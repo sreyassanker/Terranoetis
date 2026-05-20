@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Cctv, Camera } from 'lucide-react';
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
+import { apiGet } from '@/lib/api';
+import { addBaseImagery, applyTerrainProvider, crossfadeImagery } from '@/cesium/viewer.config';
+import { cinematicFlyTo, createEntityTracker } from '@/cesium/camera.controller';
+import { addEarthquakeEntity, type UsgsFeature } from '@/rendering/earthquakes';
+import { loadTectonicPlates } from '@/rendering/tectonic';
+import { FlightDeadReckoning, altitudeBandColor } from '@/rendering/flights';
+import { loadAirspaces, loadAisVessels } from '@/rendering/realDataLayers';
 
 /* ═════════════════════════════════════════════════════════════════
    TYPES
@@ -27,18 +35,85 @@ interface TimelineState {
 interface EventAlert {
   id: string; title: string; desc: string; severity: string;
   type: string; lat: number; lon: number; seen: boolean; time: string; timestamp: number;
+  hasMapPosition: boolean;
 }
 
-interface SocialPost {
-  id: string; user: string; name: string; avatar: string;
-  text: string; time: string; timeLabel: string; timestamp: number; source: string; lat: number; lon: number;
-  likes: number; shares: number; type: string;
+function alertGeometryLonLat(
+  geometry: { type?: string; coordinates?: unknown } | null | undefined,
+): { lon: number; lat: number } | null {
+  if (!geometry?.coordinates) return null;
+  const { type, coordinates: coords } = geometry;
+  if (type === 'Point' && Array.isArray(coords) && coords.length >= 2) {
+    const lon = Number(coords[0]);
+    const lat = Number(coords[1]);
+    return Number.isFinite(lon) && Number.isFinite(lat) ? { lon, lat } : null;
+  }
+  let ring: number[][] | undefined;
+  if (type === 'Polygon' && Array.isArray(coords) && Array.isArray(coords[0])) {
+    ring = coords[0] as number[][];
+  } else if (
+    type === 'MultiPolygon'
+    && Array.isArray(coords)
+    && Array.isArray(coords[0])
+    && Array.isArray(coords[0][0])
+  ) {
+    ring = coords[0][0] as number[][];
+  }
+  if (!ring?.length) return null;
+  let sumLon = 0;
+  let sumLat = 0;
+  let n = 0;
+  for (const pt of ring) {
+    if (Array.isArray(pt) && pt.length >= 2) {
+      sumLon += Number(pt[0]);
+      sumLat += Number(pt[1]);
+      n += 1;
+    }
+  }
+  if (n === 0) return null;
+  return { lon: sumLon / n, lat: sumLat / n };
+}
+
+interface IntelFeedItem {
+  id: string; title: string; source: string; type: string;
+  lat: number; lon: number; timestamp: number; timeLabel: string;
+  url?: string;
+  platform?: 'internal' | 'news' | 'twitter' | 'facebook' | 'social';
 }
 
 interface HeatmapPoint { lon: number; lat: number; count: number; }
 interface WeatherCardData { id: string; lon: number; lat: number; temp: number; desc: string; }
+interface LocalSearchResult { name: string; lat: number; lon: number; }
+interface IndiaCctvCamera {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  pageUrl: string;
+  previewUrl?: string;
+  streamUrl?: string;
+  thumbnailUrl?: string;
+  source?: string;
+  category?: string;
+  city?: string;
+  region?: string;
+  location?: string;
+  updatedAt?: number;
+  description?: string;
+  feedType?: string;
+}
 
-interface CesiumWindow extends Window { Cesium?: typeof Cesium; }
+interface LiveGlobeDebugState {
+  viewer?: Cesium.Viewer;
+  lastIndiaCctvError?: string;
+  getCameraState?: () => { lat: number; lon: number; height: number };
+  showInfoEntity?: (layerId: string, index?: number) => boolean;
+}
+
+interface CesiumWindow extends Window {
+  Cesium?: typeof Cesium;
+  __liveglobeDebug?: LiveGlobeDebugState;
+}
 declare const window: CesiumWindow;
 
 type AiProvider = 'gemini' | 'anthropic' | 'local';
@@ -46,18 +121,18 @@ type AiProvider = 'gemini' | 'anthropic' | 'local';
 interface ApiVaultState {
   gemini: string;
   anthropic: string;
+  cesiumIonAccessToken: string;
   openSkyClientId: string;
   openSkyClientSecret: string;
   sentinelHubClientId: string;
   sentinelHubClientSecret: string;
   marineTrafficApiKey: string;
+  aisStreamApiKey: string;
   preferredAiProvider: AiProvider;
   vaultDismissed: boolean;
 }
 
-/* ═════════════════════════════════════════════════════════════════
-   CONSTANTS
-   ═════════════════════════════════════════════════════════════════ */
+let cachedCctvCanvas: HTMLCanvasElement | null = null;
 
 const CATEGORIES = [
   { id: 'seismic', label: 'Seismic', icon: 'SM', color: '#3b82f6' },
@@ -77,9 +152,9 @@ const LAYER_DEFS: LayerItem[] = [
   // Weather
   { id:'wildfires', label:'Wildfires (NASA)', color:'#f97316', type:'point', on:true, default:true, opacity:1, category:'weather', sub:'MODIS/VIIRS' },
   { id:'severe_storms', label:'Severe Storms', color:'#8b5cf6', type:'point', on:true, default:true, opacity:1, category:'weather', sub:'NASA EONET' },
-  { id:'storm_forecast', label:'Storm Forecast Cone', color:'#a855f7', type:'polygon', on:true, default:true, opacity:1, category:'weather', sub:'Tropical cyclone track prediction' },
-  { id:'smoke_dispersion', label:'Smoke Dispersion', color:'#6b7280', type:'effect', on:true, default:true, opacity:1, category:'weather', sub:'Wildfire smoke plume simulation' },
-  { id:'tsunami', label:'Tsunami Propagation', color:'#3b82f6', type:'effect', on:true, default:true, opacity:1, category:'weather', sub:'Auto for M7.5+ ocean quakes' },
+  { id:'storm_forecast', label:'Storm Forecast Cone', color:'#a855f7', type:'polygon', on:false, default:false, opacity:1, category:'weather', sub:'Tropical cyclone track prediction' },
+  { id:'smoke_dispersion', label:'Smoke Dispersion', color:'#6b7280', type:'effect', on:false, default:false, opacity:1, category:'weather', sub:'Wind-driven plume from active fires (EONET)' },
+  { id:'tsunami', label:'Tsunami Propagation', color:'#3b82f6', type:'effect', on:false, default:false, opacity:1, category:'weather', sub:'Auto for M7.5+ ocean quakes' },
   { id:'temp_anomaly', label:'Temperature Anomaly', color:'#ef4444', type:'tile', on:false, default:false, opacity:0.6, category:'weather', badge:'FREE' },
   { id:'precipitation', label:'Precipitation', color:'#0ea5e9', type:'tile', on:false, default:false, opacity:0.6, category:'weather', badge:'FREE' },
   { id:'wind', label:'Wind Speed', color:'#8b5cf6', type:'tile', on:false, default:false, opacity:0.6, category:'weather', badge:'FREE' },
@@ -104,10 +179,11 @@ const LAYER_DEFS: LayerItem[] = [
   { id:'land_cover', label:'Land Cover', color:'#22c55e', type:'tile', on:false, default:false, opacity:1, category:'satellite', badge:'FREE' },
   // Advanced
   { id:'disaster_alerts', label:'GDACS Disaster Alerts', color:'#ef4444', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'FREE', sub:'Global disaster alerts' },
+  { id:'india_cctv', label:'Worldwide Public Cameras', color:'#22d3ee', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'LIVE', sub:'Open live public webcams worldwide' },
   { id:'space_weather', label:'Space Weather (NOAA)', color:'#f97316', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'FREE', sub:'Solar storms, aurora' },
   { id:'disaster_near_me', label:'Disasters Near Me', color:'#ef4444', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'FREE', sub:'Requires location' },
   { id:'population_impact', label:'Population Impact Zones', color:'#f59e0b', type:'polygon', on:false, default:false, opacity:1, category:'advanced', badge:'FREE', sub:'50 cities overlay' },
-  { id:'social_groundtruth', label:'Social Media Ground Truth', color:'#ec4899', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'PROXY', sub:'Simulated social feed' },
+  { id:'intel_feed', label:'Intel Feed', color:'#00D4FF', type:'panel', on:false, default:false, opacity:1, category:'advanced', badge:'LIVE', sub:'Real-time events from all sources' },
   { id:'ground_deformation', label:'Ground Deformation (InSAR)', color:'#a855f7', type:'tile', on:false, default:false, opacity:0.8, category:'advanced', badge:'KEY', sub:'Advanced geospatial' },
   { id:'flood_extent', label:'Flood Extent Mapping', color:'#3b82f6', type:'tile', on:false, default:false, opacity:0.6, category:'advanced', badge:'KEY' },
   { id:'burn_scars', label:'Burn Scar Mapping', color:'#7c2d12', type:'tile', on:false, default:false, opacity:0.7, category:'advanced', badge:'KEY' },
@@ -118,15 +194,18 @@ const LAYER_DEFS: LayerItem[] = [
 ];
 
 const API_VAULT_STORAGE_KEY = 'liveglobe.apiVault.v1';
+const CESIUM_ION_ENV_TOKEN = (import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined)?.trim() ?? '';
 
 const DEFAULT_API_VAULT: ApiVaultState = {
   gemini: '',
   anthropic: '',
+  cesiumIonAccessToken: '',
   openSkyClientId: '',
   openSkyClientSecret: '',
   sentinelHubClientId: '',
   sentinelHubClientSecret: '',
   marineTrafficApiKey: '',
+  aisStreamApiKey: '',
   preferredAiProvider: 'gemini',
   vaultDismissed: false,
 };
@@ -184,6 +263,13 @@ const CITY_DATA = [
   { name: 'Madrid', country: 'Spain', pop: 6.6, lat: 40.4168, lon: -3.7038 },
 ];
 
+const LOCAL_SEARCH_INDEX: Array<LocalSearchResult & { searchText: string }> = CITY_DATA.map(city => ({
+  name: `${city.name}, ${city.country}`,
+  lat: city.lat,
+  lon: city.lon,
+  searchText: normalizeLocationQuery(`${city.name} ${city.country}`),
+}));
+
 
 
 /* ═════════════════════════════════════════════════════════════════
@@ -218,6 +304,7 @@ function hasAnyApiVaultValue(vault: ApiVaultState): boolean {
   return Boolean(
     vault.gemini.trim() ||
     vault.anthropic.trim() ||
+    vault.cesiumIonAccessToken.trim() ||
     vault.openSkyClientId.trim() ||
     vault.openSkyClientSecret.trim() ||
     vault.sentinelHubClientId.trim() ||
@@ -234,6 +321,62 @@ function resolveAiProvider(vault: ApiVaultState): AiProvider {
   return 'local';
 }
 
+function resolveCesiumIonToken(vault: ApiVaultState): string | undefined {
+  const token = vault.cesiumIonAccessToken.trim() || CESIUM_ION_ENV_TOKEN;
+  return token || undefined;
+}
+
+function normalizeLocationQuery(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s,.-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseCoordinateQuery(query: string): LocalSearchResult | null {
+  const compact = query.trim().replace(/\s+/g, ' ');
+  const pair = compact.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  const split = pair
+    ? pair
+    : compact.match(/^(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)$/);
+  if (!split) return null;
+  const first = Number(split[1]);
+  const second = Number(split[2]);
+  if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+
+  const lat = Math.abs(first) <= 90 ? first : second;
+  const lon = Math.abs(first) <= 90 ? second : first;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { name: `${lat.toFixed(4)}, ${lon.toFixed(4)}`, lat, lon };
+}
+
+function findLocalLocationMatches(query: string, limit = 6): LocalSearchResult[] {
+  const normalized = normalizeLocationQuery(query);
+  if (!normalized) return [];
+
+  const scoreEntry = (entry: (typeof LOCAL_SEARCH_INDEX)[number]) => {
+    let score = 0;
+    if (entry.searchText === normalized) score += 100;
+    if (entry.searchText.startsWith(normalized)) score += 60;
+    if (entry.searchText.includes(normalized)) score += 30;
+    for (const part of normalized.split(' ')) {
+      if (!part) continue;
+      if (entry.searchText.includes(part)) score += 8;
+    }
+    return score;
+  };
+
+  return LOCAL_SEARCH_INDEX
+    .map(entry => ({ entry, score: scoreEntry(entry) }))
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
+    .slice(0, limit)
+    .map(item => ({ name: item.entry.name, lat: item.entry.lat, lon: item.entry.lon }));
+}
+
 function makeSafeAnimatedRadiusPair(
   baseRadius: () => number,
   majorMultiplier: number = 1.08
@@ -244,7 +387,7 @@ function makeSafeAnimatedRadiusPair(
     const bucket = Math.floor(Date.now() / 33);
       if (bucket !== cachedBucket) {
         cachedBucket = bucket;
-        cachedRadius = Math.max(0, baseRadius());
+        cachedRadius = Math.max(1.0, baseRadius());
       }
       return cachedRadius;
     };
@@ -321,43 +464,6 @@ function generateStormForecast(lat: number, lon: number, windSpeed: number, pres
   };
 }
 
-function generateSocialPosts(): SocialPost[] {
-  const posts: SocialPost[] = [];
-  const templates = [
-    { type:'fire', text:'Large fire visible from my window! Smoke covering the whole area. Stay safe everyone!', source:'Twitter', hashtags:['#fire','#emergency'] },
-    { type:'fire', text:'Fire department just arrived. Flames are huge - can see them from 2 miles away.', source:'Twitter', hashtags:['#wildfire','#breaking'] },
-    { type:'fire', text:'Evacuation order issued for our neighborhood. Packing up now. This is scary.', source:'Facebook', hashtags:['#evacuation'] },
-    { type:'storm', text:'Storm is getting really intense. Wind picking up fast. Power just went out!', source:'Twitter', hashtags:['#storm','#hurricane'] },
-    { type:'storm', text:'Just saw a transformer explode. Sparks everywhere. Stay indoors!', source:'Twitter', hashtags:['#weather'] },
-    { type:'storm', text:'Flooding on Main Street already. Cars are getting stranded. Avoid the area!', source:'Facebook', hashtags:['#flood'] },
-    { type:'earthquake', text:'Did anyone else feel that? Whole building shook for like 10 seconds!', source:'Twitter', hashtags:['#earthquake'] },
-    { type:'earthquake', text:'Pictures fell off the walls. My dog started barking 30 seconds before it hit. Animals know!', source:'Facebook', hashtags:['#quake'] },
-    { type:'earthquake', text:'Aftershock just now - smaller but still scary. Everyone okay in the neighborhood?', source:'Twitter', hashtags:['#aftershock'] },
-    { type:'flood', text:'Water level rising fast. Already at my doorstep. Calling emergency services.', source:'Twitter', hashtags:['#flooding'] },
-    { type:'flood', text:'Bridge is underwater. Can\'t get to the other side of town. Photos attached.', source:'Facebook', hashtags:['#flood'] },
-    { type:'volcano', text:'Ash falling on our town. Sky is gray. Everyone wearing masks outside.', source:'Twitter', hashtags:['#volcano'] },
-    { type:'landslide', text:'Road completely blocked by mudslide. Heard rumbling sound before it came down.', source:'Twitter', hashtags:['#landslide'] },
-    { type:'default', text:'Emergency services are doing an amazing job. Saw 5 fire trucks pass by in 10 minutes.', source:'Twitter', hashtags:['#grateful'] },
-    { type:'default', text:'Shelter set up at the community center. They have food, water, and charging stations.', source:'Facebook', hashtags:['#community'] },
-  ];
-  const users = ['Sarah M.','John K.','Maria G.','David L.','Emma R.','Carlos V.','Yuki T.','Alex P.','Lisa H.','Tom W.'];
-  for (let i = 0; i < templates.length; i++) {
-    const t = templates[i];
-    const lat = (Math.random() - 0.5) * 60;
-    const lon = (Math.random() - 0.5) * 160;
-    const hoursAgo = Math.floor(Math.random() * 12) + 1;
-    const likes = Math.floor(Math.random() * 200) + 10;
-    const shares = Math.floor(Math.random() * 50) + 1;
-    const timestamp = Date.now() - hoursAgo * 3600000;
-    posts.push({
-      id:`sp${i}`, user:`user_${1000+i}`, name:users[i%users.length], avatar:'👤',
-      text:`${t.text} ${t.hashtags.join(' ')}`,
-      time:new Date(timestamp).toISOString(), timeLabel:`${hoursAgo}h ago`, timestamp, source:t.source, lat, lon, likes, shares, type:t.type,
-    });
-  }
-  return posts;
-}
-
 function calculatePopulationImpact(lat: number, lon: number) {
   const affected = CITY_DATA.filter(c => {
     const dLat = c.lat - lat, dLon = c.lon - lon;
@@ -389,30 +495,83 @@ function generateHeatmapData(lon: number, lat: number, count: number): HeatmapPo
   return pts;
 }
 
-function generateMockSpaceWeather() {
-  const storms = [
-    { name:'CME Impact', kpIndex:7, scale:3, lat:70, lon:-95 },
-    { name:'Solar Flare X1.2', kpIndex:6, scale:2, lat:65, lon:25 },
-    { name:'Geomagnetic Storm', kpIndex:8, scale:4, lat:60, lon:-130 },
-    { name:'High Speed Stream', kpIndex:5, scale:1, lat:55, lon:10 },
-    { name:'CME Glancing Blow', kpIndex:6, scale:2, lat:75, lon:-45 },
-  ];
-  const baseTime = Date.now();
-  return storms.map((s, i) => ({
-    ...s,
-    description: `KP ${s.kpIndex} geomagnetic activity detected. Aurora visibility expected at ${60 - s.kpIndex * 3}° latitude.`,
-    time: baseTime - i * 1800000,
-  }));
-}
+const CctvVideoPlayer = ({ src }: { src: string }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [error, setError] = useState(false);
 
-function generateMockDisasterAlerts(): EventAlert[] {
-  const now = Date.now();
-  return [
-    { id:'d1', title:'GDACS Orange Alert', desc:'Flood warning in Southeast Asia', severity:'orange', type:'flood', lat:13.7563, lon:100.5018, seen:false, timestamp:now, time:new Date(now).toISOString() },
-    { id:'d2', title:'GDACS Red Alert', desc:'Earthquake M7.2 - Pacific Ring of Fire', severity:'red', type:'earthquake', lat:-15, lon:-175, seen:false, timestamp:now - 3600000, time:new Date(now - 3600000).toISOString() },
-    { id:'d3', title:'GDACS Green Alert', desc:'Drought conditions in East Africa', severity:'green', type:'drought', lat:1.2921, lon:36.8219, seen:false, timestamp:now - 7200000, time:new Date(now - 7200000).toISOString() },
-  ];
-}
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    setError(false);
+
+    let hls: any = null;
+    const isHls = src.includes('.m3u8') || src.includes('m3u8');
+
+    if (isHls) {
+      import('hls.js').then(({ default: Hls }) => {
+        if (!videoRef.current) return;
+        if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+          videoRef.current.src = src;
+        } else if (Hls.isSupported()) {
+          hls = new Hls({
+            maxMaxBufferLength: 5,
+            enableWorker: true,
+            lowLatencyMode: true,
+          });
+          hls.loadSource(src);
+          hls.attachMedia(videoRef.current);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            videoRef.current?.play().catch(() => {});
+          });
+          hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
+            if (data.fatal) {
+              console.warn('HLS fatal error:', data);
+              setError(true);
+            }
+          });
+        } else {
+          setError(true);
+        }
+      }).catch(err => {
+        console.error('Failed to load hls.js', err);
+        setError(true);
+      });
+    } else {
+      video.src = src;
+      video.load();
+      video.play().catch(() => {});
+    }
+
+    return () => {
+      if (hls) {
+        hls.destroy();
+      }
+      if (video) {
+        video.removeAttribute('src');
+        video.load();
+      }
+    };
+  }, [src]);
+
+  if (error) {
+    return (
+      <div className="cctv-preview-empty">
+        Failed to load video stream
+      </div>
+    );
+  }
+
+  return (
+    <video
+      ref={videoRef}
+      controls
+      playsInline
+      muted
+      autoPlay
+      style={{ width: '100%', height: '165px', objectFit: 'cover', background: '#000', display: 'block' }}
+    />
+  );
+};
 
 /* ═════════════════════════════════════════════════════════════════
    MAIN APP COMPONENT
@@ -437,6 +596,8 @@ export default function App() {
   const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const geocodeCacheRef = useRef<Record<string, Array<{name:string;lat:number;lon:number}>>>({});
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const searchValueRef = useRef('');
   const timelineThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timelineLastUpdateRef = useRef<number>(0);
   const entityStoreRef = useRef<Record<string, Cesium.Entity[]>>({});
@@ -450,16 +611,24 @@ export default function App() {
   const alertsRef = useRef<EventAlert[]>([]);
   const notificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const populationImpactLayerRef = useRef<Cesium.Entity[]>([]);
-  const socialPostsRef = useRef<SocialPost[]>([]);
+  const intelFeedRef = useRef<IntelFeedItem[]>([]);
   const weatherCardElementsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const focusMarkerRef = useRef<Cesium.Entity | null>(null);
-  const socialEntityRef = useRef<Record<string, Cesium.Entity>>({});
+  const flightDrRef = useRef<FlightDeadReckoning | null>(null);
+  const entityTrackerRef = useRef<ReturnType<typeof createEntityTracker> | null>(null);
+  const unlockInteractionRef = useRef<(() => void) | null>(null);
+  const fpsFramesRef = useRef<number[]>([]);
+  const lastFpsTimeRef = useRef(performance.now());
+  const feedErrorsRef = useRef<string[]>([]);
+  const feedSummaryShownRef = useRef(false);
   const alertEntityRef = useRef<Record<string, Cesium.Entity>>({});
   const stormOverlaysRef = useRef<Cesium.Entity[]>([]);
   const smokeParticlesRef = useRef<Cesium.Entity[]>([]);
   const tsunamiWavesRef = useRef<Cesium.Entity[]>([]);
   const tectonicEntitiesRef = useRef<Cesium.Entity[]>([]);
+  const overlayImageryLayersRef = useRef<Record<string, Cesium.ImageryLayer>>({});
   const openSkyTokenRef = useRef<{ token: string; expiresAt: number } | null>(null);
+  const cctvPulseEntityRef = useRef<Cesium.Entity | null>(null);
 
   /* ── State ── */
   const initialApiVault = useMemo(() => loadApiVault(), []);
@@ -471,7 +640,7 @@ export default function App() {
   const [layers, setLayers] = useState<LayerItem[]>(LAYER_DEFS.map(l => ({ ...l })));
   const layersRef = useRef<LayerItem[]>(LAYER_DEFS.map(l => ({ ...l })));
   const [layerOpacity, setLayerOpacity] = useState<Record<string, number>>({});
-  const [activeImagery, setActiveImagery] = useState('earth');
+  const [activeImagery, setActiveImagery] = useState('satellite');
   const [infoEntity, setInfoEntity] = useState<Cesium.Entity | null>(null);
   const [showHeatmapLegend, setShowHeatmapLegend] = useState(false);
   const [showStormLegend, setShowStormLegend] = useState(false);
@@ -479,10 +648,10 @@ export default function App() {
   const [showTsunamiLegend, setShowTsunamiLegend] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [apiVault, setApiVault] = useState<ApiVaultState>(initialApiVault);
-  const [showTokenSetup, setShowTokenSetup] = useState(() => !hasAnyApiVaultValue(initialApiVault) && !initialApiVault.vaultDismissed);
+  const [showTokenSetup, setShowTokenSetup] = useState(() => !hasAnyApiVaultValue(initialApiVault) && !initialApiVault.vaultDismissed && !CESIUM_ION_ENV_TOKEN);
   const [showAI, setShowAI] = useState(false);
   const [showAlertsPanel, setShowAlertsPanel] = useState(false);
-  const [showSocial, setShowSocial] = useState(false);
+  const [showIntelFeed, setShowIntelFeed] = useState(false);
   const [activeLayerCount, setActiveLayerCount] = useState(0);
   const [utcTime, setUtcTime] = useState('');
   const [totalEntities, setTotalEntities] = useState(0);
@@ -507,16 +676,19 @@ export default function App() {
   const [isAutoRotating, setIsAutoRotating] = useState(false);
   const [showISSInfo, setShowISSInfo] = useState(false);
   const [issInfo, setIssInfo] = useState<{lat:number;lon:number} | null>(null);
-  const [socialPosts, setSocialPosts] = useState<SocialPost[]>([]);
-  const [socialFilter, setSocialFilter] = useState('all');
-  const [socialPulse, setSocialPulse] = useState(false);
+  const [intelFeed, setIntelFeed] = useState<IntelFeedItem[]>([]);
+  const [intelFilter, setIntelFilter] = useState('all');
+  const [fps, setFps] = useState(0);
+  const [cameraDms, setCameraDms] = useState('');
   const [showPopulationImpact, setShowPopulationImpact] = useState(false);
   const [pulsingLayer, setPulsingLayer] = useState<string | null>(null);
+  const [cctvPreviewTick, setCctvPreviewTick] = useState(0);
   const lastKnownLocationRef = useRef<{ lat: number; lon: number } | null>(null);
   const disasterNearMeRequestedRef = useRef(false);
   const apiVaultRef = useRef<ApiVaultState>(initialApiVault);
 
   const aiApiType = useMemo(() => resolveAiProvider(apiVault), [apiVault]);
+  const cesiumIonToken = useMemo(() => resolveCesiumIonToken(apiVault), [apiVault]);
 
   /* ── Memo ── */
   const groupedLayers = useMemo(() => {
@@ -541,11 +713,21 @@ export default function App() {
     openSkyTokenRef.current = null;
   }, [apiVault.openSkyClientId, apiVault.openSkyClientSecret]);
 
-  /* ── UTC Clock ── */
+  /* ── IST Clock ── */
   useEffect(() => {
     const tick = () => {
       const now = new Date();
-      setUtcTime(now.toISOString().replace('T',' ').substring(0,19) + ' UTC');
+      const ist = now.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+      setUtcTime(ist + ' IST');
     };
     tick();
     clockIntervalRef.current = setInterval(tick, 1000);
@@ -558,12 +740,17 @@ export default function App() {
     window.Cesium = Cesium;
     // @ts-expect-error CESIUM_BASE_URL is a global config
     window.CESIUM_BASE_URL = '/cesium/';
+    if (cesiumIonToken) {
+      Cesium.Ion.defaultAccessToken = cesiumIonToken;
+    }
 
     setLoadingProgress(10);
     setLoadingStatus('Loading Cesium engine...');
 
     const v = new Cesium.Viewer(cesiumElRef.current, {
       terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+      scene3DOnly: true,
+      requestRenderMode: false,
       baseLayerPicker: false,
       geocoder: false,
       homeButton: false,
@@ -577,13 +764,66 @@ export default function App() {
       creditContainer: document.createElement('div'),
     });
     viewerRef.current = v;
+    if (import.meta.env.DEV) {
+      window.__liveglobeDebug = {
+        ...(window.__liveglobeDebug ?? {}),
+        viewer: v,
+        getCameraState: () => {
+          const c = v.camera.positionCartographic;
+          return {
+            lat: Cesium.Math.toDegrees(c.latitude),
+            lon: Cesium.Math.toDegrees(c.longitude),
+            height: c.height,
+          };
+        },
+      };
+    }
+    entityTrackerRef.current = createEntityTracker(v);
+    flightDrRef.current = new FlightDeadReckoning(v, (heading, color) => createPlaneIcon(heading, color));
+    v.scene.logarithmicDepthBuffer = true;
+    v.clock.shouldAnimate = true;
+    v.clock.multiplier = 1;
+    v.scene.postProcessStages.fxaa.enabled = false;
+    if (v.scene.postProcessStages.bloom) {
+      v.scene.postProcessStages.bloom.enabled = false;
+    }
+    if (v.scene.postProcessStages.ambientOcclusion) {
+      v.scene.postProcessStages.ambientOcclusion.enabled = false;
+    }
     v.scene.globe.enableLighting = true;
     v.scene.globe.depthTestAgainstTerrain = true;
     v.scene.highDynamicRange = true;
-    v.scene.postProcessStages.fxaa.enabled = true;
-    v.scene.globe.atmosphereLightIntensity = 20.0;
-    v.scene.globe.lightingFadeOutDistance = 10000000;
-    v.scene.globe.lightingFadeInDistance = 5000000;
+    v.scene.globe.atmosphereLightIntensity = 30.0;
+    v.scene.globe.lightingFadeOutDistance = 8e6;
+    v.scene.globe.lightingFadeInDistance = 1e7;
+    try {
+      // Keep Cesium default imagery; add Esri layer on top (do NOT removeAll — that causes a black globe)
+      addBaseImagery(v, 'satellite', false);
+    } catch (err) {
+      console.warn('Custom basemap failed, keeping default imagery:', err);
+    }
+    const ctrl = v.scene.screenSpaceCameraController;
+    ctrl.enableRotate = true;
+    ctrl.enableZoom = true;
+    ctrl.enableTilt = true;
+    ctrl.minimumZoomDistance = 100;
+    ctrl.maximumZoomDistance = 5e8;
+    unlockInteractionRef.current = () => {
+      if (rotateTimerRef.current) {
+        clearInterval(rotateTimerRef.current);
+        rotateTimerRef.current = null;
+      }
+      setIsAutoRotating(false);
+    };
+    v.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(0, 0, 2.2e7),
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+    });
+    v.scene.requestRender();
+    requestAnimationFrame(() => {
+      v.resize();
+      v.scene.requestRender();
+    });
 
     const syncWeatherCardPositions = () => {
       for (const card of weatherCardsRef.current) {
@@ -608,19 +848,49 @@ export default function App() {
     };
     v.scene.postRender.addEventListener(syncWeatherCardPositions);
 
-    // Initial position
-    v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(20, 0, 20000000), duration: 2 });
+    const onPostRender = () => {
+      const now = performance.now();
+      const dt = now - lastFpsTimeRef.current;
+      if (dt >= 500) {
+        const frames = fpsFramesRef.current.length;
+        setFps(Math.round((frames * 1000) / dt));
+        fpsFramesRef.current = [];
+        lastFpsTimeRef.current = now;
+        const c = v.camera.positionCartographic;
+        const lat = Cesium.Math.toDegrees(c.latitude);
+        const lon = Cesium.Math.toDegrees(c.longitude);
+        const latD = Math.abs(lat);
+        const lonD = Math.abs(lon);
+        const latDir = lat >= 0 ? 'N' : 'S';
+        const lonDir = lon >= 0 ? 'E' : 'W';
+        setCameraDms(`${latD.toFixed(2)}°${latDir} ${lonD.toFixed(2)}°${lonDir}`);
+      } else {
+        fpsFramesRef.current.push(1);
+      }
+    };
+    v.scene.postRender.addEventListener(onPostRender);
 
     setLoadingProgress(30);
     setLoadingStatus('Loading data layers...');
 
-    // Click handler
     const handler = new Cesium.ScreenSpaceEventHandler(v.canvas);
     screenSpaceHandlerRef.current = handler;
+    const unlockOnInteract = () => unlockInteractionRef.current?.();
+    handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+    handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.RIGHT_DOWN);
+    handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.MIDDLE_DOWN);
+    handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.WHEEL);
+    handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.PINCH_START);
     handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
       const picked = v.scene.pick(click.position);
       if (Cesium.defined(picked) && picked.id instanceof Cesium.Entity) {
-        showInfoPanel(picked.id);
+        const ent = picked.id as Cesium.Entity;
+        showInfoPanel(ent);
+        const p = ent.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+        const layer = String(p?.layer ?? '');
+        if (layer === 'flight_tracks') entityTrackerRef.current?.track(ent, 'aircraft');
+        else if (layer === 'earthquakes') entityTrackerRef.current?.track(ent, 'earthquake');
+        else if (layer === 'india_cctv') entityTrackerRef.current?.track(ent, 'cctv');
       } else {
         const cart = v.camera.pickEllipsoid(click.position, v.scene.globe.ellipsoid);
         if (cart) {
@@ -648,17 +918,26 @@ export default function App() {
 
     setLoadingProgress(50);
 
-    // Load default layers
-    loadAllData(v);
-    syncWeatherCardPositions();
+    void loadAllData(v)
+      .then(() => {
+        syncWeatherCardPositions();
+        autoRefreshIntervalRef.current = setInterval(() => {
+          void refreshLiveData(v);
+        }, 60000);
+        setLoadingProgress(100);
+        setLoadingStatus('Ready');
+        setTimeout(() => setLoading(false), 800);
+      })
+      .catch((err) => {
+        console.error('Data load failed:', err);
+        setLoadingProgress(100);
+        setLoadingStatus('Globe ready (some feeds unavailable)');
+        setTimeout(() => setLoading(false), 800);
+      })
+      .finally(() => {
+        v.scene.requestRender();
+      });
 
-    setLoadingProgress(100);
-    setLoadingStatus('Ready');
-
-    // Hide loading
-    setTimeout(() => setLoading(false), 800);
-
-    // Auto-dismiss context on other clicks
     const handleDocClick = (e: MouseEvent) => {
       if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
         setContextMenu(cm => ({ ...cm, show: false }));
@@ -669,13 +948,85 @@ export default function App() {
     return () => {
       document.removeEventListener('click', handleDocClick);
       v.scene.postRender.removeEventListener(syncWeatherCardPositions);
+      v.scene.postRender.removeEventListener(onPostRender);
       cleanupCesium();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+    let cancelled = false;
+
+    void (async () => {
+      const enabled = await applyTerrainProvider(v, cesiumIonToken);
+      if (!cancelled) {
+        v.scene.requestRender();
+        if (enabled) {
+          setLoadingStatus('Cesium 3D terrain enabled');
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cesiumIonToken]);
+
   const isContextMenuOpenRef = useRef(false);
   useEffect(() => { isContextMenuOpenRef.current = contextMenu.show; }, [contextMenu.show]);
+
+  useEffect(() => {
+    if (cctvPulseEntityRef.current && viewerRef.current) {
+      viewerRef.current.entities.remove(cctvPulseEntityRef.current);
+      cctvPulseEntityRef.current = null;
+    }
+
+    if (!infoEntity) {
+      setCctvPreviewTick(0);
+      return;
+    }
+    const props = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+    if (props?.layer !== 'india_cctv') {
+      setCctvPreviewTick(0);
+      return;
+    }
+
+    const v = viewerRef.current;
+    if (v) {
+      const lat = props.lat as number;
+      const lon = props.lon as number;
+      const pulse = makeSafeAnimatedRadiusPair(
+        () => 15000 + Math.sin(Date.now() / 250) * 4000,
+        1.05,
+      );
+      cctvPulseEntityRef.current = v.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat, 15),
+        ellipse: {
+          semiMajorAxis: new Cesium.CallbackProperty(() => pulse.major(), false) as unknown as number,
+          semiMinorAxis: new Cesium.CallbackProperty(() => pulse.minor(), false) as unknown as number,
+          material: Cesium.Color.fromCssColorString('#22d3ee').withAlpha(0.15),
+          outline: true,
+          outlineColor: Cesium.Color.fromCssColorString('#67e8f9').withAlpha(0.85),
+          outlineWidth: 2,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        },
+      });
+    }
+
+    const timer = setInterval(() => {
+      setCctvPreviewTick(t => t + 1);
+    }, 10000);
+
+    return () => {
+      clearInterval(timer);
+      if (cctvPulseEntityRef.current && viewerRef.current) {
+        viewerRef.current.entities.remove(cctvPulseEntityRef.current);
+        cctvPulseEntityRef.current = null;
+      }
+    };
+  }, [infoEntity]);
 
   /* ── Layer Count Update ── */
   useEffect(() => {
@@ -689,6 +1040,39 @@ export default function App() {
   /* ═════════════════════════════════════════════════════════════════
      DATA LOADING
      ═════════════════════════════════════════════════════════════════ */
+
+  async function loadSocialFeed() {
+    if (!isLayerEnabled('intel_feed')) return;
+    try {
+      const resp = await apiGet<any[]>('/social');
+      if (!Array.isArray(resp)) return;
+      resp.forEach(item => {
+        if (!intelFeedRef.current.find(i => i.id === item.id)) {
+          pushIntelFeed({
+            id: item.id,
+            title: item.title,
+            source: item.source,
+            type: item.type,
+            lat: item.lat || 0,
+            lon: item.lon || 0,
+            timestamp: item.timestamp,
+            url: item.url,
+            platform: item.platform
+          });
+        }
+      });
+    } catch (e) {
+      console.warn('Social feed error:', e);
+    }
+  }
+
+  useEffect(() => {
+    // Poll social feed every 60 seconds if Intel Feed is enabled
+    const timer = setInterval(() => {
+      void loadSocialFeed();
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   async function getOpenSkyAuthHeaders() {
     const { openSkyClientId, openSkyClientSecret } = apiVaultRef.current;
@@ -726,283 +1110,243 @@ export default function App() {
     return { Authorization: `Bearer ${data.access_token}` };
   }
 
-  function loadMockFlightTracks(viewer: Cesium.Viewer) {
-    const flights = [
-      { callsign: 'GLB101', lat: 40.6413, lon: -73.7781, alt: 11200, heading: 84, origin: 'KJFK' },
-      { callsign: 'GLB118', lat: 51.4700, lon: -0.4543, alt: 10800, heading: 97, origin: 'EGLL' },
-      { callsign: 'GLB233', lat: 35.5494, lon: 139.7798, alt: 11400, heading: 272, origin: 'RJTT' },
-      { callsign: 'GLB309', lat: 25.2532, lon: 55.3657, alt: 11900, heading: 310, origin: 'OMDB' },
-      { callsign: 'GLB412', lat: 33.9416, lon: -118.4085, alt: 11600, heading: 110, origin: 'KLAX' },
-      { callsign: 'GLB527', lat: 1.3644, lon: 103.9915, alt: 11800, heading: 225, origin: 'WSSS' },
-      { callsign: 'GLB640', lat: 48.3538, lon: 11.7861, alt: 10600, heading: 74, origin: 'EDDM' },
-      { callsign: 'GLB774', lat: 28.5562, lon: 77.1000, alt: 11100, heading: 135, origin: 'VIDP' },
-      { callsign: 'GLB881', lat: -33.9399, lon: 151.1753, alt: 10900, heading: 42, origin: 'YSSY' },
-      { callsign: 'GLB905', lat: 41.9742, lon: -87.9073, alt: 11700, heading: 122, origin: 'KORD' },
-    ];
-
-    const ents = flights.map((flight, index) => viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(flight.lon, flight.lat, flight.alt),
-      name: flight.callsign,
-      billboard: { image: createPlaneIcon(flight.heading), width: 20, height: 20 },
-      label: {
-        text: flight.callsign,
-        font: '10px "JetBrains Mono"',
-        fillColor: Cesium.Color.WHITE,
-        pixelOffset: new Cesium.Cartesian2(0, -14),
-        show: index % 2 === 0,
-      },
-      properties: {
-        layer: 'flight_tracks',
-        callsign: flight.callsign,
-        altitude: flight.alt,
-        origin: flight.origin,
-        lon: flight.lon,
-        lat: flight.lat,
-        time: Date.now(),
-      },
-    }));
-
-    entityStoreRef.current['flight_tracks'] = ents;
-  }
-
   async function loadFlightTracks(viewer: Cesium.Viewer) {
     if (!isLayerEnabled('flight_tracks')) return;
+    flightDrRef.current?.clear();
     removeLayerEntities('flight_tracks');
-    entityStoreRef.current['flight_tracks'] = [];
 
     try {
       const headers = await getOpenSkyAuthHeaders();
-      const resp = await fetch('https://opensky-network.org/api/states/all', headers ? { headers } : undefined);
-      if (!resp.ok) {
-        throw new Error(`OpenSky request failed (${resp.status})`);
-      }
-
-      const data = await resp.json() as { states?: unknown[][] | null };
-      if (!data.states?.length) {
-        throw new Error('OpenSky returned no states');
-      }
-
-      const ents = data.states.slice(0, 200).map(state => {
-        const lon = Number(state[5]);
-        const lat = Number(state[6]);
-        const alt = Number(state[7] ?? 0);
-        const callsign = String(state[1] ?? 'Unknown').trim() || 'Unknown';
-        const heading = Number(state[10] ?? 0);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-        return viewer.entities.add({
-          position: Cesium.Cartesian3.fromDegrees(lon, lat, alt),
-          name: callsign,
-          billboard: { image: createPlaneIcon(heading), width: 20, height: 20 },
-          label: {
-            text: callsign,
-            font: '10px "JetBrains Mono"',
-            fillColor: Cesium.Color.WHITE,
-            pixelOffset: new Cesium.Cartesian2(0, -14),
-            show: false,
-          },
-          properties: {
-            layer: 'flight_tracks',
-            callsign,
-            altitude: alt,
-            origin: String(state[2] ?? ''),
-            lon,
-            lat,
-            time: Date.now(),
-          },
-        });
-      }).filter(Boolean) as Cesium.Entity[];
-
-      if (ents.length === 0) {
-        throw new Error('OpenSky produced no drawable tracks');
-      }
-
+      const data = await apiGet<{ states?: unknown[][] | null }>('/flights', headers ? { headers } : undefined);
       if (!isLayerEnabled('flight_tracks')) return;
-      entityStoreRef.current['flight_tracks'] = ents;
-      showNotification(`Loaded ${ents.length} live flight tracks`, 'success');
+      if (!data.states?.length) throw new Error('OpenSky returned no states');
+      flightDrRef.current?.updateFromApi(data.states);
+      flightDrRef.current?.start();
+      showNotification(`Loaded ${Math.min(data.states.length, 500)} live flight tracks`, 'success');
     } catch (error) {
       if (!isLayerEnabled('flight_tracks')) return;
-      console.warn('OpenSky flight tracks unavailable, using simulation.', error);
-      loadMockFlightTracks(viewer);
-      showNotification('Live flight data unavailable. Showing simulated flight tracks.', 'warning');
+      recordFeedError('flights', error);
+    }
+    void viewer;
+  }
+
+  function pushIntelFeed(item: Omit<IntelFeedItem, 'timeLabel'>) {
+    const entry: IntelFeedItem = {
+      ...item,
+      timeLabel: new Date(item.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
+    };
+    const next = [entry, ...intelFeedRef.current.filter(i => i.id !== item.id)];
+    next.sort((a, b) => b.timestamp - a.timestamp); // Keep newest at the top
+    const sliced = next.slice(0, 500); // Increase limit to 500 to hold bulk loads
+    intelFeedRef.current = sliced;
+    setIntelFeed(sliced);
+  }
+
+  async function loadEarthquakes(viewer: Cesium.Viewer) {
+    removeLayerEntities('earthquakes');
+    try {
+      const geo = await apiGet<{ features: UsgsFeature[] }>('/earthquakes');
+      const features = geo.features
+        .filter(f => Number(f.properties?.mag ?? 0) >= 2.5)
+        .slice(0, 120);
+      const ents = features.map(f => {
+        const c = f.geometry.coordinates;
+        const p = f.properties;
+        const m = Number(p.mag ?? 0);
+        if (m >= 5 && p.time) checkMagnitudeAlert(m, String(p.place ?? ''), Number(p.time), c[1], c[0]);
+        pushIntelFeed({
+          id: `eq-${p.time}`,
+          title: `M${m.toFixed(1)} ${String(p.place ?? '')}`,
+          source: 'USGS',
+          type: 'earthquake',
+          lat: c[1],
+          lon: c[0],
+          timestamp: Number(p.time ?? Date.now()),
+          url: String(p.url ?? `https://earthquake.usgs.gov/earthquakes/search/`),
+          platform: 'internal'
+        });
+        return addEarthquakeEntity(viewer, f);
+      });
+      entityStoreRef.current['earthquakes'] = ents;
+    } catch (err) {
+      recordFeedError('earthquakes', err);
     }
   }
 
-  const loadAllData = useCallback((viewer: Cesium.Viewer) => {
-    // Earthquakes
-    fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_month.geojson', { cache: 'no-store' })
-      .then(r => r.json())
-      .then((geo: {features: Array<Record<string, unknown>>}) => {
-        const ents = geo.features.map(f => {
-          const c = (f.geometry as {coordinates:number[]}).coordinates;
-          const p = f.properties as Record<string, unknown>;
-          const m = (p.mag as number) || 0;
-          const size = Math.max(6, Math.min(48, m * 6));
-          const ent = viewer.entities.add({
-            position: Cesium.Cartesian3.fromDegrees(c[0], c[1]),
-            name: p.place as string,
-            ellipse: {
-              semiMinorAxis: size * 1000, semiMajorAxis: size * 1000,
-              material: Cesium.Color.fromCssColorString('#ef4444').withAlpha(0.4 + m/12),
-              outline: true, outlineColor: Cesium.Color.fromCssColorString('#ef4444'), outlineWidth: 1,
-              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-            },
-            label: {
-              text: `M${m.toFixed(1)}`, font: 'bold 12px "JetBrains Mono"',
-              fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
-              pixelOffset: new Cesium.Cartesian2(0, -size/2 - 8), show: m >= 5.5,
-              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-            },
-            properties: { ...p, layer: 'earthquakes', magnitude: m, lon: c[0], lat: c[1] },
-          });
-          // Check for M5+ alerts
-          if (m >= 5 && p.time) {
-            checkMagnitudeAlert(m, p.place as string, p.time as number, c[1], c[0]);
-          }
-          return ent;
+  async function loadEonetEvents(viewer: Cesium.Viewer) {
+    for (const key of ['wildfires', 'severe_storms', 'volcanoes', 'floods', 'dust', 'landslides']) {
+      removeLayerEntities(key);
+    }
+    try {
+      const data = await apiGet<{ events: Array<Record<string, unknown>> }>('/eonet');
+      const evs = (data.events || []).slice(0, 60);
+      setActiveEvents(evs.length);
+      entityStoreRef.current['volcanoes'] = [];
+      for (const ev of evs) {
+        const geo = ev.geometry as Array<{ coordinates: number[]; date: string }> | undefined;
+        if (!geo?.length) continue;
+        const c = geo[0].coordinates;
+        const cats = ev.categories as Array<{ id: string; title: string }>;
+        const rawCat = cats?.[0]?.id || 'other';
+        const cat = normalizeEventLayerId(rawCat);
+        const color = getEventColor(cat);
+        const ent = viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(c[0], c[1]),
+          name: ev.title as string,
+          billboard: {
+            image: createPulsingDotCanvas(color), width: 20, height: 20,
+            pixelOffset: new Cesium.Cartesian2(0, -10),
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          },
+          properties: {
+            layer: cat, title: ev.title, date: geo[0].date, category: rawCat,
+            description: ev.description || '', categories: cats, lon: c[0], lat: c[1],
+            time: new Date(geo[0].date).getTime() || Date.now(),
+          },
         });
-        entityStoreRef.current['earthquakes'] = ents;
-        updateCounts();
-      })
-      .catch(() => loadMockEarthquakes(viewer));
+        if (!entityStoreRef.current[cat]) entityStoreRef.current[cat] = [];
+        entityStoreRef.current[cat].push(ent);
+        pushIntelFeed({
+          id: `eonet-${ev.id}`,
+          title: String(ev.title ?? 'Event'),
+          source: 'NASA EONET',
+          type: cat,
+          lat: c[1],
+          lon: c[0],
+          timestamp: new Date(geo[0].date).getTime() || Date.now(),
+          url: String(ev.link ?? `https://eonet.gsfc.nasa.gov/api/v3/events/${String(ev.id ?? '')}`),
+          platform: 'internal'
+        });
+      }
+      refreshDerivedOverlays();
+    } catch (err) {
+      recordFeedError('natural events', err);
+    }
+  }
 
-    // Natural events
-    fetch('https://eonet.gsfc.nasa.gov/api/v3/events?days=30&status=open')
-      .then(r => r.json())
-      .then((data: {events: Array<Record<string, unknown>>}) => {
-        const evs = data.events || [];
-        setActiveEvents(evs.length);
-        for (const ev of evs) {
-          const geo = ev.geometry as Array<{coordinates:number[];date:string}> | undefined;
-          if (!geo?.length) continue;
-          const c = geo[0].coordinates;
-          const cats = ev.categories as Array<{id:string;title:string}>;
-          const rawCat = cats?.[0]?.id || 'other';
-          const cat = normalizeEventLayerId(rawCat);
-          const color = getEventColor(cat);
-          const ent = viewer.entities.add({
-            position: Cesium.Cartesian3.fromDegrees(c[0], c[1]),
-            name: ev.title as string,
-            billboard: {
-              image: createPulsingDotCanvas(color), width: 20, height: 20,
-              pixelOffset: new Cesium.Cartesian2(0, -10),
-              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-            },
-            properties: {
-              layer: cat, title: ev.title, date: geo[0].date, category: rawCat,
-              description: ev.description || '', categories: cats, lon: c[0], lat: c[1],
-              time: new Date(geo[0].date).getTime() || Date.now(),
-            },
-          });
-          if (!entityStoreRef.current[cat]) entityStoreRef.current[cat] = [];
-          entityStoreRef.current[cat].push(ent);
+  async function loadNwsAlerts(viewer: Cesium.Viewer) {
+    try {
+      const data = await apiGet<{
+        features: Array<{
+          properties: Record<string, unknown>;
+          geometry: { type?: string; coordinates?: unknown } | null;
+        }>;
+      }>('/weather/alerts');
+      const parsed: EventAlert[] = (data.features ?? []).slice(0, 50).map((f, i) => {
+        const p = f.properties;
+        const pos = alertGeometryLonLat(f.geometry);
+        const severity = String(p.severity ?? 'Unknown').toLowerCase().includes('extreme') ? 'red'
+          : String(p.severity ?? '').toLowerCase().includes('severe') ? 'orange' : 'green';
+        return {
+          id: `nws-${i}-${p.id ?? i}`,
+          title: String(p.event ?? p.headline ?? 'Weather Alert'),
+          desc: String(p.description ?? p.areaDesc ?? '').slice(0, 200),
+          severity,
+          type: String(p.event ?? 'weather'),
+          lat: pos?.lat ?? 0,
+          lon: pos?.lon ?? 0,
+          hasMapPosition: pos !== null,
+          seen: false,
+          timestamp: Date.now(),
+          time: new Date().toISOString(),
+        };
+      });
+      alertsRef.current = parsed;
+      setAlerts(parsed);
+      setNewAlertCount(parsed.length);
+      parsed.filter(a => a.hasMapPosition).forEach(registerAlertEntity);
+    } catch (err) {
+      recordFeedError('weather alerts', err);
+    }
+    void viewer;
+  }
+
+  async function loadSpaceWeather(viewer: Cesium.Viewer) {
+    try {
+      const rows = await apiGet<string[][]>('/space-weather/kp');
+      const recent = rows.slice(-5).reverse();
+      const spaceEnts = recent.map((row, i) => {
+        const kp = Number(row[1] ?? 0);
+        const lat = 65 - i * 5;
+        const lon = -95 + i * 30;
+        pushIntelFeed({
+          id: `kp-${row[0]}`,
+          title: `Geomagnetic Kp ${kp}`,
+          source: 'NOAA SWPC',
+          type: 'space_weather',
+          lat, lon,
+          timestamp: Date.now() - i * 1800000,
+          url: 'https://www.swpc.noaa.gov/products/planetary-k-index',
+          platform: 'internal',
+        });
+        return viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(lon, lat),
+          name: `Kp ${kp}`,
+          billboard: { image: createPulsingDotCanvas('#f97316', 18), width: 18, height: 18,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+          properties: { layer: 'space_weather', kpIndex: kp, name: `Kp ${kp}`, lon, lat, time: Date.now() },
+        });
+      });
+      entityStoreRef.current['space_weather'] = spaceEnts;
+    } catch (err) {
+      recordFeedError('space weather', err);
+    }
+  }
+
+  const loadAllData = useCallback(async (viewer: Cesium.Viewer) => {
+    feedErrorsRef.current = [];
+    feedSummaryShownRef.current = false;
+
+    await Promise.all([
+      loadEarthquakes(viewer),
+      loadEonetEvents(viewer),
+      apiGet<Record<string, unknown>>('/tectonic').then(async (geo) => {
+        const src = await loadTectonicPlates(viewer, geo);
+        entityStoreRef.current['tectonic'] = [...src.entities.values];
+        if (!isLayerEnabled('tectonic')) {
+          setLayerEntitiesVisible('tectonic', false);
         }
-        updateCounts();
-        refreshDerivedOverlays();
-      })
-      .catch(() => loadMockEvents(viewer));
+      }).catch((err) => {
+        recordFeedError('tectonic plates', err);
+      }),
+      loadNwsAlerts(viewer),
+      loadSpaceWeather(viewer),
+    ]);
 
-    // Tectonic plates
-    fetch('https://raw.githubusercontent.com/fraxen/tectonicplates/master/GeoJSON/PB2002_boundaries.json')
-      .then(r => r.json())
-      .then((geo: Record<string, unknown>) => {
-        const src = new Cesium.GeoJsonDataSource('Tectonic');
-        src.load(geo).then(() => {
-          for (const ent of src.entities.values) {
-            if (ent.polyline) {
-              ent.polyline.material = new Cesium.ColorMaterialProperty(Cesium.Color.fromCssColorString('#f97316').withAlpha(0.6));
-              (ent.polyline.width as unknown as Cesium.ConstantProperty) = new Cesium.ConstantProperty(2);
-            }
-          }
-          tectonicEntitiesRef.current = src.entities.values as unknown as Cesium.Entity[];
-          viewer.dataSources.add(src);
-        });
-      })
-      .catch(() => loadMockTectonic(viewer));
+    if (isLayerEnabled('flight_tracks')) {
+      await loadFlightTracks(viewer);
+    }
 
-    // Aviation
-    void loadFlightTracks(viewer);
+    showFeedSummaryOnce();
+    updateCounts();
 
-    // Volcanoes - use mock data directly
-    const volcanoEnts = generateMockVolcanoes().map(v => viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(v.lon, v.lat),
-      name: v.name,
-      billboard: { image: createPulsingDotCanvas('#f59e0b', 14), width: 14, height: 14,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
-      properties: { layer: 'volcanoes', ...v },
-    }));
-    entityStoreRef.current['volcanoes'] = volcanoEnts;
-
-    // Airports
     fetch('https://raw.githubusercontent.com/mwgg/Airports/master/airports.json')
       .then(r => r.json())
       .then((data: Record<string, Record<string, unknown>>) => {
         const apList = Object.values(data).filter((a: Record<string, unknown>) => a.Size && (a.Size as number) >= 3);
-        const ents = apList.slice(0, 300).map(a => viewer.entities.add({
+        entityStoreRef.current['airports'] = apList.slice(0, 300).map(a => viewer.entities.add({
           position: Cesium.Cartesian3.fromDegrees(a.lon as number, a.lat as number),
           name: a.name as string,
           billboard: { image: createAirportIcon(), width: 12, height: 12,
             heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
-          label: { text: a.iata as string || a.icao as string, font: '9px "JetBrains Mono"', fillColor: Cesium.Color.fromCssColorString('#14b8a6'),
+          label: { text: (a.iata as string) || (a.icao as string), font: '9px "JetBrains Mono"',
+            fillColor: Cesium.Color.fromCssColorString('#14b8a6'),
             pixelOffset: new Cesium.Cartesian2(0, -8), show: (a.Size as number) >= 5 },
-          properties: { layer:'airports', ...a },
+          properties: { layer: 'airports', ...a },
         }));
-        entityStoreRef.current['airports'] = ents;
         updateCounts();
       })
-      .catch(() => {
-        const mockAirports = [
-          { name:'Heathrow', iata:'LHR', icao:'EGLL', lat:51.47,lon:-0.46,size:5 },
-          { name:'JFK', iata:'JFK', icao:'KJFK', lat:40.64,lon:-73.78,size:5 },
-          { name:'Haneda', iata:'HND', icao:'RJTT', lat:35.55,lon:139.78,size:5 },
-          { name:'Charles de Gaulle', iata:'CDG', icao:'LFPG', lat:49.01,lon:2.55,size:5 },
-          { name:'Dubai Intl', iata:'DXB', icao:'OMDB', lat:25.25,lon:55.36,size:5 },
-          { name:'LAX', iata:'LAX', icao:'KLAX', lat:33.94,lon:-118.41,size:5 },
-          { name:'Changi', iata:'SIN', icao:'WSSS', lat:1.36,lon:103.99,size:5 },
-          { name:'Frankfurt', iata:'FRA', icao:'EDDF', lat:50.04,lon:8.57,size:5 },
-          { name:'Amsterdam', iata:'AMS', icao:'EHAM', lat:52.31,lon:4.77,size:5 },
-          { name:'Madrid', iata:'MAD', icao:'LEMD', lat:40.47,lon:-3.57,size:5 },
-        ];
-        const ents = mockAirports.map(a => viewer.entities.add({
-          position: Cesium.Cartesian3.fromDegrees(a.lon, a.lat),
-          name: a.name,
-          billboard: { image: createAirportIcon(), width: 12, height: 12,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
-          label: { text: a.iata, font: '9px "JetBrains Mono"', fillColor: Cesium.Color.fromCssColorString('#14b8a6'),
-            pixelOffset: new Cesium.Cartesian2(0, -8), show: a.size >= 5 },
-          properties: { layer:'airports', ...a },
-        }));
-        entityStoreRef.current['airports'] = ents;
-        updateCounts();
-      });
+      .catch((err) => recordFeedError('airports', err));
 
-    // Initial disaster alerts
-    const initialAlerts = generateMockDisasterAlerts();
-    alertsRef.current = initialAlerts;
-    setAlerts(initialAlerts);
-    setNewAlertCount(initialAlerts.length);
-    initialAlerts.forEach(registerAlertEntity);
-
-    // Space weather
-    const mockSpace = generateMockSpaceWeather();
-    const spaceEnts = mockSpace.map(s => viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(s.lon, s.lat),
-      name: s.name,
-      billboard: { image: createPulsingDotCanvas('#f97316', 18), width: 18, height: 18,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
-      properties: { layer:'space_weather', ...s },
-    }));
-    entityStoreRef.current['space_weather'] = spaceEnts;
-    updateCounts();
-
-    // Social posts
-    const sp = generateSocialPosts();
-    socialPostsRef.current = sp;
-    setSocialPosts(sp);
-    sp.forEach(registerSocialEntity);
-
-    updateCounts();
     setLoadingProgress(70);
   }, []);
+
+  async function refreshLiveData(viewer: Cesium.Viewer) {
+    await loadEarthquakes(viewer);
+    await loadEonetEvents(viewer);
+    if (isLayerEnabled('flight_tracks')) await loadFlightTracks(viewer);
+    viewer.scene.requestRender();
+  }
 
   function updateCounts() {
     const v = viewerRef.current;
@@ -1011,6 +1355,7 @@ export default function App() {
       'focus',
       'weather_cards',
       'pin',
+      'india_cctv',
       'storm_forecast',
       'smoke_dispersion',
       'tsunami',
@@ -1027,6 +1372,7 @@ export default function App() {
       const p = e.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
       if (p?.layer && p.layer !== 'earthquakes' && p.layer !== 'tectonic') evCount++;
     }
+    setActiveEvents(evCount);
   }
 
   function getEventColor(cat: string): string {
@@ -1043,116 +1389,36 @@ export default function App() {
     return cat;
   }
 
-  function loadMockEarthquakes(viewer: Cesium.Viewer) {
-    const mock = [
-      { mag:7.2, place:'Near Coast of Chile', time:Date.now()-86400000, depth:35, geometry:{coordinates:[-72, -35, 35]} },
-      { mag:6.8, place:'Japan Region', time:Date.now()-172800000, depth:45, geometry:{coordinates:[142, 38, 45]} },
-      { mag:6.5, place:'Indonesia', time:Date.now()-259200000, depth:60, geometry:{coordinates:[120, -5, 60]} },
-      { mag:5.9, place:'Turkey', time:Date.now()-345600000, depth:15, geometry:{coordinates:[35, 38, 15]} },
-      { mag:5.5, place:'California, USA', time:Date.now()-432000000, depth:8, geometry:{coordinates:[-117, 34, 8]} },
-      { mag:5.2, place:'Philippines', time:Date.now()-518400000, depth:25, geometry:{coordinates:[125, 14, 25]} },
-      { mag:4.8, place:'Greece', time:Date.now()-604800000, depth:10, geometry:{coordinates:[25, 37, 10]} },
-      { mag:4.5, place:'New Zealand', time:Date.now()-691200000, depth:55, geometry:{coordinates:[175, -40, 55]} },
-    ];
-    const ents = mock.map(f => {
-      const c = f.geometry.coordinates;
-      const m = f.mag;
-      const size = Math.max(6, Math.min(48, m * 6));
-      return viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(c[0], c[1]),
-        name: f.place,
-        ellipse: {
-          semiMinorAxis: size * 1000, semiMajorAxis: size * 1000,
-          material: Cesium.Color.fromCssColorString('#ef4444').withAlpha(0.4 + m/12),
-          outline: true, outlineColor: Cesium.Color.fromCssColorString('#ef4444'), outlineWidth: 1,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        },
-        label: {
-          text: `M${m.toFixed(1)}`, font: 'bold 12px "JetBrains Mono"',
-          fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
-          pixelOffset: new Cesium.Cartesian2(0, -size/2 - 8), show: m >= 5.5,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        },
-        properties: { layer:'earthquakes', magnitude:m, place:f.place, depth:f.depth, time:f.time, lon:c[0], lat:c[1] },
-      });
-    });
-    entityStoreRef.current['earthquakes'] = ents;
-    updateCounts();
-  }
-
-  function loadMockEvents(viewer: Cesium.Viewer) {
-    const baseTime = Date.now();
-    const events = [
-      { title:'Creek Fire', category:'wildfires', lat:37.2, lon:-119.5, time:baseTime - 2 * 3600000 },
-      { title:'Australian Bushfire', category:'wildfires', lat:-33.5, lon:150.3, time:baseTime - 4 * 3600000 },
-      { title:'Typhoon Mawar', category:'severe_storms', lat:13.4, lon:144.8, windSpeed:120, pressure:934, time:baseTime - 6 * 3600000 },
-      { title:'Hurricane Lee', category:'severe_storms', lat:25.0, lon:-70.0, windSpeed:145, pressure:925, time:baseTime - 8 * 3600000 },
-      { title:'Etna Eruption', category:'volcanoes', lat:37.75, lon:14.99, time:baseTime - 10 * 3600000 },
-      { title:'Semeru Eruption', category:'volcanoes', lat:-8.1, lon:112.9, time:baseTime - 12 * 3600000 },
-      { title:'European Floods', category:'floods', lat:50.9, lon:7.0, time:baseTime - 14 * 3600000 },
-      { title:'Pakistan Floods', category:'floods', lat:28.4, lon:69.3, time:baseTime - 16 * 3600000 },
-    ];
-    for (const ev of events) {
-      const color = getEventColor(ev.category);
-      const ent = viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(ev.lon, ev.lat),
-        name: ev.title,
-        billboard: { image: createPulsingDotCanvas(color), width: 20, height: 20,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
-        properties: { layer: ev.category, title: ev.title, lon: ev.lon, lat: ev.lat, time: ev.time, windSpeed: (ev as {windSpeed?:number}).windSpeed, pressure: (ev as {pressure?:number}).pressure },
-      });
-      if (!entityStoreRef.current[ev.category]) entityStoreRef.current[ev.category] = [];
-      entityStoreRef.current[ev.category].push(ent);
-    }
-    setActiveEvents(events.length);
-    updateCounts();
-    refreshDerivedOverlays();
-  }
-
-  function loadMockTectonic(viewer: Cesium.Viewer) {
-    // Silently skip tectonic if API fails
-    void viewer;
-  }
-
-  function generateMockVolcanoes() {
-    const baseTime = Date.now();
-    return [
-      { name:'Mount Etna', alertLevel:'Orange', lat:37.751, lon:14.9934, time: baseTime - 2 * 3600000 },
-      { name:'Semeru', alertLevel:'Orange', lat:-8.108, lon:112.922, time: baseTime - 4 * 3600000 },
-      { name:'Popocatepetl', alertLevel:'Yellow', lat:19.023, lon:-98.622, time: baseTime - 6 * 3600000 },
-      { name:'Kilauea', alertLevel:'Orange', lat:19.421, lon:-155.287, time: baseTime - 8 * 3600000 },
-      { name:'Fagradalsfjall', alertLevel:'Green', lat:63.906, lon:-22.273, time: baseTime - 10 * 3600000 },
-      { name:'Sakurajima', alertLevel:'Orange', lat:31.593, lon:130.653, time: baseTime - 12 * 3600000 },
-      { name:'Merapi', alertLevel:'Orange', lat:-7.54, lon:110.446, time: baseTime - 14 * 3600000 },
-      { name:'Cotopaxi', alertLevel:'Yellow', lat:-0.684, lon:-78.438, time: baseTime - 16 * 3600000 },
-      { name:'Mauna Loa', alertLevel:'Green', lat:19.472, lon:-155.592, time: baseTime - 18 * 3600000 },
-      { name:'Erta Ale', alertLevel:'Orange', lat:13.6, lon:40.67, time: baseTime - 20 * 3600000 },
-      { name:'Yasur', alertLevel:'Orange', lat:-19.532, lon:169.447, time: baseTime - 22 * 3600000 },
-      { name:'Stromboli', alertLevel:'Orange', lat:38.789, lon:15.213, time: baseTime - 24 * 3600000 },
-      { name:'Pacaya', alertLevel:'Orange', lat:14.382, lon:-90.601, time: baseTime - 26 * 3600000 },
-      { name:'Villarrica', alertLevel:'Yellow', lat:-39.42, lon:-71.93, time: baseTime - 28 * 3600000 },
-      { name:'Krakatau', alertLevel:'Orange', lat:-6.102, lon:105.423, time: baseTime - 30 * 3600000 },
-      { name:'Sinabung', alertLevel:'Orange', lat:3.17, lon:98.392, time: baseTime - 32 * 3600000 },
-    ];
-  }
-
   function createPulsingDotCanvas(color: string, size: number = 16): HTMLCanvasElement {
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
     const ctx = canvas.getContext('2d')!;
     const cx = size/2, cy = size/2, r = size*0.35;
+    const glow = ctx.createRadialGradient(cx, cy, r * 0.05, cx, cy, size * 0.5);
+    glow.addColorStop(0, Cesium.Color.fromCssColorString(color).withAlpha(0.95).toCssColorString());
+    glow.addColorStop(0.45, Cesium.Color.fromCssColorString(color).withAlpha(0.42).toCssColorString());
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.48, 0, Math.PI * 2);
+    ctx.fill();
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = color;
+    ctx.fillStyle = Cesium.Color.fromCssColorString(color).withAlpha(0.9).toCssColorString();
     ctx.fill();
     ctx.beginPath();
-    ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.95, 0, Math.PI * 2);
+    ctx.strokeStyle = Cesium.Color.fromCssColorString(color).withAlpha(0.75).toCssColorString();
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
     return canvas;
   }
 
-  function createPlaneIcon(heading: number): HTMLCanvasElement {
+  function createPlaneIcon(heading: number, color = '#00D4FF'): HTMLCanvasElement {
     const canvas = document.createElement('canvas');
     canvas.width = 24; canvas.height = 24;
     const ctx = canvas.getContext('2d')!;
@@ -1169,7 +1435,7 @@ export default function App() {
     ctx.lineTo(8, 6);
     ctx.lineTo(3, 2);
     ctx.closePath();
-    ctx.fillStyle = '#a855f7';
+    ctx.fillStyle = color;
     ctx.fill();
     ctx.restore();
     return canvas;
@@ -1236,57 +1502,14 @@ export default function App() {
     return ent;
   }
 
-  function registerSocialEntity(post: SocialPost) {
-    const v = viewerRef.current;
-    if (!v) return;
-    const existing = socialEntityRef.current[post.id];
-    if (existing) {
-      existing.show = true;
-      return existing;
-    }
-    const ent = v.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(post.lon, post.lat, 5000),
-      name: post.name,
-      billboard: {
-        image: createPinIcon('#ec4899', 22),
-        width: 22,
-        height: 22,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-      },
-      label: {
-        text: post.name,
-        font: '10px "JetBrains Mono"',
-        fillColor: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        pixelOffset: new Cesium.Cartesian2(0, -18),
-        show: false,
-      },
-      properties: {
-        layer: 'social_groundtruth',
-        title: post.name,
-        text: post.text,
-        source: post.source,
-        type: post.type,
-        lat: post.lat,
-        lon: post.lon,
-        time: new Date(post.time).getTime() || post.timestamp,
-      },
-    });
-    socialEntityRef.current[post.id] = ent;
-    if (!entityStoreRef.current['social_groundtruth']) entityStoreRef.current['social_groundtruth'] = [];
-    entityStoreRef.current['social_groundtruth'].push(ent);
-    return ent;
-  }
-
-  function focusLocation(lat: number, lon: number, options?: { label?: string; color?: string; height?: number; }) {
+  function focusLocation(lat: number, lon: number, options?: { label?: string; color?: string; height?: number; duration?: number; }) {
     const v = viewerRef.current;
     if (!v) return;
     if (focusMarkerRef.current) {
       v.entities.remove(focusMarkerRef.current);
       focusMarkerRef.current = null;
     }
-    const height = options?.height ?? 50000;
+    const height = options?.height ?? 150;
     const marker = v.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
       name: options?.label ?? 'Selected Location',
@@ -1313,10 +1536,26 @@ export default function App() {
       },
     });
     focusMarkerRef.current = marker;
+    cinematicFlyTo(v, lon, lat, height, options?.duration ?? 2.5);
+  }
+
+  function flyToIndiaDirect() {
+    const v = viewerRef.current;
+    if (!v) return;
+    setImagery('satellite');
+    if (focusMarkerRef.current) {
+      v.entities.remove(focusMarkerRef.current);
+      focusMarkerRef.current = null;
+    }
     v.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(lon, lat, height),
-      duration: 1.8,
-      orientation: { heading: 0, pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 },
+      destination: Cesium.Cartesian3.fromDegrees(78.5, 21.0, 4200000),
+      orientation: {
+        heading: 0,
+        pitch: Cesium.Math.toRadians(-85),
+        roll: 0,
+      },
+      duration: 2.5,
+      easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
     });
   }
 
@@ -1692,6 +1931,31 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!viewerRef.current) return;
+    if (import.meta.env.DEV) {
+      window.__liveglobeDebug = {
+        ...(window.__liveglobeDebug ?? {}),
+        viewer: viewerRef.current,
+        getCameraState: () => {
+          const c = viewerRef.current?.camera.positionCartographic;
+          if (!c) return { lat: 0, lon: 0, height: 0 };
+          return {
+            lat: Cesium.Math.toDegrees(c.latitude),
+            lon: Cesium.Math.toDegrees(c.longitude),
+            height: c.height,
+          };
+        },
+        showInfoEntity: (layerId: string, index: number = 0) => {
+          const ent = entityStoreRef.current[layerId]?.[index];
+          if (!ent) return false;
+          showInfoPanel(ent);
+          return true;
+        },
+      };
+    }
+  }, [showInfoPanel]);
+
   function triggerSeismicWaves(lon: number, lat: number, mag: number) {
     const v = viewerRef.current;
     if (!v) return;
@@ -1825,13 +2089,13 @@ export default function App() {
       id: `tsunami_${timestamp}`, title: 'Tsunami Warning',
       desc: `M${mag.toFixed(1)} earthquake may generate tsunami waves. Monitor local alerts.`,
       severity: 'red', type: 'tsunami', lat, lon, seen: false,
-      time: new Date(timestamp).toISOString(), timestamp,
+      time: new Date(timestamp).toISOString(), timestamp, hasMapPosition: true,
     };
     registerAlertEntity(alert);
     alertsRef.current.unshift(alert);
     setAlerts([...alertsRef.current]);
     setNewAlertCount(prev => prev + 1);
-    focusLocation(lat, lon, { label: 'Tsunami alert', color: '#ef4444', height: 45000 });
+    focusLocation(lat, lon, { label: 'Tsunami alert', color: '#ef4444', height: 150 });
     showNotification('Tsunami Warning triggered', 'error');
   }
 
@@ -1893,6 +2157,7 @@ export default function App() {
         desc: `${place} - Significant seismic event`,
         severity: mag >= 7 ? 'red' : mag >= 6 ? 'orange' : 'green',
         type: 'earthquake', lat, lon, seen: false, time: new Date(time).toISOString(), timestamp,
+        hasMapPosition: true,
       };
       registerAlertEntity(alert);
       alertsRef.current.unshift(alert);
@@ -1910,6 +2175,24 @@ export default function App() {
     notificationTimeoutRef.current = setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 3500);
+  }
+
+  function recordFeedError(source: string, err?: unknown) {
+    feedErrorsRef.current.push(source);
+    console.warn(`[LiveGlobe] ${source} unavailable`, err);
+  }
+
+  function showFeedSummaryOnce() {
+    const failed = feedErrorsRef.current;
+    if (failed.length === 0 || feedSummaryShownRef.current) return;
+    const critical = ['earthquakes', 'natural events', 'tectonic plates'];
+    const hasCriticalFailure = failed.some(f => critical.includes(f));
+    if (!hasCriticalFailure && failed.length < 2) return;
+    feedSummaryShownRef.current = true;
+    showNotification(
+      `Some feeds unavailable (${failed.join(', ')}). Run "npm run dev" for the API proxy, or data will load via direct APIs when possible.`,
+      'warning',
+    );
   }
 
   function requestNotification(title: string, body: string) {
@@ -2012,18 +2295,45 @@ export default function App() {
     if (!v) return;
     setActiveImagery(type);
     try {
-      v.scene.imageryLayers.removeAll();
-      if (type === 'dark') {
-        v.scene.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-          url: 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-        }));
-      } else if (type === 'temperature') {
+      if (type === 'terrain') {
+        void (async () => {
+          const enabled = await applyTerrainProvider(v, cesiumIonToken);
+          crossfadeImagery(v, 'terrain');
+          showNotification(
+            enabled ? '3D terrain enabled' : 'Terrain needs a Cesium ion token',
+            enabled ? 'success' : 'warning',
+          );
+          v.scene.requestRender();
+        })();
+        return;
+      }
+      if (type === 'population') {
+        if (entityStoreRef.current['population_impact']?.length) {
+          setLayerEntitiesVisible('population_impact', true);
+        } else {
+          loadPopulationImpact(v);
+        }
+        setShowPopulationImpact(true);
+        v.scene.requestRender();
+        return;
+      }
+      if (type === 'temperature') {
+        v.scene.imageryLayers.removeAll();
         v.scene.imageryLayers.addImageryProvider(new Cesium.WebMapServiceImageryProvider({
           url: 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
           layers: 'AIRS_L2_Surface_Air_Temperature_Daily_Day', parameters: { TRANSPARENT: 'true' },
         }));
+        v.scene.requestRender();
+        return;
       } else {
-        /* default imagery */
+        const mapType = type === 'night'
+          ? 'night'
+          : type === 'satellite'
+            ? 'satellite'
+            : type === 'dark'
+              ? 'dark'
+              : 'earth';
+        crossfadeImagery(v, mapType);
       }
     } catch (e) {
       console.error('Imagery error:', e);
@@ -2112,9 +2422,8 @@ export default function App() {
     setShowISSInfo(true);
 
     issTimerRef.current = setInterval(() => {
-      fetch('https://api.wheretheiss.at/v1/satellites/25544')
-        .then(r => r.json())
-        .then((data: {latitude:number;longitude:number}) => {
+      apiGet<{ latitude: number; longitude: number }>('/iss')
+        .then((data) => {
           const pos = Cesium.Cartesian3.fromDegrees(data.longitude, data.latitude, 408000);
           const time = Cesium.JulianDate.now();
           trail.addSample(time, pos);
@@ -2141,19 +2450,7 @@ export default function App() {
           setIssInfo({ lat: data.latitude, lon: data.longitude });
         })
         .catch(() => {
-          // Mock ISS position
-          const mockLat = 51.6 + Math.random() * 2;
-          const mockLon = -0.1 + Math.random() * 2;
-          const pos = Cesium.Cartesian3.fromDegrees(mockLon, mockLat, 408000);
-          if (!issEntityRef.current) {
-            issEntityRef.current = v.entities.add({
-              position: pos,
-              billboard: { image: createISSIcon(), width: 32, height: 32 },
-              label: { text: 'ISS', font: 'bold 11px "JetBrains Mono"', fillColor: Cesium.Color.WHITE,
-                pixelOffset: new Cesium.Cartesian2(0, -18) },
-            });
-          }
-          setIssInfo({ lat: mockLat, lon: mockLon });
+          showNotification('ISS position feed unavailable', 'warning');
         });
     }, 5000);
   }, []);
@@ -2178,34 +2475,103 @@ export default function App() {
      ═════════════════════════════════════════════════════════════════ */
 
   const handleSearch = useCallback((q: string) => {
+    const trimmed = q.trim();
     setSearchValue(q);
+    searchValueRef.current = q;
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+      searchAbortRef.current = null;
+    }
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    if (!q.trim()) { setShowSuggestions(false); return; }
-    searchDebounceRef.current = setTimeout(() => doSearch(q), 220);
-  }, []);
+    if (!trimmed) {
+      setSearchSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
 
-  function doSearch(q: string) {
-    if (geocodeCacheRef.current[q]) {
-      setSearchSuggestions(geocodeCacheRef.current[q]);
+    const coordinateMatch = parseCoordinateQuery(trimmed);
+    if (coordinateMatch) {
+      setSearchSuggestions([coordinateMatch]);
       setShowSuggestions(true);
       return;
     }
-    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`)
+
+    const localResults = findLocalLocationMatches(trimmed);
+    if (localResults.length > 0) {
+      setSearchSuggestions(localResults);
+      setShowSuggestions(true);
+      if (localResults.length >= 4) return;
+    } else {
+      setSearchSuggestions([]);
+      setShowSuggestions(true);
+    }
+
+    searchDebounceRef.current = setTimeout(() => {
+      void doSearch(trimmed);
+    }, 150);
+  }, []);
+
+  function doSearch(q: string) {
+    const normalized = normalizeLocationQuery(q);
+    if (!normalized) return;
+    const cached = geocodeCacheRef.current[normalized] ?? geocodeCacheRef.current[q];
+    if (cached?.length) {
+      if (searchValueRef.current.trim() === q) {
+        setSearchSuggestions(cached);
+        setShowSuggestions(true);
+      }
+      return;
+    }
+
+    const localResults = findLocalLocationMatches(q);
+    if (localResults.length > 0) {
+      if (searchValueRef.current.trim() === q) {
+        setSearchSuggestions(localResults);
+        setShowSuggestions(true);
+      }
+      return;
+    }
+
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(q)}`, {
+      signal: controller.signal,
+    })
       .then(r => r.json())
       .then((results: Array<{display_name:string;lat:string;lon:string}>) => {
         const items = results.slice(0, 5).map(r => ({
           name: r.display_name, lat: parseFloat(r.lat), lon: parseFloat(r.lon),
         }));
-        geocodeCacheRef.current[q] = items;
-        setSearchSuggestions(items);
-        setShowSuggestions(true);
+        geocodeCacheRef.current[normalized] = items;
+        if (searchValueRef.current.trim() === q) {
+          setSearchSuggestions(items);
+          setShowSuggestions(items.length > 0);
+        }
       })
-      .catch(() => setShowSuggestions(false));
+      .catch((err) => {
+        if (String(err).includes('AbortError')) return;
+        if (searchValueRef.current.trim() === q) setShowSuggestions(false);
+      })
+      .finally(() => {
+        if (searchAbortRef.current === controller) searchAbortRef.current = null;
+      });
   }
 
-  const goToLocation = useCallback((lat: number, lon: number, label?: string, color?: string) => {
+  function getBestSearchTarget(q: string): LocalSearchResult | null {
+    const trimmed = q.trim();
+    if (!trimmed) return null;
+    return (
+      parseCoordinateQuery(trimmed)
+      ?? findLocalLocationMatches(trimmed, 1)[0]
+      ?? geocodeCacheRef.current[normalizeLocationQuery(trimmed)]?.[0]
+      ?? geocodeCacheRef.current[trimmed]?.[0]
+      ?? null
+    );
+  }
+
+  const goToLocation = useCallback((lat: number, lon: number, label?: string, color?: string, duration = 0.9) => {
     setShowSuggestions(false);
-    focusLocation(lat, lon, { label, color, height: 50000 });
+    focusLocation(lat, lon, { label, color, height: 150, duration });
   }, [focusLocation]);
 
   /* ═════════════════════════════════════════════════════════════════
@@ -2234,6 +2600,8 @@ export default function App() {
     if (!v) return;
     if (layerId === 'population_impact') {
       loadPopulationImpact(v);
+      setLayerEntitiesVisible('population_impact', true);
+      setShowPopulationImpact(true);
     } else if (layerId === 'heatmap' && entityStoreRef.current['earthquakes']) {
       if (entityStoreRef.current['heatmap']?.length) {
         entityStoreRef.current['heatmap'].forEach(e => { if (e) e.show = true; });
@@ -2241,14 +2609,15 @@ export default function App() {
       } else {
         generateHeatmap(v);
       }
-    } else if (layerId === 'social_groundtruth') {
-      setShowSocial(true);
-      setSocialPulse(true);
-      entityStoreRef.current['social_groundtruth']?.forEach(e => { if (e) e.show = true; });
-      setTimeout(() => setSocialPulse(false), 5000);
+    } else if (layerId === 'intel_feed') {
+      setShowIntelFeed(true);
+      void loadSocialFeed();
     } else if (layerId === 'disaster_alerts') {
       setShowAlertsPanel(true);
       entityStoreRef.current['disaster_alerts']?.forEach(e => { if (e) e.show = true; });
+    } else if (layerId === 'india_cctv') {
+      void loadIndiaCctv(v);
+      return;
     } else if (layerId === 'storm_forecast' || layerId === 'smoke_dispersion') {
       refreshDerivedOverlays();
     } else if (layerId === 'disaster_near_me') {
@@ -2256,22 +2625,84 @@ export default function App() {
     } else if (layerId === 'flight_tracks') {
       void loadFlightTracks(v);
       return;
-    } else if (entityStoreRef.current[layerId]?.length) {
-      setLayerEntitiesVisible(layerId, true);
-      if (layerId === 'tsunami') setShowTsunamiLegend(true);
+    } else {
+      const wmsProvider = getNasaGibsProvider(layerId);
+      if (wmsProvider) {
+        if (!overlayImageryLayersRef.current[layerId]) {
+          const imgLayer = v.scene.imageryLayers.addImageryProvider(wmsProvider);
+          const defOpacity = LAYER_DEFS.find(l => l.id === layerId)?.opacity ?? 1.0;
+          imgLayer.alpha = layerOpacity[layerId] ?? defOpacity;
+          overlayImageryLayersRef.current[layerId] = imgLayer;
+        }
+      } else {
+        if (layerId === 'airspaces' && !entityStoreRef.current['airspaces']) {
+          loadAirspaces(v)
+            .then(entities => {
+              entityStoreRef.current['airspaces'] = entities;
+              setLayerEntitiesVisible('airspaces', true);
+            })
+            .catch(err => showNotification('Failed to load real airspaces', 'error'));
+        } else if (layerId === 'ais_vessels' && !entityStoreRef.current['ais_vessels']) {
+          const key = apiVault.aisStreamApiKey;
+          if (!key) {
+            showNotification('AISStream API Key required. Add it in settings.', 'warning');
+            setTimeout(() => toggleLayer('ais_vessels'), 10);
+          } else {
+            showNotification('Connecting to live AIS stream...', 'info');
+            loadAisVessels(v, key)
+              .then(entities => {
+                entityStoreRef.current['ais_vessels'] = entities;
+                setLayerEntitiesVisible('ais_vessels', true);
+                showNotification(`Loaded ${entities.length} live vessels`, 'success');
+              })
+              .catch(err => showNotification(err.message || 'AIS connection failed', 'error'));
+          }
+        } else if (entityStoreRef.current[layerId]?.length) {
+          setLayerEntitiesVisible(layerId, true);
+          if (layerId === 'tsunami') setShowTsunamiLegend(true);
+        }
+      }
     }
     showNotification(`${layerId} enabled`, 'success');
   }
 
   function hideLayerEntities(layerId: string) {
     setLayerEntitiesVisible(layerId, false);
+    
+    setIntelFeed(prev => {
+      const typeMap: Record<string, string[]> = {
+        'earthquakes': ['earthquake'],
+        'wildfires': ['wildfires', 'wildfire'],
+        'severe_storms': ['severe_storms', 'storm'],
+        'volcanoes': ['volcanoes', 'volcano'],
+        'floods': ['floods', 'flood'],
+        'natural_events': ['fire', 'drought', 'dust', 'ice', 'landslide', 'manmade', 'seaLakeIce', 'snow', 'tempExtremes', 'waterColor'],
+        'space_weather': ['space_weather'],
+        'intel_feed': ['news', 'social', 'twitter', 'facebook']
+      };
+      const removeTypes = typeMap[layerId];
+      if (!removeTypes) return prev;
+      const next = prev.filter(i => !removeTypes.includes(i.type));
+      intelFeedRef.current = next;
+      return next;
+    });
+    
+    if (overlayImageryLayersRef.current[layerId]) {
+      const v = viewerRef.current;
+      if (v) v.scene.imageryLayers.remove(overlayImageryLayersRef.current[layerId], true);
+      delete overlayImageryLayersRef.current[layerId];
+    }
+
     if (layerId === 'population_impact') {
       const v = viewerRef.current;
       if (v) populationImpactLayerRef.current.forEach(e => v.entities.remove(e));
       populationImpactLayerRef.current = [];
       setShowPopulationImpact(false);
     }
-    if (layerId === 'heatmap') { setShowHeatmapLegend(false); }
+    if (layerId === 'heatmap') {
+      setShowHeatmapLegend(false);
+      activeHeatmapRef.current = null;
+    }
     if (layerId === 'storm_forecast' || layerId === 'severe_storms') {
       clearStormForecastOverlays();
       setStormForecast(null);
@@ -2286,16 +2717,25 @@ export default function App() {
       entityStoreRef.current['tsunami'] = [];
       setShowTsunamiLegend(false);
     }
-    if (layerId === 'social_groundtruth') {
-      setShowSocial(false);
-      setSocialPulse(false);
+    if (layerId === 'intel_feed') {
+      setShowIntelFeed(false);
     }
     if (layerId === 'disaster_alerts') {
       setShowAlertsPanel(false);
     }
+    if (layerId === 'india_cctv') {
+      const p = infoEntity?.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+      if (p?.layer === 'india_cctv') {
+        setInfoEntity(null);
+        entityTrackerRef.current?.untrack();
+      }
+    }
     if (layerId === 'disaster_near_me') {
       clearDisasterNearMeOverlay();
       disasterNearMeRequestedRef.current = false;
+    }
+    if (layerId === 'flight_tracks') {
+      flightDrRef.current?.clear();
     }
   }
 
@@ -2323,7 +2763,138 @@ export default function App() {
       newEnts.push(ent);
     }
     populationImpactLayerRef.current = newEnts;
+    entityStoreRef.current['population_impact'] = newEnts;
     setShowPopulationImpact(true);
+  }
+
+  function createCctvIcon(): HTMLCanvasElement {
+    if (cachedCctvCanvas) return cachedCctvCanvas;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 40;
+    canvas.height = 40;
+    const ctx = canvas.getContext('2d')!;
+    const mid = 20;
+
+    // 1. Outer glow ring
+    const glow = ctx.createRadialGradient(mid, mid, 2, mid, mid, 18);
+    glow.addColorStop(0, 'rgba(34, 211, 238, 0.7)');
+    glow.addColorStop(0.5, 'rgba(34, 211, 238, 0.2)');
+    glow.addColorStop(1, 'rgba(34, 211, 238, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, 40, 40);
+
+    const stroke = Cesium.Color.fromCssColorString('#67e8f9').withAlpha(0.95).toCssColorString();
+    const fill = Cesium.Color.fromCssColorString('#0f172a').withAlpha(0.95).toCssColorString();
+    const activeRed = '#ef4444';
+
+    ctx.save();
+    // Center and scale the 24x24 Lucide CCTV vector paths to fit the 40x40 canvas nicely
+    const scale = 1.35;
+    const offset = 20 - 12 * scale;
+    ctx.translate(offset, offset);
+    ctx.scale(scale, scale);
+
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const path1 = new Path2D("M16.75 12h3.632a1 1 0 0 1 .894 1.447l-2.034 4.069a1 1 0 0 1-1.708.134l-2.124-2.97");
+    const path2 = new Path2D("M17.106 9.053a1 1 0 0 1 .447 1.341l-3.106 6.211a1 1 0 0 1-1.342.447L3.61 12.3a2.92 2.92 0 0 1-1.3-3.91L3.69 5.6a2.92 2.92 0 0 1 3.92-1.3z");
+    const path3 = new Path2D("M2 19h3.76a2 2 0 0 0 1.8-1.1L9 15");
+    const path4 = new Path2D("M2 21v-4");
+    const path5 = new Path2D("M7 9h.01");
+
+    // Fill camera body and visor for strong visibility against globe background
+    ctx.fillStyle = fill;
+    ctx.fill(path2);
+    ctx.fill(path1);
+
+    // Stroke paths
+    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = stroke;
+    ctx.stroke(path1);
+    ctx.stroke(path2);
+    ctx.stroke(path3);
+    ctx.stroke(path4);
+
+    // Render the recording indicator LED in flashing red
+    ctx.strokeStyle = activeRed;
+    ctx.lineWidth = 2.5;
+    ctx.stroke(path5);
+
+    ctx.restore();
+    cachedCctvCanvas = canvas;
+    return canvas;
+  }
+
+  async function loadIndiaCctv(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['india_cctv'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('india_cctv', true);
+      return;
+    }
+
+    try {
+      const data = await apiGet<{ cameras?: IndiaCctvCamera[] }>('/cctv/worldwide');
+      if (!isLayerEnabled('india_cctv')) return;
+      const cameras = (data.cameras ?? [])
+        .filter((camera) => Number.isFinite(camera.lat) && Number.isFinite(camera.lon))
+        .slice(0, 800);
+
+      const ents = cameras.map((camera) => {
+        return viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(camera.lon, camera.lat, 35),
+          name: camera.name,
+          billboard: {
+            image: createCctvIcon(),
+            width: 32,
+            height: 32,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            pixelOffset: new Cesium.Cartesian2(0, -2),
+          },
+          label: {
+            text: camera.name,
+            font: '10px "JetBrains Mono"',
+            fillColor: Cesium.Color.fromCssColorString('#67e8f9'),
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            pixelOffset: new Cesium.Cartesian2(0, -24),
+            show: false,
+          },
+          properties: {
+            layer: 'india_cctv',
+            title: camera.name,
+            lat: camera.lat,
+            lon: camera.lon,
+            pageUrl: camera.pageUrl,
+            previewUrl: camera.previewUrl ?? camera.thumbnailUrl ?? camera.streamUrl ?? camera.pageUrl,
+            streamUrl: camera.streamUrl ?? camera.pageUrl,
+            thumbnailUrl: camera.thumbnailUrl ?? camera.previewUrl,
+            source: camera.source ?? 'opencctv.org',
+            category: camera.category ?? 'public webcam',
+            city: camera.city,
+            region: camera.region,
+            location: camera.location,
+            updatedAt: camera.updatedAt ?? Date.now(),
+            description: camera.description ?? '',
+            feedType: camera.feedType,
+          },
+        });
+      });
+
+      entityStoreRef.current['india_cctv'] = ents;
+      viewer.scene.requestRender();
+      showNotification(`Loaded ${ents.length} worldwide webcams`, 'success');
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        window.__liveglobeDebug = {
+          ...(window.__liveglobeDebug ?? {}),
+          lastIndiaCctvError: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+        };
+      }
+      recordFeedError('worldwide cctv', err);
+      showNotification('Worldwide camera feed unavailable', 'warning');
+    }
   }
 
   function generateHeatmap(viewer: Cesium.Viewer) {
@@ -2367,21 +2938,98 @@ export default function App() {
     return '#7f1d1d';
   }
 
+  function getNasaGibsProvider(layerId: string) {
+    const layerMap: Record<string, string> = {
+      temp_anomaly: 'AIRS_L2_Surface_Air_Temperature_Daily_Day',
+      precipitation: 'IMERG_Precipitation_Rate',
+      wind: 'SMAP_L3_Wind_Speed_Daily_Day',
+      pressure: 'MERRA2_Sea_Level_Pressure_Daily',
+      sea_ice: 'MODIS_Terra_Sea_Ice_Extent_Daily',
+      wave_height: 'GHRSST_L4_MUR_Sea_Surface_Temperature', // Visual substitute
+      ocean_currents: 'GHRSST_L4_MUR_Sea_Surface_Temperature', // Visual substitute
+      sea_temp: 'GHRSST_L4_MUR_Sea_Surface_Temperature',
+      nasa_gibs: 'MODIS_Terra_CorrectedReflectance_TrueColor',
+      sentinel_hub: 'MODIS_Terra_CorrectedReflectance_TrueColor', // Free proxy
+      night_lights: 'VIIRS_CityLights_2012',
+      land_cover: 'MODIS_MCD12Q1_Majority_Land_Cover_Type_1',
+      aerosol_index: 'OMPS_Aerosol_Index_Daily_Day',
+      so2_index: 'AURA_OMI_SO2_Lower_Troposphere',
+      co_index: 'MOPITT_Carbon_Monoxide_Total_Column_Daily_Day',
+      dust_score: 'MODIS_Terra_Aerosol_Optical_Depth_Average',
+      ground_deformation: 'VIIRS_SNPP_Thermal_Anomalies_375m_Day', 
+      flood_extent: 'MODIS_Terra_Flood_Water_Daily', 
+      burn_scars: 'MODIS_Terra_Thermal_Anomalies_Day',
+    };
+    
+    const wmsLayer = layerMap[layerId];
+    if (!wmsLayer) return null;
+
+    return new Cesium.WebMapServiceImageryProvider({
+      url: 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
+      layers: wmsLayer,
+      parameters: { TRANSPARENT: 'true', FORMAT: 'image/png' },
+      enablePickFeatures: false
+    });
+  }
+
+  // Sync overlay opacity whenever layerOpacity changes
+  useEffect(() => {
+    Object.entries(overlayImageryLayersRef.current).forEach(([id, layer]) => {
+      const def = LAYER_DEFS.find(l => l.id === id);
+      const defaultOpacity = def?.opacity ?? 1.0;
+      const val = layerOpacity[id] ?? defaultOpacity;
+      if (layer) {
+        layer.alpha = val;
+      }
+    });
+    viewerRef.current?.scene.requestRender();
+  }, [layerOpacity]);
+
   const toggleAllLayers = useCallback((state: boolean) => {
     const next = layersRef.current.map(l => ({ ...l, on: state }));
     layersRef.current = next;
     setLayers(next);
-    for (const key of Object.keys(entityStoreRef.current)) {
-      entityStoreRef.current[key]?.forEach(e => { if (e) e.show = state; });
-    }
-    if (!state) {
+
+    if (state) {
+      // Stagger enabling layer visibility to prevent CPU lockups / rendering lag spikes
+      let delay = 0;
+      for (const key of Object.keys(entityStoreRef.current)) {
+        const ents = entityStoreRef.current[key];
+        if (!ents || ents.length === 0) continue;
+        setTimeout(() => {
+          // Verify user hasn't turned off layers or clicked disable in the meantime
+          if (layersRef.current.find(l => l.id === key)?.on) {
+            ents.forEach(e => { if (e) e.show = true; });
+          }
+        }, delay);
+        delay += 30; // 30ms spacing between layer updates
+      }
+
+      const v = viewerRef.current;
+      if (v) void loadFlightTracks(v);
+    } else {
+      // Hide all layer entities and clean up their specific overlay/state configurations
+      layersRef.current.forEach(l => {
+        hideLayerEntities(l.id);
+      });
+
+      // Clear any pending/active flight dead reckoning
+      flightDrRef.current?.clear();
+
+      // Dismiss the selected entity info panel and tracking
+      setInfoEntity(null);
+      entityTrackerRef.current?.untrack();
+
       const v = viewerRef.current;
       if (v && focusMarkerRef.current) {
         v.entities.remove(focusMarkerRef.current);
         focusMarkerRef.current = null;
       }
-      setShowSocial(false);
-      setSocialPulse(false);
+
+      // Clear all active notification popups immediately
+      setNotifications([]);
+
+      setShowIntelFeed(false);
       setShowAlertsPanel(false);
       setShowPopulationImpact(false);
       setShowHeatmapLegend(false);
@@ -2389,10 +3037,6 @@ export default function App() {
       setShowSmokeLegend(false);
       setShowTsunamiLegend(false);
       disasterNearMeRequestedRef.current = false;
-    }
-    if (state) {
-      const v = viewerRef.current;
-      if (v) void loadFlightTracks(v);
     }
     refreshDerivedOverlays();
   }, []);
@@ -2405,9 +3049,8 @@ export default function App() {
       const ents = entityStoreRef.current[layer.id];
       if (ents) ents.forEach(e => { if (e) e.show = layer.on; });
     }
-    if (!next.find(l => l.id === 'social_groundtruth' && l.on)) {
-      setShowSocial(false);
-      setSocialPulse(false);
+    if (!next.find(l => l.id === 'intel_feed' && l.on)) {
+      setShowIntelFeed(false);
     }
     if (!next.find(l => l.id === 'disaster_alerts' && l.on)) {
       setShowAlertsPanel(false);
@@ -2469,10 +3112,10 @@ export default function App() {
 
   function executeCommand(cmd: string, loc: { lat: number; lon: number } | null) {
     if (cmd === 'flyTo' && loc) {
-      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 50000 });
+      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 150 });
       setAiMessages(prev => [...prev, { role: 'assistant', content: `Flew to coordinates ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` }]);
     } else if (cmd === 'weather' && loc) {
-      focusLocation(loc.lat, loc.lon, { label: 'Weather request', color: '#22d3ee', height: 50000 });
+      focusLocation(loc.lat, loc.lon, { label: 'Weather request', color: '#22d3ee', height: 150 });
       addWeatherCard(loc.lat, loc.lon);
       setAiMessages(prev => [...prev, { role: 'assistant', content: 'Weather data displayed on the globe.' }]);
     } else if (cmd === 'earthquakes') {
@@ -2539,7 +3182,7 @@ export default function App() {
     const v = viewerRef.current;
     if (!v) return;
     if (action === 'flyTo') {
-      focusLocation(cm.lat, cm.lon, { label: 'Context location', color: '#60a5fa', height: 50000 });
+      focusLocation(cm.lat, cm.lon, { label: 'Context location', color: '#60a5fa', height: 150 });
     } else if (action === 'pin') {
       const pinId = `pin_${Date.now()}`;
       v.entities.add({
@@ -2554,7 +3197,7 @@ export default function App() {
       });
       showNotification('Pin dropped', 'success');
     } else if (action === 'weather') {
-      focusLocation(cm.lat, cm.lon, { label: 'Weather request', color: '#22d3ee', height: 50000 });
+      focusLocation(cm.lat, cm.lon, { label: 'Weather request', color: '#22d3ee', height: 150 });
       addWeatherCard(cm.lat, cm.lon);
     } else if (action === 'events') {
       const nearby = findNearbyEvents(cm.lat, cm.lon, 200);
@@ -2572,6 +3215,7 @@ export default function App() {
       'focus',
       'weather_cards',
       'pin',
+      'india_cctv',
       'storm_forecast',
       'smoke_dispersion',
       'tsunami',
@@ -2600,7 +3244,15 @@ export default function App() {
     canvas.width = size; canvas.height = size;
     const ctx = canvas.getContext('2d')!;
     const center = size / 2;
-    ctx.fillStyle = color;
+    const glow = ctx.createRadialGradient(center, size * 0.4, size * 0.08, center, size * 0.4, size * 0.5);
+    glow.addColorStop(0, Cesium.Color.fromCssColorString(color).withAlpha(0.9).toCssColorString());
+    glow.addColorStop(0.65, Cesium.Color.fromCssColorString(color).withAlpha(0.32).toCssColorString());
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(center, size * 0.42, size * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = Cesium.Color.fromCssColorString(color).withAlpha(0.95).toCssColorString();
     ctx.beginPath();
     ctx.arc(center, size * 0.42, size * 0.33, 0, Math.PI * 2);
     ctx.fill();
@@ -2609,6 +3261,10 @@ export default function App() {
     ctx.lineTo(size * 0.33, size);
     ctx.lineTo(size * 0.67, size);
     ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(center, size * 0.42, size * 0.13, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
     ctx.fill();
     return canvas;
   }
@@ -2649,14 +3305,41 @@ export default function App() {
     const v = viewerRef.current;
     if (!v) return;
     if (isAutoRotating) {
-      v.clock.shouldAnimate = false;
       if (rotateTimerRef.current) clearInterval(rotateTimerRef.current);
+      rotateTimerRef.current = null;
       setIsAutoRotating(false);
     } else {
-      v.clock.shouldAnimate = true;
       setIsAutoRotating(true);
       rotateTimerRef.current = setInterval(() => {
-        v.camera.rotate(Cesium.Cartesian3.UNIT_Z, 0.002);
+        const camera = v.camera;
+        if (v.trackedEntity) v.trackedEntity = undefined;
+        if (!Cesium.Matrix4.equals(camera.transform, Cesium.Matrix4.IDENTITY)) {
+          camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+        }
+        const pos = camera.position.clone();
+        const rotationMatrix = Cesium.Matrix3.fromRotationZ(0.0015);
+        const nextPos = Cesium.Matrix3.multiplyByVector(rotationMatrix, pos, new Cesium.Cartesian3());
+        camera.position = nextPos;
+        const dir = Cesium.Cartesian3.normalize(
+          Cesium.Cartesian3.negate(nextPos, new Cesium.Cartesian3()),
+          new Cesium.Cartesian3()
+        );
+        camera.direction = dir;
+        const dot = Math.abs(Cesium.Cartesian3.dot(dir, Cesium.Cartesian3.UNIT_Z));
+        const right = dot > 0.99
+          ? Cesium.Cartesian3.normalize(
+              Cesium.Cartesian3.cross(dir, Cesium.Cartesian3.UNIT_Y, new Cesium.Cartesian3()),
+              new Cesium.Cartesian3()
+            )
+          : Cesium.Cartesian3.normalize(
+              Cesium.Cartesian3.cross(dir, Cesium.Cartesian3.UNIT_Z, new Cesium.Cartesian3()),
+              new Cesium.Cartesian3()
+            );
+        camera.right = right;
+        camera.up = Cesium.Cartesian3.normalize(
+          Cesium.Cartesian3.cross(right, dir, new Cesium.Cartesian3()),
+          new Cesium.Cartesian3()
+        );
       }, 16);
     }
   }, [isAutoRotating]);
@@ -2689,6 +3372,8 @@ export default function App() {
     if (rotateTimerRef.current) clearInterval(rotateTimerRef.current);
     if (timelineRef.current.interval) clearInterval(timelineRef.current.interval);
     if (autoRefreshIntervalRef.current) clearInterval(autoRefreshIntervalRef.current);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchAbortRef.current?.abort();
     if (screenSpaceHandlerRef.current) screenSpaceHandlerRef.current.destroy();
     seismicAnimationsRef.current.forEach(a => { if (a.interval) clearInterval(a.interval); });
     if (clickHandlerRef.current) clickHandlerRef.current();
@@ -2702,7 +3387,10 @@ export default function App() {
     smokeParticlesRef.current = [];
     tsunamiWavesRef.current = [];
     Object.keys(weatherCardElementsRef.current).forEach(key => { delete weatherCardElementsRef.current[key]; });
-    Object.keys(socialEntityRef.current).forEach(key => { delete socialEntityRef.current[key]; });
+    entityTrackerRef.current?.destroy();
+    entityTrackerRef.current = null;
+    flightDrRef.current?.clear();
+    flightDrRef.current = null;
     Object.keys(alertEntityRef.current).forEach(key => { delete alertEntityRef.current[key]; });
     disasterNearMeRequestedRef.current = false;
     lastKnownLocationRef.current = null;
@@ -2716,6 +3404,48 @@ export default function App() {
     if (!infoEntity) return null;
     const p = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
     if (!p) return null;
+    if (p.layer === 'flight_tracks') {
+      const altFeet = (Number(p.altitude ?? 0) * 3.28084).toFixed(0);
+      const speedKts = (Number(p.velocity ?? 0) * 1.94384).toFixed(0);
+      const speedKmh = (Number(p.velocity ?? 0) * 3.6).toFixed(0);
+      return (
+        <>
+          <div className="info-header">
+            <div className="info-type-dot" style={{background:'#a855f7'}} />
+            <div className="info-title">✈️ Flight {String(p.callsign ?? 'Unknown')}</div>
+            <button className="info-close" onClick={() => setInfoEntity(null)}>✕</button>
+          </div>
+          <div className="info-body">
+            <div className="info-row">
+              <span className="info-key">Flight Name</span>
+              <span className="info-val" style={{fontWeight: 600, color: '#c084fc'}}>{String(p.callsign ?? 'Unknown')}</span>
+            </div>
+            <div className="info-row">
+              <span className="info-key">ICAO Address</span>
+              <span className="info-val" style={{fontFamily:'monospace'}}>{String(p.icao24 ?? 'N/A').toUpperCase()}</span>
+            </div>
+            <div className="info-row">
+              <span className="info-key">Altitude</span>
+              <span className="info-val">{Number(p.altitude).toFixed(0)} m ({altFeet} ft)</span>
+            </div>
+            <div className="info-row">
+              <span className="info-key">Speed</span>
+              <span className="info-val">{speedKmh} km/h ({speedKts} kts)</span>
+            </div>
+            <div className="info-row">
+              <span className="info-key">Heading</span>
+              <span className="info-val">{Number(p.heading).toFixed(0)}°</span>
+            </div>
+            {p.lat != null && p.lon != null && (
+              <div className="info-row">
+                <span className="info-key">Coordinates</span>
+                <span className="info-val">{Number(p.lat).toFixed(4)}, {Number(p.lon).toFixed(4)}</span>
+              </div>
+            )}
+          </div>
+        </>
+      );
+    }
 
     if (p.layer === 'earthquakes' || p.magnitude) {
       const mag = Number(p.magnitude ?? 0);
@@ -2730,7 +3460,7 @@ export default function App() {
             <div className="info-row"><span className="info-key">Location</span><span className="info-val">{String(p.place ?? '')}</span></div>
             <div className="info-row"><span className="info-key">Magnitude</span><span className="info-val">M{mag.toFixed(1)}</span></div>
             <div className="info-row"><span className="info-key">Depth</span><span className="info-val">{String(p.depth ?? 'N/A')} km</span></div>
-            <div className="info-row"><span className="info-key">Time</span><span className="info-val">{new Date(Number(p.time ?? 0)).toUTCString()}</span></div>
+            <div className="info-row"><span className="info-key">Time</span><span className="info-val">{new Date(Number(p.time ?? 0)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium' })} IST</span></div>
             <div className="info-row"><span className="info-key">Coordinates</span><span className="info-val">{Number(p.lat ?? 0).toFixed(4)}, {Number(p.lon ?? 0).toFixed(4)}</span></div>
             {Number(p.magnitude ?? 0) >= 4 && (
               <div className="sparkline-wrap">
@@ -2803,6 +3533,66 @@ export default function App() {
                 <div className="legend-row"><div className="legend-color" style={{background:'rgba(168,85,247,0.2)'}}/><span>48h forecast</span></div>
                 <div className="legend-row"><div className="legend-color" style={{background:'rgba(168,85,247,0.1)'}}/><span>72h forecast (widest)</span></div>
                 <div className="legend-row"><div className="legend-color" style={{background:'rgba(168,85,247,0.4)'}}/><span>Projected track</span></div>
+              </div>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    if (p.layer === 'india_cctv') {
+      const previewBase = String(p.previewUrl ?? p.thumbnailUrl ?? p.streamUrl ?? p.pageUrl ?? '');
+      const previewUrl = previewBase
+        ? `${previewBase}${previewBase.includes('?') ? '&' : '?'}tick=${cctvPreviewTick}`
+        : '';
+      const location = String(p.location ?? p.city ?? p.region ?? 'Worldwide');
+      const updatedAt = Number(p.updatedAt ?? Date.now());
+      const isVideo = p.feedType === 'm3u8' || previewBase.includes('.m3u8') || previewBase.includes('m3u8') || previewBase.includes('.mp4');
+
+      return (
+        <>
+          <div className="info-header">
+            <div className="info-type-dot" style={{background:'#22d3ee'}} />
+            <div className="info-title">{String(p.title ?? 'Public CCTV')}</div>
+            <button className="info-close" onClick={() => setInfoEntity(null)}>✕</button>
+          </div>
+          <div className="info-body">
+            <div className="cctv-preview">
+              {previewBase ? (
+                isVideo ? (
+                  <CctvVideoPlayer src={previewBase} />
+                ) : (
+                  <img
+                    src={previewUrl}
+                    alt={String(p.title ?? 'Live camera preview')}
+                    referrerPolicy="no-referrer"
+                    loading="eager"
+                  />
+                )
+              ) : (
+                <div className="cctv-preview-empty">
+                  Live preview unavailable
+                </div>
+              )}
+            </div>
+            <div className="info-row"><span className="info-key">Location</span><span className="info-val">{location}</span></div>
+            <div className="info-row"><span className="info-key">Category</span><span className="info-val">{String(p.category ?? 'Public webcam')}</span></div>
+            <div className="info-row"><span className="info-key">Updated</span><span className="info-val">{new Date(updatedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST</span></div>
+            <div className="info-row"><span className="info-key">Coordinates</span><span className="info-val">{Number(p.lat ?? 0).toFixed(4)}, {Number(p.lon ?? 0).toFixed(4)}</span></div>
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">Public feed</div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+                <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.4}}>
+                  Open-source live public webcam feed.
+                </div>
+                <a
+                  className="cctv-link"
+                  href={String(p.pageUrl ?? p.streamUrl ?? previewBase)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open live
+                </a>
               </div>
             </div>
           </div>
@@ -2903,6 +3693,19 @@ export default function App() {
                     onChange={e => setApiVault(prev => ({ ...prev, anthropic: e.target.value }))}
                   />
                 </label>
+                <label className="api-field">
+                  <span>Cesium Ion Access Token</span>
+                  <input
+                    type="password"
+                    className="token-input"
+                    placeholder="Paste your Cesium ion access token"
+                    value={apiVault.cesiumIonAccessToken}
+                    onChange={e => setApiVault(prev => ({ ...prev, cesiumIonAccessToken: e.target.value }))}
+                  />
+                </label>
+                <div className="token-note" style={{marginTop: 6}}>
+                  A valid Cesium ion token enables World Terrain and a much more convincing 3D globe.
+                </div>
                 <label className="api-field">
                   <span>Preferred AI Provider</span>
                   <select
@@ -3025,12 +3828,16 @@ export default function App() {
           <span className="search-icon">🔍</span>
           <input type="text" placeholder="Search location..." value={searchValue}
             onChange={e => handleSearch(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && searchSuggestions.length) goToLocation(searchSuggestions[0].lat, searchSuggestions[0].lon, searchSuggestions[0].name, '#60a5fa'); }}
+            onKeyDown={e => {
+              if (e.key !== 'Enter') return;
+              const target = getBestSearchTarget(searchValue);
+              if (target) goToLocation(target.lat, target.lon, target.name, '#60a5fa', 0.9);
+            }}
             style={{ width: '100%' }} />
           {showSuggestions && searchSuggestions.length > 0 && (
             <div className="search-suggestions active" style={{ position: 'absolute', top: '100%', left: 0, right: 0 }}>
               {searchSuggestions.map((s, i) => (
-                <div key={i} className="item" onClick={() => goToLocation(s.lat, s.lon, s.name, '#60a5fa')}>{s.name}</div>
+                <div key={i} className="item" onClick={() => goToLocation(s.lat, s.lon, s.name, '#60a5fa', 0.9)}>{s.name}</div>
               ))}
             </div>
           )}
@@ -3047,8 +3854,15 @@ export default function App() {
           </button>
           <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share">📤</button>
           <button className="btn-icon" onClick={() => setShowTokenSetup(true)} title="API Keys">🔑</button>
-          <button className="btn-icon" onClick={takeSnapshot} title="Snapshot">📷</button>
-          <button className="btn-icon" onClick={() => focusLocation(20.5937, 78.9629, { label: 'India', color: '#f59e0b', height: 6500000 })} title="Fly to India">🇮🇳</button>
+          <button className="btn-icon" onClick={takeSnapshot} title="Snapshot"><Camera size={16} /></button>
+          <button className="btn-icon" onClick={flyToIndiaDirect} title="Fly to India">🇮🇳</button>
+          <button
+            className={`btn-icon ${isLayerEnabled('india_cctv') ? 'active' : ''}`}
+            onClick={() => toggleLayer('india_cctv')}
+            title="Worldwide Public Cameras"
+          >
+            <Cctv size={16} />
+          </button>
           <button className="btn-icon" onClick={toggleISS} title="ISS Tracker">🛰️</button>
           <button className={`btn-icon ${showTimeline ? 'active' : ''}`} onClick={toggleTimeline} title="Timeline">⏱️</button>
           <button className="btn-icon" onClick={toggleAutoRotate} title="Auto Rotate" style={isAutoRotating ? {borderColor:'#22c55e',color:'#22c55e'} : {}}>🔄</button>
@@ -3196,7 +4010,7 @@ export default function App() {
                 a.seen = true;
                 setAlerts([...alertsRef.current]);
                 setNewAlertCount(prev => Math.max(0, prev - 1));
-                focusLocation(a.lat, a.lon, { label: a.title, color: getSeverityColor(a.severity), height: 45000 });
+                focusLocation(a.lat, a.lon, { label: a.title, color: getSeverityColor(a.severity), height: 150 });
               }}>
               <div className="alert-title">
                 <div className="alert-dot" style={{background:a.severity === 'red' ? '#ef4444' : a.severity === 'orange' ? '#f97316' : '#22c55e'}} />
@@ -3204,7 +4018,7 @@ export default function App() {
               </div>
               <div className="alert-desc">{a.desc}</div>
               <div className="alert-desc" style={{marginTop:4,color:'var(--text-muted)'}}>📍 {a.lat.toFixed(2)}, {a.lon.toFixed(2)}</div>
-              <div className="alert-time">{new Date(a.time).toLocaleString()}</div>
+              <div className="alert-time">{new Date(a.time).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST</div>
             </div>
           ))}
         </div>
@@ -3229,36 +4043,48 @@ export default function App() {
       </div>
 
       {/* Social Panel */}
-      <div className={`social-panel glass-panel ${showSocial ? 'open' : ''}`}>
+      <div className={`social-panel glass-panel ${showIntelFeed ? 'open' : ''}`}>
         <div className="ai-header">
           <div className="social-icon-grad">📱</div>
-          <div className="ai-title">Social Ground Truth</div>
-          <button className="ai-close" onClick={() => setShowSocial(false)}>✕</button>
+          <div className="ai-title">Intel Feed</div>
+          <button className="ai-close" onClick={() => setShowIntelFeed(false)}>✕</button>
         </div>
         <div style={{padding:'8px 12px',borderBottom:'1px solid var(--border)',display:'flex',gap:6,flexWrap:'wrap'}}>
-          {['all','fire','storm','earthquake','flood'].map(f => (
-            <button key={f} className={`social-filter-chip ${socialFilter === f ? 'active' : ''}`}
-              onClick={() => setSocialFilter(f)}>
+          {['all','fire','storm','earthquake','flood','social'].map(f => (
+            <button key={f} className={`social-filter-chip ${intelFilter === f ? 'active' : ''}`}
+              onClick={() => setIntelFilter(f)}>
               {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
           ))}
         </div>
         <div className="social-feed">
-          {socialPosts.filter(p => socialFilter === 'all' || p.type === socialFilter).map(post => (
-            <div key={post.id} className="social-post" onClick={() => focusLocation(post.lat, post.lon, { label: post.name, color: '#ec4899', height: 45000 })}>
-              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
-                <div className="social-avatar">{post.avatar}</div>
-                <div>
-                  <div className="social-user">{post.name}</div>
-                  <div style={{fontSize:9,color:'var(--text-muted)'}}>@{post.user} · {post.source}</div>
-                </div>
-                <span className="social-time">{post.timeLabel}</span>
+          {intelFeed.filter(p => {
+            if (intelFilter === 'all') return true;
+            if (intelFilter === 'social') return ['news', 'social', 'twitter', 'facebook'].includes(p.type);
+            return p.type === intelFilter;
+          }).map(item => (
+            <div key={item.id} className="social-post" onClick={() => focusLocation(item.lat, item.lon, { label: item.title, color: '#00D4FF', height: 150 })}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                <span className="social-user">{item.title}</span>
+                <span className="social-time">{item.timeLabel}</span>
               </div>
-              <div className="social-text">{post.text}</div>
-              <div style={{fontSize:10,color:'var(--text-muted)',marginBottom:6}}>📍 {post.lat.toFixed(2)}, {post.lon.toFixed(2)}</div>
-              <div className="social-meta">
-                <span>❤️ {post.likes}</span>
-                <span>🔄 {post.shares}</span>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+                <div>
+                  <div style={{fontSize:10,color:'var(--text-muted)'}}>
+                    {item.platform === 'twitter' ? '🐦 ' : item.platform === 'facebook' ? '📘 ' : item.platform === 'news' ? '📰 ' : ''}
+                    {item.source} · {item.type}
+                  </div>
+                  <div style={{fontSize:10,color:'var(--text-dim)',marginTop:4}}>
+                    {item.lat !== 0 ? `📍 ${item.lat.toFixed(2)}, ${item.lon.toFixed(2)}` : '🌍 Global'}
+                  </div>
+                </div>
+                {item.url && (
+                  <a href={item.url} target="_blank" rel="noreferrer" 
+                     className="glass-button" style={{fontSize:10, padding:'2px 6px', textDecoration:'none'}}
+                     onClick={(e) => e.stopPropagation()}>
+                    View {item.platform === 'news' ? 'Article' : item.platform === 'internal' ? 'Details' : 'Post'}
+                  </a>
+                )}
               </div>
             </div>
           ))}
@@ -3273,8 +4099,8 @@ export default function App() {
         <button className="tl-btn" onClick={stopTimeline}>⏹</button>
         <div className="tl-slider-wrap">
           <div className="tl-labels">
-            <span>{new Date(timelineRef.current.start).toLocaleDateString()}</span>
-            <span>{new Date(timelineRef.current.current).toLocaleString()}</span>
+            <span>{new Date(timelineRef.current.start).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}</span>
+            <span>{new Date(timelineRef.current.current).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST</span>
             <span>Now</span>
           </div>
           <input type="range" className="tl-slider" min="0" max="100" value={timelineValue}
@@ -3289,6 +4115,8 @@ export default function App() {
         <div className="stat-item"><div className="stat-dot" style={{background:'#22c55e'}}/><span className="stat-label">Events</span><span className="stat-val">{activeEvents}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#a855f7'}}/><span className="stat-label">Alerts</span><span className="stat-val">{newAlertCount}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#f59e0b'}}/><span className="stat-label">Layers</span><span className="stat-val">{activeLayerCount}/45</span></div>
+        <div className="stat-item"><div className="stat-dot" style={{background:'#00D4FF'}}/><span className="stat-label">FPS</span><span className="stat-val">{fps}</span></div>
+        <div className="stat-item"><div className="stat-dot" style={{background:'#14b8a6'}}/><span className="stat-label">Camera</span><span className="stat-val">{cameraDms || '—'}</span></div>
       </div>
 
       {/* Zoom Controls */}
@@ -3335,7 +4163,7 @@ export default function App() {
             <div className="token-title">Share LiveGlobe</div>
             <div className="token-sub">Share this view or take a snapshot.</div>
             <div className="share-options">
-              <button className="share-option" onClick={takeSnapshot}>📷 Snapshot</button>
+              <button className="share-option" onClick={takeSnapshot}><Camera size={14} style={{ marginRight: 6 }} /> Snapshot</button>
               <button className="share-option" onClick={() => {
                 const url = generateShareUrl();
                 navigator.clipboard?.writeText(url);
@@ -3363,19 +4191,12 @@ export default function App() {
         </div>
       )}
 
-      {/* Social Pulse Indicator */}
-      {socialPulse && (
-        <div className="social-pulse-indicator show">
-          <div className="social-pulse-dot" />
-          <span>Ground truth pulse active</span>
-        </div>
-      )}
 
       {/* Weather Cards */}
       {weatherCards.map(wc => (
         <div key={wc.id} ref={el => { weatherCardElementsRef.current[wc.id] = el; }} className="weather-card glass-panel"
           style={{ display: 'block', pointerEvents: 'auto', opacity: 0 }}
-          onClick={() => focusLocation(wc.lat, wc.lon, { label: 'Weather location', color: '#22d3ee', height: 45000 })}>
+          onClick={() => focusLocation(wc.lat, wc.lon, { label: 'Weather location', color: '#22d3ee', height: 150 })}>
           <div className="weather-card-header">
             <span className="weather-icon">🌡️</span>
             <div>
