@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import * as Cesium from 'cesium';
 
 export interface UsgsFeature {

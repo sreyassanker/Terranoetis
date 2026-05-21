@@ -1,0 +1,1867 @@
+{
+  "total_parsed": 1128,
+  "total_unique": 805,
+  "duplicates_count": 323,
+  "implemented_count": 23,
+  "simulated_count": 297,
+  "missing_count": 485,
+  "missing_samples": [
+    {
+      "category": "Next-Level Live Data Ideas",
+      "name": "Astrophysical Transient Alert Streams (Cosmic Events)",
+      "url": "GCN/WebSDR/Cyber",
+      "description": "Map live universe-shaking events like gamma-ray bursts, black hole mergers, gravitational waves, or high-energy neutrinos.",
+      "source_file": "next_level_live_data_ideas.md",
+      "raw": "Vision Item: Astrophysical Transient Alert Streams (Cosmic Events)"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "DWD Open Data",
+      "url": "https://opendata.dwd.de/",
+      "description": "German Weather Service open data portal",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | DWD Open Data | https://opendata.dwd.de/ | German Weather Service open data portal |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "ECMWF Copernicus CDS",
+      "url": "https://cds.climate.copernicus.eu/",
+      "description": "Climate Data Store, ERA5, seasonal forecasts",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | ECMWF Copernicus CDS | https://cds.climate.copernicus.eu/ | Climate Data Store, ERA5, seasonal forecasts |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "NOAA Climate Data Online",
+      "url": "https://www.ncdc.noaa.gov/cdo-web/",
+      "description": "Historical & real-time US climate data",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | NOAA Climate Data Online | https://www.ncdc.noaa.gov/cdo-web/ | Historical & real-time US climate data |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "CHIRPS Rainfall",
+      "url": "https://www.chc.ucsb.edu/data/chirps",
+      "description": "Global satellite-derived rainfall, 1981-near present",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | CHIRPS Rainfall | https://www.chc.ucsb.edu/data/chirps | Global satellite-derived rainfall, 1981-near present |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "HRRR Model",
+      "url": "https://rapidrefresh.noaa.gov/hrrr/",
+      "description": "High-Resolution Rapid Refresh, US/Canada",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | HRRR Model | https://rapidrefresh.noaa.gov/hrrr/ | High-Resolution Rapid Refresh, US/Canada |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "RFE Rainfall",
+      "url": "https://www.cpc.ncep.noaa.gov/products/fews/rfe.shtml",
+      "description": "NOAA Africa Rainfall Estimate",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | RFE Rainfall | https://www.cpc.ncep.noaa.gov/products/fews/rfe.shtml | NOAA Africa Rainfall Estimate |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "KNMI Climate Explorer",
+      "url": "https://climexp.knmi.nl/",
+      "description": "Climate data & analysis tools",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | KNMI Climate Explorer | https://climexp.knmi.nl/ | Climate data & analysis tools |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "WorldClim",
+      "url": "https://www.worldclim.org/",
+      "description": "Global climate data by raster tiles",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | WorldClim | https://www.worldclim.org/ | Global climate data by raster tiles |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "GHCN-Daily",
+      "url": "https://www.ncei.noaa.gov/products/land-based-station/global-historical-climatology-network-daily",
+      "description": "Global historical daily climate summaries",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | GHCN-Daily | https://www.ncei.noaa.gov/products/land-based-station/global-historical-climatology-network-daily | Global historical daily climate summaries |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "ISMN",
+      "url": "https://ismn.earth/en/",
+      "description": "International Soil Moisture Network",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | ISMN | https://ismn.earth/en/ | International Soil Moisture Network |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "FLDAS",
+      "url": "https://ldas.gsfc.nasa.gov/fldas/",
+      "description": "Famine Early Warning Systems Land Data Assimilation",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | FLDAS | https://ldas.gsfc.nasa.gov/fldas/ | Famine Early Warning Systems Land Data Assimilation |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "S2S Database",
+      "url": "https://s2s.ecmwf.int/",
+      "description": "Sub-seasonal to seasonal forecast database",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | S2S Database | https://s2s.ecmwf.int/ | Sub-seasonal to seasonal forecast database |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "IRI Data Library",
+      "url": "https://iridl.ldeo.columbia.edu/",
+      "description": "Climate & societal data repository",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | IRI Data Library | https://iridl.ldeo.columbia.edu/ | Climate & societal data repository |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "Visual Crossing",
+      "url": "https://www.visualcrossing.com/weather-api/",
+      "description": "Weather API, free tier 1000 calls/day",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | Visual Crossing | https://www.visualcrossing.com/weather-api/ | Weather API, free tier 1000 calls/day |"
+    },
+    {
+      "category": "Weather & Climate",
+      "name": "RainViewer API",
+      "url": "https://www.rainviewer.com/api.html",
+      "description": "Weather radar & satellite maps API, free",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Weather & Climate | RainViewer API | https://www.rainviewer.com/api.html | Weather radar & satellite maps API, free |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "USGS Earth Explorer",
+      "url": "https://earthexplorer.usgs.gov/",
+      "description": "Landsat, MODIS, ASTER, SRTM satellite data",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | USGS Earth Explorer | https://earthexplorer.usgs.gov/ | Landsat, MODIS, ASTER, SRTM satellite data |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "Google Earth Engine",
+      "url": "https://earthengine.google.com/",
+      "description": "Cloud-based planetary-scale geospatial analysis",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | Google Earth Engine | https://earthengine.google.com/ | Cloud-based planetary-scale geospatial analysis |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "Microsoft Planetary Computer",
+      "url": "https://planetarycomputer.microsoft.com/",
+      "description": "Multi-petabyte Earth science data catalog",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | Microsoft Planetary Computer | https://planetarycomputer.microsoft.com/ | Multi-petabyte Earth science data catalog |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "USGS AppEEARS",
+      "url": "https://appeears.earthdatacloud.nasa.gov/",
+      "description": "Extract & download geospatial data by area/time",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | USGS AppEEARS | https://appeears.earthdatacloud.nasa.gov/ | Extract & download geospatial data by area/time |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "VEDA Dashboard",
+      "url": "https://www.earthdata.nasa.gov/dashboard/",
+      "description": "NASA cloud-based Earth science visualization",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | VEDA Dashboard | https://www.earthdata.nasa.gov/dashboard/ | NASA cloud-based Earth science visualization |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "JAXA G-Portal",
+      "url": "https://gportal.jaxa.jp/",
+      "description": "JAXA satellite data portal (ALOS, GCOM, etc.)",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | JAXA G-Portal | https://gportal.jaxa.jp/ | JAXA satellite data portal (ALOS, GCOM, etc.) |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "JAXA Himawari Monitor",
+      "url": "https://www.eorc.jaxa.jp/ptree/",
+      "description": "Himawari-8/9 real-time geostationary data",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | JAXA Himawari Monitor | https://www.eorc.jaxa.jp/ptree/ | Himawari-8/9 real-time geostationary data |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "NOAA CLASS",
+      "url": "https://www.avl.class.noaa.gov/",
+      "description": "Comprehensive Large Array-data Stewardship System",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | NOAA CLASS | https://www.avl.class.noaa.gov/ | Comprehensive Large Array-data Stewardship System |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "NOAA GOES-R Series",
+      "url": "https://www.goes-r.gov/",
+      "description": "GOES-16/17/18 real-time weather satellite data",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | NOAA GOES-R Series | https://www.goes-r.gov/ | GOES-16/17/18 real-time weather satellite data |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "Planet Labs Open Data",
+      "url": "https://www.planet.com/open-data/",
+      "description": "Open data for disaster response & research",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | Planet Labs Open Data | https://www.planet.com/open-data/ | Open data for disaster response & research |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "OpenAerialMap",
+      "url": "https://openaerialmap.org/",
+      "description": "Open collection of aerial imagery",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | OpenAerialMap | https://openaerialmap.org/ | Open collection of aerial imagery |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "Bhuvan (ISRO)",
+      "url": "https://bhuvan.nrsc.gov.in/",
+      "description": "Indian geo-platform, 35+ domain portals",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | Bhuvan (ISRO) | https://bhuvan.nrsc.gov.in/ | Indian geo-platform, 35+ domain portals |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "AIR Centre EO Catalog",
+      "url": "https://services.aircentre.org/eo-catalog/collections",
+      "description": "Atlantic basin EO data, no registration",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | AIR Centre EO Catalog | https://services.aircentre.org/eo-catalog/collections | Atlantic basin EO data, no registration |"
+    },
+    {
+      "category": "Remote Sensing & Satellite Imagery",
+      "name": "OpenTopography",
+      "url": "https://opentopography.org/",
+      "description": "High-resolution topography & LiDAR data",
+      "source_file": "open_earth_data_sources_250plus.md",
+      "raw": "| Remote Sensing & Satellite Imagery | OpenTopography | https://opentopography.org/ | High-resolution topography & LiDAR data |"
+    }
+  ],
+  "duplicates_samples": [
+    {
+      "name": "Real-Time Global Grid & Energy Sources",
+      "file": "next_level_live_data_ideas.md",
+      "reason": "Duplicate URL with Astrophysical Transient Alert Streams (Cosmic Events) in next_level_live_data_ideas.md"
+    },
+    {
+      "name": "Cyber Threat Attack Mapping (Cyber Honeypots)",
+      "file": "next_level_live_data_ideas.md",
+      "reason": "Duplicate URL with Astrophysical Transient Alert Streams (Cosmic Events) in next_level_live_data_ideas.md"
+    },
+    {
+      "name": "WebSDR (Software Defined Radio) Listening Posts",
+      "file": "next_level_live_data_ideas.md",
+      "reason": "Duplicate URL with Astrophysical Transient Alert Streams (Cosmic Events) in next_level_live_data_ideas.md"
+    },
+    {
+      "name": "CMEMS",
+      "file": "open_earth_data_sources_250plus.md",
+      "reason": "Duplicate URL with Copernicus Marine Service in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "FLDAS Soil Moisture",
+      "file": "open_earth_data_sources_250plus.md",
+      "reason": "Duplicate URL with FLDAS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "UNAVCO Borehole",
+      "file": "open_earth_data_sources_250plus.md",
+      "reason": "Duplicate URL with UNAVCO in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "MACC",
+      "file": "open_earth_data_sources_250plus.md",
+      "reason": "Duplicate URL with Copernicus Atmosphere Monitoring in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "British Geological Survey",
+      "file": "open_earth_data_sources_250plus.md",
+      "reason": "Duplicate URL with BGS Earthquake Data in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OBIS",
+      "file": "open_earth_data_sources_250plus.md",
+      "reason": "Duplicate URL with OBIS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenAQ (Fire/Smoke)",
+      "file": "open_earth_data_sources_250plus.md",
+      "reason": "Duplicate URL with OpenAQ in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Humanitarian Data Exchange",
+      "file": "open_earth_data_sources_250plus.md",
+      "reason": "Duplicate URL with UN OCHA HDX in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "SoilGrids",
+      "file": "open_earth_data_sources_250plus.md",
+      "reason": "Duplicate URL with SoilGrids in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "HWSD",
+      "file": "open_earth_data_sources_250plus.md",
+      "reason": "Duplicate URL with Harmonized World Soil DB in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "AQUASTAT",
+      "file": "open_earth_data_sources_250plus.md",
+      "reason": "Duplicate URL with AQUASTAT in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Planetary Computer STAC",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with Microsoft Planetary Computer in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Copernicus Data Space",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with Copernicus Data Space in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "USGS EarthExplorer",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with USGS Earth Explorer in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Open-Meteo",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with Open-Meteo in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenWeatherMap",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate Name with OpenWeatherMap in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "GDACS Alerts",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with GDACS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "NASA FIRMS",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate Name with NASA FIRMS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Smithsonian Volcanoes",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with Global Volcanism Program in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Windy Webcams",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with Windy API in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "GeoNames",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with GeoNames in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenTopography",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with OpenTopography in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenAQ",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with OpenAQ in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Global Forest Watch",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with Global Forest Watch in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Copernicus Marine Environment",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with Copernicus Marine Service in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Humanitarian Data Exchange",
+      "file": "free_global_apis_research2.md",
+      "reason": "Duplicate URL with UN OCHA HDX in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "WorldPop",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WorldPop Database in free_global_apis_research2.md"
+    },
+    {
+      "name": "Overture Maps Buildings",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Overture Maps in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenAQ Health",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OpenAQ in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Macrostrat",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Macrostrat in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "IGRF Model",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with IGRF in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "WMM",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WMM in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OneGeology",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OneGeology in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenEI",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OpenEI in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "iNaturalist",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with iNaturalist in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "GBIF",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GBIF in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OBIS",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OBIS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "IBTrACS",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with IBTrACS in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SPC Storm Events",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SPC Severe Weather Data in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SoilGrids",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SoilGrids in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "HWSD",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Harmonized World Soil DB in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "UNAVCO Data Archive",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with UNAVCO Data Archive in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "ITRF",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with ITRF in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "EPOS-GNSS",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EPOS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "FAO GIEWS",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GIEWS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Harvest2Market",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with FEWS NET Data Portal in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "OpenStreetMap",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OpenStreetMap in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Geofabrik",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Geofabrik in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Overture Maps",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Overture Maps in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenAddresses",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OpenAddresses in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenAQ (Infrastructure)",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OpenAQ in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "GRID3",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GRID3 in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "USGS Water Quality Portal",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Water Quality Portal in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "MERIS/OLCI Ocean Color",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Ocean Color Web (NASA) in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "RiverATLAS Water Quality",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with RiverATLAS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "NSIDC Snow Today",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Snow Today in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "USGS Volcano Hazards",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with USGS Volcano Hazards in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Global Volcanism Program",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Global Volcanism Program in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "SOCAT",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SOCAT in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "WOD",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WOD in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "WOA",
+      "file": "additional_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WOA in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "NDACC",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate Name with NDACC in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "NEON",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NEON in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "AmeriFlux",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with AmeriFlux in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "ICOS",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with ICOS in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "ICOS Carbon Portal",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with ICOS Carbon Portal in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "FLUXNET",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with FLUXNET in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NASA COOLR",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NASA Landslide Portal in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "TRMM Landslide",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with LHASA in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "WGMS",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with World Glacier Monitoring Service in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "RGI",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with RGI (Randolph Glacier Inventory) in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "GLIMS",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GLIMS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "GTN-P",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GTN-P in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "CALM",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with CALM in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "DUE Permafrost",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GTN-P in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "GPD Map 2.0",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Global Peatland Database in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Holocene Peatland DB",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Global Wetlands Map in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Global Mangrove Watch",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Global Mangrove Watch in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "RAMSAR",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with RAMSAR Sites Database in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Wetlands International",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Wetlands International in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Global Wetlands Map",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Global Wetlands Map in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "US NWI",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Coastal Wetland Inventory in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Coastal Wetlands",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Salt Marsh Monitoring in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SeagrassWatch",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SeagrassWatch in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NOAA Coral Reef Watch",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NOAA Coral Reef Watch in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "ICESat-2 Data",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with ICESat-2 in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Global Forest Watch",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Global Forest Watch in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Deep Lithosphere Dataset",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EarthChem Portal in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "DARWIN",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EarthChem Portal in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "PANGAEA Geochemistry",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with PANGAEA in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "GMRT",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GMRT in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "GEBCO",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GEBCO in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "GEBCO Grid",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GEBCO Grid in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "IHO Data Centre",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with IHO Data Centre in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenTopo Bathymetry",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OpenTopography in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "NGHP",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with USGS Gas Hydrates in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NGDS",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NGDS in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "GEOTHERM",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GEOTHERM in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Critical Minerals Mapping",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Critical Minerals Mapping in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "MinDat",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with MinDat in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "OneGeology",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OneGeology in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "CRUST1.0",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Crust 1.0 in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "LITHO1.0",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with LITHO1.0 in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "EIGEN-6C4",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EIGEN in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "XGM2019",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EIGEN in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "ICGEM",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EIGEN in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "WDMAM",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WDMAM in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "EMM2017",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EMM2017 in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "IGS",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with IGS in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "CDDIS",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with IGS Data Center in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "ITRF",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with ITRF in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "M3G",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with M3G in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SONEL",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SONEL in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Space-Track",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Space-Track in free_global_apis_research2.md"
+    },
+    {
+      "name": "CelesTrak",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with CelesTrak GP API in free_global_apis_research2.md"
+    },
+    {
+      "name": "US Drought Monitor",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with US Drought Monitor in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SPEI Global Drought",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SPEI Global Drought in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Digital Coast (NOAA)",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Digital Coast (NOAA) in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "USGS Coastal Change Hazards",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with USGS Coastal Change Hazards in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Coastal Wetlands SET",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SET Network in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "ARGUS",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Coastal Imaging Research in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "EAWS",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EAWS in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Avalanche.org",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Avalanche.org in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SNOTEL",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SNOTEL in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Rutgers Snow Lab",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Rutgers Global Snow Lab in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "GlobSnow",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GlobSnow in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NOAA Snow Cover",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NOAA Snow Cover in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "USGS River Ice",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with River Ice Data (USGS) in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Great Lakes Ice",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Great Lakes Ice in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NASA OMI",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OMI (NASA) in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "NASA OMPS",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OMI (NASA) in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "SBUV",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with TOMS in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Dobson Network",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WOUDC in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Brewer Network",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WOUDC in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "EPA UV Index",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with UV Index (EPA) in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NOAA OVATION",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OVATION Prime in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SuperMAG",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SuperMAG in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "INTERMAGNET",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with INTERMAGNET in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "USGS Geomagnetism",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with USGS Geomagnetism in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "GRACE-FO",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GRACE-FO in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "AQUASTAT",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with AQUASTAT in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Transboundary Waters",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Transboundary Waters in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "IAEA GNIP",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GNIP in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "IAEA GONAF",
+      "file": "wave3_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GONAF in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "AISStream",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with AISStream in free_global_apis_research2.md"
+    },
+    {
+      "name": "AISHub",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with AISHub in free_global_apis_research2.md"
+    },
+    {
+      "name": "MarineCadastre",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with MarineCadastre in free_global_apis_research2.md"
+    },
+    {
+      "name": "USCG Navigation Center",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with USCG Navigation Center in free_global_apis_research2.md"
+    },
+    {
+      "name": "OpenCPN Chart Sources",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with OpenCPN Chart Sources in free_global_apis_research2.md"
+    },
+    {
+      "name": "OpenSky Network",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with OpenSky Network in free_global_apis_research2.md"
+    },
+    {
+      "name": "ADSB.lol",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with ADSB.lol in free_global_apis_research2.md"
+    },
+    {
+      "name": "adsb.fi",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with adsb.fi in free_global_apis_research2.md"
+    },
+    {
+      "name": "FlightAware AeroAPI (v4)",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with FlightAware AeroAPI (v4) in free_global_apis_research2.md"
+    },
+    {
+      "name": "AirLabs API",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with AirLabs API in free_global_apis_research2.md"
+    },
+    {
+      "name": "OpenFlights Database",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with OpenFlights Database in free_global_apis_research2.md"
+    },
+    {
+      "name": "NASA GIBS",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with NASA GIBS in free_global_apis_research2.md"
+    },
+    {
+      "name": "Planetary Computer STAC",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Microsoft Planetary Computer in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "AWS Earth Search",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with AWS Earth Search in free_global_apis_research2.md"
+    },
+    {
+      "name": "Copernicus Data Space",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Copernicus Data Space in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "USGS EarthExplorer",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with USGS Earth Explorer in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Open-Meteo",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Open-Meteo in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "National Weather Service",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with National Weather Service in free_global_apis_research2.md"
+    },
+    {
+      "name": "OpenWeatherMap",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate Name with OpenWeatherMap in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Meteostat",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Meteostat in free_global_apis_research2.md"
+    },
+    {
+      "name": "Weatherstack",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Weatherstack in free_global_apis_research2.md"
+    },
+    {
+      "name": "USGS Earthquakes",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with USGS Earthquakes in free_global_apis_research2.md"
+    },
+    {
+      "name": "NASA EONET",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with NASA EONET in free_global_apis_research2.md"
+    },
+    {
+      "name": "GDACS Alerts",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with GDACS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "NASA FIRMS",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate Name with NASA FIRMS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenFEMA",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with OpenFEMA in free_global_apis_research2.md"
+    },
+    {
+      "name": "Smithsonian Volcanoes",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Global Volcanism Program in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "NASA Open APIs",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with NASA Open APIs in free_global_apis_research2.md"
+    },
+    {
+      "name": "Where The ISS At?",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Where The ISS At? in free_global_apis_research2.md"
+    },
+    {
+      "name": "CelesTrak GP API",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with CelesTrak GP API in free_global_apis_research2.md"
+    },
+    {
+      "name": "TheSpaceDevs (LL2)",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with TheSpaceDevs (LL2) in free_global_apis_research2.md"
+    },
+    {
+      "name": "N2YO API",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with N2YO API in free_global_apis_research2.md"
+    },
+    {
+      "name": "Space-Track",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Space-Track in free_global_apis_research2.md"
+    },
+    {
+      "name": "SIMBAD / NED",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with SIMBAD / NED / VizieR in free_global_apis_research2.md"
+    },
+    {
+      "name": "SpaceX API",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with SpaceX API in free_global_apis_research2.md"
+    },
+    {
+      "name": "OpenCCTV",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with OpenCCTV in free_global_apis_research2.md"
+    },
+    {
+      "name": "Windy Webcams",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Windy API in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenWebcamDB",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with OpenWebcamDB in free_global_apis_research2.md"
+    },
+    {
+      "name": "Webcams.travel",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Webcams.travel in free_global_apis_research2.md"
+    },
+    {
+      "name": "OSM Overpass",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with OSM Overpass in free_global_apis_research2.md"
+    },
+    {
+      "name": "OSM Nominatim",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with OSM Nominatim in free_global_apis_research2.md"
+    },
+    {
+      "name": "GeoNames",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with GeoNames in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "OpenTopography",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with OpenTopography in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Openrouteservice",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Openrouteservice in free_global_apis_research2.md"
+    },
+    {
+      "name": "Natural Earth",
+      "file": "free_global_apis_research.md",
+      "reason": "Duplicate URL with Natural Earth in free_global_apis_research2.md"
+    },
+    {
+      "name": "ICOS Ecosystem",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with ICOS Carbon Portal in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "AmeriFlux BASE",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with AmeriFlux Data in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "LTER Soil Carbon",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with LTER Network in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Global Soil Wetness",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GLDAS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "SMAP Soil Moisture",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SMAP (NASA) in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "NEXRAD Level-II",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NEXRAD Radar Data (AWS) in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NEXRAD Level-III",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NEXRAD Level-III in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SPC Mesoanalysis",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SPC Mesoscale Analysis in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SPC WCM",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SPC Severe Weather Data in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Tornado History",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Tornado History Project in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "European Severe Weather DB",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with European Severe Weather Database in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "e-CALLISTO",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with CALLISTO in wave4_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "ILRS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with ILRS in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "IVS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with IVS in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "IVS Data",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with IVS Data Products in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "CDDIS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with IGS Data Center in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "PBO H2O",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with PBO H2O in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SMAP",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SMAP (NASA) in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "SMOS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate Name with SMOS in wave4_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "ICGEM",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EIGEN in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "EIGEN-6C4",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EIGEN in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "XGM2019",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EIGEN in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "EGM2008",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EGM2008 in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "GOCE",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GOCE in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "GRACE-FO",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GRACE-FO in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "NGA Geoid",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EGM2008 in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "AVISO+",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with AVISO+ in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Hydroweb",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WMO WHOS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "CryoSat-2",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with CryoSat-2 in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "LiCSAR",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with COMET LiCSAR in wave4_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Volcano Deformation",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Global Volcanism Program in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "IGRAC",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with IGRAC in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "IGRAC Portal",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with IGRAC Portal in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "WHYMAP",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WHYMAP in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "WOKAM",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WOKAM in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Transboundary Waters",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Transboundary Waters in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "USGS Groundwater",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with USGS Groundwater Data in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "National Groundwater Monitoring",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with National Groundwater Monitoring in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "AQUASTAT",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with AQUASTAT in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "IAEA GNIP",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GNIP in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "IAEA GONAF",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GONAF in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "IAEA WISER",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GNIP in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Space-Track",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Space-Track in free_global_apis_research2.md"
+    },
+    {
+      "name": "CelesTrak",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with CelesTrak GP API in free_global_apis_research2.md"
+    },
+    {
+      "name": "INTERMAGNET",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with INTERMAGNET in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "INTERMAGNET Data",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with INTERMAGNET Data in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "USGS Geomagnetism",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with USGS Geomagnetism in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "SuperMAG",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SuperMAG in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Natural Resources Canada GIC",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Natural Resources Canada GIC in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "BGS Geomagnetism",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with BGS Earthquake Data in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "AuroraMAX",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with AuroraMAX in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NOAA OVATION",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OVATION Prime in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "LISN",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with LISN in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NASA AIM",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NASA AIM in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "AIM CIPS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with AIM CIPS Data in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "AIM SOFIE",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with AIM SOFIE Data in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SOFIE Temperature",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with AIM SOFIE Data in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "CIPS Albedo",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with AIM CIPS Data in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "BehavePlus",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with BehavePlus in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "FARSITE",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with FARSITE in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "FlamMap",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with FlamMap in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "BlueSky",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with BlueSky in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "HRRR-Smoke",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with HRRR-Smoke in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NASA FIRMS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NASA FIRMS in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "VIIRS Active Fires",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with VIIRS Active Fires in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "GEONETCast Fire",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GEONETCast in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "WOUDC",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WOUDC in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "WOUDC Data",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WOUDC Data in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "TOAR",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with TOAR in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "TOAR Data Portal",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with TOAR Data Portal in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NASA OMI",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OMI (NASA) in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "NASA OMPS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OMI (NASA) in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "TOMS Archive",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with TOMS in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SBUV",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with TOMS in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Dobson Network",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WOUDC in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Brewer Network",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WOUDC in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NDACC Ozone",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NDACC Ozone in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Pandonia",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Pandonia in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "GLOFAS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GLOFAS in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "GLOFAS Data",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GLOFAS Data in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "EFAS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EFAS in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "ADCIRC",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with ADCIRC in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SLOSH",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SLOSH in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "DFO Flood Archive",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with DFO Flood Archive in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Global Flood Database",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Global Flood Database in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "iRain",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with iRain in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "PDC Global",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with PDC Global in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "USGS iCoast",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with USGS iCoast in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "CoastSnap",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with CoastSnap in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Digital Coast",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Digital Coast (NOAA) in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "USGS Coastal Change",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with USGS Coastal Change Hazards in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NOAA Shoreline",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NOAA Shoreline in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SET Network",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SET Network in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Coastal Wetlands SET",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SET Network in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Coastal Topobathy",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Coastal Topobathy in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "OpenCoasts",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with OpenCoasts in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "USACE Coastal Data",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with USACE Coastal Data in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Coastal Imaging",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Coastal Imaging Research in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "ARGUS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Coastal Imaging Research in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "EAWS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EAWS in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "EAWS Bulletins",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with EAWS Bulletins in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Avalanche.org",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Avalanche.org in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "CAIC",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with CAIC in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NWAC",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NWAC in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SNOTEL",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SNOTEL in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SNODAS",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SNODAS in wave3_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Rutgers Snow Lab",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Rutgers Global Snow Lab in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "GlobSnow",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GlobSnow in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NOAA Snow Cover",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NOAA Snow Cover in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "USGS River Ice",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with River Ice Data (USGS) in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Great Lakes Ice",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Great Lakes Ice in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Tokyo VAAC",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Tokyo VAAC in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Anchorage VAAC",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Anchorage VAAC in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "London VAAC",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with VAAC in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Washington VAAC",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NHC Active Storms in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "WOVOdat",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WOVOdat in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NASA SO2 Portal",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NASA SO2 Monitoring in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "NOAA SO2",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NOAA SO2 Portal in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "HYSPLIT Ash",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with NOAA Ash Trajectory in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "USGS Volcanic Gas",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with USGS Volcanic Gas in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Global Volcanism Program",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Global Volcanism Program in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "USGS Volcano Hazards",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with USGS Volcano Hazards in open_earth_data_sources_250plus.md"
+    },
+    {
+      "name": "Volcano Discovery",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with Volcano Discovery in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "IAEA GNIP",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GNIP in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "IAEA GONAF",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GONAF in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "IAEA WISER",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GNIP in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "SISAL",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SISAL in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Global Network of Isotopes",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with IAEA Water Resources in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "LMWL Database",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with SWITCH in wave4_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "WISER Portal",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with GNIP in additional_earth_data_sources_240plus.md"
+    },
+    {
+      "name": "Paleo Hydrology",
+      "file": "wave4_earth_data_sources_240plus.md",
+      "reason": "Duplicate URL with WDC Paleoclimatology in additional_earth_data_sources_240plus.md"
+    }
+  ]
+}

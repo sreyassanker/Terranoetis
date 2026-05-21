@@ -21,6 +21,7 @@ const buttonGroupVariants = cva(
   }
 )
 
+/* eslint-disable react-refresh/only-export-components */
 function ButtonGroup({
   className,
   orientation,

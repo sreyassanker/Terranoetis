@@ -13,6 +13,8 @@ const DIRECT_SOURCES: Record<string, string> = {
   '/flights': 'https://opensky-network.org/api/states/all',
   '/weather/alerts': 'https://api.weather.gov/alerts/active',
   '/space-weather/kp': 'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json',
+  '/aurora': 'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',
+  '/submarine-cables': 'https://www.submarinecablemap.com/api/v3/cable/cable-geo.json',
 };
 
 export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {

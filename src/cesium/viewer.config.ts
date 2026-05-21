@@ -3,6 +3,7 @@ import * as Cesium from 'cesium';
 export interface ViewerInitResult {
   viewer: Cesium.Viewer;
   unlockInteraction: () => void;
+  removeAutoRotateTick: () => void;
 }
 
 const IMAGERY: Record<string, { url: string; credit?: string }> = {
@@ -88,7 +89,8 @@ export async function createLiveGlobeViewer(container: HTMLElement): Promise<Vie
 
   const viewer = new Cesium.Viewer(container, {
     scene3DOnly: true,
-    requestRenderMode: false,
+    requestRenderMode: true,
+    maximumRenderTimeChange: 0.5,
     msaaSamples: 4,
     shadows: false,
     terrainShadows: Cesium.ShadowMode.DISABLED,
@@ -135,6 +137,16 @@ export async function createLiveGlobeViewer(container: HTMLElement): Promise<Vie
   scene.globe.lightingFadeInDistance = 1e7;
   scene.globe.nightFadeOutDistance = 4e6;
   scene.globe.nightFadeInDistance = 8e6;
+  scene.globe.showWaterEffect = false;
+  scene.globe.baseColor = Cesium.Color.BLACK;
+  scene.globe.tileCacheSize = 200;
+
+  if (scene.fog) {
+    scene.fog.enabled = true;
+    scene.fog.screenSpaceErrorFactor = 4.0;
+    scene.fog.density = 0.0002;
+  }
+
   scene.highDynamicRange = true;
 
   let autoRotating = false;
@@ -147,7 +159,7 @@ export async function createLiveGlobeViewer(container: HTMLElement): Promise<Vie
 
   viewer.clock.shouldAnimate = true;
   viewer.clock.multiplier = 1;
-  viewer.clock.onTick.addEventListener(() => {
+  const removeAutoRotateTick = viewer.clock.onTick.addEventListener(() => {
     if (autoRotating) viewer.scene.camera.rotateRight(0.0003);
   });
 
@@ -166,7 +178,7 @@ export async function createLiveGlobeViewer(container: HTMLElement): Promise<Vie
 
   viewer.scene.requestRender();
 
-  return { viewer, unlockInteraction };
+  return { viewer, unlockInteraction, removeAutoRotateTick };
 }
 
 export function addBaseImagery(viewer: Cesium.Viewer, type: string, replace = false) {
@@ -177,17 +189,21 @@ export function addBaseImagery(viewer: Cesium.Viewer, type: string, replace = fa
   const layer = createImageryLayer(type);
   // Base map must always be at the very bottom (index 0)
   layers.add(layer, 0);
+  baseImageryRef = layer;
   return layer;
 }
+
+let baseImageryRef: Cesium.ImageryLayer | null = null;
 
 export function crossfadeImagery(viewer: Cesium.Viewer, type: string, durationMs = 500) {
   const layers = viewer.scene.imageryLayers;
   if (layers.length === 0) {
-    addBaseImagery(viewer, type);
+    const next = addBaseImagery(viewer, type);
+    baseImageryRef = next;
     return;
   }
 
-  const oldBase = layers.get(0);
+  const oldBase = baseImageryRef ?? layers.get(0);
   const next = createImageryLayer(type);
   
   // Insert the new base map right above the old one (index 1) so it sits below any data overlays
@@ -201,8 +217,9 @@ export function crossfadeImagery(viewer: Cesium.Viewer, type: string, durationMs
     if (t < 1) {
       requestAnimationFrame(fade);
     } else {
-      layers.remove(oldBase, true);
+      if (oldBase && layers.contains(oldBase)) layers.remove(oldBase, true);
       next.alpha = 1;
+      baseImageryRef = next;
     }
     viewer.scene.requestRender();
   };

@@ -381,6 +381,29 @@
     margin-bottom: 10px;
   }
 
+  .sidebar-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .sidebar-search input {
+    flex: 1;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 8px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+  }
+  .sidebar-search input::placeholder { color: var(--text-dim); opacity: 0.6; }
+  .sidebar-search input:focus { border-color: var(--accent); }
+  .sidebar-search-icon { font-size: 13px; opacity: 0.5; flex-shrink: 0; }
+
   .sidebar-scroll {
     flex: 1;
     overflow-y: auto;
@@ -615,10 +638,10 @@
   /* ── INFO PANEL ── */
   .info-panel {
     position: absolute;
-    top: 110px;
+    top: 76px;
     right: 16px;
     width: 320px;
-    max-height: 70vh;
+    max-height: calc(100vh - 92px);
     overflow-y: auto;
     z-index: 90;
     transition: opacity 0.3s ease, transform 0.3s ease;
@@ -677,6 +700,22 @@
   }
 
   .info-close:hover { background: rgba(239,68,68,0.2); color: var(--danger); }
+
+  .info-fly {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    border: none;
+    background: rgba(255,255,255,0.06);
+    color: var(--text-dim);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    transition: all 0.15s ease;
+  }
+  .info-fly:hover { background: rgba(96,165,250,0.2); color: var(--accent); }
 
   .info-body { padding: 12px 14px; }
 
@@ -1386,10 +1425,10 @@
   /* ── AI PANEL ── */
   .ai-panel {
     position: absolute;
-    top: 110px;
+    top: 76px;
     right: 16px;
     width: 380px;
-    max-height: calc(100vh - 140px);
+    max-height: calc(100vh - 92px);
     z-index: 95;
     display: flex;
     flex-direction: column;
@@ -1600,10 +1639,10 @@
   /* ── ALERTS PANEL ── */
   .alerts-panel {
     position: absolute;
-    top: 110px;
+    top: 76px;
     right: 16px;
     width: 340px;
-    max-height: calc(100vh - 140px);
+    max-height: calc(100vh - 92px);
     z-index: 95;
     display: flex;
     flex-direction: column;
@@ -2023,10 +2062,10 @@
   /* ── SOCIAL PANEL ── */
   .social-panel {
     position: absolute;
-    top: 110px;
+    top: 76px;
     right: 16px;
     width: 360px;
-    max-height: calc(100vh - 140px);
+    max-height: calc(100vh - 92px);
     z-index: 95;
     display: flex;
     flex-direction: column;

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Cctv, Camera } from 'lucide-react';
 import * as Cesium from 'cesium';
@@ -8,7 +9,21 @@ import { cinematicFlyTo, createEntityTracker } from '@/cesium/camera.controller'
 import { addEarthquakeEntity, type UsgsFeature } from '@/rendering/earthquakes';
 import { loadTectonicPlates } from '@/rendering/tectonic';
 import { FlightDeadReckoning, altitudeBandColor } from '@/rendering/flights';
-import { loadAirspaces, loadAisVessels } from '@/rendering/realDataLayers';
+import {
+  loadAirspaces,
+  loadAisVessels,
+  addSpaceDebrisEntities,
+  addNasaDsnEntities,
+  addLightningEntities,
+  addAuroraEntities,
+  loadSubmarineCablesDataSource,
+  addElectricityGridEntities,
+  addAnimalMigrationEntities,
+  getDebrisOrbitPositions
+} from '@/rendering/realDataLayers';
+import { ApiVault } from '@/components/ui/api-vault';
+import { createRenderScheduler } from '@/lib/renderScheduler';
+import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings } from '@/rendering/digitalTwinLayers';
 
 /* ═════════════════════════════════════════════════════════════════
    TYPES
@@ -148,49 +163,55 @@ const LAYER_DEFS: LayerItem[] = [
   { id:'earthquakes', label:'Earthquakes (M2.5+)', color:'#ef4444', type:'point', on:true, default:true, opacity:1, category:'seismic', sub:'USGS Real-Time' },
   { id:'tectonic', label:'Tectonic Plates', color:'#f97316', type:'geojson', on:true, default:true, opacity:1, category:'seismic', sub:'USGS Plates' },
   { id:'seismic_waves', label:'Seismic Wave Propagation', color:'#3b82f6', type:'effect', on:true, default:true, opacity:1, category:'seismic', sub:'Click earthquake to trigger' },
-  { id:'heatmap', label:'Seismic Heatmap', color:'#ef4444', type:'heatmap', on:false, default:false, opacity:0.7, category:'seismic', badge:'FREE' },
+  { id:'heatmap', label:'Seismic Heatmap', color:'#ef4444', type:'heatmap', on:false, default:false, opacity:0.7, category:'seismic' },
   // Weather
   { id:'wildfires', label:'Wildfires (NASA)', color:'#f97316', type:'point', on:true, default:true, opacity:1, category:'weather', sub:'MODIS/VIIRS' },
   { id:'severe_storms', label:'Severe Storms', color:'#8b5cf6', type:'point', on:true, default:true, opacity:1, category:'weather', sub:'NASA EONET' },
+  { id:'lightning_strikes', label:'Live Lightning Strikes', color:'#fef08a', type:'point', on:false, default:false, opacity:1, category:'weather', badge:'LIVE', sub:'Blitzortung Real-Time' },
+  { id:'aurora_oval', label:'Polar Auroral Oval', color:'#4ade80', type:'point', on:false, default:false, opacity:0.8, category:'weather', sub:'NOAA Ovation Forecast' },
   { id:'storm_forecast', label:'Storm Forecast Cone', color:'#a855f7', type:'polygon', on:false, default:false, opacity:1, category:'weather', sub:'Tropical cyclone track prediction' },
   { id:'smoke_dispersion', label:'Smoke Dispersion', color:'#6b7280', type:'effect', on:false, default:false, opacity:1, category:'weather', sub:'Wind-driven plume from active fires (EONET)' },
   { id:'tsunami', label:'Tsunami Propagation', color:'#3b82f6', type:'effect', on:false, default:false, opacity:1, category:'weather', sub:'Auto for M7.5+ ocean quakes' },
-  { id:'temp_anomaly', label:'Temperature Anomaly', color:'#ef4444', type:'tile', on:false, default:false, opacity:0.6, category:'weather', badge:'FREE' },
-  { id:'precipitation', label:'Precipitation', color:'#0ea5e9', type:'tile', on:false, default:false, opacity:0.6, category:'weather', badge:'FREE' },
-  { id:'wind', label:'Wind Speed', color:'#8b5cf6', type:'tile', on:false, default:false, opacity:0.6, category:'weather', badge:'FREE' },
-  { id:'pressure', label:'Pressure (MSLP)', color:'#f97316', type:'tile', on:false, default:false, opacity:0.5, category:'weather', badge:'FREE' },
-  { id:'volcanoes', label:'Volcanoes', color:'#f59e0b', type:'point', on:false, default:false, opacity:1, category:'weather', badge:'FREE' },
-  { id:'floods', label:'Flood Reports', color:'#3b82f6', type:'point', on:false, default:false, opacity:1, category:'weather', badge:'FREE' },
-  { id:'dust', label:'Dust/Sandstorm', color:'#a16207', type:'point', on:false, default:false, opacity:1, category:'weather', badge:'FREE' },
+  { id:'temp_anomaly', label:'Temperature Anomaly', color:'#ef4444', type:'tile', on:false, default:false, opacity:0.6, category:'weather' },
+  { id:'precipitation', label:'Precipitation', color:'#0ea5e9', type:'tile', on:false, default:false, opacity:0.6, category:'weather' },
+  { id:'wind', label:'Wind Speed', color:'#8b5cf6', type:'tile', on:false, default:false, opacity:0.6, category:'weather' },
+  { id:'pressure', label:'Pressure (MSLP)', color:'#f97316', type:'tile', on:false, default:false, opacity:0.5, category:'weather' },
+  { id:'volcanoes', label:'Volcanoes', color:'#f59e0b', type:'point', on:false, default:false, opacity:1, category:'weather' },
+  { id:'floods', label:'Flood Reports', color:'#3b82f6', type:'point', on:false, default:false, opacity:1, category:'weather' },
+  { id:'dust', label:'Dust/Sandstorm', color:'#a16207', type:'point', on:false, default:false, opacity:1, category:'weather' },
+  { id:'landslides', label:'Landslides', color:'#78350f', type:'point', on:false, default:false, opacity:1, category:'weather' },
+  { id:'seaLakeIce', label:'Icebergs & Sea Ice', color:'#93c5fd', type:'point', on:false, default:false, opacity:1, category:'weather', sub:'Antarctic iceberg calving & sea ice events' },
   // Aviation
   { id:'flight_tracks', label:'Live Flight Tracks', color:'#a855f7', type:'point', on:false, default:false, opacity:1, category:'aviation', badge:'KEY', sub:'OpenSky client credentials in API Vault' },
-  { id:'airports', label:'Major Airports', color:'#14b8a6', type:'point', on:false, default:false, opacity:1, category:'aviation', badge:'FREE' },
+  { id:'space_debris', label:'Space Debris Cloud', color:'#a855f7', type:'point', on:false, default:false, opacity:0.9, category:'aviation', sub:'CelesTrak GP (1500+ objects)' },
+  { id:'airports', label:'Major Airports', color:'#14b8a6', type:'point', on:false, default:false, opacity:1, category:'aviation' },
   { id:'airspaces', label:'Airspace Boundaries', color:'#f59e0b', type:'geojson', on:false, default:false, opacity:1, category:'aviation', badge:'KEY' },
   // Marine
   { id:'ais_vessels', label:'AIS Vessel Tracking', color:'#14b8a6', type:'point', on:false, default:false, opacity:1, category:'marine', badge:'KEY', sub:'MarineTraffic or similar' },
-  { id:'sea_ice', label:'Sea Ice Concentration', color:'#93c5fd', type:'tile', on:false, default:false, opacity:0.7, category:'marine', badge:'FREE' },
-  { id:'wave_height', label:'Wave Height', color:'#3b82f6', type:'tile', on:false, default:false, opacity:0.6, category:'marine', badge:'FREE' },
-  { id:'ocean_currents', label:'Ocean Currents', color:'#14b8a6', type:'tile', on:false, default:false, opacity:0.5, category:'marine', badge:'FREE' },
-  { id:'sea_temp', label:'Sea Surface Temp', color:'#f59e0b', type:'tile', on:false, default:false, opacity:0.5, category:'marine', badge:'FREE' },
+  { id:'sea_ice', label:'Sea Ice Concentration', color:'#93c5fd', type:'tile', on:false, default:false, opacity:0.7, category:'marine' },
+  { id:'sea_temp', label:'Sea Surface Temp', color:'#f59e0b', type:'tile', on:false, default:false, opacity:0.5, category:'marine' },
   // Satellite
-  { id:'sentinel_hub', label:'Sentinel-2 (ESA)', color:'#22c55e', type:'tile', on:false, default:false, opacity:1, category:'satellite', badge:'REG', sub:'Registration required' },
-  { id:'nasa_gibs', label:'NASA GIBS Imagery', color:'#3b82f6', type:'tile', on:false, default:false, opacity:1, category:'satellite', badge:'FREE' },
-  { id:'night_lights', label:'Nighttime Lights', color:'#fbbf24', type:'tile', on:false, default:false, opacity:1, category:'satellite', badge:'FREE' },
-  { id:'land_cover', label:'Land Cover', color:'#22c55e', type:'tile', on:false, default:false, opacity:1, category:'satellite', badge:'FREE' },
+  { id:'nasa_gibs', label:'NASA GIBS Imagery', color:'#3b82f6', type:'tile', on:false, default:false, opacity:1, category:'satellite' },
+  { id:'night_lights', label:'Nighttime Lights', color:'#fbbf24', type:'tile', on:false, default:false, opacity:1, category:'satellite' },
+  { id:'land_cover', label:'Land Cover', color:'#22c55e', type:'tile', on:false, default:false, opacity:1, category:'satellite' },
   // Advanced
-  { id:'disaster_alerts', label:'GDACS Disaster Alerts', color:'#ef4444', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'FREE', sub:'Global disaster alerts' },
+  { id:'nasa_dsn', label:'NASA Deep Space Network', color:'#fbbf24', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'LIVE', sub:'Active deep-space tracking' },
+  { id:'submarine_cables', label:'Undersea Fiber Cables', color:'#06b6d4', type:'geojson', on:false, default:false, opacity:0.9, category:'advanced', sub:'Telegeography Global Index' },
+  { id:'electricity_grid', label:'Global Grid Footprint', color:'#22c55e', type:'point', on:false, default:false, opacity:0.9, category:'advanced', sub:'Regional carbon intensity' },
+  { id:'animal_migrations', label:'Wildlife Migrations', color:'#f59e0b', type:'point', on:false, default:false, opacity:0.9, category:'advanced', sub:'Movebank telemetry routes' },
+  { id:'disaster_alerts', label:'GDACS Disaster Alerts', color:'#ef4444', type:'point', on:false, default:false, opacity:1, category:'advanced', sub:'Global disaster alerts' },
+
   { id:'india_cctv', label:'Worldwide Public Cameras', color:'#22d3ee', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'LIVE', sub:'Open live public webcams worldwide' },
-  { id:'space_weather', label:'Space Weather (NOAA)', color:'#f97316', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'FREE', sub:'Solar storms, aurora' },
-  { id:'disaster_near_me', label:'Disasters Near Me', color:'#ef4444', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'FREE', sub:'Requires location' },
-  { id:'population_impact', label:'Population Impact Zones', color:'#f59e0b', type:'polygon', on:false, default:false, opacity:1, category:'advanced', badge:'FREE', sub:'50 cities overlay' },
+  { id:'space_weather', label:'Space Weather (NOAA)', color:'#f97316', type:'point', on:false, default:false, opacity:1, category:'advanced', sub:'Solar storms, aurora' },
+  { id:'disaster_near_me', label:'Disasters Near Me', color:'#ef4444', type:'point', on:false, default:false, opacity:1, category:'advanced', sub:'Requires location' },
+  { id:'population_impact', label:'Population Impact Zones', color:'#f59e0b', type:'polygon', on:false, default:false, opacity:1, category:'advanced', sub:'50 cities overlay' },
   { id:'intel_feed', label:'Intel Feed', color:'#00D4FF', type:'panel', on:false, default:false, opacity:1, category:'advanced', badge:'LIVE', sub:'Real-time events from all sources' },
-  { id:'ground_deformation', label:'Ground Deformation (InSAR)', color:'#a855f7', type:'tile', on:false, default:false, opacity:0.8, category:'advanced', badge:'KEY', sub:'Advanced geospatial' },
   { id:'flood_extent', label:'Flood Extent Mapping', color:'#3b82f6', type:'tile', on:false, default:false, opacity:0.6, category:'advanced', badge:'KEY' },
-  { id:'burn_scars', label:'Burn Scar Mapping', color:'#7c2d12', type:'tile', on:false, default:false, opacity:0.7, category:'advanced', badge:'KEY' },
-  { id:'aerosol_index', label:'Aerosol Index', color:'#6b7280', type:'tile', on:false, default:false, opacity:0.6, category:'advanced', badge:'FREE' },
-  { id:'so2_index', label:'Sulfur Dioxide', color:'#eab308', type:'tile', on:false, default:false, opacity:0.6, category:'advanced', badge:'FREE' },
-  { id:'co_index', label:'Carbon Monoxide', color:'#6b7280', type:'tile', on:false, default:false, opacity:0.6, category:'advanced', badge:'FREE' },
-  { id:'dust_score', label:'Dust Score', color:'#a16207', type:'tile', on:false, default:false, opacity:0.6, category:'advanced', badge:'FREE' },
+  { id:'aerosol_index', label:'Aerosol Index', color:'#6b7280', type:'tile', on:false, default:false, opacity:0.6, category:'advanced' },
+  { id:'so2_index', label:'Sulfur Dioxide', color:'#eab308', type:'tile', on:false, default:false, opacity:0.6, category:'advanced' },
+  { id:'co_index', label:'Carbon Monoxide', color:'#6b7280', type:'tile', on:false, default:false, opacity:0.6, category:'advanced' },
+  { id:'dust_score', label:'Dust Score', color:'#a16207', type:'tile', on:false, default:false, opacity:0.6, category:'advanced' },
+  { id:'dt_buildings', label:'3D Buildings (OSM)', color:'#00ff88', type:'3dtiles', on:false, default:false, opacity:1, category:'advanced', sub:'OpenStreetMap 3D worldwide' },
 ];
 
 const API_VAULT_STORAGE_KEY = 'liveglobe.apiVault.v1';
@@ -607,12 +628,14 @@ export default function App() {
   const issEntityRef = useRef<Cesium.Entity | null>(null);
   const issTrailRef = useRef<Cesium.SampledPositionProperty | null>(null);
   const issTimesRef = useRef<Cesium.JulianDate[]>([]);
+  const issRenderTickRef = useRef<(() => void) | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const alertsRef = useRef<EventAlert[]>([]);
-  const notificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notificationTimeoutsRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const populationImpactLayerRef = useRef<Cesium.Entity[]>([]);
   const intelFeedRef = useRef<IntelFeedItem[]>([]);
   const weatherCardElementsRef = useRef<Record<string, HTMLDivElement | null>>({});
+  const weatherAbortRef = useRef<AbortController | null>(null);
   const focusMarkerRef = useRef<Cesium.Entity | null>(null);
   const flightDrRef = useRef<FlightDeadReckoning | null>(null);
   const entityTrackerRef = useRef<ReturnType<typeof createEntityTracker> | null>(null);
@@ -629,6 +652,7 @@ export default function App() {
   const overlayImageryLayersRef = useRef<Record<string, Cesium.ImageryLayer>>({});
   const openSkyTokenRef = useRef<{ token: string; expiresAt: number } | null>(null);
   const cctvPulseEntityRef = useRef<Cesium.Entity | null>(null);
+  const nextAiMsgIdRef = useRef(1);
 
   /* ── State ── */
   const initialApiVault = useMemo(() => loadApiVault(), []);
@@ -639,6 +663,7 @@ export default function App() {
   const [openCategories, setOpenCategories] = useState<string[]>(['seismic']);
   const [layers, setLayers] = useState<LayerItem[]>(LAYER_DEFS.map(l => ({ ...l })));
   const layersRef = useRef<LayerItem[]>(LAYER_DEFS.map(l => ({ ...l })));
+  const renderSchedulerRef = useRef(createRenderScheduler());
   const [layerOpacity, setLayerOpacity] = useState<Record<string, number>>({});
   const [activeImagery, setActiveImagery] = useState('satellite');
   const [infoEntity, setInfoEntity] = useState<Cesium.Entity | null>(null);
@@ -649,6 +674,7 @@ export default function App() {
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [apiVault, setApiVault] = useState<ApiVaultState>(initialApiVault);
   const [showTokenSetup, setShowTokenSetup] = useState(() => !hasAnyApiVaultValue(initialApiVault) && !initialApiVault.vaultDismissed && !CESIUM_ION_ENV_TOKEN);
+  const [showApiVault, setShowApiVault] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [showAlertsPanel, setShowAlertsPanel] = useState(false);
   const [showIntelFeed, setShowIntelFeed] = useState(false);
@@ -663,8 +689,8 @@ export default function App() {
   const [notifications, setNotifications] = useState<Array<{id:number;text:string;severity:string}>>([]);
   const [stormForecast, setStormForecast] = useState<ReturnType<typeof generateStormForecast> | null>(null);
   const [populationImpact, setPopulationImpact] = useState<ReturnType<typeof calculatePopulationImpact> | null>(null);
-  const [aiMessages, setAiMessages] = useState<Array<{role:string;content:string}>>([
-    { role:'assistant', content:'👋 Hello! I\'m your Earth Intelligence assistant. Ask me about earthquakes, weather, disasters, or any location on Earth. Try: "Show recent earthquakes" or "What\'s the weather in Tokyo?"' },
+  const [aiMessages, setAiMessages] = useState<Array<{id:number;role:string;content:string}>>([
+    { id: nextAiMsgIdRef.current++, role:'assistant', content:'👋 Hello! I\'m your Earth Intelligence assistant. Ask me about earthquakes, weather, disasters, or any location on Earth. Try: "Show recent earthquakes" or "What\'s the weather in Tokyo?"' },
   ]);
   const [aiTyping, setAiTyping] = useState(false);
   const [aiInput, setAiInput] = useState('');
@@ -681,11 +707,15 @@ export default function App() {
   const [fps, setFps] = useState(0);
   const [cameraDms, setCameraDms] = useState('');
   const [showPopulationImpact, setShowPopulationImpact] = useState(false);
+  const [layerSearch, setLayerSearch] = useState('');
   const [pulsingLayer, setPulsingLayer] = useState<string | null>(null);
   const [cctvPreviewTick, setCctvPreviewTick] = useState(0);
   const lastKnownLocationRef = useRef<{ lat: number; lon: number } | null>(null);
   const disasterNearMeRequestedRef = useRef(false);
+  const geolocationWatchRef = useRef<number | null>(null);
   const apiVaultRef = useRef<ApiVaultState>(initialApiVault);
+  const submarineCablesDataSourceRef = useRef<Cesium.GeoJsonDataSource | null>(null);
+  const selectedDebrisOrbitEntityRef = useRef<Cesium.Entity | null>(null);
 
   const aiApiType = useMemo(() => resolveAiProvider(apiVault), [apiVault]);
   const cesiumIonToken = useMemo(() => resolveCesiumIonToken(apiVault), [apiVault]);
@@ -712,6 +742,23 @@ export default function App() {
   useEffect(() => {
     openSkyTokenRef.current = null;
   }, [apiVault.openSkyClientId, apiVault.openSkyClientSecret]);
+
+  const handleApiVaultSave = (keys: Record<string, string>) => {
+    // Map the saved keys to the ApiVaultState interface
+    const newVault: ApiVaultState = {
+      ...apiVault,
+      gemini: keys['GOOGLE_GEMINI_API_KEY'] || apiVault.gemini,
+      anthropic: keys['ANTHROPIC_API_KEY'] || apiVault.anthropic,
+      cesiumIonAccessToken: keys['CESIUM_ION_ACCESS_TOKEN'] || apiVault.cesiumIonAccessToken,
+      openSkyClientId: keys['OPENSKY_CLIENT_ID'] || apiVault.openSkyClientId,
+      openSkyClientSecret: keys['OPENSKY_CLIENT_SECRET'] || apiVault.openSkyClientSecret,
+      sentinelHubClientId: keys['SENTINEL_HUB_CLIENT_ID'] || apiVault.sentinelHubClientId,
+      sentinelHubClientSecret: keys['SENTINEL_HUB_CLIENT_SECRET'] || apiVault.sentinelHubClientSecret,
+      marineTrafficApiKey: keys['MARINE_TRAFFIC_API_KEY'] || apiVault.marineTrafficApiKey,
+      aisStreamApiKey: keys['AIS_STREAM_API_KEY'] || apiVault.aisStreamApiKey,
+    };
+    setApiVault(newVault);
+  };
 
   /* ── IST Clock ── */
   useEffect(() => {
@@ -760,7 +807,8 @@ export default function App() {
       timeline: false,
       fullscreenButton: false,
       vrButton: false,
-      infoBox: true,
+      infoBox: false,
+      selectionIndicator: false,
       creditContainer: document.createElement('div'),
     });
     viewerRef.current = v;
@@ -783,7 +831,7 @@ export default function App() {
     v.scene.logarithmicDepthBuffer = true;
     v.clock.shouldAnimate = true;
     v.clock.multiplier = 1;
-    v.scene.postProcessStages.fxaa.enabled = false;
+    try { if (v.scene.postProcessStages.fxaa) v.scene.postProcessStages.fxaa.enabled = false; } catch { /* ignore */ }
     if (v.scene.postProcessStages.bloom) {
       v.scene.postProcessStages.bloom.enabled = false;
     }
@@ -951,7 +999,6 @@ export default function App() {
       v.scene.postRender.removeEventListener(onPostRender);
       cleanupCesium();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1127,7 +1174,6 @@ export default function App() {
       if (!isLayerEnabled('flight_tracks')) return;
       recordFeedError('flights', error);
     }
-    void viewer;
   }
 
   function pushIntelFeed(item: Omit<IntelFeedItem, 'timeLabel'>) {
@@ -1154,34 +1200,46 @@ export default function App() {
         const p = f.properties;
         const m = Number(p.mag ?? 0);
         if (m >= 5 && p.time) checkMagnitudeAlert(m, String(p.place ?? ''), Number(p.time), c[1], c[0]);
-        pushIntelFeed({
-          id: `eq-${p.time}`,
-          title: `M${m.toFixed(1)} ${String(p.place ?? '')}`,
-          source: 'USGS',
-          type: 'earthquake',
-          lat: c[1],
-          lon: c[0],
-          timestamp: Number(p.time ?? Date.now()),
-          url: String(p.url ?? `https://earthquake.usgs.gov/earthquakes/search/`),
-          platform: 'internal'
-        });
+        if (isLayerEnabled('earthquakes')) {
+          pushIntelFeed({
+            id: `eq-${p.time}`,
+            title: `M${m.toFixed(1)} ${String(p.place ?? '')}`,
+            source: 'USGS',
+            type: 'earthquake',
+            lat: c[1],
+            lon: c[0],
+            timestamp: Number(p.time ?? Date.now()),
+            url: String(p.url ?? `https://earthquake.usgs.gov/earthquakes/search/`),
+            platform: 'internal'
+          });
+        }
         return addEarthquakeEntity(viewer, f);
       });
       entityStoreRef.current['earthquakes'] = ents;
+      if (!isLayerEnabled('earthquakes')) {
+        setLayerEntitiesVisible('earthquakes', false);
+      }
     } catch (err) {
       recordFeedError('earthquakes', err);
     }
   }
 
+  const eonetCategoriesRef = useRef<Set<string>>(new Set());
+
   async function loadEonetEvents(viewer: Cesium.Viewer) {
-    for (const key of ['wildfires', 'severe_storms', 'volcanoes', 'floods', 'dust', 'landslides']) {
+    const eonetLayers = ['wildfires', 'severe_storms', 'volcanoes', 'floods', 'dust', 'landslides', 'seaLakeIce'];
+    // Clear all previously used EONET categories (including transient ones like drought, manmade, snow, etc.)
+    for (const cat of eonetCategoriesRef.current) {
+      removeLayerEntities(cat);
+    }
+    for (const key of eonetLayers) {
       removeLayerEntities(key);
     }
+    eonetCategoriesRef.current.clear();
     try {
       const data = await apiGet<{ events: Array<Record<string, unknown>> }>('/eonet');
       const evs = (data.events || []).slice(0, 60);
       setActiveEvents(evs.length);
-      entityStoreRef.current['volcanoes'] = [];
       for (const ev of evs) {
         const geo = ev.geometry as Array<{ coordinates: number[]; date: string }> | undefined;
         if (!geo?.length) continue;
@@ -1206,17 +1264,25 @@ export default function App() {
         });
         if (!entityStoreRef.current[cat]) entityStoreRef.current[cat] = [];
         entityStoreRef.current[cat].push(ent);
-        pushIntelFeed({
-          id: `eonet-${ev.id}`,
-          title: String(ev.title ?? 'Event'),
-          source: 'NASA EONET',
-          type: cat,
-          lat: c[1],
-          lon: c[0],
-          timestamp: new Date(geo[0].date).getTime() || Date.now(),
-          url: String(ev.link ?? `https://eonet.gsfc.nasa.gov/api/v3/events/${String(ev.id ?? '')}`),
-          platform: 'internal'
-        });
+        eonetCategoriesRef.current.add(cat);
+        if (isLayerEnabled(cat)) {
+          pushIntelFeed({
+            id: `eonet-${ev.id}`,
+            title: String(ev.title ?? 'Event'),
+            source: 'NASA EONET',
+            type: cat,
+            lat: c[1],
+            lon: c[0],
+            timestamp: new Date(geo[0].date).getTime() || Date.now(),
+            url: String(ev.link ?? `https://eonet.gsfc.nasa.gov/api/v3/events/${String(ev.id ?? '')}`),
+            platform: 'internal'
+          });
+        }
+      }
+      for (const key of eonetLayers) {
+        if (!isLayerEnabled(key)) {
+          setLayerEntitiesVisible(key, false);
+        }
       }
       refreshDerivedOverlays();
     } catch (err) {
@@ -1255,30 +1321,39 @@ export default function App() {
       setAlerts(parsed);
       setNewAlertCount(parsed.length);
       parsed.filter(a => a.hasMapPosition).forEach(registerAlertEntity);
+      if (!isLayerEnabled('disaster_alerts')) {
+        setLayerEntitiesVisible('disaster_alerts', false);
+      }
     } catch (err) {
       recordFeedError('weather alerts', err);
     }
-    void viewer;
   }
 
   async function loadSpaceWeather(viewer: Cesium.Viewer) {
     try {
+      // Remove old space_weather entities before creating new ones
+      const oldEnts = entityStoreRef.current['space_weather'];
+      if (oldEnts) oldEnts.forEach(e => viewer.entities.remove(e));
+      entityStoreRef.current['space_weather'] = [];
+
       const rows = await apiGet<string[][]>('/space-weather/kp');
       const recent = rows.slice(-5).reverse();
       const spaceEnts = recent.map((row, i) => {
         const kp = Number(row[1] ?? 0);
         const lat = 65 - i * 5;
         const lon = -95 + i * 30;
-        pushIntelFeed({
-          id: `kp-${row[0]}`,
-          title: `Geomagnetic Kp ${kp}`,
-          source: 'NOAA SWPC',
-          type: 'space_weather',
-          lat, lon,
-          timestamp: Date.now() - i * 1800000,
-          url: 'https://www.swpc.noaa.gov/products/planetary-k-index',
-          platform: 'internal',
-        });
+        if (isLayerEnabled('space_weather')) {
+          pushIntelFeed({
+            id: `kp-${row[0]}`,
+            title: `Geomagnetic Kp ${kp}`,
+            source: 'NOAA SWPC',
+            type: 'space_weather',
+            lat, lon,
+            timestamp: Date.now() - i * 1800000,
+            url: 'https://www.swpc.noaa.gov/products/planetary-k-index',
+            platform: 'internal',
+          });
+        }
         return viewer.entities.add({
           position: Cesium.Cartesian3.fromDegrees(lon, lat),
           name: `Kp ${kp}`,
@@ -1288,6 +1363,9 @@ export default function App() {
         });
       });
       entityStoreRef.current['space_weather'] = spaceEnts;
+      if (!isLayerEnabled('space_weather')) {
+        setLayerEntitiesVisible('space_weather', false);
+      }
     } catch (err) {
       recordFeedError('space weather', err);
     }
@@ -1334,6 +1412,7 @@ export default function App() {
             pixelOffset: new Cesium.Cartesian2(0, -8), show: (a.Size as number) >= 5 },
           properties: { layer: 'airports', ...a },
         }));
+        if (!isLayerEnabled('airports')) setLayerEntitiesVisible('airports', false);
         updateCounts();
       })
       .catch((err) => recordFeedError('airports', err));
@@ -1342,9 +1421,29 @@ export default function App() {
   }, []);
 
   async function refreshLiveData(viewer: Cesium.Viewer) {
-    await loadEarthquakes(viewer);
-    await loadEonetEvents(viewer);
+    if (isLayerEnabled('earthquakes')) await loadEarthquakes(viewer);
+    if (isLayerEnabled('wildfires') || isLayerEnabled('severe_storms') || isLayerEnabled('volcanoes')
+      || isLayerEnabled('floods') || isLayerEnabled('dust') || isLayerEnabled('seaLakeIce')) {
+      await loadEonetEvents(viewer);
+    }
     if (isLayerEnabled('flight_tracks')) await loadFlightTracks(viewer);
+    if (isLayerEnabled('lightning_strikes')) await loadLightningStrikes(viewer);
+    if (isLayerEnabled('aurora_oval')) await loadAuroraOval(viewer);
+    if (isLayerEnabled('space_weather')) await loadSpaceWeather(viewer);
+    if (isLayerEnabled('disaster_alerts')) await loadNwsAlerts(viewer);
+    if (isLayerEnabled('india_cctv')) await loadIndiaCctv(viewer);
+    if (isLayerEnabled('nasa_dsn')) {
+      try {
+        const data = await apiGet<any>('/nasa-dsn');
+        if (isLayerEnabled('nasa_dsn')) {
+          removeLayerEntities('nasa_dsn');
+          const ents = addNasaDsnEntities(viewer, data);
+          entityStoreRef.current['nasa_dsn'] = ents;
+        }
+      } catch (err) {
+        console.warn('Failed to refresh NASA DSN:', err);
+      }
+    }
     viewer.scene.requestRender();
   }
 
@@ -1378,14 +1477,15 @@ export default function App() {
   function getEventColor(cat: string): string {
     const map: Record<string, string> = {
       wildfires:'#f97316', severe_storms:'#a855f7', volcanoes:'#f59e0b', floods:'#3b82f6',
-      drought:'#a855f7', dustHaze:'#a16207', landslides:'#78350f', earthquakes:'#ef4444',
-      snow:'#93c5fd', waterColor:'#0ea5e9', temperature:'#ef4444',
+      drought:'#a855f7', dustHaze:'#a16207', dust:'#a16207', landslides:'#78350f', earthquakes:'#ef4444',
+      snow:'#93c5fd', waterColor:'#0ea5e9', temperature:'#ef4444', seaLakeIce:'#93c5fd',
     };
     return map[cat] || '#64748b';
   }
 
   function normalizeEventLayerId(cat: string): string {
     if (cat === 'severeStorms') return 'severe_storms';
+    if (cat === 'dustHaze') return 'dust';
     return cat;
   }
 
@@ -1575,7 +1675,13 @@ export default function App() {
     const v = viewerRef.current;
     const ents = entityStoreRef.current[layerId];
     if (!ents) return;
-    if (v) ents.forEach(ent => v.entities.remove(ent));
+    if (v) {
+      ents.forEach(ent => v.entities.remove(ent));
+      if (layerId === 'submarine_cables' && submarineCablesDataSourceRef.current) {
+        v.dataSources.remove(submarineCablesDataSourceRef.current, true);
+        submarineCablesDataSourceRef.current = null;
+      }
+    }
     entityStoreRef.current[layerId] = [];
   }
 
@@ -1778,94 +1884,82 @@ export default function App() {
 
     if (entityStoreRef.current['disaster_near_me']?.length) {
       setLayerEntitiesVisible('disaster_near_me', true);
+      if (geolocationWatchRef.current === null && navigator.geolocation) {
+        startLocationWatch();
+      }
       return;
     }
 
-    const renderAt = (lat: number, lon: number, source: string) => {
-      if (!isLayerEnabled('disaster_near_me')) {
-        disasterNearMeRequestedRef.current = false;
-        return;
-      }
+    const renderAt = (lat: number, lon: number, fly: boolean) => {
+      if (!isLayerEnabled('disaster_near_me')) return;
       clearDisasterNearMeOverlay();
       lastKnownLocationRef.current = { lat, lon };
 
       const marker = v.entities.add({
         position: Cesium.Cartesian3.fromDegrees(lon, lat, 5000),
         ellipse: {
-          semiMajorAxis: 500000,
-          semiMinorAxis: 500000,
+          semiMajorAxis: 500000, semiMinorAxis: 500000,
           material: Cesium.Color.fromCssColorString('#ef4444').withAlpha(0.12),
-          outline: true,
-          outlineColor: Cesium.Color.fromCssColorString('#ef4444').withAlpha(0.5),
-          outlineWidth: 2,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          outline: true, outlineColor: Cesium.Color.fromCssColorString('#ef4444').withAlpha(0.5),
+          outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         },
         label: {
-          text: 'Disasters Near Me',
-          font: '11px "JetBrains Mono"',
-          fillColor: Cesium.Color.WHITE,
-          outlineColor: Cesium.Color.BLACK,
-          outlineWidth: 2,
-          pixelOffset: new Cesium.Cartesian2(0, -18),
+          text: 'Disasters Near Me', font: '11px "JetBrains Mono"',
+          fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2, pixelOffset: new Cesium.Cartesian2(0, -18),
         },
-        properties: {
-          layer: 'disaster_near_me',
-          title: 'Disasters Near Me',
-          lat,
-          lon,
-          source,
-          time: Date.now(),
-        },
+        properties: { layer: 'disaster_near_me', title: 'Disasters Near Me', lat, lon, time: Date.now() },
       });
 
       entityStoreRef.current['disaster_near_me'] = [marker];
-      focusLocation(lat, lon, { label: 'Disasters Near Me', color: '#ef4444', height: 1000000 });
-      const nearby = findNearbyEvents(lat, lon, 500);
-      showNotification(
-        nearby.length > 0
-          ? `Found ${nearby.length} nearby events`
-          : 'No major events found nearby',
-        nearby.length > 0 ? 'warning' : 'success'
-      );
-      if (nearby.length > 0) {
-        setShowAI(true);
-        setAiMessages(prev => [...prev, {
-          role: 'assistant',
-          content: `📍 **Nearby Events**\n\n${nearby.map(e => `- ${e.title} (${e.distance.toFixed(0)} km)`).join('\n')}`,
-        }]);
+      v.scene.requestRender();
+      if (fly) {
+        focusLocation(lat, lon, { label: 'Disasters Near Me', color: '#ef4444', height: 1000000 });
       }
     };
 
-    if (disasterNearMeRequestedRef.current) return;
+    function startLocationWatch() {
+      if (geolocationWatchRef.current !== null) return;
+      const vv = viewerRef.current;
+      geolocationWatchRef.current = navigator.geolocation.watchPosition(
+        pos => {
+          if (!isLayerEnabled('disaster_near_me')) return;
+          const { latitude, longitude } = pos.coords;
+          lastKnownLocationRef.current = { lat: latitude, lon: longitude };
+          const existing = entityStoreRef.current['disaster_near_me'];
+          if (existing?.length) {
+            const marker = existing[0];
+            marker.position = Cesium.Cartesian3.fromDegrees(longitude, latitude, 5000) as any;
+            vv?.scene.requestRender();
+            const nearby = findNearbyEvents(latitude, longitude, 500);
+            if (nearby.length > 0) showNotification(`${nearby.length} nearby events`, 'info');
+          }
+        },
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 30000 },
+      );
+    }
 
+    if (disasterNearMeRequestedRef.current) return;
     disasterNearMeRequestedRef.current = true;
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         pos => {
-          if (!isLayerEnabled('disaster_near_me')) {
-            disasterNearMeRequestedRef.current = false;
-            return;
-          }
-          renderAt(pos.coords.latitude, pos.coords.longitude, 'geolocation');
+          if (!isLayerEnabled('disaster_near_me')) return;
+          clearDisasterNearMeOverlay();
+          renderAt(pos.coords.latitude, pos.coords.longitude, true);
+          startLocationWatch();
         },
         () => {
-          if (!isLayerEnabled('disaster_near_me')) {
-            disasterNearMeRequestedRef.current = false;
-            return;
-          }
-          const fallback = lastKnownLocationRef.current || getCameraFallbackLocation();
-          renderAt(fallback.lat, fallback.lon, 'fallback');
+          disasterNearMeRequestedRef.current = false;
+          showNotification('Location access denied. Enable location in browser settings.', 'warning');
         },
-        { enableHighAccuracy: true, timeout: 8000 }
+        { enableHighAccuracy: true, timeout: 10000 }
       );
     } else {
-      if (!isLayerEnabled('disaster_near_me')) {
-        disasterNearMeRequestedRef.current = false;
-        return;
-      }
-      const fallback = lastKnownLocationRef.current || getCameraFallbackLocation();
-      renderAt(fallback.lat, fallback.lon, 'fallback');
+      disasterNearMeRequestedRef.current = false;
+      showNotification('Geolocation not available in this browser.', 'warning');
     }
   }
 
@@ -1930,6 +2024,34 @@ export default function App() {
       setPopulationImpact(null);
     }
   }, []);
+
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+
+    // Clear old debris orbit lines
+    if (selectedDebrisOrbitEntityRef.current) {
+      v.entities.remove(selectedDebrisOrbitEntityRef.current);
+      selectedDebrisOrbitEntityRef.current = null;
+    }
+
+    if (!infoEntity) return;
+
+    const p = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+    if (p?.layer === 'space_debris') {
+      const orbitPositions = getDebrisOrbitPositions(p, v.clock.currentTime);
+      selectedDebrisOrbitEntityRef.current = v.entities.add({
+        polyline: {
+          positions: orbitPositions,
+          width: 2.0,
+          material: new Cesium.PolylineDashMaterialProperty({
+            color: Cesium.Color.fromCssColorString('#d8b4fe').withAlpha(0.75),
+            dashLength: 16,
+          }),
+        },
+      });
+    }
+  }, [infoEntity]);
 
   useEffect(() => {
     if (!viewerRef.current) return;
@@ -2168,13 +2290,17 @@ export default function App() {
     }
   }
 
+  const bulkOperationRef = useRef(false);
+
   function showNotification(text: string, severity: string) {
+    if (bulkOperationRef.current) return;
     const id = Date.now();
     setNotifications(prev => [...prev, { id, text, severity }]);
-    if (notificationTimeoutRef.current) clearTimeout(notificationTimeoutRef.current);
-    notificationTimeoutRef.current = setTimeout(() => {
+    const t = setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 3500);
+      try { delete notificationTimeoutsRef.current[id]; } catch { /* ignore */ }
+    }, 2000);
+    notificationTimeoutsRef.current[id] = t;
   }
 
   function recordFeedError(source: string, err?: unknown) {
@@ -2274,7 +2400,7 @@ export default function App() {
       const entityTime = new Date(props.time as number);
       const diff = Math.abs(entityTime.getTime() - time.getTime());
       const visible = diff < 3600000;
-      try { (entity as unknown as Record<string, unknown>).show = visible; } catch { /* ignore */ }
+      entity.show = visible;
     }
   }
 
@@ -2290,14 +2416,19 @@ export default function App() {
      IMAGERY
      ═════════════════════════════════════════════════════════════════ */
 
+  const imageryGenRef = useRef(0);
+
   const setImagery = useCallback((type: string) => {
     const v = viewerRef.current;
     if (!v) return;
     setActiveImagery(type);
     try {
       if (type === 'terrain') {
+        imageryGenRef.current += 1;
+        const gen = imageryGenRef.current;
         void (async () => {
           const enabled = await applyTerrainProvider(v, cesiumIonToken);
+          if (gen !== imageryGenRef.current) return;
           crossfadeImagery(v, 'terrain');
           showNotification(
             enabled ? '3D terrain enabled' : 'Terrain needs a Cesium ion token',
@@ -2307,34 +2438,12 @@ export default function App() {
         })();
         return;
       }
-      if (type === 'population') {
-        if (entityStoreRef.current['population_impact']?.length) {
-          setLayerEntitiesVisible('population_impact', true);
-        } else {
-          loadPopulationImpact(v);
-        }
-        setShowPopulationImpact(true);
-        v.scene.requestRender();
-        return;
-      }
-      if (type === 'temperature') {
-        v.scene.imageryLayers.removeAll();
-        v.scene.imageryLayers.addImageryProvider(new Cesium.WebMapServiceImageryProvider({
-          url: 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
-          layers: 'AIRS_L2_Surface_Air_Temperature_Daily_Day', parameters: { TRANSPARENT: 'true' },
-        }));
-        v.scene.requestRender();
-        return;
-      } else {
-        const mapType = type === 'night'
-          ? 'night'
-          : type === 'satellite'
-            ? 'satellite'
-            : type === 'dark'
-              ? 'dark'
-              : 'earth';
-        crossfadeImagery(v, mapType);
-      }
+      const mapType = type === 'satellite'
+        ? 'satellite'
+        : type === 'dark'
+          ? 'dark'
+          : 'earth';
+      crossfadeImagery(v, mapType);
     } catch (e) {
       console.error('Imagery error:', e);
     }
@@ -2376,15 +2485,20 @@ export default function App() {
       entityStoreRef.current['weather_cards'].push(marker);
     }
 
-    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code`)
+    weatherAbortRef.current?.abort();
+    const controller = new AbortController();
+    weatherAbortRef.current = controller;
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code`, { signal: controller.signal })
       .then(r => r.json())
       .then((data: {current: {temperature_2m:number;relative_humidity_2m:number;wind_speed_10m:number;weather_code:number}}) => {
+        if (controller.signal.aborted) return;
         const c = data.current;
         setWeatherCards(prev => prev.map(wc =>
           wc.id === id ? { ...wc, temp: c.temperature_2m, desc: getWeatherDesc(c.weather_code) } : wc
         ));
       })
       .catch(() => {
+        if (controller.signal.aborted) return;
         setWeatherCards(prev => prev.map(wc =>
           wc.id === id ? { ...wc, temp: 22, desc: 'Clear sky' } : wc
         ));
@@ -2413,17 +2527,27 @@ export default function App() {
       issEntityRef.current = null;
       setShowISSInfo(false);
       if (issTimerRef.current) clearInterval(issTimerRef.current);
+      issTimerRef.current = null;
+      if (issRenderTickRef.current) { issRenderTickRef.current(); issRenderTickRef.current = null; }
       return;
     }
 
     const trail = new Cesium.SampledPositionProperty();
+    trail.forwardExtrapolationType = Cesium.ExtrapolationType.EXTRAPOLATE;
+    trail.backwardExtrapolationType = Cesium.ExtrapolationType.EXTRAPOLATE;
     issTrailRef.current = trail;
     issTimesRef.current = [];
     setShowISSInfo(true);
 
+    // Keep the scene rendering every frame while ISS is active for smooth motion
+    issRenderTickRef.current = v.clock.onTick.addEventListener(() => {
+      if (issEntityRef.current) v.scene.requestRender();
+    });
+
     issTimerRef.current = setInterval(() => {
       apiGet<{ latitude: number; longitude: number }>('/iss')
         .then((data) => {
+          if (!issEntityRef.current && !issTrailRef.current) return;
           const pos = Cesium.Cartesian3.fromDegrees(data.longitude, data.latitude, 408000);
           const time = Cesium.JulianDate.now();
           trail.addSample(time, pos);
@@ -2434,20 +2558,20 @@ export default function App() {
 
           if (!issEntityRef.current) {
             issEntityRef.current = v.entities.add({
-              position: pos,
-              billboard: { image: createISSIcon(), width: 32, height: 32 },
+              position: trail,
+              billboard: { image: createISSIcon(), width: 40, height: 40 },
               label: { text: 'ISS', font: 'bold 11px "JetBrains Mono"', fillColor: Cesium.Color.WHITE,
                 pixelOffset: new Cesium.Cartesian2(0, -18) },
-              path: { leadTime: 0, trailTime: 300, width: 2,
-                material: Cesium.Color.fromCssColorString('#3b82f6').withAlpha(0.6),
-                resolution: 60 },
+              path: { leadTime: 0, trailTime: 600, width: 3,
+                material: Cesium.Color.fromCssColorString('#ffffff').withAlpha(0.5),
+                resolution: 120 },
             });
-            (issEntityRef.current.position as Cesium.SampledPositionProperty).setInterpolationOptions({
-              interpolationDegree: 5, interpolationAlgorithm: Cesium.LagrangePolynomialApproximation,
+            trail.setInterpolationOptions({
+              interpolationDegree: 1, interpolationAlgorithm: Cesium.LinearApproximation,
             });
           }
-          (issEntityRef.current.position as Cesium.SampledPositionProperty) = trail;
           setIssInfo({ lat: data.latitude, lon: data.longitude });
+          v.scene.requestRender();
         })
         .catch(() => {
           showNotification('ISS position feed unavailable', 'warning');
@@ -2457,16 +2581,53 @@ export default function App() {
 
   function createISSIcon(): HTMLCanvasElement {
     const canvas = document.createElement('canvas');
-    canvas.width = 32; canvas.height = 32;
+    canvas.width = 40; canvas.height = 40;
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#3b82f6';
+    const cx = 20, cy = 20;
+
+    // Outer glow
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 18);
+    glow.addColorStop(0, 'rgba(255,255,255,0.25)');
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, 40, 40);
+
+    // Solar panels (left)
+    ctx.fillStyle = '#78716c';
+    ctx.fillRect(4, 14, 7, 12);
+    ctx.fillStyle = '#a8a29e';
+    ctx.fillRect(5, 15, 5, 10);
+
+    // Solar panels (right)
+    ctx.fillStyle = '#78716c';
+    ctx.fillRect(29, 14, 7, 12);
+    ctx.fillStyle = '#a8a29e';
+    ctx.fillRect(30, 15, 5, 10);
+
+    // Satellite body
+    ctx.fillStyle = '#e5e5e5';
+    ctx.fillRect(14, 13, 12, 14);
+    ctx.fillStyle = '#d4d4d4';
+    ctx.fillRect(15, 14, 10, 12);
+
+    // Antenna dish
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(16, 16, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(59,130,246,0.3)';
+    ctx.arc(cx, 12, 3, Math.PI, 2 * Math.PI);
+    ctx.stroke();
     ctx.beginPath();
-    ctx.arc(16, 16, 12, 0, Math.PI * 2);
+    ctx.moveTo(cx - 3, 12);
+    ctx.lineTo(cx, 8);
+    ctx.lineTo(cx + 3, 12);
+    ctx.stroke();
+
+    // Blinking light (red)
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(cx, 10, 1.2, 0, Math.PI * 2);
     ctx.fill();
+
     return canvas;
   }
 
@@ -2580,17 +2741,28 @@ export default function App() {
 
   const toggleLayer = useCallback((layerId: string) => {
     setLayers(prev => {
-      const next = prev.map(l => l.id === layerId ? { ...l, on: !l.on } : l);
+      const wasOn = prev.find(l => l.id === layerId)?.on ?? false;
+      let next: LayerItem[];
+
+      if (wasOn) {
+        next = prev.map(l => l.id === layerId ? { ...l, on: false } : l);
+      } else {
+        next = prev.map(l => l.id === layerId ? { ...l, on: true } : l);
+      }
+
       layersRef.current = next;
+
       const updated = next.find(l => l.id === layerId);
       if (updated) {
         if (updated.on) { loadLayerData(updated.id); }
         else { hideLayerEntities(updated.id); }
         if (updated.type === 'tile') { setPulsingLayer(updated.id); setTimeout(() => setPulsingLayer(null), 600); }
       }
+
       if (['severe_storms', 'storm_forecast', 'wildfires', 'smoke_dispersion'].includes(layerId)) {
         refreshDerivedOverlays();
       }
+
       return next;
     });
   }, []);
@@ -2598,6 +2770,17 @@ export default function App() {
   function loadLayerData(layerId: string) {
     const v = viewerRef.current;
     if (!v) return;
+
+    // Helper: show existing entities for entity-based layers
+    const showExisting = (id: string) => {
+      const ents = entityStoreRef.current[id];
+      if (ents?.length) {
+        setLayerEntitiesVisible(id, true);
+        return true;
+      }
+      return false;
+    };
+
     if (layerId === 'population_impact') {
       loadPopulationImpact(v);
       setLayerEntitiesVisible('population_impact', true);
@@ -2616,15 +2799,52 @@ export default function App() {
       setShowAlertsPanel(true);
       entityStoreRef.current['disaster_alerts']?.forEach(e => { if (e) e.show = true; });
     } else if (layerId === 'india_cctv') {
-      void loadIndiaCctv(v);
+      if (!showExisting('india_cctv')) void loadIndiaCctv(v);
       return;
     } else if (layerId === 'storm_forecast' || layerId === 'smoke_dispersion') {
       refreshDerivedOverlays();
     } else if (layerId === 'disaster_near_me') {
       renderDisasterNearMeLayer();
     } else if (layerId === 'flight_tracks') {
-      void loadFlightTracks(v);
+      if (!showExisting('flight_tracks')) void loadFlightTracks(v);
       return;
+    } else if (layerId === 'space_debris') {
+      if (!showExisting('space_debris')) void loadSpaceDebris(v);
+      return;
+    } else if (layerId === 'nasa_dsn') {
+      if (!showExisting('nasa_dsn')) void loadNasaDsn(v);
+      return;
+    } else if (layerId === 'lightning_strikes') {
+      if (!showExisting('lightning_strikes')) void loadLightningStrikes(v);
+      return;
+    } else if (layerId === 'aurora_oval') {
+      if (!showExisting('aurora_oval')) void loadAuroraOval(v);
+      return;
+    } else if (layerId === 'submarine_cables') {
+      void loadSubmarineCables(v);
+      return;
+    } else if (layerId === 'electricity_grid') {
+      if (!showExisting('electricity_grid')) void loadElectricityGrid(v);
+      return;
+    } else if (layerId === 'animal_migrations') {
+      if (!showExisting('animal_migrations')) void loadAnimalMigrations(v);
+      return;
+    } else if (layerId === 'dt_buildings') {
+      loadOsmBuildings(v, cesiumIonToken).catch((e) => showNotification('3D Buildings failed to load: ' + (e?.message || e), 'error'));
+      return;
+    } else if (layerId === 'tectonic') {
+      showExisting('tectonic');
+    } else if (layerId === 'earthquakes') {
+      showExisting('earthquakes');
+    } else if (['wildfires','severe_storms','volcanoes','floods','dust','seaLakeIce'].includes(layerId)) {
+      showExisting(layerId);
+    } else if (layerId === 'airports') {
+      showExisting('airports');
+    } else if (layerId === 'space_weather') {
+      showExisting('space_weather');
+    } else if (layerId === 'tsunami') {
+      showExisting('tsunami');
+      setShowTsunamiLegend(true);
     } else {
       const wmsProvider = getNasaGibsProvider(layerId);
       if (wmsProvider) {
@@ -2635,15 +2855,16 @@ export default function App() {
           overlayImageryLayersRef.current[layerId] = imgLayer;
         }
       } else {
-        if (layerId === 'airspaces' && !entityStoreRef.current['airspaces']) {
+        if (layerId === 'airspaces' && !entityStoreRef.current['airspaces']?.length) {
           loadAirspaces(v)
             .then(entities => {
+              if (!isLayerEnabled('airspaces')) return;
               entityStoreRef.current['airspaces'] = entities;
               setLayerEntitiesVisible('airspaces', true);
             })
             .catch(err => showNotification('Failed to load real airspaces', 'error'));
-        } else if (layerId === 'ais_vessels' && !entityStoreRef.current['ais_vessels']) {
-          const key = apiVault.aisStreamApiKey;
+        } else if (layerId === 'ais_vessels' && !entityStoreRef.current['ais_vessels']?.length) {
+          const key = apiVaultRef.current.aisStreamApiKey;
           if (!key) {
             showNotification('AISStream API Key required. Add it in settings.', 'warning');
             setTimeout(() => toggleLayer('ais_vessels'), 10);
@@ -2651,6 +2872,7 @@ export default function App() {
             showNotification('Connecting to live AIS stream...', 'info');
             loadAisVessels(v, key)
               .then(entities => {
+                if (!isLayerEnabled('ais_vessels')) return;
                 entityStoreRef.current['ais_vessels'] = entities;
                 setLayerEntitiesVisible('ais_vessels', true);
                 showNotification(`Loaded ${entities.length} live vessels`, 'success');
@@ -2659,14 +2881,33 @@ export default function App() {
           }
         } else if (entityStoreRef.current[layerId]?.length) {
           setLayerEntitiesVisible(layerId, true);
-          if (layerId === 'tsunami') setShowTsunamiLegend(true);
         }
       }
     }
-    showNotification(`${layerId} enabled`, 'success');
   }
 
   function hideLayerEntities(layerId: string) {
+    // Remove data source layers (submarine_cables, airspaces) properly
+    const v = viewerRef.current;
+    if (layerId === 'submarine_cables' && submarineCablesDataSourceRef.current) {
+      if (v) v.dataSources.remove(submarineCablesDataSourceRef.current, true);
+      submarineCablesDataSourceRef.current = null;
+      entityStoreRef.current['submarine_cables'] = [];
+    }
+    if (layerId === 'airspaces' && v) {
+      // Remove airspace entities that were added directly to viewer.entities
+      const ents = entityStoreRef.current['airspaces'];
+      if (ents) { ents.forEach(e => v.entities.remove(e)); }
+      // Also try data source removal (legacy path)
+      for (let i = v.dataSources.length - 1; i >= 0; i--) {
+        const ds = v.dataSources.get(i);
+        if (ds.name === 'airspaces' || (ds as any)._name === 'airspaces') {
+          v.dataSources.remove(ds, true);
+        }
+      }
+      entityStoreRef.current['airspaces'] = [];
+    }
+
     setLayerEntitiesVisible(layerId, false);
     
     setIntelFeed(prev => {
@@ -2676,7 +2917,9 @@ export default function App() {
         'severe_storms': ['severe_storms', 'storm'],
         'volcanoes': ['volcanoes', 'volcano'],
         'floods': ['floods', 'flood'],
-        'natural_events': ['fire', 'drought', 'dust', 'ice', 'landslide', 'manmade', 'seaLakeIce', 'snow', 'tempExtremes', 'waterColor'],
+        'dust': ['dust', 'dustHaze'],
+        'landslides': ['landslides', 'landslide'],
+        'seaLakeIce': ['seaLakeIce', 'ice'],
         'space_weather': ['space_weather'],
         'intel_feed': ['news', 'social', 'twitter', 'facebook']
       };
@@ -2688,13 +2931,11 @@ export default function App() {
     });
     
     if (overlayImageryLayersRef.current[layerId]) {
-      const v = viewerRef.current;
       if (v) v.scene.imageryLayers.remove(overlayImageryLayersRef.current[layerId], true);
       delete overlayImageryLayersRef.current[layerId];
     }
 
     if (layerId === 'population_impact') {
-      const v = viewerRef.current;
       if (v) populationImpactLayerRef.current.forEach(e => v.entities.remove(e));
       populationImpactLayerRef.current = [];
       setShowPopulationImpact(false);
@@ -2711,7 +2952,6 @@ export default function App() {
       clearSmokeDispersionOverlays();
     }
     if (layerId === 'tsunami') {
-      const v = viewerRef.current;
       if (v) tsunamiWavesRef.current.forEach(e => v.entities.remove(e));
       tsunamiWavesRef.current = [];
       entityStoreRef.current['tsunami'] = [];
@@ -2731,11 +2971,31 @@ export default function App() {
       }
     }
     if (layerId === 'disaster_near_me') {
+      if (geolocationWatchRef.current !== null) {
+        navigator.geolocation.clearWatch(geolocationWatchRef.current);
+        geolocationWatchRef.current = null;
+      }
       clearDisasterNearMeOverlay();
       disasterNearMeRequestedRef.current = false;
     }
     if (layerId === 'flight_tracks') {
       flightDrRef.current?.clear();
+    }
+    if (layerId === 'weather_cards' && v) {
+      const ents = entityStoreRef.current['weather_cards'];
+      if (ents) { ents.forEach(e => v.entities.remove(e)); entityStoreRef.current['weather_cards'] = []; }
+      setWeatherCards([]);
+    }
+    if (layerId === 'seismic_waves') {
+      const v2 = viewerRef.current;
+      seismicAnimationsRef.current.forEach(a => {
+        if (a.interval) clearInterval(a.interval);
+        if (v2) { if (a.pEnt) v2.entities.remove(a.pEnt); if (a.sEnt) v2.entities.remove(a.sEnt); if (a.surfEnt) v2.entities.remove(a.surfEnt); }
+      });
+      seismicAnimationsRef.current = [];
+    }
+    if (layerId === 'dt_buildings') {
+      hideOsmBuildings();
     }
   }
 
@@ -2897,6 +3157,137 @@ export default function App() {
     }
   }
 
+  async function loadSpaceDebris(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['space_debris'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('space_debris', true);
+      return;
+    }
+    try {
+      const data = await apiGet<any[]>('/space-debris');
+      if (!isLayerEnabled('space_debris')) return;
+      const ents = addSpaceDebrisEntities(viewer, data);
+      entityStoreRef.current['space_debris'] = ents;
+      viewer.scene.requestRender();
+      showNotification(`Loaded ${ents.length} space debris objects`, 'success');
+    } catch (err) {
+      recordFeedError('space debris', err);
+      showNotification('Space debris feed unavailable', 'warning');
+    }
+  }
+
+  async function loadNasaDsn(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['nasa_dsn'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('nasa_dsn', true);
+      return;
+    }
+    try {
+      const data = await apiGet<any>('/nasa-dsn');
+      if (!isLayerEnabled('nasa_dsn')) return;
+      const ents = addNasaDsnEntities(viewer, data);
+      entityStoreRef.current['nasa_dsn'] = ents;
+      viewer.scene.requestRender();
+      showNotification('NASA Deep Space Network active', 'success');
+    } catch (err) {
+      recordFeedError('nasa dsn', err);
+      showNotification('NASA DSN feed unavailable', 'warning');
+    }
+  }
+
+  async function loadLightningStrikes(viewer: Cesium.Viewer) {
+    removeLayerEntities('lightning_strikes');
+    try {
+      const data = await apiGet<any[]>('/lightning');
+      if (!isLayerEnabled('lightning_strikes')) return;
+      const ents = addLightningEntities(viewer, data);
+      entityStoreRef.current['lightning_strikes'] = ents;
+      viewer.scene.requestRender();
+      if (ents.length > 0) {
+        showNotification(`Loaded ${ents.length} live lightning strikes`, 'success');
+      }
+    } catch (err) {
+      recordFeedError('lightning strikes', err);
+    }
+  }
+
+  async function loadAuroraOval(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['aurora_oval'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('aurora_oval', true);
+      return;
+    }
+    try {
+      const data = await apiGet<any>('/aurora');
+      if (!isLayerEnabled('aurora_oval')) return;
+      const ents = addAuroraEntities(viewer, data);
+      entityStoreRef.current['aurora_oval'] = ents;
+      viewer.scene.requestRender();
+      showNotification('Polar auroral oval loaded', 'success');
+    } catch (err) {
+      recordFeedError('aurora', err);
+      showNotification('Aurora forecast unavailable', 'warning');
+    }
+  }
+
+  async function loadSubmarineCables(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['submarine_cables'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('submarine_cables', true);
+      return;
+    }
+    try {
+      const data = await apiGet<any>('/submarine-cables');
+      if (!isLayerEnabled('submarine_cables')) return;
+      const ds = await loadSubmarineCablesDataSource(viewer, data);
+      submarineCablesDataSourceRef.current = ds;
+      entityStoreRef.current['submarine_cables'] = [...ds.entities.values];
+      viewer.scene.requestRender();
+      showNotification('Undersea fiber cables loaded', 'success');
+    } catch (err) {
+      recordFeedError('submarine cables', err);
+      showNotification('Submarine cables feed unavailable', 'warning');
+    }
+  }
+
+  async function loadElectricityGrid(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['electricity_grid'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('electricity_grid', true);
+      return;
+    }
+    try {
+      const data = await apiGet<any[]>('/electricity-grid');
+      if (!isLayerEnabled('electricity_grid')) return;
+      const ents = addElectricityGridEntities(viewer, data);
+      entityStoreRef.current['electricity_grid'] = ents;
+      viewer.scene.requestRender();
+      showNotification('Global grid footprint loaded', 'success');
+    } catch (err) {
+      recordFeedError('electricity grid', err);
+      showNotification('Electricity grid feed unavailable', 'warning');
+    }
+  }
+
+  async function loadAnimalMigrations(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['animal_migrations'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('animal_migrations', true);
+      return;
+    }
+    try {
+      const data = await apiGet<any[]>('/animal-migrations');
+      if (!isLayerEnabled('animal_migrations')) return;
+      const ents = addAnimalMigrationEntities(viewer, data);
+      entityStoreRef.current['animal_migrations'] = ents;
+      viewer.scene.requestRender();
+      showNotification('Wildlife migration paths loaded', 'success');
+    } catch (err) {
+      recordFeedError('animal migrations', err);
+      showNotification('Wildlife migrations feed unavailable', 'warning');
+    }
+  }
+
   function generateHeatmap(viewer: Cesium.Viewer) {
     if (activeHeatmapRef.current) return;
     const eqs = entityStoreRef.current['earthquakes'];
@@ -2940,25 +3331,20 @@ export default function App() {
 
   function getNasaGibsProvider(layerId: string) {
     const layerMap: Record<string, string> = {
-      temp_anomaly: 'AIRS_L2_Surface_Air_Temperature_Daily_Day',
+      temp_anomaly: 'AIRS_L2_Surface_Air_Temperature_Day',
       precipitation: 'IMERG_Precipitation_Rate',
-      wind: 'SMAP_L3_Wind_Speed_Daily_Day',
-      pressure: 'MERRA2_Sea_Level_Pressure_Daily',
-      sea_ice: 'MODIS_Terra_Sea_Ice_Extent_Daily',
-      wave_height: 'GHRSST_L4_MUR_Sea_Surface_Temperature', // Visual substitute
-      ocean_currents: 'GHRSST_L4_MUR_Sea_Surface_Temperature', // Visual substitute
+      wind: 'CYGNSS_L3_Wind_Speed_Daily',
+      pressure: 'MERRA2_Surface_Pressure_Monthly',
+      sea_ice: 'MODIS_Terra_Sea_Ice',
       sea_temp: 'GHRSST_L4_MUR_Sea_Surface_Temperature',
       nasa_gibs: 'MODIS_Terra_CorrectedReflectance_TrueColor',
-      sentinel_hub: 'MODIS_Terra_CorrectedReflectance_TrueColor', // Free proxy
-      night_lights: 'VIIRS_CityLights_2012',
-      land_cover: 'MODIS_MCD12Q1_Majority_Land_Cover_Type_1',
-      aerosol_index: 'OMPS_Aerosol_Index_Daily_Day',
-      so2_index: 'AURA_OMI_SO2_Lower_Troposphere',
-      co_index: 'MOPITT_Carbon_Monoxide_Total_Column_Daily_Day',
-      dust_score: 'MODIS_Terra_Aerosol_Optical_Depth_Average',
-      ground_deformation: 'VIIRS_SNPP_Thermal_Anomalies_375m_Day', 
-      flood_extent: 'MODIS_Terra_Flood_Water_Daily', 
-      burn_scars: 'MODIS_Terra_Thermal_Anomalies_Day',
+      night_lights: 'VIIRS_Black_Marble',
+      land_cover: 'MODIS_Combined_L3_IGBP_Land_Cover_Type_Annual',
+      aerosol_index: 'OMPS_Aerosol_Index',
+      so2_index: 'OMPS_NOAA20_SO2_Lower_Troposphere',
+      co_index: 'MOPITT_CO_Daily_Total_Column_Day',
+      dust_score: 'MODIS_Terra_Aerosol',
+      flood_extent: 'MODIS_Combined_Flood_1-Day',
     };
     
     const wmsLayer = layerMap[layerId];
@@ -2990,73 +3376,130 @@ export default function App() {
     layersRef.current = next;
     setLayers(next);
 
+    renderSchedulerRef.current.reset();
+    bulkOperationRef.current = true;
+    setNotifications([]);
+    try { Object.values(notificationTimeoutsRef.current).forEach(t => clearTimeout(t)); } catch { /* ignore */ }
+    notificationTimeoutsRef.current = {};
+
     if (state) {
-      // Stagger enabling layer visibility to prevent CPU lockups / rendering lag spikes
-      let delay = 0;
-      for (const key of Object.keys(entityStoreRef.current)) {
-        const ents = entityStoreRef.current[key];
-        if (!ents || ents.length === 0) continue;
-        setTimeout(() => {
-          // Verify user hasn't turned off layers or clicked disable in the meantime
-          if (layersRef.current.find(l => l.id === key)?.on) {
-            ents.forEach(e => { if (e) e.show = true; });
-          }
-        }, delay);
-        delay += 30; // 30ms spacing between layer updates
+      const v = viewerRef.current;
+
+      // Phase 1 (sync): immediately show any layers that already have loaded data
+      const needsLoad: string[] = [];
+      for (const l of layersRef.current) {
+        const id = l.id;
+        const ents = entityStoreRef.current[id];
+        if (ents && ents.length > 0) {
+          ents.forEach(e => { if (e) e.show = true; });
+        } else if (overlayImageryLayersRef.current[id]) {
+          // imagery already loaded, visible by default
+        } else {
+          needsLoad.push(id);
+        }
       }
 
-      const v = viewerRef.current;
+      // Phase 2 (async): only queue layers that genuinely need data loading
+      if (needsLoad.length > 0) {
+        const tasks = needsLoad.map(id => ({
+          id: `enable:${id}`,
+          execute: () => {
+            if (!layersRef.current.find(x => x.id === id)?.on) return;
+            try { loadLayerData(id); } catch (e) { /* ignore */ }
+          },
+        }));
+        let notified = false;
+        renderSchedulerRef.current.onProgress((done, total) => {
+          if (done >= total && !notified) {
+            notified = true;
+            if (v) v.scene.requestRender();
+            bulkOperationRef.current = false;
+            showNotification(`All layers enabled (${layersRef.current.length})`, 'success');
+          }
+        });
+        renderSchedulerRef.current.enqueueAll(tasks);
+      } else {
+        bulkOperationRef.current = false;
+        if (v) v.scene.requestRender();
+        showNotification(`All layers enabled (${layersRef.current.length})`, 'success');
+      }
+
       if (v) void loadFlightTracks(v);
     } else {
-      // Hide all layer entities and clean up their specific overlay/state configurations
-      layersRef.current.forEach(l => {
-        hideLayerEntities(l.id);
-      });
+      // Disable all in one synchronous sweep — no GPU spikes
+      bulkOperationRef.current = true;
 
-      // Clear any pending/active flight dead reckoning
+      const v = viewerRef.current;
+
+      if (v) {
+        // Suspend entity events during bulk hide to prevent per-entity callbacks
+        try { v.entities.suspendEvents(); } catch { /* ignore */ }
+      }
+      layersRef.current.forEach(l => { hideLayerEntities(l.id); });
+      if (v) {
+        try { v.entities.resumeEvents(); } catch { /* ignore */ }
+      }
+
       flightDrRef.current?.clear();
 
-      // Dismiss the selected entity info panel and tracking
       setInfoEntity(null);
       entityTrackerRef.current?.untrack();
 
-      const v = viewerRef.current;
       if (v && focusMarkerRef.current) {
         v.entities.remove(focusMarkerRef.current);
         focusMarkerRef.current = null;
       }
 
-      // Clear all active notification popups immediately
+      if (v) {
+        try {
+          v.scene.imageryLayers.removeAll(true);
+          addBaseImagery(v, activeImagery, true);
+        } catch (e) { /* ignore */ }
+        overlayImageryLayersRef.current = {};
+      }
+
       setNotifications([]);
+      try {
+        Object.values(notificationTimeoutsRef.current).forEach(t => clearTimeout(t));
+      } catch (e) { /* ignore */ }
+      notificationTimeoutsRef.current = {};
 
       setShowIntelFeed(false);
       setShowAlertsPanel(false);
       setShowPopulationImpact(false);
+      const wcEnts = entityStoreRef.current['weather_cards'];
+      if (wcEnts) { wcEnts.forEach(e => v?.entities.remove(e)); entityStoreRef.current['weather_cards'] = []; }
+      setWeatherCards([]);
       setShowHeatmapLegend(false);
       setShowStormLegend(false);
       setShowSmokeLegend(false);
       setShowTsunamiLegend(false);
       disasterNearMeRequestedRef.current = false;
+      if (geolocationWatchRef.current !== null) {
+        navigator.geolocation.clearWatch(geolocationWatchRef.current);
+        geolocationWatchRef.current = null;
+      }
+
+      if (v) v.scene.requestRender();
+      bulkOperationRef.current = false;
+      showNotification(`All layers disabled`, 'success');
     }
     refreshDerivedOverlays();
   }, []);
 
   const enableDefaultLayers = useCallback(() => {
-    const next = layersRef.current.map(l => ({ ...l, on: l.default }));
+    const prevLayers = layersRef.current;
+    const next = prevLayers.map(l => ({ ...l, on: l.default }));
     layersRef.current = next;
     setLayers(next);
-    for (const layer of next) {
-      const ents = entityStoreRef.current[layer.id];
-      if (ents) ents.forEach(e => { if (e) e.show = layer.on; });
-    }
-    if (!next.find(l => l.id === 'intel_feed' && l.on)) {
-      setShowIntelFeed(false);
-    }
-    if (!next.find(l => l.id === 'disaster_alerts' && l.on)) {
-      setShowAlertsPanel(false);
-    }
-    if (!next.find(l => l.id === 'disaster_near_me' && l.on)) {
-      disasterNearMeRequestedRef.current = false;
+    for (const prev of prevLayers) {
+      const wasOn = prev.on;
+      const isOn = prev.default;
+      if (wasOn && !isOn) {
+        hideLayerEntities(prev.id);
+      } else if (!wasOn && isOn) {
+        loadLayerData(prev.id);
+      }
     }
     refreshDerivedOverlays();
   }, [layers]);
@@ -3069,7 +3512,7 @@ export default function App() {
     if (!aiInput.trim()) return;
     const userMsg = aiInput.trim();
     setAiInput('');
-    setAiMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: userMsg }]);
     setAiTyping(true);
 
     const location = extractLocation(userMsg);
@@ -3078,10 +3521,10 @@ export default function App() {
 
     try {
       const response = await callAI(userMsg, location);
-      setAiMessages(prev => [...prev, { role: 'assistant', content: response }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: response }]);
     } catch {
       const fallback = generateLocalResponse(userMsg, location);
-      setAiMessages(prev => [...prev, { role: 'assistant', content: fallback }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: fallback }]);
     }
     setAiTyping(false);
   }, [aiInput, apiVault, aiApiType]);
@@ -3113,19 +3556,19 @@ export default function App() {
   function executeCommand(cmd: string, loc: { lat: number; lon: number } | null) {
     if (cmd === 'flyTo' && loc) {
       focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 150 });
-      setAiMessages(prev => [...prev, { role: 'assistant', content: `Flew to coordinates ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Flew to coordinates ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` }]);
     } else if (cmd === 'weather' && loc) {
       focusLocation(loc.lat, loc.lon, { label: 'Weather request', color: '#22d3ee', height: 150 });
       addWeatherCard(loc.lat, loc.lon);
-      setAiMessages(prev => [...prev, { role: 'assistant', content: 'Weather data displayed on the globe.' }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Weather data displayed on the globe.' }]);
     } else if (cmd === 'earthquakes') {
-      setAiMessages(prev => [...prev, { role: 'assistant', content: 'Showing recent earthquakes. Use the sidebar to toggle seismic data layers.' }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Showing recent earthquakes. Use the sidebar to toggle seismic data layers.' }]);
     } else if (cmd === 'population') {
       setLayers(prev => prev.map(l => l.id === 'population_impact' ? { ...l, on: true } : l));
       loadLayerData('population_impact');
-      setAiMessages(prev => [...prev, { role: 'assistant', content: 'Population impact zones displayed on the globe.' }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Population impact zones displayed on the globe.' }]);
     } else {
-      setAiMessages(prev => [...prev, { role: 'assistant', content: `Command recognized: ${cmd}. Executing...` }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Command recognized: ${cmd}. Executing...` }]);
     }
   }
 
@@ -3146,10 +3589,10 @@ export default function App() {
     } else if (aiApiType === 'gemini') {
       const geminiKey = apiVault.gemini.trim();
       if (!geminiKey) return generateLocalResponse(message, location);
-      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+      const resp = await fetch('/api/ai/gemini', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: `${locationContext}${message}` }] }] }),
+        body: JSON.stringify({ key: geminiKey, prompt: `${locationContext}${message}` }),
       });
       if (!resp.ok) throw new Error(`Gemini request failed (${resp.status})`);
       const data = await resp.json();
@@ -3185,7 +3628,7 @@ export default function App() {
       focusLocation(cm.lat, cm.lon, { label: 'Context location', color: '#60a5fa', height: 150 });
     } else if (action === 'pin') {
       const pinId = `pin_${Date.now()}`;
-      v.entities.add({
+      const added = v.entities.add({
         position: Cesium.Cartesian3.fromDegrees(cm.lon, cm.lat),
         name: 'Dropped Pin',
         billboard: { image: createPinIcon('#ef4444'), width: 24, height: 24,
@@ -3194,14 +3637,16 @@ export default function App() {
           font: '11px "JetBrains Mono"', fillColor: Cesium.Color.WHITE,
           pixelOffset: new Cesium.Cartesian2(0, -14) },
         properties: { layer: 'pin', lat: cm.lat, lon: cm.lon, id: pinId },
-      });
+      }) as Cesium.Entity;
+      entityStoreRef.current.pin = [...(entityStoreRef.current.pin ?? []), added];
+      setInfoEntity(added);
       showNotification('Pin dropped', 'success');
     } else if (action === 'weather') {
       focusLocation(cm.lat, cm.lon, { label: 'Weather request', color: '#22d3ee', height: 150 });
       addWeatherCard(cm.lat, cm.lon);
     } else if (action === 'events') {
       const nearby = findNearbyEvents(cm.lat, cm.lon, 200);
-      setAiMessages(prev => [...prev, { role: 'assistant',
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant',
         content: `📍 **Events near ${cm.lat.toFixed(2)}, ${cm.lon.toFixed(2)}**\n\n${nearby.length > 0 ? nearby.map(e => `- ${e.title} (${e.distance.toFixed(0)}km)`).join('\n') : 'No recent events found within 200km.'}` }]);
       setShowAI(true);
     }
@@ -3369,15 +3814,19 @@ export default function App() {
   const cleanupCesium = useCallback(() => {
     if (clockIntervalRef.current) clearInterval(clockIntervalRef.current);
     if (issTimerRef.current) clearInterval(issTimerRef.current);
+    if (issRenderTickRef.current) { issRenderTickRef.current(); issRenderTickRef.current = null; }
     if (rotateTimerRef.current) clearInterval(rotateTimerRef.current);
     if (timelineRef.current.interval) clearInterval(timelineRef.current.interval);
     if (autoRefreshIntervalRef.current) clearInterval(autoRefreshIntervalRef.current);
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchAbortRef.current?.abort();
+    weatherAbortRef.current?.abort();
     if (screenSpaceHandlerRef.current) screenSpaceHandlerRef.current.destroy();
     seismicAnimationsRef.current.forEach(a => { if (a.interval) clearInterval(a.interval); });
+    seismicAnimationsRef.current = [];
     if (clickHandlerRef.current) clickHandlerRef.current();
     if (viewerRef.current) {
+      removeOsmBuildings(viewerRef.current);
       viewerRef.current.entities.removeAll();
       viewerRef.current.destroy();
       viewerRef.current = null;
@@ -3393,6 +3842,10 @@ export default function App() {
     flightDrRef.current = null;
     Object.keys(alertEntityRef.current).forEach(key => { delete alertEntityRef.current[key]; });
     disasterNearMeRequestedRef.current = false;
+    if (geolocationWatchRef.current !== null) {
+      navigator.geolocation.clearWatch(geolocationWatchRef.current);
+      geolocationWatchRef.current = null;
+    }
     lastKnownLocationRef.current = null;
   }, []);
 
@@ -3404,237 +3857,313 @@ export default function App() {
     if (!infoEntity) return null;
     const p = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
     if (!p) return null;
-    if (p.layer === 'flight_tracks') {
-      const altFeet = (Number(p.altitude ?? 0) * 3.28084).toFixed(0);
-      const speedKts = (Number(p.velocity ?? 0) * 1.94384).toFixed(0);
-      const speedKmh = (Number(p.velocity ?? 0) * 3.6).toFixed(0);
-      return (
-        <>
-          <div className="info-header">
-            <div className="info-type-dot" style={{background:'#a855f7'}} />
-            <div className="info-title">✈️ Flight {String(p.callsign ?? 'Unknown')}</div>
-            <button className="info-close" onClick={() => setInfoEntity(null)}>✕</button>
-          </div>
-          <div className="info-body">
-            <div className="info-row">
-              <span className="info-key">Flight Name</span>
-              <span className="info-val" style={{fontWeight: 600, color: '#c084fc'}}>{String(p.callsign ?? 'Unknown')}</span>
-            </div>
-            <div className="info-row">
-              <span className="info-key">ICAO Address</span>
-              <span className="info-val" style={{fontFamily:'monospace'}}>{String(p.icao24 ?? 'N/A').toUpperCase()}</span>
-            </div>
-            <div className="info-row">
-              <span className="info-key">Altitude</span>
-              <span className="info-val">{Number(p.altitude).toFixed(0)} m ({altFeet} ft)</span>
-            </div>
-            <div className="info-row">
-              <span className="info-key">Speed</span>
-              <span className="info-val">{speedKmh} km/h ({speedKts} kts)</span>
-            </div>
-            <div className="info-row">
-              <span className="info-key">Heading</span>
-              <span className="info-val">{Number(p.heading).toFixed(0)}°</span>
-            </div>
-            {p.lat != null && p.lon != null && (
-              <div className="info-row">
-                <span className="info-key">Coordinates</span>
-                <span className="info-val">{Number(p.lat).toFixed(4)}, {Number(p.lon).toFixed(4)}</span>
-              </div>
-            )}
-          </div>
-        </>
-      );
-    }
 
-    if (p.layer === 'earthquakes' || p.magnitude) {
-      const mag = Number(p.magnitude ?? 0);
-      return (
-        <>
-          <div className="info-header">
-            <div className="info-type-dot" style={{background:'#ef4444'}} />
-            <div className="info-title">M{mag.toFixed(1)} Earthquake</div>
-            <button className="info-close" onClick={() => setInfoEntity(null)}>✕</button>
-          </div>
-          <div className="info-body">
-            <div className="info-row"><span className="info-key">Location</span><span className="info-val">{String(p.place ?? '')}</span></div>
-            <div className="info-row"><span className="info-key">Magnitude</span><span className="info-val">M{mag.toFixed(1)}</span></div>
-            <div className="info-row"><span className="info-key">Depth</span><span className="info-val">{String(p.depth ?? 'N/A')} km</span></div>
-            <div className="info-row"><span className="info-key">Time</span><span className="info-val">{new Date(Number(p.time ?? 0)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium' })} IST</span></div>
-            <div className="info-row"><span className="info-key">Coordinates</span><span className="info-val">{Number(p.lat ?? 0).toFixed(4)}, {Number(p.lon ?? 0).toFixed(4)}</span></div>
-            {Number(p.magnitude ?? 0) >= 4 && (
-              <div className="sparkline-wrap">
-                <div className="sparkline-title">Seismic Wave Propagation</div>
-                <div style={{fontSize:10,color:'var(--text-dim)',marginBottom:6}}>
-                  P-wave (red) → S-wave (blue) → Surface wave (orange)
-                </div>
-                <div style={{display:'flex',gap:8,fontSize:10,color:'var(--text-dim)'}}>
-                  <span style={{color:'#ef4444'}}>● P-wave (fastest)</span>
-                  <span style={{color:'#3b82f6'}}>● S-wave</span>
-                  <span style={{color:'#f97316'}}>● Surface (slowest)</span>
-                </div>
-              </div>
-            )}
-            {populationImpact && (
-              <div className="sparkline-wrap">
-                <div className="sparkline-title">Population Impact</div>
-                {populationImpact.cities.map((c, i) => (
-                  <div key={i} className="pop-impact-row">
-                    <span className="pop-impact-key">{c.name} ({c.country})</span>
-                    <span className={`pop-impact-val ${populationImpact.severity}`}>{c.pop}M</span>
-                  </div>
-                ))}
-                <div className="pop-impact-row" style={{marginTop:8,borderTop:'1px solid var(--border)',paddingTop:6}}>
-                  <span className="pop-impact-key">Total Population</span>
-                  <span className={`pop-impact-val ${populationImpact.severity}`}>{populationImpact.totalPop.toFixed(1)}M</span>
-                </div>
-                <div className="pop-gradient" style={{marginTop:6}} />
-                <div className="heatmap-labels"><span>Low</span><span>Medium</span><span>High</span></div>
-              </div>
-            )}
-          </div>
-        </>
-      );
-    }
+    const layer = p.layer as string;
+    const title = String(p.title ?? p.name ?? p.callsign ?? infoEntity.name ?? 'Event');
+    const color = getEventColor(layer);
+    const px = p as any;
+    const hasCoords = p.lat != null && p.lon != null;
+    const lat = hasCoords ? Number(p.lat) : 0;
+    const lon = hasCoords ? Number(p.lon) : 0;
 
-    if ((p.layer === 'severe_storms' || p.layer === 'storm_forecast') && (stormForecast || p.stormTrack)) {
-      const forecastTrack = (stormForecast?.track as Array<{ time: string; lat: number; lon: number }> | undefined)
-        ?? (p.stormTrack as Array<{ time: string; lat: number; lon: number }> | undefined)
-        ?? [];
-      const heading = stormForecast?.heading ?? Number(p.heading ?? 0);
-      const speedKmh = stormForecast?.speedKmh ?? Number(p.speedKmh ?? 0);
-      const pressure = stormForecast?.pressure ?? Number(p.pressure ?? 0);
-      return (
-        <>
-          <div className="info-header">
-            <div className="info-type-dot" style={{background:'#a855f7'}} />
-            <div className="info-title">{String(p.title ?? 'Storm')}</div>
-            <button className="info-close" onClick={() => setInfoEntity(null)}>✕</button>
-          </div>
-          <div className="info-body">
-            <div className="info-row"><span className="info-key">Wind Speed</span><span className="info-val">{String(p.windSpeed ?? 'N/A')} mph</span></div>
-            <div className="info-row"><span className="info-key">Pressure</span><span className="info-val">{pressure.toFixed(0)} mb</span></div>
-            <div className="info-row"><span className="info-key">Heading</span><span className="info-val">{heading.toFixed(0)}°</span></div>
-            <div className="info-row"><span className="info-key">Forward Speed</span><span className="info-val">{speedKmh.toFixed(1)} km/h</span></div>
-            <div className="sparkline-wrap">
-              <div className="sparkline-title">Forecast Track</div>
-              {forecastTrack.map((pt, i) => (
-                <div key={i} className="storm-track-point">
-                  <div className="storm-track-dot" />
-                  <span style={{fontSize:11,fontWeight:500}}>{pt.time}</span>
-                  <span className="storm-track-date">{pt.lat.toFixed(1)}°, {pt.lon.toFixed(1)}°</span>
-                </div>
-              ))}
-            </div>
-            <div className="sparkline-wrap">
-              <div className="sparkline-title">Storm Cone Legend</div>
-              <div style={{display:'flex',flexDirection:'column',gap:4,fontSize:10}}>
-                <div className="legend-row"><div className="legend-color" style={{background:'rgba(168,85,247,0.3)'}}/><span>24h forecast (narrowest)</span></div>
-                <div className="legend-row"><div className="legend-color" style={{background:'rgba(168,85,247,0.2)'}}/><span>48h forecast</span></div>
-                <div className="legend-row"><div className="legend-color" style={{background:'rgba(168,85,247,0.1)'}}/><span>72h forecast (widest)</span></div>
-                <div className="legend-row"><div className="legend-color" style={{background:'rgba(168,85,247,0.4)'}}/><span>Projected track</span></div>
-              </div>
-            </div>
-          </div>
-        </>
-      );
-    }
+    const closeInfoPanel = () => {
+      const v = viewerRef.current;
+      const selectedProps = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+      const selectedLayer = String(selectedProps?.layer ?? '');
+      const selectedLat = Number(selectedProps?.lat);
+      const selectedLon = Number(selectedProps?.lon);
 
-    if (p.layer === 'india_cctv') {
-      const previewBase = String(p.previewUrl ?? p.thumbnailUrl ?? p.streamUrl ?? p.pageUrl ?? '');
-      const previewUrl = previewBase
-        ? `${previewBase}${previewBase.includes('?') ? '&' : '?'}tick=${cctvPreviewTick}`
-        : '';
+      if (v && focusMarkerRef.current) {
+        v.entities.remove(focusMarkerRef.current);
+        focusMarkerRef.current = null;
+      }
+
+      if (v && (selectedLayer === 'pin' || selectedLayer === 'focus')) {
+        const pins = entityStoreRef.current.pin ?? [];
+        entityStoreRef.current.pin = pins.filter((pin) => {
+          const pinProps = pin.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+          const pinLat = Number(pinProps?.lat);
+          const pinLon = Number(pinProps?.lon);
+          const isMatch = Number.isFinite(selectedLat) && Number.isFinite(selectedLon)
+            && Math.abs(pinLat - selectedLat) < 0.000001
+            && Math.abs(pinLon - selectedLon) < 0.000001;
+          if (isMatch) {
+            v.entities.remove(pin);
+          }
+          return !isMatch;
+        });
+      }
+
+      if (v && selectedLayer === 'weather_cards') {
+        const cards = entityStoreRef.current['weather_cards'] ?? [];
+        entityStoreRef.current['weather_cards'] = cards.filter((c) => {
+          const cProps = c.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+          const cLat = Number(cProps?.lat);
+          const cLon = Number(cProps?.lon);
+          const isMatch = Number.isFinite(selectedLat) && Number.isFinite(selectedLon)
+            && Math.abs(cLat - selectedLat) < 0.0001
+            && Math.abs(cLon - selectedLon) < 0.0001;
+          if (isMatch) {
+            v.entities.remove(c);
+          }
+          return !isMatch;
+        });
+
+        // Remove the weather card UI entry
+        try {
+          weatherCardsRef.current = weatherCardsRef.current.filter(wc => !(Math.abs(wc.lat - selectedLat) < 0.0001 && Math.abs(wc.lon - selectedLon) < 0.0001));
+          setWeatherCards(prev => prev.filter(wc => !(Math.abs(wc.lat - selectedLat) < 0.0001 && Math.abs(wc.lon - selectedLon) < 0.0001)));
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      setInfoEntity(null);
+      if (selectedLayer === 'focus') {
+        setContextMenu(cm => ({ ...cm, show: false }));
+      }
+    };
+
+    const rows: Array<{ key: string; val: string }> = [];
+
+    if (layer === 'flight_tracks') {
+      rows.push({ key: 'Flight', val: String(p.callsign ?? 'Unknown') });
+      rows.push({ key: 'ICAO', val: String(p.icao24 ?? 'N/A').toUpperCase() });
+      rows.push({ key: 'Altitude', val: `${Number(p.altitude).toFixed(0)} m (${(Number(p.altitude) * 3.28084).toFixed(0)} ft)` });
+      rows.push({ key: 'Speed', val: `${(Number(p.velocity ?? 0) * 3.6).toFixed(0)} km/h (${(Number(p.velocity ?? 0) * 1.94384).toFixed(0)} kts)` });
+      rows.push({ key: 'Heading', val: `${Number(p.heading).toFixed(0)}°` });
+    } else if (layer === 'earthquakes') {
+      rows.push({ key: 'Location', val: String(p.place ?? '') });
+      rows.push({ key: 'Magnitude', val: `M${Number(p.magnitude ?? 0).toFixed(1)}` });
+      rows.push({ key: 'Depth', val: `${String(p.depth ?? 'N/A')} km` });
+      rows.push({ key: 'Time', val: `${new Date(Number(p.time ?? 0)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium' })} IST` });
+    } else if (layer === 'wildfires') {
+      rows.push({ key: 'Status', val: String(p.status ?? 'Active') });
+      rows.push({ key: 'Date', val: String(p.date ?? '') });
+    } else if (layer === 'space_debris') {
+      rows.push({ key: 'ID', val: String(p.id) });
+      rows.push({ key: 'Epoch', val: new Date(String(p.epoch)).toLocaleString('en-IN') });
+      rows.push({ key: 'Semi-major Axis', val: `${Number(p.semimajorAxis).toFixed(2)} km` });
+      rows.push({ key: 'Inclination', val: `${Number(p.inclination).toFixed(4)}°` });
+      rows.push({ key: 'Eccentricity', val: `${Number(p.eccentricity).toFixed(6)}` });
+      rows.push({ key: 'Mean Motion', val: `${Number(p.meanMotion).toFixed(4)} revs/day` });
+    } else if (layer === 'lightning_strikes') {
+      rows.push({ key: 'Time', val: `${new Date(Number(p.time)).toLocaleTimeString('en-IN')} IST` });
+    } else if (layer === 'aurora_oval') {
+      rows.push({ key: 'Probability', val: `${Number(p.probability)}%` });
+    } else if (layer === 'submarine_cables') {
+      rows.push({ key: 'Capacity', val: String(p.capacity) });
+      rows.push({ key: 'Length', val: String(p.length) });
+      rows.push({ key: 'Owners', val: String(p.owners) });
+    } else if (layer === 'animal_migrations') {
+      rows.push({ key: 'Species', val: String(p.species) });
+    } else if (layer === 'india_cctv') {
       const location = String(p.location ?? p.city ?? p.region ?? 'Worldwide');
       const updatedAt = Number(p.updatedAt ?? Date.now());
-      const isVideo = p.feedType === 'm3u8' || previewBase.includes('.m3u8') || previewBase.includes('m3u8') || previewBase.includes('.mp4');
-
-      return (
-        <>
-          <div className="info-header">
-            <div className="info-type-dot" style={{background:'#22d3ee'}} />
-            <div className="info-title">{String(p.title ?? 'Public CCTV')}</div>
-            <button className="info-close" onClick={() => setInfoEntity(null)}>✕</button>
-          </div>
-          <div className="info-body">
-            <div className="cctv-preview">
-              {previewBase ? (
-                isVideo ? (
-                  <CctvVideoPlayer src={previewBase} />
-                ) : (
-                  <img
-                    src={previewUrl}
-                    alt={String(p.title ?? 'Live camera preview')}
-                    referrerPolicy="no-referrer"
-                    loading="eager"
-                  />
-                )
-              ) : (
-                <div className="cctv-preview-empty">
-                  Live preview unavailable
-                </div>
-              )}
-            </div>
-            <div className="info-row"><span className="info-key">Location</span><span className="info-val">{location}</span></div>
-            <div className="info-row"><span className="info-key">Category</span><span className="info-val">{String(p.category ?? 'Public webcam')}</span></div>
-            <div className="info-row"><span className="info-key">Updated</span><span className="info-val">{new Date(updatedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST</span></div>
-            <div className="info-row"><span className="info-key">Coordinates</span><span className="info-val">{Number(p.lat ?? 0).toFixed(4)}, {Number(p.lon ?? 0).toFixed(4)}</span></div>
-            <div className="sparkline-wrap">
-              <div className="sparkline-title">Public feed</div>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-                <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.4}}>
-                  Open-source live public webcam feed.
-                </div>
-                <a
-                  className="cctv-link"
-                  href={String(p.pageUrl ?? p.streamUrl ?? previewBase)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open live
-                </a>
-              </div>
-            </div>
-          </div>
-        </>
-      );
+      rows.push({ key: 'Location', val: location });
+      rows.push({ key: 'Category', val: String(p.category ?? 'Public webcam') });
+      rows.push({ key: 'Updated', val: `${new Date(updatedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST` });
     }
-
-    if (p.layer === 'wildfires' || p.category === 'wildfires') {
-      return (
-        <>
-          <div className="info-header">
-            <div className="info-type-dot" style={{background:'#f97316'}} />
-            <div className="info-title">{String(p.title ?? 'Wildfire')}</div>
-            <button className="info-close" onClick={() => setInfoEntity(null)}>✕</button>
-          </div>
-          <div className="info-body">
-            <div className="info-row"><span className="info-key">Status</span><span className="info-val">{String(p.status ?? 'Active')}</span></div>
-            <div className="info-row"><span className="info-key">Date</span><span className="info-val">{String(p.date ?? '')}</span></div>
-            {p.lat != null && p.lon != null && <div className="info-row"><span className="info-key">Coordinates</span><span className="info-val">{Number(p.lat).toFixed(4)}, {Number(p.lon).toFixed(4)}</span></div>}
-            <div className="sparkline-wrap">
-              <div className="sparkline-title">Fire Monitoring</div>
-              <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.5}}>
-                Smoke dispersion simulation active for this fire location.
-              </div>
-            </div>
-          </div>
-        </>
-      );
-    }
+    if (hasCoords) rows.push({ key: 'Coordinates', val: `${lat.toFixed(4)}, ${lon.toFixed(4)}` });
 
     return (
       <>
         <div className="info-header">
-          <div className="info-type-dot" style={{background:getEventColor(String(p.layer ?? p.type ?? 'default'))}} />
-          <div className="info-title">{String(p.title ?? p.name ?? 'Event')}</div>
-          <button className="info-close" onClick={() => setInfoEntity(null)}>✕</button>
+          <div className="info-type-dot" style={{background:color}} />
+          <div className="info-title">{title}</div>
+          {hasCoords && (
+            <button className="info-fly" onClick={() => focusLocation(lat, lon, { label: title, color, height: 150 })} title="Fly to location">
+              🎯
+            </button>
+          )}
+          <button className="info-close" onClick={closeInfoPanel}>✕</button>
         </div>
         <div className="info-body">
-          {!!p.type && <div className="info-row"><span className="info-key">Type</span><span className="info-val">{String(p.type)}</span></div>}
-          {!!p.date && <div className="info-row"><span className="info-key">Date</span><span className="info-val">{String(p.date)}</span></div>}
-          {!!p.description && <div className="info-row"><span className="info-key">Details</span><span className="info-val" style={{fontSize:10}}>{String(p.description)}</span></div>}
-          {p.lat != null && p.lon != null && <div className="info-row"><span className="info-key">Coordinates</span><span className="info-val">{Number(p.lat).toFixed(4)}, {Number(p.lon).toFixed(4)}</span></div>}
+          {rows.map((r, i) => (
+            <div key={i} className="info-row">
+              <span className="info-key">{r.key}</span>
+              <span className="info-val">{r.val}</span>
+            </div>
+          ))}
+
+          {layer === 'earthquakes' && Number(px.magnitude ?? 0) >= 4 && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">Seismic Wave Propagation</div>
+              <div style={{fontSize:10,color:'var(--text-dim)',marginBottom:6}}>
+                P-wave (red) → S-wave (blue) → Surface wave (orange)
+              </div>
+              <div style={{display:'flex',gap:8,fontSize:10,color:'var(--text-dim)'}}>
+                <span style={{color:'#ef4444'}}>● P-wave (fastest)</span>
+                <span style={{color:'#3b82f6'}}>● S-wave</span>
+                <span style={{color:'#f97316'}}>● Surface (slowest)</span>
+              </div>
+            </div>
+          )}
+
+          {layer === 'earthquakes' && populationImpact && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">Population Impact</div>
+              {populationImpact.cities.map((c, i) => (
+                <div key={i} className="pop-impact-row">
+                  <span className="pop-impact-key">{c.name} ({c.country})</span>
+                  <span className={`pop-impact-val ${populationImpact.severity}`}>{c.pop}M</span>
+                </div>
+              ))}
+              <div className="pop-impact-row" style={{marginTop:8,borderTop:'1px solid var(--border)',paddingTop:6}}>
+                <span className="pop-impact-key">Total Population</span>
+                <span className={`pop-impact-val ${populationImpact.severity}`}>{populationImpact.totalPop.toFixed(1)}M</span>
+              </div>
+              <div className="pop-gradient" style={{marginTop:6}} />
+              <div className="heatmap-labels"><span>Low</span><span>Medium</span><span>High</span></div>
+            </div>
+          )}
+
+          {(layer === 'severe_storms' || layer === 'storm_forecast') && (stormForecast || px.stormTrack) && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">Storm Forecast</div>
+              <div className="info-row"><span className="info-key">Wind Speed</span><span className="info-val">{String(px.windSpeed ?? 'N/A')} mph</span></div>
+              <div className="info-row"><span className="info-key">Pressure</span><span className="info-val">{(stormForecast?.pressure ?? Number(px.pressure ?? 0)).toFixed(0)} mb</span></div>
+              <div className="info-row"><span className="info-key">Heading</span><span className="info-val">{(stormForecast?.heading ?? Number(px.heading ?? 0)).toFixed(0)}°</span></div>
+              <div className="info-row"><span className="info-key">Forward Speed</span><span className="info-val">{(stormForecast?.speedKmh ?? Number(px.speedKmh ?? 0)).toFixed(1)} km/h</span></div>
+              {((stormForecast?.track as any[]) ?? (px.stormTrack as any[]) ?? []).map((pt: any, i: number) => (
+                <div key={i} className="storm-track-point">
+                  <div className="storm-track-dot" />
+                  <span style={{fontSize:11,fontWeight:500}}>{pt.time}</span>
+                  <span className="storm-track-date">{Number(pt.lat).toFixed(1)}°, {Number(pt.lon).toFixed(1)}°</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {layer === 'india_cctv' && (
+            <div className="cctv-preview">
+              {(() => {
+                const previewBase = String(p.previewUrl ?? p.thumbnailUrl ?? p.streamUrl ?? p.pageUrl ?? '');
+                const previewUrl = previewBase ? `${previewBase}${previewBase.includes('?') ? '&' : '?'}tick=${cctvPreviewTick}` : '';
+                const isVideo = p.feedType === 'm3u8' || previewBase.includes('.m3u8') || previewBase.includes('m3u8') || previewBase.includes('.mp4');
+                return previewBase ? (
+                  isVideo ? <CctvVideoPlayer src={previewBase} /> : <img src={previewUrl} alt={String(p.title ?? 'Live camera preview')} referrerPolicy="no-referrer" loading="eager" />
+                ) : <div className="cctv-preview-empty">Live preview unavailable</div>;
+              })()}
+            </div>
+          )}
+
+          {layer === 'india_cctv' && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">Public feed</div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+                <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.4}}>Open-source live public webcam feed.</div>
+                <a className="cctv-link" href={String(p.pageUrl ?? p.streamUrl ?? '')} target="_blank" rel="noreferrer">Open live</a>
+              </div>
+            </div>
+          )}
+
+          {layer === 'space_debris' && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">Orbit Visualization</div>
+              <div style={{fontSize:10,color:'var(--text-dim)'}}>Dashed purple line traces the projected orbital path over one period (~90-120 mins).</div>
+            </div>
+          )}
+
+          {layer === 'nasa_dsn' && (p as any).isStation && (
+            <div className="sparkline-wrap" style={{marginTop:12}}>
+              <div className="sparkline-title">Dish Statuses & Targets</div>
+              {(((p as any).dishes as any[]) || []).map((dish: any, idx: number) => (
+                <div key={idx} style={{borderBottom:'1px solid var(--border)',paddingBottom:8,marginBottom:8,fontSize:11}}>
+                  <div style={{display:'flex',justifyContent:'space-between',fontWeight:600}}>
+                    <span>{dish.name}</span>
+                    <span style={{color: dish.isUp ? '#22c55e' : '#94a3b8'}}>{dish.isUp ? 'ACTIVE' : 'STANDBY'}</span>
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',color:'var(--text-dim)',fontSize:10}}>
+                    <span>Az: {Number(dish.azimuth).toFixed(1)}° / El: {Number(dish.elevation).toFixed(1)}°</span>
+                    <span>Wind: {dish.windspeed} km/h</span>
+                  </div>
+                  {((dish.targets as any[]) || []).length > 0 ? (
+                    <div style={{marginTop:4,paddingLeft:6,borderLeft:'2px solid #f59e0b'}}>
+                      {((dish.targets as any[]) || []).map((t: any, tIdx: number) => (
+                        <div key={tIdx} style={{fontSize:10}}>
+                          <strong>Target:</strong> {t.name} (ID: {t.id})
+                          <div>Distance: {(t.range / 1.496e8).toFixed(3)} AU ({(t.range/1000).toLocaleString()} km)</div>
+                          <div>RTLT: {t.rtlt}s</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <div style={{fontSize:9,color:'var(--text-dim)',marginTop:2}}>No target tracked</div>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {layer === 'nasa_dsn' && (p as any).isBeam && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">Beam Targets</div>
+              <div className="info-row"><span className="info-key">Dish Antenna</span><span className="info-val">{String((p as any).dishName)}</span></div>
+              <div className="info-row"><span className="info-key">Az / El</span><span className="info-val">{Number((p as any).azimuth).toFixed(1)}° / {Number((p as any).elevation).toFixed(1)}°</span></div>
+              <div className="info-row"><span className="info-key">Windspeed</span><span className="info-val">{Number((p as any).windspeed).toFixed(1)} km/h</span></div>
+              {(((p as any).targets as any[]) || []).map((t: any, i: number) => (
+                <div key={i} style={{fontSize:11,marginBottom:6}}>
+                  <div style={{fontWeight:600}}>{t.name} ({t.id})</div>
+                  <div>Distance: {(t.range / 1.496e8).toFixed(3)} AU</div>
+                  <div>RTLT: {t.rtlt}s</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {layer === 'lightning_strikes' && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">Blitzortung Telemetry</div>
+              <div style={{fontSize:10,color:'var(--text-dim)'}}>Real-time discharge registered by magnetic field sensors. Bolide is represented by a vertical column rising 5km into the atmosphere with an expanding ground ripple.</div>
+            </div>
+          )}
+
+          {layer === 'aurora_oval' && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">NOAA Ovation Prime Model</div>
+              <div style={{fontSize:10,color:'var(--text-dim)'}}>Displays probability of auroral visibility. Particles float at ~95km to 150km altitudes, colored green (lower probability) to red (high probability/altitude).</div>
+            </div>
+          )}
+
+          {layer === 'submarine_cables' && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">TeleGeography Database</div>
+              <div style={{fontSize:10,color:'var(--text-dim)'}}>Fibre-optic communications link on the sea floor connecting international landing stations.</div>
+            </div>
+          )}
+
+          {layer === 'electricity_grid' && (
+            <div className="sparkline-wrap" style={{marginTop:10}}>
+              <div className="sparkline-title">Electricity Generation Mix</div>
+              {Object.entries((p.mix as Record<string, number>) || {}).map(([source, percentage]) => {
+                if (!percentage) return null;
+                return (
+                  <div key={source} style={{fontSize:11,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    <span style={{textTransform:'capitalize'}}>{source}</span>
+                    <div style={{display:'flex',alignItems:'center',gap:6}}>
+                      <div style={{background:'var(--border)',width:60,height:6,borderRadius:3,overflow:'hidden',position:'relative'}}>
+                        <div style={{background: source === 'coal' || source === 'gas' || source === 'oil' ? '#ef4444' : '#22c55e', width: `${percentage}%`, height: '100%'}} />
+                      </div>
+                      <span style={{fontWeight:500,width:30,textAlign:'right'}}>{Number(percentage).toFixed(0)}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {layer === 'animal_migrations' && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">Movebank Telemetry</div>
+              <div style={{fontSize:10,color:'var(--text-dim)'}}>Real-time tracking route. Orange ribbon displays the complete migration pathway, and pulsing dot marks the last recorded transmitter location.</div>
+            </div>
+          )}
+
+          {layer === 'wildfires' && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">Fire Monitoring</div>
+              <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.5}}>Smoke dispersion simulation active for this fire location.</div>
+            </div>
+          )}
         </div>
       </>
     );
@@ -3815,6 +4344,24 @@ export default function App() {
         </div>
       )}
 
+      {/* API Vault Dialog */}
+      <ApiVault
+        isOpen={showApiVault}
+        onClose={() => setShowApiVault(false)}
+        onSave={handleApiVaultSave}
+        initialKeys={{
+          GOOGLE_GEMINI_API_KEY: apiVault.gemini,
+          ANTHROPIC_API_KEY: apiVault.anthropic,
+          CESIUM_ION_ACCESS_TOKEN: apiVault.cesiumIonAccessToken,
+          OPENSKY_CLIENT_ID: apiVault.openSkyClientId,
+          OPENSKY_CLIENT_SECRET: apiVault.openSkyClientSecret,
+          SENTINEL_HUB_CLIENT_ID: apiVault.sentinelHubClientId,
+          SENTINEL_HUB_CLIENT_SECRET: apiVault.sentinelHubClientSecret,
+          MARINE_TRAFFIC_API_KEY: apiVault.marineTrafficApiKey,
+          AIS_STREAM_API_KEY: apiVault.aisStreamApiKey,
+        }}
+      />
+
       {/* Top Bar */}
       <div className="topbar glass-panel">
         <div className="brand">
@@ -3836,8 +4383,8 @@ export default function App() {
             style={{ width: '100%' }} />
           {showSuggestions && searchSuggestions.length > 0 && (
             <div className="search-suggestions active" style={{ position: 'absolute', top: '100%', left: 0, right: 0 }}>
-              {searchSuggestions.map((s, i) => (
-                <div key={i} className="item" onClick={() => goToLocation(s.lat, s.lon, s.name, '#60a5fa', 0.9)}>{s.name}</div>
+              {searchSuggestions.map((s) => (
+                <div key={s.name + s.lat + s.lon} className="item" onClick={() => goToLocation(s.lat, s.lon, s.name, '#60a5fa', 0.9)}>{s.name}</div>
               ))}
             </div>
           )}
@@ -3853,7 +4400,7 @@ export default function App() {
             {newAlertCount > 0 && <span style={{ position:'absolute',top:-2,right:-2,background:'#ef4444',color:'white',fontSize:9,borderRadius:'50%',width:14,height:14,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:600}}>{newAlertCount}</span>}
           </button>
           <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share">📤</button>
-          <button className="btn-icon" onClick={() => setShowTokenSetup(true)} title="API Keys">🔑</button>
+          <button className="btn-icon" onClick={() => setShowApiVault(true)} title="API Configuration">🔑</button>
           <button className="btn-icon" onClick={takeSnapshot} title="Snapshot"><Camera size={16} /></button>
           <button className="btn-icon" onClick={flyToIndiaDirect} title="Fly to India">🇮🇳</button>
           <button
@@ -3874,20 +4421,28 @@ export default function App() {
         <div className="sidebar-header">
           <div className="sidebar-title">Data Layers ({activeLayerCount} active)</div>
           <div className="imagery-row">
-            {['earth','satellite','dark','terrain','population','temperature','night'].map(type => (
+            {['earth','satellite','dark','terrain'].map(type => (
               <button key={type} className={`img-chip ${activeImagery === type ? 'active' : ''}`}
                 onClick={() => setImagery(type)}>
                 {type === 'earth' ? '🌍 Earth' : type === 'satellite' ? '🛰️ Sat' : type === 'dark' ? '🌑 Dark'
-                  : type === 'terrain' ? '⛰️ Ter' : type === 'population' ? '👥 Pop' : type === 'temperature' ? '🌡️ Temp'
-                  : '🌃 Night'}
+                  : '⛰️ Ter'}
               </button>
             ))}
           </div>
         </div>
+        <div className="sidebar-search">
+          <span className="sidebar-search-icon">🔍</span>
+          <input type="text" placeholder="Search data layers..." value={layerSearch}
+            onChange={e => setLayerSearch(e.target.value)}
+            onClick={e => e.stopPropagation()} />
+        </div>
         <div className="sidebar-scroll">
           {CATEGORIES.map(cat => {
-            const items = groupedLayers[cat.id] || [];
-            const isOpen = openCategories.includes(cat.id);
+            const items = (groupedLayers[cat.id] || []).filter(l =>
+              !layerSearch.trim() || l.label.toLowerCase().includes(layerSearch.toLowerCase())
+            );
+            if (layerSearch.trim() && items.length === 0) return null;
+            const isOpen = openCategories.includes(cat.id) || (layerSearch.trim().length > 0);
             return (
               <div key={cat.id} className={`category ${isOpen ? 'open' : ''}`}>
                 <div className="category-header" onClick={() => setOpenCategories(prev =>
@@ -3909,13 +4464,13 @@ export default function App() {
                       </div>
                       {layer.badge && <span className={`layer-badge badge-${layer.badge.toLowerCase()}`}>{layer.badge}</span>}
                       <div className="toggle">
-                        <input type="checkbox" checked={layer.on} readOnly />
+                        <input type="checkbox" checked={layer.on} onChange={e => { e.stopPropagation(); toggleLayer(layer.id); }} />
                         <div className="toggle-slider" />
                       </div>
-                      <div className="layer-status">
+                      {layer.badge === 'LIVE' && <div className="layer-status">
                         <div className="live-dot" />
                         <span>Live</span>
-                      </div>
+                      </div>}
                       {layer.type === 'tile' && layer.on && (
                         <div className="opacity-wrap">
                           <span className="opacity-label">{(layerOpacity[layer.id] ?? layer.opacity) * 100 >> 0}%</span>
@@ -3962,11 +4517,13 @@ export default function App() {
           <button className="ai-close" onClick={() => setShowAI(false)}>✕</button>
         </div>
         <div className="ai-messages">
-          {aiMessages.map((msg, i) => (
-            <div key={i} className={`ai-msg ${msg.role}`}>
+          {aiMessages.map((msg) => (
+            <div key={msg.id} className={`ai-msg ${msg.role}`}>
               {msg.role === 'assistant' ? (
                 <div dangerouslySetInnerHTML={{
-                  __html: msg.content.replace(/\*\*(.*?)\*/g, '<strong>$1</strong>')
+                  __html: msg.content
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                     .replace(/`([^`]+)`/g, '<code>$1</code>')
                     .replace(/\n/g, '<br/>')
                 }} />
@@ -4007,8 +4564,7 @@ export default function App() {
           {alerts.map(a => (
             <div key={a.id} className={`alert-item ${!a.seen ? 'new' : ''}`}
               onClick={() => {
-                a.seen = true;
-                setAlerts([...alertsRef.current]);
+                setAlerts(prev => prev.map(a2 => a2.id === a.id ? { ...a2, seen: true } : a2));
                 setNewAlertCount(prev => Math.max(0, prev - 1));
                 focusLocation(a.lat, a.lon, { label: a.title, color: getSeverityColor(a.severity), height: 150 });
               }}>
@@ -4114,15 +4670,15 @@ export default function App() {
         <div className="stat-item"><div className="stat-dot" style={{background:'#3b82f6'}}/><span className="stat-label">Entities</span><span className="stat-val">{totalEntities}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#22c55e'}}/><span className="stat-label">Events</span><span className="stat-val">{activeEvents}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#a855f7'}}/><span className="stat-label">Alerts</span><span className="stat-val">{newAlertCount}</span></div>
-        <div className="stat-item"><div className="stat-dot" style={{background:'#f59e0b'}}/><span className="stat-label">Layers</span><span className="stat-val">{activeLayerCount}/45</span></div>
+        <div className="stat-item"><div className="stat-dot" style={{background:'#f59e0b'}}/><span className="stat-label">Layers</span><span className="stat-val">{activeLayerCount}/{LAYER_DEFS.length}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#00D4FF'}}/><span className="stat-label">FPS</span><span className="stat-val">{fps}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#14b8a6'}}/><span className="stat-label">Camera</span><span className="stat-val">{cameraDms || '—'}</span></div>
       </div>
 
       {/* Zoom Controls */}
       <div className="zoom-controls">
-        <button className="zoom-btn" onClick={zoomIn}>+</button>
-        <button className="zoom-btn" onClick={zoomOut}>−</button>
+        <button className="zoom-btn" onClick={zoomIn} aria-label="Zoom in">+</button>
+        <button className="zoom-btn" onClick={zoomOut} aria-label="Zoom out">−</button>
       </div>
 
       {/* Context Menu */}
@@ -4130,20 +4686,20 @@ export default function App() {
         style={{ left: contextMenu.x - 90, top: contextMenu.y - 90 }}>
         <div className="ctx-ring">
           <div className="ctx-center">📍</div>
-          <div className="ctx-item" style={{top:0,left:'50%',transform:'translateX(-50%)'}}
-            onClick={() => handleContextAction('flyTo')}>
+          <div className="ctx-item" role="menuitem" tabIndex={0} style={{top:0,left:'50%',transform:'translateX(-50%)'}}
+            onClick={() => handleContextAction('flyTo')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('flyTo'); } }}>
             <span className="ctx-emoji">🎯</span><span className="ctx-label">Fly To</span>
           </div>
-          <div className="ctx-item" style={{bottom:0,left:'50%',transform:'translateX(-50%)'}}
-            onClick={() => handleContextAction('pin')}>
+          <div className="ctx-item" role="menuitem" tabIndex={0} style={{bottom:0,left:'50%',transform:'translateX(-50%)'}}
+            onClick={() => handleContextAction('pin')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('pin'); } }}>
             <span className="ctx-emoji">📌</span><span className="ctx-label">Drop Pin</span>
           </div>
-          <div className="ctx-item" style={{left:0,top:'50%',transform:'translateY(-50%)'}}
-            onClick={() => handleContextAction('weather')}>
+          <div className="ctx-item" role="menuitem" tabIndex={0} style={{left:0,top:'50%',transform:'translateY(-50%)'}}
+            onClick={() => handleContextAction('weather')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('weather'); } }}>
             <span className="ctx-emoji">🌡️</span><span className="ctx-label">Weather</span>
           </div>
-          <div className="ctx-item" style={{right:0,top:'50%',transform:'translateY(-50%)'}}
-            onClick={() => handleContextAction('events')}>
+          <div className="ctx-item" role="menuitem" tabIndex={0} style={{right:0,top:'50%',transform:'translateY(-50%)'}}
+            onClick={() => handleContextAction('events')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('events'); } }}>
             <span className="ctx-emoji">📋</span><span className="ctx-label">Events</span>
           </div>
         </div>
