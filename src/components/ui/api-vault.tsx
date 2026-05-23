@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, ExternalLink, Copy, Check } from 'lucide-react';
 
 export interface ApiConfig {
@@ -31,14 +31,18 @@ export function ApiVault({ isOpen, onClose, onSave, initialKeys }: ApiVaultProps
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
 
+    const abort = new AbortController();
+
     const fetchApiMetadata = async () => {
       try {
-        const res = await fetch('/api/config/apis');
+        const res = await fetch('/api/config/apis', { signal: abort.signal });
         const data = await res.json();
+        if (abort.signal.aborted) return;
         setApis(data.apis);
         setCategories(data.categories);
         if (data.categories.length > 0) {
@@ -46,12 +50,15 @@ export function ApiVault({ isOpen, onClose, onSave, initialKeys }: ApiVaultProps
         }
         setLoading(false);
       } catch (err) {
+        if (abort.signal.aborted) return;
         console.error('Failed to fetch API metadata:', err);
         setLoading(false);
       }
     };
 
     fetchApiMetadata();
+
+    return () => abort.abort();
   }, [isOpen]);
 
   const categoryApis = apis.filter((api) => api.category === activeCategory);
@@ -69,10 +76,22 @@ export function ApiVault({ isOpen, onClose, onSave, initialKeys }: ApiVaultProps
     onClose();
   };
 
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
     setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    copyTimeoutRef.current = setTimeout(() => setCopied(null), 2000);
   };
 
   const getKeyFields = (api: ApiConfig): string[] => {

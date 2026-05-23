@@ -39,7 +39,6 @@ export function createEntityTracker(viewer: Cesium.Viewer) {
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && tracked) {
-      viewer.trackedEntity = undefined;
       tracked = null;
     }
   };
@@ -51,19 +50,16 @@ export function createEntityTracker(viewer: Cesium.Viewer) {
     track(entity: Cesium.Entity, type: TrackEntityType = 'default') {
       tracked = entity;
       const offset = TRACK_OFFSETS[type] ?? TRACK_OFFSETS.default;
-      viewer.trackedEntity = entity;
       viewer.zoomTo(
         entity,
         new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(offset.pitch), offset.range),
       );
     },
     untrack() {
-      viewer.trackedEntity = undefined;
       tracked = null;
     },
     destroy() {
       removeKey?.();
-      viewer.trackedEntity = undefined;
       tracked = null;
     },
   };

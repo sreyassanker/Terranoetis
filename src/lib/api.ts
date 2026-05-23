@@ -15,6 +15,10 @@ const DIRECT_SOURCES: Record<string, string> = {
   '/space-weather/kp': 'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json',
   '/aurora': 'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',
   '/submarine-cables': 'https://www.submarinecablemap.com/api/v3/cable/cable-geo.json',
+  '/adsb-lol': 'https://adsb.lol/api/0/aircraft/',
+  '/adsb-fi': 'https://adsb.fi/api/v2/aircraft/',
+  '/openflights': 'https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat',
+  '/wovodat': 'https://www.wovodat.org/api/volcanoes',
 };
 
 export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {

@@ -21,8 +21,11 @@ export function altitudeBandColor(altMeters: number): string {
 }
 
 export function parseOpenSkyState(state: unknown[]): FlightState | null {
-  const lon = Number(state[5]);
-  const lat = Number(state[6]);
+  const lonVal = state[5];
+  const latVal = state[6];
+  if (lonVal == null || latVal == null) return null;
+  const lon = Number(lonVal);
+  const lat = Number(latVal);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   return {
     icao24: String(state[0] ?? ''),
@@ -36,27 +39,54 @@ export function parseOpenSkyState(state: unknown[]): FlightState | null {
   };
 }
 
+const ICON_CACHE = new Map<string, HTMLCanvasElement>();
+
+function getPlaneIcon(heading: number, color: string): HTMLCanvasElement {
+  const rounded = Math.round(heading / 5) * 5;
+  const key = `${rounded}_${color}`;
+  let cached = ICON_CACHE.get(key);
+  if (cached) return cached;
+  const canvas = document.createElement('canvas');
+  canvas.width = 24;
+  canvas.height = 24;
+  const ctx = canvas.getContext('2d')!;
+  ctx.save();
+  ctx.translate(12, 12);
+  ctx.rotate((rounded * Math.PI) / 180);
+  ctx.beginPath();
+  ctx.moveTo(0, -10);
+  ctx.lineTo(-3, 2);
+  ctx.lineTo(-8, 6);
+  ctx.lineTo(-3, 4);
+  ctx.lineTo(0, 8);
+  ctx.lineTo(3, 4);
+  ctx.lineTo(8, 6);
+  ctx.lineTo(3, 2);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+  ICON_CACHE.set(key, canvas);
+  return canvas;
+}
+
 export class FlightDeadReckoning {
   private flights = new Map<string, FlightState>();
   private entities = new Map<string, Cesium.Entity>();
+  private iconKeys = new Map<string, string>();
   private removeTick: (() => void) | null = null;
   private viewer: Cesium.Viewer;
-  private createIcon: (heading: number, color: string) => HTMLCanvasElement;
   private lastTickTime: number = Date.now();
 
-  constructor(
-    viewer: Cesium.Viewer,
-    createIcon: (heading: number, color: string) => HTMLCanvasElement,
-  ) {
+  constructor(viewer: Cesium.Viewer) {
     this.viewer = viewer;
-    this.createIcon = createIcon;
   }
 
   updateFromApi(states: unknown[][]) {
     const next = new Map<string, FlightState>();
-    for (const state of states.slice(0, 500)) {
+    for (const state of states) {
       const f = parseOpenSkyState(state);
-      if (f) next.set(f.icao24 || f.callsign, f);
+      if (f) next.set(`${f.icao24}_${f.callsign}`, f);
     }
     this.flights = next;
     this.syncEntities();
@@ -81,16 +111,18 @@ export class FlightDeadReckoning {
       this.viewer.entities.remove(ent);
     }
     this.entities.clear();
+    this.iconKeys.clear();
     this.flights.clear();
   }
 
   private tick() {
     const now = Date.now();
     const dt = (now - this.lastTickTime) / 1000;
+    if (dt <= 0 || dt > 5) {
+      this.lastTickTime = now;
+      return;
+    }
     this.lastTickTime = now;
-
-    if (dt <= 0 || dt > 5) return;
-
     for (const flight of this.flights.values()) {
       if (flight.velocity <= 0) continue;
       const dist = flight.velocity * dt;
@@ -109,7 +141,7 @@ export class FlightDeadReckoning {
     const activeIds = new Set<string>();
     for (const flight of this.flights.values()) {
       const color = altitudeBandColor(flight.alt);
-      const id = flight.icao24 || flight.callsign;
+      const id = `${flight.icao24}_${flight.callsign}`;
       const pos = Cesium.Cartesian3.fromDegrees(flight.lon, flight.lat, flight.alt);
       activeIds.add(id);
       let ent = this.entities.get(id);
@@ -118,10 +150,11 @@ export class FlightDeadReckoning {
           position: pos,
           name: flight.callsign,
           billboard: {
-            image: this.createIcon(flight.heading, color),
+            image: getPlaneIcon(flight.heading, color),
             width: 24,
             height: 24,
             scale: 1.2,
+            scaleByDistance: new Cesium.NearFarScalar(500000, 1.0, 5000000, 0.15),
           },
           label: {
             text: flight.callsign,
@@ -133,9 +166,9 @@ export class FlightDeadReckoning {
             pixelOffset: new Cesium.Cartesian2(0, 18),
             verticalOrigin: Cesium.VerticalOrigin.TOP,
             heightReference: Cesium.HeightReference.NONE,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY, // Ensure labels don't get clipped by the globe
-            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0.0, 3000000.0), // Hide text when camera is >3000 km away
-            scaleByDistance: new Cesium.NearFarScalar(1000000.0, 1.0, 3000000.0, 0.5), // Shrink text as camera pulls away
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0.0, 3000000.0),
+            scaleByDistance: new Cesium.NearFarScalar(1000000.0, 1.0, 3000000.0, 0.5),
           },
           properties: {
             layer: 'flight_tracks',
@@ -150,36 +183,61 @@ export class FlightDeadReckoning {
           },
         });
         this.entities.set(id, ent);
-      } else if (full) {
-        ent.position = new Cesium.ConstantPositionProperty(pos);
-        if (ent.billboard) {
-          ent.billboard.image = new Cesium.ConstantProperty(this.createIcon(flight.heading, color));
-        }
-        if (ent.label) {
-          ent.label.text = new Cesium.ConstantProperty(flight.callsign);
-        }
+        const roundedKey = `${Math.round(flight.heading / 5) * 5}_${color}`;
+        this.iconKeys.set(id, roundedKey);
       } else {
-        ent.position = new Cesium.ConstantPositionProperty(pos);
+        if (ent.position instanceof Cesium.ConstantPositionProperty) {
+          ent.position.setValue(pos);
+        } else {
+          ent.position = new Cesium.ConstantPositionProperty(pos);
+        }
+        if (full) {
+          const rounded = Math.round(flight.heading / 5) * 5;
+          const key = `${rounded}_${color}`;
+          if (key !== this.iconKeys.get(id)) {
+            if (ent.billboard) {
+              const newIcon = getPlaneIcon(flight.heading, color);
+              if (ent.billboard.image instanceof Cesium.ConstantProperty) {
+                ent.billboard.image.setValue(newIcon);
+              } else {
+                ent.billboard.image = new Cesium.ConstantProperty(newIcon);
+              }
+            }
+            this.iconKeys.set(id, key);
+          }
+          if (ent.label) {
+            if (ent.label.text instanceof Cesium.ConstantProperty) {
+              ent.label.text.setValue(flight.callsign);
+            } else {
+              ent.label.text = new Cesium.ConstantProperty(flight.callsign);
+            }
+          }
+          if (ent.properties) {
+            for (const [k, v] of Object.entries({
+              callsign: flight.callsign,
+              altitude: flight.alt,
+              heading: flight.heading,
+              velocity: flight.velocity,
+              lon: flight.lon,
+              lat: flight.lat,
+              time: Date.now(),
+            })) {
+              const prop = ent.properties.getProperty(k);
+              if (prop instanceof Cesium.ConstantProperty) {
+                prop.setValue(v);
+              }
+            }
+          }
+        }
+        ent.name = flight.callsign;
       }
-
-      ent.name = flight.callsign;
-      ent.properties = new Cesium.PropertyBag({
-        layer: 'flight_tracks',
-        icao24: id,
-        callsign: flight.callsign,
-        altitude: flight.alt,
-        heading: flight.heading,
-        velocity: flight.velocity,
-        lon: flight.lon,
-        lat: flight.lat,
-        time: Date.now(),
-      });
     }
 
     for (const [id, ent] of this.entities.entries()) {
       if (activeIds.has(id)) continue;
       this.viewer.entities.remove(ent);
       this.entities.delete(id);
+      this.iconKeys.delete(id);
     }
   }
 }

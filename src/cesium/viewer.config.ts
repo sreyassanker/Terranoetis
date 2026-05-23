@@ -114,7 +114,13 @@ export async function createLiveGlobeViewer(container: HTMLElement): Promise<Vie
 
   const scene = viewer.scene;
   scene.logarithmicDepthBuffer = true;
-  scene.postProcessStages.fxaa.enabled = false;
+  try {
+    if (scene.postProcessStages.fxaa) {
+      scene.postProcessStages.fxaa.enabled = false;
+    }
+  } catch {
+    // FXAA config varies by Cesium version
+  }
   try {
     if (scene.postProcessStages.bloom) {
       scene.postProcessStages.bloom.enabled = false;

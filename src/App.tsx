@@ -5,10 +5,11 @@ import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { apiGet } from '@/lib/api';
 import { addBaseImagery, applyTerrainProvider, crossfadeImagery } from '@/cesium/viewer.config';
-import { cinematicFlyTo, createEntityTracker } from '@/cesium/camera.controller';
+import { cinematicFlyTo, createEntityTracker, type TrackEntityType } from '@/cesium/camera.controller';
 import { addEarthquakeEntity, type UsgsFeature } from '@/rendering/earthquakes';
 import { loadTectonicPlates } from '@/rendering/tectonic';
 import { FlightDeadReckoning, altitudeBandColor } from '@/rendering/flights';
+import { AisVesselTracker } from '@/rendering/ais';
 import {
   loadAirspaces,
   loadAisVessels,
@@ -24,6 +25,22 @@ import {
 import { ApiVault } from '@/components/ui/api-vault';
 import { createRenderScheduler } from '@/lib/renderScheduler';
 import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings } from '@/rendering/digitalTwinLayers';
+import {
+  FlightDeadReckoning as AviationFlightDeadReckoning,
+  addVolcanoEntities,
+  addVaacAdvisoryEntities,
+  addSo2Entities,
+  addOpenFlightsEntities,
+} from '@/rendering/aviation';
+import {
+  addGenericPointEntities,
+  addStormTrackEntities,
+  addDroughtZoneEntities,
+  addRadarSiteEntities,
+  addClimateIndicesEntities,
+} from '@/rendering/weather';
+import { renderLayer, fetchLayerData } from '@/rendering/genericLayers';
+import { LAYER_GROUPS, LAYER_CATEGORIES, LEGACY_DEFAULTS } from '@/config/layerConfig';
 
 /* ═════════════════════════════════════════════════════════════════
    TYPES
@@ -97,7 +114,7 @@ interface IntelFeedItem {
 }
 
 interface HeatmapPoint { lon: number; lat: number; count: number; }
-interface WeatherCardData { id: string; lon: number; lat: number; temp: number; desc: string; }
+interface WeatherCardData { id: string; lon: number; lat: number; temp: number; humidity: number; windSpeed: number; pressure: number; precipitation: number; desc: string; }
 interface LocalSearchResult { name: string; lat: number; lon: number; }
 interface IndiaCctvCamera {
   id: string;
@@ -149,70 +166,30 @@ interface ApiVaultState {
 
 let cachedCctvCanvas: HTMLCanvasElement | null = null;
 
-const CATEGORIES = [
-  { id: 'seismic', label: 'Seismic', icon: 'SM', color: '#3b82f6' },
-  { id: 'weather', label: 'Weather & Hazards', icon: 'WX', color: '#f59e0b' },
-  { id: 'aviation', label: 'Aviation', icon: 'AV', color: '#a855f7' },
-  { id: 'marine', label: 'Maritime', icon: 'MR', color: '#14b8a6' },
-  { id: 'satellite', label: 'Satellite Imagery', icon: 'IM', color: '#22c55e' },
-  { id: 'advanced', label: 'Advanced', icon: 'AD', color: '#ef4444' },
-];
+const CATEGORIES = LAYER_GROUPS.map(g => ({
+  id: g.id,
+  label: g.label,
+  icon: g.icon,
+  color: g.color,
+}));
 
-const LAYER_DEFS: LayerItem[] = [
-  // Seismic
-  { id:'earthquakes', label:'Earthquakes (M2.5+)', color:'#ef4444', type:'point', on:true, default:true, opacity:1, category:'seismic', sub:'USGS Real-Time' },
-  { id:'tectonic', label:'Tectonic Plates', color:'#f97316', type:'geojson', on:true, default:true, opacity:1, category:'seismic', sub:'USGS Plates' },
-  { id:'seismic_waves', label:'Seismic Wave Propagation', color:'#3b82f6', type:'effect', on:true, default:true, opacity:1, category:'seismic', sub:'Click earthquake to trigger' },
-  { id:'heatmap', label:'Seismic Heatmap', color:'#ef4444', type:'heatmap', on:false, default:false, opacity:0.7, category:'seismic' },
-  // Weather
-  { id:'wildfires', label:'Wildfires (NASA)', color:'#f97316', type:'point', on:true, default:true, opacity:1, category:'weather', sub:'MODIS/VIIRS' },
-  { id:'severe_storms', label:'Severe Storms', color:'#8b5cf6', type:'point', on:true, default:true, opacity:1, category:'weather', sub:'NASA EONET' },
-  { id:'lightning_strikes', label:'Live Lightning Strikes', color:'#fef08a', type:'point', on:false, default:false, opacity:1, category:'weather', badge:'LIVE', sub:'Blitzortung Real-Time' },
-  { id:'aurora_oval', label:'Polar Auroral Oval', color:'#4ade80', type:'point', on:false, default:false, opacity:0.8, category:'weather', sub:'NOAA Ovation Forecast' },
-  { id:'storm_forecast', label:'Storm Forecast Cone', color:'#a855f7', type:'polygon', on:false, default:false, opacity:1, category:'weather', sub:'Tropical cyclone track prediction' },
-  { id:'smoke_dispersion', label:'Smoke Dispersion', color:'#6b7280', type:'effect', on:false, default:false, opacity:1, category:'weather', sub:'Wind-driven plume from active fires (EONET)' },
-  { id:'tsunami', label:'Tsunami Propagation', color:'#3b82f6', type:'effect', on:false, default:false, opacity:1, category:'weather', sub:'Auto for M7.5+ ocean quakes' },
-  { id:'temp_anomaly', label:'Temperature Anomaly', color:'#ef4444', type:'tile', on:false, default:false, opacity:0.6, category:'weather' },
-  { id:'precipitation', label:'Precipitation', color:'#0ea5e9', type:'tile', on:false, default:false, opacity:0.6, category:'weather' },
-  { id:'wind', label:'Wind Speed', color:'#8b5cf6', type:'tile', on:false, default:false, opacity:0.6, category:'weather' },
-  { id:'pressure', label:'Pressure (MSLP)', color:'#f97316', type:'tile', on:false, default:false, opacity:0.5, category:'weather' },
-  { id:'volcanoes', label:'Volcanoes', color:'#f59e0b', type:'point', on:false, default:false, opacity:1, category:'weather' },
-  { id:'floods', label:'Flood Reports', color:'#3b82f6', type:'point', on:false, default:false, opacity:1, category:'weather' },
-  { id:'dust', label:'Dust/Sandstorm', color:'#a16207', type:'point', on:false, default:false, opacity:1, category:'weather' },
-  { id:'landslides', label:'Landslides', color:'#78350f', type:'point', on:false, default:false, opacity:1, category:'weather' },
-  { id:'seaLakeIce', label:'Icebergs & Sea Ice', color:'#93c5fd', type:'point', on:false, default:false, opacity:1, category:'weather', sub:'Antarctic iceberg calving & sea ice events' },
-  // Aviation
-  { id:'flight_tracks', label:'Live Flight Tracks', color:'#a855f7', type:'point', on:false, default:false, opacity:1, category:'aviation', badge:'KEY', sub:'OpenSky client credentials in API Vault' },
-  { id:'space_debris', label:'Space Debris Cloud', color:'#a855f7', type:'point', on:false, default:false, opacity:0.9, category:'aviation', sub:'CelesTrak GP (1500+ objects)' },
-  { id:'airports', label:'Major Airports', color:'#14b8a6', type:'point', on:false, default:false, opacity:1, category:'aviation' },
-  { id:'airspaces', label:'Airspace Boundaries', color:'#f59e0b', type:'geojson', on:false, default:false, opacity:1, category:'aviation', badge:'KEY' },
-  // Marine
-  { id:'ais_vessels', label:'AIS Vessel Tracking', color:'#14b8a6', type:'point', on:false, default:false, opacity:1, category:'marine', badge:'KEY', sub:'MarineTraffic or similar' },
-  { id:'sea_ice', label:'Sea Ice Concentration', color:'#93c5fd', type:'tile', on:false, default:false, opacity:0.7, category:'marine' },
-  { id:'sea_temp', label:'Sea Surface Temp', color:'#f59e0b', type:'tile', on:false, default:false, opacity:0.5, category:'marine' },
-  // Satellite
-  { id:'nasa_gibs', label:'NASA GIBS Imagery', color:'#3b82f6', type:'tile', on:false, default:false, opacity:1, category:'satellite' },
-  { id:'night_lights', label:'Nighttime Lights', color:'#fbbf24', type:'tile', on:false, default:false, opacity:1, category:'satellite' },
-  { id:'land_cover', label:'Land Cover', color:'#22c55e', type:'tile', on:false, default:false, opacity:1, category:'satellite' },
-  // Advanced
-  { id:'nasa_dsn', label:'NASA Deep Space Network', color:'#fbbf24', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'LIVE', sub:'Active deep-space tracking' },
-  { id:'submarine_cables', label:'Undersea Fiber Cables', color:'#06b6d4', type:'geojson', on:false, default:false, opacity:0.9, category:'advanced', sub:'Telegeography Global Index' },
-  { id:'electricity_grid', label:'Global Grid Footprint', color:'#22c55e', type:'point', on:false, default:false, opacity:0.9, category:'advanced', sub:'Regional carbon intensity' },
-  { id:'animal_migrations', label:'Wildlife Migrations', color:'#f59e0b', type:'point', on:false, default:false, opacity:0.9, category:'advanced', sub:'Movebank telemetry routes' },
-  { id:'disaster_alerts', label:'GDACS Disaster Alerts', color:'#ef4444', type:'point', on:false, default:false, opacity:1, category:'advanced', sub:'Global disaster alerts' },
-
-  { id:'india_cctv', label:'Worldwide Public Cameras', color:'#22d3ee', type:'point', on:false, default:false, opacity:1, category:'advanced', badge:'LIVE', sub:'Open live public webcams worldwide' },
-  { id:'space_weather', label:'Space Weather (NOAA)', color:'#f97316', type:'point', on:false, default:false, opacity:1, category:'advanced', sub:'Solar storms, aurora' },
-  { id:'disaster_near_me', label:'Disasters Near Me', color:'#ef4444', type:'point', on:false, default:false, opacity:1, category:'advanced', sub:'Requires location' },
-  { id:'population_impact', label:'Population Impact Zones', color:'#f59e0b', type:'polygon', on:false, default:false, opacity:1, category:'advanced', sub:'50 cities overlay' },
-  { id:'intel_feed', label:'Intel Feed', color:'#00D4FF', type:'panel', on:false, default:false, opacity:1, category:'advanced', badge:'LIVE', sub:'Real-time events from all sources' },
-  { id:'flood_extent', label:'Flood Extent Mapping', color:'#3b82f6', type:'tile', on:false, default:false, opacity:0.6, category:'advanced', badge:'KEY' },
-  { id:'aerosol_index', label:'Aerosol Index', color:'#6b7280', type:'tile', on:false, default:false, opacity:0.6, category:'advanced' },
-  { id:'so2_index', label:'Sulfur Dioxide', color:'#eab308', type:'tile', on:false, default:false, opacity:0.6, category:'advanced' },
-  { id:'co_index', label:'Carbon Monoxide', color:'#6b7280', type:'tile', on:false, default:false, opacity:0.6, category:'advanced' },
-  { id:'dust_score', label:'Dust Score', color:'#a16207', type:'tile', on:false, default:false, opacity:0.6, category:'advanced' },
-  { id:'dt_buildings', label:'3D Buildings (OSM)', color:'#00ff88', type:'3dtiles', on:false, default:false, opacity:1, category:'advanced', sub:'OpenStreetMap 3D worldwide' },
-];
+// Build LAYER_DEFS from config, applying legacy defaults
+const LAYER_DEFS: LayerItem[] = LAYER_CATEGORIES.map(lc => {
+  const def = LEGACY_DEFAULTS[lc.id];
+  const isDefault = def?.on === true;
+  return {
+    id: lc.id,
+    label: lc.label,
+    color: lc.color,
+    type: lc.type,
+    on: def?.on === true,
+    default: isDefault,
+    opacity: def?.opacity ?? 1,
+    category: lc.group,
+    sub: lc.sub,
+    badge: lc.badge,
+  };
+});
 
 const API_VAULT_STORAGE_KEY = 'liveglobe.apiVault.v1';
 const CESIUM_ION_ENV_TOKEN = (import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined)?.trim() ?? '';
@@ -467,7 +444,7 @@ function generateStormForecast(lat: number, lon: number, windSpeed: number, pres
   const spread72: [number, number, number] = [spread24 * 2, spread24 * 2, spread24 * 2];
   const radii72: [number, number, number] = [radii24[0] * 2, radii24[1] * 2.5, radii24[2] * 3.0];
   const cone24 = generateStormCone([lon, lat], heading, radii24, [spread24, spread24, spread24]);
-  const cone48 = generateStormCone([lon, lat], heading, radii48, spread48,);
+    const cone48 = generateStormCone([lon, lat], heading, radii48, spread48);
   const cone72 = generateStormCone([lon, lat], heading, radii72, spread72);
   const speedKmh = windSpeed * 1.60934;
   const dest24 = destinationPoint(lat, lon, radii24[1], heading);
@@ -621,14 +598,17 @@ export default function App() {
   const searchValueRef = useRef('');
   const timelineThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timelineLastUpdateRef = useRef<number>(0);
+  const pinCountRef = useRef(0);
   const entityStoreRef = useRef<Record<string, Cesium.Entity[]>>({});
   const dataStoreRef = useRef<Record<string, unknown[]>>({});
   const magnitudeScaleRef = useRef(1);
   const autoRefreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoRefreshSlowRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const issEntityRef = useRef<Cesium.Entity | null>(null);
   const issTrailRef = useRef<Cesium.SampledPositionProperty | null>(null);
   const issTimesRef = useRef<Cesium.JulianDate[]>([]);
   const issRenderTickRef = useRef<(() => void) | null>(null);
+  const issLoadingRef = useRef(false);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const alertsRef = useRef<EventAlert[]>([]);
   const notificationTimeoutsRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
@@ -638,6 +618,11 @@ export default function App() {
   const weatherAbortRef = useRef<AbortController | null>(null);
   const focusMarkerRef = useRef<Cesium.Entity | null>(null);
   const flightDrRef = useRef<FlightDeadReckoning | null>(null);
+  const adsbLolDrRef = useRef<FlightDeadReckoning | null>(null);
+  const adsbFiDrRef = useRef<FlightDeadReckoning | null>(null);
+  const flightawareDrRef = useRef<FlightDeadReckoning | null>(null);
+  const airlabsDrRef = useRef<FlightDeadReckoning | null>(null);
+  const aisTrackerRef = useRef<AisVesselTracker | null>(null);
   const entityTrackerRef = useRef<ReturnType<typeof createEntityTracker> | null>(null);
   const unlockInteractionRef = useRef<(() => void) | null>(null);
   const fpsFramesRef = useRef<number[]>([]);
@@ -723,9 +708,32 @@ export default function App() {
   /* ── Memo ── */
   const groupedLayers = useMemo(() => {
     const g: Record<string, LayerItem[]> = {};
+    const primaryIds = new Set([
+      'earthquakes', 'tectonic', 'seismic_waves', 'tsunami', 'heatmap',
+      'flight_tracks', 'airports', 'airspaces',
+      'ais_vessels', 'submarine_cables',
+      'space_debris', 'nasa_dsn', 'space_weather',
+      'lightning_strikes', 'severe_storms', 'wildfires',
+      'aurora_oval', 'dust', 'co_index', 'so2_index', 'temp_anomaly',
+      'volcanoes', 'floods', 'seaLakeIce',
+      'disaster_alerts', 'landslides', 'flood_extent', 'disaster_near_me',
+      'india_cctv', 'intel_feed', 'electricity_grid',
+      'population_impact', 'dt_buildings',
+      'animal_migrations', 'land_cover',
+      'nasa_gibs', 'night_lights', 'aerosol_index', 'dust_score',
+      'sea_ice', 'sea_temp', 'precipitation', 'wind', 'pressure',
+    ]);
     for (const l of layers) {
       if (!g[l.category]) g[l.category] = [];
       g[l.category].push(l);
+    }
+    for (const cat of Object.keys(g)) {
+      g[cat].sort((a, b) => {
+        const aPrio = primaryIds.has(a.id) ? 0 : 1;
+        const bPrio = primaryIds.has(b.id) ? 0 : 1;
+        if (aPrio !== bPrio) return aPrio - bPrio;
+        return 0;
+      });
     }
     return g;
   }, [layers]);
@@ -827,7 +835,15 @@ export default function App() {
       };
     }
     entityTrackerRef.current = createEntityTracker(v);
-    flightDrRef.current = new FlightDeadReckoning(v, (heading, color) => createPlaneIcon(heading, color));
+    flightDrRef.current = new FlightDeadReckoning(v);
+    adsbLolDrRef.current = new FlightDeadReckoning(v);
+    adsbFiDrRef.current = new FlightDeadReckoning(v);
+    flightawareDrRef.current = new FlightDeadReckoning(v);
+    airlabsDrRef.current = new FlightDeadReckoning(v);
+    const aisKey = apiVaultRef.current.aisStreamApiKey;
+    if (aisKey) {
+      aisTrackerRef.current = new AisVesselTracker(v, aisKey);
+    }
     v.scene.logarithmicDepthBuffer = true;
     v.clock.shouldAnimate = true;
     v.clock.multiplier = 1;
@@ -936,10 +952,17 @@ export default function App() {
         showInfoPanel(ent);
         const p = ent.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
         const layer = String(p?.layer ?? '');
-        if (layer === 'flight_tracks') entityTrackerRef.current?.track(ent, 'aircraft');
-        else if (layer === 'earthquakes') entityTrackerRef.current?.track(ent, 'earthquake');
-        else if (layer === 'india_cctv') entityTrackerRef.current?.track(ent, 'cctv');
+        const trackTypes: Record<string, TrackEntityType> = {
+          flight_tracks: 'aircraft',
+          earthquakes: 'earthquake',
+          india_cctv: 'cctv',
+          ais_vessels: 'ship',
+          space_debris: 'satellite',
+        };
+        entityTrackerRef.current?.track(ent, trackTypes[layer] ?? 'default');
       } else {
+        setInfoEntity(null);
+        entityTrackerRef.current?.untrack();
         const cart = v.camera.pickEllipsoid(click.position, v.scene.globe.ellipsoid);
         if (cart) {
           const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cart);
@@ -972,6 +995,20 @@ export default function App() {
         autoRefreshIntervalRef.current = setInterval(() => {
           void refreshLiveData(v);
         }, 60000);
+        // Slow-refresh groups (ocean, geology, space — data changes hourly+)
+        autoRefreshSlowRef.current = setInterval(() => {
+          void refreshGenericLayers(v, ['geology', 'space', 'ocean', 'argo', 'tides', 'usgs_water', 'ports']);
+        }, 300000);
+        // Pre-warm server cache for slow groups so first toggle is instant
+        const warmGroupLayers: Record<string, string> = {
+          ocean: '42_ndbc_buoy_data', argo: '31_argo_floats', tides: '31_noaa_tides_currents',
+          usgs_water: '27_usgs_nawqa', ports: '1_world_port_index',
+          geology: '5_usgs_mineral_deposits', space: '6_celestrak_gp_api',
+        };
+        Promise.all(Object.entries(warmGroupLayers).map(([, lid]) => {
+          const lc = LAYER_CATEGORIES.find(l => l.id === lid);
+          return lc ? fetchLayerData(lc).catch(() => {}) : Promise.resolve();
+        }));
         setLoadingProgress(100);
         setLoadingStatus('Ready');
         setTimeout(() => setLoading(false), 800);
@@ -1023,6 +1060,17 @@ export default function App() {
 
   const isContextMenuOpenRef = useRef(false);
   useEffect(() => { isContextMenuOpenRef.current = contextMenu.show; }, [contextMenu.show]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setInfoEntity(null);
+        entityTrackerRef.current?.untrack();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     if (cctvPulseEntityRef.current && viewerRef.current) {
@@ -1114,9 +1162,10 @@ export default function App() {
   }
 
   useEffect(() => {
-    // Poll social feed every 60 seconds if Intel Feed is enabled
     const timer = setInterval(() => {
-      void loadSocialFeed();
+      if (isLayerEnabled('intel_feed')) {
+        void loadSocialFeed();
+      }
     }, 60000);
     return () => clearInterval(timer);
   }, []);
@@ -1169,7 +1218,7 @@ export default function App() {
       if (!data.states?.length) throw new Error('OpenSky returned no states');
       flightDrRef.current?.updateFromApi(data.states);
       flightDrRef.current?.start();
-      showNotification(`Loaded ${Math.min(data.states.length, 500)} live flight tracks`, 'success');
+      showNotification(`Loaded ${data.states.length} live flight tracks`, 'success');
     } catch (error) {
       if (!isLayerEnabled('flight_tracks')) return;
       recordFeedError('flights', error);
@@ -1188,10 +1237,14 @@ export default function App() {
     setIntelFeed(sliced);
   }
 
+  const loadGenRef = useRef<Record<string, number>>({});
+
   async function loadEarthquakes(viewer: Cesium.Viewer) {
-    removeLayerEntities('earthquakes');
+    const gen = (loadGenRef.current['earthquakes'] = (loadGenRef.current['earthquakes'] ?? 0) + 1);
     try {
       const geo = await apiGet<{ features: UsgsFeature[] }>('/earthquakes');
+      if (loadGenRef.current['earthquakes'] !== gen) return;
+      removeLayerEntities('earthquakes');
       const features = geo.features
         .filter(f => Number(f.properties?.mag ?? 0) >= 2.5)
         .slice(0, 120);
@@ -1331,18 +1384,18 @@ export default function App() {
 
   async function loadSpaceWeather(viewer: Cesium.Viewer) {
     try {
-      // Remove old space_weather entities before creating new ones
       const oldEnts = entityStoreRef.current['space_weather'];
       if (oldEnts) oldEnts.forEach(e => viewer.entities.remove(e));
       entityStoreRef.current['space_weather'] = [];
 
       const rows = await apiGet<string[][]>('/space-weather/kp');
       const recent = rows.slice(-5).reverse();
+      const enabled = isLayerEnabled('space_weather');
       const spaceEnts = recent.map((row, i) => {
         const kp = Number(row[1] ?? 0);
         const lat = 65 - i * 5;
         const lon = -95 + i * 30;
-        if (isLayerEnabled('space_weather')) {
+        if (enabled) {
           pushIntelFeed({
             id: `kp-${row[0]}`,
             title: `Geomagnetic Kp ${kp}`,
@@ -1360,12 +1413,10 @@ export default function App() {
           billboard: { image: createPulsingDotCanvas('#f97316', 18), width: 18, height: 18,
             heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
           properties: { layer: 'space_weather', kpIndex: kp, name: `Kp ${kp}`, lon, lat, time: Date.now() },
+          show: enabled,
         });
       });
       entityStoreRef.current['space_weather'] = spaceEnts;
-      if (!isLayerEnabled('space_weather')) {
-        setLayerEntitiesVisible('space_weather', false);
-      }
     } catch (err) {
       recordFeedError('space weather', err);
     }
@@ -1427,6 +1478,10 @@ export default function App() {
       await loadEonetEvents(viewer);
     }
     if (isLayerEnabled('flight_tracks')) await loadFlightTracks(viewer);
+    if (isLayerEnabled('2_adsb_lol')) await loadAdsbLolFlights(viewer);
+    if (isLayerEnabled('2_adsb_fi')) await loadAdsbFiFlights(viewer);
+    if (isLayerEnabled('2_flightaware_aeroapi')) await loadFlightawareFlights(viewer);
+    if (isLayerEnabled('2_airlabs_api')) await loadAirlabsFlights(viewer);
     if (isLayerEnabled('lightning_strikes')) await loadLightningStrikes(viewer);
     if (isLayerEnabled('aurora_oval')) await loadAuroraOval(viewer);
     if (isLayerEnabled('space_weather')) await loadSpaceWeather(viewer);
@@ -1444,7 +1499,33 @@ export default function App() {
         console.warn('Failed to refresh NASA DSN:', err);
       }
     }
+    // Refresh generic layers with fast-changing data
+    await refreshGenericLayers(viewer, ['seismic', 'hazards', 'weather', 'atmosphere']);
     viewer.scene.requestRender();
+  }
+
+  async function refreshGenericLayers(viewer: Cesium.Viewer, groups: string[]) {
+    const groupSet = new Set(groups);
+    for (const layer of LAYER_CATEGORIES) {
+      if (!isLayerEnabled(layer.id)) continue;
+      if (!groupSet.has(layer.group)) continue;
+      if (layer.type === 'tile' || layer.type === 'effect' || layer.type === 'panel' || layer.type === '3dtiles') continue;
+      // Skip layers with explicit handlers already refreshed above
+      if (layer.id === 'earthquakes' || layer.id === 'wildfires' || layer.id === 'severe_storms' ||
+          layer.id === 'volcanoes' || layer.id === 'floods' || layer.id === 'dust' || layer.id === 'seaLakeIce' ||
+          layer.id === 'space_debris' || layer.id === 'space_weather' || layer.id === 'lightning_strikes' ||
+          layer.id === 'aurora_oval' || layer.id === 'disaster_alerts') continue;
+      if (layer.group === 'weather' && layer.type !== 'tile' && layer.type !== 'effect') continue;
+      try {
+        const items = await fetchLayerData(layer);
+        if (!isLayerEnabled(layer.id)) return;
+        removeLayerEntities(layer.id);
+        if (items.length) {
+          const ents = renderLayer(viewer, layer, items);
+          entityStoreRef.current[layer.id] = ents;
+        }
+      } catch { /* skip */ }
+    }
   }
 
   function updateCounts() {
@@ -2029,7 +2110,6 @@ export default function App() {
     const v = viewerRef.current;
     if (!v) return;
 
-    // Clear old debris orbit lines
     if (selectedDebrisOrbitEntityRef.current) {
       v.entities.remove(selectedDebrisOrbitEntityRef.current);
       selectedDebrisOrbitEntityRef.current = null;
@@ -2161,6 +2241,7 @@ export default function App() {
 
     for (let i = 0; i < 4 && tsunamiEnabled; i++) {
       setTimeout(() => {
+        if (!isLayerEnabled('tsunami')) return;
         const c = Cesium.Color.fromCssColorString(colors[i]);
         const ring = v.entities.add({
           position: Cesium.Cartesian3.fromDegrees(lon, lat),
@@ -2298,7 +2379,7 @@ export default function App() {
     setNotifications(prev => [...prev, { id, text, severity }]);
     const t = setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
-      try { delete notificationTimeoutsRef.current[id]; } catch { /* ignore */ }
+      delete notificationTimeoutsRef.current[id];
     }, 2000);
     notificationTimeoutsRef.current[id] = t;
   }
@@ -2394,9 +2475,12 @@ export default function App() {
     const v = viewerRef.current;
     if (!v) return;
     const time = new Date(timeMs);
+    const ALWAYS_VISIBLE = new Set(['tectonic', 'airports', 'airspaces', 'submarine_cables', 'nasa_dsn', 'pin', 'focus']);
     for (const entity of v.entities.values) {
       const props = entity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
       if (!props?.time) continue;
+      const layer = String(props.layer ?? '');
+      if (ALWAYS_VISIBLE.has(layer)) continue;
       const entityTime = new Date(props.time as number);
       const diff = Math.abs(entityTime.getTime() - time.getTime());
       const visible = diff < 3600000;
@@ -2408,7 +2492,14 @@ export default function App() {
     const v = viewerRef.current;
     if (!v) return;
     for (const entity of v.entities.values) {
-      if (entity.show !== undefined) entity.show = true;
+      const props = entity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+      const layer = String(props?.layer ?? '');
+      const layerState = layersRef.current.find(l => l.id === layer);
+      if (layerState) {
+        entity.show = layerState.on;
+      } else if (entity.show !== undefined) {
+        entity.show = true;
+      }
     }
   }
 
@@ -2447,7 +2538,7 @@ export default function App() {
     } catch (e) {
       console.error('Imagery error:', e);
     }
-  }, []);
+  }, [cesiumIonToken]);
 
   /* ═════════════════════════════════════════════════════════════════
      WEATHER CARDS
@@ -2455,7 +2546,7 @@ export default function App() {
 
   const addWeatherCard = useCallback((lat: number, lon: number) => {
     const id = `wc_${Date.now()}`;
-    const card: WeatherCardData = { id, lat, lon, temp: 0, desc: '' };
+    const card: WeatherCardData = { id, lat, lon, temp: 0, humidity: 0, windSpeed: 0, pressure: 0, precipitation: 0, desc: '' };
     weatherCardsRef.current.push(card);
     setWeatherCards(prev => [...prev, card]);
 
@@ -2488,19 +2579,27 @@ export default function App() {
     weatherAbortRef.current?.abort();
     const controller = new AbortController();
     weatherAbortRef.current = controller;
-    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code`, { signal: controller.signal })
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,precipitation,pressure_msl,wind_speed_10m,weather_code`, { signal: controller.signal })
       .then(r => r.json())
-      .then((data: {current: {temperature_2m:number;relative_humidity_2m:number;wind_speed_10m:number;weather_code:number}}) => {
+      .then((data: {current: {temperature_2m:number;relative_humidity_2m:number;precipitation:number;pressure_msl:number;wind_speed_10m:number;weather_code:number}}) => {
         if (controller.signal.aborted) return;
         const c = data.current;
         setWeatherCards(prev => prev.map(wc =>
-          wc.id === id ? { ...wc, temp: c.temperature_2m, desc: getWeatherDesc(c.weather_code) } : wc
+          wc.id === id ? {
+            ...wc,
+            temp: c.temperature_2m,
+            humidity: c.relative_humidity_2m,
+            precipitation: c.precipitation,
+            pressure: c.pressure_msl,
+            windSpeed: c.wind_speed_10m,
+            desc: getWeatherDesc(c.weather_code),
+          } : wc
         ));
       })
       .catch(() => {
         if (controller.signal.aborted) return;
         setWeatherCards(prev => prev.map(wc =>
-          wc.id === id ? { ...wc, temp: 22, desc: 'Clear sky' } : wc
+          wc.id === id ? { ...wc, temp: 0, humidity: 0, windSpeed: 0, pressure: 0, precipitation: 0, desc: 'Unavailable' } : wc
         ));
       });
   }, []);
@@ -2545,6 +2644,8 @@ export default function App() {
     });
 
     issTimerRef.current = setInterval(() => {
+      if (issLoadingRef.current) return;
+      issLoadingRef.current = true;
       apiGet<{ latitude: number; longitude: number }>('/iss')
         .then((data) => {
           if (!issEntityRef.current && !issTrailRef.current) return;
@@ -2553,7 +2654,8 @@ export default function App() {
           trail.addSample(time, pos);
           issTimesRef.current.push(time);
           if (issTimesRef.current.length > 50) {
-            trail.removeSample(issTimesRef.current.shift()!);
+            const ts = issTimesRef.current.shift();
+            if (ts) trail.removeSample(ts);
           }
 
           if (!issEntityRef.current) {
@@ -2575,7 +2677,8 @@ export default function App() {
         })
         .catch(() => {
           showNotification('ISS position feed unavailable', 'warning');
-        });
+        })
+        .finally(() => { issLoadingRef.current = false; });
     }, 5000);
   }, []);
 
@@ -2767,6 +2870,23 @@ export default function App() {
     });
   }, []);
 
+  function loadGenericLayer(viewer: Cesium.Viewer, layerId: string) {
+    const layer = LAYER_CATEGORIES.find(l => l.id === layerId);
+    if (!layer) return;
+    if (layer.type === 'tile' || layer.type === 'effect' || layer.type === 'panel' || layer.type === '3dtiles') return;
+    if (entityStoreRef.current[layerId]?.length) {
+      setLayerEntitiesVisible(layerId, true);
+      return;
+    }
+    fetchLayerData(layer).then(items => {
+      if (!isLayerEnabled(layerId) || !items.length) return;
+      const ents = renderLayer(viewer, layer, items);
+      if (ents.length) {
+        entityStoreRef.current[layerId] = ents;
+      }
+    }).catch((e: any) => console.warn(`Failed to load generic layer ${layerId}:`, e));
+  }
+
   function loadLayerData(layerId: string) {
     const v = viewerRef.current;
     if (!v) return;
@@ -2808,6 +2928,42 @@ export default function App() {
     } else if (layerId === 'flight_tracks') {
       if (!showExisting('flight_tracks')) void loadFlightTracks(v);
       return;
+    } else if (layerId === '2_adsb_lol') {
+      if (!showExisting('2_adsb_lol')) void loadAdsbLolFlights(v);
+      return;
+    } else if (layerId === '2_adsb_fi') {
+      if (!showExisting('2_adsb_fi')) void loadAdsbFiFlights(v);
+      return;
+    } else if (layerId === '2_flightaware_aeroapi') {
+      if (!showExisting('2_flightaware_aeroapi')) void loadFlightawareFlights(v);
+      return;
+    } else if (layerId === '2_airlabs_api') {
+      if (!showExisting('2_airlabs_api')) void loadAirlabsFlights(v);
+      return;
+    } else if (layerId === '2_openflights') {
+      if (!showExisting('2_openflights')) void loadOpenFlights(v);
+      return;
+    } else if (layerId === '29_tokyo_vaac') {
+      if (!showExisting('29_tokyo_vaac')) void loadVolcanicLayer(v, '29_tokyo_vaac', '/vaac/tokyo');
+      return;
+    } else if (layerId === '29_anchorage_vaac') {
+      if (!showExisting('29_anchorage_vaac')) void loadVolcanicLayer(v, '29_anchorage_vaac', '/vaac/anchorage');
+      return;
+    } else if (layerId === '29_washington_vaac') {
+      if (!showExisting('29_washington_vaac')) void loadVolcanicLayer(v, '29_washington_vaac', '/vaac/washington');
+      return;
+    } else if (layerId === '29_wovodat') {
+      if (!showExisting('29_wovodat')) void loadVolcanicLayer(v, '29_wovodat', '/wovodat');
+      return;
+    } else if (layerId === '29_nasa_so2_monitoring') {
+      if (!showExisting('29_nasa_so2_monitoring')) void loadVolcanicLayer(v, '29_nasa_so2_monitoring', '/nasa-so2');
+      return;
+    } else if (layerId === '29_noaa_so2_portal') {
+      if (!showExisting('29_noaa_so2_portal')) void loadVolcanicLayer(v, '29_noaa_so2_portal', '/noaa-so2');
+      return;
+    } else if (layerId === '29_volcano_discovery') {
+      if (!showExisting('29_volcano_discovery')) void loadVolcanicLayer(v, '29_volcano_discovery', '/volcano-discovery');
+      return;
     } else if (layerId === 'space_debris') {
       if (!showExisting('space_debris')) void loadSpaceDebris(v);
       return;
@@ -2845,14 +3001,38 @@ export default function App() {
     } else if (layerId === 'tsunami') {
       showExisting('tsunami');
       setShowTsunamiLegend(true);
+    } else if (['12_nhc_tropical_cyclone_data','12_ibtracs'].includes(layerId)) {
+      if (!showExisting(layerId)) void loadWeatherStorms(v, layerId);
+      return;
+    } else if (layerId === '26_us_drought_monitor') {
+      if (!showExisting(layerId)) void loadWeatherDrought(v, layerId);
+      return;
+    } else if (layerId === '64_nexrad_level_ii') {
+      if (!showExisting(layerId)) void loadWeatherRadar(v, layerId);
+      return;
+    } else if (layerId === '57_noaa_cpc') {
+      if (!showExisting(layerId)) void loadClimateIndices(v, layerId);
+      return;
     } else {
-      const wmsProvider = getNasaGibsProvider(layerId);
+      const layerDef = LAYER_DEFS.find(l => l.id === layerId);
+      if (layerDef?.category === 'weather' && layerDef.type !== 'tile' && layerDef.type !== 'effect') {
+        return; // Weather data available via right-click context menu only
+      }
+      const wmsProvider = getNasaGibsProvider(layerId) || getOceanTileWmsProvider(layerId);
       if (wmsProvider) {
         if (!overlayImageryLayersRef.current[layerId]) {
           const imgLayer = v.scene.imageryLayers.addImageryProvider(wmsProvider);
           const defOpacity = LAYER_DEFS.find(l => l.id === layerId)?.opacity ?? 1.0;
           imgLayer.alpha = layerOpacity[layerId] ?? defOpacity;
           overlayImageryLayersRef.current[layerId] = imgLayer;
+          let lastWmsError = 0;
+          wmsProvider.errorEvent.addEventListener((err: any) => {
+            const now = Date.now();
+            if (lastWmsError + 120000 < now) {
+              lastWmsError = now;
+              console.warn(`WMS tile layer "${layerId}" error:`, err?.message);
+            }
+          });
         }
       } else {
         if (layerId === 'airspaces' && !entityStoreRef.current['airspaces']?.length) {
@@ -2863,24 +3043,28 @@ export default function App() {
               setLayerEntitiesVisible('airspaces', true);
             })
             .catch(err => showNotification('Failed to load real airspaces', 'error'));
-        } else if (layerId === 'ais_vessels' && !entityStoreRef.current['ais_vessels']?.length) {
-          const key = apiVaultRef.current.aisStreamApiKey;
-          if (!key) {
-            showNotification('AISStream API Key required. Add it in settings.', 'warning');
-            setTimeout(() => toggleLayer('ais_vessels'), 10);
+          } else if (layerId === 'ais_vessels') {
+          const startTracker = (tracker: AisVesselTracker) => {
+            tracker.setStatusHandler((msg, type) => showNotification(msg, type));
+            tracker.start();
+          };
+          if (aisTrackerRef.current) {
+            startTracker(aisTrackerRef.current);
           } else {
-            showNotification('Connecting to live AIS stream...', 'info');
-            loadAisVessels(v, key)
-              .then(entities => {
-                if (!isLayerEnabled('ais_vessels')) return;
-                entityStoreRef.current['ais_vessels'] = entities;
-                setLayerEntitiesVisible('ais_vessels', true);
-                showNotification(`Loaded ${entities.length} live vessels`, 'success');
-              })
-              .catch(err => showNotification(err.message || 'AIS connection failed', 'error'));
+            const key = apiVaultRef.current.aisStreamApiKey;
+            if (!key) {
+              showNotification('AISStream API Key required. Add it in settings.', 'warning');
+              setTimeout(() => toggleLayer('ais_vessels'), 10);
+            } else {
+              aisTrackerRef.current = new AisVesselTracker(v, key);
+              startTracker(aisTrackerRef.current);
+            }
           }
+          return;
         } else if (entityStoreRef.current[layerId]?.length) {
           setLayerEntitiesVisible(layerId, true);
+        } else {
+          loadGenericLayer(v, layerId);
         }
       }
     }
@@ -2893,6 +3077,10 @@ export default function App() {
       if (v) v.dataSources.remove(submarineCablesDataSourceRef.current, true);
       submarineCablesDataSourceRef.current = null;
       entityStoreRef.current['submarine_cables'] = [];
+    }
+    if (layerId === 'ais_vessels') {
+      aisTrackerRef.current?.stop();
+      aisTrackerRef.current?.clear();
     }
     if (layerId === 'airspaces' && v) {
       // Remove airspace entities that were added directly to viewer.entities
@@ -2980,6 +3168,18 @@ export default function App() {
     }
     if (layerId === 'flight_tracks') {
       flightDrRef.current?.clear();
+    }
+    if (layerId === '2_adsb_lol') {
+      adsbLolDrRef.current?.clear();
+    }
+    if (layerId === '2_adsb_fi') {
+      adsbFiDrRef.current?.clear();
+    }
+    if (layerId === '2_flightaware_aeroapi') {
+      flightawareDrRef.current?.clear();
+    }
+    if (layerId === '2_airlabs_api') {
+      airlabsDrRef.current?.clear();
     }
     if (layerId === 'weather_cards' && v) {
       const ents = entityStoreRef.current['weather_cards'];
@@ -3288,6 +3488,179 @@ export default function App() {
     }
   }
 
+  function getApiKey(keyName: string): string {
+    try {
+      const stored = localStorage.getItem('liveglobe.apiKeys.v1');
+      if (stored) {
+        const parsed = JSON.parse(stored) as Record<string, string>;
+        return parsed[keyName] || '';
+      }
+    } catch { /* ignore */ }
+    return '';
+  }
+
+  async function loadAviationLayer(
+    viewer: Cesium.Viewer,
+    layerId: string,
+    apiPath: string,
+    drRef: { current: FlightDeadReckoning | null },
+  ) {
+    drRef.current?.clear();
+    removeLayerEntities(layerId);
+    try {
+      const headers = layerId === '2_flightaware_aeroapi'
+        ? { headers: { 'x-aeroapi-key': getApiKey('FLIGHTAWARE_AEROAPI_KEY') || '' } }
+        : layerId === '2_airlabs_api'
+          ? { headers: { 'x-airlabs-key': getApiKey('AIRLABS_API_KEY') || '' } }
+          : undefined;
+      const data = await apiGet<{ states?: unknown[][] | null }>(apiPath, headers);
+      if (!isLayerEnabled(layerId)) return;
+      if (!data.states?.length) throw new Error(`${layerId} returned no states`);
+      drRef.current?.updateFromApi(data.states);
+      drRef.current?.start();
+      showNotification(`Loaded ${data.states.length} ${layerId.replace(/^\d+_/, '').replace(/_/g, ' ')} tracks`, 'success');
+    } catch (error) {
+      if (!isLayerEnabled(layerId)) return;
+      recordFeedError(layerId, error);
+      showNotification(`${layerId} feed unavailable`, 'warning');
+    }
+  }
+
+  async function loadAirlabsFlights(viewer: Cesium.Viewer) {
+    return loadAviationLayer(viewer, '2_airlabs_api', '/airlabs', airlabsDrRef);
+  }
+
+  async function loadFlightawareFlights(viewer: Cesium.Viewer) {
+    return loadAviationLayer(viewer, '2_flightaware_aeroapi', '/flightaware', flightawareDrRef);
+  }
+
+  async function loadAdsbLolFlights(viewer: Cesium.Viewer) {
+    return loadAviationLayer(viewer, '2_adsb_lol', '/adsb-lol', adsbLolDrRef);
+  }
+
+  async function loadAdsbFiFlights(viewer: Cesium.Viewer) {
+    return loadAviationLayer(viewer, '2_adsb_fi', '/adsb-fi', adsbFiDrRef);
+  }
+
+  async function loadOpenFlights(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['2_openflights'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('2_openflights', true);
+      return;
+    }
+    try {
+      const data = await apiGet<any>('/openflights');
+      if (!isLayerEnabled('2_openflights')) return;
+      removeLayerEntities('2_openflights');
+      const ents = addOpenFlightsEntities(viewer, data, '2_openflights');
+      entityStoreRef.current['2_openflights'] = ents;
+      viewer.scene.requestRender();
+      const airports = data.airports?.length || 0;
+      const routes = data.routes?.length || 0;
+      showNotification(`OpenFlights: ${airports} airports, ${routes} routes`, 'success');
+    } catch (err) {
+      recordFeedError('openflights', err);
+      showNotification('OpenFlights data unavailable', 'warning');
+    }
+  }
+
+  async function loadVolcanicLayer(viewer: Cesium.Viewer, layerId: string, apiPath: string) {
+    const existing = entityStoreRef.current[layerId];
+    if (existing?.length) {
+      setLayerEntitiesVisible(layerId, true);
+      return;
+    }
+    try {
+      const data = await apiGet<any>(apiPath);
+      if (!isLayerEnabled(layerId)) return;
+      removeLayerEntities(layerId);
+      let ents: Cesium.Entity[];
+      if (apiPath === '/nasa-so2' || apiPath === '/noaa-so2') {
+        ents = addSo2Entities(viewer, data, layerId);
+      } else if (apiPath === '/openflights') {
+        ents = addOpenFlightsEntities(viewer, data, layerId);
+      } else {
+        ents = addVaacAdvisoryEntities(viewer, data, layerId);
+      }
+      entityStoreRef.current[layerId] = ents;
+      viewer.scene.requestRender();
+      showNotification(`Loaded ${ents.length} ${layerId.replace(/^\d+_/, '').replace(/_/g, ' ')} points`, 'success');
+    } catch (err) {
+      recordFeedError(layerId, err);
+      showNotification(`${layerId} data unavailable`, 'warning');
+    }
+  }
+
+  async function loadWeatherStorms(viewer: Cesium.Viewer, layerId: string) {
+    const existing = entityStoreRef.current[layerId];
+    if (existing?.length) { setLayerEntitiesVisible(layerId, true); return; }
+    try {
+      removeLayerEntities(layerId);
+      const apiMap: Record<string, string> = {
+        '12_nhc_tropical_cyclone_data': '/weather/nhc',
+        '12_ibtracs': '/weather/ibtracs',
+      };
+      const path = apiMap[layerId] || '/weather/nhc';
+      const data = await apiGet<any>(path);
+      if (!isLayerEnabled(layerId)) return;
+      const items = data.storms || data.cyclones || data.activeStorms || [];
+      const ents = addStormTrackEntities(viewer, items, layerId);
+      entityStoreRef.current[layerId] = ents;
+      viewer.scene.requestRender();
+      showNotification(`Loaded ${ents.length} storm track features`, 'success');
+    } catch (err) {
+      recordFeedError(layerId, err);
+    }
+  }
+
+  async function loadWeatherDrought(viewer: Cesium.Viewer, layerId: string) {
+    const existing = entityStoreRef.current[layerId];
+    if (existing?.length) { setLayerEntitiesVisible(layerId, true); return; }
+    try {
+      removeLayerEntities(layerId);
+      const data = await apiGet<any>('/weather/drought');
+      if (!isLayerEnabled(layerId)) return;
+      const ents = addDroughtZoneEntities(viewer, data, layerId);
+      entityStoreRef.current[layerId] = ents;
+      viewer.scene.requestRender();
+      showNotification(`Loaded drought monitor zones`, 'success');
+    } catch (err) {
+      recordFeedError(layerId, err);
+    }
+  }
+
+  async function loadWeatherRadar(viewer: Cesium.Viewer, layerId: string) {
+    const existing = entityStoreRef.current[layerId];
+    if (existing?.length) { setLayerEntitiesVisible(layerId, true); return; }
+    try {
+      removeLayerEntities(layerId);
+      const data = await apiGet<any[]>('/weather/radar');
+      if (!isLayerEnabled(layerId)) return;
+      const ents = addRadarSiteEntities(viewer, data, layerId);
+      entityStoreRef.current[layerId] = ents;
+      viewer.scene.requestRender();
+      showNotification(`Loaded ${ents.length} radar sites`, 'success');
+    } catch (err) {
+      recordFeedError(layerId, err);
+    }
+  }
+
+  async function loadClimateIndices(viewer: Cesium.Viewer, layerId: string) {
+    const existing = entityStoreRef.current[layerId];
+    if (existing?.length) { setLayerEntitiesVisible(layerId, true); return; }
+    try {
+      removeLayerEntities(layerId);
+      const data = await apiGet<any>('/weather/climate-indices');
+      if (!isLayerEnabled(layerId)) return;
+      const ents = addClimateIndicesEntities(viewer, data, layerId);
+      entityStoreRef.current[layerId] = ents;
+      viewer.scene.requestRender();
+      showNotification(`Loaded climate indices`, 'success');
+    } catch (err) {
+      recordFeedError(layerId, err);
+    }
+  }
+
   function generateHeatmap(viewer: Cesium.Viewer) {
     if (activeHeatmapRef.current) return;
     const eqs = entityStoreRef.current['earthquakes'];
@@ -3337,7 +3710,7 @@ export default function App() {
       pressure: 'MERRA2_Surface_Pressure_Monthly',
       sea_ice: 'MODIS_Terra_Sea_Ice',
       sea_temp: 'GHRSST_L4_MUR_Sea_Surface_Temperature',
-      nasa_gibs: 'MODIS_Terra_CorrectedReflectance_TrueColor',
+      nasa_gibs: 'VIIRS_NOAA20_CorrectedReflectance_TrueColor',
       night_lights: 'VIIRS_Black_Marble',
       land_cover: 'MODIS_Combined_L3_IGBP_Land_Cover_Type_Annual',
       aerosol_index: 'OMPS_Aerosol_Index',
@@ -3345,16 +3718,112 @@ export default function App() {
       co_index: 'MOPITT_CO_Daily_Total_Column_Day',
       dust_score: 'MODIS_Terra_Aerosol',
       flood_extent: 'MODIS_Combined_Flood_1-Day',
+      // Weather imagery layers via GIBS
+      '12_nhc_tropical_cyclone_data': 'GOES-East_ABI_Band13_Clean_IR',
+      '12_ibtracs': 'MODIS_Terra_Sea_Ice',
+      '26_us_drought_monitor': 'SMAP_Soil_Moisture',
+      '57_noaa_cpc': 'MERRA2_Surface_Air_Temperature_Monthly',
+      '64_nexrad_level_ii': 'GOES-East_ABI_Band14_IR',
+      // Section 3 — Satellite Imagery & Earth Observation (each a unique GIBS product)
+      '3_planetary_computer_stac': 'MODIS_Terra_CorrectedReflectance_TrueColor',
+      '3_aws_earth_search': 'MODIS_Aqua_CorrectedReflectance_TrueColor',
+      '3_copernicus_data_space': 'MODIS_Terra_CorrectedReflectance_Bands721',
+      '3_usgs_earthexplorer': 'MODIS_Terra_SurfaceReflectance_Bands143',
+      '3_usgs_appeears': 'MODIS_Terra_Land_Surface_Temp_Day',
+      '3_veda_dashboard': 'VIIRS_SNPP_CorrectedReflectance_TrueColor',
+      '3_jaxa_g_portal': 'MODIS_Terra_AOD_Deep_Blue_Combined',
+      '3_jaxa_himawari_monitor': 'MODIS_Terra_Cloud_Top_Height_Day',
+      '3_noaa_goes_r_series': 'MODIS_Terra_Brightness_Temp_Band31_Day',
+      '3_landsat_look': 'MODIS_Terra_SurfaceReflectance_Bands721',
+      '3_planet_labs_open_data': 'MODIS_Terra_Cloud_Effective_Radius',
+      '3_openaerialmap': 'MODIS_Terra_Cloud_Fraction_Day',
+      '3_bhuvan_isro': 'MODIS_Terra_Cloud_Optical_Thickness',
+      '3_air_centre_eo_catalog': 'AIRS_L2_Dust_Score_Day',
+      '3_aster_gdem': 'ASTER_GDEM_Color_Index',
+      '3_srtm': 'MODIS_Terra_CorrectedReflectance_Bands367',
+      '3_gebco': 'GHRSST_L4_MUR_Sea_Surface_Temperature',
+      '3_modis_web_services': 'MODIS_Terra_Water_Vapor_5km_Day',
+      '3_viirs_active_fires': 'MODIS_Terra_Thermal_Anomalies_All',
+      '3_global_surface_water_explorer': 'MODIS_Combined_Flood_1-Day',
+      // Section 70 — InSAR & Ground Deformation
+      '70_comet': 'VIIRS_SNPP_Thermal_Anomalies_375m_All',
+      '70_comet_licsar': 'MODIS_Terra_Cloud_Phase_Infrared_Day',
+      '70_licsar': 'MODIS_Terra_L3_Sea_Ice_Daily',
+      '70_asf_sar_data': 'AIRS_L2_Carbon_Monoxide_500hPa_Volume_Mixing_Ratio_Day',
+      '70_unavco_sar': 'MODIS_Terra_NDSI_Snow_Cover',
+      '70_squeesar': 'VIIRS_SNPP_L2_Sea_Surface_Temp_Day',
+      '70_mintpy': 'MODIS_Terra_EVI_8Day',
+      // Ocean tile WMS replacements (original servers dead/unavailable)
+      '50_emodnet_chemistry': 'VIIRS_SNPP_L2_Chlorophyll_A',
+      '50_globcolour': 'MODIS_Aqua_L2_Chlorophyll_A',
+
     };
     
     const wmsLayer = layerMap[layerId];
     if (!wmsLayer) return null;
 
+    const params: Record<string, string> = { TRANSPARENT: 'true', FORMAT: 'image/png' };
+    const time = getLatestGibsTime(wmsLayer);
+    if (time) params.TIME = time;
+
     return new Cesium.WebMapServiceImageryProvider({
       url: 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
       layers: wmsLayer,
-      parameters: { TRANSPARENT: 'true', FORMAT: 'image/png' },
+      parameters: params,
       enablePickFeatures: false
+    });
+  }
+
+  const gibsTimeCache = new Map<string, string | null>();
+
+  function getLatestGibsTime(layer: string): string | null {
+    if (layer === 'VIIRS_Black_Marble') return null;
+    const cached = gibsTimeCache.get(layer);
+    if (cached !== undefined) return cached;
+    fetchLatestGibsTime(layer);
+    return null;
+  }
+
+  async function fetchLatestGibsTime(layer: string) {
+    try {
+      const resp = await fetch('https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities', { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) return;
+      const xml = await resp.text();
+      const layerMatch = xml.match(new RegExp(`<Layer[^>]*>[\\s\\S]*?<Name>${escapeRegex(layer)}</Name>([\\s\\S]*?)</Layer>`));
+      if (!layerMatch) return;
+      const timeDim = layerMatch[1].match(/<Dimension[^>]*name="time"[^>]*>([\s\S]*?)<\/Dimension>/);
+      if (!timeDim) return;
+      const ranges = timeDim[1].trim().split(',');
+      let latest = '';
+      for (const range of ranges) {
+        const parts = range.trim().split('/');
+        if (parts.length >= 2) {
+          const end = parts[1].trim();
+          if (end > latest) latest = end;
+        }
+      }
+      if (latest) gibsTimeCache.set(layer, latest);
+    } catch { /* ignore */ }
+  }
+
+  function escapeRegex(s: string) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function getOceanTileWmsProvider(layerId: string) {
+    type WmsCfg = { url: string; layers: string; format?: string };
+    const oceanWms: Record<string, WmsCfg> = {
+      '50_gebco': { url: 'https://wms.gebco.net/mapserv?', layers: 'GEBCO_LATEST_2' },
+      '50_emodnet_bathymetry': { url: 'https://ows.emodnet-bathymetry.eu/ows', layers: 'emodnet:mean' },
+
+    };
+    const cfg = oceanWms[layerId];
+    if (!cfg) return null;
+    return new Cesium.WebMapServiceImageryProvider({
+      url: cfg.url,
+      layers: cfg.layers,
+      parameters: { transparent: 'true', format: cfg.format || 'image/png' },
+      enablePickFeatures: false,
     });
   }
 
@@ -3441,6 +3910,7 @@ export default function App() {
       }
 
       flightDrRef.current?.clear();
+      aisTrackerRef.current?.clear();
 
       setInfoEntity(null);
       entityTrackerRef.current?.untrack();
@@ -3492,6 +3962,11 @@ export default function App() {
     const next = prevLayers.map(l => ({ ...l, on: l.default }));
     layersRef.current = next;
     setLayers(next);
+    setShowPopulationImpact(false);
+    setShowStormLegend(false);
+    setShowSmokeLegend(false);
+    setShowTsunamiLegend(false);
+    setShowHeatmapLegend(false);
     for (const prev of prevLayers) {
       const wasOn = prev.on;
       const isOn = prev.default;
@@ -3502,7 +3977,7 @@ export default function App() {
       }
     }
     refreshDerivedOverlays();
-  }, [layers]);
+  }, []);
 
   /* ═════════════════════════════════════════════════════════════════
      AI CHAT
@@ -3628,7 +4103,7 @@ export default function App() {
       focusLocation(cm.lat, cm.lon, { label: 'Context location', color: '#60a5fa', height: 150 });
     } else if (action === 'pin') {
       const pinId = `pin_${Date.now()}`;
-      const added = v.entities.add({
+      v.entities.add({
         position: Cesium.Cartesian3.fromDegrees(cm.lon, cm.lat),
         name: 'Dropped Pin',
         billboard: { image: createPinIcon('#ef4444'), width: 24, height: 24,
@@ -3637,9 +4112,12 @@ export default function App() {
           font: '11px "JetBrains Mono"', fillColor: Cesium.Color.WHITE,
           pixelOffset: new Cesium.Cartesian2(0, -14) },
         properties: { layer: 'pin', lat: cm.lat, lon: cm.lon, id: pinId },
-      }) as Cesium.Entity;
-      entityStoreRef.current.pin = [...(entityStoreRef.current.pin ?? []), added];
-      setInfoEntity(added);
+      });
+      pinCountRef.current += 1;
+      if (pinCountRef.current > 50) {
+        const oldestPin = v.entities.values.find(e => e.properties?.getValue(Cesium.JulianDate.now())?.layer === 'pin');
+        if (oldestPin) { v.entities.remove(oldestPin); pinCountRef.current -= 1; }
+      }
       showNotification('Pin dropped', 'success');
     } else if (action === 'weather') {
       focusLocation(cm.lat, cm.lon, { label: 'Weather request', color: '#22d3ee', height: 150 });
@@ -3812,19 +4290,22 @@ export default function App() {
      ═════════════════════════════════════════════════════════════════ */
 
   const cleanupCesium = useCallback(() => {
+    Object.values(notificationTimeoutsRef.current).forEach(clearTimeout);
+    notificationTimeoutsRef.current = {};
     if (clockIntervalRef.current) clearInterval(clockIntervalRef.current);
     if (issTimerRef.current) clearInterval(issTimerRef.current);
     if (issRenderTickRef.current) { issRenderTickRef.current(); issRenderTickRef.current = null; }
     if (rotateTimerRef.current) clearInterval(rotateTimerRef.current);
     if (timelineRef.current.interval) clearInterval(timelineRef.current.interval);
     if (autoRefreshIntervalRef.current) clearInterval(autoRefreshIntervalRef.current);
+    if (autoRefreshSlowRef.current) clearInterval(autoRefreshSlowRef.current);
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchAbortRef.current?.abort();
     weatherAbortRef.current?.abort();
     if (screenSpaceHandlerRef.current) screenSpaceHandlerRef.current.destroy();
     seismicAnimationsRef.current.forEach(a => { if (a.interval) clearInterval(a.interval); });
     seismicAnimationsRef.current = [];
-    if (clickHandlerRef.current) clickHandlerRef.current();
+    if (clickHandlerRef.current) { clickHandlerRef.current(); clickHandlerRef.current = null; }
     if (viewerRef.current) {
       removeOsmBuildings(viewerRef.current);
       viewerRef.current.entities.removeAll();
@@ -3840,6 +4321,14 @@ export default function App() {
     entityTrackerRef.current = null;
     flightDrRef.current?.clear();
     flightDrRef.current = null;
+    adsbLolDrRef.current?.clear();
+    adsbLolDrRef.current = null;
+    adsbFiDrRef.current?.clear();
+    adsbFiDrRef.current = null;
+    flightawareDrRef.current?.clear();
+    flightawareDrRef.current = null;
+    airlabsDrRef.current?.clear();
+    airlabsDrRef.current = null;
     Object.keys(alertEntityRef.current).forEach(key => { delete alertEntityRef.current[key]; });
     disasterNearMeRequestedRef.current = false;
     if (geolocationWatchRef.current !== null) {
@@ -3865,64 +4354,6 @@ export default function App() {
     const hasCoords = p.lat != null && p.lon != null;
     const lat = hasCoords ? Number(p.lat) : 0;
     const lon = hasCoords ? Number(p.lon) : 0;
-
-    const closeInfoPanel = () => {
-      const v = viewerRef.current;
-      const selectedProps = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-      const selectedLayer = String(selectedProps?.layer ?? '');
-      const selectedLat = Number(selectedProps?.lat);
-      const selectedLon = Number(selectedProps?.lon);
-
-      if (v && focusMarkerRef.current) {
-        v.entities.remove(focusMarkerRef.current);
-        focusMarkerRef.current = null;
-      }
-
-      if (v && (selectedLayer === 'pin' || selectedLayer === 'focus')) {
-        const pins = entityStoreRef.current.pin ?? [];
-        entityStoreRef.current.pin = pins.filter((pin) => {
-          const pinProps = pin.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-          const pinLat = Number(pinProps?.lat);
-          const pinLon = Number(pinProps?.lon);
-          const isMatch = Number.isFinite(selectedLat) && Number.isFinite(selectedLon)
-            && Math.abs(pinLat - selectedLat) < 0.000001
-            && Math.abs(pinLon - selectedLon) < 0.000001;
-          if (isMatch) {
-            v.entities.remove(pin);
-          }
-          return !isMatch;
-        });
-      }
-
-      if (v && selectedLayer === 'weather_cards') {
-        const cards = entityStoreRef.current['weather_cards'] ?? [];
-        entityStoreRef.current['weather_cards'] = cards.filter((c) => {
-          const cProps = c.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-          const cLat = Number(cProps?.lat);
-          const cLon = Number(cProps?.lon);
-          const isMatch = Number.isFinite(selectedLat) && Number.isFinite(selectedLon)
-            && Math.abs(cLat - selectedLat) < 0.0001
-            && Math.abs(cLon - selectedLon) < 0.0001;
-          if (isMatch) {
-            v.entities.remove(c);
-          }
-          return !isMatch;
-        });
-
-        // Remove the weather card UI entry
-        try {
-          weatherCardsRef.current = weatherCardsRef.current.filter(wc => !(Math.abs(wc.lat - selectedLat) < 0.0001 && Math.abs(wc.lon - selectedLon) < 0.0001));
-          setWeatherCards(prev => prev.filter(wc => !(Math.abs(wc.lat - selectedLat) < 0.0001 && Math.abs(wc.lon - selectedLon) < 0.0001)));
-        } catch (e) {
-          // ignore
-        }
-      }
-
-      setInfoEntity(null);
-      if (selectedLayer === 'focus') {
-        setContextMenu(cm => ({ ...cm, show: false }));
-      }
-    };
 
     const rows: Array<{ key: string; val: string }> = [];
 
@@ -3963,6 +4394,23 @@ export default function App() {
       rows.push({ key: 'Location', val: location });
       rows.push({ key: 'Category', val: String(p.category ?? 'Public webcam') });
       rows.push({ key: 'Updated', val: `${new Date(updatedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST` });
+    } else if (px.temperature != null) {
+      rows.push({ key: 'Temp', val: `${Number(px.temperature).toFixed(1)}°C` });
+      rows.push({ key: 'Humidity', val: `${Number(px.humidity ?? 0).toFixed(0)}%` });
+      rows.push({ key: 'Rain', val: `${Number(px.precipitation ?? 0).toFixed(1)} mm` });
+      rows.push({ key: 'Wind', val: `${Number(px.windSpeed ?? 0).toFixed(1)} km/h` });
+      rows.push({ key: 'Pressure', val: `${Number(px.pressure ?? 0).toFixed(1)} hPa` });
+      rows.push({ key: 'Source', val: 'Open-Meteo' });
+    } else {
+      // Cesium InfoBox fallback: show all properties as key-value rows
+      for (const [key, val] of Object.entries(p)) {
+        if (['layer', 'title', 'name', 'callsign'].includes(key)) continue;
+        if (key === 'lat' || key === 'lon') continue;
+        const strVal = typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val ?? '');
+        if (strVal && strVal !== 'undefined' && strVal !== 'null') {
+          rows.push({ key: key.charAt(0).toUpperCase() + key.slice(1), val: strVal });
+        }
+      }
     }
     if (hasCoords) rows.push({ key: 'Coordinates', val: `${lat.toFixed(4)}, ${lon.toFixed(4)}` });
 
@@ -3976,7 +4424,7 @@ export default function App() {
               🎯
             </button>
           )}
-          <button className="info-close" onClick={closeInfoPanel}>✕</button>
+          <button className="info-close" onClick={() => { setInfoEntity(null); entityTrackerRef.current?.untrack(); }}>✕</button>
         </div>
         <div className="info-body">
           {rows.map((r, i) => (
@@ -3985,6 +4433,16 @@ export default function App() {
               <span className="info-val">{r.val}</span>
             </div>
           ))}
+
+          {infoEntity.description && (
+            <div className="info-description" dangerouslySetInnerHTML={{
+              __html: String(infoEntity.description.getValue(Cesium.JulianDate.now()))
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\n/g, '<br/>')
+            }} />
+          )}
 
           {layer === 'earthquakes' && Number(px.magnitude ?? 0) >= 4 && (
             <div className="sparkline-wrap">
@@ -4431,7 +4889,7 @@ export default function App() {
           </div>
         </div>
         <div className="sidebar-search">
-          <span className="sidebar-search-icon">🔍</span>
+          <span className="sidebar-search-icon">⌕</span>
           <input type="text" placeholder="Search data layers..." value={layerSearch}
             onChange={e => setLayerSearch(e.target.value)}
             onClick={e => e.stopPropagation()} />
@@ -4462,22 +4920,24 @@ export default function App() {
                         <div className="layer-label">{layer.label}</div>
                         {layer.sub && <div className="layer-sub">{layer.sub}</div>}
                       </div>
-                      {layer.badge && <span className={`layer-badge badge-${layer.badge.toLowerCase()}`}>{layer.badge}</span>}
-                      <div className="toggle">
-                        <input type="checkbox" checked={layer.on} onChange={e => { e.stopPropagation(); toggleLayer(layer.id); }} />
-                        <div className="toggle-slider" />
-                      </div>
-                      {layer.badge === 'LIVE' && <div className="layer-status">
-                        <div className="live-dot" />
-                        <span>Live</span>
-                      </div>}
-                      {layer.type === 'tile' && layer.on && (
-                        <div className="opacity-wrap">
-                          <span className="opacity-label">{(layerOpacity[layer.id] ?? layer.opacity) * 100 >> 0}%</span>
-                          <input type="range" min="0" max="100" value={((layerOpacity[layer.id] ?? layer.opacity) * 100) >> 0}
-                            onChange={e => { e.stopPropagation(); setLayerOpacity(prev => ({...prev,[layer.id]:parseInt(e.target.value)/100})); }} />
+                      <div className="layer-controls">
+                        {layer.badge && <span className={`layer-badge badge-${layer.badge.toLowerCase()}`}>{layer.badge}</span>}
+                        {layer.badge === 'LIVE' && <div className="layer-status">
+                          <div className="live-dot" />
+                          <span>Live</span>
+                        </div>}
+                        {layer.type === 'tile' && layer.on && (
+                          <div className="opacity-wrap">
+                            <span className="opacity-label">{(layerOpacity[layer.id] ?? layer.opacity) * 100 >> 0}%</span>
+                            <input type="range" min="0" max="100" value={((layerOpacity[layer.id] ?? layer.opacity) * 100) >> 0}
+                              onChange={e => { e.stopPropagation(); setLayerOpacity(prev => ({...prev,[layer.id]:parseInt(e.target.value)/100})); }} />
+                          </div>
+                        )}
+                        <div className="toggle">
+                          <input type="checkbox" checked={layer.on} onChange={e => { e.stopPropagation(); toggleLayer(layer.id); }} />
+                          <div className="toggle-slider" />
                         </div>
-                      )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -4756,11 +5216,15 @@ export default function App() {
           <div className="weather-card-header">
             <span className="weather-icon">🌡️</span>
             <div>
-              <div className="weather-temp">{wc.temp}°C</div>
+              <div className="weather-temp">{wc.temp > -999 ? `${wc.temp}°C` : 'N/A'}</div>
               <div className="weather-desc">{wc.desc}</div>
             </div>
           </div>
           <div className="weather-grid">
+            <div className="weather-item"><span className="weather-label">Humidity</span><span className="weather-value">{wc.humidity > 0 ? `${wc.humidity}%` : '-'}</span></div>
+            <div className="weather-item"><span className="weather-label">Wind</span><span className="weather-value">{wc.windSpeed > 0 ? `${wc.windSpeed} km/h` : '-'}</span></div>
+            <div className="weather-item"><span className="weather-label">Pressure</span><span className="weather-value">{wc.pressure > 0 ? `${wc.pressure} hPa` : '-'}</span></div>
+            <div className="weather-item"><span className="weather-label">Rain</span><span className="weather-value">{wc.precipitation > 0 ? `${wc.precipitation} mm` : '-'}</span></div>
             <div className="weather-item"><span className="weather-label">Lat</span><span className="weather-value">{wc.lat.toFixed(2)}°</span></div>
             <div className="weather-item"><span className="weather-label">Lon</span><span className="weather-value">{wc.lon.toFixed(2)}°</span></div>
           </div>

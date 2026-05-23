@@ -42,7 +42,9 @@ export async function loadAisVessels(viewer: Cesium.Viewer, apiKey: string): Pro
   return new Promise((resolve, reject) => {
     const socket = new WebSocket('wss://stream.aisstream.io/v0/stream');
     const entities: Cesium.Entity[] = [];
+    let settled = false;
     const timeout = setTimeout(() => {
+      settled = true;
       socket.close();
       if (entities.length === 0) reject(new Error('No vessels received from AISStream.'));
       else resolve(entities);
@@ -59,6 +61,7 @@ export async function loadAisVessels(viewer: Cesium.Viewer, apiKey: string): Pro
     };
 
     socket.onmessage = (event) => {
+      if (settled) return;
       try {
         const msg = JSON.parse(event.data);
         if (msg.MessageType === "PositionReport" && msg.Message?.PositionReport) {
@@ -77,7 +80,7 @@ export async function loadAisVessels(viewer: Cesium.Viewer, apiKey: string): Pro
                 height: 16,
                 heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
               },
-              properties: { layer: 'ais_vessels', ...report }
+              properties: { ...report, layer: 'ais_vessels' }
             });
             entities.push(ship);
           }
@@ -88,7 +91,10 @@ export async function loadAisVessels(viewer: Cesium.Viewer, apiKey: string): Pro
     };
 
     socket.onerror = (err) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
+      entities.forEach(e => viewer.entities.remove(e));
       reject(new Error('AISStream WebSocket error. Invalid API Key?'));
     };
   });
@@ -435,7 +441,15 @@ export function addAuroraEntities(viewer: Cesium.Viewer, auroraData: any): Cesiu
 }
 
 // 5. Render Global Submarine Cables (GeoJSON)
+const submarineCablesSourceRef = new WeakMap<Cesium.Viewer, Cesium.GeoJsonDataSource>();
+
 export async function loadSubmarineCablesDataSource(viewer: Cesium.Viewer, cablesGeoJson: any): Promise<Cesium.GeoJsonDataSource> {
+  // Remove previous data source to prevent accumulation
+  const prev = submarineCablesSourceRef.get(viewer);
+  if (prev) {
+    viewer.dataSources.remove(prev);
+  }
+
   const ds = await Cesium.GeoJsonDataSource.load(cablesGeoJson, {
     stroke: Cesium.Color.fromCssColorString('#06b6d4').withAlpha(0.7),
     strokeWidth: 2.5,
@@ -465,6 +479,7 @@ export async function loadSubmarineCablesDataSource(viewer: Cesium.Viewer, cable
   }
 
   viewer.dataSources.add(ds);
+  submarineCablesSourceRef.set(viewer, ds);
   return ds;
 }
 
