@@ -21,6 +21,7 @@ export async function loadAirspaces(viewer: Cesium.Viewer): Promise<Cesium.Entit
       entities.push(entity);
       viewer.entities.add(entity);
     }
+    viewer.scene.requestRender();
     return entities;
   } catch (err) {
     console.error('Airspaces error:', err);

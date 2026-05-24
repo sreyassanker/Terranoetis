@@ -12,7 +12,6 @@ import { FlightDeadReckoning, altitudeBandColor } from '@/rendering/flights';
 import { AisVesselTracker } from '@/rendering/ais';
 import {
   loadAirspaces,
-  loadAisVessels,
   addSpaceDebrisEntities,
   addNasaDsnEntities,
   addLightningEntities,
@@ -154,8 +153,6 @@ interface ApiVaultState {
   gemini: string;
   anthropic: string;
   cesiumIonAccessToken: string;
-  openSkyClientId: string;
-  openSkyClientSecret: string;
   sentinelHubClientId: string;
   sentinelHubClientSecret: string;
   marineTrafficApiKey: string;
@@ -198,8 +195,6 @@ const DEFAULT_API_VAULT: ApiVaultState = {
   gemini: '',
   anthropic: '',
   cesiumIonAccessToken: '',
-  openSkyClientId: '',
-  openSkyClientSecret: '',
   sentinelHubClientId: '',
   sentinelHubClientSecret: '',
   marineTrafficApiKey: '',
@@ -303,8 +298,6 @@ function hasAnyApiVaultValue(vault: ApiVaultState): boolean {
     vault.gemini.trim() ||
     vault.anthropic.trim() ||
     vault.cesiumIonAccessToken.trim() ||
-    vault.openSkyClientId.trim() ||
-    vault.openSkyClientSecret.trim() ||
     vault.sentinelHubClientId.trim() ||
     vault.sentinelHubClientSecret.trim() ||
     vault.marineTrafficApiKey.trim()
@@ -635,7 +628,6 @@ export default function App() {
   const tsunamiWavesRef = useRef<Cesium.Entity[]>([]);
   const tectonicEntitiesRef = useRef<Cesium.Entity[]>([]);
   const overlayImageryLayersRef = useRef<Record<string, Cesium.ImageryLayer>>({});
-  const openSkyTokenRef = useRef<{ token: string; expiresAt: number } | null>(null);
   const cctvPulseEntityRef = useRef<Cesium.Entity | null>(null);
   const nextAiMsgIdRef = useRef(1);
 
@@ -699,6 +691,7 @@ export default function App() {
   const disasterNearMeRequestedRef = useRef(false);
   const geolocationWatchRef = useRef<number | null>(null);
   const apiVaultRef = useRef<ApiVaultState>(initialApiVault);
+  const layerGenRef = useRef<Record<string, number>>({});
   const submarineCablesDataSourceRef = useRef<Cesium.GeoJsonDataSource | null>(null);
   const selectedDebrisOrbitEntityRef = useRef<Cesium.Entity | null>(null);
 
@@ -747,19 +740,15 @@ export default function App() {
     }
   }, [apiVault]);
 
-  useEffect(() => {
-    openSkyTokenRef.current = null;
-  }, [apiVault.openSkyClientId, apiVault.openSkyClientSecret]);
-
   const handleApiVaultSave = (keys: Record<string, string>) => {
+    // Persist flat key map so getApiKey (used for FlightAware/AirLabs) finds them
+    localStorage.setItem('liveglobe.apiKeys.v1', JSON.stringify(keys));
     // Map the saved keys to the ApiVaultState interface
     const newVault: ApiVaultState = {
       ...apiVault,
       gemini: keys['GOOGLE_GEMINI_API_KEY'] || apiVault.gemini,
       anthropic: keys['ANTHROPIC_API_KEY'] || apiVault.anthropic,
       cesiumIonAccessToken: keys['CESIUM_ION_ACCESS_TOKEN'] || apiVault.cesiumIonAccessToken,
-      openSkyClientId: keys['OPENSKY_CLIENT_ID'] || apiVault.openSkyClientId,
-      openSkyClientSecret: keys['OPENSKY_CLIENT_SECRET'] || apiVault.openSkyClientSecret,
       sentinelHubClientId: keys['SENTINEL_HUB_CLIENT_ID'] || apiVault.sentinelHubClientId,
       sentinelHubClientSecret: keys['SENTINEL_HUB_CLIENT_SECRET'] || apiVault.sentinelHubClientSecret,
       marineTrafficApiKey: keys['MARINE_TRAFFIC_API_KEY'] || apiVault.marineTrafficApiKey,
@@ -1170,58 +1159,24 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  async function getOpenSkyAuthHeaders() {
-    const { openSkyClientId, openSkyClientSecret } = apiVaultRef.current;
-    if (!openSkyClientId.trim() || !openSkyClientSecret.trim()) return null;
-
-    const cached = openSkyTokenRef.current;
-    if (cached && cached.expiresAt - Date.now() > 60_000) {
-      return { Authorization: `Bearer ${cached.token}` };
-    }
-
-    const resp = await fetch('https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: openSkyClientId.trim(),
-        client_secret: openSkyClientSecret.trim(),
-      }),
-    });
-
-    if (!resp.ok) {
-      throw new Error(`OpenSky auth failed (${resp.status})`);
-    }
-
-    const data = await resp.json() as { access_token?: string; expires_in?: number };
-    if (!data.access_token) {
-      throw new Error('OpenSky auth response missing token');
-    }
-
-    openSkyTokenRef.current = {
-      token: data.access_token,
-      expiresAt: Date.now() + (Number(data.expires_in ?? 3600) * 1000),
-    };
-
-    return { Authorization: `Bearer ${data.access_token}` };
-  }
-
   async function loadFlightTracks(viewer: Cesium.Viewer) {
     if (!isLayerEnabled('flight_tracks')) return;
     flightDrRef.current?.clear();
     removeLayerEntities('flight_tracks');
 
-    try {
-      const headers = await getOpenSkyAuthHeaders();
-      const data = await apiGet<{ states?: unknown[][] | null }>('/flights', headers ? { headers } : undefined);
-      if (!isLayerEnabled('flight_tracks')) return;
-      if (!data.states?.length) throw new Error('OpenSky returned no states');
-      flightDrRef.current?.updateFromApi(data.states);
-      flightDrRef.current?.start();
-      showNotification(`Loaded ${data.states.length} live flight tracks`, 'success');
-    } catch (error) {
-      if (!isLayerEnabled('flight_tracks')) return;
-      recordFeedError('flights', error);
+    const sources = ['/flights', '/adsb-fi', '/adsb-lol'];
+    for (const source of sources) {
+      try {
+        const data = await apiGet<{ states?: unknown[][] | null }>(source);
+        if (!isLayerEnabled('flight_tracks')) return;
+        if (data.states?.length) {
+          flightDrRef.current?.updateFromApi(data.states);
+          flightDrRef.current?.start();
+          viewer.scene.requestRender();
+          showNotification(`Loaded ${data.states.length} live flight tracks`, 'success');
+          return;
+        }
+      } catch { /* try next source */ }
     }
   }
 
@@ -1513,8 +1468,8 @@ export default function App() {
       // Skip layers with explicit handlers already refreshed above
       if (layer.id === 'earthquakes' || layer.id === 'wildfires' || layer.id === 'severe_storms' ||
           layer.id === 'volcanoes' || layer.id === 'floods' || layer.id === 'dust' || layer.id === 'seaLakeIce' ||
-          layer.id === 'space_debris' || layer.id === 'space_weather' || layer.id === 'lightning_strikes' ||
-          layer.id === 'aurora_oval' || layer.id === 'disaster_alerts') continue;
+          layer.id === 'space_debris' || layer.id === 'space_weather' || layer.id === 'nasa_dsn' ||
+          layer.id === 'lightning_strikes' || layer.id === 'aurora_oval' || layer.id === 'disaster_alerts') continue;
       if (layer.group === 'weather' && layer.type !== 'tile' && layer.type !== 'effect') continue;
       try {
         const items = await fetchLayerData(layer);
@@ -2843,31 +2798,30 @@ export default function App() {
      ═════════════════════════════════════════════════════════════════ */
 
   const toggleLayer = useCallback((layerId: string) => {
+    // Read BEFORE setLayers — the updater runs asynchronously, not synchronously
+    const wasOn = layersRef.current.find(l => l.id === layerId)?.on ?? false;
     setLayers(prev => {
-      const wasOn = prev.find(l => l.id === layerId)?.on ?? false;
-      let next: LayerItem[];
-
-      if (wasOn) {
-        next = prev.map(l => l.id === layerId ? { ...l, on: false } : l);
-      } else {
-        next = prev.map(l => l.id === layerId ? { ...l, on: true } : l);
-      }
-
+      const next = prev.map(l => l.id === layerId ? { ...l, on: !l.on } : l);
       layersRef.current = next;
-
-      const updated = next.find(l => l.id === layerId);
-      if (updated) {
-        if (updated.on) { loadLayerData(updated.id); }
-        else { hideLayerEntities(updated.id); }
-        if (updated.type === 'tile') { setPulsingLayer(updated.id); setTimeout(() => setPulsingLayer(null), 600); }
-      }
-
-      if (['severe_storms', 'storm_forecast', 'wildfires', 'smoke_dispersion'].includes(layerId)) {
-        refreshDerivedOverlays();
-      }
-
       return next;
     });
+
+    // Side effects outside setLayers updater — critical for React 18+ batching safety
+    if (!wasOn) {
+      loadLayerData(layerId);
+    } else {
+      hideLayerEntities(layerId);
+    }
+
+    const layer = layersRef.current.find(l => l.id === layerId);
+    if (layer?.type === 'tile') {
+      setPulsingLayer(layerId);
+      setTimeout(() => setPulsingLayer(null), 600);
+    }
+
+    if (['severe_storms', 'storm_forecast', 'wildfires', 'smoke_dispersion'].includes(layerId)) {
+      refreshDerivedOverlays();
+    }
   }, []);
 
   function loadGenericLayer(viewer: Cesium.Viewer, layerId: string) {
@@ -2878,11 +2832,14 @@ export default function App() {
       setLayerEntitiesVisible(layerId, true);
       return;
     }
+    const gen = (layerGenRef.current[layerId] = (layerGenRef.current[layerId] || 0) + 1);
     fetchLayerData(layer).then(items => {
+      if (layerGenRef.current[layerId] !== gen) return;
       if (!isLayerEnabled(layerId) || !items.length) return;
       const ents = renderLayer(viewer, layer, items);
       if (ents.length) {
         entityStoreRef.current[layerId] = ents;
+        viewer.scene.requestRender();
       }
     }).catch((e: any) => console.warn(`Failed to load generic layer ${layerId}:`, e));
   }
@@ -3035,15 +2992,22 @@ export default function App() {
           });
         }
       } else {
-        if (layerId === 'airspaces' && !entityStoreRef.current['airspaces']?.length) {
-          loadAirspaces(v)
-            .then(entities => {
-              if (!isLayerEnabled('airspaces')) return;
-              entityStoreRef.current['airspaces'] = entities;
-              setLayerEntitiesVisible('airspaces', true);
-            })
-            .catch(err => showNotification('Failed to load real airspaces', 'error'));
-          } else if (layerId === 'ais_vessels') {
+        if (layerId === 'airspaces') {
+          if (!entityStoreRef.current['airspaces']?.length) {
+            const gen = (layerGenRef.current['airspaces'] = (layerGenRef.current['airspaces'] || 0) + 1);
+            loadAirspaces(v)
+              .then(entities => {
+                if (layerGenRef.current['airspaces'] !== gen) return;
+                if (!isLayerEnabled('airspaces')) return;
+                entityStoreRef.current['airspaces'] = entities;
+                setLayerEntitiesVisible('airspaces', true);
+              })
+              .catch(err => {
+                if (layerGenRef.current['airspaces'] === gen) showNotification('Failed to load real airspaces', 'error');
+              });
+          }
+          return;
+        } else if (layerId === 'ais_vessels') {
           const startTracker = (tracker: AisVesselTracker) => {
             tracker.setStatusHandler((msg, type) => showNotification(msg, type));
             tracker.start();
@@ -3224,6 +3188,7 @@ export default function App() {
     }
     populationImpactLayerRef.current = newEnts;
     entityStoreRef.current['population_impact'] = newEnts;
+    viewer.scene.requestRender();
     setShowPopulationImpact(true);
   }
 
@@ -3518,6 +3483,7 @@ export default function App() {
       if (!data.states?.length) throw new Error(`${layerId} returned no states`);
       drRef.current?.updateFromApi(data.states);
       drRef.current?.start();
+      viewer.scene.requestRender();
       showNotification(`Loaded ${data.states.length} ${layerId.replace(/^\d+_/, '').replace(/_/g, ' ')} tracks`, 'success');
     } catch (error) {
       if (!isLayerEnabled(layerId)) return;
@@ -4711,33 +4677,6 @@ export default function App() {
               </section>
 
               <section className="api-section">
-                <div className="api-section-title">Aviation</div>
-                <label className="api-field">
-                  <span>OpenSky Client ID</span>
-                  <input
-                    type="text"
-                    className="token-input"
-                    placeholder="Paste your OpenSky client ID"
-                    value={apiVault.openSkyClientId}
-                    onChange={e => setApiVault(prev => ({ ...prev, openSkyClientId: e.target.value }))}
-                  />
-                </label>
-                <label className="api-field">
-                  <span>OpenSky Client Secret</span>
-                  <input
-                    type="password"
-                    className="token-input"
-                    placeholder="Paste your OpenSky client secret"
-                    value={apiVault.openSkyClientSecret}
-                    onChange={e => setApiVault(prev => ({ ...prev, openSkyClientSecret: e.target.value }))}
-                  />
-                </label>
-                <div className="token-note" style={{marginTop: 6}}>
-                  OpenSky uses OAuth2 client credentials when supplied.
-                </div>
-              </section>
-
-              <section className="api-section">
                 <div className="api-section-title">Future integrations</div>
                 <label className="api-field">
                   <span>Sentinel Hub Client ID</span>
@@ -4811,8 +4750,6 @@ export default function App() {
           GOOGLE_GEMINI_API_KEY: apiVault.gemini,
           ANTHROPIC_API_KEY: apiVault.anthropic,
           CESIUM_ION_ACCESS_TOKEN: apiVault.cesiumIonAccessToken,
-          OPENSKY_CLIENT_ID: apiVault.openSkyClientId,
-          OPENSKY_CLIENT_SECRET: apiVault.openSkyClientSecret,
           SENTINEL_HUB_CLIENT_ID: apiVault.sentinelHubClientId,
           SENTINEL_HUB_CLIENT_SECRET: apiVault.sentinelHubClientSecret,
           MARINE_TRAFFIC_API_KEY: apiVault.marineTrafficApiKey,

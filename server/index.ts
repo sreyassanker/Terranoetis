@@ -274,14 +274,14 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
   try {
     const resp = await fetch('https://opencctv.org/cameras/india', {
       headers: { 'User-Agent': 'LiveGlobe/1.0 (public camera explorer)' },
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(5000),
     });
     if (resp.ok) {
       const html = await resp.text();
       indiaCams = extractIndiaCctvCameras(html);
     }
-  } catch (err) {
-    console.error('Failed to scrape India webcams:', err);
+  } catch {
+    // opencctv.org is frequently unreachable — fail silently
   }
 
   const fetchBox = async (box: typeof BOUNDS[0]) => {
@@ -514,65 +514,95 @@ app.get('/api/flights/regional', async (req: express.Request, res: express.Respo
 
 // --- AVIATION LAYERS ---
 
-// ADSB.lol - public aircraft tracking (falls back to airplanes.live)
+// ADSB.lol - public aircraft tracking via geographic point queries
+// Uses api.adsb.lol/v2/point which is ADSBExchange v2 compatible (no API key needed)
 app.get('/api/adsb-lol', async (_req: express.Request, res: express.Response) => {
-  const parseAircraft = (ac: any[]) => {
-    const now = Math.floor(Date.now() / 1000);
-    return ac.map((a: any) => [
-      a.hex || '',
-      (a.flight || '').trim(),
-      '', '', '',
-      a.lon, a.lat,
-      (a.alt_baro && typeof a.alt_baro === 'number' ? a.alt_baro : a.alt_geom) || 0,
-      false, a.gs || a.speed || 0, a.track || a.heading || 0, 0,
-      '', a.rssi || 0,
-    ]);
-  };
-  // Try primary: adsb.lol
-  for (const [cacheKey, url] of [
-    ['adsb_lol', 'https://adsb.lol/api/0/aircraft/'],
-    ['airplanes_live', 'https://airplanes.live/api/0/aircraft/'],
-  ] as [string, string][]) {
-    try {
-      const data = await cachedFetch(cacheKey, url, 10, { headers: { 'User-Agent': 'LiveGlobe/1.0' } });
-      if (data && typeof data === 'object' && 'aircraft' in (data as any)) {
-        const states = parseAircraft((data as any).aircraft || []);
-        res.json({ states, time: Math.floor(Date.now() / 1000) });
-        return;
-      }
-    } catch { /* try next */ }
+  const regions = [
+    { lat: 48, lon: 10, dist: 250, key: 'eu' },
+    { lat: 40, lon: -100, dist: 250, key: 'us' },
+    { lat: 35, lon: 135, dist: 250, key: 'asia' },
+    { lat: -25, lon: 135, dist: 250, key: 'au' },
+    { lat: -15, lon: -50, dist: 250, key: 'sa' },
+    { lat: 25, lon: 50, dist: 250, key: 'me' },
+    { lat: 0, lon: 20, dist: 250, key: 'af' },
+  ];
+  const seen = new Set<string>();
+  const states: any[][] = [];
+  const fetchOpts = { headers: { 'User-Agent': 'LiveGlobe/1.0' } };
+  const results = await Promise.allSettled(
+    regions.map(r =>
+      cachedFetch<any>(
+        `adsb_lol_${r.key}`,
+        `https://api.adsb.lol/v2/point/${r.lat}/${r.lon}/${r.dist}`,
+        30,
+        fetchOpts,
+      )
+    )
+  );
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    const data = result.value;
+    if (!data || typeof data !== 'object' || !('ac' in (data as any))) continue;
+    for (const ac of (data as any).ac || []) {
+      if (!ac.hex || seen.has(ac.hex)) continue;
+      seen.add(ac.hex);
+      states.push([
+        ac.hex,
+        (ac.flight || '').trim(),
+        '', '', '',
+        ac.lon, ac.lat,
+        (ac.alt_baro && typeof ac.alt_baro === 'number' ? ac.alt_baro : ac.alt_geom) || 0,
+        false, ac.gs || ac.speed || 0, ac.track || ac.heading || 0, 0,
+        '', ac.rssi || 0,
+      ]);
+    }
   }
-  res.json({ states: [], time: Math.floor(Date.now() / 1000) });
+  res.json({ states, time: Math.floor(Date.now() / 1000) });
 });
 
-// adsb.fi - full snapshot (compatible ADSBExchange v2 format)
+// adsb.fi - public aircraft tracking via geographic point queries
+// Uses opendata.adsb.fi/api/v3/lat/lon/dist which is ADSBExchange v2 compatible (public, no key)
 app.get('/api/adsb-fi', async (_req: express.Request, res: express.Response) => {
-  try {
-    const data = await cachedFetch(
-      'adsb_fi',
-      'https://opendata.adsb.fi/api/v2/snapshot',
-      10,
-      { headers: { 'User-Agent': 'LiveGlobe/1.0' } },
-    );
-    if (data && typeof data === 'object' && 'ac' in (data as any)) {
-      const aircraft = (data as any).ac || [];
-      const now = Math.floor(Date.now() / 1000);
-      const states = aircraft.map((a: any) => [
-        a.hex || '',
-        (a.flight || '').trim(),
+  const regions = [
+    { lat: 48, lon: 10, dist: 250, key: 'eu' },
+    { lat: 40, lon: -100, dist: 250, key: 'us' },
+    { lat: 35, lon: 135, dist: 250, key: 'asia' },
+    { lat: -25, lon: 135, dist: 250, key: 'au' },
+    { lat: -15, lon: -50, dist: 250, key: 'sa' },
+    { lat: 25, lon: 25, dist: 250, key: 'me' },
+  ];
+  const seen = new Set<string>();
+  const states: any[][] = [];
+  const fetchOpts = { headers: { 'User-Agent': 'LiveGlobe/1.0' } };
+  const results = await Promise.allSettled(
+    regions.map(r =>
+      cachedFetch<any>(
+        `adsb_fi_${r.key}`,
+        `https://opendata.adsb.fi/api/v3/lat/${r.lat}/lon/${r.lon}/dist/${r.dist}`,
+        30,
+        fetchOpts,
+      )
+    )
+  );
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    const data = result.value;
+    if (!data || typeof data !== 'object' || !('ac' in (data as any))) continue;
+    for (const ac of (data as any).ac || []) {
+      if (!ac.hex || seen.has(ac.hex)) continue;
+      seen.add(ac.hex);
+      states.push([
+        ac.hex,
+        (ac.flight || '').trim(),
         '', '', '',
-        a.lon, a.lat,
-        (a.alt_baro && typeof a.alt_baro === 'number' ? a.alt_baro : 0),
-        false, a.gs || 0, a.track || 0, 0,
-        '', 0,
+        ac.lon, ac.lat,
+        (ac.alt_baro && typeof ac.alt_baro === 'number' ? ac.alt_baro : ac.alt_geom) || 0,
+        false, ac.gs || ac.speed || 0, ac.track || ac.heading || 0, 0,
+        '', ac.rssi || 0,
       ]);
-      res.json({ states, time: now });
-    } else {
-      res.json({ states: [], time: Math.floor(Date.now() / 1000) });
     }
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
   }
+  res.json({ states, time: Math.floor(Date.now() / 1000) });
 });
 
 // FlightAware AeroAPI (requires API key)
@@ -1307,7 +1337,7 @@ app.get('/api/nasa-dsn', async (_req: express.Request, res: express.Response) =>
         const azimuth = toNumber(dish.attr('azimuth')) ?? 0;
         const elevation = toNumber(dish.attr('elevation')) ?? 0;
         const windspeed = toNumber(dish.attr('windspeed')) ?? 0;
-        const isUp = dish.attr('isUp') === 'true' || dish.attr('windspeed') !== '0';
+        const isUp = dish.attr('isUp') === 'true';
 
         const targets: any[] = [];
         dish.find('target').each((_, targetEl) => {
@@ -1760,51 +1790,83 @@ app.post('/api/ai/gemini', async (req: express.Request, res: express.Response) =
   }
 });
 
+// Simplify GeoJSON: reduce coordinate precision, skip tiny features
+function simplifyAirspaces(features: any[]): any[] {
+  const MIN_AREA_DEG2 = 0.001; // skip features smaller than ~0.001 sq deg
+  return features.filter(f => {
+    const coords = f?.geometry?.coordinates;
+    if (!coords?.length) return false;
+    // Simplify polygon coordinates (reduce precision to 3 decimals)
+    if (f.geometry.type === 'Polygon') {
+      f.geometry.coordinates = coords.map((ring: number[][]) =>
+        ring.map((p: number[]) => [Math.round(p[0] * 1000) / 1000, Math.round(p[1] * 1000) / 1000])
+      );
+      // Rough area check via bounding box
+      const lats = f.geometry.coordinates[0].map((p: number[]) => p[1]);
+      const lons = f.geometry.coordinates[0].map((p: number[]) => p[0]);
+      const area = (Math.max(...lats) - Math.min(...lats)) * (Math.max(...lons) - Math.min(...lons));
+      return area >= MIN_AREA_DEG2;
+    }
+    if (f.geometry.type === 'MultiPolygon') {
+      f.geometry.coordinates = coords.map((poly: number[][][]) =>
+        poly.map((ring: number[][]) =>
+          ring.map((p: number[]) => [Math.round(p[0] * 1000) / 1000, Math.round(p[1] * 1000) / 1000])
+        )
+      );
+      const lats = f.geometry.coordinates[0][0].map((p: number[]) => p[1]);
+      const lons = f.geometry.coordinates[0][0].map((p: number[]) => p[0]);
+      const area = (Math.max(...lats) - Math.min(...lats)) * (Math.max(...lons) - Math.min(...lons));
+      return area >= MIN_AREA_DEG2;
+    }
+    return true;
+  });
+}
+
+async function fetchAndCacheAirspaces(): Promise<{ type: string; features: any[] }> {
+  const cacheKey = 'airspaces';
+  const cached = cache.get<{ type: string; features: any[] }>(cacheKey);
+  if (cached) return cached;
+
+  const combined: { type: string; features: any[] } = { type: 'FeatureCollection', features: [] };
+  const countryCodes = ['at', 'au', 'ba', 'be', 'bf', 'bg', 'bh', 'bj', 'bn', 'br', 'bw', 'by', 'de', 'al', 'am', 'ao', 'ar', 'ae', 'af'];
+  const baseUrl = 'https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f';
+
+  const results = await Promise.allSettled(
+    countryCodes.map(code =>
+      fetch(`${baseUrl}/${code}_asp.geojson`, { signal: AbortSignal.timeout(10000) })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(`${code}: ${r.status}`)))
+    )
+  );
+
+  for (const result of results) {
+    if (result.status === 'fulfilled' && result.value?.features) {
+      combined.features.push(...result.value.features);
+    }
+  }
+
+  if (combined.features.length === 0) {
+    try {
+      const localPath = path.join(__dirname, '../public/data/combined_airspaces.geojson');
+      const localData = JSON.parse(fs.readFileSync(localPath, 'utf8'));
+      if (localData?.features) {
+        combined.features = localData.features;
+      }
+    } catch (localErr) {
+      console.warn('Local airspace file not found:', localErr);
+      throw new Error('No airspace data available');
+    }
+  }
+
+  const simplified = simplifyAirspaces(combined.features);
+  combined.features = simplified;
+  console.log(`Caching ${combined.features.length} simplified airspace features (was ${combined.features.length > 0 ? 'simplified' : 'none'})`);
+  cache.set(cacheKey, combined, 3600);
+  return combined;
+}
+
 app.get('/api/airspaces', async (_req: express.Request, res: express.Response) => {
   try {
-    const cacheKey = 'airspaces';
-    const cachedData = cache.get(cacheKey);
-    if (cachedData) {
-      res.json(cachedData);
-      return;
-    }
-
-    const combined: { type: string; features: any[] } = { type: 'FeatureCollection', features: [] };
-
-    // Fetch individual country airspace files from OpenAIP public GCS bucket
-    const countryCodes = ['at', 'au', 'ba', 'be', 'bf', 'bg', 'bh', 'bj', 'bn', 'br', 'bw', 'by', 'de', 'al', 'am', 'ao', 'ar', 'ae', 'af'];
-    const baseUrl = 'https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f';
-
-    // Try to fetch all country files concurrently
-    const results = await Promise.allSettled(
-      countryCodes.map(code =>
-        fetch(`${baseUrl}/${code}_asp.geojson`, { signal: AbortSignal.timeout(10000) })
-          .then(r => r.ok ? r.json() : Promise.reject(new Error(`${code}: ${r.status}`)))
-      )
-    );
-
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value?.features) {
-        combined.features.push(...result.value.features);
-      }
-    }
-
-    if (combined.features.length === 0) {
-      // Fallback: try to read from local file
-      try {
-        const localPath = path.join(__dirname, '../public/data/combined_airspaces.geojson');
-        const localData = JSON.parse(fs.readFileSync(localPath, 'utf8'));
-        if (localData?.features) {
-          combined.features = localData.features;
-        }
-      } catch (localErr) {
-        console.warn('Local airspace file not found:', localErr);
-        throw new Error('No airspace data available');
-      }
-    }
-
-    console.log(`Serving ${combined.features.length} airspace features across ${countryCodes.length} countries`);
-    cache.set(cacheKey, combined, 3600); // 1 hour cache
+    const combined = await fetchAndCacheAirspaces();
     res.json(combined);
   } catch (e) {
     console.error('Failed to serve airspace data:', e);
@@ -1818,7 +1880,12 @@ async function cachedFetchGroup<T>(key: string, fetcher: () => Promise<T>, ttl =
   const hit = cache.get<T>(key);
   if (hit) return hit;
   const data = await fetcher();
-  cache.set(key, data, ttl);
+  // Only cache non-empty results — empty means the upstream was unavailable and should be retried
+  if (Array.isArray(data) && data.length > 0) {
+    cache.set(key, data, ttl);
+  } else if (!Array.isArray(data)) {
+    cache.set(key, data, ttl);
+  }
   return data;
 }
 
@@ -1898,19 +1965,17 @@ async function fetchOceanBuoys(): Promise<any[]> {
 // ARGO: Profiling floats from Coriolis GDAC (real-time T/S profiles)
 async function fetchArgoFloats(): Promise<any[]> {
   try {
-    const columns = ['platform_number', 'latitude', 'longitude', 'time'].join(',');
-    const constraints = ['time' + encodeURIComponent('>=') + 'now-14days', 'distinct()'].join('&');
-    const url = `https://erddap.ifremer.fr/erddap/tabledap/ArgoFloats.json?${columns}&${constraints}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(30000) });
+    const url = 'https://erddap.ifremer.fr/erddap/tabledap/ArgoFloats.json?latitude,longitude,platform_number,platform_type&time%3E%3D%22now-14days%22&distinct()&orderBy(%22platform_number%22)';
+    const resp = await fetch(url, { signal: AbortSignal.timeout(60000) });
     if (!resp.ok) return [];
     const body: any = await resp.json();
-    const rows: any[][] = body?.table?.rows ?? [];
+    const rows: any[][] = (body?.table?.rows ?? []).slice(0, 500);
     return rows.flatMap((r: any[]) => {
-      const lat = r[1], lon = r[2];
+      const lat = r[0], lon = r[1];
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
       return {
-        id: `argo_${r[0]}`,
-        name: `ARGO Float ${r[0]}`,
+        id: `argo_${r[2]}`,
+        name: `ARGO Float ${r[2]}`,
         lat: +lat.toFixed(4),
         lon: +lon.toFixed(4),
         value: 1,
@@ -1925,14 +1990,10 @@ async function fetchArgoFloats(): Promise<any[]> {
 // TIDES: NOAA CO-OPS water level stations (real-time)
 async function fetchNoaaTides(): Promise<any[]> {
   try {
-    const [metaResp, obsResp] = await Promise.all([
-      fetch('https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=waterlevels', {
-        signal: AbortSignal.timeout(15000),
-      }),
-      fetch('https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=waterlevels', {
-        signal: AbortSignal.timeout(15000),
-      }),
-    ]);
+    const metaResp = await fetch(
+      'https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=waterlevels',
+      { signal: AbortSignal.timeout(15000) },
+    );
     if (!metaResp.ok) return [];
     const body: any = await metaResp.json();
     const stations: any[] = body?.stations ?? [];
@@ -2242,17 +2303,21 @@ async function fetchSatellites(): Promise<any[]> {
   const now = new Date();
   const seen = new Set<string>();
   const results: any[] = [];
+
+  // Sequential per-group to avoid CelesTrak rate limiting on concurrent connections
   for (const group of CELESTRAK_TLE_GROUPS) {
+    if (results.length >= 500) break;
     try {
       const resp = await fetch(
         `https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=tle`,
-        { signal: AbortSignal.timeout(15000) },
+        { signal: AbortSignal.timeout(20000) },
       );
       if (!resp.ok) continue;
       const text = await resp.text();
       if (text.includes('GP data has not updated') || text.includes('Invalid query')) continue;
       const lines = text.trim().split('\n');
       for (let i = 0; i + 2 < lines.length; i += 3) {
+        if (results.length >= 500) break;
         const name = lines[i].trim();
         const line1 = lines[i + 1].trim();
         const line2 = lines[i + 2].trim();
@@ -2287,8 +2352,6 @@ async function fetchSatellites(): Promise<any[]> {
           continue;
         }
       }
-      // Stop once we have enough
-      if (results.length >= 500) break;
     } catch {
       continue;
     }
@@ -2310,7 +2373,7 @@ const GROUP_DATA_SOURCES: Record<string, () => Promise<any[]>> = {
   ecology: () => cachedFetchGroup('gbif_occ', fetchGbifOccurrences, 7200),
   hazards: () => cachedFetchGroup('eonet_events', fetchEonetEvents, 600),
   weather: () => cachedFetchGroup('weather_fc', fetchWeatherForecasts, 600),
-   atmosphere: () => cachedFetchGroup('weather_fc', fetchWeatherForecasts, 600),
+  atmosphere: () => cachedFetchGroup('weather_fc', fetchWeatherForecasts, 600),
   geology: () => cachedFetchGroup('usgs_eqs', fetchEarthquakes, 60),
   space: () => cachedFetchGroup('celestrak_sats', fetchSatellites, 3600),
   cryosphere: () => cachedFetchGroup('ocean_buoys', fetchOceanBuoys, 3600).then(items =>
@@ -2322,7 +2385,8 @@ const GROUP_DATA_SOURCES: Record<string, () => Promise<any[]>> = {
   ports: () => cachedFetchGroup('world_ports', fetchWorldPorts, 86400),
   geospatial: () => cachedFetchGroup('ocean_buoys', fetchOceanBuoys, 3600),
   advanced: () => cachedFetchGroup('gbif_occ', fetchGbifOccurrences, 7200),
-  satellite: async () => [],
+  satellite: () => cachedFetchGroup('celestrak_sats', fetchSatellites, 3600),
+  bathymetry_pt: () => cachedFetchGroup('ocean_buoys', fetchOceanBuoys, 3600),
   aviation: async () => [],
 };
 
@@ -2368,8 +2432,8 @@ app.get('/api/data/:layerId', async (req: express.Request, res: express.Response
     } catch { /* fall through */ }
   }
 
-  // No real data available
-  cache.set(cacheKey, { items: [] }, 3600);
+  // No real data available — short TTL to allow recovery when upstream APIs come back
+  cache.set(cacheKey, { items: [] }, 60);
   res.json({ items: [] });
 });
 
@@ -2381,6 +2445,10 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 const server = app.listen(PORT, () => {
   console.log(`LiveGlobe API proxy listening on http://localhost:${PORT}`);
+  // Pre-warm slow caches so first user request doesn't pay the penalty
+  fetchAndCacheAirspaces().then(() => console.log('Airspace cache pre-warmed')).catch(() => {});
+  // Pre-warm OpenFlights data
+  // (fetched via /api/openflights on first request, 24h cache)
 });
 
 let shuttingDown = false;

@@ -239,5 +239,6 @@ export class FlightDeadReckoning {
       this.entities.delete(id);
       this.iconKeys.delete(id);
     }
+    this.viewer.scene.requestRender();
   }
 }

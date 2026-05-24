@@ -22,8 +22,6 @@ interface ApiVaultProps {
   initialKeys: Record<string, string>;
 }
 
-const API_STORAGE_KEY = 'liveglobe.apiKeys.v1';
-
 export function ApiVault({ isOpen, onClose, onSave, initialKeys }: ApiVaultProps) {
   const [apis, setApis] = useState<ApiConfig[]>([]);
   const [keys, setKeys] = useState<Record<string, string>>(initialKeys || {});
@@ -71,7 +69,6 @@ export function ApiVault({ isOpen, onClose, onSave, initialKeys }: ApiVaultProps
   };
 
   const handleSave = () => {
-    localStorage.setItem(API_STORAGE_KEY, JSON.stringify(keys));
     onSave(keys);
     onClose();
   };

@@ -2753,10 +2753,8 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   {
     id: 'flight_tracks', label: 'Flight Tracks', symbol: '≷',
     color: '#1eaf5b', motionType: 'dash', group: 'aviation',
-    type: 'point', description: 'Live flight tracking from OpenSky Network',
-    dataSource: 'https://opensky-network.org/',
-    badge: 'KEY',
-    sub: 'OpenSky Network',
+    type: 'point', description: 'Live flight tracking from ADSB.lol',
+    dataSource: 'https://adsb.lol/',
   },
   {
     id: 'airports', label: 'Major Airports', symbol: '≸',
@@ -2769,7 +2767,6 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     color: '#bcbc1c', motionType: 'trail', group: 'aviation',
     type: 'geojson', description: 'Airspace boundary polygons from OpenAIP',
     dataSource: '',
-    badge: 'KEY',
   },
   {
     id: 'space_debris', label: 'Space Debris', symbol: '≻',
@@ -3092,7 +3089,7 @@ export const SECTION_TITLES: Record<number, string> = {
 export const LEGACY_DEFAULTS: Record<string, { on?: boolean; badge?: string; sub?: string; opacity?: number }> = {
   earthquakes: { on: true, badge: 'LIVE', sub: 'USGS Real-Time' },
   tectonic: { badge: 'KEY', sub: 'USGS Plates' },
-  flight_tracks: { badge: 'KEY', sub: 'OpenSky Network' },
+  flight_tracks: { sub: 'ADSB.lol Live' },
   space_debris: { sub: 'CelesTrak GP (1500+ objects)' },
   ais_vessels: { badge: 'KEY', sub: 'AISStream Real-Time' },
   intel_feed: { badge: 'LIVE', sub: 'Aggregated alert feed' },
@@ -3105,7 +3102,7 @@ export const LEGACY_DEFAULTS: Record<string, { on?: boolean; badge?: string; sub
   precipitation: { opacity: 0.6 },
   wind: { opacity: 0.6 },
   heatmap: { opacity: 0.7 },
-  airspaces: { badge: 'KEY' },
+  airspaces: { sub: 'OpenAIP Airspace' },
   submarine_cables: { sub: 'Submarine Cable Map' },
   floods: { sub: 'EONET flood events' },
   landslides: { sub: 'NASA landslide reports' },
