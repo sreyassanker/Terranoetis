@@ -1,0 +1,226 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type Cesium from 'cesium';
+import type { StudyAreaItem } from '@/rendering/studyArea';
+import {
+  generateAreaId, loadGeoJsonToGlobe, removeStudyAreaFromGlobe,
+  setStudyAreaVisibility, exportToGeoJSON, downloadJSON,
+  parseFileToGeoJSON, createRectangleEntity, positionsToGeoJSON,
+} from '@/rendering/studyArea';
+
+type TabId = 'upload' | 'draw' | 'manage' | 'export';
+
+interface StudyAreaPanelProps {
+  viewer: Cesium.Viewer | null;
+  areas: StudyAreaItem[];
+  setAreas: React.Dispatch<React.SetStateAction<StudyAreaItem[]>>;
+  show: boolean;
+  onClose: () => void;
+  drawerRef: React.MutableRefObject<any>;
+  onStartDraw: (type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE') => void;
+  onStopDraw: () => void;
+  drawing: boolean;
+  setDrawing: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+export default function StudyAreaPanel({
+  viewer, areas, setAreas, show, onClose,
+  drawerRef, onStartDraw, onStopDraw, drawing, setDrawing,
+}: StudyAreaPanelProps) {
+  const [tab, setTab] = useState<TabId>('draw');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadStatus, setUploadStatus] = useState('');
+  const [drawShape, setDrawShape] = useState<'RECTANGLE' | 'POLYGON' | 'CIRCLE' | null>(null);
+
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !viewer) return;
+    setUploadStatus(`Reading ${file.name}...`);
+    try {
+      const results = await parseFileToGeoJSON(file);
+      const newAreas: StudyAreaItem[] = [];
+      for (const { name, geojson, format } of results) {
+        const ds = await loadGeoJsonToGlobe(viewer, geojson, name, '#22c55e');
+        newAreas.push({
+          id: generateAreaId(), name, type: format === 'shapefile' ? 'shapefile' : 'geojson',
+          visible: true, dataSource: ds, geojson, color: '#22c55e',
+        });
+      }
+      setAreas(prev => [...prev, ...newAreas]);
+      const totalFeatures = results.reduce((s, r) => s + r.geojson.features.length, 0);
+      const names = results.map(r => r.name).join(', ');
+      setUploadStatus(`Loaded ${totalFeatures} features from ${names}`);
+    } catch (err: any) {
+      setUploadStatus(`Error: ${err.message}`);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [viewer, setAreas]);
+
+  const toggleVisibility = useCallback((id: string) => {
+    setAreas(prev => prev.map(a => {
+      if (a.id !== id) return a;
+      const v = !a.visible;
+      if (viewer) setStudyAreaVisibility(viewer, a, v);
+      return { ...a, visible: v };
+    }));
+  }, [viewer, setAreas]);
+
+  const deleteArea = useCallback((item: StudyAreaItem) => {
+    if (viewer) removeStudyAreaFromGlobe(viewer, item);
+    setAreas(prev => prev.filter(a => a.id !== item.id));
+  }, [viewer, setAreas]);
+
+  const handleExport = useCallback(() => {
+    const geojson = exportToGeoJSON(areas);
+    if (geojson.features.length === 0) { setUploadStatus('No areas to export'); return; }
+    downloadJSON(geojson, 'study_areas.geojson');
+    setUploadStatus(`Exported ${geojson.features.length} features`);
+  }, [areas]);
+
+  const handleDrawStart = useCallback((type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE') => {
+    setDrawShape(type);
+    onStartDraw(type);
+    setDrawing(true);
+  }, [onStartDraw, setDrawing]);
+
+  const handleDrawStop = useCallback(() => {
+    setDrawShape(null);
+    onStopDraw();
+    setDrawing(false);
+  }, [onStopDraw, setDrawing]);
+
+  const handleDrawComplete = useCallback((entity: any, positions: Cesium.Cartesian3[]) => {
+    if (!viewer || !positions?.length) return;
+    const typeLabel = drawShape === 'RECTANGLE' ? 'rectangle' : drawShape === 'CIRCLE' ? 'circle' : 'polygon';
+    const name = `${typeLabel} ${areas.length + 1}`;
+    const color = '#22c55e';
+    const geojson = positionsToGeoJSON(positions, drawShape === 'CIRCLE' ? 'LineString' : 'Polygon', name);
+    const area: StudyAreaItem = {
+      id: generateAreaId(), name, type: typeLabel as any,
+      visible: true, entity, positions, geojson: { type: 'FeatureCollection', features: [geojson] },
+      color,
+    };
+    setAreas(prev => [...prev, area]);
+    setDrawShape(null);
+    setDrawing(false);
+    viewer.scene.requestRender();
+  }, [viewer, drawShape, areas.length, setAreas, setDrawing]);
+
+  useEffect(() => {
+    if (!show) { setDrawing(false); setDrawShape(null); }
+  }, [show, setDrawing]);
+
+  const tabLabels: { id: TabId; label: string; icon: string }[] = [
+    { id: 'upload', label: 'Upload', icon: '📂' },
+    { id: 'draw', label: 'Draw', icon: '✏️' },
+    { id: 'manage', label: 'Manage', icon: '📋' },
+    { id: 'export', label: 'Export', icon: '📤' },
+  ];
+
+  return (
+    <div className={`study-area-panel glass-panel ${show ? 'open' : ''}`}>
+      <div className="ai-header">
+        <div className="ai-icon" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}>🎯</div>
+        <div className="ai-title">Study Area</div>
+        <button className="ai-close" onClick={onClose}>✕</button>
+      </div>
+
+      <div className="study-tabs">
+        {tabLabels.map(t => (
+          <button key={t.id} className={`study-tab ${tab === t.id ? 'active' : ''}`}
+            onClick={() => setTab(t.id)}>
+            <span className="study-tab-icon">{t.icon}</span>
+            <span className="study-tab-label">{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="study-panel-body">
+
+        {tab === 'upload' && (
+          <div className="study-section">
+            <div className="study-section-title">Upload GeoJSON or Shapefile</div>
+            <div className="study-dropzone" onClick={() => fileInputRef.current?.click()}>
+              <div className="study-dropzone-icon">📁</div>
+              <div className="study-dropzone-text">Click to select file</div>
+              <div className="study-dropzone-hint">.geojson, .json, .zip (shapefile), .shp</div>
+            </div>
+            <input ref={fileInputRef} type="file" accept=".geojson,.json,.zip,.shp" style={{ display: 'none' }} onChange={handleFileUpload} />
+            {uploadStatus && <div className="study-status">{uploadStatus}</div>}
+          </div>
+        )}
+
+        {tab === 'draw' && (
+          <div className="study-section">
+            <div className="study-section-title">Draw on Globe</div>
+            {!drawing ? (
+              <div className="study-draw-grid">
+                <button className="study-draw-btn" onClick={() => handleDrawStart('RECTANGLE')}>
+                  <span className="study-draw-icon">▭</span>
+                  <span>Rectangle</span>
+                </button>
+                <button className="study-draw-btn" onClick={() => handleDrawStart('POLYGON')}>
+                  <span className="study-draw-icon">⬠</span>
+                  <span>Polygon</span>
+                </button>
+                <button className="study-draw-btn" onClick={() => handleDrawStart('CIRCLE')}>
+                  <span className="study-draw-icon">○</span>
+                  <span>Circle</span>
+                </button>
+              </div>
+            ) : (
+              <div className="study-draw-active">
+                <div className="study-draw-status">Drawing {drawShape.toLowerCase()}...</div>
+                <div className="study-draw-hint">Click to place vertices · Double-click to finish</div>
+                <button className="study-btn danger" onClick={handleDrawStop}>Cancel</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'manage' && (
+          <div className="study-section">
+            <div className="study-section-title">Study Areas ({areas.length})</div>
+            {areas.length === 0 ? (
+              <div className="study-empty">No study areas yet. Upload or draw one.</div>
+            ) : (
+              <div className="study-list">
+                {areas.map(a => (
+                  <div key={a.id} className="study-list-item">
+                    <div className="study-list-color" style={{ background: a.visible ? a.color : '#555' }} />
+                    <div className="study-list-info">
+                      <div className="study-list-name">{a.name}</div>
+                      <div className="study-list-type">{a.type}</div>
+                    </div>
+                    <button className={`study-list-btn ${a.visible ? '' : 'muted'}`}
+                      onClick={() => toggleVisibility(a.id)} title={a.visible ? 'Hide' : 'Show'}>
+                      {a.visible ? '👁' : '👁‍🗨'}
+                    </button>
+                    <button className="study-list-btn" onClick={() => {
+                      if (viewer && a.dataSource) viewer.flyTo(a.dataSource);
+                      else if (viewer && a.entity) viewer.flyTo(a.entity);
+                    }} title="Fly to">🎯</button>
+                    <button className="study-list-btn delete" onClick={() => deleteArea(a)} title="Delete">🗑</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'export' && (
+          <div className="study-section">
+            <div className="study-section-title">Export Study Areas</div>
+            <div className="study-export-info">
+              Exports all study areas as a single GeoJSON FeatureCollection.
+            </div>
+            <button className="study-btn primary" onClick={handleExport} style={{ width: '100%', marginTop: 8 }}>
+              📤 Download GeoJSON
+            </button>
+            {uploadStatus && <div className="study-status">{uploadStatus}</div>}
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}

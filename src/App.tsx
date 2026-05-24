@@ -4,6 +4,11 @@ import { Cctv, Camera } from 'lucide-react';
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { apiGet } from '@/lib/api';
+import StudyAreaPanel from '@/components/ui/StudyAreaPanel';
+import type { StudyAreaItem } from '@/rendering/studyArea';
+import {
+  removeStudyAreaFromGlobe, setStudyAreaVisibility,
+} from '@/rendering/studyArea';
 import { addBaseImagery, applyTerrainProvider, crossfadeImagery } from '@/cesium/viewer.config';
 import { cinematicFlyTo, createEntityTracker, type TrackEntityType } from '@/cesium/camera.controller';
 import { addEarthquakeEntity, type UsgsFeature } from '@/rendering/earthquakes';
@@ -653,6 +658,11 @@ export default function App() {
   const [showTokenSetup, setShowTokenSetup] = useState(() => !hasAnyApiVaultValue(initialApiVault) && !initialApiVault.vaultDismissed && !CESIUM_ION_ENV_TOKEN);
   const [showApiVault, setShowApiVault] = useState(false);
   const [showAI, setShowAI] = useState(false);
+  const [showStudyArea, setShowStudyArea] = useState(false);
+  const [studyWest, setStudyWest] = useState('68.0');
+  const [studySouth, setStudySouth] = useState('6.0');
+  const [studyEast, setStudyEast] = useState('98.0');
+  const [studyNorth, setStudyNorth] = useState('38.0');
   const [showAlertsPanel, setShowAlertsPanel] = useState(false);
   const [showIntelFeed, setShowIntelFeed] = useState(false);
   const [activeLayerCount, setActiveLayerCount] = useState(0);
@@ -694,6 +704,11 @@ export default function App() {
   const layerGenRef = useRef<Record<string, number>>({});
   const submarineCablesDataSourceRef = useRef<Cesium.GeoJsonDataSource | null>(null);
   const selectedDebrisOrbitEntityRef = useRef<Cesium.Entity | null>(null);
+  const studyAreaEntityRef = useRef<Cesium.Entity | null>(null);
+  const studyAreasRef = useRef<StudyAreaItem[]>([]);
+  const [studyAreas, setStudyAreas] = useState<StudyAreaItem[]>([]);
+  const [studyDrawing, setStudyDrawing] = useState(false);
+  const drawerRef = useRef<any>(null);
 
   const aiApiType = useMemo(() => resolveAiProvider(apiVault), [apiVault]);
   const cesiumIonToken = useMemo(() => resolveCesiumIonToken(apiVault), [apiVault]);
@@ -4234,6 +4249,122 @@ export default function App() {
   }, [isAutoRotating]);
 
   /* ═════════════════════════════════════════════════════════════════
+     STUDY AREA
+     ═════════════════════════════════════════════════════════════════ */
+
+  const applyStudyArea = useCallback(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+    clearStudyArea();
+    const west = parseFloat(studyWest);
+    const south = parseFloat(studySouth);
+    const east = parseFloat(studyEast);
+    const north = parseFloat(studyNorth);
+    if (!isFinite(west) || !isFinite(south) || !isFinite(east) || !isFinite(north)) return;
+    const rect = Cesium.Rectangle.fromDegrees(west, south, east, north);
+    studyAreaEntityRef.current = v.entities.add({
+      rectangle: {
+        coordinates: rect,
+        material: new Cesium.Color(0.2, 0.8, 0.3, 0.08),
+        outline: true,
+        outlineColor: Cesium.Color.LIME,
+        outlineWidth: 2,
+      },
+    });
+    v.camera.flyTo({ destination: rect });
+    v.scene.requestRender();
+  }, [studyWest, studySouth, studyEast, studyNorth]);
+
+  const clearStudyArea = useCallback(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+    if (studyAreaEntityRef.current) {
+      v.entities.remove(studyAreaEntityRef.current);
+      studyAreaEntityRef.current = null;
+      v.scene.requestRender();
+    }
+  }, []);
+
+  const flyToStudyArea = useCallback(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+    const west = parseFloat(studyWest);
+    const south = parseFloat(studySouth);
+    const east = parseFloat(studyEast);
+    const north = parseFloat(studyNorth);
+    if (!isFinite(west) || !isFinite(south) || !isFinite(east) || !isFinite(north)) return;
+    v.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(west, south, east, north) });
+  }, [studyWest, studySouth, studyEast, studyNorth]);
+
+  const startStudyDraw = useCallback(async (type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE') => {
+    const v = viewerRef.current;
+    if (!v) return;
+    try {
+      const Drawer = (await import('@cesium-extends/drawer')).default;
+      if (drawerRef.current) { drawerRef.current.destroy(); drawerRef.current = null; }
+      const drawer = new Drawer(v, {
+        terrain: false,
+        tips: { init: 'Click to start drawing', start: 'Click to place · Double-click to finish', end: '' },
+      });
+      drawerRef.current = drawer;
+      drawer.start({
+        type,
+        oneInstance: false,
+        finalOptions: type === 'RECTANGLE' ? {
+          material: new Cesium.Color(0.2, 0.8, 0.3, 0.12),
+          outline: true, outlineColor: Cesium.Color.LIME, outlineWidth: 2,
+        } : type === 'CIRCLE' ? {
+          material: new Cesium.Color(0.2, 0.8, 0.3, 0.12),
+          outline: true, outlineColor: Cesium.Color.LIME, outlineWidth: 2,
+        } : {
+          material: new Cesium.Color(0.2, 0.8, 0.3, 0.12),
+          outline: true, outlineColor: Cesium.Color.LIME, outlineWidth: 2,
+        },
+        onEnd: (entity: any, positions: Cesium.Cartesian3[]) => {
+          if (!v || !positions?.length) return;
+          const typeLabel = type === 'RECTANGLE' ? 'rectangle' : type === 'CIRCLE' ? 'circle' : 'polygon';
+          const name = `${typeLabel} ${studyAreasRef.current.length + 1}`;
+          const color = '#22c55e';
+          const coords = positions.map((p: Cesium.Cartesian3) => {
+            const carto = Cesium.Cartographic.fromCartesian(p);
+            return [Cesium.Math.toDegrees(carto.longitude), Cesium.Math.toDegrees(carto.latitude)];
+          });
+          const geojson: GeoJSON.FeatureCollection = {
+            type: 'FeatureCollection',
+            features: [{
+              type: 'Feature',
+              geometry: {
+                type: 'Polygon',
+                coordinates: [coords.length >= 2 ? [...coords, coords[0]] : coords],
+              },
+              properties: { name, type: typeLabel },
+            }],
+          };
+          const area: StudyAreaItem = {
+            id: `study_area_${Date.now()}`, name, type: typeLabel as any,
+            visible: true, entity, positions, geojson, color,
+          };
+          studyAreasRef.current = [...studyAreasRef.current, area];
+          setStudyAreas(studyAreasRef.current);
+          setStudyDrawing(false);
+          v.scene.requestRender();
+        },
+      });
+    } catch (err) {
+      console.warn('Drawer init failed:', err);
+      setStudyDrawing(false);
+    }
+  }, []);
+
+  const stopStudyDraw = useCallback(() => {
+    if (drawerRef.current) {
+      drawerRef.current.reset();
+      drawerRef.current = null;
+    }
+    setStudyDrawing(false);
+  }, []);
+
+  /* ═════════════════════════════════════════════════════════════════
      ZOOM
      ═════════════════════════════════════════════════════════════════ */
 
@@ -4269,6 +4400,9 @@ export default function App() {
     searchAbortRef.current?.abort();
     weatherAbortRef.current?.abort();
     if (screenSpaceHandlerRef.current) screenSpaceHandlerRef.current.destroy();
+    if (drawerRef.current) { drawerRef.current.destroy(); drawerRef.current = null; }
+    studyAreasRef.current.forEach(a => { if (viewerRef.current) removeStudyAreaFromGlobe(viewerRef.current, a); });
+    studyAreasRef.current = [];
     seismicAnimationsRef.current.forEach(a => { if (a.interval) clearInterval(a.interval); });
     seismicAnimationsRef.current = [];
     if (clickHandlerRef.current) { clickHandlerRef.current(); clickHandlerRef.current = null; }
@@ -4789,6 +4923,7 @@ export default function App() {
             <div className="status-dot" />
             <span>Live</span>
           </div>
+          <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => setShowStudyArea(p => !p)} title="Study Area">🎯</button>
           <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => setShowAI(p => !p)} title="AI Assistant">🤖</button>
           <button className={`btn-icon ${showAlertsPanel ? 'active' : ''}`} onClick={() => setShowAlertsPanel(p => !p)} title="Alerts">
             🔔
@@ -4905,6 +5040,24 @@ export default function App() {
       <div className={`info-panel glass-panel ${infoEntity ? '' : 'hidden'}`}>
         {formatInfoPanel()}
       </div>
+
+      {/* Study Area Panel */}
+      <StudyAreaPanel
+        viewer={viewerRef.current}
+        areas={studyAreas}
+        setAreas={(updater: any) => {
+          const next = typeof updater === 'function' ? updater(studyAreasRef.current) : updater;
+          studyAreasRef.current = next;
+          setStudyAreas(next);
+        }}
+        show={showStudyArea}
+        onClose={() => { stopStudyDraw(); setShowStudyArea(false); }}
+        drawerRef={drawerRef}
+        onStartDraw={startStudyDraw}
+        onStopDraw={stopStudyDraw}
+        drawing={studyDrawing}
+        setDrawing={setStudyDrawing}
+      />
 
       {/* AI Panel */}
       <div className={`ai-panel glass-panel ${showAI ? 'open' : ''}`}>
