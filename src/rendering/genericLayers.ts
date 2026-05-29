@@ -3,11 +3,11 @@ import * as Cesium from 'cesium';
 import * as satellite from 'satellite.js';
 import type { LayerCategory } from '@/config/layerConfig';
 
-export function renderLayer(
+export async function renderLayer(
   viewer: Cesium.Viewer,
   layer: LayerCategory,
   items: any[],
-): Cesium.Entity[] {
+): Promise<Cesium.Entity[]> {
   switch (layer.type) {
     case 'point':
       return renderPoints(viewer, layer, items);
@@ -80,20 +80,21 @@ function renderPoints(
     }
 
     const position = satrec
-      ? new Cesium.CallbackProperty((time, result) => {
+      ? new Cesium.CallbackProperty((time: Cesium.JulianDate | undefined, _result: number[]) => {
           try {
-            const date = Cesium.JulianDate.toDate(time);
+            const date = Cesium.JulianDate.toDate(time!);
             const pv = satellite.propagate(satrec, date);
-            if (pv.position && isFinite(pv.position.x)) {
+            const pos = pv?.position;
+            if (pos && typeof pos.x === 'number' && isFinite(pos.x)) {
               const gmst = satellite.gstime(date);
-              const gd = satellite.eciToGeodetic(pv.position, gmst);
+              const gd = satellite.eciToGeodetic(pos, gmst);
               const slat = satellite.degreesLat(gd.latitude);
               const slon = satellite.degreesLong(gd.longitude);
-              return Cesium.Cartesian3.fromDegrees(slon, slat, gd.height * 1000, undefined, result);
+              return Cesium.Cartesian3.fromDegrees(slon, slat, gd.height * 1000);
             }
           } catch { /* fall through */ }
-          return Cesium.Cartesian3.fromDegrees(lon, lat, 0, undefined, result);
-        }, false)
+          return Cesium.Cartesian3.fromDegrees(lon, lat, 0);
+        }, false) as unknown as Cesium.PositionProperty
       : Cesium.Cartesian3.fromDegrees(lon, lat);
 
     const billboard: any = {

@@ -3,24 +3,41 @@ import { FlightDeadReckoning } from './flights';
 
 export { FlightDeadReckoning };
 
+interface VolcanoEntry {
+  lat: number; lon: number; name?: string; status?: string;
+  country?: string; region?: string; elevation?: number;
+  so2?: number; lastUpdate?: string; date?: string; issued?: string;
+}
+
+interface DataContainer { advisories?: VolcanoEntry[]; locations?: VolcanoEntry[]; }
+
+interface AirportEntry {
+  iata?: string; icao?: string; name?: string; city?: string;
+  country?: string; lat: number; lon: number; alt?: number;
+}
+
+interface RouteEntry { srcIata: string; dstIata: string; airline?: string; }
+
+interface OpenFlightsData { airports?: AirportEntry[]; routes?: RouteEntry[]; }
+
 export function createFlightLayerManager(
   viewer: Cesium.Viewer,
-  createIcon: (heading: number, color: string) => HTMLCanvasElement,
-  layerId: string,
+  _createIcon: (heading: number, color: string) => HTMLCanvasElement,
+  _layerId: string,
 ): FlightDeadReckoning {
-  const manager = new FlightDeadReckoning(viewer, createIcon);
+  const manager = new FlightDeadReckoning(viewer);
   return manager;
 }
 
 export function addVolcanoEntities(
   viewer: Cesium.Viewer,
-  volcanoes: any[],
+  volcanoes: VolcanoEntry[],
   layerId: string,
   markerColor: string = '#f59e0b',
-  pulseColor: string = '#ef4444',
+  _pulseColor: string = '#ef4444',
 ): Cesium.Entity[] {
   const ents: Cesium.Entity[] = [];
-  volcanoes.forEach((v: any) => {
+  volcanoes.forEach((v) => {
     const lat = v.lat;
     const lon = v.lon;
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
@@ -69,7 +86,7 @@ export function addVolcanoEntities(
 
 export function addVaacAdvisoryEntities(
   viewer: Cesium.Viewer,
-  data: any,
+  data: DataContainer,
   layerId: string,
 ): Cesium.Entity[] {
   const advisories = data.advisories || [];
@@ -78,7 +95,7 @@ export function addVaacAdvisoryEntities(
 
 export function addSo2Entities(
   viewer: Cesium.Viewer,
-  data: any,
+  data: DataContainer,
   layerId: string,
 ): Cesium.Entity[] {
   const locations = data.locations || [];
@@ -87,15 +104,15 @@ export function addSo2Entities(
 
 export function addOpenFlightsEntities(
   viewer: Cesium.Viewer,
-  data: any,
+  data: OpenFlightsData,
   layerId: string,
 ): Cesium.Entity[] {
   const ents: Cesium.Entity[] = [];
   const airports = data.airports || [];
   const routes = data.routes || [];
 
-  const airportMap = new Map<string, any>();
-  airports.slice(0, 500).forEach((a: any) => {
+  const airportMap = new Map<string, AirportEntry>();
+  airports.slice(0, 500).forEach((a) => {
     if (a.iata) airportMap.set(a.iata, a);
     const pos = Cesium.Cartesian3.fromDegrees(a.lon, a.lat);
     const ent = viewer.entities.add({

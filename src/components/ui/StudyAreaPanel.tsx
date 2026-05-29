@@ -4,7 +4,9 @@ import type { StudyAreaItem } from '@/rendering/studyArea';
 import {
   generateAreaId, loadGeoJsonToGlobe, removeStudyAreaFromGlobe,
   setStudyAreaVisibility, exportToGeoJSON, downloadJSON,
-  parseFileToGeoJSON, createRectangleEntity, positionsToGeoJSON,
+  parseFileToGeoJSON,
+  flyToStudyAreaTopDown,
+  updateStudyAreaStyle,
 } from '@/rendering/studyArea';
 
 type TabId = 'upload' | 'draw' | 'manage' | 'export';
@@ -15,16 +17,18 @@ interface StudyAreaPanelProps {
   setAreas: React.Dispatch<React.SetStateAction<StudyAreaItem[]>>;
   show: boolean;
   onClose: () => void;
-  drawerRef: React.MutableRefObject<any>;
   onStartDraw: (type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE') => void;
   onStopDraw: () => void;
   drawing: boolean;
   setDrawing: React.Dispatch<React.SetStateAction<boolean>>;
+  clipToStudyArea: boolean;
+  setClipToStudyArea: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 export default function StudyAreaPanel({
   viewer, areas, setAreas, show, onClose,
-  drawerRef, onStartDraw, onStopDraw, drawing, setDrawing,
+  onStartDraw, onStopDraw, drawing, setDrawing,
+  clipToStudyArea, setClipToStudyArea,
 }: StudyAreaPanelProps) {
   const [tab, setTab] = useState<TabId>('draw');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -40,17 +44,20 @@ export default function StudyAreaPanel({
       const newAreas: StudyAreaItem[] = [];
       for (const { name, geojson, format } of results) {
         const ds = await loadGeoJsonToGlobe(viewer, geojson, name, '#22c55e');
-        newAreas.push({
+        const area: StudyAreaItem = {
           id: generateAreaId(), name, type: format === 'shapefile' ? 'shapefile' : 'geojson',
-          visible: true, dataSource: ds, geojson, color: '#22c55e',
-        });
+          visible: true, dataSource: ds, geojson, color: '#22c55e', width: 3,
+        };
+        updateStudyAreaStyle(viewer, area, '#22c55e', 3);
+        newAreas.push(area);
+        flyToStudyAreaTopDown(viewer, area);
       }
       setAreas(prev => [...prev, ...newAreas]);
       const totalFeatures = results.reduce((s, r) => s + r.geojson.features.length, 0);
       const names = results.map(r => r.name).join(', ');
       setUploadStatus(`Loaded ${totalFeatures} features from ${names}`);
-    } catch (err: any) {
-      setUploadStatus(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      setUploadStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [viewer, setAreas]);
@@ -88,26 +95,14 @@ export default function StudyAreaPanel({
     setDrawing(false);
   }, [onStopDraw, setDrawing]);
 
-  const handleDrawComplete = useCallback((entity: any, positions: Cesium.Cartesian3[]) => {
-    if (!viewer || !positions?.length) return;
-    const typeLabel = drawShape === 'RECTANGLE' ? 'rectangle' : drawShape === 'CIRCLE' ? 'circle' : 'polygon';
-    const name = `${typeLabel} ${areas.length + 1}`;
-    const color = '#22c55e';
-    const geojson = positionsToGeoJSON(positions, drawShape === 'CIRCLE' ? 'LineString' : 'Polygon', name);
-    const area: StudyAreaItem = {
-      id: generateAreaId(), name, type: typeLabel as any,
-      visible: true, entity, positions, geojson: { type: 'FeatureCollection', features: [geojson] },
-      color,
-    };
-    setAreas(prev => [...prev, area]);
-    setDrawShape(null);
-    setDrawing(false);
-    viewer.scene.requestRender();
-  }, [viewer, drawShape, areas.length, setAreas, setDrawing]);
-
+  // Reset draw state when panel hides
   useEffect(() => {
-    if (!show) { setDrawing(false); setDrawShape(null); }
-  }, [show, setDrawing]);
+    if (!show && drawing) {
+      setDrawing(false);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDrawShape(null);
+    }
+  }, [show, drawing, setDrawing]);
 
   const tabLabels: { id: TabId; label: string; icon: string }[] = [
     { id: 'upload', label: 'Upload', icon: '📂' },
@@ -169,7 +164,7 @@ export default function StudyAreaPanel({
               </div>
             ) : (
               <div className="study-draw-active">
-                <div className="study-draw-status">Drawing {drawShape.toLowerCase()}...</div>
+                <div className="study-draw-status">Drawing {(drawShape ?? 'shape').toLowerCase()}...</div>
                 <div className="study-draw-hint">Click to place vertices · Double-click to finish</div>
                 <button className="study-btn danger" onClick={handleDrawStop}>Cancel</button>
               </div>
@@ -180,24 +175,55 @@ export default function StudyAreaPanel({
         {tab === 'manage' && (
           <div className="study-section">
             <div className="study-section-title">Study Areas ({areas.length})</div>
+            {areas.length > 0 && (
+              <div className="study-clip-bar">
+                <label className="study-clip-label">
+                  <input type="checkbox" checked={clipToStudyArea}
+                    onChange={e => setClipToStudyArea(e.target.checked)} />
+                  <span>Show data only within active areas</span>
+                </label>
+              </div>
+            )}
             {areas.length === 0 ? (
               <div className="study-empty">No study areas yet. Upload or draw one.</div>
             ) : (
               <div className="study-list">
                 {areas.map(a => (
                   <div key={a.id} className="study-list-item">
-                    <div className="study-list-color" style={{ background: a.visible ? a.color : '#555' }} />
+                    <input type="color" className="study-list-color-picker"
+                      value={a.color}
+                      onChange={e => {
+                        const nc = e.target.value;
+                        setAreas((prev: StudyAreaItem[]) => prev.map(area =>
+                          area.id === a.id ? { ...area, color: nc } : area
+                        ));
+                        if (viewer) updateStudyAreaStyle(viewer, a, nc, a.width);
+                      }}
+                      title="Change outline color" />
                     <div className="study-list-info">
                       <div className="study-list-name">{a.name}</div>
                       <div className="study-list-type">{a.type}</div>
+                    </div>
+                    <div className="study-list-width-wrap">
+                      <input type="number" className="study-list-width-input"
+                        min={0.2} max={10} step={0.2}
+                        value={a.width}
+                        onChange={e => {
+                          const nw = Math.max(0.2, Math.min(10, parseFloat(e.target.value) || 0.2));
+                          setAreas((prev: StudyAreaItem[]) => prev.map(area =>
+                            area.id === a.id ? { ...area, width: nw } : area
+                          ));
+                          if (viewer) updateStudyAreaStyle(viewer, a, a.color, nw);
+                        }}
+                        title="Outline width (pt)" />
+                      <span className="study-list-width-label">pt</span>
                     </div>
                     <button className={`study-list-btn ${a.visible ? '' : 'muted'}`}
                       onClick={() => toggleVisibility(a.id)} title={a.visible ? 'Hide' : 'Show'}>
                       {a.visible ? '👁' : '👁‍🗨'}
                     </button>
                     <button className="study-list-btn" onClick={() => {
-                      if (viewer && a.dataSource) viewer.flyTo(a.dataSource);
-                      else if (viewer && a.entity) viewer.flyTo(a.entity);
+                      if (viewer) flyToStudyAreaTopDown(viewer, a);
                     }} title="Fly to">🎯</button>
                     <button className="study-list-btn delete" onClick={() => deleteArea(a)} title="Delete">🗑</button>
                   </div>

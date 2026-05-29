@@ -44,7 +44,7 @@ const ICON_CACHE = new Map<string, HTMLCanvasElement>();
 function getPlaneIcon(heading: number, color: string): HTMLCanvasElement {
   const rounded = Math.round(heading / 5) * 5;
   const key = `${rounded}_${color}`;
-  let cached = ICON_CACHE.get(key);
+  const cached = ICON_CACHE.get(key);
   if (cached) return cached;
   const canvas = document.createElement('canvas');
   canvas.width = 24;
@@ -133,6 +133,8 @@ export class FlightDeadReckoning {
       const dLon = (dist * Math.sin(rad)) / (111320 * cosLat);
       flight.lat += dLat;
       flight.lon += dLon;
+      if (flight.lon > 180) flight.lon -= 360;
+      else if (flight.lon < -180) flight.lon += 360;
     }
     this.syncEntities(false);
   }

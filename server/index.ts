@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import NodeCache from 'node-cache';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -12,17 +13,256 @@ import Parser from 'rss-parser';
 import * as satellite from 'satellite.js';
 import { createRequire } from 'module';
 const papaparse = createRequire(import.meta.url)('papaparse');
+
+import { getDb, closeDb } from './db/index';
 import { API_METADATA, getCategories } from './api-metadata';
+import {
+  AGENTS_MD, CommandParser, SessionManager, MaterializedViewCache, IntentRouter, TaskPlanner,
+  ToolRegistry, buildAgentPrompt, warmIntentPrototypeEmbeddings,
+  type GlobeCommand, type AgentStep, type AgentTool,
+} from './agent';
+import { SandboxManager } from './sandboxManager';
+import { MonitorManager, SchedulerManager, AmbientEventDetector, getLocationContext } from './monitor';
+import { MemoryManager, type Fact, type ProceduralPattern } from './memory';
+import { EmbeddingEngine } from './embedding';
+import { CircuitBreaker, withCircuitBreak, withRetry } from './resilience';
+import { AgentOrchestrator } from './orchestrator';
+import { MCPServer } from './mcp';
+import { PluginManager } from './pluginManager';
+import { ModelRouter, CostTracker, EnhancedCache } from './costOptimizer';
+import { FeedbackManager, SelfImprover, buildAnalytics } from './selfImprover';
+import { evaluateResponse, storeEval, getRecentEvals, getAvgScoresByIntent } from './ml/evals';
+import { promptLab } from './ml/promptLab';
+import { generateTrainingExample, getSyntheticData, startSyntheticDataGeneration, stopSyntheticDataGeneration } from './ml/syntheticData';
+import { knowledgeGraph } from './ml/knowledgeGraph';
+import { predictor, type Prediction, type PredictionInput } from './ml/predictor';
+import { login, authGuard, sseAuthGuard } from './middleware/auth';
+import { perUserRateLimiter } from './middleware/rateLimiter';
+import { requireOwnership } from './middleware/tenantIsolation';
+import { auditLog } from './middleware/audit';
+import { validate, askSchema, sandboxExecuteSchema, chatCreateSchema, feedbackSchema, monitorRuleSchema } from './middleware/validate';
+import { logger, requestLoggerMiddleware, startMemoryLogging, stopMemoryLogging } from './observability/logger';
+import { metricsMiddleware, getMetrics, getMetricsContentType, activeSseConnections, geminiApiCallsTotal, sandboxExecutionsTotal, dbQueryDuration, cacheHitRate } from './observability/metrics';
+import { AppError, GeminiError, SandboxError, ValidationError, DatabaseError, CircuitOpenError, AuthenticationError, NotFoundError, RateLimitError } from './observability/errors';
+import http from 'http';
+import { SimpleQueue } from './queue/simple-queue';
+import { pubsub } from './pubsub';
+import { createWsServer, shutdownWsServer, registerAbortController, removeAbortController } from './websocket';
 
 dotenv.config({ path: 'server/.env' });
-dotenv.config();
+
+// Startup env check — warn on missing critical vars, graceful degradation
+const CRITICAL_ENV_VARS = ['JWT_SECRET', 'GEMINI_API_KEY', 'CLIENT_ORIGIN'];
+const missingCritical = CRITICAL_ENV_VARS.filter(k => !process.env[k]);
+if (missingCritical.length > 0) {
+  logger.warn({ missing: missingCritical }, 'Missing critical env vars — some features may be disabled');
+}
+
+const OPTIONAL_ENV_VARS = ['GOOGLE_GEMINI_API_KEY', 'SANDBOX_API_TOKEN', 'METRICS_API_TOKEN', 'E2B_API_KEY'];
+for (const k of OPTIONAL_ENV_VARS) {
+  if (!process.env[k]) {
+    logger.debug({ var: k }, 'Optional env var not set, feature disabled');
+  }
+}
 
 const cache = new NodeCache({ stdTTL: 60, checkperiod: 120 });
 const app = express();
 const PORT = Number(process.env.PROXY_PORT ?? 3001);
 
-app.use(cors());
-app.use(express.json());
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+app.use(helmet({
+  contentSecurityPolicy: false, // Cesium needs inline styles/workers
+  crossOriginEmbedderPolicy: false,
+}));
+app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }));
+app.use(express.json({ limit: '50mb' }));
+app.disable('x-powered-by');
+
+// ── Observability middleware (before auth) ─────────────────────
+app.use(requestLoggerMiddleware());
+app.use(metricsMiddleware());
+
+// ── Resource monitoring ───────────────────────────────────────
+const RESOURCE_MONITOR_INTERVAL = 30000;
+let resourceMonitorTimer: ReturnType<typeof setInterval> | null = null;
+function startResourceMonitor(): void {
+  resourceMonitorTimer = setInterval(() => {
+    const usage = process.memoryUsage();
+    const heapUsedMB = Math.round(usage.heapUsed / 1024 / 1024);
+    if (heapUsedMB > 1500) {
+      logger.warn({ heapUsedMB, heapTotalMB: Math.round(usage.heapTotal / 1024 / 1024) }, 'heap usage exceeds 1.5GB, forcing GC');
+      if (global.gc) {
+        global.gc();
+        logger.info({ heapFreedMB: heapUsedMB - Math.round(process.memoryUsage().heapUsed / 1024 / 1024) }, 'GC completed');
+      }
+    }
+  }, RESOURCE_MONITOR_INTERVAL);
+}
+function stopResourceMonitor(): void {
+  if (resourceMonitorTimer) clearInterval(resourceMonitorTimer);
+}
+
+// ── Authentication ────────────────────────────────────────────
+app.post('/api/auth/login', login);
+app.use('/api', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (req.path === '/auth/login' || req.path === '/health' || req.path === '/ready' || req.path === '/live' || req.path === '/metrics') {
+    return next();
+  }
+  authGuard(req, res, next);
+});
+
+const agentSessions = new SessionManager();
+const materializedViews = new MaterializedViewCache(`http://127.0.0.1:${PORT}`);
+const sandboxManager = new SandboxManager();
+
+// Phase 1.3: Initialize dynamic tool registry
+const toolRegistry = new ToolRegistry();
+function registerDefaultTools() {
+  const tools: AgentTool[] = [
+    { name:'earthquakes', category:'seismic', description:'Recent M2.5+ earthquakes worldwide (GeoJSON)', exampleQueries:['show earthquakes','seismic activity'], schema:{type:'api',endpoint:'/api/earthquakes',method:'GET',outputFormat:'GeoJSON'} },
+    { name:'significant_quakes', category:'seismic', description:'Significant earthquakes (past month)', exampleQueries:['significant quakes','major earthquakes'], schema:{type:'api',endpoint:'/api/earthquakes/significant',method:'GET'} },
+    { name:'tectonic_plates', category:'seismic', description:'Tectonic plate boundary lines', exampleQueries:['tectonic plates','plate boundaries'], schema:{type:'api',endpoint:'/api/tectonic',method:'GET'} },
+    { name:'gdacs', category:'seismic', description:'GDACS disaster alerts and warnings', exampleQueries:['disaster alerts','gdacs'], schema:{type:'api',endpoint:'/api/gdacs/alerts',method:'GET'} },
+    { name:'weather_forecast', category:'weather', description:'Current weather at any lat/lon (Open-Meteo)', exampleQueries:['weather in tokyo','temperature','forecast'], schema:{type:'api',endpoint:'/api/weather/open-meteo?lat=X&lon=Y',method:'GET',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'storms', category:'weather', description:'NHC tropical cyclone tracks and forecasts', exampleQueries:['hurricane tracking','storm forecast','cyclone'], schema:{type:'api',endpoint:'/api/weather/nhc',method:'GET'} },
+    { name:'weather_alerts', category:'weather', description:'NWS active weather alerts (US)', exampleQueries:['weather alerts','storm warnings'], schema:{type:'api',endpoint:'/api/weather/alerts',method:'GET'} },
+    { name:'lightning', category:'weather', description:'Real-time lightning strike detections', exampleQueries:['lightning strikes','thunderstorm'], schema:{type:'api',endpoint:'/api/lightning',method:'GET'} },
+    { name:'wildfires', category:'hazards', description:'NASA EONET wildfire events', exampleQueries:['wildfires','fire detection','burning'], schema:{type:'api',endpoint:'/api/eonet',method:'GET'} },
+    { name:'floods', category:'hazards', description:'NASA EONET flood events globally', exampleQueries:['floods','flooding'], schema:{type:'api',endpoint:'/api/eonet',method:'GET'} },
+    { name:'volcanoes', category:'hazards', description:'Volcanic events and VAAC advisories', exampleQueries:['volcanoes','eruption','volcanic ash'], schema:{type:'api',endpoint:'/api/vaac/tokyo',method:'GET'} },
+    { name:'firms_fires', category:'hazards', description:'NASA FIRMS satellite fire detections (MODIS/VIIRS)', exampleQueries:['active fires','firms','satellite fire'], schema:{type:'api',endpoint:'/api/firms',method:'GET'} },
+    { name:'aircraft', category:'aviation', description:'Live aircraft positions from ADSB exchange', exampleQueries:['flights','aircraft','planes','adsb'], schema:{type:'api',endpoint:'/api/adsb-lol',method:'GET'} },
+    { name:'airports', category:'aviation', description:'OpenFlights airport database and routes', exampleQueries:['airports','flight routes'], schema:{type:'api',endpoint:'/api/openflights',method:'GET'} },
+    { name:'submarine_cables', category:'ocean', description:'Global submarine cable network map', exampleQueries:['submarine cables','internet cables','undersea cables'], schema:{type:'api',endpoint:'/api/submarine-cables',method:'GET'} },
+    { name:'electricity_grid', category:'energy', description:'Real-time grid carbon intensity by region', exampleQueries:['electricity grid','carbon intensity','power grid'], schema:{type:'api',endpoint:'/api/electricity-grid',method:'GET'} },
+    { name:'space_debris', category:'space', description:'CelesTrak orbital debris tracking (1500+ objects)', exampleQueries:['space debris','orbital debris','satellites'], schema:{type:'api',endpoint:'/api/space-debris',method:'GET'} },
+    { name:'nasa_dsn', category:'space', description:'NASA Deep Space Network dish status', exampleQueries:['deep space network','nasa dsn','space communications'], schema:{type:'api',endpoint:'/api/nasa-dsn',method:'GET'} },
+    { name:'aurora', category:'space', description:'Aurora oval forecast and KP index', exampleQueries:['aurora','northern lights','solar forecast'], schema:{type:'api',endpoint:'/api/aurora',method:'GET'} },
+    { name:'iss', category:'space', description:'ISS real-time position and trajectory', exampleQueries:['iss','space station','international space station'], schema:{type:'api',endpoint:'/api/iss',method:'GET'} },
+    { name:'sandbox_python', category:'compute', description:'Execute Python code with numpy, pandas, scipy in sandbox', exampleQueries:['analyze data','compute statistics','run python'], schema:{type:'sandbox',endpoint:'/api/sandbox/execute'} },
+    { name:'sandbox_node', category:'compute', description:'Execute Node.js code in sandbox', exampleQueries:['run javascript','node script'], schema:{type:'sandbox',endpoint:'/api/sandbox/execute'} },
+    { name:'sandbox_bash', category:'compute', description:'Execute bash commands in sandbox', exampleQueries:['run command','shell script'], schema:{type:'sandbox',endpoint:'/api/sandbox/execute'} },
+    { name:'fly_command', category:'navigation', description:'Fly the globe camera to any location', exampleQueries:['fly to tokyo','go to paris','show location'], schema:{type:'command'} },
+    { name:'toggle_layer_command', category:'navigation', description:'Show or hide any data layer on the globe', exampleQueries:['show earthquakes','enable flights'], schema:{type:'command'} },
+  ];
+  for (const t of tools) toolRegistry.register(t);
+}
+registerDefaultTools();
+
+// Warm embedding cache for intent prototypes (async, non-blocking)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+if (GEMINI_API_KEY) {
+  warmIntentPrototypeEmbeddings(GEMINI_API_KEY).catch(() => {});
+}
+
+// Phase 4: Initialize memory systems with embedding engine
+const embeddingEngine = new EmbeddingEngine(GEMINI_API_KEY);
+const memoryManager = new MemoryManager(embeddingEngine);
+
+// Phase 9: Cost optimization (must be after memoryManager)
+const costTracker = new CostTracker();
+const enhancedCache = new EnhancedCache(3600, 0.6);
+const origSemanticSet = memoryManager.semanticCache.set.bind(memoryManager.semanticCache);
+const origSemanticGet = memoryManager.semanticCache.get.bind(memoryManager.semanticCache);
+memoryManager.semanticCache.set = async (q: string, r: string) => { await origSemanticSet(q, r); enhancedCache.set(q, r); };
+memoryManager.semanticCache.get = async (q: string) => { const e = enhancedCache.get(q); if (e) return e; return origSemanticGet(q); };
+
+// Phase 10: Self-improving system (must be after memoryManager + costTracker)
+const feedbackManager = new FeedbackManager();
+const selfImprover = new SelfImprover(feedbackManager);
+selfImprover.setCache(enhancedCache);
+selfImprover.setGeminiApiKey(GEMINI_API_KEY);
+
+// ML Pipeline: knowledge graph + predictor
+knowledgeGraph.setEmbeddingEngine(embeddingEngine);
+predictor.setEmbeddingEngine(embeddingEngine);
+predictor.init();
+
+// Phase 7: MCP server + Plugin system
+const mcpServer = new MCPServer(toolRegistry, sandboxManager);
+const pluginManager = new PluginManager();
+pluginManager.init().then(() => {
+  for (const [name, pt] of pluginManager.getToolHandlers()) {
+    if (!toolRegistry.get(name)) {
+      toolRegistry.register({ name, description: pt.description, category: pt.category || 'plugin', exampleQueries: [name], schema: { type: 'api', endpoint: `/api/plugin/tool/${name}` } });
+    }
+  }
+}).catch(e => logger.error('Plugin init error:', e));
+
+// Phase 3: Initialize proactive systems
+const monitorManager = new MonitorManager();
+const schedulerManager = new SchedulerManager();
+const ambientDetector = new AmbientEventDetector();
+
+// Wire background managers to publish to pubsub for SSE delivery
+monitorManager.onTrigger((rule, data) => {
+  const eventData = { type: 'monitor_trigger', rule: { id: rule.id, label: rule.label, count: rule.count }, data };
+  pubsub.publish('proactive', eventData);
+});
+
+schedulerManager.onReport((task) => {
+  const eventData = { type: 'scheduled_report', task: { id: task.id, label: task.label, goal: task.goal, result: task.result?.slice(0, 2000) } };
+  pubsub.publish('proactive', eventData);
+});
+
+ambientDetector.onEvent((ambientEvent) => {
+  const eventData = { type: 'ambient_event', event: ambientEvent };
+  pubsub.publish('proactive', eventData);
+});
+
+// Set up scheduler executor (uses the same pipeline logic)
+schedulerManager.setExecutor(async (task) => {
+  const subtasks = TaskPlanner.decompose(task.goal);
+  const results: string[] = [];
+  for (const st of subtasks) {
+    if (st.code && st.language) {
+      try {
+        const r = await sandboxManager.execute({ language: st.language, code: st.code, timeout: 30000 });
+        results.push(`## ${st.description}\n\`\`\`\n${r.stdout.slice(0, 1000)}\n\`\`\``);
+      } catch (e) {
+        results.push(`## ${st.description}\n*Failed: ${e}*`);
+      }
+    }
+  }
+  return results.join('\n\n') || 'No results generated.';
+});
+
+// ── Background Job Queue ───────────────────────────────────────
+const jobQueue = new SimpleQueue(10);
+
+// Bind proactive managers to the queue
+monitorManager.bindQueue(jobQueue);
+schedulerManager.bindQueue(jobQueue);
+ambientDetector.bindQueue(jobQueue);
+
+// MaterializedViewCache refresh as recurring queue job
+jobQueue.process('mvc:refresh', async () => {
+  await materializedViews.refreshInternal();
+});
+jobQueue.recurring('mvc:refresh', 60000);
+
+// Plugin scanner as recurring queue job
+jobQueue.process('plugin:scan', async () => {
+  for (const [name, pt] of pluginManager.getToolHandlers()) {
+    if (!toolRegistry.get(name)) {
+      toolRegistry.register({ name, description: pt.description, category: pt.category || 'plugin', exampleQueries: [name], schema: { type: 'api', endpoint: `/api/plugin/tool/${name}` } });
+    }
+  }
+});
+jobQueue.recurring('plugin:scan', 30000);
+
+// ML Pipeline: synthetic data generation as recurring queue job
+jobQueue.process('ml:synthetic', async () => {
+  await generateTrainingExample(GEMINI_API_KEY);
+});
+jobQueue.recurring('ml:synthetic', 3600000);
+
+// ML Pipeline: knowledge graph cleanup / stats as recurring queue job
+jobQueue.process('ml:kg_stats', async () => {
+  const stats = knowledgeGraph.getStats();
+  logger.info({ ...stats }, 'knowledge graph stats');
+});
+jobQueue.recurring('ml:kg_stats', 600000);
 
 // Singleton browser for Puppeteer-based scrapers
 let puppeteerBrowser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
@@ -170,8 +410,96 @@ function extractIndiaCctvCameras(html: string): IndiaCctvCamera[] {
   return [...cameras.values()];
 }
 
-app.get('/api/health', (_req: express.Request, res: express.Response) => {
+// ═══════════════════════════════════════════════════════════════════════
+// OBSERVABILITY ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════
+
+app.get('/api/live', (_req: express.Request, res: express.Response) => {
   res.json({ ok: true, ts: Date.now() });
+});
+
+app.get('/api/ready', (req: express.Request, res: express.Response) => {
+  const checks: Record<string, string> = {};
+  let allCritical = true;
+
+  try {
+    const db = getDb();
+    db.prepare('SELECT 1').get();
+    checks.db = 'ok';
+  } catch {
+    checks.db = 'fail';
+    allCritical = false;
+  }
+
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
+  checks.gemini = geminiKey ? 'ok' : 'not_configured';
+
+  if (allCritical) {
+    res.json({ status: 'ready', checks, uptime_ms: Date.now() - process.uptime() * 1000 });
+  } else {
+    res.status(503).json({ status: 'not_ready', checks, uptime_ms: Date.now() - process.uptime() * 1000 });
+  }
+});
+
+app.get('/api/health', async (_req: express.Request, res: express.Response) => {
+  const checks: Record<string, { status: string; detail?: string }> = {};
+
+  try {
+    const db = getDb();
+    db.prepare('SELECT 1').get();
+    checks.db = { status: 'ok' };
+  } catch (e) {
+    checks.db = { status: 'fail', detail: (e as Error).message };
+  }
+
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
+  if (geminiKey) {
+    try {
+      const resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(5000),
+          body: JSON.stringify({ contents: [{ parts: [{ text: 'ping' }] }], generationConfig: { maxOutputTokens: 1 } }),
+        },
+      );
+      checks.gemini = { status: resp.ok ? 'ok' : 'degraded', detail: resp.ok ? undefined : `HTTP ${resp.status}` };
+    } catch (e) {
+      checks.gemini = { status: 'fail', detail: (e as Error).message };
+    }
+  } else {
+    checks.gemini = { status: 'not_configured' };
+  }
+
+  const diskFree = 0;
+  try {
+    const tmpPath = process.env.TMPDIR || '/tmp';
+    const usage = process.memoryUsage();
+    checks.memory = { status: usage.heapUsed > 500 * 1024 * 1024 ? 'degraded' : 'ok', detail: `${Math.round(usage.heapUsed / 1024 / 1024)}MB` };
+  } catch {
+    checks.memory = { status: 'unknown' };
+  }
+
+  const overallStatus = Object.values(checks).every(c => c.status === 'ok' || c.status === 'not_configured') ? 'healthy' : 'degraded';
+
+  res.json({
+    status: overallStatus,
+    checks,
+    uptime_ms: Date.now() - (process.uptime() * 1000 || 0),
+    version: process.env.npm_package_version || '0.0.0',
+    ts: Date.now(),
+  });
+});
+
+app.get('/api/metrics', async (_req: express.Request, res: express.Response) => {
+  const metricsToken = process.env.METRICS_API_TOKEN;
+  const provided = (_req.headers.authorization || '').replace('Bearer ', '') || (_req.query.token as string);
+  if (metricsToken && provided !== metricsToken) {
+    return res.status(401).json({ error: 'Unauthorized — provide METRICS_API_TOKEN' });
+  }
+  res.setHeader('Content-Type', getMetricsContentType());
+  res.end(await getMetrics());
 });
 
 app.get('/api/config/apis', (_req: express.Request, res: express.Response) => {
@@ -736,16 +1064,25 @@ app.get('/api/openflights', async (_req: express.Request, res: express.Response)
   }
 });
 
-// --- VOLCANIC LAYERS (all sourced from USGS Volcano Hazards Program) ---
+// --- VOLCANIC LAYERS (consolidated single endpoint, was 7 redundant routes) ---
+
+const VOLCANO_CACHE_TTL = 1800;
+
+let volcanoCache: { data: any[]; ts: number } | null = null;
 
 async function fetchUsgsElevatedVolcanoes(): Promise<any[]> {
+  if (volcanoCache && Date.now() - volcanoCache.ts < VOLCANO_CACHE_TTL * 1000) {
+    return volcanoCache.data;
+  }
   try {
-    const data = await cachedFetch(
-      'usgs_elevated_volcanoes',
+    const resp = await fetch(
       'https://volcanoes.usgs.gov/vsc/api/volcanoApi/elevated',
-      1800,
+      { signal: AbortSignal.timeout(10000) },
     );
-    return Array.isArray(data) ? data : [];
+    if (!resp.ok) throw new Error(`USGS ${resp.status}`);
+    const data = Array.isArray(await resp.json()) ? (await resp.json()) : [];
+    volcanoCache = { data, ts: Date.now() };
+    return data;
   } catch {
     return [];
   }
@@ -777,99 +1114,20 @@ function usgsToLocation(v: any): any {
   };
 }
 
-// WOVOdat - volcano observatory data
-app.get('/api/wovodat', async (_req: express.Request, res: express.Response) => {
+// Single consolidated volcano endpoint — all layer types route here
+app.get('/api/volcanoes', async (req: express.Request, res: express.Response) => {
   try {
     const volcanoes = await fetchUsgsElevatedVolcanoes();
     if (volcanoes.length === 0) {
       res.status(503).json({ error: 'Volcano data not available at this moment.' });
       return;
     }
-    res.json({ advisories: volcanoes.map(usgsToAdvisory) });
-  } catch (e) {
-    res.status(503).json({ error: String(e) });
-  }
-});
-
-// Tokyo VAAC - volcanic ash advisory markers
-app.get('/api/vaac/tokyo', async (_req: express.Request, res: express.Response) => {
-  try {
-    const volcanoes = await fetchUsgsElevatedVolcanoes();
-    if (volcanoes.length === 0) {
-      res.status(503).json({ error: 'Volcano data not available at this moment.' });
-      return;
+    const format = (req.query.format as string) || 'advisory';
+    if (format === 'location') {
+      res.json({ locations: volcanoes.map(usgsToLocation) });
+    } else {
+      res.json({ advisories: volcanoes.map(usgsToAdvisory) });
     }
-    res.json({ advisories: volcanoes.map(usgsToAdvisory) });
-  } catch (e) {
-    res.status(503).json({ error: String(e) });
-  }
-});
-
-// Anchorage VAAC
-app.get('/api/vaac/anchorage', async (_req: express.Request, res: express.Response) => {
-  try {
-    const volcanoes = await fetchUsgsElevatedVolcanoes();
-    if (volcanoes.length === 0) {
-      res.status(503).json({ error: 'Volcano data not available at this moment.' });
-      return;
-    }
-    res.json({ advisories: volcanoes.map(usgsToAdvisory) });
-  } catch (e) {
-    res.status(503).json({ error: String(e) });
-  }
-});
-
-// Washington VAAC
-app.get('/api/vaac/washington', async (_req: express.Request, res: express.Response) => {
-  try {
-    const volcanoes = await fetchUsgsElevatedVolcanoes();
-    if (volcanoes.length === 0) {
-      res.status(503).json({ error: 'Volcano data not available at this moment.' });
-      return;
-    }
-    res.json({ advisories: volcanoes.map(usgsToAdvisory) });
-  } catch (e) {
-    res.status(503).json({ error: String(e) });
-  }
-});
-
-// NASA SO2 Monitoring (sourced from USGS elevated volcanoes)
-app.get('/api/nasa-so2', async (_req: express.Request, res: express.Response) => {
-  try {
-    const volcanoes = await fetchUsgsElevatedVolcanoes();
-    if (volcanoes.length === 0) {
-      res.status(503).json({ error: 'SO2 data not available at this moment.' });
-      return;
-    }
-    res.json({ locations: volcanoes.map(usgsToLocation) });
-  } catch (e) {
-    res.status(503).json({ error: String(e) });
-  }
-});
-
-// NOAA SO2 Portal (sourced from USGS elevated volcanoes)
-app.get('/api/noaa-so2', async (_req: express.Request, res: express.Response) => {
-  try {
-    const volcanoes = await fetchUsgsElevatedVolcanoes();
-    if (volcanoes.length === 0) {
-      res.status(503).json({ error: 'SO2 data not available at this moment.' });
-      return;
-    }
-    res.json({ locations: volcanoes.map(usgsToLocation) });
-  } catch (e) {
-    res.status(503).json({ error: String(e) });
-  }
-});
-
-// Volcano Discovery (sourced from USGS elevated volcanoes)
-app.get('/api/volcano-discovery', async (_req: express.Request, res: express.Response) => {
-  try {
-    const volcanoes = await fetchUsgsElevatedVolcanoes();
-    if (volcanoes.length === 0) {
-      res.status(503).json({ error: 'Volcano data not available at this moment.' });
-      return;
-    }
-    res.json({ advisories: volcanoes.map(usgsToAdvisory) });
   } catch (e) {
     res.status(503).json({ error: String(e) });
   }
@@ -1212,7 +1470,7 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
         count++;
       }
     } catch (e) {
-      console.warn('Twitter scrape failed (expected occasionally):', String(e));
+      logger.warn('Twitter scrape failed (expected occasionally):', String(e));
     }
 
     // 3. Facebook Puppeteer Scraper (Public Page parsing)
@@ -1248,7 +1506,7 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
         await page.close();
       }
     } catch (e) {
-      console.warn('Facebook scrape failed:', String(e));
+      logger.warn('Facebook scrape failed:', String(e));
     }
 
     // Sort all combined results by timestamp descending
@@ -1303,7 +1561,7 @@ app.get('/api/space-debris', async (_req: express.Request, res: express.Response
     cache.set(cacheKey, sampled, 3600); // 1 hour TTL
     res.json(sampled);
   } catch (e) {
-    console.error('Space debris data not available at this moment:', e);
+    logger.error('Space debris data not available at this moment:', e);
     res.status(503).json({ error: 'Space debris data not available at this moment.' });
   }
 });
@@ -1399,7 +1657,7 @@ app.get('/api/nasa-dsn', async (_req: express.Request, res: express.Response) =>
     cache.set(cacheKey, payload, 5); // 5 second cache
     res.json(payload);
   } catch (e) {
-    console.error('Failed to parse DSN, serving real baseline:', e);
+    logger.error('Failed to parse DSN, serving real baseline:', e);
     // Real baseline sample for when DSN is offline
     const baselineDsn = {
       stations: [
@@ -1498,7 +1756,7 @@ app.get('/api/lightning', async (_req: express.Request, res: express.Response) =
     cache.set(cacheKey, strikes, 5); // 5 second cache
     res.json(strikes);
   } catch (e) {
-    console.error('Lightning data not available at this moment:', e);
+    logger.error('Lightning data not available at this moment:', e);
     res.status(503).json({ error: 'Lightning data not available at this moment.' });
   }
 });
@@ -1536,7 +1794,7 @@ app.get('/api/aurora', async (_req: express.Request, res: express.Response) => {
     cache.set(cacheKey, payload, 300); // 5 minutes cache
     res.json(payload);
   } catch (e) {
-    console.warn('Failed to fetch NOAA Aurora forecast, serving real winter polar oval:', e);
+    logger.warn('Failed to fetch NOAA Aurora forecast, serving real winter polar oval:', e);
     const baseCoords = [];
     for (let lon = -180; lon < 180; lon += 5) {
       const rad = lon * Math.PI / 180;
@@ -1573,7 +1831,7 @@ app.get('/api/submarine-cables', async (_req: express.Request, res: express.Resp
     cache.set(cacheKey, data, 86400); // 24 hours
     res.json(data);
   } catch (e) {
-    console.error('Failed to fetch submarine cables, serving major real cables:', e);
+    logger.error('Failed to fetch submarine cables, serving major real cables:', e);
     const backupGeoJson = {
       type: "FeatureCollection",
       features: [
@@ -1671,7 +1929,7 @@ app.get('/api/electricity-grid', async (req: express.Request, res: express.Respo
         ukMix = { wind: 10, solar: 5, nuclear: 15, gas: 60, coal: 5, biomass: 5 };
       }
     } catch (err) {
-      console.warn('Failed to fetch live UK grid intensity:', err);
+      logger.warn('Failed to fetch live UK grid intensity:', err);
     }
 
     const zones = [
@@ -1702,7 +1960,7 @@ app.get('/api/electricity-grid', async (req: express.Request, res: express.Respo
             }
           }
         } catch (err) {
-          console.warn(`Failed to fetch live ElectricityMaps for zone ${zone.id}:`, err);
+          logger.warn(`Failed to fetch live ElectricityMaps for zone ${zone.id}:`, err);
         }
       }
     }
@@ -1776,16 +2034,25 @@ app.get('/api/animal-migrations', async (_req: express.Request, res: express.Res
 app.post('/api/ai/gemini', async (req: express.Request, res: express.Response) => {
   const { key, prompt } = req.body;
   if (!key || !prompt) return res.status(400).json({ error: 'Missing key or prompt' });
+  const start = Date.now();
   try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, { signal: AbortSignal.timeout(30000),
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, { signal: AbortSignal.timeout(30000),
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
     });
-    if (!resp.ok) return res.status(resp.status).json({ error: 'Gemini upstream error' });
+    const latency = Date.now() - start;
+    if (!resp.ok) {
+      geminiApiCallsTotal.inc({ model: 'gemini-2.0-flash', status: 'error' });
+      geminiApiLatency.observe({ model: 'gemini-2.0-flash' }, latency);
+      return res.status(resp.status).json({ error: 'Gemini upstream error' });
+    }
     const data = await resp.json();
+    geminiApiCallsTotal.inc({ model: 'gemini-2.0-flash', status: 'success' });
+    geminiApiLatency.observe({ model: 'gemini-2.0-flash' }, latency);
     res.json(data);
   } catch (e) {
+    geminiApiCallsTotal.inc({ model: 'gemini-2.0-flash', status: 'error' });
     res.status(502).json({ error: 'Gemini proxy failed' });
   }
 });
@@ -1852,14 +2119,14 @@ async function fetchAndCacheAirspaces(): Promise<{ type: string; features: any[]
         combined.features = localData.features;
       }
     } catch (localErr) {
-      console.warn('Local airspace file not found:', localErr);
+      logger.warn('Local airspace file not found:', localErr);
       throw new Error('No airspace data available');
     }
   }
 
   const simplified = simplifyAirspaces(combined.features);
   combined.features = simplified;
-  console.log(`Caching ${combined.features.length} simplified airspace features (was ${combined.features.length > 0 ? 'simplified' : 'none'})`);
+  logger.info(`Caching ${combined.features.length} simplified airspace features (was ${combined.features.length > 0 ? 'simplified' : 'none'})`);
   cache.set(cacheKey, combined, 3600);
   return combined;
 }
@@ -1869,7 +2136,7 @@ app.get('/api/airspaces', async (_req: express.Request, res: express.Response) =
     const combined = await fetchAndCacheAirspaces();
     res.json(combined);
   } catch (e) {
-    console.error('Failed to serve airspace data:', e);
+    logger.error('Failed to serve airspace data:', e);
     res.status(502).json({ error: 'Failed to load airspace data' });
   }
 });
@@ -2437,18 +2704,1120 @@ app.get('/api/data/:layerId', async (req: express.Request, res: express.Response
   res.json({ items: [] });
 });
 
-// Global error handler (must be last)
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Internal server error' });
+// ─────────────────────────────────────────────
+// AGENT ENDPOINTS — Antigravity Earth Intelligence Copilot
+// ─────────────────────────────────────────────
+
+/* ═════════════════════════════════════════════════════════════════
+   SANDBOX API — Local code execution, workspace, file management
+   ═════════════════════════════════════════════════════════════════ */
+
+// Optional API token auth for sandbox & MCP endpoints
+// ── Concurrent sandbox execution limits ───────────────────────
+const MAX_LOCAL_SANDBOX = 3;
+const MAX_CLOUD_SANDBOX = 10;
+let activeLocalSandboxes = 0;
+let activeCloudSandboxes = 0;
+
+function checkSandboxConcurrency(cloud: boolean): { allowed: boolean; reason?: string } {
+  if (cloud && activeCloudSandboxes >= MAX_CLOUD_SANDBOX) {
+    return { allowed: false, reason: `Max cloud sandbox executions reached (${MAX_CLOUD_SANDBOX})` };
+  }
+  if (!cloud && activeLocalSandboxes >= MAX_LOCAL_SANDBOX) {
+    return { allowed: false, reason: `Max local sandbox executions reached (${MAX_LOCAL_SANDBOX})` };
+  }
+  return { allowed: true };
+}
+function incrementSandboxCount(cloud: boolean): void {
+  if (cloud) activeCloudSandboxes++; else activeLocalSandboxes++;
+}
+function decrementSandboxCount(cloud: boolean): void {
+  if (cloud) activeCloudSandboxes--; else activeLocalSandboxes--;
+}
+
+function apiTokenGuard(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const expected = process.env.SANDBOX_API_TOKEN;
+  if (!expected) return next(); // no token configured → open (local dev)
+  const provided = req.headers['x-api-token'] as string || req.query.token as string;
+  if (provided !== expected) {
+    return res.status(401).json({ error: 'Unauthorized — provide X-API-Token header or ?token= param matching SANDBOX_API_TOKEN' });
+  }
+  next();
+}
+
+// Execute code in sandbox (local or E2B cloud)
+const sandboxUserRateLimit = perUserRateLimiter(5, 60000); // 5 requests per minute per user
+
+app.post('/api/sandbox/execute', apiTokenGuard, sandboxUserRateLimit, validate(sandboxExecuteSchema), async (req: express.Request, res: express.Response) => {
+  try {
+    const { language, code, workspaceId, timeout, env, cloud } = req.body;
+    const isCloud = cloud === true;
+    const concurrency = checkSandboxConcurrency(isCloud);
+    if (!concurrency.allowed) {
+      return res.status(429).json({ error: concurrency.reason });
+    }
+    incrementSandboxCount(isCloud);
+    const start = Date.now();
+    try {
+      const result = await sandboxManager.execute({ language, code, workspaceId, timeout, env, cloud });
+      sandboxExecutionsTotal.inc({ language: language || 'unknown', status: 'success' });
+      const duration = Date.now() - start;
+      if (duration > 5000) {
+        logger.warn({ language, duration_ms: duration }, 'slow sandbox execution');
+      }
+      auditLog((req as any).userId, 'sandbox_exec', `language:${language}`, `code:${code.slice(0, 100)}`, req.ip || '', req.headers['user-agent'] || '');
+      res.json(result);
+    } finally {
+      decrementSandboxCount(isCloud);
+    }
+  } catch (e) {
+    sandboxExecutionsTotal.inc({ language: req.body.language || 'unknown', status: 'error' });
+    logger.error({ err: e, language: req.body.language }, 'sandbox execution failed');
+    if (e instanceof AppError) {
+      res.status(e.statusCode).json(e.toJSON((req as any).correlationId));
+    } else {
+      res.status(500).json({ error: String(e) });
+    }
+  }
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`LiveGlobe API proxy listening on http://localhost:${PORT}`);
+// Batch execute multiple code tasks
+app.post('/api/sandbox/batch', apiTokenGuard, sandboxUserRateLimit, async (req: express.Request, res: express.Response) => {
+  try {
+    const { tasks } = req.body;
+    if (!Array.isArray(tasks) || tasks.length === 0) return res.status(400).json({ error: 'tasks array required' });
+    const results = await sandboxManager.batchExecute(tasks);
+    auditLog((req as any).userId, 'sandbox_exec', 'batch', `${tasks.length} tasks`, req.ip || '', req.headers['user-agent'] || '');
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// Create a new sandbox workspace (local or E2B cloud)
+app.post('/api/sandbox/workspace', apiTokenGuard, async (req: express.Request, res: express.Response) => {
+  try {
+    const userId = (req as any).userId;
+    const cloud = req.body.cloud;
+    const ws = await sandboxManager.createWorkspace(userId, cloud);
+    res.json(ws);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// Delete a workspace
+app.delete('/api/sandbox/workspace/:id', apiTokenGuard, async (req: express.Request, res: express.Response) => {
+  try {
+    const ok = await sandboxManager.deleteWorkspace(req.params.id);
+    res.json({ deleted: ok });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// Upload a file to a workspace
+app.post('/api/sandbox/workspace/:id/upload', apiTokenGuard, async (req: express.Request, res: express.Response) => {
+  try {
+    const { fileName, content } = req.body;
+    if (!fileName || content === undefined) return res.status(400).json({ error: 'fileName and content required' });
+    const filePath = await sandboxManager.writeFile(req.params.id, fileName, content);
+    res.json({ path: filePath, fileName });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// List files in a workspace
+app.get('/api/sandbox/workspace/:id/files', apiTokenGuard, async (req: express.Request, res: express.Response) => {
+  try {
+    const files = await sandboxManager.listFiles(req.params.id);
+    res.json({ files });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// Read a file from a workspace
+app.get('/api/sandbox/workspace/:id/read', apiTokenGuard, async (req: express.Request, res: express.Response) => {
+  try {
+    const fileName = req.query.file as string;
+    if (!fileName) return res.status(400).json({ error: 'file query param required' });
+    const content = await sandboxManager.readFile(req.params.id, fileName);
+    res.json({ fileName, content });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// Agent task pipeline: decompose, execute, synthesize
+app.post('/api/agent/pipeline', async (req: express.Request, res: express.Response) => {
+  const { goal, workspaceId, cloud } = req.body;
+  if (!goal) return res.status(400).json({ error: 'goal required' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const sendEvent = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+    let subtasks = TaskPlanner.decompose(goal);
+    if (apiKey) {
+      try {
+        const llmPlan = await TaskPlanner.planWithLLM(goal, apiKey, toolRegistry.list());
+        if (llmPlan && llmPlan.length > 0) subtasks = llmPlan;
+      } catch { /* fallback to static decomposition */ }
+    }
+    sendEvent('plan', { subtasks: subtasks.map(s => ({ id: s.id, description: s.description })) });
+
+    let wsId = workspaceId;
+    if (!wsId) {
+      const ws = await sandboxManager.createWorkspace('default', cloud);
+      wsId = ws.id;
+      sendEvent('workspace', { workspaceId: wsId, cloud: !!ws.cloud });
+    }
+
+    const results: Record<string, string> = {};
+
+    for (const task of subtasks) {
+      const depsDone = task.dependsOn.every(d => results[d] !== undefined);
+      if (!depsDone) {
+        sendEvent('error', { taskId: task.id, error: 'Dependencies not met' });
+        continue;
+      }
+
+      sendEvent('subtask', { subtask: { id: task.id, description: task.description, status: 'running' } });
+
+      if (task.code && task.language) {
+        try {
+          const execResult = await sandboxManager.execute({
+            language: task.language,
+            code: task.code,
+            workspaceId: wsId,
+            timeout: 30000,
+          });
+          results[task.id] = execResult.stdout;
+          sendEvent('subtask', { subtask: {
+            id: task.id, description: task.description, status: 'completed',
+            result: execResult.stdout.slice(0, 2000),
+            executionTimeMs: execResult.executionTimeMs,
+          }});
+        } catch (e) {
+          sendEvent('subtask', { subtask: { id: task.id, description: task.description, status: 'failed', error: String(e) } });
+        }
+      } else {
+        results[task.id] = 'ok';
+        sendEvent('subtask', { subtask: { id: task.id, description: task.description, status: 'completed' } });
+      }
+    }
+
+    sendEvent('done', { done: true, workspaceId: wsId, subtaskResults: results });
+  } catch (e) {
+    sendEvent('error', { error: String(e) });
+  }
+  res.end();
+});
+
+// Intent classification — runs in <1ms on server, returns action plan
+app.get('/api/agent/intent', (req: express.Request, res: express.Response) => {
+  const text = (req.query.q as string) || '';
+  const result = IntentRouter.classify(text);
+  res.json(result);
+});
+
+// Materialized view query — instant pre-computed data
+app.get('/api/agent/query', (req: express.Request, res: express.Response) => {
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
+  const radius = parseFloat((req.query.radius as string) || '200');
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  const result = materializedViews.query(lat, lon, radius);
+  res.json(result);
+});
+
+// Create a fresh sandbox environment with AGENTS.md mounted
+app.post('/api/agent/environment', async (req: express.Request, res: express.Response) => {
+  const userId = (req as any).userId;
+  const existing = agentSessions.get(userId);
+  if (existing?.environmentId) {
+    res.json({ environmentId: existing.environmentId, reused: true });
+    return;
+  }
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || req.body.apiKey;
+  if (!apiKey) return res.status(400).json({ error: 'Gemini API key required' });
+  try {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/interactions?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent: 'antigravity-preview-05-2026',
+        environment: {
+          type: 'remote',
+          sources: [{
+            type: 'inline',
+            target: '/workspace/.agents/AGENTS.md',
+            content: buildAgentPrompt(toolRegistry),
+          }],
+        },
+        input: 'Initialize environment. Read AGENTS.md and confirm you are ready.',
+        store: true,
+      }),
+    });
+    if (!resp.ok) {
+      const err = await resp.text();
+      return res.status(502).json({ error: `Agent init failed: ${err}` });
+    }
+    const data = await resp.json();
+    const envId = data.environment_id;
+    if (envId) {
+      agentSessions.set(userId, { environmentId: envId, interactionId: data.id || '' });
+    }
+    res.json({ environmentId: envId, interactionId: data.id });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+// Geocode a location name using LLM + local city DB
+app.get('/api/agent/geocode', async (req: express.Request, res: express.Response) => {
+  const text = (req.query.q as string) || '';
+  if (!text) return res.status(400).json({ error: 'Query required' });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+  const result = await IntentRouter.geocode(text, apiKey);
+  if (result) return res.json(result);
+  res.status(404).json({ error: 'Location not found' });
+});
+
+// Main agent ask endpoint — SSE streaming
+const askRateLimit = perUserRateLimiter(30, 60000); // 30 requests per minute per user
+app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: express.Request, res: express.Response) => {
+  const { message } = req.body;
+  const userId = (req as any).userId || 'default';
+  const environmentId: string | undefined = req.body.environmentId;
+  const interactionId: string | undefined = req.body.interactionId;
+  const requestId = (req as any).correlationId || crypto.randomUUID();
+  const abortController = new AbortController();
+
+  registerAbortController(requestId, abortController);
+  req.on('close', () => {
+    if (!res.writableEnded) {
+      abortController.abort();
+    }
+  });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const sendEvent = (event: string, data: unknown) => {
+    if (res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  sendEvent('connected', { requestId, userId });
+
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || req.body.apiKey;
+  if (!apiKey) {
+    sendEvent('error', { error: 'Gemini API key not configured. Set GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY in .env' });
+    res.end();
+    removeAbortController(requestId);
+    return;
+  }
+
+  const cleanup = () => removeAbortController(requestId);
+
+  try {
+    // Step 1: Classify intent — use ModelRouter to decide if deep classification is needed
+    sendEvent('step', { type: 'classifying', text: 'Classifying intent...' });
+    const apiKeyForAsk = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+    let intent = IntentRouter.classify(message);
+
+    // ModelRouter: determine optimal tier and skip deep classification for simple queries
+    const modelTier = ModelRouter.route(intent.type, intent.confidence, message.length, false, false);
+    if (modelTier === 'local') {
+      // Skip deep classification — local keyword path is sufficient
+      sendEvent('step', { type: 'model_tier', text: '🪙 Free tier (local routing)' });
+    } else if (apiKeyForAsk && intent.confidence < 0.7) {
+      try {
+        const deepIntent = await IntentRouter.classifyDeep(message, apiKeyForAsk);
+        if (deepIntent && deepIntent.confidence > intent.confidence) intent = deepIntent;
+        costTracker.record('flash', message, JSON.stringify(intent), false);
+      } catch { /* use fast result */ }
+    }
+    sendEvent('intent', intent);
+
+    // Step 1.5: Check semantic cache for identical queries
+    const uid = userId || 'default';
+    const cachedResponse = await memoryManager.semanticCache.get(message);
+    if (cachedResponse) {
+      costTracker.record('local', message, cachedResponse, true);
+      sendEvent('step', { type: 'cache_hit', text: 'Found identical query in memory — returning cached response' });
+      sendEvent('output', { text: cachedResponse + '\n\n*(From memory — asked before)*' });
+      sendEvent('done', { type: 'done' });
+      cleanup();
+      res.end();
+      return;
+    }
+
+    // Step 2: If quick scan, check materialized cache first
+    if (intent.type === 'quick_scan' && intent.location) {
+      sendEvent('step', { type: 'cache_check', text: 'Checking pre-computed data...' });
+      const cached = materializedViews.query(intent.location.lat, intent.location.lon);
+      if (cached && (cached.earthquakeRisk > 0 || cached.nearbyEvents.length > 0 || cached.weatherAlerts.length > 0)) {
+        sendEvent('step', { type: 'cache_hit', text: `Found ${cached.nearbyEvents.length} events, M${cached.earthquakeRisk} max quake` });
+        const commands: GlobeCommand[] = [
+          { action: 'flyTo', lat: intent.location.lat, lon: intent.location.lon, label: intent.location.label, zoom: 8 },
+        ];
+        if (cached.earthquakeRisk > 0) {
+          commands.push({ action: 'toggleLayer', layerId: 'earthquakes', enabled: true });
+        }
+        sendEvent('commands', commands);
+        const parts: string[] = [];
+        if (cached.earthquakeRisk > 0) parts.push(`🌋 **Earthquake Risk**: M${cached.earthquakeRisk} max detected nearby`);
+        if (cached.nearbyEvents.length > 0) parts.push(`🔥 **Active Events**: ${cached.nearbyEvents.map(e => e.title).join(', ')}`);
+        if (cached.weatherAlerts.length > 0) parts.push(`🌤️ **Weather Alerts**: ${cached.weatherAlerts.length} active`);
+        sendEvent('output', { text: `## Quick Scan: ${intent.location.label}\n\n${parts.join('\n\n') || 'No significant issues detected.'}\n\n*Data pre-computed (≤60s old). Ask for "detailed" for live analysis.*` });
+        sendEvent('done', { type: 'done' });
+        cleanup();
+        res.end();
+        return;
+      }
+    }
+
+    // Step 2.5: Multi-agent orchestration for complex queries
+    const orchestrationIntents = ['deep_analysis', 'compute', 'unknown', 'weather_check'];
+    if (orchestrationIntents.includes(intent.type)) {
+      sendEvent('step', { type: 'orchestrating', text: '🧠 Multi-agent swarm analyzing...' });
+      try {
+        const orchestrator = new AgentOrchestrator(apiKey);
+        const orchestrated = await orchestrator.orchestrate(message, {
+          location: intent.location,
+          intent: intent.type,
+        });
+        if (orchestrated.output) {
+          costTracker.record(modelTier === 'pro' ? 'pro' : 'flash', message, orchestrated.output, false);
+          if (orchestrated.commands?.length) sendEvent('commands', orchestrated.commands);
+          sendEvent('output', { text: orchestrated.output + '\n\n*🤖 Multi-agent orchestrated response*' });
+          sendEvent('done', { type: 'done' });
+          cleanup();
+          res.end();
+          return;
+        }
+      } catch (e) {
+        // Orchestrator failed — fall through to single-agent Antigravity
+        logger.error('Orchestrator failed, falling back:', (e as Error).message);
+      }
+    }
+
+    // Step 3: Get or create agent session
+    const session = agentSessions.get(uid);
+
+    let envId = environmentId || session?.environmentId;
+    let prevId = interactionId || session?.interactionId;
+
+    if (!envId) {
+      sendEvent('step', { type: 'provisioning', text: 'Provisioning sandbox environment...' });
+      const envResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/interactions?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({
+          agent: 'antigravity-preview-05-2026',
+          environment: {
+            type: 'remote',
+            sources: [{
+              type: 'inline',
+              target: '/workspace/.agents/AGENTS.md',
+              content: buildAgentPrompt(toolRegistry, intent),
+            }],
+          },
+          input: 'Initialize and confirm readiness.',
+          store: true,
+        }),
+      });
+      if (!envResp.ok) {
+        sendEvent('error', { error: `Environment provisioning failed: ${await envResp.text()}` });
+        cleanup();
+        res.end();
+        return;
+      }
+      const envData = await envResp.json();
+      envId = envData.environment_id;
+      prevId = envData.id;
+      const existing = agentSessions.get(uid);
+      if (existing) {
+        existing.environmentId = envId;
+        existing.interactionId = prevId;
+      } else {
+        agentSessions.set(uid, { environmentId: envId, interactionId: prevId });
+      }
+    }
+
+    // Step 4: Send to Antigravity agent
+    sendEvent('step', { type: 'agent_thinking', text: 'Agent analyzing...' });
+    // Build working memory context from user profile and past sessions
+    const recentMessages: unknown[] = []; // placeholder — frontend could send recent msgs via WebSocket
+    const memoryContext = await memoryManager.buildWorkingMemoryContext(uid, message, []);
+    const enrichedInput = memoryContext
+      ? `[Context from user profile]\n${memoryContext}\n\n[User query]\n${message}`
+      : message;
+    const interactionBody: Record<string, unknown> = {
+      agent: 'antigravity-preview-05-2026',
+      environment: envId,
+      input: enrichedInput,
+      store: true,
+    };
+    if (prevId) interactionBody.previous_interaction_id = prevId;
+
+    const agentResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/interactions?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: abortController.signal,
+      body: JSON.stringify(interactionBody),
+    });
+
+    if (!agentResp.ok) {
+      const errText = await agentResp.text();
+      sendEvent('error', { error: `Agent request failed: ${errText}` });
+      cleanup();
+      res.end();
+      return;
+    }
+
+    const agentData = await agentResp.json();
+    const outputText = agentData.output_text || '';
+    const steps: AgentStep[] = (agentData.steps || []);
+    const newInteractionId = agentData.id;
+    const newEnvId = agentData.environment_id || envId;
+
+    // Record cost for Antigravity agent call
+    costTracker.record(modelTier, message, outputText, false);
+
+    // Update session
+    const sess = agentSessions.get(uid);
+    if (sess) { sess.interactionId = newInteractionId; sess.environmentId = newEnvId; }
+
+    // Record in memory
+    await memoryManager.recordInteraction(
+      uid, message, outputText,
+      intent.type, apiKey,
+      intent.location ? { lat: intent.location.lat, lon: intent.location.lon, label: intent.location.label } : undefined,
+    );
+
+    // ML pipeline: evaluate response quality asynchronously
+    const epId = `ep_${Date.now()}`;
+    selfImprover.evaluateInteraction(message, outputText, { intentType: intent.type, modelTier }, epId).catch(() => {});
+
+    // ML pipeline: extract knowledge graph entities
+    if (GEMINI_API_KEY && intent.location) {
+      const locLabel = intent.location.label || `${intent.location.lat.toFixed(2)},${intent.location.lon.toFixed(2)}`;
+      knowledgeGraph.ensureEntity(locLabel, 'location').catch(() => {});
+      knowledgeGraph.ensureEntity(intent.type, 'intent').catch(() => {});
+    }
+
+    // Stream reasoning steps with full detail
+    for (const step of steps) {
+      sendEvent('step', {
+        type: step.type,
+        text: step.text || (step.type === 'tool_use' ? `Using ${step.tool_name || 'tool'}...` : 'Processing...'),
+        code: step.code,
+        output: step.output?.slice(0, 5000),
+        toolName: step.tool_name,
+        stepType: step.type,
+      });
+    }
+
+    // Parse visualization commands from output
+    sendEvent('step', { type: 'parsing', text: 'Parsing visualization commands...' });
+    const commands = CommandParser.parse(outputText);
+    if (commands.length > 0) {
+      sendEvent('commands', commands);
+    }
+
+    // Send final output
+    sendEvent('output', { text: outputText, interactionId: newInteractionId, environmentId: newEnvId });
+    sendEvent('done', { type: 'done', interactionId: newInteractionId, environmentId: newEnvId });
+
+  } catch (e) {
+    sendEvent('error', { error: String(e) });
+  }
+  cleanup();
+  res.end();
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 2.1: Vision Analysis (Gemini Vision API)
+// ═══════════════════════════════════════════════════════════════════════
+app.post('/api/agent/analyze-vision', async (req: express.Request, res: express.Response) => {
+  const { image, mimeType, prompt: userPrompt } = req.body;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+  if (!apiKey) return res.status(400).json({ error: 'Gemini API key required' });
+  if (!image) return res.status(400).json({ error: 'Image data required' });
+
+  const prompt = (userPrompt || 'Describe what you see in this image in detail. '
+    + 'If it appears to be a satellite image, map, chart, or geographic data, '
+    + 'identify features, patterns, and notable characteristics.');
+
+  try {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(30000),
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType: mimeType || 'image/jpeg', data: image } },
+            ],
+          }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+        }),
+      },
+    );
+    if (!resp.ok) return res.status(resp.status).json({ error: 'Vision API upstream error' });
+    const data = await resp.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || 'No analysis available';
+    res.json({ analysis: text });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 2.3: Data File Analysis (CSV/GeoJSON parsing)
+// ═══════════════════════════════════════════════════════════════════════
+app.post('/api/agent/analyze-data', async (req: express.Request, res: express.Response) => {
+  const { content, fileName } = req.body;
+  if (!content) return res.status(400).json({ error: 'File content required' });
+
+  const name = (fileName || 'data.csv').toLowerCase();
+
+  try {
+    if (name.endsWith('.csv')) {
+      // Parse CSV and return structure
+      const lines = content.split('\n').filter((l: string) => l.trim());
+      if (lines.length < 2) return res.json({ type: 'csv', rows: 0, error: 'File has no data rows' });
+
+      const headers = lines[0].split(',').map((h: string) => h.trim());
+      const rows = lines.slice(1).map((l: string) => {
+        const vals = l.split(',');
+        const row: Record<string, string> = {};
+        headers.forEach((h: string, i: number) => { row[h] = (vals[i] || '').trim(); });
+        return row;
+      });
+
+      // Detect numeric columns and compute basic stats
+      const columns = headers.map((h: string) => {
+        const nums = rows.map((r: Record<string, string>) => parseFloat(r[h])).filter((n: number) => isFinite(n));
+        const strings = rows.map((r: Record<string, string>) => r[h]).filter((s: string) => s && isNaN(Number(s)));
+        const isNumeric = nums.length > rows.length * 0.5;
+        return {
+          name: h,
+          type: isNumeric ? 'numeric' : 'text',
+          sample: rows.slice(0, 5).map((r: Record<string, string>) => r[h]),
+          ...(isNumeric ? {
+            min: Math.min(...nums), max: Math.max(...nums),
+            mean: nums.reduce((a: number, b: number) => a + b, 0) / nums.length,
+            count: nums.length,
+          } : { uniqueValues: new Set(strings).size }),
+        };
+      });
+
+      // Detect lat/lon columns
+      const latCol = columns.find((c: { name: string; type: string }) => /lat/i.test(c.name));
+      const lonCol = columns.find((c: { name: string; type: string }) => /lon|lng/i.test(c.name));
+
+      res.json({
+        type: 'csv',
+        rows: rows.length,
+        columns: rows.length > 0 ? columns : headers.map((h: string) => ({ name: h, type: 'unknown', sample: [] })),
+        detectedLocation: latCol && lonCol ? { latColumn: latCol.name, lonColumn: lonCol.name } : null,
+        preview: rows.slice(0, 10),
+        geoDetect: latCol && lonCol ? `${rows.length} point features detected` : 'No lat/lon columns detected',
+      });
+    } else if (name.endsWith('.json') || name.endsWith('.geojson')) {
+      let data: Record<string, unknown>;
+      try { data = JSON.parse(content); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
+
+      const isGeoJSON = data.type === 'FeatureCollection' || data.type === 'Feature';
+      const features = data.type === 'FeatureCollection' ? (data.features || []) as Array<Record<string, unknown>>
+        : data.type === 'Feature' ? [data] : [];
+
+      const geometryTypes = [...new Set(features.map((f: Record<string, unknown>) => (f.geometry as Record<string, unknown>)?.type as string).filter(Boolean))];
+      const props = features.length > 0 ? Object.keys((features[0] as Record<string, unknown>).properties as Record<string, unknown> || {}) : [];
+
+      res.json({
+        type: 'geojson',
+        isGeoJSON,
+        features: features.length,
+        geometryTypes,
+        properties: props,
+        preview: features.slice(0, 5),
+      });
+    } else {
+      res.json({ type: 'unknown', message: `Unsupported file type: ${name.split('.').pop()}. Supported: CSV, JSON, GeoJSON.` });
+    }
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 3: Proactive Intelligence — SSE event stream (deprecated, use WebSocket /ws/agent)
+// ═══════════════════════════════════════════════════════════════════════
+app.get('/api/agent/events', sseAuthGuard, (req: express.Request, res: express.Response) => {
+  logger.warn({ userId: (req as any).userId }, 'SSE endpoint /api/agent/events is deprecated, migrate to WebSocket /ws/agent');
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  const userId = (req as any).userId;
+  res.write(`event: connected\ndata: ${JSON.stringify({ status: 'connected', userId })}\n\n`);
+  activeSseConnections.inc();
+
+  const unsubProactive = pubsub.subscribe('proactive', (data: any) => {
+    res.write(`event: proactive\ndata: ${JSON.stringify(data)}\n\n`);
+  });
+  const unsubUser = pubsub.subscribeUser(userId, (data: any) => {
+    res.write(`event: ${data.event || 'message'}\ndata: ${JSON.stringify(data.data)}\n\n`);
+  });
+
+  req.on('close', () => {
+    unsubProactive();
+    unsubUser();
+    activeSseConnections.dec();
+  });
+});
+
+// Phase 3.1: Monitor rules CRUD
+app.post('/api/agent/monitor', (req: express.Request, res: express.Response) => {
+  const { layerId, condition, location, label, intervalMs } = req.body;
+  if (!layerId || !condition) return res.status(400).json({ error: 'layerId and condition required' });
+  const rule = monitorManager.create({ layerId, condition, location, label: label || `Monitor ${layerId}`, userId: (req as any).userId, intervalMs: intervalMs || 300000 });
+  auditLog((req as any).userId, 'monitor_rule_change', `rule:${rule.id}`, `layer:${layerId}`, req.ip || '', req.headers['user-agent'] || '');
+  res.json(rule);
+});
+
+app.get('/api/agent/monitor', (req: express.Request, res: express.Response) => {
+  const rules = monitorManager.list((req as any).userId);
+  res.json(rules);
+});
+
+app.delete('/api/agent/monitor/:id', requireOwnership('monitor_rules'), (req: express.Request, res: express.Response) => {
+  const ok = monitorManager.remove(req.params.id);
+  auditLog((req as any).userId, 'monitor_rule_change', `rule delete:${req.params.id}`, '', req.ip || '', req.headers['user-agent'] || '');
+  res.json({ removed: ok });
+});
+
+// Phase 3.2: Scheduled tasks CRUD
+app.post('/api/agent/schedule', (req: express.Request, res: express.Response) => {
+  const { label, goal, intervalMs } = req.body;
+  if (!goal) return res.status(400).json({ error: 'goal required' });
+  const task = schedulerManager.create({ label: label || 'Scheduled report', goal, userId: (req as any).userId, intervalMs: intervalMs || 86400000 });
+  res.json(task);
+});
+
+app.get('/api/agent/schedule', (req: express.Request, res: express.Response) => {
+  const tasks = schedulerManager.list((req as any).userId);
+  res.json(tasks);
+});
+
+app.delete('/api/agent/schedule/:id', requireOwnership('scheduled_tasks'), (req: express.Request, res: express.Response) => {
+  const ok = schedulerManager.remove(req.params.id);
+  res.json({ removed: ok });
+});
+
+// Phase 3.3: Location context
+app.get('/api/agent/context', async (req: express.Request, res: express.Response) => {
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  try {
+    const context = await getLocationContext(lat, lon, `http://127.0.0.1:${PORT}`);
+    res.json(context);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 7.1: MCP Server — Model Context Protocol (JSON-RPC over HTTP)
+// ═══════════════════════════════════════════════════════════════════════
+
+app.post('/api/mcp', apiTokenGuard, async (req: express.Request, res: express.Response) => {
+  try {
+    const result = await mcpServer.handle(req.body);
+    res.json(result);
+  } catch (e) {
+    res.json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: String(e) } });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 7.2: Plugin Ecosystem — dynamic tools & data sources
+// ═══════════════════════════════════════════════════════════════════════
+
+app.get('/api/plugins', (_req: express.Request, res: express.Response) => {
+  res.json({ plugins: pluginManager.listPlugins() });
+});
+
+app.post('/api/plugin/tool/:name', async (req: express.Request, res: express.Response) => {
+  try {
+    const result = await pluginManager.callTool(req.params.name, req.body || {});
+    res.json(result);
+  } catch (e) {
+    res.status(404).json({ error: String(e) });
+  }
+});
+
+app.get('/api/plugin/data/:name', async (req: express.Request, res: express.Response) => {
+  try {
+    const result = await pluginManager.callDataSource(req.params.name, req.query as Record<string, string>);
+    res.json(result);
+  } catch (e) {
+    res.status(404).json({ error: String(e) });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 4: Memory & Personalization
+// ═══════════════════════════════════════════════════════════════════════
+
+// 4.1: User profile
+app.get('/api/agent/profile', (req: express.Request, res: express.Response) => {
+  const userId = (req as any).userId;
+  const profile = memoryManager.profiles.get(userId);
+  res.json(profile);
+});
+
+app.post('/api/agent/profile', (req: express.Request, res: express.Response) => {
+  const { updates } = req.body;
+  if (!updates) return res.status(400).json({ error: 'updates required' });
+  const profile = memoryManager.profiles.update((req as any).userId, (p) => Object.assign(p, updates));
+  res.json(profile);
+});
+
+app.delete('/api/agent/profile', (req: express.Request, res: express.Response) => {
+  const userId = (req as any).userId;
+  memoryManager.profiles.delete(userId);
+  res.json({ deleted: true });
+});
+
+app.post('/api/agent/profile/toggle', (req: express.Request, res: express.Response) => {
+  const { layerId } = req.body;
+  memoryManager.profiles.recordLayerToggle((req as any).userId, layerId);
+  res.json({ ok: true });
+});
+
+app.post('/api/agent/profile/location', (req: express.Request, res: express.Response) => {
+  const { lat, lon, label } = req.body;
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  memoryManager.profiles.recordLocation((req as any).userId, lat, lon, label);
+  res.json({ ok: true });
+});
+
+// 4.2: Episodic memory
+app.get('/api/agent/memory', (req: express.Request, res: express.Response) => {
+  const userId = (req as any).userId;
+  const q = (req.query.q as string) || '';
+  const memory = memoryManager.getEpisodic(userId);
+  if (q) return res.json(memory.search(q, 5));
+  res.json(memory.recent(20));
+});
+
+app.delete('/api/agent/memory', (req: express.Request, res: express.Response) => {
+  const userId = (req as any).userId;
+  memoryManager.getEpisodic(userId); // re-creates empty
+  res.json({ deleted: true });
+});
+
+// 4.4: Semantic cache
+app.get('/api/agent/cache', (_req: express.Request, res: express.Response) => {
+  res.json({ size: memoryManager.semanticCache.size() });
+});
+
+app.delete('/api/agent/cache', (_req: express.Request, res: express.Response) => {
+  memoryManager.semanticCache.clear();
+  res.json({ cleared: true });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 9: Cost Optimization
+// ═══════════════════════════════════════════════════════════════════════
+
+app.get('/api/agent/cost', (_req: express.Request, res: express.Response) => {
+  res.json(costTracker.getStats());
+});
+
+app.get('/api/agent/cache/stats', (_req: express.Request, res: express.Response) => {
+  res.json(enhancedCache.getStats());
+});
+
+app.get('/api/agent/models', (_req: express.Request, res: express.Response) => {
+  res.json({ tiers: ModelRouter.listTiers() });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 10: Self-Improving System
+// ═══════════════════════════════════════════════════════════════════════
+
+app.post('/api/agent/feedback', validate(feedbackSchema), (req: express.Request, res: express.Response) => {
+  const { query, response, vote, intentType, modelTier } = req.body;
+  const entry = feedbackManager.record({
+    userId: (req as any).userId,
+    query: query || '',
+    response: response || '',
+    vote: vote as 'up' | 'down',
+    intentType: intentType || 'unknown',
+    modelTier: modelTier || 'unknown',
+  });
+  // Trigger auto-tuning on each feedback
+  selfImprover.tune();
+  res.json({ ok: true, id: entry.id });
+});
+
+app.get('/api/agent/feedback', (_req: express.Request, res: express.Response) => {
+  res.json({
+    stats: feedbackManager.getStats(),
+    byIntent: feedbackManager.getByIntent(),
+    byModel: feedbackManager.getByModel(),
+    recent: feedbackManager.recent(20),
+  });
+});
+
+app.get('/api/agent/analytics', (_req: express.Request, res: express.Response) => {
+  const costStats = costTracker.getStats();
+  const cacheStats = enhancedCache.getStats();
+  const analytics = buildAnalytics(feedbackManager, costStats, cacheStats);
+  res.json(analytics);
+});
+
+app.get('/api/agent/tuning', (_req: express.Request, res: express.Response) => {
+  res.json(selfImprover.getParams());
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// ML Pipeline: evaluation scores, predictions, knowledge graph
+// ═══════════════════════════════════════════════════════════════════════
+
+app.get('/api/ml/evals', (_req: express.Request, res: express.Response) => {
+  const evals = getRecentEvals(100);
+  const byIntent = getAvgScoresByIntent();
+  res.json({ evals, byIntent });
+});
+
+app.get('/api/ml/synthetic-data', (req: express.Request, res: express.Response) => {
+  const intentType = req.query.intent as string | undefined;
+  const data = getSyntheticData(100, intentType);
+  res.json({ count: data.length, examples: data.slice(0, 20) });
+});
+
+app.post('/api/ml/synthetic-data/generate', async (_req: express.Request, res: express.Response) => {
+  const example = await generateTrainingExample(GEMINI_API_KEY);
+  res.json({ ok: !!example, example });
+});
+
+app.get('/api/ml/knowledge-graph/stats', (_req: express.Request, res: express.Response) => {
+  res.json(knowledgeGraph.getStats());
+});
+
+app.get('/api/ml/knowledge-graph/entity', (req: express.Request, res: express.Response) => {
+  const name = req.query.name as string;
+  if (!name) return res.status(400).json({ error: 'name query param required' });
+  const entity = knowledgeGraph.findEntityByName(name);
+  const relations = entity ? knowledgeGraph.getRelations(name) : [];
+  res.json({ entity, relations });
+});
+
+app.get('/api/ml/knowledge-graph/query', async (req: express.Request, res: express.Response) => {
+  const query = req.query.q as string;
+  const type = req.query.type as string | undefined;
+  if (!query) return res.status(400).json({ error: 'q query param required' });
+  const results = await knowledgeGraph.queryAsync(query, type);
+  res.json({ results });
+});
+
+app.post('/api/ml/knowledge-graph/entity', async (req: express.Request, res: express.Response) => {
+  const { name, type, metadata } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const id = await knowledgeGraph.ensureEntity(name, type || 'entity', metadata);
+  res.json({ id, ok: true });
+});
+
+app.post('/api/ml/knowledge-graph/relation', (req: express.Request, res: express.Response) => {
+  const { source, target, relationType, weight } = req.body;
+  if (!source || !target || !relationType) return res.status(400).json({ error: 'source, target, relationType required' });
+  knowledgeGraph.addRelation(source, target, relationType, weight || 1.0);
+  res.json({ ok: true });
+});
+
+app.get('/api/ml/predict', (req: express.Request, res: express.Response) => {
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
+  const layers = ((req.query.layers as string) || '').split(',').filter(Boolean);
+  if (isNaN(lat) || isNaN(lon)) return res.status(400).json({ error: 'lat and lon query params required' });
+  const input: PredictionInput = {
+    location: { lat, lon, label: req.query.label as string },
+    layers,
+    history: [],
+  };
+  const results = predictor.predict(input);
+  res.json({ predictions: results });
+});
+
+app.post('/api/ml/predict/outcome', (req: express.Request, res: express.Response) => {
+  const { hazardType, probability, severity, actualOccurred, severityMatch } = req.body;
+  if (!hazardType) return res.status(400).json({ error: 'hazardType required' });
+  predictor.recordOutcome({ hazardType, probability, severity, timeframe: '', confidence: 0.5, contributingFactors: [] }, actualOccurred, severityMatch);
+  res.json({ ok: true });
+});
+
+app.get('/api/ml/predict/report', async (req: express.Request, res: express.Response) => {
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
+  const layers = ((req.query.layers as string) || '').split(',').filter(Boolean);
+  if (isNaN(lat) || isNaN(lon)) return res.status(400).json({ error: 'lat and lon query params required' });
+  const input: PredictionInput = {
+    location: { lat, lon, label: req.query.label as string },
+    layers,
+    history: [],
+  };
+  const report = await predictor.generatePredictionReport(input, GEMINI_API_KEY);
+  res.json({ report });
+});
+
+app.get('/api/ml/variants', (_req: express.Request, res: express.Response) => {
+  const variants = promptLab.getVariants();
+  res.json({ count: variants.length, variants });
+});
+
+/* ═════════════════════════════════════════════════════════════════
+   CHAT SESSION STORAGE — persistent chat history as JSON files
+   ═════════════════════════════════════════════════════════════════ */
+
+app.get('/api/chats', (req: express.Request, res: express.Response) => {
+  try {
+    const db = getDb();
+    const uid = (req as any).userId;
+    const rows = db.prepare('SELECT id, user_id, title, created_at, updated_at, messages_json FROM chats WHERE user_id = ? ORDER BY updated_at DESC').all(uid) as Array<Record<string, unknown>>;
+    const sessions = rows.map(r => {
+      const msgs = JSON.parse(r.messages_json as string || '[]');
+      return {
+        id: r.id, title: r.title, createdAt: r.created_at, updatedAt: r.updated_at,
+        messageCount: msgs.length,
+      };
+    });
+    res.json(sessions);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get('/api/chats/:id', (req: express.Request, res: express.Response) => {
+  try {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM chats WHERE id = ? AND user_id = ?').get(req.params.id, (req as any).userId) as Record<string, unknown> | undefined;
+    if (!row) return res.status(404).json({ error: 'Chat not found' });
+    res.json({
+      id: row.id,
+      title: row.title,
+      userId: row.user_id,
+      messages: JSON.parse(row.messages_json as string || '[]'),
+      environmentId: row.environment_id,
+      workspaceId: row.workspace_id,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.post('/api/chats', validate(chatCreateSchema), (req: express.Request, res: express.Response) => {
+  try {
+    const { id, title, messages, environmentId, workspaceId } = req.body;
+    const db = getDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO chats (id, user_id, title, messages_json, environment_id, workspace_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        messages_json = excluded.messages_json,
+        environment_id = excluded.environment_id,
+        workspace_id = excluded.workspace_id,
+        updated_at = excluded.updated_at
+    `).run(
+      id,
+      (req as any).userId,
+      title || 'Untitled Chat',
+      JSON.stringify(messages || []),
+      environmentId || null,
+      workspaceId || null,
+      req.body.createdAt || now,
+      now,
+    );
+    res.json({ ok: true, id });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.delete('/api/chats/:id', requireOwnership('chats'), (req: express.Request, res: express.Response) => {
+  try {
+    const db = getDb();
+    const result = db.prepare('DELETE FROM chats WHERE id = ? AND user_id = ?').run(req.params.id, (req as any).userId);
+    if (result.changes === 0) return res.status(404).json({ error: 'Chat not found' });
+    auditLog((req as any).userId, 'chat_delete', `chat:${req.params.id}`, '', req.ip || '', req.headers['user-agent'] || '');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// Global error handler (must be last)
+app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  if (err instanceof AppError) {
+    logger.error({ err, errorCode: err.errorCode, correlationId, statusCode: err.statusCode }, err.message);
+    res.status(err.statusCode).json(err.toJSON(correlationId));
+  } else {
+    logger.error({ err, correlationId }, 'Unhandled error');
+    res.status(500).json({
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      correlationId,
+      timestamp: new Date().toISOString(),
+      retryable: false,
+    });
+  }
+});
+
+const httpServer = http.createServer(app);
+const wss = createWsServer(httpServer);
+
+httpServer.listen(PORT, () => {
+  logger.info({ port: PORT }, 'server started');
+  startMemoryLogging();
+  startResourceMonitor();
   // Pre-warm slow caches so first user request doesn't pay the penalty
-  fetchAndCacheAirspaces().then(() => console.log('Airspace cache pre-warmed')).catch(() => {});
-  // Pre-warm OpenFlights data
-  // (fetched via /api/openflights on first request, 24h cache)
+  fetchAndCacheAirspaces().then(() => logger.info('Airspace cache pre-warmed')).catch(() => {});
+  materializedViews.refreshInternal().then(() => logger.info('Materialized views refreshed')).catch(() => {});
+  // Start background jobs for proactive systems
+  monitorManager.startJobs();
+  schedulerManager.startJobs();
+  ambientDetector.startJobs();
+  // Start ML pipeline background tasks
+  startSyntheticDataGeneration(GEMINI_API_KEY, 3600000);
+  logger.info('Background jobs started (monitor:scheduler:ambient:mvc:plugin:ml)');
 });
 
 let shuttingDown = false;
@@ -2456,27 +3825,35 @@ let shuttingDown = false;
 function gracefulShutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`Received ${signal}. Shutting down gracefully...`);
-  server.close(async () => {
-    console.log('HTTP server closed.');
+  logger.info({ signal }, 'shutting down gracefully');
+  stopMemoryLogging();
+  stopResourceMonitor();
+  stopSyntheticDataGeneration();
+  shutdownWsServer();
+  httpServer.close(async () => {
+    logger.info('HTTP server closed.');
+    materializedViews.stop();
+    pubsub.removeAllListeners();
+    await jobQueue.shutdown(10000);
+    closeDb();
     if (puppeteerBrowser && puppeteerBrowser.connected) {
       try {
         await puppeteerBrowser.close();
-        console.log('Puppeteer browser closed.');
+        logger.info('Puppeteer browser closed.');
       } catch (err) {
-        console.error('Error closing Puppeteer browser:', err);
+        logger.error('Error closing Puppeteer browser:', err);
       }
     }
     process.exit(0);
   });
   setTimeout(() => {
-    console.error('Forced shutdown after timeout.');
+    logger.error('Forced shutdown after timeout.');
     process.exit(1);
   }, 10000);
 }
 
 process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Rejection:', reason);
+  logger.error('Unhandled Rejection:', reason);
 });
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

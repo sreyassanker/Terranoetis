@@ -9,6 +9,7 @@ export interface LayerCategory {
   motionType: MotionType; description: string; group: string;
   dataSource: string; sub?: string; badge?: 'LIVE' | 'KEY' | 'PREMIUM';
   type: 'point' | 'geojson' | 'effect' | 'heatmap' | 'polygon' | 'tile' | '3dtiles' | 'panel';
+  opacity?: number;
 }
 
 export interface LayerGroup { id: string; label: string; icon: string; color: string; }

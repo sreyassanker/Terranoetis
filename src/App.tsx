@@ -1,6 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Cctv, Camera } from 'lucide-react';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import LoginModal from '@/components/LoginModal';
+import AdminDashboard from '@/pages/AdminDashboard';
+import { useAuth } from '@/context/AuthContext';
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { apiGet } from '@/lib/api';
@@ -8,6 +12,7 @@ import StudyAreaPanel from '@/components/ui/StudyAreaPanel';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import {
   removeStudyAreaFromGlobe, setStudyAreaVisibility,
+  flyToStudyAreaTopDown, filterDataEntitiesByStudyArea, updateStudyAreaStyle,
 } from '@/rendering/studyArea';
 import { addBaseImagery, applyTerrainProvider, crossfadeImagery } from '@/cesium/viewer.config';
 import { cinematicFlyTo, createEntityTracker, type TrackEntityType } from '@/cesium/camera.controller';
@@ -45,6 +50,7 @@ import {
 } from '@/rendering/weather';
 import { renderLayer, fetchLayerData } from '@/rendering/genericLayers';
 import { LAYER_GROUPS, LAYER_CATEGORIES, LEGACY_DEFAULTS } from '@/config/layerConfig';
+import { listChats, getChat, saveChat, deleteChat, generateChatId, autoTitle, groupChatsByDate, type ChatSession, type ChatListItem, type ChatMessage } from '@/lib/chatStore';
 
 /* ═════════════════════════════════════════════════════════════════
    TYPES
@@ -276,6 +282,10 @@ const LOCAL_SEARCH_INDEX: Array<LocalSearchResult & { searchText: string }> = CI
 
 function easeOutCubic(t: number): number { return 1 - Math.pow(1 - t, 3); }
 
+function sanitizeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] || c);
+}
+
 function loadApiVault(): ApiVaultState {
   if (typeof window === 'undefined') return DEFAULT_API_VAULT;
   try {
@@ -501,10 +511,15 @@ const CctvVideoPlayer = ({ src }: { src: string }) => {
     setError(false);
 
     let hls: any = null;
+    let cancelled = false;
     const isHls = src.includes('.m3u8') || src.includes('m3u8');
 
     if (isHls) {
       import('hls.js').then(({ default: Hls }) => {
+        if (cancelled) {
+          if (hls) hls.destroy();
+          return;
+        }
         if (!videoRef.current) return;
         if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
           videoRef.current.src = src;
@@ -529,6 +544,7 @@ const CctvVideoPlayer = ({ src }: { src: string }) => {
           setError(true);
         }
       }).catch(err => {
+        if (cancelled) return;
         console.error('Failed to load hls.js', err);
         setError(true);
       });
@@ -539,6 +555,7 @@ const CctvVideoPlayer = ({ src }: { src: string }) => {
     }
 
     return () => {
+      cancelled = true;
       if (hls) {
         hls.destroy();
       }
@@ -568,6 +585,104 @@ const CctvVideoPlayer = ({ src }: { src: string }) => {
     />
   );
 };
+
+/* ═════════════════════════════════════════════════════════════════
+   PHASE 8: Rich message renderer — code blocks, tables, lists
+   ═════════════════════════════════════════════════════════════════ */
+
+const RICH_MESSAGE_CACHE = new Map<string, string>();
+
+function richRender(text: string): string {
+  const cached = RICH_MESSAGE_CACHE.get(text);
+  if (cached) return cached;
+
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Code blocks ```lang\n...\n```
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const langTag = lang ? `<span class="code-lang">${lang}</span>` : '';
+    return `<div class="rich-code-block">${langTag}<pre><code>${code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre></div>`;
+  });
+
+  // Tables: | col1 | col2 |\n | --- | --- |\n | val1 | val2 |
+  html = html.replace(/\n?\|(.+)\|\n\|([-|:\s]+)\|\n((?:\|.+\|\n?)*)/g, (_, headerRow, _sepRow, dataRows) => {
+    const headers = headerRow.split('|').map((h: string) => `<th>${h.trim()}</th>`).join('');
+    const rows = dataRows.trim().split('\n').map((row: string) => {
+      const cells = row.split('|').map((c: string) => `<td>${c.trim()}</td>`).join('');
+      return `<tr>${cells}</tr>`;
+    }).join('');
+    return `<div class="rich-table-wrap"><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  });
+
+  // Horizontal rules
+  html = html.replace(/^---$/gm, '<hr class="rich-hr" />');
+
+  // Unordered lists: - item or * item
+  html = html.replace(/^( *)[-*] (.+)$/gm, '$1<li>$2</li>');
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul class="rich-list">$&</ul>');
+
+  // Ordered lists: 1. item
+  html = html.replace(/^ *(\d+)\. (.+)$/gm, '<li value="$1">$2</li>');
+
+  // ### Headers
+  html = html.replace(/^### (.+)$/gm, '<h3 class="rich-h3">$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2 class="rich-h2">$1</h2>');
+
+  // Bold, italic, inline code — in this order to avoid overlap
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/`([^`]+)`/g, '<code class="rich-code">$1</code>');
+
+  // Line breaks (preserve double newlines as paragraph breaks)
+  html = html.replace(/\n{2,}/g, '</p><p class="rich-p">');
+  html = html.replace(/\n/g, '<br/>');
+
+  // Wrap in paragraph if not already wrapped
+  if (!html.startsWith('<')) html = `<p class="rich-p">${html}</p>`;
+
+  RICH_MESSAGE_CACHE.set(text, html);
+  return html;
+}
+
+function renderCommandChips(
+  content: string,
+  focusLocation: (lat: number, lon: number, opts?: Record<string, unknown>) => void,
+  toggleLayer: (id: string) => void,
+) {
+  const cmdChips: Array<{label:string;action:string;lat?:number;lon?:number;layerId?:string}> = [];
+  const cmdBlock = content.match(/## COMMANDS\n([\s\S]*?)(?:\n##|\n*$)/);
+  if (cmdBlock) {
+    const cmdMatches = cmdBlock[1].match(/\{[^}]+\}/g);
+    if (cmdMatches) {
+      for (const json of cmdMatches) {
+        try {
+          const cmd = JSON.parse(json);
+          if (cmd.action === 'flyTo' && cmd.lat && cmd.lon) {
+            cmdChips.push({label:'📍 ' + (cmd.label||'Fly'),action:'flyTo',lat:cmd.lat,lon:cmd.lon});
+          }
+          if (cmd.action === 'toggleLayer' && cmd.layerId) {
+            cmdChips.push({label:'👁 ' + cmd.layerId,action:'toggleLayer',layerId:cmd.layerId});
+          }
+        } catch { /* skip */ }
+      }
+    }
+  }
+  if (cmdChips.length === 0) return null;
+  return (
+    <div className="msg-commands" style={{display:'flex',gap:4,marginTop:6,flexWrap:'wrap'}}>
+      {cmdChips.map((chip,i) => (
+        <span key={i} className="ai-chip command-chip" style={{fontSize:10,padding:'2px 8px'}}
+          onClick={() => {
+            if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 150 });
+            if (chip.action === 'toggleLayer' && chip.layerId) toggleLayer(chip.layerId);
+          }}>{chip.label}</span>
+      ))}
+    </div>
+  );
+}
 
 /* ═════════════════════════════════════════════════════════════════
    MAIN APP COMPONENT
@@ -635,6 +750,8 @@ export default function App() {
   const overlayImageryLayersRef = useRef<Record<string, Cesium.ImageryLayer>>({});
   const cctvPulseEntityRef = useRef<Cesium.Entity | null>(null);
   const nextAiMsgIdRef = useRef(1);
+  const MAX_ENTITIES = 50000;
+  const toggleDebounceRef = useRef<Record<string, number>>({});
 
   /* ── State ── */
   const initialApiVault = useMemo(() => loadApiVault(), []);
@@ -664,6 +781,8 @@ export default function App() {
   const [studyEast, setStudyEast] = useState('98.0');
   const [studyNorth, setStudyNorth] = useState('38.0');
   const [showAlertsPanel, setShowAlertsPanel] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [analyticsData, setAnalyticsData] = useState<Record<string, unknown> | null>(null);
   const [showIntelFeed, setShowIntelFeed] = useState(false);
   const [activeLayerCount, setActiveLayerCount] = useState(0);
   const [utcTime, setUtcTime] = useState('');
@@ -676,11 +795,109 @@ export default function App() {
   const [notifications, setNotifications] = useState<Array<{id:number;text:string;severity:string}>>([]);
   const [stormForecast, setStormForecast] = useState<ReturnType<typeof generateStormForecast> | null>(null);
   const [populationImpact, setPopulationImpact] = useState<ReturnType<typeof calculatePopulationImpact> | null>(null);
-  const [aiMessages, setAiMessages] = useState<Array<{id:number;role:string;content:string}>>([
-    { id: nextAiMsgIdRef.current++, role:'assistant', content:'👋 Hello! I\'m your Earth Intelligence assistant. Ask me about earthquakes, weather, disasters, or any location on Earth. Try: "Show recent earthquakes" or "What\'s the weather in Tokyo?"' },
+  const [aiMessages, setAiMessages] = useState<ChatMessage[]>([
+    { id: nextAiMsgIdRef.current++, role: 'assistant', content: '👋 Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' },
   ]);
   const [aiTyping, setAiTyping] = useState(false);
+  const ws = useWebSocket();
+  const { isLoggedIn, isAdmin } = useAuth();
   const [aiInput, setAiInput] = useState('');
+  const [agentSteps, setAgentSteps] = useState<Array<{type:string;text:string;code?:string;output?:string;timeMs?:number;toolName?:string;subtask?:string;status?:string}>>([]);
+  const [expandedStep, setExpandedStep] = useState<number | null>(null);
+  const [agentEnvironmentId, setAgentEnvironmentId] = useState<string | null>(null);
+  const agentInteractionIdRef = useRef<string | null>(null);
+  const [sandboxWorkspaceId, setSandboxWorkspaceId] = useState<string | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
+  const [pipelineProgress, setPipelineProgress] = useState<Array<{id:string;description:string;status:string}>>([]);
+  // Phase 2: Vision
+  const [chatImages, setChatImages] = useState<Array<{id:number;dataUrl:string;mimeType:string;fileName:string}>>([]);
+  const nextImageIdRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Phase 2: Voice
+  const [isListening, setIsListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const recognitionRef = useRef<globalThis.SpeechRecognition | null>(null);
+  // Phase 2: Data Analysis
+  const [dataAnalysisResult, setDataAnalysisResult] = useState<Record<string, unknown> | null>(null);
+  // Chat history
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const currentRequestIdRef = useRef<string | null>(null);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [showTimeSlider, setShowTimeSlider] = useState(false);
+  const [timeSliderValue, setTimeSliderValue] = useState(Date.now());
+  const [timeSliderPlaying, setTimeSliderPlaying] = useState(false);
+  const [showMeasureTool, setShowMeasureTool] = useState(false);
+  const [measurePoints, setMeasurePoints] = useState<Array<{ lat: number; lon: number }>>([]);
+  const [measureDistance, setMeasureDistance] = useState<number | null>(null);
+  const [showRiskForecast, setShowRiskForecast] = useState(false);
+  const currentChatIdRef = useRef<string | null>(null);
+  const chatSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [chatList, setChatList] = useState<ChatListItem[]>([]);
+  const [showChatHistory, setShowChatHistory] = useState(false);
+  // Phase 8: Session sharing via URL hash
+  useEffect(() => {
+    // Restore session from URL hash on mount
+    const hash = window.location.hash.slice(1);
+    if (hash.startsWith('session=')) {
+      try {
+        const session = JSON.parse(decodeURIComponent(hash.slice(8)));
+        if (Array.isArray(session.messages)) {
+          setAiMessages(session.messages.map((m: {id?:number;role:string;content:string;type?:string}) => ({...m, id: m.id || nextAiMsgIdRef.current++})));
+        }
+        if (session.envId) setAgentEnvironmentId(session.envId);
+        if (session.wsId) setSandboxWorkspaceId(session.wsId);
+        if (session.input) setAiInput(session.input);
+      } catch { /* ignore session parse */ }
+    }
+  }, []);
+  useEffect(() => {
+    // Encode recent session to URL hash (debounced)
+    const timer = setTimeout(() => {
+      const recent = aiMessages.slice(-10);
+      const lastAssistant = recent.filter(m => m.role === 'assistant' && m.type !== 'error').slice(-1);
+      if (lastAssistant.length > 0) {
+        const session = { messages: recent, ts: Date.now() };
+        try {
+          const encoded = encodeURIComponent(JSON.stringify(session));
+          window.location.hash = `session=${encoded}`;
+        } catch { /* ignore */ }
+      }
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [aiMessages.length]);
+
+  // Load chat list on mount
+  useEffect(() => {
+    listChats().then(setChatList).catch(() => {});
+  }, []);
+
+  // Auto-save chat after each new message
+  useEffect(() => {
+    if (aiMessages.length <= 1) return;
+    const id = currentChatIdRef.current || generateChatId();
+    currentChatIdRef.current = id;
+    if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current);
+    chatSaveTimerRef.current = setTimeout(() => {
+      saveChat({
+        id,
+        title: autoTitle(aiMessages),
+        messages: aiMessages as ChatMessage[],
+        environmentId: agentEnvironmentId || undefined,
+        workspaceId: sandboxWorkspaceId || undefined,
+      }).then(() => {
+        listChats().then(setChatList).catch(() => {});
+      }).catch(() => {});
+    }, 2000);
+    return () => { if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current); };
+  }, [aiMessages.length, agentEnvironmentId, sandboxWorkspaceId]);
+  // Auto-expand thinking block when new steps arrive
+  const prevStepCountRef = useRef(0);
+  useEffect(() => {
+    if (agentSteps.length > prevStepCountRef.current) {
+      setExpandedStep(-1);
+    }
+    prevStepCountRef.current = agentSteps.length;
+  }, [agentSteps.length]);
   const [searchValue, setSearchValue] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState<Array<{name:string;lat:number;lon:number}>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -708,6 +925,7 @@ export default function App() {
   const studyAreasRef = useRef<StudyAreaItem[]>([]);
   const [studyAreas, setStudyAreas] = useState<StudyAreaItem[]>([]);
   const [studyDrawing, setStudyDrawing] = useState(false);
+  const [clipToStudyArea, setClipToStudyArea] = useState(false);
   const drawerRef = useRef<any>(null);
 
   const aiApiType = useMemo(() => resolveAiProvider(apiVault), [apiVault]);
@@ -749,7 +967,8 @@ export default function App() {
   useEffect(() => {
     apiVaultRef.current = apiVault;
     try {
-      window.localStorage.setItem(API_VAULT_STORAGE_KEY, JSON.stringify(apiVault));
+      const toStore = { ...apiVault, cesiumIonAccessToken: '' };
+      window.localStorage.setItem(API_VAULT_STORAGE_KEY, JSON.stringify(toStore));
     } catch {
       // Ignore storage failures in private or restricted browsing modes.
     }
@@ -1042,6 +1261,17 @@ export default function App() {
     };
   }, []);
 
+  // Request geolocation once on mount for "near me" features
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => { lastKnownLocationRef.current = { lat: pos.coords.latitude, lon: pos.coords.longitude }; },
+        () => {},
+        { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
+      );
+    }
+  }, []);
+
   useEffect(() => {
     const v = viewerRef.current;
     if (!v) return;
@@ -1281,7 +1511,7 @@ export default function App() {
           },
           properties: {
             layer: cat, title: ev.title, date: geo[0].date, category: rawCat,
-            description: ev.description || '', categories: cats, lon: c[0], lat: c[1],
+            description: sanitizeHtml(String(ev.description || '')), categories: cats, lon: c[0], lat: c[1],
             time: new Date(geo[0].date).getTime() || Date.now(),
           },
         });
@@ -1485,13 +1715,13 @@ export default function App() {
           layer.id === 'volcanoes' || layer.id === 'floods' || layer.id === 'dust' || layer.id === 'seaLakeIce' ||
           layer.id === 'space_debris' || layer.id === 'space_weather' || layer.id === 'nasa_dsn' ||
           layer.id === 'lightning_strikes' || layer.id === 'aurora_oval' || layer.id === 'disaster_alerts') continue;
-      if (layer.group === 'weather' && layer.type !== 'tile' && layer.type !== 'effect') continue;
+      if (layer.group === 'weather' && (layer.type as string) !== 'tile' && (layer.type as string) !== 'effect') continue;
       try {
         const items = await fetchLayerData(layer);
         if (!isLayerEnabled(layer.id)) return;
         removeLayerEntities(layer.id);
         if (items.length) {
-          const ents = renderLayer(viewer, layer, items);
+          const ents = await renderLayer(viewer, layer, items);
           entityStoreRef.current[layer.id] = ents;
         }
       } catch { /* skip */ }
@@ -1722,18 +1952,61 @@ export default function App() {
     });
   }
 
+  function clearEntityProperties(ent: Cesium.Entity): void {
+    if (!ent) return;
+    const props: Array<keyof Cesium.Entity> = [
+      'position', 'billboard', 'label', 'point', 'ellipse', 'cylinder',
+      'polyline', 'polygon', 'box', 'corridor', 'ellipsoid', 'model',
+      'path', 'rectangle', 'wall',
+    ];
+    for (const key of props) {
+      const val = ent[key];
+      if (val && typeof val === 'object' && 'setValue' in val) {
+        (val as any).setValue(undefined);
+      }
+    }
+    ent.properties = undefined;
+    ent.name = undefined;
+    ent.description = undefined;
+  }
+
   function removeLayerEntities(layerId: string) {
     const v = viewerRef.current;
     const ents = entityStoreRef.current[layerId];
     if (!ents) return;
     if (v) {
-      ents.forEach(ent => v.entities.remove(ent));
+      ents.forEach(ent => {
+        clearEntityProperties(ent);
+        v.entities.remove(ent);
+      });
       if (layerId === 'submarine_cables' && submarineCablesDataSourceRef.current) {
         v.dataSources.remove(submarineCablesDataSourceRef.current, true);
         submarineCablesDataSourceRef.current = null;
       }
     }
     entityStoreRef.current[layerId] = [];
+  }
+
+  function enforceEntityCap(): void {
+    const v = viewerRef.current;
+    if (!v) return;
+    const layers = Object.entries(entityStoreRef.current);
+    let total = 0;
+    for (const [, ents] of layers) total += ents.length;
+    if (total <= MAX_ENTITIES) return;
+    const sorted = [...layers].sort((a, b) => b[1].length - a[1].length);
+    let removed = 0;
+    for (const [id, ents] of sorted) {
+      if (total - removed <= MAX_ENTITIES) break;
+      if (id === 'earthquakes' || id === 'heatmap') continue;
+      const next = entityStoreRef.current[id];
+      if (!next || next !== ents) continue;
+      removed += next.length;
+      if (v) {
+        next.forEach(ent => { clearEntityProperties(ent); v.entities.remove(ent); });
+      }
+      entityStoreRef.current[id] = [];
+    }
   }
 
   function clearStormForecastOverlays() {
@@ -2188,9 +2461,7 @@ export default function App() {
       const t = Date.now() - now;
       if (t > 30000) {
         clearInterval(interval);
-        v.entities.remove(pWave);
-        v.entities.remove(sWave);
-        v.entities.remove(surfWave);
+        [pWave, sWave, surfWave].forEach(ent => { clearEntityProperties(ent); v.entities.remove(ent); });
         seismicAnimationsRef.current = seismicAnimationsRef.current.filter(a => a.id !== waveId);
       }
     }, 1000);
@@ -2243,6 +2514,7 @@ export default function App() {
           }
           if (elapsed > 20) {
             clearInterval(iv);
+            clearEntityProperties(ring);
             v.entities.remove(ring);
             const ringIdx = createdWaves.indexOf(ring);
             if (ringIdx >= 0) createdWaves.splice(ringIdx, 1);
@@ -2813,6 +3085,12 @@ export default function App() {
      ═════════════════════════════════════════════════════════════════ */
 
   const toggleLayer = useCallback((layerId: string) => {
+    const now = Date.now();
+    const last = toggleDebounceRef.current[layerId] || 0;
+    if (now - last < 300) return;
+    toggleDebounceRef.current[layerId] = now;
+    // Record toggle in user profile (fire-and-forget)
+    fetch('/api/agent/profile/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: 'browser-user', layerId }) }).catch(() => {});
     // Read BEFORE setLayers — the updater runs asynchronously, not synchronously
     const wasOn = layersRef.current.find(l => l.id === layerId)?.on ?? false;
     setLayers(prev => {
@@ -2848,10 +3126,10 @@ export default function App() {
       return;
     }
     const gen = (layerGenRef.current[layerId] = (layerGenRef.current[layerId] || 0) + 1);
-    fetchLayerData(layer).then(items => {
+    fetchLayerData(layer).then(async (items) => {
       if (layerGenRef.current[layerId] !== gen) return;
       if (!isLayerEnabled(layerId) || !items.length) return;
-      const ents = renderLayer(viewer, layer, items);
+      const ents = await renderLayer(viewer, layer, items);
       if (ents.length) {
         entityStoreRef.current[layerId] = ents;
         viewer.scene.requestRender();
@@ -2915,26 +3193,12 @@ export default function App() {
     } else if (layerId === '2_openflights') {
       if (!showExisting('2_openflights')) void loadOpenFlights(v);
       return;
-    } else if (layerId === '29_tokyo_vaac') {
-      if (!showExisting('29_tokyo_vaac')) void loadVolcanicLayer(v, '29_tokyo_vaac', '/vaac/tokyo');
-      return;
-    } else if (layerId === '29_anchorage_vaac') {
-      if (!showExisting('29_anchorage_vaac')) void loadVolcanicLayer(v, '29_anchorage_vaac', '/vaac/anchorage');
-      return;
-    } else if (layerId === '29_washington_vaac') {
-      if (!showExisting('29_washington_vaac')) void loadVolcanicLayer(v, '29_washington_vaac', '/vaac/washington');
-      return;
-    } else if (layerId === '29_wovodat') {
-      if (!showExisting('29_wovodat')) void loadVolcanicLayer(v, '29_wovodat', '/wovodat');
-      return;
-    } else if (layerId === '29_nasa_so2_monitoring') {
-      if (!showExisting('29_nasa_so2_monitoring')) void loadVolcanicLayer(v, '29_nasa_so2_monitoring', '/nasa-so2');
-      return;
-    } else if (layerId === '29_noaa_so2_portal') {
-      if (!showExisting('29_noaa_so2_portal')) void loadVolcanicLayer(v, '29_noaa_so2_portal', '/noaa-so2');
-      return;
-    } else if (layerId === '29_volcano_discovery') {
-      if (!showExisting('29_volcano_discovery')) void loadVolcanicLayer(v, '29_volcano_discovery', '/volcano-discovery');
+    } else if (layerId.startsWith('29_') || layerId === '29_wovodat' || layerId === '29_nasa_so2_monitoring' || layerId === '29_noaa_so2_portal') {
+      const needsLoad = !showExisting(layerId);
+      if (needsLoad) {
+        const isSo2 = layerId.includes('so2');
+        void loadVolcanicLayer(v, layerId, isSo2 ? '/volcanoes?format=location' : '/volcanoes');
+      }
       return;
     } else if (layerId === 'space_debris') {
       if (!showExisting('space_debris')) void loadSpaceDebris(v);
@@ -3316,7 +3580,7 @@ export default function App() {
             region: camera.region,
             location: camera.location,
             updatedAt: camera.updatedAt ?? Date.now(),
-            description: camera.description ?? '',
+            description: sanitizeHtml(String(camera.description ?? '')),
             feedType: camera.feedType,
           },
         });
@@ -3488,12 +3752,12 @@ export default function App() {
     drRef.current?.clear();
     removeLayerEntities(layerId);
     try {
-      const headers = layerId === '2_flightaware_aeroapi'
+      const fetchOpts: RequestInit | undefined = layerId === '2_flightaware_aeroapi'
         ? { headers: { 'x-aeroapi-key': getApiKey('FLIGHTAWARE_AEROAPI_KEY') || '' } }
         : layerId === '2_airlabs_api'
           ? { headers: { 'x-airlabs-key': getApiKey('AIRLABS_API_KEY') || '' } }
           : undefined;
-      const data = await apiGet<{ states?: unknown[][] | null }>(apiPath, headers);
+      const data = await apiGet<{ states?: unknown[][] | null }>(apiPath, fetchOpts);
       if (!isLayerEnabled(layerId)) return;
       if (!data.states?.length) throw new Error(`${layerId} returned no states`);
       drRef.current?.updateFromApi(data.states);
@@ -3556,10 +3820,8 @@ export default function App() {
       if (!isLayerEnabled(layerId)) return;
       removeLayerEntities(layerId);
       let ents: Cesium.Entity[];
-      if (apiPath === '/nasa-so2' || apiPath === '/noaa-so2') {
+      if (layerId.includes('so2')) {
         ents = addSo2Entities(viewer, data, layerId);
-      } else if (apiPath === '/openflights') {
-        ents = addOpenFlightsEntities(viewer, data, layerId);
       } else {
         ents = addVaacAdvisoryEntities(viewer, data, layerId);
       }
@@ -3882,12 +4144,14 @@ export default function App() {
       const v = viewerRef.current;
 
       if (v) {
-        // Suspend entity events during bulk hide to prevent per-entity callbacks
-        try { v.entities.suspendEvents(); } catch { /* ignore */ }
+        v.entities.suspendEvents();
       }
-      layersRef.current.forEach(l => { hideLayerEntities(l.id); });
-      if (v) {
-        try { v.entities.resumeEvents(); } catch { /* ignore */ }
+      try {
+        layersRef.current.forEach(l => { hideLayerEntities(l.id); });
+      } finally {
+        if (v) {
+          v.entities.resumeEvents();
+        }
       }
 
       flightDrRef.current?.clear();
@@ -3964,67 +4228,711 @@ export default function App() {
      AI CHAT
      ═════════════════════════════════════════════════════════════════ */
 
+  const handleFileUpload = useCallback(async (file: File) => {
+    if (!sandboxWorkspaceId) {
+      try {
+        const resp = await fetch('/api/sandbox/workspace', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: 'browser-user' }),
+        });
+        if (resp.ok) {
+          const ws = await resp.json();
+          setSandboxWorkspaceId(ws.id);
+        }
+      } catch { return; }
+    }
+
+    if (!sandboxWorkspaceId) return;
+
+    const content = await file.text();
+    const resp = await fetch(`/api/sandbox/workspace/${sandboxWorkspaceId}/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: file.name, content }),
+    });
+    if (resp.ok) {
+      setUploadedFiles(prev => [...prev, file.name]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `📎 Uploaded **${file.name}** to sandbox workspace. You can now ask me to analyze it.`, type: 'upload' }]);
+    }
+  }, [sandboxWorkspaceId]);
+
+  // Phase 2.1: Vision — analyze image via Gemini Vision API
+  const handleImageUpload = useCallback(async (file: File) => {
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'];
+    if (!validTypes.includes(file.type)) {
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Unsupported image type: ${file.type}. Supported: JPEG, PNG, WebP, GIF, BMP.`, type: 'error' }]);
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: '❌ Image too large. Max 10MB.', type: 'error' }]);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(',')[1];
+      const imageId = nextImageIdRef.current++;
+      setChatImages(prev => [...prev, { id: imageId, dataUrl, mimeType: file.type, fileName: file.name }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `📷 [Image: ${file.name}]`, type: 'image' }]);
+      setAiTyping(true);
+
+      try {
+        const resp = await fetch('/api/agent/analyze-vision', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64, mimeType: file.type, prompt: 'Analyze this image in detail. If it is a satellite image, map, chart, or geographic area, describe what you see including any notable features, patterns, colors, text, or structures.' }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `**🔍 Image Analysis**\n\n${data.analysis || 'No analysis returned.'}`, type: 'vision' }]);
+        } else {
+          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Vision analysis failed (${resp.status})`, type: 'error' }]);
+        }
+      } catch (e) {
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Vision analysis error: ${e}`, type: 'error' }]);
+      }
+      setAiTyping(false);
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  // Phase 2.2: Voice — speech recognition
+  // Phase 3: Connect to proactive events via WebSocket
+  useEffect(() => {
+    const unsubMonitor = ws.onMessage('message', (msg) => {
+      if (msg.event === 'monitor_trigger') {
+        const data = (msg.data || msg) as any;
+        const r = (data.rule || data) as any;
+        setAiMessages(prev => [...prev, {
+          id: nextAiMsgIdRef.current++,
+          role: 'assistant',
+          content: `🔔 **Monitor Alert: ${r.label}**\n\nTriggered ${r.count}x — condition met on \`${r.id}\`.\n*Check the globe for current data.*`,
+          type: 'monitor'
+        }]);
+      }
+
+      if (msg.event === 'scheduled_report') {
+        const data = (msg.data || msg) as any;
+        const t = (data.task || data) as any;
+        setAiMessages(prev => [...prev, {
+          id: nextAiMsgIdRef.current++,
+          role: 'assistant',
+          content: `📋 **Scheduled Report: ${t.label}**\n\n${t.result || 'No results.'}`,
+          type: 'pipeline'
+        }]);
+      }
+
+      if (msg.event === 'ambient_event') {
+        const data = (msg.data || msg) as any;
+        const ev = (data.event || data) as any;
+        const severityColors: Record<string, string> = { critical: '#ef4444', warning: '#f97316', info: '#22c55e' };
+        setAiMessages(prev => [...prev, {
+          id: nextAiMsgIdRef.current++,
+          role: 'assistant',
+          content: `**${ev.type === 'major_earthquake' ? '🌋' : ev.type === 'storm_formation' ? '🌀' : ev.type === 'fire_outbreak' ? '🔥' : '🌍'} ${ev.title}**\n\n${ev.description}`,
+          type: 'ambient'
+        }]);
+        const color = severityColors[ev.severity] || '#f97316';
+        setAlerts(prev => {
+          const exists = prev.some(a => a.title === ev.title);
+          if (exists) return prev;
+          const alert: EventAlert = {
+            id: ev.id,
+            title: ev.title,
+            desc: ev.description || ev.title,
+            type: ev.type,
+            lat: ev.lat,
+            lon: ev.lon,
+            severity: ev.severity,
+            time: new Date(ev.timestamp).toLocaleTimeString(),
+            timestamp: ev.timestamp,
+            seen: false,
+            hasMapPosition: true,
+          };
+          return [alert, ...prev].slice(0, 50);
+        });
+        setNewAlertCount(prev => prev + 1);
+      }
+    });
+
+    ws.subscribe('proactive');
+
+    return () => {
+      unsubMonitor();
+      ws.unsubscribe('proactive');
+    };
+  }, [ws.connected]);
+
+  // Phase 3: Send monitor command via chat
+  const sendMonitorCommand = useCallback(async (text: string) => {
+    // Parse: "monitor for M6+ earthquakes near Japan"
+    const monitorMatch = text.match(/monitor\s+(?:for\s+)?(.+?)(?:\s+near\s+(.+))?$/i);
+    if (monitorMatch) {
+      const conditionText = monitorMatch[1].toLowerCase();
+      const locationText = monitorMatch[2];
+
+      let layerId = 'earthquakes';
+      let field = 'mag';
+      let operator = '>';
+      let value = 6;
+
+      if (conditionText.includes('earthquake') || conditionText.includes('seismic') || conditionText.includes('quake')) {
+        const magMatch = conditionText.match(/m\s*(\d+\.?\d*)/);
+        if (magMatch) value = parseFloat(magMatch[1]);
+        if (conditionText.includes('>=')) operator = '>=';
+        else if (conditionText.includes('<=')) operator = '<=';
+        else if (conditionText.includes('<')) operator = '<';
+        layerId = 'earthquakes';
+      } else if (conditionText.includes('storm') || conditionText.includes('hurricane') || conditionText.includes('cyclone')) {
+        layerId = 'severe_storms';
+        field = 'maxWind';
+        const windMatch = conditionText.match(/(\d+)\s*knots?/);
+        if (windMatch) value = parseFloat(windMatch[1]);
+      } else if (conditionText.includes('fire') || conditionText.includes('wildfire')) {
+        layerId = 'wildfires';
+        field = 'frp';
+        const frpMatch = conditionText.match(/(\d+)\s*frp/);
+        if (frpMatch) value = parseFloat(frpMatch[1]);
+      }
+
+      let location;
+      if (locationText) {
+        const l = await extractLocation(locationText);
+        if (l) location = { lat: l.lat, lon: l.lon, radiusKm: 500 };
+      }
+
+      const resp = await fetch('/api/agent/monitor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ layerId, condition: { field, operator, value }, location, label: `Monitor: ${conditionText}`, userId: 'browser-user', intervalMs: 300000 }),
+      });
+      if (resp.ok) {
+        const rule = await resp.json();
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `✅ **Monitor Created**\n\nID: \`${rule.id}\`\nLayer: ${rule.layerId}\nCondition: ${rule.condition.field} ${rule.condition.operator} ${rule.condition.value}\nInterval: every ${rule.intervalMs / 60000} min\n\n*You'll be alerted when conditions are met.*`, type: 'monitor' }]);
+        return true;
+      }
+    }
+    return false;
+  }, [extractLocation]);
+
+  // Phase 3: Send schedule command via chat
+  const sendScheduleCommand = useCallback(async (text: string) => {
+    const scheduleMatch = text.match(/schedule\s+(.+?)(?:\s+every\s+(\d+)\s*(minute|hour|day)s?)?$/i);
+    if (scheduleMatch) {
+      const goal = scheduleMatch[1];
+      const num = scheduleMatch[2] ? parseInt(scheduleMatch[2]) : 1;
+      const unit = scheduleMatch[3] || 'day';
+      const intervalMs = unit.startsWith('min') ? num * 60000 : unit.startsWith('hour') ? num * 3600000 : num * 86400000;
+
+      const resp = await fetch('/api/agent/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: `Scheduled: ${goal.slice(0, 40)}`, goal, userId: 'browser-user', intervalMs }),
+      });
+      if (resp.ok) {
+        const task = await resp.json();
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `✅ **Schedule Created**\n\nID: \`${task.id}\`\nGoal: ${goal}\nEvery: ${num} ${unit}${num > 1 ? 's' : ''}\n\n*Reports will appear here automatically.*`, type: 'monitor' }]);
+        return true;
+      }
+    }
+    return false;
+  }, []);
+
+  // Phase 3: Get location context
+  const getLocationContextData = useCallback(async (lat: number, lon: number) => {
+    try {
+      const resp = await fetch(`/api/agent/context?lat=${lat}&lon=${lon}`);
+      if (resp.ok) {
+        const ctx = await resp.json();
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `📍 **Location Context: ${ctx.location.label}**\n\n🌋 **Seismic**: ${ctx.earthquakeRisk}\n🌤️ **Weather**: ${ctx.weather}\n${ctx.nearbyEvents?.length > 0 ? `📋 **Nearby Events**:\n${ctx.nearbyEvents.slice(0, 3).map((e: { title: string; category: string }) => `- ${e.title} (${e.category})`).join('\n')}` : ''}\n\n*Data from live APIs*`, type: 'context' }]);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => {
+    const SpeechRecognitionAPI = (window as unknown as Record<string, unknown>).SpeechRecognition as (new () => SpeechRecognition) | undefined
+      || (window as unknown as Record<string, unknown>).webkitSpeechRecognition as (new () => SpeechRecognition) | undefined;
+    if (SpeechRecognitionAPI) {
+      setVoiceSupported(true);
+      const recognition = new SpeechRecognitionAPI();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
+        const transcript = Array.from(event.results)
+          .map(r => r[0].transcript)
+          .join('');
+        setAiInput(transcript);
+        if (event.results[event.results.length - 1].isFinal) {
+          recognition.stop();
+          setIsListening(false);
+          // Auto-send after a short delay
+          setTimeout(() => {
+            setAiInput(''); // Clear so sendAI uses the already-set value
+            // We need to trigger sendAI with the final transcript
+            const finalText = transcript;
+            if (finalText.trim()) {
+              // Simulate the sendAI flow by setting a temporary ref
+              setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: finalText }]);
+              // The actual send will happen via the synthetic event
+            }
+          }, 300);
+        }
+      };
+      recognition.onerror = () => { setIsListening(false); };
+      recognition.onend = () => { setIsListening(false); };
+      recognitionRef.current = recognition;
+    }
+  }, []);
+
+  const toggleVoiceInput = useCallback(() => {
+    if (!recognitionRef.current) return;
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      setAiInput('');
+      recognitionRef.current.start();
+      setIsListening(true);
+    }
+  }, [isListening]);
+
+  // Phase 2.2: Voice — speech synthesis (text-to-speech)
+  const speakResponse = useCallback((text: string) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text.replace(/\*\*|`|#/g, '').slice(0, 500));
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  // Phase 2.3: Data file analysis
+  const handleDataFileUpload = useCallback(async (file: File) => {
+    const content = await file.text();
+    setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `📊 [Data file: ${file.name}]`, type: 'data' }]);
+    setAiTyping(true);
+    try {
+      const resp = await fetch('/api/agent/analyze-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, fileName: file.name }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setDataAnalysisResult(data);
+        let msg = `**📊 Data Analysis: ${file.name}**\n\n`;
+        if (data.type === 'csv') {
+          msg += `Rows: **${data.rows}** | Columns: **${(data.columns || []).length}**\n\n**Columns:**\n`;
+          msg += (data.columns || []).map((c: { name: string; type: string; min?: number; max?: number; mean?: number; uniqueValues?: number }) =>
+            `- **${c.name}** (${c.type})${c.min !== undefined ? ` [${c.min?.toFixed(2)} – ${c.max?.toFixed(2)}, μ=${c.mean?.toFixed(2)}]` : ''}${c.uniqueValues !== undefined ? ` (${c.uniqueValues} unique)` : ''}`
+          ).join('\n');
+          if (data.detectedLocation) {
+            msg += `\n\n📍 **Location data detected!** Lat: \`${data.detectedLocation.latColumn}\`, Lon: \`${data.detectedLocation.lonColumn}\`\n`;
+            msg += `Try: *"Plot these points on the globe"* or *"Analyze this data"*`;
+          }
+          msg += `\n\n\`\`\`\n${data.preview?.slice(0, 5).map((r: Record<string, string>) => JSON.stringify(r)).join('\n')}\n\`\`\``;
+        } else if (data.type === 'geojson') {
+          msg += `Features: **${data.features}** | Types: **${(data.geometryTypes || []).join(', ')}**\n`;
+          if (data.properties?.length) msg += `Properties: \`${data.properties.join(', ')}\`\n`;
+          msg += `\nTry: *"Show this on the globe"* or *"Analyze spatial patterns"*`;
+        } else {
+          msg += data.message || 'Unknown file format.';
+        }
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: msg, type: 'data-analysis' }]);
+      } else {
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Data analysis failed (${resp.status})`, type: 'error' }]);
+      }
+    } catch (e) {
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Data analysis error: ${e}`, type: 'error' }]);
+    }
+    setAiTyping(false);
+  }, []);
+
+  const sendToPipeline = useCallback(async (goal: string, wsId: string | null) => {
+    const resp = await fetch('/api/agent/pipeline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goal, workspaceId: wsId }),
+    });
+    if (!resp.ok) throw new Error(`Pipeline failed (${resp.status})`);
+
+    const reader = resp.body?.getReader();
+    if (!reader) throw new Error('No response body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentWsId = wsId;
+    const stepOutputs: string[] = [];
+
+    const processLines = () => {
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) continue;
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+
+          if (data.workspaceId) {
+            currentWsId = data.workspaceId;
+            setSandboxWorkspaceId(data.workspaceId);
+          }
+
+          if (data.subtasks) {
+            setPipelineProgress(data.subtasks.map((s: { id: string; description: string }) => ({ id: s.id, description: s.description, status: 'pending' })));
+          }
+
+          if (data.subtask) {
+            setPipelineProgress(prev => prev.map(p =>
+              p.id === data.subtask.id ? { ...p, status: data.subtask.status } : p
+            ));
+            if (data.subtask.status === 'running') {
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`🔄 ${data.subtask.description}`,subtask:data.subtask.description,status:'running'}]);
+            }
+            if (data.subtask.status === 'completed' && data.subtask.result) {
+              stepOutputs.push(`## ${data.subtask.description}\n\`\`\`\n${data.subtask.result.slice(0, 500)}\n\`\`\``);
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`✅ ${data.subtask.description} (${data.subtask.executionTimeMs || 0}ms)`,subtask:data.subtask.description,status:'completed',timeMs:data.subtask.executionTimeMs,output:data.subtask.result}]);
+            }
+            if (data.subtask.status === 'failed') {
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`❌ ${data.subtask.description}: ${data.subtask.error || 'Failed'}`,subtask:data.subtask.description,status:'failed',output:data.subtask.error}]);
+            }
+          }
+
+          if (data.done) {
+            if (data.workspaceId) setSandboxWorkspaceId(data.workspaceId);
+            const summary = stepOutputs.join('\n\n');
+            if (summary) {
+              setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: summary, type: 'pipeline' }]);
+              stepOutputs.length = 0; // prevent fallback duplicate
+            }
+          }
+        } catch { /* ignore */ }
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      processLines();
+    }
+    processLines();
+    // If data.done wasn't caught in the SSE stream (e.g. event type vs data mismatch),
+    // ensure the result is still shown
+    if (stepOutputs.length > 0) {
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: stepOutputs.join('\n\n'), type: 'pipeline' }]);
+    }
+    setPipelineProgress([]);
+  }, []);
+
+  function newChat() {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setAiMessages([{ id: nextAiMsgIdRef.current++, role: 'assistant', content: '👋 Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' }]);
+    setAiTyping(false);
+    setAiInput('');
+    setAgentSteps([]);
+    setPipelineProgress([]);
+    setChatImages([]);
+    setShowChatHistory(false);
+    currentChatIdRef.current = null;
+    agentInteractionIdRef.current = null;
+  }
+
+  async function loadChat(id: string) {
+    if (currentChatIdRef.current) {
+      await saveChat({
+        id: currentChatIdRef.current,
+        title: autoTitle(aiMessages),
+        messages: aiMessages,
+        environmentId: agentEnvironmentId || undefined,
+        workspaceId: sandboxWorkspaceId || undefined,
+      });
+    }
+    const session = await getChat(id);
+    if (!session) return;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setAiTyping(false);
+    setAgentSteps([]);
+    setPipelineProgress([]);
+    setChatImages([]);
+    setAiMessages(session.messages.map(m => ({ ...m, id: m.id || nextAiMsgIdRef.current++ })));
+    if (session.environmentId) setAgentEnvironmentId(session.environmentId);
+    if (session.workspaceId) setSandboxWorkspaceId(session.workspaceId);
+    currentChatIdRef.current = session.id;
+    setShowChatHistory(false);
+  }
+
+  async function deleteChatSession(id: string) {
+    await deleteChat(id);
+    if (currentChatIdRef.current === id) {
+      currentChatIdRef.current = null;
+    }
+    setChatList(prev => prev.filter(c => c.id !== id));
+  }
+
   const sendAI = useCallback(async () => {
     if (!aiInput.trim()) return;
     const userMsg = aiInput.trim();
     setAiInput('');
     setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: userMsg }]);
     setAiTyping(true);
+    setAgentSteps([]);
+    setPipelineProgress([]);
 
-    const location = extractLocation(userMsg);
-    const cmd = extractCommand(userMsg);
-    if (cmd) { executeCommand(cmd, location); setAiTyping(false); return; }
+    const loc = await extractLocation(userMsg);
 
+    // Only intercept PURE location commands (e.g. just "fly to Tokyo") — nothing else
+    const isPureFlyCommand = /^(?:fly|go|zoom)\s+(?:to|in|into)\s+/i.test(userMsg.trim());
+    if (isPureFlyCommand && loc) {
+      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 150 });
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `📍 Flying to ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` }]);
+      setAiTyping(false);
+      return;
+    }
+
+    // Phase 3: Monitor/schedule commands — handled instantly, no agent needed
+    if (/^monitor\s+/i.test(userMsg)) {
+      const handled = await sendMonitorCommand(userMsg);
+      if (handled) { setAiTyping(false); return; }
+    }
+    if (/^schedule\s+/i.test(userMsg)) {
+      const handled = await sendScheduleCommand(userMsg);
+      if (handled) { setAiTyping(false); return; }
+    }
+
+    const isComputeTask = /compute|calculate|analyze|statistics|average|distribution|correlation|regression|simulate|cluster|predict|forecast|run script|execute|csv|data|pipeline|magnitude|histogram|seismic|m[0-9]|percentage|above/i.test(userMsg);
+
+    if (isComputeTask) {
+      try {
+        setAgentSteps(prev => [...prev, {type:'planning',text:'🧠 Planning computation pipeline...',status:'running'}]);
+        setExpandedStep(-1);
+        const wsId = sandboxWorkspaceId || null;
+        await sendToPipeline(userMsg, wsId);
+        setAiTyping(false);
+        return;
+      } catch (e) {
+        setAgentSteps(prev => [...prev, {type:'error',text:`⚠️ Pipeline: ${e}`}]);
+      }
+    }
+
+    // Direct command: show planes/flights/aircraft near a location
+    const lower = userMsg.toLowerCase();
+    const wantsFlights = lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb') || lower.includes('fly');
+    if (wantsFlights && loc) {
+      const layerId = '2_adsb_lol';
+      if (!isLayerEnabled(layerId)) toggleLayer(layerId);
+      focusLocation(loc.lat, loc.lon, { label: 'Live Aircraft', color: '#60a5fa', height: 50000 });
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `✈️ **Loading live aircraft near ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}**\n\nThe ADSB flight tracking layer has been enabled. Aircraft within the visible area will appear on the globe in real-time.` }]);
+      setAiTyping(false);
+      return;
+    }
+
+    setAgentSteps(prev => [...prev, {type:'reasoning',text:'🧠 Analyzing your request...',status:'running'}]);
+    setExpandedStep(-1);
+
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     try {
-      const response = await callAI(userMsg, location);
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: response }]);
-    } catch {
-      const fallback = generateLocalResponse(userMsg, location);
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: fallback }]);
+      const resp = await fetch('/api/agent/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: userMsg,
+          userId: 'browser-user',
+          environmentId: agentEnvironmentId,
+          interactionId: agentInteractionIdRef.current,
+        }),
+        signal: abortController.signal,
+      });
+
+      if (!resp.ok) {
+        throw new Error(`Agent request failed (${resp.status})`);
+      }
+
+      const reader = resp.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalText = '';
+      let lastInteractionId: string | null = null;
+      let lastEnvironmentId: string | null = null;
+
+      const processLines = () => {
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) continue;
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'connected' && data.requestId) {
+              currentRequestIdRef.current = data.requestId;
+            }
+            if (data.steps) {
+              setAgentSteps(data.steps.map((s: { text?: string; type?: string; code?: string; output?: string }) => ({type:s.type||'step',text:s.text||s.type||'',code:s.code,output:s.output})));
+            }
+            if (data.type === 'step') {
+              setAgentSteps(prev => [...prev, {type:data.stepType||'step',text:data.text||'',code:data.code,output:data.output}]);
+            }
+            if (data.commands && Array.isArray(data.commands)) {
+              executeAgentCommands(data.commands);
+            }
+            if (data.type === 'intent') {
+              if (data.location) {
+                focusLocation(data.location.lat, data.location.lon, { label: data.location.label || 'Location', color: '#60a5fa', height: 150 });
+              }
+              if (data.layerIds) {
+                (data.layerIds as string[]).forEach((layerId: string) => { if (!isLayerEnabled(layerId)) toggleLayer(layerId); });
+              }
+            }
+            if (data.type === 'output') {
+              finalText = data.text;
+              if (data.environmentId) lastEnvironmentId = data.environmentId;
+              if (data.interactionId) lastInteractionId = data.interactionId;
+            }
+            if (data.type === 'done') {
+              if (data.environmentId) lastEnvironmentId = data.environmentId;
+              if (data.interactionId) lastInteractionId = data.interactionId;
+            }
+          } catch { /* skip malformed JSON */ }
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        processLines();
+      }
+      processLines();
+
+      if (lastEnvironmentId) setAgentEnvironmentId(lastEnvironmentId);
+      if (lastInteractionId) agentInteractionIdRef.current = lastInteractionId;
+
+      if (finalText) {
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText }]);
+      } else {
+        const fallback = generateLocalResponse(userMsg, loc);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: fallback }]);
+      }
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') {
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: '⏹ Response stopped.' }]);
+      } else {
+        const fallback = generateLocalResponse(userMsg, loc);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `${fallback}\n\n*(Agent unavailable: ${e})*` }]);
+      }
     }
     setAiTyping(false);
-  }, [aiInput, apiVault, aiApiType]);
+    abortControllerRef.current = null;
+  }, [aiInput, apiVault, aiApiType, agentEnvironmentId, sandboxWorkspaceId, sendToPipeline]);
 
-  function extractLocation(text: string): { lat: number; lon: number } | null {
+  async function extractLocation(text: string): Promise<{ lat: number; lon: number } | null> {
+    // Fast path: local coordinate regex
+    const coordMatch = text.match(/(-?\d+\.?\d*)\s*[,，]\s*(-?\d+\.?\d*)/);
+    if (coordMatch) {
+      const lat = parseFloat(coordMatch[1]);
+      const lon = parseFloat(coordMatch[2]);
+      if (isFinite(lat) && isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        return { lat, lon };
+      }
+    }
+
+    // Fast path: local city map (instant, no API call)
     const cityMap: Record<string, [number, number]> = {
       tokyo:[35.6762,139.6503], delhi:[28.7041,77.1025], shanghai:[31.2304,121.4737],
       'new york':[40.7128,-74.006], london:[51.5074,-0.1278], paris:[48.8566,2.3522],
       mumbai:[19.076,72.8777], cairo:[30.0444,31.2357], 'los angeles':[34.0522,-118.2437],
       beijing:[39.9042,116.4074], moscow:[55.7558,37.6173], istanbul:[41.0082,28.9784],
+      seoul:[37.5665,126.978], bangkok:[13.7563,100.5018], singapore:[1.3521,103.8198],
+      sydney:[-33.8688,151.2093], dubai:[25.2048,55.2708], rio:[-22.9068,-43.1729],
+      chicago:[41.8781,-87.6298], 'san francisco':[37.7749,-122.4194], toronto:[43.6532,-79.3832],
+      berlin:[52.52,13.405], madrid:[40.4168,-3.7038], rome:[41.9028,12.4964],
+      hongkong:[22.3193,114.1694], 'kuala lumpur':[3.139,101.6869], jakarta:[-6.2088,106.8456],
+      'sao paulo':[-23.5505,-46.6333], 'mexico city':[19.4326,-99.1332],
     };
     const lower = text.toLowerCase();
     for (const [city, coords] of Object.entries(cityMap)) {
       if (lower.includes(city)) return { lat: coords[0], lon: coords[1] };
     }
+
+    // Deep path: server-side LLM geocoding for any location name
+    try {
+      const resp = await fetch(`/api/agent/geocode?q=${encodeURIComponent(text)}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.lat !== undefined) return { lat: data.lat, lon: data.lon };
+      }
+    } catch { /* fall through to null */ }
+
+    // Fallback: if query implies "near me" and we have a last known location, use it
+    const loc = lastKnownLocationRef.current;
+    if (loc && (lower.includes('nearby') || lower.includes('nearest') || lower.includes('near me') || lower.includes('around me') || lower.includes('within ') || lower.includes('closest') || lower.includes('my location') || lower.includes('current location'))) {
+      return loc;
+    }
+
     return null;
   }
 
   function extractCommand(text: string): string | null {
-    const lower = text.toLowerCase();
-    if (lower.includes('fly to') || lower.includes('go to') || lower.includes('zoom to')) return 'flyTo';
-    if (lower.includes('weather')) return 'weather';
-    if (lower.includes('earthquake')) return 'earthquakes';
-    if (lower.includes('population')) return 'population';
-    if (lower.includes('storm') || lower.includes('hurricane') || lower.includes('typhoon')) return 'storm';
     return null;
   }
 
-  function executeCommand(cmd: string, loc: { lat: number; lon: number } | null) {
-    if (cmd === 'flyTo' && loc) {
-      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 150 });
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Flew to coordinates ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` }]);
-    } else if (cmd === 'weather' && loc) {
-      focusLocation(loc.lat, loc.lon, { label: 'Weather request', color: '#22d3ee', height: 150 });
-      addWeatherCard(loc.lat, loc.lon);
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Weather data displayed on the globe.' }]);
-    } else if (cmd === 'earthquakes') {
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Showing recent earthquakes. Use the sidebar to toggle seismic data layers.' }]);
-    } else if (cmd === 'population') {
-      setLayers(prev => prev.map(l => l.id === 'population_impact' ? { ...l, on: true } : l));
-      loadLayerData('population_impact');
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Population impact zones displayed on the globe.' }]);
-    } else {
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Command recognized: ${cmd}. Executing...` }]);
+  function executeCommand(_cmd: string, _loc: { lat: number; lon: number } | null) {
+  }
+
+  function executeAgentCommands(commands: Array<{ action: string; [key: string]: unknown }>) {
+    for (const cmd of commands) {
+      try {
+        const v = viewerRef.current;
+        if (!v) continue;
+        switch (cmd.action) {
+          case 'flyTo': {
+            const lat = cmd.lat as number;
+            const lon = cmd.lon as number;
+            if (isFinite(lat) && isFinite(lon)) {
+              focusLocation(lat, lon, { label: (cmd.label as string) || 'Location', color: '#60a5fa', height: 150 });
+            }
+            break;
+          }
+          case 'toggleLayer': {
+            const layerId = cmd.layerId as string;
+            const enabled = cmd.enabled as boolean;
+            if (layerId) {
+              const currentOn = isLayerEnabled(layerId);
+              if (currentOn !== enabled) toggleLayer(layerId);
+            }
+            break;
+          }
+          case 'addPin': {
+            const lat = cmd.lat as number;
+            const lon = cmd.lon as number;
+            if (isFinite(lat) && isFinite(lon)) {
+              const color = (cmd.color as string) || '#ef4444';
+              const label = (cmd.label as string);
+              v.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(lon, lat),
+                name: label || 'Agent Pin',
+                billboard: { image: createPinIcon(color, 24), width: 24, height: 24, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+                label: label ? { text: label, font: '11px "JetBrains Mono"', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, pixelOffset: new Cesium.Cartesian2(0, -18) } : undefined,
+                properties: { layer: 'pin', lat, lon, agent: true },
+              });
+            }
+            break;
+          }
+          default:
+            break;
+        }
+      } catch { /* skip malformed commands */ }
     }
   }
 
@@ -4066,7 +4974,8 @@ export default function App() {
     if (lower.includes('fire') || lower.includes('wildfire')) return '🔥 **Wildfire Monitoring**\n\nNASA MODIS/VIIRS fire detections shown as orange pulsing markers. Smoke dispersion simulations available for active fires.';
     if (lower.includes('tsunami')) return '🌊 **Tsunami Alerts**\n\nM7.5+ ocean earthquakes automatically trigger tsunami propagation simulations. Check the alerts panel for active warnings.';
     if (lower.includes('population')) return '👥 **Population Impact**\n\n50 major cities shown with population-based impact zones. Useful for assessing disaster risk to urban areas.';
-    if (lower.includes('help')) return '📚 **Available Commands**\n\n- "Show earthquakes in [location]"\n- "Weather in [city]"\n- "Fly to [location]"\n- "Show population impact"\n- "Storm tracking"\n- "Wildfire status"\n- "Tsunami alerts"\n\nOr ask any question about Earth data!';
+    if (lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb')) return '✈️ **Live Aircraft**\n\nAircraft tracking is available via the sidebar (Aviation category). Enable "ADSB.lol" or "Flight Tracks" to see live planes on the globe. Try saying "show flights near me" with location enabled.';
+    if (lower.includes('help')) return '📚 **Available Commands**\n\n- "Show earthquakes in [location]"\n- "Weather in [city]"\n- "Fly to [location]"\n- "Show population impact"\n- "Storm tracking"\n- "Wildfire status"\n- "Tsunami alerts"\n- "Show flights near me"\n\nOr ask any question about Earth data!';
     if (location) return `📍 **Location Query**\n\nCoordinates: ${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}\n\nThis area can be analyzed for seismic risk, weather conditions, and population density. Use the sidebar layers to explore different data dimensions.`;
     return `🌍 **Earth Intelligence**\n\nI can help you explore:\n- Seismic activity and earthquake data\n- Weather conditions globally\n- Storm tracking and forecasts\n- Population impact analysis\n- Natural disaster monitoring\n\nTry: "Show earthquakes in Japan" or "Weather in London"`;
   }
@@ -4108,8 +5017,12 @@ export default function App() {
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant',
         content: `📍 **Events near ${cm.lat.toFixed(2)}, ${cm.lon.toFixed(2)}**\n\n${nearby.length > 0 ? nearby.map(e => `- ${e.title} (${e.distance.toFixed(0)}km)`).join('\n') : 'No recent events found within 200km.'}` }]);
       setShowAI(true);
+    } else if (action === 'ai_intel') {
+      setShowAI(true);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `🧠 AI Intelligence for ${cm.lat.toFixed(2)}, ${cm.lon.toFixed(2)}` }]);
+      getLocationContextData(cm.lat, cm.lon);
     }
-  }, [contextMenu, addWeatherCard]);
+  }, [contextMenu, addWeatherCard, getLocationContextData]);
 
   function findNearbyEvents(lat: number, lon: number, radiusKm: number) {
     const results: Array<{title: string; distance: number}> = [];
@@ -4342,10 +5255,12 @@ export default function App() {
           };
           const area: StudyAreaItem = {
             id: `study_area_${Date.now()}`, name, type: typeLabel as any,
-            visible: true, entity, positions, geojson, color,
+            visible: true, entity, positions, geojson, color, width: 3,
           };
+          updateStudyAreaStyle(v, area, color, 3);
           studyAreasRef.current = [...studyAreasRef.current, area];
           setStudyAreas(studyAreasRef.current);
+          flyToStudyAreaTopDown(v, area);
           setStudyDrawing(false);
           v.scene.requestRender();
         },
@@ -4363,6 +5278,31 @@ export default function App() {
     }
     setStudyDrawing(false);
   }, []);
+
+  /* ═════════════════════════════════════════════════════════════════
+     CLIP TO STUDY AREA
+     ═════════════════════════════════════════════════════════════════ */
+
+  const clipEffectActiveRef = useRef(false);
+
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+    if (clipToStudyArea && studyAreasRef.current.length > 0) {
+      clipEffectActiveRef.current = true;
+      const first = studyAreasRef.current[0];
+      flyToStudyAreaTopDown(v, first);
+      setTimeout(() => {
+        if (clipEffectActiveRef.current) {
+          filterDataEntitiesByStudyArea(v, studyAreasRef.current, true);
+        }
+      }, 1400);
+    } else {
+      clipEffectActiveRef.current = false;
+      filterDataEntitiesByStudyArea(v, [], false);
+      v.scene.requestRender();
+    }
+  }, [clipToStudyArea, studyAreas]);
 
   /* ═════════════════════════════════════════════════════════════════
      ZOOM
@@ -4419,6 +5359,9 @@ export default function App() {
     Object.keys(weatherCardElementsRef.current).forEach(key => { delete weatherCardElementsRef.current[key]; });
     entityTrackerRef.current?.destroy();
     entityTrackerRef.current = null;
+    aisTrackerRef.current?.stop();
+    aisTrackerRef.current?.clear();
+    aisTrackerRef.current = null;
     flightDrRef.current?.clear();
     flightDrRef.current = null;
     adsbLolDrRef.current?.clear();
@@ -4929,6 +5872,7 @@ export default function App() {
             🔔
             {newAlertCount > 0 && <span style={{ position:'absolute',top:-2,right:-2,background:'#ef4444',color:'white',fontSize:9,borderRadius:'50%',width:14,height:14,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:600}}>{newAlertCount}</span>}
           </button>
+          <button className={`btn-icon ${showAnalytics ? 'active' : ''}`} onClick={() => { setShowAnalytics(p => !p); if (!analyticsData) fetch('/api/agent/analytics').then(r => r.json()).then(setAnalyticsData).catch(() => {}); }} title="Analytics & Insights">📊</button>
           <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share">📤</button>
           <button className="btn-icon" onClick={() => setShowApiVault(true)} title="API Configuration">🔑</button>
           <button className="btn-icon" onClick={takeSnapshot} title="Snapshot"><Camera size={16} /></button>
@@ -5025,6 +5969,12 @@ export default function App() {
             <button className="btn-all" onClick={() => toggleAllLayers(true)}>Enable All</button>
             <button className="btn-all" onClick={() => toggleAllLayers(false)}>Disable All</button>
           </div>
+          <div className="btn-row" style={{marginBottom:8, gap:4, flexWrap:'wrap'}}>
+            <button className="btn-all" style={{background:showRiskForecast ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowRiskForecast(p => !p)}>⚠️ Risk</button>
+            <button className="btn-all" style={{background:showTimeSlider ? 'rgba(96,165,250,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowTimeSlider(p => !p)}>⏱ Time</button>
+            <button className="btn-all" style={{background:showMeasureTool ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowMeasureTool(p => !p)}>📏 Measure</button>
+            {isAdmin && <button className="btn-all" style={{background:'rgba(59,130,246,0.2)', fontSize:10}} onClick={() => setShowAdmin(true)}>🛡️ Admin</button>}
+          </div>
           <button className="btn-all" onClick={enableDefaultLayers}>Reset to Defaults</button>
         </div>
       </div>
@@ -5052,11 +6002,12 @@ export default function App() {
         }}
         show={showStudyArea}
         onClose={() => { stopStudyDraw(); setShowStudyArea(false); }}
-        drawerRef={drawerRef}
         onStartDraw={startStudyDraw}
         onStopDraw={stopStudyDraw}
         drawing={studyDrawing}
         setDrawing={setStudyDrawing}
+        clipToStudyArea={clipToStudyArea}
+        setClipToStudyArea={setClipToStudyArea}
       />
 
       {/* AI Panel */}
@@ -5064,41 +6015,204 @@ export default function App() {
         <div className="ai-header">
           <div className="ai-icon">🤖</div>
           <div className="ai-title">Earth Intelligence AI</div>
-          <button className="ai-close" onClick={() => setShowAI(false)}>✕</button>
+          <div className="ai-header-actions" style={{display:'flex',gap:4,marginLeft:'auto',alignItems:'center'}}>
+            <button className="ai-header-btn" onClick={() => setShowChatHistory(prev => !prev)} title="Chat History" style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:14,padding:'2px 6px'}}>📋</button>
+            <button className="ai-header-btn" onClick={newChat} title="New Chat" style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:14,padding:'2px 6px'}}>✏️</button>
+            <button className="ai-close" onClick={() => setShowAI(false)}>✕</button>
+          </div>
         </div>
-        <div className="ai-messages">
+        <div className="ai-messages" style={{paddingBottom:4}}>
           {aiMessages.map((msg) => (
-            <div key={msg.id} className={`ai-msg ${msg.role}`}>
+            <div key={msg.id} className={`ai-msg ${msg.role}${msg.type === 'code-result' || msg.type === 'pipeline' || msg.type === 'data-analysis' ? ' code-result' : ''}${msg.type === 'image' ? ' image-msg' : ''}`}>
               {msg.role === 'assistant' ? (
-                <div dangerouslySetInnerHTML={{
-                  __html: msg.content
-                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                    .replace(/`([^`]+)`/g, '<code>$1</code>')
-                    .replace(/\n/g, '<br/>')
-                }} />
+                <div>
+                  {msg.type === 'pipeline' && <div className="msg-label">⚡ Computation Pipeline Result</div>}
+                  {msg.type === 'upload' && <div className="msg-label" style={{color:'#60a5fa'}}>📁 File Upload</div>}
+                  {msg.type === 'vision' && <div className="msg-label" style={{color:'#a78bfa'}}>🔍 Vision Analysis</div>}
+                  {msg.type === 'data-analysis' && <div className="msg-label" style={{color:'#34d399'}}>📊 Data Analysis</div>}
+                  {msg.type === 'error' && <div className="msg-label" style={{color:'#ef4444'}}>⚠️ Error</div>}
+                  <div className="rich-content" dangerouslySetInnerHTML={{ __html: richRender(msg.content) }} />
+                  {renderCommandChips(msg.content, focusLocation, toggleLayer)}
+                  {msg.type !== 'error' && !msg.type?.startsWith('monitor') && !msg.feedback && (
+                    <div className="msg-feedback" style={{display:'flex',gap:6,marginTop:6,alignItems:'center'}}>
+                      <span style={{fontSize:9,color:'var(--text-dim)'}}>Was this helpful?</span>
+                      <button className="fb-btn up" onClick={() => {
+                        fetch('/api/agent/feedback', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({vote:'up', query:aiMessages.filter(m => m.role==='user' && m.id < msg.id).slice(-1)[0]?.content||'', response:msg.content, intentType:msg.type||'unknown', modelTier:'auto'}) }).catch(()=>{});
+                        setAiMessages(prev => prev.map(m => m.id === msg.id ? {...m, feedback:'up'} : m));
+                      }} title="Helpful">👍</button>
+                      <button className="fb-btn down" onClick={() => {
+                        fetch('/api/agent/feedback', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({vote:'down', query:aiMessages.filter(m => m.role==='user' && m.id < msg.id).slice(-1)[0]?.content||'', response:msg.content, intentType:msg.type||'unknown', modelTier:'auto'}) }).catch(()=>{});
+                        setAiMessages(prev => prev.map(m => m.id === msg.id ? {...m, feedback:'down'} : m));
+                      }} title="Not helpful">👎</button>
+                    </div>
+                  )}
+                  {msg.feedback && <div style={{fontSize:9,color:'var(--text-dim)',marginTop:4}}>Feedback: {msg.feedback === 'up' ? '👍' : '👎'}</div>}
+                </div>
+              ) : msg.type === 'image' ? (
+                <div>
+                  <div>{msg.content}</div>
+                  {chatImages.filter(img => img.fileName === msg.content.replace(/\[Image: |]/g, '')).slice(-1).map(img => (
+                    <div key={img.id} className="chat-image-container" style={{marginTop:4}}>
+                      <img src={img.dataUrl} alt={img.fileName} className="chat-image" style={{maxWidth:'100%',maxHeight:180,borderRadius:6,cursor:'pointer'}} onClick={() => window.open(img.dataUrl, '_blank')} />
+                      <div style={{fontSize:9,color:'var(--text-dim)',marginTop:2}}>{img.fileName}</div>
+                    </div>
+                  ))}
+                </div>
               ) : msg.content}
             </div>
           ))}
-          {aiTyping && (
+          {pipelineProgress.length > 0 && (
+            <div className="ai-msg assistant" style={{borderColor:'rgba(96,165,250,0.3)',background:'rgba(96,165,250,0.04)'}}>
+              <div className="msg-label" style={{fontSize:10,fontWeight:600,color:'#60a5fa',marginBottom:4}}>🔄 Pipeline Progress</div>
+              {pipelineProgress.map(p => (
+                <div key={p.id} className={`pipeline-step ${p.status}`}>
+                  <span className="pipeline-step-icon">
+                    {p.status === 'completed' ? '✅' : p.status === 'running' ? '🔄' : p.status === 'failed' ? '❌' : '⏳'}
+                  </span>
+                  <span>{p.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {agentSteps.length > 0 && (
+            <div className="thinking-block">
+              <div className="thinking-header" onClick={() => setExpandedStep(expandedStep === -1 ? null : -1)}>
+                <span className="thinking-chevron">{expandedStep === -1 ? '▼' : '▶'}</span>
+                <span className="thinking-title">🤔 Thinking... ({agentSteps.length} steps)</span>
+                <span className="thinking-count">{agentSteps.filter(s => s.status === 'completed').length}/{agentSteps.length}</span>
+              </div>
+              {expandedStep === -1 && (
+                <div className="thinking-body">
+                  {agentSteps.map((step, i) => (
+                    <div key={i} className={`think-step ${step.status === 'running' ? 'running' : step.status === 'failed' ? 'failed' : ''}`}>
+                      <div className="think-step-header" onClick={() => setExpandedStep(expandedStep === i ? null : i)}>
+                        <span className="think-step-icon">
+                          {step.status === 'running' ? '🔄' : step.status === 'completed' ? '✅' : step.status === 'failed' ? '❌' : '💭'}
+                        </span>
+                        <span className="think-step-text">{step.text}</span>
+                        <span className="think-step-chevron">{expandedStep === i ? '▼' : '▶'}</span>
+                      </div>
+                      {expandedStep === i && (
+                        <div className="think-step-detail">
+                          {step.code && <div className="think-code-block"><div className="think-code-label">Code</div><pre className="think-code">{step.code}</pre></div>}
+                          {step.output && <div className="think-output-block"><div className="think-output-label">Output</div><pre className="think-output">{step.output}</pre></div>}
+                          {step.timeMs !== undefined && <div className="think-timing">⏱ {step.timeMs}ms</div>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {agentSteps.length === 0 && <div className="think-step" style={{padding:8,fontSize:11,color:'var(--text-dim)'}}>Waiting for agent...</div>}
+                  {agentSteps.some(s => s.status === 'running') && <div className="think-thinking"><span /><span /><span /></div>}
+                </div>
+              )}
+            </div>
+          )}
+          {aiTyping && agentSteps.length === 0 && (
             <div className="ai-typing">
               <span /><span /><span />
             </div>
           )}
         </div>
+        {sandboxWorkspaceId && uploadedFiles.length > 0 && (
+          <div className="sandbox-file-upload">
+            <span className="sandbox-workspace-badge">📦 Workspace active</span>
+            <span className="sandbox-file-name">{uploadedFiles.length} file(s)</span>
+          </div>
+        )}
+        {aiMessages.length <= 1 && (
         <div className="ai-suggestion-chips">
-          {['Recent earthquakes?','Weather in Tokyo','Show wildfires','Population impact'].map(chip => (
+          {['Recent earthquakes?','Weather in Tokyo','Show wildfires','Aircraft near Delhi','Analyze quake stats','Compute averages'].map(chip => (
             <span key={chip} className="ai-chip" onClick={() => { setAiInput(chip); }}>{chip}</span>
           ))}
         </div>
+        )}
         <div className="ai-input-wrap">
-          <input className="ai-input" placeholder="Ask about earthquakes, weather, disasters..."
+          <button className={`ai-voice-btn ${isListening ? 'listening' : ''}`}
+            onClick={toggleVoiceInput} title={isListening ? 'Listening...' : 'Voice input'}
+            style={{display:voiceSupported ? 'flex' : 'none'}}>
+            {isListening ? '🔴' : '🎤'}
+          </button>
+          <input className="ai-input" placeholder="Ask, analyze, compute, or upload data..."
             value={aiInput} onChange={e => setAiInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') sendAI(); }} />
-          <button className="ai-send" onClick={sendAI}>➤</button>
+          {aiTyping ? (
+            <button className="ai-stop" onClick={() => {
+              abortControllerRef.current?.abort();
+              if (currentRequestIdRef.current) {
+                ws.cancelRequest(currentRequestIdRef.current);
+                currentRequestIdRef.current = null;
+              }
+            }} title="Stop response" style={{background:'rgba(239,68,68,0.15)',border:'1px solid rgba(239,68,68,0.4)',color:'#ef4444',borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:600,padding:'4px 10px'}}>■ Stop</button>
+          ) : (
+            <button className="ai-send" onClick={sendAI}>➤</button>
+          )}
+        </div>
+        <div className="sandbox-file-upload" style={{borderTop:'1px solid var(--border)',padding:'4px 12px',display:'flex',gap:8,flexWrap:'wrap'}}>
+          <label className="sandbox-file-btn" style={{fontSize:10,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}}>
+            📎 Upload data (sandbox)
+            <input type="file" style={{display:'none'}} onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) handleFileUpload(file);
+            }} />
+          </label>
+          <label className="sandbox-file-btn" style={{fontSize:10,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}}>
+            📷 Upload image
+            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:'none'}} onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) handleImageUpload(file);
+            }} />
+          </label>
+          <label className="sandbox-file-btn" style={{fontSize:10,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}}>
+            📊 Analyze data file
+            <input type="file" accept=".csv,.json,.geojson" style={{display:'none'}} onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) handleDataFileUpload(file);
+            }} />
+          </label>
+          <button className="sandbox-file-btn" style={{fontSize:10,display:'inline-flex',alignItems:'center',gap:4}}
+            onClick={() => { speakResponse(aiMessages.filter(m => m.role === 'assistant').slice(-1)[0]?.content || ''); }}
+            title="Read last response aloud">
+            🔊 Speak
+          </button>
+          <button className="sandbox-file-btn" style={{fontSize:10,display:'inline-flex',alignItems:'center',gap:4}}
+            onClick={() => { navigator.clipboard.writeText(window.location.href).catch(() => {}); setShowShareDialog(true); setTimeout(() => setShowShareDialog(false), 1500); }}
+            title="Copy session link to clipboard">
+            🔗 Share session
+          </button>
+          {showShareDialog && <span style={{fontSize:9,color:'#34d399'}}>Copied!</span>}
+          {sandboxWorkspaceId && <span className="sandbox-workspace-badge">☰ Workspace</span>}
         </div>
         <div className="ai-api-note">
           Powered by {aiApiType === 'anthropic' ? 'Claude' : aiApiType === 'gemini' ? 'Gemini' : 'Local AI'}
+          {sandboxWorkspaceId && ' · Sandbox active'}
+          {voiceSupported && ' · Voice supported'}
+        </div>
+      </div>
+
+      {/* Chat History Panel */}
+      <div className={`chat-history-panel glass-panel ${showChatHistory ? 'open' : ''}`} style={{position:'fixed',top:0,left:0,width:300,height:'100vh',zIndex:1001,transform:showChatHistory ? 'translateX(0)' : 'translateX(-100%)',transition:'transform 0.25s ease',display:'flex',flexDirection:'column',overflow:'hidden'}}>
+        <div className="chat-history-header" style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',borderBottom:'1px solid var(--border)'}}>
+          <span style={{fontWeight:600,fontSize:14}}>Chat History</span>
+          <button onClick={() => setShowChatHistory(false)} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:16}}>✕</button>
+        </div>
+        <div className="chat-history-list" style={{flex:1,overflowY:'auto',padding:'6px 0'}}>
+          {chatList.length === 0 && <div style={{padding:'20px 14px',fontSize:12,color:'var(--text-dim)',textAlign:'center'}}>No saved chats yet.</div>}
+          {groupChatsByDate(chatList).map(group => (
+            <div key={group.label}>
+              <div className="chat-date-group" style={{padding:'8px 14px 4px',fontSize:10,fontWeight:600,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:0.5}}>{group.label}</div>
+              {group.items.map(chat => (
+                <div key={chat.id} className={`chat-history-item ${chat.id === currentChatIdRef.current ? 'active' : ''}`}
+                  onClick={() => loadChat(chat.id)}
+                  style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 14px',cursor:'pointer',fontSize:12,borderRadius:0,background:chat.id === currentChatIdRef.current ? 'rgba(96,165,250,0.08)' : 'transparent',borderLeft: chat.id === currentChatIdRef.current ? '3px solid #60a5fa' : '3px solid transparent'}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{chat.title}</div>
+                    <div style={{fontSize:10,color:'var(--text-dim)',marginTop:2}}>{chat.messageCount} messages · {new Date(chat.updatedAt || chat.createdAt).toLocaleDateString()}</div>
+                  </div>
+                  <button onClick={async (e) => { e.stopPropagation(); await deleteChatSession(chat.id); }} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:12,padding:'2px 4px',opacity:0.6}} title="Delete">✕</button>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -5145,6 +6259,82 @@ export default function App() {
             setAlerts([]);
             setNewAlertCount(0);
           }}>Clear All</button>
+        </div>
+      </div>
+
+      {/* Phase 10: Analytics Panel */}
+      <div className={`alerts-panel glass-panel ${showAnalytics ? 'open' : ''}`} style={{right:60}}>
+        <div className="ai-header">
+          <div className="ai-icon">📊</div>
+          <div className="ai-title">Analytics & Insights</div>
+          <button className="ai-close" onClick={() => setShowAnalytics(false)}>✕</button>
+        </div>
+        <div className="alerts-list" style={{fontSize:11}}>
+          {!analyticsData ? (
+            <div style={{textAlign:'center',padding:20,color:'var(--text-dim)',fontSize:11}}>Loading...</div>
+          ) : (
+            <>
+              <div className="alert-item" style={{cursor:'default'}}>
+                <div className="alert-title">💰 Cost Summary</div>
+                <div style={{padding:'4px 0',display:'flex',justifyContent:'space-between'}}>
+                  <span>Total spent:</span>
+                  <span style={{color:'var(--accent)'}}>${(analyticsData as any).cost?.totalCost?.toFixed(6) || '0'}</span>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span>Total queries:</span>
+                  <span>{(analyticsData as any).cost?.totalQueries || 0}</span>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span>Avg cost/query:</span>
+                  <span style={{color:'var(--text-dim)'}}>${(analyticsData as any).cost?.avgCostPerQuery?.toFixed(8) || '0'}</span>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span>Today cost:</span>
+                  <span>${(analyticsData as any).cost?.todayCost?.toFixed(6) || '0'}</span>
+                </div>
+              </div>
+              <div className="alert-item" style={{cursor:'default'}}>
+                <div className="alert-title">🎯 Satisfaction</div>
+                <div style={{display:'flex',justifyContent:'space-between',padding:'4px 0'}}>
+                  <span>Rate:</span>
+                  <span style={{color:(analyticsData as any).satisfactionRate >= 70 ? '#22c55e' : '#f59e0b'}}>{(analyticsData as any).satisfactionRate || 0}%</span>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span>👍 Upvotes:</span>
+                  <span style={{color:'#22c55e'}}>{(analyticsData as any).totalUpvotes || 0}</span>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span>👎 Downvotes:</span>
+                  <span style={{color:'#ef4444'}}>{(analyticsData as any).totalDownvotes || 0}</span>
+                </div>
+              </div>
+              <div className="alert-item" style={{cursor:'default'}}>
+                <div className="alert-title">🗃️ Cache</div>
+                <div style={{display:'flex',justifyContent:'space-between',padding:'4px 0'}}>
+                  <span>Hit rate:</span>
+                  <span style={{color:'var(--accent)'}}>{(analyticsData as any).cache?.hitRate || 0}%</span>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span>Entries:</span>
+                  <span>{(analyticsData as any).cache?.size || 0}</span>
+                </div>
+              </div>
+              {(analyticsData as any).cost?.byModel && (
+                <div className="alert-item" style={{cursor:'default'}}>
+                  <div className="alert-title">🤖 By Model</div>
+                  {Object.entries((analyticsData as any).cost.byModel).map(([tier, data]: [string, any]) => (
+                    <div key={tier} style={{display:'flex',justifyContent:'space-between',padding:'2px 0',fontSize:10}}>
+                      <span>{tier}</span>
+                      <span>{data.queries} queries · ${data.cost?.toFixed(5)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button className="alert-btn" onClick={() => {
+                fetch('/api/agent/analytics').then(r=>r.json()).then(setAnalyticsData).catch(()=>{});
+              }} style={{width:'100%',marginTop:4}}>🔄 Refresh</button>
+            </>
+          )}
         </div>
       </div>
 
@@ -5251,6 +6441,10 @@ export default function App() {
           <div className="ctx-item" role="menuitem" tabIndex={0} style={{right:0,top:'50%',transform:'translateY(-50%)'}}
             onClick={() => handleContextAction('events')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('events'); } }}>
             <span className="ctx-emoji">📋</span><span className="ctx-label">Events</span>
+          </div>
+          <div className="ctx-item" role="menuitem" tabIndex={0} style={{left:'50%',top:0,transform:'translateX(-50%)'}}
+            onClick={() => handleContextAction('ai_intel')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('ai_intel'); } }}>
+            <span className="ctx-emoji">🧠</span><span className="ctx-label">AI Intel</span>
           </div>
         </div>
       </div>
@@ -5369,6 +6563,67 @@ export default function App() {
         
         </div>
       )}
+
+      {/* Measure Tool Display */}
+      {showMeasureTool && measurePoints.length > 0 && (
+        <div className="glass-panel" style={{
+          position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)',
+          padding: '10px 20px', borderRadius: 10, zIndex: 1000,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <span style={{ color: '#f59e0b', fontWeight: 600 }}>📏 Measurement</span>
+          {measureDistance !== null ? (
+            <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{measureDistance.toFixed(1)} km</span>
+          ) : (
+            <span style={{ color: '#94a3b8' }}>Click a second point on the globe</span>
+          )}
+          <button onClick={() => { setMeasurePoints([]); setMeasureDistance(null); setShowMeasureTool(false); }}
+            style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: 6, cursor: 'pointer', fontSize: 11, padding: '4px 10px' }}>
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Time Slider */}
+      {showTimeSlider && (
+        <div className="glass-panel" style={{
+          position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)',
+          padding: '12px 24px', borderRadius: 12, zIndex: 1000, minWidth: 400,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <button onClick={() => setTimeSliderPlaying(p => !p)}
+            style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: 18 }}>
+            {timeSliderPlaying ? '⏸' : '▶'}
+          </button>
+          <input type="range" min={Date.now() - 86400000} max={Date.now()} value={timeSliderValue}
+            onChange={e => setTimeSliderValue(Number(e.target.value))}
+            style={{ flex: 1, height: 4, accentColor: '#60a5fa' }} />
+          <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 80, textAlign: 'right' }}>
+            {new Date(timeSliderValue).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <button onClick={() => setShowTimeSlider(false)}
+            style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 14 }}>✕</button>
+        </div>
+      )}
+
+      {/* Risk Forecast Layer */}
+      {showRiskForecast && (
+        <div className="heatmap-legend show glass-panel" style={{ bottom: 200, right: 16 }}>
+          <div className="heatmap-legend-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            Risk Forecast
+            <button onClick={() => setShowRiskForecast(false)}
+              style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 12, marginLeft: 8 }}>✕</button>
+          </div>
+          <div className="heatmap-gradient" style={{ background: 'linear-gradient(90deg, #22c55e, #f59e0b, #ef4444)' }} />
+          <div className="heatmap-labels"><span>Low</span><span>Medium</span><span>High</span></div>
+        </div>
+      )}
+
+      {/* Login Modal */}
+      <LoginModal />
+
+      {/* Admin Dashboard */}
+      {showAdmin && <AdminDashboard onClose={() => setShowAdmin(false)} />}
     </div>
   );
 }

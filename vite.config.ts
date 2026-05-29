@@ -2,10 +2,10 @@ import fs from "fs"
 import path from "path"
 import react from "@vitejs/plugin-react"
 import { defineConfig, type Plugin } from "vite"
-import { inspectAttr } from 'kimi-plugin-inspect-react'
 
 const cesiumSourceDir = path.resolve(__dirname, './node_modules/cesium/Build/Cesium')
 const cesiumPublicDir = path.resolve(__dirname, './public/cesium')
+let cesiumAssetsSynced = false
 
 function copyDirectory(source: string, target: string) {
   fs.mkdirSync(target, { recursive: true })
@@ -21,15 +21,17 @@ function copyDirectory(source: string, target: string) {
 }
 
 function syncCesiumAssets() {
-  if (!fs.existsSync(cesiumSourceDir)) return
+  if (cesiumAssetsSynced || !fs.existsSync(cesiumSourceDir)) return
   fs.rmSync(cesiumPublicDir, { recursive: true, force: true })
   copyDirectory(cesiumSourceDir, cesiumPublicDir)
+  cesiumAssetsSynced = true
 }
 
 function cesiumAssetsPlugin(): Plugin {
   return {
     name: 'cesium-assets',
     buildStart() {
+      cesiumAssetsSynced = false
       syncCesiumAssets()
     },
     configureServer() {
@@ -41,7 +43,7 @@ function cesiumAssetsPlugin(): Plugin {
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
-  plugins: [inspectAttr(), react(), cesiumAssetsPlugin()],
+  plugins: [react(), cesiumAssetsPlugin()],
   server: {
     port: 3000,
     proxy: {
@@ -69,14 +71,11 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: [
-      '@cesium/wasm-splats',
-      '@spz-loader/core',
       '@tweenjs/tween.js',
       '@zip.js/zip.js/lib/zip-core.js',
       'autolinker',
       'bitmap-sdf',
       'dompurify',
-      'draco3d/draco_decoder_nodejs.js',
       'earcut',
       'grapheme-splitter',
       'jsep',
@@ -92,6 +91,6 @@ export default defineConfig({
       'topojson-client',
       'urijs',
     ],
-    exclude: ['cesium'],
+    exclude: ['cesium', 'helmet', 'express', 'tsx', 'satellite.js', '@cesium/wasm-splats', '@spz-loader/core', 'draco3d', 'draco3d/draco_decoder_nodejs.js'],
   },
 });

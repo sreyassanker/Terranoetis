@@ -1,8 +1,46 @@
 import * as Cesium from 'cesium';
 
+export interface PointItem {
+  lat?: number; latitude?: number; lon?: number; longitude?: number; lng?: number;
+  name?: string; id?: string;
+  [key: string]: unknown;
+}
+
+interface StormPoint {
+  lon?: number; longitude?: number; lat?: number; latitude?: number;
+  [key: number]: unknown;
+}
+
+interface StormTrackEntry {
+  name?: string; category?: string; windSpeed?: number; pressure?: number;
+  track?: StormPoint[]; positions?: StormPoint[]; coordinates?: StormPoint[];
+}
+
+interface GeoFeature {
+  type?: string; coordinates?: number[][][] | number[][][][];
+  properties?: Record<string, unknown>;
+  geometry?: { type?: string; coordinates?: number[][][] | number[][][][]; };
+}
+
+interface DroughtData { features?: GeoFeature[]; zones?: GeoFeature[]; }
+
+interface RadarSiteEntry {
+  lat: number; lon: number; name?: string; id?: string;
+  stationType?: string; elevation?: number;
+  rda?: Record<string, unknown>;
+}
+
+interface ClimateFeatureProperties { cat?: string; prob?: number; valid_seas?: string; fcst_date?: number; }
+interface ClimateFeature { properties?: ClimateFeatureProperties; geometry?: GeoFeature['geometry']; }
+
+interface ClimateIndicesData {
+  temperature?: { features?: ClimateFeature[] };
+  precipitation?: { features?: ClimateFeature[] };
+}
+
 export function addGenericPointEntities(
   viewer: Cesium.Viewer,
-  items: any[],
+  items: PointItem[],
   layerId: string,
   opts?: {
     iconColor?: string;
@@ -16,9 +54,9 @@ export function addGenericPointEntities(
   const labelField = opts?.labelField || 'name';
   const iconSize = opts?.iconSize || 12;
 
-  items.forEach((item: any, i: number) => {
-    const lat = item.lat ?? item.latitude;
-    const lon = item.lon ?? item.longitude ?? item.lng;
+  items.forEach((item, i: number) => {
+    const lat = item.lat ?? item.latitude ?? 0;
+    const lon = item.lon ?? item.longitude ?? item.lng ?? 0;
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
     const pos = Cesium.Cartesian3.fromDegrees(lon, lat);
     const label = String(item[labelField] || item.name || item.id || `${layerId}_${i}`);
@@ -53,17 +91,17 @@ export function addGenericPointEntities(
 
 export function addStormTrackEntities(
   viewer: Cesium.Viewer,
-  storms: any[],
+  storms: StormTrackEntry[],
   layerId: string,
 ): Cesium.Entity[] {
   const ents: Cesium.Entity[] = [];
-  storms.forEach((storm: any) => {
+  storms.forEach((storm) => {
     const track = storm.track || storm.positions || storm.coordinates || [];
     if (track.length < 2) return;
     const positions = track
-      .map((pt: any) => {
-        const lon = pt.lon ?? pt.longitude ?? pt[0];
-        const lat = pt.lat ?? pt.latitude ?? pt[1];
+      .map((pt) => {
+        const lon = pt.lon ?? pt.longitude ?? Number(pt[0]);
+        const lat = pt.lat ?? pt.latitude ?? Number(pt[1]);
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
         return Cesium.Cartesian3.fromDegrees(lon, lat);
       })
@@ -120,12 +158,12 @@ export function addStormTrackEntities(
   return ents;
 }
 
-function extractPolygonRings(geometry: any): number[][][] {
+function extractPolygonRings(geometry: GeoFeature['geometry']): number[][][] {
   if (!geometry || !geometry.type || !geometry.coordinates) return [];
-  if (geometry.type === 'Polygon') return geometry.coordinates;
+  if (geometry.type === 'Polygon') return geometry.coordinates as number[][][];
   if (geometry.type === 'MultiPolygon') {
     const rings: number[][][] = [];
-    for (const poly of geometry.coordinates) {
+    for (const poly of geometry.coordinates as number[][][][]) {
       for (const ring of poly) rings.push(ring);
     }
     return rings;
@@ -135,7 +173,7 @@ function extractPolygonRings(geometry: any): number[][][] {
 
 export function addDroughtZoneEntities(
   viewer: Cesium.Viewer,
-  data: any,
+  data: DroughtData,
   layerId: string,
 ): Cesium.Entity[] {
   const ents: Cesium.Entity[] = [];
@@ -148,15 +186,15 @@ export function addDroughtZoneEntities(
     D4: '#730000',
   };
 
-  features.forEach((f: any) => {
+  features.forEach((f) => {
     const props = f.properties || {};
-    const dm = props.dm || 'D0';
+    const dm = String(props.dm || 'D0');
     const rings = extractPolygonRings(f.geometry);
     if (rings.length === 0) return;
     const color = Cesium.Color.fromCssColorString(dmColors[dm] || '#ffff00').withAlpha(0.4);
     try {
       const ent = viewer.entities.add({
-        name: props.name || `Drought ${dm}`,
+        name: String(props.name || `Drought ${dm}`),
         polygon: {
           hierarchy: new Cesium.PolygonHierarchy(rings[0].map((c: number[]) => Cesium.Cartesian3.fromDegrees(c[0], c[1]))),
           material: color,
@@ -178,11 +216,11 @@ export function addDroughtZoneEntities(
 
 export function addRadarSiteEntities(
   viewer: Cesium.Viewer,
-  sites: any[],
+  sites: RadarSiteEntry[],
   layerId: string,
 ): Cesium.Entity[] {
   const ents: Cesium.Entity[] = [];
-  sites.forEach((site: any) => {
+  sites.forEach((site) => {
     if (!Number.isFinite(site.lat) || !Number.isFinite(site.lon)) return;
     const pos = Cesium.Cartesian3.fromDegrees(site.lon, site.lat);
     const rda = site.rda || {};
@@ -225,15 +263,15 @@ export function addRadarSiteEntities(
 
 export function addClimateIndicesEntities(
   viewer: Cesium.Viewer,
-  data: any,
+  data: ClimateIndicesData,
   layerId: string,
 ): Cesium.Entity[] {
   const ents: Cesium.Entity[] = [];
   const { temperature, precipitation } = data;
   let validSeason = '';
 
-  function addOutlookFeatures(features: any[], prefix: string, isTemp: boolean) {
-    (features || []).forEach((f: any) => {
+  function addOutlookFeatures(features: ClimateFeature[], prefix: string, isTemp: boolean) {
+    (features || []).forEach((f) => {
       const p = f.properties || {};
       const cat = p.cat || 'EC';
       const probVal = p.prob ?? 33;
@@ -266,8 +304,8 @@ export function addClimateIndicesEntities(
     });
   }
 
-  addOutlookFeatures(temperature?.features, 'temp', true);
-  addOutlookFeatures(precipitation?.features, 'precip', false);
+  addOutlookFeatures(temperature?.features ?? [], 'temp', true);
+  addOutlookFeatures(precipitation?.features ?? [], 'precip', false);
 
   return ents;
 }

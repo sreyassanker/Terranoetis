@@ -166,7 +166,10 @@ export async function createLiveGlobeViewer(container: HTMLElement): Promise<Vie
   viewer.clock.shouldAnimate = true;
   viewer.clock.multiplier = 1;
   const removeAutoRotateTick = viewer.clock.onTick.addEventListener(() => {
-    if (autoRotating) viewer.scene.camera.rotateRight(0.0003);
+    if (autoRotating) {
+      viewer.scene.camera.rotateRight(0.0003);
+      viewer.scene.requestRender();
+    }
   });
 
   const unlockInteraction = () => {

@@ -179,6 +179,8 @@ export class AisVesselTracker {
         if (Math.abs(cosLat) > 0.01) {
           v.lon += (dist * Math.sin(rad)) / (111320 * cosLat);
         }
+        if (v.lon > 180) v.lon -= 360;
+        else if (v.lon < -180) v.lon += 360;
       }
     }
     this.syncEntities();
