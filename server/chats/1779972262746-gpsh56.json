@@ -1,0 +1,23 @@
+{
+  "id": "1779972262746-gpsh56",
+  "title": "find the nearest planes within 100km radius , show...",
+  "createdAt": "2026-05-28T12:44:34.701Z",
+  "updatedAt": "2026-05-28T12:44:34.701Z",
+  "messages": [
+    {
+      "id": 49,
+      "role": "assistant",
+      "content": "👋 Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth."
+    },
+    {
+      "id": 318,
+      "role": "user",
+      "content": "find the nearest planes within 100km radius , show me"
+    },
+    {
+      "id": 352,
+      "role": "assistant",
+      "content": "📍 **Location Query**\n\nCoordinates: 34.0522, -118.2437\n\nThis area can be analyzed for seismic risk, weather conditions, and population density. Use the sidebar layers to explore different data dimensions."
+    }
+  ]
+}

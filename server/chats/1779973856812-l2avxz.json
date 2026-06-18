@@ -1,0 +1,33 @@
+{
+  "id": "1779973856812-l2avxz",
+  "title": "find the nearest planes within 10 km radius in Che...",
+  "createdAt": "2026-05-28T13:11:27.459Z",
+  "updatedAt": "2026-05-28T13:11:27.460Z",
+  "messages": [
+    {
+      "id": 204,
+      "role": "assistant",
+      "content": "👋 Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth."
+    },
+    {
+      "id": 331,
+      "role": "user",
+      "content": "find the nearest planes within 10 km radius in Chennai International Airport"
+    },
+    {
+      "id": 333,
+      "role": "assistant",
+      "content": "✈️ **Loading live aircraft near 34.05, -118.24**\n\nThe ADSB flight tracking layer has been enabled. Aircraft within the visible area will appear on the globe in real-time."
+    },
+    {
+      "id": 424,
+      "role": "user",
+      "content": "maa airport"
+    },
+    {
+      "id": 469,
+      "role": "assistant",
+      "content": "🌍 **Earth Intelligence**\n\nI can help you explore:\n- Seismic activity and earthquake data\n- Weather conditions globally\n- Storm tracking and forecasts\n- Population impact analysis\n- Natural disaster monitoring\n\nTry: \"Show earthquakes in Japan\" or \"Weather in London\""
+    }
+  ]
+}

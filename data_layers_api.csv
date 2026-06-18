@@ -1,0 +1,418 @@
+DL No.,Category,Data Layer,Layer ID,API Status,Backend Source
+1,World Ports,World Port Index,1_world_port_index,YES,Direct proxy via GET /api/data/:layerId → msi.nga.mil
+2,Ocean,AIS Vessels,ais_vessels,YES,Dedicated endpoint in server/index.ts
+3,Aviation,ADSB.lol,2_adsb_lol,YES,Direct proxy via GET /api/data/:layerId → adsb.lol
+4,Aviation,adsb.fi,2_adsb_fi,YES,Direct proxy via GET /api/data/:layerId → adsb.fi
+5,Aviation,FlightAware AeroAPI,2_flightaware_aeroapi,YES,Direct proxy via GET /api/data/:layerId → flightaware.com
+6,Aviation,AirLabs API,2_airlabs_api,YES,Direct proxy via GET /api/data/:layerId → airlabs.co
+7,Aviation,OpenFlights,2_openflights,YES,Direct proxy via GET /api/data/:layerId → openflights.org
+8,Satellite,MODIS Terra True Color,3_planetary_computer_stac,YES (client-side),Tile layer loaded directly by CesiumJS from planetarycomputer.microsoft.com
+9,Satellite,MODIS Aqua True Color,3_aws_earth_search,YES (client-side),Tile layer loaded directly by CesiumJS from element84.com
+10,Satellite,MODIS Terra False Color (721),3_copernicus_data_space,YES (client-side),Tile layer loaded directly by CesiumJS from dataspace.copernicus.eu
+11,Satellite,MODIS Terra Surface Reflectance 143,3_usgs_earthexplorer,YES (client-side),Tile layer loaded directly by CesiumJS from earthexplorer.usgs.gov
+12,Satellite,MODIS Terra Land Surface Temp,3_usgs_appeears,YES (client-side),Tile layer loaded directly by CesiumJS from appeears.earthdatacloud.nasa.gov
+13,Satellite,VIIRS SNPP True Color,3_veda_dashboard,YES (client-side),Tile layer loaded directly by CesiumJS from www.earthdata.nasa.gov
+14,Satellite,MODIS Aerosol Optical Depth,3_jaxa_g_portal,YES (client-side),Tile layer loaded directly by CesiumJS from gportal.jaxa.jp
+15,Satellite,MODIS Cloud Top Height,3_jaxa_himawari_monitor,YES (client-side),Tile layer loaded directly by CesiumJS from www.eorc.jaxa.jp
+16,Satellite,MODIS Brightness Temp Band 31,3_noaa_goes_r_series,YES (client-side),Tile layer loaded directly by CesiumJS from www.goes-r.gov
+17,Satellite,MODIS Surf. Reflectance 721,3_landsat_look,YES (client-side),Tile layer loaded directly by CesiumJS from landsatlook.usgs.gov
+18,Satellite,MODIS Cloud Eff. Radius,3_planet_labs_open_data,YES (client-side),Tile layer loaded directly by CesiumJS from www.planet.com
+19,Satellite,MODIS Cloud Fraction,3_openaerialmap,YES (client-side),Tile layer loaded directly by CesiumJS from openaerialmap.org
+20,Satellite,MODIS Cloud Opt. Thickness,3_bhuvan_isro,YES (client-side),Tile layer loaded directly by CesiumJS from bhuvan.nrsc.gov.in
+21,Satellite,AIRS Dust Score,3_air_centre_eo_catalog,YES (client-side),Tile layer loaded directly by CesiumJS from services.aircentre.org
+22,Satellite,ASTER GDEM Color Index,3_aster_gdem,YES (client-side),Tile layer loaded directly by CesiumJS from asterweb.jpl.nasa.gov
+23,Satellite,MODIS Corr. Refl. 367,3_srtm,YES (client-side),Tile layer loaded directly by CesiumJS from srtm.csi.cgiar.org
+24,Satellite,GHRSST Sea Surface Temp,3_gebco,YES (client-side),Tile layer loaded directly by CesiumJS from www.gebco.net
+25,Satellite,MODIS Water Vapor,3_modis_web_services,YES (client-side),Tile layer loaded directly by CesiumJS from modis.gsfc.nasa.gov
+26,Satellite,MODIS Thermal Anomalies,3_viirs_active_fires,YES (client-side),Tile layer loaded directly by CesiumJS from www.earthdata.nasa.gov
+27,Satellite,MODIS Flood Extent,3_global_surface_water_explorer,YES (client-side),Tile layer loaded directly by CesiumJS from global-surface-water.appspot.com
+28,Hazards,OpenFEMA,5_openfema,YES,Direct proxy via GET /api/data/:layerId → www.fema.gov
+29,Hazards,USGS Earthquake Hazards,5_usgs_earthquake_hazards,YES,Direct proxy via GET /api/data/:layerId → earthquake.usgs.gov
+30,Hazards,USGS Latest Earthquakes,5_usgs_latest_earthquakes,YES,Direct proxy via GET /api/data/:layerId → earthquake.usgs.gov
+31,Hazards,IRIS Data Services,5_iris_data_services,YES,Direct proxy via GET /api/data/:layerId → ds.iris.edu
+32,Hazards,GEOFON,5_geofon,YES,Direct proxy via GET /api/data/:layerId → geofon.gfz-potsdam.de
+33,Hazards,EMSC,5_emsc,YES,Direct proxy via GET /api/data/:layerId → www.emsc-csem.org
+34,Hazards,INGV,5_ingv,YES,Direct proxy via GET /api/data/:layerId → www.ingv.it
+35,Hazards,ISC,5_isc,YES,Direct proxy via GET /api/data/:layerId → www.isc.ac.uk
+36,Hazards,FDSN,5_fdsn,YES,Direct proxy via GET /api/data/:layerId → www.fdsn.org
+37,Hazards,ORFEUS,5_orfeus,YES,Direct proxy via GET /api/data/:layerId → www.orfeus-eu.org
+38,Hazards,GNS Science (NZ),5_gns_science_nz,YES,Direct proxy via GET /api/data/:layerId → www.gns.cri.nz
+39,Hazards,JMA,5_jma,YES,Direct proxy via GET /api/data/:layerId → www.jma.go.jp
+40,Hazards,PHIVOLCS,5_phivolcs,YES,Direct proxy via GET /api/data/:layerId → volcano.phivolcs.dost.gov.ph
+41,Hazards,IGN (Spain),5_ign_spain,YES,Direct proxy via GET /api/data/:layerId → www.ign.es
+42,Hazards,BGS Earthquake Data,5_bgs_earthquake_data,YES,Direct proxy via GET /api/data/:layerId → www.bgs.ac.uk
+43,Hazards,GDACS,5_gdacs,YES,Direct proxy via GET /api/data/:layerId → www.gdacs.org
+44,Hazards,ReliefWeb,5_reliefweb,YES,Direct proxy via GET /api/data/:layerId → reliefweb.int
+45,Hazards,Global Flood Database,5_global_flood_database,YES,Direct proxy via GET /api/data/:layerId → global-flood-database.cloudtostreet.info
+46,Hazards,EM-DAT,5_em_dat,YES,Direct proxy via GET /api/data/:layerId → www.emdat.be
+47,Hazards,DesInventar,5_desinventar,YES,Direct proxy via GET /api/data/:layerId → www.desinventar.net
+48,Hazards,NASA Disasters Portal,5_nasa_disasters_portal,YES,Direct proxy via GET /api/data/:layerId → disasters.nasa.gov
+49,Hazards,ThinkHazard!,5_thinkhazard,YES,Direct proxy via GET /api/data/:layerId → thinkhazard.org
+50,Hazards,INFORM Index,5_inform_index,YES,Direct proxy via GET /api/data/:layerId → drmkc.jrc.ec.europa.eu
+51,Hazards,OpenDRI,5_opendri,YES,Direct proxy via GET /api/data/:layerId → opendri.org
+52,Hazards,UN OCHA HDX,5_un_ocha_hdx,YES,Direct proxy via GET /api/data/:layerId → data.humdata.org
+53,Hazards,Copernicus EMS,5_copernicus_ems,YES,Direct proxy via GET /api/data/:layerId → emergency.copernicus.eu
+54,Hazards,GLIDE,5_glide,YES,Direct proxy via GET /api/data/:layerId → www.glidenumber.net
+55,Hazards,NASA Landslide Portal,5_nasa_landslide_portal,YES,Direct proxy via GET /api/data/:layerId → landslides.nasa.gov
+56,Space,CelesTrak GP API,6_celestrak_gp_api,YES,Direct proxy via GET /api/data/:layerId → celestrak.org
+57,Advanced,Windy Webcams,7_windy_webcams,YES,Direct proxy via GET /api/data/:layerId → api.windy.com
+58,Advanced,OpenWebcamDB,7_openwebcamdb,YES,Direct proxy via GET /api/data/:layerId → openwebcamdb.com
+59,Advanced,Webcams.travel,7_webcams_travel,YES,Direct proxy via GET /api/data/:layerId → www.webcams.travel
+60,Geospatial,OSM Overpass,8_osm_overpass,YES,Direct proxy via GET /api/data/:layerId → overpass-api.de
+61,Geospatial,OSM Nominatim,8_osm_nominatim,YES,Direct proxy via GET /api/data/:layerId → nominatim.org
+62,Geospatial,GeoNames,8_geonames,YES,Direct proxy via GET /api/data/:layerId → www.geonames.org
+63,Geospatial,OpenTopography,8_opentopography,YES,Direct proxy via GET /api/data/:layerId → opentopography.org
+64,Geospatial,Openrouteservice,8_openrouteservice,YES,Direct proxy via GET /api/data/:layerId → openrouteservice.org
+65,Geospatial,Natural Earth,8_natural_earth,YES,Direct proxy via GET /api/data/:layerId → www.naturalearthdata.com
+66,Geospatial,OpenStreetMap,8_openstreetmap,YES,Direct proxy via GET /api/data/:layerId → www.openstreetmap.org
+67,Geospatial,Geofabrik,8_geofabrik,YES,Direct proxy via GET /api/data/:layerId → www.geofabrik.de
+68,Geospatial,Overture Maps,8_overture_maps,YES,Direct proxy via GET /api/data/:layerId → overturemaps.org
+69,Geospatial,OpenAddresses,8_openaddresses,YES,Direct proxy via GET /api/data/:layerId → openaddresses.io
+70,Geospatial,OpenRailwayMap,8_openrailwaymap,YES,Direct proxy via GET /api/data/:layerId → www.openrailwaymap.org
+71,Geospatial,3D City DB,8_3d_city_db,YES,Direct proxy via GET /api/data/:layerId → www.3dcitydb.org
+72,Geospatial,GeoPlatform.gov,8_geoplatform_gov,YES,Direct proxy via GET /api/data/:layerId → www.geoplatform.gov
+73,Geospatial,Data.gov,8_data_gov,YES,Direct proxy via GET /api/data/:layerId → www.data.gov
+74,Geospatial,EU Open Data Portal,8_eu_open_data_portal,YES,Direct proxy via GET /api/data/:layerId → data.europa.eu
+75,Geospatial,World Bank Open Data,8_world_bank_open_data,YES,Direct proxy via GET /api/data/:layerId → data.worldbank.org
+76,Geospatial,UN Data,8_un_data,YES,Direct proxy via GET /api/data/:layerId → data.un.org
+77,Geospatial,Humanitarian Data Exchange,8_humanitarian_data_exchange,YES,Direct proxy via GET /api/data/:layerId → data.humdata.org
+78,Atmosphere,OpenAQ,9_openaq,YES,Direct proxy via GET /api/data/:layerId → openaq.org
+79,Atmosphere,World AQI API,9_world_aqi_api,YES,Direct proxy via GET /api/data/:layerId → aqicn.org
+80,Atmosphere,Lightning Alerts (OpenWeather),9_lightning_alerts_openweather,YES,Direct proxy via GET /api/data/:layerId → openweathermap.org
+81,Atmosphere,Copernicus Atmosphere,9_copernicus_atmosphere,YES,Direct proxy via GET /api/data/:layerId → atmosphere.copernicus.eu
+82,Atmosphere,NASA GMAO,9_nasa_gmao,YES,Direct proxy via GET /api/data/:layerId → gmao.gsfc.nasa.gov
+83,Atmosphere,AIRS (NASA),9_airs_nasa,YES,Direct proxy via GET /api/data/:layerId → airs.jpl.nasa.gov
+84,Atmosphere,OMI (NASA),9_omi_nasa,YES,Direct proxy via GET /api/data/:layerId → ozoneaq.gsfc.nasa.gov
+85,Atmosphere,EPA AirData,9_epa_airdata,YES,Direct proxy via GET /api/data/:layerId → www.epa.gov
+86,Atmosphere,AirNow API,9_airnow_api,YES,Direct proxy via GET /api/data/:layerId → www.airnowapi.org
+87,Atmosphere,European Environment Agency,9_european_environment_agency,YES,Direct proxy via GET /api/data/:layerId → www.eea.europa.eu
+88,Atmosphere,PurpleAir API,9_purpleair_api,YES,Direct proxy via GET /api/data/:layerId → api.purpleair.com
+89,Atmosphere,WAQI,9_waqi,YES,Direct proxy via GET /api/data/:layerId → waqi.info
+90,Atmosphere,CAMS Global Reanalysis,9_cams_global_reanalysis,YES,Direct proxy via GET /api/data/:layerId → ads.atmosphere.copernicus.eu
+91,Atmosphere,HYSPLIT,9_hysplit,YES,Direct proxy via GET /api/data/:layerId → www.ready.noaa.gov
+92,Atmosphere,SILAM,9_silam,YES,Direct proxy via GET /api/data/:layerId → silam.fmi.fi
+93,Atmosphere,MACC,9_macc,YES,Direct proxy via GET /api/data/:layerId → atmosphere.copernicus.eu
+94,Atmosphere,TEMPO,9_tempo,YES,Direct proxy via GET /api/data/:layerId → tempo.si.edu
+95,Atmosphere,Pandonia,9_pandonia,YES,Direct proxy via GET /api/data/:layerId → www.pandonia-global-network.org
+96,Advanced,Transitland API,10_transitland_api,YES,Direct proxy via GET /api/data/:layerId → www.transit.land
+97,Geospatial,HDX,11_hdx,YES,Direct proxy via GET /api/data/:layerId → data.humdata.org
+98,Geospatial,WorldPop Database,11_worldpop_database,YES,Direct proxy via GET /api/data/:layerId → www.worldpop.org
+99,Weather,NHC Tropical Cyclone Data,12_nhc_tropical_cyclone_data,YES,Direct proxy via GET /api/data/:layerId → www.nhc.noaa.gov
+100,Weather,IBTrACS,12_ibtracs,YES,Direct proxy via GET /api/data/:layerId → www.ncei.noaa.gov
+101,Geospatial,WorldPop,14_worldpop,YES,Direct proxy via GET /api/data/:layerId → www.worldpop.org
+102,Geospatial,GHSL,14_ghsl,YES,Direct proxy via GET /api/data/:layerId → ghsl.jrc.ec.europa.eu
+103,Geospatial,LandScan,14_landscan,YES,Direct proxy via GET /api/data/:layerId → landscan.ornl.gov
+104,Geospatial,Facebook Data for Good,14_facebook_data_for_good,YES,Direct proxy via GET /api/data/:layerId → dataforgood.facebook.com
+105,Geospatial,Overture Maps Buildings,14_overture_maps_buildings,YES,Direct proxy via GET /api/data/:layerId → overturemaps.org
+106,Geospatial,Microsoft Building Footprints,14_microsoft_building_footprints,YES,Direct proxy via GET /api/data/:layerId → github.com
+107,Advanced,CDC WONDER,15_cdc_wonder,YES,Direct proxy via GET /api/data/:layerId → wonder.cdc.gov
+108,Advanced,WHO Global Health Observatory,15_who_global_health_observatory,YES,Direct proxy via GET /api/data/:layerId → www.who.int
+109,Advanced,Global Heat Health Info,15_global_heat_health_info,YES,Direct proxy via GET /api/data/:layerId → ghhin.org
+110,Advanced,National Allergy Bureau,15_national_allergy_bureau,YES,Direct proxy via GET /api/data/:layerId → www.aaaai.org
+111,Advanced,OpenAQ Health,15_openaq_health,YES,Direct proxy via GET /api/data/:layerId → openaq.org
+112,Advanced,HealthMap,15_healthmap,YES,Direct proxy via GET /api/data/:layerId → www.healthmap.org
+113,Advanced,VectorBase,15_vectorbase,YES,Direct proxy via GET /api/data/:layerId → vectorbase.org
+114,Advanced,Malaria Atlas Project,15_malaria_atlas_project,YES,Direct proxy via GET /api/data/:layerId → malariaatlas.org
+115,Geology,NOAA Paleoclimatology,16_noaa_paleoclimatology,YES,Direct proxy via GET /api/data/:layerId → www.ncei.noaa.gov
+116,Geology,PAGES,16_pages,YES,Direct proxy via GET /api/data/:layerId → pastglobalchanges.org
+117,Geology,Neotoma,16_neotoma,YES,Direct proxy via GET /api/data/:layerId → www.neotomadb.org
+118,Geology,WDC Paleoclimatology,16_wdc_paleoclimatology,YES,Direct proxy via GET /api/data/:layerId → www.ncei.noaa.gov
+119,Geology,ITRDB,16_itrdb,YES,Direct proxy via GET /api/data/:layerId → www.ncei.noaa.gov
+120,Geology,SISAL,16_sisal,YES,Direct proxy via GET /api/data/:layerId → pastglobalchanges.org
+121,Geology,PANGAEA,16_pangaea,YES,Direct proxy via GET /api/data/:layerId → www.pangaea.de
+122,Geology,Macrostrat,16_macrostrat,YES,Direct proxy via GET /api/data/:layerId → macrostrat.org
+123,Geology,PBDB,16_pbdb,YES,Direct proxy via GET /api/data/:layerId → paleobiodb.org
+124,Geology,GeoDeepDive,16_geodeepdive,YES,Direct proxy via GET /api/data/:layerId → geodeepdive.org
+125,Geology,IGRF Model,17_igrf_model,YES,Direct proxy via GET /api/data/:layerId → www.ngdc.noaa.gov
+126,Geology,WMM,17_wmm,YES,Direct proxy via GET /api/data/:layerId → www.ngdc.noaa.gov
+127,Geology,EMM2017,17_emm2017,YES,Direct proxy via GET /api/data/:layerId → www.ngdc.noaa.gov
+128,Geology,WDMAM,17_wdmam,YES,Direct proxy via GET /api/data/:layerId → wdmam.org
+129,Geology,IGFS,17_igfs,YES,Direct proxy via GET /api/data/:layerId → www.igfs.net
+130,Geology,EGM2008,17_egm2008,YES,Direct proxy via GET /api/data/:layerId → earth-info.nga.mil
+131,Geology,EIGEN,17_eigen,YES,Direct proxy via GET /api/data/:layerId → icgem.gfz-potsdam.de
+132,Geology,GOCE,17_goce,YES,Direct proxy via GET /api/data/:layerId → earth.esa.int
+133,Geology,GMRT,17_gmrt,YES,Direct proxy via GET /api/data/:layerId → www.gmrt.org
+134,Geology,Crust 1.0,17_crust_1_0,YES,Direct proxy via GET /api/data/:layerId → igppweb.ucsd.edu
+135,Geology,LITHO1.0,17_litho1_0,YES,Direct proxy via GET /api/data/:layerId → igppweb.ucsd.edu
+136,Geology,USGS Mineral Resources,18_usgs_mineral_resources,YES,Direct proxy via GET /api/data/:layerId → mrdata.usgs.gov
+137,Geology,NGDS,18_ngds,YES,Direct proxy via GET /api/data/:layerId → gdr.openei.org
+138,Geology,BOEM Data Center,18_boem_data_center,YES,Direct proxy via GET /api/data/:layerId → www.boem.gov
+139,Geology,OpenEI,18_openei,YES,Direct proxy via GET /api/data/:layerId → openei.org
+140,Geology,NREL Geothermal Prospector,18_nrel_geothermal_prospector,YES,Direct proxy via GET /api/data/:layerId → maps.nrel.gov
+141,Geology,Petrel Open Data,18_petrel_open_data,YES,Direct proxy via GET /api/data/:layerId → github.com
+142,Ecology,Global Mangrove Watch,19_global_mangrove_watch,YES,Direct proxy via GET /api/data/:layerId → www.globalmangrovewatch.org
+143,Ecology,Digital Coast (NOAA),19_digital_coast_noaa,YES,Direct proxy via GET /api/data/:layerId → coast.noaa.gov
+144,Ecology,SeagrassWatch,19_seagrasswatch,YES,Direct proxy via GET /api/data/:layerId → www.seagrasswatch.org
+145,Ecology,Wetlands International,19_wetlands_international,YES,Direct proxy via GET /api/data/:layerId → www.wetlands.org
+146,Ecology,RAMSAR Sites,19_ramsar_sites,YES,Direct proxy via GET /api/data/:layerId → rsis.ramsar.org
+147,Ecology,Coastal Wetland Inventory,19_coastal_wetland_inventory,YES,Direct proxy via GET /api/data/:layerId → www.fws.gov
+148,Ecology,Global Wetlands Map,19_global_wetlands_map,YES,Direct proxy via GET /api/data/:layerId → www2.cifor.org
+149,Ecology,Coastal Relief Model,19_coastal_relief_model,YES,Direct proxy via GET /api/data/:layerId → www.ngdc.noaa.gov
+150,Ecology,Movebank API,20_movebank_api,YES,Direct proxy via GET /api/data/:layerId → github.com
+151,Ecology,eBird,20_ebird,YES,Direct proxy via GET /api/data/:layerId → ebird.org
+152,Ecology,eBird Basic Dataset,20_ebird_basic_dataset,YES,Direct proxy via GET /api/data/:layerId → ebird.org
+153,Ecology,iNaturalist,20_inaturalist,YES,Direct proxy via GET /api/data/:layerId → www.inaturalist.org
+154,Ecology,OBIS,20_obis,YES,Direct proxy via GET /api/data/:layerId → obis.org
+155,Ecology,NOAA Passive Acoustics,20_noaa_passive_acoustics,YES,Direct proxy via GET /api/data/:layerId → www.ncei.noaa.gov
+156,Ecology,xeno-canto,20_xeno_canto,YES,Direct proxy via GET /api/data/:layerId → www.xeno-canto.org
+157,Ecology,Macaulay Library,20_macaulay_library,YES,Direct proxy via GET /api/data/:layerId → www.macaulaylibrary.org
+158,Ecology,Wildlife Insights,20_wildlife_insights,YES,Direct proxy via GET /api/data/:layerId → www.wildlifeinsights.org
+159,Geology,ISRIC World Soil Info,22_isric_world_soil_info,YES,Direct proxy via GET /api/data/:layerId → www.isric.org
+160,Geology,SoilGrids,22_soilgrids,YES,Direct proxy via GET /api/data/:layerId → www.isric.org
+161,Geology,HWSD,22_hwsd,YES,Direct proxy via GET /api/data/:layerId → www.fao.org
+162,Geology,WoSIS,22_wosis,YES,Direct proxy via GET /api/data/:layerId → www.isric.org
+163,Geology,ICE-D,22_ice_d,YES,Direct proxy via GET /api/data/:layerId → www.ice-d.org
+164,Advanced,IGS,25_igs,YES,Direct proxy via GET /api/data/:layerId → igs.org
+165,Advanced,IGS Data Center,25_igs_data_center,YES,Direct proxy via GET /api/data/:layerId → cddis.nasa.gov
+166,Advanced,UNAVCO Data Archive,25_unavco_data_archive,YES,Direct proxy via GET /api/data/:layerId → www.unavco.org
+167,Advanced,NGS CORS,25_ngs_cors,YES,Direct proxy via GET /api/data/:layerId → geodesy.noaa.gov
+168,Advanced,EUREF,25_euref,YES,Direct proxy via GET /api/data/:layerId → www.epncb.oma.be
+169,Advanced,SIRGAS,25_sirgas,YES,Direct proxy via GET /api/data/:layerId → www.sirgas.org
+170,Advanced,ITRF,25_itrf,YES,Direct proxy via GET /api/data/:layerId → itrf.ign.fr
+171,Advanced,SONEL,25_sonel,YES,Direct proxy via GET /api/data/:layerId → www.sonel.org
+172,Advanced,EPOS-GNSS,25_epos_gnss,YES,Direct proxy via GET /api/data/:layerId → www.epos-eu.org
+173,Advanced,ILRS,25_ilrs,YES,Direct proxy via GET /api/data/:layerId → ilrs.gsfc.nasa.gov
+174,Advanced,ILRS Data Products,25_ilrs_data_products,YES,Direct proxy via GET /api/data/:layerId → ilrs.gsfc.nasa.gov
+175,Advanced,IVS,25_ivs,YES,Direct proxy via GET /api/data/:layerId → ivscc.gsfc.nasa.gov
+176,Advanced,IVS Data Products,25_ivs_data_products,YES,Direct proxy via GET /api/data/:layerId → ivscc.gsfc.nasa.gov
+177,Advanced,CDDIS,25_cddis,YES,Direct proxy via GET /api/data/:layerId → cddis.nasa.gov
+178,Advanced,PBO H2O,25_pbo_h2o,YES,Direct proxy via GET /api/data/:layerId → www.unavco.org
+179,Weather,US Drought Monitor,26_us_drought_monitor,YES,Direct proxy via GET /api/data/:layerId → droughtmonitor.unl.edu
+180,Water Quality,USGS NAWQA,27_usgs_nawqa,YES,Direct proxy via GET /api/data/:layerId → api.waterdata.usgs.gov
+181,Cryosphere,NSIDC Snow Today,28_nsidc_snow_today,YES,Direct proxy via GET /api/data/:layerId → nsidc.org
+182,Cryosphere,Rutgers Global Snow Lab,28_rutgers_global_snow_lab,YES,Direct proxy via GET /api/data/:layerId → climate.rutgers.edu
+183,Cryosphere,GlobSnow,28_globsnow,YES,Direct proxy via GET /api/data/:layerId → www.globsnow.info
+184,Cryosphere,Avalanche.org,28_avalanche_org,YES,Direct proxy via GET /api/data/:layerId → www.avalanche.org
+185,Cryosphere,Canadian Ice Service,28_canadian_ice_service,YES,Direct proxy via GET /api/data/:layerId → www.canada.ca
+186,Cryosphere,Great Lakes Ice,28_great_lakes_ice,YES,Direct proxy via GET /api/data/:layerId → www.glerl.noaa.gov
+187,Aviation,Tokyo VAAC,29_tokyo_vaac,YES,Direct proxy via GET /api/data/:layerId → ds.data.jma.go.jp
+188,Aviation,Anchorage VAAC,29_anchorage_vaac,YES,Direct proxy via GET /api/data/:layerId → www.weather.gov
+189,Aviation,Washington VAAC,29_washington_vaac,YES,Direct proxy via GET /api/data/:layerId → www.nhc.noaa.gov
+190,Aviation,WOVOdat,29_wovodat,YES,Direct proxy via GET /api/data/:layerId → www.wovodat.org
+191,Aviation,NASA SO2 Monitoring,29_nasa_so2_monitoring,YES,Direct proxy via GET /api/data/:layerId → so2.gsfc.nasa.gov
+192,Aviation,NOAA SO2 Portal,29_noaa_so2_portal,YES,Direct proxy via GET /api/data/:layerId → satepsanone.nesdis.noaa.gov
+193,Aviation,Volcano Discovery,29_volcano_discovery,YES,Direct proxy via GET /api/data/:layerId → www.volcanodiscovery.com
+194,ARGO Floats,ARGO Floats,31_argo_floats,YES,Direct proxy via GET /api/data/:layerId → erddap.ifremer.fr
+195,Tides,NOAA Tides & Currents,31_noaa_tides_currents,YES,Direct proxy via GET /api/data/:layerId → api.tidesandcurrents.noaa.gov
+196,Advanced,USGS Water Data,32_usgs_water_data,YES,Direct proxy via GET /api/data/:layerId → api.waterdata.usgs.gov
+197,Advanced,USGS Water Services,32_usgs_water_services,YES,Direct proxy via GET /api/data/:layerId → waterservices.usgs.gov
+198,Advanced,GRDC,32_grdc,YES,Direct proxy via GET /api/data/:layerId → portal.grdc.bafg.de
+199,Advanced,HydroSHEDS,32_hydrosheds,YES,Direct proxy via GET /api/data/:layerId → www.hydrosheds.org
+200,Advanced,SMAP (NASA),32_smap_nasa,YES,Direct proxy via GET /api/data/:layerId → smap.jpl.nasa.gov
+201,Advanced,FLDAS Soil Moisture,32_fldas_soil_moisture,YES,Direct proxy via GET /api/data/:layerId → ldas.gsfc.nasa.gov
+202,Advanced,GLDAS,32_gldas,YES,Direct proxy via GET /api/data/:layerId → ldas.gsfc.nasa.gov
+203,Advanced,GRACE-FO,32_grace_fo,YES,Direct proxy via GET /api/data/:layerId → grace.jpl.nasa.gov
+204,Advanced,AQUASTAT,32_aquastat,YES,Direct proxy via GET /api/data/:layerId → www.fao.org
+205,Advanced,CUAHSI HydroShare,32_cuahsi_hydroshare,YES,Direct proxy via GET /api/data/:layerId → www.hydroshare.org
+206,Advanced,WRI Aqueduct,32_wri_aqueduct,YES,Direct proxy via GET /api/data/:layerId → www.wri.org
+207,Advanced,OpenAgua,32_openagua,YES,Direct proxy via GET /api/data/:layerId → www.openagua.org
+208,Advanced,iRain,32_irain,YES,Direct proxy via GET /api/data/:layerId → irain.eng.uci.edu
+209,Cryosphere,NSIDC,34_nsidc,YES,Direct proxy via GET /api/data/:layerId → nsidc.org
+210,Cryosphere,Arctic Data Explorer,34_arctic_data_explorer,YES,Direct proxy via GET /api/data/:layerId → nsidc.org
+211,Cryosphere,Global Cryosphere Watch,34_global_cryosphere_watch,YES,Direct proxy via GET /api/data/:layerId → globalcryospherewatch.org
+212,Cryosphere,WGMS,34_wgms,YES,Direct proxy via GET /api/data/:layerId → wgms.ch
+213,Cryosphere,RGI,34_rgi,YES,Direct proxy via GET /api/data/:layerId → www.glims.org
+214,Cryosphere,GLIMS,34_glims,YES,Direct proxy via GET /api/data/:layerId → www.glims.org
+215,Cryosphere,ICESat-2,34_icesat_2,YES,Direct proxy via GET /api/data/:layerId → icesat-2.gsfc.nasa.gov
+216,Cryosphere,CryoSat-2,34_cryosat_2,YES,Direct proxy via GET /api/data/:layerId → earth.esa.int
+217,Cryosphere,Operation IceBridge,34_operation_icebridge,YES,Direct proxy via GET /api/data/:layerId → icebridge.gsfc.nasa.gov
+218,Cryosphere,OSI SAF,34_osi_saf,YES,Direct proxy via GET /api/data/:layerId → osi-saf.eumetsat.int
+219,Cryosphere,Polar View,34_polar_view,YES,Direct proxy via GET /api/data/:layerId → www.polarview.org
+220,Cryosphere,GTN-P,34_gtn_p,YES,Direct proxy via GET /api/data/:layerId → gtnp.arcticportal.org
+221,Cryosphere,Iceberg Tracker,34_iceberg_tracker,YES,Direct proxy via GET /api/data/:layerId → www.icebergfinder.com
+222,Cryosphere,Snow Today,34_snow_today,YES,Direct proxy via GET /api/data/:layerId → nsidc.org
+223,Geology,BGS,35_bgs,YES,Direct proxy via GET /api/data/:layerId → www.bgs.ac.uk
+224,Geology,IGRF,35_igrf,YES,Direct proxy via GET /api/data/:layerId → www.ngdc.noaa.gov
+225,Geology,INTERMAGNET Data,35_intermagnet_data,YES,Direct proxy via GET /api/data/:layerId → intermagnet.github.io
+226,Geology,EarthScope,35_earthscope,YES,Direct proxy via GET /api/data/:layerId → www.earthscope.org
+227,Geology,SOPAC,35_sopac,YES,Direct proxy via GET /api/data/:layerId → sopac-csrc.ucsd.edu
+228,Geology,EPOS,35_epos,YES,Direct proxy via GET /api/data/:layerId → www.epos-eu.org
+229,Geology,GFZ Data Services,35_gfz_data_services,YES,Direct proxy via GET /api/data/:layerId → dataservices.gfz-potsdam.de
+230,Geology,NGDC Data,35_ngdc_data,YES,Direct proxy via GET /api/data/:layerId → www.ngdc.noaa.gov
+231,Ecology,Map of Life,36_map_of_life,YES,Direct proxy via GET /api/data/:layerId → mol.org
+232,Ecology,MODIS Land Cover,36_modis_land_cover,YES,Direct proxy via GET /api/data/:layerId → modis.gsfc.nasa.gov
+233,Ecology,Copernicus Land Service,36_copernicus_land_service,YES,Direct proxy via GET /api/data/:layerId → land.copernicus.eu
+234,Ecology,Harmonized World Soil DB,36_harmonized_world_soil_db,YES,Direct proxy via GET /api/data/:layerId → www.fao.org
+235,Ecology,OpenLandMap,36_openlandmap,YES,Direct proxy via GET /api/data/:layerId → openlandmap.org
+236,Ecology,EarthEnv,36_earthenv,YES,Direct proxy via GET /api/data/:layerId → www.earthenv.org
+237,Ecology,CHELSA,36_chelsa,YES,Direct proxy via GET /api/data/:layerId → chelsa-climate.org
+238,Ecology,EcoData Retriever,36_ecodata_retriever,YES,Direct proxy via GET /api/data/:layerId → ecodataretriever.org
+239,Ecology,NEON,36_neon,YES,Direct proxy via GET /api/data/:layerId → www.neonscience.org
+240,Ecology,LTER Network,36_lter_network,YES,Direct proxy via GET /api/data/:layerId → lternet.edu
+241,Ecology,ALA,36_ala,YES,Direct proxy via GET /api/data/:layerId → www.ala.org.au
+242,Ecology,Global Forest Watch,36_global_forest_watch,YES,Direct proxy via GET /api/data/:layerId → www.globalforestwatch.org
+243,Geospatial,Open Data Kit,37_open_data_kit,YES,Direct proxy via GET /api/data/:layerId → opendatakit.org
+244,Geospatial,QGIS,37_qgis,YES,Direct proxy via GET /api/data/:layerId → qgis.org
+245,Geospatial,GeoServer,37_geoserver,YES,Direct proxy via GET /api/data/:layerId → geoserver.org
+246,Geospatial,MapServer,37_mapserver,YES,Direct proxy via GET /api/data/:layerId → mapserver.org
+247,Geospatial,GeoNode,37_geonode,YES,Direct proxy via GET /api/data/:layerId → geonode.org
+248,Geospatial,GeoNetwork,37_geonetwork,YES,Direct proxy via GET /api/data/:layerId → geonetwork-opensource.org
+249,Geospatial,OpenLayers,37_openlayers,YES,Direct proxy via GET /api/data/:layerId → openlayers.org
+250,Geospatial,Leaflet,37_leaflet,YES,Direct proxy via GET /api/data/:layerId → leafletjs.com
+251,Geospatial,CesiumJS,37_cesiumjs,YES,Direct proxy via GET /api/data/:layerId → cesium.com
+252,Geospatial,GDAL,37_gdal,YES,Direct proxy via GET /api/data/:layerId → gdal.org
+253,Geospatial,PostGIS,37_postgis,YES,Direct proxy via GET /api/data/:layerId → postgis.net
+254,Advanced,Global Solar Atlas,39_global_solar_atlas,YES,Direct proxy via GET /api/data/:layerId → globalsolaratlas.info
+255,Advanced,Global Wind Atlas,39_global_wind_atlas,YES,Direct proxy via GET /api/data/:layerId → globalwindatlas.info
+256,Advanced,NREL Data Catalog,39_nrel_data_catalog,YES,Direct proxy via GET /api/data/:layerId → data.nrel.gov
+257,Advanced,EIA Open Data,39_eia_open_data,YES,Direct proxy via GET /api/data/:layerId → www.eia.gov
+258,Advanced,OSM Power,39_osm_power,YES,Direct proxy via GET /api/data/:layerId → wiki.openstreetmap.org
+259,Advanced,GRID3,39_grid3,YES,Direct proxy via GET /api/data/:layerId → grid3.org
+260,Advanced,Energydata.info,39_energydata_info,YES,Direct proxy via GET /api/data/:layerId → energydata.info
+261,Ecology,PhenoCam Network,41_phenocam_network,YES,Direct proxy via GET /api/data/:layerId → phenocam.nau.edu
+262,Ecology,PhenoCam Data,41_phenocam_data,YES,Direct proxy via GET /api/data/:layerId → phenocam.nau.edu
+263,Ecology,NEON Data Portal,41_neon_data_portal,YES,Direct proxy via GET /api/data/:layerId → data.neonscience.org
+264,Ecology,LTAR Network,41_ltar_network,YES,Direct proxy via GET /api/data/:layerId → ltar.ars.usda.gov
+265,Ecology,CZO Network,41_czo_network,YES,Direct proxy via GET /api/data/:layerId → criticalzone.org
+266,Ecology,CZO Data Portal,41_czo_data_portal,YES,Direct proxy via GET /api/data/:layerId → criticalzone.org
+267,Ecology,AmeriFlux Data,41_ameriflux_data,YES,Direct proxy via GET /api/data/:layerId → ameriflux.lbl.gov
+268,Ocean,NDBC Buoy Data,42_ndbc_buoy_data,YES,Direct proxy via GET /api/data/:layerId → www.ndbc.noaa.gov
+269,Seismic,COSMOS,43_cosmos,YES,Direct proxy via GET /api/data/:layerId → www.strongmotion.org
+270,Seismic,COSMOS VDC,43_cosmos_vdc,YES,Direct proxy via GET /api/data/:layerId → www.strongmotioncenter.org
+271,Seismic,K-NET / KiK-net,43_k_net_kik_net,YES,Direct proxy via GET /api/data/:layerId → www.kyoshin.bosai.go.jp
+272,Seismic,GeoNet,43_geonet,YES,Direct proxy via GET /api/data/:layerId → www.geonet.org.nz
+273,Seismic,GeoNet Data,43_geonet_data,YES,Direct proxy via GET /api/data/:layerId → www.geonet.org.nz
+274,Seismic,CSN Chile,43_csn_chile,YES,Direct proxy via GET /api/data/:layerId → evtdb.csn.uchile.cl
+275,Seismic,ShakeAlert,43_shakealert,YES,Direct proxy via GET /api/data/:layerId → www.shakealert.org
+276,Seismic,USGS ShakeMap,43_usgs_shakemap,YES,Direct proxy via GET /api/data/:layerId → earthquake.usgs.gov
+277,Seismic,USGS DyFI,43_usgs_dyfi,YES,Direct proxy via GET /api/data/:layerId → earthquake.usgs.gov
+278,Hazards,NASA COOLR,44_nasa_coolr,YES,Direct proxy via GET /api/data/:layerId → landslides.nasa.gov
+279,Hazards,NASA Landslide Reporter,44_nasa_landslide_reporter,YES,Direct proxy via GET /api/data/:layerId → landslides.nasa.gov
+280,Hazards,LHASA,44_lhasa,YES,Direct proxy via GET /api/data/:layerId → gpm.nasa.gov
+281,Hazards,High Mountain Asia,44_high_mountain_asia,YES,Direct proxy via GET /api/data/:layerId → nsidc.org
+282,Hazards,TRMM Landslide,44_trmm_landslide,YES,Direct proxy via GET /api/data/:layerId → gpm.nasa.gov
+283,Cryosphere,GlaThiDa,45_glathida,YES,Direct proxy via GET /api/data/:layerId → www.gtn-g.ch
+284,Cryosphere,GTN-G,45_gtn_g,YES,Direct proxy via GET /api/data/:layerId → www.gtn-g.ch
+285,Cryosphere,NSIDC Glacier Data,45_nsidc_glacier_data,YES,Direct proxy via GET /api/data/:layerId → nsidc.org
+286,Cryosphere,TSP,45_tsp,YES,Direct proxy via GET /api/data/:layerId → gtnp.arcticportal.org
+287,Cryosphere,DUE Permafrost,45_due_permafrost,YES,Direct proxy via GET /api/data/:layerId → gtnp.arcticportal.org
+288,Ecology,Global Peatland DB,46_global_peatland_db,YES,Direct proxy via GET /api/data/:layerId → greifswaldmoor.de
+289,Ecology,PeatData,46_peatdata,YES,Direct proxy via GET /api/data/:layerId → datadryad.org
+290,Ecology,EIDC Peatland,46_eidc_peatland,YES,Direct proxy via GET /api/data/:layerId → eidc.ceh.ac.uk
+291,Ecology,Holocene Peatland DB,46_holocene_peatland_db,YES,Direct proxy via GET /api/data/:layerId → www2.cifor.org
+292,Ecology,RAMSAR,46_ramsar,YES,Direct proxy via GET /api/data/:layerId → rsis.ramsar.org
+293,Ecology,US NWI,46_us_nwi,YES,Direct proxy via GET /api/data/:layerId → www.fws.gov
+294,Ecology,GEDI Data,48_gedi_data,YES,Direct proxy via GET /api/data/:layerId → daac.ornl.gov
+295,Ecology,ICESat-2 Biomass,48_icesat_2_biomass,YES,Direct proxy via GET /api/data/:layerId → ceos.org
+296,Ecology,ICESat-2 Data,48_icesat_2_data,YES,Direct proxy via GET /api/data/:layerId → icesat-2.gsfc.nasa.gov
+297,Ecology,GFW Data Portal,48_gfw_data_portal,YES,Direct proxy via GET /api/data/:layerId → data.globalforestwatch.org
+298,Ecology,Rainfor,48_rainfor,YES,Direct proxy via GET /api/data/:layerId → www.rainfor.org
+299,Ecology,ForestPlots.net,48_forestplots_net,YES,Direct proxy via GET /api/data/:layerId → www.forestplots.net
+300,Geology,EarthChem Portal,49_earthchem_portal,YES,Direct proxy via GET /api/data/:layerId → www.earthchem.org
+301,Geology,PetDB,49_petdb,YES,Direct proxy via GET /api/data/:layerId → www.earthchem.org
+302,Geology,GEOROC,49_georoc,YES,Direct proxy via GET /api/data/:layerId → georoc.mpch-mainz.gwdg.de
+303,Geology,GeoReM,49_georem,YES,Direct proxy via GET /api/data/:layerId → georem.mpch-mainz.gwdg.de
+304,Geology,Deep Lithosphere Dataset,49_deep_lithosphere_dataset,YES,Direct proxy via GET /api/data/:layerId → www.earthchem.org
+305,Geology,DARWIN,49_darwin,YES,Direct proxy via GET /api/data/:layerId → www.earthchem.org
+306,Geology,PANGAEA Geochemistry,49_pangaea_geochemistry,YES,Direct proxy via GET /api/data/:layerId → www.pangaea.de
+307,bathymetry_pt,EMODnet Bathymetry (Points),50_emodnet_bathymetry_pt,YES,Direct proxy via GET /api/data/:layerId → emodnet.ec.europa.eu
+308,Ocean,GEBCO Grid,50_gebco,YES (client-side),Tile layer loaded directly by CesiumJS from wms.gebco.net
+309,Ocean,EMODnet Bathymetry,50_emodnet_bathymetry,YES (client-side),Tile layer loaded directly by CesiumJS from ows.emodnet-bathymetry.eu
+310,Ocean,EMODnet Chemistry,50_emodnet_chemistry,YES (client-side),Tile layer loaded directly by CesiumJS from ows.emodnet-chemistry.eu
+311,Ocean,GlobColour Chlorophyll,50_globcolour,YES (client-side),Tile layer loaded directly by CesiumJS from hermes.acri.fr
+312,Geology,InterRidge Vents,51_interridge_vents,YES,Direct proxy via GET /api/data/:layerId → vents-data.interridge.org
+313,Geology,InterRidge V3.4,51_interridge_v3_4,YES,Direct proxy via GET /api/data/:layerId → doi.pangaea.de
+314,Geology,GROTP,51_grotp,YES,Direct proxy via GET /api/data/:layerId → geothermal.org
+315,Geology,NREL Geothermal,51_nrel_geothermal,YES,Direct proxy via GET /api/data/:layerId → www.nrel.gov
+316,Geology,CRUST1.0,52_crust1_0,YES,Direct proxy via GET /api/data/:layerId → igppweb.ucsd.edu
+317,Geology,CRUST2.0,52_crust2_0,YES,Direct proxy via GET /api/data/:layerId → igppweb.ucsd.edu
+318,Geology,EIGEN-6C4,52_eigen_6c4,YES,Direct proxy via GET /api/data/:layerId → icgem.gfz-potsdam.de
+319,Geology,XGM2019,52_xgm2019,YES,Direct proxy via GET /api/data/:layerId → icgem.gfz-potsdam.de
+320,Geology,ICGEM,52_icgem,YES,Direct proxy via GET /api/data/:layerId → icgem.gfz-potsdam.de
+321,Geology,EMGeo,52_emgeo,YES,Direct proxy via GET /api/data/:layerId → emgeo.org
+322,Geology,MTNet,52_mtnet,YES,Direct proxy via GET /api/data/:layerId → www.mtnet.info
+323,Hazards,GLOFAS,53_glofas,YES,Direct proxy via GET /api/data/:layerId → www.globalfloods.eu
+324,Hazards,EFAS,53_efas,YES,Direct proxy via GET /api/data/:layerId → www.efas.eu
+325,Hazards,ADCIRC,53_adcirc,YES,Direct proxy via GET /api/data/:layerId → adcirc.org
+326,Hazards,SLOSH Display,53_slosh_display,YES,Direct proxy via GET /api/data/:layerId → www.nhc.noaa.gov
+327,Hazards,HRRR-Smoke,53_hrrr_smoke,YES,Direct proxy via GET /api/data/:layerId → rapidrefresh.noaa.gov
+328,Hazards,BehavePlus,53_behaveplus,YES,Direct proxy via GET /api/data/:layerId → www.frames.gov
+329,Weather,NOAA CPC,57_noaa_cpc,YES,Direct proxy via GET /api/data/:layerId → www.cpc.ncep.noaa.gov
+330,Advanced,WHYMAP,59_whymap,YES,Direct proxy via GET /api/data/:layerId → www.whymap.org
+331,Advanced,IGRAC,59_igrac,YES,Direct proxy via GET /api/data/:layerId → www.un-igrac.org
+332,Advanced,IGRAC Portal,59_igrac_portal,YES,Direct proxy via GET /api/data/:layerId → ggis.un-igrac.org
+333,Advanced,USGS Groundwater Data,59_usgs_groundwater_data,YES,Direct proxy via GET /api/data/:layerId → waterdata.usgs.gov
+334,Advanced,USGS Groundwater,60_usgs_groundwater,YES,Direct proxy via GET /api/data/:layerId → waterdata.usgs.gov
+335,Geology,SuperMAG Data,62_supermag_data,YES,Direct proxy via GET /api/data/:layerId → supermag.jhuapl.edu
+336,Geology,BGS Geomagnetism,62_bgs_geomagnetism,YES,Direct proxy via GET /api/data/:layerId → www.bgs.ac.uk
+337,Geology,GFZ Geomagnetism,62_gfz_geomagnetism,YES,Direct proxy via GET /api/data/:layerId → www.gfz-potsdam.de
+338,Geology,LISN,62_lisn,YES,Direct proxy via GET /api/data/:layerId → lisn.igp.gob.pe
+339,Ecology,SRDB,63_srdb,YES,Direct proxy via GET /api/data/:layerId → github.com
+340,Ecology,AmeriFlux BASE,63_ameriflux_base,YES,Direct proxy via GET /api/data/:layerId → ameriflux.lbl.gov
+341,Ecology,NEON Soil Data,63_neon_soil_data,YES,Direct proxy via GET /api/data/:layerId → data.neonscience.org
+342,Ecology,LTER Soil Carbon,63_lter_soil_carbon,YES,Direct proxy via GET /api/data/:layerId → lternet.edu
+343,Ecology,SMAP Soil Moisture,63_smap_soil_moisture,YES,Direct proxy via GET /api/data/:layerId → smap.jpl.nasa.gov
+344,Ecology,SMOS,63_smos,YES,Direct proxy via GET /api/data/:layerId → www.cesbio.cnrs.fr
+345,Ecology,ASCAT Soil Moisture,63_ascat_soil_moisture,YES,Direct proxy via GET /api/data/:layerId → hsaf.meteoam.it
+346,Weather,NEXRAD Level-II,64_nexrad_level_ii,YES,Direct proxy via GET /api/data/:layerId → registry.opendata.aws
+347,Advanced,ILRS Data,66_ilrs_data,YES,Direct proxy via GET /api/data/:layerId → ilrs.gsfc.nasa.gov
+348,Advanced,IVS Data,66_ivs_data,YES,Direct proxy via GET /api/data/:layerId → ivscc.gsfc.nasa.gov
+349,Advanced,BKG Data Center,66_bkg_data_center,YES,Direct proxy via GET /api/data/:layerId → igs.bkg.bund.de
+350,Advanced,GA Data Center,66_ga_data_center,YES,Direct proxy via GET /api/data/:layerId → www.ga.gov.au
+351,Advanced,GNSS-IR,67_gnss_ir,YES,Direct proxy via GET /api/data/:layerId → gnss-reflections.org
+352,Advanced,SMAP,67_smap,YES,Direct proxy via GET /api/data/:layerId → smap.jpl.nasa.gov
+353,Advanced,CYGNSS,67_cygnss,YES,Direct proxy via GET /api/data/:layerId → science.nasa.gov
+354,Advanced,CYGNSS Data,67_cygnss_data,YES,Direct proxy via GET /api/data/:layerId → podaac.jpl.nasa.gov
+355,Advanced,Spire Weather,67_spire_weather,YES,Direct proxy via GET /api/data/:layerId → spire.com
+356,Advanced,GeoOptics,67_geooptics,YES,Direct proxy via GET /api/data/:layerId → geooptics.com
+357,Advanced,PlanetiQ,67_planetiq,YES,Direct proxy via GET /api/data/:layerId → www.planetiq.com
+358,Advanced,ROM SAF,67_rom_saf,YES,Direct proxy via GET /api/data/:layerId → rom-saf.eumetsat.int
+359,Geology,BGI Gravimetry,68_bgi_gravimetry,YES,Direct proxy via GET /api/data/:layerId → bgi.obs-mip.fr
+360,Geology,NGA Geoid,68_nga_geoid,YES,Direct proxy via GET /api/data/:layerId → earth-info.nga.mil
+361,Geology,GFZ Gravity,68_gfz_gravity,YES,Direct proxy via GET /api/data/:layerId → www.gfz-potsdam.de
+362,Satellite,VIIRS Thermal Anomalies 375m,70_comet,YES (client-side),Tile layer loaded directly by CesiumJS from comet.nerc.ac.uk
+363,Satellite,MODIS Cloud Phase IR,70_comet_licsar,YES (client-side),Tile layer loaded directly by CesiumJS from comet.nerc.ac.uk
+364,Satellite,MODIS Sea Ice Daily,70_licsar,YES (client-side),Tile layer loaded directly by CesiumJS from comet.nerc.ac.uk
+365,Satellite,AIRS Carbon Monoxide,70_asf_sar_data,YES (client-side),Tile layer loaded directly by CesiumJS from asf.alaska.edu
+366,Satellite,MODIS NDSI Snow Cover,70_unavco_sar,YES (client-side),Tile layer loaded directly by CesiumJS from www.unavco.org
+367,Satellite,VIIRS Sea Surface Temp,70_squeesar,YES (client-side),Tile layer loaded directly by CesiumJS from www.tre-altamira.com
+368,Satellite,MODIS EVI 8-Day,70_mintpy,YES (client-side),Tile layer loaded directly by CesiumJS from github.com
+369,Advanced,PAGES 2k,71_pages_2k,YES,Direct proxy via GET /api/data/:layerId → pastglobalchanges.org
+370,Advanced,Iso2k,71_iso2k,YES,Direct proxy via GET /api/data/:layerId → www.ncei.noaa.gov
+371,Advanced,SWITCH,71_switch,YES,Direct proxy via GET /api/data/:layerId → www.hydrology.nl
+372,Advanced,LMWL Database,71_lmwl_database,YES,Direct proxy via GET /api/data/:layerId → www.hydrology.nl
+373,Advanced,Paleo Hydrology,71_paleo_hydrology,YES,Direct proxy via GET /api/data/:layerId → www.ncei.noaa.gov
+374,Seismic,Earthquakes,earthquakes,YES,Dedicated endpoint in server/index.ts
+375,Seismic,Tectonic Plates,tectonic,YES,Dedicated endpoint in server/index.ts
+376,Seismic,Seismic Wave Propagation,seismic_waves,YES,Group fallback (seismic) via GET /api/data/:layerId
+377,Seismic,Tsunami Propagation,tsunami,YES,Group fallback (seismic) via GET /api/data/:layerId
+378,Seismic,Seismic Heatmap,heatmap,YES,Group fallback (seismic) via GET /api/data/:layerId
+379,Aviation,Flight Tracks,flight_tracks,YES,Direct proxy via GET /api/data/:layerId → adsb.lol
+380,Aviation,Major Airports,airports,YES,Dedicated endpoint in server/index.ts
+381,Aviation,Airspace Boundaries,airspaces,YES,Dedicated endpoint in server/index.ts
+382,Space,Space Debris,space_debris,YES,Dedicated endpoint in server/index.ts
+383,Space,NASA Deep Space Network,nasa_dsn,YES,Dedicated endpoint in server/index.ts
+384,Space,Space Weather,space_weather,YES,Dedicated endpoint in server/index.ts
+385,Weather,Lightning Strikes,lightning_strikes,YES,Dedicated endpoint in server/index.ts
+386,Atmosphere,Polar Auroral Oval,aurora_oval,YES,Dedicated endpoint in server/index.ts
+387,Weather,Storm Forecast Cone,storm_forecast,YES,Group fallback (weather) via GET /api/data/:layerId
+388,Weather,Smoke Dispersion,smoke_dispersion,YES,Group fallback (weather) via GET /api/data/:layerId
+389,Weather,Wildfires,wildfires,YES,Dedicated endpoint in server/index.ts
+390,Weather,Severe Storms,severe_storms,YES,Dedicated endpoint in server/index.ts
+391,Weather,Volcanoes,volcanoes,YES,Dedicated endpoint in server/index.ts
+392,Hazards,Flood Reports,floods,YES,Dedicated endpoint in server/index.ts
+393,Atmosphere,Dust Storms,dust,YES,Group fallback (atmosphere) via GET /api/data/:layerId
+394,Cryosphere,Icebergs & Sea Ice,seaLakeIce,YES,Group fallback (cryosphere) via GET /api/data/:layerId
+395,Hazards,Disaster Alerts,disaster_alerts,YES,Dedicated endpoint in server/index.ts
+396,Hazards,Disasters Near Me,disaster_near_me,YES,Group fallback (hazards) via GET /api/data/:layerId
+397,Hazards,Flood Extent Mapping,flood_extent,YES (client-side),Tile layer loaded directly by CesiumJS
+398,Hazards,Landslides,landslides,YES,Dedicated endpoint in server/index.ts
+399,Advanced,Live Webcams,india_cctv,YES,Dedicated endpoint in server/index.ts
+400,Advanced,Intel Feed,intel_feed,NO,No API endpoint or group fallback
+401,Geospatial,Population Impact Zones,population_impact,YES,Group fallback (geospatial) via GET /api/data/:layerId
+402,Advanced,Undersea Fiber Cables,submarine_cables,YES,Dedicated endpoint in server/index.ts
+403,Ecology,Animal Migrations,animal_migrations,YES,Dedicated endpoint in server/index.ts
+404,Advanced,Electricity Grid,electricity_grid,YES,Dedicated endpoint in server/index.ts
+405,Satellite,VIIRS NOAA-20 True Color,nasa_gibs,YES (client-side),Tile layer loaded directly by CesiumJS from gibs.earthdata.nasa.gov
+406,Satellite,VIIRS Black Marble,night_lights,YES (client-side),Tile layer loaded directly by CesiumJS
+407,Atmosphere,Aerosol Index,aerosol_index,YES (client-side),Tile layer loaded directly by CesiumJS
+408,Atmosphere,Dust Score,dust_score,YES (client-side),Tile layer loaded directly by CesiumJS
+409,Cryosphere,Sea Ice,sea_ice,YES (client-side),Tile layer loaded directly by CesiumJS
+410,Atmosphere,Temperature Anomaly,temp_anomaly,YES (client-side),Tile layer loaded directly by CesiumJS
+411,Weather,Precipitation,precipitation,YES (client-side),Tile layer loaded directly by CesiumJS
+412,Weather,Wind Speed,wind,YES (client-side),Tile layer loaded directly by CesiumJS
+413,Weather,Pressure,pressure,YES (client-side),Tile layer loaded directly by CesiumJS
+414,Atmosphere,CO Index,co_index,YES (client-side),Tile layer loaded directly by CesiumJS
+415,Atmosphere,SO2 Index,so2_index,YES (client-side),Tile layer loaded directly by CesiumJS
+416,Ecology,Land Cover,land_cover,YES (client-side),Tile layer loaded directly by CesiumJS
+417,Geospatial,Digital Twin Buildings,dt_buildings,YES (client-side),Tile layer loaded directly by CesiumJS

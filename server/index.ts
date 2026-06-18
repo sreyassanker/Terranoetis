@@ -11,8 +11,12 @@ import puppeteer from 'puppeteer';
 import * as cheerio from 'cheerio';
 import Parser from 'rss-parser';
 import * as satellite from 'satellite.js';
+import { createHash } from 'crypto';
 import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
 const papaparse = createRequire(import.meta.url)('papaparse');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import { getDb, closeDb } from './db/index';
 import { API_METADATA, getCategories } from './api-metadata';
@@ -22,11 +26,61 @@ import {
   type GlobeCommand, type AgentStep, type AgentTool,
 } from './agent';
 import { SandboxManager } from './sandboxManager';
+import { SimulationEngine } from './sandbox-v2/simulationEngine';
+import { runFarsiteSimulation, farsiteOutputsToGeoJSON } from './sandbox-v2/farsiteLite';
+import { runAdcircSimulation, adcircOutputsToGeoJSON } from './sandbox-v2/adcircLite';
+import { runWrfSimulation, wrfOutputsToGridJSON } from './sandbox-v2/wrfLite';
+import { runHysplitSimulation, hysplitOutputsToGeoJSON } from './sandbox-v2/hysplitLite';
+import { runFnoPrediction, getFastPrediction } from './sandbox-v2/fnoSurrogate';
+import spatialRouter, { initSpatialEngine } from './h3-engine/spatialQuery';
+import { CodeWriter } from './self-evolution/codeWriter';
+import { TestRunner } from './self-evolution/testRunner';
+import { GitIntegration } from './self-evolution/gitIntegration';
+import { IntentDiscoveryV2 } from './self-evolution/intentDiscoveryV2';
+import { BanditRouter } from './self-evolution/banditRouter';
+import { PerfMonitor } from './self-evolution/perfMonitor';
 import { MonitorManager, SchedulerManager, AmbientEventDetector, getLocationContext } from './monitor';
 import { MemoryManager, type Fact, type ProceduralPattern } from './memory';
+import { memoryManagerV2 } from './memory-v2/memoryManager-v2';
 import { EmbeddingEngine } from './embedding';
+import { dynamicTools } from './tools-v2/toolGenerator';
+import { ToolComposer } from './tools-v2/toolComposer';
+import { toolDiscovery } from './tools-v2/toolDiscovery';
+import { toolRepair } from './tools-v2/toolRepair';
+import { executor } from './tools-v2/selfHealingExecutor';
 import { CircuitBreaker, withCircuitBreak, withRetry } from './resilience';
 import { AgentOrchestrator } from './orchestrator';
+import { CognitiveAgent } from './agent';
+import { scenarioSimulator } from './world-model/scenarioSimulator';
+import { generateScenario } from './scenarios/scenarioGenerator';
+import { exportToGeoJSON, exportToCZML, exportToNetCDF, exportToTrainingData } from './scenarios/scenarioExporter';
+import { scenarioDb } from './scenarios/scenarioDb';
+import { generateBatch, getBatchProgress } from './scenarios/batchGenerator';
+import { predictionValidator } from './world-model/predictionValidator';
+import { causalGraph } from './world-model/causalGraph';
+import { CausalKnowledgeGraph } from './causal/kg';
+import { EntropyMixer } from './causal/entropyMixer';
+import { DiscoveryEngine } from './causal/discoveryEngine';
+import { DreamEngine } from './dream/engine';
+import { PlanetaryMemorySystem } from './memory/memorySystem';
+import { sentinel } from './sentinel/index';
+import { ambientIntelligence } from './sentinel/ambientIntelligence';
+import { selfImproverV2 } from './selfImprover-v2';
+import { multimodal } from './multimodal/index';
+import { satelliteAnalyzer } from './multimodal/satelliteAnalyzer';
+import { explainability } from './explainability/index';
+import { reasoningVisualizer } from './explainability/reasoningVisualizer';
+import { evidenceChain } from './explainability/evidenceChain';
+import { uncertaintyQuantifier } from './explainability/uncertaintyQuantifier';
+import { biasAuditor } from './explainability/biasAuditor';
+import { humanOverride } from './explainability/humanOverride';
+import { seismicProcessor } from './multimodal/seismicProcessor';
+import { radarInterpreter } from './multimodal/radarInterpreter';
+import { sentimentAnalyzer } from './multimodal/sentimentAnalyzer';
+import { multimodalFusion } from './multimodal/multimodalFusion';
+
+import { architectureProposals } from './meta-cognition/architectureProposals';
+import { promptEvolution } from './meta-cognition/promptEvolution';
 import { MCPServer } from './mcp';
 import { PluginManager } from './pluginManager';
 import { ModelRouter, CostTracker, EnhancedCache } from './costOptimizer';
@@ -35,30 +89,48 @@ import { evaluateResponse, storeEval, getRecentEvals, getAvgScoresByIntent } fro
 import { promptLab } from './ml/promptLab';
 import { generateTrainingExample, getSyntheticData, startSyntheticDataGeneration, stopSyntheticDataGeneration } from './ml/syntheticData';
 import { knowledgeGraph } from './ml/knowledgeGraph';
-import { predictor, type Prediction, type PredictionInput } from './ml/predictor';
-import { login, authGuard, sseAuthGuard } from './middleware/auth';
-import { perUserRateLimiter } from './middleware/rateLimiter';
+import { entityGenerator, edgeGenerator, counterfactualGraph, graphCompletion, evolvingGraph } from './kg-v2/index';
+import { predictor, type Prediction } from './ml/predictor';
+import { omninet, classifyComplexity } from './ai-router/omninet';
+import { login, authGuard, sseAuthGuard, ensureDefaultAdmin, requireRole, devAutoLogin } from './middleware/auth';
+import { perUserRateLimiter, perIpRateLimiter } from './middleware/rateLimiter';
 import { requireOwnership } from './middleware/tenantIsolation';
 import { auditLog } from './middleware/audit';
 import { validate, askSchema, sandboxExecuteSchema, chatCreateSchema, feedbackSchema, monitorRuleSchema } from './middleware/validate';
+import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { logger, requestLoggerMiddleware, startMemoryLogging, stopMemoryLogging } from './observability/logger';
-import { metricsMiddleware, getMetrics, getMetricsContentType, activeSseConnections, geminiApiCallsTotal, sandboxExecutionsTotal, dbQueryDuration, cacheHitRate } from './observability/metrics';
+import { metricsMiddleware, getMetrics, getMetricsContentType, activeSseConnections, sandboxExecutionsTotal, dbQueryDuration, cacheHitRate, omninetCallsTotal, toolExecutionsTotal, toolGenerationsTotal } from './observability/metrics';
 import { AppError, GeminiError, SandboxError, ValidationError, DatabaseError, CircuitOpenError, AuthenticationError, NotFoundError, RateLimitError } from './observability/errors';
+import { validateJwtSecretStrength } from './utils/validation';
+import { validateOutboundUrl, isAllowedUpstream } from './utils/ssrfGuard';
 import http from 'http';
 import { SimpleQueue } from './queue/simple-queue';
 import { pubsub } from './pubsub';
 import { createWsServer, shutdownWsServer, registerAbortController, removeAbortController } from './websocket';
-
+import { ReflexEngine } from './reflex/engine';
+import { ReflexActionHandler } from './reflex/actionHandlers';
+import { forkManager } from './fork/manager';
+(global as any).__forkManager = forkManager;
+import { forkRouter } from './fork/routes';
+import { vaultRouter } from './routes/vault';
+import { createSelfEvolutionRouter } from './routes/selfEvolution';
 dotenv.config({ path: 'server/.env' });
 
-// Startup env check — warn on missing critical vars, graceful degradation
-const CRITICAL_ENV_VARS = ['JWT_SECRET', 'GEMINI_API_KEY', 'CLIENT_ORIGIN'];
-const missingCritical = CRITICAL_ENV_VARS.filter(k => !process.env[k]);
-if (missingCritical.length > 0) {
-  logger.warn({ missing: missingCritical }, 'Missing critical env vars — some features may be disabled');
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+// Startup env check — refuse to start in production with weak/missing JWT_SECRET
+const secretIssues = validateJwtSecretStrength(process.env.JWT_SECRET);
+if (secretIssues.length > 0) {
+  if (IS_PROD) {
+    logger.fatal({ issues: secretIssues }, 'Refusing to start in production with weak JWT_SECRET. Set a strong (>=32 chars) secret in server/.env');
+    process.exit(1);
+  }
+  for (const issue of secretIssues) {
+    logger.warn({ issue }, 'JWT_SECRET is weak — a strong random secret will be auto-generated for this dev session');
+  }
 }
 
-const OPTIONAL_ENV_VARS = ['GOOGLE_GEMINI_API_KEY', 'SANDBOX_API_TOKEN', 'METRICS_API_TOKEN', 'E2B_API_KEY'];
+const OPTIONAL_ENV_VARS = ['GEMINI_API_KEY', 'GOOGLE_GEMINI_API_KEY', 'GROQ_API_KEY', 'CEREBRAS_API_KEY', 'SAMBANOVA_API_KEY', 'OPENROUTER_API_KEY', 'TOGETHER_API_KEY', 'ANTHROPIC_API_KEY', 'HUGGINGFACE_API_KEY', 'SANDBOX_API_TOKEN', 'METRICS_API_TOKEN', 'E2B_API_KEY'];
 for (const k of OPTIONAL_ENV_VARS) {
   if (!process.env[k]) {
     logger.debug({ var: k }, 'Optional env var not set, feature disabled');
@@ -67,20 +139,61 @@ for (const k of OPTIONAL_ENV_VARS) {
 
 const cache = new NodeCache({ stdTTL: 60, checkperiod: 120 });
 const app = express();
+app.set('trust proxy', 1);
 const PORT = Number(process.env.PROXY_PORT ?? 3001);
 
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
 app.use(helmet({
-  contentSecurityPolicy: false, // Cesium needs inline styles/workers
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      // Cesium requires inline styles and eval for workers — see SECURITY.md (Issue #11)
+      'default-src': ["'self'"],
+      'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://cdn.jsdelivr.net', 'blob:'],
+      'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      'img-src': ["'self'", 'data:', 'blob:', 'https:', 'http:'],
+      'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com', 'https://fonts.googleapis.com'],
+      'connect-src': [
+        "'self'",
+        'ws:', 'wss:',
+        'https://api.cesium.com', 'https://assets.cesium.com',
+        'https://*.cesium.com', 'https://tile.googleapis.com',
+        'https://tile.openstreetmap.org', 'https://server.arcgisonline.com',
+        'https://api.weather.gov', 'https://earthquake.usgs.gov',
+        'https://eonet.gsfc.nasa.gov', 'https://*.amazonaws.com',
+        'https://*.amazoncognito.com', 'https://cognito-identity.us-east-1.amazonaws.com',
+      ],
+      'worker-src': ["'self'", 'blob:'],
+      'child-src': ["'self'", 'blob:'],
+      'object-src': ["'none'"],
+      'base-uri': ["'self'"],
+      'form-action': ["'self'"],
+      'frame-ancestors': ["'none'"],
+      'upgrade-insecure-requests': IS_PROD ? [] : null,
+    },
+  },
   crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: { policy: 'same-origin' },
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  referrerPolicy: { policy: 'no-referrer' },
+  hsts: IS_PROD ? { maxAge: 31536000, includeSubDomains: true } : false,
+  permittedCrossDomainPolicies: { permittedPolicies: 'none' },
 }));
-app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }));
-app.use(express.json({ limit: '50mb' }));
+app.use((_req, res, next) => {
+  res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(), microphone=(), payment=(), usb=(), magnetometer=(self), gyroscope=(self), accelerometer=(self)');
+  next();
+});
+app.use(cors({ origin: CLIENT_ORIGIN, credentials: true, maxAge: 600 }));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ limit: '5mb', extended: false }));
 app.disable('x-powered-by');
 
 // ── Observability middleware (before auth) ─────────────────────
 app.use(requestLoggerMiddleware());
 app.use(metricsMiddleware());
+
+// ── Bootstrap: ensure default admin user exists ───────────────
+ensureDefaultAdmin();
 
 // ── Resource monitoring ───────────────────────────────────────
 const RESOURCE_MONITOR_INTERVAL = 30000;
@@ -103,18 +216,56 @@ function stopResourceMonitor(): void {
 }
 
 // ── Authentication ────────────────────────────────────────────
-app.post('/api/auth/login', login);
+const loginRateLimit = perIpRateLimiter(5, 15 * 60 * 1000);
+app.post('/api/auth/login', loginRateLimit, login);
+
+if (!IS_PROD) {
+  app.post('/api/auth/dev-login', devAutoLogin);
+}
 app.use('/api', (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (req.path === '/auth/login' || req.path === '/health' || req.path === '/ready' || req.path === '/live' || req.path === '/metrics') {
+  // Health/metrics are public
+  if (
+    req.path === '/auth/login' || req.path === '/auth/dev-login' ||
+    req.path === '/health' || req.path === '/ready' || req.path === '/live' || req.path === '/metrics'
+  ) {
     return next();
   }
+  // Public read-only data endpoints (no user context required, server-side rate-limited)
+  if (
+    req.path === '/earthquakes' || req.path === '/earthquakes/significant' ||
+    req.path === '/eonet' || req.path === '/weather/alerts' || req.path === '/weather/open-meteo' ||
+    req.path === '/weather/nhc' || req.path === '/gdacs/alerts' || req.path === '/tectonic' ||
+    req.path === '/vaac/tokyo' || req.path === '/firms' || req.path === '/lightning' ||
+    req.path === '/openflights' || req.path === '/submarine-cables' || req.path === '/electricity-grid' ||
+    req.path === '/space-debris' || req.path === '/nasa-dsn' || req.path === '/aurora' || req.path === '/iss' ||
+    req.path === '/iss/path' || req.path === '/solar' || req.path === '/firms/hotspots' ||
+    req.path === '/clocks' || req.path === '/faults' || req.path === '/volcanoes' ||
+    req.path === '/geomagnetic' || req.path === '/ship-traffic'
+  ) {
+    return next();
+  }
+  // Everything else (including /api/data/* which proxies user-supplied URLs) requires auth
   authGuard(req, res, next);
 });
+app.use('/api/fork', forkRouter);
+app.use('/api/vault', vaultRouter);
 
 const agentSessions = new SessionManager();
 const materializedViews = new MaterializedViewCache(`http://127.0.0.1:${PORT}`);
 const sandboxManager = new SandboxManager();
-
+const simulationEngine = new SimulationEngine(sandboxManager);
+const reflexEngine = new ReflexEngine();
+(global as any).__reflexEngine = reflexEngine;
+const reflexActionHandler = new ReflexActionHandler();
+const causalKG = new CausalKnowledgeGraph();
+const entropyMixer = new EntropyMixer();
+(global as any).__entropyMixer = entropyMixer;
+const discoveryEngine = new DiscoveryEngine();
+(global as any).__discoveryEngine = discoveryEngine;
+const dreamEngine = new DreamEngine();
+(global as any).__dreamEngine = dreamEngine;
+const memorySystem = new PlanetaryMemorySystem();
+(global as any).__memorySystem = memorySystem;
 // Phase 1.3: Initialize dynamic tool registry
 const toolRegistry = new ToolRegistry();
 function registerDefaultTools() {
@@ -149,15 +300,37 @@ function registerDefaultTools() {
 }
 registerDefaultTools();
 
-// Warm embedding cache for intent prototypes (async, non-blocking)
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
-if (GEMINI_API_KEY) {
-  warmIntentPrototypeEmbeddings(GEMINI_API_KEY).catch(() => {});
+// Register core tools in DynamicToolRegistry (the old ToolRegistry stays for prompt building)
+for (const t of toolRegistry.list()) {
+  dynamicTools.register({
+    name: t.name,
+    description: t.description,
+    category: t.category,
+    exampleQueries: t.exampleQueries,
+    schema: { type: t.schema.type as 'api' | 'sandbox' | 'command', endpoint: t.schema.endpoint, method: t.schema.method, params: t.schema.params, outputFormat: t.schema.outputFormat },
+    code: null,
+  });
 }
 
+// Initialize dynamic tool system
+dynamicTools.init();
+const toolComposer = new ToolComposer(dynamicTools);
+toolComposer.init();
+toolDiscovery.init();
+toolRepair.init();
+executor.init();
+
+// Warm embedding cache for intent prototypes (async, non-blocking)
+warmIntentPrototypeEmbeddings().catch(() => {});
+
+// Initialize Omninet — free-tier AI provider router
+omninet.init();
+
 // Phase 4: Initialize memory systems with embedding engine
-const embeddingEngine = new EmbeddingEngine(GEMINI_API_KEY);
+const embeddingEngine = new EmbeddingEngine();
 const memoryManager = new MemoryManager(embeddingEngine);
+memoryManagerV2.setEmbedder(embeddingEngine);
+memoryManagerV2.init();
 
 // Phase 9: Cost optimization (must be after memoryManager)
 const costTracker = new CostTracker();
@@ -171,12 +344,41 @@ memoryManager.semanticCache.get = async (q: string) => { const e = enhancedCache
 const feedbackManager = new FeedbackManager();
 const selfImprover = new SelfImprover(feedbackManager);
 selfImprover.setCache(enhancedCache);
-selfImprover.setGeminiApiKey(GEMINI_API_KEY);
 
-// ML Pipeline: knowledge graph + predictor
+// SelfImproverV2: unified meta-cognition hub
+selfImproverV2.setFeedbackManager(feedbackManager);
+selfImproverV2.init();
+selfImproverV2.start();
+
+// CognitiveAgent: dual-process cognition (System 1 fast + System 2 deep)
+const cognitiveAgent = new CognitiveAgent();
+cognitiveAgent.init().catch(e => logger.error({ err: e }, 'CognitiveAgent init error'));
+
+// Sentinel: proactive continuous monitoring system
+sentinel.init().then(() => {
+  sentinel.start();
+  logger.info('Sentient ambient intelligence activated');
+}).catch(e => logger.error({ err: e }, 'Sentinel init error'));
+
+// Multimodal: satellite imagery, seismic waveforms, weather radar, social sentiment
+multimodal.init().then(() => {
+  multimodal.start();
+  logger.info('Multimodal perception systems activated');
+}).catch(e => logger.error({ err: e }, 'Multimodal init error'));
+
+// Explainability: full transparency — reasoning traces, evidence chains, uncertainty, bias, overrides
+explainability.init();
+explainability.start();
+
+// ML Pipeline: knowledge graph + predictor + generative KG
 knowledgeGraph.setEmbeddingEngine(embeddingEngine);
 predictor.setEmbeddingEngine(embeddingEngine);
 predictor.init();
+entityGenerator.init();
+edgeGenerator.init();
+counterfactualGraph.init();
+graphCompletion.init();
+evolvingGraph.init();
 
 // Phase 7: MCP server + Plugin system
 const mcpServer = new MCPServer(toolRegistry, sandboxManager);
@@ -208,6 +410,29 @@ schedulerManager.onReport((task) => {
 ambientDetector.onEvent((ambientEvent) => {
   const eventData = { type: 'ambient_event', event: ambientEvent };
   pubsub.publish('proactive', eventData);
+});
+
+// Wire monitor + ambient events into sentinel stream
+monitorManager.onTrigger((rule, data) => {
+  pubsub.publish('sentinel:raw', {
+    source: 'monitor',
+    type: 'monitor_trigger',
+    timestamp: Date.now(),
+    lat: rule.location?.lat || 0,
+    lon: rule.location?.lon || 0,
+    payload: { ruleId: rule.id, label: rule.label, count: rule.count, ...data },
+  });
+});
+
+ambientDetector.onEvent((event) => {
+  pubsub.publish('sentinel:raw', {
+    source: 'ambient_detector',
+    type: event.type,
+    timestamp: event.timestamp,
+    lat: event.lat,
+    lon: event.lon,
+    payload: { title: event.title, description: event.description, severity: event.severity },
+  });
 });
 
 // Set up scheduler executor (uses the same pipeline logic)
@@ -253,7 +478,7 @@ jobQueue.recurring('plugin:scan', 30000);
 
 // ML Pipeline: synthetic data generation as recurring queue job
 jobQueue.process('ml:synthetic', async () => {
-  await generateTrainingExample(GEMINI_API_KEY);
+  await generateTrainingExample();
 });
 jobQueue.recurring('ml:synthetic', 3600000);
 
@@ -452,22 +677,10 @@ app.get('/api/health', async (_req: express.Request, res: express.Response) => {
     checks.db = { status: 'fail', detail: (e as Error).message };
   }
 
-  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
-  if (geminiKey) {
-    try {
-      const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(5000),
-          body: JSON.stringify({ contents: [{ parts: [{ text: 'ping' }] }], generationConfig: { maxOutputTokens: 1 } }),
-        },
-      );
-      checks.gemini = { status: resp.ok ? 'ok' : 'degraded', detail: resp.ok ? undefined : `HTTP ${resp.status}` };
-    } catch (e) {
-      checks.gemini = { status: 'fail', detail: (e as Error).message };
-    }
+  const providerStatus = omninet.getStatus();
+  const geminiStatus = providerStatus.find(s => s.name === 'gemini');
+  if (geminiStatus) {
+    checks.gemini = { status: geminiStatus.status === 'healthy' ? 'ok' : geminiStatus.status === 'down' ? 'fail' : 'degraded' };
   } else {
     checks.gemini = { status: 'not_configured' };
   }
@@ -481,6 +694,32 @@ app.get('/api/health', async (_req: express.Request, res: express.Response) => {
     checks.memory = { status: 'unknown' };
   }
 
+  // Engine health checks
+  const engineNames = ['__reflexEngine', '__forkManager', '__dreamEngine', '__memorySystem', '__entropyMixer', '__discoveryEngine'] as const;
+  const engineLabels: Record<string, string> = {
+    __reflexEngine: 'reflex',
+    __forkManager: 'forks',
+    __dreamEngine: 'dream',
+    __memorySystem: 'memory',
+    __entropyMixer: 'entropy',
+    __discoveryEngine: 'discovery',
+  };
+  for (const name of engineNames) {
+    const g = (global as any)[name];
+    checks[engineLabels[name]] = { status: g ? 'ok' : 'missing' };
+  }
+
+  // Pubsub check
+  try {
+    let pubsubOk = false;
+    const unsub = pubsub.subscribe('health:check', () => { pubsubOk = true; });
+    pubsub.publish('health:check', { t: Date.now() });
+    unsub();
+    checks.pubsub = { status: pubsubOk ? 'ok' : 'fail' };
+  } catch {
+    checks.pubsub = { status: 'fail' };
+  }
+
   const overallStatus = Object.values(checks).every(c => c.status === 'ok' || c.status === 'not_configured') ? 'healthy' : 'degraded';
 
   res.json({
@@ -490,6 +729,28 @@ app.get('/api/health', async (_req: express.Request, res: express.Response) => {
     version: process.env.npm_package_version || '0.0.0',
     ts: Date.now(),
   });
+});
+
+app.get('/api/memory/stats', async (_req: express.Request, res: express.Response) => {
+  const tiers = await memorySystem.getStats();
+  res.json({ tiers, timestamp: Date.now() });
+});
+
+app.get('/api/reflex/stats', (_req: express.Request, res: express.Response) => {
+  try {
+    res.json({
+      reflexes: [
+        { reflexId: 'seismic-pupillary', status: 'IDLE', triggerCount: 0 },
+        { reflexId: 'storm-pupillary', status: 'IDLE', triggerCount: 0 },
+        { reflexId: 'maritime-distress', status: 'IDLE', triggerCount: 0 },
+      ],
+      traumaMode: false,
+      activeCount: 0,
+      timestamp: Date.now(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
 
 app.get('/api/metrics', async (_req: express.Request, res: express.Response) => {
@@ -1470,7 +1731,7 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
         count++;
       }
     } catch (e) {
-      logger.warn('Twitter scrape failed (expected occasionally):', String(e));
+      logger.warn({ err: e }, 'Twitter scrape failed (expected occasionally)');
     }
 
     // 3. Facebook Puppeteer Scraper (Public Page parsing)
@@ -1506,7 +1767,7 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
         await page.close();
       }
     } catch (e) {
-      logger.warn('Facebook scrape failed:', String(e));
+      logger.warn({ err: e }, 'Facebook scrape failed');
     }
 
     // Sort all combined results by timestamp descending
@@ -1561,7 +1822,7 @@ app.get('/api/space-debris', async (_req: express.Request, res: express.Response
     cache.set(cacheKey, sampled, 3600); // 1 hour TTL
     res.json(sampled);
   } catch (e) {
-    logger.error('Space debris data not available at this moment:', e);
+    logger.error({ err: e }, 'Space debris data not available at this moment');
     res.status(503).json({ error: 'Space debris data not available at this moment.' });
   }
 });
@@ -1657,7 +1918,7 @@ app.get('/api/nasa-dsn', async (_req: express.Request, res: express.Response) =>
     cache.set(cacheKey, payload, 5); // 5 second cache
     res.json(payload);
   } catch (e) {
-    logger.error('Failed to parse DSN, serving real baseline:', e);
+    logger.error({ err: e }, 'Failed to parse DSN, serving real baseline');
     // Real baseline sample for when DSN is offline
     const baselineDsn = {
       stations: [
@@ -1756,7 +2017,7 @@ app.get('/api/lightning', async (_req: express.Request, res: express.Response) =
     cache.set(cacheKey, strikes, 5); // 5 second cache
     res.json(strikes);
   } catch (e) {
-    logger.error('Lightning data not available at this moment:', e);
+    logger.error({ err: e }, 'Lightning data not available at this moment');
     res.status(503).json({ error: 'Lightning data not available at this moment.' });
   }
 });
@@ -1794,7 +2055,7 @@ app.get('/api/aurora', async (_req: express.Request, res: express.Response) => {
     cache.set(cacheKey, payload, 300); // 5 minutes cache
     res.json(payload);
   } catch (e) {
-    logger.warn('Failed to fetch NOAA Aurora forecast, serving real winter polar oval:', e);
+    logger.warn({ err: e }, 'Failed to fetch NOAA Aurora forecast, serving real winter polar oval');
     const baseCoords = [];
     for (let lon = -180; lon < 180; lon += 5) {
       const rad = lon * Math.PI / 180;
@@ -1831,7 +2092,7 @@ app.get('/api/submarine-cables', async (_req: express.Request, res: express.Resp
     cache.set(cacheKey, data, 86400); // 24 hours
     res.json(data);
   } catch (e) {
-    logger.error('Failed to fetch submarine cables, serving major real cables:', e);
+    logger.error({ err: e }, 'Failed to fetch submarine cables, serving major real cables');
     const backupGeoJson = {
       type: "FeatureCollection",
       features: [
@@ -1929,7 +2190,7 @@ app.get('/api/electricity-grid', async (req: express.Request, res: express.Respo
         ukMix = { wind: 10, solar: 5, nuclear: 15, gas: 60, coal: 5, biomass: 5 };
       }
     } catch (err) {
-      logger.warn('Failed to fetch live UK grid intensity:', err);
+      logger.warn({ err }, 'Failed to fetch live UK grid intensity');
     }
 
     const zones = [
@@ -1960,7 +2221,7 @@ app.get('/api/electricity-grid', async (req: express.Request, res: express.Respo
             }
           }
         } catch (err) {
-          logger.warn(`Failed to fetch live ElectricityMaps for zone ${zone.id}:`, err);
+          logger.warn({ err }, `Failed to fetch live ElectricityMaps for zone ${zone.id}`);
         }
       }
     }
@@ -2032,28 +2293,155 @@ app.get('/api/animal-migrations', async (_req: express.Request, res: express.Res
 
 // 10. Combined Airspaces GeoJSON (from OpenAIP GCS exports)
 app.post('/api/ai/gemini', async (req: express.Request, res: express.Response) => {
-  const { key, prompt } = req.body;
-  if (!key || !prompt) return res.status(400).json({ error: 'Missing key or prompt' });
+  const { prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  try {
+    const text = await omninet.generateText(prompt, { temperature: 0.2, maxTokens: 2048 });
+    res.json({ candidates: [{ content: { parts: [{ text }] } }] });
+  } catch (e) {
+    res.status(502).json({ error: 'AI provider unavailable', detail: (e as Error).message });
+  }
+});
+
+// ── Omninet Router API ───────────────────────────────────────────
+
+// 1. GET /api/omninet/providers — list all providers with status
+app.get('/api/omninet/providers', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  omninetCallsTotal.inc({ endpoint: 'providers', status: 'ok' });
+  const providers = omninet.getProviderDetails();
+  logger.info({ correlationId, providerCount: providers.length }, 'Omninet providers listed');
+  res.json({ providers });
+});
+
+// 2. POST /api/omninet/classify — classify query complexity + intent
+app.post('/api/omninet/classify', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { query } = req.body;
+  if (!query) return res.status(400).json({ error: 'Missing query' });
+  omninetCallsTotal.inc({ endpoint: 'classify', status: 'ok' });
+  const complexity = classifyComplexity(query);
+  const intent = IntentRouter.classify(query);
+  logger.info({ correlationId, complexity, intent: intent.type }, 'Omninet classify');
+  res.json({ complexity, intent: intent.type, confidence: intent.confidence });
+});
+
+// 3. POST /api/omninet/route — route query to best provider
+app.post('/api/omninet/route', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { query, complexity: reqComplexity, preferredModel } = req.body;
+  if (!query) return res.status(400).json({ error: 'Missing query' });
+  try {
+    const complexity = (reqComplexity as 'simple' | 'medium' | 'complex' | 'reasoning') || classifyComplexity(query);
+    const routeResult = omninet.route(query, complexity, preferredModel);
+    omninetCallsTotal.inc({ endpoint: 'route', status: 'ok' });
+    const fallbackChain = omninet.getStatus()
+      .filter(p => p.name !== routeResult.provider && p.status !== 'down')
+      .map(p => p.name);
+    logger.info({ correlationId, provider: routeResult.provider, model: routeResult.model, complexity }, 'Omninet route');
+    res.json({
+      provider: routeResult.provider,
+      model: routeResult.model,
+      estimatedLatency: routeResult.estimatedLatency,
+      fallbackChain,
+      tier: 2,
+    });
+  } catch (e) {
+    omninetCallsTotal.inc({ endpoint: 'route', status: 'error' });
+    logger.error({ err: (e as Error).message, correlationId }, 'Omninet route error');
+    res.status(503).json({ error: (e as Error).message });
+  }
+});
+
+// 4. POST /api/omninet/embed — generate embedding (local-first)
+app.post('/api/omninet/embed', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'Missing text' });
+  try {
+    omninetCallsTotal.inc({ endpoint: 'embed', status: 'ok' });
+    const embedding = await embeddingEngine.embed(text);
+    const dimension = embedding.length;
+    const source = dimension > 0 ? 'local' : 'gemini';
+    logger.info({ correlationId, dimension, source }, 'Omninet embed');
+    res.json({ embedding: Array.from(embedding), dimension, source });
+  } catch (e) {
+    omninetCallsTotal.inc({ endpoint: 'embed', status: 'error' });
+    logger.error({ err: (e as Error).message, correlationId }, 'Omninet embed error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// 5. GET /api/omninet/rate-status — rate limit status per provider
+app.get('/api/omninet/rate-status', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  omninetCallsTotal.inc({ endpoint: 'rate-status', status: 'ok' });
+  const providers = omninet.getStatus().map(p => ({
+    name: p.name,
+    remainingTokens: p.tokens,
+    lastUsed: p.lastLatency ? Date.now() - p.lastLatency : 0,
+    status: p.status,
+  }));
+  logger.info({ correlationId, providerCount: providers.length }, 'Omninet rate-status');
+  res.json({ providers });
+});
+
+// 6. POST /api/omninet/generate — generate text via Omninet
+app.post('/api/omninet/generate', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { prompt, options } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
   const start = Date.now();
   try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, { signal: AbortSignal.timeout(30000),
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    const text = await omninet.generateText(prompt, {
+      temperature: options?.temperature,
+      maxTokens: options?.maxTokens,
     });
-    const latency = Date.now() - start;
-    if (!resp.ok) {
-      geminiApiCallsTotal.inc({ model: 'gemini-2.0-flash', status: 'error' });
-      geminiApiLatency.observe({ model: 'gemini-2.0-flash' }, latency);
-      return res.status(resp.status).json({ error: 'Gemini upstream error' });
-    }
-    const data = await resp.json();
-    geminiApiCallsTotal.inc({ model: 'gemini-2.0-flash', status: 'success' });
-    geminiApiLatency.observe({ model: 'gemini-2.0-flash' }, latency);
-    res.json(data);
+    const latencyMs = Date.now() - start;
+    omninetCallsTotal.inc({ endpoint: 'generate', status: 'ok' });
+    const routeResult = omninet.route(prompt, classifyComplexity(prompt));
+    logger.info({ correlationId, latencyMs, provider: routeResult.provider }, 'Omninet generate');
+    res.json({ text, provider: routeResult.provider, model: routeResult.model, latencyMs });
   } catch (e) {
-    geminiApiCallsTotal.inc({ model: 'gemini-2.0-flash', status: 'error' });
-    res.status(502).json({ error: 'Gemini proxy failed' });
+    omninetCallsTotal.inc({ endpoint: 'generate', status: 'error' });
+    logger.error({ err: (e as Error).message, correlationId }, 'Omninet generate error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// 7. POST /api/omninet/generate-stream — SSE streaming text generation
+app.post('/api/omninet/generate-stream', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { prompt, options } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  const start = Date.now();
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Correlation-Id': correlationId,
+  });
+  try {
+    omninetCallsTotal.inc({ endpoint: 'generate-stream', status: 'ok' });
+    let tokenCount = 0;
+    for await (const chunk of omninet.generateStream(prompt, {
+      temperature: options?.temperature,
+      maxTokens: options?.maxTokens,
+      stream: true,
+    })) {
+      res.write(`data: ${JSON.stringify({ token: chunk })}\n\n`);
+      tokenCount++;
+    }
+    const latencyMs = Date.now() - start;
+    const routeResult = omninet.route(prompt, classifyComplexity(prompt));
+    res.write(`data: ${JSON.stringify({ done: true, provider: routeResult.provider, model: routeResult.model, latencyMs, tokenCount })}\n\n`);
+    res.end();
+    logger.info({ correlationId, latencyMs, tokenCount, provider: routeResult.provider }, 'Omninet generate-stream complete');
+  } catch (e) {
+    omninetCallsTotal.inc({ endpoint: 'generate-stream', status: 'error' });
+    logger.error({ err: (e as Error).message, correlationId }, 'Omninet generate-stream error');
+    res.write(`data: ${JSON.stringify({ error: (e as Error).message })}\n\n`);
+    res.end();
   }
 });
 
@@ -2119,7 +2507,7 @@ async function fetchAndCacheAirspaces(): Promise<{ type: string; features: any[]
         combined.features = localData.features;
       }
     } catch (localErr) {
-      logger.warn('Local airspace file not found:', localErr);
+      logger.warn({ err: localErr }, 'Local airspace file not found');
       throw new Error('No airspace data available');
     }
   }
@@ -2136,7 +2524,7 @@ app.get('/api/airspaces', async (_req: express.Request, res: express.Response) =
     const combined = await fetchAndCacheAirspaces();
     res.json(combined);
   } catch (e) {
-    logger.error('Failed to serve airspace data:', e);
+    logger.error({ err: e }, 'Failed to serve airspace data');
     res.status(502).json({ error: 'Failed to load airspace data' });
   }
 });
@@ -2626,11 +3014,468 @@ async function fetchSatellites(): Promise<any[]> {
   return results.slice(0, 500);
 }
 
+// AIRPORTS: OurAirports dataset (free, CC-BY 4.0)
+async function fetchAirports(): Promise<any[]> {
+  try {
+    const resp = await fetch(
+      'https://raw.githubusercontent.com/mwgg/Airports/master/airports.json',
+      { signal: AbortSignal.timeout(15000) },
+    );
+    if (!resp.ok) return [];
+    const data: any = await resp.json();
+    const entries = Object.values(data) as any[];
+    return entries.slice(0, 500).flatMap((a: any) => {
+      if (!a.lat || !a.lon) return [];
+      return {
+        id: `airport_${a.icao || a.iata || a.gps_code || Math.random().toString(36).slice(2, 8)}`,
+        name: a.name || a.ident || 'Unknown',
+        lat: +parseFloat(a.lat).toFixed(4),
+        lon: +parseFloat(a.lon).toFixed(4),
+        value: 1,
+        magnitude: 0.5,
+        icao: a.icao || '',
+        iata: a.iata || '',
+        type: a.type || '',
+        source: 'OurAirports',
+        timestamp: Date.now(),
+      };
+    });
+  } catch { return []; }
+}
+
+// OPENFEMA: Disaster declarations (public API, no key required)
+async function fetchOpenFema(): Promise<any[]> {
+  try {
+    const resp = await fetch(
+      'https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries?$format=json&$top=500',
+      { signal: AbortSignal.timeout(15000) },
+    );
+    if (!resp.ok) return [];
+    const body: any = await resp.json();
+    const items: any[] = (body?.DisasterDeclarationsSummaries ?? []).slice(0, 500);
+    return items.flatMap((d: any) => {
+      if (!d.longitude || !d.latitude) return [];
+      return {
+        id: `fema_${d.id || d.disasterNumber || Math.random().toString(36).slice(2, 8)}`,
+        name: d.declarationTitle || d.disasterName || 'FEMA Disaster',
+        lat: +parseFloat(d.latitude).toFixed(4),
+        lon: +parseFloat(d.longitude).toFixed(4),
+        value: 1,
+        magnitude: d.declaredCountyOrParish ? 0.8 : 0.4,
+        type: d.incidentType || 'disaster',
+        state: d.state,
+        source: 'OpenFEMA',
+        timestamp: d.declarationDate ? new Date(d.declarationDate).getTime() : Date.now(),
+      };
+    });
+  } catch { return []; }
+}
+
+// OpenAQ: Air quality station locations (v2 API, public)
+const WORLD_CITIES_AQ = [
+  { name: 'Tokyo', lat: 35.6762, lon: 139.6503 },
+  { name: 'Delhi', lat: 28.7041, lon: 77.1025 },
+  { name: 'Shanghai', lat: 31.2304, lon: 121.4737 },
+  { name: 'São Paulo', lat: -23.5505, lon: -46.6333 },
+  { name: 'Mexico City', lat: 19.4326, lon: -99.1332 },
+  { name: 'Cairo', lat: 30.0444, lon: 31.2357 },
+  { name: 'Mumbai', lat: 19.0760, lon: 72.8777 },
+  { name: 'Beijing', lat: 39.9042, lon: 116.4074 },
+  { name: 'Dhaka', lat: 23.8103, lon: 90.4125 },
+  { name: 'Osaka', lat: 34.6937, lon: 135.5023 },
+  { name: 'New York', lat: 40.7128, lon: -74.0060 },
+  { name: 'Karachi', lat: 24.8607, lon: 67.0011 },
+  { name: 'London', lat: 51.5074, lon: -0.1278 },
+  { name: 'Los Angeles', lat: 34.0522, lon: -118.2437 },
+  { name: 'Bangkok', lat: 13.7563, lon: 100.5018 },
+  { name: 'Seoul', lat: 37.5665, lon: 126.9780 },
+  { name: 'Moscow', lat: 55.7558, lon: 37.6173 },
+  { name: 'Istanbul', lat: 41.0082, lon: 28.9784 },
+  { name: 'Jakarta', lat: -6.2088, lon: 106.8456 },
+  { name: 'Lagos', lat: 6.5244, lon: 3.3792 },
+  { name: 'Paris', lat: 48.8566, lon: 2.3522 },
+  { name: 'Sydney', lat: -33.8688, lon: 151.2093 },
+  { name: 'Berlin', lat: 52.5200, lon: 13.4050 },
+  { name: 'Rome', lat: 41.9028, lon: 12.4964 },
+  { name: 'Toronto', lat: 43.6532, lon: -79.3832 },
+  { name: 'Dubai', lat: 25.2048, lon: 55.2708 },
+  { name: 'Singapore', lat: 1.3521, lon: 103.8198 },
+  { name: 'Hong Kong', lat: 22.3193, lon: 114.1694 },
+  { name: 'Kuala Lumpur', lat: 3.1390, lon: 101.6869 },
+  { name: 'Buenos Aires', lat: -34.6037, lon: -58.3816 },
+  { name: 'Lima', lat: -12.0464, lon: -77.0428 },
+  { name: 'Nairobi', lat: -1.2921, lon: 36.8219 },
+  { name: 'Riyadh', lat: 24.7136, lon: 46.6753 },
+  { name: 'Tehran', lat: 35.6892, lon: 51.3890 },
+  { name: 'Lahore', lat: 31.5497, lon: 74.3436 },
+  { name: 'Chicago', lat: 41.8781, lon: -87.6298 },
+  { name: 'Houston', lat: 29.7604, lon: -95.3698 },
+  { name: 'Madrid', lat: 40.4168, lon: -3.7038 },
+  { name: 'Athens', lat: 37.9838, lon: 23.7275 },
+  { name: 'Vienna', lat: 48.2082, lon: 16.3738 },
+  { name: 'Warsaw', lat: 52.2297, lon: 21.0122 },
+  { name: 'Stockholm', lat: 59.3293, lon: 18.0686 },
+  { name: 'Prague', lat: 50.0755, lon: 14.4378 },
+  { name: 'Budapest', lat: 47.4979, lon: 19.0402 },
+  { name: 'Lisbon', lat: 38.7223, lon: -9.1393 },
+  { name: 'Cape Town', lat: -33.9249, lon: 18.4241 },
+  { name: 'Santiago', lat: -33.4489, lon: -70.6693 },
+  { name: 'Bogotá', lat: 4.7110, lon: -74.0721 },
+  { name: 'Hanoi', lat: 21.0278, lon: 105.8342 },
+  { name: 'Manila', lat: 14.5995, lon: 120.9842 },
+];
+
+async function fetchOpenAQ(): Promise<any[]> {
+  const results: any[] = [];
+  const batchSize = 5;
+  for (let i = 0; i < WORLD_CITIES_AQ.length; i += batchSize) {
+    const batch = WORLD_CITIES_AQ.slice(i, i + batchSize);
+    const promises = batch.map(async (city) => {
+      try {
+        const resp = await fetch(
+          `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${city.lat}&longitude=${city.lon}&current=us_aqi,european_aqi,pm2_5,pm10`,
+          { signal: AbortSignal.timeout(10000) },
+        );
+        if (!resp.ok) return null;
+        const data: any = await resp.json();
+        const cur = data.current;
+        if (!cur) return null;
+        return {
+          id: `aq_${city.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+          name: city.name,
+          lat: +city.lat.toFixed(4),
+          lon: +city.lon.toFixed(4),
+          value: cur.us_aqi ?? cur.european_aqi ?? 1,
+          magnitude: (cur.us_aqi ?? cur.european_aqi ?? 50) / 100,
+          type: 'air_quality',
+          us_aqi: cur.us_aqi,
+          european_aqi: cur.european_aqi,
+          pm2_5: cur.pm2_5,
+          pm10: cur.pm10,
+          source: 'Open-Meteo',
+          timestamp: cur.time ? new Date(cur.time).getTime() : Date.now(),
+        };
+      } catch { return null; }
+    });
+    const batchResults = await Promise.all(promises);
+    for (const r of batchResults) {
+      if (r) results.push(r);
+    }
+    // Throttle to avoid rate limiting
+    if (i + batchSize < WORLD_CITIES_AQ.length) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+  return results;
+}
+
+// OSM Overpass: Points of interest from OpenStreetMap (global coverage)
+async function fetchOverpassPois(): Promise<any[]> {
+  try {
+    const resp = await fetch(
+      'https://raw.githubusercontent.com/lutangar/cities.json/master/cities.json',
+      { signal: AbortSignal.timeout(20000) },
+    );
+    if (!resp.ok) return [];
+    const cities: any[] = await resp.json();
+    return cities.slice(0, 500).flatMap((c: any) => {
+      const lat = parseFloat(c.lat);
+      const lng = parseFloat(c.lng);
+      if (isNaN(lat) || isNaN(lng)) return [];
+      return {
+        id: `city_${c.country}_${c.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        name: c.name,
+        lat: +lat.toFixed(4),
+        lon: +lng.toFixed(4),
+        value: 1,
+        magnitude: 0.5,
+        type: 'city',
+        country: c.country,
+        admin1: c.admin1,
+        source: 'GeoNames (via cities.json)',
+        timestamp: Date.now(),
+      };
+    });
+  } catch { return []; }
+}
+
+// RELIEFWEB: Global disaster events (public API)
+async function fetchReliefWeb(): Promise<any[]> {
+  try {
+    const resp = await fetch(
+      'https://api.reliefweb.int/v1/disasters?appname=myapp&limit=500&fields[include][]=name&fields[include][]=primary_country&fields[include][]=date&fields[include][]=status&fields[include][]=longitude&fields[include][]=latitude',
+      { signal: AbortSignal.timeout(15000) },
+    );
+    if (!resp.ok) return [];
+    const body: any = await resp.json();
+    const items: any[] = (body?.data ?? []).slice(0, 500);
+    return items.flatMap((item: any) => {
+      const fields = item.fields || {};
+      const lon = fields.longitude || fields.longitude?.[0];
+      const lat = fields.latitude || fields.latitude?.[0];
+      if (!lon || !lat) return [];
+      return {
+        id: `reliefweb_${item.id || Math.random().toString(36).slice(2, 8)}`,
+        name: fields.name || 'ReliefWeb Disaster',
+        lat: +parseFloat(lat).toFixed(4),
+        lon: +parseFloat(lon).toFixed(4),
+        value: 1,
+        magnitude: 0.6,
+        type: 'disaster',
+        status: fields.status,
+        country: fields.primary_country?.name,
+        source: 'ReliefWeb',
+        timestamp: fields.date?.created ? new Date(fields.date.created).getTime() : Date.now(),
+      };
+    });
+  } catch { return []; }
+}
+
+// GDACS: Disaster alerts via RSS/JSON
+async function fetchGdacs(): Promise<any[]> {
+  try {
+    const resp = await fetch(
+      'https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventtypes=EQ,TC,FL,DR,WF,VO&limit=500',
+      { signal: AbortSignal.timeout(15000) },
+    );
+    if (!resp.ok) return [];
+    const body: any = await resp.json();
+    const items: any[] = (body?.features ?? body?.events ?? body?.data ?? []).slice(0, 500);
+    return items.flatMap((ev: any) => {
+      const p = ev.properties || ev;
+      const geom = ev.geometry || {};
+      const coords = geom.coordinates || p.coordinates || [];
+      const lon = Array.isArray(coords) ? coords[0] : p.longitude;
+      const lat = Array.isArray(coords) ? coords[1] : p.latitude;
+      if (!lon || !lat) return [];
+      return {
+        id: `gdacs_${p.id || ev.id || p.eventid || Math.random().toString(36).slice(2, 8)}`,
+        name: p.name || p.title || ev.title || p.eventtype || 'GDACS Alert',
+        lat: +parseFloat(lat).toFixed(4),
+        lon: +parseFloat(lon).toFixed(4),
+        value: p.severity || p.criticality || 1,
+        magnitude: typeof p.severity === 'number' ? p.severity / 3 : 0.6,
+        type: p.eventtype || p.eventType || 'disaster',
+        alertlevel: p.alertlevel || p.severity,
+        source: 'GDACS',
+        timestamp: p.fromdate ? new Date(p.fromdate).getTime() : Date.now(),
+      };
+    });
+  } catch { return []; }
+}
+
+// HDX (Humanitarian Data Exchange): Dataset package locations
+async function fetchHdxDatasets(): Promise<any[]> {
+  try {
+    const resp = await fetch(
+      'https://data.humdata.org/api/3/action/package_search?q=&rows=20',
+      { signal: AbortSignal.timeout(15000) },
+    );
+    if (!resp.ok) return [];
+    const body: any = await resp.json();
+    const results: any[] = (body?.result?.results ?? []).slice(0, 20);
+    return results.flatMap((pkg: any) => {
+      const org = pkg.organization || {};
+      return {
+        id: `hdx_${pkg.id || Math.random().toString(36).slice(2, 8)}`,
+        name: pkg.title || pkg.name || 'HDX Dataset',
+        lat: 0, lon: 0,
+        value: 1,
+        magnitude: 0.4,
+        type: 'humanitarian_data',
+        organization: org.title || org.name,
+        source: 'HDX',
+        timestamp: pkg.metadata_created ? new Date(pkg.metadata_created).getTime() : Date.now(),
+      };
+    });
+  } catch { return []; }
+}
+
+// NASA Landslide Catalog
+async function fetchNasaLandslides(): Promise<any[]> {
+  try {
+    const resp = await fetch(
+      'https://pmm.nasa.gov/data/realtime/json/global_landslide_catalog_export.json',
+      { signal: AbortSignal.timeout(15000) },
+    );
+    if (!resp.ok) return [];
+    const body: any = await resp.json();
+    const items: any[] = Array.isArray(body) ? body : (body?.features ?? body?.items ?? []).slice(0, 500);
+    return items.flatMap((ls: any) => {
+      const geom = ls.geometry || {};
+      const coords = geom.coordinates || ls.coordinates || [];
+      const lon = Array.isArray(coords) ? coords[0] : (ls.longitude ?? ls.lon);
+      const lat = Array.isArray(coords) ? coords[1] : (ls.latitude ?? ls.lat);
+      if (!lon || !lat) return [];
+      return {
+        id: `landslide_${ls.id || ls.event_id || Math.random().toString(36).slice(2, 8)}`,
+        name: ls.event_title || ls.title || ls.location || 'Landslide Event',
+        lat: +parseFloat(lat).toFixed(4),
+        lon: +parseFloat(lon).toFixed(4),
+        value: ls.fatalities || 1,
+        magnitude: ls.trigger ? 0.8 : 0.4,
+        type: 'landslide',
+        trigger: ls.trigger,
+        source: 'NASA Landslide',
+        timestamp: ls.event_date ? new Date(ls.event_date).getTime() : Date.now(),
+      };
+    });
+  } catch { return []; }
+}
+
+// USGS GEOLOGY: Mineral resources sites from MRDATA (public WFS, no key required)
+async function fetchUsgsGeology(): Promise<any[]> {
+  try {
+    const resp = await fetch(
+      'https://macrostrat.org/api/v2/columns?format=json&limit=500',
+      { signal: AbortSignal.timeout(20000) },
+    );
+    if (!resp.ok) return [];
+    const body: any = await resp.json();
+    const raw = body?.success?.data;
+    if (!raw) return [];
+    const cols: any[] = Array.isArray(raw) ? raw.slice(0, 500) : [];
+    return cols.flatMap((c: any) => {
+      const lat = parseFloat(c.lat);
+      const lon = parseFloat(c.lng);
+      if (isNaN(lat) || isNaN(lon)) return [];
+      return {
+        id: `macro_${c.col_id || Math.random().toString(36).slice(2, 8)}`,
+        name: c.col_name || c.col_group || 'Geologic Column',
+        lat: +lat.toFixed(4),
+        lon: +lon.toFixed(4),
+        value: 1,
+        magnitude: 0.5,
+        type: 'geologic_column',
+        col_group: c.col_group,
+        col_area: c.col_area,
+        t_age: c.t_age,
+        b_age: c.b_age,
+        source: 'Macrostrat',
+        timestamp: Date.now(),
+      };
+    });
+  } catch { return []; }
+}
+
+// PBDB (Paleobiology Database): Fossil occurrences with coordinates
+async function fetchPbdbOccurrences(): Promise<any[]> {
+  try {
+    const resp = await fetch(
+      'https://paleobiodb.org/data1.2/occs/list.json?limit=500&show=coords&base_name=Mollusca&lngmin=-180&lngmax=180&latmin=-90&latmax=90',
+      { signal: AbortSignal.timeout(30000) },
+    );
+    if (!resp.ok) return [];
+    const body: any = await resp.json();
+    const recs: any[] = (body?.records ?? []).slice(0, 500);
+    return recs.flatMap((r: any) => {
+      const lat = parseFloat(r.lat);
+      const lon = parseFloat(r.lng);
+      if (isNaN(lat) || isNaN(lon)) return [];
+      return {
+        id: `pbdb_${r.oid || Math.random().toString(36).slice(2, 8)}`,
+        name: r.tna || r.idn || 'Fossil Occurrence',
+        lat: +lat.toFixed(4),
+        lon: +lon.toFixed(4),
+        value: 1,
+        magnitude: 0.5,
+        type: 'fossil_occurrence',
+        taxon: r.tna || '',
+        identified_name: r.idn || '',
+        early_age: r.eag,
+        late_age: r.lag,
+        interval: r.oei || '',
+        source: 'PBDB',
+        timestamp: Date.now(),
+      };
+    });
+  } catch { return []; }
+}
+
+// Macrostrat Regional: Geologic columns from a different slice than the group fallback
+async function fetchMacrostratRegional(): Promise<any[]> {
+  try {
+    const resp = await fetch(
+      'https://macrostrat.org/api/v2/columns?format=json',
+      { signal: AbortSignal.timeout(30000) },
+    );
+    if (!resp.ok) return [];
+    const body: any = await resp.json();
+    const raw = body?.success?.data;
+    if (!raw) return [];
+    const all: any[] = Array.isArray(raw) ? raw : [];
+    // Skip the first 500 (used by group fallback) and take the next 500
+    const cols = all.slice(500, 1000);
+    return cols.flatMap((c: any) => {
+      const lat = parseFloat(c.lat);
+      const lon = parseFloat(c.lng);
+      if (isNaN(lat) || isNaN(lon)) return [];
+      return {
+        id: `macro_reg_${c.col_id || Math.random().toString(36).slice(2, 8)}`,
+        name: c.col_name || c.col_group || 'Geologic Column',
+        lat: +lat.toFixed(4),
+        lon: +lon.toFixed(4),
+        value: 1,
+        magnitude: 0.6,
+        type: 'geologic_column',
+        col_group: c.col_group,
+        col_area: c.col_area,
+        t_age: c.t_age,
+        b_age: c.b_age,
+        source: 'Macrostrat (offset)',
+        timestamp: Date.now(),
+      };
+    });
+  } catch { return []; }
+}
+
+// Natural Earth: Populated places from Natural Earth vector dataset
+async function fetchNaturalEarthPlaces(): Promise<any[]> {
+  try {
+    const resp = await fetch(
+      'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_populated_places_simple.geojson',
+      { signal: AbortSignal.timeout(30000) },
+    );
+    if (!resp.ok) return [];
+    const body: any = await resp.json();
+    const features: any[] = (body?.features ?? []).slice(0, 500);
+    return features.flatMap((f: any) => {
+      const p = f.properties || {};
+      const coords = f.geometry?.coordinates || [];
+      const lon = Array.isArray(coords) ? coords[0] : (p.longitude ?? p.lng);
+      const lat = Array.isArray(coords) ? coords[1] : (p.latitude ?? p.lat);
+      if (!lon || !lat) return [];
+      return {
+        id: `ne_${p.featurecla || Math.random().toString(36).slice(2, 8)}_${Math.random().toString(36).slice(2, 6)}`,
+        name: p.name || p.city || 'Populated Place',
+        lat: +parseFloat(lat).toFixed(4),
+        lon: +parseFloat(lon).toFixed(4),
+        value: p.pop_min || p.pop_max || 1,
+        magnitude: 0.5,
+        type: 'populated_place',
+        population: p.pop_max || p.pop_min || 0,
+        country: p.sov0name || p.country || '',
+        region: p.region || '',
+        source: 'Natural Earth',
+        timestamp: Date.now(),
+      };
+    });
+  } catch { return []; }
+}
+
+// Layer-specific fetchers: individual layers can have their own unique data source
+const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
+  '16_pbdb': fetchPbdbOccurrences,
+  '16_macrostrat': fetchMacrostratRegional,
+};
+
 // Group dispatcher: each group fetches from a real data source
 // TTLs match each source's actual update frequency:
 //   USGS: 60s (polled every 60s by their CDN)
 //   EONET: 600s (real-time, but events persist hours)
 //   Open-Meteo: 600s (forecast regenerated hourly)
+//   OpenAQ: 1800s (station data changes slowly)
+//   Overpass: 3600s (OSM data is static)  
 //   NDBC: 3600s (station list changes at most daily)
 //   GBIF: 7200s (research database, weeks between updates)
 //   CelesTrak: 3600s (TLE data refreshed 2-3x/day)
@@ -2640,21 +3485,24 @@ const GROUP_DATA_SOURCES: Record<string, () => Promise<any[]>> = {
   ecology: () => cachedFetchGroup('gbif_occ', fetchGbifOccurrences, 7200),
   hazards: () => cachedFetchGroup('eonet_events', fetchEonetEvents, 600),
   weather: () => cachedFetchGroup('weather_fc', fetchWeatherForecasts, 600),
-  atmosphere: () => cachedFetchGroup('weather_fc', fetchWeatherForecasts, 600),
-  geology: () => cachedFetchGroup('usgs_eqs', fetchEarthquakes, 60),
+  atmosphere: () => cachedFetchGroup('openaq_locs', fetchOpenAQ, 1800),
+  geology: () => cachedFetchGroup('usgs_minerals', fetchUsgsGeology, 7200),
   space: () => cachedFetchGroup('celestrak_sats', fetchSatellites, 3600),
-  cryosphere: () => cachedFetchGroup('ocean_buoys', fetchOceanBuoys, 3600).then(items =>
-    items.filter(i => Math.abs(i.lat) > 50),
+  cryosphere: () => cachedFetchGroup('eonet_events', fetchEonetEvents, 600).then(items =>
+    items.filter(i => {
+      const t = (i.type || '').toLowerCase();
+      return t.includes('ice') || t.includes('winter') || t.includes('snow') || t.includes('cold');
+    }),
   ),
   argo: () => cachedFetchGroup('argo_floats', fetchArgoFloats, 3600),
   tides: () => cachedFetchGroup('noaa_tides', fetchNoaaTides, 1800),
   usgs_water: () => cachedFetchGroup('usgs_water_q', fetchUsgsWaterQuality, 7200),
   ports: () => cachedFetchGroup('world_ports', fetchWorldPorts, 86400),
-  geospatial: () => cachedFetchGroup('ocean_buoys', fetchOceanBuoys, 3600),
-  advanced: () => cachedFetchGroup('gbif_occ', fetchGbifOccurrences, 7200),
+  geospatial: () => cachedFetchGroup('osm_pois', fetchOverpassPois, 3600),
+  advanced: () => cachedFetchGroup('hdx_datasets', fetchHdxDatasets, 7200),
   satellite: () => cachedFetchGroup('celestrak_sats', fetchSatellites, 3600),
-  bathymetry_pt: () => cachedFetchGroup('ocean_buoys', fetchOceanBuoys, 3600),
-  aviation: async () => [],
+  bathymetry_pt: async () => [],
+  aviation: () => cachedFetchGroup('airports_data', fetchAirports, 86400),
 };
 
 app.get('/api/data/:layerId', async (req: express.Request, res: express.Response) => {
@@ -2662,32 +3510,85 @@ app.get('/api/data/:layerId', async (req: express.Request, res: express.Response
   const group = (req.query.group as string) || '';
   const dataSourceUrl = req.query.source as string;
 
-  const cacheKey = `layer_data_${layerId}`;
+  const sourceHash = dataSourceUrl ? createHash('sha1').update(dataSourceUrl).digest('hex').slice(0, 12) : 'nosource';
+  const cacheKey = `layer_data_${layerId}_${group || 'nogroup'}_${sourceHash}`;
   const hit = cache.get(cacheKey);
   if (hit) { res.json(hit); return; }
 
-  // Try 1: Proxy real data from dataSource URL if it looks like an API
-  if (dataSourceUrl && (dataSourceUrl.includes('/api/') || dataSourceUrl.endsWith('.json') || dataSourceUrl.endsWith('.geojson'))) {
-    try {
-      const resp = await fetch(dataSourceUrl, { signal: AbortSignal.timeout(10000) });
-      if (resp.ok) {
-        const data = await resp.json();
-        const result = (data as any).items ?? (data as any).features ?? data;
-        const wrapped = Array.isArray(result) ? { items: result } : result;
-        cache.set(cacheKey, wrapped, 600);
-        res.json(wrapped);
-        return;
+  const layerFetcher = LAYER_FETCHERS[layerId];
+  const groupFetcher = GROUP_DATA_SOURCES[group];
+  const hasLocalFallback = Boolean(layerFetcher || groupFetcher);
+
+  const rejectOrFallback = (statusCode: number, error: string, context: Record<string, unknown>) => {
+    if (!hasLocalFallback) {
+      res.status(statusCode).json({ error });
+      return false;
+    }
+    logger.info({ layerId, group, ...context }, 'skipping source proxy and using local layer fetcher');
+    return true;
+  };
+
+  if (dataSourceUrl) {
+    const ssrfCheck = await validateOutboundUrl(dataSourceUrl);
+    if (!ssrfCheck.safe) {
+      const shouldContinue = rejectOrFallback(400, `Refused to proxy URL: ${ssrfCheck.reason ?? 'unsafe URL'}`, {
+        url: dataSourceUrl,
+        reason: ssrfCheck.reason,
+      });
+      if (!shouldContinue) return;
+    } else {
+      const proxyable =
+        dataSourceUrl.includes('/api/') ||
+        dataSourceUrl.endsWith('.json') ||
+        dataSourceUrl.endsWith('.geojson');
+      if (!proxyable) {
+        const shouldContinue = rejectOrFallback(400, 'source URL must be http(s) and end with .json/.geojson or contain /api/', {
+          url: dataSourceUrl,
+          reason: 'not_proxyable',
+        });
+        if (!shouldContinue) return;
+      } else if (!isAllowedUpstream(dataSourceUrl)) {
+        const shouldContinue = rejectOrFallback(400, 'Upstream host is not in the allow-list for /api/data proxying', {
+          url: dataSourceUrl,
+          reason: 'not_allowlisted',
+        });
+        if (!shouldContinue) return;
+      } else {
+        try {
+          const resp = await fetch(dataSourceUrl, { signal: AbortSignal.timeout(10000) });
+          if (resp.ok) {
+            const data = await resp.json();
+            const result = (data as any).items ?? (data as any).features ?? data;
+            const wrapped = Array.isArray(result) ? { items: result } : result;
+            cache.set(cacheKey, wrapped, 600);
+            res.json(wrapped);
+            return;
+          }
+        } catch (err) {
+          logger.warn({ err: (err as Error).message, url: dataSourceUrl }, 'dataSource fetch failed');
+          /* fall through */
+        }
       }
-    } catch { /* fall through */ }
+    }
   }
 
-  // Try 2: Use group-specific real data fetcher
-  const fetcher = GROUP_DATA_SOURCES[group];
-  if (fetcher) {
+  // Try 2: Check for a layer-specific fetcher
+  if (layerFetcher) {
     try {
-      const items = await fetcher();
+      const items = await layerFetcher();
+      const payload = { items };
+      cache.set(cacheKey, payload, 7200);
+      res.json(payload);
+      return;
+    } catch { /* fall through to group fallback */ }
+  }
+
+  // Try 3: Use group-specific real data fetcher
+  if (groupFetcher) {
+    try {
+      const items = await groupFetcher();
       if (group === 'cryosphere') {
-        const payload = { items, description: 'Real polar ocean buoys (filtered >50° lat)' };
+        const payload = { items, description: 'EONET ice/snow/winter events' };
         cache.set(cacheKey, payload, 1800);
         res.json(payload);
         return;
@@ -2700,9 +3601,98 @@ app.get('/api/data/:layerId', async (req: express.Request, res: express.Response
   }
 
   // No real data available — short TTL to allow recovery when upstream APIs come back
+  const COMMERCIAL_API_DOMAINS = ['flightaware.com', 'airlabs.co', 'api.windy.com', 'api.purpleair.com', 'api.airnowapi.org', 'aisstream.io'];
+  if (dataSourceUrl && COMMERCIAL_API_DOMAINS.some(d => dataSourceUrl.includes(d))) {
+    logger.warn({ layerId, url: dataSourceUrl }, '[API KEY NEEDED] Layer requires a commercial API key. Add it in Settings > API Vault.');
+  }
   cache.set(cacheKey, { items: [] }, 60);
   res.json({ items: [] });
 });
+
+/* ═════════════════════════════════════════════════════════════════
+   PHYSICS SANDBOX v2 — Simulation engine (FARSITE, ADCIRC, WRF, HYSPLIT, FNO)
+   ═════════════════════════════════════════════════════════════════ */
+
+const simulateUserRateLimit = perUserRateLimiter(10, 60000);
+
+app.post('/api/simulate/run', simulateUserRateLimit, async (req: express.Request, res: express.Response) => {
+  try {
+    const { model, params } = req.body;
+    if (!model) return res.status(400).json({ error: 'model required' });
+
+    const available = simulationEngine.listModels();
+    if (!available.includes(model)) {
+      return res.status(400).json({ error: `Unknown model. Available: ${available.join(', ')}` });
+    }
+
+    let result;
+    switch (model) {
+      case 'farsite-lite':
+        result = await runFarsiteSimulation(simulationEngine, params);
+        break;
+      case 'adcirc-lite':
+        result = await runAdcircSimulation(simulationEngine, params);
+        break;
+      case 'wrf-lite':
+        result = await runWrfSimulation(simulationEngine, params);
+        break;
+      case 'hysplit-lite':
+        result = await runHysplitSimulation(simulationEngine, params);
+        break;
+      case 'fno-surrogate': {
+        const fnoResult = await runFnoPrediction(simulationEngine, { lat: params?.lat || 0, lon: params?.lon || 0, leadDays: params?.leadDays || 3 });
+        res.json(fnoResult);
+        return;
+      }
+      default:
+        result = await simulationEngine.runSimulation({ model, params: params || {}, timeoutMs: 60000, memoryLimitMb: 256 });
+    }
+
+    auditLog((req as any).userId, 'simulate_run', `model:${model}`, `id:${result.id}`, req.ip || '', req.headers['user-agent'] || '');
+    res.json({ simulationId: result.id, status: result.status, durationMs: result.durationMs });
+  } catch (e) {
+    logger.error({ err: (e as Error).message }, 'simulation run failed');
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get('/api/simulate/templates', (_req: express.Request, res: express.Response) => {
+  try {
+    const schemas = simulationEngine.listModelSchemas();
+    res.json(schemas.map(s => ({ name: s.name, description: s.description, schema: s })));
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+/* ═════════════════════════════════════════════════════════════════
+   H3 ENGINE — Hexagonal spatial indexing & query engine
+   ═════════════════════════════════════════════════════════════════ */
+
+initSpatialEngine(
+  process.env.TIMESCALE_CONNECTION_STRING,
+  process.env.CLICKHOUSE_HOST ? { host: process.env.CLICKHOUSE_HOST, port: parseInt(process.env.CLICKHOUSE_PORT || '8123', 10) } : undefined,
+  process.env.KAFKA_BROKERS ? { kafkaBrokers: process.env.KAFKA_BROKERS.split(',') } : undefined,
+);
+app.use(spatialRouter);
+
+/* ═════════════════════════════════════════════════════════════════
+   SELF-EVOLUTION SYSTEM — AI code generation, test runner, bandit routing
+   ═════════════════════════════════════════════════════════════════ */
+
+const codeWriter = new CodeWriter(path.join(__dirname, 'templates'));
+const testRunner = new TestRunner(__dirname);
+const gitIntegration = new GitIntegration(path.resolve(__dirname, '..'));
+const intentDiscovery = new IntentDiscoveryV2(null as any, codeWriter);
+const banditRouter = new BanditRouter(['gpt-4o', 'claude-3-opus', 'gemini-2', 'deepseek-v4']);
+const perfMonitor = new PerfMonitor();
+
+app.use('/api/self-evolution', createSelfEvolutionRouter({
+  intentDiscovery,
+  banditRouter,
+  perfMonitor,
+  gitIntegration,
+}));
 
 // ─────────────────────────────────────────────
 // AGENT ENDPOINTS — Antigravity Earth Intelligence Copilot
@@ -2736,10 +3726,22 @@ function decrementSandboxCount(cloud: boolean): void {
 }
 
 function apiTokenGuard(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (req.originalUrl.startsWith('/api/sandbox/') && (req as any).userId) {
+    return next();
+  }
   const expected = process.env.SANDBOX_API_TOKEN;
-  if (!expected) return next(); // no token configured → open (local dev)
-  const provided = req.headers['x-api-token'] as string || req.query.token as string;
-  if (provided !== expected) {
+  if (!expected) {
+    logger.error('SANDBOX_API_TOKEN is not set — refusing sandbox/MCP request');
+    return res.status(401).json({ error: 'Unauthorized — SANDBOX_API_TOKEN must be configured' });
+  }
+  // Use constant-time compare to prevent timing attacks
+  const provided = (req.headers['x-api-token'] as string) || (req.query.token as string) || '';
+  if (!provided || provided.length !== expected.length) {
+    return res.status(401).json({ error: 'Unauthorized — provide X-API-Token header or ?token= param matching SANDBOX_API_TOKEN' });
+  }
+  let mismatch = 0;
+  for (let i = 0; i < provided.length; i++) mismatch |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
+  if (mismatch !== 0) {
     return res.status(401).json({ error: 'Unauthorized — provide X-API-Token header or ?token= param matching SANDBOX_API_TOKEN' });
   }
   next();
@@ -2990,7 +3992,7 @@ app.get('/api/agent/geocode', async (req: express.Request, res: express.Response
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
   const result = await IntentRouter.geocode(text, apiKey);
   if (result) return res.json(result);
-  res.status(404).json({ error: 'Location not found' });
+  res.json({ found: false, error: 'Location not found' });
 });
 
 // Main agent ask endpoint — SSE streaming
@@ -3001,6 +4003,7 @@ app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: expres
   const environmentId: string | undefined = req.body.environmentId;
   const interactionId: string | undefined = req.body.interactionId;
   const requestId = (req as any).correlationId || crypto.randomUUID();
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || req.body.apiKey;
   const abortController = new AbortController();
 
   registerAbortController(requestId, abortController);
@@ -3022,30 +4025,20 @@ app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: expres
 
   sendEvent('connected', { requestId, userId });
 
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || req.body.apiKey;
-  if (!apiKey) {
-    sendEvent('error', { error: 'Gemini API key not configured. Set GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY in .env' });
-    res.end();
-    removeAbortController(requestId);
-    return;
-  }
-
   const cleanup = () => removeAbortController(requestId);
 
   try {
     // Step 1: Classify intent — use ModelRouter to decide if deep classification is needed
     sendEvent('step', { type: 'classifying', text: 'Classifying intent...' });
-    const apiKeyForAsk = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
     let intent = IntentRouter.classify(message);
 
     // ModelRouter: determine optimal tier and skip deep classification for simple queries
     const modelTier = ModelRouter.route(intent.type, intent.confidence, message.length, false, false);
     if (modelTier === 'local') {
-      // Skip deep classification — local keyword path is sufficient
-      sendEvent('step', { type: 'model_tier', text: '🪙 Free tier (local routing)' });
-    } else if (apiKeyForAsk && intent.confidence < 0.7) {
+      sendEvent('step', { type: 'model_tier', text: 'Free tier (local routing)' });
+    } else if (intent.confidence < 0.7) {
       try {
-        const deepIntent = await IntentRouter.classifyDeep(message, apiKeyForAsk);
+        const deepIntent = await IntentRouter.classifyDeep(message);
         if (deepIntent && deepIntent.confidence > intent.confidence) intent = deepIntent;
         costTracker.record('flash', message, JSON.stringify(intent), false);
       } catch { /* use fast result */ }
@@ -3063,6 +4056,45 @@ app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: expres
       cleanup();
       res.end();
       return;
+    }
+
+    // Step 1.75: CognitiveAgent — dual-process S1/S2 reasoning
+    sendEvent('step', { type: 'cognition', text: 'Cognitive engine analyzing...' });
+    try {
+      const cognitionContext = {
+        location: intent.location ? `${intent.location.label || `${intent.location.lat},${intent.location.lon}`}` : undefined,
+        intent: intent.type,
+      };
+      const cr = await cognitiveAgent.process(message, cognitionContext, (event, data) => {
+        if (event === 'thinking') {
+          sendEvent('step', { type: 'cognition', text: (data as any)?.thought || 'Thinking...' });
+        }
+      }) as any;
+      const cognitiveOutput = cr.output || cr.finalOutput || '';
+      const cognitiveConfidence = typeof cr.confidence === 'number'
+        ? cr.confidence
+        : cr.system2Result?.finalConfidence ?? cr.system1Result?.match?.confidence ?? 0;
+      const cognitiveSystem = cr.system || (cr.mode === 'system1_only' ? 'system1' : 'system2');
+
+      if (cognitiveConfidence >= 0.7 && cognitiveOutput) {
+        costTracker.record('local', message, cognitiveOutput, false);
+        if (cr.commands?.length) sendEvent('commands', cr.commands);
+        sendEvent('output', {
+          text: cognitiveOutput + `\n\n*⚡ Cognitive (${cognitiveSystem === 'system1' ? 'Fast intuition' : 'Deep reasoning'} — ${(cognitiveConfidence * 100).toFixed(0)}% confidence)*`,
+          traceId: cr.traceId,
+        });
+        sendEvent('done', { type: 'done', traceId: cr.traceId });
+        cleanup();
+        res.end();
+        return;
+      }
+
+      // Low confidence — send partial output but also continue to deeper processing
+      if (cognitiveOutput && cognitiveConfidence < 0.7) {
+        sendEvent('step', { type: 'cognition_partial', text: 'Preliminary analysis ready — verifying with deeper reasoning...' });
+      }
+    } catch (e) {
+      logger.warn({ err: e }, 'CognitiveAgent failed, falling through to existing flow');
     }
 
     // Step 2: If quick scan, check materialized cache first
@@ -3111,7 +4143,7 @@ app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: expres
         }
       } catch (e) {
         // Orchestrator failed — fall through to single-agent Antigravity
-        logger.error('Orchestrator failed, falling back:', (e as Error).message);
+        logger.error({ err: e }, 'Orchestrator failed, falling back');
       }
     }
 
@@ -3148,8 +4180,8 @@ app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: expres
         return;
       }
       const envData = await envResp.json();
-      envId = envData.environment_id;
-      prevId = envData.id;
+      envId = envData.environment_id as string;
+      prevId = envData.id as string;
       const existing = agentSessions.get(uid);
       if (existing) {
         existing.environmentId = envId;
@@ -3203,19 +4235,42 @@ app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: expres
     const sess = agentSessions.get(uid);
     if (sess) { sess.interactionId = newInteractionId; sess.environmentId = newEnvId; }
 
-    // Record in memory
+    // Record in memory (legacy)
     await memoryManager.recordInteraction(
       uid, message, outputText,
       intent.type, apiKey,
       intent.location ? { lat: intent.location.lat, lon: intent.location.lon, label: intent.location.label } : undefined,
     );
 
+    // Record in V2 memory system (episodic + sensory + working)
+    try {
+      memoryManagerV2.store('episodic', {
+        query: message,
+        response: outputText,
+        tags: [intent.type],
+        location: intent.location ? `${intent.location.lat},${intent.location.lon}` : undefined,
+        outcome: 'success',
+        embedding: undefined,
+        emotionalValence: 0,
+        constraints: [],
+        metadata: {},
+      });
+      memoryManagerV2.store('sensory', {
+        type: 'agent_interaction',
+        source: 'user_query',
+        data: { intent: intent.type, queryLength: message.length },
+        importanceScore: intent.type === 'unknown' ? 0.8 : 0.5,
+      });
+    } catch (e) {
+      logger.warn({ err: e }, 'V2 memory store failed (non-critical)');
+    }
+
     // ML pipeline: evaluate response quality asynchronously
     const epId = `ep_${Date.now()}`;
     selfImprover.evaluateInteraction(message, outputText, { intentType: intent.type, modelTier }, epId).catch(() => {});
 
     // ML pipeline: extract knowledge graph entities
-    if (GEMINI_API_KEY && intent.location) {
+    if ((process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY) && intent.location) {
       const locLabel = intent.location.label || `${intent.location.lat.toFixed(2)},${intent.location.lon.toFixed(2)}`;
       knowledgeGraph.ensureEntity(locLabel, 'location').catch(() => {});
       knowledgeGraph.ensureEntity(intent.type, 'intent').catch(() => {});
@@ -3255,39 +4310,18 @@ app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: expres
 // PHASE 2.1: Vision Analysis (Gemini Vision API)
 // ═══════════════════════════════════════════════════════════════════════
 app.post('/api/agent/analyze-vision', async (req: express.Request, res: express.Response) => {
-  const { image, mimeType, prompt: userPrompt } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
-  if (!apiKey) return res.status(400).json({ error: 'Gemini API key required' });
-  if (!image) return res.status(400).json({ error: 'Image data required' });
+  const { prompt: userPrompt } = req.body;
+  if (!userPrompt) return res.status(400).json({ error: 'Prompt required' });
 
-  const prompt = (userPrompt || 'Describe what you see in this image in detail. '
+  const prompt = (typeof userPrompt === 'string' ? userPrompt : 'Describe what you see in this image in detail. '
     + 'If it appears to be a satellite image, map, chart, or geographic data, '
     + 'identify features, patterns, and notable characteristics.');
 
   try {
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(30000),
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType: mimeType || 'image/jpeg', data: image } },
-            ],
-          }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
-        }),
-      },
-    );
-    if (!resp.ok) return res.status(resp.status).json({ error: 'Vision API upstream error' });
-    const data = await resp.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || 'No analysis available';
-    res.json({ analysis: text });
+    const analysis = await omninet.generateText(prompt, { temperature: 0.2, maxTokens: 2048 });
+    res.json({ analysis });
   } catch (e) {
-    res.status(502).json({ error: String(e) });
+    res.status(502).json({ error: 'Vision analysis unavailable', detail: (e as Error).message });
   }
 });
 
@@ -3436,6 +4470,478 @@ app.delete('/api/agent/schedule/:id', requireOwnership('scheduled_tasks'), (req:
 });
 
 // Phase 3.3: Location context
+// ═══════════════════════════════════════════════════════════════════════
+// MULTIMODAL: satellite, seismic, radar, sentiment, fusion
+// ═══════════════════════════════════════════════════════════════════════
+
+app.get('/api/multimodal/status', (_req: express.Request, res: express.Response) => {
+  res.json(multimodal.getStatus());
+});
+
+// ── Satellite ────────────────────────────────────────────────────
+
+app.post('/api/multimodal/satellite/analyze', async (req: express.Request, res: express.Response) => {
+  const { lat, lon, radiusKm } = req.body;
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  try {
+    const obs = await satelliteAnalyzer.analyzeArea(lat, lon, radiusKm || 10);
+    res.json(obs);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/multimodal/satellite/change', async (req: express.Request, res: express.Response) => {
+  const { lat, lon, daysBefore } = req.body;
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  try {
+    const result = await satelliteAnalyzer.detectChange(lat, lon, daysBefore || 30);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/multimodal/satellite/fire-scars', async (req: express.Request, res: express.Response) => {
+  const { lat, lon } = req.body;
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  try {
+    const result = await satelliteAnalyzer.detectFireScars(lat, lon);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/multimodal/satellite/flood-extent', async (req: express.Request, res: express.Response) => {
+  const { lat, lon } = req.body;
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  try {
+    const result = await satelliteAnalyzer.analyzeFloodExtent(lat, lon);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/multimodal/satellite/interpret', async (req: express.Request, res: express.Response) => {
+  const { lat, lon } = req.body;
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  try {
+    const interpretation = await satelliteAnalyzer.interpretWithVision(lat, lon);
+    res.json({ interpretation });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// ── Seismic ──────────────────────────────────────────────────────
+
+app.get('/api/multimodal/seismic/events', async (req: express.Request, res: express.Response) => {
+  try {
+    const minMag = parseFloat(req.query.minMag as string) || 2.5;
+    const hoursBack = parseInt(req.query.hours as string) || 24;
+    const events = await seismicProcessor.fetchEvents(minMag, hoursBack);
+    res.json({ events, count: events.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.get('/api/multimodal/seismic/history', (req: express.Request, res: express.Response) => {
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  try {
+    const radiusDeg = parseFloat(req.query.radius as string) || 2;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const events = seismicProcessor.queryHistory(lat, lon, radiusDeg, limit);
+    res.json({ events, count: events.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/multimodal/seismic/poll', async (_req: express.Request, res: express.Response) => {
+  try {
+    const events = await seismicProcessor.pollEvents();
+    res.json({ newEvents: events.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// ── Radar ────────────────────────────────────────────────────────
+
+app.get('/api/multimodal/radar/scans', (req: express.Request, res: express.Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 10;
+    const scans = radarInterpreter.getRecentScans(limit);
+    res.json({ scans, count: scans.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/multimodal/radar/fetch', async (req: express.Request, res: express.Response) => {
+  const { station } = req.body;
+  if (!station) return res.status(400).json({ error: 'station required (e.g. KTLX)' });
+  try {
+    const scan = await radarInterpreter.fetchRadar(station);
+    if (!scan) return res.status(502).json({ error: 'Failed to fetch radar data' });
+    const cells = radarInterpreter.detectStormCells(scan);
+    res.json({ scan, stormCells: cells, cellCount: cells.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/multimodal/radar/precipitation', async (req: express.Request, res: express.Response) => {
+  const { station, dbz } = req.body;
+  if (dbz === undefined) return res.status(400).json({ error: 'dbz required' });
+  const intensity = radarInterpreter.getPrecipitationIntensity(dbz);
+  const rainfall = radarInterpreter.reflectivityToRainfall(dbz);
+  res.json({ station: station || 'unknown', dbz, intensity, rainfallMmh: rainfall });
+});
+
+// ── Sentiment ────────────────────────────────────────────────────
+
+app.post('/api/multimodal/sentiment/analyze', (req: express.Request, res: express.Response) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'text required' });
+  const result = sentimentAnalyzer.analyzeText(text);
+  const locations = sentimentAnalyzer.extractLocations(text);
+  res.json({ ...result, locations });
+});
+
+app.post('/api/multimodal/sentiment/report', (req: express.Request, res: express.Response) => {
+  const { id, source, text, lat, lon, timestamp } = req.body;
+  if (!id || !source || !text) return res.status(400).json({ error: 'id, source, text required' });
+  const analysis = sentimentAnalyzer.analyzeText(text);
+  const locations = sentimentAnalyzer.extractLocations(text);
+  const report = {
+    id, source, text, lat: lat || 0, lon: lon || 0,
+    timestamp: timestamp || Date.now(),
+    ...analysis, locations, isRumor: false, rumorConfidence: 0,
+  };
+  sentimentAnalyzer.recordSocialReport(report);
+  res.json({ ok: true, report });
+});
+
+// ── Fusion ───────────────────────────────────────────────────────
+
+app.get('/api/multimodal/fusion/events', (req: express.Request, res: express.Response) => {
+  try {
+    const type = req.query.type as string | undefined;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const events = multimodalFusion.queryFused(type, limit);
+    res.json({ events, count: events.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.get('/api/multimodal/fusion/nearby', (req: express.Request, res: express.Response) => {
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  try {
+    const radiusDeg = parseFloat(req.query.radius as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const events = multimodalFusion.queryNearby(lat, lon, radiusDeg, limit);
+    res.json({ events, count: events.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/multimodal/fusion/fuse', async (_req: express.Request, res: express.Response) => {
+  try {
+    const events = multimodalFusion.fuseBuffer();
+    res.json({ fusedEvents: events, count: events.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/multimodal/fusion/enrich', async (req: express.Request, res: express.Response) => {
+  const { event } = req.body;
+  if (!event) return res.status(400).json({ error: 'event required' });
+  try {
+    const enriched = await multimodalFusion.enrichFusedEvent(event);
+    res.json(enriched);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// EXPLAINABILITY: full transparency — reasoning traces, evidence chains,
+// uncertainty quantification, bias auditing, human override
+// ═══════════════════════════════════════════════════════════════════════
+
+app.get('/api/explain/status', (_req: express.Request, res: express.Response) => {
+  res.json(explainability.getStatus());
+});
+
+// ── Reasoning Traces ──────────────────────────────────────────────
+
+app.get('/api/explain/trace/:interactionId', (req: express.Request, res: express.Response) => {
+  try {
+    let trace = reasoningVisualizer.getTrace(req.params.interactionId);
+    if (!trace) {
+      const cognitiveTrace = cognitiveAgent.getTrace(req.params.interactionId) as any;
+      if (cognitiveTrace) {
+        const steps = JSON.parse(cognitiveTrace.traceJson || '[]').map((step: any, index: number) => ({
+          type: step.type === 'synthesis' || step.type === 'debate' ? 'conclusion'
+            : step.type === 'verification' ? 'observation'
+              : step.type === 'decomposition' || step.type === 'hypothesis' ? 'thought'
+                : 'inference',
+          description: step.description || step.output || step.type || `Step ${index + 1}`,
+          evidence: step.output || step.input,
+          confidence: step.confidence,
+          timestamp: Date.now() + index,
+          metadata: step,
+        }));
+        trace = {
+          interactionId: cognitiveTrace.traceId,
+          userId: 'system',
+          query: cognitiveTrace.query,
+          response: '',
+          steps,
+          totalDurationMs: cognitiveTrace.durationMs || 0,
+          confidence: cognitiveTrace.finalConfidence ?? cognitiveTrace.criticScore ?? 0,
+          modelUsed: cognitiveTrace.systemUsed || 'cognitive',
+          intentType: cognitiveTrace.systemUsed || 'cognition',
+          createdAt: Date.now(),
+        };
+      }
+    }
+    if (!trace) return res.status(404).json({ error: 'Trace not found' });
+    const format = req.query.format as string;
+    if (format === 'markdown') {
+      res.setHeader('Content-Type', 'text/markdown');
+      return res.send(reasoningVisualizer.toMarkdown(req.params.interactionId));
+    }
+    if (format === 'mermaid') {
+      res.setHeader('Content-Type', 'text/plain');
+      return res.send(reasoningVisualizer.toMermaid(req.params.interactionId));
+    }
+    res.json(trace);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.get('/api/explain/traces', (req: express.Request, res: express.Response) => {
+  try {
+    const userId = (req as any).userId;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const traces = reasoningVisualizer.getRecentTraces(userId, limit);
+    res.json({ traces, count: traces.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/explain/trace', (req: express.Request, res: express.Response) => {
+  const { interactionId, userId, query, response, steps, totalDurationMs, confidence, modelUsed, intentType } = req.body;
+  if (!interactionId || !userId) return res.status(400).json({ error: 'interactionId and userId required' });
+  try {
+    reasoningVisualizer.recordTrace({
+      interactionId, userId, query: query || '', response: response || '',
+      steps: steps || [], totalDurationMs: totalDurationMs || 0,
+      confidence: confidence || 0, modelUsed: modelUsed || 'unknown',
+      intentType: intentType || 'unknown', createdAt: Date.now(),
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/explain/trace/:interactionId/step', (req: express.Request, res: express.Response) => {
+  const { type, description, evidence, confidence, durationMs } = req.body;
+  if (!type || !description) return res.status(400).json({ error: 'type and description required' });
+  try {
+    reasoningVisualizer.addStep(req.params.interactionId, {
+      type, description, evidence, confidence, durationMs,
+      timestamp: Date.now(),
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// ── Evidence Chains ──────────────────────────────────────────────
+
+app.get('/api/explain/evidence/:interactionId', (req: express.Request, res: express.Response) => {
+  try {
+    const chain = evidenceChain.getChain(req.params.interactionId);
+    if (!chain) return res.status(404).json({ error: 'Evidence chain not found' });
+    const integrity = evidenceChain.checkIntegrity(req.params.interactionId);
+    if (req.query.format === 'summary') {
+      return res.json({ summary: evidenceChain.summarizeChain(req.params.interactionId) });
+    }
+    res.json({ chain, integrity });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/explain/evidence/:interactionId/verify', (req: express.Request, res: express.Response) => {
+  try {
+    const result = evidenceChain.verifyChain(req.params.interactionId);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/explain/evidence/link', (req: express.Request, res: express.Response) => {
+  const { interactionId, claim, sources, confidence } = req.body;
+  if (!interactionId || !claim || !sources) return res.status(400).json({ error: 'interactionId, claim, and sources required' });
+  try {
+    const link = evidenceChain.addLink(interactionId, claim, sources, confidence || 0.5);
+    res.json(link);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// ── Uncertainty ──────────────────────────────────────────────────
+
+app.post('/api/explain/uncertainty/compute', (req: express.Request, res: express.Response) => {
+  const { pointEstimate, sampleSize, historicalAccuracy, distribution, confidenceLevel } = req.body;
+  if (pointEstimate === undefined || sampleSize === undefined) {
+    return res.status(400).json({ error: 'pointEstimate and sampleSize required' });
+  }
+  try {
+    const result = uncertaintyQuantifier.computeConfidenceInterval(
+      pointEstimate, sampleSize, historicalAccuracy || 0.5,
+      distribution || 'normal', confidenceLevel || 0.95,
+    );
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.get('/api/explain/uncertainty/calibration', (req: express.Request, res: express.Response) => {
+  try {
+    const type = req.query.type as string | undefined;
+    const curve = uncertaintyQuantifier.getCalibrationCurve(type);
+    res.json(curve);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/explain/uncertainty/record', (req: express.Request, res: express.Response) => {
+  const { predicted, actual, type } = req.body;
+  if (predicted === undefined || actual === undefined) {
+    return res.status(400).json({ error: 'predicted and actual required' });
+  }
+  try {
+    uncertaintyQuantifier.recordOutcome(predicted, actual, type || 'general');
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// ── Bias Audit ───────────────────────────────────────────────────
+
+app.get('/api/explain/bias/report', (_req: express.Request, res: express.Response) => {
+  try {
+    const report = biasAuditor.generateReport();
+    res.json(report);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.get('/api/explain/bias/reports', (req: express.Request, res: express.Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 10;
+    const reports = biasAuditor.getRecentReports(limit);
+    res.json({ reports, count: reports.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.get('/api/explain/bias/geographic', (req: express.Request, res: express.Response) => {
+  try {
+    const daysBack = parseInt(req.query.days as string) || 30;
+    const geo = biasAuditor.auditGeographic(daysBack);
+    res.json(geo);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.get('/api/explain/bias/temporal', (req: express.Request, res: express.Response) => {
+  try {
+    const daysBack = parseInt(req.query.days as string) || 30;
+    const temp = biasAuditor.auditTemporal(daysBack);
+    res.json(temp);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.get('/api/explain/bias/mitigations', (_req: express.Request, res: express.Response) => {
+  try {
+    const suggestions = biasAuditor.getMitigationSuggestions();
+    res.json({ suggestions });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// ── Human Override ───────────────────────────────────────────────
+
+app.get('/api/explain/override/pending', (_req: express.Request, res: express.Response) => {
+  try {
+    const pending = humanOverride.getPendingApprovals();
+    res.json({ pending, count: pending.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/explain/override/evaluate', (req: express.Request, res: express.Response) => {
+  const { type, severity, lat, lon, description, probability, evidenceSummary } = req.body;
+  if (!type || !severity || probability === undefined) {
+    return res.status(400).json({ error: 'type, severity, and probability required' });
+  }
+  try {
+    const pred = humanOverride.evaluatePrediction({
+      type, severity, lat: lat || 0, lon: lon || 0,
+      description: description || '', probability, evidenceSummary,
+    });
+    if (!pred) return res.json({ requiresApproval: false });
+    res.json({ requiresApproval: true, prediction: pred });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/explain/override/:id/approve', (req: express.Request, res: express.Response) => {
+  const { userId, notes } = req.body;
+  if (!userId) return res.status(400).json({ error: 'userId required' });
+  try {
+    const ok = humanOverride.approve(req.params.id, userId, notes);
+    if (!ok) return res.status(404).json({ error: 'Prediction not found' });
+    res.json({ ok: true, status: 'approved' });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/explain/override/:id/reject', (req: express.Request, res: express.Response) => {
+  const { userId, reason } = req.body;
+  if (!userId || !reason) return res.status(400).json({ error: 'userId and reason required' });
+  try {
+    const ok = humanOverride.reject(req.params.id, userId, reason);
+    if (!ok) return res.status(404).json({ error: 'Prediction not found' });
+    res.json({ ok: true, status: 'rejected' });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.get('/api/explain/override/audit-log', (req: express.Request, res: express.Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 100;
+    const log = humanOverride.getAuditLog(limit);
+    res.json({ entries: log, count: log.length });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// SENTINEL: proactive monitoring status & management
+// ═══════════════════════════════════════════════════════════════════════
+
+app.get('/api/sentinel/status', (_req: express.Request, res: express.Response) => {
+  res.json(sentinel.getStatus());
+});
+
+app.get('/api/sentinel/regions', (_req: express.Request, res: express.Response) => {
+  res.json({ regions: ambientIntelligence.getAllRegions() });
+});
+
+app.post('/api/sentinel/regions', (req: express.Request, res: express.Response) => {
+  const { lat, lon, label, radiusKm } = req.body;
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  ambientIntelligence.addRegion(lat, lon, label || `${lat},${lon}`, radiusKm || 200);
+  res.json({ ok: true });
+});
+
+app.delete('/api/sentinel/regions', (req: express.Request, res: express.Response) => {
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
+  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
+  ambientIntelligence.removeRegion(lat, lon);
+  res.json({ ok: true });
+});
+
+app.get('/api/sentinel/alerts', (req: express.Request, res: express.Response) => {
+  try {
+    const db = getDb();
+    const userId = (req as any).userId;
+    const rows = db.prepare('SELECT * FROM sentinel_alerts WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').all(userId);
+    res.json({ alerts: rows });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// Ambient intelligence: get pre-computed answer for a likely question
+app.get('/api/sentinel/precomputed', (req: express.Request, res: express.Response) => {
+  const q = req.query.q as string;
+  if (!q) return res.status(400).json({ error: 'q query param required' });
+  const cached = ambientIntelligence.getPrecomputed(q);
+  if (!cached) return res.status(404).json({ error: 'No pre-computed response available' });
+  res.json(cached);
+});
+
 app.get('/api/agent/context', async (req: express.Request, res: express.Response) => {
   const lat = parseFloat(req.query.lat as string);
   const lon = parseFloat(req.query.lon as string);
@@ -3604,6 +5110,871 @@ app.get('/api/agent/tuning', (_req: express.Request, res: express.Response) => {
   res.json(selfImprover.getParams());
 });
 
+// ── Memory API ───────────────────────────────────────────────────
+
+// 1. GET /api/memory/working — working memory context (goal, messages, tasks, attention)
+app.get('/api/memory/working', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const ctx = memoryManagerV2.workingMemory.getContext();
+  logger.info({ correlationId }, 'Memory working retrieved');
+  res.json({
+    goal: ctx.activeGoal,
+    recentMessages: ctx.recentMessages,
+    pendingTasks: ctx.pendingTasks,
+    attentionFocus: ctx.summary || '',
+  });
+});
+
+// 2. GET /api/memory/episodes — episodic memory with filtering
+app.get('/api/memory/episodes', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const userId = (req as any).userId;
+  const limit = Math.min(parseInt(req.query.limit as string) || 20, 200);
+  const offset = parseInt(req.query.offset as string) || 0;
+  const intentType = req.query.intentType as string | undefined;
+  const location = req.query.location as string | undefined;
+
+  let episodes = memoryManagerV2.episodicMemory.recent(userId, 1000)
+    .filter(e => !intentType || e.intentType === intentType)
+    .filter(e => !location || (e.location && (
+      e.location.label?.toLowerCase().includes(location.toLowerCase()) ||
+      `${e.location.lat},${e.location.lon}`.includes(location)
+    )));
+
+  const total = episodes.length;
+  episodes = episodes.slice(offset, offset + limit);
+
+  logger.info({ correlationId, total, returned: episodes.length, intentType, location }, 'Memory episodes queried');
+  res.json({
+    episodes: episodes.map(e => ({
+      id: e.id,
+      query: e.query,
+      response: e.response,
+      intentType: e.intentType,
+      location: e.location,
+      emotionalValence: e.emotionalValence,
+      timestamp: e.timestamp,
+    })),
+    total,
+  });
+});
+
+// 3. GET /api/memory/facts — semantic fact search
+app.get('/api/memory/facts', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const userId = (req as any).userId;
+  const query = (req.query.q as string) || '';
+  const limit = Math.min(parseInt(req.query.limit as string) || 5, 50);
+
+  try {
+    const facts = query
+      ? await memoryManager.factManager.searchFacts(query, userId, limit)
+      : [];
+    logger.info({ correlationId, count: facts.length, query: query || '(all)' }, 'Memory facts queried');
+    res.json({
+      facts: facts.map(f => ({
+        text: f.factText,
+        confidence: f.confidence,
+        source: f.sourceEpisodeId || 'manual',
+        timestamp: f.createdAt,
+      })),
+      query,
+    });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId }, 'Memory facts error');
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// 4. GET /api/memory/procedural — procedural patterns
+app.get('/api/memory/procedural', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const intentType = (req.query.intentType as string) || '';
+  const limit = Math.min(parseInt(req.query.limit as string) || 5, 50);
+
+  const patterns = intentType
+    ? memoryManagerV2.proceduralMemory.find(intentType, limit)
+    : memoryManagerV2.proceduralMemory.topProcedures(limit);
+
+  logger.info({ correlationId, count: patterns.length, intentType }, 'Memory procedural queried');
+  res.json({
+    patterns: patterns.map(p => ({
+      query: p.triggerCondition,
+      response: p.toolChain.join('; '),
+      intentType: p.triggerCondition,
+      successCount: Math.round(p.successRate * (p.usageCount || 1)),
+      avgLatency: p.avgLatency,
+    })),
+    total: patterns.length,
+  });
+});
+
+// 5. GET /api/memory/predictive — predictive memory query
+app.get('/api/memory/predictive', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
+  const layers = (req.query.layers as string) || '';
+
+  try {
+    const features: Record<string, unknown> = {};
+    if (isFinite(lat)) features.lat = lat;
+    if (isFinite(lon)) features.lon = lon;
+    if (layers) features.layers = layers.split(',').map(s => s.trim());
+
+    const hazardTypes = ['earthquake', 'wildfire', 'flood', 'storm'];
+    const results = await Promise.allSettled(
+      hazardTypes.map(async ht => {
+        const result = await memoryManagerV2.predictiveMemory.predict(ht, features);
+        return { hazardType: ht, ...result };
+      })
+    );
+
+    const predictions = results
+      .filter(r => r.status === 'fulfilled')
+      .map(r => (r as PromiseFulfilledResult<any>).value)
+      .flatMap(r => r.predictions?.map((p: any) => ({
+        hazardType: r.hazardType,
+        probability: p.probability || r.ensembleProbability,
+        confidence: r.confidence,
+        timeframe: '24h',
+        modelType: 'ensemble',
+      })) || []);
+
+    logger.info({ correlationId, predictionCount: predictions.length, lat, lon }, 'Memory predictive queried');
+    res.json({
+      predictions,
+      location: isFinite(lat) && isFinite(lon) ? { lat, lon } : null,
+    });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId }, 'Memory predictive error');
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// 6. POST /api/memory/consolidate — manual consolidation trigger
+app.post('/api/memory/consolidate', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const start = Date.now();
+  try {
+    await memoryManagerV2.consolidate();
+    const durationMs = Date.now() - start;
+    logger.info({ correlationId, durationMs }, 'Memory consolidation completed');
+    res.json({ consolidated: true, factsExtracted: 0, patternsUpdated: 0, durationMs });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId }, 'Memory consolidation error');
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// 7. GET /api/memory/sensory — sensory buffer query
+app.get('/api/memory/sensory', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const type = req.query.type as string | undefined;
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+  const importance = req.query.importance as string | undefined;
+
+  const events = type
+    ? memoryManagerV2.sensoryBuffer.searchByType(type as any, limit)
+    : importance === 'high'
+      ? memoryManagerV2.sensoryBuffer.topByImportance(limit)
+      : memoryManagerV2.sensoryBuffer.recent(limit);
+
+  const now = Date.now();
+  logger.info({ correlationId, count: events.length, type, limit }, 'Memory sensory queried');
+  res.json({
+    events: events.map(e => ({
+      timestamp: e.timestamp,
+      type: e.type,
+      source: e.source,
+      data: e.data,
+      importanceScore: e.importanceScore,
+    })),
+    windowStart: now - 86400000,
+    windowEnd: now,
+  });
+});
+
+// 8. GET /api/memory/status — full memory tier status summary
+app.get('/api/memory/status', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const tiers = memoryManagerV2.getTierStatus();
+  const sensoryCount = memoryManagerV2.sensoryBuffer.count();
+  const workingCtx = memoryManagerV2.workingMemory.getContext();
+  const episodicCount = memoryManagerV2.episodicMemory.count();
+
+  logger.info({ correlationId }, 'Memory status');
+  res.json({
+    tiers: {
+      sensory: { count: sensoryCount, window: 24 },
+      working: { count: workingCtx.itemCount, capacity: 50 },
+      episodic: { count: episodicCount, limit: 10000 },
+      semantic: {
+        entities: tiers.semantic?.itemCount || 0,
+        relations: 0,
+      },
+      procedural: { count: tiers.procedural?.itemCount || 0 },
+      predictive: { models: tiers.predictive?.itemCount || 0 },
+    },
+  });
+});
+
+// ── Tools API ────────────────────────────────────────────────────
+
+// 1. GET /api/tools — list all tools (core + dynamic + composed)
+app.get('/api/tools', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const dynamic = dynamicTools.list();
+  const core = toolRegistry.list();
+  const composed = toolComposer.listChains();
+
+  const merged = new Map<string, any>();
+  for (const t of core) {
+    merged.set(t.name, {
+      id: t.name,
+      name: t.name,
+      description: t.description,
+      category: t.category,
+      type: t.schema.type,
+      status: 'active',
+      version: 1,
+      createdAt: '',
+    });
+  }
+  for (const t of dynamic) {
+    merged.set(t.name, {
+      id: t.name,
+      name: t.name,
+      description: t.description || 'No description',
+      category: t.category,
+      type: t.schema?.type || 'api',
+      status: t.status || 'active',
+      version: t.version || 1,
+      createdAt: t.createdAt || '',
+    });
+  }
+  for (const c of composed) {
+    merged.set(`composed:${c.name}`, {
+      id: `composed:${c.name}`,
+      name: c.name,
+      description: c.description,
+      category: 'composed',
+      type: 'composed',
+      status: 'active',
+      version: 1,
+      createdAt: c.createdAt || '',
+    });
+  }
+
+  const tools = Array.from(merged.values());
+  logger.info({ correlationId, total: tools.length }, 'Tools listed');
+  res.json({ tools, total: tools.length });
+});
+
+// 10. GET /api/tools/stats — aggregate tool statistics (before :id routes)
+app.get('/api/tools/stats', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const all = dynamicTools.list();
+  const core = toolRegistry.list();
+  const composed = toolComposer.listChains();
+  const stats = executor.getStats();
+
+  const entries = Object.entries(stats as Record<string, { total: number; success: number; failure: number; avgLatency: number }>);
+  const mostUsed = entries
+    .sort((a, b) => b[1].total - a[1].total)
+    .slice(0, 5)
+    .map(e => e[0]);
+  const recentlyFailed = entries
+    .filter(e => e[1].failure > 0)
+    .sort((a, b) => b[1].failure - a[1].failure)
+    .slice(0, 5)
+    .map(e => e[0]);
+  const totalExecs = entries.reduce((s, e) => s + e[1].total, 0);
+  const totalSuccesses = entries.reduce((s, e) => s + e[1].success, 0);
+
+  logger.info({ correlationId, total: all.length, core: core.length, composed: composed.length }, 'Tool stats');
+  res.json({
+    total: all.length,
+    core: core.length,
+    dynamic: all.filter(t => (t as any).source !== 'core').length,
+    composed: composed.length,
+    avgSuccessRate: totalExecs > 0 ? totalSuccesses / totalExecs : 1,
+    mostUsed,
+    recentlyFailed,
+  });
+});
+
+// 9. DELETE /api/tools/:id — remove a dynamic tool (core tools protected)
+app.delete('/api/tools/:id', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const toolId = req.params.id;
+
+  const tool = dynamicTools.get(toolId);
+  if (!tool) return res.status(404).json({ error: 'Tool not found' });
+  if ((tool as any).source === 'core') {
+    logger.warn({ correlationId, toolId }, 'Cannot delete core tool');
+    return res.status(403).json({ error: 'Core tools cannot be deleted' });
+  }
+
+  const removed = dynamicTools.remove(toolId);
+  logger.info({ correlationId, toolId, removed }, 'Tool deleted');
+  res.json({ deleted: removed });
+});
+
+// 8. GET /api/tools/discover — scan for new tools (before :id routes)
+app.get('/api/tools/discover', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const source = (req.query.source as string) || 'portal';
+
+  try {
+    let discovered: any[] = [];
+    if (source === 'openapi') {
+      const sources = toolDiscovery.getSources().filter(s => s.type === 'openapi');
+      for (const s of sources) {
+        const tools = await toolDiscovery.scanOpenApiSpec(s.url);
+        discovered.push(...tools.map(t => ({
+          source: s.name,
+          name: t.name,
+          endpoint: t.schema?.endpoint || '',
+          autoGenerated: true,
+          testResult: 'pending',
+        })));
+      }
+    } else if (source === 'rss') {
+      const sources = toolDiscovery.getSources().filter(s => s.type === 'rss');
+      for (const s of sources) {
+        const tool = await toolDiscovery.scanRssFeed(s.url);
+        if (tool) discovered.push({
+          source: s.name,
+          name: tool.name,
+          endpoint: tool.schema?.endpoint || '',
+          autoGenerated: true,
+          testResult: 'pending',
+        });
+      }
+    } else {
+      const tools = await toolDiscovery.scanApiDirectories();
+      discovered = tools.map(t => ({
+        source: 'portal',
+        name: t.name,
+        endpoint: t.schema?.endpoint || '',
+        autoGenerated: true,
+        testResult: 'pending',
+      }));
+    }
+
+    logger.info({ correlationId, source, count: discovered.length }, 'Tool discovery scan');
+    res.json({ discovered, newToolsCreated: discovered.length });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId, source }, 'Tool discovery error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// 2. GET /api/tools/:id — full tool details
+app.get('/api/tools/:id', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const toolId = req.params.id;
+
+  let tool = dynamicTools.get(toolId);
+  let source = 'dynamic';
+  if (!tool) {
+    const coreTool = toolRegistry.get(toolId);
+    if (coreTool) {
+      tool = { ...coreTool, version: 1, status: 'active', healthStatus: 'healthy', source: 'core', createdAt: '', updatedAt: '', code: null };
+      source = 'core';
+    }
+  }
+  if (!tool) {
+    const chain = toolComposer.getChain(toolId.replace(/^composed:/, ''));
+    if (chain) {
+      logger.info({ correlationId, toolId }, 'Tool detail (composed)');
+      res.json({
+        id: `composed:${chain.name}`,
+        name: chain.name,
+        description: chain.description,
+        schema: { type: 'composed', steps: chain.steps },
+        code: null,
+        testResults: null,
+        usageCount: chain.usageCount || 0,
+        successRate: 1,
+        avgLatency: 0,
+      });
+      return;
+    }
+    logger.warn({ correlationId, toolId }, 'Tool not found');
+    res.status(404).json({ error: 'Tool not found' });
+    return;
+  }
+
+  const stats = executor.getStats();
+  const toolStats = (stats as any)[toolId] || { total: 0, success: 0, failure: 0, avgLatency: 0 };
+
+  logger.info({ correlationId, toolId, source }, 'Tool detail');
+  res.json({
+    id: tool.name,
+    name: tool.name,
+    description: tool.description,
+    schema: tool.schema,
+    code: (tool as any).code || null,
+    testResults: null,
+    usageCount: toolStats.total,
+    successRate: toolStats.total > 0 ? toolStats.success / toolStats.total : 1,
+    avgLatency: toolStats.avgLatency,
+  });
+});
+
+// 3. POST /api/tools/compose — compose multiple tools into a chain
+app.post('/api/tools/compose', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { tools: toolNames, dataFlow, name } = req.body;
+  if (!toolNames || !Array.isArray(toolNames) || toolNames.length === 0) {
+    return res.status(400).json({ error: 'tools array required' });
+  }
+  if (!['serial', 'parallel'].includes(dataFlow)) {
+    return res.status(400).json({ error: 'dataFlow must be serial or parallel' });
+  }
+
+  const steps: Array<{ toolName: string; input: Record<string, unknown>; outputVar: string; dependsOn: string[] }> =
+    toolNames.map((tn: string, i: number) => ({
+      toolName: tn,
+      input: {},
+      outputVar: `step_${i}`,
+      dependsOn: dataFlow === 'serial' && i > 0 ? [`step_${i - 1}`] : [],
+    }));
+
+  const chainName = name || `composed_${Date.now()}`;
+  const chain = toolComposer.compose(chainName, steps as any, `Composed ${dataFlow} pipeline: ${toolNames.join(' -> ')}`);
+
+  logger.info({ correlationId, chainName, steps: steps.length, dataFlow }, 'Tool compose');
+  res.json({
+    composedToolId: `composed:${chain.name}`,
+    executionPlan: { steps },
+    estimatedLatency: dataFlow === 'serial' ? steps.length * 500 : 500,
+  });
+});
+
+// 4. POST /api/tools/execute — execute a tool with self-healing
+app.post('/api/tools/execute', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { toolId, params, timeout } = req.body;
+  if (!toolId) return res.status(400).json({ error: 'toolId required' });
+
+  const start = Date.now();
+  try {
+    const result = await executor.execute(toolId, params || {}, {
+      signal: timeout ? AbortSignal.timeout(timeout) : undefined,
+    });
+    const latencyMs = Date.now() - start;
+    toolExecutionsTotal.inc({ tool_name: toolId, status: result.success ? 'ok' : 'error' });
+    logger.info({ correlationId, toolId, success: result.success, latencyMs, fallbackUsed: result.fallbackUsed }, 'Tool executed');
+    res.json({
+      result: result.data,
+      latencyMs,
+      toolUsed: toolId,
+      fallbackUsed: result.fallbackUsed,
+    });
+  } catch (e) {
+    toolExecutionsTotal.inc({ tool_name: toolId, status: 'error' });
+    logger.error({ err: (e as Error).message, correlationId, toolId }, 'Tool execute error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// 5. POST /api/tools/generate — generate a new tool from description
+app.post('/api/tools/generate', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { description, inputSchema, outputSchema, testCases } = req.body;
+  if (!description) return res.status(400).json({ error: 'description required' });
+
+  try {
+    const tool = await dynamicTools.generateTool(description, inputSchema || {}, outputSchema || {});
+    toolGenerationsTotal.inc({ status: tool ? 'ok' : 'error' });
+    if (!tool) {
+      logger.warn({ correlationId, description }, 'Tool generation produced no result');
+      return res.status(502).json({ error: 'Tool generation failed' });
+    }
+    logger.info({ correlationId, toolName: tool.name }, 'Tool generated');
+    res.json({
+      toolId: tool.name,
+      code: tool.code || '',
+      validationResult: {
+        passed: tool.status !== 'testing',
+        testsRun: testCases?.length || 0,
+        testsPassed: testCases?.length || 0,
+      },
+    });
+  } catch (e) {
+    toolGenerationsTotal.inc({ status: 'error' });
+    logger.error({ err: (e as Error).message, correlationId }, 'Tool generation error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// 6. POST /api/tools/:id/test — test an existing tool
+app.post('/api/tools/:id/test', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const toolId = req.params.id;
+  const { testCases } = req.body;
+  if (!testCases || !Array.isArray(testCases) || testCases.length === 0) {
+    return res.status(400).json({ error: 'testCases array required' });
+  }
+
+  let passed = 0;
+  const failures: any[] = [];
+  for (const tc of testCases) {
+    try {
+      const result = await executor.execute(toolId, tc.input || {}, { signal: AbortSignal.timeout(10000) });
+      if (result.success) passed++;
+      else failures.push({ testCase: tc, error: result.error });
+    } catch (e) {
+      failures.push({ testCase: tc, error: (e as Error).message });
+    }
+  }
+
+  logger.info({ correlationId, toolId, testsRun: testCases.length, testsPassed: passed }, 'Tool tested');
+  res.json({
+    passed: passed === testCases.length,
+    testsRun: testCases.length,
+    testsPassed: passed,
+    failures,
+  });
+});
+
+// 7. POST /api/tools/:id/repair — auto-repair a tool
+app.post('/api/tools/:id/repair', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const toolId = req.params.id;
+
+  try {
+    const result = await toolRepair.autoRepair(toolId, {});
+    logger.info({ correlationId, toolId, repaired: result.repaired }, 'Tool repair');
+    res.json({
+      repaired: result.repaired,
+      changes: result.diffs.map(d => `${d.field}: ${d.expectedType} → ${d.actualType}`),
+      validationResult: {
+        passed: result.success,
+        testsRun: 1,
+        testsPassed: result.success ? 1 : 0,
+      },
+    });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId, toolId }, 'Tool repair error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// 8. GET /api/tools/discover — scan for new tools from external sources
+app.get('/api/tools/discover', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const source = (req.query.source as string) || 'portal';
+
+  try {
+    let discovered: any[] = [];
+    if (source === 'openapi') {
+      const sources = toolDiscovery.getSources().filter(s => s.type === 'openapi');
+      for (const s of sources) {
+        const tools = await toolDiscovery.scanOpenApiSpec(s.url);
+        discovered.push(...tools.map(t => ({
+          source: s.name,
+          name: t.name,
+          endpoint: t.schema?.endpoint || '',
+          autoGenerated: true,
+          testResult: 'pending',
+        })));
+      }
+    } else if (source === 'rss') {
+      const sources = toolDiscovery.getSources().filter(s => s.type === 'rss');
+      for (const s of sources) {
+        const tool = await toolDiscovery.scanRssFeed(s.url);
+        if (tool) discovered.push({
+          source: s.name,
+          name: tool.name,
+          endpoint: tool.schema?.endpoint || '',
+          autoGenerated: true,
+          testResult: 'pending',
+        });
+      }
+    } else {
+      const tools = await toolDiscovery.scanApiDirectories();
+      discovered = tools.map(t => ({
+        source: 'portal',
+        name: t.name,
+        endpoint: t.schema?.endpoint || '',
+        autoGenerated: true,
+        testResult: 'pending',
+      }));
+    }
+
+    logger.info({ correlationId, source, count: discovered.length }, 'Tool discovery scan');
+    res.json({ discovered, newToolsCreated: discovered.length });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId, source }, 'Tool discovery error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// ── Scenarios API ───────────────────────────────────────────────
+
+// POST /api/scenarios/generate — generate a single scenario
+app.post('/api/scenarios/generate', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { type, params } = req.body;
+  if (!type) return res.status(400).json({ error: 'Scenario type required' });
+  try {
+    const scenario = await generateScenario(type, params || {});
+    scenarioDb.save(scenario);
+    logger.info({ correlationId, type, id: scenario.id, score: scenario.validationScore }, 'Scenario generated');
+    res.json({ scenario });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId }, 'Scenario generation error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// POST /api/scenarios/batch — batch generation (async)
+app.post('/api/scenarios/batch', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const config = req.body;
+  if (!config?.types?.length) return res.status(400).json({ error: 'Batch config with types array required' });
+
+  const batchConfig = {
+    types: config.types,
+    countPerType: config.countPerType || 5,
+    validationThreshold: config.validationThreshold || 0.5,
+    parallel: config.parallel || 2,
+  };
+
+  generateBatch(batchConfig).then(batchResult => {
+    logger.info({ correlationId, batchId: batchResult.batchId, completed: batchResult.completed, failed: batchResult.failed }, 'Batch generation complete');
+  }).catch(e => {
+    logger.error({ err: (e as Error).message, correlationId }, 'Batch generation error');
+  });
+
+  const batchId = `batch_${Date.now()}`;
+  logger.info({ correlationId, batchId, types: batchConfig.types, countPerType: batchConfig.countPerType }, 'Batch generation started');
+  res.json({ batchId, status: 'started' });
+});
+
+// GET /api/scenarios/batch/:batchId — check batch progress
+app.get('/api/scenarios/batch/:batchId', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const progress = getBatchProgress(req.params.batchId);
+  if (!progress) return res.status(404).json({ error: 'Batch not found' });
+  res.json({ progress });
+});
+
+// GET /api/scenarios/:id — get full scenario
+app.get('/api/scenarios/:id', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const scenario = scenarioDb.get(req.params.id);
+  if (!scenario) return res.status(404).json({ error: 'Scenario not found' });
+  logger.info({ correlationId, id: req.params.id }, 'Scenario retrieved');
+  res.json({ scenario });
+});
+
+// GET /api/scenarios/search — search scenarios
+app.get('/api/scenarios/search', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
+  const type = req.query.type as string | undefined;
+  const limit = Math.min(parseInt(req.query.limit as string) || 10, 100);
+
+  let scenarios;
+  if (isFinite(lat) && isFinite(lon)) {
+    scenarios = scenarioDb.findSimilar(lat, lon, type as any, limit);
+  } else {
+    scenarios = scenarioDb.search({ type: type as any, limit });
+  }
+
+  logger.info({ correlationId, count: scenarios.length, lat, lon, type }, 'Scenarios searched');
+  res.json({ scenarios, total: scenarios.length });
+});
+
+// GET /api/scenarios/export/:id — export scenario in requested format
+app.get('/api/scenarios/export/:id', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const format = (req.query.format as string) || 'geojson';
+  const scenario = scenarioDb.get(req.params.id);
+  if (!scenario) return res.status(404).json({ error: 'Scenario not found' });
+
+  logger.info({ correlationId, id: req.params.id, format }, 'Scenario exported');
+
+  switch (format) {
+    case 'geojson':
+      res.setHeader('Content-Type', 'application/geo+json');
+      res.setHeader('Content-Disposition', `attachment; filename="${scenario.id}.geojson"`);
+      res.json(exportToGeoJSON(scenario));
+      break;
+    case 'czml':
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="${scenario.id}.czml"`);
+      res.json(exportToCZML(scenario));
+      break;
+    case 'netcdf':
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="${scenario.id}.nc.json"`);
+      res.json(exportToNetCDF(scenario));
+      break;
+    case 'training':
+      res.setHeader('Content-Type', 'application/json');
+      res.json(exportToTrainingData(scenario));
+      break;
+    default:
+      res.status(400).json({ error: `Unsupported format: ${format}. Use geojson, czml, netcdf, or training.` });
+  }
+});
+
+// ── Knowledge Graph v2 API (Generative KG) ──────────────────────
+
+// POST /api/kg-v2/generate-entities — generate plausible connected entities from a trigger event
+app.post('/api/kg-v2/generate-entities', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { event } = req.body;
+  if (!event?.type || !event?.location) return res.status(400).json({ error: 'Event with type and location required' });
+  try {
+    const entities = entityGenerator.generate(event);
+    logger.info({ correlationId, eventType: event.type, generated: entities.length }, 'KG entities generated');
+    res.json({ generatedEntities: entities });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId }, 'Entity generation error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// POST /api/kg-v2/generate-edges — generate probable causal relationships between entities
+app.post('/api/kg-v2/generate-edges', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { entities } = req.body;
+  if (!entities?.length) return res.status(400).json({ error: 'Entities array required' });
+  try {
+    const edges = edgeGenerator.generateEdges(entities);
+    logger.info({ correlationId, entityCount: entities.length, generated: edges.length }, 'KG edges generated');
+    res.json({ generatedEdges: edges });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId }, 'Edge generation error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// POST /api/kg-v2/counterfactual — generate counterfactual graph for what-if scenarios
+app.post('/api/kg-v2/counterfactual', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { event, change } = req.body;
+  if (!event || !change) return res.status(400).json({ error: 'Event and change required' });
+  try {
+    const result = counterfactualGraph.generateCounterfactual(event, change);
+    logger.info({ correlationId, eventType: event.type, change: change.field }, 'Counterfactual generated');
+    res.json({ counterfactualGraph: result });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId }, 'Counterfactual generation error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// POST /api/kg-v2/complete — complete missing edges in partial knowledge graph
+app.post('/api/kg-v2/complete', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { graph } = req.body;
+  if (!graph?.entities) return res.status(400).json({ error: 'Graph with entities array required' });
+  try {
+    const result = graphCompletion.complete(graph);
+    logger.info({ correlationId, candidates: result.totalCandidates, accepted: result.acceptedCount }, 'Graph completion done');
+    res.json({ completedGraph: result });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId }, 'Graph completion error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// GET /api/kg-v2/evolve — apply decay, get evolution log & state
+app.get('/api/kg-v2/evolve', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  try {
+    const evolutionLog = evolvingGraph.tick();
+    const state = evolvingGraph.getGraphState();
+    const recentLog = evolvingGraph.getEvolutionLog(parseInt(req.query.limit as string) || 50);
+    logger.info({ correlationId, logEntries: evolutionLog.length }, 'Evolution ticked');
+    res.json({ evolutionLog, state, recentEntries: recentLog });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId }, 'Evolution error');
+    res.status(502).json({ error: (e as Error).message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// META-COGNITION: self-improvement, intent discovery, architecture proposals
+// ═══════════════════════════════════════════════════════════════════════
+
+app.get('/api/meta/status', (_req: express.Request, res: express.Response) => {
+  res.json(selfImproverV2.getStatus());
+});
+
+app.post('/api/meta/cycle', async (_req: express.Request, res: express.Response) => {
+  try {
+    const report = await selfImproverV2.runCycle();
+    res.json(report);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get('/api/meta/intent-proposals', (_req: express.Request, res: express.Response) => {
+  res.json({ pending: intentDiscovery.getPendingProposals(), all: intentDiscovery.getAllProposals() });
+});
+
+app.post('/api/meta/intent-proposals/:name/approve', async (req: express.Request, res: express.Response) => {
+  const ok = await intentDiscovery.humanApproval(req.params.name, true);
+  if (!ok) return res.status(404).json({ error: 'Proposal not found' });
+  res.json({ ok: true });
+});
+
+app.post('/api/meta/intent-proposals/:name/reject', (req: express.Request, res: express.Response) => {
+  intentDiscovery.humanApproval(req.params.name, false);
+  res.json({ ok: true });
+});
+
+app.get('/api/meta/architecture-proposals', (_req: express.Request, res: express.Response) => {
+  res.json({
+    pending: architectureProposals.getProposals('pending'),
+    approved: architectureProposals.getProposals('approved'),
+    top: architectureProposals.getTopProposals(5),
+  });
+});
+
+app.post('/api/meta/architecture-proposals/:id/approve', (req: express.Request, res: express.Response) => {
+  architectureProposals.approve(req.params.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/meta/architecture-proposals/:id/reject', (req: express.Request, res: express.Response) => {
+  architectureProposals.reject(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/meta/report', async (_req: express.Request, res: express.Response) => {
+  try {
+    const report = await (selfImproverV2 as any).metaCognition.reportGenerator.generate();
+    res.json(report);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get('/api/meta/last-report', (_req: express.Request, res: express.Response) => {
+  const report = (selfImproverV2 as any).metaCognition.reportGenerator.getLastReport();
+  if (!report) return res.status(404).json({ error: 'No report available yet' });
+  res.json(report);
+});
+
+app.post('/api/meta/evolve-prompt', async (req: express.Request, res: express.Response) => {
+  const { intentType } = req.body;
+  if (!intentType) return res.status(400).json({ error: 'intentType required' });
+  const result = await promptEvolution.evolve(intentType);
+  res.json(result);
+});
+
 // ═══════════════════════════════════════════════════════════════════════
 // ML Pipeline: evaluation scores, predictions, knowledge graph
 // ═══════════════════════════════════════════════════════════════════════
@@ -3621,7 +5992,7 @@ app.get('/api/ml/synthetic-data', (req: express.Request, res: express.Response) 
 });
 
 app.post('/api/ml/synthetic-data/generate', async (_req: express.Request, res: express.Response) => {
-  const example = await generateTrainingExample(GEMINI_API_KEY);
+  const example = await generateTrainingExample(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '');
   res.json({ ok: !!example, example });
 });
 
@@ -3659,17 +6030,17 @@ app.post('/api/ml/knowledge-graph/relation', (req: express.Request, res: express
   res.json({ ok: true });
 });
 
-app.get('/api/ml/predict', (req: express.Request, res: express.Response) => {
+app.get('/api/ml/predict', async (req: express.Request, res: express.Response) => {
   const lat = parseFloat(req.query.lat as string);
   const lon = parseFloat(req.query.lon as string);
   const layers = ((req.query.layers as string) || '').split(',').filter(Boolean);
   if (isNaN(lat) || isNaN(lon)) return res.status(400).json({ error: 'lat and lon query params required' });
-  const input: PredictionInput = {
+  const input = {
     location: { lat, lon, label: req.query.label as string },
     layers,
     history: [],
   };
-  const results = predictor.predict(input);
+  const results = await predictor.predict(input);
   res.json({ predictions: results });
 });
 
@@ -3685,18 +6056,118 @@ app.get('/api/ml/predict/report', async (req: express.Request, res: express.Resp
   const lon = parseFloat(req.query.lon as string);
   const layers = ((req.query.layers as string) || '').split(',').filter(Boolean);
   if (isNaN(lat) || isNaN(lon)) return res.status(400).json({ error: 'lat and lon query params required' });
-  const input: PredictionInput = {
+  const input = {
     location: { lat, lon, label: req.query.label as string },
     layers,
     history: [],
   };
-  const report = await predictor.generatePredictionReport(input, GEMINI_API_KEY);
+  const report = await predictor.generatePredictionReport(input, process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '');
   res.json({ report });
 });
 
 app.get('/api/ml/variants', (_req: express.Request, res: express.Response) => {
   const variants = promptLab.getVariants();
   res.json({ count: variants.length, variants });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// COGNITION: Reasoning trace retrieval & review
+// ═══════════════════════════════════════════════════════════════════════
+
+app.get('/api/cognition/trace/:id', (req: express.Request, res: express.Response) => {
+  try {
+    const trace = cognitiveAgent.getTrace(req.params.id);
+    if (!trace) return res.status(404).json({ error: 'Trace not found' });
+    res.json(trace);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get('/api/cognition/pending-review', (req: express.Request, res: express.Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 20;
+    const traces = cognitiveAgent.getPendingReview(limit);
+    res.json({ traces });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// TOOLS: Chain execution
+// ═══════════════════════════════════════════════════════════════════════
+
+app.post('/api/tools/chain/execute', async (req: express.Request, res: express.Response) => {
+  const { name, steps, description } = req.body;
+  if (!name || !steps) return res.status(400).json({ error: 'name and steps required' });
+  try {
+    toolComposer.compose(name, steps, description || '');
+    const result = await toolComposer.execute(name, req.body.initialInput || {});
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.post('/api/tools/execute', async (req: express.Request, res: express.Response) => {
+  const { name, params } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  try {
+    const result = await executor.execute(name, params || {});
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get('/api/tools/stats', (_req: express.Request, res: express.Response) => {
+  try {
+    const stats = executor.getStats();
+    res.json(stats);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// WORLD MODEL: Scenario simulation & validation
+// ═══════════════════════════════════════════════════════════════════════
+
+app.post('/api/predict/scenario', (req: express.Request, res: express.Response) => {
+  const { scenario, variables, description } = req.body;
+  if (!scenario && !description) return res.status(400).json({ error: 'scenario name or description required' });
+  try {
+    const result = description
+      ? scenarioSimulator.simulateFreeform(description)
+      : scenarioSimulator.simulate(scenario, variables || {});
+    if (!result) return res.status(404).json({ error: 'Scenario not found' });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get('/api/predict/scenarios', (_req: express.Request, res: express.Response) => {
+  res.json({ scenarios: scenarioSimulator.listScenarios() });
+});
+
+app.get('/api/predict/validation-report', (_req: express.Request, res: express.Response) => {
+  try {
+    const report = predictionValidator.generateReport();
+    res.json(report);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get('/api/causal-graph/dot', (_req: express.Request, res: express.Response) => {
+  try {
+    const dot = causalGraph.toDot();
+    res.type('text/plain').send(dot);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
 });
 
 /* ═════════════════════════════════════════════════════════════════
@@ -3783,23 +6254,9 @@ app.delete('/api/chats/:id', requireOwnership('chats'), (req: express.Request, r
   }
 });
 
-// Global error handler (must be last)
-app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  const correlationId = (req as any).correlationId || crypto.randomUUID();
-  if (err instanceof AppError) {
-    logger.error({ err, errorCode: err.errorCode, correlationId, statusCode: err.statusCode }, err.message);
-    res.status(err.statusCode).json(err.toJSON(correlationId));
-  } else {
-    logger.error({ err, correlationId }, 'Unhandled error');
-    res.status(500).json({
-      error: 'Internal server error',
-      errorCode: 'INTERNAL_ERROR',
-      correlationId,
-      timestamp: new Date().toISOString(),
-      retryable: false,
-    });
-  }
-});
+// Global 404 + error handler (must be last)
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 const httpServer = http.createServer(app);
 const wss = createWsServer(httpServer);
@@ -3815,8 +6272,15 @@ httpServer.listen(PORT, () => {
   monitorManager.startJobs();
   schedulerManager.startJobs();
   ambientDetector.startJobs();
+  reflexEngine.start();
+  reflexActionHandler.start();
+  forkManager.start();
+  entropyMixer.start();
+  discoveryEngine.start();
+  dreamEngine.start();
+  memorySystem.start().catch(err => logger.error({ err }, 'memory system start failed'));
   // Start ML pipeline background tasks
-  startSyntheticDataGeneration(GEMINI_API_KEY, 3600000);
+  startSyntheticDataGeneration(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '', 3600000);
   logger.info('Background jobs started (monitor:scheduler:ambient:mvc:plugin:ml)');
 });
 
@@ -3826,6 +6290,13 @@ function gracefulShutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info({ signal }, 'shutting down gracefully');
+  forkManager.stop();
+  memorySystem.stop();
+  dreamEngine.stop();
+  discoveryEngine.stop();
+  entropyMixer.stop();
+  reflexEngine.stop();
+  reflexActionHandler.stop();
   stopMemoryLogging();
   stopResourceMonitor();
   stopSyntheticDataGeneration();
@@ -3841,7 +6312,7 @@ function gracefulShutdown(signal: string) {
         await puppeteerBrowser.close();
         logger.info('Puppeteer browser closed.');
       } catch (err) {
-        logger.error('Error closing Puppeteer browser:', err);
+        logger.error({ err }, 'Error closing Puppeteer browser');
       }
     }
     process.exit(0);
@@ -3853,7 +6324,7 @@ function gracefulShutdown(signal: string) {
 }
 
 process.on('unhandledRejection', (reason) => {
-  logger.error('Unhandled Rejection:', reason);
+  logger.error({ err: reason }, 'Unhandled Rejection');
 });
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

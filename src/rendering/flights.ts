@@ -1,4 +1,6 @@
 import * as Cesium from 'cesium';
+import { GhostProtocol } from './ghostProtocol';
+import { GhostEntity } from './GhostEntity';
 
 export interface FlightState {
   icao24: string;
@@ -74,12 +76,15 @@ export class FlightDeadReckoning {
   private flights = new Map<string, FlightState>();
   private entities = new Map<string, Cesium.Entity>();
   private iconKeys = new Map<string, string>();
+  private ghostEntities: Map<string, GhostEntity> = new Map();
+  private ghostProtocol?: GhostProtocol;
   private removeTick: (() => void) | null = null;
   private viewer: Cesium.Viewer;
   private lastTickTime: number = Date.now();
 
-  constructor(viewer: Cesium.Viewer) {
+  constructor(viewer: Cesium.Viewer, ghostProtocol?: GhostProtocol) {
     this.viewer = viewer;
+    this.ghostProtocol = ghostProtocol;
   }
 
   updateFromApi(states: unknown[][]) {
@@ -107,12 +112,19 @@ export class FlightDeadReckoning {
 
   clear() {
     this.stop();
-    for (const ent of this.entities.values()) {
-      this.viewer.entities.remove(ent);
+    for (const [id, ent] of this.entities.entries()) {
+      const ghost = this.ghostEntities.get(id);
+      if (ghost) {
+        this.ghostProtocol?.removeGhost(id);
+        this.ghostEntities.delete(id);
+      } else {
+        this.viewer.entities.remove(ent);
+      }
     }
     this.entities.clear();
     this.iconKeys.clear();
     this.flights.clear();
+    this.ghostEntities.clear();
   }
 
   private tick() {
@@ -148,7 +160,7 @@ export class FlightDeadReckoning {
       activeIds.add(id);
       let ent = this.entities.get(id);
       if (!ent) {
-        ent = this.viewer.entities.add({
+        const entityConfig: Cesium.Entity.ConstructorOptions = {
           position: pos,
           name: flight.callsign,
           billboard: {
@@ -183,7 +195,15 @@ export class FlightDeadReckoning {
             lat: flight.lat,
             time: Date.now(),
           },
-        });
+        };
+        if (this.ghostProtocol) {
+          const velocityVec = flight.velocity > 0 ? new Cesium.Cartesian3(flight.velocity, 0, 0) : null;
+          const ghost = this.ghostProtocol.createGhost(id, entityConfig, 'aviation', velocityVec, flight.heading || null);
+          this.ghostEntities.set(id, ghost);
+          ent = ghost.getRealEntity()!;
+        } else {
+          ent = this.viewer.entities.add(entityConfig);
+        }
         this.entities.set(id, ent);
         const roundedKey = `${Math.round(flight.heading / 5) * 5}_${color}`;
         this.iconKeys.set(id, roundedKey);
@@ -192,6 +212,11 @@ export class FlightDeadReckoning {
           ent.position.setValue(pos);
         } else {
           ent.position = new Cesium.ConstantPositionProperty(pos);
+        }
+        const ghost = this.ghostEntities.get(id);
+        if (ghost && this.ghostProtocol) {
+          const velocityVec = flight.velocity > 0 ? new Cesium.Cartesian3(flight.velocity, 0, 0) : null;
+          ghost.updatePosition(pos, velocityVec, flight.heading || null);
         }
         if (full) {
           const rounded = Math.round(flight.heading / 5) * 5;
@@ -237,7 +262,13 @@ export class FlightDeadReckoning {
 
     for (const [id, ent] of this.entities.entries()) {
       if (activeIds.has(id)) continue;
-      this.viewer.entities.remove(ent);
+      const ghost = this.ghostEntities.get(id);
+      if (ghost) {
+        this.ghostProtocol?.removeGhost(id);
+        this.ghostEntities.delete(id);
+      } else {
+        this.viewer.entities.remove(ent);
+      }
       this.entities.delete(id);
       this.iconKeys.delete(id);
     }

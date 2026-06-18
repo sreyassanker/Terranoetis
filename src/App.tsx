@@ -1,10 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera } from 'lucide-react';
+import { Cctv, Camera, Monitor } from 'lucide-react';
+import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
 import AdminDashboard from '@/pages/AdminDashboard';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth, authHeaders } from '@/context/AuthContext';
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { apiGet } from '@/lib/api';
@@ -20,6 +21,10 @@ import { addEarthquakeEntity, type UsgsFeature } from '@/rendering/earthquakes';
 import { loadTectonicPlates } from '@/rendering/tectonic';
 import { FlightDeadReckoning, altitudeBandColor } from '@/rendering/flights';
 import { AisVesselTracker } from '@/rendering/ais';
+import { GhostProtocol } from '@/rendering/ghostProtocol';
+import { ForkRenderer } from '@/rendering/forkRenderer';
+import { EntropyHalo } from '@/rendering/entropyHalo';
+import { OracleChainRenderer, type CausalChainLink } from '@/rendering/oracleChains';
 import {
   loadAirspaces,
   addSpaceDebrisEntities,
@@ -31,7 +36,16 @@ import {
   addAnimalMigrationEntities,
   getDebrisOrbitPositions
 } from '@/rendering/realDataLayers';
+import { ForkPanel } from '@/components/ForkPanel';
+
+import { ReasoningTraceViewer, EvidenceChainPanel, UncertaintyBadge, HumanOverrideBanner } from '@/components/explainability/index';
+import { CognitiveDashboard, AlertPanel as CockpitAlertPanel, ToolWorkbench, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
 import { ApiVault } from '@/components/ui/api-vault';
+import ScenarioViewer from '@/components/scenarios/ScenarioViewer';
+import ScenarioEditor from '@/components/scenarios/ScenarioEditor';
+import ScenarioGallery from '@/components/scenarios/ScenarioGallery';
+import CinematicDirector from '@/components/scenarios/CinematicDirector';
+import SpatialSketching from '@/components/scenarios/SpatialSketching';
 import { createRenderScheduler } from '@/lib/renderScheduler';
 import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings } from '@/rendering/digitalTwinLayers';
 import {
@@ -199,7 +213,8 @@ const LAYER_DEFS: LayerItem[] = LAYER_CATEGORIES.map(lc => {
   };
 });
 
-const API_VAULT_STORAGE_KEY = 'liveglobe.apiVault.v1';
+const LEGACY_VAULT_KEYS = 'liveglobe.apiKeys.v1';
+const LEGACY_VAULT_STATE = 'liveglobe.apiVault.v1';
 const CESIUM_ION_ENV_TOKEN = (import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined)?.trim() ?? '';
 
 const DEFAULT_API_VAULT: ApiVaultState = {
@@ -286,25 +301,32 @@ function sanitizeHtml(text: string): string {
   return text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] || c);
 }
 
+function vaultFromFlatKeys(keys: Record<string, string>): ApiVaultState {
+  return {
+    ...DEFAULT_API_VAULT,
+    gemini: keys.GOOGLE_GEMINI_API_KEY ?? '',
+    anthropic: keys.ANTHROPIC_API_KEY ?? '',
+    cesiumIonAccessToken: keys.CESIUM_ION_ACCESS_TOKEN ?? CESIUM_ION_ENV_TOKEN,
+    sentinelHubClientId: keys.SENTINEL_HUB_CLIENT_ID ?? '',
+    sentinelHubClientSecret: keys.SENTINEL_HUB_CLIENT_SECRET ?? '',
+    marineTrafficApiKey: keys.MARINE_TRAFFIC_API_KEY ?? '',
+    aisStreamApiKey: keys.AIS_STREAM_API_KEY ?? '',
+  };
+}
+
 function loadApiVault(): ApiVaultState {
-  if (typeof window === 'undefined') return DEFAULT_API_VAULT;
+  return {
+    ...DEFAULT_API_VAULT,
+    cesiumIonAccessToken: CESIUM_ION_ENV_TOKEN,
+  };
+}
+
+function purgeLegacyVaultStorage(): void {
   try {
-    const raw = window.localStorage.getItem(API_VAULT_STORAGE_KEY);
-    if (!raw) return DEFAULT_API_VAULT;
-    const parsed = JSON.parse(raw) as Partial<ApiVaultState>;
-    return {
-      ...DEFAULT_API_VAULT,
-      ...parsed,
-      preferredAiProvider:
-        parsed.preferredAiProvider === 'anthropic'
-      ? 'anthropic'
-      : parsed.preferredAiProvider === 'local'
-        ? 'local'
-        : 'gemini',
-      vaultDismissed: Boolean(parsed.vaultDismissed),
-    };
+    localStorage.removeItem(LEGACY_VAULT_KEYS);
+    localStorage.removeItem(LEGACY_VAULT_STATE);
   } catch {
-    return DEFAULT_API_VAULT;
+    /* ignore */
   }
 }
 
@@ -643,8 +665,14 @@ function richRender(text: string): string {
   // Wrap in paragraph if not already wrapped
   if (!html.startsWith('<')) html = `<p class="rich-p">${html}</p>`;
 
-  RICH_MESSAGE_CACHE.set(text, html);
-  return html;
+  // Sanitize to prevent XSS — defense in depth even though text was already escaped
+  const safe = DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['p', 'br', 'hr', 'strong', 'em', 'code', 'pre', 'span', 'div', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'a', 'blockquote'],
+    ALLOWED_ATTR: ['class', 'value', 'href', 'rel', 'target'],
+    ALLOW_DATA_ATTR: false,
+  });
+  RICH_MESSAGE_CACHE.set(text, safe);
+  return safe;
 }
 
 function renderCommandChips(
@@ -702,6 +730,7 @@ export default function App() {
   const activeHeatmapRef = useRef<string | null>(null);
   const clickHandlerRef = useRef<Cesium.Event.RemoveCallback | null>(null);
   const screenSpaceHandlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
+  const forkRendererRef = useRef<ForkRenderer | null>(null);
   const issTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const rotateTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -736,6 +765,9 @@ export default function App() {
   const flightawareDrRef = useRef<FlightDeadReckoning | null>(null);
   const airlabsDrRef = useRef<FlightDeadReckoning | null>(null);
   const aisTrackerRef = useRef<AisVesselTracker | null>(null);
+  const ghostProtocolRef = useRef<GhostProtocol | null>(null);
+  const entropyHaloRef = useRef<EntropyHalo | null>(null);
+  const oracleChainRef = useRef<OracleChainRenderer | null>(null);
   const entityTrackerRef = useRef<ReturnType<typeof createEntityTracker> | null>(null);
   const unlockInteractionRef = useRef<(() => void) | null>(null);
   const fpsFramesRef = useRef<number[]>([]);
@@ -790,6 +822,17 @@ export default function App() {
   const [activeEvents, setActiveEvents] = useState(0);
   const [weatherCards, setWeatherCards] = useState<WeatherCardData[]>([]);
   const [contextMenu, setContextMenu] = useState<{show:boolean;x:number;y:number;lat:number;lon:number}>({show:false,x:0,y:0,lat:0,lon:0});
+  const [forks, setForks] = useState<Array<{forkId: string; name: string; divergenceScore: number; status: string}>>([]);
+  const [activeForkCount, setActiveForkCount] = useState(0);
+  const [monitorCollapsed, setMonitorCollapsed] = useState(false);
+  const [memoryStats, setMemoryStats] = useState<Record<string, { count: number }> | null>(null);
+  const [reflexStates, setReflexStates] = useState<Array<{ reflexId: string; status: string }>>([
+    { reflexId: 'seismic-pupillary', status: 'IDLE' },
+    { reflexId: 'storm-pupillary', status: 'IDLE' },
+    { reflexId: 'maritime-distress', status: 'IDLE' },
+  ]);
+  const [recentDiscoveries, setRecentDiscoveries] = useState<Array<{ summary: string; confidence: number }>>([]);
+  const [lastDream, setLastDream] = useState<{ scenariosRun: number; modelUpdates: number; newCausalEdges: number; timestamp: number } | null>(null);
   const [alerts, setAlerts] = useState<EventAlert[]>([]);
   const [newAlertCount, setNewAlertCount] = useState(0);
   const [notifications, setNotifications] = useState<Array<{id:number;text:string;severity:string}>>([]);
@@ -799,10 +842,27 @@ export default function App() {
     { id: nextAiMsgIdRef.current++, role: 'assistant', content: '👋 Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' },
   ]);
   const [aiTyping, setAiTyping] = useState(false);
-  const ws = useWebSocket();
-  const { isLoggedIn, isAdmin } = useAuth();
+  const auth = useAuth();
+  const ws = useWebSocket(auth.token ?? undefined);
+  const { isLoggedIn, isAdmin } = auth;
   const [aiInput, setAiInput] = useState('');
   const [agentSteps, setAgentSteps] = useState<Array<{type:string;text:string;code?:string;output?:string;timeMs?:number;toolName?:string;subtask?:string;status?:string}>>([]);
+  const [showReasoningFor, setShowReasoningFor] = useState<Record<string, boolean>>({});
+  const [showEvidenceFor, setShowEvidenceFor] = useState<Record<string, boolean>>({});
+  const [reasoningTraces, setReasoningTraces] = useState<Record<string, any>>({});
+  const [evidenceChains, setEvidenceChains] = useState<Record<string, any>>({});
+  const [showCognitiveDashboard, setShowCognitiveDashboard] = useState(false);
+  const [showCockpitAlerts, setShowCockpitAlerts] = useState(false);
+  const [showToolWorkbench, setShowToolWorkbench] = useState(false);
+  const [showMemoryExplorer, setShowMemoryExplorer] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showScenarioGallery, setShowScenarioGallery] = useState(false);
+  const [showScenarioEditor, setShowScenarioEditor] = useState(false);
+  const [showCinematicDirector, setShowCinematicDirector] = useState(false);
+  const [showSpatialSketching, setShowSpatialSketching] = useState(false);
+  const [selectedScenario, setSelectedScenario] = useState<any>(null);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+  const [scenarioGalleryScenarios, setScenarioGalleryScenarios] = useState<any[]>([]);
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
   const [agentEnvironmentId, setAgentEnvironmentId] = useState<string | null>(null);
   const agentInteractionIdRef = useRef<string | null>(null);
@@ -864,11 +924,27 @@ export default function App() {
       }
     }, 2000);
     return () => clearTimeout(timer);
-  }, [aiMessages.length]);
+  }, [aiMessages]);
 
   // Load chat list on mount
   useEffect(() => {
     listChats().then(setChatList).catch(() => {});
+  }, []);
+
+  // Poll memory stats every 30s
+  useEffect(() => {
+    const fetchMemory = async () => {
+      try {
+        const res = await fetch('/api/memory/stats', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          setMemoryStats(data.tiers);
+        }
+      } catch { /* silent */ }
+    };
+    fetchMemory();
+    const interval = setInterval(fetchMemory, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   // Auto-save chat after each new message
@@ -889,7 +965,7 @@ export default function App() {
       }).catch(() => {});
     }, 2000);
     return () => { if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current); };
-  }, [aiMessages.length, agentEnvironmentId, sandboxWorkspaceId]);
+  }, [aiMessages, agentEnvironmentId, sandboxWorkspaceId]);
   // Auto-expand thinking block when new steps arrive
   const prevStepCountRef = useRef(0);
   useEffect(() => {
@@ -966,29 +1042,43 @@ export default function App() {
 
   useEffect(() => {
     apiVaultRef.current = apiVault;
-    try {
-      const toStore = { ...apiVault, cesiumIonAccessToken: '' };
-      window.localStorage.setItem(API_VAULT_STORAGE_KEY, JSON.stringify(toStore));
-    } catch {
-      // Ignore storage failures in private or restricted browsing modes.
-    }
   }, [apiVault]);
 
-  const handleApiVaultSave = (keys: Record<string, string>) => {
-    // Persist flat key map so getApiKey (used for FlightAware/AirLabs) finds them
-    localStorage.setItem('liveglobe.apiKeys.v1', JSON.stringify(keys));
-    // Map the saved keys to the ApiVaultState interface
-    const newVault: ApiVaultState = {
-      ...apiVault,
-      gemini: keys['GOOGLE_GEMINI_API_KEY'] || apiVault.gemini,
-      anthropic: keys['ANTHROPIC_API_KEY'] || apiVault.anthropic,
-      cesiumIonAccessToken: keys['CESIUM_ION_ACCESS_TOKEN'] || apiVault.cesiumIonAccessToken,
-      sentinelHubClientId: keys['SENTINEL_HUB_CLIENT_ID'] || apiVault.sentinelHubClientId,
-      sentinelHubClientSecret: keys['SENTINEL_HUB_CLIENT_SECRET'] || apiVault.sentinelHubClientSecret,
-      marineTrafficApiKey: keys['MARINE_TRAFFIC_API_KEY'] || apiVault.marineTrafficApiKey,
-      aisStreamApiKey: keys['AIS_STREAM_API_KEY'] || apiVault.aisStreamApiKey,
-    };
-    setApiVault(newVault);
+  const flatKeysRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    purgeLegacyVaultStorage();
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetch('/api/vault', { headers: authHeaders() });
+        if (!resp.ok || cancelled) return;
+        const data = await resp.json() as { keys?: Record<string, string> };
+        if (cancelled || !data.keys) return;
+        flatKeysRef.current = data.keys;
+        setApiVault(prev => ({ ...vaultFromFlatKeys(data.keys!), preferredAiProvider: prev.preferredAiProvider, vaultDismissed: prev.vaultDismissed }));
+      } catch {
+        /* vault optional until user saves keys */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isLoggedIn]);
+
+  const handleApiVaultSave = async (keys: Record<string, string>) => {
+    flatKeysRef.current = keys;
+    const newVault = vaultFromFlatKeys(keys);
+    setApiVault(prev => ({ ...newVault, preferredAiProvider: prev.preferredAiProvider, vaultDismissed: prev.vaultDismissed }));
+    try {
+      await fetch('/api/vault', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ keys }),
+      });
+      purgeLegacyVaultStorage();
+    } catch {
+      showNotification('Failed to save API keys to server', 'warning');
+    }
   };
 
   /* ── IST Clock ── */
@@ -1043,6 +1133,10 @@ export default function App() {
       creditContainer: document.createElement('div'),
     });
     viewerRef.current = v;
+    forkRendererRef.current = new ForkRenderer(v);
+    ghostProtocolRef.current = new GhostProtocol(v);
+    entropyHaloRef.current = new EntropyHalo(v);
+    oracleChainRef.current = new OracleChainRenderer(v);
     if (import.meta.env.DEV) {
       window.__liveglobeDebug = {
         ...(window.__liveglobeDebug ?? {}),
@@ -1056,16 +1150,17 @@ export default function App() {
           };
         },
       };
+      (window as any).__renderCausalChain = renderCausalChain;
     }
     entityTrackerRef.current = createEntityTracker(v);
-    flightDrRef.current = new FlightDeadReckoning(v);
-    adsbLolDrRef.current = new FlightDeadReckoning(v);
-    adsbFiDrRef.current = new FlightDeadReckoning(v);
-    flightawareDrRef.current = new FlightDeadReckoning(v);
-    airlabsDrRef.current = new FlightDeadReckoning(v);
+    flightDrRef.current = new FlightDeadReckoning(v, ghostProtocolRef.current ?? undefined);
+    adsbLolDrRef.current = new FlightDeadReckoning(v, ghostProtocolRef.current ?? undefined);
+    adsbFiDrRef.current = new FlightDeadReckoning(v, ghostProtocolRef.current ?? undefined);
+    flightawareDrRef.current = new FlightDeadReckoning(v, ghostProtocolRef.current ?? undefined);
+    airlabsDrRef.current = new FlightDeadReckoning(v, ghostProtocolRef.current ?? undefined);
     const aisKey = apiVaultRef.current.aisStreamApiKey;
     if (aisKey) {
-      aisTrackerRef.current = new AisVesselTracker(v, aisKey);
+      aisTrackerRef.current = new AisVesselTracker(v, aisKey, ghostProtocolRef.current ?? undefined);
     }
     v.scene.logarithmicDepthBuffer = true;
     v.clock.shouldAnimate = true;
@@ -1200,12 +1295,29 @@ export default function App() {
 
     handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
       const cart = v.camera.pickEllipsoid(click.position, v.scene.globe.ellipsoid);
-      if (cart) {
-        const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cart);
-        const lon = Cesium.Math.toDegrees(carto.longitude);
-        const lat = Cesium.Math.toDegrees(carto.latitude);
-        setContextMenu({ show: true, x: click.position.x, y: click.position.y, lat, lon });
-      }
+      if (!cart) return;
+      const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cart);
+      const lon = Cesium.Math.toDegrees(carto.longitude);
+      const lat = Cesium.Math.toDegrees(carto.latitude);
+      setContextMenu({ show: true, x: click.position.x, y: click.position.y, lat, lon });
+
+      // Fork creation prompt
+      const forkName = window.prompt('🍴 Name this parallel reality:', `Fork-${Date.now()}`);
+      if (!forkName) return;
+      fetch('/api/fork/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          name: forkName,
+          lat,
+          lon,
+          deltas: [{ type: 'INJECT_EVENT', targetId: 'manual_fork', parameters: { lat, lon }, effectiveTimeOffsetHours: 0 }],
+          maxSimulationHours: 72,
+        }),
+      }).then(r => r.json()).then(data => {
+        console.log('Fork created:', data);
+      }).catch(e => console.error('Fork creation failed:', e));
     }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
 
     handler.setInputAction(() => setContextMenu({show:false,x:0,y:0,lat:0,lon:0}), Cesium.ScreenSpaceEventType.LEFT_DOWN);
@@ -1259,7 +1371,7 @@ export default function App() {
       v.scene.postRender.removeEventListener(onPostRender);
       cleanupCesium();
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Request geolocation once on mount for "near me" features
   useEffect(() => {
@@ -1402,7 +1514,7 @@ export default function App() {
       }
     }, 60000);
     return () => clearInterval(timer);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadFlightTracks(viewer: Cesium.Viewer) {
     if (!isLayerEnabled('flight_tracks')) return;
@@ -1649,11 +1761,18 @@ export default function App() {
     showFeedSummaryOnce();
     updateCounts();
 
-    fetch('https://raw.githubusercontent.com/mwgg/Airports/master/airports.json')
+    fetch('/api/data/airports?group=aviation')
       .then(r => r.json())
-      .then((data: Record<string, Record<string, unknown>>) => {
-        const apList = Object.values(data).filter((a: Record<string, unknown>) => a.Size && (a.Size as number) >= 3);
-        entityStoreRef.current['airports'] = apList.slice(0, 300).map(a => viewer.entities.add({
+      .then((data: any) => { const items: any[] = data.items ?? data; if (!Array.isArray(items)) return;
+        const norm = items.map(a => ({
+          iata: a.iata || '',
+          icao: a.icao || '',
+          name: a.name,
+          lat: a.lat,
+          lon: a.lon,
+          Size: a.magnitude ? 3 + Math.round(a.magnitude * 4) : 3,
+        }));
+        entityStoreRef.current['airports'] = norm.slice(0, 300).map(a => viewer.entities.add({
           position: Cesium.Cartesian3.fromDegrees(a.lon as number, a.lat as number),
           name: a.name as string,
           billboard: { image: createAirportIcon(), width: 12, height: 12,
@@ -1669,7 +1788,7 @@ export default function App() {
       .catch((err) => recordFeedError('airports', err));
 
     setLoadingProgress(70);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function refreshLiveData(viewer: Cesium.Viewer) {
     if (isLayerEnabled('earthquakes')) await loadEarthquakes(viewer);
@@ -1721,7 +1840,7 @@ export default function App() {
         if (!isLayerEnabled(layer.id)) return;
         removeLayerEntities(layer.id);
         if (items.length) {
-          const ents = await renderLayer(viewer, layer, items);
+          const ents = await renderLayer(viewer, layer, items, ghostProtocolRef.current ?? undefined);
           entityStoreRef.current[layer.id] = ents;
         }
       } catch { /* skip */ }
@@ -1883,7 +2002,7 @@ export default function App() {
     return ent;
   }
 
-  function focusLocation(lat: number, lon: number, options?: { label?: string; color?: string; height?: number; duration?: number; }) {
+  const focusLocation = useCallback((lat: number, lon: number, options?: { label?: string; color?: string; height?: number; duration?: number; }) => {
     const v = viewerRef.current;
     if (!v) return;
     if (focusMarkerRef.current) {
@@ -1918,7 +2037,7 @@ export default function App() {
     });
     focusMarkerRef.current = marker;
     cinematicFlyTo(v, lon, lat, height, options?.duration ?? 2.5);
-  }
+  }, []);
 
   function flyToIndiaDirect() {
     const v = viewerRef.current;
@@ -1978,6 +2097,7 @@ export default function App() {
       ents.forEach(ent => {
         clearEntityProperties(ent);
         v.entities.remove(ent);
+        ghostProtocolRef.current?.removeGhost(ent.id);
       });
       if (layerId === 'submarine_cables' && submarineCablesDataSourceRef.current) {
         v.dataSources.remove(submarineCablesDataSourceRef.current, true);
@@ -2347,7 +2467,7 @@ export default function App() {
       setStormForecast(null);
       setPopulationImpact(null);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const v = viewerRef.current;
@@ -2674,7 +2794,7 @@ export default function App() {
         (timelineRef.current.end - timelineRef.current.start)) * 100));
       throttledTimelineFilter();
     }, 50);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pauseTimeline = useCallback(() => {
     timelineRef.current.active = false;
@@ -2703,7 +2823,7 @@ export default function App() {
     t.current = t.start + (t.end - t.start) * (val / 100);
     setTimelineValue(val);
     throttledTimelineFilter();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function throttledTimelineFilter() {
     const now = Date.now();
@@ -3080,6 +3200,35 @@ export default function App() {
     focusLocation(lat, lon, { label, color, height: 150, duration });
   }, [focusLocation]);
 
+  const handlePauseFork = useCallback(async (forkId: string) => {
+    try {
+      await fetch(`/api/fork/${forkId}/pause`, { method: 'POST', credentials: 'include' });
+      forkRendererRef.current?.pauseForkVisual(forkId);
+      setForks(prev => prev.map(f => f.forkId === forkId ? { ...f, status: 'paused' } : f));
+    } catch (e) { console.error('Pause fork failed:', e); }
+  }, []);
+
+  const handleResumeFork = useCallback(async (forkId: string) => {
+    try {
+      await fetch(`/api/fork/${forkId}/resume`, { method: 'POST', credentials: 'include' });
+      forkRendererRef.current?.resumeForkVisual(forkId);
+      setForks(prev => prev.map(f => f.forkId === forkId ? { ...f, status: 'running' } : f));
+    } catch (e) { console.error('Resume fork failed:', e); }
+  }, []);
+
+  const handleTerminateFork = useCallback(async (forkId: string) => {
+    try {
+      await fetch(`/api/fork/${forkId}/terminate`, { method: 'POST', credentials: 'include' });
+      forkRendererRef.current?.removeForkVisual(forkId);
+      setForks(prev => prev.filter(f => f.forkId !== forkId));
+      setActiveForkCount(prev => Math.max(0, prev - 1));
+    } catch (e) { console.error('Terminate fork failed:', e); }
+  }, []);
+
+  const renderCausalChain = useCallback((links: CausalChainLink[]) => {
+    oracleChainRef.current?.renderChain(links);
+  }, []);
+
   /* ═════════════════════════════════════════════════════════════════
      LAYER TOGGLES
      ═════════════════════════════════════════════════════════════════ */
@@ -3115,7 +3264,7 @@ export default function App() {
     if (['severe_storms', 'storm_forecast', 'wildfires', 'smoke_dispersion'].includes(layerId)) {
       refreshDerivedOverlays();
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function loadGenericLayer(viewer: Cesium.Viewer, layerId: string) {
     const layer = LAYER_CATEGORIES.find(l => l.id === layerId);
@@ -3129,10 +3278,11 @@ export default function App() {
     fetchLayerData(layer).then(async (items) => {
       if (layerGenRef.current[layerId] !== gen) return;
       if (!isLayerEnabled(layerId) || !items.length) return;
-      const ents = await renderLayer(viewer, layer, items);
+      const ents = await renderLayer(viewer, layer, items, ghostProtocolRef.current ?? undefined);
       if (ents.length) {
         entityStoreRef.current[layerId] = ents;
         viewer.scene.requestRender();
+        viewer.zoomTo(ents);
       }
     }).catch((e: any) => console.warn(`Failed to load generic layer ${layerId}:`, e));
   }
@@ -3173,6 +3323,7 @@ export default function App() {
       return;
     } else if (layerId === 'storm_forecast' || layerId === 'smoke_dispersion') {
       refreshDerivedOverlays();
+      return;
     } else if (layerId === 'disaster_near_me') {
       renderDisasterNearMeLayer();
     } else if (layerId === 'flight_tracks') {
@@ -3299,7 +3450,7 @@ export default function App() {
               showNotification('AISStream API Key required. Add it in settings.', 'warning');
               setTimeout(() => toggleLayer('ais_vessels'), 10);
             } else {
-              aisTrackerRef.current = new AisVesselTracker(v, key);
+              aisTrackerRef.current = new AisVesselTracker(v, key, ghostProtocolRef.current ?? undefined);
               startTracker(aisTrackerRef.current);
             }
           }
@@ -3733,14 +3884,7 @@ export default function App() {
   }
 
   function getApiKey(keyName: string): string {
-    try {
-      const stored = localStorage.getItem('liveglobe.apiKeys.v1');
-      if (stored) {
-        const parsed = JSON.parse(stored) as Record<string, string>;
-        return parsed[keyName] || '';
-      }
-    } catch { /* ignore */ }
-    return '';
+    return flatKeysRef.current[keyName] || '';
   }
 
   async function loadAviationLayer(
@@ -3957,7 +4101,7 @@ export default function App() {
       night_lights: 'VIIRS_Black_Marble',
       land_cover: 'MODIS_Combined_L3_IGBP_Land_Cover_Type_Annual',
       aerosol_index: 'OMPS_Aerosol_Index',
-      so2_index: 'OMPS_NOAA20_SO2_Lower_Troposphere',
+      so2_index: 'OMPS_SO2_Total_Column_Lower_Troposphere',
       co_index: 'MOPITT_CO_Daily_Total_Column_Day',
       dust_score: 'MODIS_Terra_Aerosol',
       flood_extent: 'MODIS_Combined_Flood_1-Day',
@@ -4200,7 +4344,7 @@ export default function App() {
       showNotification(`All layers disabled`, 'success');
     }
     refreshDerivedOverlays();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const enableDefaultLayers = useCallback(() => {
     const prevLayers = layersRef.current;
@@ -4222,14 +4366,15 @@ export default function App() {
       }
     }
     refreshDerivedOverlays();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ═════════════════════════════════════════════════════════════════
      AI CHAT
      ═════════════════════════════════════════════════════════════════ */
 
   const handleFileUpload = useCallback(async (file: File) => {
-    if (!sandboxWorkspaceId) {
+    let workspaceId = sandboxWorkspaceId;
+    if (!workspaceId) {
       try {
         const resp = await fetch('/api/sandbox/workspace', {
           method: 'POST',
@@ -4238,15 +4383,22 @@ export default function App() {
         });
         if (resp.ok) {
           const ws = await resp.json();
-          setSandboxWorkspaceId(ws.id);
+          workspaceId = ws.id;
+          setSandboxWorkspaceId(workspaceId);
+        } else {
+          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Sandbox workspace creation failed (${resp.status})`, type: 'error' }]);
+          return;
         }
-      } catch { return; }
+      } catch (e) {
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Sandbox workspace error: ${e}`, type: 'error' }]);
+        return;
+      }
     }
 
-    if (!sandboxWorkspaceId) return;
+    if (!workspaceId) return;
 
     const content = await file.text();
-    const resp = await fetch(`/api/sandbox/workspace/${sandboxWorkspaceId}/upload`, {
+    const resp = await fetch(`/api/sandbox/workspace/${workspaceId}/upload`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fileName: file.name, content }),
@@ -4254,6 +4406,8 @@ export default function App() {
     if (resp.ok) {
       setUploadedFiles(prev => [...prev, file.name]);
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `📎 Uploaded **${file.name}** to sandbox workspace. You can now ask me to analyze it.`, type: 'upload' }]);
+    } else {
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ File upload failed (${resp.status})`, type: 'error' }]);
     }
   }, [sandboxWorkspaceId]);
 
@@ -4355,15 +4509,131 @@ export default function App() {
         });
         setNewAlertCount(prev => prev + 1);
       }
+
+      // Phase 2: Reflex engine events
+      if (msg.event === 'REFLEX_DILATE') {
+        const data = (msg.data || msg) as any;
+        const { lat, lon, region, reflexId } = data;
+        setAiMessages(prev => [...prev, {
+          id: nextAiMsgIdRef.current++,
+          role: 'assistant',
+          content: `👁️ **Reflex Dilate: ${region || 'unknown region'}**\n\nReflex \`${reflexId || 'unknown'}\` triggered camera dilation to [${lat?.toFixed(2)}, ${lon?.toFixed(2)}].`,
+          type: 'reflex',
+        }]);
+        if (lat != null && lon != null && viewerRef.current) {
+          cinematicFlyTo(viewerRef.current, lon, lat, 500000, 3);
+        }
+      }
+
+      if (msg.event === 'REFLEX_ALERT') {
+        const data = (msg.data || msg) as any;
+        const { title, description, severity, reflexId, lat, lon } = data;
+        console.warn(`[REFLEX_ALERT] ${title}: ${description}`);
+        setAiMessages(prev => [...prev, {
+          id: nextAiMsgIdRef.current++,
+          role: 'assistant',
+          content: `🚨 **Reflex Alert: ${title || 'Unspecified'}**\n\n${description || ''}`,
+          type: 'reflex',
+        }]);
+        setNewAlertCount(prev => prev + 1);
+        if (reflexId) {
+          setReflexStates(prev => prev.map(r =>
+            r.reflexId === reflexId ? { ...r, status: 'ACTIVE' } : r
+          ));
+          setTimeout(() => {
+            setReflexStates(prev => prev.map(r =>
+              r.reflexId === reflexId ? { ...r, status: 'IDLE' } : r
+            ));
+          }, 5000);
+        }
+      }
+
+      if (msg.event === 'SYSTEM_TRAUMA') {
+        const data = (msg.data || msg) as any;
+        const active = data.active === true || data.active === 'true';
+        if (active) {
+          console.error('[SYSTEM_TRAUMA] Trauma mode ACTIVE — multiple reflexes firing simultaneously');
+        } else {
+          console.log('[SYSTEM_TRAUMA] Trauma mode ended');
+        }
+      }
+
+      // Phase 3: Fork stream events
+      const forkMsg: any = msg.type === 'FORK_STREAM' ? (msg.data || msg) : msg;
+      if (forkMsg.type === 'FORK_INIT') {
+        const payload: any = forkMsg.payload || forkMsg;
+        const forkId: string = payload.forkId || forkMsg.forkId;
+        const name: string = payload.name || forkMsg.name || 'Unnamed Fork';
+        const request: any = payload.request || payload;
+        forkRendererRef.current?.createForkVisual(forkId, name, request?.lat || 0, request?.lon || 0);
+        setForks(prev => [...prev, { forkId, name, divergenceScore: 0, status: 'running' }]);
+        setActiveForkCount(prev => prev + 1);
+      }
+      if (forkMsg.type === 'FORK_TICK') {
+        const payload: any = forkMsg.payload || forkMsg;
+        const forkId: string = payload.forkId || forkMsg.forkId;
+        forkRendererRef.current?.updateDivergence(forkId, payload.divergenceScore || 0, payload.simulatedTimeMs || 0);
+        setForks(prev => prev.map((f: any) => f.forkId === forkId ? { ...f, divergenceScore: payload.divergenceScore || f.divergenceScore, status: 'running' } : f));
+      }
+      if (forkMsg.type === 'FORK_TERMINATED') {
+        const payload: any = forkMsg.payload || forkMsg;
+        const forkId: string = payload.forkId || forkMsg.forkId;
+        forkRendererRef.current?.removeForkVisual(forkId);
+        setForks(prev => prev.filter((f: any) => f.forkId !== forkId));
+        setActiveForkCount(prev => Math.max(0, prev - 1));
+      }
+
+      // Phase 4: Entropy and discovery events
+      if (msg.type === 'ENTROPY_UPDATE' || msg.event === 'ENTROPY_UPDATE') {
+        const data: any = msg.data || msg;
+        entropyHaloRef.current?.setEntropy(data.planetaryEntropy || 0);
+        console.log(`🌍 Planetary Entropy: ${(data.planetaryEntropy * 100).toFixed(1)}% — ${entropyHaloRef.current?.getInterpretation()?.toUpperCase()}`);
+      }
+      if (msg.type === 'DISCOVERY' || msg.event === 'DISCOVERY') {
+        const data: any = msg.data || msg;
+        const disc = data.discovery || data;
+        if (disc?.summary) {
+          setRecentDiscoveries(prev => [{ summary: disc.summary, confidence: disc.edge?.confidence || 0.5 }, ...prev].slice(0, 5));
+          setAiMessages(prev => [...prev, {
+            id: nextAiMsgIdRef.current++,
+            role: 'assistant',
+            content: `🧠 **Causal Discovery**\n\n${disc.summary}`,
+            type: 'discovery',
+          }]);
+        }
+      }
+
+      // Phase 5: Dream cycle events
+      if (msg.type === 'DREAM_COMPLETE' || msg.event === 'DREAM_COMPLETE') {
+        const data: any = msg.data || msg;
+        setLastDream({
+          scenariosRun: data.scenariosRun || 0,
+          modelUpdates: data.modelUpdates || 0,
+          newCausalEdges: data.newCausalEdges || 0,
+          timestamp: Date.now(),
+        });
+        console.log(`🌙 DREAM COMPLETE: ${data.scenariosRun} scenarios, ${data.modelUpdates} model updates, ${data.newCausalEdges} new causal edges`);
+        setAiMessages(prev => [...prev, {
+          id: nextAiMsgIdRef.current++,
+          role: 'assistant',
+          content: `🌙 **Dream Cycle Complete**\n\nThe system dreamed ${data.scenariosRun} synthetic catastrophes while you slept.\n• ${data.modelUpdates} prediction models retrained\n• ${data.newCausalEdges} new causal edges discovered\n\n*The planet learns even when you do not.*`,
+          type: 'dream',
+        }]);
+      }
     });
 
+    ws.subscribe('fork:all');
+
     ws.subscribe('proactive');
+    ws.subscribe('reflex');
 
     return () => {
       unsubMonitor();
       ws.unsubscribe('proactive');
+      ws.unsubscribe('reflex');
+      ws.unsubscribe('fork:all');
     };
-  }, [ws.connected]);
+  }, [ws]);
 
   // Phase 3: Send monitor command via chat
   const sendMonitorCommand = useCallback(async (text: string) => {
@@ -4415,7 +4685,7 @@ export default function App() {
       }
     }
     return false;
-  }, [extractLocation]);
+  }, []);
 
   // Phase 3: Send schedule command via chat
   const sendScheduleCommand = useCallback(async (text: string) => {
@@ -4765,6 +5035,7 @@ export default function App() {
       let finalText = '';
       let lastInteractionId: string | null = null;
       let lastEnvironmentId: string | null = null;
+      let lastTraceId: string | null = null;
 
       const processLines = () => {
         const lines = buffer.split('\n');
@@ -4798,10 +5069,12 @@ export default function App() {
               finalText = data.text;
               if (data.environmentId) lastEnvironmentId = data.environmentId;
               if (data.interactionId) lastInteractionId = data.interactionId;
+              if (data.traceId) lastTraceId = data.traceId;
             }
             if (data.type === 'done') {
               if (data.environmentId) lastEnvironmentId = data.environmentId;
               if (data.interactionId) lastInteractionId = data.interactionId;
+              if (data.traceId) lastTraceId = data.traceId;
             }
           } catch { /* skip malformed JSON */ }
         }
@@ -4819,7 +5092,7 @@ export default function App() {
       if (lastInteractionId) agentInteractionIdRef.current = lastInteractionId;
 
       if (finalText) {
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText }]);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText, traceId: lastTraceId }]);
       } else {
         const fallback = generateLocalResponse(userMsg, loc);
         setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: fallback }]);
@@ -4834,7 +5107,7 @@ export default function App() {
     }
     setAiTyping(false);
     abortControllerRef.current = null;
-  }, [aiInput, apiVault, aiApiType, agentEnvironmentId, sandboxWorkspaceId, sendToPipeline]);
+  }, [aiInput, agentEnvironmentId, sandboxWorkspaceId, sendToPipeline, focusLocation, sendMonitorCommand, sendScheduleCommand, toggleLayer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function extractLocation(text: string): Promise<{ lat: number; lon: number } | null> {
     // Fast path: local coordinate regex
@@ -5022,7 +5295,7 @@ export default function App() {
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `🧠 AI Intelligence for ${cm.lat.toFixed(2)}, ${cm.lon.toFixed(2)}` }]);
       getLocationContextData(cm.lat, cm.lon);
     }
-  }, [contextMenu, addWeatherCard, getLocationContextData]);
+  }, [contextMenu, addWeatherCard, getLocationContextData, focusLocation]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function findNearbyEvents(lat: number, lon: number, radiusKm: number) {
     const results: Array<{title: string; distance: number}> = [];
@@ -5188,7 +5461,7 @@ export default function App() {
     v.scene.requestRender();
   }, [studyWest, studySouth, studyEast, studyNorth]);
 
-  const clearStudyArea = useCallback(() => {
+  function clearStudyArea() {
     const v = viewerRef.current;
     if (!v) return;
     if (studyAreaEntityRef.current) {
@@ -5196,17 +5469,29 @@ export default function App() {
       studyAreaEntityRef.current = null;
       v.scene.requestRender();
     }
-  }, []);
+  }
 
   const flyToStudyArea = useCallback(() => {
     const v = viewerRef.current;
     if (!v) return;
     const west = parseFloat(studyWest);
     const south = parseFloat(studySouth);
+
     const east = parseFloat(studyEast);
     const north = parseFloat(studyNorth);
     if (!isFinite(west) || !isFinite(south) || !isFinite(east) || !isFinite(north)) return;
-    v.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(west, south, east, north) });
+    const rect = Cesium.Rectangle.fromDegrees(west, south, east, north);
+    studyAreaEntityRef.current = v.entities.add({
+      rectangle: {
+        coordinates: rect,
+        material: new Cesium.Color(0.2, 0.8, 0.3, 0.08),
+        outline: true,
+        outlineColor: Cesium.Color.LIME,
+        outlineWidth: 2,
+      },
+    });
+    v.camera.flyTo({ destination: rect });
+    v.scene.requestRender();
   }, [studyWest, studySouth, studyEast, studyNorth]);
 
   const startStudyDraw = useCallback(async (type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE') => {
@@ -5357,6 +5642,10 @@ export default function App() {
     smokeParticlesRef.current = [];
     tsunamiWavesRef.current = [];
     Object.keys(weatherCardElementsRef.current).forEach(key => { delete weatherCardElementsRef.current[key]; });
+    entropyHaloRef.current?.destroy();
+    entropyHaloRef.current = null;
+    oracleChainRef.current?.destroy();
+    oracleChainRef.current = null;
     entityTrackerRef.current?.destroy();
     entityTrackerRef.current = null;
     aisTrackerRef.current?.stop();
@@ -5479,11 +5768,14 @@ export default function App() {
 
           {infoEntity.description && (
             <div className="info-description" dangerouslySetInnerHTML={{
-              __html: String(infoEntity.description.getValue(Cesium.JulianDate.now()))
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                .replace(/`([^`]+)`/g, '<code>$1</code>')
-                .replace(/\n/g, '<br/>')
+              __html: DOMPurify.sanitize(
+                String(infoEntity.description.getValue(Cesium.JulianDate.now()))
+                  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                  .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                  .replace(/`([^`]+)`/g, '<code>$1</code>')
+                  .replace(/\n/g, '<br/>'),
+                { ALLOWED_TAGS: ['strong', 'em', 'code', 'br', 'p', 'span'], ALLOWED_ATTR: ['class'], ALLOW_DATA_ATTR: false }
+              ),
             }} />
           )}
 
@@ -5669,6 +5961,9 @@ export default function App() {
       </>
     );
   };
+
+  const traceKeyFor = (msg: ChatMessage) => `trace_${msg.traceId || msg.id}`;
+  const traceTargetFor = (msg: ChatMessage) => encodeURIComponent(String(msg.traceId || msg.id));
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
@@ -5875,6 +6170,15 @@ export default function App() {
           <button className={`btn-icon ${showAnalytics ? 'active' : ''}`} onClick={() => { setShowAnalytics(p => !p); if (!analyticsData) fetch('/api/agent/analytics').then(r => r.json()).then(setAnalyticsData).catch(() => {}); }} title="Analytics & Insights">📊</button>
           <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share">📤</button>
           <button className="btn-icon" onClick={() => setShowApiVault(true)} title="API Configuration">🔑</button>
+          <button className={`btn-icon ${showCognitiveDashboard ? 'active' : ''}`} onClick={() => setShowCognitiveDashboard(p => !p)} title="Cognitive Dashboard">🧠</button>
+          <button className={`btn-icon ${showCockpitAlerts ? 'active' : ''}`} onClick={() => setShowCockpitAlerts(p => !p)} title="Proactive Alerts">🚨</button>
+          <button className={`btn-icon ${showToolWorkbench ? 'active' : ''}`} onClick={() => setShowToolWorkbench(p => !p)} title="Tool Workbench">🔧</button>
+          <button className={`btn-icon ${showMemoryExplorer ? 'active' : ''}`} onClick={() => setShowMemoryExplorer(p => !p)} title="Memory Explorer">💾</button>
+          <button className={`btn-icon ${showSettings ? 'active' : ''}`} onClick={() => setShowSettings(p => !p)} title="Settings">⚙️</button>
+          <button className={`btn-icon ${showScenarioGallery ? 'active' : ''}`} onClick={() => setShowScenarioGallery(p => !p)} title="Scenarios">🌋</button>
+          <button className={`btn-icon ${showScenarioEditor ? 'active' : ''}`} onClick={() => setShowScenarioEditor(p => !p)} title="New Scenario">🎬</button>
+          <button className={`btn-icon ${showCinematicDirector ? 'active' : ''}`} onClick={() => setShowCinematicDirector(p => !p)} title="Cinematic Director">🎥</button>
+          <button className={`btn-icon ${showSpatialSketching ? 'active' : ''}`} onClick={() => setShowSpatialSketching(p => !p)} title="Spatial Sketch">✏️</button>
           <button className="btn-icon" onClick={takeSnapshot} title="Snapshot"><Camera size={16} /></button>
           <button className="btn-icon" onClick={flyToIndiaDirect} title="Fly to India">🇮🇳</button>
           <button
@@ -6047,6 +6351,54 @@ export default function App() {
                     </div>
                   )}
                   {msg.feedback && <div style={{fontSize:9,color:'var(--text-dim)',marginTop:4}}>Feedback: {msg.feedback === 'up' ? '👍' : '👎'}</div>}
+                  {/* Explainability: reasoning trace & evidence chain buttons */}
+                  {msg.role === 'assistant' && msg.content.length > 20 && (
+                    <div style={{display:'flex',gap:4,marginTop:4}}>
+                      <button
+                        onClick={() => {
+                          const key = traceKeyFor(msg);
+                          if (showReasoningFor[key]) {
+                            setShowReasoningFor(prev => ({...prev, [key]: false}));
+                            return;
+                          }
+                          setShowReasoningFor(prev => ({...prev, [key]: true}));
+                          fetch(`/api/explain/trace/${traceTargetFor(msg)}`).then(r => r.ok ? r.json() : null).then(data => {
+                            if (data) setReasoningTraces(prev => ({...prev, [key]: data}));
+                          }).catch(() => {});
+                        }}
+                        style={{fontSize:9,color:'var(--text-dim)',background:'none',border:'none',cursor:'pointer',padding:'1px 4px',borderRadius:3}}
+                        title="View reasoning trace"
+                      >
+                        🧠 Trace
+                      </button>
+                      <button
+                        onClick={() => {
+                          const key = `evidence_${msg.id}`;
+                          if (showEvidenceFor[key]) {
+                            setShowEvidenceFor(prev => ({...prev, [key]: false}));
+                            return;
+                          }
+                          setShowEvidenceFor(prev => ({...prev, [key]: true}));
+                          fetch(`/api/explain/evidence/${msg.id}`).then(r => r.ok ? r.json() : null).then(data => {
+                            if (data) setEvidenceChains(prev => ({...prev, [key]: data}));
+                          }).catch(() => {});
+                        }}
+                        style={{fontSize:9,color:'var(--text-dim)',background:'none',border:'none',cursor:'pointer',padding:'1px 4px',borderRadius:3}}
+                        title="View evidence chain"
+                      >
+                        📋 Evidence
+                      </button>
+                    </div>
+                  )}
+                  {showReasoningFor[traceKeyFor(msg)] && reasoningTraces[traceKeyFor(msg)] && (
+                    <ReasoningTraceViewer trace={reasoningTraces[traceKeyFor(msg)]} />
+                  )}
+                  {showEvidenceFor[`evidence_${msg.id}`] && evidenceChains[`evidence_${msg.id}`] && (
+                    <EvidenceChainPanel
+                      chain={evidenceChains[`evidence_${msg.id}`].chain}
+                      integrity={evidenceChains[`evidence_${msg.id}`].integrity}
+                    />
+                  )}
                 </div>
               ) : msg.type === 'image' ? (
                 <div>
@@ -6113,6 +6465,7 @@ export default function App() {
             </div>
           )}
         </div>
+        <HumanOverrideBanner />
         {sandboxWorkspaceId && uploadedFiles.length > 0 && (
           <div className="sandbox-file-upload">
             <span className="sandbox-workspace-badge">📦 Workspace active</span>
@@ -6412,7 +6765,15 @@ export default function App() {
         <div className="stat-item"><div className="stat-dot" style={{background:'#a855f7'}}/><span className="stat-label">Alerts</span><span className="stat-val">{newAlertCount}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#f59e0b'}}/><span className="stat-label">Layers</span><span className="stat-val">{activeLayerCount}/{LAYER_DEFS.length}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#00D4FF'}}/><span className="stat-label">FPS</span><span className="stat-val">{fps}</span></div>
+        <div className="stat-item"><div className="stat-dot" style={{background:'#FF8C00'}}/><span className="stat-label">Forks</span><span className="stat-val">{activeForkCount}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#14b8a6'}}/><span className="stat-label">Camera</span><span className="stat-val">{cameraDms || '—'}</span></div>
+        <button
+          className={`btn-icon monitor-btn ${!monitorCollapsed ? 'active' : ''}`}
+          onClick={() => setMonitorCollapsed(prev => !prev)}
+          title="Monitor Panel"
+        >
+          <Monitor size={14} />
+        </button>
       </div>
 
       {/* Zoom Controls */}
@@ -6619,8 +6980,227 @@ export default function App() {
         </div>
       )}
 
+      {/* Cognitive Dashboard */}
+      <div className={`alerts-panel glass-panel ${showCognitiveDashboard ? 'open' : ''}`} style={{ width: 380, maxHeight: 'calc(100vh - 92px)' }}>
+        <CognitiveDashboard onClose={() => setShowCognitiveDashboard(false)} />
+      </div>
+
+      {/* Cockpit Alerts Panel */}
+      <div className={`alerts-panel glass-panel ${showCockpitAlerts ? 'open' : ''}`} style={{ width: 380, maxHeight: 'calc(100vh - 92px)' }}>
+        <CockpitAlertPanel onClose={() => setShowCockpitAlerts(false)} onFlyTo={(lat, lon) => { setShowCockpitAlerts(false); focusLocation(lat, lon); }} />
+      </div>
+
+      {/* Tool Workbench */}
+      <div className={`alerts-panel glass-panel ${showToolWorkbench ? 'open' : ''}`} style={{ width: 480, maxHeight: 'calc(100vh - 92px)' }}>
+        <ToolWorkbench onClose={() => setShowToolWorkbench(false)} />
+      </div>
+
+      {/* Memory Explorer */}
+      <div className={`alerts-panel glass-panel ${showMemoryExplorer ? 'open' : ''}`} style={{ width: 380, maxHeight: 'calc(100vh - 92px)' }}>
+        <MemoryExplorer onClose={() => setShowMemoryExplorer(false)} />
+      </div>
+
+      {/* Settings Panel */}
+      <div className={`alerts-panel glass-panel ${showSettings ? 'open' : ''}`} style={{ width: 360, maxHeight: 'calc(100vh - 92px)' }}>
+        <SettingsPanel onClose={() => setShowSettings(false)} />
+      </div>
+
+      {/* Fork Panel */}
+      <ForkPanel
+        forks={forks}
+        onPauseFork={handlePauseFork}
+        onResumeFork={handleResumeFork}
+        onTerminateFork={handleTerminateFork}
+      />
+
+      {/* Monitor Panel */}
+      {!loading && (
+        <div className={`alerts-panel glass-panel ${!monitorCollapsed ? 'open' : ''}`}
+          style={{ width: 320, fontFamily: 'monospace', fontSize: 11 }}>
+          <div className="ai-header">
+            <div className="ai-icon" style={{ background: 'linear-gradient(135deg,#00ff88,#0066ff)' }}>⬡</div>
+            <div className="ai-title" style={{ color: '#00ff88' }}>MONITOR</div>
+            <button className="ai-close" onClick={() => setMonitorCollapsed(true)}>✕</button>
+          </div>
+          <div style={{ padding: 8, overflowY: 'auto', maxHeight: 'calc(100vh - 160px)' }}>
+            {/* Planetary Entropy */}
+            {(() => {
+              const entropyVal = entropyHaloRef.current?.getEntropy() || 0;
+              const interp = entropyHaloRef.current?.getInterpretation() || 'baseline';
+              const pct = Math.round(entropyVal * 100);
+              const color = entropyVal < 0.3 ? '#22c55e' : entropyVal < 0.6 ? '#eab308' : entropyVal < 0.9 ? '#FF8C00' : '#ef4444';
+              return (
+                <>
+                  <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Planetary Entropy</div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontSize: 20, fontWeight: 'bold', color }} className={entropyVal >= 0.9 ? 'monitor-entropy-critical' : ''}>{pct}%</span>
+                    <span style={{ color, fontSize: 10 }}>{interp.toUpperCase()}</span>
+                  </div>
+                  <div style={{ width: '100%', height: 8, background: '#1a1a2e', borderRadius: 4, overflow: 'hidden', marginTop: 4 }}>
+                    <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', background: color, borderRadius: 4, transition: 'width 0.5s ease' }} />
+                  </div>
+                </>
+              );
+            })()}
+
+            {/* Active Forks */}
+            <div style={{ padding: '8px 0', borderBottom: '1px solid #1a3a2a' }}>
+              <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+                Active Forks <span style={{ marginLeft: 6, color: '#ff8c00', fontSize: 10 }}>({forks.length})</span>
+              </div>
+              {forks.length === 0 && <div style={{ color: '#666', fontSize: 10 }}>No active forks</div>}
+              {forks.map(fork => (
+                <div key={fork.forkId} style={{ marginBottom: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
+                    <span style={{ color: '#ddd' }}>{fork.name}</span>
+                    <span style={{ color: fork.status === 'running' ? '#22c55e' : '#eab308' }}>{fork.status}</span>
+                  </div>
+                  <div style={{ width: '100%', height: 6, background: '#1a1a2e', borderRadius: 4, overflow: 'hidden', marginTop: 2 }}>
+                    <div style={{
+                      width: `${Math.min(100, fork.divergenceScore * 100)}%`,
+                      height: '100%',
+                      background: fork.divergenceScore > 0.6 ? '#ef4444' : fork.divergenceScore > 0.3 ? '#eab308' : '#22c55e',
+                      borderRadius: 4,
+                      transition: 'width 0.5s ease',
+                    }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Reflex Status */}
+            <div style={{ padding: '8px 0', borderBottom: '1px solid #1a3a2a' }}>
+              <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Reflex Status</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
+                {reflexStates.map(reflex => {
+                  const refColors: Record<string, string> = { IDLE: '#22c55e', ARMED: '#eab308', ACTIVE: '#ef4444', RECOVERING: '#6b7280' };
+                  return (
+                    <div key={reflex.reflexId} style={{ padding: '4px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: 4, textAlign: 'center' }}>
+                      <div style={{ fontSize: 8, color: '#888', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {reflex.reflexId.replace(/-/g, '\n')}
+                      </div>
+                      <div style={{ fontSize: 9, fontWeight: 'bold', color: refColors[reflex.status] || '#666' }}
+                        className={reflex.status === 'ACTIVE' ? 'monitor-entropy-critical' : ''}>
+                        {reflex.status}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Memory Tiers */}
+            <div style={{ padding: '8px 0', borderBottom: '1px solid #1a3a2a' }}>
+              <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Memory Tiers</div>
+              {memoryStats ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px', fontSize: 10 }}>
+                  {Object.entries(memoryStats).map(([tier, info]) => (
+                    <div key={tier} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#888' }}>{tier}</span>
+                      <span style={{ color: '#ddd' }}>{(info as any).count ?? 0}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: '#666', fontSize: 10 }}>Loading...</div>
+              )}
+            </div>
+
+            {/* Recent Discoveries */}
+            <div style={{ padding: '8px 0', borderBottom: '1px solid #1a3a2a' }}>
+              <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Recent Discoveries</div>
+              {recentDiscoveries.length === 0 && <div style={{ color: '#666', fontSize: 10 }}>No discoveries yet</div>}
+              {recentDiscoveries.slice(0, 3).map((d, i) => (
+                <div key={i} style={{ fontSize: 10, color: '#ccc', marginBottom: 2, display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{d.summary}</span>
+                  <span style={{ color: d.confidence > 0.7 ? '#22c55e' : d.confidence > 0.4 ? '#eab308' : '#ef4444', marginLeft: 6, flexShrink: 0 }}>
+                    {Math.round(d.confidence * 100)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Last Dream Cycle */}
+            <div style={{ padding: '8px 0' }}>
+              <div style={{ color: '#00ff88', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Last Dream Cycle</div>
+              {lastDream ? (
+                <div style={{ fontSize: 10, color: '#ccc' }}>
+                  <div>Scenarios: <span style={{ color: '#ddd' }}>{lastDream.scenariosRun}</span></div>
+                  <div>Model updates: <span style={{ color: '#ddd' }}>{lastDream.modelUpdates}</span></div>
+                  <div>New edges: <span style={{ color: '#ddd' }}>{lastDream.newCausalEdges}</span></div>
+                  <div style={{ color: '#666', fontSize: 9, marginTop: 2 }}>{new Date(lastDream.timestamp).toLocaleString()}</div>
+                </div>
+              ) : (
+                <div style={{ color: '#666', fontSize: 10 }}>No dream cycle recorded</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Login Modal */}
       <LoginModal />
+
+      {/* Scenario Gallery */}
+      <div className={`alerts-panel glass-panel ${showScenarioGallery ? 'open' : ''}`}
+        style={{ position: 'fixed', top: 52, right: 48, zIndex: 1000 }}>
+        <ScenarioGallery
+          scenarios={scenarioGalleryScenarios}
+          onSelect={(id) => { setSelectedScenarioId(id); setShowScenarioGallery(false); }}
+          onCreateNew={() => { setShowScenarioGallery(false); setShowScenarioEditor(true); }}
+          onClose={() => setShowScenarioGallery(false)}
+        />
+      </div>
+
+      {/* Scenario Viewer */}
+      {selectedScenario && (
+        <ScenarioViewer
+          viewer={viewerRef.current}
+          scenario={selectedScenario}
+          onClose={() => setSelectedScenario(null)}
+        />
+      )}
+
+      {/* Scenario Editor */}
+      {showScenarioEditor && (
+        <ScenarioEditor
+          onClose={() => setShowScenarioEditor(false)}
+          onGenerate={(type, params) => {
+            setShowScenarioEditor(false);
+            fetch('/api/scenarios/generate', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type, params }),
+            }).then(r => r.json()).then(data => {
+              if (data.scenario) setSelectedScenario(data.scenario);
+            }).catch(() => {});
+          }}
+        />
+      )}
+
+      {/* Cinematic Director */}
+      {showCinematicDirector && (
+        <CinematicDirector
+          viewer={viewerRef.current}
+          onClose={() => setShowCinematicDirector(false)}
+        />
+      )}
+
+      {/* Spatial Sketching */}
+      {showSpatialSketching && (
+        <SpatialSketching
+          viewer={viewerRef.current}
+          onClose={() => setShowSpatialSketching(false)}
+          onGenerateScenario={(type, params) => {
+            setShowSpatialSketching(false);
+            fetch('/api/scenarios/generate', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type, params }),
+            }).then(r => r.json()).then(data => {
+              if (data.scenario) setSelectedScenario(data.scenario);
+            }).catch(() => {});
+          }}
+        />
+      )}
 
       {/* Admin Dashboard */}
       {showAdmin && <AdminDashboard onClose={() => setShowAdmin(false)} />}

@@ -1,0 +1,14 @@
+{
+  "name": "Earth Intelligence — Real-time Globe",
+  "short_name": "EarthIntel",
+  "description": "Real-time geospatial data visualization with 460+ layers — earthquakes, weather, flights, and AI-powered analysis.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a1a",
+  "theme_color": "#1a1a2e",
+  "orientation": "any",
+  "categories": ["weather", "science", "geospatial", "utilities"],
+  "icons": [
+    { "src": "/icon.png", "sizes": "96x96", "type": "image/png" }
+  ]
+}

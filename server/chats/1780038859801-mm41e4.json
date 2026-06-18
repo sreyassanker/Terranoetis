@@ -1,0 +1,23 @@
+{
+  "id": "1780038859801-mm41e4",
+  "title": "Show wildfires",
+  "createdAt": "2026-05-29T07:14:30.333Z",
+  "updatedAt": "2026-05-29T07:14:30.333Z",
+  "messages": [
+    {
+      "id": 1,
+      "role": "assistant",
+      "content": "👋 Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth."
+    },
+    {
+      "id": 1459,
+      "role": "user",
+      "content": "Show wildfires"
+    },
+    {
+      "id": 1493,
+      "role": "assistant",
+      "content": "🔥 **Wildfire Monitoring**\n\nNASA MODIS/VIIRS fire detections shown as orange pulsing markers. Smoke dispersion simulations available for active fires."
+    }
+  ]
+}

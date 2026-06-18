@@ -906,6 +906,30 @@
     font-weight: 500;
   }
 
+  .monitor-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    margin-left: 4px;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+  }
+  .monitor-btn:hover {
+    background: rgba(59, 130, 246, 0.1);
+    color: var(--accent);
+  }
+  .monitor-btn.active {
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--accent);
+  }
+
   /* ── TIMELINE ── */
   .timeline-bar {
     position: absolute;
@@ -2963,4 +2987,171 @@
     box-shadow: 0 0 8px rgba(59,130,246,0.5);
     cursor: pointer;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   COCKPIT UI — Glassmorphism, neumorphism, animated effects
+   ═══════════════════════════════════════════════════════════ */
+
+.cockpit-card {
+  background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 6px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.04);
+  transition: all 0.2s ease;
+}
+
+.cockpit-card:hover {
+  border-color: rgba(59,130,246,0.25);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(10,16,28,0.8), rgba(10,16,28,0.95));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  min-height: 36px;
+}
+
+/* Glassmorphism panel base */
+.glass-deep {
+  background: linear-gradient(135deg, rgba(10, 16, 28, 0.88), rgba(10, 16, 28, 0.96));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(80, 160, 255, 0.12);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Neumorphic inset */
+.neumorphic-inset {
+  background: rgba(255,255,255,0.02);
+  border-radius: 8px;
+  box-shadow:
+    inset 0 2px 4px rgba(0,0,0,0.3),
+    inset 0 -1px 0 rgba(255,255,255,0.04),
+    0 1px 0 rgba(255,255,255,0.04);
+}
+
+/* Animated gradient backgrounds */
+.gradient-flow {
+  background: linear-gradient(135deg, rgba(59,130,246,0.08), rgba(168,85,247,0.06), rgba(20,184,166,0.06));
+  background-size: 200% 200%;
+  animation: gradientShift 8s ease infinite;
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Pulsing dot for "dreaming" / "live" indicators */
+.pulse-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--purple);
+  box-shadow: 0 0 8px rgba(168,85,247,0.5);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+/* Glow effect for active elements */
+.glow-primary {
+  box-shadow: 0 0 12px rgba(59,130,246,0.15), 0 0 4px rgba(59,130,246,0.1);
+}
+
+/* Particle effect container */
+.particle-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.particle {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  background: rgba(59,130,246,0.3);
+  border-radius: 50%;
+  animation: float linear infinite;
+}
+
+@keyframes float {
+  0% { transform: translateY(100%) translateX(0); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(-100vh) translateX(20px); opacity: 0; }
+}
+
+/* Glass scrollbar for cockpit panels */
+.cockpit-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.cockpit-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.cockpit-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+}
+.cockpit-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.15);
+}
+
+/* Data flow line animation */
+.data-flow {
+  position: relative;
+}
+.data-flow::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+  animation: flowPulse 2s ease-in-out infinite;
+}
+
+@keyframes flowPulse {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.8; }
+}
+
+/* Confidence halo animation */
+@keyframes haloPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* Thought bubble depth shading */
+.thought-depth-0 { background: linear-gradient(135deg, rgba(59,130,246,0.08), rgba(168,85,247,0.04)); }
+.thought-depth-1 { background: rgba(59,130,246,0.04); }
+.thought-depth-2 { background: rgba(168,85,247,0.04); }
+.thought-depth-3 { background: rgba(20,184,166,0.04); }
+
+/* ── MONITOR PANEL ── */
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.monitor-entropy-critical {
+  animation: pulse-red 1s infinite;
 }

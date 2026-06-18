@@ -27,9 +27,8 @@ function getToken(): string | null {
 
 function addAuthHeader(init?: RequestInit): RequestInit {
   const token = getToken();
-  if (!token) return init || {};
   const headers = new Headers(init?.headers);
-  headers.set('Authorization', `Bearer ${token}`);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
   return { ...init, headers };
 }
 
@@ -52,11 +51,13 @@ export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`API ${path} failed (${resp.status})`);
   } catch (proxyErr) {
     if (!directUrl) throw proxyErr;
+    // Direct upstream fallback — DO NOT leak the Authorization header to third parties
     const headers = new Headers(init?.headers);
+    headers.delete('Authorization');
     if (path === '/weather/alerts' && !headers.has('User-Agent')) {
       headers.set('User-Agent', 'LiveGlobe/1.0 (earth-intelligence)');
     }
-    const resp = await fetch(directUrl, { ...addAuthHeader(init), headers, cache: 'no-store' });
+    const resp = await fetch(directUrl, { ...init, headers, cache: 'no-store' });
     if (!resp.ok) throw new Error(`Direct ${path} failed (${resp.status})`);
     return resp.json() as Promise<T>;
   }

@@ -1,0 +1,61 @@
+{
+  "id": "1779972177977-ohcoxh",
+  "title": "Hello at least you check the weather",
+  "createdAt": "2026-05-28T12:43:00.809Z",
+  "updatedAt": "2026-05-28T12:43:00.809Z",
+  "messages": [
+    {
+      "id": 374,
+      "role": "user",
+      "content": "Hello at least you check the weather"
+    },
+    {
+      "id": 428,
+      "role": "user",
+      "content": "Analyze earthquake and weather patterns near Tokyo for the past month, compute the average magnitude, and suggest which layers I should enable on the globe"
+    },
+    {
+      "id": 450,
+      "role": "assistant",
+      "content": "## Fetching earthquake data from USGS\n```\n  186903\nbytes fetched\n\n```\n\n## Computing magnitude distribution and statistics\n```\nTotal earthquakes: 261\nMean magnitude: 1.73\nMax magnitude: 6.00\nStd deviation: 1.16\nPercentage above M6: 0.8%\n##JSON_RESULT\n{\"count\": 261, \"mean\": 1.733061076323444, \"max\": 6.0, \"std\": 1.1598766924588397, \"aboveM6_pct\": 0.8, \"histogram\": {\"M0-2\": 176, \"M2-3\": 49, \"M3-4\": 9, \"M4-5\": 11, \"M5-6\": 5, \"M6-10\": 2}}\n##\n\n```",
+      "type": "pipeline"
+    },
+    {
+      "id": 451,
+      "role": "assistant",
+      "content": "## Fetching earthquake data from USGS\n```\n  186903\nbytes fetched\n\n```\n\n## Computing magnitude distribution and statistics\n```\nTotal earthquakes: 261\nMean magnitude: 1.73\nMax magnitude: 6.00\nStd deviation: 1.16\nPercentage above M6: 0.8%\n##JSON_RESULT\n{\"count\": 261, \"mean\": 1.733061076323444, \"max\": 6.0, \"std\": 1.1598766924588397, \"aboveM6_pct\": 0.8, \"histogram\": {\"M0-2\": 176, \"M2-3\": 49, \"M3-4\": 9, \"M4-5\": 11, \"M5-6\": 5, \"M6-10\": 2}}\n##\n\n```",
+      "type": "pipeline"
+    },
+    {
+      "id": 81,
+      "role": "user",
+      "content": "Analyze earthquake and weather patterns near Tokyo for the past month, compute the average magnitude, and suggest which layers I should enable on the globe"
+    },
+    {
+      "id": 91,
+      "role": "assistant",
+      "content": "## Fetching earthquake data from USGS\n```\n  186903\nbytes fetched\n\n```\n\n## Computing magnitude distribution and statistics\n```\nTotal earthquakes: 261\nMean magnitude: 1.73\nMax magnitude: 6.00\nStd deviation: 1.16\nPercentage above M6: 0.8%\n##JSON_RESULT\n{\"count\": 261, \"mean\": 1.733061076323444, \"max\": 6.0, \"std\": 1.1598766924588397, \"aboveM6_pct\": 0.8, \"histogram\": {\"M0-2\": 176, \"M2-3\": 49, \"M3-4\": 9, \"M4-5\": 11, \"M5-6\": 5, \"M6-10\": 2}}\n##\n\n```",
+      "type": "pipeline"
+    },
+    {
+      "id": 268,
+      "role": "user",
+      "content": "which flights are traveling in kerala"
+    },
+    {
+      "id": 317,
+      "role": "assistant",
+      "content": "📍 **Location Query**\n\nCoordinates: 34.0522, -118.2437\n\nThis area can be analyzed for seismic risk, weather conditions, and population density. Use the sidebar layers to explore different data dimensions."
+    },
+    {
+      "id": 786,
+      "role": "user",
+      "content": "find out the flights flying at my location"
+    },
+    {
+      "id": 790,
+      "role": "assistant",
+      "content": "🌍 **Earth Intelligence**\n\nI can help you explore:\n- Seismic activity and earthquake data\n- Weather conditions globally\n- Storm tracking and forecasts\n- Population impact analysis\n- Natural disaster monitoring\n\nTry: \"Show earthquakes in Japan\" or \"Weather in London\"\n\n*(Agent unavailable: Error: Agent request failed (503))*"
+    }
+  ]
+}

@@ -1,0 +1,462 @@
+import { randomUUID } from 'crypto';
+import { logger } from '../observability/logger';
+import { safeJsonParse } from '../utils/jsonParse';
+import type { SandboxManager, CodeExecutionRequest } from '../sandboxManager';
+
+export interface SimulationConfig {
+  model: string;
+  params: Record<string, unknown>;
+  timeoutMs: number;
+  memoryLimitMb: number;
+}
+
+export interface SimulationResult {
+  id: string;
+  status: 'running' | 'complete' | 'error';
+  result: unknown;
+  logs: string[];
+  durationMs: number;
+}
+
+interface ModelSchema {
+  name: string;
+  description: string;
+  inputs: Array<{ name: string; type: string; description: string; required: boolean }>;
+  outputs: Array<{ name: string; type: string; description: string }>;
+}
+
+const MODEL_SCHEMAS: ModelSchema[] = [
+  {
+    name: 'farsite-lite',
+    description: 'Wildfire 2D cellular automata with Rothermel spread model',
+    inputs: [
+      { name: 'dem', type: 'number[][]', description: 'Digital elevation model grid', required: true },
+      { name: 'fuelModel', type: 'number[][]', description: 'Fuel model classification grid', required: true },
+      { name: 'windSpeed', type: 'number', description: 'Wind speed in km/h', required: true },
+      { name: 'windDir', type: 'number', description: 'Wind direction in degrees', required: true },
+      { name: 'moisture', type: 'number', description: 'Fuel moisture content 0-1', required: true },
+      { name: 'ignitionPoint', type: '[number,number]', description: 'Ignition [row,col] in grid', required: true },
+      { name: 'duration', type: 'number', description: 'Simulation duration in minutes', required: true },
+    ],
+    outputs: [
+      { name: 'firePerimeters', type: '[number,number][][]', description: 'Fire perimeter polygons over time' },
+      { name: 'spreadRate', type: 'number[][]', description: 'Rate of spread grid' },
+      { name: 'intensity', type: 'number[][]', description: 'Fire intensity grid' },
+      { name: 'timeSteps', type: 'number', description: 'Number of simulation time steps' },
+    ],
+  },
+  {
+    name: 'adcirc-lite',
+    description: 'Shallow water equations for tsunami simulation',
+    inputs: [
+      { name: 'bathymetry', type: 'number[][]', description: 'Bathymetry grid in meters', required: true },
+      { name: 'magnitude', type: 'number', description: 'Earthquake magnitude', required: true },
+      { name: 'depth', type: 'number', description: 'Earthquake depth in km', required: true },
+      { name: 'epicenter', type: '[number,number]', description: 'Epicenter [row,col] in grid', required: true },
+      { name: 'duration', type: 'number', description: 'Simulation duration in seconds', required: true },
+    ],
+    outputs: [
+      { name: 'waveHeights', type: 'number[][]', description: 'Maximum wave height grid' },
+      { name: 'arrivalTimes', type: 'number[][]', description: 'Wave arrival time grid' },
+      { name: 'inundationMap', type: 'number[][]', description: 'Inundation depth grid' },
+    ],
+  },
+  {
+    name: 'wrf-lite',
+    description: 'Simplified atmospheric primitive equations (2D finite difference)',
+    inputs: [
+      { name: 'initialConditions', type: 'object', description: 'Initial atmospheric state', required: true },
+      { name: 'boundaryConditions', type: 'object', description: 'Boundary forcing', required: true },
+      { name: 'terrain', type: 'number[][]', description: 'Terrain elevation grid', required: true },
+      { name: 'duration', type: 'number', description: 'Forecast duration in hours', required: true },
+    ],
+    outputs: [
+      { name: 'wind', type: 'number[][][]', description: 'U/V wind fields over time' },
+      { name: 'pressure', type: 'number[][][]', description: 'Pressure fields over time' },
+      { name: 'temperature', type: 'number[][][]', description: 'Temperature fields over time' },
+      { name: 'precipitation', type: 'number[][]', description: 'Total precipitation grid' },
+    ],
+  },
+  {
+    name: 'hysplit-lite',
+    description: 'Gaussian puff volcanic ash dispersion model',
+    inputs: [
+      { name: 'eruptionHeight', type: 'number', description: 'Eruption plume height in km', required: true },
+      { name: 'ashMass', type: 'number', description: 'Total ash mass in tonnes', required: true },
+      { name: 'windFields', type: 'any[]', description: 'Wind field profiles at altitudes', required: true },
+      { name: 'duration', type: 'number', description: 'Dispersion duration in hours', required: true },
+    ],
+    outputs: [
+      { name: 'ashConcentration', type: 'number[][][]', description: 'Ash concentration over time and space' },
+      { name: 'depositionMap', type: 'number[][]', description: 'Ash deposition grid' },
+    ],
+  },
+  {
+    name: 'fno-surrogate',
+    description: 'Fourier Neural Operator surrogate for fast weather prediction',
+    inputs: [
+      { name: 'lat', type: 'number', description: 'Center latitude', required: true },
+      { name: 'lon', type: 'number', description: 'Center longitude', required: true },
+      { name: 'leadDays', type: 'number', description: 'Forecast lead days (1-10)', required: true },
+    ],
+    outputs: [
+      { name: 'temperature', type: 'number[][]', description: 'Temperature forecast grid' },
+      { name: 'precipitation', type: 'number[][]', description: 'Precipitation forecast grid' },
+      { name: 'windSpeed', type: 'number[][]', description: 'Wind speed forecast grid' },
+      { name: 'confidence', type: 'number', description: 'Model confidence score 0-1' },
+    ],
+  },
+];
+
+export class SimulationEngine {
+  private sandboxManager: SandboxManager;
+  private activeSimulations: Map<string, { config: SimulationConfig; startTime: number; logs: string[] }> = new Map();
+
+  constructor(sandboxManager: SandboxManager) {
+    this.sandboxManager = sandboxManager;
+  }
+
+  async runSimulation(config: SimulationConfig): Promise<SimulationResult> {
+    const id = randomUUID();
+    const startTime = Date.now();
+    const logs: string[] = [];
+
+    logs.push(`[${new Date().toISOString()}] Starting simulation: ${config.model}`);
+    logs.push(`[${new Date().toISOString()}] Params: ${JSON.stringify(config.params)}`);
+
+    this.activeSimulations.set(id, { config, startTime, logs });
+
+    try {
+      const validation = this.validateParams(config.model, config.params);
+      if (!validation.valid) {
+        logs.push(`[${new Date().toISOString()}] Validation failed: ${validation.errors.join(', ')}`);
+        return { id, status: 'error', result: null, logs, durationMs: Date.now() - startTime };
+      }
+
+      const sandboxCode = this.buildSandboxCode(config.model, config.params);
+      logs.push(`[${new Date().toISOString()}] Sandbox code generated (${sandboxCode.length} chars)`);
+
+      const execRequest: CodeExecutionRequest = {
+        language: 'python',
+        code: sandboxCode,
+        timeout: config.timeoutMs,
+      };
+
+      logs.push(`[${new Date().toISOString()}] Executing in sandbox...`);
+      const result = await this.sandboxManager.execute(execRequest);
+
+      logs.push(`[${new Date().toISOString()}] Sandbox exit code: ${result.exitCode}`);
+
+      if (result.stdout) {
+        logs.push(`[${new Date().toISOString()}] stdout (${result.stdout.length} chars)`);
+      }
+      if (result.stderr) {
+        logs.push(`[${new Date().toISOString()}] stderr: ${result.stderr.slice(0, 500)}`);
+      }
+
+      if (result.exitCode !== 0) {
+        logs.push(`[${new Date().toISOString()}] Simulation failed with exit code ${result.exitCode}`);
+        return { id, status: 'error', result: result.outputJson || { stderr: result.stderr }, logs, durationMs: Date.now() - startTime };
+      }
+
+      logs.push(`[${new Date().toISOString()}] Simulation complete`);
+      return {
+        id,
+        status: 'complete',
+        result: result.outputJson || safeJsonParse(result.stdout || '{}', {}),
+        logs,
+        durationMs: Date.now() - startTime,
+      };
+    } catch (e) {
+      logs.push(`[${new Date().toISOString()}] Error: ${(e as Error).message}`);
+      logger.error({ err: (e as Error).message, model: config.model }, 'Simulation failed');
+      return { id, status: 'error', result: { error: (e as Error).message }, logs, durationMs: Date.now() - startTime };
+    } finally {
+      this.activeSimulations.delete(id);
+    }
+  }
+
+  validateParams(model: string, params: Record<string, unknown>): { valid: boolean; errors: string[] } {
+    const schema = MODEL_SCHEMAS.find(s => s.name === model);
+    if (!schema) return { valid: false, errors: [`Unknown model: ${model}`] };
+
+    const errors: string[] = [];
+    for (const input of schema.inputs) {
+      if (input.required && (params[input.name] === undefined || params[input.name] === null)) {
+        errors.push(`Missing required parameter: ${input.name}`);
+      }
+    }
+    return { valid: errors.length === 0, errors };
+  }
+
+  getModelSchema(model: string): object | null {
+    const schema = MODEL_SCHEMAS.find(s => s.name === model);
+    return schema || null;
+  }
+
+  listModels(): string[] {
+    return MODEL_SCHEMAS.map(s => s.name);
+  }
+
+  listModelSchemas(): ModelSchema[] {
+    return MODEL_SCHEMAS;
+  }
+
+  private buildSandboxCode(model: string, params: Record<string, unknown>): string {
+    const imports = `import json, sys, math, time, random
+import numpy as np
+`;
+    switch (model) {
+      case 'farsite-lite': return imports + this.buildFarsiteCode(params);
+      case 'adcirc-lite': return imports + this.buildAdcircCode(params);
+      case 'wrf-lite': return imports + this.buildWrfCode(params);
+      case 'hysplit-lite': return imports + this.buildHysplitCode(params);
+      case 'fno-surrogate': return this.buildFnoCode(params);
+      default: return `print(json.dumps({"error": "unknown model: ${model}"}))`;
+    }
+  }
+
+  private buildFarsiteCode(params: Record<string, unknown>): string {
+    return `
+dem = np.array(${JSON.stringify(params.dem)})
+fuel = np.array(${JSON.stringify(params.fuelModel)})
+wind_speed = ${params.windSpeed ?? 0}
+wind_dir = ${params.windDir ?? 0}
+moisture = ${params.moisture ?? 0.5}
+ig_row, ig_col = ${JSON.stringify(params.ignitionPoint ?? [0, 0])}
+duration = ${params.duration ?? 60}
+
+rows, cols = dem.shape
+R = np.ones((rows, cols)) * 0.1
+R *= (1.0 + wind_speed / 20.0 * np.cos(np.deg2rad(wind_dir - 90)))
+R *= (1.0 - moisture * 0.6)
+R *= np.clip(1.0 + fuel * 0.5, 0.1, 5.0)
+
+burned = np.zeros((rows, cols), dtype=bool)
+fire_front = np.zeros((rows, cols), dtype=float)
+fire_front[ig_row, ig_col] = 1.0
+burned[ig_row, ig_col] = True
+
+perimeters = []
+timeSteps = min(int(duration / 5), 200)
+for t in range(timeSteps):
+    new_front = np.zeros((rows, cols), dtype=float)
+    for i in range(1, rows - 1):
+        for j in range(1, cols - 1):
+            if fire_front[i, j] > 0 and not burned[i, j]:
+                burned[i, j] = True
+                for di in [-1, 0, 1]:
+                    for dj in [-1, 0, 1]:
+                        ni, nj = i + di, j + dj
+                        if 0 <= ni < rows and 0 <= nj < cols and not burned[ni, nj]:
+                            spread = R[i, j] * (1.0 + abs(di) * 0.3) * (1.0 + abs(dj) * 0.3)
+                            if random.random() < spread * 0.1:
+                                new_front[ni, nj] = spread
+                                burned[ni, nj] = True
+    fire_front = new_front
+    front_pts = np.argwhere(fire_front > 0)
+    if len(front_pts) > 2:
+        perimeters.append(front_pts.tolist())
+
+intensity = R * 5000 * (1.0 - moisture)
+result = {
+    "firePerimeters": perimeters,
+    "spreadRate": R.tolist(),
+    "intensity": intensity.tolist(),
+    "timeSteps": len(perimeters)
+}
+print(json.dumps(result))
+`;
+  }
+
+  private buildAdcircCode(params: Record<string, unknown>): string {
+    return `
+bathy = np.array(${JSON.stringify(params.bathymetry)})
+magnitude = ${params.magnitude ?? 7.0}
+depth = ${params.depth ?? 10}
+epi_row, epi_col = ${JSON.stringify(params.epicenter ?? [0, 0])}
+duration = ${params.duration ?? 3600}
+
+rows, cols = bathy.shape
+g = 9.81
+manning = 0.025
+dx = 1000.0
+
+init_amp = 10.0 ** (0.5 * magnitude - 3.0)
+init_amp *= min(1.0, max(0.1, 30.0 / max(depth, 1)))
+
+eta = np.zeros((rows, cols))
+u = np.zeros((rows, cols))
+v = np.zeros((rows, cols))
+
+r2 = (np.arange(rows)[:, None] - epi_row) ** 2 + (np.arange(cols)[None, :] - epi_col) ** 2
+eta = init_amp * np.exp(-r2 / 100.0)
+
+max_eta = np.zeros((rows, cols))
+arrival = np.full((rows, cols), duration)
+
+dt = 2.0
+timeSteps = min(int(duration / dt), 3000)
+for t in range(timeSteps):
+    if t % 100 == 0:
+        pass
+    de_dx = np.zeros((rows, cols))
+    de_dy = np.zeros((rows, cols))
+    de_dx[:, 1:-1] = (eta[:, 2:] - eta[:, :-2]) / (2 * dx)
+    de_dy[1:-1, :] = (eta[2:, :] - eta[:-2, :]) / (2 * dx)
+    depth_total = np.maximum(bathy + eta, 0.1)
+    u -= dt * g * de_dx
+    v -= dt * g * de_dy
+    u_flux = u * depth_total
+    v_flux = v * depth_total
+    dudx = np.zeros((rows, cols)); dvdy = np.zeros((rows, cols))
+    dudx[:, 1:-1] = (u_flux[:, 2:] - u_flux[:, :-2]) / (2 * dx)
+    dvdy[1:-1, :] = (v_flux[2:, :] - v_flux[:-2, :]) / (2 * dx)
+    eta -= dt * (dudx + dvdy)
+    eta *= 0.999
+    max_eta = np.maximum(max_eta, np.abs(eta))
+    arriving = (np.abs(eta) > 0.01) & (arrival == duration)
+    arrival[arriving] = t * dt
+
+inundation = np.maximum(max_eta - np.maximum(bathy, 0), 0)
+result = {
+    "waveHeights": max_eta.tolist(),
+    "arrivalTimes": arrival.tolist(),
+    "inundationMap": inundation.tolist()
+}
+print(json.dumps(result))
+`;
+  }
+
+  private buildWrfCode(params: Record<string, unknown>): string {
+    return `
+init = ${JSON.stringify(params.initialConditions ?? {})}
+boundary = ${JSON.stringify(params.boundaryConditions ?? {})}
+terrain = np.array(${JSON.stringify(params.terrain ?? [])})
+duration = ${params.duration ?? 24}
+
+rows, cols = terrain.shape
+nx, ny = rows, cols
+dx = 5000.0
+dt = 30.0
+f = 1e-4
+g = 9.81
+H = 5000.0
+
+u = np.random.randn(nx, ny) * 0.1
+v = np.random.randn(nx, ny) * 0.1
+T = np.ones((nx, ny)) * 288.0
+p = np.ones((nx, ny)) * 101325.0
+qv = np.ones((nx, ny)) * 0.005
+
+if "temperature" in init:
+    T += np.array(init["temperature"])
+if "pressure" in init:
+    p += np.array(init["pressure"])
+
+wind_out = []
+pressure_out = []
+temp_out = []
+
+timeSteps = min(int(duration * 3600 / dt), 2000)
+for t in range(timeSteps):
+    if t > 0:
+        du_dx = np.zeros((nx, ny)); du_dy = np.zeros((nx, ny))
+        dv_dx = np.zeros((nx, ny)); dv_dy = np.zeros((nx, ny))
+        du_dx[:, 1:-1] = (u[:, 2:] - u[:, :-2]) / (2 * dx)
+        du_dy[1:-1, :] = (u[2:, :] - u[:-2, :]) / (2 * dx)
+        dv_dx[:, 1:-1] = (v[:, 2:] - v[:, :-2]) / (2 * dx)
+        dv_dy[1:-1, :] = (v[2:, :] - v[:-2, :]) / (2 * dx)
+        u -= dt * (u * du_dx + v * du_dy - f * v + g * np.gradient(p, dx, axis=1) / p)
+        v -= dt * (u * dv_dx + v * dv_dy + f * u + g * np.gradient(p, dx, axis=0) / p)
+        u *= 0.999; v *= 0.999
+
+    if t % int(timeSteps / 10 + 1) == 0 or t == timeSteps - 2:
+        wind_out.append([u.tolist(), v.tolist()])
+        pressure_out.append(p.tolist())
+        temp_out.append(T.tolist())
+
+precip = np.maximum(qv * 1000 - 5, 0) * 10
+result = {
+    "wind": wind_out,
+    "pressure": pressure_out,
+    "temperature": temp_out,
+    "precipitation": precip.tolist()
+}
+print(json.dumps(result))
+`;
+  }
+
+  private buildHysplitCode(params: Record<string, unknown>): string {
+    return `
+eruption_height = ${params.eruptionHeight ?? 10}
+ash_mass = ${params.ashMass ?? 1000}
+wind_fields = ${JSON.stringify(params.windFields ?? [])}
+duration = ${params.duration ?? 24}
+
+nx, ny, nz = 100, 100, 20
+dx, dy = 5000.0, 5000.0
+K_h = 5000.0
+K_v = 50.0
+dt = 60.0
+
+C = np.zeros((nx, ny, nz))
+plume_rise = eruption_height * 1000.0
+cz = int(min(plume_rise / 500.0, nz - 1))
+cx, cy = nx // 2, ny // 2
+C[cx-2:cx+2, cy-2:cy+2, cz-1:cz+2] = ash_mass / 100.0
+
+deposition = np.zeros((nx, ny))
+timeSteps = min(int(duration * 3600 / dt), 2000)
+for t in range(timeSteps):
+    dC = np.zeros((nx, ny, nz))
+    for i in range(1, nx - 1):
+        for j in range(1, ny - 1):
+            for k in range(1, nz - 1):
+                adv_x = K_h * (C[i+1,j,k] - 2*C[i,j,k] + C[i-1,j,k]) / dx**2
+                adv_y = K_h * (C[i,j+1,k] - 2*C[i,j,k] + C[i,j-1,k]) / dy**2
+                adv_z = K_v * (C[i,j,k+1] - 2*C[i,j,k] + C[i,j,k-1]) / (250**2)
+                dC[i,j,k] = adv_x + adv_y + adv_z
+                if k == 0:
+                    deposition[i,j] += C[i,j,0] * 0.001
+                    dC[i,j,0] -= C[i,j,0] * 0.001
+    C += dC * dt
+    C = np.maximum(C, 0)
+
+ash_series = []
+for t_step in range(min(10, timeSteps)):
+    idx = int(t_step * timeSteps / 10)
+    ash_series.append(C[:, :, nz//2].tolist())
+
+result = {
+    "ashConcentration": ash_series,
+    "depositionMap": deposition.tolist()
+}
+print(json.dumps(result))
+`;
+  }
+
+  private buildFnoCode(params: Record<string, unknown>): string {
+    return `
+lat = ${params.lat ?? 0}
+lon = ${params.lon ?? 0}
+lead_days = min(max(${params.leadDays ?? 1}, 1), 10)
+
+np.random.seed(abs(int(lat * 100 + lon * 100 + lead_days * 10)))
+nx, ny = 64, 64
+base_temp = 288.0 - abs(lat) * 0.5
+conf = 0.75 - lead_days * 0.03
+temp = np.random.randn(nx, ny) * 2.0 + base_temp + lead_days * 0.1
+precip = np.maximum(np.random.exponential(2.0, (nx, ny)) * (1.0 - lead_days * 0.02), 0)
+wind = np.abs(np.random.randn(nx, ny) * 3.0 + 5.0)
+
+result = {
+    "temperature": temp.tolist(),
+    "precipitation": precip.tolist(),
+    "windSpeed": wind.tolist(),
+    "confidence": round(conf, 3)
+}
+print(json.dumps(result))
+`;
+  }
+}

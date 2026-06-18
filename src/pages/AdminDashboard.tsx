@@ -1,0 +1,196 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { getToken } from '../context/AuthContext';
+
+type Tab = 'metrics' | 'audit' | 'plugins' | 'health';
+
+interface HealthData {
+  status: string;
+  checks: Record<string, { status: string; detail?: string }>;
+  uptime_ms: number;
+  version?: string;
+}
+
+interface MetricsData {
+  [key: string]: string;
+}
+
+export default function AdminDashboard({ onClose }: { onClose: () => void }) {
+  const { isAdmin, logout } = useAuth();
+  const [tab, setTab] = useState<Tab>('metrics');
+  const [metrics, setMetrics] = useState<MetricsData | null>(null);
+  const [health, setHealth] = useState<HealthData | null>(null);
+  const [auditLogs, setAuditLogs] = useState<Array<Record<string, unknown>>>([]);
+  const [plugins, setPlugins] = useState<Array<{ name: string; enabled: boolean; description?: string }>>([]);
+  const [healthColor, setHealthColor] = useState<string>('#22c55e');
+
+  const token = getToken();
+
+  const fetchMetrics = useCallback(async () => {
+    try {
+      const resp = await fetch(`/api/metrics?token=${token}`, { cache: 'no-store' });
+      if (resp.ok) {
+        const text = await resp.text();
+        const lines: MetricsData = {};
+        for (const line of text.split('\n')) {
+          if (line && !line.startsWith('#') && !line.startsWith('TYPE') && !line.startsWith('HELP')) {
+            const parts = line.split(' ');
+            if (parts.length >= 2) {
+              const key = parts.slice(0, -1).join(' ');
+              lines[key] = parts[parts.length - 1];
+            }
+          }
+        }
+        setMetrics(lines);
+      }
+    } catch { /* silent */ }
+  }, [token]);
+
+  const fetchHealth = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/health', { cache: 'no-store' });
+      const data: HealthData = await resp.json();
+      setHealth(data);
+      if (data.status === 'healthy') setHealthColor('#22c55e');
+      else if (data.status === 'degraded') setHealthColor('#f59e0b');
+      else setHealthColor('#ef4444');
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => {
+    fetchMetrics();
+    fetchHealth();
+    const interval = setInterval(fetchHealth, 5000);
+    return () => clearInterval(interval);
+  }, [fetchMetrics, fetchHealth]);
+
+  if (!isAdmin) {
+    return (
+      <div className="admin-overlay">
+        <div className="admin-panel" style={{ textAlign: 'center', padding: 40 }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+          <h2>Access Denied</h2>
+          <p style={{ color: '#94a3b8' }}>Admin privileges required.</p>
+          <button onClick={onClose} style={{ marginTop: 16, padding: '8px 24px', borderRadius: 8, border: 'none', background: '#334155', color: '#e2e8f0', cursor: 'pointer' }}>Close</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="admin-overlay" style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div className="admin-panel" style={{
+        background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)',
+        borderRadius: 16, width: '90%', maxWidth: 900, height: '85vh',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#e2e8f0' }}>🛡️ Admin Dashboard</h2>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button onClick={logout} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: 12 }}>Logout</button>
+            <button onClick={onClose} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#334155', color: '#e2e8f0', cursor: 'pointer', fontSize: 12 }}>✕</button>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 2, padding: '8px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+          {(['metrics', 'audit', 'plugins', 'health'] as Tab[]).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              style={{
+                padding: '8px 16px', borderRadius: '6px 6px 0 0', border: 'none',
+                background: tab === t ? 'rgba(59,130,246,0.15)' : 'transparent',
+                color: tab === t ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 13, fontWeight: tab === t ? 600 : 400,
+              }}>
+              {t === 'metrics' ? '📊 Metrics' : t === 'audit' ? '📋 Audit Logs' : t === 'plugins' ? '🔌 Plugins' : '❤️ Health'}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+          {tab === 'metrics' && (
+            <div>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Prometheus Metrics</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+                {metrics ? Object.entries(metrics).slice(0, 50).map(([key, val]) => (
+                  <div key={key} style={{
+                    background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '10px 14px',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                  }}>
+                    <div style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace', wordBreak: 'break-all' }}>{key}</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#60a5fa', marginTop: 4 }}>{val}</div>
+                  </div>
+                )) : <div style={{ color: '#64748b', padding: 20 }}>Loading metrics...</div>}
+              </div>
+            </div>
+          )}
+
+          {tab === 'audit' && (
+            <div>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Audit Logs (coming soon)</h3>
+              <div style={{ color: '#64748b', padding: 20, textAlign: 'center' }}>
+                Audit log viewer will be implemented in a future update.
+              </div>
+            </div>
+          )}
+
+          {tab === 'plugins' && (
+            <div>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Plugin Manager</h3>
+              {plugins.length === 0 ? (
+                <div style={{ color: '#64748b', padding: 20, textAlign: 'center' }}>
+                  No plugins loaded. Plugin management UI coming soon.
+                </div>
+              ) : (
+                plugins.map(p => (
+                  <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 6 }}>
+                    <div style={{ flex: 1 }}><strong style={{ color: '#e2e8f0' }}>{p.name}</strong></div>
+                    <div style={{ fontSize: 11, color: p.enabled ? '#22c55e' : '#ef4444' }}>{p.enabled ? 'Enabled' : 'Disabled'}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {tab === 'health' && (
+            <div>
+              <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#94a3b8' }}>System Health <span style={{ fontSize: 11, color: '#64748b' }}>(polling every 5s)</span></h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+                {health ? (
+                  <>
+                    <HealthCard label="Overall Status" value={health.status} color={healthColor} />
+                    <HealthCard label="Uptime" value={`${(health.uptime_ms / 3600000).toFixed(1)}h`} color="#60a5fa" />
+                    <HealthCard label="Version" value={health.version || '0.0.0'} color="#94a3b8" />
+                    {Object.entries(health.checks).map(([key, val]) => (
+                      <HealthCard key={key} label={key} value={val.status} color={val.status === 'ok' ? '#22c55e' : val.status === 'degraded' ? '#f59e0b' : '#ef4444'} detail={val.detail} />
+                    ))}
+                  </>
+                ) : (
+                  <div style={{ color: '#64748b' }}>Loading health data...</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HealthCard({ label, value, color, detail }: { label: string; value: string; color: string; detail?: string }) {
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '14px 16px',
+      border: `1px solid ${color}22`,
+    }}>
+      <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block' }} />
+        {value}
+      </div>
+      {detail && <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>{detail}</div>}
+    </div>
+  );
+}

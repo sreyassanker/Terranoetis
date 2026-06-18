@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
+    "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\" \"bash -c 'redis-cli ping &>/dev/null || redis-server 2>/dev/null || true; exec tail -f /dev/null'\"",
     "dev:client": "vite",
     "dev:server": "tsx server/index.ts",
     "build": "tsc -b && vite build",
@@ -14,6 +14,8 @@
     "test:unit": "vitest run --reporter=verbose server/__tests__/unit",
     "test:integration": "vitest run --reporter=verbose server/__tests__/integration",
     "test:e2e": "vitest run --reporter=verbose server/__tests__/e2e",
+    "test:server": "vitest run --reporter=verbose server/__tests__/unit server/__tests__/integration",
+    "test:server:coverage": "vitest run --coverage",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
@@ -60,9 +62,11 @@
     "dotenv": "^16.4.7",
     "embla-carousel-react": "^8.6.0",
     "express": "^4.21.2",
+    "h3-js": "^4.4.0",
     "helmet": "^8.2.0",
     "hls.js": "^1.6.16",
     "input-otp": "^1.4.2",
+    "ioredis": "^5.11.0",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.562.0",
     "next-themes": "^0.4.6",
@@ -95,6 +99,7 @@
     "@types/cheerio": "^0.22.33",
     "@types/cors": "^2.8.12",
     "@types/express": "^4.17.17",
+    "@types/ioredis": "^4.28.10",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
@@ -119,5 +124,11 @@
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",
     "vitest": "^4.1.7"
+  },
+  "overrides": {
+    "protobufjs": "^7.5.0",
+    "onnx-proto": {
+      "protobufjs": "^7.5.0"
+    }
   }
 }

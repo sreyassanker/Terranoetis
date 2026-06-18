@@ -73,6 +73,7 @@ export function addEarthquakeEntity(
       semiMajorAxis: ringRadius,
       semiMinorAxis: ringRadius,
       material: ringMaterial,
+      height: 0,
       heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
       show: new Cesium.CallbackProperty((time?: Cesium.JulianDate) => {
         const elapsed = Cesium.JulianDate.secondsDifference(time ?? eventTime, eventTime);

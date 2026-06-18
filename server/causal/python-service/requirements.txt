@@ -1,0 +1,6 @@
+dowhy==0.11.1
+causal-learn==0.1.4.0
+pandas==2.1.4
+numpy==1.26.3
+flask==3.0.0
+gunicorn==21.2.0

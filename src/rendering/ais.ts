@@ -1,4 +1,6 @@
 import * as Cesium from 'cesium';
+import { GhostProtocol } from './ghostProtocol';
+import { GhostEntity } from './GhostEntity';
 
 interface AisVesselState {
   mmsi: number;
@@ -48,32 +50,64 @@ function getShipIcon(heading: number): HTMLCanvasElement {
 export class AisVesselTracker {
   private vessels = new Map<number, AisVesselState>();
   private entities = new Map<number, Cesium.Entity>();
+  private ghostEntities = new Map<number, GhostEntity>();
   private viewer: Cesium.Viewer;
+  private ghostProtocol?: GhostProtocol;
   private socket: WebSocket | null = null;
   private removeTick: (() => void) | null = null;
   private lastTickTime = Date.now();
   private apiKey: string;
   private connected = false;
-  private reconnectCount = 0;
+  private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private shouldReconnect = false;
   private onStatus: ((msg: string, type: 'success' | 'error' | 'info') => void) | null = null;
   private hasReceivedData = false;
 
-  constructor(viewer: Cesium.Viewer, apiKey: string) {
+  private static readonly MAX_RECONNECT_ATTEMPTS = 10;
+  private static readonly BASE_RECONNECT_MS = 1000;
+  private static readonly MAX_RECONNECT_MS = 60_000;
+
+  constructor(viewer: Cesium.Viewer, apiKey: string, ghostProtocol?: GhostProtocol) {
     this.viewer = viewer;
     this.apiKey = apiKey;
+    this.ghostProtocol = ghostProtocol;
   }
 
   setStatusHandler(fn: (msg: string, type: 'success' | 'error' | 'info') => void) {
     this.onStatus = fn;
   }
 
+  private scheduleReconnect() {
+    if (!this.shouldReconnect) return;
+    if (this.reconnectAttempt >= AisVesselTracker.MAX_RECONNECT_ATTEMPTS) {
+      this.onStatus?.('AISStream: giving up after repeated failures', 'error');
+      return;
+    }
+    const delay = Math.min(
+      AisVesselTracker.MAX_RECONNECT_MS,
+      AisVesselTracker.BASE_RECONNECT_MS * 2 ** this.reconnectAttempt,
+    );
+    this.reconnectAttempt++;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.shouldReconnect) this.connect();
+    }, delay);
+  }
+
   private connect() {
     if (this.socket) return;
     this.hasReceivedData = false;
-    this.socket = new WebSocket('wss://stream.aisstream.io/v0/stream');
+    try {
+      this.socket = new WebSocket('wss://stream.aisstream.io/v0/stream');
+    } catch (e) {
+      this.onStatus?.(`AISStream connection error: ${(e as Error).message}`, 'error');
+      this.scheduleReconnect();
+      return;
+    }
     this.socket.onopen = () => {
       this.connected = true;
-      this.reconnectCount = 0;
+      this.reconnectAttempt = 0;
       this.socket!.send(JSON.stringify({
         APIKey: this.apiKey,
         BoundingBoxes: [[[-90, -180], [90, 180]]],
@@ -117,17 +151,25 @@ export class AisVesselTracker {
     this.socket.onclose = () => {
       this.connected = false;
       this.socket = null;
+      this.scheduleReconnect();
     };
   }
 
   start() {
     if (this.removeTick) return;
+    this.shouldReconnect = true;
+    this.reconnectAttempt = 0;
     this.connect();
     this.lastTickTime = Date.now();
     this.removeTick = this.viewer.clock.onTick.addEventListener(() => this.tick());
   }
 
   stop() {
+    this.shouldReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.removeTick) {
       this.removeTick();
       this.removeTick = null;
@@ -141,6 +183,11 @@ export class AisVesselTracker {
 
   clear() {
     this.stop();
+    for (const [mmsi, ghost] of this.ghostEntities.entries()) {
+      this.ghostProtocol?.removeGhost(String(mmsi));
+      ghost.destroy();
+    }
+    this.ghostEntities.clear();
     for (const ent of this.entities.values()) {
       this.viewer.entities.remove(ent);
     }
@@ -157,14 +204,6 @@ export class AisVesselTracker {
     }
     this.lastTickTime = now;
     const staleCutoff = now - STALE_TIMEOUT_MS;
-
-    if (!this.socket && this.removeTick) {
-      this.reconnectCount++;
-      if (this.reconnectCount >= 20) {
-        this.reconnectCount = 0;
-        this.connect();
-      }
-    }
 
     for (const [mmsi, v] of this.vessels) {
       if (v.lastUpdate < staleCutoff) {
@@ -194,7 +233,7 @@ export class AisVesselTracker {
       activeIds.add(id);
       let ent = this.entities.get(id);
       if (!ent) {
-        ent = this.viewer.entities.add({
+        const entityConfig: Cesium.Entity.ConstructorOptions = {
           position: pos,
           name: v.name || `MMSI: ${v.mmsi}`,
           billboard: {
@@ -218,8 +257,24 @@ export class AisVesselTracker {
             scaleByDistance: new Cesium.NearFarScalar(500000.0, 1.0, 2000000.0, 0.3),
           },
           properties: { layer: 'ais_vessels', mmsi: v.mmsi, name: v.name, sog: v.sog, cog: v.cog, lon: v.lon, lat: v.lat, time: Date.now() },
-        });
-        this.entities.set(id, ent);
+        };
+        if (this.ghostProtocol) {
+          const speedMs = v.sog * 0.514444;
+          const velocity = new Cesium.Cartesian3(speedMs, 0, 0);
+          const ghost = this.ghostProtocol.createGhost(
+            String(v.mmsi), entityConfig, 'maritime', velocity,
+            v.heading !== 0 ? v.heading : v.cog,
+          );
+          this.ghostEntities.set(id, ghost);
+          const realEnt = ghost.getRealEntity();
+          if (realEnt) {
+            ent = realEnt;
+            this.entities.set(id, ent);
+          }
+        } else {
+          ent = this.viewer.entities.add(entityConfig);
+          if (ent) this.entities.set(id, ent);
+        }
       } else {
         if (ent.position instanceof Cesium.ConstantPositionProperty) {
           ent.position.setValue(pos);
@@ -238,6 +293,13 @@ export class AisVesselTracker {
         if (ent.label && ent.label.text instanceof Cesium.ConstantProperty) {
           ent.label.text.setValue(v.name || '');
         }
+        // Ghost Protocol: update FutureTensor and trail with dead-reckoned position
+        const ghost = this.ghostEntities.get(id);
+        if (ghost && this.ghostProtocol) {
+          const speedMs = v.sog * 0.514444;
+          const velocity = new Cesium.Cartesian3(speedMs, 0, 0);
+          ghost.updatePosition(pos, velocity, v.heading !== 0 ? v.heading : v.cog);
+        }
       }
     }
 
@@ -245,6 +307,12 @@ export class AisVesselTracker {
       if (activeIds.has(id)) continue;
       this.viewer.entities.remove(ent);
       this.entities.delete(id);
+      // Clean up associated GhostProtocol entities
+      const ghost = this.ghostEntities.get(id);
+      if (ghost) {
+        this.ghostProtocol?.removeGhost(String(id));
+        this.ghostEntities.delete(id);
+      }
     }
   }
 }

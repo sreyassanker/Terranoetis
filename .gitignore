@@ -12,7 +12,15 @@ dist
 dist-ssr
 *.local
 .env
+.env.local
 server/.env
+
+# SQLite runtime data
+server/realtime.db
+server/realtime.db-wal
+server/realtime.db-shm
+*.db-wal
+*.db-shm
 
 # Editor directories and files
 .vscode/*

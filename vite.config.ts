@@ -61,7 +61,9 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 2000,
+    sourcemap: 'hidden', // upload to error tracking, do not expose in browser
     rollupOptions: {
+      external: [/satellite\.js\/wasm-build/],
       output: {
         manualChunks: {
           cesium: ['cesium'],
