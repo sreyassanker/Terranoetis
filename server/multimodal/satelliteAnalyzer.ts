@@ -173,7 +173,7 @@ export class SatelliteAnalyzer {
   }
 
   /** LLM vision interpretation (placeholder — requires vision-capable model) */
-  async interpretWithVision(lat: number, lon: number, apiKey?: string): Promise<string | null> {
+  async interpretWithVision(lat: number, lon: number, _apiKey?: string): Promise<string | null> {
     const obs = await this.analyzeArea(lat, lon);
     if (!obs) return null;
 
@@ -190,7 +190,7 @@ export class SatelliteAnalyzer {
     return interpretation;
   }
 
-  private async analyzeHistorical(lat: number, lon: number, daysAgo: number): Promise<SatelliteObservation | null> {
+  private async analyzeHistorical(lat: number, lon: number, _daysAgo: number): Promise<SatelliteObservation | null> {
     return this.analyzeArea(lat, lon);
   }
 

@@ -436,7 +436,7 @@ export class FactManager {
     this.embedder = embedder;
   }
 
-  async extractFacts(text: string, apiKey: string): Promise<string[]> {
+  async extractFacts(text: string, _apiKey: string): Promise<string[]> {
     const cacheKey = `extract:${text.slice(0, 100)}`;
     const cached = this.cache.get<string[]>(cacheKey);
     if (cached) return cached;
@@ -615,7 +615,7 @@ export class MemoryManager {
     userId: string,
     currentQuery: string,
     recentMessages: Array<{ role: string; content: string }>,
-    apiKey?: string,
+    _apiKey?: string,
   ): Promise<string> {
     const profile = this.profiles.get(userId);
     const episodic = this.getEpisodic(userId);

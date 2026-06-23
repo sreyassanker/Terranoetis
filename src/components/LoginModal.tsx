@@ -3,23 +3,22 @@ import { useAuth } from '../context/AuthContext';
 
 export default function LoginModal() {
   const { isLoggedIn, login } = useAuth();
-  const [open, setOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (!isLoggedIn) setOpen(true);
-    else setOpen(false);
+  const open = isLoggedIn ? false : manualOpen;
 
+  useEffect(() => {
     const handler = () => {
       const token = localStorage.getItem('auth_token');
-      setOpen(!token);
+      if (!token) setManualOpen(true);
     };
     window.addEventListener('auth:required', handler);
     return () => window.removeEventListener('auth:required', handler);
-  }, [isLoggedIn]);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -28,7 +27,7 @@ export default function LoginModal() {
     setLoading(true);
     try {
       await login(username, password);
-      setOpen(false);
+      setManualOpen(false);
     } catch (err) {
       setError((err as Error).message);
     }

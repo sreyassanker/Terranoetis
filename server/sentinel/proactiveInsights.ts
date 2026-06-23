@@ -3,8 +3,6 @@ import { pubsub } from '../pubsub';
 import { broadcastToUser, broadcastToAll } from '../websocket';
 import { getDb } from '../db/index';
 import { memoryManagerV2 } from '../memory-v2/memoryManager-v2';
-import { omninet } from '../ai-router/omninet';
-import { causalGraph } from '../world-model/causalGraph';
 import { ensemblePredictor } from '../world-model/ensemblePredictor';
 import type { Alert } from './alertIntelligence';
 import type { EnrichedEvent } from './streamProcessor';

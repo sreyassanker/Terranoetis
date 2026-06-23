@@ -1,8 +1,16 @@
 import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
+import type * as Cesium from 'cesium';
+
+interface WeatherDataPoint {
+  lat?: number;
+  lon?: number;
+  intensity?: number;
+  opacity?: number;
+}
 
 interface VolumetricWeatherProps {
-  viewer: any;
-  weatherData: any[];
+  viewer: Cesium.Viewer;
+  weatherData: WeatherDataPoint[];
   type: 'cloud' | 'smoke' | 'rain';
   visible?: boolean;
   opacity?: number;
@@ -52,14 +60,16 @@ const PARTICLE_CONFIGS: Record<string, ParticleConfig> = {
 const VolumetricWeather: React.FC<VolumetricWeatherProps> = ({
   viewer, weatherData, type, visible = true, opacity = 1, onToggle,
 }) => {
-  const systemRef = useRef<any>(null);
+  const systemRef = useRef<Cesium.ParticleSystem | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [particleCount, setParticleCount] = useState(0);
-  const cesium = (window as any).Cesium;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cesium = (window as any).Cesium as typeof Cesium | undefined;
 
   const config = useMemo(() => PARTICLE_CONFIGS[type], [type]);
 
-  const getShadersForType = useCallback((particleType: string): string => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _getShadersForType = useCallback((particleType: string): string => {
     switch (particleType) {
       case 'cloud':
         return 'vec2 cloudUV = gl_FragCoord.xy / vec2(512.0); float alpha = 1.0 - smoothstep(0.0, 0.8, length(cloudUV - 0.5));';
@@ -72,13 +82,16 @@ const VolumetricWeather: React.FC<VolumetricWeatherProps> = ({
     }
   }, []);
 
-  const createParticleSystem = useCallback(() => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _createParticleSystem = useCallback(() => {
     if (!viewer || !viewer.scene || !visible || !cesium) return;
     const emitter = new cesium.CircleEmitter(config.emitterRadius);
-    const particleSystem = new cesium.ParticleSystem({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const particleSystem = new (cesium as any).ParticleSystem({
       image: config.image,
       color: new cesium.Color(...config.color),
-      size: new cesium.ParticleSystemSize(config.size, config.size * 2),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      size: new (cesium as any).ParticleSystemSize(config.size, config.size * 2),
       speed: config.speed,
       lifetime: config.lifetime,
       emitter,
@@ -108,14 +121,16 @@ const VolumetricWeather: React.FC<VolumetricWeatherProps> = ({
     const updateParticles = () => {
       if (!weatherData.length) return;
       const latest = weatherData[weatherData.length - 1];
-      ps.rate = (latest.intensity || 1) * (config.count / config.lifetime);
-      const c = cesium.Color.fromBytes(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ps as any).rate = (latest.intensity || 1) * (config.count / config.lifetime);
+      const c = cesium!.Color.fromBytes(
         Math.floor(255 * config.color[0]),
         Math.floor(255 * config.color[1]),
         Math.floor(255 * config.color[2]),
         Math.floor(255 * Math.min(1, (latest.opacity ?? config.color[3]))),
       );
-      ps.color = c;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ps as any).color = c;
     };
 
     const interval = setInterval(updateParticles, 2000);

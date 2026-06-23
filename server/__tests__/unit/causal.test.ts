@@ -76,9 +76,9 @@ describe('EntropyMixer', () => {
   });
 
   it('interpretEntropy returns correct levels', () => {
-    expect((mixer as any).interpretEntropy(0.1)).toBe('baseline');
-    expect((mixer as any).interpretEntropy(0.4)).toBe('restless');
-    expect((mixer as any).interpretEntropy(0.7)).toBe('critical');
-    expect((mixer as any).interpretEntropy(0.95)).toBe('catastrophic');
+    expect((mixer as unknown as { interpretEntropy: (v: number) => string }).interpretEntropy(0.1)).toBe('baseline');
+    expect((mixer as unknown as { interpretEntropy: (v: number) => string }).interpretEntropy(0.4)).toBe('restless');
+    expect((mixer as unknown as { interpretEntropy: (v: number) => string }).interpretEntropy(0.7)).toBe('critical');
+    expect((mixer as unknown as { interpretEntropy: (v: number) => string }).interpretEntropy(0.95)).toBe('catastrophic');
   });
 });

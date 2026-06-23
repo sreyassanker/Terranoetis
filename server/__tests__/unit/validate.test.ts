@@ -1,9 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   askSchema, sandboxExecuteSchema, chatCreateSchema,
   feedbackSchema, monitorRuleSchema, validate,
 } from '../../middleware/validate';
-import { z } from 'zod';
 
 describe('Zod schemas - valid data', () => {
   it('askSchema accepts valid message', () => {
@@ -91,8 +90,8 @@ describe('Zod schemas - invalid data', () => {
 describe('validate middleware', () => {
   it('should call next on valid body', () => {
     const middleware = validate(askSchema);
-    const req: any = { body: { message: 'test query' } };
-    const res: any = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
+    const req: Record<string, unknown> = { body: { message: 'test query' } };
+    const res: Record<string, unknown> = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
     const next = vi.fn();
     middleware(req, res, next);
     expect(next).toHaveBeenCalled();
@@ -100,8 +99,8 @@ describe('validate middleware', () => {
 
   it('should return 400 on invalid body', () => {
     const middleware = validate(askSchema);
-    const req: any = { body: {} };
-    const res: any = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
+    const req: Record<string, unknown> = { body: {} };
+    const res: Record<string, unknown> = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
     const next = vi.fn();
     middleware(req, res, next);
     expect(res.status).toHaveBeenCalledWith(400);

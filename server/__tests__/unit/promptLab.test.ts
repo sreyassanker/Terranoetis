@@ -54,7 +54,7 @@ describe('PromptLab', () => {
     const variant = lab.selectVariant('quick_scan');
     lab.recordResult('quick_scan', variant.id, 0.9);
     const variants = lab.getVariants('quick_scan');
-    const updated = variants.find((v: any) => v.id === variant.id);
+    const updated = variants.find((v: Record<string, unknown>) => v.id === variant.id);
     expect(updated.metrics.usageCount).toBe(1);
     expect(updated.metrics.avgScore).toBeCloseTo(0.9);
   });

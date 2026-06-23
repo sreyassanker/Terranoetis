@@ -42,7 +42,7 @@ export function requireOwnership(table: string) {
         next();
         return;
       }
-      if (row.user_id !== (req as any).userId) {
+      if (row.user_id !== (req as unknown as Record<string, unknown>).userId) {
         res.status(403).json({ error: 'Forbidden: you do not own this resource' });
         return;
       }

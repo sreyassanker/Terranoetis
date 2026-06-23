@@ -154,7 +154,7 @@ export class PromptEvolution {
     const evals = getRecentEvals(sampleSize * 2);
     const intentEvals = evals.filter(e => {
       try {
-        const meta = JSON.parse((e as any).metadata_json || '{}');
+        const meta = JSON.parse((e as unknown as Record<string, string>).metadata_json || '{}');
         return meta.intentType === intentType;
       } catch { return false; }
     });

@@ -175,7 +175,6 @@ Summary:`;
     const goal = this.items.find(i => i.type === 'goal');
     const nonGoalItems = this.items.filter(i => i.id !== goal?.id);
 
-    const oldest = nonGoalItems.slice(0, Math.ceil(nonGoalItems.length * 0.5));
     const newest = nonGoalItems.slice(Math.ceil(nonGoalItems.length * 0.5));
 
     const summaryText = await this.summarize();

@@ -216,7 +216,6 @@ export class Omninet {
     const start = Date.now();
     const config = state.config;
     const model = config.models[0];
-    const apiKey = config.apiKeyEnvVar ? process.env[config.apiKeyEnvVar] : '';
 
     await this.executeProviderCall(config, model, 'hi', { maxTokens: 1, temperature: 0.1, signal: AbortSignal.timeout(10000) });
     state.lastLatency = Date.now() - start;

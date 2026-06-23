@@ -1,4 +1,4 @@
-import { exec, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import { mkdtemp, writeFile, mkdir, rm, readFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -371,7 +371,7 @@ export class SandboxManager {
       const timer = setTimeout(() => {
         timedOut = true;
         child.kill('SIGTERM');
-        setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 2000);
+        setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* noop */ } }, 2000);
       }, opts.timeout);
 
       child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });

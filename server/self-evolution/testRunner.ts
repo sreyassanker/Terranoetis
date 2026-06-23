@@ -135,12 +135,11 @@ describe('${name}', () => {
 
   async runTestsInDirectory(dir: string): Promise<TestResult> {
     const files = (await fs.readdir(dir)).filter(f => f.endsWith('.test.ts') || f.endsWith('.test.tsx'));
-    let totalPassed = 0;
     let totalFailed = 0;
     let totalCoverage = 0;
     for (const file of files) {
       const result = await this.runTests(path.join(dir, file));
-      if (result.passed) totalPassed++; else totalFailed++;
+      if (!result.passed) totalFailed++;
       totalCoverage += result.coverage;
     }
     const avgCoverage = files.length > 0 ? totalCoverage / files.length : 0;

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import path from 'path';
+import fs from 'fs';
 
 const schemaPath = path.resolve(import.meta.dirname, '../../db/schema.sql');
 
@@ -15,7 +16,7 @@ beforeAll(() => {
   db = new Database(':memory:');
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
-  const fsModule = require('fs');
+  const fsModule = fs;
   const schema = fsModule.readFileSync(schemaPath, 'utf-8');
   db.exec(schema);
   db.exec(`CREATE TABLE IF NOT EXISTS job_queue (
@@ -58,7 +59,7 @@ describe('SimpleQueue', () => {
     const { SimpleQueue } = await import('../../queue/simple-queue');
     const q = new SimpleQueue(10);
     const order: number[] = [];
-    q.process('task', async (_payload: any, job: any) => {
+    q.process('task', async (_payload: unknown, job: Record<string, unknown>) => {
       order.push(job.id);
     });
 

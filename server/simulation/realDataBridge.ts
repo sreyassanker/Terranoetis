@@ -32,14 +32,14 @@ function bboxCenter(bbox: BBox): { lat: number; lon: number } {
   return { lat: (bbox.latMin + bbox.latMax) / 2, lon: (bbox.lonMin + bbox.lonMax) / 2 };
 }
 
-function parseGeoJsonFeatures(data: any): any[] {
+function parseGeoJsonFeatures(data: unknown): unknown[] {
   if (!data) return [];
   if (Array.isArray(data)) return data;
   if (data.features) return data.features;
   return [];
 }
 
-async function cachedFetch(key: string, url: string, ttl: number): Promise<any> {
+async function cachedFetch(key: string, url: string, ttl: number): Promise<unknown> {
   const cache = global.__realDataCache || (global.__realDataCache = new Map());
   const hit = cache.get(key);
   if (hit && Date.now() - hit.ts < ttl * 1000) return hit.data;
@@ -83,7 +83,7 @@ export async function fetchRealDataForBBox(bbox: BBox): Promise<RealDataSnapshot
         });
       }
     }
-  } catch {}
+  } catch { /* noop */ }
 
   // 2. Fetch weather from Open-Meteo (center of bbox)
   try {
@@ -100,7 +100,7 @@ export async function fetchRealDataForBBox(bbox: BBox): Promise<RealDataSnapshot
         precip: c.precipitation ?? 0,
       });
     }
-  } catch {}
+  } catch { /* noop */ }
 
   // 3. Fetch NASA FIRMS fires (global CSV, filter by bbox)
   try {
@@ -126,7 +126,7 @@ export async function fetchRealDataForBBox(bbox: BBox): Promise<RealDataSnapshot
         }
       }
     }
-  } catch {}
+  } catch { /* noop */ }
 
   // 4. Fetch USGS volcanoes
   try {
@@ -137,7 +137,7 @@ export async function fetchRealDataForBBox(bbox: BBox): Promise<RealDataSnapshot
         snapshot.volcanoes.push({ volcano: v.vName || 'Unknown', lat, lon, status: v.alertLevel || 'GREEN' });
       }
     }
-  } catch {}
+  } catch { /* noop */ }
 
   // 5. Fetch EONET events
   try {
@@ -147,14 +147,14 @@ export async function fetchRealDataForBBox(bbox: BBox): Promise<RealDataSnapshot
       if (!coords || coords.length < 2) continue;
       const lon = coords[0]; const lat = coords[1];
       if (inBBox(lat, lon, bbox)) {
-        const cats = (ev.categories || []).map((c: any) => c.title || '').join(',');
+        const cats = (ev.categories || []).map((c: unknown) => (c as Record<string, unknown>).title || '').join(',');
         snapshot.eonet.push({
           id: ev.id || '', title: ev.title || '',
           category: cats, lat, lon, date: ev.date || '',
         });
       }
     }
-  } catch {}
+  } catch { /* noop */ }
 
   // 6. Fetch GDACS alerts (XML, parse basic)
   try {
@@ -177,7 +177,7 @@ export async function fetchRealDataForBBox(bbox: BBox): Promise<RealDataSnapshot
         }
       }
     }
-  } catch {}
+  } catch { /* noop */ }
 
   return snapshot;
 }
@@ -197,7 +197,6 @@ export function deriveParams(snapshot: RealDataSnapshot, hazardType: string): De
   const dataSources: string[] = [];
   const result: DerivedParams = { scenarioType: hazardType, params: { lat: center.lat, lon: center.lon }, dataSources };
 
-  const avgTemp = snapshot.weather.reduce((s, w) => s + w.temp, 0) / Math.max(1, snapshot.weather.length);
   const avgHumidity = snapshot.weather.reduce((s, w) => s + w.humidity, 0) / Math.max(1, snapshot.weather.length);
   const avgWind = snapshot.weather.reduce((s, w) => s + w.windSpeed, 0) / Math.max(1, snapshot.weather.length);
   const avgPressure = snapshot.weather.reduce((s, w) => s + w.pressure, 0) / Math.max(1, snapshot.weather.length);

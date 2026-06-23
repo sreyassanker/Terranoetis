@@ -1,5 +1,5 @@
 import { getDb } from '../db/index';
-import { EmbeddingEngine, cosineSimilarity, embeddingToBuffer, bufferToEmbedding } from '../embedding';
+import { EmbeddingEngine, embeddingToBuffer, bufferToEmbedding } from '../embedding';
 import { logger } from '../observability/logger';
 import { safeJsonParse } from '../utils/jsonParse';
 
@@ -171,7 +171,7 @@ export class CausalGraphEngine {
     }
   }
 
-  async addNode(name: string, type: CausalNode['type'], prior = 0.5, metadata?: Record<string, unknown>): Promise<number | null> {
+  async addNode(name: string, type: CausalNode['type'], prior = 0.5, _metadata?: Record<string, unknown>): Promise<number | null> {
     return this.ensureNode(name, type, prior);
   }
 
@@ -260,7 +260,7 @@ export class CausalGraphEngine {
       .slice(0, 10);
   }
 
-  async learnFromOutcome(observedEvents: string[], outcome: string): Promise<void> {
+  async learnFromOutcome(observedEvents: string[], _outcome: string): Promise<void> {
     // Update edge weights based on observed co-occurrence
     for (const cause of observedEvents) {
       for (const effect of observedEvents.filter(e => e !== cause)) {
@@ -304,7 +304,7 @@ export class CausalGraphEngine {
     return [...this.edges];
   }
 
-  getDownstream(nodeName: string, depth = 2): PosteriorResult[] {
+  getDownstream(nodeName: string, _depth = 2): PosteriorResult[] {
     const node = this.getNodeByName(nodeName);
     if (!node) return [];
     return this.infer([{ nodeName, observed: true, confidence: 0.8 }]).filter(

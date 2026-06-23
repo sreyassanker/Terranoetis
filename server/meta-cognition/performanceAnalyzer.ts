@@ -58,20 +58,12 @@ export class PerformanceAnalyzer {
   /** Analyze performance across all intents, detect drift */
   analyze(): IntentPerformance[] {
     const byIntent = getAvgScoresByIntent();
-    const evals = getRecentEvals(200);
     const recentEvals = getRecentEvals(50);
 
     return Object.entries(byIntent).map(([intentType, stats]) => {
-      const intentEvals = evals.filter(e => {
-        try {
-          const meta = JSON.parse((e as any).metadata_json || '{}');
-          return meta.intentType === intentType;
-        } catch { return false; }
-      });
-
       const intentRecent = recentEvals.filter(e => {
         try {
-          const meta = JSON.parse((e as any).metadata_json || '{}');
+          const meta = JSON.parse((e as unknown as Record<string, string>).metadata_json || '{}');
           return meta.intentType === intentType;
         } catch { return false; }
       });
@@ -252,7 +244,7 @@ export class PerformanceAnalyzer {
 
   private matchesIntent(evalEntry: EvalScores & Record<string, unknown>, intentType: string): boolean {
     try {
-      const meta = JSON.parse((evalEntry as any).metadata_json || '{}');
+      const meta = JSON.parse((evalEntry as unknown as Record<string, string>).metadata_json || '{}');
       return meta.intentType === intentType;
     } catch { return false; }
   }

@@ -163,16 +163,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function authHeaders(): Record<string, string> {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};

@@ -1,5 +1,5 @@
 import NodeCache from 'node-cache';
-import { omninet, classifyComplexity } from './ai-router/omninet';
+import { omninet } from './ai-router/omninet';
 import { cognitiveOrchestrator, type CognitionResult, type ProgressCallback } from './cognition/cognitiveOrchestrator';
 import { AgentOrchestrator } from './orchestrator';
 
@@ -641,7 +641,7 @@ Return JSON: {"type":"...","confidence":0.0,"location":{"lat":0,"lon":0,"label":
   /**
    * LLM-based geocoding — resolves any location name to coordinates.
    */
-  static async geocode(text: string, apiKey: string): Promise<{ lat: number; lon: number; label: string } | null> {
+  static async geocode(text: string, _apiKey: string): Promise<{ lat: number; lon: number; label: string } | null> {
     // First try the local city database
     const fast = this.extractLocation(text.toLowerCase());
     if (fast) return { lat: fast[0], lon: fast[1], label: fast[2] };

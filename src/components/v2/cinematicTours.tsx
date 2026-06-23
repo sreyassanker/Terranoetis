@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 
 type TourType = 'orbit' | 'dolly' | 'flyover';
 
@@ -13,7 +13,7 @@ interface Tour {
 }
 
 interface CinematicToursProps {
-  viewer: any;
+  viewer: { camera: { flyTo: (opts: Record<string, unknown>) => void; setView: (opts: Record<string, unknown>) => void } } | null | undefined;
   target?: [number, number];
   type?: TourType;
   onRecord?: (blob: Blob) => void;
@@ -34,24 +34,18 @@ const NarrationScripts: Record<TourType, (target: [number, number]) => string> =
 };
 
 const CinematicTours: React.FC<CinematicToursProps> = ({
-  viewer, target: propTarget, type: propType, onRecord,
+  viewer, target: propTarget, type: propType, onRecord: _onRecord,
 }) => {
-  const [target, setTarget] = useState<[number, number]>(propTarget || [35.6762, 139.6503]);
-  const [tourType, setTourType] = useState<TourType>(propType || 'orbit');
+  const [localTarget, setLocalTarget] = useState<[number, number]>(propTarget || [35.6762, 139.6503]);
+  const target = propTarget || localTarget;
+  const [localTourType, setLocalTourType] = useState<TourType>(propType || 'orbit');
+  const tourType = propType || localTourType;
   const [isPlaying, setIsPlaying] = useState(false);
   const [narration, setNarration] = useState('');
   const [tours, setTours] = useState<Tour[]>([]);
   const [tourName, setTourName] = useState('');
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
-  const cesium = (window as any).Cesium;
-
-  useEffect(() => {
-    if (propTarget) setTarget(propTarget);
-  }, [propTarget]);
-
-  useEffect(() => {
-    if (propType) setTourType(propType);
-  }, [propType]);
+  const cesium = (window as unknown as Record<string, Record<string, Record<string, (...args: unknown[]) => unknown>>>).Cesium;
 
   const playTour = useCallback(async () => {
     if (!viewer || !cesium) return;
@@ -122,8 +116,8 @@ const CinematicTours: React.FC<CinematicToursProps> = ({
   }, [tourName, tourType, target, tours.length]);
 
   const loadTour = useCallback((tour: Tour) => {
-    setTourType(tour.type);
-    setTarget(tour.target as [number, number]);
+    setLocalTourType(tour.type);
+    setLocalTarget(tour.target as [number, number]);
     setNarration(tour.narration);
   }, []);
 
@@ -136,7 +130,7 @@ const CinematicTours: React.FC<CinematicToursProps> = ({
             <label>Type</label>
             <div className="tour-type-select">
               {TOUR_TYPES.map(t => (
-                <button key={t} className={`type-btn ${tourType === t ? 'active' : ''}`} onClick={() => setTourType(t)}>
+                <button key={t} className={`type-btn ${tourType === t ? 'active' : ''}`} onClick={() => setLocalTourType(t)}>
                   {t.charAt(0).toUpperCase() + t.slice(1)}
                 </button>
               ))}
@@ -145,8 +139,8 @@ const CinematicTours: React.FC<CinematicToursProps> = ({
           <div className="tour-row">
             <label>Target</label>
             <div className="tour-coords">
-              <input type="number" value={target[0]} onChange={e => setTarget([+e.target.value, target[1]])} step={0.01} placeholder="Lat" />
-              <input type="number" value={target[1]} onChange={e => setTarget([target[0], +e.target.value])} step={0.01} placeholder="Lon" />
+              <input type="number" value={target[0]} onChange={e => setLocalTarget([+e.target.value, target[1]])} step={0.01} placeholder="Lat" />
+              <input type="number" value={target[1]} onChange={e => setLocalTarget([target[0], +e.target.value])} step={0.01} placeholder="Lon" />
             </div>
           </div>
           <div className="tour-actions">

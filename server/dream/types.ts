@@ -3,7 +3,7 @@ export interface SyntheticEvent {
   type: 'earthquake' | 'hurricane' | 'port_strike' | 'cyber_attack' | 'tsunami' | 'volcanic_eruption';
   region: { lat: number; lon: number; radiusKm: number };
   magnitude: number;
-  parameters: Record<string, any>;
+  parameters: Record<string, unknown>;
   isReal: boolean;
   createdAt: number;
 }

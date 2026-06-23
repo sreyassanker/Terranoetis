@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { NetCDFReader } from 'netcdfjs';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import { computeStudyAreaBbox } from '@/rendering/studyArea';
@@ -65,7 +65,7 @@ export default function ScenarioEditor({ onClose, onGenerateFromBbox, onImport, 
   const czmlInputRef = useRef<HTMLInputElement>(null);
   const ncInputRef = useRef<HTMLInputElement>(null);
   const [importPath, setImportPath] = useState('');
-  const [importVar, setImportVar] = useState('');
+  const [importVar] = useState('');
   const [importingPath, setImportingPath] = useState(false);
 
   const updateParam = useCallback((key: string, value: number) => {
@@ -92,7 +92,7 @@ export default function ScenarioEditor({ onClose, onGenerateFromBbox, onImport, 
 
   const parseFile = useCallback((text: string, format: string) => {
     try {
-      let pointCloud: Point3D[] = [];
+      const pointCloud: Point3D[] = [];
       let lat = 0, lon = 0;
 
       if (format === 'geojson') {
@@ -152,13 +152,13 @@ export default function ScenarioEditor({ onClose, onGenerateFromBbox, onImport, 
         location: { lat, lon },
         timestamp: new Date().toISOString(),
       });
-    } catch (e: any) {
-      alert(`Failed to parse ${format.toUpperCase()}: ${e.message}`);
+    } catch (e: unknown) {
+      alert(`Failed to parse ${format.toUpperCase()}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }, [onImport]);
 
-  function parseNcVars(vars: Record<string, number[]>): { pointCloud: Point3D[]; lat: number; lon: number } {
-    let pointCloud: Point3D[] = [];
+  function parseNcVars(vars: Record<string, number[] | undefined>): { pointCloud: Point3D[]; lat: number; lon: number } {
+    const pointCloud: Point3D[] = [];
     let lat = 0, lon = 0;
 
     if (vars.x && vars.y && vars.z) {
@@ -217,8 +217,8 @@ export default function ScenarioEditor({ onClose, onGenerateFromBbox, onImport, 
     try {
       const reader = new NetCDFReader(buffer);
       const vars: Record<string, number[]> = {};
-      for (const name of Object.keys(reader.variables)) {
-        vars[name] = reader.variables[name].data as number[];
+      for (const v of reader.variables) {
+        vars[v.name] = reader.getDataVariable(v) as number[];
       }
       const { pointCloud, lat, lon } = parseNcVars(vars);
       if (pointCloud.length === 0) { alert(`No recognized variables found. Available: ${Object.keys(vars).join(', ') || 'none'}`); return; }
@@ -238,17 +238,17 @@ export default function ScenarioEditor({ onClose, onGenerateFromBbox, onImport, 
       return r.json();
     }).then(data => {
       const { pointCloud, lat, lon } = parseNcVars({
-        x: data.pointCloud?.map((p: any) => p.x),
-        y: data.pointCloud?.map((p: any) => p.y),
-        z: data.pointCloud?.map((p: any) => p.z),
+        x: data.pointCloud?.map((p: { x: number }) => p.x),
+        y: data.pointCloud?.map((p: { y: number }) => p.y),
+        z: data.pointCloud?.map((p: { z: number }) => p.z),
         lat: data.lat ? [data.lat] : undefined,
         lon: data.lon ? [data.lon] : undefined,
       });
       if (pointCloud.length === 0) { alert(`No recognized variables in server response. Available: ${(data.variables || []).join(', ')}`); return; }
       const id = `imported_${Date.now().toString(36)}`;
       onImport?.({ id, type: 'netcdf', name: `Imported NetCDF — ${pointCloud.length} points`, pointCloud, validationScore: 0.5, severity: 'medium', location: { lat, lon }, timestamp: new Date().toISOString() });
-    }).catch((e: any) => {
-      alert(`Failed to import NetCDF: ${e.message}`);
+    }).catch((e: unknown) => {
+      alert(`Failed to import NetCDF: ${e instanceof Error ? e.message : String(e)}`);
     });
   }, [onImport]);
 
@@ -273,7 +273,7 @@ export default function ScenarioEditor({ onClose, onGenerateFromBbox, onImport, 
     try {
       const active = studyAreas.find(a => a.id === activeStudyAreaId);
       const activeBbox = active ? computeStudyAreaBbox(active) : null;
-      const body: any = { path: importPath.trim(), variable: importVar || undefined, maxPoints: 8000 };
+      const body: Record<string, unknown> = { path: importPath.trim(), variable: importVar || undefined, maxPoints: 8000 };
       if (activeBbox) {
         body.bbox = activeBbox;
         body.maxPoints = 20000;
@@ -285,7 +285,7 @@ export default function ScenarioEditor({ onClose, onGenerateFromBbox, onImport, 
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Import failed');
-      const pointCloud = data.pointCloud.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
+      const pointCloud = data.pointCloud.map((p: { x: number; y: number; z: number }) => ({ x: p.x, y: p.y, z: p.z }));
       const id = `imported_${Date.now().toString(36)}`;
       onImport?.({
         id, type: 'netcdf',
@@ -295,8 +295,8 @@ export default function ScenarioEditor({ onClose, onGenerateFromBbox, onImport, 
         timestamp: new Date().toISOString(),
         metadata: { variableName: data.variableName, colorValues: data.colorValues, valueMin: data.valueMin, valueMax: data.valueMax },
       });
-    } catch (e: any) {
-      alert(`Import failed: ${e.message}`);
+    } catch (e: unknown) {
+      alert(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setImportingPath(false);
     }

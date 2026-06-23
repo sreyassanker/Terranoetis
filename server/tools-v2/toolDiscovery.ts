@@ -1,7 +1,7 @@
 import { getDb } from '../db/index';
 import { omninet } from '../ai-router/omninet';
 import { logger } from '../observability/logger';
-import { dynamicTools, type DynamicTool, type ToolSchema } from './toolGenerator';
+import { dynamicTools, type DynamicTool } from './toolGenerator';
 
 // ── Types ───────────────────────────────────────────────────────
 

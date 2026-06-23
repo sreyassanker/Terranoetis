@@ -28,17 +28,17 @@ describe('Predictor', () => {
     const { Predictor } = await import('../../ml/predictor');
     const predictor = new Predictor();
     predictor.storePattern('high_temp+low_rain', 'drought', 0.5);
-    const row1 = db.prepare("SELECT * FROM historical_patterns WHERE outcome = 'drought'").get() as any;
+    const row1 = db.prepare("SELECT * FROM historical_patterns WHERE outcome = 'drought'").get() as Record<string, unknown>;
     expect(row1.occurrences).toBe(1);
 
     predictor.recordOutcome(
       { hazardType: 'drought', probability: 0.6, severity: 'medium', timeframe: '7d', confidence: 0.5, contributingFactors: ['test'] },
       true, true,
     );
-    const row2 = db.prepare("SELECT * FROM historical_patterns WHERE outcome = 'drought'").get() as any;
+    const row2 = db.prepare("SELECT * FROM historical_patterns WHERE outcome = 'drought'").get() as Record<string, unknown>;
     expect(row2.occurrences).toBe(2);
 
-    const rows = db.prepare("SELECT * FROM prediction_log WHERE hazard_type = 'drought' ORDER BY id DESC").all() as any[];
+    const rows = db.prepare("SELECT * FROM prediction_log WHERE hazard_type = 'drought' ORDER BY id DESC").all() as Record<string, unknown>[];
     expect(rows.length).toBeGreaterThanOrEqual(1);
     expect(rows[0].accuracy).toBe(0.9);
   });
@@ -49,7 +49,7 @@ describe('Predictor', () => {
     const data = [
       { hazardType: 'fire', probability: 0.5, severity: 'medium' as const, timeframe: '24h', confidence: 0.7, contributingFactors: [], source: 'physics' as const, confidenceInterval: [0, 0] as [number, number] },
     ];
-    const result = (predictor as any).toPrediction(data);
+    const result = (predictor as unknown as { toPrediction: (data: unknown[]) => Record<string, unknown>[] }).toPrediction(data);
     expect(result).toHaveLength(1);
     expect(result[0].hazardType).toBe('fire');
     expect(result[0].probability).toBe(0.5);

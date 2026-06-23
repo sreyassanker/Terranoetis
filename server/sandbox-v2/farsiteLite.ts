@@ -164,7 +164,7 @@ export function computeFlameLength(intensity: number): number {
 export function computeCrownFractionBurned(
   spreadRate: number,
   canopyBaseHeight: number,
-  canopyBulkDensity: number,
+  _canopyBulkDensity: number,
 ): number {
   if (spreadRate < 0.1) return 0;
   if (canopyBaseHeight > 20) return 0;

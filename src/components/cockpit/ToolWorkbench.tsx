@@ -34,11 +34,11 @@ interface ToolWorkbenchProps {
 
 export default function ToolWorkbench({ onClose }: ToolWorkbenchProps) {
   const [chain, setChain] = useState<ChainStep[]>([]);
-  const [selectedTool, setSelectedTool] = useState<string | null>(null);
+  const [, setSelectedTool] = useState<string | null>(null);
   const [executing, setExecuting] = useState(false);
   const [results, setResults] = useState<Record<string, string>>({});
   const [showSaveDialog, setShowSaveDialog] = useState(false);
-  const [paramsInput, setParamsInput] = useState('{ "lat": 35, "lon": 140 }');
+  const [paramsInput] = useState('{ "lat": 35, "lon": 140 }');
 
   function addTool(name: string) {
     setChain(prev => [...prev, { tool: name, params: paramsInput, id: `step_${Date.now()}_${prev.length}` }]);

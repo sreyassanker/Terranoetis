@@ -1,4 +1,5 @@
 import { generateScenario } from '../../scenarios/scenarioGenerator';
+import type { ScenarioType } from '../../scenarios/templates';
 import { type PointCloud } from '../../earthgen/flowMatching';
 import { logger } from '../../observability/logger';
 
@@ -30,7 +31,7 @@ const SCENARIO_DESCRIPTIONS: Record<string, string> = {
 
 export class ScenarioPredictor {
   async predict(type: string, params: Record<string, unknown>, numRuns = 100): Promise<ScenarioStats> {
-    const scenarioType = type as any;
+    const scenarioType = type as unknown as ScenarioType;
     const clouds: PointCloud[] = [];
     const probabilities: number[] = [];
     const severityScores: number[] = [];

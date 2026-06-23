@@ -60,10 +60,12 @@ const SpatialCanvas: React.FC = () => {
     setSelectedNode(null);
   }, []);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const updateNodeConfig = useCallback((id: string, config: Record<string, unknown>) => {
     setNodes(prev => prev.map(n => n.id === id ? { ...n, config: { ...n.config, ...config } } : n));
   }, []);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const addEdge = useCallback((from: string, to: string) => {
     const edge: CanvasEdge = {
       id: `edge_${nextId.current++}`,

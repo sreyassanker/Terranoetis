@@ -1,8 +1,11 @@
-import fs from 'fs';
+interface H5WasmModule {
+  ready: Promise<void>;
+  File: new (path: string, mode: string) => { close: () => void; keys: () => Iterable<string>; get: (name: string) => { type: string; value: unknown } | null };
+}
 
-let h5wasmMod: any = null;
-async function getH5(): Promise<any> {
-  if (!h5wasmMod) h5wasmMod = await import('h5wasm/node');
+let h5wasmMod: H5WasmModule | null = null;
+async function getH5(): Promise<H5WasmModule> {
+  if (!h5wasmMod) h5wasmMod = await import('h5wasm/node') as unknown as H5WasmModule;
   await h5wasmMod.ready;
   return h5wasmMod;
 }
@@ -21,7 +24,7 @@ export interface BBox {
   lonMin: number; lonMax: number;
 }
 
-function readDataset(f: any, name: string): number[] | null {
+function readDataset(f: { get: (name: string) => { type: string; value: unknown } | null }, name: string): number[] | null {
   try {
     const item = f.get(name);
     if (!item || item.type !== 'Dataset') return null;
@@ -48,13 +51,13 @@ export async function openFile(filePath: string): Promise<H5File> {
 }
 
 export interface H5File {
-  file: any;
+  file: { close: () => void; keys: () => Iterable<string>; get: (name: string) => { type: string; value: unknown } | null };
   keys: string[];
-  mod: any;
+  mod: unknown;
 }
 
 export function closeFile(h5: H5File): void {
-  try { h5.file.close(); } catch {}
+  try { h5.file.close(); } catch { /* noop */ }
 }
 
 export async function queryVariableNames(filePath: string): Promise<string[]> {
@@ -82,7 +85,7 @@ export function subsetGrid(
   const nlons = lons.length;
   const isGrid = nlats > 1 && nlons > 1 && data.length === nlats * nlons;
 
-  let points: { lat: number; lon: number; value: number }[] = [];
+  const points: { lat: number; lon: number; value: number }[] = [];
 
   if (isGrid) {
     const [iMin, iMax] = bbox ? findBounds(lats, bbox.latMin ?? -90, bbox.latMax ?? 90) : [0, nlats - 1];

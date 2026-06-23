@@ -1,7 +1,6 @@
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
 import { FeedbackManager } from '../selfImprover';
-import { performanceAnalyzer } from './performanceAnalyzer';
 
 // ── Types ───────────────────────────────────────────────────────
 

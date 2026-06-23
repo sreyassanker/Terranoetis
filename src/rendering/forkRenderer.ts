@@ -78,22 +78,23 @@ export class ForkRenderer {
 
     if (entityConfig.point) {
       ghostConfig.point = {
-        ...(entityConfig.point as any),
+        ...(entityConfig.point as Cesium.PointGraphics),
         color: new Cesium.Color(1.0, 0.65, 0.0, 0.5),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         pixelSize: ((entityConfig.point as any).pixelSize ?? 6) * 1.2,
       };
     }
 
     if (entityConfig.billboard) {
       ghostConfig.billboard = {
-        ...(entityConfig.billboard as any),
+        ...(entityConfig.billboard as Cesium.BillboardGraphics),
         color: new Cesium.Color(1.0, 0.65, 0.0, 0.5),
       };
     }
 
     if (entityConfig.polyline) {
       ghostConfig.polyline = {
-        ...(entityConfig.polyline as any),
+        ...(entityConfig.polyline as Cesium.PolylineGraphics),
         material: new Cesium.PolylineGlowMaterialProperty({
           color: new Cesium.Color(1.0, 0.65, 0.0, 0.5),
           glowPower: 0.4,

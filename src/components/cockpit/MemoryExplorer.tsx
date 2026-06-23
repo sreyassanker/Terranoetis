@@ -89,7 +89,7 @@ export default function MemoryExplorer({ onClose }: MemoryExplorerProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MemoryItem[]>([]);
   const [searching, setSearching] = useState(false);
-  const [entities, setEntities] = useState<Entity[]>([
+  const [entities] = useState<Entity[]>([
     { name: 'Tokyo Earthquake', type: 'event', relations: [{ target: 'Japan Trench', relationType: 'located_at' }, { target: 'M6.2', relationType: 'magnitude' }] },
     { name: 'Japan Trench', type: 'geological', relations: [{ target: 'Pacific Plate', relationType: 'boundary' }, { target: 'Tokyo Earthquake', relationType: 'caused' }] },
     { name: 'Pacific Plate', type: 'geological', relations: [{ target: 'Japan Trench', relationType: 'subducts' }] },

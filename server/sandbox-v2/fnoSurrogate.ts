@@ -1,4 +1,4 @@
-import { SimulationEngine, type SimulationConfig, type SimulationResult } from './simulationEngine';
+import { SimulationEngine } from './simulationEngine';
 import { logger } from '../observability/logger';
 import { runWrfSimulation } from './wrfLite';
 

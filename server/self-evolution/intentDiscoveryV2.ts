@@ -25,12 +25,12 @@ interface Proposal {
 }
 
 export class IntentDiscoveryV2 {
-  private memoryManager: any;
-  private codeWriter: any;
+  private memoryManager: unknown;
+  private codeWriter: unknown;
   private proposals: Proposal[] = [];
   private intentLibrary: Map<string, string[]> = new Map();
 
-  constructor(memoryManager: any, codeWriter: any) {
+  constructor(memoryManager: unknown, codeWriter: unknown) {
     this.memoryManager = memoryManager;
     this.codeWriter = codeWriter;
   }
@@ -137,7 +137,7 @@ export class IntentDiscoveryV2 {
 
   async analyzeIntentFrequency(): Promise<Array<{ intent: string; count: number; lastSeen: Date }>> {
     const freq = new Map<string, { count: number; lastSeen: Date }>();
-    for (const [clusterId, examples] of this.intentLibrary.entries()) {
+    for (const [, examples] of this.intentLibrary.entries()) {
       const intent = this.inferIntent(examples);
       if (!freq.has(intent)) freq.set(intent, { count: 0, lastSeen: new Date(0) });
       const entry = freq.get(intent)!;

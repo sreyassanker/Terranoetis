@@ -159,7 +159,7 @@ export class ArchitectureProposals {
       : 0;
 
     let toolCount = 0;
-    let toolUsageRate = 0.5;
+    const toolUsageRate = 0.5;
     let avgLatencyMs = 1500;
     let cacheHitRate = 0.3;
     let feedbackCount = 0;

@@ -178,7 +178,7 @@ export class SelfReportGenerator {
 
   // ── Metrics Collection ───────────────────────────────────────
 
-  private async collectMetrics(startTime: number, endTime: number): Promise<RawMetrics> {
+  private async collectMetrics(_startTime: number, _endTime: number): Promise<RawMetrics> {
     const evals = getRecentEvals(200);
     const avgAccuracy = evals.length > 0
       ? evals.reduce((s, e) => s + e.overall, 0) / evals.length

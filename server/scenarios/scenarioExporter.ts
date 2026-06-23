@@ -64,7 +64,7 @@ export function exportToCZML(scenario: ScenarioBase): CZMLPacket[] {
       id: 'document',
       name: `Scenario: ${scenario.id}`,
       version: '1.0',
-    } as any,
+    } as unknown as Record<string, unknown>,
     {
       id: scenario.id,
       name: `${scenario.type} — ${scenario.id}`,

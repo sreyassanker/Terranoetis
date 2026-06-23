@@ -83,7 +83,7 @@ export class MetaCognition {
 
   async runCycle(): Promise<void> {
     // 1. Analyze performance
-    const perfResults = performanceAnalyzer.analyze();
+    performanceAnalyzer.analyze();
 
     // 2. Detect drift
     const drifted = performanceAnalyzer.getDriftedIntents();

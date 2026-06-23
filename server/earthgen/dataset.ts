@@ -83,26 +83,6 @@ function sqDist(a: Point3D, b: Point3D): number {
   return dx * dx + dy * dy + dz * dz;
 }
 
-function pointsToCloud(
-  lats: number[],
-  lons: number[],
-  depths: number[],
-): PointCloud {
-  const n = Math.min(lats.length, lons.length, depths.length);
-  const cloud: PointCloud = [];
-  for (let i = 0; i < n; i++) {
-    const latRad = (lats[i] || 0) * (Math.PI / 180);
-    const lonRad = (lons[i] || 0) * (Math.PI / 180);
-    const r = 1 + (depths[i] || 0) * 0.001;
-    cloud.push({
-      x: r * Math.cos(latRad) * Math.cos(lonRad),
-      y: r * Math.cos(latRad) * Math.sin(lonRad),
-      z: r * Math.sin(latRad),
-    });
-  }
-  return cloud;
-}
-
 export interface DatasetSource {
   name: string;
   fetch: () => Promise<DatasetExample[]>;
@@ -116,7 +96,7 @@ export class EarthGenDataset {
     this.config = { ...DEFAULT_DATASET_CONFIG, ...cfg };
   }
 
-  addSource(source: DatasetSource, weight = 1): void {
+  addSource(source: DatasetSource, _weight = 1): void {
   }
 
   addExamples(examples: DatasetExample[]): void {

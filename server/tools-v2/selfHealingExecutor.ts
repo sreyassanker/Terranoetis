@@ -62,7 +62,6 @@ function generateSyntheticApproximation(
   }
 
   if (lower.includes('weather') || lower.includes('temperature') || lower.includes('forecast')) {
-    const lat = (input.lat as number) || 40.71;
     return {
       data: {
         temperature: parseFloat((15 + Math.random() * 15).toFixed(1)),

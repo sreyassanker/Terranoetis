@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   });
 
   const dataset = new EarthGenDataset({ numPoints: 4096 });
-  let syntheticExamples: any[] = [];
+  let syntheticExamples: DatasetExample[] = [];
 
   if (opts.source === 'earthquakes' || opts.source === 'synthetic') {
     syntheticExamples = dataset.syntheticEarthquakeDataset(opts.numSamples);

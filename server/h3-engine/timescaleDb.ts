@@ -1,5 +1,3 @@
-import { randomUUID } from 'crypto';
-
 interface TimescaleH3Config {
   connectionString: string;
   schema?: string;

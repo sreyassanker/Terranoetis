@@ -171,16 +171,16 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
             <div className="info-row"><span className="info-key">Location</span><span className="info-val">{scenario.location.lat.toFixed(2)}°, {scenario.location.lon.toFixed(2)}°</span></div>
             <div className="info-row"><span className="info-key">Points</span><span className="info-val">{scenario.pointCloud.length}</span></div>
             <div className="info-row"><span className="info-key">Time</span><span className="info-val">{new Date(scenario.timestamp).toLocaleString()}</span></div>
-            {scenario.metadata?.variableName && <div className="info-row"><span className="info-key">Variable</span><span className="info-val">{String(scenario.metadata.variableName)}</span></div>}
+            {scenario.metadata?.variableName !== undefined && <div className="info-row"><span className="info-key">Variable</span><span className="info-val">{String(scenario.metadata.variableName)}</span></div>}
             {scenario.metadata?.valueMin !== undefined && (
               <div className="info-row"><span className="info-key">Range</span><span className="info-val">{(scenario.metadata.valueMin as number).toFixed(2)} – {(scenario.metadata.valueMax as number).toFixed(2)}</span></div>
             )}
-            {scenario.metadata?.dataSources && Array.isArray(scenario.metadata.dataSources) && (
+            {Array.isArray(scenario.metadata?.dataSources) && (
               <div className="info-row"><span className="info-key">Sources</span><span className="info-val" style={{ fontSize: 9 }}>{(scenario.metadata.dataSources as string[]).join(', ')}</span></div>
             )}
-            {scenario.metadata?.stats && (
+            {scenario.metadata?.stats !== undefined && (
               <div style={{ marginTop: 4, fontSize: 9, color: 'var(--text-dim)' }}>
-                <div>Stats: min {(scenario.metadata.stats as any).min}, max {(scenario.metadata.stats as any).max}, avg {(scenario.metadata.stats as any).avg}</div>
+                <div>Stats: min {(scenario.metadata.stats as Record<string, number>).min}, max {(scenario.metadata.stats as Record<string, number>).max}, avg {(scenario.metadata.stats as Record<string, number>).avg}</div>
               </div>
             )}
           </div>

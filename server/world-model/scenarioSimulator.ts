@@ -1,5 +1,5 @@
 import { causalGraph } from './causalGraph';
-import { physicsNN, tsunamiProbability, aftershockProbability, fireIgnitionProbability, rothermelSpreadRate } from './physicsNN';
+import { tsunamiProbability, aftershockProbability, fireIgnitionProbability, rothermelSpreadRate } from './physicsNN';
 import { logger } from '../observability/logger';
 
 // ── Types ───────────────────────────────────────────────────────

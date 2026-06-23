@@ -28,12 +28,6 @@ export class CodeWriter {
   }
 
   async generateTool(spec: ToolSpec): Promise<string> {
-    const inputFields = Object.entries(spec.inputSchema)
-      .map(([k, v]) => `  ${k}: ${this.mapType(v as string)};`)
-      .join('\n');
-    const outputFields = Object.entries(spec.outputSchema)
-      .map(([k, v]) => `  ${k}: ${this.mapType(v as string)};`)
-      .join('\n');
     return `import { z } from 'zod';
 
 export const ${spec.name}Input = z.object({
@@ -61,7 +55,6 @@ export async function ${spec.name}(
   }
 
   async generateRoute(spec: RouteSpec): Promise<string> {
-    const method = spec.method.toUpperCase();
     return `import { Router, Request, Response } from 'express';
 
 const router = Router();

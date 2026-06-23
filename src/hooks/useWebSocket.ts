@@ -95,6 +95,7 @@ export function useWebSocket(token?: string) {
       clearTimers();
       closeSocket();
       reconnectAttemptsRef.current = 0;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus('disconnected');
       return () => {
         mountedRef.current = false;

@@ -186,9 +186,6 @@ export class SentimentAnalyzer {
     // In production: stream from Twitter API, Reddit API, RSS feeds
     // For now: generate simulated social reports from known disaster areas
     const db = getDb();
-    const recentEvents = db.prepare(
-      "SELECT * FROM social_reports WHERE created_at > datetime('now', '-1 hour')",
-    ).all() as SocialReport[];
 
     // Check recent sentinel events for social corroboration
     const sentinelAnomalies = db.prepare(

@@ -10,7 +10,7 @@ export class CausalKnowledgeGraph {
 
   upsertNode(node: CausalNode): void {
     try {
-      const metadata: Record<string, any> = { ...node.properties };
+      const metadata: Record<string, unknown> = { ...node.properties };
       if (node.lat != null) metadata._lat = node.lat;
       if (node.lon != null) metadata._lon = node.lon;
       const embeddingBlob = node.embedding ? Buffer.from(JSON.stringify(node.embedding)) : null;
@@ -139,7 +139,7 @@ export class CausalKnowledgeGraph {
     }
   }
 
-  private rowToEdge(row: any): CausalEdge {
+  private rowToEdge(row: Record<string, unknown>): CausalEdge {
     return {
       edgeId: String(row.id || row.edge_id),
       sourceId: row.source_name,
@@ -155,7 +155,7 @@ export class CausalKnowledgeGraph {
     };
   }
 
-  private rowToDiscovery(row: any): Discovery {
+  private rowToDiscovery(row: Record<string, unknown>): Discovery {
     return {
       discoveryId: String(row.discovery_id),
       edge: this.rowToEdge(row),

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
+import type * as Cesium from 'cesium';
 
 interface PhotorealisticTilesProps {
-  viewer: any;
+  viewer: Cesium.Viewer;
   enabled: boolean;
   ionToken?: string;
   onToggle?: (enabled: boolean) => void;
@@ -13,8 +14,8 @@ const OSM_BUILDINGS_ASSET_ID = 96188;
 const PhotorealisticTiles: React.FC<PhotorealisticTilesProps> = ({
   viewer, enabled, ionToken, onToggle,
 }) => {
-  const viewerRef = useRef<any>(null);
-  const tilesetRef = useRef<any>(null);
+  const viewerRef = useRef<Cesium.Viewer | null>(null);
+  const tilesetRef = useRef<Cesium.Cesium3DTileset | null>(null);
   const isMounted = useRef(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,15 +32,19 @@ const PhotorealisticTiles: React.FC<PhotorealisticTilesProps> = ({
     setError(null);
     try {
       const assetId = ionToken ? PHOTOREALISTIC_ASSET_ID : OSM_BUILDINGS_ASSET_ID;
-      const tileset = await (window as any).Cesium.Cesium3DTileset.fromIonAssetId(assetId, {
+      const cesiumWindow = (window as unknown as Record<string, unknown>).Cesium as Record<string, unknown> | undefined;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tileset = await (cesiumWindow as any)?.Cesium3DTileset?.fromIonAssetId(assetId, {
         accessToken: ionToken || undefined,
       });
-      tileset.tileLoad.addEventListener(() => {
-        setTileStats({ loaded: tileset.tilesLoaded, total: tileset.tilesLoading + tileset.tilesLoaded });
-      });
-      viewer.scene.primitives.add(tileset);
-      tilesetRef.current = tileset;
-      viewer.zoomTo(tileset);
+      if (tileset) {
+        tileset.tileLoad.addEventListener(() => {
+          setTileStats({ loaded: tileset.tilesLoaded, total: tileset.tilesLoading + tileset.tilesLoaded });
+        });
+        viewer.scene.primitives.add(tileset);
+        tilesetRef.current = tileset;
+        viewer.zoomTo(tileset);
+      }
       setLoading(false);
     } catch (err) {
       console.warn('Failed to load 3D tiles, using fallback terrain', err);
@@ -61,7 +66,8 @@ const PhotorealisticTiles: React.FC<PhotorealisticTilesProps> = ({
   useEffect(() => {
     isMounted.current = true;
     if (enabled) {
-      addTileset();
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void addTileset();
     } else {
       removeTileset();
     }
@@ -76,7 +82,8 @@ const PhotorealisticTiles: React.FC<PhotorealisticTilesProps> = ({
     if (cesiumViewer?.scene?.globe) {
       cesiumViewer.scene.globe.enableLighting = enabled;
       cesiumViewer.scene.globe.showGroundAtmosphere = enabled;
-      cesiumViewer.scene.globe.terrainExaggeration = terrainExaggeration;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (cesiumViewer.scene.globe as any).terrainExaggeration = terrainExaggeration;
     }
   }, [enabled, terrainExaggeration]);
 

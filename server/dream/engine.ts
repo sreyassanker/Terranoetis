@@ -151,7 +151,7 @@ export class DreamEngine {
     }
 
     const predictedEvents = scenario.events.length;
-    const actualEvents = forkState.events.filter((e: any) => e.type === 'injected').length;
+    const actualEvents = forkState.events.filter((e: unknown) => (e as Record<string, unknown>).type === 'injected').length;
     const accuracy = Math.min(1.0, actualEvents / Math.max(1, predictedEvents));
 
     scenario.actualOutcome = `${forkState.events.length} cascade events, ${Object.keys(forkState.entities).length} affected entities`;

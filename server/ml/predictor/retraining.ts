@@ -3,6 +3,7 @@ import { EarthGenDataset, type DatasetExample } from '../../earthgen/dataset';
 import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../../observability/logger';
+import { getDb } from '../../db/index';
 
 export interface RetrainingConfig {
   checkpointDir: string;
@@ -134,7 +135,7 @@ export class RetrainingPipeline {
     }
 
     if (currentSize > 0) {
-      for (const sample of this.replayBuffer) {
+      for (let _i = 0; _i < currentSize; _i++) {
         const oldIdx = Math.floor(Math.random() * currentSize);
         const oldSample = this.replayBuffer[oldIdx];
         if (oldSample) samples.push(oldSample.example);
@@ -167,8 +168,8 @@ export class RetrainingPipeline {
 
   private loadTrainingCount(): number {
     try {
-      const db = require('../../db/index') as { getDb: () => any };
-      const row = db.getDb().prepare('SELECT value FROM meta WHERE key = ?').get('retraining_count') as { value: string } | undefined;
+      const db = getDb();
+      const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('retraining_count') as { value: string } | undefined;
       return row ? parseInt(row.value) : 0;
     } catch {
       return 0;
@@ -177,8 +178,8 @@ export class RetrainingPipeline {
 
   private saveTrainingCount(): void {
     try {
-      const db = require('../../db/index') as { getDb: () => any };
-      db.getDb().prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('retraining_count', String(this.trainingCount));
+      const db = getDb();
+      db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('retraining_count', String(this.trainingCount));
     } catch { /* best-effort */ }
   }
 

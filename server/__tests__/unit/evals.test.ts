@@ -41,11 +41,11 @@ describe('evaluateResponse', () => {
   });
 
   it('stores result in eval_scores table', async () => {
-    const { evaluateResponse, storeEval } = await import('../../ml/evals');
+    const { storeEval } = await import('../../ml/evals');
     storeEval('ep1', 'test query', {
       relevance: 0.8, factualAccuracy: 0.7, helpfulness: 0.9, conciseness: 0.6, overall: 0.75,
     }, { intentType: 'scan' });
-    const row = db.prepare("SELECT * FROM eval_scores WHERE episode_id = 'ep1'").get() as any;
+    const row = db.prepare("SELECT * FROM eval_scores WHERE episode_id = 'ep1'").get() as Record<string, unknown>;
     expect(row).toBeTruthy();
     expect(row.overall).toBeCloseTo(0.75);
   });

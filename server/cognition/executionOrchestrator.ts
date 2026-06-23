@@ -1,5 +1,5 @@
-import { MCTSEngine, type MCTSConfig } from './mctsEngine';
-import { TreeOfThoughts, type ToTConfig } from './treeOfThoughts';
+import { MCTSEngine } from './mctsEngine';
+import { TreeOfThoughts } from './treeOfThoughts';
 import { ReasoningTree, type ReasoningNode } from './reasoningTree';
 import { logger } from '../observability/logger';
 
@@ -154,7 +154,7 @@ Provide a concise, complete answer based on this reasoning.`;
 
     const parentNode = activePath[failureIdx - 1];
     const siblings = parentNode.children
-      .map(cId => failureNode)
+      .map(_cId => failureNode)
       .filter(s => s.id !== failureNode.id);
 
     if (siblings.length === 0) {

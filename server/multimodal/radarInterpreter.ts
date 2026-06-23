@@ -283,7 +283,7 @@ export class RadarInterpreter {
     };
   }
 
-  private estimateHailProbability(dbz: number, maxDbz: number): number {
+  private estimateHailProbability(dbz: number, _maxDbz: number): number {
     if (dbz < 45) return 0;
     if (dbz < 55) return (dbz - 45) / 10 * 0.5;
     return 0.5 + (dbz - 55) / 15 * 0.5;

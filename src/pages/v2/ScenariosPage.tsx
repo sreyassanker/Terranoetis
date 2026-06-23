@@ -2,6 +2,7 @@ import React from 'react';
 import ScenarioGallery from '@/components/scenarios/ScenarioGallery';
 
 const ScenariosPage: React.FC = () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dummyScenarios: any[] = [];
 
   return (

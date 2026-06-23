@@ -1,7 +1,6 @@
 import { EarthGenModel } from '../../earthgen/earthGen';
 import { type PointCloud } from '../../earthgen/flowMatching';
 import { type ConditioningVector } from '../../earthgen/conditioning';
-import { getDb } from '../../db/index';
 import { logger } from '../../observability/logger';
 
 export interface FlowPredictionInput {

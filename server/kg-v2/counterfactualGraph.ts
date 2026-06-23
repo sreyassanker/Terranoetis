@@ -1,4 +1,3 @@
-import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
 import { EarthGenModel } from '../earthgen/earthGen';
 import { type ConditioningVector } from '../earthgen/conditioning';
@@ -117,8 +116,6 @@ export class CounterfactualGraph {
   }
 
   private generateEntities(event: CounterfactualEvent): CounterfactualGraphSnapshot['entities'] {
-    const severity = (event.magnitude || 5) >= 8 ? 'extreme' : (event.magnitude || 5) >= 6 ? 'high' : (event.magnitude || 5) >= 4 ? 'medium' : 'low';
-
     const types = [
       { name: 'shaking_intensity', type: 'seismic_event', mult: 0.1 },
       { name: 'aftershocks', type: 'seismic_event', mult: 0.08 },

@@ -32,11 +32,6 @@ export interface DynamicTool {
   updatedAt: string;
 }
 
-interface ToolExecutionContext {
-  input: Record<string, unknown>;
-  signal?: AbortSignal;
-}
-
 // ── DynamicToolRegistry ─────────────────────────────────────────
 
 export class DynamicToolRegistry {

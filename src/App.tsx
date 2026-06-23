@@ -5673,7 +5673,7 @@ export default function App() {
      AUTO CLIP TO ACTIVE STUDY AREA
      ═════════════════════════════════════════════════════════════════ */
 
-  const clipTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const clipTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     const v = viewerRef.current;
@@ -7295,7 +7295,7 @@ export default function App() {
               const data = await resp.json();
               if (data.scenario) setSelectedScenario(adaptScenario(data.scenario));
             } catch (err: any) {
-              setAiMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: `⚠️ Real-data scenario failed: ${err.message}`, type: 'error' }]);
+              setAiMessages(prev => [...prev, { id: Date.now(), role: 'assistant', content: `⚠️ Real-data scenario failed: ${err.message}`, type: 'error' }]);
             }
           }}
           onImport={(scenario) => {
@@ -7333,7 +7333,7 @@ export default function App() {
             }).then(data => {
               if (data.scenario) setSelectedScenario(adaptScenario(data.scenario));
             }).catch(err => {
-              setAiMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: `⚠️ Scenario generation failed: ${err.message}`, type: 'error' }]);
+              setAiMessages(prev => [...prev, { id: Date.now(), role: 'assistant', content: `⚠️ Scenario generation failed: ${err.message}`, type: 'error' }]);
             });
           }}
         />

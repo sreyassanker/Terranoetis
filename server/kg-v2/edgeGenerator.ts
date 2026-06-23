@@ -1,6 +1,5 @@
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
-import { type PointCloud } from '../earthgen/flowMatching';
 
 export interface KGEntity {
   id: number;

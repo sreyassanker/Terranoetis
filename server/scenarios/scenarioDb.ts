@@ -74,7 +74,6 @@ export class ScenarioDatabase {
 
   findSimilar(lat: number, lon: number, type?: ScenarioType, limit = 10): ScenarioBase[] {
     this.init();
-    const db = getDb();
     const results = this.search({ type, limit: limit * 5 });
     return results
       .map(s => ({ scenario: s, dist: haversineDistance(lat, lon, extractLat(s), extractLon(s)) }))

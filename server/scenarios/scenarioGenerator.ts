@@ -1,19 +1,7 @@
 import { randomUUID } from 'crypto';
 import { type PointCloud } from '../earthgen/flowMatching';
-import { EarthGenModel } from '../earthgen/earthGen';
-import { type ConditioningVector } from '../earthgen/conditioning';
-import { type ScenarioType, type ScenarioParams, type ScenarioBase, type EarthquakeSwarmParams, type HurricaneLandfallParams, type WildfireSpreadParams, type VolcanicEruptionParams, type FloodInundationParams, type TsunamiWaveParams, DEFAULT_PARAMS } from './templates';
+import { type ScenarioType, type ScenarioBase, type EarthquakeSwarmParams, type HurricaneLandfallParams, type WildfireSpreadParams, type VolcanicEruptionParams, type FloodInundationParams, type TsunamiWaveParams, DEFAULT_PARAMS } from './templates';
 import { validateScenario } from './scenarioValidator';
-
-const model = new EarthGenModel({
-  latentDim: 128,
-  numLatentTokens: 512,
-  numHeads: 4,
-  numLayers: 6,
-  hiddenDim: 256,
-  knn: 8,
-  learningRate: 1e-3,
-});
 
 export async function generateScenario(
   type: ScenarioType,
@@ -47,7 +35,7 @@ export async function generateScenario(
       throw new Error(`Unknown scenario type: ${type}`);
   }
 
-  const validation = validateScenario({ type, params, pointCloud } as any);
+  const validation = validateScenario({ type, params, pointCloud } as unknown as Record<string, unknown>);
   const id = `scenario_${randomUUID().slice(0, 8)}`;
 
   return {
@@ -73,7 +61,7 @@ function generateEarthquakeSwarm(p: EarthquakeSwarmParams): PointCloud {
     const lat = p.lat + offsetDeg * Math.cos(angle);
     const lon = p.lon + offsetDeg * Math.sin(angle);
     const depth = dMin + (dMax - dMin) * (1 - mag / mMax);
-    const timeOffset = omoriDecay(i, p.numEvents, p.timeWindow, p.decayModel);
+    omoriDecay(i, p.numEvents, p.timeWindow, p.decayModel);
 
     const [x, y, z] = geoToSphere(lat, lon, depth);
     cloud.push({ x, y, z });

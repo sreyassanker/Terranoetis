@@ -68,6 +68,7 @@ function isValidChannelName(ch: unknown): ch is string {
   if (typeof ch !== 'string') return false;
   if (ch.length === 0 || ch.length > CHANNEL_MAX_LENGTH) return false;
   // Reject path traversal / null bytes / control characters
+  // eslint-disable-next-line no-control-regex
   if (/[\x00-\x1f\x7f/]/.test(ch)) return false;
   return VALID_CHANNEL_RE.test(ch);
 }

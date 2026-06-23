@@ -91,7 +91,7 @@ export class MCTSEngine {
 
   async select(): Promise<ReasoningNode> {
     let current = this.tree.getRoot();
-    let path: ReasoningNode[] = [current];
+    const path: ReasoningNode[] = [current];
 
     while (current.children.length > 0) {
       const parentVisits = current.visits;
@@ -163,7 +163,7 @@ Return JSON: {"action": "tool_call|hypothesis|analysis|data_request", "descripti
   }
 
   async simulate(node: ReasoningNode): Promise<number> {
-    let currentState: ReasoningState = { ...node.state, status: 'active' };
+    const currentState: ReasoningState = { ...node.state, status: 'active' };
     let score = 0;
 
     for (let d = 0; d < this.config.simulationDepth; d++) {

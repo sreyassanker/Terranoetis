@@ -1,7 +1,6 @@
 import { logger } from '../observability/logger';
 import { pubsub } from '../pubsub';
 import { getDb } from '../db/index';
-import { memoryManagerV2 } from '../memory-v2/memoryManager-v2';
 import { causalGraph } from '../world-model/causalGraph';
 import { ensemblePredictor } from '../world-model/ensemblePredictor';
 import { predictionValidator } from '../world-model/predictionValidator';

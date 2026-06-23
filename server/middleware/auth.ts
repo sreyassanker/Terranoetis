@@ -53,7 +53,7 @@ function getUserById(id: string): UserRow | null {
 function getUserByName(name: string): UserRow | null {
   try {
     const row = getDb()
-      .prepare('SELECT id, name, password_hash, role, failed_attempts, locked_until FROM users WHERE id = ?')
+      .prepare('SELECT id, name, password_hash, role, failed_attempts, locked_until FROM users WHERE name = ?')
       .get(name) as UserRow | undefined;
     return row ?? null;
   } catch {
@@ -159,12 +159,12 @@ export function login(req: Request, res: Response): void {
 
   const ok = verifyPassword(password, user.password_hash);
   if (!ok) {
-    recordFailedAttempt(normalized);
+    recordFailedAttempt(user.id);
     res.status(401).json({ error: 'Invalid credentials' });
     return;
   }
 
-  recordSuccessfulLogin(normalized);
+  recordSuccessfulLogin(user.id);
   const token = jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET(), { expiresIn: TOKEN_TTL });
   res.json({ token, userId: user.id, role: user.role });
 }
@@ -181,8 +181,8 @@ export function authGuard(req: Request, res: Response, next: NextFunction): void
       res.status(401).json({ error: 'Invalid token payload' });
       return;
     }
-    (req as any).userId = payload.sub;
-    (req as any).userRole = typeof payload.role === 'string' ? payload.role : 'user';
+    (req as unknown as Record<string, unknown>).userId = payload.sub;
+    (req as unknown as Record<string, unknown>).userRole = typeof payload.role === 'string' ? payload.role : 'user';
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });
@@ -191,7 +191,7 @@ export function authGuard(req: Request, res: Response, next: NextFunction): void
 
 export function requireRole(...roles: string[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const role = (req as any).userRole;
+    const role = (req as unknown as Record<string, unknown>).userRole as string;
     if (!roles.includes(role)) {
       res.status(403).json({ error: 'Forbidden — insufficient role' });
       return;
@@ -201,7 +201,7 @@ export function requireRole(...roles: string[]) {
 }
 
 export function skipAuth(req: Request, _res: Response, next: NextFunction): void {
-  (req as any).userId = req.body?.userId || req.query?.userId || 'anonymous';
+  (req as unknown as Record<string, unknown>).userId = req.body?.userId || req.query?.userId || 'anonymous';
   next();
 }
 
@@ -211,7 +211,7 @@ export function sseAuthGuard(req: Request, res: Response, next: NextFunction): v
     try {
       const payload = jwt.verify(header.slice(7), JWT_SECRET()) as { sub?: unknown };
       if (typeof payload.sub === 'string') {
-        (req as any).userId = payload.sub;
+        (req as unknown as Record<string, unknown>).userId = payload.sub;
         next();
         return;
       }
@@ -224,7 +224,7 @@ export function sseAuthGuard(req: Request, res: Response, next: NextFunction): v
     try {
       const payload = jwt.verify(token, JWT_SECRET()) as { sub?: unknown };
       if (typeof payload.sub === 'string') {
-        (req as any).userId = payload.sub;
+        (req as unknown as Record<string, unknown>).userId = payload.sub;
         next();
         return;
       }

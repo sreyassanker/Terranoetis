@@ -61,7 +61,7 @@ export default function StudyAreaPanel({
       setUploadStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, [viewer, setAreas]);
+  }, [viewer, setAreas, onActivate]);
 
   const toggleVisibility = useCallback((id: string) => {
     setAreas(prev => prev.map(a => {

@@ -42,7 +42,7 @@ export class BanditRouter {
     return scores[0].arm;
   }
 
-  selectTopK(k: number, context: Context): string[] {
+  selectTopK(k: number, _context: Context): string[] {
     const scores = this.arms.map(arm => {
       const alpha = this.successes.get(arm) || 1;
       const beta = this.failures.get(arm) || 1;

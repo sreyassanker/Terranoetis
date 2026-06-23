@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 describe('perUserRateLimiter', () => {
-  let perUserRateLimiter: any;
+  let perUserRateLimiter: (limit: number, windowMs: number) => (req: Record<string, unknown>, res: Record<string, unknown>, next: () => void) => void;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -10,8 +10,8 @@ describe('perUserRateLimiter', () => {
   });
 
   function mockReqRes(userId?: string, ip?: string) {
-    const req: any = { userId, ip, socket: { remoteAddress: '127.0.0.1' } };
-    const res: any = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis() };
+    const req: Record<string, unknown> = { userId, ip, socket: { remoteAddress: '127.0.0.1' } };
+    const res: Record<string, unknown> = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis() };
     const next = vi.fn();
     return { req, res, next };
   }

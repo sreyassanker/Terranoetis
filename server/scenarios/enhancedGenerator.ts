@@ -1,11 +1,9 @@
 import { randomUUID } from 'crypto';
 import fs from 'fs';
-import path from 'path';
-import { type PointCloud } from '../earthgen/flowMatching';
 import { type ScenarioType, type ScenarioBase } from './templates';
 import { generateScenario } from './scenarioGenerator';
 import { fetchRealDataForBBox, deriveParams, type BBox } from '../simulation/realDataBridge';
-import { queryVariableNames, openFile, readVariable, subsetGrid, gridToPointCloud, closeFile, type GridSubset } from '../grid/netcdfReader';
+import { openFile, readVariable, subsetGrid, gridToPointCloud, closeFile } from '../grid/netcdfReader';
 
 const WLDAS_PATH = process.env.WLDAS_NC_PATH || '/Users/sreyassanker/Downloads/Realtime_v2/Testing/WLDAS_NOAHMP001_DA1_20240101.D10.nc';
 
@@ -46,7 +44,6 @@ export async function generateScenarioFromBBox(
   const dataSources: string[] = [];
 
   const isNcLayer = hazardType === 'data_layer';
-  const ncVarName = '';
 
   // If pure NC data layer, skip real data and synthetic generation
   if (isNcLayer) {
@@ -95,7 +92,7 @@ export async function generateScenarioFromBBox(
         }
         closeFile(h5);
       }
-    } catch {}
+    } catch { /* noop */ }
     // Fallback: return empty point cloud
     return {
       id: `scenario_${randomUUID().slice(0, 8)}`,
@@ -113,7 +110,7 @@ export async function generateScenarioFromBBox(
   // Step 1: Fetch real data from all available APIs
   const realData = await fetchRealDataForBBox(bbox);
   for (const src of ['earthquakes', 'weather', 'fires', 'volcanoes', 'eonet', 'gdacs'] as const) {
-    if ((realData[src] as any[]).length > 0) dataSources.push(src);
+    if ((realData[src] as unknown as unknown[]).length > 0) dataSources.push(src);
   }
 
   // Step 2: Derive simulation parameters from real data
@@ -162,7 +159,7 @@ export async function generateScenarioFromBBox(
       }
       closeFile(h5);
     }
-  } catch {}
+  } catch { /* noop */ }
 
   // Step 5: Build enhanced scenario
   const stats = colorValues ? computeStats(colorValues) : null;

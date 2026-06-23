@@ -1,5 +1,5 @@
 import { omninet } from '../ai-router/omninet';
-import { logger } from '../observability/logger';
+
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -83,7 +83,6 @@ const DEBATE_AGENTS = [
 ];
 
 const CRITIC_NAME = 'Verifier';
-const JUDGE_NAME = 'Synthesizer';
 
 // ── System 2 ─────────────────────────────────────────────────────
 
@@ -287,7 +286,7 @@ Return ONLY valid JSON: {"ratings":[{"agentName":"...","factualAccuracy":0.0,"lo
 
     // Judge selects
     let selectedIndex = 0;
-    let judgeRationale = criticResult?.recommendation || 'Selecting highest confidence proposal';
+    const judgeRationale = criticResult?.recommendation || 'Selecting highest confidence proposal';
 
     if (criticResult && criticResult.recommendedIndex >= 0 && criticResult.recommendedIndex < proposals.length) {
       selectedIndex = criticResult.recommendedIndex;

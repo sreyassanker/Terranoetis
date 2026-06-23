@@ -26,7 +26,6 @@ export default function UncertaintyBadge({ confidence, showLabel = true, size = 
   const label = confidenceLabel(confidence);
 
   if (format === 'badge') {
-    const height = size === 'sm' ? 16 : size === 'md' ? 20 : 24;
     const fontSize = size === 'sm' ? 9 : size === 'md' ? 10 : 11;
 
     return (

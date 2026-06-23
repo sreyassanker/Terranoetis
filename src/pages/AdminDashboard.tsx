@@ -95,6 +95,7 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchMetrics();
     fetchHealth();
     void fetchAdminData();

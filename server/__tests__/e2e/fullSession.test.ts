@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import express from 'express';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { getDb } from '../../db/index';
+import express, { Request, Response } from 'express';
 import http from 'http';
 import jwt from 'jsonwebtoken';
-import { WebSocket } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 
 process.env.JWT_SECRET = 'test-e2e-secret';
 process.env.GEMINI_API_KEY = 'test-key';
@@ -13,10 +14,10 @@ const TEST_PASSWORD = 'test-password-123';
 
 describe('E2E: Full user session', () => {
   let server: http.Server;
-  let wss: any;
+  let wss: WebSocketServer;
   let baseUrl: string;
   let token: string;
-  let db: any;
+  let db: ReturnType<typeof getDb>;
 
   beforeAll(async () => {
     const dbMod = await import('../../db/index');
@@ -30,7 +31,7 @@ describe('E2E: Full user session', () => {
 
     const { login } = await import('../../middleware/auth');
     app.post('/api/auth/login', login);
-    app.get('/api/agent/analytics', (req: any, res: any) => {
+    app.get('/api/agent/analytics', (req: Request, res: Response) => {
       res.json({
         totalFeedback: 1,
         satisfactionRate: 100,
@@ -50,7 +51,7 @@ describe('E2E: Full user session', () => {
 
     const { WebSocketServer } = await import('ws');
     wss = new WebSocketServer({ server, path: '/ws/agent' });
-    wss.on('connection', (ws: any, req: any) => {
+    wss.on('connection', (ws: WebSocket, req: http.IncomingMessage) => {
       const urlParams = new URL(req.url!, `http://${req.headers.host}`).searchParams;
       const token = urlParams.get('token');
       if (!token) { ws.close(4001, 'Auth required'); return; }
@@ -61,7 +62,7 @@ describe('E2E: Full user session', () => {
         return;
       }
       ws.send(JSON.stringify({ type: 'connected', userId: 'test', channels: [] }));
-      ws.on('message', (data: any) => {
+      ws.on('message', (data: Buffer) => {
         const msg = JSON.parse(data.toString());
         if (msg.type === 'ping') ws.send(JSON.stringify({ type: 'pong' }));
         if (msg.type === 'subscribe') {
@@ -89,19 +90,19 @@ describe('E2E: Full user session', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: TEST_USER, password: TEST_PASSWORD }),
     });
-    const data = await resp.json() as any;
+    const data = await resp.json() as Record<string, unknown>;
     expect(resp.status).toBe(200);
     expect(data.token).toBeTruthy();
-    token = data.token;
+    token = data.token as string;
   });
 
   it('2. WebSocket connect and subscribe', async () => {
     return new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(`ws://localhost:3005/ws/agent?token=${token}`);
-      const messages: any[] = [];
+      const messages: unknown[] = [];
       const timeout = setTimeout(() => reject(new Error('WebSocket timeout')), 5000);
 
-      ws.on('message', (data: any) => {
+      ws.on('message', (data: Buffer) => {
         const msg = JSON.parse(data.toString());
         messages.push(msg);
 
@@ -125,7 +126,7 @@ describe('E2E: Full user session', () => {
     const resp = await fetch(`${baseUrl}/api/agent/analytics`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const data = await resp.json() as any;
+    const data = await resp.json() as Record<string, unknown>;
     expect(resp.status).toBe(200);
     expect(data.totalFeedback).toBe(1);
     expect(data.satisfactionRate).toBe(100);

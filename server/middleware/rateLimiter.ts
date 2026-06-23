@@ -10,7 +10,7 @@ const limits = new Map<string, RateEntry>();
 
 export function perUserRateLimiter(maxRequests: number, windowMs: number) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const key = (req as any).userId || req.ip || req.socket.remoteAddress || 'unknown';
+    const key = (req as unknown as Record<string, unknown>).userId as string || req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     const entry = limits.get(key);
 

@@ -1,5 +1,4 @@
-import { getDb } from './db/index';
-import { evaluateResponse, storeEval, getRecentEvals, getAvgScoresByIntent, type EvalScores } from './ml/evals';
+import { evaluateResponse, storeEval, type EvalScores } from './ml/evals';
 import { promptLab } from './ml/promptLab';
 import { logger } from './observability/logger';
 import { MetaCognition } from './meta-cognition/index';
@@ -130,7 +129,7 @@ export class SelfImproverV2 {
     const perfResults = performanceAnalyzer.analyze();
     const underperformers = perfResults.filter(p => p.sampleCount >= 20 && p.accuracy < 0.65);
     let promptsEvolved = 0;
-    for (const intent of underperformers.slice(0, 3)) {
+    for (let i = 0; i < Math.min(underperformers.length, 3); i++) {
       await this.metaCognition.runCycle();
       promptsEvolved++;
     }

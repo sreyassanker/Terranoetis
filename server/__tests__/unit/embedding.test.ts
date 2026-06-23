@@ -8,7 +8,7 @@ vi.mock('../../ai-router/omninet', () => ({
   },
 }));
 
-let EmbeddingEngine: any;
+let EmbeddingEngine: typeof import('../../embedding').EmbeddingEngine;
 let cosineSimilarity: (a: Float32Array, b: Float32Array) => number;
 
 beforeAll(async () => {
@@ -18,7 +18,7 @@ beforeAll(async () => {
 });
 
 describe('EmbeddingEngine', () => {
-  let engine: any;
+  let engine: { embed: (text: string) => Promise<Float32Array>; embedBatch: (texts: string[]) => Promise<Float32Array[]> };
 
   beforeEach(() => {
     mockGenerateEmbedding.mockReset();

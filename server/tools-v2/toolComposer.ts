@@ -87,7 +87,7 @@ export class ToolComposer {
     const start = Date.now();
 
     // Build execution DAG
-    const nodes = optimized.map((n, i) => ({
+    const nodes = optimized.map((n, _i) => ({
       ...n,
       remaining: chain.steps.filter(s => s.outputVar === n.step.outputVar).length > 0,
     }));
@@ -105,7 +105,7 @@ export class ToolComposer {
         throw new Error('Chain deadlock detected');
       }
 
-      const results = await Promise.all(ready.map(async (node) => {
+      await Promise.all(ready.map(async (node) => {
         try {
           const mergedInput = { ...initialInput };
           for (const dep of node.step.dependsOn) {

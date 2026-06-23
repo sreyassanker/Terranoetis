@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
-import express from 'express';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import jwt from 'jsonwebtoken';
 
@@ -11,11 +11,11 @@ const TEST_USER = 'testuser-api';
 const TEST_PASSWORD = 'test-password-123';
 
 describe('Integration: full auth flow', () => {
-  let app: any;
+  let app: ReturnType<typeof express>;
   let server: http.Server;
-  let login: any;
-  let authGuard: any;
-  let db: any;
+  let login: (req: Request, res: Response, next: NextFunction) => void;
+  let authGuard: (req: Request, res: Response, next: NextFunction) => void;
+  let db: ReturnType<typeof import('../../db/index').getDb>;
 
   beforeAll(async () => {
     const dbMod = await import('../../db/index');
@@ -31,7 +31,7 @@ describe('Integration: full auth flow', () => {
     app = express();
     app.use(express.json());
     app.post('/api/auth/login', login);
-    app.get('/api/protected', (req: any, res: any, next: any) => authGuard(req, res, next), (req: any, res: any) => {
+    app.get('/api/protected', (req: Request, res: Response, next: NextFunction) => authGuard(req, res, next), (req: Request, res: Response) => {
       res.json({ ok: true, userId: req.userId });
     });
 
@@ -50,7 +50,7 @@ describe('Integration: full auth flow', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: TEST_USER, password: TEST_PASSWORD }),
     });
-    const data = await resp.json() as any;
+    const data = await resp.json() as Record<string, unknown>;
     expect(resp.status).toBe(200);
     expect(data.token).toBeTruthy();
     expect(data.userId).toBe(TEST_USER);
@@ -61,7 +61,7 @@ describe('Integration: full auth flow', () => {
     const resp = await fetch('http://localhost:3002/api/protected', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const data = await resp.json() as any;
+    const data = await resp.json() as Record<string, unknown>;
     expect(resp.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.userId).toBe(TEST_USER);
@@ -81,18 +81,18 @@ describe('Integration: full auth flow', () => {
 });
 
 describe('Integration: health endpoints', () => {
-  let app: any;
+  let app: ReturnType<typeof express>;
   let server: http.Server;
 
   beforeAll(async () => {
     app = express();
-    app.get('/api/health', (req: any, res: any) => {
+    app.get('/api/health', (req: Request, res: Response) => {
       res.json({ status: 'ok', checks: { db: { status: 'ok' }, memory: { status: 'ok', detail: '64MB' } }, uptime_ms: process.uptime() * 1000, version: '0.0.0', ts: Date.now() });
     });
-    app.get('/api/ready', (req: any, res: any) => {
+    app.get('/api/ready', (req: Request, res: Response) => {
       res.json({ status: 'ready', checks: { db: 'ok' }, uptime_ms: process.uptime() * 1000 });
     });
-    app.get('/api/live', (req: any, res: any) => {
+    app.get('/api/live', (req: Request, res: Response) => {
       res.json({ ok: true, ts: Date.now() });
     });
 
@@ -106,7 +106,7 @@ describe('Integration: health endpoints', () => {
 
   it('GET /api/health returns status object', async () => {
     const resp = await fetch('http://localhost:3003/api/health');
-    const data = await resp.json() as any;
+    const data = await resp.json() as Record<string, unknown>;
     expect(data.status).toBe('ok');
     expect(data.checks.db).toBeTruthy();
     expect(data.checks.memory).toBeTruthy();
@@ -115,24 +115,24 @@ describe('Integration: health endpoints', () => {
 
   it('GET /api/ready returns ready status', async () => {
     const resp = await fetch('http://localhost:3003/api/ready');
-    const data = await resp.json() as any;
+    const data = await resp.json() as Record<string, unknown>;
     expect(data.status).toBe('ready');
   });
 
   it('GET /api/live returns ok', async () => {
     const resp = await fetch('http://localhost:3003/api/live');
-    const data = await resp.json() as any;
+    const data = await resp.json() as Record<string, unknown>;
     expect(data.ok).toBe(true);
   });
 });
 
 describe('Integration: metrics endpoint', () => {
-  let app: any;
+  let app: ReturnType<typeof express>;
   let server: http.Server;
 
   beforeAll(async () => {
     app = express();
-    app.get('/api/metrics', (req: any, res: any) => {
+    app.get('/api/metrics', (req: Request, res: Response) => {
       res.set('Content-Type', 'text/plain; version=0.0.4');
       res.send('# HELP process_cpu_seconds_total Total CPU time\n# TYPE process_cpu_seconds_total counter\nprocess_cpu_seconds_total 1.5\n');
     });

@@ -1,5 +1,5 @@
 import { type PointWithContext } from './knnContext';
-import { type PointCloud, type Point3D } from './flowMatching';
+import { type PointCloud } from './flowMatching';
 
 export interface LatentTransformerConfig {
   latentDim: number;
@@ -55,8 +55,6 @@ const DEFAULT_CONFIG: LatentTransformerConfig = {
   hiddenDim: 256,
 };
 
-const HEAD_DIM = 32;
-
 function scaledDotProductAttention(q: number[][], k: number[][], v: number[][]): number[][] {
   const dk = q[0]?.length || 1;
   const scale = 1 / Math.sqrt(dk);
@@ -97,7 +95,6 @@ function multiHeadAttention(
   for (let i = 0; i < batch; i++) {
     const row: number[] = [];
     for (let h = 0; h < numHeads; h++) {
-      const start = Math.floor(h * d);
       row.push(...(headsOut[h * batch + i] || []));
     }
     concat.push(row);

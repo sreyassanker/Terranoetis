@@ -31,7 +31,7 @@ export function mockGeminiResponse(overrides?: Partial<{
       })));
     }
     return Promise.reject(new Error(`Unexpected URL: ${url}`));
-  }) as any;
+  }) as unknown;
 }
 
 export function restoreFetch(): void {
@@ -39,12 +39,12 @@ export function restoreFetch(): void {
 }
 
 export function mockWebSocketClient() {
-  const messages: any[] = [];
-  const handlers: Record<string, Function[]> = {};
+  const messages: unknown[] = [];
+  const handlers: Record<string, ((...args: unknown[]) => void)[]> = {};
 
   return {
     messages,
-    on: (event: string, handler: Function) => {
+    on: (event: string, handler: (...args: unknown[]) => void) => {
       if (!handlers[event]) handlers[event] = [];
       handlers[event].push(handler);
     },
@@ -52,14 +52,14 @@ export function mockWebSocketClient() {
       messages.push(JSON.parse(data));
     },
     close: vi.fn(),
-    emit: (event: string, ...args: any[]) => {
+    emit: (event: string, ...args: unknown[]) => {
       (handlers[event] || []).forEach(h => h(...args));
     },
   };
 }
 
 export function mockSseResponse() {
-  const events: Array<{ type: string; data: any }> = [];
+  const events: Array<{ type: string; data: unknown }> = [];
   return {
     events,
     writeHead: vi.fn().mockReturnThis(),

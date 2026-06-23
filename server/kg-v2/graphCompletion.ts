@@ -1,6 +1,5 @@
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
-import { type PointCloud } from '../earthgen/flowMatching';
 
 export interface PartialGraph {
   entities: Array<{ id?: number; name: string; type: string; metadata?: Record<string, unknown> }>;

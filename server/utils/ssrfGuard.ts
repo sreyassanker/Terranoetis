@@ -33,7 +33,7 @@ const PRIVATE_IPV4_RANGES: Array<[RegExp, string]> = [
 ];
 
 function isPrivateIPv4(ip: string): boolean {
-  for (const [re, label] of PRIVATE_IPV4_RANGES) {
+  for (const [re] of PRIVATE_IPV4_RANGES) {
     if (re.test(ip)) return true;
   }
   return false;

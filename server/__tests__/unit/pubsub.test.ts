@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 describe('PubSub', () => {
-  let pubsub: any;
+  let pubsub: { publish: (event: string, data: unknown) => void; subscribe: (event: string, handler: (...args: unknown[]) => void) => () => void; subscribeUser: (userId: string, handler: (...args: unknown[]) => void) => void; publishToUser: (userId: string, event: string, data: unknown) => void; removeAllListeners: () => void };
 
   beforeEach(async () => {
     vi.resetModules();

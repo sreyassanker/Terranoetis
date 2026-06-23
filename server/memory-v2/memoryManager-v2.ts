@@ -1,6 +1,5 @@
 import { getDb } from '../db/index';
 import { EmbeddingEngine } from '../embedding';
-import { omninet } from '../ai-router/omninet';
 import { logger } from '../observability/logger';
 import { sensoryBuffer, type PerceptualEvent } from './sensoryBuffer';
 import { workingMemory, type WorkingMemoryContext } from './workingMemory';
@@ -22,15 +21,6 @@ export interface RichContext {
 }
 
 export type MemoryTier = 'sensory' | 'working' | 'episodic' | 'semantic' | 'procedural' | 'predictive';
-
-const TIER_WEIGHTS: Record<MemoryTier, number> = {
-  sensory: 0.1,
-  working: 0.3,
-  episodic: 0.2,
-  semantic: 0.2,
-  procedural: 0.1,
-  predictive: 0.1,
-};
 
 // ── MemoryManagerV2 ─────────────────────────────────────────────
 
@@ -69,11 +59,11 @@ export class MemoryManagerV2 {
 
   async store(tier: string, params: Record<string, unknown>): Promise<void> {
     if (tier === 'sensory') {
-      await this.sensoryBuffer.push(params as any);
+      await this.sensoryBuffer.push(params as unknown as PerceptualEvent);
       return;
     }
     if (tier === 'episodic' && this.episodicMemory) {
-      await this.episodicMemory.add(params as any);
+      await this.episodicMemory.add(params as unknown as Record<string, unknown>);
       return;
     }
     // Full interaction store (legacy callers that don't pass a tier)

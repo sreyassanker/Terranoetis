@@ -1,4 +1,3 @@
-import { pubsub } from '../pubsub';
 import { getDb } from '../db';
 import type { SyntheticEvent, SyntheticScenario } from './types';
 
@@ -33,7 +32,7 @@ export class SyntheticScenarioGenerator {
       const template = this.EVENT_TEMPLATES[Math.floor(Math.random() * this.EVENT_TEMPLATES.length)];
       const magnitude = template.minMag + Math.random() * (template.maxMag - template.minMag);
 
-      const params: Record<string, any> = {};
+      const params: Record<string, unknown> = {};
       for (const param of template.params) {
         params[param] = this.generateParamValue(param);
       }
@@ -73,7 +72,7 @@ export class SyntheticScenarioGenerator {
       const template = this.EVENT_TEMPLATES.find(t => t.type === type) || this.EVENT_TEMPLATES[0];
       const magnitude = template.minMag + Math.random() * (template.maxMag - template.minMag) * (1 + i * 0.3);
 
-      const params: Record<string, any> = {};
+      const params: Record<string, unknown> = {};
       for (const param of template.params) {
         params[param] = this.generateParamValue(param);
       }
@@ -102,8 +101,8 @@ export class SyntheticScenarioGenerator {
     };
   }
 
-  private generateParamValue(param: string): any {
-    const generators: Record<string, () => any> = {
+  private generateParamValue(param: string): unknown {
+    const generators: Record<string, () => unknown> = {
       depthKm: () => 5 + Math.random() * 695,
       faultType: () => ['strike-slip', 'thrust', 'normal'][Math.floor(Math.random() * 3)],
       windSpeedKmh: () => 120 + Math.random() * 280,

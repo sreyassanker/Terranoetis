@@ -21,7 +21,7 @@ Return ONLY a JSON object: { "relevance": 0.0-1.0, "factualAccuracy": 0.0-1.0, "
 export async function evaluateResponse(
   query: string,
   response: string,
-  context: { intentType?: string; location?: string; modelTier?: string },
+  _context: { intentType?: string; location?: string; modelTier?: string },
   _apiKey?: string,
 ): Promise<EvalScores> {
   if (!response) {

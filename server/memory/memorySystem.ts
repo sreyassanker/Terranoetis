@@ -10,7 +10,7 @@ export interface MemoryTier {
   items: Array<{
     id: string;
     timestamp: number;
-    content: any;
+    content: unknown;
     importance: number;
     accessCount: number;
   }>;
@@ -82,7 +82,7 @@ export class PlanetaryMemorySystem {
     }
   }
 
-  async write(tierName: string, id: string, content: any, importance: number = 0.5): Promise<void> {
+  async write(tierName: string, id: string, content: unknown, importance: number = 0.5): Promise<void> {
     const redisAdapter = this.redisAdapters.get(tierName);
     if (redisAdapter && this.redisAvailable) {
       const ttl = tierName === 'sensory' ? 60 : 3600;
@@ -122,7 +122,7 @@ export class PlanetaryMemorySystem {
     }
   }
 
-  async read(tierName: string, id: string): Promise<any | null> {
+  async read(tierName: string, id: string): Promise<unknown | null> {
     const redisAdapter = this.redisAdapters.get(tierName);
     if (redisAdapter && this.redisAvailable) {
       const item = await redisAdapter.read(id);
@@ -145,7 +145,7 @@ export class PlanetaryMemorySystem {
     return null;
   }
 
-  async query(tierName: string, sinceMs: number): Promise<Array<{ id: string; timestamp: number; content: any }>> {
+  async query(tierName: string, sinceMs: number): Promise<Array<{ id: string; timestamp: number; content: unknown }>> {
     const redisAdapter = this.redisAdapters.get(tierName);
     if (redisAdapter && this.redisAvailable) {
       return redisAdapter.query(sinceMs);
@@ -208,7 +208,7 @@ export class PlanetaryMemorySystem {
     }
   }
 
-  private persistToDb(tierName: string, id: string, content: any, importance: number): void {
+  private persistToDb(tierName: string, id: string, content: unknown, importance: number): void {
     try {
       const db = getDb();
       db.prepare(`
@@ -224,7 +224,7 @@ export class PlanetaryMemorySystem {
     }
   }
 
-  private readFromDb(tierName: string, id: string): any | null {
+  private readFromDb(tierName: string, id: string): unknown | null {
     try {
       const db = getDb();
       const row = db.prepare('SELECT content_json FROM memory_store WHERE tier = ? AND memory_id = ?').get(tierName, id) as { content_json: string } | undefined;

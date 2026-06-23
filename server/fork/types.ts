@@ -14,14 +14,14 @@ export interface ForkDefinition {
 export interface ForkDelta {
   type: 'CLOSE_PORT' | 'BLOCK_ROUTE' | 'INJECT_EVENT' | 'MODIFY_PARAM';
   targetId: string;
-  parameters: Record<string, any>;
+  parameters: Record<string, unknown>;
   effectiveTimeOffsetHours: number;
 }
 
 export interface ForkState {
   forkId: string;
-  entities: Record<string, any>;
-  events: any[];
+  entities: Record<string, unknown>;
+  events: Array<Record<string, unknown>>;
   lastTick: number;
 }
 
@@ -38,5 +38,5 @@ export interface ForkStreamMessage {
   type: 'FORK_INIT' | 'FORK_TICK' | 'FORK_EVENT' | 'FORK_DIVERGENCE' | 'FORK_TERMINATED';
   forkId: string;
   timestamp: number;
-  payload: any;
+  payload: unknown;
 }

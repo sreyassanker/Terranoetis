@@ -48,10 +48,10 @@ export function runHealthCheck(): HealthStatus {
   }
 
   try {
-    checks.reflexEngine = !!(global as any).__reflexEngine;
-    checks.forkManager = !!(global as any).__forkManager;
-    checks.dreamEngine = !!(global as any).__dreamEngine;
-    checks.memorySystem = !!(global as any).__memorySystem;
+    checks.reflexEngine = !!(global as unknown as Record<string, unknown>).__reflexEngine;
+    checks.forkManager = !!(global as unknown as Record<string, unknown>).__forkManager;
+    checks.dreamEngine = !!(global as unknown as Record<string, unknown>).__dreamEngine;
+    checks.memorySystem = !!(global as unknown as Record<string, unknown>).__memorySystem;
   } catch (e) {
     console.error('[HEALTH] Engine checks failed:', e);
   }

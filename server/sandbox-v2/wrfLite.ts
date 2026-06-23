@@ -85,7 +85,6 @@ function validateWrfInputs(inputs: WrfInputs): void {
 
 const CP = 1004;
 const RD = 287;
-const GAMMA = CP / RD;
 const F_CORIOLIS = 1e-4;
 
 export function computeGeostrophicWind(

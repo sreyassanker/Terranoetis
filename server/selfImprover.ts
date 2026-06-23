@@ -1,8 +1,9 @@
 import { EnhancedCache } from './costOptimizer';
 import { getDb } from './db/index';
-import { evaluateResponse, storeEval, getRecentEvals, getAvgScoresByIntent, type EvalScores } from './ml/evals';
+import { evaluateResponse, storeEval, getRecentEvals, getAvgScoresByIntent } from './ml/evals';
 import { promptLab } from './ml/promptLab';
 import { logger } from './observability/logger';
+import { knowledgeGraph } from './ml/knowledgeGraph';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -335,7 +336,6 @@ export function buildAnalytics(
   let kgStats = { entityCount: 0, relationCount: 0 };
   let predictionPatterns = 0;
   try {
-    const { knowledgeGraph } = require('./ml/knowledgeGraph');
     kgStats = knowledgeGraph.getStats();
   } catch { /* not loaded */ }
   try {

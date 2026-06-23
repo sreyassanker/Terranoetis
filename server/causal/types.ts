@@ -4,7 +4,7 @@ export interface CausalNode {
   type: 'seismic' | 'port' | 'weather' | 'vessel' | 'flight' | 'economic' | 'political';
   lat?: number;
   lon?: number;
-  properties: Record<string, any>;
+  properties: Record<string, unknown>;
   embedding?: number[];
   createdAt: number;
 }

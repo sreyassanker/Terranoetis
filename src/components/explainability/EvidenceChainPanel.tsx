@@ -40,7 +40,6 @@ export default function EvidenceChainPanel({ chain, integrity, loading }: Props)
 
   if (!chain || chain.length === 0) return null;
 
-  const avgConfidence = chain.reduce((s, l) => s + l.confidence, 0) / chain.length;
   const isIntact = integrity?.valid !== false;
 
   return (

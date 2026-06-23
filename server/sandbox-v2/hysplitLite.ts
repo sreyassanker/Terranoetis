@@ -65,12 +65,11 @@ function validateHysplitInputs(inputs: HysplitInputs): void {
 
 const K_H = 5000;
 const K_V = 50;
-const SETTLING_VELOCITY = 0.01;
 
 export function computeGaussianPlumeRise(
   heatFlux: number,
   windSpeed: number,
-  ambientLapseRate: number,
+  _ambientLapseRate: number,
 ): number {
   const buoyancyFlux = heatFlux * 5.0;
   if (windSpeed > 0.1) {

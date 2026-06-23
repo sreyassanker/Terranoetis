@@ -89,7 +89,6 @@ function runMigrations(database: Database.Database): void {
 function extractCreateTableStmts(schema: string): { tableName: string; sql: string }[] {
   const results: { tableName: string; sql: string }[] = [];
   const re = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\(/gi;
-  let idx = 0;
   while (true) {
     const match = re.exec(schema);
     if (!match) break;
@@ -107,7 +106,6 @@ function extractCreateTableStmts(schema: string): { tableName: string; sql: stri
     const after = schema.slice(end).trimStart();
     if (after.startsWith(';')) sql += ';';
     results.push({ tableName, sql });
-    idx++;
   }
   return results;
 }

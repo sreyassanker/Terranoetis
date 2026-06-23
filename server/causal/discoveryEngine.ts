@@ -1,6 +1,6 @@
 import { pubsub } from '../pubsub';
 import { CausalKnowledgeGraph } from './kg';
-import type { CausalEdge, Discovery, CausalNode } from './types';
+import type { CausalEdge, Discovery } from './types';
 
 export class DiscoveryEngine {
   private kg: CausalKnowledgeGraph;
@@ -29,7 +29,7 @@ export class DiscoveryEngine {
     console.log('[DISCOVERY] Running causal discovery...');
 
     try {
-      const db = (this.kg as any).db;
+      const db = (this.kg as unknown as { db: { prepare: (sql: string) => { all: () => unknown[] } } }).db;
       const recentEvents = db.prepare(`
         SELECT * FROM episodes
         WHERE created_at > datetime('now', '-7 days')
@@ -91,7 +91,7 @@ export class DiscoveryEngine {
     }
   }
 
-  private async findCandidatePairs(events: any[]): Promise<Array<{ source: string; target: string; correlation: number; avgLagHours: number; count: number }>> {
+  private async findCandidatePairs(events: Array<Record<string, unknown>>): Promise<Array<{ source: string; target: string; correlation: number; avgLagHours: number; count: number }>> {
     const eventTypes = [...new Set(events.map(e => e.type || 'unknown'))];
     const data: Record<string, number[]> = {};
 
@@ -146,11 +146,11 @@ export class DiscoveryEngine {
     }
   }
 
-  private estimateCausalStrength(pair: any): number {
+  private estimateCausalStrength(pair: { correlation: number; count: number }): number {
     return Math.min(0.99, pair.correlation * (1 - 1 / (pair.count + 1)));
   }
 
-  private estimatePValue(pair: any): number {
+  private estimatePValue(pair: { correlation: number; count: number }): number {
     return Math.max(0.001, 0.1 / (pair.count + 1));
   }
 

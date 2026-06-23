@@ -1,6 +1,6 @@
 import { pubsub } from '../pubsub';
 import { getDb } from '../db';
-import type { ForkDefinition, ForkDelta, ForkState, ForkCreateRequest, ForkStreamMessage } from './types';
+import type { ForkDefinition, ForkState, ForkCreateRequest, ForkStreamMessage } from './types';
 
 export class ForkManager {
   private forks: Map<string, ForkDefinition>;

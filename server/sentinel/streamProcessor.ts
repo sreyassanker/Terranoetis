@@ -1,4 +1,3 @@
-import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
 import { pubsub } from '../pubsub';
 import { causalGraph } from '../world-model/causalGraph';

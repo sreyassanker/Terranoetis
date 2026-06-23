@@ -1,6 +1,6 @@
 import { logger } from '../observability/logger';
 import { pubsub } from '../pubsub';
-import { broadcastToUser, broadcastToAll } from '../websocket';
+import { broadcastToUser } from '../websocket';
 import { getDb } from '../db/index';
 import { memoryManagerV2 } from '../memory-v2/memoryManager-v2';
 import type { Anomaly } from './anomalyDetector';
@@ -123,7 +123,6 @@ export class AlertIntelligence {
   }
 
   private determineSeverityForUser(anomaly: Anomaly, userModel?: UserModel): 'info' | 'warning' | 'critical' {
-    const base: Record<string, string> = { critical: 'critical', warning: 'warning', info: 'info' };
     const eventSeverity = anomaly.event?.severity || 'info';
 
     if (!userModel) return eventSeverity as 'info' | 'warning' | 'critical';

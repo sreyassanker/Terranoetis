@@ -1,5 +1,4 @@
 import { getDb } from '../db/index';
-import { omninet } from '../ai-router/omninet';
 import { EmbeddingEngine, cosineSimilarity, embeddingToBuffer, bufferToEmbedding } from '../embedding';
 import { logger } from '../observability/logger';
 

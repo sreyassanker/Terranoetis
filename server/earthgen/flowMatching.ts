@@ -18,10 +18,6 @@ const DEFAULT_CONFIG: FlowMatchingConfig = {
   cosineS: 0.008,
 };
 
-function cosineSchedule(t: number, s: number): number {
-  return (Math.cos(((t + s) / (1 + s)) * (Math.PI / 2))) ** 2;
-}
-
 function sampleTimestep(batchSize: number, config: FlowMatchingConfig): number[] {
   const steps: number[] = [];
   for (let i = 0; i < batchSize; i++) {

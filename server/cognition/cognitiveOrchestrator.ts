@@ -6,7 +6,7 @@ import { system2, type System2Result, type ReasoningStep } from './system2';
 import { ExecutionOrchestrator, type FormattedTraceNode } from './executionOrchestrator';
 import { MCTSEngine } from './mctsEngine';
 import { TreeOfThoughts } from './treeOfThoughts';
-import { ReasoningTree } from './reasoningTree';
+
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -325,7 +325,7 @@ export class CognitiveOrchestrator {
           counterfactuals: [],
           hypotheses: mctsResult.trace
             .filter(n => n.action.startsWith('HYPOTHESIS:'))
-            .map((n, i) => ({
+            .map((n, _i) => ({
               statement: n.action.replace('HYPOTHESIS:', '').trim(),
               probability: n.visits > 0 ? Math.round((n.value / n.visits) * 100) / 100 : 0.5,
               evidenceFor: [],
@@ -364,7 +364,7 @@ export class CognitiveOrchestrator {
           counterfactuals: [],
           hypotheses: totResult.trace
             .filter(n => n.action.startsWith('HYPOTHESIS:'))
-            .map((n, i) => ({
+            .map((n, _i) => ({
               statement: n.action.replace('HYPOTHESIS:', '').trim(),
               probability: n.visits > 0 ? Math.round((n.value / n.visits) * 100) / 100 : 0.5,
               evidenceFor: [],

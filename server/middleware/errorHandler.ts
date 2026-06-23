@@ -21,7 +21,7 @@ interface ErrorWithStatus {
  */
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
   const e = err as ErrorWithStatus;
-  const correlationId = (req as any).correlationId;
+  const correlationId = (req as unknown as Record<string, unknown>).correlationId;
 
   // Body parser errors
   if (e?.type === 'entity.parse.failed') {

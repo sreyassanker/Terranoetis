@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 
 interface SpeechToGlobeProps {
-  viewer?: any;
+  viewer?: { camera: { flyTo: (dest: unknown) => void; setView: (opts: unknown) => void } };
   onNavigate?: (command: NavigationCommand) => void;
 }
 
@@ -43,12 +43,12 @@ const COMMAND_PATTERNS: Array<{ regex: RegExp; parse: (match: RegExpMatchArray) 
   },
 ];
 
-const SpeechToGlobe: React.FC<SpeechToGlobeProps> = ({ viewer, onNavigate }) => {
+const SpeechToGlobe: React.FC<SpeechToGlobeProps> = ({ viewer: _viewer, onNavigate }) => {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState<Transcription>({ text: '', confidence: 0, isFinal: false });
   const [commandPreview, setCommandPreview] = useState('');
   const [history, setHistory] = useState<string[]>([]);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<{ stop: () => void; start: () => void; continuous: boolean; interimResults: boolean; lang: string; onresult: ((event: unknown) => void) | null; onerror: (() => void) | null } | null>(null);
   const audioRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>(0);
@@ -115,7 +115,8 @@ const SpeechToGlobe: React.FC<SpeechToGlobeProps> = ({ viewer, onNavigate }) => 
   const startListening = useCallback(async () => {
     try {
       audioRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const SpeechRecognition = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
       if (!SpeechRecognition) {
         setTranscript({ text: 'Speech recognition not available', confidence: 0, isFinal: true });
         return;
@@ -125,6 +126,7 @@ const SpeechToGlobe: React.FC<SpeechToGlobeProps> = ({ viewer, onNavigate }) => 
       recognition.interimResults = true;
       recognition.lang = 'en-US';
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recognition.onresult = (event: any) => {
         let finalText = '';
         let interimText = '';

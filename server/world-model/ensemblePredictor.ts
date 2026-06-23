@@ -1,7 +1,7 @@
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
 import { causalGraph, type InferenceEvidence } from './causalGraph';
-import { physicsNN, type PhysicsPrediction } from './physicsNN';
+import { physicsNN } from './physicsNN';
 import { omninet } from '../ai-router/omninet';
 import { tryJsonParse } from '../utils/jsonParse';
 
@@ -109,7 +109,6 @@ export class EnsemblePredictor {
     if (layers.has('seismic') || layers.has('earthquake')) {
       const seismicPreds = physicsNN.predictSeismic(6.0, 10, 30);
       for (const sp of seismicPreds) {
-        const weight = this.getEnsembleWeight('earthquake');
         results.push({
           hazardType: sp.hazardType,
           probability: physicsNN.hybridPredict(sp, 0.6, 0),
@@ -197,9 +196,8 @@ export class EnsemblePredictor {
     return results;
   }
 
-  private runPatternMatch(input: EnsembleInput): DomainPrediction[] {
+  private runPatternMatch(_input: EnsembleInput): DomainPrediction[] {
     const results: DomainPrediction[] = [];
-    const locLabel = input.location.label || `${input.location.lat.toFixed(2)},${input.location.lon.toFixed(2)}`;
 
     for (const pattern of this.patterns) {
       if (pattern.occurrences < 2) continue;

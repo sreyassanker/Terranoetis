@@ -210,7 +210,7 @@ export const MonitorPanel: React.FC<MonitorPanelProps> = ({
                 {Object.entries(memoryStats).map(([tier, info]) => (
                   <div key={tier} style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#888' }}>{tier}</span>
-                    <span style={{ color: '#ddd' }}>{(info as any).count ?? 0}</span>
+                    <span style={{ color: '#ddd' }}>{info.count ?? 0}</span>
                   </div>
                 ))}
               </div>

@@ -5,8 +5,7 @@ import { causalGraph } from '../world-model/causalGraph';
 import { getDb } from '../db/index';
 import { satelliteAnalyzer, type SatelliteObservation } from './satelliteAnalyzer';
 import { seismicProcessor, type SeismicEvent } from './seismicProcessor';
-import { radarInterpreter, type StormCell } from './radarInterpreter';
-import { sentimentAnalyzer, type DisasterSignal, type SocialReport } from './sentimentAnalyzer';
+import { type DisasterSignal } from './sentimentAnalyzer';
 
 export interface FusedEvent {
   id: string;

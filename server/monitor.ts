@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { getDb } from './db/index';
-import { logger } from './observability/logger';
 import type { SimpleQueue } from './queue/simple-queue';
 
 // ═══════════════════════════════════════════════════════════════════════

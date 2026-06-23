@@ -1,5 +1,4 @@
 import { logger } from '../observability/logger';
-import { pubsub } from '../pubsub';
 import { getDb } from '../db/index';
 import { streamProcessor, type RawEvent } from './streamProcessor';
 import { anomalyDetector } from './anomalyDetector';

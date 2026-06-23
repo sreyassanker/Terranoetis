@@ -98,7 +98,7 @@ const ENTITY_TEMPLATES: EntityTemplate[] = [
     applicableEvents: ['earthquake', 'wildfire'],
     probabilityFn: (e) => e.type === 'wildfire' ? 1.0 : Math.min(0.4, (e.magnitude || 5) / 15),
     severityFn: (e) => (e.magnitude || 0) >= 6 ? 'high' : 'medium',
-    impactFn: (e) => `Secondary fires from gas line breaks and electrical damage`,
+    impactFn: (_e) => `Secondary fires from gas line breaks and electrical damage`,
     hazardType: 'fire',
     conditioningModifiers: { spreadX: 0.04, spreadY: 0.04, spreadZ: 0.01, hazardType: 'fire' },
     metadataFn: () => ({ secondaryFireRisk: 'elevated' }),
@@ -239,7 +239,7 @@ export class EntityGenerator {
     return this.fallbackCloud(template, event);
   }
 
-  private fallbackCloud(template: EntityTemplate, event: TriggerEvent): PointCloud {
+  private fallbackCloud(template: EntityTemplate, _event: TriggerEvent): PointCloud {
     const n = 64;
     const cloud: PointCloud = [];
     const spreadX = template.conditioningModifiers.spreadX || 0.1;

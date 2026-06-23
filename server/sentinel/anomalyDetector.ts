@@ -175,7 +175,7 @@ export class AnomalyDetector {
     return null;
   }
 
-  private estimateArrivalRate(event: EnrichedEvent, key: string): number {
+  private estimateArrivalRate(event: EnrichedEvent, _key: string): number {
     const db = getDb();
     try {
       const oneHourAgo = new Date(Date.now() - 3600000).toISOString();

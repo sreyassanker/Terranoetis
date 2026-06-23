@@ -5,7 +5,7 @@ import type Redis from 'ioredis';
 export interface RedisMemoryItem {
   id: string;
   timestamp: number;
-  content: any;
+  content: unknown;
   importance: number;
   accessCount: number;
 }
@@ -19,7 +19,7 @@ export class RedisMemoryAdapter {
     this.keyPrefix = `terra:memory:${tierName}`;
   }
 
-  async write(id: string, content: any, importance: number, ttlSeconds: number): Promise<void> {
+  async write(id: string, content: unknown, importance: number, ttlSeconds: number): Promise<void> {
     const item: RedisMemoryItem = {
       id,
       timestamp: Date.now(),
@@ -43,7 +43,7 @@ export class RedisMemoryAdapter {
     return item;
   }
 
-  async query(sinceMs: number): Promise<Array<{ id: string; timestamp: number; content: any }>> {
+  async query(sinceMs: number): Promise<Array<{ id: string; timestamp: number; content: unknown }>> {
     const pattern = `${this.keyPrefix}:*`;
     const keys: string[] = [];
     let cursor = '0';

@@ -1,4 +1,3 @@
-import { getDb } from '../db/index';
 import { omninet } from '../ai-router/omninet';
 import { logger } from '../observability/logger';
 import { dynamicTools } from './toolGenerator';

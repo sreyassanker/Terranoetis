@@ -1,5 +1,3 @@
-import { logger } from '../observability/logger';
-
 // ── Physics-Informed Neural Network ─────────────────────────────
 // Combines physical laws with data-driven adjustments.
 // Not a real neural net — computes physics-constrained estimates.
@@ -157,7 +155,7 @@ export interface PhysicsPrediction {
 }
 
 export class PhysicsNN {
-  predictSeismic(magnitude: number, depthKm: number, daysSinceLastQuake: number): PhysicsPrediction[] {
+  predictSeismic(magnitude: number, depthKm: number, _daysSinceLastQuake: number): PhysicsPrediction[] {
     const results: PhysicsPrediction[] = [];
 
     // Earthquake probability (Gutenberg-Richter)

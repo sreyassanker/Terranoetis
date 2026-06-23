@@ -1,9 +1,9 @@
-import { createFlowMatching, type FlowMatching, type PointCloud, type Point3D } from './flowMatching';
+import { createFlowMatching, type FlowMatching, type PointCloud } from './flowMatching';
 import { computeKNNContext } from './knnContext';
 import { type ConditioningVector, ConditionProjector, conditioningToArray } from './conditioning';
 import { LatentTransformer } from './latentTransformer';
 import { EarthGenDataset, type DatasetExample } from './dataset';
-import { randomUUID } from 'crypto';
+
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -74,7 +74,6 @@ export class EarthGenModel {
   ): Promise<void> {
     this.dataset.addExamples(dataset);
     const split = this.dataset.getSplit(0.8);
-    const lr = this.config.learningRate;
 
     for (let epoch = 0; epoch < epochs; epoch++) {
       let totalLoss = 0;
@@ -100,7 +99,7 @@ export class EarthGenModel {
     const tArr = this.flow.sampleTimestep();
     const t = tArr[0] || 0.5;
 
-    const { xt, velocity: targetVel } = this.flow.computeVelocity(x0, x1, t);
+    const { xt } = this.flow.computeVelocity(x0, x1, t);
 
     const c = example.conditioning;
     const condProjected = this.conditionProjector.forward({
@@ -133,7 +132,7 @@ export class EarthGenModel {
     const x1 = example.cloud;
     const tArr = this.flow.sampleTimestep();
     const t = tArr[0] || 0.5;
-    const { xt, velocity: targetVel } = this.flow.computeVelocity(x0, x1, t);
+    const { xt } = this.flow.computeVelocity(x0, x1, t);
     const predictedVel = this.velocityFn(xt, t, example.conditioning);
     return this.flow.computeLoss(predictedVel, x0, x1);
   }

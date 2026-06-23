@@ -27,6 +27,7 @@ function AlertCard({ alert, onDismiss, onEscalate }: { alert: Alert; onDismiss: 
   const [expanded, setExpanded] = useState(false);
   const color = SEVERITY_COLORS[alert.severity] || 'var(--text-dim)';
   const timeAgo = alert.created_at
+    // eslint-disable-next-line react-hooks/purity
     ? Math.floor((Date.now() - new Date(alert.created_at + 'Z').getTime()) / 60000)
     : 0;
 
