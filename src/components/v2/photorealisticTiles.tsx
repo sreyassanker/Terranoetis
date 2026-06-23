@@ -13,12 +13,17 @@ const OSM_BUILDINGS_ASSET_ID = 96188;
 const PhotorealisticTiles: React.FC<PhotorealisticTilesProps> = ({
   viewer, enabled, ionToken, onToggle,
 }) => {
+  const viewerRef = useRef<any>(null);
   const tilesetRef = useRef<any>(null);
   const isMounted = useRef(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tileStats, setTileStats] = useState<{ loaded: number; total: number }>({ loaded: 0, total: 0 });
   const [terrainExaggeration, setTerrainExaggeration] = useState(1);
+
+  useEffect(() => {
+    viewerRef.current = viewer;
+  }, [viewer]);
 
   const addTileset = useCallback(async () => {
     if (!viewer || !viewer.scene || !enabled) return;
@@ -67,12 +72,13 @@ const PhotorealisticTiles: React.FC<PhotorealisticTilesProps> = ({
   }, [enabled, addTileset, removeTileset]);
 
   useEffect(() => {
-    if (viewer?.scene) {
-      viewer.scene.globe.enableLighting = enabled;
-      viewer.scene.globe.showGroundAtmosphere = enabled;
-      viewer.scene.globe.terrainExaggeration = terrainExaggeration;
+    const cesiumViewer = viewerRef.current;
+    if (cesiumViewer?.scene?.globe) {
+      cesiumViewer.scene.globe.enableLighting = enabled;
+      cesiumViewer.scene.globe.showGroundAtmosphere = enabled;
+      cesiumViewer.scene.globe.terrainExaggeration = terrainExaggeration;
     }
-  }, [viewer, enabled, terrainExaggeration]);
+  }, [enabled, terrainExaggeration]);
 
   return (
     <div className="photorealistic-tiles">

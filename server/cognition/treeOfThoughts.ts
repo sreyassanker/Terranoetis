@@ -188,13 +188,21 @@ ${path.map((n, i) => `  Step ${i}: ${n.action}`).join('\n')}
 Provide a final answer synthesizing all reasoning steps.`;
 
     let finalAnswer = answer;
+    let synthesisFailed = false;
     try {
       finalAnswer = await this.llmRouter.generateText(synthesisPrompt, { temperature: 0.2, maxTokens: 1024 });
     } catch {
-      finalAnswer = `Analysis complete. Path: ${path.map(n => n.action).join(' -> ')}`;
+      synthesisFailed = true;
+      finalAnswer = '';
     }
 
-    logger.info({ pathLength: path.length, confidence }, 'ToT solve complete');
-    return { path, answer: finalAnswer, confidence };
+    // Detect when all thoughts are fallbacks (LLM calls all failed)
+    const hasOnlyFallbacks = path.length > 0 &&
+      path.every(n => n.action.startsWith('FALLBACK:') || n.action === 'root');
+
+    const effectiveConfidence = (hasOnlyFallbacks || synthesisFailed || !finalAnswer) ? 0 : confidence;
+
+    logger.info({ pathLength: path.length, confidence: effectiveConfidence, synthesisFailed, hasOnlyFallbacks }, 'ToT solve complete');
+    return { path, answer: finalAnswer, confidence: effectiveConfidence };
   }
 }

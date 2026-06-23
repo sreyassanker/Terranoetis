@@ -7,6 +7,7 @@ export interface StudyAreaItem {
   name: string;
   type: 'rectangle' | 'polygon' | 'circle' | 'geojson' | 'shapefile';
   visible: boolean;
+  active: boolean;
   dataSource?: Cesium.GeoJsonDataSource;
   entity?: Cesium.Entity;
   positions?: Cesium.Cartesian3[];
@@ -59,6 +60,22 @@ export function flyToStudyAreaTopDown(viewer: Cesium.Viewer, item: StudyAreaItem
     orientation: { heading: 0, pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 },
     duration: 1.2,
   });
+}
+
+export function computeStudyAreaBbox(item: StudyAreaItem): { latMin: number; latMax: number; lonMin: number; lonMax: number } | null {
+  let rect: Cesium.Rectangle | undefined;
+  if (item.positions && item.positions.length >= 2) {
+    rect = Cesium.Rectangle.fromCartesianArray(item.positions, Cesium.Ellipsoid.WGS84);
+  } else if (item.geojson) {
+    rect = computeGeoJSONBbox(item.geojson);
+  }
+  if (!rect) return null;
+  return {
+    latMin: Cesium.Math.toDegrees(rect.south),
+    latMax: Cesium.Math.toDegrees(rect.north),
+    lonMin: Cesium.Math.toDegrees(rect.west),
+    lonMax: Cesium.Math.toDegrees(rect.east),
+  };
 }
 
 function computeGeoJSONBbox(geojson: GeoJSON.FeatureCollection): Cesium.Rectangle | undefined {
@@ -156,12 +173,14 @@ export function filterDataEntitiesByStudyArea(
   viewer: Cesium.Viewer,
   items: StudyAreaItem[],
   active: boolean,
+  activeOnlyId?: string,
 ): void {
   if (!active) {
     restoreHiddenEntities(viewer);
     return;
   }
-  const turfPolygons = buildTurfPolygons(items);
+  const itemsToFilter = activeOnlyId ? items.filter(i => i.id === activeOnlyId) : items;
+  const turfPolygons = buildTurfPolygons(itemsToFilter);
   if (turfPolygons.length === 0) return;
 
   hiddenEntityIds.clear();
@@ -196,7 +215,7 @@ export function filterDataEntitiesByStudyArea(
   viewer.scene.requestRender();
 }
 
-function restoreHiddenEntities(viewer: Cesium.Viewer): void {
+export function restoreHiddenEntities(viewer: Cesium.Viewer): void {
   const allEntities: Cesium.Entity[] = [];
   allEntities.push(...viewer.entities.values);
   for (let i = 0; i < viewer.dataSources.length; i++) {
@@ -371,6 +390,19 @@ export function setStudyAreaVisibility(
     item.outlinePrimitive.show = visible;
   }
   viewer.scene.requestRender();
+}
+
+export function setStudyAreaActive(
+  viewer: Cesium.Viewer,
+  item: StudyAreaItem,
+  active: boolean,
+): void {
+  item.active = active;
+  if (active) {
+    updateStudyAreaStyle(viewer, item, '#22c55e', 4);
+  } else {
+    updateStudyAreaStyle(viewer, item, '#6b7280', 1);
+  }
 }
 
 export function exportToGeoJSON(items: StudyAreaItem[]): GeoJSON.FeatureCollection {

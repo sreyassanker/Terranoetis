@@ -984,7 +984,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
 
 
 export const LEGACY_DEFAULTS: Record<string, { on?: boolean; badge?: string; sub?: string; opacity?: number }> = {
-  earthquakes: { on: true, badge: 'LIVE', sub: 'USGS Real-Time' },
+  earthquakes: { badge: 'LIVE', sub: 'USGS Real-Time' },
   tectonic: { badge: 'KEY', sub: 'USGS Plates' },
   flight_tracks: { sub: 'ADSB.lol Live' },
   space_debris: { sub: 'CelesTrak GP (1500+ objects)' },

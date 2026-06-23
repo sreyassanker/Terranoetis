@@ -53,6 +53,7 @@ import { AgentOrchestrator } from './orchestrator';
 import { CognitiveAgent } from './agent';
 import { scenarioSimulator } from './world-model/scenarioSimulator';
 import { generateScenario } from './scenarios/scenarioGenerator';
+import { generateScenarioFromBBox } from './scenarios/enhancedGenerator';
 import { exportToGeoJSON, exportToCZML, exportToNetCDF, exportToTrainingData } from './scenarios/scenarioExporter';
 import { scenarioDb } from './scenarios/scenarioDb';
 import { generateBatch, getBatchProgress } from './scenarios/batchGenerator';
@@ -103,6 +104,12 @@ import { metricsMiddleware, getMetrics, getMetricsContentType, activeSseConnecti
 import { AppError, GeminiError, SandboxError, ValidationError, DatabaseError, CircuitOpenError, AuthenticationError, NotFoundError, RateLimitError } from './observability/errors';
 import { validateJwtSecretStrength } from './utils/validation';
 import { validateOutboundUrl, isAllowedUpstream } from './utils/ssrfGuard';
+import { filterEonetPayload, readEonetCategoryFilter, type EonetPayload } from './utils/eonet';
+import { isValidIssPosition, parseIssTle, propagateIssPosition, type IssPosition, type IssTle } from './utils/iss';
+import { parseFirmsCsv, readFirmsDayRange, type FirmsHotspot } from './utils/firms';
+import { normalizeSpaceDebrisRecords, type SpaceDebrisItem } from './utils/spaceDebris';
+import { parseTokyoVaacHtml, type TokyoVaacAdvisory } from './utils/vaac';
+import { distanceKm } from './utils/geo';
 import http from 'http';
 import { SimpleQueue } from './queue/simple-queue';
 import { pubsub } from './pubsub';
@@ -240,7 +247,8 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/space-debris' || req.path === '/nasa-dsn' || req.path === '/aurora' || req.path === '/iss' ||
     req.path === '/iss/path' || req.path === '/solar' || req.path === '/firms/hotspots' ||
     req.path === '/clocks' || req.path === '/faults' || req.path === '/volcanoes' ||
-    req.path === '/geomagnetic' || req.path === '/ship-traffic'
+    req.path === '/geomagnetic' || req.path === '/ship-traffic' ||
+    req.path === '/cameras' || req.path.startsWith('/cameras/') || req.path.startsWith('/cctv/')
   ) {
     return next();
   }
@@ -660,9 +668,9 @@ app.get('/api/ready', (req: express.Request, res: express.Response) => {
   checks.gemini = geminiKey ? 'ok' : 'not_configured';
 
   if (allCritical) {
-    res.json({ status: 'ready', checks, uptime_ms: Date.now() - process.uptime() * 1000 });
+    res.json({ status: 'ready', checks, uptime_ms: process.uptime() * 1000 });
   } else {
-    res.status(503).json({ status: 'not_ready', checks, uptime_ms: Date.now() - process.uptime() * 1000 });
+    res.status(503).json({ status: 'not_ready', checks, uptime_ms: process.uptime() * 1000 });
   }
 });
 
@@ -725,7 +733,7 @@ app.get('/api/health', async (_req: express.Request, res: express.Response) => {
   res.json({
     status: overallStatus,
     checks,
-    uptime_ms: Date.now() - (process.uptime() * 1000 || 0),
+    uptime_ms: process.uptime() * 1000,
     version: process.env.npm_package_version || '0.0.0',
     ts: Date.now(),
   });
@@ -761,6 +769,33 @@ app.get('/api/metrics', async (_req: express.Request, res: express.Response) => 
   }
   res.setHeader('Content-Type', getMetricsContentType());
   res.end(await getMetrics());
+});
+
+app.get('/api/admin/metrics', requireRole('admin'), async (_req: express.Request, res: express.Response) => {
+  res.setHeader('Content-Type', getMetricsContentType());
+  res.end(await getMetrics());
+});
+
+app.get('/api/admin/audit-logs', requireRole('admin'), (req: express.Request, res: express.Response) => {
+  const limit = Number(req.query.limit ?? 100);
+  const offset = Number(req.query.offset ?? 0);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500
+    || !Number.isInteger(offset) || offset < 0) {
+    return res.status(400).json({ error: 'limit must be 1-500 and offset must be a non-negative integer' });
+  }
+  const db = getDb();
+  const logs = db.prepare(
+    `SELECT id, user_id, action, resource, details, ip_address, user_agent, created_at
+     FROM audit_logs ORDER BY id DESC LIMIT ? OFFSET ?`,
+  ).all(limit, offset);
+  const total = (db.prepare('SELECT COUNT(*) AS count FROM audit_logs').get() as { count: number }).count;
+  res.json({ logs, total, limit, offset });
+});
+
+app.get('/api/admin/plugins', requireRole('admin'), (_req: express.Request, res: express.Response) => {
+  res.json({
+    plugins: pluginManager.listPlugins().map((plugin) => ({ ...plugin, enabled: true })),
+  });
 });
 
 app.get('/api/config/apis', (_req: express.Request, res: express.Response) => {
@@ -1026,29 +1061,150 @@ app.get('/api/cctv/india', async (_req: express.Request, res: express.Response) 
   }
 });
 
-app.get('/api/eonet', async (_req: express.Request, res: express.Response) => {
+// Backward-compatible camera route documented by earlier releases.
+app.get(['/api/cameras', '/api/cameras/:lat/:lon/:radius'], async (req: express.Request, res: express.Response) => {
   try {
-    const data = await cachedFetch(
-      'eonet',
-      'https://eonet.gsfc.nasa.gov/api/v3/events?days=30&status=open',
-      120,
-    );
-    res.json(data);
+    let payload = cache.get<WorldwideCctvPayload>('cctv_worldwide');
+    if (!payload) {
+      payload = {
+        source: 'opencctv.org',
+        country: 'Worldwide',
+        updatedAt: Date.now(),
+        cameras: await fetchWorldwideCameras(),
+      };
+      cache.set('cctv_worldwide', payload, 1800);
+    }
+
+    if (req.params.lat === undefined) return res.json(payload);
+    const lat = Number(req.params.lat);
+    const lon = Number(req.params.lon);
+    const radius = Number(req.params.radius);
+    if (!Number.isFinite(lat) || Math.abs(lat) > 90
+      || !Number.isFinite(lon) || Math.abs(lon) > 180
+      || !Number.isFinite(radius) || radius <= 0 || radius > 20_000) {
+      return res.status(400).json({ error: 'lat, lon, and radius must be valid; radius is in km (0-20000)' });
+    }
+
+    res.json({
+      ...payload,
+      cameras: payload.cameras.filter((camera) => distanceKm(lat, lon, camera.lat, camera.lon) <= radius),
+      query: { lat, lon, radiusKm: radius },
+    });
   } catch (e) {
     res.status(502).json({ error: String(e) });
   }
 });
 
-app.get('/api/iss', async (_req: express.Request, res: express.Response) => {
+app.get('/api/vaac/tokyo', async (req: express.Request, res: express.Response) => {
+  const requestedLimit = Number(req.query.limit ?? 50);
+  if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 200) {
+    return res.status(400).json({ error: 'limit must be an integer from 1 to 200' });
+  }
+
   try {
-    const data = await cachedFetch(
-      'iss',
-      'https://api.wheretheiss.at/v1/satellites/25544',
-      5,
+    const cacheKey = 'vaac_tokyo';
+    let advisories = cache.get<TokyoVaacAdvisory[]>(cacheKey);
+    if (!advisories) {
+      const response = await fetch('https://ds.data.jma.go.jp/svd/vaac/data/vaac_list.html', {
+        headers: { 'User-Agent': 'LiveGlobe/1.0 (volcanic ash advisories)' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new Error(`Tokyo VAAC ${response.status}`);
+      advisories = parseTokyoVaacHtml(await response.text());
+      if (advisories.length === 0) throw new Error('Tokyo VAAC returned no parseable advisories');
+      cache.set(cacheKey, advisories, 300);
+    }
+    res.json({
+      advisories: advisories.slice(0, requestedLimit),
+      source: 'Tokyo VAAC (Japan Meteorological Agency)',
+      updatedAt: Date.now(),
+    });
+  } catch (e) {
+    logger.warn({ err: e }, 'Tokyo VAAC feed unavailable');
+    res.json({
+      advisories: [],
+      source: 'Tokyo VAAC (Japan Meteorological Agency)',
+      available: false,
+      message: 'Tokyo VAAC advisories are temporarily unavailable.',
+    });
+  }
+});
+
+app.get('/api/eonet', async (req: express.Request, res: express.Response) => {
+  try {
+    const data = await cachedFetch<EonetPayload>(
+      'eonet',
+      'https://eonet.gsfc.nasa.gov/api/v3/events?days=30&status=open',
+      120,
     );
-    res.json(data);
+    const category = readEonetCategoryFilter(req.query.source ?? req.query.category);
+    res.json(filterEonetPayload(data, category));
   } catch (e) {
     res.status(502).json({ error: String(e) });
+  }
+});
+
+let lastKnownIssPosition: IssPosition | null = null;
+let issPrimaryRetryAfter = 0;
+
+async function fetchIssPosition(): Promise<IssPosition> {
+  const primaryCached = cache.get<IssPosition>('iss');
+  if (primaryCached && isValidIssPosition(primaryCached)) return primaryCached;
+
+  if (Date.now() >= issPrimaryRetryAfter) {
+    try {
+      const response = await fetch('https://api.wheretheiss.at/v1/satellites/25544', {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) throw new Error(`Where The ISS ${response.status}`);
+      const position = await response.json() as IssPosition;
+      if (!isValidIssPosition(position)) throw new Error('Where The ISS returned invalid coordinates');
+      const result = { ...position, source: 'Where The ISS' };
+      cache.set('iss', result, 5);
+      lastKnownIssPosition = result;
+      return result;
+    } catch (error) {
+      issPrimaryRetryAfter = Date.now() + 60_000;
+      logger.warn({ err: error }, 'ISS primary feed unavailable; using CelesTrak fallback');
+    }
+  }
+
+  try {
+    let tle = cache.get<IssTle>('iss_tle');
+    if (!tle) {
+      const response = await fetch(
+        'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE',
+        { signal: AbortSignal.timeout(8000) },
+      );
+      if (!response.ok) throw new Error(`CelesTrak ${response.status}`);
+      tle = parseIssTle(await response.text());
+      cache.set('iss_tle', tle, 3600);
+    }
+    const result = propagateIssPosition(tle);
+    lastKnownIssPosition = result;
+    return result;
+  } catch (error) {
+    if (lastKnownIssPosition) {
+      logger.warn({ err: error }, 'ISS fallback unavailable; serving last known position');
+      return {
+        ...lastKnownIssPosition,
+        stale: true,
+        warning: 'Live ISS feeds are temporarily unavailable; this is the last known position.',
+      };
+    }
+    throw error;
+  }
+}
+
+app.get('/api/iss', async (_req: express.Request, res: express.Response) => {
+  try {
+    res.json(await fetchIssPosition());
+  } catch (e) {
+    res.status(503).json({
+      error: 'ISS position is temporarily unavailable',
+      detail: e instanceof Error ? e.message : String(e),
+      retryable: true,
+    });
   }
 });
 
@@ -1660,23 +1816,41 @@ app.get('/api/gdacs/alerts', async (_req: express.Request, res: express.Response
 });
 
 app.get('/api/firms', async (req: express.Request, res: express.Response) => {
+  const dayRange = readFirmsDayRange(req.query.dayRange ?? req.query.days);
+  if (dayRange === null) {
+    return res.status(400).json({ error: 'dayRange must be an integer from 1 to 31' });
+  }
+
   const mapKey = process.env.NASA_FIRMS_MAP_KEY;
   if (!mapKey) {
-    res.status(503).json({ error: 'NASA_FIRMS_MAP_KEY not configured on server' });
+    res.json({
+      hotspots: [],
+      configured: false,
+      source: 'NASA FIRMS VIIRS SNPP NRT',
+      dayRange,
+      message: 'NASA FIRMS is not configured. Set NASA_FIRMS_MAP_KEY to enable satellite fire detections.',
+    });
     return;
-  }
-  const dayRange = parseInt(req.query.dayRange as string, 10);
-  if (!isFinite(dayRange) || dayRange < 1 || dayRange > 31) {
-    return res.status(400).json({ error: 'dayRange must be 1-31' });
   }
   const key = `firms_${dayRange}`;
   try {
-    const data = await cachedFetch(
-      key,
+    const hit = cache.get<{ hotspots: FirmsHotspot[]; configured: true; source: string; dayRange: number; updatedAt: number }>(key);
+    if (hit) return res.json(hit);
+
+    const response = await fetch(
       `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${mapKey}/VIIRS_SNPP_NRT/world/${dayRange}`,
-      300,
+      { signal: AbortSignal.timeout(15000) },
     );
-    res.json(data);
+    if (!response.ok) throw new Error(`NASA FIRMS ${response.status}`);
+    const payload = {
+      hotspots: parseFirmsCsv(await response.text()),
+      configured: true as const,
+      source: 'NASA FIRMS VIIRS SNPP NRT',
+      dayRange,
+      updatedAt: Date.now(),
+    };
+    cache.set(key, payload, 300);
+    res.json(payload);
   } catch (e) {
     res.status(502).json({ error: String(e) });
   }
@@ -1783,47 +1957,69 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
 // --- UPGRADED PLANETARY LAYERS PROXIES ---
 
 // 1. Space Debris Proxy (CelesTrak)
+const CELESTRAK_DEBRIS_GROUPS = [
+  'fengyun-1c-debris',
+  'iridium-33-debris',
+  'cosmos-2251-debris',
+  'cosmos-1408-debris',
+];
+let lastKnownSpaceDebris: SpaceDebrisItem[] = [];
+
 app.get('/api/space-debris', async (_req: express.Request, res: express.Response) => {
   try {
     const cacheKey = 'space_debris';
-    const cachedData = cache.get(cacheKey);
+    const cachedData = cache.get<Record<string, unknown>>(cacheKey);
     if (cachedData) {
       res.json(cachedData);
       return;
     }
 
-    const resp = await fetch('https://celestrak.org/NORAD/elements/gp.php?GROUP=debris&FORMAT=json', { signal: AbortSignal.timeout(15000) });
-    if (!resp.ok) throw new Error(`CelesTrak error ${resp.status}`);
-    const data = await resp.json();
-    if (!Array.isArray(data)) throw new Error('CelesTrak data is not an array');
-    
-    // Sample to ~1,500 active debris elements to keep the payload lightweight
-    const step = Math.max(1, Math.floor(data.length / 1500));
-    const sampled = [];
-    for (let i = 0; i < data.length; i += step) {
-      if (sampled.length >= 1500) break;
-      const d = data[i];
-      if (d && d.OBJECT_NAME && d.EPOCH) {
-        sampled.push({
-          name: d.OBJECT_NAME,
-          id: d.OBJECT_ID || `DEB-${i}`,
-          epoch: d.EPOCH,
-          meanMotion: toNumber(d.MEAN_MOTION) ?? 14.5,
-          eccentricity: toNumber(d.ECCENTRICITY) ?? 0.001,
-          inclination: toNumber(d.INCLINATION) ?? 98.6,
-          raOfAscNode: toNumber(d.RA_OF_ASC_NODE) ?? 0.0,
-          argOfPericenter: toNumber(d.ARG_OF_PERICENTER) ?? 0.0,
-          meanAnomaly: toNumber(d.MEAN_ANOMALY) ?? 0.0,
-          semimajorAxis: toNumber(d.SEMIMAJOR_AXIS) ?? 7100,
-        });
+    const records: unknown[] = [];
+    const failedGroups: string[] = [];
+    // Fetch sequentially to respect CelesTrak's rate limits.
+    for (const group of CELESTRAK_DEBRIS_GROUPS) {
+      try {
+        const response = await fetch(
+          `https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=JSON`,
+          { signal: AbortSignal.timeout(15000) },
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (!Array.isArray(data)) throw new Error('response was not an array');
+        records.push(...data);
+      } catch (error) {
+        failedGroups.push(group);
+        logger.warn({ group, err: error }, 'CelesTrak debris group unavailable');
       }
     }
 
-    cache.set(cacheKey, sampled, 3600); // 1 hour TTL
-    res.json(sampled);
+    const items = normalizeSpaceDebrisRecords(records);
+    if (items.length === 0) throw new Error('No CelesTrak debris groups returned usable records');
+    lastKnownSpaceDebris = items;
+    const payload = {
+      items,
+      available: true,
+      stale: false,
+      source: 'CelesTrak GP debris groups',
+      updatedAt: Date.now(),
+      partial: failedGroups.length > 0,
+      message: failedGroups.length > 0
+        ? `Loaded available debris groups; ${failedGroups.length} group(s) are temporarily unavailable.`
+        : undefined,
+    };
+    cache.set(cacheKey, payload, 3600);
+    res.json(payload);
   } catch (e) {
-    logger.error({ err: e }, 'Space debris data not available at this moment');
-    res.status(503).json({ error: 'Space debris data not available at this moment.' });
+    logger.warn({ err: e }, 'Space debris feeds unavailable; serving graceful response');
+    res.json({
+      items: lastKnownSpaceDebris,
+      available: false,
+      stale: lastKnownSpaceDebris.length > 0,
+      source: 'CelesTrak GP debris groups',
+      message: lastKnownSpaceDebris.length > 0
+        ? 'Live space-debris feeds are unavailable; showing the last known dataset.'
+        : 'Space-debris data is temporarily unavailable. Try again later.',
+    });
   }
 });
 
@@ -3995,6 +4191,42 @@ app.get('/api/agent/geocode', async (req: express.Request, res: express.Response
   res.json({ found: false, error: 'Location not found' });
 });
 
+// ── Direct Gemini fallback ─────────────────────────────────────
+// Used when the Antigravity "interactions" API is unavailable (quota, 404, etc).
+// Streams nothing — returns the full text once Gemini completes. Keeps the
+// agent fully functional even without Antigravity access.
+async function directGeminiAnswer(
+  apiKey: string,
+  systemPrompt: string,
+  userMessage: string,
+  memoryContext: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const model = 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const fullPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}[User query]\n${userMessage}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: fullPrompt.slice(0, 30000) }] }],
+      generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+    }),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`Gemini HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('') || '';
+  if (!text) {
+    const blockReason = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason;
+    throw new Error(`Gemini returned empty response${blockReason ? ` (blockReason: ${blockReason})` : ''}`);
+  }
+  return text;
+}
+
 // Main agent ask endpoint — SSE streaming
 const askRateLimit = perUserRateLimiter(30, 60000); // 30 requests per minute per user
 app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: express.Request, res: express.Response) => {
@@ -4007,7 +4239,10 @@ app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: expres
   const abortController = new AbortController();
 
   registerAbortController(requestId, abortController);
-  req.on('close', () => {
+  // Abort long-running work when the client disconnects. Use res 'close' (not req 'close')
+  // because req 'close' can fire as soon as the request body is fully received for POST
+  // requests, which would abort the agent before it finishes streaming the response.
+  res.on('close', () => {
     if (!res.writableEnded) {
       abortController.abort();
     }
@@ -4071,10 +4306,18 @@ app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: expres
         }
       }) as any;
       const cognitiveOutput = cr.output || cr.finalOutput || '';
-      const cognitiveConfidence = typeof cr.confidence === 'number'
+      const rawCognitiveConfidence = typeof cr.confidence === 'number'
         ? cr.confidence
         : cr.system2Result?.finalConfidence ?? cr.system1Result?.match?.confidence ?? 0;
       const cognitiveSystem = cr.system || (cr.mode === 'system1_only' ? 'system1' : 'system2');
+
+      // Detect garbage output from failed MCTS/ToT expansions — don't trust confidence if output is trace noise
+      const isGarbageOutput = !cognitiveOutput ||
+        /fallback_thought_[a-z0-9]{4}/.test(cognitiveOutput) ||
+        /MCTS analysis:.*->/.test(cognitiveOutput) ||
+        /Analysis complete\. Path:.*->/.test(cognitiveOutput) ||
+        /^FALLBACK:/.test(cognitiveOutput);
+      const cognitiveConfidence = isGarbageOutput ? 0 : rawCognitiveConfidence;
 
       if (cognitiveConfidence >= 0.7 && cognitiveOutput) {
         costTracker.record('local', message, cognitiveOutput, false);
@@ -4147,93 +4390,83 @@ app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: expres
       }
     }
 
-    // Step 3: Get or create agent session
-    const session = agentSessions.get(uid);
+    // Step 3 & 4: Send to Antigravity agent — with graceful fallback to direct Gemini.
+    // The Antigravity "interactions" API has tight quota limits and may return 429/403.
+    // In that case we fall back to a direct Gemini generateContent call using the same
+    // AGENTS.md system prompt so the copilot stays fully functional.
+    sendEvent('step', { type: 'agent_thinking', text: 'Agent analyzing...' });
+    // Build working memory context from user profile and past sessions
+    const memoryContext = await memoryManager.buildWorkingMemoryContext(uid, message, []);
+    const systemPrompt = buildAgentPrompt(toolRegistry, intent);
 
+    let outputText = '';
+    let steps: AgentStep[] = [];
+    let usedFallback = false;
+
+    // First, attempt Antigravity (only if we already have a valid environment)
+    const session = agentSessions.get(uid);
     let envId = environmentId || session?.environmentId;
     let prevId = interactionId || session?.interactionId;
+    let antigravityOk = !!envId; // only attempt if env already provisioned
 
-    if (!envId) {
-      sendEvent('step', { type: 'provisioning', text: 'Provisioning sandbox environment...' });
-      const envResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/interactions?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: abortController.signal,
-        body: JSON.stringify({
+    if (antigravityOk) {
+      try {
+        const enrichedInput = memoryContext
+          ? `[Context from user profile]\n${memoryContext}\n\n[User query]\n${message}`
+          : message;
+        const interactionBody: Record<string, unknown> = {
           agent: 'antigravity-preview-05-2026',
-          environment: {
-            type: 'remote',
-            sources: [{
-              type: 'inline',
-              target: '/workspace/.agents/AGENTS.md',
-              content: buildAgentPrompt(toolRegistry, intent),
-            }],
-          },
-          input: 'Initialize and confirm readiness.',
+          environment: envId,
+          input: enrichedInput,
           store: true,
-        }),
-      });
-      if (!envResp.ok) {
-        sendEvent('error', { error: `Environment provisioning failed: ${await envResp.text()}` });
+        };
+        if (prevId) interactionBody.previous_interaction_id = prevId;
+        const agentResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/interactions?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: abortController.signal,
+          body: JSON.stringify(interactionBody),
+        });
+        if (agentResp.ok) {
+          const agentData = await agentResp.json();
+          outputText = agentData.output_text || '';
+          steps = (agentData.steps || []);
+          const newInteractionId = agentData.id;
+          const newEnvId = agentData.environment_id || envId;
+          const sess = agentSessions.get(uid);
+          if (sess) { sess.interactionId = newInteractionId; sess.environmentId = newEnvId; }
+        } else {
+          logger.warn({ status: agentResp.status }, 'Antigravity interaction failed, using Gemini fallback');
+          antigravityOk = false;
+        }
+      } catch (e) {
+        logger.warn({ err: e }, 'Antigravity interaction threw, using Gemini fallback');
+        antigravityOk = false;
+      }
+    }
+
+    if (!outputText) {
+      // Fallback path: direct Gemini generateContent
+      usedFallback = true;
+      sendEvent('step', { type: 'agent_thinking', text: 'Reasoning with Gemini...' });
+      try {
+        logger.info({ msgLen: message.length, hasMemory: !!memoryContext }, 'Gemini fallback starting');
+        outputText = await directGeminiAnswer(apiKey, systemPrompt, message, memoryContext, abortController.signal);
+        logger.info({ outputLen: outputText.length, aborted: abortController.signal.aborted }, 'Gemini fallback complete');
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.error({ err: e, aborted: abortController.signal.aborted }, 'Gemini fallback failed');
+        // Avoid surfacing abort errors as failures if the client disconnected
+        if (abortController.signal.aborted) { cleanup(); res.end(); return; }
+        sendEvent('error', { error: `Agent reasoning failed: ${errMsg}` });
         cleanup();
         res.end();
         return;
       }
-      const envData = await envResp.json();
-      envId = envData.environment_id as string;
-      prevId = envData.id as string;
-      const existing = agentSessions.get(uid);
-      if (existing) {
-        existing.environmentId = envId;
-        existing.interactionId = prevId;
-      } else {
-        agentSessions.set(uid, { environmentId: envId, interactionId: prevId });
-      }
     }
 
-    // Step 4: Send to Antigravity agent
-    sendEvent('step', { type: 'agent_thinking', text: 'Agent analyzing...' });
-    // Build working memory context from user profile and past sessions
-    const recentMessages: unknown[] = []; // placeholder — frontend could send recent msgs via WebSocket
-    const memoryContext = await memoryManager.buildWorkingMemoryContext(uid, message, []);
-    const enrichedInput = memoryContext
-      ? `[Context from user profile]\n${memoryContext}\n\n[User query]\n${message}`
-      : message;
-    const interactionBody: Record<string, unknown> = {
-      agent: 'antigravity-preview-05-2026',
-      environment: envId,
-      input: enrichedInput,
-      store: true,
-    };
-    if (prevId) interactionBody.previous_interaction_id = prevId;
-
-    const agentResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/interactions?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: abortController.signal,
-      body: JSON.stringify(interactionBody),
-    });
-
-    if (!agentResp.ok) {
-      const errText = await agentResp.text();
-      sendEvent('error', { error: `Agent request failed: ${errText}` });
-      cleanup();
-      res.end();
-      return;
-    }
-
-    const agentData = await agentResp.json();
-    const outputText = agentData.output_text || '';
-    const steps: AgentStep[] = (agentData.steps || []);
-    const newInteractionId = agentData.id;
-    const newEnvId = agentData.environment_id || envId;
-
-    // Record cost for Antigravity agent call
+    // Record cost for agent call
     costTracker.record(modelTier, message, outputText, false);
-
-    // Update session
-    const sess = agentSessions.get(uid);
-    if (sess) { sess.interactionId = newInteractionId; sess.environmentId = newEnvId; }
 
     // Record in memory (legacy)
     await memoryManager.recordInteraction(
@@ -4296,8 +4529,8 @@ app.post('/api/agent/ask', askRateLimit, validate(askSchema), async (req: expres
     }
 
     // Send final output
-    sendEvent('output', { text: outputText, interactionId: newInteractionId, environmentId: newEnvId });
-    sendEvent('done', { type: 'done', interactionId: newInteractionId, environmentId: newEnvId });
+    sendEvent('output', { text: outputText, interactionId: prevId, environmentId: envId, source: usedFallback ? 'gemini' : 'antigravity' });
+    sendEvent('done', { type: 'done', interactionId: prevId, environmentId: envId });
 
   } catch (e) {
     sendEvent('error', { error: String(e) });
@@ -5764,16 +5997,7 @@ app.get('/api/scenarios/batch/:batchId', authGuard, (req: express.Request, res: 
   res.json({ progress });
 });
 
-// GET /api/scenarios/:id — get full scenario
-app.get('/api/scenarios/:id', authGuard, (req: express.Request, res: express.Response) => {
-  const correlationId = (req as any).correlationId || crypto.randomUUID();
-  const scenario = scenarioDb.get(req.params.id);
-  if (!scenario) return res.status(404).json({ error: 'Scenario not found' });
-  logger.info({ correlationId, id: req.params.id }, 'Scenario retrieved');
-  res.json({ scenario });
-});
-
-// GET /api/scenarios/search — search scenarios
+// GET /api/scenarios/search — search scenarios (MUST be before :id route)
 app.get('/api/scenarios/search', authGuard, (req: express.Request, res: express.Response) => {
   const correlationId = (req as any).correlationId || crypto.randomUUID();
   const lat = parseFloat(req.query.lat as string);
@@ -5790,6 +6014,67 @@ app.get('/api/scenarios/search', authGuard, (req: express.Request, res: express.
 
   logger.info({ correlationId, count: scenarios.length, lat, lon, type }, 'Scenarios searched');
   res.json({ scenarios, total: scenarios.length });
+});
+
+// GET /api/scenarios/nc-variables — list available NetCDF variables (MUST be before :id route)
+app.get('/api/scenarios/nc-variables', authGuard, async (req: express.Request, res: express.Response) => {
+  try {
+    const { queryVariableNames, openFile, readVariable, closeFile } = await import('./grid/netcdfReader');
+    const WLDAS_PATH = process.env.WLDAS_NC_PATH || '/Users/sreyassanker/Downloads/Realtime_v2/Testing/WLDAS_NOAHMP001_DA1_20240101.D10.nc';
+    if (!fs.existsSync(WLDAS_PATH)) return res.json({ variables: [] });
+    const keys = await queryVariableNames(WLDAS_PATH);
+    const coordKeys = new Set(['lat', 'lon', 'latitude', 'longitude', 'time', 'bnds', 'time_bnds', 'crs']);
+    let variables = keys.filter((k: string) => !coordKeys.has(k));
+
+    // If bbox query params provided, check if the file's grid actually covers this area
+    const latMin = parseFloat(req.query.latMin as string);
+    const latMax = parseFloat(req.query.latMax as string);
+    const lonMin = parseFloat(req.query.lonMin as string);
+    const lonMax = parseFloat(req.query.lonMax as string);
+    if (isFinite(latMin) && isFinite(latMax) && isFinite(lonMin) && isFinite(lonMax)) {
+      try {
+        const h5 = await openFile(WLDAS_PATH);
+        const lats = readVariable(h5, 'lat');
+        const lons = readVariable(h5, 'lon');
+        if (lats && lons && lats.length > 0 && lons.length > 0) {
+          const fileLatMin = Math.min(...lats);
+          const fileLatMax = Math.max(...lats);
+          const fileLonMin = Math.min(...lons);
+          const fileLonMax = Math.max(...lons);
+          const overlaps = latMax > fileLatMin && latMin < fileLatMax && lonMax > fileLonMin && lonMin < fileLonMax;
+          if (!overlaps) variables = [];
+        }
+        closeFile(h5);
+      } catch {}
+    }
+
+    res.json({ variables });
+  } catch { res.json({ variables: [] }); }
+});
+
+// GET /api/scenarios/:id — get full scenario
+app.get('/api/scenarios/:id', authGuard, (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const scenario = scenarioDb.get(req.params.id);
+  if (!scenario) return res.status(404).json({ error: 'Scenario not found' });
+  logger.info({ correlationId, id: req.params.id }, 'Scenario retrieved');
+  res.json({ scenario });
+});
+
+// POST /api/scenarios/generate-from-bbox — generate scenario using real data within bounding box
+app.post('/api/scenarios/generate-from-bbox', authGuard, async (req: express.Request, res: express.Response) => {
+  const correlationId = (req as any).correlationId || crypto.randomUUID();
+  const { bbox, hazardType, params } = req.body;
+  if (!bbox || !hazardType) return res.status(400).json({ error: 'bbox and hazardType required' });
+  try {
+    const scenario = await generateScenarioFromBBox(hazardType, bbox, params || {});
+    scenarioDb.save(scenario);
+    logger.info({ correlationId, hazardType, id: scenario.id, dataSources: scenario.dataSources, score: scenario.validationScore }, 'Scenario generated from bbox with real data');
+    res.json({ scenario });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, correlationId }, 'Bbox scenario generation error');
+    res.status(502).json({ error: (e as Error).message });
+  }
 });
 
 // GET /api/scenarios/export/:id — export scenario in requested format
@@ -5823,6 +6108,219 @@ app.get('/api/scenarios/export/:id', authGuard, (req: express.Request, res: expr
       break;
     default:
       res.status(400).json({ error: `Unsupported format: ${format}. Use geojson, czml, netcdf, or training.` });
+  }
+});
+
+// POST /api/scenarios/import — parse NetCDF/HDF5 file uploaded as base64
+app.post('/api/scenarios/import', authGuard, async (req: express.Request, res: express.Response) => {
+  try {
+    const { file: base64 } = req.body;
+    if (!base64 || typeof base64 !== 'string') return res.status(400).json({ error: 'Missing file (base64 string)' });
+
+    const buffer = Buffer.from(base64, 'base64');
+    const tmpPath = `/tmp/scenario_import_${Date.now()}.nc`;
+    fs.writeFileSync(tmpPath, buffer);
+
+    try {
+      const mod: any = await import('h5wasm/node');
+      await mod.ready;
+      const f = new mod.File(tmpPath, 'r');
+
+      const vars: Record<string, number[]> = {};
+      function walk(item: any, prefix: string) {
+        if (item.type === 'Dataset' || item.type === 'dataset') {
+          const name = prefix.split('/').filter(Boolean).pop() || '';
+          try {
+            const val = item.value;
+            if (val && typeof val === 'object' && 'length' in val) {
+              vars[name] = Array.from(val as ArrayLike<number>);
+            } else if (val !== null && val !== undefined) {
+              vars[name] = [Number(val)];
+            }
+          } catch { /* skip */ }
+          return;
+        }
+        const keys = typeof item.keys === 'function' ? item.keys() : [];
+        for (const k of keys) {
+          const child = typeof item.get === 'function' ? item.get(k) : null;
+          if (child) walk(child, `${prefix}/${k}`);
+        }
+      }
+      walk(f, '');
+      f.close();
+
+      let pointCloud: { x: number; y: number; z: number }[] = [];
+      let lat = 0, lon = 0;
+
+      if (vars.x && vars.y && vars.z) {
+        const n = Math.min(vars.x.length, vars.y.length, vars.z.length);
+        for (let i = 0; i < n; i++) {
+          pointCloud.push({ x: vars.x[i], y: vars.y[i], z: vars.z[i] });
+        }
+        let slat = 0, slon = 0;
+        for (let i = 0; i < n; i++) {
+          const r = Math.sqrt(vars.x[i] ** 2 + vars.y[i] ** 2 + vars.z[i] ** 2) || 1;
+          slat += Math.asin(Math.max(-1, Math.min(1, vars.z[i] / r))) * 180 / Math.PI;
+          slon += Math.atan2(vars.y[i], vars.x[i]) * 180 / Math.PI;
+        }
+        lat = slat / n; lon = slon / n;
+      } else {
+        const lats = vars.lat || vars.latitude || vars.Latitude || vars.LAT;
+        const lons = vars.lon || vars.longitude || vars.Longitude || vars.LON;
+        if (lats && lons && lats.length && lons.length) {
+          const n = Math.min(lats.length, lons.length);
+          for (let i = 0; i < n; i++) {
+            const latRad = lats[i] * Math.PI / 180;
+            const lonRad = lons[i] * Math.PI / 180;
+            pointCloud.push({
+              x: Math.cos(latRad) * Math.cos(lonRad),
+              y: Math.cos(latRad) * Math.sin(lonRad),
+              z: Math.sin(latRad),
+            });
+          }
+          lat = lats.reduce((a: number, b: number) => a + b, 0) / n;
+          lon = lons.reduce((a: number, b: number) => a + b, 0) / n;
+        }
+      }
+
+      res.json({ pointCloud, lat, lon, variables: Object.keys(vars) });
+    } finally {
+      try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    }
+  } catch (e: any) {
+    logger.error({ err: e.message }, 'NetCDF import failed');
+    res.status(422).json({ error: e.message });
+  }
+});
+
+// POST /api/scenarios/import-from-path — parse NetCDF4/HDF5 file from server path (for large files)
+// Accepts: { path, variable?, maxPoints? }
+// Returns: { pointCloud, lat, lon, variableName, variables }
+app.post('/api/scenarios/import-from-path', authGuard, async (req: express.Request, res: express.Response) => {
+  try {
+    const filePath = req.body.path;
+    if (!filePath || typeof filePath !== 'string') return res.status(400).json({ error: 'Missing path' });
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: `File not found: ${filePath}` });
+
+    const maxPoints = Math.min(Math.max(req.body.maxPoints || 5000, 100), 100000);
+    const bbox = req.body.bbox as { latMin?: number; latMax?: number; lonMin?: number; lonMax?: number } | undefined;
+
+    const mod: any = await import('h5wasm/node');
+    await mod.ready;
+    const f = new mod.File(filePath, 'r');
+
+    // List all datasets (no data read)
+    const allKeys: string[] = [];
+    for (const key of f.keys()) allKeys.push(String(key));
+
+    // Helper to read a dataset as number[]
+    function readDataset(name: string): number[] | null {
+      try {
+        const item = f.get(name);
+        if (!item || item.type !== 'Dataset') return null;
+        const val = item.value;
+        if (val == null) return null;
+        if (typeof val === 'object' && 'length' in val) {
+          return Array.from(val as ArrayLike<number>);
+        }
+        return [Number(val)];
+      } catch { return null; }
+    }
+
+    // Read lat/lon
+    const latKey = allKeys.find(k => /^lat$/i.test(k)) || '';
+    const lonKey = allKeys.find(k => /^lon$/i.test(k)) || '';
+    const lats = latKey ? readDataset(latKey) || [] : [];
+    const lons = lonKey ? readDataset(lonKey) || [] : [];
+
+    if (!lats.length || !lons.length) {
+      f.close();
+      return res.status(422).json({ error: `No lat/lon coordinates found. Available: ${allKeys.join(', ')}` });
+    }
+
+    // Pick the data variable (only read one!)
+    const coordKeys = new Set(allKeys.filter(k => /^(lat|lon|latitude|longitude|time|bnds|time_bnds|crs)$/i.test(k)));
+    let varKey = req.body.variable || '';
+    if (varKey && !allKeys.includes(varKey)) varKey = '';
+    if (!varKey) varKey = allKeys.find(k => !coordKeys.has(k)) || '';
+
+    if (!varKey) {
+      f.close();
+      return res.status(422).json({ error: 'No data variables found' });
+    }
+
+    const rawData = readDataset(varKey);
+    f.close();
+
+    if (!rawData || !rawData.length) {
+      return res.status(422).json({ error: `Variable "${varKey}" has no data` });
+    }
+
+    // Determine grid indices from bbox
+    const nlats = lats.length;
+    const nlons = lons.length;
+    const isGrid = nlats > 1 && nlons > 1 && rawData.length === nlats * nlons;
+
+    function findBounds(arr: number[], min: number, max: number): [number, number] {
+      let lo = 0, hi = arr.length - 1;
+      while (lo < arr.length - 1 && arr[lo + 1] <= min) lo++;
+      while (hi > 0 && arr[hi - 1] >= max) hi--;
+      return [lo, hi];
+    }
+
+    let points: { lat: number; lon: number; value: number }[] = [];
+    if (isGrid) {
+      const [iMin, iMax] = bbox ? findBounds(lats, bbox.latMin ?? -90, bbox.latMax ?? 90) : [0, nlats - 1];
+      const [jMin, jMax] = bbox ? findBounds(lons, bbox.lonMin ?? -180, bbox.lonMax ?? 180) : [0, nlons - 1];
+      const rangeLat = iMax - iMin + 1;
+      const rangeLon = jMax - jMin + 1;
+      const totalInRange = rangeLat * rangeLon;
+      const step = Math.max(1, Math.floor(totalInRange / maxPoints));
+      for (let idx = 0; idx < totalInRange; idx += step) {
+        const i = iMin + Math.floor(idx / rangeLon);
+        const j = jMin + (idx % rangeLon);
+        const flatIdx = i * nlons + j;
+        const val = rawData[flatIdx];
+        if (val === -9999 || val === -9999.0 || isNaN(val)) continue;
+        points.push({ lat: lats[i], lon: lons[j], value: val });
+      }
+    } else if (rawData.length === lats.length && rawData.length === lons.length) {
+      const step = Math.max(1, Math.floor(rawData.length / maxPoints));
+      for (let i = 0; i < rawData.length; i += step) {
+        if (bbox && (lats[i] < (bbox.latMin ?? -90) || lats[i] > (bbox.latMax ?? 90) || lons[i] < (bbox.lonMin ?? -180) || lons[i] > (bbox.lonMax ?? 180))) continue;
+        const val = rawData[i];
+        if (val === -9999 || val === -9999.0 || isNaN(val)) continue;
+        points.push({ lat: lats[i], lon: lons[i], value: val });
+      }
+    }
+
+    if (points.length === 0) {
+      return res.status(422).json({ error: `No valid data points in "${varKey}" within the selected area.` });
+    }
+
+    const pointCloud = points.map(p => {
+      const latRad = p.lat * Math.PI / 180;
+      const lonRad = p.lon * Math.PI / 180;
+      return { x: Math.cos(latRad) * Math.cos(lonRad), y: Math.cos(latRad) * Math.sin(lonRad), z: Math.sin(latRad) };
+    });
+
+    const avgLat = points.reduce((s, p) => s + p.lat, 0) / points.length;
+    const avgLon = points.reduce((s, p) => s + p.lon, 0) / points.length;
+    const values = points.map(p => p.value);
+    const valueMin = Math.min(...values);
+    const valueMax = Math.max(...values);
+
+    res.json({
+      pointCloud, lat: avgLat, lon: avgLon,
+      variableName: varKey, variables: allKeys,
+      pointsUsed: points.length,
+      totalAvailable: isGrid ? nlats * nlons : rawData.length,
+      colorValues: values,
+      valueMin, valueMax,
+    });
+  } catch (e: any) {
+    logger.error({ err: e.message }, 'NetCDF import-from-path failed');
+    res.status(422).json({ error: e.message });
   }
 });
 

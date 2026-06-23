@@ -29,6 +29,15 @@ export interface FlowPrediction {
 const HAZARD_TYPES = ['earthquake', 'tsunami', 'hurricane', 'wildfire', 'flood', 'volcanic'] as const;
 type HazardType = typeof HAZARD_TYPES[number];
 
+const HAZARD_LAYER_ALIASES: Record<HazardType, string[]> = {
+  earthquake: ['earthquake', 'earthquakes', 'seismic', 'tectonic'],
+  tsunami: ['tsunami', 'seismic', 'ocean'],
+  hurricane: ['hurricane', 'cyclone', 'storm', 'storms', 'severe_weather', 'weather'],
+  wildfire: ['wildfire', 'wildfires', 'fire', 'fire_risk', 'firms'],
+  flood: ['flood', 'floods', 'flooding', 'water', 'hydrology'],
+  volcanic: ['volcanic', 'volcano', 'volcanoes', 'vaac', 'ash'],
+};
+
 const HAZARD_TO_SCENARIO: Record<string, string> = {
   earthquake: 'earthquake_swarm',
   tsunami: 'tsunami_wave',
@@ -47,18 +56,16 @@ const HAZARD_TO_CONDITIONING: Record<string, Partial<ConditioningVector>> = {
   volcanic: { hazardType: 'volcanic', spreadX: 0.05, spreadY: 0.05, spreadZ: 0.15 },
 };
 
-function depthToSeverity(depth: number): 'low' | 'medium' | 'high' | 'extreme' {
-  if (depth < 10) return 'extreme';
-  if (depth < 30) return 'high';
-  if (depth < 70) return 'medium';
-  return 'low';
+function normalizeLayer(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
-function magToSeverity(mag: number): 'low' | 'medium' | 'high' | 'extreme' {
-  if (mag >= 8) return 'extreme';
-  if (mag >= 6) return 'high';
-  if (mag >= 4) return 'medium';
-  return 'low';
+function layerMatchesHazard(hazardType: HazardType, layers: string[]): boolean {
+  if (layers.length === 0) return true;
+  const aliases = HAZARD_LAYER_ALIASES[hazardType];
+  return layers
+    .map(normalizeLayer)
+    .some(layer => aliases.some(alias => layer === alias || layer.includes(alias)));
 }
 
 export class FlowPredictor {
@@ -99,7 +106,7 @@ export class FlowPredictor {
       const scenarioType = HAZARD_TO_SCENARIO[hazardType];
       if (!scenarioType) continue;
 
-      const layerMatch = input.layers.some(l => hazardType === l || input.layers.includes(l));
+      const layerMatch = layerMatchesHazard(hazardType, input.layers);
       const historyMatch = input.history.some(h =>
         h.type.toLowerCase().includes(hazardType) ||
         hazardType.includes(h.type.toLowerCase()),
@@ -108,13 +115,19 @@ export class FlowPredictor {
       if (!layerMatch && !historyMatch && input.layers.length > 0) continue;
 
       const conditioning = this.buildConditioning(hazardType, input);
-      const numPoints = 500 + Math.floor(Math.random() * 1500);
+      const numPoints = this.trained
+        ? 500 + Math.floor(Math.random() * 500)
+        : 250 + Math.floor(Math.random() * 250);
 
       let cloud: PointCloud;
-      try {
-        cloud = this.model.generate(conditioning as ConditioningVector, numPoints);
-      } catch {
+      if (!this.trained) {
         cloud = this.generateFallbackCloud(hazardType, input, numPoints);
+      } else {
+        try {
+          cloud = this.model.generate(conditioning as ConditioningVector, numPoints);
+        } catch {
+          cloud = this.generateFallbackCloud(hazardType, input, numPoints);
+        }
       }
 
       const stats = this.computeCloudStats(cloud);

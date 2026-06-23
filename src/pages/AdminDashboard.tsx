@@ -15,20 +15,41 @@ interface MetricsData {
   [key: string]: string;
 }
 
+interface AuditLogRow {
+  id: number;
+  user_id: string;
+  action: string;
+  resource: string;
+  details: string;
+  created_at: string;
+}
+
+interface PluginRow {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  toolCount: number;
+  enabled: boolean;
+}
+
 export default function AdminDashboard({ onClose }: { onClose: () => void }) {
   const { isAdmin, logout } = useAuth();
   const [tab, setTab] = useState<Tab>('metrics');
   const [metrics, setMetrics] = useState<MetricsData | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
-  const [auditLogs, setAuditLogs] = useState<Array<Record<string, unknown>>>([]);
-  const [plugins, setPlugins] = useState<Array<{ name: string; enabled: boolean; description?: string }>>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
+  const [plugins, setPlugins] = useState<PluginRow[]>([]);
   const [healthColor, setHealthColor] = useState<string>('#22c55e');
 
   const token = getToken();
 
   const fetchMetrics = useCallback(async () => {
     try {
-      const resp = await fetch(`/api/metrics?token=${token}`, { cache: 'no-store' });
+      const resp = await fetch('/api/admin/metrics', {
+        cache: 'no-store',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
       if (resp.ok) {
         const text = await resp.text();
         const lines: MetricsData = {};
@@ -46,6 +67,22 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
     } catch { /* silent */ }
   }, [token]);
 
+  const fetchAdminData = useCallback(async () => {
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+    const [auditResponse, pluginResponse] = await Promise.allSettled([
+      fetch('/api/admin/audit-logs?limit=100', { cache: 'no-store', headers }),
+      fetch('/api/admin/plugins', { cache: 'no-store', headers }),
+    ]);
+    if (auditResponse.status === 'fulfilled' && auditResponse.value.ok) {
+      const data = await auditResponse.value.json();
+      setAuditLogs(Array.isArray(data.logs) ? data.logs : []);
+    }
+    if (pluginResponse.status === 'fulfilled' && pluginResponse.value.ok) {
+      const data = await pluginResponse.value.json();
+      setPlugins(Array.isArray(data.plugins) ? data.plugins : []);
+    }
+  }, [token]);
+
   const fetchHealth = useCallback(async () => {
     try {
       const resp = await fetch('/api/health', { cache: 'no-store' });
@@ -60,9 +97,10 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     fetchMetrics();
     fetchHealth();
+    void fetchAdminData();
     const interval = setInterval(fetchHealth, 5000);
     return () => clearInterval(interval);
-  }, [fetchMetrics, fetchHealth]);
+  }, [fetchMetrics, fetchHealth, fetchAdminData]);
 
   if (!isAdmin) {
     return (
@@ -129,10 +167,21 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
 
           {tab === 'audit' && (
             <div>
-              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Audit Logs (coming soon)</h3>
-              <div style={{ color: '#64748b', padding: 20, textAlign: 'center' }}>
-                Audit log viewer will be implemented in a future update.
-              </div>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Audit Logs</h3>
+              {auditLogs.length === 0 ? (
+                <div style={{ color: '#64748b', padding: 20, textAlign: 'center' }}>No audit events recorded.</div>
+              ) : auditLogs.map(log => (
+                <div key={log.id} style={{ padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 6 }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+                    <strong style={{ color: '#e2e8f0' }}>{log.action}</strong>
+                    <span style={{ color: '#64748b', fontSize: 11 }}>{log.resource || 'system'}</span>
+                    <span style={{ marginLeft: 'auto', color: '#64748b', fontSize: 10 }}>{log.created_at}</span>
+                  </div>
+                  <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 4 }}>
+                    {log.user_id || 'anonymous'}{log.details ? ` · ${log.details}` : ''}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
@@ -141,12 +190,15 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
               <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Plugin Manager</h3>
               {plugins.length === 0 ? (
                 <div style={{ color: '#64748b', padding: 20, textAlign: 'center' }}>
-                  No plugins loaded. Plugin management UI coming soon.
+                  No plugins loaded.
                 </div>
               ) : (
                 plugins.map(p => (
                   <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 6 }}>
-                    <div style={{ flex: 1 }}><strong style={{ color: '#e2e8f0' }}>{p.name}</strong></div>
+                    <div style={{ flex: 1 }}>
+                      <strong style={{ color: '#e2e8f0' }}>{p.name}</strong>
+                      <div style={{ color: '#64748b', fontSize: 10 }}>{p.version} · {p.toolCount} tools</div>
+                    </div>
                     <div style={{ fontSize: 11, color: p.enabled ? '#22c55e' : '#ef4444' }}>{p.enabled ? 'Enabled' : 'Disabled'}</div>
                   </div>
                 ))

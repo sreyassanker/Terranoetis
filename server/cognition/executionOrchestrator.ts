@@ -90,16 +90,28 @@ ${bestPath.map((n, i) => `  ${i}: ${n.action}`).join('\n')}
 Provide a concise, complete answer based on this reasoning.`;
 
     let result: string;
+    let synthesisFailed = false;
     try {
       result = await this.llmRouter.generateText(syntaxPrompt, { temperature: 0.2, maxTokens: 1024 });
     } catch {
-      result = `MCTS analysis: ${bestPath.map(n => n.action).join(' -> ')}`;
+      synthesisFailed = true;
+      result = '';
     }
 
-    const elapsed = Date.now() - start;
-    logger.info({ elapsed, confidence, pathLength: bestPath.length }, 'MCTS execution complete');
+    // Detect when the path is entirely fallback thoughts (LLM calls all failed)
+    const hasOnlyFallbacks = bestPath.length > 0 &&
+      bestPath.every(n => n.action.startsWith('fallback_thought') || n.action === 'root');
 
-    return { result, trace: bestPath, confidence, method: 'mcts' };
+    const elapsed = Date.now() - start;
+    logger.info({ elapsed, confidence, pathLength: bestPath.length, synthesisFailed, hasOnlyFallbacks }, 'MCTS execution complete');
+
+    return {
+      result: hasOnlyFallbacks ? '' : result,
+      trace: bestPath,
+      // When all nodes are fallbacks or synthesis failed, confidence should be 0 so the flow falls through to Gemini
+      confidence: (hasOnlyFallbacks || synthesisFailed || !result) ? 0 : confidence,
+      method: 'mcts',
+    };
   }
 
   async executeWithToT(query: string, context: Record<string, unknown>): Promise<ExecutionResult> {

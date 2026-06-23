@@ -181,7 +181,8 @@ GET  /api/space-debris                       — Orbital debris tracking
 GET  /api/nasa-dsn                           — Deep Space Network
 GET  /api/aurora                             — Aurora forecast
 GET  /api/iss                                — ISS position
-GET  /api/cameras[/:lat/:lon/:radius]        — CCTV cameras
+GET  /api/cameras[/:lat/:lon/:radius]        — Worldwide CCTV cameras (optional radius in km)
+GET  /api/cctv/worldwide                     — Worldwide CCTV camera payload
 GET  /api/sandbox/execute                    — Execute code sandbox
 GET  /api/chats                              — Chat sessions
 ```

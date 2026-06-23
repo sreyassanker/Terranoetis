@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as Cesium from 'cesium';
+import { authHeaders } from '@/context/AuthContext';
 
 interface Point3D { x: number; y: number; z: number }
 
@@ -20,6 +21,7 @@ interface ScenarioViewerProps {
   scenario: Scenario | null;
   counterfactualScenario?: Scenario | null;
   onClose: () => void;
+  onBack?: () => void;
 }
 
 type ColorMode = 'hazard' | 'intensity' | 'confidence';
@@ -31,15 +33,17 @@ const HAZARD_COLORS: Record<string, string> = {
   volcanic_eruption: '#d946ef',
   flood_inundation: '#3b82f6',
   tsunami_wave: '#06b6d4',
+  data_layer: '#10b981',
 };
 
-export default function ScenarioViewer({ viewer, scenario, counterfactualScenario, onClose }: ScenarioViewerProps) {
+export default function ScenarioViewer({ viewer, scenario, counterfactualScenario, onClose, onBack }: ScenarioViewerProps) {
   const [colorMode, setColorMode] = useState<ColorMode>('hazard');
   const [timeProgress, setTimeProgress] = useState(0);
   const [compareMode, setCompareMode] = useState(false);
   const [showInfo, setShowInfo] = useState(true);
   const primitivesRef = useRef<Cesium.Primitive[]>([]);
   const cfPrimitivesRef = useRef<Cesium.Primitive[]>([]);
+  const bboxEntitiesRef = useRef<Cesium.Entity[]>([]);
   const animFrameRef = useRef<number>(0);
 
   const clearPrimitives = useCallback((prims: Cesium.Primitive[]) => {
@@ -53,9 +57,35 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
   useEffect(() => {
     if (!viewer || !scenario) return;
     clearPrimitives(primitivesRef.current);
-    const prims = renderPointCloud(viewer, scenario.pointCloud, scenario.location, colorMode, 1);
+    const cv = (scenario.metadata?.colorValues as number[]) || undefined;
+    const vmin = (scenario.metadata?.valueMin as number) || undefined;
+    const vmax = (scenario.metadata?.valueMax as number) || undefined;
+    const prims = renderPointCloud(viewer, scenario.pointCloud, scenario.location, colorMode, 1, cv, vmin, vmax);
     primitivesRef.current = prims;
-    return () => { clearPrimitives(primitivesRef.current); };
+
+    // Draw bbox rectangle on globe for reference
+    for (const e of bboxEntitiesRef.current) viewer.entities.remove(e);
+    bboxEntitiesRef.current = [];
+    const bbox = scenario.metadata?.bbox as { latMin: number; latMax: number; lonMin: number; lonMax: number } | undefined;
+    if (bbox) {
+      const rect = viewer.entities.add({
+        rectangle: {
+          coordinates: Cesium.Rectangle.fromDegrees(bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax),
+          height: 0,
+          material: Cesium.Color.fromCssColorString('rgba(59,130,246,0.06)'),
+          outline: true,
+          outlineColor: Cesium.Color.fromCssColorString('rgba(59,130,246,0.3)'),
+          outlineWidth: 1,
+        },
+      });
+      bboxEntitiesRef.current.push(rect);
+    }
+
+    return () => {
+      clearPrimitives(primitivesRef.current);
+      if (viewer) for (const e of bboxEntitiesRef.current) viewer.entities.remove(e);
+      bboxEntitiesRef.current = [];
+    };
   }, [viewer, scenario, colorMode, clearPrimitives]);
 
   useEffect(() => {
@@ -64,22 +94,28 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
       return;
     }
     clearPrimitives(cfPrimitivesRef.current);
-    const prims = renderPointCloud(viewer, counterfactualScenario.pointCloud, counterfactualScenario.location, colorMode, 0.6);
+    const cv = (counterfactualScenario.metadata?.colorValues as number[]) || undefined;
+    const vmin = (counterfactualScenario.metadata?.valueMin as number) || undefined;
+    const vmax = (counterfactualScenario.metadata?.valueMax as number) || undefined;
+    const prims = renderPointCloud(viewer, counterfactualScenario.pointCloud, counterfactualScenario.location, colorMode, 0.6, cv, vmin, vmax);
     cfPrimitivesRef.current = prims;
     return () => { clearPrimitives(cfPrimitivesRef.current); };
   }, [viewer, counterfactualScenario, compareMode, colorMode, clearPrimitives]);
 
   useEffect(() => {
     if (!viewer || !scenario) return;
+    let cancelled = false;
     const startTime = Date.now();
     const duration = 5000;
     const animate = () => {
+      if (cancelled) return;
       const elapsed = Date.now() - startTime;
-      setTimeProgress(Math.min(1, elapsed / duration));
-      animFrameRef.current = requestAnimationFrame(animate);
+      const t = Math.min(1, elapsed / duration);
+      setTimeProgress(t);
+      if (t < 1) animFrameRef.current = requestAnimationFrame(animate);
     };
     animFrameRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animFrameRef.current);
+    return () => { cancelled = true; cancelAnimationFrame(animFrameRef.current); };
   }, [viewer, scenario]);
 
   if (!scenario) {
@@ -99,7 +135,10 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
       <div className="ai-header">
         <div className="social-icon-grad" style={{ background: HAZARD_COLORS[scenario.type] || '#60a5fa' }} />
         <div className="ai-title">{scenario.name}</div>
-        <button className="ai-close" onClick={onClose}>✕</button>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {onBack && <button className="ai-close" onClick={onBack} style={{ fontSize: 11, padding: '2px 10px', position: 'static', background: 'rgba(255,255,255,0.05)' }}>← Back</button>}
+          <button className="ai-close" onClick={onClose}>✕</button>
+        </div>
       </div>
 
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 140px)' }}>
@@ -132,6 +171,18 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
             <div className="info-row"><span className="info-key">Location</span><span className="info-val">{scenario.location.lat.toFixed(2)}°, {scenario.location.lon.toFixed(2)}°</span></div>
             <div className="info-row"><span className="info-key">Points</span><span className="info-val">{scenario.pointCloud.length}</span></div>
             <div className="info-row"><span className="info-key">Time</span><span className="info-val">{new Date(scenario.timestamp).toLocaleString()}</span></div>
+            {scenario.metadata?.variableName && <div className="info-row"><span className="info-key">Variable</span><span className="info-val">{String(scenario.metadata.variableName)}</span></div>}
+            {scenario.metadata?.valueMin !== undefined && (
+              <div className="info-row"><span className="info-key">Range</span><span className="info-val">{(scenario.metadata.valueMin as number).toFixed(2)} – {(scenario.metadata.valueMax as number).toFixed(2)}</span></div>
+            )}
+            {scenario.metadata?.dataSources && Array.isArray(scenario.metadata.dataSources) && (
+              <div className="info-row"><span className="info-key">Sources</span><span className="info-val" style={{ fontSize: 9 }}>{(scenario.metadata.dataSources as string[]).join(', ')}</span></div>
+            )}
+            {scenario.metadata?.stats && (
+              <div style={{ marginTop: 4, fontSize: 9, color: 'var(--text-dim)' }}>
+                <div>Stats: min {(scenario.metadata.stats as any).min}, max {(scenario.metadata.stats as any).max}, avg {(scenario.metadata.stats as any).avg}</div>
+              </div>
+            )}
           </div>
         )}
 
@@ -163,38 +214,38 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
   );
 }
 
-function renderPointCloud(viewer: Cesium.Viewer, cloud: Point3D[], center: { lat: number; lon: number }, colorMode: ColorMode, opacity: number): Cesium.Primitive[] {
+function renderPointCloud(viewer: Cesium.Viewer, cloud: Point3D[], _center: { lat: number; lon: number }, colorMode: ColorMode, opacity: number, colorValues?: number[], valueMin?: number, valueMax?: number): Cesium.Primitive[] {
   const primitives: Cesium.Primitive[] = [];
   const batchSize = 10000;
 
   for (let batch = 0; batch < cloud.length; batch += batchSize) {
     const batchCloud = cloud.slice(batch, batch + batchSize);
-    const positions = new Float64Array(batchCloud.length * 3);
-    const colors = new Uint8Array(batchCloud.length * 4);
+    const geom = new Cesium.PointPrimitiveCollection({ modelMatrix: Cesium.Matrix4.IDENTITY });
 
     for (let i = 0; i < batchCloud.length; i++) {
       const p = batchCloud[i];
-      const cartesian = Cesium.Cartesian3.fromDegrees(
-        center.lon + p.x * 10,
-        center.lat + p.y * 10,
-        p.z * 5000 + 1000,
-      );
-      positions[i * 3] = cartesian.x;
-      positions[i * 3 + 1] = cartesian.y;
-      positions[i * 3 + 2] = cartesian.z;
+      const r = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+      const lat = Math.asin(clamp(p.z / r, -1, 1)) * (180 / Math.PI);
+      const lon = Math.atan2(p.y, p.x) * (180 / Math.PI);
+      const height = 5000 + (1 - r) * 10000;
 
-      const c = getPointColor(p, i / batchCloud.length, colorMode);
-      colors[i * 4] = c[0];
-      colors[i * 4 + 1] = c[1];
-      colors[i * 4 + 2] = c[2];
-      colors[i * 4 + 3] = Math.round(opacity * 255);
-    }
+      let color: [number, number, number];
+      if (colorValues && valueMin !== undefined && valueMax !== undefined) {
+        const idx = batch + i;
+        const val = colorValues[idx];
+        if (val !== undefined && !isNaN(val)) {
+          const t = clamp((val - valueMin) / (valueMax - valueMin || 1), 0, 1);
+          color = hslToRgb(0.66 - t * 0.66, 1.0, 0.5);
+        } else {
+          color = [100, 100, 100];
+        }
+      } else {
+        color = getPointColor(p, i / batchCloud.length, colorMode);
+      }
 
-    const geom = new Cesium.PointPrimitiveCollection({ modelMatrix: Cesium.Matrix4.IDENTITY });
-    for (let i = 0; i < batchCloud.length; i++) {
       geom.add({
-        position: Cesium.Cartesian3.fromArray(Array.from(positions), i * 3) as unknown as Cesium.Cartesian3,
-        color: Cesium.Color.fromBytes(colors[i * 4], colors[i * 4 + 1], colors[i * 4 + 2], colors[i * 4 + 3]),
+        position: Cesium.Cartesian3.fromDegrees(lon, lat, height) as unknown as Cesium.Cartesian3,
+        color: Cesium.Color.fromBytes(...color, Math.round(opacity * 255)),
         pixelSize: 3,
       });
     }
@@ -203,6 +254,22 @@ function renderPointCloud(viewer: Cesium.Viewer, cloud: Point3D[], center: { lat
   }
 
   return primitives;
+}
+
+function clamp(v: number, min: number, max: number): number { return Math.max(min, Math.min(max, v)); }
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 1/6) { r = c; g = x; }
+  else if (h < 2/6) { r = x; g = c; }
+  else if (h < 3/6) { g = c; b = x; }
+  else if (h < 4/6) { g = x; b = c; }
+  else if (h < 5/6) { r = x; b = c; }
+  else { r = c; b = x; }
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
 }
 
 function getPointColor(p: Point3D, t: number, mode: ColorMode): [number, number, number] {
@@ -225,6 +292,25 @@ function getPointColor(p: Point3D, t: number, mode: ColorMode): [number, number,
   }
 }
 
-function exportScenario(_scenario: Scenario, _format: string): void {
-  alert(`Export as ${_format} — server endpoint would be called.`);
+function exportScenario(scenario: Scenario, format: string): void {
+  fetch(`/api/scenarios/export/${scenario.id}?format=${format}`, {
+    headers: { ...authHeaders() },
+  })
+    .then(r => {
+      if (!r.ok) throw new Error(`Export failed: ${r.status}`);
+      const filename = `${scenario.id}.${format === 'netcdf' ? 'nc.json' : format}`;
+      return r.blob().then(blob => { downloadBlob(blob, filename); });
+    })
+    .catch(err => alert(err.message));
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

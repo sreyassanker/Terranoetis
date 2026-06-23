@@ -1,5 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
+p { text-align: justify; }
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -145,8 +147,9 @@
     z-index: 100;
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    flex-wrap: wrap;
-    overflow: visible;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .brand {
@@ -199,8 +202,10 @@
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .status-pill {
@@ -1646,6 +1651,23 @@
     background: rgba(255,255,255,0.03);
     border: 1px solid var(--border);
   }
+  .study-list-item.active {
+    border-color: #22c55e;
+    background: rgba(34,197,94,0.08);
+  }
+  .study-list-item.inactive {
+    opacity: 0.5;
+  }
+  .study-active-badge {
+    font-size: 9px;
+    font-weight: 700;
+    color: #22c55e;
+    background: rgba(34,197,94,0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
 
   .study-list-color-picker {
     width: 20px;
@@ -2266,11 +2288,11 @@
   /* ── ALERTS PANEL ── */
   .alerts-panel {
     position: absolute;
-    top: 76px;
+    top: 80px;
     right: 16px;
     width: 340px;
-    max-height: calc(100vh - 92px);
-    z-index: 95;
+    max-height: calc(100vh - 96px);
+    z-index: 101;
     display: flex;
     flex-direction: column;
     overflow: hidden;

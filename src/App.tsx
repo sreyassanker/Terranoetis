@@ -14,6 +14,7 @@ import type { StudyAreaItem } from '@/rendering/studyArea';
 import {
   removeStudyAreaFromGlobe, setStudyAreaVisibility,
   flyToStudyAreaTopDown, filterDataEntitiesByStudyArea, updateStudyAreaStyle,
+  setStudyAreaActive, computeStudyAreaBbox, restoreHiddenEntities,
 } from '@/rendering/studyArea';
 import { addBaseImagery, applyTerrainProvider, crossfadeImagery } from '@/cesium/viewer.config';
 import { cinematicFlyTo, createEntityTracker, type TrackEntityType } from '@/cesium/camera.controller';
@@ -614,6 +615,59 @@ const CctvVideoPlayer = ({ src }: { src: string }) => {
 
 const RICH_MESSAGE_CACHE = new Map<string, string>();
 
+const TYPE_LABELS: Record<string, string> = {
+  earthquake_swarm: 'Earthquake Swarm', hurricane_landfall: 'Hurricane Landfall',
+  wildfire_spread: 'Wildfire Spread', volcanic_eruption: 'Volcanic Eruption',
+  flood_inundation: 'Flood Inundation', tsunami_wave: 'Tsunami Wave',
+  data_layer: 'Data Layer',
+};
+
+function adaptScenario(raw: any): any {
+  const severity = raw.validationScore > 0.8 ? 'extreme' : raw.validationScore > 0.6 ? 'high' : raw.validationScore > 0.4 ? 'medium' : 'low';
+  const lat = raw.params?.lat ?? raw.params?.epicenterLat ?? 0;
+  const lon = raw.params?.lon ?? raw.params?.epicenterLon ?? 0;
+  return {
+    id: raw.id,
+    type: raw.type,
+    name: (raw.dataSources?.length ? '🧬 ' : '') + (TYPE_LABELS[raw.type as string] || raw.type),
+    pointCloud: raw.pointCloud,
+    validationScore: raw.validationScore,
+    severity,
+    location: { lat, lon },
+    timestamp: raw.createdAt,
+    metadata: {
+      ...raw.metadata,
+      colorValues: raw.colorValues,
+      valueMin: raw.valueMin,
+      valueMax: raw.valueMax,
+      variableName: raw.variableName,
+      dataSources: raw.dataSources,
+      bbox: raw.bbox,
+    },
+  };
+}
+
+function mapFrontendParams(type: string, params: Record<string, unknown>): Record<string, unknown> {
+  const { lat, lon, magnitude = 5, depth = 10, spread = 0.1, intensity = 1, duration = 24, windSpeed = 50, populationDensity: _pd, ...rest } = params;
+  const base = { lat, lon };
+  switch (type) {
+    case 'earthquake_swarm':
+      return { ...base, depthRange: [Math.max(0.1, (depth as number) - 5), (depth as number) + 5], magnitudeRange: [Math.max(0, (magnitude as number) - 2), Math.min(9.5, (magnitude as number) + 2)], numEvents: Math.max(10, Math.round((spread as number) * 100)), timeWindow: duration, decayModel: 'omori' };
+    case 'hurricane_landfall':
+      return { ...base, category: Math.min(7, Math.max(1, Math.round((magnitude as number) / 1.5))), forwardSpeed: windSpeed, pressure: Math.round(1050 - (intensity as number) * 10), radius: Math.max(10, (spread as number) * 200 + 10), landfallTime: duration };
+    case 'wildfire_spread':
+      return { ...base, area: Math.max(100, (spread as number) * 5000 + 500), windSpeed: windSpeed, windDir: 270, humidity: Math.max(0, Math.min(100, 100 - (depth as number))), fuelType: 'forest', duration };
+    case 'volcanic_eruption':
+      return { ...base, vei: Math.min(7, Math.max(1, Math.round((magnitude as number) / 2))), ashHeight: Math.max(1000, (intensity as number) * 2000), windDir: 260, duration };
+    case 'flood_inundation':
+      return { ...base, rainfall: Math.max(10, (intensity as number) * 100), catchmentArea: Math.max(100, (spread as number) * 5000), soilSaturation: Math.min(1, Math.max(0, (depth as number) / 100)), duration };
+    case 'tsunami_wave':
+      return { epicenterLat: lat, epicenterLon: lon, magnitude, depth, waveHeight: Math.max(1, (intensity as number) * 5), arrivalTimes: [30, 45, 60, 90, 120] };
+    default:
+      return { ...base, ...params };
+  }
+}
+
 function richRender(text: string): string {
   const cached = RICH_MESSAGE_CACHE.get(text);
   if (cached) return cached;
@@ -863,6 +917,15 @@ export default function App() {
   const [selectedScenario, setSelectedScenario] = useState<any>(null);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [scenarioGalleryScenarios, setScenarioGalleryScenarios] = useState<any[]>([]);
+  const [activeStudyAreaId, setActiveStudyAreaId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!showScenarioGallery) return;
+    fetch('/api/scenarios/search', { headers: { ...authHeaders() } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.scenarios) setScenarioGalleryScenarios(data.scenarios.map(adaptScenario));
+      }).catch(() => {});
+  }, [showScenarioGallery]);
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
   const [agentEnvironmentId, setAgentEnvironmentId] = useState<string | null>(null);
   const agentInteractionIdRef = useRef<string | null>(null);
@@ -894,11 +957,27 @@ export default function App() {
   const chatSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const [showChatHistory, setShowChatHistory] = useState(false);
-  // Phase 8: Session sharing via URL hash
+  // Phase 8: Session sharing. New shares store session contents locally and
+  // place only an opaque reference in the URL so operational chat text is not
+  // continuously leaked through address bars, browser history, screenshots, or logs.
   useEffect(() => {
-    // Restore session from URL hash on mount
     const hash = window.location.hash.slice(1);
-    if (hash.startsWith('session=')) {
+    if (hash.startsWith('sessionRef=')) {
+      try {
+        const id = decodeURIComponent(hash.slice('sessionRef='.length));
+        const raw = window.localStorage.getItem(`liveglobe.sharedSession.${id}`);
+        if (!raw) return;
+        const session = JSON.parse(raw);
+        if (Array.isArray(session.messages)) {
+          setAiMessages(session.messages.map((m: {id?:number;role:string;content:string;type?:string}) => ({...m, id: m.id || nextAiMsgIdRef.current++})));
+        }
+        if (session.envId) setAgentEnvironmentId(session.envId);
+        if (session.wsId) setSandboxWorkspaceId(session.wsId);
+        if (session.input) setAiInput(session.input);
+      } catch { /* ignore session parse */ }
+    } else if (hash.startsWith('session=')) {
+      // Backward compatibility for old links only; new links never encode
+      // message contents in the URL.
       try {
         const session = JSON.parse(decodeURIComponent(hash.slice(8)));
         if (Array.isArray(session.messages)) {
@@ -910,21 +989,21 @@ export default function App() {
       } catch { /* ignore session parse */ }
     }
   }, []);
-  useEffect(() => {
-    // Encode recent session to URL hash (debounced)
-    const timer = setTimeout(() => {
-      const recent = aiMessages.slice(-10);
-      const lastAssistant = recent.filter(m => m.role === 'assistant' && m.type !== 'error').slice(-1);
-      if (lastAssistant.length > 0) {
-        const session = { messages: recent, ts: Date.now() };
-        try {
-          const encoded = encodeURIComponent(JSON.stringify(session));
-          window.location.hash = `session=${encoded}`;
-        } catch { /* ignore */ }
-      }
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [aiMessages]);
+
+  const buildSessionShareLink = useCallback(() => {
+    const id = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const session = {
+      messages: aiMessages.slice(-10),
+      envId: agentEnvironmentId,
+      wsId: sandboxWorkspaceId,
+      input: aiInput,
+      ts: Date.now(),
+    };
+    window.localStorage.setItem(`liveglobe.sharedSession.${id}`, JSON.stringify(session));
+    const url = new URL(window.location.href);
+    url.hash = `sessionRef=${encodeURIComponent(id)}`;
+    return url.toString();
+  }, [agentEnvironmentId, aiInput, aiMessages, sandboxWorkspaceId]);
 
   // Load chat list on mount
   useEffect(() => {
@@ -1001,7 +1080,6 @@ export default function App() {
   const studyAreasRef = useRef<StudyAreaItem[]>([]);
   const [studyAreas, setStudyAreas] = useState<StudyAreaItem[]>([]);
   const [studyDrawing, setStudyDrawing] = useState(false);
-  const [clipToStudyArea, setClipToStudyArea] = useState(false);
   const drawerRef = useRef<any>(null);
 
   const aiApiType = useMemo(() => resolveAiProvider(apiVault), [apiVault]);
@@ -1383,6 +1461,7 @@ export default function App() {
       );
     }
   }, []);
+
 
   useEffect(() => {
     const v = viewerRef.current;
@@ -3759,12 +3838,24 @@ export default function App() {
       return;
     }
     try {
-      const data = await apiGet<any[]>('/space-debris');
+      const data = await apiGet<{
+        items: any[];
+        available: boolean;
+        stale?: boolean;
+        message?: string;
+      }>('/space-debris');
       if (!isLayerEnabled('space_debris')) return;
-      const ents = addSpaceDebrisEntities(viewer, data);
+      const ents = addSpaceDebrisEntities(viewer, data.items || []);
       entityStoreRef.current['space_debris'] = ents;
       viewer.scene.requestRender();
-      showNotification(`Loaded ${ents.length} space debris objects`, 'success');
+      if (!data.available) {
+        showNotification(data.message || 'Space debris feed unavailable', 'warning');
+      } else {
+        showNotification(
+          `${data.stale ? 'Showing' : 'Loaded'} ${ents.length} space debris objects`,
+          data.stale ? 'warning' : 'success',
+        );
+      }
     } catch (err) {
       recordFeedError('space debris', err);
       showNotification('Space debris feed unavailable', 'warning');
@@ -4071,10 +4162,18 @@ export default function App() {
       const r = 15000 + pt.count * 5000;
       heatmapEntities.push(viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(pt.lon, pt.lat),
+        name: 'Seismic Heatmap',
         ellipse: {
           semiMinorAxis: r, semiMajorAxis: r,
           material: Cesium.Color.fromCssColorString(getHeatmapColor(pt.count / maxC)).withAlpha(alpha),
           outline: false, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        },
+        properties: {
+          layer: 'heatmap',
+          title: 'Seismic Heatmap',
+          lat: pt.lat,
+          lon: pt.lon,
+          count: pt.count,
         },
       }));
     }
@@ -5540,11 +5639,17 @@ export default function App() {
           };
           const area: StudyAreaItem = {
             id: `study_area_${Date.now()}`, name, type: typeLabel as any,
-            visible: true, entity, positions, geojson, color, width: 3,
+            visible: true, active: false, entity, positions, geojson, color, width: 3,
           };
           updateStudyAreaStyle(v, area, color, 3);
+          // Deactivate all other areas, activate this one
+          studyAreasRef.current.forEach(a => {
+            if (a.id !== area.id && a.active) setStudyAreaActive(v, a, false);
+          });
+          setStudyAreaActive(v, area, true);
           studyAreasRef.current = [...studyAreasRef.current, area];
           setStudyAreas(studyAreasRef.current);
+          setActiveStudyAreaId(area.id);
           flyToStudyAreaTopDown(v, area);
           setStudyDrawing(false);
           v.scene.requestRender();
@@ -5565,29 +5670,29 @@ export default function App() {
   }, []);
 
   /* ═════════════════════════════════════════════════════════════════
-     CLIP TO STUDY AREA
+     AUTO CLIP TO ACTIVE STUDY AREA
      ═════════════════════════════════════════════════════════════════ */
 
-  const clipEffectActiveRef = useRef(false);
+  const clipTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     const v = viewerRef.current;
     if (!v) return;
-    if (clipToStudyArea && studyAreasRef.current.length > 0) {
-      clipEffectActiveRef.current = true;
-      const first = studyAreasRef.current[0];
-      flyToStudyAreaTopDown(v, first);
-      setTimeout(() => {
-        if (clipEffectActiveRef.current) {
-          filterDataEntitiesByStudyArea(v, studyAreasRef.current, true);
-        }
-      }, 1400);
+    if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
+    if (activeStudyAreaId && layers.some(l => l.on)) {
+      clipTimeoutRef.current = setTimeout(() => {
+        filterDataEntitiesByStudyArea(v, studyAreasRef.current, true, activeStudyAreaId);
+      }, 500);
     } else {
-      clipEffectActiveRef.current = false;
-      filterDataEntitiesByStudyArea(v, [], false);
+      restoreHiddenEntities(v);
+      layers.filter(l => !l.on).forEach(l => {
+        const ents = entityStoreRef.current[l.id];
+        if (ents) ents.forEach(e => { if (e) e.show = false; });
+      });
       v.scene.requestRender();
     }
-  }, [clipToStudyArea, studyAreas]);
+    return () => { if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current); };
+  }, [activeStudyAreaId, layers]);
 
   /* ═════════════════════════════════════════════════════════════════
      ZOOM
@@ -6177,6 +6282,7 @@ export default function App() {
           <button className={`btn-icon ${showSettings ? 'active' : ''}`} onClick={() => setShowSettings(p => !p)} title="Settings">⚙️</button>
           <button className={`btn-icon ${showScenarioGallery ? 'active' : ''}`} onClick={() => setShowScenarioGallery(p => !p)} title="Scenarios">🌋</button>
           <button className={`btn-icon ${showScenarioEditor ? 'active' : ''}`} onClick={() => setShowScenarioEditor(p => !p)} title="New Scenario">🎬</button>
+
           <button className={`btn-icon ${showCinematicDirector ? 'active' : ''}`} onClick={() => setShowCinematicDirector(p => !p)} title="Cinematic Director">🎥</button>
           <button className={`btn-icon ${showSpatialSketching ? 'active' : ''}`} onClick={() => setShowSpatialSketching(p => !p)} title="Spatial Sketch">✏️</button>
           <button className="btn-icon" onClick={takeSnapshot} title="Snapshot"><Camera size={16} /></button>
@@ -6304,14 +6410,26 @@ export default function App() {
           studyAreasRef.current = next;
           setStudyAreas(next);
         }}
+        activeStudyAreaId={activeStudyAreaId}
+        onActivate={(id: string) => {
+          const v = viewerRef.current;
+          if (!v) return;
+          if (!id) {
+            setActiveStudyAreaId(null);
+            return;
+          }
+          studyAreasRef.current.forEach(a => {
+            if (a.id === id) setStudyAreaActive(v, a, true);
+            else if (a.active) setStudyAreaActive(v, a, false);
+          });
+          setActiveStudyAreaId(id);
+        }}
         show={showStudyArea}
         onClose={() => { stopStudyDraw(); setShowStudyArea(false); }}
         onStartDraw={startStudyDraw}
         onStopDraw={stopStudyDraw}
         drawing={studyDrawing}
         setDrawing={setStudyDrawing}
-        clipToStudyArea={clipToStudyArea}
-        setClipToStudyArea={setClipToStudyArea}
       />
 
       {/* AI Panel */}
@@ -6528,7 +6646,7 @@ export default function App() {
             🔊 Speak
           </button>
           <button className="sandbox-file-btn" style={{fontSize:10,display:'inline-flex',alignItems:'center',gap:4}}
-            onClick={() => { navigator.clipboard.writeText(window.location.href).catch(() => {}); setShowShareDialog(true); setTimeout(() => setShowShareDialog(false), 1500); }}
+            onClick={() => { navigator.clipboard.writeText(buildSessionShareLink()).catch(() => {}); setShowShareDialog(true); setTimeout(() => setShowShareDialog(false), 1500); }}
             title="Copy session link to clipboard">
             🔗 Share session
           </button>
@@ -7142,15 +7260,14 @@ export default function App() {
       <LoginModal />
 
       {/* Scenario Gallery */}
-      <div className={`alerts-panel glass-panel ${showScenarioGallery ? 'open' : ''}`}
-        style={{ position: 'fixed', top: 52, right: 48, zIndex: 1000 }}>
+      {showScenarioGallery && (
         <ScenarioGallery
           scenarios={scenarioGalleryScenarios}
           onSelect={(id) => { setSelectedScenarioId(id); setShowScenarioGallery(false); }}
           onCreateNew={() => { setShowScenarioGallery(false); setShowScenarioEditor(true); }}
           onClose={() => setShowScenarioGallery(false)}
         />
-      </div>
+      )}
 
       {/* Scenario Viewer */}
       {selectedScenario && (
@@ -7158,24 +7275,37 @@ export default function App() {
           viewer={viewerRef.current}
           scenario={selectedScenario}
           onClose={() => setSelectedScenario(null)}
+          onBack={() => { setSelectedScenario(null); setShowScenarioEditor(true); }}
         />
       )}
 
-      {/* Scenario Editor */}
-      {showScenarioEditor && (
+      {/* Scenario Editor (always mounted to preserve state) */}
+      <div style={{ display: showScenarioEditor ? '' : 'none' }}>
         <ScenarioEditor
           onClose={() => setShowScenarioEditor(false)}
-          onGenerate={(type, params) => {
+          onGenerateFromBbox={async (hazardType, bbox, params) => {
             setShowScenarioEditor(false);
-            fetch('/api/scenarios/generate', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ type, params }),
-            }).then(r => r.json()).then(data => {
-              if (data.scenario) setSelectedScenario(data.scenario);
-            }).catch(() => {});
+            try {
+              const resp = await fetch('/api/scenarios/generate-from-bbox', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                body: JSON.stringify({ hazardType, bbox, params }),
+              });
+              if (!resp.ok) throw new Error(resp.status === 401 ? 'Not logged in' : 'Generation failed');
+              const data = await resp.json();
+              if (data.scenario) setSelectedScenario(adaptScenario(data.scenario));
+            } catch (err: any) {
+              setAiMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: `⚠️ Real-data scenario failed: ${err.message}`, type: 'error' }]);
+            }
           }}
+          onImport={(scenario) => {
+            setShowScenarioEditor(false);
+            setSelectedScenario(scenario);
+          }}
+          studyAreas={studyAreas}
+          activeStudyAreaId={activeStudyAreaId}
         />
-      )}
+      </div>
 
       {/* Cinematic Director */}
       {showCinematicDirector && (
@@ -7192,12 +7322,19 @@ export default function App() {
           onClose={() => setShowSpatialSketching(false)}
           onGenerateScenario={(type, params) => {
             setShowSpatialSketching(false);
+            const mappedParams = mapFrontendParams(type, params);
             fetch('/api/scenarios/generate', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ type, params }),
-            }).then(r => r.json()).then(data => {
-              if (data.scenario) setSelectedScenario(data.scenario);
-            }).catch(() => {});
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...authHeaders() },
+              body: JSON.stringify({ type, params: mappedParams }),
+            }).then(r => {
+              if (!r.ok) throw new Error(r.status === 401 ? 'Not logged in' : 'Generation failed');
+              return r.json();
+            }).then(data => {
+              if (data.scenario) setSelectedScenario(adaptScenario(data.scenario));
+            }).catch(err => {
+              setAiMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: `⚠️ Scenario generation failed: ${err.message}`, type: 'error' }]);
+            });
           }}
         />
       )}

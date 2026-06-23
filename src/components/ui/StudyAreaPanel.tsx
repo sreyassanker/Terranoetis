@@ -21,14 +21,14 @@ interface StudyAreaPanelProps {
   onStopDraw: () => void;
   drawing: boolean;
   setDrawing: React.Dispatch<React.SetStateAction<boolean>>;
-  clipToStudyArea: boolean;
-  setClipToStudyArea: React.Dispatch<React.SetStateAction<boolean>>;
+  activeStudyAreaId: string | null;
+  onActivate: (id: string) => void;
 }
 
 export default function StudyAreaPanel({
   viewer, areas, setAreas, show, onClose,
   onStartDraw, onStopDraw, drawing, setDrawing,
-  clipToStudyArea, setClipToStudyArea,
+  activeStudyAreaId, onActivate,
 }: StudyAreaPanelProps) {
   const [tab, setTab] = useState<TabId>('draw');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -46,13 +46,14 @@ export default function StudyAreaPanel({
         const ds = await loadGeoJsonToGlobe(viewer, geojson, name, '#22c55e');
         const area: StudyAreaItem = {
           id: generateAreaId(), name, type: format === 'shapefile' ? 'shapefile' : 'geojson',
-          visible: true, dataSource: ds, geojson, color: '#22c55e', width: 3,
+          visible: true, active: false, dataSource: ds, geojson, color: '#22c55e', width: 3,
         };
         updateStudyAreaStyle(viewer, area, '#22c55e', 3);
         newAreas.push(area);
         flyToStudyAreaTopDown(viewer, area);
       }
       setAreas(prev => [...prev, ...newAreas]);
+      if (newAreas.length > 0) onActivate(newAreas[0].id);
       const totalFeatures = results.reduce((s, r) => s + r.geojson.features.length, 0);
       const names = results.map(r => r.name).join(', ');
       setUploadStatus(`Loaded ${totalFeatures} features from ${names}`);
@@ -74,7 +75,8 @@ export default function StudyAreaPanel({
   const deleteArea = useCallback((item: StudyAreaItem) => {
     if (viewer) removeStudyAreaFromGlobe(viewer, item);
     setAreas(prev => prev.filter(a => a.id !== item.id));
-  }, [viewer, setAreas]);
+    if (item.id === activeStudyAreaId) onActivate('');
+  }, [viewer, setAreas, activeStudyAreaId, onActivate]);
 
   const handleExport = useCallback(() => {
     const geojson = exportToGeoJSON(areas);
@@ -175,59 +177,62 @@ export default function StudyAreaPanel({
         {tab === 'manage' && (
           <div className="study-section">
             <div className="study-section-title">Study Areas ({areas.length})</div>
-            {areas.length > 0 && (
-              <div className="study-clip-bar">
-                <label className="study-clip-label">
-                  <input type="checkbox" checked={clipToStudyArea}
-                    onChange={e => setClipToStudyArea(e.target.checked)} />
-                  <span>Show data only within active areas</span>
-                </label>
-              </div>
-            )}
             {areas.length === 0 ? (
               <div className="study-empty">No study areas yet. Upload or draw one.</div>
             ) : (
               <div className="study-list">
-                {areas.map(a => (
-                  <div key={a.id} className="study-list-item">
-                    <input type="color" className="study-list-color-picker"
-                      value={a.color}
-                      onChange={e => {
-                        const nc = e.target.value;
-                        setAreas((prev: StudyAreaItem[]) => prev.map(area =>
-                          area.id === a.id ? { ...area, color: nc } : area
-                        ));
-                        if (viewer) updateStudyAreaStyle(viewer, a, nc, a.width);
-                      }}
-                      title="Change outline color" />
-                    <div className="study-list-info">
-                      <div className="study-list-name">{a.name}</div>
-                      <div className="study-list-type">{a.type}</div>
-                    </div>
-                    <div className="study-list-width-wrap">
-                      <input type="number" className="study-list-width-input"
-                        min={0.2} max={10} step={0.2}
-                        value={a.width}
+                {areas.map(a => {
+                  const isActive = a.id === activeStudyAreaId;
+                  return (
+                    <div key={a.id} className={`study-list-item ${isActive ? 'active' : 'inactive'}`}
+                      onClick={() => { if (!isActive) onActivate(a.id); }}
+                      style={{ cursor: 'pointer', opacity: isActive ? 1 : 0.5 }}>
+                      <input type="color" className="study-list-color-picker"
+                        value={a.color}
                         onChange={e => {
-                          const nw = Math.max(0.2, Math.min(10, parseFloat(e.target.value) || 0.2));
+                          const nc = e.target.value;
+                          e.stopPropagation();
                           setAreas((prev: StudyAreaItem[]) => prev.map(area =>
-                            area.id === a.id ? { ...area, width: nw } : area
+                            area.id === a.id ? { ...area, color: nc } : area
                           ));
-                          if (viewer) updateStudyAreaStyle(viewer, a, a.color, nw);
+                          if (viewer) updateStudyAreaStyle(viewer, a, nc, a.width);
                         }}
-                        title="Outline width (pt)" />
-                      <span className="study-list-width-label">pt</span>
+                        title="Change outline color" />
+                      <div className="study-list-info">
+                        <div className="study-list-name">{a.name}</div>
+                        <div className="study-list-type">{a.type}</div>
+                      </div>
+                      {isActive && <span className="study-active-badge">Active</span>}
+                      <div className="study-list-width-wrap">
+                        <input type="number" className="study-list-width-input"
+                          min={0.2} max={10} step={0.2}
+                          value={a.width}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => {
+                            const nw = Math.max(0.2, Math.min(10, parseFloat(e.target.value) || 0.2));
+                            setAreas((prev: StudyAreaItem[]) => prev.map(area =>
+                              area.id === a.id ? { ...area, width: nw } : area
+                            ));
+                            if (viewer) updateStudyAreaStyle(viewer, a, a.color, nw);
+                          }}
+                          title="Outline width (pt)" />
+                        <span className="study-list-width-label">pt</span>
+                      </div>
+                      <button className={`study-list-btn ${a.visible ? '' : 'muted'}`}
+                        onClick={e => { e.stopPropagation(); toggleVisibility(a.id); }} title={a.visible ? 'Hide' : 'Show'}>
+                        {a.visible ? '👁' : '👁‍🗨'}
+                      </button>
+                      <button className="study-list-btn" onClick={e => {
+                        e.stopPropagation();
+                        if (viewer) flyToStudyAreaTopDown(viewer, a);
+                      }} title="Fly to">🎯</button>
+                      <button className="study-list-btn delete" onClick={e => {
+                        e.stopPropagation();
+                        deleteArea(a);
+                      }} title="Delete">🗑</button>
                     </div>
-                    <button className={`study-list-btn ${a.visible ? '' : 'muted'}`}
-                      onClick={() => toggleVisibility(a.id)} title={a.visible ? 'Hide' : 'Show'}>
-                      {a.visible ? '👁' : '👁‍🗨'}
-                    </button>
-                    <button className="study-list-btn" onClick={() => {
-                      if (viewer) flyToStudyAreaTopDown(viewer, a);
-                    }} title="Fly to">🎯</button>
-                    <button className="study-list-btn delete" onClick={() => deleteArea(a)} title="Delete">🗑</button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

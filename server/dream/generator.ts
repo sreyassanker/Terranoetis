@@ -127,38 +127,68 @@ export class SyntheticScenarioGenerator {
   persistScenario(scenario: SyntheticScenario): void {
     try {
       const db = getDb();
-      for (const event of scenario.events) {
+      const saveScenario = db.transaction(() => {
         db.prepare(`
-          INSERT INTO synthetic_events (event_id, scenario_id, event_type, lat, lon, radius_km, magnitude, parameters_json, is_real, created_at)
+          INSERT INTO synthetic_scenarios (
+            scenario_id, name, events_json, fork_id, predicted_outcome,
+            actual_outcome, prediction_accuracy, evaluated_at, lessons_learned_json, created_at
+          )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(scenario_id) DO UPDATE SET
+            name = excluded.name,
+            events_json = excluded.events_json,
+            fork_id = excluded.fork_id,
+            predicted_outcome = excluded.predicted_outcome,
+            actual_outcome = excluded.actual_outcome,
+            prediction_accuracy = excluded.prediction_accuracy,
+            evaluated_at = excluded.evaluated_at,
+            lessons_learned_json = excluded.lessons_learned_json
         `).run(
-          event.eventId,
           scenario.scenarioId,
-          event.type,
-          event.region.lat,
-          event.region.lon,
-          event.region.radiusKm,
-          event.magnitude,
-          JSON.stringify(event.parameters),
-          0,
-          new Date(event.createdAt).toISOString()
+          scenario.name,
+          JSON.stringify(scenario.events.map(e => e.eventId)),
+          scenario.forkId,
+          scenario.predictedOutcome,
+          scenario.actualOutcome,
+          scenario.predictionAccuracy,
+          scenario.evaluatedAt ? new Date(scenario.evaluatedAt).toISOString() : null,
+          JSON.stringify(scenario.lessonsLearned),
+          new Date().toISOString()
         );
-      }
-      db.prepare(`
-        INSERT INTO synthetic_scenarios (scenario_id, name, events_json, fork_id, predicted_outcome, actual_outcome, prediction_accuracy, evaluated_at, lessons_learned_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        scenario.scenarioId,
-        scenario.name,
-        JSON.stringify(scenario.events.map(e => e.eventId)),
-        scenario.forkId,
-        scenario.predictedOutcome,
-        scenario.actualOutcome,
-        scenario.predictionAccuracy,
-        scenario.evaluatedAt ? new Date(scenario.evaluatedAt).toISOString() : null,
-        JSON.stringify(scenario.lessonsLearned),
-        new Date().toISOString()
-      );
+
+        for (const event of scenario.events) {
+          db.prepare(`
+            INSERT INTO synthetic_events (
+              event_id, scenario_id, event_type, lat, lon, radius_km,
+              magnitude, parameters_json, is_real, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(event_id) DO UPDATE SET
+              scenario_id = excluded.scenario_id,
+              event_type = excluded.event_type,
+              lat = excluded.lat,
+              lon = excluded.lon,
+              radius_km = excluded.radius_km,
+              magnitude = excluded.magnitude,
+              parameters_json = excluded.parameters_json,
+              is_real = excluded.is_real,
+              created_at = excluded.created_at
+          `).run(
+            event.eventId,
+            scenario.scenarioId,
+            event.type,
+            event.region.lat,
+            event.region.lon,
+            event.region.radiusKm,
+            event.magnitude,
+            JSON.stringify(event.parameters),
+            0,
+            new Date(event.createdAt).toISOString()
+          );
+        }
+      });
+
+      saveScenario();
     } catch (e) {
       console.error('[DREAM] Failed to persist scenario:', e);
     }

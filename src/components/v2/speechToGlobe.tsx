@@ -53,49 +53,6 @@ const SpeechToGlobe: React.FC<SpeechToGlobeProps> = ({ viewer, onNavigate }) => 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>(0);
 
-  const startListening = useCallback(async () => {
-    try {
-      audioRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (!SpeechRecognition) {
-        setTranscript({ text: 'Speech recognition not available', confidence: 0, isFinal: true });
-        return;
-      }
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      recognition.onresult = (event: any) => {
-        let finalText = '';
-        let interimText = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const result = event.results[i];
-          if (result.isFinal) {
-            finalText += result[0].transcript;
-            processCommand(result[0].transcript);
-          } else {
-            interimText += result[0].transcript;
-          }
-        }
-        setTranscript({
-          text: finalText || interimText,
-          confidence: event.results[event.results.length - 1]?.[0]?.confidence || 0,
-          isFinal: !!finalText,
-        });
-      };
-
-      recognition.onerror = () => setIsListening(false);
-      recognition.start();
-      recognitionRef.current = recognition;
-      setIsListening(true);
-
-      drawWaveform();
-    } catch {
-      setTranscript({ text: 'Microphone access denied', confidence: 0, isFinal: true });
-    }
-  }, [onNavigate]);
-
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
       recognitionRef.current.stop();
@@ -154,6 +111,49 @@ const SpeechToGlobe: React.FC<SpeechToGlobeProps> = ({ viewer, onNavigate }) => 
     };
     draw();
   }, [isListening]);
+
+  const startListening = useCallback(async () => {
+    try {
+      audioRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        setTranscript({ text: 'Speech recognition not available', confidence: 0, isFinal: true });
+        return;
+      }
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event: any) => {
+        let finalText = '';
+        let interimText = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          if (result.isFinal) {
+            finalText += result[0].transcript;
+            processCommand(result[0].transcript);
+          } else {
+            interimText += result[0].transcript;
+          }
+        }
+        setTranscript({
+          text: finalText || interimText,
+          confidence: event.results[event.results.length - 1]?.[0]?.confidence || 0,
+          isFinal: !!finalText,
+        });
+      };
+
+      recognition.onerror = () => setIsListening(false);
+      recognition.start();
+      recognitionRef.current = recognition;
+      setIsListening(true);
+
+      drawWaveform();
+    } catch {
+      setTranscript({ text: 'Microphone access denied', confidence: 0, isFinal: true });
+    }
+  }, [drawWaveform, processCommand]);
 
   useEffect(() => {
     return () => {
