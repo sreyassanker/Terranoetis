@@ -43,8 +43,8 @@ describe('Memory flow: query → store → search → cache', () => {
   it('records query as episode then search finds it', async () => {
     const { EpisodicMemory } = await import('../../memory');
     const mem = new EpisodicMemory('u1');
-    mem.add({ userId: 'u1', query: 'Show me earthquakes near Japan', response: 'Here are the latest earthquakes...', intentType: 'scan', location: { lat: 35, lon: 139 } });
-    mem.add({ userId: 'u1', query: 'What is the weather in London?', response: 'London weather is cloudy...', intentType: 'weather' });
+    mem.add({ userId: 'u1', query: 'Show me earthquakes near Japan', response: 'Here are the latest earthquakes...', intentType: 'scan', location: { lat: 35, lon: 139 }, layersToggled: [] });
+    mem.add({ userId: 'u1', query: 'What is the weather in London?', response: 'London weather is cloudy...', intentType: 'weather', layersToggled: [] });
     const results = mem.search('Japan earthquakes', 5);
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0].query).toContain('Japan');
@@ -52,7 +52,7 @@ describe('Memory flow: query → store → search → cache', () => {
 
   it('cache hit on repeat query', async () => {
     const { SemanticCache } = await import('../../memory');
-    const mockEmb = { embed: vi.fn().mockResolvedValue(new Float32Array(768)) } as unknown;
+    const mockEmb = { embed: vi.fn().mockResolvedValue(new Float32Array(768)) } as unknown as import('../../embedding').EmbeddingEngine;
     const cache = new SemanticCache(mockEmb);
     await cache.set('repeated query', 'cached response');
     expect(await cache.get('repeated query')).toBe('cached response');
@@ -61,7 +61,7 @@ describe('Memory flow: query → store → search → cache', () => {
 
   it('cache miss returns undefined', async () => {
     const { SemanticCache } = await import('../../memory');
-    const mockEmb = { embed: vi.fn().mockResolvedValue(new Float32Array(768)) } as unknown;
+    const mockEmb = { embed: vi.fn().mockResolvedValue(new Float32Array(768)) } as unknown as import('../../embedding').EmbeddingEngine;
     const cache = new SemanticCache(mockEmb);
     expect(await cache.get('nonexistent query')).toBeUndefined();
   });
@@ -75,7 +75,7 @@ describe('Fact extraction and search', () => {
         .mockResolvedValueOnce(new Float32Array(768).fill(0.1))  // store fact 1
         .mockResolvedValueOnce(new Float32Array(768).fill(0.1))  // store fact 2
         .mockResolvedValueOnce(new Float32Array(768).fill(0.1)), // search
-    } as unknown;
+    } as unknown as import('../../embedding').EmbeddingEngine;
     const fm = new FactManager(embedder);
     await fm.storeFact('u1', 'Japan is in the Pacific Ring of Fire', 'ep1');
     await fm.storeFact('u1', 'Tokyo is the capital of Japan', 'ep2');

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 describe('perUserRateLimiter', () => {
-  let perUserRateLimiter: (limit: number, windowMs: number) => (req: Record<string, unknown>, res: Record<string, unknown>, next: () => void) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let perUserRateLimiter: any;
 
   beforeEach(async () => {
     vi.resetModules();

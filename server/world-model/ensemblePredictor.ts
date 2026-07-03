@@ -383,7 +383,8 @@ Maximum 3 predictions. Base on earth science knowledge.`;
   updateWeights(domain: string, source: keyof ModelWeight, delta: number): void {
     const weight = this.getEnsembleWeight(domain);
     const oldVal = weight[source] as number;
-    (weight as Record<string, unknown>)[source] = Math.max(0.05, Math.min(0.8, oldVal + delta));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (weight as any)[source] = Math.max(0.05, Math.min(0.8, oldVal + delta));
 
     // Normalize
     const total = weight.physicsWeight + weight.statisticalWeight + weight.patternWeight + weight.causalWeight + weight.llmWeight;
@@ -404,7 +405,7 @@ Maximum 3 predictions. Base on earth science knowledge.`;
       const rows = db.prepare("SELECT * FROM config WHERE key LIKE 'ensemble_weight_%'").all() as Array<{ key: string; value: string }>;
       for (const row of rows) {
         const domain = row.key.replace('ensemble_weight_', '');
-        this.weights.set(domain, tryJsonParse(row.value, 0) as number);
+        this.weights.set(domain, tryJsonParse(row.value) as unknown as ModelWeight);
       }
     } catch { /* no weights yet */ }
   }

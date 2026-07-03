@@ -171,16 +171,7 @@ export class CounterfactualGraph {
         return this.earthGen.generate(conditioning as ConditioningVector, 256);
       } catch { /* fall through */ }
     }
-    const n = 128;
-    const cloud: PointCloud = [];
-    for (let i = 0; i < n; i++) {
-      cloud.push({
-        x: (Math.random() - 0.5) * 0.3,
-        y: (Math.random() - 0.5) * 0.3,
-        z: (Math.random() - 0.5) * 0.1,
-      });
-    }
-    return cloud;
+    return [];
   }
 
   private computeDeltas(original: CounterfactualGraphSnapshot, counterfactual: CounterfactualGraphSnapshot): CounterfactualDelta[] {

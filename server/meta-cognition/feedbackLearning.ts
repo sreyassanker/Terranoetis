@@ -33,7 +33,11 @@ export class FeedbackLearning {
   private explorationRate = 0.1;
   private totalFeedback = 0;
 
-  constructor(private feedbackManager: FeedbackManager) {}
+  private feedbackManager: FeedbackManager;
+
+  constructor(feedbackManager: FeedbackManager) {
+    this.feedbackManager = feedbackManager;
+  }
 
   init(): void {
     this.loadRewardModels();

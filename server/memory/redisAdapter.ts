@@ -1,6 +1,6 @@
 import { getRedis } from '../infrastructure/redis';
 import { tryJsonParse } from '../utils/jsonParse';
-import type Redis from 'ioredis';
+import Redis from 'ioredis';
 
 export interface RedisMemoryItem {
   id: string;
@@ -11,7 +11,7 @@ export interface RedisMemoryItem {
 }
 
 export class RedisMemoryAdapter {
-  private readonly redis: Redis.Redis;
+  private readonly redis: Redis;
   private readonly keyPrefix: string;
 
   constructor(tierName: string) {

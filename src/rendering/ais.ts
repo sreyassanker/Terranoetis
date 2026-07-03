@@ -1,6 +1,4 @@
 import * as Cesium from 'cesium';
-import { GhostProtocol } from './ghostProtocol';
-import { GhostEntity } from './GhostEntity';
 
 interface AisVesselState {
   mmsi: number;
@@ -15,9 +13,11 @@ interface AisVesselState {
 }
 
 const SHIP_ICON_CACHE = new Map<string, HTMLCanvasElement>();
+const SHIP_ICON_CACHE_MAX = 500;
 const STALE_TIMEOUT_MS = 30 * 60 * 1000;
 
 function getShipIcon(heading: number): HTMLCanvasElement {
+  if (SHIP_ICON_CACHE.size > SHIP_ICON_CACHE_MAX) SHIP_ICON_CACHE.clear();
   const rounded = Math.round(heading / 5) * 5;
   const key = `${rounded}`;
   const cached = SHIP_ICON_CACHE.get(key);
@@ -50,9 +50,7 @@ function getShipIcon(heading: number): HTMLCanvasElement {
 export class AisVesselTracker {
   private vessels = new Map<number, AisVesselState>();
   private entities = new Map<number, Cesium.Entity>();
-  private ghostEntities = new Map<number, GhostEntity>();
   private viewer: Cesium.Viewer;
-  private ghostProtocol?: GhostProtocol;
   private socket: WebSocket | null = null;
   private removeTick: (() => void) | null = null;
   private lastTickTime = Date.now();
@@ -68,10 +66,9 @@ export class AisVesselTracker {
   private static readonly BASE_RECONNECT_MS = 1000;
   private static readonly MAX_RECONNECT_MS = 60_000;
 
-  constructor(viewer: Cesium.Viewer, apiKey: string, ghostProtocol?: GhostProtocol) {
+  constructor(viewer: Cesium.Viewer, apiKey: string) {
     this.viewer = viewer;
     this.apiKey = apiKey;
-    this.ghostProtocol = ghostProtocol;
   }
 
   setStatusHandler(fn: (msg: string, type: 'success' | 'error' | 'info') => void) {
@@ -183,11 +180,6 @@ export class AisVesselTracker {
 
   clear() {
     this.stop();
-    for (const [mmsi, ghost] of this.ghostEntities.entries()) {
-      this.ghostProtocol?.removeGhost(String(mmsi));
-      ghost.destroy();
-    }
-    this.ghostEntities.clear();
     for (const ent of this.entities.values()) {
       this.viewer.entities.remove(ent);
     }
@@ -198,7 +190,7 @@ export class AisVesselTracker {
   private tick() {
     const now = Date.now();
     const dt = (now - this.lastTickTime) / 1000;
-    if (dt <= 0 || dt > 10) {
+    if (dt < 0.2 || dt > 10) {
       this.lastTickTime = now;
       return;
     }
@@ -258,23 +250,8 @@ export class AisVesselTracker {
           },
           properties: { layer: 'ais_vessels', mmsi: v.mmsi, name: v.name, sog: v.sog, cog: v.cog, lon: v.lon, lat: v.lat, time: Date.now() },
         };
-        if (this.ghostProtocol) {
-          const speedMs = v.sog * 0.514444;
-          const velocity = new Cesium.Cartesian3(speedMs, 0, 0);
-          const ghost = this.ghostProtocol.createGhost(
-            String(v.mmsi), entityConfig, 'maritime', velocity,
-            v.heading !== 0 ? v.heading : v.cog,
-          );
-          this.ghostEntities.set(id, ghost);
-          const realEnt = ghost.getRealEntity();
-          if (realEnt) {
-            ent = realEnt;
-            this.entities.set(id, ent);
-          }
-        } else {
-          ent = this.viewer.entities.add(entityConfig);
-          if (ent) this.entities.set(id, ent);
-        }
+        ent = this.viewer.entities.add(entityConfig);
+        if (ent) this.entities.set(id, ent);
       } else {
         if (ent.position instanceof Cesium.ConstantPositionProperty) {
           ent.position.setValue(pos);
@@ -293,13 +270,6 @@ export class AisVesselTracker {
         if (ent.label && ent.label.text instanceof Cesium.ConstantProperty) {
           ent.label.text.setValue(v.name || '');
         }
-        // Ghost Protocol: update FutureTensor and trail with dead-reckoned position
-        const ghost = this.ghostEntities.get(id);
-        if (ghost && this.ghostProtocol) {
-          const speedMs = v.sog * 0.514444;
-          const velocity = new Cesium.Cartesian3(speedMs, 0, 0);
-          ghost.updatePosition(pos, velocity, v.heading !== 0 ? v.heading : v.cog);
-        }
       }
     }
 
@@ -307,12 +277,6 @@ export class AisVesselTracker {
       if (activeIds.has(id)) continue;
       this.viewer.entities.remove(ent);
       this.entities.delete(id);
-      // Clean up associated GhostProtocol entities
-      const ghost = this.ghostEntities.get(id);
-      if (ghost) {
-        this.ghostProtocol?.removeGhost(String(id));
-        this.ghostEntities.delete(id);
-      }
     }
   }
 }

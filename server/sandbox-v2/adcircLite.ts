@@ -15,7 +15,7 @@ export interface AdcircOutputs {
 }
 
 const DEFAULT_INPUTS: AdcircInputs = {
-  bathymetry: Array.from({ length: 80 }, () => Array.from({ length: 80 }, () => -1000 - Math.random() * 4000)),
+  bathymetry: Array.from({ length: 80 }, () => Array.from({ length: 80 }, () => -1000)),
   magnitude: 7.5,
   depth: 15,
   epicenter: [40, 40],

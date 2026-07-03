@@ -62,7 +62,7 @@ const INTENT_TAGS: Record<string, string[]> = {
 
 function autoTag(episode: { query: string; response: string; intentType: string }): string[] {
   const tags = new Set<string>();
-  tags.push(episode.intentType);
+  tags.add(episode.intentType);
 
   const intentTags = INTENT_TAGS[episode.intentType];
   if (intentTags) intentTags.forEach(t => tags.add(t));
@@ -135,7 +135,7 @@ export class EpisodicMemoryV2 {
     } catch { /* tables exist */ }
   }
 
-  async add(episode: Omit<EpisodeV2, 'id' | 'timestamp' | 'tags' | 'outcome' | 'consolidated' | 'embedding'>): Promise<string> {
+  async add(episode: Omit<EpisodeV2, 'id' | 'timestamp' | 'tags' | 'consolidated' | 'embedding'>): Promise<string> {
     const id = `ep2_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const tags = autoTag({ query: episode.query, response: episode.response, intentType: episode.intentType });
 

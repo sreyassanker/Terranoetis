@@ -83,20 +83,16 @@ export class SatelliteAnalyzer {
         changeType: 'none',
       };
 
-      // Approximate NDVI from cloud-free bands (placeholder — real NDVI needs band math)
-      if (obs.cloudCover < 30) {
-        obs.ndvi = 0.3 + Math.random() * 0.5; // simulated
-        obs.changeDetected = obs.ndvi < 0.2;
-        if (obs.changeDetected) {
-          obs.changeType = 'deforestation';
-        }
-      }
+      // NDVI requires band math from raw imagery (B08/B04)
+      // Sentinel Hub WFS metadata does not provide raw bands — return null
+      obs.ndvi = undefined;
+      obs.changeDetected = false;
 
       // Cache tile
       this.cacheTile(cacheKey, lat, lon, obs);
 
       // Store in episodic memory
-      memoryManagerV2.addEpisodic('satellite_observation', obs, ['satellite', 'imagery', obs.changeType || 'none']);
+      memoryManagerV2.store('episodic', { userId: '', query: 'satellite_observation', response: JSON.stringify(obs), intentType: 'satellite' } as unknown as Record<string, unknown>).catch(() => {});
 
       pubsub.publish('satellite:observation', obs);
       return obs;
@@ -129,7 +125,7 @@ export class SatelliteAnalyzer {
     }
 
     if (changed) {
-      memoryManagerV2.addEpisodic('satellite_change', { lat, lon, deltaDescription }, ['satellite', 'change_detection']);
+      memoryManagerV2.store('episodic', { userId: '', query: 'satellite_change', response: JSON.stringify({ lat, lon, deltaDescription }), intentType: 'satellite' } as unknown as Record<string, unknown>).catch(() => {});
       pubsub.publish('satellite:change', { lat, lon, deltaDescription });
     }
 
@@ -145,13 +141,11 @@ export class SatelliteAnalyzer {
     const obs = await this.analyzeArea(lat, lon);
     if (!obs) return { scarDetected: false, estimatedAreaHa: 0, severity: 'low' };
 
-    // Simulated fire scar detection
-    const scarDetected = obs.changeType === 'fire_scar' || (obs.ndvi !== undefined && obs.ndvi < 0.1);
-    const severity: ('low' | 'moderate' | 'high' | 'severe')[] = ['low', 'moderate', 'high', 'severe'];
+    const scarDetected = obs.changeType === 'fire_scar';
     return {
       scarDetected,
-      estimatedAreaHa: scarDetected ? Math.round(Math.random() * 500 + 10) : 0,
-      severity: scarDetected ? severity[Math.floor(Math.random() * severity.length)] : 'low',
+      estimatedAreaHa: 0,
+      severity: 'low',
     };
   }
 
@@ -164,11 +158,11 @@ export class SatelliteAnalyzer {
     const obs = await this.analyzeArea(lat, lon);
     if (!obs) return { flooded: false, estimatedAreaKm2: 0, waterFraction: 0 };
 
-    const waterFraction = obs.ndvi !== undefined && obs.ndvi < -0.1 ? Math.random() * 0.6 : Math.random() * 0.1;
+    // Water fraction requires band math not available from WFS metadata
     return {
-      flooded: waterFraction > 0.3,
-      estimatedAreaKm2: waterFraction > 0.3 ? Math.round(Math.random() * 100 + 5) : 0,
-      waterFraction,
+      flooded: false,
+      estimatedAreaKm2: 0,
+      waterFraction: 0,
     };
   }
 

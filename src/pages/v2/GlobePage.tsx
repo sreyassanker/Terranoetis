@@ -9,7 +9,10 @@ const GlowCanvas: React.FC = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     let frame = 0;
+    let cancelled = false;
+    let rafId = 0;
     const animate = () => {
+      if (cancelled) return;
       frame++;
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -24,9 +27,10 @@ const GlowCanvas: React.FC = () => {
         ctx.arc(x, y, 60, 0, Math.PI * 2);
         ctx.fill();
       }
-      requestAnimationFrame(animate);
+      rafId = requestAnimationFrame(animate);
     };
-    animate();
+    rafId = requestAnimationFrame(animate);
+    return () => { cancelled = true; cancelAnimationFrame(rafId); };
   }, []);
 
   return (

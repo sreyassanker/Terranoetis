@@ -23,8 +23,8 @@ function buildKDTree(points: PointCloud, depth = 0): KDNode | null {
     point: sorted[mid].point,
     index: sorted[mid].index,
     axis,
-    left: buildKDTree(sorted.slice(0, mid), depth + 1),
-    right: buildKDTree(sorted.slice(mid + 1), depth + 1),
+    left: buildKDTree(sorted.slice(0, mid).map(p => p.point), depth + 1),
+    right: buildKDTree(sorted.slice(mid + 1).map(p => p.point), depth + 1),
   };
   return node;
 }

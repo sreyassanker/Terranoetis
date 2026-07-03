@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import * as Cesium from 'cesium';
 
 export interface UsgsFeature {
@@ -24,25 +23,57 @@ export function addEarthquakeEntity(
   const radius = 2000 + mag * 800;
   const eventTime = Cesium.JulianDate.fromDate(new Date(Number(p.time ?? Date.now())));
 
+  // Pre-compute static positions for the vertical line (these never change)
+  const carto = Cesium.Cartographic.fromDegrees(c[0], c[1]);
+  const groundPos = Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, 0);
+  const topPos = Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, height);
+  const staticPositions = [groundPos, topPos];
+
+  // Cache final animated values (after 40s) so callbacks short-circuit
+  const transparentColor = Cesium.Color.fromAlpha(color, 0.4);
+  const ringFinalRadius = 10000 + 40 * 2500; // 110,000m at t=40s
+
+  // Pre-compute animated color palette (12 frames at 0.25s intervals = 3s cycle)
+  const PULSE_FRAMES = 12;
+  const pulseColors: Cesium.Color[] = new Array(PULSE_FRAMES);
+  for (let f = 0; f < PULSE_FRAMES; f++) {
+    const pulse = 0.4 + 0.6 * Math.sin((f / PULSE_FRAMES) * Math.PI * 2);
+    pulseColors[f] = Cesium.Color.fromAlpha(color, pulse);
+  }
+  // Pre-compute ring opacity palette (40 frames at 1s intervals)
+  const RING_FRAMES = 40;
+  const ringColors: Cesium.Color[] = new Array(RING_FRAMES);
+  for (let f = 0; f < RING_FRAMES; f++) {
+    const opacity = Math.max(0, 1 - f / 40);
+    ringColors[f] = Cesium.Color.fromAlpha(Cesium.Color.ORANGE, opacity * 0.3);
+  }
+  const transparentOrange = Cesium.Color.fromAlpha(Cesium.Color.ORANGE, 0);
+
+  // Pulse material: 3-second cycle, but after 40s return static value
   const pulseMaterial = new Cesium.ColorMaterialProperty(
     new Cesium.CallbackProperty((time?: Cesium.JulianDate) => {
-      const t = (Cesium.JulianDate.secondsDifference(time ?? eventTime, eventTime) % 3) / 3;
-      const pulse = 0.4 + 0.6 * Math.sin(t * Math.PI * 2);
-      return Cesium.Color.fromAlpha(color, pulse);
+      const elapsed = Cesium.JulianDate.secondsDifference(time ?? eventTime, eventTime);
+      if (elapsed > 40) return transparentColor;
+      const frame = Math.floor((elapsed % 3) * (PULSE_FRAMES / 3)) % PULSE_FRAMES;
+      return pulseColors[frame];
     }, false),
   );
 
+  // Ring material: fades over 40s, then transparent
   const ringMaterial = new Cesium.ColorMaterialProperty(
     new Cesium.CallbackProperty((time?: Cesium.JulianDate) => {
       const elapsed = Cesium.JulianDate.secondsDifference(time ?? eventTime, eventTime);
-      const opacity = Math.max(0, 1 - elapsed / 40);
-      return Cesium.Color.fromAlpha(Cesium.Color.ORANGE, opacity * 0.3);
+      if (elapsed >= 40) return transparentOrange;
+      const frame = Math.min(Math.floor(elapsed), RING_FRAMES - 1);
+      return ringColors[frame];
     }, false),
   );
 
+  // Ring radius: expands for 40s, then frozen
   const ringRadius = new Cesium.CallbackProperty((time?: Cesium.JulianDate) => {
-    const elapsed = Math.max(0, Cesium.JulianDate.secondsDifference(time ?? eventTime, eventTime));
-    return 10000 + elapsed * 2500;
+    const elapsed = Cesium.JulianDate.secondsDifference(time ?? eventTime, eventTime);
+    if (elapsed >= 40) return ringFinalRadius;
+    return 10000 + Math.max(0, elapsed) * 2500;
   }, false);
 
   return viewer.entities.add({
@@ -57,12 +88,8 @@ export function addEarthquakeEntity(
       outlineColor: color.withAlpha(0.8),
     },
     polyline: {
-      positions: new Cesium.CallbackProperty((time) => {
-        const carto = Cesium.Cartographic.fromDegrees(c[0], c[1]);
-        const ground = Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, 0);
-        const top = Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, height);
-        return [ground, top];
-      }, false),
+      // Static positions — no CallbackProperty needed
+      positions: staticPositions,
       width: 2,
       material: new Cesium.PolylineGlowMaterialProperty({
         glowPower: 0.3,

@@ -97,7 +97,7 @@ export class PerformanceAnalyzer {
         satisfaction: stats.avgOverall,
         sampleCount: stats.count,
         trend,
-        driftDetected: drift,
+        driftDetected: drift ?? false,
         recentScore,
         baselineScore,
       };
@@ -242,7 +242,7 @@ export class PerformanceAnalyzer {
     return values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
   }
 
-  private matchesIntent(evalEntry: EvalScores & Record<string, unknown>, intentType: string): boolean {
+  private matchesIntent(evalEntry: EvalScores & { query: string; createdAt: string }, intentType: string): boolean {
     try {
       const meta = JSON.parse((evalEntry as unknown as Record<string, string>).metadata_json || '{}');
       return meta.intentType === intentType;

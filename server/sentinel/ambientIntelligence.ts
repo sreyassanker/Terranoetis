@@ -102,12 +102,12 @@ export class AmbientIntelligence {
     ensemblePredictor.recordOutcome(hazardName, {
       hazardType: hazardName,
       probability: 0.5,
-      severity: event.severity,
+      severity: (event.severity === 'critical' ? 'high' : event.severity === 'warning' ? 'medium' : 'low') as 'low' | 'medium' | 'high' | 'extreme',
       timeframe: '1h',
       confidence: 0.5,
       confidenceInterval: [0, 0],
       contributingFactors: [`observed_${hazardName}`],
-      source: 'sentinel',
+      source: 'pattern' as 'pattern' | 'physics' | 'statistical' | 'causal' | 'llm',
     }, true);
 
     this.worldModelUpdatedAt = Date.now();
@@ -124,7 +124,7 @@ export class AmbientIntelligence {
           history: [],
           query: 'next_1h',
         };
-        const predictions = ensemblePredictor.predict(input);
+        const predictions = await ensemblePredictor.predict(input);
         region.lastPredictions['1h'] = {
           timestamp: Date.now(),
           prediction: predictions.map(p =>
@@ -147,7 +147,7 @@ export class AmbientIntelligence {
           history: [],
           query: 'next_6h',
         };
-        const predictions = ensemblePredictor.predict(input);
+        const predictions = await ensemblePredictor.predict(input);
         region.lastPredictions['6h'] = {
           timestamp: Date.now(),
           prediction: predictions.map(p =>
@@ -167,7 +167,7 @@ export class AmbientIntelligence {
           history: [],
           query: 'next_24h',
         };
-        const predictions = ensemblePredictor.predict(input);
+        const predictions = await ensemblePredictor.predict(input);
         region.lastPredictions['24h'] = {
           timestamp: Date.now(),
           prediction: predictions.map(p =>

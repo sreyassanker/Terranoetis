@@ -159,7 +159,7 @@ export class ArchitectureProposals {
       : 0;
 
     let toolCount = 0;
-    const toolUsageRate = 0.5;
+    let toolUsageRate = 0;
     let avgLatencyMs = 1500;
     let cacheHitRate = 0.3;
     let feedbackCount = 0;
@@ -170,6 +170,9 @@ export class ArchitectureProposals {
       const db = getDb();
       const toolRow = db.prepare('SELECT COUNT(*) as c FROM dynamic_tools').get() as { c: number } | undefined;
       toolCount = toolRow?.c || 0;
+
+      const usageRow = db.prepare('SELECT COUNT(DISTINCT tool_name) as used FROM tool_executions WHERE created_at >= datetime("now", "-24 hours")').get() as { used: number } | undefined;
+      toolUsageRate = toolCount > 0 ? Math.min(1, (usageRow?.used || 0) / toolCount) : 0;
 
       const latencyRow = db.prepare('SELECT AVG(latency_ms) as avg FROM execution_log WHERE created_at >= datetime("now", "-1 hour")').get() as { avg: number | null } | undefined;
       if (latencyRow?.avg) avgLatencyMs = latencyRow.avg;
@@ -183,8 +186,8 @@ export class ArchitectureProposals {
       const costRow = db.prepare("SELECT value FROM config WHERE key = 'cost_total_queries'").get() as { value: string } | undefined;
       totalQueries = parseInt(costRow?.value || '0');
 
-      const driftRow = db.prepare("SELECT value FROM config WHERE key = 'perf_baselines'").get();
-      driftedIntentCount = driftRow ? 2 : 0;
+      const driftRow = db.prepare("SELECT COUNT(DISTINCT intent_type) as c FROM episodes WHERE intent_type NOT IN ('quick_scan','deep_analysis','fly_to','toggle_layer','weather_check','compute','unknown') AND created_at >= datetime('now', '-7 days')").get() as { c: number } | undefined;
+      driftedIntentCount = driftRow?.c || 0;
     } catch { /* defaults */ }
 
     return {

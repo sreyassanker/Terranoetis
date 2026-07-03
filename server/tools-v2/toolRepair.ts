@@ -17,7 +17,7 @@ interface RepairResult {
   success: boolean;
   diffs: SchemaDiff[];
   repaired: boolean;
-  newVersion: number | null;
+  newVersion?: number | null;
   error?: string;
 }
 
@@ -173,7 +173,7 @@ Return ONLY valid JSON representing the corrected output schema (a JSON object w
   }
 
   private async fixToolCode(
-    tool: { name: string; description: string; code: string },
+    tool: { name: string; description: string; code: string | null },
     diffs: SchemaDiff[],
     newSchema: Record<string, unknown>,
   ): Promise<string | null> {

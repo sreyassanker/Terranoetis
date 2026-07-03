@@ -77,7 +77,7 @@ export class CausalKnowledgeGraph {
         WHERE s.name = ?
         ORDER BY e.weight DESC
       `).all(nodeName);
-      return rows.map(r => this.rowToEdge(r));
+      return rows.map(r => this.rowToEdge(r as Record<string, unknown>));
     } catch (e) {
       console.error('[KG] getOutgoingEdges failed:', e);
       return [];
@@ -95,7 +95,7 @@ export class CausalKnowledgeGraph {
         WHERE t.name = ?
         ORDER BY e.weight DESC
       `).all(nodeName);
-      return rows.map(r => this.rowToEdge(r));
+      return rows.map(r => this.rowToEdge(r as Record<string, unknown>));
     } catch (e) {
       console.error('[KG] getIncomingEdges failed:', e);
       return [];
@@ -132,7 +132,7 @@ export class CausalKnowledgeGraph {
         WHERE d.validation_status = 'pending'
         ORDER BY d.discovered_at DESC
       `).all();
-      return rows.map(r => this.rowToDiscovery(r));
+      return rows.map(r => this.rowToDiscovery(r as Record<string, unknown>));
     } catch (e) {
       console.error('[KG] getPendingDiscoveries failed:', e);
       return [];
@@ -142,15 +142,15 @@ export class CausalKnowledgeGraph {
   private rowToEdge(row: Record<string, unknown>): CausalEdge {
     return {
       edgeId: String(row.id || row.edge_id),
-      sourceId: row.source_name,
-      targetId: row.target_name,
-      relation: row.relation,
-      correlation: row.weight,
-      causalStrength: row.weight,
+      sourceId: row.source_name as string,
+      targetId: row.target_name as string,
+      relation: row.relation as CausalEdge['relation'],
+      correlation: row.weight as number,
+      causalStrength: row.weight as number,
       timeLagHours: 0,
-      confidence: row.weight,
-      evidenceCount: row.evidence_count,
-      lastUpdated: new Date(row.created_at).getTime(),
+      confidence: row.weight as number,
+      evidenceCount: row.evidence_count as number,
+      lastUpdated: new Date(row.created_at as string).getTime(),
       isSynthetic: false,
     };
   }
@@ -159,11 +159,11 @@ export class CausalKnowledgeGraph {
     return {
       discoveryId: String(row.discovery_id),
       edge: this.rowToEdge(row),
-      summary: row.summary,
-      discoveredAt: new Date(row.discovered_at).getTime(),
-      validatedBy: row.validated_by,
-      validationStatus: row.validation_status,
-      forkId: row.fork_id,
+      summary: row.summary as string,
+      discoveredAt: new Date(row.discovered_at as string).getTime(),
+      validatedBy: row.validated_by as string | null,
+      validationStatus: row.validation_status as Discovery['validationStatus'],
+      forkId: row.fork_id as string | undefined,
     };
   }
 }

@@ -1,13 +1,61 @@
-export type ScenarioType = 'earthquake_swarm' | 'hurricane_landfall' | 'wildfire_spread' | 'volcanic_eruption' | 'flood_inundation' | 'tsunami_wave';
+export type ScenarioType = 'earthquake_swarm' | 'hurricane_landfall' | 'wildfire_spread' | 'volcanic_eruption' | 'flood_inundation' | 'tsunami_wave' | 'data_layer';
+
+export interface Point3D { x: number; y: number; z: number }
+
+export interface ShapeData {
+  type: 'polygon' | 'cylinder' | 'corridor' | 'ellipse' | 'polyline' | 'ring' | 'flood_surface' | 'wavefront' | 'intensity_zone' | 'damage_zone' | 'liquefaction_zone';
+  color: string;
+  opacity: number;
+  positions?: { lat: number; lon: number }[];
+  center?: { lat: number; lon: number };
+  radius?: number;
+  innerRadius?: number;
+  height?: number;
+  extrudedHeight?: number;
+  width?: number;
+  semiMajorAxis?: number;
+  semiMinorAxis?: number;
+  rotation?: number;
+  depths?: number[];
+  maxDepth?: number;
+  waterElevation?: number;
+  waveType?: string;
+  waveSpeed?: number;
+  startTime?: number;
+  mmi?: number;
+  damagePercent?: number;
+  liquefactionProb?: number;
+  epicenter?: { lat: number; lon: number };
+  magnitude?: number;
+}
+
+export interface TimeStep {
+  time: number;
+  points: Point3D[];
+  shapes: ShapeData[];
+  intensity: number[];
+  label?: string;
+}
+
+export interface ScenarioTimeSeries {
+  steps: TimeStep[];
+  metadata: {
+    duration: number;
+    dt: number;
+    type: ScenarioType;
+    params: Record<string, unknown>;
+  };
+}
 
 export interface ScenarioBase {
   id: string;
   type: ScenarioType;
   params: Record<string, unknown>;
-  pointCloud: { x: number; y: number; z: number }[];
+  pointCloud: Point3D[];
   validationScore: number;
   createdAt: string;
   metadata: Record<string, unknown>;
+  timeSeries?: ScenarioTimeSeries;
 }
 
 export interface EarthquakeSwarmParams {
@@ -70,6 +118,10 @@ export interface TsunamiWaveParams {
 
 export type ScenarioParams = EarthquakeSwarmParams | HurricaneLandfallParams | WildfireSpreadParams | VolcanicEruptionParams | FloodInundationParams | TsunamiWaveParams;
 
+export interface Simulator {
+  simulate(params: ScenarioParams, realData?: Record<string, unknown>): ScenarioTimeSeries;
+}
+
 export const DEFAULT_PARAMS: Record<ScenarioType, Record<string, unknown>> = {
   earthquake_swarm: {
     lat: 35.68, lon: 139.65, depthRange: [5, 30], magnitudeRange: [2.5, 5.5],
@@ -94,5 +146,8 @@ export const DEFAULT_PARAMS: Record<ScenarioType, Record<string, unknown>> = {
   tsunami_wave: {
     epicenterLat: 35.0, epicenterLon: 140.0, magnitude: 8.5,
     depth: 20, waveHeight: 15, arrivalTimes: [30, 45, 60, 90, 120],
+  },
+  data_layer: {
+    variableName: '', pointCloud: [], bbox: { latMin: 0, latMax: 0, lonMin: 0, lonMax: 0 },
   },
 };

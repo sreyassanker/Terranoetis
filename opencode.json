@@ -1,0 +1,89 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "aimlapi/gpt-4o",
+  "provider": {
+    "aimlapi": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "aimlapi.com",
+      "options": {
+        "baseURL": "https://api.aimlapi.com/v1",
+        "apiKey": "10b2777b723249fd947c956a2cdf7e5a"
+      },
+      "models": {
+        "gpt-4o": {
+          "name": "gpt-4o",
+          "limit": {
+            "context": 128000,
+            "output": 4096
+          }
+        },
+        "gpt-4o-mini": {
+          "name": "gpt-4o-mini",
+          "limit": {
+            "context": 128000,
+            "output": 4096
+          }
+        }
+      }
+    },
+    "clod": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "CLōD",
+      "options": {
+        "baseURL": "https://api.clod.io/v1",
+        "apiKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1a2pQZDl6RFJLUWdTYU5iU3ZSZWhWUUgwc3YyIiwidXNlcklkIjoiNWtqUGQ5ekRSS1FnU2FOYlN2UmVoVlFIMHN2MiIsInRlYW1JZCI6ImMyNTBiYmQ0LTY2NzAtNDE5Ni1hMmYwLTI1NjViNWNlYjk1YyIsInRlYW1Sb2xlIjoib3duZXIiLCJwcm9qZWN0SWQiOiI1YjA4NzNjYS00ZmM1LTRlNDQtOTVmZi02MWVkMjdkNjM2YTYiLCJqdGkiOiJhcGlrZXktMTc4MjMxMjA0ODAzNSIsImlhdCI6MTc4MjMxMjA0OCwiZXhwIjoxODMyMzEyMDQ4fQ.JRm0w2tuHarr06PoZO6CIP3I4Mn7r1eRfLNcGjGMOj0"
+      },
+      "models": {
+        "Trinity Mini": {
+          "name": "Trinity Mini",
+          "limit": {
+            "context": 128000,
+            "output": 4096
+          }
+        },
+        "Gemma 4 31B IT": {
+          "name": "Gemma 4 31B IT",
+          "limit": {
+            "context": 256000,
+            "output": 4096
+          }
+        },
+        "Llama 3.1 8B": {
+          "name": "Llama 3.1 8B",
+          "limit": {
+            "context": 131000,
+            "output": 4096
+          }
+        },
+        "Meta Llama 3.3 70B Instruct": {
+          "name": "Meta Llama 3.3 70B Instruct",
+          "limit": {
+            "context": 128000,
+            "output": 4096
+          }
+        },
+        "GPT OSS 120B": {
+          "name": "GPT OSS 120B",
+          "limit": {
+            "context": 128000,
+            "output": 4096
+          }
+        },
+        "GPT OSS 20B": {
+          "name": "GPT OSS 20B",
+          "limit": {
+            "context": 128000,
+            "output": 4096
+          }
+        },
+        "Qwen 3.5 9B": {
+          "name": "Qwen 3.5 9B",
+          "limit": {
+            "context": 262000,
+            "output": 4096
+          }
+        }
+      }
+    }
+  }
+}

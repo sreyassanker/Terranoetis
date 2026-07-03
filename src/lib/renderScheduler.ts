@@ -5,6 +5,7 @@ export interface BatchTask {
 
 export function createRenderScheduler(frameBudgetMs = 8) {
   let queue: BatchTask[] = [];
+  let head = 0;
   let running = false;
   let onProgress: ((done: number, total: number) => void) | null = null;
   let totalQueued = 0;
@@ -13,10 +14,10 @@ export function createRenderScheduler(frameBudgetMs = 8) {
   function processBatch() {
     const start = performance.now();
 
-    while (queue.length > 0) {
-      const task = queue[0];
+    while (head < queue.length) {
+      const task = queue[head];
+      head++;
       task.execute();
-      queue.shift();
       completed++;
 
       if (performance.now() - start > frameBudgetMs) break;
@@ -24,10 +25,12 @@ export function createRenderScheduler(frameBudgetMs = 8) {
 
     onProgress?.(completed, totalQueued);
 
-    if (queue.length > 0) {
+    if (head < queue.length) {
       requestAnimationFrame(processBatch);
     } else {
       running = false;
+      queue = [];
+      head = 0;
       onProgress?.(completed, totalQueued);
     }
   }
@@ -53,26 +56,30 @@ export function createRenderScheduler(frameBudgetMs = 8) {
 
     clear() {
       queue = [];
+      head = 0;
       completed = totalQueued;
       running = false;
     },
 
     flush() {
-      while (queue.length > 0) {
-        const task = queue.shift()!;
+      while (head < queue.length) {
+        const task = queue[head];
+        head++;
         task.execute();
         completed++;
       }
+      queue = [];
+      head = 0;
       running = false;
       onProgress?.(completed, totalQueued);
     },
 
     get hasPending() {
-      return queue.length > 0;
+      return head < queue.length;
     },
 
     get pending() {
-      return queue.length;
+      return queue.length - head;
     },
 
     onProgress(cb: ((done: number, total: number) => void) | null) {
@@ -81,6 +88,7 @@ export function createRenderScheduler(frameBudgetMs = 8) {
 
     reset() {
       queue = [];
+      head = 0;
       totalQueued = 0;
       completed = 0;
       running = false;

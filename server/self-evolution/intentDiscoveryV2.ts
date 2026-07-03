@@ -26,11 +26,11 @@ interface Proposal {
 
 export class IntentDiscoveryV2 {
   private memoryManager: unknown;
-  private codeWriter: unknown;
+  private codeWriter: { generateTool: (opts: { name: string; description: string; inputSchema: Record<string, string>; outputSchema: Record<string, string> }) => Promise<string> };
   private proposals: Proposal[] = [];
   private intentLibrary: Map<string, string[]> = new Map();
 
-  constructor(memoryManager: unknown, codeWriter: unknown) {
+  constructor(memoryManager: unknown, codeWriter: { generateTool: (opts: { name: string; description: string; inputSchema: Record<string, string>; outputSchema: Record<string, string> }) => Promise<string> }) {
     this.memoryManager = memoryManager;
     this.codeWriter = codeWriter;
   }

@@ -3,17 +3,17 @@ import fs from 'fs';
 import { type ScenarioType, type ScenarioBase } from './templates';
 import { generateScenario } from './scenarioGenerator';
 import { fetchRealDataForBBox, deriveParams, type BBox } from '../simulation/realDataBridge';
-import { openFile, readVariable, subsetGrid, gridToPointCloud, closeFile } from '../grid/netcdfReader';
+import { openFile, readVariable, subsetGrid, gridToPointCloud, closeFile, type GridSubset } from '../grid/netcdfReader';
 
-const WLDAS_PATH = process.env.WLDAS_NC_PATH || '/Users/sreyassanker/Downloads/Realtime_v2/Testing/WLDAS_NOAHMP001_DA1_20240101.D10.nc';
+const WLDAS_PATH = process.env.WLDAS_NC_PATH || '';
 
 const HAZARD_TO_NC_VARS: Record<string, string[]> = {
   wildfire_spread: ['SoilMoi00_10cm_tavg', 'Wind_f_tavg', 'VegT_tavg', 'Swnet_tavg', 'Lwnet_tavg'],
   flood_inundation: ['Rainf_tavg', 'SoilMoi00_10cm_tavg', 'Qs_tavg', 'Qsb_tavg'],
   hurricane_landfall: ['Psurf_f_tavg', 'Wind_f_tavg', 'Qair_f_tavg', 'Tair_f_tavg'],
-  earthquake_swarm: [''],  // earthquakes use USGS data, not NC
+  earthquake_swarm: [],  // earthquakes use USGS data, not NC
   volcanic_eruption: ['Swnet_tavg', 'Lwnet_tavg', 'Qair_f_tavg'],
-  tsunami_wave: [''],  // tsunamis use USGS data
+  tsunami_wave: [],  // tsunamis use USGS data
 };
 
 function computeStats(vals: number[]): { min: number; max: number; avg: number; median: number } {
@@ -48,7 +48,7 @@ export async function generateScenarioFromBBox(
   // If pure NC data layer, skip real data and synthetic generation
   if (isNcLayer) {
     try {
-      if (fs.existsSync(WLDAS_PATH)) {
+      if (WLDAS_PATH && fs.existsSync(WLDAS_PATH)) {
         const h5 = await openFile(WLDAS_PATH);
         const latVar = readVariable(h5, 'lat');
         const lonVar = readVariable(h5, 'lon');
@@ -126,10 +126,8 @@ export async function generateScenarioFromBBox(
   let valueMin: number | undefined;
   let valueMax: number | undefined;
   let variableName: string | undefined;
-  let gridSubset: GridSubset | null = null;
-
-  try {
-    if (fs.existsSync(WLDAS_PATH)) {
+  let gridSubset: GridSubset | null = null;    try {
+    if (WLDAS_PATH && fs.existsSync(WLDAS_PATH)) {
       const ncVars = HAZARD_TO_NC_VARS[hazardType] || [];
       const h5 = await openFile(WLDAS_PATH);
       const latVar = readVariable(h5, 'lat');
@@ -178,6 +176,7 @@ export async function generateScenarioFromBBox(
     valueMin,
     valueMax,
     variableName,
+    timeSeries: syntheticScenario.timeSeries,
     metadata: {
       validation: syntheticScenario.metadata.validation,
       realData: {

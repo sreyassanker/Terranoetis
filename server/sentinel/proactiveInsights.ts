@@ -269,7 +269,7 @@ export class ProactiveInsights {
         history: [],
         query: 'next_24h_risk',
       };
-      const predictions = ensemblePredictor.predict(input);
+      const predictions = await ensemblePredictor.predict(input);
 
       for (const pred of predictions) {
         if (pred.probability > 0.6) {

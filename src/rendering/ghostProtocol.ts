@@ -160,13 +160,19 @@ export class GhostProtocol {
     const trailId = `${id}_trail`;
 
     // Build callback that dynamically fetches trail positions from the ghost's FutureTensor.
-    // This runs every frame and always retrieves the latest prediction data.
+    // Cache the mapped array — only recompute when predictions change.
+    let cachedPositions: Cesium.Cartesian3[] = [];
+    let cachedTrailLength = 0;
     const positionsCallback = new Cesium.CallbackProperty(() => {
       const ghost = this.ghosts.get(id);
-      if (!ghost) return [];
+      if (!ghost) return cachedPositions;
 
       const trailPositions = ghost.getFutureTensor().getTrailPositions();
-      return trailPositions.map((tp) => tp.position);
+      if (trailPositions.length !== cachedTrailLength) {
+        cachedPositions = trailPositions.map((tp) => tp.position);
+        cachedTrailLength = trailPositions.length;
+      }
+      return cachedPositions;
     }, false);
 
     const trailEntity = this.viewer.entities.add({
@@ -212,11 +218,8 @@ export class GhostProtocol {
     // Resolve initial position from ghost's real entity
     const initialPos = this.resolveGhostPosition(id);
 
-    // Create ellipse with CallbackProperty for dynamic radius and color.
-    // Position uses a ConstantPositionProperty initialized to the ghost's
-    // current location, since the halo center does not change for static entities.
-    // If the entity position is somehow dynamic (CallbackProperty/Sampled),
-    // we use the resolved value as a fixed center.
+    // Pre-allocate color for halo pulse — avoid per-frame Color allocation
+    const haloColor = new Cesium.Color(0.0, 0.6, 1.0, 0.15);
     const halo = this.viewer.entities.add({
       id: haloId,
       position: initialPos,
@@ -225,22 +228,21 @@ export class GhostProtocol {
           const g = this.ghosts.get(id);
           if (!g) return 0;
           const tensor = g.getFutureTensor();
-          const wp24h = tensor.predictions[96]; // 96 * 15min = 24h
-          return wp24h ? wp24h.uncertaintyRadiusMeters : 1000;
+          const lastWp = tensor.predictions[tensor.predictions.length - 1];
+          return lastWp ? lastWp.uncertaintyRadiusMeters : 1000;
         }, false),
         semiMinorAxis: new Cesium.CallbackProperty(() => {
           const g = this.ghosts.get(id);
           if (!g) return 0;
           const tensor = g.getFutureTensor();
-          const wp24h = tensor.predictions[96];
-          return wp24h ? wp24h.uncertaintyRadiusMeters : 1000;
+          const lastWp = tensor.predictions[tensor.predictions.length - 1];
+          return lastWp ? lastWp.uncertaintyRadiusMeters : 1000;
         }, false),
         material: new Cesium.ColorMaterialProperty(
           new Cesium.CallbackProperty(() => {
-            const g = this.ghosts.get(id);
-            if (!g) return new Cesium.Color(0, 0.6, 1, 0.15);
             const pulse = 0.1 + 0.1 * Math.abs(Math.sin(Date.now() / 2000));
-            return new Cesium.Color(0.0, 0.6, 1.0, pulse);
+            haloColor.alpha = pulse;
+            return haloColor;
           }, false),
         ),
         outline: true,

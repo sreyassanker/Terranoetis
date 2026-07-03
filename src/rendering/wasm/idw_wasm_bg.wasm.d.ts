@@ -1,0 +1,23 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_get_neighbor_dist_sq: (a: number) => number;
+export const __wbg_get_neighbor_lat: (a: number) => number;
+export const __wbg_get_neighbor_lon: (a: number) => number;
+export const __wbg_get_neighbor_value: (a: number) => number;
+export const __wbg_kdnode_free: (a: number, b: number) => void;
+export const __wbg_kdtree_free: (a: number, b: number) => void;
+export const __wbg_neighbor_free: (a: number, b: number) => void;
+export const __wbg_set_neighbor_dist_sq: (a: number, b: number) => void;
+export const __wbg_set_neighbor_lat: (a: number, b: number) => void;
+export const __wbg_set_neighbor_lon: (a: number, b: number) => void;
+export const __wbg_set_neighbor_value: (a: number, b: number) => void;
+export const interpolate_idw: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => [number, number];
+export const kdtree_build: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+export const kdtree_nearest_k: (a: number, b: number, c: number, d: number) => [number, number];
+export const kdtree_new: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __externref_drop_slice: (a: number, b: number) => void;
+export const __wbindgen_start: () => void;

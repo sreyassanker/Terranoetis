@@ -44,7 +44,11 @@ export class PluginManager {
   private dataHandlers = new Map<string, PluginData>();
   private watchTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private onToolChange?: () => void) {}
+  private onToolChange?: () => void;
+
+  constructor(onToolChange?: () => void) {
+    this.onToolChange = onToolChange;
+  }
 
   async init(): Promise<void> {
     if (!fs.existsSync(PLUGINS_DIR)) {
@@ -322,9 +326,12 @@ module.exports.init = function(api) {
 `;
 
     const sandboxConsole = {
-      log: (...args: unknown[]) => logger.info({ source: 'plugin' }, ...args),
-      warn: (...args: unknown[]) => logger.warn({ source: 'plugin' }, ...args),
-      error: (...args: unknown[]) => logger.error({ source: 'plugin' }, ...args),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      log: (...args: unknown[]) => (logger as any).info({ source: 'plugin' }, ...args),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      warn: (...args: unknown[]) => (logger as any).warn({ source: 'plugin' }, ...args),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      error: (...args: unknown[]) => (logger as any).error({ source: 'plugin' }, ...args),
     };
 
     const sandbox = {
@@ -347,7 +354,8 @@ module.exports.init = function(api) {
     };
 
     const context = vm.createContext(sandbox);
-    const script = new vm.Script(wrapperCode, { filename: 'plugin', timeout: 5000 });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const script = new vm.Script(wrapperCode, { filename: 'plugin' } as any);
     script.runInContext(context, { timeout: 5000 });
 
     return sandboxModule.exports.init as ((api: PluginAPI) => void) | undefined;

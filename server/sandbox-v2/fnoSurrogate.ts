@@ -74,9 +74,7 @@ export async function runFnoPrediction(
 
   const wrfResult = await runWrfSimulation(engine, {
     duration: inputs.leadDays * 24,
-    terrain: Array.from({ length: 64 }, () =>
-      Array.from({ length: 64 }, () => Math.random() * 500),
-    ),
+    terrain: inputs.terrain ?? Array.from({ length: 64 }, () => Array.from({ length: 64 }, () => 0)),
   });
 
   const latencyMs = Date.now() - start;
@@ -90,23 +88,15 @@ export async function runFnoPrediction(
     const lastTemp = temp[temp.length - 1] || [];
     const lastWind = wind[wind.length - 1] || [];
 
-    const avgWindSpeed = lastWind.length > 0
-      ? lastWind.map(u => Math.abs(u))
-      : Array.from({ length: 64 }, () =>
-          Array.from({ length: 64 }, () => Math.random() * 5),
-        );
+    if (lastTemp.length === 0 || lastWind.length === 0 || precip.length === 0) {
+      throw new Error('FNO surrogate returned empty data — no synthetic fallback');
+    }
+
+    const avgWindSpeed: number[][] = ((lastWind as unknown as [number[][], number[][]])[0]).map((row: number[]) => row.map(Math.abs));
 
     const fnoOutput: FnoOutputs = {
-      temperature: lastTemp.length > 0
-        ? lastTemp
-        : Array.from({ length: 64 }, () =>
-            Array.from({ length: 64 }, () => 288 + (Math.random() - 0.5) * 10),
-          ),
-      precipitation: precip.length > 0
-        ? precip
-        : Array.from({ length: 64 }, () =>
-            Array.from({ length: 64 }, () => Math.random() * 10),
-          ),
+      temperature: lastTemp,
+      precipitation: precip,
       windSpeed: avgWindSpeed as number[][],
       confidence: 0.65,
     };
@@ -146,9 +136,7 @@ export async function getFastPrediction(
     logger.info({ confidence: result.output.confidence }, 'FNO confidence too low, re-running with WRF-lite');
     const wrfResult = await runWrfSimulation(engine, {
       duration: leadDays * 24,
-      terrain: Array.from({ length: 64 }, () =>
-        Array.from({ length: 64 }, () => Math.random() * 500),
-      ),
+      terrain: Array.from({ length: 64 }, () => Array.from({ length: 64 }, () => 0)),
     });
 
     if (wrfResult.status === 'complete' && wrfResult.result) {
@@ -157,7 +145,7 @@ export async function getFastPrediction(
         output: {
           temperature: (wrfOut.temperature as number[][][])?.slice(-1)[0] || result.output.temperature,
           precipitation: (wrfOut.precipitation as number[][]) || result.output.precipitation,
-          windSpeed: ((wrfOut.wind as number[][][])?.slice(-1)[0] || []).map(u => Math.abs(u)) as number[][],
+          windSpeed: (((wrfOut.wind as number[][][])?.slice(-1)[0] || []) as unknown as number[][][])[0]?.map((row: number[]) => row.map(Math.abs)) as number[][] || [],
           confidence: 0.65,
         },
         source: 'wrf-lite',

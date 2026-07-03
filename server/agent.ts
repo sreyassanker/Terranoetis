@@ -1,7 +1,8 @@
 import NodeCache from 'node-cache';
 import { omninet } from './ai-router/omninet';
 import { cognitiveOrchestrator, type CognitionResult, type ProgressCallback } from './cognition/cognitiveOrchestrator';
-import { AgentOrchestrator } from './orchestrator';
+import { AgentOrchestrator, type AgentResult } from './orchestrator';
+import { logger } from './observability/logger';
 
 // ═══════════════════════════════════════════════════════════════════════
 // DEPRECATED: Static prompt — kept for backward compatibility.
@@ -121,7 +122,7 @@ After your analysis, output commands for the globe. Each line is one JSON comman
 
 export type GlobeAction =
   | 'flyTo' | 'toggleLayer' | 'addPin' | 'addHeatmap' | 'addPolygon'
-  | 'addGeoJSON' | 'addChart';
+  | 'addGeoJSON' | 'addChart' | 'addPanel';
 
 export interface GlobeCommand {
   action: GlobeAction;
@@ -156,10 +157,22 @@ export interface Subtask {
 }
 
 export interface IntentResult {
-  type: 'quick_scan' | 'deep_analysis' | 'fly_to' | 'toggle_layer' | 'weather_check' | 'compute' | 'unknown';
+  type: 'quick_scan' | 'deep_analysis' | 'fly_to' | 'toggle_layer' | 'weather_check' | 'compute' | 'digital_twin' | 'unknown';
   confidence: number;
   location?: { lat: number; lon: number; label?: string };
   layerIds?: string[];
+}
+
+export interface PanelData {
+  stats: { label: string; value: string; unit: string; icon: string }[];
+  charts: {
+    type: 'bar' | 'pie' | 'area' | 'line' | 'radar';
+    title: string;
+    data: Record<string, unknown>[];
+    keys: { dataKey: string; color: string; name: string }[];
+  }[];
+  table: { title: string; columns: string[]; rows: string[][] };
+  recommendations: string[];
 }
 
 export interface MaterializedCell {
@@ -279,9 +292,10 @@ export class ToolRegistry {
       '{"action":"addPolygon","coordinates":[[35.6,139.5],[35.7,139.5]],"label":"Zone","color":"rgba(255,0,0,0.3)"}',
       '{"action":"addGeoJSON","geojson":{...},"label":"Results","color":"#22c55e"}',
       '{"action":"addChart","type":"bar","title":"Distribution","labels":["A","B"],"values":[10,20]}',
+      '{"action":"addPanel","panelData":{"stats":[...],"charts":[...],"table":{...},"recommendations":[...]}}',
       '```',
       '',
-      'Supported actions: flyTo, toggleLayer, addPin, addHeatmap, addPolygon, addGeoJSON, addChart.',
+      'Supported actions: flyTo, toggleLayer, addPin, addHeatmap, addPolygon, addGeoJSON, addChart, addPanel.',
       '',
       '## Response Rules',
       '- Be concise. Lead with the most important finding.',
@@ -382,6 +396,20 @@ const INTENT_PROTOTYPES: IntentPrototype[] = [
     'research seismic activity', 'study volcanic patterns', 'investigate climate trends',
     'comprehensive report on', 'in depth analysis',
   ]},
+  { type: 'digital_twin', confidence: 0.85, patterns: [
+    'what if sea level rises 20 meters', 'impact of earthquake on city',
+    'show me flood zones for mumbai', 'how many people affected by tsunami',
+    'damage assessment for tokyo', 'risk analysis of coastal bangladesh',
+    'compare scenarios for wildfire near los angeles', 'simulate hurricane hitting florida',
+    'what happens if volcano erupts near naples', 'analyze impact on infrastructure',
+    'crisis simulation for flooding in london', 'disaster scenario for chennai',
+    'show me what will happen if sea rises 40m', 'what will happen if sea level rises 40 meters',
+    'if sea rises by 20m in coastal area', 'what happens if sea level rises 40 meters',
+    'show me impact of sea level rise on thiruvananthapuram', 'flood simulation for coastal city',
+    'what if ocean rises 30 meters', 'show me flood risk for mumbai',
+    'if hurricane hits chennai', 'earthquake damage simulation tokyo',
+    'tsunami impact on coastal area', 'wildfire spread simulation',
+  ]},
 ];
 
 // Pre-computed embeddings cache
@@ -423,10 +451,32 @@ const CITY_COORDS: Record<string, [number, number]> = {
   // Additional major cities
   chicago: [41.8781, -87.6298], 'hong kong': [22.3193, 114.1694], 'kuala lumpur': [3.139, 101.6869],
   jakarta: [-6.2088, 106.8456], 'sao paulo': [-23.5505, -46.6333], 'mexico city': [19.4326, -99.1332],
-  karachi: [24.8607, 67.0011], lagos: [6.5244, 3.3792], 'hong kong': [22.3193, 114.1694],
+  karachi: [24.8607, 67.0011], lagos: [6.5244, 3.3792],
   chennai: [13.0827, 80.2707], kolkata: [22.5726, 88.3639], bangalore: [12.9716, 77.5946],
   hyderabad: [17.385, 78.4867], ahmedabad: [23.0225, 72.5714], pune: [18.5204, 73.8567],
-  jaipur: [26.9124, 75.7873], lucknow: [26.8467, 80.9462], 'los angeles': [34.0522, -118.2437],
+  jaipur: [26.9124, 75.7873], lucknow: [26.8467, 80.9462],
+  'thiruvananthapuram': [8.5241, 76.9366], trivandrum: [8.5241, 76.9366],
+  'thiruvanathapuram': [8.5241, 76.9366],
+  'thiruvannathapuram': [8.5241, 76.9366],
+  kochi: [9.9312, 76.2673], calicut: [11.2588, 75.7804],
+  goa: [15.2993, 74.1240], varanasi: [25.3176, 82.9739],
+  agra: [27.1767, 78.0081], 'new delhi': [28.6139, 77.2090],
+  shimla: [31.1048, 77.1734], manali: [32.2432, 77.1892],
+  darjeeling: [27.0360, 88.2627], gangtok: [27.3389, 88.6065],
+  pondicherry: [11.9416, 79.8083], madurai: [9.9252, 78.1198],
+  coimbatore: [11.0168, 76.9558], tiruchirappalli: [10.7905, 78.7047],
+  mysore: [12.2958, 76.6394], hubli: [15.3647, 75.1240],
+  vijayawada: [16.5062, 80.6480], visakhapatnam: [17.6868, 83.2185],
+  amritsar: [31.6340, 74.8723], jalandhar: [31.3260, 75.5762],
+  indore: [22.7196, 75.8577], bhopal: [23.2599, 77.4126],
+  nagpur: [21.1458, 79.0882], raipur: [21.2514, 81.6296],
+  patna: [25.6093, 85.1376], ranchi: [23.3441, 85.3096],
+  bhubaneswar: [20.2961, 85.8245], cuttack: [20.4625, 85.8830],
+  guwahati: [26.1445, 91.7362], imphal: [24.8170, 93.9368],
+  shillong: [25.5788, 91.8933], aizawl: [23.7271, 92.7176],
+  kohima: [25.6586, 94.1086], itanagar: [27.1044, 93.6920],
+  leh: [34.1526, 77.5771], srinagar: [34.0837, 74.7973],
+  jammu: [32.7266, 74.8570],
 
   // Regional hubs
   'buenos aires': [-34.6037, -58.3816], 'santiago': [-33.4489, -70.6693], lima: [-12.0464, -77.0428],
@@ -497,6 +547,11 @@ export class IntentRouter {
     if (location && (lower.includes('fly') || lower.includes('go to') || lower.includes('zoom to') ||
                      lower.includes('take me') || lower.includes('navigate') || lower.includes('focus'))) {
       return { type: 'fly_to', confidence: 0.95, location };
+    }
+
+    // Digital twin / impact analysis (must precede compute and quick_scan)
+    if (/\b(what if|what will happen|what would happen|impact|damage assessment|flood zone|inundation|sea level rise|sea rises|sea.*rises|sea.*level.*rises|ocean.*rises|water.*level.*rises|how many.*affected|risk analysis|compare.*scenarios?|simulate.*near|what happens if|analyze impact|show.*impact|crisis simulation|disaster scenario|show me.*zone|show me.*flood|show me.*risk|show me.*damage|show me.*impact|show me what|coastal.*flood|flood.*coastal|coastal.*area.*sea|if.*sea.*rises|if.*sea.*level|what.*happens.*if.*sea|what.*happens.*if.*flood|what.*happens.*if.*earthquake|what.*happens.*if.*tsunami|what.*happens.*if.*erupt|what.*happens.*if.*hurricane|what.*happens.*if.*cyclone|what.*happens.*if.*wildfire)\b/i.test(lower)) {
+      return { type: 'digital_twin', confidence: 0.85, location };
     }
 
     // Compute task keywords
@@ -701,6 +756,19 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
 
     return null;
   }
+
+  /**
+   * Register a custom intent prototype at runtime (e.g., from intent discovery).
+   */
+  static addCustomIntent(name: string, description: string, exampleQueries: string[]): void {
+    const type = name.replace(/[^a-z0-9_]/gi, '_').toLowerCase() as IntentResult['type'];
+    INTENT_PROTOTYPES.push({
+      type,
+      confidence: 0.75,
+      patterns: exampleQueries.slice(0, 10),
+    });
+    logger.info({ intentType: type, description, patternCount: exampleQueries.length }, 'Custom intent registered');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -838,7 +906,7 @@ export class CommandParser {
       if (!trimmed.startsWith('{')) continue;
       try {
         const cmd = JSON.parse(trimmed) as GlobeCommand;
-        const validActions = ['flyTo', 'toggleLayer', 'addPin', 'addHeatmap', 'addPolygon', 'addGeoJSON', 'addChart'];
+        const validActions = ['flyTo', 'toggleLayer', 'addPin', 'addHeatmap', 'addPolygon', 'addGeoJSON', 'addChart', 'addPanel'];
         if (validActions.includes(cmd.action)) {
           commands.push(cmd);
         }
@@ -885,8 +953,13 @@ export class SessionManager {
 export class MaterializedViewCache {
   private cache = new NodeCache({ stdTTL: 60, checkperiod: 30 });
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private apiOrigin: string;
+  private refreshIntervalMs: number;
 
-  constructor(private apiOrigin: string, private refreshIntervalMs = 60000) {}
+  constructor(apiOrigin: string, refreshIntervalMs = 60000) {
+    this.apiOrigin = apiOrigin;
+    this.refreshIntervalMs = refreshIntervalMs;
+  }
 
   async start() {
     await this.refresh();
@@ -904,10 +977,10 @@ export class MaterializedViewCache {
   private async refresh() {
     try {
       const [quakes, eonet, weather, gdacs] = await Promise.all([
-        this.fetchJson(`${this.apiOrigin}/api/earthquakes`).catch(() => ({ features: [] })),
-        this.fetchJson(`${this.apiOrigin}/api/eonet`).catch(() => ({ events: [] })),
-        this.fetchJson(`${this.apiOrigin}/api/weather/alerts`).catch(() => ({ features: [] })),
-        this.fetchJson(`${this.apiOrigin}/api/gdacs/alerts`).catch(() => ({ alerts: [] })),
+        this.fetchJson(`${this.apiOrigin}/api/earthquakes`).catch(() => ({ features: [] })) as unknown as { features: Array<Record<string, unknown>> },
+        this.fetchJson(`${this.apiOrigin}/api/eonet`).catch(() => ({ events: [] })) as unknown as { events: Array<Record<string, unknown>> },
+        this.fetchJson(`${this.apiOrigin}/api/weather/alerts`).catch(() => ({ features: [] })) as unknown as { features: Array<Record<string, unknown>> },
+        this.fetchJson(`${this.apiOrigin}/api/gdacs/alerts`).catch(() => ({ alerts: [] })) as unknown as { alerts: Array<Record<string, unknown>> },
       ]);
       const grid = this.buildGrid({ quakes, eonet, weather, gdacs });
       this.cache.set('materialized', grid);

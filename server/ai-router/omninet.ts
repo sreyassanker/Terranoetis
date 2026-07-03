@@ -60,7 +60,7 @@ const PROVIDER_CONFIGS: ProviderConfig[] = [
   { name: 'groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', models: ['llama-4-scout', 'mixtral-8x7b'], rateLimit: 20, tier: 1, apiKeyEnvVar: 'GROQ_API_KEY', supportsStreaming: true },
   { name: 'cerebras', type: 'openai-compatible', baseUrl: 'https://api.cerebras.ai/v1', models: ['llama-3.3-70b'], rateLimit: 1, tier: 1, apiKeyEnvVar: 'CEREBRAS_API_KEY', supportsStreaming: true },
   { name: 'sambanova', type: 'openai-compatible', baseUrl: 'https://api.sambanova.ai/v1', models: ['llama-3.1-8b'], rateLimit: 10, tier: 1, apiKeyEnvVar: 'SAMBANOVA_API_KEY', supportsStreaming: true },
-  { name: 'gemini', type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', models: ['gemini-2.0-flash', 'gemini-2.5-pro'], rateLimit: 60, tier: 2, apiKeyEnvVar: 'GEMINI_API_KEY', supportsStreaming: true, supportsVision: true },
+  { name: 'gemini', type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', models: ['gemini-2.0-flash', 'gemini-2.5-pro'], rateLimit: 60, tier: 2, apiKeyEnvVar: 'GOOGLE_GEMINI_API_KEY', supportsStreaming: true, supportsVision: true },
   { name: 'openrouter', type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1', models: ['deepseek/deepseek-r1', 'qwen/qwen3-235b', 'meta-llama/llama-4-scout'], rateLimit: 200, tier: 2, apiKeyEnvVar: 'OPENROUTER_API_KEY', supportsStreaming: true },
   { name: 'together', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', models: ['meta-llama/Llama-3-70b'], rateLimit: 60, tier: 2, apiKeyEnvVar: 'TOGETHER_API_KEY', supportsStreaming: true },
   { name: 'deepseek', type: 'openai-compatible', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'], rateLimit: 50, tier: 3, apiKeyEnvVar: 'DEEPSEEK_API_KEY', supportsStreaming: true },
@@ -109,19 +109,19 @@ export class Omninet {
       const saved = this.loadState(config.name);
       return {
         config,
-        status: config.local ? 'healthy' : (saved?.status as HealthStatus || 'healthy'),
-        lastChecked: saved?.lastChecked || 0,
-        failureCount: saved?.failureCount || 0,
-        consecutiveSuccesses: saved?.consecutiveSuccesses || 0,
+        status: config.local ? 'healthy' : ((saved?.status as HealthStatus) || 'healthy'),
+        lastChecked: (saved?.lastChecked as number) || 0,
+        failureCount: (saved?.failureCount as number) || 0,
+        consecutiveSuccesses: (saved?.consecutiveSuccesses as number) || 0,
         circuitState: 'closed',
         circuitFailures: 0,
         circuitOpenedAt: 0,
-        tokens: saved?.tokens ?? config.rateLimit,
-        lastTokenRefill: saved?.lastTokenRefill || Date.now(),
-        totalRequests: saved?.totalRequests || 0,
-        totalTokens: saved?.totalTokens || 0,
-        estimatedCost: saved?.estimatedCost || 0,
-        lastLatency: saved?.lastLatency || 1000,
+        tokens: (saved?.tokens as number) ?? config.rateLimit,
+        lastTokenRefill: (saved?.lastTokenRefill as number) || Date.now(),
+        totalRequests: (saved?.totalRequests as number) || 0,
+        totalTokens: (saved?.totalTokens as number) || 0,
+        estimatedCost: (saved?.estimatedCost as number) || 0,
+        lastLatency: (saved?.lastLatency as number) || 1000,
       };
     });
     this.ensureTable();
@@ -326,24 +326,52 @@ export class Omninet {
       }),
     });
     if (!resp.ok) throw new Error(`${config.name} HTTP ${resp.status}`);
-    const data = await resp.json();
-    return data.choices?.[0]?.message?.content || '';
+    const data = await resp.json() as Record<string, unknown>;
+    return ((data.choices as Array<Record<string, unknown>>)?.[0]?.message as Record<string, unknown>)?.content as string || '';
   }
 
   private async callGemini(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
     const apiKey = process.env[config.apiKeyEnvVar!] || process.env.GOOGLE_GEMINI_API_KEY || '';
-    const resp = await fetch(`${config.baseUrl}/models/${model}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal,
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt.slice(0, 16000) }] }],
-        generationConfig: { temperature: options?.temperature ?? 0.3, maxOutputTokens: options?.maxTokens ?? 2048 },
-      }),
-    });
-    if (!resp.ok) throw new Error(`Gemini HTTP ${resp.status}`);
-    const data = await resp.json();
-    return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    if (!apiKey) throw new Error('Gemini API key not configured');
+
+    // Quick retry then let generateText fallback chain switch providers (e.g. Groq)
+    const maxRetries = 1;
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (attempt > 0) {
+        const base = Math.min(1000 * Math.pow(2, attempt), 16000);
+        const jitter = Math.random() * 1000;
+        await new Promise(r => setTimeout(r, base + jitter));
+        if (signal?.aborted) throw new Error('Request aborted');
+      }
+      try {
+        const attemptSignal = signal || AbortSignal.timeout(30000);
+        const resp = await fetch(`${config.baseUrl}/models/${model}:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: attemptSignal,
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt.slice(0, 16000) }] }],
+            generationConfig: { temperature: options?.temperature ?? 0.3, maxOutputTokens: options?.maxTokens ?? 2048 },
+          }),
+        });
+        if (resp.status === 429 || resp.status === 503) {
+          lastError = new Error(`Gemini HTTP ${resp.status} (transient)`);
+          logger.info({ status: resp.status, attempt: attempt + 1 }, 'Gemini transient error, retrying');
+          continue;
+        }
+        if (!resp.ok) throw new Error(`Gemini HTTP ${resp.status}`);
+        const data = await resp.json() as Record<string, unknown>;
+        return (((data.candidates as Array<Record<string, unknown>>)?.[0]?.content as Record<string, unknown>)?.parts as Array<Record<string, unknown>>)?.[0]?.text as string || '';
+      } catch (e) {
+        lastError = e as Error;
+        if ((e as Error).name === 'AbortError' || (e as Error).message?.includes('abort')) {
+          throw new Error('Request timed out');
+        }
+        if (attempt < maxRetries - 1) continue;
+      }
+    }
+    throw lastError || new Error('Gemini: all retries exhausted');
   }
 
   private async callClaude(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
@@ -359,8 +387,8 @@ export class Omninet {
       }),
     });
     if (!resp.ok) throw new Error(`Claude HTTP ${resp.status}`);
-    const data = await resp.json();
-    return data?.content?.[0]?.text || '';
+    const data = await resp.json() as Record<string, unknown>;
+    return (data.content as Array<Record<string, unknown>>)?.[0]?.text as string || '';
   }
 
   private async callOllama(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
@@ -376,8 +404,8 @@ export class Omninet {
       }),
     });
     if (!resp.ok) throw new Error(`Ollama HTTP ${resp.status}`);
-    const data = await resp.json();
-    return data?.response || '';
+    const data = await resp.json() as Record<string, unknown>;
+    return (data.response as string) || '';
   }
 
   private async callHuggingFace(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
@@ -392,8 +420,8 @@ export class Omninet {
       }),
     });
     if (!resp.ok) throw new Error(`HuggingFace HTTP ${resp.status}`);
-    const data = await resp.json();
-    return Array.isArray(data) ? (data[0]?.generated_text || '') : (data?.generated_text || '');
+    const data: unknown = await resp.json();
+    return Array.isArray(data) ? ((data as Array<Record<string, unknown>>)[0]?.generated_text as string || '') : ((data as Record<string, unknown>)?.generated_text as string || '');
   }
 
   // ── Provider Embedding API ─────────────────────────────────────
@@ -421,7 +449,7 @@ export class Omninet {
 
   async generateText(prompt: string, options?: OmninetOptions): Promise<string> {
     this.ensureInit();
-    const complexity = classifyComplexity(prompt, options);
+    const complexity = classifyComplexity(prompt);
     const routeResult = this.route(prompt, complexity, options?.model);
     const state = this.providers.find(s => s.config.name === routeResult.provider)!;
 
@@ -513,8 +541,8 @@ export class Omninet {
 
   private async initLocalPipeline(): Promise<((text: string, opts: { pooling: string; normalize: boolean }) => Promise<{ data: Float32Array }>) | null> {
     try {
-      const { pipeline } = await import('@xenova/transformers');
-      return await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+      const { pipeline: xfPipeline } = await import('@xenova/transformers');
+      return await xfPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2') as unknown as (text: string, opts: { pooling: string; normalize: boolean }) => Promise<{ data: Float32Array }>;
     } catch {
       return null;
     }
@@ -530,8 +558,8 @@ export class Omninet {
         body: JSON.stringify({ content: { parts: [{ text }] } }),
       });
       if (!resp.ok) throw new Error(`Embedding API error: ${resp.status}`);
-      const data = await resp.json();
-      const values = data.embedding?.values as number[];
+      const data = await resp.json() as Record<string, unknown>;
+      const values = (data.embedding as Record<string, unknown>)?.values as number[];
       if (!values) throw new Error('No embedding values');
       return new Float32Array(values);
     }
@@ -544,8 +572,8 @@ export class Omninet {
         body: JSON.stringify({ model: 'text-embedding-ada-002', input: text }),
       });
       if (!resp.ok) throw new Error(`Embedding error: ${resp.status}`);
-      const data = await resp.json();
-      return new Float32Array(data.data?.[0]?.embedding || []);
+      const data = await resp.json() as Record<string, unknown>;
+      return new Float32Array((data.data as Array<Record<string, unknown>>)?.[0]?.embedding as number[] || []);
     }
     if (config.type === 'ollama') {
       const resp = await fetch(`${config.baseUrl}/api/embeddings`, {
@@ -555,8 +583,8 @@ export class Omninet {
         body: JSON.stringify({ model: 'llama3', prompt: text }),
       });
       if (!resp.ok) throw new Error(`Ollama embedding error: ${resp.status}`);
-      const data = await resp.json();
-      return new Float32Array(data.embedding || []);
+      const data = await resp.json() as Record<string, unknown>;
+      return new Float32Array(data.embedding as number[] || []);
     }
     throw new Error(`${config.name}: embedding not supported`);
   }
@@ -565,7 +593,7 @@ export class Omninet {
 
   async *generateStream(prompt: string, options?: OmninetOptions): AsyncGenerator<string, void, unknown> {
     this.ensureInit();
-    const complexity = classifyComplexity(prompt, options);
+    const complexity = classifyComplexity(prompt);
     const routeResult = this.route(prompt, complexity, options?.model);
     const state = this.providers.find(s => s.config.name === routeResult.provider)!;
 

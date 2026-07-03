@@ -131,7 +131,7 @@ export class PredictiveMemory {
           WHERE model_id = ? AND actual_outcome IS NOT NULL
         `).all(row.model_id) as Array<{ probability: number; actual_outcome: string }>;
 
-        const accuracies = allPredictions.map(p => {
+        const accuracies: number[] = allPredictions.map(p => {
           const correct = (p.probability >= 0.5 && p.actual_outcome === 'occurred') ||
                           (p.probability < 0.5 && p.actual_outcome === 'did_not_occur');
           return correct ? 1 : 0;

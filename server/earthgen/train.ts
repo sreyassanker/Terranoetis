@@ -1,5 +1,5 @@
 import { EarthGenModel } from './earthGen';
-import { EarthGenDataset } from './dataset';
+import { EarthGenDataset, type DatasetExample } from './dataset';
 
 interface CLIOptions {
   source: string;

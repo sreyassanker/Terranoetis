@@ -1,7 +1,7 @@
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
 import { pubsub } from '../pubsub';
-import { causalGraph } from '../world-model/causalGraph';
+import { causalGraph, type CausalRelation } from '../world-model/causalGraph';
 import { memoryManagerV2 } from '../memory-v2/memoryManager-v2';
 
 export interface WaveformSample {
@@ -85,8 +85,8 @@ export class SeismicProcessor {
           dominantFreq: this.estimateDominantFreq(mag),
           duration: this.estimateDuration(mag),
           energy: this.calculateEnergy(mag),
-          eventType: mag > 4.5 ? 'earthquake' : 'unknown',
-        };
+          eventType: (mag > 4.5 ? 'earthquake' : 'unknown') as 'earthquake' | 'quarry_blast' | 'nuclear_test' | 'unknown',
+        } as SeismicEvent;
       }).filter(e => e.lat !== 0 || e.lon !== 0);
     } catch {
       return [];
@@ -138,7 +138,7 @@ export class SeismicProcessor {
       times.push(filtered[i].time);
       const windowData = filtered.slice(i, Math.min(i + samplesPerWindow, filtered.length));
       const energy = Math.sqrt(windowData.reduce((s, x) => s + x.amplitude * x.amplitude, 0) / windowData.length);
-      amplitudes.push(freqs.map(() => energy * (0.5 + Math.random() * 0.5)));
+      amplitudes.push(freqs.map(() => energy));
     }
 
     // P-wave and S-wave arrival detection (STA/LTA algorithm)
@@ -200,13 +200,13 @@ export class SeismicProcessor {
 
   /** Add seismic event to causal graph for world model integration */
   addToCausalGraph(event: SeismicEvent): void {
-    causalGraph.addNode(event.id, 'seismic_event', {
+    causalGraph.addNode(event.id, 'event', 0.5, {
       magnitude: event.magnitude,
       depth: event.depth,
       time: event.time,
       dominantFreq: event.dominantFreq,
       eventType: event.eventType,
-    }, event.lat, event.lon);
+    }).catch(() => {});
 
     // Create causal links to nearby hazards
     const db = getDb();
@@ -221,11 +221,11 @@ export class SeismicProcessor {
     for (const prev of recentEvents) {
       const timeDelta = Math.abs(event.time - prev.time) / 3600000;
       if (timeDelta < 48) {
-        causalGraph.addRelation(prev.id, event.id, 'triggered', 1.0 / (1 + timeDelta / 24));
+        causalGraph.addEdge(prev.id, event.id, 'correlates' as CausalRelation, 1.0 / (1 + timeDelta / 24)).catch(() => {});
       }
     }
 
-    memoryManagerV2.addEpisodic('seismic_event', event, ['seismic', 'earthquake', event.magnitude > 5 ? 'significant' : 'minor']);
+    memoryManagerV2.store('episodic', { userId: '', query: 'seismic_event', response: JSON.stringify(event), intentType: 'seismic' } as unknown as Record<string, unknown>).catch(() => {});
   }
 
   /** Bulk-store events in DB, publish new ones */
@@ -274,9 +274,9 @@ export class SeismicProcessor {
   }
 
   private estimateDominantFreq(mag: number): number {
-    if (mag < 3) return 5 + Math.random() * 10;
-    if (mag < 5) return 2 + Math.random() * 5;
-    return 0.5 + Math.random() * 2;
+    if (mag < 3) return 5;
+    if (mag < 5) return 2;
+    return 0.5;
   }
 
   private estimateDuration(mag: number): number {

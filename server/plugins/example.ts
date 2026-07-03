@@ -8,14 +8,16 @@
 
 module.exports = { init };
 
-function init(api) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function init(api: any) {
   api.log('info', 'Example plugin loaded');
 
   api.registerTool({
     name: 'hello_world',
     description: 'A friendly greeting tool',
     category: 'custom',
-    handler: async (args) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    handler: async (args: any) => {
       const name = args.name || 'World';
       return { greeting: `Hello, ${name}! From Earth Intelligence plugin.` };
     },

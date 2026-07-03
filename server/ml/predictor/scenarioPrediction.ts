@@ -41,7 +41,7 @@ export class ScenarioPredictor {
         const scenario = await generateScenario(scenarioType, params);
         clouds.push(scenario.pointCloud);
         probabilities.push(scenario.validationScore);
-        severityScores.push(scenario.validationScore * (0.5 + Math.random() * 0.5));
+        severityScores.push(scenario.validationScore);
       } catch (e) {
         logger.warn({ run: i, err: e }, 'Scenario prediction run failed');
       }

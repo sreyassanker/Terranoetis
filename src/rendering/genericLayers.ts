@@ -5,21 +5,53 @@ import type { LayerCategory } from '@/config/layerConfig';
 import type { GhostProtocol } from './ghostProtocol';
 import type { FutureTensorDomain } from './FutureTensor';
 
+const MAX_ITEMS_PER_LAYER = 500;
+
+const BATCH_SIZE = 50;
+const FRAME_BUDGET_MS = 8;
+
+function batchCreate(
+  items: any[],
+  createFn: (item: any, i: number) => Cesium.Entity | null,
+): Promise<Cesium.Entity[]> {
+  return new Promise((resolve) => {
+    const ents: Cesium.Entity[] = [];
+    let idx = 0;
+
+    function processBatch() {
+      const start = performance.now();
+      while (idx < items.length) {
+        const ent = createFn(items[idx], idx);
+        if (ent) ents.push(ent);
+        idx++;
+        if (idx % BATCH_SIZE === 0 && performance.now() - start > FRAME_BUDGET_MS) break;
+      }
+      if (idx < items.length) {
+        requestAnimationFrame(processBatch);
+      } else {
+        resolve(ents);
+      }
+    }
+    requestAnimationFrame(processBatch);
+  });
+}
+
 export async function renderLayer(
   viewer: Cesium.Viewer,
   layer: LayerCategory,
   items: any[],
   ghostProtocol?: GhostProtocol | null,
 ): Promise<Cesium.Entity[]> {
+  const capped = items.slice(0, MAX_ITEMS_PER_LAYER);
   switch (layer.type) {
     case 'point':
-      return renderPoints(viewer, layer, items, ghostProtocol);
+      return renderPoints(viewer, layer, capped, ghostProtocol);
     case 'heatmap':
-      return renderHeatmap(viewer, layer, items, ghostProtocol);
+      return renderHeatmap(viewer, layer, capped, ghostProtocol);
     case 'geojson':
-      return renderGeoJson(viewer, layer, items, ghostProtocol);
+      return renderGeoJson(viewer, layer, capped, ghostProtocol);
     case 'polygon':
-      return renderPolygons(viewer, layer, items, ghostProtocol);
+      return renderPolygons(viewer, layer, capped, ghostProtocol);
     default:
       return [];
   }
@@ -27,30 +59,14 @@ export async function renderLayer(
 
 /**
  * Maps a Cesium layer group ID to a FutureTensor predictive domain.
- * Seismic maps directly; weather/atmosphere → 'weather'; ocean/argo/tides/ports
- * → 'maritime'; aviation → 'aviation'; everything else defaults to 'seismic'
- * for static-layer probability halo rendering.
+ * Returns null for static layers that don't need probability trails.
+ * Only maritime (ships) and aviation (aircraft) entities move fast enough
+ * to benefit from GhostProtocol prediction trails.
  */
-export function mapGroupToDomain(group: string): FutureTensorDomain {
+export function mapGroupToDomain(group: string): FutureTensorDomain | null {
   switch (group) {
-    case 'seismic':
-      return 'seismic';
-    case 'weather':
-    case 'atmosphere':
-      return 'weather';
-    case 'aviation':
-      return 'aviation';
-    case 'ocean':
-    case 'argo':
-    case 'tides':
-    case 'ports':
-    case 'usgs_water':
-      return 'maritime';
-    case 'satellite':
-    case 'space':
-      return 'aviation';
     default:
-      return 'seismic';
+      return null;
   }
 }
 
@@ -59,24 +75,19 @@ function renderPoints(
   layer: LayerCategory,
   items: any[],
   ghostProtocol?: GhostProtocol | null,
-): Cesium.Entity[] {
-  const ents: Cesium.Entity[] = [];
+): Promise<Cesium.Entity[]> {
   const color = Cesium.Color.fromCssColorString(layer.color || '#3b82f6');
   const isSpace = layer.group === 'space';
   const domain = mapGroupToDomain(layer.group);
 
-  viewer.entities.suspendEvents();
-  try {
-
-  items.forEach((item: any, i: number) => {
+  function createOne(item: any, i: number): Cesium.Entity | null {
     const lat = item.lat ?? item.latitude ?? item.latDeg;
     const lon = item.lon ?? item.longitude ?? item.lng ?? item.lonDeg;
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
     const name = item.name || item.label || item.title || item.id || `${layer.label} ${i}`;
     const entityId = `${layer.id}_p_${i}`;
 
-    // Build orbital propagator for space-group satellites (TLE + SGP4 client-side animation)
     let satrec: any = null;
     if (isSpace && item.tle1 && item.tle2) {
       try { satrec = satellite.twoline2satrec(item.tle1, item.tle2); } catch { /* ignore */ }
@@ -131,21 +142,16 @@ function renderPoints(
       show: true,
     };
 
-    if (ghostProtocol) {
-      // GhostProtocol handles entity creation via GhostEntity constructor
+    if (ghostProtocol && domain) {
       ghostProtocol.createGhost(entityId, config, domain, null, null);
       const ghostEntity = ghostProtocol.getGhost(entityId)?.getRealEntity();
-      if (ghostEntity) ents.push(ghostEntity);
+      return ghostEntity ?? null;
     } else {
-      const ent = viewer.entities.add(config);
-      ents.push(ent);
+      return viewer.entities.add(config);
     }
-  });
-
-  } finally {
-    viewer.entities.resumeEvents();
   }
-  return ents;
+
+  return batchCreate(items, createOne);
 }
 
 function renderHeatmap(
@@ -153,8 +159,7 @@ function renderHeatmap(
   layer: LayerCategory,
   items: any[],
   ghostProtocol?: GhostProtocol | null,
-): Cesium.Entity[] {
-  const ents: Cesium.Entity[] = [];
+): Promise<Cesium.Entity[]> {
   const baseColor = Cesium.Color.fromCssColorString(layer.color || '#f97316');
   const domain = mapGroupToDomain(layer.group);
   const sizes = items.map((item: any) => {
@@ -164,11 +169,9 @@ function renderHeatmap(
     return { lat, lon, val: item.value ?? item.magnitude ?? item.intensity ?? item.count ?? 1, item };
   }).filter(Boolean) as { lat: number; lon: number; val: number; item: any }[];
 
-  viewer.entities.suspendEvents();
-  try {
-
   const maxVal = Math.max(1, ...sizes.map(s => s.val));
-  sizes.forEach((s, i) => {
+
+  function createOne(s: { lat: number; lon: number; val: number; item: any }, i: number): Cesium.Entity | null {
     const t = s.val / maxVal;
     const alpha = 0.15 + t * 0.5;
     const r = 10000 + t * 40000;
@@ -206,20 +209,16 @@ function renderHeatmap(
       },
     };
 
-    if (ghostProtocol) {
+    if (ghostProtocol && domain) {
       ghostProtocol.createGhost(entityId, config, domain, null, null);
       const ghostEntity = ghostProtocol.getGhost(entityId)?.getRealEntity();
-      if (ghostEntity) ents.push(ghostEntity);
+      return ghostEntity ?? null;
     } else {
-      const ent = viewer.entities.add(config);
-      ents.push(ent);
+      return viewer.entities.add(config);
     }
-  });
-
-  } finally {
-    viewer.entities.resumeEvents();
   }
-  return ents;
+
+  return batchCreate(sizes, createOne);
 }
 
 async function renderGeoJson(
@@ -254,7 +253,7 @@ async function renderGeoJson(
       viewer.entities.add(e);
 
       // Attach ghost entity for probability trail/halo alongside geojson geometry
-      if (ghostProtocol) {
+      if (ghostProtocol && domain) {
         const entityId = `${layer.id}_gj_${i}`;
         const pos = e.position?.getValue(Cesium.JulianDate.now());
         if (pos instanceof Cesium.Cartesian3) {
@@ -279,14 +278,13 @@ function renderPolygons(
   layer: LayerCategory,
   items: any[],
   ghostProtocol?: GhostProtocol | null,
-): Cesium.Entity[] {
-  const ents: Cesium.Entity[] = [];
+): Promise<Cesium.Entity[]> {
   const color = Cesium.Color.fromCssColorString(layer.color || '#3b82f6');
   const domain = mapGroupToDomain(layer.group);
 
-  items.forEach((item: any, i: number) => {
+  function createOne(item: any, i: number): Cesium.Entity | null {
     const coords = item.coordinates ?? item.geometry?.coordinates ?? [];
-    if (!coords.length) return;
+    if (!coords.length) return null;
 
     try {
       const ring = Array.isArray(coords[0]) ? coords[0] : coords;
@@ -302,7 +300,7 @@ function renderPolygons(
         })
         .filter(Boolean) as Cesium.Cartesian3[];
 
-      if (positions.length < 3) return;
+      if (positions.length < 3) return null;
 
       const entityId = `${layer.id}_poly_${i}`;
 
@@ -324,21 +322,20 @@ function renderPolygons(
         },
       };
 
-      if (ghostProtocol) {
-        // Use polygon centroid as position for the ghost entity
+      if (ghostProtocol && domain) {
         const centroid = computePolygonCentroid(positions);
         ghostProtocol.createGhost(entityId, { ...config, position: centroid }, domain, null, null);
         const ghostEntity = ghostProtocol.getGhost(entityId)?.getRealEntity();
-        if (ghostEntity) ents.push(ghostEntity);
+        return ghostEntity ?? null;
       } else {
-        const ent = viewer.entities.add(config);
-        ents.push(ent);
+        return viewer.entities.add(config);
       }
     } catch {
-      // skip invalid geometry
+      return null;
     }
-  });
-  return ents;
+  }
+
+  return batchCreate(items, createOne);
 }
 
 /**
@@ -365,8 +362,11 @@ export async function fetchLayerData(layer: LayerCategory): Promise<any[]> {
     desc: layer.description,
   });
   const apiPath = `/api/data/${layer.id}?${params}`;
+  const headers: Record<string, string> = {};
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   try {
-    const resp = await fetch(apiPath, { cache: 'no-store' });
+    const resp = await fetch(apiPath, { cache: 'no-store', headers });
     if (resp.ok) {
       const data = await resp.json();
       return (data as any).items ?? (data as any).features ?? data;

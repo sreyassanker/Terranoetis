@@ -82,7 +82,7 @@ function persistAuth(token: string, userId: string, role: string): void {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuth] = useState<AuthState>(loadAuth);
-  const [authReady, setAuthReady] = useState(() => !import.meta.env.DEV || loadAuth().isLoggedIn);
+  const [authReady, setAuthReady] = useState(() => !import.meta.env.DEV);
 
   useEffect(() => {
     const handler = () => setAuth(loadAuth());
@@ -94,18 +94,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // DEV mode: always try dev-login for a fresh token, fall back to stored token
   useEffect(() => {
-    if (!import.meta.env.DEV || auth.isLoggedIn) {
+    if (!import.meta.env.DEV) {
       setAuthReady(true);
       return;
     }
     let cancelled = false;
-    (async () => {
+    let retries = 0;
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1500;
+    const stored = loadAuth();
+    (async function tryLogin() {
       try {
         const resp = await fetch('/api/auth/dev-login', { method: 'POST' });
-        if (!resp.ok || cancelled) return;
+        if (!resp.ok) throw new Error(`dev-login ${resp.status}`);
         const data = await resp.json();
-        if (!data?.token || cancelled) return;
+        if (!data?.token) throw new Error('no token in dev-login response');
         persistAuth(data.token, data.userId, data.role ?? 'user');
         setAuth({
           user: data.userId,
@@ -116,13 +121,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         window.dispatchEvent(new CustomEvent('auth:updated'));
       } catch {
-        /* dev-login optional */
+        if (cancelled) return;
+        retries++;
+        if (retries < MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, RETRY_DELAY));
+          if (!cancelled) return tryLogin();
+        }
+        if (!cancelled && stored.isLoggedIn) {
+          setAuth(stored);
+        }
       } finally {
         if (!cancelled) setAuthReady(true);
       }
     })();
     return () => { cancelled = true; };
-  }, [auth.isLoggedIn]);
+  }, []);
+
+  useEffect(() => {
+    const handler = () => {
+      const reloaded = loadAuth();
+      setAuth(reloaded);
+      if (!reloaded.isLoggedIn) {
+        window.dispatchEvent(new CustomEvent('auth:required'));
+      }
+    };
+    window.addEventListener('auth:required', handler);
+    return () => window.removeEventListener('auth:required', handler);
+  }, []);
 
   const login = useCallback(async (username: string, password: string) => {
     const resp = await fetch('/api/auth/login', {

@@ -1,9 +1,42 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import ScenarioGallery from '@/components/scenarios/ScenarioGallery';
+import type { ScenarioSummary } from '@/components/scenarios/types';
+import { authHeaders } from '@/context/AuthContext';
+
+function useScenarioSummaries() {
+  const [scenarios, setScenarios] = useState<ScenarioSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function load() {
+      try {
+        const resp = await fetch('/api/scenarios/search', {
+          headers: { ...authHeaders() },
+          signal: controller.signal,
+        });
+        if (!resp.ok) throw new Error(resp.status === 401 ? 'Not logged in' : 'Failed to load scenarios');
+        const data = await resp.json();
+        if (!cancelled) setScenarios(data.scenarios ?? []);
+      } catch (err: unknown) {
+        if (!cancelled && err instanceof Error && err.name !== 'AbortError') setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => { cancelled = true; controller.abort(); };
+  }, []);
+
+  return { scenarios, loading, error };
+}
 
 const ScenariosPage: React.FC = () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const dummyScenarios: any[] = [];
+  const { scenarios, loading, error } = useScenarioSummaries();
 
   return (
     <div className="v2-scenarios-page">
@@ -22,9 +55,11 @@ const ScenariosPage: React.FC = () => {
       </div>
       <div className="v2-scenarios-body">
         <ScenarioGallery
-          scenarios={dummyScenarios}
+          scenarios={scenarios}
+          loading={loading}
+          error={error}
           onSelect={(id) => console.log('selected scenario', id)}
-          onCreateNew={() => console.log('create new')}
+          onCreateNew={() => { window.location.href = '/'; }}
           onClose={() => {}}
         />
       </div>

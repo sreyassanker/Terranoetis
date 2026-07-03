@@ -68,7 +68,6 @@ const VolumetricWeather: React.FC<VolumetricWeatherProps> = ({
 
   const config = useMemo(() => PARTICLE_CONFIGS[type], [type]);
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _getShadersForType = useCallback((particleType: string): string => {
     switch (particleType) {
       case 'cloud':
@@ -82,7 +81,6 @@ const VolumetricWeather: React.FC<VolumetricWeatherProps> = ({
     }
   }, []);
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _createParticleSystem = useCallback(() => {
     if (!viewer || !viewer.scene || !visible || !cesium) return;
     const emitter = new cesium.CircleEmitter(config.emitterRadius);

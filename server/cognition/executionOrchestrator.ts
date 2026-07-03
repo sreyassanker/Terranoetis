@@ -118,7 +118,9 @@ Provide a concise, complete answer based on this reasoning.`;
     logger.info({ query: query.slice(0, 80) }, 'ToT execution started');
     const start = Date.now();
 
-    const solveResult = await this.tot.solve(query, context);
+    const _tree = new ReasoningTree(query, context);
+    const totEngine = new TreeOfThoughts(this.llmRouter, this.toolRegistry);
+    const solveResult = await totEngine.solve(query, context);
     const elapsed = Date.now() - start;
 
     logger.info({ elapsed, confidence: solveResult.confidence, pathLength: solveResult.path.length }, 'ToT execution complete');

@@ -1,6 +1,7 @@
 import * as Cesium from 'cesium';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import { point, polygon } from '@turf/helpers';
+import { throttledRender } from '@/lib/throttledRender';
 
 export interface StudyAreaItem {
   id: string;
@@ -15,6 +16,150 @@ export interface StudyAreaItem {
   color: string;
   width: number;
   outlinePrimitive?: Cesium.GroundPolylinePrimitive;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Satellite Imagery Loading — multi-source (GIBS, EOX, WorldCover)
+   ═══════════════════════════════════════════════════════════════════ */
+
+import {
+  GIBS_PRODUCTS, EXTERNAL_DATA_SOURCES, GROUP_LABELS,
+  groupProducts,
+  type GibsProduct, type SatelliteDataSource,
+} from '@/rendering/satelliteDataSources';
+
+export { GIBS_PRODUCTS, EXTERNAL_DATA_SOURCES, GROUP_LABELS, groupProducts };
+export type { GibsProduct, SatelliteDataSource };
+
+/** Max concurrent satellite imagery layers to prevent GPU heat accumulation */
+const MAX_SAT_LAYERS = 5;
+
+/** Evict oldest sat_ layers when exceeding the cap */
+function enforceLayerCap(viewer: Cesium.Viewer): void {
+  const layers = viewer.scene.imageryLayers;
+  const satLayers: Cesium.ImageryLayer[] = [];
+  for (let i = 0; i < layers.length; i++) {
+    const l = layers.get(i);
+    if (l?.name?.startsWith('sat_')) satLayers.push(l);
+  }
+  while (satLayers.length > MAX_SAT_LAYERS) {
+    const oldest = satLayers.shift()!;
+    viewer.scene.imageryLayers.remove(oldest, true);
+  }
+}
+
+/** Load a GIBS WMS imagery layer scoped to a study area bbox */
+export function loadGibsImageryForBbox(
+  viewer: Cesium.Viewer,
+  layer: string,
+  bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number },
+  date: string,
+  opacity: number = 0.7,
+  studyAreaId?: string,
+  cloudCover?: number,
+): Cesium.ImageryLayer {
+  const params: Record<string, string> = {
+    transparent: 'true',
+    format: 'image/png',
+    time: date,
+  };
+  if (cloudCover !== undefined && cloudCover < 100) {
+    params.cloudcover = String(cloudCover);
+  }
+  const provider = new Cesium.WebMapServiceImageryProvider({
+    url: 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
+    layers: layer,
+    parameters: params,
+    rectangle: Cesium.Rectangle.fromDegrees(bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax),
+  });
+  const imgLayer = viewer.scene.imageryLayers.addImageryProvider(provider);
+  imgLayer.alpha = opacity;
+  imgLayer.name = `sat_${studyAreaId || 'default'}_${layer}_${date}${cloudCover !== undefined && cloudCover < 100 ? `_cc${cloudCover}` : ''}`;
+  enforceLayerCap(viewer);
+  return imgLayer;
+}
+
+/** Load an XYZ tile imagery layer (EOX, Esri, MapTiler) */
+export function loadXyzImageryForBbox(
+  viewer: Cesium.Viewer,
+  url: string,
+  bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number },
+  opacity: number = 0.7,
+  studyAreaId?: string,
+  layerName?: string,
+): Cesium.ImageryLayer {
+  const provider = new Cesium.UrlTemplateImageryProvider({
+    url,
+    rectangle: Cesium.Rectangle.fromDegrees(bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax),
+  });
+  const imgLayer = viewer.scene.imageryLayers.addImageryProvider(provider);
+  imgLayer.alpha = opacity;
+  imgLayer.name = `sat_${studyAreaId || 'default'}_${layerName || 'xyz'}_bbox`;
+  enforceLayerCap(viewer);
+  return imgLayer;
+}
+
+/** Load a WMS imagery layer from any WMS endpoint (WorldCover, etc.) */
+export function loadWmsImageryForBbox(
+  viewer: Cesium.Viewer,
+  url: string,
+  layer: string,
+  bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number },
+  opacity: number = 0.7,
+  studyAreaId?: string,
+  cloudCover?: number,
+): Cesium.ImageryLayer {
+  const params: Record<string, string> = {
+    transparent: 'true',
+    format: 'image/png',
+  };
+  if (cloudCover !== undefined && cloudCover < 100) {
+    params.MAXCC = String(cloudCover);
+  }
+  const provider = new Cesium.WebMapServiceImageryProvider({
+    url,
+    layers: layer,
+    parameters: params,
+    rectangle: Cesium.Rectangle.fromDegrees(bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax),
+  });
+  const imgLayer = viewer.scene.imageryLayers.addImageryProvider(provider);
+  imgLayer.alpha = opacity;
+  imgLayer.name = `sat_${studyAreaId || 'default'}_${layer}_bbox`;
+  enforceLayerCap(viewer);
+  return imgLayer;
+}
+
+/** Remove all satellite imagery layers for a specific study area */
+export function removeGibsImageryForStudyArea(
+  viewer: Cesium.Viewer,
+  studyAreaId: string,
+): void {
+  const layers = viewer.scene.imageryLayers;
+  const toRemove: Cesium.ImageryLayer[] = [];
+  for (let i = 0; i < layers.length; i++) {
+    const l = layers.get(i);
+    if (l?.name?.startsWith(`sat_${studyAreaId}_`)) {
+      toRemove.push(l);
+    }
+  }
+  for (const l of toRemove) {
+    viewer.scene.imageryLayers.remove(l, true);
+  }
+}
+
+/** Update opacity for all satellite imagery layers of a study area */
+export function updateGibsImageryOpacity(
+  viewer: Cesium.Viewer,
+  studyAreaId: string,
+  opacity: number,
+): void {
+  const layers = viewer.scene.imageryLayers;
+  for (let i = 0; i < layers.length; i++) {
+    const l = layers.get(i);
+    if (l?.name?.startsWith(`sat_${studyAreaId}_`)) {
+      l.alpha = opacity;
+    }
+  }
 }
 
 let areaIdCounter = 0;
@@ -212,7 +357,7 @@ export function filterDataEntitiesByStudyArea(
       entity.show = false;
     }
   }
-  viewer.scene.requestRender();
+  throttledRender(viewer);
 }
 
 export function restoreHiddenEntities(viewer: Cesium.Viewer): void {
@@ -230,7 +375,7 @@ export function restoreHiddenEntities(viewer: Cesium.Viewer): void {
     }
   }
   hiddenEntityIds.clear();
-  viewer.scene.requestRender();
+  throttledRender(viewer);
 }
 
 export function removeStudyAreaFromGlobe(
@@ -372,7 +517,7 @@ export function updateStudyAreaStyle(
 
   item.color = newColor;
   item.width = newWidth;
-  viewer.scene.requestRender();
+  throttledRender(viewer);
 }
 
 export function setStudyAreaVisibility(
@@ -389,7 +534,7 @@ export function setStudyAreaVisibility(
   if (item.outlinePrimitive) {
     item.outlinePrimitive.show = visible;
   }
-  viewer.scene.requestRender();
+  throttledRender(viewer);
 }
 
 export function setStudyAreaActive(

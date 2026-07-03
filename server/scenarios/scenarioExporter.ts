@@ -14,20 +14,33 @@ export interface GeoJSONCollection {
   features: GeoJSONFeature[];
 }
 
+/** Convert unit-sphere [x,y,z] to [longitude, latitude, altitude_meters] */
+function sphereToGeoCoords(x: number, y: number, z: number): [number, number, number] {
+  const r = Math.sqrt(x * x + y * y + z * z);
+  if (r === 0) return [0, 0, 0];
+  const lat = Math.asin(Math.max(-1, Math.min(1, z / r))) * (180 / Math.PI);
+  const lon = Math.atan2(y, x) * (180 / Math.PI);
+  const altMeters = (1 - r) * 6371000; // convert unit-sphere radius to meters above/below ellipsoid
+  return [lon, lat, altMeters];
+}
+
 export function exportToGeoJSON(scenario: ScenarioBase): GeoJSONCollection {
-  const features: GeoJSONFeature[] = scenario.pointCloud.map((p, i) => ({
-    type: 'Feature' as const,
-    geometry: {
-      type: 'Point' as const,
-      coordinates: [p.x, p.y, p.z],
-    },
-    properties: {
-      index: i,
-      scenarioId: scenario.id,
-      scenarioType: scenario.type,
-      ...scenario.params,
-    },
-  }));
+  const features: GeoJSONFeature[] = scenario.pointCloud.map((p, i) => {
+    const [lon, lat, alt] = sphereToGeoCoords(p.x, p.y, p.z);
+    return {
+      type: 'Feature' as const,
+      geometry: {
+        type: 'Point' as const,
+        coordinates: [lon, lat, alt],
+      },
+      properties: {
+        index: i,
+        scenarioId: scenario.id,
+        scenarioType: scenario.type,
+        ...scenario.params,
+      },
+    };
+  });
 
   return { type: 'FeatureCollection', features };
 }
@@ -52,11 +65,13 @@ export interface CZMLPacket {
 
 export function exportToCZML(scenario: ScenarioBase): CZMLPacket[] {
   const positions: number[] = [];
-  scenario.pointCloud.slice(0, 500).forEach(p => {
-    const lat = Math.asin(p.z) * (180 / Math.PI);
+  const maxPoints = Math.min(scenario.pointCloud.length, 2000);
+  scenario.pointCloud.slice(0, maxPoints).forEach(p => {
+    const r = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+    const lat = r > 0 ? Math.asin(Math.max(-1, Math.min(1, p.z / r))) * (180 / Math.PI) : 0;
     const lon = Math.atan2(p.y, p.x) * (180 / Math.PI);
-    const height = p.z * 1000;
-    positions.push(lon, lat, height);
+    const heightMeters = (1 - r) * 6371000;
+    positions.push(lon, lat, heightMeters);
   });
 
   return [
@@ -64,7 +79,7 @@ export function exportToCZML(scenario: ScenarioBase): CZMLPacket[] {
       id: 'document',
       name: `Scenario: ${scenario.id}`,
       version: '1.0',
-    } as unknown as Record<string, unknown>,
+    } as CZMLPacket,
     {
       id: scenario.id,
       name: `${scenario.type} — ${scenario.id}`,

@@ -93,7 +93,8 @@ describe('validate middleware', () => {
     const req: Record<string, unknown> = { body: { message: 'test query' } };
     const res: Record<string, unknown> = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
     const next = vi.fn();
-    middleware(req, res, next);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    middleware(req as any, res as any, next);
     expect(next).toHaveBeenCalled();
   });
 
@@ -102,7 +103,8 @@ describe('validate middleware', () => {
     const req: Record<string, unknown> = { body: {} };
     const res: Record<string, unknown> = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
     const next = vi.fn();
-    middleware(req, res, next);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    middleware(req as any, res as any, next);
     expect(res.status).toHaveBeenCalledWith(400);
     expect(next).not.toHaveBeenCalled();
   });

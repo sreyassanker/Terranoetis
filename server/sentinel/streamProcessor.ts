@@ -118,7 +118,7 @@ export class StreamProcessor {
     let country: string | undefined;
     const locLabel = `${raw.lat.toFixed(2)},${raw.lon.toFixed(2)}`;
     try {
-      const entity = await causalGraph.getNodeByName(locLabel).catch(() => null);
+      const entity = causalGraph.getNodeByName(locLabel);
       if (entity) kgRelations.push(entity.name);
     } catch { /* skip */ }
 

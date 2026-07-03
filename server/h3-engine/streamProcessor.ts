@@ -33,7 +33,7 @@ export class H3StreamProcessor {
       flushIntervalMs: 5000,
       ...config,
     };
-    if (this.config.flushIntervalMs > 0) {
+    if ((this.config.flushIntervalMs ?? 0) > 0) {
       this.flushTimer = setInterval(() => this.flush(), this.config.flushIntervalMs);
     }
   }

@@ -35,13 +35,13 @@ router.get('/api/spatial/h3', (req: Request, res: Response) => {
   try {
     const lat = parseFloat(req.query.lat as string);
     const lon = parseFloat(req.query.lon as string);
-    const res = parseInt(req.query.res as string, 10) || 6;
+    const resolution = parseInt(req.query.res as string, 10) || 6;
     if (isNaN(lat) || isNaN(lon)) {
       return res.status(400).json({ error: 'lat and lon are required' });
     }
-    const h3Index = coordsToH3(lat, lon, res);
+    const h3Index = coordsToH3(lat, lon, resolution);
     const center = h3ToCoords(h3Index);
-    res.json({ h3Index, resolution: res, center });
+    res.json({ h3Index, resolution, center });
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }

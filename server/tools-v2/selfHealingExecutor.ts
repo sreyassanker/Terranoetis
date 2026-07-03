@@ -32,71 +32,8 @@ export interface ExecutionLog {
 const RETRY_DELAYS = [1000, 3000, 7000];
 const MAX_RETRIES = 3;
 
-// ── Synthetic fallback data ═══════════════════════════════════
-
-function generateSyntheticApproximation(
-  toolName: string,
-  input: Record<string, unknown>,
-): { data: unknown; confidence: number } {
-  const lower = toolName.toLowerCase();
-
-  if (lower.includes('earthquake') || lower.includes('quake')) {
-    const lat = (input.lat as number) || 35;
-    const lon = (input.lon as number) || 139;
-    return {
-      data: {
-        features: Array.from({ length: 5 }, (_, i) => ({
-          type: 'Feature',
-          properties: {
-            mag: parseFloat((2.5 + Math.random() * 4).toFixed(1)),
-            place: `${(lat + (Math.random() - 0.5) * 2).toFixed(2)}, ${(lon + (Math.random() - 0.5) * 2).toFixed(2)}`,
-            time: Date.now() - i * 3600000,
-            synthetic: true,
-            confidence: 0.4,
-          },
-          geometry: { type: 'Point', coordinates: [lon + (Math.random() - 0.5) * 2, lat + (Math.random() - 0.5) * 2] },
-        })),
-      },
-      confidence: 0.4,
-    };
-  }
-
-  if (lower.includes('weather') || lower.includes('temperature') || lower.includes('forecast')) {
-    return {
-      data: {
-        temperature: parseFloat((15 + Math.random() * 15).toFixed(1)),
-        humidity: Math.round(40 + Math.random() * 40),
-        windSpeed: parseFloat((5 + Math.random() * 20).toFixed(1)),
-        conditions: ['clear', 'cloudy', 'rainy', 'partly_cloudy'][Math.floor(Math.random() * 4)],
-        synthetic: true,
-        confidence: 0.35,
-      },
-      confidence: 0.35,
-    };
-  }
-
-  if (lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb')) {
-    return {
-      data: {
-        aircraft: Array.from({ length: 8 }, () => ({
-          hex: Math.random().toString(16).slice(2, 8),
-          flight: `FL${Math.floor(100 + Math.random() * 900)}`,
-          lat: 35 + Math.random() * 10,
-          lon: 135 + Math.random() * 10,
-          alt: Math.floor(30000 + Math.random() * 10000),
-          speed: Math.floor(400 + Math.random() * 200),
-          synthetic: true,
-        })),
-      },
-      confidence: 0.3,
-    };
-  }
-
-  return {
-    data: { synthetic: true, message: 'Data temporarily unavailable — showing estimated values', confidence: 0.2 },
-    confidence: 0.2,
-  };
-}
+// ── Synthetic fallback data — REMOVED ──────────────────────────────
+// Never generate fake data. Return error instead.
 
 // ── SelfHealingExecutor ─────────────────────────────────────────
 
@@ -170,44 +107,11 @@ export class SelfHealingExecutor {
       } catch { /* fallback also failed */ }
     }
 
-    // Phase 3: Synthetic approximation
-    if (options?.allowSynthetic !== false) {
-      const synth = generateSyntheticApproximation(toolName, input);
-      data = synth.data;
-      const latencyMs = Date.now() - start;
-
-      this.log({ toolName, input, data, success: false, error: lastError, fallbackType: 'synthetic_approximation', latencyMs, retryCount: MAX_RETRIES });
-      logger.warn({ tool: toolName, confidence: synth.confidence }, 'Using synthetic approximation');
-
-      // Try auto-repair in background
-      this.attemptRepair(toolName);
-
-      return {
-        success: false,
-        data,
-        error: lastError,
-        fallbackUsed: true,
-        fallbackType: 'synthetic_approximation',
-        syntheticConfidence: synth.confidence,
-        latencyMs,
-        retryCount: MAX_RETRIES,
-      };
-    }
-
-    // Phase 4: Graceful error
+    // All retries and fallbacks exhausted — return error, NEVER fake data
     const latencyMs = Date.now() - start;
     this.log({ toolName, input, data: null, success: false, error: lastError, fallbackType: 'graceful_error', latencyMs, retryCount: MAX_RETRIES });
     logger.error({ tool: toolName, err: lastError }, 'All execution paths exhausted');
-
-    return {
-      success: false,
-      data: null,
-      error: lastError,
-      fallbackUsed: true,
-      fallbackType: 'graceful_error',
-      latencyMs,
-      retryCount: MAX_RETRIES,
-    };
+    return { success: false, data: null, error: lastError, fallbackUsed: false, fallbackType: 'graceful_error', latencyMs, retryCount: MAX_RETRIES };
   }
 
   /* ── Fallback resolution ─────────────────────────────────── */

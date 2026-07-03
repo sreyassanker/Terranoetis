@@ -28,7 +28,8 @@ describe('JWT sign/verify', () => {
 });
 
 describe('authGuard', () => {
-  let authGuard: (req: unknown, res: unknown, next: unknown) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let authGuard: (req: any, res: any, next: any) => void;
 
   beforeAll(async () => {
     process.env.JWT_SECRET = 'test-secret-key';
@@ -68,7 +69,8 @@ describe('authGuard', () => {
 });
 
 describe('sseAuthGuard', () => {
-  let sseAuthGuard: (req: unknown, res: unknown, next: unknown) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sseAuthGuard: (req: any, res: any, next: any) => void;
 
   beforeAll(async () => {
     process.env.JWT_SECRET = 'test-secret-key';

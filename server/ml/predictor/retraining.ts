@@ -153,7 +153,8 @@ export class RetrainingPipeline {
       const tArr = this.currentModel.flow.sampleTimestep();
       const t = tArr[0] || 0.5;
       const { xt } = this.currentModel.flow.computeVelocity(x0, ex.cloud, t);
-      const predictedVel = this.currentModel.velocityFn(xt, t, ex.conditioning);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const predictedVel = (this.currentModel as any).velocityFn(xt, t, ex.conditioning);
       totalLoss += this.currentModel.flow.computeLoss(predictedVel, x0, ex.cloud);
     }
     return totalLoss / valSet.length;

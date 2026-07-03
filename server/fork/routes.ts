@@ -11,7 +11,7 @@ forkRouter.post('/create', (req, res) => {
       res.status(400).json({ error: 'Missing required fields: name, lat, lon' });
       return;
     }
-    const userId = (req as Record<string, unknown>).userId || 'anonymous';
+    const userId = ((req as unknown as Record<string, unknown>).userId as string) || 'anonymous';
     const fork = forkManager.createFork(body, userId);
     res.status(201).json({ forkId: fork.forkId, name: fork.name, status: fork.status, divergenceScore: fork.divergenceScore });
   } catch (err) {

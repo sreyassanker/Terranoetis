@@ -112,22 +112,8 @@ export default function AlertPanel({ onClose, onFlyTo }: AlertPanelProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <div className="panel-header">
-        <span style={{ fontWeight: 700, fontSize: 13 }}>
-          {showHistory ? '📋 Alert History' : '🔔 Proactive Alerts'}
-        </span>
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <button onClick={() => setShowHistory(!showHistory)}
-            style={{ fontSize: 9, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-dim)', cursor: 'pointer', padding: '2px 6px' }}>
-            {showHistory ? 'Live' : 'History'}
-          </button>
-          <button className="ai-close" onClick={onClose}>✕</button>
-        </div>
-      </div>
-
-      {!showHistory && (
-        <>
-          {/* Filter chips */}
-          <div style={{ display: 'flex', gap: 4, padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>
+        {!showHistory && (
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             {[
               { key: 'all', label: `All (${alerts.length})` },
               { key: 'critical', label: `🔴 ${criticalCount}` },
@@ -145,7 +131,18 @@ export default function AlertPanel({ onClose, onFlyTo }: AlertPanelProps) {
               </button>
             ))}
           </div>
+        )}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 'auto' }}>
+          <button onClick={() => setShowHistory(!showHistory)}
+            style={{ fontSize: 9, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-dim)', cursor: 'pointer', padding: '2px 6px' }}>
+            {showHistory ? 'Live' : 'History'}
+          </button>
+          <button className="ai-close" onClick={onClose}>✕</button>
+        </div>
+      </div>
 
+      {!showHistory && (
+        <>
           {/* Alert Cards */}
           <div style={{ flex: 1, overflow: 'auto' }}>
             {loading && <div style={{ padding: 20, textAlign: 'center', fontSize: 11, color: 'var(--text-dim)' }}>Loading alerts...</div>}

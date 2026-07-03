@@ -18,8 +18,8 @@ export interface FarsiteOutputs {
 }
 
 const DEFAULT_INPUTS: FarsiteInputs = {
-  dem: Array.from({ length: 100 }, () => Array.from({ length: 100 }, () => Math.random() * 500)),
-  fuelModel: Array.from({ length: 100 }, () => Array.from({ length: 100 }, () => Math.floor(Math.random() * 5))),
+  dem: Array.from({ length: 100 }, () => Array.from({ length: 100 }, () => 0)),
+  fuelModel: Array.from({ length: 100 }, () => Array.from({ length: 100 }, () => 0)),
   windSpeed: 20,
   windDir: 180,
   moisture: 0.15,

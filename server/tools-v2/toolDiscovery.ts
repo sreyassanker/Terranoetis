@@ -111,7 +111,7 @@ export class ToolDiscovery {
     method: string,
     operation: OpenApiOperation,
     baseUrl: string,
-  ): Omit<DynamicTool, 'id' | 'version' | 'status' | 'healthStatus' | 'source' | 'createdAt' | 'updatedAt'> | null {
+  ): Omit<DynamicTool, 'id' | 'version' | 'status' | 'healthStatus' | 'createdAt' | 'updatedAt'> | null {
     const name = this.sanitizeName(
       operation.operationId || `${apiTitle}_${path.replace(/[{}]/g, '').replace(/[^a-zA-Z0-9]/g, '_')}`,
     );
@@ -151,7 +151,7 @@ export class ToolDiscovery {
       const text = await resp.text();
       const title = text.match(/<title>([^<]*)<\/title>/)?.[1] || 'RSS Feed';
 
-      const tool: Omit<DynamicTool, 'id' | 'version' | 'status' | 'healthStatus' | 'source' | 'createdAt' | 'updatedAt'> = {
+      const tool: Omit<DynamicTool, 'id' | 'version' | 'status' | 'healthStatus' | 'createdAt' | 'updatedAt'> = {
         name: this.sanitizeName(`rss_${title}`),
         description: `RSS feed: ${title}`,
         category: 'rss',
@@ -202,7 +202,7 @@ export class ToolDiscovery {
             const resp = await fetch(api.url, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
             if (!resp.ok) continue;
 
-            const tool: Omit<DynamicTool, 'id' | 'version' | 'status' | 'healthStatus' | 'source' | 'createdAt' | 'updatedAt'> = {
+            const tool: Omit<DynamicTool, 'id' | 'version' | 'status' | 'healthStatus' | 'createdAt' | 'updatedAt'> = {
               name: this.sanitizeName(api.name),
               description: api.description.slice(0, 200),
               category: 'discovered',

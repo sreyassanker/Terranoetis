@@ -34,7 +34,7 @@ export interface TrailPosition {
 }
 
 /**
- * FutureTensor stores 288 predicted future positions (15-minute intervals for 72 hours)
+ * FutureTensor stores 96 predicted future positions (15-minute intervals for 24 hours)
  * for a single entity. Different domains use different uncertainty-growth models.
  *
  * @remarks
@@ -58,8 +58,11 @@ export class FutureTensor {
   /** Last known heading in degrees (0 = North, clockwise). Only relevant for maritime/aviation. */
   private currentHeading: number | null;
 
+  private _cachedTrailPositions: TrailPosition[] | null = null;
+  private _lastTrailUpdateKey = '';
+
   /**
-   * Array of 288 predicted waypoints at 15-minute intervals spanning 72 hours.
+   * Array of 96 predicted waypoints at 15-minute intervals spanning 24 hours.
    */
   predictions: PredictionWaypoint[] = [];
 
@@ -69,9 +72,10 @@ export class FutureTensor {
   private static readonly INTERVAL_SECONDS = 15 * 60;
 
   /**
-   * Total number of prediction waypoints (72 hours / 15 min = 288).
+   * Total number of prediction waypoints (24 hours / 15 min = 96).
+   * Reduced from 288 (72h) to save 3× memory per ghost entity.
    */
-  private static readonly WAYPOINT_COUNT = 288;
+  private static readonly WAYPOINT_COUNT = 96;
 
   /**
    * @param entityId - Unique identifier for the tracked entity.
@@ -103,12 +107,12 @@ export class FutureTensor {
   }
 
   /**
-   * Generates 288 predicted waypoints using domain-specific projection rules.
+   * Generates 96 predicted waypoints using domain-specific projection rules.
    *
    * @remarks
    * Each waypoint is 15 minutes apart. Uncertainty radii grow based on domain:
-   * - Maritime: baseRadius = 100 + (hours  500) meters with heading perturbation.
-   * - Aviation: baseRadius = 50 + (hours  200) meters; defaults to 250 m/s if velocity is null.
+   * - Maritime: baseRadius = 100 + (hours * 500) meters with heading perturbation.
+   * - Aviation: baseRadius = 50 + (hours * 200) meters; defaults to 250 m/s if velocity is null.
    * - Seismic/Weather: static position, radius = hours * 1000 meters.
    */
   generatePredictions(): void {
@@ -291,43 +295,51 @@ export class FutureTensor {
 
   /**
    * Returns all predicted waypoints with decayed opacity for a fading trail effect.
-   * Opacity fades linearly from 1.0 at the current position to 0.1 at the 72-hour
+   * Opacity fades linearly from 1.0 at the current position to 0.1 at the 24-hour
    * prediction, creating a smoke-trail ghost effect.
    *
    * @returns Array of trail positions with opacity in [0.1, 1.0].
    */
   getTrailPositions(): TrailPosition[] {
+    const key = String(this.predictions.length);
+    if (this._cachedTrailPositions && this._lastTrailUpdateKey === key) {
+      return this._cachedTrailPositions;
+    }
+
     const now = Date.now();
-
-    return this.predictions.map((wp) => {
-      const msFromNow = Math.max(0, wp.timestamp - now);
-      const hoursFromNow = msFromNow / (3600 * 1000);
-      const opacity = Math.max(0.1, 1.0 - hoursFromNow / 72);
-
-      return {
-        position: wp.position.clone(),
-        opacity: Math.round(opacity * 100) / 100,
+    const preds = this.predictions;
+    const len = preds.length;
+    const cache: TrailPosition[] = new Array(len);
+    for (let i = 0; i < len; i++) {
+      const wp = preds[i];
+      const hoursFromNow = Math.max(0, wp.timestamp - now) / 3600000;
+      cache[i] = {
+        position: wp.position,
+        opacity: Math.round(Math.max(0.1, 1.0 - hoursFromNow / 24) * 100) / 100,
         timestamp: wp.timestamp,
       };
-    });
+    }
+    this._cachedTrailPositions = cache;
+    this._lastTrailUpdateKey = key;
+    return cache;
   }
 
   /**
    * Returns the 2D Gaussian probability that the entity will be at the given world
    * position at the specified time offset from now.
    *
-   * @param timeOffsetHours - Hours from now to evaluate probability at (clamped to 0–72).
+   * @param timeOffsetHours - Hours from now to evaluate probability at (clamped to 0–24).
    * @param worldPos - ECEF world position to evaluate probability for.
    * @returns Probability in range [0.0, 1.0] based on a 2D Gaussian falloff.
    */
   getProbabilityAt(timeOffsetHours: number, worldPos: Cesium.Cartesian3): number {
     if (this.predictions.length === 0) return 0;
 
-    // Clamp time offset
-    const clampedHours = Math.max(0, Math.min(72, timeOffsetHours));
+    // Clamp time offset (24-hour horizon)
+    const clampedHours = Math.max(0, Math.min(24, timeOffsetHours));
 
     const totalWaypoints = this.predictions.length;
-    const fractionalIndex = (clampedHours / 72) * (totalWaypoints - 1);
+    const fractionalIndex = (clampedHours / 24) * (totalWaypoints - 1);
     const idxLow = Math.floor(fractionalIndex);
     const idxHigh = Math.min(idxLow + 1, totalWaypoints - 1);
     const frac = fractionalIndex - idxLow;
@@ -374,6 +386,8 @@ export class FutureTensor {
     this.currentPosition = newPosition.clone();
     this.currentVelocity = newVelocity ? newVelocity.clone() : null;
     this.currentHeading = newHeading;
+    this._cachedTrailPositions = null;
+    this._lastTrailUpdateKey = '';
     this.generatePredictions();
   }
 }

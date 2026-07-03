@@ -59,7 +59,8 @@ describe('SimpleQueue', () => {
     const { SimpleQueue } = await import('../../queue/simple-queue');
     const q = new SimpleQueue(10);
     const order: number[] = [];
-    q.process('task', async (_payload: unknown, job: Record<string, unknown>) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    q.process('task', async (_payload: any, job: any) => {
       order.push(job.id);
     });
 

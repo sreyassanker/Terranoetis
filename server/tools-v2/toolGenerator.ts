@@ -77,7 +77,7 @@ export class DynamicToolRegistry {
     } catch { /* tables exist */ }
   }
 
-  register(tool: Omit<DynamicTool, 'id' | 'version' | 'status' | 'healthStatus' | 'source' | 'createdAt' | 'updatedAt'>): number {
+  register(tool: Omit<DynamicTool, 'id' | 'version' | 'status' | 'healthStatus' | 'createdAt' | 'updatedAt'>): number {
     const existing = this.tools.get(tool.name);
     const version = existing ? existing.version + 1 : 1;
 
@@ -154,7 +154,7 @@ Example format:
 
       const parsed = JSON.parse(jsonMatch[0]) as { name: string; code: string; description: string; category: string };
 
-      const tool: Omit<DynamicTool, 'id' | 'version' | 'status' | 'healthStatus' | 'source' | 'createdAt' | 'updatedAt'> = {
+      const tool: Omit<DynamicTool, 'id' | 'version' | 'status' | 'healthStatus' | 'createdAt' | 'updatedAt'> = {
         name: this.sanitizeName(parsed.name),
         description: parsed.description,
         category: parsed.category || 'general',

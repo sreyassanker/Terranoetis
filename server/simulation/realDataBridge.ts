@@ -35,12 +35,13 @@ function bboxCenter(bbox: BBox): { lat: number; lon: number } {
 function parseGeoJsonFeatures(data: unknown): unknown[] {
   if (!data) return [];
   if (Array.isArray(data)) return data;
-  if (data.features) return data.features;
+  if ((data as Record<string, unknown>).features) return (data as Record<string, unknown>).features as unknown[];
   return [];
 }
 
 async function cachedFetch(key: string, url: string, ttl: number): Promise<unknown> {
-  const cache = global.__realDataCache || (global.__realDataCache = new Map());
+  const g = global as { __realDataCache?: Map<string, { data: unknown; ts: number }> };
+  const cache = g.__realDataCache || (g.__realDataCache = new Map());
   const hit = cache.get(key);
   if (hit && Date.now() - hit.ts < ttl * 1000) return hit.data;
   const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
@@ -70,16 +71,19 @@ export async function fetchRealDataForBBox(bbox: BBox): Promise<RealDataSnapshot
   // 1. Fetch earthquakes from USGS (global, filter by bbox)
   try {
     const eqData = await cachedFetch('earthquakes', 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson', 60);
-    for (const f of parseGeoJsonFeatures(eqData)) {
-      const coords = f.geometry?.coordinates;
+    for (const fRaw of parseGeoJsonFeatures(eqData)) {
+      const f = fRaw as Record<string, unknown>;
+      const geometry = f.geometry as Record<string, unknown> | undefined;
+      const coords = geometry?.coordinates as number[] | undefined;
       if (!coords || coords.length < 2) continue;
       const lon = coords[0]; const lat = coords[1];
       if (inBBox(lat, lon, bbox)) {
+        const props = f.properties as Record<string, unknown> | undefined;
         snapshot.earthquakes.push({
           lat, lon,
-          mag: f.properties?.mag || 0,
+          mag: (props?.mag as number) || 0,
           depth: coords[2] || 10,
-          time: f.properties?.time || '',
+          time: (props?.time as string) || '',
         });
       }
     }
@@ -88,16 +92,16 @@ export async function fetchRealDataForBBox(bbox: BBox): Promise<RealDataSnapshot
   // 2. Fetch weather from Open-Meteo (center of bbox)
   try {
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${center.lat}&longitude=${center.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,pressure_msl&timezone=auto`;
-    const wData = await cachedFetch(`weather_${center.lat}_${center.lon}`, weatherUrl, 300);
+    const wData = await cachedFetch(`weather_${center.lat}_${center.lon}`, weatherUrl, 300) as Record<string, unknown> | undefined;
     if (wData?.current) {
-      const c = wData.current;
+      const c = wData.current as Record<string, unknown>;
       snapshot.weather.push({
         lat: center.lat, lon: center.lon,
-        temp: c.temperature_2m ?? 20,
-        humidity: c.relative_humidity_2m ?? 50,
-        windSpeed: c.wind_speed_10m ?? 10,
-        pressure: c.pressure_msl ?? 1013,
-        precip: c.precipitation ?? 0,
+        temp: (c.temperature_2m as number) ?? 20,
+        humidity: (c.relative_humidity_2m as number) ?? 50,
+        windSpeed: (c.wind_speed_10m as number) ?? 10,
+        pressure: (c.pressure_msl as number) ?? 1013,
+        precip: (c.precipitation as number) ?? 0,
       });
     }
   } catch { /* noop */ }
@@ -142,15 +146,17 @@ export async function fetchRealDataForBBox(bbox: BBox): Promise<RealDataSnapshot
   // 5. Fetch EONET events
   try {
     const eoData = await cachedFetch('eonet', 'https://eonet.gsfc.nasa.gov/api/v3/events?days=30&status=open', 120);
-    for (const ev of parseGeoJsonFeatures(eoData)) {
-      const coords = ev.geometry?.coordinates;
+    for (const evRaw of parseGeoJsonFeatures(eoData)) {
+      const ev = evRaw as Record<string, unknown>;
+      const geometry = ev.geometry as Record<string, unknown> | undefined;
+      const coords = geometry?.coordinates as number[] | undefined;
       if (!coords || coords.length < 2) continue;
       const lon = coords[0]; const lat = coords[1];
       if (inBBox(lat, lon, bbox)) {
-        const cats = (ev.categories || []).map((c: unknown) => (c as Record<string, unknown>).title || '').join(',');
+        const cats = ((ev.categories as Array<Record<string, unknown>>) || []).map((c: Record<string, unknown>) => (c.title as string) || '').join(',');
         snapshot.eonet.push({
-          id: ev.id || '', title: ev.title || '',
-          category: cats, lat, lon, date: ev.date || '',
+          id: (ev.id as string) || '', title: (ev.title as string) || '',
+          category: cats, lat, lon, date: (ev.date as string) || '',
         });
       }
     }

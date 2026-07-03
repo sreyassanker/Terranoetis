@@ -1,3 +1,4 @@
+import { SimpleQueue } from './simple-queue';
 export { SimpleQueue } from './simple-queue';
 
 let defaultQueue: SimpleQueue | null = null;

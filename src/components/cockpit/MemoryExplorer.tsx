@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 
 interface MemoryItem {
   id: number;
@@ -89,13 +89,32 @@ export default function MemoryExplorer({ onClose }: MemoryExplorerProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MemoryItem[]>([]);
   const [searching, setSearching] = useState(false);
-  const [entities] = useState<Entity[]>([
-    { name: 'Tokyo Earthquake', type: 'event', relations: [{ target: 'Japan Trench', relationType: 'located_at' }, { target: 'M6.2', relationType: 'magnitude' }] },
-    { name: 'Japan Trench', type: 'geological', relations: [{ target: 'Pacific Plate', relationType: 'boundary' }, { target: 'Tokyo Earthquake', relationType: 'caused' }] },
-    { name: 'Pacific Plate', type: 'geological', relations: [{ target: 'Japan Trench', relationType: 'subducts' }] },
-    { name: 'M6.2', type: 'measurement', relations: [] },
-    { name: 'Nankai Trough', type: 'geological', relations: [{ target: 'Japan Trench', relationType: 'extends' }] },
-  ]);
+  const [entities, setEntities] = useState<Entity[]>([]);
+
+  // Fetch real knowledge graph from CausalGraphEngine on mount
+  useEffect(() => {
+    fetch('/api/causal-graph')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.nodes) return;
+        const nodeById = new Map<number, { id: number; name: string; type: string }>(
+          data.nodes.map((n: { id: number; name: string; type: string }) => [n.id, n])
+        );
+        const graphEntities: Entity[] = data.nodes.map((n: { id: number; name: string; type: string }) => {
+          const rels = data.edges
+            .filter((e: { source: number; target: number; relation: string }) => e.source === n.id || e.target === n.id)
+            .map((e: { source: number; target: number; relation: string }) => {
+              const otherId = e.source === n.id ? e.target : e.source;
+              const other = nodeById.get(otherId);
+              return other ? { target: other.name, relationType: e.relation } : null;
+            })
+            .filter(Boolean) as Array<{ target: string; relationType: string }>;
+          return { name: n.name, type: n.type, relations: rels };
+        });
+        setEntities(graphEntities);
+      })
+      .catch(() => {});
+  }, []);
 
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return;

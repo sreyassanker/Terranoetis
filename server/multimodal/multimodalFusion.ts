@@ -6,6 +6,7 @@ import { getDb } from '../db/index';
 import { satelliteAnalyzer, type SatelliteObservation } from './satelliteAnalyzer';
 import { seismicProcessor, type SeismicEvent } from './seismicProcessor';
 import { type DisasterSignal } from './sentimentAnalyzer';
+import { type StormCell } from './radarInterpreter';
 
 export interface FusedEvent {
   id: string;
@@ -145,14 +146,14 @@ export class MultimodalFusion {
         pubsub.publish('multimodal:fused_event', event);
 
         // Add to causal graph
-        causalGraph.addNode(event.id, 'fused_event', {
+        causalGraph.addNode(event.id, 'event', 0.5, {
           type: event.type,
           confidence: event.confidence,
           modalities: event.modalities,
           severity: event.severity,
-        }, event.lat, event.lon);
+        }).catch(() => {});
 
-        memoryManagerV2.addEpisodic('fused_multimodal_event', event, ['multimodal', event.type, event.severity]);
+        memoryManagerV2.store('episodic', { userId: '', query: 'fused_multimodal_event', response: JSON.stringify(event), intentType: event.type } as unknown as Record<string, unknown>).catch(() => {});
       }
     }
 

@@ -20,7 +20,7 @@ export class EntropyMixer {
   start(): void {
     for (const domain of this.DOMAINS) {
       const unsub = pubsub.subscribe(`anomaly:${domain}`, (data: unknown) => {
-        this.feedDomain(domain, data.score || data.anomaly || 0);
+        this.feedDomain(domain, (data as Record<string, unknown>).score as number || (data as Record<string, unknown>).anomaly as number || 0);
       });
       this.unsubs.push(unsub);
     }

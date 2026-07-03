@@ -185,7 +185,10 @@ export function addOpenFlightsEntities(
   return ents;
 }
 
+const volcanoIconCache = new Map<string, HTMLCanvasElement>();
 function createVolcanoIcon(color: string): HTMLCanvasElement {
+  const cached = volcanoIconCache.get(color);
+  if (cached) return cached;
   const canvas = document.createElement('canvas');
   canvas.width = 20;
   canvas.height = 20;
@@ -203,10 +206,13 @@ function createVolcanoIcon(color: string): HTMLCanvasElement {
   ctx.arc(cx, cy, 4, 0, Math.PI * 2);
   ctx.fillStyle = Cesium.Color.fromCssColorString(color).withAlpha(0.9).toCssColorString();
   ctx.fill();
+  volcanoIconCache.set(color, canvas);
   return canvas;
 }
 
+let cachedAviationAirportIcon: HTMLCanvasElement | null = null;
 function createAirportIcon(): HTMLCanvasElement {
+  if (cachedAviationAirportIcon) return cachedAviationAirportIcon;
   const canvas = document.createElement('canvas');
   canvas.width = 12;
   canvas.height = 12;
@@ -218,5 +224,6 @@ function createAirportIcon(): HTMLCanvasElement {
   ctx.strokeStyle = '#0d9488';
   ctx.lineWidth = 1;
   ctx.stroke();
+  cachedAviationAirportIcon = canvas;
   return canvas;
 }

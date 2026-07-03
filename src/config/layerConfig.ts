@@ -719,13 +719,6 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     sub: 'Click earthquake to trigger',
   },
   {
-    id: 'tsunami', label: 'Tsunami Propagation', symbol: '≵',
-    color: '#1f35a3', motionType: 'radar', group: 'seismic',
-    type: 'effect', description: 'Auto-triggered tsunami travel-time isochrones for M7.5+ submarine earthquakes',
-    dataSource: '',
-    sub: 'Auto for M7.5+ ocean quakes',
-  },
-  {
     id: 'heatmap', label: 'Seismic Heatmap', symbol: '≶',
     color: '#a9301e', motionType: 'pulse', group: 'seismic',
     type: 'heatmap', description: 'Density heatmap computed from earthquake epicenters',
@@ -787,13 +780,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     dataSource: '',
     sub: 'NOAA SWPC Ovation Model',
   },
-  {
-    id: 'storm_forecast', label: 'Storm Forecast Cone', symbol: '⊀',
-    color: '#eb14e2', motionType: 'wave', group: 'weather',
-    type: 'polygon', description: 'Tropical cyclone track prediction cone',
-    dataSource: '',
-    sub: 'NHC GIS data source',
-  },
+
   {
     id: 'smoke_dispersion', label: 'Smoke Dispersion', symbol: '⊁',
     color: '#a6ee18', motionType: 'flicker', group: 'weather',
@@ -873,6 +860,14 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     dataSource: '',
     badge: 'LIVE',
     sub: 'Aggregated alert feed',
+  },
+  {
+    id: 'live_media', label: 'Live Media', symbol: '▶',
+    color: '#ef4444', motionType: 'breathe', group: 'advanced',
+    type: 'point', description: 'YouTube news videos auto-placed by geo extraction',
+    dataSource: '',
+    badge: 'LIVE',
+    sub: 'YouTube news videos',
   },
   {
     id: 'population_impact', label: 'Population Impact Zones', symbol: '⊎',
@@ -980,6 +975,300 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     type: '3dtiles', description: 'OSM buildings digital twin',
     dataSource: '',
   },
+
+  // ── NEW LAYERS: Energy & Resources (from Reference) ──
+  {
+    id: 'energy_chokepoints', label: 'Energy Chokepoints', symbol: '⧖',
+    color: '#e63946', motionType: 'pulse', group: 'geospatial',
+    type: 'point', description: 'Critical maritime energy chokepoints (Strait of Hormuz, Malacca, Suez, etc.)',
+    dataSource: 'https://www.eia.gov/',
+    sub: 'EIA Chokepoint Data',
+    badge: 'KEY',
+  },
+  {
+    id: 'energy_pipelines_oil', label: 'Oil Pipelines', symbol: '┃',
+    color: '#2d2d2d', motionType: 'dash', group: 'geospatial',
+    type: 'geojson', description: 'Global oil pipeline network — flow directions and capacity',
+    dataSource: 'https://www.eia.gov/',
+    sub: 'EIA Pipeline Data',
+  },
+  {
+    id: 'energy_pipelines_gas', label: 'Gas Pipelines', symbol: '┃',
+    color: '#457b9d', motionType: 'dash', group: 'geospatial',
+    type: 'geojson', description: 'Global natural gas pipeline network — LNG and pipeline routes',
+    dataSource: 'https://www.eia.gov/',
+    sub: 'EIA Pipeline Data',
+  },
+  {
+    id: 'energy_storage', label: 'Storage Facilities', symbol: '⬢',
+    color: '#6d6875', motionType: 'breathe', group: 'geospatial',
+    type: 'point', description: 'Oil and gas storage facilities — tank farms, LNG terminals',
+    dataSource: 'https://www.eia.gov/',
+    sub: 'EIA Storage Data',
+  },
+  {
+    id: 'spr_levels', label: 'Strategic Petroleum Reserve', symbol: '◼',
+    color: '#1d3557', motionType: 'glow', group: 'geospatial',
+    type: 'panel', description: 'US SPR levels and release schedules — strategic reserve tracking',
+    dataSource: 'https://www.energy.gov/',
+    sub: 'SPR Data',
+    badge: 'LIVE',
+  },
+  {
+    id: 'refinery_utilization', label: 'Refinery Utilization', symbol: '⊡',
+    color: '#e76f51', motionType: 'flicker', group: 'geospatial',
+    type: 'panel', description: 'US refinery inputs and utilization rates — crude processing capacity',
+    dataSource: 'https://www.eia.gov/',
+    sub: 'EIA Refinery Data',
+  },
+  {
+    id: 'eu_gas_storage', label: 'EU Gas Storage', symbol: '◧',
+    color: '#264653', motionType: 'breathe', group: 'geospatial',
+    type: 'point', description: 'European gas storage fill levels by country — energy security indicator',
+    dataSource: 'https://agsi.gie.eu/',
+    sub: 'GIE AGSI Data',
+  },
+  {
+    id: 'electricity_prices', label: 'Electricity Prices', symbol: '⚡',
+    color: '#f4a261', motionType: 'glow', group: 'geospatial',
+    type: 'panel', description: 'European electricity spot prices by region — day-ahead market',
+    dataSource: 'https://transparency.entsoe.eu/',
+    sub: 'ENTSO-E Data',
+  },
+  {
+    id: 'electricity_mix', label: 'Electricity Generation Mix', symbol: '⏻',
+    color: '#2a9d8f', motionType: 'pulse', group: 'geospatial',
+    type: 'panel', description: 'Country electricity generation by fuel type — fossil, renewable, nuclear shares',
+    dataSource: 'https://ember-climate.org/',
+    sub: 'Ember Climate Data',
+  },
+  {
+    id: 'jodi_oil', label: 'JODI Oil Data', symbol: '▮',
+    color: '#3d405b', motionType: 'wave', group: 'geospatial',
+    type: 'panel', description: 'Joint Organisations Data Initiative — monthly oil supply/demand by country',
+    dataSource: 'https://www.jodidb.org/',
+    sub: 'JODI Oil',
+  },
+  {
+    id: 'jodi_gas', label: 'JODI Gas Data', symbol: '▮',
+    color: '#588157', motionType: 'wave', group: 'geospatial',
+    type: 'panel', description: 'Joint Organisations Data Initiative — monthly gas supply/demand by country',
+    dataSource: 'https://www.jodidb.org/',
+    sub: 'JODI Gas',
+  },
+  {
+    id: 'iea_oil_stocks', label: 'IEA Oil Stocks', symbol: '◫',
+    color: '#bc6c25', motionType: 'breathe', group: 'geospatial',
+    type: 'panel', description: 'IEA oil stock levels and days of cover — IEA obligation tracking',
+    dataSource: 'https://www.iea.org/',
+    sub: 'IEA Stocks',
+  },
+  {
+    id: 'energy_intelligence', label: 'Energy Intelligence', symbol: '◉',
+    color: '#9b2226', motionType: 'flicker', group: 'geospatial',
+    type: 'panel', description: 'Aggregated energy sector intelligence — supply disruptions, policy changes',
+    dataSource: 'Internal aggregation',
+    sub: 'Energy Intel Feed',
+    badge: 'LIVE',
+  },
+  {
+    id: 'fuel_shortages', label: 'Fuel Shortages', symbol: '⚠',
+    color: '#ae2012', motionType: 'pulse', group: 'geospatial',
+    type: 'point', description: 'Reported fuel shortages and supply disruptions globally',
+    dataSource: 'Multiple sources',
+    sub: 'Fuel Shortage Alerts',
+    badge: 'LIVE',
+  },
+
+  // ── NEW LAYERS: Risk & Security ──
+  {
+    id: 'cii_risk_scores', label: 'Country Instability Index', symbol: '◈',
+    color: '#d62828', motionType: 'glow', group: 'geospatial',
+    type: 'panel', description: 'Country Instability Index — composite risk scoring for 190+ countries',
+    dataSource: 'Internal CII Model',
+    sub: 'CII Risk Scores',
+    badge: 'KEY',
+  },
+  {
+    id: 'sanctions_pressure', label: 'Sanctions Pressure', symbol: '⊗',
+    color: '#780000', motionType: 'contract', group: 'geospatial',
+    type: 'point', description: 'Global sanctions regime — OFAC, EU, UN sanctions by country',
+    dataSource: 'https://www.treasury.gov/',
+    sub: 'OFAC/EU/UN Sanctions',
+  },
+  {
+    id: 'sanctions_counts', label: 'Sanctions Entity Counts', symbol: '⊗',
+    color: '#c1121f', motionType: 'flicker', group: 'geospatial',
+    type: 'panel', description: 'Number of sanctioned entities per country — sanctions density map',
+    dataSource: 'https://www.treasury.gov/',
+    sub: 'Sanctions Entity Data',
+  },
+  {
+    id: 'gpsjam', label: 'GPS Jamming', symbol: '⊞',
+    color: '#e85d04', motionType: 'radar', group: 'geospatial',
+    type: 'heatmap', description: 'GPS/GNSS jamming and spoofing events — aviation safety indicator',
+    dataSource: 'https://gpsjam.org/',
+    sub: 'GPS Jamming Data',
+    badge: 'LIVE',
+  },
+  {
+    id: 'military_bases', label: 'Military Bases', symbol: '▲',
+    color: '#555555', motionType: 'glow', group: 'geospatial',
+    type: 'point', description: 'Active military installations worldwide — bases, ports, airfields',
+    dataSource: 'Open source intelligence',
+    sub: 'Military Installations',
+  },
+
+  // ── NEW LAYERS: Conflict & Geopolitics ──
+  {
+    id: 'ucdp_conflict', label: 'Armed Conflict Events', symbol: '⚔',
+    color: '#9d0208', motionType: 'pulse', group: 'geospatial',
+    type: 'point', description: 'UCDP armed conflict events — battles, attacks, violence against civilians',
+    dataSource: 'https://ucdp.uu.se/',
+    sub: 'Uppsala Conflict Data Program',
+    badge: 'LIVE',
+  },
+  {
+    id: 'iran_events', label: 'Iran Regional Events', symbol: '◆',
+    color: '#370617', motionType: 'flicker', group: 'geospatial',
+    type: 'point', description: 'Iran-focused geopolitical events — military, protests, nuclear',
+    dataSource: 'Multiple OSINT sources',
+    sub: 'Iran Intel Feed',
+    badge: 'LIVE',
+  },
+  {
+    id: 'oref_alerts', label: 'Israel OREF Alerts', symbol: '⚠',
+    color: '#dc2f02', motionType: 'pulse', group: 'geospatial',
+    type: 'point', description: 'Israel Home Front Command rocket alerts — real-time threat data',
+    dataSource: 'https://www.oref.org.il/',
+    sub: 'OREF Alert System',
+    badge: 'LIVE',
+  },
+
+  // ── NEW LAYERS: Climate & Environment ──
+  {
+    id: 'climate_anomalies', label: 'Climate Anomalies', symbol: '◐',
+    color: '#ff7b00', motionType: 'shimmer', group: 'atmosphere',
+    type: 'tile', description: 'Global temperature anomalies — departure from baseline average',
+    dataSource: 'https://www.ncdc.noaa.gov/',
+    sub: 'NOAA Climate Data',
+  },
+  {
+    id: 'co2_monitoring', label: 'CO2 Monitoring', symbol: '◑',
+    color: '#8ac926', motionType: 'breathe', group: 'atmosphere',
+    type: 'tile', description: 'Atmospheric CO2 concentration — Mauna Loa and global stations',
+    dataSource: 'https://gml.noaa.gov/',
+    sub: 'NOAA GML CO2',
+  },
+  {
+    id: 'ocean_ice', label: 'Ocean Ice Cover', symbol: '◒',
+    color: '#caf0f8', motionType: 'contract', group: 'cryosphere',
+    type: 'tile', description: 'Arctic and Antarctic sea ice extent — daily concentration maps',
+    dataSource: 'https://nsidc.org/',
+    sub: 'NSIDC Sea Ice',
+  },
+  {
+    id: 'climate_news', label: 'Climate News Feed', symbol: '☰',
+    color: '#52b788', motionType: 'float', group: 'geospatial',
+    type: 'panel', description: 'Aggregated climate change news and reports — policy, science, impacts',
+    dataSource: 'Multiple climate news sources',
+    sub: 'Climate News Aggregator',
+  },
+
+  // ── NEW LAYERS: Displacement & Migration ──
+  {
+    id: 'displacement', label: 'Population Displacement', symbol: '◍',
+    color: '#7209b7', motionType: 'wave', group: 'geospatial',
+    type: 'panel', description: 'UNHCR and IDMC displacement data — refugees, IDPs, returns',
+    dataSource: 'https://www.unhcr.org/',
+    sub: 'UNHCR/IDMC Displacement',
+    badge: 'KEY',
+  },
+
+  // ── NEW LAYERS: Infrastructure & Resilience ──
+  {
+    id: 'infra_outages', label: 'Infrastructure Outages', symbol: '⊘',
+    color: '#5a189a', motionType: 'flicker', group: 'geospatial',
+    type: 'point', description: 'Internet and power infrastructure outages — network disruptions',
+    dataSource: 'https://radar.cloudflare.com/',
+    sub: 'Cloudflare Radar / Downdetector',
+    badge: 'LIVE',
+  },
+  {
+    id: 'resilience_ranking', label: 'Country Resilience', symbol: ' ◈',
+    color: '#3a0ca3', motionType: 'glow', group: 'geospatial',
+    type: 'panel', description: 'Country infrastructure resilience ranking — supply chain robustness',
+    dataSource: 'Internal resilience model',
+    sub: 'Resilience Index',
+  },
+  {
+    id: 'customs_trade', label: 'Customs & Trade Data', symbol: '▣',
+    color: '#4361ee', motionType: 'wave', group: 'geospatial',
+    type: 'panel', description: 'International customs and trade flow data — import/export volumes',
+    dataSource: 'https://comtradeapi.un.org/',
+    sub: 'UN Comtrade',
+  },
+
+  // ── NEW LAYERS: Markets & Economy ──
+  {
+    id: 'macro_signals', label: 'Macro Economic Signals', symbol: '◈',
+    color: '#4895ef', motionType: 'pulse', group: 'geospatial',
+    type: 'panel', description: 'Recession probability, yield curve, unemployment claims — macro regime detection',
+    dataSource: 'https://fred.stlouisfed.org/',
+    sub: 'FRED Economic Data',
+    badge: 'KEY',
+  },
+  {
+    id: 'prediction_markets', label: 'Prediction Markets', symbol: '◱',
+    color: '#4cc9f0', motionType: 'float', group: 'geospatial',
+    type: 'panel', description: 'Polymarket and Metaculus prediction odds — geopolitical and economic events',
+    dataSource: 'https://polymarket.com/',
+    sub: 'Polymarket/Metaculus',
+  },
+  {
+    id: 'gold_data', label: 'Gold Markets', symbol: '◆',
+    color: '#ffd60a', motionType: 'glow', group: 'geospatial',
+    type: 'panel', description: 'Gold price, central bank reserves, ETF flows — safe haven indicator',
+    dataSource: 'https://www.gold.org/',
+    sub: 'World Gold Council',
+  },
+
+  // ── NEW LAYERS: Cyber ──
+  {
+    id: 'cyber_threats', label: 'Cyber Threat Intelligence', symbol: '⊘',
+    color: '#7209b7', motionType: 'radar', group: 'geospatial',
+    type: 'panel', description: 'Aggregated cyber threat indicators — malware, phishing, DDoS by region',
+    dataSource: 'https://otx.alienvault.com/',
+    sub: 'AlienVault OTX',
+    badge: 'LIVE',
+  },
+
+  // ── NEW LAYERS: Health ──
+  {
+    id: 'air_quality_health', label: 'Health Air Quality', symbol: '◐',
+    color: '#06d6a0', motionType: 'shimmer', group: 'atmosphere',
+    type: 'heatmap', description: 'PM2.5 and AQI health impact data — WHO guideline exceedances',
+    dataSource: 'https://www.who.int/',
+    sub: 'WHO Air Quality',
+  },
+
+  // ── Satellite Data Enrichment Layers ──
+  {
+    id: 'satnogs_db', label: 'SatNOGS Frequencies', symbol: '▥',
+    color: '#f59e0b', motionType: 'orbit', group: 'space',
+    type: 'panel', description: 'Satellite transmitter frequencies and modes from SatNOGS DB — cross-reference NORAD IDs with radio data',
+    dataSource: 'https://db.satnogs.org/api/',
+    sub: 'Satellite radio frequencies',
+    badge: 'LIVE',
+  },
+  {
+    id: 'ucs_satellite_db', label: 'UCS Satellite Catalog', symbol: '▤',
+    color: '#3b82f6', motionType: 'orbit', group: 'space',
+    type: 'panel', description: 'UCS Satellite Database — detailed satellite metadata: purpose, operator, country, launch date, mass',
+    dataSource: 'https://www.ucs.org/resources/satellite-database',
+    sub: 'Satellite metadata catalog',
+    badge: 'KEY',
+  },
 ];
 
 
@@ -990,6 +1279,7 @@ export const LEGACY_DEFAULTS: Record<string, { on?: boolean; badge?: string; sub
   space_debris: { sub: 'CelesTrak GP (1500+ objects)' },
   ais_vessels: { badge: 'KEY', sub: 'AISStream Real-Time' },
   intel_feed: { badge: 'LIVE', sub: 'Aggregated alert feed' },
+  live_media: { badge: 'LIVE', sub: 'YouTube news videos', on: true },
   lightning_strikes: { badge: 'LIVE', sub: 'Real-Time Lightning' },
   aurora_oval: { opacity: 0.8, sub: 'NOAA Ovation Forecast' },
   flood_extent: { badge: 'KEY' },
@@ -1004,6 +1294,8 @@ export const LEGACY_DEFAULTS: Record<string, { on?: boolean; badge?: string; sub
   floods: { sub: 'EONET flood events' },
   landslides: { sub: 'NASA landslide reports' },
   seaLakeIce: { sub: 'EONET sea ice events' },
+  satnogs_db: { badge: 'LIVE', sub: 'SatNOGS transmitter frequencies', on: false },
+  ucs_satellite_db: { badge: 'KEY', sub: 'UCS satellite metadata catalog', on: false },
 };
 
 

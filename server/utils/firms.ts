@@ -19,8 +19,9 @@ export function parseFirmsCsv(csv: string): FirmsHotspot[] {
     header: true,
     dynamicTyping: true,
     skipEmptyLines: true,
-    transformHeader: (header) => header.trim(),
-  });
+    transformHeader: (header: string) => header.trim(),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
 
   return parsed.data.flatMap((row) => {
     const latitude = Number(row.latitude);

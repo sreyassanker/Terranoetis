@@ -222,7 +222,10 @@ export class EnhancedCache {
   private misses = 0;
   private timestamps = new Map<string, number>();
 
-  constructor(ttlSeconds = 3600, private threshold = 0.6) {
+  private threshold: number;
+
+  constructor(ttlSeconds = 3600, threshold = 0.6) {
+    this.threshold = threshold;
     this.cache = new NodeCache({ stdTTL: ttlSeconds, checkperiod: Math.min(ttlSeconds / 10, 300) });
   }
 

@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { throttledRender } from '@/lib/throttledRender';
 
 export interface ViewerInitResult {
   viewer: Cesium.Viewer;
@@ -73,8 +74,10 @@ export async function applyTerrainProvider(viewer: Cesium.Viewer, ionToken?: str
       });
       return true;
     } catch {
-      // Keep ellipsoid terrain if Ion terrain fails.
+      console.warn('[Terrain] Cesium World Terrain failed to load. Using flat ellipsoid. Scenario shapes will use ground-clamped heights.');
     }
+  } else {
+    console.warn('[Terrain] No VITE_CESIUM_ION_ACCESS_TOKEN found. Terrain is flat ellipsoid. Set the token for real terrain and ocean detection.');
   }
 
   viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
@@ -90,8 +93,8 @@ export async function createLiveGlobeViewer(container: HTMLElement): Promise<Vie
   const viewer = new Cesium.Viewer(container, {
     scene3DOnly: true,
     requestRenderMode: true,
-    maximumRenderTimeChange: 0.5,
-    msaaSamples: 4,
+    maximumRenderTimeChange: Infinity,
+    msaaSamples: 2,
     shadows: false,
     terrainShadows: Cesium.ShadowMode.DISABLED,
     baseLayerPicker: false,
@@ -136,24 +139,22 @@ export async function createLiveGlobeViewer(container: HTMLElement): Promise<Vie
     scene.skyAtmosphere.hueShift = 0.1;
     scene.skyAtmosphere.saturationShift = 0.2;
   }
-  scene.globe.enableLighting = true;
+  // enableLighting=false eliminates per-pixel sun shading (major GPU saver)
+  scene.globe.enableLighting = false;
   scene.globe.depthTestAgainstTerrain = true;
-  scene.globe.atmosphereLightIntensity = 30.0;
-  scene.globe.lightingFadeOutDistance = 8e6;
-  scene.globe.lightingFadeInDistance = 1e7;
-  scene.globe.nightFadeOutDistance = 4e6;
-  scene.globe.nightFadeInDistance = 8e6;
-  scene.globe.showWaterEffect = false;
-  scene.globe.baseColor = Cesium.Color.BLACK;
-  scene.globe.tileCacheSize = 200;
 
+  scene.globe.baseColor = Cesium.Color.BLACK;
+  scene.globe.tileCacheSize = 100;
+
+  // Fog actually HELPS performance by culling distant geometry
   if (scene.fog) {
     scene.fog.enabled = true;
     scene.fog.screenSpaceErrorFactor = 4.0;
     scene.fog.density = 0.0002;
   }
 
-  scene.highDynamicRange = true;
+  // HDR disabled to reduce GPU heat — re-enable for visual quality
+  scene.highDynamicRange = false;
 
   let autoRotating = false;
   const controller = scene.screenSpaceCameraController;
@@ -168,7 +169,7 @@ export async function createLiveGlobeViewer(container: HTMLElement): Promise<Vie
   const removeAutoRotateTick = viewer.clock.onTick.addEventListener(() => {
     if (autoRotating) {
       viewer.scene.camera.rotateRight(0.0003);
-      viewer.scene.requestRender();
+      throttledRender(viewer);
     }
   });
 
@@ -185,7 +186,12 @@ export async function createLiveGlobeViewer(container: HTMLElement): Promise<Vie
     },
   });
 
-  viewer.scene.requestRender();
+  throttledRender(viewer);
+
+  // Reduce resolution on high-DPI displays to cut GPU pixel load
+  if (window.devicePixelRatio >= 2) {
+    viewer.resolutionScale = 0.75;
+  }
 
   return { viewer, unlockInteraction, removeAutoRotateTick };
 }
@@ -230,7 +236,7 @@ export function crossfadeImagery(viewer: Cesium.Viewer, type: string, durationMs
       next.alpha = 1;
       baseImageryRef = next;
     }
-    viewer.scene.requestRender();
+    throttledRender(viewer);
   };
   requestAnimationFrame(fade);
 }

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, Bell, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -10,7 +10,9 @@ import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { apiGet } from '@/lib/api';
 import StudyAreaPanel from '@/components/ui/StudyAreaPanel';
+import { CameraControls } from '@/components/CameraControls';
 import type { StudyAreaItem } from '@/rendering/studyArea';
+import { throttledRender } from '@/lib/throttledRender';
 import {
   removeStudyAreaFromGlobe, setStudyAreaVisibility,
   flyToStudyAreaTopDown, filterDataEntitiesByStudyArea, updateStudyAreaStyle,
@@ -26,6 +28,10 @@ import { GhostProtocol } from '@/rendering/ghostProtocol';
 import { ForkRenderer } from '@/rendering/forkRenderer';
 import { EntropyHalo } from '@/rendering/entropyHalo';
 import { OracleChainRenderer, type CausalChainLink } from '@/rendering/oracleChains';
+import { interpolateIDW, renderGridToCanvas, initWasmIdw } from '@/rendering/wasmIdw';
+import type { InterpGrid } from '@/rendering/idwInterpolation';
+import { extractPointsFromResult } from '@/rendering/toolResultParser';
+import { showInterpSurface, clearInterpSurface, getViewDependentResolution } from '@/rendering/surfaceRenderer';
 import {
   loadAirspaces,
   addSpaceDebrisEntities,
@@ -38,6 +44,8 @@ import {
   getDebrisOrbitPositions
 } from '@/rendering/realDataLayers';
 import { ForkPanel } from '@/components/ForkPanel';
+import { fetchAndStoreSatnogsData, getSatnogsForNorad, addSatnogsEntities } from '@/rendering/satnogs';
+import { fetchAndStoreUcsData, getUcsForNorad, addUcsEntities } from '@/rendering/ucsSatelliteDb';
 
 import { ReasoningTraceViewer, EvidenceChainPanel, UncertaintyBadge, HumanOverrideBanner } from '@/components/explainability/index';
 import { CognitiveDashboard, AlertPanel as CockpitAlertPanel, ToolWorkbench, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
@@ -47,7 +55,16 @@ import ScenarioEditor from '@/components/scenarios/ScenarioEditor';
 import ScenarioGallery from '@/components/scenarios/ScenarioGallery';
 import CinematicDirector from '@/components/scenarios/CinematicDirector';
 import SpatialSketching from '@/components/scenarios/SpatialSketching';
+import PerformanceMonitor from '@/components/PerformanceMonitor';
+import { DigitalTwinPanel } from '@/components/DigitalTwinPanel';
+import { IntelligencePanel } from '@/components/IntelligencePanel';
+import { PrithviPanel } from '@/components/prithvi/PrithviPanel';
+import { SatelliteSearchPanel } from '@/components/prithvi/SatelliteSearchPanel';
+import { Tile38Panel } from '@/components/prithvi/Tile38Panel';
+import { EOKnowledgeGraphPanel } from '@/components/prithvi/EOKnowledgeGraphPanel';
+import { CommandPalette } from '@/components/CommandPalette';
 import { createRenderScheduler } from '@/lib/renderScheduler';
+import { createUnifiedTimer } from '@/lib/unifiedTimer'; // P0 perf: unified timer
 import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings } from '@/rendering/digitalTwinLayers';
 import {
   FlightDeadReckoning as AviationFlightDeadReckoning,
@@ -139,37 +156,10 @@ interface IntelFeedItem {
 }
 
 interface HeatmapPoint { lon: number; lat: number; count: number; }
-interface WeatherCardData { id: string; lon: number; lat: number; temp: number; humidity: number; windSpeed: number; pressure: number; precipitation: number; desc: string; }
-interface LocalSearchResult { name: string; lat: number; lon: number; }
-interface IndiaCctvCamera {
-  id: string;
-  name: string;
-  lat: number;
-  lon: number;
-  pageUrl: string;
-  previewUrl?: string;
-  streamUrl?: string;
-  thumbnailUrl?: string;
-  source?: string;
-  category?: string;
-  city?: string;
-  region?: string;
-  location?: string;
-  updatedAt?: number;
-  description?: string;
-  feedType?: string;
-}
-
-interface LiveGlobeDebugState {
-  viewer?: Cesium.Viewer;
-  lastIndiaCctvError?: string;
-  getCameraState?: () => { lat: number; lon: number; height: number };
-  showInfoEntity?: (layerId: string, index?: number) => boolean;
-}
 
 interface CesiumWindow extends Window {
   Cesium?: typeof Cesium;
-  __liveglobeDebug?: LiveGlobeDebugState;
+  __liveglobeDebug?: Record<string, unknown>;
 }
 declare const window: CesiumWindow;
 
@@ -183,11 +173,23 @@ interface ApiVaultState {
   sentinelHubClientSecret: string;
   marineTrafficApiKey: string;
   aisStreamApiKey: string;
+  flightAwareAeroApiKey: string;
+  airLabsApiKey: string;
   preferredAiProvider: AiProvider;
   vaultDismissed: boolean;
 }
 
 let cachedCctvCanvas: HTMLCanvasElement | null = null;
+let cachedYoutubeCanvas: HTMLCanvasElement | null = null;
+
+function extractYoutubeId(url?: string): string | undefined {
+  if (!url) return;
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes('youtube.com')) return u.searchParams.get('v') || undefined;
+    if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('/')[0] || undefined;
+  } catch { /* */ }
+}
 
 const CATEGORIES = LAYER_GROUPS.map(g => ({
   id: g.id,
@@ -216,6 +218,7 @@ const LAYER_DEFS: LayerItem[] = LAYER_CATEGORIES.map(lc => {
 
 const LEGACY_VAULT_KEYS = 'liveglobe.apiKeys.v1';
 const LEGACY_VAULT_STATE = 'liveglobe.apiVault.v1';
+const SESSION_VAULT_KEY = 'worldmonitor.vault.v1';
 const CESIUM_ION_ENV_TOKEN = (import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined)?.trim() ?? '';
 
 const DEFAULT_API_VAULT: ApiVaultState = {
@@ -226,9 +229,29 @@ const DEFAULT_API_VAULT: ApiVaultState = {
   sentinelHubClientSecret: '',
   marineTrafficApiKey: '',
   aisStreamApiKey: '',
+  flightAwareAeroApiKey: '',
+  airLabsApiKey: '',
   preferredAiProvider: 'gemini',
   vaultDismissed: false,
 };
+
+interface LocalSearchResult {
+  name: string;
+  lat: number;
+  lon: number;
+}
+
+interface WeatherCardData {
+  id: string;
+  lat: number;
+  lon: number;
+  temp: number;
+  humidity: number;
+  windSpeed: number;
+  pressure: number;
+  precipitation: number;
+  desc: string;
+}
 
 const CITY_DATA = [
   { name: 'Tokyo', country: 'Japan', pop: 37.4, lat: 35.6762, lon: 139.6503 },
@@ -283,6 +306,192 @@ const CITY_DATA = [
   { name: 'Madrid', country: 'Spain', pop: 6.6, lat: 40.4168, lon: -3.7038 },
 ];
 
+const EXTRA_GEO: Array<{ name: string; lat: number; lon: number }> = [
+  { name: 'Afghanistan', lat: 33.9391, lon: 67.7100 },
+  { name: 'Algeria', lat: 28.0339, lon: 1.6596 },
+  { name: 'Angola', lat: -11.2027, lon: 17.8739 },
+  { name: 'Argentina', lat: -38.4161, lon: -63.6167 },
+  { name: 'Australia', lat: -25.2744, lon: 133.7751 },
+  { name: 'Bangladesh', lat: 23.6850, lon: 90.3563 },
+  { name: 'Bolivia', lat: -16.2902, lon: -63.5887 },
+  { name: 'Botswana', lat: -22.3285, lon: 24.6849 },
+  { name: 'Brazil', lat: -14.2350, lon: -51.9253 },
+  { name: 'Cambodia', lat: 12.5657, lon: 104.9910 },
+  { name: 'Cameroon', lat: 7.3697, lon: 12.3547 },
+  { name: 'Canada', lat: 56.1304, lon: -106.3468 },
+  { name: 'Chad', lat: 15.4542, lon: 18.7322 },
+  { name: 'Chile', lat: -35.6751, lon: -71.5430 },
+  { name: 'Colombia', lat: 4.5709, lon: -74.2973 },
+  { name: 'Congo', lat: -4.0383, lon: 21.7587 },
+  { name: 'Croatia', lat: 45.1000, lon: 15.2000 },
+  { name: 'Cuba', lat: 21.5218, lon: -77.7812 },
+  { name: 'Czech Republic', lat: 49.8175, lon: 15.4730 },
+  { name: 'DR Congo', lat: -4.0383, lon: 21.7587 },
+  { name: 'Ecuador', lat: -1.8312, lon: -78.1834 },
+  { name: 'Egypt', lat: 26.8206, lon: 30.8025 },
+  { name: 'Ethiopia', lat: 9.1450, lon: 40.4897 },
+  { name: 'Fiji', lat: -17.7134, lon: 178.0650 },
+  { name: 'France', lat: 46.6034, lon: 1.8883 },
+  { name: 'Germany', lat: 51.1657, lon: 10.4515 },
+  { name: 'Ghana', lat: 7.9465, lon: -1.0232 },
+  { name: 'Greece', lat: 39.0742, lon: 21.8243 },
+  { name: 'Guatemala', lat: 15.7835, lon: -90.2308 },
+  { name: 'Haiti', lat: 18.9712, lon: -72.2852 },
+  { name: 'Hungary', lat: 47.1625, lon: 19.5033 },
+  { name: 'Iceland', lat: 64.9631, lon: -19.0208 },
+  { name: 'India', lat: 20.5937, lon: 78.9629 },
+  { name: 'Indonesia', lat: -0.7893, lon: 113.9213 },
+  { name: 'Iran', lat: 32.4279, lon: 53.6880 },
+  { name: 'Iraq', lat: 33.3152, lon: 44.3661 },
+  { name: 'Ireland', lat: 53.1424, lon: -7.6921 },
+  { name: 'Israel', lat: 31.0461, lon: 34.8516 },
+  { name: 'Italy', lat: 41.8719, lon: 12.5674 },
+  { name: 'Japan', lat: 36.2048, lon: 138.2529 },
+  { name: 'Jordan', lat: 30.5852, lon: 36.2384 },
+  { name: 'Kazakhstan', lat: 48.0196, lon: 66.9237 },
+  { name: 'Kenya', lat: -0.0236, lon: 37.9062 },
+  { name: 'Kuwait', lat: 29.3117, lon: 47.4818 },
+  { name: 'Laos', lat: 19.8563, lon: 102.4955 },
+  { name: 'Lebanon', lat: 33.8547, lon: 35.8623 },
+  { name: 'Libya', lat: 26.3351, lon: 17.2283 },
+  { name: 'Madagascar', lat: -18.7669, lon: 46.8691 },
+  { name: 'Malaysia', lat: 4.2105, lon: 101.9758 },
+  { name: 'Mali', lat: 17.5707, lon: -3.9962 },
+  { name: 'Mexico', lat: 23.6345, lon: -102.5528 },
+  { name: 'Mongolia', lat: 46.8625, lon: 103.8467 },
+  { name: 'Morocco', lat: 31.7917, lon: -7.0926 },
+  { name: 'Myanmar', lat: 21.9162, lon: 95.9560 },
+  { name: 'Nepal', lat: 28.3949, lon: 84.1240 },
+  { name: 'Netherlands', lat: 52.1326, lon: 5.2913 },
+  { name: 'New Zealand', lat: -40.9006, lon: 174.8860 },
+  { name: 'Nicaragua', lat: 12.8654, lon: -85.2072 },
+  { name: 'Niger', lat: 17.6078, lon: 8.0817 },
+  { name: 'Nigeria', lat: 9.0820, lon: 8.6753 },
+  { name: 'North Korea', lat: 40.3399, lon: 127.5101 },
+  { name: 'Norway', lat: 60.4720, lon: 8.4689 },
+  { name: 'Oman', lat: 21.5126, lon: 55.9233 },
+  { name: 'Pakistan', lat: 30.3753, lon: 69.3451 },
+  { name: 'Panama', lat: 8.5380, lon: -80.7821 },
+  { name: 'Papua New Guinea', lat: -6.3150, lon: 143.9555 },
+  { name: 'Paraguay', lat: -23.4425, lon: -58.4438 },
+  { name: 'Peru', lat: -9.1900, lon: -75.0152 },
+  { name: 'Philippines', lat: 12.8797, lon: 121.7740 },
+  { name: 'Poland', lat: 51.9194, lon: 19.1451 },
+  { name: 'Portugal', lat: 39.3999, lon: -8.2245 },
+  { name: 'Qatar', lat: 25.3548, lon: 51.1839 },
+  { name: 'Romania', lat: 45.9432, lon: 24.9668 },
+  { name: 'Russia', lat: 61.5240, lon: 105.3188 },
+  { name: 'Rwanda', lat: -1.9403, lon: 29.8739 },
+  { name: 'Saudi Arabia', lat: 23.8859, lon: 45.0792 },
+  { name: 'Senegal', lat: 14.4974, lon: -14.4524 },
+  { name: 'Serbia', lat: 44.0165, lon: 21.0059 },
+  { name: 'Sierra Leone', lat: 8.4606, lon: -11.7799 },
+  { name: 'Singapore', lat: 1.3521, lon: 103.8198 },
+  { name: 'Somalia', lat: 5.1521, lon: 46.1996 },
+  { name: 'South Africa', lat: -30.5595, lon: 22.9375 },
+  { name: 'South Korea', lat: 35.9078, lon: 127.7669 },
+  { name: 'South Sudan', lat: 6.8770, lon: 31.3070 },
+  { name: 'Spain', lat: 40.4637, lon: -3.7492 },
+  { name: 'Sri Lanka', lat: 7.8731, lon: 80.7718 },
+  { name: 'Sudan', lat: 12.8628, lon: 30.2176 },
+  { name: 'Sweden', lat: 60.1282, lon: 18.6435 },
+  { name: 'Switzerland', lat: 46.8182, lon: 8.2275 },
+  { name: 'Syria', lat: 34.8021, lon: 38.9968 },
+  { name: 'Taiwan', lat: 23.6978, lon: 120.9605 },
+  { name: 'Tajikistan', lat: 38.8610, lon: 71.2761 },
+  { name: 'Tanzania', lat: -6.3690, lon: 34.8888 },
+  { name: 'Thailand', lat: 15.8700, lon: 100.9925 },
+  { name: 'Tunisia', lat: 33.8869, lon: 9.5375 },
+  { name: 'Turkey', lat: 38.9637, lon: 35.2433 },
+  { name: 'Turkmenistan', lat: 38.9697, lon: 59.5563 },
+  { name: 'Uganda', lat: 1.3733, lon: 32.2903 },
+  { name: 'Ukraine', lat: 48.3794, lon: 31.1656 },
+  { name: 'United Arab Emirates', lat: 23.4241, lon: 53.8478 },
+  { name: 'United Kingdom', lat: 55.3781, lon: -3.4360 },
+  { name: 'USA', lat: 39.8283, lon: -98.5795 },
+  { name: 'Uruguay', lat: -32.5228, lon: -55.7658 },
+  { name: 'Uzbekistan', lat: 41.3775, lon: 64.5853 },
+  { name: 'Venezuela', lat: 6.4238, lon: -66.5897 },
+  { name: 'Vietnam', lat: 14.0583, lon: 108.2772 },
+  { name: 'Yemen', lat: 15.5527, lon: 48.5164 },
+  { name: 'Zambia', lat: -13.1339, lon: 27.8493 },
+  { name: 'Zimbabwe', lat: -19.0154, lon: 29.1549 },
+  { name: 'Alabama', lat: 32.3182, lon: -86.9023 },
+  { name: 'Alaska', lat: 64.2008, lon: -149.4937 },
+  { name: 'Arizona', lat: 34.0489, lon: -111.0937 },
+  { name: 'Arkansas', lat: 34.7465, lon: -92.2896 },
+  { name: 'California', lat: 36.7783, lon: -119.4179 },
+  { name: 'Colorado', lat: 39.5501, lon: -105.7821 },
+  { name: 'Connecticut', lat: 41.6032, lon: -73.0877 },
+  { name: 'Delaware', lat: 38.9108, lon: -75.5277 },
+  { name: 'Florida', lat: 27.6648, lon: -81.5158 },
+  { name: 'Georgia', lat: 32.1656, lon: -82.9001 },
+  { name: 'Hawaii', lat: 19.8968, lon: -155.5828 },
+  { name: 'Idaho', lat: 44.0682, lon: -114.7420 },
+  { name: 'Illinois', lat: 40.6331, lon: -89.3985 },
+  { name: 'Indiana', lat: 40.2672, lon: -86.1349 },
+  { name: 'Iowa', lat: 41.8780, lon: -93.0977 },
+  { name: 'Kansas', lat: 39.0119, lon: -98.4842 },
+  { name: 'Kentucky', lat: 37.8393, lon: -84.2700 },
+  { name: 'Louisiana', lat: 30.9843, lon: -91.9623 },
+  { name: 'Maine', lat: 45.2538, lon: -69.4455 },
+  { name: 'Maryland', lat: 39.0458, lon: -76.6413 },
+  { name: 'Massachusetts', lat: 42.4072, lon: -71.3824 },
+  { name: 'Michigan', lat: 44.3148, lon: -85.6024 },
+  { name: 'Minnesota', lat: 46.7296, lon: -94.6859 },
+  { name: 'Mississippi', lat: 32.3547, lon: -89.3985 },
+  { name: 'Missouri', lat: 37.9643, lon: -91.8318 },
+  { name: 'Montana', lat: 46.8797, lon: -110.3626 },
+  { name: 'Nebraska', lat: 41.4925, lon: -99.9018 },
+  { name: 'Nevada', lat: 38.8026, lon: -116.4194 },
+  { name: 'New Hampshire', lat: 43.1939, lon: -71.5724 },
+  { name: 'New Jersey', lat: 40.0583, lon: -74.0057 },
+  { name: 'New Mexico', lat: 34.5199, lon: -105.8701 },
+  { name: 'New York', lat: 43.2994, lon: -74.2179 },
+  { name: 'North Carolina', lat: 35.7596, lon: -79.0193 },
+  { name: 'North Dakota', lat: 47.5515, lon: -101.0020 },
+  { name: 'Ohio', lat: 40.4173, lon: -82.9071 },
+  { name: 'Oklahoma', lat: 35.0078, lon: -97.0929 },
+  { name: 'Oregon', lat: 43.8041, lon: -120.5542 },
+  { name: 'Pennsylvania', lat: 41.2033, lon: -77.1945 },
+  { name: 'Rhode Island', lat: 41.5801, lon: -71.4774 },
+  { name: 'South Carolina', lat: 33.8361, lon: -81.1637 },
+  { name: 'South Dakota', lat: 43.9695, lon: -99.9018 },
+  { name: 'Tennessee', lat: 35.5175, lon: -86.5804 },
+  { name: 'Texas', lat: 31.9686, lon: -99.9018 },
+  { name: 'Utah', lat: 39.3210, lon: -111.0937 },
+  { name: 'Vermont', lat: 44.5588, lon: -72.5778 },
+  { name: 'Virginia', lat: 37.4316, lon: -78.6569 },
+  { name: 'Washington', lat: 47.7511, lon: -120.7401 },
+  { name: 'West Virginia', lat: 38.5976, lon: -80.4549 },
+  { name: 'Wisconsin', lat: 43.7844, lon: -88.7879 },
+  { name: 'Wyoming', lat: 42.7560, lon: -107.3025 },
+  { name: 'Middle East', lat: 26.0, lon: 45.0 },
+  { name: 'Central America', lat: 12.0, lon: -86.0 },
+  { name: 'Southeast Asia', lat: 12.0, lon: 105.0 },
+  { name: 'South Asia', lat: 22.0, lon: 80.0 },
+  { name: 'Central Asia', lat: 45.0, lon: 68.0 },
+  { name: 'West Africa', lat: 10.0, lon: -5.0 },
+  { name: 'East Africa', lat: -2.0, lon: 37.0 },
+  { name: 'Southern Africa', lat: -25.0, lon: 25.0 },
+  { name: 'North Africa', lat: 28.0, lon: 5.0 },
+  { name: 'Scandinavia', lat: 62.0, lon: 15.0 },
+  { name: 'Balkans', lat: 43.0, lon: 22.0 },
+  { name: 'Caucasus', lat: 42.0, lon: 44.0 },
+  { name: 'Horn of Africa', lat: 5.0, lon: 47.0 },
+  { name: 'Sahel', lat: 15.0, lon: 5.0 },
+  { name: 'Maghreb', lat: 30.0, lon: 2.0 },
+  { name: 'Levant', lat: 33.0, lon: 36.0 },
+  { name: 'Gulf', lat: 26.0, lon: 52.0 },
+  { name: 'Arctic', lat: 75.0, lon: -100.0 },
+  { name: 'Antarctica', lat: -75.0, lon: 0.0 },
+  { name: 'Atlantic', lat: 30.0, lon: -40.0 },
+  { name: 'Pacific', lat: 0.0, lon: -160.0 },
+  { name: 'Indian Ocean', lat: -20.0, lon: 80.0 },
+  { name: 'Mediterranean', lat: 36.0, lon: 18.0 },
+  { name: 'Caribbean', lat: 18.0, lon: -72.0 },
+];
+
 const LOCAL_SEARCH_INDEX: Array<LocalSearchResult & { searchText: string }> = CITY_DATA.map(city => ({
   name: `${city.name}, ${city.country}`,
   lat: city.lat,
@@ -312,10 +521,23 @@ function vaultFromFlatKeys(keys: Record<string, string>): ApiVaultState {
     sentinelHubClientSecret: keys.SENTINEL_HUB_CLIENT_SECRET ?? '',
     marineTrafficApiKey: keys.MARINE_TRAFFIC_API_KEY ?? '',
     aisStreamApiKey: keys.AIS_STREAM_API_KEY ?? '',
+    flightAwareAeroApiKey: keys.FLIGHTAWARE_AEROAPI_KEY ?? '',
+    airLabsApiKey: keys.AIRLABS_API_KEY ?? '',
   };
 }
 
 function loadApiVault(): ApiVaultState {
+  try {
+    const cached = sessionStorage.getItem(SESSION_VAULT_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached) as Partial<ApiVaultState>;
+      if (parsed && typeof parsed === 'object') {
+        return { ...DEFAULT_API_VAULT, ...parsed, cesiumIonAccessToken: parsed.cesiumIonAccessToken || CESIUM_ION_ENV_TOKEN };
+      }
+    }
+  } catch {
+    /* ignore */
+  }
   return {
     ...DEFAULT_API_VAULT,
     cesiumIonAccessToken: CESIUM_ION_ENV_TOKEN,
@@ -338,7 +560,10 @@ function hasAnyApiVaultValue(vault: ApiVaultState): boolean {
     vault.cesiumIonAccessToken.trim() ||
     vault.sentinelHubClientId.trim() ||
     vault.sentinelHubClientSecret.trim() ||
-    vault.marineTrafficApiKey.trim()
+    vault.marineTrafficApiKey.trim() ||
+    vault.aisStreamApiKey.trim() ||
+    vault.flightAwareAeroApiKey.trim() ||
+    vault.airLabsApiKey.trim()
   );
 }
 
@@ -437,62 +662,6 @@ function destinationPoint(lat: number, lon: number, distance: number, bearing: n
   return { lat: lat2 * 180 / Math.PI, lon: lon2 * 180 / Math.PI };
 }
 
-function generateStormCone(
-  center: [number, number],
-  heading: number,
-  radii: [number, number, number],
-  spread: [number, number, number]
-): { positions: Cesium.Cartesian3[]; radii: Cesium.Cartesian3 } {
-  const coords: [number, number][] = [];
-  for (let i = -1; i <= 1; i += 0.1) {
-    const dist = radii[0];
-    const angle = (heading + spread[0] * i + 360) % 360;
-    const p = destinationPoint(center[1], center[0], dist, angle);
-    coords.push([p.lon, p.lat]);
-  }
-  for (let i = 1; i >= -1; i -= 0.1) {
-    const dist = radii[2];
-    const angle = (heading + spread[2] * i + 360) % 360;
-    const p = destinationPoint(center[1], center[0], dist, angle);
-    coords.push([p.lon, p.lat]);
-  }
-  coords.push(coords[0]);
-  const cartesians = coords.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat));
-  const centerCart = Cesium.Cartesian3.fromDegrees(center[0], center[1]);
-  const dists = cartesians.map(p => Cesium.Cartesian3.distance(centerCart, p));
-  const maxDist = Math.max(...dists);
-  const radiiVec = new Cesium.Cartesian3(maxDist, maxDist, maxDist);
-  return { positions: cartesians, radii: radiiVec };
-}
-
-function generateStormForecast(lat: number, lon: number, windSpeed: number, pressure: number) {
-  const headingSeed = Math.sin((lat + 90) * 12.9898 + (lon + 180) * 78.233 + windSpeed * 0.31831);
-  const heading = ((headingSeed * 43758.5453) % 360 + 360) % 360;
-  const spread24 = windSpeed > 100 ? 22.5 : windSpeed > 80 ? 30 : 45;
-  const radii24: [number, number, number] = windSpeed > 100 ? [50, 100, 150] : windSpeed > 80 ? [30, 70, 120] : [20, 50, 80];
-  const spread48: [number, number, number] = [spread24 * 1.5, spread24 * 1.5, spread24 * 1.5];
-  const radii48: [number, number, number] = [radii24[0] * 1.5, radii24[1] * 1.8, radii24[2] * 2.0];
-  const spread72: [number, number, number] = [spread24 * 2, spread24 * 2, spread24 * 2];
-  const radii72: [number, number, number] = [radii24[0] * 2, radii24[1] * 2.5, radii24[2] * 3.0];
-  const cone24 = generateStormCone([lon, lat], heading, radii24, [spread24, spread24, spread24]);
-    const cone48 = generateStormCone([lon, lat], heading, radii48, spread48);
-  const cone72 = generateStormCone([lon, lat], heading, radii72, spread72);
-  const speedKmh = windSpeed * 1.60934;
-  const dest24 = destinationPoint(lat, lon, radii24[1], heading);
-  const dest48 = destinationPoint(lat, lon, radii48[1], heading);
-  const dest72 = destinationPoint(lat, lon, radii72[1], heading);
-  return {
-    heading, speedKmh, pressure,
-    cone24, cone48, cone72,
-    track: [
-      { time: 'Now', lat, lon },
-      { time: '+24h', lat: dest24.lat, lon: dest24.lon },
-      { time: '+48h', lat: dest48.lat, lon: dest48.lon },
-      { time: '+72h', lat: dest72.lat, lon: dest72.lon },
-    ],
-  };
-}
-
 function calculatePopulationImpact(lat: number, lon: number) {
   const affected = CITY_DATA.filter(c => {
     const dLat = c.lat - lat, dLon = c.lon - lon;
@@ -506,22 +675,6 @@ function calculatePopulationImpact(lat: number, lon: number) {
   else if (totalPop > 5) severity = 'medium';
   else severity = 'low';
   return { cities: affected, totalPop, severity };
-}
-
-function generateHeatmapData(lon: number, lat: number, count: number): HeatmapPoint[] {
-  const pts: HeatmapPoint[] = [];
-  const grid = Math.ceil(Math.sqrt(count));
-  const spacing = 200 / grid;
-  for (let i = 0; i < grid; i++) {
-    for (let j = 0; j < grid; j++) {
-      if (pts.length >= count) break;
-      const w = 0.1 + Math.random() * 5;
-      const clat = lat + (i - grid/2) * spacing / 111;
-      const clon = lon + (j - grid/2) * spacing / (111 * Math.cos(lat * Math.PI/180));
-      pts.push({ lon: clon, lat: clat, count: w });
-    }
-  }
-  return pts;
 }
 
 const CctvVideoPlayer = ({ src }: { src: string }) => {
@@ -609,16 +762,40 @@ const CctvVideoPlayer = ({ src }: { src: string }) => {
   );
 };
 
+const YoutubePlayer = ({ videoId }: { videoId: string }) => {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [error, setError] = useState(false);
+
+  if (error) {
+    return <div className="cctv-preview-empty">Failed to load YouTube video</div>;
+  }
+
+  return (
+    <div style={{ position: 'relative', width: '100%', paddingBottom: '56.25%', background: '#000', borderRadius: 6, overflow: 'hidden' }}>
+      <iframe
+        ref={iframeRef}
+        src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
+        title="YouTube video player"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+        onError={() => setError(true)}
+        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
+      />
+    </div>
+  );
+};
+
 /* ═════════════════════════════════════════════════════════════════
    PHASE 8: Rich message renderer — code blocks, tables, lists
    ═════════════════════════════════════════════════════════════════ */
 
 const RICH_MESSAGE_CACHE = new Map<string, string>();
+const RICH_MESSAGE_CACHE_MAX = 200;
 
 const TYPE_LABELS: Record<string, string> = {
   earthquake_swarm: 'Earthquake Swarm', hurricane_landfall: 'Hurricane Landfall',
   wildfire_spread: 'Wildfire Spread', volcanic_eruption: 'Volcanic Eruption',
-  flood_inundation: 'Flood Inundation', tsunami_wave: 'Tsunami Wave',
+  flood_inundation: 'Flood Inundation',
   data_layer: 'Data Layer',
 };
 
@@ -635,6 +812,7 @@ function adaptScenario(raw: any): any {
     severity,
     location: { lat, lon },
     timestamp: raw.createdAt,
+    timeSeries: raw.timeSeries,
     metadata: {
       ...raw.metadata,
       colorValues: raw.colorValues,
@@ -661,8 +839,6 @@ function mapFrontendParams(type: string, params: Record<string, unknown>): Recor
       return { ...base, vei: Math.min(7, Math.max(1, Math.round((magnitude as number) / 2))), ashHeight: Math.max(1000, (intensity as number) * 2000), windDir: 260, duration };
     case 'flood_inundation':
       return { ...base, rainfall: Math.max(10, (intensity as number) * 100), catchmentArea: Math.max(100, (spread as number) * 5000), soilSaturation: Math.min(1, Math.max(0, (depth as number) / 100)), duration };
-    case 'tsunami_wave':
-      return { epicenterLat: lat, epicenterLon: lon, magnitude, depth, waveHeight: Math.max(1, (intensity as number) * 5), arrivalTimes: [30, 45, 60, 90, 120] };
     default:
       return { ...base, ...params };
   }
@@ -725,6 +901,7 @@ function richRender(text: string): string {
     ALLOWED_ATTR: ['class', 'value', 'href', 'rel', 'target'],
     ALLOW_DATA_ATTR: false,
   });
+  if (RICH_MESSAGE_CACHE.size > RICH_MESSAGE_CACHE_MAX) RICH_MESSAGE_CACHE.clear();
   RICH_MESSAGE_CACHE.set(text, safe);
   return safe;
 }
@@ -766,6 +943,17 @@ function renderCommandChips(
   );
 }
 
+/* ── Measure helpers ── */
+function greatCircleDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 /* ═════════════════════════════════════════════════════════════════
    MAIN APP COMPONENT
    ═════════════════════════════════════════════════════════════════ */
@@ -792,14 +980,18 @@ export default function App() {
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchValueRef = useRef('');
+  const searchBoxRef = useRef<HTMLDivElement | null>(null);
+  const [searchBoxRect, setSearchBoxRect] = useState<DOMRect | null>(null);
   const timelineThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timelineLastUpdateRef = useRef<number>(0);
   const pinCountRef = useRef(0);
   const entityStoreRef = useRef<Record<string, Cesium.Entity[]>>({});
-  const dataStoreRef = useRef<Record<string, unknown[]>>({});
+  const layerDataCacheRef = useRef<Record<string, unknown[]>>({});
+  const LAYER_CACHE_MAX = 60;
   const magnitudeScaleRef = useRef(1);
   const autoRefreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoRefreshSlowRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastZoomToRef = useRef(0);
   const issEntityRef = useRef<Cesium.Entity | null>(null);
   const issTrailRef = useRef<Cesium.SampledPositionProperty | null>(null);
   const issTimesRef = useRef<Cesium.JulianDate[]>([]);
@@ -829,14 +1021,13 @@ export default function App() {
   const feedErrorsRef = useRef<string[]>([]);
   const feedSummaryShownRef = useRef(false);
   const alertEntityRef = useRef<Record<string, Cesium.Entity>>({});
-  const stormOverlaysRef = useRef<Cesium.Entity[]>([]);
   const smokeParticlesRef = useRef<Cesium.Entity[]>([]);
-  const tsunamiWavesRef = useRef<Cesium.Entity[]>([]);
   const tectonicEntitiesRef = useRef<Cesium.Entity[]>([]);
   const overlayImageryLayersRef = useRef<Record<string, Cesium.ImageryLayer>>({});
   const cctvPulseEntityRef = useRef<Cesium.Entity | null>(null);
+  const cctvMetaRef = useRef<Map<string, any>>(new Map());
   const nextAiMsgIdRef = useRef(1);
-  const MAX_ENTITIES = 50000;
+  const MAX_ENTITIES = 30000;
   const toggleDebounceRef = useRef<Record<string, number>>({});
 
   /* ── State ── */
@@ -849,13 +1040,12 @@ export default function App() {
   const [layers, setLayers] = useState<LayerItem[]>(LAYER_DEFS.map(l => ({ ...l })));
   const layersRef = useRef<LayerItem[]>(LAYER_DEFS.map(l => ({ ...l })));
   const renderSchedulerRef = useRef(createRenderScheduler());
+  const unifiedTimerRef = useRef(createUnifiedTimer()); // P0 perf: single rAF loop replaces 97+ setInterval calls
   const [layerOpacity, setLayerOpacity] = useState<Record<string, number>>({});
   const [activeImagery, setActiveImagery] = useState('satellite');
   const [infoEntity, setInfoEntity] = useState<Cesium.Entity | null>(null);
   const [showHeatmapLegend, setShowHeatmapLegend] = useState(false);
-  const [showStormLegend, setShowStormLegend] = useState(false);
   const [showSmokeLegend, setShowSmokeLegend] = useState(false);
-  const [showTsunamiLegend, setShowTsunamiLegend] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [apiVault, setApiVault] = useState<ApiVaultState>(initialApiVault);
   const [showTokenSetup, setShowTokenSetup] = useState(() => !hasAnyApiVaultValue(initialApiVault) && !initialApiVault.vaultDismissed && !CESIUM_ION_ENV_TOKEN);
@@ -867,6 +1057,7 @@ export default function App() {
   const [studyEast, setStudyEast] = useState('98.0');
   const [studyNorth, setStudyNorth] = useState('38.0');
   const [showAlertsPanel, setShowAlertsPanel] = useState(false);
+  const [alertTab, setAlertTab] = useState<'alerts' | 'predictive'>('alerts');
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [analyticsData, setAnalyticsData] = useState<Record<string, unknown> | null>(null);
   const [showIntelFeed, setShowIntelFeed] = useState(false);
@@ -879,6 +1070,27 @@ export default function App() {
   const [forks, setForks] = useState<Array<{forkId: string; name: string; divergenceScore: number; status: string}>>([]);
   const [activeForkCount, setActiveForkCount] = useState(0);
   const [monitorCollapsed, setMonitorCollapsed] = useState(false);
+  const [forkMode, setForkMode] = useState(false);
+  const forkModeRef = useRef(false);
+  useEffect(() => { forkModeRef.current = forkMode; }, [forkMode]);
+  useEffect(() => { initWasmIdw(); }, []);
+  const [showIntelligencePanel, setShowIntelligencePanel] = useState(false);
+  const [showPrithviPanel, setShowPrithviPanel] = useState(false);
+  const [showSearchPanel, setShowSearchPanel] = useState(false);
+  const [showTile38Panel, setShowTile38Panel] = useState(false);
+  const [showKgPanel, setShowKgPanel] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  // CMD+K keyboard shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowCommandPalette(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
   const [memoryStats, setMemoryStats] = useState<Record<string, { count: number }> | null>(null);
   const [reflexStates, setReflexStates] = useState<Array<{ reflexId: string; status: string }>>([
     { reflexId: 'seismic-pupillary', status: 'IDLE' },
@@ -890,7 +1102,6 @@ export default function App() {
   const [alerts, setAlerts] = useState<EventAlert[]>([]);
   const [newAlertCount, setNewAlertCount] = useState(0);
   const [notifications, setNotifications] = useState<Array<{id:number;text:string;severity:string}>>([]);
-  const [stormForecast, setStormForecast] = useState<ReturnType<typeof generateStormForecast> | null>(null);
   const [populationImpact, setPopulationImpact] = useState<ReturnType<typeof calculatePopulationImpact> | null>(null);
   const [aiMessages, setAiMessages] = useState<ChatMessage[]>([
     { id: nextAiMsgIdRef.current++, role: 'assistant', content: '👋 Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' },
@@ -906,25 +1117,42 @@ export default function App() {
   const [reasoningTraces, setReasoningTraces] = useState<Record<string, any>>({});
   const [evidenceChains, setEvidenceChains] = useState<Record<string, any>>({});
   const [showCognitiveDashboard, setShowCognitiveDashboard] = useState(false);
-  const [showCockpitAlerts, setShowCockpitAlerts] = useState(false);
   const [showToolWorkbench, setShowToolWorkbench] = useState(false);
   const [showMemoryExplorer, setShowMemoryExplorer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showScenarioGallery, setShowScenarioGallery] = useState(false);
   const [showScenarioEditor, setShowScenarioEditor] = useState(false);
+  const [digitalTwinPanel, setDigitalTwinPanel] = useState<null | {
+    stats: { label: string; value: string; unit: string; icon: string }[];
+    charts: { type: 'area' | 'bar' | 'line' | 'pie' | 'radar'; title: string; data: Record<string, unknown>[]; keys: { dataKey: string; color: string; name: string }[] }[];
+    table: { title: string; columns: string[]; rows: string[][] };
+    recommendations: string[];
+  }>(null);
   const [showCinematicDirector, setShowCinematicDirector] = useState(false);
+  const [cinematicLayerVersion, setCinematicLayerVersion] = useState(0);
+  const [cinematicFocusEntity, setCinematicFocusEntity] = useState<{ lat: number; lon: number; layer: string; name?: string } | null>(null);
   const [showSpatialSketching, setShowSpatialSketching] = useState(false);
+  const [showPerfMonitor, setShowPerfMonitor] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState<any>(null);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [scenarioGalleryScenarios, setScenarioGalleryScenarios] = useState<any[]>([]);
+  const [scenarioGalleryLoading, setScenarioGalleryLoading] = useState(false);
+  const [scenarioGalleryError, setScenarioGalleryError] = useState<string | null>(null);
   const [activeStudyAreaId, setActiveStudyAreaId] = useState<string | null>(null);
   useEffect(() => {
     if (!showScenarioGallery) return;
+    setScenarioGalleryLoading(true);
+    setScenarioGalleryError(null);
     fetch('/api/scenarios/search', { headers: { ...authHeaders() } })
-      .then(r => r.ok ? r.json() : null)
+      .then(r => {
+        if (!r.ok) throw new Error(r.status === 401 ? 'Not logged in' : 'Failed to load scenarios');
+        return r.json();
+      })
       .then(data => {
         if (data?.scenarios) setScenarioGalleryScenarios(data.scenarios.map(adaptScenario));
-      }).catch(() => {});
+      })
+      .catch(err => setScenarioGalleryError(err.message))
+      .finally(() => setScenarioGalleryLoading(false));
   }, [showScenarioGallery]);
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
   const [agentEnvironmentId, setAgentEnvironmentId] = useState<string | null>(null);
@@ -949,10 +1177,36 @@ export default function App() {
   const [showTimeSlider, setShowTimeSlider] = useState(false);
   const [timeSliderValue, setTimeSliderValue] = useState(Date.now());
   const [timeSliderPlaying, setTimeSliderPlaying] = useState(false);
+
+  // Time slider: apply entity filtering when value changes
+  useEffect(() => {
+    if (showTimeSlider) {
+      filterEntitiesByTime(timeSliderValue);
+    } else {
+      clearTimelineFilter();
+    }
+  }, [showTimeSlider, timeSliderValue]);
+
+  // Time slider play/pause: advance time forward when playing
+  useEffect(() => {
+    if (!timeSliderPlaying || !showTimeSlider) return;
+    const interval = setInterval(() => {
+      setTimeSliderValue(prev => {
+        const next = prev + 60000; // advance 1 minute per tick
+        if (next >= Date.now()) {
+          setTimeSliderPlaying(false);
+          return Date.now();
+        }
+        return next;
+      });
+    }, 100); // 10 ticks per second for smooth playback
+    return () => clearInterval(interval);
+  }, [timeSliderPlaying, showTimeSlider]);
   const [showMeasureTool, setShowMeasureTool] = useState(false);
   const [measurePoints, setMeasurePoints] = useState<Array<{ lat: number; lon: number }>>([]);
   const [measureDistance, setMeasureDistance] = useState<number | null>(null);
-  const [showRiskForecast, setShowRiskForecast] = useState(false);
+  const [measureArea, setMeasureArea] = useState<number | null>(null);
+  const measureEntitiesRef = useRef<Cesium.Entity[]>([]);
   const currentChatIdRef = useRef<string | null>(null);
   const chatSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
@@ -1007,14 +1261,15 @@ export default function App() {
 
   // Load chat list on mount
   useEffect(() => {
+    if (!auth.token) return;
     listChats().then(setChatList).catch(() => {});
-  }, []);
+  }, [auth.token]);
 
   // Poll memory stats every 30s
   useEffect(() => {
     const fetchMemory = async () => {
       try {
-        const res = await fetch('/api/memory/stats', { credentials: 'include' });
+        const res = await fetch('/api/memory/stats');
         if (res.ok) {
           const data = await res.json();
           setMemoryStats(data.tiers);
@@ -1022,9 +1277,9 @@ export default function App() {
       } catch { /* silent */ }
     };
     fetchMemory();
-    const interval = setInterval(fetchMemory, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    unifiedTimerRef.current.register('memory-stats', fetchMemory, 30000);
+    return () => { unifiedTimerRef.current.unregister('memory-stats'); };
+  }, [auth.token]);
 
   // Auto-save chat after each new message
   useEffect(() => {
@@ -1069,6 +1324,14 @@ export default function App() {
   const [layerSearch, setLayerSearch] = useState('');
   const [pulsingLayer, setPulsingLayer] = useState<string | null>(null);
   const [cctvPreviewTick, setCctvPreviewTick] = useState(0);
+  const [cctvPreviewFailed, setCctvPreviewFailed] = useState(false);
+  useEffect(() => { setCctvPreviewFailed(false); }, [infoEntity]);
+  useEffect(() => {
+    if (showSuggestions && searchSuggestions.length > 0) {
+      const el = searchBoxRef.current;
+      if (el) setSearchBoxRect(el.getBoundingClientRect());
+    }
+  }, [showSuggestions, searchSuggestions]);
   const lastKnownLocationRef = useRef<{ lat: number; lon: number } | null>(null);
   const disasterNearMeRequestedRef = useRef(false);
   const geolocationWatchRef = useRef<number | null>(null);
@@ -1085,11 +1348,36 @@ export default function App() {
   const aiApiType = useMemo(() => resolveAiProvider(apiVault), [apiVault]);
   const cesiumIonToken = useMemo(() => resolveCesiumIonToken(apiVault), [apiVault]);
 
+  const activeBbox = useMemo(() => {
+    if (!activeStudyAreaId) return null;
+    const active = studyAreas.find(a => a.id === activeStudyAreaId);
+    if (!active) return null;
+    return computeStudyAreaBbox(active);
+  }, [studyAreas, activeStudyAreaId]);
+
+  const handleSurfaceData = useCallback((toolId: string, resultJson: string) => {
+    const viewer = viewerRef.current;
+    if (!viewer || !activeBbox) return;
+    try {
+      const points = extractPointsFromResult(toolId, resultJson);
+      if (points.length < 3) { console.warn('[Surface] Too few points:', points.length); return; }
+      const camAlt = viewer.camera.positionCartographic.height;
+      const { width, height } = getViewDependentResolution(camAlt, 200);
+      const b = activeBbox;
+      console.log('[Surface] Rendering', points.length, 'points, bbox:', b, 'grid:', width, 'x', height);
+      if (b.latMin >= b.latMax || b.lonMin >= b.lonMax) { console.error('[Surface] Invalid bbox:', b); return; }
+      const grid = interpolateIDW(points, b, width, height);
+      showInterpSurface(viewer, grid, undefined, 0.65, true);
+    } catch (e) {
+      console.error('[Surface] Render error:', (e as Error)?.message, (e as Error)?.stack);
+    }
+  }, [activeBbox]);
+
   /* ── Memo ── */
   const groupedLayers = useMemo(() => {
     const g: Record<string, LayerItem[]> = {};
     const primaryIds = new Set([
-      'earthquakes', 'tectonic', 'seismic_waves', 'tsunami', 'heatmap',
+      'earthquakes', 'tectonic', 'seismic_waves', 'heatmap',
       'flight_tracks', 'airports', 'airspaces',
       'ais_vessels', 'submarine_cables',
       'space_debris', 'nasa_dsn', 'space_weather',
@@ -1097,7 +1385,7 @@ export default function App() {
       'aurora_oval', 'dust', 'co_index', 'so2_index', 'temp_anomaly',
       'volcanoes', 'floods', 'seaLakeIce',
       'disaster_alerts', 'landslides', 'flood_extent', 'disaster_near_me',
-      'india_cctv', 'intel_feed', 'electricity_grid',
+      'india_cctv', 'intel_feed', 'live_media', 'electricity_grid',
       'population_impact', 'dt_buildings',
       'animal_migrations', 'land_cover',
       'nasa_gibs', 'night_lights', 'aerosol_index', 'dust_score',
@@ -1135,17 +1423,20 @@ export default function App() {
         const data = await resp.json() as { keys?: Record<string, string> };
         if (cancelled || !data.keys) return;
         flatKeysRef.current = data.keys;
-        setApiVault(prev => ({ ...vaultFromFlatKeys(data.keys!), preferredAiProvider: prev.preferredAiProvider, vaultDismissed: prev.vaultDismissed }));
+        const fetchedVault = vaultFromFlatKeys(data.keys!);
+        try { sessionStorage.setItem(SESSION_VAULT_KEY, JSON.stringify(fetchedVault)); } catch { /* ignore */ }
+        setApiVault(prev => ({ ...fetchedVault, preferredAiProvider: prev.preferredAiProvider, vaultDismissed: prev.vaultDismissed }));
       } catch {
         /* vault optional until user saves keys */
       }
     })();
     return () => { cancelled = true; };
-  }, [isLoggedIn]);
+  }, [isLoggedIn, auth.token]);
 
   const handleApiVaultSave = async (keys: Record<string, string>) => {
     flatKeysRef.current = keys;
     const newVault = vaultFromFlatKeys(keys);
+    try { sessionStorage.setItem(SESSION_VAULT_KEY, JSON.stringify(newVault)); } catch { /* ignore */ }
     setApiVault(prev => ({ ...newVault, preferredAiProvider: prev.preferredAiProvider, vaultDismissed: prev.vaultDismissed }));
     try {
       await fetch('/api/vault', {
@@ -1176,8 +1467,9 @@ export default function App() {
       setUtcTime(ist + ' IST');
     };
     tick();
-    clockIntervalRef.current = setInterval(tick, 1000);
-    return () => { if (clockIntervalRef.current) clearInterval(clockIntervalRef.current); };
+    unifiedTimerRef.current.register('clock', tick, 1000);
+    unifiedTimerRef.current.start();
+    return () => { unifiedTimerRef.current.unregister('clock'); };
   }, []);
 
   /* ── Cesium Init ── */
@@ -1196,7 +1488,15 @@ export default function App() {
     const v = new Cesium.Viewer(cesiumElRef.current, {
       terrainProvider: new Cesium.EllipsoidTerrainProvider(),
       scene3DOnly: true,
-      requestRenderMode: false,
+      contextOptions: {
+        webgl: {
+          preserveDrawingBuffer: true,
+          alpha: false,
+        },
+      },
+      requestRenderMode: true,
+      maximumRenderTimeChange: Infinity, // P0 perf: only render on demand
+      targetFrameRate: 30,
       baseLayerPicker: false,
       geocoder: false,
       homeButton: false,
@@ -1212,6 +1512,8 @@ export default function App() {
     });
     viewerRef.current = v;
     forkRendererRef.current = new ForkRenderer(v);
+    forkRendererRef.current.setEntityCacheGetter(() => entityStoreRef.current);
+    forkRendererRef.current.setSkipLayers(['live_media', 'weather_cards', 'india_cctv']);
     ghostProtocolRef.current = new GhostProtocol(v);
     entropyHaloRef.current = new EntropyHalo(v);
     oracleChainRef.current = new OracleChainRenderer(v);
@@ -1231,14 +1533,14 @@ export default function App() {
       (window as any).__renderCausalChain = renderCausalChain;
     }
     entityTrackerRef.current = createEntityTracker(v);
-    flightDrRef.current = new FlightDeadReckoning(v, ghostProtocolRef.current ?? undefined);
-    adsbLolDrRef.current = new FlightDeadReckoning(v, ghostProtocolRef.current ?? undefined);
-    adsbFiDrRef.current = new FlightDeadReckoning(v, ghostProtocolRef.current ?? undefined);
-    flightawareDrRef.current = new FlightDeadReckoning(v, ghostProtocolRef.current ?? undefined);
-    airlabsDrRef.current = new FlightDeadReckoning(v, ghostProtocolRef.current ?? undefined);
+    flightDrRef.current = new FlightDeadReckoning(v);
+    adsbLolDrRef.current = new FlightDeadReckoning(v);
+    adsbFiDrRef.current = new FlightDeadReckoning(v);
+    flightawareDrRef.current = new FlightDeadReckoning(v);
+    airlabsDrRef.current = new FlightDeadReckoning(v);
     const aisKey = apiVaultRef.current.aisStreamApiKey;
     if (aisKey) {
-      aisTrackerRef.current = new AisVesselTracker(v, aisKey, ghostProtocolRef.current ?? undefined);
+      aisTrackerRef.current = new AisVesselTracker(v, aisKey);
     }
     v.scene.logarithmicDepthBuffer = true;
     v.clock.shouldAnimate = true;
@@ -1257,7 +1559,8 @@ export default function App() {
     v.scene.globe.lightingFadeOutDistance = 8e6;
     v.scene.globe.lightingFadeInDistance = 1e7;
     try {
-      // Keep Cesium default imagery; add Esri layer on top (do NOT removeAll — that causes a black globe)
+      // Remove Cesium default imagery and add Esri satellite as the single base layer
+      v.scene.imageryLayers.remove(v.scene.imageryLayers.get(0));
       addBaseImagery(v, 'satellite', false);
     } catch (err) {
       console.warn('Custom basemap failed, keeping default imagery:', err);
@@ -1270,7 +1573,7 @@ export default function App() {
     ctrl.maximumZoomDistance = 5e8;
     unlockInteractionRef.current = () => {
       if (rotateTimerRef.current) {
-        clearInterval(rotateTimerRef.current);
+        cancelAnimationFrame(rotateTimerRef.current as unknown as number);
         rotateTimerRef.current = null;
       }
       setIsAutoRotating(false);
@@ -1279,13 +1582,23 @@ export default function App() {
       destination: Cesium.Cartesian3.fromDegrees(0, 0, 2.2e7),
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     });
-    v.scene.requestRender();
+    throttledRender(v);
     requestAnimationFrame(() => {
       v.resize();
-      v.scene.requestRender();
+      throttledRender(v);
     });
 
+    // Dismiss loading overlay immediately — globe is visible, data loads in background
+    setLoadingProgress(100);
+    setLoadingStatus('Globe ready');
+    setTimeout(() => setLoading(false), 400);
+
+    let lastCardSyncTime = 0;
+    const CARD_SYNC_THROTTLE_MS = 500; // P0 perf: sync card positions at 2 Hz instead of every frame
     const syncWeatherCardPositions = () => {
+      const now = performance.now();
+      if (now - lastCardSyncTime < CARD_SYNC_THROTTLE_MS) return;
+      lastCardSyncTime = now;
       for (const card of weatherCardsRef.current) {
         const el = weatherCardElementsRef.current[card.id];
         if (!el) continue;
@@ -1308,8 +1621,12 @@ export default function App() {
     };
     v.scene.postRender.addEventListener(syncWeatherCardPositions);
 
+    let lastFpsRenderTime = 0;
+    const FPS_UPDATE_THROTTLE_MS = 1000; // P0 perf: update FPS at 1 Hz instead of every frame
     const onPostRender = () => {
       const now = performance.now();
+      if (now - lastFpsRenderTime < FPS_UPDATE_THROTTLE_MS) return;
+      lastFpsRenderTime = now;
       const dt = now - lastFpsTimeRef.current;
       if (dt >= 500) {
         const frames = fpsFramesRef.current.length;
@@ -1330,8 +1647,7 @@ export default function App() {
     };
     v.scene.postRender.addEventListener(onPostRender);
 
-    setLoadingProgress(30);
-    setLoadingStatus('Loading data layers...');
+    setLoadingProgress(100);
 
     const handler = new Cesium.ScreenSpaceEventHandler(v.canvas);
     screenSpaceHandlerRef.current = handler;
@@ -1342,6 +1658,34 @@ export default function App() {
     handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.WHEEL);
     handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.PINCH_START);
     handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
+      // Measure tool: when active, clicking adds measurement points
+      if (showMeasureToolRef.current) {
+        let cart: Cesium.Cartesian3 | undefined = v.scene.pickPosition(click.position);
+        if (!cart || !Cesium.defined(cart)) {
+          cart = v.camera.pickEllipsoid(click.position, v.scene.globe.ellipsoid);
+        }
+        if (cart && Cesium.defined(cart)) {
+          const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cart);
+          if (!carto) return;
+          const lon = Cesium.Math.toDegrees(carto.longitude);
+          const lat = Cesium.Math.toDegrees(carto.latitude);
+          const newLat = lat, newLon = lon;
+          setMeasurePoints(prev => {
+            const next = [...prev, { lat: newLat, lon: newLon }];
+            let total = 0;
+            for (let i = 1; i < next.length; i++) {
+              total += greatCircleDistance(
+                next[i - 1].lat, next[i - 1].lon,
+                next[i].lat, next[i].lon,
+              );
+            }
+            setMeasureDistance(total);
+            return next;
+          });
+        }
+        return;
+      }
+
       const picked = v.scene.pick(click.position);
       if (Cesium.defined(picked) && picked.id instanceof Cesium.Entity) {
         const ent = picked.id as Cesium.Entity;
@@ -1352,10 +1696,25 @@ export default function App() {
           flight_tracks: 'aircraft',
           earthquakes: 'earthquake',
           india_cctv: 'cctv',
+          live_media: 'cctv',
           ais_vessels: 'ship',
           space_debris: 'satellite',
         };
         entityTrackerRef.current?.track(ent, trackTypes[layer] ?? 'default');
+
+        // If CinematicDirector is open, focus on this entity
+        if (showCinematicDirector) {
+          const pos = ent.position?.getValue(Cesium.JulianDate.now()) as Cesium.Cartesian3 | undefined;
+          if (pos) {
+            const carto = Cesium.Cartographic.fromCartesian(pos);
+            setCinematicFocusEntity({
+              lat: Cesium.Math.toDegrees(carto.latitude),
+              lon: Cesium.Math.toDegrees(carto.longitude),
+              layer,
+              name: typeof ent.name === 'string' ? ent.name : typeof p?.place === 'string' ? p.place : undefined,
+            });
+          }
+        }
       } else {
         setInfoEntity(null);
         entityTrackerRef.current?.untrack();
@@ -1377,9 +1736,12 @@ export default function App() {
       const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cart);
       const lon = Cesium.Math.toDegrees(carto.longitude);
       const lat = Cesium.Math.toDegrees(carto.latitude);
-      setContextMenu({ show: true, x: click.position.x, y: click.position.y, lat, lon });
 
-      // Fork creation prompt
+      if (!forkModeRef.current) {
+        setContextMenu({ show: true, x: click.position.x, y: click.position.y, lat, lon });
+        return;
+      }
+
       const forkName = window.prompt('🍴 Name this parallel reality:', `Fork-${Date.now()}`);
       if (!forkName) return;
       fetch('/api/fork/create', {
@@ -1394,24 +1756,26 @@ export default function App() {
           maxSimulationHours: 72,
         }),
       }).then(r => r.json()).then(data => {
-        console.log('Fork created:', data);
+        if (data.forkId) {
+          forkRendererRef.current?.createForkVisual(data.forkId, forkName, lat, lon);
+          forkRendererRef.current?.spawnGhostsWithRetry(data.forkId);
+          setForks(prev => [...prev, { forkId: data.forkId, name: forkName, divergenceScore: 0, status: 'running' }]);
+          setActiveForkCount(prev => prev + 1);
+        }
       }).catch(e => console.error('Fork creation failed:', e));
     }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
 
     handler.setInputAction(() => setContextMenu({show:false,x:0,y:0,lat:0,lon:0}), Cesium.ScreenSpaceEventType.LEFT_DOWN);
 
-    setLoadingProgress(50);
+    v.scene.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     void loadAllData(v)
       .then(() => {
         syncWeatherCardPositions();
-        autoRefreshIntervalRef.current = setInterval(() => {
-          void refreshLiveData(v);
-        }, 60000);
+        unifiedTimerRef.current.register('refresh-live', () => { void refreshLiveData(v); }, 60000);
         // Slow-refresh groups (ocean, geology, space — data changes hourly+)
-        autoRefreshSlowRef.current = setInterval(() => {
-          void refreshGenericLayers(v, ['geology', 'space', 'ocean', 'argo', 'tides', 'usgs_water', 'ports']);
-        }, 300000);
+        unifiedTimerRef.current.register('refresh-slow', () => { void refreshGenericLayers(v, ['geology', 'space', 'ocean', 'argo', 'tides', 'usgs_water', 'ports']); }, 300000);
+        unifiedTimerRef.current.start();
         // Pre-warm server cache for slow groups so first toggle is instant
         const warmGroupLayers: Record<string, string> = {
           ocean: '42_ndbc_buoy_data', argo: '31_argo_floats', tides: '31_noaa_tides_currents',
@@ -1422,18 +1786,12 @@ export default function App() {
           const lc = LAYER_CATEGORIES.find(l => l.id === lid);
           return lc ? fetchLayerData(lc).catch(() => {}) : Promise.resolve();
         }));
-        setLoadingProgress(100);
-        setLoadingStatus('Ready');
-        setTimeout(() => setLoading(false), 800);
       })
       .catch((err) => {
         console.error('Data load failed:', err);
-        setLoadingProgress(100);
-        setLoadingStatus('Globe ready (some feeds unavailable)');
-        setTimeout(() => setLoading(false), 800);
       })
       .finally(() => {
-        v.scene.requestRender();
+        throttledRender(v);
       });
 
     const handleDocClick = (e: MouseEvent) => {
@@ -1471,7 +1829,7 @@ export default function App() {
     void (async () => {
       const enabled = await applyTerrainProvider(v, cesiumIonToken);
       if (!cancelled) {
-        v.scene.requestRender();
+        throttledRender(v);
         if (enabled) {
           setLoadingStatus('Cesium 3D terrain enabled');
         }
@@ -1485,6 +1843,138 @@ export default function App() {
 
   const isContextMenuOpenRef = useRef(false);
   useEffect(() => { isContextMenuOpenRef.current = contextMenu.show; }, [contextMenu.show]);
+  const showMeasureToolRef = useRef(false);
+  useEffect(() => { showMeasureToolRef.current = showMeasureTool; }, [showMeasureTool]);
+
+  // Render measure points, polyline, and polygon on globe
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+    // Clear previous measure entities
+    measureEntitiesRef.current.forEach(e => v.entities.remove(e));
+    measureEntitiesRef.current = [];
+    if (!showMeasureTool || measurePoints.length === 0) return;
+
+    const ents: Cesium.Entity[] = [];
+    const pts = measurePoints.map(p =>
+      Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 1)
+    );
+
+    // Point markers
+    for (let i = 0; i < measurePoints.length; i++) {
+      ents.push(v.entities.add({
+        position: pts[i],
+        point: {
+          pixelSize: 6,
+          color: Cesium.Color.fromCssColorString('#f59e0b'),
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 1.5,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          scaleByDistance: new Cesium.NearFarScalar(100, 1.0, 50000, 0.4),
+        },
+        label: {
+          text: `${i + 1}`,
+          font: 'bold 12px monospace',
+          fillColor: Cesium.Color.WHITE,
+          backgroundColor: new Cesium.Color(0, 0, 0, 0.6),
+          showBackground: true,
+          pixelOffset: new Cesium.Cartesian2(12, -8),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          scaleByDistance: new Cesium.NearFarScalar(100, 1.0, 50000, 0.0),
+        },
+        properties: { layer: 'measure_tool', type: 'point', index: i },
+      }));
+    }
+
+    // Polyline connecting points (open path)
+    if (pts.length >= 2) {
+      ents.push(v.entities.add({
+        polyline: {
+          positions: pts,
+          width: 2.5,
+          material: new Cesium.PolylineOutlineMaterialProperty({
+            color: Cesium.Color.fromCssColorString('#f59e0b'),
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 1,
+          }),
+          clampToGround: true,
+        },
+        properties: { layer: 'measure_tool', type: 'polyline' },
+      }));
+    }
+
+    // Polygon fill only when 3+ points (closed shape)
+    if (pts.length >= 3) {
+      // Compute polygon area via 3D triangulation (fan from first vertex)
+      let area3d = 0;
+      const ref = pts[0];
+      for (let i = 1; i < pts.length - 1; i++) {
+        const v1 = new Cesium.Cartesian3();
+        const v2 = new Cesium.Cartesian3();
+        Cesium.Cartesian3.subtract(pts[i], ref, v1);
+        Cesium.Cartesian3.subtract(pts[i + 1], ref, v2);
+        const cross = Cesium.Cartesian3.cross(v1, v2, new Cesium.Cartesian3());
+        area3d += Cesium.Cartesian3.magnitude(cross) / 2;
+      }
+      setMeasureArea(area3d / 1e6);
+
+      // Visual polygon fill (semi-transparent) — always closed
+      ents.push(v.entities.add({
+        polygon: {
+          hierarchy: pts,
+          material: Cesium.Color.fromCssColorString('#f59e0b').withAlpha(0.12),
+          outline: true,
+          outlineColor: Cesium.Color.fromCssColorString('#f59e0b').withAlpha(0.6),
+          outlineWidth: 1.5,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        },
+        properties: { layer: 'measure_tool', type: 'polygon' },
+      }));
+
+      // Closing edge polyline (last → first) shown as dashed
+      const closePositions = [pts[pts.length - 1], pts[0]];
+      ents.push(v.entities.add({
+        polyline: {
+          positions: closePositions,
+          width: 2,
+          material: new Cesium.PolylineDashMaterialProperty({
+            color: Cesium.Color.fromCssColorString('#f59e0b').withAlpha(0.5),
+          }),
+          clampToGround: true,
+        },
+        properties: { layer: 'measure_tool', type: 'close_edge' },
+      }));
+    }
+
+    measureEntitiesRef.current = ents;
+    throttledRender(v);
+  }, [showMeasureTool, measurePoints]);
+
+  // Sample terrain heights for more accurate distance (overrides ellipsoid value)
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (!v || measurePoints.length < 2) return;
+    const t = v.terrainProvider;
+    if (!t || !Cesium.sampleTerrain) return;
+    const cartos = measurePoints.map(p =>
+      new Cesium.Cartographic(Cesium.Math.toRadians(p.lon), Cesium.Math.toRadians(p.lat), 0)
+    );
+    let stop = false;
+    Cesium.sampleTerrain(t, 11, cartos).then(() => {
+      if (stop) return;
+      let total = 0;
+      for (let i = 1; i < cartos.length; i++) {
+        const a = cartos[i - 1], b = cartos[i];
+        const ca = Cesium.Cartesian3.fromRadians(a.longitude, a.latitude, a.height ?? 0);
+        const cb = Cesium.Cartesian3.fromRadians(b.longitude, b.latitude, b.height ?? 0);
+        total += Cesium.Cartesian3.distance(ca, cb);
+      }
+      setMeasureDistance(total);
+    });
+    return () => { stop = true; };
+  }, [measurePoints]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1515,8 +2005,10 @@ export default function App() {
 
     const v = viewerRef.current;
     if (v) {
-      const lat = props.lat as number;
-      const lon = props.lon as number;
+      const meta = cctvMetaRef.current.get(infoEntity.id);
+      const lat = (meta?.lat as number) ?? (props.lat as number);
+      const lon = (meta?.lon as number) ?? (props.lon as number);
+      if (lat == null || lon == null) { setCctvPreviewTick(0); return; }
       const pulse = makeSafeAnimatedRadiusPair(
         () => 15000 + Math.sin(Date.now() / 250) * 4000,
         1.05,
@@ -1561,58 +2053,157 @@ export default function App() {
      DATA LOADING
      ═════════════════════════════════════════════════════════════════ */
 
-  async function loadSocialFeed() {
-    if (!isLayerEnabled('intel_feed')) return;
-    try {
-      const resp = await apiGet<any[]>('/social');
-      if (!Array.isArray(resp)) return;
-      resp.forEach(item => {
-        if (!intelFeedRef.current.find(i => i.id === item.id)) {
-          pushIntelFeed({
-            id: item.id,
-            title: item.title,
-            source: item.source,
-            type: item.type,
-            lat: item.lat || 0,
-            lon: item.lon || 0,
-            timestamp: item.timestamp,
-            url: item.url,
-            platform: item.platform
-          });
-        }
-      });
-    } catch (e) {
-      console.warn('Social feed error:', e);
-    }
-  }
-
   useEffect(() => {
-    const timer = setInterval(() => {
-      if (isLayerEnabled('intel_feed')) {
-        void loadSocialFeed();
+    if (!isLoggedIn) return;
+    // SSE stream for instant items; falls back to HTTP polling if SSE fails
+    const token = auth.token || localStorage.getItem('auth_token');
+    const url = `/api/social/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+    const es = new EventSource(url);
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+    es.addEventListener('items', (e: MessageEvent) => {
+      try {
+        const items = JSON.parse(e.data) as any[];
+        if (!Array.isArray(items)) return;
+        let youtubeCount = 0;
+        for (const item of items) {
+          if (item.id && !intelFeedRef.current.find(i => i.id === item.id)) {
+            pushIntelFeed({
+              id: item.id,
+              title: item.title ?? '',
+              source: item.source ?? '',
+              type: item.type ?? 'news',
+              lat: item.lat || 0,
+              lon: item.lon || 0,
+              timestamp: item.timestamp ?? Date.now(),
+              url: item.url,
+              platform: item.platform,
+            });
+            const videoId = item.youtubeVideoId || extractYoutubeId(item.url);
+            if (videoId && item.url) {
+              youtubeCount++;
+              if (!item.lat && !item.lon) {
+                const geo = geoFromText(item.title || '');
+                if (geo.lat || geo.lon) { item.lat = geo.lat; item.lon = geo.lon; }
+              }
+              if (item.lat && item.lon) {
+                addYoutubeEntity(item);
+              } else {
+                console.warn('[LiveMedia] YouTube item skipped: no geo', item.title?.slice(0, 50), item.lat, item.lon);
+              }
+            }
+          }
+        }
+        if (youtubeCount) console.warn(`[LiveMedia] SSE items event: ${youtubeCount} YouTube items, ${items.length} total`);
+      } catch { /* ignore malformed SSE data */ }
+    });
+
+    es.addEventListener('enriched', (e: MessageEvent) => {
+      try {
+        const items = JSON.parse(e.data) as any[];
+        if (!Array.isArray(items)) return;
+        const feed = intelFeedRef.current;
+        for (const item of items) {
+          if (!item.id) continue;
+          const existing = feed.find(i => i.id === item.id);
+          if (existing) {
+            if (item.lat) existing.lat = item.lat;
+            if (item.lon) existing.lon = item.lon;
+            if ((item as unknown as Record<string, unknown>).confidence) (existing as unknown as Record<string, unknown>).confidence = (item as unknown as Record<string, unknown>).confidence;
+          }
+          // If LLM enrichment gave geo to a YouTube item, create its entity
+          const videoId = item.youtubeVideoId || extractYoutubeId(item.url);
+          if (videoId && item.lat && item.lon) {
+            addYoutubeEntity({ id: item.id, title: item.title || '', lat: item.lat, lon: item.lon, url: item.url, source: item.source });
+          }
+        }
+      } catch { /* ignore */ }
+    });
+
+    es.addEventListener('done', () => {
+      // Refresh YouTube entities after all sources have delivered
+      if (isLayerEnabled('live_media') && viewerRef.current) {
+        void loadLiveMedia(viewerRef.current);
       }
-    }, 60000);
-    return () => clearInterval(timer);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+      // Don't close — LLM enrichment may still send 'enriched' events
+    });
+
+    // Fallback polling if SSE fails (onerror fires async, so polling is inside the handler)
+    es.onerror = () => {
+      es.close();
+      if (pollTimer) return;
+      pollTimer = setInterval(() => {
+        if (!isLayerEnabled('intel_feed') && !isLayerEnabled('live_media')) return;
+        fetch('/api/social', { headers: { ...authHeaders() } })
+          .then(r => r.ok ? r.json() : [])
+          .then((items: any[]) => {
+            for (const item of items) {
+              if (item.id && !intelFeedRef.current.find(i => i.id === item.id)) {
+                pushIntelFeed({
+                  id: item.id,
+                  title: item.title ?? '',
+                  source: item.source ?? '',
+                  type: item.type ?? 'news',
+                  lat: item.lat || 0,
+                  lon: item.lon || 0,
+                  timestamp: item.timestamp ?? Date.now(),
+                  url: item.url,
+                  platform: item.platform,
+                });
+                const videoId = item.youtubeVideoId || extractYoutubeId(item.url);
+                if (videoId && item.url) {
+                  if (!item.lat && !item.lon) {
+                    const geo = geoFromText(item.title || '');
+                    if (geo.lat || geo.lon) { item.lat = geo.lat; item.lon = geo.lon; }
+                  }
+                  if (item.lat && item.lon) addYoutubeEntity(item);
+                }
+              }
+            }
+            // Refresh YouTube entities after polling fetch
+            if (isLayerEnabled('live_media') && viewerRef.current) {
+              void loadLiveMedia(viewerRef.current);
+            }
+          })
+          .catch(() => {});
+      }, 60000);
+    };
+
+    return () => {
+      es.close();
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, [isLoggedIn, auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadFlightTracks(viewer: Cesium.Viewer) {
+    const gen = (loadGenRef.current['flight_tracks'] = (loadGenRef.current['flight_tracks'] ?? 0) + 1);
     if (!isLayerEnabled('flight_tracks')) return;
     flightDrRef.current?.clear();
     removeLayerEntities('flight_tracks');
 
     const sources = ['/flights', '/adsb-fi', '/adsb-lol'];
-    for (const source of sources) {
-      try {
-        const data = await apiGet<{ states?: unknown[][] | null }>(source);
-        if (!isLayerEnabled('flight_tracks')) return;
-        if (data.states?.length) {
-          flightDrRef.current?.updateFromApi(data.states);
-          flightDrRef.current?.start();
-          viewer.scene.requestRender();
-          showNotification(`Loaded ${data.states.length} live flight tracks`, 'success');
-          return;
-        }
-      } catch { /* try next source */ }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    // Try all sources in parallel, use first successful response
+    const results = await Promise.allSettled(
+      sources.map(source =>
+        apiGet<{ states?: unknown[][] | null }>(source, { signal: controller.signal })
+      )
+    );
+    clearTimeout(timeout);
+
+    if (loadGenRef.current['flight_tracks'] !== gen) return;
+    if (!isLayerEnabled('flight_tracks')) return;
+
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value.states?.length) {
+        flightDrRef.current?.updateFromApi(result.value.states);
+        flightDrRef.current?.start();
+        throttledRender(viewer);
+        showNotification(`Loaded ${result.value.states.length} live flight tracks`, 'success');
+        return;
+      }
     }
   }
 
@@ -1626,6 +2217,62 @@ export default function App() {
     const sliced = next.slice(0, 500); // Increase limit to 500 to hold bulk loads
     intelFeedRef.current = sliced;
     setIntelFeed(sliced);
+  }
+
+  function addYoutubeEntity(item: { id: string; title: string; lat: number; lon: number; url?: string; source?: string }) {
+    const v = viewerRef.current;
+    if (!v || !isLayerEnabled('live_media')) {
+      console.warn('[LiveMedia] addYoutubeEntity skipped: viewer/layer disabled');
+      return;
+    }
+    const existing = entityStoreRef.current['live_media'];
+    if (existing?.find(e => e.id === item.id)) {
+      console.warn('[LiveMedia] addYoutubeEntity skipped: duplicate', item.title?.slice(0, 50));
+      return;
+    }
+    const videoId = extractYoutubeId(item.url);
+    if (!videoId) {
+      console.warn('[LiveMedia] addYoutubeEntity skipped: no videoId', item.url);
+      return;
+    }
+    console.warn('[LiveMedia] Creating entity', item.title?.slice(0, 50), `@(${item.lat},${item.lon})`, videoId);
+    const ent = v.entities.add({
+      id: item.id,
+      position: Cesium.Cartesian3.fromDegrees(item.lon, item.lat, 0),
+      name: item.title,
+      billboard: {
+        image: createYoutubeIcon(),
+        width: 32, height: 32,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        disableDepthTestDistance: 10000,
+        pixelOffset: new Cesium.Cartesian2(0, -2),
+      },
+      label: {
+        text: item.title,
+        font: '10px "JetBrains Mono"',
+        fillColor: Cesium.Color.fromCssColorString('#ef4444'),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        pixelOffset: new Cesium.Cartesian2(0, -24),
+        show: false,
+      },
+      properties: {
+        layer: 'live_media',
+        title: item.title,
+        lat: item.lat,
+        lon: item.lon,
+        source: item.source,
+        url: item.url,
+        youtubeVideoId: videoId,
+      },
+    });
+    const store = entityStoreRef.current['live_media'] || [];
+    if (!store.find(e => e.id === item.id)) {
+      store.push(ent);
+    }
+    entityStoreRef.current['live_media'] = store;
+    throttledRender(v);
   }
 
   const loadGenRef = useRef<Record<string, number>>({});
@@ -1660,6 +2307,7 @@ export default function App() {
         return addEarthquakeEntity(viewer, f);
       });
       entityStoreRef.current['earthquakes'] = ents;
+      enforceEntityCap();
       if (!isLayerEnabled('earthquakes')) {
         setLayerEntitiesVisible('earthquakes', false);
       }
@@ -1671,6 +2319,7 @@ export default function App() {
   const eonetCategoriesRef = useRef<Set<string>>(new Set());
 
   async function loadEonetEvents(viewer: Cesium.Viewer) {
+    const gen = (loadGenRef.current['eonet'] = (loadGenRef.current['eonet'] ?? 0) + 1);
     const eonetLayers = ['wildfires', 'severe_storms', 'volcanoes', 'floods', 'dust', 'landslides', 'seaLakeIce'];
     // Clear all previously used EONET categories (including transient ones like drought, manmade, snow, etc.)
     for (const cat of eonetCategoriesRef.current) {
@@ -1682,6 +2331,7 @@ export default function App() {
     eonetCategoriesRef.current.clear();
     try {
       const data = await apiGet<{ events: Array<Record<string, unknown>> }>('/eonet');
+      if (loadGenRef.current['eonet'] !== gen) return;
       const evs = (data.events || []).slice(0, 60);
       setActiveEvents(evs.length);
       for (const ev of evs) {
@@ -1728,6 +2378,7 @@ export default function App() {
           setLayerEntitiesVisible(key, false);
         }
       }
+      enforceEntityCap();
       refreshDerivedOverlays();
     } catch (err) {
       recordFeedError('natural events', err);
@@ -1808,6 +2459,7 @@ export default function App() {
         });
       });
       entityStoreRef.current['space_weather'] = spaceEnts;
+      enforceEntityCap();
     } catch (err) {
       recordFeedError('space weather', err);
     }
@@ -1817,54 +2469,67 @@ export default function App() {
     feedErrorsRef.current = [];
     feedSummaryShownRef.current = false;
 
-    await Promise.all([
-      loadEarthquakes(viewer),
-      loadEonetEvents(viewer),
-      apiGet<Record<string, unknown>>('/tectonic').then(async (geo) => {
-        const src = await loadTectonicPlates(viewer, geo);
-        entityStoreRef.current['tectonic'] = [...src.entities.values];
-        if (!isLayerEnabled('tectonic')) {
-          setLayerEntitiesVisible('tectonic', false);
-        }
-      }).catch((err) => {
-        recordFeedError('tectonic plates', err);
-      }),
-      loadNwsAlerts(viewer),
-      loadSpaceWeather(viewer),
-    ]);
+    // Only load data for layers that are actually enabled at startup
+    const startupLoads: Promise<void>[] = [];
+    if (isLayerEnabled('earthquakes')) {
+      startupLoads.push(loadEarthquakes(viewer));
+    }
+    if (isLayerEnabled('wildfires') || isLayerEnabled('severe_storms') || isLayerEnabled('volcanoes')
+      || isLayerEnabled('floods') || isLayerEnabled('dust') || isLayerEnabled('seaLakeIce')) {
+      startupLoads.push(loadEonetEvents(viewer));
+    }
+    if (isLayerEnabled('tectonic')) {
+      startupLoads.push(
+        apiGet<Record<string, unknown>>('/tectonic').then(async (geo) => {
+          const src = await loadTectonicPlates(viewer, geo);
+          entityStoreRef.current['tectonic'] = [...src.entities.values];
+        }).catch((err) => {
+          recordFeedError('tectonic plates', err);
+        })
+      );
+    }
+    if (isLayerEnabled('disaster_alerts')) {
+      startupLoads.push(loadNwsAlerts(viewer));
+    }
+    if (isLayerEnabled('space_weather')) {
+      startupLoads.push(loadSpaceWeather(viewer));
+    }
+
+    await Promise.all(startupLoads);
 
     if (isLayerEnabled('flight_tracks')) {
       await loadFlightTracks(viewer);
     }
 
+    if (isLayerEnabled('airports')) {
+      fetch('/api/data/airports?group=aviation')
+        .then(r => r.json())
+        .then((data: any) => { const items: any[] = data.items ?? data; if (!Array.isArray(items)) return;
+          const norm = items.map(a => ({
+            iata: a.iata || '',
+            icao: a.icao || '',
+            name: a.name,
+            lat: a.lat,
+            lon: a.lon,
+            Size: a.magnitude ? 3 + Math.round(a.magnitude * 4) : 3,
+          }));
+          entityStoreRef.current['airports'] = norm.slice(0, 300).map(a => viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(a.lon as number, a.lat as number),
+            name: a.name as string,
+            billboard: { image: createAirportIcon(), width: 12, height: 12,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+            label: { text: (a.iata as string) || (a.icao as string), font: '9px "JetBrains Mono"',
+              fillColor: Cesium.Color.fromCssColorString('#14b8a6'),
+              pixelOffset: new Cesium.Cartesian2(0, -8), show: (a.Size as number) >= 5 },
+            properties: { layer: 'airports', ...a },
+          }));
+          updateCounts();
+        })
+        .catch((err) => recordFeedError('airports', err));
+    }
+
     showFeedSummaryOnce();
     updateCounts();
-
-    fetch('/api/data/airports?group=aviation')
-      .then(r => r.json())
-      .then((data: any) => { const items: any[] = data.items ?? data; if (!Array.isArray(items)) return;
-        const norm = items.map(a => ({
-          iata: a.iata || '',
-          icao: a.icao || '',
-          name: a.name,
-          lat: a.lat,
-          lon: a.lon,
-          Size: a.magnitude ? 3 + Math.round(a.magnitude * 4) : 3,
-        }));
-        entityStoreRef.current['airports'] = norm.slice(0, 300).map(a => viewer.entities.add({
-          position: Cesium.Cartesian3.fromDegrees(a.lon as number, a.lat as number),
-          name: a.name as string,
-          billboard: { image: createAirportIcon(), width: 12, height: 12,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
-          label: { text: (a.iata as string) || (a.icao as string), font: '9px "JetBrains Mono"',
-            fillColor: Cesium.Color.fromCssColorString('#14b8a6'),
-            pixelOffset: new Cesium.Cartesian2(0, -8), show: (a.Size as number) >= 5 },
-          properties: { layer: 'airports', ...a },
-        }));
-        if (!isLayerEnabled('airports')) setLayerEntitiesVisible('airports', false);
-        updateCounts();
-      })
-      .catch((err) => recordFeedError('airports', err));
 
     setLoadingProgress(70);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1885,6 +2550,7 @@ export default function App() {
     if (isLayerEnabled('space_weather')) await loadSpaceWeather(viewer);
     if (isLayerEnabled('disaster_alerts')) await loadNwsAlerts(viewer);
     if (isLayerEnabled('india_cctv')) await loadIndiaCctv(viewer);
+    if (isLayerEnabled('live_media')) await loadLiveMedia(viewer);
     if (isLayerEnabled('nasa_dsn')) {
       try {
         const data = await apiGet<any>('/nasa-dsn');
@@ -1899,11 +2565,14 @@ export default function App() {
     }
     // Refresh generic layers with fast-changing data
     await refreshGenericLayers(viewer, ['seismic', 'hazards', 'weather', 'atmosphere']);
-    viewer.scene.requestRender();
+    throttledRender(viewer);
   }
 
   async function refreshGenericLayers(viewer: Cesium.Viewer, groups: string[]) {
     const groupSet = new Set(groups);
+    // Quick check: skip entirely if no layers in these groups are enabled
+    const hasEnabled = LAYER_CATEGORIES.some(l => groupSet.has(l.group) && isLayerEnabled(l.id));
+    if (!hasEnabled) return;
     for (const layer of LAYER_CATEGORIES) {
       if (!isLayerEnabled(layer.id)) continue;
       if (!groupSet.has(layer.group)) continue;
@@ -1914,13 +2583,36 @@ export default function App() {
           layer.id === 'space_debris' || layer.id === 'space_weather' || layer.id === 'nasa_dsn' ||
           layer.id === 'lightning_strikes' || layer.id === 'aurora_oval' || layer.id === 'disaster_alerts') continue;
       if (layer.group === 'weather' && (layer.type as string) !== 'tile' && (layer.type as string) !== 'effect') continue;
+      const gen = (loadGenRef.current[layer.id] = (loadGenRef.current[layer.id] ?? 0) + 1);
       try {
         const items = await fetchLayerData(layer);
-        if (!isLayerEnabled(layer.id)) return;
+        if (loadGenRef.current[layer.id] !== gen) continue;
+        if (!isLayerEnabled(layer.id)) continue;
+        // Skip destroy+recreate if data is unchanged
+        const cached = layerDataCacheRef.current[layer.id];
+        if (cached && cached.length === items.length) {
+          let same = true;
+          for (let i = 0; i < cached.length; i++) {
+            const c = cached[i] as Record<string, unknown>, n = items[i] as Record<string, unknown>;
+            if (c.lat !== n.lat || c.lon !== n.lon || c.name !== n.name || c.magnitude !== n.magnitude ||
+                c.depth !== n.depth || c.category !== n.category || c.status !== n.status) {
+              same = false;
+              break;
+            }
+          }
+          if (same) continue;
+        }
         removeLayerEntities(layer.id);
         if (items.length) {
+          const keys = Object.keys(layerDataCacheRef.current);
+          if (keys.length > LAYER_CACHE_MAX) {
+            for (const k of keys.slice(0, keys.length - LAYER_CACHE_MAX)) delete layerDataCacheRef.current[k];
+          }
+          layerDataCacheRef.current[layer.id] = items;
           const ents = await renderLayer(viewer, layer, items, ghostProtocolRef.current ?? undefined);
+          if (loadGenRef.current[layer.id] !== gen) continue;
           entityStoreRef.current[layer.id] = ents;
+          enforceEntityCap();
         }
       } catch { /* skip */ }
     }
@@ -1934,9 +2626,7 @@ export default function App() {
       'weather_cards',
       'pin',
       'india_cctv',
-      'storm_forecast',
       'smoke_dispersion',
-      'tsunami',
       'disaster_near_me',
     ]);
     const visibleEntities = v.entities.values.filter(e => {
@@ -1968,7 +2658,14 @@ export default function App() {
     return cat;
   }
 
+  const pulsingDotCacheRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  const PULSING_DOT_CACHE_MAX = 200;
+
   function createPulsingDotCanvas(color: string, size: number = 16): HTMLCanvasElement {
+    if (pulsingDotCacheRef.current.size > PULSING_DOT_CACHE_MAX) pulsingDotCacheRef.current.clear();
+    const key = `${color}_${size}`;
+    const cached = pulsingDotCacheRef.current.get(key);
+    if (cached) return cached;
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
     const ctx = canvas.getContext('2d')!;
@@ -1994,6 +2691,7 @@ export default function App() {
     ctx.strokeStyle = Cesium.Color.fromCssColorString(color).withAlpha(0.75).toCssColorString();
     ctx.lineWidth = 1.1;
     ctx.stroke();
+    pulsingDotCacheRef.current.set(key, canvas);
     return canvas;
   }
 
@@ -2020,7 +2718,9 @@ export default function App() {
     return canvas;
   }
 
+  let cachedAirportIcon: HTMLCanvasElement | null = null;
   function createAirportIcon(): HTMLCanvasElement {
+    if (cachedAirportIcon) return cachedAirportIcon;
     const canvas = document.createElement('canvas');
     canvas.width = 12; canvas.height = 12;
     const ctx = canvas.getContext('2d')!;
@@ -2029,6 +2729,7 @@ export default function App() {
     ctx.strokeStyle = '#14b8a6';
     ctx.lineWidth = 1.5;
     ctx.stroke();
+    cachedAirportIcon = canvas;
     return canvas;
   }
 
@@ -2184,6 +2885,9 @@ export default function App() {
       }
     }
     entityStoreRef.current[layerId] = [];
+    if (layerId === 'disaster_alerts') {
+      Object.keys(alertEntityRef.current).forEach(k => { delete alertEntityRef.current[k]; });
+    }
   }
 
   function enforceEntityCap(): void {
@@ -2202,103 +2906,17 @@ export default function App() {
       if (!next || next !== ents) continue;
       removed += next.length;
       if (v) {
-        next.forEach(ent => { clearEntityProperties(ent); v.entities.remove(ent); });
+        next.forEach(ent => {
+          ghostProtocolRef.current?.removeGhost(ent.id);
+          clearEntityProperties(ent);
+          v.entities.remove(ent);
+        });
       }
       entityStoreRef.current[id] = [];
     }
   }
 
-  function clearStormForecastOverlays() {
-    removeLayerEntities('storm_forecast');
-    stormOverlaysRef.current = [];
-    setShowStormLegend(false);
-  }
 
-  function renderStormForecastOverlays() {
-    const v = viewerRef.current;
-    if (!v) return;
-    if (!isLayerEnabled('storm_forecast') || !isLayerEnabled('severe_storms')) {
-      clearStormForecastOverlays();
-      return;
-    }
-
-    clearStormForecastOverlays();
-
-    const storms = entityStoreRef.current['severe_storms'] || [];
-    const overlays: Cesium.Entity[] = [];
-
-    storms.forEach((stormEnt, index) => {
-      if (!stormEnt.show) return;
-      const props = stormEnt.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-      if (!props || props.lat == null || props.lon == null) return;
-
-      const lat = Number(props.lat);
-      const lon = Number(props.lon);
-      const wind = Number(props.windSpeed ?? (90 + (index % 4) * 5));
-      const pressure = Number(props.pressure ?? Math.max(900, 990 - wind / 2));
-      const forecast = generateStormForecast(lat, lon, wind, pressure);
-      const title = String(props.title ?? stormEnt.name ?? 'Storm');
-      const time = Number(props.time ?? Date.now());
-
-      const addCone = (positions: Cesium.Cartesian3[], fill: string, confidence: string) => {
-        const color = Cesium.Color.fromCssColorString(fill);
-        const ent = v.entities.add({
-          polygon: {
-            hierarchy: new Cesium.PolygonHierarchy(positions),
-            material: color.withAlpha(0.18),
-            outline: true,
-            outlineColor: color.withAlpha(0.7),
-            outlineWidth: 1,
-          },
-          properties: {
-            layer: 'storm_forecast',
-            title,
-            lat,
-            lon,
-            windSpeed: wind,
-            pressure,
-            heading: forecast.heading,
-            speedKmh: forecast.speedKmh,
-            time,
-            confidence,
-            stormTrack: forecast.track,
-          },
-        });
-        overlays.push(ent);
-      };
-
-      addCone(forecast.cone24.positions, '#ff3b30', '24h');
-      addCone(forecast.cone48.positions, '#f59e0b', '48h');
-      addCone(forecast.cone72.positions, '#eab308', '72h');
-
-      const trackPositions = forecast.track.map(pt => Cesium.Cartesian3.fromDegrees(pt.lon, pt.lat, 5000));
-      const trackEnt = v.entities.add({
-        polyline: {
-          positions: trackPositions,
-          width: 2,
-          material: Cesium.Color.fromCssColorString('#ec4899').withAlpha(0.9),
-          clampToGround: true,
-        },
-        properties: {
-          layer: 'storm_forecast',
-          title,
-          lat,
-          lon,
-          windSpeed: wind,
-          pressure,
-          heading: forecast.heading,
-          speedKmh: forecast.speedKmh,
-          time,
-          stormTrack: forecast.track,
-        },
-      });
-      overlays.push(trackEnt);
-    });
-
-    stormOverlaysRef.current = overlays;
-    entityStoreRef.current['storm_forecast'] = overlays;
-    setShowStormLegend(overlays.length > 0);
-  }
 
   function clearSmokeDispersionOverlays() {
     removeLayerEntities('smoke_dispersion');
@@ -2435,7 +3053,7 @@ export default function App() {
       });
 
       entityStoreRef.current['disaster_near_me'] = [marker];
-      v.scene.requestRender();
+      throttledRender(v);
       if (fly) {
         focusLocation(lat, lon, { label: 'Disasters Near Me', color: '#ef4444', height: 1000000 });
       }
@@ -2453,7 +3071,7 @@ export default function App() {
           if (existing?.length) {
             const marker = existing[0];
             marker.position = Cesium.Cartesian3.fromDegrees(longitude, latitude, 5000) as any;
-            vv?.scene.requestRender();
+            throttledRender(vv);
             const nearby = findNearbyEvents(latitude, longitude, 500);
             if (nearby.length > 0) showNotification(`${nearby.length} nearby events`, 'info');
           }
@@ -2487,12 +3105,6 @@ export default function App() {
   }
 
   function refreshDerivedOverlays() {
-    if (isLayerEnabled('storm_forecast') && isLayerEnabled('severe_storms')) {
-      renderStormForecastOverlays();
-    } else {
-      clearStormForecastOverlays();
-    }
-
     if (isLayerEnabled('smoke_dispersion') && isLayerEnabled('wildfires')) {
       renderSmokeDispersionOverlays();
     } else {
@@ -2506,12 +3118,6 @@ export default function App() {
     } else {
       clearDisasterNearMeOverlay();
     }
-
-    if (!isLayerEnabled('tsunami')) {
-      setShowTsunamiLegend(false);
-    } else if ((entityStoreRef.current['tsunami'] || []).length > 0) {
-      setShowTsunamiLegend(true);
-    }
   }
 
   /* ═════════════════════════════════════════════════════════════════
@@ -2519,31 +3125,19 @@ export default function App() {
      ═════════════════════════════════════════════════════════════════ */
 
   const showInfoPanel = useCallback((entity: Cesium.Entity) => {
-    setInfoEntity(entity);
     const props = entity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
     if (!props) return;
+    setInfoEntity(entity);
 
     if (props.layer === 'earthquakes' && props.magnitude) {
       const m = props.magnitude as number;
       const lat = props.lat as number;
       const lon = props.lon as number;
       if (m >= 4.0) triggerSeismicWaves(lon, lat, m);
-      if (m >= 7.5) {
-        const isOcean = Math.abs(lat) < 70 && (Math.abs(lon) > 150 || Math.abs(lon - 180) < 30 || lat > 50 || lat < -50);
-        if (isOcean) triggerTsunami(lon, lat, m);
-      }
       const pi = calculatePopulationImpact(lat, lon);
       if (pi) setPopulationImpact(pi);
       else setPopulationImpact(null);
-    } else if (props.layer === 'severe_storms') {
-      const wind = props.windSpeed as number || 100;
-      const pressure = props.pressure as number || 950;
-      const lat = props.lat as number;
-      const lon = props.lon as number;
-      const fc = generateStormForecast(lat, lon, wind, pressure);
-      setStormForecast(fc);
     } else {
-      setStormForecast(null);
       setPopulationImpact(null);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2666,81 +3260,6 @@ export default function App() {
     }, 1000);
     waveData.interval = interval;
     seismicAnimationsRef.current.push(waveData);
-  }
-
-  function triggerTsunami(lon: number, lat: number, mag: number) {
-    const v = viewerRef.current;
-    if (!v) return;
-    const maxR = Math.min(50, mag * 6);
-    const colors = ['#22c55e','#f59e0b','#f97316','#ef4444'];
-    const labels = ['1h','3h','6h','12h'];
-    const speeds = [1, 0.6, 0.35, 0.2];
-    const createdWaves: Cesium.Entity[] = [];
-    const tsunamiEnabled = isLayerEnabled('tsunami');
-    if (tsunamiEnabled) setShowTsunamiLegend(true);
-
-    for (let i = 0; i < 4 && tsunamiEnabled; i++) {
-      setTimeout(() => {
-        if (!isLayerEnabled('tsunami')) return;
-        const c = Cesium.Color.fromCssColorString(colors[i]);
-        const ring = v.entities.add({
-          position: Cesium.Cartesian3.fromDegrees(lon, lat),
-          ellipse: {
-            semiMinorAxis: 0, semiMajorAxis: 0,
-            material: c.withAlpha(0.08 + i * 0.02),
-            outline: true, outlineColor: c.withAlpha(0.3 + i * 0.1), outlineWidth: 1.5,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-          },
-          label: { text: labels[i], font: 'bold 10px "JetBrains Mono"', fillColor: c, show: false },
-          properties: {
-            layer: 'tsunami',
-            title: 'Tsunami Wave',
-            lat,
-            lon,
-            time: Date.now(),
-            travelTime: labels[i],
-            magnitude: mag,
-          },
-        });
-        const startT = Date.now();
-        const iv = setInterval(() => {
-          const elapsed = (Date.now() - startT) / 1000;
-          const progress = easeOutCubic(Math.min(1, elapsed / 20));
-          const curR = maxR * speeds[i] * progress;
-          if (ring.ellipse) {
-            (ring.ellipse.semiMinorAxis as Cesium.ConstantProperty).setValue(curR * 1000);
-            (ring.ellipse.semiMajorAxis as Cesium.ConstantProperty).setValue(curR * 1000);
-          }
-          if (elapsed > 20) {
-            clearInterval(iv);
-            clearEntityProperties(ring);
-            v.entities.remove(ring);
-            const ringIdx = createdWaves.indexOf(ring);
-            if (ringIdx >= 0) createdWaves.splice(ringIdx, 1);
-            tsunamiWavesRef.current = tsunamiWavesRef.current.filter(e => e !== ring);
-            entityStoreRef.current['tsunami'] = (entityStoreRef.current['tsunami'] || []).filter(e => e !== ring);
-          }
-        }, 50);
-        createdWaves.push(ring);
-        tsunamiWavesRef.current.push(ring);
-        if (!entityStoreRef.current['tsunami']) entityStoreRef.current['tsunami'] = [];
-        entityStoreRef.current['tsunami'].push(ring);
-      }, i * 500);
-    }
-
-    const timestamp = Date.now();
-    const alert: EventAlert = {
-      id: `tsunami_${timestamp}`, title: 'Tsunami Warning',
-      desc: `M${mag.toFixed(1)} earthquake may generate tsunami waves. Monitor local alerts.`,
-      severity: 'red', type: 'tsunami', lat, lon, seen: false,
-      time: new Date(timestamp).toISOString(), timestamp, hasMapPosition: true,
-    };
-    registerAlertEntity(alert);
-    alertsRef.current.unshift(alert);
-    setAlerts([...alertsRef.current]);
-    setNewAlertCount(prev => prev + 1);
-    focusLocation(lat, lon, { label: 'Tsunami alert', color: '#ef4444', height: 150 });
-    showNotification('Tsunami Warning triggered', 'error');
   }
 
   function _triggerSmoke(lon: number, lat: number) {
@@ -2966,7 +3485,7 @@ export default function App() {
             enabled ? '3D terrain enabled' : 'Terrain needs a Cesium ion token',
             enabled ? 'success' : 'warning',
           );
-          v.scene.requestRender();
+          throttledRender(v);
         })();
         return;
       }
@@ -3081,7 +3600,7 @@ export default function App() {
 
     // Keep the scene rendering every frame while ISS is active for smooth motion
     issRenderTickRef.current = v.clock.onTick.addEventListener(() => {
-      if (issEntityRef.current) v.scene.requestRender();
+      if (issEntityRef.current) throttledRender(v);
     });
 
     issTimerRef.current = setInterval(() => {
@@ -3114,7 +3633,7 @@ export default function App() {
             });
           }
           setIssInfo({ lat: data.latitude, lon: data.longitude });
-          v.scene.requestRender();
+          throttledRender(v);
         })
         .catch(() => {
           showNotification('ISS position feed unavailable', 'warning');
@@ -3334,13 +3853,16 @@ export default function App() {
       hideLayerEntities(layerId);
     }
 
+    // Notify CinematicDirector that entities changed
+    setCinematicLayerVersion(v => v + 1);
+
     const layer = layersRef.current.find(l => l.id === layerId);
     if (layer?.type === 'tile') {
       setPulsingLayer(layerId);
       setTimeout(() => setPulsingLayer(null), 600);
     }
 
-    if (['severe_storms', 'storm_forecast', 'wildfires', 'smoke_dispersion'].includes(layerId)) {
+    if (['severe_storms', 'wildfires', 'smoke_dispersion'].includes(layerId)) {
       refreshDerivedOverlays();
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -3349,6 +3871,19 @@ export default function App() {
     const layer = LAYER_CATEGORIES.find(l => l.id === layerId);
     if (!layer) return;
     if (layer.type === 'tile' || layer.type === 'effect' || layer.type === 'panel' || layer.type === '3dtiles') return;
+    // Re-render from cached data if entities were previously loaded but removed on hide
+    const cached = layerDataCacheRef.current[layerId];
+    if (cached?.length) {
+      const gen = (layerGenRef.current[layerId] = (layerGenRef.current[layerId] || 0) + 1);
+      renderLayer(viewer, layer, cached, ghostProtocolRef.current ?? undefined).then((ents) => {
+        if (layerGenRef.current[layerId] !== gen) return;
+        if (!isLayerEnabled(layerId) || !ents.length) return;
+        entityStoreRef.current[layerId] = ents;
+        throttledRender(viewer);
+        enforceEntityCap();
+      }).catch(() => {});
+      return;
+    }
     if (entityStoreRef.current[layerId]?.length) {
       setLayerEntitiesVisible(layerId, true);
       return;
@@ -3357,11 +3892,23 @@ export default function App() {
     fetchLayerData(layer).then(async (items) => {
       if (layerGenRef.current[layerId] !== gen) return;
       if (!isLayerEnabled(layerId) || !items.length) return;
+      const keys = Object.keys(layerDataCacheRef.current);
+      if (keys.length > LAYER_CACHE_MAX) {
+        for (const k of keys.slice(0, keys.length - LAYER_CACHE_MAX)) delete layerDataCacheRef.current[k];
+      }
+      layerDataCacheRef.current[layerId] = items;
       const ents = await renderLayer(viewer, layer, items, ghostProtocolRef.current ?? undefined);
+      if (layerGenRef.current[layerId] !== gen) return;
       if (ents.length) {
         entityStoreRef.current[layerId] = ents;
-        viewer.scene.requestRender();
-        viewer.zoomTo(ents);
+        throttledRender(viewer);
+        enforceEntityCap();
+        // Debounce zoomTo — only zoom if 3+ seconds since last zoom
+        const now = Date.now();
+        if (now - lastZoomToRef.current > 3000) {
+          lastZoomToRef.current = now;
+          viewer.zoomTo(ents);
+        }
       }
     }).catch((e: any) => console.warn(`Failed to load generic layer ${layerId}:`, e));
   }
@@ -3393,14 +3940,18 @@ export default function App() {
       }
     } else if (layerId === 'intel_feed') {
       setShowIntelFeed(true);
-      void loadSocialFeed();
+      // loadSocialFeed was removed — no-op
+
     } else if (layerId === 'disaster_alerts') {
       setShowAlertsPanel(true);
       entityStoreRef.current['disaster_alerts']?.forEach(e => { if (e) e.show = true; });
     } else if (layerId === 'india_cctv') {
       if (!showExisting('india_cctv')) void loadIndiaCctv(v);
       return;
-    } else if (layerId === 'storm_forecast' || layerId === 'smoke_dispersion') {
+    } else if (layerId === 'live_media') {
+      if (!showExisting('live_media')) void loadLiveMedia(v);
+      return;
+    } else if (layerId === 'smoke_dispersion') {
       refreshDerivedOverlays();
       return;
     } else if (layerId === 'disaster_near_me') {
@@ -3433,6 +3984,12 @@ export default function App() {
     } else if (layerId === 'space_debris') {
       if (!showExisting('space_debris')) void loadSpaceDebris(v);
       return;
+    } else if (layerId === 'satnogs_db') {
+      void loadSatnogsDb(v);
+      return;
+    } else if (layerId === 'ucs_satellite_db') {
+      void loadUcsSatelliteDb(v);
+      return;
     } else if (layerId === 'nasa_dsn') {
       if (!showExisting('nasa_dsn')) void loadNasaDsn(v);
       return;
@@ -3455,18 +4012,29 @@ export default function App() {
       loadOsmBuildings(v, cesiumIonToken).catch((e) => showNotification('3D Buildings failed to load: ' + (e?.message || e), 'error'));
       return;
     } else if (layerId === 'tectonic') {
-      showExisting('tectonic');
+      if (!showExisting('tectonic')) {
+        apiGet<Record<string, unknown>>('/tectonic').then(async (geo) => {
+          const src = await loadTectonicPlates(v, geo);
+          entityStoreRef.current['tectonic'] = [...src.entities.values];
+          updateCounts();
+        }).catch((err) => {
+          recordFeedError('tectonic plates', err);
+        });
+      }
     } else if (layerId === 'earthquakes') {
-      showExisting('earthquakes');
+      if (!showExisting('earthquakes')) {
+        void loadEarthquakes(v);
+      }
     } else if (['wildfires','severe_storms','volcanoes','floods','dust','seaLakeIce'].includes(layerId)) {
-      showExisting(layerId);
+      if (!showExisting(layerId)) {
+        void loadEonetEvents(v);
+      }
     } else if (layerId === 'airports') {
       showExisting('airports');
     } else if (layerId === 'space_weather') {
-      showExisting('space_weather');
-    } else if (layerId === 'tsunami') {
-      showExisting('tsunami');
-      setShowTsunamiLegend(true);
+      if (!showExisting('space_weather')) {
+        void loadSpaceWeather(v);
+      }
     } else if (['12_nhc_tropical_cyclone_data','12_ibtracs'].includes(layerId)) {
       if (!showExisting(layerId)) void loadWeatherStorms(v, layerId);
       return;
@@ -3529,7 +4097,7 @@ export default function App() {
               showNotification('AISStream API Key required. Add it in settings.', 'warning');
               setTimeout(() => toggleLayer('ais_vessels'), 10);
             } else {
-              aisTrackerRef.current = new AisVesselTracker(v, key, ghostProtocolRef.current ?? undefined);
+              aisTrackerRef.current = new AisVesselTracker(v, key);
               startTracker(aisTrackerRef.current);
             }
           }
@@ -3569,7 +4137,28 @@ export default function App() {
       entityStoreRef.current['airspaces'] = [];
     }
 
-    setLayerEntitiesVisible(layerId, false);
+    // Remove entities from viewer for ALL layers to free Cesium resources.
+    // Skip layers that have no re-fetch fallback and rely on show/hide only.
+    const skipRemove = new Set([
+      'submarine_cables', 'airspaces', 'ais_vessels',
+      'population_impact', 'weather_cards',
+      // Layers loaded at init with no re-fetch fallback in loadLayerData
+      'earthquakes', 'tectonic', 'airports', 'space_weather',
+      'wildfires', 'severe_storms', 'volcanoes', 'floods', 'dust', 'seaLakeIce',
+    ]);
+    if (!skipRemove.has(layerId)) {
+      const ents = entityStoreRef.current[layerId];
+      if (ents?.length && v) {
+        for (const ent of ents) {
+          if (ent) {
+            clearEntityProperties(ent);
+            v.entities.remove(ent);
+            ghostProtocolRef.current?.removeGhost(ent.id);
+          }
+        }
+        entityStoreRef.current[layerId] = [];
+      }
+    }
     
     setIntelFeed(prev => {
       const typeMap: Record<string, string[]> = {
@@ -3582,7 +4171,8 @@ export default function App() {
         'landslides': ['landslides', 'landslide'],
         'seaLakeIce': ['seaLakeIce', 'ice'],
         'space_weather': ['space_weather'],
-        'intel_feed': ['news', 'social', 'twitter', 'facebook']
+        'intel_feed': ['news', 'social', 'twitter', 'facebook'],
+        'live_media': ['news', 'social', 'twitter', 'facebook', 'youtube'],
       };
       const removeTypes = typeMap[layerId];
       if (!removeTypes) return prev;
@@ -3605,18 +4195,11 @@ export default function App() {
       setShowHeatmapLegend(false);
       activeHeatmapRef.current = null;
     }
-    if (layerId === 'storm_forecast' || layerId === 'severe_storms') {
-      clearStormForecastOverlays();
-      setStormForecast(null);
+    if (layerId === 'severe_storms') {
+      setPopulationImpact(null);
     }
     if (layerId === 'smoke_dispersion' || layerId === 'wildfires') {
       clearSmokeDispersionOverlays();
-    }
-    if (layerId === 'tsunami') {
-      if (v) tsunamiWavesRef.current.forEach(e => v.entities.remove(e));
-      tsunamiWavesRef.current = [];
-      entityStoreRef.current['tsunami'] = [];
-      setShowTsunamiLegend(false);
     }
     if (layerId === 'intel_feed') {
       setShowIntelFeed(false);
@@ -3627,6 +4210,13 @@ export default function App() {
     if (layerId === 'india_cctv') {
       const p = infoEntity?.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
       if (p?.layer === 'india_cctv') {
+        setInfoEntity(null);
+        entityTrackerRef.current?.untrack();
+      }
+    }
+    if (layerId === 'live_media') {
+      const p = infoEntity?.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+      if (p?.layer === 'live_media') {
         setInfoEntity(null);
         entityTrackerRef.current?.untrack();
       }
@@ -3670,6 +4260,17 @@ export default function App() {
     if (layerId === 'dt_buildings') {
       hideOsmBuildings();
     }
+    if (layerId === 'satnogs_db' || layerId === 'ucs_satellite_db') {
+      const v2 = viewerRef.current;
+      const ents = entityStoreRef.current[layerId];
+      if (ents && v2) { ents.forEach((e: Cesium.Entity) => v2.entities.remove(e)); }
+      entityStoreRef.current[layerId] = [];
+      const p = infoEntity?.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+      if (p?.layer === layerId) {
+        setInfoEntity(null);
+        entityTrackerRef.current?.untrack();
+      }
+    }
   }
 
   function loadPopulationImpact(viewer: Cesium.Viewer) {
@@ -3697,65 +4298,62 @@ export default function App() {
     }
     populationImpactLayerRef.current = newEnts;
     entityStoreRef.current['population_impact'] = newEnts;
-    viewer.scene.requestRender();
+    throttledRender(viewer);
     setShowPopulationImpact(true);
+  }
+
+  function createYoutubeIcon(): HTMLCanvasElement {
+    if (cachedYoutubeCanvas) return cachedYoutubeCanvas;
+    const canvas = document.createElement('canvas');
+    canvas.width = 36;
+    canvas.height = 36;
+    const ctx = canvas.getContext('2d')!;
+    const cx = 18, cy = 18;
+    const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, 16);
+    glow.addColorStop(0, 'rgba(239, 68, 68, 0.7)');
+    glow.addColorStop(0.5, 'rgba(239, 68, 68, 0.2)');
+    glow.addColorStop(1, 'rgba(239, 68, 68, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, 36, 36);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.moveTo(-7, -5);
+    ctx.lineTo(-7, 5);
+    ctx.lineTo(6, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    cachedYoutubeCanvas = canvas;
+    return canvas;
   }
 
   function createCctvIcon(): HTMLCanvasElement {
     if (cachedCctvCanvas) return cachedCctvCanvas;
-
     const canvas = document.createElement('canvas');
-    canvas.width = 40;
-    canvas.height = 40;
+    canvas.width = 36;
+    canvas.height = 36;
     const ctx = canvas.getContext('2d')!;
-    const mid = 20;
-
-    // 1. Outer glow ring
-    const glow = ctx.createRadialGradient(mid, mid, 2, mid, mid, 18);
-    glow.addColorStop(0, 'rgba(34, 211, 238, 0.7)');
-    glow.addColorStop(0.5, 'rgba(34, 211, 238, 0.2)');
-    glow.addColorStop(1, 'rgba(34, 211, 238, 0)');
+    const cx = 18, cy = 18;
+    const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, 16);
+    glow.addColorStop(0, 'rgba(103, 232, 249, 0.7)');
+    glow.addColorStop(0.5, 'rgba(103, 232, 249, 0.2)');
+    glow.addColorStop(1, 'rgba(103, 232, 249, 0)');
     ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, 40, 40);
-
-    const stroke = Cesium.Color.fromCssColorString('#67e8f9').withAlpha(0.95).toCssColorString();
-    const fill = Cesium.Color.fromCssColorString('#0f172a').withAlpha(0.95).toCssColorString();
-    const activeRed = '#ef4444';
-
+    ctx.fillRect(0, 0, 36, 36);
     ctx.save();
-    // Center and scale the 24x24 Lucide CCTV vector paths to fit the 40x40 canvas nicely
-    const scale = 1.35;
-    const offset = 20 - 12 * scale;
-    ctx.translate(offset, offset);
-    ctx.scale(scale, scale);
-
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    const path1 = new Path2D("M16.75 12h3.632a1 1 0 0 1 .894 1.447l-2.034 4.069a1 1 0 0 1-1.708.134l-2.124-2.97");
-    const path2 = new Path2D("M17.106 9.053a1 1 0 0 1 .447 1.341l-3.106 6.211a1 1 0 0 1-1.342.447L3.61 12.3a2.92 2.92 0 0 1-1.3-3.91L3.69 5.6a2.92 2.92 0 0 1 3.92-1.3z");
-    const path3 = new Path2D("M2 19h3.76a2 2 0 0 0 1.8-1.1L9 15");
-    const path4 = new Path2D("M2 21v-4");
-    const path5 = new Path2D("M7 9h.01");
-
-    // Fill camera body and visor for strong visibility against globe background
-    ctx.fillStyle = fill;
-    ctx.fill(path2);
-    ctx.fill(path1);
-
-    // Stroke paths
-    ctx.lineWidth = 1.8;
-    ctx.strokeStyle = stroke;
-    ctx.stroke(path1);
-    ctx.stroke(path2);
-    ctx.stroke(path3);
-    ctx.stroke(path4);
-
-    // Render the recording indicator LED in flashing red
-    ctx.strokeStyle = activeRed;
-    ctx.lineWidth = 2.5;
-    ctx.stroke(path5);
-
+    ctx.translate(cx, cy);
+    ctx.fillStyle = '#3b82f6';
+    ctx.strokeStyle = '#67e8f9';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-7, -5);
+    ctx.lineTo(-7, 5);
+    ctx.lineTo(6, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
     ctx.restore();
     cachedCctvCanvas = canvas;
     return canvas;
@@ -3769,34 +4367,24 @@ export default function App() {
     }
 
     try {
-      const data = await apiGet<{ cameras?: IndiaCctvCamera[] }>('/cctv/worldwide');
+      const data = await apiGet<{ cameras?: Array<Record<string, unknown>> }>('/cctv/worldwide');
       if (!isLayerEnabled('india_cctv')) return;
       const cameras = (data.cameras ?? [])
-        .filter((camera) => Number.isFinite(camera.lat) && Number.isFinite(camera.lon))
-        .slice(0, 800);
+        .filter((camera) => Number.isFinite(camera.lat) && Number.isFinite(camera.lon));
 
-      const ents = cameras.map((camera) => {
-        return viewer.entities.add({
-          position: Cesium.Cartesian3.fromDegrees(camera.lon, camera.lat, 35),
-          name: camera.name,
-          billboard: {
-            image: createCctvIcon(),
-            width: 32,
-            height: 32,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-            pixelOffset: new Cesium.Cartesian2(0, -2),
-          },
-          label: {
-            text: camera.name,
-            font: '10px "JetBrains Mono"',
-            fillColor: Cesium.Color.fromCssColorString('#67e8f9'),
-            outlineColor: Cesium.Color.BLACK,
-            outlineWidth: 2,
-            pixelOffset: new Cesium.Cartesian2(0, -24),
-            show: false,
-          },
-          properties: {
-            layer: 'india_cctv',
+      const total = cameras.length;
+      const ents: Cesium.Entity[] = [];
+      let idx = 0;
+      const chunkSize = 300;
+      const icon = createCctvIcon();
+      const metaMap = cctvMetaRef.current;
+
+      const addChunk = () => {
+        const end = Math.min(idx + chunkSize, total);
+        for (; idx < end; idx++) {
+          const camera = cameras[idx];
+          const entityId = `cctv_${camera.id || idx}`;
+          metaMap.set(entityId, {
             title: camera.name,
             lat: camera.lat,
             lon: camera.lon,
@@ -3812,13 +4400,33 @@ export default function App() {
             updatedAt: camera.updatedAt ?? Date.now(),
             description: sanitizeHtml(String(camera.description ?? '')),
             feedType: camera.feedType,
-          },
-        });
-      });
-
-      entityStoreRef.current['india_cctv'] = ents;
-      viewer.scene.requestRender();
-      showNotification(`Loaded ${ents.length} worldwide webcams`, 'success');
+          });
+          ents.push(viewer.entities.add({
+            id: entityId,
+            position: Cesium.Cartesian3.fromDegrees(camera.lon as number, camera.lat as number, 0),
+            name: camera.name as string,
+            billboard: {
+              image: icon,
+              width: 28,
+              height: 28,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              disableDepthTestDistance: 10000,
+              pixelOffset: new Cesium.Cartesian2(0, -2),
+            },
+            properties: { layer: 'india_cctv' },
+          }));
+        }
+        if (idx < total) {
+          requestAnimationFrame(addChunk);
+        } else {
+          entityStoreRef.current['india_cctv'] = ents;
+          enforceEntityCap();
+          throttledRender(viewer);
+          showNotification(`Loaded ${ents.length} worldwide webcams`, 'success');
+        }
+      };
+      addChunk();
     } catch (err) {
       if (import.meta.env.DEV) {
         window.__liveglobeDebug = {
@@ -3829,6 +4437,88 @@ export default function App() {
       recordFeedError('worldwide cctv', err);
       showNotification('Worldwide camera feed unavailable', 'warning');
     }
+  }
+
+  // Simple frontend geo extraction from text (city/country lookup)
+  function geoFromText(text: string): { lat: number; lon: number } {
+    const lower = text.toLowerCase();
+    for (const city of CITY_DATA) {
+      if (lower.includes(city.name.toLowerCase()) || lower.includes(city.name.toLowerCase().split(',')[0])) {
+        return { lat: city.lat, lon: city.lon };
+      }
+    }
+    for (const entry of EXTRA_GEO) {
+      if (lower.includes(entry.name.toLowerCase())) {
+        return { lat: entry.lat, lon: entry.lon };
+      }
+    }
+    return { lat: 0, lon: 0 };
+  }
+
+  function flyToLiveMediaEntities(viewer: Cesium.Viewer) {
+    const ents = entityStoreRef.current['live_media'];
+    if (!ents?.length) return;
+    const positions = ents.map(e => e.position!.getValue(Cesium.JulianDate.now())!).filter(Boolean);
+    if (positions.length > 0) {
+      try {
+        viewer.camera.flyToBoundingSphere(Cesium.BoundingSphere.fromPoints(positions), { duration: 1.2 });
+      } catch { /* ignore */ }
+    }
+  }
+
+  async function loadLiveMedia(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['live_media'];
+    if (existing?.length) {
+      console.warn(`[LiveMedia] loadLiveMedia: showing ${existing.length} existing entities`);
+      setLayerEntitiesVisible('live_media', true);
+      return;
+    }
+    console.warn('[LiveMedia] loadLiveMedia: no existing entities, scanning intelFeed...', intelFeedRef.current.length);
+    const items = intelFeedRef.current
+      .map(i => {
+        const geo = (!i.lat || !i.lon) ? geoFromText(i.title || i.url || '') : { lat: 0, lon: 0 };
+        return { ...i, lat: i.lat || geo.lat, lon: i.lon || geo.lon, youtubeVideoId: extractYoutubeId(i.url) };
+      })
+      .filter(i => i.youtubeVideoId && i.lat && i.lon);
+    console.warn(`[LiveMedia] loadLiveMedia: found ${items.length} YouTube items with geo`);
+    if (!items.length) return;
+    const ents = items.map(item => {
+      return viewer.entities.add({
+        id: item.id,
+      position: Cesium.Cartesian3.fromDegrees(item.lon, item.lat, 2),
+        name: item.title,
+        billboard: {
+          image: createYoutubeIcon(),
+          width: 32,
+          height: 32,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          pixelOffset: new Cesium.Cartesian2(0, -2),
+        },
+        label: {
+          text: item.title,
+          font: '10px "JetBrains Mono"',
+          fillColor: Cesium.Color.fromCssColorString('#ef4444'),
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          pixelOffset: new Cesium.Cartesian2(0, -24),
+          show: false,
+        },
+        properties: {
+          layer: 'live_media',
+          title: item.title,
+          lat: item.lat,
+          lon: item.lon,
+          source: item.source,
+          url: item.url,
+          youtubeVideoId: item.youtubeVideoId,
+        },
+      });
+    });
+    entityStoreRef.current['live_media'] = ents;
+    enforceEntityCap();
+    throttledRender(viewer);
+    flyToLiveMediaEntities(viewer);
+    showNotification(`Loaded ${ents.length} YouTube news videos on globe`, 'success');
   }
 
   async function loadSpaceDebris(viewer: Cesium.Viewer) {
@@ -3847,7 +4537,8 @@ export default function App() {
       if (!isLayerEnabled('space_debris')) return;
       const ents = addSpaceDebrisEntities(viewer, data.items || []);
       entityStoreRef.current['space_debris'] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       if (!data.available) {
         showNotification(data.message || 'Space debris feed unavailable', 'warning');
       } else {
@@ -3862,6 +4553,60 @@ export default function App() {
     }
   }
 
+  async function loadSatnogsDb(viewer: Cesium.Viewer) {
+    try {
+      const data = await fetchAndStoreSatnogsData(apiGet);
+      if (!isLayerEnabled('satnogs_db')) return;
+      const ents = await addSatnogsEntities(viewer, apiGet);
+      if (ents.length === 0) {
+        showNotification('SatNOGS: no matching satellites found on the globe', 'warning');
+        return;
+      }
+      entityStoreRef.current['satnogs_db'] = ents;
+      enforceEntityCap();
+      throttledRender(viewer);
+      pushIntelFeed({
+        id: 'satnogs-db-loaded',
+        title: `SatNOGS: ${ents.length} satellites with frequency data`,
+        source: 'SatNOGS DB',
+        type: 'space',
+        lat: 0, lon: 0,
+        timestamp: Date.now(),
+        url: 'https://db.satnogs.org/',
+        platform: 'internal',
+      });
+      showNotification(`SatNOGS: ${ents.length} satellites with known frequencies`, 'success');
+    } catch (err) {
+      recordFeedError('SatNOGS DB', err);
+      showNotification('SatNOGS DB unavailable', 'warning');
+    }
+  }
+
+  async function loadUcsSatelliteDb(viewer: Cesium.Viewer) {
+    try {
+      const data = await fetchAndStoreUcsData(apiGet);
+      if (!isLayerEnabled('ucs_satellite_db')) return;
+      const ents = addUcsEntities(viewer);
+      entityStoreRef.current['ucs_satellite_db'] = ents;
+      enforceEntityCap();
+      throttledRender(viewer);
+      pushIntelFeed({
+        id: 'ucs-satellite-db-loaded',
+        title: `UCS Catalog: ${ents.length} operational satellites`,
+        source: 'UCS Satellite Database',
+        type: 'space',
+        lat: 0, lon: 0,
+        timestamp: Date.now(),
+        url: 'https://www.ucs.org/resources/satellite-database',
+        platform: 'internal',
+      });
+      showNotification(`UCS Catalog: ${ents.length} operational satellites loaded`, 'success');
+    } catch (err) {
+      recordFeedError('UCS Satellite DB', err);
+      showNotification('UCS Satellite DB unavailable', 'warning');
+    }
+  }
+
   async function loadNasaDsn(viewer: Cesium.Viewer) {
     const existing = entityStoreRef.current['nasa_dsn'];
     if (existing?.length) {
@@ -3873,7 +4618,8 @@ export default function App() {
       if (!isLayerEnabled('nasa_dsn')) return;
       const ents = addNasaDsnEntities(viewer, data);
       entityStoreRef.current['nasa_dsn'] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       showNotification('NASA Deep Space Network active', 'success');
     } catch (err) {
       recordFeedError('nasa dsn', err);
@@ -3888,7 +4634,8 @@ export default function App() {
       if (!isLayerEnabled('lightning_strikes')) return;
       const ents = addLightningEntities(viewer, data);
       entityStoreRef.current['lightning_strikes'] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       if (ents.length > 0) {
         showNotification(`Loaded ${ents.length} live lightning strikes`, 'success');
       }
@@ -3908,7 +4655,8 @@ export default function App() {
       if (!isLayerEnabled('aurora_oval')) return;
       const ents = addAuroraEntities(viewer, data);
       entityStoreRef.current['aurora_oval'] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       showNotification('Polar auroral oval loaded', 'success');
     } catch (err) {
       recordFeedError('aurora', err);
@@ -3928,7 +4676,8 @@ export default function App() {
       const ds = await loadSubmarineCablesDataSource(viewer, data);
       submarineCablesDataSourceRef.current = ds;
       entityStoreRef.current['submarine_cables'] = [...ds.entities.values];
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       showNotification('Undersea fiber cables loaded', 'success');
     } catch (err) {
       recordFeedError('submarine cables', err);
@@ -3947,7 +4696,8 @@ export default function App() {
       if (!isLayerEnabled('electricity_grid')) return;
       const ents = addElectricityGridEntities(viewer, data);
       entityStoreRef.current['electricity_grid'] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       showNotification('Global grid footprint loaded', 'success');
     } catch (err) {
       recordFeedError('electricity grid', err);
@@ -3966,7 +4716,8 @@ export default function App() {
       if (!isLayerEnabled('animal_migrations')) return;
       const ents = addAnimalMigrationEntities(viewer, data);
       entityStoreRef.current['animal_migrations'] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       showNotification('Wildlife migration paths loaded', 'success');
     } catch (err) {
       recordFeedError('animal migrations', err);
@@ -3997,7 +4748,7 @@ export default function App() {
       if (!data.states?.length) throw new Error(`${layerId} returned no states`);
       drRef.current?.updateFromApi(data.states);
       drRef.current?.start();
-      viewer.scene.requestRender();
+      throttledRender(viewer);
       showNotification(`Loaded ${data.states.length} ${layerId.replace(/^\d+_/, '').replace(/_/g, ' ')} tracks`, 'success');
     } catch (error) {
       if (!isLayerEnabled(layerId)) return;
@@ -4034,7 +4785,8 @@ export default function App() {
       removeLayerEntities('2_openflights');
       const ents = addOpenFlightsEntities(viewer, data, '2_openflights');
       entityStoreRef.current['2_openflights'] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       const airports = data.airports?.length || 0;
       const routes = data.routes?.length || 0;
       showNotification(`OpenFlights: ${airports} airports, ${routes} routes`, 'success');
@@ -4061,7 +4813,8 @@ export default function App() {
         ents = addVaacAdvisoryEntities(viewer, data, layerId);
       }
       entityStoreRef.current[layerId] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       showNotification(`Loaded ${ents.length} ${layerId.replace(/^\d+_/, '').replace(/_/g, ' ')} points`, 'success');
     } catch (err) {
       recordFeedError(layerId, err);
@@ -4084,7 +4837,8 @@ export default function App() {
       const items = data.storms || data.cyclones || data.activeStorms || [];
       const ents = addStormTrackEntities(viewer, items, layerId);
       entityStoreRef.current[layerId] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       showNotification(`Loaded ${ents.length} storm track features`, 'success');
     } catch (err) {
       recordFeedError(layerId, err);
@@ -4100,7 +4854,8 @@ export default function App() {
       if (!isLayerEnabled(layerId)) return;
       const ents = addDroughtZoneEntities(viewer, data, layerId);
       entityStoreRef.current[layerId] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       showNotification(`Loaded drought monitor zones`, 'success');
     } catch (err) {
       recordFeedError(layerId, err);
@@ -4116,7 +4871,8 @@ export default function App() {
       if (!isLayerEnabled(layerId)) return;
       const ents = addRadarSiteEntities(viewer, data, layerId);
       entityStoreRef.current[layerId] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       showNotification(`Loaded ${ents.length} radar sites`, 'success');
     } catch (err) {
       recordFeedError(layerId, err);
@@ -4132,7 +4888,8 @@ export default function App() {
       if (!isLayerEnabled(layerId)) return;
       const ents = addClimateIndicesEntities(viewer, data, layerId);
       entityStoreRef.current[layerId] = ents;
-      viewer.scene.requestRender();
+      enforceEntityCap();
+      throttledRender(viewer);
       showNotification(`Loaded climate indices`, 'success');
     } catch (err) {
       recordFeedError(layerId, err);
@@ -4323,7 +5080,7 @@ export default function App() {
         layer.alpha = val;
       }
     });
-    viewerRef.current?.scene.requestRender();
+    throttledRender(viewerRef.current);
   }, [layerOpacity]);
 
   const toggleAllLayers = useCallback((state: boolean) => {
@@ -4367,7 +5124,7 @@ export default function App() {
         renderSchedulerRef.current.onProgress((done, total) => {
           if (done >= total && !notified) {
             notified = true;
-            if (v) v.scene.requestRender();
+            if (v) throttledRender(v);
             bulkOperationRef.current = false;
             showNotification(`All layers enabled (${layersRef.current.length})`, 'success');
           }
@@ -4375,7 +5132,7 @@ export default function App() {
         renderSchedulerRef.current.enqueueAll(tasks);
       } else {
         bulkOperationRef.current = false;
-        if (v) v.scene.requestRender();
+        if (v) throttledRender(v);
         showNotification(`All layers enabled (${layersRef.current.length})`, 'success');
       }
 
@@ -4429,16 +5186,14 @@ export default function App() {
       if (wcEnts) { wcEnts.forEach(e => v?.entities.remove(e)); entityStoreRef.current['weather_cards'] = []; }
       setWeatherCards([]);
       setShowHeatmapLegend(false);
-      setShowStormLegend(false);
       setShowSmokeLegend(false);
-      setShowTsunamiLegend(false);
       disasterNearMeRequestedRef.current = false;
       if (geolocationWatchRef.current !== null) {
         navigator.geolocation.clearWatch(geolocationWatchRef.current);
         geolocationWatchRef.current = null;
       }
 
-      if (v) v.scene.requestRender();
+      if (v) throttledRender(v);
       bulkOperationRef.current = false;
       showNotification(`All layers disabled`, 'success');
     }
@@ -4451,9 +5206,7 @@ export default function App() {
     layersRef.current = next;
     setLayers(next);
     setShowPopulationImpact(false);
-    setShowStormLegend(false);
     setShowSmokeLegend(false);
-    setShowTsunamiLegend(false);
     setShowHeatmapLegend(false);
     for (const prev of prevLayers) {
       const wasOn = prev.on;
@@ -4665,6 +5418,8 @@ export default function App() {
         const name: string = payload.name || forkMsg.name || 'Unnamed Fork';
         const request: any = payload.request || payload;
         forkRendererRef.current?.createForkVisual(forkId, name, request?.lat || 0, request?.lon || 0);
+        // entity cache is now read via getter — no manual refresh needed
+        forkRendererRef.current?.spawnGhostsWithRetry(forkId);
         setForks(prev => [...prev, { forkId, name, divergenceScore: 0, status: 'running' }]);
         setActiveForkCount(prev => prev + 1);
       }
@@ -5076,7 +5831,7 @@ export default function App() {
       if (handled) { setAiTyping(false); return; }
     }
 
-    const isComputeTask = /compute|calculate|analyze|statistics|average|distribution|correlation|regression|simulate|cluster|predict|forecast|run script|execute|csv|data|pipeline|magnitude|histogram|seismic|m[0-9]|percentage|above/i.test(userMsg);
+    const isComputeTask = /\b(compute|calculate|run script|execute (?:code|script|python|node|bash)|simulate|csv|analyze (?:data|dataset|this)|pipeline)\b/i.test(userMsg) && !/\b(show|display|visualize|fly|go|zoom|toggle|enable|display|where|what|how|why|compare|near|around)\b/i.test(userMsg);
 
     if (isComputeTask) {
       try {
@@ -5088,6 +5843,7 @@ export default function App() {
         return;
       } catch (e) {
         setAgentSteps(prev => [...prev, {type:'error',text:`⚠️ Pipeline: ${e}`}]);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `⚠️ Pipeline execution failed: ${e}\n\nFalling back to agent analysis...` }]);
       }
     }
 
@@ -5110,6 +5866,12 @@ export default function App() {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     try {
+      // Clear previous digital twin entities at start of new query
+      const v0 = viewerRef.current;
+      if (v0) {
+        const toRemove = v0.entities.values.filter((e: any) => e.properties?.layer === 'digital_twin');
+        for (const e of toRemove) v0.entities.remove(e);
+      }
       const resp = await fetch('/api/agent/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -5135,6 +5897,7 @@ export default function App() {
       let lastInteractionId: string | null = null;
       let lastEnvironmentId: string | null = null;
       let lastTraceId: string | null = null;
+      let serverError: string | null = null;
 
       const processLines = () => {
         const lines = buffer.split('\n');
@@ -5170,10 +5933,16 @@ export default function App() {
               if (data.interactionId) lastInteractionId = data.interactionId;
               if (data.traceId) lastTraceId = data.traceId;
             }
+            if (data.type === 'panel' || (data.stats && data.charts)) {
+              setDigitalTwinPanel(data);
+            }
             if (data.type === 'done') {
               if (data.environmentId) lastEnvironmentId = data.environmentId;
               if (data.interactionId) lastInteractionId = data.interactionId;
               if (data.traceId) lastTraceId = data.traceId;
+            }
+            if (data.type === 'error') {
+              serverError = data.error || data.message || 'Unknown server error';
             }
           } catch { /* skip malformed JSON */ }
         }
@@ -5190,7 +5959,9 @@ export default function App() {
       if (lastEnvironmentId) setAgentEnvironmentId(lastEnvironmentId);
       if (lastInteractionId) agentInteractionIdRef.current = lastInteractionId;
 
-      if (finalText) {
+      if (serverError) {
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `⚠️ Server error: ${serverError}` }]);
+      } else if (finalText) {
         setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText, traceId: lastTraceId }]);
       } else {
         const fallback = generateLocalResponse(userMsg, loc);
@@ -5296,8 +6067,128 @@ export default function App() {
                 name: label || 'Agent Pin',
                 billboard: { image: createPinIcon(color, 24), width: 24, height: 24, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
                 label: label ? { text: label, font: '11px "JetBrains Mono"', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, pixelOffset: new Cesium.Cartesian2(0, -18) } : undefined,
-                properties: { layer: 'pin', lat, lon, agent: true },
+                properties: { layer: 'digital_twin', lat, lon, agent: true },
               });
+            }
+            break;
+          }
+          case 'addHeatmap': {
+            const points = cmd.points as Array<{ lat: number; lon: number; value: number }>;
+            const radius = (cmd.radius as number) || 50;
+            if (Array.isArray(points)) {
+              for (const pt of points) {
+                if (!isFinite(pt.lat) || !isFinite(pt.lon)) continue;
+                const intensity = Math.max(0, Math.min(1, pt.value || 0.5));
+                const color = Cesium.Color.fromHsl(0.66 - intensity * 0.66, 1, 0.5, 0.6);
+                const pixelSize = Math.max(4, Math.round(radius * intensity * 0.15));
+                v.entities.add({
+                  position: Cesium.Cartesian3.fromDegrees(pt.lon, pt.lat),
+                  point: { pixelSize, color, outlineColor: Cesium.Color.WHITE.withAlpha(0.3), outlineWidth: 1, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+                  properties: { layer: 'heatmap', lat: pt.lat, lon: pt.lon, value: pt.value, agent: true },
+                });
+              }
+            }
+            break;
+          }
+          case 'addPolygon': {
+            const coords = cmd.coordinates as Array<[number, number]>;
+            const label = (cmd.label as string) || 'Zone';
+            const color = (cmd.color as string) || 'rgba(255,0,0,0.3)';
+            const extrudedHeight = (cmd.extrudedHeight as number) || (cmd.height as number) || 0;
+            if (Array.isArray(coords) && coords.length >= 3) {
+              const positions = coords.map(c => Cesium.Cartesian3.fromDegrees(c[1], c[0]));
+              const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+              const fill = rgba ? Cesium.Color.fromBytes(+rgba[1], +rgba[2], +rgba[3], Math.round((parseFloat(rgba[4]) || 0.35) * 255)) : Cesium.Color.WHITE.withAlpha(0.35);
+              v.entities.add({
+                polygon: {
+                  hierarchy: positions,
+                  material: fill,
+                  outline: true,
+                  outlineColor: fill.withAlpha(0.9),
+                  height: 1.0,
+                  ...(extrudedHeight > 0 ? { extrudedHeight: extrudedHeight + 1.0 } : {}),
+                },
+                name: label,
+                properties: { layer: 'digital_twin', label, agent: true },
+              });
+            }
+            break;
+          }
+          case 'addGeoJSON': {
+            const geojson = cmd.geojson as { type: string; features?: Array<{ geometry: { type: string; coordinates: unknown }; properties?: Record<string, unknown> }> };
+            const label = (cmd.label as string) || 'GeoJSON';
+            const color = (cmd.color as string) || '#22c55e';
+            if (geojson?.features) {
+              for (const feature of geojson.features) {
+                const geom = feature.geometry;
+                if (geom?.type === 'Point' && Array.isArray(geom.coordinates)) {
+                  const [lon, lat] = geom.coordinates as [number, number];
+                  v.entities.add({
+                    position: Cesium.Cartesian3.fromDegrees(lon, lat),
+                    billboard: { image: createPinIcon(color, 20), width: 20, height: 20, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+                    properties: { layer: 'geojson', agent: true, ...feature.properties },
+                  });
+                } else if (geom?.type === 'Polygon' && Array.isArray(geom.coordinates)) {
+                  const ring = (geom.coordinates as number[][][])[0];
+                  const positions = ring.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]));
+                  v.entities.add({
+                    polygon: {
+                      hierarchy: positions,
+                      material: Cesium.Color.fromCssColorString(color).withAlpha(0.4),
+                      outline: true,
+                      outlineColor: Cesium.Color.fromCssColorString(color).withAlpha(0.9),
+                      height: 0.5,
+                    },
+                    properties: { layer: 'digital_twin', agent: true, ...feature.properties },
+                  });
+                }
+              }
+            }
+            break;
+          }
+          case 'addChart': {
+            const chartType = (cmd.type as string) || 'bar';
+            const title = (cmd.title as string) || 'Chart';
+            const labels = cmd.labels as string[] | undefined;
+            const values = cmd.values as number[] | undefined;
+            const pos = cmd.position as { lat: number; lon: number } | undefined;
+            if (pos && isFinite(pos.lat) && isFinite(pos.lon) && labels && values) {
+              const canvas = document.createElement('canvas');
+              canvas.width = 320;
+              canvas.height = 200;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.fillStyle = 'rgba(15,23,42,0.9)';
+                ctx.fillRect(0, 0, 320, 200);
+                ctx.fillStyle = '#e2e8f0';
+                ctx.font = 'bold 13px sans-serif';
+                ctx.fillText(title, 12, 22);
+                const maxVal = Math.max(...values, 1);
+                const barW = Math.max(8, Math.floor(260 / labels.length) - 6);
+                labels.forEach((lbl, i) => {
+                  const barH = (values[i] / maxVal) * 130;
+                  const x = 20 + i * (barW + 6);
+                  const y = 175 - barH;
+                  ctx.fillStyle = Cesium.Color.fromHsl(0.55 + (i / labels.length) * 0.3, 0.8, 0.5).toCssColorString();
+                  ctx.fillRect(x, y, barW, barH);
+                  ctx.fillStyle = '#94a3b8';
+                  ctx.font = '9px sans-serif';
+                  ctx.fillText(lbl.slice(0, 6), x, 190);
+                  ctx.fillText(String(values[i]), x, y - 3);
+                });
+              }
+              v.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 5000),
+                billboard: { image: canvas.toDataURL(), width: 320, height: 200, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                properties: { layer: 'chart', agent: true },
+              });
+            }
+            break;
+          }
+          case 'addPanel': {
+            const panelData = cmd.panelData as Record<string, unknown> | undefined;
+            if (panelData) {
+              setDigitalTwinPanel(panelData as any);
             }
             break;
           }
@@ -5308,46 +6199,15 @@ export default function App() {
     }
   }
 
-  async function callAI(message: string, location: { lat: number; lon: number } | null): Promise<string> {
-    const locationContext = location ? `Location context: ${location.lat}, ${location.lon}. ` : '';
-    if (aiApiType === 'anthropic') {
-      const anthropicKey = apiVault.anthropic.trim();
-      if (!anthropicKey) return generateLocalResponse(message, location);
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json', 'x-api-key':anthropicKey, 'anthropic-version':'2023-06-01' },
-        body: JSON.stringify({ model:'claude-3-opus-20240229', max_tokens:1024,
-          messages: [{role:'user', content:`${locationContext}${message}`}] }),
-      });
-      if (!resp.ok) throw new Error(`Anthropic request failed (${resp.status})`);
-      const data = await resp.json();
-      return data.content?.[0]?.text || 'No response';
-    } else if (aiApiType === 'gemini') {
-      const geminiKey = apiVault.gemini.trim();
-      if (!geminiKey) return generateLocalResponse(message, location);
-      const resp = await fetch('/api/ai/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ key: geminiKey, prompt: `${locationContext}${message}` }),
-      });
-      if (!resp.ok) throw new Error(`Gemini request failed (${resp.status})`);
-      const data = await resp.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
-    } else {
-      return generateLocalResponse(message, location);
-    }
-  }
-
   function generateLocalResponse(message: string, location: { lat: number; lon: number } | null): string {
     const lower = message.toLowerCase();
     if (lower.includes('earthquake')) return '🌍 **Seismic Activity**\n\nRecent earthquakes are displayed on the globe. Use the sidebar to toggle earthquake data layers. The color intensity indicates magnitude - red circles show M5+ events.';
     if (lower.includes('weather')) return '🌤️ **Weather Information**\n\nClick on any location to see current weather conditions. Temperature, humidity, wind speed, and conditions are displayed in real-time cards.';
     if (lower.includes('storm') || lower.includes('hurricane')) return '🌀 **Storm Tracking**\n\nActive storms are shown with forecast cones indicating predicted paths. Click on any storm to see 24/48/72-hour forecasts and wind speed data.';
     if (lower.includes('fire') || lower.includes('wildfire')) return '🔥 **Wildfire Monitoring**\n\nNASA MODIS/VIIRS fire detections shown as orange pulsing markers. Smoke dispersion simulations available for active fires.';
-    if (lower.includes('tsunami')) return '🌊 **Tsunami Alerts**\n\nM7.5+ ocean earthquakes automatically trigger tsunami propagation simulations. Check the alerts panel for active warnings.';
     if (lower.includes('population')) return '👥 **Population Impact**\n\n50 major cities shown with population-based impact zones. Useful for assessing disaster risk to urban areas.';
     if (lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb')) return '✈️ **Live Aircraft**\n\nAircraft tracking is available via the sidebar (Aviation category). Enable "ADSB.lol" or "Flight Tracks" to see live planes on the globe. Try saying "show flights near me" with location enabled.';
-    if (lower.includes('help')) return '📚 **Available Commands**\n\n- "Show earthquakes in [location]"\n- "Weather in [city]"\n- "Fly to [location]"\n- "Show population impact"\n- "Storm tracking"\n- "Wildfire status"\n- "Tsunami alerts"\n- "Show flights near me"\n\nOr ask any question about Earth data!';
+    if (lower.includes('help')) return '📚 **Available Commands**\n\n- "Show earthquakes in [location]"\n- "Weather in [city]"\n- "Fly to [location]"\n- "Show population impact"\n- "Storm tracking"\n- "Wildfire status"\n- "Show flights near me"\n\nOr ask any question about Earth data!';
     if (location) return `📍 **Location Query**\n\nCoordinates: ${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}\n\nThis area can be analyzed for seismic risk, weather conditions, and population density. Use the sidebar layers to explore different data dimensions.`;
     return `🌍 **Earth Intelligence**\n\nI can help you explore:\n- Seismic activity and earthquake data\n- Weather conditions globally\n- Storm tracking and forecasts\n- Population impact analysis\n- Natural disaster monitoring\n\nTry: "Show earthquakes in Japan" or "Weather in London"`;
   }
@@ -5405,9 +6265,7 @@ export default function App() {
       'weather_cards',
       'pin',
       'india_cctv',
-      'storm_forecast',
       'smoke_dispersion',
-      'tsunami',
       'disaster_near_me',
     ]);
     for (const entity of v.entities.values) {
@@ -5465,13 +6323,15 @@ export default function App() {
   const takeSnapshot = useCallback(() => {
     const v = viewerRef.current;
     if (!v) return;
-    v.scene.render();
+    v.render();
     const canvas = v.scene.canvas;
-    const link = document.createElement('a');
-    link.download = `liveglobe_${new Date().toISOString().slice(0,10)}.png`;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-    showNotification('Snapshot saved!', 'success');
+    requestAnimationFrame(() => {
+      const link = document.createElement('a');
+      link.download = `liveglobe_${new Date().toISOString().slice(0,10)}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      showNotification('Snapshot saved!', 'success');
+    });
   }, []);
 
   const generateShareUrl = useCallback(() => {
@@ -5494,12 +6354,16 @@ export default function App() {
     const v = viewerRef.current;
     if (!v) return;
     if (isAutoRotating) {
-      if (rotateTimerRef.current) clearInterval(rotateTimerRef.current);
+      if (rotateTimerRef.current) cancelAnimationFrame(rotateTimerRef.current as unknown as number);
       rotateTimerRef.current = null;
       setIsAutoRotating(false);
     } else {
       setIsAutoRotating(true);
-      rotateTimerRef.current = setInterval(() => {
+      const rotateFrame = () => {
+        if (document.hidden) {
+          rotateTimerRef.current = requestAnimationFrame(rotateFrame) as unknown as ReturnType<typeof setInterval>;
+          return;
+        }
         const camera = v.camera;
         if (v.trackedEntity) v.trackedEntity = undefined;
         if (!Cesium.Matrix4.equals(camera.transform, Cesium.Matrix4.IDENTITY)) {
@@ -5529,7 +6393,10 @@ export default function App() {
           Cesium.Cartesian3.cross(right, dir, new Cesium.Cartesian3()),
           new Cesium.Cartesian3()
         );
-      }, 16);
+        throttledRender(v);
+        rotateTimerRef.current = requestAnimationFrame(rotateFrame) as unknown as ReturnType<typeof setInterval>;
+      };
+      rotateTimerRef.current = requestAnimationFrame(rotateFrame) as unknown as ReturnType<typeof setInterval>;
     }
   }, [isAutoRotating]);
 
@@ -5557,7 +6424,7 @@ export default function App() {
       },
     });
     v.camera.flyTo({ destination: rect });
-    v.scene.requestRender();
+    throttledRender(v);
   }, [studyWest, studySouth, studyEast, studyNorth]);
 
   function clearStudyArea() {
@@ -5566,7 +6433,7 @@ export default function App() {
     if (studyAreaEntityRef.current) {
       v.entities.remove(studyAreaEntityRef.current);
       studyAreaEntityRef.current = null;
-      v.scene.requestRender();
+      throttledRender(v);
     }
   }
 
@@ -5590,7 +6457,7 @@ export default function App() {
       },
     });
     v.camera.flyTo({ destination: rect });
-    v.scene.requestRender();
+    throttledRender(v);
   }, [studyWest, studySouth, studyEast, studyNorth]);
 
   const startStudyDraw = useCallback(async (type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE') => {
@@ -5652,7 +6519,7 @@ export default function App() {
           setActiveStudyAreaId(area.id);
           flyToStudyAreaTopDown(v, area);
           setStudyDrawing(false);
-          v.scene.requestRender();
+          throttledRender(v);
         },
       });
     } catch (err) {
@@ -5689,7 +6556,7 @@ export default function App() {
         const ents = entityStoreRef.current[l.id];
         if (ents) ents.forEach(e => { if (e) e.show = false; });
       });
-      v.scene.requestRender();
+      throttledRender(v);
     }
     return () => { if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current); };
   }, [activeStudyAreaId, layers]);
@@ -5722,7 +6589,7 @@ export default function App() {
     if (clockIntervalRef.current) clearInterval(clockIntervalRef.current);
     if (issTimerRef.current) clearInterval(issTimerRef.current);
     if (issRenderTickRef.current) { issRenderTickRef.current(); issRenderTickRef.current = null; }
-    if (rotateTimerRef.current) clearInterval(rotateTimerRef.current);
+    if (rotateTimerRef.current) cancelAnimationFrame(rotateTimerRef.current as unknown as number);
     if (timelineRef.current.interval) clearInterval(timelineRef.current.interval);
     if (autoRefreshIntervalRef.current) clearInterval(autoRefreshIntervalRef.current);
     if (autoRefreshSlowRef.current) clearInterval(autoRefreshSlowRef.current);
@@ -5743,9 +6610,7 @@ export default function App() {
       viewerRef.current = null;
     }
     focusMarkerRef.current = null;
-    stormOverlaysRef.current = [];
     smokeParticlesRef.current = [];
-    tsunamiWavesRef.current = [];
     Object.keys(weatherCardElementsRef.current).forEach(key => { delete weatherCardElementsRef.current[key]; });
     entropyHaloRef.current?.destroy();
     entropyHaloRef.current = null;
@@ -5781,10 +6646,17 @@ export default function App() {
 
   const formatInfoPanel = () => {
     if (!infoEntity) return null;
-    const p = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-    if (!p) return null;
+    try {
+      const p = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+      if (!p) return <div className="cctv-preview-empty">No data available</div>;
+      const cctvMeta = p.layer === 'india_cctv' ? cctvMetaRef.current.get(infoEntity.id) : null;
+      if (p.layer === 'india_cctv' && cctvMeta) {
+        Object.assign(p, cctvMeta);
+      } else if (p.layer === 'india_cctv' && !cctvMeta) {
+        if (import.meta.env.DEV) console.warn('[InfoPanel] cctvMeta not found for', infoEntity.id, 'map size:', cctvMetaRef.current.size);
+      }
 
-    const layer = p.layer as string;
+      const layer = p.layer as string;
     const title = String(p.title ?? p.name ?? p.callsign ?? infoEntity.name ?? 'Event');
     const color = getEventColor(layer);
     const px = p as any;
@@ -5825,6 +6697,9 @@ export default function App() {
       rows.push({ key: 'Owners', val: String(p.owners) });
     } else if (layer === 'animal_migrations') {
       rows.push({ key: 'Species', val: String(p.species) });
+    } else if (layer === 'live_media') {
+      rows.push({ key: 'Source', val: String(p.source ?? 'YouTube') });
+      rows.push({ key: 'Location', val: `${Number(p.lat).toFixed(4)}, ${Number(p.lon).toFixed(4)}` });
     } else if (layer === 'india_cctv') {
       const location = String(p.location ?? p.city ?? p.region ?? 'Worldwide');
       const updatedAt = Number(p.updatedAt ?? Date.now());
@@ -5916,31 +6791,15 @@ export default function App() {
             </div>
           )}
 
-          {(layer === 'severe_storms' || layer === 'storm_forecast') && (stormForecast || px.stormTrack) && (
-            <div className="sparkline-wrap">
-              <div className="sparkline-title">Storm Forecast</div>
-              <div className="info-row"><span className="info-key">Wind Speed</span><span className="info-val">{String(px.windSpeed ?? 'N/A')} mph</span></div>
-              <div className="info-row"><span className="info-key">Pressure</span><span className="info-val">{(stormForecast?.pressure ?? Number(px.pressure ?? 0)).toFixed(0)} mb</span></div>
-              <div className="info-row"><span className="info-key">Heading</span><span className="info-val">{(stormForecast?.heading ?? Number(px.heading ?? 0)).toFixed(0)}°</span></div>
-              <div className="info-row"><span className="info-key">Forward Speed</span><span className="info-val">{(stormForecast?.speedKmh ?? Number(px.speedKmh ?? 0)).toFixed(1)} km/h</span></div>
-              {((stormForecast?.track as any[]) ?? (px.stormTrack as any[]) ?? []).map((pt: any, i: number) => (
-                <div key={i} className="storm-track-point">
-                  <div className="storm-track-dot" />
-                  <span style={{fontSize:11,fontWeight:500}}>{pt.time}</span>
-                  <span className="storm-track-date">{Number(pt.lat).toFixed(1)}°, {Number(pt.lon).toFixed(1)}°</span>
-                </div>
-              ))}
-            </div>
-          )}
-
           {layer === 'india_cctv' && (
             <div className="cctv-preview">
               {(() => {
-                const previewBase = String(p.previewUrl ?? p.thumbnailUrl ?? p.streamUrl ?? p.pageUrl ?? '');
-                const previewUrl = previewBase ? `${previewBase}${previewBase.includes('?') ? '&' : '?'}tick=${cctvPreviewTick}` : '';
-                const isVideo = p.feedType === 'm3u8' || previewBase.includes('.m3u8') || previewBase.includes('m3u8') || previewBase.includes('.mp4');
-                return previewBase ? (
-                  isVideo ? <CctvVideoPlayer src={previewBase} /> : <img src={previewUrl} alt={String(p.title ?? 'Live camera preview')} referrerPolicy="no-referrer" loading="eager" />
+                const thumbUrl = String(p.thumbnailUrl ?? p.previewUrl ?? '');
+                const streamUrl = String(p.streamUrl ?? '');
+                const pageUrl = String(p.pageUrl ?? '');
+                const imgUrl = thumbUrl && !cctvPreviewFailed ? `${thumbUrl}${thumbUrl.includes('?') ? '&' : '?'}tick=${cctvPreviewTick}` : '';
+                return imgUrl ? (
+                  <img key={imgUrl} src={imgUrl} alt={String(p.title ?? 'Live camera preview')} referrerPolicy="no-referrer" loading="eager" style={{width:'100%',height:'165px',objectFit:'cover',display:'block',background:'#000'}} onError={() => setCctvPreviewFailed(true)} />
                 ) : <div className="cctv-preview-empty">Live preview unavailable</div>;
               })()}
             </div>
@@ -5952,6 +6811,22 @@ export default function App() {
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
                 <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.4}}>Open-source live public webcam feed.</div>
                 <a className="cctv-link" href={String(p.pageUrl ?? p.streamUrl ?? '')} target="_blank" rel="noreferrer">Open live</a>
+              </div>
+            </div>
+          )}
+
+          {layer === 'live_media' && (
+            <div className="cctv-preview">
+              {p.youtubeVideoId ? <YoutubePlayer videoId={String(p.youtubeVideoId)} /> : <div className="cctv-preview-empty">Video unavailable</div>}
+            </div>
+          )}
+
+          {layer === 'live_media' && p.youtubeVideoId && (
+            <div className="sparkline-wrap">
+              <div className="sparkline-title">YouTube Video</div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+                <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.4}}>{String(p.title ?? '')}</div>
+                <a className="cctv-link" href={`https://www.youtube.com/watch?v=${String(p.youtubeVideoId)}`} target="_blank" rel="noreferrer">Open on YouTube</a>
               </div>
             </div>
           )}
@@ -6065,6 +6940,10 @@ export default function App() {
         </div>
       </>
     );
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('[InfoPanel] error:', e);
+      return <div className="cctv-preview-empty">Error loading details</div>;
+    }
   };
 
   const traceKeyFor = (msg: ChatMessage) => `trace_${msg.traceId || msg.id}`;
@@ -6231,6 +7110,8 @@ export default function App() {
           SENTINEL_HUB_CLIENT_SECRET: apiVault.sentinelHubClientSecret,
           MARINE_TRAFFIC_API_KEY: apiVault.marineTrafficApiKey,
           AIS_STREAM_API_KEY: apiVault.aisStreamApiKey,
+          FLIGHTAWARE_AEROAPI_KEY: apiVault.flightAwareAeroApiKey,
+          AIRLABS_API_KEY: apiVault.airLabsApiKey,
         }}
       />
 
@@ -6243,50 +7124,48 @@ export default function App() {
         <div className="topbar-sep" />
         <div className="utc-clock">{utcTime}</div>
         <div className="topbar-sep" />
-        <div className="search-box" style={{ position: 'relative', flex: 1, maxWidth: 280 }}>
-          <span className="search-icon">🔍</span>
+        <div className="search-box" ref={searchBoxRef} style={{ position: 'relative', flex: 1, maxWidth: 280 }}>
+          <span className="search-icon"><SearchIcon size={14} /></span>
           <input type="text" placeholder="Search location..." value={searchValue}
-            onChange={e => handleSearch(e.target.value)}
+            onChange={e => {
+              handleSearch(e.target.value);
+              const el = searchBoxRef.current;
+              if (el) setSearchBoxRect(el.getBoundingClientRect());
+            }}
             onKeyDown={e => {
               if (e.key !== 'Enter') return;
               const target = getBestSearchTarget(searchValue);
               if (target) goToLocation(target.lat, target.lon, target.name, '#60a5fa', 0.9);
             }}
             style={{ width: '100%' }} />
-          {showSuggestions && searchSuggestions.length > 0 && (
-            <div className="search-suggestions active" style={{ position: 'absolute', top: '100%', left: 0, right: 0 }}>
-              {searchSuggestions.map((s) => (
-                <div key={s.name + s.lat + s.lon} className="item" onClick={() => goToLocation(s.lat, s.lon, s.name, '#60a5fa', 0.9)}>{s.name}</div>
-              ))}
-            </div>
-          )}
         </div>
         <div className="topbar-right">
           <div className="status-pill">
             <div className="status-dot" />
             <span>Live</span>
           </div>
-          <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => setShowStudyArea(p => !p)} title="Study Area">🎯</button>
-          <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => setShowAI(p => !p)} title="AI Assistant">🤖</button>
+          <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => setShowStudyArea(p => !p)} title="Study Area"><Crosshair size={16} /></button>
+          <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => setShowAI(p => !p)} title="AI Assistant"><Bot size={16} /></button>
           <button className={`btn-icon ${showAlertsPanel ? 'active' : ''}`} onClick={() => setShowAlertsPanel(p => !p)} title="Alerts">
-            🔔
+            <Bell size={16} />
             {newAlertCount > 0 && <span style={{ position:'absolute',top:-2,right:-2,background:'#ef4444',color:'white',fontSize:9,borderRadius:'50%',width:14,height:14,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:600}}>{newAlertCount}</span>}
           </button>
-          <button className={`btn-icon ${showAnalytics ? 'active' : ''}`} onClick={() => { setShowAnalytics(p => !p); if (!analyticsData) fetch('/api/agent/analytics').then(r => r.json()).then(setAnalyticsData).catch(() => {}); }} title="Analytics & Insights">📊</button>
-          <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share">📤</button>
-          <button className="btn-icon" onClick={() => setShowApiVault(true)} title="API Configuration">🔑</button>
-          <button className={`btn-icon ${showCognitiveDashboard ? 'active' : ''}`} onClick={() => setShowCognitiveDashboard(p => !p)} title="Cognitive Dashboard">🧠</button>
-          <button className={`btn-icon ${showCockpitAlerts ? 'active' : ''}`} onClick={() => setShowCockpitAlerts(p => !p)} title="Proactive Alerts">🚨</button>
-          <button className={`btn-icon ${showToolWorkbench ? 'active' : ''}`} onClick={() => setShowToolWorkbench(p => !p)} title="Tool Workbench">🔧</button>
-          <button className={`btn-icon ${showMemoryExplorer ? 'active' : ''}`} onClick={() => setShowMemoryExplorer(p => !p)} title="Memory Explorer">💾</button>
-          <button className={`btn-icon ${showSettings ? 'active' : ''}`} onClick={() => setShowSettings(p => !p)} title="Settings">⚙️</button>
-          <button className={`btn-icon ${showScenarioGallery ? 'active' : ''}`} onClick={() => setShowScenarioGallery(p => !p)} title="Scenarios">🌋</button>
-          <button className={`btn-icon ${showScenarioEditor ? 'active' : ''}`} onClick={() => setShowScenarioEditor(p => !p)} title="New Scenario">🎬</button>
+          <button className={`btn-icon ${showAnalytics ? 'active' : ''}`} onClick={() => { setShowAnalytics(p => !p); if (!analyticsData) fetch('/api/agent/analytics').then(r => r.json()).then(setAnalyticsData).catch(() => {}); }} title="Analytics & Insights"><BarChart3 size={16} /></button>
+          <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share"><Share2 size={16} /></button>
+          <button className="btn-icon" onClick={() => setShowApiVault(true)} title="API Configuration"><Key size={16} /></button>
+          <button className={`btn-icon ${showCognitiveDashboard ? 'active' : ''}`} onClick={() => setShowCognitiveDashboard(p => !p)} title="Cognitive Dashboard"><Brain size={16} /></button>
 
-          <button className={`btn-icon ${showCinematicDirector ? 'active' : ''}`} onClick={() => setShowCinematicDirector(p => !p)} title="Cinematic Director">🎥</button>
-          <button className={`btn-icon ${showSpatialSketching ? 'active' : ''}`} onClick={() => setShowSpatialSketching(p => !p)} title="Spatial Sketch">✏️</button>
+          <button className={`btn-icon ${showToolWorkbench ? 'active' : ''}`} onClick={() => setShowToolWorkbench(p => !p)} title="Tool Workbench"><Wrench size={16} /></button>
+          <button className={`btn-icon ${showMemoryExplorer ? 'active' : ''}`} onClick={() => setShowMemoryExplorer(p => !p)} title="Memory Explorer"><Save size={16} /></button>
+          <button className={`btn-icon ${showSettings ? 'active' : ''}`} onClick={() => setShowSettings(p => !p)} title="Settings"><Cog size={16} /></button>
+          <button className={`btn-icon ${showPerfMonitor ? 'active' : ''}`} onClick={() => setShowPerfMonitor(p => !p)} title="Performance Monitor"><Activity size={16} /></button>
+          <button className={`btn-icon ${showScenarioGallery ? 'active' : ''}`} onClick={() => setShowScenarioGallery(p => !p)} title="Scenarios"><Flame size={16} /></button>
+          <button className={`btn-icon ${showScenarioEditor ? 'active' : ''}`} onClick={() => setShowScenarioEditor(p => !p)} title="New Scenario"><Clapperboard size={16} /></button>
+
+          <button className={`btn-icon ${showCinematicDirector ? 'active' : ''}`} onClick={() => setShowCinematicDirector(p => !p)} title="Cinematic Director"><Film size={16} /></button>
+          <button className={`btn-icon ${showSpatialSketching ? 'active' : ''}`} onClick={() => setShowSpatialSketching(p => !p)} title="Spatial Sketch"><Pencil size={16} /></button>
           <button className="btn-icon" onClick={takeSnapshot} title="Snapshot"><Camera size={16} /></button>
-          <button className="btn-icon" onClick={flyToIndiaDirect} title="Fly to India">🇮🇳</button>
+          <button className="btn-icon" onClick={flyToIndiaDirect} title="Fly to India"><Navigation2 size={16} /></button>
           <button
             className={`btn-icon ${isLayerEnabled('india_cctv') ? 'active' : ''}`}
             onClick={() => toggleLayer('india_cctv')}
@@ -6294,11 +7173,24 @@ export default function App() {
           >
             <Cctv size={16} />
           </button>
-          <button className="btn-icon" onClick={toggleISS} title="ISS Tracker">🛰️</button>
-          <button className={`btn-icon ${showTimeline ? 'active' : ''}`} onClick={toggleTimeline} title="Timeline">⏱️</button>
-          <button className="btn-icon" onClick={toggleAutoRotate} title="Auto Rotate" style={isAutoRotating ? {borderColor:'#22c55e',color:'#22c55e'} : {}}>🔄</button>
+          <button className="btn-icon" onClick={toggleISS} title="ISS Tracker"><Satellite size={16} /></button>
+          <button className={`btn-icon ${showTimeline ? 'active' : ''}`} onClick={toggleTimeline} title="Timeline"><Timer size={16} /></button>
+          <button className="btn-icon" onClick={toggleAutoRotate} title="Auto Rotate" style={isAutoRotating ? {borderColor:'#22c55e',color:'#22c55e'} : {}}><RefreshCw size={16} /></button>
         </div>
       </div>
+
+      {showSuggestions && searchSuggestions.length > 0 && searchBoxRect && (
+        <div className="search-suggestions active" style={{
+          position: 'fixed',
+          top: searchBoxRect.bottom + 4,
+          left: searchBoxRect.left,
+          width: searchBoxRect.width,
+        }}>
+          {searchSuggestions.map((s) => (
+            <div key={s.name + s.lat + s.lon} className="item" onClick={() => goToLocation(s.lat, s.lon, s.name, '#60a5fa', 0.9)}>{s.name}</div>
+          ))}
+        </div>
+      )}
 
       {/* Sidebar */}
       <div className={`sidebar glass-panel ${sidebarCollapsed ? 'collapsed' : ''}`}>
@@ -6380,7 +7272,6 @@ export default function App() {
             <button className="btn-all" onClick={() => toggleAllLayers(false)}>Disable All</button>
           </div>
           <div className="btn-row" style={{marginBottom:8, gap:4, flexWrap:'wrap'}}>
-            <button className="btn-all" style={{background:showRiskForecast ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowRiskForecast(p => !p)}>⚠️ Risk</button>
             <button className="btn-all" style={{background:showTimeSlider ? 'rgba(96,165,250,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowTimeSlider(p => !p)}>⏱ Time</button>
             <button className="btn-all" style={{background:showMeasureTool ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowMeasureTool(p => !p)}>📏 Measure</button>
             {isAdmin && <button className="btn-all" style={{background:'rgba(59,130,246,0.2)', fontSize:10}} onClick={() => setShowAdmin(true)}>🛡️ Admin</button>}
@@ -6455,20 +7346,6 @@ export default function App() {
                   {msg.type === 'error' && <div className="msg-label" style={{color:'#ef4444'}}>⚠️ Error</div>}
                   <div className="rich-content" dangerouslySetInnerHTML={{ __html: richRender(msg.content) }} />
                   {renderCommandChips(msg.content, focusLocation, toggleLayer)}
-                  {msg.type !== 'error' && !msg.type?.startsWith('monitor') && !msg.feedback && (
-                    <div className="msg-feedback" style={{display:'flex',gap:6,marginTop:6,alignItems:'center'}}>
-                      <span style={{fontSize:9,color:'var(--text-dim)'}}>Was this helpful?</span>
-                      <button className="fb-btn up" onClick={() => {
-                        fetch('/api/agent/feedback', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({vote:'up', query:aiMessages.filter(m => m.role==='user' && m.id < msg.id).slice(-1)[0]?.content||'', response:msg.content, intentType:msg.type||'unknown', modelTier:'auto'}) }).catch(()=>{});
-                        setAiMessages(prev => prev.map(m => m.id === msg.id ? {...m, feedback:'up'} : m));
-                      }} title="Helpful">👍</button>
-                      <button className="fb-btn down" onClick={() => {
-                        fetch('/api/agent/feedback', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({vote:'down', query:aiMessages.filter(m => m.role==='user' && m.id < msg.id).slice(-1)[0]?.content||'', response:msg.content, intentType:msg.type||'unknown', modelTier:'auto'}) }).catch(()=>{});
-                        setAiMessages(prev => prev.map(m => m.id === msg.id ? {...m, feedback:'down'} : m));
-                      }} title="Not helpful">👎</button>
-                    </div>
-                  )}
-                  {msg.feedback && <div style={{fontSize:9,color:'var(--text-dim)',marginTop:4}}>Feedback: {msg.feedback === 'up' ? '👍' : '👎'}</div>}
                   {/* Explainability: reasoning trace & evidence chain buttons */}
                   {msg.role === 'assistant' && msg.content.length > 20 && (
                     <div style={{display:'flex',gap:4,marginTop:4}}>
@@ -6691,46 +7568,56 @@ export default function App() {
       <div className={`alerts-panel glass-panel ${showAlertsPanel ? 'open' : ''}`}>
         <div className="ai-header">
           <div className="ai-icon" style={{background:'linear-gradient(135deg,#ef4444,#f97316)'}}>⚠️</div>
-          <div className="ai-title">Disaster Alerts</div>
+          <div className="ai-title">Alerts</div>
           <button className="ai-close" onClick={() => setShowAlertsPanel(false)}>✕</button>
         </div>
-        <div className="alerts-list">
-          {alerts.length === 0 && <div style={{textAlign:'center',padding:20,color:'var(--text-dim)',fontSize:12}}>No active alerts</div>}
-          {alerts.map(a => (
-            <div key={a.id} className={`alert-item ${!a.seen ? 'new' : ''}`}
-              onClick={() => {
-                setAlerts(prev => prev.map(a2 => a2.id === a.id ? { ...a2, seen: true } : a2));
-                setNewAlertCount(prev => Math.max(0, prev - 1));
-                focusLocation(a.lat, a.lon, { label: a.title, color: getSeverityColor(a.severity), height: 150 });
-              }}>
-              <div className="alert-title">
-                <div className="alert-dot" style={{background:a.severity === 'red' ? '#ef4444' : a.severity === 'orange' ? '#f97316' : '#22c55e'}} />
-                {a.title}
+        <div style={{display:'flex',borderBottom:'1px solid var(--border)'}}>
+          <button style={{flex:1,padding:'6px 12px',fontSize:11,fontWeight:600,border:'none',background:alertTab === 'alerts' ? 'var(--accent-bg)' : 'transparent',color:alertTab === 'alerts' ? 'var(--accent)' : 'var(--text-dim)',cursor:'pointer',borderBottom: alertTab === 'alerts' ? '2px solid var(--accent)' : '2px solid transparent'}} onClick={() => setAlertTab('alerts')}>Present</button>
+          <button style={{flex:1,padding:'6px 12px',fontSize:11,fontWeight:600,border:'none',background:alertTab === 'predictive' ? 'var(--accent-bg)' : 'transparent',color:alertTab === 'predictive' ? 'var(--accent)' : 'var(--text-dim)',cursor:'pointer',borderBottom: alertTab === 'predictive' ? '2px solid var(--accent)' : '2px solid transparent'}} onClick={() => setAlertTab('predictive')}>Predictive</button>
+        </div>
+        {alertTab === 'alerts' ? (
+          <div className="alerts-list">
+            {alerts.length === 0 && <div style={{textAlign:'center',padding:20,color:'var(--text-dim)',fontSize:12}}>No active alerts</div>}
+            {alerts.map(a => (
+              <div key={a.id} className={`alert-item ${!a.seen ? 'new' : ''}`}
+                onClick={() => {
+                  setAlerts(prev => prev.map(a2 => a2.id === a.id ? { ...a2, seen: true } : a2));
+                  setNewAlertCount(prev => Math.max(0, prev - 1));
+                  focusLocation(a.lat, a.lon, { label: a.title, color: getSeverityColor(a.severity), height: 150 });
+                }}>
+                <div className="alert-title">
+                  <div className="alert-dot" style={{background:a.severity === 'red' ? '#ef4444' : a.severity === 'orange' ? '#f97316' : '#22c55e'}} />
+                  {a.title}
+                </div>
+                <div className="alert-desc">{a.desc}</div>
+                <div className="alert-desc" style={{marginTop:4,color:'var(--text-muted)'}}>📍 {a.lat.toFixed(2)}, {a.lon.toFixed(2)}</div>
+                <div className="alert-time">{new Date(a.time).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST</div>
               </div>
-              <div className="alert-desc">{a.desc}</div>
-              <div className="alert-desc" style={{marginTop:4,color:'var(--text-muted)'}}>📍 {a.lat.toFixed(2)}, {a.lon.toFixed(2)}</div>
-              <div className="alert-time">{new Date(a.time).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST</div>
+            ))}
+            <div className="alerts-footer">
+              <button className="alert-btn" onClick={() => {
+                alertsRef.current.forEach(a => a.seen = true);
+                setAlerts([...alertsRef.current]);
+                setNewAlertCount(0);
+              }}>Mark All Read</button>
+              <button className="alert-btn" onClick={() => {
+                const v = viewerRef.current;
+                if (v) {
+                  entityStoreRef.current['disaster_alerts']?.forEach(e => v.entities.remove(e));
+                }
+                entityStoreRef.current['disaster_alerts'] = [];
+                Object.keys(alertEntityRef.current).forEach(id => { delete alertEntityRef.current[id]; });
+                alertsRef.current = [];
+                setAlerts([]);
+                setNewAlertCount(0);
+              }}>Clear All</button>
             </div>
-          ))}
-        </div>
-        <div className="alerts-footer">
-          <button className="alert-btn" onClick={() => {
-            alertsRef.current.forEach(a => a.seen = true);
-            setAlerts([...alertsRef.current]);
-            setNewAlertCount(0);
-          }}>Mark All Read</button>
-          <button className="alert-btn" onClick={() => {
-            const v = viewerRef.current;
-            if (v) {
-              entityStoreRef.current['disaster_alerts']?.forEach(e => v.entities.remove(e));
-            }
-            entityStoreRef.current['disaster_alerts'] = [];
-            Object.keys(alertEntityRef.current).forEach(id => { delete alertEntityRef.current[id]; });
-            alertsRef.current = [];
-            setAlerts([]);
-            setNewAlertCount(0);
-          }}>Clear All</button>
-        </div>
+          </div>
+        ) : (
+          <div className="alerts-list">
+            <CockpitAlertPanel onClose={() => setShowAlertsPanel(false)} onFlyTo={(lat, lon) => { setShowAlertsPanel(false); focusLocation(lat, lon); }} />
+          </div>
+        )}
       </div>
 
       {/* Phase 10: Analytics Panel */}
@@ -6892,13 +7779,58 @@ export default function App() {
         >
           <Monitor size={14} />
         </button>
+        <button
+          className={`btn-icon monitor-btn ${forkMode ? 'active' : ''}`}
+          onClick={() => setForkMode(prev => !prev)}
+          title="Fork Mode — right-click to create parallel realities"
+          style={forkMode ? { borderColor: '#FF8C00', color: '#FF8C00' } : {}}
+        >
+          <span style={{ fontSize: 16 }}>⬡</span>
+        </button>
+        <button
+          className={`btn-icon monitor-btn ${showIntelligencePanel ? 'active' : ''}`}
+          onClick={() => setShowIntelligencePanel(prev => !prev)}
+          title="Pulse — markets, energy, geopolitics, correlations"
+          style={showIntelligencePanel ? { borderColor: '#818cf8', color: '#818cf8' } : {}}
+        >
+          <Eye size={16} />
+        </button>
+        <button
+          className={`btn-icon monitor-btn ${showPrithviPanel ? 'active' : ''}`}
+          onClick={() => setShowPrithviPanel(prev => !prev)}
+          title="Prithvi EO Foundation Model — satellite image analysis"
+          style={showPrithviPanel ? { borderColor: '#a855f7', color: '#a855f7' } : {}}
+        >
+          <Brain size={16} />
+        </button>
+        <button
+          className={`btn-icon monitor-btn ${showSearchPanel ? 'active' : ''}`}
+          onClick={() => setShowSearchPanel(p => !p)}
+          title="Satellite Search — find locations by text, class, or coordinates"
+          style={showSearchPanel ? { borderColor: '#22c55e', color: '#22c55e' } : {}}
+        >
+          <SearchIcon size={16} />
+        </button>
+        <button
+          className={`btn-icon monitor-btn ${showTile38Panel ? 'active' : ''}`}
+          onClick={() => setShowTile38Panel(p => !p)}
+          title="Geofencing — real-time spatial triggers (Tile38)"
+          style={showTile38Panel ? { borderColor: '#fb923c', color: '#fb923c' } : {}}
+        >
+          <Crosshair size={16} />
+        </button>
+        <button
+          className={`btn-icon monitor-btn ${showKgPanel ? 'active' : ''}`}
+          onClick={() => setShowKgPanel(p => !p)}
+          title="EO Knowledge Graph — geospatial entity exploration"
+          style={showKgPanel ? { borderColor: '#a78bfa', color: '#a78bfa' } : {}}
+        >
+          <Network size={16} />
+        </button>
       </div>
 
-      {/* Zoom Controls */}
-      <div className="zoom-controls">
-        <button className="zoom-btn" onClick={zoomIn} aria-label="Zoom in">+</button>
-        <button className="zoom-btn" onClick={zoomOut} aria-label="Zoom out">−</button>
-      </div>
+      {/* Camera Controls — advanced zoom with smooth flyTo */}
+      <CameraControls viewer={viewerRef.current} />
 
       {/* Context Menu */}
       <div ref={contextMenuRef} className={`context-menu ${contextMenu.show ? 'active' : ''}`}
@@ -7003,33 +7935,12 @@ export default function App() {
         </div>
       )}
 
-      {/* Storm Legend */}
-      {showStormLegend && (
-        <div className="legend-panel show glass-panel" style={{ bottom: 190 }}>
-          <div className="heatmap-legend-title">Storm Forecast Cone</div>
-          <div className="legend-row"><div className="legend-color" style={{background:'rgba(168,85,247,0.3)'}}/><span>24h forecast</span></div>
-          <div className="legend-row"><div className="legend-color" style={{background:'rgba(168,85,247,0.2)'}}/><span>48h forecast</span></div>
-          <div className="legend-row"><div className="legend-color" style={{background:'rgba(168,85,247,0.1)'}}/><span>72h forecast</span></div>
-        </div>
-      )}
-
       {/* Smoke Legend */}
       {showSmokeLegend && (
         <div className="heatmap-legend show glass-panel" style={{ bottom: 280 }}>
           <div className="heatmap-legend-title">Wildfire Smoke Dispersion</div>
           <div className="heatmap-gradient" style={{ background: 'linear-gradient(90deg, rgba(120,113,108,0.15), rgba(120,113,108,0.45), rgba(68,64,60,0.75))' }} />
           <div className="heatmap-labels"><span>Light</span><span>Moderate</span><span>Heavy</span></div>
-        </div>
-      )}
-
-      {/* Tsunami Legend */}
-      {showTsunamiLegend && (
-        <div className="legend-panel show glass-panel" style={{ bottom: 370 }}>
-          <div className="heatmap-legend-title">Tsunami Travel Time</div>
-          <div className="legend-row"><div className="legend-color" style={{background:'#22c55e'}}/><span>&lt; 1h</span></div>
-          <div className="legend-row"><div className="legend-color" style={{background:'#f59e0b'}}/><span>1-3h</span></div>
-          <div className="legend-row"><div className="legend-color" style={{background:'#ef4444'}}/><span>3-6h</span></div>
-          <div className="legend-row"><div className="legend-color" style={{background:'#7f1d1d'}}/><span>6h+</span></div>
         </div>
       )}
 
@@ -7046,17 +7957,29 @@ export default function App() {
       {/* Measure Tool Display */}
       {showMeasureTool && measurePoints.length > 0 && (
         <div className="glass-panel" style={{
-          position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)',
+          position: 'fixed', top: 76, left: '50%', transform: 'translateX(-50%)',
           padding: '10px 20px', borderRadius: 10, zIndex: 1000,
-          display: 'flex', alignItems: 'center', gap: 12,
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
         }}>
           <span style={{ color: '#f59e0b', fontWeight: 600 }}>📏 Measurement</span>
-          {measureDistance !== null ? (
-            <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{measureDistance.toFixed(1)} km</span>
-          ) : (
+          {measureDistance !== null && (
+            <span style={{ color: '#e2e8f0', fontFamily: 'monospace', fontSize: 13 }}>
+              {measureDistance >= 1000
+                ? `${(measureDistance / 1000).toFixed(2)} km`
+                : `${measureDistance.toFixed(0)} m`}
+            </span>
+          )}
+          {measureArea !== null && measurePoints.length >= 3 && (
+            <span style={{ color: '#22d3ee', fontFamily: 'monospace', fontSize: 13 }}>
+              Area: {measureArea >= 1
+                ? `${measureArea.toFixed(2)} km²`
+                : `${(measureArea * 1e6).toFixed(2)} m²`}
+            </span>
+          )}
+          {measureDistance === null && measurePoints.length === 1 && (
             <span style={{ color: '#94a3b8' }}>Click a second point on the globe</span>
           )}
-          <button onClick={() => { setMeasurePoints([]); setMeasureDistance(null); setShowMeasureTool(false); }}
+          <button onClick={() => { setMeasurePoints([]); setMeasureDistance(null); setMeasureArea(null); }}
             style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: 6, cursor: 'pointer', fontSize: 11, padding: '4px 10px' }}>
             Clear
           </button>
@@ -7085,32 +8008,19 @@ export default function App() {
         </div>
       )}
 
-      {/* Risk Forecast Layer */}
-      {showRiskForecast && (
-        <div className="heatmap-legend show glass-panel" style={{ bottom: 200, right: 16 }}>
-          <div className="heatmap-legend-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            Risk Forecast
-            <button onClick={() => setShowRiskForecast(false)}
-              style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 12, marginLeft: 8 }}>✕</button>
-          </div>
-          <div className="heatmap-gradient" style={{ background: 'linear-gradient(90deg, #22c55e, #f59e0b, #ef4444)' }} />
-          <div className="heatmap-labels"><span>Low</span><span>Medium</span><span>High</span></div>
-        </div>
-      )}
-
       {/* Cognitive Dashboard */}
       <div className={`alerts-panel glass-panel ${showCognitiveDashboard ? 'open' : ''}`} style={{ width: 380, maxHeight: 'calc(100vh - 92px)' }}>
         <CognitiveDashboard onClose={() => setShowCognitiveDashboard(false)} />
       </div>
 
-      {/* Cockpit Alerts Panel */}
-      <div className={`alerts-panel glass-panel ${showCockpitAlerts ? 'open' : ''}`} style={{ width: 380, maxHeight: 'calc(100vh - 92px)' }}>
-        <CockpitAlertPanel onClose={() => setShowCockpitAlerts(false)} onFlyTo={(lat, lon) => { setShowCockpitAlerts(false); focusLocation(lat, lon); }} />
-      </div>
+      {/* Digital Twin Panel */}
+      {digitalTwinPanel && (
+        <DigitalTwinPanel panel={digitalTwinPanel} onClose={() => setDigitalTwinPanel(null)} />
+      )}
 
       {/* Tool Workbench */}
       <div className={`alerts-panel glass-panel ${showToolWorkbench ? 'open' : ''}`} style={{ width: 480, maxHeight: 'calc(100vh - 92px)' }}>
-        <ToolWorkbench onClose={() => setShowToolWorkbench(false)} />
+        <ToolWorkbench onClose={() => setShowToolWorkbench(false)} bbox={activeBbox} onSurfaceData={handleSurfaceData} onClear={() => { clearStudyArea(); clearInterpSurface(viewerRef.current!); }} />
       </div>
 
       {/* Memory Explorer */}
@@ -7131,6 +8041,36 @@ export default function App() {
         onTerminateFork={handleTerminateFork}
       />
 
+      {/* Intelligence Panel */}
+      <IntelligencePanel
+        open={showIntelligencePanel}
+        onClose={() => setShowIntelligencePanel(false)}
+        onToggleLayer={toggleLayer}
+        onFlyTo={focusLocation}
+      />
+
+      {/* Prithvi EO Foundation Model Panel */}
+      {showPrithviPanel && <PrithviPanel />}
+
+      {/* Satellite Search Panel */}
+      {showSearchPanel && <SatelliteSearchPanel onClose={() => setShowSearchPanel(false)} />}
+
+      {/* Geofencing Panel */}
+      {showTile38Panel && <Tile38Panel onClose={() => setShowTile38Panel(false)} />}
+
+      {/* EO Knowledge Graph Panel */}
+      {showKgPanel && <EOKnowledgeGraphPanel onClose={() => setShowKgPanel(false)} />}
+
+      {/* Command Palette (CMD+K) */}
+      <CommandPalette
+        open={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        onToggleLayer={toggleLayer}
+        onFlyTo={focusLocation}
+        onOpenIntelligencePanel={() => { setShowIntelligencePanel(true); setShowCommandPalette(false); }}
+      />
+
+      <PerformanceMonitor viewer={viewerRef.current} visible={showPerfMonitor} onToggle={() => setShowPerfMonitor(p => !p)} />
       {/* Monitor Panel */}
       {!loading && (
         <div className={`alerts-panel glass-panel ${!monitorCollapsed ? 'open' : ''}`}
@@ -7263,6 +8203,8 @@ export default function App() {
       {showScenarioGallery && (
         <ScenarioGallery
           scenarios={scenarioGalleryScenarios}
+          loading={scenarioGalleryLoading}
+          error={scenarioGalleryError}
           onSelect={(id) => { setSelectedScenarioId(id); setShowScenarioGallery(false); }}
           onCreateNew={() => { setShowScenarioGallery(false); setShowScenarioEditor(true); }}
           onClose={() => setShowScenarioGallery(false)}
@@ -7279,8 +8221,8 @@ export default function App() {
         />
       )}
 
-      {/* Scenario Editor (always mounted to preserve state) */}
-      <div style={{ display: showScenarioEditor ? '' : 'none' }}>
+      {/* Scenario Editor (lazy mounted) */}
+      {showScenarioEditor && (
         <ScenarioEditor
           onClose={() => setShowScenarioEditor(false)}
           onGenerateFromBbox={async (hazardType, bbox, params) => {
@@ -7305,13 +8247,15 @@ export default function App() {
           studyAreas={studyAreas}
           activeStudyAreaId={activeStudyAreaId}
         />
-      </div>
+      )}
 
       {/* Cinematic Director */}
       {showCinematicDirector && (
         <CinematicDirector
           viewer={viewerRef.current}
-          onClose={() => setShowCinematicDirector(false)}
+          onClose={() => { setShowCinematicDirector(false); setCinematicFocusEntity(null); }}
+          layerVersion={cinematicLayerVersion}
+          focusEntity={cinematicFocusEntity}
         />
       )}
 

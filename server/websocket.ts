@@ -222,7 +222,7 @@ export function createWsServer(server: HttpServer): WebSocketServer {
 
         case 'ack':
           if (msg.messageId) {
-            logger.debug({ messageId, userId }, 'ack received');
+            logger.debug({ messageId: msg.messageId, userId }, 'ack received');
           }
           break;
 

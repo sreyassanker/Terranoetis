@@ -26,6 +26,7 @@ export interface StormCell {
   movement: { direction: number; speedKmh: number };
   projectedPath: Array<{ lat: number; lon: number; time: number }>;
   tornadoSignature: boolean;
+  timestamp: number;
 }
 
 export interface StormTrack {
@@ -110,9 +111,10 @@ export class RadarInterpreter {
               intensity: dbz,
               rotationDetected,
               hailProbability: hailProb,
-              movement: { direction: 0, speedKmh: 30 + Math.random() * 40 },
+              movement: { direction: 0, speedKmh: 0 },
               projectedPath: projected,
               tornadoSignature: rotationDetected && dbz > 50,
+              timestamp: scan.timestamp,
             });
           }
         }
@@ -215,14 +217,14 @@ export class RadarInterpreter {
       timestamp: Date.now(),
     });
 
-    causalGraph.addNode(cell.id, 'storm_cell', {
+    causalGraph.addNode(cell.id, 'event', 0.5, {
       intensity: cell.intensity,
       rotationDetected: cell.rotationDetected,
       tornadoSignature: cell.tornadoSignature,
       hailProbability: cell.hailProbability,
-    }, cell.lat, cell.lon);
+    }).catch(() => {});
 
-    memoryManagerV2.addEpisodic('storm_cell', cell, ['weather', 'storm', cell.tornadoSignature ? 'tornado' : 'severe']);
+    memoryManagerV2.store('episodic', { userId: '', query: 'storm_cell', response: JSON.stringify(cell), intentType: 'weather' } as unknown as Record<string, unknown>).catch(() => {});
   }
 
   private async pollRadar(): Promise<void> {
@@ -274,13 +276,8 @@ export class RadarInterpreter {
         }
       }
     }
-    // Convert grid indices to approximate lat/lon
-    const baseLat = 35 + Math.random() * 10;
-    const baseLon = -100 + Math.random() * 20;
-    return {
-      lat: baseLat + (sumI / count) * 0.01,
-      lon: baseLon + (sumJ / count) * 0.01,
-    };
+    if (count === 0) return { lat: 0, lon: 0 };
+    return { lat: sumI / count, lon: sumJ / count };
   }
 
   private estimateHailProbability(dbz: number, _maxDbz: number): number {
@@ -290,15 +287,7 @@ export class RadarInterpreter {
   }
 
   private projectStormPath(lat: number, lon: number): Array<{ lat: number; lon: number; time: number }> {
-    const path: Array<{ lat: number; lon: number; time: number }> = [];
-    for (let h = 1; h <= 6; h++) {
-      path.push({
-        lat: lat + (Math.random() - 0.5) * h * 0.2,
-        lon: lon + (Math.random() - 0.5) * h * 0.2,
-        time: Date.now() + h * 3600000,
-      });
-    }
-    return path;
+    return [];
   }
 
   private cacheRadarScan(scan: RadarScan): void {

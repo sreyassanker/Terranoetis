@@ -85,6 +85,8 @@ export class HumanOverride {
     this.updatePredictionStatus(pred);
 
     this.audit({
+      id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: Date.now(),
       action: 'human_approval',
       predictionId,
       userId,
@@ -110,6 +112,8 @@ export class HumanOverride {
     this.updatePredictionStatus(pred);
 
     this.audit({
+      id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: Date.now(),
       action: 'human_rejection',
       predictionId,
       userId,
@@ -136,6 +140,8 @@ export class HumanOverride {
     this.updatePredictionStatus(pred);
 
     this.audit({
+      id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: Date.now(),
       action: 'auto_override',
       predictionId,
       userId,

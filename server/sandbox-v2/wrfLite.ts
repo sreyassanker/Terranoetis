@@ -30,16 +30,16 @@ export interface WrfOutputs {
 }
 
 const DEFAULT_TERRAIN = Array.from({ length: 60 }, () =>
-  Array.from({ length: 60 }, () => Math.random() * 1000),
+  Array.from({ length: 60 }, () => 0),
 );
 
 const DEFAULT_INPUTS: WrfInputs = {
   initialConditions: {
     temperature: Array.from({ length: 60 }, () =>
-      Array.from({ length: 60 }, () => (Math.random() - 0.5) * 5),
+      Array.from({ length: 60 }, () => 0),
     ),
     pressure: Array.from({ length: 60 }, () =>
-      Array.from({ length: 60 }, () => (Math.random() - 0.5) * 200),
+      Array.from({ length: 60 }, () => 0),
     ),
   },
   boundaryConditions: {},
@@ -86,6 +86,7 @@ function validateWrfInputs(inputs: WrfInputs): void {
 const CP = 1004;
 const RD = 287;
 const F_CORIOLIS = 1e-4;
+const GRAVITY = 9.81;
 
 export function computeGeostrophicWind(
   pressureGradientX: number,

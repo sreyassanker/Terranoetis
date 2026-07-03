@@ -45,14 +45,28 @@ interface RawMetrics {
 // ── SelfReportGenerator ─────────────────────────────────────────
 
 export class SelfReportGenerator {
+  private feedbackManager: FeedbackManager;
+  private perfAnalyzer: PerformanceAnalyzer;
+  private promptEvolver: PromptEvolution;
+  private intentDiscoverer: IntentDiscovery;
+  private archProposer: ArchitectureProposals;
+  private feedbackLearner: FeedbackLearning;
+
   constructor(
-    private feedbackManager: FeedbackManager,
-    private perfAnalyzer: PerformanceAnalyzer,
-    private promptEvolver: PromptEvolution,
-    private intentDiscoverer: IntentDiscovery,
-    private archProposer: ArchitectureProposals,
-    private feedbackLearner: FeedbackLearning,
-  ) {}
+    feedbackManager: FeedbackManager,
+    perfAnalyzer: PerformanceAnalyzer,
+    promptEvolver: PromptEvolution,
+    intentDiscoverer: IntentDiscovery,
+    archProposer: ArchitectureProposals,
+    feedbackLearner: FeedbackLearning,
+  ) {
+    this.feedbackManager = feedbackManager;
+    this.perfAnalyzer = perfAnalyzer;
+    this.promptEvolver = promptEvolver;
+    this.intentDiscoverer = intentDiscoverer;
+    this.archProposer = archProposer;
+    this.feedbackLearner = feedbackLearner;
+  }
 
   async generate(): Promise<SelfReport> {
     const endTime = Date.now();

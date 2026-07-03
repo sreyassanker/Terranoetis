@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from 'express';
 
 export const askSchema = z.object({
   message: z.string().min(1).max(10000),
+  cloud: z.boolean().optional(),
 });
 
 export const sandboxExecuteSchema = z.object({
@@ -10,7 +11,7 @@ export const sandboxExecuteSchema = z.object({
   language: z.enum(['python', 'node', 'bash', 'r']),
   workspaceId: z.string().optional(),
   timeout: z.number().int().min(1000).max(120000).optional(),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   cloud: z.boolean().optional(),
 });
 
@@ -44,6 +45,14 @@ export const feedbackSchema = z.object({
   response: z.string().optional(),
   intentType: z.string().optional(),
   modelTier: z.string().optional(),
+});
+
+export const digitalTwinSchema = z.object({
+  message: z.string().min(1).max(2000),
+  lat: z.number().min(-90).max(90).optional(),
+  lon: z.number().min(-180).max(180).optional(),
+  locationName: z.string().optional(),
+  radiusKm: z.number().min(1).max(200).optional(),
 });
 
 export function validate(schema: z.ZodSchema) {

@@ -1,0 +1,15 @@
+{
+  "name": "idw-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "idw_wasm_bg.wasm",
+    "idw_wasm.js",
+    "idw_wasm.d.ts"
+  ],
+  "main": "idw_wasm.js",
+  "types": "idw_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

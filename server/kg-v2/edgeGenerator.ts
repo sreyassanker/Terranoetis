@@ -152,11 +152,11 @@ export class EdgeGenerator {
   }
 
   private computePointCloudSimilarity(_source: KGEntity, _target: KGEntity): number {
-    return 0.3 + Math.random() * 0.4;
+    return 0;
   }
 
   private computeTemporalRelevance(_source: KGEntity, _target: KGEntity): number {
-    return 0.5 + Math.random() * 0.5;
+    return 0;
   }
 
   private extractMagnitude(entity: KGEntity): number | undefined {

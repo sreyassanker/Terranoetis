@@ -132,7 +132,7 @@ describe('Job queue', () => {
     db.prepare("INSERT INTO job_queue (type, payload, priority) VALUES ('test_type','{\"data\":\"hello\"}',0)").run();
     const row = db.prepare("SELECT * FROM job_queue WHERE type='test_type'").get() as Record<string, unknown>;
     expect(row).toBeTruthy();
-    expect(JSON.parse(row.payload)).toEqual({ data: 'hello' });
+    expect(JSON.parse(row.payload as string)).toEqual({ data: 'hello' });
     expect(row.status).toBe('pending');
   });
 

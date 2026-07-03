@@ -61,7 +61,7 @@ export class CognitiveOrchestrator {
   private toolRegistry = {
     executeTool: async (name: string, args: Record<string, unknown>) => {
       const { dynamicTools } = await import('../tools-v2/toolGenerator');
-      return dynamicTools.execute(name, args);
+      return dynamicTools.execute(name, args) as unknown as { success: boolean; output: unknown };
     },
     listTools: () => {
       return ['earthquakes', 'weather', 'flights', 'sandbox', 'firms', 'eonet', 'tectonic',

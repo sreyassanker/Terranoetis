@@ -29,14 +29,14 @@ export class DiscoveryEngine {
     console.log('[DISCOVERY] Running causal discovery...');
 
     try {
-      const db = (this.kg as unknown as { db: { prepare: (sql: string) => { all: () => unknown[] } } }).db;
+      const db = (this.kg as unknown as { db: { prepare: (sql: string) => { all: () => unknown[]; run: (...args: unknown[]) => void } } }).db;
       const recentEvents = db.prepare(`
         SELECT * FROM episodes
         WHERE created_at > datetime('now', '-7 days')
         ORDER BY created_at DESC
       `).all();
 
-      const candidatePairs = await this.findCandidatePairs(recentEvents);
+      const candidatePairs = await this.findCandidatePairs(recentEvents as Array<Record<string, unknown>>);
 
       for (const pair of candidatePairs) {
         const strength = this.estimateCausalStrength(pair);
@@ -92,13 +92,13 @@ export class DiscoveryEngine {
   }
 
   private async findCandidatePairs(events: Array<Record<string, unknown>>): Promise<Array<{ source: string; target: string; correlation: number; avgLagHours: number; count: number }>> {
-    const eventTypes = [...new Set(events.map(e => e.type || 'unknown'))];
+    const eventTypes = [...new Set(events.map(e => (e.type as string) || 'unknown'))] as string[];
     const data: Record<string, number[]> = {};
 
     for (const type of eventTypes) {
       data[type] = events
-        .filter(e => e.type === type)
-        .map(e => e.magnitude || e.severity || 1);
+        .filter(e => (e.type as string) === type)
+        .map(e => (e.magnitude as number) || (e.severity as number) || 1);
     }
 
     const maxLen = Math.max(...Object.values(data).map(arr => arr.length));
@@ -124,14 +124,14 @@ export class DiscoveryEngine {
 
       if (!response.ok) return [];
 
-      const result = await response.json();
+      const result = await response.json() as Record<string, unknown>;
       const pairs: Array<{ source: string; target: string; correlation: number; avgLagHours: number; count: number }> = [];
 
-      for (const edge of result.edges || []) {
-        if (edge.type === 'directed') {
+      for (const edge of (result.edges as Array<Record<string, unknown>>) || []) {
+        if ((edge.type as string) === 'directed') {
           pairs.push({
-            source: eventTypes[edge.source] || `var_${edge.source}`,
-            target: eventTypes[edge.target] || `var_${edge.target}`,
+            source: eventTypes[edge.source as number] || `var_${edge.source}`,
+            target: eventTypes[edge.target as number] || `var_${edge.target}`,
             correlation: 0.7,
             avgLagHours: 12,
             count: rows.length,

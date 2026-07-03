@@ -31,7 +31,7 @@ export function mockGeminiResponse(overrides?: Partial<{
       })));
     }
     return Promise.reject(new Error(`Unexpected URL: ${url}`));
-  }) as unknown;
+  }) as unknown as (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 }
 
 export function restoreFetch(): void {

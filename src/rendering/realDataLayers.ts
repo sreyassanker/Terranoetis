@@ -173,18 +173,29 @@ export function getDebrisOrbitPositions(d: any, time: Cesium.JulianDate): Cesium
   return points;
 }
 
-// 1. Render Space Debris
+// 1. Render Space Debris — pre-sample orbital positions to avoid per-frame Kepler propagation
 export function addSpaceDebrisEntities(viewer: Cesium.Viewer, debrisList: any[]): Cesium.Entity[] {
   const ents: Cesium.Entity[] = [];
-  
+  const SAMPLE_INTERVAL = 5 * 60; // 5 minutes in seconds
+  const SAMPLE_COUNT = 288; // 24 hours / 5 minutes = 288 samples
+  const now = Cesium.JulianDate.now();
+
   debrisList.forEach((d) => {
-    const positionProperty = new Cesium.CallbackProperty((time) => {
-      if (!time) return undefined;
-      return computeDebrisPosition(d, time);
-    }, false);
+    // Pre-sample positions at 5-minute intervals for 24 hours
+    const sampledPosition = new Cesium.SampledPositionProperty();
+    sampledPosition.setInterpolationOptions({
+      interpolationDegree: 3,
+      interpolationAlgorithm: Cesium.LagrangePolynomialApproximation,
+    });
+
+    for (let step = 0; step <= SAMPLE_COUNT; step++) {
+      const time = Cesium.JulianDate.addSeconds(now, step * SAMPLE_INTERVAL, new Cesium.JulianDate());
+      const position = computeDebrisPosition(d, time);
+      sampledPosition.addSample(time, position);
+    }
 
     const ent = viewer.entities.add({
-      position: positionProperty as any,
+      position: sampledPosition,
       name: d.name,
       point: {
         pixelSize: 4,
@@ -357,18 +368,24 @@ export function addLightningEntities(viewer: Cesium.Viewer, strikes: any[]): Ces
     });
     ents.push(bolt);
 
-    // 2. Draw ground ripple effect that expands and fades
+    // 2. Draw ground ripple effect that expands and fades (1.6s animation)
     const strikeTime = Cesium.JulianDate.fromDate(new Date(strike.time));
+    const baseRippleColor = Cesium.Color.fromCssColorString('#fef08a');
+    const transparentRipple = baseRippleColor.withAlpha(0);
+    const rippleDuration = 1.6;
+    // Pre-compute 8 ripple frames to avoid per-frame Color allocation
+    const RIPPLE_FRAMES = 8;
+    const rippleColors: Cesium.Color[] = new Array(RIPPLE_FRAMES);
+    for (let f = 0; f < RIPPLE_FRAMES; f++) {
+      const opacity = Math.max(0, 0.7 - (f / RIPPLE_FRAMES) * rippleDuration * 0.45);
+      rippleColors[f] = baseRippleColor.withAlpha(opacity);
+    }
+
     const ringRadius = new Cesium.CallbackProperty((time) => {
       if (!time) return 0;
       const elapsed = Math.max(0, Cesium.JulianDate.secondsDifference(time, strikeTime));
-      return 15000 + elapsed * 60000; // expand rapidly
-    }, false);
-
-    const ringOpacity = new Cesium.CallbackProperty((time) => {
-      if (!time) return 0;
-      const elapsed = Math.max(0, Cesium.JulianDate.secondsDifference(time, strikeTime));
-      return Math.max(0, 0.7 - elapsed * 0.45); // fade quickly in 1.5 seconds
+      if (elapsed >= rippleDuration) return 0; // short-circuit after animation ends
+      return 15000 + elapsed * 60000;
     }, false);
 
     const groundRipple = viewer.entities.add({
@@ -378,14 +395,18 @@ export function addLightningEntities(viewer: Cesium.Viewer, strikes: any[]): Ces
         semiMinorAxis: ringRadius,
         material: new Cesium.ColorMaterialProperty(
           new Cesium.CallbackProperty((time) => {
-            return Cesium.Color.fromCssColorString('#fef08a').withAlpha(Number(ringOpacity.getValue(time ?? strikeTime) ?? 0));
+            if (!time) return transparentRipple;
+            const elapsed = Math.max(0, Cesium.JulianDate.secondsDifference(time, strikeTime));
+            if (elapsed >= rippleDuration) return transparentRipple;
+            const frame = Math.min(Math.floor(elapsed / rippleDuration * RIPPLE_FRAMES), RIPPLE_FRAMES - 1);
+            return rippleColors[frame];
           }, false)
         ),
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         show: new Cesium.CallbackProperty((time) => {
           if (!time) return false;
           const elapsed = Cesium.JulianDate.secondsDifference(time, strikeTime);
-          return elapsed >= 0 && elapsed < 1.6;
+          return elapsed >= 0 && elapsed < rippleDuration;
         }, false)
       },
       properties: {

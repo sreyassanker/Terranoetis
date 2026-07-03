@@ -1,20 +1,16 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as Cesium from 'cesium';
 import { authHeaders } from '@/context/AuthContext';
-
-interface Point3D { x: number; y: number; z: number }
-
-interface Scenario {
-  id: string;
-  type: string;
-  name: string;
-  pointCloud: Point3D[];
-  validationScore: number;
-  severity: string;
-  location: { lat: number; lon: number };
-  timestamp: string;
-  metadata?: Record<string, unknown>;
-}
+import { throttledRender } from '@/lib/throttledRender';
+import type { Point3D, Scenario, TimeStep, ShapeData } from './types';
+import { SCENARIO_TYPE_COLORS } from './types';
+import { renderHazardShapes, clearHazardShapes } from './hazardRenderers';
+import FloodWaterSurface from './FloodWaterSurface';
+import EarthquakeVisualizer from './EarthquakeVisualizer';
+import HurricaneVisualizer from './HurricaneVisualizer';
+import WildfireVisualizer from './WildfireVisualizer';
+import VolcanicVisualizer from './VolcanicVisualizer';
+import TimelineControls from './TimelineControls';
 
 interface ScenarioViewerProps {
   viewer: Cesium.Viewer | null;
@@ -26,25 +22,37 @@ interface ScenarioViewerProps {
 
 type ColorMode = 'hazard' | 'intensity' | 'confidence';
 
-const HAZARD_COLORS: Record<string, string> = {
-  earthquake_swarm: '#ef4444',
-  hurricane_landfall: '#f59e0b',
-  wildfire_spread: '#ff6b35',
-  volcanic_eruption: '#d946ef',
-  flood_inundation: '#3b82f6',
-  tsunami_wave: '#06b6d4',
-  data_layer: '#10b981',
-};
+interface StepPrimitives {
+  pointPrims: Cesium.Primitive[];
+  shapeEntities: Cesium.Entity[];
+  floodSurfaceShapes?: ShapeData[];
+  earthquakeShapes?: ShapeData[];
+  hurricaneShapes?: ShapeData[];
+  wildfireShapes?: ShapeData[];
+  volcanicShapes?: ShapeData[];
+}
+
+/** How many steps ahead/behind the current step to pre-create */
+const LAZY_WINDOW = 2;
 
 export default function ScenarioViewer({ viewer, scenario, counterfactualScenario, onClose, onBack }: ScenarioViewerProps) {
   const [colorMode, setColorMode] = useState<ColorMode>('hazard');
-  const [timeProgress, setTimeProgress] = useState(0);
   const [compareMode, setCompareMode] = useState(false);
   const [showInfo, setShowInfo] = useState(true);
+  const [playing, setPlaying] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [speed, setSpeed] = useState(1);
   const primitivesRef = useRef<Cesium.Primitive[]>([]);
   const cfPrimitivesRef = useRef<Cesium.Primitive[]>([]);
   const bboxEntitiesRef = useRef<Cesium.Entity[]>([]);
-  const animFrameRef = useRef<number>(0);
+  const stepPrimsRef = useRef<StepPrimitives[]>([]);
+  const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const timeSeries = scenario?.timeSeries;
+  const steps: TimeStep[] = timeSeries?.steps ?? [];
+  const hasTimeline = steps.length > 1;
+  const duration = timeSeries?.metadata?.duration ?? 0;
+  const dt = timeSeries?.metadata?.dt ?? 1;
 
   const clearPrimitives = useCallback((prims: Cesium.Primitive[]) => {
     if (!viewer) return;
@@ -54,16 +62,86 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
     prims.length = 0;
   }, [viewer]);
 
-  useEffect(() => {
-    if (!viewer || !scenario) return;
-    clearPrimitives(primitivesRef.current);
+  const clearAllStepPrims = useCallback(() => {
+    if (!viewer) return;
+    const ec = viewer.entities;
+    ec.suspendEvents();
+    for (const sp of stepPrimsRef.current) {
+      if (!sp) continue; // sparse array — skip empty slots
+      for (const p of sp.pointPrims) viewer.scene.primitives.remove(p);
+      for (const e of sp.shapeEntities) ec.remove(e);
+    }
+    stepPrimsRef.current = [];
+    ec.resumeEvents();
+  }, [viewer]);
+
+  const showStep = useCallback((stepIdx: number) => {
+    const refs = stepPrimsRef.current;
+    for (let i = 0; i < refs.length; i++) {
+      if (!refs[i]) continue; // sparse array — skip empty slots
+      const show = i === stepIdx;
+      for (const p of refs[i].pointPrims) p.show = show;
+      for (const e of refs[i].shapeEntities) e.show = show;
+    }
+  }, []);
+
+  /** Create a single step's primitives on demand */
+  const ensureStepCreated = useCallback((stepIdx: number) => {
+    if (!viewer || !scenario || !hasTimeline) return;
+    const refs = stepPrimsRef.current;
+    if (refs[stepIdx]) return; // already created
+
+    const step = steps[stepIdx];
+    if (!step) return;
+
     const cv = (scenario.metadata?.colorValues as number[]) || undefined;
     const vmin = (scenario.metadata?.valueMin as number) || undefined;
     const vmax = (scenario.metadata?.valueMax as number) || undefined;
-    const prims = renderPointCloud(viewer, scenario.pointCloud, scenario.location, colorMode, 1, cv, vmin, vmax);
-    primitivesRef.current = prims;
+    const pointPrims = renderPointCloud(viewer, step.points, scenario.location, colorMode, 1, cv, vmin, vmax);
+    const shapeEntities = renderHazardShapes(viewer, step.shapes);
+    const floodSurfaceShapes = step.shapes.filter(s => s.type === 'flood_surface');
+    const earthquakeShapes = step.shapes.filter(s => s.type === 'wavefront' || s.type === 'intensity_zone' || s.type === 'damage_zone' || s.type === 'liquefaction_zone');
+    const hurricaneShapes = step.shapes.filter(s => s.type === 'cylinder' || s.type === 'polyline' || s.type === 'intensity_zone' || (s.type === 'polygon' && s.color === '#fbbf24') || (s.type === 'ring' && (s.waveType === 'eye' || s.waveType === 'surge')));
+    const wildfireShapes = step.shapes.filter(s => s.type === 'polyline' || s.type === 'intensity_zone' || s.type === 'cylinder' || s.type === 'ring' || s.type === 'damage_zone');
+    const volcanicShapes = step.shapes.filter(s => s.type === 'cylinder' || s.type === 'polyline' || s.type === 'intensity_zone' || s.type === 'ring');
+    refs[stepIdx] = { pointPrims, shapeEntities, floodSurfaceShapes, earthquakeShapes, hurricaneShapes, wildfireShapes, volcanicShapes };
 
-    // Draw bbox rectangle on globe for reference
+    // Hide all newly created entities/primitives (showStep will show the right one)
+    for (const p of pointPrims) p.show = false;
+    for (const e of shapeEntities) e.show = false;
+  }, [viewer, scenario, hasTimeline, steps, colorMode]);
+
+  /** Lazily create steps around current position */
+  const ensureWindowCreated = useCallback((centerStep: number) => {
+    if (!hasTimeline) return;
+    const start = Math.max(0, centerStep - LAZY_WINDOW);
+    const end = Math.min(steps.length - 1, centerStep + LAZY_WINDOW);
+    for (let i = start; i <= end; i++) {
+      ensureStepCreated(i);
+    }
+  }, [ensureStepCreated, hasTimeline, steps.length]);
+
+  useEffect(() => {
+    if (!viewer || !scenario) return;
+    clearAllStepPrims();
+    clearPrimitives(primitivesRef.current);
+
+    if (hasTimeline && steps.length > 0) {
+      // Only create the current step ± window (lazy loading)
+      stepPrimsRef.current = new Array(steps.length); // sparse array
+      ensureWindowCreated(currentStep);
+      showStep(currentStep);
+    } else {
+      const cv = (scenario.metadata?.colorValues as number[]) || undefined;
+      const vmin = (scenario.metadata?.valueMin as number) || undefined;
+      const vmax = (scenario.metadata?.valueMax as number) || undefined;
+      const prims = renderPointCloud(viewer, scenario.pointCloud, scenario.location, colorMode, 1, cv, vmin, vmax);
+      primitivesRef.current = prims;
+      if (scenario.timeSeries?.steps?.[0]?.shapes) {
+        renderHazardShapes(viewer, scenario.timeSeries.steps[0].shapes);
+      }
+    }
+
     for (const e of bboxEntitiesRef.current) viewer.entities.remove(e);
     bboxEntitiesRef.current = [];
     const bbox = scenario.metadata?.bbox as { latMin: number; latMax: number; lonMin: number; lonMax: number } | undefined;
@@ -82,11 +160,37 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
     }
 
     return () => {
+      clearAllStepPrims();
       clearPrimitives(primitivesRef.current);
+      clearHazardShapes(viewer);
       if (viewer) for (const e of bboxEntitiesRef.current) viewer.entities.remove(e);
       bboxEntitiesRef.current = [];
     };
-  }, [viewer, scenario, colorMode, clearPrimitives]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewer, scenario, colorMode, clearPrimitives, clearAllStepPrims, showStep, hasTimeline, steps]);
+
+  useEffect(() => {
+    if (!hasTimeline || !playing) {
+      if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null; }
+      return;
+    }
+    const ms = Math.max(50, 500 / speed);
+    tickIntervalRef.current = setInterval(() => {
+      setCurrentStep(prev => {
+        const next = prev + 1;
+        if (next >= steps.length) { setPlaying(false); return prev; }
+        return next;
+      });
+    }, ms);
+    return () => { if (tickIntervalRef.current) clearInterval(tickIntervalRef.current); };
+  }, [playing, speed, hasTimeline, steps.length]);
+
+  useEffect(() => {
+    if (hasTimeline) {
+      ensureWindowCreated(currentStep);
+      showStep(currentStep);
+    }
+  }, [currentStep, hasTimeline, showStep, ensureWindowCreated]);
 
   useEffect(() => {
     if (!viewer || !counterfactualScenario || !compareMode) {
@@ -102,22 +206,6 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
     return () => { clearPrimitives(cfPrimitivesRef.current); };
   }, [viewer, counterfactualScenario, compareMode, colorMode, clearPrimitives]);
 
-  useEffect(() => {
-    if (!viewer || !scenario) return;
-    let cancelled = false;
-    const startTime = Date.now();
-    const duration = 5000;
-    const animate = () => {
-      if (cancelled) return;
-      const elapsed = Date.now() - startTime;
-      const t = Math.min(1, elapsed / duration);
-      setTimeProgress(t);
-      if (t < 1) animFrameRef.current = requestAnimationFrame(animate);
-    };
-    animFrameRef.current = requestAnimationFrame(animate);
-    return () => { cancelled = true; cancelAnimationFrame(animFrameRef.current); };
-  }, [viewer, scenario]);
-
   if (!scenario) {
     return (
       <div className="alerts-panel glass-panel open" style={{ width: 420, maxHeight: 'calc(100vh - 92px)' }}>
@@ -130,10 +218,24 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
     );
   }
 
+  const currentLabel = hasTimeline ? steps[currentStep]?.label : undefined;
+  const currentFloodShapes = stepPrimsRef.current[currentStep]?.floodSurfaceShapes ?? [];
+  const currentEarthquakeShapes = stepPrimsRef.current[currentStep]?.earthquakeShapes ?? [];
+  const currentHurricaneShapes = stepPrimsRef.current[currentStep]?.hurricaneShapes ?? [];
+  const hasWaterSurface = scenario.type === 'flood_inundation' || scenario.type === 'tsunami_wave';
+  const isEarthquake = scenario.type === 'earthquake_swarm';
+  const currentWildfireShapes = stepPrimsRef.current[currentStep]?.wildfireShapes ?? [];
+  const isHurricane = scenario.type === 'hurricane_landfall';
+  const isWildfire = scenario.type === 'wildfire_spread';
+  const isVolcanic = scenario.type === 'volcanic_eruption';
+  const currentVolcanicShapes = stepPrimsRef.current[currentStep]?.volcanicShapes ?? [];
+
+  const progress = hasTimeline ? currentStep / Math.max(1, steps.length - 1) : 1;
+
   return (
     <div className="alerts-panel glass-panel open" style={{ width: 420, maxHeight: 'calc(100vh - 92px)' }}>
       <div className="ai-header">
-        <div className="social-icon-grad" style={{ background: HAZARD_COLORS[scenario.type] || '#60a5fa' }} />
+        <div className="social-icon-grad" style={{ background: SCENARIO_TYPE_COLORS[scenario.type] || '#60a5fa' }} />
         <div className="ai-title">{scenario.name}</div>
         <div style={{ display: 'flex', gap: 4 }}>
           {onBack && <button className="ai-close" onClick={onBack} style={{ fontSize: 11, padding: '2px 10px', position: 'static', background: 'rgba(255,255,255,0.05)' }}>← Back</button>}
@@ -141,8 +243,7 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
         </div>
       </div>
 
-      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 140px)' }}>
-        {/* Controls */}
+      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, overflowY: 'auto', flex: 1, minHeight: 0 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {(['hazard', 'intensity', 'confidence'] as ColorMode[]).map(mode => (
             <button key={mode} className={`glass-button ${colorMode === mode ? 'active' : ''}`}
@@ -162,39 +263,21 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
           </button>
         </div>
 
-        {/* Info Panel */}
         {showInfo && (
           <div className="scenario-info" style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10 }}>
             <div className="info-row"><span className="info-key">Type</span><span className="info-val">{scenario.type.replace(/_/g, ' ')}</span></div>
             <div className="info-row"><span className="info-key">Score</span><span className="info-val">{(scenario.validationScore * 100).toFixed(0)}%</span></div>
             <div className="info-row"><span className="info-key">Severity</span><span className="info-val">{scenario.severity}</span></div>
-            <div className="info-row"><span className="info-key">Location</span><span className="info-val">{scenario.location.lat.toFixed(2)}°, {scenario.location.lon.toFixed(2)}°</span></div>
+            <div className="info-row"><span className="info-key">Location</span><span className="info-val">{scenario.location.lat.toFixed(2)}, {scenario.location.lon.toFixed(2)}</span></div>
             <div className="info-row"><span className="info-key">Points</span><span className="info-val">{scenario.pointCloud.length}</span></div>
-            <div className="info-row"><span className="info-key">Time</span><span className="info-val">{new Date(scenario.timestamp).toLocaleString()}</span></div>
+            {hasTimeline && <div className="info-row"><span className="info-key">Steps</span><span className="info-val">{steps.length} ({duration.toFixed(0)}s total)</span></div>}
             {scenario.metadata?.variableName !== undefined && <div className="info-row"><span className="info-key">Variable</span><span className="info-val">{String(scenario.metadata.variableName)}</span></div>}
-            {scenario.metadata?.valueMin !== undefined && (
-              <div className="info-row"><span className="info-key">Range</span><span className="info-val">{(scenario.metadata.valueMin as number).toFixed(2)} – {(scenario.metadata.valueMax as number).toFixed(2)}</span></div>
-            )}
             {Array.isArray(scenario.metadata?.dataSources) && (
               <div className="info-row"><span className="info-key">Sources</span><span className="info-val" style={{ fontSize: 9 }}>{(scenario.metadata.dataSources as string[]).join(', ')}</span></div>
-            )}
-            {scenario.metadata?.stats !== undefined && (
-              <div style={{ marginTop: 4, fontSize: 9, color: 'var(--text-dim)' }}>
-                <div>Stats: min {(scenario.metadata.stats as Record<string, number>).min}, max {(scenario.metadata.stats as Record<string, number>).max}, avg {(scenario.metadata.stats as Record<string, number>).avg}</div>
-              </div>
             )}
           </div>
         )}
 
-        {/* Time Slider */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 10, color: 'var(--text-dim)', minWidth: 60 }}>Evolution</span>
-          <input type="range" min="0" max="100" value={timeProgress * 100}
-            onChange={e => setTimeProgress(Number(e.target.value) / 100)}
-            style={{ flex: 1, height: 3, accentColor: '#60a5fa' }} />
-        </div>
-
-        {/* Compare Mode */}
         {compareMode && counterfactualScenario && (
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4 }}>
             <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6, color: 'var(--text-dim)' }}>Counterfactual</div>
@@ -203,13 +286,50 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
           </div>
         )}
 
-        {/* Export Buttons */}
         <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
           <button className="glass-button" style={{ fontSize: 10, flex: 1 }} onClick={() => exportScenario(scenario, 'geojson')}>GeoJSON</button>
           <button className="glass-button" style={{ fontSize: 10, flex: 1 }} onClick={() => exportScenario(scenario, 'czml')}>CZML</button>
           <button className="glass-button" style={{ fontSize: 10, flex: 1 }} onClick={() => exportScenario(scenario, 'netcdf')}>NetCDF</button>
         </div>
       </div>
+
+      {hasTimeline && (
+        <TimelineControls
+          playing={playing}
+          onTogglePlay={() => setPlaying(p => !p)}
+          currentTime={currentStep * dt}
+          duration={duration}
+          speed={speed}
+          onSpeedChange={setSpeed}
+          label={currentLabel}
+          stepCount={steps.length}
+          currentStep={currentStep}
+          onStepJump={setCurrentStep}
+          isFloodScenario={hasWaterSurface}
+          maxDepth={steps[currentStep]?.shapes.find(s => s.type === 'flood_surface')?.maxDepth ?? 0}
+          currentProgress={progress}
+        />
+      )}
+
+      {hasWaterSurface && currentFloodShapes.length > 0 && (
+        <FloodWaterSurface viewer={viewer} shapes={currentFloodShapes} progress={progress} />
+      )}
+
+      {isEarthquake && currentEarthquakeShapes.length > 0 && (
+        <EarthquakeVisualizer viewer={viewer} shapes={currentEarthquakeShapes} progress={progress} />
+      )}
+
+      {isHurricane && currentHurricaneShapes.length > 0 && (
+        <HurricaneVisualizer viewer={viewer} shapes={currentHurricaneShapes} progress={progress} />
+      )}
+
+      {isWildfire && currentWildfireShapes.length > 0 && (
+        <WildfireVisualizer viewer={viewer} shapes={currentWildfireShapes} progress={progress} />
+      )}
+
+      {isVolcanic && currentVolcanicShapes.length > 0 && (
+        <VolcanicVisualizer viewer={viewer} shapes={currentVolcanicShapes} progress={progress} />
+      )}
     </div>
   );
 }
@@ -220,14 +340,17 @@ function renderPointCloud(viewer: Cesium.Viewer, cloud: Point3D[], _center: { la
 
   for (let batch = 0; batch < cloud.length; batch += batchSize) {
     const batchCloud = cloud.slice(batch, batch + batchSize);
-    const geom = new Cesium.PointPrimitiveCollection({ modelMatrix: Cesium.Matrix4.IDENTITY });
+    const geom = new Cesium.PointPrimitiveCollection({
+      modelMatrix: Cesium.Matrix4.IDENTITY,
+      blendOption: Cesium.BlendOption.OPAQUE, // 2x perf boost for opaque points
+    });
 
     for (let i = 0; i < batchCloud.length; i++) {
       const p = batchCloud[i];
       const r = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
       const lat = Math.asin(clamp(p.z / r, -1, 1)) * (180 / Math.PI);
       const lon = Math.atan2(p.y, p.x) * (180 / Math.PI);
-      const height = 5000 + (1 - r) * 10000;
+      const height = (1 - r) * 10000000;
 
       let color: [number, number, number];
       if (colorValues && valueMin !== undefined && valueMax !== undefined) {
@@ -247,6 +370,7 @@ function renderPointCloud(viewer: Cesium.Viewer, cloud: Point3D[], _center: { la
         position: Cesium.Cartesian3.fromDegrees(lon, lat, height) as unknown as Cesium.Cartesian3,
         color: Cesium.Color.fromBytes(...color, Math.round(opacity * 255)),
         pixelSize: 3,
+        heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
       });
     }
     viewer.scene.primitives.add(geom);
@@ -263,11 +387,11 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   const x = c * (1 - Math.abs((h * 6) % 2 - 1));
   const m = l - c / 2;
   let r = 0, g = 0, b = 0;
-  if (h < 1/6) { r = c; g = x; }
-  else if (h < 2/6) { r = x; g = c; }
-  else if (h < 3/6) { g = c; b = x; }
-  else if (h < 4/6) { g = x; b = c; }
-  else if (h < 5/6) { r = x; b = c; }
+  if (h < 1 / 6) { r = c; g = x; }
+  else if (h < 2 / 6) { r = x; g = c; }
+  else if (h < 3 / 6) { g = c; b = x; }
+  else if (h < 4 / 6) { g = x; b = c; }
+  else if (h < 5 / 6) { r = x; b = c; }
   else { r = c; b = x; }
   return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
 }

@@ -16,7 +16,7 @@ interface DAGPlan {
   synthesisPrompt: string;
 }
 
-interface AgentResult {
+export interface AgentResult {
   output: string;
   commands?: Array<{ action: string; [key: string]: unknown }>;
 }
@@ -93,7 +93,7 @@ const coderSchema = z.object({
 
 const analystSchema = z.object({
   findings: z.array(z.string()).min(1),
-  metrics: z.record(z.number()).optional(),
+  metrics: z.record(z.string(), z.number()).optional(),
   summary: z.string().min(1),
   confidence: z.number().min(0).max(1).optional(),
 });
@@ -162,7 +162,7 @@ export class AgentOrchestrator {
 
   async orchestrate(
     query: string,
-    context?: { location?: { lat: number; lon: number; label?: string }; intent?: string; layers?: string[] },
+    context?: { location?: { lat: number; lon: number; label?: string }; intent?: string; layers?: string[]; cloud?: boolean },
   ): Promise<AgentResult> {
     const plan = await this.plan(query);
 

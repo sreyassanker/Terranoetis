@@ -32,7 +32,8 @@ describe('Integration: full auth flow', () => {
     app.use(express.json());
     app.post('/api/auth/login', login);
     app.get('/api/protected', (req: Request, res: Response, next: NextFunction) => authGuard(req, res, next), (req: Request, res: Response) => {
-      res.json({ ok: true, userId: req.userId });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      res.json({ ok: true, userId: (req as any).userId });
     });
 
     server = http.createServer(app);
@@ -108,8 +109,8 @@ describe('Integration: health endpoints', () => {
     const resp = await fetch('http://localhost:3003/api/health');
     const data = await resp.json() as Record<string, unknown>;
     expect(data.status).toBe('ok');
-    expect(data.checks.db).toBeTruthy();
-    expect(data.checks.memory).toBeTruthy();
+    expect((data.checks as Record<string, unknown>).db).toBeTruthy();
+    expect((data.checks as Record<string, unknown>).memory).toBeTruthy();
     expect(data.version).toBeTruthy();
   });
 

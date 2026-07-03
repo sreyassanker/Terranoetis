@@ -145,7 +145,7 @@ export class SentimentAnalyzer {
 
     if (signal.confidence > 0.5) {
       pubsub.publish('sentiment:disaster_signal', signal);
-      memoryManagerV2.addEpisodic('disaster_signal', signal, ['social', signal.type, 'disaster']);
+      memoryManagerV2.store('episodic', { userId: '', query: 'disaster_signal', response: JSON.stringify(signal), intentType: signal.type } as unknown as Record<string, unknown>).catch(() => {});
     }
 
     return signal;
@@ -184,37 +184,8 @@ export class SentimentAnalyzer {
   /** Poll social sources for disaster-related posts */
   private async pollSocial(): Promise<void> {
     // In production: stream from Twitter API, Reddit API, RSS feeds
-    // For now: generate simulated social reports from known disaster areas
-    const db = getDb();
-
-    // Check recent sentinel events for social corroboration
-    const sentinelAnomalies = db.prepare(
-      "SELECT * FROM sentinel_anomalies WHERE created_at > datetime('now', '-2 hour')",
-    ).all() as Array<Record<string, unknown>>;
-
-    if (sentinelAnomalies.length > 0) {
-      const signals: DisasterSignal[] = [];
-      for (const anomaly of sentinelAnomalies) {
-        const sig = this.createDisasterSignal({
-          id: `sim_${anomaly.anomaly_id}`,
-          source: 'twitter',
-          text: `Reports of ${anomaly.type} near ${(anomaly as Record<string, unknown>).description || 'this area'}`,
-          lat: anomaly.lat as number,
-          lon: anomaly.lon as number,
-          timestamp: Date.now(),
-          sentiment: -0.5,
-          urgency: 0.7,
-          keywords: [anomaly.type as string, 'reported'],
-          locations: [],
-          isRumor: false,
-          rumorConfidence: 0,
-        });
-        if (sig) signals.push(sig);
-      }
-      if (signals.length > 0) {
-        pubsub.publish('sentiment:batch', signals);
-      }
-    }
+    // No real social media API configured — return empty
+    return;
   }
 
   private classifyDisasterType(keywords: string[]): string {

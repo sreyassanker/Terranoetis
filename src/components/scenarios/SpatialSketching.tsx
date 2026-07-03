@@ -25,9 +25,14 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario }
   const [activePrompt, setActivePrompt] = useState(SCENARIO_PROMPTS[0]);
   const [isDrawing, setIsDrawing] = useState(false);
   const drawnPrimitivesRef = useRef<Cesium.Entity[]>([]);
+  const handlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
 
   const clearDrawings = useCallback(() => {
     if (!viewer) return;
+    if (handlerRef.current && !handlerRef.current.isDestroyed()) {
+      handlerRef.current.destroy();
+    }
+    handlerRef.current = null;
     for (const ent of drawnPrimitivesRef.current) {
       viewer.entities.remove(ent);
     }
@@ -47,6 +52,7 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario }
     setBoundingBox(null);
 
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    handlerRef.current = handler;
 
     handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
       const cartesian = viewer.camera.pickEllipsoid(click.position);
@@ -69,7 +75,7 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario }
           setBoundingBox(bb);
           drawRectangle(viewer, bb, drawnPrimitivesRef.current);
           setIsDrawing(false);
-          handler.destroy();
+          if (!handler.isDestroyed()) handler.destroy();
         } else if (mode === 'circle' && newPoints.length >= 2) {
           const center = newPoints[0];
           const edge = newPoints[1];
@@ -83,7 +89,7 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario }
           setBoundingBox(bb);
           drawCircle(viewer, center, radius, drawnPrimitivesRef.current);
           setIsDrawing(false);
-          handler.destroy();
+          if (!handler.isDestroyed()) handler.destroy();
         }
         return newPoints;
       });
@@ -101,7 +107,7 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario }
           setBoundingBox(bb);
           drawPolygon(viewer, points, drawnPrimitivesRef.current);
           setIsDrawing(false);
-          handler.destroy();
+          if (!handler.isDestroyed()) handler.destroy();
         }
       }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
     }

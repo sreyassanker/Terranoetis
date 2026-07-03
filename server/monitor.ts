@@ -198,12 +198,13 @@ export class MonitorManager {
     if (!endpoint) return false;
     const resp = await fetch(`${this.apiOrigin}${endpoint}`, { signal: AbortSignal.timeout(10000) });
     if (!resp.ok) return false;
-    const data = await resp.json();
+    const data = await resp.json() as Record<string, unknown>;
 
-    let features = data.features || data.events || [];
+    let features = (data.features || data.events || []) as Array<Record<string, unknown>>;
     if (rule.location) {
       features = features.filter((f: Record<string, unknown>) => {
-        const coords = f.geometry?.coordinates || f.geometry?.[0]?.coordinates || [];
+        const geo = f.geometry as Record<string, unknown> | undefined;
+        const coords = (geo?.coordinates || (geo?.[0] as Record<string, unknown>)?.coordinates || []) as number[];
         const lat = coords[1];
         const lon = coords[0];
         if (!isFinite(lat) || !isFinite(lon)) return false;
@@ -215,7 +216,7 @@ export class MonitorManager {
     for (const f of features) {
       const val = this.resolveField(f, rule.condition.field);
       if (val === undefined || val === null) continue;
-      const numVal = typeof val === 'number' ? val : parseFloat(val);
+      const numVal = typeof val === 'number' ? val : parseFloat(val as string);
       if (!isFinite(numVal)) continue;
       if (this.matches(numVal, rule.condition.operator, rule.condition.value)) return true;
     }
@@ -435,18 +436,21 @@ export class AmbientEventDetector {
     try {
       const resp = await fetch(`${this.apiOrigin}/api/earthquakes`, { signal: AbortSignal.timeout(10000) });
       if (!resp.ok) return;
-      const data = await resp.json();
-      for (const f of (data.features || [])) {
-        const mag = f.properties?.mag;
-        const time = f.properties?.time;
+      const data = await resp.json() as Record<string, unknown>;
+      const features = (data.features || []) as Array<Record<string, unknown>>;
+      for (const f of features) {
+        const props = f.properties as Record<string, unknown> || {};
+        const mag = props.mag as number;
+        const time = props.time as number;
         if (mag >= 7 && time > (this.lastEventTimes.majorQuake || 0)) {
           this.lastEventTimes.majorQuake = time;
-          const coords = f.geometry?.coordinates || [];
+          const geo = f.geometry as Record<string, unknown> || {};
+          const coords = (geo.coordinates || []) as number[];
           this.emit({
             type: 'major_earthquake',
             severity: 'critical',
             title: `M${mag} Earthquake`,
-            description: f.properties?.place || `Magnitude ${mag} earthquake detected`,
+            description: (props.place as string) || `Magnitude ${mag} earthquake detected`,
             lat: coords[1], lon: coords[0],
           });
         }
@@ -458,20 +462,20 @@ export class AmbientEventDetector {
     try {
       const resp = await fetch(`${this.apiOrigin}/api/weather/nhc`, { signal: AbortSignal.timeout(10000) });
       if (!resp.ok) return;
-      const data = await resp.json();
-      const storms = Array.isArray(data) ? data : data.storms || [];
+      const data = await resp.json() as Record<string, unknown>;
+      const storms: Array<Record<string, unknown>> = Array.isArray(data) ? data as Array<Record<string, unknown>> : (data.storms || []) as Array<Record<string, unknown>>;
       for (const s of storms) {
-        const name = s.name || s.id || 'Unknown';
+        const name = (s.name || s.id || 'Unknown') as string;
         const key = `storm_${name}`;
-        const wind = s.maxWind || s.wind || 0;
-        if (wind > 60 && (!this.lastEventTimes[key] || s.timestamp > this.lastEventTimes[key])) {
-          this.lastEventTimes[key] = s.timestamp || Date.now();
+        const wind = (s.maxWind || s.wind || 0) as number;
+        if (wind > 60 && (!this.lastEventTimes[key] || (s.timestamp as number) > this.lastEventTimes[key])) {
+          this.lastEventTimes[key] = (s.timestamp as number) || Date.now();
           this.emit({
             type: 'storm_formation',
             severity: wind > 100 ? 'critical' : 'warning',
             title: `${name} (${wind}kt)`,
             description: `${name} is active with ${wind}kt winds. Track available on globe.`,
-            lat: s.lat, lon: s.lon,
+            lat: s.lat as number, lon: s.lon as number,
           });
         }
       }
@@ -482,8 +486,8 @@ export class AmbientEventDetector {
     try {
       const resp = await fetch(`${this.apiOrigin}/api/firms`, { signal: AbortSignal.timeout(10000) });
       if (!resp.ok) return;
-      const data = await resp.json();
-      const fires = Array.isArray(data) ? data : data.fires || [];
+      const data = await resp.json() as Record<string, unknown>;
+      const fires: Array<Record<string, unknown>> = Array.isArray(data) ? data as Array<Record<string, unknown>> : (data.fires || []) as Array<Record<string, unknown>>;
       for (const f of (fires.slice(0, 5) as Array<Record<string, unknown>>)) {
         const frp = typeof f.frp === 'number' ? f.frp : parseFloat(String(f.frp)) || 0;
         const key = `fire_${f.latitude}_${f.longitude}`;
@@ -522,23 +526,29 @@ export async function getLocationContext(
     fetch(`${apiOrigin}/api/weather/alerts`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
   ]);
 
-  const quakes = quakesResp?.ok ? await quakesResp.json().catch(() => ({ features: [] })) : { features: [] };
-  const weather = weatherResp?.ok ? await weatherResp.json().catch(() => null) : null;
-  const alerts = alertsResp?.ok ? await alertsResp.json().catch(() => ({ features: [] })) : { features: [] };
+  const quakes = quakesResp?.ok ? await quakesResp.json().catch(() => ({ features: [] })) as Record<string, unknown> : { features: [] };
+  const weather = weatherResp?.ok ? await weatherResp.json().catch(() => null) as Record<string, unknown> | null : null;
+  const alerts = alertsResp?.ok ? await alertsResp.json().catch(() => ({ features: [] })) as Record<string, unknown> : { features: [] };
 
-  const nearbyQuakes = (quakes.features || []).filter((f: Record<string, unknown>) => {
-    const coords = f.geometry?.coordinates || [];
+  const quakesFeatures = (quakes.features || []) as Array<Record<string, unknown>>;
+  const alertsFeatures = (alerts.features || []) as Array<Record<string, unknown>>;
+
+  const nearbyQuakes = quakesFeatures.filter((f: Record<string, unknown>) => {
+    const geo = f.geometry as Record<string, unknown> | undefined;
+    const coords = (geo?.coordinates || []) as number[];
     return haversineKm(lat, lon, coords[1], coords[0]) < 500;
   });
 
   const maxMag = nearbyQuakes.length > 0
-    ? Math.max(...nearbyQuakes.map((f: Record<string, unknown>) => f.properties?.mag || 0))
+    ? Math.max(...nearbyQuakes.map((f: Record<string, unknown>) => ((f.properties as Record<string, unknown>)?.mag as number) || 0))
     : 0;
 
-  const nearbyAlerts = (alerts.features || []).filter((f: Record<string, unknown>) => {
-    const coords = f.geometry?.coordinates || f.geometry?.coordinates?.[0];
+  const nearbyAlerts = alertsFeatures.filter((f: Record<string, unknown>) => {
+    const geo = f.geometry as Record<string, unknown> | undefined;
+    const coords = (geo?.coordinates || (geo?.[0] as Record<string, unknown>)?.coordinates || []) as number[] | number[][];
     if (!coords) return false;
-    const [alLon, alLat] = Array.isArray(coords[0]) ? coords[0] : coords;
+    const first = Array.isArray(coords[0]) ? coords[0] as number[] : coords as number[];
+    const [alLon, alLat] = first;
     return haversineKm(lat, lon, alLat, alLon) < 300;
   });
 
@@ -548,19 +558,25 @@ export async function getLocationContext(
     location: { lat, lon, label },
     earthquakeRisk: maxMag > 0 ? `M${maxMag.toFixed(1)} within 500km` : 'No recent seismic activity nearby',
     nearbyEvents: [
-      ...nearbyQuakes.slice(0, 3).map((f: Record<string, unknown>) => ({
-        title: `M${f.properties?.mag} — ${f.properties?.place || 'Unknown'}`,
-        category: 'Earthquake',
-        distance: 'Within 500km',
-      })),
-      ...nearbyAlerts.slice(0, 3).map((f: Record<string, unknown>) => ({
-        title: f.properties?.event || f.properties?.headline || 'Weather alert',
-        category: 'Weather',
-        distance: 'Within 300km',
-      })),
+      ...nearbyQuakes.slice(0, 3).map((f: Record<string, unknown>) => {
+        const props = f.properties as Record<string, unknown> || {};
+        return {
+          title: `M${props.mag || 0} — ${props.place || 'Unknown'}`,
+          category: 'Earthquake',
+          distance: 'Within 500km',
+        };
+      }),
+      ...nearbyAlerts.slice(0, 3).map((f: Record<string, unknown>) => {
+        const props = f.properties as Record<string, unknown> || {};
+        return {
+          title: (props.event || props.headline || 'Weather alert') as string,
+          category: 'Weather',
+          distance: 'Within 300km',
+        };
+      }),
     ],
-    weather: weather?.current?.temperature !== undefined
-      ? `${weather.current.temperature}°C, ${weather.current.windspeed || '?'} km/h wind`
+    weather: (weather as Record<string, unknown>)?.current !== undefined
+      ? `${((weather as Record<string, unknown>).current as Record<string, unknown>).temperature}°C, ${((weather as Record<string, unknown>).current as Record<string, unknown>).windspeed || '?'} km/h wind`
       : 'Weather data unavailable',
     population: 'Population data available via globe interaction',
     timestamp: Date.now(),

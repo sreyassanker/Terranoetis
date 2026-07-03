@@ -310,7 +310,14 @@ export function addClimateIndicesEntities(
   return ents;
 }
 
+const DOT_ICON_CACHE = new Map<string, HTMLCanvasElement>();
+const DOT_ICON_CACHE_MAX = 500;
+
 function createColoredDot(color: string, size: number): HTMLCanvasElement {
+  if (DOT_ICON_CACHE.size > DOT_ICON_CACHE_MAX) DOT_ICON_CACHE.clear();
+  const key = `${color}_${size}`;
+  const cached = DOT_ICON_CACHE.get(key);
+  if (cached) return cached;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -328,10 +335,13 @@ function createColoredDot(color: string, size: number): HTMLCanvasElement {
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fillStyle = Cesium.Color.fromCssColorString(color).withAlpha(0.9).toCssColorString();
   ctx.fill();
+  DOT_ICON_CACHE.set(key, canvas);
   return canvas;
 }
 
+let cachedRadarIcon: HTMLCanvasElement | null = null;
 function createRadarIcon(): HTMLCanvasElement {
+  if (cachedRadarIcon) return cachedRadarIcon;
   const canvas = document.createElement('canvas');
   canvas.width = 18;
   canvas.height = 18;
@@ -353,5 +363,6 @@ function createRadarIcon(): HTMLCanvasElement {
   ctx.arc(9, 9, 3, 0, Math.PI * 2);
   ctx.fillStyle = '#22d3ee';
   ctx.fill();
+  cachedRadarIcon = canvas;
   return canvas;
 }

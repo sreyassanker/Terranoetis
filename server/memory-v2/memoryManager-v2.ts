@@ -63,7 +63,7 @@ export class MemoryManagerV2 {
       return;
     }
     if (tier === 'episodic' && this.episodicMemory) {
-      await this.episodicMemory.add(params as unknown as Record<string, unknown>);
+      await this.episodicMemory.add(params as unknown as Parameters<typeof this.episodicMemory.add>[0]);
       return;
     }
     // Full interaction store (legacy callers that don't pass a tier)
@@ -276,7 +276,8 @@ export class MemoryManagerV2 {
       episodic: { active: true, itemCount: this.episodicMemory.count() },
       semantic: { active: true, itemCount: 0 },
       procedural: { active: true, itemCount: 0 },
-      predictive: { active: true, itemCount: this.predictiveMemory.getActiveModels().length },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      predictive: { active: true, itemCount: (this.predictiveMemory as any).getActiveModels().length },
     };
   }
 
