@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type * as Cesium from 'cesium';
 
 interface PerformanceMonitorProps {
@@ -23,19 +23,11 @@ interface Stats {
 export default function PerformanceMonitor({ viewer, visible, onToggle }: PerformanceMonitorProps) {
   const [stats, setStats] = useState<Stats>({ fps: 0, frameTime: 0, entityCount: 0, primitiveCount: 0, memoryMB: 0, jsHeapUsed: '—' });
   const frameTimesRef = useRef<number[]>([]);
-  const lastFrameRef = useRef(performance.now());
+  const lastFrameRef = useRef(0);
   const rafRef = useRef<number>(0);
   const updateRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const tick = useCallback(() => {
-    const now = performance.now();
-    const dt = now - lastFrameRef.current;
-    lastFrameRef.current = now;
-    frameTimesRef.current.push(dt);
-    // Keep last 60 frame times for averaging
-    if (frameTimesRef.current.length > 60) frameTimesRef.current.shift();
-    rafRef.current = requestAnimationFrame(tick);
-  }, []);
+  const tickRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!visible) {
@@ -44,9 +36,20 @@ export default function PerformanceMonitor({ viewer, visible, onToggle }: Perfor
       return;
     }
 
+    // Define tick inside useEffect to avoid ref assignment during render
+    tickRef.current = () => {
+      const now = performance.now();
+      const dt = now - lastFrameRef.current;
+      lastFrameRef.current = now;
+      frameTimesRef.current.push(dt);
+      // Keep last 60 frame times for averaging
+      if (frameTimesRef.current.length > 60) frameTimesRef.current.shift();
+      rafRef.current = requestAnimationFrame(() => tickRef.current());
+    };
+
     lastFrameRef.current = performance.now();
     frameTimesRef.current = [];
-    rafRef.current = requestAnimationFrame(tick);
+    rafRef.current = requestAnimationFrame(() => tickRef.current());
 
     updateRef.current = setInterval(() => {
       const frames = frameTimesRef.current;
@@ -78,7 +81,7 @@ export default function PerformanceMonitor({ viewer, visible, onToggle }: Perfor
       cancelAnimationFrame(rafRef.current);
       if (updateRef.current) clearInterval(updateRef.current);
     };
-  }, [visible, viewer, tick]);
+  }, [visible, viewer]);
 
   // Global keyboard shortcut: Ctrl+Shift+P
   useEffect(() => {

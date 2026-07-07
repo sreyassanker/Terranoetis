@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { Eye } from 'lucide-react';
 import * as Cesium from 'cesium';
 import { authHeaders } from '@/context/AuthContext';
-import { throttledRender } from '@/lib/throttledRender';
 import type { Point3D, Scenario, TimeStep, ShapeData } from './types';
 import { SCENARIO_TYPE_COLORS } from './types';
+import Panel from '@/components/ui/Panel';
 import { renderHazardShapes, clearHazardShapes } from './hazardRenderers';
 import FloodWaterSurface from './FloodWaterSurface';
 import EarthquakeVisualizer from './EarthquakeVisualizer';
@@ -49,7 +50,7 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
   const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const timeSeries = scenario?.timeSeries;
-  const steps: TimeStep[] = timeSeries?.steps ?? [];
+  const steps: TimeStep[] = useMemo(() => timeSeries?.steps ?? [], [timeSeries]);
   const hasTimeline = steps.length > 1;
   const duration = timeSeries?.metadata?.duration ?? 0;
   const dt = timeSeries?.metadata?.dt ?? 1;
@@ -98,12 +99,35 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
     const vmin = (scenario.metadata?.valueMin as number) || undefined;
     const vmax = (scenario.metadata?.valueMax as number) || undefined;
     const pointPrims = renderPointCloud(viewer, step.points, scenario.location, colorMode, 1, cv, vmin, vmax);
-    const shapeEntities = renderHazardShapes(viewer, step.shapes);
+
+    // Extract type-specific shape arrays for specialized visualizers
     const floodSurfaceShapes = step.shapes.filter(s => s.type === 'flood_surface');
-    const earthquakeShapes = step.shapes.filter(s => s.type === 'wavefront' || s.type === 'intensity_zone' || s.type === 'damage_zone' || s.type === 'liquefaction_zone');
-    const hurricaneShapes = step.shapes.filter(s => s.type === 'cylinder' || s.type === 'polyline' || s.type === 'intensity_zone' || (s.type === 'polygon' && s.color === '#fbbf24') || (s.type === 'ring' && (s.waveType === 'eye' || s.waveType === 'surge')));
+    const earthquakeShapes = step.shapes.filter(s => s.type === 'wavefront' || s.type === 'intensity_zone' || s.type === 'damage_zone' || s.type === 'liquefaction_zone' || s.type === 'ring');
+    const hurricaneShapes = step.shapes.filter(s => s.type === 'cylinder' || s.type === 'polyline' || s.type === 'intensity_zone' || s.type === 'ring' || s.type === 'polygon');
     const wildfireShapes = step.shapes.filter(s => s.type === 'polyline' || s.type === 'intensity_zone' || s.type === 'cylinder' || s.type === 'ring' || s.type === 'damage_zone');
     const volcanicShapes = step.shapes.filter(s => s.type === 'cylinder' || s.type === 'polyline' || s.type === 'intensity_zone' || s.type === 'ring');
+
+    // Static type sets per scenario — prevents double-rendering (static generic + animated specialized)
+    const specializedTypes = new Set<string>();
+    if (scenario.type === 'earthquake_swarm') {
+      for (const t of ['wavefront', 'intensity_zone', 'damage_zone', 'liquefaction_zone', 'ring']) specializedTypes.add(t);
+    } else if (scenario.type === 'hurricane_landfall') {
+      for (const t of ['cylinder', 'polyline', 'intensity_zone', 'ring', 'polygon']) specializedTypes.add(t);
+    } else if (scenario.type === 'wildfire_spread') {
+      for (const t of ['polyline', 'intensity_zone', 'cylinder', 'ring', 'damage_zone']) specializedTypes.add(t);
+    } else if (scenario.type === 'volcanic_eruption') {
+      for (const t of ['cylinder', 'polyline', 'intensity_zone', 'ring']) specializedTypes.add(t);
+    } else if (scenario.type === 'flood_inundation' || scenario.type === 'tsunami_wave') {
+      specializedTypes.add('flood_surface');
+    }
+
+    // Only pass shapes to generic renderer that are NOT handled by specialized visualizers
+    // This prevents double-rendering (static generic + animated specialized)
+    const genericShapes = specializedTypes.size > 0
+      ? step.shapes.filter(s => !specializedTypes.has(s.type))
+      : step.shapes;
+    const shapeEntities = renderHazardShapes(viewer, genericShapes);
+
     refs[stepIdx] = { pointPrims, shapeEntities, floodSurfaceShapes, earthquakeShapes, hurricaneShapes, wildfireShapes, volcanicShapes };
 
     // Hide all newly created entities/primitives (showStep will show the right one)
@@ -208,12 +232,12 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
 
   if (!scenario) {
     return (
-      <div className="alerts-panel glass-panel open" style={{ width: 420, maxHeight: 'calc(100vh - 92px)' }}>
-        <div className="scenario-viewer-empty">
-          <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-dim)' }}>
+      <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 420 }}>
+        <Panel title="SCENARIO VIEWER" icon={<Eye size={14} />} accentColor="#3b82f6" iconColor="#60a5fa" titleColor="#93c5fd" onClose={onClose} style={{ maxHeight: 'calc(100vh - 92px)' }}>
+          <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 11 }}>
             No scenario selected
           </div>
-        </div>
+        </Panel>
       </div>
     );
   }
@@ -232,16 +256,13 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
 
   const progress = hasTimeline ? currentStep / Math.max(1, steps.length - 1) : 1;
 
+  const headerExtra = onBack ? (
+    <button onClick={onBack} style={{ fontSize: 10, padding: '2px 8px', background: 'rgba(255,255,255,0.06)', border: 'none', borderRadius: 4, color: '#94a3b8', cursor: 'pointer' }}>← Back</button>
+  ) : undefined;
+
   return (
-    <div className="alerts-panel glass-panel open" style={{ width: 420, maxHeight: 'calc(100vh - 92px)' }}>
-      <div className="ai-header">
-        <div className="social-icon-grad" style={{ background: SCENARIO_TYPE_COLORS[scenario.type] || '#60a5fa' }} />
-        <div className="ai-title">{scenario.name}</div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {onBack && <button className="ai-close" onClick={onBack} style={{ fontSize: 11, padding: '2px 10px', position: 'static', background: 'rgba(255,255,255,0.05)' }}>← Back</button>}
-          <button className="ai-close" onClick={onClose}>✕</button>
-        </div>
-      </div>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 420 }}>
+      <Panel title={scenario.name.toUpperCase()} icon={<Eye size={14} />} accentColor={SCENARIO_TYPE_COLORS[scenario.type] || '#3b82f6'} iconColor="#60a5fa" titleColor="#93c5fd" onClose={onClose} headerExtra={headerExtra} style={{ maxHeight: 'calc(100vh - 92px)' }}>
 
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, overflowY: 'auto', flex: 1, minHeight: 0 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -330,6 +351,7 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
       {isVolcanic && currentVolcanicShapes.length > 0 && (
         <VolcanicVisualizer viewer={viewer} shapes={currentVolcanicShapes} progress={progress} />
       )}
+    </Panel>
     </div>
   );
 }

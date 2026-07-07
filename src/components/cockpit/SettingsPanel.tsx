@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { Settings, Brain, Bell, Key, Shield, Zap, Trash2 } from 'lucide-react';
+import Panel from '@/components/ui/Panel';
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -22,19 +24,22 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [rememberAnalytics, setRememberAnalytics] = useState(true);
   const [autoForgetDays, setAutoForgetDays] = useState(90);
 
-  const tabLabels: Record<string, string> = {
-    cognitive: '🧠 Cognitive',
-    alerts: '🔔 Alerts',
-    providers: '🔑 Providers',
-    privacy: '🛡️ Privacy',
+  const tabLabels: Record<string, React.ReactNode> = {
+    cognitive: <><Brain size={11} style={{display:'inline',marginRight:3}} /> Cognitive</>,
+    alerts: <><Bell size={11} style={{display:'inline',marginRight:3}} /> Alerts</>,
+    providers: <><Key size={11} style={{display:'inline',marginRight:3}} /> Providers</>,
+    privacy: <><Shield size={11} style={{display:'inline',marginRight:3}} /> Privacy</>,
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <div className="panel-header">
-        <span style={{ fontWeight: 700, fontSize: 13 }}>⚙️ Settings</span>
-        <button className="ai-close" onClick={onClose}>✕</button>
-      </div>
+    <Panel
+      title="SETTINGS"
+      icon={<Settings size={16} />}
+      accentColor="#64748b"
+      iconColor="#94a3b8"
+      titleColor="#cbd5e1"
+      onClose={onClose}
+    >
 
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '4px 6px', gap: 2 }}>
         {(['cognitive', 'alerts', 'providers', 'privacy'] as const).map(tab => (
@@ -57,8 +62,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>System 1 vs System 2 Bias</div>
               <div style={{ marginBottom: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>
-                  <span style={{ color: 'var(--accent)' }}>⚡ Fast & Intuitive</span>
-                  <span style={{ color: 'var(--purple)' }}>🧠 Deep & Analytical</span>
+                  <span style={{ color: 'var(--accent)' }}><Zap size={11} style={{display:'inline',marginRight:3}} /> Fast & Intuitive</span>
+                  <span style={{ color: 'var(--purple)' }}><Brain size={11} style={{display:'inline',marginRight:3}} /> Deep & Analytical</span>
                 </div>
                 <input type="range" min={0} max={1} step={0.05} value={s1Bias} onChange={e => { setS1Bias(parseFloat(e.target.value)); setS2Bias(1 - parseFloat(e.target.value)); }}
                   style={{ width: '100%', accentColor: 'var(--accent)' }} />
@@ -139,7 +144,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 </select>
               </div>
               <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-                Configure API keys in the <span style={{ color: 'var(--accent)', cursor: 'pointer' }}>API Vault</span> (🔑 button in top bar)
+                Configure API keys in the <span style={{ color: 'var(--accent)', cursor: 'pointer' }}>API Vault</span> (<Key size={9} style={{display:'inline',marginRight:1}} /> button in top bar)
               </div>
             </div>
             <div className="cockpit-card">
@@ -205,11 +210,11 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
               background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
               borderRadius: 6, color: 'var(--danger)', cursor: 'pointer',
             }}>
-              🗑️ Clear All Stored Data
+              <Trash2 size={11} style={{display:'inline',marginRight:3}} /> Clear All Stored Data
             </button>
           </div>
         )}
       </div>
-    </div>
+    </Panel>
   );
 }

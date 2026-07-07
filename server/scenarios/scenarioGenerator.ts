@@ -101,7 +101,7 @@ function generateEarthquakeSwarm(p: EarthquakeSwarmParams): PointCloud {
   const rng = new SeededRNG(hashParams('earthquake', p));
   const cloud: PointCloud = [];
   const [dMin, dMax] = p.depthRange;
-  const [mMin, mMax] = p.magnitudeRange;
+  const [_mMin, mMax] = p.magnitudeRange;
 
   // Fault plane parameters — strike determines along-strike direction,
   // dip determines the angle the fault plunges into the earth
@@ -121,9 +121,7 @@ function generateEarthquakeSwarm(p: EarthquakeSwarmParams): PointCloud {
   const numAftershocks = Math.max(0, p.numEvents - 1);
   for (let i = 0; i < numAftershocks; i++) {
     // Temporal decay (Omori law) determines when each event occurs
-    const decay = omoriDecay(i, numAftershocks, p.timeWindow, p.decayModel);
-
-    // Spatial position on fault plane:
+      // Spatial position on fault plane:
     // alongStrike = position along the fault length
     // alongDip = position along the fault width (determines depth)
     const alongStrike = (rng.next() - 0.5) * faultLengthKm; // km from center
@@ -145,8 +143,7 @@ function generateEarthquakeSwarm(p: EarthquakeSwarmParams): PointCloud {
     const lon = p.lon + dLon + scatter * kmToDeg * 0.5;
 
     // Gutenberg-Richter magnitude distribution
-    const mag = gutenbergRichter(mMin, Math.min(mMax - 1.2, mainMag), rng);
-    const depth = Math.max(dMin, Math.min(dMax, depthKm));
+      const depth = Math.max(dMin, Math.min(dMax, depthKm));
 
     const pt = geoToSphere(lat, lon, depth);
     cloud.push({ x: pt[0], y: pt[1], z: pt[2] });
@@ -154,7 +151,6 @@ function generateEarthquakeSwarm(p: EarthquakeSwarmParams): PointCloud {
 
   // Add P-wave and S-wave propagation rings as surface points
   // (represented as very shallow points that expand outward)
-  const avgDepth = (dMin + dMax) / 2;
   const numWavefronts = Math.min(5, Math.floor(p.numEvents / 10) + 1);
   for (let w = 0; w < numWavefronts; w++) {
     const waveRadiusKm = (w + 1) * faultLengthKm * 0.3;
@@ -176,12 +172,12 @@ function generateEarthquakeSwarm(p: EarthquakeSwarmParams): PointCloud {
   return cloud;
 }
 
-function gutenbergRichter(mMin: number, mMax: number, rng: SeededRNG, b = 1.0): number {
+function _gutenbergRichter(mMin: number, mMax: number, rng: SeededRNG, b = 1.0): number {
   const u = rng.next();
   return mMin - (1 / b) * Math.log10(1 - u * (1 - 10 ** (-b * (mMax - mMin))));
 }
 
-function omoriDecay(index: number, total: number, windowHours: number, model: string): number {
+function _omoriDecay(index: number, total: number, windowHours: number, model: string): number {
   const t = (index / Math.max(1, total)) * windowHours;
   if (model === 'omori') return 1 / (1 + t * 0.1);
   if (model === 'exponential') return Math.exp(-t * 0.05);
@@ -215,7 +211,7 @@ function generateHurricaneLandfall(p: HurricaneLandfallParams): PointCloud {
   const rOuterKm = rMaxKm * 5; // outer extent of gale-force winds
 
   // Maximum sustained wind from Saffir-Simpson
-  const vMaxKt = [33, 43, 50, 58, 64, 70, 77][Math.min(cat, 6)] || 50;
+
 
   // === EYE ===
   // A few points at dead center with zero wind (calm eye)
@@ -591,15 +587,12 @@ function generateFloodInundation(p: FloodInundationParams): PointCloud {
   const kmToDeg = 1 / 111;
 
   // Manning's equation for peak discharge
-  const slope = 0.02;
-  const roughness = 0.035;
-  const runoffCoeff = 0.3 + p.soilSaturation * 0.5;
-  const peakQ = runoffCoeff * p.rainfall * (p.catchmentArea / 1000);
+
 
   // Flood extent based on peak discharge
   const channelWidthKm = 0.5 + Math.sqrt(p.catchmentArea) * 0.01;
   const maxFloodExtentKm = Math.sqrt(p.catchmentArea / Math.PI) * 0.8;
-  const waveCelerity = 2.5 + peakQ * 0.002;
+
 
   // === MAIN RIVER CHANNEL ===
   // Generate a sinuous river channel with meanders
@@ -637,7 +630,7 @@ function generateFloodInundation(p: FloodInundationParams): PointCloud {
   // === FLOODPLAIN INUNDATION ===
   // Water spreads from river banks into low-lying areas
   // Uses dendritic branching pattern (not radial!)
-  const numBranches = 4 + Math.floor(rng.next() * 4);
+
   const numFloodPts = Math.min(Math.floor(p.catchmentArea / 20), 1200);
 
   for (let i = 0; i < numFloodPts; i++) {
@@ -723,7 +716,7 @@ function generateTsunamiWave(p: TsunamiWaveParams): PointCloud {
   // Multiple wave crests radiating outward
   // Energy is concentrated in the directivity direction
   const numRings = Math.min(p.arrivalTimes.length + 2, 8);
-  const maxRadiusKm = cKmh * 3; // 3 hours of propagation
+  const _maxRadiusKm = cKmh * 3; // 3 hours of propagation
 
   for (let ring = 0; ring < numRings; ring++) {
     const arrivalMin = p.arrivalTimes[ring] || (ring + 1) * 15;

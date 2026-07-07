@@ -3,6 +3,7 @@ import {
   Brain, MapPin, Activity, Search, RefreshCw,
   ChevronDown, ChevronRight, Loader2, Globe,
 } from 'lucide-react';
+import Panel from '@/components/ui/Panel';
 
 interface PrithviStatus {
   ready: boolean;
@@ -138,37 +139,31 @@ export function PrithviPanel(_props: Record<string, unknown> = {}) {
     : [];
 
   return (
-    <div style={{
-      position: 'absolute', top: 60, right: 10, width: 340,
-      background: 'rgba(10,10,30,0.92)',
-      border: '1px solid rgba(99,102,241,0.3)',
-      borderRadius: 12, overflow: 'hidden',
-      fontFamily: 'monospace', fontSize: 12, zIndex: 1000,
-      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-    }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 14px',
-        background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1))',
-        borderBottom: '1px solid rgba(99,102,241,0.2)',
-        cursor: 'pointer',
-      }} onClick={() => setCollapsed(!collapsed)}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Brain size={16} style={{ color: '#818cf8' }} />
-          <span style={{ color: '#c4b5fd', fontWeight: 600, fontSize: 11, letterSpacing: 1 }}>
-            PRITHVI EO FM
-          </span>
-          {status?.ready
-            ? <span style={{ color: '#22c55e', fontSize: 9 }}>● READY</span>
-            : <span style={{ color: '#eab308', fontSize: 9 }}>● {status?.loading ? 'LOADING' : 'OFFLINE'}</span>
-          }
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 1000, width: 340 }}>
+      <Panel hideHeader accentColor="#6366f1">
+        {/* Custom click-to-collapse header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '10px 14px',
+          background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1))',
+          borderBottom: collapsed ? 'none' : '1px solid rgba(99,102,241,0.2)',
+          cursor: 'pointer',
+        }} onClick={() => setCollapsed(!collapsed)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Brain size={16} style={{ color: '#818cf8' }} />
+            <span style={{ color: '#c4b5fd', fontWeight: 600, fontSize: 11, letterSpacing: 1 }}>
+              PRITHVI EO FM
+            </span>
+            {status?.ready
+              ? <span style={{ color: '#22c55e', fontSize: 9 }}>● READY</span>
+              : <span style={{ color: '#eab308', fontSize: 9 }}>● {status?.loading ? 'LOADING' : 'OFFLINE'}</span>
+            }
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <RefreshCw size={12} style={{ color: '#6366f1', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); fetchStatus(); }} />
+            <span style={{ color: '#6366f1', fontSize: 10 }}>{collapsed ? '+' : '−'}</span>
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <RefreshCw size={12} style={{ color: '#6366f1', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); fetchStatus(); }} />
-          <span style={{ color: '#6366f1', fontSize: 10 }}>{collapsed ? '+' : '−'}</span>
-        </div>
-      </div>
 
       {!collapsed && (
         <>
@@ -443,6 +438,7 @@ export function PrithviPanel(_props: Record<string, unknown> = {}) {
           </div>
         </>
       )}
+    </Panel>
     </div>
   );
 }

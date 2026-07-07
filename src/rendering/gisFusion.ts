@@ -289,10 +289,6 @@ function extractSentiment(
   return [];
 }
 
-function extractRadar(_raw: Record<string, unknown>): ProjectedPoint[] {
-  return [];
-}
-
 function extractSatellite(
   raw: Record<string, unknown>,
   toolId: string, category: string,
@@ -335,12 +331,9 @@ function extractPopulation(
 const magNorm        = (v: number) => clamp01(v / 10);          // mag 0→10 → 0→1
 const tempDevNorm    = (t: number) => clamp01(Math.abs(t - 22) / 30); // 22°C ideal, ±30°C → 1
 const windNorm       = (w: number) => clamp01(w / 140);          // 140 kt = Cat 5
-const flowNorm       = (f: number) => clamp01(f / 500000);       // 500k cfs = major flood
-const popNorm        = (p: number) => clamp01(p / 50000000);     // 50M = megacity
 const aqiNorm        = (a: number) => clamp01(a / 500);          // AQI 500 = hazardous
 const precipNorm     = (p: number) => clamp01(p / 2000);         // 2000mm = extreme
 const seasonalNorm   = (t: number) => linScale(t, -10, 50);      // -10°C→0, 50°C→1
-const gdeltToneNorm  = (t: number) => clamp01(Math.abs(t) / 20); // tone -20→+20 scale
 
 /* ═════════════════════════════════════════════════════════════════
    EXTRACTORS — each maps to a category for category-pooled fusion

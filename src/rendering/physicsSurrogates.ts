@@ -335,10 +335,9 @@ export function computeWildfireSpread(params: {
     slope: slopeDeg,
     fuelMoisture,
     deadFuelMoisture,
-    relativeHumidity,
-    temperature,
     fuelType = 'timber',
   } = params;
+  // relativeHumidity and temperature available for future model refinements
 
   // Fuel type coefficients (simplified FBP system)
   const fuelCoeffs: Record<string, { base: number; windAlpha: number; slopeAlpha: number; intensityFactor: number }> = {
@@ -460,8 +459,6 @@ export function computeFloodRouting(params: {
   }
 
   const A = B * y;
-  const P = B + 2 * y;
-  const R = A / Math.max(0.01, P);
   const velocity = A > 0 ? Q / A : 0;
   const celerity = A > 0 ? (5 / 3) * velocity : 0;
 

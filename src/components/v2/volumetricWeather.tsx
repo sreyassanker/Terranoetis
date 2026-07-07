@@ -170,7 +170,7 @@ const VolumetricWeather: React.FC<VolumetricWeatherProps> = ({
         </div>
       )}
       <style>{`
-        .volumetric-weather-panel { position: absolute; top: 80px; right: 16px; z-index: 100; }
+        .volumetric-weather-panel { position: absolute; top: 60px; right: 10px; z-index: 110; }
         .volumetric-weather-indicator { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 8px; font-size: 11px; color: #94a3b8; backdrop-filter: blur(8px); }
         .weather-dot { width: 6px; height: 6px; border-radius: 50%; animation: pulse 2s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }

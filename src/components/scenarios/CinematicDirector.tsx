@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Clapperboard, Circle, Flame, TriangleAlert, Waves, CloudLightning, Wind, Globe, MapPin, Play, Square, RotateCw } from 'lucide-react';
 import * as Cesium from 'cesium';
+import Panel from '@/components/ui/Panel';
 
 interface Waypoint {
   lat: number;
@@ -503,23 +505,27 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
     }
   }, [viewer, paths, stopPlayback]);
 
-  const CATEGORY_ICONS: Record<string, string> = {
-    earthquakes: '🔴',
-    wildfires: '🔥',
-    volcanoes: '🌋',
-    floods: '🌊',
-    severe_storms: '⛈️',
-    dust: '🌪️',
-    overview: '🌍',
+  const CATEGORY_ICONS: Record<string, React.ReactNode> = {
+    earthquakes: <Circle size={12} fill="#ef4444" color="#ef4444" />,
+    wildfires: <Flame size={12} color="#f97316" />,
+    volcanoes: <TriangleAlert size={12} color="#a855f7" />,
+    floods: <Waves size={12} color="#3b82f6" />,
+    severe_storms: <CloudLightning size={12} color="#eab308" />,
+    dust: <Wind size={12} color="#94a3b8" />,
+    overview: <Globe size={12} color="#60a5fa" />,
   };
 
   return (
-    <div className="alerts-panel glass-panel open" style={{ width: 380, maxHeight: 'calc(100vh - 92px)' }}>
-      <div className="ai-header">
-        <div className="social-icon-grad">🎥</div>
-        <div className="ai-title">Cinematic Director</div>
-        <button className="ai-close" onClick={onClose}>✕</button>
-      </div>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 380 }}>
+      <Panel
+        title="CINEMATIC DIRECTOR"
+        icon={<Clapperboard size={14} />}
+        accentColor="#3b82f6"
+        iconColor="#60a5fa"
+        titleColor="#93c5fd"
+        onClose={onClose}
+        style={{ maxHeight: 'calc(100vh - 92px)' }}
+      >
 
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 140px)' }}>
         {/* Path list */}
@@ -537,7 +543,7 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
               }}
               onClick={() => selectPath(i)}>
               <div style={{ fontSize: 11, fontWeight: 600 }}>
-                {CATEGORY_ICONS[path.category] ?? '📍'} {path.name}
+                {CATEGORY_ICONS[path.category] ?? <MapPin size={12} color="#64748b" style={{display:'inline'}} />} {path.name}
               </div>
               <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>{path.description}</div>
               <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
@@ -564,12 +570,12 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
                 }
               }}
               disabled={!selectedPath}>
-              {isPlaying ? '⏹ Stop' : progress > 0 && progress < 1 ? '▶ Resume' : '▶ Play'}
+              {isPlaying ? <><Square size={12} fill="#60a5fa" color="#60a5fa" style={{display:'inline',marginRight:3}} /> Stop</> : progress > 0 && progress < 1 ? <><Play size={12} color="#60a5fa" style={{display:'inline',marginRight:3}} /> Resume</> : <><Play size={12} color="#60a5fa" style={{display:'inline',marginRight:3}} /> Play</>}
             </button>
             {progress >= 1 && (
               <button className="glass-button" style={{ fontSize: 11, padding: '6px 10px' }}
                 onClick={() => { setProgress(0); setNarrationText(''); lastSegmentRef.current = -1; if (viewer && selectedPath) setCameraAtT(viewer, selectedPath, 0); }}>
-                ↺ Reset
+                <RotateCw size={12} style={{display:'inline',marginRight:3}} /> Reset
               </button>
             )}
           </div>
@@ -630,6 +636,7 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
           </div>
         )}
       </div>
+    </Panel>
     </div>
   );
 }

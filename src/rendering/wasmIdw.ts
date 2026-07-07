@@ -4,15 +4,12 @@ import { interpolateIDW as jsInterpolateIDW, renderGridToCanvas } from './idwInt
 export { renderGridToCanvas }; export type { InterpGrid };
 
 let wasmReady = false;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let wasmModule: any = null;
 
 export async function initWasmIdw(): Promise<boolean> {
   try {
     // Try dynamic import of WASM module — gracefully fallback to JS
     const mod = await import('./wasm/idw_wasm.js').catch(() => null);
     if (mod && typeof (mod as Record<string, unknown>).interpolate_idw === 'function') {
-      wasmModule = mod;
       wasmReady = true;
       return true;
     }

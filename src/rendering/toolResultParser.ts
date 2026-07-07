@@ -260,7 +260,7 @@ function extractSentimentPoints(result: Record<string, unknown>): InterpPoint[] 
   return [];
 }
 
-function extractRadarPoints(result: Record<string, unknown>): InterpPoint[] {
+function extractRadarPoints(_result: Record<string, unknown>): InterpPoint[] {
   // Rainviewer returns radar tile URLs; we can't extract spatial points from this
   // Return empty since radar data is tile-based, not point-based
   return [];

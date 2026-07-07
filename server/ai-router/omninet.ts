@@ -57,10 +57,10 @@ export interface OmninetOptions {
 // ── Provider Registry ───────────────────────────────────────────
 
 const PROVIDER_CONFIGS: ProviderConfig[] = [
-  { name: 'groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', models: ['llama-4-scout', 'mixtral-8x7b'], rateLimit: 20, tier: 1, apiKeyEnvVar: 'GROQ_API_KEY', supportsStreaming: true },
+  { name: 'groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'], rateLimit: 20, tier: 1, apiKeyEnvVar: 'GROQ_API_KEY', supportsStreaming: true },
   { name: 'cerebras', type: 'openai-compatible', baseUrl: 'https://api.cerebras.ai/v1', models: ['llama-3.3-70b'], rateLimit: 1, tier: 1, apiKeyEnvVar: 'CEREBRAS_API_KEY', supportsStreaming: true },
   { name: 'sambanova', type: 'openai-compatible', baseUrl: 'https://api.sambanova.ai/v1', models: ['llama-3.1-8b'], rateLimit: 10, tier: 1, apiKeyEnvVar: 'SAMBANOVA_API_KEY', supportsStreaming: true },
-  { name: 'gemini', type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', models: ['gemini-2.0-flash', 'gemini-2.5-pro'], rateLimit: 60, tier: 2, apiKeyEnvVar: 'GOOGLE_GEMINI_API_KEY', supportsStreaming: true, supportsVision: true },
+  { name: 'gemini', type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', models: ['gemini-2.0-flash-001', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'], rateLimit: 60, tier: 2, apiKeyEnvVar: 'GOOGLE_GEMINI_API_KEY', supportsStreaming: true, supportsVision: true },
   { name: 'openrouter', type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1', models: ['deepseek/deepseek-r1', 'qwen/qwen3-235b', 'meta-llama/llama-4-scout'], rateLimit: 200, tier: 2, apiKeyEnvVar: 'OPENROUTER_API_KEY', supportsStreaming: true },
   { name: 'together', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', models: ['meta-llama/Llama-3-70b'], rateLimit: 60, tier: 2, apiKeyEnvVar: 'TOGETHER_API_KEY', supportsStreaming: true },
   { name: 'deepseek', type: 'openai-compatible', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'], rateLimit: 50, tier: 3, apiKeyEnvVar: 'DEEPSEEK_API_KEY', supportsStreaming: true },
@@ -124,9 +124,9 @@ export class Omninet {
         lastLatency: (saved?.lastLatency as number) || 1000,
       };
     });
+    this.initialized = true;
     this.ensureTable();
     this.startHealthChecks();
-    this.initialized = true;
     logger.info({ providerCount: this.providers.length }, 'Omninet initialized');
   }
 
@@ -332,46 +332,74 @@ export class Omninet {
 
   private async callGemini(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
     const apiKey = process.env[config.apiKeyEnvVar!] || process.env.GOOGLE_GEMINI_API_KEY || '';
-    if (!apiKey) throw new Error('Gemini API key not configured');
+    if (!apiKey) throw new Error('Gemini API key not configured. Set GOOGLE_GEMINI_API_KEY in server/.env');
 
-    // Quick retry then let generateText fallback chain switch providers (e.g. Groq)
-    const maxRetries = 1;
+    // Try multiple models in order of preference — if the first fails with 429/404, try the next
+    const modelsToTry = [model, ...config.models.filter(m => m !== model)];
     let lastError: Error | undefined;
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      if (attempt > 0) {
-        const base = Math.min(1000 * Math.pow(2, attempt), 16000);
-        const jitter = Math.random() * 1000;
-        await new Promise(r => setTimeout(r, base + jitter));
-        if (signal?.aborted) throw new Error('Request aborted');
-      }
-      try {
-        const attemptSignal = signal || AbortSignal.timeout(30000);
-        const resp = await fetch(`${config.baseUrl}/models/${model}:generateContent?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: attemptSignal,
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt.slice(0, 16000) }] }],
-            generationConfig: { temperature: options?.temperature ?? 0.3, maxOutputTokens: options?.maxTokens ?? 2048 },
-          }),
-        });
-        if (resp.status === 429 || resp.status === 503) {
-          lastError = new Error(`Gemini HTTP ${resp.status} (transient)`);
-          logger.info({ status: resp.status, attempt: attempt + 1 }, 'Gemini transient error, retrying');
-          continue;
+    let bestError: Error | undefined; // Keep the first actionable error (quota > generic)
+
+    for (const currentModel of modelsToTry) {
+      const maxRetries = 1;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (attempt > 0) {
+          const base = Math.min(1000 * Math.pow(2, attempt), 16000);
+          const jitter = Math.random() * 1000;
+          await new Promise(r => setTimeout(r, base + jitter));
+          if (signal?.aborted) throw new Error('Request aborted');
         }
-        if (!resp.ok) throw new Error(`Gemini HTTP ${resp.status}`);
-        const data = await resp.json() as Record<string, unknown>;
-        return (((data.candidates as Array<Record<string, unknown>>)?.[0]?.content as Record<string, unknown>)?.parts as Array<Record<string, unknown>>)?.[0]?.text as string || '';
-      } catch (e) {
-        lastError = e as Error;
-        if ((e as Error).name === 'AbortError' || (e as Error).message?.includes('abort')) {
-          throw new Error('Request timed out');
+        try {
+          const attemptSignal = signal || AbortSignal.timeout(30000);
+          const resp = await fetch(`${config.baseUrl}/models/${currentModel}:generateContent?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: attemptSignal,
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt.slice(0, 16000) }] }],
+              generationConfig: { temperature: options?.temperature ?? 0.3, maxOutputTokens: options?.maxTokens ?? 2048 },
+              toolConfig: { functionCallingConfig: { mode: 'NONE' } },
+            }),
+          });
+          if (resp.status === 429 || resp.status === 503) {
+            const body = await resp.text().catch(() => '');
+            const isQuota = body.includes('quota');
+            const err = new Error(`Gemini ${currentModel}: HTTP ${resp.status}${isQuota ? ' (quota exceeded — enable Generative Language API at https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com)' : ' (transient)'}`);
+            lastError = err;
+            // Prefer the first actionable error (quota) over later generic ones
+            if (isQuota && !bestError) bestError = err;
+            else if (!bestError) bestError = err;
+            logger.warn({ status: resp.status, model: currentModel, attempt: attempt + 1, isQuota }, 'Gemini transient error, retrying');
+            continue;
+          }
+          if (resp.status === 404) {
+            lastError = new Error(`Gemini ${currentModel}: model not found — trying next model`);
+            if (!bestError) bestError = lastError;
+            logger.info({ model: currentModel }, 'Gemini model not found, trying next');
+            break; // break retry loop, try next model
+          }
+          if (!resp.ok) {
+            const body = await resp.text().catch(() => '');
+            const err = new Error(`Gemini ${currentModel}: HTTP ${resp.status} — ${body.slice(0, 200)}`);
+            lastError = err;
+            if (!bestError) bestError = err;
+            throw err;
+          }
+          const data = await resp.json() as Record<string, unknown>;
+          const text = (((data.candidates as Array<Record<string, unknown>>)?.[0]?.content as Record<string, unknown>)?.parts as Array<Record<string, unknown>>)?.[0]?.text as string || '';
+          if (!text && !data.candidates) {
+            throw new Error(`Gemini ${currentModel}: empty response — ${JSON.stringify(data).slice(0, 200)}`);
+          }
+          return text;
+        } catch (e) {
+          lastError = e as Error;
+          if ((e as Error).name === 'AbortError' || (e as Error).message?.includes('abort') || (e as Error).message?.includes('timed out')) {
+            throw new Error(`Gemini ${currentModel}: request timed out`);
+          }
+          if (attempt < maxRetries) continue;
         }
-        if (attempt < maxRetries - 1) continue;
       }
     }
-    throw lastError || new Error('Gemini: all retries exhausted');
+    throw bestError || lastError || new Error('Gemini: all models and retries exhausted. Check API key and billing at https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com');
   }
 
   private async callClaude(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
@@ -451,7 +479,7 @@ export class Omninet {
     this.ensureInit();
     const complexity = classifyComplexity(prompt);
     const routeResult = this.route(prompt, complexity, options?.model);
-    const state = this.providers.find(s => s.config.name === routeResult.provider)!;
+    let state = this.providers.find(s => s.config.name === routeResult.provider)!;
 
     let lastError: Error | undefined;
     const backoff = [1000, 2000, 4000];
@@ -481,7 +509,8 @@ export class Omninet {
             const fb = fallbackRoutes[0];
             routeResult.provider = fb.provider;
             routeResult.model = fb.model;
-            Object.assign(state, this.providers.find(s => s.config.name === fb.provider)!);
+            const fbState = this.providers.find(s => s.config.name === fb.provider);
+            if (fbState) state = fbState;
             continue;
           }
         }

@@ -12,19 +12,12 @@
 // satellite.js is loaded via self.importScripts or bundled
 // For Vite/Web Worker, we use the inline approach
 
-interface TLE {
-  name: string;
-  tle1: string;
-  tle2: string;
-}
-
 interface PropagationResult {
   positions: Float32Array; // interleaved lat, lon, alt (km) × count
   count: number;
   timestamp: number;
 }
 
-let tles: TLE[] = [];
 let satrecs: Record<string, unknown>[] = [];
 
 // We'll use a simplified SGP4 propagation since satellite.js can't be easily
@@ -35,7 +28,6 @@ self.onmessage = (e: MessageEvent) => {
   const { type, data } = e.data;
 
   if (type === 'SET_TLES') {
-    tles = data.tles;
     // Store pre-parsed satellite records as raw data
     satrecs = data.satrecs || [];
   }

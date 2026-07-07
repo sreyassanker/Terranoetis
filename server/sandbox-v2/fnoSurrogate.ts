@@ -6,6 +6,7 @@ export interface FnoInputs {
   lat: number;
   lon: number;
   leadDays: number;
+  terrain?: number[][];
 }
 
 export interface FnoOutputs {

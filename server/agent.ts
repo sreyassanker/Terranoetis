@@ -62,6 +62,13 @@ When a user describes a task:
 - \`GET /api/iss\` — ISS real-time position
 - \`GET /api/satellites/tle\` — Active satellite TLE data
 
+### Satellite Imagery
+- \`GET /api/fm/search?text=forest+fire\` — Search satellite imagery by text description (returns lat/lon + class labels)
+- \`GET /api/fm/search?classLabel=trees\` — Search satellite imagery by land-cover class (water/trees/grass/crops/built_area/bare_ground/snow_ice/clouds/flooded_vegetation)
+- \`GET /api/fm/search?lat=12.34&lon=56.78&radiusKm=50\` — Search satellite imagery by geographic area
+- \`POST /api/fm/prithvi/analyze\` — Analyze a specific lat/lon with the Prithvi EO model (body: {"lat":12.34,"lon":56.78,"radiusKm":10})
+- \`POST /api/fm/prithvi/change\` — Detect change at a location (body: {"lat":12.34,"lon":56.78})
+
 ### Social
 - \`GET /api/social\` — Aggregated news + social media feed
 
@@ -304,6 +311,7 @@ export class ToolRegistry {
       '- Always include ## COMMANDS when globe changes are needed.',
       '- If the user asks about a location with no data, say so honestly.',
       '- For complex tasks, break into subtasks and show progress.',
+      '- Do NOT use function calling, tool calls, or any structured function syntax. Respond with plain text only.',
     );
 
     return lines.join('\n');
@@ -583,7 +591,7 @@ export class IntentRouter {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['earthquakes'] };
       }
       if (lower.includes('flight') || lower.includes('plane') || lower.includes('aircraft') || lower.includes('adsb')) {
-        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['2_adsb_lol'] };
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['flight_tracks'], location };
       }
       if (lower.includes('fire') || lower.includes('wildfire') || lower.includes('burn')) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['wildfires'] };
@@ -915,34 +923,6 @@ export class CommandParser {
       }
     }
     return commands;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// SessionManager (unchanged)
-// ═══════════════════════════════════════════════════════════════════════
-
-export class SessionManager {
-  private sessions = new Map<string, { environmentId: string; interactionId: string }>();
-
-  get(userId: string) {
-    return this.sessions.get(userId);
-  }
-
-  set(userId: string, data: { environmentId: string; interactionId: string }) {
-    this.sessions.set(userId, data);
-  }
-
-  delete(userId: string) {
-    this.sessions.delete(userId);
-  }
-
-  getOrCreate(userId: string, environmentId: string) {
-    const existing = this.sessions.get(userId);
-    if (existing) return existing;
-    const session = { environmentId, interactionId: '' };
-    this.sessions.set(userId, session);
-    return session;
   }
 }
 

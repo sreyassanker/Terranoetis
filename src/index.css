@@ -233,17 +233,17 @@ p { text-align: justify; }
 
   /* ── BUTTONS ── */
   .btn-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.04);
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
     color: var(--text-dim);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 14px;
+    border-radius: 6px;
     transition: all 0.2s ease;
     flex-shrink: 0;
     position: relative;
@@ -652,12 +652,12 @@ p { text-align: justify; }
   /* ── INFO PANEL ── */
   .info-panel {
     position: absolute;
-    top: 76px;
+    top: 60px;
     right: 16px;
     width: 320px;
     max-height: calc(100vh - 92px);
     overflow-y: auto;
-    z-index: 90;
+    z-index: 110;
     transition: opacity 0.3s ease, transform 0.3s ease;
     transform: translateY(0);
     opacity: 1;
@@ -2059,20 +2059,27 @@ p { text-align: justify; }
     line-height: 1.55;
     max-width: 100%;
     word-break: break-word;
+    text-align: left;
+    position: relative;
   }
+  .ai-msg p { text-align: left; }
 
   .ai-msg.user {
-    background: rgba(59,130,246,0.12);
-    border: 1px solid rgba(59,130,246,0.2);
+    background: rgba(99,102,241,0.1);
+    border: 1px solid rgba(99,102,241,0.2);
+    border-left: 3px solid #818cf8;
     align-self: flex-end;
     margin-left: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
   }
 
   .ai-msg.assistant {
-    background: rgba(255,255,255,0.04);
-    border: 1px solid var(--border);
+    background: rgba(15,23,42,0.5);
+    border: 1px solid rgba(71,85,105,0.4);
+    border-left: 3px solid #14b8a6;
     align-self: flex-start;
     margin-right: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
   }
 
   .ai-msg.assistant pre {
@@ -2109,8 +2116,8 @@ p { text-align: justify; }
   .rich-content .rich-hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   .rich-content .rich-list { margin: 4px 0; padding-left: 16px; }
   .rich-content .rich-list li { margin: 2px 0; }
-  .command-chip { cursor: pointer; background: rgba(59,130,246,0.15) !important; color: var(--accent) !important; border: 1px solid rgba(59,130,246,0.3) !important; }
-  .command-chip:hover { background: rgba(59,130,246,0.25) !important; }
+  .command-chip { cursor: pointer; background: rgba(20,184,166,0.1) !important; color: #2dd4bf !important; border: 1px solid rgba(20,184,166,0.25) !important; }
+  .command-chip:hover { background: rgba(20,184,166,0.2) !important; }
   /* Phase 10: Feedback buttons */
   .fb-btn { background: none; border: none; cursor: pointer; font-size: 13px; padding: 2px 4px; border-radius: 4px; opacity: 0.5; transition: opacity 0.2s; line-height: 1; }
   .fb-btn:hover { opacity: 1; background: rgba(255,255,255,0.05); }
@@ -2350,7 +2357,8 @@ p { text-align: justify; }
   .chat-image:hover { transform: scale(1.02); }
 
   .ai-msg.image-msg {
-    border-left-color: #a78bfa;
+    border-left: 3px solid #a78bfa;
+    background: rgba(139,92,246,0.04);
   }
 
   .ai-send {
@@ -2382,18 +2390,18 @@ p { text-align: justify; }
     font-size: 11px;
     padding: 4px 10px;
     border-radius: 14px;
-    border: 1px solid var(--border);
-    background: rgba(255,255,255,0.04);
-    color: var(--text-dim);
+    border: 1px solid rgba(99,102,241,0.2);
+    background: rgba(99,102,241,0.06);
+    color: #a5b4fc;
     cursor: pointer;
     transition: all 0.15s ease;
     white-space: nowrap;
   }
 
   .ai-chip:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: rgba(59,130,246,0.08);
+    border-color: #818cf8;
+    color: #c7d2fe;
+    background: rgba(99,102,241,0.12);
   }
 
   .ai-api-note {
@@ -2488,16 +2496,16 @@ p { text-align: justify; }
     font-size: 10px;
     padding: 4px 10px;
     border-radius: 6px;
-    border: 1px dashed var(--border);
+    border: 1px dashed rgba(99,102,241,0.2);
     background: rgba(255,255,255,0.03);
     color: var(--text-dim);
     cursor: pointer;
     transition: all 0.15s;
   }
   .sandbox-file-btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: rgba(59,130,246,0.08);
+    border-color: #818cf8;
+    color: #a5b4fc;
+    background: rgba(99,102,241,0.08);
   }
   .sandbox-file-name {
     font-size: 10px;
@@ -2539,6 +2547,7 @@ p { text-align: justify; }
   .ai-msg.code-result {
     border-color: rgba(34,197,94,0.3);
     background: rgba(34,197,94,0.04);
+    border-left: 3px solid #22c55e;
   }
   .ai-msg.code-result .msg-label {
     font-size: 10px;
@@ -2801,7 +2810,7 @@ p { text-align: justify; }
   /* ── ISS PANEL ── */
   .iss-panel {
     position: absolute;
-    top: 72px;
+    top: 60px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 220;

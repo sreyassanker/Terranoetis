@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { MapPin, ClipboardList, Circle, CheckCircle, RefreshCw } from 'lucide-react';
 
 interface Alert {
   id: string;
@@ -53,7 +54,7 @@ function AlertCard({ alert, onDismiss, onEscalate }: { alert: Alert; onDismiss: 
           <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.4 }}>{alert.body}</div>
           {alert.lat !== 0 && (
             <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
-              📍 {alert.lat.toFixed(3)}, {alert.lon.toFixed(3)}
+              <MapPin size={10} style={{display:'inline',marginRight:2}} /> {alert.lat.toFixed(3)}, {alert.lon.toFixed(3)}
             </div>
           )}
         </div>
@@ -70,7 +71,7 @@ function AlertCard({ alert, onDismiss, onEscalate }: { alert: Alert; onDismiss: 
           </button>
           {alert.evidence && (
             <span style={{ fontSize: 9, color: 'var(--teal)', display: 'flex', alignItems: 'center', gap: 2 }}>
-              📋 {alert.evidence}
+              <ClipboardList size={10} style={{display:'inline',marginRight:2}} /> {alert.evidence}
             </span>
           )}
         </div>
@@ -116,8 +117,8 @@ export default function AlertPanel({ onClose, onFlyTo }: AlertPanelProps) {
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             {[
               { key: 'all', label: `All (${alerts.length})` },
-              { key: 'critical', label: `🔴 ${criticalCount}` },
-              { key: 'warning', label: `🟠 ${warningCount}` },
+              { key: 'critical', label: <><Circle size={9} fill="var(--danger)" color="var(--danger)" style={{display:'inline',marginRight:2}} />{criticalCount}</> },
+              { key: 'warning', label: <><Circle size={9} fill="#f97316" color="#f97316" style={{display:'inline',marginRight:2}} />{warningCount}</> },
             ].map(f => (
               <button key={f.key} onClick={() => setFilter(f.key)}
                 style={{
@@ -148,7 +149,7 @@ export default function AlertPanel({ onClose, onFlyTo }: AlertPanelProps) {
             {loading && <div style={{ padding: 20, textAlign: 'center', fontSize: 11, color: 'var(--text-dim)' }}>Loading alerts...</div>}
             {!loading && filtered.length === 0 && (
               <div style={{ padding: 20, textAlign: 'center', fontSize: 11, color: 'var(--text-dim)' }}>
-                ✅ No alerts
+                <CheckCircle size={11} style={{display:'inline',marginRight:3}} /> No alerts
               </div>
             )}
             {filtered.map(alert => (
@@ -190,7 +191,7 @@ export default function AlertPanel({ onClose, onFlyTo }: AlertPanelProps) {
           Clear All
         </button>
         <button onClick={fetchAlerts} style={{ fontSize: 9, padding: '3px 8px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-dim)', cursor: 'pointer' }}>
-          🔄 Refresh
+          <RefreshCw size={10} style={{display:'inline',marginRight:2}} /> Refresh
         </button>
       </div>
     </div>

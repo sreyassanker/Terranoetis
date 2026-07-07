@@ -20,7 +20,7 @@ function geoToSphere(lat: number, lon: number, height: number): Point3D {
 }
 
 /** Lava flow rate from VEI (m³/s simplified FLOWGO) */
-function lavaFlowRate(vei: number, slopeDeg: number): number {
+function _lavaFlowRate(vei: number, slopeDeg: number): number {
   const baseRate = [1, 10, 50, 200, 500, 1000, 5000][Math.min(vei, 6)];
   return baseRate * (1 + Math.tan(slopeDeg * Math.PI / 180) * 0.5);
 }

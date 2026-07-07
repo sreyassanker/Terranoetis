@@ -352,7 +352,6 @@ export function formatStepResult(
       const daily = result?.daily as Record<string, unknown> | undefined;
       if (daily) {
         const tMax = daily.temperature_2m_max as number[] | undefined;
-        const tMin = daily.temperature_2m_min as number[] | undefined;
         const precip = daily.precipitation_sum as number[] | undefined;
         const avgHigh = Array.isArray(tMax) ? (tMax.filter(Number.isFinite).reduce((a, b) => a + b, 0) / tMax.length).toFixed(1) : '?';
         const totalP = Array.isArray(precip) ? precip.filter(Number.isFinite).reduce((a, b) => a + b, 0).toFixed(0) : '?';
@@ -373,7 +372,6 @@ export function formatStepResult(
       const daily = result?.daily as Record<string, unknown> | undefined;
       if (daily) {
         const tMax = daily.temperature_2m_max as number[] | undefined;
-        const tMin = daily.temperature_2m_min as number[] | undefined;
         const precip = daily.precipitation_sum as number[] | undefined;
         const wind = daily.wind_speed_10m_max as number[] | undefined;
         const avgT = Array.isArray(tMax) ? ((tMax.filter(Number.isFinite).reduce((a, b) => a + b, 0) / tMax.length).toFixed(1)) : '?';
@@ -522,9 +520,9 @@ export function formatStepResult(
       const notifications = result as Array<Record<string, unknown>> | Record<string, unknown>;
       const arr = Array.isArray(notifications) ? notifications : (notifications?.notifications as Array<Record<string, unknown>> | undefined) ?? [];
       if (arr.length > 0) {
-        const flaren = arr.filter((n: any) => String(n.messageType ?? n.type ?? '').includes('flare'));
-        const cmen = arr.filter((n: any) => String(n.messageType ?? n.type ?? '').includes('cme'));
-        const storms = arr.filter((n: any) => String(n.messageType ?? n.type ?? '').includes('geomagnetic'));
+        const flaren = arr.filter((n: Record<string, unknown>) => String(n.messageType ?? n.type ?? '').includes('flare'));
+        const cmen = arr.filter((n: Record<string, unknown>) => String(n.messageType ?? n.type ?? '').includes('cme'));
+        const storms = arr.filter((n: Record<string, unknown>) => String(n.messageType ?? n.type ?? '').includes('geomagnetic'));
         summary = `${arr.length} space weather notification${arr.length > 1 ? 's' : ''}`;
         metrics = [
           { label: 'Solar Flares', value: String(flaren.length) },
@@ -542,9 +540,9 @@ export function formatStepResult(
     case 'infrastructure': {
       const elements = result?.elements as Array<Record<string, unknown>> | undefined;
       if (elements && elements.length > 0) {
-        const buildings = elements.filter((e: any) => e.tags?.building || e.type === 'way');
-        const roads = elements.filter((e: any) => e.tags?.highway);
-        const pois = elements.filter((e: any) => e.type === 'node');
+        const buildings = elements.filter((e: Record<string, unknown>) => (e.tags as Record<string, unknown>)?.building || e.type === 'way');
+        const roads = elements.filter((e: Record<string, unknown>) => (e.tags as Record<string, unknown>)?.highway);
+        const pois = elements.filter((e: Record<string, unknown>) => e.type === 'node');
         summary = `${elements.length} infrastructure features in area`;
         metrics = [
           { label: 'Buildings', value: String(buildings.length) },
@@ -561,7 +559,6 @@ export function formatStepResult(
 
     case 'water_resources': {
       const value = result?.value as Record<string, unknown> | undefined;
-      const ts = result?.timeSeries as Array<Record<string, unknown>> | undefined;
       if (value) {
         const q = value['00060'] as Record<string, unknown> | undefined;
         const gh = value['00065'] as Record<string, unknown> | undefined;
@@ -590,7 +587,7 @@ export function formatStepResult(
     case 'disaster_declarations': {
       const declarations = result?.DisasterDeclarationsSummaries as Array<Record<string, unknown>> | undefined;
       if (declarations && declarations.length > 0) {
-        const types = new Set(declarations.map((d: any) => d.incidentType).filter(Boolean));
+        const types = new Set(declarations.map((d: Record<string, unknown>) => d.incidentType).filter(Boolean));
         const latest = declarations[0];
         summary = `${declarations.length} FEMA disaster declarations (${[...types].slice(0, 5).join(', ')})`;
         metrics = [

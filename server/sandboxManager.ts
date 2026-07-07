@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { mkdtemp, writeFile, mkdir, rm, readFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { Sandbox } from 'e2b';
 
 export interface ExecutionResult {
   stdout: string;
@@ -38,99 +39,79 @@ export interface FileUpload {
 const WORKSPACE_TTL_MS = 30 * 60 * 1000;
 const MAX_WORKSPACES = 50;
 
-// E2B REST API helpers (zero external deps — uses built-in fetch)
-const E2B_API_BASE = 'https://api.e2b.dev/api/v1';
-const E2B_HEADERS = () => {
-  const key = process.env.E2B_API_KEY || process.env.e2b_devkey || '';
-  return { 'X-API-Key': key, 'Content-Type': 'application/json' };
-};
+// E2B SDK helpers
 const isE2BConfigured = () => !!(process.env.E2B_API_KEY || process.env.e2b_devkey);
 
-async function e2bCreateSandbox(): Promise<{ sandboxId: string; url: string }> {
-  const resp = await fetch(`${E2B_API_BASE}/sandboxes`, {
-    method: 'POST',
-    headers: E2B_HEADERS(),
-    signal: AbortSignal.timeout(30000),
-    body: JSON.stringify({ template_id: 'base' }),
-  });
-  if (!resp.ok) throw new Error(`E2B create sandbox failed: ${resp.status} ${await resp.text().catch(() => '')}`);
-  const data = await resp.json() as { sandbox_id: string; client_id?: string; url?: string };
-  const sandboxId = data.sandbox_id;
-  const runtimeUrl = data.url || `https://${sandboxId}.sandbox.e2b.dev`;
-  return { sandboxId, url: runtimeUrl };
+const E2B_HOME = '/home/user';
+
+async function e2bCreateSandbox(): Promise<Sandbox> {
+  return Sandbox.create('base', { timeoutMs: 30000 });
 }
 
-async function e2bExecute(sandboxId: string, url: string, language: string, code: string, timeout: number): Promise<ExecutionResult> {
+async function e2bExecute(sbx: Sandbox, language: string, code: string, timeout: number): Promise<ExecutionResult> {
   const start = Date.now();
-  const langMap: Record<string, string> = { python: 'python3', node: 'nodejs', bash: 'bash', r: 'r' };
-  const payload = { code, language: langMap[language] || language };
-  const resp = await fetch(`${url}/code`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(Math.min(timeout, 60000)),
-    body: JSON.stringify(payload),
-  });
-  if (!resp.ok) throw new Error(`E2B execute failed: ${resp.status}`);
-  const data = await resp.json() as { stdout?: string; stderr?: string; exit_code?: number; error?: string };
+  const extMap: Record<string, string> = { python: 'py', node: 'mjs', bash: 'sh', r: 'R' };
+  const cmdMap: Record<string, string> = { python: 'python3 -u', node: 'node --experimental-json-modules', bash: '/bin/bash', r: 'Rscript' };
+  const ext = extMap[language] || 'py';
+  const cmd = cmdMap[language] || 'python3 -u';
+  const scriptPath = `/tmp/lgs-${start}.${ext}`;
+
+  const b64 = Buffer.from(code).toString('base64');
+  await sbx.commands.run(`echo ${b64} | base64 -d > ${scriptPath}`, { timeoutMs: 10000 });
+
+  const result = await sbx.commands.run(`${cmd} ${scriptPath}`, { timeoutMs: Math.min(timeout, 60000) });
+
+  sbx.commands.run(`rm -f ${scriptPath}`).catch(() => {});
+
   let outputJson: Record<string, unknown> | undefined;
-  const stdout = data.stdout || '';
+  const stdout = result.stdout || '';
   const jsonMatch = stdout.match(/##JSON_RESULT\n([\s\S]*?)(?:\n##|\n*$)/);
   if (jsonMatch) {
     try { outputJson = JSON.parse(jsonMatch[1].trim()); } catch { /* skip */ }
   }
   return {
     stdout,
-    stderr: data.stderr || (data.error ? `Error: ${data.error}` : ''),
-    exitCode: data.exit_code ?? null,
+    stderr: result.stderr || '',
+    exitCode: result.exitCode,
     outputJson,
     executionTimeMs: Date.now() - start,
     cloud: true,
   };
 }
 
-async function e2bWriteFile(sandboxId: string, url: string, filePath: string, content: string): Promise<void> {
-  const resp = await fetch(`${url}/files/${filePath}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    signal: AbortSignal.timeout(15000),
-    body: content,
-  });
-  if (!resp.ok) throw new Error(`E2B write file failed: ${resp.status}`);
+async function e2bWriteFile(sbx: Sandbox, filePath: string, content: string): Promise<void> {
+  const fullPath = `${E2B_HOME}/${filePath}`;
+  const b64 = Buffer.from(content).toString('base64');
+  const r = await sbx.commands.run(
+    `mkdir -p $(dirname ${fullPath}) && echo ${b64} | base64 -d > ${fullPath}`,
+    { timeoutMs: 15000 },
+  );
+  if (r.exitCode !== 0) throw new Error(`E2B write file failed: ${r.stderr}`);
 }
 
-async function e2bReadFile(sandboxId: string, url: string, filePath: string): Promise<string> {
-  const resp = await fetch(`${url}/files/${filePath}`, {
-    method: 'GET',
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!resp.ok) throw new Error(`E2B read file failed: ${resp.status}`);
-  return resp.text();
+async function e2bReadFile(sbx: Sandbox, filePath: string): Promise<string> {
+  const fullPath = `${E2B_HOME}/${filePath}`;
+  const r = await sbx.commands.run(`cat ${fullPath} | base64`, { timeoutMs: 15000 });
+  if (r.exitCode !== 0) throw new Error(`E2B read file failed: ${r.stderr}`);
+  return Buffer.from(r.stdout.trim(), 'base64').toString();
 }
 
-async function e2bListFiles(url: string): Promise<string[]> {
-  const resp = await fetch(`${url}/files`, {
-    method: 'GET',
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!resp.ok) throw new Error(`E2B list files failed: ${resp.status}`);
-  const data = await resp.json() as { files?: string[]; paths?: string[] };
-  return data.files || data.paths || [];
+async function e2bListFiles(sbx: Sandbox): Promise<string[]> {
+  const r = await sbx.commands.run(`ls -1 ${E2B_HOME}`, { timeoutMs: 15000 });
+  if (r.exitCode !== 0) throw new Error(`E2B list files failed: ${r.stderr}`);
+  return r.stdout.trim().split('\n').filter(Boolean);
 }
 
-async function e2bDeleteSandbox(sandboxId: string): Promise<void> {
-  await fetch(`${E2B_API_BASE}/sandboxes/${sandboxId}`, {
-    method: 'DELETE',
-    headers: E2B_HEADERS(),
-    signal: AbortSignal.timeout(15000),
-  }).catch(() => {});
+async function e2bDeleteSandbox(sbx: Sandbox): Promise<void> {
+  await sbx.kill().catch(() => {});
 }
 
 // ── SandboxManager ───────────────────────────────────────────────────
 
 export class SandboxManager {
   private workspaces = new Map<string, SandboxWorkspace>();
-  /** Maps workspaceId → E2B sandbox ID for cloud workspaces */
-  private e2bSandboxes = new Map<string, { sandboxId: string; url: string }>();
+  /** Maps workspaceId → E2B sandbox instance */
+  private e2bSandboxes = new Map<string, Sandbox>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
@@ -158,9 +139,9 @@ export class SandboxManager {
     const id = `${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     if (useCloud) {
-      const { sandboxId, url } = await e2bCreateSandbox();
-      this.e2bSandboxes.set(id, { sandboxId, url });
-      const ws: SandboxWorkspace = { id, path: `e2b://${sandboxId}`, createdAt: Date.now(), lastAccessed: Date.now(), cloud: true };
+      const sbx = await e2bCreateSandbox();
+      this.e2bSandboxes.set(id, sbx);
+      const ws: SandboxWorkspace = { id, path: `e2b://${sbx.getHost(0)}`, createdAt: Date.now(), lastAccessed: Date.now(), cloud: true };
       this.workspaces.set(id, ws);
       return ws;
     }
@@ -186,9 +167,9 @@ export class SandboxManager {
     if (!ws) return false;
 
     if (ws.cloud) {
-      const e2b = this.e2bSandboxes.get(id);
-      if (e2b) {
-        await e2bDeleteSandbox(e2b.sandboxId).catch(() => {});
+      const sbx = this.e2bSandboxes.get(id);
+      if (sbx) {
+        await e2bDeleteSandbox(sbx).catch(() => {});
         this.e2bSandboxes.delete(id);
       }
     } else {
@@ -204,10 +185,10 @@ export class SandboxManager {
     if (!ws) throw new Error(`Workspace ${workspaceId} not found`);
 
     if (ws.cloud) {
-      const e2b = this.e2bSandboxes.get(workspaceId);
-      if (!e2b) throw new Error(`E2B sandbox not found for workspace ${workspaceId}`);
-      await e2bWriteFile(e2b.sandboxId, e2b.url, fileName, content);
-      return `e2b://${e2b.sandboxId}/${fileName}`;
+      const sbx = this.e2bSandboxes.get(workspaceId);
+      if (!sbx) throw new Error(`E2B sandbox not found for workspace ${workspaceId}`);
+      await e2bWriteFile(sbx, fileName, content);
+      return `e2b://${sbx.getHost(0)}/${fileName}`;
     }
 
     const filePath = join(ws.path, 'uploads', fileName);
@@ -221,9 +202,9 @@ export class SandboxManager {
     if (!ws) throw new Error(`Workspace ${workspaceId} not found`);
 
     if (ws.cloud) {
-      const e2b = this.e2bSandboxes.get(workspaceId);
-      if (!e2b) throw new Error(`E2B sandbox not found for workspace ${workspaceId}`);
-      return e2bReadFile(e2b.sandboxId, e2b.url, fileName);
+      const sbx = this.e2bSandboxes.get(workspaceId);
+      if (!sbx) throw new Error(`E2B sandbox not found for workspace ${workspaceId}`);
+      return e2bReadFile(sbx, fileName);
     }
 
     const filePath = join(ws.path, 'uploads', fileName);
@@ -235,9 +216,9 @@ export class SandboxManager {
     if (!ws) throw new Error(`Workspace ${workspaceId} not found`);
 
     if (ws.cloud) {
-      const e2b = this.e2bSandboxes.get(workspaceId);
-      if (!e2b) throw new Error(`E2B sandbox not found for workspace ${workspaceId}`);
-      return e2bListFiles(e2b.url);
+      const sbx = this.e2bSandboxes.get(workspaceId);
+      if (!sbx) throw new Error(`E2B sandbox not found for workspace ${workspaceId}`);
+      return e2bListFiles(sbx);
     }
 
     const files: string[] = [];
@@ -272,27 +253,23 @@ export class SandboxManager {
   }
 
   private async cloudExecute(request: CodeExecutionRequest, startTime: number, timeout: number): Promise<ExecutionResult> {
-    let sandboxId: string | null = null;
-    let runtimeUrl: string | null = null;
+    let sbx: Sandbox | null = null;
+    let owned = false;
 
     if (request.workspaceId) {
-      const e2b = this.e2bSandboxes.get(request.workspaceId);
-      if (!e2b) throw new Error(`E2B sandbox not found for workspace ${request.workspaceId}`);
-      sandboxId = e2b.sandboxId;
-      runtimeUrl = e2b.url;
+      const stored = this.e2bSandboxes.get(request.workspaceId);
+      if (!stored) throw new Error(`E2B sandbox not found for workspace ${request.workspaceId}`);
+      sbx = stored;
     } else {
-      // Ephemeral sandbox — create, execute, destroy
-      const created = await e2bCreateSandbox();
-      sandboxId = created.sandboxId;
-      runtimeUrl = created.url;
+      sbx = await e2bCreateSandbox();
+      owned = true;
     }
 
     try {
-      return await e2bExecute(sandboxId, runtimeUrl!, request.language, request.code, timeout);
+      return await e2bExecute(sbx, request.language, request.code, timeout);
     } finally {
-      // Clean up ephemeral sandbox (not if workspace-managed)
-      if (!request.workspaceId && sandboxId) {
-        e2bDeleteSandbox(sandboxId).catch(() => {});
+      if (owned && sbx) {
+        e2bDeleteSandbox(sbx).catch(() => {});
       }
     }
   }

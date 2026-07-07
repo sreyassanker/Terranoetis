@@ -4,6 +4,11 @@ import type { Request, Response, NextFunction } from 'express';
 export const askSchema = z.object({
   message: z.string().min(1).max(10000),
   cloud: z.boolean().optional(),
+  environmentId: z.string().optional(),
+  interactionId: z.string().optional(),
+  apiKey: z.string().optional(),
+  userId: z.string().optional(),
+  images: z.array(z.object({ dataUrl: z.string(), mimeType: z.string(), fileName: z.string() })).optional(),
 });
 
 export const sandboxExecuteSchema = z.object({

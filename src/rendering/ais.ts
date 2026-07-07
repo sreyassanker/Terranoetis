@@ -62,6 +62,10 @@ export class AisVesselTracker {
   private onStatus: ((msg: string, type: 'success' | 'error' | 'info') => void) | null = null;
   private hasReceivedData = false;
 
+  getVesselsSnapshot(): AisVesselState[] {
+    return [...this.vessels.values()];
+  }
+
   private static readonly MAX_RECONNECT_ATTEMPTS = 10;
   private static readonly BASE_RECONNECT_MS = 1000;
   private static readonly MAX_RECONNECT_MS = 60_000;

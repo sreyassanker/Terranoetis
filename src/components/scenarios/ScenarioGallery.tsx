@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react';
+import { Layers } from 'lucide-react';
 import type { ScenarioSummary } from './types';
 import { SCENARIO_TYPE_LABELS, SCENARIO_TYPE_COLORS } from './types';
 import ScenarioThumbnail from './ScenarioThumbnail';
+import Panel from '@/components/ui/Panel';
 
 type SortKey = 'recency' | 'confidence' | 'complexity' | 'score';
 type FilterKey = 'all' | 'earthquake_swarm' | 'hurricane_landfall' | 'wildfire_spread' | 'volcanic_eruption' | 'flood_inundation' | 'tsunami_wave';
@@ -35,15 +37,17 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
   }, [externalScenarios, filter, sort, search]);
 
   return (
-    <div className="alerts-panel glass-panel open" style={{ width: 520, maxHeight: 'calc(100vh - 92px)' }}>
-      <div className="ai-header">
-        <div className="social-icon-grad">🌋</div>
-        <div className="ai-title">Scenario Gallery</div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button className="glass-button" style={{ fontSize: 10, padding: '2px 8px' }} onClick={onCreateNew}>+ New</button>
-          <button className="ai-close" onClick={onClose}>✕</button>
-        </div>
-      </div>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 520 }}>
+      <Panel
+        title="SCENARIO GALLERY"
+        icon={<Layers size={14} />}
+        accentColor="#3b82f6"
+        iconColor="#60a5fa"
+        titleColor="#93c5fd"
+        onClose={onClose}
+        headerExtra={<button className="glass-button" style={{ fontSize: 10, padding: '2px 8px', background: 'rgba(59,130,246,0.3)', border: 'none', borderRadius: 4, color: '#93c5fd', cursor: 'pointer' }} onClick={onCreateNew}>+ New</button>}
+        style={{ maxHeight: 'calc(100vh - 92px)' }}
+      >
 
       <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 140px)' }}>
         {/* Search */}
@@ -136,6 +140,7 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
           </div>
         )}
       </div>
+    </Panel>
     </div>
   );
 }

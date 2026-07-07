@@ -7,6 +7,33 @@ import type { FutureTensorDomain } from './FutureTensor';
 
 const MAX_ITEMS_PER_LAYER = 500;
 
+// ── Ocean current arrow billboard ──
+let _arrowCanvas: HTMLCanvasElement | null = null;
+
+function getArrowCanvas(): HTMLCanvasElement {
+  if (_arrowCanvas) return _arrowCanvas;
+  const c = document.createElement('canvas');
+  c.width = 32;
+  c.height = 32;
+  const ctx = c.getContext('2d')!;
+  // Draw a simple arrow pointing right (0°)
+  ctx.clearRect(0, 0, 32, 32);
+  ctx.translate(16, 16);
+  ctx.fillStyle = '#3b82f6';
+  ctx.beginPath();
+  ctx.moveTo(12, 0);
+  ctx.lineTo(-6, -8);
+  ctx.lineTo(-4, 0);
+  ctx.lineTo(-6, 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  _arrowCanvas = c;
+  return c;
+}
+
 const BATCH_SIZE = 50;
 const FRAME_BUDGET_MS = 8;
 
@@ -111,18 +138,32 @@ function renderPoints(
         }, false) as unknown as Cesium.PositionProperty
       : Cesium.Cartesian3.fromDegrees(lon, lat);
 
+    const hasHeading = item.heading != null;
     const config: Cesium.Entity.ConstructorOptions = {
       id: entityId,
       position,
       name: String(name),
-      point: {
-        pixelSize: 6,
-        color,
-        outlineColor: Cesium.Color.WHITE,
-        outlineWidth: 1,
-        heightReference: isSpace ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
-        ...(isSpace ? { scaleByDistance: new Cesium.NearFarScalar(1.5e6, 2.0, 1.5e8, 0.3) } : {}),
-      },
+      ...(hasHeading ? {
+        billboard: {
+          image: getArrowCanvas(),
+          rotation: Cesium.Math.toRadians(90 - item.heading),
+          scale: 0.8,
+          color,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          scaleByDistance: new Cesium.NearFarScalar(1.5e6, 1.2, 1.5e8, 0.3),
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        },
+      } : {
+        point: {
+          pixelSize: 6,
+          color,
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 1,
+          heightReference: isSpace ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
+          ...(isSpace ? { scaleByDistance: new Cesium.NearFarScalar(1.5e6, 2.0, 1.5e8, 0.3) } : {}),
+        },
+      }),
       label: {
         text: typeof name === 'string' && name.length > 20 ? name.slice(0, 18) + '...' : String(name),
         font: '9px Space Grotesk, sans-serif',

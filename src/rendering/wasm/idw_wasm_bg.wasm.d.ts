@@ -1,5 +1,3 @@
-/* tslint:disable */
-/* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_get_neighbor_dist_sq: (a: number) => number;
 export const __wbg_get_neighbor_lat: (a: number) => number;

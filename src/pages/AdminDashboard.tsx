@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getToken } from '../context/AuthContext';
+import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart } from 'lucide-react';
 
 type Tab = 'metrics' | 'audit' | 'plugins' | 'health';
 
@@ -107,7 +108,7 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
     return (
       <div className="admin-overlay">
         <div className="admin-panel" style={{ textAlign: 'center', padding: 40 }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+          <Lock size={48} />
           <h2>Access Denied</h2>
           <p style={{ color: '#94a3b8' }}>Admin privileges required.</p>
           <button onClick={onClose} style={{ marginTop: 16, padding: '8px 24px', borderRadius: 8, border: 'none', background: '#334155', color: '#e2e8f0', cursor: 'pointer' }}>Close</button>
@@ -128,10 +129,10 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#e2e8f0' }}>🛡️ Admin Dashboard</h2>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#e2e8f0' }}><Shield size={18} style={{display:'inline',marginRight:6}} /> Admin Dashboard</h2>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button onClick={logout} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: 12 }}>Logout</button>
-            <button onClick={onClose} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#334155', color: '#e2e8f0', cursor: 'pointer', fontSize: 12 }}>✕</button>
+            <button onClick={onClose} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#334155', color: '#e2e8f0', cursor: 'pointer', fontSize: 12 }}><X size={12} /></button>
           </div>
         </div>
 
@@ -143,7 +144,7 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
                 background: tab === t ? 'rgba(59,130,246,0.15)' : 'transparent',
                 color: tab === t ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 13, fontWeight: tab === t ? 600 : 400,
               }}>
-              {t === 'metrics' ? '📊 Metrics' : t === 'audit' ? '📋 Audit Logs' : t === 'plugins' ? '🔌 Plugins' : '❤️ Health'}
+              {t === 'metrics' ? <><BarChart3 size={13} style={{display:'inline',marginRight:4}} /> Metrics</> : t === 'audit' ? <><ClipboardList size={13} style={{display:'inline',marginRight:4}} /> Audit Logs</> : t === 'plugins' ? <><Plug size={13} style={{display:'inline',marginRight:4}} /> Plugins</> : <><Heart size={13} style={{display:'inline',marginRight:4}} /> Health</>}
             </button>
           ))}
         </div>

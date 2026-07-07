@@ -22,6 +22,8 @@ import {
   computeFloodRouting,
 } from '@/rendering/physicsSurrogates';
 import { computeFusedSurface } from '@/rendering/gisFusion';
+import { Wrench } from 'lucide-react';
+import Panel from '@/components/ui/Panel';
 
 /* ═════════════════════════════════════════════════════════════════
    TYPES & CONSTANTS
@@ -275,6 +277,9 @@ const DIRECT_API: Record<string, DirectApiEntry> = {
   /* predict is handled as a special case in executeChain — synthesizes from cumulative evidence */
 };
 
+/* Skip: predict (synthesis), radar_fetch (tile-only, no points), space_weather (global) */
+const TOOL_WORKBENCH_SKIPPED_TOOLS = new Set(['predict', 'radar_fetch', 'space_weather']);
+
 /** Tools in causal topological order — data flows downstream */
 const AVAILABLE_TOOLS: Tool[] = [
   { name: 'earthquakes', category: 'seismic', description: 'Recent M2.5+ earthquakes (USGS)' },
@@ -338,19 +343,43 @@ export default function ToolWorkbench({ onClose, bbox, onSurfaceData, onClear }:
   useEffect(() => { initBlackboard(); }, []);
   useEffect(() => { return () => { mountedRef.current = false; }; }, []);
 
+  /* Set default date range (IST): now → 1 hour ago */
+  useEffect(() => {
+    function istParts(date: Date) {
+      const ms = date.getTime() + 5.5 * 3600000;
+      const ist = new Date(ms);
+      return {
+        date: `${ist.getUTCFullYear()}-${String(ist.getUTCMonth()+1).padStart(2,'0')}-${String(ist.getUTCDate()).padStart(2,'0')}`,
+        time: `${String(ist.getUTCHours()).padStart(2,'0')}:${String(ist.getUTCMinutes()).padStart(2,'0')}`,
+      };
+    }
+    const now = new Date();
+    const end = istParts(now);
+    const start = istParts(new Date(now.getTime() - 3600000));
+    setRangeEndDate(end.date);
+    setRangeEndTime(end.time);
+    setRangeStartDate(start.date);
+    setRangeStartTime(start.time);
+  }, []);
+
   const bboxCentroid = bbox
     ? { lat: (bbox.latMin + bbox.latMax) / 2, lon: (bbox.lonMin + bbox.lonMax) / 2 }
     : undefined;
 
   /* Auto-populate chain in topological order when bbox appears */
   /* Skip: predict (synthesis), radar_fetch (tile-only, no points), space_weather (global) */
-  const SKIPPED_TOOLS = new Set(['predict', 'radar_fetch', 'space_weather']);
   useEffect(() => {
     if (autoMode && bbox && !autoPopulatedRef.current) {
       autoPopulatedRef.current = true;
-      setChain(AVAILABLE_TOOLS.filter(t => !SKIPPED_TOOLS.has(t.name)).map((t, i) => ({
+      const midLat = ((bbox.latMin + bbox.latMax) / 2).toFixed(4);
+      const midLon = ((bbox.lonMin + bbox.lonMax) / 2).toFixed(4);
+      const params = JSON.stringify({
+        lat: parseFloat(midLat), lon: parseFloat(midLon),
+        latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax,
+      }, null, 1);
+      setChain(AVAILABLE_TOOLS.filter(t => !TOOL_WORKBENCH_SKIPPED_TOOLS.has(t.name)).map((t, i) => ({
         tool: t.name,
-        params: bboxParams(),
+        params,
         id: `step_auto_${Date.now()}_${i}`,
       })));
     }
@@ -701,36 +730,46 @@ export default function ToolWorkbench({ onClose, bbox, onSurfaceData, onClear }:
 
   const categories = [...new Set(AVAILABLE_TOOLS.map(t => t.category))];
 
+  const headerExtra = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 0 }}>
+      {bbox && (
+        <span style={{ fontSize: 8, color: '#5eead4' }}>
+          [{bbox.latMin.toFixed(1)},{bbox.lonMin.toFixed(1)} → {bbox.latMax.toFixed(1)},{bbox.lonMax.toFixed(1)}]
+        </span>
+      )}
+      {(['chain', 'whatif'] as const).map(tab => (
+        <button key={tab} onClick={() => setActiveTab(tab)}
+          style={{ padding: '2px 10px', fontSize: 10, fontWeight: 600, cursor: 'pointer',
+            background: activeTab === tab ? 'rgba(139,92,246,0.4)' : 'transparent',
+            border: 'none', borderRadius: 4, color: activeTab === tab ? '#8b5cf6' : '#475569' }}>
+          {tab === 'chain' ? 'Chain' : 'What-If'}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      {/* Header */}
-      <div className="panel-header" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontWeight: 700, fontSize: 13 }}>Tool Workbench</span>
-        {bbox && (
-          <span style={{ fontSize: 8, color: 'var(--teal)' }}>
-            [{bbox.latMin.toFixed(1)},{bbox.lonMin.toFixed(1)} → {bbox.latMax.toFixed(1)},{bbox.lonMax.toFixed(1)}]
-          </span>
-        )}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
-          {(['chain', 'whatif'] as const).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              style={{ padding: '2px 10px', fontSize: 10, fontWeight: 600, cursor: 'pointer',
-                background: activeTab === tab ? 'rgba(59,130,246,0.15)' : 'transparent',
-                border: 'none', borderRadius: 4, color: activeTab === tab ? 'var(--accent)' : 'var(--text-dim)' }}>
-              {tab === 'chain' ? 'Chain' : 'What-If'}
-            </button>
-          ))}
-        </div>
-        <button className="ai-close" onClick={onClose}>✕</button>
-      </div>
+    <Panel
+      title="TOOL WORKBENCH"
+      icon={<Wrench size={16} />}
+      accentColor="#8b5cf6"
+      iconColor="#a78bfa"
+      titleColor="#c4b5fd"
+      onClose={onClose}
+      headerExtra={headerExtra}
+      headerHeight="44px"
+      headerBackground="linear-gradient(135deg, rgba(139,92,246,0.2), rgba(139,92,246,0.15)), rgba(10,10,30,0.95)"
+      style={{ background: 'transparent', backdropFilter: 'none', WebkitBackdropFilter: 'none' }}
+    >
 
       {activeTab === 'chain' ? (
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
           {/* Tool Palette */}
-          <div style={{ width: 130, borderRight: '1px solid var(--border)', overflow: 'auto', padding: 6 }}>
+          <div style={{ width: 130, borderRight: '1px solid var(--border)', overflow: 'auto', padding: 6, background: 'transparent' }}>
             <div onClick={() => setAutoMode(!autoMode)}
               style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6, fontSize: 10, fontWeight: 600,
-                color: autoMode ? 'var(--accent)' : 'var(--text-dim)', cursor: 'pointer', userSelect: 'none' }}>
+                color: autoMode ? 'var(--accent)' : 'var(--text-dim)', cursor: 'pointer', userSelect: 'none',
+                padding: '3px 6px', borderRadius: 4, background: 'rgba(10,10,30,0.92)', border: '1px solid var(--border)' }}>
               <span style={{ width: 12, height: 12, borderRadius: 3, fontSize: 8, display: 'inline-flex',
                 alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s',
                 background: autoMode ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.05)',
@@ -740,17 +779,17 @@ export default function ToolWorkbench({ onClose, bbox, onSurfaceData, onClear }:
               Auto (topo order)
             </div>
             {categories.map(cat => (
-              <div key={cat} style={{ marginBottom: 6 }}>
-                <div style={{ fontSize: 8, color: 'var(--text-dim)', marginBottom: 2, textTransform: 'uppercase' }}>{cat}</div>
+              <div key={cat} style={{ marginBottom: 6, padding: '4px 6px', borderRadius: 4, background: 'rgba(10,10,30,0.92)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 8, color: '#94a3b8', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>{cat}</div>
                 {AVAILABLE_TOOLS.filter(t => t.category === cat).map(tool => {
                   const meta = TOOL_META[tool.name];
                   return (
                     <div key={tool.name} onClick={() => addTool(tool.name)}
                       style={{ padding: '3px 6px', fontSize: 9, cursor: 'pointer', borderRadius: 4, marginBottom: 2,
-                        display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,0.03)',
+                        display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(10,10,30,0.92)',
                         border: '1px solid var(--border)', color: 'var(--text)', transition: 'all 0.15s' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(59,130,246,0.1)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(59,130,246,0.2)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'rgba(10,10,30,0.92)')}
                       title={tool.description}>
                       <span style={{ width: 18, height: 14, borderRadius: 3, fontSize: 7, fontWeight: 700,
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
@@ -766,10 +805,10 @@ export default function ToolWorkbench({ onClose, bbox, onSurfaceData, onClear }:
           </div>
 
           {/* Chain Builder */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0, background: 'rgba(10,10,30,0.92)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
             <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)', fontSize: 10, fontWeight: 600,
               color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>Chain ({chain.length} steps, topo order)</span>
+              <span>Chain</span>
               {causalState && (
                 <span style={{ fontSize: 8, color: 'var(--teal)' }}>
                   info gain: {causalState.informationGain.toFixed(3)} bits
@@ -979,7 +1018,7 @@ export default function ToolWorkbench({ onClose, bbox, onSurfaceData, onClear }:
         </div>
       ) : (
         /* What-If Tab */
-        <div style={{ flex: 1, overflow: 'auto', padding: 10 }}>
+        <div style={{ flex: 1, overflow: 'auto', minHeight: 0, padding: 10 }}>
           {!selectedScenario ? (
             <>
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>What-If Scenarios</div>
@@ -1064,6 +1103,6 @@ export default function ToolWorkbench({ onClose, bbox, onSurfaceData, onClear }:
           </div>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }

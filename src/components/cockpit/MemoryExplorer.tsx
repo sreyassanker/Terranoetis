@@ -1,4 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { Brain } from 'lucide-react';
+import Panel from '@/components/ui/Panel';
 
 interface MemoryItem {
   id: number;
@@ -135,11 +137,14 @@ export default function MemoryExplorer({ onClose }: MemoryExplorerProps) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <div className="panel-header">
-        <span style={{ fontWeight: 700, fontSize: 13 }}>🧠 Memory Explorer</span>
-        <button className="ai-close" onClick={onClose}>✕</button>
-      </div>
+    <Panel
+      title="MEMORY EXPLORER"
+      icon={<Brain size={16} />}
+      accentColor="#06b6d4"
+      iconColor="#22d3ee"
+      titleColor="#67e8f9"
+      onClose={onClose}
+    >
 
       {/* Search */}
       <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
@@ -234,6 +239,6 @@ export default function MemoryExplorer({ onClose }: MemoryExplorerProps) {
           </div>
         </div>
       </div>
-    </div>
+    </Panel>
   );
 }

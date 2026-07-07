@@ -80,6 +80,10 @@ export class FlightDeadReckoning {
   private viewer: Cesium.Viewer;
   private lastTickTime: number = Date.now();
 
+  getFlightsSnapshot(): FlightState[] {
+    return [...this.flights.values()];
+  }
+
   constructor(viewer: Cesium.Viewer) {
     this.viewer = viewer;
   }

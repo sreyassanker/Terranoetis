@@ -1,11 +1,30 @@
-import { useState, useCallback } from 'react';
-import { Search, Loader2, X, Globe } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { Search, Loader2, Globe, Database, Play, Square } from 'lucide-react';
+import Panel from '@/components/ui/Panel';
 
 interface SearchResult {
   lat: number; lon: number; classLabel: string; confidence: number; similarity?: number; fetchedAt: string;
 }
 
-export function SatelliteSearchPanel({ onClose }: { onClose?: () => void }) {
+interface SeederStatus {
+  running: boolean;
+  spacingDeg: number;
+  totalCells: number;
+  completedCells: number;
+  percentComplete: number;
+  lastLat: number | null;
+  lastLon: number | null;
+  lastError: string | null;
+  activeJobs: number;
+}
+
+interface Props {
+  onClose?: () => void;
+  onResults?: (results: Array<{ lat: number; lon: number; classLabel: string; similarity?: number }>) => void;
+  onFlyTo?: (lat: number, lon: number, options?: { label?: string; color?: string; height?: number }) => void;
+}
+
+export function SatelliteSearchPanel({ onClose, onResults, onFlyTo }: Props) {
   const [query, setQuery] = useState('');
   const [lat, setLat] = useState('');
   const [lon, setLon] = useState('');
@@ -17,6 +36,8 @@ export function SatelliteSearchPanel({ onClose }: { onClose?: () => void }) {
   const [mode, setMode] = useState<'text' | 'geo' | 'class'>('text');
   const [classes, setClasses] = useState<string[]>([]);
   const [selectedClass, setSelectedClass] = useState('');
+  const [seederStatus, setSeederStatus] = useState<SeederStatus | null>(null);
+  const [showSeeder, setShowSeeder] = useState(false);
 
   const loadClasses = useCallback(async () => {
     try {
@@ -26,7 +47,15 @@ export function SatelliteSearchPanel({ onClose }: { onClose?: () => void }) {
     } catch { /* ignore */ }
   }, []);
 
-  useState(() => { loadClasses(); });
+  const fetchSeederStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/fm/seeder/status');
+      const data = await res.json();
+      setSeederStatus(data);
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { loadClasses(); }, [loadClasses]);
 
   const doSearch = useCallback(async () => {
     setLoading(true); setError(null);
@@ -36,31 +65,52 @@ export function SatelliteSearchPanel({ onClose }: { onClose?: () => void }) {
       if (mode === 'geo' && lat && lon) url += `&lat=${lat}&lon=${lon}&radiusKm=${radius || '100'}`;
       if (mode === 'class' && selectedClass) url += `&classLabel=${selectedClass}`;
       const res = await fetch(url);
-      if (!res.ok) throw new Error((await res.json()).error);
+      if (!res.ok) throw new Error((await res.json()).error || 'Search failed');
       const data = await res.json();
-      setResults(data.results);
-      setTotal(data.total);
+      setResults(data.results || []);
+      setTotal(data.total || 0);
+      onResults?.(data.results || []);
+      if (data.results?.length > 0 && onFlyTo) {
+        onFlyTo(data.results[0].lat, data.results[0].lon, { label: data.results[0].classLabel.replace(/_/g, ' ') });
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
     } finally { setLoading(false); }
-  }, [query, lat, lon, radius, mode, selectedClass]);
+  }, [query, lat, lon, radius, mode, selectedClass, onResults, onFlyTo]);
+
+  const handleSeedLocation = async (sLat: number, sLon: number) => {
+    try {
+      await fetch('/api/fm/seeder/seed-location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat: sLat, lon: sLon }),
+      });
+      fetchSeederStatus();
+    } catch { /* ignore */ }
+  };
+
+  const handleStartSeeder = async () => {
+    try {
+      await fetch('/api/fm/seeder/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resume: true }),
+      });
+      fetchSeederStatus();
+    } catch { /* ignore */ }
+  };
+
+  const handleStopSeeder = async () => {
+    try {
+      await fetch('/api/fm/seeder/stop', { method: 'POST' });
+      fetchSeederStatus();
+    } catch { /* ignore */ }
+  };
 
   return (
-    <div style={{
-      position: 'absolute', top: 60, right: 10, width: 340,
-      background: 'rgba(10,10,30,0.92)', border: '1px solid rgba(34,197,94,0.3)',
-      borderRadius: 12, overflow: 'hidden', fontFamily: 'monospace', fontSize: 12, zIndex: 1000,
-      backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px',
-        background: 'linear-gradient(135deg, rgba(34,197,94,0.15), rgba(16,185,129,0.1))',
-        borderBottom: '1px solid rgba(34,197,94,0.2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Search size={16} style={{ color: '#34d399' }} />
-          <span style={{ color: '#6ee7b7', fontWeight: 600, fontSize: 11, letterSpacing: 1 }}>SATELLITE SEARCH</span>
-        </div>
-        {onClose && <X size={14} style={{ color: '#64748b', cursor: 'pointer' }} onClick={onClose} />}
-      </div>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 1000, width: 340 }}>
+      <Panel title="EO IMAGE SEARCH" icon={<Search size={16} />} accentColor="#22c55e" iconColor="#34d399" titleColor="#6ee7b7" onClose={onClose}>
 
       <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(34,197,94,0.1)' }}>
         <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
@@ -131,24 +181,82 @@ export function SatelliteSearchPanel({ onClose }: { onClose?: () => void }) {
 
       {error && <div style={{ padding: '8px 14px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: 10 }}>{error}</div>}
 
-      <div style={{ padding: '10px 14px', maxHeight: 350, overflowY: 'auto' }}>
+      <div style={{ padding: '10px 14px', maxHeight: 300, overflowY: 'auto' }}>
         <div style={{ color: '#6ee7b7', fontSize: 9, marginBottom: 6 }}>{total} RESULT{total !== 1 ? 'S' : ''}</div>
         {results.length === 0 ? (
-          <div style={{ color: '#64748b', fontSize: 10, textAlign: 'center', padding: 20 }}>No results found</div>
+          <div style={{ color: '#64748b', fontSize: 10, textAlign: 'center', padding: 20 }}>No results found. The database may be empty — start the seeder below to populate it with real Sentinel-2 data.</div>
         ) : (
           results.map((r, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', marginBottom: 4,
-              borderRadius: 6, background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.1)' }}>
+            <div key={i}
+              onClick={() => onFlyTo?.(r.lat, r.lon, { label: r.classLabel.replace(/_/g, ' ') })}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', marginBottom: 4,
+                borderRadius: 6, background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.1)',
+                cursor: onFlyTo ? 'pointer' : 'default' }}>
               <Globe size={12} style={{ color: '#34d399' }} />
               <div style={{ flex: 1 }}>
                 <div style={{ color: '#e2e8f0', fontSize: 10 }}>{r.lat.toFixed(3)}, {r.lon.toFixed(3)}</div>
                 <div style={{ color: '#22c55e', fontSize: 9 }}>{r.classLabel.replace(/_/g, ' ')}</div>
               </div>
               {r.similarity != null && <span style={{ color: '#94a3b8', fontSize: 9 }}>{(r.similarity * 100).toFixed(0)}%</span>}
+              <button onClick={e => { e.stopPropagation(); handleSeedLocation(r.lat, r.lon); }}
+                style={{ padding: '2px 6px', borderRadius: 4, border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer',
+                  background: 'transparent', color: '#34d399', fontSize: 8 }} title="Re-analyze this location">
+                <Database size={10} />
+              </button>
             </div>
           ))
         )}
       </div>
+
+      {/* Seeder Controls */}
+      <div style={{ borderTop: '1px solid rgba(34,197,94,0.1)' }}>
+        <button onClick={() => { setShowSeeder(p => !p); if (!showSeeder) fetchSeederStatus(); }}
+          style={{ width: '100%', padding: '6px 14px', border: 'none', cursor: 'pointer',
+            background: 'transparent', color: '#6ee7b7', fontSize: 9, textTransform: 'uppercase' }}>
+          <Database size={10} style={{ marginRight: 4 }} />Database Seeder {showSeeder ? '▲' : '▼'}
+        </button>
+        {showSeeder && (
+          <div style={{ padding: '8px 14px' }}>
+            {seederStatus && (
+              <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Progress</span>
+                  <span style={{ color: '#6ee7b7' }}>{seederStatus.percentComplete}%</span>
+                </div>
+                <div style={{ width: '100%', height: 4, background: 'rgba(34,197,94,0.1)', borderRadius: 2, margin: '4 0', overflow: 'hidden' }}>
+                  <div style={{ width: `${seederStatus.percentComplete}%`, height: '100%', background: '#22c55e', borderRadius: 2 }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                  <span>{seederStatus.completedCells}/{seederStatus.totalCells} cells</span>
+                  <span style={{ color: seederStatus.running ? '#22c55e' : '#64748b' }}>
+                    {seederStatus.running ? 'RUNNING' : 'IDLE'}
+                  </span>
+                </div>
+                {seederStatus.lastError && (
+                  <div style={{ color: '#ef4444', marginTop: 4, wordBreak: 'break-all' }}>Last error: {seederStatus.lastError}</div>
+                )}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 4 }}>
+              {!seederStatus?.running ? (
+                <button onClick={handleStartSeeder}
+                  style={{ flex: 1, padding: '4px', borderRadius: 4, border: 'none', cursor: 'pointer',
+                    background: 'rgba(34,197,94,0.6)', color: '#e2e8f0', fontSize: 9 }}>
+                  <Play size={10} style={{ marginRight: 4 }} />Start Seeder
+                </button>
+              ) : (
+                <button onClick={handleStopSeeder}
+                  style={{ flex: 1, padding: '4px', borderRadius: 4, border: 'none', cursor: 'pointer',
+                    background: 'rgba(239,68,68,0.6)', color: '#e2e8f0', fontSize: 9 }}>
+                  <Square size={10} style={{ marginRight: 4 }} />Stop Seeder
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+    </Panel>
     </div>
   );
 }

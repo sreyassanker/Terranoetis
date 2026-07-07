@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Brain, Eye, Zap, BookOpen, Puzzle, Moon, Wrench, Package, Sparkles } from 'lucide-react';
+import Panel from '@/components/ui/Panel';
 
 interface HealthResponse {
   uptime?: number;
@@ -88,14 +90,14 @@ function AnimatedBrain({ load }: { load: number }) {
 
 function MemoryTierBar({ tier, count }: { tier: string; count: number }) {
   const tierConfig: Record<string, { label: string; color: string; barColor: string }> = {
-    sensory: { label: '👁 Sensory', color: 'var(--accent)', barColor: 'rgba(59,130,246,0.3)' },
-    working: { label: '⚡ Working', color: 'var(--accent)', barColor: 'rgba(59,130,246,0.3)' },
-    episodic: { label: '📖 Episodic', color: 'var(--purple)', barColor: 'rgba(168,85,247,0.3)' },
-    semantic: { label: '🧩 Semantic', color: 'var(--purple)', barColor: 'rgba(168,85,247,0.3)' },
-    consolidating: { label: '💤 Consolidating', color: 'var(--purple)', barColor: 'rgba(168,85,247,0.3)' },
-    procedural: { label: '🔧 Procedural', color: 'var(--teal)', barColor: 'rgba(20,184,166,0.3)' },
-    long_term: { label: '📦 Long-term', color: 'var(--teal)', barColor: 'rgba(20,184,166,0.3)' },
-    predictive: { label: '🔮 Predictive', color: 'var(--warning)', barColor: 'rgba(245,158,11,0.3)' },
+    sensory: { label: <><Eye size={11} style={{display:'inline',marginRight:3}} /> Sensory</>, color: 'var(--accent)', barColor: 'rgba(59,130,246,0.3)' },
+    working: { label: <><Zap size={11} style={{display:'inline',marginRight:3}} /> Working</>, color: 'var(--accent)', barColor: 'rgba(59,130,246,0.3)' },
+    episodic: { label: <><BookOpen size={11} style={{display:'inline',marginRight:3}} /> Episodic</>, color: 'var(--purple)', barColor: 'rgba(168,85,247,0.3)' },
+    semantic: { label: <><Puzzle size={11} style={{display:'inline',marginRight:3}} /> Semantic</>, color: 'var(--purple)', barColor: 'rgba(168,85,247,0.3)' },
+    consolidating: { label: <><Moon size={11} style={{display:'inline',marginRight:3}} /> Consolidating</>, color: 'var(--purple)', barColor: 'rgba(168,85,247,0.3)' },
+    procedural: { label: <><Wrench size={11} style={{display:'inline',marginRight:3}} /> Procedural</>, color: 'var(--teal)', barColor: 'rgba(20,184,166,0.3)' },
+    long_term: { label: <><Package size={11} style={{display:'inline',marginRight:3}} /> Long-term</>, color: 'var(--teal)', barColor: 'rgba(20,184,166,0.3)' },
+    predictive: { label: <><Sparkles size={11} style={{display:'inline',marginRight:3}} /> Predictive</>, color: 'var(--warning)', barColor: 'rgba(245,158,11,0.3)' },
   };
   const config = tierConfig[tier] || { label: tier, color: 'var(--text-dim)', barColor: 'rgba(255,255,255,0.1)' };
   const maxItems = 500;
@@ -191,13 +193,14 @@ export default function CognitiveDashboard({ onClose }: CognitiveDashboardProps)
   const totalEngines = Object.keys(metrics.engineStatus).length || 1;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <div className="panel-header">
-        <span style={{ background: 'linear-gradient(135deg, #3b82f6, #a855f7)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: 700, fontSize: 13 }}>
-          🧠 Cognitive Dashboard
-        </span>
-        <button className="ai-close" onClick={onClose}>✕</button>
-      </div>
+    <Panel
+      title="COGNITIVE DASHBOARD"
+      icon={<Brain size={16} />}
+      accentColor="#3b82f6"
+      iconColor="#60a5fa"
+      titleColor="#93c5fd"
+      onClose={onClose}
+    >
 
       <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
         {/* System Status */}
@@ -263,6 +266,6 @@ export default function CognitiveDashboard({ onClose }: CognitiveDashboardProps)
           ))}
         </div>
       </div>
-    </div>
+    </Panel>
   );
 }

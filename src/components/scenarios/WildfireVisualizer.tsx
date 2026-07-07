@@ -23,7 +23,7 @@ function cachePolyPositions(positions: { lat: number; lon: number }[], height: n
 export default function WildfireVisualizer({ viewer, shapes, progress }: WildfireVisualizerProps) {
   const entitiesRef = useRef<Cesium.Entity[]>([]);
   const progressRef = useRef(progress);
-  progressRef.current = progress;
+  useEffect(() => { progressRef.current = progress; });
 
   const cleanup = useCallback(() => {
     if (!viewer) return;

@@ -280,13 +280,13 @@ export class RadarInterpreter {
     return { lat: sumI / count, lon: sumJ / count };
   }
 
-  private estimateHailProbability(dbz: number, _maxDbz: number): number {
+  private estimateHailProbability(dbz: number, _maxReflectivity: number): number {
     if (dbz < 45) return 0;
     if (dbz < 55) return (dbz - 45) / 10 * 0.5;
     return 0.5 + (dbz - 55) / 15 * 0.5;
   }
 
-  private projectStormPath(lat: number, lon: number): Array<{ lat: number; lon: number; time: number }> {
+  private projectStormPath(_lat: number, _lon: number): Array<{ lat: number; lon: number; time: number }> {
     return [];
   }
 

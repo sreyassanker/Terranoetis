@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { Pen } from 'lucide-react';
 import * as Cesium from 'cesium';
+import Panel from '@/components/ui/Panel';
 
 interface SpatialSketchingProps {
   viewer: Cesium.Viewer | null;
@@ -136,12 +138,16 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario }
   }, [boundingBox, activePrompt, onGenerateScenario, clearDrawings]);
 
   return (
-    <div className="alerts-panel glass-panel open" style={{ width: 360, maxHeight: 'calc(100vh - 92px)' }}>
-      <div className="ai-header">
-        <div className="social-icon-grad">✏️</div>
-        <div className="ai-title">Spatial Sketching</div>
-        <button className="ai-close" onClick={onClose}>✕</button>
-      </div>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 360 }}>
+      <Panel
+        title="SPATIAL SKETCHING"
+        icon={<Pen size={14} />}
+        accentColor="#3b82f6"
+        iconColor="#60a5fa"
+        titleColor="#93c5fd"
+        onClose={onClose}
+        style={{ maxHeight: 'calc(100vh - 92px)' }}
+      >
 
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 140px)' }}>
         {/* Prompt Selection */}
@@ -217,6 +223,7 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario }
           </button>
         )}
       </div>
+    </Panel>
     </div>
   );
 }

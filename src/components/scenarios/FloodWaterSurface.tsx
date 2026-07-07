@@ -3,6 +3,7 @@ import * as Cesium from 'cesium';
 import type { ShapeData } from './types';
 import { sampleTerrainHeights } from '@/lib/terrainSampler';
 import { throttledRender } from '@/lib/throttledRender';
+import { createFloodMaterial, animateWaterMaterial } from '@/rendering/advancedWaterShader';
 
 interface FloodWaterSurfaceProps {
   viewer: Cesium.Viewer | null;
@@ -10,73 +11,6 @@ interface FloodWaterSurfaceProps {
   /** Progress 0→1 directly controlled by timeline scrubber */
   progress: number;
 }
-
-/**
- * GLSL wave shader for realistic water surface animation.
- * Uses procedural fBm noise for organic wave patterns.
- */
-const WAVE_SHADER_SOURCE = `
-  uniform float time;
-  uniform float waveIntensity;
-  uniform float alpha;
-
-  float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-  }
-
-  float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(
-      mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), u.x),
-      mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
-      u.y
-    );
-  }
-
-  float fbm(vec2 p) {
-    float value = 0.0;
-    float amplitude = 0.5;
-    float frequency = 1.0;
-    for (int i = 0; i < 4; i++) {
-      value += amplitude * noise(p * frequency);
-      frequency *= 2.0;
-      amplitude *= 0.5;
-    }
-    return value;
-  }
-
-  czm_material czm_getMaterial(czm_materialInput materialInput) {
-    czm_material material = czm_getDefaultMaterial(materialInput);
-    vec2 st = materialInput.st;
-
-    float t = time * 0.3;
-    float wave1 = fbm(st * 8.0 + vec2(t, t * 0.7));
-    float wave2 = fbm(st * 12.0 - vec2(t * 0.5, t * 1.2));
-    float wave3 = fbm(st * 5.0 + vec2(t * 0.8, -t * 0.4));
-
-    float combinedWave = (wave1 + wave2 + wave3) / 3.0;
-    float specular = pow(combinedWave, 3.0) * 0.4;
-
-    vec3 shallowColor = vec3(0.2, 0.75, 0.85);
-    vec3 deepColor = vec3(0.05, 0.15, 0.45);
-    vec3 waterCol = mix(shallowColor, deepColor, 1.0 - waveIntensity);
-
-    vec3 finalColor = waterCol + combinedWave * 0.08;
-    finalColor += vec3(specular * 0.6, specular * 0.7, specular * 0.9);
-
-    float foam = smoothstep(0.65, 0.78, combinedWave) * waveIntensity * 0.3;
-    finalColor += vec3(foam);
-
-    material.diffuse = finalColor;
-    material.alpha = alpha;
-    material.specular = vec3(0.4 + specular * 0.3);
-    material.shininess = 80.0;
-
-    return material;
-  }
-`;
 
 /**
  * Optimized Flood Water Surface Renderer
@@ -91,7 +25,7 @@ export default function FloodWaterSurface({ viewer, shapes, progress }: FloodWat
   const postRenderRef = useRef<(() => void) | null>(null);
   const builtShapesRef = useRef<string>('');
   const progressRef = useRef(progress);
-  progressRef.current = progress;
+  useEffect(() => { progressRef.current = progress; });
 
   const cleanup = useCallback(() => {
     if (!viewer) return;
@@ -121,25 +55,17 @@ export default function FloodWaterSurface({ viewer, shapes, progress }: FloodWat
 
     const heightMap = await sampleTerrainHeights(viewer, allPositions);
 
-    // Create wave material — shader runs on GPU, uniform updates are near-zero cost
-    const waveMaterial = new Cesium.Material({
-      fabric: {
-        type: 'WaveWater',
-        uniforms: {
-          time: 0.0,
-          waveIntensity: 0.6,
-          alpha: 0.6,
-        },
-        source: WAVE_SHADER_SOURCE,
-      },
-    });
+    // Create advanced flood material with terrain-following waves
+    const waveMaterial = createFloodMaterial(1.0, 0.5);
 
-    // Animate shader uniforms via postRender — only time updates, no position recalc
+    // Animate shader uniforms via postRender — GPU-side, near-zero CPU cost
     const postRenderListener = () => {
-      const t = performance.now() / 1000.0;
-      waveMaterial.uniforms.time = t;
-      waveMaterial.uniforms.waveIntensity = 0.3 + progressRef.current * 0.7;
-      waveMaterial.uniforms.alpha = 0.35 + progressRef.current * 0.45;
+      const deltaTime = 1.0 / 60.0; // ~60fps
+      animateWaterMaterial(waveMaterial, deltaTime);
+      // Update water level based on progress
+      if (waveMaterial.uniforms.waterLevel !== undefined) {
+        waveMaterial.uniforms.waterLevel = 0.5 + progressRef.current * 2.0;
+      }
     };
     viewer.scene.postRender.addEventListener(postRenderListener);
     postRenderRef.current = postRenderListener;
@@ -161,7 +87,6 @@ export default function FloodWaterSurface({ viewer, shapes, progress }: FloodWat
         return { lat: pos.lat, lon: pos.lon, terrainH, depth };
       });
 
-      const maxDepth = shape.maxDepth || 1;
       const baseColor = depthToColor(0.6);
 
       // Pre-compute static positions for initial state — only elevation changes via progress

@@ -77,8 +77,6 @@ export class ScenarioDatabase {
     this.init();
     const db = getDb();
     // Use a bounding box prefilter (~1 degree ≈ 111km) to avoid loading all scenarios
-    const latDelta = 1.0;
-    const lonDelta = 1.0 / Math.cos(lat * Math.PI / 180);
     const paramsJson = type ? '%' + '"lat"%' : '%';
     let sql = `SELECT * FROM scenarios WHERE params_json LIKE ?`;
     const params: unknown[] = [paramsJson];

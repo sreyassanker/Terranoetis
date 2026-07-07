@@ -1,4 +1,5 @@
 import React from 'react';
+import Panel from '@/components/ui/Panel';
 
 interface ForkItem {
   forkId: string;
@@ -65,23 +66,6 @@ export const MonitorPanel: React.FC<MonitorPanelProps> = ({
   const entropyColor = entropy < 0.3 ? ENTROPY_COLORS.baseline : entropy < 0.6 ? ENTROPY_COLORS.restless : entropy < 0.9 ? ENTROPY_COLORS.critical : ENTROPY_COLORS.catastrophic;
   const isCritical = entropy >= 0.9;
 
-  const containerStyle: React.CSSProperties = {
-    position: 'absolute',
-    bottom: '75px',
-    right: '20px',
-    width: '320px',
-    background: 'rgba(0, 0, 0, 0.9)',
-    border: '1px solid #00ff88',
-    borderRadius: '8px',
-    color: '#eee',
-    fontFamily: 'monospace',
-    fontSize: '11px',
-    zIndex: 1000,
-    maxHeight: isCollapsed ? '36px' : '500px',
-    overflow: 'hidden',
-    transition: 'max-height 0.3s ease',
-  };
-
   const headerStyle: React.CSSProperties = {
     display: 'flex',
     justifyContent: 'space-between',
@@ -123,11 +107,12 @@ export const MonitorPanel: React.FC<MonitorPanelProps> = ({
   });
 
   return (
-    <div style={containerStyle}>
-      <div style={headerStyle} onClick={onToggle}>
-        <span style={{ color: '#00ff88', fontWeight: 'bold', fontSize: '11px' }}>⬡ MONITOR</span>
-        <span style={{ color: '#00ff88' }}>{isCollapsed ? '▶' : '▼'}</span>
-      </div>
+    <div style={{ position: 'absolute', bottom: 75, right: 10, zIndex: 1000, width: 320 }}>
+      <Panel hideHeader accentColor="#22c55e" style={{ maxHeight: isCollapsed ? 44 : 500, transition: 'max-height 0.3s ease', overflow: 'hidden' }}>
+        <div style={headerStyle} onClick={onToggle}>
+          <span style={{ color: '#00ff88', fontWeight: 'bold', fontSize: '11px' }}>⬡ MONITOR</span>
+          <span style={{ color: '#00ff88' }}>{isCollapsed ? '▶' : '▼'}</span>
+        </div>
 
       {!isCollapsed && (
         <div style={{ overflowY: 'auto', maxHeight: '464px' }}>
@@ -253,6 +238,7 @@ export const MonitorPanel: React.FC<MonitorPanelProps> = ({
           </div>
         </div>
       )}
+    </Panel>
     </div>
   );
 };

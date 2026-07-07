@@ -55,6 +55,46 @@ export function simulateFlood(params: ScenarioParams): ScenarioTimeSeries {
     const intensities: number[] = [];
     const shapes: ShapeData[] = [];
 
+    // Always show the river channel and epicenter marker (even at t=0 when q=0)
+    if (t === 0) {
+      // Epicenter marker — source of the flood
+      shapes.push({
+        type: 'cylinder',
+        color: '#3b82f6',
+        opacity: 0.6,
+        center: { lat: p.lat, lon: p.lon },
+        radius: 1500,
+        height: 2000,
+      });
+
+      // River channel (initial state — visible before flooding begins)
+      const initRiverLen = 5 * KM_TO_DEG;
+      const initRiverPos: { lat: number; lon: number }[] = [];
+      for (let i = 0; i <= 20; i++) {
+        const frac = i / 20;
+        initRiverPos.push({
+          lat: p.lat - initRiverLen * 0.5 + initRiverLen * frac,
+          lon: p.lon + Math.sin(frac * Math.PI * 2) * 0.01,
+        });
+      }
+      shapes.push({
+        type: 'corridor',
+        color: '#1d4ed8',
+        opacity: 0.4,
+        positions: initRiverPos,
+        width: channelWidth,
+      });
+
+      // Label the river as the water source
+      shapes.push({
+        type: 'polyline',
+        color: '#60a5fa',
+        opacity: 0.3,
+        positions: initRiverPos,
+        width: 1.5,
+      });
+    }
+
     if (q > peakQ * 0.01) {
       // Generate flood grid points with depth data
       const floodPoints: { lat: number; lon: number; depth: number }[] = [];

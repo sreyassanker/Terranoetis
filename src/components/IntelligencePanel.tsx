@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  TrendingUp, TrendingDown, Zap, Globe, Link, BarChart3, X, ChevronDown, ChevronRight, AlertTriangle, Eye, RefreshCw, Activity, ArrowUpRight, ArrowDownRight, Layers, Radio, MapPin, Info, Hash, Brain
+  TrendingUp, TrendingDown, Zap, Globe, Link, BarChart3, ChevronDown, ChevronRight, AlertTriangle, Eye, RefreshCw, Activity, ArrowUpRight, ArrowDownRight, ArrowRight, Layers, Radio, MapPin, Info, Hash, Brain
 } from 'lucide-react';
+import Panel from '@/components/ui/Panel';
 import { AnalysisTab } from './AnalysisTab';
 import { DetailLineChart, Sparkline, StatRow } from './intelligence/ChartComponents';
 
@@ -665,9 +666,7 @@ const CorrelationTab: React.FC = () => {
                       <span style={{ fontSize: 9, color: '#64748b', display: 'flex', alignItems: 'center', gap: 2 }}>
                         <Radio size={8} /> {card.signals} signals
                       </span>
-                      <span style={{ fontSize: 9, color: card.trend === 'escalating' ? '#ef4444' : card.trend === 'de-escalating' ? '#22c55e' : '#64748b' }}>
-                        {card.trend === 'escalating' ? '↗' : card.trend === 'de-escalating' ? '↘' : '→'}
-                      </span>
+                      {card.trend === 'escalating' ? <TrendingUp size={9} color="#ef4444" style={{display:'inline'}} /> : card.trend === 'de-escalating' ? <TrendingDown size={9} color="#22c55e" style={{display:'inline'}} /> : <ArrowRight size={9} color="#64748b" style={{display:'inline'}} />}
                     </div>
                   </div>
                 </div>
@@ -938,44 +937,16 @@ export const IntelligencePanel: React.FC<IntelligencePanelProps> = ({
   if (!open) return null as unknown as React.ReactElement;
 
   return (
-    <>
-      {/* Panel - no backdrop overlay */}
-      <div style={{
-        position: 'fixed', top: 60, right: 16, bottom: 56, width: 380,
-        maxWidth: 'calc(100vw - 32px)', zIndex: 999,
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-        border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12,
-        boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(99,102,241,0.1)',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        animation: 'slideInRight 0.25s ease',
-      }}>
-        {/* Header */}
-        <div style={{
-          padding: '14px 16px 10px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          userSelect: 'none',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Eye size={16} color="#818cf8" />
-            <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', letterSpacing: '-0.02em' }}>
-              Pulse
-            </span>
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 6, color: '#94a3b8', cursor: 'pointer',
-              padding: '4px 8px', fontSize: 12, lineHeight: 1, transition: 'all 0.15s',
-              display: 'flex', alignItems: 'center',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.15)'; e.currentTarget.style.color = '#ef4444'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = '#94a3b8'; }}
-          >
-            <X size={12} />
-          </button>
-        </div>
+    <div style={{ position: 'fixed', top: 60, right: 10, bottom: 56, zIndex: 999, width: 380, maxWidth: 'calc(100vw - 32px)' }}>
+      <Panel
+        title="PULSE"
+        icon={<Eye size={16} />}
+        accentColor="#818cf8"
+        iconColor="#a78bfa"
+        titleColor="#c4b5fd"
+        onClose={onClose}
+        style={{ height: '100%', animation: 'slideInRight 0.25s ease' }}
+      >
 
         {/* Tab Bar */}
         <div className="tab-bar" style={{
@@ -1024,7 +995,7 @@ export const IntelligencePanel: React.FC<IntelligencePanelProps> = ({
             <Hash size={9} /> CMD+K search
           </div>
         </div>
-      </div>
-    </>
+    </Panel>
+    </div>
   );
 };

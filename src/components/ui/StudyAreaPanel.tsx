@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type Cesium from 'cesium';
+import { Map } from 'lucide-react';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import {
   generateAreaId, loadGeoJsonToGlobe, removeStudyAreaFromGlobe,
@@ -19,6 +20,7 @@ import {
   groupProducts,
 } from '@/rendering/studyArea';
 import { throttledRender } from '@/lib/throttledRender';
+import Panel from '@/components/ui/Panel';
 
 type TabId = 'upload' | 'draw' | 'manage' | 'export' | 'satellite' | 'analysis';
 
@@ -310,12 +312,15 @@ export default React.memo(function StudyAreaPanel({
   ];
 
   return (
-    <div className={`study-area-panel glass-panel ${show ? 'open' : ''}`}>
-      <div className="ai-header">
-        <div className="ai-icon" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', fontSize: 11, fontFamily: 'monospace', fontWeight: 700 }}>SA</div>
-        <div className="ai-title">Study Area</div>
-        <button className="ai-close" onClick={onClose}>✕</button>
-      </div>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 340, maxHeight: 'calc(100vh - 92px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Panel
+        title="STUDY AREA"
+        icon={<Map size={14} />}
+        accentColor="#22c55e"
+        iconColor="#34d399"
+        titleColor="#6ee7b7"
+        onClose={onClose}
+      >
 
       <div className="study-tabs">
         {tabLabels.map(t => (
@@ -739,6 +744,7 @@ export default React.memo(function StudyAreaPanel({
         )}
 
       </div>
+    </Panel>
     </div>
   );
 });

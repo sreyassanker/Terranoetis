@@ -2,7 +2,7 @@ import type { ScenarioParams, ScenarioTimeSeries, TimeStep, ShapeData, Point3D }
 import { SeededRNG, scenarioSeed } from './rng';
 
 /** Saffir-Simpson max sustained wind (kt) by category */
-const SAFFIR_SIMPSON_MAX_WIND = [33, 43, 50, 58, 64, 70, 77];
+const _SAFFIR_SIMPSON_MAX_WIND = [33, 43, 50, 58, 64, 70, 77];
 /** Saffir-Simpson category labels */
 const CAT_LABELS = ['TD', 'TS', 'Cat 1', 'Cat 2', 'Cat 3', 'Cat 4', 'Cat 5'];
 /** Saffir-Simpson colors */

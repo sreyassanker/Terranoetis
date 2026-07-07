@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, ExternalLink, Copy, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Save, Key, Search } from 'lucide-react';
 
 export interface ApiConfig {
   id: string;
@@ -24,72 +24,27 @@ interface ApiVaultProps {
 
 export function ApiVault({ isOpen, onClose, onSave, initialKeys }: ApiVaultProps) {
   const [apis, setApis] = useState<ApiConfig[]>([]);
-  const [keys, setKeys] = useState<Record<string, string>>(initialKeys || {});
-  const [activeCategory, setActiveCategory] = useState<string>('');
   const [categories, setCategories] = useState<string[]>([]);
+  const [keys, setKeys] = useState<Record<string, string>>(initialKeys || {});
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState<string | null>(null);
-  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
-
     const abort = new AbortController();
-
-    const fetchApiMetadata = async () => {
-      try {
-        const res = await fetch('/api/config/apis', { signal: abort.signal });
-        const data = await res.json();
+    fetch('/api/config/apis', { signal: abort.signal })
+      .then(r => r.json())
+      .then(data => {
         if (abort.signal.aborted) return;
         setApis(data.apis);
         setCategories(data.categories);
-        if (data.categories.length > 0) {
-          setActiveCategory(data.categories[0]);
-        }
         setLoading(false);
-      } catch (err) {
-        if (abort.signal.aborted) return;
-        console.error('Failed to fetch API metadata:', err);
-        setLoading(false);
-      }
-    };
-
-    fetchApiMetadata();
-
+      })
+      .catch(() => setLoading(false));
     return () => abort.abort();
   }, [isOpen]);
 
-  const categoryApis = apis.filter((api) => api.category === activeCategory);
-
-  const handleInputChange = (keyName: string, value: string) => {
-    setKeys((prev) => ({
-      ...prev,
-      [keyName]: value,
-    }));
-  };
-
-  const handleSave = () => {
-    onSave(keys);
-    onClose();
-  };
-
-  const copyToClipboard = async (text: string, id: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    }
-    setCopied(id);
-    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
-    copyTimeoutRef.current = setTimeout(() => setCopied(null), 2000);
-  };
+  if (!isOpen) return null;
 
   const getKeyFields = (api: ApiConfig): string[] => {
     if (api.envKeys) return api.envKeys;
@@ -97,191 +52,87 @@ export function ApiVault({ isOpen, onClose, onSave, initialKeys }: ApiVaultProps
     return [];
   };
 
-  if (!isOpen) return null;
+  const configuredCount = apis.filter(api => getKeyFields(api).some(f => keys[f]?.trim())).length;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-700">
-          <div>
-            <h2 className="text-2xl font-bold text-white">API Configuration</h2>
-            <p className="text-sm text-gray-400 mt-1">
-              Add your API keys to unlock features. All keys are stored locally.
-            </p>
+      <div className="bg-gray-900 rounded-lg shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-gray-700">
+          <div className="flex items-center gap-2">
+            <Key size={16} className="text-blue-400" />
+            <h2 className="text-lg font-bold text-white">API Keys</h2>
+            <span className="text-xs text-gray-500 ml-1">({configuredCount}/{apis.length} configured)</span>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white transition"
-          >
-            <X size={24} />
+          <button onClick={onClose} className="text-gray-400 hover:text-white transition p-1">
+            <X size={18} />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Category Sidebar */}
-          <div className="w-48 bg-gray-800 border-r border-gray-700 overflow-y-auto">
-            {categories.map((category) => {
-              const count = apis.filter((api) => api.category === category).length;
-              return (
-                <button
-                  key={category}
-                  onClick={() => setActiveCategory(category)}
-                  className={`w-full text-left px-4 py-3 border-l-4 transition ${
-                    activeCategory === category
-                      ? 'border-blue-500 bg-blue-500/10 text-blue-400'
-                      : 'border-transparent text-gray-300 hover:bg-gray-700'
-                  }`}
-                >
-                  <div className="font-medium">{category}</div>
-                  <div className="text-xs text-gray-500 mt-1">{count} APIs</div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* APIs List */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
-            {loading ? (
-              <div className="text-center text-gray-400">Loading API metadata...</div>
-            ) : categoryApis.length === 0 ? (
-              <div className="text-center text-gray-400">No APIs in this category</div>
-            ) : (
-              categoryApis.map((api) => {
-                const keyFields = getKeyFields(api);
-                const isFilled = keyFields.some((field) => keys[field]?.trim());
-
-                return (
-                  <div
-                    key={api.id}
-                    className="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-gray-600 transition"
-                  >
-                    {/* API Header */}
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h3 className="text-lg font-semibold text-white">{api.name}</h3>
-                        <p className="text-sm text-gray-400 mt-1">{api.description}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <span
-                          className={`px-2 py-1 rounded text-xs font-medium ${
-                            api.free
-                              ? 'bg-green-500/20 text-green-400'
-                              : 'bg-orange-500/20 text-orange-400'
-                          }`}
-                        >
-                          {api.free ? 'Free' : 'Paid'}
-                        </span>
-                        <span
-                          className={`px-2 py-1 rounded text-xs font-medium ${
-                            isFilled
-                              ? 'bg-blue-500/20 text-blue-400'
-                              : 'bg-gray-700/20 text-gray-400'
-                          }`}
-                        >
-                          {isFilled ? '✓ Configured' : 'Not Set'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Details */}
-                    <div className="mb-4 space-y-2 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500">Rate Limit:</span>
-                        <span className="text-gray-300">{api.rateLimit}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <a
-                          href={api.registrationUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-400 hover:text-blue-300 flex items-center gap-1"
-                        >
-                          Sign up / Get API Key
-                          <ExternalLink size={14} />
-                        </a>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <a
-                          href={api.docsUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-400 hover:text-blue-300 flex items-center gap-1"
-                        >
-                          Docs
-                          <ExternalLink size={14} />
-                        </a>
-                      </div>
-                    </div>
-
-                    {/* Input Fields */}
-                    {keyFields.length > 0 && (
-                      <div className="space-y-3">
-                        {keyFields.map((field) => (
-                          <div key={field}>
-                            <label className="block text-xs font-medium text-gray-400 mb-1">
-                              {field}
-                            </label>
-                            <div className="relative">
-                              <input
-                                type="password"
-                                placeholder={`Paste your ${field} here...`}
-                                value={keys[field] || ''}
-                                onChange={(e) => handleInputChange(field, e.target.value)}
-                                className="w-full bg-gray-700 text-white rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
-                              />
-                              {keys[field] && (
-                                <button
-                                  onClick={() =>
-                                    copyToClipboard(keys[field], `copy-${field}`)
-                                  }
-                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
-                                >
-                                  {copied === `copy-${field}` ? (
-                                    <Check size={16} />
-                                  ) : (
-                                    <Copy size={16} />
-                                  )}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {api.status === 'public' && keyFields.length === 0 && (
-                      <div className="text-xs text-green-400 bg-green-500/10 px-3 py-2 rounded">
-                        ✓ This API is public and requires no authentication
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
+        <div className="px-4 pt-2">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+            <input
+              type="text"
+              placeholder="Search APIs..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full bg-gray-800 text-white rounded pl-8 pr-3 py-1.5 text-xs border border-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
           </div>
         </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {loading ? (
+            <div className="text-center text-gray-500 text-sm py-8">Loading...</div>
+          ) : (
+            categories.map(cat => {
+              const catApis = apis.filter(a =>
+                a.category === cat &&
+                getKeyFields(a).length > 0 &&
+                (!search || a.name.toLowerCase().includes(search.toLowerCase()))
+              );
+              if (catApis.length === 0) return null;
+              return (
+                <div key={cat}>
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{cat}</div>
+                  <div className="space-y-2">
+                    {catApis.map(api => {
+                      const fields = getKeyFields(api);
+                      const filled = fields.some(f => keys[f]?.trim());
+                      return (
+                        <div key={api.id} className="bg-gray-800 rounded p-3 border border-gray-700">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-white">{api.name}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded ${filled ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-500'}`}>
+                              {filled ? 'Configured' : 'Not set'}
+                            </span>
+                          </div>
+                          {fields.map(field => (
+                            <input
+                              key={field}
+                              type="password"
+                              placeholder={`${field}`}
+                              value={keys[field] || ''}
+                              onChange={e => setKeys(prev => ({ ...prev, [field]: e.target.value }))}
+                              className="w-full bg-gray-700 text-white rounded px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between p-6 border-t border-gray-700 bg-gray-800">
-          <p className="text-xs text-gray-400">
-            Keys are stored in browser localStorage. Never share them publicly.
-          </p>
-          <div className="flex gap-3">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition"
-            >
-              Save & Apply
-            </button>
-          </div>
+        <div className="flex items-center justify-end gap-2 p-4 border-t border-gray-700 bg-gray-800">
+          <button onClick={onClose} className="px-3 py-1.5 text-xs text-gray-400 hover:text-white transition">
+            Cancel
+          </button>
+          <button onClick={() => { onSave(keys); onClose(); }} className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition flex items-center gap-1.5">
+            <Save size={12} /> Save Keys
+          </button>
         </div>
       </div>
     </div>

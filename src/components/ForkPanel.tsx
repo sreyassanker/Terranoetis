@@ -1,4 +1,6 @@
 import React from 'react';
+import { GitFork } from 'lucide-react';
+import Panel from '@/components/ui/Panel';
 
 interface Fork {
   forkId: string;
@@ -18,26 +20,16 @@ export const ForkPanel: React.FC<ForkPanelProps> = ({ forks, onPauseFork, onResu
   if (forks.length === 0) return null;
 
   return (
-    <div style={{
-      position: 'absolute',
-      top: '80px',
-      right: '20px',
-      width: '280px',
-      background: 'rgba(0, 0, 0, 0.85)',
-      border: '1px solid #FF8C00',
-      borderRadius: '8px',
-      padding: '12px',
-      color: '#fff',
-      fontFamily: 'monospace',
-      fontSize: '12px',
-      zIndex: 1000,
-      maxHeight: '400px',
-      overflowY: 'auto',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '1px solid #FF8C00', paddingBottom: '4px' }}>
-        <span style={{ color: '#FF8C00', fontWeight: 'bold', fontSize: '14px' }}>🍴 PARALLEL REALITIES</span>
-        <span style={{ color: '#888' }}>{forks.length} active</span>
-      </div>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 280 }}>
+      <Panel
+        title="PARALLEL REALITIES"
+        icon={<GitFork size={14} />}
+        accentColor="#f97316"
+        iconColor="#fb923c"
+        titleColor="#fdba74"
+        headerExtra={<span style={{ color: '#94a3b8', fontSize: 10 }}>{forks.length} active</span>}
+        style={{ maxHeight: 400, overflowY: 'auto' }}
+      >
       {forks.map(fork => (
         <div key={fork.forkId} style={{ marginBottom: '10px', padding: '8px', background: 'rgba(255, 140, 0, 0.1)', borderRadius: '4px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -69,6 +61,7 @@ export const ForkPanel: React.FC<ForkPanelProps> = ({ forks, onPauseFork, onResu
           </div>
         </div>
       ))}
+    </Panel>
     </div>
   );
 };
