@@ -21,7 +21,7 @@ const __dirname = path.dirname(__filename);
 import { getDb, closeDb } from './db/index';
 import { API_METADATA, getCategories } from './api-metadata';
 import {
-  AGENTS_MD, CommandParser, SessionManager, MaterializedViewCache, IntentRouter, TaskPlanner,
+  AGENTS_MD, CommandParser, MaterializedViewCache, IntentRouter, TaskPlanner,
   ToolRegistry, buildAgentPrompt, warmIntentPrototypeEmbeddings,
   type GlobeCommand, type AgentStep, type AgentTool,
 } from './agent';
@@ -71,9 +71,8 @@ import { multimodal } from './multimodal/index';
 import { satelliteAnalyzer } from './multimodal/satelliteAnalyzer';
 import { prithviEngine } from './foundation-models/prithvi';
 import { satelliteSearcher, LAND_COVER_KEYWORDS } from './foundation-models/satelliteSearch';
+import { satelliteSeeder } from './foundation-models/satelliteSeeder';
 import { handleTileRequest, getTileJson, getLayerSources } from './foundation-models/mvtTileServer';
-import { tile38Engine } from './geofencing/tile38Engine';
-import { eoKnowledgeGraph } from './foundation-models/eoKnowledgeGraph';
 import { explainability } from './explainability/index';
 import { reasoningVisualizer } from './explainability/reasoningVisualizer';
 import { evidenceChain } from './explainability/evidenceChain';
@@ -264,7 +263,8 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/radar/rainviewer' || req.path === '/sentiment/news' ||
     req.path === '/ml/predict' || req.path === '/ml/predict/report' ||
     req.path === '/climate/power' || req.path === '/climate/anomalies' || req.path === '/climate/co2' || req.path === '/climate/sea-ice' ||
-    req.path === '/gdelt' || req.path === '/fema' || req.path === '/geospatial/overpass' || req.path === '/population/worldpop' || req.path === '/usgs/water'
+    req.path === '/gdelt' || req.path === '/fema' || req.path === '/geospatial/overpass' || req.path === '/population/worldpop' || req.path === '/usgs/water' ||
+    req.path === '/flights/military' || req.path === '/military-bases' || req.path === '/ucdp'
   ) {
     return next();
   }
@@ -283,14 +283,6 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
   }
   // MVT vector tile endpoints
   if (req.path.startsWith('/tiles/') || req.path.startsWith('/tilejson') || req.path.startsWith('/tile-sources')) {
-    return next();
-  }
-  // Tile38 geofencing endpoints
-  if (req.path.startsWith('/tile38/')) {
-    return next();
-  }
-  // EO Knowledge Graph endpoints
-  if (req.path.startsWith('/fm/kg/')) {
     return next();
   }
   // Pulse intelligence panel (public market/energy/geo/sentiment data)
@@ -384,7 +376,47 @@ app.get('/api/fm/search/classes', (_req: express.Request, res: express.Response)
   });
 });
 
-// ── Dynamic World Change Detection ──────────────────────────────
+// ── Satellite Seeder — background population of embeddings DB ──
+app.get('/api/fm/seeder/status', (_req: express.Request, res: express.Response) => {
+  res.json(satelliteSeeder.getStatus());
+});
+
+app.post('/api/fm/seeder/start', async (req: express.Request, res: express.Response) => {
+  try {
+    const { spacingDeg, latMin, latMax, lonMin, lonMax, resume } = req.body || {};
+    satelliteSeeder.start({ spacingDeg, latMin, latMax, lonMin, lonMax, resume }).catch(err => {
+      logger.error({ err }, 'Satellite seeder failed');
+    });
+    res.json({ message: 'Seeder started', status: satelliteSeeder.getStatus() });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post('/api/fm/seeder/stop', (_req: express.Request, res: express.Response) => {
+  satelliteSeeder.stop();
+  res.json({ message: 'Seeder stopped', status: satelliteSeeder.getStatus() });
+});
+
+app.post('/api/fm/seeder/reset', (_req: express.Request, res: express.Response) => {
+  satelliteSeeder.resetProgress();
+  res.json({ message: 'Seeder progress reset', status: satelliteSeeder.getStatus() });
+});
+
+app.post('/api/fm/seeder/seed-location', async (req: express.Request, res: express.Response) => {
+  try {
+    const { lat, lon } = req.body;
+    if (lat == null || lon == null) {
+      res.status(400).json({ error: 'lat and lon required' });
+      return;
+    }
+    await satelliteSeeder.seedLocation(lat, lon);
+    res.json({ message: 'Location seeded', lat, lon });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── MVT Vector Tile Server ──────────────────────────────────────
 app.get('/api/tilejson', (_req: express.Request, res: express.Response) => {
   res.json(getTileJson(''));
@@ -433,125 +465,10 @@ app.get('/api/tiles/:z/:x/:y/:layer.mvt', async (req: express.Request, res: expr
   }
 });
 
-// ── Tile38 Geofencing ───────────────────────────────────────────
-app.get('/api/tile38/status', (_req: express.Request, res: express.Response) => {
-  res.json({ status: tile38Engine.getStatus() });
-});
-
-app.post('/api/tile38/fence', (req: express.Request, res: express.Response) => {
-  try {
-    const { id, type, params, webhook } = req.body;
-    if (!id || !type || !params) {
-      res.status(400).json({ error: 'id, type, and params required' });
-      return;
-    }
-    const fence = tile38Engine.setGeofence(id, type, params, webhook);
-    res.json({ ok: true, fence });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.delete('/api/tile38/fence/:id', (req: express.Request, res: express.Response) => {
-  const deleted = tile38Engine.delGeofence(req.params.id);
-  res.json({ ok: deleted });
-});
-
-app.get('/api/tile38/fences', (_req: express.Request, res: express.Response) => {
-  res.json({ fences: tile38Engine.getGeofences() });
-});
-
-app.post('/api/tile38/object', (req: express.Request, res: express.Response) => {
-  try {
-    const { id, lat, lon, properties } = req.body;
-    if (!id || lat == null || lon == null) {
-      res.status(400).json({ error: 'id, lat, and lon required' });
-      return;
-    }
-    const obj = tile38Engine.setObject(id, lat, lon, properties);
-    res.json({ ok: true, object: obj });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.delete('/api/tile38/object/:id', (req: express.Request, res: express.Response) => {
-  const deleted = tile38Engine.delObject(req.params.id);
-  res.json({ ok: deleted });
-});
-
-app.get('/api/tile38/objects', (_req: express.Request, res: express.Response) => {
-  res.json({ objects: tile38Engine.getObjects() });
-});
-
-app.get('/api/tile38/nearby', (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(req.query.lat as string);
-    const lon = parseFloat(req.query.lon as string);
-    const radius = parseFloat(req.query.radius as string) || 1000;
-    if (isNaN(lat) || isNaN(lon)) {
-      res.status(400).json({ error: 'lat and lon required as query params' });
-      return;
-    }
-    const results = tile38Engine.nearby(lat, lon, radius);
-    res.json({ objects: results });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.get('/api/tile38/within/:fenceId', (req: express.Request, res: express.Response) => {
-  const objects = tile38Engine.within(req.params.fenceId);
-  res.json({ objects });
-});
-
-app.get('/api/tile38/events', (_req: express.Request, res: express.Response) => {
-  res.json({ events: tile38Engine.getRecentEvents(50) });
-});
-
-// ── EO Knowledge Graph ──────────────────────────────────────────
-app.get('/api/fm/kg/search', async (req: express.Request, res: express.Response) => {
-  try {
-    const text = req.query.text as string;
-    const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;
-    const lon = req.query.lon ? parseFloat(req.query.lon as string) : undefined;
-    const type = req.query.type as string | undefined;
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
-    if (!text && (lat == null || lon == null)) {
-      res.status(400).json({ error: 'text or lat+lon required' });
-      return;
-    }
-    const result = await eoKnowledgeGraph.query({ text, lat, lon, type, limit });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.get('/api/fm/kg/enrich', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(req.query.lat as string);
-    const lon = parseFloat(req.query.lon as string);
-    if (isNaN(lat) || isNaN(lon)) {
-      res.status(400).json({ error: 'lat and lon required' });
-      return;
-    }
-    const entities = await eoKnowledgeGraph.enrichLocation(lat, lon);
-    res.json({ lat, lon, entities });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.get('/api/fm/kg/entities', (_req: express.Request, res: express.Response) => {
-  res.json({ entities: eoKnowledgeGraph.getCurated() });
-});
-
 app.use('/api/fork', forkRouter);
 app.use('/api/vault', vaultRouter);
 app.use('/api/pulse', pulseRouter);
 
-const agentSessions = new SessionManager();
 const materializedViews = new MaterializedViewCache(`http://127.0.0.1:${PORT}`);
 const sandboxManager = new SandboxManager();
 const simulationEngine = new SimulationEngine(sandboxManager);
@@ -596,6 +513,8 @@ function registerDefaultTools() {
     { name:'sandbox_bash', category:'compute', description:'Execute bash commands in sandbox', exampleQueries:['run command','shell script'], schema:{type:'sandbox',endpoint:'/api/sandbox/execute'} },
     { name:'fly_command', category:'navigation', description:'Fly the globe camera to any location', exampleQueries:['fly to tokyo','go to paris','show location'], schema:{type:'command'} },
     { name:'toggle_layer_command', category:'navigation', description:'Show or hide any data layer on the globe', exampleQueries:['show earthquakes','enable flights'], schema:{type:'command'} },
+    { name:'satellite_search', category:'eo', description:'Search satellite imagery by text, class, or coordinates', exampleQueries:['search satellite imagery','find deforestation from space','show me forest near river','satellite view of'], schema:{type:'api',endpoint:'/api/fm/search',method:'GET',outputFormat:'JSON'} },
+    { name:'satellite_analyze', category:'eo', description:'Analyze a lat/lon with the Prithvi EO model — returns land cover classification', exampleQueries:['analyze this location from satellite','what does satellite see at','classify land cover'], schema:{type:'api',endpoint:'/api/fm/prithvi/analyze',method:'POST'} },
   ];
   for (const t of tools) toolRegistry.register(t);
 }
@@ -1107,8 +1026,8 @@ app.get('/api/earthquakes', async (req: express.Request, res: express.Response) 
 
     // If time or bbox params specified, use USGS FDSN query API for filtered results
     if (starttime || endtime || minLat || maxLat || minLon || maxLon) {
-      let start = starttime || new Date(Date.now() - (parseInt(hours || '24', 10)) * 3600000).toISOString();
-      let end = endtime || new Date().toISOString();
+      const start = starttime || new Date(Date.now() - (parseInt(hours || '24', 10)) * 3600000).toISOString();
+      const end = endtime || new Date().toISOString();
       const bbox = (minLat && maxLat && minLon && maxLon)
         ? `&minlatitude=${minLat}&maxlatitude=${maxLat}&minlongitude=${minLon}&maxlongitude=${maxLon}`
         : '';
@@ -1583,10 +1502,20 @@ app.get('/api/vaac/tokyo', async (req: express.Request, res: express.Response) =
 });
 
 app.get('/api/eonet', async (req: express.Request, res: express.Response) => {
-  const latMin = parseFloat(req.query.latMin as string);
-  const latMax = parseFloat(req.query.latMax as string);
-  const lonMin = parseFloat(req.query.lonMin as string);
-  const lonMax = parseFloat(req.query.lonMax as string);
+  // Parse bbox from either individual params or combined bbox param (lonMin,latMin,lonMax,latMax)
+  let latMin = parseFloat(req.query.latMin as string);
+  let latMax = parseFloat(req.query.latMax as string);
+  let lonMin = parseFloat(req.query.lonMin as string);
+  let lonMax = parseFloat(req.query.lonMax as string);
+  if (!(Number.isFinite(latMin) && Number.isFinite(latMax) && Number.isFinite(lonMin) && Number.isFinite(lonMax))) {
+    const bboxParam = req.query.bbox as string | undefined;
+    if (bboxParam) {
+      const parts = bboxParam.split(',').map(Number);
+      if (parts.length === 4 && parts.every(Number.isFinite)) {
+        [lonMin, latMin, lonMax, latMax] = parts;
+      }
+    }
+  }
   const hasBbox = Number.isFinite(latMin) && Number.isFinite(latMax) && Number.isFinite(lonMin) && Number.isFinite(lonMax);
 
   const fetchEonet = (days: number) =>
@@ -1706,19 +1635,19 @@ app.get('/api/satellites/tle', async (_req: express.Request, res: express.Respon
 });
 
 app.get('/api/flights', async (req: express.Request, res: express.Response) => {
+  const authHeader = req.headers.authorization;
+  const headers: Record<string, string> = authHeader ? { Authorization: authHeader } : {};
+  const key = authHeader ? 'flights_auth' : 'flights';
   try {
-    const authHeader = req.headers.authorization;
-    const headers: Record<string, string> = authHeader ? { Authorization: authHeader } : {};
-    const key = authHeader ? 'flights_auth' : 'flights';
     const hit = cache.get(key);
     if (hit) return res.json(hit);
     const resp = await fetch('https://opensky-network.org/api/states/all', { ...headers, signal: AbortSignal.timeout(15000) });
     if (!resp.ok) throw new Error(`OpenSky ${resp.status}`);
     const data = await resp.json();
-    cache.set(cacheKey, data, 3600);
+    cache.set(key, data, 3600);
     res.json(data);
   } catch (e) {
-    cache.set(cacheKey, { elements: [] }, 600);
+    cache.set(key, { elements: [] }, 600);
     res.json({ elements: [], note: 'Overpass query failed: ' + String(e) });
   }
 });
@@ -1746,20 +1675,181 @@ app.get('/api/flights/regional', async (req: express.Request, res: express.Respo
   }
 });
 
+// ── Combined flights: query ALL aviation sources, deduplicate by hex ──
+app.get('/api/flights/all', async (req: express.Request, res: express.Response) => {
+  const reqLat = req.query.lat ? parseFloat(req.query.lat as string) : NaN;
+  const reqLon = req.query.lon ? parseFloat(req.query.lon as string) : NaN;
+  const locParam = (isFinite(reqLat) && isFinite(reqLon)) ? `?lat=${reqLat.toFixed(2)}&lon=${reqLon.toFixed(2)}` : '';
+  const base = `http://127.0.0.1:${PORT}`;
+
+  async function fetchSource(url: string, timeoutMs = 6000): Promise<{ states?: unknown[][] }> {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const r = await fetch(url, { signal: controller.signal });
+      clearTimeout(id);
+      return r.ok ? (await r.json() as { states?: unknown[][] }) : { states: [] };
+    } catch {
+      clearTimeout(id);
+      return { states: [] };
+    }
+  }
+
+  const sources = [
+    fetchSource(`${base}/api/flights`),
+    fetchSource(`${base}/api/adsb-lol${locParam}`, 10000),
+    fetchSource(`${base}/api/adsb-fi${locParam}`, 10000),
+    fetchSource(`${base}/api/flightaware`),
+    fetchSource(`${base}/api/airlabs`),
+  ];
+
+  const seen = new Set<string>();
+  const merged: unknown[][] = [];
+
+  const results = await Promise.allSettled(sources);
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    const data = result.value as { states?: unknown[][] };
+    if (!data.states) continue;
+    for (const state of data.states) {
+      const id = String(state[0] ?? '');
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      merged.push(state);
+    }
+  }
+
+  res.json({ states: merged, time: Math.floor(Date.now() / 1000), count: merged.length });
+});
+
+// ── Military flights (OpenSky, filtered by callsign pattern) ──────────
+const MILITARY_CALLSIGN_PATTERNS = [
+  /^RCH\d*$/i, /^NAF\d*$/i, /^GAF\d*$/i, /^RAF\d*$/i, /^IAF\d*$/i,
+  /^PLF\d*$/i, /^CFC\d*$/i, /^BKA\d*$/i, /^DUCK\d*$/i, /^SNAKE\d*$/i,
+  /^VIPR\d*$/i, /^SNDL\d*$/i, /^MAGIC\d*$/i, /^DEATH\d*$/i,
+  /^HAWG\d*$/i, /^RAVEN\d*$/i, /^STING\d*$/i, /^VIPER\d*$/i,
+  /^JEDI\d*$/i, /^SABER\d*$/i, /^STEEL\d*$/i, /^GORilla\d*$/i,
+  /^UAF\d*$/i, /^RMAF\d*$/i, /^USAF\d*$/i, /^JASDF\d*$/i,
+  /^AAC\d*$/i, /^RTAF\d*$/i, /^ROCAF\d*$/i, /^PAF\d*$/i,
+  /^FNF\d*$/i, /^KAF\d*$/i, /^ETAF\d*$/i,
+];
+
+app.get('/api/flights/military', async (_req: express.Request, res: express.Response) => {
+  try {
+    const resp = await fetch('https://opensky-network.org/api/states/all', {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) throw new Error(`OpenSky ${resp.status}`);
+    const data: any = await resp.json();
+    const states = data.states || [];
+    const milStates = states.filter((s: unknown[]) => {
+      const cs = String(s[1] ?? '').trim().toUpperCase();
+      return cs && MILITARY_CALLSIGN_PATTERNS.some(p => p.test(cs));
+    });
+    res.json({
+      states: milStates,
+      time: data.time,
+      total: states.length,
+      military: milStates.length,
+    });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
 // --- AVIATION LAYERS ---
 
+// ── Global ADSB coverage grid ──
+// Covers all major landmasses with overlapping circles (dist ≈ 300 NM ≈ 555 km)
+const GLOBAL_ADSB_REGIONS = [
+  // North America
+  { lat: 60, lon: -150, dist: 300, key: 'ak' },
+  { lat: 55, lon: -120, dist: 300, key: 'ca_w' },
+  { lat: 50, lon: -95, dist: 300, key: 'ca_c' },
+  { lat: 45, lon: -75, dist: 300, key: 'ca_e' },
+  { lat: 45, lon: -120, dist: 300, key: 'us_w' },
+  { lat: 40, lon: -100, dist: 300, key: 'us_c' },
+  { lat: 35, lon: -80, dist: 300, key: 'us_e' },
+  { lat: 28, lon: -98, dist: 300, key: 'us_s' },
+  { lat: 22, lon: -100, dist: 300, key: 'mx_c' },
+  // Central America / Caribbean
+  { lat: 18, lon: -75, dist: 300, key: 'carib' },
+  { lat: 10, lon: -85, dist: 300, key: 'cam' },
+  // South America
+  { lat: 10, lon: -68, dist: 300, key: 'sa_n' },
+  { lat: -3, lon: -55, dist: 300, key: 'sa_amz' },
+  { lat: -10, lon: -40, dist: 300, key: 'sa_br' },
+  { lat: -18, lon: -65, dist: 300, key: 'sa_w' },
+  { lat: -25, lon: -55, dist: 300, key: 'sa_s' },
+  { lat: -35, lon: -65, dist: 300, key: 'sa_arg' },
+  // Europe
+  { lat: 60, lon: -5, dist: 300, key: 'eu_nw' },
+  { lat: 55, lon: 10, dist: 300, key: 'eu_n' },
+  { lat: 48, lon: 5, dist: 300, key: 'eu_c' },
+  { lat: 45, lon: 25, dist: 300, key: 'eu_e' },
+  { lat: 52, lon: 40, dist: 300, key: 'eu_ru' },
+  { lat: 42, lon: 0, dist: 300, key: 'eu_sw' },
+  { lat: 42, lon: 15, dist: 300, key: 'eu_se' },
+  { lat: 38, lon: -8, dist: 300, key: 'ib' },
+  // Scandinavia / Baltic
+  { lat: 62, lon: 20, dist: 300, key: 'scan' },
+  // Russia / Central Asia
+  { lat: 60, lon: 50, dist: 300, key: 'ru_w' },
+  { lat: 60, lon: 90, dist: 300, key: 'ru_c' },
+  { lat: 55, lon: 130, dist: 300, key: 'ru_e' },
+  { lat: 45, lon: 65, dist: 300, key: 'ca_as' },
+  // Middle East
+  { lat: 38, lon: 35, dist: 300, key: 'me_tr' },
+  { lat: 32, lon: 45, dist: 300, key: 'me_iq' },
+  { lat: 25, lon: 48, dist: 300, key: 'me_ar' },
+  { lat: 30, lon: 55, dist: 300, key: 'me_ir' },
+  // Africa
+  { lat: 35, lon: -5, dist: 300, key: 'af_nw' },
+  { lat: 30, lon: 30, dist: 300, key: 'af_ne' },
+  { lat: 15, lon: -10, dist: 300, key: 'af_w' },
+  { lat: 10, lon: 15, dist: 300, key: 'af_c' },
+  { lat: 5, lon: 35, dist: 300, key: 'af_e' },
+  { lat: -5, lon: 15, dist: 300, key: 'af_sc' },
+  { lat: -15, lon: 25, dist: 300, key: 'af_s_c' },
+  { lat: -28, lon: 25, dist: 300, key: 'af_s' },
+  // South Asia / India
+  { lat: 28, lon: 72, dist: 300, key: 'in_nw' },
+  { lat: 24, lon: 82, dist: 300, key: 'in_ne' },
+  { lat: 16, lon: 77, dist: 300, key: 'in_c' },
+  { lat: 10, lon: 78, dist: 300, key: 'in_s' },
+  // East Asia
+  { lat: 42, lon: 125, dist: 300, key: 'ea_ne' },
+  { lat: 34, lon: 115, dist: 300, key: 'ea_c' },
+  { lat: 26, lon: 110, dist: 300, key: 'ea_sc' },
+  { lat: 35, lon: 138, dist: 300, key: 'jp' },
+  { lat: 38, lon: 127, dist: 300, key: 'kr' },
+  // Southeast Asia
+  { lat: 20, lon: 100, dist: 300, key: 'sea_mm' },
+  { lat: 14, lon: 105, dist: 300, key: 'sea_th' },
+  { lat: 10, lon: 125, dist: 300, key: 'ph' },
+  { lat: -3, lon: 115, dist: 300, key: 'sea_id' },
+  { lat: 2, lon: 105, dist: 300, key: 'sea_my' },
+  { lat: 10, lon: 108, dist: 300, key: 'sea_vn' },
+  // Oceania
+  { lat: -20, lon: 140, dist: 300, key: 'au_n' },
+  { lat: -28, lon: 145, dist: 300, key: 'au_c' },
+  { lat: -35, lon: 140, dist: 300, key: 'au_s' },
+  { lat: -37, lon: 175, dist: 300, key: 'nz' },
+  // Pacific
+  { lat: 22, lon: -160, dist: 300, key: 'hi' },
+  // Greenland / Iceland
+  { lat: 65, lon: -40, dist: 300, key: 'gl' },
+  { lat: 64, lon: -20, dist: 300, key: 'is' },
+];
+
 // ADSB.lol - public aircraft tracking via geographic point queries
-// Uses api.adsb.lol/v2/point which is ADSBExchange v2 compatible (no API key needed)
-app.get('/api/adsb-lol', async (_req: express.Request, res: express.Response) => {
-  const regions = [
-    { lat: 48, lon: 10, dist: 250, key: 'eu' },
-    { lat: 40, lon: -100, dist: 250, key: 'us' },
-    { lat: 35, lon: 135, dist: 250, key: 'asia' },
-    { lat: -25, lon: 135, dist: 250, key: 'au' },
-    { lat: -15, lon: -50, dist: 250, key: 'sa' },
-    { lat: 25, lon: 50, dist: 250, key: 'me' },
-    { lat: 0, lon: 20, dist: 250, key: 'af' },
-  ];
+app.get('/api/adsb-lol', async (req: express.Request, res: express.Response) => {
+  const regions = [...GLOBAL_ADSB_REGIONS];
+  const reqLat = req.query.lat ? parseFloat(req.query.lat as string) : NaN;
+  const reqLon = req.query.lon ? parseFloat(req.query.lon as string) : NaN;
+  if (isFinite(reqLat) && isFinite(reqLon) && Math.abs(reqLat) <= 90 && Math.abs(reqLon) <= 180) {
+    regions.push({ lat: reqLat, lon: reqLon, dist: 300, key: 'pinpoint' });
+  }
   const seen = new Set<string>();
   const states: any[][] = [];
   const fetchOpts = { headers: { 'User-Agent': 'LiveGlobe/1.0' } };
@@ -1795,16 +1885,13 @@ app.get('/api/adsb-lol', async (_req: express.Request, res: express.Response) =>
 });
 
 // adsb.fi - public aircraft tracking via geographic point queries
-// Uses opendata.adsb.fi/api/v3/lat/lon/dist which is ADSBExchange v2 compatible (public, no key)
-app.get('/api/adsb-fi', async (_req: express.Request, res: express.Response) => {
-  const regions = [
-    { lat: 48, lon: 10, dist: 250, key: 'eu' },
-    { lat: 40, lon: -100, dist: 250, key: 'us' },
-    { lat: 35, lon: 135, dist: 250, key: 'asia' },
-    { lat: -25, lon: 135, dist: 250, key: 'au' },
-    { lat: -15, lon: -50, dist: 250, key: 'sa' },
-    { lat: 25, lon: 25, dist: 250, key: 'me' },
-  ];
+app.get('/api/adsb-fi', async (req: express.Request, res: express.Response) => {
+  const regions = [...GLOBAL_ADSB_REGIONS];
+  const reqLat = req.query.lat ? parseFloat(req.query.lat as string) : NaN;
+  const reqLon = req.query.lon ? parseFloat(req.query.lon as string) : NaN;
+  if (isFinite(reqLat) && isFinite(reqLon) && Math.abs(reqLat) <= 90 && Math.abs(reqLon) <= 180) {
+    regions.push({ lat: reqLat, lon: reqLon, dist: 300, key: 'pinpoint' });
+  }
   const seen = new Set<string>();
   const states: any[][] = [];
   const fetchOpts = { headers: { 'User-Agent': 'LiveGlobe/1.0' } };
@@ -2040,7 +2127,6 @@ app.get('/api/volcanoes', async (req: express.Request, res: express.Response) =>
       hotspots: [],
       configured: true,
       source: 'NASA FIRMS VIIRS SNPP NRT',
-      dayRange,
       updatedAt: Date.now(),
       message: 'No data from NASA FIRMS upstream',
     });
@@ -2259,7 +2345,7 @@ app.get('/api/weather/ibtracs', async (_req: express.Request, res: express.Respo
     cache.set('ibtracs', result, 86400);
     res.json(result);
   } catch {
-    res.json({ source: 'Natural Earth', bbox: { latMin, latMax, lonMin, lonMax }, totalPopulation: 0, densityPerKm2: 0, cityCount: 0, largestCities: [], note: 'Population data temporarily unavailable' });
+    res.json({ source: 'Natural Earth', totalPopulation: 0, densityPerKm2: 0, cityCount: 0, largestCities: [], note: 'Population data temporarily unavailable' });
   }
 });
 
@@ -3934,7 +4020,7 @@ app.get('/api/waqi', async (req: express.Request, res: express.Response) => {
 app.get('/api/reliefweb', async (req: express.Request, res: express.Response) => {
   try {
     const { limit = '50', country, disaster_type } = req.query;
-    const params = new URLSearchParams({ 'app[]': 'reports', 'format[]': 'json', limit: String(limit) });
+    const params = new URLSearchParams({ 'appname': 'EarthReplica', 'format[]': 'json', limit: String(limit) });
     if (country) params.set('country[]', String(country));
     if (disaster_type) params.set('disaster_type[]', String(disaster_type));
 
@@ -4582,8 +4668,11 @@ app.get('/api/ucdp', async (req: express.Request, res: express.Response) => {
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
+    const ucdpToken = process.env.UCDP_ACCESS_TOKEN;
+    const ucdpHeaders: Record<string, string> = { 'Accept': 'application/json' };
+    if (ucdpToken) ucdpHeaders['x-ucdp-access-token'] = ucdpToken;
     const resp = await fetch(`https://ucdpapi.pcr.uu.se/api/${type}/${year}?pagesize=100`, {
-      headers: { 'Accept': 'application/json' },
+      headers: ucdpHeaders,
     });
     if (!resp.ok) return res.status(resp.status).json({ error: `UCDP ${resp.status}` });
     const data = await resp.json();
@@ -5183,6 +5272,78 @@ async function fetchOceanBuoys(): Promise<any[]> {
   return stations;
 }
 
+// ── Ocean Currents & Waves (Open-Meteo Marine API) ─────────────────────
+// Uniform global grid covering all oceans at 7° spacing
+const OCEAN_GRID = buildOceanGrid();
+let _oceanCache: { data: any[]; ts: number } | null = null;
+let _oceanInFlight: Promise<any[]> | null = null;
+const OCEAN_CACHE_TTL = 3600;
+
+function buildOceanGrid(): { lat: number; lon: number }[] {
+  const pts: { lat: number; lon: number }[] = [];
+  for (let lat = -80; lat <= 80; lat += 8) {
+    for (let lon = -180; lon <= 180; lon += 8) {
+      pts.push({ lat: +lat.toFixed(1), lon: +lon.toFixed(1) });
+    }
+  }
+  // Shuffle so early-chunk bias is geographically random
+  for (let i = pts.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pts[i], pts[j]] = [pts[j], pts[i]];
+  }
+  return pts;
+}
+
+async function fetchOceanCurrents(): Promise<any[]> {
+  if (_oceanCache && Date.now() - _oceanCache.ts < OCEAN_CACHE_TTL * 1000) {
+    return _oceanCache.data;
+  }
+  if (_oceanInFlight) return _oceanInFlight;
+  _oceanInFlight = (async () => {
+    const results: any[] = [];
+    const grid = [...OCEAN_GRID];
+    // Retry loop: up to 3 passes for throttled requests
+    for (let pass = 0; pass < 3 && grid.length > 0; pass++) {
+      const pending = [...grid];
+      grid.length = 0;
+      const delay = pass === 0 ? 400 : pass === 1 ? 800 : 1500;
+      for (let i = 0; i < pending.length; i += 8) {
+        const chunk = pending.slice(i, i + 8);
+        const responses = await Promise.allSettled(
+          chunk.map(pt =>
+            fetch(
+              `https://marine-api.open-meteo.com/v1/marine?latitude=${pt.lat}&longitude=${pt.lon}&current=ocean_current_velocity,ocean_current_direction,wave_height,wave_direction`,
+              { signal: AbortSignal.timeout(15000) },
+            ).then(r => r.json()),
+          ),
+        );
+        for (let j = 0; j < chunk.length; j++) {
+          const resp = responses[j];
+          if (resp.status !== 'fulfilled' || !resp.value?.current) { grid.push(chunk[j]); continue; }
+          const cur = resp.value.current;
+          const speed = cur.ocean_current_velocity;
+          if (speed == null) { grid.push(chunk[j]); continue; }
+          results.push({
+            id: `oc_${chunk[j].lat}_${chunk[j].lon}`,
+            lat: chunk[j].lat,
+            lon: chunk[j].lon,
+            value: +(+speed).toFixed(3),
+            heading: +(+cur.ocean_current_direction).toFixed(1),
+            waveHeight: cur.wave_height != null ? +(+cur.wave_height).toFixed(2) : undefined,
+            waveDirection: cur.wave_direction != null ? +(+cur.wave_direction).toFixed(1) : undefined,
+            timestamp: Date.now(),
+          });
+        }
+        if (i + 8 < pending.length) await new Promise(r => setTimeout(r, delay));
+      }
+    }
+    _oceanCache = { data: results, ts: Date.now() };
+    _oceanInFlight = null;
+    return results;
+  })();
+  return _oceanInFlight;
+}
+
 // ARGO: Profiling floats from Coriolis GDAC (real-time T/S profiles)
 async function fetchArgoFloats(): Promise<any[]> {
   try {
@@ -5543,34 +5704,6 @@ async function fetchAirports(): Promise<any[]> {
         type: a.type || '',
         source: 'OurAirports',
         timestamp: Date.now(),
-      };
-    });
-  } catch { return []; }
-}
-
-// OPENFEMA: Disaster declarations (public API, no key required)
-async function fetchOpenFema(): Promise<any[]> {
-  try {
-    const resp = await fetch(
-      'https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries?$format=json&$top=500',
-      { signal: AbortSignal.timeout(15000) },
-    );
-    if (!resp.ok) return [];
-    const body: any = await resp.json();
-    const items: any[] = (body?.DisasterDeclarationsSummaries ?? []).slice(0, 500);
-    return items.flatMap((d: any) => {
-      if (!d.longitude || !d.latitude) return [];
-      return {
-        id: `fema_${d.id || d.disasterNumber || Math.random().toString(36).slice(2, 8)}`,
-        name: d.declarationTitle || d.disasterName || 'FEMA Disaster',
-        lat: +parseFloat(d.latitude).toFixed(4),
-        lon: +parseFloat(d.longitude).toFixed(4),
-        value: 1,
-        magnitude: d.declaredCountyOrParish ? 0.8 : 0.4,
-        type: d.incidentType || 'disaster',
-        state: d.state,
-        source: 'OpenFEMA',
-        timestamp: d.declarationDate ? new Date(d.declarationDate).getTime() : Date.now(),
       };
     });
   } catch { return []; }
@@ -5974,6 +6107,7 @@ async function fetchNaturalEarthPlaces(): Promise<any[]> {
 const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
   '16_pbdb': fetchPbdbOccurrences,
   '16_macrostrat': fetchMacrostratRegional,
+  '50_ocean_currents': fetchOceanCurrents,
 };
 
 // Group dispatcher: each group fetches from a real data source
@@ -6046,8 +6180,8 @@ app.get('/api/fema', async (req: express.Request, res: express.Response) => {
     if (!resp.ok) {
       return res.json({ DisasterDeclarationsSummaries: [], total: 0, source: 'FEMA', note: 'FEMA API temporarily unavailable' });
     }
-    const data = await resp.json();
-    const summaries = data.DisasterDeclarationsSummaries || [];
+    const data = (await resp.json()) as Record<string, unknown>;
+    const summaries = (data.DisasterDeclarationsSummaries as unknown[]) || [];
 
     const result = { DisasterDeclarationsSummaries: summaries, total: summaries.length, source: 'FEMA' };
     cache.set(cacheKey, result, 3600);
@@ -6176,6 +6310,40 @@ app.get('/api/geospatial/overpass', async (req: express.Request, res: express.Re
   }
 });
 
+// ── Military Bases (Wikidata SPARQL) ───────────────────────────────
+app.get('/api/military-bases', async (_req: express.Request, res: express.Response) => {
+  const cacheKey = 'military_bases_global_v4';
+  const hit = cache.get(cacheKey);
+  if (hit) { res.json(hit); return; }
+  try {
+    const sparql = `SELECT ?item ?itemLabel ?coords WHERE {
+  ?item wdt:P31/wdt:P279* wd:Q245016 ; wdt:P625 ?coords .
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+} LIMIT 200`;
+    const url = `https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(sparql)}`;
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': 'EarthReplica/1.0' },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!resp.ok) { res.json({ elements: [], note: 'Wikidata unavailable' }); return; }
+    const data = await resp.json();
+    const results = data.results?.bindings || [];
+    const elements = results.map((r: any) => {
+      const wkt = r.coords?.value || '';
+      const m = wkt.match(/Point\(([-\d.]+)\s+([-\d.]+)\)/);
+      const lon = m ? parseFloat(m[1]) : NaN;
+      const lat = m ? parseFloat(m[2]) : NaN;
+      return { type: 'node', id: r.item?.value?.split('/').pop() || 0, lat, lon,
+        tags: { name: r.itemLabel?.value || '', type: 'military_base' } };
+    }).filter((e: any) => isFinite(e.lat) && isFinite(e.lon));
+    const out = { elements };
+    cache.set(cacheKey, out, 86400);
+    res.json(out);
+  } catch (e) {
+    res.json({ elements: [], note: 'Wikidata query failed' });
+  }
+});
+
 // ── WorldPop Population Grid (population counts via bbox) ───────────
 app.get('/api/population/worldpop', async (req: express.Request, res: express.Response) => {
   const latMin = parseFloat(req.query.latMin as string);
@@ -6288,7 +6456,7 @@ app.get('/api/data/:layerId', async (req: express.Request, res: express.Response
     try {
       const items = await layerFetcher();
       const payload = { items };
-      cache.set(cacheKey, payload, 7200);
+      cache.set(cacheKey, payload, 3600);
       res.json(payload);
       return;
     } catch { /* fall through to group fallback */ }
@@ -6653,48 +6821,7 @@ app.get('/api/agent/query', (req: express.Request, res: express.Response) => {
   res.json(result);
 });
 
-// Create a fresh sandbox environment with AGENTS.md mounted
-app.post('/api/agent/environment', async (req: express.Request, res: express.Response) => {
-  const userId = (req as any).userId;
-  const existing = agentSessions.get(userId);
-  if (existing?.environmentId) {
-    res.json({ environmentId: existing.environmentId, reused: true });
-    return;
-  }
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || req.body.apiKey;
-  if (!apiKey) return res.status(400).json({ error: 'Gemini API key required' });
-  try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/interactions?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        agent: 'antigravity-preview-05-2026',
-        environment: {
-          type: 'remote',
-          sources: [{
-            type: 'inline',
-            target: '/workspace/.agents/AGENTS.md',
-            content: buildAgentPrompt(toolRegistry),
-          }],
-        },
-        input: 'Initialize environment. Read AGENTS.md and confirm you are ready.',
-        store: true,
-      }),
-    });
-    if (!resp.ok) {
-      const err = await resp.text();
-      return res.status(502).json({ error: `Agent init failed: ${err}` });
-    }
-    const data = await resp.json() as any;
-    const envId = data.environment_id;
-    if (envId) {
-      agentSessions.set(userId, { environmentId: envId, interactionId: data.id || '' });
-    }
-    res.json({ environmentId: envId, interactionId: data.id });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
+
 
 // Geocode a location name using LLM + local city DB
 app.get('/api/agent/geocode', async (req: express.Request, res: express.Response) => {
@@ -6760,6 +6887,13 @@ async function directGeminiAnswer(
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: fullPrompt.slice(0, 30000) }] }],
       generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+      tool_config: { function_calling_config: { mode: 'NONE' } },
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      ],
     }),
   });
   if (!resp.ok) {
@@ -6778,10 +6912,10 @@ async function directGeminiAnswer(
 // Main agent ask endpoint — SSE streaming
 const askRateLimit = perUserRateLimiter(30, 60000); // 30 requests per minute per user
 app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (req: express.Request, res: express.Response) => {
-  const { message } = req.body;
+  const { message, images } = req.body;
+  const imageContext = Array.isArray(images) && images.length > 0 ? images.map((img: any) => "[Image: " + img.fileName + " (" + img.mimeType + ")]").join(' ') : '';
+  const fullMessage = imageContext ? imageContext + "\n" + message : message;
   const userId = (req as any).userId || 'default';
-  const environmentId: string | undefined = req.body.environmentId;
-  const interactionId: string | undefined = req.body.interactionId;
   const cloud: boolean = req.body.cloud || false;
   const requestId = (req as any).correlationId || crypto.randomUUID();
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || req.body.apiKey;
@@ -6819,13 +6953,13 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
 
   try {
     // Step 1: Classify intent — use ModelRouter to decide if deep classification is needed
-    sendEvent('step', { type: 'classifying', text: 'Classifying intent...' });
-    let intent = IntentRouter.classify(message);
+    sendEvent('step', { stepType: 'classifying', text: 'Classifying intent...', status: 'completed' });
+    let intent = IntentRouter.classify(fullMessage);
 
     // ModelRouter: determine optimal tier and skip deep classification for simple queries
     const modelTier = ModelRouter.route(intent.type, intent.confidence, message.length, false, false);
     if (modelTier === 'local') {
-      sendEvent('step', { type: 'model_tier', text: 'Free tier (local routing)' });
+      sendEvent('step', { stepType: 'model_tier', text: 'Free tier (local routing)', status: 'completed' });
     } else if (intent.confidence < 0.7) {
       try {
         const deepIntent = await IntentRouter.classifyDeep(message);
@@ -6837,7 +6971,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
 
     // Step 1.25: Digital Twin — run analysis if intent is digital_twin
     if (intent.type === 'digital_twin') {
-      sendEvent('step', { type: 'digital_twin', text: 'Running digital twin analysis...' });
+      sendEvent('step', { stepType: 'digital_twin', text: 'Running digital twin analysis...', status: 'completed' });
       try {
         // Geocode location if not in city database
         let dtLocation = intent.location;
@@ -6850,7 +6984,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         }
         if (dtLocation) {
           const dtResult = await analyzeDigitalTwin(message, dtLocation, 30);
-          sendEvent('step', { type: 'digital_twin_complete', text: `Analysis complete: ${dtResult.analysis.title}` });
+          sendEvent('step', { stepType: 'digital_twin_complete', text: `Analysis complete: ${dtResult.analysis.title}`, status: 'completed' });
           if (dtResult.commands.length > 0) sendEvent('commands', dtResult.commands);
           sendEvent('panel', dtResult.panel);
           sendEvent('output', { text: dtResult.text });
@@ -6861,7 +6995,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         }
       } catch (err) {
         logger.warn({ err }, 'Digital twin analysis failed, falling through');
-        sendEvent('step', { type: 'digital_twin_error', text: 'Digital twin analysis failed — falling back to agent' });
+        sendEvent('step', { stepType: 'digital_twin_error', text: 'Digital twin analysis failed — falling back to agent', status: 'completed' });
       }
     }
 
@@ -6869,13 +7003,13 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     const uid = userId || 'default';
     let cachedResponse: string | null = null;
     try {
-      cachedResponse = (await memoryManager.semanticCache.get(message)) ?? null;
+      cachedResponse = (await memoryManager.semanticCache.get(fullMessage)) ?? null;
     } catch (e) {
       logger.warn({ err: e }, 'Semantic cache lookup failed (non-critical)');
     }
     if (cachedResponse) {
       costTracker.record('local', message, cachedResponse, true);
-      sendEvent('step', { type: 'cache_hit', text: 'Found identical query in memory — returning cached response' });
+      sendEvent('step', { stepType: 'cache_hit', text: 'Found identical query in memory — returning cached response', status: 'completed' });
       sendEvent('output', { text: cachedResponse + '\n\n*(From memory — asked before)*' });
       sendEvent('done', { type: 'done' });
       cleanup();
@@ -6883,61 +7017,11 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       return;
     }
 
-    // Step 1.75: CognitiveAgent — dual-process S1/S2 reasoning
-    sendEvent('step', { type: 'cognition', text: 'Cognitive engine analyzing...' });
-    try {
-      const cognitionContext = {
-        location: intent.location ? `${intent.location.label || `${intent.location.lat},${intent.location.lon}`}` : undefined,
-        intent: intent.type,
-      };
-      const cognitionTimeout = AbortSignal.timeout(15000);
-      const cr = await Promise.race([
-        cognitiveAgent.process(message, cognitionContext, (event, data) => {
-          if (event === 'thinking') {
-            sendEvent('step', { type: 'cognition', text: (data as any)?.thought || 'Thinking...' });
-          }
-        }) as any,
-        new Promise((_resolve, reject) => {
-          cognitionTimeout.addEventListener('abort',
-            () => reject(new Error('Cognitive timeout (15s)')),
-            { once: true });
-        }),
-      ]) as any;
-      const cognitiveOutput = cr.finalOutput || '';
-      const rawCognitiveConfidence = cr.system2Result?.finalConfidence ?? cr.system1Result?.match?.confidence ?? 0;
-      const cognitiveSystem = cr.mode === 'system1_only' ? 'system1' : 'system2';
-
-      // Detect garbage output from failed MCTS/ToT expansions — don't trust confidence if output is trace noise
-      const isGarbageOutput = !cognitiveOutput ||
-        /fallback_thought_[a-z0-9]{4}/.test(cognitiveOutput) ||
-        /MCTS analysis:.*->/.test(cognitiveOutput) ||
-        /Analysis complete\. Path:.*->/.test(cognitiveOutput) ||
-        /^FALLBACK:/.test(cognitiveOutput);
-      const cognitiveConfidence = isGarbageOutput ? 0 : rawCognitiveConfidence;
-
-      if (cognitiveConfidence >= 0.7 && cognitiveOutput) {
-        costTracker.record('local', message, cognitiveOutput, false);
-        sendEvent('output', {
-          text: cognitiveOutput + `\n\n*⚡ Cognitive (${cognitiveSystem === 'system1' ? 'Fast intuition' : 'Deep reasoning'} — ${(cognitiveConfidence * 100).toFixed(0)}% confidence)*`,
-          traceId: cr.traceId,
-        });
-        sendEvent('done', { type: 'done', traceId: cr.traceId });
-        cleanup();
-        res.end();
-        return;
-      }
-
-      // Low confidence — send partial output but also continue to deeper processing
-      if (cognitiveOutput && cognitiveConfidence < 0.7) {
-        sendEvent('step', { type: 'cognition_partial', text: 'Preliminary analysis ready — verifying with deeper reasoning...' });
-      }
-    } catch (e) {
-      logger.warn({ err: e }, 'CognitiveAgent failed, falling through to existing flow');
-    }
+    // Step 1.75: (CognitiveAgent removed — was returning template variables instead of real data)
 
     // Step 2: If quick scan, check materialized cache first
     if (intent.type === 'quick_scan' && intent.location) {
-      sendEvent('step', { type: 'cache_check', text: 'Checking pre-computed data...' });
+      sendEvent('step', { stepType: 'cache_check', text: 'Checking pre-computed data...', status: 'completed' });
       let cached: ReturnType<typeof materializedViews.query> | null = null;
       try {
         cached = materializedViews.query(intent.location.lat, intent.location.lon);
@@ -6945,7 +7029,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         logger.warn({ err: e }, 'Materialized view query failed (non-critical)');
       }
       if (cached && (cached.earthquakeRisk > 0 || cached.nearbyEvents.length > 0 || cached.weatherAlerts.length > 0)) {
-        sendEvent('step', { type: 'cache_hit', text: `Found ${cached.nearbyEvents.length} events, M${cached.earthquakeRisk} max quake` });
+        sendEvent('step', { stepType: 'cache_hit', text: `Found ${cached.nearbyEvents.length} events, M${cached.earthquakeRisk} max quake`, status: 'completed' });
         const commands: GlobeCommand[] = [
           { action: 'flyTo', lat: intent.location.lat, lon: intent.location.lon, label: intent.location.label, zoom: 8 },
         ];
@@ -6968,7 +7052,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // Step 2.5: Multi-agent orchestration for complex queries
     const orchestrationIntents = ['deep_analysis', 'compute', 'unknown', 'weather_check'];
     if (orchestrationIntents.includes(intent.type)) {
-      sendEvent('step', { type: 'orchestrating', text: '🧠 Multi-agent swarm analyzing...' });
+      sendEvent('step', { stepType: 'orchestrating', text: 'Multi-agent swarm analyzing...', status: 'completed' });
       try {
         const orchestrator = new AgentOrchestrator(apiKey);
         const orchestrated = await orchestrator.orchestrate(message, {
@@ -6991,79 +7075,26 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       }
     }
 
-    // Step 3 & 4: Send to Antigravity agent — with graceful fallback to direct Gemini.
-    // The Antigravity "interactions" API has tight quota limits and may return 429/403.
-    // In that case we fall back to a direct Gemini generateContent call using the same
-    // AGENTS.md system prompt so the copilot stays fully functional.
-    sendEvent('step', { type: 'agent_thinking', text: 'Agent analyzing...' });
-    // Build working memory context from user profile and past sessions
-    const memoryContext = await memoryManager.buildWorkingMemoryContext(uid, message, []);
+    // Step 3: Analyze with Omninet (auto-fallback across providers)
+    sendEvent('step', { stepType: 'agent_thinking', text: 'Agent analyzing...', status: 'completed' });
+    const memoryContext = await memoryManager.buildWorkingMemoryContext(uid, fullMessage, []);
     const systemPrompt = buildAgentPrompt(toolRegistry, intent);
 
     let outputText = '';
-    let steps: AgentStep[] = [];
-    let usedFallback = false;
-
-    // First, attempt Antigravity (only if we already have a valid environment)
-    const session = agentSessions.get(uid);
-    const envId = environmentId || session?.environmentId;
-    const prevId = interactionId || session?.interactionId;
-    let antigravityOk = !!envId; // only attempt if env already provisioned
-
-    if (antigravityOk) {
-      try {
-        const enrichedInput = memoryContext
-          ? `[Context from user profile]\n${memoryContext}\n\n[User query]\n${message}`
-          : message;
-        const interactionBody: Record<string, unknown> = {
-          agent: 'antigravity-preview-05-2026',
-          environment: envId,
-          input: enrichedInput,
-          store: true,
-        };
-        if (prevId) interactionBody.previous_interaction_id = prevId;
-        const agentResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/interactions?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: abortController.signal,
-          body: JSON.stringify(interactionBody),
-        });
-        if (agentResp.ok) {
-          const agentData = await agentResp.json();
-          outputText = (agentData as any).output_text || '';
-          steps = ((agentData as any).steps || []);
-          const newInteractionId = (agentData as any).id;
-          const newEnvId = (agentData as any).environment_id || envId;
-          const sess = agentSessions.get(uid);
-          if (sess) { sess.interactionId = newInteractionId; sess.environmentId = newEnvId; }
-        } else {
-          logger.warn({ status: agentResp.status }, 'Antigravity interaction failed, using Gemini fallback');
-          antigravityOk = false;
-        }
-      } catch (e) {
-        logger.warn({ err: e }, 'Antigravity interaction threw, using Gemini fallback');
-        antigravityOk = false;
-      }
-    }
-
-    if (!outputText) {
-      // Fallback path: direct Gemini generateContent
-      usedFallback = true;
-      sendEvent('step', { type: 'agent_thinking', text: 'Reasoning with Gemini...' });
-      try {
-        logger.info({ msgLen: message.length, hasMemory: !!memoryContext }, 'Gemini fallback starting');
-        outputText = await directGeminiAnswer(apiKey, systemPrompt, message, memoryContext, abortController.signal);
-        logger.info({ outputLen: outputText.length, aborted: abortController.signal.aborted }, 'Gemini fallback complete');
-      } catch (e) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        logger.error({ err: e, aborted: abortController.signal.aborted }, 'Gemini fallback failed');
-        // Avoid surfacing abort errors as failures if the client disconnected
-        if (abortController.signal.aborted) { cleanup(); res.end(); return; }
-        sendEvent('error', { error: `Agent reasoning failed: ${errMsg}` });
-        cleanup();
-        res.end();
-        return;
-      }
+    sendEvent('step', { stepType: 'agent_thinking', text: 'Reasoning with AI...', status: 'completed' });
+    try {
+      logger.info({ msgLen: message.length, hasMemory: !!memoryContext }, 'Omninet analysis starting');
+      const fullPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}[User query]\n${fullMessage}`;
+      outputText = await omninet.generateText(fullPrompt, { signal: abortController.signal, temperature: 0.4, maxTokens: 4096 });
+      logger.info({ outputLen: outputText.length, aborted: abortController.signal.aborted }, 'Omninet analysis complete');
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error({ err: e, aborted: abortController.signal.aborted }, 'All AI providers failed');
+      if (abortController.signal.aborted) { cleanup(); res.end(); return; }
+      sendEvent('error', { error: `Analysis failed: ${errMsg}` });
+      cleanup();
+      res.end();
+      return;
     }
 
     // Record cost for agent call
@@ -7110,20 +7141,8 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       knowledgeGraph.ensureEntity(intent.type, 'intent').catch(() => {});
     }
 
-    // Stream reasoning steps with full detail
-    for (const step of steps) {
-      sendEvent('step', {
-        type: step.type,
-        text: step.text || (step.type === 'tool_use' ? `Using ${step.tool_name || 'tool'}...` : 'Processing...'),
-        code: step.code,
-        output: step.output?.slice(0, 5000),
-        toolName: step.tool_name,
-        stepType: step.type,
-      });
-    }
-
     // Parse visualization commands from output
-    sendEvent('step', { type: 'parsing', text: 'Parsing visualization commands...' });
+    sendEvent('step', { stepType: 'parsing', text: 'Parsing visualization commands...', status: 'completed' });
     try {
       const commands = CommandParser.parse(outputText);
       if (commands.length > 0) {
@@ -7134,8 +7153,8 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     }
 
     // Send final output
-    sendEvent('output', { text: outputText, interactionId: prevId, environmentId: envId, source: usedFallback ? 'gemini' : 'antigravity' });
-    sendEvent('done', { type: 'done', interactionId: prevId, environmentId: envId });
+    sendEvent('output', { text: outputText });
+    sendEvent('done', { type: 'done' });
 
   } catch (e) {
     sendEvent('error', { error: String(e) });
@@ -7148,19 +7167,50 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
 // PHASE 2.1: Vision Analysis (Gemini Vision API)
 // ═══════════════════════════════════════════════════════════════════════
 app.post('/api/agent/analyze-vision', async (req: express.Request, res: express.Response) => {
-  const { prompt: userPrompt } = req.body;
-  if (!userPrompt) return res.status(400).json({ error: 'Prompt required' });
+  const { image: imageBase64, mimeType, prompt: userPrompt } = req.body;
+  if (!imageBase64 || !mimeType) return res.status(400).json({ error: 'Image data and mimeType required' });
+  const supportedMime = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'];
+  if (!supportedMime.includes(mimeType)) return res.status(400).json({ error: `Unsupported mime type: ${mimeType}` });
 
-  const prompt = (typeof userPrompt === 'string' ? userPrompt : 'Describe what you see in this image in detail. '
-    + 'If it appears to be a satellite image, map, chart, or geographic data, '
-    + 'identify features, patterns, and notable characteristics.');
+  const textPrompt = (typeof userPrompt === 'string' && userPrompt.trim())
+    ? userPrompt.trim()
+    : 'Analyze this image in detail. If it is a satellite image, map, chart, or geographic area, describe what you see including any notable features, patterns, colors, text, or structures.';
 
-  try {
-    const analysis = await omninet.generateText(prompt, { temperature: 0.2, maxTokens: 2048 });
-    res.json({ analysis });
-  } catch (e) {
-    res.status(502).json({ error: 'Vision analysis unavailable', detail: (e as Error).message });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+  if (!apiKey) return res.status(502).json({ error: 'Gemini API key not configured. Set GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY in server/.env' });
+
+  const modelsToTry = ['gemini-2.0-flash-001', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
+  let lastError: string | undefined;
+
+  for (const model of modelsToTry) {
+    try {
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(30000),
+        body: JSON.stringify({
+          contents: [{
+            role: 'user',
+            parts: [
+              { text: textPrompt.slice(0, 2000) },
+              { inlineData: { mimeType, data: imageBase64 } },
+            ],
+          }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+        }),
+      });
+      if (resp.status === 404) { lastError = `Model ${model} not found`; continue; }
+      if (resp.status === 429 || resp.status === 503) { lastError = `Rate limited on ${model}`; continue; }
+      if (!resp.ok) { lastError = `Gemini HTTP ${resp.status}`; continue; }
+      const data = await resp.json() as Record<string, unknown>;
+      const text = (((data.candidates as Array<Record<string, unknown>>)?.[0]?.content as Record<string, unknown>)?.parts as Array<Record<string, unknown>>)?.[0]?.text as string || '';
+      if (!text) { lastError = 'Empty response from Gemini'; continue; }
+      return res.json({ analysis: text });
+    } catch (e) {
+      lastError = (e as Error).message;
+    }
   }
+  res.status(502).json({ error: 'Vision analysis unavailable', detail: lastError || 'All Gemini models failed' });
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -9843,6 +9893,10 @@ httpServer.listen(PORT, () => {
   startResourceMonitor();
   // Pre-warm slow caches so first user request doesn't pay the penalty
   fetchAndCacheAirspaces().then(() => logger.info('Airspace cache pre-warmed')).catch(() => {});
+  fetchOceanCurrents().then(r => logger.info({ count: r.length }, 'Ocean currents cache pre-warmed')).catch(e => logger.error({ err: String(e) }, 'Ocean currents pre-warm failed'));
+  setInterval(() => {
+    fetchOceanCurrents().then(r => logger.info({ count: r.length }, 'Ocean currents cache refreshed')).catch(e => logger.error({ err: String(e) }, 'Ocean currents refresh failed'));
+  }, 3600000);
   materializedViews.refreshInternal().then(() => logger.info('Materialized views refreshed')).catch(() => {});
   // Start background jobs for proactive systems
   monitorManager.startJobs();
@@ -9856,12 +9910,15 @@ httpServer.listen(PORT, () => {
   dreamEngine.start();
   memorySystem.start().catch(err => logger.error({ err }, 'memory system start failed'));
   // Initialize Prithvi foundation model
-  prithviEngine.init().then(() => logger.info('Prithvi FM initialized')).catch(err => logger.warn({ err }, 'Prithvi FM init skipped'));
+  prithviEngine.init().then(() => {
+    logger.info('Prithvi FM initialized');
+    // Auto-start satellite seeder in background (populates prithvi_embeddings for EO search)
+    satelliteSeeder.start({ spacingDeg: 2, resume: true }).catch(err => {
+      logger.warn({ err }, 'Satellite seeder auto-start failed (will retry on demand)');
+    });
+  }).catch(err => logger.warn({ err }, 'Prithvi FM init skipped'));
   // Initialize satellite image searcher
   satelliteSearcher.init().then(() => logger.info('SatelliteSearcher initialized')).catch(err => logger.warn({ err }, 'SatelliteSearcher init skipped'));
-  // Initialize Tile38 geofencing engine
-  tile38Engine.startPeriodicSweep();
-  logger.info('Tile38 geofencing engine started');
   // Start ML pipeline background tasks
   startSyntheticDataGeneration(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '', 3600000);
   logger.info('Background jobs started (monitor:scheduler:ambient:mvc:plugin:ml)');

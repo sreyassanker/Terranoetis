@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, Bell, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -9,6 +9,7 @@ import { useAuth, authHeaders } from '@/context/AuthContext';
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { apiGet } from '@/lib/api';
+import * as satellite from 'satellite.js';
 import StudyAreaPanel from '@/components/ui/StudyAreaPanel';
 import { CameraControls } from '@/components/CameraControls';
 import type { StudyAreaItem } from '@/rendering/studyArea';
@@ -47,9 +48,10 @@ import { ForkPanel } from '@/components/ForkPanel';
 import { fetchAndStoreSatnogsData, getSatnogsForNorad, addSatnogsEntities } from '@/rendering/satnogs';
 import { fetchAndStoreUcsData, getUcsForNorad, addUcsEntities } from '@/rendering/ucsSatelliteDb';
 
-import { ReasoningTraceViewer, EvidenceChainPanel, UncertaintyBadge, HumanOverrideBanner } from '@/components/explainability/index';
-import { CognitiveDashboard, AlertPanel as CockpitAlertPanel, ToolWorkbench, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
+import { UncertaintyBadge, HumanOverrideBanner } from '@/components/explainability/index';
+import { CognitiveDashboard, ToolWorkbench, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
 import { ApiVault } from '@/components/ui/api-vault';
+import Panel from '@/components/ui/Panel';
 import ScenarioViewer from '@/components/scenarios/ScenarioViewer';
 import ScenarioEditor from '@/components/scenarios/ScenarioEditor';
 import ScenarioGallery from '@/components/scenarios/ScenarioGallery';
@@ -60,9 +62,10 @@ import { DigitalTwinPanel } from '@/components/DigitalTwinPanel';
 import { IntelligencePanel } from '@/components/IntelligencePanel';
 import { PrithviPanel } from '@/components/prithvi/PrithviPanel';
 import { SatelliteSearchPanel } from '@/components/prithvi/SatelliteSearchPanel';
-import { Tile38Panel } from '@/components/prithvi/Tile38Panel';
-import { EOKnowledgeGraphPanel } from '@/components/prithvi/EOKnowledgeGraphPanel';
+import { SatelliteTrackerPanel } from '@/components/prithvi/SatelliteTrackerPanel';
 import { CommandPalette } from '@/components/CommandPalette';
+import { MilitarySymbologyPanel } from '@/components/MilitarySymbologyPanel';
+import { MilitarySymbologyOverlay } from '@/rendering/militarySymbologyOverlay';
 import { createRenderScheduler } from '@/lib/renderScheduler';
 import { createUnifiedTimer } from '@/lib/unifiedTimer'; // P0 perf: unified timer
 import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings } from '@/rendering/digitalTwinLayers';
@@ -72,6 +75,10 @@ import {
   addVaacAdvisoryEntities,
   addSo2Entities,
   addOpenFlightsEntities,
+  addMilitaryFlightEntities,
+  addUcdpEntities,
+  type UcdpEvent,
+  addMilitaryBaseEntities,
 } from '@/rendering/aviation';
 import {
   addGenericPointEntities,
@@ -106,51 +113,10 @@ interface TimelineState {
   active: boolean; speed: number; interval: ReturnType<typeof setInterval> | null;
 }
 
-interface EventAlert {
-  id: string; title: string; desc: string; severity: string;
-  type: string; lat: number; lon: number; seen: boolean; time: string; timestamp: number;
-  hasMapPosition: boolean;
-}
-
-function alertGeometryLonLat(
-  geometry: { type?: string; coordinates?: unknown } | null | undefined,
-): { lon: number; lat: number } | null {
-  if (!geometry?.coordinates) return null;
-  const { type, coordinates: coords } = geometry;
-  if (type === 'Point' && Array.isArray(coords) && coords.length >= 2) {
-    const lon = Number(coords[0]);
-    const lat = Number(coords[1]);
-    return Number.isFinite(lon) && Number.isFinite(lat) ? { lon, lat } : null;
-  }
-  let ring: number[][] | undefined;
-  if (type === 'Polygon' && Array.isArray(coords) && Array.isArray(coords[0])) {
-    ring = coords[0] as number[][];
-  } else if (
-    type === 'MultiPolygon'
-    && Array.isArray(coords)
-    && Array.isArray(coords[0])
-    && Array.isArray(coords[0][0])
-  ) {
-    ring = coords[0][0] as number[][];
-  }
-  if (!ring?.length) return null;
-  let sumLon = 0;
-  let sumLat = 0;
-  let n = 0;
-  for (const pt of ring) {
-    if (Array.isArray(pt) && pt.length >= 2) {
-      sumLon += Number(pt[0]);
-      sumLat += Number(pt[1]);
-      n += 1;
-    }
-  }
-  if (n === 0) return null;
-  return { lon: sumLon / n, lat: sumLat / n };
-}
-
 interface IntelFeedItem {
   id: string; title: string; source: string; type: string;
   lat: number; lon: number; timestamp: number; timeLabel: string;
+  desc?: string;
   url?: string;
   platform?: 'internal' | 'news' | 'twitter' | 'facebook' | 'social';
 }
@@ -806,7 +772,7 @@ function adaptScenario(raw: any): any {
   return {
     id: raw.id,
     type: raw.type,
-    name: (raw.dataSources?.length ? '🧬 ' : '') + (TYPE_LABELS[raw.type as string] || raw.type),
+    name: (raw.dataSources?.length ? 'Data: ' : '') + (TYPE_LABELS[raw.type as string] || raw.type),
     pointCloud: raw.pointCloud,
     validationScore: raw.validationScore,
     severity,
@@ -848,7 +814,9 @@ function richRender(text: string): string {
   const cached = RICH_MESSAGE_CACHE.get(text);
   if (cached) return cached;
 
-  let html = text
+  // Strip ## COMMANDS block — it's only needed for command chips, not visible text
+  const readableText = text.replace(/## COMMANDS\n[\s\S]*?(?=\n##|\n*$)/g, '');
+  let html = readableText
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
@@ -920,10 +888,10 @@ function renderCommandChips(
         try {
           const cmd = JSON.parse(json);
           if (cmd.action === 'flyTo' && cmd.lat && cmd.lon) {
-            cmdChips.push({label:'📍 ' + (cmd.label||'Fly'),action:'flyTo',lat:cmd.lat,lon:cmd.lon});
+            cmdChips.push({label:(cmd.label||'Fly'),action:'flyTo',lat:cmd.lat,lon:cmd.lon});
           }
           if (cmd.action === 'toggleLayer' && cmd.layerId) {
-            cmdChips.push({label:'👁 ' + cmd.layerId,action:'toggleLayer',layerId:cmd.layerId});
+            cmdChips.push({label:cmd.layerId,action:'toggleLayer',layerId:cmd.layerId});
           }
         } catch { /* skip */ }
       }
@@ -935,7 +903,7 @@ function renderCommandChips(
       {cmdChips.map((chip,i) => (
         <span key={i} className="ai-chip command-chip" style={{fontSize:10,padding:'2px 8px'}}
           onClick={() => {
-            if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 150 });
+            if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 1000 });
             if (chip.action === 'toggleLayer' && chip.layerId) toggleLayer(chip.layerId);
           }}>{chip.label}</span>
       ))}
@@ -997,11 +965,15 @@ export default function App() {
   const issTimesRef = useRef<Cesium.JulianDate[]>([]);
   const issRenderTickRef = useRef<(() => void) | null>(null);
   const issLoadingRef = useRef(false);
+  const trackedSatRef = useRef<Cesium.Entity | null>(null);
+  const trackedSatTrailEntityRef = useRef<Cesium.Entity | null>(null);
+  const trackedSatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const trackedSatTleRef = useRef<{ tle1: string; tle2: string } | null>(null);
+  const trackedSatRenderTickRef = useRef<(() => void) | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
-  const alertsRef = useRef<EventAlert[]>([]);
+  const intelFeedRef = useRef<IntelFeedItem[]>([]);
   const notificationTimeoutsRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const populationImpactLayerRef = useRef<Cesium.Entity[]>([]);
-  const intelFeedRef = useRef<IntelFeedItem[]>([]);
   const weatherCardElementsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const weatherAbortRef = useRef<AbortController | null>(null);
   const focusMarkerRef = useRef<Cesium.Entity | null>(null);
@@ -1011,24 +983,25 @@ export default function App() {
   const flightawareDrRef = useRef<FlightDeadReckoning | null>(null);
   const airlabsDrRef = useRef<FlightDeadReckoning | null>(null);
   const aisTrackerRef = useRef<AisVesselTracker | null>(null);
+  const militaryOverlayRef = useRef<MilitarySymbologyOverlay | null>(null);
   const ghostProtocolRef = useRef<GhostProtocol | null>(null);
   const entropyHaloRef = useRef<EntropyHalo | null>(null);
   const oracleChainRef = useRef<OracleChainRenderer | null>(null);
   const entityTrackerRef = useRef<ReturnType<typeof createEntityTracker> | null>(null);
   const unlockInteractionRef = useRef<(() => void) | null>(null);
-  const fpsFramesRef = useRef<number[]>([]);
-  const lastFpsTimeRef = useRef(performance.now());
   const feedErrorsRef = useRef<string[]>([]);
   const feedSummaryShownRef = useRef(false);
-  const alertEntityRef = useRef<Record<string, Cesium.Entity>>({});
   const smokeParticlesRef = useRef<Cesium.Entity[]>([]);
   const tectonicEntitiesRef = useRef<Cesium.Entity[]>([]);
   const overlayImageryLayersRef = useRef<Record<string, Cesium.ImageryLayer>>({});
+  const searchResultEntitiesRef = useRef<Cesium.Entity[]>([]);
   const cctvPulseEntityRef = useRef<Cesium.Entity | null>(null);
   const cctvMetaRef = useRef<Map<string, any>>(new Map());
   const nextAiMsgIdRef = useRef(1);
   const MAX_ENTITIES = 30000;
   const toggleDebounceRef = useRef<Record<string, number>>({});
+
+
 
   /* ── State ── */
   const initialApiVault = useMemo(() => loadApiVault(), []);
@@ -1036,7 +1009,7 @@ export default function App() {
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState('Initializing Cesium...');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [openCategories, setOpenCategories] = useState<string[]>(['seismic']);
+  const [openCategories, setOpenCategories] = useState<string[]>([]);
   const [layers, setLayers] = useState<LayerItem[]>(LAYER_DEFS.map(l => ({ ...l })));
   const layersRef = useRef<LayerItem[]>(LAYER_DEFS.map(l => ({ ...l })));
   const renderSchedulerRef = useRef(createRenderScheduler());
@@ -1056,14 +1029,11 @@ export default function App() {
   const [studySouth, setStudySouth] = useState('6.0');
   const [studyEast, setStudyEast] = useState('98.0');
   const [studyNorth, setStudyNorth] = useState('38.0');
-  const [showAlertsPanel, setShowAlertsPanel] = useState(false);
-  const [alertTab, setAlertTab] = useState<'alerts' | 'predictive'>('alerts');
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [analyticsData, setAnalyticsData] = useState<Record<string, unknown> | null>(null);
   const [showIntelFeed, setShowIntelFeed] = useState(false);
   const [activeLayerCount, setActiveLayerCount] = useState(0);
   const [utcTime, setUtcTime] = useState('');
-  const [totalEntities, setTotalEntities] = useState(0);
   const [activeEvents, setActiveEvents] = useState(0);
   const [weatherCards, setWeatherCards] = useState<WeatherCardData[]>([]);
   const [contextMenu, setContextMenu] = useState<{show:boolean;x:number;y:number;lat:number;lon:number}>({show:false,x:0,y:0,lat:0,lon:0});
@@ -1077,9 +1047,9 @@ export default function App() {
   const [showIntelligencePanel, setShowIntelligencePanel] = useState(false);
   const [showPrithviPanel, setShowPrithviPanel] = useState(false);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
-  const [showTile38Panel, setShowTile38Panel] = useState(false);
-  const [showKgPanel, setShowKgPanel] = useState(false);
+  const [showSatelliteTracker, setShowSatelliteTracker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showMilitarySymbology, setShowMilitarySymbology] = useState(false);
   // CMD+K keyboard shortcut
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1099,17 +1069,16 @@ export default function App() {
   ]);
   const [recentDiscoveries, setRecentDiscoveries] = useState<Array<{ summary: string; confidence: number }>>([]);
   const [lastDream, setLastDream] = useState<{ scenariosRun: number; modelUpdates: number; newCausalEdges: number; timestamp: number } | null>(null);
-  const [alerts, setAlerts] = useState<EventAlert[]>([]);
-  const [newAlertCount, setNewAlertCount] = useState(0);
   const [notifications, setNotifications] = useState<Array<{id:number;text:string;severity:string}>>([]);
   const [populationImpact, setPopulationImpact] = useState<ReturnType<typeof calculatePopulationImpact> | null>(null);
   const [aiMessages, setAiMessages] = useState<ChatMessage[]>([
-    { id: nextAiMsgIdRef.current++, role: 'assistant', content: '👋 Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' },
+    { id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' },
   ]);
   const [aiTyping, setAiTyping] = useState(false);
   const auth = useAuth();
   const ws = useWebSocket(auth.token ?? undefined);
   const { isLoggedIn, isAdmin } = auth;
+  const [copiedMsgId, setCopiedMsgId] = useState<number | null>(null);
   const [aiInput, setAiInput] = useState('');
   const [agentSteps, setAgentSteps] = useState<Array<{type:string;text:string;code?:string;output?:string;timeMs?:number;toolName?:string;subtask?:string;status?:string}>>([]);
   const [showReasoningFor, setShowReasoningFor] = useState<Record<string, boolean>>({});
@@ -1155,8 +1124,7 @@ export default function App() {
       .finally(() => setScenarioGalleryLoading(false));
   }, [showScenarioGallery]);
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
-  const [agentEnvironmentId, setAgentEnvironmentId] = useState<string | null>(null);
-  const agentInteractionIdRef = useRef<string | null>(null);
+  const [thinkingExpanded, setThinkingExpanded] = useState(true);
   const [sandboxWorkspaceId, setSandboxWorkspaceId] = useState<string | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [pipelineProgress, setPipelineProgress] = useState<Array<{id:string;description:string;status:string}>>([]);
@@ -1173,6 +1141,7 @@ export default function App() {
   // Chat history
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentRequestIdRef = useRef<string | null>(null);
+  const sendAIRef = useRef<(overrideMessage?: string) => Promise<void>>(async () => {});
   const [showAdmin, setShowAdmin] = useState(false);
   const [showTimeSlider, setShowTimeSlider] = useState(false);
   const [timeSliderValue, setTimeSliderValue] = useState(Date.now());
@@ -1225,7 +1194,6 @@ export default function App() {
         if (Array.isArray(session.messages)) {
           setAiMessages(session.messages.map((m: {id?:number;role:string;content:string;type?:string}) => ({...m, id: m.id || nextAiMsgIdRef.current++})));
         }
-        if (session.envId) setAgentEnvironmentId(session.envId);
         if (session.wsId) setSandboxWorkspaceId(session.wsId);
         if (session.input) setAiInput(session.input);
       } catch { /* ignore session parse */ }
@@ -1237,7 +1205,6 @@ export default function App() {
         if (Array.isArray(session.messages)) {
           setAiMessages(session.messages.map((m: {id?:number;role:string;content:string;type?:string}) => ({...m, id: m.id || nextAiMsgIdRef.current++})));
         }
-        if (session.envId) setAgentEnvironmentId(session.envId);
         if (session.wsId) setSandboxWorkspaceId(session.wsId);
         if (session.input) setAiInput(session.input);
       } catch { /* ignore session parse */ }
@@ -1248,7 +1215,6 @@ export default function App() {
     const id = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const session = {
       messages: aiMessages.slice(-10),
-      envId: agentEnvironmentId,
       wsId: sandboxWorkspaceId,
       input: aiInput,
       ts: Date.now(),
@@ -1257,7 +1223,7 @@ export default function App() {
     const url = new URL(window.location.href);
     url.hash = `sessionRef=${encodeURIComponent(id)}`;
     return url.toString();
-  }, [agentEnvironmentId, aiInput, aiMessages, sandboxWorkspaceId]);
+  }, [aiInput, aiMessages, sandboxWorkspaceId]);
 
   // Load chat list on mount
   useEffect(() => {
@@ -1277,8 +1243,9 @@ export default function App() {
       } catch { /* silent */ }
     };
     fetchMemory();
-    unifiedTimerRef.current.register('memory-stats', fetchMemory, 30000);
-    return () => { unifiedTimerRef.current.unregister('memory-stats'); };
+    const timer = unifiedTimerRef.current;
+    timer.register('memory-stats', fetchMemory, 30000);
+    return () => { timer.unregister('memory-stats'); };
   }, [auth.token]);
 
   // Auto-save chat after each new message
@@ -1292,19 +1259,18 @@ export default function App() {
         id,
         title: autoTitle(aiMessages),
         messages: aiMessages as ChatMessage[],
-        environmentId: agentEnvironmentId || undefined,
         workspaceId: sandboxWorkspaceId || undefined,
       }).then(() => {
         listChats().then(setChatList).catch(() => {});
       }).catch(() => {});
     }, 2000);
     return () => { if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current); };
-  }, [aiMessages, agentEnvironmentId, sandboxWorkspaceId]);
+  }, [aiMessages, sandboxWorkspaceId]);
   // Auto-expand thinking block when new steps arrive
   const prevStepCountRef = useRef(0);
   useEffect(() => {
     if (agentSteps.length > prevStepCountRef.current) {
-      setExpandedStep(-1);
+      setThinkingExpanded(true);
     }
     prevStepCountRef.current = agentSteps.length;
   }, [agentSteps.length]);
@@ -1318,8 +1284,10 @@ export default function App() {
   const [issInfo, setIssInfo] = useState<{lat:number;lon:number} | null>(null);
   const [intelFeed, setIntelFeed] = useState<IntelFeedItem[]>([]);
   const [intelFilter, setIntelFilter] = useState('all');
-  const [fps, setFps] = useState(0);
-  const [cameraDms, setCameraDms] = useState('');
+  const [cameraLat, setCameraLat] = useState('');
+  const [cameraLon, setCameraLon] = useState('');
+  const [cameraLatDir, setCameraLatDir] = useState('N');
+  const [cameraLonDir, setCameraLonDir] = useState('E');
   const [showPopulationImpact, setShowPopulationImpact] = useState(false);
   const [layerSearch, setLayerSearch] = useState('');
   const [pulsingLayer, setPulsingLayer] = useState<string | null>(null);
@@ -1344,6 +1312,10 @@ export default function App() {
   const [studyAreas, setStudyAreas] = useState<StudyAreaItem[]>([]);
   const [studyDrawing, setStudyDrawing] = useState(false);
   const drawerRef = useRef<any>(null);
+  const chatMessagesRef = useRef<HTMLDivElement>(null);
+
+  /* Auto-scroll chat to bottom on new messages */
+  useEffect(() => { chatMessagesRef.current?.scrollTo({ top: chatMessagesRef.current.scrollHeight, behavior: 'smooth' }); }, [aiMessages.length, aiTyping]);
 
   const aiApiType = useMemo(() => resolveAiProvider(apiVault), [apiVault]);
   const cesiumIonToken = useMemo(() => resolveCesiumIonToken(apiVault), [apiVault]);
@@ -1467,12 +1439,29 @@ export default function App() {
       setUtcTime(ist + ' IST');
     };
     tick();
-    unifiedTimerRef.current.register('clock', tick, 1000);
-    unifiedTimerRef.current.start();
-    return () => { unifiedTimerRef.current.unregister('clock'); };
+    const timer = unifiedTimerRef.current;
+    timer.register('clock', tick, 1000);
+    timer.start();
+    return () => { timer.unregister('clock'); };
   }, []);
 
-  /* ── Cesium Init ── */
+  /* ── Military Symbology Overlay Sync ── */
+  useEffect(() => {
+    const overlay = militaryOverlayRef.current;
+    if (!overlay) return;
+    overlay.setEnabled(showMilitarySymbology);
+    if (!showMilitarySymbology) return;
+    const interval = setInterval(() => {
+      if (!overlay.isEnabled()) return;
+      const ais = aisTrackerRef.current;
+      if (ais) overlay.updateFromVessels(ais.getVesselsSnapshot());
+      const flightDrs = [flightDrRef, adsbLolDrRef, adsbFiDrRef, flightawareDrRef, airlabsDrRef];
+      for (const dr of flightDrs) {
+        if (dr.current) overlay.updateFromFlights(dr.current.getFlightsSnapshot());
+      }
+    }, 2000);
+    return () => { clearInterval(interval); overlay.setEnabled(false); };
+  }, [showMilitarySymbology]);
   useEffect(() => {
     if (!cesiumElRef.current || viewerRef.current) return;
     window.Cesium = Cesium;
@@ -1542,6 +1531,7 @@ export default function App() {
     if (aisKey) {
       aisTrackerRef.current = new AisVesselTracker(v, aisKey);
     }
+    militaryOverlayRef.current = new MilitarySymbologyOverlay(v);
     v.scene.logarithmicDepthBuffer = true;
     v.clock.shouldAnimate = true;
     v.clock.multiplier = 1;
@@ -1579,7 +1569,7 @@ export default function App() {
       setIsAutoRotating(false);
     };
     v.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(0, 0, 2.2e7),
+      destination: Cesium.Cartesian3.fromDegrees(78, 22, 2.2e7),
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     });
     throttledRender(v);
@@ -1621,29 +1611,14 @@ export default function App() {
     };
     v.scene.postRender.addEventListener(syncWeatherCardPositions);
 
-    let lastFpsRenderTime = 0;
-    const FPS_UPDATE_THROTTLE_MS = 1000; // P0 perf: update FPS at 1 Hz instead of every frame
     const onPostRender = () => {
-      const now = performance.now();
-      if (now - lastFpsRenderTime < FPS_UPDATE_THROTTLE_MS) return;
-      lastFpsRenderTime = now;
-      const dt = now - lastFpsTimeRef.current;
-      if (dt >= 500) {
-        const frames = fpsFramesRef.current.length;
-        setFps(Math.round((frames * 1000) / dt));
-        fpsFramesRef.current = [];
-        lastFpsTimeRef.current = now;
-        const c = v.camera.positionCartographic;
-        const lat = Cesium.Math.toDegrees(c.latitude);
-        const lon = Cesium.Math.toDegrees(c.longitude);
-        const latD = Math.abs(lat);
-        const lonD = Math.abs(lon);
-        const latDir = lat >= 0 ? 'N' : 'S';
-        const lonDir = lon >= 0 ? 'E' : 'W';
-        setCameraDms(`${latD.toFixed(2)}°${latDir} ${lonD.toFixed(2)}°${lonDir}`);
-      } else {
-        fpsFramesRef.current.push(1);
-      }
+      const c = v.camera.positionCartographic;
+      const latRaw = Cesium.Math.toDegrees(c.latitude);
+      const lonRaw = Cesium.Math.toDegrees(c.longitude);
+      setCameraLat(Math.abs(latRaw).toFixed(4));
+      setCameraLon(Math.abs(lonRaw).toFixed(4));
+      setCameraLatDir(latRaw >= 0 ? 'N' : 'S');
+      setCameraLonDir(lonRaw >= 0 ? 'E' : 'W');
     };
     v.scene.postRender.addEventListener(onPostRender);
 
@@ -1746,7 +1721,7 @@ export default function App() {
       if (!forkName) return;
       fetch('/api/fork/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' , ...authHeaders() },
         credentials: 'include',
         body: JSON.stringify({
           name: forkName,
@@ -1979,6 +1954,8 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        const v = viewerRef.current;
+        if (v && focusMarkerRef.current) { v.entities.remove(focusMarkerRef.current); focusMarkerRef.current = null; }
         setInfoEntity(null);
         entityTrackerRef.current?.untrack();
       }
@@ -2051,11 +2028,10 @@ export default function App() {
 
   /* ═════════════════════════════════════════════════════════════════
      DATA LOADING
-     ═════════════════════════════════════════════════════════════════ */
+      ═════════════════════════════════════════════════════════════════ */
 
   useEffect(() => {
     if (!isLoggedIn) return;
-    // SSE stream for instant items; falls back to HTTP polling if SSE fails
     const token = auth.token || localStorage.getItem('auth_token');
     const url = `/api/social/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`;
     const es = new EventSource(url);
@@ -2065,36 +2041,28 @@ export default function App() {
       try {
         const items = JSON.parse(e.data) as any[];
         if (!Array.isArray(items)) return;
-        let youtubeCount = 0;
         for (const item of items) {
-          if (item.id && !intelFeedRef.current.find(i => i.id === item.id)) {
-            pushIntelFeed({
-              id: item.id,
-              title: item.title ?? '',
-              source: item.source ?? '',
-              type: item.type ?? 'news',
-              lat: item.lat || 0,
-              lon: item.lon || 0,
-              timestamp: item.timestamp ?? Date.now(),
-              url: item.url,
-              platform: item.platform,
-            });
-            const videoId = item.youtubeVideoId || extractYoutubeId(item.url);
-            if (videoId && item.url) {
-              youtubeCount++;
-              if (!item.lat && !item.lon) {
-                const geo = geoFromText(item.title || '');
-                if (geo.lat || geo.lon) { item.lat = geo.lat; item.lon = geo.lon; }
-              }
-              if (item.lat && item.lon) {
-                addYoutubeEntity(item);
-              } else {
-                console.warn('[LiveMedia] YouTube item skipped: no geo', item.title?.slice(0, 50), item.lat, item.lon);
-              }
+          if (!item.id || intelFeedRef.current.find(i => i.id === item.id)) continue;
+          if (item.youtubeVideoId || extractYoutubeId(item.url)) {
+            if (!item.lat && !item.lon) {
+              const geo = geoFromText(item.title || '');
+              if (geo.lat || geo.lon) { item.lat = geo.lat; item.lon = geo.lon; }
             }
+            if (item.lat && item.lon) addYoutubeEntity(item);
+            continue;
           }
+          pushIntelFeed({
+            id: item.id,
+            title: item.title ?? '',
+            source: item.source ?? '',
+            type: item.type ?? 'news',
+            lat: item.lat || 0,
+            lon: item.lon || 0,
+            timestamp: item.timestamp ?? Date.now(),
+            url: item.url,
+            platform: item.platform,
+          });
         }
-        if (youtubeCount) console.warn(`[LiveMedia] SSE items event: ${youtubeCount} YouTube items, ${items.length} total`);
       } catch { /* ignore malformed SSE data */ }
     });
 
@@ -2102,67 +2070,49 @@ export default function App() {
       try {
         const items = JSON.parse(e.data) as any[];
         if (!Array.isArray(items)) return;
-        const feed = intelFeedRef.current;
         for (const item of items) {
           if (!item.id) continue;
-          const existing = feed.find(i => i.id === item.id);
+          if (item.youtubeVideoId || extractYoutubeId(item.url)) {
+            if (item.lat && item.lon) addYoutubeEntity(item);
+            continue;
+          }
+          const existing = intelFeedRef.current.find(i => i.id === item.id);
           if (existing) {
             if (item.lat) existing.lat = item.lat;
             if (item.lon) existing.lon = item.lon;
-            if ((item as unknown as Record<string, unknown>).confidence) (existing as unknown as Record<string, unknown>).confidence = (item as unknown as Record<string, unknown>).confidence;
-          }
-          // If LLM enrichment gave geo to a YouTube item, create its entity
-          const videoId = item.youtubeVideoId || extractYoutubeId(item.url);
-          if (videoId && item.lat && item.lon) {
-            addYoutubeEntity({ id: item.id, title: item.title || '', lat: item.lat, lon: item.lon, url: item.url, source: item.source });
           }
         }
       } catch { /* ignore */ }
     });
 
-    es.addEventListener('done', () => {
-      // Refresh YouTube entities after all sources have delivered
-      if (isLayerEnabled('live_media') && viewerRef.current) {
-        void loadLiveMedia(viewerRef.current);
-      }
-      // Don't close — LLM enrichment may still send 'enriched' events
-    });
-
-    // Fallback polling if SSE fails (onerror fires async, so polling is inside the handler)
     es.onerror = () => {
       es.close();
       if (pollTimer) return;
       pollTimer = setInterval(() => {
-        if (!isLayerEnabled('intel_feed') && !isLayerEnabled('live_media')) return;
         fetch('/api/social', { headers: { ...authHeaders() } })
           .then(r => r.ok ? r.json() : [])
           .then((items: any[]) => {
             for (const item of items) {
-              if (item.id && !intelFeedRef.current.find(i => i.id === item.id)) {
-                pushIntelFeed({
-                  id: item.id,
-                  title: item.title ?? '',
-                  source: item.source ?? '',
-                  type: item.type ?? 'news',
-                  lat: item.lat || 0,
-                  lon: item.lon || 0,
-                  timestamp: item.timestamp ?? Date.now(),
-                  url: item.url,
-                  platform: item.platform,
-                });
-                const videoId = item.youtubeVideoId || extractYoutubeId(item.url);
-                if (videoId && item.url) {
-                  if (!item.lat && !item.lon) {
-                    const geo = geoFromText(item.title || '');
-                    if (geo.lat || geo.lon) { item.lat = geo.lat; item.lon = geo.lon; }
-                  }
-                  if (item.lat && item.lon) addYoutubeEntity(item);
+              if (!item.id || intelFeedRef.current.find(i => i.id === item.id)) continue;
+              if (item.youtubeVideoId || extractYoutubeId(item.url)) {
+                if (!item.lat && !item.lon) {
+                  const geo = geoFromText(item.title || '');
+                  if (geo.lat || geo.lon) { item.lat = geo.lat; item.lon = geo.lon; }
                 }
+                if (item.lat && item.lon) addYoutubeEntity(item);
+                continue;
               }
-            }
-            // Refresh YouTube entities after polling fetch
-            if (isLayerEnabled('live_media') && viewerRef.current) {
-              void loadLiveMedia(viewerRef.current);
+              pushIntelFeed({
+                id: item.id,
+                title: item.title ?? '',
+                source: item.source ?? '',
+                type: item.type ?? 'news',
+                lat: item.lat || 0,
+                lon: item.lon || 0,
+                timestamp: item.timestamp ?? Date.now(),
+                url: item.url,
+                platform: item.platform,
+              });
             }
           })
           .catch(() => {});
@@ -2173,7 +2123,8 @@ export default function App() {
       es.close();
       if (pollTimer) clearInterval(pollTimer);
     };
-  }, [isLoggedIn, auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoggedIn, auth.token]);
 
   async function loadFlightTracks(viewer: Cesium.Viewer) {
     const gen = (loadGenRef.current['flight_tracks'] = (loadGenRef.current['flight_tracks'] ?? 0) + 1);
@@ -2181,29 +2132,29 @@ export default function App() {
     flightDrRef.current?.clear();
     removeLayerEntities('flight_tracks');
 
-    const sources = ['/flights', '/adsb-fi', '/adsb-lol'];
+    const cam = viewer.camera.positionCartographic;
+    const lat = cam ? (cam.latitude * 180 / Math.PI).toFixed(2) : '';
+    const lon = cam ? (cam.longitude * 180 / Math.PI).toFixed(2) : '';
+    const locParam = (lat && lon) ? `?lat=${lat}&lon=${lon}` : '';
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), 20000);
 
-    // Try all sources in parallel, use first successful response
-    const results = await Promise.allSettled(
-      sources.map(source =>
-        apiGet<{ states?: unknown[][] | null }>(source, { signal: controller.signal })
-      )
-    );
-    clearTimeout(timeout);
-
-    if (loadGenRef.current['flight_tracks'] !== gen) return;
-    if (!isLayerEnabled('flight_tracks')) return;
-
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value.states?.length) {
-        flightDrRef.current?.updateFromApi(result.value.states);
-        flightDrRef.current?.start();
-        throttledRender(viewer);
-        showNotification(`Loaded ${result.value.states.length} live flight tracks`, 'success');
+    try {
+      const data = await apiGet<{ states?: unknown[][] | null }>(`/flights/all${locParam}`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (loadGenRef.current['flight_tracks'] !== gen) return;
+      if (!isLayerEnabled('flight_tracks')) return;
+      if (!data.states?.length) {
+        showNotification('No aircraft data available', 'warning');
         return;
       }
+      flightDrRef.current?.updateFromApi(data.states);
+      flightDrRef.current?.start();
+      throttledRender(viewer);
+      showNotification(`Loaded ${data.states.length} live aircraft (combined sources)`, 'success');
+    } catch {
+      clearTimeout(timeout);
+      showNotification('Flight tracking unavailable', 'warning');
     }
   }
 
@@ -2291,8 +2242,7 @@ export default function App() {
         const p = f.properties;
         const m = Number(p.mag ?? 0);
         if (m >= 5 && p.time) checkMagnitudeAlert(m, String(p.place ?? ''), Number(p.time), c[1], c[0]);
-        if (isLayerEnabled('earthquakes')) {
-          pushIntelFeed({
+        pushIntelFeed({
             id: `eq-${p.time}`,
             title: `M${m.toFixed(1)} ${String(p.place ?? '')}`,
             source: 'USGS',
@@ -2301,9 +2251,9 @@ export default function App() {
             lon: c[0],
             timestamp: Number(p.time ?? Date.now()),
             url: String(p.url ?? `https://earthquake.usgs.gov/earthquakes/search/`),
-            platform: 'internal'
+            platform: 'internal',
+            desc: `Magnitude ${m.toFixed(1)} at ${String(p.place ?? 'unknown location')}`,
           });
-        }
         return addEarthquakeEntity(viewer, f);
       });
       entityStoreRef.current['earthquakes'] = ents;
@@ -2359,19 +2309,17 @@ export default function App() {
         if (!entityStoreRef.current[cat]) entityStoreRef.current[cat] = [];
         entityStoreRef.current[cat].push(ent);
         eonetCategoriesRef.current.add(cat);
-        if (isLayerEnabled(cat)) {
-          pushIntelFeed({
+        pushIntelFeed({
             id: `eonet-${ev.id}`,
             title: String(ev.title ?? 'Event'),
             source: 'NASA EONET',
-            type: cat,
+            type: cat === 'wildfires' ? 'fire' : cat === 'severe_storms' ? 'storm' : cat === 'floods' ? 'flood' : cat,
             lat: c[1],
             lon: c[0],
             timestamp: new Date(geo[0].date).getTime() || Date.now(),
             url: String(ev.link ?? `https://eonet.gsfc.nasa.gov/api/v3/events/${String(ev.id ?? '')}`),
             platform: 'internal'
           });
-        }
       }
       for (const key of eonetLayers) {
         if (!isLayerEnabled(key)) {
@@ -2393,32 +2341,43 @@ export default function App() {
           geometry: { type?: string; coordinates?: unknown } | null;
         }>;
       }>('/weather/alerts');
-      const parsed: EventAlert[] = (data.features ?? []).slice(0, 50).map((f, i) => {
+      const groups = new Map<string, { title: string; desc: string; count: number; lat: number; lon: number }>();
+      for (const f of (data.features ?? []).slice(0, 50)) {
         const p = f.properties;
-        const pos = alertGeometryLonLat(f.geometry);
-        const severity = String(p.severity ?? 'Unknown').toLowerCase().includes('extreme') ? 'red'
-          : String(p.severity ?? '').toLowerCase().includes('severe') ? 'orange' : 'green';
-        return {
-          id: `nws-${i}-${p.id ?? i}`,
-          title: String(p.event ?? p.headline ?? 'Weather Alert'),
-          desc: String(p.description ?? p.areaDesc ?? '').slice(0, 200),
-          severity,
-          type: String(p.event ?? 'weather'),
-          lat: pos?.lat ?? 0,
-          lon: pos?.lon ?? 0,
-          hasMapPosition: pos !== null,
-          seen: false,
-          timestamp: Date.now(),
-          time: new Date().toISOString(),
-        };
-      });
-      alertsRef.current = parsed;
-      setAlerts(parsed);
-      setNewAlertCount(parsed.length);
-      parsed.filter(a => a.hasMapPosition).forEach(registerAlertEntity);
-      if (!isLayerEnabled('disaster_alerts')) {
-        setLayerEntitiesVisible('disaster_alerts', false);
+        const coords = f.geometry?.coordinates;
+        let lat = 0, lon = 0;
+        if (f.geometry?.type === 'Point' && Array.isArray(coords) && coords.length >= 2) {
+          lon = Number(coords[0]); lat = Number(coords[1]);
+        } else if (f.geometry?.type === 'Polygon' && Array.isArray(coords) && Array.isArray(coords[0])) {
+          const ring = coords[0] as number[][];
+          lon = ring.reduce((s, c) => s + Number(c[0]), 0) / ring.length;
+          lat = ring.reduce((s, c) => s + Number(c[1]), 0) / ring.length;
+        }
+        if (!isFinite(lat) || !isFinite(lon)) continue;
+        const title = String(p.event ?? p.headline ?? 'Weather Alert');
+        const desc = String(p.description ?? '').slice(0, 300);
+        if (groups.has(title)) {
+          const g = groups.get(title)!;
+          g.count++;
+          if (desc.length > g.desc.length) g.desc = desc;
+        } else {
+          groups.set(title, { title, desc, count: 1, lat, lon });
+        }
       }
+      for (const g of groups.values()) {
+        pushIntelFeed({
+          id: `nws-${g.title}`,
+          title: g.count > 1 ? `${g.title} (${g.count} alerts)` : g.title,
+          source: 'NWS',
+          type: 'weather',
+          lat: g.lat, lon: g.lon,
+          timestamp: Date.now(),
+          url: 'https://www.weather.gov/',
+          platform: 'internal',
+          desc: g.desc,
+        });
+      }
+      entityStoreRef.current['disaster_alerts'] = [];
     } catch (err) {
       recordFeedError('weather alerts', err);
     }
@@ -2437,8 +2396,7 @@ export default function App() {
         const kp = Number(row[1] ?? 0);
         const lat = 65 - i * 5;
         const lon = -95 + i * 30;
-        if (enabled) {
-          pushIntelFeed({
+        pushIntelFeed({
             id: `kp-${row[0]}`,
             title: `Geomagnetic Kp ${kp}`,
             source: 'NOAA SWPC',
@@ -2448,7 +2406,6 @@ export default function App() {
             url: 'https://www.swpc.noaa.gov/products/planetary-k-index',
             platform: 'internal',
           });
-        }
         return viewer.entities.add({
           position: Cesium.Cartesian3.fromDegrees(lon, lat),
           name: `Kp ${kp}`,
@@ -2545,6 +2502,9 @@ export default function App() {
     if (isLayerEnabled('2_adsb_fi')) await loadAdsbFiFlights(viewer);
     if (isLayerEnabled('2_flightaware_aeroapi')) await loadFlightawareFlights(viewer);
     if (isLayerEnabled('2_airlabs_api')) await loadAirlabsFlights(viewer);
+    if (isLayerEnabled('2_military_flights')) await loadMilitaryFlights(viewer);
+    if (isLayerEnabled('ucdp_conflict')) await loadUcdp(viewer);
+    if (isLayerEnabled('military_bases')) await loadMilitaryBases(viewer);
     if (isLayerEnabled('lightning_strikes')) await loadLightningStrikes(viewer);
     if (isLayerEnabled('aurora_oval')) await loadAuroraOval(viewer);
     if (isLayerEnabled('space_weather')) await loadSpaceWeather(viewer);
@@ -2634,7 +2594,6 @@ export default function App() {
       const layer = p?.layer as string | undefined;
       return !layer || !ignoreLayers.has(layer);
     });
-    setTotalEntities(visibleEntities.length);
     let evCount = 0;
     for (const e of visibleEntities) {
       const p = e.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
@@ -2733,55 +2692,6 @@ export default function App() {
     return canvas;
   }
 
-  function getSeverityColor(severity: string): string {
-    if (severity === 'red') return '#ef4444';
-    if (severity === 'orange') return '#f97316';
-    return '#22c55e';
-  }
-
-  function registerAlertEntity(alert: EventAlert) {
-    const v = viewerRef.current;
-    if (!v) return;
-    const existing = alertEntityRef.current[alert.id];
-    if (existing) {
-      existing.show = true;
-      return existing;
-    }
-    const ent = v.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(alert.lon, alert.lat, 5000),
-      name: alert.title,
-      billboard: {
-        image: createPinIcon(getSeverityColor(alert.severity), 24),
-        width: 24,
-        height: 24,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-      },
-      label: {
-        text: alert.title,
-        font: '10px "JetBrains Mono"',
-        fillColor: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        pixelOffset: new Cesium.Cartesian2(0, -18),
-        show: false,
-      },
-      properties: {
-        layer: 'disaster_alerts',
-        title: alert.title,
-        desc: alert.desc,
-        severity: alert.severity,
-        type: alert.type,
-        lat: alert.lat,
-        lon: alert.lon,
-        time: alert.timestamp,
-      },
-    });
-    alertEntityRef.current[alert.id] = ent;
-    if (!entityStoreRef.current['disaster_alerts']) entityStoreRef.current['disaster_alerts'] = [];
-    entityStoreRef.current['disaster_alerts'].push(ent);
-    return ent;
-  }
-
   const focusLocation = useCallback((lat: number, lon: number, options?: { label?: string; color?: string; height?: number; duration?: number; }) => {
     const v = viewerRef.current;
     if (!v) return;
@@ -2816,7 +2726,146 @@ export default function App() {
       },
     });
     focusMarkerRef.current = marker;
-    cinematicFlyTo(v, lon, lat, height, options?.duration ?? 2.5);
+    const range = Math.max(height, 500);
+    v.flyTo(marker, {
+      offset: new Cesium.HeadingPitchRange(
+        Cesium.Math.toRadians(20),
+        Cesium.Math.toRadians(-90),
+        range,
+      ),
+      duration: options?.duration ?? 2.5,
+    });
+  }, []);
+
+  const handleSearchResults = useCallback((results: Array<{ lat: number; lon: number; classLabel: string; similarity?: number }>) => {
+    const v = viewerRef.current;
+    if (!v) return;
+    // Clear previous search markers
+    for (const ent of searchResultEntitiesRef.current) {
+      v.entities.remove(ent);
+    }
+    searchResultEntitiesRef.current = [];
+    // Place new markers (limit to 50 to avoid clutter)
+    const toShow = results.slice(0, 50);
+    for (const r of toShow) {
+      const marker = v.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(r.lon, r.lat),
+        name: r.classLabel.replace(/_/g, ' '),
+        billboard: {
+          image: createPinIcon('#22c55e', 20),
+          width: 20,
+          height: 20,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        },
+        label: {
+          text: r.classLabel.replace(/_/g, ' '),
+          font: '9px "JetBrains Mono"',
+          fillColor: Cesium.Color.fromCssColorString('#6ee7b7'),
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 1,
+          pixelOffset: new Cesium.Cartesian2(0, -14),
+          showBackground: true,
+          backgroundColor: new Cesium.Color(0, 0, 0, 0.6),
+        },
+        properties: { layer: 'search', lat: r.lat, lon: r.lon, classLabel: r.classLabel },
+      });
+      searchResultEntitiesRef.current.push(marker);
+    }
+  }, []);
+
+  const trackSatellite = useCallback((sat: { id: string; name: string; lat: number; lon: number; altitude: number; tle1: string; tle2: string }) => {
+    const v = viewerRef.current;
+    if (!v) return;
+
+    // Clean up previous
+    if (trackedSatIntervalRef.current) { clearInterval(trackedSatIntervalRef.current); trackedSatIntervalRef.current = null; }
+    if (trackedSatRenderTickRef.current) { trackedSatRenderTickRef.current(); trackedSatRenderTickRef.current = null; }
+    if (trackedSatRef.current) { v.entities.remove(trackedSatRef.current); trackedSatRef.current = null; }
+    if (trackedSatTrailEntityRef.current) { v.entities.remove(trackedSatTrailEntityRef.current); trackedSatTrailEntityRef.current = null; }
+
+    const rec = satellite.twoline2satrec(sat.tle1, sat.tle2);
+    trackedSatTleRef.current = { tle1: sat.tle1, tle2: sat.tle2 };
+
+    // ── Trail polyline with arrow material for direction ──
+    const TRAIL_MAX = 120;
+    const trailPositions: Cesium.Cartesian3[] = [];
+
+    const trailEntity = v.entities.add({
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => trailPositions, false),
+        width: 2,
+        material: new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString('#00D4FF').withAlpha(0.6),
+          dashLength: 12,
+        }),
+        arcType: Cesium.ArcType.NONE,
+      },
+    });
+    trackedSatTrailEntityRef.current = trailEntity;
+
+    // ── Current position (ConstantPositionProperty — updated every 2s, flyTo-safe) ──
+    const posProp = new Cesium.ConstantPositionProperty();
+    // Seed initial position
+    try {
+      const pv = satellite.propagate(rec, new Date());
+      if (pv && pv.position && isFinite(pv.position.x)) {
+        const gmst = satellite.gstime(new Date());
+        const gd = satellite.eciToGeodetic(pv.position, gmst);
+        const pos = Cesium.Cartesian3.fromDegrees(satellite.degreesLong(gd.longitude), satellite.degreesLat(gd.latitude), gd.height * 1000);
+        posProp.setValue(pos);
+      }
+    } catch { /* ignore */ }
+
+    const entity = v.entities.add({
+      position: posProp,
+      point: { pixelSize: 11, color: Cesium.Color.CYAN, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
+      label: { text: sat.name, font: 'bold 10px "JetBrains Mono"', fillColor: Cesium.Color.WHITE,
+        pixelOffset: new Cesium.Cartesian2(0, -18) },
+      properties: { layer: 'tracked_satellite', satId: sat.id },
+    });
+    trackedSatRef.current = entity;
+
+    // Seed trail with a 2-minute arc
+    const now = new Date();
+    for (let t = -120; t <= 0; t += 5) {
+      const date = new Date(now.getTime() + t * 1000);
+      const pv = satellite.propagate(rec, date);
+      if (!pv || !pv.position || !isFinite(pv.position.x)) continue;
+      const gmst = satellite.gstime(date);
+      const gd = satellite.eciToGeodetic(pv.position, gmst);
+      const pos = Cesium.Cartesian3.fromDegrees(satellite.degreesLong(gd.longitude), satellite.degreesLat(gd.latitude), gd.height * 1000);
+      trailPositions.push(pos);
+    }
+
+    // Fly to entity — ConstantPositionProperty is stable for flyTo
+    v.flyTo(entity, {
+      duration: 2,
+      offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-25), 20000),
+    });
+
+    // Force render every frame
+    trackedSatRenderTickRef.current = v.clock.onTick.addEventListener(() => {
+      if (trackedSatRef.current) throttledRender(v);
+    });
+
+    // Update both position and trail every 2s
+    trackedSatIntervalRef.current = setInterval(() => {
+      const date = new Date();
+      try {
+        const pv = satellite.propagate(rec, date);
+        if (!pv || !pv.position || !isFinite(pv.position.x)) return;
+        const gmst = satellite.gstime(date);
+        const gd = satellite.eciToGeodetic(pv.position, gmst);
+        const lat = satellite.degreesLat(gd.latitude);
+        const lon = satellite.degreesLong(gd.longitude);
+        const alt = gd.height * 1000;
+        const pos = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+        posProp.setValue(pos);
+        trailPositions.push(Cesium.Cartesian3.clone(pos));
+        if (trailPositions.length > TRAIL_MAX) trailPositions.splice(0, trailPositions.length - TRAIL_MAX);
+        throttledRender(v);
+      } catch { /* ignore */ }
+    }, 2000);
   }, []);
 
   function flyToIndiaDirect() {
@@ -2885,9 +2934,6 @@ export default function App() {
       }
     }
     entityStoreRef.current[layerId] = [];
-    if (layerId === 'disaster_alerts') {
-      Object.keys(alertEntityRef.current).forEach(k => { delete alertEntityRef.current[k]; });
-    }
   }
 
   function enforceEntityCap(): void {
@@ -3314,20 +3360,18 @@ export default function App() {
 
   function checkMagnitudeAlert(mag: number, place: string, time: number, lat: number, lon: number) {
     if (Date.now() - time < 3600000) {
-      const timestamp = Date.now();
-      const alert: EventAlert = {
-        id: `eq_${time}`, title: `M${mag.toFixed(1)} Earthquake Detected`,
-        desc: `${place} - Significant seismic event`,
-        severity: mag >= 7 ? 'red' : mag >= 6 ? 'orange' : 'green',
-        type: 'earthquake', lat, lon, seen: false, time: new Date(time).toISOString(), timestamp,
-        hasMapPosition: true,
-      };
-      registerAlertEntity(alert);
-      alertsRef.current.unshift(alert);
-      setAlerts([...alertsRef.current]);
-      setNewAlertCount(prev => prev + 1);
       showNotification(`M${mag.toFixed(1)} earthquake detected`, 'error');
       if (mag >= 6.5) requestNotification(`M${mag.toFixed(1)} Earthquake Alert`, place);
+      pushIntelFeed({
+        id: `mag_${time}`,
+        title: `M${mag.toFixed(1)} Earthquake: ${place}`,
+        source: 'USGS',
+        type: 'earthquake',
+        lat, lon,
+        timestamp: Date.now(),
+        url: `https://earthquake.usgs.gov/earthquakes/eventpage/${time}`,
+        platform: 'internal',
+      });
     }
   }
 
@@ -3530,7 +3574,7 @@ export default function App() {
           pixelOffset: new Cesium.Cartesian2(0, -16),
           show: false,
         },
-        properties: { layer: 'weather_cards', title: 'Weather Location', lat, lon, time: Date.now() },
+        properties: { layer: 'weather_cards', title: 'Weather Location', lat, lon, cardId: id, time: Date.now() },
       });
       if (!entityStoreRef.current['weather_cards']) entityStoreRef.current['weather_cards'] = [];
       entityStoreRef.current['weather_cards'].push(marker);
@@ -3621,7 +3665,7 @@ export default function App() {
           if (!issEntityRef.current) {
             issEntityRef.current = v.entities.add({
               position: trail,
-              billboard: { image: createISSIcon(), width: 40, height: 40 },
+              billboard: { image: createISSIcon(), width: 28, height: 28 },
               label: { text: 'ISS', font: 'bold 11px "JetBrains Mono"', fillColor: Cesium.Color.WHITE,
                 pixelOffset: new Cesium.Cartesian2(0, -18) },
               path: { leadTime: 0, trailTime: 600, width: 3,
@@ -3643,52 +3687,30 @@ export default function App() {
   }, []);
 
   function createISSIcon(): HTMLCanvasElement {
+    const s = 28;
     const canvas = document.createElement('canvas');
-    canvas.width = 40; canvas.height = 40;
+    canvas.width = s; canvas.height = s;
     const ctx = canvas.getContext('2d')!;
-    const cx = 20, cy = 20;
+    const c = s / 2;
 
-    // Outer glow
-    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 18);
-    glow.addColorStop(0, 'rgba(255,255,255,0.25)');
-    glow.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, 40, 40);
-
-    // Solar panels (left)
-    ctx.fillStyle = '#78716c';
-    ctx.fillRect(4, 14, 7, 12);
-    ctx.fillStyle = '#a8a29e';
-    ctx.fillRect(5, 15, 5, 10);
-
-    // Solar panels (right)
-    ctx.fillStyle = '#78716c';
-    ctx.fillRect(29, 14, 7, 12);
-    ctx.fillStyle = '#a8a29e';
-    ctx.fillRect(30, 15, 5, 10);
-
-    // Satellite body
-    ctx.fillStyle = '#e5e5e5';
-    ctx.fillRect(14, 13, 12, 14);
-    ctx.fillStyle = '#d4d4d4';
-    ctx.fillRect(15, 14, 10, 12);
-
-    // Antenna dish
-    ctx.strokeStyle = '#fbbf24';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(cx, 12, 3, Math.PI, 2 * Math.PI);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(cx - 3, 12);
-    ctx.lineTo(cx, 8);
-    ctx.lineTo(cx + 3, 12);
+    ctx.arc(c, c, 11, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Blinking light (red)
-    ctx.fillStyle = '#ef4444';
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 0.5;
     ctx.beginPath();
-    ctx.arc(cx, 10, 1.2, 0, Math.PI * 2);
+    ctx.moveTo(c, c - 15);
+    ctx.lineTo(c, c + 15);
+    ctx.moveTo(c - 15, c);
+    ctx.lineTo(c + 15, c);
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(c, c, 3, 0, Math.PI * 2);
     ctx.fill();
 
     return canvas;
@@ -3837,7 +3859,8 @@ export default function App() {
     if (now - last < 300) return;
     toggleDebounceRef.current[layerId] = now;
     // Record toggle in user profile (fire-and-forget)
-    fetch('/api/agent/profile/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: 'browser-user', layerId }) }).catch(() => {});
+    fetch('/api/agent/profile/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' , ...authHeaders() }, body: JSON.stringify({ userId: 'browser-user',
+          images: chatImages.length > 0 ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName })) : undefined, layerId }) }).catch(() => {});
     // Read BEFORE setLayers — the updater runs asynchronously, not synchronously
     const wasOn = layersRef.current.find(l => l.id === layerId)?.on ?? false;
     setLayers(prev => {
@@ -3940,10 +3963,14 @@ export default function App() {
       }
     } else if (layerId === 'intel_feed') {
       setShowIntelFeed(true);
-      // loadSocialFeed was removed — no-op
+      const v = viewerRef.current;
+      if (!v) return;
+      if (!entityStoreRef.current['earthquakes']?.length) loadEarthquakes(v);
+      if (!entityStoreRef.current['wildfires']?.length && !entityStoreRef.current['severe_storms']?.length) loadEonetEvents(v);
+      if (!entityStoreRef.current['disaster_alerts']) loadNwsAlerts(v);
+      if (!entityStoreRef.current['space_weather']?.length) loadSpaceWeather(v);
 
     } else if (layerId === 'disaster_alerts') {
-      setShowAlertsPanel(true);
       entityStoreRef.current['disaster_alerts']?.forEach(e => { if (e) e.show = true; });
     } else if (layerId === 'india_cctv') {
       if (!showExisting('india_cctv')) void loadIndiaCctv(v);
@@ -3973,6 +4000,15 @@ export default function App() {
       return;
     } else if (layerId === '2_openflights') {
       if (!showExisting('2_openflights')) void loadOpenFlights(v);
+      return;
+    } else if (layerId === '2_military_flights') {
+      if (!showExisting('2_military_flights')) void loadMilitaryFlights(v);
+      return;
+    } else if (layerId === 'ucdp_conflict') {
+      if (!showExisting('ucdp_conflict')) void loadUcdp(v);
+      return;
+    } else if (layerId === 'military_bases') {
+      if (!showExisting('military_bases')) void loadMilitaryBases(v);
       return;
     } else if (layerId.startsWith('29_') || layerId === '29_wovodat' || layerId === '29_nasa_so2_monitoring' || layerId === '29_noaa_so2_portal') {
       const needsLoad = !showExisting(layerId);
@@ -4204,9 +4240,6 @@ export default function App() {
     if (layerId === 'intel_feed') {
       setShowIntelFeed(false);
     }
-    if (layerId === 'disaster_alerts') {
-      setShowAlertsPanel(false);
-    }
     if (layerId === 'india_cctv') {
       const p = infoEntity?.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
       if (p?.layer === 'india_cctv') {
@@ -4243,6 +4276,24 @@ export default function App() {
     }
     if (layerId === '2_airlabs_api') {
       airlabsDrRef.current?.clear();
+    }
+    if (layerId === '2_military_flights') {
+      const v2 = viewerRef.current;
+      const ents = entityStoreRef.current['2_military_flights'];
+      if (ents && v2) { ents.forEach(e => v2.entities.remove(e)); }
+      entityStoreRef.current['2_military_flights'] = [];
+    }
+    if (layerId === 'ucdp_conflict') {
+      const v2 = viewerRef.current;
+      const ents = entityStoreRef.current['ucdp_conflict'];
+      if (ents && v2) { ents.forEach(e => v2.entities.remove(e)); }
+      entityStoreRef.current['ucdp_conflict'] = [];
+    }
+    if (layerId === 'military_bases') {
+      const v2 = viewerRef.current;
+      const ents = entityStoreRef.current['military_bases'];
+      if (ents && v2) { ents.forEach(e => v2.entities.remove(e)); }
+      entityStoreRef.current['military_bases'] = [];
     }
     if (layerId === 'weather_cards' && v) {
       const ents = entityStoreRef.current['weather_cards'];
@@ -4743,7 +4794,11 @@ export default function App() {
         : layerId === '2_airlabs_api'
           ? { headers: { 'x-airlabs-key': getApiKey('AIRLABS_API_KEY') || '' } }
           : undefined;
-      const data = await apiGet<{ states?: unknown[][] | null }>(apiPath, fetchOpts);
+      const cam = viewer.camera.positionCartographic;
+      const lat = cam ? (cam.latitude * 180 / Math.PI).toFixed(2) : '';
+      const lon = cam ? (cam.longitude * 180 / Math.PI).toFixed(2) : '';
+      const locParam = (lat && lon) ? `?lat=${lat}&lon=${lon}` : '';
+      const data = await apiGet<{ states?: unknown[][] | null }>(`${apiPath}${locParam}`, fetchOpts);
       if (!isLayerEnabled(layerId)) return;
       if (!data.states?.length) throw new Error(`${layerId} returned no states`);
       drRef.current?.updateFromApi(data.states);
@@ -4793,6 +4848,69 @@ export default function App() {
     } catch (err) {
       recordFeedError('openflights', err);
       showNotification('OpenFlights data unavailable', 'warning');
+    }
+  }
+
+  async function loadMilitaryFlights(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['2_military_flights'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('2_military_flights', true);
+      return;
+    }
+    try {
+      const data = await apiGet<any>('/flights/military');
+      if (!isLayerEnabled('2_military_flights')) return;
+      removeLayerEntities('2_military_flights');
+      const ents = addMilitaryFlightEntities(viewer, data, '2_military_flights');
+      entityStoreRef.current['2_military_flights'] = ents;
+      enforceEntityCap();
+      throttledRender(viewer);
+      showNotification(`Loaded ${ents.length} military flight tracks`, 'success');
+    } catch (err) {
+      recordFeedError('military_flights', err);
+      showNotification('Military flights data unavailable', 'warning');
+    }
+  }
+
+  async function loadUcdp(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['ucdp_conflict'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('ucdp_conflict', true);
+      return;
+    }
+    try {
+      const data = await apiGet<UcdpEvent[]>('/ucdp');
+      if (!isLayerEnabled('ucdp_conflict')) return;
+      removeLayerEntities('ucdp_conflict');
+      const ents = addUcdpEntities(viewer, Array.isArray(data) ? data : [], 'ucdp_conflict');
+      entityStoreRef.current['ucdp_conflict'] = ents;
+      enforceEntityCap();
+      throttledRender(viewer);
+      showNotification(`Loaded ${ents.length} UCDP conflict events`, 'success');
+    } catch (err) {
+      recordFeedError('ucdp', err);
+      showNotification('UCDP conflict data unavailable', 'warning');
+    }
+  }
+
+  async function loadMilitaryBases(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['military_bases'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('military_bases', true);
+      return;
+    }
+    try {
+      const data = await apiGet<any>('/military-bases');
+      if (!isLayerEnabled('military_bases')) return;
+      removeLayerEntities('military_bases');
+      const ents = addMilitaryBaseEntities(viewer, data, 'military_bases');
+      entityStoreRef.current['military_bases'] = ents;
+      enforceEntityCap();
+      throttledRender(viewer);
+      showNotification(`Loaded ${ents.length} military base locations`, 'success');
+    } catch (err) {
+      recordFeedError('military_bases', err);
+      showNotification('Military bases data unavailable', 'warning');
     }
   }
 
@@ -5180,7 +5298,6 @@ export default function App() {
       notificationTimeoutsRef.current = {};
 
       setShowIntelFeed(false);
-      setShowAlertsPanel(false);
       setShowPopulationImpact(false);
       const wcEnts = entityStoreRef.current['weather_cards'];
       if (wcEnts) { wcEnts.forEach(e => v?.entities.remove(e)); entityStoreRef.current['weather_cards'] = []; }
@@ -5230,7 +5347,7 @@ export default function App() {
       try {
         const resp = await fetch('/api/sandbox/workspace', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json' , ...authHeaders() },
           body: JSON.stringify({ userId: 'browser-user' }),
         });
         if (resp.ok) {
@@ -5252,12 +5369,12 @@ export default function App() {
     const content = await file.text();
     const resp = await fetch(`/api/sandbox/workspace/${workspaceId}/upload`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' , ...authHeaders() },
       body: JSON.stringify({ fileName: file.name, content }),
     });
     if (resp.ok) {
       setUploadedFiles(prev => [...prev, file.name]);
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `📎 Uploaded **${file.name}** to sandbox workspace. You can now ask me to analyze it.`, type: 'upload' }]);
+              setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Uploaded **${file.name}** to sandbox workspace. You can now ask me to analyze it.`, type: 'upload' }]);
     } else {
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ File upload failed (${resp.status})`, type: 'error' }]);
     }
@@ -5281,18 +5398,18 @@ export default function App() {
       const base64 = dataUrl.split(',')[1];
       const imageId = nextImageIdRef.current++;
       setChatImages(prev => [...prev, { id: imageId, dataUrl, mimeType: file.type, fileName: file.name }]);
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `📷 [Image: ${file.name}]`, type: 'image' }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `[Image: ${file.name}]`, type: 'image' }]);
       setAiTyping(true);
 
       try {
         const resp = await fetch('/api/agent/analyze-vision', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json' , ...authHeaders() },
           body: JSON.stringify({ image: base64, mimeType: file.type, prompt: 'Analyze this image in detail. If it is a satellite image, map, chart, or geographic area, describe what you see including any notable features, patterns, colors, text, or structures.' }),
         });
         if (resp.ok) {
           const data = await resp.json();
-          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `**🔍 Image Analysis**\n\n${data.analysis || 'No analysis returned.'}`, type: 'vision' }]);
+          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `**Image Analysis**\n\n${data.analysis || 'No analysis returned.'}`, type: 'vision' }]);
         } else {
           setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Vision analysis failed (${resp.status})`, type: 'error' }]);
         }
@@ -5333,33 +5450,26 @@ export default function App() {
       if (msg.event === 'ambient_event') {
         const data = (msg.data || msg) as any;
         const ev = (data.event || data) as any;
-        const severityColors: Record<string, string> = { critical: '#ef4444', warning: '#f97316', info: '#22c55e' };
         setAiMessages(prev => [...prev, {
           id: nextAiMsgIdRef.current++,
           role: 'assistant',
-          content: `**${ev.type === 'major_earthquake' ? '🌋' : ev.type === 'storm_formation' ? '🌀' : ev.type === 'fire_outbreak' ? '🔥' : '🌍'} ${ev.title}**\n\n${ev.description}`,
+          content: `**${ev.title}**\n\n${ev.description}`,
           type: 'ambient'
         }]);
-        const color = severityColors[ev.severity] || '#f97316';
-        setAlerts(prev => {
-          const exists = prev.some(a => a.title === ev.title);
-          if (exists) return prev;
-          const alert: EventAlert = {
-            id: ev.id,
+        if (ev.lat != null && ev.lon != null && ev.title) {
+          pushIntelFeed({
+            id: `ambient_${ev.id ?? Date.now()}`,
             title: ev.title,
-            desc: ev.description || ev.title,
-            type: ev.type,
+            source: 'Ambient',
+            type: ev.type ?? 'ambient',
             lat: ev.lat,
             lon: ev.lon,
-            severity: ev.severity,
-            time: new Date(ev.timestamp).toLocaleTimeString(),
-            timestamp: ev.timestamp,
-            seen: false,
-            hasMapPosition: true,
-          };
-          return [alert, ...prev].slice(0, 50);
-        });
-        setNewAlertCount(prev => prev + 1);
+            timestamp: ev.timestamp ?? Date.now(),
+            url: '',
+            platform: 'internal',
+            desc: ev.description ?? '',
+          });
+        }
       }
 
       // Phase 2: Reflex engine events
@@ -5369,7 +5479,7 @@ export default function App() {
         setAiMessages(prev => [...prev, {
           id: nextAiMsgIdRef.current++,
           role: 'assistant',
-          content: `👁️ **Reflex Dilate: ${region || 'unknown region'}**\n\nReflex \`${reflexId || 'unknown'}\` triggered camera dilation to [${lat?.toFixed(2)}, ${lon?.toFixed(2)}].`,
+          content: `**Reflex Dilate: ${region || 'unknown region'}**\n\nReflex \`${reflexId || 'unknown'}\` triggered camera dilation to [${lat?.toFixed(2)}, ${lon?.toFixed(2)}].`,
           type: 'reflex',
         }]);
         if (lat != null && lon != null && viewerRef.current) {
@@ -5384,10 +5494,9 @@ export default function App() {
         setAiMessages(prev => [...prev, {
           id: nextAiMsgIdRef.current++,
           role: 'assistant',
-          content: `🚨 **Reflex Alert: ${title || 'Unspecified'}**\n\n${description || ''}`,
+          content: `**Reflex Alert: ${title || 'Unspecified'}**\n\n${description || ''}`,
           type: 'reflex',
         }]);
-        setNewAlertCount(prev => prev + 1);
         if (reflexId) {
           setReflexStates(prev => prev.map(r =>
             r.reflexId === reflexId ? { ...r, status: 'ACTIVE' } : r
@@ -5451,7 +5560,7 @@ export default function App() {
           setAiMessages(prev => [...prev, {
             id: nextAiMsgIdRef.current++,
             role: 'assistant',
-            content: `🧠 **Causal Discovery**\n\n${disc.summary}`,
+            content: `**Causal Discovery**\n\n${disc.summary}`,
             type: 'discovery',
           }]);
         }
@@ -5470,7 +5579,7 @@ export default function App() {
         setAiMessages(prev => [...prev, {
           id: nextAiMsgIdRef.current++,
           role: 'assistant',
-          content: `🌙 **Dream Cycle Complete**\n\nThe system dreamed ${data.scenariosRun} synthetic catastrophes while you slept.\n• ${data.modelUpdates} prediction models retrained\n• ${data.newCausalEdges} new causal edges discovered\n\n*The planet learns even when you do not.*`,
+          content: `**Dream Cycle Complete**\n\nThe system dreamed ${data.scenariosRun} synthetic catastrophes while you slept.\n• ${data.modelUpdates} prediction models retrained\n• ${data.newCausalEdges} new causal edges discovered\n\n*The planet learns even when you do not.*`,
           type: 'dream',
         }]);
       }
@@ -5529,8 +5638,9 @@ export default function App() {
 
       const resp = await fetch('/api/agent/monitor', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ layerId, condition: { field, operator, value }, location, label: `Monitor: ${conditionText}`, userId: 'browser-user', intervalMs: 300000 }),
+        headers: { 'Content-Type': 'application/json' , ...authHeaders() },
+        body: JSON.stringify({ layerId, condition: { field, operator, value }, location, label: `Monitor: ${conditionText}`, userId: 'browser-user',
+          images: chatImages.length > 0 ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName })) : undefined, intervalMs: 300000 }),
       });
       if (resp.ok) {
         const rule = await resp.json();
@@ -5539,7 +5649,7 @@ export default function App() {
       }
     }
     return false;
-  }, []);
+  }, [chatImages]);
 
   // Phase 3: Send schedule command via chat
   const sendScheduleCommand = useCallback(async (text: string) => {
@@ -5552,8 +5662,9 @@ export default function App() {
 
       const resp = await fetch('/api/agent/schedule', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: `Scheduled: ${goal.slice(0, 40)}`, goal, userId: 'browser-user', intervalMs }),
+        headers: { 'Content-Type': 'application/json' , ...authHeaders() },
+        body: JSON.stringify({ label: `Scheduled: ${goal.slice(0, 40)}`, goal, userId: 'browser-user',
+          images: chatImages.length > 0 ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName })) : undefined, intervalMs }),
       });
       if (resp.ok) {
         const task = await resp.json();
@@ -5562,7 +5673,7 @@ export default function App() {
       }
     }
     return false;
-  }, []);
+  }, [chatImages]);
 
   // Phase 3: Get location context
   const getLocationContextData = useCallback(async (lat: number, lon: number) => {
@@ -5570,7 +5681,7 @@ export default function App() {
       const resp = await fetch(`/api/agent/context?lat=${lat}&lon=${lon}`);
       if (resp.ok) {
         const ctx = await resp.json();
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `📍 **Location Context: ${ctx.location.label}**\n\n🌋 **Seismic**: ${ctx.earthquakeRisk}\n🌤️ **Weather**: ${ctx.weather}\n${ctx.nearbyEvents?.length > 0 ? `📋 **Nearby Events**:\n${ctx.nearbyEvents.slice(0, 3).map((e: { title: string; category: string }) => `- ${e.title} (${e.category})`).join('\n')}` : ''}\n\n*Data from live APIs*`, type: 'context' }]);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `**Location Context: ${ctx.location.label}**\n\n**Seismic**: ${ctx.earthquakeRisk}\n**Weather**: ${ctx.weather}\n${ctx.nearbyEvents?.length > 0 ? `**Nearby Events**:\n${ctx.nearbyEvents.slice(0, 3).map((e: { title: string; category: string }) => `- ${e.title} (${e.category})`).join('\n')}` : ''}\n\n*Data from live APIs*`, type: 'context' }]);
       }
     } catch { /* silent */ }
   }, []);
@@ -5595,13 +5706,9 @@ export default function App() {
           setIsListening(false);
           // Auto-send after a short delay
           setTimeout(() => {
-            setAiInput(''); // Clear so sendAI uses the already-set value
-            // We need to trigger sendAI with the final transcript
             const finalText = transcript;
             if (finalText.trim()) {
-              // Simulate the sendAI flow by setting a temporary ref
-              setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: finalText }]);
-              // The actual send will happen via the synthetic event
+              sendAIRef.current(finalText);
             }
           }, 300);
         }
@@ -5643,20 +5750,20 @@ export default function App() {
     try {
       const resp = await fetch('/api/agent/analyze-data', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' , ...authHeaders() },
         body: JSON.stringify({ content, fileName: file.name }),
       });
       if (resp.ok) {
         const data = await resp.json();
         setDataAnalysisResult(data);
-        let msg = `**📊 Data Analysis: ${file.name}**\n\n`;
+        let msg = `**Data Analysis: ${file.name}**\n\n`;
         if (data.type === 'csv') {
           msg += `Rows: **${data.rows}** | Columns: **${(data.columns || []).length}**\n\n**Columns:**\n`;
           msg += (data.columns || []).map((c: { name: string; type: string; min?: number; max?: number; mean?: number; uniqueValues?: number }) =>
             `- **${c.name}** (${c.type})${c.min !== undefined ? ` [${c.min?.toFixed(2)} – ${c.max?.toFixed(2)}, μ=${c.mean?.toFixed(2)}]` : ''}${c.uniqueValues !== undefined ? ` (${c.uniqueValues} unique)` : ''}`
           ).join('\n');
           if (data.detectedLocation) {
-            msg += `\n\n📍 **Location data detected!** Lat: \`${data.detectedLocation.latColumn}\`, Lon: \`${data.detectedLocation.lonColumn}\`\n`;
+            msg += `\n\n**Location data detected!** Lat: \`${data.detectedLocation.latColumn}\`, Lon: \`${data.detectedLocation.lonColumn}\`\n`;
             msg += `Try: *"Plot these points on the globe"* or *"Analyze this data"*`;
           }
           msg += `\n\n\`\`\`\n${data.preview?.slice(0, 5).map((r: Record<string, string>) => JSON.stringify(r)).join('\n')}\n\`\`\``;
@@ -5680,7 +5787,7 @@ export default function App() {
   const sendToPipeline = useCallback(async (goal: string, wsId: string | null) => {
     const resp = await fetch('/api/agent/pipeline', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' , ...authHeaders() },
       body: JSON.stringify({ goal, workspaceId: wsId }),
     });
     if (!resp.ok) throw new Error(`Pipeline failed (${resp.status})`);
@@ -5716,14 +5823,14 @@ export default function App() {
               p.id === data.subtask.id ? { ...p, status: data.subtask.status } : p
             ));
             if (data.subtask.status === 'running') {
-              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`🔄 ${data.subtask.description}`,subtask:data.subtask.description,status:'running'}]);
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Running: ${data.subtask.description}`,subtask:data.subtask.description,status:'running'}]);
             }
             if (data.subtask.status === 'completed' && data.subtask.result) {
               stepOutputs.push(`## ${data.subtask.description}\n\`\`\`\n${data.subtask.result.slice(0, 500)}\n\`\`\``);
-              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`✅ ${data.subtask.description} (${data.subtask.executionTimeMs || 0}ms)`,subtask:data.subtask.description,status:'completed',timeMs:data.subtask.executionTimeMs,output:data.subtask.result}]);
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Completed: ${data.subtask.description} (${data.subtask.executionTimeMs || 0}ms)`,subtask:data.subtask.description,status:'completed',timeMs:data.subtask.executionTimeMs,output:data.subtask.result}]);
             }
             if (data.subtask.status === 'failed') {
-              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`❌ ${data.subtask.description}: ${data.subtask.error || 'Failed'}`,subtask:data.subtask.description,status:'failed',output:data.subtask.error}]);
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Failed: ${data.subtask.description}: ${data.subtask.error || 'Failed'}`,subtask:data.subtask.description,status:'failed',output:data.subtask.error}]);
             }
           }
 
@@ -5757,7 +5864,7 @@ export default function App() {
   function newChat() {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
-    setAiMessages([{ id: nextAiMsgIdRef.current++, role: 'assistant', content: '👋 Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' }]);
+    setAiMessages([{ id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' }]);
     setAiTyping(false);
     setAiInput('');
     setAgentSteps([]);
@@ -5765,7 +5872,6 @@ export default function App() {
     setChatImages([]);
     setShowChatHistory(false);
     currentChatIdRef.current = null;
-    agentInteractionIdRef.current = null;
   }
 
   async function loadChat(id: string) {
@@ -5774,7 +5880,6 @@ export default function App() {
         id: currentChatIdRef.current,
         title: autoTitle(aiMessages),
         messages: aiMessages,
-        environmentId: agentEnvironmentId || undefined,
         workspaceId: sandboxWorkspaceId || undefined,
       });
     }
@@ -5787,7 +5892,6 @@ export default function App() {
     setPipelineProgress([]);
     setChatImages([]);
     setAiMessages(session.messages.map(m => ({ ...m, id: m.id || nextAiMsgIdRef.current++ })));
-    if (session.environmentId) setAgentEnvironmentId(session.environmentId);
     if (session.workspaceId) setSandboxWorkspaceId(session.workspaceId);
     currentChatIdRef.current = session.id;
     setShowChatHistory(false);
@@ -5801,9 +5905,14 @@ export default function App() {
     setChatList(prev => prev.filter(c => c.id !== id));
   }
 
-  const sendAI = useCallback(async () => {
-    if (!aiInput.trim()) return;
-    const userMsg = aiInput.trim();
+
+  const cleanupThinkingSteps = useCallback(() => {
+    setAgentSteps([]);
+  }, []);
+
+  const sendAI = useCallback(async (overrideMessage?: string) => {
+    const userMsg = typeof overrideMessage === 'string' ? overrideMessage : aiInput.trim();
+    if (!userMsg) return;
     setAiInput('');
     setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: userMsg }]);
     setAiTyping(true);
@@ -5815,8 +5924,8 @@ export default function App() {
     // Only intercept PURE location commands (e.g. just "fly to Tokyo") — nothing else
     const isPureFlyCommand = /^(?:fly|go|zoom)\s+(?:to|in|into)\s+/i.test(userMsg.trim());
     if (isPureFlyCommand && loc) {
-      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 150 });
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `📍 Flying to ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` }]);
+      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 1000 });
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Flying to ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` }]);
       setAiTyping(false);
       return;
     }
@@ -5824,26 +5933,34 @@ export default function App() {
     // Phase 3: Monitor/schedule commands — handled instantly, no agent needed
     if (/^monitor\s+/i.test(userMsg)) {
       const handled = await sendMonitorCommand(userMsg);
-      if (handled) { setAiTyping(false); return; }
+      if (handled) {
+        cleanupThinkingSteps();
+        setAiTyping(false);
+        return;
+      }
     }
     if (/^schedule\s+/i.test(userMsg)) {
       const handled = await sendScheduleCommand(userMsg);
-      if (handled) { setAiTyping(false); return; }
+      if (handled) {
+        cleanupThinkingSteps();
+        setAiTyping(false);
+        return;
+      }
     }
 
     const isComputeTask = /\b(compute|calculate|run script|execute (?:code|script|python|node|bash)|simulate|csv|analyze (?:data|dataset|this)|pipeline)\b/i.test(userMsg) && !/\b(show|display|visualize|fly|go|zoom|toggle|enable|display|where|what|how|why|compare|near|around)\b/i.test(userMsg);
 
     if (isComputeTask) {
       try {
-        setAgentSteps(prev => [...prev, {type:'planning',text:'🧠 Planning computation pipeline...',status:'running'}]);
+        setAgentSteps(prev => [...prev, {type:'planning',text:'Planning computation pipeline...',status:'running'}]);
         setExpandedStep(-1);
         const wsId = sandboxWorkspaceId || null;
         await sendToPipeline(userMsg, wsId);
         setAiTyping(false);
         return;
       } catch (e) {
-        setAgentSteps(prev => [...prev, {type:'error',text:`⚠️ Pipeline: ${e}`}]);
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `⚠️ Pipeline execution failed: ${e}\n\nFalling back to agent analysis...` }]);
+        setAgentSteps(prev => [...prev, {type:'error',text:`Pipeline Error: ${e}`}]);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Pipeline execution failed: ${e}\n\nFalling back to agent analysis...` }]);
       }
     }
 
@@ -5851,15 +5968,21 @@ export default function App() {
     const lower = userMsg.toLowerCase();
     const wantsFlights = lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb') || lower.includes('fly');
     if (wantsFlights && loc) {
-      const layerId = '2_adsb_lol';
-      if (!isLayerEnabled(layerId)) toggleLayer(layerId);
+      const layerId = 'flight_tracks';
+      const alreadyOn = isLayerEnabled(layerId);
+      if (alreadyOn) {
+        const v = viewerRef.current;
+        if (v) void loadFlightTracks(v);
+      } else {
+        toggleLayer(layerId);
+      }
       focusLocation(loc.lat, loc.lon, { label: 'Live Aircraft', color: '#60a5fa', height: 50000 });
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `✈️ **Loading live aircraft near ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}**\n\nThe ADSB flight tracking layer has been enabled. Aircraft within the visible area will appear on the globe in real-time.` }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Loading aircraft near ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}...` }]);
       setAiTyping(false);
       return;
     }
 
-    setAgentSteps(prev => [...prev, {type:'reasoning',text:'🧠 Analyzing your request...',status:'running'}]);
+    setAgentSteps(prev => [...prev, {type:'reasoning',text:'Analyzing your request...',status:'running'}]);
     setExpandedStep(-1);
 
     abortControllerRef.current?.abort();
@@ -5874,12 +5997,11 @@ export default function App() {
       }
       const resp = await fetch('/api/agent/ask', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' , ...authHeaders() },
         body: JSON.stringify({
           message: userMsg,
           userId: 'browser-user',
-          environmentId: agentEnvironmentId,
-          interactionId: agentInteractionIdRef.current,
+          images: chatImages.length > 0 ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName })) : undefined,
         }),
         signal: abortController.signal,
       });
@@ -5894,8 +6016,6 @@ export default function App() {
       const decoder = new TextDecoder();
       let buffer = '';
       let finalText = '';
-      let lastInteractionId: string | null = null;
-      let lastEnvironmentId: string | null = null;
       let lastTraceId: string | null = null;
       let serverError: string | null = null;
 
@@ -5911,7 +6031,7 @@ export default function App() {
               currentRequestIdRef.current = data.requestId;
             }
             if (data.steps) {
-              setAgentSteps(data.steps.map((s: { text?: string; type?: string; code?: string; output?: string }) => ({type:s.type||'step',text:s.text||s.type||'',code:s.code,output:s.output})));
+              setAgentSteps(data.steps.map((s: { text?: string; type?: string; code?: string; output?: string; status?: string }) => ({type:s.type||'step',text:s.text||s.type||'',code:s.code,output:s.output,status:s.status||'completed'})));
             }
             if (data.type === 'step') {
               setAgentSteps(prev => [...prev, {type:data.stepType||'step',text:data.text||'',code:data.code,output:data.output}]);
@@ -5921,7 +6041,7 @@ export default function App() {
             }
             if (data.type === 'intent') {
               if (data.location) {
-                focusLocation(data.location.lat, data.location.lon, { label: data.location.label || 'Location', color: '#60a5fa', height: 150 });
+                focusLocation(data.location.lat, data.location.lon, { label: data.location.label || 'Location', color: '#60a5fa', height: 1000 });
               }
               if (data.layerIds) {
                 (data.layerIds as string[]).forEach((layerId: string) => { if (!isLayerEnabled(layerId)) toggleLayer(layerId); });
@@ -5929,16 +6049,12 @@ export default function App() {
             }
             if (data.type === 'output') {
               finalText = data.text;
-              if (data.environmentId) lastEnvironmentId = data.environmentId;
-              if (data.interactionId) lastInteractionId = data.interactionId;
               if (data.traceId) lastTraceId = data.traceId;
             }
             if (data.type === 'panel' || (data.stats && data.charts)) {
               setDigitalTwinPanel(data);
             }
             if (data.type === 'done') {
-              if (data.environmentId) lastEnvironmentId = data.environmentId;
-              if (data.interactionId) lastInteractionId = data.interactionId;
               if (data.traceId) lastTraceId = data.traceId;
             }
             if (data.type === 'error') {
@@ -5956,11 +6072,8 @@ export default function App() {
       }
       processLines();
 
-      if (lastEnvironmentId) setAgentEnvironmentId(lastEnvironmentId);
-      if (lastInteractionId) agentInteractionIdRef.current = lastInteractionId;
-
       if (serverError) {
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `⚠️ Server error: ${serverError}` }]);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Server error: ${serverError}` }]);
       } else if (finalText) {
         setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText, traceId: lastTraceId }]);
       } else {
@@ -5975,11 +6088,14 @@ export default function App() {
         setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `${fallback}\n\n*(Agent unavailable: ${e})*` }]);
       }
     }
+    cleanupThinkingSteps(true);
     setAiTyping(false);
     abortControllerRef.current = null;
-  }, [aiInput, agentEnvironmentId, sandboxWorkspaceId, sendToPipeline, focusLocation, sendMonitorCommand, sendScheduleCommand, toggleLayer]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [aiInput, sandboxWorkspaceId, sendToPipeline, focusLocation, sendMonitorCommand, sendScheduleCommand, toggleLayer]); // eslint-disable-line react-hooks/exhaustive-deps
+  sendAIRef.current = sendAI;
 
   async function extractLocation(text: string): Promise<{ lat: number; lon: number } | null> {
+    if (typeof text !== 'string' || !text) return null;
     // Fast path: local coordinate regex
     const coordMatch = text.match(/(-?\d+\.?\d*)\s*[,，]\s*(-?\d+\.?\d*)/);
     if (coordMatch) {
@@ -6043,7 +6159,8 @@ export default function App() {
             const lat = cmd.lat as number;
             const lon = cmd.lon as number;
             if (isFinite(lat) && isFinite(lon)) {
-              focusLocation(lat, lon, { label: (cmd.label as string) || 'Location', color: '#60a5fa', height: 150 });
+              focusLocation(lat, lon, { label: (cmd.label as string) || 'Location', color: '#60a5fa', height: 1000 });
+      cleanupThinkingSteps(true);
             }
             break;
           }
@@ -6201,15 +6318,15 @@ export default function App() {
 
   function generateLocalResponse(message: string, location: { lat: number; lon: number } | null): string {
     const lower = message.toLowerCase();
-    if (lower.includes('earthquake')) return '🌍 **Seismic Activity**\n\nRecent earthquakes are displayed on the globe. Use the sidebar to toggle earthquake data layers. The color intensity indicates magnitude - red circles show M5+ events.';
-    if (lower.includes('weather')) return '🌤️ **Weather Information**\n\nClick on any location to see current weather conditions. Temperature, humidity, wind speed, and conditions are displayed in real-time cards.';
-    if (lower.includes('storm') || lower.includes('hurricane')) return '🌀 **Storm Tracking**\n\nActive storms are shown with forecast cones indicating predicted paths. Click on any storm to see 24/48/72-hour forecasts and wind speed data.';
-    if (lower.includes('fire') || lower.includes('wildfire')) return '🔥 **Wildfire Monitoring**\n\nNASA MODIS/VIIRS fire detections shown as orange pulsing markers. Smoke dispersion simulations available for active fires.';
-    if (lower.includes('population')) return '👥 **Population Impact**\n\n50 major cities shown with population-based impact zones. Useful for assessing disaster risk to urban areas.';
-    if (lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb')) return '✈️ **Live Aircraft**\n\nAircraft tracking is available via the sidebar (Aviation category). Enable "ADSB.lol" or "Flight Tracks" to see live planes on the globe. Try saying "show flights near me" with location enabled.';
-    if (lower.includes('help')) return '📚 **Available Commands**\n\n- "Show earthquakes in [location]"\n- "Weather in [city]"\n- "Fly to [location]"\n- "Show population impact"\n- "Storm tracking"\n- "Wildfire status"\n- "Show flights near me"\n\nOr ask any question about Earth data!';
-    if (location) return `📍 **Location Query**\n\nCoordinates: ${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}\n\nThis area can be analyzed for seismic risk, weather conditions, and population density. Use the sidebar layers to explore different data dimensions.`;
-    return `🌍 **Earth Intelligence**\n\nI can help you explore:\n- Seismic activity and earthquake data\n- Weather conditions globally\n- Storm tracking and forecasts\n- Population impact analysis\n- Natural disaster monitoring\n\nTry: "Show earthquakes in Japan" or "Weather in London"`;
+    if (lower.includes('earthquake')) return '**Seismic Activity**\n\nRecent earthquakes are displayed on the globe. Use the sidebar to toggle earthquake data layers. The color intensity indicates magnitude - red circles show M5+ events.';
+    if (lower.includes('weather')) return '**Weather Information**\n\nClick on any location to see current weather conditions. Temperature, humidity, wind speed, and conditions are displayed in real-time cards.';
+    if (lower.includes('storm') || lower.includes('hurricane')) return '**Storm Tracking**\n\nActive storms are shown with forecast cones indicating predicted paths. Click on any storm to see 24/48/72-hour forecasts and wind speed data.';
+    if (lower.includes('fire') || lower.includes('wildfire')) return '**Wildfire Monitoring**\n\nNASA MODIS/VIIRS fire detections shown as orange pulsing markers. Smoke dispersion simulations available for active fires.';
+    if (lower.includes('population')) return '**Population Impact**\n\n50 major cities shown with population-based impact zones. Useful for assessing disaster risk to urban areas.';
+    if (lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb')) return '**Live Aircraft**\n\nAircraft tracking is available via the sidebar (Aviation category). Enable "ADSB.lol" or "Flight Tracks" to see live planes on the globe. Try saying "show flights near me" with location enabled.';
+    if (lower.includes('help')) return '**Available Commands**\n\n- "Show earthquakes in [location]"\n- "Weather in [city]"\n- "Fly to [location]"\n- "Show population impact"\n- "Storm tracking"\n- "Wildfire status"\n- "Show flights near me"\n\nOr ask any question about Earth data!';
+    if (location) return `**Location Query**\n\nCoordinates: ${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}\n\nThis area can be analyzed for seismic risk, weather conditions, and population density. Use the sidebar layers to explore different data dimensions.`;
+    return `**Earth Intelligence**\n\nI can help you explore:\n- Seismic activity and earthquake data\n- Weather conditions globally\n- Storm tracking and forecasts\n- Population impact analysis\n- Natural disaster monitoring\n\nTry: "Show earthquakes in Japan" or "Weather in London"`;
   }
 
   /* ═════════════════════════════════════════════════════════════════
@@ -6222,7 +6339,7 @@ export default function App() {
     const v = viewerRef.current;
     if (!v) return;
     if (action === 'flyTo') {
-      focusLocation(cm.lat, cm.lon, { label: 'Context location', color: '#60a5fa', height: 150 });
+      focusLocation(cm.lat, cm.lon, { label: 'Context location', color: '#60a5fa', height: 1000 });
     } else if (action === 'pin') {
       const pinId = `pin_${Date.now()}`;
       v.entities.add({
@@ -6230,7 +6347,7 @@ export default function App() {
         name: 'Dropped Pin',
         billboard: { image: createPinIcon('#ef4444'), width: 24, height: 24,
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
-        label: { text: `📍 ${cm.lat.toFixed(3)}, ${cm.lon.toFixed(3)}`,
+        label: { text: `${cm.lat.toFixed(3)}, ${cm.lon.toFixed(3)}`,
           font: '11px "JetBrains Mono"', fillColor: Cesium.Color.WHITE,
           pixelOffset: new Cesium.Cartesian2(0, -14) },
         properties: { layer: 'pin', lat: cm.lat, lon: cm.lon, id: pinId },
@@ -6240,18 +6357,18 @@ export default function App() {
         const oldestPin = v.entities.values.find(e => e.properties?.getValue(Cesium.JulianDate.now())?.layer === 'pin');
         if (oldestPin) { v.entities.remove(oldestPin); pinCountRef.current -= 1; }
       }
-      showNotification('Pin dropped', 'success');
+      focusLocation(cm.lat, cm.lon, { label: 'Dropped Pin', color: '#ef4444', height: 1000 }); showNotification('Pin dropped', 'success');
     } else if (action === 'weather') {
-      focusLocation(cm.lat, cm.lon, { label: 'Weather request', color: '#22d3ee', height: 150 });
+      focusLocation(cm.lat, cm.lon, { label: 'Weather request', color: '#22d3ee', height: 1000 });
       addWeatherCard(cm.lat, cm.lon);
     } else if (action === 'events') {
       const nearby = findNearbyEvents(cm.lat, cm.lon, 200);
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant',
-        content: `📍 **Events near ${cm.lat.toFixed(2)}, ${cm.lon.toFixed(2)}**\n\n${nearby.length > 0 ? nearby.map(e => `- ${e.title} (${e.distance.toFixed(0)}km)`).join('\n') : 'No recent events found within 200km.'}` }]);
+        content: `**Events near ${cm.lat.toFixed(2)}, ${cm.lon.toFixed(2)}**\n\n${nearby.length > 0 ? nearby.map(e => `- ${e.title} (${e.distance.toFixed(0)}km)`).join('\n') : 'No recent events found within 200km.'}` }]);
       setShowAI(true);
     } else if (action === 'ai_intel') {
       setShowAI(true);
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `🧠 AI Intelligence for ${cm.lat.toFixed(2)}, ${cm.lon.toFixed(2)}` }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `AI Intelligence for ${cm.lat.toFixed(2)}, ${cm.lon.toFixed(2)}` }]);
       getLocationContextData(cm.lat, cm.lon);
     }
   }, [contextMenu, addWeatherCard, getLocationContextData, focusLocation]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -6631,7 +6748,6 @@ export default function App() {
     flightawareDrRef.current = null;
     airlabsDrRef.current?.clear();
     airlabsDrRef.current = null;
-    Object.keys(alertEntityRef.current).forEach(key => { delete alertEntityRef.current[key]; });
     disasterNearMeRequestedRef.current = false;
     if (geolocationWatchRef.current !== null) {
       navigator.geolocation.clearWatch(geolocationWatchRef.current);
@@ -6732,11 +6848,11 @@ export default function App() {
           <div className="info-type-dot" style={{background:color}} />
           <div className="info-title">{title}</div>
           {hasCoords && (
-            <button className="info-fly" onClick={() => focusLocation(lat, lon, { label: title, color, height: 150 })} title="Fly to location">
-              🎯
+            <button className="info-fly" onClick={() => focusLocation(lat, lon, { label: title, color, height: 1000 })} title="Fly to location">
+              <Crosshair size={14} />
             </button>
           )}
-          <button className="info-close" onClick={() => { setInfoEntity(null); entityTrackerRef.current?.untrack(); }}>✕</button>
+          <button className="info-close" onClick={() => { const ent = infoEntity; const props = ent?.properties?.getValue(Cesium.JulianDate.now()); if (props?.layer === 'pin') { viewerRef.current?.entities.remove(ent); pinCountRef.current = Math.max(0, pinCountRef.current - 1); } if (props?.layer === 'focus' && focusMarkerRef.current === ent) { viewerRef.current?.entities.remove(ent); focusMarkerRef.current = null; } if (props?.layer === 'weather_cards') { viewerRef.current?.entities.remove(ent); const a = entityStoreRef.current['weather_cards']; if (a) { const i = a.indexOf(ent); if (i > -1) a.splice(i, 1); } const cid = props?.cardId; if (cid) { weatherCardsRef.current = weatherCardsRef.current.filter(c => c.id !== cid); setWeatherCards(prev => prev.filter(c => c.id !== cid)); } } setInfoEntity(null); entityTrackerRef.current?.untrack(); }}><X size={14} /></button>
         </div>
         <div className="info-body">
           {rows.map((r, i) => (
@@ -7146,10 +7262,7 @@ export default function App() {
           </div>
           <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => setShowStudyArea(p => !p)} title="Study Area"><Crosshair size={16} /></button>
           <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => setShowAI(p => !p)} title="AI Assistant"><Bot size={16} /></button>
-          <button className={`btn-icon ${showAlertsPanel ? 'active' : ''}`} onClick={() => setShowAlertsPanel(p => !p)} title="Alerts">
-            <Bell size={16} />
-            {newAlertCount > 0 && <span style={{ position:'absolute',top:-2,right:-2,background:'#ef4444',color:'white',fontSize:9,borderRadius:'50%',width:14,height:14,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:600}}>{newAlertCount}</span>}
-          </button>
+          <button className={`btn-icon ${showIntelFeed ? 'active' : ''}`} onClick={() => toggleLayer('intel_feed')} title="Intel Feed"><Radio size={16} /></button>
           <button className={`btn-icon ${showAnalytics ? 'active' : ''}`} onClick={() => { setShowAnalytics(p => !p); if (!analyticsData) fetch('/api/agent/analytics').then(r => r.json()).then(setAnalyticsData).catch(() => {}); }} title="Analytics & Insights"><BarChart3 size={16} /></button>
           <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share"><Share2 size={16} /></button>
           <button className="btn-icon" onClick={() => setShowApiVault(true)} title="API Configuration"><Key size={16} /></button>
@@ -7175,7 +7288,7 @@ export default function App() {
           </button>
           <button className="btn-icon" onClick={toggleISS} title="ISS Tracker"><Satellite size={16} /></button>
           <button className={`btn-icon ${showTimeline ? 'active' : ''}`} onClick={toggleTimeline} title="Timeline"><Timer size={16} /></button>
-          <button className="btn-icon" onClick={toggleAutoRotate} title="Auto Rotate" style={isAutoRotating ? {borderColor:'#22c55e',color:'#22c55e'} : {}}><RefreshCw size={16} /></button>
+          <button className="btn-icon" onClick={toggleAutoRotate} title="Auto Rotate" style={isAutoRotating ? {color:'#22c55e'} : {}}><RefreshCw size={16} /></button>
         </div>
       </div>
 
@@ -7200,8 +7313,7 @@ export default function App() {
             {['earth','satellite','dark','terrain'].map(type => (
               <button key={type} className={`img-chip ${activeImagery === type ? 'active' : ''}`}
                 onClick={() => setImagery(type)}>
-                {type === 'earth' ? '🌍 Earth' : type === 'satellite' ? '🛰️ Sat' : type === 'dark' ? '🌑 Dark'
-                  : '⛰️ Ter'}
+                {type === 'earth' ? <><Globe size={12} style={{display:'inline',marginRight:3}} /> Earth</> : type === 'satellite' ? <><Satellite size={12} style={{display:'inline',marginRight:3}} /> Sat</> : type === 'dark' ? <><Moon size={12} style={{display:'inline',marginRight:3}} /> Dark</> : <><Mountain size={12} style={{display:'inline',marginRight:3}} /> Ter</>}
               </button>
             ))}
           </div>
@@ -7227,7 +7339,7 @@ export default function App() {
                   <div className="cat-icon" style={{color:cat.color}}>{cat.icon}</div>
                   <span style={{color:isOpen ? 'var(--text)' : undefined}}>{cat.label}</span>
                   <span className="cat-count">{items.filter(l => l.on).length}/{items.length}</span>
-                  <span className="cat-chevron">▶</span>
+                  <ChevronRight size={10} className="cat-chevron" />
                 </div>
                 <div className="category-items">
                   {items.map(layer => (
@@ -7272,9 +7384,9 @@ export default function App() {
             <button className="btn-all" onClick={() => toggleAllLayers(false)}>Disable All</button>
           </div>
           <div className="btn-row" style={{marginBottom:8, gap:4, flexWrap:'wrap'}}>
-            <button className="btn-all" style={{background:showTimeSlider ? 'rgba(96,165,250,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowTimeSlider(p => !p)}>⏱ Time</button>
-            <button className="btn-all" style={{background:showMeasureTool ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowMeasureTool(p => !p)}>📏 Measure</button>
-            {isAdmin && <button className="btn-all" style={{background:'rgba(59,130,246,0.2)', fontSize:10}} onClick={() => setShowAdmin(true)}>🛡️ Admin</button>}
+            <button className="btn-all" style={{background:showTimeSlider ? 'rgba(96,165,250,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowTimeSlider(p => !p)}><Clock size={12} style={{display:'inline',marginRight:3}} /> Time</button>
+            <button className="btn-all" style={{background:showMeasureTool ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowMeasureTool(p => !p)}><Ruler size={12} style={{display:'inline',marginRight:3}} /> Measure</button>
+            {isAdmin && <button className="btn-all" style={{background:'rgba(59,130,246,0.2)', fontSize:10}} onClick={() => setShowAdmin(true)}><Shield size={12} style={{display:'inline',marginRight:3}} /> Admin</button>}
           </div>
           <button className="btn-all" onClick={enableDefaultLayers}>Reset to Defaults</button>
         </div>
@@ -7284,7 +7396,7 @@ export default function App() {
       <div className={`sidebar-toggle ${sidebarCollapsed ? 'collapsed' : ''}`}
         style={{ left: sidebarCollapsed ? 0 : 300 }}
         onClick={() => setSidebarCollapsed(p => !p)}>
-        {sidebarCollapsed ? '▶' : '◀'}
+        {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
       </div>
 
       {/* Info Panel */}
@@ -7293,7 +7405,7 @@ export default function App() {
       </div>
 
       {/* Study Area Panel */}
-      <StudyAreaPanel
+      {showStudyArea && <StudyAreaPanel
         viewer={viewerRef.current}
         areas={studyAreas}
         setAreas={(updater: any) => {
@@ -7321,78 +7433,57 @@ export default function App() {
         onStopDraw={stopStudyDraw}
         drawing={studyDrawing}
         setDrawing={setStudyDrawing}
-      />
+      />}
 
       {/* AI Panel */}
-      <div className={`ai-panel glass-panel ${showAI ? 'open' : ''}`}>
-        <div className="ai-header">
-          <div className="ai-icon">🤖</div>
-          <div className="ai-title">Earth Intelligence AI</div>
-          <div className="ai-header-actions" style={{display:'flex',gap:4,marginLeft:'auto',alignItems:'center'}}>
-            <button className="ai-header-btn" onClick={() => setShowChatHistory(prev => !prev)} title="Chat History" style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:14,padding:'2px 6px'}}>📋</button>
-            <button className="ai-header-btn" onClick={newChat} title="New Chat" style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:14,padding:'2px 6px'}}>✏️</button>
-            <button className="ai-close" onClick={() => setShowAI(false)}>✕</button>
-          </div>
-        </div>
-        <div className="ai-messages" style={{paddingBottom:4}}>
-          {aiMessages.map((msg) => (
+      {showAI && (
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 380 }}>
+          <Panel title="EARTH INTELLIGENCE AI" icon={<Bot size={14} />} accentColor="#6366f1" iconColor="#818cf8" titleColor="#a5b4fc" onClose={() => setShowAI(false)} headerExtra={
+            <div style={{display:'flex',gap:4,alignItems:'center'}}>
+              <button onClick={() => setShowChatHistory(prev => !prev)} title="Chat History" style={{background:'none',border:'none',color:'#64748b',cursor:'pointer',fontSize:13,padding:'2px 4px',lineHeight:1}}><History size={14} /></button>
+              <button onClick={newChat} title="New Chat" style={{background:'none',border:'none',color:'#64748b',cursor:'pointer',fontSize:13,padding:'2px 4px',lineHeight:1}}><Plus size={14} /></button>
+            </div>
+          } style={{ maxHeight: 'calc(100vh - 160px)' }}>
+        <div className="ai-messages" ref={chatMessagesRef} style={{paddingBottom:4, overflowY:'auto', maxHeight:'calc(100vh - 320px)'}}>
+          {aiMessages.map((msg, idx) => (
             <div key={msg.id} className={`ai-msg ${msg.role}${msg.type === 'code-result' || msg.type === 'pipeline' || msg.type === 'data-analysis' ? ' code-result' : ''}${msg.type === 'image' ? ' image-msg' : ''}`}>
               {msg.role === 'assistant' ? (
                 <div>
-                  {msg.type === 'pipeline' && <div className="msg-label">⚡ Computation Pipeline Result</div>}
-                  {msg.type === 'upload' && <div className="msg-label" style={{color:'#60a5fa'}}>📁 File Upload</div>}
-                  {msg.type === 'vision' && <div className="msg-label" style={{color:'#a78bfa'}}>🔍 Vision Analysis</div>}
-                  {msg.type === 'data-analysis' && <div className="msg-label" style={{color:'#34d399'}}>📊 Data Analysis</div>}
-                  {msg.type === 'error' && <div className="msg-label" style={{color:'#ef4444'}}>⚠️ Error</div>}
+                  {msg.type === 'pipeline' && <div className="msg-label"><Zap size={12} style={{display:'inline',marginRight:3}} /> Computation Pipeline Result</div>}
+                  {msg.type === 'upload' && <div className="msg-label" style={{color:'#60a5fa'}}><Upload size={12} style={{display:'inline',marginRight:3}} /> File Upload</div>}
+                  {msg.type === 'vision' && <div className="msg-label" style={{color:'#a78bfa'}}><SearchIcon size={12} style={{display:'inline',marginRight:3}} /> Vision Analysis</div>}
+                  {msg.type === 'data-analysis' && <div className="msg-label" style={{color:'#34d399'}}><BarChart3 size={12} style={{display:'inline',marginRight:3}} /> Data Analysis</div>}
+                  {msg.type === 'error' && <div className="msg-label" style={{color:'#ef4444'}}><AlertTriangle size={12} style={{display:'inline',marginRight:3}} /> Error</div>}
                   <div className="rich-content" dangerouslySetInnerHTML={{ __html: richRender(msg.content) }} />
                   {renderCommandChips(msg.content, focusLocation, toggleLayer)}
-                  {/* Explainability: reasoning trace & evidence chain buttons */}
-                  {msg.role === 'assistant' && msg.content.length > 20 && (
-                    <div style={{display:'flex',gap:4,marginTop:4}}>
+                  {msg.content && idx > 0 && (
+                    <div style={{marginTop:4}}>
                       <button
                         onClick={() => {
-                          const key = traceKeyFor(msg);
-                          if (showReasoningFor[key]) {
-                            setShowReasoningFor(prev => ({...prev, [key]: false}));
-                            return;
-                          }
-                          setShowReasoningFor(prev => ({...prev, [key]: true}));
-                          fetch(`/api/explain/trace/${traceTargetFor(msg)}`).then(r => r.ok ? r.json() : null).then(data => {
-                            if (data) setReasoningTraces(prev => ({...prev, [key]: data}));
-                          }).catch(() => {});
+                          navigator.clipboard.writeText(msg.content.replace(/## COMMANDS[\s\S]*/, '').trim());
+                          setCopiedMsgId(msg.id);
+                          setTimeout(() => setCopiedMsgId(null), 1500);
                         }}
-                        style={{fontSize:9,color:'var(--text-dim)',background:'none',border:'none',cursor:'pointer',padding:'1px 4px',borderRadius:3}}
-                        title="View reasoning trace"
-                      >
-                        🧠 Trace
-                      </button>
-                      <button
-                        onClick={() => {
-                          const key = `evidence_${msg.id}`;
-                          if (showEvidenceFor[key]) {
-                            setShowEvidenceFor(prev => ({...prev, [key]: false}));
-                            return;
-                          }
-                          setShowEvidenceFor(prev => ({...prev, [key]: true}));
-                          fetch(`/api/explain/evidence/${msg.id}`).then(r => r.ok ? r.json() : null).then(data => {
-                            if (data) setEvidenceChains(prev => ({...prev, [key]: data}));
-                          }).catch(() => {});
+                        style={{
+                          fontSize:9,
+                          color: copiedMsgId === msg.id ? '#34d399' : 'var(--text-dim)',
+                          background:'none',
+                          border:`1px solid ${copiedMsgId === msg.id ? 'rgba(52,211,153,0.3)' : 'transparent'}`,
+                          cursor:'pointer',
+                          padding:'2px 8px',
+                          borderRadius:4,
+                          display:'inline-flex',
+                          alignItems:'center',
+                          gap:3,
+                          transition:'all 0.2s ease',
+                          transform: copiedMsgId === msg.id ? 'scale(1.05)' : 'scale(1)',
                         }}
-                        style={{fontSize:9,color:'var(--text-dim)',background:'none',border:'none',cursor:'pointer',padding:'1px 4px',borderRadius:3}}
-                        title="View evidence chain"
+                        title="Copy response"
                       >
-                        📋 Evidence
+                        <ClipboardList size={10} style={{display:'inline'}} />
+                        {copiedMsgId === msg.id ? 'Copied!' : 'Copy'}
                       </button>
                     </div>
-                  )}
-                  {showReasoningFor[traceKeyFor(msg)] && reasoningTraces[traceKeyFor(msg)] && (
-                    <ReasoningTraceViewer trace={reasoningTraces[traceKeyFor(msg)]} />
-                  )}
-                  {showEvidenceFor[`evidence_${msg.id}`] && evidenceChains[`evidence_${msg.id}`] && (
-                    <EvidenceChainPanel
-                      chain={evidenceChains[`evidence_${msg.id}`].chain}
-                      integrity={evidenceChains[`evidence_${msg.id}`].integrity}
-                    />
                   )}
                 </div>
               ) : msg.type === 'image' ? (
@@ -7410,11 +7501,11 @@ export default function App() {
           ))}
           {pipelineProgress.length > 0 && (
             <div className="ai-msg assistant" style={{borderColor:'rgba(96,165,250,0.3)',background:'rgba(96,165,250,0.04)'}}>
-              <div className="msg-label" style={{fontSize:10,fontWeight:600,color:'#60a5fa',marginBottom:4}}>🔄 Pipeline Progress</div>
+              <div className="msg-label" style={{fontSize:10,fontWeight:600,color:'#60a5fa',marginBottom:4}}><RefreshCw size={12} style={{display:'inline',marginRight:3}} /> Pipeline Progress</div>
               {pipelineProgress.map(p => (
                 <div key={p.id} className={`pipeline-step ${p.status}`}>
                   <span className="pipeline-step-icon">
-                    {p.status === 'completed' ? '✅' : p.status === 'running' ? '🔄' : p.status === 'failed' ? '❌' : '⏳'}
+                    {p.status === 'completed' ? <CheckCircle size={12} style={{color:'#22c55e'}} /> : p.status === 'running' ? <Loader size={12} className="spin" style={{color:'#60a5fa'}} /> : p.status === 'failed' ? <XCircle size={12} style={{color:'#ef4444'}} /> : <Hourglass size={12} style={{color:'#eab308'}} />}
                   </span>
                   <span>{p.description}</span>
                 </div>
@@ -7423,27 +7514,27 @@ export default function App() {
           )}
           {agentSteps.length > 0 && (
             <div className="thinking-block">
-              <div className="thinking-header" onClick={() => setExpandedStep(expandedStep === -1 ? null : -1)}>
-                <span className="thinking-chevron">{expandedStep === -1 ? '▼' : '▶'}</span>
-                <span className="thinking-title">🤔 Thinking... ({agentSteps.length} steps)</span>
+              <div className="thinking-header" onClick={() => setThinkingExpanded(!thinkingExpanded)}>
+                <span className="thinking-chevron">{thinkingExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}</span>
+                <span className="thinking-title"><MessageCircle size={12} style={{display:'inline',marginRight:3}} /> Thinking... ({agentSteps.length} steps)</span>
                 <span className="thinking-count">{agentSteps.filter(s => s.status === 'completed').length}/{agentSteps.length}</span>
               </div>
-              {expandedStep === -1 && (
+              {thinkingExpanded && (
                 <div className="thinking-body">
                   {agentSteps.map((step, i) => (
                     <div key={i} className={`think-step ${step.status === 'running' ? 'running' : step.status === 'failed' ? 'failed' : ''}`}>
-                      <div className="think-step-header" onClick={() => setExpandedStep(expandedStep === i ? null : i)}>
+                      <div className="think-step-header" onClick={(e) => { e.stopPropagation(); setExpandedStep(expandedStep === i ? null : i); }}>
                         <span className="think-step-icon">
-                          {step.status === 'running' ? '🔄' : step.status === 'completed' ? '✅' : step.status === 'failed' ? '❌' : '💭'}
+                          {step.status === 'running' ? <Loader size={12} className="spin" style={{color:'#60a5fa'}} /> : step.status === 'completed' ? <CheckCircle size={12} style={{color:'#22c55e'}} /> : step.status === 'failed' ? <XCircle size={12} style={{color:'#ef4444'}} /> : <MessageCircle size={12} style={{color:'#94a3b8'}} />}
                         </span>
                         <span className="think-step-text">{step.text}</span>
-                        <span className="think-step-chevron">{expandedStep === i ? '▼' : '▶'}</span>
+                        <span className="think-step-chevron">{expandedStep === i ? <ChevronDown size={10} /> : <ChevronRight size={10} />}</span>
                       </div>
                       {expandedStep === i && (
                         <div className="think-step-detail">
                           {step.code && <div className="think-code-block"><div className="think-code-label">Code</div><pre className="think-code">{step.code}</pre></div>}
                           {step.output && <div className="think-output-block"><div className="think-output-label">Output</div><pre className="think-output">{step.output}</pre></div>}
-                          {step.timeMs !== undefined && <div className="think-timing">⏱ {step.timeMs}ms</div>}
+                          {step.timeMs !== undefined && <div className="think-timing"><Timer size={10} style={{display:'inline',marginRight:2}} /> {step.timeMs}ms</div>}
                         </div>
                       )}
                     </div>
@@ -7463,7 +7554,7 @@ export default function App() {
         <HumanOverrideBanner />
         {sandboxWorkspaceId && uploadedFiles.length > 0 && (
           <div className="sandbox-file-upload">
-            <span className="sandbox-workspace-badge">📦 Workspace active</span>
+            <span className="sandbox-workspace-badge"><Package size={12} style={{display:'inline',marginRight:3}} /> Workspace active</span>
             <span className="sandbox-file-name">{uploadedFiles.length} file(s)</span>
           </div>
         )}
@@ -7478,40 +7569,35 @@ export default function App() {
           <button className={`ai-voice-btn ${isListening ? 'listening' : ''}`}
             onClick={toggleVoiceInput} title={isListening ? 'Listening...' : 'Voice input'}
             style={{display:voiceSupported ? 'flex' : 'none'}}>
-            {isListening ? '🔴' : '🎤'}
+            {isListening ? <Circle size={14} fill="#ef4444" color="#ef4444" /> : <Mic size={14} />}
           </button>
           <input className="ai-input" placeholder="Ask, analyze, compute, or upload data..."
             value={aiInput} onChange={e => setAiInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') sendAI(); }} />
           {aiTyping ? (
             <button className="ai-stop" onClick={() => {
-              abortControllerRef.current?.abort();
-              if (currentRequestIdRef.current) {
-                ws.cancelRequest(currentRequestIdRef.current);
-                currentRequestIdRef.current = null;
-              }
-            }} title="Stop response" style={{background:'rgba(239,68,68,0.15)',border:'1px solid rgba(239,68,68,0.4)',color:'#ef4444',borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:600,padding:'4px 10px'}}>■ Stop</button>
+            }} title="Stop response" style={{background:'rgba(239,68,68,0.15)',border:'1px solid rgba(239,68,68,0.4)',color:'#ef4444',borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:600,padding:'4px 10px',display:'flex',alignItems:'center',gap:4}}><Square size={12} /> Stop</button>
           ) : (
-            <button className="ai-send" onClick={sendAI}>➤</button>
+            <button className="ai-send" onClick={() => sendAI()}><Send size={14} /></button>
           )}
         </div>
         <div className="sandbox-file-upload" style={{borderTop:'1px solid var(--border)',padding:'4px 12px',display:'flex',gap:8,flexWrap:'wrap'}}>
           <label className="sandbox-file-btn" style={{fontSize:10,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}}>
-            📎 Upload data (sandbox)
+            <Paperclip size={12} /> Upload data (sandbox)
             <input type="file" style={{display:'none'}} onChange={e => {
               const file = e.target.files?.[0];
               if (file) handleFileUpload(file);
             }} />
           </label>
           <label className="sandbox-file-btn" style={{fontSize:10,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}}>
-            📷 Upload image
+            <Image size={12} /> Upload image
             <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:'none'}} onChange={e => {
               const file = e.target.files?.[0];
               if (file) handleImageUpload(file);
             }} />
           </label>
           <label className="sandbox-file-btn" style={{fontSize:10,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}}>
-            📊 Analyze data file
+            <FileSpreadsheet size={12} /> Analyze data file
             <input type="file" accept=".csv,.json,.geojson" style={{display:'none'}} onChange={e => {
               const file = e.target.files?.[0];
               if (file) handleDataFileUpload(file);
@@ -7520,22 +7606,20 @@ export default function App() {
           <button className="sandbox-file-btn" style={{fontSize:10,display:'inline-flex',alignItems:'center',gap:4}}
             onClick={() => { speakResponse(aiMessages.filter(m => m.role === 'assistant').slice(-1)[0]?.content || ''); }}
             title="Read last response aloud">
-            🔊 Speak
+            <Volume2 size={12} /> Speak
           </button>
           <button className="sandbox-file-btn" style={{fontSize:10,display:'inline-flex',alignItems:'center',gap:4}}
             onClick={() => { navigator.clipboard.writeText(buildSessionShareLink()).catch(() => {}); setShowShareDialog(true); setTimeout(() => setShowShareDialog(false), 1500); }}
             title="Copy session link to clipboard">
-            🔗 Share session
+            <Link size={12} /> Share session
           </button>
           {showShareDialog && <span style={{fontSize:9,color:'#34d399'}}>Copied!</span>}
-          {sandboxWorkspaceId && <span className="sandbox-workspace-badge">☰ Workspace</span>}
+          {sandboxWorkspaceId && <span className="sandbox-workspace-badge"><Grid size={12} style={{display:'inline',marginRight:3}} /> Workspace</span>}
         </div>
-        <div className="ai-api-note">
-          Powered by {aiApiType === 'anthropic' ? 'Claude' : aiApiType === 'gemini' ? 'Gemini' : 'Local AI'}
-          {sandboxWorkspaceId && ' · Sandbox active'}
-          {voiceSupported && ' · Voice supported'}
+
+      </Panel>
         </div>
-      </div>
+      )}
 
       {/* Chat History Panel */}
       <div className={`chat-history-panel glass-panel ${showChatHistory ? 'open' : ''}`} style={{position:'fixed',top:0,left:0,width:300,height:'100vh',zIndex:1001,transform:showChatHistory ? 'translateX(0)' : 'translateX(-100%)',transition:'transform 0.25s ease',display:'flex',flexDirection:'column',overflow:'hidden'}}>
@@ -7565,146 +7649,87 @@ export default function App() {
       </div>
 
       {/* Alerts Panel */}
-      <div className={`alerts-panel glass-panel ${showAlertsPanel ? 'open' : ''}`}>
-        <div className="ai-header">
-          <div className="ai-icon" style={{background:'linear-gradient(135deg,#ef4444,#f97316)'}}>⚠️</div>
-          <div className="ai-title">Alerts</div>
-          <button className="ai-close" onClick={() => setShowAlertsPanel(false)}>✕</button>
-        </div>
-        <div style={{display:'flex',borderBottom:'1px solid var(--border)'}}>
-          <button style={{flex:1,padding:'6px 12px',fontSize:11,fontWeight:600,border:'none',background:alertTab === 'alerts' ? 'var(--accent-bg)' : 'transparent',color:alertTab === 'alerts' ? 'var(--accent)' : 'var(--text-dim)',cursor:'pointer',borderBottom: alertTab === 'alerts' ? '2px solid var(--accent)' : '2px solid transparent'}} onClick={() => setAlertTab('alerts')}>Present</button>
-          <button style={{flex:1,padding:'6px 12px',fontSize:11,fontWeight:600,border:'none',background:alertTab === 'predictive' ? 'var(--accent-bg)' : 'transparent',color:alertTab === 'predictive' ? 'var(--accent)' : 'var(--text-dim)',cursor:'pointer',borderBottom: alertTab === 'predictive' ? '2px solid var(--accent)' : '2px solid transparent'}} onClick={() => setAlertTab('predictive')}>Predictive</button>
-        </div>
-        {alertTab === 'alerts' ? (
-          <div className="alerts-list">
-            {alerts.length === 0 && <div style={{textAlign:'center',padding:20,color:'var(--text-dim)',fontSize:12}}>No active alerts</div>}
-            {alerts.map(a => (
-              <div key={a.id} className={`alert-item ${!a.seen ? 'new' : ''}`}
-                onClick={() => {
-                  setAlerts(prev => prev.map(a2 => a2.id === a.id ? { ...a2, seen: true } : a2));
-                  setNewAlertCount(prev => Math.max(0, prev - 1));
-                  focusLocation(a.lat, a.lon, { label: a.title, color: getSeverityColor(a.severity), height: 150 });
-                }}>
-                <div className="alert-title">
-                  <div className="alert-dot" style={{background:a.severity === 'red' ? '#ef4444' : a.severity === 'orange' ? '#f97316' : '#22c55e'}} />
-                  {a.title}
-                </div>
-                <div className="alert-desc">{a.desc}</div>
-                <div className="alert-desc" style={{marginTop:4,color:'var(--text-muted)'}}>📍 {a.lat.toFixed(2)}, {a.lon.toFixed(2)}</div>
-                <div className="alert-time">{new Date(a.time).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST</div>
-              </div>
-            ))}
-            <div className="alerts-footer">
-              <button className="alert-btn" onClick={() => {
-                alertsRef.current.forEach(a => a.seen = true);
-                setAlerts([...alertsRef.current]);
-                setNewAlertCount(0);
-              }}>Mark All Read</button>
-              <button className="alert-btn" onClick={() => {
-                const v = viewerRef.current;
-                if (v) {
-                  entityStoreRef.current['disaster_alerts']?.forEach(e => v.entities.remove(e));
-                }
-                entityStoreRef.current['disaster_alerts'] = [];
-                Object.keys(alertEntityRef.current).forEach(id => { delete alertEntityRef.current[id]; });
-                alertsRef.current = [];
-                setAlerts([]);
-                setNewAlertCount(0);
-              }}>Clear All</button>
-            </div>
-          </div>
-        ) : (
-          <div className="alerts-list">
-            <CockpitAlertPanel onClose={() => setShowAlertsPanel(false)} onFlyTo={(lat, lon) => { setShowAlertsPanel(false); focusLocation(lat, lon); }} />
-          </div>
-        )}
-      </div>
-
-      {/* Phase 10: Analytics Panel */}
-      <div className={`alerts-panel glass-panel ${showAnalytics ? 'open' : ''}`} style={{right:60}}>
-        <div className="ai-header">
-          <div className="ai-icon">📊</div>
-          <div className="ai-title">Analytics & Insights</div>
-          <button className="ai-close" onClick={() => setShowAnalytics(false)}>✕</button>
-        </div>
-        <div className="alerts-list" style={{fontSize:11}}>
-          {!analyticsData ? (
-            <div style={{textAlign:'center',padding:20,color:'var(--text-dim)',fontSize:11}}>Loading...</div>
-          ) : (
-            <>
-              <div className="alert-item" style={{cursor:'default'}}>
-                <div className="alert-title">💰 Cost Summary</div>
-                <div style={{padding:'4px 0',display:'flex',justifyContent:'space-between'}}>
-                  <span>Total spent:</span>
-                  <span style={{color:'var(--accent)'}}>${(analyticsData as any).cost?.totalCost?.toFixed(6) || '0'}</span>
-                </div>
-                <div style={{display:'flex',justifyContent:'space-between'}}>
-                  <span>Total queries:</span>
-                  <span>{(analyticsData as any).cost?.totalQueries || 0}</span>
-                </div>
-                <div style={{display:'flex',justifyContent:'space-between'}}>
-                  <span>Avg cost/query:</span>
-                  <span style={{color:'var(--text-dim)'}}>${(analyticsData as any).cost?.avgCostPerQuery?.toFixed(8) || '0'}</span>
-                </div>
-                <div style={{display:'flex',justifyContent:'space-between'}}>
-                  <span>Today cost:</span>
-                  <span>${(analyticsData as any).cost?.todayCost?.toFixed(6) || '0'}</span>
-                </div>
-              </div>
-              <div className="alert-item" style={{cursor:'default'}}>
-                <div className="alert-title">🎯 Satisfaction</div>
-                <div style={{display:'flex',justifyContent:'space-between',padding:'4px 0'}}>
-                  <span>Rate:</span>
-                  <span style={{color:(analyticsData as any).satisfactionRate >= 70 ? '#22c55e' : '#f59e0b'}}>{(analyticsData as any).satisfactionRate || 0}%</span>
-                </div>
-                <div style={{display:'flex',justifyContent:'space-between'}}>
-                  <span>👍 Upvotes:</span>
-                  <span style={{color:'#22c55e'}}>{(analyticsData as any).totalUpvotes || 0}</span>
-                </div>
-                <div style={{display:'flex',justifyContent:'space-between'}}>
-                  <span>👎 Downvotes:</span>
-                  <span style={{color:'#ef4444'}}>{(analyticsData as any).totalDownvotes || 0}</span>
-                </div>
-              </div>
-              <div className="alert-item" style={{cursor:'default'}}>
-                <div className="alert-title">🗃️ Cache</div>
-                <div style={{display:'flex',justifyContent:'space-between',padding:'4px 0'}}>
-                  <span>Hit rate:</span>
-                  <span style={{color:'var(--accent)'}}>{(analyticsData as any).cache?.hitRate || 0}%</span>
-                </div>
-                <div style={{display:'flex',justifyContent:'space-between'}}>
-                  <span>Entries:</span>
-                  <span>{(analyticsData as any).cache?.size || 0}</span>
-                </div>
-              </div>
-              {(analyticsData as any).cost?.byModel && (
-                <div className="alert-item" style={{cursor:'default'}}>
-                  <div className="alert-title">🤖 By Model</div>
-                  {Object.entries((analyticsData as any).cost.byModel).map(([tier, data]: [string, any]) => (
-                    <div key={tier} style={{display:'flex',justifyContent:'space-between',padding:'2px 0',fontSize:10}}>
-                      <span>{tier}</span>
-                      <span>{data.queries} queries · ${data.cost?.toFixed(5)}</span>
+      {/* Analytics Panel */}
+      {showAnalytics && (
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 340 }}>
+          <Panel title="ANALYTICS & INSIGHTS" icon={<BarChart3 size={14} />} accentColor="#3b82f6" iconColor="#60a5fa" titleColor="#93c5fd" onClose={() => setShowAnalytics(false)} style={{ maxHeight: 'calc(100vh - 96px)' }}>
+            <div style={{ flex: 1, overflowY: 'auto', fontSize: 11 }}>
+              {!analyticsData ? (
+                <div style={{textAlign:'center',padding:20,color:'#94a3b8',fontSize:11}}>Loading...</div>
+              ) : (
+                <div style={{ padding: 8 }}>
+                  <div className="alert-item" style={{cursor:'default'}}>
+                    <div className="alert-title"><DollarSign size={12} style={{display:'inline',marginRight:3}} /> Cost Summary</div>
+                    <div style={{padding:'4px 0',display:'flex',justifyContent:'space-between'}}>
+                      <span>Total spent:</span>
+                      <span style={{color:'#60a5fa'}}>${(analyticsData as any).cost?.totalCost?.toFixed(6) || '0'}</span>
                     </div>
-                  ))}
+                    <div style={{display:'flex',justifyContent:'space-between'}}>
+                      <span>Total queries:</span>
+                      <span>{(analyticsData as any).cost?.totalQueries || 0}</span>
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between'}}>
+                      <span>Avg cost/query:</span>
+                      <span style={{color:'#94a3b8'}}>${(analyticsData as any).cost?.avgCostPerQuery?.toFixed(8) || '0'}</span>
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between'}}>
+                      <span>Today cost:</span>
+                      <span>${(analyticsData as any).cost?.todayCost?.toFixed(6) || '0'}</span>
+                    </div>
+                  </div>
+                  <div className="alert-item" style={{cursor:'default'}}>
+                    <div className="alert-title"><Target size={12} style={{display:'inline',marginRight:3}} /> Satisfaction</div>
+                    <div style={{display:'flex',justifyContent:'space-between',padding:'4px 0'}}>
+                      <span>Rate:</span>
+                      <span style={{color:(analyticsData as any).satisfactionRate >= 70 ? '#22c55e' : '#f59e0b'}}>{(analyticsData as any).satisfactionRate || 0}%</span>
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between'}}>
+                      <span><ThumbsUp size={10} style={{display:'inline',marginRight:2}} /> Upvotes:</span>
+                      <span style={{color:'#22c55e'}}>{(analyticsData as any).totalUpvotes || 0}</span>
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between'}}>
+                      <span><ThumbsDown size={10} style={{display:'inline',marginRight:2}} /> Downvotes:</span>
+                      <span style={{color:'#ef4444'}}>{(analyticsData as any).totalDownvotes || 0}</span>
+                    </div>
+                  </div>
+                  <div className="alert-item" style={{cursor:'default'}}>
+                    <div className="alert-title"><Database size={12} style={{display:'inline',marginRight:3}} /> Cache</div>
+                    <div style={{display:'flex',justifyContent:'space-between',padding:'4px 0'}}>
+                      <span>Hit rate:</span>
+                      <span style={{color:'#60a5fa'}}>{(analyticsData as any).cache?.hitRate || 0}%</span>
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between'}}>
+                      <span>Entries:</span>
+                      <span>{(analyticsData as any).cache?.size || 0}</span>
+                    </div>
+                  </div>
+                  {(analyticsData as any).cost?.byModel && (
+                    <div className="alert-item" style={{cursor:'default'}}>
+                      <div className="alert-title"><Bot size={12} style={{display:'inline',marginRight:3}} /> By Model</div>
+                      {Object.entries((analyticsData as any).cost.byModel).map(([tier, data]: [string, any]) => (
+                        <div key={tier} style={{display:'flex',justifyContent:'space-between',padding:'2px 0',fontSize:10}}>
+                          <span>{tier}</span>
+                          <span>{data.queries} queries · ${data.cost?.toFixed(5)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button className="alert-btn" onClick={() => {
+                    fetch('/api/agent/analytics').then(r=>r.json()).then(setAnalyticsData).catch(()=>{});
+                  }} style={{width:'100%',marginTop:4,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}}><RefreshCw size={12} /> Refresh</button>
                 </div>
               )}
-              <button className="alert-btn" onClick={() => {
-                fetch('/api/agent/analytics').then(r=>r.json()).then(setAnalyticsData).catch(()=>{});
-              }} style={{width:'100%',marginTop:4}}>🔄 Refresh</button>
-            </>
-          )}
+            </div>
+          </Panel>
         </div>
-      </div>
+      )}
 
       {/* Social Panel */}
-      <div className={`social-panel glass-panel ${showIntelFeed ? 'open' : ''}`}>
-        <div className="ai-header">
-          <div className="social-icon-grad">📱</div>
-          <div className="ai-title">Intel Feed</div>
-          <button className="ai-close" onClick={() => setShowIntelFeed(false)}>✕</button>
-        </div>
+      {showIntelFeed && (
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 360 }}>
+          <Panel title="INTEL FEED" icon={<Radio size={16} />} accentColor="#3b82f6" iconColor="#60a5fa" titleColor="#93c5fd" onClose={() => setShowIntelFeed(false)} style={{ maxHeight: 'calc(100vh - 160px)' }}>
         <div style={{padding:'8px 12px',borderBottom:'1px solid var(--border)',display:'flex',gap:6,flexWrap:'wrap'}}>
-          {['all','fire','storm','earthquake','flood','social'].map(f => (
+          {['all','fire','storm','earthquake','flood','weather','space_weather'].map(f => (
             <button key={f} className={`social-filter-chip ${intelFilter === f ? 'active' : ''}`}
               onClick={() => setIntelFilter(f)}>
               {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
@@ -7717,19 +7742,20 @@ export default function App() {
             if (intelFilter === 'social') return ['news', 'social', 'twitter', 'facebook'].includes(p.type);
             return p.type === intelFilter;
           }).map(item => (
-            <div key={item.id} className="social-post" onClick={() => focusLocation(item.lat, item.lon, { label: item.title, color: '#00D4FF', height: 150 })}>
+            <div key={item.id} className="social-post" onClick={() => focusLocation(item.lat, item.lon, { label: item.title, color: '#00D4FF', height: 1000 })}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
                 <span className="social-user">{item.title}</span>
                 <span className="social-time">{item.timeLabel}</span>
               </div>
+              {item.desc && <div style={{fontSize:10,color:'var(--text-dim)',marginBottom:4,lineHeight:1.4}}>{item.desc}</div>}
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
                 <div>
                   <div style={{fontSize:10,color:'var(--text-muted)'}}>
-                    {item.platform === 'twitter' ? '🐦 ' : item.platform === 'facebook' ? '📘 ' : item.platform === 'news' ? '📰 ' : ''}
+                    {item.platform === 'twitter' ? <MessageCircle size={10} style={{display:'inline',marginRight:3}} /> : item.platform === 'facebook' ? <Share2 size={10} style={{display:'inline',marginRight:3}} /> : item.platform === 'news' ? <Newspaper size={10} style={{display:'inline',marginRight:3}} /> : ''}
                     {item.source} · {item.type}
                   </div>
                   <div style={{fontSize:10,color:'var(--text-dim)',marginTop:4}}>
-                    {item.lat !== 0 ? `📍 ${item.lat.toFixed(2)}, ${item.lon.toFixed(2)}` : '🌍 Global'}
+                    {item.lat !== 0 ? <><MapPin size={10} style={{display:'inline',marginRight:2}} /> {item.lat.toFixed(2)}, {item.lon.toFixed(2)}</> : <><Globe size={10} style={{display:'inline',marginRight:2}} /> Global</>}
                   </div>
                 </div>
                 {item.url && (
@@ -7743,14 +7769,16 @@ export default function App() {
             </div>
           ))}
         </div>
-      </div>
+      </Panel>
+        </div>
+      )}
 
       {/* Timeline */}
       <div className={`timeline-bar glass-panel ${showTimeline ? '' : 'collapsed'} ${sidebarCollapsed ? 'full-width' : ''}`}>
-        <button className="tl-btn" onClick={startTimeline}>▶</button>
-        <button className="tl-btn" onClick={pauseTimeline}>⏸</button>
-        <button className="tl-btn" onClick={resetTimeline}>⏮</button>
-        <button className="tl-btn" onClick={stopTimeline}>⏹</button>
+        <button className="tl-btn" onClick={startTimeline}><Play size={14} /></button>
+        <button className="tl-btn" onClick={pauseTimeline}><Pause size={14} /></button>
+        <button className="tl-btn" onClick={resetTimeline}><SkipBack size={14} /></button>
+        <button className="tl-btn" onClick={stopTimeline}><Square size={14} /></button>
         <div className="tl-slider-wrap">
           <div className="tl-labels">
             <span>{new Date(timelineRef.current.start).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}</span>
@@ -7765,13 +7793,11 @@ export default function App() {
 
       {/* Stats Bar */}
       <div className={`statsbar glass-panel ${sidebarCollapsed ? 'full-width' : ''}`}>
-        <div className="stat-item"><div className="stat-dot" style={{background:'#3b82f6'}}/><span className="stat-label">Entities</span><span className="stat-val">{totalEntities}</span></div>
-        <div className="stat-item"><div className="stat-dot" style={{background:'#22c55e'}}/><span className="stat-label">Events</span><span className="stat-val">{activeEvents}</span></div>
-        <div className="stat-item"><div className="stat-dot" style={{background:'#a855f7'}}/><span className="stat-label">Alerts</span><span className="stat-val">{newAlertCount}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#f59e0b'}}/><span className="stat-label">Layers</span><span className="stat-val">{activeLayerCount}/{LAYER_DEFS.length}</span></div>
-        <div className="stat-item"><div className="stat-dot" style={{background:'#00D4FF'}}/><span className="stat-label">FPS</span><span className="stat-val">{fps}</span></div>
+        <div className="stat-item"><div className="stat-dot" style={{background:'#22c55e'}}/><span className="stat-label">Events</span><span className="stat-val">{activeEvents}</span></div>
+        <div className="stat-item"><div className="stat-dot" style={{background:'#8b5cf6'}}/><span className="stat-label">Intel</span><span className="stat-val">{intelFeedRef.current.length}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#FF8C00'}}/><span className="stat-label">Forks</span><span className="stat-val">{activeForkCount}</span></div>
-        <div className="stat-item"><div className="stat-dot" style={{background:'#14b8a6'}}/><span className="stat-label">Camera</span><span className="stat-val">{cameraDms || '—'}</span></div>
+        <div className="stat-item"><div className="stat-dot" style={{background:'#14b8a6'}}/><span className="stat-val">{cameraLat && cameraLon ? `${cameraLat}°${cameraLatDir} ${cameraLon}°${cameraLonDir}` : '—'}</span></div>
         <button
           className={`btn-icon monitor-btn ${!monitorCollapsed ? 'active' : ''}`}
           onClick={() => setMonitorCollapsed(prev => !prev)}
@@ -7806,26 +7832,26 @@ export default function App() {
         <button
           className={`btn-icon monitor-btn ${showSearchPanel ? 'active' : ''}`}
           onClick={() => setShowSearchPanel(p => !p)}
-          title="Satellite Search — find locations by text, class, or coordinates"
+          title="EO Image Search — find satellite imagery by text, class, or coordinates"
           style={showSearchPanel ? { borderColor: '#22c55e', color: '#22c55e' } : {}}
         >
           <SearchIcon size={16} />
         </button>
         <button
-          className={`btn-icon monitor-btn ${showTile38Panel ? 'active' : ''}`}
-          onClick={() => setShowTile38Panel(p => !p)}
-          title="Geofencing — real-time spatial triggers (Tile38)"
-          style={showTile38Panel ? { borderColor: '#fb923c', color: '#fb923c' } : {}}
+          className={`btn-icon monitor-btn ${showSatelliteTracker ? 'active' : ''}`}
+          onClick={() => setShowSatelliteTracker(p => !p)}
+          title="Satellite Tracker — search and track live satellites in orbit"
+          style={showSatelliteTracker ? { borderColor: '#00D4FF', color: '#00D4FF' } : {}}
         >
-          <Crosshair size={16} />
+          <Satellite size={16} />
         </button>
         <button
-          className={`btn-icon monitor-btn ${showKgPanel ? 'active' : ''}`}
-          onClick={() => setShowKgPanel(p => !p)}
-          title="EO Knowledge Graph — geospatial entity exploration"
-          style={showKgPanel ? { borderColor: '#a78bfa', color: '#a78bfa' } : {}}
+          className={`btn-icon monitor-btn ${showMilitarySymbology ? 'active' : ''}`}
+          onClick={() => setShowMilitarySymbology(p => !p)}
+          title="Military Symbology — APP-6/MIL-STD-2525 tactical symbols"
+          style={showMilitarySymbology ? { borderColor: '#22c55e', color: '#22c55e' } : {}}
         >
-          <Network size={16} />
+          <Shield size={16} />
         </button>
       </div>
 
@@ -7836,26 +7862,26 @@ export default function App() {
       <div ref={contextMenuRef} className={`context-menu ${contextMenu.show ? 'active' : ''}`}
         style={{ left: contextMenu.x - 90, top: contextMenu.y - 90 }}>
         <div className="ctx-ring">
-          <div className="ctx-center">📍</div>
+          <div className="ctx-center"><MapPin size={16} /></div>
           <div className="ctx-item" role="menuitem" tabIndex={0} style={{top:0,left:'50%',transform:'translateX(-50%)'}}
             onClick={() => handleContextAction('flyTo')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('flyTo'); } }}>
-            <span className="ctx-emoji">🎯</span><span className="ctx-label">Fly To</span>
+            <Crosshair size={14} className="ctx-emoji" /><span className="ctx-label">Fly To</span>
           </div>
           <div className="ctx-item" role="menuitem" tabIndex={0} style={{bottom:0,left:'50%',transform:'translateX(-50%)'}}
             onClick={() => handleContextAction('pin')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('pin'); } }}>
-            <span className="ctx-emoji">📌</span><span className="ctx-label">Drop Pin</span>
+            <MapPin size={14} className="ctx-emoji" /><span className="ctx-label">Drop Pin</span>
           </div>
           <div className="ctx-item" role="menuitem" tabIndex={0} style={{left:0,top:'50%',transform:'translateY(-50%)'}}
             onClick={() => handleContextAction('weather')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('weather'); } }}>
-            <span className="ctx-emoji">🌡️</span><span className="ctx-label">Weather</span>
+            <Thermometer size={14} className="ctx-emoji" /><span className="ctx-label">Weather</span>
           </div>
           <div className="ctx-item" role="menuitem" tabIndex={0} style={{right:0,top:'50%',transform:'translateY(-50%)'}}
             onClick={() => handleContextAction('events')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('events'); } }}>
-            <span className="ctx-emoji">📋</span><span className="ctx-label">Events</span>
+            <ClipboardList size={14} className="ctx-emoji" /><span className="ctx-label">Events</span>
           </div>
           <div className="ctx-item" role="menuitem" tabIndex={0} style={{left:'50%',top:0,transform:'translateX(-50%)'}}
             onClick={() => handleContextAction('ai_intel')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleContextAction('ai_intel'); } }}>
-            <span className="ctx-emoji">🧠</span><span className="ctx-label">AI Intel</span>
+            <Brain size={14} className="ctx-emoji" /><span className="ctx-label">AI Intel</span>
           </div>
         </div>
       </div>
@@ -7879,7 +7905,7 @@ export default function App() {
                 const url = generateShareUrl();
                 navigator.clipboard?.writeText(url);
                 showNotification('Link copied!', 'success');
-              }}>🔗 Copy Link</button>
+              }}><Link size={14} style={{display:'inline',marginRight:6}} /> Copy Link</button>
             </div>
             <div className="share-url-box">
               <input className="share-url-input" value={generateShareUrl()} readOnly />
@@ -7909,7 +7935,7 @@ export default function App() {
           style={{ display: 'block', pointerEvents: 'auto', opacity: 0 }}
           onClick={() => focusLocation(wc.lat, wc.lon, { label: 'Weather location', color: '#22d3ee', height: 150 })}>
           <div className="weather-card-header">
-            <span className="weather-icon">🌡️</span>
+            <Thermometer size={16} className="weather-icon" />
             <div>
               <div className="weather-temp">{wc.temp > -999 ? `${wc.temp}°C` : 'N/A'}</div>
               <div className="weather-desc">{wc.desc}</div>
@@ -7957,11 +7983,11 @@ export default function App() {
       {/* Measure Tool Display */}
       {showMeasureTool && measurePoints.length > 0 && (
         <div className="glass-panel" style={{
-          position: 'fixed', top: 76, left: '50%', transform: 'translateX(-50%)',
-          padding: '10px 20px', borderRadius: 10, zIndex: 1000,
+          position: 'fixed', top: 60, left: '50%', transform: 'translateX(-50%)',
+          padding: '10px 20px', borderRadius: 10, zIndex: 110,
           display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
         }}>
-          <span style={{ color: '#f59e0b', fontWeight: 600 }}>📏 Measurement</span>
+          <span style={{ color: '#f59e0b', fontWeight: 600 }}><Ruler size={12} style={{display:'inline',marginRight:4}} /> Measurement</span>
           {measureDistance !== null && (
             <span style={{ color: '#e2e8f0', fontFamily: 'monospace', fontSize: 13 }}>
               {measureDistance >= 1000
@@ -7994,8 +8020,8 @@ export default function App() {
           display: 'flex', alignItems: 'center', gap: 12,
         }}>
           <button onClick={() => setTimeSliderPlaying(p => !p)}
-            style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: 18 }}>
-            {timeSliderPlaying ? '⏸' : '▶'}
+            style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {timeSliderPlaying ? <Pause size={18} /> : <Play size={18} />}
           </button>
           <input type="range" min={Date.now() - 86400000} max={Date.now()} value={timeSliderValue}
             onChange={e => setTimeSliderValue(Number(e.target.value))}
@@ -8009,9 +8035,11 @@ export default function App() {
       )}
 
       {/* Cognitive Dashboard */}
-      <div className={`alerts-panel glass-panel ${showCognitiveDashboard ? 'open' : ''}`} style={{ width: 380, maxHeight: 'calc(100vh - 92px)' }}>
-        <CognitiveDashboard onClose={() => setShowCognitiveDashboard(false)} />
-      </div>
+      {showCognitiveDashboard && (
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 380, maxHeight: 'calc(100vh - 160px)' }}>
+          <CognitiveDashboard onClose={() => setShowCognitiveDashboard(false)} />
+        </div>
+      )}
 
       {/* Digital Twin Panel */}
       {digitalTwinPanel && (
@@ -8019,19 +8047,23 @@ export default function App() {
       )}
 
       {/* Tool Workbench */}
-      <div className={`alerts-panel glass-panel ${showToolWorkbench ? 'open' : ''}`} style={{ width: 480, maxHeight: 'calc(100vh - 92px)' }}>
+      <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 480, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', display: showToolWorkbench ? 'block' : 'none' }}>
         <ToolWorkbench onClose={() => setShowToolWorkbench(false)} bbox={activeBbox} onSurfaceData={handleSurfaceData} onClear={() => { clearStudyArea(); clearInterpSurface(viewerRef.current!); }} />
       </div>
 
       {/* Memory Explorer */}
-      <div className={`alerts-panel glass-panel ${showMemoryExplorer ? 'open' : ''}`} style={{ width: 380, maxHeight: 'calc(100vh - 92px)' }}>
-        <MemoryExplorer onClose={() => setShowMemoryExplorer(false)} />
-      </div>
+      {showMemoryExplorer && (
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 380, maxHeight: 'calc(100vh - 160px)' }}>
+          <MemoryExplorer onClose={() => setShowMemoryExplorer(false)} />
+        </div>
+      )}
 
       {/* Settings Panel */}
-      <div className={`alerts-panel glass-panel ${showSettings ? 'open' : ''}`} style={{ width: 360, maxHeight: 'calc(100vh - 92px)' }}>
-        <SettingsPanel onClose={() => setShowSettings(false)} />
-      </div>
+      {showSettings && (
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 360, maxHeight: 'calc(100vh - 160px)' }}>
+          <SettingsPanel onClose={() => setShowSettings(false)} />
+        </div>
+      )}
 
       {/* Fork Panel */}
       <ForkPanel
@@ -8052,14 +8084,14 @@ export default function App() {
       {/* Prithvi EO Foundation Model Panel */}
       {showPrithviPanel && <PrithviPanel />}
 
-      {/* Satellite Search Panel */}
-      {showSearchPanel && <SatelliteSearchPanel onClose={() => setShowSearchPanel(false)} />}
+      {/* EO Image Search Panel */}
+      {showSearchPanel && <SatelliteSearchPanel onClose={() => { setShowSearchPanel(false); const v = viewerRef.current; if (v) { for (const ent of searchResultEntitiesRef.current) v.entities.remove(ent); } searchResultEntitiesRef.current = []; }} onResults={handleSearchResults} onFlyTo={focusLocation} />}
 
-      {/* Geofencing Panel */}
-      {showTile38Panel && <Tile38Panel onClose={() => setShowTile38Panel(false)} />}
+      {/* Satellite Tracker Panel */}
+      {showSatelliteTracker && <SatelliteTrackerPanel onClose={() => { setShowSatelliteTracker(false); if (trackedSatIntervalRef.current) { clearInterval(trackedSatIntervalRef.current); trackedSatIntervalRef.current = null; } if (trackedSatRenderTickRef.current) { trackedSatRenderTickRef.current(); trackedSatRenderTickRef.current = null; } if (trackedSatRef.current) { viewerRef.current?.entities.remove(trackedSatRef.current); trackedSatRef.current = null; } if (trackedSatTrailEntityRef.current) { viewerRef.current?.entities.remove(trackedSatTrailEntityRef.current); trackedSatTrailEntityRef.current = null; } trackedSatTleRef.current = null; }} onTrackSatellite={trackSatellite} />}
 
-      {/* EO Knowledge Graph Panel */}
-      {showKgPanel && <EOKnowledgeGraphPanel onClose={() => setShowKgPanel(false)} />}
+      {/* Military Symbology Panel */}
+      {showMilitarySymbology && <MilitarySymbologyPanel onClose={() => setShowMilitarySymbology(false)} />}
 
       {/* Command Palette (CMD+K) */}
       <CommandPalette
@@ -8072,15 +8104,10 @@ export default function App() {
 
       <PerformanceMonitor viewer={viewerRef.current} visible={showPerfMonitor} onToggle={() => setShowPerfMonitor(p => !p)} />
       {/* Monitor Panel */}
-      {!loading && (
-        <div className={`alerts-panel glass-panel ${!monitorCollapsed ? 'open' : ''}`}
-          style={{ width: 320, fontFamily: 'monospace', fontSize: 11 }}>
-          <div className="ai-header">
-            <div className="ai-icon" style={{ background: 'linear-gradient(135deg,#00ff88,#0066ff)' }}>⬡</div>
-            <div className="ai-title" style={{ color: '#00ff88' }}>MONITOR</div>
-            <button className="ai-close" onClick={() => setMonitorCollapsed(true)}>✕</button>
-          </div>
-          <div style={{ padding: 8, overflowY: 'auto', maxHeight: 'calc(100vh - 160px)' }}>
+      {!loading && !monitorCollapsed && (
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 320 }}>
+          <Panel title="MONITOR" icon={<span>⬡</span>} accentColor="#00ff88" iconColor="#00ff88" titleColor="#00ff88" onClose={() => setMonitorCollapsed(true)} style={{ fontFamily: 'monospace', fontSize: 11, maxHeight: 'calc(100vh - 96px)' }}>
+            <div style={{ padding: 8, overflowY: 'auto', flex: 1 }}>
             {/* Planetary Entropy */}
             {(() => {
               const entropyVal = entropyHaloRef.current?.getEntropy() || 0;
@@ -8192,7 +8219,8 @@ export default function App() {
                 <div style={{ color: '#666', fontSize: 10 }}>No dream cycle recorded</div>
               )}
             </div>
-          </div>
+            </div>
+          </Panel>
         </div>
       )}
 
@@ -8226,7 +8254,6 @@ export default function App() {
         <ScenarioEditor
           onClose={() => setShowScenarioEditor(false)}
           onGenerateFromBbox={async (hazardType, bbox, params) => {
-            setShowScenarioEditor(false);
             try {
               const resp = await fetch('/api/scenarios/generate-from-bbox', {
                 method: 'POST',
@@ -8235,7 +8262,10 @@ export default function App() {
               });
               if (!resp.ok) throw new Error(resp.status === 401 ? 'Not logged in' : 'Generation failed');
               const data = await resp.json();
-              if (data.scenario) setSelectedScenario(adaptScenario(data.scenario));
+              if (data.scenario) {
+                setSelectedScenario(adaptScenario(data.scenario));
+                setShowScenarioEditor(false);
+              }
             } catch (err: any) {
               setAiMessages(prev => [...prev, { id: Date.now(), role: 'assistant', content: `⚠️ Real-data scenario failed: ${err.message}`, type: 'error' }]);
             }
@@ -8246,6 +8276,7 @@ export default function App() {
           }}
           studyAreas={studyAreas}
           activeStudyAreaId={activeStudyAreaId}
+          terrainProvider={viewerRef.current?.terrainProvider}
         />
       )}
 

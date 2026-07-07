@@ -87,6 +87,13 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     dataSource: 'https://openflights.org/',
     sub: 'Aviation',
   },
+  {
+    id: '2_military_flights', label: 'Military Flights', symbol: '✈',
+    color: '#ff4444', motionType: 'trail', group: 'aviation',
+    type: 'point', description: 'OpenSky military aircraft — filtered by callsign heuristics, rendered as MIL-STD-2525 symbology',
+    dataSource: 'https://opensky-network.org/',
+    sub: 'Aviation',
+  },
   // ── 3. Satellite Imagery & Earth Observation ──
   {
     id: '3_planetary_computer_stac', label: 'MODIS Terra True Color', symbol: '┎',
@@ -617,6 +624,14 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     type: 'tile', description: 'GlobColour — Global ocean chlorophyll concentration, 4km, 8-day composite, WMS',
     dataSource: 'https://hermes.acri.fr/cgi-bin/mapserv?map=/data/globcolour/wms/globcolour.map',
     sub: 'Chlorophyll tiles',
+    badge: 'LIVE',
+  },
+  {
+    id: '50_ocean_currents', label: 'Ocean Currents', symbol: '↗',
+    color: '#1ea1b6', motionType: 'float', group: 'ocean',
+    type: 'point', description: 'Open-Meteo Marine — Global surface current velocity & direction',
+    dataSource: 'https://open-meteo.com/',
+    sub: 'Surface currents',
     badge: 'LIVE',
   },
   // ── 53. (deleted) ──
@@ -1296,6 +1311,7 @@ export const LEGACY_DEFAULTS: Record<string, { on?: boolean; badge?: string; sub
   seaLakeIce: { sub: 'EONET sea ice events' },
   satnogs_db: { badge: 'LIVE', sub: 'SatNOGS transmitter frequencies', on: false },
   ucs_satellite_db: { badge: 'KEY', sub: 'UCS satellite metadata catalog', on: false },
+  ocean_currents: { badge: 'LIVE', sub: 'Open-Meteo surface currents' },
 };
 
 
