@@ -80,7 +80,7 @@ export function addVolcanoEntities(
       },
     });
     ents.push(ent);
-  }
+  });
   return ents;
 }
 

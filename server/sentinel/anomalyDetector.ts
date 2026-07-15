@@ -80,20 +80,26 @@ export class AnomalyDetector {
     for (const anomaly of results) {
       if (anomaly.confidence < 0.5) continue;
       this.anomalyCount++;
-      this.storeAnomaly(anomaly);
 
       // Publish to alert intelligence
       pubsub.publish('sentinel:anomaly', anomaly);
 
-      // Store in memory
+      // Store in memory (with dedup)
       try {
         const db = getDb();
+        const existing = db.prepare(
+          'SELECT id FROM sentinel_anomalies WHERE description = ? AND created_at >= datetime("now", "-1 hour")'
+        ).get(anomaly.description) as { id: number } | undefined;
+        if (existing) continue;
+
         db.prepare(`
           INSERT INTO sentinel_anomalies (anomaly_id, source, type, method, score, confidence, description, lat, lon, event_json)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(anomaly.id, anomaly.source, anomaly.type, anomaly.method, anomaly.score, anomaly.confidence,
           anomaly.description, anomaly.lat, anomaly.lon, JSON.stringify(anomaly.event));
-      } catch { /* non-critical */ }
+      } catch (e) {
+        logger.error({ err: (e as Error).message }, 'Failed to store anomaly');
+      }
     }
   }
 
@@ -212,16 +218,6 @@ export class AnomalyDetector {
     if (features.frp !== undefined) return features.frp;
     if (features.intensity !== undefined) return features.intensity;
     return null;
-  }
-
-  private storeAnomaly(anomaly: Anomaly): void {
-    try {
-      const db = getDb();
-      const existing = db.prepare(
-        'SELECT id FROM sentinel_anomalies WHERE description = ? AND created_at >= datetime("now", "-1 hour")'
-      ).get(anomaly.description) as { id: number } | undefined;
-      if (existing) return; // dedup
-    } catch { /* ignore */ }
   }
 
   getStats() {

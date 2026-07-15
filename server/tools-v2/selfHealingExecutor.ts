@@ -60,7 +60,7 @@ export class SelfHealingExecutor {
         retry_count INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`);
-    } catch { /* table exists */ }
+    } catch (e) { logger.warn({ err: e }, 'SelfHealingExecutor table creation'); }
   }
 
   async execute(
@@ -104,7 +104,7 @@ export class SelfHealingExecutor {
         this.log({ toolName, input, data, success: true, error: null, fallbackType: 'fallback_tool', latencyMs, retryCount: MAX_RETRIES });
         logger.info({ tool: toolName, fallback: fallbackTool }, 'Fallback tool succeeded');
         return { success: true, data, error: null, fallbackUsed: true, fallbackType: 'fallback_tool', latencyMs, retryCount: MAX_RETRIES };
-      } catch { /* fallback also failed */ }
+      } catch (e) { logger.warn({ err: e }, 'Fallback tool also failed'); }
     }
 
     // All retries and fallbacks exhausted — return error, NEVER fake data
@@ -208,7 +208,7 @@ export class SelfHealingExecutor {
         INSERT INTO execution_log (tool_name, input_json, output_json, success, error_msg, fallback_type, latency_ms, retry_count)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(log.toolName, log.inputJson, log.outputJson, log.success, log.errorMsg, log.fallbackType, log.latencyMs, log.retryCount);
-    } catch { /* silent */ }
+    } catch (e) { logger.warn({ err: e }, 'Execution log persist failed'); }
   }
 
   getLogs(toolName?: string, limit = 50): ExecutionLog[] {
@@ -220,7 +220,8 @@ export class SelfHealingExecutor {
       sql += ' ORDER BY created_at DESC LIMIT ?';
       params.push(limit);
       return db.prepare(sql).all(...params) as ExecutionLog[];
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Execution log query failed');
       return [];
     }
   }
@@ -246,7 +247,8 @@ export class SelfHealingExecutor {
         };
       }
       return stats;
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Execution stats query failed');
       return {};
     }
   }

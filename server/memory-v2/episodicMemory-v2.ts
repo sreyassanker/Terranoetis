@@ -132,7 +132,7 @@ export class EpisodicMemoryV2 {
       db.exec(`CREATE INDEX IF NOT EXISTS idx_episodic_v2_created ON episodic_v2(created_at DESC)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_episodic_v2_outcome ON episodic_v2(outcome)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_episodic_v2_consolidated ON episodic_v2(consolidated)`);
-    } catch { /* tables exist */ }
+    } catch (e) { logger.warn({ err: (e as Error).message }, 'EpisodicMemory tables may already exist'); }
   }
 
   async add(episode: Omit<EpisodeV2, 'id' | 'timestamp' | 'tags' | 'consolidated' | 'embedding'>): Promise<string> {
@@ -142,7 +142,7 @@ export class EpisodicMemoryV2 {
     let emb: Float32Array | null = null;
     try {
       emb = await this.embedder.embed(`${episode.query} ${episode.response.slice(0, 500)}`);
-    } catch { /* embedding optional */ }
+    } catch (e) { logger.debug({ err: (e as Error).message }, 'Episode embedding optional (non-critical)'); }
 
     try {
       const db = getDb();
@@ -151,7 +151,7 @@ export class EpisodicMemoryV2 {
           layers_toggled, emotional_valence, outcome, tokens_used, latency_ms, model_tier, embedding)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        id, episode.userId, episode.query, episode.response, episode.intentType,
+        id, episode.userId ?? '', episode.query, episode.response, episode.intentType,
         JSON.stringify(tags),
         episode.location?.lat ?? null, episode.location?.lon ?? null, episode.location?.label ?? null,
         JSON.stringify(episode.layersToggled ?? []),
@@ -160,7 +160,7 @@ export class EpisodicMemoryV2 {
         episode.tokensUsed ?? 0, episode.latencyMs ?? 0, episode.modelTier ?? 'flash',
         emb ? embeddingToBuffer(emb) : null,
       );
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message }, 'Failed in episodic memory operation'); }
 
     return id;
   }
@@ -218,7 +218,8 @@ export class EpisodicMemoryV2 {
         .sort((a, b) => b.score - a.score)
         .slice(0, opts.limit ?? 10)
         .map(s => s.ep);
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to search episodic memory');
       return [];
     }
   }
@@ -235,7 +236,8 @@ export class EpisodicMemoryV2 {
         'SELECT * FROM episodic_v2 WHERE user_id = ? ORDER BY created_at DESC LIMIT ?'
       ).all(userId, count) as Array<Record<string, unknown>>;
       return rows.map(r => this.rowToEpisode(r));
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to get recent episodes');
       return [];
     }
   }
@@ -249,7 +251,8 @@ export class EpisodicMemoryV2 {
       }
       const row = db.prepare('SELECT COUNT(*) as cnt FROM episodic_v2').get() as { cnt: number };
       return row.cnt;
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to count episodes');
       return 0;
     }
   }
@@ -314,14 +317,14 @@ export class EpisodicMemoryV2 {
     try {
       const db = getDb();
       db.prepare('UPDATE episodic_v2 SET emotional_valence = ? WHERE id = ?').run(valence, episodeId);
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message }, 'Failed in episodic memory operation'); }
   }
 
   updateOutcome(episodeId: string, outcome: EpisodeV2['outcome']): void {
     try {
       const db = getDb();
       db.prepare('UPDATE episodic_v2 SET outcome = ? WHERE id = ?').run(outcome, episodeId);
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message }, 'Failed in episodic memory operation'); }
   }
 
   shutdown(): void {

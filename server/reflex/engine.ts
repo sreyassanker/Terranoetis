@@ -11,6 +11,7 @@
  */
 
 import { pubsub } from '../pubsub';
+import { logger } from '../observability/logger';
 import { BUILTIN_REFLEXES, evaluateCondition } from './reflexes';
 import type { ReflexDefinition, ReflexState, ReflexAction } from './types';
 
@@ -71,8 +72,8 @@ export class ReflexEngine {
     for (const unsub of this.unsubscribers) {
       try {
         unsub();
-      } catch {
-        // subscriber may have been removed already
+      } catch (e) {
+        logger.warn({ err: e }, 'Reflex unsubscribe failed');
       }
     }
     this.unsubscribers = [];

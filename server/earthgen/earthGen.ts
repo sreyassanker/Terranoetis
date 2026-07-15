@@ -93,14 +93,13 @@ export class EarthGenModel {
     }
   }
 
-  private trainStep(example: DatasetExample): number {
+  /** Compute loss for a single example with current weights */
+  private computeSingleLoss(example: DatasetExample): number {
     const x0 = this.flow.samplePrior(example.cloud.length);
     const x1 = example.cloud;
     const tArr = this.flow.sampleTimestep();
     const t = tArr[0] || 0.5;
-
     const { xt } = this.flow.computeVelocity(x0, x1, t);
-
     const c = example.conditioning;
     const condProjected = this.conditionProjector.forward({
       lat: c[0] * 90,
@@ -116,15 +115,54 @@ export class EarthGenModel {
       spreadZ: c[10] || 0.05,
       mask: c[11] || 0,
     });
-
     const withContext = computeKNNContext(xt, { k: this.config.knn });
     const predictedVel = this.transformer.forward(withContext, t, condProjected);
+    return this.flow.computeLoss(predictedVel, x0, x1);
+  }
 
-    const loss = this.flow.computeLoss(predictedVel, x0, x1);
+  private trainStep(example: DatasetExample): number {
+    const lr = this.config.learningRate;
+    const eps = 1e-4; // Perturbation size for finite differences
+
+    // SPSA (Simultaneous Perturbation Stochastic Approximation):
+    // Estimate gradient using only 2 forward passes regardless of param count
+    // Reference: Spall (1992) "Multivariate Stochastic Approximation"
+
+    // 1. Compute baseline loss at current weights
+    const baseLoss = this.computeSingleLoss(example);
+
+    // 2. Sample random perturbation direction (Rademacher: +1/-1)
+    const tDirSize = this.transformer.collectWeights().length;
+    const tDir = this.transformer.sampleRandomDirection(tDirSize);
+    const cDirSize = this.conditionProjector.collectWeights().length;
+    const cDir = this.conditionProjector.sampleRandomDirection(cDirSize);
+
+    // 3. Perturb weights forward: w + eps * d
+    this.transformer.applyDirection(eps, tDir);
+    this.conditionProjector.applyDirection(eps, cDir);
+    const lossPlus = this.computeSingleLoss(example);
+
+    // 4. Perturb weights backward: w - 2*eps * d (from w+eps*d position)
+    this.transformer.applyDirection(-2 * eps, tDir);
+    this.conditionProjector.applyDirection(-2 * eps, cDir);
+    const lossMinus = this.computeSingleLoss(example);
+
+    // 5. Restore weights to original: w + eps * d (from w-eps*d position)
+    this.transformer.applyDirection(eps, tDir);
+    this.conditionProjector.applyDirection(eps, cDir);
+
+    // 6. Estimate gradient: g ≈ (L(w+ed) - L(w-ed)) / (2*eps) * d
+    const gradEstimate = (lossPlus - lossMinus) / (2 * eps);
+
+    // 7. Update weights: w = w - lr * gradEstimate * direction
+    // Clamp gradient to prevent explosion
+    const clampedGrad = Math.max(-10, Math.min(10, gradEstimate));
+    this.transformer.applyDirection(-lr * clampedGrad, tDir);
+    this.conditionProjector.applyDirection(-lr * clampedGrad * 0.5, cDir);
 
     this.optimizerStep++;
 
-    return loss;
+    return baseLoss;
   }
 
   private computeLoss(example: DatasetExample): number {
@@ -170,13 +208,13 @@ export class EarthGenModel {
     return result;
   }
 
-  save(filePath: string): void {
+  save(filePath: string, epoch?: number, loss?: number): void {
     const checkpoint: Checkpoint = {
       config: this.config,
       transformerState: this.transformer.getParams(),
       conditionProjector: this.conditionProjector.getParams(),
-      epoch: 0,
-      loss: 0,
+      epoch: epoch ?? 0,
+      loss: loss ?? 0,
     };
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {

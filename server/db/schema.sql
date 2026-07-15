@@ -661,3 +661,54 @@ CREATE TABLE IF NOT EXISTS memory_store (
 
 CREATE INDEX IF NOT EXISTS idx_memory_tier_id ON memory_store(tier, memory_id);
 CREATE INDEX IF NOT EXISTS idx_memory_importance ON memory_store(importance DESC);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Phase 1: Sentinel Mode — Automated Monitoring & Alerting
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Watch Zones: user-defined monitoring regions
+CREATE TABLE IF NOT EXISTS watch_zones (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  bbox_min_lat REAL NOT NULL,
+  bbox_max_lat REAL NOT NULL,
+  bbox_min_lon REAL NOT NULL,
+  bbox_max_lon REAL NOT NULL,
+  layers TEXT NOT NULL DEFAULT '[]',
+  thresholds TEXT NOT NULL DEFAULT '{}',
+  poll_interval_ms INTEGER NOT NULL DEFAULT 300000,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT NOT NULL DEFAULT 'local-user',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_watch_zones_user ON watch_zones(created_by);
+CREATE INDEX IF NOT EXISTS idx_watch_zones_enabled ON watch_zones(enabled);
+
+-- Sentinel Baselines: last known state per zone+layer for anomaly detection
+CREATE TABLE IF NOT EXISTS sentinel_baselines (
+  zone_id TEXT NOT NULL,
+  layer_id TEXT NOT NULL,
+  baseline_value TEXT NOT NULL DEFAULT '{}',
+  sample_count INTEGER NOT NULL DEFAULT 0,
+  last_checked_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (zone_id, layer_id),
+  FOREIGN KEY (zone_id) REFERENCES watch_zones(id) ON DELETE CASCADE
+);
+
+-- Risk Snapshots: periodic composite risk scores per zone for trend analysis
+CREATE TABLE IF NOT EXISTS risk_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  zone_id TEXT NOT NULL,
+  composite_score REAL NOT NULL DEFAULT 0,
+  hazard_scores TEXT NOT NULL DEFAULT '{}',
+  alert_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (zone_id) REFERENCES watch_zones(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_snapshots_zone ON risk_snapshots(zone_id);
+CREATE INDEX IF NOT EXISTS idx_risk_snapshots_created ON risk_snapshots(created_at DESC);
+

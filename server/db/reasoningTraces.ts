@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { logger } from '../observability/logger';
 
 const REQUIRED_COLUMNS = [
   { name: 'trace_id', definition: 'TEXT' },
@@ -88,15 +89,15 @@ export function ensureReasoningTracesTable(db: Database.Database): void {
       SET confidence = COALESCE(final_confidence, critic_score, 0)
       WHERE confidence IS NULL
     `);
-  } catch {
-    // Best-effort backfill; normal inserts still use the unified schema.
+  } catch (e) {
+    logger.warn({ err: e }, 'Reasoning traces backfill failed (best-effort)');
   }
 
   for (const sql of INDEXES) {
     try {
       db.exec(sql);
-    } catch {
-      // Old local databases may contain duplicate historical rows; indexes are an optimization.
+    } catch (e) {
+      logger.warn({ err: e }, 'Reasoning traces index creation failed');
     }
   }
 }

@@ -91,7 +91,7 @@ export class SemanticMemory {
       db.exec(`CREATE INDEX IF NOT EXISTS idx_semantic_rel_source ON semantic_relations(source_id)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_semantic_rel_target ON semantic_relations(target_id)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_semantic_rel_type ON semantic_relations(relation_type)`);
-    } catch { /* tables exist */ }
+    } catch (e) { logger.warn({ err: (e as Error).message }, 'SemanticMemory tables may already exist'); }
   }
 
   async addEntity(name: string, type: string, metadata?: Record<string, unknown>): Promise<number> {
@@ -99,7 +99,7 @@ export class SemanticMemory {
     try {
       const vec = await this.embedder.embed(name);
       emb = embeddingToBuffer(vec);
-    } catch { /* embedding optional */ }
+    } catch (e) { logger.debug({ err: (e as Error).message }, 'Embedding generation failed (non-critical)'); }
 
     try {
       const db = getDb();
@@ -132,7 +132,7 @@ export class SemanticMemory {
         VALUES (?, ?, ?, ?)
         ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET weight = excluded.weight
       `).run(sourceId, targetId, relationType, weight);
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message, sourceId, targetId, relationType }, 'Failed to add relation'); }
   }
 
   async addFact(subject: string, relation: string, object: string, weight = 1.0): Promise<void> {
@@ -152,7 +152,8 @@ export class SemanticMemory {
       const row = db.prepare('SELECT * FROM semantic_entities WHERE name = ?').get(name) as Record<string, unknown> | undefined;
       if (!row) return null;
       return this.rowToEntity(row);
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message, name }, 'Failed to get entity');
       return null;
     }
   }
@@ -167,7 +168,8 @@ export class SemanticMemory {
 
       const rows = db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
       return rows.map(r => this.rowToEntity(r));
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to search by vector');
       return [];
     }
   }
@@ -193,7 +195,8 @@ export class SemanticMemory {
         .sort((a, b) => b.score - a.score)
         .slice(0, limit)
         .map(s => s.entity);
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to search by vector');
       return [];
     }
   }
@@ -219,7 +222,8 @@ export class SemanticMemory {
         sourceName: r.source_name as string,
         targetName: r.target_name as string,
       }));
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to get relations');
       return [];
     }
   }
@@ -298,7 +302,8 @@ export class SemanticMemory {
       const row = db.prepare('SELECT * FROM semantic_entities WHERE id = ?').get(id) as Record<string, unknown> | undefined;
       if (!row) return null;
       return this.rowToEntity(row);
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message, id }, 'Failed to get entity by id');
       return null;
     }
   }

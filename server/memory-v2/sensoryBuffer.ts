@@ -60,7 +60,7 @@ export class SensoryBuffer {
       db.exec(`CREATE INDEX IF NOT EXISTS idx_sensory_timestamp ON sensory_buffer(timestamp)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_sensory_importance ON sensory_buffer(importance_score DESC)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_sensory_type ON sensory_buffer(type)`);
-    } catch { /* tables exist */ }
+    } catch (e) { logger.warn({ err: (e as Error).message }, 'SensoryBuffer tables may already exist'); }
   }
 
   async push(event: Omit<PerceptualEvent, 'id' | 'timestamp'> & { timestamp?: number }): Promise<string> {
@@ -68,14 +68,17 @@ export class SensoryBuffer {
     const ts = event.timestamp ?? Date.now();
     const importance = event.importanceScore ?? this.computeImportance(event);
 
+    // Defensive: coerce data to string if it isn't already (e.g. objects passed by callers)
+    const dataStr = typeof event.data === 'string' ? event.data : JSON.stringify(event.data ?? '');
+
     try {
       const db = getDb();
       db.prepare(`
         INSERT INTO sensory_buffer (id, timestamp, type, source, data, importance_score, metadata_json)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(id, ts, event.type, event.source, event.data.slice(0, 2000), importance,
+      `).run(id, ts, event.type, event.source, dataStr.slice(0, 2000), importance,
         event.metadata ? JSON.stringify(event.metadata) : null);
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message, id }, 'Failed to push event to sensory buffer'); }
 
     const count = this.count();
     if (count > this.options.maxEvents) {
@@ -101,7 +104,8 @@ export class SensoryBuffer {
         'SELECT * FROM sensory_buffer WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?'
       ).all(cutoff, limit) as Array<Record<string, unknown>>;
       return rows.map(r => this.rowToEvent(r));
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to query sensory buffer');
       return [];
     }
   }
@@ -114,7 +118,8 @@ export class SensoryBuffer {
         'SELECT * FROM sensory_buffer WHERE timestamp >= ? ORDER BY importance_score DESC LIMIT ?'
       ).all(cutoff, limit) as Array<Record<string, unknown>>;
       return rows.map(r => this.rowToEvent(r));
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to query sensory buffer');
       return [];
     }
   }
@@ -127,7 +132,8 @@ export class SensoryBuffer {
         'SELECT * FROM sensory_buffer WHERE type = ? AND timestamp >= ? ORDER BY timestamp DESC LIMIT ?'
       ).all(type, cutoff, limit) as Array<Record<string, unknown>>;
       return rows.map(r => this.rowToEvent(r));
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to query sensory buffer');
       return [];
     }
   }
@@ -163,7 +169,7 @@ export class SensoryBuffer {
     try {
       const db = getDb();
       db.prepare('DELETE FROM sensory_buffer').run();
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message }, 'Failed to clear sensory buffer'); }
   }
 
   count(): number {
@@ -172,7 +178,8 @@ export class SensoryBuffer {
       const cutoff = Date.now() - this.options.windowHours * 3600000;
       const row = db.prepare('SELECT COUNT(*) as cnt FROM sensory_buffer WHERE timestamp >= ?').get(cutoff) as { cnt: number };
       return row.cnt;
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to count sensory buffer entries');
       return 0;
     }
   }

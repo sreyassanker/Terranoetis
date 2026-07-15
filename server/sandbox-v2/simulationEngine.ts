@@ -216,15 +216,41 @@ import numpy as np
     }
   }
 
+  private validateNumericArray(arr: unknown): boolean {
+    if (!Array.isArray(arr)) return false;
+    for (const row of arr) {
+      if (!Array.isArray(row)) return false;
+      for (const val of row) {
+        if (typeof val !== 'number' || !Number.isFinite(val)) return false;
+      }
+    }
+    return true;
+  }
+
   private buildFarsiteCode(params: Record<string, unknown>): string {
+    const safeDem = JSON.stringify(params.dem);
+    const safeFuel = JSON.stringify(params.fuelModel);
+    const safeIgnition = JSON.stringify(params.ignitionPoint ?? [0, 0]);
+    const windSpeed = typeof params.windSpeed === 'number' && Number.isFinite(params.windSpeed) ? params.windSpeed : 0;
+    const windDir = typeof params.windDir === 'number' && Number.isFinite(params.windDir) ? params.windDir : 0;
+    const moisture = typeof params.moisture === 'number' && Number.isFinite(params.moisture) ? params.moisture : 0.5;
+    const duration = typeof params.duration === 'number' && Number.isFinite(params.duration) ? params.duration : 60;
+
+    if (params.dem && !this.validateNumericArray(params.dem)) {
+      return `print(json.dumps({"error": "dem must be a 2D numeric array"}))`;
+    }
+    if (params.fuelModel && !this.validateNumericArray(params.fuelModel)) {
+      return `print(json.dumps({"error": "fuelModel must be a 2D numeric array"}))`;
+    }
+
     return `
-dem = np.array(${JSON.stringify(params.dem)})
-fuel = np.array(${JSON.stringify(params.fuelModel)})
-wind_speed = ${params.windSpeed ?? 0}
-wind_dir = ${params.windDir ?? 0}
-moisture = ${params.moisture ?? 0.5}
-ig_row, ig_col = ${JSON.stringify(params.ignitionPoint ?? [0, 0])}
-duration = ${params.duration ?? 60}
+dem = np.array(${safeDem})
+fuel = np.array(${safeFuel})
+wind_speed = ${windSpeed}
+wind_dir = ${windDir}
+moisture = ${moisture}
+ig_row, ig_col = ${safeIgnition}
+duration = ${duration}
 
 rows, cols = dem.shape
 R = np.ones((rows, cols)) * 0.1
@@ -270,12 +296,22 @@ print(json.dumps(result))
   }
 
   private buildAdcircCode(params: Record<string, unknown>): string {
+    // Validate bathymetry array
+    if (params.bathymetry && !this.validateNumericArray(params.bathymetry)) {
+      return `print(json.dumps({"error": "bathymetry must be a 2D numeric array"}))`;
+    }
+    const safeBathy = JSON.stringify(params.bathymetry);
+    const safeEpicenter = JSON.stringify(params.epicenter ?? [0, 0]);
+    const magnitude = typeof params.magnitude === 'number' && Number.isFinite(params.magnitude) ? params.magnitude : 7.0;
+    const depth = typeof params.depth === 'number' && Number.isFinite(params.depth) ? params.depth : 10;
+    const duration = typeof params.duration === 'number' && Number.isFinite(params.duration) ? params.duration : 3600;
+
     return `
-bathy = np.array(${JSON.stringify(params.bathymetry)})
-magnitude = ${params.magnitude ?? 7.0}
-depth = ${params.depth ?? 10}
-epi_row, epi_col = ${JSON.stringify(params.epicenter ?? [0, 0])}
-duration = ${params.duration ?? 3600}
+bathy = np.array(${safeBathy})
+magnitude = ${magnitude}
+depth = ${depth}
+epi_row, epi_col = ${safeEpicenter}
+duration = ${duration}
 
 rows, cols = bathy.shape
 g = 9.81
@@ -329,11 +365,18 @@ print(json.dumps(result))
   }
 
   private buildWrfCode(params: Record<string, unknown>): string {
+    // Validate terrain array
+    if (params.terrain && !this.validateNumericArray(params.terrain)) {
+      return `print(json.dumps({"error": "terrain must be a 2D numeric array"}))`;
+    }
+    const safeTerrain = JSON.stringify(params.terrain ?? []);
+    const duration = typeof params.duration === 'number' && Number.isFinite(params.duration) ? params.duration : 24;
+
     return `
 init = ${JSON.stringify(params.initialConditions ?? {})}
 boundary = ${JSON.stringify(params.boundaryConditions ?? {})}
-terrain = np.array(${JSON.stringify(params.terrain ?? [])})
-duration = ${params.duration ?? 24}
+terrain = np.array(${safeTerrain})
+duration = ${duration}
 
 rows, cols = terrain.shape
 nx, ny = rows, cols
@@ -388,11 +431,15 @@ print(json.dumps(result))
   }
 
   private buildHysplitCode(params: Record<string, unknown>): string {
+    const eruptionHeight = typeof params.eruptionHeight === 'number' && Number.isFinite(params.eruptionHeight) ? params.eruptionHeight : 10;
+    const ashMass = typeof params.ashMass === 'number' && Number.isFinite(params.ashMass) ? params.ashMass : 1000;
+    const duration = typeof params.duration === 'number' && Number.isFinite(params.duration) ? params.duration : 24;
+
     return `
-eruption_height = ${params.eruptionHeight ?? 10}
-ash_mass = ${params.ashMass ?? 1000}
+eruption_height = ${eruptionHeight}
+ash_mass = ${ashMass}
 wind_fields = ${JSON.stringify(params.windFields ?? [])}
-duration = ${params.duration ?? 24}
+duration = ${duration}
 
 nx, ny, nz = 100, 100, 20
 dx, dy = 5000.0, 5000.0
@@ -437,25 +484,49 @@ print(json.dumps(result))
   }
 
   private buildFnoCode(params: Record<string, unknown>): string {
+    const lat = typeof params.lat === 'number' ? params.lat : 0;
+    const lon = typeof params.lon === 'number' ? params.lon : 0;
+    const leadDays = typeof params.leadDays === 'number' ? Math.min(Math.max(params.leadDays, 1), 10) : 1;
+
+    // Use Open-Meteo API for real weather data instead of random noise
     return `
-lat = ${params.lat ?? 0}
-lon = ${params.lon ?? 0}
-lead_days = min(max(${params.leadDays ?? 1}, 1), 10)
+import json, urllib.request
+lat = ${lat}
+lon = ${lon}
+lead_days = ${leadDays}
 
-np.random.seed(abs(int(lat * 100 + lon * 100 + lead_days * 10)))
-nx, ny = 64, 64
-base_temp = 288.0 - abs(lat) * 0.5
-conf = 0.75 - lead_days * 0.03
-temp = np.random.randn(nx, ny) * 2.0 + base_temp + lead_days * 0.1
-precip = np.maximum(np.random.exponential(2.0, (nx, ny)) * (1.0 - lead_days * 0.02), 0)
-wind = np.abs(np.random.randn(nx, ny) * 3.0 + 5.0)
-
-result = {
-    "temperature": temp.tolist(),
-    "precipitation": precip.tolist(),
-    "windSpeed": wind.tolist(),
-    "confidence": round(conf, 3)
-}
+try:
+    url = f'https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max&forecast_days={lead_days}&timezone=auto'
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read())
+    daily = data.get('daily', {})
+    temp_max = daily.get('temperature_2m_max', [])
+    temp_min = daily.get('temperature_2m_min', [])
+    precip = daily.get('precipitation_sum', [])
+    wind = daily.get('wind_speed_10m_max', [])
+    avg_temp = [(a + b) / 2 for a, b in zip(temp_max, temp_min)] if temp_max and temp_min else [288.0]
+    conf = 0.85 - lead_days * 0.05
+    result = {
+        "temperature": [avg_temp],
+        "precipitation": [precip if precip else [0]],
+        "windSpeed": [wind if wind else [0]],
+        "confidence": round(max(0.1, conf), 3),
+        "source": "open-meteo",
+        "synthetic": False
+    }
+except Exception as e:
+    # Fallback: return climatological estimate based on latitude
+    base_temp = 288.0 - abs(lat) * 0.5
+    result = {
+        "temperature": [[base_temp + lead_days * 0.1] * 64],
+        "precipitation": [[2.0] * 64],
+        "windSpeed": [[5.0] * 64],
+        "confidence": 0.3,
+        "source": "climatological-fallback",
+        "synthetic": True,
+        "warning": str(e)
+    }
 print(json.dumps(result))
 `;
   }

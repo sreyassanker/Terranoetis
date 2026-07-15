@@ -349,7 +349,8 @@ async function omninetStructured<T>(prompt: string, _apiKey?: string): Promise<T
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
     return JSON.parse(jsonMatch[0]) as T;
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'omninetStructured JSON parse failed');
     return null;
   }
 }
@@ -429,8 +430,8 @@ export async function warmIntentPrototypeEmbeddings(_apiKey?: string): Promise<v
       try {
         const emb = await omninetEmbed(pattern);
         prototypeEmbeddings.set(pattern, emb);
-      } catch {
-        // skip failed embeddings
+      } catch (e) {
+        logger.warn({ err: e }, 'Intent prototype embedding failed');
       }
     }
   }
@@ -668,8 +669,8 @@ export class IntentRouter {
           layerIds: bestProto.layerIds,
         };
       }
-    } catch {
-      // Fall through to fast result
+    } catch (e) {
+      logger.warn({ err: e }, 'Intent router deep path failed, falling through to fast result');
     }
 
     return fastResult;
@@ -726,8 +727,8 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
           Math.abs(result.lat) <= 90 && Math.abs(result.lon) <= 180) {
         return result;
       }
-    } catch {
-      // Return null — caller handles missing location
+    } catch (e) {
+      logger.warn({ err: e }, 'LLM location extraction failed');
     }
 
     return null;
@@ -891,8 +892,8 @@ Return: [{"id":"step1","description":"...","status":"pending","dependsOn":[],"co
           language: s.language && ['python', 'node', 'bash'].includes(s.language) ? s.language as Subtask['language'] : undefined,
         }));
       }
-    } catch {
-      // Fallback to static decomposition
+    } catch (e) {
+      logger.warn({ err: e }, 'LLM plan decomposition failed, using static');
     }
 
     return this.decompose(goal);
@@ -918,8 +919,8 @@ export class CommandParser {
         if (validActions.includes(cmd.action)) {
           commands.push(cmd);
         }
-      } catch {
-        // skip malformed JSON lines
+      } catch (e) {
+        logger.warn({ err: e }, 'Globe command parse failed');
       }
     }
     return commands;
@@ -964,8 +965,8 @@ export class MaterializedViewCache {
       ]);
       const grid = this.buildGrid({ quakes, eonet, weather, gdacs });
       this.cache.set('materialized', grid);
-    } catch {
-      // Silently fail — next refresh will retry
+    } catch (e) {
+      logger.warn({ err: e }, 'Materialized view refresh failed');
     }
   }
 

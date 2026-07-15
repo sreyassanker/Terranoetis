@@ -84,6 +84,49 @@ export class ConditionProjector {
     return addBias(mulMatVec(h, this.w2), this.b2);
   }
 
+  /** Collect all trainable weights into a flat vector */
+  collectWeights(): number[] {
+    const weights: number[] = [];
+    for (const row of this.w1) for (const v of row) weights.push(v);
+    for (const v of this.b1) weights.push(v);
+    for (const row of this.w2) for (const v of row) weights.push(v);
+    for (const v of this.b2) weights.push(v);
+    return weights;
+  }
+
+  /** Restore weights from a flat vector */
+  restoreWeights(flat: number[]): void {
+    let idx = 0;
+    for (let i = 0; i < this.w1.length; i++)
+      for (let j = 0; j < this.w1[i].length; j++)
+        this.w1[i][j] = flat[idx++];
+    for (let i = 0; i < this.b1.length; i++)
+      this.b1[i] = flat[idx++];
+    for (let i = 0; i < this.w2.length; i++)
+      for (let j = 0; j < this.w2[i].length; j++)
+        this.w2[i][j] = flat[idx++];
+    for (let i = 0; i < this.b2.length; i++)
+      this.b2[i] = flat[idx++];
+  }
+
+  /** Generate a random perturbation direction */
+  sampleRandomDirection(size: number): number[] {
+    const dir: number[] = [];
+    for (let i = 0; i < size; i++) {
+      dir.push(Math.random() < 0.5 ? 1 : -1);
+    }
+    return dir;
+  }
+
+  /** Apply a scaled direction to all weights: w += scale * direction */
+  applyDirection(scale: number, direction: number[]): void {
+    const weights = this.collectWeights();
+    for (let i = 0; i < weights.length; i++) {
+      weights[i] += scale * direction[i];
+    }
+    this.restoreWeights(weights);
+  }
+
   getParams(): { w1: number[][]; b1: number[]; w2: number[][]; b2: number[] } {
     return { w1: this.w1, b1: this.b1, w2: this.w2, b2: this.b2 };
   }

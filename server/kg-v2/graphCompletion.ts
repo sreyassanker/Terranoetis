@@ -138,20 +138,43 @@ export class GraphCompletion {
 
   private computeEmbedding(name: string, type: string): Float64Array {
     const emb = new Float64Array(this.maxEmbeddingDim);
-    const seed = this.hashString(name + ':' + type);
-    for (let i = 0; i < emb.length; i++) {
-      emb[i] = Math.sin(seed * (i + 1)) * Math.cos(seed * (i + 2) * 0.5);
+    const combined = (name + ':' + type).toLowerCase();
+    
+    // Character frequency-based embedding (captures semantic content)
+    const charFreq = new Map<string, number>();
+    for (const ch of combined) {
+      charFreq.set(ch, (charFreq.get(ch) || 0) + 1);
     }
+    
+    // N-gram features (bigrams capture word structure)
+    const bigrams = new Map<string, number>();
+    for (let i = 0; i < combined.length - 1; i++) {
+      const bg = combined.slice(i, i + 2);
+      bigrams.set(bg, (bigrams.get(bg) || 0) + 1);
+    }
+    
+    // Type-specific bias
+    const typeBias = type.length * 0.01;
+    
+    // Fill embedding with meaningful features
+    let idx = 0;
+    for (const [ch, count] of charFreq) {
+      if (idx >= emb.length) break;
+      emb[idx] = count / combined.length;
+      idx++;
+    }
+    for (const [, count] of bigrams) {
+      if (idx >= emb.length) break;
+      emb[idx] = count / Math.max(1, combined.length - 1);
+      idx++;
+    }
+    // Fill remaining with type/name length features
+    while (idx < emb.length) {
+      emb[idx] = Math.sin(idx * typeBias + name.length * 0.1) * 0.5;
+      idx++;
+    }
+    
     return emb;
-  }
-
-  private hashString(str: string): number {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i);
-      hash |= 0;
-    }
-    return hash;
   }
 
   private cosineSimilarity(a: Float64Array, b: Float64Array): number {

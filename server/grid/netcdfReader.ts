@@ -1,3 +1,5 @@
+import { logger } from '../observability/logger';
+
 interface H5WasmModule {
   ready: Promise<void>;
   File: new (path: string, mode: string) => { close: () => void; keys: () => Iterable<string>; get: (name: string) => { type: string; value: unknown } | null };
@@ -32,7 +34,7 @@ function readDataset(f: { get: (name: string) => { type: string; value: unknown 
     if (val == null) return null;
     if (typeof val === 'object' && 'length' in val) return Array.from(val as ArrayLike<number>);
     return [Number(val)];
-  } catch { return null; }
+  } catch (e) { logger.warn({ err: e }, 'NetCDF readDataset failed'); return null; }
 }
 
 function findBounds(arr: number[], min: number, max: number): [number, number] {
@@ -57,7 +59,7 @@ export interface H5File {
 }
 
 export function closeFile(h5: H5File): void {
-  try { h5.file.close(); } catch { /* noop */ }
+  try { h5.file.close(); } catch (e) { logger.warn({ err: e }, 'HDF5 file close failed'); }
 }
 
 export async function queryVariableNames(filePath: string): Promise<string[]> {

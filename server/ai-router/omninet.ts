@@ -147,14 +147,14 @@ export class Omninet {
         last_latency INTEGER NOT NULL DEFAULT 1000,
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`);
-    } catch { /* table exists */ }
+    } catch (e) { logger.warn({ err: e }, 'Omninet provider_stats table creation'); }
   }
 
   private loadState(providerName: string): Record<string, unknown> | null {
     try {
       const db = getDb();
       return db.prepare('SELECT * FROM provider_stats WHERE provider_name = ?').get(providerName) as Record<string, unknown> | undefined || null;
-    } catch { return null; }
+    } catch (e) { logger.warn({ err: e }, 'Omninet loadState failed'); return null; }
   }
 
   private persistState(state: ProviderState): void {
@@ -174,7 +174,7 @@ export class Omninet {
         state.consecutiveSuccesses, state.tokens, state.lastTokenRefill,
         state.totalRequests, state.totalTokens, state.estimatedCost, state.lastLatency,
       );
-    } catch { /* persist failed */ }
+    } catch (e) { logger.warn({ err: e }, 'Omninet persistState failed'); }
   }
 
   shutdown(): void {
@@ -200,7 +200,8 @@ export class Omninet {
           state.consecutiveSuccesses++;
           state.failureCount = 0;
           if (state.consecutiveSuccesses >= 3) state.status = 'healthy';
-        } catch {
+        } catch (e) {
+          logger.warn({ err: e, provider: state.config.name }, 'Omninet health ping failed');
           state.failureCount++;
           state.consecutiveSuccesses = 0;
           if (state.failureCount >= 5) state.status = 'down';
@@ -520,7 +521,7 @@ export class Omninet {
           if (localProvider) {
             return await this.executeProviderCall(localProvider.config, 'llama3', prompt, { ...options, maxTokens: 512 });
           }
-        } catch { /* local also failed */ }
+        } catch (e) { logger.warn({ err: e }, 'Omninet local fallback also failed'); }
       }
     }
 
@@ -545,13 +546,13 @@ export class Omninet {
 
     try {
       return await this.callLocalEmbedding(text);
-    } catch {
-      // fallback to API-based embedding
+    } catch (e) {
+      logger.warn({ err: e }, 'Omninet local embedding failed, trying API');
       for (const state of this.getEmbeddingProviders()) {
-        if (state.config.local) continue; // already tried local
+        if (state.config.local) continue;
         try {
           return await this.callApiEmbedding(state.config, text);
-        } catch { /* try next */ }
+        } catch (e2) { logger.warn({ err: e2 }, 'Omninet API embedding failed'); }
       }
     }
 
@@ -572,7 +573,8 @@ export class Omninet {
     try {
       const { pipeline: xfPipeline } = await import('@xenova/transformers');
       return await xfPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2') as unknown as (text: string, opts: { pooling: string; normalize: boolean }) => Promise<{ data: Float32Array }>;
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Omninet local pipeline init failed');
       return null;
     }
   }
@@ -668,7 +670,7 @@ export class Omninet {
                 const chunk = JSON.parse(trimmed.slice(6));
                 const content = chunk.choices?.[0]?.delta?.content || '';
                 if (content) yield content;
-              } catch { /* skip parse errors */ }
+              } catch (e) { logger.warn({ err: e }, 'Omninet SSE parse error'); }
             }
           }
         }
@@ -701,7 +703,7 @@ export class Omninet {
                 const chunk = JSON.parse(line.slice(6));
                 const content = chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
                 if (content) yield content;
-              } catch { /* skip */ }
+              } catch (e) { logger.warn({ err: e }, 'Omninet Gemini SSE parse error'); }
             }
           }
         }

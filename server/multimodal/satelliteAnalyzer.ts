@@ -29,8 +29,14 @@ export interface TileCache {
 export class SatelliteAnalyzer {
   private running = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private apiBase = 'https://services.sentinel-hub.com';
+  private apiBase = process.env.COPERNICUS_API_BASE_URL || 'https://sh.dataspace.copernicus.eu';
   private collection = '/ogc/wfs/45001'; // Sentinel-2 L2A
+  private get token(): string | undefined {
+    return process.env.COPERNICUS_TOKEN;
+  }
+  private get authHeaders(): Record<string, string> | undefined {
+    return this.token ? { Authorization: `Bearer ${this.token}` } : undefined;
+  }
 
   init(): void {
     this.ensureTables();
@@ -62,7 +68,10 @@ export class SatelliteAnalyzer {
 
     try {
       const url = `${this.apiBase}${this.collection}?bbox=${bbox.join(',')}&time=${this.dateDaysAgo(7)}&maxcc=30`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      const fetchOpts: RequestInit = { signal: AbortSignal.timeout(15000) };
+      const headers = this.authHeaders;
+      if (headers) fetchOpts.headers = headers;
+      const resp = await fetch(url, fetchOpts);
       if (!resp.ok) return null;
 
       const data = await resp.json() as { features?: Array<Record<string, unknown>> };

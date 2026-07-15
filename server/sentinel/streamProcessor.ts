@@ -94,7 +94,7 @@ export class StreamProcessor {
       memoryManagerV2.store('sensory', {
         type: `sentinel_${raw.source}`,
         source: raw.source,
-        data: { eventType: raw.type, lat: raw.lat, lon: raw.lon, ...raw.payload },
+        data: JSON.stringify({ eventType: raw.type, lat: raw.lat, lon: raw.lon, ...raw.payload }),
         importanceScore: this.calcImportance(enriched),
       });
     } catch { /* non-critical */ }

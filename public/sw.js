@@ -1,13 +1,38 @@
-// Earth Intelligence — PWA Service Worker
-// Cache static assets only. API responses are NEVER cached because they are
-// user-scoped (auth tokens, personal data) and must always be fresh.
+// Earth Intelligence — PWA Service Worker (Offline-First)
+// Caches static assets, API responses, and tile data for offline operation.
+// Critical for deployed/field environments with no internet connectivity.
 
-const CACHE_NAME = 'earth-intel-v2';
-const MAX_CACHE_SIZE = 50 * 1024 * 1024; // 50MB cap
+const CACHE_NAME = 'earth-intel-v3';
+const MAX_CACHE_SIZE = 200 * 1024 * 1024; // 200MB cap (increased for offline data)
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
+  '/index.html',
 ];
+
+// API endpoints to cache for offline access (public read-only data)
+const CACHEABLE_API_PATHS = [
+  '/api/earthquakes',
+  '/api/weather/open-meteo',
+  '/api/weather/alerts',
+  '/api/eonet',
+  '/api/firms',
+  '/api/lightning',
+  '/api/iss',
+  '/api/aurora',
+  '/api/vaac/',
+  '/api/gdacs/',
+  '/api/tectonic',
+  '/api/ndbc/',
+  '/api/shakemap/',
+  '/api/spc/',
+  '/api/openaq',
+  '/api/mgrs',
+];
+
+// Tile cache for offline basemaps
+const TILE_CACHE_NAME = 'earth-intel-tiles';
+const TILE_CACHE_MAX = 500 * 1024 * 1024; // 500MB for tiles
 
 // Install: cache critical assets
 self.addEventListener('install', (event) => {

@@ -196,15 +196,16 @@ export const ${spec.name[0].toLowerCase() + spec.name.slice(1)} = new ${spec.nam
   }
 
   async generateTestSuite(spec: { target: string; cases: Array<{ name: string; input: unknown; expected: unknown }> }): Promise<string> {
+    const safeTarget = spec.target.replace(/[^a-zA-Z0-9_$]/g, '_');
     const caseTests = spec.cases.map(c => `
-  it('${c.name}', () => {
-    const input = ${JSON.stringify(c.input)};
-    const expected = ${JSON.stringify(c.expected)};
-    expect(input).toEqual(expected);
+  it(${JSON.stringify(c.name)}, () => {
+    const result = ${safeTarget}(${JSON.stringify(c.input)});
+    expect(result).toEqual(${JSON.stringify(c.expected)});
   });`).join('');
     return `import { describe, it, expect } from 'vitest';
+import { ${safeTarget} } from '../${spec.target}';
 
-describe('${spec.target}', function () {${caseTests}
+describe(${JSON.stringify(spec.target)}, function () {${caseTests}
 });
 `;
   }

@@ -245,6 +245,8 @@ function createFFLayer(dim: number, hiddenDim: number): FFLayer {
 
 export class LatentTransformer {
   state: LatentTransformerState;
+  private featureDimCache: number = 0;
+  private projInCache: number[][] | null = null;
 
   constructor(cfg?: Partial<LatentTransformerConfig>) {
     const config = { ...DEFAULT_CONFIG, ...cfg };
@@ -276,7 +278,12 @@ export class LatentTransformer {
     const cfg = this.state.config;
     const featureDim = 3 + (points[0]?.context.length || 0);
 
-    const projIn = randMat(featureDim, cfg.latentDim);
+    // Cache the input projection matrix to avoid creating new random matrix every call
+    if (!this.projInCache || this.featureDimCache !== featureDim) {
+      this.projInCache = randMat(featureDim, cfg.latentDim);
+      this.featureDimCache = featureDim;
+    }
+    const projIn = this.projInCache;
     const pointTokens = points.map(p => {
       const raw = [p.point.x, p.point.y, p.point.z, ...p.context];
       return addBias(mulMatVec(raw, projIn), this.state.inputProj.b);
@@ -299,6 +306,82 @@ export class LatentTransformer {
 
     const out = addBias2D(matMul(x, this.state.outputProj.w), this.state.outputProj.b);
     return out.map(row => ({ x: row[0] || 0, y: row[1] || 0, z: row[2] || 0 }));
+  }
+
+  /** Collect all trainable weight matrices into a flat vector for gradient computation */
+  collectWeights(): number[] {
+    const weights: number[] = [];
+    for (const layer of this.state.layers) {
+      this.collectMatrix(layer.selfAttn.wQ, weights);
+      this.collectMatrix(layer.selfAttn.wK, weights);
+      this.collectMatrix(layer.selfAttn.wV, weights);
+      this.collectMatrix(layer.selfAttn.wO, weights);
+      this.collectMatrix(layer.crossAttn.wQ, weights);
+      this.collectMatrix(layer.crossAttn.wK, weights);
+      this.collectMatrix(layer.crossAttn.wV, weights);
+      this.collectMatrix(layer.crossAttn.wO, weights);
+      this.collectMatrix(layer.ff.w1, weights);
+      this.collectMatrix(layer.ff.w2, weights);
+    }
+    this.collectMatrix(this.state.outputProj.w, weights);
+    this.collectMatrix(this.state.condProj.w, weights);
+    return weights;
+  }
+
+  /** Restore weights from a flat vector */
+  restoreWeights(flat: number[]): void {
+    let idx = 0;
+    for (const layer of this.state.layers) {
+      idx = this.restoreMatrix(layer.selfAttn.wQ, flat, idx);
+      idx = this.restoreMatrix(layer.selfAttn.wK, flat, idx);
+      idx = this.restoreMatrix(layer.selfAttn.wV, flat, idx);
+      idx = this.restoreMatrix(layer.selfAttn.wO, flat, idx);
+      idx = this.restoreMatrix(layer.crossAttn.wQ, flat, idx);
+      idx = this.restoreMatrix(layer.crossAttn.wK, flat, idx);
+      idx = this.restoreMatrix(layer.crossAttn.wV, flat, idx);
+      idx = this.restoreMatrix(layer.crossAttn.wO, flat, idx);
+      idx = this.restoreMatrix(layer.ff.w1, flat, idx);
+      idx = this.restoreMatrix(layer.ff.w2, flat, idx);
+    }
+    idx = this.restoreMatrix(this.state.outputProj.w, flat, idx);
+    idx = this.restoreMatrix(this.state.condProj.w, flat, idx);
+  }
+
+  /** Generate a random perturbation direction */
+  sampleRandomDirection(size: number): number[] {
+    const dir: number[] = [];
+    for (let i = 0; i < size; i++) {
+      // Rademacher distribution: +1 or -1 with equal probability
+      dir.push(Math.random() < 0.5 ? 1 : -1);
+    }
+    return dir;
+  }
+
+  /** Apply a scaled direction to all weights: w += scale * direction */
+  applyDirection(scale: number, direction: number[]): void {
+    const weights = this.collectWeights();
+    for (let i = 0; i < weights.length; i++) {
+      weights[i] += scale * direction[i];
+    }
+    this.restoreWeights(weights);
+  }
+
+  private collectMatrix(m: number[][], out: number[]): void {
+    for (let i = 0; i < m.length; i++) {
+      for (let j = 0; j < m[i].length; j++) {
+        out.push(m[i][j]);
+      }
+    }
+  }
+
+  private restoreMatrix(m: number[][], flat: number[], startIdx: number): number {
+    let idx = startIdx;
+    for (let i = 0; i < m.length; i++) {
+      for (let j = 0; j < m[i].length; j++) {
+        m[i][j] = flat[idx++];
+      }
+    }
+    return idx;
   }
 
   getParams(): LatentTransformerState {

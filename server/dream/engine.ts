@@ -4,6 +4,7 @@ import { forkManager } from '../fork/manager';
 import { CausalKnowledgeGraph } from '../causal/kg';
 import { DiscoveryEngine } from '../causal/discoveryEngine';
 import { SyntheticScenarioGenerator } from './generator';
+import { logger } from '../observability/logger';
 import type { SyntheticScenario, DreamLog } from './types';
 
 export class DreamEngine {
@@ -24,12 +25,12 @@ export class DreamEngine {
 
   start(): void {
     this.scheduleNextDream();
-    console.log('[DREAM] Engine started — next dream at 02:00 UTC');
+    logger.info('[DREAM] Engine started — next dream at 02:00 UTC');
   }
 
   stop(): void {
     if (this.dreamInterval) clearTimeout(this.dreamInterval);
-    console.log('[DREAM] Engine stopped');
+    logger.info('[DREAM] Engine stopped');
   }
 
   private scheduleNextDream(): void {
@@ -45,7 +46,7 @@ export class DreamEngine {
       this.scheduleNextDream();
     }, msUntil);
 
-    console.log(`[DREAM] Scheduled for ${nextDream.toISOString()} (in ${(msUntil / 3600000).toFixed(1)}h)`);
+    logger.info({ nextDream: nextDream.toISOString(), hoursUntil: (msUntil / 3600000).toFixed(1) }, '[DREAM] Scheduled');
   }
 
   private async runDream(): Promise<void> {
@@ -60,19 +61,19 @@ export class DreamEngine {
       newCausalEdges: [],
     };
 
-    console.log(`[DREAM] 🌙 Night cycle beginning — ${dreamId}`);
+    logger.info({ dreamId }, '[DREAM] Night cycle beginning');
 
     for (let i = 0; i < this.SCENARIOS_PER_NIGHT; i++) {
       const scenario = this.generator.generateScenario();
       log.scenarios.push(scenario);
       this.generator.persistScenario(scenario);
-      console.log(`[DREAM] Generated scenario: ${scenario.name}`);
+      logger.info({ scenarioId: scenario.scenarioId, name: scenario.name }, '[DREAM] Generated scenario');
     }
 
     const compound = this.generator.generateCompoundScenario(['earthquake', 'port_strike', 'cyber_attack']);
     log.scenarios.push(compound);
     this.generator.persistScenario(compound);
-    console.log(`[DREAM] Generated compound scenario: ${compound.name}`);
+    logger.info({ scenarioId: compound.scenarioId, name: compound.name }, '[DREAM] Generated compound scenario');
 
     for (const scenario of log.scenarios) {
       try {
@@ -96,12 +97,12 @@ export class DreamEngine {
         }, 'dream_engine');
 
         scenario.forkId = fork.forkId;
-        console.log(`[DREAM] Spawned fork ${fork.forkId} for scenario ${scenario.scenarioId}`);
+        logger.info({ forkId: fork.forkId, scenarioId: scenario.scenarioId }, '[DREAM] Spawned fork');
 
         await this.waitForForkCompletion(fork.forkId, (this.SIMULATION_DAYS * 24 * 3600 * 1000) / this.SIMULATION_SPEED + 30000);
 
       } catch (e) {
-        console.error(`[DREAM] Failed to spawn fork for scenario ${scenario.scenarioId}:`, e);
+        logger.error({ err: e, scenarioId: scenario.scenarioId }, '[DREAM] Failed to spawn fork');
       }
     }
 
@@ -125,7 +126,7 @@ export class DreamEngine {
       timestamp: Date.now(),
     });
 
-    console.log(`[DREAM] ✅ Night cycle complete — ${log.scenariosRun} scenarios, ${log.modelUpdates.length} model updates, ${log.newCausalEdges.length} new edges`);
+    logger.info({ scenariosRun: log.scenariosRun, modelUpdates: log.modelUpdates.length, newCausalEdges: log.newCausalEdges.length }, '[DREAM] Night cycle complete');
   }
 
   private waitForForkCompletion(forkId: string, timeoutMs: number): Promise<void> {
@@ -146,7 +147,7 @@ export class DreamEngine {
     const forkState = scenario.forkId ? forkManager.getForkState(scenario.forkId) : null;
 
     if (!fork || !forkState) {
-      console.warn(`[DREAM] Fork ${scenario.forkId} not found for evaluation`);
+      logger.warn({ forkId: scenario.forkId }, '[DREAM] Fork not found for evaluation');
       return;
     }
 
@@ -234,7 +235,7 @@ export class DreamEngine {
         scenario.scenarioId
       );
     } catch (e) {
-      console.error('[DREAM] Failed to update scenario evaluation:', e);
+      logger.error({ err: e }, '[DREAM] Failed to update scenario evaluation');
     }
   }
 
@@ -254,7 +255,7 @@ export class DreamEngine {
         JSON.stringify(log.newCausalEdges)
       );
     } catch (e) {
-      console.error('[DREAM] Failed to persist dream log:', e);
+      logger.error({ err: e }, '[DREAM] Failed to persist dream log');
     }
   }
 

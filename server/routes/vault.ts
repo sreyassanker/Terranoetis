@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
+import { logger } from '../observability/logger';
 import { getDb } from '../db/index';
 import { authGuard } from '../middleware/auth';
 
@@ -175,7 +176,8 @@ function readVault(userId: string): Record<string, string> {
         : resolveEnvVar(k);
     }
     return out;
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Vault profile parse failed, falling back to env');
     const out: Record<string, string> = {};
     for (const k of VAULT_KEY_NAMES) {
       out[k] = resolveEnvVar(k);
@@ -192,7 +194,8 @@ function writeVault(userId: string, keys: Record<string, string>): void {
   let data: Record<string, unknown> = {};
   try {
     data = JSON.parse(row.json_data || '{}') as Record<string, unknown>;
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Vault JSON parse failed');
     data = {};
   }
   const existing = (data.api_vault as Record<string, string>) ?? {};

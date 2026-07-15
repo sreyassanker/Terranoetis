@@ -2,7 +2,6 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import NodeCache from 'node-cache';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -112,8 +111,13 @@ import { filterEonetPayload, readEonetCategoryFilter, type EonetPayload } from '
 import { isValidIssPosition, parseIssTle, propagateIssPosition, type IssPosition, type IssTle } from './utils/iss';
 import { parseFirmsCsv, readFirmsDayRange, type FirmsHotspot } from './utils/firms';
 import { normalizeSpaceDebrisRecords, type SpaceDebrisItem } from './utils/spaceDebris';
-import { parseTokyoVaacHtml, type TokyoVaacAdvisory } from './utils/vaac';
-import { distanceKm } from './utils/geo';
+import { parseTokyoVaacHtml, parseNoaaVaacHtml, type VaacAdvisory } from './utils/vaac';
+import { haversineDistance } from './utils/geo';
+import { latLonToMgrs, mgrsToLatLon, getPrecisionLevels } from './utils/mgrs';
+import { getAirQualityNearby, parseForSentinel, findLocationsNearby } from './utils/openaq';
+import { fetchStationData, findNearestStation, getConditionsNearby, getStations } from './utils/ndbc';
+import { fetchRecentShakeMaps, fetchShakeMapDetail, getMmiDescription, getMmiColor, getPagerDescription, formatForSentinel as shakeMapFormatForSentinel } from './utils/shakeMap';
+import { fetchDayOutlook, getRiskForLocation } from './utils/spc';
 import http from 'http';
 import { SimpleQueue } from './queue/simple-queue';
 import { pubsub } from './pubsub';
@@ -122,10 +126,25 @@ import { ReflexEngine } from './reflex/engine';
 import { ReflexActionHandler } from './reflex/actionHandlers';
 import { forkManager } from './fork/manager';
 (global as any).__forkManager = forkManager;
+import { foundationModelsRouter } from './routes/foundationModels';
 import { forkRouter } from './fork/routes';
 import { vaultRouter } from './routes/vault';
 import { createSelfEvolutionRouter } from './routes/selfEvolution';
 import { pulseRouter } from './routes/pulse';
+import { startSentinelEngine, stopSentinelEngine } from './sentinel/engine';
+import { CorrelationEngine } from './sentinel/correlationEngine';
+import { ForcePostureEngine } from './sentinel/forcePosture';
+import { startOsintBridge, stopOsintBridge } from './military/osintBridge';
+import { prithviV2Engine } from './foundation-models/prithvi-v2';
+import { roadTrafficDetector } from './sentinel/roadTrafficDetector';
+import { spacexEngine } from './foundation-models/spacexApi';
+import { clayEngine } from './foundation-models/clayModel';
+import { bayFireDetector } from './foundation-models/bayFireDetector';
+import { unetSegmenter } from './foundation-models/unetSegmenter';
+import { weatherForecaster } from './foundation-models/weatherForecaster';
+import { agricultureMonitor } from './foundation-models/agricultureMonitor';
+import { samGeoSegmenter } from './foundation-models/samgeoSegmenter';
+import { alphaEarthLookup } from './foundation-models/alphaEarthLookup';
 dotenv.config({ path: 'server/.env' });
 
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -149,7 +168,39 @@ for (const k of OPTIONAL_ENV_VARS) {
   }
 }
 
-const cache = new NodeCache({ stdTTL: 60, checkperiod: 120, maxKeys: 100 });
+// ── .env template validation — warn about missing important API keys ──
+function validateEnvTemplate(): void {
+  try {
+    const templatePath = path.resolve('server/.env.example');
+    if (!fs.existsSync(templatePath)) return;
+    const template = fs.readFileSync(templatePath, 'utf-8');
+    // Parse KEY= lines from the template (skip comments and empty lines)
+    const templateKeys = new Set<string>();
+    for (const line of template.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const match = trimmed.match(/^([A-Z_][A-Z0-9_]*)\s*=/);
+      if (match) templateKeys.add(match[1]);
+    }
+    // Check which template keys are missing from the actual env
+    const missing: string[] = [];
+    for (const key of templateKeys) {
+      if (!process.env[key] && !OPTIONAL_ENV_VARS.includes(key)) {
+        missing.push(key);
+      }
+    }
+    if (missing.length > 0) {
+      logger.warn({ count: missing.length, sample: missing.slice(0, 5) },
+        `${missing.length} env var(s) from .env.example not set in .env — features may be unavailable. ` +
+        `Run 'cp server/.env.example server/.env' and fill in your API keys.`);
+    }
+  } catch (e) {
+    logger.debug({ err: (e as Error).message }, 'Env template validation skipped');
+  }
+}
+validateEnvTemplate();
+
+import { cache } from './routes/routeHelpers';
 const app = express();
 app.set('trust proxy', 1);
 const PORT = Number(process.env.PROXY_PORT ?? 3001);
@@ -253,7 +304,7 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/weather/ibtracs' || req.path === '/weather/drought' ||
     req.path === '/weather/climate-indices' ||
     req.path === '/gdacs/alerts' || req.path === '/tectonic' ||
-    req.path === '/vaac/tokyo' || req.path === '/firms' || req.path === '/lightning' ||
+    req.path === '/vaac/tokyo' || req.path === '/vaac/anchorage' || req.path === '/vaac/washington' || req.path === '/firms' || req.path === '/lightning' ||
     req.path === '/openflights' || req.path === '/submarine-cables' || req.path === '/electricity-grid' ||
     req.path === '/space-debris' || req.path === '/space-weather/kp' || req.path === '/space-weather/donki' ||
     req.path === '/nasa-dsn' || req.path === '/aurora' || req.path === '/iss' ||
@@ -264,13 +315,28 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/ml/predict' || req.path === '/ml/predict/report' ||
     req.path === '/climate/power' || req.path === '/climate/anomalies' || req.path === '/climate/co2' || req.path === '/climate/sea-ice' ||
     req.path === '/gdelt' || req.path === '/fema' || req.path === '/geospatial/overpass' || req.path === '/population/worldpop' || req.path === '/usgs/water' ||
-    req.path === '/flights/military' || req.path === '/military-bases' || req.path === '/ucdp'
+    req.path === '/flights/military' || req.path === '/military-bases' || req.path === '/ucdp' ||
+    req.path === '/mgrs' || req.path === '/openaq' || req.path.startsWith('/openaq/') ||
+    req.path.startsWith('/ndbc/') || req.path === '/ndbc/stations' ||
+    req.path === '/shakemap/recent' || req.path.startsWith('/shakemap/') ||
+    req.path === '/spc/outlook' || req.path.startsWith('/spc/')
   ) {
     return next();
   }
-  // Prithvi EO foundation model endpoints
-  if (req.path.startsWith('/fm/prithvi/')) {
-    console.log('[AUTH] Prithvi path whitelisted:', req.path);
+  // Prithvi EO foundation model endpoints (v1 + v2 + all new FM systems)
+  if (
+    req.path.startsWith('/fm/prithvi/') ||
+    req.path.startsWith('/fm/prithvi-v2/') ||
+    req.path.startsWith('/fm/clay/') ||
+    req.path.startsWith('/fm/unet/') ||
+    req.path.startsWith('/fm/weather/') ||
+    req.path.startsWith('/fm/agri/') ||
+    req.path.startsWith('/fm/samgeo/') ||
+    req.path.startsWith('/fm/alpha/') ||
+    req.path.startsWith('/road-traffic/') ||
+    req.path.startsWith('/spacex/') ||
+    req.path.startsWith('/bayfire/')
+  ) {
     return next();
   }
   // Satellite image search endpoints
@@ -292,179 +358,7 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
   authGuard(req, res, next);
 });
 
-// Prithvi EO foundation model routes (registered early for proper middleware ordering)
-app.get('/api/fm/prithvi/status', async (_req: express.Request, res: express.Response) => {
-  if (!prithviEngine.isReady()) {
-    res.status(503).json({ error: 'Prithvi engine not initialized yet' });
-    return;
-  }
-  try {
-    const status = prithviEngine.getStatus();
-    res.json({ status, message: status.ready ? 'Prithvi engine ready' : 'Prithvi engine not initialized' });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.post('/api/fm/prithvi/analyze', async (req: express.Request, res: express.Response) => {
-  try {
-    const { lat, lon, radiusKm } = req.body;
-    if (lat == null || lon == null) {
-      res.status(400).json({ error: 'lat and lon required' });
-      return;
-    }
-    const result = await prithviEngine.analyze({ lat, lon, radiusKm: radiusKm || 10 });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.post('/api/fm/prithvi/similar', async (req: express.Request, res: express.Response) => {
-  try {
-    const { lat, lon, topK } = req.body;
-    if (lat == null || lon == null) {
-      res.status(400).json({ error: 'lat and lon required' });
-      return;
-    }
-    const similar = await prithviEngine.getSimilar(lat, lon, topK || 5);
-    res.json({ similar });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.post('/api/fm/prithvi/change', async (req: express.Request, res: express.Response) => {
-  try {
-    const { lat, lon } = req.body;
-    if (lat == null || lon == null) {
-      res.status(400).json({ error: 'lat and lon required' });
-      return;
-    }
-    const result = await prithviEngine.detectChange(lat, lon);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// ── Satellite Image Search ────────────────────────────────────────
-app.get('/api/fm/search', async (req: express.Request, res: express.Response) => {
-  try {
-    const { text, lat, lon, radiusKm, classLabel, limit, offset, since, until } = req.query;
-    const results = await satelliteSearcher.search({
-      text: text as string | undefined,
-      lat: lat ? parseFloat(lat as string) : undefined,
-      lon: lon ? parseFloat(lon as string) : undefined,
-      radiusKm: radiusKm ? parseFloat(radiusKm as string) : undefined,
-      classLabel: classLabel as string | undefined,
-      limit: limit ? parseInt(limit as string, 10) : undefined,
-      offset: offset ? parseInt(offset as string, 10) : undefined,
-      since: since as string | undefined,
-      until: until as string | undefined,
-    });
-    res.json(results);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.get('/api/fm/search/classes', (_req: express.Request, res: express.Response) => {
-  res.json({
-    classes: Object.keys(LAND_COVER_KEYWORDS),
-    keywords: LAND_COVER_KEYWORDS,
-  });
-});
-
-// ── Satellite Seeder — background population of embeddings DB ──
-app.get('/api/fm/seeder/status', (_req: express.Request, res: express.Response) => {
-  res.json(satelliteSeeder.getStatus());
-});
-
-app.post('/api/fm/seeder/start', async (req: express.Request, res: express.Response) => {
-  try {
-    const { spacingDeg, latMin, latMax, lonMin, lonMax, resume } = req.body || {};
-    satelliteSeeder.start({ spacingDeg, latMin, latMax, lonMin, lonMax, resume }).catch(err => {
-      logger.error({ err }, 'Satellite seeder failed');
-    });
-    res.json({ message: 'Seeder started', status: satelliteSeeder.getStatus() });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.post('/api/fm/seeder/stop', (_req: express.Request, res: express.Response) => {
-  satelliteSeeder.stop();
-  res.json({ message: 'Seeder stopped', status: satelliteSeeder.getStatus() });
-});
-
-app.post('/api/fm/seeder/reset', (_req: express.Request, res: express.Response) => {
-  satelliteSeeder.resetProgress();
-  res.json({ message: 'Seeder progress reset', status: satelliteSeeder.getStatus() });
-});
-
-app.post('/api/fm/seeder/seed-location', async (req: express.Request, res: express.Response) => {
-  try {
-    const { lat, lon } = req.body;
-    if (lat == null || lon == null) {
-      res.status(400).json({ error: 'lat and lon required' });
-      return;
-    }
-    await satelliteSeeder.seedLocation(lat, lon);
-    res.json({ message: 'Location seeded', lat, lon });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// ── MVT Vector Tile Server ──────────────────────────────────────
-app.get('/api/tilejson', (_req: express.Request, res: express.Response) => {
-  res.json(getTileJson(''));
-});
-
-app.get('/api/tile-sources', (_req: express.Request, res: express.Response) => {
-  res.json({ layers: getLayerSources() });
-});
-
-app.get('/api/tiles/:z/:x/:y.mvt', async (req: express.Request, res: express.Response) => {
-  try {
-    const z = parseInt(req.params.z, 10);
-    const x = parseInt(req.params.x, 10);
-    const y = parseInt(req.params.y, 10);
-    const result = await handleTileRequest(z, x, y);
-    if (!result) {
-      res.status(204).end();
-      return;
-    }
-    for (const [key, value] of Object.entries(result.headers)) {
-      res.setHeader(key, value);
-    }
-    res.send(result.buffer);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.get('/api/tiles/:z/:x/:y/:layer.mvt', async (req: express.Request, res: express.Response) => {
-  try {
-    const z = parseInt(req.params.z, 10);
-    const x = parseInt(req.params.x, 10);
-    const y = parseInt(req.params.y, 10);
-    const layer = req.params.layer;
-    const result = await handleTileRequest(z, x, y, layer);
-    if (!result) {
-      res.status(204).end();
-      return;
-    }
-    for (const [key, value] of Object.entries(result.headers)) {
-      res.setHeader(key, value);
-    }
-    res.send(result.buffer);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
+app.use('/api', foundationModelsRouter);
 app.use('/api/fork', forkRouter);
 app.use('/api/vault', vaultRouter);
 app.use('/api/pulse', pulseRouter);
@@ -575,9 +469,90 @@ selfImproverV2.start();
 const cognitiveAgent = new CognitiveAgent();
 cognitiveAgent.init().catch(e => logger.error({ err: e }, 'CognitiveAgent init error'));
 
+// Module-level engine declarations (for gracefulShutdown access)
+let correlationEngine: CorrelationEngine | null = null;
+let forcePosture: ForcePostureEngine | null = null;
+
 // Sentinel: proactive continuous monitoring system
 sentinel.init().then(() => {
   sentinel.start();
+  const db = getDb();
+
+  // Start Anomaly Correlation Engine
+  correlationEngine = null;
+  forcePosture = null;
+  try {
+    correlationEngine = new CorrelationEngine(db);
+    correlationEngine.start();
+    // Fetch external data sources immediately
+    correlationEngine.ingestFromExternalSources().catch(() => {});
+    logger.info('[Correlation] Engine started — cross-correlating real data streams');
+
+    // Start Force Posture Intelligence
+    forcePosture = new ForcePostureEngine(db);
+    forcePosture.start();
+    logger.info('[ForcePosture] Engine started — monitoring 12 installations');
+  } catch (err) {
+    logger.error({ err: String(err) }, '[Correlation] Engine failed to start');
+  }
+
+  // ── Correlation Engine API ──
+  app.get('/api/correlation/anomalies', (req: express.Request, res: express.Response) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 100;
+      const anomalies = correlationEngine?.getAllAnomalies(limit) || [];
+      res.json({ anomalies, count: anomalies.length });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.post('/api/correlation/anomalies/:id/acknowledge', (req: express.Request, res: express.Response) => {
+    try {
+      correlationEngine?.acknowledgeAnomaly(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.get('/api/correlation/status', (_req: express.Request, res: express.Response) => {
+    res.json(correlationEngine?.getStatus() || { running: false, windowEvents: 0, anomalyCount: 0, ruleCount: 0 });
+  });
+
+
+
+
+
+  // ── Force Posture API ──
+  app.get('/api/force-posture/installations', (_req: express.Request, res: express.Response) => {
+    try { res.json({ installations: forcePosture?.getInstallations() || [] }); } catch (err) { res.status(500).json({ error: String(err) }); }
+  });
+  app.get('/api/force-posture/alerts', (req: express.Request, res: express.Response) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+      res.json({ alerts: forcePosture?.getAlerts(limit) || [] });
+    } catch (err) { res.status(500).json({ error: String(err) }); }
+  });
+  app.post('/api/force-posture/alerts/:id/acknowledge', (req: express.Request, res: express.Response) => {
+    try { forcePosture?.acknowledgeAlert(req.params.id); res.json({ ok: true }); } catch (err) { res.status(500).json({ error: String(err) }); }
+  });
+  app.get('/api/force-posture/status', (_req: express.Request, res: express.Response) => {
+    res.json(forcePosture?.getStatus() || { running: false, installationCount: 0, alertCount: 0 });
+  });
+
+  // ── Start Priority 1-10 upgraded engines ──
+  try {
+    roadTrafficDetector.start();
+    spacexEngine.start();
+    bayFireDetector.start();
+    weatherForecaster.start();
+    agricultureMonitor.start();
+    logger.info('[Priority1-10] All upgraded engines started');
+  } catch (err) {
+    logger.error({ err: String(err) }, '[Priority1-10] Engine startup failed');
+  }
+
   logger.info('Sentient ambient intelligence activated');
 }).catch(e => logger.error({ err: e }, 'Sentinel init error'));
 
@@ -806,8 +781,8 @@ function extractIndiaCctvCameras(html: string): IndiaCctvCamera[] {
     if (!raw) continue;
     try {
       collectJsonLdNodes(JSON.parse(raw), jsonLdNodes);
-    } catch {
-      // Ignore malformed JSON-LD blocks and continue scanning the page.
+    } catch (e) {
+      logger.warn({ err: e }, 'Malformed JSON-LD block in CCTV page');
     }
   }
 
@@ -873,7 +848,8 @@ app.get('/api/ready', (req: express.Request, res: express.Response) => {
     const db = getDb();
     db.prepare('SELECT 1').get();
     checks.db = 'ok';
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Health check: DB unavailable');
     checks.db = 'fail';
     allCritical = false;
   }
@@ -912,7 +888,8 @@ app.get('/api/health', async (_req: express.Request, res: express.Response) => {
     const tmpPath = process.env.TMPDIR || '/tmp';
     const usage = process.memoryUsage();
     checks.memory = { status: usage.heapUsed > 500 * 1024 * 1024 ? 'degraded' : 'ok', detail: `${Math.round(usage.heapUsed / 1024 / 1024)}MB` };
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Health check: memory check failed');
     checks.memory = { status: 'unknown' };
   }
 
@@ -938,7 +915,8 @@ app.get('/api/health', async (_req: express.Request, res: express.Response) => {
     pubsub.publish('health:check', { t: Date.now() });
     unsub();
     checks.pubsub = { status: pubsubOk ? 'ok' : 'fail' };
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Health check: pubsub unavailable');
     checks.pubsub = { status: 'fail' };
   }
 
@@ -1146,7 +1124,7 @@ async function fetchSkylineWebcams(): Promise<WorldwideCctvCamera[]> {
               if (el?.url) items.push(el.url);
             }
           }
-        } catch {/* skip */}
+        } catch (e) { logger.warn({ err: e }, 'Skipping item list entry'); }
       }
     }
     // Fallback: extract camera links from HTML
@@ -1196,7 +1174,7 @@ async function fetchSkylineWebcams(): Promise<WorldwideCctvCamera[]> {
         }
       }
     }
-  } catch {/* skip */}
+  } catch (e) { logger.warn({ err: e }, 'Skyline webcam scrape failed'); }
   return cams;
 }
 
@@ -1237,7 +1215,7 @@ async function fetchLiveEnvStreams(): Promise<WorldwideCctvCamera[]> {
         feedType: isHls ? 'm3u8' : (p.url_type === 'http_image' ? 'image' : undefined),
       });
     }
-  } catch {/* skip */}
+  } catch (e) { logger.warn({ err: e }, 'LiveEnv stream scrape failed'); }
   return cams;
 }
 
@@ -1262,8 +1240,8 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
       const html = await resp.text();
       indiaCams = extractIndiaCctvCameras(html);
     }
-  } catch {
-    // opencctv.org is frequently unreachable — fail silently
+  } catch (e) {
+    logger.warn({ err: e }, 'opencctv.org India feed unavailable');
   }
 
   const fetchBox = async (box: typeof BOUNDS[0]) => {
@@ -1276,7 +1254,8 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
       if (!resp.ok) return [];
       const data = await resp.json();
       return Array.isArray(data) ? data : [];
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'OpenCCTV box fetch failed');
       return [];
     }
   };
@@ -1458,7 +1437,7 @@ app.get(['/api/cameras', '/api/cameras/:lat/:lon/:radius'], async (req: express.
 
     res.json({
       ...payload,
-      cameras: payload.cameras.filter((camera) => distanceKm(lat, lon, camera.lat, camera.lon) <= radius),
+      cameras: payload.cameras.filter((camera) => haversineDistance(lat, lon, camera.lat, camera.lon) <= radius),
       query: { lat, lon, radiusKm: radius },
     });
   } catch (e) {
@@ -1474,7 +1453,7 @@ app.get('/api/vaac/tokyo', async (req: express.Request, res: express.Response) =
 
   try {
     const cacheKey = 'vaac_tokyo';
-    let advisories = cache.get<TokyoVaacAdvisory[]>(cacheKey);
+    let advisories = cache.get<VaacAdvisory[]>(cacheKey);
     if (!advisories) {
       const response = await fetch('https://ds.data.jma.go.jp/svd/vaac/data/vaac_list.html', {
         headers: { 'User-Agent': 'LiveGlobe/1.0 (volcanic ash advisories)' },
@@ -1497,6 +1476,78 @@ app.get('/api/vaac/tokyo', async (req: express.Request, res: express.Response) =
       source: 'Tokyo VAAC (Japan Meteorological Agency)',
       available: false,
       message: 'Tokyo VAAC advisories are temporarily unavailable.',
+    });
+  }
+});
+
+// ── Anchorage VAAC ──
+app.get('/api/vaac/anchorage', async (req: express.Request, res: express.Response) => {
+  const requestedLimit = Number(req.query.limit ?? 50);
+  if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 200) {
+    return res.status(400).json({ error: 'limit must be an integer from 1 to 200' });
+  }
+  try {
+    const cacheKey = 'vaac_anchorage';
+    let advisories = cache.get<VaacAdvisory[]>(cacheKey);
+    if (!advisories) {
+      const url = 'https://vaac.arh.noaa.gov/list.php';
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'LiveGlobe/1.0 (volcanic ash advisories)' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new Error(`Anchorage VAAC ${response.status}`);
+      advisories = parseNoaaVaacHtml(await response.text(), 'Anchorage VAAC (NOAA)', url);
+      if (advisories.length === 0) throw new Error('Anchorage VAAC returned no parseable advisories');
+      cache.set(cacheKey, advisories, 300);
+    }
+    res.json({
+      advisories: advisories.slice(0, requestedLimit),
+      source: 'Anchorage VAAC (NOAA)',
+      updatedAt: Date.now(),
+    });
+  } catch (e) {
+    logger.warn({ err: e }, 'Anchorage VAAC feed unavailable');
+    res.json({
+      advisories: [],
+      source: 'Anchorage VAAC (NOAA)',
+      available: false,
+      message: 'Anchorage VAAC advisories are temporarily unavailable.',
+    });
+  }
+});
+
+// ── Washington VAAC ──
+app.get('/api/vaac/washington', async (req: express.Request, res: express.Response) => {
+  const requestedLimit = Number(req.query.limit ?? 50);
+  if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 200) {
+    return res.status(400).json({ error: 'limit must be an integer from 1 to 200' });
+  }
+  try {
+    const cacheKey = 'vaac_washington';
+    let advisories = cache.get<VaacAdvisory[]>(cacheKey);
+    if (!advisories) {
+      const url = 'https://vaac.washington.noaa.gov/list.php';
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'LiveGlobe/1.0 (volcanic ash advisories)' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new Error(`Washington VAAC ${response.status}`);
+      advisories = parseNoaaVaacHtml(await response.text(), 'Washington VAAC (NOAA)', url);
+      if (advisories.length === 0) throw new Error('Washington VAAC returned no parseable advisories');
+      cache.set(cacheKey, advisories, 300);
+    }
+    res.json({
+      advisories: advisories.slice(0, requestedLimit),
+      source: 'Washington VAAC (NOAA)',
+      updatedAt: Date.now(),
+    });
+  } catch (e) {
+    logger.warn({ err: e }, 'Washington VAAC feed unavailable');
+    res.json({
+      advisories: [],
+      source: 'Washington VAAC (NOAA)',
+      available: false,
+      message: 'Washington VAAC advisories are temporarily unavailable.',
     });
   }
 });
@@ -1689,8 +1740,9 @@ app.get('/api/flights/all', async (req: express.Request, res: express.Response) 
       const r = await fetch(url, { signal: controller.signal });
       clearTimeout(id);
       return r.ok ? (await r.json() as { states?: unknown[][] }) : { states: [] };
-    } catch {
+    } catch (e) {
       clearTimeout(id);
+      logger.warn({ err: e }, 'ADSB source fetch failed');
       return { states: [] };
     }
   }
@@ -2077,7 +2129,8 @@ async function fetchUsgsElevatedVolcanoes(): Promise<any[]> {
     const data = Array.isArray(json) ? json : [];
     volcanoCache = { data, ts: Date.now() };
     return data;
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'USGS volcano fetch failed');
     return [];
   }
 }
@@ -2298,6 +2351,538 @@ app.get('/api/weather/gfs', async (req: express.Request, res: express.Response) 
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// TIER 1 QUICK WINS: New Data Source Endpoints
+// ═══════════════════════════════════════════════════════════════════
+
+// ── 1. MGRS Coordinate Conversion ───────────────────────────────
+app.get('/api/mgrs', (req: express.Request, res: express.Response) => {
+  try {
+    const { lat, lon, mgrs: mgrsStr, precision } = req.query;
+    if (lat && lon) {
+      const latNum = parseFloat(lat as string);
+      const lonNum = parseFloat(lon as string);
+      const prec = parseInt(precision as string) || 5;
+      const result = latLonToMgrs(latNum, lonNum, prec);
+      if (!result) return res.status(400).json({ error: 'Invalid lat/lon coordinates' });
+      return res.json(result);
+    }
+    if (mgrsStr) {
+      const result = mgrsToLatLon(mgrsStr as string);
+      if (!result) return res.status(400).json({ error: 'Invalid MGRS string' });
+      return res.json(result);
+    }
+    return res.json({ precisionLevels: getPrecisionLevels(), usage: 'Provide lat+lon to convert to MGRS, or mgrs to convert to lat/lon' });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// ── 2. OpenAQ Global Air Quality ─────────────────────────────────
+app.get('/api/openaq', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(req.query.lat as string);
+    const lon = parseFloat(req.query.lon as string);
+    const radius = parseInt(req.query.radius as string) || 25000;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: 'lat and lon required' });
+    const cacheKey = `openaq_${lat.toFixed(2)}_${lon.toFixed(2)}_${radius}`;
+    const hit = cache.get(cacheKey);
+    if (hit) return res.json(hit);
+    const results = await getAirQualityNearby(lat, lon, radius);
+    const summary = parseForSentinel(results);
+    const payload = { source: 'OpenAQ', location: { lat, lon }, radiusMeters: radius, results, summary, updatedAt: Date.now() };
+    cache.set(cacheKey, payload, 1800);
+    res.json(payload);
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+// ── 3. NDBC Ocean Buoys ──────────────────────────────────────────
+app.get('/api/ndbc/stations', (_req: express.Request, res: express.Response) => {
+  try { res.json({ stations: getStations(), count: getStations().length, source: 'NOAA NDBC' }); }
+  catch (e) { res.status(500).json({ error: String(e) }); }
+});
+app.get('/api/ndbc/nearby', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(req.query.lat as string);
+    const lon = parseFloat(req.query.lon as string);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: 'lat and lon required' });
+    const result = await getConditionsNearby(lat, lon);
+    res.json({ ...result, source: 'NOAA NDBC' });
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+app.get('/api/ndbc/:stationId', async (req: express.Request, res: express.Response) => {
+  try {
+    const stationId = req.params.stationId;
+    const dataType = (req.query.type as string) || 'stdmet';
+    const cacheKey = `ndbc_${stationId}_${dataType}`;
+    const hit = cache.get(cacheKey);
+    if (hit) return res.json(hit);
+    const readings = await fetchStationData(stationId, dataType);
+    const payload = { stationId, readings, count: readings.length, source: 'NOAA NDBC', updatedAt: Date.now() };
+    cache.set(cacheKey, payload, 300);
+    res.json(payload);
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+// ── 4. USGS ShakeMap ─────────────────────────────────────────────
+app.get('/api/shakemap/recent', async (req: express.Request, res: express.Response) => {
+  try {
+    const minMag = parseFloat(req.query.minMag as string) || 4.5;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const cacheKey = `shakemap_recent_${minMag}_${limit}`;
+    const hit = cache.get(cacheKey);
+    if (hit) return res.json(hit);
+    const events = await fetchRecentShakeMaps(minMag, limit);
+    const summary = shakeMapFormatForSentinel(events);
+    const payload = { events, summary, count: events.length, source: 'USGS ShakeMap', updatedAt: Date.now() };
+    cache.set(cacheKey, payload, 300);
+    res.json(payload);
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+app.get('/api/shakemap/:eventId', async (req: express.Request, res: express.Response) => {
+  try {
+    const { event, stations } = await fetchShakeMapDetail(req.params.eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    res.json({ event, stations, mmiDescription: event.mmi ? getMmiDescription(event.mmi) : undefined, mmiColor: event.mmi ? getMmiColor(event.mmi) : undefined, pagerDescription: getPagerDescription(event.alert), source: 'USGS ShakeMap' });
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+// ── 5. NOAA SPC Convective Outlooks ──────────────────────────────
+app.get('/api/spc/outlook', async (req: express.Request, res: express.Response) => {
+  try {
+    const day = parseInt(req.query.day as string) || 1;
+    const cacheKey = `spc_outlook_day${day}`;
+    const hit = cache.get(cacheKey);
+    if (hit) return res.json(hit);
+    const outlook = await fetchDayOutlook(day);
+    const payload = { day, outlook, source: 'NOAA Storm Prediction Center', updatedAt: Date.now() };
+    cache.set(cacheKey, payload, 600);
+    res.json(payload);
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+app.get('/api/spc/risk', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(req.query.lat as string);
+    const lon = parseFloat(req.query.lon as string);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: 'lat and lon required' });
+    const risk = await getRiskForLocation(lat, lon);
+    res.json({ lat, lon, risk, source: 'NOAA Storm Prediction Center' });
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// NEW TIER 1 & 2 API ROUTES
+// ═══════════════════════════════════════════════════════════════════
+
+import { getRecentGlobalEvents, getEventsNearLocation, getCountryEvents, summarizeEvents, detectEscalation } from './utils/acled';
+import { searchStacItems, listStacCollections } from './foundation-models/stacSearch';
+import { geojsonToCsv, geojsonToStreamingJson, estimateParquetSize, getGeoParquetMetadata } from './utils/geoParquet';
+import { latLonToMgrs, mgrsToLatLon, parseMgrs } from '../src/lib/mgrs';
+import { detectIonosphericAnomalies, getIonosphericConditions } from './utils/guardian';
+import { getOceanConditions } from './utils/cmems';
+import { getWaveForecast, getWaveWarnings, getSeaState } from './utils/wavewatch';
+
+// ── ACLED Conflict Events ──
+app.get('/api/acled/recent', async (req: express.Request, res: express.Response) => {
+  try {
+    const days = parseInt(String(req.query.days || '7'), 10);
+    const events = await getRecentGlobalEvents(Math.min(days, 30));
+    res.json({ events, count: events.length, source: 'ACLED' });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+app.get('/api/acled/nearby', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const radius = parseFloat(String(req.query.radius || '250'));
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const events = await getEventsNearLocation(lat, lon, radius);
+    const summary = summarizeEvents(events);
+    res.json({ events, summary, source: 'ACLED' });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+app.get('/api/acled/country/:country', async (req: express.Request, res: express.Response) => {
+  try {
+    const { country } = req.params;
+    const start = String(req.query.start || '');
+    const end = String(req.query.end || '');
+    const events = await getCountryEvents(country, start || undefined, end || undefined);
+    const summary = summarizeEvents(events);
+    const escalations = detectEscalation(events);
+    res.json({ events, summary, escalations, source: 'ACLED' });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+// ── NASA CMR STAC Search ──
+app.get('/api/stac/search', async (req: express.Request, res: express.Response) => {
+  try {
+    const query = String(req.query.q || req.query.query || '');
+    const collections = req.query.collections ? String(req.query.collections).split(',') : undefined;
+    const bbox = req.query.bbox ? String(req.query.bbox).split(',').map(Number) : undefined;
+    const limit = parseInt(String(req.query.limit || '20'), 10);
+    const result = await searchStacItems({ query, collections, bbox, limit: Math.min(limit, 100) });
+    res.json(result);
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+app.get('/api/stac/collections', async (_req: express.Request, res: express.Response) => {
+  try {
+    const collections = await listStacCollections(50);
+    res.json({ collections, count: collections.length });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+// ── GeoParquet Conversion ──
+app.post('/api/geoParquet/convert', async (req: express.Request, res: express.Response) => {
+  try {
+    const { geojson, format } = req.body;
+    if (!geojson?.features) return res.status(400).json({ error: 'GeoJSON FeatureCollection required' });
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv');
+      res.send(geojsonToCsv(geojson));
+    } else {
+      res.json(geojsonToStreamingJson(geojson));
+    }
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+app.post('/api/geoParquet/estimate', async (req: express.Request, res: express.Response) => {
+  try {
+    const { geojson } = req.body;
+    if (!geojson?.features) return res.status(400).json({ error: 'GeoJSON FeatureCollection required' });
+    const estimate = estimateParquetSize(geojson);
+    const metadata = getGeoParquetMetadata(geojson);
+    res.json({ estimate, metadata });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+// ── GUARDIAN Ionospheric Monitoring ──
+app.get('/api/guardian/anomalies', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat || '0'));
+    const lon = parseFloat(String(req.query.lon || '0'));
+    const radius = parseFloat(String(req.query.radius || '500'));
+    const anomalies = await detectIonosphericAnomalies(lat, lon, radius);
+    res.json({ anomalies, count: anomalies.length, source: 'GUARDIAN' });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+app.get('/api/guardian/conditions', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat || '0'));
+    const lon = parseFloat(String(req.query.lon || '0'));
+    const conditions = await getIonosphericConditions(lat, lon);
+    res.json(conditions);
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+// ── CMEMS Ocean Conditions ──
+app.get('/api/cmems/ocean', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const conditions = await getOceanConditions(lat, lon);
+    res.json(conditions);
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+// ── WAVEWATCH III Wave Forecasts ──
+app.get('/api/wavewatch/forecast', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const hours = parseInt(String(req.query.hours || '24'), 10);
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const forecasts = await getWaveForecast(lat, lon, Math.min(hours, 180));
+    res.json({ forecasts, source: 'WAVEWATCH III' });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+app.get('/api/wavewatch/warnings', async (_req: express.Request, res: express.Response) => {
+  try {
+    const warnings = await getWaveWarnings();
+    res.json({ warnings, count: warnings.length });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+import { getFloodConditions, getFloodAlerts, estimateInundation } from './utils/floodInundation';
+
+// ── USGS Flood Inundation ──
+app.get('/api/flood/conditions', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const radius = parseInt(String(req.query.radius || '50'), 10);
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const gauges = await getFloodConditions(lat, lon, radius);
+    const inundations = gauges.filter((g) => g.status !== 'normal').map(estimateInundation);
+    res.json({ gauges, inundations, source: 'USGS Water Services' });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+app.get('/api/flood/alerts', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const alerts = await getFloodAlerts(lat, lon);
+    res.json({ alerts, count: alerts.length, source: 'NWS Alerts API' });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+import { getHistoricalDaily, calculateClimateStats, detectExtremes } from './utils/era5';
+import { getCoralReefStatus, getActiveBleachingAlerts, getSstData } from './utils/coralReefWatch';
+import { initObservability, traceAsync, recordMetric, incrementCounter, getRecentTraces, getMetricsSummary } from './observability/openTelemetry';
+
+// ── ERA5 Climate Reanalysis ──
+app.get('/api/era5/historical', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const start = String(req.query.start || '');
+    const end = String(req.query.end || '');
+    if (!isFinite(lat) || !isFinite(lon) || !start || !end) return res.status(400).json({ error: 'lat, lon, start, end required' });
+    const data = await getHistoricalDaily(lat, lon, start, end);
+    const stats = calculateClimateStats(data, `${start} to ${end}`);
+    const extremes = detectExtremes(data);
+    res.json({ data, stats, extremes, source: 'ERA5 via Open-Meteo' });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+// ── NOAA Coral Reef Watch ──
+app.get('/api/crw/status', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const status = await getCoralReefStatus(lat, lon);
+    res.json({ status, source: 'NOAA Coral Reef Watch' });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+app.get('/api/crw/alerts', async (_req: express.Request, res: express.Response) => {
+  try {
+    const alerts = await getActiveBleachingAlerts();
+    res.json({ alerts, count: alerts.length, source: 'NOAA Coral Reef Watch' });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+app.get('/api/crw/sst', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const days = parseInt(String(req.query.days || '30'), 10);
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const sst = await getSstData(lat, lon, Math.min(days, 365));
+    res.json({ sst, count: sst.length, source: 'NOAA CRW / Open-Meteo' });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+// ── OpenTelemetry Observability ──
+app.get('/api/observability/traces', (_req: express.Request, res: express.Response) => {
+  try {
+    const traces = getRecentTraces(50);
+    res.json({ traces, count: traces.length });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get('/api/observability/metrics', (_req: express.Request, res: express.Response) => {
+  try {
+    const summary = getMetricsSummary();
+    res.json(summary);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+import { getSatclipEmbedding, findSimilarLocations, getLocationContext } from './utils/satclip';
+import { assembleContext, spatialQuery, addEntity, addRelation } from './utils/geoGraphRAG';
+import { streamFeatures, streamWithBbox } from './utils/flatGeobuf';
+import { getWaterTimeSeries, getFloodWatch } from './utils/operaSurfaceWater';
+import { searchHlsScenes, getTimeSeries } from './utils/landsatSentinelHls';
+import { validateSidc, buildSidc, parseSidc, COMMON_SYMBOLS } from '../src/rendering/militarySymbologyStandard';
+
+// ── SatCLIP Location Embeddings ──
+app.get('/api/satclip/embedding', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const embedding = await getSatclipEmbedding(lat, lon);
+    res.json({ embedding, source: 'satclip' });
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+app.get('/api/satclip/similar', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const radius = parseFloat(String(req.query.radius || '500'));
+    const limit = parseInt(String(req.query.limit || '10'), 10);
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const similar = await findSimilarLocations(lat, lon, radius, limit);
+    res.json({ similar, count: similar.length });
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+app.get('/api/satclip/context', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const context = await getLocationContext(lat, lon);
+    res.json({ context });
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+// ── GeoGraphRAG ──
+app.get('/api/geographrag/context', async (req: express.Request, res: express.Response) => {
+  try {
+    const query = String(req.query.q || '');
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const radius = parseFloat(String(req.query.radius || '100'));
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const context = await assembleContext(query, lat, lon, radius);
+    res.json(context);
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+app.get('/api/geographrag/spatial', (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const radius = parseFloat(String(req.query.radius || '100'));
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const entities = spatialQuery({ lat, lon, radiusKm: radius });
+    res.json({ entities, count: entities.length });
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+// ── FlatGeobuf Streaming ──
+app.post('/api/flatgeobuf/stream', async (req: express.Request, res: express.Response) => {
+  try {
+    const { url, format, maxFeatures, bbox } = req.body || {};
+    if (!url) return res.status(400).json({ error: 'url required' });
+    const result = bbox
+      ? await streamWithBbox({ name: 'custom', url, format: format || 'geojson' }, bbox, maxFeatures || 500)
+      : await streamFeatures({ name: 'custom', url, format: format || 'geojson', maxFeatures });
+    res.json(result);
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+// ── NASA OPERA Surface Water ──
+app.get('/api/opera/water', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const start = String(req.query.start || '2024-01-01');
+    const end = String(req.query.end || new Date().toISOString().split('T')[0]);
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const timeSeries = await getWaterTimeSeries(lat, lon, start, end);
+    res.json(timeSeries);
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+app.get('/api/opera/flood-watch', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const name = String(req.query.name || 'water body');
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const watch = await getFloodWatch(lat, lon, name);
+    res.json(watch);
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+// ── Landsat + Sentinel HLS ──
+app.get('/api/hls/scenes', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const start = String(req.query.start || '2024-01-01');
+    const end = String(req.query.end || new Date().toISOString().split('T')[0]);
+    const cloudMax = req.query.cloudMax ? parseInt(String(req.query.cloudMax), 10) : undefined;
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const scenes = await searchHlsScenes({ lat, lon, startDate: start, endDate: end, cloudMax });
+    res.json({ scenes, count: scenes.length });
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+app.get('/api/hls/timeseries', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(String(req.query.lat));
+    const lon = parseFloat(String(req.query.lon));
+    const start = String(req.query.start || '2024-01-01');
+    const end = String(req.query.end || new Date().toISOString().split('T')[0]);
+    const index = String(req.query.index || 'NDVI') as 'NDVI' | 'NDWI' | 'NBR' | 'EVI';
+    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
+    const timeSeries = await getTimeSeries(lat, lon, start, end, index);
+    res.json(timeSeries);
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
+// ── MIL-STD-2525D Symbology ──
+app.get('/api/milsymbol/validate', (req: express.Request, res: express.Response) => {
+  const sidc = String(req.query.sidc || '');
+  const result = validateSidc(sidc);
+  res.json(result);
+});
+
+app.get('/api/milsymbol/parse', (req: express.Request, res: express.Response) => {
+  const sidc = String(req.query.sidc || '');
+  const parsed = parseSidc(sidc);
+  res.json({ sidc, ...parsed });
+});
+
+app.get('/api/milsymbol/common', (_req: express.Request, res: express.Response) => {
+  res.json({ symbols: COMMON_SYMBOLS, count: Object.keys(COMMON_SYMBOLS).length });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// END TIER 1 QUICK WINS
+// ═══════════════════════════════════════════════════════════════════
+
 // NHC Tropical Cyclone Data
 app.get('/api/weather/nhc', async (req: express.Request, res: express.Response) => {
   const latMin = parseFloat(req.query.latMin as string);
@@ -2344,7 +2929,8 @@ app.get('/api/weather/ibtracs', async (_req: express.Request, res: express.Respo
     const result = { storms, total: storms.length };
     cache.set('ibtracs', result, 86400);
     res.json(result);
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'IBTrACS cyclone fetch failed');
     res.json({ source: 'Natural Earth', totalPopulation: 0, densityPerKm2: 0, cityCount: 0, largestCities: [], note: 'Population data temporarily unavailable' });
   }
 });
@@ -2391,11 +2977,11 @@ app.get('/api/weather/climate-indices', async (_req: express.Request, res: expre
     const results: any = { temperature: null, precipitation: null };
     if (tempResp.status === 'fulfilled' && tempResp.value.ok) {
       const text = await tempResp.value.text();
-      try { results.temperature = JSON.parse(text); } catch { /* ignore parse errors */ }
+      try { results.temperature = JSON.parse(text); } catch (e) { logger.warn({ err: e }, 'NOAA temp parse failed'); }
     }
     if (precipResp.status === 'fulfilled' && precipResp.value.ok) {
       const text = await precipResp.value.text();
-      try { results.precipitation = JSON.parse(text); } catch { /* ignore parse errors */ }
+      try { results.precipitation = JSON.parse(text); } catch (e) { logger.warn({ err: e }, 'NOAA precip parse failed'); }
     }
     cache.set('climate_indices', results, 3600);
     res.json(results);
@@ -2432,7 +3018,7 @@ app.get('/api/weather/radar', async (_req: express.Request, res: express.Respons
             controlStatus: p.rda.properties.controlStatus || '',
           } : null;
         }
-      } catch { /* per-station details optional */ }
+      } catch (e) { logger.warn({ err: e }, 'NWS station detail failed'); }
       return {
         id,
         name: f.properties?.name || '',
@@ -2628,7 +3214,7 @@ function extractYoutubeId(url: string): string | null {
       const v = u.pathname.slice(1).split('?')[0];
       if (/^[A-Za-z0-9_-]{11}$/.test(v)) return v;
     }
-  } catch { /* ignore invalid URLs */ }
+  } catch (e) { logger.warn({ err: e }, 'Invalid NOAA buoy URL'); }
   return null;
 }
 
@@ -2685,7 +3271,8 @@ async function fetchYouTubeSearch(signal?: AbortSignal): Promise<any[]> {
       }
     }
     return videos.slice(0, 20);
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'YouTube crisis videos fetch failed');
     return [];
   }
 }
@@ -2914,8 +3501,8 @@ Respond ONLY with a JSON array: []`;
       if (p.lat != null && p.lon != null) { item.lat = p.lat; item.lon = p.lon; }
       if (p.category) item.type = p.category;
     }
-  } catch {
-    // LLM enrichment is best-effort
+  } catch (e) {
+    logger.warn({ err: e }, 'Social feed LLM enrichment failed');
   }
 }
 
@@ -3946,8 +4533,8 @@ app.get('/api/animal-migrations', async (_req: express.Request, res: express.Res
             });
           }
         }
-      } catch {
-        // Skip failed studies, continue with others
+      } catch (e) {
+        logger.warn({ err: e }, 'Failed to process migration study, skipping');
       }
     }
 
@@ -4729,7 +5316,8 @@ app.get('/api/climate/power', async (req: express.Request, res: express.Response
     const data = await resp.json();
     cache.set(cacheKey, data, 86400);
     res.json(data);
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'NASA POWER API unavailable');
     res.json({ error: 'POWER API temporarily unavailable', properties: {} });
   }
 });
@@ -4760,12 +5348,14 @@ app.get('/api/gdelt', async (req: express.Request, res: express.Response) => {
     const resp = await fetch(url, { signal: AbortSignal.timeout(20000) });
     const text = await resp.text();
     let data: Record<string, unknown>;
-    try { data = JSON.parse(text); } catch {
+    try { data = JSON.parse(text); } catch (e) {
+      logger.warn({ err: e }, 'GDELT JSON parse failed');
       data = { articles: [], total: 0, note: 'GDELT rate limited, using cached/empty result' };
     }
     cache.set(cacheKey, data, 600);
     res.json(data);
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'GDELT API unavailable');
     res.json({ articles: [], total: 0, note: 'GDELT data temporarily unavailable' });
   }
 });
@@ -4793,8 +5383,9 @@ app.get('/api/space-weather/donki', async (req: express.Request, res: express.Re
     const data = await resp.json();
     cache.set(cacheKey, data, 3600);
     res.json(data);
-  } catch {
-    try { cache.set('donki_notifications', [], 300); } catch { /* ignore */ }
+  } catch (e) {
+    logger.warn({ err: e }, 'NASA DONKI API unavailable');
+    try { cache.set('donki_notifications', [], 300); } catch (e2) { logger.warn({ err: e2 }, 'DONKI cache set failed'); }
     if (!res.headersSent) res.status(200).json([]);
   }
 });
@@ -5318,7 +5909,7 @@ async function fetchOceanCurrents(): Promise<any[]> {
           ),
         );
         for (let j = 0; j < chunk.length; j++) {
-          const resp = responses[j];
+          const resp = responses[j] as PromiseFulfilledResult<any>;
           if (resp.status !== 'fulfilled' || !resp.value?.current) { grid.push(chunk[j]); continue; }
           const cur = resp.value.current;
           const speed = cur.ocean_current_velocity;
@@ -5366,7 +5957,7 @@ async function fetchArgoFloats(): Promise<any[]> {
         timestamp: Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'ARGO float fetch failed'); return []; }
 }
 
 // TIDES: NOAA CO-OPS water level stations (real-time)
@@ -5392,7 +5983,7 @@ async function fetchNoaaTides(): Promise<any[]> {
         if (data.length > 0) {
           tideReadings.set(s.id, parseFloat(data[0].v));
         }
-      } catch { /* skip */ }
+      } catch (e) { logger.warn({ err: e }, 'NOAA tide reading fetch failed'); }
     }));
     return stations.map((s: any) => ({
       id: `tide_${s.id}`,
@@ -5405,7 +5996,7 @@ async function fetchNoaaTides(): Promise<any[]> {
       source: 'NOAA CO-OPS',
       timestamp: Date.now(),
     }));
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'NOAA CO-OPS tides fetch failed'); return []; }
 }
 
 // USGS WATER: National Water Quality Monitoring Locations
@@ -5437,7 +6028,7 @@ async function fetchUsgsWaterQuality(): Promise<any[]> {
         timestamp: Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'USGS water quality fetch failed'); return []; }
 }
 
 // WORLD PORTS: Static dataset (~800 major ports)
@@ -5475,8 +6066,8 @@ async function fetchWorldPorts(): Promise<any[]> {
           timestamp: Date.now(),
         };
       });
-  } catch {
-    // Fallback: return empty array rather than fake data
+  } catch (e) {
+    logger.warn({ err: e }, 'UN/LOCODE port fetch failed');
     return [];
   }
 }
@@ -5669,11 +6260,13 @@ async function fetchSatellites(): Promise<any[]> {
             tle1: line1,
             tle2: line2,
           });
-        } catch {
+        } catch (e) {
+          logger.warn({ err: e }, 'CelesTrak TLE entry parse failed');
           continue;
         }
       }
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'CelesTrak batch parse failed');
       continue;
     }
   }
@@ -5706,7 +6299,7 @@ async function fetchAirports(): Promise<any[]> {
         timestamp: Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'OurAirports fetch failed'); return []; }
 }
 
 // OpenAQ: Air quality station locations (v2 API, public)
@@ -5793,7 +6386,7 @@ async function fetchOpenAQ(): Promise<any[]> {
           source: 'Open-Meteo',
           timestamp: cur.time ? new Date(cur.time).getTime() : Date.now(),
         };
-      } catch { return null; }
+      } catch (e) { logger.warn({ err: e }, 'Open-Meteo AQ station failed'); return null; }
     });
     const batchResults = await Promise.all(promises);
     for (const r of batchResults) {
@@ -5834,7 +6427,7 @@ async function fetchOverpassPois(): Promise<any[]> {
         timestamp: Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'GeoNames cities fetch failed'); return []; }
 }
 
 // RELIEFWEB: Global disaster events (public API)
@@ -5866,7 +6459,7 @@ async function fetchReliefWeb(): Promise<any[]> {
         timestamp: fields.date?.created ? new Date(fields.date.created).getTime() : Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'ReliefWeb disaster fetch failed'); return []; }
 }
 
 // GDACS: Disaster alerts via RSS/JSON
@@ -5899,7 +6492,7 @@ async function fetchGdacs(): Promise<any[]> {
         timestamp: p.fromdate ? new Date(p.fromdate).getTime() : Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'GDACS disaster fetch failed'); return []; }
 }
 
 // HDX (Humanitarian Data Exchange): Dataset package locations
@@ -5926,7 +6519,7 @@ async function fetchHdxDatasets(): Promise<any[]> {
         timestamp: pkg.metadata_created ? new Date(pkg.metadata_created).getTime() : Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'HDX dataset fetch failed'); return []; }
 }
 
 // NASA Landslide Catalog
@@ -5958,7 +6551,7 @@ async function fetchNasaLandslides(): Promise<any[]> {
         timestamp: ls.event_date ? new Date(ls.event_date).getTime() : Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'NASA landslide fetch failed'); return []; }
 }
 
 // USGS GEOLOGY: Mineral resources sites from MRDATA (public WFS, no key required)
@@ -5993,7 +6586,7 @@ async function fetchUsgsGeology(): Promise<any[]> {
         timestamp: Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'Macrostrat geology fetch failed'); return []; }
 }
 
 // PBDB (Paleobiology Database): Fossil occurrences with coordinates
@@ -6027,7 +6620,7 @@ async function fetchPbdbOccurrences(): Promise<any[]> {
         timestamp: Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'PBDB fossil fetch failed'); return []; }
 }
 
 // Macrostrat Regional: Geologic columns from a different slice than the group fallback
@@ -6064,7 +6657,7 @@ async function fetchMacrostratRegional(): Promise<any[]> {
         timestamp: Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'Macrostrat regional fetch failed'); return []; }
 }
 
 // Natural Earth: Populated places from Natural Earth vector dataset
@@ -6100,11 +6693,166 @@ async function fetchNaturalEarthPlaces(): Promise<any[]> {
         timestamp: Date.now(),
       };
     });
-  } catch { return []; }
+  } catch (e) { logger.warn({ err: e }, 'Natural Earth places fetch failed'); return []; }
 }
 
 // Layer-specific fetchers: individual layers can have their own unique data source
 const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
+  'internet_outages': async () => {
+    try {
+      const resp = await fetch('https://api.ioda.inetintel.cc.gatech.edu/v2/alerts/country?format=json', { signal: AbortSignal.timeout(15000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.data ?? []).map((item: any) => ({ lat: item.lat ?? 0, lon: item.lon ?? 0, name: item.name ?? 'Internet Outage', severity: item.severity ?? 'unknown', source: 'IODA' }));
+    } catch { return []; }
+  },
+  'acled_conflict': async () => {
+    try {
+      const key = process.env.ACLED_API_KEY || '';
+      const email = process.env.ACLED_EMAIL || '';
+      if (!key) { logger.info('ACLED_API_KEY not configured — register at acleddata.com for free access'); return []; }
+      const resp = await fetch(`https://api.acleddata.com/acled/read?limit=100&format=json&key=${key}&email=${email}`, { signal: AbortSignal.timeout(15000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.data ?? []).map((e: any) => ({ lat: parseFloat(e.latitude) || 0, lon: parseFloat(e.longitude) || 0, name: e.event_type ?? 'Conflict', severity: e.fatalities > 10 ? 'critical' : e.fatalities > 0 ? 'high' : 'medium', source: 'ACLED' }));
+    } catch { return []; }
+  },
+  'worldbank_economy': async () => {
+    try {
+      // Multiple World Bank indicators for comprehensive economic intelligence
+      const indicators = [
+        { code: 'NY.GDP.MKTP.CD', name: 'GDP (Current US$)', unit: 'US$', divisor: 1e9, format: (v: number) => `$${(v / 1e9).toFixed(1)}B` },
+        { code: 'SP.POP.TOTL', name: 'Population', unit: 'people', divisor: 1e6, format: (v: number) => `${(v / 1e6).toFixed(1)}M` },
+        { code: 'NY.GDP.PCAP.CD', name: 'GDP per Capita', unit: 'US$/person', divisor: 1, format: (v: number) => `$${v.toLocaleString()}` },
+        { code: 'FP.CPI.TOTL.ZG', name: 'Inflation Rate', unit: '%', divisor: 1, format: (v: number) => `${v.toFixed(1)}%` },
+        { code: 'SL.UEM.TOTL.ZS', name: 'Unemployment Rate', unit: '%', divisor: 1, format: (v: number) => `${v.toFixed(1)}%` },
+        { code: 'SP.DYN.LE00.IN', name: 'Life Expectancy', unit: 'years', divisor: 1, format: (v: number) => `${v.toFixed(1)} yrs` },
+        { code: 'EN.ATM.CO2E.PC', name: 'CO2 Emissions per Capita', unit: 'metric tons', divisor: 1, format: (v: number) => `${v.toFixed(2)}t` },
+        { code: 'BN.CAB.XOKA.CD', name: 'Current Account Balance', unit: 'US$', divisor: 1e9, format: (v: number) => `${v >= 0 ? '+' : ''}$${(v / 1e9).toFixed(1)}B` },
+      ];
+      
+      const allRecords: any[] = [];
+      // Fetch all indicators in parallel with individual timeouts
+      await Promise.allSettled(indicators.map(async (ind) => {
+        try {
+          const resp = await fetch(`https://api.worldbank.org/v2/country/all/indicator/${ind.code}?format=json&per_page=300&date=2023:2026`, { signal: AbortSignal.timeout(12000) });
+          if (!resp.ok) return;
+          const data = await resp.json();
+          const records = Array.isArray(data) && data.length > 1 ? data[1] : [];
+          for (const r of records) {
+            if (r.value != null && r.countryiso2code) {
+              const cc = r.countryiso2code as string;
+              const coords = COUNTRY_CENTROIDS[cc] || [0, 0];
+              allRecords.push({
+                lat: coords[0], lon: coords[1],
+                indicator: ind.code,
+                indicatorName: ind.name,
+                unit: ind.unit,
+                formatValue: ind.format(r.value),
+                rawValue: r.value,
+                country: r.country?.value,
+                countryCode: cc,
+                date: r.date,
+                name: `${r.country?.value}: ${ind.format(r.value)}`,
+                value: r.value,
+                source: 'World Bank',
+              });
+            }
+          }
+        } catch { /* indicator failed, continue with others */ }
+      }));
+      
+      const records = allRecords;
+      // Country centroid lookup for geocoding World Bank data (ISO2 -> [lat, lon])
+      ;
+      return records.filter((r: any) => r.value != null).map((r: any) => {
+        const cc = r.countryiso2code as string;
+        const coords = COUNTRY_CENTROIDS[cc] || [0, 0];
+        return {
+          lat: coords[0], lon: coords[1],
+          name: `${r.country?.value}: $${(r.value / 1e9).toFixed(1)}B`,
+          value: r.value, date: r.date, countryCode: cc,
+          source: 'World Bank', indicator: r.indicator?.value,
+        };
+      });
+    } catch { return []; }
+  },
+  'who_disease_outbreaks': async () => {
+    try {
+      const resp = await fetch('https://ghoapi.azureedge.net/api/WHS6_102?$filter=SpatialDim%20eq%20%27GLO%27&$orderby=TimeDim%20desc&$top=100', { signal: AbortSignal.timeout(15000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      
+      // WHO region centroids + major country centroids for geocoding health data
+      ;
+      return (data.value ?? []).filter((v: any) => v.NumericValue != null).map((v: any) => {
+        const dim = v.SpatialDim as string;
+        const c = WHO_GEO[dim] || WHO_GEO[dim.toUpperCase()];
+        return {
+          lat: c?.[0] ?? 0, lon: c?.[1] ?? 0,
+          name: `${v.SpatialDim}: ${v.NumericValue?.toFixed(1) ?? 'N/A'}`,
+          value: v.NumericValue, date: v.TimeDim, source: 'WHO GHO',
+          indicator: v.IndicatorCode,
+        };
+      }).filter((r: any) => r.lat !== 0 || r.lon !== 0);
+    } catch { return []; }
+  },
+  'shodan_iot': async () => {
+    try {
+      const apiKey = process.env.SHODAN_API_KEY;
+      if (!apiKey) return [];
+      const resp = await fetch(`https://api.shodan.io/shodan/host/search?key=${apiKey}&query=country:US&limit=50`, { signal: AbortSignal.timeout(15000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.matches ?? []).map((h: any) => ({ lat: h.location?.latitude ?? 0, lon: h.location?.longitude ?? 0, name: h.org ?? h.ip_str ?? 'IoT Device', country: h.location?.country_name, source: 'Shodan' }));
+    } catch { return []; }
+  },
+  'virustotal_threats': async () => {
+    try {
+      const apiKey = process.env.VIRUSTOTAL_API_KEY;
+      if (!apiKey) { logger.info('VIRUSTOTAL_API_KEY not configured'); return []; }
+      const resp = await fetch('https://www.virustotal.com/api/v3/files?limit=50', {
+        headers: { 'x-apikey': apiKey },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.data ?? []).map((f: any) => ({ lat: 0, lon: 0, name: f.attributes?.meaningful_name ?? f.id ?? 'Threat', source: 'VirusTotal' }));
+    } catch { return []; }
+  },
+  'supply_chain_trade': async () => {
+    try {
+      const resp = await fetch('https://comtradeapi.un.org/public/v1/preview/C/A/HS?reporterCode=842&flowCode=M&cmdCode=TOTAL&period=2024', { signal: AbortSignal.timeout(15000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.data ?? []).map((t: any) => ({ lat: 0, lon: 0, name: `${t.partnerDesc}: $${(t.primaryValue ?? 0 / 1e9).toFixed(1)}B`, value: t.primaryValue, source: 'UN Comtrade' }));
+    } catch { return []; }
+  },
+  'disinformation_monitor': async () => {
+    try {
+      const resp = await fetch('https://api.gdeltproject.org/api/v2/doc/doc?query=disinformation+OR+deepfake+OR+propaganda&mode=artlist&maxrecords=50&format=json&sort=DateDesc&timespan=7d', { signal: AbortSignal.timeout(15000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      
+      return (data.articles ?? []).map((a: any) => ({
+        lat: 0, lon: 0,
+        name: a.title ?? 'Disinformation Article',
+        url: a.url, source: 'GDELT',
+        language: a.language, domain: a.domain,
+        date: a.seendate, tone: a.tone,
+      }));
+    } catch { return []; }
+  },
+  'cloudflare_radar_attacks': async () => {
+    try {
+      const apiKey = process.env.CLOUDFLARE_API_KEY;
+      if (!apiKey) return [];
+      const resp = await fetch('https://api.cloudflare.com/client/v4/radar/attacks/summary?dateRange=7d', { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.result?.locations ?? []).map((l: any) => ({ lat: l.latitude ?? 0, lon: l.longitude ?? 0, name: `${l.location}: ${l.value} attacks`, value: l.value, source: 'Cloudflare Radar' }));
+    } catch { return []; }
+  },
   '16_pbdb': fetchPbdbOccurrences,
   '16_macrostrat': fetchMacrostratRegional,
   '50_ocean_currents': fetchOceanCurrents,
@@ -6186,7 +6934,8 @@ app.get('/api/fema', async (req: express.Request, res: express.Response) => {
     const result = { DisasterDeclarationsSummaries: summaries, total: summaries.length, source: 'FEMA' };
     cache.set(cacheKey, result, 3600);
     res.json(result);
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'FEMA API unavailable');
     res.json({ DisasterDeclarationsSummaries: [], total: 0, source: 'FEMA', note: 'FEMA API temporarily unavailable' });
   }
 });
@@ -6259,7 +7008,8 @@ app.get('/api/usgs/water', async (req: express.Request, res: express.Response) =
     if (sites.length === 1) { result.latitude = sites[0].latitude; result.longitude = sites[0].longitude; result.value = sites[0].parameters; result.siteName = sites[0].siteName; }
     cache.set(cacheKey, result, 600);
     res.json(result);
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'USGS Water Services unavailable');
     res.json(emptyResult);
   }
 });
@@ -6305,7 +7055,8 @@ app.get('/api/geospatial/overpass', async (req: express.Request, res: express.Re
     const data = await resp.json();
     cache.set(cacheKey, data, 3600);
     res.json(data);
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Overpass API unavailable');
     res.json({ elements: [], note: 'Overpass API temporarily unavailable' });
   }
 });
@@ -6326,7 +7077,7 @@ app.get('/api/military-bases', async (_req: express.Request, res: express.Respon
       signal: AbortSignal.timeout(20000),
     });
     if (!resp.ok) { res.json({ elements: [], note: 'Wikidata unavailable' }); return; }
-    const data = await resp.json();
+    const data = await resp.json() as { results?: { bindings?: any[] } };
     const results = data.results?.bindings || [];
     const elements = results.map((r: any) => {
       const wkt = r.coords?.value || '';
@@ -6459,7 +7210,7 @@ app.get('/api/data/:layerId', async (req: express.Request, res: express.Response
       cache.set(cacheKey, payload, 3600);
       res.json(payload);
       return;
-    } catch { /* fall through to group fallback */ }
+    } catch (e) { logger.warn({ err: e, layerId }, 'Layer-specific fetcher failed, falling through to group'); }
   }
 
   // Try 3: Use group-specific real data fetcher
@@ -6476,7 +7227,7 @@ app.get('/api/data/:layerId', async (req: express.Request, res: express.Response
       cache.set(cacheKey, payload, 600);
       res.json(payload);
       return;
-    } catch { /* fall through */ }
+    } catch (e) { logger.warn({ err: e, group }, 'Group fetcher failed, falling through'); }
   }
 
   // No real data available — short TTL to allow recovery when upstream APIs come back
@@ -6752,7 +7503,7 @@ app.post('/api/agent/pipeline', authGuard, async (req: express.Request, res: exp
       try {
         const llmPlan = await TaskPlanner.planWithLLM(goal, apiKey, toolRegistry.list());
         if (llmPlan && llmPlan.length > 0) subtasks = llmPlan;
-      } catch { /* fallback to static decomposition */ }
+      } catch (e) { logger.warn({ err: e }, 'LLM planning failed, using static decomposition'); }
     }
     sendEvent('plan', { subtasks: subtasks.map(s => ({ id: s.id, description: s.description })) });
 
@@ -6835,6 +7586,8 @@ app.get('/api/agent/geocode', async (req: express.Request, res: express.Response
 
 // ── Digital Twin Analysis Endpoint ─────────────────────────────
 import { analyzeDigitalTwin } from './digitalTwin/orchestrator';
+import { COUNTRY_CENTROIDS } from './data/countryCentroids';
+import { WHO_GEO } from './data/whoGeo';
 
 app.post('/api/digital-twin/analyze', authGuard, validate(digitalTwinSchema), async (req: express.Request, res: express.Response) => {
   const { message, lat, lon, locationName, radiusKm } = req.body;
@@ -6965,7 +7718,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         const deepIntent = await IntentRouter.classifyDeep(message);
         if (deepIntent && deepIntent.confidence > intent.confidence) intent = deepIntent;
         costTracker.record('flash', message, JSON.stringify(intent), false);
-      } catch { /* use fast result */ }
+      } catch (e) { logger.warn({ err: e }, 'Deep intent classification failed, using fast result'); }
     }
     sendEvent('intent', intent);
 
@@ -7132,13 +7885,13 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
 
     // ML pipeline: evaluate response quality asynchronously
     const epId = `ep_${Date.now()}`;
-    selfImprover.evaluateInteraction(message, outputText, { intentType: intent.type, modelTier }, epId).catch(() => {});
+    selfImprover.evaluateInteraction(message, outputText, { intentType: intent.type, modelTier }, epId).catch((e: any) => logger.warn({ err: e }, 'Self-improver evaluation failed'));
 
     // ML pipeline: extract knowledge graph entities
     if ((process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY) && intent.location) {
       const locLabel = intent.location.label || `${intent.location.lat.toFixed(2)},${intent.location.lon.toFixed(2)}`;
-      knowledgeGraph.ensureEntity(locLabel, 'location').catch(() => {});
-      knowledgeGraph.ensureEntity(intent.type, 'intent').catch(() => {});
+      knowledgeGraph.ensureEntity(locLabel, 'location').catch((e: any) => logger.warn({ err: e }, 'Knowledge graph location entity failed'));
+      knowledgeGraph.ensureEntity(intent.type, 'intent').catch((e: any) => logger.warn({ err: e }, 'Knowledge graph intent entity failed'));
     }
 
     // Parse visualization commands from output
@@ -7369,7 +8122,8 @@ app.get('/api/data-layers/status', authGuard, askRateLimit, async (_req: express
             httpStatus: resp.status,
             latencyMs: Date.now() - start,
           };
-        } catch {
+        } catch (e) {
+          logger.warn({ err: e, layerId: layer.id }, 'Layer health check failed');
           return {
             ...layer,
             status: 'down',
@@ -7930,50 +8684,6 @@ app.get('/api/explain/override/audit-log', (req: express.Request, res: express.R
 // ═══════════════════════════════════════════════════════════════════════
 // SENTINEL: proactive monitoring status & management
 // ═══════════════════════════════════════════════════════════════════════
-
-app.get('/api/sentinel/status', (_req: express.Request, res: express.Response) => {
-  res.json(sentinel.getStatus());
-});
-
-app.get('/api/sentinel/regions', (_req: express.Request, res: express.Response) => {
-  res.json({ regions: ambientIntelligence.getAllRegions() });
-});
-
-app.post('/api/sentinel/regions', (req: express.Request, res: express.Response) => {
-  const { lat, lon, label, radiusKm } = req.body;
-  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
-  ambientIntelligence.addRegion(lat, lon, label || `${lat},${lon}`, radiusKm || 200);
-  res.json({ ok: true });
-});
-
-app.delete('/api/sentinel/regions', (req: express.Request, res: express.Response) => {
-  const lat = parseFloat(req.query.lat as string);
-  const lon = parseFloat(req.query.lon as string);
-  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
-  ambientIntelligence.removeRegion(lat, lon);
-  res.json({ ok: true });
-});
-
-app.get('/api/sentinel/alerts', (req: express.Request, res: express.Response) => {
-  try {
-    const db = getDb();
-    const userId = (req as any).userId;
-    const rows = db.prepare('SELECT * FROM sentinel_alerts WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').all(userId);
-    res.json({ alerts: rows });
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
-
-// Ambient intelligence: get pre-computed answer for a likely question
-app.get('/api/sentinel/precomputed', (req: express.Request, res: express.Response) => {
-  const q = req.query.q as string;
-  if (!q) return res.status(400).json({ error: 'q query param required' });
-  const cached = ambientIntelligence.getPrecomputed(q);
-  if (!cached) return res.status(404).json({ error: 'No pre-computed response available' });
-  res.json(cached);
-});
-
 app.get('/api/agent/context', async (req: express.Request, res: express.Response) => {
   const lat = parseFloat(req.query.lat as string);
   const lon = parseFloat(req.query.lon as string);
@@ -8796,11 +9506,11 @@ app.get('/api/scenarios/nc-variables', authGuard, async (req: express.Request, r
           if (!overlaps) variables = [];
         }
         closeFile(h5);
-      } catch { /* noop */ }
+      } catch (e) { logger.warn({ err: e }, 'HDF5 variable read failed'); }
     }
 
     res.json({ variables });
-  } catch { res.json({ variables: [] }); }
+  } catch (e) { logger.warn({ err: e }, 'HDF5 variables query failed'); res.json({ variables: [] }); }
 });
 
 // GET /api/scenarios/:id — get full scenario
@@ -8888,7 +9598,7 @@ app.post('/api/scenarios/import', authGuard, async (req: express.Request, res: e
             } else if (val !== null && val !== undefined) {
               vars[name] = [Number(val)];
             }
-          } catch { /* skip */ }
+          } catch (e) { logger.warn({ err: e }, 'Tide station detail missing'); }
           return;
         }
         const keys = typeof item.keys === 'function' ? item.keys() : [];
@@ -8936,7 +9646,7 @@ app.post('/api/scenarios/import', authGuard, async (req: express.Request, res: e
 
       res.json({ pointCloud, lat, lon, variables: Object.keys(vars) });
     } finally {
-      try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+      try { fs.unlinkSync(tmpPath); } catch (e) { logger.warn({ err: e }, 'Temp file cleanup failed'); }
     }
   } catch (e: any) {
     logger.error({ err: e.message }, 'NetCDF import failed');
@@ -8975,7 +9685,7 @@ app.post('/api/scenarios/import-from-path', authGuard, async (req: express.Reque
           return Array.from(val as ArrayLike<number>);
         }
         return [Number(val)];
-      } catch { return null; }
+      } catch (e) { logger.warn({ err: e }, 'NetCDF dataset read failed'); return null; }
     }
 
     // Read lat/lon
@@ -9237,12 +9947,12 @@ app.get('/api/ml/evals', (_req: express.Request, res: express.Response) => {
 app.get('/api/ml/synthetic-data', (req: express.Request, res: express.Response) => {
   const intentType = req.query.intent as string | undefined;
   const data = getSyntheticData(100, intentType);
-  res.json({ count: data.length, examples: data.slice(0, 20) });
+  res.json({ count: data.length, examples: data.slice(0, 20).map(d => ({ ...d, isSynthetic: true })), isSynthetic: true });
 });
 
 app.post('/api/ml/synthetic-data/generate', async (_req: express.Request, res: express.Response) => {
   const example = await generateTrainingExample(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '');
-  res.json({ ok: !!example, example });
+  res.json({ ok: !!example, example: example ? { ...example, isSynthetic: true } : null, isSynthetic: true });
 });
 
 app.get('/api/ml/knowledge-graph/stats', (_req: express.Request, res: express.Response) => {
@@ -9533,38 +10243,7 @@ app.delete('/api/chats/:id', requireOwnership('chats'), (req: express.Request, r
    Intelligence Panel — Historical Data Routes
    ═════════════════════════════════════════════════════════════════ */
 
-// ── Market Candle Data (Finnhub) ──
-app.get('/api/market/candle', async (req: express.Request, res: express.Response) => {
-  const symbol = (req.query.symbol as string) || 'SPY';
-  const resolution = (req.query.resolution as string) || 'D';
-  const range = (req.query.range as string) || '1M';
-  const apiKey = process.env.FINNHUB_API_KEY;
-  if (!apiKey) {
-    return res.json({ candles: [], error: 'FINNHUB_API_KEY not configured' });
-  }
-  try {
-    const now = Math.floor(Date.now() / 1000);
-    const rangeMap: Record<string, number> = { '1D': 86400, '1W': 604800, '1M': 2592000, '3M': 7776000, '1Y': 31536000 };
-    const from = now - (rangeMap[range] || 2592000);
-    const url = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(symbol)}&resolution=${resolution}&from=${from}&to=${now}&token=${apiKey}`;
-    const resp = await fetch(url);
-    const data = await resp.json() as { s?: string; c?: number[]; h?: number[]; l?: number[]; o?: number[]; v?: number[]; t?: number[] };
-    if (data.s !== 'ok' || !data.c) {
-      return res.json({ candles: [], symbol, error: 'No data available' });
-    }
-    const candles = data.c.map((close, i) => ({
-      time: data.t?.[i] ?? 0,
-      open: data.o?.[i] ?? 0,
-      high: data.h?.[i] ?? 0,
-      low: data.l?.[i] ?? 0,
-      close,
-      volume: data.v?.[i] ?? 0,
-    }));
-    res.json({ candles, symbol, resolution, range });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// ── Market Candle Data — handled by pulseRouter at /api/pulse/market/candle ──
 
 // ── Earthquake Summary (USGS) ──
 app.get('/api/earthquakes/summary', async (_req: express.Request, res: express.Response) => {
@@ -9581,6 +10260,221 @@ app.get('/api/earthquakes/summary', async (_req: express.Request, res: express.R
       else if (m < 5) buckets[3]++;
       else buckets[4]++;
     });
+
+// ── NEW FEATURES: Internet Outage, Conflict, Health, Economy, Cyber, Supply Chain ──
+
+// 1. IODA Internet Outage Monitor
+app.get('/api/internet/outages', async (req: express.Request, res: express.Response) => {
+  try {
+    const days = parseInt(req.query.days as string) || 7;
+    const resp = await fetch(`https://api.ioda.inetintel.cc.gatech.edu/v2/alerts/country?limit=${days}&format=json`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return res.json({ outages: [], note: 'IODA API unavailable' });
+    const data = await resp.json();
+    res.json({ outages: data.data ?? [], source: 'IODA Georgia Tech' });
+  } catch (e) {
+    logger.warn({ err: e }, 'IODA API failed');
+    res.json({ outages: [], note: 'IODA data temporarily unavailable' });
+  }
+});
+
+app.get('/api/internet/outages/:country', async (req: express.Request, res: express.Response) => {
+  try {
+    const country = req.params.country;
+    const resp = await fetch(`https://api.ioda.inetintel.cc.gatech.edu/v2/alerts/country/${country}?format=json`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return res.json({ signals: [], note: 'IODA API unavailable' });
+    const data = await resp.json();
+    res.json({ signals: data.data ?? [], source: 'IODA Georgia Tech' });
+  } catch (e) {
+    logger.warn({ err: e }, 'IODA country API failed');
+    res.json({ signals: [], note: 'IODA data temporarily unavailable' });
+  }
+});
+
+// 2. ACLED Conflict Events (free public access via ACLED API)
+app.get('/api/conflict/acled', async (req: express.Request, res: express.Response) => {
+  try {
+    const country = req.query.country as string || '';
+    const startDate = req.query.start_date as string || '';
+    const endDate = req.query.end_date as string || '';
+    const limit = parseInt(req.query.limit as string) || 100;
+    const key = process.env.ACLED_API_KEY || '';
+    const email = process.env.ACLED_EMAIL || '';
+    
+    const params = new URLSearchParams({
+      limit: String(limit),
+      format: 'json',
+    });
+    if (country) params.set('country', country);
+    if (startDate) params.set('event_date', `>${startDate}`);
+    if (endDate) params.set('event_date', `<${endDate}`);
+    if (key) params.set('key', key);
+    if (email) params.set('email', email);
+    
+    const resp = await fetch(`https://api.acleddata.com/acled/read?${params}`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return res.json({ events: [], note: 'ACLED API unavailable - configure ACLED_API_KEY' });
+    const data = await resp.json();
+    res.json({ events: data.data ?? [], source: 'ACLED' });
+  } catch (e) {
+    logger.warn({ err: e }, 'ACLED API failed');
+    res.json({ events: [], note: 'ACLED data temporarily unavailable' });
+  }
+});
+
+// 3. World Bank Economic Indicators (free, no key required)
+app.get('/api/economics/worldbank', async (req: express.Request, res: express.Response) => {
+  try {
+    const country = req.query.country as string || 'all';
+    const indicatorParam = req.query.indicator as string || 'NY.GDP.MKTP.CD';
+    // Support multiple indicators (comma-separated)
+    const indicators = indicatorParam.split(',').map(s => s.trim()).filter(Boolean);
+    const allResults: any[] = [];
+    await Promise.allSettled(indicators.map(async (indicator) => {
+      try {
+        const resp = await fetch(`https://api.worldbank.org/v2/country/${country}/indicator/${indicator}?format=json&per_page=100&date=2020:2026`, {
+          signal: AbortSignal.timeout(12000),
+        });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const records = Array.isArray(data) && data.length > 1 ? data[1] : [];
+        for (const r of records) {
+          allResults.push({
+            country: r.country?.value,
+            countryCode: r.countryiso2code,
+            value: r.value,
+            date: r.date,
+            indicator: r.indicator?.value,
+            indicatorCode: indicator,
+          });
+        }
+      } catch { /* individual indicator failed */ }
+    }));
+    res.json({
+      indicators: allResults,
+      source: 'World Bank',
+      indicators_queried: indicators,
+    });
+  } catch (e) {
+    logger.warn({ err: e }, 'World Bank API failed');
+    res.json({ indicators: [], note: 'World Bank data temporarily unavailable' });
+  }
+});
+
+// 4. WHO Disease Outbreaks (free, no key required)
+app.get('/api/health/who-outbreaks', async (req: express.Request, res: express.Response) => {
+  try {
+    const resp = await fetch('https://ghoapi.azureedge.net/api/WHS6_102?$filter=SpatialDim%20eq%20%27GLO%27&$orderby=TimeDim%20desc&$top=100', {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return res.json({ outbreaks: [], note: 'WHO API unavailable' });
+    const data = await resp.json();
+    res.json({ outbreaks: data.value ?? [], source: 'WHO GHO' });
+  } catch (e) {
+    logger.warn({ err: e }, 'WHO API failed');
+    res.json({ outbreaks: [], note: 'WHO data temporarily unavailable' });
+  }
+});
+
+app.get('/api/health/who-disease/:indicator', async (req: express.Request, res: express.Response) => {
+  try {
+    const indicator = req.params.indicator;
+    const resp = await fetch(`https://ghoapi.azureedge.net/api/${indicator}?$orderby=TimeDim desc&$top=200`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return res.json({ data: [], note: 'WHO API unavailable' });
+    const result = await resp.json();
+    res.json({ data: result.value ?? [], source: 'WHO GHO' });
+  } catch (e) {
+    logger.warn({ err: e }, 'WHO disease API failed');
+    res.json({ data: [], note: 'WHO data temporarily unavailable' });
+  }
+});
+
+// 5. Shodan IoT Intelligence (requires API key)
+app.get('/api/cyber/shodan', async (req: express.Request, res: express.Response) => {
+  try {
+    const query = req.query.q as string || 'country:US';
+    const apiKey = process.env.SHODAN_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'SHODAN_API_KEY not configured' });
+    const resp = await fetch(`https://api.shodan.io/shodan/host/search?key=${apiKey}&query=${encodeURIComponent(query)}&limit=50`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return res.json({ devices: [], note: 'Shodan API unavailable' });
+    const data = await resp.json();
+    res.json({ devices: data.matches ?? [], total: data.total ?? 0, source: 'Shodan' });
+  } catch (e) {
+    logger.warn({ err: e }, 'Shodan API failed');
+    res.json({ devices: [], note: 'Shodan data temporarily unavailable' });
+  }
+});
+
+// 6. VirusTotal Threat Intel (requires API key)
+app.get('/api/cyber/virustotal', async (req: express.Request, res: express.Response) => {
+  try {
+    const url = req.query.url as string;
+    if (!url) return res.status(400).json({ error: 'url query parameter required' });
+    const apiKey = process.env.VIRUSTOTAL_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'VIRUSTOTAL_API_KEY not configured' });
+    const urlId = Buffer.from(url).toString('base64').replace(/=/g, '');
+    const resp = await fetch(`https://www.virustotal.com/api/v3/urls/${urlId}`, {
+      headers: { 'x-apikey': apiKey },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return res.json({ result: null, note: 'VirusTotal API unavailable' });
+    const data = await resp.json();
+    res.json({ result: data.data?.attributes ?? null, source: 'VirusTotal' });
+  } catch (e) {
+    logger.warn({ err: e }, 'VirusTotal API failed');
+    res.json({ result: null, note: 'VirusTotal data temporarily unavailable' });
+  }
+});
+
+// 7. Container/Port Tracking (UN Comtrade trade data - free)
+app.get('/api/supply-chain/trade', async (req: express.Request, res: express.Response) => {
+  try {
+    const reporterCountry = req.query.reporter as string || '842'; // US
+    const partnerCountry = req.query.partner as string || '';
+    const params = new URLSearchParams({
+      reporterCode: reporterCountry,
+      flowCode: 'M',
+      cmdCode: 'TOTAL',
+      period: '2024',
+      partnerCode: partnerCountry || '0',
+      motCode: '0',
+    });
+    const resp = await fetch(`https://comtradeapi.un.org/public/v1/preview/C/A/HS?${params}`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return res.json({ trade: [], note: 'UN Comtrade API unavailable' });
+    const data = await resp.json();
+    res.json({ trade: data.data ?? [], source: 'UN Comtrade' });
+  } catch (e) {
+    logger.warn({ err: e }, 'UN Comtrade API failed');
+    res.json({ trade: [], note: 'Trade data temporarily unavailable' });
+  }
+});
+
+// 8. Deepfake/Disinformation Monitor (GDELT media bias + sentiment)
+app.get('/api/intelligence/disinformation', async (req: express.Request, res: express.Response) => {
+  try {
+    const query = req.query.q as string || 'disinformation OR deepfake OR propaganda OR misinformation';
+    const resp = await fetch(`https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&maxrecords=50&format=json&sort=DateDesc&timespan=7d`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return res.json({ articles: [], note: 'GDELT API unavailable' });
+    const data = await resp.json();
+    res.json({ articles: data.articles ?? [], source: 'GDELT', note: 'Monitor for disinformation patterns' });
+  } catch (e) {
+    logger.warn({ err: e }, 'GDELT disinformation API failed');
+    res.json({ articles: [], note: 'Disinformation data temporarily unavailable' });
+  }
+});
+
     const recent = features
       .sort((a, b) => (b.properties?.time ?? 0) - (a.properties?.time ?? 0))
       .slice(0, 20)
@@ -9605,276 +10499,19 @@ app.get('/api/earthquakes/summary', async (_req: express.Request, res: express.R
   }
 });
 
-// ── Energy History (EIA) ──
-app.get('/api/energy/history', async (req: express.Request, res: express.Response) => {
-  const series = (req.query.series as string) || 'petroleum';
-  const apiKey = process.env.EIA_API_KEY;
-  if (!apiKey) {
-    return res.json({ data: [], error: 'EIA_API_KEY not configured' });
-  }
-  try {
-    const url = `https://api.eia.gov/v2/petroleum/pri/gnd/data/?api_key=${apiKey}&frequency=monthly&data[0]=value&facets[product][]=EPM0&sort[0][column]=period&sort[0][direction]=desc&length=24`;
-    const resp = await fetch(url);
-    const data = await resp.json() as { response?: { data?: Array<{ period: string; value: number; product: string }> } };
-    const history = (data.response?.data ?? []).reverse().map(d => ({
-      period: d.period,
-      value: d.value,
-      product: d.product,
-    }));
-    res.json({ data: history, series });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// ── Energy History — handled by pulseRouter at /api/pulse/energy/history ──
 
 /* ═════════════════════════════════════════════════════════════════
    Intelligence Panel API Routes
    ═════════════════════════════════════════════════════════════════ */
 
-// Simple in-memory cache for intelligence panel data
-const intelCache = new Map<string, { data: unknown; expires: number }>();
-function getCached<T>(key: string, ttlMs: number): T | null {
-  const entry = intelCache.get(key);
-  if (entry && entry.expires > Date.now()) return entry.data as T;
-  intelCache.delete(key);
-  return null;
-}
-function setCache(key: string, data: unknown, ttlMs: number): void {
-  intelCache.set(key, { data, expires: Date.now() + ttlMs });
-}
+// ── Market Quotes — handled by pulseRouter at /api/pulse/market/quotes ──
 
-// ── Market Quotes (Finnhub + CoinGecko fallback) ──
-app.get('/api/market/quotes', async (req: express.Request, res: express.Response) => {
-  try {
-    const symbolsParam = (req.query.symbols as string) || 'SPY,QQQ,DIA,IWM,AAPL,MSFT,GOOGL,AMZN,NVDA,TSLA,BTC-USD,ETH-USD';
-    const symbols = symbolsParam.split(',').map(s => s.trim());
+// ── Energy Prices — handled by pulseRouter at /api/pulse/energy/prices ──
 
-    const cacheKey = `market:${symbols.sort().join(',')}`;
-    const cached = getCached<unknown[]>(cacheKey, 5 * 60 * 1000);
-    if (cached) return res.json({ quotes: cached });
+// ── Geopolitical Risks — handled by pulseRouter at /api/pulse/geopolitical/risks ──
 
-    const finnhubKey = process.env.FINNHUB_API_KEY;
-    const coingeckoKey = process.env.COINGECKO_DEMO_API_KEY || process.env.COINGECKO_API_KEY;
-
-    const stockSymbols = symbols.filter(s => !s.includes('-USD'));
-    const cryptoSymbols = symbols.filter(s => s.includes('-USD'));
-
-    const results: unknown[] = [];
-
-    // Fetch stock quotes from Finnhub
-    if (finnhubKey && stockSymbols.length > 0) {
-      const batches = stockSymbols;
-      const quotePromises = batches.map(async (symbol) => {
-        try {
-          const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${finnhubKey}`;
-          const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
-          if (!resp.ok) return null;
-          const data = await resp.json() as { c: number; d: number; dp: number; pc: number };
-          if (!data || data.c === 0) return null;
-          return {
-            symbol,
-            name: symbol,
-            price: data.c,
-            change: data.d,
-            changePct: data.dp,
-            sparkline: [data.pc * 0.98, data.pc * 0.99, data.pc * 0.97, data.pc * 1.01, data.c * 0.99, data.c],
-          };
-        } catch { return null; }
-      });
-      const stockResults = await Promise.all(quotePromises);
-      results.push(...stockResults.filter(Boolean));
-    }
-
-    // Fetch crypto from CoinGecko
-    if (cryptoSymbols.length > 0) {
-      const cgIds = cryptoSymbols.map(s => {
-        const base = s.replace('-USD', '').toLowerCase();
-        return base === 'btc' ? 'bitcoin' : base === 'eth' ? 'ethereum' : base;
-      });
-      try {
-        const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cgIds.join(',')}&vs_currencies=usd&include_24hr_change=true`;
-        const headers: Record<string, string> = {};
-        if (coingeckoKey) {
-          headers[process.env.COINGECKO_API_KEY ? 'x-cg-pro-api-key' : 'x-cg-demo-api-key'] = coingeckoKey;
-        }
-        const resp = await fetch(url, { headers, signal: AbortSignal.timeout(5000) });
-        if (resp.ok) {
-          const data = await resp.json() as Record<string, { usd?: number; usd_24h_change?: number }>;
-          for (const symbol of cryptoSymbols) {
-            const base = symbol.replace('-USD', '').toLowerCase();
-            const cgId = base === 'btc' ? 'bitcoin' : base === 'eth' ? 'ethereum' : base;
-            const entry = data[cgId];
-            if (entry?.usd) {
-              results.push({
-                symbol,
-                name: symbol.replace('-USD', '/USD'),
-                price: entry.usd,
-                change: 0,
-                changePct: entry.usd_24h_change ?? 0,
-                sparkline: undefined,
-              });
-            }
-          }
-        }
-      } catch { /* ignore */ }
-    }
-
-    setCache(cacheKey, results, 5 * 60 * 1000);
-    res.json({ quotes: results });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch market quotes' });
-  }
-});
-
-// ── Energy Prices (EIA) ──
-app.get('/api/energy/prices', async (_req: express.Request, res: express.Response) => {
-  try {
-    const cached = getCached<unknown[]>('energy:prices', 30 * 60 * 1000);
-    if (cached) return res.json({ prices: cached });
-
-    const eiaKey = process.env.EIA_API_KEY;
-    if (!eiaKey) {
-      // Return placeholder data when no key
-      return res.json({
-        prices: [
-          { id: 'wti', name: 'WTI Crude', current: 0, changePct: 0, unit: '$/bbl', trend: 'stable' },
-          { id: 'brent', name: 'Brent Crude', current: 0, changePct: 0, unit: '$/bbl', trend: 'stable' },
-          { id: 'natgas', name: 'Natural Gas', current: 0, changePct: 0, unit: '$/MMBtu', trend: 'stable' },
-          { id: 'gold', name: 'Gold', current: 0, changePct: 0, unit: '$/oz', trend: 'stable' },
-        ],
-      });
-    }
-
-    // EIA Petroseries: WTI + Brent + Natural Gas
-    const seriesMap: Record<string, string> = {
-      wti: 'RWTC',
-      brent: 'RBRTE',
-      natgas: 'RNGWHHD',
-    };
-
-    const results: unknown[] = [];
-    for (const [id, series] of Object.entries(seriesMap)) {
-      try {
-        const url = `https://api.eia.gov/v2/petroleum/pri/spt/data/?api_key=${eiaKey}&frequency=daily&data[0]=value&facets[series][]=${series}&sort[0][column]=period&sort[0][direction]=desc&length=5`;
-        const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
-        if (!resp.ok) continue;
-        const data = await resp.json() as { response?: { data?: Array<{ value: string; period: string }> } };
-        const rows = data.response?.data ?? [];
-        if (rows.length >= 2) {
-          const current = parseFloat(rows[0]!.value);
-          const prev = parseFloat(rows[1]!.value);
-          const changePct = prev ? ((current - prev) / prev) * 100 : 0;
-          results.push({
-            id,
-            name: id === 'wti' ? 'WTI Crude' : id === 'brent' ? 'Brent Crude' : 'Natural Gas',
-            current,
-            changePct: Math.round(changePct * 10) / 10,
-            unit: id === 'natgas' ? '$/MMBtu' : '$/bbl',
-            trend: changePct > 0.5 ? 'up' : changePct < -0.5 ? 'down' : 'stable',
-          });
-        }
-      } catch { /* skip */ }
-    }
-
-    // Add gold price from a public endpoint
-    try {
-      const resp = await fetch('https://api.metalpriceapi.com/v1/latest?api_key=demo&base=USD&currencies=XAU', { signal: AbortSignal.timeout(5000) });
-      if (resp.ok) {
-        const data = await resp.json() as { rates?: { XAU?: number } };
-        if (data.rates?.XAU) {
-          results.push({ id: 'gold', name: 'Gold', current: 1 / data.rates.XAU, changePct: 0, unit: '$/oz', trend: 'stable' });
-        }
-      }
-    } catch { /* ignore */ }
-
-    if (results.length === 0) {
-      results.push(
-        { id: 'wti', name: 'WTI Crude', current: 0, changePct: 0, unit: '$/bbl', trend: 'stable' },
-        { id: 'brent', name: 'Brent Crude', current: 0, changePct: 0, unit: '$/bbl', trend: 'stable' },
-        { id: 'natgas', name: 'Natural Gas', current: 0, changePct: 0, unit: '$/MMBtu', trend: 'stable' },
-      );
-    }
-
-    setCache('energy:prices', results, 30 * 60 * 1000);
-    res.json({ prices: results });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch energy prices' });
-  }
-});
-
-// ── Geopolitical Risks (based on existing earthquake/EONET + static scoring) ──
-app.get('/api/geopolitical/risks', async (_req: express.Request, res: express.Response) => {
-  try {
-    const cached = getCached<unknown[]>('geo:risks', 60 * 60 * 1000);
-    if (cached) return res.json({ risks: cached });
-
-    // Static risk baseline — can be enhanced with live ACLED/UCDP data later
-    const risks = [
-      { country: 'Ukraine', code: 'UA', score: 85, level: 'critical', delta: 2 },
-      { country: 'Taiwan Strait', code: 'TW', score: 72, level: 'high', delta: -1 },
-      { country: 'Middle East', code: 'IL', score: 78, level: 'high', delta: 5 },
-      { country: 'South China Sea', code: 'CN', score: 65, level: 'medium', delta: 0 },
-      { country: 'Korean Peninsula', code: 'KP', score: 58, level: 'medium', delta: -2 },
-      { country: 'Sahel Region', code: 'ML', score: 62, level: 'medium', delta: 3 },
-      { country: 'Red Sea', code: 'YE', score: 70, level: 'high', delta: 4 },
-      { country: 'Balkans', code: 'RS', score: 42, level: 'low', delta: -1 },
-    ];
-
-    setCache('geo:risks', risks, 60 * 60 * 1000);
-    res.json({ risks });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch geopolitical risks' });
-  }
-});
-
-// ── Correlation Cards (cross-domain signal aggregation) ──
-app.get('/api/correlation/cards', async (_req: express.Request, res: express.Response) => {
-  try {
-    const cached = getCached<unknown[]>('correlation:cards', 5 * 60 * 1000);
-    if (cached) return res.json({ cards: cached });
-
-    // Derive correlation signals from active earthquake + EONET data
-    const cards: unknown[] = [];
-    try {
-      const eqResp = await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson', { signal: AbortSignal.timeout(5000) });
-      if (eqResp.ok) {
-        const eqData = await eqResp.json() as { features?: Array<{ properties: { mag?: number; place?: string; time?: number }; geometry: { coordinates: number[] } }> };
-        const features = eqData.features ?? [];
-        // Cluster earthquakes by proximity
-        const clusters: Array<{ signals: number; score: number; title: string; trend: string; domain: string }> = [];
-        const processed = new Set<number>();
-        for (let i = 0; i < features.length; i++) {
-          if (processed.has(i)) continue;
-          const f1 = features[i]!;
-          const [lon1, lat1] = f1.geometry.coordinates;
-          const nearby = features.filter((f2, j) => {
-            if (j <= i || processed.has(j)) return false;
-            const [lon2, lat2] = f2.geometry.coordinates;
-            const dist = Math.sqrt((lat1 - lat2) ** 2 + (lon1 - lon2) ** 2);
-            return dist < 5; // ~500km
-          });
-          if (nearby.length >= 2) {
-            clusters.push({
-              signals: nearby.length + 1,
-              score: Math.min(100, (nearby.length + 1) * 25),
-              title: `Seismic cluster near ${f1.properties.place ?? 'unknown region'}`,
-              trend: 'escalating',
-              domain: 'disaster',
-            });
-            processed.add(i);
-            nearby.forEach((_, j) => processed.add(j));
-          }
-        }
-        cards.push(...clusters.slice(0, 5));
-      }
-    } catch { /* ignore */ }
-
-    setCache('correlation:cards', cards, 5 * 60 * 1000);
-    res.json({ cards });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch correlation cards' });
-  }
-});
+// ── Correlation Cards — handled by pulseRouter at /api/pulse/correlation/cards ──
 
 /* ═══════════════════════════════════════════════════════════════════
    PRITHVI EO FOUNDATION MODEL — routes registered above
@@ -9891,6 +10528,8 @@ httpServer.listen(PORT, () => {
   logger.info({ port: PORT }, 'server started');
   startMemoryLogging();
   startResourceMonitor();
+  startOsintBridge();
+  startSentinelEngine();
   // Pre-warm slow caches so first user request doesn't pay the penalty
   fetchAndCacheAirspaces().then(() => logger.info('Airspace cache pre-warmed')).catch(() => {});
   fetchOceanCurrents().then(r => logger.info({ count: r.length }, 'Ocean currents cache pre-warmed')).catch(e => logger.error({ err: String(e) }, 'Ocean currents pre-warm failed'));
@@ -9940,6 +10579,15 @@ function gracefulShutdown(signal: string) {
   stopMemoryLogging();
   stopResourceMonitor();
   stopSyntheticDataGeneration();
+  stopOsintBridge();
+  stopSentinelEngine();
+  correlationEngine?.stop();
+  forcePosture?.stop();
+  roadTrafficDetector.stop();
+  spacexEngine.stop();
+  bayFireDetector.stop();
+  weatherForecaster.stop();
+  agricultureMonitor.stop();
   shutdownWsServer();
   httpServer.close(async () => {
     logger.info('HTTP server closed.');

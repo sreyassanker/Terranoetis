@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { logger } from '../observability/logger';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 
@@ -45,7 +46,7 @@ router.get('/market/quotes', async (req: Request, res: Response) => {
             changePct: data.dp, source: 'finnhub',
             sparkline: [data.pc * 0.98, data.pc * 0.99, data.pc * 0.97, data.pc * 1.01, data.c * 0.99, data.c],
           };
-        } catch { return null; }
+        } catch (e) { logger.warn({ err: e }, 'Pulse Finnhub quote failed'); return null; }
       });
       const stockResults = await Promise.all(promises);
       results.push(...stockResults.filter(Boolean));
@@ -74,7 +75,7 @@ router.get('/market/quotes', async (req: Request, res: Response) => {
             source: 'yahoo',
             sparkline: prices.length >= 2 ? prices : undefined,
           };
-        } catch { return null; }
+        } catch (e) { logger.warn({ err: e }, 'Pulse Yahoo quote failed'); return null; }
       });
       const yahooResults = await Promise.all(promises);
       results.push(...yahooResults.filter(Boolean));
@@ -103,12 +104,13 @@ router.get('/market/quotes', async (req: Request, res: Response) => {
             }
           }
         }
-      } catch { /* ignore */ }
+      } catch (e) { logger.warn({ err: e }, 'Pulse CoinGecko crypto failed'); }
     }
 
     setCache(cacheKey, results, 60 * 1000);
     res.json({ quotes: results });
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Pulse market quotes failed');
     res.status(500).json({ error: 'Failed to fetch market quotes' });
   }
 });
@@ -157,7 +159,8 @@ router.get('/market/candle', async (req: Request, res: Response) => {
       low: quotes.low?.[i], close: quotes.close?.[i], volume: quotes.volume?.[i],
     })).filter((c: any) => c.close != null);
     res.json({ candles, symbol, range: rawRange });
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Pulse candle data failed');
     res.status(500).json({ error: 'Failed to fetch candle data' });
   }
 });
@@ -186,7 +189,7 @@ router.get('/energy/prices', async (_req: Request, res: Response) => {
             const changePct = prev ? ((current - prev) / prev) * 100 : 0;
             results.push({ id, name: id === 'wti' ? 'WTI Crude' : id === 'brent' ? 'Brent Crude' : 'Natural Gas', current, changePct: Math.round(changePct * 10) / 10, unit: id === 'natgas' ? '$/MMBtu' : '$/bbl', trend: changePct > 0.5 ? 'up' : changePct < -0.5 ? 'down' : 'stable', source: 'eia' });
           }
-        } catch { /* skip */ }
+        } catch (e) { logger.warn({ err: e }, 'Pulse EIA commodity failed'); }
       }
     }
 
@@ -217,7 +220,7 @@ router.get('/energy/prices', async (_req: Request, res: Response) => {
           results.push({ id: commodity.id, name: commodity.name, current: meta.regularMarketPrice, changePct: Math.round(changePct * 10) / 10, unit: commodity.unit, trend: changePct > 0.5 ? 'up' : changePct < -0.5 ? 'down' : 'stable', source: 'yahoo' });
         }
       }
-    } catch { /* ignore */ }
+    } catch (e) { logger.warn({ err: e }, 'Pulse Yahoo energy fallback failed'); }
 
     if (results.length === 0) {
       results.push(
@@ -228,7 +231,8 @@ router.get('/energy/prices', async (_req: Request, res: Response) => {
 
     setCache('pulse:energy', results, 15 * 60 * 1000);
     res.json({ prices: results });
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Pulse energy prices failed');
     res.status(500).json({ error: 'Failed to fetch energy prices' });
   }
 });
@@ -255,7 +259,8 @@ router.get('/energy/history', async (req: Request, res: Response) => {
     const closes = (result.indicators?.quote?.[0]?.close || []).filter((v: number | null) => v != null);
     const history = closes.map((v: number) => ({ value: v }));
     res.json({ data: history, series });
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Pulse energy history failed');
     res.status(500).json({ error: 'Failed to fetch energy history' });
   }
 });
@@ -308,7 +313,7 @@ router.get('/geopolitical/risks', async (_req: Request, res: Response) => {
             event_count: eventCount,
           });
         }
-      } catch { /* skip */ }
+      } catch (e) { logger.warn({ err: e }, 'Pulse WarScope query failed'); }
     }
 
     // Fallback to static data if WarScope fails
@@ -331,7 +336,8 @@ router.get('/geopolitical/risks', async (_req: Request, res: Response) => {
 
     setCache('pulse:geo', risks, 30 * 60 * 1000);
     res.json({ risks });
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Pulse geopolitical risks failed');
     res.status(500).json({ error: 'Failed to fetch geopolitical risks' });
   }
 });
@@ -383,7 +389,7 @@ router.get('/correlation/cards', async (_req: Request, res: Response) => {
           }
         }
       }
-    } catch { /* ignore */ }
+    } catch (e) { logger.warn({ err: e }, 'Pulse SPY-WTI correlation failed'); }
 
     // 2. Gold & USD negative correlation (classic hedge)
     try {
@@ -415,7 +421,7 @@ router.get('/correlation/cards', async (_req: Request, res: Response) => {
           });
         }
       }
-    } catch { /* ignore */ }
+    } catch (e) { logger.warn({ err: e }, 'Pulse Gold-DXY correlation failed'); }
 
     // 3. Geopolitical + energy correlation
     try {
@@ -435,7 +441,7 @@ router.get('/correlation/cards', async (_req: Request, res: Response) => {
           });
         }
       }
-    } catch { /* ignore */ }
+    } catch (e) { logger.warn({ err: e }, 'Pulse geo-energy correlation failed'); }
 
     // 4. Xoomar sentiment divergence
     try {
@@ -459,7 +465,7 @@ router.get('/correlation/cards', async (_req: Request, res: Response) => {
           });
         }
       }
-    } catch { /* ignore */ }
+    } catch (e) { logger.warn({ err: e }, 'Pulse sentiment divergence failed'); }
 
     // 5. Global event density
     try {
@@ -480,11 +486,12 @@ router.get('/correlation/cards', async (_req: Request, res: Response) => {
           });
         }
       }
-    } catch { /* ignore */ }
+    } catch (e) { logger.warn({ err: e }, 'Pulse event density failed'); }
 
     setCache('pulse:corr', cards, 10 * 60 * 1000);
     res.json({ cards });
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Pulse correlation cards failed');
     res.status(500).json({ error: 'Failed to fetch correlation cards' });
   }
 });
@@ -500,7 +507,8 @@ router.get('/sentiment', async (_req: Request, res: Response) => {
     const data = await resp.json();
     setCache('pulse:sentiment', data, 30 * 60 * 1000);
     res.json(data);
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Pulse sentiment failed');
     res.status(500).json({ error: 'Failed to fetch sentiment data' });
   }
 });
@@ -532,7 +540,8 @@ router.get('/heatmap', async (_req: Request, res: Response) => {
           const prevClose = meta.chartPreviousClose || meta.regularMarketPrice;
           const changePct = prevClose ? ((meta.regularMarketPrice - prevClose) / prevClose) * 100 : 0;
           return { symbol, price: meta.regularMarketPrice, changePct: Math.round(changePct * 100) / 100 };
-        } catch {
+        } catch (e) {
+          logger.warn({ err: e }, 'Pulse heatmap symbol failed');
           return { symbol, price: null, changePct: null };
         }
       });
@@ -542,7 +551,8 @@ router.get('/heatmap', async (_req: Request, res: Response) => {
 
     setCache('pulse:heatmap', results, 5 * 60 * 1000);
     res.json({ assets: results });
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e }, 'Pulse heatmap failed');
     res.status(500).json({ error: 'Failed to fetch heatmap data' });
   }
 });

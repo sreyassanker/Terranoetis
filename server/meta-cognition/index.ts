@@ -153,6 +153,6 @@ export class MetaCognition {
           created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
       `);
-    } catch { /* tables exist */ }
+    } catch (e) { logger.warn({ err: e }, 'Meta-cognition DB tables already exist'); }
   }
 }

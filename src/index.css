@@ -149,8 +149,7 @@ p { text-align: justify; }
     backdrop-filter: saturate(180%);
     -webkit-backdrop-filter: saturate(180%);
     flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible;
   }
 
   .brand {
@@ -198,15 +197,14 @@ p { text-align: justify; }
   }
 
   .topbar-right {
-    margin-left: auto;
+    margin-left: 12px;
     display: flex;
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
     flex-wrap: nowrap;
-    justify-content: flex-end;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    justify-content: flex-start;
+    overflow: visible;
   }
 
   .status-pill {
@@ -258,6 +256,69 @@ p { text-align: justify; }
   .btn-icon.active {
     background: rgba(59, 130, 246, 0.2);
     border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ── TOP BAR GROUPED MENUS ── */
+  .topbar-menu {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .topbar-menu-pop {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 200px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    z-index: 200;
+  }
+
+  .topbar-menu-pop.up {
+    top: auto;
+    bottom: calc(100% + 8px);
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.45);
+  }
+
+  .topbar-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+    border-radius: 7px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+  }
+
+  .topbar-menu-item:hover {
+    background: rgba(59, 130, 246, 0.12);
+  }
+
+  .topbar-menu-item.active {
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--accent);
+  }
+
+  .topbar-menu-item-icon {
+    display: flex;
+    align-items: center;
+    color: var(--text-dim);
+  }
+
+  .topbar-menu-item.active .topbar-menu-item-icon {
     color: var(--accent);
   }
 
@@ -879,7 +940,7 @@ p { text-align: justify; }
     gap: 0;
     z-index: 90;
     transition: left 0.3s ease;
-    overflow-x: auto;
+    overflow: visible;
   }
 
   .statsbar.full-width { left: 0; }

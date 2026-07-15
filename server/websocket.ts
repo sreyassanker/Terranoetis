@@ -15,7 +15,7 @@ const HEARTBEAT_TIMEOUT = 35000;
 //   - `fork:${forkId}` — allowed (fork streaming is global; ownership checked at REST API)
 //   - `ws:all`        — public, read-only broadcasts
 //   - everything else must be in the explicit allowlist below
-const PUBLIC_CHANNELS = new Set(['ws:all', 'sentinel:raw', 'proactive', 'fork:all']);
+const PUBLIC_CHANNELS = new Set(['ws:all', 'sentinel:raw', 'proactive', 'fork:all', 'military:updates', 'sentinel:alerts', 'correlation:alerts']);
 const CHANNEL_MAX_LENGTH = 128;
 const VALID_CHANNEL_RE = /^(ws:[a-zA-Z0-9_.-]{1,64}|fork:[a-zA-Z0-9_.-]{1,64}|[a-z][a-z0-9_:-]{0,80})$/;
 

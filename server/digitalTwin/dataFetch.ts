@@ -627,17 +627,6 @@ function getFallbackInfrastructure(bounds: RegionBounds): InfrastructureData {
       { type: 'hospital', name: 'Apollo Hospital', lat: 13.0100, lon: 80.2580, tags: {} },
     );
   }
-  // Generic fallback: ensure at least some pins appear for any location
-  if (hospitals.length === 0) {
-    hospitals.push(
-      { type: 'hospital', name: 'General Hospital', lat: centerLat + 0.01, lon: centerLon - 0.01, tags: {} },
-      { type: 'hospital', name: 'Medical Center', lat: centerLat - 0.01, lon: centerLon + 0.01, tags: {} },
-    );
-  }
-  if (schools.length === 0) {
-    schools.push(
-      { type: 'school', name: 'Public School', lat: centerLat + 0.005, lon: centerLon + 0.005, tags: {} },
-    );
-  }
+  // Return empty arrays for unknown locations instead of fabricating data
   return { hospitals, schools, roads: [], total: hospitals.length + schools.length };
 }

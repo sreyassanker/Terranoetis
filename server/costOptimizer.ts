@@ -1,4 +1,5 @@
 import NodeCache from 'node-cache';
+import { logger } from './observability/logger';
 import { getDb } from './db/index';
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -16,8 +17,8 @@ export interface ModelConfig {
 
 const TIERS: Record<ModelTier, ModelConfig> = {
   local:   { name: 'local',           inputPricePer1M: 0,    outputPricePer1M: 0,    description: 'Local keyword/rule matching — free' },
-  flash:   { name: 'gemini-2.0-flash', inputPricePer1M: 0.075, outputPricePer1M: 0.30, description: 'Gemini 2.0 Flash — fast & cheap' },
-  pro:     { name: 'gemini-2.0-flash-lite', inputPricePer1M: 0.075, outputPricePer1M: 0.30, description: 'Gemini 2.0 Flash Lite — cheapest' },
+  flash:   { name: 'gemini-2.0-flash-lite', inputPricePer1M: 0.075, outputPricePer1M: 0.30, description: 'Gemini 2.0 Flash Lite — cheapest' },
+  pro:     { name: 'gemini-2.0-flash', inputPricePer1M: 0.075, outputPricePer1M: 0.30, description: 'Gemini 2.0 Flash — fast & cheap' },
   'pro-exp': { name: 'gemini-2.0-pro-exp', inputPricePer1M: 2.50, outputPricePer1M: 10.00, description: 'Gemini 2.0 Pro — experimental best quality' },
 };
 
@@ -124,8 +125,8 @@ export class CostTracker {
         cached ? 1 : 0,
         tier,
       );
-    } catch {
-      /* persist failed — entry still available in return value */
+    } catch (e) {
+      logger.warn({ err: e }, 'Cost entry persist failed');
     }
 
     return entry;
@@ -188,7 +189,8 @@ export class CostTracker {
           cached: r.cached === 1,
         })),
       };
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Cost stats query failed');
       return { totalCost: 0, totalQueries: 0, todayCost: 0, todayQueries: 0, cachedHits: 0, byTier: {}, recentEntries: [] };
     }
   }
@@ -197,8 +199,8 @@ export class CostTracker {
     try {
       const db = getDb();
       db.prepare("DELETE FROM episodes WHERE user_id = '_cost_tracker'").run();
-    } catch {
-      /* ignore */
+    } catch (e) {
+      logger.warn({ err: e }, 'Cost clear failed');
     }
   }
 }

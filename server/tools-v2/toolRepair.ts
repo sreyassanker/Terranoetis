@@ -204,7 +204,8 @@ Rules:
       if (!jsonMatch) return null;
       const parsed = JSON.parse(jsonMatch[0]) as { fixedCode: string };
       return parsed.fixedCode || null;
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'LLM repair generation failed');
       return null;
     }
   }

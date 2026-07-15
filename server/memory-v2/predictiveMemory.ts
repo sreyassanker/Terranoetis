@@ -80,7 +80,7 @@ export class PredictiveMemory {
       db.exec(`CREATE INDEX IF NOT EXISTS idx_prediction_v2_model ON prediction_log_v2(model_id)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_prediction_v2_hazard ON prediction_log_v2(hazard_type)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_prediction_v2_created ON prediction_log_v2(created_at DESC)`);
-    } catch { /* tables exist */ }
+    } catch (e) { logger.warn({ err: (e as Error).message }, 'PredictiveMemory tables may already exist'); }
   }
 
   registerModel(modelType: ModelType, parameters: Record<string, unknown>, trainingDataDesc: string): number {
@@ -94,7 +94,8 @@ export class PredictiveMemory {
       const id = result.lastInsertRowid as number;
       logger.info({ id, modelType }, 'Predictive model registered');
       return id;
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message, modelType }, 'Failed to register predictive model');
       return -1;
     }
   }
@@ -108,7 +109,8 @@ export class PredictiveMemory {
       `).run(modelId, hazardType, probability, severity, confidence, JSON.stringify(features));
 
       return result.lastInsertRowid as number;
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message, modelId, hazardType }, 'Failed to log prediction');
       return null;
     }
   }
@@ -155,7 +157,7 @@ export class PredictiveMemory {
           `).run(JSON.stringify(recentHist), newAccuracy, row.model_id);
         }
       }
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message }, 'Failed to record outcome'); }
   }
 
   async predict(hazardType: string, features: Record<string, unknown>): Promise<EnsembleResult> {
@@ -241,7 +243,8 @@ export class PredictiveMemory {
       ).all() as Array<Record<string, unknown>>;
 
       return rows.map(r => this.rowToModel(r));
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to get active models');
       return [];
     }
   }
@@ -252,7 +255,8 @@ export class PredictiveMemory {
       const row = db.prepare('SELECT * FROM predictive_models WHERE id = ?').get(id) as Record<string, unknown> | undefined;
       if (!row) return null;
       return this.rowToModel(row);
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message, id }, 'Failed to get model');
       return null;
     }
   }

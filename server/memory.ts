@@ -1,5 +1,6 @@
 import NodeCache from 'node-cache';
 import { getDb } from './db/index';
+import { logger } from './observability/logger';
 import { EmbeddingEngine, cosineSimilarity, embeddingToBuffer, bufferToEmbedding } from './embedding';
 import { omninet } from './ai-router/omninet';
 
@@ -93,8 +94,8 @@ export class UserProfileManager {
         this.cache.set(userId, profile);
         return profile;
       }
-    } catch {
-      /* fall through to default */
+    } catch (e) {
+      logger.warn({ err: e }, 'Profile DB load failed, using default');
     }
 
     const profile: UserProfile = {
@@ -133,8 +134,8 @@ export class UserProfileManager {
         JSON.stringify(profile.layerToggleCount),
         '{}',
       );
-    } catch {
-      /* silently fail — in-memory cache still works */
+    } catch (e) {
+      logger.warn({ err: e }, 'Profile DB persist failed');
     }
   }
 
@@ -186,8 +187,8 @@ export class UserProfileManager {
     try {
       const db = getDb();
       db.prepare('DELETE FROM profiles WHERE user_id = ?').run(userId);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      logger.warn({ err: e }, 'Profile DB delete failed');
     }
   }
 }
@@ -231,8 +232,8 @@ export class EpisodicMemory {
           )
         `).run(episode.userId, episode.userId, this.maxEpisodes);
       }
-    } catch {
-      /* silent */
+    } catch (e) {
+      logger.warn({ err: e }, 'Episode pruning failed');
     }
   }
 
@@ -262,7 +263,8 @@ export class EpisodicMemory {
         .sort((a, b) => b.score - a.score)
         .slice(0, limit)
         .map(s => this.rowToEpisode(s.row));
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Episode search failed');
       return [];
     }
   }
@@ -279,7 +281,8 @@ export class EpisodicMemory {
         'SELECT * FROM episodes WHERE user_id = ? ORDER BY created_at DESC LIMIT ?'
       ).all(this.userId, count) as Array<Record<string, unknown>>;
       return rows.map(r => this.rowToEpisode(r));
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Recent episodes query failed');
       return [];
     }
   }
@@ -289,7 +292,8 @@ export class EpisodicMemory {
       const db = getDb();
       const row = db.prepare('SELECT COUNT(*) as cnt FROM episodes WHERE user_id = ?').get(this.userId) as { cnt: number };
       return row.cnt;
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Episode count failed');
       return 0;
     }
   }
@@ -354,12 +358,12 @@ export class SemanticCache {
           try {
             const db2 = getDb();
             db2.prepare('UPDATE cache_entries SET hit_count = hit_count + 1 WHERE query_hash = ?').run(row.content as string);
-          } catch { /* silent */ }
+          } catch (e) { logger.warn({ err: e }, 'Semantic cache hit count update failed'); }
           return response;
         }
       }
-    } catch {
-      /* fall through */
+    } catch (e) {
+      logger.warn({ err: e }, 'Semantic cache lookup failed');
     }
 
     return undefined;
@@ -390,8 +394,8 @@ export class SemanticCache {
           embedding = excluded.embedding
         -- sqlite doesn't support ON CONFLICT on non-unique — skip silently
       `).run(normalized, normalized, embeddingToBuffer(emb));
-    } catch {
-      /* silent */
+    } catch (e) {
+      logger.warn({ err: e }, 'Semantic cache set failed');
     }
   }
 
@@ -401,8 +405,8 @@ export class SemanticCache {
       const db = getDb();
       db.prepare('DELETE FROM cache_entries').run();
       db.prepare("DELETE FROM vec_store WHERE entity_type = 'cache'").run();
-    } catch {
-      /* silent */
+    } catch (e) {
+      logger.warn({ err: e }, 'Semantic cache clear failed');
     }
   }
 
@@ -411,7 +415,8 @@ export class SemanticCache {
       const db = getDb();
       const row = db.prepare('SELECT COUNT(*) as cnt FROM cache_entries').get() as { cnt: number };
       return row.cnt;
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Semantic cache size query failed');
       return 0;
     }
   }
@@ -457,7 +462,8 @@ Text: "${text.replace(/"/g, '\\"')}"`;
         this.cache.set(cacheKey, valid, 300);
       }
       return valid;
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Fact extraction LLM call failed');
       return [];
     }
   }
@@ -478,8 +484,8 @@ Text: "${text.replace(/"/g, '\\"')}"`;
         INSERT INTO vec_store (user_id, entity_type, entity_id, content, embedding)
         VALUES (?, 'fact', ?, ?, ?)
       `).run(userId, String(rowId), factText, embBuf);
-    } catch {
-      /* silent */
+    } catch (e) {
+      logger.warn({ err: e }, 'Fact store failed');
     }
   }
 
@@ -518,7 +524,8 @@ Text: "${text.replace(/"/g, '\\"')}"`;
         .sort((a, b) => b.score - a.score)
         .slice(0, limit)
         .map(s => s.fact);
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Fact search failed');
       return [];
     }
   }
@@ -550,8 +557,8 @@ export class ProceduralMemory {
         `).run(userId, intentType, JSON.stringify(pattern));
       }
       this.cache.del(`patterns:${userId}:${intentType}`);
-    } catch {
-      /* silent */
+    } catch (e) {
+      logger.warn({ err: e }, 'Procedural pattern store failed');
     }
   }
 
@@ -576,7 +583,8 @@ export class ProceduralMemory {
       }));
       this.cache.set(cacheKey, patterns, 600);
       return patterns;
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Pattern query failed');
       return [];
     }
   }
@@ -625,7 +633,7 @@ export class MemoryManager {
     let facts: Fact[] = [];
     try {
       facts = await this.factManager.searchFacts(currentQuery, userId, 5);
-    } catch { /* ignore */ }
+    } catch (e) { logger.warn({ err: e }, 'Fact search in context build failed'); }
 
     const parts: string[] = ['<context>'];
 
@@ -733,7 +741,8 @@ export class MemoryManager {
   async buildWorkingMemoryContext(userId: string, currentQuery: string, recentMessages: Array<{ role: string; content: string }>): Promise<string> {
     try {
       return await this.buildContext(userId, currentQuery, recentMessages);
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Working memory context build failed');
       return '';
     }
   }

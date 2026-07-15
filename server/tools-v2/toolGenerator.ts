@@ -74,7 +74,7 @@ export class DynamicToolRegistry {
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(tool_name, version)
       )`);
-    } catch { /* tables exist */ }
+    } catch (e) { logger.warn({ err: e }, 'ToolGenerator table creation'); }
   }
 
   register(tool: Omit<DynamicTool, 'id' | 'version' | 'status' | 'healthStatus' | 'createdAt' | 'updatedAt'>): number {
@@ -277,7 +277,7 @@ Example format:
     try {
       const db = getDb();
       db.prepare('UPDATE dynamic_tools SET status = ? WHERE name = ?').run('disabled', name);
-    } catch { /* silent */ }
+          } catch (e) { logger.warn({ err: e }, 'ToolGenerator remove DB update failed'); }
     return true;
   }
 
@@ -288,7 +288,7 @@ Example format:
     try {
       const db = getDb();
       db.prepare('UPDATE dynamic_tools SET status = ? WHERE name = ?').run('disabled', name);
-    } catch { /* silent */ }
+    } catch (e) { logger.warn({ err: e }, 'ToolGenerator disable DB update failed'); }
   }
 
   enable(name: string): void {
@@ -298,7 +298,7 @@ Example format:
     try {
       const db = getDb();
       db.prepare('UPDATE dynamic_tools SET status = ? WHERE name = ?').run('active', name);
-    } catch { /* silent */ }
+    } catch (e) { logger.warn({ err: e }, 'ToolGenerator enable DB update failed'); }
   }
 
   rollback(name: string, targetVersion: number): DynamicTool | null {
@@ -324,7 +324,8 @@ Example format:
       `).run(tool.code, JSON.stringify(tool.schema), targetVersion, name);
 
       return tool;
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'ToolGenerator rollback failed');
       return null;
     }
   }
@@ -336,7 +337,7 @@ Example format:
     try {
       const db = getDb();
       db.prepare('UPDATE dynamic_tools SET health_status = ? WHERE name = ?').run(status, name);
-    } catch { /* silent */ }
+    } catch (e) { logger.warn({ err: e }, 'ToolGenerator health update failed'); }
   }
 
   search(query: string): DynamicTool[] {
@@ -372,7 +373,7 @@ Example format:
         };
         this.tools.set(tool.name, tool);
       }
-    } catch { /* silent */ }
+    } catch (e) { logger.warn({ err: e }, 'ToolGenerator loadFromDb failed'); }
   }
 
   private sanitizeName(name: string): string {

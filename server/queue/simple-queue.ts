@@ -109,8 +109,8 @@ export class SimpleQueue {
           LIMIT 1
         `).get() as Job | undefined;
         job = row;
-      } catch {
-        /* silent */
+      } catch (e) {
+        logger.warn({ err: e }, 'Queue job fetch failed');
       }
 
       if (!job) break;
@@ -121,7 +121,7 @@ export class SimpleQueue {
           const db = getDb();
           db.prepare("UPDATE job_queue SET status = 'failed', error = ? WHERE id = ?")
             .run(`No handler for type: ${job.type}`, job.id);
-        } catch { /* silent */ }
+        } catch (e) { logger.warn({ err: e }, 'Queue job fail update failed'); }
         continue;
       }
 
@@ -130,7 +130,7 @@ export class SimpleQueue {
         const db = getDb();
         db.prepare("UPDATE job_queue SET status = 'running', attempts = attempts + 1 WHERE id = ?")
           .run(job.id);
-      } catch { /* silent */ }
+      } catch (e) { logger.warn({ err: e }, 'Queue job running update failed'); }
 
       this.executeJob(job, handler).finally(() => {
         this.activeJobs--;
@@ -149,7 +149,7 @@ export class SimpleQueue {
         const db = getDb();
         db.prepare("UPDATE job_queue SET status = 'completed', processed_at = datetime('now') WHERE id = ?")
           .run(job.id);
-      } catch { /* silent */ }
+      } catch (e) { logger.warn({ err: e }, 'Queue job complete update failed'); }
     } catch (e) {
       const errMsg = (e as Error).message;
       logger.warn({ jobId: job.id, type: job.type, error: errMsg, attempt: job.attempts }, 'job failed');
@@ -165,7 +165,7 @@ export class SimpleQueue {
             .run(retryAt, errMsg, job.id);
           setImmediate(() => this.processNext());
         }
-      } catch { /* silent */ }
+      } catch (e) { logger.warn({ err: e }, 'Queue job retry/fail update failed'); }
     }
   }
 
@@ -178,7 +178,8 @@ export class SimpleQueue {
       }
       const row = db.prepare("SELECT COUNT(*) as cnt FROM job_queue WHERE status = 'pending'").get() as { cnt: number };
       return row.cnt;
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Queue pending count query failed');
       return 0;
     }
   }

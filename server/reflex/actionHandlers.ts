@@ -106,6 +106,25 @@ export class ReflexActionHandler {
   }
 
   private handleScan(reflexId: string, action: any, _triggerData: any): void {
+    try {
+      const db = getDb();
+      db.prepare(`
+        INSERT INTO sentinel_alerts (alert_id, anomaly_id, title, body, severity, lat, lon, delivered)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        `scan-${reflexId}-${Date.now()}`,
+        'scan',
+        `Scan: ${reflexId}`,
+        JSON.stringify({ action }),
+        'INFO',
+        action.region?.lat || 0,
+        action.region?.lon || 0,
+        0,
+      );
+    } catch (e) {
+      console.error('[REFLEX-ACTION] Failed to persist scan:', e);
+    }
+
     pubsub.publish('ws:all', {
       type: 'REFLEX_SCAN',
       reflexId,
@@ -119,6 +138,25 @@ export class ReflexActionHandler {
   }
 
   private handleFlag(reflexId: string, action: any, _triggerData: any): void {
+    try {
+      const db = getDb();
+      db.prepare(`
+        INSERT INTO sentinel_alerts (alert_id, anomaly_id, title, body, severity, lat, lon, delivered)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        `flag-${reflexId}-${Date.now()}`,
+        'flag',
+        `Flag: ${action.target}`,
+        JSON.stringify({ action }),
+        'YELLOW',
+        action.region?.lat || 0,
+        action.region?.lon || 0,
+        0,
+      );
+    } catch (e) {
+      console.error('[REFLEX-ACTION] Failed to persist flag:', e);
+    }
+
     pubsub.publish('ws:all', {
       type: 'REFLEX_FLAG',
       reflexId,

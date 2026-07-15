@@ -264,7 +264,8 @@ export class MemoryManagerV2 {
         'SELECT * FROM reasoning_traces WHERE trace_id = ?'
       ).get(traceId) as Record<string, unknown> | undefined;
       return row ?? null;
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message, traceId }, 'Failed to get trace');
       return null;
     }
   }

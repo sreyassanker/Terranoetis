@@ -45,7 +45,7 @@ export class ProceduralMemoryV2 {
 
       db.exec(`CREATE INDEX IF NOT EXISTS idx_procedural_v2_trigger ON procedural_v2(trigger_condition)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_procedural_v2_success ON procedural_v2(success_rate DESC)`);
-    } catch { /* tables exist */ }
+    } catch (e) { logger.warn({ err: (e as Error).message }, 'ProceduralMemory tables may already exist'); }
   }
 
   record(toolChain: ToolStep[], success: boolean, latencyMs: number): number | null {
@@ -83,7 +83,8 @@ export class ProceduralMemoryV2 {
 
         return result.lastInsertRowid as number;
       }
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to record procedure');
       return null;
     }
   }
@@ -99,7 +100,8 @@ export class ProceduralMemoryV2 {
       `).run(`%${intentType}%`, limit) as unknown as Array<Record<string, unknown>>;
 
       return rows.map(r => this.rowToProcedure(r));
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to query procedures');
       return [];
     }
   }
@@ -115,7 +117,8 @@ export class ProceduralMemoryV2 {
       `).run(`%${trigger}%`, limit) as unknown as Array<Record<string, unknown>>;
 
       return rows.map(r => this.rowToProcedure(r));
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to query procedures');
       return [];
     }
   }
@@ -130,7 +133,8 @@ export class ProceduralMemoryV2 {
       `).all(limit) as Array<Record<string, unknown>>;
 
       return rows.map(r => this.rowToProcedure(r));
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message }, 'Failed to query procedures');
       return [];
     }
   }
@@ -147,7 +151,7 @@ export class ProceduralMemoryV2 {
         db.prepare('UPDATE procedural_v2 SET success_rate = ?, usage_count = ? WHERE id = ?')
           .run(newRate, newCount, id);
       }
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message }, 'Failed in procedural memory operation'); }
   }
 
   private abstract(procedureId: number): void {
@@ -176,7 +180,7 @@ export class ProceduralMemoryV2 {
 
       db.prepare('UPDATE procedural_v2 SET abstracted = 1 WHERE id = ?').run(procedureId);
       logger.info({ id: procedureId }, 'Procedure abstracted to variable form');
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message }, 'Failed in procedural memory operation'); }
   }
 
   private isAbstracted(id: number): boolean {
@@ -184,7 +188,8 @@ export class ProceduralMemoryV2 {
       const db = getDb();
       const row = db.prepare('SELECT abstracted FROM procedural_v2 WHERE id = ?').get(id) as { abstracted: number } | undefined;
       return row?.abstracted === 1;
-    } catch {
+    } catch (e) {
+      logger.error({ err: (e as Error).message, id }, 'Failed to check if procedure is abstracted');
       return false;
     }
   }

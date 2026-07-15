@@ -922,6 +922,64 @@ function greatCircleDistance(lat1: number, lon1: number, lat2: number, lon2: num
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/* ── Top bar grouped menu ── */
+interface TopbarMenuItem {
+  label: string;
+  icon: React.ReactNode;
+  active?: boolean;
+  onClick: () => void;
+}
+
+function TopbarMenu({
+  id, title, icon, active, menuId, setMenuId, items, direction = 'down', triggerClassName,
+}: {
+  id: string;
+  title: string;
+  icon: React.ReactNode;
+  active?: boolean;
+  menuId: string | null;
+  setMenuId: (id: string | null) => void;
+  items: TopbarMenuItem[];
+  direction?: 'down' | 'up';
+  triggerClassName?: string;
+}) {
+  const open = menuId === id;
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setMenuId(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open, setMenuId]);
+  return (
+    <div className="topbar-menu" ref={ref}>
+      <button
+        className={`${triggerClassName ?? 'btn-icon'} ${active || open ? 'active' : ''}`}
+        title={title}
+        onClick={() => setMenuId(open ? null : id)}
+      >
+        {icon}
+      </button>
+      {open && (
+        <div className={`topbar-menu-pop ${direction === 'up' ? 'up' : ''}`}>
+          {items.map((it, i) => (
+            <button
+              key={i}
+              className={`topbar-menu-item ${it.active ? 'active' : ''}`}
+              onClick={() => { it.onClick(); setMenuId(null); }}
+            >
+              <span className="topbar-menu-item-icon">{it.icon}</span>
+              <span>{it.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═════════════════════════════════════════════════════════════════
    MAIN APP COMPONENT
    ═════════════════════════════════════════════════════════════════ */
@@ -1102,6 +1160,7 @@ export default function App() {
   const [cinematicFocusEntity, setCinematicFocusEntity] = useState<{ lat: number; lon: number; layer: string; name?: string } | null>(null);
   const [showSpatialSketching, setShowSpatialSketching] = useState(false);
   const [showPerfMonitor, setShowPerfMonitor] = useState(false);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [selectedScenario, setSelectedScenario] = useState<any>(null);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [scenarioGalleryScenarios, setScenarioGalleryScenarios] = useState<any[]>([]);
@@ -7260,35 +7319,62 @@ export default function App() {
             <div className="status-dot" />
             <span>Live</span>
           </div>
+
+          <button className={`btn-icon ${showIntelFeed ? 'active' : ''}`} onClick={() => toggleLayer('intel_feed')} title="Intel Feed"><Radio size={16} /></button>
           <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => setShowStudyArea(p => !p)} title="Study Area"><Crosshair size={16} /></button>
           <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => setShowAI(p => !p)} title="AI Assistant"><Bot size={16} /></button>
-          <button className={`btn-icon ${showIntelFeed ? 'active' : ''}`} onClick={() => toggleLayer('intel_feed')} title="Intel Feed"><Radio size={16} /></button>
-          <button className={`btn-icon ${showAnalytics ? 'active' : ''}`} onClick={() => { setShowAnalytics(p => !p); if (!analyticsData) fetch('/api/agent/analytics').then(r => r.json()).then(setAnalyticsData).catch(() => {}); }} title="Analytics & Insights"><BarChart3 size={16} /></button>
-          <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share"><Share2 size={16} /></button>
-          <button className="btn-icon" onClick={() => setShowApiVault(true)} title="API Configuration"><Key size={16} /></button>
-          <button className={`btn-icon ${showCognitiveDashboard ? 'active' : ''}`} onClick={() => setShowCognitiveDashboard(p => !p)} title="Cognitive Dashboard"><Brain size={16} /></button>
-
-          <button className={`btn-icon ${showToolWorkbench ? 'active' : ''}`} onClick={() => setShowToolWorkbench(p => !p)} title="Tool Workbench"><Wrench size={16} /></button>
-          <button className={`btn-icon ${showMemoryExplorer ? 'active' : ''}`} onClick={() => setShowMemoryExplorer(p => !p)} title="Memory Explorer"><Save size={16} /></button>
-          <button className={`btn-icon ${showSettings ? 'active' : ''}`} onClick={() => setShowSettings(p => !p)} title="Settings"><Cog size={16} /></button>
-          <button className={`btn-icon ${showPerfMonitor ? 'active' : ''}`} onClick={() => setShowPerfMonitor(p => !p)} title="Performance Monitor"><Activity size={16} /></button>
-          <button className={`btn-icon ${showScenarioGallery ? 'active' : ''}`} onClick={() => setShowScenarioGallery(p => !p)} title="Scenarios"><Flame size={16} /></button>
-          <button className={`btn-icon ${showScenarioEditor ? 'active' : ''}`} onClick={() => setShowScenarioEditor(p => !p)} title="New Scenario"><Clapperboard size={16} /></button>
-
-          <button className={`btn-icon ${showCinematicDirector ? 'active' : ''}`} onClick={() => setShowCinematicDirector(p => !p)} title="Cinematic Director"><Film size={16} /></button>
-          <button className={`btn-icon ${showSpatialSketching ? 'active' : ''}`} onClick={() => setShowSpatialSketching(p => !p)} title="Spatial Sketch"><Pencil size={16} /></button>
-          <button className="btn-icon" onClick={takeSnapshot} title="Snapshot"><Camera size={16} /></button>
           <button className="btn-icon" onClick={flyToIndiaDirect} title="Fly to India"><Navigation2 size={16} /></button>
-          <button
-            className={`btn-icon ${isLayerEnabled('india_cctv') ? 'active' : ''}`}
-            onClick={() => toggleLayer('india_cctv')}
-            title="Worldwide Public Cameras"
-          >
-            <Cctv size={16} />
-          </button>
-          <button className="btn-icon" onClick={toggleISS} title="ISS Tracker"><Satellite size={16} /></button>
-          <button className={`btn-icon ${showTimeline ? 'active' : ''}`} onClick={toggleTimeline} title="Timeline"><Timer size={16} /></button>
-          <button className="btn-icon" onClick={toggleAutoRotate} title="Auto Rotate" style={isAutoRotating ? {color:'#22c55e'} : {}}><RefreshCw size={16} /></button>
+          <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share"><Share2 size={16} /></button>
+
+          <div className="topbar-sep" />
+
+          <TopbarMenu
+            id="analysis" title="AI & Analysis" icon={<Brain size={16} />}
+            menuId={openMenu} setMenuId={setOpenMenu}
+            active={showCognitiveDashboard || showToolWorkbench || showMemoryExplorer || showAnalytics}
+            items={[
+              { label: 'Cognitive Dashboard', icon: <Brain size={15} />, active: showCognitiveDashboard, onClick: () => setShowCognitiveDashboard(p => !p) },
+              { label: 'Tool Workbench', icon: <Wrench size={15} />, active: showToolWorkbench, onClick: () => setShowToolWorkbench(p => !p) },
+              { label: 'Memory Explorer', icon: <Save size={15} />, active: showMemoryExplorer, onClick: () => setShowMemoryExplorer(p => !p) },
+              { label: 'Analytics & Insights', icon: <BarChart3 size={15} />, active: showAnalytics, onClick: () => { setShowAnalytics(p => !p); if (!analyticsData) fetch('/api/agent/analytics').then(r => r.json()).then(setAnalyticsData).catch(() => {}); } },
+            ]}
+          />
+
+          <TopbarMenu
+            id="scenarios" title="Scenarios" icon={<Flame size={16} />}
+            menuId={openMenu} setMenuId={setOpenMenu}
+            active={showScenarioGallery || showScenarioEditor || showCinematicDirector || showSpatialSketching}
+            items={[
+              { label: 'Scenarios', icon: <Flame size={15} />, active: showScenarioGallery, onClick: () => setShowScenarioGallery(p => !p) },
+              { label: 'New Scenario', icon: <Clapperboard size={15} />, active: showScenarioEditor, onClick: () => setShowScenarioEditor(p => !p) },
+              { label: 'Cinematic Director', icon: <Film size={15} />, active: showCinematicDirector, onClick: () => setShowCinematicDirector(p => !p) },
+              { label: 'Spatial Sketch', icon: <Pencil size={15} />, active: showSpatialSketching, onClick: () => setShowSpatialSketching(p => !p) },
+            ]}
+          />
+
+          <TopbarMenu
+            id="view" title="View & Capture" icon={<Eye size={16} />}
+            menuId={openMenu} setMenuId={setOpenMenu}
+            active={isLayerEnabled('india_cctv') || showTimeline || isAutoRotating}
+            items={[
+              { label: 'Worldwide Public Cameras', icon: <Cctv size={15} />, active: isLayerEnabled('india_cctv'), onClick: () => toggleLayer('india_cctv') },
+              { label: 'ISS Tracker', icon: <Satellite size={15} />, onClick: () => toggleISS() },
+              { label: 'Timeline', icon: <Timer size={15} />, active: showTimeline, onClick: () => toggleTimeline() },
+              { label: 'Auto Rotate', icon: <RefreshCw size={15} />, active: isAutoRotating, onClick: () => toggleAutoRotate() },
+              { label: 'Snapshot', icon: <Camera size={15} />, onClick: () => takeSnapshot() },
+            ]}
+          />
+
+          <TopbarMenu
+            id="system" title="System" icon={<Cog size={16} />}
+            menuId={openMenu} setMenuId={setOpenMenu}
+            active={showSettings || showPerfMonitor}
+            items={[
+              { label: 'API Configuration', icon: <Key size={15} />, onClick: () => setShowApiVault(true) },
+              { label: 'Settings', icon: <Cog size={15} />, active: showSettings, onClick: () => setShowSettings(p => !p) },
+              { label: 'Performance Monitor', icon: <Activity size={15} />, active: showPerfMonitor, onClick: () => setShowPerfMonitor(p => !p) },
+            ]}
+          />
         </div>
       </div>
 
@@ -7813,46 +7899,19 @@ export default function App() {
         >
           <span style={{ fontSize: 16 }}>⬡</span>
         </button>
-        <button
-          className={`btn-icon monitor-btn ${showIntelligencePanel ? 'active' : ''}`}
-          onClick={() => setShowIntelligencePanel(prev => !prev)}
-          title="Pulse — markets, energy, geopolitics, correlations"
-          style={showIntelligencePanel ? { borderColor: '#818cf8', color: '#818cf8' } : {}}
-        >
-          <Eye size={16} />
-        </button>
-        <button
-          className={`btn-icon monitor-btn ${showPrithviPanel ? 'active' : ''}`}
-          onClick={() => setShowPrithviPanel(prev => !prev)}
-          title="Prithvi EO Foundation Model — satellite image analysis"
-          style={showPrithviPanel ? { borderColor: '#a855f7', color: '#a855f7' } : {}}
-        >
-          <Brain size={16} />
-        </button>
-        <button
-          className={`btn-icon monitor-btn ${showSearchPanel ? 'active' : ''}`}
-          onClick={() => setShowSearchPanel(p => !p)}
-          title="EO Image Search — find satellite imagery by text, class, or coordinates"
-          style={showSearchPanel ? { borderColor: '#22c55e', color: '#22c55e' } : {}}
-        >
-          <SearchIcon size={16} />
-        </button>
-        <button
-          className={`btn-icon monitor-btn ${showSatelliteTracker ? 'active' : ''}`}
-          onClick={() => setShowSatelliteTracker(p => !p)}
-          title="Satellite Tracker — search and track live satellites in orbit"
-          style={showSatelliteTracker ? { borderColor: '#00D4FF', color: '#00D4FF' } : {}}
-        >
-          <Satellite size={16} />
-        </button>
-        <button
-          className={`btn-icon monitor-btn ${showMilitarySymbology ? 'active' : ''}`}
-          onClick={() => setShowMilitarySymbology(p => !p)}
-          title="Military Symbology — APP-6/MIL-STD-2525 tactical symbols"
-          style={showMilitarySymbology ? { borderColor: '#22c55e', color: '#22c55e' } : {}}
-        >
-          <Shield size={16} />
-        </button>
+
+        <TopbarMenu
+          id="models" title="Models & Panels" icon={<Grid size={16} />}
+          direction="up" triggerClassName="btn-icon monitor-btn"
+          menuId={openMenu} setMenuId={setOpenMenu}
+          active={showIntelligencePanel || showPrithviPanel || showSearchPanel || showSatelliteTracker}
+          items={[
+            { label: 'Pulse', icon: <Eye size={15} />, active: showIntelligencePanel, onClick: () => setShowIntelligencePanel(p => !p) },
+            { label: 'Prithvi EO', icon: <Brain size={15} />, active: showPrithviPanel, onClick: () => setShowPrithviPanel(p => !p) },
+            { label: 'EO Image Search', icon: <SearchIcon size={15} />, active: showSearchPanel, onClick: () => setShowSearchPanel(p => !p) },
+            { label: 'Satellite Tracker', icon: <Satellite size={15} />, active: showSatelliteTracker, onClick: () => setShowSatelliteTracker(p => !p) },
+          ]}
+        />
       </div>
 
       {/* Camera Controls — advanced zoom with smooth flyTo */}

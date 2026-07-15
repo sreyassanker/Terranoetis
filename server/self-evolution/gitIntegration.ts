@@ -1,4 +1,17 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
+import { logger } from '../observability/logger';
+
+/** Characters that could be used for shell injection - only reject truly dangerous shell metacharacters */
+const DANGEROUS_CHARS = /[;&|`$\n\r!<>]/;
+
+/** Sanitize a single argument for safe use in execFileSync */
+function sanitizeArg(arg: string): string {
+  if (DANGEROUS_CHARS.test(arg)) {
+    logger.warn({ arg: arg.slice(0, 100) }, 'GitIntegration: dangerous characters in arg, rejecting');
+    throw new Error(`Invalid argument contains shell metacharacters: ${arg.slice(0, 50)}`);
+  }
+  return arg;
+}
 
 export class GitIntegration {
   private repoPath: string;
@@ -7,8 +20,10 @@ export class GitIntegration {
     this.repoPath = repoPath;
   }
 
+  /** Safe git execution using execFileSync with argument array (no shell interpolation) */
   private git(...args: string[]): string {
-    return execSync(`git ${args.join(' ')}`, { cwd: this.repoPath, encoding: 'utf-8' });
+    const safeArgs = args.map(sanitizeArg);
+    return execFileSync('git', safeArgs, { cwd: this.repoPath, encoding: 'utf-8' });
   }
 
   async createBranch(name: string): Promise<void> {
@@ -17,7 +32,8 @@ export class GitIntegration {
 
   async commit(message: string, files: string[]): Promise<void> {
     this.git('add', ...files);
-    this.git('commit', '-m', `"${message.replace(/"/g, '\\"')}"`);
+    // Files are already staged; just pass the message safely
+    this.git('commit', '-m', message);
   }
 
   async push(branch: string): Promise<void> {
@@ -29,8 +45,11 @@ export class GitIntegration {
     body: string,
     branch: string,
   ): Promise<{ url: string }> {
-    const output = execSync(
-      `gh pr create --title "${title.replace(/"/g, '\\"')}" --body "${body.replace(/"/g, '\\"')}" --head "${branch}"`,
+    const safeTitle = sanitizeArg(title);
+    const safeBody = sanitizeArg(body);
+    const safeBranch = sanitizeArg(branch);
+    const output = execFileSync(
+      'gh', ['pr', 'create', '--title', safeTitle, '--body', safeBody, '--head', safeBranch],
       { cwd: this.repoPath, encoding: 'utf-8', timeout: 30000 },
     );
     const url = output.trim();
@@ -72,7 +91,7 @@ export class GitIntegration {
   }
 
   async createTag(tag: string, message: string): Promise<void> {
-    this.git('tag', '-a', tag, '-m', `"${message.replace(/"/g, '\\"')}"`);
+    this.git('tag', '-a', tag, '-m', message);
   }
 
   async merge(branch: string): Promise<void> {

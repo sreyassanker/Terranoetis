@@ -36,7 +36,7 @@ const EARTHQUAKE_SOURCE = {
           },
         };
       }).filter(e => e.lat !== 0 || e.lon !== 0);
-    } catch { return []; }
+    } catch (e) { logger.warn({ err: e }, 'Sentinel USGS poll failed'); return []; }
   },
 };
 
@@ -65,7 +65,7 @@ const EONET_SOURCE = {
           payload: { title: e.title, category: catTitle, id: e.id },
         };
       }).filter(e => e.lat !== 0 || e.lon !== 0);
-    } catch { return []; }
+    } catch (e) { logger.warn({ err: e }, 'Sentinel EONET poll failed'); return []; }
   },
 };
 
@@ -103,7 +103,7 @@ const FIRMS_SOURCE = {
           },
         };
       }).filter(e => e.lat !== 0 || e.lon !== 0);
-    } catch { return []; }
+    } catch (e) { logger.warn({ err: e }, 'Sentinel FIRMS poll failed'); return []; }
   },
 };
 
@@ -136,7 +136,7 @@ const WEATHER_ALERTS_SOURCE = {
           },
         };
       }).filter(e => e.lat !== 0 || e.lon !== 0);
-    } catch { return []; }
+    } catch (e) { logger.warn({ err: e }, 'Sentinel NWS poll failed'); return []; }
   },
 };
 
@@ -228,7 +228,7 @@ export class Sentinel {
         CREATE INDEX IF NOT EXISTS idx_sentinel_alerts_severity ON sentinel_alerts(severity);
         CREATE INDEX IF NOT EXISTS idx_sentinel_alerts_created ON sentinel_alerts(created_at DESC);
       `);
-    } catch { /* tables exist */ }
+    } catch (e) { logger.warn({ err: e }, 'Sentinel DB tables already exist'); }
   }
 
   getStatus() {

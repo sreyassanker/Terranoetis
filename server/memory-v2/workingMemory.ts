@@ -54,7 +54,7 @@ export class WorkingMemory {
 
       db.exec(`CREATE INDEX IF NOT EXISTS idx_working_timestamp ON working_memory(timestamp DESC)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_working_type ON working_memory(type)`);
-    } catch { /* tables exist */ }
+    } catch (e) { logger.warn({ err: (e as Error).message }, 'WorkingMemory tables may already exist'); }
   }
 
   async add(item: { type: WorkingMemoryItem['type']; content: string; parentId?: string }): Promise<string> {
@@ -82,7 +82,7 @@ export class WorkingMemory {
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(id, item.type, item.content.slice(0, 2000), newItem.timestamp, newItem.relevanceToCurrent,
         item.parentId ?? null, item.type === 'goal' ? 1 : 0);
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message }, 'Failed in working memory operation'); }
 
     if (this.items.length > CAPACITY) {
       await this.summarizeAndCompact();
@@ -166,7 +166,7 @@ Summary:`;
         this.summary = cleaned;
         this.cache.set(cacheKey, cleaned, 120);
       }
-    } catch { /* keep previous summary */ }
+    } catch (e) { logger.warn({ err: (e as Error).message }, 'Failed to summarize working memory (keeping previous)'); }
 
     return this.summary;
   }
@@ -193,7 +193,7 @@ Summary:`;
       const db = getDb();
       db.prepare('DELETE FROM working_memory WHERE active_goal = 0 ORDER BY timestamp ASC LIMIT ?')
         .run(Math.ceil(nonGoalItems.length * 0.5));
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message }, 'Failed in working memory operation'); }
   }
 
   clear(): void {
@@ -204,7 +204,7 @@ Summary:`;
     try {
       const db = getDb();
       db.prepare('DELETE FROM working_memory').run();
-    } catch { /* silent */ }
+    } catch (e) { logger.error({ err: (e as Error).message }, 'Failed in working memory operation'); }
   }
 
   getContext(): WorkingMemoryContext {

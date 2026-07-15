@@ -69,7 +69,7 @@ export class ToolDiscovery {
         last_health_check INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`);
-    } catch { /* table exists */ }
+    } catch (e) { logger.warn({ err: e }, 'ToolDiscovery table creation'); }
   }
 
   /* ── OpenAPI spec scanning ───────────────────────────────── */
@@ -93,7 +93,7 @@ export class ToolDiscovery {
               dynamicTools.register(tool);
               tools.push(dynamicTools.get(tool.name)!);
             }
-          } catch { /* skip individual endpoint failure */ }
+          } catch (e) { logger.warn({ err: e }, 'OpenAPI endpoint conversion failed'); }
         }
       }
 
@@ -215,9 +215,9 @@ export class ToolDiscovery {
             dynamicTools.register(tool);
             const registered = dynamicTools.get(tool.name);
             if (registered) allTools.push(registered);
-          } catch { /* skip unreachable */ }
+          } catch (e) { logger.warn({ err: e }, 'Discovered API unreachable'); }
         }
-      } catch { /* skip failed directory */ }
+      } catch (e) { logger.warn({ err: e }, 'API directory scan failed'); }
     }
 
     return allTools;
@@ -247,7 +247,8 @@ export class ToolDiscovery {
         }
       }
       return true;
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'Tool health test failed');
       dynamicTools.updateHealth(name, 'degraded');
       return false;
     }
@@ -262,7 +263,7 @@ export class ToolDiscovery {
       db.prepare(`
         INSERT OR IGNORE INTO discovered_sources (name, url, type) VALUES (?, ?, ?)
       `).run(name, url, type);
-    } catch { /* silent */ }
+    } catch (e) { logger.warn({ err: e }, 'ToolDiscovery registerSource failed'); }
   }
 
   /* ── Health monitoring ───────────────────────────────────── */
@@ -276,7 +277,7 @@ export class ToolDiscovery {
           if (!healthy) {
             logger.warn({ tool: tool.name }, 'Tool health check failed');
           }
-        } catch { /* skip */ }
+        } catch (e) { logger.warn({ err: e }, 'Health check iteration failed'); }
       }
     }, 3600000);
   }
@@ -307,7 +308,7 @@ export class ToolDiscovery {
         status: r.status as DiscoveredSource['status'],
         lastHealthCheck: r.last_health_check as number || 0,
       }));
-    } catch { /* silent */ }
+    } catch (e) { logger.warn({ err: e }, 'ToolDiscovery loadSources failed'); }
   }
 
   getSources(): DiscoveredSource[] {

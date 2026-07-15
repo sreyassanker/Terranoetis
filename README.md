@@ -144,7 +144,8 @@ GET  /api/ml/knowledge-graph/entity?name= — Entity lookup
 GET  /api/ml/knowledge-graph/query?q=     — Vector similarity search
 POST /api/ml/knowledge-graph/entity       — Create entity
 POST /api/ml/knowledge-graph/relation     — Create relation
-GET  /api/ml/predict?lat=&lon=&layers=    — Hazard predictions
+GET  /api/ml/predict?lat=&lon=&layers=    — Hazard predictions (query params)
+POST /api/ml/predict                      — Hazard predictions (JSON body: { features, model })
 POST /api/ml/predict/outcome              — Record prediction outcome
 GET  /api/ml/predict/report               — Gemini risk report
 GET  /api/ml/variants                     — Active prompt variants
@@ -183,7 +184,7 @@ GET  /api/aurora                             — Aurora forecast
 GET  /api/iss                                — ISS position
 GET  /api/cameras[/:lat/:lon/:radius]        — Worldwide CCTV cameras (optional radius in km)
 GET  /api/cctv/worldwide                     — Worldwide CCTV camera payload
-GET  /api/sandbox/execute                    — Execute code sandbox
+POST /api/sandbox/execute                    — Execute code sandbox
 GET  /api/chats                              — Chat sessions
 ```
 

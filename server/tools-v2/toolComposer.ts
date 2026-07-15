@@ -53,7 +53,7 @@ export class ToolComposer {
         usage_count INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`);
-    } catch { /* table exists */ }
+    } catch (e) { logger.warn({ err: e }, 'ToolComposer table creation'); }
   }
 
   compose(name: string, steps: ToolChainStep[], description: string): ToolChain {
@@ -72,7 +72,7 @@ export class ToolComposer {
         VALUES (?, ?, ?)
         ON CONFLICT(name) DO UPDATE SET steps_json = excluded.steps_json, description = excluded.description
       `).run(name, JSON.stringify(steps), description);
-    } catch { /* silent */ }
+    } catch (e) { logger.warn({ err: e }, 'ToolComposer persist failed'); }
 
     logger.info({ name, stepCount: steps.length }, 'Tool chain composed');
     return chain;
@@ -147,7 +147,7 @@ export class ToolComposer {
     try {
       const db = getDb();
       db.prepare('UPDATE tool_chains SET usage_count = usage_count + 1 WHERE name = ?').run(name);
-    } catch { /* silent */ }
+    } catch (e) { logger.warn({ err: e }, 'ToolComposer usage count update failed'); }
 
     logger.info({ name, duration: Date.now() - start, errors }, 'Tool chain executed');
     return outputs;
@@ -174,7 +174,8 @@ export class ToolComposer {
       const optimized = this.optimize(chain);
       this.chainCache.set(name, { chain, optimized });
       return chain;
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'ToolComposer getChain DB query failed');
       return null;
     }
   }
@@ -191,7 +192,8 @@ export class ToolComposer {
         createdAt: r.created_at as string,
         usageCount: r.usage_count as number,
       }));
-    } catch {
+    } catch (e) {
+      logger.warn({ err: e }, 'ToolComposer listChains DB query failed');
       return [];
     }
   }

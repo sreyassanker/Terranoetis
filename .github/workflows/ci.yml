@@ -1,0 +1,244 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# CI/CD Pipeline — Automated TypeScript Checks, Tests & Browser Tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════
+  # TypeScript Type Checking
+  # ═══════════════════════════════════════════════════════════════════════
+  typecheck:
+    name: 🔍 TypeScript Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Typecheck Frontend
+        run: npx tsc --noEmit --project tsconfig.app.json
+      - name: Typecheck Server
+        run: npx tsc --noEmit --project tsconfig.server.json
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # ESLint Linting
+  # ═══════════════════════════════════════════════════════════════════════
+  lint:
+    name: 🎨 Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Unit Tests
+  # ═══════════════════════════════════════════════════════════════════════
+  test-unit:
+    name: 🧪 Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run test:unit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results
+          path: coverage/
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Integration Tests
+  # ═══════════════════════════════════════════════════════════════════════
+  test-integration:
+    name: 🔗 Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run test:integration
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Build Verification
+  # ═══════════════════════════════════════════════════════════════════════
+  build:
+    name: 🏗️ Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [typecheck, lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Browser Tests (Playwright)
+  # ═══════════════════════════════════════════════════════════════════════
+  browser-tests:
+    name: 🌐 Browser Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Build frontend
+        run: npm run build
+      - name: Start server
+        run: |
+          cp .env.example .env || true
+          npx tsx server/index.ts &
+          sleep 8
+          curl -f http://localhost:3001/api/health || echo 'Server health check failed but continuing'
+      - name: Run Playwright tests
+        run: npx playwright test
+        env:
+          BASE_URL: http://localhost:3000
+          CI: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-screenshots
+          path: test-results/
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Docker Build Verification
+  # ═══════════════════════════════════════════════════════════════════════
+  docker-build:
+    name: 🐳 Docker Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: realtime-v2:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Coverage Report
+  # ═══════════════════════════════════════════════════════════════════════
+  coverage:
+    name: 📊 Coverage Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test-unit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run test:coverage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Security Audit
+  # ═══════════════════════════════════════════════════════════════════════
+  security:
+    name: 🔒 Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm audit --audit-level=high || true
+      - run: npm outdated || true
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Summary
+  # ═══════════════════════════════════════════════════════════════════════
+  summary:
+    name: ✅ CI Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [typecheck, lint, test-unit, test-integration, build, browser-tests, docker-build, coverage, security]
+    if: always()
+    steps:
+      - name: Report results
+        run: |
+          echo "Pipeline Results:"
+          echo "- Typecheck: ${{ needs.typecheck.result }}"
+          echo "- Lint: ${{ needs.lint.result }}"
+          echo "- Unit Tests: ${{ needs.test-unit.result }}"
+          echo "- Integration: ${{ needs.test-integration.result }}"
+          echo "- Build: ${{ needs.build.result }}"
+          echo "- Browser Tests: ${{ needs.browser-tests.result }}"
+          echo "- Docker: ${{ needs.docker-build.result }}"
+          echo "- Coverage: ${{ needs.coverage.result }}"
+          echo "- Security: ${{ needs.security.result }}"
+          if [[ "${{ needs.typecheck.result }}" == "failure" ]] || \
+             [[ "${{ needs.test-unit.result }}" == "failure" ]]; then
+            echo "❌ Critical jobs failed!"
+            exit 1
+          fi
+          echo "✅ All critical checks passed!"
