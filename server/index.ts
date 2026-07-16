@@ -2740,7 +2740,7 @@ import { assembleContext, spatialQuery, addEntity, addRelation } from './utils/g
 import { streamFeatures, streamWithBbox } from './utils/flatGeobuf';
 import { getWaterTimeSeries, getFloodWatch } from './utils/operaSurfaceWater';
 import { searchHlsScenes, getTimeSeries } from './utils/landsatSentinelHls';
-import { validateSidc, buildSidc, parseSidc, COMMON_SYMBOLS } from '../src/rendering/militarySymbologyStandard';
+
 
 // ── SatCLIP Location Embeddings ──
 app.get('/api/satclip/embedding', async (req: express.Request, res: express.Response) => {
@@ -2860,23 +2860,6 @@ app.get('/api/hls/timeseries', async (req: express.Request, res: express.Respons
     const timeSeries = await getTimeSeries(lat, lon, start, end, index);
     res.json(timeSeries);
   } catch (e) { res.status(502).json({ error: String(e) }); }
-});
-
-// ── MIL-STD-2525D Symbology ──
-app.get('/api/milsymbol/validate', (req: express.Request, res: express.Response) => {
-  const sidc = String(req.query.sidc || '');
-  const result = validateSidc(sidc);
-  res.json(result);
-});
-
-app.get('/api/milsymbol/parse', (req: express.Request, res: express.Response) => {
-  const sidc = String(req.query.sidc || '');
-  const parsed = parseSidc(sidc);
-  res.json({ sidc, ...parsed });
-});
-
-app.get('/api/milsymbol/common', (_req: express.Request, res: express.Response) => {
-  res.json({ symbols: COMMON_SYMBOLS, count: Object.keys(COMMON_SYMBOLS).length });
 });
 
 // ═══════════════════════════════════════════════════════════════════
