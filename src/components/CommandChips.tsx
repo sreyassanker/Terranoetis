@@ -29,7 +29,7 @@ export function CommandChips({ content, focusLocation, toggleLayer }: CommandChi
       {cmdChips.map((chip,i) => (
         <span key={i} className="ai-chip command-chip" style={{fontSize:10,padding:'2px 8px'}}
           onClick={() => {
-            if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 1000 });
+            if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 1500 });
             if (chip.action === 'toggleLayer' && chip.layerId) toggleLayer(chip.layerId);
           }}>{chip.label}</span>
       ))}

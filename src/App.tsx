@@ -63,6 +63,7 @@ import { IntelligencePanel } from '@/components/IntelligencePanel';
 import { PrithviPanel } from '@/components/prithvi/PrithviPanel';
 import { SatelliteSearchPanel } from '@/components/prithvi/SatelliteSearchPanel';
 import { SatelliteTrackerPanel } from '@/components/prithvi/SatelliteTrackerPanel';
+import { IssLivePanel } from '@/components/IssLivePanel';
 import { CommandPalette } from '@/components/CommandPalette';
 import { MilitarySymbologyPanel } from '@/components/MilitarySymbologyPanel';
 import { MilitarySymbologyOverlay } from '@/rendering/militarySymbologyOverlay';
@@ -80,6 +81,10 @@ import {
   type UcdpEvent,
   addMilitaryBaseEntities,
 } from '@/rendering/aviation';
+import {
+  routeBetween, computeSafestLocation, drawNavPolyline, drawNavMarker, drawNavIso,
+  facilityLabel, type RouteResult, type SafeFacility, type SafestResult,
+} from '@/rendering/navigation';
 import {
   addGenericPointEntities,
   addStormTrackEntities,
@@ -728,7 +733,9 @@ const CctvVideoPlayer = ({ src }: { src: string }) => {
   );
 };
 
-const YoutubePlayer = ({ videoId }: { videoId: string }) => {
+const ISS_LIVE_EMBED = 'https://www.youtube.com/embed/awQzjn72bI0?autoplay=1&rel=0';
+
+const YoutubePlayer = ({ videoId, src }: { videoId?: string; src?: string }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [error, setError] = useState(false);
 
@@ -736,11 +743,13 @@ const YoutubePlayer = ({ videoId }: { videoId: string }) => {
     return <div className="cctv-preview-empty">Failed to load YouTube video</div>;
   }
 
+  const embedSrc = src ?? `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`;
+
   return (
     <div style={{ position: 'relative', width: '100%', paddingBottom: '56.25%', background: '#000', borderRadius: 6, overflow: 'hidden' }}>
       <iframe
         ref={iframeRef}
-        src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
+        src={embedSrc}
         title="YouTube video player"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
         allowFullScreen
@@ -903,7 +912,7 @@ function renderCommandChips(
       {cmdChips.map((chip,i) => (
         <span key={i} className="ai-chip command-chip" style={{fontSize:10,padding:'2px 8px'}}
           onClick={() => {
-            if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 1000 });
+            if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 1500 });
             if (chip.action === 'toggleLayer' && chip.layerId) toggleLayer(chip.layerId);
           }}>{chip.label}</span>
       ))}
@@ -1234,6 +1243,23 @@ export default function App() {
   const [measurePoints, setMeasurePoints] = useState<Array<{ lat: number; lon: number }>>([]);
   const [measureDistance, setMeasureDistance] = useState<number | null>(null);
   const [measureArea, setMeasureArea] = useState<number | null>(null);
+
+  /* ── Navigation / Spatial Safety tools ── */
+  const [navMode, setNavMode] = useState<'none' | 'route' | 'safest'>('none');
+  const [routePoints, setRoutePoints] = useState<Array<{ lat: number; lon: number }>>([]);
+  const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
+  const [safestHazard, setSafestHazard] = useState<{ lat: number; lon: number } | null>(null);
+  const [safestResult, setSafestResult] = useState<SafestResult | null>(null);
+  const navModeRef = useRef<'none' | 'route' | 'safest'>('none');
+  const routePointsRef = useRef<Array<{ lat: number; lon: number }>>([]);
+  const navEntitiesRef = useRef<Cesium.Entity[]>([]);
+  useEffect(() => { navModeRef.current = navMode; }, [navMode]);
+  const clearNavEntities = useCallback(() => {
+    for (const e of navEntitiesRef.current) {
+      try { viewerRef.current?.entities.remove(e); } catch { /* ignore */ }
+    }
+    navEntitiesRef.current = [];
+  }, []);
   const measureEntitiesRef = useRef<Cesium.Entity[]>([]);
   const currentChatIdRef = useRef<string | null>(null);
   const chatSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1692,6 +1718,58 @@ export default function App() {
     handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.WHEEL);
     handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.PINCH_START);
     handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
+      // ── Navigation / Spatial Safety tools ──
+      if (navModeRef.current === 'route' || navModeRef.current === 'safest') {
+        let cart = v.scene.pickPosition(click.position);
+        if (!cart || !Cesium.defined(cart)) cart = v.camera.pickEllipsoid(click.position, v.scene.globe.ellipsoid);
+        if (cart && Cesium.defined(cart)) {
+          const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cart);
+          if (carto) {
+            const lon = Cesium.Math.toDegrees(carto.longitude);
+            const lat = Cesium.Math.toDegrees(carto.latitude);
+            const pt = { lat, lon };
+            if (navModeRef.current === 'route') {
+              const cur = routePointsRef.current;
+              if (cur.length >= 2) { clearNavEntities(); setRouteResult(null); }
+              const next = cur.length >= 2 ? [pt] : [...cur, pt];
+              routePointsRef.current = next;
+              setRoutePoints(next);
+              if (next.length === 2) {
+                const [a, b] = next;
+                routeBetween(a, b).then(res => {
+                  const v = viewerRef.current;
+                  if (!v) return;
+                  navEntitiesRef.current.push(drawNavPolyline(v, res.coords, '#22d3ee'));
+                  navEntitiesRef.current.push(drawNavMarker(v, a, '#22d3ee', 'Start'));
+                  navEntitiesRef.current.push(drawNavMarker(v, b, '#22d3ee', 'End'));
+                  setRouteResult(res);
+                }).catch(() => setRouteResult(null));
+              }
+            } else {
+              setSafestHazard(pt);
+              setSafestResult({ best: null, bestRoute: null, facilities: [], iso: null, status: 'Searching safe locations nearby…' });
+              computeSafestLocation(pt).then(r => {
+                if (!viewerRef.current) return;
+                setSafestResult(r);
+                if (r.best && r.bestRoute) {
+                  const v = viewerRef.current;
+                  if (v) {
+                    navEntitiesRef.current.push(drawNavPolyline(v, r.bestRoute.coords, '#22c55e'));
+                    navEntitiesRef.current.push(drawNavMarker(v, pt, '#ef4444', 'Hazard'));
+                    navEntitiesRef.current.push(drawNavMarker(v, r.best, '#22c55e', 'Safe'));
+                  }
+                }
+                if (r.iso) {
+                  const v = viewerRef.current;
+                  if (v) navEntitiesRef.current.push(drawNavIso(v, r.iso, '#ef4444'));
+                }
+              }).catch(e => setSafestResult({ best: null, bestRoute: null, facilities: [], iso: null, status: 'Error: ' + (e instanceof Error ? e.message : String(e)) }));
+            }
+          }
+        }
+        return;
+      }
+
       // Measure tool: when active, clicking adds measurement points
       if (showMeasureToolRef.current) {
         let cart: Cesium.Cartesian3 | undefined = v.scene.pickPosition(click.position);
@@ -1735,6 +1813,9 @@ export default function App() {
           space_debris: 'satellite',
         };
         entityTrackerRef.current?.track(ent, trackTypes[layer] ?? 'default');
+
+        // Open the live ISS camera panel when the ISS marker is selected
+        if (ent === issEntityRef.current) setShowISSInfo(true);
 
         // If CinematicDirector is open, focus on this entity
         if (showCinematicDirector) {
@@ -2758,7 +2839,7 @@ export default function App() {
       v.entities.remove(focusMarkerRef.current);
       focusMarkerRef.current = null;
     }
-    const height = options?.height ?? 150;
+    const height = options?.height ?? 1500;
     const marker = v.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
       name: options?.label ?? 'Selected Location',
@@ -3876,7 +3957,7 @@ export default function App() {
 
   const goToLocation = useCallback((lat: number, lon: number, label?: string, color?: string, duration = 0.9) => {
     setShowSuggestions(false);
-    focusLocation(lat, lon, { label, color, height: 150, duration });
+    focusLocation(lat, lon, { label, color, height: 1500, duration });
   }, [focusLocation]);
 
   const handlePauseFork = useCallback(async (forkId: string) => {
@@ -5983,7 +6064,7 @@ export default function App() {
     // Only intercept PURE location commands (e.g. just "fly to Tokyo") — nothing else
     const isPureFlyCommand = /^(?:fly|go|zoom)\s+(?:to|in|into)\s+/i.test(userMsg.trim());
     if (isPureFlyCommand && loc) {
-      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 1000 });
+      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 1500 });
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Flying to ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` }]);
       setAiTyping(false);
       return;
@@ -6100,7 +6181,7 @@ export default function App() {
             }
             if (data.type === 'intent') {
               if (data.location) {
-                focusLocation(data.location.lat, data.location.lon, { label: data.location.label || 'Location', color: '#60a5fa', height: 1000 });
+                focusLocation(data.location.lat, data.location.lon, { label: data.location.label || 'Location', color: '#60a5fa', height: 1500 });
               }
               if (data.layerIds) {
                 (data.layerIds as string[]).forEach((layerId: string) => { if (!isLayerEnabled(layerId)) toggleLayer(layerId); });
@@ -6218,7 +6299,7 @@ export default function App() {
             const lat = cmd.lat as number;
             const lon = cmd.lon as number;
             if (isFinite(lat) && isFinite(lon)) {
-              focusLocation(lat, lon, { label: (cmd.label as string) || 'Location', color: '#60a5fa', height: 1000 });
+              focusLocation(lat, lon, { label: (cmd.label as string) || 'Location', color: '#60a5fa', height: 1500 });
       cleanupThinkingSteps(true);
             }
             break;
@@ -6398,7 +6479,7 @@ export default function App() {
     const v = viewerRef.current;
     if (!v) return;
     if (action === 'flyTo') {
-      focusLocation(cm.lat, cm.lon, { label: 'Context location', color: '#60a5fa', height: 1000 });
+      focusLocation(cm.lat, cm.lon, { label: 'Context location', color: '#60a5fa', height: 1500 });
     } else if (action === 'pin') {
       const pinId = `pin_${Date.now()}`;
       v.entities.add({
@@ -6416,9 +6497,9 @@ export default function App() {
         const oldestPin = v.entities.values.find(e => e.properties?.getValue(Cesium.JulianDate.now())?.layer === 'pin');
         if (oldestPin) { v.entities.remove(oldestPin); pinCountRef.current -= 1; }
       }
-      focusLocation(cm.lat, cm.lon, { label: 'Dropped Pin', color: '#ef4444', height: 1000 }); showNotification('Pin dropped', 'success');
+      focusLocation(cm.lat, cm.lon, { label: 'Dropped Pin', color: '#ef4444', height: 1500 }); showNotification('Pin dropped', 'success');
     } else if (action === 'weather') {
-      focusLocation(cm.lat, cm.lon, { label: 'Weather request', color: '#22d3ee', height: 1000 });
+      focusLocation(cm.lat, cm.lon, { label: 'Weather request', color: '#22d3ee', height: 1500 });
       addWeatherCard(cm.lat, cm.lon);
     } else if (action === 'events') {
       const nearby = findNearbyEvents(cm.lat, cm.lon, 200);
@@ -6907,7 +6988,7 @@ export default function App() {
           <div className="info-type-dot" style={{background:color}} />
           <div className="info-title">{title}</div>
           {hasCoords && (
-            <button className="info-fly" onClick={() => focusLocation(lat, lon, { label: title, color, height: 1000 })} title="Fly to location">
+            <button className="info-fly" onClick={() => focusLocation(lat, lon, { label: title, color, height: 1500 })} title="Fly to location">
               <Crosshair size={14} />
             </button>
           )}
@@ -7472,6 +7553,8 @@ export default function App() {
           <div className="btn-row" style={{marginBottom:8, gap:4, flexWrap:'wrap'}}>
             <button className="btn-all" style={{background:showTimeSlider ? 'rgba(96,165,250,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowTimeSlider(p => !p)}><Clock size={12} style={{display:'inline',marginRight:3}} /> Time</button>
             <button className="btn-all" style={{background:showMeasureTool ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowMeasureTool(p => !p)}><Ruler size={12} style={{display:'inline',marginRight:3}} /> Measure</button>
+            <button className="btn-all" style={{background: navMode==='route' ? 'rgba(34,211,238,0.25)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => { const on = navMode!=='route'; setNavMode(on?'route':'none'); if(!on){clearNavEntities(); setRoutePoints([]); setRouteResult(null);} setShowMeasureTool(false); }}><Navigation2 size={12} style={{display:'inline',marginRight:3}} /> Route</button>
+            <button className="btn-all" style={{background: navMode==='safest' ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => { const on = navMode!=='safest'; setNavMode(on?'safest':'none'); if(!on){clearNavEntities(); setSafestHazard(null); setSafestResult(null);} setShowMeasureTool(false); }}><Shield size={12} style={{display:'inline',marginRight:3}} /> Safest</button>
             {isAdmin && <button className="btn-all" style={{background:'rgba(59,130,246,0.2)', fontSize:10}} onClick={() => setShowAdmin(true)}><Shield size={12} style={{display:'inline',marginRight:3}} /> Admin</button>}
           </div>
           <button className="btn-all" onClick={enableDefaultLayers}>Reset to Defaults</button>
@@ -7828,7 +7911,7 @@ export default function App() {
             if (intelFilter === 'social') return ['news', 'social', 'twitter', 'facebook'].includes(p.type);
             return p.type === intelFilter;
           }).map(item => (
-            <div key={item.id} className="social-post" onClick={() => focusLocation(item.lat, item.lon, { label: item.title, color: '#00D4FF', height: 1000 })}>
+            <div key={item.id} className="social-post" onClick={() => focusLocation(item.lat, item.lon, { label: item.title, color: '#00D4FF', height: 1500 })}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
                 <span className="social-user">{item.title}</span>
                 <span className="social-time">{item.timeLabel}</span>
@@ -7978,13 +8061,9 @@ export default function App() {
         </div>
       )}
 
-      {/* ISS Info */}
+      {/* ISS Live Camera — top-right panel */}
       {showISSInfo && issInfo && (
-        <div className="iss-panel show glass-panel">
-          <div className="iss-dot" />
-          <div className="iss-info">ISS Position</div>
-          <div className="iss-coords">{issInfo.lat.toFixed(2)}°N, {issInfo.lon.toFixed(2)}°E</div>
-        </div>
+        <IssLivePanel lat={issInfo.lat} lon={issInfo.lon} src={ISS_LIVE_EMBED} onClose={toggleISS} />
       )}
 
 
@@ -7992,7 +8071,7 @@ export default function App() {
       {weatherCards.map(wc => (
         <div key={wc.id} ref={el => { weatherCardElementsRef.current[wc.id] = el; }} className="weather-card glass-panel"
           style={{ display: 'block', pointerEvents: 'auto', opacity: 0 }}
-          onClick={() => focusLocation(wc.lat, wc.lon, { label: 'Weather location', color: '#22d3ee', height: 150 })}>
+          onClick={() => focusLocation(wc.lat, wc.lon, { label: 'Weather location', color: '#22d3ee', height: 1500 })}>
           <div className="weather-card-header">
             <Thermometer size={16} className="weather-icon" />
             <div>
@@ -8068,6 +8147,46 @@ export default function App() {
             style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: 6, cursor: 'pointer', fontSize: 11, padding: '4px 10px' }}>
             Clear
           </button>
+        </div>
+      )}
+
+      {/* Route Tool Display */}
+      {navMode === 'route' && (routePoints.length > 0 || routeResult) && (
+        <div className="glass-panel" style={{ position: 'fixed', top: 60, left: '50%', transform: 'translateX(-50%)', padding: '10px 20px', borderRadius: 10, zIndex: 110, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ color: '#22d3ee', fontWeight: 600 }}><Navigation2 size={12} style={{ display: 'inline', marginRight: 4 }} /> Route</span>
+          {routeResult && (
+            <>
+              <span style={{ color: '#e2e8f0', fontFamily: 'monospace', fontSize: 13 }}>{(routeResult.distanceM / 1000).toFixed(2)} km</span>
+              <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 13 }}>{Math.round(routeResult.durationS / 60)} min</span>
+            </>
+          )}
+          {routePoints.length < 2 && <span style={{ color: '#94a3b8' }}>Click a second point on the globe</span>}
+          <button onClick={() => { clearNavEntities(); setRoutePoints([]); routePointsRef.current = []; setRouteResult(null); }}
+            style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: 6, cursor: 'pointer', fontSize: 11, padding: '4px 10px' }}>Clear</button>
+        </div>
+      )}
+
+      {/* Safest Location Display */}
+      {navMode === 'safest' && safestResult && (
+        <div className="glass-panel" style={{ position: 'fixed', top: 60, left: '50%', transform: 'translateX(-50%)', padding: '12px 18px', borderRadius: 10, zIndex: 110, width: 340, maxWidth: 'calc(100vw - 24px)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ color: '#22c55e', fontWeight: 600 }}><Shield size={12} style={{ display: 'inline', marginRight: 4 }} /> Safest Location</span>
+            <button onClick={() => { clearNavEntities(); setSafestHazard(null); setSafestResult(null); }}
+              style={{ marginLeft: 'auto', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: 6, cursor: 'pointer', fontSize: 11, padding: '3px 9px' }}>Clear</button>
+          </div>
+          <div style={{ color: '#cbd5e1', fontSize: 12, marginBottom: 8 }}>{safestResult.status}</div>
+          {safestResult.best && safestResult.bestRoute && (
+            <div style={{ color: '#e2e8f0', fontFamily: 'monospace', fontSize: 12, marginBottom: 8 }}>
+              {facilityLabel(safestResult.best)} · {(safestResult.bestRoute.distanceM / 1000).toFixed(1)} km · {Math.round(safestResult.bestRoute.durationS / 60)} min
+            </div>
+          )}
+          {safestResult.facilities.length > 1 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {safestResult.facilities.map((f, i) => (
+                <div key={i} style={{ fontSize: 11, color: '#94a3b8' }}>{i === 0 ? '★ ' : ''}{facilityLabel(f)} — {(f.distM / 1000).toFixed(1)} km</div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
