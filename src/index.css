@@ -902,6 +902,26 @@ p { text-align: justify; }
     height: 60px;
   }
 
+  .board-sat-btn {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: rgba(0, 200, 255, 0.08);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .board-sat-btn:hover {
+    background: rgba(0, 200, 255, 0.18);
+    border-color: rgba(0, 200, 255, 0.4);
+  }
+
   /* ── STORM TRACK ── */
   .storm-track-wrap { margin: 10px 0; }
   .storm-track-point {

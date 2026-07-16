@@ -13,23 +13,29 @@ let _arrowCanvas: HTMLCanvasElement | null = null;
 function getArrowCanvas(): HTMLCanvasElement {
   if (_arrowCanvas) return _arrowCanvas;
   const c = document.createElement('canvas');
-  c.width = 32;
-  c.height = 32;
+  c.width = 24;
+  c.height = 24;
   const ctx = c.getContext('2d')!;
-  // Draw a simple arrow pointing right (0°)
-  ctx.clearRect(0, 0, 32, 32);
-  ctx.translate(16, 16);
-  ctx.fillStyle = '#3b82f6';
+  ctx.clearRect(0, 0, 24, 24);
+  ctx.translate(12, 12);
+
+  // Tear-drop / streamline-shaped glyph for CFD flow feel
+  const grad = ctx.createLinearGradient(-4, 0, 10, 0);
+  grad.addColorStop(0, 'rgba(147, 197, 253, 0.5)');
+  grad.addColorStop(1, 'rgba(6, 182, 212, 1)');
+  ctx.fillStyle = grad;
   ctx.beginPath();
-  ctx.moveTo(12, 0);
-  ctx.lineTo(-6, -8);
-  ctx.lineTo(-4, 0);
-  ctx.lineTo(-6, 8);
+  ctx.moveTo(8, 0);
+  ctx.lineTo(-3, -5);
+  ctx.lineTo(-1, 0);
+  ctx.lineTo(-3, 5);
   ctx.closePath();
   ctx.fill();
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 1;
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 0.8;
   ctx.stroke();
+
   _arrowCanvas = c;
   return c;
 }
@@ -139,22 +145,96 @@ function renderPoints(
       : Cesium.Cartesian3.fromDegrees(lon, lat);
 
     const hasHeading = item.heading != null;
-    const config: Cesium.Entity.ConstructorOptions = {
-      id: entityId,
-      position,
-      name: String(name),
-      ...(hasHeading ? {
+
+    let entityPosition: Cesium.PositionProperty | Cesium.Cartesian3 = position;
+    let shapeConfig: any = null;
+
+    if (hasHeading) {
+      const phaseOffset = ((i * 137.5 + Math.abs(lat * 7) + Math.abs(lon * 13)) % 10000);
+      const speedMs = Math.max(0.1, item.value || 0.5);
+      const speedFactor = Math.max(0.3, Math.min(3, speedMs * 1.5));
+      const headingRad = Cesium.Math.toRadians(item.heading);
+      const maxDriftDeg = 3;
+      const cycleMs = 10000 / speedFactor;
+
+      const fadeWindow = 0.18;
+
+      // Speed-to-color mapping: slow = teal, fast = amber
+      const speedNorm = Math.min(1, speedMs / 2);
+      const cr = 0.1 + speedNorm * 0.7;
+      const cg = 0.7 - speedNorm * 0.4;
+      const cb = 0.8 - speedNorm * 0.6;
+
+      entityPosition = new Cesium.CallbackProperty(() => {
+        const elapsed = ((Date.now() + phaseOffset) % cycleMs);
+        const progress = elapsed / cycleMs;
+        const driftDeg = progress * maxDriftDeg;
+        return Cesium.Cartesian3.fromDegrees(
+          lon + Math.sin(headingRad) * driftDeg,
+          lat + Math.cos(headingRad) * driftDeg,
+        );
+      }, false) as unknown as Cesium.PositionProperty;
+
+      const animColor = new Cesium.CallbackProperty(() => {
+        const elapsed = ((Date.now() + phaseOffset) % cycleMs);
+        const progress = elapsed / cycleMs;
+        const driftDeg = progress * maxDriftDeg;
+        const fadeIn = Math.min(1, driftDeg / (maxDriftDeg * fadeWindow));
+        const fadeOut = Math.min(1, (maxDriftDeg - driftDeg) / (maxDriftDeg * fadeWindow));
+        const a = Math.min(fadeIn, fadeOut);
+        return new Cesium.Color(cr, cg, cb, a);
+      }, false);
+
+      shapeConfig = {
         billboard: {
           image: getArrowCanvas(),
           rotation: Cesium.Math.toRadians(90 - item.heading),
-          scale: 0.8,
-          color,
+          scale: 0.7,
+          color: animColor,
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           scaleByDistance: new Cesium.NearFarScalar(1.5e6, 1.2, 1.5e8, 0.3),
           verticalOrigin: Cesium.VerticalOrigin.CENTER,
           horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         },
-      } : {
+      };
+
+      const trailLen = 0.3 + speedMs * 0.4;
+      const trailPos = new Cesium.CallbackProperty(() => {
+        const elapsed = ((Date.now() + phaseOffset) % cycleMs);
+        const progress = elapsed / cycleMs;
+        const driftDeg = progress * maxDriftDeg;
+        const aLon = lon + Math.sin(headingRad) * driftDeg;
+        const aLat = lat + Math.cos(headingRad) * driftDeg;
+        const tLon = aLon - Math.sin(headingRad) * trailLen;
+        const tLat = aLat - Math.cos(headingRad) * trailLen;
+        return [
+          Cesium.Cartesian3.fromDegrees(tLon, tLat),
+          Cesium.Cartesian3.fromDegrees(aLon, aLat),
+        ];
+      }, false);
+
+      const trailMat = new Cesium.CallbackProperty(() => {
+        const elapsed = ((Date.now() + phaseOffset) % cycleMs);
+        const progress = elapsed / cycleMs;
+        const driftDeg = progress * maxDriftDeg;
+        const fadeIn = Math.min(1, driftDeg / (maxDriftDeg * fadeWindow));
+        const fadeOut = Math.min(1, (maxDriftDeg - driftDeg) / (maxDriftDeg * fadeWindow));
+        const a = Math.min(fadeIn, fadeOut) * 0.4;
+        return new Cesium.Color(cr, cg, cb, a);
+      }, false);
+
+      viewer.entities.add({
+        id: `${entityId}_trail`,
+        polyline: {
+          positions: trailPos,
+          width: 2,
+          material: new Cesium.ColorMaterialProperty(trailMat),
+          clampToGround: true,
+          arcType: Cesium.ArcType.RHUMB,
+        },
+      });
+    } else {
+      shapeConfig = {
         point: {
           pixelSize: 6,
           color,
@@ -163,7 +243,14 @@ function renderPoints(
           heightReference: isSpace ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
           ...(isSpace ? { scaleByDistance: new Cesium.NearFarScalar(1.5e6, 2.0, 1.5e8, 0.3) } : {}),
         },
-      }),
+      };
+    }
+
+    const config: Cesium.Entity.ConstructorOptions = {
+      id: entityId,
+      position: entityPosition,
+      name: String(name),
+      ...shapeConfig,
       label: {
         text: typeof name === 'string' && name.length > 20 ? name.slice(0, 18) + '...' : String(name),
         font: '9px Space Grotesk, sans-serif',

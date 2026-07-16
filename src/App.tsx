@@ -1033,16 +1033,18 @@ export default function App() {
   const issTimesRef = useRef<Cesium.JulianDate[]>([]);
   const issRenderTickRef = useRef<(() => void) | null>(null);
   const issLoadingRef = useRef(false);
-  // ── ISS Travel View (first-person onboard camera) ──
-  const issTravelRef = useRef(false);
-  const issTravelYawRef = useRef(0);                                  // azimuth around zenith (rad)
-  const issTravelPitchRef = useRef(Cesium.Math.toRadians(22));        // depression from nadir (rad)
-  const issTravelFovRef = useRef(Cesium.Math.toRadians(60));          // camera field of view (rad)
-  const issTravelPreRenderRef = useRef<(() => void) | null>(null);
-  const issTravelHudIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const issTravelDragRef = useRef<{ x: number; y: number; active: boolean }>({ x: 0, y: 0, active: false });
-  const issTravelDragCleanupRef = useRef<(() => void) | null>(null);
-  const issTravelSavedViewRef = useRef<{ pos: Cesium.Cartesian3; hdg: number; pitch: number; roll: number } | null>(null);
+  // ── Satellite Travel View (first-person onboard camera) ──
+  const satTravelRef = useRef(false);
+  const satTravelPosRef = useRef<Cesium.PositionProperty | null>(null);
+  const satTravelNameRef = useRef('');
+  const satTravelYawRef = useRef(0);                                  // azimuth around zenith (rad)
+  const satTravelPitchRef = useRef(Cesium.Math.toRadians(22));        // depression from nadir (rad)
+  const satTravelFovRef = useRef(Cesium.Math.toRadians(60));          // camera field of view (rad)
+  const satTravelPreRenderRef = useRef<(() => void) | null>(null);
+  const satTravelHudIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const satTravelDragRef = useRef<{ x: number; y: number; active: boolean }>({ x: 0, y: 0, active: false });
+  const satTravelDragCleanupRef = useRef<(() => void) | null>(null);
+  const satTravelSavedViewRef = useRef<{ pos: Cesium.Cartesian3; hdg: number; pitch: number; roll: number } | null>(null);
   const trackedSatRef = useRef<Cesium.Entity | null>(null);
   const trackedSatTrailEntityRef = useRef<Cesium.Entity | null>(null);
   const trackedSatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1378,8 +1380,8 @@ export default function App() {
   const [isAutoRotating, setIsAutoRotating] = useState(false);
   const [showISSInfo, setShowISSInfo] = useState(false);
   const [issInfo, setIssInfo] = useState<{lat:number;lon:number} | null>(null);
-  const [issTravel, setIssTravel] = useState(false);
-  const [issTravelHud, setIssTravelHud] = useState<{ lat: number; lon: number; altKm: number; az: number; el: number } | null>(null);
+  const [satTravel, setSatTravel] = useState(false);
+  const [satTravelHud, setSatTravelHud] = useState<{ lat: number; lon: number; altKm: number; az: number; el: number } | null>(null);
   const [intelFeed, setIntelFeed] = useState<IntelFeedItem[]>([]);
   const [intelFilter, setIntelFilter] = useState('all');
   const [cameraLat, setCameraLat] = useState('');
@@ -2956,8 +2958,10 @@ export default function App() {
     });
     trackedSatTrailEntityRef.current = trailEntity;
 
-    // ── Current position (ConstantPositionProperty — updated every 2s, flyTo-safe) ──
-    const posProp = new Cesium.ConstantPositionProperty();
+    // ── Current position (SampledPositionProperty — updated every 2s, interpolated between samples) ──
+    const posProp = new Cesium.SampledPositionProperty();
+    posProp.forwardExtrapolationType = Cesium.ExtrapolationType.EXTRAPOLATE;
+    posProp.backwardExtrapolationType = Cesium.ExtrapolationType.EXTRAPOLATE;
     // Seed initial position
     try {
       const pv = satellite.propagate(rec, new Date());
@@ -2965,7 +2969,7 @@ export default function App() {
         const gmst = satellite.gstime(new Date());
         const gd = satellite.eciToGeodetic(pv.position, gmst);
         const pos = Cesium.Cartesian3.fromDegrees(satellite.degreesLong(gd.longitude), satellite.degreesLat(gd.latitude), gd.height * 1000);
-        posProp.setValue(pos);
+        posProp.addSample(Cesium.JulianDate.now(), pos);
       }
     } catch { /* ignore */ }
 
@@ -2990,7 +2994,7 @@ export default function App() {
       trailPositions.push(pos);
     }
 
-    // Fly to entity — ConstantPositionProperty is stable for flyTo
+    // Fly to entity
     v.flyTo(entity, {
       duration: 2,
       offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-25), 20000),
@@ -3013,7 +3017,7 @@ export default function App() {
         const lon = satellite.degreesLong(gd.longitude);
         const alt = gd.height * 1000;
         const pos = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
-        posProp.setValue(pos);
+        posProp.addSample(Cesium.JulianDate.now(), pos);
         trailPositions.push(Cesium.Cartesian3.clone(pos));
         if (trailPositions.length > TRAIL_MAX) trailPositions.splice(0, trailPositions.length - TRAIL_MAX);
         throttledRender(v);
@@ -3779,7 +3783,7 @@ export default function App() {
     const v = viewerRef.current;
     if (!v) return;
     if (issEntityRef.current) {
-      if (issTravelRef.current) exitIssTravel(v);
+      if (satTravelRef.current) exitSatelliteTravel(v);
       v.entities.remove(issEntityRef.current);
       issEntityRef.current = null;
       setShowISSInfo(false);
@@ -3844,40 +3848,40 @@ export default function App() {
      ISS TRAVEL VIEW — first-person onboard camera (live orbit, no driving)
      ═════════════════════════════════════════════════════════════════ */
 
-  const ISS_TRAVEL_PITCH_MIN = 0;                                   // straight down (nadir)
-  const ISS_TRAVEL_PITCH_MAX = Cesium.Math.toRadians(85);           // near horizon
-  const ISS_TRAVEL_FOV_MIN = Cesium.Math.toRadians(15);
-  const ISS_TRAVEL_FOV_MAX = Cesium.Math.toRadians(90);
+  const SAT_TRAVEL_PITCH_MIN = 0;                                   // straight down (nadir)
+  const SAT_TRAVEL_PITCH_MAX = Cesium.Math.toRadians(85);           // near horizon
+  const SAT_TRAVEL_FOV_MIN = Cesium.Math.toRadians(15);
+  const SAT_TRAVEL_FOV_MAX = Cesium.Math.toRadians(90);
 
-  // Per-frame: glue the camera to the live ISS position and orient it from yaw/pitch.
+  // Per-frame: glue the camera to the live satellite position and orient it from yaw/pitch.
   // We pass heading/pitch/roll directly (roll = 0) instead of direction/up — Cesium
   // internally converts direction/up -> hpr and that round-trip inverts the up vector
   // (roll 180°), which flipped the Earth upside-down. hpr keeps "up" = zenith (upright).
   function updateTravelCamera(v: Cesium.Viewer) {
-    const trail = issTrailRef.current;
-    if (!trail) return;
-    const pos = trail.getValue(Cesium.JulianDate.now());
+    const posProp = satTravelPosRef.current;
+    if (!posProp) return;
+    const pos = posProp.getValue(Cesium.JulianDate.now());
     if (!pos) return;
 
-    const heading = issTravelYawRef.current;                         // azimuth, north=0, east=+90
-    const pitch = issTravelPitchRef.current - Cesium.Math.PI_OVER_TWO; // depression-from-nadir -> cesium pitch (-90 nadir .. 0 horizon)
+    const heading = satTravelYawRef.current;                         // azimuth, north=0, east=+90
+    const pitch = satTravelPitchRef.current - Cesium.Math.PI_OVER_TWO; // depression-from-nadir -> cesium pitch (-90 nadir .. 0 horizon)
 
     const frustum = v.camera.frustum as Cesium.PerspectiveFrustum;
-    frustum.fov = issTravelFovRef.current;
+    frustum.fov = satTravelFovRef.current;
 
     v.camera.setView({ destination: pos, orientation: { heading, pitch, roll: 0 } });
   }
 
   // ~5 Hz HUD telemetry (avoids setState every frame)
   function updateTravelHud(v: Cesium.Viewer) {
-    const trail = issTrailRef.current;
-    if (!trail) return;
-    const pos = trail.getValue(Cesium.JulianDate.now());
+    const posProp = satTravelPosRef.current;
+    if (!posProp) return;
+    const pos = posProp.getValue(Cesium.JulianDate.now());
     if (!pos) return;
     const carto = Cesium.Cartographic.fromCartesian(pos);
-    const az = (Cesium.Math.toDegrees(issTravelYawRef.current) % 360 + 360) % 360;
-    const el = Cesium.Math.toDegrees(issTravelPitchRef.current) - 90; // -90 nadir .. 0 horizon .. +90 zenith
-    setIssTravelHud({
+    const az = (Cesium.Math.toDegrees(satTravelYawRef.current) % 360 + 360) % 360;
+    const el = Cesium.Math.toDegrees(satTravelPitchRef.current) - 90; // -90 nadir .. 0 horizon .. +90 zenith
+    setSatTravelHud({
       lat: +Cesium.Math.toDegrees(carto.latitude).toFixed(3),
       lon: +Cesium.Math.toDegrees(carto.longitude).toFixed(3),
       altKm: +(carto.height / 1000).toFixed(1),
@@ -3889,56 +3893,54 @@ export default function App() {
   function setupTravelDrag(v: Cesium.Viewer) {
     const canvas = v.scene.canvas;
     const SENS = Cesium.Math.toRadians(0.25);
-    const onDown = (ev: PointerEvent) => { issTravelDragRef.current = { x: ev.clientX, y: ev.clientY, active: true }; };
-    const onUp = () => { issTravelDragRef.current.active = false; };
+    const onDown = (ev: PointerEvent) => { satTravelDragRef.current = { x: ev.clientX, y: ev.clientY, active: true }; };
+    const onUp = () => { satTravelDragRef.current.active = false; };
     const onMove = (ev: PointerEvent) => {
-      const d = issTravelDragRef.current;
+      const d = satTravelDragRef.current;
       if (!d.active) return;
       const dx = ev.clientX - d.x;
       const dy = ev.clientY - d.y;
       d.x = ev.clientX;
       d.y = ev.clientY;
-      issTravelYawRef.current -= dx * SENS;
-      issTravelPitchRef.current = Math.min(ISS_TRAVEL_PITCH_MAX, Math.max(ISS_TRAVEL_PITCH_MIN, issTravelPitchRef.current + dy * SENS));
+      satTravelYawRef.current -= dx * SENS;
+      satTravelPitchRef.current = Math.min(SAT_TRAVEL_PITCH_MAX, Math.max(SAT_TRAVEL_PITCH_MIN, satTravelPitchRef.current + dy * SENS));
     };
     canvas.addEventListener('pointerdown', onDown);
     window.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointermove', onMove);
-    issTravelDragCleanupRef.current = () => {
+    satTravelDragCleanupRef.current = () => {
       canvas.removeEventListener('pointerdown', onDown);
       window.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointermove', onMove);
     };
   }
 
-  function issTravelKeyHandler(e: KeyboardEvent) {
-    if (!issTravelRef.current) return;
+  function satTravelKeyHandler(e: KeyboardEvent) {
+    if (!satTravelRef.current) return;
     const STEP = Cesium.Math.toRadians(6);
     const FOV = Cesium.Math.toRadians(5);
     switch (e.key) {
-      case 'ArrowLeft': issTravelYawRef.current -= STEP; e.preventDefault(); break;
-      case 'ArrowRight': issTravelYawRef.current += STEP; e.preventDefault(); break;
-      case 'ArrowUp': issTravelPitchRef.current = Math.min(ISS_TRAVEL_PITCH_MAX, issTravelPitchRef.current + STEP); e.preventDefault(); break;
-      case 'ArrowDown': issTravelPitchRef.current = Math.max(ISS_TRAVEL_PITCH_MIN, issTravelPitchRef.current - STEP); e.preventDefault(); break;
-      case 'q': case 'Q': issTravelYawRef.current += Math.PI; break;
-      case 'r': case 'R': issTravelPitchRef.current = ISS_TRAVEL_PITCH_MIN; break;
-      case 'f': case 'F': issTravelPitchRef.current = Cesium.Math.toRadians(80); break;
-      case '+': case '=': issTravelFovRef.current = Math.max(ISS_TRAVEL_FOV_MIN, issTravelFovRef.current - FOV); break;
-      case '-': case '_': issTravelFovRef.current = Math.min(ISS_TRAVEL_FOV_MAX, issTravelFovRef.current + FOV); break;
-      case 'Escape': { const v = viewerRef.current; if (v) exitIssTravel(v); break; }
+      case 'ArrowLeft': satTravelYawRef.current -= STEP; e.preventDefault(); break;
+      case 'ArrowRight': satTravelYawRef.current += STEP; e.preventDefault(); break;
+      case 'ArrowUp': satTravelPitchRef.current = Math.min(SAT_TRAVEL_PITCH_MAX, satTravelPitchRef.current + STEP); e.preventDefault(); break;
+      case 'ArrowDown': satTravelPitchRef.current = Math.max(SAT_TRAVEL_PITCH_MIN, satTravelPitchRef.current - STEP); e.preventDefault(); break;
+      case 'q': case 'Q': satTravelYawRef.current += Math.PI; break;
+      case 'r': case 'R': satTravelPitchRef.current = SAT_TRAVEL_PITCH_MIN; break;
+      case 'f': case 'F': satTravelPitchRef.current = Cesium.Math.toRadians(80); break;
+      case '+': case '=': satTravelFovRef.current = Math.max(SAT_TRAVEL_FOV_MIN, satTravelFovRef.current - FOV); break;
+      case '-': case '_': satTravelFovRef.current = Math.min(SAT_TRAVEL_FOV_MAX, satTravelFovRef.current + FOV); break;
+      case 'Escape': { const v = viewerRef.current; if (v) exitSatelliteTravel(v); break; }
     }
   }
 
   // Forward heading (azimuth) of the satellite's actual direction of travel,
   // derived from its live position samples — so the default view is "where it's pointing",
   // not a fixed north. Recomputed every boarding, so a different satellite yields a different default.
-  function getIssForwardAzimuth(): number {
-    const trail = issTrailRef.current;
-    if (!trail) return 0;
+  function getSatForwardAzimuth(posProp: Cesium.PositionProperty): number {
     const t0 = Cesium.JulianDate.now();
     const t1 = Cesium.JulianDate.addSeconds(t0, 20, new Cesium.JulianDate());
-    const p0 = trail.getValue(t0);
-    const p1 = trail.getValue(t1);
+    const p0 = posProp.getValue(t0);
+    const p1 = posProp.getValue(t1);
     if (!p0 || !p1) return 0;
     const enu = Cesium.Transforms.eastNorthUpToFixedFrame(p0);
     const eAxis = new Cesium.Cartesian3(enu[0], enu[4], enu[8]);
@@ -3950,20 +3952,22 @@ export default function App() {
     return Math.atan2(eastComp, northComp); // matches h = e*sin(az) + n*cos(az)
   }
 
-  function enterIssTravel(v: Cesium.Viewer) {
-    issTravelRef.current = true;
-    setIssTravel(true);
+  function enterSatelliteTravel(v: Cesium.Viewer, posProp: Cesium.PositionProperty, name: string) {
+    satTravelRef.current = true;
+    setSatTravel(true);
+    satTravelPosRef.current = posProp;
+    satTravelNameRef.current = name;
     // remember the current globe camera so we can return to the exact same spot on exit
-    issTravelSavedViewRef.current = {
+    satTravelSavedViewRef.current = {
       pos: Cesium.Cartesian3.clone(v.camera.position),
       hdg: v.camera.heading,
       pitch: v.camera.pitch,
       roll: v.camera.roll,
     };
-    // default look = ahead along the orbit (satellite's real direction of travel), near the horizon
-    issTravelYawRef.current = getIssForwardAzimuth();
-    issTravelPitchRef.current = Cesium.Math.toRadians(80);
-    issTravelFovRef.current = Cesium.Math.toRadians(60);
+    // default look = ahead along the orbit, looking straight down at Earth (nadir)
+    satTravelYawRef.current = getSatForwardAzimuth(posProp);
+    satTravelPitchRef.current = SAT_TRAVEL_PITCH_MIN;
+    satTravelFovRef.current = Cesium.Math.toRadians(60);
 
     const ctrl = v.scene.screenSpaceCameraController;
     ctrl.enableRotate = false;
@@ -3971,21 +3975,23 @@ export default function App() {
     ctrl.enableTilt = false;
     ctrl.enableTranslate = false;
 
-    issTravelPreRenderRef.current = v.scene.preRender.addEventListener(() => updateTravelCamera(v));
-    issTravelHudIntRef.current = setInterval(() => updateTravelHud(v), 200);
+    satTravelPreRenderRef.current = v.scene.preRender.addEventListener(() => updateTravelCamera(v));
+    satTravelHudIntRef.current = setInterval(() => updateTravelHud(v), 200);
     setupTravelDrag(v);
-    window.addEventListener('keydown', issTravelKeyHandler);
-    showNotification('Boarded ISS — Travel View (live orbit)', 'success');
+    window.addEventListener('keydown', satTravelKeyHandler);
+    showNotification('Boarded ' + name + ' — Travel View (live orbit)', 'success');
   }
 
-  function exitIssTravel(v: Cesium.Viewer) {
-    issTravelRef.current = false;
-    setIssTravel(false);
-    setIssTravelHud(null);
-    if (issTravelPreRenderRef.current) { issTravelPreRenderRef.current(); issTravelPreRenderRef.current = null; }
-    if (issTravelHudIntRef.current) { clearInterval(issTravelHudIntRef.current); issTravelHudIntRef.current = null; }
-    if (issTravelDragCleanupRef.current) { issTravelDragCleanupRef.current(); issTravelDragCleanupRef.current = null; }
-    window.removeEventListener('keydown', issTravelKeyHandler);
+  function exitSatelliteTravel(v: Cesium.Viewer) {
+    satTravelRef.current = false;
+    setSatTravel(false);
+    setSatTravelHud(null);
+    satTravelPosRef.current = null;
+    satTravelNameRef.current = '';
+    if (satTravelPreRenderRef.current) { satTravelPreRenderRef.current(); satTravelPreRenderRef.current = null; }
+    if (satTravelHudIntRef.current) { clearInterval(satTravelHudIntRef.current); satTravelHudIntRef.current = null; }
+    if (satTravelDragCleanupRef.current) { satTravelDragCleanupRef.current(); satTravelDragCleanupRef.current = null; }
+    window.removeEventListener('keydown', satTravelKeyHandler);
 
     const ctrl = v.scene.screenSpaceCameraController;
     ctrl.enableRotate = true;
@@ -3995,8 +4001,8 @@ export default function App() {
     (v.camera.frustum as Cesium.PerspectiveFrustum).fov = Cesium.Math.toRadians(60);
 
     // return to the exact globe position we were at before boarding
-    const saved = issTravelSavedViewRef.current;
-    issTravelSavedViewRef.current = null;
+    const saved = satTravelSavedViewRef.current;
+    satTravelSavedViewRef.current = null;
     if (saved) {
       v.camera.flyTo({
         destination: saved.pos,
@@ -4007,15 +4013,15 @@ export default function App() {
     } else {
       cinematicFlyTo(v, 78, 22, 2.2e7, 2);
     }
-    showNotification('Exited ISS Travel View', 'info');
+    showNotification('Exited Travel View', 'info');
   }
 
   const toggleIssTravel = useCallback(() => {
     const v = viewerRef.current;
     if (!v) return;
-    if (issTravelRef.current) { exitIssTravel(v); return; }
+    if (satTravelRef.current) { exitSatelliteTravel(v); return; }
     if (!issEntityRef.current) toggleISS();   // ensure ISS is live before boarding
-    enterIssTravel(v);
+    enterSatelliteTravel(v, issTrailRef.current!, 'ISS');
   }, [toggleISS]);
 
   // D-pad / button actions driven from the Travel View HUD
@@ -4023,23 +4029,36 @@ export default function App() {
     const STEP = Cesium.Math.toRadians(8);
     const FOV = Cesium.Math.toRadians(6);
     switch (action) {
-      case 'left': issTravelYawRef.current -= STEP; break;
-      case 'right': issTravelYawRef.current += STEP; break;
-      case 'up': issTravelPitchRef.current = Math.min(ISS_TRAVEL_PITCH_MAX, issTravelPitchRef.current + STEP); break;
-      case 'down': issTravelPitchRef.current = Math.max(ISS_TRAVEL_PITCH_MIN, issTravelPitchRef.current - STEP); break;
-      case 'back': issTravelYawRef.current += Math.PI; break;
-      case 'nadir': issTravelPitchRef.current = ISS_TRAVEL_PITCH_MIN; break;
-      case 'horizon': issTravelPitchRef.current = Cesium.Math.toRadians(80); break;
-      case 'zoomin': issTravelFovRef.current = Math.max(ISS_TRAVEL_FOV_MIN, issTravelFovRef.current - FOV); break;
-      case 'zoomout': issTravelFovRef.current = Math.min(ISS_TRAVEL_FOV_MAX, issTravelFovRef.current + FOV); break;
+      case 'left': satTravelYawRef.current -= STEP; break;
+      case 'right': satTravelYawRef.current += STEP; break;
+      case 'up': satTravelPitchRef.current = Math.min(SAT_TRAVEL_PITCH_MAX, satTravelPitchRef.current + STEP); break;
+      case 'down': satTravelPitchRef.current = Math.max(SAT_TRAVEL_PITCH_MIN, satTravelPitchRef.current - STEP); break;
+      case 'back': satTravelYawRef.current += Math.PI; break;
+      case 'nadir': satTravelPitchRef.current = SAT_TRAVEL_PITCH_MIN; break;
+      case 'horizon': satTravelPitchRef.current = Cesium.Math.toRadians(80); break;
+      case 'zoomin': satTravelFovRef.current = Math.max(SAT_TRAVEL_FOV_MIN, satTravelFovRef.current - FOV); break;
+      case 'zoomout': satTravelFovRef.current = Math.min(SAT_TRAVEL_FOV_MAX, satTravelFovRef.current + FOV); break;
       case 'default':
-        // reset to the satellite's actual default look (forward along orbit, at the horizon)
-        issTravelYawRef.current = getIssForwardAzimuth();
-        issTravelPitchRef.current = Cesium.Math.toRadians(80);
-        issTravelFovRef.current = Cesium.Math.toRadians(60);
+        // reset to the satellite's actual default look (forward along orbit, nadir)
+        if (satTravelPosRef.current) {
+          satTravelYawRef.current = getSatForwardAzimuth(satTravelPosRef.current);
+        }
+        satTravelPitchRef.current = SAT_TRAVEL_PITCH_MIN;
+        satTravelFovRef.current = Cesium.Math.toRadians(60);
         break;
     }
   }, []);
+
+  const boardSatelliteFromInfoPanel = useCallback(() => {
+    const v = viewerRef.current;
+    const ent = infoEntity;
+    if (!v || !ent || !ent.position) return;
+    if (satTravelRef.current) exitSatelliteTravel(v);
+    const p = ent.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+    const name = String(p?.name ?? p?.title ?? ent.name ?? 'Satellite');
+    enterSatelliteTravel(v, ent.position, name);
+    setInfoEntity(null);
+  }, [infoEntity]);
 
   function createISSIcon(): HTMLCanvasElement {
     const s = 28;
@@ -7309,6 +7328,14 @@ export default function App() {
             </div>
           )}
 
+          {['space_debris', 'satnogs_db', 'ucs_satellite_db', 'tracked_satellite'].includes(layer) && (
+            <div className="sparkline-wrap">
+              <button className="board-sat-btn" onClick={boardSatelliteFromInfoPanel}>
+                <Satellite size={14} style={{marginRight:6,display:'inline'}} /> Enter Travel View
+              </button>
+            </div>
+          )}
+
           {layer === 'nasa_dsn' && (p as any).isStation && (
             <div className="sparkline-wrap" style={{marginTop:12}}>
               <div className="sparkline-title">Dish Statuses & Targets</div>
@@ -8213,7 +8240,7 @@ export default function App() {
       </div>
 
       {/* Camera Controls — advanced zoom with smooth flyTo */}
-      {!issTravel && <CameraControls viewer={viewerRef.current} />}
+      {!satTravel && <CameraControls viewer={viewerRef.current} />}
 
       {/* Context Menu */}
       <div ref={contextMenuRef} className={`context-menu ${contextMenu.show ? 'active' : ''}`}
@@ -8283,17 +8310,17 @@ export default function App() {
           lon={issInfo.lon}
           src={ISS_LIVE_EMBED}
           onClose={toggleISS}
-          isTraveling={issTravel}
+          isTraveling={satTravel}
           onBoard={() => toggleIssTravel()}
         />
       )}
 
-      {issTravel && (
+      {satTravel && (
         <IssTravelView
-          hud={issTravelHud}
+          hud={satTravelHud}
           onLook={travelLook}
           onCapture={() => takeSnapshot()}
-          onExit={() => { const v = viewerRef.current; if (v) exitIssTravel(v); }}
+          onExit={() => { const v = viewerRef.current; if (v) exitSatelliteTravel(v); }}
         />
       )}
 
