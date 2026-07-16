@@ -110,45 +110,62 @@ function solveKepler(M: number, e: number): number {
   return E;
 }
 
+function tleEpochToMs(epoch: string): number {
+  const iso = new Date(epoch).getTime();
+  if (!isNaN(iso)) return iso;
+  const m = epoch.match(/^(\d{2})(\d{3})\.(\d+)$/);
+  if (!m) return NaN;
+  let yy = parseInt(m[1]);
+  const doy = parseInt(m[2]);
+  const frac = parseFloat(`0.${m[3]}`);
+  if (yy >= 57) yy += 1900; else yy += 2000;
+  return Date.UTC(yy, 0, doy + frac);
+}
+
 export function computeDebrisPosition(d: any, time: Cesium.JulianDate): Cesium.Cartesian3 {
-  const epochTime = new Date(d.epoch).getTime();
+  const epochTime = tleEpochToMs(d.epoch);
   const currentTime = Cesium.JulianDate.toDate(time).getTime();
   const dt = (currentTime - epochTime) / 1000; // seconds since epoch
 
   const GM = 3.986004418e14; // Earth GM (m^3/s^2)
+  const Re = 6378137;        // Earth equatorial radius (m)
+  const J2 = 1.08262668e-3;
   const a = d.semimajorAxis * 1000; // semi-major axis in meters
   const e = d.eccentricity;
   const i = d.inclination * Math.PI / 180;
-  const omega = d.argOfPericenter * Math.PI / 180;
-  const omegaAN = d.raOfAscNode * Math.PI / 180;
+  const omega0 = d.argOfPericenter * Math.PI / 180;
+  const omegaAN0 = d.raOfAscNode * Math.PI / 180;
   const M0 = d.meanAnomaly * Math.PI / 180;
 
   // Mean motion (rad/s)
   const n = Math.sqrt(GM / (a * a * a));
+
+  // J2 secular precession rates
+  const j2fac = J2 * (Re / a) ** 2 / ((1 - e * e) ** 2);
+  const omegaAN_dot = -1.5 * n * j2fac * Math.cos(i);
+  const omega_dot = 0.75 * n * j2fac * (5 * Math.cos(i) ** 2 - 1);
+
+  const omegaAN = omegaAN0 + omegaAN_dot * dt;
+  const omega = omega0 + omega_dot * dt;
+
   const M = M0 + n * dt;
   const E = solveKepler(M, e);
 
-  // True anomaly
   const cosV = (Math.cos(E) - e) / (1 - e * Math.cos(E));
   const sinV = (Math.sqrt(1 - e * e) * Math.sin(E)) / (1 - e * Math.cos(E));
   const v = Math.atan2(sinV, cosV);
 
-  // Orbital radius
   const r = a * (1 - e * Math.cos(E));
 
-  // Position in orbital plane
   const xOrb = r * Math.cos(v);
   const yOrb = r * Math.sin(v);
 
-  // Inertial coordinates (ECI)
   const xI = xOrb * (Math.cos(omega) * Math.cos(omegaAN) - Math.sin(omega) * Math.sin(omegaAN) * Math.cos(i)) -
              yOrb * (Math.sin(omega) * Math.cos(omegaAN) + Math.cos(omega) * Math.sin(omegaAN) * Math.cos(i));
   const yI = xOrb * (Math.cos(omega) * Math.sin(omegaAN) + Math.sin(omega) * Math.cos(omegaAN) * Math.cos(i)) -
              yOrb * (Math.sin(omega) * Math.sin(omegaAN) - Math.cos(omega) * Math.cos(omegaAN) * Math.cos(i));
   const zI = xOrb * (Math.sin(omega) * Math.sin(i)) + yOrb * (Math.cos(omega) * Math.sin(i));
 
-  // Rotate to ECEF based on Earth's rotation
-  // Earth angular velocity ~ 7.2921159e-5 rad/s
   const theta = 7.2921159e-5 * dt;
   const x = xI * Math.cos(theta) + yI * Math.sin(theta);
   const y = -xI * Math.sin(theta) + yI * Math.cos(theta);

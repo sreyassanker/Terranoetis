@@ -1676,15 +1676,6 @@ app.get('/api/iss', async (_req: express.Request, res: express.Response) => {
   }
 });
 
-app.get('/api/satellites/tle', async (_req: express.Request, res: express.Response) => {
-  try {
-    const data = await fetchSatellites();
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
-
 app.get('/api/flights', async (req: express.Request, res: express.Response) => {
   const authHeader = req.headers.authorization;
   const headers: Record<string, string> = authHeader ? { Authorization: authHeader } : {};
@@ -6192,16 +6183,44 @@ async function fetchWeatherForecasts(): Promise<any[]> {
   return items;
 }
 
-// SPACE: CelesTrak satellite positions (SGP4-propagated real lat/lon via TLE format)
-const CELESTRAK_TLE_GROUPS = ['stations', 'visual', 'weather', 'resource', 'cubesat', 'engineering', 'last-30-days'];
+// SPACE: Merged satellite catalog (CelesTrak TLE + UCS DB + SpaceX Starlink)
+const CELESTRAK_TLE_GROUPS = [
+  'stations', 'visual', 'weather', 'resource', 'cubesat', 'engineering', 'last-30-days',
+  'active', 'starlink', 'oneweb', 'gps-ops', 'glo-ops', 'galileo', 'beidou',
+  'amateur', 'x-comm', 'intelsat', 'iridium', 'ses', 'eutelsat',
+  'orbcomm', 'globalstar', 'swarm', 'planet', 'spire',
+];
+
+function tleChecksum(line: string): string {
+  let sum = 0;
+  for (const ch of line) for (const d of ch) if (d >= '0' && d <= '9') sum += +d; else if (d === '-') sum++;
+  return String(sum % 10);
+}
+
+function generateTle(noradId: string, inc: number, raan: number, ecc: number, argPer: number, meanAnomaly: number, meanMotion: number, epoch?: string): { tle1: string; tle2: string } {
+  const id = noradId.padStart(5, ' ');
+  const epochStr = (epoch ?? '00001.00000000').slice(0, 14).padEnd(14, '0');
+  const l1 = `1 ${id}U 00001A   ${epochStr}  0.00000000  0  0  999`;
+  const incS = inc.toFixed(4).padStart(8, ' ');
+  const raanS = raan.toFixed(4).padStart(8, ' ');
+  const eccS = Math.round(ecc * 1e7).toString().padStart(7, '0');
+  const argS = argPer.toFixed(4).padStart(8, ' ');
+  const meanS = meanAnomaly.toFixed(4).padStart(8, ' ');
+  const mmS = meanMotion.toFixed(8).padStart(11, ' ');
+  const l2 = `2 ${id} ${incS} ${raanS} ${eccS} ${argS} ${meanS} ${mmS} 0`;
+  return { tle1: l1 + tleChecksum(l1), tle2: l2 + tleChecksum(l2) };
+}
+
 async function fetchSatellites(): Promise<any[]> {
+  const cacheKey = 'merged_satellites';
+  const cached = cache.get<any[]>(cacheKey);
+  if (cached) return cached;
+
   const now = new Date();
-  const seen = new Set<string>();
   const results: any[] = [];
 
-  // Sequential per-group to avoid CelesTrak rate limiting on concurrent connections
+  // 1) CelesTrak TLE — sequential per-group to avoid rate limiting
   for (const group of CELESTRAK_TLE_GROUPS) {
-    if (results.length >= 5000) break;
     try {
       const resp = await fetch(
         `https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=tle`,
@@ -6212,14 +6231,12 @@ async function fetchSatellites(): Promise<any[]> {
       if (text.includes('GP data has not updated') || text.includes('Invalid query')) continue;
       const lines = text.trim().split('\n');
       for (let i = 0; i + 2 < lines.length; i += 3) {
-        if (results.length >= 5000) break;
         const name = lines[i].trim();
         const line1 = lines[i + 1].trim();
         const line2 = lines[i + 2].trim();
         if (!line1.startsWith('1 ') || !line2.startsWith('2 ')) continue;
         const noradCat = line1.slice(2, 7).trim();
-        if (seen.has(noradCat)) continue;
-        seen.add(noradCat);
+        if (results.some(r => r.id === noradCat)) continue;
         try {
           const rec = satellite.twoline2satrec(line1, line2);
           const pv = satellite.propagate(rec, now);
@@ -6240,21 +6257,133 @@ async function fetchSatellites(): Promise<any[]> {
             epoch: line1.slice(18, 32).trim(),
             value: Math.round(+(line2.slice(52, 63).trim() ?? 0) * 10),
             source: 'CelesTrak',
+            hasTle: true,
             tle1: line1,
             tle2: line2,
           });
         } catch (e) {
-          logger.warn({ err: e }, 'CelesTrak TLE entry parse failed');
           continue;
         }
       }
     } catch (e) {
-      logger.warn({ err: e }, 'CelesTrak batch parse failed');
       continue;
     }
   }
-  return results.slice(0, 500);
+
+  // 2) UCS Satellite Database (static orbital elements, no TLE)
+  //    Merges metadata into existing CelesTrak entries when NORAD ID matches
+  try {
+    const ucsPath = path.join(__dirname, '..', 'public', 'data', 'ucs-satellites.json');
+    if (fs.existsSync(ucsPath)) {
+      const raw = fs.readFileSync(ucsPath, 'utf-8');
+      const ucsRecords = JSON.parse(raw) as any[];
+      for (const u of ucsRecords) {
+        const noradId = String(u.norad_id ?? u.NORAD_ID ?? '').trim();
+        const existing = noradId ? results.find(r => r.id === noradId) : null;
+        if (existing) {
+          if (u.country) existing.country = u.country;
+          if (u.purpose) existing.purpose = u.purpose;
+          if (u.orbit_class) existing.orbitClass = u.orbit_class;
+          continue;
+        }
+        const uInclination = u.inclination ?? 0;
+        const uEccentricity = u.eccentricity ?? 0;
+        const uPeriod = u.period; // minutes
+        const uMeanMotion = uPeriod ? 1440 / uPeriod : 15; // rev/day
+        const uAltitude = u.apogee ? Math.round((u.apogee + (u.perigee ?? u.apogee)) / 2 * 1000) : null;
+        let tle: { tle1: string; tle2: string } | null = null;
+        try {
+          tle = generateTle(noradId || '00000', uInclination, 0, uEccentricity, 0, 0, uMeanMotion);
+        } catch {}
+        results.push({
+          id: noradId || `ucs_${u.name ?? Math.random()}`,
+          name: u.name ?? u.OBJECT_NAME ?? 'Unknown',
+          lat: null,
+          lon: null,
+          altitude: uAltitude,
+          inclination: uInclination,
+          meanMotion: uMeanMotion,
+          epoch: null,
+          value: 50,
+          source: 'UCS',
+          hasTle: !!tle,
+          tle1: tle?.tle1 ?? null,
+          tle2: tle?.tle2 ?? null,
+          country: u.country ?? null,
+          purpose: u.purpose ?? null,
+          orbitClass: u.orbit_class ?? null,
+          apogee: u.apogee ?? null,
+          perigee: u.perigee ?? null,
+        });
+      }
+    }
+  } catch (e) {
+    logger.warn({ err: e }, 'Failed to load UCS satellite data');
+  }
+
+  // 3) SpaceX Starlink (live positions from API, no TLE)
+  //    Merges velocity/lat/lon into existing CelesTrak entries when NORAD ID matches
+  try {
+    const starlinkData = spacexEngine.getStarlinkByRegion(-90, 90, -180, 180);
+    for (const s of starlinkData) {
+      const noradMatch = s.spaceTrack?.OBJECT_ID?.match(/\d{5}/);
+      const noradId = noradMatch ? noradMatch[0] : null;
+      const st = s.spaceTrack;
+      const sInc = st?.INCLINATION ?? 0;
+      const sRaan = st?.RA_OF_ASC_NODE ?? 0;
+      const sEcc = st?.ECCENTRICITY ?? 0;
+      const sArg = st?.ARG_OF_PERICENTER ?? 0;
+      const sMean = st?.MEAN_ANOMALY ?? 0;
+      const sMm = st?.MEAN_MOTION ?? 15;
+      const sEpoch = st?.EPOCH ? st.EPOCH.replace(/[^0-9.]/g, '').slice(0, 14) : undefined;
+      let stTle: { tle1: string; tle2: string } | null = null;
+      try {
+        stTle = generateTle(noradId || '00000', sInc, sRaan, sEcc, sArg, sMean, sMm, sEpoch);
+      } catch {}
+
+      const existing = noradId ? results.find(r => r.id === noradId) : null;
+      if (existing) {
+        if (s.velocity_kms != null) existing.velocity = s.velocity_kms;
+        if (s.latitude != null) { existing.lat = +s.latitude.toFixed(4); existing.lon = +s.longitude.toFixed(4); }
+        if (s.height_km != null) existing.altitude = Math.round(s.height_km * 1000);
+        if (stTle) { existing.tle1 = stTle.tle1; existing.tle2 = stTle.tle2; existing.hasTle = true; }
+        existing.source = 'CelesTrak';
+        continue;
+      }
+      results.push({
+        id: noradId || `starlink_${st?.OBJECT_NAME ?? Math.random()}`,
+        name: st?.OBJECT_NAME ?? 'Starlink',
+        lat: s.latitude != null ? +s.latitude.toFixed(4) : null,
+        lon: s.longitude != null ? +s.longitude.toFixed(4) : null,
+        altitude: s.height_km != null ? Math.round(s.height_km * 1000) : null,
+        inclination: sInc,
+        meanMotion: sMm,
+        epoch: sEpoch ?? null,
+        value: 60,
+        source: 'Starlink',
+        hasTle: !!stTle,
+        tle1: stTle?.tle1 ?? null,
+        tle2: stTle?.tle2 ?? null,
+        velocity: s.velocity_kms ?? null,
+        version: s.version ?? null,
+      });
+    }
+  } catch (e) {
+    logger.warn({ err: e }, 'Failed to load Starlink data');
+  }
+
+  cache.set(cacheKey, results, 3600);
+  return results;
 }
+
+app.get('/api/satellites/tle', async (_req: express.Request, res: express.Response) => {
+  try {
+    const data = await fetchSatellites();
+    res.json(data);
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
 
 // AIRPORTS: OurAirports dataset (free, CC-BY 4.0)
 async function fetchAirports(): Promise<any[]> {

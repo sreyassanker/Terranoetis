@@ -1050,6 +1050,9 @@ export default function App() {
   const trackedSatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const trackedSatTleRef = useRef<{ tle1: string; tle2: string } | null>(null);
   const trackedSatRenderTickRef = useRef<(() => void) | null>(null);
+  const trackedSatPosPropRef = useRef<Cesium.SampledPositionProperty | null>(null);
+  const trackedSatSpeedRef = useRef(0);
+  const trackedSatNameRef = useRef('');
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const intelFeedRef = useRef<IntelFeedItem[]>([]);
   const notificationTimeoutsRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
@@ -1119,7 +1122,7 @@ export default function App() {
   const [contextMenu, setContextMenu] = useState<{show:boolean;x:number;y:number;lat:number;lon:number}>({show:false,x:0,y:0,lat:0,lon:0});
   const [forks, setForks] = useState<Array<{forkId: string; name: string; divergenceScore: number; status: string}>>([]);
   const [activeForkCount, setActiveForkCount] = useState(0);
-  const [monitorCollapsed, setMonitorCollapsed] = useState(false);
+  const [monitorCollapsed, setMonitorCollapsed] = useState(true);
   const [forkMode, setForkMode] = useState(false);
   const forkModeRef = useRef(false);
   useEffect(() => { forkModeRef.current = forkMode; }, [forkMode]);
@@ -2970,6 +2973,10 @@ export default function App() {
         const gd = satellite.eciToGeodetic(pv.position, gmst);
         const pos = Cesium.Cartesian3.fromDegrees(satellite.degreesLong(gd.longitude), satellite.degreesLat(gd.latitude), gd.height * 1000);
         posProp.addSample(Cesium.JulianDate.now(), pos);
+        if (pv.velocity && isFinite(pv.velocity.x)) {
+          const vx = pv.velocity.x, vy = pv.velocity.y, vz = pv.velocity.z;
+          trackedSatSpeedRef.current = Math.sqrt(vx*vx + vy*vy + vz*vz);
+        }
       }
     } catch { /* ignore */ }
 
@@ -3011,6 +3018,10 @@ export default function App() {
       try {
         const pv = satellite.propagate(rec, date);
         if (!pv || !pv.position || !isFinite(pv.position.x)) return;
+        if (pv.velocity && isFinite(pv.velocity.x)) {
+          const vx = pv.velocity.x, vy = pv.velocity.y, vz = pv.velocity.z;
+          trackedSatSpeedRef.current = Math.sqrt(vx*vx + vy*vy + vz*vz);
+        }
         const gmst = satellite.gstime(date);
         const gd = satellite.eciToGeodetic(pv.position, gmst);
         const lat = satellite.degreesLat(gd.latitude);
@@ -3023,6 +3034,18 @@ export default function App() {
         throttledRender(v);
       } catch { /* ignore */ }
     }, 2000);
+
+    trackedSatPosPropRef.current = posProp;
+    trackedSatNameRef.current = sat.name;
+  }, []);
+
+  const travelToTrackedSatellite = useCallback(() => {
+    const v = viewerRef.current;
+    const posProp = trackedSatPosPropRef.current;
+    const name = trackedSatNameRef.current;
+    if (!v || !posProp || !name) return;
+    if (satTravelRef.current) exitSatelliteTravel(v);
+    enterSatelliteTravel(v, posProp, name);
   }, []);
 
   function flyToIndiaDirect() {
@@ -3876,17 +3899,30 @@ export default function App() {
   function updateTravelHud(v: Cesium.Viewer) {
     const posProp = satTravelPosRef.current;
     if (!posProp) return;
-    const pos = posProp.getValue(Cesium.JulianDate.now());
+    const now = Cesium.JulianDate.now();
+    const pos = posProp.getValue(now);
     if (!pos) return;
+    const t1 = Cesium.JulianDate.addSeconds(now, 1, new Cesium.JulianDate());
+    const pos1 = posProp.getValue(t1);
     const carto = Cesium.Cartographic.fromCartesian(pos);
     const az = (Cesium.Math.toDegrees(satTravelYawRef.current) % 360 + 360) % 360;
     const el = Cesium.Math.toDegrees(satTravelPitchRef.current) - 90; // -90 nadir .. 0 horizon .. +90 zenith
+    let speed = 0;
+    if (pos1) {
+      const v = Cesium.Cartesian3.subtract(pos1, pos, new Cesium.Cartesian3());
+      const w = 7.2921159e-5;
+      const vx = v.x - w * pos.y;
+      const vy = v.y + w * pos.x;
+      const vz = v.z;
+      speed = Math.sqrt(vx * vx + vy * vy + vz * vz) / 1000; // ECI speed in km/s
+    }
     setSatTravelHud({
       lat: +Cesium.Math.toDegrees(carto.latitude).toFixed(3),
       lon: +Cesium.Math.toDegrees(carto.longitude).toFixed(3),
       altKm: +(carto.height / 1000).toFixed(1),
       az: +az.toFixed(0),
       el: +el.toFixed(0),
+      speed: +speed.toFixed(2),
     });
   }
 
@@ -3955,6 +3991,11 @@ export default function App() {
   function enterSatelliteTravel(v: Cesium.Viewer, posProp: Cesium.PositionProperty, name: string) {
     satTravelRef.current = true;
     setSatTravel(true);
+    // Ensure position property can always return a value (debris etc. may lack extrapolation)
+    if ('forwardExtrapolationType' in posProp) {
+      (posProp as Cesium.SampledPositionProperty).forwardExtrapolationType = Cesium.ExtrapolationType.EXTRAPOLATE;
+      (posProp as Cesium.SampledPositionProperty).backwardExtrapolationType = Cesium.ExtrapolationType.EXTRAPOLATE;
+    }
     satTravelPosRef.current = posProp;
     satTravelNameRef.current = name;
     // remember the current globe camera so we can return to the exact same spot on exit
@@ -3969,11 +4010,24 @@ export default function App() {
     satTravelPitchRef.current = SAT_TRAVEL_PITCH_MIN;
     satTravelFovRef.current = Cesium.Math.toRadians(60);
 
+    // Position camera at the satellite immediately (preRender starts on next frame)
+    const initPos = posProp.getValue(Cesium.JulianDate.now());
+    if (initPos) {
+      v.camera.setView({
+        destination: initPos,
+        orientation: { heading: satTravelYawRef.current, pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 },
+      });
+    }
+
     const ctrl = v.scene.screenSpaceCameraController;
     ctrl.enableRotate = false;
     ctrl.enableZoom = false;
     ctrl.enableTilt = false;
     ctrl.enableTranslate = false;
+
+    // Hide the tracked entity and trail while riding along
+    if (trackedSatRef.current) trackedSatRef.current.show = false;
+    if (trackedSatTrailEntityRef.current) trackedSatTrailEntityRef.current.show = false;
 
     satTravelPreRenderRef.current = v.scene.preRender.addEventListener(() => updateTravelCamera(v));
     satTravelHudIntRef.current = setInterval(() => updateTravelHud(v), 200);
@@ -3992,6 +4046,10 @@ export default function App() {
     if (satTravelHudIntRef.current) { clearInterval(satTravelHudIntRef.current); satTravelHudIntRef.current = null; }
     if (satTravelDragCleanupRef.current) { satTravelDragCleanupRef.current(); satTravelDragCleanupRef.current = null; }
     window.removeEventListener('keydown', satTravelKeyHandler);
+
+    // Restore tracked entity and trail
+    if (trackedSatRef.current) trackedSatRef.current.show = true;
+    if (trackedSatTrailEntityRef.current) trackedSatTrailEntityRef.current.show = true;
 
     const ctrl = v.scene.screenSpaceCameraController;
     ctrl.enableRotate = true;
@@ -7328,7 +7386,7 @@ export default function App() {
             </div>
           )}
 
-          {['space_debris', 'satnogs_db', 'ucs_satellite_db', 'tracked_satellite'].includes(layer) && (
+          {['space_debris', 'satnogs_db', 'ucs_satellite_db', 'tracked_satellite', '6_celestrak_gp_api'].includes(layer) && (
             <div className="sparkline-wrap">
               <button className="board-sat-btn" onClick={boardSatelliteFromInfoPanel}>
                 <Satellite size={14} style={{marginRight:6,display:'inline'}} /> Enter Travel View
@@ -8321,6 +8379,7 @@ export default function App() {
           onLook={travelLook}
           onCapture={() => takeSnapshot()}
           onExit={() => { const v = viewerRef.current; if (v) exitSatelliteTravel(v); }}
+          satName={satTravelNameRef.current}
         />
       )}
 
@@ -8524,7 +8583,7 @@ export default function App() {
       {showSearchPanel && <SatelliteSearchPanel onClose={() => { setShowSearchPanel(false); const v = viewerRef.current; if (v) { for (const ent of searchResultEntitiesRef.current) v.entities.remove(ent); } searchResultEntitiesRef.current = []; }} onResults={handleSearchResults} onFlyTo={focusLocation} />}
 
       {/* Satellite Tracker Panel */}
-      {showSatelliteTracker && <SatelliteTrackerPanel onClose={() => { setShowSatelliteTracker(false); if (trackedSatIntervalRef.current) { clearInterval(trackedSatIntervalRef.current); trackedSatIntervalRef.current = null; } if (trackedSatRenderTickRef.current) { trackedSatRenderTickRef.current(); trackedSatRenderTickRef.current = null; } if (trackedSatRef.current) { viewerRef.current?.entities.remove(trackedSatRef.current); trackedSatRef.current = null; } if (trackedSatTrailEntityRef.current) { viewerRef.current?.entities.remove(trackedSatTrailEntityRef.current); trackedSatTrailEntityRef.current = null; } trackedSatTleRef.current = null; }} onTrackSatellite={trackSatellite} />}
+      {showSatelliteTracker && <SatelliteTrackerPanel onClose={() => { setShowSatelliteTracker(false); if (trackedSatIntervalRef.current) { clearInterval(trackedSatIntervalRef.current); trackedSatIntervalRef.current = null; } if (trackedSatRenderTickRef.current) { trackedSatRenderTickRef.current(); trackedSatRenderTickRef.current = null; } if (trackedSatRef.current) { viewerRef.current?.entities.remove(trackedSatRef.current); trackedSatRef.current = null; } if (trackedSatTrailEntityRef.current) { viewerRef.current?.entities.remove(trackedSatTrailEntityRef.current); trackedSatTrailEntityRef.current = null; } trackedSatTleRef.current = null; trackedSatPosPropRef.current = null; trackedSatSpeedRef.current = 0; trackedSatNameRef.current = ''; }} onTrackSatellite={trackSatellite} onTravelView={travelToTrackedSatellite} />}
 
       {/* Military Symbology Panel */}
       {showMilitarySymbology && <MilitarySymbologyPanel onClose={() => setShowMilitarySymbology(false)} />}

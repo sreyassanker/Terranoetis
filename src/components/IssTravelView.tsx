@@ -7,6 +7,7 @@ export interface IssTravelHud {
   altKm: number;
   az: number;   // look azimuth (deg, 0 = N)
   el: number;   // look elevation (deg, -90 = nadir .. 0 = horizon)
+  speed: number; // km/s
 }
 
 type LookAction = 'left' | 'right' | 'up' | 'down' | 'back' | 'nadir' | 'horizon' | 'zoomin' | 'zoomout' | 'default';
@@ -16,6 +17,7 @@ interface IssTravelViewProps {
   onLook: (action: LookAction) => void;
   onCapture: () => void;
   onExit: () => void;
+  satName?: string;
 }
 
 const PX_PER_DEG_PITCH = 3.4;   // horizon line travel per elevation degree
@@ -32,7 +34,7 @@ function utcClock(): string {
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}Z`;
 }
 
-export function IssTravelView({ hud, onLook, onCapture, onExit }: IssTravelViewProps) {
+export function IssTravelView({ hud, onLook, onCapture, onExit, satName }: IssTravelViewProps) {
   const [clock, setClock] = useState(utcClock());
   useEffect(() => {
     const id = setInterval(() => setClock(utcClock()), 1000);
@@ -110,7 +112,7 @@ export function IssTravelView({ hud, onLook, onCapture, onExit }: IssTravelViewP
       {/* top-left: satellite identity */}
       <div className="iss-hud-tl">
         <div className="iss-hud-sat">
-          <Rocket size={13} /> ISS (ZARYA)
+          <Rocket size={13} /> {satName}
         </div>
         <div className="iss-hud-row"><span>LIVE</span><span className="iss-hud-live"><i /> TRACKING</span></div>
         <div className="iss-hud-row"><span>MODE</span><span>ORBITAL TRAVEL</span></div>
@@ -127,6 +129,9 @@ export function IssTravelView({ hud, onLook, onCapture, onExit }: IssTravelViewP
         </div>
         <div className="iss-hud-stat">
           <label>ALTITUDE</label><b>{hud ? `${hud.altKm.toFixed(0)} km` : '—'}</b>
+        </div>
+        <div className="iss-hud-stat">
+          <label>SPEED</label><b>{hud ? `${hud.speed.toFixed(2)} km/s` : '—'}</b>
         </div>
         <div className="iss-hud-stat">
           <label>LOOK AZ</label><b>{azLabel}</b>

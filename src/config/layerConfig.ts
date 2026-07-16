@@ -1294,7 +1294,7 @@ export const LEGACY_DEFAULTS: Record<string, { on?: boolean; badge?: string; sub
   space_debris: { sub: 'CelesTrak GP (1500+ objects)' },
   ais_vessels: { badge: 'KEY', sub: 'AISStream Real-Time' },
   intel_feed: { badge: 'LIVE', sub: 'Aggregated alert feed' },
-  live_media: { badge: 'LIVE', sub: 'YouTube news videos', on: true },
+  live_media: { badge: 'LIVE', sub: 'YouTube news videos', on: false },
   lightning_strikes: { badge: 'LIVE', sub: 'Real-Time Lightning' },
   aurora_oval: { opacity: 0.8, sub: 'NOAA Ovation Forecast' },
   flood_extent: { badge: 'KEY' },
