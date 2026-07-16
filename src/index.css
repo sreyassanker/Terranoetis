@@ -3014,6 +3014,164 @@ p { text-align: justify; }
     color: var(--accent2);
   }
 
+  .iss-live-board {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: calc(100% - 24px);
+    margin: 0 12px 12px;
+    padding: 9px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--text);
+    border: 1px solid var(--border);
+    background: rgba(56, 189, 248, 0.12);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+  }
+
+  .iss-live-board:hover { background: rgba(56, 189, 248, 0.22); }
+  .iss-live-board.active { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.5); color: #fca5a5; }
+
+  /* ── ISS TRAVEL VIEW — immersive satellite-camera HUD ── */
+  .iss-hud {
+    position: absolute;
+    inset: 0;
+    z-index: 235;
+    pointer-events: none;
+    font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+    --hud-cyan: #7dd3fc;
+    --hud-amber: #fbbf24;
+    --hud-line: rgba(125, 211, 252, 0.55);
+    color: var(--hud-cyan);
+  }
+
+  .iss-hud-scan {
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(to bottom, rgba(125,211,252,0.05) 0, rgba(125,211,252,0.05) 1px, transparent 2px, transparent 4px);
+    mix-blend-mode: screen; opacity: 0.5;
+  }
+  .iss-hud-vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+  }
+
+  .iss-hud-corner { position: absolute; width: 34px; height: 34px; border: 2px solid var(--hud-line); }
+  .iss-hud-corner.tl { top: 14px; left: 14px; border-right: none; border-bottom: none; }
+  .iss-hud-corner.tr { top: 14px; right: 14px; border-left: none; border-bottom: none; }
+  .iss-hud-corner.bl { bottom: 14px; left: 14px; border-right: none; border-top: none; }
+  .iss-hud-corner.br { bottom: 14px; right: 14px; border-left: none; border-top: none; }
+
+  .iss-hud-top {
+    position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+    width: min(620px, 80vw); display: flex; flex-direction: column; align-items: center; gap: 8px;
+  }
+  .iss-hud-feed {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; letter-spacing: 0.18em; color: var(--hud-cyan);
+    text-shadow: 0 0 8px rgba(125,211,252,0.5);
+  }
+  .iss-hud-rec-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #ef4444;
+    box-shadow: 0 0 8px #ef4444; animation: blink 1.4s infinite;
+  }
+  .iss-hud-utc { color: var(--hud-amber); margin-left: 6px; letter-spacing: 0.1em; }
+  .iss-hud-heading {
+    position: relative; width: 100%; height: 26px;
+    border-top: 1px solid var(--hud-line); border-bottom: 1px solid var(--hud-line);
+    overflow: hidden; background: rgba(8, 20, 30, 0.35); backdrop-filter: blur(2px);
+  }
+  .iss-hud-heading-strip { position: absolute; inset: 0; }
+  .iss-hud-tick { position: absolute; top: 0; height: 100%; transform: translateX(-50%); }
+  .iss-hud-tick-mark { display: block; width: 1px; height: 7px; background: var(--hud-line); margin: 0 auto; }
+  .iss-hud-tick.major .iss-hud-tick-mark { height: 12px; background: var(--hud-amber); }
+  .iss-hud-tick-label {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    font-size: 10px; color: var(--hud-amber); letter-spacing: 0.05em;
+  }
+  .iss-hud-heading-pointer {
+    position: absolute; top: -3px; left: 50%; transform: translateX(-50%);
+    width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent;
+    border-top: 8px solid var(--hud-cyan);
+  }
+
+  .iss-hud-reticle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 220px; height: 220px; }
+  .iss-hud-reticle-h, .iss-hud-reticle-v { position: absolute; background: var(--hud-line); }
+  .iss-hud-reticle-h { top: 50%; left: 0; width: 100%; height: 1px; transform: translateY(-50%); }
+  .iss-hud-reticle-v { left: 50%; top: 0; height: 100%; width: 1px; transform: translateX(-50%); }
+  .iss-hud-reticle-box {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 54px; height: 54px; border: 1px solid var(--hud-line); border-radius: 2px;
+  }
+  .iss-hud-reticle-dot {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 4px; height: 4px; border-radius: 50%; background: var(--hud-amber); box-shadow: 0 0 6px var(--hud-amber);
+  }
+
+  .iss-hud-horizon {
+    position: absolute; top: 50%; left: 50%; width: 60%;
+    display: flex; align-items: center; gap: 8px; pointer-events: none;
+  }
+  .iss-hud-horizon-line {
+    flex: 1; height: 1px; background: linear-gradient(to right, transparent, var(--hud-amber), transparent);
+    box-shadow: 0 0 6px rgba(251,191,36,0.5);
+  }
+  .iss-hud-horizon-tag { font-size: 10px; color: var(--hud-amber); letter-spacing: 0.05em; white-space: nowrap; }
+
+  .iss-hud-tl, .iss-hud-bl {
+    position: absolute; padding: 10px 12px; min-width: 184px;
+    background: linear-gradient(180deg, rgba(8,20,30,0.45), rgba(8,20,30,0.15));
+    border: 1px solid rgba(125,211,252,0.22); border-radius: 8px; backdrop-filter: blur(3px);
+  }
+  .iss-hud-tl { top: 56px; left: 56px; }
+  .iss-hud-bl { bottom: 56px; left: 56px; }
+  .iss-hud-sat {
+    display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700;
+    letter-spacing: 0.08em; color: var(--hud-cyan); text-shadow: 0 0 8px rgba(125,211,252,0.4); margin-bottom: 6px;
+  }
+  .iss-hud-row { display: flex; justify-content: space-between; gap: 14px; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+  .iss-hud-row span:last-child { color: var(--hud-cyan); }
+  .iss-hud-live { display: inline-flex; align-items: center; gap: 5px; color: #4ade80 !important; }
+  .iss-hud-live i { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 6px #4ade80; }
+  .iss-hud-stat { display: flex; flex-direction: column; gap: 1px; margin-bottom: 5px; }
+  .iss-hud-stat label { font-size: 8px; letter-spacing: 0.12em; color: var(--text-dim); }
+  .iss-hud-stat b { font-size: 12px; color: var(--hud-amber); font-weight: 600; }
+
+  .iss-hud-deck {
+    position: absolute; right: 24px; bottom: 24px; pointer-events: auto;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 12px; border-radius: 12px;
+    background: rgba(8,20,30,0.5); border: 1px solid rgba(125,211,252,0.25);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5); backdrop-filter: blur(4px);
+  }
+  .iss-hud-dpad {
+    display: grid; grid-template-columns: repeat(3, 38px); grid-template-rows: repeat(3, 38px); gap: 5px;
+  }
+  .iss-hud-btn {
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(125,211,252,0.3); background: rgba(125,211,252,0.06);
+    color: var(--hud-cyan); border-radius: 8px; cursor: pointer;
+    transition: background 0.12s ease, transform 0.05s ease;
+  }
+  .iss-hud-btn:hover { background: rgba(125,211,252,0.2); }
+  .iss-hud-btn:active { transform: scale(0.92); }
+  .iss-hud-center { background: rgba(251,191,36,0.14); border-color: rgba(251,191,36,0.4); }
+  .iss-hud-actions { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; max-width: 150px; }
+  .iss-hud-pill {
+    display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px;
+    font-size: 10px; font-family: 'JetBrains Mono', monospace;
+    border: 1px solid rgba(125,211,252,0.3); background: rgba(125,211,252,0.06);
+    color: var(--hud-cyan); border-radius: 6px; cursor: pointer; transition: background 0.12s ease;
+  }
+  .iss-hud-pill:hover { background: rgba(125,211,252,0.2); }
+  .iss-hud-exit { border-color: rgba(239,68,68,0.5); color: #fca5a5; }
+  .iss-hud-exit:hover { background: rgba(239,68,68,0.2); }
+
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
   /* ── SHARE DIALOG ── */
   .share-dialog {
     position: fixed;

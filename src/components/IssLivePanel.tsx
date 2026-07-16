@@ -1,13 +1,16 @@
 import { useState } from 'react';
+import { Rocket } from 'lucide-react';
 
 interface IssLivePanelProps {
   lat: number;
   lon: number;
   src: string;
   onClose: () => void;
+  isTraveling?: boolean;
+  onBoard?: () => void;
 }
 
-export function IssLivePanel({ lat, lon, src, onClose }: IssLivePanelProps) {
+export function IssLivePanel({ lat, lon, src, onClose, isTraveling = false, onBoard }: IssLivePanelProps) {
   const [failed, setFailed] = useState(false);
 
   return (
@@ -49,6 +52,16 @@ export function IssLivePanel({ lat, lon, src, onClose }: IssLivePanelProps) {
           <span className="iss-live-value">~408 km</span>
         </div>
       </div>
+
+      {onBoard && (
+        <button
+          className={`iss-live-board${isTraveling ? ' active' : ''}`}
+          onClick={onBoard}
+        >
+          <Rocket size={13} />
+          {isTraveling ? 'Exit Travel View' : 'Enter Travel View'}
+        </button>
+      )}
     </div>
   );
 }
