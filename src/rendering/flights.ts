@@ -42,7 +42,7 @@ export function parseOpenSkyState(state: unknown[]): FlightState | null {
 const ICON_CACHE = new Map<string, HTMLCanvasElement>();
 const ICON_CACHE_MAX = 500;
 
-function getPlaneIcon(heading: number, color: string): HTMLCanvasElement {
+export function getPlaneIcon(heading: number, color: string): HTMLCanvasElement {
   if (ICON_CACHE.size > ICON_CACHE_MAX) ICON_CACHE.clear();
   const rounded = Math.round(heading / 5) * 5;
   const key = `${rounded}_${color}`;
@@ -82,6 +82,25 @@ export class FlightDeadReckoning {
 
   getFlightsSnapshot(): FlightState[] {
     return [...this.flights.values()];
+  }
+
+  getFlightByKey(icao24: string, callsign: string): FlightState | undefined {
+    const key = `${icao24}_${callsign}`;
+    if (this.flights.has(key)) return this.flights.get(key);
+    for (const [k, f] of this.flights) {
+      if (k.startsWith(`${icao24}_`)) return f;
+    }
+    return undefined;
+  }
+
+  getEntity(icao24: string, callsign: string): Cesium.Entity | null {
+    const direct = this.entities.get(`${icao24}_${callsign}`);
+    if (direct) return direct;
+    // fallback: match by icao24 prefix (handles callsign normalization differences)
+    for (const [key, ent] of this.entities) {
+      if (key.startsWith(`${icao24}_`)) return ent;
+    }
+    return null;
   }
 
   constructor(viewer: Cesium.Viewer) {

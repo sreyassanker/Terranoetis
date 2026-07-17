@@ -316,6 +316,8 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/climate/power' || req.path === '/climate/anomalies' || req.path === '/climate/co2' || req.path === '/climate/sea-ice' ||
     req.path === '/gdelt' || req.path === '/fema' || req.path === '/geospatial/overpass' || req.path === '/population/worldpop' || req.path === '/usgs/water' ||
     req.path === '/flights/military' || req.path === '/military-bases' || req.path === '/ucdp' ||
+    req.path === '/satellites/tle' ||
+    req.path === '/flights' || req.path === '/flights/all' || req.path === '/adsb-lol' || req.path === '/airlabs' ||
     req.path === '/mgrs' || req.path === '/openaq' || req.path.startsWith('/openaq/') ||
     req.path.startsWith('/ndbc/') || req.path === '/ndbc/stations' ||
     req.path === '/shakemap/recent' || req.path.startsWith('/shakemap/') ||
@@ -1686,7 +1688,7 @@ app.get('/api/flights', async (req: express.Request, res: express.Response) => {
     const resp = await fetch('https://opensky-network.org/api/states/all', { ...headers, signal: AbortSignal.timeout(15000) });
     if (!resp.ok) throw new Error(`OpenSky ${resp.status}`);
     const data = await resp.json();
-    cache.set(key, data, 3600);
+    cache.set(key, data, 30);
     res.json(data);
   } catch (e) {
     cache.set(key, { elements: [] }, 600);
@@ -1918,8 +1920,8 @@ app.get('/api/adsb-lol', async (req: express.Request, res: express.Response) => 
         (ac.flight || '').trim(),
         '', '', '',
         ac.lon, ac.lat,
-        (ac.alt_baro && typeof ac.alt_baro === 'number' ? ac.alt_baro : ac.alt_geom) || 0,
-        false, ac.gs || ac.speed || 0, ac.track || ac.heading || 0, 0,
+        ((ac.alt_baro && typeof ac.alt_baro === 'number' ? ac.alt_baro : ac.alt_geom) || 0) * 0.3048,
+        false, (ac.gs || ac.speed || 0) * 0.514444, ac.track || ac.heading || 0, 0,
         '', ac.rssi || 0,
       ]);
     }
@@ -1960,8 +1962,8 @@ app.get('/api/adsb-fi', async (req: express.Request, res: express.Response) => {
         (ac.flight || '').trim(),
         '', '', '',
         ac.lon, ac.lat,
-        (ac.alt_baro && typeof ac.alt_baro === 'number' ? ac.alt_baro : ac.alt_geom) || 0,
-        false, ac.gs || ac.speed || 0, ac.track || ac.heading || 0, 0,
+        ((ac.alt_baro && typeof ac.alt_baro === 'number' ? ac.alt_baro : ac.alt_geom) || 0) * 0.3048,
+        false, (ac.gs || ac.speed || 0) * 0.514444, ac.track || ac.heading || 0, 0,
         '', ac.rssi || 0,
       ]);
     }
@@ -2028,8 +2030,8 @@ app.get('/api/airlabs', async (req: express.Request, res: express.Response) => {
       f.flight_icao || f.flight_iata || '',
       '', '', '',
       f.lng || f.lon || 0, f.lat || 0,
-      f.alt || 0,
-      false, f.speed || 0, f.dir || 0, 0,
+      (f.alt || 0) * 0.3048,
+      false, (f.speed || 0) * 0.514444, f.dir || 0, 0,
       '', 0,
     ]);
     const result = { states, time: now };

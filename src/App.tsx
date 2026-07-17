@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -23,7 +23,7 @@ import { addBaseImagery, applyTerrainProvider, crossfadeImagery } from '@/cesium
 import { cinematicFlyTo, createEntityTracker, type TrackEntityType } from '@/cesium/camera.controller';
 import { addEarthquakeEntity, type UsgsFeature } from '@/rendering/earthquakes';
 import { loadTectonicPlates } from '@/rendering/tectonic';
-import { FlightDeadReckoning, altitudeBandColor } from '@/rendering/flights';
+import { FlightDeadReckoning, altitudeBandColor, getPlaneIcon } from '@/rendering/flights';
 import { AisVesselTracker } from '@/rendering/ais';
 import { GhostProtocol } from '@/rendering/ghostProtocol';
 import { ForkRenderer } from '@/rendering/forkRenderer';
@@ -63,8 +63,10 @@ import { IntelligencePanel } from '@/components/IntelligencePanel';
 import { PrithviPanel } from '@/components/prithvi/PrithviPanel';
 import { SatelliteSearchPanel } from '@/components/prithvi/SatelliteSearchPanel';
 import { SatelliteTrackerPanel } from '@/components/prithvi/SatelliteTrackerPanel';
+import { AviationTrackerPanel } from '@/components/prithvi/AviationTrackerPanel';
 import { IssLivePanel } from '@/components/IssLivePanel';
 import { IssTravelView } from '@/components/IssTravelView';
+import { FlightTravelView } from '@/components/FlightTravelView';
 import { CommandPalette } from '@/components/CommandPalette';
 import { MilitarySymbologyPanel } from '@/components/MilitarySymbologyPanel';
 import { MilitarySymbologyOverlay } from '@/rendering/militarySymbologyOverlay';
@@ -1045,6 +1047,22 @@ export default function App() {
   const satTravelDragRef = useRef<{ x: number; y: number; active: boolean }>({ x: 0, y: 0, active: false });
   const satTravelDragCleanupRef = useRef<(() => void) | null>(null);
   const satTravelSavedViewRef = useRef<{ pos: Cesium.Cartesian3; hdg: number; pitch: number; roll: number } | null>(null);
+  // ── Flight Travel View (separate chase-cam style, distinct from satellite travel) ──
+  const flightTravelRef = useRef(false);
+  const flightTravelSimRef = useRef<{ lat: number; lon: number; alt: number; velocity: number; heading: number; verticalRate: number; lastUpdate: number } | null>(null);
+  const flightTravelNameRef = useRef('');
+  const flightTravelIcaoRef = useRef('');
+  const flightTravelCallsignRef = useRef('');
+  const flightTravelYawRef = useRef(0);                                  // yaw look-offset (rad)
+  const flightTravelPitchRef = useRef(Cesium.Math.toRadians(-14));       // chase look pitch (rad)
+  const flightTravelFovRef = useRef(Cesium.Math.toRadians(65));
+  const flightTravelPreRenderRef = useRef<(() => void) | null>(null);
+  const flightTravelHudIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const flightTravelRefreshIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const flightTravelDragRef = useRef<{ x: number; y: number; active: boolean }>({ x: 0, y: 0, active: false });
+  const flightTravelDragCleanupRef = useRef<(() => void) | null>(null);
+  const flightTravelMarkerRef = useRef<Cesium.Entity | null>(null);
+  const flightTravelSavedViewRef = useRef<{ pos: Cesium.Cartesian3; hdg: number; pitch: number; roll: number } | null>(null);
   const trackedSatRef = useRef<Cesium.Entity | null>(null);
   const trackedSatTrailEntityRef = useRef<Cesium.Entity | null>(null);
   const trackedSatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1131,6 +1149,7 @@ export default function App() {
   const [showPrithviPanel, setShowPrithviPanel] = useState(false);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
   const [showSatelliteTracker, setShowSatelliteTracker] = useState(false);
+  const [showAviationTracker, setShowAviationTracker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showMilitarySymbology, setShowMilitarySymbology] = useState(false);
   // CMD+K keyboard shortcut
@@ -1385,6 +1404,8 @@ export default function App() {
   const [issInfo, setIssInfo] = useState<{lat:number;lon:number} | null>(null);
   const [satTravel, setSatTravel] = useState(false);
   const [satTravelHud, setSatTravelHud] = useState<{ lat: number; lon: number; altKm: number; az: number; el: number } | null>(null);
+  const [flightTravel, setFlightTravel] = useState(false);
+  const [flightTravelHud, setFlightTravelHud] = useState<{ callsign: string; lat: number; lon: number; altFt: number; speedKts: number; speedKmh: number; heading: number; vs: number; pitch?: number } | null>(null);
   const [intelFeed, setIntelFeed] = useState<IntelFeedItem[]>([]);
   const [intelFilter, setIntelFilter] = useState('all');
   const [cameraLat, setCameraLat] = useState('');
@@ -3785,7 +3806,7 @@ export default function App() {
         setWeatherCards(prev => prev.map(wc =>
           wc.id === id ? { ...wc, temp: 0, humidity: 0, windSpeed: 0, pressure: 0, precipitation: 0, desc: 'Unavailable' } : wc
         ));
-      });
+    });
   }, []);
 
   function getWeatherDesc(code: number): string {
@@ -3875,6 +3896,17 @@ export default function App() {
   const SAT_TRAVEL_PITCH_MAX = Cesium.Math.toRadians(85);           // near horizon
   const SAT_TRAVEL_FOV_MIN = Cesium.Math.toRadians(15);
   const SAT_TRAVEL_FOV_MAX = Cesium.Math.toRadians(90);
+
+  // Flight Travel View — chase-cam constants (distinct from satellite nadir view)
+  const FLIGHT_TRAVEL_CHASE_DIST = 1800;                          // metres behind the aircraft
+  const FLIGHT_TRAVEL_CHASE_HEIGHT = 480;                         // metres above the aircraft
+  const FLIGHT_TRAVEL_PITCH = Cesium.Math.toRadians(-14);        // default chase look-down (rad)
+  const FLIGHT_TRAVEL_PITCH_MIN = Cesium.Math.toRadians(-80);    // can look back/down
+  const FLIGHT_TRAVEL_PITCH_MAX = Cesium.Math.toRadians(35);     // can look up
+  const FLIGHT_TRAVEL_FOV = Cesium.Math.toRadians(65);               // default field of view (rad)
+  const FLIGHT_TRAVEL_FOV_MIN = Cesium.Math.toRadians(25);
+  const FLIGHT_TRAVEL_FOV_MAX = Cesium.Math.toRadians(90);
+
 
   // Per-frame: glue the camera to the live satellite position and orient it from yaw/pitch.
   // We pass heading/pitch/roll directly (roll = 0) instead of direction/up — Cesium
@@ -3989,6 +4021,7 @@ export default function App() {
   }
 
   function enterSatelliteTravel(v: Cesium.Viewer, posProp: Cesium.PositionProperty, name: string) {
+    if (flightTravelRef.current) exitFlightTravel(v);
     satTravelRef.current = true;
     setSatTravel(true);
     // Ensure position property can always return a value (debris etc. may lack extrapolation)
@@ -4117,6 +4150,229 @@ export default function App() {
     enterSatelliteTravel(v, ent.position, name);
     setInfoEntity(null);
   }, [infoEntity]);
+
+  // ── Flight Travel View: chase-cam that rides behind/above a live aircraft ──
+  function flightChaseCam(v: Cesium.Viewer, pos: Cesium.Cartesian3, acHeadingDeg: number, yawRad: number, pitchRad: number) {
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(pos);
+    const eAxis = new Cesium.Cartesian3(enu[0], enu[4], enu[8]);
+    const nAxis = new Cesium.Cartesian3(enu[1], enu[5], enu[9]);
+    // forward direction = aircraft heading (determines camera position, not look)
+    const hRad = Cesium.Math.toRadians(acHeadingDeg);
+    const fwd = new Cesium.Cartesian3();
+    Cesium.Cartesian3.multiplyByScalar(eAxis, Math.sin(hRad), fwd);
+    Cesium.Cartesian3.add(fwd, Cesium.Cartesian3.multiplyByScalar(nAxis, Math.cos(hRad), new Cesium.Cartesian3()), fwd);
+    // chase position = aircraft - forward*dist + up*height (using aircraft heading only)
+    const uAxis = new Cesium.Cartesian3(enu[2], enu[6], enu[10]);
+    const chasePos = new Cesium.Cartesian3();
+    Cesium.Cartesian3.multiplyByScalar(fwd, -FLIGHT_TRAVEL_CHASE_DIST, chasePos);
+    Cesium.Cartesian3.add(pos, chasePos, chasePos);
+    Cesium.Cartesian3.add(chasePos, Cesium.Cartesian3.multiplyByScalar(uAxis, FLIGHT_TRAVEL_CHASE_HEIGHT, new Cesium.Cartesian3()), chasePos);
+    // look direction: aircraft heading + yaw offset
+    const lookHeading = hRad + yawRad;
+    const frustum = v.camera.frustum as Cesium.PerspectiveFrustum;
+    frustum.fov = flightTravelFovRef.current;
+    v.camera.setView({ destination: chasePos, orientation: { heading: lookHeading, pitch: pitchRad, roll: 0 } });
+  }
+
+  function updateFlightTravelCamera(v: Cesium.Viewer) {
+    const sim = flightTravelSimRef.current;
+    if (!sim) return;
+    const now = Date.now();
+    const dt = (now - sim.lastUpdate) / 1000;
+    if (dt > 0) {
+      if (sim.velocity > 0) {
+        const dist = sim.velocity * dt;
+        const rad = (sim.heading * Math.PI) / 180;
+        const dLat = (dist * Math.cos(rad)) / 111320;
+        const cosLat = Math.cos((sim.lat * Math.PI) / 180);
+        if (Math.abs(cosLat) >= 0.01) {
+          const dLon = (dist * Math.sin(rad)) / (111320 * cosLat);
+          sim.lat += dLat;
+          sim.lon += dLon;
+          if (sim.lon > 180) sim.lon -= 360; else if (sim.lon < -180) sim.lon += 360;
+        }
+      }
+      sim.alt = Math.max(0, sim.alt + sim.verticalRate * dt);
+      sim.lastUpdate = now;
+    }
+    const pos = Cesium.Cartesian3.fromDegrees(sim.lon, sim.lat, sim.alt);
+    flightChaseCam(v, pos, sim.heading, flightTravelYawRef.current, flightTravelPitchRef.current);
+  }
+
+  function updateFlightTravelHud(_v: Cesium.Viewer) {
+    const sim = flightTravelSimRef.current;
+    if (!sim) return;
+    setFlightTravelHud({
+      callsign: flightTravelNameRef.current,
+      lat: +sim.lat.toFixed(3),
+      lon: +sim.lon.toFixed(3),
+      altFt: Math.round(sim.alt * 3.28084),
+      speedKts: Math.round(sim.velocity * 1.94384),
+      speedKmh: Math.round(sim.velocity * 3.6),
+      heading: +sim.heading.toFixed(0),
+      vs: +sim.verticalRate.toFixed(1),
+      pitch: +Cesium.Math.toDegrees(flightTravelPitchRef.current).toFixed(1),
+    });
+  }
+
+  function flightTravelKeyHandler(e: KeyboardEvent) {
+    if (!flightTravelRef.current) return;
+    const STEP = Cesium.Math.toRadians(6);
+    const FOV = Cesium.Math.toRadians(5);
+    switch (e.key) {
+      case 'ArrowLeft': flightTravelYawRef.current -= STEP; e.preventDefault(); break;
+      case 'ArrowRight': flightTravelYawRef.current += STEP; e.preventDefault(); break;
+      case 'ArrowUp': flightTravelPitchRef.current = Math.min(FLIGHT_TRAVEL_PITCH_MAX, flightTravelPitchRef.current + STEP); e.preventDefault(); break;
+      case 'ArrowDown': flightTravelPitchRef.current = Math.max(FLIGHT_TRAVEL_PITCH_MIN, flightTravelPitchRef.current - STEP); e.preventDefault(); break;
+      case 'r': case 'R': flightTravelPitchRef.current = FLIGHT_TRAVEL_PITCH; flightTravelYawRef.current = 0; break;
+      case '+': case '=': flightTravelFovRef.current = Math.max(FLIGHT_TRAVEL_FOV_MIN, flightTravelFovRef.current - FOV); break;
+      case '-': case '_': flightTravelFovRef.current = Math.min(FLIGHT_TRAVEL_FOV_MAX, flightTravelFovRef.current + FOV); break;
+      case 'Escape': { const v = viewerRef.current; if (v) exitFlightTravel(v); break; }
+    }
+  }
+
+  function setupFlightTravelDrag(v: Cesium.Viewer) {
+    const canvas = v.scene.canvas;
+    const SENS = Cesium.Math.toRadians(0.25);
+    const onDown = (ev: PointerEvent) => { flightTravelDragRef.current = { x: ev.clientX, y: ev.clientY, active: true }; };
+    const onUp = () => { flightTravelDragRef.current.active = false; };
+    const onMove = (ev: PointerEvent) => {
+      const d = flightTravelDragRef.current;
+      if (!d.active) return;
+      const dx = ev.clientX - d.x;
+      const dy = ev.clientY - d.y;
+      d.x = ev.clientX; d.y = ev.clientY;
+      flightTravelYawRef.current -= dx * SENS;
+      flightTravelPitchRef.current = Math.min(FLIGHT_TRAVEL_PITCH_MAX, Math.max(FLIGHT_TRAVEL_PITCH_MIN, flightTravelPitchRef.current + dy * SENS));
+    };
+    canvas.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointermove', onMove);
+    flightTravelDragCleanupRef.current = () => {
+      canvas.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointermove', onMove);
+    };
+  }
+
+  function enterFlightTravel(v: Cesium.Viewer, sim: { lat: number; lon: number; alt: number; velocity: number; heading: number; verticalRate: number }, name: string, icao24?: string) {
+    flightTravelRef.current = true;
+    setFlightTravel(true);
+    flightTravelSimRef.current = { ...sim, lastUpdate: Date.now() };
+    flightTravelNameRef.current = name;
+    flightTravelIcaoRef.current = icao24 || '';
+    flightTravelCallsignRef.current = name.replace(/\s*\(.*\)$/, '').trim();
+    flightTravelSavedViewRef.current = {
+      pos: Cesium.Cartesian3.clone(v.camera.position),
+      hdg: v.camera.heading, pitch: v.camera.pitch, roll: v.camera.roll,
+    };
+    flightTravelYawRef.current = 0;
+    flightTravelPitchRef.current = FLIGHT_TRAVEL_PITCH;
+    flightTravelFovRef.current = FLIGHT_TRAVEL_FOV;
+
+    const pos = Cesium.Cartesian3.fromDegrees(sim.lon, sim.lat, sim.alt);
+    flightChaseCam(v, pos, sim.heading, 0, FLIGHT_TRAVEL_PITCH);
+
+    const ctrl = v.scene.screenSpaceCameraController;
+    ctrl.enableRotate = false; ctrl.enableZoom = false; ctrl.enableTilt = false; ctrl.enableTranslate = false;
+
+    flightTravelPreRenderRef.current = v.scene.preRender.addEventListener(() => updateFlightTravelCamera(v));
+    flightTravelHudIntRef.current = setInterval(() => updateFlightTravelHud(v), 200);
+    flightTravelRefreshIntRef.current = setInterval(() => refreshFlightTravelPosition(), 30000);
+    setupFlightTravelDrag(v);
+    window.addEventListener('keydown', flightTravelKeyHandler);
+    showNotification('Boarded ' + name + ' — Flight Travel View (chase cam)', 'success');
+  }
+
+  async function refreshFlightTravelPosition() {
+    if (!flightTravelRef.current) return;
+    const icao = flightTravelIcaoRef.current;
+    const cs = flightTravelCallsignRef.current;
+    if (!icao || !cs) return;
+    try {
+      const data = await fetch('/api/flights/all').then(r => r.json()) as { states?: unknown[][] };
+      const states = data.states || [];
+      const qcs = cs.toLowerCase();
+      for (const s of states) {
+        const sIcao = String(s[0] ?? '').toLowerCase();
+        const sCs = String(s[1] ?? '').trim().toLowerCase();
+        if (sIcao === icao.toLowerCase() || sCs === qcs || sCs.includes(qcs)) {
+          const sim = flightTravelSimRef.current;
+          if (!sim) return;
+          const lon = s[5]; const lat = s[6];
+          if (lon == null || lat == null) return;
+          sim.lon = Number(lon);
+          sim.lat = Number(lat);
+          sim.alt = Math.max(0, s[7] != null ? Number(s[7]) : (s[13] != null ? Number(s[13]) : sim.alt));
+          sim.velocity = s[9] != null ? Number(s[9]) : sim.velocity;
+          sim.heading = s[10] != null ? Number(s[10]) : sim.heading;
+          sim.verticalRate = s[11] != null ? Number(s[11]) : sim.verticalRate;
+          sim.lastUpdate = Date.now();
+          flightTravelIcaoRef.current = String(s[0] ?? '');
+          return;
+        }
+      }
+    } catch { /* silently ignore */ }
+  }
+
+  function exitFlightTravel(v: Cesium.Viewer) {
+    flightTravelRef.current = false;
+    setFlightTravel(false);
+    setFlightTravelHud(null);
+    flightTravelSimRef.current = null;
+    flightTravelNameRef.current = '';
+    flightTravelIcaoRef.current = '';
+    flightTravelCallsignRef.current = '';
+    if (flightTravelPreRenderRef.current) { flightTravelPreRenderRef.current(); flightTravelPreRenderRef.current = null; }
+    if (flightTravelHudIntRef.current) { clearInterval(flightTravelHudIntRef.current); flightTravelHudIntRef.current = null; }
+    if (flightTravelRefreshIntRef.current) { clearInterval(flightTravelRefreshIntRef.current); flightTravelRefreshIntRef.current = null; }
+    if (flightTravelDragCleanupRef.current) { flightTravelDragCleanupRef.current(); flightTravelDragCleanupRef.current = null; }
+    window.removeEventListener('keydown', flightTravelKeyHandler);
+    const ctrl = v.scene.screenSpaceCameraController;
+    ctrl.enableRotate = true; ctrl.enableZoom = true; ctrl.enableTilt = true; ctrl.enableTranslate = true;
+    (v.camera.frustum as Cesium.PerspectiveFrustum).fov = Cesium.Math.toRadians(60);
+    const saved = flightTravelSavedViewRef.current;
+    flightTravelSavedViewRef.current = null;
+    if (saved) {
+      v.camera.flyTo({
+        destination: saved.pos,
+        orientation: { heading: saved.hdg, pitch: saved.pitch, roll: saved.roll },
+        duration: 1.5, easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+      });
+    } else {
+      cinematicFlyTo(v, 78, 22, 2.2e7, 2);
+    }
+    showNotification('Exited Flight Travel View', 'info');
+  }
+
+  const travelToFlight = useCallback((f: { id: string; name: string; lat: number; lon: number; altitude: number; velocity: number; heading: number; verticalRate: number }) => {
+    const v = viewerRef.current;
+    if (!v) return;
+    if (satTravelRef.current) exitSatelliteTravel(v);
+    enterFlightTravel(v, {
+      lat: f.lat, lon: f.lon, alt: f.altitude,
+      velocity: f.velocity, heading: f.heading, verticalRate: f.verticalRate,
+    }, `${f.name} (${f.id})`, f.id);
+  }, []);
+
+
+  const travelLookFlight = useCallback((action: 'left' | 'right' | 'up' | 'down' | 'back' | 'default' | 'zoomin' | 'zoomout' | 'chase' | 'cockpit' | 'topdown') => {
+    const STEP = Cesium.Math.toRadians(8);
+    const FOV = Cesium.Math.toRadians(6);
+    switch (action) {
+      case 'left': flightTravelYawRef.current -= STEP; break;
+      case 'right': flightTravelYawRef.current += STEP; break;
+      case 'up': flightTravelPitchRef.current = Math.min(FLIGHT_TRAVEL_PITCH_MAX, flightTravelPitchRef.current + STEP); break;
+      case 'down': flightTravelPitchRef.current = Math.max(FLIGHT_TRAVEL_PITCH_MIN, flightTravelPitchRef.current - STEP); break;
+      case 'back': flightTravelYawRef.current += Math.PI; break;
+      case 'default': flightTravelPitchRef.current = FLIGHT_TRAVEL_PITCH; flightTravelYawRef.current = 0; break;
+      case 'chase': flightTravelPitchRef.current = FLIGHT_TRAVEL_PITCH; flightTravelYawRef.current = 0; break;
+      case 'cockpit': flightTravelPitchRef.current = Cesium.Math.toRadians(10); flightTravelYawRef.current = 0; break;
+      case 'topdown': flightTravelPitchRef.current = FLIGHT_TRAVEL_PITCH_MIN; flightTravelYawRef.current = 0; break;
+      case 'zoomin': flightTravelFovRef.current = Math.max(FLIGHT_TRAVEL_FOV_MIN, flightTravelFovRef.current - FOV); break;
+      case 'zoomout': flightTravelFovRef.current = Math.min(FLIGHT_TRAVEL_FOV_MAX, flightTravelFovRef.current + FOV); break;
+    }
+  }, []);
 
   function createISSIcon(): HTMLCanvasElement {
     const s = 28;
@@ -8287,12 +8543,13 @@ export default function App() {
           id="models" title="Models & Panels" icon={<Grid size={16} />}
           direction="up" triggerClassName="btn-icon monitor-btn"
           menuId={openMenu} setMenuId={setOpenMenu}
-          active={showIntelligencePanel || showPrithviPanel || showSearchPanel || showSatelliteTracker}
+          active={showIntelligencePanel || showPrithviPanel || showSearchPanel || showSatelliteTracker || showAviationTracker}
           items={[
             { label: 'Pulse', icon: <Eye size={15} />, active: showIntelligencePanel, onClick: () => setShowIntelligencePanel(p => !p) },
             { label: 'Prithvi EO', icon: <Brain size={15} />, active: showPrithviPanel, onClick: () => setShowPrithviPanel(p => !p) },
             { label: 'EO Image Search', icon: <SearchIcon size={15} />, active: showSearchPanel, onClick: () => setShowSearchPanel(p => !p) },
             { label: 'Satellite Tracker', icon: <Satellite size={15} />, active: showSatelliteTracker, onClick: () => setShowSatelliteTracker(p => !p) },
+            { label: 'Aviation Tracker', icon: <Plane size={15} />, active: showAviationTracker, onClick: () => setShowAviationTracker(p => !p) },
           ]}
         />
       </div>
@@ -8380,6 +8637,15 @@ export default function App() {
           onCapture={() => takeSnapshot()}
           onExit={() => { const v = viewerRef.current; if (v) exitSatelliteTravel(v); }}
           satName={satTravelNameRef.current}
+        />
+      )}
+
+      {flightTravel && (
+        <FlightTravelView
+          hud={flightTravelHud}
+          onLook={travelLookFlight}
+          onCapture={() => takeSnapshot()}
+          onExit={() => { const v = viewerRef.current; if (v) exitFlightTravel(v); }}
         />
       )}
 
@@ -8584,6 +8850,9 @@ export default function App() {
 
       {/* Satellite Tracker Panel */}
       {showSatelliteTracker && <SatelliteTrackerPanel onClose={() => { setShowSatelliteTracker(false); if (trackedSatIntervalRef.current) { clearInterval(trackedSatIntervalRef.current); trackedSatIntervalRef.current = null; } if (trackedSatRenderTickRef.current) { trackedSatRenderTickRef.current(); trackedSatRenderTickRef.current = null; } if (trackedSatRef.current) { viewerRef.current?.entities.remove(trackedSatRef.current); trackedSatRef.current = null; } if (trackedSatTrailEntityRef.current) { viewerRef.current?.entities.remove(trackedSatTrailEntityRef.current); trackedSatTrailEntityRef.current = null; } trackedSatTleRef.current = null; trackedSatPosPropRef.current = null; trackedSatSpeedRef.current = 0; trackedSatNameRef.current = ''; }} onTrackSatellite={trackSatellite} onTravelView={travelToTrackedSatellite} />}
+
+      {/* Aviation Tracker Panel */}
+      {showAviationTracker && <AviationTrackerPanel onClose={() => setShowAviationTracker(false)} onTravelView={travelToFlight} />}
 
       {/* Military Symbology Panel */}
       {showMilitarySymbology && <MilitarySymbologyPanel onClose={() => setShowMilitarySymbology(false)} />}
