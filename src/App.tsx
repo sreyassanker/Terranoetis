@@ -1063,6 +1063,8 @@ export default function App() {
   const flightTravelDragCleanupRef = useRef<(() => void) | null>(null);
   const flightTravelMarkerRef = useRef<Cesium.Entity | null>(null);
   const flightTravelSavedViewRef = useRef<{ pos: Cesium.Cartesian3; hdg: number; pitch: number; roll: number } | null>(null);
+  const flightTravelNearbyEntitiesRef = useRef<Map<string, Cesium.Entity>>(new Map());
+  const flightTravelHiddenEntityRef = useRef<Cesium.Entity | null>(null);
   const trackedSatRef = useRef<Cesium.Entity | null>(null);
   const trackedSatTrailEntityRef = useRef<Cesium.Entity | null>(null);
   const trackedSatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -4151,6 +4153,26 @@ export default function App() {
     setInfoEntity(null);
   }, [infoEntity]);
 
+  const boardFlightFromInfoPanel = useCallback(() => {
+    const v = viewerRef.current;
+    const ent = infoEntity;
+    if (!v || !ent) return;
+    if (satTravelRef.current) exitSatelliteTravel(v);
+    const p = ent.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+    if (!p) return;
+    const lat = Number(p.lat ?? 0);
+    const lon = Number(p.lon ?? 0);
+    const alt = Number(p.altitude ?? 0);
+    const vel = Number(p.velocity ?? 0);
+    const hdg = Number(p.heading ?? 0);
+    const vr = Number(p.verticalRate ?? 0);
+    const callsign = String(p.callsign ?? ent.name ?? 'Flight');
+    const icao24 = String(p.icao24 ?? '');
+    if (!lat && !lon) return;
+    enterFlightTravel(v, { lat, lon, alt, velocity: vel, heading: hdg, verticalRate: vr }, `${callsign} (${icao24})`, icao24);
+    setInfoEntity(null);
+  }, [infoEntity]);
+
   // ── Flight Travel View: chase-cam that rides behind/above a live aircraft ──
   function flightChaseCam(v: Cesium.Viewer, pos: Cesium.Cartesian3, acHeadingDeg: number, yawRad: number, pitchRad: number) {
     const enu = Cesium.Transforms.eastNorthUpToFixedFrame(pos);
@@ -4282,6 +4304,18 @@ export default function App() {
     setupFlightTravelDrag(v);
     window.addEventListener('keydown', flightTravelKeyHandler);
     showNotification('Boarded ' + name + ' — Flight Travel View (chase cam)', 'success');
+
+    const qIcao = (icao24 || '').toLowerCase();
+    if (qIcao) {
+      for (const ent of v.entities.values) {
+        const props = ent.properties?.getValue(Cesium.JulianDate.now());
+        if (props?.icao24 && String(props.icao24).toLowerCase() === qIcao) {
+          ent.show = false;
+          flightTravelHiddenEntityRef.current = ent;
+          break;
+        }
+      }
+    }
   }
 
   async function refreshFlightTravelPosition() {
@@ -4315,6 +4349,110 @@ export default function App() {
     } catch { /* silently ignore */ }
   }
 
+  function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function updateNearbyFlights(v: Cesium.Viewer, states: unknown[][], centerLat: number, centerLon: number) {
+    const BUFFER_KM = 50;
+    const tIcao = flightTravelIcaoRef.current.toLowerCase();
+    const map = flightTravelNearbyEntitiesRef.current;
+    const active = new Set<string>();
+
+    for (const s of states) {
+      const sIcao = String(s[0] ?? '');
+      const lat = Number(s[6] ?? 0);
+      const lon = Number(s[5] ?? 0);
+      const alt = Number(s[7] ?? 0);
+      if (!sIcao || !lat || !lon || sIcao.toLowerCase() === tIcao) continue;
+      if (haversineKm(centerLat, centerLon, lat, lon) > BUFFER_KM) continue;
+
+      const key = sIcao;
+      active.add(key);
+      const cs = String(s[1] ?? '').trim();
+      const hdg = Number(s[10] ?? 0);
+      const pos = Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(alt, 0));
+
+      let ent = map.get(key);
+      if (!ent) {
+        ent = v.entities.add({
+          position: pos,
+          billboard: {
+            image: getPlaneIcon(hdg, '#60a5fa'),
+            width: 14, height: 14,
+            scaleByDistance: new Cesium.NearFarScalar(5000, 1, 100000, 0.2),
+          },
+          label: {
+            text: cs,
+            font: '8px monospace',
+            fillColor: Cesium.Color.fromCssColorString('#94a3b8'),
+            showBackground: true,
+            backgroundColor: Cesium.Color.fromCssColorString('rgba(0,0,0,0.5)'),
+            pixelOffset: new Cesium.Cartesian2(0, -12),
+            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          },
+          properties: new Cesium.ConstantProperty({ layer: 'flight_nearby', icao24: sIcao }),
+        });
+        map.set(key, ent);
+      } else {
+        if (ent.position instanceof Cesium.ConstantPositionProperty) {
+          ent.position.setValue(pos);
+        }
+        ent.billboard!.image = getPlaneIcon(hdg, '#60a5fa');
+      }
+    }
+
+    for (const [key, ent] of map) {
+      if (!active.has(key)) {
+        v.entities.remove(ent);
+        map.delete(key);
+      }
+    }
+  }
+
+  async function refreshFlightTravelPosition() {
+    if (!flightTravelRef.current) return;
+    const icao = flightTravelIcaoRef.current;
+    const cs = flightTravelCallsignRef.current;
+    if (!icao || !cs) return;
+    try {
+      const data = await fetch('/api/flights/all').then(r => r.json()) as { states?: unknown[][] };
+      const states = data.states || [];
+      const qcs = cs.toLowerCase();
+      let trackedLat = 0, trackedLon = 0;
+      for (const s of states) {
+        const sIcao = String(s[0] ?? '').toLowerCase();
+        const sCs = String(s[1] ?? '').trim().toLowerCase();
+        if (sIcao === icao.toLowerCase() || sCs === qcs || sCs.includes(qcs)) {
+          const sim = flightTravelSimRef.current;
+          if (!sim) return;
+          const lon = s[5]; const lat = s[6];
+          if (lon == null || lat == null) return;
+          sim.lon = Number(lon);
+          sim.lat = Number(lat);
+          sim.alt = Math.max(0, s[7] != null ? Number(s[7]) : (s[13] != null ? Number(s[13]) : sim.alt));
+          sim.velocity = s[9] != null ? Number(s[9]) : sim.velocity;
+          sim.heading = s[10] != null ? Number(s[10]) : sim.heading;
+          sim.verticalRate = s[11] != null ? Number(s[11]) : sim.verticalRate;
+          sim.lastUpdate = Date.now();
+          flightTravelIcaoRef.current = String(s[0] ?? '');
+          trackedLat = sim.lat;
+          trackedLon = sim.lon;
+          break;
+        }
+      }
+      const v = viewerRef.current;
+      if (v && trackedLat && trackedLon) {
+        updateNearbyFlights(v, states, trackedLat, trackedLon);
+      }
+    } catch { /* silently ignore */ }
+  }
+
   function exitFlightTravel(v: Cesium.Viewer) {
     flightTravelRef.current = false;
     setFlightTravel(false);
@@ -4342,6 +4480,14 @@ export default function App() {
     } else {
       cinematicFlyTo(v, 78, 22, 2.2e7, 2);
     }
+    if (flightTravelHiddenEntityRef.current) {
+      flightTravelHiddenEntityRef.current.show = true;
+      flightTravelHiddenEntityRef.current = null;
+    }
+    for (const ent of flightTravelNearbyEntitiesRef.current.values()) {
+      v.entities.remove(ent);
+    }
+    flightTravelNearbyEntitiesRef.current.clear();
     showNotification('Exited Flight Travel View', 'info');
   }
 
@@ -7642,6 +7788,14 @@ export default function App() {
             </div>
           )}
 
+          {layer === 'flight_tracks' && (
+            <div className="sparkline-wrap">
+              <button className="board-sat-btn" onClick={boardFlightFromInfoPanel}>
+                <Plane size={14} style={{marginRight:6,display:'inline'}} /> Travel View
+              </button>
+            </div>
+          )}
+
           {['space_debris', 'satnogs_db', 'ucs_satellite_db', 'tracked_satellite', '6_celestrak_gp_api'].includes(layer) && (
             <div className="sparkline-wrap">
               <button className="board-sat-btn" onClick={boardSatelliteFromInfoPanel}>
@@ -8555,7 +8709,7 @@ export default function App() {
       </div>
 
       {/* Camera Controls — advanced zoom with smooth flyTo */}
-      {!satTravel && <CameraControls viewer={viewerRef.current} />}
+      {!satTravel && !flightTravel && <CameraControls viewer={viewerRef.current} />}
 
       {/* Context Menu */}
       <div ref={contextMenuRef} className={`context-menu ${contextMenu.show ? 'active' : ''}`}

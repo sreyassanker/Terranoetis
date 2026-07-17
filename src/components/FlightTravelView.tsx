@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plane, Crosshair, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, RotateCcw, Locate, Scan, X } from 'lucide-react';
+import { Plane, Crosshair, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, RotateCcw, Locate, Scan, X, Video } from 'lucide-react';
 
 export interface FlightTravelHud {
   callsign: string;
@@ -102,9 +102,22 @@ export function FlightTravelView({ hud, onLook, onCapture, onExit }: FlightTrave
   return (
     <div className="flt-hud">
 
-      {/* ── top bar: autopilot / flight director / status ── */}
+      {/* ── scanline + vignette ── */}
+      <div className="flt-hud-scan" />
+      <div className="flt-hud-vignette" />
+
+      {/* ── corner brackets ── */}
+      <div className="flt-hud-corner tl" />
+      <div className="flt-hud-corner tr" />
+      <div className="flt-hud-corner bl" />
+      <div className="flt-hud-corner br" />
+
+      {/* ── top bar: feed title + REC + clock ── */}
       <div className="flt-hud-topbar">
-        <span className="flt-hud-fd">FD</span>
+        <span className="flt-hud-feed">
+          <Video size={11} />
+          <span className="flt-hud-rec-dot" /> FLIGHT TELEMETRY FEED
+        </span>
         <span className="flt-hud-ap">LNAV · VNAV</span>
         <span className="flt-hud-spd">SPD {speed}kt</span>
         <span className="flt-hud-hdg">HDG {heading}°</span>
@@ -273,18 +286,25 @@ const css = `
 }
 .flt-hud button { pointer-events: auto; }
 
-/* ─── scanline + vignette ─── */
-.flt-hud::before {
-  content: ''; position: absolute; inset: 0;
+/* ─── scanline ─── */
+.flt-hud-scan {
+  position: absolute; inset: 0; z-index: 1;
   background: repeating-linear-gradient(to bottom, rgba(125,211,252,0.04) 0, rgba(125,211,252,0.04) 1px, transparent 2px, transparent 4px);
-  mix-blend-mode: screen; opacity: 0.4; z-index: 1;
+  mix-blend-mode: screen; opacity: 0.4; pointer-events: none;
 }
-.flt-hud::after {
-  content: ''; position: absolute; inset: 0;
+.flt-hud-vignette {
+  position: absolute; inset: 0; z-index: 1;
   background: radial-gradient(ellipse at 50% 45%, transparent 50%, rgba(0,0,0,0.55) 100%);
-  z-index: 1;
+  pointer-events: none;
 }
 .flt-hud > * { position: relative; z-index: 2; }
+
+/* ─── corner brackets ─── */
+.flt-hud-corner { position: absolute; width: 34px; height: 34px; z-index: 3; pointer-events: none; border: 2px solid rgba(125,211,252,0.35); }
+.flt-hud-corner.tl { top: 14px; left: 14px; border-right: none; border-bottom: none; }
+.flt-hud-corner.tr { top: 14px; right: 14px; border-left: none; border-bottom: none; }
+.flt-hud-corner.bl { bottom: 14px; left: 14px; border-right: none; border-top: none; }
+.flt-hud-corner.br { bottom: 14px; right: 14px; border-left: none; border-top: none; }
 
 /* ─── top status bar ─── */
 .flt-hud-topbar {
@@ -294,7 +314,9 @@ const css = `
   background: rgba(8,20,30,0.5); padding: 3px 14px; border-radius: 4px;
   border: 1px solid rgba(125,211,252,0.2);
 }
-.flt-hud-fd { color: var(--a); font-weight: 700; }
+.flt-hud-feed { display: flex; align-items: center; gap: 4px; color: var(--a); font-weight: 700; }
+.flt-hud-rec-dot { width: 6px; height: 6px; border-radius: 50%; background: #ef4444; animation: fltRecPulse 1.2s infinite; }
+@keyframes fltRecPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 .flt-hud-ap, .flt-hud-spd, .flt-hud-hdg, .flt-hud-alt-sel { color: #4ade80; }
 .flt-hud-clock { color: var(--a); margin-left: 4px; }
 

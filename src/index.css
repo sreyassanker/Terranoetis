@@ -3086,13 +3086,15 @@ p { text-align: justify; }
   .iss-hud-corner.br { bottom: 14px; right: 14px; border-left: none; border-top: none; }
 
   .iss-hud-top {
-    position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: 72px; left: 50%; transform: translateX(-50%);
     width: min(620px, 80vw); display: flex; flex-direction: column; align-items: center; gap: 8px;
   }
   .iss-hud-feed {
     display: flex; align-items: center; gap: 8px;
     font-size: 11px; letter-spacing: 0.18em; color: var(--hud-cyan);
     text-shadow: 0 0 8px rgba(125,211,252,0.5);
+    background: rgba(8,20,30,0.5); padding: 3px 10px; border-radius: 4px;
+    border: 1px solid rgba(125,211,252,0.2);
   }
   .iss-hud-rec-dot {
     width: 8px; height: 8px; border-radius: 50%; background: #ef4444;
@@ -3146,7 +3148,7 @@ p { text-align: justify; }
     background: linear-gradient(180deg, rgba(8,20,30,0.45), rgba(8,20,30,0.15));
     border: 1px solid rgba(125,211,252,0.22); border-radius: 8px; backdrop-filter: blur(3px);
   }
-  .iss-hud-tl { top: 56px; left: 56px; }
+  .iss-hud-tl { top: 72px; left: 56px; }
   .iss-hud-bl { bottom: 56px; left: 56px; }
   .iss-hud-sat {
     display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700;
