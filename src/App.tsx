@@ -4151,29 +4151,6 @@ export default function App() {
     setInfoEntity(null);
   }, [infoEntity]);
 
-  const boardFlightFromInfoPanel = useCallback(() => {
-    const ent = infoEntity;
-    if (!ent) return;
-    const p = ent.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-    if (!p) return;
-    const lat = Number(p.lat ?? 0);
-    const lon = Number(p.lon ?? 0);
-    if (!lat && !lon) return;
-    const v = viewerRef.current;
-    if (!v) return;
-    if (satTravelRef.current) exitSatelliteTravel(v);
-    travelToFlight({
-      id: String(p.icao24 ?? ''),
-      name: String(p.callsign ?? ent.name ?? 'Flight'),
-      lat, lon,
-      altitude: Number(p.altitude ?? 0),
-      velocity: Number(p.velocity ?? 0),
-      heading: Number(p.heading ?? 0),
-      verticalRate: 0,
-    });
-    setInfoEntity(null);
-  }, [infoEntity]);
-
   // ── Flight Travel View: chase-cam that rides behind/above a live aircraft ──
   function flightChaseCam(v: Cesium.Viewer, pos: Cesium.Cartesian3, acHeadingDeg: number, yawRad: number, pitchRad: number) {
     const enu = Cesium.Transforms.eastNorthUpToFixedFrame(pos);
@@ -7669,14 +7646,6 @@ export default function App() {
             <div className="sparkline-wrap">
               <button className="board-sat-btn" onClick={boardSatelliteFromInfoPanel}>
                 <Satellite size={14} style={{marginRight:6,display:'inline'}} /> Enter Travel View
-              </button>
-            </div>
-          )}
-
-          {layer === 'flight_tracks' && (
-            <div className="sparkline-wrap">
-              <button className="board-sat-btn" onClick={boardFlightFromInfoPanel}>
-                <Plane size={14} style={{marginRight:6,display:'inline'}} /> Travel View
               </button>
             </div>
           )}
