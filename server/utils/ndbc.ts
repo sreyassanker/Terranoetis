@@ -179,22 +179,6 @@ export async function fetchStationData(stationId: string, dataType: string = 'st
 /**
  * Fetch data for multiple stations concurrently
  */
-export async function fetchMultipleStations(
-  stationIds: string[],
-  dataType: string = 'stdmet',
-): Promise<Map<string, NdbcReading[]>> {
-  const results = new Map<string, NdbcReading[]>();
-
-  const promises = stationIds.map(async (id) => {
-    const readings = await fetchStationData(id, dataType);
-    if (readings.length > 0) {
-      results.set(id, readings);
-    }
-  });
-
-  await Promise.allSettled(promises);
-  return results;
-}
 
 /**
  * Find nearest NDBC station to a coordinate

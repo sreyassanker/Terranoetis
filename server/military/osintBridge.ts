@@ -179,6 +179,7 @@ async function fetchUrlhausThreats(): Promise<CyberThreat[]> {
       if (cols.length < 7) continue;
       const url = cols[2]?.replace(/^"(.*)"$/, '$1') || '';
       const threat = cols[5]?.replace(/^"(.*)"$/, '$1') || 'malware';
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const tags = cols[6]?.replace(/^"(.*)"$/, '$1') || '';
       const status = cols[3]?.replace(/^"(.*)"$/, '$1') || 'online';
       const host = url.startsWith('http') ? new URL(url).hostname : url.split('/')[0];

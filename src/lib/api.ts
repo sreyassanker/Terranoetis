@@ -56,7 +56,7 @@ export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
     const headers = new Headers(init?.headers);
     headers.delete('Authorization');
     if (path === '/weather/alerts' && !headers.has('User-Agent')) {
-      headers.set('User-Agent', 'LiveGlobe/1.0 (earth-intelligence)');
+      headers.set('User-Agent', 'Terranoetis/1.0 (earth-intelligence)');
     }
     const resp = await fetch(directUrl, { ...init, headers, cache: 'no-store' });
     if (!resp.ok) throw new Error(`Direct ${path} failed (${resp.status})`);
@@ -64,66 +64,12 @@ export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
   }
 }
 
-export function apiUrl(path: string): string {
-  return path.startsWith('http') ? path : `${API_BASE}${path}`;
-}
 
-async function authFetch(url: string, init?: RequestInit): Promise<Response> {
-  const resp = await fetch(url, addAuthHeader(init));
-  handleUnauthorized(resp);
-  return resp;
-}
 
 /* ── Sandbox API helpers ── */
 
-export async function sandboxExecute(language: string, code: string, workspaceId?: string, timeout?: number) {
-  const resp = await authFetch('/api/sandbox/execute', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ language, code, workspaceId, timeout }),
-  });
-  if (!resp.ok) throw new Error(`Sandbox execute failed (${resp.status})`);
-  return resp.json();
-}
 
-export async function sandboxBatchExecute(tasks: Array<{ language: string; code: string }>) {
-  const resp = await authFetch('/api/sandbox/batch', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tasks }),
-  });
-  if (!resp.ok) throw new Error(`Sandbox batch failed (${resp.status})`);
-  return resp.json();
-}
 
-export async function sandboxCreateWorkspace(userId = 'default') {
-  const resp = await authFetch('/api/sandbox/workspace', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId }),
-  });
-  if (!resp.ok) throw new Error(`Workspace creation failed (${resp.status})`);
-  return resp.json();
-}
 
-export async function sandboxUploadFile(workspaceId: string, fileName: string, content: string) {
-  const resp = await authFetch(`/api/sandbox/workspace/${workspaceId}/upload`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fileName, content }),
-  });
-  if (!resp.ok) throw new Error(`File upload failed (${resp.status})`);
-  return resp.json();
-}
 
-export async function sandboxListFiles(workspaceId: string) {
-  const resp = await authFetch(`/api/sandbox/workspace/${workspaceId}/files`);
-  if (!resp.ok) throw new Error(`List files failed (${resp.status})`);
-  return resp.json();
-}
 
-export async function sandboxReadFile(workspaceId: string, fileName: string) {
-  const resp = await authFetch(`/api/sandbox/workspace/${workspaceId}/read?file=${encodeURIComponent(fileName)}`);
-  if (!resp.ok) throw new Error(`Read file failed (${resp.status})`);
-  return resp.json();
-}

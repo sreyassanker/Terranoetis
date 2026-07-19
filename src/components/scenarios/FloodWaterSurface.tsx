@@ -99,7 +99,7 @@ export default function FloodWaterSurface({ viewer, shapes, progress }: FloodWat
               return Cesium.Cartesian3.fromDegrees(v.lon, v.lat, elevation);
             });
           }, false),
-          material: waveMaterial,
+          material: waveMaterial as unknown as Cesium.MaterialProperty,
           outline: true,
           outlineColor: baseColor.withAlpha(0.6 + progressRef.current * 0.2),
         },

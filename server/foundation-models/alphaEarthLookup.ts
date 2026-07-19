@@ -101,6 +101,7 @@ export class AlphaEarthLookup {
     const query = await this.lookup(lat, lon);
     const results: EmbeddingSimilarityResult[] = [];
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = this.db.prepare('SELECT lat, lon, year, embedding, class_label FROM alpha_earth_embeddings ORDER BY RANDOM() LIMIT 500').all() as any[];
     for (const row of rows) {
       const emb = JSON.parse(row.embedding) as number[];
@@ -160,6 +161,7 @@ export class AlphaEarthLookup {
 
   private loadCache(): void {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rows = this.db.prepare('SELECT lat, lon, year, embedding, class_label, confidence FROM alpha_earth_embeddings ORDER BY created_at DESC LIMIT ?').all(MAX_CACHE) as any[];
       for (const row of rows) {
         this.cache.set(this.cacheKey(row.lat, row.lon, row.year), {

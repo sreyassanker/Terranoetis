@@ -63,7 +63,7 @@ export function formatStepResult(
   latencyMs: number,
 ): FormattedStepResult {
   if (parsed.error) {
-    return { status: 'error', label: 'Error', summary: String(parsed.error), metrics: [], latencyMs, raw: JSON.stringify(parsed).slice(0, 300) };
+    return { status: 'error', label: 'Error', summary: String(parsed.error), metrics: [], latencyMs, raw: JSON.stringify(parsed).slice(0, 300), timestamp: '' };
   }
 
   const result = (parsed.result as Record<string, unknown>) ?? parsed;
@@ -125,7 +125,8 @@ export function formatStepResult(
       if (temp !== undefined) metrics.push({ label: 'Temperature', value: `${temp}°C` });
       if (humidity !== undefined) metrics.push({ label: 'Humidity', value: `${humidity}%` });
       if (wind !== undefined) metrics.push({ label: 'Wind', value: `${wind}${(current?.wind_speed_10m ?? cw?.windspeed) !== undefined ? ' km/h' : ' m/s'}` });
-      if (label !== undefined && !conditions) metrics.push({ label: 'Conditions', value: label });
+      const labelStr = label != null ? String(label) : '';
+      if (labelStr && !conditions) metrics.push({ label: 'Conditions', value: labelStr });
       if (metrics.length === 0) summary = 'Weather data unavailable';
       break;
     }
@@ -136,9 +137,11 @@ export function formatStepResult(
         const sev = eonetSeverityCount(events);
         timestamp = fmtTime(eonetLatestTs(events) || undefined);
         summary = `${count} wildfire event${count > 1 ? 's' : ''} detected`;
-        if (sev > 0) summary += `, max ${sev} ${events?.[0]?.geometry?.[0]?.magnitudeUnit ?? 'acres'}`;
+        const geomArr = (events?.[0]?.geometry as unknown[] | undefined) ?? [];
+        const magUnit = (geomArr[0] as Record<string, unknown> | undefined)?.magnitudeUnit ?? 'acres';
+        if (sev > 0) summary += `, max ${sev} ${magUnit}`;
         metrics = [{ label: 'Wildfires', value: String(count) }];
-        if (sev > 0) metrics.push({ label: 'Severity', value: `${sev} ${events?.[0]?.geometry?.[0]?.magnitudeUnit ?? 'acres'}` });
+        if (sev > 0) metrics.push({ label: 'Severity', value: `${sev} ${magUnit}` });
       } else {
         summary = 'No wildfire activity detected';
         metrics = [{ label: 'Wildfires', value: '0' }];

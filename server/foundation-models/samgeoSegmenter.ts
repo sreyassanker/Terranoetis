@@ -63,9 +63,11 @@ export interface AutoSegmentationResult {
 // ═══════════════════════════════════════════════════════════════════════
 
 const ES_SEARCH_URL = 'https://earth-search.aws.element84.com/v1/search';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const RESOLUTION_M = 10; // Sentinel-2 resolution
 const PIXELS_PER_HA = 100; // 10m x 10m = 100 pixels per hectare
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const CLASS_PROMPTS: Record<string, string[]> = {
   water: ['water body', 'lake', 'river', 'ocean', 'pond'],
   trees: ['forest', 'tree canopy', 'woodland', 'grove'],

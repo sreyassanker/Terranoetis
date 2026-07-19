@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { addEntity, addRelation, spatialQuery, graphTraversal, assembleContext } from '../../utils/geoGraphRAG';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type { GeoEntity, GeoRelation } from '../../utils/geoGraphRAG';
 
 describe('GeoGraphRAG', () => {

@@ -109,12 +109,4 @@ export function clearInterpSurface(viewer: Cesium.Viewer): void {
   }
 }
 
-export function updateInterpSurfaceOpacity(viewer: Cesium.Viewer, opacity: number): void {
-  if (surfaceLayer) {
-    surfaceLayer.alpha = opacity;
-  }
-}
 
-export function isConfidenceVisible(): boolean {
-  return confidenceLayer !== null;
-}

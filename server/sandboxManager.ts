@@ -30,11 +30,6 @@ export interface CodeExecutionRequest {
   cloud?: boolean;
 }
 
-export interface FileUpload {
-  fileName: string;
-  content: string;
-  workspaceId: string;
-}
 
 const WORKSPACE_TTL_MS = 30 * 60 * 1000;
 const MAX_WORKSPACES = 50;
@@ -146,7 +141,7 @@ export class SandboxManager {
       return ws;
     }
 
-    const baseDir = await mkdtemp(join(tmpdir(), `liveglobe-sandbox-`));
+    const baseDir = await mkdtemp(join(tmpdir(), `terranoetis-sandbox-`));
     await mkdir(join(baseDir, 'uploads'), { recursive: true });
     await mkdir(join(baseDir, 'outputs'), { recursive: true });
     await mkdir(join(baseDir, 'scripts'), { recursive: true });
@@ -283,7 +278,7 @@ export class SandboxManager {
       workspacePath = ws.path;
     }
 
-    const scriptDir = workspacePath || join(tmpdir(), `liveglobe-exec-${Date.now()}`);
+    const scriptDir = workspacePath || join(tmpdir(), `terranoetis-exec-${Date.now()}`);
     if (!workspacePath) await mkdir(scriptDir, { recursive: true });
 
     try {

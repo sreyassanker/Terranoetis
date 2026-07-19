@@ -69,6 +69,7 @@ export interface FloodAlert {
 export async function getFloodConditions(
   lat: number,
   lon: number,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   radiusMiles: number = 50,
 ): Promise<FloodGauge[]> {
   try {
@@ -282,9 +283,10 @@ export function estimateInundation(gauge: FloodGauge): FloodInundation {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function extractCenter(geometry: GeoJSON.Geometry | null | undefined): { lat: number; lon: number } {
-  if (!geometry?.coordinates) return { lat: 0, lon: 0 };
-  const coords = geometry.coordinates;
-  if (geometry.type === 'Point') return { lat: coords[1] as number, lon: coords[0] as number };
-  if (geometry.type === 'Polygon') return { lat: coords[0][0][1] as number, lon: coords[0][0][0] as number };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const coords: any = (geometry as any)?.coordinates;
+  if (!coords) return { lat: 0, lon: 0 };
+  if (geometry?.type === 'Point') return { lat: coords[1], lon: coords[0] };
+  if (geometry?.type === 'Polygon') return { lat: coords[0][0][1], lon: coords[0][0][0] };
   return { lat: 0, lon: 0 };
 }

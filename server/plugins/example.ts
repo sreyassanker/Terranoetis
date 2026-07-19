@@ -1,23 +1,21 @@
 // Example Earth Intelligence Plugin
-// Drop .ts or .js files into server/plugins/ — they auto-load every 30s.
+// Drop .ts files into server/plugins/ — they auto-load every 30s.
 //
 // Plugin API available:
 //   api.registerTool(tool)    — register a custom tool
 //   api.unregisterTool(name)  — remove a tool
 //   api.log(level, msg)       — log to server console
 
-module.exports = { init };
+module.exports = {};
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function init(api: any) {
+module.exports.init = function(api) {
   api.log('info', 'Example plugin loaded');
 
   api.registerTool({
     name: 'hello_world',
     description: 'A friendly greeting tool',
     category: 'custom',
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    handler: async (args: any) => {
+    handler: async (args) => {
       const name = args.name || 'World';
       return { greeting: `Hello, ${name}! From Earth Intelligence plugin.` };
     },
@@ -30,4 +28,4 @@ function init(api: any) {
       return { message: 'This is example data from a plugin.' };
     },
   });
-}
+};

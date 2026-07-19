@@ -17,15 +17,6 @@ export interface ForecastModel {
   active: boolean;
 }
 
-export interface Prediction {
-  hazardType: string;
-  probability: number;
-  severity: string;
-  confidence: number;
-  modelId: number;
-  features: Record<string, unknown>;
-  timestamp: number;
-}
 
 export interface EnsembleResult {
   predictions: Array<{ modelId: number; probability: number; weight: number }>;

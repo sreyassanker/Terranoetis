@@ -1,7 +1,7 @@
 import type { CityData, ExtraGeo, LocalSearchResult } from './appTypes';
 
-export const LEGACY_VAULT_KEYS = 'liveglobe.apiKeys.v1';
-export const LEGACY_VAULT_STATE = 'liveglobe.apiVault.v1';
+export const LEGACY_VAULT_KEYS = 'terranoetis.apiKeys.v1';
+export const LEGACY_VAULT_STATE = 'terranoetis.apiVault.v1';
 export const SESSION_VAULT_KEY = 'worldmonitor.vault.v1';
 export const CESIUM_ION_ENV_TOKEN = (import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined)?.trim() ?? '';
 

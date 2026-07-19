@@ -101,8 +101,5 @@ export async function downloadModel(
   return dest;
 }
 
-export function listModels(): string[] {
-  return Object.keys(MODELS);
-}
 
-export { MODELS_DIR };
+

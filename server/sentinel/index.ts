@@ -114,7 +114,7 @@ const WEATHER_ALERTS_SOURCE = {
     try {
       const resp = await fetch(
         'https://api.weather.gov/alerts/active?limit=50',
-        { signal: AbortSignal.timeout(10000), headers: { 'User-Agent': 'LiveGlobe/1.0' } },
+        { signal: AbortSignal.timeout(10000), headers: { 'User-Agent': 'Terranoetis/1.0' } },
       );
       if (!resp.ok) return [];
       const data = await resp.json() as { features?: Array<Record<string, unknown>> };

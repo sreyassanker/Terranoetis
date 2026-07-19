@@ -86,6 +86,7 @@ export async function routeBetween(a: LatLon, b: LatLon): Promise<RouteResult> {
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const SAFE_AMENITIES = 'hospital|shelter|clinic|fire_station|police|school';
 
 /** Query OSM (via Overpass) for safe/civil facilities near a point. */

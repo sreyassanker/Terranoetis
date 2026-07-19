@@ -30,7 +30,7 @@ export interface HeatmapPoint { lon: number; lat: number; count: number; }
 
 export interface CesiumWindow extends Window {
   Cesium?: typeof Cesium;
-  __liveglobeDebug?: Record<string, unknown>;
+  __terranoetisDebug?: Record<string, unknown>;
 }
 
 export type AiProvider = 'gemini' | 'anthropic' | 'local';

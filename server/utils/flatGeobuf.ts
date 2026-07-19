@@ -49,11 +49,6 @@ export interface FlatGeobufResult {
   parseTimeMs: number;
 }
 
-export interface StreamProgress {
-  bytesReceived: number;
-  featuresParsed: number;
-  done: boolean;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Streaming Functions
@@ -110,12 +105,13 @@ export async function streamFeatures(
           const featureSize = new DataView(buffer.buffer).getUint32(0, true);
           if (buffer.length < 4 + featureSize) break;
 
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const featureData = buffer.slice(4, 4 + featureSize);
           buffer = buffer.slice(4 + featureSize);
 
           // Simplified FGB parsing — extract properties
           const feature: FlatGeobufFeature = {
-            geometry: { type: 'Point', coordinates: [0, 0] },
+            geometry: { type: 'Point', coordinates: [[0, 0]] },
             properties: {},
           };
           features.push(feature);

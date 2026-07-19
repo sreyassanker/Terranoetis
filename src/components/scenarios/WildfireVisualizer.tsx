@@ -113,8 +113,8 @@ export default function WildfireVisualizer({ viewer, shapes, progress }: Wildfir
                 width: s.width || 2,
                 material: new Cesium.CallbackProperty(() => {
                   return Cesium.Color.fromCssColorString(s.color).withAlpha((s.opacity || 0.25) * progressRef.current);
-                }, false) as unknown as Cesium.Property,
-                clampToGround: true,
+                 }, false) as unknown as Cesium.MaterialProperty,
+                 clampToGround: true,
               },
             });
             entitiesRef.current.push(entity);

@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { type PointCloud } from '../earthgen/flowMatching';
 import { type ScenarioType, type ScenarioBase, type EarthquakeSwarmParams, type HurricaneLandfallParams, type WildfireSpreadParams, type VolcanicEruptionParams, type FloodInundationParams, type TsunamiWaveParams, DEFAULT_PARAMS } from './templates';
 import { validateScenario } from './scenarioValidator';
-import { simulateScenario } from './simulators';
+import { simulateScenario } from './simulators/index';
 
 /* ═════════════════════════════════════════════════════════════════
    COMMON UTILITIES

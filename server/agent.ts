@@ -146,12 +146,6 @@ export interface AgentStep {
   progress?: number;
 }
 
-export interface AgentResponse {
-  outputText: string;
-  commands: GlobeCommand[];
-  steps: AgentStep[];
-  workspaceId?: string;
-}
 
 export interface Subtask {
   id: string;

@@ -28,11 +28,6 @@ export interface CalibrationPoint {
   predictedFrequency: number;
 }
 
-export interface ROCPoint {
-  threshold: number;
-  tpr: number;
-  fpr: number;
-}
 
 export interface ValidationReport {
   totalPredictions: number;

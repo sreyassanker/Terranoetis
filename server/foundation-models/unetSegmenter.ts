@@ -67,6 +67,7 @@ const SEGMENTATION_CLASSES = [
   'shrub', 'wetland', 'road', 'building', 'parking_lot',
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const CLASS_COLORS: Record<string, [number, number, number]> = {
   water: [0, 0, 255],
   trees: [0, 128, 0],
@@ -202,6 +203,7 @@ export class UnetSegmenter {
 
     // Simplified U-Net-like classification per pixel
     for (let p = 0; p < numPixels; p++) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const px = bands[p] / 10000;
       const probs = new Array(numClasses).fill(1 / numClasses);
 
@@ -247,6 +249,7 @@ export class UnetSegmenter {
     return result;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private extractBoundaries(segmentationMap: Uint8Array, centerLat: number, centerLon: number): Array<{ class: string; polygon: Array<[number, number]>; areaHa: number }> {
     // Simplified boundary extraction — production would use contour detection
     return [];
@@ -293,6 +296,7 @@ export class UnetSegmenter {
 
   private getPreviousResult(lat: number, lon: number): SegmentationOutput | null {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const row = this.db.prepare('SELECT * FROM unet_segmentations WHERE lat = ? AND lon = ? ORDER BY timestamp DESC LIMIT 1').get(lat, lon) as any;
       return row ? JSON.parse(row.result_json) : null;
     } catch { return null; }

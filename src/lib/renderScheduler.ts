@@ -100,4 +100,3 @@ export function createRenderScheduler(frameBudgetMs = 8) {
   };
 }
 
-export type RenderScheduler = ReturnType<typeof createRenderScheduler>;

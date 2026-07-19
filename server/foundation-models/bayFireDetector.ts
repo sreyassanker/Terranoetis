@@ -14,6 +14,7 @@
 
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { pubsub } from '../pubsub';
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -76,6 +77,7 @@ const PRIOR_FIRE_PROBABILITY = 0.02; // Base rate: 2% of thermal anomalies are r
 const INSTRUMENT_CONFIDENCE_WEIGHT = 0.4;
 const BRIGHTNESS_WEIGHT = 0.3;
 const FRP_WEIGHT = 0.2;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const CONTEXT_WEIGHT = 0.1;
 
 const BRIGHTNESS_THRESHOLDS = {
@@ -306,6 +308,7 @@ export class BayFireDetector {
     return adjustment;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private computeUncertainty(obs: FireObservation, posterior: number): number {
     // Uncertainty decreases with more confident observations
     const dataQuality = obs.confidence / 100;

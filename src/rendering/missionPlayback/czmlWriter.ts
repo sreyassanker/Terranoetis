@@ -122,6 +122,7 @@ export function snapshotsToCzml(snapshots: MissionSnapshot[]): CzmlPacket[] {
     id: 'document',
     name: 'Mission Replay',
     version: '1.0',
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
 
   // Collect all unique entity IDs across all snapshots
@@ -205,15 +206,18 @@ export function snapshotsToCzml(snapshots: MissionSnapshot[]): CzmlPacket[] {
       // Each position in the array is preceded by its epoch date
       const positions: (string | number)[] = [];
       for (const ep of epochs) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         positions.push(ep.date as any);
         positions.push(...ep.position);
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (packet.position as any) = {
         epoch: epochs[0].date,
         interpolationAlgorithm: 'LAGRANGE',
         interpolationDegree: 2,
         // Use cartographicDegrees: [timeOffset, lon, lat, alt, ...]
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         cartographicDegrees: epochs.flatMap((ep, i) => [
           (new Date(ep.date).getTime() - new Date(epochs[0].date).getTime()) / 1000,
           ep.position[1],
@@ -242,6 +246,7 @@ export function snapshotsToSimpleCzml(snapshots: MissionSnapshot[]): CzmlPacket[
     id: 'document',
     name: 'Mission Replay',
     version: '1.0',
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
 
   // Build per-entity time ranges
@@ -285,6 +290,7 @@ export function snapshotsToSimpleCzml(snapshots: MissionSnapshot[]): CzmlPacket[
         interpolationAlgorithm: 'LINEAR',
         interpolationDegree: 1,
         cartographicDegrees: positions,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       point: {
         pixelSize: firstEntity.category === 'bft' ? 10 : 8,

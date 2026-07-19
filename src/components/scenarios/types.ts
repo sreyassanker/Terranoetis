@@ -91,14 +91,6 @@ export interface ScenarioSummary {
   thumbnail?: string;
 }
 
-export type ScenarioType =
-  | 'earthquake_swarm'
-  | 'hurricane_landfall'
-  | 'wildfire_spread'
-  | 'volcanic_eruption'
-  | 'flood_inundation'
-  | 'tsunami_wave'
-  | 'data_layer';
 
 export const SCENARIO_TYPE_LABELS: Record<string, string> = {
   earthquake_swarm: 'Earthquake',

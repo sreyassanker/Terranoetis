@@ -36,9 +36,3 @@ export async function sampleTerrainHeights(
   return heightMap;
 }
 
-export function isOceanByTerrain(heightMap: Map<string, number>, lat: number, lon: number, threshold = 50): boolean {
-  const key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
-  const height = heightMap.get(key);
-  if (height === undefined) return true;
-  return height < threshold;
-}

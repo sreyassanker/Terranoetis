@@ -71,6 +71,7 @@ export interface StacSearchResult {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const CMR_STAC_BASE = 'https://cmr.earthdata.nasa.gov/stac';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const CMR_SEARCH_BASE = 'https://cmr.earthdata.nasa.gov/search';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -144,71 +145,6 @@ export async function searchStacItems(params: StacSearchParams): Promise<StacSea
 /**
  * Search with cloud cover filter using CMR query syntax
  */
-export async function searchWithCloudCover(params: StacSearchParams): Promise<StacSearchResult> {
-  const searchBody: Record<string, unknown> = {
-    limit: params.limit || 20,
-    conditions: [] as Record<string, unknown>[],
-  };
-
-  if (params.collections?.length) {
-    (searchBody.conditions as Record<string, unknown>[]).push({
-      collection_short_name: { in: params.collections },
-    });
-  }
-
-  if (params.bbox) {
-    searchBody.bbox = params.bbox;
-  }
-
-  if (params.datetime) {
-    searchBody.datetime = params.datetime;
-  }
-
-  if (params.cloudCover !== undefined) {
-    (searchBody.conditions as Record<string, unknown>[]).push({
-      'eo:cloud_cover': { lte: params.cloudCover },
-    });
-  }
-
-  try {
-    const response = await fetch(`${CMR_STAC_BASE}/search`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/geo+json',
-      },
-      body: JSON.stringify(searchBody),
-      signal: AbortSignal.timeout(20000),
-    });
-
-    if (!response.ok) {
-      throw new Error(`CMR STAC returned ${response.status}`);
-    }
-
-    const data = await response.json() as GeoJSON.FeatureCollection & {
-      numberMatched: number;
-      numberReturned: number;
-    };
-
-    const items = (data.features || []).map((f) => ({
-      id: f.id as string,
-      collection: f.properties?.collection as string || '',
-      geometry: f.geometry as GeoJSON.Geometry,
-      properties: (f.properties || {}) as StacItem['properties'],
-      assets: {},
-      links: [],
-    })) as StacItem[];
-
-    return {
-      items,
-      numberMatched: data.numberMatched || items.length,
-      numberReturned: data.numberReturned || items.length,
-    };
-  } catch (e) {
-    logger.error({ err: e }, '[STAC] Search with cloud cover failed');
-    return { items: [], numberMatched: 0, numberReturned: 0 };
-  }
-}
 
 /**
  * List available STAC collections from CMR
@@ -245,14 +181,3 @@ export async function listStacCollections(limit: number = 50): Promise<StacColle
 /**
  * Get download links for a STAC item
  */
-export function getItemDownloadLinks(item: StacItem): Array<{
-  name: string;
-  href: string;
-  type?: string;
-}> {
-  return Object.entries(item.assets).map(([key, asset]) => ({
-    name: asset.title || key,
-    href: asset.href,
-    type: asset.type,
-  }));
-}

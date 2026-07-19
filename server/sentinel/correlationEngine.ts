@@ -85,6 +85,7 @@ function eventsBySource(events: CorrelatedEvent[], source: string): CorrelatedEv
   return events.filter(e => e.source === source);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function latestEventTime(events: CorrelatedEvent[]): number {
   if (events.length === 0) return 0;
   return Math.max(...events.map(e => e.timestamp));

@@ -93,23 +93,4 @@ export interface SimFrame {
   progress: number;
 }
 
-export interface ScenarioConfig {
-  disaster: DisasterType;
-  durationS: number;
-  timeScale: number;
-  intensity: number;
-  epicenter?: Cartographic;
-}
 
-export interface ScenarioEditorEvents {
-  "area:drawn": { polygon: Cartographic[] };
-  "analysis:started": undefined;
-  "analysis:progress": { step: string; fraction: number };
-  "analysis:complete": { env: EnvironmentSnapshot };
-  "validation:complete": { report: ValidationReport };
-  "sim:frame": { frame: SimFrame };
-  "sim:phase": { phase: SimPhase };
-  "sim:state": { state: "running" | "paused" | "stopped" | "finished" };
-  "quality:changed": { tier: 0 | 1 | 2 };
-  "error": { message: string; cause?: unknown };
-}

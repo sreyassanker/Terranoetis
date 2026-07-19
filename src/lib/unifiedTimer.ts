@@ -112,4 +112,3 @@ export function createUnifiedTimer() {
   };
 }
 
-export type UnifiedTimer = ReturnType<typeof createUnifiedTimer>;

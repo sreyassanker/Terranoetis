@@ -112,7 +112,9 @@ export async function detectIonosphericAnomalies(
  * Get ionospheric conditions summary for a region
  */
 export async function getIonosphericConditions(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   lat: number,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   lon: number,
 ): Promise<{
   backgroundTEC: number;

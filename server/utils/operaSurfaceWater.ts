@@ -20,13 +20,6 @@ import { logger } from '../observability/logger';
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface WaterExtentQuery {
-  lat: number;
-  lon: number;
-  startDate: string;
-  endDate: string;
-  threshold?: number;  // 0-1, water detection threshold
-}
 
 export interface WaterExtent {
   date: string;

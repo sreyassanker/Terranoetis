@@ -53,21 +53,7 @@ export function simulateScenario(type: ScenarioType, params: ScenarioParams): Sc
   return fn(params);
 }
 
-export function getSimulatorNames(): string[] {
-  return Object.keys(simulators);
-}
 
 /**
  * Get validation result for a scenario without running simulation
  */
-export function validateScenarioLocation(
-  type: string,
-  params: ScenarioParams,
-): { valid: boolean; reason: string; suggestion?: string } {
-  const location = getLocationFromParams(type, params);
-  if (!location) {
-    return { valid: true, reason: 'Unable to determine location' };
-  }
-  
-  return validateScenario(type, location.lat, location.lon);
-}

@@ -15,6 +15,7 @@
  * Reference: https://arxiv.org/abs/2404.16130
  */
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { logger } from '../observability/logger';
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -6,7 +6,6 @@ import { pubsub } from './pubsub';
 import { logger } from './observability/logger';
 import { _JWT_SECRET as getJwtSecret } from './middleware/auth';
 
-const IS_PROD = process.env.NODE_ENV === 'production';
 const HEARTBEAT_INTERVAL = 30000;
 const HEARTBEAT_TIMEOUT = 35000;
 
@@ -41,17 +40,7 @@ type WsMessage = {
 const clients = new Map<string, WsClient>();
 const pendingAbortControllers = new Map<string, AbortController>();
 
-export function getActiveConnections(): number {
-  return clients.size;
-}
 
-export function getUserConnections(userId: string): number {
-  let count = 0;
-  for (const [, client] of clients) {
-    if (client.userId === userId) count++;
-  }
-  return count;
-}
 
 function verifyTokenOrReject(token: string): string | null {
   if (!token) return null;
@@ -338,4 +327,4 @@ export function shutdownWsServer(): void {
 }
 
 // Re-export IS_PROD so other modules can align production behavior
-export { IS_PROD };
+

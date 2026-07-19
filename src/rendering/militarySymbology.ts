@@ -183,23 +183,6 @@ const EQUIP_SIDC: Record<EquipmentType, string> = {
 };
 
 /* ── Tactical Graphic SIDC Templates ───────────────────────────── */
-const TACTICAL_GRAPHIC_SIDC: Record<TacticalGraphicType, { prefix: string; symbol: string }> = {
-  boundary:         { prefix: 'S-G-OL', symbol: '----' },   // Boundary
-  forward_line:     { prefix: 'S-G-PU', symbol: '----' },   // FLOT
-  objective_line:   { prefix: 'S-G-PC', symbol: '----' },   // Objective
-  no_fire_line:     { prefix: 'S-G-D-----', symbol: '' },    // NFL
-  fire_support_line:{ prefix: 'S-G-DF', symbol: '----' },    // FSCL
-  target_area:      { prefix: 'S-G-GAT', symbol: '' },       // NAI/TAI
-  engagement_zone:  { prefix: 'S-G-DAA', symbol: '' },       // Engagement zone
-  security_zone:    { prefix: 'S-G-PM', symbol: '' },        // Security zone
-  assembly_area:    { prefix: 'S-G-PA', symbol: '' },        // Assembly
-  drop_zone:        { prefix: 'S-G-PL', symbol: '' },        // DZ/LZ
-  supply_route:     { prefix: 'S-G-MCL', symbol: '' },       // MSR/ASR
-  obstacle_zone:    { prefix: 'S-G-OB', symbol: '' },        // Obstacle
-  air_corridor:     { prefix: 'S-A-MC', symbol: '' },        // Air corridor
-  restricted_area:  { prefix: 'S-G-PR', symbol: '' },        // ROZ
-  fire_support_area:{ prefix: 'S-G-DFA', symbol: '' },       // FSA/RFA/SFA
-};
 
 const ICON_CACHE = new Map<string, HTMLCanvasElement>();
 const ICON_CACHE_MAX = 500;
@@ -237,7 +220,8 @@ export function getMilitarySymbol(entity: MilitaryEntity, size: number = 32): HT
       quantity: echelonMod || '',
       fill: true,
       militaryStyle: '2525D',
-    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
     const canvas = symbol.asCanvas();
     ICON_CACHE.set(key, canvas);
     return canvas;
@@ -262,44 +246,6 @@ export function getMilitarySymbol(entity: MilitaryEntity, size: number = 32): HT
   }
 }
 
-export function getTacticalGraphicSymbol(
-  graphicType: TacticalGraphicType,
-  affiliation: Affiliation = 'friend',
-  size: number = 32,
-): HTMLCanvasElement {
-  const tmpl = TACTICAL_GRAPHIC_SIDC[graphicType];
-  const aff = AFFILIATION_MAP[affiliation];
-  const sidc = `${tmpl.prefix}------${aff}P-----`;
-  const key = `tg_${graphicType}_${affiliation}_${size}`;
-
-  const cached = ICON_CACHE.get(key);
-  if (cached) return cached;
-
-  if (ICON_CACHE.size >= ICON_CACHE_MAX) ICON_CACHE.clear();
-
-  try {
-    const symbol = new ms.Symbol(sidc, {
-      size,
-      fill: true,
-      militaryStyle: '2525D',
-    });
-    const canvas = symbol.asCanvas();
-    ICON_CACHE.set(key, canvas);
-    return canvas;
-  } catch {
-    // Fallback
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = getAffiliationColor(affiliation);
-    ctx.globalAlpha = 0.6;
-    ctx.fillRect(0, 0, size, size);
-    ctx.globalAlpha = 1;
-    ICON_CACHE.set(key, canvas);
-    return canvas;
-  }
-}
 
 export function getAffiliationColor(affiliation: Affiliation): string {
   switch (affiliation) {

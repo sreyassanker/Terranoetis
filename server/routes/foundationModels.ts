@@ -311,6 +311,7 @@ foundationModelsRouter.post('/fm/unet/segment', async (req: Request, res: Respon
     const { lat, lon } = req.body;
     if (lat == null || lon == null) return res.status(400).json({ error: 'lat and lon required' });
     const result = await unetSegmenter.segment({ lat, lon });
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { probabilityMap, segmentationMap, ...lightResult } = result;
     res.json(lightResult);
   } catch (err) { res.status(500).json({ error: String(err) }); }

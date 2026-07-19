@@ -12,15 +12,6 @@
 
 import { logger } from '../observability/logger';
 
-export interface SpcOutlook {
-  day: number; // 1-8
-  type: 'categorical' | 'tornado' | 'wind' | 'hail';
-  timestamp: string;
-  issued: string;
-  expires: string;
-  label: string;
-  updateNumber: number;
-}
 
 export interface SpcPolygon {
   type: 'Feature';
@@ -61,15 +52,6 @@ export const CATEGORICAL_LABELS: Record<number, { label: string; color: string; 
 };
 
 // Probability labels for probabilistic outlooks
-export function getProbabilityLabel(prob: number): string {
-  if (prob >= 45) return '≥45%';
-  if (prob >= 30) return '30-45%';
-  if (prob >= 15) return '15-30%';
-  if (prob >= 10) return '10-15%';
-  if (prob >= 5) return '5-10%';
-  if (prob >= 2) return '2-5%';
-  return '<2%';
-}
 
 async function fetchOutlook(url: string): Promise<SpcGeoJson | null> {
   try {
@@ -271,33 +253,3 @@ export async function getRiskForLocation(
 /**
  * Format for Sentinel engine consumption
  */
-export function formatForSentinel(geojson: SpcGeoJson): {
-  riskLevel: string;
-  maxCategory: number;
-  polygonCount: number;
-  labels: string[];
-} {
-  if (!geojson?.features || geojson.features.length === 0) {
-    return { riskLevel: 'none', maxCategory: 0, polygonCount: 0, labels: [] };
-  }
-
-  let maxCat = 0;
-  const labels: string[] = [];
-
-  for (const f of geojson.features) {
-    const dn = f.properties?.DN || 0;
-    if (dn > maxCat) maxCat = dn;
-    const cat = CATEGORICAL_LABELS[dn];
-    if (cat && !labels.includes(cat.label)) {
-      labels.push(cat.label);
-    }
-  }
-
-  const catInfo = CATEGORICAL_LABELS[maxCat];
-  return {
-    riskLevel: catInfo?.risk || 'general',
-    maxCategory: maxCat,
-    polygonCount: geojson.features.length,
-    labels,
-  };
-}

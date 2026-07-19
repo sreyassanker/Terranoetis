@@ -13,6 +13,7 @@ describe('FlatGeobuf utilities', () => {
           },
         ],
       };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = geojsonToFgbPayload(geojson as any);
       expect(result.type).toBe('FeatureCollection');
       expect(result.features).toHaveLength(1);
@@ -35,6 +36,7 @@ describe('FlatGeobuf utilities', () => {
           },
         ],
       };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = geojsonToFgbPayload(geojson as any);
       expect(result.features[0].geometry.type).toBe('Polygon');
     });

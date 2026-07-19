@@ -10,13 +10,14 @@
  *
  * Verifies: HTTP status codes, JSON response structure, caching, error handling
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import http from 'http';
 
 // ── Mock external fetch (only used inside route handlers) ──────
 const mockFetch = vi.fn();
-let originalFetch: typeof globalThis.fetch;
+const originalFetch: typeof globalThis.fetch = globalThis.fetch;
 
 // ── Cache module for testing caching behavior ────────────────
 import { cache } from '../../routes/routeHelpers';
@@ -66,6 +67,7 @@ describe('GET /api/mgrs', () => {
 
     server = http.createServer(app);
     await new Promise<void>(r => server.listen(0, r));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const addr = server.address() as any;
     baseUrl = `http://127.0.0.1:${addr.port}`;
   });
@@ -136,6 +138,7 @@ describe('GET /api/openaq', () => {
         const cached = cache.get(cacheKey);
         if (cached) return res.json(cached);
         const stations = await findLocationsNearby(latN, lonN, rad, lim);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const result = { stations, parsed: parseForSentinel(stations as any) };
         cache.set(cacheKey, result, 60);
         res.json(result);
@@ -146,6 +149,7 @@ describe('GET /api/openaq', () => {
 
     server = http.createServer(app);
     await new Promise<void>(r => server.listen(0, r));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const addr = server.address() as any;
     baseUrl = `http://127.0.0.1:${addr.port}`;
   });
@@ -238,6 +242,7 @@ describe('NDBC routes', () => {
 
     server = http.createServer(app);
     await new Promise<void>(r => server.listen(0, r));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const addr = server.address() as any;
     baseUrl = `http://127.0.0.1:${addr.port}`;
   });
@@ -363,6 +368,7 @@ describe('ShakeMap routes', () => {
 
     server = http.createServer(app);
     await new Promise<void>(r => server.listen(0, r));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const addr = server.address() as any;
     baseUrl = `http://127.0.0.1:${addr.port}`;
   });
@@ -495,6 +501,7 @@ describe('SPC routes', () => {
 
     server = http.createServer(app);
     await new Promise<void>(r => server.listen(0, r));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const addr = server.address() as any;
     baseUrl = `http://127.0.0.1:${addr.port}`;
   });
@@ -567,6 +574,7 @@ describe('Error handling across Tier 1 routes', () => {
 
     server = http.createServer(app);
     await new Promise<void>(r => server.listen(0, r));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const addr = server.address() as any;
     baseUrl = `http://127.0.0.1:${addr.port}`;
   });
@@ -601,10 +609,12 @@ describe('Caching behavior across Tier 1 routes', () => {
     // Flush cache before all tests to ensure clean state
     cache.flushAll();
     // Spy on fetch and selectively mock only upstream URLs
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any, init?: any) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       // Mock upstream API calls, let everything else pass through
       if (urlStr.includes('api.openaq.org') || urlStr.includes('spc.noaa.gov')) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return { ok: true, json: async () => ({ results: [{ id: 1, name: 'Test' }], meta: { found: 1 }, type: 'FeatureCollection', features: [] }) } as any;
       }
       return originalFetch(url, init);
@@ -647,6 +657,7 @@ describe('Caching behavior across Tier 1 routes', () => {
 
     server = http.createServer(app);
     await new Promise<void>(r => server.listen(0, r));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const addr = server.address() as any;
     baseUrl = `http://127.0.0.1:${addr.port}`;
   });

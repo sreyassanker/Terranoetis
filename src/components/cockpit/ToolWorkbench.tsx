@@ -75,7 +75,8 @@ type DirectApiEntry = {
 /** Shared USGS query builder for earthquakes + seismic_events */
 function usgsQuery(p: Record<string, unknown>): string {
   const s = p as Record<string, unknown>;
-  const bbox = `minLat=${s.latMin ?? s.lat ?? 35}&maxLat=${s.latMax ?? (s.lat ?? 35) + 10}&minLon=${s.lonMin ?? s.lon ?? 139}&maxLon=${s.lonMax ?? (s.lon ?? 139) + 10}&minMag=${s.minMag ?? 1}`;
+  const num = (v: unknown, d: number) => (typeof v === 'number' ? v : d);
+  const bbox = `minLat=${s.latMin ?? s.lat ?? 35}&maxLat=${s.latMax ?? num(s.lat, 35) + 10}&minLon=${s.lonMin ?? s.lon ?? 139}&maxLon=${s.lonMax ?? num(s.lon, 139) + 10}&minMag=${s.minMag ?? 1}`;
   const timeRange = s.startDate ? `&starttime=${s.startDate}T${s.startTime || '00:00'}:00Z&endtime=${s.endDate || s.startDate}T${s.endTime || '23:59'}:00Z` : '';
   return `?${bbox}${timeRange}`;
 }
@@ -684,7 +685,7 @@ export default function ToolWorkbench({ onClose, bbox, onSurfaceData, onClear }:
         }
       } catch (e) {
         if (mountedRef.current) {
-          setFormattedResults(prev => ({ ...prev, [step.id]: { status: 'error', label: 'Error', summary: String(e), metrics: [], latencyMs: 0, raw: '' } }));
+          setFormattedResults(prev => ({ ...prev, [step.id]: { status: 'error', label: 'Error', summary: String(e), metrics: [], latencyMs: 0, raw: '', timestamp: '' } }));
         }
       }
     }

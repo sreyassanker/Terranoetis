@@ -3,9 +3,6 @@ import * as Cesium from 'cesium';
 
 let osmBuildingsTileset: Cesium.Cesium3DTileset | null = null;
 
-export function getOsmBuildingsTileset() {
-  return osmBuildingsTileset;
-}
 
 export async function loadOsmBuildings(
   viewer: Cesium.Viewer,

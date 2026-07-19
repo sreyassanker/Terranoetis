@@ -758,40 +758,17 @@ export function getDownstreamTools(toolId: string): string[] {
   return EDGES.filter(e => e.from === toolId).map(e => e.to);
 }
 
-export function getUpstreamTools(toolId: string): string[] {
-  return EDGES.filter(e => e.to === toolId).map(e => e.from);
-}
 
 export function getMapping(fromTool: string, toTool: string): Record<string, string> | null {
   const edge = EDGE_MAP.get(`${fromTool}→${toTool}`);
   return edge?.mapping ?? null;
 }
 
-export function getEdge(fromTool: string, toTool: string): CausalEdge | undefined {
-  return EDGE_MAP.get(`${fromTool}→${toTool}`);
-}
 
-export function getCausalChain(fromTool: string, toTool: string): string[] | null {
-  const visited = new Set<string>();
-  const queue: { tool: string; path: string[] }[] = [{ tool: fromTool, path: [fromTool] }];
-  while (queue.length > 0) {
-    const { tool, path } = queue.shift()!;
-    if (tool === toTool) return path;
-    if (visited.has(tool)) continue;
-    visited.add(tool);
-    for (const next of getDownstreamTools(tool)) {
-      queue.push({ tool: next, path: [...path, next] });
-    }
-  }
-  return null;
-}
 
 /**
  * Get all edges in the graph (for visualization).
  */
-export function getAllEdges(): CausalEdge[] {
-  return [...EDGES];
-}
 
 /**
  * Get all nodes in the graph (for visualization).
@@ -803,9 +780,6 @@ export function getAllNodes(): CausalNode[] {
 /**
  * Get the topological order (for sequencing execution).
  */
-export function getTopoOrder(): string[] {
-  return [...TOPO_ORDER];
-}
 
 /* ═════════════════════════════════════════════════════════════════
    EVIDENCE EXTRACTION (Entropy-Weighted)
@@ -948,21 +922,3 @@ export function extractEvidence(
    DOT GRAPH EXPORT (for visualization)
    ═════════════════════════════════════════════════════════════════ */
 
-export function toDot(): string {
-  const lines: string[] = ['digraph CausalBN {', '  rankdir=LR;', '  node [shape=box, style=filled];'];
-  for (const n of NODES) {
-    const color = n.category === 'seismic' ? '#f59e0b'
-      : n.category === 'weather' ? '#3b82f6'
-      : n.category === 'hazards' ? '#ef4444'
-      : n.category === 'multimodal' ? '#8b5cf6'
-      : n.category === 'ml' ? '#a855f7'
-      : n.category === 'environment' ? '#65a30d'
-      : '#666666';
-    lines.push(`  ${n.toolId} [label="${n.label}\\nprior=${(n.prior * 100).toFixed(0)}%", fillcolor="${color}33"];`);
-  }
-  for (const e of EDGES) {
-    lines.push(`  ${e.from} -> ${e.to} [label="q=${e.leakProb.toFixed(2)} s=${e.strength.toFixed(2)}"];`);
-  }
-  lines.push('}');
-  return lines.join('\n');
-}

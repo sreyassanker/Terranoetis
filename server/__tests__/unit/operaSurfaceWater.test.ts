@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { getWaterTimeSeries, getFloodWatch } from '../../utils/operaSurfaceWater';
 
 // Mock fetch for external API calls

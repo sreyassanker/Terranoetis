@@ -194,44 +194,7 @@ export function rolloutScenario(
 /**
  * Full scenario analysis with complete causal state.
  */
-export function analyzeScenario(
-  scenarioId: string,
-  baseEvidence: Record<string, number>,
-  location?: { lat: number; lon: number },
-): ScenarioResult | null {
-  const scenario = DEFAULT_SCENARIOS.find(s => s.id === scenarioId);
-  if (!scenario) return null;
-
-  const diffs = rolloutScenario(scenario, baseEvidence, location);
-  const mergedEvidence: Record<string, number> = { ...baseEvidence };
-  for (const [key, value] of Object.entries(scenario.evidence)) {
-    mergedEvidence[key] = Math.max(mergedEvidence[key] ?? 0, value);
-  }
-  const causalState = computeFullCausalState(mergedEvidence, location);
-
-  const totalRiskDelta = diffs.reduce((s, d) => s + Math.max(0, d.delta), 0);
-  const maxNodeDelta = Math.max(0, ...diffs.map(d => Math.abs(d.delta)));
-  const significantChanges = diffs.filter(d => Math.abs(d.delta) > 0.05).length;
-
-  return {
-    diffs,
-    scenario,
-    causalState,
-    totalRiskDelta,
-    maxNodeDelta,
-    significantChanges,
-  };
-}
 
 /**
  * Convenience wrapper: get scenario impact with scenario lookup.
  */
-export function getScenarioImpact(
-  scenarioId: string,
-  baseEvidence: Record<string, number>,
-  location?: { lat: number; lon: number },
-): { diffs: ScenarioDiff[]; scenario: Scenario | undefined } {
-  const scenario = DEFAULT_SCENARIOS.find(s => s.id === scenarioId);
-  if (!scenario) return { diffs: [], scenario: undefined };
-  return { diffs: rolloutScenario(scenario, baseEvidence, location), scenario };
-}

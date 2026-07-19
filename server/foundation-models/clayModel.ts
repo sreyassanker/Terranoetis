@@ -106,6 +106,7 @@ export class ClayEngine {
     // SAR-based flood detection — works through clouds
     const bands = await this.fetchSarBands(lat, lon);
     const vvMean = this.computeMean(bands.vv);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const vhMean = this.computeMean(bands.vh);
 
     // Water has low VV backscatter in SAR
@@ -169,6 +170,7 @@ export class ClayEngine {
     return { vv: new Float32Array(224 * 224), vh: new Float32Array(224 * 224) };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private computeEmbedding(bands: Float32Array, sensor: string): Float32Array {
     // Simplified embedding — production would use Clay MAE encoder
     const embedding = new Float32Array(768);

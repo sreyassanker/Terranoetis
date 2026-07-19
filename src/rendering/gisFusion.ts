@@ -539,22 +539,3 @@ export function computeFusedSurface(
   return out;
 }
 
-export function computeToolRiskSummary(
-  toolResults: Record<string, Record<string, unknown>>,
-  bbox: Bbox,
-): Record<string, number> {
-  const centerLat = (bbox.latMin + bbox.latMax) / 2;
-  const centerLon = (bbox.lonMin + bbox.lonMax) / 2;
-  const summary: Record<string, number> = {};
-  for (const [toolId, raw] of Object.entries(toolResults)) {
-    const extract = EXTRACTORS[toolId];
-    if (!extract) continue;
-    try {
-      const pts = extract(raw, centerLat, centerLon, bbox);
-      if (pts.length > 0) {
-        summary[toolId] = clamp01(Math.max(...pts.map(p => p.value)));
-      }
-    } catch { /* skip */ }
-  }
-  return summary;
-}

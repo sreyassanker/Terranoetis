@@ -63,80 +63,11 @@ function validateHysplitInputs(inputs: HysplitInputs): void {
   }
 }
 
-const K_H = 5000;
-const K_V = 50;
 
-export function computeGaussianPlumeRise(
-  heatFlux: number,
-  windSpeed: number,
-  _ambientLapseRate: number,
-): number {
-  const buoyancyFlux = heatFlux * 5.0;
-  if (windSpeed > 0.1) {
-    return Math.min(10000, 2.6 * (buoyancyFlux / windSpeed) ** 0.67);
-  }
-  return Math.min(10000, 5.0 * buoyancyFlux ** 0.25);
-}
 
-export function computeHorizontalDiffusivity(
-  windSpeed: number,
-  stability: string,
-): number {
-  const base = K_H;
-  switch (stability) {
-    case 'unstable': return base * 2.0;
-    case 'stable': return base * 0.5;
-    case 'neutral': return base * 1.0;
-    default: return base;
-  }
-}
 
-export function computeVerticalDiffusivity(
-  windShear: number,
-  stabilityClass: string,
-): number {
-  const base = K_V;
-  const shearFactor = 1 + windShear * 10;
-  switch (stabilityClass) {
-    case 'unstable': return base * 3.0 * shearFactor;
-    case 'stable': return base * 0.3 * shearFactor;
-    case 'neutral': return base * shearFactor;
-    default: return base * shearFactor;
-  }
-}
 
-export function computeAshConcentration(
-  massEmitted: number,
-  plumeHeight: number,
-  windSpeed: number,
-  distance: number,
-  horizontalDispersion: number,
-  verticalDispersion: number,
-): number {
-  if (windSpeed < 0.1 || distance < 100) return 0;
-  const travelTime = distance / windSpeed;
-  const sigmaY = Math.sqrt(2 * horizontalDispersion * travelTime);
-  const sigmaZ = Math.sqrt(2 * verticalDispersion * travelTime);
-  const denominator = 2 * Math.PI * sigmaY * sigmaZ;
-  if (denominator < 1e-10) return 0;
-  const yTerm = Math.exp(-0.5 * (0 / sigmaY) ** 2);
-  const zTerm = Math.exp(-0.5 * (plumeHeight / sigmaZ) ** 2);
-  return (massEmitted / (windSpeed * denominator)) * yTerm * zTerm;
-}
 
-export function estimateAshSettlingTime(
-  particleDiameterMm: number,
-  particleDensity: number,
-): number {
-  const d = particleDiameterMm / 1000;
-  const rho = particleDensity;
-  const rhoAir = 1.2;
-  const g = 9.81;
-  const terminalVelocity = Math.sqrt(
-    (4 * d * rho * g) / (3 * rhoAir * 0.5),
-  );
-  return terminalVelocity > 0.01 ? 10000 / terminalVelocity : 100000;
-}
 
 export function hysplitOutputsToGeoJSON(outputs: HysplitOutputs): Record<string, unknown> {
   const features: Record<string, unknown>[] = [];

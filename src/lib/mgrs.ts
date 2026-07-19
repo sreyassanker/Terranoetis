@@ -37,6 +37,7 @@ export interface UtmResult {
 // MGRS Grid Constants
 // ═══════════════════════════════════════════════════════════════════════════
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const GRIDSQUARE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const COLUMN_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const ROW_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -61,21 +62,6 @@ export function latLonToMgrs(
 /**
  * Convert MGRS string to lat/lon
  */
-export function mgrsToLatLon(mgrs: string): { lat: number; lon: number } {
-  const parsed = parseMgrs(mgrs);
-  if (!parsed) throw new Error('Invalid MGRS string');
-
-  const utm: UtmResult = {
-    zone: parsed.zone,
-    band: parsed.band,
-    easting: parsed.easting,
-    northing: parsed.northing,
-    lat: 0,
-    lon: 0,
-  };
-
-  return utmToLatLon(utm);
-}
 
 /**
  * Parse MGRS string into components
@@ -123,46 +109,10 @@ export function parseMgrs(mgrs: string): MgrsResult | null {
 /**
  * Get MGRS precision levels
  */
-export function getPrecisionLevels(): Array<{
-  digits: number;
-  meters: number;
-  label: string;
-}> {
-  return [
-    { digits: 0, meters: 100000, label: '100km' },
-    { digits: 2, meters: 10000, label: '10km' },
-    { digits: 4, meters: 1000, label: '1km' },
-    { digits: 6, meters: 100, label: '100m' },
-    { digits: 8, meters: 10, label: '10m' },
-    { digits: 10, meters: 1, label: '1m' },
-  ];
-}
 
 /**
  * Render MGRS grid overlay for a visible region
  */
-export function getMgrsGrid(
-  latMin: number, lonMin: number,
-  latMax: number, lonMax: number,
-  precision: number = 4,
-): Array<{ lat: number; lon: number; mgrs: string; level: string }> {
-  const points: Array<{ lat: number; lon: number; mgrs: string; level: string }> = [];
-  const step = precision <= 2 ? 1 : precision <= 4 ? 0.5 : 0.1;
-
-  for (let lat = Math.floor(latMin / step) * step; lat <= latMax; lat += step) {
-    for (let lon = Math.floor(lonMin / step) * step; lon <= lonMax; lon += step) {
-      const mgrs = latLonToMgrs(lat, lon, precision);
-      points.push({
-        lat: Math.round(lat * 10000) / 10000,
-        lon: Math.round(lon * 10000) / 10000,
-        mgrs,
-        level: precision <= 2 ? 'zone' : precision <= 4 ? 'grid' : 'point',
-      });
-    }
-  }
-
-  return points;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Internal Conversion Functions
@@ -228,43 +178,6 @@ function utmToMgrs(utm: UtmResult, precision: number): string {
   return `${utm.zone}${utm.band}${colLetter}${rowLetter}${eastPart}${northPart}`;
 }
 
-function utmToLatLon(utm: UtmResult): { lat: number; lon: number } {
-  // Simplified inverse UTM conversion
-  const a = 6378137;
-  const f = 1 / 298.257223563;
-  const k0 = 0.9996;
-  const e = Math.sqrt(2 * f - f * f);
-  const e1 = (1 - Math.sqrt(1 - e * e)) / (1 + Math.sqrt(1 - e * e));
-
-  const x = utm.easting - 500000;
-  const y = utm.northing;
-  const M = y / k0;
-  const mu = M / (a * (1 - e * e / 4 - 3 * e * e * e * e / 64 - 5 * e * e * e * e * e * e / 256));
-
-  const phi1 = mu + (3 * e1 / 2 - 27 * e1 * e1 * e1 / 32) * Math.sin(2 * mu) +
-    (21 * e1 * e1 / 16 - 55 * e1 * e1 * e1 * e1 / 32) * Math.sin(4 * mu) +
-    (151 * e1 * e1 * e1 / 96) * Math.sin(6 * mu);
-
-  const N1 = a / Math.sqrt(1 - e * e * Math.sin(phi1) * Math.sin(phi1));
-  const T1 = Math.tan(phi1) * Math.tan(phi1);
-  const C1 = e * e * Math.cos(phi1) * Math.cos(phi1) / (1 - e * e);
-  const R1 = a * (1 - e * e) / Math.pow(1 - e * e * Math.sin(phi1) * Math.sin(phi1), 1.5);
-  const D = x / (N1 * k0);
-
-  const lat = phi1 - (N1 * Math.tan(phi1) / R1) * (
-    D * D / 2 - (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * e * e) * D * D * D * D / 24 +
-    (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * e * e - 3 * C1 * C1) * D * D * D * D * D * D / 720
-  );
-
-  const lon = ((utm.zone - 1) * 6 - 180 + 3) * Math.PI / 180 +
-    (D - (1 + 2 * T1 + C1) * D * D * D / 6 +
-    (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * e * e + 24 * T1 * T1) * D * D * D * D * D / 120) / Math.cos(phi1);
-
-  return {
-    lat: (lat * 180) / Math.PI,
-    lon: (lon * 180) / Math.PI,
-  };
-}
 
 function northingToLat(northing: number, _zone: number, _band: string): number {
   // Full inverse UTM northing to latitude
@@ -293,6 +206,7 @@ function eastingToLon(easting: number, zone: number): number {
   const a = 6378137;
   const f = 1 / 298.257223563;
   const k0 = 0.9996;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const e = Math.sqrt(2 * f - f * f);
   const lonOrigin = (zone - 1) * 6 - 180 + 3;
   const x = easting - 500000;

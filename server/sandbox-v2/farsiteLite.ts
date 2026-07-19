@@ -98,25 +98,7 @@ export function farsiteOutputsToGeoJSON(outputs: FarsiteOutputs): Record<string,
   };
 }
 
-export function estimateFireSpreadRate(
-  windSpeed: number,
-  moisture: number,
-  fuelModel: number,
-): number {
-  const baseRate = 0.1 + fuelModel * 0.5;
-  const windFactor = 1.0 + (windSpeed / 30.0) ** 0.5;
-  const moistureFactor = 1.0 - moisture * 0.8;
-  const slopeFactor = 1.0;
-  return baseRate * windFactor * moistureFactor * slopeFactor;
-}
 
-export function calculateIntensity(
-  spreadRate: number,
-  fuelLoad: number,
-  heatContent: number = 18608,
-): number {
-  return spreadRate * fuelLoad * heatContent / 60.0;
-}
 
 const FUEL_MODEL_PARAMS: Record<number, { load: number; depth: number; savr: number; ext: number; heat: number }> = {
   1: { load: 0.74, depth: 0.3, savr: 3500, ext: 0.15, heat: 18608 },
@@ -130,77 +112,9 @@ export function getFuelModelParams(fuelModel: number) {
   return FUEL_MODEL_PARAMS[fuelModel] || FUEL_MODEL_PARAMS[1];
 }
 
-export function computeRothermelSpreadRate(
-  windSpeed: number,
-  windDir: number,
-  slopeDeg: number,
-  slopeAzimuth: number,
-  fuelModel: number,
-  moisture: number,
-): number {
-  const fuel = getFuelModelParams(fuelModel);
-  const maxSpreadRate = 1.0 + fuel.load * 0.5;
-  const windFactor = windSpeed > 0
-    ? 1.0 + (windSpeed / 30.0) * Math.cos((windDir - slopeAzimuth) * Math.PI / 180)
-    : 1.0;
-  const slopeFactor = 1.0 + Math.tan(slopeDeg * Math.PI / 180) * 2.0;
-  const moistureFactor = 1.0 - Math.min(1, moisture / fuel.ext);
-  const savrFactor = fuel.savr / 3500;
-  return maxSpreadRate * Math.max(0, windFactor) * slopeFactor * Math.max(0, moistureFactor) * savrFactor;
-}
 
-export function computeFirelineIntensity(
-  spreadRate: number,
-  fuelConsumed: number,
-  heatContent: number = 18608,
-): number {
-  return spreadRate * fuelConsumed * heatContent / 60.0;
-}
 
-export function computeFlameLength(intensity: number): number {
-  return 0.45 * Math.pow(intensity, 0.46);
-}
 
-export function computeCrownFractionBurned(
-  spreadRate: number,
-  canopyBaseHeight: number,
-  _canopyBulkDensity: number,
-): number {
-  if (spreadRate < 0.1) return 0;
-  if (canopyBaseHeight > 20) return 0;
-  const criticalIntensity = 0.01 * canopyBaseHeight ** 2;
-  const actualIntensity = 5000 * spreadRate;
-  return Math.min(1, actualIntensity / criticalIntensity);
-}
 
-export function estimateContainmentProbability(
-  fireSizeHa: number,
-  windSpeed: number,
-  resourcesAvailable: number,
-  timeToContainmentHr: number,
-): number {
-  const sizeFactor = Math.max(0, 1 - fireSizeHa / 10000);
-  const windFactor = Math.max(0, 1 - windSpeed / 100);
-  const resourceFactor = Math.min(1, resourcesAvailable / 10);
-  const timeFactor = Math.max(0, 1 - timeToContainmentHr / 24);
-  return 0.25 * (sizeFactor + windFactor + resourceFactor + timeFactor);
-}
 
-export function estimateFirePerimeterGrowth(
-  currentPerimeterKm: number,
-  spreadRate: number,
-  timeStepMin: number,
-  shapeFactor: number = 1.2,
-): number {
-  const growthRate = spreadRate * timeStepMin * 60 / 1000;
-  return currentPerimeterKm + growthRate * shapeFactor;
-}
 
-export function convertFlameLengthToCrownScorch(
-  flameLength: number,
-  windSpeed: number,
-): number {
-  const flameHeight = flameLength * 0.5;
-  const tiltFactor = 1 + windSpeed * 0.01;
-  return Math.min(100, flameHeight * tiltFactor * 10);
-}

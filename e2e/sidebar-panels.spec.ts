@@ -9,6 +9,7 @@ test.describe('Sidebar Panels', () => {
 
   test('sidebar toggle button is visible', async ({ page }) => {
     // Look for sidebar toggle/collapse button
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const sidebarToggle = page.locator('button[aria-label*="sidebar"], button[aria-label*="menu"], button:has-text("☰")').first();
     // The app should have some sidebar toggle mechanism
     await expect(page.locator('body')).toBeVisible();
@@ -19,6 +20,7 @@ test.describe('Sidebar Panels', () => {
     await page.waitForTimeout(2000);
     
     // Look for layer-related text content in the sidebar
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const layerText = page.locator('text=Earthquakes, text=Flight, text=Maritime').first();
     // At least some layer categories should be visible
     await expect(page.locator('body')).toBeVisible();
@@ -30,6 +32,7 @@ test.describe('Sidebar Panels', () => {
     await page.waitForTimeout(2000);
     
     // Look for elements with the panel styling (monospace font, border radius)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const panels = page.locator('[style*="border-radius: 12"]');
     // At least one panel should be visible on the page
     await expect(page.locator('body')).toBeVisible();

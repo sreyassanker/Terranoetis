@@ -115,7 +115,7 @@ export default function HurricaneVisualizer({ viewer, shapes, progress }: Hurric
                   glowPower: 0.12,
                   color: new Cesium.CallbackProperty(() => {
                     return Cesium.Color.fromCssColorString(s.color).withAlpha((s.opacity || 0.3) * progressRef.current);
-                  }, false) as unknown as Cesium.Property,
+              }, false) as unknown as Cesium.MaterialProperty,
                 }),
                 clampToGround: true,
               },
@@ -134,7 +134,7 @@ export default function HurricaneVisualizer({ viewer, shapes, progress }: Hurric
               width: s.width || 2,
               material: new Cesium.CallbackProperty(() => {
                 return Cesium.Color.fromCssColorString(s.color || '#22d3ee').withAlpha((s.opacity || 0.25) * progressRef.current);
-              }, false) as unknown as Cesium.Property,
+              }, false) as unknown as Cesium.MaterialProperty,
               clampToGround: true,
             },
           });
@@ -199,7 +199,7 @@ export default function HurricaneVisualizer({ viewer, shapes, progress }: Hurric
               hierarchy: cached,
               material: new Cesium.CallbackProperty(() => {
                 return Cesium.Color.fromCssColorString(s.color || '#fbbf24').withAlpha((s.opacity || 0.08) * progressRef.current);
-              }, false),
+              }, false) as unknown as Cesium.MaterialProperty,
               outline: true,
               outlineColor: Cesium.Color.fromCssColorString('#fbbf24').withAlpha(0.2),
               height: 3,

@@ -1319,6 +1319,3 @@ export function getLayerById(id: string): LayerCategory | undefined {
   return LAYER_CATEGORIES.find(lc => lc.id === id);
 }
 
-export function getLayerColor(id: string): string | undefined {
-  return getLayerById(id)?.color;
-}

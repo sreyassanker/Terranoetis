@@ -158,6 +158,3 @@ export async function getFastPrediction(
   return result;
 }
 
-export async function loadFnoModel(): Promise<boolean> {
-  return loadOnnxModel();
-}

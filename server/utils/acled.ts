@@ -90,6 +90,7 @@ export const INTERACTION_TYPES = [
 // ═══════════════════════════════════════════════════════════════════════════
 
 const ACLED_BASE_URL = 'https://api.acleddata.com/acled/read';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const DEFAULT_COUNTRY = '';  // Empty = all countries
 const DEFAULT_TERMS = 300;  // Max results per request (ACLED limit)
 

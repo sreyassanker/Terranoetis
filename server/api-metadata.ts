@@ -1057,26 +1057,9 @@ export const API_METADATA: ApiConfig[] = [
   },
 ];
 
-export function getApiConfigById(id: string): ApiConfig | undefined {
-  return API_METADATA.find((api) => api.id === id);
-}
 
-export function getApisByCategory(category: string): ApiConfig[] {
-  return API_METADATA.filter((api) => api.category === category);
-}
 
 export function getCategories(): string[] {
   return Array.from(new Set(API_METADATA.map((api) => api.category)));
 }
 
-export function getConfigured(env: Record<string, string | undefined>): ApiConfig[] {
-  return API_METADATA.filter((api) => {
-    if (api.envKey && api.envKey !== 'N/A') {
-      return !!env[api.envKey]?.trim();
-    }
-    if (api.envKeys && api.envKeys.length > 0) {
-      return api.envKeys.some((key) => !!env[key]?.trim());
-    }
-    return api.status === 'public';
-  });
-}

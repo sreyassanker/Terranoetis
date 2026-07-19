@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { Shield, Plus, Trash2, Crosshair, ChevronDown, ChevronRight, MapPin, Minus, Save } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 import type { MilitaryEntity, Affiliation, EntityDomain, Echelon, EquipmentType, TacticalGraphic, TacticalGraphicType } from '@/rendering/militarySymbology';
@@ -29,6 +30,7 @@ const ECHELONS: Echelon[] = [
   'battalion', 'regiment', 'brigade', 'division', 'corps', 'army',
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const EQUIPMENT_TYPES: EquipmentType[] = [
   'infantry', 'mech_infantry', 'armor', 'artillery', 'air_defense',
   'engineer', 'helicopter', 'attack_helicopter', 'fixed_wing', 'fighter',
@@ -76,6 +78,7 @@ const SPACE_PRESETS: SymbolPreset[] = [
   { name: 'Unknown Space', domain: 'space', affiliation: 'unknown' },
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const ALL_PRESETS = [...GROUND_PRESETS, ...AIR_PRESETS, ...SEA_PRESETS, ...SPACE_PRESETS];
 
 const TACTICAL_GRAPHIC_TYPES: Array<{ type: TacticalGraphicType; label: string; category: string }> = [

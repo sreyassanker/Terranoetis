@@ -89,7 +89,6 @@ export default defineConfig({
       'meshoptimizer',
       'nosleep.js',
       'pako/lib/inflate.js',
-      'protobufjs/dist/minimal/protobuf.js',
       'rbush',
       'topojson-client',
       'urijs',

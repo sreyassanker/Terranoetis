@@ -197,6 +197,7 @@ export class MilitarySymbologyOverlay {
 
   private tick() {
     const now = Cesium.JulianDate.now();
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for (const [id, ent] of this.entities) {
       const props = ent.properties?.getValue(now);
       if (!props) continue;

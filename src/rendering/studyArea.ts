@@ -25,11 +25,11 @@ export interface StudyAreaItem {
 import {
   GIBS_PRODUCTS, EXTERNAL_DATA_SOURCES, GROUP_LABELS,
   groupProducts,
-  type GibsProduct, type SatelliteDataSource,
+   
 } from '@/rendering/satelliteDataSources';
 
 export { GIBS_PRODUCTS, EXTERNAL_DATA_SOURCES, GROUP_LABELS, groupProducts };
-export type { GibsProduct, SatelliteDataSource };
+
 
 /** Max concurrent satellite imagery layers to prevent GPU heat accumulation */
 const MAX_SAT_LAYERS = 5;
@@ -40,7 +40,8 @@ function enforceLayerCap(viewer: Cesium.Viewer): void {
   const satLayers: Cesium.ImageryLayer[] = [];
   for (let i = 0; i < layers.length; i++) {
     const l = layers.get(i);
-    if (l?.name?.startsWith('sat_')) satLayers.push(l);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((l as any)?.name?.startsWith('sat_')) satLayers.push(l);
   }
   while (satLayers.length > MAX_SAT_LAYERS) {
     const oldest = satLayers.shift()!;
@@ -74,7 +75,8 @@ export function loadGibsImageryForBbox(
   });
   const imgLayer = viewer.scene.imageryLayers.addImageryProvider(provider);
   imgLayer.alpha = opacity;
-  imgLayer.name = `sat_${studyAreaId || 'default'}_${layer}_${date}${cloudCover !== undefined && cloudCover < 100 ? `_cc${cloudCover}` : ''}`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (imgLayer as any).name = `sat_${studyAreaId || 'default'}_${layer}_${date}${cloudCover !== undefined && cloudCover < 100 ? `_cc${cloudCover}` : ''}`;
   enforceLayerCap(viewer);
   return imgLayer;
 }
@@ -94,7 +96,8 @@ export function loadXyzImageryForBbox(
   });
   const imgLayer = viewer.scene.imageryLayers.addImageryProvider(provider);
   imgLayer.alpha = opacity;
-  imgLayer.name = `sat_${studyAreaId || 'default'}_${layerName || 'xyz'}_bbox`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (imgLayer as any).name = `sat_${studyAreaId || 'default'}_${layerName || 'xyz'}_bbox`;
   enforceLayerCap(viewer);
   return imgLayer;
 }
@@ -124,7 +127,8 @@ export function loadWmsImageryForBbox(
   });
   const imgLayer = viewer.scene.imageryLayers.addImageryProvider(provider);
   imgLayer.alpha = opacity;
-  imgLayer.name = `sat_${studyAreaId || 'default'}_${layer}_bbox`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (imgLayer as any).name = `sat_${studyAreaId || 'default'}_${layer}_bbox`;
   enforceLayerCap(viewer);
   return imgLayer;
 }
@@ -138,7 +142,8 @@ export function removeGibsImageryForStudyArea(
   const toRemove: Cesium.ImageryLayer[] = [];
   for (let i = 0; i < layers.length; i++) {
     const l = layers.get(i);
-    if (l?.name?.startsWith(`sat_${studyAreaId}_`)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((l as any)?.name?.startsWith(`sat_${studyAreaId}_`)) {
       toRemove.push(l);
     }
   }
@@ -156,7 +161,8 @@ export function updateGibsImageryOpacity(
   const layers = viewer.scene.imageryLayers;
   for (let i = 0; i < layers.length; i++) {
     const l = layers.get(i);
-    if (l?.name?.startsWith(`sat_${studyAreaId}_`)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((l as any)?.name?.startsWith(`sat_${studyAreaId}_`)) {
       l.alpha = opacity;
     }
   }
@@ -602,50 +608,7 @@ export function downloadJSON(data: unknown, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function createRectangleEntity(
-  viewer: Cesium.Viewer,
-  west: number, south: number, east: number, north: number,
-  color: string,
-  name: string,
-): Cesium.Entity {
-  const c = Cesium.Color.fromCssColorString(color);
-  const entity = viewer.entities.add({
-    name,
-    rectangle: {
-      coordinates: new Cesium.Rectangle(
-        Cesium.Math.toRadians(west),
-        Cesium.Math.toRadians(south),
-        Cesium.Math.toRadians(east),
-        Cesium.Math.toRadians(north),
-      ),
-      material: c.withAlpha(0.1),
-      outline: true,
-      outlineColor: c,
-      outlineWidth: 2,
-    },
-  });
-  return entity;
-}
 
-export function positionsToGeoJSON(
-  positions: Cesium.Cartesian3[],
-  type: 'Polygon' | 'LineString',
-  name: string,
-): GeoJSON.Feature {
-  const coords = positions.map(p => {
-    const carto = Cesium.Cartographic.fromCartesian(p);
-    return [Cesium.Math.toDegrees(carto.longitude), Cesium.Math.toDegrees(carto.latitude)];
-  });
-  if (type === 'Polygon') coords.push(coords[0]);
-  const geometry: GeoJSON.Geometry = type === 'Polygon'
-    ? { type: 'Polygon', coordinates: [coords] }
-    : { type: 'LineString', coordinates: coords };
-  return {
-    type: 'Feature',
-    geometry,
-    properties: { name },
-  };
-}
 
 export async function parseFileToGeoJSON(file: File): Promise<Array<{
   name: string;

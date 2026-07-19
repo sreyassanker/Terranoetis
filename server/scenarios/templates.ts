@@ -118,9 +118,6 @@ export interface TsunamiWaveParams {
 
 export type ScenarioParams = EarthquakeSwarmParams | HurricaneLandfallParams | WildfireSpreadParams | VolcanicEruptionParams | FloodInundationParams | TsunamiWaveParams;
 
-export interface Simulator {
-  simulate(params: ScenarioParams, realData?: Record<string, unknown>): ScenarioTimeSeries;
-}
 
 export const DEFAULT_PARAMS: Record<ScenarioType, Record<string, unknown>> = {
   earthquake_swarm: {

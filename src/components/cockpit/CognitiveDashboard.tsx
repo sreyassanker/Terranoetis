@@ -89,7 +89,7 @@ function AnimatedBrain({ load }: { load: number }) {
 }
 
 function MemoryTierBar({ tier, count }: { tier: string; count: number }) {
-  const tierConfig: Record<string, { label: string; color: string; barColor: string }> = {
+  const tierConfig: Record<string, { label: React.ReactNode; color: string; barColor: string }> = {
     sensory: { label: <><Eye size={11} style={{display:'inline',marginRight:3}} /> Sensory</>, color: 'var(--accent)', barColor: 'rgba(59,130,246,0.3)' },
     working: { label: <><Zap size={11} style={{display:'inline',marginRight:3}} /> Working</>, color: 'var(--accent)', barColor: 'rgba(59,130,246,0.3)' },
     episodic: { label: <><BookOpen size={11} style={{display:'inline',marginRight:3}} /> Episodic</>, color: 'var(--purple)', barColor: 'rgba(168,85,247,0.3)' },

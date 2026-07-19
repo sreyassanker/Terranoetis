@@ -21,6 +21,7 @@
  * No auth required for small batches
  */
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { logger } from '../observability/logger';
 
 // ═══════════════════════════════════════════════════════════════════════════

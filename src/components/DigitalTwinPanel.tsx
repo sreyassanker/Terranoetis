@@ -98,7 +98,7 @@ function ChartRenderer({ config }: { config: ChartConfig }) {
           </BarChart>
         ) : type === 'pie' ? (
           <PieChart>
-            <Pie data={data} dataKey={keys[0]?.dataKey || 'value'} nameKey="name" cx="50%" cy="50%" outerRadius={70} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+            <Pie data={data} dataKey={keys[0]?.dataKey || 'value'} nameKey="name" cx="50%" cy="50%" outerRadius={70} label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}>
               {data.map((_, idx) => (
                 <Cell key={idx} fill={['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6'][idx % 5]} />
               ))}

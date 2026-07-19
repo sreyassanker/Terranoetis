@@ -22,7 +22,6 @@ const DEFAULT_INPUTS: AdcircInputs = {
   duration: 3600,
 };
 
-const MANNING_N = 0.025;
 const GRAVITY = 9.81;
 
 export async function runAdcircSimulation(
@@ -60,113 +59,19 @@ function validateAdcircInputs(inputs: AdcircInputs): void {
   }
 }
 
-export function estimateInitialWaveHeight(magnitude: number, depth: number): number {
-  return 10 ** (0.5 * magnitude - 3.0) * Math.min(1, Math.max(0.1, 30 / Math.max(depth, 1)));
-}
 
-export function computeArrivalTime(
-  distanceKm: number,
-  avgDepth: number,
-): number {
-  const waveSpeed = Math.sqrt(GRAVITY * Math.max(avgDepth, 1));
-  return waveSpeed > 0 ? (distanceKm * 1000) / waveSpeed : 3600;
-}
 
-export function computeInundationDepth(
-  waveHeight: number,
-  elevation: number,
-  manningCoeff: number = MANNING_N,
-): number {
-  if (elevation >= 0) {
-    const maxRunup = waveHeight * (1 + 0.5 / manningCoeff);
-    return Math.max(0, maxRunup - elevation);
-  }
-  return Math.max(0, waveHeight - Math.abs(elevation) * 0.1);
-}
 
-export function computeCourantNumber(
-  waveSpeed: number,
-  dt: number,
-  dx: number,
-): number {
-  return waveSpeed * dt / dx;
-}
 
 export function computeCelerity(depth: number): number {
   return Math.sqrt(GRAVITY * Math.max(depth, 0.1));
 }
 
-export function computeWaveAmplitude(
-  initialAmplitude: number,
-  distanceKm: number,
-  avgDepth: number,
-  spreadingFactor: number = 1,
-): number {
-  const greenFactor = Math.pow(avgDepth / 4000, -0.25);
-  const spreadFactor = Math.pow(distanceKm / 100 + 1, -0.5);
-  return initialAmplitude * greenFactor * spreadFactor * spreadingFactor;
-}
 
-export function estimateTsunamiInundationZone(
-  coastalElevation: number[][],
-  maxWaveHeight: number,
-  manningCoeff: number = MANNING_N,
-): number[][] {
-  const rows = coastalElevation.length;
-  const cols = coastalElevation[0]?.length || 0;
-  const inundation: number[][] = [];
 
-  for (let i = 0; i < rows; i++) {
-    const row: number[] = [];
-    for (let j = 0; j < cols; j++) {
-      const elevation = coastalElevation[i][j];
-      if (elevation < 0) {
-        row.push(maxWaveHeight);
-      } else {
-        const runup = maxWaveHeight * (1 + 0.5 / manningCoeff);
-        row.push(Math.max(0, runup - elevation));
-      }
-    }
-    inundation.push(row);
-  }
-  return inundation;
-}
 
-export function computeMomentMagnitude(
-  area_km2: number,
-  slip_m: number,
-  rigidity: number = 3e10,
-): number {
-  const mo = area_km2 * 1e6 * slip_m * rigidity;
-  return (2 / 3) * Math.log10(mo) - 10.7;
-}
 
-export function computeTsunamiEnergy(
-  waveHeight: number,
-  waterDensity: number = 1025,
-): number {
-  return 0.125 * waterDensity * GRAVITY * waveHeight ** 2;
-}
 
-export function computeEddyViscosity(
-  depth: number,
-  currentSpeed: number,
-  manningCoeff: number = MANNING_N,
-): number {
-  return manningCoeff ** 2 * GRAVITY * depth ** (4 / 3) * currentSpeed * 10;
-}
-
-export function computeWaveRefractionAngle(
-  incidentAngle: number,
-  depth1: number,
-  depth2: number,
-): number {
-  const c1 = computeCelerity(depth1);
-  const c2 = computeCelerity(depth2);
-  if (c1 < 0.1 || c2 < 0.1) return incidentAngle;
-  const sinTheta2 = Math.sin(incidentAngle) * c2 / c1;
-  return Math.asin(Math.max(-1, Math.min(1, sinTheta2)));
-}
 
 export function adcircOutputsToGeoJSON(outputs: AdcircOutputs): Record<string, unknown> {
   const features: Record<string, unknown>[] = [];

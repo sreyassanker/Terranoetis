@@ -32,20 +32,7 @@ export const activeSseConnections = new promClient.Gauge({
 });
 
 // Gemini API metrics
-export const geminiApiCallsTotal = new promClient.Counter({
-  name: 'gemini_api_calls_total',
-  help: 'Total number of Gemini API calls',
-  labelNames: labelNames('model, status'),
-  registers: [register],
-});
 
-export const geminiApiLatency = new promClient.Histogram({
-  name: 'gemini_api_latency_ms',
-  help: 'Gemini API call latency in milliseconds',
-  labelNames: labelNames('model'),
-  buckets: [50, 100, 250, 500, 1000, 2500, 5000, 10000],
-  registers: [register],
-});
 
 // Sandbox metrics
 export const sandboxExecutionsTotal = new promClient.Counter({

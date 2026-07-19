@@ -10,6 +10,7 @@
  *
  * Tests verify: pure function correctness, edge cases, response shapes
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -73,7 +74,7 @@ describe('MGRS utility functions', () => {
   describe('mgrsToLatLon', () => {
     it('converts an MGRS string to lat/lon within valid ranges', () => {
       const mgrs = latLonToMgrs(35.6852, 139.7528, 5);
-      const result = mgrsToLatLon(mgrs);
+      const result = mgrsToLatLon(mgrs!.mgrs);
       // mgrsToLatLon may return null for some MGRS strings
       if (result) {
         expect(typeof result.lat).toBe('number');
@@ -89,7 +90,7 @@ describe('MGRS utility functions', () => {
       const origLat = 35.6852;
       const origLon = 139.7528;
       const mgrs = latLonToMgrs(origLat, origLon, 5);
-      const result = mgrsToLatLon(mgrs);
+      const result = mgrsToLatLon(mgrs!.mgrs);
       if (result) {
         expect(Math.abs(result.lat - origLat)).toBeLessThan(0.01);
         expect(Math.abs(result.lon - origLon)).toBeLessThan(0.01);
@@ -175,6 +176,7 @@ describe('OpenAQ utility functions', () => {
 
   describe('parseForSentinel', () => {
     it('returns zeroed object for empty array', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = parseForSentinel([] as any);
       expect(result).toBeTruthy();
       expect(result.avgPm25).toBe(0);
@@ -192,6 +194,7 @@ describe('OpenAQ utility functions', () => {
           ],
         },
       ];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = parseForSentinel(data as any);
       expect(result).toBeTruthy();
       expect(result.avgPm25).toBeGreaterThan(0);
@@ -205,6 +208,7 @@ describe('OpenAQ utility functions', () => {
         { location: 'Station B', measurements: [{ parameter: 'pm25', value: 20 }] },
         { location: 'Station C', measurements: [{ parameter: 'pm25', value: 30 }] },
       ];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = parseForSentinel(data as any);
       expect(result).toBeTruthy();
       expect(result.avgPm25).toBeCloseTo(20, 0);
@@ -214,6 +218,7 @@ describe('OpenAQ utility functions', () => {
       const data = [
         { location: 'Polluted', measurements: [{ parameter: 'pm25', value: 55.4 }] },
       ];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = parseForSentinel(data as any);
       expect(result.avgAqi).toBeGreaterThan(0);
     });
@@ -259,7 +264,7 @@ describe('NDBC utility functions', () => {
         expect(station).toHaveProperty('name');
         expect(station).toHaveProperty('lat');
         expect(station).toHaveProperty('lon');
-        expect(typeof station.id).toBe('string');
+      expect(typeof station!.id).toBe('string');
         expect(typeof station.lat).toBe('number');
         expect(typeof station.lon).toBe('number');
       }
@@ -297,7 +302,7 @@ describe('NDBC utility functions', () => {
     it('returns a station for Hawaii', () => {
       const station = findNearestStation(21.3, -157.8);
       expect(station).toBeTruthy();
-      expect(typeof station.id).toBe('string');
+      expect(typeof station!.id).toBe('string');
     });
 
     it('returns a station for mid-Atlantic (ocean coverage)', () => {
@@ -309,15 +314,15 @@ describe('NDBC utility functions', () => {
       const sfStation = findNearestStation(37.8, -122.4);
       const hawaiiStation = findNearestStation(21.3, -157.8);
       // They should be different stations
-      expect(sfStation.id).not.toBe(hawaiiStation.id);
+      expect(sfStation!.id).not.toBe(hawaiiStation!.id);
     });
 
     it('returned station coordinates are valid', () => {
       const station = findNearestStation(37.8, -122.4);
-      expect(station.lat).toBeGreaterThanOrEqual(-90);
-      expect(station.lat).toBeLessThanOrEqual(90);
-      expect(station.lon).toBeGreaterThanOrEqual(-180);
-      expect(station.lon).toBeLessThanOrEqual(180);
+      expect(station!.lat).toBeGreaterThanOrEqual(-90);
+      expect(station!.lat).toBeLessThanOrEqual(90);
+      expect(station!.lon).toBeGreaterThanOrEqual(-180);
+      expect(station!.lon).toBeLessThanOrEqual(180);
     });
   });
 });
@@ -343,6 +348,7 @@ describe('ShakeMap utility functions', () => {
     });
 
     it('returns descriptions for all MMI levels 1-10', () => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const expectedKeywords = ['not felt', 'weak', 'moderate', 'strong', 'very strong', 'severe', 'violent', 'extreme'];
       for (let i = 1; i <= 10; i++) {
         const desc = getMmiDescription(i);
@@ -425,7 +431,8 @@ describe('SPC utility functions', () => {
         ],
       };
 
-      const result = isPointInOutlook(40.0, -95.0, outlook);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = isPointInOutlook(40.0, -95.0, outlook as any);
       expect(result).toHaveProperty('inside');
       expect(typeof result.inside).toBe('boolean');
     });
@@ -446,7 +453,8 @@ describe('SPC utility functions', () => {
       };
 
       // Point inside the polygon (midwest US)
-      const result = isPointInOutlook(35.0, -95.0, outlook);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = isPointInOutlook(35.0, -95.0, outlook as any);
       expect(result.inside).toBe(true);
       expect(result.label).toBe('Moderate Risk');
     });
@@ -467,13 +475,15 @@ describe('SPC utility functions', () => {
       };
 
       // Point outside (East Coast)
-      const result = isPointInOutlook(40.0, -74.0, outlook);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = isPointInOutlook(40.0, -74.0, outlook as any);
       expect(result.inside).toBe(false);
     });
 
     it('handles empty FeatureCollection', () => {
       const outlook = { type: 'FeatureCollection' as const, features: [] };
-      const result = isPointInOutlook(40.0, -95.0, outlook);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = isPointInOutlook(40.0, -95.0, outlook as any);
       expect(result.inside).toBe(false);
     });
 
@@ -501,7 +511,8 @@ describe('SPC utility functions', () => {
       };
 
       // Point inside both polygons — should match first
-      const result = isPointInOutlook(35.0, -95.0, outlook);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = isPointInOutlook(35.0, -95.0, outlook as any);
       expect(result.inside).toBe(true);
       expect(result.label).toBe('Slight Risk');
     });

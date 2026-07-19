@@ -97,7 +97,7 @@ export default function VolcanicVisualizer({ viewer, shapes, progress }: Volcani
                   color: new Cesium.CallbackProperty(() => {
                     const glow = 0.6 + 0.4 * Math.sin(progressRef.current * Math.PI * 6);
                     return Cesium.Color.fromCssColorString('#ff4500').withAlpha(glow * progressRef.current);
-                  }, false) as unknown as Cesium.Property,
+                  }, false) as unknown as Cesium.MaterialProperty,
                 }),
                 clampToGround: true,
               },
@@ -111,7 +111,7 @@ export default function VolcanicVisualizer({ viewer, shapes, progress }: Volcani
                 width: s.width || 3,
                 material: new Cesium.CallbackProperty(() => {
                   return Cesium.Color.fromCssColorString(s.color).withAlpha((s.opacity || 0.5) * progressRef.current);
-                }, false) as unknown as Cesium.Property,
+                 }, false) as unknown as Cesium.MaterialProperty,
                 clampToGround: true,
               },
             });

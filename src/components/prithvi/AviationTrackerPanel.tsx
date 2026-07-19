@@ -56,6 +56,7 @@ export function AviationTrackerPanel({ onClose, onTravelView }: {
 
   useEffect(() => {
     inputRef.current?.focus();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetch('/api/flights/all')
       .then(r => r.json())
@@ -183,9 +184,12 @@ export function AviationTrackerPanel({ onClose, onTravelView }: {
               ))}
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-              {onTravelView && (selected.lat != null && selected.lon != null) && (
+              {onTravelView && (selected.lat != null && selected.lon != null) && (() => {
+                const travelLat = selected.lat ?? 0;
+                const travelLon = selected.lon ?? 0;
+                return (
                 <button
-                  onClick={() => onTravelView({ id: selected.id, name: selected.callsign, lat: selected.lat, lon: selected.lon, altitude: selected.altitude ?? 0, velocity: selected.velocity ?? 0, heading: selected.heading ?? 0, verticalRate: selected.verticalRate ?? 0 })}
+                  onClick={() => onTravelView({ id: selected.id, name: selected.callsign, lat: travelLat, lon: travelLon, altitude: selected.altitude ?? 0, velocity: selected.velocity ?? 0, heading: selected.heading ?? 0, verticalRate: selected.verticalRate ?? 0 })}
                   style={{
                     flex: 1, padding: '6px', borderRadius: 4, border: 'none',
                     cursor: 'pointer', background: 'rgba(96,165,250,0.2)', color: SOURCE_COLOR, fontSize: 9,
@@ -195,7 +199,8 @@ export function AviationTrackerPanel({ onClose, onTravelView }: {
                   <Radio size={12} style={{ display: 'inline', marginRight: 4 }} />
                   Travel View
                 </button>
-              )}
+                );
+              })()}
               <button
                 onClick={() => { setSelected(null); setQuery(''); }}
                 style={{

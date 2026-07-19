@@ -72,8 +72,10 @@ let config: ObservabilityConfig = {
   sampleRate: 1.0,
 };
 
-let traceCounter = 0;
-let spanCounter = 0;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const traceCounter = 0;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const spanCounter = 0;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Initialization
@@ -244,13 +246,6 @@ export function incrementCounter(
 /**
  * Record a histogram value
  */
-export function recordHistogram(
-  name: string,
-  value: number,
-  labels: Record<string, string> = {},
-): void {
-  recordMetric(name, 'histogram', value, labels);
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Query

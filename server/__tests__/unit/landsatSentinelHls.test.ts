@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { searchHlsScenes, getTimeSeries } from '../../utils/landsatSentinelHls';
 
 const mockFetch = vi.fn();

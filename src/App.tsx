@@ -29,7 +29,7 @@ import { GhostProtocol } from '@/rendering/ghostProtocol';
 import { ForkRenderer } from '@/rendering/forkRenderer';
 import { EntropyHalo } from '@/rendering/entropyHalo';
 import { OracleChainRenderer, type CausalChainLink } from '@/rendering/oracleChains';
-import { interpolateIDW, renderGridToCanvas, initWasmIdw } from '@/rendering/wasmIdw';
+import { interpolateIDW } from '@/rendering/idwInterpolation';
 import type { InterpGrid } from '@/rendering/idwInterpolation';
 import { extractPointsFromResult } from '@/rendering/toolResultParser';
 import { showInterpSurface, clearInterpSurface, getViewDependentResolution } from '@/rendering/surfaceRenderer';
@@ -133,7 +133,7 @@ interface HeatmapPoint { lon: number; lat: number; count: number; }
 
 interface CesiumWindow extends Window {
   Cesium?: typeof Cesium;
-  __liveglobeDebug?: Record<string, unknown>;
+  __terranoetisDebug?: Record<string, unknown>;
 }
 declare const window: CesiumWindow;
 
@@ -190,8 +190,8 @@ const LAYER_DEFS: LayerItem[] = LAYER_CATEGORIES.map(lc => {
   };
 });
 
-const LEGACY_VAULT_KEYS = 'liveglobe.apiKeys.v1';
-const LEGACY_VAULT_STATE = 'liveglobe.apiVault.v1';
+const LEGACY_VAULT_KEYS = 'terranoetis.apiKeys.v1';
+const LEGACY_VAULT_STATE = 'terranoetis.apiVault.v1';
 const SESSION_VAULT_KEY = 'worldmonitor.vault.v1';
 const CESIUM_ION_ENV_TOKEN = (import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined)?.trim() ?? '';
 
@@ -1146,7 +1146,7 @@ export default function App() {
   const [forkMode, setForkMode] = useState(false);
   const forkModeRef = useRef(false);
   useEffect(() => { forkModeRef.current = forkMode; }, [forkMode]);
-  useEffect(() => { initWasmIdw(); }, []);
+
   const [showIntelligencePanel, setShowIntelligencePanel] = useState(false);
   const [showPrithviPanel, setShowPrithviPanel] = useState(false);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
@@ -1310,7 +1310,7 @@ export default function App() {
     if (hash.startsWith('sessionRef=')) {
       try {
         const id = decodeURIComponent(hash.slice('sessionRef='.length));
-        const raw = window.localStorage.getItem(`liveglobe.sharedSession.${id}`);
+        const raw = window.localStorage.getItem(`terranoetis.sharedSession.${id}`);
         if (!raw) return;
         const session = JSON.parse(raw);
         if (Array.isArray(session.messages)) {
@@ -1341,7 +1341,7 @@ export default function App() {
       input: aiInput,
       ts: Date.now(),
     };
-    window.localStorage.setItem(`liveglobe.sharedSession.${id}`, JSON.stringify(session));
+    window.localStorage.setItem(`terranoetis.sharedSession.${id}`, JSON.stringify(session));
     const url = new URL(window.location.href);
     url.hash = `sessionRef=${encodeURIComponent(id)}`;
     return url.toString();
@@ -1405,7 +1405,7 @@ export default function App() {
   const [showISSInfo, setShowISSInfo] = useState(false);
   const [issInfo, setIssInfo] = useState<{lat:number;lon:number} | null>(null);
   const [satTravel, setSatTravel] = useState(false);
-  const [satTravelHud, setSatTravelHud] = useState<{ lat: number; lon: number; altKm: number; az: number; el: number } | null>(null);
+  const [satTravelHud, setSatTravelHud] = useState<{ lat: number; lon: number; altKm: number; az: number; el: number; speed: number } | null>(null);
   const [flightTravel, setFlightTravel] = useState(false);
   const [flightTravelHud, setFlightTravelHud] = useState<{ callsign: string; lat: number; lon: number; altFt: number; speedKts: number; speedKmh: number; heading: number; vs: number; pitch?: number } | null>(null);
   const [intelFeed, setIntelFeed] = useState<IntelFeedItem[]>([]);
@@ -1633,8 +1633,8 @@ export default function App() {
     entropyHaloRef.current = new EntropyHalo(v);
     oracleChainRef.current = new OracleChainRenderer(v);
     if (import.meta.env.DEV) {
-      window.__liveglobeDebug = {
-        ...(window.__liveglobeDebug ?? {}),
+      window.__terranoetisDebug = {
+        ...(window.__terranoetisDebug ?? {}),
         viewer: v,
         getCameraState: () => {
           const c = v.camera.positionCartographic;
@@ -1762,7 +1762,7 @@ export default function App() {
       // ── Navigation / Spatial Safety tools ──
       if (navModeRef.current === 'route' || navModeRef.current === 'safest') {
         let cart = v.scene.pickPosition(click.position);
-        if (!cart || !Cesium.defined(cart)) cart = v.camera.pickEllipsoid(click.position, v.scene.globe.ellipsoid);
+        if (!cart || !Cesium.defined(cart)) cart = v.camera.pickEllipsoid(click.position, v.scene.globe.ellipsoid) as Cesium.Cartesian3;
         if (cart && Cesium.defined(cart)) {
           const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cart);
           if (carto) {
@@ -3069,6 +3069,7 @@ export default function App() {
     if (!v || !posProp || !name) return;
     if (satTravelRef.current) exitSatelliteTravel(v);
     enterSatelliteTravel(v, posProp, name);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function flyToIndiaDirect() {
@@ -3421,8 +3422,8 @@ export default function App() {
   useEffect(() => {
     if (!viewerRef.current) return;
     if (import.meta.env.DEV) {
-      window.__liveglobeDebug = {
-        ...(window.__liveglobeDebug ?? {}),
+      window.__terranoetisDebug = {
+        ...(window.__terranoetisDebug ?? {}),
         viewer: viewerRef.current,
         getCameraState: () => {
           const c = viewerRef.current?.camera.positionCartographic;
@@ -3593,7 +3594,7 @@ export default function App() {
 
   function recordFeedError(source: string, err?: unknown) {
     feedErrorsRef.current.push(source);
-    console.warn(`[LiveGlobe] ${source} unavailable`, err);
+    console.warn(`[Terranoetis] ${source} unavailable`, err);
   }
 
   function showFeedSummaryOnce() {
@@ -3888,6 +3889,7 @@ export default function App() {
         })
         .finally(() => { issLoadingRef.current = false; });
     }, 5000);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ═════════════════════════════════════════════════════════════════
@@ -4115,6 +4117,7 @@ export default function App() {
     if (satTravelRef.current) { exitSatelliteTravel(v); return; }
     if (!issEntityRef.current) toggleISS();   // ensure ISS is live before boarding
     enterSatelliteTravel(v, issTrailRef.current!, 'ISS');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toggleISS]);
 
   // D-pad / button actions driven from the Travel View HUD
@@ -4140,6 +4143,7 @@ export default function App() {
         satTravelFovRef.current = Cesium.Math.toRadians(60);
         break;
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const boardSatelliteFromInfoPanel = useCallback(() => {
@@ -4151,6 +4155,7 @@ export default function App() {
     const name = String(p?.name ?? p?.title ?? ent.name ?? 'Satellite');
     enterSatelliteTravel(v, ent.position, name);
     setInfoEntity(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [infoEntity]);
 
   const boardFlightFromInfoPanel = useCallback(() => {
@@ -4171,6 +4176,7 @@ export default function App() {
     if (!lat && !lon) return;
     enterFlightTravel(v, { lat, lon, alt, velocity: vel, heading: hdg, verticalRate: vr }, `${callsign} (${icao24})`, icao24);
     setInfoEntity(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [infoEntity]);
 
   // ── Flight Travel View: chase-cam that rides behind/above a live aircraft ──
@@ -4318,37 +4324,6 @@ export default function App() {
     }
   }
 
-  async function refreshFlightTravelPosition() {
-    if (!flightTravelRef.current) return;
-    const icao = flightTravelIcaoRef.current;
-    const cs = flightTravelCallsignRef.current;
-    if (!icao || !cs) return;
-    try {
-      const data = await fetch('/api/flights/all').then(r => r.json()) as { states?: unknown[][] };
-      const states = data.states || [];
-      const qcs = cs.toLowerCase();
-      for (const s of states) {
-        const sIcao = String(s[0] ?? '').toLowerCase();
-        const sCs = String(s[1] ?? '').trim().toLowerCase();
-        if (sIcao === icao.toLowerCase() || sCs === qcs || sCs.includes(qcs)) {
-          const sim = flightTravelSimRef.current;
-          if (!sim) return;
-          const lon = s[5]; const lat = s[6];
-          if (lon == null || lat == null) return;
-          sim.lon = Number(lon);
-          sim.lat = Number(lat);
-          sim.alt = Math.max(0, s[7] != null ? Number(s[7]) : (s[13] != null ? Number(s[13]) : sim.alt));
-          sim.velocity = s[9] != null ? Number(s[9]) : sim.velocity;
-          sim.heading = s[10] != null ? Number(s[10]) : sim.heading;
-          sim.verticalRate = s[11] != null ? Number(s[11]) : sim.verticalRate;
-          sim.lastUpdate = Date.now();
-          flightTravelIcaoRef.current = String(s[0] ?? '');
-          return;
-        }
-      }
-    } catch { /* silently ignore */ }
-  }
-
   function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -4403,7 +4378,7 @@ export default function App() {
         if (ent.position instanceof Cesium.ConstantPositionProperty) {
           ent.position.setValue(pos);
         }
-        ent.billboard!.image = getPlaneIcon(hdg, '#60a5fa');
+        ent.billboard!.image = getPlaneIcon(hdg, '#60a5fa') as unknown as Cesium.Property;
       }
     }
 
@@ -4499,6 +4474,7 @@ export default function App() {
       lat: f.lat, lon: f.lon, alt: f.altitude,
       velocity: f.velocity, heading: f.heading, verticalRate: f.verticalRate,
     }, `${f.name} (${f.id})`, f.id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
 
@@ -4518,6 +4494,7 @@ export default function App() {
       case 'zoomin': flightTravelFovRef.current = Math.max(FLIGHT_TRAVEL_FOV_MIN, flightTravelFovRef.current - FOV); break;
       case 'zoomout': flightTravelFovRef.current = Math.min(FLIGHT_TRAVEL_FOV_MAX, flightTravelFovRef.current + FOV); break;
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function createISSIcon(): HTMLCanvasElement {
@@ -5314,8 +5291,8 @@ export default function App() {
       addChunk();
     } catch (err) {
       if (import.meta.env.DEV) {
-        window.__liveglobeDebug = {
-          ...(window.__liveglobeDebug ?? {}),
+        window.__terranoetisDebug = {
+          ...(window.__terranoetisDebug ?? {}),
           lastIndiaCctvError: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
         };
       }
@@ -6740,7 +6717,7 @@ export default function App() {
   }
 
 
-  const cleanupThinkingSteps = useCallback(() => {
+  const cleanupThinkingSteps = useCallback((_?: boolean) => {
     setAgentSteps([]);
   }, []);
 
@@ -7278,7 +7255,7 @@ export default function App() {
     const canvas = v.scene.canvas;
     requestAnimationFrame(() => {
       const link = document.createElement('a');
-      link.download = `liveglobe_${new Date().toISOString().slice(0,10)}.png`;
+      link.download = `terranoetis_${new Date().toISOString().slice(0,10)}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
       showNotification('Snapshot saved!', 'success');
@@ -7927,7 +7904,7 @@ export default function App() {
       {/* Loading Overlay */}
       {loading && (
         <div className={`loading-overlay ${loadingProgress >= 100 ? 'fade' : ''}`}>
-          <div className="loader-brand">LiveGlobe</div>
+          <div className="loader-brand">Terranoetis</div>
           <div className="loader-sub">Real-Time Earth Intelligence</div>
           <div className="loader-bar-wrap">
             <div className="loader-bar" style={{ width: `${loadingProgress}%` }} />
@@ -8085,7 +8062,7 @@ export default function App() {
       <div className="topbar glass-panel">
         <div className="brand">
           <div className="brand-dot" />
-          <span>LiveGlobe</span>
+          <span>Terranoetis</span>
         </div>
         <div className="topbar-sep" />
         <div className="utc-clock">{utcTime}</div>
@@ -8750,7 +8727,7 @@ export default function App() {
       {showShareDialog && (
         <div className="share-dialog active" onClick={e => { if (e.target === e.currentTarget) setShowShareDialog(false); }}>
           <div className="share-card">
-            <div className="token-title">Share LiveGlobe</div>
+            <div className="token-title">Share Terranoetis</div>
             <div className="token-sub">Share this view or take a snapshot.</div>
             <div className="share-options">
               <button className="share-option" onClick={takeSnapshot}><Camera size={14} style={{ marginRight: 6 }} /> Snapshot</button>

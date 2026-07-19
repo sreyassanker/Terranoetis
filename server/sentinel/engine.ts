@@ -59,6 +59,7 @@ const DEFAULT_THRESHOLDS: Record<string, number> = {
 };
 
 /** Layer-to-API endpoint mapping */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const LAYER_API_MAP: Record<string, (zone: WatchZone) => { path: string; method?: string; body?: any }> = {
   earthquakes: (z) => ({
     path: `/api/earthquakes?minLat=${z.bbox_min_lat}&maxLat=${z.bbox_max_lat}&minLon=${z.bbox_min_lon}&maxLon=${z.bbox_max_lon}&minMag=2`,
@@ -133,6 +134,7 @@ export function refreshPollers(): void {
 
   try {
     const db = getDb();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const zones = db.prepare('SELECT * FROM watch_zones WHERE enabled = 1').all() as any[];
 
     for (const zone of zones) {
@@ -222,6 +224,7 @@ async function pollZone(zone: WatchZone): Promise<void> {
 function getBaseline(zoneId: string, layerId: string): Record<string, unknown> {
   const db = getDb();
   const row = db.prepare('SELECT baseline_value FROM sentinel_baselines WHERE zone_id = ? AND layer_id = ?')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .get(zoneId, layerId) as any;
   return row ? JSON.parse(row.baseline_value || '{}') : {};
 }
@@ -244,28 +247,35 @@ function updateBaseline(zoneId: string, layerId: string, data: Record<string, un
 function summarizeData(layerId: string, data: Record<string, unknown>): Record<string, unknown> {
   switch (layerId) {
     case 'earthquakes': {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const features = (data.features as any[]) ?? [];
       return {
         count: features.length,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         maxMagnitude: features.length > 0 ? Math.max(...features.map((f: any) => f.properties?.mag ?? 0)) : 0,
         avgMagnitude: features.length > 0
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ? features.reduce((s: number, f: any) => s + (f.properties?.mag ?? 0), 0) / features.length
           : 0,
       };
     }
     case 'firms_fires': {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const hotspots = (data.hotspots as any[]) ?? [];
       return {
         count: hotspots.length,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         maxFrp: hotspots.length > 0 ? Math.max(...hotspots.map((h: any) => h.bright_ti4 ?? 0)) : 0,
       };
     }
     case 'wildfires':
     case 'floods': {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const events = (data.events as any[]) ?? [];
       return { count: events.length };
     }
     case 'weather': {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const current = (data.current as Record<string, any>) ?? {};
       return {
         temperature: current.temperature_2m ?? 0,
@@ -274,10 +284,12 @@ function summarizeData(layerId: string, data: Record<string, unknown>): Record<s
       };
     }
     case 'air_quality': {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const current = (data.current as Record<string, any>) ?? {};
       return { aqi: current.us_aqi ?? current.european_aqi ?? 0 };
     }
     case 'storms': {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const storms = Array.isArray(data) ? data : (data.storms as any[]) ?? [];
       return { count: storms.length, maxWind: 0 };
     }
@@ -423,6 +435,7 @@ function generateAlert(zone: WatchZone, layerId: string, data: Record<string, un
    STORAGE & NOTIFICATION
    ═══════════════════════════════════════════════════════════════════ */
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function storeAlert(db: any, alert: Alert): void {
   db.prepare(`
     INSERT INTO sentinel_alerts (alert_id, anomaly_id, user_id, title, body, severity, lat, lon, type, delivered, created_at)
@@ -430,6 +443,7 @@ function storeAlert(db: any, alert: Alert): void {
   `).run(alert.alert_id, alert.title, alert.body, alert.severity, alert.lat, alert.lon, alert.zone_id, new Date().toISOString());
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function updateRiskSnapshot(db: any, zone: WatchZone, alerts: Alert[]): void {
   // Compute composite score from alerts
   const maxSeverity = alerts.reduce((max, a) => {

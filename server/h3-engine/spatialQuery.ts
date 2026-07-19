@@ -2,34 +2,22 @@ import { Router, Request, Response } from 'express';
 import { coordsToH3, h3ToCoords, getNeighbors, h3Distance, spatialJoin, expandToResolution } from './h3Index';
 import { TimescaleH3 } from './timescaleDb';
 import { ClickhouseH3 } from './clickhouse';
-import { H3StreamProcessor } from './streamProcessor';
 
 const router = Router();
 let tsdb: TimescaleH3 | null = null;
 let chdb: ClickhouseH3 | null = null;
-let streamProc: H3StreamProcessor | null = null;
 
 export function initSpatialEngine(
   timescaleConfig?: string,
   clickhouseConfig?: { host: string; port: number },
-  streamConfig?: { kafkaBrokers?: string[] },
+  _streamConfig?: { kafkaBrokers?: string[] },
 ): void {
   if (timescaleConfig) tsdb = new TimescaleH3(timescaleConfig);
   if (clickhouseConfig) chdb = new ClickhouseH3(clickhouseConfig);
-  if (streamConfig) streamProc = new H3StreamProcessor(streamConfig || {});
 }
 
-export function getTimescaleH3(): TimescaleH3 | null {
-  return tsdb;
-}
 
-export function getClickhouseH3(): ClickhouseH3 | null {
-  return chdb;
-}
 
-export function getStreamProcessor(): H3StreamProcessor | null {
-  return streamProc;
-}
 
 router.get('/api/spatial/h3', (req: Request, res: Response) => {
   try {

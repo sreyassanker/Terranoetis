@@ -74,6 +74,7 @@ export async function searchHlsScenes(query: HlsQuery): Promise<HlsScene[]> {
 
   try {
     // NASA CMR STAC search
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const stacUrl = 'https://cmr.earthdata.nasa.gov/stac/L30/collections/HLSL30/items';
     const searchUrl = `https://cmr.earthdata.nasa.gov/stac/search`;
 
@@ -105,10 +106,11 @@ export async function searchHlsScenes(query: HlsQuery): Promise<HlsScene[]> {
     }> };
 
     return (data.features || []).map(f => {
-      const coords = f.geometry?.coordinates?.[0]?.[0] || [query.lon, query.lat];
+      const coords = f.geometry?.coordinates?.[0] || [query.lon, query.lat];
+      const collection: 'HLSS30' | 'HLSL30' = f.collection === 'HLSL30' ? 'HLSL30' : 'HLSS30';
       return {
         id: f.id,
-        collection: f.collection === 'HLSL30' ? 'HLSL30' : 'HLSS30' as const,
+        collection,
         date: f.properties.datetime.split('T')[0],
         lat: coords[1] || query.lat,
         lon: coords[0] || query.lon,

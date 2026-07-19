@@ -13,6 +13,7 @@
 
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { pubsub } from '../pubsub';
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -64,6 +65,7 @@ export interface CropAlert {
 // CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const CROP_TYPES = [
   'wheat', 'rice', 'corn', 'soybean', 'cotton', 'sugarcane',
   'barley', 'oats', 'rapeseed', 'sunflower', 'potato', 'tomato',

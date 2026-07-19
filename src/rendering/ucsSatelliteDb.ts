@@ -28,9 +28,6 @@ export interface UcsSatellite {
 
 const ucsData = new Map<number, UcsSatellite>();
 
-export function getUcsData(): Map<number, UcsSatellite> {
-  return ucsData;
-}
 
 export function getUcsForNorad(noradId: number): UcsSatellite | undefined {
   return ucsData.get(noradId);

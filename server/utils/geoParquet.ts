@@ -12,6 +12,7 @@
  * Spec: https://github.com/opengeospatial/geoparquet
  */
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { logger } from '../observability/logger';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -198,10 +199,12 @@ function extractCoordinates(geometry: GeoJSON.Geometry | null | undefined): {
   lon: number | null;
   lat: number | null;
 } {
-  if (!geometry?.coordinates) return { lon: null, lat: null };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (!(geometry as any)?.coordinates) return { lon: null, lat: null };
 
-  const coords = geometry.coordinates;
-  switch (geometry.type) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const coords: any = (geometry as any).coordinates;
+   switch (geometry!.type) {
     case 'Point':
       return { lon: coords[0] as number, lat: coords[1] as number };
     case 'MultiPoint':

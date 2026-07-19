@@ -1109,7 +1109,7 @@ async function fetchSkylineWebcams(): Promise<WorldwideCctvCamera[]> {
   const cams: WorldwideCctvCamera[] = [];
   try {
     const resp = await fetch('https://www.skylinewebcams.com/en/webcam', {
-      headers: { 'User-Agent': 'LiveGlobe/1.0 (public camera explorer)', 'Accept-Language': 'en-US,en;q=0.9' },
+      headers: { 'User-Agent': 'Terranoetis/1.0 (public camera explorer)', 'Accept-Language': 'en-US,en;q=0.9' },
       signal: AbortSignal.timeout(10000),
     });
     if (!resp.ok) return [];
@@ -1142,7 +1142,7 @@ async function fetchSkylineWebcams(): Promise<WorldwideCctvCamera[]> {
     const batch = unique.slice(0, 50);
     const pages = await Promise.allSettled(
       batch.map(url =>
-        fetch(url, { headers: { 'User-Agent': 'LiveGlobe/1.0' }, signal: AbortSignal.timeout(8000) })
+        fetch(url, { headers: { 'User-Agent': 'Terranoetis/1.0' }, signal: AbortSignal.timeout(8000) })
           .then(r => r.ok ? r.text() : null)
       )
     );
@@ -1186,7 +1186,7 @@ async function fetchLiveEnvStreams(): Promise<WorldwideCctvCamera[]> {
   try {
     const resp = await fetch(
       'https://raw.githubusercontent.com/willytop8/Live-Environment-Streams/main/streams.geojson',
-      { headers: { 'User-Agent': 'LiveGlobe/1.0' }, signal: AbortSignal.timeout(15000) }
+      { headers: { 'User-Agent': 'Terranoetis/1.0' }, signal: AbortSignal.timeout(15000) }
     );
     if (!resp.ok) return [];
     const geojson = await resp.json() as any;
@@ -1235,7 +1235,7 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
   let indiaCams: WorldwideCctvCamera[] = [];
   try {
     const resp = await fetch('https://opencctv.org/cameras/india', {
-      headers: { 'User-Agent': 'LiveGlobe/1.0 (public camera explorer)' },
+      headers: { 'User-Agent': 'Terranoetis/1.0 (public camera explorer)' },
       signal: AbortSignal.timeout(5000),
     });
     if (resp.ok) {
@@ -1250,7 +1250,7 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
     try {
       const url = `https://opencctv.org/api/cameras?bounds=${box.s},${box.w},${box.n},${box.e}`;
       const resp = await fetch(url, {
-        headers: { 'User-Agent': 'LiveGlobe/1.0 (public camera explorer)' },
+        headers: { 'User-Agent': 'Terranoetis/1.0 (public camera explorer)' },
         signal: AbortSignal.timeout(15000),
       });
       if (!resp.ok) return [];
@@ -1458,7 +1458,7 @@ app.get('/api/vaac/tokyo', async (req: express.Request, res: express.Response) =
     let advisories = cache.get<VaacAdvisory[]>(cacheKey);
     if (!advisories) {
       const response = await fetch('https://ds.data.jma.go.jp/svd/vaac/data/vaac_list.html', {
-        headers: { 'User-Agent': 'LiveGlobe/1.0 (volcanic ash advisories)' },
+        headers: { 'User-Agent': 'Terranoetis/1.0 (volcanic ash advisories)' },
         signal: AbortSignal.timeout(15000),
       });
       if (!response.ok) throw new Error(`Tokyo VAAC ${response.status}`);
@@ -1494,7 +1494,7 @@ app.get('/api/vaac/anchorage', async (req: express.Request, res: express.Respons
     if (!advisories) {
       const url = 'https://vaac.arh.noaa.gov/list.php';
       const response = await fetch(url, {
-        headers: { 'User-Agent': 'LiveGlobe/1.0 (volcanic ash advisories)' },
+        headers: { 'User-Agent': 'Terranoetis/1.0 (volcanic ash advisories)' },
         signal: AbortSignal.timeout(15000),
       });
       if (!response.ok) throw new Error(`Anchorage VAAC ${response.status}`);
@@ -1530,7 +1530,7 @@ app.get('/api/vaac/washington', async (req: express.Request, res: express.Respon
     if (!advisories) {
       const url = 'https://vaac.washington.noaa.gov/list.php';
       const response = await fetch(url, {
-        headers: { 'User-Agent': 'LiveGlobe/1.0 (volcanic ash advisories)' },
+        headers: { 'User-Agent': 'Terranoetis/1.0 (volcanic ash advisories)' },
         signal: AbortSignal.timeout(15000),
       });
       if (!response.ok) throw new Error(`Washington VAAC ${response.status}`);
@@ -1897,7 +1897,7 @@ app.get('/api/adsb-lol', async (req: express.Request, res: express.Response) => 
   }
   const seen = new Set<string>();
   const states: any[][] = [];
-  const fetchOpts = { headers: { 'User-Agent': 'LiveGlobe/1.0' } };
+  const fetchOpts = { headers: { 'User-Agent': 'Terranoetis/1.0' } };
   const results = await Promise.allSettled(
     regions.map(r =>
       cachedFetch<any>(
@@ -1939,7 +1939,7 @@ app.get('/api/adsb-fi', async (req: express.Request, res: express.Response) => {
   }
   const seen = new Set<string>();
   const states: any[][] = [];
-  const fetchOpts = { headers: { 'User-Agent': 'LiveGlobe/1.0' } };
+  const fetchOpts = { headers: { 'User-Agent': 'Terranoetis/1.0' } };
   const results = await Promise.allSettled(
     regions.map(r =>
       cachedFetch<any>(
@@ -2469,7 +2469,7 @@ app.get('/api/spc/risk', async (req: express.Request, res: express.Response) => 
 import { getRecentGlobalEvents, getEventsNearLocation, getCountryEvents, summarizeEvents, detectEscalation } from './utils/acled';
 import { searchStacItems, listStacCollections } from './foundation-models/stacSearch';
 import { geojsonToCsv, geojsonToStreamingJson, estimateParquetSize, getGeoParquetMetadata } from './utils/geoParquet';
-import { latLonToMgrs, mgrsToLatLon, parseMgrs } from '../src/lib/mgrs';
+import { parseMgrs } from '../src/lib/mgrs';
 import { detectIonosphericAnomalies, getIonosphericConditions } from './utils/guardian';
 import { getOceanConditions } from './utils/cmems';
 import { getWaveForecast, getWaveWarnings, getSeaState } from './utils/wavewatch';
@@ -2728,7 +2728,7 @@ app.get('/api/observability/metrics', (_req: express.Request, res: express.Respo
   }
 });
 
-import { getSatclipEmbedding, findSimilarLocations, getLocationContext } from './utils/satclip';
+import { getSatclipEmbedding, findSimilarLocations, getLocationContext as satclipGetLocationContext } from './utils/satclip';
 import { assembleContext, spatialQuery, addEntity, addRelation } from './utils/geoGraphRAG';
 import { streamFeatures, streamWithBbox } from './utils/flatGeobuf';
 import { getWaterTimeSeries, getFloodWatch } from './utils/operaSurfaceWater';
@@ -2763,7 +2763,7 @@ app.get('/api/satclip/context', async (req: express.Request, res: express.Respon
     const lat = parseFloat(String(req.query.lat));
     const lon = parseFloat(String(req.query.lon));
     if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const context = await getLocationContext(lat, lon);
+    const context = await satclipGetLocationContext(lat, lon);
     res.json({ context });
   } catch (e) { res.status(502).json({ error: String(e) }); }
 });
@@ -2972,7 +2972,7 @@ app.get('/api/weather/radar', async (_req: express.Request, res: express.Respons
   const hit = cache.get(cacheKey);
   if (hit) { res.json(hit); return; }
   try {
-    const resp = await fetch('https://api.weather.gov/radar/stations', { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'LiveGlobe/1.0' } });
+    const resp = await fetch('https://api.weather.gov/radar/stations', { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Terranoetis/1.0' } });
     if (!resp.ok) throw new Error(`NWS radar stations ${resp.status}`);
     const body = await resp.json() as any;
     const sites = await Promise.all((body.features || []).map(async (f: any) => {
@@ -2980,7 +2980,7 @@ app.get('/api/weather/radar', async (_req: express.Request, res: express.Respons
       // Fetch per-station details for latency/RDA data
       let rda = null;
       try {
-        const detailResp = await fetch(`https://api.weather.gov/radar/stations/${id}`, { signal: AbortSignal.timeout(5000), headers: { 'User-Agent': 'LiveGlobe/1.0' } });
+        const detailResp = await fetch(`https://api.weather.gov/radar/stations/${id}`, { signal: AbortSignal.timeout(5000), headers: { 'User-Agent': 'Terranoetis/1.0' } });
         if (detailResp.ok) {
           const detail = await detailResp.json() as any;
           const p = detail.properties || {};
@@ -3042,7 +3042,7 @@ app.get('/api/weather/alerts', async (_req: express.Request, res: express.Respon
       'nws_alerts',
       'https://api.weather.gov/alerts/active',
       60,
-      { headers: { 'User-Agent': 'LiveGlobe/1.0 (earth-intelligence)' } },
+      { headers: { 'User-Agent': 'Terranoetis/1.0 (earth-intelligence)' } },
     );
     res.json(data);
   } catch (e) {
@@ -3170,7 +3170,7 @@ const rssParser = new Parser();
 /** Safe RSS fetch — uses fetch + parseString to avoid rss-parser TLS callback crashes */
 async function parseRSS(url: string, opts?: { headers?: Record<string, string>; signal?: AbortSignal }): Promise<any> {
   const resp = await fetch(url, {
-    headers: opts?.headers || { 'User-Agent': 'LiveGlobe/1.0' },
+    headers: opts?.headers || { 'User-Agent': 'Terranoetis/1.0' },
     signal: opts?.signal,
   });
   if (!resp.ok) throw new Error(`RSS ${url} HTTP ${resp.status}`);
@@ -3562,7 +3562,7 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
   // ── 4. Reddit ──
   sources.push(safeFetch('Reddit', async (signal) => {
     const resp = await fetch('https://www.reddit.com/r/worldnews/hot.json?limit=10', {
-      headers: { 'User-Agent': 'LiveGlobe/1.0' },
+      headers: { 'User-Agent': 'Terranoetis/1.0' },
       signal,
     });
     if (!resp.ok) return;
@@ -3595,7 +3595,7 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
   // ── 6. ReliefWeb ──
   sources.push(safeFetch('ReliefWeb', async (signal) => {
     const resp = await fetch(
-      'https://api.reliefweb.int/v1/reports?appname=LiveGlobe&limit=8&sort[]=date:desc&fields[]=title&fields[]=url&fields[]=date&fields[]=source',
+      'https://api.reliefweb.int/v1/reports?appname=Terranoetis&limit=8&sort[]=date:desc&fields[]=title&fields[]=url&fields[]=date&fields[]=source',
       { signal }
     );
     if (!resp.ok) return;
@@ -3831,7 +3831,7 @@ app.get('/api/social/stream', sseAuthGuard, (req: express.Request, res: express.
 
   sources.push(safeFetch('Reddit', async (signal) => {
     const resp = await fetch('https://www.reddit.com/r/worldnews/hot.json?limit=10', {
-      headers: { 'User-Agent': 'LiveGlobe/1.0' },
+      headers: { 'User-Agent': 'Terranoetis/1.0' },
       signal,
     });
     if (!resp.ok) return;
@@ -3866,7 +3866,7 @@ app.get('/api/social/stream', sseAuthGuard, (req: express.Request, res: express.
 
   sources.push(safeFetch('ReliefWeb', async (signal) => {
     const resp = await fetch(
-      'https://api.reliefweb.int/v1/reports?appname=LiveGlobe&limit=8&sort[]=date:desc&fields[]=title&fields[]=url&fields[]=date&fields[]=source',
+      'https://api.reliefweb.int/v1/reports?appname=Terranoetis&limit=8&sort[]=date:desc&fields[]=title&fields[]=url&fields[]=date&fields[]=source',
       { signal }
     );
     if (!resp.ok) return;
@@ -5079,8 +5079,8 @@ app.post('/api/openrouter', async (req: express.Request, res: express.Response) 
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': 'https://liveglobe.app',
-        'X-Title': 'LiveGlobe',
+        'HTTP-Referer': 'https://terranoetis.app',
+        'X-Title': 'Terranoetis',
       },
       body: JSON.stringify({ model, messages, temperature, max_tokens }),
     });
@@ -6296,6 +6296,7 @@ async function fetchSatellites(): Promise<any[]> {
         let tle: { tle1: string; tle2: string } | null = null;
         try {
           tle = generateTle(noradId || '00000', uInclination, 0, uEccentricity, 0, 0, uMeanMotion);
+        // eslint-disable-next-line no-empty
         } catch {}
         results.push({
           id: noradId || `ucs_${u.name ?? Math.random()}`,
@@ -6341,12 +6342,13 @@ async function fetchSatellites(): Promise<any[]> {
       let stTle: { tle1: string; tle2: string } | null = null;
       try {
         stTle = generateTle(noradId || '00000', sInc, sRaan, sEcc, sArg, sMean, sMm, sEpoch);
+      // eslint-disable-next-line no-empty
       } catch {}
 
       const existing = noradId ? results.find(r => r.id === noradId) : null;
       if (existing) {
         if (s.velocity_kms != null) existing.velocity = s.velocity_kms;
-        if (s.latitude != null) { existing.lat = +s.latitude.toFixed(4); existing.lon = +s.longitude.toFixed(4); }
+        if (s.latitude != null && s.longitude != null) { existing.lat = +s.latitude.toFixed(4); existing.lon = +s.longitude.toFixed(4); }
         if (s.height_km != null) existing.altitude = Math.round(s.height_km * 1000);
         if (stTle) { existing.tle1 = stTle.tle1; existing.tle2 = stTle.tle2; existing.hasTle = true; }
         existing.source = 'CelesTrak';
@@ -8228,7 +8230,7 @@ app.get('/api/data-layers/status', authGuard, askRateLimit, async (_req: express
         try {
           const resp = await fetch(layer.url, {
             signal: AbortSignal.timeout(8000),
-            headers: { 'User-Agent': 'LiveGlobe/1.0' },
+            headers: { 'User-Agent': 'Terranoetis/1.0' },
           });
           return {
             ...layer,

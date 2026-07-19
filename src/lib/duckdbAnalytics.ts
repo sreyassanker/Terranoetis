@@ -9,7 +9,9 @@
  * Used by: Felt, Observable, and other modern geospatial platforms
  */
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let duckdbInstance: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let connection: any = null;
 let initialized = false;
 
@@ -105,6 +107,7 @@ export async function importCSV(csvData: string, tableName: string): Promise<voi
  * @param geojson GeoJSON FeatureCollection
  * @param tableName Table name to create
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function importGeoJSON(geojson: { type: string; features?: any[] }, tableName: string): Promise<void> {
   if (!initialized || !connection) {
     await initDuckDB();
@@ -122,6 +125,7 @@ export async function importGeoJSON(geojson: { type: string; features?: any[] },
 
     // Build CSV with geometry columns
     let csv = 'id,' + headers.join(',') + ',longitude,latitude\n';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     features.forEach((f: any, idx: number) => {
       const props = f.properties || {};
       const geometry = f.geometry;
@@ -288,6 +292,7 @@ export async function getColumnStats(
     if (result.length === 0) {
       return { count: 0, mean: 0, stddev: 0, min: 0, max: 0, percentiles: {} };
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const r = result[0] as any;
     return {
       count: Number(r.count),

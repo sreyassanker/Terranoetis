@@ -478,9 +478,6 @@ function computePolygonCentroid(positions: Cesium.Cartesian3[]): Cesium.Cartesia
   return Cesium.Cartesian3.divideByScalar(avg, positions.length, avg);
 }
 
-export function createLayerEntityStoreKey(layerId: string): string {
-  return `generic_${layerId}`;
-}
 
 export async function fetchLayerData(layer: LayerCategory): Promise<any[]> {
   const params = new URLSearchParams({

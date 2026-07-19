@@ -109,45 +109,6 @@ export async function findLocationsNearby(
 /**
  * Get latest measurements for a specific location
  */
-export async function getLatestMeasurements(locationId: number): Promise<OpenAQMeasurement[]> {
-  if (!Number.isFinite(locationId) || locationId <= 0) return [];
-
-  try {
-    const url = `${BASE_URL}/locations/${locationId}/latest`;
-    const resp = await fetch(url, {
-      headers: getHeaders(),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!resp.ok) return [];
-
-    const data = await resp.json() as { results?: Array<{
-      datetime: { utc: string; local?: string };
-      value: number;
-      coordinates: { latitude: number; longitude: number };
-      sensorsId: number;
-      locationsId: number;
-    }> };
-
-    // Group by location and parameter
-    const measurements: OpenAQMeasurement[] = [];
-    for (const r of data.results || []) {
-      measurements.push({
-        locationId: r.locationsId,
-        locationName: '',
-        parameter: 'unknown',
-        value: r.value,
-        units: '',
-        datetime: r.datetime?.utc || '',
-        coordinates: r.coordinates || { latitude: 0, longitude: 0 },
-      });
-    }
-    return measurements;
-  } catch (e) {
-    logger.warn({ err: e }, 'OpenAQ measurements fetch failed');
-    return [];
-  }
-}
 
 /**
  * Get air quality readings near a coordinate (convenience function)

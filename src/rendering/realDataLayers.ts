@@ -30,7 +30,7 @@ export async function loadAirspaces(viewer: Cesium.Viewer): Promise<Cesium.Entit
 }
 
 // --- REAL AIS VESSELS ---
-export async function loadAisVessels(viewer: Cesium.Viewer, apiKey: string): Promise<Cesium.Entity[]> {
+async function loadAisVessels(viewer: Cesium.Viewer, apiKey: string): Promise<Cesium.Entity[]> {
   if (!apiKey || apiKey.trim() === '') {
     throw new Error('AISStream API Key required for real live vessels.');
   }

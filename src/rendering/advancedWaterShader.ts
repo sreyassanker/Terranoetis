@@ -10,6 +10,8 @@
  * All rendering happens on GPU for optimal performance.
  */
 
+import * as Cesium from 'cesium';
+
 /**
  * Advanced ocean wave shader with Gerstner waves
  * Based on Tessendorf (2001) - "Simulating Ocean Water"
@@ -242,50 +244,10 @@ export const FLOOD_SHADER = `
 /**
  * Create ocean wave material
  */
-export function createOceanWaveMaterial(
-  waveHeight: number = 2.0,
-  waveSpeed: number = 1.0,
-  choppy: number = 0.5,
-): Cesium.Material {
-  return new Cesium.Material({
-    fabric: {
-      type: 'OceanWave',
-      uniforms: {
-        time: 0.0,
-        waveHeight,
-        waveSpeed,
-        choppy,
-        foamThreshold: 0.7,
-      },
-      source: OCEAN_WAVE_SHADER,
-    },
-  });
-}
 
 /**
  * Create tsunami wave material
  */
-export function createTsunamiWaveMaterial(
-  epicenterLat: number,
-  epicenterLon: number,
-  waveHeight: number = 5.0,
-  waveSpeed: number = 10.0,
-  directivity: number = 0.0,
-): Cesium.Material {
-  return new Cesium.Material({
-    fabric: {
-      type: 'TsunamiWave',
-      uniforms: {
-        time: 0.0,
-        waveHeight,
-        epicenter: new Cesium.Cartesian2(epicenterLon, epicenterLat),
-        waveSpeed,
-        directivity,
-      },
-      source: TSUNAMI_WAVE_SHADER,
-    },
-  });
-}
 
 /**
  * Create flood water material

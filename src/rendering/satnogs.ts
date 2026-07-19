@@ -34,9 +34,6 @@ export interface NormalizedSatelliteFrequencies {
 
 const satnogsData = new Map<number, NormalizedSatelliteFrequencies>();
 
-export function getSatnogsData(): Map<number, NormalizedSatelliteFrequencies> {
-  return satnogsData;
-}
 
 export function getSatnogsForNorad(noradId: number): NormalizedSatelliteFrequencies | undefined {
   return satnogsData.get(noradId);

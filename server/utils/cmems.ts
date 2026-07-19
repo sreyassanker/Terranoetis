@@ -15,6 +15,19 @@
 
 import { logger } from '../observability/logger';
 
+export interface OceanConditions {
+  lat: number;
+  lon: number;
+  seaSurfaceTemp?: number;
+  salinity?: number;
+  chlorophyll?: number;
+  currentSpeed?: number;
+  currentDirection?: number;
+  waveHeight?: number;
+  source: string;
+  timestamp: string;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Core Functions
 // ═══════════════════════════════════════════════════════════════════════════
@@ -48,51 +61,10 @@ export async function getOceanConditions(
 /**
  * Get sea ice extent for a region
  */
-export async function getSeaIceExtent(
-  lat: number,
-  lon: number,
-  radiusKm: number = 100,
-): Promise<{
-  hasIce: boolean;
-  iceFraction: number;
-  iceType: string;
-  thickness: number;
-} | null> {
-  try {
-    // Fetch from CMEMS sea ice product
-    const _bbox = {
-      west: lon - radiusKm / 111,
-      south: lat - radiusKm / 111,
-      east: lon + radiusKm / 111,
-      north: lat + radiusKm / 111,
-    };
-
-    // In production, query the CMEMS Sea Ice Edge product
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Get current patterns for naval operations
  */
-export async function getCurrentPatterns(
-  lat: number,
-  lon: number,
-): Promise<{
-  surfaceCurrent: { speed: number; direction: number };
-  deepCurrent: { speed: number; direction: number };
-  upwelling: boolean;
-  eddies: Array<{ lat: number; lon: number; radius: number; rotation: 'cw' | 'ccw' }>;
-}> {
-  return {
-    surfaceCurrent: { speed: 0.5, direction: 90 },
-    deepCurrent: { speed: 0.1, direction: 180 },
-    upwelling: false,
-    eddies: [],
-  };
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Internal Helpers

@@ -16,19 +16,11 @@ export function gutenbergRichter(magnitude: number, a = 4.5, b = 1.0): number {
  * Omori's law: n(t) = K / (c + t)^p
  * Returns aftershock rate at time t (days) after mainshock.
  */
-export function omoriLaw(tDays: number, k = 100, c = 0.1, p = 1.0): number {
-  return k / Math.pow(c + tDays, p);
-}
 
 /**
  * Rate-and-state friction: approximate probability of triggered seismicity
  * based on Coulomb stress change.
  */
-export function rateStateFriction(stressChangeMPa: number, aSigma = 0.1): number {
-  // Simplified: probability ∝ exp(Δτ / aσ)
-  const ratio = stressChangeMPa / aSigma;
-  return Math.min(1, Math.max(0, 0.5 * (1 + Math.tanh(ratio))));
-}
 
 /**
  * Aftershock probability: probability of M ≥ threshold in next tDays
@@ -61,10 +53,6 @@ export function tsunamiProbability(magnitude: number, depthKm: number, isSubduct
 /**
  * Approximate thermal wind balance: pressure gradient ∝ temperature gradient
  */
-export function thermalWindBalance(tempGradient: number, latitude: number): number {
-  const coriolis = 2 * 7.2921e-5 * Math.sin(latitude * Math.PI / 180);
-  return Math.abs(coriolis) > 1e-10 ? tempGradient / coriolis : 0;
-}
 
 /**
  * Clausius-Clapeyron: saturation vapor pressure (hPa) at temperature T (°C)
@@ -134,15 +122,6 @@ export function fireIgnitionProbability(
 /**
  * Fire spread risk considering atmospheric coupling
  */
-export function fireAtmosphericCoupling(
-  spreadRate: number,
-  humidityPct: number,
-  terrainRuggedness: number,
-): number {
-  // Dry air + fast spread + rough terrain creates fire-generated winds
-  const drynessBoost = Math.max(0, 1 - humidityPct / 20) * 0.3;
-  return Math.min(1, spreadRate / 20 * 0.5 + drynessBoost + terrainRuggedness * 0.2);
-}
 
 // ── PhysicsNN ───────────────────────────────────────────────────
 

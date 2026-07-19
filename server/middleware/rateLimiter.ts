@@ -70,9 +70,6 @@ export function perIpRateLimiter(maxRequests: number, windowMs: number) {
   };
 }
 
-export function getRateLimitStats(): { size: number } {
-  return { size: limits.size };
-}
 
 // Periodic cleanup of expired entries (every 5 minutes)
 setInterval(() => {

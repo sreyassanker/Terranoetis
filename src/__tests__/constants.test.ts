@@ -21,6 +21,7 @@ describe('SEVERITY_COLORS', () => {
   });
 
   it('all values are valid hex colors', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for (const [key, value] of Object.entries(SEVERITY_COLORS)) {
       expect(value).toMatch(/^#[0-9a-fA-F]{6}$/);
     }
@@ -44,6 +45,7 @@ describe('SEVERITY_BG', () => {
   });
 
   it('all values are rgba colors', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for (const [key, value] of Object.entries(SEVERITY_BG)) {
       expect(value).toMatch(/^rgba\(/);
     }
@@ -63,6 +65,7 @@ describe('SEVERITY_ICONS', () => {
   });
 
   it('all values are LucideIcon components', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for (const [key, value] of Object.entries(SEVERITY_ICONS)) {
       // Lucide icons are React forward-ref components (objects with $$typeof)
       expect(value).toBeDefined();

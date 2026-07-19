@@ -48,11 +48,6 @@ export interface ShakeMapStation {
   siteClass?: string;
 }
 
-export interface ShakeMapIntensity {
-  lat: number;
-  lon: number;
-  intensity: number; // MMI scale 1-12
-}
 
 /**
  * Fetch recent earthquakes with ShakeMap data from USGS

@@ -105,7 +105,7 @@ export default function EarthquakeVisualizer({ viewer, shapes, progress }: Earth
               hierarchy: cached,
               material: new Cesium.CallbackProperty(() => {
                 return color.withAlpha(alpha * progressRef.current);
-              }, false),
+              }, false) as unknown as Cesium.MaterialProperty,
               outline: true,
               outlineColor: new Cesium.CallbackProperty(() => {
                 return color.withAlpha(alpha * 2 * progressRef.current);

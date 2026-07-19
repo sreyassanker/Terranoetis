@@ -2,7 +2,7 @@ import type { ReactNode, CSSProperties } from 'react';
 import { X } from 'lucide-react';
 
 interface PanelProps {
-  title: string;
+  title?: string;
   icon?: ReactNode;
   accentColor?: string;
   iconColor?: string;
@@ -14,6 +14,7 @@ interface PanelProps {
   headerHeight?: string;
   hideHeader?: boolean;
   headerBackground?: string;
+  width?: number;
 }
 
 export default function Panel({

@@ -91,12 +91,6 @@ export function initBlackboard(): boolean {
 /**
  * Write a Float32Array into a named slot.
  */
-export function writeSlot(slot: SlotKey, data: Float32Array): void {
-  const view = views[slot];
-  if (!view) return;
-  const len = Math.min(data.length, view.length);
-  for (let i = 0; i < len; i++) view[i] = data[i];
-}
 
 /**
  * Read data from a named slot.
@@ -111,16 +105,10 @@ export function readSlot(slot: SlotKey, length?: number): Float32Array {
  * Get a direct view (no copy) into a slot for zero-copy read access.
  * Mutations to this view directly affect the blackboard.
  */
-export function getSlotView(slot: SlotKey): Float32Array | null {
-  return views[slot] ?? null;
-}
 
 /**
  * Get the underlying SharedArrayBuffer for passing to Web Workers.
  */
-export function getBlackboardBuffer(): ArrayBufferLike | null {
-  return buffer;
-}
 
 /**
  * Check if the blackboard uses SharedArrayBuffer (vs plain ArrayBuffer).
@@ -132,27 +120,14 @@ export function isSharedArrayBuffer(): boolean {
 /**
  * Zero out the entire blackboard.
  */
-export function clearBlackboard(): void {
-  if (!buffer) return;
-  const zeros = new Uint8Array(buffer);
-  zeros.fill(0);
-}
 
 /**
  * Clear a specific slot to zero.
  */
-export function clearSlot(slot: SlotKey): void {
-  const view = views[slot];
-  if (!view) return;
-  view.fill(0);
-}
 
 /**
  * Check if the blackboard has been initialized.
  */
-export function isInitialized(): boolean {
-  return initialized;
-}
 
 /* ═════════════════════════════════════════════════════════════════
    HIGH-LEVEL WRITE OPERATIONS
@@ -178,37 +153,16 @@ export function writeCausalProbs(
 /**
  * Read causal probabilities from the CAUSAL_RISK slot.
  */
-export function readCausalProbs(topoOrder: string[]): Record<string, number> {
-  const view = views.CAUSAL_RISK;
-  if (!view) return {};
-  const probs: Record<string, number> = {};
-  for (let i = 0; i < Math.min(topoOrder.length, view.length); i++) {
-    probs[topoOrder[i]] = view[i];
-  }
-  return probs;
-}
 
 /**
  * Write a risk surface grid into a named slot.
  * @param slot - Target slot (e.g., 'SEISMIC_PROB', 'FUSED_RISK')
  * @param grid - InterpGrid with data, width, height
  */
-export function writeRiskSurface(
-  slot: SlotKey,
-  grid: { data: Float32Array; width: number; height: number },
-): void {
-  const view = views[slot];
-  if (!view) return;
-  const len = Math.min(grid.data.length, view.length);
-  for (let i = 0; i < len; i++) view[i] = grid.data[i];
-}
 
 /**
  * Read a risk surface from a slot as a flat Float32Array.
  */
-export function readRiskSurface(slot: SlotKey): Float32Array {
-  return readSlot(slot);
-}
 
 /* ═════════════════════════════════════════════════════════════════
    ATOMIC OPERATIONS (for SharedArrayBuffer)
@@ -218,25 +172,10 @@ export function readRiskSurface(slot: SlotKey): Float32Array {
  * Atomically update a single cell in a slot.
  * Uses Atomics.store when SharedArrayBuffer is available.
  */
-export function atomicWriteCell(
-  slot: SlotKey,
-  index: number,
-  value: number,
-): void {
-  const view = views[slot];
-  if (!view || index < 0 || index >= view.length) return;
-
-  view[index] = value;
-}
 
 /**
  * Atomically read a single cell from a slot.
  */
-export function atomicReadCell(slot: SlotKey, index: number): number {
-  const view = views[slot];
-  if (!view || index < 0 || index >= view.length) return 0;
-  return view[index];
-}
 
 /* ═════════════════════════════════════════════════════════════════
    STATISTICS & DIAGNOSTICS
@@ -245,32 +184,3 @@ export function atomicReadCell(slot: SlotKey, index: number): number {
 /**
  * Get memory usage statistics for the blackboard.
  */
-export function getBlackboardStats(): {
-  totalBytes: number;
-  isShared: boolean;
-  slotStats: Record<string, { offset: number; size: number; bytes: number; nonZero: number }>;
-} {
-  const slotStats: Record<string, { offset: number; size: number; bytes: number; nonZero: number }> = {};
-
-  for (const [key, slot] of Object.entries(BOARD_SLOTS)) {
-    const view = views[key];
-    let nonZero = 0;
-    if (view) {
-      for (let i = 0; i < view.length; i++) {
-        if (view[i] !== 0) nonZero++;
-      }
-    }
-    slotStats[key] = {
-      offset: slot.offset,
-      size: slot.size,
-      bytes: slot.size * 4,
-      nonZero,
-    };
-  }
-
-  return {
-    totalBytes: TOTAL_SIZE * 4,
-    isShared: isSharedArrayBuffer(),
-    slotStats,
-  };
-}

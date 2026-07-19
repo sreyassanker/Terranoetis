@@ -40,11 +40,6 @@ export interface Fact {
   createdAt: string;
 }
 
-export interface MemoryQuery {
-  episodes: Episode[];
-  profile: UserProfile | null;
-  facts: Fact[];
-}
 
 export interface ProceduralPattern {
   id: number;

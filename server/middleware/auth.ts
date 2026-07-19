@@ -39,16 +39,6 @@ interface UserRow {
   locked_until: string | null;
 }
 
-function getUserById(id: string): UserRow | null {
-  try {
-    const row = getDb()
-      .prepare('SELECT id, name, password_hash, role, failed_attempts, locked_until FROM users WHERE id = ?')
-      .get(id) as UserRow | undefined;
-    return row ?? null;
-  } catch {
-    return null;
-  }
-}
 
 function getUserByName(name: string): UserRow | null {
   try {
@@ -200,10 +190,6 @@ export function requireRole(...roles: string[]) {
   };
 }
 
-export function skipAuth(req: Request, _res: Response, next: NextFunction): void {
-  (req as unknown as Record<string, unknown>).userId = req.body?.userId || req.query?.userId || 'anonymous';
-  next();
-}
 
 export function sseAuthGuard(req: Request, res: Response, next: NextFunction): void {
   const header = req.headers.authorization;
@@ -250,5 +236,5 @@ export function devAutoLogin(req: Request, res: Response): void {
   res.json({ token, userId: user.id, role: user.role });
 }
 
-export { getUserById as _getUserById };
+
 export { JWT_SECRET as _JWT_SECRET };

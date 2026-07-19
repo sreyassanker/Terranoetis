@@ -1,6 +1,6 @@
 import * as Cesium from 'cesium';
 
-interface AisVesselState {
+export interface AisVesselState {
   mmsi: number;
   lon: number;
   lat: number;

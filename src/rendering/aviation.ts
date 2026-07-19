@@ -20,14 +20,6 @@ interface RouteEntry { srcIata: string; dstIata: string; airline?: string; }
 
 interface OpenFlightsData { airports?: AirportEntry[]; routes?: RouteEntry[]; }
 
-export function createFlightLayerManager(
-  viewer: Cesium.Viewer,
-  _createIcon: (heading: number, color: string) => HTMLCanvasElement,
-  _layerId: string,
-): FlightDeadReckoning {
-  const manager = new FlightDeadReckoning(viewer);
-  return manager;
-}
 
 export function addVolcanoEntities(
   viewer: Cesium.Viewer,

@@ -9,6 +9,7 @@ import { AlertTriangle, Info, AlertCircle, XCircle, type LucideIcon } from 'luci
  * Used consistently in MilitaryDashboard,
  * ReportGenerator, AnomalyPanel, and ForcePosturePanel.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export const SEVERITY_COLORS: Record<string, string> = {
   critical: '#ef4444',
   high: '#f97316',
@@ -21,6 +22,7 @@ export const SEVERITY_COLORS: Record<string, string> = {
 /**
  * Background colors for severity badges.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export const SEVERITY_BG: Record<string, string> = {
   critical: 'rgba(239,68,68,0.15)',
   high: 'rgba(249,115,22,0.15)',
@@ -34,6 +36,7 @@ export const SEVERITY_BG: Record<string, string> = {
  * Icon component factories for severity levels.
  * Returns a LucideIcon component for the given severity.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export const SEVERITY_ICONS: Record<string, LucideIcon> = {
   critical: XCircle,
   high: AlertTriangle,
@@ -64,6 +67,7 @@ function formatDuration(diffMs: number): string {
  * @param ts - Unix timestamp in milliseconds
  * @returns Formatted string like "just now", "5m ago", "2h ago", "3d ago"
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function timeAgo(ts: number): string {
   return formatDuration(Date.now() - ts);
 }
@@ -73,6 +77,7 @@ export function timeAgo(ts: number): string {
  * @param dateStr - ISO date string or timestamp
  * @returns Formatted string like "just now", "5m ago", "2h ago", "3d ago"
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function formatTimeAgo(dateStr: string): string {
   try {
     const d = new Date(dateStr);

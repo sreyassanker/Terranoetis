@@ -158,6 +158,7 @@ export class GraphCompletion {
     
     // Fill embedding with meaningful features
     let idx = 0;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for (const [ch, count] of charFreq) {
       if (idx >= emb.length) break;
       emb[idx] = count / combined.length;

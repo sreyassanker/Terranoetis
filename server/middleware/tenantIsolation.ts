@@ -54,4 +54,4 @@ export function requireOwnership(table: string) {
 }
 
 /** Exposed for tests / introspection only. */
-export const _TABLE_CONFIG = TABLE_CONFIG;
+const _TABLE_CONFIG = TABLE_CONFIG;

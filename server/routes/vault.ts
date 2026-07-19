@@ -125,7 +125,6 @@ export const VAULT_KEY_NAMES = [
   'SENTRY_DSN',
 ] as const;
 
-export type VaultKeyName = (typeof VAULT_KEY_NAMES)[number];
 
 /** Maps vault key names to alternative env var names when the .env uses a different name. */
 const VAULT_KEY_ENV_ALIASES: Record<string, string[]> = {
@@ -237,7 +236,3 @@ vaultRouter.put('/', authGuard, (req: Request, res: Response) => {
 });
 
 /** Server-side lookup for proxied requests (never exposed to other users). */
-export function getUserVaultKey(userId: string, keyName: string): string {
-  const vault = readVault(userId);
-  return vault[keyName] ?? '';
-}
