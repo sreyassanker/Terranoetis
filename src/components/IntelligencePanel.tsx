@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  TrendingUp, TrendingDown, Zap, Globe, Link, BarChart3, ChevronDown, ChevronRight, AlertTriangle, Eye, RefreshCw, Activity, ArrowUpRight, ArrowDownRight, ArrowRight, Layers, Radio, MapPin, Info, Hash, Brain
+  TrendingUp, TrendingDown, Zap, Globe, Link, BarChart3, ChevronDown, ChevronRight, AlertTriangle, Eye, RefreshCw, Activity, ArrowUpRight, ArrowDownRight, ArrowRight, Layers, Radio, MapPin, Info, Hash, Brain, Shield
 } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 import { AnalysisTab } from './AnalysisTab';
-import { DetailLineChart, Sparkline, StatRow } from './intelligence/ChartComponents';
+import { DetailLineChart, Sparkline, StatRow } from './ui/ChartComponents';
 
 /* ═════════════════════════════════════════════════════════════════
    TYPES
@@ -53,7 +53,7 @@ interface IntelligencePanelProps {
   onFlyTo: (lat: number, lon: number, opts?: { height?: number; label?: string }) => void;
 }
 
-type TabId = 'market' | 'energy' | 'geopolitical' | 'correlation' | 'sentiment' | 'heatmap' | 'analysis';
+type TabId = 'market' | 'energy' | 'geopolitical' | 'correlation' | 'sentiment' | 'heatmap' | 'analysis' | 'intel';
 
 /* ═════════════════════════════════════════════════════════════════
    SHARED CHART COMPONENTS
@@ -892,6 +892,204 @@ const HeatmapTab: React.FC = () => {
 };
 
 /* ═════════════════════════════════════════════════════════════════
+   INTEL TAB — Force-posture, ACLED, anomalies, guardian, cyber OSINT
+   ═════════════════════════════════════════════════════════════════ */
+
+const IntelTab: React.FC = () => {
+  const [forceStatus, setForceStatus] = useState<{ alertCount?: number; activeAlerts?: number } | null>(null);
+  const [alerts, setAlerts] = useState<Array<Record<string, unknown>>>([]);
+  const [acled, setAcled] = useState<Array<Record<string, unknown>>>([]);
+  const [anomalies, setAnomalies] = useState<Array<Record<string, unknown>>>([]);
+  const [guardian, setGuardian] = useState<Array<Record<string, unknown>>>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [cyberSources, setCyberSources] = useState<Record<string, Array<Record<string, unknown>>>>({});
+
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [fpRes, fpAlertsRes, acledRes, anomRes, guardRes, shodanRes, abuseRes, urlhausRes, outagesRes] = await Promise.allSettled([
+        fetch('/api/force-posture/status'),
+        fetch('/api/force-posture/alerts'),
+        fetch('/api/acled/recent'),
+        fetch('/api/correlation/anomalies'),
+        fetch('/api/guardian/anomalies'),
+        fetch('/api/cyber/shodan'),
+        fetch('/api/abuseipdb'),
+        fetch('/api/urlhaus'),
+        fetch('/api/internet/outages'),
+      ]);
+      if (fpRes.status === 'fulfilled' && fpRes.value.ok) {
+        const d = await fpRes.value.json();
+        setForceStatus(d);
+      }
+      if (fpAlertsRes.status === 'fulfilled' && fpAlertsRes.value.ok) {
+        const d = await fpAlertsRes.value.json();
+        setAlerts(Array.isArray(d) ? d : d.alerts ?? d.items ?? []);
+      }
+      if (acledRes.status === 'fulfilled' && acledRes.value.ok) {
+        const d = await acledRes.value.json();
+        setAcled(Array.isArray(d) ? d : d.events ?? d.data ?? d.items ?? []);
+      }
+      if (anomRes.status === 'fulfilled' && anomRes.value.ok) {
+        const d = await anomRes.value.json();
+        setAnomalies(Array.isArray(d) ? d : d.anomalies ?? d.items ?? []);
+      }
+      if (guardRes.status === 'fulfilled' && guardRes.value.ok) {
+        const d = await guardRes.value.json();
+        setGuardian(Array.isArray(d) ? d : d.anomalies ?? d.data ?? d.items ?? []);
+      }
+      const cyber: Record<string, Array<Record<string, unknown>>> = {};
+      if (shodanRes.status === 'fulfilled' && shodanRes.value.ok) {
+        const d = await shodanRes.value.json();
+        cyber.shodan = Array.isArray(d) ? d : d.matches ?? d.data ?? d.services ?? [];
+      }
+      if (abuseRes.status === 'fulfilled' && abuseRes.value.ok) {
+        const d = await abuseRes.value.json();
+        cyber.abuseipdb = Array.isArray(d) ? d : d.data ?? d.reports ?? [];
+      }
+      if (urlhausRes.status === 'fulfilled' && urlhausRes.value.ok) {
+        const d = await urlhausRes.value.json();
+        cyber.urlhaus = Array.isArray(d) ? d : d.urls ?? d.data ?? [];
+      }
+      if (outagesRes.status === 'fulfilled' && outagesRes.value.ok) {
+        const d = await outagesRes.value.json();
+        cyber.outages = Array.isArray(d) ? d : d.outages ?? d.data ?? [];
+      }
+      setCyberSources(cyber);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const cyberTotal = (cyberSources.shodan?.length ?? 0) + (cyberSources.abuseipdb?.length ?? 0) + (cyberSources.urlhaus?.length ?? 0) + (cyberSources.outages?.length ?? 0);
+
+  const sections = [
+    { id: 'alerts', label: 'Force-Posture Alerts', count: alerts.length, icon: <Shield size={12} />, color: '#fb7185' },
+    { id: 'acled', label: 'ACLED Conflict', count: acled.length, icon: <MapPin size={12} />, color: '#f97316' },
+    { id: 'anomalies', label: 'Correlation Anomalies', count: anomalies.length, icon: <AlertTriangle size={12} />, color: '#eab308' },
+    { id: 'guardian', label: 'Guardian Alerts', count: guardian.length, icon: <Eye size={12} />, color: '#8b5cf6' },
+    { id: 'cyber', label: 'Cyber / OSINT', count: cyberTotal, icon: <Shield size={12} />, color: '#f87171' },
+  ];
+
+  return (
+    <div style={{ padding: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Shield size={12} /> Sentinel Intel
+        </div>
+        <RefreshCw
+          size={12}
+          style={{ color: '#64748b', cursor: 'pointer', transition: 'transform 0.3s' }}
+          onClick={fetchData}
+        />
+      </div>
+
+      {/* Status bar */}
+      {forceStatus && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <div style={{ flex: 1, padding: '8px 10px', borderRadius: 6, background: 'rgba(251,113,133,0.08)', border: '1px solid rgba(251,113,133,0.2)' }}>
+            <div style={{ fontSize: 9, color: '#fb7185' }}>Active Alerts</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace' }}>{forceStatus.activeAlerts ?? forceStatus.alertCount ?? 0}</div>
+          </div>
+          <div style={{ flex: 1, padding: '8px 10px', borderRadius: 6, background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)' }}>
+            <div style={{ fontSize: 9, color: '#818cf8' }}>Installations</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace' }}>
+              <span style={{ fontSize: 10, color: '#64748b' }}>via </span>/api/force-posture
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loading && <div style={{ color: '#64748b', fontSize: 12, textAlign: 'center', padding: 20 }}>Loading intel data...</div>}
+
+      {/* Section rows */}
+      {sections.map(s => {
+        const items = s.id === 'alerts' ? alerts : s.id === 'acled' ? acled : s.id === 'anomalies' ? anomalies : s.id === 'guardian' ? guardian : [];
+        const isExpanded = expanded === s.id;
+        return (
+          <div key={s.id} style={{ marginBottom: 4 }}>
+            <div
+              onClick={() => setExpanded(prev => prev === s.id ? null : s.id)}
+              style={{
+                padding: '10px 12px', borderRadius: 6, cursor: 'pointer',
+                background: isExpanded ? `${s.color}10` : 'rgba(255,255,255,0.03)',
+                border: `1px solid ${isExpanded ? `${s.color}55` : `${s.color}22`}`,
+                transition: 'all 0.15s',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {isExpanded ? <ChevronDown size={10} color={s.color} /> : <ChevronRight size={10} color="#64748b" />}
+                  {s.icon}
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#e2e8f0' }}>{s.label}</span>
+                </div>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, color: s.color, fontFamily: 'monospace',
+                  background: `${s.color}20`, padding: '2px 8px', borderRadius: 10,
+                }}>
+                  {s.count}
+                </span>
+              </div>
+            </div>
+            {isExpanded && s.id !== 'cyber' && (
+              <div style={{
+                padding: '10px 12px', margin: '0 0 4px', borderRadius: '0 0 6px 6px',
+                background: `${s.color}08`, border: `1px solid ${s.color}22`, borderTop: 'none',
+                animation: 'fadeIn 0.2s ease', maxHeight: 300, overflowY: 'auto',
+              }}>
+                {items.length === 0 && (
+                  <div style={{ color: '#475569', fontSize: 11, textAlign: 'center', padding: 10 }}>No data</div>
+                )}
+                {items.slice(0, 20).map((item, i) => (
+                  <div key={item.id as string ?? i} style={{
+                    padding: '6px 8px', marginBottom: 4, borderRadius: 4,
+                    background: 'rgba(0,0,0,0.15)', fontSize: 10, lineHeight: 1.4,
+                    color: '#cbd5e1', fontFamily: 'monospace',
+                  }}>
+                    {item.title as string ?? item.label as string ?? item.event as string ?? item.type as string ?? JSON.stringify(item).slice(0, 120)}
+                  </div>
+                ))}
+              </div>
+            )}
+            {isExpanded && s.id === 'cyber' && (
+              <div style={{
+                padding: '10px 12px', margin: '0 0 4px', borderRadius: '0 0 6px 6px',
+                background: `${s.color}08`, border: `1px solid ${s.color}22`, borderTop: 'none',
+                animation: 'fadeIn 0.2s ease',
+              }}>
+                {cyberTotal === 0 && (
+                  <div style={{ color: '#475569', fontSize: 11, textAlign: 'center', padding: 10 }}>No threat data</div>
+                )}
+                {Object.entries(cyberSources).map(([source, srcItems]) =>
+                  srcItems.length > 0 && (
+                    <div key={source} style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: '#f87171', marginBottom: 4, textTransform: 'capitalize' }}>
+                        {source} ({srcItems.length})
+                      </div>
+                      {srcItems.slice(0, 8).map((item, i) => (
+                        <div key={i} style={{
+                          padding: '4px 8px', marginBottom: 2, borderRadius: 4,
+                          background: 'rgba(0,0,0,0.15)', fontSize: 9, lineHeight: 1.3,
+                          color: '#cbd5e1', fontFamily: 'monospace',
+                        }}>
+                          {item.ip as string ?? item.hostname as string ?? item.url as string ?? item.domain as string ?? item.location as string ?? item.source as string ?? Object.values(item)[0] as string ?? JSON.stringify(item).slice(0, 100)}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/* ═════════════════════════════════════════════════════════════════
    MAIN INTELLIGENCE PANEL
    ═════════════════════════════════════════════════════════════════ */
 
@@ -922,6 +1120,7 @@ export const IntelligencePanel: React.FC<IntelligencePanelProps> = ({
     { id: 'sentiment', label: 'Sentiment', icon: <Brain size={14} /> },
     { id: 'heatmap', label: 'Heatmap', icon: <Activity size={14} /> },
     { id: 'analysis', label: 'Analysis', icon: <BarChart3 size={14} /> },
+    { id: 'intel', label: 'Intel', icon: <Shield size={14} /> },
   ];
 
   const tabContent: Record<TabId, React.ReactNode> = {
@@ -932,6 +1131,7 @@ export const IntelligencePanel: React.FC<IntelligencePanelProps> = ({
     sentiment: <SentimentTab />,
     heatmap: <HeatmapTab />,
     analysis: <AnalysisTab />,
+    intel: <IntelTab />,
   };
 
   if (!open) return null as unknown as React.ReactElement;

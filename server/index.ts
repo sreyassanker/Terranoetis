@@ -82,6 +82,7 @@ import { seismicProcessor } from './multimodal/seismicProcessor';
 import { radarInterpreter } from './multimodal/radarInterpreter';
 import { sentimentAnalyzer } from './multimodal/sentimentAnalyzer';
 import { multimodalFusion } from './multimodal/multimodalFusion';
+import { registerAnalyticalModelsRoutes } from './analytical-models';
 
 import { architectureProposals } from './meta-cognition/architectureProposals';
 import { promptEvolution } from './meta-cognition/promptEvolution';
@@ -364,6 +365,7 @@ app.use('/api', foundationModelsRouter);
 app.use('/api/fork', forkRouter);
 app.use('/api/vault', vaultRouter);
 app.use('/api/pulse', pulseRouter);
+registerAnalyticalModelsRoutes(app);
 
 const materializedViews = new MaterializedViewCache(`http://127.0.0.1:${PORT}`);
 const sandboxManager = new SandboxManager();
@@ -838,33 +840,7 @@ function extractIndiaCctvCameras(html: string): IndiaCctvCamera[] {
 // OBSERVABILITY ENDPOINTS
 // ═══════════════════════════════════════════════════════════════════════
 
-app.get('/api/live', (_req: express.Request, res: express.Response) => {
-  res.json({ ok: true, ts: Date.now() });
-});
 
-app.get('/api/ready', (req: express.Request, res: express.Response) => {
-  const checks: Record<string, string> = {};
-  let allCritical = true;
-
-  try {
-    const db = getDb();
-    db.prepare('SELECT 1').get();
-    checks.db = 'ok';
-  } catch (e) {
-    logger.warn({ err: e }, 'Health check: DB unavailable');
-    checks.db = 'fail';
-    allCritical = false;
-  }
-
-  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
-  checks.gemini = geminiKey ? 'ok' : 'not_configured';
-
-  if (allCritical) {
-    res.json({ status: 'ready', checks, uptime_ms: process.uptime() * 1000 });
-  } else {
-    res.status(503).json({ status: 'not_ready', checks, uptime_ms: process.uptime() * 1000 });
-  }
-});
 
 app.get('/api/health', async (_req: express.Request, res: express.Response) => {
   const checks: Record<string, { status: string; detail?: string }> = {};
@@ -938,22 +914,6 @@ app.get('/api/memory/stats', async (_req: express.Request, res: express.Response
   res.json({ tiers, timestamp: Date.now() });
 });
 
-app.get('/api/reflex/stats', (_req: express.Request, res: express.Response) => {
-  try {
-    res.json({
-      reflexes: [
-        { reflexId: 'seismic-pupillary', status: 'IDLE', triggerCount: 0 },
-        { reflexId: 'storm-pupillary', status: 'IDLE', triggerCount: 0 },
-        { reflexId: 'maritime-distress', status: 'IDLE', triggerCount: 0 },
-      ],
-      traumaMode: false,
-      activeCount: 0,
-      timestamp: Date.now(),
-    });
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
 
 app.get('/api/metrics', async (_req: express.Request, res: express.Response) => {
   const metricsToken = process.env.METRICS_API_TOKEN;
@@ -1363,55 +1323,7 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
   });
 }
 
-app.get('/api/cctv/worldwide', async (_req: express.Request, res: express.Response) => {
-  try {
-    const hit = cache.get<WorldwideCctvPayload>('cctv_worldwide');
-    if (hit) {
-      res.json(hit);
-      return;
-    }
 
-    const cameras = await fetchWorldwideCameras();
-    const payload: WorldwideCctvPayload = {
-      source: 'opencctv.org',
-      country: 'Worldwide',
-      updatedAt: Date.now(),
-      cameras,
-    };
-    cache.set('cctv_worldwide', payload, 1800);
-    res.json(payload);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
-
-app.get('/api/cctv/india', async (_req: express.Request, res: express.Response) => {
-  try {
-    const hit = cache.get<WorldwideCctvPayload>('cctv_worldwide');
-    let cameras: WorldwideCctvCamera[];
-    if (hit) {
-      cameras = hit.cameras;
-    } else {
-      cameras = await fetchWorldwideCameras();
-      const payload: WorldwideCctvPayload = {
-        source: 'opencctv.org',
-        country: 'Worldwide',
-        updatedAt: Date.now(),
-        cameras,
-      };
-      cache.set('cctv_worldwide', payload, 1800);
-    }
-    const indiaCameras = cameras.filter(c => c.location?.toLowerCase().includes('india'));
-    res.json({
-      source: 'opencctv.org',
-      country: 'India',
-      updatedAt: Date.now(),
-      cameras: indiaCameras,
-    });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // Backward-compatible camera route documented by earlier releases.
 app.get(['/api/cameras', '/api/cameras/:lat/:lon/:radius'], async (req: express.Request, res: express.Response) => {
@@ -1696,28 +1608,6 @@ app.get('/api/flights', async (req: express.Request, res: express.Response) => {
   }
 });
 
-app.get('/api/flights/regional', async (req: express.Request, res: express.Response) => {
-  const rawLat = req.query.lat ?? '51.5';
-  const rawLon = req.query.lon ?? '-0.1';
-  const rawDist = req.query.dist ?? '250';
-  const lat = parseFloat(rawLat as string);
-  const lon = parseFloat(rawLon as string);
-  const dist = parseFloat(rawDist as string);
-  if (!isFinite(lat) || Math.abs(lat) > 90) return res.status(400).json({ error: 'Invalid lat' });
-  if (!isFinite(lon) || Math.abs(lon) > 180) return res.status(400).json({ error: 'Invalid lon' });
-  if (!isFinite(dist) || dist < 0 || dist > 2000) return res.status(400).json({ error: 'Invalid dist' });
-  const key = `flights_regional_${lat}_${lon}_${dist}`;
-  try {
-    const data = await cachedFetch(
-      key,
-      `https://adsb.fi/api/v2/lat/${lat}/lon/${lon}/dist/${dist}`,
-      5,
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── Combined flights: query ALL aviation sources, deduplicate by hex ──
 app.get('/api/flights/all', async (req: express.Request, res: express.Response) => {
@@ -1779,28 +1669,6 @@ const MILITARY_CALLSIGN_PATTERNS = [
   /^FNF\d*$/i, /^KAF\d*$/i, /^ETAF\d*$/i,
 ];
 
-app.get('/api/flights/military', async (_req: express.Request, res: express.Response) => {
-  try {
-    const resp = await fetch('https://opensky-network.org/api/states/all', {
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!resp.ok) throw new Error(`OpenSky ${resp.status}`);
-    const data: any = await resp.json();
-    const states = data.states || [];
-    const milStates = states.filter((s: unknown[]) => {
-      const cs = String(s[1] ?? '').trim().toUpperCase();
-      return cs && MILITARY_CALLSIGN_PATTERNS.some(p => p.test(cs));
-    });
-    res.json({
-      states: milStates,
-      time: data.time,
-      total: states.length,
-      military: milStates.length,
-    });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // --- AVIATION LAYERS ---
 
@@ -2155,29 +2023,6 @@ function usgsToLocation(v: any): any {
 }
 
 // Single consolidated volcano endpoint — all layer types route here
-app.get('/api/volcanoes', async (req: express.Request, res: express.Response) => {
-  try {
-    const volcanoes = await fetchUsgsElevatedVolcanoes();
-    if (volcanoes.length === 0) {
-      res.status(503).json({ error: 'Volcano data not available at this moment.' });
-      return;
-    }
-    const format = (req.query.format as string) || 'advisory';
-    if (format === 'location') {
-      res.json({ locations: volcanoes.map(usgsToLocation) });
-    } else {
-      res.json({ advisories: volcanoes.map(usgsToAdvisory) });
-    }
-  } catch (e) {
-    res.json({
-      hotspots: [],
-      configured: true,
-      source: 'NASA FIRMS VIIRS SNPP NRT',
-      updatedAt: Date.now(),
-      message: 'No data from NASA FIRMS upstream',
-    });
-  }
-});
 
 // --- WEATHER LAYERS ---
 
@@ -2349,118 +2194,15 @@ app.get('/api/weather/gfs', async (req: express.Request, res: express.Response) 
 // ═══════════════════════════════════════════════════════════════════
 
 // ── 1. MGRS Coordinate Conversion ───────────────────────────────
-app.get('/api/mgrs', (req: express.Request, res: express.Response) => {
-  try {
-    const { lat, lon, mgrs: mgrsStr, precision } = req.query;
-    if (lat && lon) {
-      const latNum = parseFloat(lat as string);
-      const lonNum = parseFloat(lon as string);
-      const prec = parseInt(precision as string) || 5;
-      const result = latLonToMgrs(latNum, lonNum, prec);
-      if (!result) return res.status(400).json({ error: 'Invalid lat/lon coordinates' });
-      return res.json(result);
-    }
-    if (mgrsStr) {
-      const result = mgrsToLatLon(mgrsStr as string);
-      if (!result) return res.status(400).json({ error: 'Invalid MGRS string' });
-      return res.json(result);
-    }
-    return res.json({ precisionLevels: getPrecisionLevels(), usage: 'Provide lat+lon to convert to MGRS, or mgrs to convert to lat/lon' });
-  } catch (e) { res.status(500).json({ error: String(e) }); }
-});
 
 // ── 2. OpenAQ Global Air Quality ─────────────────────────────────
-app.get('/api/openaq', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(req.query.lat as string);
-    const lon = parseFloat(req.query.lon as string);
-    const radius = parseInt(req.query.radius as string) || 25000;
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: 'lat and lon required' });
-    const cacheKey = `openaq_${lat.toFixed(2)}_${lon.toFixed(2)}_${radius}`;
-    const hit = cache.get(cacheKey);
-    if (hit) return res.json(hit);
-    const results = await getAirQualityNearby(lat, lon, radius);
-    const summary = parseForSentinel(results);
-    const payload = { source: 'OpenAQ', location: { lat, lon }, radiusMeters: radius, results, summary, updatedAt: Date.now() };
-    cache.set(cacheKey, payload, 1800);
-    res.json(payload);
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
 // ── 3. NDBC Ocean Buoys ──────────────────────────────────────────
-app.get('/api/ndbc/stations', (_req: express.Request, res: express.Response) => {
-  try { res.json({ stations: getStations(), count: getStations().length, source: 'NOAA NDBC' }); }
-  catch (e) { res.status(500).json({ error: String(e) }); }
-});
-app.get('/api/ndbc/nearby', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(req.query.lat as string);
-    const lon = parseFloat(req.query.lon as string);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: 'lat and lon required' });
-    const result = await getConditionsNearby(lat, lon);
-    res.json({ ...result, source: 'NOAA NDBC' });
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
-app.get('/api/ndbc/:stationId', async (req: express.Request, res: express.Response) => {
-  try {
-    const stationId = req.params.stationId;
-    const dataType = (req.query.type as string) || 'stdmet';
-    const cacheKey = `ndbc_${stationId}_${dataType}`;
-    const hit = cache.get(cacheKey);
-    if (hit) return res.json(hit);
-    const readings = await fetchStationData(stationId, dataType);
-    const payload = { stationId, readings, count: readings.length, source: 'NOAA NDBC', updatedAt: Date.now() };
-    cache.set(cacheKey, payload, 300);
-    res.json(payload);
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
 // ── 4. USGS ShakeMap ─────────────────────────────────────────────
-app.get('/api/shakemap/recent', async (req: express.Request, res: express.Response) => {
-  try {
-    const minMag = parseFloat(req.query.minMag as string) || 4.5;
-    const limit = parseInt(req.query.limit as string) || 20;
-    const cacheKey = `shakemap_recent_${minMag}_${limit}`;
-    const hit = cache.get(cacheKey);
-    if (hit) return res.json(hit);
-    const events = await fetchRecentShakeMaps(minMag, limit);
-    const summary = shakeMapFormatForSentinel(events);
-    const payload = { events, summary, count: events.length, source: 'USGS ShakeMap', updatedAt: Date.now() };
-    cache.set(cacheKey, payload, 300);
-    res.json(payload);
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
-app.get('/api/shakemap/:eventId', async (req: express.Request, res: express.Response) => {
-  try {
-    const { event, stations } = await fetchShakeMapDetail(req.params.eventId);
-    if (!event) return res.status(404).json({ error: 'Event not found' });
-    res.json({ event, stations, mmiDescription: event.mmi ? getMmiDescription(event.mmi) : undefined, mmiColor: event.mmi ? getMmiColor(event.mmi) : undefined, pagerDescription: getPagerDescription(event.alert), source: 'USGS ShakeMap' });
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
 // ── 5. NOAA SPC Convective Outlooks ──────────────────────────────
-app.get('/api/spc/outlook', async (req: express.Request, res: express.Response) => {
-  try {
-    const day = parseInt(req.query.day as string) || 1;
-    const cacheKey = `spc_outlook_day${day}`;
-    const hit = cache.get(cacheKey);
-    if (hit) return res.json(hit);
-    const outlook = await fetchDayOutlook(day);
-    const payload = { day, outlook, source: 'NOAA Storm Prediction Center', updatedAt: Date.now() };
-    cache.set(cacheKey, payload, 600);
-    res.json(payload);
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
-app.get('/api/spc/risk', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(req.query.lat as string);
-    const lon = parseFloat(req.query.lon as string);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: 'lat and lon required' });
-    const risk = await getRiskForLocation(lat, lon);
-    res.json({ lat, lon, risk, source: 'NOAA Storm Prediction Center' });
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
 // ═══════════════════════════════════════════════════════════════════
 // NEW TIER 1 & 2 API ROUTES
@@ -2537,32 +2279,7 @@ app.get('/api/stac/collections', async (_req: express.Request, res: express.Resp
 });
 
 // ── GeoParquet Conversion ──
-app.post('/api/geoParquet/convert', async (req: express.Request, res: express.Response) => {
-  try {
-    const { geojson, format } = req.body;
-    if (!geojson?.features) return res.status(400).json({ error: 'GeoJSON FeatureCollection required' });
-    if (format === 'csv') {
-      res.setHeader('Content-Type', 'text/csv');
-      res.send(geojsonToCsv(geojson));
-    } else {
-      res.json(geojsonToStreamingJson(geojson));
-    }
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
-app.post('/api/geoParquet/estimate', async (req: express.Request, res: express.Response) => {
-  try {
-    const { geojson } = req.body;
-    if (!geojson?.features) return res.status(400).json({ error: 'GeoJSON FeatureCollection required' });
-    const estimate = estimateParquetSize(geojson);
-    const metadata = getGeoParquetMetadata(geojson);
-    res.json({ estimate, metadata });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── GUARDIAN Ionospheric Monitoring ──
 app.get('/api/guardian/anomalies', async (req: express.Request, res: express.Response) => {
@@ -2589,125 +2306,24 @@ app.get('/api/guardian/conditions', async (req: express.Request, res: express.Re
 });
 
 // ── CMEMS Ocean Conditions ──
-app.get('/api/cmems/ocean', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const conditions = await getOceanConditions(lat, lon);
-    res.json(conditions);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── WAVEWATCH III Wave Forecasts ──
-app.get('/api/wavewatch/forecast', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    const hours = parseInt(String(req.query.hours || '24'), 10);
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const forecasts = await getWaveForecast(lat, lon, Math.min(hours, 180));
-    res.json({ forecasts, source: 'WAVEWATCH III' });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
-app.get('/api/wavewatch/warnings', async (_req: express.Request, res: express.Response) => {
-  try {
-    const warnings = await getWaveWarnings();
-    res.json({ warnings, count: warnings.length });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 import { getFloodConditions, getFloodAlerts, estimateInundation } from './utils/floodInundation';
 
 // ── USGS Flood Inundation ──
-app.get('/api/flood/conditions', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    const radius = parseInt(String(req.query.radius || '50'), 10);
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const gauges = await getFloodConditions(lat, lon, radius);
-    const inundations = gauges.filter((g) => g.status !== 'normal').map(estimateInundation);
-    res.json({ gauges, inundations, source: 'USGS Water Services' });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
-app.get('/api/flood/alerts', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const alerts = await getFloodAlerts(lat, lon);
-    res.json({ alerts, count: alerts.length, source: 'NWS Alerts API' });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 import { getHistoricalDaily, calculateClimateStats, detectExtremes } from './utils/era5';
 import { getCoralReefStatus, getActiveBleachingAlerts, getSstData } from './utils/coralReefWatch';
 import { initObservability, traceAsync, recordMetric, incrementCounter, getRecentTraces, getMetricsSummary } from './observability/openTelemetry';
 
 // ── ERA5 Climate Reanalysis ──
-app.get('/api/era5/historical', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    const start = String(req.query.start || '');
-    const end = String(req.query.end || '');
-    if (!isFinite(lat) || !isFinite(lon) || !start || !end) return res.status(400).json({ error: 'lat, lon, start, end required' });
-    const data = await getHistoricalDaily(lat, lon, start, end);
-    const stats = calculateClimateStats(data, `${start} to ${end}`);
-    const extremes = detectExtremes(data);
-    res.json({ data, stats, extremes, source: 'ERA5 via Open-Meteo' });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── NOAA Coral Reef Watch ──
-app.get('/api/crw/status', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const status = await getCoralReefStatus(lat, lon);
-    res.json({ status, source: 'NOAA Coral Reef Watch' });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
-app.get('/api/crw/alerts', async (_req: express.Request, res: express.Response) => {
-  try {
-    const alerts = await getActiveBleachingAlerts();
-    res.json({ alerts, count: alerts.length, source: 'NOAA Coral Reef Watch' });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
-app.get('/api/crw/sst', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    const days = parseInt(String(req.query.days || '30'), 10);
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const sst = await getSstData(lat, lon, Math.min(days, 365));
-    res.json({ sst, count: sst.length, source: 'NOAA CRW / Open-Meteo' });
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── OpenTelemetry Observability ──
 app.get('/api/observability/traces', (_req: express.Request, res: express.Response) => {
@@ -2769,91 +2385,15 @@ app.get('/api/satclip/context', async (req: express.Request, res: express.Respon
 });
 
 // ── GeoGraphRAG ──
-app.get('/api/geographrag/context', async (req: express.Request, res: express.Response) => {
-  try {
-    const query = String(req.query.q || '');
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    const radius = parseFloat(String(req.query.radius || '100'));
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const context = await assembleContext(query, lat, lon, radius);
-    res.json(context);
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
-app.get('/api/geographrag/spatial', (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    const radius = parseFloat(String(req.query.radius || '100'));
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const entities = spatialQuery({ lat, lon, radiusKm: radius });
-    res.json({ entities, count: entities.length });
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
 // ── FlatGeobuf Streaming ──
-app.post('/api/flatgeobuf/stream', async (req: express.Request, res: express.Response) => {
-  try {
-    const { url, format, maxFeatures, bbox } = req.body || {};
-    if (!url) return res.status(400).json({ error: 'url required' });
-    const result = bbox
-      ? await streamWithBbox({ name: 'custom', url, format: format || 'geojson' }, bbox, maxFeatures || 500)
-      : await streamFeatures({ name: 'custom', url, format: format || 'geojson', maxFeatures });
-    res.json(result);
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
 // ── NASA OPERA Surface Water ──
-app.get('/api/opera/water', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    const start = String(req.query.start || '2024-01-01');
-    const end = String(req.query.end || new Date().toISOString().split('T')[0]);
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const timeSeries = await getWaterTimeSeries(lat, lon, start, end);
-    res.json(timeSeries);
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
-app.get('/api/opera/flood-watch', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    const name = String(req.query.name || 'water body');
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const watch = await getFloodWatch(lat, lon, name);
-    res.json(watch);
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
 // ── Landsat + Sentinel HLS ──
-app.get('/api/hls/scenes', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    const start = String(req.query.start || '2024-01-01');
-    const end = String(req.query.end || new Date().toISOString().split('T')[0]);
-    const cloudMax = req.query.cloudMax ? parseInt(String(req.query.cloudMax), 10) : undefined;
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const scenes = await searchHlsScenes({ lat, lon, startDate: start, endDate: end, cloudMax });
-    res.json({ scenes, count: scenes.length });
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
-app.get('/api/hls/timeseries', async (req: express.Request, res: express.Response) => {
-  try {
-    const lat = parseFloat(String(req.query.lat));
-    const lon = parseFloat(String(req.query.lon));
-    const start = String(req.query.start || '2024-01-01');
-    const end = String(req.query.end || new Date().toISOString().split('T')[0]);
-    const index = String(req.query.index || 'NDVI') as 'NDVI' | 'NDWI' | 'NBR' | 'EVI';
-    if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
-    const timeSeries = await getTimeSeries(lat, lon, start, end, index);
-    res.json(timeSeries);
-  } catch (e) { res.status(502).json({ error: String(e) }); }
-});
 
 // ═══════════════════════════════════════════════════════════════════
 // END TIER 1 QUICK WINS
@@ -2893,23 +2433,6 @@ app.get('/api/weather/nhc', async (req: express.Request, res: express.Response) 
 });
 
 // IBTrACS - global tropical cyclone archive
-app.get('/api/weather/ibtracs', async (_req: express.Request, res: express.Response) => {
-  try {
-    const hit = cache.get('ibtracs');
-    if (hit) { res.json(hit); return; }
-    const resp = await fetch('https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r00/access/csv/ibtracs.NA.list.v04r00.csv', { signal: AbortSignal.timeout(60000) });
-    if (!resp.ok) throw new Error(`ibtracs upstream ${resp.status}`);
-    const csvText = await resp.text();
-    const parsed = papaparse.parse(csvText, { header: true, skipEmptyLines: true });
-    const storms = (parsed.data || []).filter((r: any) => r.ISO_TIME && r.LAT && r.LON);
-    const result = { storms, total: storms.length };
-    cache.set('ibtracs', result, 86400);
-    res.json(result);
-  } catch (e) {
-    logger.warn({ err: e }, 'IBTrACS cyclone fetch failed');
-    res.json({ source: 'Natural Earth', totalPopulation: 0, densityPerKm2: 0, cityCount: 0, largestCities: [], note: 'Population data temporarily unavailable' });
-  }
-});
 
 // US Drought Monitor (NCEI GeoJSON)
 app.get('/api/weather/drought', async (_req: express.Request, res: express.Response) => {
@@ -2967,74 +2490,6 @@ app.get('/api/weather/climate-indices', async (_req: express.Request, res: expre
 });
 
 // Weather Radar Status (NEXRAD sites) — real-time from NWS API
-app.get('/api/weather/radar', async (_req: express.Request, res: express.Response) => {
-  const cacheKey = 'weather_radar_sites';
-  const hit = cache.get(cacheKey);
-  if (hit) { res.json(hit); return; }
-  try {
-    const resp = await fetch('https://api.weather.gov/radar/stations', { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Terranoetis/1.0' } });
-    if (!resp.ok) throw new Error(`NWS radar stations ${resp.status}`);
-    const body = await resp.json() as any;
-    const sites = await Promise.all((body.features || []).map(async (f: any) => {
-      const id = f.properties?.id || '';
-      // Fetch per-station details for latency/RDA data
-      let rda = null;
-      try {
-        const detailResp = await fetch(`https://api.weather.gov/radar/stations/${id}`, { signal: AbortSignal.timeout(5000), headers: { 'User-Agent': 'Terranoetis/1.0' } });
-        if (detailResp.ok) {
-          const detail = await detailResp.json() as any;
-          const p = detail.properties || {};
-          rda = p.rda?.properties ? {
-            mode: p.rda.properties.mode || '',
-            vcp: p.rda.properties.volumeCoveragePattern || '',
-            alarmSummary: p.rda.properties.alarmSummary || '',
-            generatorState: p.rda.properties.generatorState || '',
-            superResolutionStatus: p.rda.properties.superResolutionStatus || '',
-            buildNumber: p.rda.properties.buildNumber || '',
-            controlStatus: p.rda.properties.controlStatus || '',
-          } : null;
-        }
-      } catch (e) { logger.warn({ err: e }, 'NWS station detail failed'); }
-      return {
-        id,
-        name: f.properties?.name || '',
-        stationType: f.properties?.stationType || '',
-        lat: f.geometry?.coordinates?.[1] ?? 0,
-        lon: f.geometry?.coordinates?.[0] ?? 0,
-        elevation: f.properties?.elevation?.value ?? 0,
-        timeZone: f.properties?.timeZone || '',
-        rda,
-      };
-    }));
-    // Filter to WSR-88D only and limit to ~200
-    const filtered = sites.filter((s: any) => s.stationType === 'WSR-88D' && s.lat !== 0).slice(0, 200);
-    cache.set(cacheKey, filtered, 3600);
-    res.json(filtered);
-  } catch (e) {
-    // Fallback to hardcoded core sites if NWS API fails
-    const fallback = [
-      { id: 'KTLX', name: 'Oklahoma City', lat: 35.3334, lon: -97.2778, stationType: 'WSR-88D', elevation: 369.7, timeZone: 'GMT', rda: { mode: 'Operational', vcp: 'R212', alarmSummary: 'No Alarms', generatorState: 'Utility PWR Available', superResolutionStatus: 'Enabled', buildNumber: 24, controlStatus: 'RPG (Remote) Only' } },
-      { id: 'KSHV', name: 'Shreveport', lat: 32.4505, lon: -93.8412, stationType: 'WSR-88D', elevation: 82.3, timeZone: 'GMT', rda: null },
-      { id: 'KFWS', name: 'Dallas/Fort Worth', lat: 32.5730, lon: -97.3031, stationType: 'WSR-88D', elevation: 212.5, timeZone: 'GMT', rda: null },
-      { id: 'KHTX', name: 'Huntsville', lat: 34.9310, lon: -86.0836, stationType: 'WSR-88D', elevation: 357.2, timeZone: 'GMT', rda: null },
-      { id: 'KLCH', name: 'Lake Charles', lat: 30.1254, lon: -93.2161, stationType: 'WSR-88D', elevation: 4.0, timeZone: 'GMT', rda: null },
-      { id: 'KAMX', name: 'Miami', lat: 25.6111, lon: -80.4127, stationType: 'WSR-88D', elevation: 4.0, timeZone: 'GMT', rda: null },
-      { id: 'KTBW', name: 'Tampa Bay', lat: 27.7055, lon: -82.4018, stationType: 'WSR-88D', elevation: 13.1, timeZone: 'GMT', rda: null },
-      { id: 'KPBZ', name: 'Pittsburgh', lat: 40.5318, lon: -80.2183, stationType: 'WSR-88D', elevation: 362.7, timeZone: 'GMT', rda: null },
-      { id: 'KICT', name: 'Wichita', lat: 37.6041, lon: -97.4231, stationType: 'WSR-88D', elevation: 406.0, timeZone: 'GMT', rda: null },
-      { id: 'KDAX', name: 'Sacramento', lat: 38.7010, lon: -121.6780, stationType: 'WSR-88D', elevation: 9.0, timeZone: 'GMT', rda: null },
-      { id: 'KBBX', name: 'Beale AFB', lat: 39.4960, lon: -121.6320, stationType: 'WSR-88D', elevation: 34.0, timeZone: 'GMT', rda: null },
-      { id: 'KNQA', name: 'Memphis', lat: 35.3447, lon: -89.8734, stationType: 'WSR-88D', elevation: 86.0, timeZone: 'GMT', rda: null },
-      { id: 'KIND', name: 'Indianapolis', lat: 39.7075, lon: -86.2803, stationType: 'WSR-88D', elevation: 241.0, timeZone: 'GMT', rda: null },
-      { id: 'KLOT', name: 'Chicago', lat: 41.6044, lon: -88.0844, stationType: 'WSR-88D', elevation: 202.0, timeZone: 'GMT', rda: null },
-      { id: 'KBUF', name: 'Buffalo', lat: 42.9483, lon: -78.7372, stationType: 'WSR-88D', elevation: 215.0, timeZone: 'GMT', rda: null },
-      { id: 'KDOX', name: 'Dover', lat: 38.8258, lon: -75.4400, stationType: 'WSR-88D', elevation: 14.0, timeZone: 'GMT', rda: null },
-      { id: 'TJUA', name: 'San Juan', lat: 18.1156, lon: -66.0780, stationType: 'WSR-88D', elevation: 842.0, timeZone: 'GMT', rda: null },
-    ];
-    cache.set(cacheKey, fallback, 86400);
-    res.json(fallback);
-  }
-});
 
 app.get('/api/weather/alerts', async (_req: express.Request, res: express.Response) => {
   try {
@@ -4320,50 +3775,9 @@ app.get('/api/submarine-cables', async (_req: express.Request, res: express.Resp
 });
 
 // SatNOGS DB — satellite transmitter frequencies
-app.get('/api/satnogs/transmitters', async (_req: express.Request, res: express.Response) => {
-  try {
-    const cacheKey = 'satnogs_transmitters';
-    const cachedData = cache.get(cacheKey);
-    if (cachedData) {
-      res.json(cachedData);
-      return;
-    }
-    const resp = await fetch('https://db.satnogs.org/api/transmitters/', { signal: AbortSignal.timeout(30000) });
-    if (!resp.ok) throw new Error(`SatNOGS error ${resp.status}`);
-    const data = await resp.json();
-    cache.set(cacheKey, data, 3600);
-    res.json(data);
-  } catch (e) {
-    logger.error({ err: e }, 'Failed to fetch SatNOGS transmitters');
-    res.json([]);
-  }
-});
 
 // UCS Satellite Database — satellite metadata served from static JSON file under public/data/
 const UCS_JSON_PATH = path.join(__dirname, '..', 'public', 'data', 'ucs-satellites.json');
-app.get('/api/ucs-satellites', async (_req: express.Request, res: express.Response) => {
-  try {
-    const cacheKey = 'ucs_satellites';
-    const cachedData = cache.get(cacheKey);
-    if (cachedData) {
-      res.json(cachedData);
-      return;
-    }
-    if (fs.existsSync(UCS_JSON_PATH)) {
-      const raw = fs.readFileSync(UCS_JSON_PATH, 'utf-8');
-      const records = JSON.parse(raw);
-      cache.set(cacheKey, records, 86400);
-      res.json(records);
-    } else {
-      logger.warn('UCS satellite JSON not found at %s — returning empty dataset', UCS_JSON_PATH);
-      cache.set(cacheKey, [], 3600);
-      res.json([]);
-    }
-  } catch (e) {
-    logger.error({ err: e }, 'Failed to serve UCS satellite data');
-    res.json([]);
-  }
-});
 
 // 6. Global Carbon Footprints Electricity Grid
 app.get('/api/electricity-grid', async (req: express.Request, res: express.Response) => {
@@ -4523,34 +3937,6 @@ app.get('/api/animal-migrations', async (_req: express.Request, res: express.Res
   }
 });
 
-// ── OpenAQ (Air Quality) ─────────────────────────────────────────
-app.get('/api/openaq', async (req: express.Request, res: express.Response) => {
-  try {
-    const apiKey = process.env.OPENAQ_API_KEY;
-    if (!apiKey) return res.status(503).json({ error: 'OPENAQ_API_KEY not configured' });
-
-    const { city, country, limit = '100', coordinates, radius = '25000' } = req.query;
-    const params = new URLSearchParams({ limit: String(limit), order_by: 'datetime', sort: 'desc' });
-    if (city) params.set('city', String(city));
-    if (country) params.set('country', String(country));
-    if (coordinates) params.set('coordinates', String(coordinates));
-    if (radius) params.set('radius', String(radius));
-
-    const cacheKey = `openaq_${params.toString()}`;
-    const cached = cache.get(cacheKey);
-    if (cached) return res.json(cached);
-
-    const url = `https://api.openaq.org/v3/locations?${params}`;
-    const resp = await fetch(url, { headers: { 'X-API-Key': apiKey } });
-    if (!resp.ok) return res.status(resp.status).json({ error: `OpenAQ ${resp.status}` });
-    const data = await resp.json();
-    cache.set(cacheKey, data, 300);
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
-
 // ── WAQI (World Air Quality Index) ──────────────────────────────
 app.get('/api/waqi', async (req: express.Request, res: express.Response) => {
   try {
@@ -4602,35 +3988,6 @@ app.get('/api/reliefweb', async (req: express.Request, res: express.Response) =>
 });
 
 // ── Windy (Weather Forecast) ────────────────────────────────────
-app.get('/api/windy', async (req: express.Request, res: express.Response) => {
-  try {
-    const apiKey = process.env.WINDY_API_KEY;
-    if (!apiKey) return res.status(503).json({ error: 'WINDY_API_KEY not configured' });
-
-    const { lat, lon, model = 'gfs', parameters = 'temp,rh,wspd' } = req.query;
-    if (!lat || !lon) return res.status(400).json({ error: 'lat and lon required' });
-
-    const cacheKey = `windy_${lat}_${lon}_${model}`;
-    const cached = cache.get(cacheKey);
-    if (cached) return res.json(cached);
-
-    const resp = await fetch('https://api.windy.com/api/point-forecast/v2', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        lat: Number(lat), lon: Number(lon), model,
-        parameters: String(parameters).split(','),
-        key: apiKey,
-      }),
-    });
-    if (!resp.ok) return res.status(resp.status).json({ error: `Windy ${resp.status}` });
-    const data = await resp.json();
-    cache.set(cacheKey, data, 1800);
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── Cloudflare Radar (Internet Traffic) ─────────────────────────
 app.get('/api/cloudflare-radar', async (req: express.Request, res: express.Response) => {
@@ -4891,48 +4248,8 @@ app.get('/api/brave-search', async (req: express.Request, res: express.Response)
 });
 
 // ── Telegram Bot (Notifications) ────────────────────────────────
-app.post('/api/telegram/send', async (req: express.Request, res: express.Response) => {
-  try {
-    const apiKey = process.env.TELEGRAM_BOT_TOKEN;
-    if (!apiKey) return res.status(503).json({ error: 'TELEGRAM_BOT_TOKEN not configured' });
-
-    const { chat_id, text, parse_mode = 'HTML' } = req.body;
-    if (!chat_id || !text) return res.status(400).json({ error: 'chat_id and text required' });
-
-    const resp = await fetch(`https://api.telegram.org/bot${apiKey}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id, text, parse_mode }),
-    });
-    if (!resp.ok) return res.status(resp.status).json({ error: `Telegram ${resp.status}` });
-    const data = await resp.json();
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── Resend (Email Notifications) ────────────────────────────────
-app.post('/api/resend/send', async (req: express.Request, res: express.Response) => {
-  try {
-    const apiKey = process.env.RESEND_API_KEY;
-    if (!apiKey) return res.status(503).json({ error: 'RESEND_API_KEY not configured' });
-
-    const { from, to, subject, html } = req.body;
-    if (!from || !to || !subject || !html) return res.status(400).json({ error: 'from, to, subject, html required' });
-
-    const resp = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({ from, to, subject, html }),
-    });
-    if (!resp.ok) return res.status(resp.status).json({ error: `Resend ${resp.status}` });
-    const data = await resp.json();
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── NewsAPI (News Aggregation) ───────────────────────────────────
 app.get('/api/newsapi', async (req: express.Request, res: express.Response) => {
@@ -5044,53 +4361,8 @@ app.get('/api/sentiment/news', async (req: express.Request, res: express.Respons
 });
 
 // ── Groq (Fast AI Inference) ────────────────────────────────────
-app.post('/api/groq', async (req: express.Request, res: express.Response) => {
-  try {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) return res.status(503).json({ error: 'GROQ_API_KEY not configured' });
-
-    const { model = 'llama3-8b-8192', messages, temperature = 0.7, max_tokens = 1024 } = req.body;
-    if (!messages) return res.status(400).json({ error: 'messages required' });
-
-    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, messages, temperature, max_tokens }),
-    });
-    if (!resp.ok) return res.status(resp.status).json({ error: `Groq ${resp.status}` });
-    const data = await resp.json();
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── OpenRouter (Multi-Model AI) ──────────────────────────────────
-app.post('/api/openrouter', async (req: express.Request, res: express.Response) => {
-  try {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
-
-    const { model = 'openai/gpt-3.5-turbo', messages, temperature = 0.7, max_tokens = 1024 } = req.body;
-    if (!messages) return res.status(400).json({ error: 'messages required' });
-
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': 'https://terranoetis.app',
-        'X-Title': 'Terranoetis',
-      },
-      body: JSON.stringify({ model, messages, temperature, max_tokens }),
-    });
-    if (!resp.ok) return res.status(resp.status).json({ error: `OpenRouter ${resp.status}` });
-    const data = await resp.json();
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── IMF (International Monetary Fund) ────────────────────────────
 app.get('/api/imf', async (req: express.Request, res: express.Response) => {
@@ -5211,16 +4483,6 @@ app.post('/api/firecrawl', async (req: express.Request, res: express.Response) =
 });
 
 // 10. Combined Airspaces GeoJSON (from OpenAIP GCS exports)
-app.post('/api/ai/gemini', async (req: express.Request, res: express.Response) => {
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-  try {
-    const text = await omninet.generateText(prompt, { temperature: 0.2, maxTokens: 2048 });
-    res.json({ candidates: [{ content: { parts: [{ text }] } }] });
-  } catch (e) {
-    res.status(502).json({ error: 'AI provider unavailable', detail: (e as Error).message });
-  }
-});
 
 // ── UCDP Armed Conflict Events ──────────────────────────────────
 app.get('/api/ucdp', async (req: express.Request, res: express.Response) => {
@@ -5367,74 +4629,12 @@ app.get('/api/space-weather/donki', async (req: express.Request, res: express.Re
 });
 
 // ── GPS Jamming (GPSJam) ────────────────────────────────────────
-app.get('/api/gpsjam', async (req: express.Request, res: express.Response) => {
-  try {
-    const { days = '7' } = req.query;
-
-    const cacheKey = `gpsjam_${days}`;
-    const cached = cache.get(cacheKey);
-    if (cached) return res.json(cached);
-
-    const resp = await fetch(`https://gpsjam.org/api/data?days=${days}`);
-    if (!resp.ok) return res.status(resp.status).json({ error: `GPSJam ${resp.status}` });
-    const data = await resp.json();
-    cache.set(cacheKey, data, 1800);
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── NOAA Climate Anomalies ──────────────────────────────────────
-app.get('/api/climate/anomalies', async (_req: express.Request, res: express.Response) => {
-  try {
-    const cacheKey = 'climate_anomalies_global';
-    const cached = cache.get(cacheKey);
-    if (cached) return res.json(cached);
-
-    const resp = await fetch('https://www.ncei.noaa.gov/cag/global/time-series/globe/land_ocean/12/10/1880-2024.json');
-    if (!resp.ok) return res.status(resp.status).json({ error: `NOAA ${resp.status}` });
-    const data = await resp.json();
-    cache.set(cacheKey, data, 86400);
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── NOAA CO2 Monitoring ─────────────────────────────────────────
-app.get('/api/climate/co2', async (_req: express.Request, res: express.Response) => {
-  try {
-    const cacheKey = 'climate_co2_mlo';
-    const cached = cache.get(cacheKey);
-    if (cached) return res.json(cached);
-
-    const resp = await fetch('https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_mlo.json');
-    if (!resp.ok) return res.status(resp.status).json({ error: `NOAA CO2 ${resp.status}` });
-    const text = await resp.text();
-    cache.set(cacheKey, text, 86400);
-    res.type('json').send(text);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── NSIDC Sea Ice Extent ────────────────────────────────────────
-app.get('/api/climate/sea-ice', async (_req: express.Request, res: express.Response) => {
-  try {
-    const cacheKey = 'climate_sea_ice_extent';
-    const cached = cache.get(cacheKey);
-    if (cached) return res.json(cached);
-
-    const resp = await fetch('https://noaadata.apps.nsidc.org/DATASETS/NOAA/G02135/north/daily/data/seaice_extent_north.json');
-    if (!resp.ok) return res.status(resp.status).json({ error: `NSIDC ${resp.status}` });
-    const data = await resp.json();
-    cache.set(cacheKey, data, 86400);
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── UNHCR Displacement Data ─────────────────────────────────────
 app.get('/api/displacement', async (req: express.Request, res: express.Response) => {
@@ -5503,27 +4703,6 @@ app.get('/api/gold', async (_req: express.Request, res: express.Response) => {
 });
 
 // ── WHO Air Quality ─────────────────────────────────────────────
-app.get('/api/who/air-quality', async (req: express.Request, res: express.Response) => {
-  try {
-    const { country } = req.query;
-
-    const cacheKey = `who_aq_${country || 'global'}`;
-    const cached = cache.get(cacheKey);
-    if (cached) return res.json(cached);
-
-    const url = country
-      ? `https://apps.who.int/gho/observatory/api/whs/indicators/6930/data/${country}?format=json`
-      : 'https://apps.who.int/gho/observatory/api/whs/indicators/6930/data?format=json&limit=100';
-
-    const resp = await fetch(url);
-    if (!resp.ok) return res.status(resp.status).json({ error: `WHO ${resp.status}` });
-    const data = await resp.json();
-    cache.set(cacheKey, data, 3600);
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
 
 // ── Omninet Router API ───────────────────────────────────────────
 
@@ -7672,21 +6851,8 @@ app.post('/api/agent/pipeline', authGuard, async (req: express.Request, res: exp
 });
 
 // Intent classification — runs in <1ms on server, returns action plan
-app.get('/api/agent/intent', (req: express.Request, res: express.Response) => {
-  const text = (req.query.q as string) || '';
-  const result = IntentRouter.classify(text);
-  res.json(result);
-});
 
 // Materialized view query — instant pre-computed data
-app.get('/api/agent/query', (req: express.Request, res: express.Response) => {
-  const lat = parseFloat(req.query.lat as string);
-  const lon = parseFloat(req.query.lon as string);
-  const radius = parseFloat((req.query.radius as string) || '200');
-  if (!isFinite(lat) || !isFinite(lon)) return res.status(400).json({ error: 'Invalid lat/lon' });
-  const result = materializedViews.query(lat, lon, radius);
-  res.json(result);
-});
 
 
 
@@ -8816,14 +7982,6 @@ app.get('/api/agent/context', async (req: express.Request, res: express.Response
 // PHASE 7.1: MCP Server — Model Context Protocol (JSON-RPC over HTTP)
 // ═══════════════════════════════════════════════════════════════════════
 
-app.post('/api/mcp', apiTokenGuard, async (req: express.Request, res: express.Response) => {
-  try {
-    const result = await mcpServer.handle(req.body);
-    res.json(result);
-  } catch (e) {
-    res.json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: String(e) } });
-  }
-});
 
 // ═══════════════════════════════════════════════════════════════════════
 // PHASE 7.2: Plugin Ecosystem — dynamic tools & data sources
@@ -8917,17 +8075,8 @@ app.delete('/api/agent/cache', (_req: express.Request, res: express.Response) =>
 // PHASE 9: Cost Optimization
 // ═══════════════════════════════════════════════════════════════════════
 
-app.get('/api/agent/cost', (_req: express.Request, res: express.Response) => {
-  res.json(costTracker.getStats());
-});
 
-app.get('/api/agent/cache/stats', (_req: express.Request, res: express.Response) => {
-  res.json(enhancedCache.getStats());
-});
 
-app.get('/api/agent/models', (_req: express.Request, res: express.Response) => {
-  res.json({ tiers: ModelRouter.listTiers() });
-});
 
 // ═══════════════════════════════════════════════════════════════════════
 // PHASE 10: Self-Improving System
@@ -8964,9 +8113,6 @@ app.get('/api/agent/analytics', (_req: express.Request, res: express.Response) =
   res.json(analytics);
 });
 
-app.get('/api/agent/tuning', (_req: express.Request, res: express.Response) => {
-  res.json(selfImprover.getParams());
-});
 
 // ── Memory API ───────────────────────────────────────────────────
 
@@ -10163,25 +9309,7 @@ app.get('/api/ml/variants', (_req: express.Request, res: express.Response) => {
 // COGNITION: Reasoning trace retrieval & review
 // ═══════════════════════════════════════════════════════════════════════
 
-app.get('/api/cognition/trace/:id', (req: express.Request, res: express.Response) => {
-  try {
-    const trace = cognitiveAgent.getTrace(req.params.id);
-    if (!trace) return res.status(404).json({ error: 'Trace not found' });
-    res.json(trace);
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
 
-app.get('/api/cognition/pending-review', (req: express.Request, res: express.Response) => {
-  try {
-    const limit = parseInt(req.query.limit as string) || 20;
-    const traces = cognitiveAgent.getPendingReview(limit);
-    res.json({ traces });
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
 
 // ═══════════════════════════════════════════════════════════════════════
 // TOOLS: Chain execution

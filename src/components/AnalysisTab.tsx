@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   BarChart3, TrendingUp, RefreshCw, ChevronDown, ChevronRight, Activity, Globe, Info
 } from 'lucide-react';
-import { DetailLineChart, CorrelationHeatmap } from './intelligence/ChartComponents';
+import { DetailLineChart, CorrelationHeatmap } from './ui/ChartComponents';
 
 /* ═════════════════════════════════════════════════════════════════
    TYPES

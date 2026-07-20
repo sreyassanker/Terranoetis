@@ -1,6 +1,6 @@
 import * as Cesium from 'cesium';
-import { GhostEntity } from './GhostEntity';
-import type { FutureTensorDomain } from './FutureTensor';
+import { GhostEntity } from './ghostEntity';
+import type { FutureTensorDomain } from './trajectoryPredictor';
 
 /**
  * GhostProtocol is the central manager for all GhostEntities in the TERRA UMBRA

@@ -7,10 +7,10 @@ import { computeStudyAreaBbox } from '@/rendering/studyArea';
 import type { Point3D, Scenario } from './types';
 import { SCENARIO_TYPE_LABELS } from './types';
 import Panel from '@/components/ui/Panel';
-import { DisasterType } from '@/scenario-editor/core/types';
-import type { EnvironmentSnapshot, ValidationReport, ValidationCheck } from '@/scenario-editor/core/types';
-import { EnvironmentAnalyzer } from '@/scenario-editor/environment/EnvironmentAnalyzer';
-import { ValidationEngine } from '@/scenario-editor/validation/ValidationEngine';
+import { DisasterType } from './analysis/core/types';
+import type { EnvironmentSnapshot, ValidationReport, ValidationCheck } from './analysis/core/types';
+import { EnvironmentAnalyzer } from './analysis/environment/EnvironmentAnalyzer';
+import { ValidationEngine } from './analysis/validation/ValidationEngine';
 
 interface ParameterDef {
   key: string;
