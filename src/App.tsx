@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -19,8 +19,8 @@ import {
   flyToStudyAreaTopDown, filterDataEntitiesByStudyArea, updateStudyAreaStyle,
   setStudyAreaActive, computeStudyAreaBbox, restoreHiddenEntities,
 } from '@/rendering/studyArea';
-import { addBaseImagery, applyTerrainProvider, crossfadeImagery } from '@/cesium/viewer.config';
-import { cinematicFlyTo, createEntityTracker, type TrackEntityType } from '@/cesium/camera.controller';
+import { addBaseImagery, applyTerrainProvider, crossfadeImagery } from '@/viewer/viewer.config';
+import { cinematicFlyTo, createEntityTracker, type TrackEntityType } from '@/viewer/camera.controller';
 import { addEarthquakeEntity, type UsgsFeature } from '@/rendering/earthquakes';
 import { loadTectonicPlates } from '@/rendering/tectonic';
 import { FlightDeadReckoning, altitudeBandColor, getPlaneIcon } from '@/rendering/flights';
@@ -43,14 +43,15 @@ import {
   addElectricityGridEntities,
   addAnimalMigrationEntities,
   getDebrisOrbitPositions
-} from '@/rendering/realDataLayers';
+} from '@/rendering/domainLayers';
 import { ForkPanel } from '@/components/ForkPanel';
 import { fetchAndStoreSatnogsData, getSatnogsForNorad, addSatnogsEntities } from '@/rendering/satnogs';
 import { fetchAndStoreUcsData, getUcsForNorad, addUcsEntities } from '@/rendering/ucsSatelliteDb';
 
-import { UncertaintyBadge, HumanOverrideBanner } from '@/components/explainability/index';
+import { HumanOverrideBanner } from '@/components/explainability/index';
+
 import { CognitiveDashboard, ToolWorkbench, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
-import { ApiVault } from '@/components/ui/api-vault';
+import { ApiVault } from '@/components/ui/ApiVault';
 import Panel from '@/components/ui/Panel';
 import ScenarioViewer from '@/components/scenarios/ScenarioViewer';
 import ScenarioEditor from '@/components/scenarios/ScenarioEditor';
@@ -59,6 +60,7 @@ import CinematicDirector from '@/components/scenarios/CinematicDirector';
 import SpatialSketching from '@/components/scenarios/SpatialSketching';
 import PerformanceMonitor from '@/components/PerformanceMonitor';
 import { DigitalTwinPanel } from '@/components/DigitalTwinPanel';
+import SatelliteImageryPanel from '@/components/ui/SatelliteImageryPanel';
 import { IntelligencePanel } from '@/components/IntelligencePanel';
 import { PrithviPanel } from '@/components/prithvi/PrithviPanel';
 import { SatelliteSearchPanel } from '@/components/prithvi/SatelliteSearchPanel';
@@ -69,12 +71,12 @@ import { IssTravelView } from '@/components/IssTravelView';
 import { FlightTravelView } from '@/components/FlightTravelView';
 import { CommandPalette } from '@/components/CommandPalette';
 import { MilitarySymbologyPanel } from '@/components/MilitarySymbologyPanel';
+import { AnalyticsWorkbench } from '@/components/AnalyticsWorkbench';
 import { MilitarySymbologyOverlay } from '@/rendering/militarySymbologyOverlay';
-import { createRenderScheduler } from '@/lib/renderScheduler';
+import { createRenderScheduler } from '@/lib/batchScheduler';
 import { createUnifiedTimer } from '@/lib/unifiedTimer'; // P0 perf: unified timer
-import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings } from '@/rendering/digitalTwinLayers';
+import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings } from '@/rendering/osmBuildings';
 import {
-  FlightDeadReckoning as AviationFlightDeadReckoning,
   addVolcanoEntities,
   addVaacAdvisoryEntities,
   addSo2Entities,
@@ -95,8 +97,8 @@ import {
   addRadarSiteEntities,
   addClimateIndicesEntities,
 } from '@/rendering/weather';
-import { renderLayer, fetchLayerData } from '@/rendering/genericLayers';
-import { LAYER_GROUPS, LAYER_CATEGORIES, LEGACY_DEFAULTS } from '@/config/layerConfig';
+import { renderLayer, fetchLayerData } from '@/rendering/layerRenderer';
+import { LAYER_GROUPS, LAYER_CATEGORIES, LEGACY_DEFAULTS } from '@/lib/layerConfig';
 import { listChats, getChat, saveChat, deleteChat, generateChatId, autoTitle, groupChatsByDate, type ChatSession, type ChatListItem, type ChatMessage } from '@/lib/chatStore';
 
 /* ═════════════════════════════════════════════════════════════════
@@ -1152,6 +1154,8 @@ export default function App() {
   const [showSearchPanel, setShowSearchPanel] = useState(false);
   const [showSatelliteTracker, setShowSatelliteTracker] = useState(false);
   const [showAviationTracker, setShowAviationTracker] = useState(false);
+  const [showSatelliteImagery, setShowSatelliteImagery] = useState(false);
+  const [showAnalyticsWorkbench, setShowAnalyticsWorkbench] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showMilitarySymbology, setShowMilitarySymbology] = useState(false);
   // CMD+K keyboard shortcut
@@ -1470,6 +1474,68 @@ export default function App() {
       console.error('[Surface] Render error:', (e as Error)?.message, (e as Error)?.stack);
     }
   }, [activeBbox]);
+
+  const toolResultEntityRef = useRef<Cesium.Entity | null>(null);
+  const _toolSurfacePrimitive = useRef<unknown>(null);
+
+  const handleToolResult = useCallback((toolId: number, label: string, lat: number, lon: number, value?: number) => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    if (toolResultEntityRef.current) {
+      viewer.entities.remove(toolResultEntityRef.current);
+    }
+    toolResultEntityRef.current = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat),
+      label: {
+        text: label,
+        font: 'bold 18px monospace',
+        fillColor: Cesium.Color.YELLOW,
+        backgroundColor: new Cesium.Color(0, 0, 0, 0.6),
+        showBackground: true,
+        pixelOffset: new Cesium.Cartesian2(0, -30),
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        outlineWidth: 2,
+        outlineColor: Cesium.Color.BLACK,
+        scale: 1.2,
+        eyeOffset: new Cesium.Cartesian3(0, 0, -100),
+      },
+      point: {
+        pixelSize: 12,
+        color: Cesium.Color.YELLOW.withAlpha(0.8),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+      },
+    });
+    const b = activeBbox;
+    if (!b || b.latMin >= b.latMax || b.lonMin >= b.lonMax || value == null) return;
+    const camAlt = viewer.camera.positionCartographic.height;
+    const { width, height } = getViewDependentResolution(camAlt, 100);
+    const nLat = Math.max(4, Math.floor(width / 10));
+    const nLon = Math.max(4, Math.floor(height / 10));
+    const pts: Array<{ lat: number; lon: number; value: number }> = [];
+    for (let i = 0; i < nLat; i++) {
+      for (let j = 0; j < nLon; j++) {
+        pts.push({
+          lat: b.latMin + (b.latMax - b.latMin) * i / (nLat - 1),
+          lon: b.lonMin + (b.lonMax - b.lonMin) * j / (nLon - 1),
+          value,
+        });
+      }
+    }
+    if (pts.length < 3) return;
+    const grid = interpolateIDW(pts, b, width, height);
+    showInterpSurface(viewer, grid, undefined, 0.6, true);
+  }, [activeBbox]);
+
+  const handleClearToolResult = useCallback(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    if (toolResultEntityRef.current) {
+      viewer.entities.remove(toolResultEntityRef.current);
+      toolResultEntityRef.current = null;
+    }
+    clearInterpSurface(viewer);
+  }, []);
 
   /* ── Memo ── */
   const groupedLayers = useMemo(() => {
@@ -8654,6 +8720,7 @@ export default function App() {
         <div className="stat-item"><div className="stat-dot" style={{background:'#8b5cf6'}}/><span className="stat-label">Intel</span><span className="stat-val">{intelFeedRef.current.length}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#FF8C00'}}/><span className="stat-label">Forks</span><span className="stat-val">{activeForkCount}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#14b8a6'}}/><span className="stat-val">{cameraLat && cameraLon ? `${cameraLat}°${cameraLatDir} ${cameraLon}°${cameraLonDir}` : '—'}</span></div>
+
         <button
           className={`btn-icon monitor-btn ${!monitorCollapsed ? 'active' : ''}`}
           onClick={() => setMonitorCollapsed(prev => !prev)}
@@ -8679,10 +8746,19 @@ export default function App() {
             { label: 'Pulse', icon: <Eye size={15} />, active: showIntelligencePanel, onClick: () => setShowIntelligencePanel(p => !p) },
             { label: 'Prithvi EO', icon: <Brain size={15} />, active: showPrithviPanel, onClick: () => setShowPrithviPanel(p => !p) },
             { label: 'EO Image Search', icon: <SearchIcon size={15} />, active: showSearchPanel, onClick: () => setShowSearchPanel(p => !p) },
-            { label: 'Satellite Tracker', icon: <Satellite size={15} />, active: showSatelliteTracker, onClick: () => setShowSatelliteTracker(p => !p) },
-            { label: 'Aviation Tracker', icon: <Plane size={15} />, active: showAviationTracker, onClick: () => setShowAviationTracker(p => !p) },
+    { label: 'Satellite Tracker', icon: <Satellite size={15} />, active: showSatelliteTracker, onClick: () => setShowSatelliteTracker(p => !p) },
+    { label: 'Satellite Imagery', icon: <Satellite size={15} />, active: showSatelliteImagery, onClick: () => setShowSatelliteImagery(p => !p) },
+    { label: 'Aviation Tracker', icon: <Plane size={15} />, active: showAviationTracker, onClick: () => setShowAviationTracker(p => !p) },
           ]}
         />
+        <button
+          className={`btn-icon monitor-btn ${showAnalyticsWorkbench ? 'active' : ''}`}
+          onClick={() => setShowAnalyticsWorkbench(p => !p)}
+          title="Analytics Workbench — 150 analytical models"
+          style={{ color: showAnalyticsWorkbench ? '#a78bfa' : undefined }}
+        >
+          <FlaskConical size={14} />
+        </button>
       </div>
 
       {/* Camera Controls — advanced zoom with smooth flyTo */}
@@ -8984,6 +9060,12 @@ export default function App() {
 
       {/* Aviation Tracker Panel */}
       {showAviationTracker && <AviationTrackerPanel onClose={() => setShowAviationTracker(false)} onTravelView={travelToFlight} />}
+
+      {/* Satellite Imagery Panel */}
+      <SatelliteImageryPanel viewer={viewerRef.current} show={showSatelliteImagery} onClose={() => setShowSatelliteImagery(false)} />
+
+      {/* Analytics Workbench Panel */}
+      <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} onToolResult={handleToolResult} onClearResult={handleClearToolResult} />
 
       {/* Military Symbology Panel */}
       {showMilitarySymbology && <MilitarySymbologyPanel onClose={() => setShowMilitarySymbology(false)} />}

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Brain, Eye, Zap, BookOpen, Puzzle, Moon, Wrench, Package, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Brain, Eye, Zap, BookOpen, Puzzle, Moon, Wrench, Package, Sparkles, BarChart3, Network, TrendingUp } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 
 interface HealthResponse {
@@ -122,15 +122,19 @@ export default function CognitiveDashboard({ onClose }: CognitiveDashboardProps)
   const [memoryTiers, setMemoryTiers] = useState<Record<string, number>>({});
   const [history, setHistory] = useState<number[]>(() => Array.from({ length: 30 }, () => 0));
   const [load, setLoad] = useState(0.3);
+  const [mlReport, setMlReport] = useState<{ predictions?: number; accuracy?: number; pending?: number } | null>(null);
+  const [kgStats, setKgStats] = useState<{ entities?: number; relations?: number } | null>(null);
 
   useEffect(() => {
     let mounted = true;
     const fetchMetrics = async () => {
       try {
-        const [healthRes, memRes, alertRes] = await Promise.allSettled([
+        const [healthRes, memRes, alertRes, mlRes, kgRes] = await Promise.allSettled([
           fetch('/api/health').then(r => r.ok ? r.json() : null),
           fetch('/api/memory/status').then(r => r.ok ? r.json() : null),
           fetch('/api/sentinel/alerts').then(r => r.ok ? r.json() : null),
+          fetch('/api/ml/predict/report').then(r => r.ok ? r.json() : null),
+          fetch('/api/ml/knowledge-graph/stats').then(r => r.ok ? r.json() : null),
         ]);
 
         if (!mounted) return;
@@ -170,6 +174,12 @@ export default function CognitiveDashboard({ onClose }: CognitiveDashboardProps)
         if (alerts && Array.isArray(alerts)) {
           setMetrics(prev => ({ ...prev, activeAlerts: alerts.length }));
         }
+
+        const mlData = mlRes.status === 'fulfilled' ? mlRes.value : null;
+        if (mlData) setMlReport(typeof mlData === 'object' && !Array.isArray(mlData) ? mlData : null);
+
+        const kgData = kgRes.status === 'fulfilled' ? kgRes.value : null;
+        if (kgData && typeof kgData === 'object' && !Array.isArray(kgData)) setKgStats(kgData as { entities?: number; relations?: number });
       } catch {
         // ignore fetch errors
       }
@@ -253,6 +263,39 @@ export default function CognitiveDashboard({ onClose }: CognitiveDashboardProps)
             <div style={{ padding: '8px 10px', fontSize: 10, color: 'var(--text-dim)' }}>Loading memory status...</div>
           )}
         </div>
+
+        {/* Predict & Analytics */}
+        {(mlReport || kgStats) && (
+          <div className="cockpit-card" style={{ padding: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', padding: '8px 10px 4px', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <BarChart3 size={12} /> Predict & Analytics
+            </div>
+            <div style={{ display: 'flex', gap: 8, padding: '6px 10px 10px' }}>
+              {mlReport && (
+                <div style={{ flex: 1, padding: '6px 8px', borderRadius: 4, background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)' }}>
+                  <div style={{ fontSize: 9, color: '#34d399', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <TrendingUp size={10} /> ML Predict
+                  </div>
+                  <div style={{ fontSize: 9, color: '#94a3b8' }}>
+                    {mlReport.predictions != null && <div>{mlReport.predictions} predictions</div>}
+                    {mlReport.accuracy != null && <div>accuracy: {(mlReport.accuracy * 100).toFixed(0)}%</div>}
+                  </div>
+                </div>
+              )}
+              {kgStats && (
+                <div style={{ flex: 1, padding: '6px 8px', borderRadius: 4, background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)' }}>
+                  <div style={{ fontSize: 9, color: '#818cf8', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <Network size={10} /> Knowledge Graph
+                  </div>
+                  <div style={{ fontSize: 9, color: '#94a3b8' }}>
+                    {kgStats.entities != null && <div>{kgStats.entities} entities</div>}
+                    {kgStats.relations != null && <div>{kgStats.relations} relations</div>}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Engine Status */}
         <div className="cockpit-card" style={{ padding: 0 }}>

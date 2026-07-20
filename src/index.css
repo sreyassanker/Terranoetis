@@ -964,6 +964,8 @@ p { text-align: justify; }
   }
 
   .statsbar.full-width { left: 0; }
+
+  .stat-item { flex-shrink: 0; }
   .statsbar::-webkit-scrollbar { display: none; }
 
   .stat-item {
@@ -3804,3 +3806,6 @@ p { text-align: justify; }
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+
+.spin { animation: spin 1s linear infinite; }

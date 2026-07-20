@@ -1,6 +1,6 @@
 import * as Cesium from 'cesium';
-import { FutureTensor } from './FutureTensor';
-import type { FutureTensorDomain } from './FutureTensor';
+import { FutureTensor } from './trajectoryPredictor';
+import type { FutureTensorDomain } from './trajectoryPredictor';
 
 /**
  * GhostEntity wraps a Cesium Entity with a FutureTensor for probabilistic

@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as Cesium from 'cesium';
 import * as satellite from 'satellite.js';
-import type { LayerCategory } from '@/config/layerConfig';
+import type { LayerCategory } from '@/lib/layerConfig';
 import type { GhostProtocol } from './ghostProtocol';
-import type { FutureTensorDomain } from './FutureTensor';
+import type { FutureTensorDomain } from './trajectoryPredictor';
 
 const MAX_ITEMS_PER_LAYER = 500;
 

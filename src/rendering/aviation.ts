@@ -1,7 +1,4 @@
 import * as Cesium from 'cesium';
-import { FlightDeadReckoning } from './flights';
-
-export { FlightDeadReckoning };
 
 interface VolcanoEntry {
   lat: number; lon: number; name?: string; status?: string;

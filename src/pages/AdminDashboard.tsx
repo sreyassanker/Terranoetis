@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getToken } from '../context/AuthContext';
-import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart } from 'lucide-react';
+import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart, Sparkles, Brain, CheckCircle, XCircle } from 'lucide-react';
 
-type Tab = 'metrics' | 'audit' | 'plugins' | 'health';
+type Tab = 'metrics' | 'audit' | 'plugins' | 'health' | 'evolution';
 
 interface HealthData {
   status: string;
@@ -42,6 +42,10 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [plugins, setPlugins] = useState<PluginRow[]>([]);
   const [healthColor, setHealthColor] = useState<string>('#22c55e');
+  const [evoStatus, setEvoStatus] = useState<{ active?: boolean; proposals?: number } | null>(null);
+  const [archProposals, setArchProposals] = useState<Array<Record<string, unknown>>>([]);
+  const [intentProposals, setIntentProposals] = useState<Array<Record<string, unknown>>>([]);
+  const [ecoProposals, setEcoProposals] = useState<Array<Record<string, unknown>>>([]);
 
   const token = getToken();
 
@@ -95,14 +99,41 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
     } catch { /* silent */ }
   }, []);
 
+  const fetchEvolution = useCallback(async () => {
+    const [statusRes, archRes, intentRes, ecoRes] = await Promise.allSettled([
+      fetch('/api/self-evolution/status'),
+      fetch('/api/meta/architecture-proposals'),
+      fetch('/api/meta/intent-proposals'),
+      fetch('/api/self-evolution/proposals'),
+    ]);
+    if (statusRes.status === 'fulfilled' && statusRes.value.ok) {
+      const d = await statusRes.value.json();
+      setEvoStatus(typeof d === 'object' ? d : null);
+    }
+    if (archRes.status === 'fulfilled' && archRes.value.ok) {
+      const d = await archRes.value.json();
+      setArchProposals(Array.isArray(d) ? d : d.proposals ?? d.data ?? []);
+    }
+    if (intentRes.status === 'fulfilled' && intentRes.value.ok) {
+      const d = await intentRes.value.json();
+      setIntentProposals(Array.isArray(d) ? d : d.proposals ?? d.data ?? []);
+    }
+    if (ecoRes.status === 'fulfilled' && ecoRes.value.ok) {
+      const d = await ecoRes.value.json();
+      setEcoProposals(Array.isArray(d) ? d : d.proposals ?? d.data ?? []);
+    }
+  }, []);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchMetrics();
     fetchHealth();
     void fetchAdminData();
+    void fetchEvolution();
     const interval = setInterval(fetchHealth, 5000);
-    return () => clearInterval(interval);
-  }, [fetchMetrics, fetchHealth, fetchAdminData]);
+    const evoInterval = setInterval(fetchEvolution, 30000);
+    return () => { clearInterval(interval); clearInterval(evoInterval); };
+  }, [fetchMetrics, fetchHealth, fetchAdminData, fetchEvolution]);
 
   if (!isAdmin) {
     return (
@@ -137,14 +168,14 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
         </div>
 
         <div style={{ display: 'flex', gap: 2, padding: '8px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-          {(['metrics', 'audit', 'plugins', 'health'] as Tab[]).map(t => (
+          {(['metrics', 'audit', 'plugins', 'health', 'evolution'] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)}
               style={{
                 padding: '8px 16px', borderRadius: '6px 6px 0 0', border: 'none',
                 background: tab === t ? 'rgba(59,130,246,0.15)' : 'transparent',
                 color: tab === t ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 13, fontWeight: tab === t ? 600 : 400,
               }}>
-              {t === 'metrics' ? <><BarChart3 size={13} style={{display:'inline',marginRight:4}} /> Metrics</> : t === 'audit' ? <><ClipboardList size={13} style={{display:'inline',marginRight:4}} /> Audit Logs</> : t === 'plugins' ? <><Plug size={13} style={{display:'inline',marginRight:4}} /> Plugins</> : <><Heart size={13} style={{display:'inline',marginRight:4}} /> Health</>}
+              {t === 'metrics' ? <><BarChart3 size={13} style={{display:'inline',marginRight:4}} /> Metrics</> : t === 'audit' ? <><ClipboardList size={13} style={{display:'inline',marginRight:4}} /> Audit Logs</> : t === 'plugins' ? <><Plug size={13} style={{display:'inline',marginRight:4}} /> Plugins</> : t === 'health' ? <><Heart size={13} style={{display:'inline',marginRight:4}} /> Health</> : <><Sparkles size={13} style={{display:'inline',marginRight:4}} /> Evolution</>}
             </button>
           ))}
         </div>
@@ -225,6 +256,90 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
                   <div style={{ color: '#64748b' }}>Loading health data...</div>
                 )}
               </div>
+            </div>
+          )}
+
+          {tab === 'evolution' && (
+            <div>
+              <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#94a3b8' }}>
+                <Sparkles size={14} style={{display:'inline',marginRight:4}} /> Self-Improvement Evolution
+              </h3>
+
+              {/* Status cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: 20 }}>
+                <HealthCard label="Evolution Status" value={evoStatus?.active ? 'Active' : 'Standby'} color={evoStatus?.active ? '#22c55e' : '#94a3b8'} />
+                <HealthCard label="Pending Proposals" value={`${evoStatus?.proposals ?? 0}`} color={evoStatus && evoStatus.proposals && evoStatus.proposals > 0 ? '#f59e0b' : '#94a3b8'} />
+                <HealthCard label="Arch. Proposals" value={`${archProposals.length}`} color={archProposals.length > 0 ? '#818cf8' : '#94a3b8'} />
+                <HealthCard label="Intent Proposals" value={`${intentProposals.length}`} color={intentProposals.length > 0 ? '#a78bfa' : '#94a3b8'} />
+              </div>
+
+              {/* Architecture Proposals */}
+              {archProposals.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <h4 style={{ fontSize: 12, color: '#818cf8', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Brain size={12} /> Architecture Proposals
+                  </h4>
+                  {archProposals.slice(0, 10).map((p, i) => (
+                    <div key={i} style={{
+                      padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 4,
+                      border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 8,
+                    }}>
+                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{p.title || p.name || `Proposal #${i + 1}`}</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 9, display: 'flex', alignItems: 'center', gap: 3 }}>
+                        {p.status === 'approved' ? <CheckCircle size={10} color="#22c55e" /> : p.status === 'rejected' ? <XCircle size={10} color="#ef4444" /> : <Sparkles size={10} color="#f59e0b" />}
+                        <span style={{ color: '#94a3b8' }}>{p.status as string || 'pending'}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Intent Proposals */}
+              {intentProposals.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <h4 style={{ fontSize: 12, color: '#a78bfa', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Sparkles size={12} /> Intent Proposals
+                  </h4>
+                  {intentProposals.slice(0, 10).map((p, i) => (
+                    <div key={i} style={{
+                      padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 4,
+                      border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 8,
+                    }}>
+                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{p.title || p.name || p.intent || `Intent #${i + 1}`}</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 9, display: 'flex', alignItems: 'center', gap: 3 }}>
+                        {p.status === 'active' ? <CheckCircle size={10} color="#22c55e" /> : p.status === 'explored' ? <CheckCircle size={10} color="#818cf8" /> : <Sparkles size={10} color="#f59e0b" />}
+                        <span style={{ color: '#94a3b8' }}>{p.status as string || 'pending'}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Self-Evolution Proposals */}
+              {ecoProposals.length > 0 && (
+                <div>
+                  <h4 style={{ fontSize: 12, color: '#f472b6', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Sparkles size={12} /> Self-Evolution Proposals
+                  </h4>
+                  {ecoProposals.slice(0, 10).map((p, i) => (
+                    <div key={i} style={{
+                      padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 4,
+                      border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 8,
+                    }}>
+                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{p.title || p.description || p.name || `Proposal #${i + 1}`}</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 9, color: '#94a3b8' }}>{p.status as string || 'pending'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!archProposals.length && !intentProposals.length && !ecoProposals.length && (
+                <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>
+                  <Brain size={32} style={{ opacity: 0.3, marginBottom: 12 }} />
+                  <div>No evolution proposals yet</div>
+                  <div style={{ fontSize: 11, marginTop: 4 }}>The self-improvement engine will generate proposals as the system learns.</div>
+                </div>
+              )}
             </div>
           )}
         </div>
