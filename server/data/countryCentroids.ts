@@ -1,7 +1,7 @@
 // Country centroid lookup table for geocoding World Bank and other economic data
 // Maps ISO 3166-1 alpha-2 country codes to [latitude, longitude] center coordinates
 
-import type { GeoLookup } from '../../src/lib/types/geo';
+import type { GeoLookup } from '../../src/lib/geo';
 
 export const COUNTRY_CENTROIDS: GeoLookup = {
         // G7 / G20 economies

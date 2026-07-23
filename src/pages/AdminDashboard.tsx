@@ -284,7 +284,7 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
                       padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 4,
                       border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 8,
                     }}>
-                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{p.title || p.name || `Proposal #${i + 1}`}</span>
+                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{`${p.title || p.name || `Proposal #${i + 1}`}`}</span>
                       <span style={{ marginLeft: 'auto', fontSize: 9, display: 'flex', alignItems: 'center', gap: 3 }}>
                         {p.status === 'approved' ? <CheckCircle size={10} color="#22c55e" /> : p.status === 'rejected' ? <XCircle size={10} color="#ef4444" /> : <Sparkles size={10} color="#f59e0b" />}
                         <span style={{ color: '#94a3b8' }}>{p.status as string || 'pending'}</span>
@@ -305,7 +305,7 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
                       padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 4,
                       border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 8,
                     }}>
-                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{p.title || p.name || p.intent || `Intent #${i + 1}`}</span>
+                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{`${p.title || p.name || p.intent || `Intent #${i + 1}`}`}</span>
                       <span style={{ marginLeft: 'auto', fontSize: 9, display: 'flex', alignItems: 'center', gap: 3 }}>
                         {p.status === 'active' ? <CheckCircle size={10} color="#22c55e" /> : p.status === 'explored' ? <CheckCircle size={10} color="#818cf8" /> : <Sparkles size={10} color="#f59e0b" />}
                         <span style={{ color: '#94a3b8' }}>{p.status as string || 'pending'}</span>
@@ -326,7 +326,7 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
                       padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 4,
                       border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 8,
                     }}>
-                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{p.title || p.description || p.name || `Proposal #${i + 1}`}</span>
+                      <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>{`${p.title || p.description || p.name || `Proposal #${i + 1}`}`}</span>
                       <span style={{ marginLeft: 'auto', fontSize: 9, color: '#94a3b8' }}>{p.status as string || 'pending'}</span>
                     </div>
                   ))}

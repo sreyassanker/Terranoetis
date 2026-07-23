@@ -72,6 +72,7 @@ import { FlightTravelView } from '@/components/FlightTravelView';
 import { CommandPalette } from '@/components/CommandPalette';
 import { MilitarySymbologyPanel } from '@/components/MilitarySymbologyPanel';
 import { AnalyticsWorkbench } from '@/components/AnalyticsWorkbench';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MilitarySymbologyOverlay } from '@/rendering/militarySymbologyOverlay';
 import { createRenderScheduler } from '@/lib/batchScheduler';
 import { createUnifiedTimer } from '@/lib/unifiedTimer'; // P0 perf: unified timer
@@ -1478,7 +1479,11 @@ export default function App() {
   const toolResultEntityRef = useRef<Cesium.Entity | null>(null);
   const _toolSurfacePrimitive = useRef<unknown>(null);
 
-  const handleToolResult = useCallback((toolId: number, label: string, lat: number, lon: number, value?: number) => {
+  const handleToolResult = useCallback((
+    toolId: number, label: string, lat: number, lon: number, value?: number,
+    grid?: { latMin: number; latMax: number; lonMin: number; lonMax: number; nLat: number; nLon: number; values: number[]; valueMin: number; valueMax: number; hasNaN: boolean },
+    unit?: string,
+  ) => {
     const viewer = viewerRef.current;
     if (!viewer) return;
     if (toolResultEntityRef.current) {
@@ -1506,7 +1511,31 @@ export default function App() {
         outlineWidth: 2,
       },
     });
+
     const b = activeBbox;
+    // QGIS-style raster output: render the computed spatial grid as a styled
+    // surface over the study area (real per-cell values, not a flat plane).
+    if (grid && b && b.latMin < b.latMax && b.lonMin < b.lonMax) {
+      const n = grid.nLat * grid.nLon;
+      const data = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const v = grid.values[i];
+        data[i] = typeof v === 'number' && Number.isFinite(v) ? v : grid.valueMin;
+      }
+      const interpGrid: InterpGrid = {
+        data,
+        variance: new Float32Array(n),
+        width: grid.nLon,
+        height: grid.nLat,
+        latMin: grid.latMin, latMax: grid.latMax, lonMin: grid.lonMin, lonMax: grid.lonMax,
+        valueMin: grid.valueMin, valueMax: grid.valueMax,
+      };
+      showInterpSurface(viewer, interpGrid, undefined, 0.6, false);
+      return;
+    }
+
+    // Fallback: point mode with no grid — paint a surface only if a study area
+    // is active and a scalar value exists.
     if (!b || b.latMin >= b.latMax || b.lonMin >= b.lonMax || value == null) return;
     const camAlt = viewer.camera.positionCartographic.height;
     const { width, height } = getViewDependentResolution(camAlt, 100);
@@ -1523,8 +1552,8 @@ export default function App() {
       }
     }
     if (pts.length < 3) return;
-    const grid = interpolateIDW(pts, b, width, height);
-    showInterpSurface(viewer, grid, undefined, 0.6, true);
+    const idwGrid = interpolateIDW(pts, b, width, height);
+    showInterpSurface(viewer, idwGrid, undefined, 0.6, true);
   }, [activeBbox]);
 
   const handleClearToolResult = useCallback(() => {
@@ -9065,7 +9094,9 @@ export default function App() {
       <SatelliteImageryPanel viewer={viewerRef.current} show={showSatelliteImagery} onClose={() => setShowSatelliteImagery(false)} />
 
       {/* Analytics Workbench Panel */}
-      <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} onToolResult={handleToolResult} onClearResult={handleClearToolResult} />
+      <ErrorBoundary label="Analytics Workbench">
+        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} onToolResult={handleToolResult} onClearResult={handleClearToolResult} />
+      </ErrorBoundary>
 
       {/* Military Symbology Panel */}
       {showMilitarySymbology && <MilitarySymbologyPanel onClose={() => setShowMilitarySymbology(false)} />}

@@ -1,0 +1,706 @@
+
+════════════════════════════════════════════════════════════
+DOMAIN 1: Atmospheric Science  (Part 1: Earth System Core)
+════════════════════════════════════════════════════════════
+
+Eq 1 | Domain 1: Atmospheric Science | Land Surface Temperature Retrieval | Ts = A₀ + A₁·T₁₀ − A₂·T₁₁ | Satellite thermal infrared → surface temperature map
+  Inputs: T₁₀(Band 10 Brightness Temp, K, default 300, 260-330 [Satellite Brightness Temperatures]) | T₁₁(Band 11 Brightness Temp, K, default 298, 260-330 [Satellite Brightness Temperatures]) | ε₁₀(Band 10 Emissivity, —, default 0.97, 0.9-1 [Surface Properties]) | ε₁₁(Band 11 Emissivity, —, default 0.98, 0.9-1 [Surface Properties]) | w(Column Water Vapor, g/cm², default 1.5, 0-6.3 [Atmospheric Conditions])
+  Ref: Rozenstein 2014
+
+Eq 2 | Domain 1: Atmospheric Science | Brightness Temperature Retrieval | B_λ(T) = 2hc²/λ⁵ × 1/(exp(hc/λkT) − 1) | Satellite thermal radiance → brightness temperature
+  Inputs: λ(Wavelength, µm, default 10, 0.1-100 [Measurement]) | T(Temperature, K, default 300, 100-2000 [Measurement])
+  Ref: Planck 1901
+
+Eq 3 | Domain 1: Atmospheric Science | Saturation Vapor Pressure | e_s(T) = 6.1094 × exp(17.625T/(T + 243.04)) hPa | Saturation vapor pressure, dew point, humidity
+  Inputs: T(Air Temperature, °C, default 20, -50-50 [Temperature])
+  Ref: Tetens 1930
+
+Eq 4 | Domain 1: Atmospheric Science | Atmospheric Pressure Profile | P(z) = P₀ × exp(−gz/RT) | Pressure at altitude, 3D atmospheric structure, aviation altimetry
+  Inputs: P0(Surface Pressure, hPa, default 1013.25, 500-1100 [Reference Level]) | z(Altitude, m, default 1000, 0-50000 [Target Level]) | T(Mean Layer Temperature, K, default 288, 200-320 [Air Properties])
+  Ref: Holton 2012
+
+Eq 5 | Domain 1: Atmospheric Science | Geostrophic Wind Analysis | V_g = (1/fρ) × (∂P/∂y, −∂P/∂x), f = 2Ω sin φ | Jet stream analysis, frontal zone detection, synoptic-scale wind computation
+  Inputs: dP/dx(Pressure Gradient (x), Pa/m, default 0.001, -10-10 [Pressure Field]) | dP/dy(Pressure Gradient (y), Pa/m, default 0.001, -10-10 [Pressure Field]) | f(Coriolis Parameter, /s, default 0.0001, 0-0.0002 [Earth Rotation]) | ρ(Air Density, kg/m³, default 1.2, 0.5-1.5 [Air Properties])
+  Ref: Holton 2012
+
+Eq 6 | Domain 1: Atmospheric Science | Pollutant Transport Modeling | ∂C/∂t + u·∇C = D∇²C + S | Pollutant transport, smoke/ash dispersion, tracer diffusion modeling
+  Inputs: u(Wind Speed, m/s, default 5, 0-50 [Flow Conditions]) | D(Eddy Diffusivity, m²/s, default 100, 0.1-10000 [Turbulence]) | C₀(Initial Concentration, µg/m³, default 100, 0-10000 [Emission]) | t(Elapsed Time, s, default 3600, 0-86400 [Time])
+  Ref: Bird 2007
+
+Eq 7 | Domain 1: Atmospheric Science | Atmospheric Stability Index | Ri_b = g(z_g−z_s)(θ_v(z_g)−θ_v(z_s)) / (θ_v(z_s)|u(z_g)−u(z_s)|²) | Atmospheric stability classification, turbulence onset prediction, boundary layer regime
+  Inputs: z_g(Upper Height, m, default 100, 0-1000 [Layer Definition]) | z_s(Surface Height, m, default 2, 0-100 [Layer Definition]) | θᵥ(z)(Upper Virtual Pot. Temp., K, default 305, 250-350 [Thermal Structure]) | θᵥ(s)(Surface Virtual Pot. Temp., K, default 300, 250-350 [Thermal Structure]) | u(z)(Upper Wind Speed, m/s, default 10, 0-50 [Wind Shear]) | u(s)(Surface Wind Speed, m/s, default 2, 0-30 [Wind Shear])
+  Ref: Stull 1988
+
+Eq 8 | Domain 1: Atmospheric Science | Turbulent Energy Spectrum | E(k) = C·ε^(2/3)·k^(−5/3) | Turbulent energy spectrum computation, large-eddy simulation (LES) closure, turbulence characterization
+  Inputs: C(Kolmogorov Constant, —, default 1.5, 1-2 [Universal Constants]) | ε(TKE Dissipation Rate, m²/s³, default 0.001, 1e-10-100 [Physical Parameters]) | k(Wavenumber, 1/m, default 0.01, 0.000001-1000 [Physical Parameters])
+  Ref: Kolmogorov 1941
+
+════════════════════════════════════════════════════════════
+DOMAIN 2: Hydrology & Oceanography  (Part 1: Earth System Core)
+════════════════════════════════════════════════════════════
+
+Eq 9 | Domain 2: Hydrology & Oceanography | Reference Evapotranspiration | ET₀ = [0.408Δ(R_n-G) + γ(900/(T+273))u₂(e_s-e_a)] / [Δ+γ(1+0.34u₂)] | Evapotranspiration, drought monitoring, irrigation scheduling
+  Inputs: Rₙ(Net Radiation, W/m², default 150, -100-1000 [Energy Balance]) | G(Soil Heat Flux, W/m², default 10, -100-500 [Energy Balance]) | T(Air Temperature, °C, default 25, -10-50 [Meteorological]) | u₂(Wind Speed at 2m, m/s, default 2, 0-20 [Meteorological]) | eₛ(Saturation Vapor Pressure, kPa, default 3.17, 0-10 [Vapor Pressure]) | eₐ(Actual Vapor Pressure, kPa, default 1.5, 0-10 [Vapor Pressure]) | Δ(Slope Vapor Pressure Curve, kPa/°C, default 0.15, 0-1 [Vapor Pressure]) | γ(Psychrometric Constant, kPa/°C, default 0.067, 0.04-0.1 [Vapor Pressure])
+  Ref: Allen 1998
+
+Eq 10 | Domain 2: Hydrology & Oceanography | Runoff Estimation (SCS-CN) | Q = (P-I_a)²/(P-I_a+S), I_a = 0.2S | Runoff estimation, flash flood potential, watershed planning
+  Inputs: P(Precipitation, mm, default 50, 0-500 [Rainfall]) | Iₐ(Initial Abstraction, mm, default 10, 0-100 [Watershed Storage]) | S(Potential Retention, mm, default 100, 0-500 [Watershed Storage])
+  Ref: USDA Soil Conservation Service 1954
+
+Eq 11 | Domain 2: Hydrology & Oceanography | Open Channel Flow Analysis | v = (1/n) × R^(2/3) × S^(1/2) | Open channel flow, river discharge, flood routing, canal design
+  Inputs: n(Manning Roughness, —, default 0.03, 0.001-1 [Channel Resistance]) | R(Hydraulic Radius, m, default 1.5, 0.01-100 [Channel Geometry]) | S(Channel Slope, m/m, default 0.001, 0-1 [Channel Geometry])
+  Ref: Manning 1891
+
+Eq 12 | Domain 2: Hydrology & Oceanography | Peak Discharge Estimation | Q = C × i × A | Peak discharge from small watersheds, stormwater design, culvert sizing
+  Inputs: C(Runoff Coefficient, —, default 0.5, 0-1 [Catchment Characteristics]) | i(Rainfall Intensity, mm/h, default 10, 0-200 [Rainfall]) | A(Catchment Area, km², default 10, 0.1-10000 [Catchment Characteristics])
+  Ref: Mulvaney 1851
+
+Eq 13 | Domain 2: Hydrology & Oceanography | Flood Wave Routing | S = K[XI_t + (1-X)O_t] | Flood wave attenuation in river reaches, reservoir routing, channel design
+  Inputs: K(Storage Constant, h, default 6, 0.1-48 [Reach Characteristics]) | X(Weighting Factor, —, default 0.2, 0-0.5 [Reach Characteristics]) | Iₜ(Inflow at Time t, m³/s, default 100, 0-10000 [Flow Conditions]) | Oₜ(Outflow at Time t, m³/s, default 80, 0-10000 [Flow Conditions])
+  Ref: McCarthy 1938
+
+Eq 14 | Domain 2: Hydrology & Oceanography | Tide Prediction | h(t) = H₀ + Σ Aᵢcos(ωᵢt + φᵢ) | Tide prediction, storm surge detection, sea-level analysis
+  Inputs: H₀(Mean Tidal Height, m, default 2, -5-10 [Reference Level]) | amplitude(Constituent Amplitudes, m, default 0.5, 0-5 [Harmonic Constituents])
+  Ref: Pugh 2014
+
+Eq 15 | Domain 2: Hydrology & Oceanography | Wind-Driven Current Analysis | V₀ = τ/√(ρfA_v), direction 45° to wind | Wind-driven currents, upwelling detection, coastal ocean dynamics
+  Inputs: τ(Wind Stress, N/m², default 0.1, 0-10 [Atmospheric Forcing]) | ρ(Seawater Density, kg/m³, default 1025, 1000-1050 [Ocean Properties]) | f(Coriolis Parameter, /s, default 0.0001, 0-0.0002 [Earth Rotation]) | Aᵥ(Vertical Eddy Viscosity, m²/s, default 0.1, 0.001-1 [Ocean Properties])
+  Ref: Ekman 1905
+
+Eq 16 | Domain 2: Hydrology & Oceanography | Ocean Current Analysis | f×v_g = (1/ρ)×∂p/∂x | Major ocean current computation, altimetry-derived currents, eddy detection
+  Inputs: f(Coriolis Parameter, /s, default 0.0001, 0-0.0002 [Earth Rotation]) | ρ(Seawater Density, kg/m³, default 1025, 1000-1050 [Ocean Properties]) | ∂p/∂x(Pressure Gradient, Pa/m, default 0.00001, -0.01-0.01 [Pressure Field])
+  Ref: Gill 1982
+
+Eq 17 | Domain 2: Hydrology & Oceanography | Marine Heat Budget | Q_net = Q_s - Q_b - Q_h - Q_e | Marine heat wave detection, air-sea interaction, mixed layer temperature tendency
+  Inputs: Qₛ(Incoming Shortwave, W/m², default 200, 0-1500 [Radiation]) | Q_b(Outgoing Longwave, W/m², default 50, 0-500 [Radiation]) | Q_h(Sensible Heat Flux, W/m², default 20, -200-500 [Turbulent Flux]) | Q_e(Latent Heat Flux, W/m², default 80, -200-500 [Turbulent Flux])
+  Ref: Gill 1982
+
+Eq 18 | Domain 2: Hydrology & Oceanography | Infiltration Analysis | f(t) = K_s × (1 + (ψ_w-ψ₀)Δθ/F(t)) | Infiltration rate, flood forecasting, soil water movement, irrigation design
+  Inputs: Kₛ(Saturated Hydraulic Conductivity, m/s, default 0.00001, 1e-10-1 [Soil Properties]) | ψ_w(Wetting Front Potential, m, default 0.2, 0-10 [Soil Properties]) | ψ₀(Initial Matric Potential, m, default 0.5, 0-10 [Soil Properties]) | Δθ(Moisture Deficit, —, default 0.2, 0-0.5 [Soil Properties]) | F(t)(Cumulative Infiltration, m, default 0.1, 0-5 [Infiltration State])
+  Ref: Green 1911
+
+════════════════════════════════════════════════════════════
+DOMAIN 3: Geophysics & Seismology  (Part 1: Earth System Core)
+════════════════════════════════════════════════════════════
+
+Eq 19 | Domain 3: Geophysics & Seismology | Earthquake Frequency Analysis | log₁₀(N) = a - bM | Earthquake frequency-magnitude, seismic hazard
+  Inputs: a(Seismic Activity (a-value), —, default 4, 0-10 [Seismicity Parameters]) | b(Gutenberg-Richter b-value, —, default 1, 0.5-2 [Seismicity Parameters]) | M(Earthquake Magnitude, M_w, default 5, 0-10 [Magnitude])
+  Ref: Gutenberg 1944
+
+Eq 20 | Domain 3: Geophysics & Seismology | Aftershock Decay Analysis | n(t) = K/(c+t)^p | Aftershock decay, post-earthquake hazard
+  Inputs: K(Aftershock Productivity, events/day, default 100, 0-10000 [Sequence Parameters]) | c(Time Offset, days, default 0.1, 0-10 [Sequence Parameters]) | t(Time Since Main Shock, days, default 1, 0-1000 [Sequence Parameters]) | p(Omori Decay Exponent, —, default 1.1, 0.5-2 [Sequence Parameters])
+  Ref: Omori 1894
+
+Eq 21 | Domain 3: Geophysics & Seismology | Ground Motion Prediction | ln(Y) = f_mag + f_dist + f_site + f_fault + f_hanging_wall | Ground motion prediction, ShakeMap
+  Inputs: M_ag(Magnitude Term (f_mag), —, default 1, 0-10 [Magnitude Scaling]) | D_st(Distance Term (f_dist), —, default -1, -10-0 [Attenuation]) | S_te(Site Term (f_site), —, default 0, -2-2 [Site Response]) | F_lt(Fault Mechanism Term (f_fault), —, default 0, -1-1 [Source Effects]) | H_w(Hanging Wall Term (f_hw), —, default 0, 0-1 [Source Effects])
+  Ref: Campbell 2014
+
+Eq 22 | Domain 3: Geophysics & Seismology | Shear Strength Analysis | τ = c + σ_n × tanφ | Fault stability, landslide susceptibility
+  Inputs: c(Cohesion, kPa, default 10, 0-100 [Material Strength]) | σₙ(Normal Stress, kPa, default 100, 0-1000 [Stress State]) | tan φ(Friction Coefficient (tan φ), —, default 0.6, 0.1-1.5 [Material Strength])
+  Ref: Coulomb 1776
+
+Eq 23 | Domain 3: Geophysics & Seismology | Earthquake Magnitude from Moment | M_w = (2/3)log₁₀(M₀) - 6.07 | Earthquake magnitude from seismic moment
+  Inputs: M₀(Seismic Moment, N·m, default 1000000000000000000, 10000000000-1e+24 [Source Parameters])
+  Ref: Hanks 1979
+
+Eq 24 | Domain 3: Geophysics & Seismology | Earthquake Stress Drop Analysis | Δσ = (7/16)(M₀/r³) | Earthquake source characterization
+  Inputs: M₀(Seismic Moment, N·m, default 1000000000000000000, 10000000000-1e+24 [Source Parameters]) | r(Source Radius (circular crack), m, default 1000, 10-50000 [Source Parameters])
+  Ref: Brune 1970
+
+Eq 25 | Domain 3: Geophysics & Seismology | Fault Rupture Scaling | log₁₀(A) = -3.49 + 0.91×M_w | Magnitude-area relationships
+  Inputs: M_w(Moment Magnitude, M_w, default 6, 3-10 [Magnitude])
+  Ref: Wells 1994
+
+════════════════════════════════════════════════════════════
+DOMAIN 4: Remote Sensing & Cryosphere  (Part 1: Earth System Core)
+════════════════════════════════════════════════════════════
+
+Eq 26 | Domain 4: Remote Sensing & Cryosphere | Vegetation Health Index | NDVI = (NIR - Red)/(NIR + Red) | Vegetation health, drought stress, deforestation
+  Inputs: NIR(Near-Infrared Reflectance, reflectance, default 0.3, 0-1 [Satellite Bands]) | Red(Red Reflectance, reflectance, default 0.1, 0-1 [Satellite Bands])
+  Ref: Rouse 1974
+
+Eq 27 | Domain 4: Remote Sensing & Cryosphere | Surface Water Detection | NDWI = (Green - NIR)/(Green + NIR) | Surface water detection, flood mapping
+  Inputs: Green(Green Band Reflectance, reflectance, default 0.2, 0-1 [Satellite Bands]) | NIR(NIR Band Reflectance, reflectance, default 0.3, 0-1 [Satellite Bands])
+  Ref: McFeeters 1996
+
+Eq 28 | Domain 4: Remote Sensing & Cryosphere | Vegetation Water Content | NDWI = (NIR - SWIR)/(NIR + SWIR) | Vegetation water content
+  Inputs: NIR(NIR Band Reflectance, reflectance, default 0.3, 0-1 [Satellite Bands]) | SWIR(SWIR Band Reflectance, reflectance, default 0.1, 0-1 [Satellite Bands])
+  Ref: Gao 1996
+
+Eq 29 | Domain 4: Remote Sensing & Cryosphere | Enhanced Vegetation Index | EVI = 2.5 × (NIR - Red)/(NIR + 6×Red - 7.5×Blue + 1) | Dense vegetation monitoring, MODIS
+  Inputs: NIR(NIR Band Reflectance, reflectance, default 0.3, 0-1 [Satellite Bands]) | Red(Red Band Reflectance, reflectance, default 0.1, 0-1 [Satellite Bands]) | Blue(Blue Band Reflectance, reflectance, default 0.05, 0-1 [Satellite Bands])
+  Ref: Huete 2002
+
+Eq 30 | Domain 4: Remote Sensing & Cryosphere | Snow Cover Detection | NDSI = (Green - SWIR)/(Green + SWIR) | Snow cover detection, cryosphere monitoring
+  Inputs: Green(Green Band Reflectance, reflectance, default 0.2, 0-1 [Satellite Bands]) | SWIR(SWIR Band Reflectance, reflectance, default 0.1, 0-1 [Satellite Bands])
+  Ref: Hall 1995
+
+Eq 31 | Domain 4: Remote Sensing & Cryosphere | Burn Severity Mapping | NBR = (NIR - SWIR)/(NIR + SWIR) | Burn severity, post-fire recovery
+  Inputs: NIR(NIR Band Reflectance, reflectance, default 0.3, 0-1 [Satellite Bands]) | SWIR(SWIR Band Reflectance, reflectance, default 0.1, 0-1 [Satellite Bands])
+  Ref: Key 1999
+
+Eq 32 | Domain 4: Remote Sensing & Cryosphere | Fire Radiative Power Estimation | FRP = A × σ × ε × (T_fire⁴ − T_bg⁴) | Fire intensity, smoke emission estimation
+  Inputs: A(Pixel Area, m², default 10000, 0-100000000 [Geometry]) | ε(Fire Emissivity, —, default 0.98, 0-1 [Fire Properties]) | T_fire(Fire Temperature, K, default 800, 400-2000 [Fire Properties]) | T_bg(Background Temperature, K, default 300, 200-400 [Background])
+  Ref: Giglio 2006
+
+Eq 33 | Domain 4: Remote Sensing & Cryosphere | Crop Water Stress Assessment | CWSI = (T_c − T_wet) / (T_dry − T_wet) | Agricultural drought, irrigation management
+  Inputs: T_c(Canopy Temperature, °C, default 35, 0-60 [Thermal Measurements]) | T_wet(Wet Reference (well-watered canopy), °C, default 25, 0-50 [Reference Baselines]) | T_dry(Dry Reference (non-transpiring canopy), °C, default 40, 0-60 [Reference Baselines])
+  Ref: Idso 1981
+
+Eq 34 | Domain 4: Remote Sensing & Cryosphere | Snowmelt Runoff Forecasting | M = DDF × max(0, T_air − T_base) | Snowmelt runoff forecasting
+  Inputs: DDF(Degree-Day Factor, mm/°C·day, default 5, 0.5-20 [Melt Parameters]) | T_air(Air Temperature, °C, default 5, -20-40 [Meteorological]) | T_base(Base Melt Temperature, °C, default 0, -5-5 [Melt Parameters])
+  Ref: Hock 2003
+
+Eq 35 | Domain 4: Remote Sensing & Cryosphere | Passive Microwave Sea Ice Analysis | T_B = (1−C) × T_water + C × T_ice | Passive microwave sea ice retrieval
+  Inputs: C(Ice Concentration, fraction, default 0.5, 0-1 [Ice Conditions]) | T_water(Open Water Radiative Temperature, °C, default 0, -2-10 [Radiative Properties]) | T_ice(Sea Ice Radiative Temperature, °C, default -5, -50-0 [Radiative Properties])
+  Ref: Comiso 1986
+
+════════════════════════════════════════════════════════════
+DOMAIN 5: Spatial Analysis & Extreme Events  (Part 1: Earth System Core)
+════════════════════════════════════════════════════════════
+
+Eq 36 | Domain 5: Spatial Analysis & Extreme Events | Great Circle Distance | d = 2r × arcsin(√(sin²(Δφ/2) + cosφ₁·cosφ₂·sin²(Δλ/2))) | Great circle distance, disaster impact radius
+  Inputs: lat₁(Latitude of Point 1, °, default 40, -90-90 [Point Coordinates]) | lon₁(Longitude of Point 1, °, default -100, -180-180 [Point Coordinates]) | lat₂(Latitude of Point 2, °, default 41, -90-90 [Point Coordinates]) | lon₂(Longitude of Point 2, °, default -99, -180-180 [Point Coordinates])
+  Ref: Sinnott 1984
+
+Eq 37 | Domain 5: Spatial Analysis & Extreme Events | Geostatistical Interpolation (Kriging) | ŷ(s₀) = Σλᵢ·z(sᵢ), weights solve Aλ = b | Optimal spatial interpolation with uncertainty
+  Inputs: z(Observed Values at Sampled Points, —, default 1 [Observations]) | λᵢ(Kriging Weights (from solving Aλ=b), —, default 1 [Kriging System])
+  Ref: Matheron 1963
+
+Eq 38 | Domain 5: Spatial Analysis & Extreme Events | Inverse Distance Weighting Interpolation | ŷ = Σ(wᵢ·z_i) / Σ(wᵢ); wᵢ = 1 / dᵢᵖ | Rapid spatial interpolation
+  Inputs: z(Sampled Values at Data Points, —, default 1 [Observations]) | wᵢ(IDW Weights (1/dᵖ), —, default 1 [Weights])
+  Ref: Shepard 1968
+
+Eq 39 | Domain 5: Spatial Analysis & Extreme Events | Gaussian Plume Air Dispersion | C(x,y,z) = Q/(2π·u·σ_y·σ_z) × exp(−y²/(2σ_y²)) × [exp(−(z−H)²/(2σ_z²)) + exp(−(z+H)²/(2σ_z²))] | Air quality, smoke/ash dispersion
+  Inputs: Q(Source Emission Rate, µg/s, default 1000, 0-1000000000 [Source]) | u(Mean Wind Speed at Stack Height, m/s, default 5, 0-50 [Meteorological]) | σ_y(Horizontal Dispersion Parameter, m, default 50, 1-1000 [Dispersion]) | σ_z(Vertical Dispersion Parameter, m, default 30, 1-1000 [Dispersion]) | y(Crosswind Distance from Plume Centerline, m, default 0, -5000-5000 [Receptor])
+  Ref: Pasquill 1983
+
+Eq 40 | Domain 5: Spatial Analysis & Extreme Events | Gumbel Extreme Value Analysis | F(x) = exp(−exp(−(x − μ)/β)) | Return period for floods, wind, temperature extremes
+  Inputs: μ(Location Parameter (mode), —, default 100, -1000000-1000000 [Distribution Parameters]) | β(Scale Parameter, —, default 20, 0.1-1000000 [Distribution Parameters]) | x(Value of Interest (quantile), —, default 100, -1000000-1000000 [Probabilistic])
+  Ref: Gumbel 1958
+
+Eq 41 | Domain 5: Spatial Analysis & Extreme Events | Generalized Pareto Distribution (Peaks-Over-Threshold) | G(x) = 1 − (1 + ξ·x/β)^(−1/ξ) for ξ ≠ 0 | Peaks-over-threshold extreme analysis
+  Inputs: ξ(Shape Parameter, —, default 0.1, -0.5-1 [Distribution Parameters]) | β(Scale Parameter, —, default 20, 0.1-1000000 [Distribution Parameters]) | x(Exceedance Threshold u, —, default 100, -1000000-1000000 [Threshold])
+  Ref: Pickands 1975
+
+Eq 42 | Domain 5: Spatial Analysis & Extreme Events | Semivariogram Analysis | γ(h) = (1/(2·N(h))) × Σ[z(x) − z(x+h)]² | Spatial autocorrelation modeling
+  Inputs: z(Observed Spatial Values, —, default 1 [Observations]) | h(Lag Distance (separation vector), —, default 1 [Variography])
+  Ref: Matheron 1963
+
+════════════════════════════════════════════════════════════
+DOMAIN 6: Soil Science & Land Surface  (Part 1: Earth System Core)
+════════════════════════════════════════════════════════════
+
+Eq 43 | Domain 6: Soil Science & Land Surface | Soil Water Retention Curve | θ(ψ) = θ_r + (θ_s − θ_r) / [1 + (α|ψ|)ⁿ]ᵐ where m = 1 − 1/n | Soil water retention, unsaturated flow
+  Inputs: θ_r(Residual Water Content, m³/m³, default 0.05, 0-0.2 [Soil Hydraulic Parameters]) | θ_s(Saturated Water Content, m³/m³, default 0.4, 0.2-0.6 [Soil Hydraulic Parameters]) | α(Inverse of Air-Entry Pressure, 1/m, default 0.01, 0.001-1 [Soil Hydraulic Parameters]) | n(Pore-Size Distribution Index, —, default 1.5, 1.1-5 [Soil Hydraulic Parameters]) | ψ(Soil Matric Potential, m, default -10, -100--0.01 [State Conditions])
+  Ref: van Genuchten 1980
+
+Eq 44 | Domain 6: Soil Science & Land Surface | Soil Hydraulic Model | S_e = (ψ_b / ψ)^λ | Soil hydraulic properties, drainage
+  Inputs: ψ_b(Bubbling (Air-Entry) Pressure, m, default -0.3, -10--0.01 [Soil Parameters]) | ψ(Matric Potential, m, default -1, -100--0.01 [State Conditions])
+  Ref: Brooks 1964
+
+Eq 45 | Domain 6: Soil Science & Land Surface | Universal Soil Loss Equation | A = R × K × LS × C × P | Soil erosion prediction, land management
+  Inputs: R(Rainfall Erosivity Factor, MJ·mm/ha·h·yr, default 5000, 0-50000 [Climate]) | K(Soil Erodibility Factor, t·ha·h/ha·MJ·mm, default 0.03, 0-1 [Soil]) | LS(Slope Length-Steepness Factor, —, default 2, 0-20 [Topography]) | C(Cover-Management Factor, —, default 0.2, 0-1 [Land Management]) | P(Support Practice Factor, —, default 1, 0-1 [Land Management])
+  Ref: Wischmeier 1978
+
+Eq 46 | Domain 6: Soil Science & Land Surface | Soil Respiration Temperature Sensitivity | R_s = R_base × Q₁₀^((T − T_base)/10) | Soil carbon flux, carbon cycle feedback
+  Inputs: R_base(Base Respiration Rate at T_base, µmol/m²s, default 2, 0-50 [Respiration]) | Q₁₀(Temperature Sensitivity Coefficient, —, default 2, 1-5 [Respiration]) | T(Current Soil Temperature, °C, default 20, -10-50 [Temperature]) | T_base(Reference Base Temperature, °C, default 10, -10-30 [Temperature])
+  Ref: Raich 1992
+
+Eq 47 | Domain 6: Soil Science & Land Surface | Soil Thermal Conductivity Model | λ_soil = Σ(kᵢ·fᵢ·λᵢ) / Σ(kᵢ·fᵢ) | Soil heat transfer, frost depth
+  Inputs: kᵢ(Shape/Weighting Factors for Each Phase, —, default 1 [Phase Properties]) | fᵢ(Volume Fractions of Each Phase, —, default 1 [Phase Properties])
+  Ref: de Vries 1963
+
+Eq 48 | Domain 6: Soil Science & Land Surface | Surface Layer Similarity Theory | φ_m(ζ) = κ·z/u_* × ∂ū/∂z, ζ = z/L | Surface layer flux-profile relationships
+  Inputs: κ(von Kármán Constant, —, default 0.4, 0.3-0.5 [Universal Constants]) | u_*(Friction Velocity, m/s, default 0.3, 0-5 [Turbulence]) | z(Measurement Height, m, default 10, 0-1000 [Profile]) | L(Obukhov Length, m, default -50, -1000-1000 [Stability])
+  Ref: Monin 1954
+
+Eq 49 | Domain 6: Soil Science & Land Surface | Logarithmic Wind Profile | u(z) = (u_*/κ) × ln(z/z₀), κ ≈ 0.4 | Near-surface wind estimation, wind energy
+  Inputs: u_*(Friction Velocity (u_*), m/s, default 0.3, 0-5 [Turbulence]) | z(Height Above Surface, m, default 10, 0-1000 [Profile]) | z₀(Aerodynamic Roughness Length, m, default 0.1, 0.00001-10 [Surface])
+  Ref: Stull 1988
+
+Eq 50 | Domain 6: Soil Science & Land Surface | Stomatal Conductance Model | g_s = g₀ + a₁ × A × h_s / c_s | Land surface modeling, transpiration
+  Inputs: g₀(Residual (Minimum) Conductance, mmol/m²s, default 10, 0-100 [Stomatal Parameters]) | a₁(Ball-Berry Slope Parameter, —, default 9, 0-20 [Stomatal Parameters]) | A(Net Photosynthesis Rate (CO₂ assimilation), µmol/m²s, default 15, 0-50 [Photosynthesis]) | hₛ(Relative Humidity at Leaf Surface, —, default 0.7, 0-1 [Environmental]) | cₛ(CO₂ Concentration at Leaf Surface, µmol/mol, default 380, 100-1000 [Environmental])
+  Ref: Ball 1987
+
+════════════════════════════════════════════════════════════
+DOMAIN 7: Biosphere & Carbon Cycle  (Part 2: Biosphere, Agriculture & Chemistry)
+════════════════════════════════════════════════════════════
+
+Eq 51 | Domain 7: Biosphere & Carbon Cycle | Gross Primary Production | GPP = ε × fPAR × PAR | Global vegetation productivity, MODIS MOD17
+  Inputs: ε(Light Use Efficiency, gC/MJ, default 1.2, 0-5 [Plant Physiology]) | fPAR(Fraction of PAR Absorbed, fraction, default 0.5, 0-1 [Canopy Structure]) | PAR(Photosynthetically Active Radiation, MJ/m²/yr, default 2000, 0-10000 [Radiation])
+  Ref: Monteith 1972
+
+Eq 52 | Domain 7: Biosphere & Carbon Cycle | Canopy Light Extinction | I(z) = I₀ × exp(-k×LAI) | Canopy light environment, photosynthesis
+  Inputs: I₀(Incident Radiation, µmol/m²s, default 1500, 0-3000 [Radiation]) | k(Extinction Coefficient, —, default 0.5, 0.1-1 [Canopy Structure]) | LAI(Leaf Area Index, —, default 4, 0-12 [Canopy Structure])
+  Ref: Monsi 1953
+
+Eq 53 | Domain 7: Biosphere & Carbon Cycle | Net Carbon Flux | NEE = R_eco - GPP | Carbon flux monitoring, ecosystem carbon balance
+  Inputs: R_eco(Ecosystem Respiration, gC/m²/yr, default 800, 0-5000 [Carbon Fluxes]) | GPP(Gross Primary Production, gC/m²/yr, default 1200, 0-5000 [Carbon Fluxes])
+  Ref: Wofsy 1993
+
+Eq 54 | Domain 7: Biosphere & Carbon Cycle | C3 Photosynthesis | A_c = V_cmax × (c_i - Γ*) / (c_i + K_c(1+O/K_o)) | C3 photosynthesis, carbon cycle modeling
+  Inputs: V_cmax(Max Carboxylation Rate, µmol/m²s, default 80, 0-300 [Rubisco Kinetics]) | cᵢ(Intercellular CO₂, µmol/mol, default 250, 0-500 [CO₂ Supply]) | Γ*(CO₂ Compensation Point, µmol/mol, default 40, 0-100 [Rubisco Kinetics]) | K_c(Michaelis Constant for CO₂, µmol/mol, default 300, 50-1000 [Rubisco Kinetics]) | K_o(Michaelis Constant for O₂, µmol/mol, default 300000, 100000-500000 [Rubisco Kinetics]) | O(Intercellular O₂, µmol/mol, default 210000, 150000-250000 [CO₂ Supply])
+  Ref: Farquhar 1980
+
+Eq 55 | Domain 7: Biosphere & Carbon Cycle | Forest Biomass Estimation | B = a × DBH^b | Forest biomass, carbon stock estimation
+  Inputs: a(Allometric Coefficient, kg/cm², default 0.05, 0.001-1 [Allometric Model]) | DBH(Diameter at Breast Height, cm, default 30, 0-300 [Tree Measurement])
+  Ref: Chave 2014
+
+Eq 56 | Domain 7: Biosphere & Carbon Cycle | Ocean CO₂ Uptake | F = k×K₀×ΔpCO₂; k = 0.31×u²×(Sc/660)^(-0.5) | Air-sea CO₂ exchange, ocean carbon sink
+  Inputs: k(Gas Transfer Velocity, m/yr, default 1000, 0-5000 [Gas Exchange]) | K₀(CO₂ Solubility, mol/m³·atm, default 30, 0-100 [Seawater Chemistry]) | ΔpCO₂(Partial Pressure Difference, µatm, default 10, -100-100 [Air-Sea Gradient])
+  Ref: Wanninkhof 1992
+
+Eq 57 | Domain 7: Biosphere & Carbon Cycle | Ocean Nutrient Ratios | C:N:P = 106:16:1 | Ocean nutrient cycling, biogeochemical modeling
+  Inputs: C(Carbon Content, µmol/L, default 106, 0-1000 [Elemental Composition]) | N(Nitrogen Content, µmol/L, default 16, 0-100 [Elemental Composition]) | P(Phosphorus Content, µmol/L, default 1, 0-10 [Elemental Composition])
+  Ref: Redfield 1934
+
+════════════════════════════════════════════════════════════
+DOMAIN 8: Agriculture & Crop Science  (Part 2: Biosphere, Agriculture & Chemistry)
+════════════════════════════════════════════════════════════
+
+Eq 58 | Domain 8: Agriculture & Crop Science | Crop Growing Degree Days | GDD = Σ max(min(T_avg, T_upper) - T_base, 0) | Crop phenology, planting/harvest timing
+  Inputs: T_avg(Average Daily Temperature, °C, default 20, -10-50 [Meteorological]) | T_base(Base Temperature, °C, default 10, 0-20 [Crop Parameters]) | T_upper(Upper Threshold Temperature, °C, default 30, 20-50 [Crop Parameters])
+  Ref: McMaster 1997
+
+Eq 59 | Domain 8: Agriculture & Crop Science | Priestley-Taylor Evapotranspiration | ET_p = α × (Δ/(Δ+γ)) × (R_n - G) | Radiation-driven ET estimation
+  Inputs: α(Priestley-Taylor Coefficient, —, default 1.26, 1-2 [Evaporation Parameters]) | Δ(Slope Vapor Pressure Curve, kPa/°C, default 0.15, 0-1 [Meteorological]) | γ(Psychrometric Constant, kPa/°C, default 0.067, 0.04-0.1 [Meteorological]) | Rₙ(Net Radiation, W/m², default 150, -100-1000 [Radiation]) | G(Soil Heat Flux, W/m², default 10, -100-500 [Energy Balance])
+  Ref: Priestley 1972
+
+Eq 60 | Domain 8: Agriculture & Crop Science | Hargreaves-Samani ET | ET₀ = 0.0023×R_a×(T_avg+17.8)×√(T_max-T_min)×0.408 | Temperature-only ET estimation
+  Inputs: Rₐ(Extraterrestrial Radiation, MJ/m²day, default 25, 0-50 [Radiation]) | T_max(Maximum Temperature, °C, default 30, -10-50 [Meteorological]) | T_min(Minimum Temperature, °C, default 15, -30-40 [Meteorological])
+  Ref: Hargreaves 1985
+
+Eq 61 | Domain 8: Agriculture & Crop Science | FAO Yield-Water Response | (1-Y_a/Y_m) = K_y × (1-ET_a/ET_m) | Crop yield loss from drought
+  Inputs: Yₐ(Actual Yield, t/ha, default 5, 0-20 [Yield]) | Yₘ(Maximum Yield, t/ha, default 8, 0-20 [Yield]) | K_y(Yield Response Factor, —, default 1.1, 0-2 [Crop Parameters]) | ETₐ(Actual Evapotranspiration, mm, default 400, 0-2000 [Water Balance]) | ETₘ(Maximum Evapotranspiration, mm, default 600, 0-2000 [Water Balance])
+  Ref: Doorenbos 1979
+
+Eq 62 | Domain 8: Agriculture & Crop Science | Phytoplankton Temperature Growth | μ_max = μ₂₀ × 1.066^(T-20) | Phytoplankton growth rate
+  Inputs: μ₂₀(Growth Rate at 20°C, /day, default 0.8, 0-5 [Physiology]) | T(Temperature, °C, default 20, 0-40 [Environmental])
+  Ref: Eppley 1972
+
+Eq 63 | Domain 8: Agriculture & Crop Science | Bigleaf Penman-Monteith | H = ρc_p(T_s-T_a)/r_a, LE = ρL_v(e_s-e_a)/(r_a+r_s) | Land surface modeling, evapotranspiration, surface energy balance
+  Inputs: ρ(Air Density, kg/m³, default 1.2, 0.5-1.5 [Air Properties]) | c_p(Specific Heat at Constant Pressure, J/kgK, default 1005, 800-1200 [Air Properties]) | T_s(Surface Temperature, °C, default 30, -10-60 [Temperatures]) | T_a(Air Temperature, °C, default 25, -20-50 [Temperatures]) | r_a(Aerodynamic Resistance, s/m, default 50, 1-500 [Resistances]) | r_s(Surface Resistance, s/m, default 100, 10-1000 [Resistances]) | e_s(Saturation Vapor Pressure, hPa, default 30, 0-100 [Vapor]) | e_a(Actual Vapor Pressure, hPa, default 15, 0-100 [Vapor])
+  Ref: Sellers 1986
+
+════════════════════════════════════════════════════════════
+DOMAIN 9: Atmospheric Chemistry & Aerosols  (Part 2: Biosphere, Agriculture & Chemistry)
+════════════════════════════════════════════════════════════
+
+Eq 64 | Domain 9: Atmospheric Chemistry & Aerosols | Chapman Ozone Cycle | O₂ + hν → 2O; O + O₂ + M → O₃ + M; O₃ + hν → O₂ + O; O + O₃ → 2O₂ | Stratospheric ozone, UV radiation modeling
+  Inputs: O₂(Oxygen Concentration, mol/m³, default 8, 0-20 [Species Concentrations]) | hν(Solar Irradiance Factor, —, default 1, 0-2 [Radiation])
+  Ref: Chapman 1930
+
+Eq 65 | Domain 9: Atmospheric Chemistry & Aerosols | Pollutant Lifetime | τ = 1/(k×[OH]) | Atmospheric residence time, pollutant transport
+  Inputs: k(Reaction Rate Constant, cm³/s, default 1e-12, 1e-20-0.00001 [Kinetics]) | [OH](Hydroxyl Radical Concentration, mol/cm³, default 0.000001, 1e-10-0.001 [Atmospheric Chemistry])
+  Ref: Atkinson 2000
+
+════════════════════════════════════════════════════════════
+DOMAIN 10: Ocean Dynamics & Circulation  (Part 3: Ocean & Coastal Advanced)
+════════════════════════════════════════════════════════════
+
+Eq 66 | Domain 10: Ocean Dynamics & Circulation | Sverdrup Balance | βv = (1/ρ₀)(∇×τ)_z | Wind-driven ocean interior transport
+  Inputs: β(Rossby Parameter (df/dy), /m·s, default 2e-11, 0-1e-10 [Earth Parameters]) | ρ₀(Reference Seawater Density, kg/m³, default 1025, 1000-1050 [Fluid Properties]) | (∇×τ)_z(Wind Stress Curl (z), N/m³, default 0.000001, -0.001-0.001 [Wind Forcing])
+  Ref: Sverdrup 1947
+
+Eq 67 | Domain 10: Ocean Dynamics & Circulation | Stommel Western Boundary Current | β×∂ψ/∂x = curlτ - R∇²ψ | Gulf Stream, Kuroshio — westward intensification
+  Inputs: β(Rossby Parameter, /m·s, default 2e-11, 0-1e-10 [Earth Parameters]) | ψ(Streamfunction, m²/s, default 100000, -1000000000-1000000000 [Flow]) | curlτ(Wind Stress Curl, N/m³, default 0.000001, -0.001-0.001 [Wind Forcing]) | R(Friction Coefficient, /s, default 0.000001, 1e-10-1 [Dissipation]) | ν(Viscosity, m²/s, default 0.0001, 0-1 [Dissipation])
+  Ref: Stommel 1948
+
+Eq 68 | Domain 10: Ocean Dynamics & Circulation | Munk Viscous Boundary Layer | A_H∇⁴ψ - β×∂ψ/∂x = curlτ | Lateral viscosity-driven boundary current width
+  Inputs: A_H(Lateral Eddy Viscosity, m²/s, default 10000, 0-10000000 [Mixing]) | β(Rossby Parameter, /m·s, default 2e-11, 0-1e-10 [Earth Parameters]) | ψ(Streamfunction, m²/s, default 100000, -1000000000-1000000000 [Flow]) | curlτ(Wind Stress Curl, N/m³, default 0.000001, -0.001-0.001 [Wind Forcing])
+  Ref: Munk 1950
+
+Eq 69 | Domain 10: Ocean Dynamics & Circulation | Stommel Box Model (Thermohaline) | dT/dt = λ(T*-T) - q(T-T_p) | Thermohaline circulation stability, AMOC collapse
+  Inputs: λ(Relaxation Rate, /yr, default 0.1, 0-1 [Thermal]) | T*(Equilibrium Temperature, °C, default 15, -5-40 [Thermal]) | T(Box Temperature, °C, default 10, -5-40 [State]) | q(Overturning Strength, /yr, default 0.5, 0-5 [Circulation])
+  Ref: Stommel 1961
+
+Eq 70 | Domain 10: Ocean Dynamics & Circulation | TEOS-10 Seawater Density | ρ = ρ(S_A, Θ, p) | Ocean density, buoyancy, sound speed
+  Inputs: S(Salinity, PSU, default 35, 0-42 [Seawater Properties]) | Θ(Potential Temperature, °C, default 10, -5-40 [Seawater Properties]) | p(Pressure, dbar, default 0, 0-10000 [Depth])
+  Ref: IOC 2010
+
+Eq 71 | Domain 10: Ocean Dynamics & Circulation | Osborn-Cox Turbulent Diffusivity | K_ρ = γ×ε/N² | Ocean mixing, vertical diffusivity
+  Inputs: γ(Mixing Efficiency, —, default 0.2, 0-0.5 [Turbulence Parameters]) | ε(TKE Dissipation Rate, W/kg, default 1e-8, 1e-12-0.0001 [Turbulence Parameters]) | N²(Buoyancy Frequency Squared, /s², default 0.00001, 0-1 [Stratification])
+  Ref: Osborn 1972
+
+Eq 72 | Domain 10: Ocean Dynamics & Circulation | Price-Weller-Pinkel Mixed Layer | Deepening when bulk Richardson number > 0.65 | Ocean mixed layer depth evolution
+  Inputs: Ri(Bulk Richardson Number, —, default 0.5, 0-10 [Stratification])
+  Ref: Price 1986
+
+Eq 73 | Domain 10: Ocean Dynamics & Circulation | Pierson-Moskowitz Sea State | S(f) = αg²f⁻⁵×exp[-5/4(f_m/f)⁴] | Fully developed sea state, wave forecasting
+  Inputs: α(Phillips Constant, —, default 0.0081, 0-1 [Spectral Parameters]) | g(Gravity, m/s², default 9.81, 9.8-9.82 [Physical Constants]) | f_m(Peak Frequency, Hz, default 0.1, 0.01-10 [Spectral Parameters])
+  Ref: Pierson 1964
+
+════════════════════════════════════════════════════════════
+DOMAIN 11: Coastal & Wave Mechanics  (Part 3: Ocean & Coastal Advanced)
+════════════════════════════════════════════════════════════
+
+Eq 74 | Domain 11: Coastal & Wave Mechanics | Wave Runup (Stockdon) | R₂ = 1.1(η_u + 0.5√(S_w² + S_ig²)) | Coastal flooding, beach erosion, dune overtopping
+  Inputs: η_u(Wave Setup, m, default 0.5, 0-5 [Hydrodynamic]) | S_w(Incident Swash Amplitude, m, default 0.8, 0-5 [Hydrodynamic]) | S_ig(Infragravity Swash Amplitude, m, default 0.6, 0-5 [Hydrodynamic])
+  Ref: Stockdon 2006
+
+Eq 75 | Domain 11: Coastal & Wave Mechanics | Bruun Rule | R = (L × S) / (B + h*) | Shoreline retreat projection under sea level rise
+  Inputs: L*(Active Profile Length L, m, default 500, 50-5000 [Beach Geometry]) | S(Sea Level Rise Rate, m/yr, default 0.003, 0-1 [Forcing]) | B(Berm Height, m, default 2, 0-20 [Beach Geometry]) | h*(Closure Depth, m, default 8, 1-50 [Beach Geometry])
+  Ref: Bruun 1962
+
+Eq 76 | Domain 11: Coastal & Wave Mechanics | Breaker Criterion | H_b = 0.78 × d_b | Breaking wave height estimation, surf zone dynamics
+  Inputs: d_b(Breaking Water Depth, m, default 3, 0.1-50 [Nearshore Bathymetry])
+  Ref: McCowan 1894
+
+Eq 77 | Domain 11: Coastal & Wave Mechanics | Longshore Sediment Transport | Q_l = K × H_sb^(5/2) × sin(2θ_b) | Beach erosion, navigation channel infilling, coastal engineering
+  Inputs: K(CERC Coefficient K, —, default 0.77, 0.2-2 [Empirical]) | H_sb(Breaking Significant Wave Height, m, default 1.5, 0.1-10 [Wave Parameters]) | θ_b(Breaking Wave Angle, rad, default 0.35, 0-1.57 [Wave Parameters])
+  Ref: US Army Corps 1984
+
+Eq 78 | Domain 11: Coastal & Wave Mechanics | Wave Dispersion Relation | ω² = gk × tanh(kh) | Wave celerity, wavelength transformation, coastal hydrodynamics
+  Inputs: g(Gravitational Acceleration, m/s², default 9.81, 9.8-9.82 [Physical Constants]) | k(Wavenumber, rad/m, default 0.1, 0.001-10 [Wave Parameters]) | h(Water Depth, m, default 10, 0-10000 [Bathymetry])
+  Ref: Airy 1845
+
+Eq 79 | Domain 11: Coastal & Wave Mechanics | Stokes Drift | u_s = (ω × k × a² / 2) × exp(2kz) | Wave-driven currents, Langmuir circulation, sediment transport, oil spill trajectory
+  Inputs: ω(Angular Frequency, rad/s, default 0.628, 0.01-10 [Wave Parameters]) | k(Wavenumber, rad/m, default 0.04, 0.001-10 [Wave Parameters]) | a(Wave Amplitude, m, default 1, 0-20 [Wave Parameters]) | z(Depth (negative downward), m, default 0, -500-0 [Position])
+  Ref: Stokes 1847
+
+Eq 80 | Domain 11: Coastal & Wave Mechanics | JONSWAP Wave Spectrum | S(f) = αg²f⁻⁵exp[-5/4(f_p/f)⁴]γ^exp[-(f-f_p)²/(2σ²f_p²)] | Fetch-limited sea states, wave hindcasting, coastal wave climate assessment
+  Inputs: α(Phillips Constant α, —, default 0.0081, 0.001-0.05 [Spectral Parameters]) | g(Gravity, m/s², default 9.81, 9.8-9.82 [Physical Constants]) | f_m(PM Peak Frequency, Hz, default 0.1, 0.01-10 [Spectral Parameters]) | γ(Peak Enhancement Factor, —, default 3.3, 1-10 [Spectral Parameters])
+  Ref: Hasselmann 1973
+
+════════════════════════════════════════════════════════════
+DOMAIN 12: Geomorphology & Mass Wasting  (Part 4: Geomorphology, Limnology & Cryosphere)
+════════════════════════════════════════════════════════════
+
+Eq 81 | Domain 12: Geomorphology & Mass Wasting | Stream Power Law | E = K×A^m×S^n | Bedrock erosion rate, landscape evolution
+  Inputs: K(Erodibility Coefficient, —, default 0.001, 0-1 [Bedrock]) | A(Upstream Drainage Area, m², default 1000000, 0-1000000000000 [Landscape]) | m(Area Exponent, —, default 0.5, 0-2 [Exponents]) | S(Channel Slope, m/m, default 0.01, 0-1 [Landscape])
+  Ref: Howard 1983
+
+Eq 82 | Domain 12: Geomorphology & Mass Wasting | River Network Scaling | L = c×A^h (h ≈ 0.6) | River network scaling, basin morphology, hypsometry
+  Inputs: c(Scaling Coefficient, —, default 1.5, 0-100 [Empirical]) | A(Drainage Basin Area, km^2, default 100, 0.01-100000 [Basin Geometry]) | h(Scaling Exponent, —, default 0.6, 0.4-0.8 [Empirical])
+  Ref: Hack 1957
+
+Eq 83 | Domain 12: Geomorphology & Mass Wasting | Richardson Fractal Dimension | L(s) ∝ s^(1-D) | Coastline complexity, landscape roughness, boundary fractal analysis
+  Inputs: L(Measured Coastline Length, km, default 100, 0-10000 [Measurement]) | s(Measurement Scale (Ruler Length), km, default 10, 0.1-1000 [Measurement])
+  Ref: Richardson 1961
+
+Eq 84 | Domain 12: Geomorphology & Mass Wasting | Slope Stability Analysis | FS = [c' + (γzcos^2β - u)tanφ'] / (γz sinβ cosβ) | Landslide factor of safety, shallow landslide hazard assessment
+  Inputs: c'(Effective Cohesion, kPa, default 10, 0-100 [Soil Strength]) | γz(Total Unit Weight × Depth, kPa, default 100, 0-500 [Loading]) | cosβ(Cosine of Slope Angle, —, default 0.866, 0-1 [Geometry]) | u(Pore Water Pressure, kPa, default 20, 0-200 [Hydrology]) | φ'(Tan of Effective Friction Angle, —, default 0.6, 0.1-1.5 [Soil Strength]) | sinβ(Sine of Slope Angle, —, default 0.5, 0-1 [Geometry]) | cos^2β(Cos^2 of Slope Angle, —, default 0.75, 0-1 [Geometry])
+  Ref: Skempton 1957
+
+Eq 85 | Domain 12: Geomorphology & Mass Wasting | Voellmy Friction Model | τ = μσ_n + ρgu^2/ξ | Debris flow runout, avalanche dynamics, granular flow modeling
+  Inputs: μ(Coulomb Friction Coefficient, —, default 0.3, 0-1 [Friction]) | σ_n(Normal Stress, kPa, default 100, 0-1000 [Loading]) | ξ(Turbulent Friction Parameter, m/s^2, default 100, 0-10000 [Turbulence])
+  Ref: Voellmy 1955
+
+Eq 86 | Domain 12: Geomorphology & Mass Wasting | Stream Power Index | SPI = ln(A_s × tanβ) | Erosion potential from DEM, landscape process mapping
+  Inputs: A_s(Specific Contributing Area, m^2/m, default 100, 0-1000000 [Flow]) | tan β(Slope (tangent), —, default 0.1, 0-10 [Topography])
+  Ref: Moore 1991
+
+Eq 87 | Domain 12: Geomorphology & Mass Wasting | Topographic Wetness Index | TWI = ln(A_s/tanβ) | Soil moisture estimation, saturation zones, landslide hazard, wetland delineation
+  Inputs: A_s(Specific Contributing Area, m^2/m, default 100, 0-1000000 [Flow]) | tan β(Slope (tangent), —, default 0.1, 0-10 [Topography])
+  Ref: Beven 1979
+
+════════════════════════════════════════════════════════════
+DOMAIN 13: Limnology & Freshwater  (Part 4: Geomorphology, Limnology & Cryosphere)
+════════════════════════════════════════════════════════════
+
+Eq 88 | Domain 13: Limnology & Freshwater | Lake Evaporation Estimation | E = K_M×(e_w - e_a)×(1 + u/16) | Lake water loss estimation, water budget, reservoir management
+  Inputs: K_m(Pan Coefficient, —, default 0.7, 0.1-1.5 [Empirical]) | e_w(Saturation Vapor Pressure at Water Surface, hPa, default 25, 0-100 [Meteorology]) | e_a(Actual Vapor Pressure of Overlying Air, hPa, default 15, 0-100 [Meteorology]) | u(Wind Speed at 9 m Height, km/h, default 10, 0-100 [Meteorology])
+  Ref: Meyer 1915
+
+Eq 89 | Domain 13: Limnology & Freshwater | Schmidt Stability Number | S = (1/A_0)∫A(z)(ρ_z - ρ_m)(z - z_v)dz | Lake thermal stratification, mixing regime, water quality management
+  Inputs: A(Lake Surface Area, m^2, default 1000000, 0-10000000000 [Morphometry]) | z(Maximum Depth, m, default 50, 0-1000 [Morphometry])
+  Ref: Schmidt 1928
+
+Eq 90 | Domain 13: Limnology & Freshwater | Nash Cascade (Linear Reservoirs) | q(t) = (t^(n-1)/(K^(n-1)(n-1)!))(1/K)exp(-t/K)Q_0 | Watershed response, unit hydrograph, flood forecasting
+  Inputs: n(Number of Linear Reservoirs, —, default 3, 1-10 [Model Structure]) | K(Storage Coefficient (Residence Time), h, default 6, 0.1-48 [Model Structure]) | t(Time, h, default 12, 0-1000 [Temporal]) | Q_0(Initial Discharge (Peak Inflow), m^3/s, default 100, 0-10000 [Hydrology])
+  Ref: Nash 1957
+
+════════════════════════════════════════════════════════════
+DOMAIN 14: Cryosphere Advanced & Volcanology  (Part 4: Geomorphology, Limnology & Cryosphere)
+════════════════════════════════════════════════════════════
+
+Eq 91 | Domain 14: Cryosphere Advanced & Volcanology | Glacier Mass Balance (PDD) | B_n = Accumulation - sum(DDF × T_positive) | Glacier health monitoring, sea level rise projection, water resources
+  Inputs: Accum(Annual Accumulation (Snowfall), m w.e., default 0.5, 0-10 [Mass Balance]) | DDF(Degree-Day Factor, m w.e./degC-day, default 0.005, 0-0.1 [Melt]) | T_pos(Sum of Positive Degree-Days, degC-day, default 800, 0-5000 [Climate])
+  Ref: Braithwaite 1989
+
+Eq 92 | Domain 14: Cryosphere Advanced & Volcanology | Stefan Permafrost Active Layer | ALT = sqrt(2K×DIFI/L) | Permafrost depth, climate change monitoring, infrastructure stability
+  Inputs: K(Thermal Conductivity, W/mK, default 2, 0.1-10 [Thermal Properties]) | DIFI(Degree-Days of Thawing (Thawing Index), degC-day, default 1000, 0-10000 [Climate]) | L(Volumetric Latent Heat of Fusion, J/m^3, default 300000000, 0-500000000 [Thermal Properties])
+  Ref: Stefan 1891
+
+Eq 93 | Domain 14: Cryosphere Advanced & Volcanology | Herron-Langway Firn Densification | dρ/dt = k×b×(ρ_i - ρ_f) | Ice core age-depth, snowpack evolution, glacier compaction
+  Inputs: k(Densification Rate Constant, /year, default 0.01, 0-1 [Empirical]) | b(Annual Accumulation Rate, kg/m^2/yr, default 100, 0-10000 [Climate]) | ρ_i(Ice Density, kg/m^3, default 917, 800-950 [Density]) | ρ_f(Firn Density, kg/m^3, default 550, 300-850 [Density])
+  Ref: Herron 1980
+
+Eq 94 | Domain 14: Cryosphere Advanced & Volcanology | VEI Volume Relationship | log_10(V_km^3) = -4.42 + 0.75×VEI | Volcanic eruption classification, hazard assessment
+  Inputs: VEI(Volcanic Explosivity Index, —, default 4, 0-8 [Eruption])
+  Ref: Newhall 1982
+
+Eq 95 | Domain 14: Cryosphere Advanced & Volcanology | Morton-Taylor-Turner Buoyant Plume | dz/dt = f(M_dot, ρ_air, buoyancy), α ≈ 0.1 | Volcanic plume rise, ash cloud height, atmospheric convection
+  Inputs: Q_dot(Heat Output (Buoyancy Flux), MW, default 100, 0-100000 [Eruption]) | ρ_air(Ambient Air Density, kg/m^3, default 1.2, 0.5-1.5 [Atmosphere]) | α(Entrainment Coefficient, —, default 0.1, 0.05-0.2 [Plume Dynamics])
+  Ref: Morton 1956
+
+════════════════════════════════════════════════════════════
+DOMAIN 15: Climate Dynamics & Feedback  (Part 5: Climate & Atmosphere Advanced)
+════════════════════════════════════════════════════════════
+
+Eq 96 | Domain 15: Climate Dynamics & Feedback | Budyko-Sellers Energy Balance | C×∂T/∂t = Q(1-α(T)) - I(T) + div(D∇T) | Climate sensitivity, ice-line stability
+  Inputs: C(Heat Capacity, J/m²K, default 100000000, 1000000-10000000000 [System Properties]) | Q(Incoming Solar Radiation, W/m², default 340, 0-500 [Forcing]) | α(Albedo, —, default 0.3, 0-1 [Surface Properties]) | I(Outgoing Longwave, W/m², default 240, 0-400 [Radiation]) | D(Diffusion Coefficient, W/mK, default 1, 0-100 [Transport]) | ∇²T(Temperature Laplacian, K/m², default 0, -1-1 [Transport])
+  Ref: Budyko 1969
+
+Eq 97 | Domain 15: Climate Dynamics & Feedback | Climate Sensitivity | ΔT = λ × ΔF, where λ = (λ₀⁻¹ - f)⁻¹ | Global warming projection from CO₂ forcing
+  Inputs: ΔF(Radiative Forcing, W/m², default 4, 0-20 [Forcing]) | λ₀(Planck Feedback, W/m²K, default 3.2, 1-5 [Feedback]) | f(Net Feedback Factor, W/m²K, default 1.5, -5-5 [Feedback])
+  Ref: Standard
+
+Eq 98 | Domain 15: Climate Dynamics & Feedback | Planck Feedback Parameter | λ_P = ∂R/∂T ≈ 3.2 W m⁻² K⁻¹ | Climate feedback decomposition
+  Inputs: ∂R/∂T(Planck Feedback Parameter, W/m²K, default 3.2, 1-5 [Radiation Parameters])
+  Ref: Standard
+
+Eq 99 | Domain 15: Climate Dynamics & Feedback | Rossby Wave Dispersion | ω = ūk - βk/(k²+l²) | Large-scale atmospheric wave dynamics
+  Inputs: β(Rossby Parameter, /m·s, default 2e-11, 0-1e-10 [Mean Flow]) | k_x(Zonal Wavenumber, rad/m, default 0.000001, 0-1 [Wave Parameters]) | k_y(Meridional Wavenumber, rad/m, default 0.000001, 0-1 [Wave Parameters])
+  Ref: Rossby 1939
+
+Eq 100 | Domain 15: Climate Dynamics & Feedback | Charney-Stern Theorem | Baroclinic instability requires ∂q/∂y < 0 | Mid-latitude storm generation conditions
+  Inputs: ∂q/∂y(Meridional PV Gradient, /m·s, default -1e-11, -1e-9-1e-9 [Flow Properties])
+  Ref: Charney 1962
+
+Eq 101 | Domain 15: Climate Dynamics & Feedback | Eady Growth Rate | σ_Eady ≈ 0.31 × (f/N) × |∂u/∂z| | Baroclinic instability, storm track intensity
+  Inputs: f(Coriolis Parameter, /s, default 0.0001, 0-0.0002 [Mean Flow]) | N(Brunt-Väisälä Frequency, /s, default 0.01, 0.001-0.1 [Stratification]) | ∂u/∂z(Vertical Wind Shear, /s, default 0.005, 0-1 [Wind Profile])
+  Ref: Eady 1949
+
+════════════════════════════════════════════════════════════
+DOMAIN 16: Atmospheric Dynamics & Turbulence  (Part 5: Climate & Atmosphere Advanced)
+════════════════════════════════════════════════════════════
+
+Eq 102 | Domain 16: Atmospheric Dynamics & Turbulence | Quasi-Geostrophic Potential Vorticity | q = ∇²ψ + f + (∂/∂p)[(f²/N²)(∂ψ/∂p)] | Conserved tracer for large-scale dynamics
+  Inputs: ψ(Streamfunction, m²/s, default 1000000, -1000000000-1000000000 [Flow Field]) | f(Coriolis Parameter, /s, default 0.0001, 0-0.0002 [Earth Rotation]) | ∂²ψ/∂p²(Vertical Curvature, —, default 0.000001, -1-1 [Vertical Structure])
+  Ref: Charney 1948
+
+Eq 103 | Domain 16: Atmospheric Dynamics & Turbulence | Reynolds Decomposition | u = ū + u' | Turbulent flow separation, Navier-Stokes averaging
+  Inputs: u_bar(Mean Flow Velocity, m/s, default 10, 0-100 [Mean Flow]) | u_prime(Turbulent Fluctuation, m/s, default 2, -50-50 [Turbulence])
+  Ref: Reynolds 1895
+
+Eq 104 | Domain 16: Atmospheric Dynamics & Turbulence | Ekman Layer Depth | D_E = π√(2K_m/f) | Frictional boundary layer, ocean/atmosphere
+  Inputs: K_m(Eddy Viscosity, m²/s, default 10, 0.001-1000 [Turbulence]) | f(Coriolis Parameter, /s, default 0.0001, 0-0.0002 [Earth Rotation])
+  Ref: Ekman 1905
+
+Eq 105 | Domain 16: Atmospheric Dynamics & Turbulence | Convective Velocity Scale | w_* = (g/θ̄_v × (w'θ'_v)₀ × z_i)^(1/3) | Convective boundary layer scaling
+  Inputs: g(Gravitational Acceleration, m/s², default 9.81, 0-20 [Physical Constants]) | θ̄_v(Mean Virtual Potential Temperature, K, default 300, 200-400 [State Variables]) | w'θ'_v₀(Surface Virtual Heat Flux, K·m/s, default 0.1, 0-10 [Surface Flux]) | z_i(Boundary Layer Height, m, default 1000, 10-5000 [CBL Structure])
+  Ref: Deardorff 1970
+
+Eq 106 | Domain 16: Atmospheric Dynamics & Turbulence | Petterssen Frontogenesis | F = d|∇θ|/dt = |∇θ|(D·cos2β - δ) + cosβ|∂u/∂s||∇θ| | Weather front intensification rate
+  Inputs: |∇θ|(Potential Temperature Gradient, K/m, default 0.01, 0-1 [Thermal Field]) | D(Horizontal Divergence, /s, default 0.00001, -1-1 [Kinematic Field]) | β(Isentrope-Dilatation Angle, rad, default 0.5, 0-1.57 [Kinematic Field]) | δ(Total Deformation, /s, default 0.00001, 0-1 [Kinematic Field]) | |∂u/∂s|(Shear Along Isentropes, /s, default 0.000001, 0-1 [Kinematic Field])
+  Ref: Petterssen 1936
+
+Eq 107 | Domain 16: Atmospheric Dynamics & Turbulence | Vorticity Equation | Dζ/Dt = -(ζ+f)(∇·V) + (curl F)_z + tilting | Storm dynamics, cyclone development
+  Inputs: ζ(Relative Vorticity, /s, default 0.00001, -1-1 [Vorticity]) | f(Coriolis Parameter, /s, default 0.0001, 0-0.0002 [Earth Rotation]) | ∇·V(Horizontal Divergence, /s, default 0.00001, -1-1 [Divergence])
+  Ref: Standard
+
+════════════════════════════════════════════════════════════
+DOMAIN 17: Cloud Physics & Precipitation  (Part 5: Climate & Atmosphere Advanced)
+════════════════════════════════════════════════════════════
+
+Eq 108 | Domain 17: Cloud Physics & Precipitation | Köhler Equation (Cloud Activation) | S ≈ a/r - b/r³ | Cloud droplet activation, aerosol-cloud interaction
+  Inputs: a(Kelvin Curvature Coefficient, m, default 1.2e-9, 0-0.000001 [Constants]) | r(Droplet Radius, m, default 0.000001, 1e-8-0.001 [Droplet]) | b(Solute Coefficient, m³, default 1e-18, 0-1e-10 [Aerosol])
+  Ref: Köhler 1936
+
+Eq 109 | Domain 17: Cloud Physics & Precipitation | Marshall-Palmer Drop Size Distribution | N(D) = N₀ × exp(-ΛD) | Precipitation microphysics, radar reflectivity
+  Inputs: N₀(Intercept Parameter, m⁻⁴, default 8000000, 0-1000000000 [DSD Parameters]) | Λ(Slope Parameter, 1/m, default 4000, 0-50000 [DSD Parameters]) | D(Drop Diameter, m, default 0.001, 0-0.01 [Drop Size])
+  Ref: Marshall 1948
+
+Eq 110 | Domain 17: Cloud Physics & Precipitation | Z-R Relationship | Z = aR^b (e.g., Z = 200R^1.6) | Weather radar rainfall estimation
+  Inputs: a(Z-R Coefficient, —, default 200, 0-1000 [Relation Parameters]) | R(Rainfall Rate, mm/h, default 10, 0-500 [Precipitation])
+  Ref: Marshall 1948
+
+════════════════════════════════════════════════════════════
+DOMAIN 18: Geodesy & Reference Frames  (Part 6: Space Environment & Satellite)
+════════════════════════════════════════════════════════════
+
+Eq 111 | Domain 18: Geodesy & Reference Frames | IERS Earth Rotation Matrix | R(t) = P(t)·N(t)·R(t)·W(t) | Satellite position correction, GPS accuracy
+  Inputs: P(Precession Matrix, —, default 1, 0-1 [Rotation Matrices]) | N(Nutation Matrix, —, default 1, 0-1 [Rotation Matrices]) | R(Earth Rotation Matrix (GAST), —, default 1, 0-1 [Rotation Matrices]) | W(Polar Motion Matrix, —, default 1, 0-1 [Rotation Matrices])
+  Ref: IERS Conventions 2010
+
+Eq 112 | Domain 18: Geodesy & Reference Frames | Earth Tides (Love Numbers) | u_r = Σ h_n × V_n / g | Sub-meter satellite/GPS correction
+  Inputs: hₙ(Love Number h_n, —, default 0.603, 0-1 [Love Numbers]) | Vₙ(Tidal Potential (degree n), m²/s², default 1, 0-10 [Tidal Potential]) | g(Surface Gravity, m/s², default 9.81, 9.8-9.82 [Constants])
+  Ref: Wahr 1981
+
+Eq 113 | Domain 18: Geodesy & Reference Frames | EGM2008 Gravity Field | V(r,φ,λ) = (GM/r)ΣΣ(R/r)^n(C_nmcos(mλ)+S_nmsin(mλ))P_nm(sinφ) | Global geoid, precise orbit determination
+  Inputs: GM(Earth Gravitational Constant, m³/s², default 398600441500000, 0-1000000000000000 [Constants]) | r(Radial Distance, m, default 7000000, 6000000-10000000 [Position]) | C_nm(Cosine Coefficient, —, default 0.000001, -1-1 [Coefficients]) | S_nm(Sine Coefficient, —, default 0.000001, -1-1 [Coefficients]) | P_nm(Legendre Polynomial, —, default 1, -1-1 [Coefficients])
+  Ref: Pavlis 2008
+
+Eq 114 | Domain 18: Geodesy & Reference Frames | Helmert 7-Parameter Transformation | X_t = S·R·X + T | Datum conversion WGS84/ITRF
+  Inputs: S(Scale Factor (1+ppm), —, default 1.000001, 0-2 [Datum Parameters]) | R(Rotation Matrix (combined), —, default 1, 0-2 [Datum Parameters]) | T(Translation Vector (x component), m, default 0, -1000-1000 [Datum Parameters])
+  Ref: Heiskanen 1967
+
+Eq 115 | Domain 18: Geodesy & Reference Frames | Geoid Height | H ≈ h - N (N = geoid undulation) | Height reference frame transformation
+  Inputs: h(Ellipsoidal Height (GPS), m, default 100, -500-10000 [GNSS Height]) | N(Geoid Undulation, m, default 30, -200-200 [Geoid Model])
+  Ref: Standard
+
+════════════════════════════════════════════════════════════
+DOMAIN 19: Thermosphere, Ionosphere & Magnetosphere  (Part 6: Space Environment & Satellite)
+════════════════════════════════════════════════════════════
+
+Eq 116 | Domain 19: Thermosphere, Ionosphere & Magnetosphere | NRLMSISE-00 Thermosphere | ρ = Σ n_i × m_i | Satellite drag density, orbital decay
+  Inputs: n_N₂(N₂ Number Density, m⁻³, default 500000000000000000, 0-1e+30 [Number Densities]) | n_O₂(O₂ Number Density, m⁻³, default 100000000000000000, 0-1e+30 [Number Densities]) | n_O(O Number Density, m⁻³, default 50000000000000000, 0-1e+30 [Number Densities]) | m_N₂(N₂ Molecular Mass, kg, default 4.65e-26 [Molecular Masses]) | m_O₂(O₂ Molecular Mass, kg, default 5.31e-26 [Molecular Masses]) | m_O(O Atomic Mass, kg, default 2.66e-26 [Molecular Masses])
+  Ref: Picone 2002
+
+Eq 117 | Domain 19: Thermosphere, Ionosphere & Magnetosphere | IRI-2016 Ionosphere | Empirical electron density profiles | GPS accuracy, radio propagation
+  Inputs: N_e(Electron Density, m⁻³, default 100000000000, 100000000-10000000000000 [Ionosphere Parameters]) | h(Altitude, m, default 350000, 50000-2000000 [Location]) | NmF2(F2 Peak Density, m⁻³, default 1000000000000, 10000000000-5000000000000 [Ionosphere Parameters]) | hmF2(F2 Peak Height, m, default 350000, 150000-600000 [Ionosphere Parameters])
+  Ref: Bilitza 2017
+
+Eq 118 | Domain 19: Thermosphere, Ionosphere & Magnetosphere | Joule Heating | Q_J = J·E = σ×E² | Storm-time thermospheric density spike
+  Inputs: J(Current Density, A/m², default 0.000001, 0-1 [Current]) | E(Electric Field, V/m, default 0.01, 0-1 [Electric Field]) | σ(Pedersen Conductivity, S/m, default 0.000005, 0-0.01 [Conductivity])
+  Ref: Standard
+
+Eq 119 | Domain 19: Thermosphere, Ionosphere & Magnetosphere | Ionospheric Scintillation (S4) | S4 = √((⟨I²⟩ - ⟨I⟩²) / ⟨I⟩²) | GPS reliability assessment
+  Inputs: ⟨I⟩(Mean Intensity, —, default 1, 0-100 [Signal Intensity]) | σ_I(Intensity Std Dev, —, default 0.2, 0-10 [Signal Intensity])
+  Ref: Standard GNSS
+
+Eq 120 | Domain 19: Thermosphere, Ionosphere & Magnetosphere | Magnetopause Standoff (Shue) | R_mp = 107.4×P_dyn^(-1/6.6)×[1+0.013×exp(0.19×Bz)] R_E | Magnetopause location, solar wind compression
+  Inputs: P_dyn(Solar Wind Dynamic Pressure, nPa, default 2, 0-100 [Solar Wind]) | B_z(IMF B_z Component, nT, default 0, -30-30 [Interplanetary Magnetic Field])
+  Ref: Shue 1998
+
+Eq 121 | Domain 19: Thermosphere, Ionosphere & Magnetosphere | Dst Ring Current Index | Dst* = Dst - b√(P_dyn) + c | Geomagnetic storm severity
+  Inputs: Dst(Raw Dst Index, nT, default -50, -500-100 [Magnetic Index]) | P_dyn(Solar Wind Dynamic Pressure, nPa, default 2, 0-100 [Solar Wind]) | b(Pressure Correction Coefficient, nT/√nPa, default 7.26, 0-20 [Correction Parameters]) | c(Offset, nT, default 0, -50-50 [Correction Parameters])
+  Ref: Sugiura 1964
+
+Eq 122 | Domain 19: Thermosphere, Ionosphere & Magnetosphere | Debye Length (Space Plasma) | λ_D = √(ε₀k_BT_e / n_ee²) | Space plasma shielding distance
+  Inputs: ε₀(Vacuum Permittivity, F/m, default 8.854e-12 [Constants]) | k_B(Boltzmann Constant, J/K, default 1.381e-23 [Constants]) | T_e(Electron Temperature, K, default 100000, 1000-10000000 [Plasma Parameters]) | n_e(Electron Density, m⁻³, default 100000000000, 1000000-1000000000000000 [Plasma Parameters])
+  Ref: Debye 1923
+
+════════════════════════════════════════════════════════════
+DOMAIN 20: Satellite Dynamics & Space Debris  (Part 6: Space Environment & Satellite)
+════════════════════════════════════════════════════════════
+
+Eq 123 | Domain 20: Satellite Dynamics & Space Debris | Satellite Drag Force | F_D = -½ρC_D(A/m)v_rel²v̂ | Orbital decay prediction
+  Inputs: ρ(Atmospheric Density, kg/m³, default 2e-12, 1e-20-0.00001 [Atmosphere]) | C_D(Drag Coefficient, —, default 2.2, 1-4 [Satellite]) | A(Cross-Sectional Area, m², default 10, 0.01-1000 [Satellite]) | m(Satellite Mass, kg, default 1000, 1-100000 [Satellite]) | v(Velocity, m/s, default 7500, 0-15000 [Orbit])
+  Ref: Standard
+
+Eq 124 | Domain 20: Satellite Dynamics & Space Debris | Orbital Decay Rate | da/dt = -(ρ×C_D×A×v)/m | Re-entry timeline estimation
+  Inputs: ρ(Atmospheric Density, kg/m³, default 2e-12, 1e-20-0.00001 [Atmosphere]) | C_D(Drag Coefficient, —, default 2.2, 1-4 [Satellite]) | A(Cross-Sectional Area, m², default 10, 0.01-1000 [Satellite]) | v(Velocity, m/s, default 7500, 0-15000 [Orbit]) | m(Satellite Mass, kg, default 1000, 1-100000 [Satellite])
+  Ref: King-Hele 1987
+
+Eq 125 | Domain 20: Satellite Dynamics & Space Debris | Collision Probability | P_c ≈ (A₁+A₂)/(2πσ_xσ_y) × exp(-d²/2σ²) | Conjunction assessment, collision avoidance
+  Inputs: A₁(Object 1 Area, m², default 10, 0-1000 [Objects]) | A₂(Object 2 Area, m², default 10, 0-1000 [Objects]) | σ_x(Position Uncertainty (x), m, default 10, 0-10000 [Covariance]) | σ_y(Position Uncertainty (y), m, default 10, 0-10000 [Covariance]) | d(Miss Distance, m, default 100, 0-10000 [Encounter])
+  Ref: Foster 1992
+
+Eq 126 | Domain 20: Satellite Dynamics & Space Debris | Kessler Syndrome Debris Growth | dN/dt = ½ρ²σvN² + L - βN³ - γN | Long-term debris environment projection
+  Inputs: ρ(Spatial Density, km⁻³, default 0.000001, 0-1 [Environment]) | σ(Collision Cross-Section, km², default 10, 0-1000 [Environment]) | v(Relative Velocity, km/s, default 10, 0-20 [Environment]) | N(Debris Population, —, default 10000, 0-1000000000 [State]) | L(Launch Source, km⁻³/yr, default 0, 0-1000 [Sources]) | β(Breakup Coefficient, /yr, default 1e-9, 0-1 [Losses]) | γ(Decay Coefficient, /yr, default 0.0001, 0-1 [Losses])
+  Ref: Kessler 1991
+
+Eq 127 | Domain 20: Satellite Dynamics & Space Debris | Hill-Clohessy-Wiltshire | ẍ-2nẏ-3n²x=a_x; ÿ+2nẋ=a_y; z̈+n²z=a_z | Satellite rendezvous, proximity operations
+  Inputs: n(Mean Motion, rad/s, default 0.001, 0-0.01 [Chief Orbit]) | a_x(Radial Acceleration, m/s², default 0, -10-10 [Thrust]) | a_y(Along-Track Acceleration, m/s², default 0, -10-10 [Thrust]) | a_z(Cross-Track Acceleration, m/s², default 0, -10-10 [Thrust])
+  Ref: Hill 1878
+
+════════════════════════════════════════════════════════════
+DOMAIN 21: Solar-Terrestrial & GNSS  (Part 6: Space Environment & Satellite)
+════════════════════════════════════════════════════════════
+
+Eq 128 | Domain 21: Solar-Terrestrial & GNSS | Kp Geomagnetic Index | Kp = Σ(w_i×K_i)/Σ(w_i) | Primary space weather severity metric
+  Inputs: wᵢ(Station Weights, —, default 1 [Kp Input]) | Kᵢ(Station K Indices, —, default 3, 0-9 [Kp Input]) | num_stations(Number of Stations, —, default 13, 1-13 [Kp Input])
+  Ref: Bartels 1949
+
+Eq 129 | Domain 21: Solar-Terrestrial & GNSS | DOP (Dilution of Precision) | GDOP = √(trace(H^TH)^(-1)) | GPS accuracy visualization
+  Inputs: tr(H)(Trace of Design Matrix, —, default 4, 1-100 [Geometry]) | num_satellites(Number of Satellites, —, default 8, 4-40 [Constellation]) | elevation_mask(Elevation Mask, °, default 10, 0-90 [Geometry])
+  Ref: Standard GNSS
+
+Eq 130 | Domain 21: Solar-Terrestrial & GNSS | Saastamoinen Tropospheric Delay | Δτ = (0.002277/sinθ)×[P+(1255/T+0.05)×e] | GPS signal correction
+  Inputs: θ(Elevation Angle, rad, default 0.5, 0.05-1.57 [Geometry]) | P(Surface Pressure, hPa, default 1013.25, 500-1100 [Meteorology]) | T(Surface Temperature, K, default 288, 200-320 [Meteorology]) | e(Water Vapor Pressure, hPa, default 10, 0-50 [Meteorology])
+  Ref: Saastamoinen 1972
+
+════════════════════════════════════════════════════════════
+DOMAIN 22: Groundwater & Subsurface  (Part 7: Advanced Engineering & Risk)
+════════════════════════════════════════════════════════════
+
+Eq 131 | Domain 22: Groundwater & Subsurface | Thiem Equation (Steady Radial Flow) | Q = 2πT(h₂-h₁)/ln(r₂/r₁) | Aquifer transmissivity from well tests
+  Inputs: T(Transmissivity, m²/day, default 500, 0.1-50000 [Aquifer Properties]) | h₁(Head at Well 1, m, default 50, 0-500 [Observation]) | h₂(Head at Well 2, m, default 60, 0-500 [Observation]) | r₁(Distance to Well 1, m, default 10, 0-10000 [Geometry]) | r₂(Distance to Well 2, m, default 100, 0-100000 [Geometry])
+  Ref: Thiem 1906
+
+Eq 132 | Domain 22: Groundwater & Subsurface | Theis Transient Drawdown | s = (Q/4πT)×W(u), u = r²S/4Tt | Transient aquifer response
+  Inputs: Q(Pumping Rate, m³/day, default 1000, 0-100000 [Pumping]) | T(Transmissivity, m²/day, default 500, 0.1-50000 [Aquifer]) | t(Time, days, default 1, 0-10000 [Time]) | r(Distance from Well, m, default 100, 0-10000 [Geometry]) | S(Storativity, —, default 0.0001, 1e-8-0.1 [Aquifer])
+  Ref: Theis 1935
+
+Eq 133 | Domain 22: Groundwater & Subsurface | Cooper-Jacob Approximation | s = (2.3Q/4πT)×log₁₀(2.25Tt/r²S) | Simplified well-test analysis
+  Inputs: Q(Pumping Rate, m³/day, default 1000, 0-100000 [Pumping]) | T(Transmissivity, m²/day, default 500, 0.1-50000 [Aquifer]) | t(Time, days, default 1, 0-10000 [Time]) | r(Distance from Well, m, default 100, 0-10000 [Geometry]) | S(Storativity, —, default 0.0001, 1e-8-0.1 [Aquifer])
+  Ref: Cooper 1946
+
+Eq 134 | Domain 22: Groundwater & Subsurface | Horton Infiltration | f(t) = f_c + (f₀-f_c)×e^(-kt) | Empirical infiltration capacity
+  Inputs: f_c(Final Infiltration Rate, mm/h, default 5, 0-50 [Soil Properties]) | f₀(Initial Infiltration Rate, mm/h, default 50, 0-500 [Soil Properties]) | k(Decay Constant, /h, default 2, 0.01-20 [Soil Properties]) | t(Time, h, default 1, 0-100 [Event])
+  Ref: Horton 1939
+
+════════════════════════════════════════════════════════════
+DOMAIN 23: Hazard, Risk & Disaster Engineering  (Part 7: Advanced Engineering & Risk)
+════════════════════════════════════════════════════════════
+
+Eq 135 | Domain 23: Hazard, Risk & Disaster Engineering | Risk = Hazard × Vulnerability × Exposure | R = H × V × E | Universal risk framework
+  Inputs: H(Hazard Probability, —, default 0.5, 0-1 [Risk Components]) | V(Vulnerability Index, —, default 0.3, 0-1 [Risk Components]) | E(Exposure Index, —, default 0.8, 0-1 [Risk Components])
+  Ref: UNISDR 2004
+
+Eq 136 | Domain 23: Hazard, Risk & Disaster Engineering | Expected Annual Damage | EAD = ∫₀¹ D(P)dP | Dam safety, flood risk, infrastructure planning
+  Inputs: D(P)(Damage at Exceedance P, $, default 1 [Risk Curve]) | P_low(Lower Exceedance Probability, —, default 0.001, 0-0.1 [Risk Curve]) | P_high(Upper Exceedance Probability, —, default 0.5, 0-1 [Risk Curve]) | num_intervals(Number of Integration Intervals, —, default 100, 10-10000 [Integration])
+  Ref: Standard
+
+Eq 137 | Domain 23: Hazard, Risk & Disaster Engineering | AQI Breakpoint | AQI = [(IHi-ILo)/(BPHi-BPLo)]×(Cp-BPLo)+ILo | Air quality standardization
+  Inputs: I_Hi(Concentration (Upper), µg/m³, default 100, 0-10000 [Breakpoints]) | I_Lo(Concentration (Lower), µg/m³, default 50, 0-10000 [Breakpoints]) | BP_Hi(Breakpoint Upper, µg/m³, default 100, 0-10000 [Breakpoints]) | BP_Lo(Breakpoint Lower, µg/m³, default 50, 0-10000 [Breakpoints]) | C_p(Pollutant Concentration, µg/m³, default 75, 0-10000 [Pollutant])
+  Ref: US EPA
+
+Eq 138 | Domain 23: Hazard, Risk & Disaster Engineering | Probable Maximum Precipitation | PMP = X̄ + K_p×σ_x | Dam safety, extreme rainfall
+  Inputs: X̄(Mean Annual Maximum Precipitation, mm, default 100, 0-10000 [Statistics]) | K_p(Frequency Factor, —, default 10, 0-20 [Statistics]) | σ_x(Std Dev of Annual Maxima, mm, default 30, 0-1000 [Statistics])
+  Ref: Chow 1964
+
+Eq 139 | Domain 23: Hazard, Risk & Disaster Engineering | Palmer Drought Severity Index | X_i = 0.897×X_{i-1} + Z/3 | Drought monitoring
+  Inputs: X_{i-1}(Previous Month's PDSI, —, default 0, -10-10 [PDSI State]) | Z(Current Moisture Anomaly Index, —, default 0, -10-10 [Moisture Anomaly]) | α(Persistence Factor, —, default 0.897, 0.5-1 [Calibration])
+  Ref: Palmer 1965
+
+Eq 140 | Domain 23: Hazard, Risk & Disaster Engineering | Froehlich Dam Breach | B_avg = 0.1803×K₀×V_res^0.32×h_b^0.19 | Dam breach outflow estimation
+  Inputs: K₀(Breach Correction Factor, —, default 1.3, 0.5-3 [Failure Mode]) | V_res(Reservoir Volume, m³, default 1000000, 0-100000000000 [Reservoir]) | h_b(Breach Height, m, default 30, 1-300 [Dam Geometry])
+  Ref: Froehlich 2008
+
+════════════════════════════════════════════════════════════
+DOMAIN 24: Data Assimilation & State Estimation  (Part 7: Advanced Engineering & Risk)
+════════════════════════════════════════════════════════════
+
+Eq 141 | Domain 24: Data Assimilation & State Estimation | Ensemble Kalman Filter | x_a = x_f + K(y-Hx_f); K = P_fH^T(HP_fH^T+R)^(-1) | THE equation that makes a Digital Twin
+  Inputs: x_f(Forecast State, —, default 0 [State]) | P_f(Forecast Error Covariance, —, default 1 [Covariance]) | y(Observation, —, default 1 [Observations]) | R(Observation Error Covariance, —, default 1 [Covariance]) | H(Observation Operator, —, default 1 [Operators])
+  Ref: Evensen 1994
+
+Eq 142 | Domain 24: Data Assimilation & State Estimation | Optimal Interpolation | x_a = x_b + BH^T(HBH^T+R)^(-1)(y-Hx_b) | Spatial analysis of observations
+  Inputs: x_b(Background State, —, default 0 [State]) | y(Observation, —, default 1 [Observations]) | B(Background Error Covariance, —, default 1 [Covariance]) | R(Observation Error Covariance, —, default 1 [Covariance]) | H(Observation Operator, —, default 1 [Operators])
+  Ref: Lorenz 1969
+
+Eq 143 | Domain 24: Data Assimilation & State Estimation | 4D-Var Cost Function | J(x) = ½(x-x_b)^TB^(-1)(x-x_b) + ½Σ(yᵢ-Hᵢ(x))^TRᵢ^(-1)(yᵢ-Hᵢ(x)) | Weather analysis gold standard (ECMWF)
+  Inputs: x(Analysis/Initial State, —, default 0 [State]) | x_b(Background State, —, default 0 [State]) | B(Background Error Covariance, —, default 1 [Covariance]) | y_i(Observation at Time t_i, —, default 1 [Observations]) | R(Observation Error Covariance, —, default 1 [Covariance])
+  Ref: Le Dimet 1986
+
+Eq 144 | Domain 24: Data Assimilation & State Estimation | Shannon Information Entropy | H(X) = -Σp(x)×log₂p(x) | Data source value assessment for DT-Earth
+  Inputs: p(x)(Probability of X, —, default 0.5, 0-1 [Distributions]) | p(y)(Probability of Y, —, default 0.5, 0-1 [Distributions]) | p(x,y)(Joint Probability of X and Y, —, default 0.25, 0-1 [Distributions])
+  Ref: Shannon 1948
+
+════════════════════════════════════════════════════════════
+DOMAIN 25: Signal Processing & Communications  (Part 7: Advanced Engineering & Risk)
+════════════════════════════════════════════════════════════
+
+Eq 145 | Domain 25: Signal Processing & Communications | Free-Space Path Loss | FSPL(dB) = 32.45 + 20log₁₀(d_km) + 20log₁₀(f_GHz) | Satellite link budget
+  Inputs: d_km(Distance, km, default 100, 0-100000 [Link Geometry]) | f_GHz(Frequency, GHz, default 2, 0-100 [Signal])
+  Ref: Fundamental
+
+Eq 146 | Domain 25: Signal Processing & Communications | Klobuchar Ionospheric Delay | Delay = [5×10⁻⁹ + A×(1-x²/2+x⁴/24)] s | Single-frequency GPS correction
+  Inputs: A(Amplitude, s, default 5e-9, 0-0.000001 [Model Parameters]) | x(Local Time Phase, rad, default 0.5, 0-2 [Model Parameters]) | φ_m(Geomagnetic Latitude of IPP, °, default 45, -90-90 [Ionosphere])
+  Ref: Klobuchar 1987
+
+Eq 147 | Domain 25: Signal Processing & Communications | Doppler Shift | Δf = f₀×v_rel/c | Satellite tracking, GNSS
+  Inputs: f₀(Transmitted Frequency, Hz, default 1600000000, 0-1000000000000 [Signal]) | v_rel(Relative Velocity (LOS), m/s, default 1000, -30000-30000 [Kinematics])
+  Ref: Doppler 1842
+
+════════════════════════════════════════════════════════════
+DOMAIN 26: Mathematical Frameworks  (Part 7: Advanced Engineering & Risk)
+════════════════════════════════════════════════════════════
+
+Eq 148 | Domain 26: Mathematical Frameworks | Hohmann Transfer | Δv₁ = √(GM/r₁)×[√(2r₂/(r₁+r₂))-1] | Optimal orbit transfer planning
+  Inputs: GM(Gravitational Parameter, m³/s², default 398600000000000, 0-1000000000000000 [Central Body]) | r₁(Initial Orbit Radius, m, default 7000000, 6000000-10000000 [Orbits]) | r₂(Target Orbit Radius, m, default 42000000, 6000000-100000000 [Orbits])
+  Ref: Hohmann 1925
+
+Eq 149 | Domain 26: Mathematical Frameworks | Lagrange Points (L1-L5) | 5th-order polynomial for collinear points | Mission planning (JWST at L2, solar observatories)
+  Inputs: γ(Mass Ratio Parameter, —, default 0.000003, 0-0.5 [System]) | R(Body Separation, m, default 149600000000, 0-10000000000000 [System]) | point_id(Lagrange Point ID, —, default 2, 1-5 [Selection])
+  Ref: Lagrange 1772
+
+Eq 150 | Domain 26: Mathematical Frameworks | Mutual Information | I(X;Y) = Σp(x,y)×log(p(x,y)/(p(x)×p(y))) | Quantifying data source value for model improvement
+  Inputs: p(x)(Probability of X, —, default 0.5, 0-1 [Distributions]) | p(y)(Probability of Y, —, default 0.5, 0-1 [Distributions]) | p(x,y)(Joint Probability, —, default 0.25, 0-1 [Distributions])
+  Ref: Shannon 1948
+
+TOTAL TOOLS: 150

@@ -29,11 +29,11 @@
 | 11 | Manning's Equation | Manning, R. | 1891 | On the flow of water in open channels and pipes | *Transactions of the Institution of Civil Engineers of Ireland*, 20, 161–207 |
 | 12 | Rational Method | Mulvaney, T.J. | 1851 | On the use of self-registering rain and flood gauges in making observations of the relations of rainfall and of flood discharges in a given catchment | *Journal of the Institution of Civil Engineers of Ireland*, 4, 18–31 |
 | 13 | Muskingum Routing | McCarthy, G.T. | 1938 | The unit hydrograph and flood routing | Conference of North Atlantic Division, U.S. Army Corps of Engineers |
-| 14 | Tidal Harmonic Analysis | Pugh, D. & Woodworth, P. | 2014 | Sea-Level Science: Understanding Tides, Surges, Tsunamis and Mean Sea-Level Changes | Cambridge University Press, ISBN: 978-1107028197 |
+| 14 | Tidal Harmonic Analysis | Pugh, D. & Woodworth, P. | 2014 | Sea-Level Science: Understanding Tides, Surges, Tsunamis and Mean Sea-Level Changes | Cambridge University Press, ISBN: 978-1107028197 — [10.1017/CBO9781139151740](https://doi.org/10.1017/CBO9781139151740) |
 | 15 | Ekman Spiral | Ekman, V.W. | 1905 | On the influence of the Earth's rotation on ocean-currents | *Arkiv för Matematik, Astronomi och Fysik*, 2(11), 1–52 — [NOAA Archive](https://repository.library.noaa.gov/view/noaa/13174) |
 | 16 | Geostrophic Current | Gill, A.E. | 1982 | Atmosphere-Ocean Dynamics | Academic Press, ISBN: 978-0122835221 |
 | 17 | Ocean Surface Heat Budget | Gill, A.E. | 1982 | Atmosphere-Ocean Dynamics, Chapter 3 | Academic Press, ISBN: 978-0122835221 |
-| 18 | Green-Ampt Infiltration | Green, W.H. & Ampt, G.A. | 1911 | Studies on Soil Physics. Part I — The flow of air and water through soils | *The Journal of Agricultural Science*, 4(1), 1–24 |
+| 18 | Green-Ampt Infiltration | Green, W.H. & Ampt, G.A. | 1911 | Studies on Soil Physics. Part I — The flow of air and water through soils | *The Journal of Agricultural Science*, 4(1), 1–24 — [10.1017/S0021859600001441](https://doi.org/10.1017/S0021859600001441) |
 
 ### Domain 3: Geophysics & Seismology (Eqs 19–25)
 
@@ -42,7 +42,7 @@
 | 19 | Gutenberg-Richter Law | Gutenberg, B. & Richter, C.F. | 1944 | Frequency of earthquakes in California | *Bulletin of the Seismological Society of America*, 34(4), 185–188 — [10.1785/BSSA0340040185](https://doi.org/10.1785/BSSA0340040185) |
 | 20 | Omori Law | Omori, F. | 1894 | On the after-shocks of earthquakes | *The Journal of the College of Science, Imperial University of Tokyo*, 7, 111–120 |
 | 21 | Campbell-Bozorgnia GMPE | Campbell, K.W. & Bozorgnia, Y. | 2014 | NGA-West2 ground motion model for the average horizontal components of PGA, PGV, and 5%-damped linear acceleration response spectra | *Earthquake Spectra*, 30(3), 1087–1115 — [10.1193/062913EQS175M](https://doi.org/10.1193/062913EQS175M) |
-| 22 | Mohr-Coulomb Failure | Coulomb, C.A. (1776); Mohr, O. (1900) | 1776/1900 | Essai sur une application des règles de maximis et minimis à quelques problèmes de statique, relatifs à l'architecture; Welche Umstände bedingen die Elastizitätsgrenze und den Bruch eines Materials | *Mémoires de Mathématique et de Physique de l'Académie Royale des Sciences*, 7, 343–382 (Coulomb); *Zeitschrift des Vereines Deutscher Ingenieure*, 44, 1524–1530 & 1572–1577 (Mohr) |
+| 22 | Mohr-Coulomb Failure | Coulomb, C.A. (1776); Mohr, O. (1900) | 1776/1900 | Essai sur une application des règles de maximis et minimis à quelques problèmes de statique, relatifs à l'architecture (Coulomb); Welche Umstände bedingen die Elastizitätsgrenze und den Bruch eines Materials (Mohr) | Coulomb: *Mém. Acad. R. Sci. Paris*, 7, 343–382; Mohr: *Z. Ver. Dtsch. Ing.*, 44, 1524–1530 & 1572–1577 |
 | 23 | Seismic Moment Magnitude | Hanks, T.C. & Kanamori, H. | 1979 | A moment magnitude scale | *Journal of Geophysical Research: Solid Earth*, 84(B5), 2348–2350 — [10.1029/JB084iB05p02348](https://doi.org/10.1029/JB084iB05p02348) |
 | 24 | Brune Stress Drop | Brune, J.N. | 1970 | Tectonic stress and the spectra of seismic shear waves from earthquakes | *Journal of Geophysical Research*, 75(26), 4997–5009 — [10.1029/JB075i026p04997](https://doi.org/10.1029/JB075i026p04997) |
 | 25 | Wells-Coppersmith Scaling | Wells, D.L. & Coppersmith, K.J. | 1994 | New empirical relationships among magnitude, rupture length, rupture width, rupture area, and surface displacement | *Bulletin of the Seismological Society of America*, 84(4), 974–1002 — [10.1785/BSSA0840040974](https://doi.org/10.1785/BSSA0840040974) |
@@ -59,7 +59,7 @@
 | 31 | NBR | Key, C.H. & Benson, N.C. | 2006 | Landscape Assessment: Ground measure of severity, the Composite Burn Index; and Remote sensing of severity, the Normalized Burn Ratio | In Lutes, D.C. et al. (Eds.), *FIREMON: Fire Effects Monitoring and Inventory System*, Gen. Tech. Rep. RMRS-GTR-164-CD, Fort Collins, CO: U.S. Department of Agriculture, Forest Service, Rocky Mountain Research Station |
 | 32 | Fire Radiative Power | Giglio, L., Kendall, J.D. & Tucker, C.J. | 2006 | Multi-year MODIS active fire product production and validation | *IEEE Transactions on Geoscience and Remote Sensing*, 44(8), 2139–2150 — [10.1109/TGRS.2006.877868](https://doi.org/10.1109/TGRS.2006.877868) |
 | 33 | Crop Water Stress Index | Idso, S.B., Jackson, R.D., Pinter, P.J., Reginato, R.J. & Hatfield, J.L. | 1981 | Normalizing the stress-degree-day parameter for environmental variability | *Agricultural Meteorology*, 24, 45–55 — [10.1016/0002-1571(81)90032-7](https://doi.org/10.1016/0002-1571(81)90032-7) |
-| 34 | Degree-Day Snowmelt | Braithwaite, R.J. | 1995 | Positive degree-day factors for ablation on glaciers in Svalbard | *Journal of Glaciology*, 41(137), 153–160 |
+| 34 | Degree-Day Snowmelt | Braithwaite, R.J. | 1995 | Positive degree-day factors for ablation on the Greenland ice sheet studied by energy-balance modelling | *Journal of Glaciology*, 41(137), 153–160 — [10.3189/S0022143000017846](https://doi.org/10.3189/S0022143000017846) |
 | 35 | Sea Ice Concentration | Comiso, J.C. | 1986 | Characteristics of Arctic winter sea ice from satellite multispectral microwave observations | *Journal of Geophysical Research: Oceans*, 91(C1), 975–994 — [10.1029/JC091iC01p00975](https://doi.org/10.1029/JC091iC01p00975) |
 
 ### Domain 5: Spatial Analysis & Extreme Events (Eqs 36–42)
@@ -67,12 +67,12 @@
 | # | Equation Name | Author(s) | Year | Title | DOI / URL |
 |---|--------------|-----------|------|-------|-----------|
 | 36 | Haversine Distance | Sinnott, R.W. | 1984 | Virtues of the Haversine | *Sky and Telescope*, 68(2), 158 |
-| 37 | Ordinary Kriging | Matheron, G. | 1963 | Principles of geostatistics | *Economic Geology*, 58(8), 1246–1266 |
+| 37 | Ordinary Kriging | Matheron, G. | 1963 | Principles of geostatistics | *Economic Geology*, 58(8), 1246–1266 — [10.2113/gsecongeo.58.8.1246](https://doi.org/10.2113/gsecongeo.58.8.1246) |
 | 38 | Inverse Distance Weighting | Shepard, D. | 1968 | A two-dimensional interpolation function for irregularly-spaced data | *Proceedings of the 1968 23rd ACM National Conference*, 517–524 |
 | 39 | Gaussian Plume Dispersion | Pasquill, F. | 1974 | Atmospheric Diffusion (2nd ed.) | Ellis Horwood, ISBN: 978-0853120018 |
 | 40 | Gumbel Distribution | Gumbel, E.J. | 1958 | Statistics of Extremes | Columbia University Press, ISBN: 978-0231021906 |
-| 41 | Generalized Pareto Distribution | Pickands III, J. | 1975 | Statistical inference using extreme order statistics | *The Annals of Statistics*, 3(1), 119–131 |
-| 42 | Semivariogram | Matheron, G. | 1963 | Principles of geostatistics | *Economic Geology*, 58(8), 1246–1266 |
+| 41 | Generalized Pareto Distribution | Pickands III, J. | 1975 | Statistical inference using extreme order statistics | *The Annals of Statistics*, 3(1), 119–131 — [10.1214/aos/1176343003](https://doi.org/10.1214/aos/1176343003) |
+| 42 | Semivariogram | Matheron, G. | 1963 | Principles of geostatistics | *Economic Geology*, 58(8), 1246–1266 — [10.2113/gsecongeo.58.8.1246](https://doi.org/10.2113/gsecongeo.58.8.1246) |
 
 ### Domain 6: Soil Science & Land Surface (Eqs 43–50)
 
@@ -84,7 +84,7 @@
 | 46 | Q₁₀ Soil Respiration | Raich, J.W. & Schlesinger, W.H. | 1992 | The global carbon dioxide flux in soil respiration and its relationship to vegetation and climate | *Tellus B: Chemical and Physical Meteorology*, 44(2), 81–99 — [10.1034/j.1600-0889.1992.t01-1-00001.x](https://doi.org/10.1034/j.1600-0889.1992.t01-1-00001.x) |
 | 47 | de Vries Thermal Conductivity | de Vries, D.A. | 1963 | Thermal properties of soils | In W.R. van Wijk (Ed.), *Physics of Plant Environment*, pp. 210–235, North-Holland Publishing |
 | 48 | Monin-Obukhov Similarity | Monin, A.S. & Obukhov, A.M. | 1954 | Basic laws of turbulent mixing in the surface layer of the atmosphere | *Trudy Geofizicheskogo Instituta, Akademiya Nauk SSSR*, 24(151), 163–187 |
-| 49 | Logarithmic Wind Profile | Prandtl, L. | 1925 | Über die ausgebildete Turbulenz | *Zeitschrift für Angewandte Mathematik und Mechanik*, 5(2), 136–139 |
+| 49 | Logarithmic Wind Profile | Prandtl, L. | 1925 | Über die ausgebildete Turbulenz | *Zeitschrift für Angewandte Mathematik und Mechanik*, 5(2), 136–139 — [10.1002/zamm.19250050205](https://doi.org/10.1002/zamm.19250050205) |
 | 50 | Ball-Berry Stomatal Conductance | Ball, J.T., Woodrow, I.E. & Berry, J.A. | 1987 | A model predicting stomatal conductance and its contribution to the control of photosynthesis under different environmental conditions | In J. Biggens (Ed.), *Progress in Photosynthesis Research*, Vol. 4, pp. 221–224, Martinus Nijhoff — [10.1007/978-94-017-0519-6_48](https://doi.org/10.1007/978-94-017-0519-6_48) |
 
 ---
@@ -109,10 +109,10 @@
 |---|--------------|-----------|------|-------|-----------|
 | 58 | Growing Degree Days | Barger, G.L. | 1969 | Total growing degree days | *Weekly Weather and Crop Bulletin*, 56(16), 10 |
 | 59 | Priestley-Taylor ET | Priestley, C.H.B. & Taylor, R.J. | 1972 | On the assessment of surface heat flux and evaporation using large-scale parameters | *Monthly Weather Review*, 100(2), 81–92 — [10.1175/1520-0493(1972)100<0081:OTAOSH>2.3.CO;2](https://doi.org/10.1175/1520-0493(1972)100%3C0081:OTAOSH%3E2.3.CO;2) |
-| 60 | Hargreaves-Samani ET | Hargreaves, G.H. & Samani, Z.A. | 1985 | Reference crop evapotranspiration from temperature | *Applied Engineering in Agriculture*, 1(2), 96–99 |
+| 60 | Hargreaves-Samani ET | Hargreaves, G.H. & Samani, Z.A. | 1985 | Reference crop evapotranspiration from temperature | *Applied Engineering in Agriculture*, 1(2), 96–99 — [10.13031/2013.26773](https://doi.org/10.13031/2013.26773) |
 | 61 | FAO Yield Response to Water | Allen, R.G., Pereira, L.S., Raes, D. & Smith, M. | 1998 | Crop evapotranspiration: Guidelines for computing crop water requirements | FAO Irrigation and Drainage Paper 56 |
 | 62 | Eppley Temperature-Growth | Eppley, R.W. | 1972 | Temperature and phytoplankton growth in the sea | *Fishery Bulletin*, 70(4), 1063–1085 — [https://spo.nmfs.noaa.gov/content/temperature-and-phytoplankton-growth-sea](https://spo.nmfs.noaa.gov/content/temperature-and-phytoplankton-growth-sea) |
-| 63 | Bigleaf Model | Sellers, P.J., Mintz, Y., Sud, Y.C. & Dalcher, A. | 1986 | A Simple Biosphere Model (SiB) for use within general circulation models | *Journal of the Atmospheric Sciences*, 43(6), 505–531 |
+| 63 | Bigleaf Model | Sellers, P.J., Mintz, Y., Sud, Y.C. & Dalcher, A. | 1986 | A Simple Biosphere Model (SiB) for use within general circulation models | *Journal of the Atmospheric Sciences*, 43(6), 505–531 — [10.1175/1520-0469(1986)043<0505:ASBMFU>2.0.CO;2](https://doi.org/10.1175/1520-0469(1986)043%3C0505:ASBMFU%3E2.0.CO;2) |
 
 ### Domain 9: Atmospheric Chemistry & Aerosols (Eqs 64–65)
 
@@ -162,7 +162,7 @@
 | 82 | Hack's Law | Hack, J.T. | 1957 | Studies of longitudinal stream profiles in Virginia and Maryland | *USGS Professional Paper*, 294-B, 45–97 |
 | 83 | Richardson Fractal Dimension | Richardson, L.F. | 1961 | The problem of contiguity: An appendix to statistics of deadly quarrels | *General Systems*, 6, 139–187 |
 | 84 | Infinite Slope Stability | Campbell, R.H. | 1975 | Soil slips, debris flows, and rainstorms in the Santa Monica Mountains and vicinity, Southern California | *USGS Professional Paper*, 851, 51 pp. |
-| 85 | Voellmy Friction Model | Voellmy, A. | 1955 | Über die Zerstörungskraft von Lawinen | *Schweizerische Bauzeitung*, 73, 159–162, 212–217, 246–249, 280–285 |
+| 85 | Voellmy Friction Model | Voellmy, A. | 1955 | Über die Zerstörungskraft von Lawinen | *Schweizerische Bauzeitung*, 73, 159–162, 212–217, 246–249, 280–285 — [10.5169/seals-61891](https://doi.org/10.5169/seals-61891) |
 | 86 | Stream Power Index | Moore, I.D., Grayson, R.B. & Ladson, A.R. | 1991 | Digital terrain modelling: A review of hydrological, geomorphological, and biological applications | *Hydrological Processes*, 5(1), 3–30 |
 | 87 | Topographic Wetness Index | Beven, K.J. & Kirkby, M.J. | 1979 | A physically based, variable contributing area model of basin hydrology | *Hydrological Sciences Bulletin*, 24(1), 43–69 |
 
@@ -171,7 +171,7 @@
 | # | Equation Name | Author(s) | Year | Title | DOI / URL |
 |---|--------------|-----------|------|-------|-----------|
 | 88 | Lake Evaporation (Meyer's) | Meyer, A.F. | 1915 | Computing run-off from rainfall and other physical data | *Transactions of the American Society of Civil Engineers*, 79, 1056–1224 |
-| 89 | Schmidt Stability Number | Schmidt, W. | 1928 | Über Temperatur- und Stabilitätsverhältnisse von Seen | *Geografiska Annaler*, 10, 145–177 |
+| 89 | Schmidt Stability Number | Schmidt, W. | 1928 | Über Temperatur- und Stabilitätsverhältnisse von Seen | *Geografiska Annaler*, 10, 145–177 — [10.1080/04353676.1928.11879633](https://doi.org/10.1080/04353676.1928.11879633) |
 | 90 | Nash Cascade (Linear Reservoirs) | Nash, J.E. | 1957 | The form of the instantaneous unit hydrograph | *IUGG Association of Scientific Hydrology, Toronto Assembly*, 3, 114–121 — [10.1080/02626665709493103](https://doi.org/10.1080/02626665709493103) |
 
 ### Domain 14: Cryosphere Advanced & Volcanology (Eqs 91–95)
@@ -299,7 +299,7 @@
 
 | # | Equation Name | Author(s) | Year | Title | DOI / URL |
 |---|--------------|-----------|------|-------|-----------|
-| 145 | Free-Space Path Loss | Friis, H.T. | 1946 | A note on a simple transmission formula | *Proceedings of the IRE*, 34(5), 254–256 — Also documented as ITU-R Recommendation P.525 |
+| 145 | Free-Space Path Loss | Friis, H.T. | 1946 | A note on a simple transmission formula | *Proceedings of the IRE*, 34(5), 254–256 — [10.1109/JRPROC.1946.234568](https://doi.org/10.1109/JRPROC.1946.234568) |
 | 146 | Klobuchar Ionospheric Delay | Klobuchar, J.A. | 1987 | Ionospheric time-delay algorithm for single-frequency GPS users | *IEEE Transactions on Aerospace and Electronic Systems*, AES-23(3), 325–331 — [10.1109/TAES.1987.310829](https://doi.org/10.1109/TAES.1987.310829) |
 | 147 | Doppler Shift | Doppler, C. | 1842 | Ueber das farbige Licht der Doppelsterne und einiger anderer Gestirne des Himmels | *Abhandlungen der Königlichen Böhmischen Gesellschaft der Wissenschaften* |
 
@@ -319,6 +319,8 @@
 |---|-----|
 | 2 | [10.1002/andp.19003090310](https://doi.org/10.1002/andp.19003090310) |
 | 8 | [10.1098/rspa.1991.0075](https://doi.org/10.1098/rspa.1991.0075) |
+| 14 | [10.1017/CBO9781139151740](https://doi.org/10.1017/CBO9781139151740) |
+| 18 | [10.1017/S0021859600001441](https://doi.org/10.1017/S0021859600001441) |
 | 9 | [10.4060/X0490E](https://doi.org/10.4060/X0490E) |
 | 19 | [10.1785/BSSA0340040185](https://doi.org/10.1785/BSSA0340040185) |
 | 21 | [10.1193/062913EQS175M](https://doi.org/10.1193/062913EQS175M) |
@@ -331,15 +333,22 @@
 | 30 | [10.1016/0034-4257(95)00137-P](https://doi.org/10.1016/0034-4257(95)00137-P) |
 | 32 | [10.1109/TGRS.2006.877868](https://doi.org/10.1109/TGRS.2006.877868) |
 | 33 | [10.1016/0002-1571(81)90032-7](https://doi.org/10.1016/0002-1571(81)90032-7) |
+| 34 | [10.3189/S0022143000017846](https://doi.org/10.3189/S0022143000017846) |
 | 35 | [10.1029/JC091iC01p00975](https://doi.org/10.1029/JC091iC01p00975) |
+| 37 | [10.2113/gsecongeo.58.8.1246](https://doi.org/10.2113/gsecongeo.58.8.1246) |
+| 41 | [10.1214/aos/1176343003](https://doi.org/10.1214/aos/1176343003) |
+| 42 | [10.2113/gsecongeo.58.8.1246](https://doi.org/10.2113/gsecongeo.58.8.1246) |
 | 43 | [10.2136/sssaj1980.03615995004400050002x](https://doi.org/10.2136/sssaj1980.03615995004400050002x) |
 | 46 | [10.1034/j.1600-0889.1992.t01-1-00001.x](https://doi.org/10.1034/j.1600-0889.1992.t01-1-00001.x) |
+| 49 | [10.1002/zamm.19250050205](https://doi.org/10.1002/zamm.19250050205) |
 | 50 | [10.1007/978-94-017-0519-6_48](https://doi.org/10.1007/978-94-017-0519-6_48) |
 | 51 | [10.1098/rstb.1977.0140](https://doi.org/10.1098/rstb.1977.0140) |
 | 53 | [10.1126/science.260.5112.1314](https://doi.org/10.1126/science.260.5112.1314) |
 | 54 | [10.1007/BF00386231](https://doi.org/10.1007/BF00386231) |
 | 55 | [10.1111/gcb.12629](https://doi.org/10.1111/gcb.12629) |
 | 56 | [10.1029/92JC00188](https://doi.org/10.1029/92JC00188) |
+| 60 | [10.13031/2013.26773](https://doi.org/10.13031/2013.26773) |
+| 63 | [10.1175/1520-0469(1986)043<0505:ASBMFU>2.0.CO;2](https://doi.org/10.1175/1520-0469(1986)043%3C0505:ASBMFU%3E2.0.CO;2) |
 | 66 | [10.1073/pnas.33.11.318](https://doi.org/10.1073/pnas.33.11.318) |
 | 67 | [10.1029/TR029i002p00202](https://doi.org/10.1029/TR029i002p00202) |
 | 68 | [10.1175/1520-0469(1950)007<0080:OTWDOC>2.0.CO;2](https://doi.org/10.1175/1520-0469(1950)007%3C0080:OTWDOC%3E2.0.CO;2) |
@@ -351,6 +360,8 @@
 | 75 | [10.1061/JWHEAU.0000252](https://doi.org/10.1061/JWHEAU.0000252) |
 | 76 | [10.1080/14786449408620638](https://doi.org/10.1080/14786449408620638) |
 | 80 | [10.1007/bf02268716](https://doi.org/10.1007/bf02268716) |
+| 85 | [10.5169/seals-61891](https://doi.org/10.5169/seals-61891) |
+| 89 | [10.1080/04353676.1928.11879633](https://doi.org/10.1080/04353676.1928.11879633) |
 | 90 | [10.1080/02626665709493103](https://doi.org/10.1080/02626665709493103) |
 | 93 | [10.1017/S002214300001099X](https://doi.org/10.1017/S002214300001099X) |
 | 94 | [10.1029/JC087iC02p01231](https://doi.org/10.1029/JC087iC02p01231) |
@@ -382,6 +393,7 @@
 | 142 | [10.1175/1520-0469(1969)026<0636:APARBN>2.0.CO;2](https://doi.org/10.1175/1520-0469(1969)026%3C0636:APARBN%3E2.0.CO;2) |
 | 143 | [10.1111/j.1600-0870.1986.tb00459.x](https://doi.org/10.1111/j.1600-0870.1986.tb00459.x) |
 | 144/150 | [10.1002/j.1538-7305.1948.tb01338.x](https://doi.org/10.1002/j.1538-7305.1948.tb01338.x) |
+| 145 | [10.1109/JRPROC.1946.234568](https://doi.org/10.1109/JRPROC.1946.234568) |
 | 146 | [10.1109/TAES.1987.310829](https://doi.org/10.1109/TAES.1987.310829) |
 
 ---

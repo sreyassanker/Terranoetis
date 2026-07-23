@@ -14,7 +14,7 @@ function enforceLayerCap(viewer: Cesium.Viewer): void {
   const satLayers: Cesium.ImageryLayer[] = [];
   for (let i = 0; i < layers.length; i++) {
     const l = layers.get(i);
-    if ((l as any)?.name?.startsWith('sat_')) satLayers.push(l);
+    if ((l as Cesium.ImageryLayer & { name?: string })?.name?.startsWith('sat_')) satLayers.push(l);
   }
   while (satLayers.length > MAX_SAT_LAYERS) {
     const oldest = satLayers.shift()!;
@@ -47,7 +47,7 @@ export function loadGibsImageryForBbox(
   });
   const imgLayer = viewer.scene.imageryLayers.addImageryProvider(provider);
   imgLayer.alpha = opacity;
-  (imgLayer as any).name = `sat_${studyAreaId || 'default'}_${layer}_${date}${cloudCover !== undefined && cloudCover < 100 ? `_cc${cloudCover}` : ''}`;
+  (imgLayer as Cesium.ImageryLayer & { name?: string }).name = `sat_${studyAreaId || 'default'}_${layer}_${date}${cloudCover !== undefined && cloudCover < 100 ? `_cc${cloudCover}` : ''}`;
   enforceLayerCap(viewer);
   return imgLayer;
 }
@@ -66,7 +66,7 @@ export function loadXyzImageryForBbox(
   });
   const imgLayer = viewer.scene.imageryLayers.addImageryProvider(provider);
   imgLayer.alpha = opacity;
-  (imgLayer as any).name = `sat_${studyAreaId || 'default'}_${layerName || 'xyz'}_bbox`;
+  (imgLayer as Cesium.ImageryLayer & { name?: string }).name = `sat_${studyAreaId || 'default'}_${layerName || 'xyz'}_bbox`;
   enforceLayerCap(viewer);
   return imgLayer;
 }
@@ -95,7 +95,7 @@ export function loadWmsImageryForBbox(
   });
   const imgLayer = viewer.scene.imageryLayers.addImageryProvider(provider);
   imgLayer.alpha = opacity;
-  (imgLayer as any).name = `sat_${studyAreaId || 'default'}_${layer}_bbox`;
+  (imgLayer as Cesium.ImageryLayer & { name?: string }).name = `sat_${studyAreaId || 'default'}_${layer}_bbox`;
   enforceLayerCap(viewer);
   return imgLayer;
 }
@@ -108,7 +108,7 @@ export function removeGibsImageryForStudyArea(
   const toRemove: Cesium.ImageryLayer[] = [];
   for (let i = 0; i < layers.length; i++) {
     const l = layers.get(i);
-    if ((l as any)?.name?.startsWith(`sat_${studyAreaId}_`)) {
+    if ((l as Cesium.ImageryLayer & { name?: string })?.name?.startsWith(`sat_${studyAreaId}_`)) {
       toRemove.push(l);
     }
   }
@@ -125,7 +125,7 @@ export function updateGibsImageryOpacity(
   const layers = viewer.scene.imageryLayers;
   for (let i = 0; i < layers.length; i++) {
     const l = layers.get(i);
-    if ((l as any)?.name?.startsWith(`sat_${studyAreaId}_`)) {
+    if ((l as Cesium.ImageryLayer & { name?: string })?.name?.startsWith(`sat_${studyAreaId}_`)) {
       l.alpha = opacity;
     }
   }

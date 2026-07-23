@@ -1,7 +1,7 @@
 // WHO region and country centroid lookup table for geocoding health data
 // Maps WHO region codes, sub-regions, and ISO3 country codes to [latitude, longitude]
 
-import type { GeoLookup } from '../../src/lib/types/geo';
+import type { GeoLookup } from '../../src/lib/geo';
 
 export const WHO_GEO: GeoLookup = {
         // WHO Regions

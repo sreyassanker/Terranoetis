@@ -1,0 +1,546 @@
+/**
+ * ECMWF Climate Data Store (CDS) API v2 Client
+ * ── High-fidelity ERA5 reanalysis data for the Analytical Workbench ──
+ *
+ * Provides variables NOT available through Open-Meteo's ERA5 subset:
+ *   - Friction velocity (zust) — Monin-Obukhov wind profile (Eqs 48-49)
+ *   - Total column water vapour (tcwv) — split-window LST (Eq 1)
+ *   - Pressure-level variables (u, v, w, t, q, z) — dynamics (Eqs 99-107)
+ *   - Surface energy fluxes (ssrd, strd, sshf, slhf) — energy budget (Eqs 17, 96)
+ *
+ * CDS API v2 workflow:
+ *   1. POST request → task_id
+ *   2. Poll task status until "completed"
+ *   3. Download NetCDF → parse with netcdfjs
+ *   4. Cache result to avoid redundant API calls
+ *
+ * The job-based nature means first request for a location is slow (~30-120s).
+ * Subsequent requests hit the cache.
+ * Falls back gracefully when no CDS_API_TOKEN is configured.
+ */
+
+import { NetCDFReader } from 'netcdfjs';
+import NodeCache from 'node-cache';
+
+const CDS_API_BASE = 'https://cds.climate.copernicus.eu/api/v2';
+const POLL_INTERVAL_MS = 3000;
+const MAX_POLL_ATTEMPTS = 60; // 3 min max
+const FETCH_TIMEOUT = 60000;  // 60s per HTTP call
+
+const cache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 }); // 24h TTL
+
+interface CdsTaskStatus {
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  request_id: string;
+  error?: { message: string };
+}
+
+interface CdsRequestParams {
+  dataset: string;
+  variables: string[];
+  area?: { north: number; west: number; south: number; east: number };
+  years: string[];
+  months: string[];
+  days: string[];
+  times: string[];
+  product_type?: string;
+  format: 'netcdf' | 'grib';
+}
+
+function getToken(): string | null {
+  return process.env.CDS_API_TOKEN ?? null;
+}
+
+function headers(): Record<string, string> {
+  const token = getToken();
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+function cacheKey(dataset: string, params: Record<string, unknown>): string {
+  return `cds:${dataset}:${JSON.stringify(params)}`;
+}
+
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Submit a request to CDS and poll until completion.
+ * Returns the raw ArrayBuffer of the NetCDF response.
+ */
+export async function fetchCdsNetCdf(
+  params: CdsRequestParams,
+): Promise<ArrayBuffer | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  const ck = cacheKey(params.dataset, params);
+  const cached = cache.get<ArrayBuffer>(ck);
+  if (cached) return cached;
+
+  const body: Record<string, unknown> = {
+    variable: params.variables,
+    product_type: params.product_type ?? 'reanalysis',
+    year: params.years,
+    month: params.months,
+    day: params.days,
+    time: params.times,
+    format: params.format,
+  };
+  if (params.area) {
+    body.area = `${params.area.north}/${params.area.west}/${params.area.south}/${params.area.east}`;
+  }
+
+  const submitResp = await fetch(
+    `${CDS_API_BASE}/resources/${params.dataset}`,
+    {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT),
+    },
+  );
+  if (!submitResp.ok) {
+    const errText = await submitResp.text().catch(() => 'unknown');
+    console.warn(`[CDS] submit failed (${submitResp.status}): ${errText.slice(0, 200)}`);
+    return null;
+  }
+
+  const submitJson = await submitResp.json() as Record<string, unknown>;
+  const requestId = submitJson.request_id as string | undefined;
+  if (!requestId) {
+    console.warn('[CDS] no request_id in response');
+    return null;
+  }
+
+  let status: CdsTaskStatus['status'] = 'queued';
+  for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+
+    const pollResp = await fetch(
+      `${CDS_API_BASE}/tasks/${requestId}`,
+      {
+        headers: headers(),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT / 2),
+      },
+    );
+    if (!pollResp.ok) {
+      console.warn(`[CDS] poll failed (${pollResp.status}) for ${requestId}`);
+      continue;
+    }
+
+    const task = await pollResp.json() as CdsTaskStatus;
+    status = task.status;
+
+    if (status === 'completed') break;
+    if (status === 'failed') {
+      console.warn(`[CDS] request ${requestId} failed: ${task.error?.message ?? 'unknown'}`);
+      return null;
+    }
+  }
+
+  if (status !== 'completed') {
+    console.warn(`[CDS] request ${requestId} timed out after ${MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS}ms`);
+    return null;
+  }
+
+  const downloadResp = await fetch(
+    `${CDS_API_BASE}/tasks/${requestId}/download`,
+    {
+      headers: headers(),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT * 2),
+    },
+  );
+  if (!downloadResp.ok) {
+    console.warn(`[CDS] download failed (${downloadResp.status}) for ${requestId}`);
+    return null;
+  }
+
+  const buffer = await downloadResp.arrayBuffer();
+  cache.set(ck, buffer);
+  return buffer;
+}
+
+/**
+ * Parse a NetCDF buffer and extract a named variable as a simple array.
+ * Assumes: single timestep, single location (or mean over small area).
+ */
+function readVariable(buffer: ArrayBuffer, varName: string): Float32Array | null {
+  try {
+    const reader = new NetCDFReader(buffer);
+    const data = reader.getDataVariable(varName);
+    if (!data) return null;
+    // Flatten if multi-dimensional
+    const flat = data instanceof Float32Array ? data : new Float32Array(data as number[]);
+    if (flat.length === 0) return null;
+    return flat;
+  } catch (e) {
+    console.warn(`[CDS] failed to read variable ${varName}:`, e);
+    return null;
+  }
+}
+
+/**
+ * Get a single numeric value for a variable at a point.
+ * Averages over all grid cells if area > single point.
+ */
+function readPoint(buffer: ArrayBuffer, varName: string): number | null {
+  const data = readVariable(buffer, varName);
+  if (!data) return null;
+  // Mean over all values (typically 1-4 cells for small area)
+  let sum = 0, n = 0;
+  for (let i = 0; i < data.length; i++) {
+    if (Number.isFinite(data[i])) { sum += data[i]; n++; }
+  }
+  return n > 0 ? sum / n : null;
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  Specific Data Fetchers
+// ══════════════════════════════════════════════════════════════════
+
+/** Default area window (0.25 deg around point — ~28 km) */
+function pointArea(lat: number, lon: number) {
+  const d = 0.125;
+  return { north: lat + d, west: lon - d, south: lat - d, east: lon + d };
+}
+
+function recentDateWindow(): { year: string; month: string; day: string } {
+  const d = new Date();
+  return {
+    year: String(d.getFullYear()),
+    month: String(d.getMonth() + 1).padStart(2, '0'),
+    day: String(d.getDate()).padStart(2, '0'),
+  };
+}
+
+const ERA5_SINGLE = 'reanalysis-era5-single-levels';
+
+/**
+ * Fetch ERA5 friction velocity (zust) at a point.
+ * Units: m/s. Used by Monin-Obukhov wind profile (Eqs 48-49).
+ */
+export async function fetchEra5FrictionVelocity(
+  lat: number, lon: number,
+): Promise<number | null> {
+  const cacheKey = `era5:ustar:${lat.toFixed(3)}:${lon.toFixed(3)}`;
+  const cached = cache.get<number>(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const { year, month, day } = recentDateWindow();
+  const buffer = await fetchCdsNetCdf({
+    dataset: ERA5_SINGLE,
+    variables: ['friction_velocity'],
+    area: pointArea(lat, lon),
+    years: [year],
+    months: [month],
+    days: [day],
+    times: ['12:00'],
+    format: 'netcdf',
+  });
+  if (!buffer) return null;
+
+  const val = readPoint(buffer, 'zust');
+  // Convert from m/s to standard units if needed
+  const result = val !== null && Number.isFinite(val) ? val : null;
+  if (result !== null) cache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * Fetch ERA5 total column water vapour (tcwv) at a point.
+ * Units: kg/m² = mm → convert to g/cm² (/10).
+ * Used by Rozenstein split-window LST (Eq 1).
+ */
+export async function fetchEra5Tcwv(
+  lat: number, lon: number, dateStr?: string,
+): Promise<number | null> {
+  const date = dateStr ?? todayStr();
+  const [y, m, d] = date.split('-');
+  if (!y || !m || !d) return null;
+
+  const cacheKey = `era5:tcwv:${lat.toFixed(3)}:${lon.toFixed(3)}:${date}`;
+  const cached = cache.get<number>(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const buffer = await fetchCdsNetCdf({
+    dataset: ERA5_SINGLE,
+    variables: ['total_column_water_vapour'],
+    area: pointArea(lat, lon),
+    years: [y],
+    months: [m],
+    days: [d],
+    times: ['10:00', '11:00'], // Landsat overpass window
+    format: 'netcdf',
+  });
+  if (!buffer) return null;
+
+  const val = readPoint(buffer, 'tcwv');
+  // tcwv in kg/m² = mm → g/cm² (/10)
+  const result = val !== null && Number.isFinite(val) ? val / 10 : null;
+  if (result !== null) cache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * Fetch ERA5 surface energy fluxes at a point.
+ * Returns net shortwave (ssrd), net longwave (strd), sensible (sshf),
+ * and latent (slhf) heat fluxes in W/m² or J/m² (accumulated → convert).
+ * Used by energy budget equations (Eqs 17, 96).
+ *
+ * ERA5 stores ssrd/strd as accumulated J/m² since forecast start.
+ * Divide by 3600 to get W/m² for hourly data.
+ */
+export interface Era5SurfaceFluxes {
+  netShortwave: number | null;  // W/m²
+  netLongwave: number | null;   // W/m²  
+  sensibleFlux: number | null;  // W/m²
+  latentFlux: number | null;    // W/m²
+}
+
+export async function fetchEra5SurfaceFluxes(
+  lat: number, lon: number,
+): Promise<Era5SurfaceFluxes | null> {
+  const { year, month, day } = recentDateWindow();
+  const cacheKey = `era5:flux:${lat.toFixed(3)}:${lon.toFixed(3)}`;
+  const cached = cache.get<Era5SurfaceFluxes>(cacheKey);
+  if (cached) return cached;
+
+  const buffer = await fetchCdsNetCdf({
+    dataset: ERA5_SINGLE,
+    variables: [
+      'surface_solar_radiation_downwards',
+      'surface_thermal_radiation_downwards',
+      'surface_sensible_heat_flux',
+      'surface_latent_heat_flux',
+    ],
+    area: pointArea(lat, lon),
+    years: [year],
+    months: [month],
+    days: [day],
+    times: ['12:00'],
+    format: 'netcdf',
+  });
+  if (!buffer) return null;
+
+  const ssrd = readPoint(buffer, 'ssrd');   // J/m² accumulated
+  const strd = readPoint(buffer, 'strd');   // J/m² accumulated
+  const sshf = readPoint(buffer, 'sshf');   // J/m² accumulated
+  const slhf = readPoint(buffer, 'slhf');   // J/m² accumulated
+
+  const result: Era5SurfaceFluxes = {
+    netShortwave: ssrd !== null && Number.isFinite(ssrd) ? ssrd / 3600 : null,
+    netLongwave: strd !== null && Number.isFinite(strd) ? strd / 3600 : null,
+    sensibleFlux: sshf !== null && Number.isFinite(sshf) ? sshf / 3600 : null,
+    latentFlux: slhf !== null && Number.isFinite(slhf) ? slhf / 3600 : null,
+  };
+  cache.set(cacheKey, result);
+  return result;
+}
+
+const ERA5_PRESSURE = 'reanalysis-era5-pressure-levels';
+
+// Pressure levels typically used for atmospheric dynamics
+const STANDARD_PRESSURE_LEVELS = ['1000', '925', '850', '700', '500', '250'];
+
+/**
+ * Fetch ERA5 pressure-level wind at a point.
+ * Returns u and v wind components (m/s) at a specified pressure level.
+ * Used by geostrophic wind (Eq 5), vorticity (Eq 107).
+ */
+export interface Era5PressureWind {
+  u: number | null;
+  v: number | null;
+}
+
+export async function fetchEra5PressureWind(
+  lat: number, lon: number,
+  level: number = 850, // 850 hPa by default
+): Promise<Era5PressureWind | null> {
+  const { year, month, day } = recentDateWindow();
+  const cacheKey = `era5:pwind:${level}:${lat.toFixed(3)}:${lon.toFixed(3)}`;
+  const cached = cache.get<Era5PressureWind>(cacheKey);
+  if (cached) return cached;
+
+  const buffer = await fetchCdsNetCdf({
+    dataset: ERA5_PRESSURE,
+    variables: ['u_component_of_wind', 'v_component_of_wind'],
+    area: pointArea(lat, lon),
+    years: [year],
+    months: [month],
+    days: [day],
+    times: ['12:00'],
+    format: 'netcdf',
+    product_type: 'reanalysis',
+  });
+  if (!buffer) return null;
+
+  const u = readPoint(buffer, 'u');
+  const v = readPoint(buffer, 'v');
+
+  const result: Era5PressureWind = {
+    u: u !== null && Number.isFinite(u) ? u : null,
+    v: v !== null && Number.isFinite(v) ? v : null,
+  };
+  cache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * Fetch ERA5 pressure-level temperature and geopotential at a point.
+ * Used by atmospheric dynamics (Eqs 99-102, 106).
+ */
+export interface Era5PressureState {
+  temperature: number | null;  // K
+  geopotential: number | null; // m²/s² → divide by g for height
+  specificHumidity: number | null; // kg/kg
+  omega: number | null; // Pa/s (vertical velocity)
+}
+
+export async function fetchEra5PressureState(
+  lat: number, lon: number,
+  level: number = 500,
+): Promise<Era5PressureState | null> {
+  const { year, month, day } = recentDateWindow();
+  const cacheKey = `era5:pstate:${level}:${lat.toFixed(3)}:${lon.toFixed(3)}`;
+  const cached = cache.get<Era5PressureState>(cacheKey);
+  if (cached) return cached;
+
+  const buffer = await fetchCdsNetCdf({
+    dataset: ERA5_PRESSURE,
+    variables: [
+      'temperature',
+      'geopotential',
+      'specific_humidity',
+      'vertical_velocity',
+    ],
+    area: pointArea(lat, lon),
+    years: [year],
+    months: [month],
+    days: [day],
+    times: ['12:00'],
+    format: 'netcdf',
+    product_type: 'reanalysis',
+  });
+  if (!buffer) return null;
+
+  const t = readPoint(buffer, 't');
+  const z = readPoint(buffer, 'z');
+  const q = readPoint(buffer, 'q');
+  const w = readPoint(buffer, 'w');
+
+  const result: Era5PressureState = {
+    temperature: t !== null && Number.isFinite(t) ? t : null,
+    geopotential: z !== null && Number.isFinite(z) ? z : null,
+    specificHumidity: q !== null && Number.isFinite(q) ? q : null,
+    omega: w !== null && Number.isFinite(w) ? w : null,
+  };
+  cache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * Fetch ERA5 multi-level soil temperature and moisture.
+ * Used by Eqs 43-47 (soil physics).
+ */
+export interface Era5SoilState {
+  temperature0_7: number | null;   // K → C (-273.15)
+  temperature7_28: number | null;
+  temperature28_100: number | null;
+  moisture0_7: number | null;      // m³/m³
+  moisture7_28: number | null;
+  moisture28_100: number | null;
+}
+
+const ERA5_SOIL = 'reanalysis-era5-land';
+
+export async function fetchEra5SoilState(
+  lat: number, lon: number,
+): Promise<Era5SoilState | null> {
+  const { year, month, day } = recentDateWindow();
+  const cacheKey = `era5:soil:${lat.toFixed(3)}:${lon.toFixed(3)}`;
+  const cached = cache.get<Era5SoilState>(cacheKey);
+  if (cached) return cached;
+
+  const buffer = await fetchCdsNetCdf({
+    dataset: ERA5_SOIL,
+    variables: [
+      'soil_temperature_level_1',
+      'soil_temperature_level_2',
+      'soil_temperature_level_3',
+      'volumetric_soil_water_level_1',
+      'volumetric_soil_water_level_2',
+      'volumetric_soil_water_level_3',
+    ],
+    area: pointArea(lat, lon),
+    years: [year],
+    months: [month],
+    days: [day],
+    times: ['12:00'],
+    format: 'netcdf',
+    product_type: 'reanalysis',
+  });
+  if (!buffer) return null;
+
+  const result: Era5SoilState = {
+    temperature0_7: readPoint(buffer, 'stl1'),
+    temperature7_28: readPoint(buffer, 'stl2'),
+    temperature28_100: readPoint(buffer, 'stl3'),
+    moisture0_7: readPoint(buffer, 'swvl1'),
+    moisture7_28: readPoint(buffer, 'swvl2'),
+    moisture28_100: readPoint(buffer, 'swvl3'),
+  };
+  cache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * Fetch ERA5 geopotential at 500 hPa and 1000 hPa for thickness/steering.
+ * Used by Rossby wave (Eq 99), QG PV (Eq 102).
+ */
+export interface Era5GeopotentialThickness {
+  z500: number | null;   // m²/s²
+  z1000: number | null;  // m²/s²
+}
+
+export async function fetchEra5GeopotentialThickness(
+  lat: number, lon: number,
+): Promise<Era5GeopotentialThickness | null> {
+  const { year, month, day } = recentDateWindow();
+  const cacheKey = `era5:geopot:${lat.toFixed(3)}:${lon.toFixed(3)}`;
+  const cached = cache.get<Era5GeopotentialThickness>(cacheKey);
+  if (cached) return cached;
+
+  const buffer = await fetchCdsNetCdf({
+    dataset: ERA5_PRESSURE,
+    variables: ['geopotential'],
+    area: pointArea(lat, lon),
+    years: [year],
+    months: [month],
+    days: [day],
+    times: ['12:00'],
+    format: 'netcdf',
+    product_type: 'reanalysis',
+  });
+  if (!buffer) return null;
+
+  const z500 = readPoint(buffer, 'z');
+
+  const result: Era5GeopotentialThickness = {
+    z500: z500 !== null && Number.isFinite(z500) ? z500 : null,
+    z1000: null, // would need separate request with pressure_level filter
+  };
+  cache.set(cacheKey, result);
+  return result;
+}
+
+export function getCdsStatus(): { tokenConfigured: boolean; cacheSize: number } {
+  return {
+    tokenConfigured: !!getToken(),
+    cacheSize: cache.getStats().ksize ?? 0,
+  };
+}
