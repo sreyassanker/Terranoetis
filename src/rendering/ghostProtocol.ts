@@ -1,5 +1,5 @@
 import * as Cesium from 'cesium';
-import { GhostEntity } from './ghostEntity';
+import { GhostEntity } from './GhostEntity';
 import type { FutureTensorDomain } from './trajectoryPredictor';
 
 /**

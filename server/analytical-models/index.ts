@@ -22,6 +22,19 @@ export function registerAnalyticalModelsRoutes(app: express.Express): void {
         steps: result.steps,
         dataSource: result.dataSource,
         location: result.location,
+        log: result.log,
+        warnings: result.warnings,
+        grid: result.grid,
+        fetchedParams: result.fetchedParams,
+        validation: result.validation,
+        qualityControl: result.qualityControl,
+        uncertainty: result.uncertainty,
+        interpretation: result.interpretation,
+        workflowLog: result.workflowLog,
+        dataQualityScore: result.dataQualityScore,
+        processingTimeMs: result.processingTimeMs,
+        visualizationType: result.visualizationType,
+        preprocessingNotes: result.preprocessingNotes,
       });
     } catch (err) {
       return res.status(500).json({ error: err instanceof Error ? err.message : 'Computation failed' });

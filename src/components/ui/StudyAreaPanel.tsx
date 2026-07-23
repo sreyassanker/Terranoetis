@@ -8,7 +8,6 @@ import {
   parseFileToGeoJSON,
   flyToStudyAreaTopDown,
   updateStudyAreaStyle,
-  computeStudyAreaBbox,
 } from '@/rendering/studyArea';
 import Panel from '@/components/ui/Panel';
 
@@ -107,8 +106,7 @@ export default React.memo(function StudyAreaPanel({
     }
   }, [show, drawing, setDrawing]);
 
-  const activeArea = areas.find(a => a.id === activeStudyAreaId);
-  const hasActiveArea = Boolean(activeArea);
+
 
   const tabLabels: { id: TabId; label: string; }[] = [
     { id: 'upload', label: 'Upload' },

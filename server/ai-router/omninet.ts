@@ -333,7 +333,7 @@ export class Omninet {
 
   private async callGemini(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
     const apiKey = process.env[config.apiKeyEnvVar!] || process.env.GOOGLE_GEMINI_API_KEY || '';
-    if (!apiKey) throw new Error('Gemini API key not configured. Set GOOGLE_GEMINI_API_KEY in server/.env');
+    if (!apiKey) throw new Error('Gemini API key not configured. Set GOOGLE_GEMINI_API_KEY in .env');
 
     // Try multiple models in order of preference — if the first fails with 429/404, try the next
     const modelsToTry = [model, ...config.models.filter(m => m !== model)];

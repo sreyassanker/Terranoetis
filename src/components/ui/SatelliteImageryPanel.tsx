@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import * as Cesium from 'cesium';
-import { Satellite, Globe, Calendar, Search, Sliders, Cloud, Eye, Loader2, Sun, Moon, X } from 'lucide-react';
+import { Satellite, Globe, Calendar, Eye, Loader2, X } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 import { throttledRender } from '@/lib/throttledRender';
 import {

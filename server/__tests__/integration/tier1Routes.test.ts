@@ -669,46 +669,50 @@ describe('Caching behavior across Tier 1 routes', () => {
   });
 
   describe('OpenAQ caching', () => {
-    it('first request fetches from upstream (mockFetch called)', async () => {
+    function countUpstreamCalls(): number {
+      return fetchSpy.mock.calls.filter(
+        ([url]: unknown[]) => String(url).includes('api.openaq.org'),
+      ).length;
+    }
+
+    it('first request fetches from upstream (openaq.org called)', async () => {
       fetchSpy.mockClear();
       const resp = await fetch(`${baseUrl}/api/openaq?lat=40.71&lon=-74.01`);
       expect(resp.status).toBe(200);
-      // The route's internal fetch() call should be intercepted by mockFetch
-      expect(fetchSpy).toHaveBeenCalled();
+      expect(countUpstreamCalls()).toBe(1);
     });
 
     it('second request returns cached data without re-fetching', async () => {
-      mockFetch.mockReset();
-      // First request — populate cache
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ results: [{ id: 1, name: 'Test' }], meta: { found: 1 } }),
-      });
+      fetchSpy.mockClear();
       await fetch(`${baseUrl}/api/openaq?lat=40.71&lon=-74.01`);
-      const callsAfterFirst = fetchSpy.mock.calls.length;
-      // Second request — should hit cache, NOT call mockFetch again
+      const upstreamAfterFirst = countUpstreamCalls();
       const resp2 = await fetch(`${baseUrl}/api/openaq?lat=40.71&lon=-74.01`);
       expect(resp2.status).toBe(200);
-      // mockFetch should NOT have been called again
-      expect(fetchSpy.mock.calls.length).toBe(callsAfterFirst);
+      expect(countUpstreamCalls()).toBe(upstreamAfterFirst);
     });
   });
 
   describe('SPC outlook caching', () => {
-    it('first request fetches from upstream (mockFetch called)', async () => {
+    function countSpcCalls(): number {
+      return fetchSpy.mock.calls.filter(
+        ([url]: unknown[]) => String(url).includes('spc.noaa.gov'),
+      ).length;
+    }
+
+    it('first request fetches from upstream (spc.noaa.gov called)', async () => {
       fetchSpy.mockClear();
       const resp = await fetch(`${baseUrl}/api/spc/outlook?day=1`);
       expect(resp.status).toBe(200);
-      expect(fetchSpy).toHaveBeenCalled();
+      expect(countSpcCalls()).toBe(1);
     });
 
     it('second request returns cached data without re-fetching', async () => {
       fetchSpy.mockClear();
       await fetch(`${baseUrl}/api/spc/outlook?day=1`);
-      const callsAfterFirst = fetchSpy.mock.calls.length;
+      const spcCallsAfterFirst = countSpcCalls();
       const resp2 = await fetch(`${baseUrl}/api/spc/outlook?day=1`);
       expect(resp2.status).toBe(200);
-      expect(fetchSpy.mock.calls.length).toBe(callsAfterFirst);
+      expect(countSpcCalls()).toBe(spcCallsAfterFirst);
     });
   });
 });

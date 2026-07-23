@@ -146,7 +146,7 @@ import { weatherForecaster } from './foundation-models/weatherForecaster';
 import { agricultureMonitor } from './foundation-models/agricultureMonitor';
 import { samGeoSegmenter } from './foundation-models/samgeoSegmenter';
 import { alphaEarthLookup } from './foundation-models/alphaEarthLookup';
-dotenv.config({ path: 'server/.env' });
+dotenv.config();
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -154,7 +154,7 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 const secretIssues = validateJwtSecretStrength(process.env.JWT_SECRET);
 if (secretIssues.length > 0) {
   if (IS_PROD) {
-    logger.fatal({ issues: secretIssues }, 'Refusing to start in production with weak JWT_SECRET. Set a strong (>=32 chars) secret in server/.env');
+    logger.fatal({ issues: secretIssues }, 'Refusing to start in production with weak JWT_SECRET. Set a strong (>=32 chars) secret in .env');
     process.exit(1);
   }
   for (const issue of secretIssues) {
@@ -172,7 +172,7 @@ for (const k of OPTIONAL_ENV_VARS) {
 // ── .env template validation — warn about missing important API keys ──
 function validateEnvTemplate(): void {
   try {
-    const templatePath = path.resolve('server/.env.example');
+    const templatePath = path.resolve('.env.example');
     if (!fs.existsSync(templatePath)) return;
     const template = fs.readFileSync(templatePath, 'utf-8');
     // Parse KEY= lines from the template (skip comments and empty lines)
@@ -193,7 +193,7 @@ function validateEnvTemplate(): void {
     if (missing.length > 0) {
       logger.warn({ count: missing.length, sample: missing.slice(0, 5) },
         `${missing.length} env var(s) from .env.example not set in .env — features may be unavailable. ` +
-        `Run 'cp server/.env.example server/.env' and fill in your API keys.`);
+        `Fill in missing values in .env.`);
     }
   } catch (e) {
     logger.debug({ err: (e as Error).message }, 'Env template validation skipped');
@@ -2211,7 +2211,7 @@ app.get('/api/weather/gfs', async (req: express.Request, res: express.Response) 
 import { getRecentGlobalEvents, getEventsNearLocation, getCountryEvents, summarizeEvents, detectEscalation } from './utils/acled';
 import { searchStacItems, listStacCollections } from './foundation-models/stacSearch';
 import { geojsonToCsv, geojsonToStreamingJson, estimateParquetSize, getGeoParquetMetadata } from './utils/geoParquet';
-import { parseMgrs } from '../src/lib/mgrs';
+import { parseMgrs } from './utils/mgrs';
 import { detectIonosphericAnomalies, getIonosphericConditions } from './utils/guardian';
 import { getOceanConditions } from './utils/cmems';
 import { getWaveForecast, getWaveWarnings, getSeaState } from './utils/wavewatch';
@@ -7212,7 +7212,7 @@ app.post('/api/agent/analyze-vision', async (req: express.Request, res: express.
     : 'Analyze this image in detail. If it is a satellite image, map, chart, or geographic area, describe what you see including any notable features, patterns, colors, text, or structures.';
 
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
-  if (!apiKey) return res.status(502).json({ error: 'Gemini API key not configured. Set GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY in server/.env' });
+  if (!apiKey) return res.status(502).json({ error: 'Gemini API key not configured. Set GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY in .env' });
 
   const modelsToTry = ['gemini-2.0-flash-001', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
   let lastError: string | undefined;

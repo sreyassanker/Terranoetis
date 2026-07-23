@@ -8,14 +8,14 @@
 
 module.exports = {};
 
-module.exports.init = function(api) {
+module.exports.init = function(api: { log: (level: string, msg: string) => void; registerTool: (tool: { name: string; description: string; category: string; handler: (args: Record<string, unknown>) => Promise<Record<string, unknown>> }) => void; registerDataSource: (ds: { name: string; description: string; handler: () => Promise<Record<string, unknown>> }) => void }) {
   api.log('info', 'Example plugin loaded');
 
   api.registerTool({
     name: 'hello_world',
     description: 'A friendly greeting tool',
     category: 'custom',
-    handler: async (args) => {
+    handler: async (args: Record<string, unknown>) => {
       const name = args.name || 'World';
       return { greeting: `Hello, ${name}! From Earth Intelligence plugin.` };
     },
@@ -24,7 +24,7 @@ module.exports.init = function(api) {
   api.registerDataSource({
     name: 'example_data',
     description: 'Example data source',
-    handler: async () => {
+    handler: async (): Promise<Record<string, unknown>> => {
       return { message: 'This is example data from a plugin.' };
     },
   });

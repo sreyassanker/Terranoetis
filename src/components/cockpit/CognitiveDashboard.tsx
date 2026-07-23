@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Brain, Eye, Zap, BookOpen, Puzzle, Moon, Wrench, Package, Sparkles, BarChart3, Network, TrendingUp } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 
