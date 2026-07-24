@@ -349,6 +349,126 @@ Example format:
     );
   }
 
+  buildPrompt(intent?: { type: string; confidence: number; layerIds?: string[] }): string {
+    let tools = this.list();
+
+    if (intent && intent.confidence > 0.3) {
+      tools = tools.filter(t => {
+        if (intent.type === 'weather_check') return t.category === 'weather';
+        if (intent.type === 'toggle_layer') {
+          if (intent.layerIds) {
+            return intent.layerIds.some((id: string) => t.name.includes(id) || t.exampleQueries.some(q => q.includes(id)));
+          }
+          return true;
+        }
+        if (intent.type === 'compute') return t.schema.type === 'sandbox';
+        // For deep_analysis with layerIds, include the relevant domain tools + navigation + sandbox
+        if (intent.type === 'deep_analysis' && intent.layerIds) {
+          if (t.category === 'navigation' || t.schema.type === 'sandbox') return true;
+          return intent.layerIds.some((id: string) => {
+            // Map layer IDs to tool categories
+            if (id === 'ais_vessels') return t.category === 'maritime' || t.category === 'ocean';
+            if (id === 'space_debris') return t.category === 'space';
+            if (id === 'flight_tracks') return t.category === 'aviation';
+            if (id === 'wildfires') return t.category === 'hazards' || t.category === 'eo' || t.category === 'multimodal';
+            if (id === 'earthquakes') return t.category === 'seismic' || t.category === 'multimodal';
+            if (id === 'severe_storms') return t.category === 'weather' || t.category === 'multimodal';
+            if (id === 'volcanoes') return t.category === 'hazards' || t.category === 'multimodal';
+            return t.name.includes(id) || t.exampleQueries.some(q => q.includes(id));
+          });
+        }
+        // For deep_analysis without layerIds, include all non-compute tools
+        if (intent.type === 'deep_analysis') return true;
+        return true;
+      });
+    }
+
+    const lines: string[] = [
+      '# Earth Intelligence Copilot — Agent Mode',
+      '',
+      'You are an autonomous Earth Intelligence Copilot. Your mission:',
+      '1. Understand the user\'s Earth science question',
+      '2. Fetch relevant data from the tools below or the web',
+      '3. Analyze using the sandbox code execution environment',
+      '4. Visualize results on the globe using ## COMMANDS',
+      '5. Respond with concise, data-backed answers',
+      '',
+      '## Available Tools',
+      '',
+    ];
+
+    const grouped = new Map<string, DynamicTool[]>();
+    for (const tool of tools) {
+      const group = grouped.get(tool.category) || [];
+      group.push(tool);
+      grouped.set(tool.category, group);
+    }
+
+    for (const [category, categoryTools] of grouped) {
+      lines.push(`### ${category.charAt(0).toUpperCase() + category.slice(1)}`);
+      for (const tool of categoryTools) {
+        const ep = tool.schema.endpoint ? ` — \`${tool.schema.method || 'GET'} ${tool.schema.endpoint}\`` : '';
+        lines.push(`- **${tool.name}**: ${tool.description}${ep}`);
+      }
+      lines.push('');
+    }
+
+    lines.push(
+      '## Sandbox Code Execution',
+      '',
+      'You can run code via `POST /api/sandbox/execute` with `{"language":"python"|"node"|"bash", "code": "..."}`.',
+      'The sandbox has numpy, pandas, scipy, scikit-learn, geopandas, and internet access.',
+      '',
+      '## Tool Calling Protocol',
+      '',
+      'To fetch live data BEFORE writing your answer, emit a `## TOOL_CALLS` block. The orchestrator',
+      'will execute the named tools and feed their JSON results back to you in a second pass, so your',
+      'final answer can cite real numbers. Use this whenever the user asks about current conditions,',
+      'live data, or anything a registered tool can answer.',
+      '',
+      '```',
+      '## TOOL_CALLS',
+      '{"name":"weather_forecast","args":{"lat":35.68,"lon":139.65}}',
+      '{"name":"earthquakes","args":{"minMagnitude":4}}',
+      '```',
+      '',
+      'Rules for TOOL_CALLS:',
+      '- `name` MUST be one of the tools listed above (exact match, case-sensitive).',
+      '- `args` MUST match the tool\'s parameter schema (see the endpoint path for hints: lat/lon, radiusKm, etc.).',
+      '- Emit between 0 and 4 tool calls per response. Multiple calls run in parallel.',
+      '- After tool calls run, you will receive a `## TOOL_RESULTS` block and must then write your final answer.',
+      '- You may ALSO emit `## COMMANDS` for globe visualization in the SAME response as TOOL_CALLS, or in the final pass.',
+      '',
+      '## How to Command the Globe',
+      '',
+      'After your analysis, output commands:',
+      '```',
+      '## COMMANDS',
+      '{"action":"flyTo","lat":35.68,"lon":139.65,"label":"Tokyo","zoom":8}',
+      '{"action":"toggleLayer","layerId":"earthquakes","enabled":true}',
+      '{"action":"addPin","lat":35.68,"lon":139.65,"label":"Epicenter","color":"#ef4444"}',
+      '{"action":"addHeatmap","points":[{"lat":35.68,"lon":139.65,"value":0.8}],"radius":50}',
+      '{"action":"addPolygon","coordinates":[[35.6,139.5],[35.7,139.5]],"label":"Zone","color":"rgba(255,0,0,0.3)"}',
+      '{"action":"addGeoJSON","geojson":{...},"label":"Results","color":"#22c55e"}',
+      '{"action":"addChart","type":"bar","title":"Distribution","labels":["A","B"],"values":[10,20]}',
+      '{"action":"addPanel","panelData":{"stats":[...],"charts":[...],"table":{...},"recommendations":[...]}}',
+      '```',
+      '',
+      'Supported actions: flyTo, toggleLayer, addPin, addHeatmap, addPolygon, addGeoJSON, addChart, addPanel.',
+      '',
+      '## Response Rules',
+      '- Be concise. Lead with the most important finding.',
+      '- Include specific numbers (magnitudes, counts, computed statistics).',
+      '- Suggest what the user should look at on the globe.',
+      '- Always include ## COMMANDS when globe changes are needed.',
+      '- If the user asks about a location with no data, say so honestly.',
+      '- For complex tasks, break into subtasks and show progress.',
+      '- Prefer ## TOOL_CALLS to fetch live data rather than describing what you cannot see.',
+    );
+
+    return lines.join('\n');
+  }
+
   private loadFromDb(): void {
     try {
       const db = getDb();

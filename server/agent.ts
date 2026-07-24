@@ -3,128 +3,10 @@ import { omninet } from './ai-router/omninet';
 import { cognitiveOrchestrator, type CognitionResult, type ProgressCallback } from './cognition/cognitiveOrchestrator';
 import { AgentOrchestrator, type AgentResult } from './orchestrator';
 import { logger } from './observability/logger';
+import { dynamicTools } from './tools-v2/toolGenerator';
 
 // ═══════════════════════════════════════════════════════════════════════
-// DEPRECATED: Static prompt — kept for backward compatibility.
-// Use buildAgentPrompt(tools) instead.
-// ═══════════════════════════════════════════════════════════════════════
-export const AGENTS_MD = `# Earth Intelligence Copilot — Advanced Sandbox Mode
-
-You are an autonomous Earth Intelligence Copilot with full sandbox capabilities. You have access to:
-1. **Antigravity sandbox** (Google-managed Linux VM with Python, Node.js, bash, internet)
-2. **Local sandbox API** on http://localhost:3001 for direct code execution, file ops, and data analysis
-
-## Your Mission
-When a user describes a task:
-1. **Plan** — Decompose the task into subtasks (fetch, analyze, visualize)
-2. **Fetch** — Pull data from the APIs below or scrape the web
-3. **Compute** — Run Python/Node.js in the sandbox for analysis, stats, simulations
-4. **Command** — Use COMMANDS to visualize results on the globe
-5. **Respond** — Concise, data-backed answer with specific numbers
-
-## Available Data APIs (all on http://localhost:3001)
-
-### Seismic
-- \`GET /api/earthquakes\` — Recent M2.5+ earthquakes (GeoJSON)
-- \`GET /api/earthquakes/significant\` — Significant month quakes
-- \`GET /api/tectonic\` — Tectonic plate boundaries
-- \`GET /api/gdacs/alerts\` — GDACS disaster alerts
-
-### Aviation
-- \`GET /api/adsb-lol\` — Live aircraft positions (multi-region)
-- \`GET /api/adsb-fi\` — Live aircraft positions (multi-region)
-- \`GET /api/openflights\` — Airports and routes
-
-### Weather
-- \`GET /api/weather/open-meteo?lat=X&lon=Y\` — Current weather at coordinates
-- \`GET /api/weather/nhc\` — NHC tropical cyclones
-- \`GET /api/weather/alerts\` — NWS weather alerts
-- \`GET /api/weather/drought\` — US drought monitor
-- \`GET /api/weather/climate-indices\` — Climate outlooks
-- \`GET /api/lightning\` — Real-time lightning strikes
-
-### Hazards
-- \`GET /api/eonet\` — NASA natural events (wildfires, floods, volcanoes, dust)
-- \`GET /api/firms\` — NASA FIRMS wildfire detections
-- \`GET /api/vaac/tokyo\`, \`/api/vaac/anchorage\`, \`/api/vaac/washington\` — VAAC advisories
-- \`GET /api/wovodat\` — Volcano observatory data
-- \`GET /api/nasa-so2\` — NASA SO2 monitoring
-
-### Ocean & Energy
-- \`GET /api/submarine-cables\` — Submarine cable map
-- \`GET /api/electricity-grid\` — Grid carbon intensity
-
-### Space
-- \`GET /api/space-debris\` — CelesTrak orbital debris (1500+ objects)
-- \`GET /api/nasa-dsn\` — NASA Deep Space Network dishes
-- \`GET /api/aurora\` — Aurora oval forecast
-- \`GET /api/space-weather/kp\` — Kp index
-- \`GET /api/iss\` — ISS real-time position
-- \`GET /api/satellites/tle\` — Active satellite TLE data
-
-### Satellite Imagery
-- \`GET /api/fm/search?text=forest+fire\` — Search satellite imagery by text description (returns lat/lon + class labels)
-- \`GET /api/fm/search?classLabel=trees\` — Search satellite imagery by land-cover class (water/trees/grass/crops/built_area/bare_ground/snow_ice/clouds/flooded_vegetation)
-- \`GET /api/fm/search?lat=12.34&lon=56.78&radiusKm=50\` — Search satellite imagery by geographic area
-- \`POST /api/fm/prithvi/analyze\` — Analyze a specific lat/lon with the Prithvi EO model (body: {"lat":12.34,"lon":56.78,"radiusKm":10})
-- \`POST /api/fm/prithvi/change\` — Detect change at a location (body: {"lat":12.34,"lon":56.78})
-
-### Social
-- \`GET /api/social\` — Aggregated news + social media feed
-
-## Sandbox Code Execution
-
-You can run code directly in the local sandbox using \`POST /api/sandbox/execute\`:
-
-### Python
-\`\`\`json
-POST /api/sandbox/execute
-{"language":"python","code":"import json, numpy as np\\ndata = np.array([1,2,3,4,5])\\nprint(f'Mean: {np.mean(data)}')\\nprint('##JSON_RESULT')\\nprint(json.dumps({'mean':float(np.mean(data)),'std':float(np.std(data))}))\\nprint('##')"}
-\`\`\`
-
-### Node.js
-\`\`\`json
-POST /api/sandbox/execute
-{"language":"node","code":"const data = [1,2,3,4,5];\\nconst mean = data.reduce((a,b)=>a+b,0)/data.length;\\nconsole.log('##JSON_RESULT');\\nconsole.log(JSON.stringify({mean,std:Math.sqrt(data.reduce((s,v)=>s+(v-mean)**2,0)/data.length)}));\\nconsole.log('##')"}
-\`\`\`
-
-### Bash
-\`\`\`json
-POST /api/sandbox/execute
-{"language":"bash","code":"curl -s http://localhost:3001/api/earthquakes | python3 -c \\"import sys,json; d=json.load(sys.stdin); print(f'{len(d[\\"features\\"])} earthquakes'); print('##JSON_RESULT'); print(json.dumps({'count':len(d['features'])})); print('##')\\""}
-\`\`\`
-
-### File operations
-- Upload: POST /api/sandbox/workspace/{id}/upload (multipart)
-- List: GET /api/sandbox/workspace/{id}/files
-- Read: GET /api/sandbox/workspace/{id}/read?file=xxx
-
-## How to Command the Globe
-
-After your analysis, output commands for the globe. Each line is one JSON command:
-
-\`\`\`
-## COMMANDS
-{"action":"flyTo","lat":35.68,"lon":139.65,"label":"Tokyo","zoom":8}
-{"action":"toggleLayer","layerId":"earthquakes","enabled":true}
-{"action":"addPin","lat":35.68,"lon":139.65,"label":"Epicenter","color":"#ef4444"}
-{"action":"addHeatmap","points":[{"lat":35.68,"lon":139.65,"value":0.8},{"lat":35.5,"lon":139.3,"value":0.4}],"radius":50}
-{"action":"addPolygon","coordinates":[[35.6,139.5],[35.7,139.5],[35.7,139.7],[35.6,139.7]],"label":"Risk Zone","color":"rgba(255,0,0,0.3)"}
-{"action":"addGeoJSON","geojson":{"type":"FeatureCollection","features":[...]},"label":"Analysis Results","color":"#22c55e"}
-{"action":"addChart","type":"bar","title":"Magnitude Distribution","labels":["M2","M3","M4","M5"],"values":[120,45,12,3],"position":{"lat":35.68,"lon":139.65}}
-\`\`\`
-
-## Response Rules
-- Be concise. Lead with the most important finding.
-- Include specific numbers (magnitudes, counts, distances, computed statistics).
-- Suggest what the user should look at on the globe.
-- Always include ## COMMANDS when globe changes are needed.
-- When running code, explain what you're computing and why.
-- If the user asks about a location with no data, say so honestly.
-- For complex tasks, break into subtasks and show progress.`;
-
-// ═══════════════════════════════════════════════════════════════════════
-// TYPES (unchanged)
+// TYPES
 // ═══════════════════════════════════════════════════════════════════════
 
 export type GlobeAction =
@@ -206,109 +88,64 @@ export interface AgentTool {
 // ═══════════════════════════════════════════════════════════════════════
 
 export class ToolRegistry {
-  private tools = new Map<string, AgentTool>();
-
   register(tool: AgentTool): void {
-    this.tools.set(tool.name, tool);
+    dynamicTools.register({
+      name: tool.name,
+      description: tool.description,
+      category: tool.category,
+      exampleQueries: tool.exampleQueries,
+      source: 'core',
+      schema: {
+        type: tool.schema.type as 'api' | 'sandbox' | 'command',
+        endpoint: tool.schema.endpoint,
+        method: tool.schema.method,
+        params: tool.schema.params,
+        outputFormat: tool.schema.outputFormat,
+      },
+      code: null,
+    });
   }
 
   get(name: string): AgentTool | undefined {
-    return this.tools.get(name);
+    const dt = dynamicTools.get(name);
+    if (!dt) return undefined;
+    return {
+      name: dt.name,
+      description: dt.description,
+      category: dt.category,
+      exampleQueries: dt.exampleQueries,
+      schema: {
+        type: dt.schema.type as 'api' | 'sandbox' | 'command',
+        endpoint: dt.schema.endpoint,
+        method: dt.schema.method,
+        params: dt.schema.params,
+        outputFormat: dt.schema.outputFormat,
+      },
+    };
   }
 
   list(): AgentTool[] {
-    return Array.from(this.tools.values());
+    return dynamicTools.list().map(dt => ({
+      name: dt.name,
+      description: dt.description,
+      category: dt.category,
+      exampleQueries: dt.exampleQueries,
+      schema: {
+        type: dt.schema.type as 'api' | 'sandbox' | 'command',
+        endpoint: dt.schema.endpoint,
+        method: dt.schema.method,
+        params: dt.schema.params,
+        outputFormat: dt.schema.outputFormat,
+      },
+    }));
   }
 
   listByCategory(category: string): AgentTool[] {
     return this.list().filter(t => t.category === category);
   }
 
-  /**
-   * Build a dynamic AGENTS.md prompt that only includes
-   * tools relevant to the detected intent.
-   */
   buildPrompt(intent?: IntentResult): string {
-    let tools = this.list();
-
-    if (intent && intent.confidence > 0.3) {
-      tools = tools.filter(t => {
-        if (intent.type === 'weather_check') return t.category === 'weather';
-        if (intent.type === 'toggle_layer') {
-          if (intent.layerIds) {
-            return intent.layerIds.some(id => t.name.includes(id) || t.exampleQueries.some(q => q.includes(id)));
-          }
-          return true;
-        }
-        if (intent.type === 'compute') return t.schema.type === 'sandbox';
-        return true;
-      });
-    }
-
-    const lines: string[] = [
-      '# Earth Intelligence Copilot — Agent Mode',
-      '',
-      'You are an autonomous Earth Intelligence Copilot. Your mission:',
-      '1. Understand the user\'s Earth science question',
-      '2. Fetch relevant data from the tools below or the web',
-      '3. Analyze using the sandbox code execution environment',
-      '4. Visualize results on the globe using ## COMMANDS',
-      '5. Respond with concise, data-backed answers',
-      '',
-      '## Available Tools',
-      '',
-    ];
-
-    const grouped = new Map<string, AgentTool[]>();
-    for (const tool of tools) {
-      const group = grouped.get(tool.category) || [];
-      group.push(tool);
-      grouped.set(tool.category, group);
-    }
-
-    for (const [category, categoryTools] of grouped) {
-      lines.push(`### ${category.charAt(0).toUpperCase() + category.slice(1)}`);
-      for (const tool of categoryTools) {
-        const ep = tool.schema.endpoint ? ` — \`${tool.schema.method || 'GET'} ${tool.schema.endpoint}\`` : '';
-        lines.push(`- **${tool.name}**: ${tool.description}${ep}`);
-      }
-      lines.push('');
-    }
-
-    lines.push(
-      '## Sandbox Code Execution',
-      '',
-      'You can run code via `POST /api/sandbox/execute` with `{"language":"python"|"node"|"bash", "code": "..."}`.',
-      'The sandbox has numpy, pandas, scipy, scikit-learn, geopandas, and internet access.',
-      '',
-      '## How to Command the Globe',
-      '',
-      'After your analysis, output commands:',
-      '```',
-      '## COMMANDS',
-      '{"action":"flyTo","lat":35.68,"lon":139.65,"label":"Tokyo","zoom":8}',
-      '{"action":"toggleLayer","layerId":"earthquakes","enabled":true}',
-      '{"action":"addPin","lat":35.68,"lon":139.65,"label":"Epicenter","color":"#ef4444"}',
-      '{"action":"addHeatmap","points":[{"lat":35.68,"lon":139.65,"value":0.8}],"radius":50}',
-      '{"action":"addPolygon","coordinates":[[35.6,139.5],[35.7,139.5]],"label":"Zone","color":"rgba(255,0,0,0.3)"}',
-      '{"action":"addGeoJSON","geojson":{...},"label":"Results","color":"#22c55e"}',
-      '{"action":"addChart","type":"bar","title":"Distribution","labels":["A","B"],"values":[10,20]}',
-      '{"action":"addPanel","panelData":{"stats":[...],"charts":[...],"table":{...},"recommendations":[...]}}',
-      '```',
-      '',
-      'Supported actions: flyTo, toggleLayer, addPin, addHeatmap, addPolygon, addGeoJSON, addChart, addPanel.',
-      '',
-      '## Response Rules',
-      '- Be concise. Lead with the most important finding.',
-      '- Include specific numbers (magnitudes, counts, computed statistics).',
-      '- Suggest what the user should look at on the globe.',
-      '- Always include ## COMMANDS when globe changes are needed.',
-      '- If the user asks about a location with no data, say so honestly.',
-      '- For complex tasks, break into subtasks and show progress.',
-      '- Do NOT use function calling, tool calls, or any structured function syntax. Respond with plain text only.',
-    );
-
-    return lines.join('\n');
+    return dynamicTools.buildPrompt(intent ? { type: intent.type, confidence: intent.confidence, layerIds: intent.layerIds } : undefined);
   }
 }
 
@@ -542,19 +379,52 @@ export class IntentRouter {
 
     // Weather check with location (must precede generic quick_scan)
     if (location && (lower.includes('weather') || lower.includes('rain') || lower.includes('temperature') ||
-                     lower.includes('wind') || lower.includes('humidity') || lower.includes('forecast'))) {
+                     lower.includes('wind') || lower.includes('humidity') || lower.includes('forecast') ||
+                     lower.includes('precipitation') || lower.includes('air quality') || lower.includes('pollution') ||
+                     lower.includes('aqi') || lower.includes('pm2.5') || lower.includes('smog') ||
+                     lower.includes('drought') || lower.includes('marine') || lower.includes('wave') ||
+                     lower.includes('swell') || lower.includes('sea state') || lower.includes('radar'))) {
       return { type: 'weather_check', confidence: 0.9, location };
     }
 
     // Fly to location
     if (location && (lower.includes('fly') || lower.includes('go to') || lower.includes('zoom to') ||
-                     lower.includes('take me') || lower.includes('navigate') || lower.includes('focus'))) {
+                      lower.includes('take me') || lower.includes('navigate') || lower.includes('focus'))) {
       return { type: 'fly_to', confidence: 0.95, location };
     }
 
     // Digital twin / impact analysis (must precede compute and quick_scan)
     if (/\b(what if|what will happen|what would happen|impact|damage assessment|flood zone|inundation|sea level rise|sea rises|sea.*rises|sea.*level.*rises|ocean.*rises|water.*level.*rises|how many.*affected|risk analysis|compare.*scenarios?|simulate.*near|what happens if|analyze impact|show.*impact|crisis simulation|disaster scenario|show me.*zone|show me.*flood|show me.*risk|show me.*damage|show me.*impact|show me what|coastal.*flood|flood.*coastal|coastal.*area.*sea|if.*sea.*rises|if.*sea.*level|what.*happens.*if.*sea|what.*happens.*if.*flood|what.*happens.*if.*earthquake|what.*happens.*if.*tsunami|what.*happens.*if.*erupt|what.*happens.*if.*hurricane|what.*happens.*if.*cyclone|what.*happens.*if.*wildfire)\b/i.test(lower)) {
       return { type: 'digital_twin', confidence: 0.85, location };
+    }
+
+    // Maritime queries with spatial context — route to deep_analysis (not just toggle)
+    if ((lower.includes('ship') || lower.includes('vessel') || lower.includes('maritime') || lower.includes('ais')) &&
+        (lower.includes('near') || lower.includes('find') || lower.includes('show') || lower.includes('track') ||
+         lower.includes('coastline') || lower.includes('port') || location)) {
+      return { type: 'deep_analysis', confidence: 0.85, location, layerIds: ['ais_vessels'] };
+    }
+
+    // Satellite tracking with spatial context — route to deep_analysis
+    if ((lower.includes('satellite') || lower.includes('starlink') || lower.includes('gps satellite')) &&
+        (lower.includes('over') || lower.includes('near') || lower.includes('track') || lower.includes('show') ||
+         lower.includes('find') || location)) {
+      return { type: 'deep_analysis', confidence: 0.85, location, layerIds: ['space_debris'] };
+    }
+
+    // Flight tracking with spatial context or specific flight — route to deep_analysis
+    if ((lower.includes('flight') || lower.includes('plane') || lower.includes('aircraft') || lower.includes('adsb') ||
+         lower.includes('military flight') || lower.includes('military aircraft')) &&
+        (lower.includes('near') || lower.includes('within') || lower.includes('radius') || lower.includes('track') ||
+         lower.includes('show') || lower.includes('find') || /flight\s+\w+\d+/i.test(lower) || location)) {
+      return { type: 'deep_analysis', confidence: 0.85, location, layerIds: ['flight_tracks'] };
+    }
+
+    // Wildfire hotspot queries with spatial context
+    if ((lower.includes('fire') || lower.includes('wildfire') || lower.includes('hotspot') || lower.includes('burning')) &&
+        (lower.includes('near') || lower.includes('show') || lower.includes('find') || lower.includes('display') ||
+         lower.includes('hotspot') || location)) {
+      return { type: 'deep_analysis', confidence: 0.85, location, layerIds: ['wildfires'] };
     }
 
     // Compute task keywords
@@ -574,6 +444,58 @@ export class IntentRouter {
       lower.includes('issue') || lower.includes('problem')
     )) {
       return { type: 'quick_scan', confidence: 0.85, location };
+    }
+
+    // Simulation queries — route to compute/deep_analysis
+    if ((lower.includes('simulate') || lower.includes('simulation')) &&
+        (lower.includes('wildfire') || lower.includes('fire') || lower.includes('tsunami') ||
+         lower.includes('atmosphere') || lower.includes('ash') || lower.includes('weather model') ||
+         lower.includes('flood') || lower.includes('dispersion'))) {
+      return { type: 'compute', confidence: 0.9, location };
+    }
+
+    // Scenario generation queries
+    if ((lower.includes('scenario') || lower.includes('generate scenario') || lower.includes('create scenario')) &&
+        (lower.includes('earthquake') || lower.includes('hurricane') || lower.includes('wildfire') ||
+         lower.includes('volcanic') || lower.includes('flood') || lower.includes('tsunami') || location)) {
+      return { type: 'deep_analysis', confidence: 0.85, location };
+    }
+
+    // Analytical model queries
+    if (lower.includes('calculate') || lower.includes('compute') || lower.includes('equation') ||
+        lower.includes('formula') || lower.includes('scientific model') || lower.includes('ndvi') ||
+        lower.includes('wave energy') || lower.includes('land surface temperature') ||
+        lower.includes('carbon flux') || lower.includes('seismic magnitude') ||
+        lower.includes('evapotranspiration') || lower.includes('runoff')) {
+      return { type: 'compute', confidence: 0.85, location };
+    }
+
+    // Intelligence/market/OSINT queries
+    if ((lower.includes('stock') || lower.includes('market') || lower.includes('oil price') ||
+         lower.includes('gold price') || lower.includes('crypto') || lower.includes('bitcoin') ||
+         lower.includes('geopolitical') || lower.includes('conflict risk') ||
+         lower.includes('correlation') || lower.includes('heatmap')) &&
+        !lower.includes('weather') && !lower.includes('satellite')) {
+      return { type: 'deep_analysis', confidence: 0.8, location };
+    }
+
+    // OSINT/threat intelligence queries
+    if (lower.includes('air quality') || lower.includes('aqi') || lower.includes('pollution') ||
+        lower.includes('sanctions') || lower.includes('ofac') || lower.includes('displacement') ||
+        lower.includes('refugee') || lower.includes('reliefweb') || lower.includes('cyber threat') ||
+        lower.includes('otx') || lower.includes('gdelt') || lower.includes('reliefweb') ||
+        lower.includes('acled') || lower.includes('ucdp')) {
+      return { type: 'deep_analysis', confidence: 0.8, location };
+    }
+
+    // Foundation model / EO analysis queries
+    if ((lower.includes('satellite') || lower.includes('land cover') || lower.includes('segmentation') ||
+         lower.includes('crop health') || lower.includes('deforestation') || lower.includes('ndvi') ||
+         lower.includes('samgeo') || lower.includes('clay') || lower.includes('unet') ||
+         lower.includes('prithvi') || lower.includes('fire scar') || lower.includes('flood extent')) &&
+        (lower.includes('analyze') || lower.includes('detect') || lower.includes('classify') ||
+         lower.includes('segment') || lower.includes('monitor') || location)) {
+      return { type: 'deep_analysis', confidence: 0.85, location };
     }
 
     // Layer toggles (skip if user wants analysis, not just a toggle)
@@ -678,10 +600,27 @@ export class IntentRouter {
     const prompt = `You are an Earth Intelligence intent classifier. Analyze the user's message and return ONLY valid JSON (no markdown, no explanation).
 
 Determine:
-- type: one of "quick_scan" (urgent hazard check), "deep_analysis" (detailed research), "fly_to" (navigate to location), "toggle_layer" (show/hide data), "weather_check" (weather query), "compute" (data analysis/computation), or "unknown"
+- type: one of "quick_scan" (urgent hazard check), "deep_analysis" (detailed research or data query requiring backend fetch), "fly_to" (navigate to location), "toggle_layer" (show/hide data layer), "weather_check" (weather/marine/air quality query), "compute" (data analysis/computation), "digital_twin" (impact simulation/what-if scenario), or "unknown"
 - confidence: 0.0 to 1.0
 - location: if a specific place is mentioned, provide {lat, lon, label}. Use known coordinates for major cities. If coordinates are given directly, parse them.
-- layerIds: if the user wants to see a specific data layer, suggest the layer ID (earthquakes, wildfires, severe_storms, volcanoes, flights, ais_vessels, space_debris, etc.)
+- layerIds: if the user wants to see a specific data layer, suggest the layer ID from: earthquakes, wildfires, severe_storms, volcanoes, flight_tracks, ais_vessels, space_debris, satellite_tracker, lightning_strikes, aurora_oval, submarine_cables
+
+Guidance:
+- "ships near", "vessels near", "find ships", "maritime" → deep_analysis with layerIds ["ais_vessels"]
+- "satellites over", "track satellite", "show satellites" → deep_analysis with layerIds ["space_debris"]
+- "flights near", "aircraft near", "track flight", "military flights" → deep_analysis with layerIds ["flight_tracks"]
+- "wildfire hotspots", "active fires near" → deep_analysis with layerIds ["wildfires"]
+- "rainfall over", "rain in", "temperature in" → weather_check
+- "air quality", "pollution", "AQI" → weather_check
+- "what if sea level", "impact of", "flood simulation" → digital_twin
+- "stock price", "oil price", "market quotes" → deep_analysis
+- "geopolitical risk", "conflict risk" → deep_analysis
+- "sanctions check", "OFAC" → deep_analysis
+- "simulate wildfire", "tsunami simulation" → compute
+- "crop health", "agriculture analysis" → deep_analysis
+- "satellite analysis", "land cover", "segmentation" → deep_analysis
+- "scientific equation", "calculate NDVI" → compute
+- "scenario generation", "create scenario" → deep_analysis
 
 User message: "${text.replace(/"/g, '\\"')}"
 
@@ -692,8 +631,8 @@ Return JSON: {"type":"...","confidence":0.0,"location":{"lat":0,"lon":0,"label":
       return result;
     }
 
-    // Fallback to embedding path
-    return this.classifyWithEmbedding(text);
+    // Fallback to fast keyword classification (embedding path removed for consolidation)
+    return this.classify(text);
   }
 
   /**
@@ -918,6 +857,43 @@ export class CommandParser {
       }
     }
     return commands;
+  }
+}
+
+export interface ToolCall {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+/**
+ * Parses a `## TOOL_CALLS` block emitted by the LLM.
+ * Each non-empty line that starts with `{` is treated as a JSON tool call
+ * of the form `{ "name": "toolName", "args": { ... } }`.
+ */
+export class ToolCallParser {
+  static parse(text: string): ToolCall[] {
+    const calls: ToolCall[] = [];
+    const match = text.match(/## TOOL_CALLS\n([\s\S]*?)(?:\n##|$)/);
+    if (!match) return calls;
+    const lines = match[1].trim().split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('{')) continue;
+      try {
+        const parsed = JSON.parse(trimmed) as { name?: string; args?: Record<string, unknown> };
+        if (typeof parsed.name === 'string' && parsed.name.length > 0) {
+          calls.push({ name: parsed.name, args: parsed.args ?? {} });
+        }
+      } catch (e) {
+        logger.warn({ err: e, line: trimmed }, 'Tool call parse failed');
+      }
+    }
+    return calls;
+  }
+
+  /** Strip the `## TOOL_CALLS` block from LLM output before showing it to the user. */
+  static strip(text: string): string {
+    return text.replace(/## TOOL_CALLS\n[\s\S]*?(?=\n## |$)/, '').trim();
   }
 }
 
