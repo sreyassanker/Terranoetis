@@ -890,26 +890,18 @@ function richRender(text: string): string {
 }
 
 function renderCommandChips(
-  content: string,
+  commands: Array<{ action: string; label?: string; lat?: number; lon?: number; layerId?: string }> | undefined,
   focusLocation: (lat: number, lon: number, opts?: Record<string, unknown>) => void,
   toggleLayer: (id: string) => void,
 ) {
+  if (!commands || commands.length === 0) return null;
   const cmdChips: Array<{label:string;action:string;lat?:number;lon?:number;layerId?:string}> = [];
-  const cmdBlock = content.match(/## COMMANDS\n([\s\S]*?)(?:\n##|\n*$)/);
-  if (cmdBlock) {
-    const cmdMatches = cmdBlock[1].match(/\{[^}]+\}/g);
-    if (cmdMatches) {
-      for (const json of cmdMatches) {
-        try {
-          const cmd = JSON.parse(json);
-          if (cmd.action === 'flyTo' && cmd.lat && cmd.lon) {
-            cmdChips.push({label:(cmd.label||'Fly'),action:'flyTo',lat:cmd.lat,lon:cmd.lon});
-          }
-          if (cmd.action === 'toggleLayer' && cmd.layerId) {
-            cmdChips.push({label:cmd.layerId,action:'toggleLayer',layerId:cmd.layerId});
-          }
-        } catch { /* skip */ }
-      }
+  for (const cmd of commands) {
+    if (cmd.action === 'flyTo' && cmd.lat != null && cmd.lon != null) {
+      cmdChips.push({ label: cmd.label || 'Fly', action: 'flyTo', lat: cmd.lat, lon: cmd.lon });
+    }
+    if (cmd.action === 'toggleLayer' && cmd.layerId) {
+      cmdChips.push({ label: cmd.layerId, action: 'toggleLayer', layerId: cmd.layerId });
     }
   }
   if (cmdChips.length === 0) return null;
@@ -6907,10 +6899,13 @@ export default function App() {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     try {
-      // Clear previous digital twin entities at start of new query
+      // Clear previous agent-generated entities at start of new query
       const v0 = viewerRef.current;
       if (v0) {
-        const toRemove = v0.entities.values.filter((e: any) => e.properties?.layer === 'digital_twin');
+        const toRemove = v0.entities.values.filter((e: any) => {
+          const layer = e.properties?.layer;
+          return layer === 'digital_twin' || layer === 'heatmap' || layer === 'chart' || layer === 'geojson';
+        });
         for (const e of toRemove) v0.entities.remove(e);
       }
       const resp = await fetch('/api/agent/ask', {
@@ -6936,6 +6931,8 @@ export default function App() {
       let finalText = '';
       let lastTraceId: string | null = null;
       let serverError: string | null = null;
+      const receivedCommands: Array<{ action: string; label?: string; lat?: number; lon?: number; layerId?: string }> = [];
+      let streamingMsgId: number | null = null;
 
       const processLines = () => {
         const lines = buffer.split('\n');
@@ -6952,9 +6949,49 @@ export default function App() {
               setAgentSteps(data.steps.map((s: { text?: string; type?: string; code?: string; output?: string; status?: string }) => ({type:s.type||'step',text:s.text||s.type||'',code:s.code,output:s.output,status:s.status||'completed'})));
             }
             if (data.type === 'step') {
-              setAgentSteps(prev => [...prev, {type:data.stepType||'step',text:data.text||'',code:data.code,output:data.output}]);
+              setAgentSteps(prev => [...prev, {type:data.stepType||'step',text:data.text||'',code:data.code,output:data.output,status:data.status||'completed'}]);
+            }
+            if (data.type === 'token' && data.text) {
+              if (streamingMsgId === null) {
+                streamingMsgId = nextAiMsgIdRef.current++;
+                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: data.text }]);
+              } else {
+                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: m.content + data.text } : m));
+              }
+            }
+            if (data.type === 'tool_call') {
+              if (streamingMsgId === null) {
+                streamingMsgId = nextAiMsgIdRef.current++;
+                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: '', toolEvents: [{ name: data.name, args: data.args, description: data.description, status: 'pending' }] }]);
+              } else {
+                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, toolEvents: [...(m.toolEvents || []), { name: data.name, args: data.args, description: data.description, status: 'pending' }] } : m));
+              }
+            }
+            if (data.type === 'tool_result') {
+              if (streamingMsgId !== null) {
+                setAiMessages(prev => prev.map(m => {
+                  if (m.id !== streamingMsgId || !m.toolEvents) return m;
+                  const events = [...m.toolEvents];
+                  const idx = events.findIndex(e => e.name === data.name && e.status === 'pending');
+                  if (idx >= 0) {
+                    events[idx] = { ...events[idx], status: data.status, error: data.error, result: data.result };
+                  } else {
+                    events.push({ name: data.name, status: data.status, error: data.error, result: data.result });
+                  }
+                  return { ...m, toolEvents: events };
+                }));
+              }
             }
             if (data.commands && Array.isArray(data.commands)) {
+              for (const cmd of data.commands) {
+                receivedCommands.push({
+                  action: cmd.action,
+                  label: cmd.label,
+                  lat: cmd.lat,
+                  lon: cmd.lon,
+                  layerId: cmd.layerId,
+                });
+              }
               executeAgentCommands(data.commands);
             }
             if (data.type === 'intent') {
@@ -6991,10 +7028,19 @@ export default function App() {
       processLines();
 
       if (serverError) {
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Server error: ${serverError}` }]);
+        if (streamingMsgId !== null) {
+          setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: `Server error: ${serverError}` } : m));
+        } else {
+          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Server error: ${serverError}` }]);
+        }
       } else if (finalText) {
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText, traceId: lastTraceId }]);
-      } else {
+        if (streamingMsgId !== null) {
+          // Replace streaming content with final text (which may include updates from command parsing)
+          setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: finalText, traceId: lastTraceId, commands: receivedCommands.length > 0 ? receivedCommands : undefined } : m));
+        } else {
+          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText, traceId: lastTraceId, commands: receivedCommands.length > 0 ? receivedCommands : undefined }]);
+        }
+      } else if (streamingMsgId === null) {
         const fallback = generateLocalResponse(userMsg, loc);
         setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: fallback }]);
       }
@@ -7153,31 +7199,84 @@ export default function App() {
             const geojson = cmd.geojson as { type: string; features?: Array<{ geometry: { type: string; coordinates: unknown }; properties?: Record<string, unknown> }> };
             const label = (cmd.label as string) || 'GeoJSON';
             const color = (cmd.color as string) || '#22c55e';
-            if (geojson?.features) {
-              for (const feature of geojson.features) {
-                const geom = feature.geometry;
-                if (geom?.type === 'Point' && Array.isArray(geom.coordinates)) {
-                  const [lon, lat] = geom.coordinates as [number, number];
-                  v.entities.add({
-                    position: Cesium.Cartesian3.fromDegrees(lon, lat),
-                    billboard: { image: createPinIcon(color, 20), width: 20, height: 20, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
-                    properties: { layer: 'geojson', agent: true, ...feature.properties },
-                  });
-                } else if (geom?.type === 'Polygon' && Array.isArray(geom.coordinates)) {
-                  const ring = (geom.coordinates as number[][][])[0];
-                  const positions = ring.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]));
-                  v.entities.add({
-                    polygon: {
-                      hierarchy: positions,
-                      material: Cesium.Color.fromCssColorString(color).withAlpha(0.4),
-                      outline: true,
-                      outlineColor: Cesium.Color.fromCssColorString(color).withAlpha(0.9),
-                      height: 0.5,
-                    },
-                    properties: { layer: 'digital_twin', agent: true, ...feature.properties },
-                  });
+            const cesiumColor = (() => { try { return Cesium.Color.fromCssColorString(color); } catch { return Cesium.Color.fromCssColorString('#22c55e'); } })();
+            const addPoint = (lon: number, lat: number, props?: Record<string, unknown>) => {
+              if (!isFinite(lon) || !isFinite(lat)) return;
+              v.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(lon, lat),
+                billboard: { image: createPinIcon(color, 20), width: 20, height: 20, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+                properties: { layer: 'geojson', agent: true, ...props },
+              });
+            };
+            const addLine = (coords: number[][], props?: Record<string, unknown>) => {
+              if (!Array.isArray(coords) || coords.length < 2) return;
+              const positions = coords.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]));
+              v.entities.add({
+                polyline: { positions, width: 2, material: cesiumColor, clampToGround: true },
+                properties: { layer: 'geojson', agent: true, ...props },
+              });
+            };
+            const addPolygon = (rings: number[][][], props?: Record<string, unknown>) => {
+              if (!Array.isArray(rings) || rings.length === 0) return;
+              const outer = rings[0];
+              if (outer.length < 3) return;
+              const positions = outer.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]));
+              const holes = rings.slice(1).map(ring => new Cesium.PolygonHierarchy(ring.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]))));
+              v.entities.add({
+                polygon: {
+                  hierarchy: new Cesium.PolygonHierarchy(positions, holes),
+                  material: cesiumColor.withAlpha(0.4),
+                  outline: true,
+                  outlineColor: cesiumColor.withAlpha(0.9),
+                  height: 0.5,
+                },
+                properties: { layer: 'digital_twin', agent: true, ...props },
+              });
+            };
+            const renderGeometry = (geom: { type: string; coordinates: unknown }, props?: Record<string, unknown>) => {
+              if (!geom) return;
+              switch (geom.type) {
+                case 'Point': {
+                  const c = geom.coordinates as [number, number];
+                  addPoint(c[0], c[1], props);
+                  break;
+                }
+                case 'MultiPoint': {
+                  for (const c of (geom.coordinates as number[][])) addPoint(c[0], c[1], props);
+                  break;
+                }
+                case 'LineString': {
+                  addLine(geom.coordinates as number[][], props);
+                  break;
+                }
+                case 'MultiLineString': {
+                  for (const line of (geom.coordinates as number[][][])) addLine(line, props);
+                  break;
+                }
+                case 'Polygon': {
+                  addPolygon(geom.coordinates as number[][][], props);
+                  break;
+                }
+                case 'MultiPolygon': {
+                  for (const poly of (geom.coordinates as number[][][][])) addPolygon(poly, props);
+                  break;
+                }
+                case 'GeometryCollection': {
+                  const geoms = (geom as unknown as { geometries: Array<{ type: string; coordinates: unknown }> }).geometries;
+                  if (Array.isArray(geoms)) for (const g of geoms) renderGeometry(g, props);
+                  break;
                 }
               }
+            };
+            if (geojson?.features) {
+              for (const feature of geojson.features) {
+                renderGeometry(feature.geometry, feature.properties);
+              }
+            } else if (geojson?.type === 'Feature') {
+              const singleFeature = geojson as unknown as { geometry: { type: string; coordinates: unknown }; properties?: Record<string, unknown> };
+              renderGeometry(singleFeature.geometry, singleFeature.properties);
+            } else if (geojson?.type && geojson.type !== 'FeatureCollection') {
+              renderGeometry(geojson as unknown as { type: string; coordinates: unknown }, { label });
             }
             break;
           }
@@ -8419,7 +8518,39 @@ export default function App() {
                   {msg.type === 'data-analysis' && <div className="msg-label" style={{color:'#34d399'}}><BarChart3 size={12} style={{display:'inline',marginRight:3}} /> Data Analysis</div>}
                   {msg.type === 'error' && <div className="msg-label" style={{color:'#ef4444'}}><AlertTriangle size={12} style={{display:'inline',marginRight:3}} /> Error</div>}
                   <div className="rich-content" dangerouslySetInnerHTML={{ __html: richRender(msg.content) }} />
-                  {renderCommandChips(msg.content, focusLocation, toggleLayer)}
+                  {msg.toolEvents && msg.toolEvents.length > 0 && (
+                    <div style={{ display:'flex', flexDirection:'column', gap:4, marginTop:6 }}>
+                      {msg.toolEvents.map((ev, i) => {
+                        const icon = ev.status === 'pending'
+                          ? <Loader size={11} className="spin" style={{color:'#60a5fa'}} />
+                          : ev.status === 'success'
+                            ? <CheckCircle size={11} style={{color:'#34d399'}} />
+                            : ev.status === 'error'
+                              ? <XCircle size={11} style={{color:'#ef4444'}} />
+                              : <AlertTriangle size={11} style={{color:'#eab308'}} />;
+                        const bg = ev.status === 'success' ? 'rgba(52,211,153,0.08)'
+                          : ev.status === 'error' ? 'rgba(239,68,68,0.08)'
+                          : ev.status === 'unknown' ? 'rgba(234,179,8,0.08)'
+                          : 'rgba(96,165,250,0.08)';
+                        const bd = ev.status === 'success' ? 'rgba(52,211,153,0.25)'
+                          : ev.status === 'error' ? 'rgba(239,68,68,0.25)'
+                          : ev.status === 'unknown' ? 'rgba(234,179,8,0.25)'
+                          : 'rgba(96,165,250,0.25)';
+                        return (
+                          <div key={i} style={{ display:'flex', alignItems:'center', gap:6, fontSize:10, padding:'3px 8px', borderRadius:6, background:bg, border:`1px solid ${bd}` }}>
+                            {icon}
+                            <Wrench size={10} style={{color:'var(--text-dim)'}} />
+                            <span style={{fontWeight:600, color:'var(--text)'}}>{ev.name}</span>
+                            {ev.args && Object.keys(ev.args).length > 0 && (
+                              <span style={{color:'var(--text-dim)'}}>{JSON.stringify(ev.args)}</span>
+                            )}
+                            {ev.error && <span style={{color:'#ef4444'}}>{ev.error}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {renderCommandChips(msg.commands, focusLocation, toggleLayer)}
                   {msg.content && idx > 0 && (
                     <div style={{marginTop:4}}>
                       <button
@@ -8540,6 +8671,9 @@ export default function App() {
             onKeyDown={e => { if (e.key === 'Enter') sendAI(); }} />
           {aiTyping ? (
             <button className="ai-stop" onClick={() => {
+              abortControllerRef.current?.abort();
+              setAiTyping(false);
+              cleanupThinkingSteps(true);
             }} title="Stop response" style={{background:'rgba(239,68,68,0.15)',border:'1px solid rgba(239,68,68,0.4)',color:'#ef4444',borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:600,padding:'4px 10px',display:'flex',alignItems:'center',gap:4}}><Square size={12} /> Stop</button>
           ) : (
             <button className="ai-send" onClick={() => sendAI()}><Send size={14} /></button>

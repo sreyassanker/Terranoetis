@@ -20,9 +20,9 @@ const __dirname = path.dirname(__filename);
 import { getDb, closeDb } from './db/index';
 import { API_METADATA, getCategories } from './api-metadata';
 import {
-  AGENTS_MD, CommandParser, MaterializedViewCache, IntentRouter, TaskPlanner,
-  ToolRegistry, buildAgentPrompt, warmIntentPrototypeEmbeddings,
-  type GlobeCommand, type AgentStep, type AgentTool,
+  CommandParser, MaterializedViewCache, IntentRouter, TaskPlanner,
+  ToolRegistry, buildAgentPrompt, ToolCallParser,
+  type GlobeCommand, type AgentStep, type AgentTool, type ToolCall,
 } from './agent';
 import { SandboxManager } from './sandboxManager';
 import { SimulationEngine } from './sandbox-v2/simulationEngine';
@@ -86,7 +86,6 @@ import { registerAnalyticalModelsRoutes } from './analytical-models';
 
 import { architectureProposals } from './meta-cognition/architectureProposals';
 import { promptEvolution } from './meta-cognition/promptEvolution';
-import { MCPServer } from './mcp';
 import { PluginManager } from './pluginManager';
 import { ModelRouter, CostTracker, EnhancedCache } from './costOptimizer';
 import { FeedbackManager, SelfImprover, buildAnalytics } from './selfImprover';
@@ -136,6 +135,7 @@ import { startSentinelEngine, stopSentinelEngine } from './sentinel/engine';
 import { CorrelationEngine } from './sentinel/correlationEngine';
 import { ForcePostureEngine } from './sentinel/forcePosture';
 import { startOsintBridge, stopOsintBridge } from './military/osintBridge';
+import { initAisTracker, stopAisTracker, getAisTracker, type AisVessel } from './maritime/aisTracker';
 import { prithviV2Engine } from './foundation-models/prithvi-v2';
 import { roadTrafficDetector } from './sentinel/roadTrafficDetector';
 import { spacexEngine } from './foundation-models/spacexApi';
@@ -307,11 +307,11 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/gdacs/alerts' || req.path === '/tectonic' ||
     req.path === '/vaac/tokyo' || req.path === '/vaac/anchorage' || req.path === '/vaac/washington' || req.path === '/firms' || req.path === '/lightning' ||
     req.path === '/openflights' || req.path === '/submarine-cables' || req.path === '/electricity-grid' ||
+    req.path === '/ais' || req.path.startsWith('/ais/') ||
     req.path === '/space-debris' || req.path === '/space-weather/kp' || req.path === '/space-weather/donki' ||
     req.path === '/nasa-dsn' || req.path === '/aurora' || req.path === '/iss' ||
     req.path === '/volcanoes' ||
     req.path === '/cameras' || req.path.startsWith('/cameras/') || req.path.startsWith('/cctv/') ||
-    req.path === '/satnogs/transmitters' || req.path === '/ucs-satellites' ||
     req.path === '/radar/rainviewer' || req.path === '/sentiment/news' ||
     req.path === '/ml/predict' || req.path === '/ml/predict/report' ||
     req.path === '/climate/power' || req.path === '/climate/anomalies' || req.path === '/climate/co2' || req.path === '/climate/sea-ice' ||
@@ -338,7 +338,12 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path.startsWith('/fm/alpha/') ||
     req.path.startsWith('/road-traffic/') ||
     req.path.startsWith('/spacex/') ||
-    req.path.startsWith('/bayfire/')
+    req.path.startsWith('/bayfire/') ||
+    // Multimodal perception endpoints (satellite analysis, seismic, radar, sentiment, fusion)
+    req.path.startsWith('/multimodal/') ||
+    req.path.startsWith('/satellite/process') ||
+    // Simulation endpoints (physics models)
+    req.path.startsWith('/simulate/')
   ) {
     return next();
   }
@@ -356,6 +361,10 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
   }
   // Pulse intelligence panel (public market/energy/geo/sentiment data)
   if (req.path.startsWith('/pulse/')) {
+    return next();
+  }
+  // Analytical models — search and detail are public, execute requires auth
+  if (req.path === '/analytical-models' || req.path === '/analytical-models/search' || (req.path.match(/^\/analytical-models\/\d+$/) && req.method === 'GET')) {
     return next();
   }
   authGuard(req, res, next);
@@ -386,61 +395,143 @@ const memorySystem = new PlanetaryMemorySystem();
 const toolRegistry = new ToolRegistry();
 function registerDefaultTools() {
   const tools: AgentTool[] = [
-    { name:'earthquakes', category:'seismic', description:'Recent M2.5+ earthquakes worldwide (GeoJSON)', exampleQueries:['show earthquakes','seismic activity'], schema:{type:'api',endpoint:'/api/earthquakes',method:'GET',outputFormat:'GeoJSON'} },
-    { name:'significant_quakes', category:'seismic', description:'Significant earthquakes (past month)', exampleQueries:['significant quakes','major earthquakes'], schema:{type:'api',endpoint:'/api/earthquakes/significant',method:'GET'} },
-    { name:'tectonic_plates', category:'seismic', description:'Tectonic plate boundary lines', exampleQueries:['tectonic plates','plate boundaries'], schema:{type:'api',endpoint:'/api/tectonic',method:'GET'} },
+    // ── Seismic ──
+    { name:'earthquakes', category:'seismic', description:'Recent M2.5+ earthquakes worldwide (GeoJSON). Supports bbox filtering via minLat/maxLat/minLon/maxLon and time range via starttime/endtime/hours.', exampleQueries:['show earthquakes','seismic activity','earthquakes near japan'], schema:{type:'api',endpoint:'/api/earthquakes',method:'GET',params:{minLat:'min latitude',maxLat:'max latitude',minLon:'min longitude',maxLon:'max longitude',starttime:'ISO start date',endtime:'ISO end date',hours:'lookback hours',minMag:'minimum magnitude'},outputFormat:'GeoJSON'} },
+    { name:'significant_quakes', category:'seismic', description:'Significant earthquakes (past month)', exampleQueries:['significant quakes','major earthquakes'], schema:{type:'api',endpoint:'/api/earthquakes/significant',method:'GET',outputFormat:'GeoJSON'} },
+    { name:'earthquake_summary', category:'seismic', description:'Earthquake summary with magnitude distribution buckets for the past week', exampleQueries:['earthquake summary','quake statistics','magnitude distribution'], schema:{type:'api',endpoint:'/api/earthquakes/summary',method:'GET'} },
+    { name:'tectonic_plates', category:'seismic', description:'Tectonic plate boundary lines', exampleQueries:['tectonic plates','plate boundaries'], schema:{type:'api',endpoint:'/api/tectonic',method:'GET',outputFormat:'GeoJSON'} },
     { name:'gdacs', category:'seismic', description:'GDACS disaster alerts and warnings', exampleQueries:['disaster alerts','gdacs'], schema:{type:'api',endpoint:'/api/gdacs/alerts',method:'GET'} },
-    { name:'weather_forecast', category:'weather', description:'Current weather at any lat/lon (Open-Meteo)', exampleQueries:['weather in tokyo','temperature','forecast'], schema:{type:'api',endpoint:'/api/weather/open-meteo?lat=X&lon=Y',method:'GET',params:{lat:'latitude',lon:'longitude'}} },
-    { name:'storms', category:'weather', description:'NHC tropical cyclone tracks and forecasts', exampleQueries:['hurricane tracking','storm forecast','cyclone'], schema:{type:'api',endpoint:'/api/weather/nhc',method:'GET'} },
-    { name:'weather_alerts', category:'weather', description:'NWS active weather alerts (US)', exampleQueries:['weather alerts','storm warnings'], schema:{type:'api',endpoint:'/api/weather/alerts',method:'GET'} },
-    { name:'lightning', category:'weather', description:'Real-time lightning strike detections', exampleQueries:['lightning strikes','thunderstorm'], schema:{type:'api',endpoint:'/api/lightning',method:'GET'} },
-    { name:'wildfires', category:'hazards', description:'NASA EONET wildfire events', exampleQueries:['wildfires','fire detection','burning'], schema:{type:'api',endpoint:'/api/eonet',method:'GET'} },
-    { name:'floods', category:'hazards', description:'NASA EONET flood events globally', exampleQueries:['floods','flooding'], schema:{type:'api',endpoint:'/api/eonet',method:'GET'} },
-    { name:'volcanoes', category:'hazards', description:'Volcanic events and VAAC advisories', exampleQueries:['volcanoes','eruption','volcanic ash'], schema:{type:'api',endpoint:'/api/vaac/tokyo',method:'GET'} },
-    { name:'firms_fires', category:'hazards', description:'NASA FIRMS satellite fire detections (MODIS/VIIRS)', exampleQueries:['active fires','firms','satellite fire'], schema:{type:'api',endpoint:'/api/firms',method:'GET'} },
-    { name:'aircraft', category:'aviation', description:'Live aircraft positions from ADSB exchange', exampleQueries:['flights','aircraft','planes','adsb'], schema:{type:'api',endpoint:'/api/adsb-lol',method:'GET'} },
-    { name:'airports', category:'aviation', description:'OpenFlights airport database and routes', exampleQueries:['airports','flight routes'], schema:{type:'api',endpoint:'/api/openflights',method:'GET'} },
-    { name:'submarine_cables', category:'ocean', description:'Global submarine cable network map', exampleQueries:['submarine cables','internet cables','undersea cables'], schema:{type:'api',endpoint:'/api/submarine-cables',method:'GET'} },
+
+    // ── Weather ──
+    { name:'weather_forecast', category:'weather', description:'Current weather at any lat/lon (Open-Meteo). Returns temperature, humidity, wind, precipitation, pressure.', exampleQueries:['weather in tokyo','temperature','forecast','current conditions'], schema:{type:'api',endpoint:'/api/weather/open-meteo',method:'GET',params:{lat:'latitude',lon:'longitude',startDate:'ISO date',endDate:'ISO date'}} },
+    { name:'weather_flood', category:'weather', description:'River discharge and flood forecast at a location (Open-Meteo Flood API)', exampleQueries:['flood forecast','river discharge','flood risk'], schema:{type:'api',endpoint:'/api/weather/flood',method:'GET',params:{lat:'latitude',lon:'longitude',startDate:'ISO date',endDate:'ISO date'}} },
+    { name:'weather_marine', category:'weather', description:'Marine conditions: wave height, swell, wave period at a location', exampleQueries:['marine conditions','wave height','swell forecast','sea state'], schema:{type:'api',endpoint:'/api/weather/marine',method:'GET',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'weather_ensemble', category:'weather', description:'Ensemble weather forecast (10 members) with uncertainty at a location', exampleQueries:['ensemble forecast','weather uncertainty','probabilistic forecast'], schema:{type:'api',endpoint:'/api/weather/ensemble',method:'GET',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'weather_seasonal', category:'weather', description:'Seasonal forecast (180 days) with temperature and precipitation at a location', exampleQueries:['seasonal forecast','long range weather','3 month forecast'], schema:{type:'api',endpoint:'/api/weather/seasonal',method:'GET',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'weather_historical', category:'weather', description:'Historical weather data for a date range at a location (Open-Meteo Archive). Returns daily temp max/min, precipitation, wind.', exampleQueries:['historical weather','past weather','rainfall history','temperature history'], schema:{type:'api',endpoint:'/api/weather/historical',method:'GET',params:{lat:'latitude',lon:'longitude',startDate:'ISO date',endDate:'ISO date'}} },
+    { name:'weather_air_quality', category:'weather', description:'Air quality at a location — AQI, PM2.5, PM10, CO, NO2, ozone, UV index', exampleQueries:['air quality','pollution','AQI','PM2.5','smog'], schema:{type:'api',endpoint:'/api/weather/air-quality',method:'GET',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'weather_gfs', category:'weather', description:'GFS model 16-day weather forecast at a location', exampleQueries:['GFS forecast','16 day forecast','weather model'], schema:{type:'api',endpoint:'/api/weather/gfs',method:'GET',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'storms', category:'weather', description:'NHC tropical cyclone tracks and forecasts. Supports bbox filtering via latMin/latMax/lonMin/lonMax.', exampleQueries:['hurricane tracking','storm forecast','cyclone','typhoon','tropical storm'], schema:{type:'api',endpoint:'/api/weather/nhc',method:'GET',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude'}} },
+    { name:'weather_alerts', category:'weather', description:'NWS active weather alerts (US). Returns GeoJSON of active alerts.', exampleQueries:['weather alerts','storm warnings','severe weather'], schema:{type:'api',endpoint:'/api/weather/alerts',method:'GET',outputFormat:'GeoJSON'} },
+    { name:'weather_drought', category:'weather', description:'US Drought Monitor — drought intensity zones (D0-D4). Returns GeoJSON.', exampleQueries:['drought','drought monitor','drought conditions'], schema:{type:'api',endpoint:'/api/weather/drought',method:'GET',outputFormat:'GeoJSON'} },
+    { name:'weather_climate_indices', category:'weather', description:'NOAA CPC seasonal climate outlooks (temperature and precipitation probability)', exampleQueries:['climate outlook','seasonal outlook','climate indices'], schema:{type:'api',endpoint:'/api/weather/climate-indices',method:'GET'} },
+    { name:'lightning', category:'weather', description:'Real-time lightning strike detections', exampleQueries:['lightning strikes','thunderstorm','lightning'], schema:{type:'api',endpoint:'/api/lightning',method:'GET'} },
+    { name:'weather_radar', category:'weather', description:'Weather radar tile layers from RainViewer (precipitation reflectivity)', exampleQueries:['weather radar','rain radar','precipitation radar','radar map'], schema:{type:'api',endpoint:'/api/radar/rainviewer',method:'GET'} },
+    { name:'climate_power', category:'weather', description:'NASA POWER climate data — daily temperature, humidity, precipitation, wind, solar at a location', exampleQueries:['climate data','nasa power','solar radiation','wind climate'], schema:{type:'api',endpoint:'/api/climate/power',method:'GET',params:{lat:'latitude',lon:'longitude',startDate:'ISO date',endDate:'ISO date'}} },
+
+    // ── Hazards / Earth Observation ──
+    { name:'wildfires', category:'hazards', description:'NASA EONET wildfire events globally. Supports bbox filtering via latMin/latMax/lonMin/lonMax and source filtering.', exampleQueries:['wildfires','fire detection','burning','active fires'], schema:{type:'api',endpoint:'/api/eonet',method:'GET',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude',source:'event source'},outputFormat:'JSON'} },
+    { name:'floods', category:'hazards', description:'NASA EONET flood events globally. Supports bbox filtering via latMin/latMax/lonMin/lonMax.', exampleQueries:['floods','flooding','inundation'], schema:{type:'api',endpoint:'/api/eonet',method:'GET',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude'}} },
+    { name:'volcanoes', category:'hazards', description:'Volcanic events and VAAC ash advisories from Tokyo, Anchorage, and Washington VAACs', exampleQueries:['volcanoes','eruption','volcanic ash','vaac'], schema:{type:'api',endpoint:'/api/vaac/tokyo',method:'GET'} },
+    { name:'firms_fires', category:'hazards', description:'NASA FIRMS satellite fire detections (MODIS/VIIRS). Supports point+radius (lat/lon/radius) and bbox (latMin/latMax/lonMin/lonMax) filtering. Requires NASA_FIRMS_MAP_KEY.', exampleQueries:['active fires','firms','satellite fire','fire hotspots','wildfire hotspots'], schema:{type:'api',endpoint:'/api/firms',method:'GET',params:{lat:'latitude for point search',lon:'longitude for point search',radius:'search radius in km',latMin:'min latitude for bbox',latMax:'max latitude for bbox',lonMin:'min longitude for bbox',lonMax:'max longitude for bbox',dayRange:'days to look back',startDate:'ISO start date',endDate:'ISO end date'}} },
+    { name:'eonet_events', category:'hazards', description:'All NASA EONET natural events (wildfires, floods, volcanoes, storms, dust, sea ice). Supports bbox filtering.', exampleQueries:['natural events','disaster events','eonet','all hazards'], schema:{type:'api',endpoint:'/api/eonet',method:'GET',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude',source:'event source',bbox:'bounding box'},outputFormat:'JSON'} },
+
+    // ── Aviation ──
+    { name:'aircraft', category:'aviation', description:'Live aircraft positions from ADSB.lol. Supports point search via lat/lon query params.', exampleQueries:['flights','aircraft','planes','adsb','live aircraft'], schema:{type:'api',endpoint:'/api/adsb-lol',method:'GET',params:{lat:'latitude for nearby search',lon:'longitude for nearby search'}} },
+    { name:'flights_all', category:'aviation', description:'All live aircraft positions merged from OpenSky + ADSB.lol + ADSB.fi + FlightAware + AirLabs (deduplicated). Supports point search via lat/lon.', exampleQueries:['all flights','show flights','aircraft near','flights near kochi','planes overhead'], schema:{type:'api',endpoint:'/api/flights/all',method:'GET',params:{lat:'latitude for nearby search',lon:'longitude for nearby search'}} },
+    { name:'military_flights', category:'aviation', description:'Live military aircraft positions (filtered by military callsign patterns from OpenSky)', exampleQueries:['military flights','military aircraft','fighter jets','military planes'], schema:{type:'api',endpoint:'/api/flights/military',method:'GET'} },
+    { name:'airports', category:'aviation', description:'OpenFlights airport database and flight routes', exampleQueries:['airports','flight routes','airport database'], schema:{type:'api',endpoint:'/api/openflights',method:'GET'} },
+    { name:'airspaces', category:'aviation', description:'Controlled airspace polygons from OpenAIP (GeoJSON)', exampleQueries:['airspaces','controlled airspace','flight restrictions'], schema:{type:'api',endpoint:'/api/airspaces',method:'GET',outputFormat:'GeoJSON'} },
+
+    // ── Maritime ──
+    { name:'ais_vessels', category:'maritime', description:'Live vessel positions from AIS (AISStream.io). Supports point+radius search (lat/lon/radius) and bbox (latMin/latMax/lonMin/lonMax). Returns vessels with MMSI, name, position, speed, course, type.', exampleQueries:['ships','vessels','maritime','ais','find ships','vessels near','ships near coastline'], schema:{type:'api',endpoint:'/api/ais',method:'GET',params:{lat:'latitude for nearby search',lon:'longitude for nearby search',radius:'search radius in km',latMin:'min latitude for bbox',latMax:'max latitude for bbox',lonMin:'min longitude for bbox',lonMax:'max longitude for bbox',limit:'max results (default 1000)'}} },
+    { name:'maritime_nearby', category:'maritime', description:'Find vessels near a specific lat/lon within a radius (default 50km)', exampleQueries:['ships near me','vessels nearby','find ships near this location'], schema:{type:'api',endpoint:'/api/ais/nearby',method:'GET',params:{lat:'latitude',lon:'longitude',radius:'search radius in km (default 50)'}} },
+    { name:'submarine_cables', category:'ocean', description:'Global submarine cable network map', exampleQueries:['submarine cables','internet cables','undersea cables'], schema:{type:'api',endpoint:'/api/submarine-cables',method:'GET',outputFormat:'GeoJSON'} },
     { name:'electricity_grid', category:'energy', description:'Real-time grid carbon intensity by region', exampleQueries:['electricity grid','carbon intensity','power grid'], schema:{type:'api',endpoint:'/api/electricity-grid',method:'GET'} },
+
+    // ── Space ──
     { name:'space_debris', category:'space', description:'CelesTrak orbital debris tracking (1500+ objects)', exampleQueries:['space debris','orbital debris','satellites'], schema:{type:'api',endpoint:'/api/space-debris',method:'GET'} },
-    { name:'nasa_dsn', category:'space', description:'NASA Deep Space Network dish status', exampleQueries:['deep space network','nasa dsn','space communications'], schema:{type:'api',endpoint:'/api/nasa-dsn',method:'GET'} },
-    { name:'aurora', category:'space', description:'Aurora oval forecast and KP index', exampleQueries:['aurora','northern lights','solar forecast'], schema:{type:'api',endpoint:'/api/aurora',method:'GET'} },
-    { name:'iss', category:'space', description:'ISS real-time position and trajectory', exampleQueries:['iss','space station','international space station'], schema:{type:'api',endpoint:'/api/iss',method:'GET'} },
+    { name:'satellites_tle', category:'space', description:'All active satellites with live positions (CelesTrak TLE + UCS database + Starlink). Returns lat/lon/altitude/inclination for each satellite. Filter by bbox for regional queries.', exampleQueries:['satellites','show satellites','satellites over india','track satellite','starlink','gps satellites'], schema:{type:'api',endpoint:'/api/satellites/tle',method:'GET',params:{latMin:'min latitude for bbox filter',latMax:'max latitude for bbox filter',lonMin:'min longitude for bbox filter',lonMax:'max longitude for bbox filter'}} },
+    { name:'nasa_dsn', category:'space', description:'NASA Deep Space Network dish status — which antennas are tracking which spacecraft', exampleQueries:['deep space network','nasa dsn','space communications','dsn status'], schema:{type:'api',endpoint:'/api/nasa-dsn',method:'GET'} },
+    { name:'aurora', category:'space', description:'Aurora oval forecast and probability (NOAA SWPC). Returns coordinates with probability values.', exampleQueries:['aurora','northern lights','solar forecast','aurora borealis'], schema:{type:'api',endpoint:'/api/aurora',method:'GET'} },
+    { name:'space_weather_kp', category:'space', description:'Planetary K-index (geomagnetic activity) from NOAA SWPC', exampleQueries:['kp index','space weather','geomagnetic activity','solar storm'], schema:{type:'api',endpoint:'/api/space-weather/kp',method:'GET'} },
+    { name:'space_weather_donki', category:'space', description:'NASA DONKI space weather notifications — CMEs, solar flares, SEP events. Supports date range via startDate/endDate.', exampleQueries:['space weather events','solar flare','CME','coronal mass ejection','donki'], schema:{type:'api',endpoint:'/api/space-weather/donki',method:'GET',params:{startDate:'ISO start date',endDate:'ISO end date'}} },
+    { name:'iss', category:'space', description:'ISS real-time position, velocity, altitude, and footprint', exampleQueries:['iss','space station','international space station','where is the iss'], schema:{type:'api',endpoint:'/api/iss',method:'GET'} },
+
+    // ── Compute / Sandbox ──
     { name:'sandbox_python', category:'compute', description:'Execute Python code with numpy, pandas, scipy in sandbox', exampleQueries:['analyze data','compute statistics','run python'], schema:{type:'sandbox',endpoint:'/api/sandbox/execute'} },
     { name:'sandbox_node', category:'compute', description:'Execute Node.js code in sandbox', exampleQueries:['run javascript','node script'], schema:{type:'sandbox',endpoint:'/api/sandbox/execute'} },
     { name:'sandbox_bash', category:'compute', description:'Execute bash commands in sandbox', exampleQueries:['run command','shell script'], schema:{type:'sandbox',endpoint:'/api/sandbox/execute'} },
+
+    // ── Navigation ──
     { name:'fly_command', category:'navigation', description:'Fly the globe camera to any location', exampleQueries:['fly to tokyo','go to paris','show location'], schema:{type:'command'} },
     { name:'toggle_layer_command', category:'navigation', description:'Show or hide any data layer on the globe', exampleQueries:['show earthquakes','enable flights'], schema:{type:'command'} },
-    { name:'satellite_search', category:'eo', description:'Search satellite imagery by text, class, or coordinates', exampleQueries:['search satellite imagery','find deforestation from space','show me forest near river','satellite view of'], schema:{type:'api',endpoint:'/api/fm/search',method:'GET',outputFormat:'JSON'} },
-    { name:'satellite_analyze', category:'eo', description:'Analyze a lat/lon with the Prithvi EO model — returns land cover classification', exampleQueries:['analyze this location from satellite','what does satellite see at','classify land cover'], schema:{type:'api',endpoint:'/api/fm/prithvi/analyze',method:'POST'} },
+
+    // ── Earth Observation / Foundation Models ──
+    { name:'satellite_search', category:'eo', description:'Search satellite imagery by text description, land-cover class, or geographic area. Returns lat/lon + class labels + image URLs.', exampleQueries:['search satellite imagery','find deforestation from space','show me forest near river','satellite view of','land cover search'], schema:{type:'api',endpoint:'/api/fm/search',method:'GET',params:{text:'text description of what to find',classLabel:'land cover class (water/trees/grass/crops/built_area/bare_ground/snow_ice/clouds/flooded_vegetation)',lat:'latitude for area search',lon:'longitude for area search',radiusKm:'search radius in km',limit:'max results'}} },
+    { name:'satellite_analyze', category:'eo', description:'Analyze a lat/lon with the Prithvi EO foundation model — returns land cover classification with confidence', exampleQueries:['analyze this location from satellite','what does satellite see at','classify land cover','satellite analysis'], schema:{type:'api',endpoint:'/api/fm/prithvi/analyze',method:'POST',params:{lat:'latitude',lon:'longitude',radiusKm:'analysis radius in km'}} },
+    { name:'satellite_change', category:'eo', description:'Detect land cover change at a lat/lon using Prithvi EO model', exampleQueries:['detect change','land cover change','deforestation detection','urbanization detection'], schema:{type:'api',endpoint:'/api/fm/prithvi/change',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'satellite_similar', category:'eo', description:'Find similar locations to a lat/lon based on satellite imagery embeddings', exampleQueries:['similar locations','find similar terrain','matching landscape'], schema:{type:'api',endpoint:'/api/fm/prithvi/similar',method:'POST',params:{lat:'latitude',lon:'longitude',topK:'number of similar results'}} },
+    { name:'clay_analyze', category:'eo', description:'Analyze a lat/lon with the IBM CLAY geospatial foundation model (multisensor). Returns embedding + classification.', exampleQueries:['clay analysis','multisensor satellite analysis','geospatial embedding'], schema:{type:'api',endpoint:'/api/fm/clay/analyze',method:'POST',params:{lat:'latitude',lon:'longitude',sensor:'satellite sensor (sentinel-2, landsat, etc.)'}} },
+    { name:'clay_flood_sar', category:'eo', description:'Detect flood extent using CLAY model with SAR data at a lat/lon', exampleQueries:['flood detection sar','sar flood extent','clay flood'], schema:{type:'api',endpoint:'/api/fm/clay/flood-sar',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'unet_segment', category:'eo', description:'U-Net land/water segmentation at a lat/lon — returns classified areas', exampleQueries:['unet segmentation','land water segmentation','image segmentation'], schema:{type:'api',endpoint:'/api/fm/unet/segment',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'unet_change', category:'eo', description:'Detect change using U-Net segmentation at a lat/lon', exampleQueries:['unet change detection','segmentation change'], schema:{type:'api',endpoint:'/api/fm/unet/change',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'weather_fm_forecast', category:'eo', description:'ML weather forecasting using foundation model at a lat/lon. Returns multi-day predictions.', exampleQueries:['ml weather forecast','ai weather prediction','foundation model weather'], schema:{type:'api',endpoint:'/api/fm/weather/forecast',method:'POST',params:{lat:'latitude',lon:'longitude',forecastDays:'number of forecast days'}} },
+    { name:'weather_fm_anomalies', category:'eo', description:'Detect weather anomalies for a region using ML foundation model', exampleQueries:['weather anomalies','climate anomaly detection','temperature anomaly'], schema:{type:'api',endpoint:'/api/fm/weather/anomalies',method:'POST',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude'}} },
+    { name:'agri_analyze', category:'eo', description:'Agriculture crop health analysis at a lat/lon — NDVI/EVI, stress level, alerts', exampleQueries:['crop health','agriculture analysis','crop stress','ndvi','farming conditions'], schema:{type:'api',endpoint:'/api/fm/agri/analyze',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'agri_alerts', category:'eo', description:'Active agriculture stress alerts from crop monitoring', exampleQueries:['crop alerts','agriculture alerts','farming alerts'], schema:{type:'api',endpoint:'/api/fm/agri/alerts',method:'GET'} },
+    { name:'samgeo_segment', category:'eo', description:'Segment-Anything-Model for geospatial — point/box prompt segmentation at a lat/lon. Returns masks and polygons.', exampleQueries:['sam segmentation','segment anything','geospatial segmentation','samgeo'], schema:{type:'api',endpoint:'/api/fm/samgeo/segment',method:'POST',params:{lat:'latitude',lon:'longitude',pointPrompts:'array of [lat,lon] points',boxPrompt:'bounding box prompt'}} },
+    { name:'alpha_earth_lookup', category:'eo', description:'Earth embeddings lookup at a lat/lon — returns embedding + land class for a year', exampleQueries:['earth embedding','alpha earth','location embedding'], schema:{type:'api',endpoint:'/api/fm/alpha/lookup',method:'POST',params:{lat:'latitude',lon:'longitude',year:'year for historical lookup'}} },
+    { name:'alpha_earth_change', category:'eo', description:'Temporal change detection at a lat/lon across years using AlphaEarth embeddings', exampleQueries:['temporal change','alpha earth change','multi-year change detection'], schema:{type:'api',endpoint:'/api/fm/alpha/change',method:'POST',params:{lat:'latitude',lon:'longitude',yearStart:'start year',yearEnd:'end year'}} },
+    { name:'bayfire_clusters', category:'eo', description:'Bayesian wildfire detection clusters from satellite + weather data fusion', exampleQueries:['bayesian fire','wildfire clusters','fire detection model','bay fire'], schema:{type:'api',endpoint:'/api/bayfire/clusters',method:'GET'} },
+    { name:'spacex_launches', category:'space', description:'SpaceX launch data and schedule', exampleQueries:['spacex launches','rocket launches','spacex schedule'], schema:{type:'api',endpoint:'/api/spacex/launches',method:'GET',params:{limit:'max results'}} },
+    { name:'spacex_starlink', category:'space', description:'SpaceX Starlink satellite positions. Supports bbox filtering via latMin/latMax/lonMin/lonMax.', exampleQueries:['starlink satellites','starlink positions','spacex starlink'], schema:{type:'api',endpoint:'/api/spacex/starlink',method:'GET',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude'}} },
+    { name:'road_traffic', category:'eo', description:'Road traffic analysis from Sentinel-1 SAR. Analyze a corridor for traffic patterns.', exampleQueries:['road traffic','traffic analysis','sentinel traffic','road corridors'], schema:{type:'api',endpoint:'/api/road-traffic/analyze',method:'POST',params:{corridorId:'corridor ID to analyze'}} },
+
+    // ── Multimodal Perception ──
+    { name:'mm_satellite_analyze', category:'multimodal', description:'Multimodal satellite analysis at a lat/lon — Copernicus Sentinel-2 observation with classification', exampleQueries:['multimodal satellite','sentinel analysis','satellite observation'], schema:{type:'api',endpoint:'/api/multimodal/satellite/analyze',method:'POST',params:{lat:'latitude',lon:'longitude',radiusKm:'analysis radius'}} },
+    { name:'mm_fire_scars', category:'multimodal', description:'Detect fire scars/burned areas from satellite at a lat/lon', exampleQueries:['fire scars','burned area detection','burn scar mapping'], schema:{type:'api',endpoint:'/api/multimodal/satellite/fire-scars',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'mm_flood_extent', category:'multimodal', description:'Detect flood extent from satellite at a lat/lon', exampleQueries:['flood extent','flood mapping','inundation from satellite','satellite flood detection'], schema:{type:'api',endpoint:'/api/multimodal/satellite/flood-extent',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'mm_satellite_interpret', category:'multimodal', description:'Vision LLM interpretation of satellite imagery at a lat/lon — natural language description of what the satellite sees', exampleQueries:['satellite interpretation','what does satellite see','ai satellite vision','describe satellite image'], schema:{type:'api',endpoint:'/api/multimodal/satellite/interpret',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
+    { name:'mm_seismic_events', category:'multimodal', description:'Seismic events from multimodal processor. Filter by minMag and hours.', exampleQueries:['seismic events','earthquake detection multimodal','seismic history'], schema:{type:'api',endpoint:'/api/multimodal/seismic/events',method:'GET',params:{minMag:'minimum magnitude',hours:'lookback hours'}} },
+    { name:'mm_radar_fetch', category:'multimodal', description:'Fetch weather radar scan data from a radar station — storm cells, reflectivity', exampleQueries:['radar scan','weather radar data','storm cells','nexrad data'], schema:{type:'api',endpoint:'/api/multimodal/radar/fetch',method:'POST',params:{station:'radar station ID'}} },
+    { name:'mm_sentiment_analyze', category:'multimodal', description:'Analyze sentiment of news/social media text — returns sentiment score + location extraction', exampleQueries:['sentiment analysis','news sentiment','social media sentiment'], schema:{type:'api',endpoint:'/api/multimodal/sentiment/analyze',method:'POST',params:{text:'text to analyze'}} },
+    { name:'mm_fusion_events', category:'multimodal', description:'Fused multimodal events (satellite + seismic + radar + sentiment). Filter by type.', exampleQueries:['fused events','multimodal fusion','correlated events','multi-source events'], schema:{type:'api',endpoint:'/api/multimodal/fusion/events',method:'GET',params:{type:'event type filter',limit:'max results'}} },
+    { name:'mm_fusion_nearby', category:'multimodal', description:'Find fused multimodal events near a lat/lon within a radius', exampleQueries:['nearby events','events near me','multimodal nearby'], schema:{type:'api',endpoint:'/api/multimodal/fusion/nearby',method:'GET',params:{lat:'latitude',lon:'longitude',radius:'search radius in km'}} },
+
+    // ── Simulation / Physics Models ──
+    { name:'simulate_run', category:'simulation', description:'Run a physics simulation model. Models: farsite-lite (wildfire), adcirc-lite (tsunami), wrf-lite (atmosphere), hysplit-lite (ash dispersion), fno-surrogate (weather prediction). Returns result grids.', exampleQueries:['run simulation','simulate wildfire','tsunami simulation','weather model','ash dispersion','fire spread model'], schema:{type:'api',endpoint:'/api/simulate/run',method:'POST',params:{model:'model name (farsite-lite/adcirc-lite/wrf-lite/hysplit-lite/fno-surrogate)',params:'model-specific parameters object'}} },
+    { name:'simulate_templates', category:'simulation', description:'List available simulation models with their input/output schemas', exampleQueries:['simulation models','available simulations','model templates'], schema:{type:'api',endpoint:'/api/simulate/templates',method:'GET'} },
+
+    // ── Scenarios ──
+    { name:'scenario_generate', category:'scenarios', description:'Generate a 3D point-cloud disaster scenario (earthquake swarm, hurricane, wildfire, volcanic eruption, flood, tsunami)', exampleQueries:['generate scenario','create disaster scenario','earthquake scenario','hurricane scenario','flood scenario','tsunami scenario','wildfire scenario','volcano scenario'], schema:{type:'api',endpoint:'/api/scenarios/generate',method:'POST',params:{type:'scenario type',params:'scenario parameters'}} },
+    { name:'scenario_generate_bbox', category:'scenarios', description:'Generate a scenario from real data within a bounding box', exampleQueries:['scenario from bbox','data-driven scenario','realistic disaster scenario'], schema:{type:'api',endpoint:'/api/scenarios/generate-from-bbox',method:'POST',params:{bbox:'bounding box [latMin,latMax,lonMin,lonMax]',hazardType:'hazard type',params:'scenario parameters'}} },
+    { name:'scenario_search', category:'scenarios', description:'Search scenarios by location or type', exampleQueries:['search scenarios','find scenarios','scenario near location'], schema:{type:'api',endpoint:'/api/scenarios/search',method:'GET',params:{lat:'latitude',lon:'longitude',type:'scenario type',limit:'max results'}} },
+    { name:'scenario_export', category:'scenarios', description:'Export a scenario in GeoJSON, CZML, NetCDF, or training data format', exampleQueries:['export scenario','download scenario','czml export','geojson scenario'], schema:{type:'api',endpoint:'/api/scenarios/export/:id',method:'GET',params:{id:'scenario ID',format:'export format (geojson/czml/netcdf/training)'}} },
+
+    // ── Analytical Models (150 scientific equations) ──
+    { name:'analytical_search', category:'analytical', description:'Search 150 scientific analytical models by natural language (e.g., "land surface temperature", "wave energy", "NDVI"). Returns matching equation IDs and names.', exampleQueries:['find equation','search analytical model','scientific formula','land surface temperature','wave energy','ndvi','seismic magnitude','carbon flux'], schema:{type:'api',endpoint:'/api/analytical-models/search',method:'GET',params:{q:'natural language search query'}} },
+    { name:'analytical_execute', category:'analytical', description:'Execute a scientific analytical model by ID. Returns result with steps, validation, uncertainty, interpretation, and visualization type. Use analytical_search first to find the ID.', exampleQueries:['calculate equation','run scientific model','compute formula','analytical model'], schema:{type:'api',endpoint:'/api/analytical-models/:id/execute',method:'POST',params:{id:'equation ID (from search)',inputs:'input parameters object',context:'optional context (location, study area)'}} },
+
+    // ── Pulse / Intelligence ──
+    { name:'pulse_market_quotes', category:'intelligence', description:'Live stock and crypto price quotes. Returns price, change, changePct, sparkline for each symbol.', exampleQueries:['stock price','market quotes','crypto price','stock market','sp500','bitcoin price','apple stock'], schema:{type:'api',endpoint:'/api/pulse/market/quotes',method:'GET',params:{symbols:'comma-separated symbols (e.g., SPY,AAPL,BTC-USD)'}} },
+    { name:'pulse_energy_prices', category:'intelligence', description:'Energy commodity prices — WTI oil, Brent, natural gas, gold, silver, copper, gasoline', exampleQueries:['oil price','energy prices','gold price','silver price','copper price','gasoline price','brent crude'], schema:{type:'api',endpoint:'/api/pulse/energy/prices',method:'GET'} },
+    { name:'pulse_geo_risks', category:'intelligence', description:'Geopolitical risk scores for 10 conflict zones (Ukraine, Taiwan, Middle East, etc.)', exampleQueries:['geopolitical risk','conflict risk','geopolitical tension','war risk'], schema:{type:'api',endpoint:'/api/pulse/geopolitical/risks',method:'GET'} },
+    { name:'pulse_correlations', category:'intelligence', description:'Cross-asset correlation analysis — SPY↔WTI, Gold↔DXY, geo+energy, sentiment divergence, seismic clusters', exampleQueries:['correlation analysis','cross-asset correlation','market correlation','sentiment divergence'], schema:{type:'api',endpoint:'/api/pulse/correlation/cards',method:'GET'} },
+    { name:'pulse_heatmap', category:'intelligence', description:'18-asset price change heatmap for quick market overview', exampleQueries:['market heatmap','asset heatmap','price heatmap','market overview'], schema:{type:'api',endpoint:'/api/pulse/heatmap',method:'GET'} },
+
+    // ── OSINT / Threat Intelligence ──
+    { name:'air_quality_waqi', category:'osint', description:'Air quality index for a city or coordinates (World AQI). Returns AQI, PM2.5, PM10, pollutants.', exampleQueries:['air quality','aqi','pollution level','air quality index','smog level'], schema:{type:'api',endpoint:'/api/waqi',method:'GET',params:{city:'city name',lat:'latitude',lon:'longitude'}} },
+    { name:'acled_recent', category:'osint', description:'Recent armed conflict events from ACLED', exampleQueries:['conflict events','armed conflict','acled','recent clashes','battle events'], schema:{type:'api',endpoint:'/api/acled/recent',method:'GET'} },
+    { name:'acled_nearby', category:'osint', description:'Find armed conflict events near a lat/lon', exampleQueries:['conflict near me','conflict nearby','battles near location'], schema:{type:'api',endpoint:'/api/acled/nearby',method:'GET',params:{lat:'latitude',lon:'longitude',radius:'search radius in km'}} },
+    { name:'ucdp_conflict', category:'osint', description:'UCDP armed conflict data — conflict events by year and type', exampleQueries:['ucdp','conflict data','organized violence','battle deaths'], schema:{type:'api',endpoint:'/api/ucdp',method:'GET',params:{year:'year filter',type:'conflict type'}} },
+    { name:'sanctions_ofac', category:'osint', description:'US Treasury OFAC sanctions list — search for sanctioned entities', exampleQueries:['sanctions','ofac','sanctioned entities','sanctions check','specially designated nationals'], schema:{type:'api',endpoint:'/api/sanctions/ofac',method:'GET'} },
+    { name:'gdelt_events', category:'osint', description:'GDELT global event database — news events by location and date range', exampleQueries:['gdelt','global events','news events','world events','media events'], schema:{type:'api',endpoint:'/api/gdelt',method:'GET',params:{lat:'latitude',lon:'longitude',startDate:'ISO start date',endDate:'ISO end date'}} },
+    { name:'reliefweb', category:'osint', description:'ReliefWeb disaster reports and humanitarian updates', exampleQueries:['reliefweb','disaster reports','humanitarian','relief operations','disaster response'], schema:{type:'api',endpoint:'/api/reliefweb',method:'GET',params:{limit:'max results',country:'country filter',disaster_type:'disaster type filter'}} },
+    { name:'cyber_threats_otx', category:'osint', description:'AlienVault OTX threat intelligence pulses — latest cyber threat indicators', exampleQueries:['cyber threats','threat intelligence','otx','malware indicators','cyber security'], schema:{type:'api',endpoint:'/api/otx',method:'GET',params:{section:'OTX section',limit:'max results'}} },
+    { name:'displacement_data', category:'osint', description:'UNHCR displacement data — refugees and internally displaced persons by year', exampleQueries:['displacement','refugees','idp','unhcr','displaced persons','forced migration'], schema:{type:'api',endpoint:'/api/displacement',method:'GET',params:{year:'year filter'}} },
   ];
   for (const t of tools) toolRegistry.register(t);
 }
 registerDefaultTools();
 
-// Register core tools in DynamicToolRegistry (the old ToolRegistry stays for prompt building)
-for (const t of toolRegistry.list()) {
-  dynamicTools.register({
-    name: t.name,
-    description: t.description,
-    category: t.category,
-    exampleQueries: t.exampleQueries,
-    source: 'core',
-    schema: { type: t.schema.type as 'api' | 'sandbox' | 'command', endpoint: t.schema.endpoint, method: t.schema.method, params: t.schema.params, outputFormat: t.schema.outputFormat },
-    code: null,
-  });
-}
-
-// Initialize dynamic tool system
+// Initialize dynamic tool system (toolRegistry delegates to dynamicTools — single source of truth)
 dynamicTools.init();
 const toolComposer = new ToolComposer(dynamicTools);
 toolComposer.init();
 toolDiscovery.init();
 toolRepair.init();
 executor.init();
-
-// Warm embedding cache for intent prototypes (async, non-blocking)
-warmIntentPrototypeEmbeddings().catch(() => {});
 
 // Initialize Omninet — free-tier AI provider router
 omninet.init();
@@ -581,8 +672,7 @@ graphCompletion.init();
 evolvingGraph.init();
 causalGraph.init();
 
-// Phase 7: MCP server + Plugin system
-const mcpServer = new MCPServer(toolRegistry, sandboxManager);
+// Phase 7: Plugin system
 const pluginManager = new PluginManager();
 pluginManager.init().then(() => {
   for (const [name, pt] of pluginManager.getToolHandlers()) {
@@ -1668,6 +1758,26 @@ const MILITARY_CALLSIGN_PATTERNS = [
   /^AAC\d*$/i, /^RTAF\d*$/i, /^ROCAF\d*$/i, /^PAF\d*$/i,
   /^FNF\d*$/i, /^KAF\d*$/i, /^ETAF\d*$/i,
 ];
+
+app.get('/api/flights/military', async (_req: express.Request, res: express.Response) => {
+  try {
+    const hit = cache.get<{ states: any[]; time: number }>('flights_military');
+    if (hit) return res.json(hit);
+    const resp = await fetch('https://opensky-network.org/api/states/all', { signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) throw new Error(`OpenSky ${resp.status}`);
+    const data = await resp.json();
+    const allStates: any[] = Array.isArray(data?.states) ? data.states : [];
+    const military = allStates.filter((s: any[]) => {
+      const callsign = (s[1] || '').toString().trim();
+      return callsign && MILITARY_CALLSIGN_PATTERNS.some(re => re.test(callsign));
+    });
+    const result = { states: military, time: data?.time || Math.floor(Date.now() / 1000), count: military.length, source: 'opensky-filtered' };
+    cache.set('flights_military', result, 30);
+    res.json(result);
+  } catch (e) {
+    res.json({ states: [], count: 0, error: String(e) });
+  }
+});
 
 
 // --- AVIATION LAYERS ---
@@ -3774,6 +3884,59 @@ app.get('/api/submarine-cables', async (_req: express.Request, res: express.Resp
   }
 });
 
+// ── Maritime: AIS vessel tracking (server-side WebSocket to AISStream.io) ──
+const aisTracker = initAisTracker();
+
+app.get('/api/ais', async (req: express.Request, res: express.Response) => {
+  const tracker = getAisTracker();
+  if (!tracker || !tracker.isConnected()) {
+    return res.json({ vessels: [], count: 0, connected: false, message: 'AIS tracker not active (set AIS_STREAM_API_KEY)' });
+  }
+  const lat = req.query.lat ? parseFloat(req.query.lat as string) : NaN;
+  const lon = req.query.lon ? parseFloat(req.query.lon as string) : NaN;
+  const radius = req.query.radius ? parseFloat(req.query.radius as string) : NaN;
+  const latMin = req.query.latMin ? parseFloat(req.query.latMin as string) : NaN;
+  const latMax = req.query.latMax ? parseFloat(req.query.latMax as string) : NaN;
+  const lonMin = req.query.lonMin ? parseFloat(req.query.lonMin as string) : NaN;
+  const lonMax = req.query.lonMax ? parseFloat(req.query.lonMax as string) : NaN;
+  const limit = req.query.limit ? Math.min(parseInt(req.query.limit as string), 5000) : 1000;
+
+  let vessels: AisVessel[];
+  if (isFinite(lat) && isFinite(lon) && isFinite(radius)) {
+    vessels = tracker.getVesselsNearby(lat, lon, radius);
+  } else if (isFinite(latMin) && isFinite(latMax) && isFinite(lonMin) && isFinite(lonMax)) {
+    vessels = tracker.getVesselsInBBox(latMin, latMax, lonMin, lonMax);
+  } else {
+    vessels = tracker.getAllVessels();
+  }
+  const result = vessels.slice(0, limit);
+  res.json({ vessels: result, count: result.length, total: vessels.length, connected: true });
+});
+
+app.get('/api/ais/nearby', async (req: express.Request, res: express.Response) => {
+  const tracker = getAisTracker();
+  if (!tracker || !tracker.isConnected()) {
+    return res.json({ vessels: [], count: 0, connected: false });
+  }
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
+  const radius = req.query.radius ? parseFloat(req.query.radius as string) : 50;
+  if (!isFinite(lat) || !isFinite(lon)) {
+    return res.status(400).json({ error: 'lat and lon required' });
+  }
+  const vessels = tracker.getVesselsNearby(lat, lon, radius);
+  res.json({ vessels, count: vessels.length, radiusKm: radius, center: { lat, lon } });
+});
+
+app.get('/api/ais/status', async (_req: express.Request, res: express.Response) => {
+  const tracker = getAisTracker();
+  res.json({
+    connected: tracker?.isConnected() ?? false,
+    vesselCount: tracker?.getVesselCount() ?? 0,
+    apiKeyConfigured: !!process.env.AIS_STREAM_API_KEY,
+  });
+});
+
 // SatNOGS DB — satellite transmitter frequencies
 
 // UCS Satellite Database — satellite metadata served from static JSON file under public/data/
@@ -5227,13 +5390,13 @@ async function fetchWorldPorts(): Promise<any[]> {
   }
 }
 
-// SEISMIC: USGS Earthquakes (real-time)
+// SEISMIC: USGS Earthquakes (real-time) — uses shared cachedFetch to deduplicate with /api/earthquakes
 async function fetchEarthquakes(): Promise<any[]> {
-  const resp = await fetch(
+  const geo = await cachedFetch<any>(
+    'earthquakes',
     'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson',
-    { signal: AbortSignal.timeout(15000) },
+    60,
   );
-  const geo = await resp.json() as any;
   return (geo.features || []).map((f: any) => {
     const p = f.properties || {};
     const coords = f.geometry?.coordinates || [];
@@ -6574,7 +6737,7 @@ app.post('/api/simulate/run', simulateUserRateLimit, async (req: express.Request
     }
 
     auditLog((req as any).userId, 'simulate_run', `model:${model}`, `id:${result.id}`, req.ip || '', req.headers['user-agent'] || '');
-    res.json({ simulationId: result.id, status: result.status, durationMs: result.durationMs });
+    res.json({ simulationId: result.id, status: result.status, durationMs: result.durationMs, result: result.result, logs: result.logs });
   } catch (e) {
     logger.error({ err: (e as Error).message }, 'simulation run failed');
     res.status(500).json({ error: String(e) });
@@ -6988,7 +7151,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
 
   try {
     // Step 1: Classify intent — use ModelRouter to decide if deep classification is needed
-    sendEvent('step', { stepType: 'classifying', text: 'Classifying intent...', status: 'completed' });
+    sendEvent('step', { stepType: 'classifying', text: 'Classifying intent...', status: 'running' });
     let intent = IntentRouter.classify(fullMessage);
 
     // ModelRouter: determine optimal tier and skip deep classification for simple queries
@@ -7002,6 +7165,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         costTracker.record('flash', message, JSON.stringify(intent), false);
       } catch (e) { logger.warn({ err: e }, 'Deep intent classification failed, using fast result'); }
     }
+    sendEvent('step', { stepType: 'classifying', text: `Intent: ${intent.type} (confidence ${(intent.confidence * 100).toFixed(0)}%)`, status: 'completed' });
     sendEvent('intent', intent);
 
     // Step 1.25: Digital Twin — run analysis if intent is digital_twin
@@ -7111,17 +7275,78 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     }
 
     // Step 3: Analyze with Omninet (auto-fallback across providers)
-    sendEvent('step', { stepType: 'agent_thinking', text: 'Agent analyzing...', status: 'completed' });
+    sendEvent('step', { stepType: 'agent_thinking', text: 'Agent analyzing...', status: 'running' });
     const memoryContext = await memoryManager.buildWorkingMemoryContext(uid, fullMessage, []);
     const systemPrompt = buildAgentPrompt(toolRegistry, intent);
 
+    /**
+     * Run one streaming LLM pass. Tokens are forwarded to the client as they arrive.
+     * Returns the full accumulated text so callers can inspect it for ## TOOL_CALLS.
+     */
+    const streamPass = async (prompt: string): Promise<string> => {
+      let accumulated = '';
+      let tokenCount = 0;
+      for await (const token of omninet.generateStream(prompt, { signal: abortController.signal, temperature: 0.4, maxTokens: 4096 })) {
+        if (abortController.signal.aborted) break;
+        accumulated += token;
+        tokenCount++;
+        if (tokenCount % 5 === 0 || tokenCount <= 3) {
+          sendEvent('token', { text: token });
+        } else {
+          res.write(`event: token\ndata: ${JSON.stringify({ type: 'token', text: token })}\n\n`);
+        }
+      }
+      logger.info({ outputLen: accumulated.length, aborted: abortController.signal.aborted, tokenCount }, 'Omninet streaming pass complete');
+      return accumulated;
+    };
+
     let outputText = '';
-    sendEvent('step', { stepType: 'agent_thinking', text: 'Reasoning with AI...', status: 'completed' });
     try {
-      logger.info({ msgLen: message.length, hasMemory: !!memoryContext }, 'Omninet analysis starting');
+      logger.info({ msgLen: message.length, hasMemory: !!memoryContext }, 'Omninet streaming starting');
       const fullPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}[User query]\n${fullMessage}`;
-      outputText = await omninet.generateText(fullPrompt, { signal: abortController.signal, temperature: 0.4, maxTokens: 4096 });
-      logger.info({ outputLen: outputText.length, aborted: abortController.signal.aborted }, 'Omninet analysis complete');
+      outputText = await streamPass(fullPrompt);
+      sendEvent('step', { stepType: 'agent_thinking', text: 'Agent analysis complete', status: 'completed' });
+
+      // ── Two-pass tool execution ──────────────────────────────────
+      // If the LLM emitted ## TOOL_CALLS, execute the named tools via the
+      // unified dynamicTools registry, then run a second synthesis pass with
+      // the real results injected. This is what lets the AI reach 100+ backend
+      // capabilities instead of only describing them.
+      const toolCalls = ToolCallParser.parse(outputText);
+      if (toolCalls.length > 0 && !abortController.signal.aborted) {
+        sendEvent('step', { stepType: 'tool_execution', text: `Executing ${toolCalls.length} tool call(s)...`, status: 'running' });
+        const toolResults: string[] = [];
+        await Promise.all(toolCalls.map(async (call) => {
+          const known = dynamicTools.get(call.name);
+          if (!known) {
+            sendEvent('tool_result', { name: call.name, status: 'unknown', error: `Tool "${call.name}" not registered` });
+            toolResults.push(`[${call.name}] ERROR: tool not registered`);
+            return;
+          }
+          sendEvent('tool_call', { name: call.name, args: call.args, description: known.description });
+          try {
+            const result = await dynamicTools.execute(call.name, call.args, abortController.signal);
+            const serialised = JSON.stringify(result).slice(0, 8000);
+            toolResults.push(`[${call.name}]\n${serialised}`);
+            sendEvent('tool_result', { name: call.name, status: 'success', result });
+          } catch (e) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            toolResults.push(`[${call.name}] ERROR: ${errMsg}`);
+            sendEvent('tool_result', { name: call.name, status: 'error', error: errMsg });
+          }
+        }));
+        sendEvent('step', { stepType: 'tool_execution', text: `Executed ${toolCalls.length} tool call(s)`, status: 'completed' });
+
+        // Second pass: synthesize a final answer using the real tool outputs.
+        sendEvent('step', { stepType: 'synthesis', text: 'Synthesizing answer from tool results...', status: 'running' });
+        const resultsBlock = toolResults.join('\n\n');
+        const synthesisPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}[User query]\n${fullMessage}\n\n## TOOL_RESULTS\n${resultsBlock}\n\nUsing the tool results above, write your final answer now. Cite the real numbers from the tool results. You may still emit ## COMMANDS for visualization.`;
+        outputText = ToolCallParser.strip(await streamPass(synthesisPrompt));
+        sendEvent('step', { stepType: 'synthesis', text: 'Synthesis complete', status: 'completed' });
+      } else {
+        // No tool calls — strip any stray TOOL_CALLS markers from a no-op pass.
+        outputText = ToolCallParser.strip(outputText);
+      }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       logger.error({ err: e, aborted: abortController.signal.aborted }, 'All AI providers failed');
@@ -7135,14 +7360,9 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // Record cost for agent call
     costTracker.record(modelTier, message, outputText, false);
 
-    // Record in memory (legacy)
-    await memoryManager.recordInteraction(
-      uid, message, outputText,
-      intent.type, apiKey,
-      intent.location ? { lat: intent.location.lat, lon: intent.location.lon, label: intent.location.label } : undefined,
-    );
-
-    // Record in V2 memory system (episodic + sensory + working)
+    // Record in unified V2 memory system (episodic + sensory + working)
+    // The legacy memoryManager.recordInteraction is intentionally removed — v2 stores the same data.
+    // The v1 semanticCache and buildWorkingMemoryContext are still used (read-only) above.
     try {
       memoryManagerV2.store('episodic', {
         query: message,
@@ -7177,14 +7397,18 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     }
 
     // Parse visualization commands from output
-    sendEvent('step', { stepType: 'parsing', text: 'Parsing visualization commands...', status: 'completed' });
+    sendEvent('step', { stepType: 'parsing', text: 'Parsing visualization commands...', status: 'running' });
     try {
       const commands = CommandParser.parse(outputText);
       if (commands.length > 0) {
         sendEvent('commands', commands);
+        sendEvent('step', { stepType: 'parsing', text: `Parsed ${commands.length} visualization command(s)`, status: 'completed' });
+      } else {
+        sendEvent('step', { stepType: 'parsing', text: 'No visualization commands needed', status: 'completed' });
       }
     } catch (e) {
       logger.warn({ err: e }, 'Command parsing failed (non-critical)');
+      sendEvent('step', { stepType: 'parsing', text: 'Command parsing failed', status: 'completed' });
     }
 
     // Send final output
@@ -9824,6 +10048,7 @@ function gracefulShutdown(signal: string) {
   stopResourceMonitor();
   stopSyntheticDataGeneration();
   stopOsintBridge();
+  stopAisTracker();
   stopSentinelEngine();
   correlationEngine?.stop();
   forcePosture?.stop();

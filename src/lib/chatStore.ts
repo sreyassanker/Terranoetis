@@ -1,3 +1,12 @@
+export interface ToolEvent {
+  name: string;
+  args?: Record<string, unknown>;
+  description?: string;
+  status?: 'pending' | 'success' | 'error' | 'unknown';
+  error?: string;
+  result?: unknown;
+}
+
 export interface ChatMessage {
   id: number;
   role: 'user' | 'assistant';
@@ -6,6 +15,8 @@ export interface ChatMessage {
   data?: unknown;
   feedback?: 'up' | 'down';
   traceId?: string | null;
+  commands?: Array<{ action: string; label?: string; lat?: number; lon?: number; layerId?: string }>;
+  toolEvents?: ToolEvent[];
 }
 
 export interface ChatSession {
