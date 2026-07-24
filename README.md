@@ -4,147 +4,149 @@ A real-time geospatial data visualization and AI-powered Earth intelligence plat
 
 ## Architecture
 
-The platform follows a layered client-server architecture with a React frontend (CesiumJS 3D globe) and an Express.js backend, communicating through REST APIs, WebSockets, and an internal PubSub event bus.
+```mermaid
+flowchart TB
+    subgraph CLIENT["CLIENT (React 19 + CesiumJS)"]
+        direction TB
+        Pages["Pages: App / Globe / Canvas / Scenarios / Tours"]
+        UI["UI Panels: Analytics, Intelligence, Satellite, Scenarios, Cockpit"]
+        Render["Rendering Engine: 36 modules for weather, aviation, maritime, satellites, earthquakes, military symbology, scenarios"]
+        Api["Data Layer: REST Client + WebSocket"]
+        Pages --> UI
+        UI --> Api
+        Render --> Api
+    end
 
+    subgraph PROXY["VITE DEV PROXY"]
+        Proxy["/api/* -> :3001\n/ws/* -> ws://:3001"]
+    end
+
+    subgraph SERVER["EXPRESS.JS SERVER"]
+        direction TB
+        Security["Security & Observability\nHelmet CSP, CORS, JWT Auth, Rate Limiter, Logger, Prometheus Metrics"]
+        
+        subgraph Data["Data Integration"]
+            direction LR
+            Fetchers["Data Fetchers\n(server/data/)"]
+            Utils["Utility Modules\n(server/utils/)"]
+            Fetchers --- Utils
+        end
+
+        subgraph Core["Core Services"]
+            direction TB
+            Analytical["Analytical Models\n150 equations in 26 domains\nContextEngine + 7-stage QC Pipeline\nSandbox: FARSITE, ADCIRC, WRF, HYSPLIT, FNO"]
+            FM["Foundation Models\nPrithvi, CLAY, U-Net, SAM-Geo\nWeather, Agriculture, AlphaEarth\nBayFire, SpaceX, Satellite Search"]
+            Multimodal["Multimodal Perception\nSatellite Analyzer, Seismic\nRadar, Sentiment, Fusion"]
+        end
+
+        subgraph AI["AI & Cognition"]
+            direction TB
+            OmniNet["OmniNet LLM Router\nMulti-model orchestration"]
+            CogOrch["Cognitive Orchestrator\nSystem 1 (fast) + System 2 (deep)"]
+            S2["System 2 Reasoning\nHTN Decomposition\nMulti-Agent Debate\nCausal Reasoning\nCounterfactual Analysis\nHypothesis Synthesis"]
+            Meta["Meta-Cognition\nSelf-Improvement\nPrompt Evolution\nExplainability (Traces, Bias, Uncertainty, Human Override)"]
+            OmniNet --> CogOrch
+            CogOrch --> S2
+            CogOrch --> Meta
+        end
+
+        subgraph Realtime["Realtime Intelligence"]
+            direction TB
+            Sentinel["Sentinel Engine\nBackground monitoring\nStream Processing\nAnomaly Detection\nCorrelation Engine\nForce Posture"]
+            Reflex["Reflex Engine\nAutonomic responses to\nreal-time events\nTrauma mode"]
+            Monitor["Monitor Manager\nRules + Scheduled Tasks\nAmbient Event Detection"]
+        end
+
+        subgraph World["World Modeling"]
+            direction TB
+            Causal["Causal Knowledge Graph\nDiscovery Engine\nEntropy Mixer\nEntity & Edge Generation\nGraph Completion\nCounterfactual Graph"]
+            Dream["Dream Engine\nSynthetic scenario generation\nFork simulation\nCausal KG refinement"]
+            Fork["Fork Manager\nDivergent what-if\nsimulation threads"]
+            Sim["Scenario Simulator\nEnsemble Predictor\nPhysics NN"]
+        end
+    end
+
+    subgraph STORAGE["PERSISTENCE & CACHING"]
+        direction TB
+        SQLite["SQLite\nAuth, Scenarios, Forks\nMemory Traces, Sentinel\nWatch Zones, Evaluations"]
+        Redis["Redis\nCache, PubSub\nSession, Queue"]
+    end
+
+    subgraph COMMS["REAL-TIME COMMUNICATION"]
+        Ws["WebSocket Server\nClient channels (ws:<userId>)\nBroadcast (ws:all)\nFork channels (fork:<id>)\nHeartbeat 30s"]
+        PubSub["PubSub Event Bus\nsentinel:raw -> enriched -> alerts\nseismic | weather | ais | adsb\nproactive, fork, sse channels"]
+    end
+
+    CLIENT -->|HTTP| Proxy
+    CLIENT -->|WebSocket| Ws
+    Proxy --> Security
+    Security --> Data
+    Data --> Core
+    Security --> AI
+    AI --> Core
+    Core --> World
+    Data --> Realtime
+    Realtime --> COMMS
+    World --> STORAGE
+    Core --> STORAGE
+    COMMS --> CLIENT
+    COMMS --> SERVER
+    AI --> Realtime
+    Realtime --> Ws
+    Ws --> PubSub
 ```
-                      TERREANOETIS ARCHITECTURE
-                      ─────────────────────────
 
- +------------------------------------------------------------------+
- |  CLIENT LAYER                    React 19 / CesiumJS 1.140       |
- |                                                                  |
- |  +-----------+  +-------------------+  +----------------------+  |
- |  | Pages     |  | UI Panels         |  | Rendering Engine     |  |
- |  |           |  |                   |  | 36 custom modules    |  |
- |  | App /     |  | AnalyticsWorkbnch |  | Earthquakes  Weather |  |
- |  | Globe     |  | IntelligencePanel |  | Aviation     Maritime|  |
- |  | Canvas    |  | SatellitePanel    |  | Satellites   Scenarios|  |
- |  | Scenarios |  | ScenarioGallery   |  | MilitarySym  Fork    |  |
- |  | Tours     |  | ToolDialog        |  | GhostProt    Entropy |  |
- |  +-----------+  +-------------------+  +----------------------+  |
- |                    |                        |                     |
- |  +-----------------+------------------------+------------------+  |
- |  |  Data Layer: REST Client (api.ts) + WebSocket (useWebSocket)|  |
- |  +---------------------+---------------------------------------+  |
- +------------------------|------------------------------------------+
-                          |  HTTP / WebSocket (:3001)
-                          v
- +------------------------------------------------------------------+
- |  SERVER LAYER                         Express.js / TypeScript    |
- |                                                                  |
- |  +------------------------------------------------------------+  |
- |  |  Security & Observability                                  |  |
- |  |  Helmet CSP  CORS  RateLimiter  JWT Auth  Logger  Metrics  |  |
- |  +------------------------------------------------------------+  |
- |                          |                                       |
- |                          v                                       |
- |  +------------------------------------------------------------+  |
- |  |  Data Integration Layer      30+ data sources              |  |
- |  |  server/data/ (13 fetchers)   server/utils/ (29 modules)   |  |
- |  |  Firms  EONET  USGS  Open-Meteo  NDBC  VAAC  OpenAQ        |  |
- |  |  FIRMS  ERA5  IMERG  GLDAS  CMEMS  ShakeMap  SPC  ISS     |  |
- |  +------------------------------------------------------------+  |
- |                          |                                       |
- +--------+-----------------+-------------------+-------------------+
-          |                 |                   |
-          v                 v                   v
- +----------------+ +------------------+ +----------------------+
- | Analytics &    | | AI & Cognition  | | Foundation Models   |
- | Simulation     | |                 | | & Perception        |
- |                | | OmniNet: multi- | |                     |
- | 150 scientific | | model LLM router| | Prithvi  CLAY  U-Net|
- | equations in   | |                 | | SAM-Geo  WeatherFM  |
- | 26 domains     | | CognitiveOrch:  | | AgriMon  AlphaEarth |
- |                | | S1 fast + S2    | | BayFire  SpaceX     |
- | ContextEngine  | | deep reasoning  | |                     |
- | + 7-stage QC   | | (HTN, Debate,   | | Multimodal:         |
- | pipeline       | | Causal, Counter-| | Satellite  Seismic  |
- |                | | factual, Synth) | | Radar  Sentiment    |
- | Sandbox-v2:    | |                 | | Fusion              |
- | FARSITE,       | | Meta-cognition: | +----------------------+
- | ADCIRC, WRF,   | | Self-improve    |           |
- | HYSPLIT, FNO   | | Prompt evolve   |           v
- +----------------+ | Explainability  | +----------------------+
-          |         | (Traces, Bias,  | | World Models        |
-          v         |  Uncertainty,   | |                     |
- +----------------+ |  HumanOverride) | | Causal KG     Discov|
- | Memory Systems | +------------------+ | EntropyMixer  Dream|
- |                |           |          | Fork Simulation    |
- | Episodic       |           v          | Scenario Simulator |
- | Semantic       | +------------------+ | Physics NN         |
- | Procedural     | | Reflex Engine   | +----------------------+
- | Predictive     | | Autonomic resp. |           |
- | Sensory Buffer | | to real-time    |           v
- +----------------+ | events          | +----------------------+
-          |         +------------------+ | Sentinel Engine     |
-          v                 |            | Background monitor   |
- +----------------+         v            | Stream Processor    |
- | Persistence    | +------------------+ | Anomaly Detector    |
- |                | | Real-time Comms  | | Correlation Engine  |
- | SQLite:        | |                  | | Force Posture       |
- | Auth, Scenarios| | WebSocket server | +----------------------+
- | Forks, Memory  | | (ws) + heartbeat |           |
- | Sentinel, Traces| | Channels per user|           v
- |                | | and per fork     | +----------------------+
- | Redis:         | |                  | | Real-time Comms     |
- | Cache, PubSub  | | PubSub event bus | | Bus                 |
- | Session, Queue | | sentinel:raw ->  | |                     |
- +----------------+ | enriched -> alert| | PubSub -> WebSocket |
-                    | seismic/weather  | | -> Client UI        |
-                    | -> reflex engine | +----------------------+
-                    +------------------+
+**Request Flow:**
 
-  DATA FLOW
-  ─────────
+```mermaid
+flowchart LR
+    Q["User Query"] --> IR["IntentRouter\n(agent.ts)"]
+    IR -->|"embedding + cosine similarity"| CO["CognitiveOrchestrator"]
+    CO -->|"confidence >= 0.92"| S1["System 1\nFast pattern match"]
+    CO -->|"0.70 <= conf < 0.92"| S2V["System 2\nVerify (10s timeout)"]
+    CO -->|"conf < 0.70"| S2D["System 2\nDeep reasoning"]
+    S2D --> HTN["HTN Decomposition"]
+    HTN --> MAD["Multi-Agent Debate\n4 agent personas"]
+    MAD --> CR["Causal Reasoning"]
+    CR --> CA["Counterfactual Analysis"]
+    CA --> HG["Hypothesis Generation"]
+    HG --> SC["Synthesis + Critic"]
+    S1 --> TE["Tool Execution"]
+    S2V --> TE
+    SC --> TE
+    TE -->|"API calls"| DF["Data Fetchers\n30+ sources"]
+    TE -->|"Equations"| AE["Analytical Engine\n150 models"]
+    TE -->|"Sandbox"| SB["Python / Node / Bash"]
+    TE -->|"Foundation"| FME["Prithvi / CLAY / U-Net\nSAM-Geo / Weather"]
+    TE --> RP["Response Processing"]
+    RP -->|"Cesium globe"| CG["3D Render"]
+    RP -->|"Panels"| UP["UI Update"]
+    RP -->|"Memory"| MS["Memory Store"]
+```
 
-  User Query
-      |
-      v
-  IntentRouter ──embedding──> cosine similarity ──> Intent Type
-  (agent.ts)                 (weather_check | fly_to | compute | ...)
-      |
-      v
-  CognitiveOrchestrator
-  ├── confidence >= 0.92 ───> System 1 (fast pattern match)
-  ├── 0.70 <= conf < 0.92 ──> System 2 (verify, 10s timeout)
-  └── conf < 0.70 | anomaly ─> System 2 (deep: HTN Decomposition
-                                -> Multi-Agent Debate (4 agents)
-                                -> Causal Reasoning
-                                -> Counterfactual Analysis
-                                -> Hypothesis Generation
-                                -> Synthesis + Critic)
-      |
-      v
-  Tool Execution
-  ├── API calls ──> Data Fetchers ──> 30+ external APIs
-  ├── Analytical Models ──> Equation Engine ──> 7-stage QC
-  ├── Sandbox ──> Python/Node/Bash execution
-  └── Foundation Models ──> Prithvi / CLAY / U-Net / SAM-Geo
-      |
-      v
-  Response Processing
-  ├── Render on Cesium 3D globe
-  ├── Update UI panels
-  └── Store in memory systems
+**Background Processes:**
 
-  BACKGROUND PROCESSES (continuous)
-  ─────────────────────────────────
-  
-  Sentinel Engine      Dream Engine          Self-Improver
-  Poll watch zones     Generate scenarios    Record feedback
-  Compare vs baseline  Fork simulation       Evaluate responses
-  -> Stream Processor  Evaluate accuracy     Detect drift
-  -> Anomaly Detector  -> Update causal KG   Evolve prompts
-  -> Correlation Eng
-  -> Alerts via PubSub
+```mermaid
+flowchart LR
+    subgraph Continuous["Continuous Background Processes"]
+        SE["Sentinel Engine\nPoll watch zones\nCompare vs baseline"] --> SP["Stream Processor\nFilter, Enrich, Route"]
+        SP --> AD["Anomaly Detector"]
+        SP --> CE["Correlation Engine\nCross-stream fusion"]
+        AD --> AL["Alerts via PubSub"]
+        CE --> AL
 
-  Reflex Engine
-  Monitor seismic / weather / ais / adsb channels
-  Evaluate conditions -> Execute actions (ALERT / ZOOM / SCAN)
-  Trauma mode: >=3 reflexes fire simultaneously
+        DE["Dream Engine\nSynthetic scenarios"] --> FK["Fork Simulation"]
+        FK --> EA["Evaluate Accuracy"]
+        EA --> KG["Update Causal KG"]
 
-  Self-Evolution
-  Propose architecture changes -> Write code -> Run tests
+        SI["Self-Improver\nRecord feedback"] --> ER["Evaluate Responses"]
+        ER --> DD["Detect Drift"]
+        DD --> EP["Evolve Prompts"]
+
+        REF["Reflex Engine\nMonitor channels"] --> EC["Evaluate Conditions"]
+        EC --> AC["Execute Actions\nALERT / ZOOM / SCAN"]
+        AC --> TR["Trauma Mode\n>=3 simultaneous"]
+    end
 ```
 
 ### Frontend (`src/`)
