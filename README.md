@@ -4,7 +4,326 @@ A real-time geospatial data visualization and AI-powered Earth intelligence plat
 
 ## Architecture
 
-The platform follows a client-server architecture with a React frontend and an Express.js backend, communicating via REST APIs and WebSockets.
+The platform follows a client-server architecture with a React frontend and an Express.js backend, communicating via REST APIs and WebSockets. The backend is organized into layered subsystems: data integration, cognition, perception, simulation, and persistence.
+
+```
+================================================================================
+                           TERREANOETIS ARCHITECTURE
+================================================================================
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │                          CLIENT (React + Cesium)                         │
+  │                                                                          │
+  │  ┌───────────┐  ┌───────────────────┐  ┌──────────────────────────────┐  │
+  │  │  Routing  │  │  UI Components    │  │  3D Rendering Engine         │  │
+  │  │           │  │                   │  │                              │  │
+  │  │  /        │  │  AnalyticsWorkbnch│  │  Earthquakes     Weather     │  │
+  │  │  /v2/globe│  │  IntelligencePanel│  │  Aviation        Maritime    │  │
+  │  │  /v2/...  │  │  SatelliteTracker │  │  Satellites      FIRMS       │  │
+  │  │           │  │  Prithvi Panel    │  │  MilitarySym     StudyArea   │  │
+  │  │           │  │  Scenario Gallery │  │  ScenarioEngine  ForkRender  │  │
+  │  │           │  │  Tool Dialog      │  │  GhostProtocol   EntropyHalo │  │
+  │  │           │  │  Cockpit Panels   │  │  IDW Interp      SurfaceRen  │  │
+  │  │           │  │  Command Palette  │  │  TrajectoryPred  OSM Bldgs   │  │
+  │  └───────────┘  └───────────────────┘  └──────────────────────────────┘  │
+  │                           │                │                             │
+  │              ┌────────────┴────────────────┴────────────┐                │
+  │              │    Data Layer (api.ts / chatStore.ts)    │                │
+  │              │  REST Client  +  WebSocket Client        │                │
+  │              └────────────┬─────────────────────────────┘                │
+  └───────────────────────────┼─────────────────────────────────────────────┘
+                              │ HTTP / WebSocket
+                              ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                    REVERSE PROXY (Vite → Express :3001)                   │
+│                /api/* → localhost:3001  /ws/* → ws://:3001               │
+└────────────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+══════════════════════════════════════════════════════════════════════════════
+                   EXPRESS.JS APPLICATION LAYER (server/index.ts)
+══════════════════════════════════════════════════════════════════════════════
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │                     SECURITY & OBSERVABILITY                         │
+  │  Helmet(CSP)  CORS  RateLimiter  JWT Auth  RequestLogger  Metrics   │
+  └──────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │                     API ROUTE HANDLERS                               │
+  │                                                                      │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  Public Data Endpoints (no auth required)                    │   │
+  │  │  /earthquakes  /weather/*  /eonet  /firms  /flights/*       │   │
+  │  │  /ais/*  /satellites/*  /space-*  /iss  /vaac/*  /gdacs    │   │
+  │  │  /tectonic  /volcanoes  /lightning  /radar  /climate/*      │   │
+  │  │  /fm/*  /multimodal/*  /simulate/*  /scenarios/*            │   │
+  │  │  /analytical-models/*  /tiles/*  /pulse/*                   │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  │                                                                      │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  Authenticated Endpoints                                     │   │
+  │  │  /api/fork/*  /api/vault/*  /api/self-evolve/*              │   │
+  │  │  /api/correlation/*  /api/force-posture/*                   │   │
+  │  │  /api/analytical-models/:id/execute                         │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+══════════════════════════════════════════════════════════════════════════════
+                    BACKEND SERVICE LAYERS
+══════════════════════════════════════════════════════════════════════════════
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  1. DATA INTEGRATION & FETCHERS                                      │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  server/data/                          server/utils/         │   │
+  │  │  dataFetchers  ecmwfCdsClient          firms  eonet  iss     │   │
+  │  │  satelliteThermal  glacier  oceanData  vaac  spaceDebris     │   │
+  │  │  permafrost  seaice  volcano  drought  ndbc  openaq  shakemap│   │
+  │  │  gldas  imerg  whoGeo                  mgrs  spc  era5       │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  2. ANALYTICAL MODELS & SIMULATION                                   │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  analytical-models/    150 scientific equations in 26 domains │   │
+  │  │  engine.ts             Pure computation functions             │   │
+  │  │  contextEngine.ts      Real-data fetch + equation execution   │   │
+  │  │  toolWorkflowRunner.ts 7-stage QC pipeline                    │   │
+  │  │  perToolDefs.ts        Tool definitions & workflow steps      │   │
+  │  │                                                                  │
+  │  │  sandbox-v2/           Physics simulation engines             │   │
+  │  │  farsiteLite (wildfire)  adcircLite (tsunami)                 │   │
+  │  │  wrfLite (atmosphere)    hysplitLite (ash dispersion)         │   │
+  │  │  fnoSurrogate (neural weather prediction)                     │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  3. PERCEPTION & FOUNDATION MODELS                                   │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  foundation-models/          multimodal/                    │   │
+  │  │  prithvi (EO classification)  satelliteAnalyzer             │   │
+  │  │  clay (IBM multisensor)       seismicProcessor              │   │
+  │  │  unetSegmenter (land/water)   radarInterpreter              │   │
+  │  │  samgeoSegmenter (SAM-Geo)    sentimentAnalyzer             │   │
+  │  │  weatherForecaster (ML)       multimodalFusion              │   │
+  │  │  agricultureMonitor           │                               │   │
+  │  │  alphaEarthLookup             │                               │   │
+  │  │  bayFireDetector              │                               │   │
+  │  │  spacexApi                    │                               │   │
+  │  │  satelliteSearch              │                               │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  4. COGNITION & AI ARCHITECTURE                                      │
+  │                                                                      │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  cognition/                                                     │   │
+  │  │  cognitiveOrchestrator.ts    Dual-process orchestration       │   │
+  │  │  system1.ts                  Fast (pattern cache, cosine sim) │   │
+  │  │  system2.ts                  Deep (HTN, Multi-Agent Debate,   │   │
+  │  │                              Causal, Counterfactual, Synthesis)│   │
+  │  │  mctsEngine.ts               Monte Carlo Tree Search          │   │
+  │  │  treeOfThoughts.ts           Tree-of-Thoughts reasoning       │   │
+  │  │  reasoningTree.ts            Structured reasoning traces      │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  │                                                                      │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  agent.ts                  Intent routing + ToolRegistry     │   │
+  │  │  orchestrator.ts           Multi-agent DAG (Plumber, Coder,  │   │
+  │  │                            Analyst, Visualizer, Critic,      │   │
+  │  │                            Reframer)                          │   │
+  │  │  tools-v2/                 Dynamic tool generation + healing  │   │
+  │  │  ai-router/omninet.ts      Multi-model LLM router            │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  │                                                                      │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  explainability/                                               │   │
+  │  │  reasoningVisualizer.ts  evidenceChain.ts  uncertaintyQuant   │   │
+  │  │  biasAuditor.ts  humanOverride.ts                             │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  │                                                                      │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  self-evolution/             selfImprover-v2.ts              │   │
+  │  │  codeWriter  testRunner  gitIntegration  intentDiscovery    │   │
+  │  │  banditRouter  perfMonitor                                   │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  5. REALTIME INTELLIGENCE & MONITORING                               │
+  │                                                                      │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  sentinel/                  Background monitoring system     │   │
+  │  │  engine.ts            Polls zones, detects changes           │   │
+  │  │  streamProcessor.ts   Filters, enriches, routes events      │   │
+  │  │  anomalyDetector.ts                                        │   │
+  │  │  correlationEngine.ts Cross-stream anomaly correlation      │   │
+  │  │  forcePosture.ts      Military installation monitoring      │   │
+  │  │  ambientIntelligence.ts                                     │   │
+  │  │  proactiveInsights.ts                                       │   │
+  │  │  roadTrafficDetector.ts  SAR-based traffic analysis         │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  │                                                                      │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  reflex/                    Autonomic nervous system          │   │
+  │  │  engine.ts  reflexes.ts  actionHandlers.ts   types.ts       │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  │                                                                      │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  monitor.ts    Monitor rules + scheduled tasks + ambient     │   │
+  │  │                event detection                                │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  6. WORLD MODELING & CAUSAL REASONING                                │
+  │                                                                      │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  world-model/   causalGraph  scenarioSimulator               │   │
+  │  │                 ensemblePredictor  physicsNN  predictValidator│   │
+  │  │                                                                │   │
+  │  │  causal/        kg (knowledge graph)  discoveryEngine         │   │
+  │  │                 entropyMixer  types (+ Python microservice)   │   │
+  │  │                                                                │   │
+  │  │  kg-v2/         entityGenerator  edgeGenerator               │   │
+  │  │                 graphCompletion  counterfactualGraph          │   │
+  │  │                 evolvingGraph                                 │   │
+  │  │                                                                │   │
+  │  │  dream/         engine.ts  Nocturnal synthetic scenario gen  │   │
+  │  │                                                                │   │
+  │  │  fork/          manager.ts  routes.ts  types.ts              │   │
+  │  │                 Divergent what-if simulation threads          │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  7. MEMORY SYSTEMS                                                    │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  memory/       PlanetaryMemorySystem  redisAdapter           │   │
+  │  │  memory-v2/    WorkingMemory  EpisodicMemory  SemanticMemory │   │
+  │  │                 ProceduralMemory  PredictiveMemory           │   │
+  │  │                 SensoryBuffer  memoryManager-v2              │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  8. PERSISTENCE & CACHING                                            │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  SQLite (server/db/)     Redis (server/infrastructure/)     │   │
+  │  │  Auth users & roles      Session & token cache              │   │
+  │  │  Watch zones & baselines Semantic cache (embeddings)        │   │
+  │  │  Reasoning traces        Pub/sub message bus                │   │
+  │  │  Fork state              NLP model cache                    │   │
+  │  │  Scenario definitions    Sentinel baselines                 │   │
+  │  │  Memory traces           Queue job state                    │   │
+  │  │  MLAIDE evaluations       Materialized view cache           │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────────┘
+
+══════════════════════════════════════════════════════════════════════════════
+                   REAL-TIME COMMUNICATION BUS
+══════════════════════════════════════════════════════════════════════════════
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  WebSocket Server (server/websocket.ts)                              │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  Client channels (ws:<userId>)     Heartbeat (30s interval)  │   │
+  │  │  Broadcast channel (ws:all)        Fork channels (fork:<id>) │   │
+  │  │  Sentinel channels                 Military updates          │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  │                                                                      │
+  │  PubSub Event Bus (server/pubsub.ts)                                 │
+  │  ┌──────────────────────────────────────────────────────────────┐   │
+  │  │  sentinel:raw -> streamProcessor -> sentinel:enriched        │   │
+  │  │  sentinel:enriched -> anomalyDetector -> sentinel:alerts     │   │
+  │  │  proactive  (monitor triggers, scheduled reports)            │   │
+  │  │  seismic | weather | ais | adsb -> reflex engine            │   │
+  │  │  fork:<id> | fork:all -> WebSocket -> Client                 │   │
+  │  │  sse:<userId> | sse:all -> Client push notifications        │   │
+  │  └──────────────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────────┘
+
+══════════════════════════════════════════════════════════════════════════════
+                    DATA FLOW THROUGH THE SYSTEM
+══════════════════════════════════════════════════════════════════════════════
+
+  User Query
+      │
+      ▼
+  ┌────────────────────────┐
+  │  IntentRouter          │── Embedding → cosine similarity → intent type
+  │  (agent.ts)            │  (weather_check | fly_to | compute | deep_analysis | ...)
+  └───────────┬────────────┘
+              │
+              ▼
+  ┌────────────────────────┐
+  │  CognitiveOrchestrator │─────────────────────────────────────────┐
+  │  (cognition/)          │                                           │
+  │                        │  System 1 (fast):                        │
+  │  confidence >= 0.92 ───┼──→ Return pattern-matched result         │
+  │                        │                                           │
+  │  0.70 <= conf < 0.92 ──┼──→ System 2 (verify, 10s timeout)       │
+  │                        │                                           │
+  │  conf < 0.70 │ anomaly─┼──→ System 2 (full deep)                  │
+  │                        │    HTN Decomposition                     │
+  │                        │    Multi-Agent Debate (4 agents)         │
+  │                        │    Causal Reasoning                      │
+  │                        │    Counterfactual Analysis               │
+  │                        │    Hypothesis Generation                 │
+  │                        │    Synthesis + Critic                    │
+  └───────────┬────────────┘                                           │
+              │                                                       │
+              ▼                                                       │
+  ┌────────────────────────┐                                          │
+  │  Tool Execution        │                                          │
+  │  (ToolRegistry +       │── API calls → data fetchers               │
+  │   dynamicTools)        │── Sandbox execution (Python/Node/Bash)   │
+  │                        │── Analytical models → equation engine    │
+  └───────────┬────────────┘                                          │
+              │                                                       │
+              ▼                                                       │
+  ┌────────────────────────┐                                          │
+  │  Response Processing   │                                          │
+  │  Render on Cesium Globe│ ← WebSocket push + REST response         │
+  │  Update UI panels      │                                          │
+  │  Store in memory       │                                          │
+  └────────────────────────┘                                          │
+                                                                      │
+  ──────────── BACKGROUND PROCESSES (running continuously) ───────────│
+                                                                      │
+  Sentinel Engine ──→ Poll watch zones ──→ Compare vs baseline        │
+       │                    │                   │                     │
+       ▼                    ▼                   ▼                     │
+  Stream Processor    Anomaly Detector    Correlation Engine          │
+  (filter → enrich →  (detect spikes,    (cross-stream fusion)       │
+   route → store)      trends, outliers)                              │
+       │                    │                   │                     │
+       ▼                    ▼                   ▼                     │
+  PubSub → WebSocket → Client UI Updates                             │
+                                                                      │
+  Dream Engine ──→ Generate synthetic scenarios                      │
+       │            → Fork simulation                                 │
+       │            → Evaluate accuracy                                │
+       ▼            → Update causal KG                                 │
+  Self-Improver ──→ Record feedback                                   │
+       │            → Evaluate responses                               │
+       │            → Detect drift                                    │
+       ▼            → Evolve prompts                                   │
+  Self-Evolution ──→ Propose architecture changes                     │
+       │            → Write code                                       │
+       │            → Run tests                                       │
+       ▼            → Git commit                                      │
+  Reflex Engine ──→ Monitor seismic/weather/ais/adsb/sentinel channels│
+                     → Evaluate reflex conditions                      │
+                     → Execute actions (ALERT, ZOOM, SCAN, etc.)       │
+                     → Trauma mode if >= 3 reflexes fire simultaneous │
+```
 
 ### Frontend (`src/`)
 
@@ -174,7 +493,7 @@ The UI uses a dynamic z-index stacking manager. Panels can be toggled from the t
 
 ```yaml
 services:
-  terra-umbra:     # Main application (Express + Vite)
+  terranoetis:     # Main application (Express + Vite)
   redis:           # Caching and pub/sub
   causal-service:  # Python causal inference microservice
 ```
