@@ -420,10 +420,12 @@ The `.env` file contains configuration for 30+ integrated services across catego
 
 Services gracefully disable features when corresponding API keys are absent.
 
-## Author
-
-**[Sreyassanker](https://sreyassanker.vercel.app)** — [GitHub](https://github.com/sreyassanker) · [LinkedIn](https://linkedin.com/in/sreyassanker) · [Portfolio](https://sreyassanker.vercel.app)
-
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE)
+
+Copyright (c) 2026 Terreanoetis
+
+---
+
+[Sreyassanker](https://sreyassanker.vercel.app) · [GitHub](https://github.com/sreyassanker) · [LinkedIn](https://linkedin.com/in/sreyassanker)
