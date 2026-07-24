@@ -1,12 +1,12 @@
 services:
-  terra-umbra:
+  terranoetis:
     build: .
-    container_name: terra-umbra-v3
+    container_name: terranoetis-v3
     ports:
       - "3001:3001"
       - "3000:3000"
     volumes:
-      - terra-data:/app/data
+      - terranoetis-data:/app/data
       - ./.env:/app/.env:ro
     environment:
       - NODE_ENV=production
@@ -50,5 +50,5 @@ services:
       retries: 3
 
 volumes:
-  terra-data:
+  terranoetis-data:
   redis-data:
