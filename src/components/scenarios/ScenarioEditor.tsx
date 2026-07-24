@@ -112,9 +112,10 @@ interface ScenarioEditorProps {
   studyAreas: StudyAreaItem[];
   activeStudyAreaId: string | null;
   terrainProvider?: TerrainProvider;
+  zIndex?: number;
 }
 
-export default function ScenarioEditor({ onClose, onGenerateFromBbox, onImport, studyAreas = [], activeStudyAreaId, terrainProvider }: ScenarioEditorProps) {
+export default function ScenarioEditor({ onClose, onGenerateFromBbox, onImport, studyAreas = [], activeStudyAreaId, terrainProvider, zIndex = 110 }: ScenarioEditorProps) {
   const [scenarioType, setScenarioType] = useState('earthquake_swarm');
   const [params, setParams] = useState<Record<string, number | string>>(() => {
     const p: Record<string, number | string> = {};
@@ -406,7 +407,7 @@ export default function ScenarioEditor({ onClose, onGenerateFromBbox, onImport, 
   const canGenerate = !!activeStudyAreaId && (!validationReport || validationReport.feasible);
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 440 }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 440 }}>
       <Panel
         title="SCENARIO EDITOR"
         icon={<Sliders size={14} />}

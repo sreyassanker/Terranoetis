@@ -744,7 +744,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   },
   23: ({ M0, target: _target }) => {
     const logM0 = Math.log10(M0);
-    const Mw = (2 / 3) * logM0 - 6.07;
+    const Mw = (2 / 3) * logM0 - 6.07;  // Hanks-Kanamori (1979): M₀ in N·m (SI)
     const logA = Mw - 4; // empirical: log₁₀(A_km²) ≈ Mw − 4 (Δσ≈3 MPa)
     const A_km2 = Math.pow(10, logA);
     const D = M0 / (3e10 * (A_km2 * 1e6)) || 0;
@@ -4071,9 +4071,17 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  146: ({ Ai, x }) => {
+  146: ({ alpha1, alpha2, alpha3, alpha4, beta1, beta2, beta3, beta4, phi_m, t_sec }) => {
+    // Full Klobuchar (1987) ICD-GPS-200: compute amplitude & period from 8 broadcast coefficients
+    const phiM = phi_m ?? 0;          // geomagnetic latitude of receiver (rad)
+    const tSec = t_sec ?? 50400;      // local time (seconds of day), default noon
+    const phiM_deg = phiM * 180 / Math.PI;
+    const Ai = (alpha1 ?? 50) + (alpha2 ?? 60) * phiM_deg + (alpha3 ?? 30) * phiM_deg ** 2 + (alpha4 ?? 20) * phiM_deg ** 3;   // amplitude (s)
+    const Pi = Math.max(200, (beta1 ?? 90000) + (beta2 ?? 80000) * phiM_deg + (beta3 ?? 30000) * phiM_deg ** 2 + (beta4 ?? 60000) * phiM_deg ** 3); // period (s), clamped ≥200
+    const x = 2 * Math.PI * (tSec - 50400) / Pi;
     const poly = 1 - (x * x) / 2 + Math.pow(x, 4) / 24;
-    const delay_s = 5e-9 + Ai * poly;
+    // Nighttime: |x| >= π/2 → no ionospheric delay beyond the 5 ns base
+    const delay_s = Math.abs(x) < Math.PI / 2 ? 5e-9 + Math.max(0, Ai) * poly : 5e-9;
     const delay_ns = delay_s * 1e9;
     const rangeErr = delay_s * 299792458;
     return {

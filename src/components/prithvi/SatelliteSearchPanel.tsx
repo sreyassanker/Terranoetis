@@ -22,9 +22,10 @@ interface Props {
   onClose?: () => void;
   onResults?: (results: Array<{ lat: number; lon: number; classLabel: string; similarity?: number }>) => void;
   onFlyTo?: (lat: number, lon: number, options?: { label?: string; color?: string; height?: number }) => void;
+  zIndex?: number;
 }
 
-export function SatelliteSearchPanel({ onClose, onResults, onFlyTo }: Props) {
+export function SatelliteSearchPanel({ onClose, onResults, onFlyTo, zIndex = 1000 }: Props) {
   const [query, setQuery] = useState('');
   const [lat, setLat] = useState('');
   const [lon, setLon] = useState('');
@@ -109,7 +110,7 @@ export function SatelliteSearchPanel({ onClose, onResults, onFlyTo }: Props) {
   };
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 1000, width: 340 }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 340 }}>
       <Panel title="EO IMAGE SEARCH" icon={<Search size={16} />} accentColor="#22c55e" iconColor="#34d399" titleColor="#6ee7b7" onClose={onClose}>
 
       <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(34,197,94,0.1)' }}>

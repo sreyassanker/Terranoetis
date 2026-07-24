@@ -25,6 +25,7 @@ interface CinematicDirectorProps {
   onClose: () => void;
   layerVersion?: number;
   focusEntity?: { lat: number; lon: number; layer: string; name?: string } | null;
+  zIndex?: number;
 }
 
 /* ── Easing ────────────────────────────────────────────── */
@@ -293,7 +294,7 @@ function getSegmentIndex(path: CameraPath, t: number): number {
 
 /* ── Component ─────────────────────────────────────────── */
 
-export default function CinematicDirector({ viewer, onClose, layerVersion, focusEntity }: CinematicDirectorProps) {
+export default function CinematicDirector({ viewer, onClose, layerVersion, focusEntity, zIndex = 110 }: CinematicDirectorProps) {
   const [paths, setPaths] = useState<CameraPath[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -516,7 +517,7 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
   };
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 380 }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 380 }}>
       <Panel
         title="CINEMATIC DIRECTOR"
         icon={<Clapperboard size={14} />}

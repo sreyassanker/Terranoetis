@@ -7,6 +7,7 @@ interface SpatialSketchingProps {
   viewer: Cesium.Viewer | null;
   onClose: () => void;
   onGenerateScenario: (type: string, params: Record<string, unknown>) => void;
+  zIndex?: number;
 }
 
 type DrawMode = 'polygon' | 'rectangle' | 'circle' | null;
@@ -20,7 +21,7 @@ const SCENARIO_PROMPTS = [
   { label: 'What if a volcano erupted here?', type: 'volcanic_eruption' },
 ];
 
-export default function SpatialSketching({ viewer, onClose, onGenerateScenario }: SpatialSketchingProps) {
+export default function SpatialSketching({ viewer, onClose, onGenerateScenario, zIndex = 110 }: SpatialSketchingProps) {
   const [drawMode, setDrawMode] = useState<DrawMode>(null);
   const [points, setPoints] = useState<Array<{ lat: number; lon: number }>>([]);
   const [boundingBox, setBoundingBox] = useState<{ minLat: number; maxLat: number; minLon: number; maxLon: number } | null>(null);
@@ -138,7 +139,7 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario }
   }, [boundingBox, activePrompt, onGenerateScenario, clearDrawings]);
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 360 }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 360 }}>
       <Panel
         title="SPATIAL SKETCHING"
         icon={<Pen size={14} />}

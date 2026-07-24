@@ -19,6 +19,7 @@ interface ScenarioViewerProps {
   counterfactualScenario?: Scenario | null;
   onClose: () => void;
   onBack?: () => void;
+  zIndex?: number;
 }
 
 type ColorMode = 'hazard' | 'intensity' | 'confidence';
@@ -36,7 +37,7 @@ interface StepPrimitives {
 /** How many steps ahead/behind the current step to pre-create */
 const LAZY_WINDOW = 2;
 
-export default function ScenarioViewer({ viewer, scenario, counterfactualScenario, onClose, onBack }: ScenarioViewerProps) {
+export default function ScenarioViewer({ viewer, scenario, counterfactualScenario, onClose, onBack, zIndex = 110 }: ScenarioViewerProps) {
   const [colorMode, setColorMode] = useState<ColorMode>('hazard');
   const [compareMode, setCompareMode] = useState(false);
   const [showInfo, setShowInfo] = useState(true);
@@ -232,7 +233,7 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
 
   if (!scenario) {
     return (
-      <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 420 }}>
+      <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 420 }}>
         <Panel title="SCENARIO VIEWER" icon={<Eye size={14} />} accentColor="#3b82f6" iconColor="#60a5fa" titleColor="#93c5fd" onClose={onClose} style={{ maxHeight: 'calc(100vh - 92px)' }}>
           <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 11 }}>
             No scenario selected
@@ -261,7 +262,7 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
   ) : undefined;
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 420 }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 420 }}>
       <Panel title={scenario.name.toUpperCase()} icon={<Eye size={14} />} accentColor={SCENARIO_TYPE_COLORS[scenario.type] || '#3b82f6'} iconColor="#60a5fa" titleColor="#93c5fd" onClose={onClose} headerExtra={headerExtra} style={{ maxHeight: 'calc(100vh - 92px)' }}>
 
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, overflowY: 'auto', flex: 1, minHeight: 0 }}>

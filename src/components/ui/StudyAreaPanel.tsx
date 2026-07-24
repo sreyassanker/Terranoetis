@@ -25,12 +25,13 @@ interface StudyAreaPanelProps {
   setDrawing: React.Dispatch<React.SetStateAction<boolean>>;
   activeStudyAreaId: string | null;
   onActivate: (id: string) => void;
+  zIndex?: number;
 }
 
 export default React.memo(function StudyAreaPanel({
   viewer, areas, setAreas, show, onClose,
   onStartDraw, onStopDraw, drawing, setDrawing,
-  activeStudyAreaId, onActivate,
+  activeStudyAreaId, onActivate, zIndex = 110,
 }: StudyAreaPanelProps) {
   const [tab, setTab] = useState<TabId>('draw');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -116,7 +117,7 @@ export default React.memo(function StudyAreaPanel({
   ];
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 340, maxHeight: 'calc(100vh - 92px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 340, maxHeight: 'calc(100vh - 92px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <Panel
         title="STUDY AREA"
         icon={<Map size={14} />}

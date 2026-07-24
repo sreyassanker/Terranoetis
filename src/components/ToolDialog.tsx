@@ -167,6 +167,9 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, onT
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showRef, setShowRef] = useState(false);
+  const [showScientificConcept, setShowScientificConcept] = useState(false);
+  const [showMethodology, setShowMethodology] = useState(false);
+  const [showOutputInterpretation, setShowOutputInterpretation] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const meta = tool.analysisMeta;
@@ -656,23 +659,35 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, onT
         {/* Scientific Concept */}
         {tool.scientificConcept && (
           <div style={{ marginBottom: 8, padding: '6px 8px', borderRadius: 6, background: 'rgba(139,92,246,0.05)', border: '1px solid rgba(139,92,246,0.15)' }}>
-            <div style={sectionStyle}><Info size={10} /> Scientific Concept</div>
-            <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.5 }}>{tool.scientificConcept}</div>
+            <button onClick={() => setShowScientificConcept(p => !p)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', width: '100%', display: 'flex', alignItems: 'center', gap: 4, padding: 0 }}>
+              <div style={{ ...sectionStyle, flex: 1, marginBottom: 0 }}><Info size={10} /> Scientific Concept</div>
+              <span style={{ fontSize: 9, color: '#64748b' }}>{showScientificConcept ? 'Hide' : 'View'}</span>
+            </button>
+            {showScientificConcept && (
+              <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.5, marginTop: 4 }}>{tool.scientificConcept}</div>
+            )}
           </div>
         )}
 
         {/* Methodology */}
         {tool.methodology && (
-          <div style={{ marginBottom: 8 }}>
-            <div style={sectionStyle}><Zap size={10} /> Processing Methodology</div>
-            {tool.processingSteps ? (
-              <ol style={{ margin: 0, paddingLeft: 16, fontSize: 10, color: '#94a3b8', lineHeight: 1.6 }}>
-                {tool.processingSteps.map((step, i) => (
-                  <li key={i} style={{ marginBottom: 3 }}>{step}</li>
-                ))}
-              </ol>
-            ) : (
-              <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{tool.methodology}</div>
+          <div style={{ marginBottom: 8, padding: '6px 8px', borderRadius: 6, background: 'rgba(234,179,8,0.05)', border: '1px solid rgba(234,179,8,0.15)' }}>
+            <button onClick={() => setShowMethodology(p => !p)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', width: '100%', display: 'flex', alignItems: 'center', gap: 4, padding: 0 }}>
+              <div style={{ ...sectionStyle, flex: 1, marginBottom: 0 }}><Zap size={10} /> Processing Methodology</div>
+              <span style={{ fontSize: 9, color: '#64748b' }}>{showMethodology ? 'Hide' : 'View'}</span>
+            </button>
+            {showMethodology && (
+              tool.processingSteps ? (
+                <ol style={{ margin: 0, paddingLeft: 16, fontSize: 10, color: '#94a3b8', lineHeight: 1.6, marginTop: 4 }}>
+                  {tool.processingSteps.map((step, i) => (
+                    <li key={i} style={{ marginBottom: 3 }}>{step}</li>
+                  ))}
+                </ol>
+              ) : (
+                <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.5, whiteSpace: 'pre-wrap', marginTop: 4 }}>{tool.methodology}</div>
+              )
             )}
           </div>
         )}
@@ -680,8 +695,14 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, onT
         {/* Output Interpretation */}
         {tool.outputInterpretation && (
           <div style={{ marginBottom: 8, padding: '6px 8px', borderRadius: 6, background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.15)' }}>
-            <div style={sectionStyle}><TrendingUp size={10} /> Output Interpretation</div>
-            <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{tool.outputInterpretation}</div>
+            <button onClick={() => setShowOutputInterpretation(p => !p)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', width: '100%', display: 'flex', alignItems: 'center', gap: 4, padding: 0 }}>
+              <div style={{ ...sectionStyle, flex: 1, marginBottom: 0 }}><TrendingUp size={10} /> Output Interpretation</div>
+              <span style={{ fontSize: 9, color: '#64748b' }}>{showOutputInterpretation ? 'Hide' : 'View'}</span>
+            </button>
+            {showOutputInterpretation && (
+              <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.5, whiteSpace: 'pre-wrap', marginTop: 4 }}>{tool.outputInterpretation}</div>
+            )}
           </div>
         )}
 
@@ -716,6 +737,15 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, onT
           {showRef && (
             <div style={{ marginTop: 6, fontSize: 10, color: '#94a3b8', lineHeight: 1.5 }}>
               <div style={{ marginBottom: 4 }}><span style={{ color: '#64748b' }}>Reference: </span>{tool.reference}</div>
+              {tool.paperUrl && (
+                <div style={{ marginBottom: 4 }}>
+                  <a href={tool.paperUrl} target="_blank" rel="noopener noreferrer"
+                    style={{ color: '#60a5fa', textDecoration: 'none', borderBottom: '1px solid rgba(96,165,250,0.3)' }}>
+                    <BookOpen size={9} style={{ marginRight: 3, verticalAlign: 'middle' }} />
+                    View Paper ↗
+                  </a>
+                </div>
+              )}
               {tool.paperSummary && (
                 <div style={{ marginBottom: 4, whiteSpace: 'pre-wrap' }}><span style={{ color: '#64748b' }}>Paper Summary: </span>{tool.paperSummary}</div>
               )}

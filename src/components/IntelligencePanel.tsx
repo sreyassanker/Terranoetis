@@ -51,6 +51,7 @@ interface IntelligencePanelProps {
   onClose: () => void;
   onToggleLayer: (id: string) => void;
   onFlyTo: (lat: number, lon: number, opts?: { height?: number; label?: string }) => void;
+  zIndex?: number;
 }
 
 type TabId = 'market' | 'energy' | 'geopolitical' | 'correlation' | 'sentiment' | 'heatmap' | 'analysis' | 'intel';
@@ -1094,7 +1095,7 @@ const IntelTab: React.FC = () => {
    ═════════════════════════════════════════════════════════════════ */
 
 export const IntelligencePanel: React.FC<IntelligencePanelProps> = ({
-  open, onClose, onToggleLayer: _onToggleLayer, onFlyTo,
+  open, onClose, onToggleLayer: _onToggleLayer, onFlyTo, zIndex = 999,
 }): React.ReactElement => {
   const [activeTab, setActiveTab] = useState<TabId>('market');
   const mountedTabs = useRef<Set<TabId>>(new Set(['market']));
@@ -1137,7 +1138,7 @@ export const IntelligencePanel: React.FC<IntelligencePanelProps> = ({
   if (!open) return null as unknown as React.ReactElement;
 
   return (
-    <div style={{ position: 'fixed', top: 60, right: 10, bottom: 56, zIndex: 999, width: 380, maxWidth: 'calc(100vw - 32px)' }}>
+    <div style={{ position: 'fixed', top: 60, right: 10, bottom: 56, zIndex, width: 380, maxWidth: 'calc(100vw - 32px)' }}>
       <Panel
         title="PULSE"
         icon={<Eye size={16} />}

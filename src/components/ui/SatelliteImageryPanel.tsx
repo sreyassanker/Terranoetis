@@ -17,9 +17,10 @@ interface Props {
   viewer: Cesium.Viewer | null;
   show: boolean;
   onClose: () => void;
+  zIndex?: number;
 }
 
-export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose }: Props) {
+export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose, zIndex = 110 }: Props) {
   const [satStartDate, setSatStartDate] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 7);
     return d.toISOString().slice(0, 10);
@@ -169,7 +170,7 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
   }, [show, viewer]);
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 340, maxHeight: 'calc(100vh - 92px)', display: show ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 340, maxHeight: 'calc(100vh - 92px)', display: show ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
       <Panel title="SATELLITE IMAGERY" icon={<Satellite size={14} />} accentColor="#3b82f6" iconColor="#60a5fa" titleColor="#93c5fd" onClose={onClose}>
         <div style={{ padding: '8px 10px', overflowY: 'auto', flex: 1 }}>
           {/* Bounding Box Inputs */}

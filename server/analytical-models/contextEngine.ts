@@ -135,7 +135,6 @@ const ALIGN: Record<number, Record<string, string>> = {
   69:  { 'λ': 'lambda' },
   71:  { 'ε': 'eps' },
   75:  { 'Lstar': 'L' },
-  84:  { 'tanPhi': 'tanphi' },
   92:  { 'λ': 'lambda' },
   95:  { 'α': 'alpha' },
   96:  { 'α': 'alpha' },
@@ -147,8 +146,7 @@ const ALIGN: Record<number, Record<string, string>> = {
   124: { 'ρ': 'rho' },
   126: { 'β': 'beta', 'γ': 'gamma' },
   134: { 'ft': 'fc' },
-  145: { 'f': 'dKm', 'd': 'fGHz' },
-  146: { 'alpha1': 'Ai', 'alpha2': 'x' },
+  145: { 'f': 'fGHz', 'd': 'dKm' },  // Fixed: f→frequency (GHz), d→distance (km)
   147: { 'v': 'vrel' },
   149: { 'm1': 'x', 'm2': 'y' },
 };
@@ -221,13 +219,11 @@ function mapInputs(
   const lc = ctx.landCover;
   const tr = ctx.terrain;
   const gl = ctx.glacier;
-  const _vo = ctx.volcano;
-  void _vo;
+  const vo = ctx.volcano;
   const tp = ctx.tropo;
   void tp;
-  const _pf = ctx.permafrost;
-  const _dr = ctx.drought;
-  void _pf;
+  const pf = ctx.permafrost;
+  const dr = ctx.drought;
   const rv = ctx.river;
   const T = w.temperature_2m ?? 15;
   const P = w.pressure_msl ?? 1013.25;
@@ -394,7 +390,7 @@ function mapInputs(
       It: u('It', rv.discharge),
       Ot: u('Ot', rv.discharge * 0.8),
     };
-    case 14: return { H0: u('H0', 2) };
+    case 14: return { H0: u('H0', 2), amps: Array.isArray(userInputs['amps']) ? userInputs['amps'] : [1.5, 0.8, 0.3] };
     case 15: {
       // Ekman (1905) wind stress τ = ρ_air · Cd · U₁₀² (Large & Pond 1981).
       // The paper requires wind stress derived from wind speed, not a static
@@ -545,8 +541,8 @@ function mapInputs(
       const siC = si.concentration;
       return {
         C: u('C', siC),
-        Twater: u('Twater', 0),
-        Tice: u('Tice', -5),
+        Twater: u('Twater', 180),  // Open water brightness temp at 37 GHz (K) — Comiso 1986 tie-point
+        Tice: u('Tice', 140),     // First-year ice brightness temp at 37 GHz (K) — Comiso 1986 tie-point
       };
     }
 
@@ -649,10 +645,13 @@ function mapInputs(
       };
     }
     case 46: {
+      // Q10 soil respiration — uses GLDAS soil moisture + drought PDSI
       const gldasSm = ctx.gldas?.soilMoisture0_10;
       const smFactor = gldasSm != null ? Math.max(0.1, Math.min(1, gldasSm / 30)) : 1;
+      // Drought suppression: PDSI < -2 severely limits respiration
+      const droughtFactor = Math.max(0.3, Math.min(1, 1 + (dr?.pdsi ?? 0) * 0.15));
       return {
-        Rbase: u('Rbase', 2 * smFactor),
+        Rbase: u('Rbase', 2 * smFactor * droughtFactor),
         Q10: u('Q10', 2),
         T: u('T', w.soil_temperature_0_to_7cm ?? T),
         Tbase: u('Tbase', 10),
@@ -758,21 +757,26 @@ function mapInputs(
       const doy = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000) || 180;
       const dr = 1 + 0.033 * Math.cos(2 * Math.PI * doy / 365);
       const decl = 0.409 * Math.sin(2 * Math.PI * doy / 365 - 1.39);
-      const ws = Math.acos(-Math.tan(latRad) * Math.tan(decl));
-      const RaCalc = (24 * 60 / Math.PI) * 0.082 * dr * (ws * Math.sin(latRad) * Math.sin(decl) + Math.cos(latRad) * Math.cos(decl) * Math.sin(ws)); // MJ/m²/day
+      const wsArg = Math.max(-1, Math.min(1, -Math.tan(latRad) * Math.tan(decl)));
+      const ws = Math.acos(wsArg); // MJ/m²/day
       return {
         Ra: u('Ra', RaCalc),
         Tmax: u('Tmax', T + 5),
         Tmin: u('Tmin', T - 5),
       };
     }
-    case 61: return {
-      Ya: u('Ya', 4),
-      Ym: u('Ym', 5),
-      Ky: u('Ky', 1.2),
-      ETa: u('ETa', 4),
-      ETm: u('ETm', 5),
-    };
+    case 61: {
+      // FAO Yield Response — drought reduces actual evapotranspiration
+      const pdsi = dr?.pdsi ?? 0;
+      const droughtET = pdsi < -2 ? Math.max(2, 4 + pdsi * 0.5) : 4;
+      return {
+        Ya: u('Ya', 4),
+        Ym: u('Ym', 5),
+        Ky: u('Ky', 1.2),
+        ETa: u('ETa', droughtET),
+        ETm: u('ETm', 5),
+      };
+    }
     case 62: return {
       umax: u('umax', 0.8),
       T: u('T', T),
@@ -910,7 +914,7 @@ function mapInputs(
       K: u('K', 0.01),
       A: u('A', 10000),
       m: u('m', 0.5),
-      S: u('S', tr.slope / 100),
+      S: u('S', (tr.slope || 0) / 100),
     };
     case 82: return {
       c: u('c', 2.5),
@@ -938,12 +942,14 @@ function mapInputs(
       xi: u('xi', 500),
     };
     case 86: return {
+      // Stream Power Index: SPI = ln(As × tanβ) — Moore et al. (1991)
       As: u('As', 500),
-      tanB: u('tanB', 0.05),
+      tanB: u('tanB', Math.max(1e-6, Math.tan(Math.max(0.001, (tr.slope ?? 2)) * Math.PI / 180))),
     };
     case 87: return {
+      // Topographic Wetness Index: TWI = ln(As / tanβ) — Beven & Kirkby (1979)
       As: u('As', 500),
-      tanB: u('tanB', 0.05),
+      tanB: u('tanB', Math.max(1e-6, Math.tan(Math.max(0.001, (tr.slope ?? 2)) * Math.PI / 180))),
     };
 
     // ═══ Domain 13: Limnology ═══
@@ -973,7 +979,9 @@ function mapInputs(
       // mean air temperature × a 150-day melt season (a documented proxy for
       // the true PDD integration, which requires the full daily ERA5 series).
       const glArea = gl.area;  // 0 when glacier fetcher throws — flagged below
-      const pddApprox = Math.max(0, T) * 150;  // mean T × melt-season days
+      // Use permafrost ground temperature when available for more accurate PDD
+      const surfaceT = pf?.groundTemp ?? T;
+      const pddApprox = Math.max(0, surfaceT) * 150;  // mean T × melt-season days
       // GLDAS snow water equivalent for accumulation estimate
       const gldasSwe = ctx.gldas?.snowWaterEquivalent;
       const sweAccum = gldasSwe != null ? Math.max(0, gldasSwe / 1000) : undefined;
@@ -1004,14 +1012,22 @@ function mapInputs(
       rhoI: u('rhoI', 917),
       rhoF: u('rhoF', 550),
     };
-    case 94: return {
-      V: u('V', 4),
-    };
-    case 95: return {
-      Qdot: u('Qdot', 1e6),
-      rhoAir: u('rhoAir', 1.2),
-      α: u('α', 0.1),
-    };
+    case 94: {
+      // Volcanic Explosivity Index — influenced by eruption history
+      const activityBoost = vo?.recentActivity ? 1 : 0;
+      return {
+        V: u('V', 4 + activityBoost),
+      };
+    }
+    case 95: {
+      // Volcanic Heat Flux — influenced by proximity to active volcano
+      const distFactor = (vo?.distance ?? 9999) < 50 ? 3 : (vo?.distance ?? 9999) < 200 ? 1.5 : 1;
+      return {
+        Qdot: u('Qdot', 1e6 * distFactor),
+        rhoAir: u('rhoAir', 1.2),
+        α: u('α', 0.1),
+      };
+    }
 
     // ═══ Domain 15: Climate Dynamics ═══
     case 96: {
@@ -1234,7 +1250,7 @@ function mapInputs(
       az: u('az', 0),
     };
 
-    // ═══ Domain 21: Solar-Terrestrial ═══
+    // ═══ Domain 21: Solar-Terrestrial & GNSS (Eqs 128–130) ═══
     case 128: return {
       wi: u('wi', 1),
       Ki: Array.from({ length: 13 }, () => sw.kpIndex * 3),
@@ -1245,7 +1261,6 @@ function mapInputs(
     case 130: {
       // Saastamoinen (1972). P in hPa, T in K, e = water vapour pressure
       // in hPa (computed from Tetens using real T/RH), θ = elevation angle.
-      // The previous tp.wetDelay*1000 (mm) was a unit error — e must be hPa.
       const eCalc = 6.1094 * Math.exp(17.625 * T / (T + 243.04)) * rh / 100;  // hPa
       return {
         P: u('P', P),
@@ -1374,13 +1389,23 @@ function mapInputs(
       Gt: u('Gt', 20),
       Gr: u('Gr', 0),
     };
-    case 146: return {
-      alpha1: u('alpha1', 50),
-      alpha2: u('alpha2', 60),
-      alpha3: u('alpha3', 30),
-      alpha4: u('alpha4', 20),
-      A: u('A', 14),
-    };
+    case 146: {
+      // Full Klobuchar (1987): 8 broadcast ionospheric parameters + receiver geometry
+      const phiM = lat * Math.PI / 180;   // geomagnetic latitude ≈ geographic at low/mid latitudes
+      const hourAngle = (Date.now() % 86400000) / 1000;  // seconds of day (UTC)
+      return {
+        alpha1: u('alpha1', 50),
+        alpha2: u('alpha2', 60),
+        alpha3: u('alpha3', 30),
+        alpha4: u('alpha4', 20),
+        beta1: u('beta1', 90000),
+        beta2: u('beta2', 80000),
+        beta3: u('beta3', 30000),
+        beta4: u('beta4', 60000),
+        phi_m: u('phi_m', phiM),
+        t_sec: u('t_sec', hourAngle),
+      };
+    }
     case 147: return {
       f0: u('f0', 5e9),
       v: u('v', 300),
@@ -1430,6 +1455,8 @@ export async function computeWithContext(
   // entire computation. mapInputs() already provides physical fallback
   // values via ?? operators for every parameter.
   const safe = <T>(p: Promise<T>, fb: T): Promise<T> => p.catch(() => fb);
+
+  const dateStr = context?.time?.start || undefined;
 
   const [
     weather, marine, airQuality, earthquakes, elevation,
@@ -1487,8 +1514,6 @@ export async function computeWithContext(
   ]);
 
   const popData = await safe(fetchPopulation(lat, lon), { populationDensity: 0, totalPopulation: 0 });
-
-  const dateStr = context?.time?.start || undefined;
 
   // Real satellite thermal data for LST (Rozenstein 2014) and related
   // remote-sensing tools that require Landsat brightness temperature,

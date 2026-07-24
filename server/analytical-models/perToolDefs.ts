@@ -95,20 +95,6 @@ const SOIL_BANDS: ClassificationBand[] = [
   { min: 100, max: Infinity, label: 'Very High', color: '#3b82f6', description: 'Very high' },
 ];
 
-function makeTool(id: number, name: string, vizType: string, bands: ClassificationBand[], rules: Array<{param: string; min?: number; max?: number}>, preprocessingNotes: string[], unc: { method: 'analytical'|'empirical'|'qualitative'; rmse?: number; rmseUnit?: string; factors: string[]; assessment: string }, interpretation: string, recs: string[], assumptions: string[], limitations: string[], references: string[], deps?: number[]): ToolWorkflowDef {
-  return {
-    toolId: id, name, vizType: vizType as ToolWorkflowDef['vizType'], classificationBands: bands,
-    validate: (inputs) => validateRange(inputs, rules),
-    preprocess: (inputs, ctx, log) => { preprocessingNotes.forEach(n => log.push(`  ${n}`)); log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`); return inputs; },
-    postProcess: (result, _base, _ctx, log) => { const c = classify(result, bands); if (c) log.push(`  Result: ${c.label}`); return { classification: c }; },
-    qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
-    estimateUncertainty: () => ({ method: unc.method, rmse: unc.rmse, rmseUnit: unc.rmseUnit, contributingFactors: unc.factors.map(f => ({ factor: f, contribution: 'Varies' })), overallAssessment: unc.assessment }),
-    interpret: (result) => ({ contextualAnalysis: `${name}: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. ${interpretation}`, recommendations: recs }),
-    metadata: { methodology: interpretation, assumptions, limitations, references, preprocessingNotes },
-    dependencies: deps,
-  };
-}
-
 // Additional shared band sets for Part 4
 const OCEAN_BANDS: ClassificationBand[] = [
   { min: -Infinity, max: 0.1, label: 'Calm', color: '#22c55e', description: 'Calm' },
@@ -138,34 +124,6 @@ const GENERIC_BANDS: ClassificationBand[] = [
   { min: 0, max: 1, label: 'Normal', color: '#22c55e', description: 'Normal' },
   { min: 1, max: Infinity, label: 'High', color: '#eab308', description: 'High' },
 ];
-
-// Compact validation for Part 4 generated tools
-function vr(inputs: Record<string, unknown>, rules: Array<{ param: string; min?: number; max?: number }>) {
-  const errors: string[] = [], warnings: string[] = [], validated: Record<string, number> = {};
-  for (const r of rules) {
-    const v = inputs[r.param]; if (v === undefined || v === null) { warnings.push("'" + r.param + "' not provided."); continue; }
-    const n = typeof v === 'number' ? v : Number(v); if (!Number.isFinite(n)) { errors.push("'" + r.param + "' not finite."); continue; }
-    if (r.min !== undefined && n < r.min) errors.push("'" + r.param + "' below " + r.min + ".");
-    if (r.max !== undefined && n > r.max) errors.push("'" + r.param + "' above " + r.max + ".");
-    validated[r.param] = n;
-  }
-  return { valid: errors.length === 0, errors, warnings, validatedParams: validated };
-}
-
-// Factory function for Part 4 generated tools
-function mt(id: number, name: string, viz: string, bands: ClassificationBand[], rules: Array<{param: string; min?: number; max?: number}>, pp: string[], unc: { method: 'analytical'|'empirical'|'qualitative'; rmse?: number; rmseUnit?: string; factors: string[]; assessment: string }, interp: string, recs: string[], assum: string[], lim: string[], refs: string[], deps: number[]): ToolWorkflowDef {
-  return {
-    toolId: id, name, vizType: viz as ToolWorkflowDef['vizType'], classificationBands: bands,
-    validate: (inputs) => vr(inputs, rules),
-    preprocess: (inputs, ctx, log) => { pp.forEach(n => log.push('  ' + n)); log.push('  Location: (' + ctx.lat.toFixed(2) + ', ' + ctx.lon.toFixed(2) + ')'); return inputs; },
-    postProcess: (result, _b, _c, log) => { const c = classify(result, bands); if (c) log.push('  Result: ' + c.label); return { classification: c }; },
-    qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' as const : 'error' as const }]),
-    estimateUncertainty: () => ({ method: unc.method, rmse: unc.rmse, rmseUnit: unc.rmseUnit, contributingFactors: unc.factors.map(f => ({ factor: f, contribution: 'Varies' })), overallAssessment: unc.assessment }),
-    interpret: (result) => ({ contextualAnalysis: name + ': ' + (Number.isFinite(result) ? result.toFixed(4) : 'N/A') + '. ' + interp, recommendations: recs }),
-    metadata: { methodology: interp, assumptions: assum, limitations: lim, references: refs, preprocessingNotes: pp },
-    dependencies: deps.length > 0 ? deps : undefined,
-  };
-}
 
 // ══════════════════════════════════════════════════════════════════
 //  EQUATION 1 — Land Surface Temperature Retrieval (Split-Window)
@@ -673,7 +631,9 @@ const SEISMIC_BANDS: ClassificationBand[] = [
   { min: 1000, max: Infinity, label: 'Very High', color: '#ef4444', description: 'Very high' },
 ];
 
-// ═══ Eq 9 — FAO-56 Penman-Monteith Reference ET ═══
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 9 — Reference Evapotranspiration
+// ══════════════════════════════════════════════════════════════════
 export const TOOL_9: ToolWorkflowDef = {
   toolId: 9, name: 'Reference Evapotranspiration', vizType: 'timeseries',
   classificationBands: WATER_BANDS,
@@ -730,7 +690,9 @@ export const TOOL_9: ToolWorkflowDef = {
   dependencies: [3],
 };
 
-// ═══ Eq 10 — SCS Curve Number Runoff ═══
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 10 — Runoff Estimation (SCS-CN)
+// ══════════════════════════════════════════════════════════════════
 export const TOOL_10: ToolWorkflowDef = {
   toolId: 10, name: 'Runoff Estimation (SCS-CN)', vizType: 'scalar',
   classificationBands: WATER_BANDS,
@@ -778,7 +740,9 @@ export const TOOL_10: ToolWorkflowDef = {
   dependencies: [],
 };
 
-// ═══ Eq 11 — Manning's Equation ═══
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 11 — Open Channel Flow Analysis
+// ══════════════════════════════════════════════════════════════════
 export const TOOL_11: ToolWorkflowDef = {
   toolId: 11, name: 'Open Channel Flow Analysis', vizType: 'scalar',
   classificationBands: [
@@ -836,112 +800,660 @@ export const TOOL_11: ToolWorkflowDef = {
   dependencies: [],
 };
 
-// ═══ Eqs 12-25: Generate definitions using a helper ═══
-function makeSimpleTool(id: number, name: string, vizType: string, bands: ClassificationBand[], rules: Array<{param: string; min?: number; max?: number}>, preprocessingNotes: string[], uncertainty: { method: 'analytical' | 'empirical' | 'qualitative'; rmse?: number; rmseUnit?: string; factors: string[]; assessment: string }, interpretation: string, recs: string[], assumptions: string[], limitations: string[], references: string[], deps?: number[]): ToolWorkflowDef {
-  return {
-    toolId: id, name, vizType: vizType as ToolWorkflowDef['vizType'], classificationBands: bands,
-    validate: (inputs) => validateRange(inputs, rules),
-    preprocess: (inputs, ctx, log) => { preprocessingNotes.forEach(n => log.push(`  ${n}`)); log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`); return inputs; },
-    postProcess: (result, _base, _ctx, log) => { const c = classify(result, bands); if (c) log.push(`  Result classified as: ${c.label}`); return { classification: c }; },
-    qualityCheck: (result) => makeQC([rangeQC(result, -Infinity, Infinity, 'Result range'), { name: 'Non-finite check', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
-    estimateUncertainty: () => ({ method: uncertainty.method, rmse: uncertainty.rmse, rmseUnit: uncertainty.rmseUnit, contributingFactors: uncertainty.factors.map(f => ({ factor: f, contribution: 'Varies' })), overallAssessment: uncertainty.assessment }),
-    interpret: (result) => ({ contextualAnalysis: `${name}: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. ${interpretation}`, recommendations: recs }),
-    metadata: { methodology: interpretation, assumptions, limitations, references, preprocessingNotes },
-    dependencies: deps,
-  };
-}
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 12 — Peak Discharge Estimation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_12: ToolWorkflowDef = {
+  toolId: 12,
+  name: 'Peak Discharge Estimation',
+  vizType: 'scalar',
+  classificationBands: WATER_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'C', min: 0, max: 1 }, { param: 'i', min: 0, max: 200 }, { param: 'A', min: 0.1, max: 10000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Rainfall intensity from Open-Meteo');
+    log.push('  Runoff coefficient from ESA WorldCover');
+    log.push('  Catchment area from HydroSHEDS');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, WATER_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Runoff coefficient uncertainty', contribution: 'Varies' },
+      { factor: 'Rainfall intensity spatial variability', contribution: 'Varies' },
+      { factor: 'Small catchment assumption', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Rational Method has +/- 30% uncertainty. Valid only for small catchments (< 80 ha).',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Peak Discharge Estimation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Peak discharge for stormwater design. Q = C*i*A/3.6 converts mm/hr*km2 to m3/s.`,
+    recommendations: ['Valid only for small catchments (< 80 ha).', 'Use IDF curves for design rainfall intensity.', 'Cross-reference with USGS NWIS.'],
+  }),
+  metadata: {
+    methodology: 'Peak discharge for stormwater design. Q = C*i*A/3.6 converts mm/hr*km2 to m3/s.',
+    assumptions: ['Uniform rainfall', 'Small catchment (< 80 ha)', 'Constant runoff coefficient'],
+    limitations: ['Not applicable for large basins', 'No temporal distribution', 'Single peak only'],
+    references: ['Mulvaney 1851'],
+    preprocessingNotes: ['Rainfall intensity from Open-Meteo', 'Runoff coefficient from ESA WorldCover', 'Catchment area from HydroSHEDS'],
+  },
+  dependencies: [],
+};
 
-// Eq 12 — Rational Method
-export const TOOL_12 = makeSimpleTool(12, 'Peak Discharge Estimation', 'scalar', WATER_BANDS,
-  [{ param: 'C', min: 0, max: 1 }, { param: 'i', min: 0, max: 200 }, { param: 'A', min: 0.1, max: 10000 }],
-  ['Rainfall intensity from Open-Meteo', 'Runoff coefficient from ESA WorldCover', 'Catchment area from HydroSHEDS'],
-  { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ['Runoff coefficient uncertainty', 'Rainfall intensity spatial variability', 'Small catchment assumption'], assessment: 'Rational Method has +/- 30% uncertainty. Valid only for small catchments (< 80 ha).' },
-  'Peak discharge for stormwater design. Q = C*i*A/3.6 converts mm/hr*km2 to m3/s.', ['Valid only for small catchments (< 80 ha).', 'Use IDF curves for design rainfall intensity.', 'Cross-reference with USGS NWIS.'], ['Uniform rainfall', 'Small catchment (< 80 ha)', 'Constant runoff coefficient'], ['Not applicable for large basins', 'No temporal distribution', 'Single peak only'], ['Mulvaney 1851'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 13 — Flood Wave Routing
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_13: ToolWorkflowDef = {
+  toolId: 13,
+  name: 'Flood Wave Routing',
+  vizType: 'scalar',
+  classificationBands: WATER_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'K', min: 0.1, max: 48 }, { param: 'X', min: 0, max: 0.5 }, { param: 'It', min: 0, max: 10000 }, { param: 'Ot', min: 0, max: 10000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Storage constant from channel geometry');
+    log.push('  Weighting factor from calibration');
+    log.push('  Inflow/outflow from USGS NWIS');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, WATER_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'K and X calibration', contribution: 'Varies' },
+      { factor: 'Channel geometry variability', contribution: 'Varies' },
+      { factor: 'Linear storage assumption', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Muskingum has +/- 15% uncertainty. Use Muskingum-Cunge for ungauged reaches.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Flood Wave Routing: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Flood wave attenuation in river reaches. S = K*[X*I + (1-X)*O].`,
+    recommendations: ['For ungauged reaches, use Muskingum-Cunge.', 'K = travel time; X = 0 (storage) to 0.5 (translation).', 'Typical natural channels: X = 0.2-0.3.'],
+  }),
+  metadata: {
+    methodology: 'Flood wave attenuation in river reaches. S = K*[X*I + (1-X)*O].',
+    assumptions: ['Linear storage assumption', 'Requires calibration', 'Constant parameters'],
+    limitations: ['No temporal distribution', 'Not for large basins', 'Requires calibration'],
+    references: ['McCarthy 1938', 'Cunge 1969'],
+    preprocessingNotes: ['Storage constant from channel geometry', 'Weighting factor from calibration', 'Inflow/outflow from USGS NWIS'],
+  },
+  dependencies: [],
+};
 
-// Eq 13 — Muskingum Routing
-export const TOOL_13 = makeSimpleTool(13, 'Flood Wave Routing', 'scalar', WATER_BANDS,
-  [{ param: 'K', min: 0.1, max: 48 }, { param: 'X', min: 0, max: 0.5 }, { param: 'It', min: 0, max: 10000 }, { param: 'Ot', min: 0, max: 10000 }],
-  ['Storage constant from channel geometry', 'Weighting factor from calibration', 'Inflow/outflow from USGS NWIS'],
-  { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ['K and X calibration', 'Channel geometry variability', 'Linear storage assumption'], assessment: 'Muskingum has +/- 15% uncertainty. Use Muskingum-Cunge for ungauged reaches.' },
-  'Flood wave attenuation in river reaches. S = K*[X*I + (1-X)*O].', ['For ungauged reaches, use Muskingum-Cunge.', 'K = travel time; X = 0 (storage) to 0.5 (translation).', 'Typical natural channels: X = 0.2-0.3.'], ['Linear storage assumption', 'Requires calibration', 'Constant parameters'], ['No temporal distribution', 'Not for large basins', 'Requires calibration'], ['McCarthy 1938', 'Cunge 1969'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 14 — Tide Prediction
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_14: ToolWorkflowDef = {
+  toolId: 14,
+  name: 'Tide Prediction',
+  vizType: 'timeseries',
+  classificationBands: WATER_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'H0', min: -5, max: 10 }, { param: 'amplitude', min: 0, max: 5 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Harmonic constituents from NOAA Tides & Currents');
+    log.push('  M2 dominant constituent');
+    log.push('  Station-specific phases and amplitudes');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, WATER_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.05,
+    rmseUnit: 'm',
+    contributingFactors: [
+      { factor: 'Constituent count', contribution: 'Varies' },
+      { factor: 'Station proximity', contribution: 'Varies' },
+      { factor: 'Non-tidal residuals (storm surge)', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Harmonic tide prediction accurate to ~5 cm. Storm surge adds non-tidal residual.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Tide Prediction: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Tidal elevation from harmonic constituents. h(t) = H0 + sum(Ai*cos(wi*t + phi_i)).`,
+    recommendations: ['For coastal: use NOAA Tides & Currents API.', 'For open ocean: satellite altimetry.', 'Storm surge adds non-tidal residual.'],
+  }),
+  metadata: {
+    methodology: 'Tidal elevation from harmonic constituents. h(t) = H0 + sum(Ai*cos(wi*t + phi_i)).',
+    assumptions: ['Linear superposition', 'Astronomical forcing only', 'No storm surge'],
+    limitations: ['Not applicable in enclosed basins', 'Requires local constituents', 'Nonlinear effects ignored'],
+    references: ['Pugh & Woodworth 2014, Sea-Level Science'],
+    preprocessingNotes: ['Harmonic constituents from NOAA Tides & Currents', 'M2 dominant constituent', 'Station-specific phases and amplitudes'],
+  },
+  dependencies: [],
+};
 
-// Eq 14 — Tide Prediction
-export const TOOL_14 = makeSimpleTool(14, 'Tide Prediction', 'timeseries', WATER_BANDS,
-  [{ param: 'H0', min: -5, max: 10 }, { param: 'amplitude', min: 0, max: 5 }],
-  ['Harmonic constituents from NOAA Tides & Currents', 'M2 dominant constituent', 'Station-specific phases and amplitudes'],
-  { method: 'empirical', rmse: 0.05, rmseUnit: 'm', factors: ['Constituent count', 'Station proximity', 'Non-tidal residuals (storm surge)'], assessment: 'Harmonic tide prediction accurate to ~5 cm. Storm surge adds non-tidal residual.' },
-  'Tidal elevation from harmonic constituents. h(t) = H0 + sum(Ai*cos(wi*t + phi_i)).', ['For coastal: use NOAA Tides & Currents API.', 'For open ocean: satellite altimetry.', 'Storm surge adds non-tidal residual.'], ['Linear superposition', 'Astronomical forcing only', 'No storm surge'], ['Not applicable in enclosed basins', 'Requires local constituents', 'Nonlinear effects ignored'], ['Pugh & Woodworth 2014, Sea-Level Science'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 15 — Wind-Driven Current Analysis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_15: ToolWorkflowDef = {
+  toolId: 15,
+  name: 'Wind-Driven Current Analysis',
+  vizType: 'vector',
+  classificationBands: WATER_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'tau', min: 0, max: 10 }, { param: 'rho', min: 1000, max: 1050 }, { param: 'f', min: 0, max: 0.0002 }, { param: 'Av', min: 0.001, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Wind stress from ASCAT scatterometer');
+    log.push('  Seawater density from temperature/salinity');
+    log.push('  Coriolis from latitude');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, WATER_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Eddy viscosity estimation', contribution: 'Varies' },
+      { factor: 'Stratification effects', contribution: 'Varies' },
+      { factor: 'Time-varying wind', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Ekman theory idealized. Observations show 10-40 deg deflection (not 45 deg classical).',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Wind-Driven Current Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Ekman surface current: V0 = tau/sqrt(rho*f*Av). Net transport 90 deg to wind (robust).`,
+    recommendations: ['Net Ekman transport = 90 deg to wind (robust).', 'Surface deflection: 10-40 deg (observed, not 45 classical).', 'Use CMEMS for ocean current data.'],
+  }),
+  metadata: {
+    methodology: 'Ekman surface current: V0 = tau/sqrt(rho*f*Av). Net transport 90 deg to wind (robust).',
+    assumptions: ['Constant eddy viscosity', 'No stratification', 'Steady wind', 'Infinite depth'],
+    limitations: ['45 deg is idealized upper bound', 'Real oceans have stratification', 'Time-varying wind not captured'],
+    references: ['Ekman 1905', 'Pugh & Woodworth 2014'],
+    preprocessingNotes: ['Wind stress from ASCAT scatterometer', 'Seawater density from temperature/salinity', 'Coriolis from latitude'],
+  },
+  dependencies: [],
+};
 
-// Eq 15 — Ekman Spiral
-export const TOOL_15 = makeSimpleTool(15, 'Wind-Driven Current Analysis', 'vector', WATER_BANDS,
-  [{ param: 'tau', min: 0, max: 10 }, { param: 'rho', min: 1000, max: 1050 }, { param: 'f', min: 0, max: 0.0002 }, { param: 'Av', min: 0.001, max: 1 }],
-  ['Wind stress from ASCAT scatterometer', 'Seawater density from temperature/salinity', 'Coriolis from latitude'],
-  { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ['Eddy viscosity estimation', 'Stratification effects', 'Time-varying wind'], assessment: 'Ekman theory idealized. Observations show 10-40 deg deflection (not 45 deg classical).' },
-  'Ekman surface current: V0 = tau/sqrt(rho*f*Av). Net transport 90 deg to wind (robust).', ['Net Ekman transport = 90 deg to wind (robust).', 'Surface deflection: 10-40 deg (observed, not 45 classical).', 'Use CMEMS for ocean current data.'], ['Constant eddy viscosity', 'No stratification', 'Steady wind', 'Infinite depth'], ['45 deg is idealized upper bound', 'Real oceans have stratification', 'Time-varying wind not captured'], ['Ekman 1905', 'Pugh & Woodworth 2014'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 16 — Ocean Current Analysis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_16: ToolWorkflowDef = {
+  toolId: 16,
+  name: 'Ocean Current Analysis',
+  vizType: 'vector',
+  classificationBands: WATER_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'f', min: 0, max: 0.0002 }, { param: 'rho', min: 1000, max: 1050 }, { param: 'dPdx', min: -0.01, max: 0.01 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Sea surface height from satellite altimetry (CMEMS/AVISO)');
+    log.push('  Geostrophic derivation from SSH gradient');
+    log.push('  Jason-3/Sentinel-6 accuracy ~2-3 cm');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, WATER_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'SSH measurement accuracy', contribution: 'Varies' },
+      { factor: 'Spatial gradient resolution', contribution: 'Varies' },
+      { factor: 'Ageostrophic components', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Satellite altimetry provides ~2-3 cm SSH. Geostrophic currents derived from SSH gradients.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Ocean Current Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Geostrophic current from sea surface height gradient. v_g = (1/rho*f)*dP/dx.`,
+    recommendations: ['Use CMEMS/AVISO satellite altimetry for open ocean.', 'In-situ ADCP for coastal.', 'Geostrophic breaks near equator (f->0).'],
+  }),
+  metadata: {
+    methodology: 'Geostrophic current from sea surface height gradient. v_g = (1/rho*f)*dP/dx.',
+    assumptions: ['Geostrophic balance', 'No friction', 'Away from equator'],
+    limitations: ['Degrades within 20-30 km of coast', 'No ageostrophic component', 'Requires SSH data'],
+    references: ['Gill 1982, Atmosphere-Ocean Dynamics'],
+    preprocessingNotes: ['Sea surface height from satellite altimetry (CMEMS/AVISO)', 'Geostrophic derivation from SSH gradient', 'Jason-3/Sentinel-6 accuracy ~2-3 cm'],
+  },
+  dependencies: [],
+};
 
-// Eq 16 — Geostrophic Current
-export const TOOL_16 = makeSimpleTool(16, 'Ocean Current Analysis', 'vector', WATER_BANDS,
-  [{ param: 'f', min: 0, max: 0.0002 }, { param: 'rho', min: 1000, max: 1050 }, { param: 'dPdx', min: -0.01, max: 0.01 }],
-  ['Sea surface height from satellite altimetry (CMEMS/AVISO)', 'Geostrophic derivation from SSH gradient', 'Jason-3/Sentinel-6 accuracy ~2-3 cm'],
-  { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ['SSH measurement accuracy', 'Spatial gradient resolution', 'Ageostrophic components'], assessment: 'Satellite altimetry provides ~2-3 cm SSH. Geostrophic currents derived from SSH gradients.' },
-  'Geostrophic current from sea surface height gradient. v_g = (1/rho*f)*dP/dx.', ['Use CMEMS/AVISO satellite altimetry for open ocean.', 'In-situ ADCP for coastal.', 'Geostrophic breaks near equator (f->0).'], ['Geostrophic balance', 'No friction', 'Away from equator'], ['Degrades within 20-30 km of coast', 'No ageostrophic component', 'Requires SSH data'], ['Gill 1982, Atmosphere-Ocean Dynamics'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 17 — Marine Heat Budget
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_17: ToolWorkflowDef = {
+  toolId: 17,
+  name: 'Marine Heat Budget',
+  vizType: 'scalar',
+  classificationBands: WATER_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Qs', min: 0, max: 1500 }, { param: 'Qb', min: 0, max: 500 }, { param: 'Qh', min: -200, max: 500 }, { param: 'Qe', min: -200, max: 500 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  CERES satellite for radiative fluxes');
+    log.push('  ERA5 for turbulent fluxes');
+    log.push('  NOAA OISST for SST validation');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, WATER_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: 'W/m2',
+    contributingFactors: [
+      { factor: 'Turbulent flux parameterization', contribution: 'Varies' },
+      { factor: 'Cloud radiative forcing', contribution: 'Varies' },
+      { factor: 'Bulk formula assumptions', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Ocean heat budget uncertainty ~15 W/m2. CERES for radiation, ERA5 for turbulent.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Marine Heat Budget: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Net ocean heat flux: Q_net = Q_s - Q_b - Q_h - Q_e. Positive = heat gain by ocean.`,
+    recommendations: ['CERES for radiative (Q_s, Q_b).', 'ERA5 for turbulent (Q_h, Q_e).', 'OAFlux (WHOI) for blended product.'],
+  }),
+  metadata: {
+    methodology: 'Net ocean heat flux: Q_net = Q_s - Q_b - Q_h - Q_e. Positive = heat gain by ocean.',
+    assumptions: ['Bulk aerodynamic formulas', 'Constant transfer coefficients', 'No diurnal cycle (daily mean)'],
+    limitations: ['Turbulent fluxes are model-dependent', 'Cloud effects on radiation', 'Spatial resolution limits'],
+    references: ['Gill 1982, Atmosphere-Ocean Dynamics Ch. 3'],
+    preprocessingNotes: ['CERES satellite for radiative fluxes', 'ERA5 for turbulent fluxes', 'NOAA OISST for SST validation'],
+  },
+  dependencies: [],
+};
 
-// Eq 17 — Ocean Heat Budget
-export const TOOL_17 = makeSimpleTool(17, 'Marine Heat Budget', 'scalar', WATER_BANDS,
-  [{ param: 'Qs', min: 0, max: 1500 }, { param: 'Qb', min: 0, max: 500 }, { param: 'Qh', min: -200, max: 500 }, { param: 'Qe', min: -200, max: 500 }],
-  ['CERES satellite for radiative fluxes', 'ERA5 for turbulent fluxes', 'NOAA OISST for SST validation'],
-  { method: 'empirical', rmse: 15, rmseUnit: 'W/m2', factors: ['Turbulent flux parameterization', 'Cloud radiative forcing', 'Bulk formula assumptions'], assessment: 'Ocean heat budget uncertainty ~15 W/m2. CERES for radiation, ERA5 for turbulent.' },
-  'Net ocean heat flux: Q_net = Q_s - Q_b - Q_h - Q_e. Positive = heat gain by ocean.', ['CERES for radiative (Q_s, Q_b).', 'ERA5 for turbulent (Q_h, Q_e).', 'OAFlux (WHOI) for blended product.'], ['Bulk aerodynamic formulas', 'Constant transfer coefficients', 'No diurnal cycle (daily mean)'], ['Turbulent fluxes are model-dependent', 'Cloud effects on radiation', 'Spatial resolution limits'], ['Gill 1982, Atmosphere-Ocean Dynamics Ch. 3'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 18 — Infiltration Analysis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_18: ToolWorkflowDef = {
+  toolId: 18,
+  name: 'Infiltration Analysis',
+  vizType: 'scalar',
+  classificationBands: WATER_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Ks', min: 1e-10, max: 1 }, { param: 'psi_w', min: 0, max: 10 }, { param: 'psi0', min: 0, max: 10 }, { param: 'dTheta', min: 0, max: 0.5 }, { param: 'Ft', min: 0, max: 5 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Soil parameters from ISRIC SoilGrids');
+    log.push('  K_s via ROSETTA pedotransfer');
+    log.push('  Soil moisture from SMAP satellite');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, WATER_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'K_s estimation', contribution: 'Varies' },
+      { factor: 'Suction head variability', contribution: 'Varies' },
+      { factor: 'Initial moisture content', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Green-Ampt has +/- 25% uncertainty. SMAP provides surface soil moisture.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Infiltration Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Green-Ampt infiltration: f = K_s*(1 + psi*dTheta/F). Implicit in F, requires iteration.`,
+    recommendations: ['ISRIC SoilGrids for K_s via pedotransfer.', 'SMAP for soil moisture validation.', 'Iterative solution for cumulative F(t).'],
+  }),
+  metadata: {
+    methodology: 'Green-Ampt infiltration: f = K_s*(1 + psi*dTheta/F). Implicit in F, requires iteration.',
+    assumptions: ['Homogeneous soil', 'Sharp wetting front', 'Constant K_s', 'No macropore flow'],
+    limitations: ['Not for layered soils', 'Macropores not captured', 'Requires iterative solution'],
+    references: ['Green & Ampt 1911', 'Mays 2005, Water Resources Engineering'],
+    preprocessingNotes: ['Soil parameters from ISRIC SoilGrids', 'K_s via ROSETTA pedotransfer', 'Soil moisture from SMAP satellite'],
+  },
+  dependencies: [],
+};
 
-// Eq 18 — Green-Ampt Infiltration
-export const TOOL_18 = makeSimpleTool(18, 'Infiltration Analysis', 'scalar', WATER_BANDS,
-  [{ param: 'Ks', min: 1e-10, max: 1 }, { param: 'psi_w', min: 0, max: 10 }, { param: 'psi0', min: 0, max: 10 }, { param: 'dTheta', min: 0, max: 0.5 }, { param: 'Ft', min: 0, max: 5 }],
-  ['Soil parameters from ISRIC SoilGrids', 'K_s via ROSETTA pedotransfer', 'Soil moisture from SMAP satellite'],
-  { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ['K_s estimation', 'Suction head variability', 'Initial moisture content'], assessment: 'Green-Ampt has +/- 25% uncertainty. SMAP provides surface soil moisture.' },
-  'Green-Ampt infiltration: f = K_s*(1 + psi*dTheta/F). Implicit in F, requires iteration.', ['ISRIC SoilGrids for K_s via pedotransfer.', 'SMAP for soil moisture validation.', 'Iterative solution for cumulative F(t).'], ['Homogeneous soil', 'Sharp wetting front', 'Constant K_s', 'No macropore flow'], ['Not for layered soils', 'Macropores not captured', 'Requires iterative solution'], ['Green & Ampt 1911', 'Mays 2005, Water Resources Engineering'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 19 — Earthquake Frequency Analysis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_19: ToolWorkflowDef = {
+  toolId: 19,
+  name: 'Earthquake Frequency Analysis',
+  vizType: 'bar',
+  classificationBands: SEISMIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'a', min: 0, max: 10 }, { param: 'b', min: 0.5, max: 2 }, { param: 'M', min: 0, max: 10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  USGS FDSN earthquake catalog query');
+    log.push('  Filter by magnitude threshold and time window');
+    log.push('  b-value via maximum likelihood (Aki 1965)');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SEISMIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.1,
+    rmseUnit: 'magnitude',
+    contributingFactors: [
+      { factor: 'Catalog completeness', contribution: 'Varies' },
+      { factor: 'b-value regional variability', contribution: 'Varies' },
+      { factor: 'Magnitude uncertainty', contribution: 'Varies' },
+    ],
+    overallAssessment: 'USGS magnitudes have +/- 0.1-0.3 uncertainty. b-value varies regionally.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Earthquake Frequency Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Gutenberg-Richter: log10(N) = a - b*M. b ~ 1.0 globally.`,
+    recommendations: ['Cross-reference USGS FDSN catalog.', 'Validate b-value against regional data.', 'For deformation, consider InSAR (Sentinel-1).'],
+  }),
+  metadata: {
+    methodology: 'Gutenberg-Richter: log10(N) = a - b*M. b ~ 1.0 globally.',
+    assumptions: ['Power-law distribution', 'Stationary seismicity', 'Complete catalog above threshold'],
+    limitations: ['Catalog incompleteness', 'Temporal b-value variations', 'Assumes power law'],
+    references: ['Gutenberg & Richter 1944, BSSA 34(4):185-188', 'Aki 1965 (MLE b-value)'],
+    preprocessingNotes: ['USGS FDSN earthquake catalog query', 'Filter by magnitude threshold and time window', 'b-value via maximum likelihood (Aki 1965)'],
+  },
+  dependencies: [],
+};
 
-// Eqs 19-25: Seismology
-export const TOOL_19 = makeSimpleTool(19, 'Earthquake Frequency Analysis', 'bar', SEISMIC_BANDS,
-  [{ param: 'a', min: 0, max: 10 }, { param: 'b', min: 0.5, max: 2 }, { param: 'M', min: 0, max: 10 }],
-  ['USGS FDSN earthquake catalog query', 'Filter by magnitude threshold and time window', 'b-value via maximum likelihood (Aki 1965)'],
-  { method: 'empirical', rmse: 0.1, rmseUnit: 'magnitude', factors: ['Catalog completeness', 'b-value regional variability', 'Magnitude uncertainty'], assessment: 'USGS magnitudes have +/- 0.1-0.3 uncertainty. b-value varies regionally.' },
-  'Gutenberg-Richter: log10(N) = a - b*M. b ~ 1.0 globally.', ['Cross-reference USGS FDSN catalog.', 'Validate b-value against regional data.', 'For deformation, consider InSAR (Sentinel-1).'], ['Power-law distribution', 'Stationary seismicity', 'Complete catalog above threshold'], ['Catalog incompleteness', 'Temporal b-value variations', 'Assumes power law'], ['Gutenberg & Richter 1944, BSSA 34(4):185-188', 'Aki 1965 (MLE b-value)'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 20 — Aftershock Decay Analysis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_20: ToolWorkflowDef = {
+  toolId: 20,
+  name: 'Aftershock Decay Analysis',
+  vizType: 'timeseries',
+  classificationBands: SEISMIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'K', min: 0, max: 10000 }, { param: 'c', min: 0, max: 10 }, { param: 't', min: 0, max: 1000 }, { param: 'p', min: 0.5, max: 2 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  USGS FDSN aftershock sequence query');
+    log.push('  Omori-Utsu modified form (p != 1)');
+    log.push('  Sequence-dependent parameters');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SEISMIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.2,
+    rmseUnit: 'p-value',
+    contributingFactors: [
+      { factor: 'Sequence completeness', contribution: 'Varies' },
+      { factor: 'Mainshock-aftershock classification', contribution: 'Varies' },
+      { factor: 'Time window selection', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Omori p typically 0.7-1.5. p ~ 1.0 is standard reference.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Aftershock Decay Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Omori law: n(t) = K/(c+t)^p. Utsu (1961) modified form with p != 1.`,
+    recommendations: ['Query USGS FDSN for aftershock sequence.', 'p is empirical, sequence-dependent.', 'Use modified Omori (Utsu 1961).'],
+  }),
+  metadata: {
+    methodology: 'Omori law: n(t) = K/(c+t)^p. Utsu (1961) modified form with p != 1.',
+    assumptions: ['Stationary decay', 'No clustering of aftershocks', 'Single mainshock'],
+    limitations: ['p varies by sequence', 'Requires careful declustering', 'Secondary aftershock sequences'],
+    references: ['Omori 1894', 'Utsu 1961'],
+    preprocessingNotes: ['USGS FDSN aftershock sequence query', 'Omori-Utsu modified form (p != 1)', 'Sequence-dependent parameters'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_20 = makeSimpleTool(20, 'Aftershock Decay Analysis', 'timeseries', SEISMIC_BANDS,
-  [{ param: 'K', min: 0, max: 10000 }, { param: 'c', min: 0, max: 10 }, { param: 't', min: 0, max: 1000 }, { param: 'p', min: 0.5, max: 2 }],
-  ['USGS FDSN aftershock sequence query', 'Omori-Utsu modified form (p != 1)', 'Sequence-dependent parameters'],
-  { method: 'empirical', rmse: 0.2, rmseUnit: 'p-value', factors: ['Sequence completeness', 'Mainshock-aftershock classification', 'Time window selection'], assessment: 'Omori p typically 0.7-1.5. p ~ 1.0 is standard reference.' },
-  'Omori law: n(t) = K/(c+t)^p. Utsu (1961) modified form with p != 1.', ['Query USGS FDSN for aftershock sequence.', 'p is empirical, sequence-dependent.', 'Use modified Omori (Utsu 1961).'], ['Stationary decay', 'No clustering of aftershocks', 'Single mainshock'], ['p varies by sequence', 'Requires careful declustering', 'Secondary aftershock sequences'], ['Omori 1894', 'Utsu 1961'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 21 — Ground Motion Prediction
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_21: ToolWorkflowDef = {
+  toolId: 21,
+  name: 'Ground Motion Prediction',
+  vizType: 'gauge',
+  classificationBands: SEISMIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Mag', min: 0, max: 10 }, { param: 'Dst', min: -10, max: 0 }, { param: 'Ste', min: -2, max: 2 }, { param: 'Flt', min: -1, max: 1 }, { param: 'Hw', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  USGS ShakeMap for validation');
+    log.push('  NGA-West2 GMPE coefficients');
+    log.push('  Vs30 from USGS site characterization');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SEISMIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.3,
+    rmseUnit: 'ln(g)',
+    contributingFactors: [
+      { factor: 'GMPE model selection', contribution: 'Varies' },
+      { factor: 'Site amplification', contribution: 'Varies' },
+      { factor: 'Fault mechanism uncertainty', contribution: 'Varies' },
+    ],
+    overallAssessment: 'NGA-West2 GMPEs have sigma ~ 0.3 ln(g). USGS 2023 NSHM uses logic tree.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Ground Motion Prediction: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Campbell-Bozorgnia NGA-West2 GMPE. ln(Y) = f_mag + f_dist + f_site + f_fault + f_hw.`,
+    recommendations: ['USGS 2023 NSHM uses NGA-West2 logic tree.', 'NGA-East for CEUS.', 'Validate with ShakeMap.'],
+  }),
+  metadata: {
+    methodology: 'Campbell-Bozorgnia NGA-West2 GMPE. ln(Y) = f_mag + f_dist + f_site + f_fault + f_hw.',
+    assumptions: ['Empirical regression', 'Limited data for large M', 'Site-specific variability'],
+    limitations: ['Not valid near-fault without directivity', 'Requires Vs30', 'Model epistemic uncertainty'],
+    references: ['Campbell & Bozorgnia 2014, Earthquake Spectra 30(3):1087-1115'],
+    preprocessingNotes: ['USGS ShakeMap for validation', 'NGA-West2 GMPE coefficients', 'Vs30 from USGS site characterization'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_21 = makeSimpleTool(21, 'Ground Motion Prediction', 'gauge', SEISMIC_BANDS,
-  [{ param: 'Mag', min: 0, max: 10 }, { param: 'Dst', min: -10, max: 0 }, { param: 'Ste', min: -2, max: 2 }, { param: 'Flt', min: -1, max: 1 }, { param: 'Hw', min: 0, max: 1 }],
-  ['USGS ShakeMap for validation', 'NGA-West2 GMPE coefficients', 'Vs30 from USGS site characterization'],
-  { method: 'empirical', rmse: 0.3, rmseUnit: 'ln(g)', factors: ['GMPE model selection', 'Site amplification', 'Fault mechanism uncertainty'], assessment: 'NGA-West2 GMPEs have sigma ~ 0.3 ln(g). USGS 2023 NSHM uses logic tree.' },
-  'Campbell-Bozorgnia NGA-West2 GMPE. ln(Y) = f_mag + f_dist + f_site + f_fault + f_hw.', ['USGS 2023 NSHM uses NGA-West2 logic tree.', 'NGA-East for CEUS.', 'Validate with ShakeMap.'], ['Empirical regression', 'Limited data for large M', 'Site-specific variability'], ['Not valid near-fault without directivity', 'Requires Vs30', 'Model epistemic uncertainty'], ['Campbell & Bozorgnia 2014, Earthquake Spectra 30(3):1087-1115'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 22 — Shear Strength Analysis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_22: ToolWorkflowDef = {
+  toolId: 22,
+  name: 'Shear Strength Analysis',
+  vizType: 'gauge',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'c', min: 0, max: 100 }, { param: 'sigma_n', min: 0, max: 1000 }, { param: 'tan_phi', min: 0.1, max: 1.5 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Soil properties from ISRIC SoilGrids');
+    log.push('  Stress state from geotechnical model');
+    log.push('  Friction angle from soil classification');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Cohesion variability', contribution: 'Varies' },
+      { factor: 'Friction angle estimation', contribution: 'Varies' },
+      { factor: 'Pore pressure conditions', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Mohr-Coulomb has +/- 20% uncertainty from soil property variability.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Shear Strength Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Mohr-Coulomb failure: tau = c + sigma_n * tan(phi). Byerlee law: phi ~ 30-40 deg for faults.`,
+    recommendations: ['For faults: Byerlee law phi ~ 30-40 deg.', 'Use effective stress for saturated soils.', 'Consider strain-softening for brittle failure.'],
+  }),
+  metadata: {
+    methodology: 'Mohr-Coulomb failure: tau = c + sigma_n * tan(phi). Byerlee law: phi ~ 30-40 deg for faults.',
+    assumptions: ['Linear failure envelope', 'Constant c and phi', 'No strain-softening'],
+    limitations: ['Not for nonlinear strength', 'Cohesion is scale-dependent', 'Requires effective stress analysis'],
+    references: ['Coulomb 1776', 'Mohr 1900'],
+    preprocessingNotes: ['Soil properties from ISRIC SoilGrids', 'Stress state from geotechnical model', 'Friction angle from soil classification'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_22 = makeSimpleTool(22, 'Shear Strength Analysis', 'gauge', RISK_BANDS,
-  [{ param: 'c', min: 0, max: 100 }, { param: 'sigma_n', min: 0, max: 1000 }, { param: 'tan_phi', min: 0.1, max: 1.5 }],
-  ['Soil properties from ISRIC SoilGrids', 'Stress state from geotechnical model', 'Friction angle from soil classification'],
-  { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ['Cohesion variability', 'Friction angle estimation', 'Pore pressure conditions'], assessment: 'Mohr-Coulomb has +/- 20% uncertainty from soil property variability.' },
-  'Mohr-Coulomb failure: tau = c + sigma_n * tan(phi). Byerlee law: phi ~ 30-40 deg for faults.', ['For faults: Byerlee law phi ~ 30-40 deg.', 'Use effective stress for saturated soils.', 'Consider strain-softening for brittle failure.'], ['Linear failure envelope', 'Constant c and phi', 'No strain-softening'], ['Not for nonlinear strength', 'Cohesion is scale-dependent', 'Requires effective stress analysis'], ['Coulomb 1776', 'Mohr 1900'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 23 — Earthquake Magnitude from Moment
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_23: ToolWorkflowDef = {
+  toolId: 23,
+  name: 'Earthquake Magnitude from Moment',
+  vizType: 'gauge',
+  classificationBands: SEISMIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'M0', min: 1e10, max: 1e24 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Seismic moment from USGS moment tensor');
+    log.push('  Global CMT catalog for validation');
+    log.push('  M0 in N*m (not dyne-cm)');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SEISMIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'M0 determination', contribution: 'Varies' },
+      { factor: 'Unit consistency (N*m vs dyne*cm)', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Moment magnitude is the most physically meaningful scale. M0 has +/- 0.1-0.3 uncertainty.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Earthquake Magnitude from Moment: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Moment magnitude: M_w = (2/3)*log10(M0) - 6.07. M0 must be in N*m.`,
+    recommendations: ['M0 must be in N*m (not dyne-cm: use -10.7).', 'USGS uses M_w as preferred magnitude.', 'Global CMT for independent validation.'],
+  }),
+  metadata: {
+    methodology: 'Moment magnitude: M_w = (2/3)*log10(M0) - 6.07. M0 must be in N*m.',
+    assumptions: ['Point source approximation', 'Double-couple assumption', 'Constant -6.07 offset'],
+    limitations: ['Saturation above M~8.5', 'Not for slow earthquakes', 'Requires moment tensor solution'],
+    references: ['Hanks & Kanamori 1979, JGR 84(B5):2348-2350'],
+    preprocessingNotes: ['Seismic moment from USGS moment tensor', 'Global CMT catalog for validation', 'M0 in N*m (not dyne-cm)'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_23 = makeSimpleTool(23, 'Earthquake Magnitude from Moment', 'gauge', SEISMIC_BANDS,
-  [{ param: 'M0', min: 1e10, max: 1e24 }],
-  ['Seismic moment from USGS moment tensor', 'Global CMT catalog for validation', 'M0 in N*m (not dyne-cm)'],
-  { method: 'analytical', factors: ['M0 determination', 'Unit consistency (N*m vs dyne*cm)'], assessment: 'Moment magnitude is the most physically meaningful scale. M0 has +/- 0.1-0.3 uncertainty.' },
-  'Moment magnitude: M_w = (2/3)*log10(M0) - 6.07. M0 must be in N*m.', ['M0 must be in N*m (not dyne-cm: use -10.7).', 'USGS uses M_w as preferred magnitude.', 'Global CMT for independent validation.'], ['Point source approximation', 'Double-couple assumption', 'Constant -6.07 offset'], ['Saturation above M~8.5', 'Not for slow earthquakes', 'Requires moment tensor solution'], ['Hanks & Kanamori 1979, JGR 84(B5):2348-2350'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 24 — Earthquake Stress Drop Analysis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_24: ToolWorkflowDef = {
+  toolId: 24,
+  name: 'Earthquake Stress Drop Analysis',
+  vizType: 'gauge',
+  classificationBands: SEISMIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'M0', min: 1e10, max: 1e24 }, { param: 'r', min: 10, max: 50000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Seismic moment from USGS/GCMT');
+    log.push('  Source radius from spectral analysis');
+    log.push('  Corner frequency from seismograms');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SEISMIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.5,
+    rmseUnit: 'log10(Pa)',
+    contributingFactors: [
+      { factor: 'Source model (Brune vs Madariaga)', contribution: 'Varies' },
+      { factor: 'Corner frequency measurement', contribution: 'Varies' },
+      { factor: 'Rupture velocity assumption', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Stress drops have factor-of-10 variability. Brune 1970 vs Madariaga 1976 fc conventions.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Earthquake Stress Drop Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Brune stress drop: delta_sigma = (7/16)*M0/r^3. fc = 0.49*beta/r (Brune convention).`,
+    recommendations: ['Cite model: Brune (0.49) vs Madariaga (0.21-0.42).', 'Typical stress drops: 1-10 MPa interplate.', 'Use IRIS DMC for seismograms.'],
+  }),
+  metadata: {
+    methodology: 'Brune stress drop: delta_sigma = (7/16)*M0/r^3. fc = 0.49*beta/r (Brune convention).',
+    assumptions: ['Circular crack model', 'Constant rupture velocity', 'Brune omega-squared model'],
+    limitations: ['Stress drops highly variable', 'Model-dependent fc', 'Requires spectral analysis'],
+    references: ['Brune 1970, JGR 75(26):4997-5009', 'Madariaga 1976, BSSA 66(3):639-666'],
+    preprocessingNotes: ['Seismic moment from USGS/GCMT', 'Source radius from spectral analysis', 'Corner frequency from seismograms'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_24 = makeSimpleTool(24, 'Earthquake Stress Drop Analysis', 'gauge', SEISMIC_BANDS,
-  [{ param: 'M0', min: 1e10, max: 1e24 }, { param: 'r', min: 10, max: 50000 }],
-  ['Seismic moment from USGS/GCMT', 'Source radius from spectral analysis', 'Corner frequency from seismograms'],
-  { method: 'empirical', rmse: 0.5, rmseUnit: 'log10(Pa)', factors: ['Source model (Brune vs Madariaga)', 'Corner frequency measurement', 'Rupture velocity assumption'], assessment: 'Stress drops have factor-of-10 variability. Brune 1970 vs Madariaga 1976 fc conventions.' },
-  'Brune stress drop: delta_sigma = (7/16)*M0/r^3. fc = 0.49*beta/r (Brune convention).', ['Cite model: Brune (0.49) vs Madariaga (0.21-0.42).', 'Typical stress drops: 1-10 MPa interplate.', 'Use IRIS DMC for seismograms.'], ['Circular crack model', 'Constant rupture velocity', 'Brune omega-squared model'], ['Stress drops highly variable', 'Model-dependent fc', 'Requires spectral analysis'], ['Brune 1970, JGR 75(26):4997-5009', 'Madariaga 1976, BSSA 66(3):639-666'], []);
-
-export const TOOL_25 = makeSimpleTool(25, 'Fault Rupture Scaling', 'bar', SEISMIC_BANDS,
-  [{ param: 'Mw', min: 3, max: 10 }],
-  ['USGS Quaternary Faults database', 'Wells-Coppersmith regressions', 'Leonard (2014) for M > 7'],
-  { method: 'empirical', rmse: 0.3, rmseUnit: 'log10(L)', factors: ['Regression scatter', 'Fault type variability', 'Bias for large M'], assessment: 'Wells-Coppersmith has bias for M > 7. Use Leonard (2014) or Stirling (2013) for large events.' },
-  'Wells-Coppersmith scaling: log10(L) = a + b*M_w. For M > 7, prefer Leonard (2014).', ['For M > 7: use Leonard (2014) scaling.', 'USGS Quaternary Faults DB for fault geometry.', 'Stirling (2013) for updated regressions.'], ['Empirical regression', 'Fault-type specific', 'Limited data for large M'], ['Large scatter for M > 7', 'Self-similar assumption', 'Regional variability'], ['Wells & Coppersmith 1994, BSSA 84(4):974-1002', 'Leonard 2014'], [23]);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 25 — Fault Rupture Scaling
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_25: ToolWorkflowDef = {
+  toolId: 25,
+  name: 'Fault Rupture Scaling',
+  vizType: 'bar',
+  classificationBands: SEISMIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Mw', min: 3, max: 10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  USGS Quaternary Faults database');
+    log.push('  Wells-Coppersmith regressions');
+    log.push('  Leonard (2014) for M > 7');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SEISMIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.3,
+    rmseUnit: 'log10(L)',
+    contributingFactors: [
+      { factor: 'Regression scatter', contribution: 'Varies' },
+      { factor: 'Fault type variability', contribution: 'Varies' },
+      { factor: 'Bias for large M', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Wells-Coppersmith has bias for M > 7. Use Leonard (2014) or Stirling (2013) for large events.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Fault Rupture Scaling: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Wells-Coppersmith scaling: log10(L) = a + b*M_w. For M > 7, prefer Leonard (2014).`,
+    recommendations: ['For M > 7: use Leonard (2014) scaling.', 'USGS Quaternary Faults DB for fault geometry.', 'Stirling (2013) for updated regressions.'],
+  }),
+  metadata: {
+    methodology: 'Wells-Coppersmith scaling: log10(L) = a + b*M_w. For M > 7, prefer Leonard (2014).',
+    assumptions: ['Empirical regression', 'Fault-type specific', 'Limited data for large M'],
+    limitations: ['Large scatter for M > 7', 'Self-similar assumption', 'Regional variability'],
+    references: ['Wells & Coppersmith 1994, BSSA 84(4):974-1002', 'Leonard 2014'],
+    preprocessingNotes: ['USGS Quaternary Faults database', 'Wells-Coppersmith regressions', 'Leonard (2014) for M > 7'],
+  },
+  dependencies: [23],
+};
 
 export const TOOLS_PART2: Record<number, ToolWorkflowDef> = {
   9: TOOL_9, 10: TOOL_10, 11: TOOL_11, 12: TOOL_12, 13: TOOL_13,
@@ -955,257 +1467,1878 @@ export const TOOLS_PART2: Record<number, ToolWorkflowDef> = {
  * Remote Sensing, Spatial Analysis, Soil Science, Biosphere, Agriculture, Chemistry
  */
 
-// Eq 26 — NDVI
-export const TOOL_26 = makeTool(26, 'Vegetation Health Index', 'heatmap', INDEX_BANDS,
-  [{ param: 'NIR', min: 0, max: 1 }, { param: 'Red', min: 0, max: 1 }],
-  ['Acquire NIR/Red reflectance from Sentinel-2 or MODIS', 'Apply atmospheric correction if L1C', 'Mask clouds and shadows'],
-  { method: 'empirical', rmse: 0.05, rmseUnit: 'NDVI', factors: ['Atmospheric correction', 'BRDF effects', 'Sensor calibration'], assessment: 'NDVI has +/- 0.02-0.05 uncertainty. Pre-computed MODIS reduces noise.' },
-  'NDVI = (NIR-Red)/(NIR+Red). Dense veg: 0.6-0.8. Saturation above 0.8.', ['Use EVI where NDVI saturates (>0.8).', 'MODIS MOD13 for temporal continuity.', 'Sentinel-2 for 10m resolution.'], ['Atmospherically corrected reflectance', 'Nadir viewing', 'Homogeneous pixel'], ['Saturates above 0.8', 'Soil background effects', 'Atmospheric contamination'], ['Rouse et al. 1974', 'Huete et al. 2002, RSE 83:195-213'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 26 — Vegetation Health Index
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_26: ToolWorkflowDef = {
+  toolId: 26,
+  name: 'Vegetation Health Index',
+  vizType: 'heatmap',
+  classificationBands: INDEX_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'NIR', min: 0, max: 1 }, { param: 'Red', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Acquire NIR/Red reflectance from Sentinel-2 or MODIS');
+    log.push('  Apply atmospheric correction if L1C');
+    log.push('  Mask clouds and shadows');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, INDEX_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.05,
+    rmseUnit: 'NDVI',
+    contributingFactors: [
+      { factor: 'Atmospheric correction', contribution: 'Varies' },
+      { factor: 'BRDF effects', contribution: 'Varies' },
+      { factor: 'Sensor calibration', contribution: 'Varies' },
+    ],
+    overallAssessment: 'NDVI has +/- 0.02-0.05 uncertainty. Pre-computed MODIS reduces noise.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Vegetation Health Index: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. NDVI = (NIR-Red)/(NIR+Red). Dense veg: 0.6-0.8. Saturation above 0.8.`,
+    recommendations: ['Use EVI where NDVI saturates (>0.8).', 'MODIS MOD13 for temporal continuity.', 'Sentinel-2 for 10m resolution.'],
+  }),
+  metadata: {
+    methodology: 'NDVI = (NIR-Red)/(NIR+Red). Dense veg: 0.6-0.8. Saturation above 0.8.',
+    assumptions: ['Atmospherically corrected reflectance', 'Nadir viewing', 'Homogeneous pixel'],
+    limitations: ['Saturates above 0.8', 'Soil background effects', 'Atmospheric contamination'],
+    references: ['Rouse et al. 1974', 'Huete et al. 2002, RSE 83:195-213'],
+    preprocessingNotes: ['Acquire NIR/Red reflectance from Sentinel-2 or MODIS', 'Apply atmospheric correction if L1C', 'Mask clouds and shadows'],
+  },
+  dependencies: [],
+};
 
-// Eq 27 — NDWI McFeeters
-export const TOOL_27 = makeTool(27, 'Surface Water Detection', 'heatmap', INDEX_BANDS,
-  [{ param: 'Green', min: 0, max: 1 }, { param: 'NIR', min: 0, max: 1 }],
-  ['Acquire Green/NIR reflectance from Sentinel-2', '10m resolution for shoreline delineation', 'Verify with MNDWI for built-up areas'],
-  { method: 'empirical', rmse: 0.03, rmseUnit: 'NDWI', factors: ['Atmospheric correction', 'Mixed pixels at shoreline', 'Shadow contamination'], assessment: 'NDWI water detection has +/- 0.03 uncertainty. Use MNDWI for urban areas.' },
-  'NDWI = (Green-NIR)/(Green+NIR). >0 indicates open water.', ['Use MNDWI for built-up areas.', 'Sentinel-2 10m for shoreline.', 'Verify water body with secondary check.'], ['Open water surfaces', 'Low turbidity', 'Minimal shadow'], ['Built-up areas can give false positives', 'Turbid water detection varies', 'Shadow confusion'], ['McFeeters 1996, Int. J. Remote Sensing 17(7):1425-1432'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 27 — Surface Water Detection
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_27: ToolWorkflowDef = {
+  toolId: 27,
+  name: 'Surface Water Detection',
+  vizType: 'heatmap',
+  classificationBands: INDEX_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Green', min: 0, max: 1 }, { param: 'NIR', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Acquire Green/NIR reflectance from Sentinel-2');
+    log.push('  10m resolution for shoreline delineation');
+    log.push('  Verify with MNDWI for built-up areas');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, INDEX_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.03,
+    rmseUnit: 'NDWI',
+    contributingFactors: [
+      { factor: 'Atmospheric correction', contribution: 'Varies' },
+      { factor: 'Mixed pixels at shoreline', contribution: 'Varies' },
+      { factor: 'Shadow contamination', contribution: 'Varies' },
+    ],
+    overallAssessment: 'NDWI water detection has +/- 0.03 uncertainty. Use MNDWI for urban areas.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Surface Water Detection: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. NDWI = (Green-NIR)/(Green+NIR). >0 indicates open water.`,
+    recommendations: ['Use MNDWI for built-up areas.', 'Sentinel-2 10m for shoreline.', 'Verify water body with secondary check.'],
+  }),
+  metadata: {
+    methodology: 'NDWI = (Green-NIR)/(Green+NIR). >0 indicates open water.',
+    assumptions: ['Open water surfaces', 'Low turbidity', 'Minimal shadow'],
+    limitations: ['Built-up areas can give false positives', 'Turbid water detection varies', 'Shadow confusion'],
+    references: ['McFeeters 1996, Int. J. Remote Sensing 17(7):1425-1432'],
+    preprocessingNotes: ['Acquire Green/NIR reflectance from Sentinel-2', '10m resolution for shoreline delineation', 'Verify with MNDWI for built-up areas'],
+  },
+  dependencies: [],
+};
 
-// Eq 28 — NDMI (Gao NDWI)
-export const TOOL_28 = makeTool(28, 'Vegetation Water Content', 'heatmap', INDEX_BANDS,
-  [{ param: 'NIR', min: 0, max: 1 }, { param: 'SWIR', min: 0, max: 1 }],
-  ['Acquire NIR/SWIR from Sentinel-2 B8/B11', 'NDMI uses SWIR1 (1.6um) — different from Gao-NDWI (1.24um)', 'Label correctly: NDMI vs Gao-NDWI'],
-  { method: 'empirical', rmse: 0.04, rmseUnit: 'NDMI', factors: ['SWIR atmospheric absorption', 'Canopy structure effects', 'Sensor bandpass differences'], assessment: 'NDMI has +/- 0.04 uncertainty. Naming collision: NDMI (1.6um) vs Gao-NDWI (1.24um).' },
-  'NDMI = (NIR-SWIR)/(NIR+SWIR). Vegetation water content. Also called Gao-NDWI.', ['Disambiguate: NDMI (1.6um) vs Gao-NDWI (1.24um).', 'Sentinel-2 B8/B11 for NDMI.', 'Different physics at different SWIR wavelengths.'], ['Vegetation canopy present', 'SWIR atmospheric window clear', 'Consistent bandpass'], ['Naming collision with water NDWI', 'SWIR atmospheric absorption', 'Canopy structure effects'], ['Gao 1996, RSE 58(3):257-266', 'Wilson & Sader 2002'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 28 — Vegetation Water Content
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_28: ToolWorkflowDef = {
+  toolId: 28,
+  name: 'Vegetation Water Content',
+  vizType: 'heatmap',
+  classificationBands: INDEX_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'NIR', min: 0, max: 1 }, { param: 'SWIR', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Acquire NIR/SWIR from Sentinel-2 B8/B11');
+    log.push('  NDMI uses SWIR1 (1.6um) — different from Gao-NDWI (1.24um)');
+    log.push('  Label correctly: NDMI vs Gao-NDWI');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, INDEX_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.04,
+    rmseUnit: 'NDMI',
+    contributingFactors: [
+      { factor: 'SWIR atmospheric absorption', contribution: 'Varies' },
+      { factor: 'Canopy structure effects', contribution: 'Varies' },
+      { factor: 'Sensor bandpass differences', contribution: 'Varies' },
+    ],
+    overallAssessment: 'NDMI has +/- 0.04 uncertainty. Naming collision: NDMI (1.6um) vs Gao-NDWI (1.24um).',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Vegetation Water Content: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. NDMI = (NIR-SWIR)/(NIR+SWIR). Vegetation water content. Also called Gao-NDWI.`,
+    recommendations: ['Disambiguate: NDMI (1.6um) vs Gao-NDWI (1.24um).', 'Sentinel-2 B8/B11 for NDMI.', 'Different physics at different SWIR wavelengths.'],
+  }),
+  metadata: {
+    methodology: 'NDMI = (NIR-SWIR)/(NIR+SWIR). Vegetation water content. Also called Gao-NDWI.',
+    assumptions: ['Vegetation canopy present', 'SWIR atmospheric window clear', 'Consistent bandpass'],
+    limitations: ['Naming collision with water NDWI', 'SWIR atmospheric absorption', 'Canopy structure effects'],
+    references: ['Gao 1996, RSE 58(3):257-266', 'Wilson & Sader 2002'],
+    preprocessingNotes: ['Acquire NIR/SWIR from Sentinel-2 B8/B11', 'NDMI uses SWIR1 (1.6um) — different from Gao-NDWI (1.24um)', 'Label correctly: NDMI vs Gao-NDWI'],
+  },
+  dependencies: [],
+};
 
-// Eq 29 — EVI
-export const TOOL_29 = makeTool(29, 'Enhanced Vegetation Index', 'heatmap', INDEX_BANDS,
-  [{ param: 'NIR', min: 0, max: 1 }, { param: 'Red', min: 0, max: 1 }, { param: 'Blue', min: 0, max: 1 }],
-  ['Use MODIS MOD13 pre-computed EVI for MODIS bandpass', 'For Sentinel-2: use EVI2 (no blue band) or HLS EVI', 'MODIS coefficients (G=2.5, C1=6, C2=7.5, L=1) not transferable to S2'],
-  { method: 'empirical', rmse: 0.06, rmseUnit: 'EVI', factors: ['Blue band calibration', 'Coefficient transferability', 'Atmospheric aerosol correction'], assessment: 'EVI has +/- 0.06 uncertainty. MODIS coefficients NOT directly transferable to Sentinel-2.' },
-  'EVI = G*(NIR-Red)/(NIR+C1*Red-C2*Blue+L). G=2.5, C1=6, C2=7.5, L=1 (MODIS).', ['MODIS coefficients NOT transferable to S2 without bandpass adjustment.', 'Use EVI2 for S2: 2.5*(NIR-Red)/(NIR+2.4*Red+1).', 'HLS EVI for merged Landsat+S2.'], ['MODIS bandpasses', 'Atmospheric correction via blue band', 'Canopy background correction'], ['Coefficient transferability issue', 'Requires blue band', 'Not for sensors without blue band'], ['Huete et al. 2002, RSE 83:195-213', 'Jiang et al. 2008, RSE 112:3833-3845 (EVI2)'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 29 — Enhanced Vegetation Index
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_29: ToolWorkflowDef = {
+  toolId: 29,
+  name: 'Enhanced Vegetation Index',
+  vizType: 'heatmap',
+  classificationBands: INDEX_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'NIR', min: 0, max: 1 }, { param: 'Red', min: 0, max: 1 }, { param: 'Blue', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Use MODIS MOD13 pre-computed EVI for MODIS bandpass');
+    log.push('  For Sentinel-2: use EVI2 (no blue band) or HLS EVI');
+    log.push('  MODIS coefficients (G=2.5, C1=6, C2=7.5, L=1) not transferable to S2');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, INDEX_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.06,
+    rmseUnit: 'EVI',
+    contributingFactors: [
+      { factor: 'Blue band calibration', contribution: 'Varies' },
+      { factor: 'Coefficient transferability', contribution: 'Varies' },
+      { factor: 'Atmospheric aerosol correction', contribution: 'Varies' },
+    ],
+    overallAssessment: 'EVI has +/- 0.06 uncertainty. MODIS coefficients NOT directly transferable to Sentinel-2.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Enhanced Vegetation Index: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. EVI = G*(NIR-Red)/(NIR+C1*Red-C2*Blue+L). G=2.5, C1=6, C2=7.5, L=1 (MODIS).`,
+    recommendations: ['MODIS coefficients NOT transferable to S2 without bandpass adjustment.', 'Use EVI2 for S2: 2.5*(NIR-Red)/(NIR+2.4*Red+1).', 'HLS EVI for merged Landsat+S2.'],
+  }),
+  metadata: {
+    methodology: 'EVI = G*(NIR-Red)/(NIR+C1*Red-C2*Blue+L). G=2.5, C1=6, C2=7.5, L=1 (MODIS).',
+    assumptions: ['MODIS bandpasses', 'Atmospheric correction via blue band', 'Canopy background correction'],
+    limitations: ['Coefficient transferability issue', 'Requires blue band', 'Not for sensors without blue band'],
+    references: ['Huete et al. 2002, RSE 83:195-213', 'Jiang et al. 2008, RSE 112:3833-3845 (EVI2)'],
+    preprocessingNotes: ['Use MODIS MOD13 pre-computed EVI for MODIS bandpass', 'For Sentinel-2: use EVI2 (no blue band) or HLS EVI', 'MODIS coefficients (G=2.5, C1=6, C2=7.5, L=1) not transferable to S2'],
+  },
+  dependencies: [],
+};
 
-// Eq 30 — NDSI
-export const TOOL_30 = makeTool(30, 'Snow Cover Detection', 'heatmap', INDEX_BANDS,
-  [{ param: 'Green', min: 0, max: 1 }, { param: 'SWIR', min: 0, max: 1 }],
-  ['Use pre-computed MODIS MOD10A1 (500m daily)', 'MODIS C6.1 threshold: NDSI > 0.0 (not 0.4)', 'Add visible reflectance screen (>0.07-0.11)'],
-  { method: 'empirical', rmse: 0.05, rmseUnit: 'NDSI', factors: ['Cloud masking', 'Forest canopy snow detection', 'Polar darkness'], assessment: 'MODIS C6.1 uses NDSI > 0.0 (not 0.4). Riggs et al. 2016.' },
-  'NDSI = (Green-SWIR)/(Green+SWIR). MODIS C6.1: snow if NDSI > 0.0.', ['MODIS C6.1: threshold 0.0 (not 0.4).', 'Landsat binary: NDSI > 0.4 still OK.', 'MOD10A1 includes cloud mask.'], ['Snow has high visible, low SWIR reflectance', 'Cloud-free pixel', 'Nadir viewing'], ['Forest canopy obscures snow', 'Cloud contamination', 'Polar darkness limitation'], ['Hall et al. 1995, RSE 54(2):127-140', 'Riggs, Hall & Roman 2016, MODIS C6.1 User Guide'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 30 — Snow Cover Detection
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_30: ToolWorkflowDef = {
+  toolId: 30,
+  name: 'Snow Cover Detection',
+  vizType: 'heatmap',
+  classificationBands: INDEX_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Green', min: 0, max: 1 }, { param: 'SWIR', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Use pre-computed MODIS MOD10A1 (500m daily)');
+    log.push('  MODIS C6.1 threshold: NDSI > 0.0 (not 0.4)');
+    log.push('  Add visible reflectance screen (>0.07-0.11)');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, INDEX_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.05,
+    rmseUnit: 'NDSI',
+    contributingFactors: [
+      { factor: 'Cloud masking', contribution: 'Varies' },
+      { factor: 'Forest canopy snow detection', contribution: 'Varies' },
+      { factor: 'Polar darkness', contribution: 'Varies' },
+    ],
+    overallAssessment: 'MODIS C6.1 uses NDSI > 0.0 (not 0.4). Riggs et al. 2016.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Snow Cover Detection: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. NDSI = (Green-SWIR)/(Green+SWIR). MODIS C6.1: snow if NDSI > 0.0.`,
+    recommendations: ['MODIS C6.1: threshold 0.0 (not 0.4).', 'Landsat binary: NDSI > 0.4 still OK.', 'MOD10A1 includes cloud mask.'],
+  }),
+  metadata: {
+    methodology: 'NDSI = (Green-SWIR)/(Green+SWIR). MODIS C6.1: snow if NDSI > 0.0.',
+    assumptions: ['Snow has high visible, low SWIR reflectance', 'Cloud-free pixel', 'Nadir viewing'],
+    limitations: ['Forest canopy obscures snow', 'Cloud contamination', 'Polar darkness limitation'],
+    references: ['Hall et al. 1995, RSE 54(2):127-140', 'Riggs, Hall & Roman 2016, MODIS C6.1 User Guide'],
+    preprocessingNotes: ['Use pre-computed MODIS MOD10A1 (500m daily)', 'MODIS C6.1 threshold: NDSI > 0.0 (not 0.4)', 'Add visible reflectance screen (>0.07-0.11)'],
+  },
+  dependencies: [],
+};
 
-// Eqs 31-35: Remote sensing continued
-export const TOOL_31 = makeTool(31, 'Burn Severity Mapping', 'heatmap', INDEX_BANDS,
-  [{ param: 'NIR', min: 0, max: 1 }, { param: 'SWIR', min: 0, max: 1 }],
-  ['Acquire pre/post fire Landsat or Sentinel-2 imagery', 'NBR uses SWIR2 (~2.1um), not SWIR1', 'Compute dNBR = NBR_pre - NBR_post'],
-  { method: 'empirical', rmse: 0.08, rmseUnit: 'dNBR', factors: ['Pre/post image registration', 'Phenological differences', 'Atmospheric correction consistency'], assessment: 'Burn severity (dNBR) has +/- 0.08 uncertainty. MTBS standard thresholds.' },
-  'NBR = (NIR-SWIR2)/(NIR+SWIR2). dNBR = NBR_pre - NBR_post. MTBS severity thresholds.', ['Use SWIR2 (~2.1um), not SWIR1.', 'MTBS: low 0.10-0.27, moderate 0.27-0.44, high >0.44.', '30m Landsat preferred for severity.'], ['Pre/post fire imagery available', 'Same phenological period', 'Cloud-free conditions'], ['Phenological differences confound', 'Requires pre-fire reference', 'Regrowth can mask severity'], ['Key & Benson 2006, FIREMON Landscape Assessment', 'MTBS program'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 31 — Burn Severity Mapping
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_31: ToolWorkflowDef = {
+  toolId: 31,
+  name: 'Burn Severity Mapping',
+  vizType: 'heatmap',
+  classificationBands: INDEX_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'NIR', min: 0, max: 1 }, { param: 'SWIR', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Acquire pre/post fire Landsat or Sentinel-2 imagery');
+    log.push('  NBR uses SWIR2 (~2.1um), not SWIR1');
+    log.push('  Compute dNBR = NBR_pre - NBR_post');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, INDEX_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.08,
+    rmseUnit: 'dNBR',
+    contributingFactors: [
+      { factor: 'Pre/post image registration', contribution: 'Varies' },
+      { factor: 'Phenological differences', contribution: 'Varies' },
+      { factor: 'Atmospheric correction consistency', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Burn severity (dNBR) has +/- 0.08 uncertainty. MTBS standard thresholds.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Burn Severity Mapping: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. NBR = (NIR-SWIR2)/(NIR+SWIR2). dNBR = NBR_pre - NBR_post. MTBS severity thresholds.`,
+    recommendations: ['Use SWIR2 (~2.1um), not SWIR1.', 'MTBS: low 0.10-0.27, moderate 0.27-0.44, high >0.44.', '30m Landsat preferred for severity.'],
+  }),
+  metadata: {
+    methodology: 'NBR = (NIR-SWIR2)/(NIR+SWIR2). dNBR = NBR_pre - NBR_post. MTBS severity thresholds.',
+    assumptions: ['Pre/post fire imagery available', 'Same phenological period', 'Cloud-free conditions'],
+    limitations: ['Phenological differences confound', 'Requires pre-fire reference', 'Regrowth can mask severity'],
+    references: ['Key & Benson 2006, FIREMON Landscape Assessment', 'MTBS program'],
+    preprocessingNotes: ['Acquire pre/post fire Landsat or Sentinel-2 imagery', 'NBR uses SWIR2 (~2.1um), not SWIR1', 'Compute dNBR = NBR_pre - NBR_post'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_32 = makeTool(32, 'Fire Radiative Power Estimation', 'gauge', INDEX_BANDS,
-  [{ param: 'A', min: 0, max: 1e8 }, { param: 'eps', min: 0, max: 1 }, { param: 'T_fire', min: 400, max: 2000 }, { param: 'T_bg', min: 200, max: 400 }],
-  ['Use pre-computed NASA FIRMS FRP (do not recompute from raw)', 'VIIRS 375m for small fires', 'MODIS 1km for long record'],
-  { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ['Dozier method assumptions', 'Background temperature estimation', 'Subpixel fire fraction'], assessment: 'FIRMS FRP uses Wooster (2005) MIR radiance method. Do not recompute from raw.' },
-  'FRP = eps*sigma*A*(T_fire^4 - T_bg^4). Operational: Wooster MIR radiance method.', ['Use pre-computed NASA FIRMS FRP.', 'VIIRS 375m for small/cool fires.', 'GOES ABI for fire behavior tracking.'], ['Fire fills entire pixel (Dozier)', 'Single fire per pixel', 'Known background temperature'], ['Subpixel heterogeneity', 'Cloud obscuration', 'Background T estimation error'], ['Giglio et al. 2003, RSE 87:273-282', 'Wooster et al. 2005, Biogeosciences 2:161'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 32 — Fire Radiative Power Estimation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_32: ToolWorkflowDef = {
+  toolId: 32,
+  name: 'Fire Radiative Power Estimation',
+  vizType: 'gauge',
+  classificationBands: INDEX_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'A', min: 0, max: 1e8 }, { param: 'eps', min: 0, max: 1 }, { param: 'T_fire', min: 400, max: 2000 }, { param: 'T_bg', min: 200, max: 400 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Use pre-computed NASA FIRMS FRP (do not recompute from raw)');
+    log.push('  VIIRS 375m for small fires');
+    log.push('  MODIS 1km for long record');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, INDEX_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Dozier method assumptions', contribution: 'Varies' },
+      { factor: 'Background temperature estimation', contribution: 'Varies' },
+      { factor: 'Subpixel fire fraction', contribution: 'Varies' },
+    ],
+    overallAssessment: 'FIRMS FRP uses Wooster (2005) MIR radiance method. Do not recompute from raw.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Fire Radiative Power Estimation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. FRP = eps*sigma*A*(T_fire^4 - T_bg^4). Operational: Wooster MIR radiance method.`,
+    recommendations: ['Use pre-computed NASA FIRMS FRP.', 'VIIRS 375m for small/cool fires.', 'GOES ABI for fire behavior tracking.'],
+  }),
+  metadata: {
+    methodology: 'FRP = eps*sigma*A*(T_fire^4 - T_bg^4). Operational: Wooster MIR radiance method.',
+    assumptions: ['Fire fills entire pixel (Dozier)', 'Single fire per pixel', 'Known background temperature'],
+    limitations: ['Subpixel heterogeneity', 'Cloud obscuration', 'Background T estimation error'],
+    references: ['Giglio et al. 2003, RSE 87:273-282', 'Wooster et al. 2005, Biogeosciences 2:161'],
+    preprocessingNotes: ['Use pre-computed NASA FIRMS FRP (do not recompute from raw)', 'VIIRS 375m for small fires', 'MODIS 1km for long record'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_33 = makeTool(33, 'Crop Water Stress Assessment', 'gauge', INDEX_BANDS,
-  [{ param: 'Tc', min: 0, max: 60 }, { param: 'Twet', min: 0, max: 50 }, { param: 'Tdry', min: 0, max: 60 }],
-  ['Satellite LST from ECOSTRESS/Landsat/Sentinel-3', 'Jackson (1988) theoretical baselines preferred', 'No pre-computed CWSI API exists'],
-  { method: 'empirical', rmse: 0.15, rmseUnit: 'CWSI', factors: ['Reference temperature accuracy', 'VPD measurement', 'Aerodynamic resistance'], assessment: 'CWSI has +/- 0.15 uncertainty. Jackson (1988) theoretical method preferred over Idso empirical.' },
-  'CWSI = (Tc-Twet)/(Tdry-Twet). 0=no stress, 1=full stress. Jackson theoretical preferred.', ['Prefer Jackson (1988) theoretical method.', 'Requires satellite LST (ECOSTRESS 70m).', 'No pre-computed CWSI API exists.'], ['Well-defined wet/dry references', 'Homogeneous canopy', 'Clear sky conditions'], ['Requires reference baselines', 'VPD-dependent', 'Cloud contamination'], ['Idso et al. 1981, Agric. Meteorol. 24:45', 'Jackson et al. 1988'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 33 — Crop Water Stress Assessment
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_33: ToolWorkflowDef = {
+  toolId: 33,
+  name: 'Crop Water Stress Assessment',
+  vizType: 'gauge',
+  classificationBands: INDEX_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Tc', min: 0, max: 60 }, { param: 'Twet', min: 0, max: 50 }, { param: 'Tdry', min: 0, max: 60 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Satellite LST from ECOSTRESS/Landsat/Sentinel-3');
+    log.push('  Jackson (1988) theoretical baselines preferred');
+    log.push('  No pre-computed CWSI API exists');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, INDEX_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.15,
+    rmseUnit: 'CWSI',
+    contributingFactors: [
+      { factor: 'Reference temperature accuracy', contribution: 'Varies' },
+      { factor: 'VPD measurement', contribution: 'Varies' },
+      { factor: 'Aerodynamic resistance', contribution: 'Varies' },
+    ],
+    overallAssessment: 'CWSI has +/- 0.15 uncertainty. Jackson (1988) theoretical method preferred over Idso empirical.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Crop Water Stress Assessment: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. CWSI = (Tc-Twet)/(Tdry-Twet). 0=no stress, 1=full stress. Jackson theoretical preferred.`,
+    recommendations: ['Prefer Jackson (1988) theoretical method.', 'Requires satellite LST (ECOSTRESS 70m).', 'No pre-computed CWSI API exists.'],
+  }),
+  metadata: {
+    methodology: 'CWSI = (Tc-Twet)/(Tdry-Twet). 0=no stress, 1=full stress. Jackson theoretical preferred.',
+    assumptions: ['Well-defined wet/dry references', 'Homogeneous canopy', 'Clear sky conditions'],
+    limitations: ['Requires reference baselines', 'VPD-dependent', 'Cloud contamination'],
+    references: ['Idso et al. 1981, Agric. Meteorol. 24:45', 'Jackson et al. 1988'],
+    preprocessingNotes: ['Satellite LST from ECOSTRESS/Landsat/Sentinel-3', 'Jackson (1988) theoretical baselines preferred', 'No pre-computed CWSI API exists'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_34 = makeTool(34, 'Snowmelt Runoff Forecasting', 'timeseries', INDEX_BANDS,
-  [{ param: 'DDF', min: 0.5, max: 20 }, { param: 'T_air', min: -20, max: 40 }, { param: 'T_base', min: -5, max: 5 }],
-  ['T_air from ERA5/Open-Meteo (NOT satellite LST)', 'Snow cover from MODIS MOD10A1', 'DDF: snow 3-5, ice 5-8 mm/C/day'],
-  { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ['DDF spatial variability', 'T_air vs LST difference', 'Snow density variations'], assessment: 'Degree-day model has +/- 25% uncertainty. DDF: snow 3-5, ice 5-8 mm/C/day (Hock 2003).' },
-  'Melt = DDF * max(0, T_air - T_base). DDF: snow 3-5, ice 5-8 mm/C/day.', ['T_air from reanalysis, NOT satellite LST.', 'MODIS MOD10A1 for snow depletion curves.', 'DDF varies with radiation and debris cover.'], ['Linear temperature-melt relation', 'Constant DDF', 'Snow surface is isothermal at 0C'], ['DDF varies spatially and temporally', 'T_air vs LST difference (5-15C)', 'Not for energy-balance models'], ['Braithwaite 1995', 'Hock 2003, J. Hydrol. 282:104-129'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 34 — Snowmelt Runoff Forecasting
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_34: ToolWorkflowDef = {
+  toolId: 34,
+  name: 'Snowmelt Runoff Forecasting',
+  vizType: 'timeseries',
+  classificationBands: INDEX_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'DDF', min: 0.5, max: 20 }, { param: 'T_air', min: -20, max: 40 }, { param: 'T_base', min: -5, max: 5 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  T_air from ERA5/Open-Meteo (NOT satellite LST)');
+    log.push('  Snow cover from MODIS MOD10A1');
+    log.push('  DDF: snow 3-5, ice 5-8 mm/C/day');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, INDEX_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'DDF spatial variability', contribution: 'Varies' },
+      { factor: 'T_air vs LST difference', contribution: 'Varies' },
+      { factor: 'Snow density variations', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Degree-day model has +/- 25% uncertainty. DDF: snow 3-5, ice 5-8 mm/C/day (Hock 2003).',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Snowmelt Runoff Forecasting: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Melt = DDF * max(0, T_air - T_base). DDF: snow 3-5, ice 5-8 mm/C/day.`,
+    recommendations: ['T_air from reanalysis, NOT satellite LST.', 'MODIS MOD10A1 for snow depletion curves.', 'DDF varies with radiation and debris cover.'],
+  }),
+  metadata: {
+    methodology: 'Melt = DDF * max(0, T_air - T_base). DDF: snow 3-5, ice 5-8 mm/C/day.',
+    assumptions: ['Linear temperature-melt relation', 'Constant DDF', 'Snow surface is isothermal at 0C'],
+    limitations: ['DDF varies spatially and temporally', 'T_air vs LST difference (5-15C)', 'Not for energy-balance models'],
+    references: ['Braithwaite 1995', 'Hock 2003, J. Hydrol. 282:104-129'],
+    preprocessingNotes: ['T_air from ERA5/Open-Meteo (NOT satellite LST)', 'Snow cover from MODIS MOD10A1', 'DDF: snow 3-5, ice 5-8 mm/C/day'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_35 = makeTool(35, 'Passive Microwave Sea Ice Analysis', 'heatmap', INDEX_BANDS,
-  [{ param: 'C', min: 0, max: 1 }, { param: 'T_water', min: -2, max: 10 }, { param: 'T_ice', min: -50, max: 0 }],
-  ['Use pre-computed NSIDC CDR G02202 (hybrid NASA-Team/Bootstrap)', 'AMSR2 > SSMIS for resolution', '15% threshold defines ice extent'],
-  { method: 'empirical', rmse: 5, rmseUnit: '%', factors: ['Tie-point variability', 'Atmospheric contamination', 'Melt pond effects'], assessment: 'Hybrid CDR has <5% error for high-concentration ice. AMSR2 > SSMIS.' },
-  'Sea ice from passive microwave. Hybrid NASA-Team/Bootstrap algorithm. 15% = ice extent.', ['Use NSIDC CDR G02202 (hybrid).', 'AMSR2 (10-15km) > SSMIS (25km).', '15% threshold for ice extent.'], ['Passive microwave brightness temperatures', 'Polar regions', 'Known tie-points'], ['Melt ponds reduce accuracy', 'Thin ice (<30cm) underestimated', 'Atmospheric contamination near ice edge'], ['Comiso 1986, JGR Oceans 91(C1):975-994', 'NSIDC G02202 CDR'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 35 — Passive Microwave Sea Ice Analysis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_35: ToolWorkflowDef = {
+  toolId: 35,
+  name: 'Passive Microwave Sea Ice Analysis',
+  vizType: 'heatmap',
+  classificationBands: INDEX_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'C', min: 0, max: 1 }, { param: 'T_water', min: -2, max: 10 }, { param: 'T_ice', min: -50, max: 0 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Use pre-computed NSIDC CDR G02202 (hybrid NASA-Team/Bootstrap)');
+    log.push('  AMSR2 > SSMIS for resolution');
+    log.push('  15% threshold defines ice extent');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, INDEX_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 5,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Tie-point variability', contribution: 'Varies' },
+      { factor: 'Atmospheric contamination', contribution: 'Varies' },
+      { factor: 'Melt pond effects', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Hybrid CDR has <5% error for high-concentration ice. AMSR2 > SSMIS.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Passive Microwave Sea Ice Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Sea ice from passive microwave. Hybrid NASA-Team/Bootstrap algorithm. 15% = ice extent.`,
+    recommendations: ['Use NSIDC CDR G02202 (hybrid).', 'AMSR2 (10-15km) > SSMIS (25km).', '15% threshold for ice extent.'],
+  }),
+  metadata: {
+    methodology: 'Sea ice from passive microwave. Hybrid NASA-Team/Bootstrap algorithm. 15% = ice extent.',
+    assumptions: ['Passive microwave brightness temperatures', 'Polar regions', 'Known tie-points'],
+    limitations: ['Melt ponds reduce accuracy', 'Thin ice (<30cm) underestimated', 'Atmospheric contamination near ice edge'],
+    references: ['Comiso 1986, JGR Oceans 91(C1):975-994', 'NSIDC G02202 CDR'],
+    preprocessingNotes: ['Use pre-computed NSIDC CDR G02202 (hybrid NASA-Team/Bootstrap)', 'AMSR2 > SSMIS for resolution', '15% threshold defines ice extent'],
+  },
+  dependencies: [],
+};
 
-// Eqs 36-42: Spatial Analysis
-export const TOOL_36 = makeTool(36, 'Great Circle Distance', 'scalar', RISK_BANDS,
-  [{ param: 'lat1', min: -90, max: 90 }, { param: 'lon1', min: -180, max: 180 }, { param: 'lat2', min: -90, max: 90 }, { param: 'lon2', min: -180, max: 180 }],
-  ['Pure geometric calculation', 'Earth radius R = 6371 km', 'Vincenty formula for higher precision'],
-  { method: 'analytical', factors: ['Spherical Earth approximation', 'Earth radius value'], assessment: 'Haversine is exact for sphere. Vincenty formula accounts for ellipsoid.' },
-  'Great circle distance: d = 2R*arcsin(sqrt(sin^2(dPhi/2) + cos(phi1)*cos(phi2)*sin^2(dLambda/2))).', ['Use Vincenty for ellipsoidal precision.', 'R = 6371 km for mean Earth radius.', 'For geodesic distance, use geographiclib.'], ['Spherical Earth', 'No altitude differences', 'Great circle path'], ['0.5% error vs ellipsoidal', 'Not for short distances (< 1 km)', 'No terrain consideration'], ['Sinnott 1984, Sky and Telescope 68(2):158'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 36 — Great Circle Distance
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_36: ToolWorkflowDef = {
+  toolId: 36,
+  name: 'Great Circle Distance',
+  vizType: 'scalar',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'lat1', min: -90, max: 90 }, { param: 'lon1', min: -180, max: 180 }, { param: 'lat2', min: -90, max: 90 }, { param: 'lon2', min: -180, max: 180 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Pure geometric calculation');
+    log.push('  Earth radius R = 6371 km');
+    log.push('  Vincenty formula for higher precision');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Spherical Earth approximation', contribution: 'Varies' },
+      { factor: 'Earth radius value', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Haversine is exact for sphere. Vincenty formula accounts for ellipsoid.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Great Circle Distance: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Great circle distance: d = 2R*arcsin(sqrt(sin^2(dPhi/2) + cos(phi1)*cos(phi2)*sin^2(dLambda/2))).`,
+    recommendations: ['Use Vincenty for ellipsoidal precision.', 'R = 6371 km for mean Earth radius.', 'For geodesic distance, use geographiclib.'],
+  }),
+  metadata: {
+    methodology: 'Great circle distance: d = 2R*arcsin(sqrt(sin^2(dPhi/2) + cos(phi1)*cos(phi2)*sin^2(dLambda/2))).',
+    assumptions: ['Spherical Earth', 'No altitude differences', 'Great circle path'],
+    limitations: ['0.5% error vs ellipsoidal', 'Not for short distances (< 1 km)', 'No terrain consideration'],
+    references: ['Sinnott 1984, Sky and Telescope 68(2):158'],
+    preprocessingNotes: ['Pure geometric calculation', 'Earth radius R = 6371 km', 'Vincenty formula for higher precision'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_37 = makeTool(37, 'Geostatistical Interpolation (Kriging)', 'contour', RISK_BANDS,
-  [{ param: 'z', min: -Infinity, max: Infinity }, { param: 'lambda', min: -Infinity, max: Infinity }],
-  ['Compute experimental semivariogram from observations', 'Fit spherical/exponential/Gaussian model', 'Solve kriging system: A*lambda = b'],
-  { method: 'empirical', rmse: 0.5, rmseUnit: 'log10', factors: ['Variogram model fit', 'Stationarity assumption', 'Sample density'], assessment: 'Ordinary kriging assumes 2nd-order stationarity. Use regression kriging for non-stationary fields.' },
-  'Kriging: y_hat = sum(lambda_i * z(s_i)). Weights solve A*lambda = b with unbiasedness constraint.', ['For non-stationary: use regression/universal kriging.', 'Gaussian process regression for multi-scale.', 'PyKrige library for implementation.'], ['2nd-order stationarity', 'Translation-invariant covariance', 'Gaussian residuals'], ['Fails for non-stationary fields', 'Requires dense sampling', 'Computationally expensive'], ['Matheron 1963, Economic Geology 58(8):1246-1266'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 37 — Geostatistical Interpolation (Kriging)
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_37: ToolWorkflowDef = {
+  toolId: 37,
+  name: 'Geostatistical Interpolation (Kriging)',
+  vizType: 'contour',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'z', min: -Infinity, max: Infinity }, { param: 'lambda', min: -Infinity, max: Infinity }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Compute experimental semivariogram from observations');
+    log.push('  Fit spherical/exponential/Gaussian model');
+    log.push('  Solve kriging system: A*lambda = b');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.5,
+    rmseUnit: 'log10',
+    contributingFactors: [
+      { factor: 'Variogram model fit', contribution: 'Varies' },
+      { factor: 'Stationarity assumption', contribution: 'Varies' },
+      { factor: 'Sample density', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Ordinary kriging assumes 2nd-order stationarity. Use regression kriging for non-stationary fields.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Geostatistical Interpolation (Kriging): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Kriging: y_hat = sum(lambda_i * z(s_i)). Weights solve A*lambda = b with unbiasedness constraint.`,
+    recommendations: ['For non-stationary: use regression/universal kriging.', 'Gaussian process regression for multi-scale.', 'PyKrige library for implementation.'],
+  }),
+  metadata: {
+    methodology: 'Kriging: y_hat = sum(lambda_i * z(s_i)). Weights solve A*lambda = b with unbiasedness constraint.',
+    assumptions: ['2nd-order stationarity', 'Translation-invariant covariance', 'Gaussian residuals'],
+    limitations: ['Fails for non-stationary fields', 'Requires dense sampling', 'Computationally expensive'],
+    references: ['Matheron 1963, Economic Geology 58(8):1246-1266'],
+    preprocessingNotes: ['Compute experimental semivariogram from observations', 'Fit spherical/exponential/Gaussian model', 'Solve kriging system: A*lambda = b'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_38 = makeTool(38, 'Inverse Distance Weighting', 'contour', RISK_BANDS,
-  [{ param: 'z', min: -Infinity, max: Infinity }, { param: 'w', min: 0, max: Infinity }],
-  ['IDW with power parameter p (typically 2)', 'Bilinear/bicubic for gridded data', 'Nearest neighbor for categorical'],
-  { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ['Power parameter selection', 'Search radius', 'Anisotropy'], assessment: 'IDW has +/- 20% uncertainty. Simpler than kriging but no uncertainty estimate.' },
-  'IDW: y_hat = sum(w_i * z_i) / sum(w_i); w_i = 1/d_i^p. Fast spatial interpolation.', ['Power p typically 2.', 'Use search radius to limit computation.', 'Kriging preferred when variogram available.'], ['Isotropic distances', 'No directional anisotropy', 'Exact at data points'], ['No uncertainty estimate', 'Bullseye artifacts at data points', 'Power parameter subjective'], ['Shepard 1968, Proc. 23rd ACM National Conference'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 38 — Inverse Distance Weighting
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_38: ToolWorkflowDef = {
+  toolId: 38,
+  name: 'Inverse Distance Weighting',
+  vizType: 'contour',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'z', min: -Infinity, max: Infinity }, { param: 'w', min: 0, max: Infinity }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  IDW with power parameter p (typically 2)');
+    log.push('  Bilinear/bicubic for gridded data');
+    log.push('  Nearest neighbor for categorical');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Power parameter selection', contribution: 'Varies' },
+      { factor: 'Search radius', contribution: 'Varies' },
+      { factor: 'Anisotropy', contribution: 'Varies' },
+    ],
+    overallAssessment: 'IDW has +/- 20% uncertainty. Simpler than kriging but no uncertainty estimate.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Inverse Distance Weighting: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. IDW: y_hat = sum(w_i * z_i) / sum(w_i); w_i = 1/d_i^p. Fast spatial interpolation.`,
+    recommendations: ['Power p typically 2.', 'Use search radius to limit computation.', 'Kriging preferred when variogram available.'],
+  }),
+  metadata: {
+    methodology: 'IDW: y_hat = sum(w_i * z_i) / sum(w_i); w_i = 1/d_i^p. Fast spatial interpolation.',
+    assumptions: ['Isotropic distances', 'No directional anisotropy', 'Exact at data points'],
+    limitations: ['No uncertainty estimate', 'Bullseye artifacts at data points', 'Power parameter subjective'],
+    references: ['Shepard 1968, Proc. 23rd ACM National Conference'],
+    preprocessingNotes: ['IDW with power parameter p (typically 2)', 'Bilinear/bicubic for gridded data', 'Nearest neighbor for categorical'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_39 = makeTool(39, 'Gaussian Plume Air Dispersion', 'heatmap', AQI_BANDS,
-  [{ param: 'Q', min: 0, max: 1e9 }, { param: 'u', min: 0, max: 50 }, { param: 'sigmaY', min: 1, max: 1000 }, { param: 'sigmaZ', min: 1, max: 1000 }, { param: 'y', min: -5000, max: 5000 }],
-  ['Estimate Pasquill stability class from wind and radiation', 'Compute sigma_y, sigma_z from stability class', 'Use EPA AERMOD for regulatory compliance'],
-  { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ['Stability class estimation', 'Wind variability', 'Terrain effects'], assessment: 'Gaussian plume has +/- 30% uncertainty. Use AERMOD for regulatory.' },
-  'Gaussian plume: C = Q/(2*pi*u*sigma_y*sigma_z) * exp(-y^2/2*sigma_y^2) * exp(-H^2/2*sigma_z^2).', ['Use AERMOD for regulatory compliance.', 'Pasquill stability from wind + solar radiation.', 'Real-time wind from Open-Meteo.'], ['Steady wind', 'Constant sigma_y, sigma_z', 'Flat terrain', 'Conservative pollutant'], ['No terrain effects', 'No chemical reactions', 'Steady-state only', 'Limited to flat terrain'], ['Pasquill 1974, Atmospheric Diffusion 2nd ed.'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 39 — Gaussian Plume Air Dispersion
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_39: ToolWorkflowDef = {
+  toolId: 39,
+  name: 'Gaussian Plume Air Dispersion',
+  vizType: 'heatmap',
+  classificationBands: AQI_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Q', min: 0, max: 1e9 }, { param: 'u', min: 0, max: 50 }, { param: 'sigmaY', min: 1, max: 1000 }, { param: 'sigmaZ', min: 1, max: 1000 }, { param: 'y', min: -5000, max: 5000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Estimate Pasquill stability class from wind and radiation');
+    log.push('  Compute sigma_y, sigma_z from stability class');
+    log.push('  Use EPA AERMOD for regulatory compliance');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, AQI_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Stability class estimation', contribution: 'Varies' },
+      { factor: 'Wind variability', contribution: 'Varies' },
+      { factor: 'Terrain effects', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Gaussian plume has +/- 30% uncertainty. Use AERMOD for regulatory.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Gaussian Plume Air Dispersion: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Gaussian plume: C = Q/(2*pi*u*sigma_y*sigma_z) * exp(-y^2/2*sigma_y^2) * exp(-H^2/2*sigma_z^2).`,
+    recommendations: ['Use AERMOD for regulatory compliance.', 'Pasquill stability from wind + solar radiation.', 'Real-time wind from Open-Meteo.'],
+  }),
+  metadata: {
+    methodology: 'Gaussian plume: C = Q/(2*pi*u*sigma_y*sigma_z) * exp(-y^2/2*sigma_y^2) * exp(-H^2/2*sigma_z^2).',
+    assumptions: ['Steady wind', 'Constant sigma_y, sigma_z', 'Flat terrain', 'Conservative pollutant'],
+    limitations: ['No terrain effects', 'No chemical reactions', 'Steady-state only', 'Limited to flat terrain'],
+    references: ['Pasquill 1974, Atmospheric Diffusion 2nd ed.'],
+    preprocessingNotes: ['Estimate Pasquill stability class from wind and radiation', 'Compute sigma_y, sigma_z from stability class', 'Use EPA AERMOD for regulatory compliance'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_40 = makeTool(40, 'Gumbel Extreme Value Analysis', 'distribution', RISK_BANDS,
-  [{ param: 'mu', min: -1e6, max: 1e6 }, { param: 'beta', min: 0.1, max: 1e6 }, { param: 'x', min: -1e6, max: 1e6 }],
-  ['Use >= 30 years of data for reliable estimation', 'Fit via MLE or method of moments', 'Compare with GEV for model selection'],
-  { method: 'qualitative', factors: ['Sample size', 'Distribution fit quality', 'Stationarity assumption'], assessment: 'Use > 30 years for reliable return periods. Compare Gumbel and GEV.' },
-  'Gumbel distribution: F(x) = exp(-exp(-(x-mu)/beta)). Return period: x_T = mu - beta*ln(-ln(1-1/T)).', ['Use >= 30 years of data.', 'Compare Gumbel and GEV via AIC/BIC.', 'Cross-reference USGS stream gauges for floods.'], ['Stationary climate', 'IID samples', 'Gumbel is appropriate (Type I)'], ['Climate non-stationarity invalidates', 'Requires long records', 'May not fit all extremes'], ['Gumbel 1958, Statistics of Extremes'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 40 — Gumbel Extreme Value Analysis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_40: ToolWorkflowDef = {
+  toolId: 40,
+  name: 'Gumbel Extreme Value Analysis',
+  vizType: 'distribution',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'mu', min: -1e6, max: 1e6 }, { param: 'beta', min: 0.1, max: 1e6 }, { param: 'x', min: -1e6, max: 1e6 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Use >= 30 years of data for reliable estimation');
+    log.push('  Fit via MLE or method of moments');
+    log.push('  Compare with GEV for model selection');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'qualitative',
+    contributingFactors: [
+      { factor: 'Sample size', contribution: 'Varies' },
+      { factor: 'Distribution fit quality', contribution: 'Varies' },
+      { factor: 'Stationarity assumption', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Use > 30 years for reliable return periods. Compare Gumbel and GEV.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Gumbel Extreme Value Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Gumbel distribution: F(x) = exp(-exp(-(x-mu)/beta)). Return period: x_T = mu - beta*ln(-ln(1-1/T)).`,
+    recommendations: ['Use >= 30 years of data.', 'Compare Gumbel and GEV via AIC/BIC.', 'Cross-reference USGS stream gauges for floods.'],
+  }),
+  metadata: {
+    methodology: 'Gumbel distribution: F(x) = exp(-exp(-(x-mu)/beta)). Return period: x_T = mu - beta*ln(-ln(1-1/T)).',
+    assumptions: ['Stationary climate', 'IID samples', 'Gumbel is appropriate (Type I)'],
+    limitations: ['Climate non-stationarity invalidates', 'Requires long records', 'May not fit all extremes'],
+    references: ['Gumbel 1958, Statistics of Extremes'],
+    preprocessingNotes: ['Use >= 30 years of data for reliable estimation', 'Fit via MLE or method of moments', 'Compare with GEV for model selection'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_41 = makeTool(41, 'Generalized Pareto Distribution', 'distribution', RISK_BANDS,
-  [{ param: 'xi', min: -0.5, max: 1 }, { param: 'beta', min: 0.1, max: 1e6 }, { param: 'x', min: -1e6, max: 1e6 }],
-  ['Peaks-over-threshold approach', 'Threshold selection critical (mean residual life plot)', 'Compare with block maxima (GEV)'],
-  { method: 'qualitative', factors: ['Threshold selection', 'Shape parameter sensitivity', 'Sample size'], assessment: 'GPD is flexible for peaks-over-threshold. Threshold selection is critical.' },
-  'GPD: F(x) = 1 - (1 + xi*x/beta)^(-1/xi). Peaks-over-threshold extreme analysis.', ['Use mean residual life plot for threshold.', 'Compare with GEV (block maxima).', 'Shape parameter xi determines tail behavior.'], ['IID exceedances', 'Threshold is appropriate', 'Stationary climate'], ['Threshold selection subjective', 'Sensitive to shape parameter', 'Requires sufficient exceedances'], ['Pickands 1975, Annals of Statistics 3(1):119-131'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 41 — Generalized Pareto Distribution
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_41: ToolWorkflowDef = {
+  toolId: 41,
+  name: 'Generalized Pareto Distribution',
+  vizType: 'distribution',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'xi', min: -0.5, max: 1 }, { param: 'beta', min: 0.1, max: 1e6 }, { param: 'x', min: -1e6, max: 1e6 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Peaks-over-threshold approach');
+    log.push('  Threshold selection critical (mean residual life plot)');
+    log.push('  Compare with block maxima (GEV)');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'qualitative',
+    contributingFactors: [
+      { factor: 'Threshold selection', contribution: 'Varies' },
+      { factor: 'Shape parameter sensitivity', contribution: 'Varies' },
+      { factor: 'Sample size', contribution: 'Varies' },
+    ],
+    overallAssessment: 'GPD is flexible for peaks-over-threshold. Threshold selection is critical.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Generalized Pareto Distribution: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. GPD: F(x) = 1 - (1 + xi*x/beta)^(-1/xi). Peaks-over-threshold extreme analysis.`,
+    recommendations: ['Use mean residual life plot for threshold.', 'Compare with GEV (block maxima).', 'Shape parameter xi determines tail behavior.'],
+  }),
+  metadata: {
+    methodology: 'GPD: F(x) = 1 - (1 + xi*x/beta)^(-1/xi). Peaks-over-threshold extreme analysis.',
+    assumptions: ['IID exceedances', 'Threshold is appropriate', 'Stationary climate'],
+    limitations: ['Threshold selection subjective', 'Sensitive to shape parameter', 'Requires sufficient exceedances'],
+    references: ['Pickands 1975, Annals of Statistics 3(1):119-131'],
+    preprocessingNotes: ['Peaks-over-threshold approach', 'Threshold selection critical (mean residual life plot)', 'Compare with block maxima (GEV)'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_42 = makeTool(42, 'Semivariogram Analysis', 'spectrum', RISK_BANDS,
-  [{ param: 'z', min: -Infinity, max: Infinity }, { param: 'h', min: 0, max: Infinity }],
-  ['Compute experimental semivariogram from spatial data', 'Fit nugget, sill, range', 'Model selection: spherical, exponential, Gaussian'],
-  { method: 'empirical', rmse: 0.3, rmseUnit: 'log10', factors: ['Lag spacing', 'Sample configuration', 'Model selection'], assessment: 'Semivariogram model fit has +/- 0.3 log10 uncertainty.' },
-  'Semivariogram: gamma(h) = (1/2N(h)) * sum [z(s_i) - z(s_i+h)]^2. Fit nugget, sill, range.', ['Fit theoretical model (spherical/exp/Gaussian).', 'Nugget = measurement error + micro-scale variability.', 'Range = spatial correlation distance.'], ['2nd-order stationarity', 'Isotropic covariance', 'Gaussian residuals'], ['Anisotropy not captured', 'Requires sufficient sample pairs', 'Model selection subjective'], ['Matheron 1963, Economic Geology 58(8):1246-1266'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 42 — Semivariogram Analysis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_42: ToolWorkflowDef = {
+  toolId: 42,
+  name: 'Semivariogram Analysis',
+  vizType: 'spectrum',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'z', min: -Infinity, max: Infinity }, { param: 'h', min: 0, max: Infinity }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Compute experimental semivariogram from spatial data');
+    log.push('  Fit nugget, sill, range');
+    log.push('  Model selection: spherical, exponential, Gaussian');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.3,
+    rmseUnit: 'log10',
+    contributingFactors: [
+      { factor: 'Lag spacing', contribution: 'Varies' },
+      { factor: 'Sample configuration', contribution: 'Varies' },
+      { factor: 'Model selection', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Semivariogram model fit has +/- 0.3 log10 uncertainty.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Semivariogram Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Semivariogram: gamma(h) = (1/2N(h)) * sum [z(s_i) - z(s_i+h)]^2. Fit nugget, sill, range.`,
+    recommendations: ['Fit theoretical model (spherical/exp/Gaussian).', 'Nugget = measurement error + micro-scale variability.', 'Range = spatial correlation distance.'],
+  }),
+  metadata: {
+    methodology: 'Semivariogram: gamma(h) = (1/2N(h)) * sum [z(s_i) - z(s_i+h)]^2. Fit nugget, sill, range.',
+    assumptions: ['2nd-order stationarity', 'Isotropic covariance', 'Gaussian residuals'],
+    limitations: ['Anisotropy not captured', 'Requires sufficient sample pairs', 'Model selection subjective'],
+    references: ['Matheron 1963, Economic Geology 58(8):1246-1266'],
+    preprocessingNotes: ['Compute experimental semivariogram from spatial data', 'Fit nugget, sill, range', 'Model selection: spherical, exponential, Gaussian'],
+  },
+  dependencies: [],
+};
 
-// Eqs 43-50: Soil Science
-export const TOOL_43 = makeTool(43, 'Soil Water Retention Curve', 'profile', SOIL_BANDS,
-  [{ param: 'thetaR', min: 0, max: 0.2 }, { param: 'thetaS', min: 0.2, max: 0.6 }, { param: 'alpha', min: 0.001, max: 1 }, { param: 'n', min: 1.1, max: 5 }, { param: 'psi', min: -100, max: -0.01 }],
-  ['Derive alpha, n from ISRIC SoilGrids via ROSETTA', 'Mualem-vG pairing for hydraulic conductivity', 'Validate with SMAP soil moisture'],
-  { method: 'empirical', rmse: 0.5, rmseUnit: 'log10(K)', factors: ['Pedotransfer function', 'Soil texture variability', 'Macropores not captured'], assessment: 'van Genuchten-Mualem has +/- 0.5 log10(K) uncertainty from pedotransfer.' },
-  'van Genuchten: theta(psi) = thetaR + (thetaS-thetaR)/[1+(alpha*|psi|)^n]^m, m=1-1/n. Mualem pairing.', ['Use ROSETTA pedotransfer for alpha, n.', 'Mualem pairing for K(S_e).', 'ISRIC SoilGrids for spatial variability.'], ['Rigid, homogeneous soil', 'No hysteresis', 'Mualem model for K'], ['Hysteresis not captured', 'Macropores not modeled', 'Requires calibration for local soils'], ['van Genuchten 1980, SSSAJ 44(5):892-898', 'Mualem 1976, Water Resour. Res. 12(3):513-522'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 43 — Soil Water Retention Curve
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_43: ToolWorkflowDef = {
+  toolId: 43,
+  name: 'Soil Water Retention Curve',
+  vizType: 'profile',
+  classificationBands: SOIL_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'thetaR', min: 0, max: 0.2 }, { param: 'thetaS', min: 0.2, max: 0.6 }, { param: 'alpha', min: 0.001, max: 1 }, { param: 'n', min: 1.1, max: 5 }, { param: 'psi', min: -100, max: -0.01 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Derive alpha, n from ISRIC SoilGrids via ROSETTA');
+    log.push('  Mualem-vG pairing for hydraulic conductivity');
+    log.push('  Validate with SMAP soil moisture');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SOIL_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.5,
+    rmseUnit: 'log10(K)',
+    contributingFactors: [
+      { factor: 'Pedotransfer function', contribution: 'Varies' },
+      { factor: 'Soil texture variability', contribution: 'Varies' },
+      { factor: 'Macropores not captured', contribution: 'Varies' },
+    ],
+    overallAssessment: 'van Genuchten-Mualem has +/- 0.5 log10(K) uncertainty from pedotransfer.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Soil Water Retention Curve: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. van Genuchten: theta(psi) = thetaR + (thetaS-thetaR)/[1+(alpha*|psi|)^n]^m, m=1-1/n. Mualem pairing.`,
+    recommendations: ['Use ROSETTA pedotransfer for alpha, n.', 'Mualem pairing for K(S_e).', 'ISRIC SoilGrids for spatial variability.'],
+  }),
+  metadata: {
+    methodology: 'van Genuchten: theta(psi) = thetaR + (thetaS-thetaR)/[1+(alpha*|psi|)^n]^m, m=1-1/n. Mualem pairing.',
+    assumptions: ['Rigid, homogeneous soil', 'No hysteresis', 'Mualem model for K'],
+    limitations: ['Hysteresis not captured', 'Macropores not modeled', 'Requires calibration for local soils'],
+    references: ['van Genuchten 1980, SSSAJ 44(5):892-898', 'Mualem 1976, Water Resour. Res. 12(3):513-522'],
+    preprocessingNotes: ['Derive alpha, n from ISRIC SoilGrids via ROSETTA', 'Mualem-vG pairing for hydraulic conductivity', 'Validate with SMAP soil moisture'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_44 = makeTool(44, 'Soil Hydraulic Model', 'profile', SOIL_BANDS,
-  [{ param: 'psi_b', min: -10, max: -0.01 }, { param: 'psi', min: -100, max: -0.01 }],
-  ['Brooks-Corey parameters from soil texture', 'Lambda from pore-size distribution', 'ISRIC SoilGrids for spatial data'],
-  { method: 'empirical', rmse: 0.5, rmseUnit: 'log10(K)', factors: ['Lambda estimation', 'Air-entry pressure', 'Soil structure effects'], assessment: 'Brooks-Corey has similar uncertainty to vG. Simpler form but discontinuous at air-entry.' },
-  'Brooks-Corey: K(psi) = K_s for psi < psi_b; K_s*(psi_b/psi)^lambda for psi >= psi_b.', ['Compare with vG for same soil.', 'Lambda varies with texture: 0.5 (sand) to 2+ (clay).', 'ISRIC SoilGrids for spatial data.'], ['Rigid soil', 'No hysteresis', 'Sharp air-entry'], ['Discontinuous at psi_b', 'Less flexible than vG', 'Not for structured soils'], ['Brooks & Corey 1964, CSU Hydrology Papers No. 3'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 44 — Soil Hydraulic Model
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_44: ToolWorkflowDef = {
+  toolId: 44,
+  name: 'Soil Hydraulic Model',
+  vizType: 'profile',
+  classificationBands: SOIL_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'psi_b', min: -10, max: -0.01 }, { param: 'psi', min: -100, max: -0.01 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Brooks-Corey parameters from soil texture');
+    log.push('  Lambda from pore-size distribution');
+    log.push('  ISRIC SoilGrids for spatial data');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SOIL_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.5,
+    rmseUnit: 'log10(K)',
+    contributingFactors: [
+      { factor: 'Lambda estimation', contribution: 'Varies' },
+      { factor: 'Air-entry pressure', contribution: 'Varies' },
+      { factor: 'Soil structure effects', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Brooks-Corey has similar uncertainty to vG. Simpler form but discontinuous at air-entry.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Soil Hydraulic Model: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Brooks-Corey: K(psi) = K_s for psi < psi_b; K_s*(psi_b/psi)^lambda for psi >= psi_b.`,
+    recommendations: ['Compare with vG for same soil.', 'Lambda varies with texture: 0.5 (sand) to 2+ (clay).', 'ISRIC SoilGrids for spatial data.'],
+  }),
+  metadata: {
+    methodology: 'Brooks-Corey: K(psi) = K_s for psi < psi_b; K_s*(psi_b/psi)^lambda for psi >= psi_b.',
+    assumptions: ['Rigid soil', 'No hysteresis', 'Sharp air-entry'],
+    limitations: ['Discontinuous at psi_b', 'Less flexible than vG', 'Not for structured soils'],
+    references: ['Brooks & Corey 1964, CSU Hydrology Papers No. 3'],
+    preprocessingNotes: ['Brooks-Corey parameters from soil texture', 'Lambda from pore-size distribution', 'ISRIC SoilGrids for spatial data'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_45 = makeTool(45, 'Universal Soil Loss Equation', 'scalar', SOIL_BANDS,
-  [{ param: 'R', min: 0, max: 50000 }, { param: 'K', min: 0, max: 1 }, { param: 'LS', min: 0, max: 20 }, { param: 'C', min: 0, max: 1 }, { param: 'P', min: 0, max: 1 }],
-  ['R-factor from GPM IMERG precipitation', 'K-factor from ISRIC SoilGrids', 'LS from SRTM DEM slope/length'],
-  { method: 'empirical', rmse: 50, rmseUnit: '%', factors: ['R-factor spatial variability', 'K-factor estimation', 'LS calculation method'], assessment: 'USLE has +/- 50% uncertainty at plot scale. RUSLE2 is current USDA standard.' },
-  'USLE: A = R * K * LS * C * P. Annual soil loss in tons/acre/year. RUSLE2 is current standard.', ['Use RUSLE2 (current USDA-ARS standard).', 'R from GPM IMERG. K from SoilGrids. LS from DEM.', 'Unit plot convention: L=S=C=P=1.'], ['Uniform slope', 'Sheet and rill erosion only', 'Annual time step'], ['Not for gully erosion', '+/- 50% at plot scale', 'Requires local calibration'], ['Wischmeier & Smith 1978, USDA Handbook 537', 'RUSLE2 (USDA-ARS)'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 45 — Universal Soil Loss Equation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_45: ToolWorkflowDef = {
+  toolId: 45,
+  name: 'Universal Soil Loss Equation',
+  vizType: 'scalar',
+  classificationBands: SOIL_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'R', min: 0, max: 50000 }, { param: 'K', min: 0, max: 1 }, { param: 'LS', min: 0, max: 20 }, { param: 'C', min: 0, max: 1 }, { param: 'P', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  R-factor from GPM IMERG precipitation');
+    log.push('  K-factor from ISRIC SoilGrids');
+    log.push('  LS from SRTM DEM slope/length');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SOIL_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 50,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'R-factor spatial variability', contribution: 'Varies' },
+      { factor: 'K-factor estimation', contribution: 'Varies' },
+      { factor: 'LS calculation method', contribution: 'Varies' },
+    ],
+    overallAssessment: 'USLE has +/- 50% uncertainty at plot scale. RUSLE2 is current USDA standard.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Universal Soil Loss Equation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. USLE: A = R * K * LS * C * P. Annual soil loss in tons/acre/year. RUSLE2 is current standard.`,
+    recommendations: ['Use RUSLE2 (current USDA-ARS standard).', 'R from GPM IMERG. K from SoilGrids. LS from DEM.', 'Unit plot convention: L=S=C=P=1.'],
+  }),
+  metadata: {
+    methodology: 'USLE: A = R * K * LS * C * P. Annual soil loss in tons/acre/year. RUSLE2 is current standard.',
+    assumptions: ['Uniform slope', 'Sheet and rill erosion only', 'Annual time step'],
+    limitations: ['Not for gully erosion', '+/- 50% at plot scale', 'Requires local calibration'],
+    references: ['Wischmeier & Smith 1978, USDA Handbook 537', 'RUSLE2 (USDA-ARS)'],
+    preprocessingNotes: ['R-factor from GPM IMERG precipitation', 'K-factor from ISRIC SoilGrids', 'LS from SRTM DEM slope/length'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_46 = makeTool(46, 'Soil Respiration Temperature Sensitivity', 'timeseries', CARBON_BANDS,
-  [{ param: 'R_base', min: 0, max: 50 }, { param: 'Q10', min: 1, max: 5 }, { param: 'T', min: -10, max: 50 }, { param: 'T_base', min: -10, max: 30 }],
-  ['Soil temperature from Open-Meteo soil_temperature_0cm', 'Q10 from FLUXNET or literature', 'Global mean Q10 ~ 2.4'],
-  { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ['Q10 is not constant', 'Substrate lability', 'Moisture dependence'], assessment: 'Q10 is NOT constant — varies with T, moisture, substrate (Davidson & Janssens 2006).' },
-  'Soil respiration: R = R_base * Q10^((T-T_base)/10). Global mean Q10 ~ 2.4.', ['Q10 varies with T, moisture, substrate.', 'Use soil_temperature_0cm from Open-Meteo.', 'FLUXNET for validation.'], ['Constant Q10', 'No moisture limitation', 'No substrate depletion'], ['Q10 is temperature-dependent', 'Moisture stress not captured', 'Acclimatization effects'], ['Raich & Schlesinger 1992, Tellus B 44(2):81-99', 'Davidson & Janssens 2006, Nature 440:165-173'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 46 — Soil Respiration Temperature Sensitivity
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_46: ToolWorkflowDef = {
+  toolId: 46,
+  name: 'Soil Respiration Temperature Sensitivity',
+  vizType: 'timeseries',
+  classificationBands: CARBON_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'R_base', min: 0, max: 50 }, { param: 'Q10', min: 1, max: 5 }, { param: 'T', min: -10, max: 50 }, { param: 'T_base', min: -10, max: 30 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Soil temperature from Open-Meteo soil_temperature_0cm');
+    log.push('  Q10 from FLUXNET or literature');
+    log.push('  Global mean Q10 ~ 2.4');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CARBON_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Q10 is not constant', contribution: 'Varies' },
+      { factor: 'Substrate lability', contribution: 'Varies' },
+      { factor: 'Moisture dependence', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Q10 is NOT constant — varies with T, moisture, substrate (Davidson & Janssens 2006).',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Soil Respiration Temperature Sensitivity: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Soil respiration: R = R_base * Q10^((T-T_base)/10). Global mean Q10 ~ 2.4.`,
+    recommendations: ['Q10 varies with T, moisture, substrate.', 'Use soil_temperature_0cm from Open-Meteo.', 'FLUXNET for validation.'],
+  }),
+  metadata: {
+    methodology: 'Soil respiration: R = R_base * Q10^((T-T_base)/10). Global mean Q10 ~ 2.4.',
+    assumptions: ['Constant Q10', 'No moisture limitation', 'No substrate depletion'],
+    limitations: ['Q10 is temperature-dependent', 'Moisture stress not captured', 'Acclimatization effects'],
+    references: ['Raich & Schlesinger 1992, Tellus B 44(2):81-99', 'Davidson & Janssens 2006, Nature 440:165-173'],
+    preprocessingNotes: ['Soil temperature from Open-Meteo soil_temperature_0cm', 'Q10 from FLUXNET or literature', 'Global mean Q10 ~ 2.4'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_47 = makeTool(47, 'Soil Thermal Conductivity Model', 'scalar', SOIL_BANDS,
-  [{ param: 'ki', min: 0, max: 10 }, { param: 'fi', min: 0, max: 1 }],
-  ['Soil composition from ISRIC SoilGrids', 'Mineral/organic/water/air fractions', 'Bulk density for volume fractions'],
-  { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ['Moisture content', 'Mineral composition', 'Bulk density'], assessment: 'de Vries model has +/- 25% uncertainty, mainly from moisture.' },
-  'de Vries: k_soil = sum(k_i * f_i * lambda_i) / sum(k_i * f_i). Weighted by volume fractions.', ['ISRIC SoilGrids for composition.', 'Moisture content critical for k.', 'Validate with in-situ measurements.'], ['Isotropic soil', 'Linear mixing', 'Known volume fractions'], ['Moisture dependence complex', 'Mineral composition varies', 'Not for frozen soils'], ['de Vries 1963, Physics of Plant Environment'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 47 — Soil Thermal Conductivity Model
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_47: ToolWorkflowDef = {
+  toolId: 47,
+  name: 'Soil Thermal Conductivity Model',
+  vizType: 'scalar',
+  classificationBands: SOIL_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'ki', min: 0, max: 10 }, { param: 'fi', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Soil composition from ISRIC SoilGrids');
+    log.push('  Mineral/organic/water/air fractions');
+    log.push('  Bulk density for volume fractions');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SOIL_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Moisture content', contribution: 'Varies' },
+      { factor: 'Mineral composition', contribution: 'Varies' },
+      { factor: 'Bulk density', contribution: 'Varies' },
+    ],
+    overallAssessment: 'de Vries model has +/- 25% uncertainty, mainly from moisture.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Soil Thermal Conductivity Model: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. de Vries: k_soil = sum(k_i * f_i * lambda_i) / sum(k_i * f_i). Weighted by volume fractions.`,
+    recommendations: ['ISRIC SoilGrids for composition.', 'Moisture content critical for k.', 'Validate with in-situ measurements.'],
+  }),
+  metadata: {
+    methodology: 'de Vries: k_soil = sum(k_i * f_i * lambda_i) / sum(k_i * f_i). Weighted by volume fractions.',
+    assumptions: ['Isotropic soil', 'Linear mixing', 'Known volume fractions'],
+    limitations: ['Moisture dependence complex', 'Mineral composition varies', 'Not for frozen soils'],
+    references: ['de Vries 1963, Physics of Plant Environment'],
+    preprocessingNotes: ['Soil composition from ISRIC SoilGrids', 'Mineral/organic/water/air fractions', 'Bulk density for volume fractions'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_48 = makeTool(48, 'Surface Layer Similarity Theory', 'profile', SOIL_BANDS,
-  [{ param: 'kappa', min: 0.3, max: 0.5 }, { param: 'u_star', min: 0, max: 5 }, { param: 'z', min: 0, max: 1000 }, { param: 'L', min: -1000, max: 1000 }],
-  ['Von Karman constant kappa = 0.40 (Hogstrom 1988)', 'Businger-Dyer stability functions', 'ERA5 for surface fluxes'],
-  { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ['Universal function uncertainty', 'Roughness sublayer effects', 'Stability parameter accuracy'], assessment: 'Monin-Obukhov has 10-20% inherent error in universal functions.' },
-  'Monin-Obukhov: u(z) = (u*/kappa) * [ln(z/z0) - Psi_m(zeta)]. zeta = z/L.', ['kappa = 0.40 (Hogstrom 1988).', 'Businger-Dyer stability functions.', 'ERA5 for surface fluxes.'], ['Horizontally homogeneous surface', 'Stationary conditions', 'Constant flux layer'], ['Breaks down in roughness sublayer', 'Non-stationary conditions', 'Requires accurate u*'], ['Monin & Obukhov 1954', 'Hogstrom 1988, Boundary-Layer Meteorology 42:55-78'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 48 — Surface Layer Similarity Theory
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_48: ToolWorkflowDef = {
+  toolId: 48,
+  name: 'Surface Layer Similarity Theory',
+  vizType: 'profile',
+  classificationBands: SOIL_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'kappa', min: 0.3, max: 0.5 }, { param: 'u_star', min: 0, max: 5 }, { param: 'z', min: 0, max: 1000 }, { param: 'L', min: -1000, max: 1000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Von Karman constant kappa = 0.40 (Hogstrom 1988)');
+    log.push('  Businger-Dyer stability functions');
+    log.push('  ERA5 for surface fluxes');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SOIL_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Universal function uncertainty', contribution: 'Varies' },
+      { factor: 'Roughness sublayer effects', contribution: 'Varies' },
+      { factor: 'Stability parameter accuracy', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Monin-Obukhov has 10-20% inherent error in universal functions.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Surface Layer Similarity Theory: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Monin-Obukhov: u(z) = (u*/kappa) * [ln(z/z0) - Psi_m(zeta)]. zeta = z/L.`,
+    recommendations: ['kappa = 0.40 (Hogstrom 1988).', 'Businger-Dyer stability functions.', 'ERA5 for surface fluxes.'],
+  }),
+  metadata: {
+    methodology: 'Monin-Obukhov: u(z) = (u*/kappa) * [ln(z/z0) - Psi_m(zeta)]. zeta = z/L.',
+    assumptions: ['Horizontally homogeneous surface', 'Stationary conditions', 'Constant flux layer'],
+    limitations: ['Breaks down in roughness sublayer', 'Non-stationary conditions', 'Requires accurate u*'],
+    references: ['Monin & Obukhov 1954', 'Hogstrom 1988, Boundary-Layer Meteorology 42:55-78'],
+    preprocessingNotes: ['Von Karman constant kappa = 0.40 (Hogstrom 1988)', 'Businger-Dyer stability functions', 'ERA5 for surface fluxes'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_49 = makeTool(49, 'Logarithmic Wind Profile', 'profile', SOIL_BANDS,
-  [{ param: 'u_star', min: 0, max: 5 }, { param: 'z', min: 0, max: 1000 }, { param: 'z0', min: 0.00001, max: 10 }],
-  ['Roughness length z0 from ESA WorldCover land cover', 'Friction velocity from multi-level wind', 'Neutral stability assumption'],
-  { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ['z0 estimation', 'Stability correction', 'Surface heterogeneity'], assessment: 'Log law has +/- 15% uncertainty. z0 from land cover classification.' },
-  'Log wind: u(z) = (u*/kappa) * ln(z/z0). Neutral conditions only. z0 from land cover.', ['z0 from ESA WorldCover (water ~0.0001, forest ~1).', 'Add stability correction for non-neutral.', 'Use multi-level wind (10m + 80m).'], ['Neutral stability', 'Horizontally homogeneous', 'Above roughness sublayer'], ['Not for stable/unstable without correction', 'z0 is subjective', 'Fails in complex terrain'], ['Prandtl 1925, ZAMM 5(2):136-139'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 49 — Logarithmic Wind Profile
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_49: ToolWorkflowDef = {
+  toolId: 49,
+  name: 'Logarithmic Wind Profile',
+  vizType: 'profile',
+  classificationBands: SOIL_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'u_star', min: 0, max: 5 }, { param: 'z', min: 0, max: 1000 }, { param: 'z0', min: 0.00001, max: 10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Roughness length z0 from ESA WorldCover land cover');
+    log.push('  Friction velocity from multi-level wind');
+    log.push('  Neutral stability assumption');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SOIL_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'z0 estimation', contribution: 'Varies' },
+      { factor: 'Stability correction', contribution: 'Varies' },
+      { factor: 'Surface heterogeneity', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Log law has +/- 15% uncertainty. z0 from land cover classification.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Logarithmic Wind Profile: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Log wind: u(z) = (u*/kappa) * ln(z/z0). Neutral conditions only. z0 from land cover.`,
+    recommendations: ['z0 from ESA WorldCover (water ~0.0001, forest ~1).', 'Add stability correction for non-neutral.', 'Use multi-level wind (10m + 80m).'],
+  }),
+  metadata: {
+    methodology: 'Log wind: u(z) = (u*/kappa) * ln(z/z0). Neutral conditions only. z0 from land cover.',
+    assumptions: ['Neutral stability', 'Horizontally homogeneous', 'Above roughness sublayer'],
+    limitations: ['Not for stable/unstable without correction', 'z0 is subjective', 'Fails in complex terrain'],
+    references: ['Prandtl 1925, ZAMM 5(2):136-139'],
+    preprocessingNotes: ['Roughness length z0 from ESA WorldCover land cover', 'Friction velocity from multi-level wind', 'Neutral stability assumption'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_50 = makeTool(50, 'Stomatal Conductance Model', 'scalar', SOIL_BANDS,
-  [{ param: 'g0', min: 0, max: 100 }, { param: 'a1', min: 0, max: 20 }, { param: 'A', min: 0, max: 50 }, { param: 'hs', min: 0, max: 1 }, { param: 'cs', min: 100, max: 1000 }],
-  ['Use Leuning (1995) revision for VPD handling', 'CO2 from OCO-2/3 satellite', 'Photosynthesis from FLUXNET'],
-  { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ['Parameter variability', 'VPD dependence', 'Species-specific calibration'], assessment: 'Ball-Berry has +/- 25% uncertainty. Leuning (1995) revision recommended.' },
-  'Ball-Berry: g_s = g0 + a1*A*hs/cs. Leuning (1995) revision preferred.', ['Use Leuning (1995) revision for VPD handling.', 'g_s = g0 + a1*A_n / [(cs-Gamma)*(1+Ds/D0)].', 'Used in CLM, CABLE, JULES.'], ['Well-watered conditions', 'Constant a1, g0', 'Leaf-level scale'], ['Diverges at low cs in original form', 'Parameters species-specific', 'Not for water-stressed plants'], ['Ball et al. 1987', 'Leuning 1995, Plant Cell Environ. 18:339-355'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 50 — Stomatal Conductance Model
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_50: ToolWorkflowDef = {
+  toolId: 50,
+  name: 'Stomatal Conductance Model',
+  vizType: 'scalar',
+  classificationBands: SOIL_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'g0', min: 0, max: 100 }, { param: 'a1', min: 0, max: 20 }, { param: 'A', min: 0, max: 50 }, { param: 'hs', min: 0, max: 1 }, { param: 'cs', min: 100, max: 1000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Use Leuning (1995) revision for VPD handling');
+    log.push('  CO2 from OCO-2/3 satellite');
+    log.push('  Photosynthesis from FLUXNET');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SOIL_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Parameter variability', contribution: 'Varies' },
+      { factor: 'VPD dependence', contribution: 'Varies' },
+      { factor: 'Species-specific calibration', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Ball-Berry has +/- 25% uncertainty. Leuning (1995) revision recommended.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Stomatal Conductance Model: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Ball-Berry: g_s = g0 + a1*A*hs/cs. Leuning (1995) revision preferred.`,
+    recommendations: ['Use Leuning (1995) revision for VPD handling.', 'g_s = g0 + a1*A_n / [(cs-Gamma)*(1+Ds/D0)].', 'Used in CLM, CABLE, JULES.'],
+  }),
+  metadata: {
+    methodology: 'Ball-Berry: g_s = g0 + a1*A*hs/cs. Leuning (1995) revision preferred.',
+    assumptions: ['Well-watered conditions', 'Constant a1, g0', 'Leaf-level scale'],
+    limitations: ['Diverges at low cs in original form', 'Parameters species-specific', 'Not for water-stressed plants'],
+    references: ['Ball et al. 1987', 'Leuning 1995, Plant Cell Environ. 18:339-355'],
+    preprocessingNotes: ['Use Leuning (1995) revision for VPD handling', 'CO2 from OCO-2/3 satellite', 'Photosynthesis from FLUXNET'],
+  },
+  dependencies: [],
+};
 
-// Eqs 51-57: Biosphere
-export const TOOL_51 = makeTool(51, 'Gross Primary Production', 'timeseries', CARBON_BANDS,
-  [{ param: 'eps', min: 0, max: 5 }, { param: 'fPAR', min: 0, max: 1 }, { param: 'PAR', min: 0, max: 10000 }],
-  ['fPAR from MODIS MCD15A3H', 'PAR from SW radiation x 2.02 (approximate)', 'Validate with MODIS MOD17'],
-  { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ['Light use efficiency', 'fPAR retrieval', 'PAR estimation from SW'], assessment: 'Monteith LUE GPP has +/- 20-30% uncertainty. MODIS MOD17 is standard product.' },
-  'GPP = epsilon * fPAR * PAR. PAR ~ 0.495 * SW (x 2.02 inverse).', ['PAR = SW x 2.02 is approximate (+/- 10%).', 'fPAR from MODIS MCD15A3H.', 'Validate with MOD17 and FLUXNET.'], ['Constant LUE', 'fPAR accurately retrieved', 'PAR well estimated'], ['LUE varies with stress', 'PAR approximation error', 'fPAR saturates at high LAI'], ['Monteith 1977, Phil. Trans. R. Soc. B 281:277-294', 'MODIS MOD17 product'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 51 — Gross Primary Production
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_51: ToolWorkflowDef = {
+  toolId: 51,
+  name: 'Gross Primary Production',
+  vizType: 'timeseries',
+  classificationBands: CARBON_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'eps', min: 0, max: 5 }, { param: 'fPAR', min: 0, max: 1 }, { param: 'PAR', min: 0, max: 10000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  fPAR from MODIS MCD15A3H');
+    log.push('  PAR from SW radiation x 2.02 (approximate)');
+    log.push('  Validate with MODIS MOD17');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CARBON_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Light use efficiency', contribution: 'Varies' },
+      { factor: 'fPAR retrieval', contribution: 'Varies' },
+      { factor: 'PAR estimation from SW', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Monteith LUE GPP has +/- 20-30% uncertainty. MODIS MOD17 is standard product.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Gross Primary Production: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. GPP = epsilon * fPAR * PAR. PAR ~ 0.495 * SW (x 2.02 inverse).`,
+    recommendations: ['PAR = SW x 2.02 is approximate (+/- 10%).', 'fPAR from MODIS MCD15A3H.', 'Validate with MOD17 and FLUXNET.'],
+  }),
+  metadata: {
+    methodology: 'GPP = epsilon * fPAR * PAR. PAR ~ 0.495 * SW (x 2.02 inverse).',
+    assumptions: ['Constant LUE', 'fPAR accurately retrieved', 'PAR well estimated'],
+    limitations: ['LUE varies with stress', 'PAR approximation error', 'fPAR saturates at high LAI'],
+    references: ['Monteith 1977, Phil. Trans. R. Soc. B 281:277-294', 'MODIS MOD17 product'],
+    preprocessingNotes: ['fPAR from MODIS MCD15A3H', 'PAR from SW radiation x 2.02 (approximate)', 'Validate with MODIS MOD17'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_52 = makeTool(52, 'Canopy Light Extinction', 'profile', CARBON_BANDS,
-  [{ param: 'I0', min: 0, max: 3000 }, { param: 'k', min: 0.1, max: 1 }, { param: 'LAI', min: 0, max: 12 }],
-  ['LAI from MODIS MCD15A3H', 'Extinction coefficient k from canopy structure', 'Radiation from Open-Meteo'],
-  { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ['k estimation', 'LAI accuracy', 'Canopy heterogeneity'], assessment: 'Beer-Lambert has +/- 15% uncertainty from k variability.' },
-  'Beer-Lambert: I(z) = I0 * exp(-k * LAI). k varies with leaf angle distribution.', ['k varies: 0.3 (vertical leaves) to 0.8 (horizontal).', 'LAI from MODIS MCD15A3H.', 'Spherical distribution: k ~ 0.5.'], ['Random leaf distribution', 'Uniform canopy', 'Monochromatic radiation'], ['Non-random leaf angles', 'Canopy clumping', 'Mixed species effects'], ['Monsi & Saeki 1953, Japanese J. Botany 14:22-52'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 52 — Canopy Light Extinction
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_52: ToolWorkflowDef = {
+  toolId: 52,
+  name: 'Canopy Light Extinction',
+  vizType: 'profile',
+  classificationBands: CARBON_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'I0', min: 0, max: 3000 }, { param: 'k', min: 0.1, max: 1 }, { param: 'LAI', min: 0, max: 12 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  LAI from MODIS MCD15A3H');
+    log.push('  Extinction coefficient k from canopy structure');
+    log.push('  Radiation from Open-Meteo');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CARBON_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'k estimation', contribution: 'Varies' },
+      { factor: 'LAI accuracy', contribution: 'Varies' },
+      { factor: 'Canopy heterogeneity', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Beer-Lambert has +/- 15% uncertainty from k variability.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Canopy Light Extinction: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Beer-Lambert: I(z) = I0 * exp(-k * LAI). k varies with leaf angle distribution.`,
+    recommendations: ['k varies: 0.3 (vertical leaves) to 0.8 (horizontal).', 'LAI from MODIS MCD15A3H.', 'Spherical distribution: k ~ 0.5.'],
+  }),
+  metadata: {
+    methodology: 'Beer-Lambert: I(z) = I0 * exp(-k * LAI). k varies with leaf angle distribution.',
+    assumptions: ['Random leaf distribution', 'Uniform canopy', 'Monochromatic radiation'],
+    limitations: ['Non-random leaf angles', 'Canopy clumping', 'Mixed species effects'],
+    references: ['Monsi & Saeki 1953, Japanese J. Botany 14:22-52'],
+    preprocessingNotes: ['LAI from MODIS MCD15A3H', 'Extinction coefficient k from canopy structure', 'Radiation from Open-Meteo'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_53 = makeTool(53, 'Net Carbon Flux', 'timeseries', CARBON_BANDS,
-  [{ param: 'Reco', min: 0, max: 5000 }, { param: 'GPP', min: 0, max: 5000 }],
-  ['GPP from MODIS MOD17', 'Ecosystem respiration from FLUXNET', 'NEE positive = source, negative = sink'],
-  { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ['GPP uncertainty', 'Respiration model', 'Temperature dependence of Reco'], assessment: 'NEE has +/- 25% uncertainty from GPP and Reco components.' },
-  'NEE = R_eco - GPP. Positive = net CO2 source, negative = net sink.', ['FLUXNET eddy covariance for validation.', 'NEE positive = source, negative = sink.', 'Reco temperature-dependent.'], ['Ecosystem at steady state', 'No lateral carbon flux', 'Annual balance'], ['Legacy effects', 'Disturbance not captured', 'Lateral fluxes ignored'], ['Wofsy et al. 1993, Science 260:1314-1317'], [51]);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 53 — Net Carbon Flux
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_53: ToolWorkflowDef = {
+  toolId: 53,
+  name: 'Net Carbon Flux',
+  vizType: 'timeseries',
+  classificationBands: CARBON_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Reco', min: 0, max: 5000 }, { param: 'GPP', min: 0, max: 5000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  GPP from MODIS MOD17');
+    log.push('  Ecosystem respiration from FLUXNET');
+    log.push('  NEE positive = source, negative = sink');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CARBON_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'GPP uncertainty', contribution: 'Varies' },
+      { factor: 'Respiration model', contribution: 'Varies' },
+      { factor: 'Temperature dependence of Reco', contribution: 'Varies' },
+    ],
+    overallAssessment: 'NEE has +/- 25% uncertainty from GPP and Reco components.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Net Carbon Flux: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. NEE = R_eco - GPP. Positive = net CO2 source, negative = net sink.`,
+    recommendations: ['FLUXNET eddy covariance for validation.', 'NEE positive = source, negative = sink.', 'Reco temperature-dependent.'],
+  }),
+  metadata: {
+    methodology: 'NEE = R_eco - GPP. Positive = net CO2 source, negative = net sink.',
+    assumptions: ['Ecosystem at steady state', 'No lateral carbon flux', 'Annual balance'],
+    limitations: ['Legacy effects', 'Disturbance not captured', 'Lateral fluxes ignored'],
+    references: ['Wofsy et al. 1993, Science 260:1314-1317'],
+    preprocessingNotes: ['GPP from MODIS MOD17', 'Ecosystem respiration from FLUXNET', 'NEE positive = source, negative = sink'],
+  },
+  dependencies: [51],
+};
 
-export const TOOL_54 = makeTool(54, 'C3 Photosynthesis', 'scalar', CARBON_BANDS,
-  [{ param: 'Vcmax', min: 0, max: 300 }, { param: 'ci', min: 0, max: 500 }, { param: 'GammaStar', min: 0, max: 100 }, { param: 'Kc', min: 50, max: 1000 }, { param: 'Ko', min: 100000, max: 500000 }, { param: 'O', min: 150000, max: 250000 }],
-  ['Temperature corrections from Bernacchi et al. (2001)', 'Vcmax from leaf trait databases', 'CO2 from OCO-2/3'],
-  { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ['Vcmax variability', 'Temperature corrections', 'Kc, Ko temperature dependence'], assessment: 'Farquhar FvCB has +/- 20% uncertainty, mainly from Vcmax.' },
-  'FvCB: A_c = Vcmax*(ci-Gamma*)/(ci+Kc*(1+O/Ko)). Also A_j, A_p branches.', ['Include A_j and A_p limiting rates.', 'Temperature corrections: Bernacchi et al. 2001.', 'Vcmax@25 ~ 80 umol/m2/s typical.'], ['C3 pathway', 'Light not limiting (A_c branch)', 'Constant intercellular CO2'], ['Does not include A_j (light-limited)', 'Vcmax varies with species/conditions', 'Temperature corrections needed'], ['Farquhar, von Caemmerer & Berry 1980, Planta 149:78-90', 'Bernacchi et al. 2001, Plant Cell Environ. 24:253-259'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 54 — C3 Photosynthesis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_54: ToolWorkflowDef = {
+  toolId: 54,
+  name: 'C3 Photosynthesis',
+  vizType: 'scalar',
+  classificationBands: CARBON_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Vcmax', min: 0, max: 300 }, { param: 'ci', min: 0, max: 500 }, { param: 'GammaStar', min: 0, max: 100 }, { param: 'Kc', min: 50, max: 1000 }, { param: 'Ko', min: 100000, max: 500000 }, { param: 'O', min: 150000, max: 250000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Temperature corrections from Bernacchi et al. (2001)');
+    log.push('  Vcmax from leaf trait databases');
+    log.push('  CO2 from OCO-2/3');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CARBON_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Vcmax variability', contribution: 'Varies' },
+      { factor: 'Temperature corrections', contribution: 'Varies' },
+      { factor: 'Kc, Ko temperature dependence', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Farquhar FvCB has +/- 20% uncertainty, mainly from Vcmax.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `C3 Photosynthesis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. FvCB: A_c = Vcmax*(ci-Gamma*)/(ci+Kc*(1+O/Ko)). Also A_j, A_p branches.`,
+    recommendations: ['Include A_j and A_p limiting rates.', 'Temperature corrections: Bernacchi et al. 2001.', 'Vcmax@25 ~ 80 umol/m2/s typical.'],
+  }),
+  metadata: {
+    methodology: 'FvCB: A_c = Vcmax*(ci-Gamma*)/(ci+Kc*(1+O/Ko)). Also A_j, A_p branches.',
+    assumptions: ['C3 pathway', 'Light not limiting (A_c branch)', 'Constant intercellular CO2'],
+    limitations: ['Does not include A_j (light-limited)', 'Vcmax varies with species/conditions', 'Temperature corrections needed'],
+    references: ['Farquhar, von Caemmerer & Berry 1980, Planta 149:78-90', 'Bernacchi et al. 2001, Plant Cell Environ. 24:253-259'],
+    preprocessingNotes: ['Temperature corrections from Bernacchi et al. (2001)', 'Vcmax from leaf trait databases', 'CO2 from OCO-2/3'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_55 = makeTool(55, 'Forest Biomass Estimation', 'scatter', CARBON_BANDS,
-  [{ param: 'a', min: 0.001, max: 1 }, { param: 'DBH', min: 0, max: 300 }],
-  ['Allometric coefficients from Chave et al. (2014)', 'Include environmental stress factor E', 'Wood density from BIEN database'],
-  { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ['Allometric equation selection', 'Wood density variability', 'Environmental stress factor'], assessment: 'Allometric biomass has +/- 30% uncertainty. Chave (2014) includes E factor.' },
-  'Allometric biomass: AGB = a * rho_wood * DBH^b * E. Chave et al. (2014) with environmental factor.', ['Use Chave et al. (2014) with E factor.', 'Wood density from BIEN database.', 'Global Forest Watch for cover.'], ['Allometric equation valid for species', 'Single-stem trees', 'Wood density known'], ['Not for multi-stem trees', 'Requires species-specific calibration', 'Environmental stress factor needed'], ['Chave et al. 2014, Global Change Biology 20:3177-3190'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 55 — Forest Biomass Estimation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_55: ToolWorkflowDef = {
+  toolId: 55,
+  name: 'Forest Biomass Estimation',
+  vizType: 'scatter',
+  classificationBands: CARBON_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'a', min: 0.001, max: 1 }, { param: 'DBH', min: 0, max: 300 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Allometric coefficients from Chave et al. (2014)');
+    log.push('  Include environmental stress factor E');
+    log.push('  Wood density from BIEN database');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CARBON_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Allometric equation selection', contribution: 'Varies' },
+      { factor: 'Wood density variability', contribution: 'Varies' },
+      { factor: 'Environmental stress factor', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Allometric biomass has +/- 30% uncertainty. Chave (2014) includes E factor.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Forest Biomass Estimation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Allometric biomass: AGB = a * rho_wood * DBH^b * E. Chave et al. (2014) with environmental factor.`,
+    recommendations: ['Use Chave et al. (2014) with E factor.', 'Wood density from BIEN database.', 'Global Forest Watch for cover.'],
+  }),
+  metadata: {
+    methodology: 'Allometric biomass: AGB = a * rho_wood * DBH^b * E. Chave et al. (2014) with environmental factor.',
+    assumptions: ['Allometric equation valid for species', 'Single-stem trees', 'Wood density known'],
+    limitations: ['Not for multi-stem trees', 'Requires species-specific calibration', 'Environmental stress factor needed'],
+    references: ['Chave et al. 2014, Global Change Biology 20:3177-3190'],
+    preprocessingNotes: ['Allometric coefficients from Chave et al. (2014)', 'Include environmental stress factor E', 'Wood density from BIEN database'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_56 = makeTool(56, 'Ocean CO2 Uptake', 'scalar', CARBON_BANDS,
-  [{ param: 'k', min: 0, max: 5000 }, { param: 'K0', min: 0, max: 100 }, { param: 'dpCO2', min: -100, max: 100 }],
-  ['Use Wanninkhof (2014) coefficient 0.251 (not 0.31)', 'Nightingale (2000) alternative for coastal', 'pCO2 from SOCAT database'],
-  { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ['Gas transfer coefficient', 'Wind speed product', 'pCO2 spatial variability'], assessment: 'Wanninkhof 2014 uses k = 0.251*u^2 (not 0.31). Nightingale for coastal.' },
-  'Ocean CO2: F = k * K0 * dpCO2. k = 0.251*u^2*(Sc/660)^(-0.5) (Wanninkhof 2014).', ['Use Wanninkhof 2014 (0.251, not 0.31).', 'Nightingale (2000) for coastal waters.', 'pCO2 from SOCAT database.'], ['Steady wind', 'Quadratic wind dependence', 'Known pCO2 gradient'], ['Wind product dependent', 'No bubble-mediated transfer', 'Seasonal pCO2 variability'], ['Wanninkhof 2014, Limnol. Oceanogr. Methods 12:351-362', 'Nightingale et al. 2000'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 56 — Ocean CO2 Uptake
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_56: ToolWorkflowDef = {
+  toolId: 56,
+  name: 'Ocean CO2 Uptake',
+  vizType: 'scalar',
+  classificationBands: CARBON_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'k', min: 0, max: 5000 }, { param: 'K0', min: 0, max: 100 }, { param: 'dpCO2', min: -100, max: 100 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Use Wanninkhof (2014) coefficient 0.251 (not 0.31)');
+    log.push('  Nightingale (2000) alternative for coastal');
+    log.push('  pCO2 from SOCAT database');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CARBON_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Gas transfer coefficient', contribution: 'Varies' },
+      { factor: 'Wind speed product', contribution: 'Varies' },
+      { factor: 'pCO2 spatial variability', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Wanninkhof 2014 uses k = 0.251*u^2 (not 0.31). Nightingale for coastal.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Ocean CO2 Uptake: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Ocean CO2: F = k * K0 * dpCO2. k = 0.251*u^2*(Sc/660)^(-0.5) (Wanninkhof 2014).`,
+    recommendations: ['Use Wanninkhof 2014 (0.251, not 0.31).', 'Nightingale (2000) for coastal waters.', 'pCO2 from SOCAT database.'],
+  }),
+  metadata: {
+    methodology: 'Ocean CO2: F = k * K0 * dpCO2. k = 0.251*u^2*(Sc/660)^(-0.5) (Wanninkhof 2014).',
+    assumptions: ['Steady wind', 'Quadratic wind dependence', 'Known pCO2 gradient'],
+    limitations: ['Wind product dependent', 'No bubble-mediated transfer', 'Seasonal pCO2 variability'],
+    references: ['Wanninkhof 2014, Limnol. Oceanogr. Methods 12:351-362', 'Nightingale et al. 2000'],
+    preprocessingNotes: ['Use Wanninkhof (2014) coefficient 0.251 (not 0.31)', 'Nightingale (2000) alternative for coastal', 'pCO2 from SOCAT database'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_57 = makeTool(57, 'Ocean Nutrient Ratios', 'bar', CARBON_BANDS,
-  [{ param: 'C', min: 0, max: 1000 }, { param: 'N', min: 0, max: 100 }, { param: 'P', min: 0, max: 10 }],
-  ['Classic Redfield 106:16:1', 'Modern median: 163:22:1 (deviations exist)', 'Regional variations significant'],
-  { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ['Regional variability', 'Species composition', 'Nutrient limitation'], assessment: 'Redfield ratio varies regionally. Classic 106:16:1, modern median 163:22:1.' },
-  'Redfield ratio: C:N:P = 106:16:1. Modern median ~163:22:1.', ['Classic 106:16:1; modern median 163:22:1.', 'Regional deviations significant.', 'Use for biogeochemical modeling.'], ['Steady-state plankton', 'Balanced growth', 'No nutrient limitation'], ['Regional variations large', 'Species-dependent', 'Not for nutrient-limited regions'], ['Redfield 1934'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 57 — Ocean Nutrient Ratios
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_57: ToolWorkflowDef = {
+  toolId: 57,
+  name: 'Ocean Nutrient Ratios',
+  vizType: 'bar',
+  classificationBands: CARBON_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'C', min: 0, max: 1000 }, { param: 'N', min: 0, max: 100 }, { param: 'P', min: 0, max: 10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Classic Redfield 106:16:1');
+    log.push('  Modern median: 163:22:1 (deviations exist)');
+    log.push('  Regional variations significant');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CARBON_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Regional variability', contribution: 'Varies' },
+      { factor: 'Species composition', contribution: 'Varies' },
+      { factor: 'Nutrient limitation', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Redfield ratio varies regionally. Classic 106:16:1, modern median 163:22:1.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Ocean Nutrient Ratios: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Redfield ratio: C:N:P = 106:16:1. Modern median ~163:22:1.`,
+    recommendations: ['Classic 106:16:1; modern median 163:22:1.', 'Regional deviations significant.', 'Use for biogeochemical modeling.'],
+  }),
+  metadata: {
+    methodology: 'Redfield ratio: C:N:P = 106:16:1. Modern median ~163:22:1.',
+    assumptions: ['Steady-state plankton', 'Balanced growth', 'No nutrient limitation'],
+    limitations: ['Regional variations large', 'Species-dependent', 'Not for nutrient-limited regions'],
+    references: ['Redfield 1934'],
+    preprocessingNotes: ['Classic Redfield 106:16:1', 'Modern median: 163:22:1 (deviations exist)', 'Regional variations significant'],
+  },
+  dependencies: [],
+};
 
-// Eqs 58-63: Agriculture
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 58 — Crop Growing Degree Days
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_58: ToolWorkflowDef = {
+  toolId: 58,
+  name: 'Crop Growing Degree Days',
+  vizType: 'timeseries',
+  classificationBands: AGRI_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Tavg', min: -10, max: 50 }, { param: 'Tbase', min: 0, max: 20 }, { param: 'Tupper', min: 20, max: 50 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Temperature from Open-Meteo');
+    log.push('  Crop-specific Tbase (wheat 0, maize 10, rice 10)');
+    log.push('  Upper threshold for heat stress');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, AGRI_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 10,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Temperature data', contribution: 'Varies' },
+      { factor: 'Crop-specific thresholds', contribution: 'Varies' },
+      { factor: 'Daily vs hourly accumulation', contribution: 'Varies' },
+    ],
+    overallAssessment: 'GDD has +/- 10% uncertainty. Crop-specific thresholds vary by cultivar.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Crop Growing Degree Days: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. GDD = sum max(min(Tavg, Tupper) - Tbase, 0). Crop-specific Tbase and Tupper.`,
+    recommendations: ['Tbase varies by crop: wheat 0, maize 10, rice 10.', 'Tupper caps heat stress.', 'Use daily Tavg from Open-Meteo.'],
+  }),
+  metadata: {
+    methodology: 'GDD = sum max(min(Tavg, Tupper) - Tbase, 0). Crop-specific Tbase and Tupper.',
+    assumptions: ['Single sine wave daily T', 'No stress above Tupper', 'Base temp constant'],
+    limitations: ['Heat stress not fully captured', 'Cultivar-specific thresholds', 'Requires daily temperature data'],
+    references: ['McMaster 1997'],
+    preprocessingNotes: ['Temperature from Open-Meteo', 'Crop-specific Tbase (wheat 0, maize 10, rice 10)', 'Upper threshold for heat stress'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_58 = makeTool(58, 'Crop Growing Degree Days', 'timeseries', AGRI_BANDS,
-  [{ param: 'Tavg', min: -10, max: 50 }, { param: 'Tbase', min: 0, max: 20 }, { param: 'Tupper', min: 20, max: 50 }],
-  ['Temperature from Open-Meteo', 'Crop-specific Tbase (wheat 0, maize 10, rice 10)', 'Upper threshold for heat stress'],
-  { method: 'empirical', rmse: 10, rmseUnit: '%', factors: ['Temperature data', 'Crop-specific thresholds', 'Daily vs hourly accumulation'], assessment: 'GDD has +/- 10% uncertainty. Crop-specific thresholds vary by cultivar.' },
-  'GDD = sum max(min(Tavg, Tupper) - Tbase, 0). Crop-specific Tbase and Tupper.', ['Tbase varies by crop: wheat 0, maize 10, rice 10.', 'Tupper caps heat stress.', 'Use daily Tavg from Open-Meteo.'], ['Single sine wave daily T', 'No stress above Tupper', 'Base temp constant'], ['Heat stress not fully captured', 'Cultivar-specific thresholds', 'Requires daily temperature data'], ['McMaster 1997'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 59 — Priestley-Taylor Evapotranspiration
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_59: ToolWorkflowDef = {
+  toolId: 59,
+  name: 'Priestley-Taylor Evapotranspiration',
+  vizType: 'timeseries',
+  classificationBands: WATER_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'alpha', min: 1, max: 2 }, { param: 'delta', min: 0, max: 1 }, { param: 'gamma', min: 0.04, max: 0.1 }, { param: 'Rn', min: -100, max: 1000 }, { param: 'G', min: -100, max: 500 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Alpha = 1.26 for well-watered surfaces');
+    log.push('  May be lower (1.08-1.34) for humid regions');
+    log.push('  Net radiation from Open-Meteo');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, WATER_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Alpha coefficient variability', contribution: 'Varies' },
+      { factor: 'Radiation measurement', contribution: 'Varies' },
+      { factor: 'G estimation', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Priestley-Taylor has +/- 15% uncertainty. Alpha = 1.26 varies with surface.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Priestley-Taylor Evapotranspiration: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Priestley-Taylor: ET = alpha * (delta/(delta+gamma)) * (Rn - G). alpha = 1.26.`,
+    recommendations: ['Alpha varies: 1.08-1.34 depending on surface.', 'For humid regions, alpha may be lower.', 'No wind data needed (advantage over FAO-56).'],
+  }),
+  metadata: {
+    methodology: 'Priestley-Taylor: ET = alpha * (delta/(delta+gamma)) * (Rn - G). alpha = 1.26.',
+    assumptions: ['Well-watered surface', 'No advection', 'Alpha = 1.26'],
+    limitations: ['Alpha not universal', 'Advection increases ET', 'Not for water-stressed surfaces'],
+    references: ['Priestley & Taylor 1972'],
+    preprocessingNotes: ['Alpha = 1.26 for well-watered surfaces', 'May be lower (1.08-1.34) for humid regions', 'Net radiation from Open-Meteo'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_59 = makeTool(59, 'Priestley-Taylor Evapotranspiration', 'timeseries', WATER_BANDS,
-  [{ param: 'alpha', min: 1, max: 2 }, { param: 'delta', min: 0, max: 1 }, { param: 'gamma', min: 0.04, max: 0.1 }, { param: 'Rn', min: -100, max: 1000 }, { param: 'G', min: -100, max: 500 }],
-  ['Alpha = 1.26 for well-watered surfaces', 'May be lower (1.08-1.34) for humid regions', 'Net radiation from Open-Meteo'],
-  { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ['Alpha coefficient variability', 'Radiation measurement', 'G estimation'], assessment: 'Priestley-Taylor has +/- 15% uncertainty. Alpha = 1.26 varies with surface.' },
-  'Priestley-Taylor: ET = alpha * (delta/(delta+gamma)) * (Rn - G). alpha = 1.26.', ['Alpha varies: 1.08-1.34 depending on surface.', 'For humid regions, alpha may be lower.', 'No wind data needed (advantage over FAO-56).'], ['Well-watered surface', 'No advection', 'Alpha = 1.26'], ['Alpha not universal', 'Advection increases ET', 'Not for water-stressed surfaces'], ['Priestley & Taylor 1972'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 60 — Hargreaves-Samani ET
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_60: ToolWorkflowDef = {
+  toolId: 60,
+  name: 'Hargreaves-Samani ET',
+  vizType: 'timeseries',
+  classificationBands: WATER_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Ra', min: 0, max: 50 }, { param: 'Tmax', min: -10, max: 50 }, { param: 'Tmin', min: -30, max: 40 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Extraterrestrial radiation from latitude and date');
+    log.push('  Tmax/Tmin from Open-Meteo');
+    log.push('  Coefficient 0.0023 calibrated');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, WATER_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Coefficient 0.0023 calibration', contribution: 'Varies' },
+      { factor: 'Temperature range proxy for radiation', contribution: 'Varies' },
+      { factor: 'Wind/humidity not included', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Hargreaves has +/- 20% uncertainty. Temperature-only method, no wind/humidity needed.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Hargreaves-Samani ET: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Hargreaves: ET0 = 0.0023 * Ra * (Tavg+17.8) * sqrt(Tmax-Tmin) * 0.408.`,
+    recommendations: ['Temperature-only method (no wind/RH needed).', 'Coefficient 0.0023 calibrated for semi-arid.', 'Validate against FAO-56 where data available.'],
+  }),
+  metadata: {
+    methodology: 'Hargreaves: ET0 = 0.0023 * Ra * (Tavg+17.8) * sqrt(Tmax-Tmin) * 0.408.',
+    assumptions: ['No advection', 'Cloud-free or radiation from Tmax-Tmin', 'Calibrated for specific climate'],
+    limitations: ['Not for humid/windy regions', 'Requires Tmax-Tmin range', 'Less accurate than FAO-56'],
+    references: ['Hargreaves & Samani 1985'],
+    preprocessingNotes: ['Extraterrestrial radiation from latitude and date', 'Tmax/Tmin from Open-Meteo', 'Coefficient 0.0023 calibrated'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_60 = makeTool(60, 'Hargreaves-Samani ET', 'timeseries', WATER_BANDS,
-  [{ param: 'Ra', min: 0, max: 50 }, { param: 'Tmax', min: -10, max: 50 }, { param: 'Tmin', min: -30, max: 40 }],
-  ['Extraterrestrial radiation from latitude and date', 'Tmax/Tmin from Open-Meteo', 'Coefficient 0.0023 calibrated'],
-  { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ['Coefficient 0.0023 calibration', 'Temperature range proxy for radiation', 'Wind/humidity not included'], assessment: 'Hargreaves has +/- 20% uncertainty. Temperature-only method, no wind/humidity needed.' },
-  'Hargreaves: ET0 = 0.0023 * Ra * (Tavg+17.8) * sqrt(Tmax-Tmin) * 0.408.', ['Temperature-only method (no wind/RH needed).', 'Coefficient 0.0023 calibrated for semi-arid.', 'Validate against FAO-56 where data available.'], ['No advection', 'Cloud-free or radiation from Tmax-Tmin', 'Calibrated for specific climate'], ['Not for humid/windy regions', 'Requires Tmax-Tmin range', 'Less accurate than FAO-56'], ['Hargreaves & Samani 1985'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 61 — FAO Yield-Water Response
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_61: ToolWorkflowDef = {
+  toolId: 61,
+  name: 'FAO Yield-Water Response',
+  vizType: 'scalar',
+  classificationBands: AGRI_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Ya', min: 0, max: 20 }, { param: 'Ym', min: 0, max: 20 }, { param: 'Ky', min: 0, max: 2 }, { param: 'ETa', min: 0, max: 2000 }, { param: 'ETm', min: 0, max: 2000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Crop-specific Ky from FAO-33');
+    log.push('  ETa/ETm from water balance');
+    log.push('  Ym from regional yield data');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, AGRI_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Ky crop-specific', contribution: 'Varies' },
+      { factor: 'ETa/ETm estimation', contribution: 'Varies' },
+      { factor: 'Ym regional variability', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Doorenbos-Kassam has +/- 25% uncertainty. Ky is crop-specific.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `FAO Yield-Water Response: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Yield response: (1-Ya/Ym) = Ky * (1-ETa/ETm). Ky is crop-specific from FAO-33.`,
+    recommendations: ['Ky is crop-specific (FAO-33 tables).', 'ETa/ETm from water balance.', 'Ym from regional yield statistics.'],
+  }),
+  metadata: {
+    methodology: 'Yield response: (1-Ya/Ym) = Ky * (1-ETa/ETm). Ky is crop-specific from FAO-33.',
+    assumptions: ['Linear yield-ET relationship', 'No stress timing effects', 'Constant Ky'],
+    limitations: ['Nonlinear for severe stress', 'Ky varies with growth stage', 'Requires crop-specific calibration'],
+    references: ['Doorenbos & Kassam 1979, FAO Irrigation and Drainage Paper 33'],
+    preprocessingNotes: ['Crop-specific Ky from FAO-33', 'ETa/ETm from water balance', 'Ym from regional yield data'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_61 = makeTool(61, 'FAO Yield-Water Response', 'scalar', AGRI_BANDS,
-  [{ param: 'Ya', min: 0, max: 20 }, { param: 'Ym', min: 0, max: 20 }, { param: 'Ky', min: 0, max: 2 }, { param: 'ETa', min: 0, max: 2000 }, { param: 'ETm', min: 0, max: 2000 }],
-  ['Crop-specific Ky from FAO-33', 'ETa/ETm from water balance', 'Ym from regional yield data'],
-  { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ['Ky crop-specific', 'ETa/ETm estimation', 'Ym regional variability'], assessment: 'Doorenbos-Kassam has +/- 25% uncertainty. Ky is crop-specific.' },
-  'Yield response: (1-Ya/Ym) = Ky * (1-ETa/ETm). Ky is crop-specific from FAO-33.', ['Ky is crop-specific (FAO-33 tables).', 'ETa/ETm from water balance.', 'Ym from regional yield statistics.'], ['Linear yield-ET relationship', 'No stress timing effects', 'Constant Ky'], ['Nonlinear for severe stress', 'Ky varies with growth stage', 'Requires crop-specific calibration'], ['Doorenbos & Kassam 1979, FAO Irrigation and Drainage Paper 33'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 62 — Phytoplankton Temperature Growth
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_62: ToolWorkflowDef = {
+  toolId: 62,
+  name: 'Phytoplankton Temperature Growth',
+  vizType: 'timeseries',
+  classificationBands: AGRI_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'mu20', min: 0, max: 5 }, { param: 'T', min: 0, max: 40 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Eppley (1972) Q10 = 1.88 (1.066^10)');
+    log.push('  Modern: thermal optimum, not exponential');
+    log.push('  SST from NOAA OISST');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, AGRI_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Q10 variability', contribution: 'Varies' },
+      { factor: 'Thermal optimum not captured', contribution: 'Varies' },
+      { factor: 'Species-specific curves', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Eppley curve is classic but modern research shows thermal optima. Q10 = 1.88.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Phytoplankton Temperature Growth: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Eppley: mu_max = mu20 * 1.066^(T-20). Q10 = 1.88. Modern: thermal optimum models.`,
+    recommendations: ['Q10 = 1.88 (1.066^10).', 'Modern: thermal optimum, not exponential.', 'Species-specific curves exist.'],
+  }),
+  metadata: {
+    methodology: 'Eppley: mu_max = mu20 * 1.066^(T-20). Q10 = 1.88. Modern: thermal optimum models.',
+    assumptions: ['Exponential growth', 'No thermal optimum', 'Nutrient-replete'],
+    limitations: ['Thermal optimum not captured', 'Nutrient limitation ignored', 'Species-specific curves differ'],
+    references: ['Eppley 1972, Fishery Bulletin 70:1063-1085'],
+    preprocessingNotes: ['Eppley (1972) Q10 = 1.88 (1.066^10)', 'Modern: thermal optimum, not exponential', 'SST from NOAA OISST'],
+  },
+  dependencies: [],
+};
 
-export const TOOL_62 = makeTool(62, 'Phytoplankton Temperature Growth', 'timeseries', AGRI_BANDS,
-  [{ param: 'mu20', min: 0, max: 5 }, { param: 'T', min: 0, max: 40 }],
-  ['Eppley (1972) Q10 = 1.88 (1.066^10)', 'Modern: thermal optimum, not exponential', 'SST from NOAA OISST'],
-  { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ['Q10 variability', 'Thermal optimum not captured', 'Species-specific curves'], assessment: 'Eppley curve is classic but modern research shows thermal optima. Q10 = 1.88.' },
-  'Eppley: mu_max = mu20 * 1.066^(T-20). Q10 = 1.88. Modern: thermal optimum models.', ['Q10 = 1.88 (1.066^10).', 'Modern: thermal optimum, not exponential.', 'Species-specific curves exist.'], ['Exponential growth', 'No thermal optimum', 'Nutrient-replete'], ['Thermal optimum not captured', 'Nutrient limitation ignored', 'Species-specific curves differ'], ['Eppley 1972, Fishery Bulletin 70:1063-1085'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 63 — Bigleaf Penman-Monteith
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_63: ToolWorkflowDef = {
+  toolId: 63,
+  name: 'Bigleaf Penman-Monteith',
+  vizType: 'scalar',
+  classificationBands: AGRI_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'rho', min: 0.5, max: 1.5 }, { param: 'cp', min: 800, max: 1200 }, { param: 'Ts', min: -10, max: 60 }, { param: 'Ta', min: -20, max: 50 }, { param: 'ra', min: 1, max: 500 }, { param: 'rs', min: 10, max: 1000 }, { param: 'es', min: 0, max: 100 }, { param: 'ea', min: 0, max: 100 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Aerodynamic resistance from wind and roughness');
+    log.push('  Surface resistance from stomatal conductance');
+    log.push('  Saturation vapor pressure from Eq 3');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, AGRI_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'ra estimation', contribution: 'Varies' },
+      { factor: 'rs from stomatal model', contribution: 'Varies' },
+      { factor: 'Surface temperature accuracy', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Bigleaf PM has +/- 20% uncertainty. ra and rs are key uncertain parameters.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Bigleaf Penman-Monteith: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Bigleaf PM: H = rho*cp*(Ts-Ta)/ra; LE = rho*Lv*(es-ea)/(ra+rs).`,
+    recommendations: ['ra from wind + roughness.', 'rs from stomatal conductance model (Eq 50).', 'Used in land-surface models.'],
+  }),
+  metadata: {
+    methodology: 'Bigleaf PM: H = rho*cp*(Ts-Ta)/ra; LE = rho*Lv*(es-ea)/(ra+rs).',
+    assumptions: ['Bigleaf approximation', 'No canopy stratification', 'Linear gradients'],
+    limitations: ['Not for tall canopies', 'Requires surface temperature', 'ra and rs uncertain'],
+    references: ['Sellers 1986'],
+    preprocessingNotes: ['Aerodynamic resistance from wind and roughness', 'Surface resistance from stomatal conductance', 'Saturation vapor pressure from Eq 3'],
+  },
+  dependencies: [3, 50],
+};
 
-export const TOOL_63 = makeTool(63, 'Bigleaf Penman-Monteith', 'scalar', AGRI_BANDS,
-  [{ param: 'rho', min: 0.5, max: 1.5 }, { param: 'cp', min: 800, max: 1200 }, { param: 'Ts', min: -10, max: 60 }, { param: 'Ta', min: -20, max: 50 }, { param: 'ra', min: 1, max: 500 }, { param: 'rs', min: 10, max: 1000 }, { param: 'es', min: 0, max: 100 }, { param: 'ea', min: 0, max: 100 }],
-  ['Aerodynamic resistance from wind and roughness', 'Surface resistance from stomatal conductance', 'Saturation vapor pressure from Eq 3'],
-  { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ['ra estimation', 'rs from stomatal model', 'Surface temperature accuracy'], assessment: 'Bigleaf PM has +/- 20% uncertainty. ra and rs are key uncertain parameters.' },
-  'Bigleaf PM: H = rho*cp*(Ts-Ta)/ra; LE = rho*Lv*(es-ea)/(ra+rs).', ['ra from wind + roughness.', 'rs from stomatal conductance model (Eq 50).', 'Used in land-surface models.'], ['Bigleaf approximation', 'No canopy stratification', 'Linear gradients'], ['Not for tall canopies', 'Requires surface temperature', 'ra and rs uncertain'], ['Sellers 1986'], [3, 50]);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 64 — Chapman Ozone Cycle
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_64: ToolWorkflowDef = {
+  toolId: 64,
+  name: 'Chapman Ozone Cycle',
+  vizType: 'scalar',
+  classificationBands: AQI_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'O2', min: 0, max: 20 }, { param: 'hv', min: 0, max: 2 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Add NOx, HOx, ClOx catalytic cycles (Chapman alone overestimates O3 by ~2x)');
+    log.push('  Solar UV from NOAA SWPC');
+    log.push('  Stratospheric conditions');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, AQI_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 50,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Missing catalytic cycles', contribution: 'Varies' },
+      { factor: 'UV flux estimation', contribution: 'Varies' },
+      { factor: 'Stratospheric conditions', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Chapman alone overestimates O3 by ~2x. Must include catalytic cycles (NOx, HOx, ClOx).',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Chapman Ozone Cycle: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Chapman cycle: O2 + hv -> 2O; O + O2 + M -> O3; O3 + hv -> O2 + O; O + O3 -> 2O2.`,
+    recommendations: ['Add NOx, HOx, ClOx catalytic destruction.', 'Chapman alone overestimates O3 by ~2x.', 'Use CAMS for atmospheric composition.'],
+  }),
+  metadata: {
+    methodology: 'Chapman cycle: O2 + hv -> 2O; O + O2 + M -> O3; O3 + hv -> O2 + O; O + O3 -> 2O2.',
+    assumptions: ['Pure oxygen chemistry', 'Steady state', 'No catalytic cycles'],
+    limitations: ['Missing catalytic cycles', 'No transport', 'Steady-state assumption'],
+    references: ['Chapman 1930', 'WMO Ozone Assessment 2022'],
+    preprocessingNotes: ['Add NOx, HOx, ClOx catalytic cycles (Chapman alone overestimates O3 by ~2x)', 'Solar UV from NOAA SWPC', 'Stratospheric conditions'],
+  },
+  dependencies: [],
+};
 
-// Eqs 64-65: Atmospheric Chemistry
-export const TOOL_64 = makeTool(64, 'Chapman Ozone Cycle', 'scalar', AQI_BANDS,
-  [{ param: 'O2', min: 0, max: 20 }, { param: 'hv', min: 0, max: 2 }],
-  ['Add NOx, HOx, ClOx catalytic cycles (Chapman alone overestimates O3 by ~2x)', 'Solar UV from NOAA SWPC', 'Stratospheric conditions'],
-  { method: 'empirical', rmse: 50, rmseUnit: '%', factors: ['Missing catalytic cycles', 'UV flux estimation', 'Stratospheric conditions'], assessment: 'Chapman alone overestimates O3 by ~2x. Must include catalytic cycles (NOx, HOx, ClOx).' },
-  'Chapman cycle: O2 + hv -> 2O; O + O2 + M -> O3; O3 + hv -> O2 + O; O + O3 -> 2O2.', ['Add NOx, HOx, ClOx catalytic destruction.', 'Chapman alone overestimates O3 by ~2x.', 'Use CAMS for atmospheric composition.'], ['Pure oxygen chemistry', 'Steady state', 'No catalytic cycles'], ['Missing catalytic cycles', 'No transport', 'Steady-state assumption'], ['Chapman 1930', 'WMO Ozone Assessment 2022'], []);
-
-export const TOOL_65 = makeTool(65, 'Pollutant Lifetime', 'scalar', AQI_BANDS,
-  [{ param: 'k', min: 1e-20, max: 1e-5 }, { param: 'OH', min: 1e-10, max: 0.001 }],
-  ['OH concentration ~ 1e6 molecules/cm3', 'Rate constants temperature-dependent', 'Lifetime = 1/(k*[OH])'],
-  { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ['OH concentration poorly constrained', 'Rate constant T-dependence', 'Multi-species reactions'], assessment: 'OH radical concentrations are poorly constrained (+/- 30%). [OH] ~ 1e6 mol/cm3.' },
-  'Pollutant lifetime: tau = 1/(k * [OH]). [OH] ~ 1e6 molecules/cm3.', ['[OH] ~ 1e6 molecules/cm3 (global mean).', 'Rate constants temperature-dependent.', 'Consider multi-species reactions.'], ['Single reaction pathway', 'Constant [OH]', 'No photolysis'], ['OH poorly constrained', 'Multiple reaction pathways', 'Photolysis not included'], ['Atkinson 2000', 'Seinfeld & Pandis 2016'], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 65 — Pollutant Lifetime
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_65: ToolWorkflowDef = {
+  toolId: 65,
+  name: 'Pollutant Lifetime',
+  vizType: 'scalar',
+  classificationBands: AQI_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'k', min: 1e-20, max: 1e-5 }, { param: 'OH', min: 1e-10, max: 0.001 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  OH concentration ~ 1e6 molecules/cm3');
+    log.push('  Rate constants temperature-dependent');
+    log.push('  Lifetime = 1/(k*[OH])');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, AQI_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'OH concentration poorly constrained', contribution: 'Varies' },
+      { factor: 'Rate constant T-dependence', contribution: 'Varies' },
+      { factor: 'Multi-species reactions', contribution: 'Varies' },
+    ],
+    overallAssessment: 'OH radical concentrations are poorly constrained (+/- 30%). [OH] ~ 1e6 mol/cm3.',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Pollutant Lifetime: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Pollutant lifetime: tau = 1/(k * [OH]). [OH] ~ 1e6 molecules/cm3.`,
+    recommendations: ['[OH] ~ 1e6 molecules/cm3 (global mean).', 'Rate constants temperature-dependent.', 'Consider multi-species reactions.'],
+  }),
+  metadata: {
+    methodology: 'Pollutant lifetime: tau = 1/(k * [OH]). [OH] ~ 1e6 molecules/cm3.',
+    assumptions: ['Single reaction pathway', 'Constant [OH]', 'No photolysis'],
+    limitations: ['OH poorly constrained', 'Multiple reaction pathways', 'Photolysis not included'],
+    references: ['Atkinson 2000', 'Seinfeld & Pandis 2016'],
+    preprocessingNotes: ['OH concentration ~ 1e6 molecules/cm3', 'Rate constants temperature-dependent', 'Lifetime = 1/(k*[OH])'],
+  },
+  dependencies: [],
+};
 
 export const TOOLS_PART3: Record<number, ToolWorkflowDef> = {
   26: TOOL_26, 27: TOOL_27, 28: TOOL_28, 29: TOOL_29, 30: TOOL_30,
@@ -1223,92 +3356,3825 @@ export const TOOLS_PART3: Record<number, ToolWorkflowDef> = {
  * Generated programmatically from tool metadata.
  */
 
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 66 — Sverdrup Balance
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_66: ToolWorkflowDef = {
+  toolId: 66,
+  name: 'Sverdrup Balance',
+  vizType: 'vector',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'beta', min: 0, max: 1e-10 },{ param: 'rho0', min: 1000, max: 1050 },{ param: 'curlTau_z', min: -0.001, max: 0.001 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Wind stress curl from ASCAT');
+    log.push('  rho0 = 1025 kg/m3');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Wind stress curl', contribution: 'Varies' },
+      { factor: 'Reference density', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 20% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Sverdrup Balance: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Wind-driven interior ocean transport.`,
+    recommendations: ["Valid for ocean interior only.","CMEMS for ocean currents."],
+  }),
+  metadata: {
+    methodology: 'Wind-driven interior ocean transport.',
+    assumptions: ["Steady state","Interior ocean"],
+    limitations: ["Fails in western boundary currents"],
+    references: ["Sverdrup 1947"],
+    preprocessingNotes: ["Wind stress curl from ASCAT","rho0 = 1025 kg/m3"],
+  },
+  dependencies: [],
+};
 
-export const TOOL_66 = mt(66, "Sverdrup Balance", 'vector', OCEAN_BANDS, [{"param":"beta","min":0,"max":1e-10},{"param":"rho0","min":1000,"max":1050},{"param":"curlTau_z","min":-0.001,"max":0.001}], ["Wind stress curl from ASCAT","rho0 = 1025 kg/m3"], { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ["Wind stress curl","Reference density"], assessment: '+/- 20% uncertainty' }, "Wind-driven interior ocean transport.", ["Valid for ocean interior only.","CMEMS for ocean currents."], ["Steady state","Interior ocean"], ["Fails in western boundary currents"], ["Sverdrup 1947"], []);
-export const TOOL_67 = mt(67, "Stommel Western Boundary Current", 'vector', OCEAN_BANDS, [{"param":"beta","min":0,"max":1e-10},{"param":"psi","min":-1000000000,"max":1000000000},{"param":"curlTau","min":-0.001,"max":0.001},{"param":"R","min":1e-10,"max":1},{"param":"nu","min":0,"max":1}], ["Linear friction model","Gulf Stream application"], { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ["Friction parameter","Linear assumption"], assessment: 'Idealized model for westward intensification' }, "Western boundary intensification with linear friction.", ["Explains Gulf Stream, Kuroshio.","Real boundaries have eddies."], ["Linear dynamics","Constant friction"], ["Oversimplified friction","No eddies"], ["Stommel 1948"], []);
-export const TOOL_68 = mt(68, "Munk Viscous Boundary Layer", 'vector', OCEAN_BANDS, [{"param":"AH","min":0,"max":10000000},{"param":"beta","min":0,"max":1e-10},{"param":"psi","min":-1000000000,"max":1000000000},{"param":"curlTau","min":-0.001,"max":0.001}], ["Lateral eddy viscosity","Biharmonic operator"], { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ["Eddy viscosity","Biharmonic"], assessment: 'Munk model for boundary current width' }, "Lateral viscosity, biharmonic for boundary width.", ["AH from mixing observations.","More realistic than Stommel."], ["Constant viscosity","Linear dynamics"], ["AH poorly constrained","No eddies"], ["Munk 1950"], []);
-export const TOOL_69 = mt(69, "Stommel Box Model", 'timeseries', OCEAN_BANDS, [{"param":"lambda","min":0,"max":1},{"param":"Tstar","min":-5,"max":40},{"param":"T","min":-5,"max":40},{"param":"q","min":0,"max":5}], ["Thermohaline stability","AMOC collapse analysis"], { method: 'qualitative', factors: ["Box model","Bifurcation"], assessment: 'Conceptual model showing AMOC bistability' }, "Thermohaline circulation bistability.", ["Shows AMOC bistability.","Freshwater forcing triggers collapse."], ["Two-box simplification","No mixing"], ["Oversimplified","No transient eddies"], ["Stommel 1961"], []);
-export const TOOL_70 = mt(70, "TEOS-10 Seawater Density", 'profile', OCEAN_BANDS, [{"param":"S","min":0,"max":42},{"param":"Theta","min":-5,"max":40},{"param":"p","min":0,"max":10000}], ["GSW library reference","Absolute Salinity"], { method: 'analytical', factors: ["GSW implementation","Absolute vs Practical Salinity"], assessment: 'TEOS-10 is exact with GSW library' }, "75-term polynomial seawater density.", ["Use GSW library.","Absolute Salinity, Conservative Temperature."], ["TEOS-10 standard","Known S,T,p"], ["Requires GSW","Absolute Salinity needs atlas"], ["IOC 2010, TEOS-10 Manual"], []);
-export const TOOL_71 = mt(71, "Osborn-Cox Turbulent Diffusivity", 'scalar', OCEAN_BANDS, [{"param":"gamma","min":0,"max":0.5},{"param":"eps","min":1e-12,"max":0.0001},{"param":"N2","min":0,"max":1}], ["Mixing efficiency gamma ~ 0.2","TKE from microstructure","N2 from CTD"], { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ["Gamma","Epsilon","N2"], assessment: '+/- 30% uncertainty' }, "Vertical diffusivity from TKE dissipation.", ["Gamma ~ 0.2.","Epsilon from microstructure."], ["Steady state","Constant gamma"], ["Gamma not universal","Requires microstructure"], ["Osborn 1980"], []);
-export const TOOL_72 = mt(72, "Price-Weller-Pinkel Mixed Layer", 'gauge', OCEAN_BANDS, [{"param":"Ri","min":0,"max":10}], ["Ri = 0.65 threshold","Wind from ASCAT"], { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ["Ri threshold","Wind forcing"], assessment: '+/- 20% uncertainty' }, "Mixed layer deepening at Ri > 0.65.", ["Ri = 0.65 threshold.","Argo for profiles."], ["Bulk mixed layer","Linear stratification"], ["Simplified mixing","No lateral processes"], ["Price, Weller & Pinkel 1986"], []);
-export const TOOL_73 = mt(73, "Pierson-Moskowitz Sea State", 'spectrum', OCEAN_BANDS, [{"param":"alpha","min":0,"max":1},{"param":"g","min":9.8,"max":9.82},{"param":"fm","min":0.01,"max":10}], ["Fully developed sea assumption","NDBC buoy validation"], { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ["Fully developed","Wind speed"], assessment: '+/- 15% for fully developed seas' }, "Fully developed sea wave spectrum.", ["Fully developed only.","JONSWAP for fetch-limited."], ["Fully developed","Infinite fetch"], ["Not for fetch-limited","No swell"], ["Pierson & Moskowitz 1964"], []);
-export const TOOL_74 = mt(74, "Wave Runup (Stockdon)", 'scalar', OCEAN_BANDS, [{"param":"eta_u","min":0,"max":5},{"param":"Sw","min":0,"max":5},{"param":"Sig","min":0,"max":5}], ["Stockdon 2006 empirical","Beach slope from LiDAR"], { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ["Beach slope","Wave conditions"], assessment: '+/- 20% uncertainty' }, "2% exceedance wave runup.", ["Most widely used.","NDBC for wave data."], ["Dissipative beaches","Uniform slope"], ["Not for reflective beaches","Vegetation not included"], ["Stockdon et al. 2006"], []);
-export const TOOL_75 = mt(75, "Bruun Rule", 'timeseries', OCEAN_BANDS, [{"param":"Lstar","min":50,"max":5000},{"param":"S","min":0,"max":1},{"param":"B","min":0,"max":20},{"param":"hstar","min":1,"max":50}], ["SLR from satellite altimetry","Closure depth from wave climate"], { method: 'empirical', rmse: 50, rmseUnit: '%', factors: ["Closure depth","Profile length"], assessment: '+/- 50% highly simplified' }, "Shoreline retreat from sea level rise.", ["Highly simplified.","GEBCO for bathymetry."], ["Equilibrium profile","No longshore transport"], ["Oversimplified","No sediment budget"], ["Bruun 1962"], []);
-export const TOOL_76 = mt(76, "Breaker Criterion", 'scalar', OCEAN_BANDS, [{"param":"db","min":0.1,"max":50}], ["McCowan 0.78 coefficient","Bathymetry from GEBCO"], { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ["Breaker coefficient","Beach slope"], assessment: '+/- 15% uncertainty' }, "Breaking wave height from water depth.", ["0.78 is McCowan coefficient.","NDBC for waves."], ["Spilling breakers","Uniform slope"], ["Not for plunging","No current interaction"], ["McCowan 1894"], []);
-export const TOOL_77 = mt(77, "Longshore Sediment Transport", 'vector', OCEAN_BANDS, [{"param":"K","min":0.2,"max":2},{"param":"Hsb","min":0.1,"max":10},{"param":"theta_b","min":0,"max":1.57}], ["CERC K ~ 0.77","Breaking wave from models"], { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ["CERC coefficient","Breaking angle"], assessment: '+/- 30% uncertainty' }, "Longshore sediment transport rate.", ["K ~ 0.77 (varies 0.2-2).","Wave models for Hsb."], ["Straight shoreline","Spilling breakers"], ["K highly variable","No tidal effects"], ["US Army Corps 1984"], []);
-export const TOOL_78 = mt(78, "Wave Dispersion Relation", 'scalar', OCEAN_BANDS, [{"param":"g","min":9.8,"max":9.82},{"param":"k","min":0.001,"max":10},{"param":"h","min":0,"max":10000}], ["Water depth from GEBCO","Iterative solution"], { method: 'analytical', factors: ["Exact for linear waves","Water depth accuracy"], assessment: 'Exact for small amplitude waves' }, "Wave celerity and wavelength from depth.", ["Exact for linear waves.","GEBCO for bathymetry."], ["Small amplitude","Incompressible"], ["Not for steep waves","No breaking"], ["Airy 1845"], []);
-export const TOOL_79 = mt(79, "Stokes Drift", 'profile', OCEAN_BANDS, [{"param":"omega","min":0.01,"max":10},{"param":"k","min":0.001,"max":10},{"param":"a","min":0,"max":20},{"param":"z","min":-500,"max":0}], ["Wave amplitude from buoys","Wavenumber from dispersion"], { method: 'analytical', factors: ["Wave amplitude","Second-order"], assessment: 'Exact for linear waves to second order' }, "Wave-driven mean surface drift.", ["Second-order accurate.","Decays with depth."], ["Linear wave theory","Monochromatic"], ["No wave-wave interactions","Single frequency"], ["Stokes 1847"], []);
-export const TOOL_80 = mt(80, "JONSWAP Wave Spectrum", 'spectrum', OCEAN_BANDS, [{"param":"alpha","min":0.001,"max":0.05},{"param":"g","min":9.8,"max":9.82},{"param":"fm","min":0.01,"max":10},{"param":"gamma","min":1,"max":10}], ["gamma = 3.3 standard","sigma_a=0.07, sigma_b=0.09"], { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ["Peak enhancement","Fetch"], assessment: '+/- 15% for fetch-limited' }, "Fetch-limited sea state spectrum.", ["gamma = 3.3.","Fetch-limited seas."], ["Fetch-limited","Steady wind"], ["Not for fully developed","No swell"], ["Hasselmann et al. 1973"], []);
-export const TOOL_81 = mt(81, "Stream Power Law", 'scalar', RISK_BANDS, [{"param":"K","min":0,"max":1},{"param":"A","min":0,"max":1000000000000},{"param":"m","min":0,"max":2},{"param":"S","min":0,"max":1}], ["Drainage area from HydroSHEDS","Slope from SRTM"], { method: 'empirical', rmse: 50, rmseUnit: '%', factors: ["Erodibility","Exponents"], assessment: '+/- 50% uncertainty' }, "Bedrock erosion rate from stream power.", ["K poorly constrained.","m ~ 0.5, n ~ 1."], ["Steady state","Detachment-limited"], ["Not for transport-limited","K varies"], ["Howard 1983"], []);
-export const TOOL_82 = mt(82, "River Network Scaling", 'scatter', RISK_BANDS, [{"param":"c","min":0,"max":100},{"param":"A","min":0.01,"max":100000},{"param":"h","min":0.4,"max":0.8}], ["Hack exponent h ~ 0.6","HydroSHEDS for area"], { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ["Hack exponent","Network extraction"], assessment: '+/- 20% uncertainty' }, "River length-drainage area scaling.", ["Hack exponent h ~ 0.6 is the global average value.","Use HydroSHEDS database for drainage area extraction.","Network extraction required for river length."], ["Self-similar basins","Steady state"], ["h varies by region","Requires network"], ["Hack 1957"], []);
-export const TOOL_83 = mt(83, "Richardson Fractal Dimension", 'scalar', RISK_BANDS, [{"param":"L","min":0,"max":10000},{"param":"s","min":0.1,"max":1000}], ["Coastline from vector data","Multiple ruler lengths"], { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ["Measurement scale","Data resolution"], assessment: '+/- 15% uncertainty' }, "Coastline fractal dimension.", ["D typically 1.0-1.5.","Scale-dependent."], ["Self-similar","Infinite detail"], ["Limited scale range","Requires digitized coastline"], ["Richardson 1961"], []);
-export const TOOL_84 = mt(84, "Slope Stability Analysis", 'gauge', RISK_BANDS, [{"param":"cprime","min":0,"max":100},{"param":"gammaz","min":0,"max":500},{"param":"cosB","min":0,"max":1},{"param":"u","min":0,"max":200},{"param":"phiP","min":0.1,"max":1.5},{"param":"sinB","min":0,"max":1},{"param":"cosB2","min":0,"max":1}], ["Slope from SRTM/ALOS","Soil from ISRIC","Pore pressure from rainfall"], { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ["Cohesion","Friction angle","Pore pressure"], assessment: '+/- 30% uncertainty, FS>1.5 stable' }, "Infinite slope factor of safety.", ["FS > 1.5: stable.","Soil from ISRIC SoilGrids."], ["Infinite slope","Uniform soil"], ["Not for 3D slopes","Pore pressure critical"], ["Skempton 1957"], []);
-export const TOOL_85 = mt(85, "Voellmy Friction Model", 'scalar', RISK_BANDS, [{"param":"mu","min":0,"max":1},{"param":"sigma_n","min":0,"max":1000},{"param":"xi","min":0,"max":10000}], ["Coulomb friction from material","Turbulent friction from flow velocity"], { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ["Friction coefficients","Flow velocity"], assessment: '+/- 30% for debris flow runout' }, "Debris flow friction model.", ["Mu and xi from calibration.","RAMMS model uses Voellmy."], ["Steady uniform flow","Constant friction"], ["Parameters event-specific","No entrainment"], ["Voellmy 1955"], []);
-export const TOOL_86 = mt(86, "Stream Power Index", 'heatmap', RISK_BANDS, [{"param":"As","min":0,"max":1000000},{"param":"tanBeta","min":0,"max":10}], ["Flow accumulation from SRTM","Slope from DEM"], { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ["Flow accumulation","DEM resolution"], assessment: '+/- 25% uncertainty' }, "Erosion potential from DEM.", ["Flow accumulation from SRTM.","Log transform for visualization."], ["DEM represents true surface","Flow routing correct"], ["DEM resolution dependent","Artifacts in flat areas"], ["Moore et al. 1991"], []);
-export const TOOL_87 = mt(87, "Topographic Wetness Index", 'heatmap', RISK_BANDS, [{"param":"As","min":0,"max":1000000},{"param":"tanBeta","min":0,"max":10}], ["Flow accumulation from SRTM","Slope from DEM"], { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ["Flow accumulation","DEM resolution","Soil transmissivity"], assessment: '+/- 25% uncertainty' }, "Soil moisture and saturation zones.", ["High TWI = wet areas.","SRTM for DEM."], ["Steady state","Uniform soil"], ["DEM resolution dependent","No soil variability"], ["Beven & Kirkby 1979"], []);
-export const TOOL_88 = mt(88, "Lake Evaporation Estimation", 'scalar', OCEAN_BANDS, [{"param":"Km","min":0.1,"max":1.5},{"param":"ew","min":0,"max":100},{"param":"ea","min":0,"max":100},{"param":"u","min":0,"max":100}], ["Vapor pressures from temperature","Wind speed from Open-Meteo"], { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ["Pan coefficient","Wind height"], assessment: '+/- 25% uncertainty' }, "Lake evaporation estimation.", ["Pan coefficient Km ~ 0.7.","Wind at 9m height."], ["Steady conditions","Uniform lake surface"], ["Pan coefficient variable","Stratification ignored"], ["Meyer 1915"], []);
-export const TOOL_89 = mt(89, "Schmidt Stability Number", 'profile', OCEAN_BANDS, [{"param":"A","min":0,"max":10000000000},{"param":"z","min":0,"max":1000}], ["Temperature/density profiles from CTD","Lake morphometry from bathymetry"], { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ["Density profile","Lake morphometry"], assessment: '+/- 20% from density profile quality' }, "Lake stratification strength.", ["Requires density vs depth profile.","Lake morphometry from bathymetry."], ["Static lake","No internal waves"], ["Requires profile data","Lake shape matters"], ["Schmidt 1928"], []);
-export const TOOL_90 = mt(90, "Nash Cascade", 'timeseries', OCEAN_BANDS, [{"param":"n","min":1,"max":10},{"param":"K","min":0.1,"max":48},{"param":"t","min":0,"max":1000},{"param":"Q0","min":0,"max":10000}], ["Nash model for unit hydrograph","N and K from calibration"], { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ["N and K calibration","Rainfall-runoff linearity"], assessment: '+/- 20% uncertainty' }, "Unit hydrograph and flood forecasting.", ["N and K from calibration.","Linear reservoir assumption."], ["Linear reservoirs","Lumped watershed"], ["Nonlinear runoff not captured","Requires calibration"], ["Nash 1957"], []);
-export const TOOL_91 = mt(91, "Glacier Mass Balance (PDD)", 'timeseries', RISK_BANDS, [{"param":"Accum","min":0,"max":10},{"param":"DDF","min":0,"max":0.1},{"param":"Tpos","min":0,"max":5000}], ["Degree-day factor for ice melt","Accumulation from snowfall"], { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ["DDF variability","Accumulation estimation"], assessment: '+/- 30% uncertainty, DDF ice 5-8 mm/C/day' }, "Glacier mass balance from degree-days.", ["DDF for ice: 5-8 mm/C/day.","Accumulation from snowfall."], ["Constant DDF","No debris cover"], ["DDF varies with debris","Requires elevation zones"], ["Braithwaite 1989","Hock 2003"], []);
-export const TOOL_92 = mt(92, "Stefan Permafrost Active Layer", 'profile', RISK_BANDS, [{"param":"K","min":0.1,"max":10},{"param":"DIFI","min":0,"max":10000},{"param":"L","min":0,"max":500000000}], ["Thawing index from temperature sum","Thermal conductivity from soil type"], { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ["Thawing index","Thermal conductivity","Soil moisture"], assessment: '+/- 25% uncertainty' }, "Permafrost active layer depth.", ["Thawing index from ERA5.","K from soil type."], ["Homogeneous soil","Phase change only"], ["No snow insulation","Soil heterogeneity"], ["Stefan 1891"], []);
-export const TOOL_93 = mt(93, "Herron-Langway Firn Densification", 'timeseries', RISK_BANDS, [{"param":"k","min":0,"max":1},{"param":"b","min":0,"max":10000},{"param":"rho_i","min":800,"max":950},{"param":"rho_f","min":300,"max":850}], ["Accumulation rate from ice cores","Ice density = 917 kg/m3"], { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ["Densification rate","Accumulation rate"], assessment: '+/- 30% uncertainty' }, "Firn densification for ice core dating.", ["Accumulation rate from ice cores.","k temperature-dependent."], ["Steady accumulation","No melt"], ["Melt events not captured","Requires accumulation data"], ["Herron & Langway 1980"], []);
-export const TOOL_94 = mt(94, "VEI Volume Relationship", 'gauge', RISK_BANDS, [{"param":"VEI","min":0,"max":8}], ["VEI from Smithsonian GVP","Volume from deposit mapping"], { method: 'empirical', rmse: 0.5, rmseUnit: 'VEI', factors: ["Volume estimation","Eruption classification"], assessment: '+/- 0.5 VEI uncertainty' }, "Volcanic eruption classification.", ["VEI from Smithsonian GVP.","Volume from deposit mapping."], ["Volume-VEI relationship","Representative deposit"], ["Volume poorly constrained","Not for effusive eruptions"], ["Newhall & Self 1982"], []);
-export const TOOL_95 = mt(95, "Morton-Taylor-Turner Buoyant Plume", 'profile', RISK_BANDS, [{"param":"Qdot","min":0,"max":100000},{"param":"rho_air","min":0.5,"max":1.5},{"param":"alpha","min":0.05,"max":0.2}], ["Entrainment coefficient alpha ~ 0.1","Heat output from thermal observations"], { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ["Entrainment coefficient","Heat output"], assessment: '+/- 25% uncertainty' }, "Volcanic plume rise modeling.", ["Alpha ~ 0.1 (standard).","Heat output from thermal satellite."], ["Steady plume","Constant entrainment"], ["Crosswind effects important","Alpha varies"], ["Morton, Taylor & Turner 1956"], []);
-export const TOOL_96 = mt(96, "Budyko-Sellers Energy Balance", 'timeseries', CLIMATE_BANDS, [{"param":"C","min":1000000,"max":10000000000},{"param":"Q","min":0,"max":500},{"param":"alpha","min":0,"max":1},{"param":"I","min":0,"max":400},{"param":"D","min":0,"max":100},{"param":"nabla2T","min":-1,"max":1}], ["Solar constant S/4 for sphere","Albedo temperature dependence"], { method: 'qualitative', factors: ["Albedo parameterization","Diffusion coefficient"], assessment: 'Conceptual climate model' }, "Energy balance climate model.", ["S/4 for sphere averaging.","Ice-albedo feedback included."], ["Zero-dimensional or 1D","No ocean dynamics"], ["No clouds","No ocean heat transport"], ["Budyko 1969","Sellers 1969"], []);
-export const TOOL_97 = mt(97, "Climate Sensitivity", 'scalar', CLIMATE_BANDS, [{"param":"dF","min":0,"max":20},{"param":"lambda0","min":1,"max":5},{"param":"f","min":-5,"max":5}], ["IPCC AR6: ECS ~ 3C","Planck feedback 3.76 W/m2/K"], { method: 'qualitative', factors: ["Cloud feedback","Lapse rate","Water vapor"], assessment: 'IPCC AR6 ECS: 3C (2.5-4.0)' }, "Climate sensitivity from radiative forcing.", ["IPCC AR6: ECS ~ 3C (2.5-4.0).","lambda0 = 3.76 W/m2/K."], ["Linear feedback","Constant feedbacks"], ["Nonlinear feedbacks","State-dependent"], ["IPCC AR6 Chapter 7","Soden & Held 2006"], []);
-export const TOOL_98 = mt(98, "Planck Feedback Parameter", 'scalar', CLIMATE_BANDS, [{"param":"dRdT","min":1,"max":5}], ["At T=255K: 4*sigma*T^3 = 3.76","Pure Planck response only"], { method: 'analytical', factors: ["Blackbody temperature","Stefan-Boltzmann constant"], assessment: 'Pure Planck: 3.76 W/m2/K at T=255K' }, "Planck feedback parameter.", ["3.76 W/m2/K at T=255K (not 3.2).","3.2 includes lapse rate."], ["Blackbody emission","Constant T"], ["Not total feedback","Excludes water vapor/clouds"], ["IPCC AR6 Section 7.2"], []);
-export const TOOL_99 = mt(99, "Rossby Wave Dispersion", 'spectrum', CLIMATE_BANDS, [{"param":"beta","min":0,"max":1e-10},{"param":"kx","min":0,"max":1},{"param":"ky","min":0,"max":1}], ["Beta = df/dy","Wavenumber from wavelength"], { method: 'analytical', factors: ["Beta parameter","Wavenumber accuracy"], assessment: 'Exact for linear barotropic waves' }, "Planetary wave dynamics.", ["Beta = df/dy.","Rossby radius from stratification."], ["Linear waves","Beta-plane"], ["Nonlinear effects","No topographic waves"], ["Rossby 1939"], []);
-export const TOOL_100 = mt(100, "Charney-Stern Theorem", 'scalar', CLIMATE_BANDS, [{"param":"dqdy","min":-1e-9,"max":1e-9}], ["PV gradient from reanalysis","Necessary condition for instability"], { method: 'qualitative', factors: ["PV gradient","Reanalysis resolution"], assessment: 'Necessary not sufficient condition' }, "Baroclinic instability criterion.", ["Necessary, not sufficient.","PV from reanalysis."], ["Linear instability","Zonal mean flow"], ["Necessary not sufficient","Requires QG"], ["Charney & Stern 1962"], []);
-export const TOOL_101 = mt(101, "Eady Growth Rate", 'gauge', CLIMATE_BANDS, [{"param":"f","min":0,"max":0.0002},{"param":"N","min":0.001,"max":0.1},{"param":"dudz","min":0,"max":1}], ["Coefficient 0.3098 from Eady 1949","Wind shear from ERA5","N from stability"], { method: 'analytical', factors: ["Eady model assumptions","Shear measurement","N from stability"], assessment: 'Exact for idealized Eady model' }, "Baroclinic instability growth rate.", ["0.3098 coefficient.","Wind shear from ERA5."], ["Eady model","Constant shear"], ["Idealized model","No moisture"], ["Eady 1949"], []);
-export const TOOL_102 = mt(102, "Quasi-Geostrophic PV", 'contour', CLIMATE_BANDS, [{"param":"psi","min":-1000000000,"max":1000000000},{"param":"f","min":0,"max":0.0002},{"param":"d2psi_dp2","min":-1,"max":1}], ["QG PV from streamfunction","Coriolis from latitude"], { method: 'analytical', factors: ["QG approximation","Streamfunction accuracy"], assessment: 'Conserved in QG flow' }, "Conserved tracer for large-scale dynamics.", ["Conserved in adiabatic QG flow.","ERA5 for streamfunction."], ["QG approximation","Small Rossby number"], ["Breaks for mesoscale","No ageostrophic"], ["Charney 1948"], []);
-export const TOOL_103 = mt(103, "Reynolds Decomposition", 'scalar', CLIMATE_BANDS, [{"param":"ubar","min":0,"max":100},{"param":"uprime","min":-50,"max":50}], ["Mean and fluctuating components","Time averaging"], { method: 'analytical', factors: ["Averaging period","Turbulence definition"], assessment: 'Exact decomposition' }, "Mean + turbulent fluctuation.", ["Foundation of RANS.","Averaging period critical."], ["Stationary flow","Clear scale separation"], ["Averaging period subjective","Non-stationary issues"], ["Reynolds 1895"], []);
-export const TOOL_104 = mt(104, "Ekman Layer Depth", 'profile', CLIMATE_BANDS, [{"param":"Km","min":0.001,"max":1000},{"param":"f","min":0,"max":0.0002}], ["Eddy viscosity from boundary layer","Coriolis from latitude"], { method: 'analytical', factors: ["Eddy viscosity","Coriolis parameter"], assessment: 'Exact for constant eddy viscosity' }, "Frictional boundary layer depth.", ["Constant eddy viscosity.","Breaks near equator."], ["Constant Km","Steady state"], ["Km not constant","Stratification effects"], ["Ekman 1905"], []);
-export const TOOL_105 = mt(105, "Convective Velocity Scale", 'scalar', CLIMATE_BANDS, [{"param":"g","min":0,"max":20},{"param":"thetav","min":200,"max":400},{"param":"wthetav0","min":0,"max":10},{"param":"zi","min":10,"max":5000}], ["Surface heat flux from observations","BL height from lidar/sodar"], { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ["Surface heat flux","BL height","Mean state"], assessment: '+/- 15% from flux and BL height' }, "Convective boundary layer scaling.", ["Surface heat flux from tower.","BL height from lidar."], ["Free convection","Horizontally homogeneous"], ["Not for wind-driven BL","Requires surface flux"], ["Deardorff 1970"], []);
-export const TOOL_106 = mt(106, "Petterssen Frontogenesis", 'scalar', CLIMATE_BANDS, [{"param":"gradtheta","min":0,"max":1},{"param":"D","min":-1,"max":1},{"param":"beta","min":0,"max":1.57},{"param":"delta","min":0,"max":1},{"param":"duds","min":0,"max":1}], ["Temperature gradient from reanalysis","Deformation from wind field"], { method: 'analytical', factors: ["Gradient accuracy","Deformation calculation"], assessment: 'Exact for kinematic formulation' }, "Frontal intensification rate.", ["Frontal intensification rate.","From ERA5 wind and temperature."], ["2D front","No diabatic effects"], ["No diabatic heating","2D simplification"], ["Petterssen 1936"], []);
-export const TOOL_107 = mt(107, "Vorticity Equation", 'vector', CLIMATE_BANDS, [{"param":"zeta","min":-1,"max":1},{"param":"f","min":0,"max":0.0002},{"param":"divV","min":-1,"max":1}], ["Relative vorticity from wind field","Coriolis from latitude"], { method: 'analytical', factors: ["Vorticity calculation","Divergence accuracy","Friction"], assessment: 'Exact from Navier-Stokes' }, "Storm dynamics and cyclone development.", ["Conservation of absolute vorticity.","ERA5 for wind fields."], ["Inviscid or parameterized","Hydrostatic"], ["Friction parameterization","No diabatic effects"], ["Holton & Hakim 2012"], []);
-export const TOOL_108 = mt(108, "Kohler Equation", 'scalar', CLIMATE_BANDS, [{"param":"a","min":0,"max":0.000001},{"param":"r","min":1e-8,"max":0.001},{"param":"b","min":0,"max":1e-10}], ["Kelvin curvature coefficient","Solute coefficient from Raoult law"], { method: 'analytical', factors: ["Surface tension","Solute properties","Temperature"], assessment: 'Exact for ideal solution droplets' }, "Cloud droplet activation.", ["Critical radius and supersaturation.","CCN activation."], ["Ideal solution","Spherical droplet","Equilibrium"], ["Non-ideal solutions","Surface tension varies"], ["Kohler 1936"], []);
-export const TOOL_109 = mt(109, "Marshall-Palmer DSD", 'histogram', CLIMATE_BANDS, [{"param":"N0","min":0,"max":1000000000},{"param":"Lambda","min":0,"max":50000},{"param":"D","min":0,"max":0.01}], ["Intercept N0 = 8e6 m^-4","Slope Lambda from rain rate"], { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ["N0 variability","Lambda-rain rate","Exponential assumption"], assessment: '+/- 20%, N0 variable' }, "Exponential drop size distribution.", ["N0 = 8e6 m^-4.","Lambda from rain rate."], ["Exponential distribution","Steady rain"], ["Not for convective rain","N0 varies"], ["Marshall & Palmer 1948"], []);
-export const TOOL_110 = mt(110, "Z-R Relationship", 'scatter', CLIMATE_BANDS, [{"param":"a","min":0,"max":1000},{"param":"R","min":0,"max":500}], ["Z = 200*R^1.6 (stratiform)","Z = 300*R^1.4 (convective)"], { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ["Z-R coefficients","DSD","Radar calibration"], assessment: '+/- 30%, coefficients vary' }, "Radar reflectivity to rainfall rate.", ["200*R^1.6 (stratiform).","300*R^1.4 (convective).","Dual-pol reduces uncertainty."], ["Equilibrium DSD","Single rain type"], ["Coefficients vary by region","Hail contamination"], ["Marshall & Palmer 1948"], []);
-export const TOOL_111 = mt(111, "IERS Earth Rotation Matrix", 'scalar', GENERIC_BANDS, [{"param":"P","min":0,"max":1},{"param":"N","min":0,"max":1},{"param":"R","min":0,"max":1},{"param":"W","min":0,"max":1}], ["Precession-nutation from IERS","Earth rotation from GAST","Polar motion from IERS"], { method: 'analytical', factors: ["IERS conventions","Matrix order","Time system"], assessment: 'Exact with IERS conventions' }, "Earth rotation for satellite positioning.", ["IERS Conventions 2010.","Precession, nutation, rotation, polar motion."], ["Rigid Earth","Known time"], ["Non-rigid Earth effects","Requires IERS data"], ["IERS Conventions 2010"], []);
-export const TOOL_112 = mt(112, "Earth Tides (Love Numbers)", 'scalar', GENERIC_BANDS, [{"param":"hn","min":0,"max":1},{"param":"Vn","min":0,"max":10},{"param":"g","min":9.8,"max":9.82}], ["Love numbers from Earth model","Tidal potential from Moon/Sun"], { method: 'empirical', rmse: 5, rmseUnit: 'mm', factors: ["Love number model","Tidal potential","Local geology"], assessment: '+/- 5mm accuracy' }, "Solid Earth deformation from tides.", ["Love numbers from PREM model.","Sub-meter GPS correction."], ["Elastic Earth","Known Love numbers"], ["Anelastic effects","Local geology variations"], ["Wahr 1981"], []);
-export const TOOL_113 = mt(113, "EGM2008 Gravity Field", 'scalar', GENERIC_BANDS, [{"param":"GM","min":0,"max":1000000000000000},{"param":"r","min":6000000,"max":10000000},{"param":"Cnm","min":-1,"max":1},{"param":"Snm","min":-1,"max":1},{"param":"Pnm","min":-1,"max":1}], ["Spherical harmonics degree 2190","Coefficients from EGM2008"], { method: 'analytical', factors: ["Harmonic degree truncation","Coefficient accuracy","Legendre functions"], assessment: 'Exact to degree 2190' }, "Global gravity field and geoid.", ["Degree 2190 (~5 arcmin).","Precise orbit determination."], ["Spherical harmonic expansion","Known coefficients"], ["Truncation error","Computationally expensive"], ["Pavlis et al. 2008"], []);
-export const TOOL_114 = mt(114, "Helmert 7-Parameter Transformation", 'scalar', GENERIC_BANDS, [{"param":"S","min":0,"max":2},{"param":"R","min":0,"max":2},{"param":"T","min":-1000,"max":1000}], ["7 parameters from datum calibration","WGS84 to ITRF conversion"], { method: 'analytical', factors: ["Parameter accuracy","Rotation matrix","Scale factor"], assessment: 'Exact for known parameters' }, "7-parameter datum transformation.", ["Scale, 3 rotations, 3 translations.","WGS84/ITRF conversion."], ["Rigid body","Known parameters","Small angles"], ["Not for nonlinear distortions","Parameter accuracy critical"], ["Heiskanen & Moritz 1967"], []);
-export const TOOL_115 = mt(115, "Geoid Height", 'scalar', GENERIC_BANDS, [{"param":"h","min":-500,"max":10000},{"param":"N","min":-200,"max":200}], ["Ellipsoidal height from GPS","Geoid undulation from EGM2008"], { method: 'analytical', factors: ["GPS height accuracy","Geoid model accuracy","EGM2008 resolution"], assessment: 'Exact with accurate EGM2008' }, "Height reference frame transformation.", ["H = h - N (orthometric).","N from EGM2008."], ["Known geoid undulation","GPS ellipsoidal height"], ["Geoid model resolution","GPS height accuracy"], ["Standard geodesy"], []);
-export const TOOL_116 = mt(116, "NRLMSISE-00 Thermosphere", 'profile', SPACE_BANDS, [{"param":"n_N2","min":0,"max":1e+30},{"param":"n_O2","min":0,"max":1e+30},{"param":"n_O","min":0,"max":1e+30},{"param":"m_N2","min":0,"max":1e-25},{"param":"m_O2","min":0,"max":1e-25},{"param":"m_O","min":0,"max":1e-25}], ["NRLMSIS 2.0 with TIMED/SABER","Species densities from model"], { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ["Model coefficients","Solar activity","Geomagnetic conditions"], assessment: '+/- 15%, NRLMSIS 2.0 recommended' }, "Satellite drag atmospheric density.", ["Use NRLMSIS 2.0 (updated).","TIMED/SABER data assimilation."], ["Empirical model","Known solar/geomagnetic inputs"], ["Solar cycle variability","Storm-time density spikes"], ["Picone 2002"], []);
-export const TOOL_117 = mt(117, "IRI-2016 Ionosphere", 'profile', SPACE_BANDS, [{"param":"Ne","min":100000000,"max":10000000000000},{"param":"h","min":50000,"max":2000000},{"param":"NmF2","min":10000000000,"max":5000000000000},{"param":"hmF2","min":150000,"max":600000}], ["IRI-2020 is latest version","Electron density profiles"], { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ["Model coefficients","Solar activity","Ionosonde data"], assessment: '+/- 15%, IRI-2020 recommended' }, "Ionospheric electron density profiles.", ["Use IRI-2020 (latest).","GPS accuracy application."], ["Empirical model","Known solar inputs"], ["Storm-time deviations","Equatorial anomaly"], ["Bilitza 2017"], []);
-export const TOOL_118 = mt(118, "Joule Heating", 'scalar', SPACE_BANDS, [{"param":"J","min":0,"max":1},{"param":"E","min":0,"max":1},{"param":"sigma","min":0,"max":0.01}], ["Current density from ionosphere","Electric field from convection","Pedersen conductivity"], { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ["Current density","Electric field","Conductivity"], assessment: '+/- 20% uncertainty' }, "Storm-time thermospheric heating.", ["Key driver of storm-time density spikes.","Electric field from convection."], ["Steady state","Known conductivity"], ["Time-varying fields","Conductivity altitude-dependent"], ["Standard"], []);
-export const TOOL_119 = mt(119, "Ionospheric Scintillation (S4)", 'gauge', SPACE_BANDS, [{"param":"Ibar","min":0,"max":100},{"param":"sigmaI","min":0,"max":10}], ["Signal intensity statistics","GNSS receiver data"], { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ["Signal conditions","Receiver quality","Multipath"], assessment: '+/- 15% uncertainty' }, "GPS reliability assessment.", ["S4 > 0.5: strong scintillation.","GNSS receiver data."], ["Steady signal","No multipath"], ["Multipath contamination","Receiver-dependent"], ["Standard GNSS"], []);
-export const TOOL_120 = mt(120, "Magnetopause Standoff (Shue)", 'scalar', SPACE_BANDS, [{"param":"Pdyn","min":0,"max":100},{"param":"Bz","min":-30,"max":30}], ["Solar wind from NOAA SWPC","IMF Bz from ACE/DSCOVR"], { method: 'empirical', rmse: 10, rmseUnit: '%', factors: ["Solar wind input","Model coefficients"], assessment: '+/- 10%, NOAA SWPC authoritative' }, "Magnetopause location from solar wind.", ["Real-time NOAA SWPC data.","ACE/DSCOVR for IMF."], ["Steady solar wind","Axisymmetric magnetopause"], ["Dynamic pressure variations","Tailward extension"], ["Shue 1998"], []);
-export const TOOL_121 = mt(121, "Dst Ring Current Index", 'gauge', SPACE_BANDS, [{"param":"Dst","min":-500,"max":100},{"param":"Pdyn","min":0,"max":100},{"param":"b","min":0,"max":20},{"param":"c","min":-50,"max":50}], ["Raw Dst from WDC Kyoto","Pressure correction"], { method: 'empirical', rmse: 10, rmseUnit: 'nT', factors: ["Pressure correction","Offset calibration"], assessment: '+/- 10 nT uncertainty' }, "Geomagnetic storm severity.", ["Raw Dst from WDC Kyoto.","Pressure correction."], ["Steady ring current","Known pressure"], ["Non-storm contamination","Offset varies"], ["Sugiura 1964"], []);
-export const TOOL_122 = mt(122, "Debye Length", 'scalar', SPACE_BANDS, [{"param":"eps0","min":8.854e-12,"max":8.854e-12},{"param":"kB","min":1.381e-23,"max":1.381e-23},{"param":"Te","min":1000,"max":10000000},{"param":"ne","min":1000000,"max":1000000000000000}], ["Electron temperature from plasma","Electron density from measurements"], { method: 'analytical', factors: ["Electron temperature","Electron density"], assessment: 'Exact for Maxwellian plasma' }, "Space plasma shielding distance.", ["Fundamental plasma parameter.","Indicates charge neutrality scale."], ["Maxwellian distribution","Known Te, ne"], ["Non-Maxwellian plasmas","Magnetic field effects"], ["Debye 1923"], []);
-export const TOOL_123 = mt(123, "Satellite Drag Force", 'scalar', SPACE_BANDS, [{"param":"rho","min":1e-20,"max":0.00001},{"param":"CD","min":1,"max":4},{"param":"A","min":0.01,"max":1000},{"param":"m","min":1,"max":100000},{"param":"v","min":0,"max":15000}], ["Atmospheric density from NRLMSIS","Drag coefficient ~ 2.2"], { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ["Atmospheric density","Drag coefficient","Cross-section"], assessment: '+/- 15%, density is key uncertainty' }, "Orbital decay prediction.", ["Atmospheric density from NRLMSIS.","CD ~ 2.2 (varies 1-4)."], ["Known density","Constant CD","Known area/mass"], ["Density variable","CD attitude-dependent","Area varies"], ["Standard"], []);
-export const TOOL_124 = mt(124, "Orbital Decay Rate", 'timeseries', SPACE_BANDS, [{"param":"rho","min":1e-20,"max":0.00001},{"param":"CD","min":1,"max":4},{"param":"A","min":0.01,"max":1000},{"param":"v","min":0,"max":15000},{"param":"m","min":1,"max":100000}], ["Atmospheric density from NRLMSIS","Re-entry timeline estimation"], { method: 'empirical', rmse: 15, rmseUnit: '%', factors: ["Atmospheric density","Drag coefficient","Velocity"], assessment: '+/- 15% uncertainty' }, "Satellite re-entry timeline.", ["Density from NRLMSIS.","Re-entry prediction."], ["Known density","Circular orbit"], ["Eccentric orbit","Density variations","CD attitude-dependent"], ["King-Hele 1987"], []);
-export const TOOL_125 = mt(125, "Collision Probability", 'scalar', SPACE_BANDS, [{"param":"A1","min":0,"max":1000},{"param":"A2","min":0,"max":1000},{"param":"sigmax","min":0,"max":10000},{"param":"sigmay","min":0,"max":10000},{"param":"d","min":0,"max":10000}], ["Position uncertainty from tracking","Miss distance from conjunction"], { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ["Covariance accuracy","Miss distance","Encounter geometry"], assessment: '+/- 20% uncertainty' }, "Conjunction assessment and collision avoidance.", ["Position uncertainty from tracking.","Miss distance from conjunction."], ["Gaussian distribution","Short encounter","Known covariance"], ["Non-Gaussian errors","Long encounters","Maneuvers change geometry"], ["Foster 1992"], []);
-export const TOOL_126 = mt(126, "Kessler Syndrome Debris Growth", 'timeseries', SPACE_BANDS, [{"param":"rho","min":0,"max":1},{"param":"sigma","min":0,"max":1000},{"param":"v","min":0,"max":20},{"param":"N","min":0,"max":1000000000},{"param":"L","min":0,"max":1000},{"param":"beta","min":0,"max":1},{"param":"gamma","min":0,"max":1}], ["Debris population from catalog","Collision cross-section"], { method: 'qualitative', factors: ["Collision rate","Launch source","Decay coefficient"], assessment: 'Long-term debris environment projection' }, "Space debris growth modeling.", ["Long-term projection.","Collision cascading."], ["Mean-field approximation","Known population"], ["Individual collisions stochastic","Launch rates uncertain","Decay varies"], ["Kessler 1991"], []);
-export const TOOL_127 = mt(127, "Hill-Clohessy-Wiltshire", 'scalar', SPACE_BANDS, [{"param":"n","min":0,"max":0.01},{"param":"ax","min":-10,"max":10},{"param":"ay","min":-10,"max":10},{"param":"az","min":-10,"max":10}], ["Mean motion from orbital elements","Relative motion for rendezvous"], { method: 'analytical', factors: ["Linearized equations","Circular reference orbit","No perturbations"], assessment: 'Exact for circular orbit' }, "Satellite rendezvous proximity operations.", ["Linearized relative motion.","Circular reference orbit."], ["Circular orbit","Small separations","No perturbations"], ["Not for eccentric orbits","Large separations","J2 perturbation"], ["Hill 1878"], []);
-export const TOOL_128 = mt(128, "Kp Geomagnetic Index", 'gauge', SPACE_BANDS, [{"param":"wi","min":0,"max":1},{"param":"Ki","min":0,"max":9},{"param":"num_stations","min":1,"max":13}], ["13 station K-indices","Weighted average","NOAA SWPC real-time"], { method: 'empirical', rmse: 0.5, rmseUnit: 'Kp', factors: ["Station weights","K-index estimation"], assessment: '+/- 0.5 Kp uncertainty' }, "Primary space weather severity metric.", ["13 stations worldwide.","NOAA SWPC for real-time.","Kp > 5: storm."], ["Station distribution","Quiet conditions"], ["Station gaps","Local time effects"], ["Bartels 1949"], []);
-export const TOOL_129 = mt(129, "DOP (Dilution of Precision)", 'gauge', SPACE_BANDS, [{"param":"trH","min":1,"max":100},{"param":"num_satellites","min":4,"max":40},{"param":"elevation_mask","min":0,"max":90}], ["Satellite geometry from ephemeris","Elevation mask from receiver"], { method: 'analytical', factors: ["Satellite geometry","Number of satellites","Elevation mask"], assessment: 'Exact for known geometry' }, "GPS accuracy from satellite geometry.", ["Lower DOP = better accuracy.","GDOP < 4: excellent."], ["Known satellite positions","Clear sky view"], ["Obstructions","Multipath","Atmospheric delays"], ["Standard GNSS"], []);
-export const TOOL_130 = mt(130, "Saastamoinen Tropospheric Delay", 'scalar', SPACE_BANDS, [{"param":"theta","min":0.05,"max":1.57},{"param":"P","min":500,"max":1100},{"param":"T","min":200,"max":320},{"param":"e","min":0,"max":50}], ["Surface pressure from weather","Temperature from weather","Water vapor from humidity"], { method: 'analytical', factors: ["Pressure accuracy","Temperature accuracy","Water vapor"], assessment: 'Exact for known P, T, e' }, "GPS signal tropospheric correction.", ["Surface met data from Open-Meteo.","ZHD = 0.002277*P.","ZWD = 0.002277*(1255/T+0.05)*e."], ["Known surface met","Hydrostatic equilibrium"], ["Wet delay variable","Elevation-dependent","Asymmetric mapping"], ["Saastamoinen 1972"], []);
-export const TOOL_131 = mt(131, "Thiem Equation (Steady Radial Flow)", 'profile', OCEAN_BANDS, [{"param":"T","min":0.1,"max":50000},{"param":"h1","min":0,"max":500},{"param":"h2","min":0,"max":500},{"param":"r1","min":0,"max":10000},{"param":"r2","min":0,"max":100000}], ["Transmissivity from well tests","Head from observation wells","Distance from well geometry"], { method: 'empirical', rmse: 20, rmseUnit: '%', factors: ["Transmissivity","Head measurements","Radial flow assumption"], assessment: '+/- 20% uncertainty' }, "Aquifer transmissivity from well tests.", ["Steady-state assumption.","Radial flow to pumping well."], ["Confined aquifer","Steady state","Radial flow"], ["Not for unconfined","Transient conditions","Well losses"], ["Thiem 1906"], []);
-export const TOOL_132 = mt(132, "Theis Transient Drawdown", 'timeseries', OCEAN_BANDS, [{"param":"Q","min":0,"max":100000},{"param":"T","min":0.1,"max":50000},{"param":"t","min":0,"max":10000},{"param":"r","min":0,"max":10000},{"param":"S","min":1e-8,"max":0.1}], ["Pumping rate from well","Transmissivity from geology","Storativity from specific yield"], { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ["Transmissivity","Storativity","Well function"], assessment: '+/- 25% uncertainty' }, "Transient aquifer response to pumping.", ["Theis well function W(u).","Requires type-curve matching."], ["Confined aquifer","Homogeneous","No recharge"], ["Not for unconfined","Heterogeneous aquifers","Well effects"], ["Theis 1935"], []);
-export const TOOL_133 = mt(133, "Cooper-Jacob Approximation", 'timeseries', OCEAN_BANDS, [{"param":"Q","min":0,"max":100000},{"param":"T","min":0.1,"max":50000},{"param":"t","min":0,"max":10000},{"param":"r","min":0,"max":10000},{"param":"S","min":1e-8,"max":0.1}], ["Simplified Theis solution","Valid for small u","Logarithmic approximation"], { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ["Validity of approximation","Transmissivity","Storativity"], assessment: '+/- 30%, valid for u < 0.01' }, "Simplified well-test analysis.", ["Valid for u < 0.01 (large time/small r).","Simpler than full Theis."], ["u < 0.01","Confined aquifer","Homogeneous"], ["Not valid for early time","Not for unconfined","Heterogeneous"], ["Cooper & Jacob 1946"], []);
-export const TOOL_134 = mt(134, "Horton Infiltration", 'timeseries', OCEAN_BANDS, [{"param":"fc","min":0,"max":50},{"param":"f0","min":0,"max":500},{"param":"k","min":0.01,"max":20},{"param":"t","min":0,"max":100}], ["Final infiltration from soil type","Initial infiltration from soil moisture","Decay constant from calibration"], { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ["Soil properties","Decay constant","Initial conditions"], assessment: '+/- 25% uncertainty' }, "Empirical infiltration capacity decay.", ["Empirical model.","fc from soil type."], ["Homogeneous soil","No crust formation","Constant rainfall"], ["Not for layered soils","Crust effects","Rainfall intensity effects"], ["Horton 1939"], []);
-export const TOOL_135 = mt(135, "Risk = Hazard x Vulnerability x Exposure", 'gauge', RISK_BANDS, [{"param":"H","min":0,"max":1},{"param":"V","min":0,"max":1},{"param":"E","min":0,"max":1}], ["Hazard probability from analysis","Vulnerability index from exposure data","Exposure from population/assets"], { method: 'qualitative', factors: ["Hazard assessment","Vulnerability assessment","Exposure data"], assessment: 'Universal risk framework' }, "Universal risk assessment framework.", ["UNISDR framework.","Hazard x Vulnerability x Exposure."], ["Independent components","Linear interaction"], ["Nonlinear interactions","Requires all three components"], ["UNISDR 2004"], []);
-export const TOOL_136 = mt(136, "Expected Annual Damage", 'scalar', RISK_BANDS, [{"param":"D_P","min":0,"max":10000000000},{"param":"P_low","min":0,"max":0.1},{"param":"P_high","min":0,"max":1},{"param":"num_intervals","min":10,"max":10000}], ["Damage function from analysis","Exceedance probability from hazard","Integration over probability"], { method: 'qualitative', factors: ["Damage function","Probability distribution","Integration method"], assessment: 'Integral over damage-probability curve' }, "Expected annual damage from risk curve.", ["Integrate D(P) over P.","Dam safety, flood risk."], ["Known damage function","Continuous probability"], ["Damage function uncertain","Discrete integration errors"], ["Standard risk analysis"], []);
-export const TOOL_137 = mt(137, "AQI Breakpoint", 'gauge', RISK_BANDS, [{"param":"I_Hi","min":0,"max":10000},{"param":"I_Lo","min":0,"max":10000},{"param":"BP_Hi","min":0,"max":10000},{"param":"BP_Lo","min":0,"max":10000},{"param":"C_p","min":0,"max":10000}], ["AQI breakpoints from EPA","Pollutant concentration from measurement","Linear interpolation between breakpoints"], { method: 'analytical', factors: ["Breakpoint accuracy","Concentration measurement","Pollutant type"], assessment: 'Exact linear interpolation' }, "Air quality index standardization.", ["EPA standard breakpoints.","Linear interpolation."], ["Known breakpoints","Single pollutant"], ["Multi-pollutant AQI complex","Breakpoints region-specific"], ["US EPA"], []);
-export const TOOL_138 = mt(138, "Probable Maximum Precipitation", 'gauge', RISK_BANDS, [{"param":"Xbar","min":0,"max":10000},{"param":"Kp","min":0,"max":20},{"param":"sigmax","min":0,"max":1000}], ["Mean annual max from historical records","Frequency factor from statistics","Std dev from historical data"], { method: 'empirical', rmse: 30, rmseUnit: '%', factors: ["Historical record length","Frequency factor","Distribution assumption"], assessment: '+/- 30%, requires long records' }, "Extreme precipitation for dam safety.", ["Requires long historical records.","Frequency factor from statistics."], ["Stationary climate","Gumbel distribution","Adequate record"], ["Climate non-stationarity","Short records","Distribution assumption"], ["Chow 1964"], []);
-export const TOOL_139 = mt(139, "Palmer Drought Severity Index", 'gauge', RISK_BANDS, [{"param":"X_prev","min":-10,"max":10},{"param":"Z","min":-10,"max":10},{"param":"alpha","min":0.5,"max":1}], ["Previous month PDSI","Current moisture anomaly","Persistence factor"], { method: 'empirical', rmse: 1, rmseUnit: 'PDSI', factors: ["Moisture anomaly","Persistence factor","Calibration"], assessment: '+/- 1 PDSI uncertainty' }, "Drought monitoring index.", ["PDSI: -4 extreme drought, +4 extreme wet.","Monthly time step."], ["Calibrated to local climate","Monthly water balance"], ["Not comparable across regions","Soil-dependent calibration","Slow response"], ["Palmer 1965"], []);
-export const TOOL_140 = mt(140, "Froehlich Dam Breach", 'scalar', RISK_BANDS, [{"param":"K0","min":0.5,"max":3},{"param":"Vres","min":0,"max":100000000000},{"param":"hb","min":1,"max":300}], ["Breach correction from failure mode","Reservoir volume from bathymetry","Breach height from dam geometry"], { method: 'empirical', rmse: 25, rmseUnit: '%', factors: ["Correction factor","Volume estimation","Breach height"], assessment: '+/- 25% uncertainty' }, "Dam breach outflow estimation.", ["K0 from failure mode.","Reservoir volume from survey."], ["Empirical regression","Known geometry"], ["Regression scatter","Site-specific factors","Time to breach"], ["Froehlich 2008"], []);
-export const TOOL_141 = mt(141, "Ensemble Kalman Filter", 'scalar', GENERIC_BANDS, [{"param":"xf","min":-Infinity,"max":Infinity},{"param":"Pf","min":-Infinity,"max":Infinity},{"param":"y","min":-Infinity,"max":Infinity},{"param":"R","min":-Infinity,"max":Infinity},{"param":"H","min":-Infinity,"max":Infinity}], ["Forecast from model","Observation from data","Error covariances from statistics"], { method: 'analytical', factors: ["Ensemble size","Error covariances","Observation operator"], assessment: 'Exact for linear systems' }, "THE equation for Digital Twin assimilation.", ["Key DA equation.","K = PfH^T(HPfH^T+R)^-1.","x_a = x_f + K(y-Hx_f)."], ["Linear observation operator","Gaussian errors","Adequate ensemble"], ["Nonlinear operators","Ensemble collapse","Localization needed"], ["Evensen 1994"], []);
-export const TOOL_142 = mt(142, "Optimal Interpolation", 'scalar', GENERIC_BANDS, [{"param":"xb","min":-Infinity,"max":Infinity},{"param":"y","min":-Infinity,"max":Infinity},{"param":"B","min":-Infinity,"max":Infinity},{"param":"R","min":-Infinity,"max":Infinity},{"param":"H","min":-Infinity,"max":Infinity}], ["Background from model","Observation from data","Background error covariance"], { method: 'analytical', factors: ["Background error covariance","Observation error","Observation operator"], assessment: 'Exact for linear systems' }, "Spatial analysis of observations.", ["Simpler than EnKF.","Static B matrix."], ["Static B","Linear operator","Known covariances"], ["B not static in reality","No flow-dependence","Requires B matrix"], ["Lorenz 1969"], []);
-export const TOOL_143 = mt(143, "4D-Var Cost Function", 'scalar', GENERIC_BANDS, [{"param":"x","min":-Infinity,"max":Infinity},{"param":"xb","min":-Infinity,"max":Infinity},{"param":"B","min":-Infinity,"max":Infinity},{"param":"yi","min":-Infinity,"max":Infinity},{"param":"Ri","min":-Infinity,"max":Infinity}], ["Background from model","Observations over time window","Error covariances"], { method: 'analytical', factors: ["Background error","Observation error","Model trajectory"], assessment: 'ECMWF operational standard' }, "Weather analysis gold standard.", ["ECMWF operational.","4D: assimilates over time window."], ["Tangent-linear model","Adjoint model","Known covariances"], ["Requires adjoint","Computationally expensive","B matrix critical"], ["Le Dimet 1986"], []);
-export const TOOL_144 = mt(144, "Shannon Information Entropy", 'scalar', GENERIC_BANDS, [{"param":"px","min":0,"max":1},{"param":"py","min":0,"max":1},{"param":"pxy","min":0,"max":1}], ["Probability distributions from data","Joint probability from observations"], { method: 'analytical', factors: ["Probability estimation","Sample size","Discretization"], assessment: 'Exact for known distributions' }, "Data source value assessment.", ["H(X) = -sum p(x) log2 p(x).","Measures information content."], ["Known probabilities","Discrete variables"], ["Continuous entropy differs","Sample size for estimation","Binning effects"], ["Shannon 1948"], []);
-export const TOOL_145 = mt(145, "Free-Space Path Loss", 'scalar', GENERIC_BANDS, [{"param":"d_km","min":0,"max":100000},{"param":"f_GHz","min":0,"max":100}], ["Distance from geometry","Frequency from signal"], { method: 'analytical', factors: ["Exact formula","Distance accuracy","Frequency accuracy"], assessment: 'Exact for free space' }, "Satellite link budget calculation.", ["FSPL = 32.45 + 20log10(d) + 20log10(f).","Satellite link budget."], ["Free space","No atmosphere","Line of sight"], ["Atmospheric attenuation","Multipath","Obstructions"], ["Fundamental"], []);
-export const TOOL_146 = mt(146, "Klobuchar Ionospheric Delay", 'spectrum', GENERIC_BANDS, [{"param":"A","min":0,"max":0.000001},{"param":"x","min":0,"max":2},{"param":"phi_m","min":-90,"max":90}], ["Amplitude from broadcast","Local time phase from receiver","Geomagnetic latitude"], { method: 'empirical', rmse: 50, rmseUnit: '%', factors: ["Model coefficients","Ionospheric conditions","Solar activity"], assessment: '+/- 50%, coarse model' }, "Single-frequency GPS ionospheric correction.", ["Coarse model (+/- 50%).","Better than no correction.","Dual-frequency preferred."], ["Single frequency","Daytime only","Known coefficients"], ["Not for nighttime","Storm-time errors","Coefficients broadcast"], ["Klobuchar 1987"], []);
-export const TOOL_147 = mt(147, "Doppler Shift", 'spectrum', GENERIC_BANDS, [{"param":"f0","min":0,"max":1000000000000},{"param":"vrel","min":-30000,"max":30000}], ["Transmitted frequency from signal","Relative velocity from kinematics"], { method: 'analytical', factors: ["Exact non-relativistic","Velocity accuracy","Frequency accuracy"], assessment: 'Exact for v << c' }, "Satellite tracking and GNSS.", ["Delta_f = f0 * v_rel / c.","Non-relativistic approximation."], ["v << c","Line of sight velocity"], ["Relativistic at high v","Not for transverse motion","Multipath"], ["Doppler 1842"], []);
-export const TOOL_148 = mt(148, "Hohmann Transfer", 'scalar', GENERIC_BANDS, [{"param":"GM","min":0,"max":1000000000000000},{"param":"r1","min":6000000,"max":10000000},{"param":"r2","min":6000000,"max":100000000}], ["Gravitational parameter from central body","Orbit radii from mission design"], { method: 'analytical', factors: ["Exact for circular orbits","Impulsive burns","Two-body problem"], assessment: 'Exact for two-body' }, "Optimal orbit transfer planning.", ["Most fuel-efficient 2-burn transfer.","Between coplanar circular orbits."], ["Circular orbits","Coplanar","Impulsive burns"], ["Not for elliptical","Plane changes","Finite burns"], ["Hohmann 1925"], []);
-export const TOOL_149 = mt(149, "Lagrange Points (L1-L5)", 'scalar', GENERIC_BANDS, [{"param":"gamma","min":0,"max":0.5},{"param":"R","min":0,"max":10000000000000},{"param":"point_id","min":1,"max":5}], ["Mass ratio from system","Body separation from ephemeris","5th-order polynomial for collinear"], { method: 'analytical', factors: ["Exact for CR3BP","Mass ratio accuracy","Body separation"], assessment: 'Exact for circular restricted 3-body' }, "Mission planning for L-points.", ["L2 is used by JWST for deep space observation.","L1 hosts solar observatories like SOHO.","L3-L5 are stable equilibrium points."], ["Circular orbits","Restricted 3-body","Primaries in circular motion"], ["Elliptical orbits","Perturbations","Stability varies"], ["Lagrange 1772"], []);
-export const TOOL_150 = mt(150, "Mutual Information", 'scalar', GENERIC_BANDS, [{"param":"px","min":0,"max":1},{"param":"py","min":0,"max":1},{"param":"pxy","min":0,"max":1}], ["Joint probability from observations","Marginal probabilities from data"], { method: 'analytical', factors: ["Probability estimation","Sample size","Discretization"], assessment: 'Exact for known distributions' }, "Quantifying data source value.", ["I(X;Y) = sum p(x,y) log(p(x,y)/(p(x)*p(y))).","Information theory."], ["Known probabilities","Discrete variables"], ["Continuous variables","Sample size","Binning effects"], ["Shannon 1948"], []);
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 67 — Stommel Western Boundary Current
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_67: ToolWorkflowDef = {
+  toolId: 67,
+  name: 'Stommel Western Boundary Current',
+  vizType: 'vector',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'beta', min: 0, max: 1e-10 },{ param: 'psi', min: -1000000000, max: 1000000000 },{ param: 'curlTau', min: -0.001, max: 0.001 },{ param: 'R', min: 1e-10, max: 1 },{ param: 'nu', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Linear friction model');
+    log.push('  Gulf Stream application');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Friction parameter', contribution: 'Varies' },
+      { factor: 'Linear assumption', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Idealized model for westward intensification',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Stommel Western Boundary Current: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Western boundary intensification with linear friction.`,
+    recommendations: ["Explains Gulf Stream, Kuroshio.","Real boundaries have eddies."],
+  }),
+  metadata: {
+    methodology: 'Western boundary intensification with linear friction.',
+    assumptions: ["Linear dynamics","Constant friction"],
+    limitations: ["Oversimplified friction","No eddies"],
+    references: ["Stommel 1948"],
+    preprocessingNotes: ["Linear friction model","Gulf Stream application"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 68 — Munk Viscous Boundary Layer
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_68: ToolWorkflowDef = {
+  toolId: 68,
+  name: 'Munk Viscous Boundary Layer',
+  vizType: 'vector',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'AH', min: 0, max: 10000000 },{ param: 'beta', min: 0, max: 1e-10 },{ param: 'psi', min: -1000000000, max: 1000000000 },{ param: 'curlTau', min: -0.001, max: 0.001 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Lateral eddy viscosity');
+    log.push('  Biharmonic operator');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Eddy viscosity', contribution: 'Varies' },
+      { factor: 'Biharmonic', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Munk model for boundary current width',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Munk Viscous Boundary Layer: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Lateral viscosity, biharmonic for boundary width.`,
+    recommendations: ["AH from mixing observations.","More realistic than Stommel."],
+  }),
+  metadata: {
+    methodology: 'Lateral viscosity, biharmonic for boundary width.',
+    assumptions: ["Constant viscosity","Linear dynamics"],
+    limitations: ["AH poorly constrained","No eddies"],
+    references: ["Munk 1950"],
+    preprocessingNotes: ["Lateral eddy viscosity","Biharmonic operator"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 69 — Stommel Box Model
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_69: ToolWorkflowDef = {
+  toolId: 69,
+  name: 'Stommel Box Model',
+  vizType: 'timeseries',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'lambda', min: 0, max: 1 },{ param: 'Tstar', min: -5, max: 40 },{ param: 'T', min: -5, max: 40 },{ param: 'q', min: 0, max: 5 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Thermohaline stability');
+    log.push('  AMOC collapse analysis');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'qualitative',
+    contributingFactors: [
+      { factor: 'Box model', contribution: 'Varies' },
+      { factor: 'Bifurcation', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Conceptual model showing AMOC bistability',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Stommel Box Model: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Thermohaline circulation bistability.`,
+    recommendations: ["Shows AMOC bistability.","Freshwater forcing triggers collapse."],
+  }),
+  metadata: {
+    methodology: 'Thermohaline circulation bistability.',
+    assumptions: ["Two-box simplification","No mixing"],
+    limitations: ["Oversimplified","No transient eddies"],
+    references: ["Stommel 1961"],
+    preprocessingNotes: ["Thermohaline stability","AMOC collapse analysis"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 70 — TEOS-10 Seawater Density
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_70: ToolWorkflowDef = {
+  toolId: 70,
+  name: 'TEOS-10 Seawater Density',
+  vizType: 'profile',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'S', min: 0, max: 42 },{ param: 'Theta', min: -5, max: 40 },{ param: 'p', min: 0, max: 10000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  GSW library reference');
+    log.push('  Absolute Salinity');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'GSW implementation', contribution: 'Varies' },
+      { factor: 'Absolute vs Practical Salinity', contribution: 'Varies' },
+    ],
+    overallAssessment: 'TEOS-10 is exact with GSW library',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `TEOS-10 Seawater Density: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. 75-term polynomial seawater density.`,
+    recommendations: ["Use GSW library.","Absolute Salinity, Conservative Temperature."],
+  }),
+  metadata: {
+    methodology: '75-term polynomial seawater density.',
+    assumptions: ["TEOS-10 standard","Known S,T,p"],
+    limitations: ["Requires GSW","Absolute Salinity needs atlas"],
+    references: ["IOC 2010, TEOS-10 Manual"],
+    preprocessingNotes: ["GSW library reference","Absolute Salinity"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 71 — Osborn-Cox Turbulent Diffusivity
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_71: ToolWorkflowDef = {
+  toolId: 71,
+  name: 'Osborn-Cox Turbulent Diffusivity',
+  vizType: 'scalar',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'gamma', min: 0, max: 0.5 },{ param: 'eps', min: 1e-12, max: 0.0001 },{ param: 'N2', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Mixing efficiency gamma ~ 0.2');
+    log.push('  TKE from microstructure');
+    log.push('  N2 from CTD');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Gamma', contribution: 'Varies' },
+      { factor: 'Epsilon', contribution: 'Varies' },
+      { factor: 'N2', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 30% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Osborn-Cox Turbulent Diffusivity: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Vertical diffusivity from TKE dissipation.`,
+    recommendations: ["Gamma ~ 0.2.","Epsilon from microstructure."],
+  }),
+  metadata: {
+    methodology: 'Vertical diffusivity from TKE dissipation.',
+    assumptions: ["Steady state","Constant gamma"],
+    limitations: ["Gamma not universal","Requires microstructure"],
+    references: ["Osborn 1980"],
+    preprocessingNotes: ["Mixing efficiency gamma ~ 0.2","TKE from microstructure","N2 from CTD"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 72 — Price-Weller-Pinkel Mixed Layer
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_72: ToolWorkflowDef = {
+  toolId: 72,
+  name: 'Price-Weller-Pinkel Mixed Layer',
+  vizType: 'gauge',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Ri', min: 0, max: 10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Ri = 0.65 threshold');
+    log.push('  Wind from ASCAT');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Ri threshold', contribution: 'Varies' },
+      { factor: 'Wind forcing', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 20% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Price-Weller-Pinkel Mixed Layer: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Mixed layer deepening at Ri > 0.65.`,
+    recommendations: ["Ri = 0.65 threshold.","Argo for profiles."],
+  }),
+  metadata: {
+    methodology: 'Mixed layer deepening at Ri > 0.65.',
+    assumptions: ["Bulk mixed layer","Linear stratification"],
+    limitations: ["Simplified mixing","No lateral processes"],
+    references: ["Price, Weller & Pinkel 1986"],
+    preprocessingNotes: ["Ri = 0.65 threshold","Wind from ASCAT"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 73 — Pierson-Moskowitz Sea State
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_73: ToolWorkflowDef = {
+  toolId: 73,
+  name: 'Pierson-Moskowitz Sea State',
+  vizType: 'spectrum',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'alpha', min: 0, max: 1 },{ param: 'g', min: 9.8, max: 9.82 },{ param: 'fm', min: 0.01, max: 10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Fully developed sea assumption');
+    log.push('  NDBC buoy validation');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Fully developed', contribution: 'Varies' },
+      { factor: 'Wind speed', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 15% for fully developed seas',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Pierson-Moskowitz Sea State: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Fully developed sea wave spectrum.`,
+    recommendations: ["Fully developed only.","JONSWAP for fetch-limited."],
+  }),
+  metadata: {
+    methodology: 'Fully developed sea wave spectrum.',
+    assumptions: ["Fully developed","Infinite fetch"],
+    limitations: ["Not for fetch-limited","No swell"],
+    references: ["Pierson & Moskowitz 1964"],
+    preprocessingNotes: ["Fully developed sea assumption","NDBC buoy validation"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 74 — Wave Runup (Stockdon)
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_74: ToolWorkflowDef = {
+  toolId: 74,
+  name: 'Wave Runup (Stockdon)',
+  vizType: 'scalar',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'eta_u', min: 0, max: 5 },{ param: 'Sw', min: 0, max: 5 },{ param: 'Sig', min: 0, max: 5 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Stockdon 2006 empirical');
+    log.push('  Beach slope from LiDAR');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Beach slope', contribution: 'Varies' },
+      { factor: 'Wave conditions', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 20% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Wave Runup (Stockdon): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. 2% exceedance wave runup.`,
+    recommendations: ["Most widely used.","NDBC for wave data."],
+  }),
+  metadata: {
+    methodology: '2% exceedance wave runup.',
+    assumptions: ["Dissipative beaches","Uniform slope"],
+    limitations: ["Not for reflective beaches","Vegetation not included"],
+    references: ["Stockdon et al. 2006"],
+    preprocessingNotes: ["Stockdon 2006 empirical","Beach slope from LiDAR"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 75 — Bruun Rule
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_75: ToolWorkflowDef = {
+  toolId: 75,
+  name: 'Bruun Rule',
+  vizType: 'timeseries',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Lstar', min: 50, max: 5000 },{ param: 'S', min: 0, max: 1 },{ param: 'B', min: 0, max: 20 },{ param: 'hstar', min: 1, max: 50 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  SLR from satellite altimetry');
+    log.push('  Closure depth from wave climate');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 50,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Closure depth', contribution: 'Varies' },
+      { factor: 'Profile length', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 50% highly simplified',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Bruun Rule: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Shoreline retreat from sea level rise.`,
+    recommendations: ["Highly simplified.","GEBCO for bathymetry."],
+  }),
+  metadata: {
+    methodology: 'Shoreline retreat from sea level rise.',
+    assumptions: ["Equilibrium profile","No longshore transport"],
+    limitations: ["Oversimplified","No sediment budget"],
+    references: ["Bruun 1962"],
+    preprocessingNotes: ["SLR from satellite altimetry","Closure depth from wave climate"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 76 — Breaker Criterion
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_76: ToolWorkflowDef = {
+  toolId: 76,
+  name: 'Breaker Criterion',
+  vizType: 'scalar',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'db', min: 0.1, max: 50 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  McCowan 0.78 coefficient');
+    log.push('  Bathymetry from GEBCO');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Breaker coefficient', contribution: 'Varies' },
+      { factor: 'Beach slope', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 15% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Breaker Criterion: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Breaking wave height from water depth.`,
+    recommendations: ["0.78 is McCowan coefficient.","NDBC for waves."],
+  }),
+  metadata: {
+    methodology: 'Breaking wave height from water depth.',
+    assumptions: ["Spilling breakers","Uniform slope"],
+    limitations: ["Not for plunging","No current interaction"],
+    references: ["McCowan 1894"],
+    preprocessingNotes: ["McCowan 0.78 coefficient","Bathymetry from GEBCO"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 77 — Longshore Sediment Transport
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_77: ToolWorkflowDef = {
+  toolId: 77,
+  name: 'Longshore Sediment Transport',
+  vizType: 'vector',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'K', min: 0.2, max: 2 },{ param: 'Hsb', min: 0.1, max: 10 },{ param: 'theta_b', min: 0, max: 1.57 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  CERC K ~ 0.77');
+    log.push('  Breaking wave from models');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'CERC coefficient', contribution: 'Varies' },
+      { factor: 'Breaking angle', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 30% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Longshore Sediment Transport: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Longshore sediment transport rate.`,
+    recommendations: ["K ~ 0.77 (varies 0.2-2).","Wave models for Hsb."],
+  }),
+  metadata: {
+    methodology: 'Longshore sediment transport rate.',
+    assumptions: ["Straight shoreline","Spilling breakers"],
+    limitations: ["K highly variable","No tidal effects"],
+    references: ["US Army Corps 1984"],
+    preprocessingNotes: ["CERC K ~ 0.77","Breaking wave from models"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 78 — Wave Dispersion Relation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_78: ToolWorkflowDef = {
+  toolId: 78,
+  name: 'Wave Dispersion Relation',
+  vizType: 'scalar',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'g', min: 9.8, max: 9.82 },{ param: 'k', min: 0.001, max: 10 },{ param: 'h', min: 0, max: 10000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Water depth from GEBCO');
+    log.push('  Iterative solution');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Exact for linear waves', contribution: 'Varies' },
+      { factor: 'Water depth accuracy', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for small amplitude waves',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Wave Dispersion Relation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Wave celerity and wavelength from depth.`,
+    recommendations: ["Exact for linear waves.","GEBCO for bathymetry."],
+  }),
+  metadata: {
+    methodology: 'Wave celerity and wavelength from depth.',
+    assumptions: ["Small amplitude","Incompressible"],
+    limitations: ["Not for steep waves","No breaking"],
+    references: ["Airy 1845"],
+    preprocessingNotes: ["Water depth from GEBCO","Iterative solution"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 79 — Stokes Drift
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_79: ToolWorkflowDef = {
+  toolId: 79,
+  name: 'Stokes Drift',
+  vizType: 'profile',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'omega', min: 0.01, max: 10 },{ param: 'k', min: 0.001, max: 10 },{ param: 'a', min: 0, max: 20 },{ param: 'z', min: -500, max: 0 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Wave amplitude from buoys');
+    log.push('  Wavenumber from dispersion');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Wave amplitude', contribution: 'Varies' },
+      { factor: 'Second-order', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for linear waves to second order',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Stokes Drift: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Wave-driven mean surface drift.`,
+    recommendations: ["Second-order accurate.","Decays with depth."],
+  }),
+  metadata: {
+    methodology: 'Wave-driven mean surface drift.',
+    assumptions: ["Linear wave theory","Monochromatic"],
+    limitations: ["No wave-wave interactions","Single frequency"],
+    references: ["Stokes 1847"],
+    preprocessingNotes: ["Wave amplitude from buoys","Wavenumber from dispersion"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 80 — JONSWAP Wave Spectrum
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_80: ToolWorkflowDef = {
+  toolId: 80,
+  name: 'JONSWAP Wave Spectrum',
+  vizType: 'spectrum',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'alpha', min: 0.001, max: 0.05 },{ param: 'g', min: 9.8, max: 9.82 },{ param: 'fm', min: 0.01, max: 10 },{ param: 'gamma', min: 1, max: 10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  gamma = 3.3 standard');
+    log.push('  sigma_a=0.07, sigma_b=0.09');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Peak enhancement', contribution: 'Varies' },
+      { factor: 'Fetch', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 15% for fetch-limited',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `JONSWAP Wave Spectrum: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Fetch-limited sea state spectrum.`,
+    recommendations: ["gamma = 3.3.","Fetch-limited seas."],
+  }),
+  metadata: {
+    methodology: 'Fetch-limited sea state spectrum.',
+    assumptions: ["Fetch-limited","Steady wind"],
+    limitations: ["Not for fully developed","No swell"],
+    references: ["Hasselmann et al. 1973"],
+    preprocessingNotes: ["gamma = 3.3 standard","sigma_a=0.07, sigma_b=0.09"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 81 — Stream Power Law
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_81: ToolWorkflowDef = {
+  toolId: 81,
+  name: 'Stream Power Law',
+  vizType: 'scalar',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'K', min: 0, max: 1 },{ param: 'A', min: 0, max: 1000000000000 },{ param: 'm', min: 0, max: 2 },{ param: 'S', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Drainage area from HydroSHEDS');
+    log.push('  Slope from SRTM');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 50,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Erodibility', contribution: 'Varies' },
+      { factor: 'Exponents', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 50% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Stream Power Law: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Bedrock erosion rate from stream power.`,
+    recommendations: ["K poorly constrained.","m ~ 0.5, n ~ 1."],
+  }),
+  metadata: {
+    methodology: 'Bedrock erosion rate from stream power.',
+    assumptions: ["Steady state","Detachment-limited"],
+    limitations: ["Not for transport-limited","K varies"],
+    references: ["Howard 1983"],
+    preprocessingNotes: ["Drainage area from HydroSHEDS","Slope from SRTM"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 82 — River Network Scaling
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_82: ToolWorkflowDef = {
+  toolId: 82,
+  name: 'River Network Scaling',
+  vizType: 'scatter',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'c', min: 0, max: 100 },{ param: 'A', min: 0.01, max: 100000 },{ param: 'h', min: 0.4, max: 0.8 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Hack exponent h ~ 0.6');
+    log.push('  HydroSHEDS for area');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Hack exponent', contribution: 'Varies' },
+      { factor: 'Network extraction', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 20% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `River Network Scaling: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. River length-drainage area scaling.`,
+    recommendations: ["Hack exponent h ~ 0.6 is the global average value.","Use HydroSHEDS database for drainage area extraction.","Network extraction required for river length."],
+  }),
+  metadata: {
+    methodology: 'River length-drainage area scaling.',
+    assumptions: ["Self-similar basins","Steady state"],
+    limitations: ["h varies by region","Requires network"],
+    references: ["Hack 1957"],
+    preprocessingNotes: ["Hack exponent h ~ 0.6","HydroSHEDS for area"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 83 — Richardson Fractal Dimension
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_83: ToolWorkflowDef = {
+  toolId: 83,
+  name: 'Richardson Fractal Dimension',
+  vizType: 'scalar',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'L', min: 0, max: 10000 },{ param: 's', min: 0.1, max: 1000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Coastline from vector data');
+    log.push('  Multiple ruler lengths');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Measurement scale', contribution: 'Varies' },
+      { factor: 'Data resolution', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 15% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Richardson Fractal Dimension: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Coastline fractal dimension.`,
+    recommendations: ["D typically 1.0-1.5.","Scale-dependent."],
+  }),
+  metadata: {
+    methodology: 'Coastline fractal dimension.',
+    assumptions: ["Self-similar","Infinite detail"],
+    limitations: ["Limited scale range","Requires digitized coastline"],
+    references: ["Richardson 1961"],
+    preprocessingNotes: ["Coastline from vector data","Multiple ruler lengths"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 84 — Slope Stability Analysis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_84: ToolWorkflowDef = {
+  toolId: 84,
+  name: 'Slope Stability Analysis',
+  vizType: 'gauge',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'cprime', min: 0, max: 100 },{ param: 'gammaz', min: 0, max: 500 },{ param: 'cosB', min: 0, max: 1 },{ param: 'u', min: 0, max: 200 },{ param: 'phiP', min: 0.1, max: 1.5 },{ param: 'sinB', min: 0, max: 1 },{ param: 'cosB2', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Slope from SRTM/ALOS');
+    log.push('  Soil from ISRIC');
+    log.push('  Pore pressure from rainfall');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Cohesion', contribution: 'Varies' },
+      { factor: 'Friction angle', contribution: 'Varies' },
+      { factor: 'Pore pressure', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 30% uncertainty, FS>1.5 stable',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Slope Stability Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Infinite slope factor of safety.`,
+    recommendations: ["FS > 1.5: stable.","Soil from ISRIC SoilGrids."],
+  }),
+  metadata: {
+    methodology: 'Infinite slope factor of safety.',
+    assumptions: ["Infinite slope","Uniform soil"],
+    limitations: ["Not for 3D slopes","Pore pressure critical"],
+    references: ["Skempton 1957"],
+    preprocessingNotes: ["Slope from SRTM/ALOS","Soil from ISRIC","Pore pressure from rainfall"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 85 — Voellmy Friction Model
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_85: ToolWorkflowDef = {
+  toolId: 85,
+  name: 'Voellmy Friction Model',
+  vizType: 'scalar',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'mu', min: 0, max: 1 },{ param: 'sigma_n', min: 0, max: 1000 },{ param: 'xi', min: 0, max: 10000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Coulomb friction from material');
+    log.push('  Turbulent friction from flow velocity');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Friction coefficients', contribution: 'Varies' },
+      { factor: 'Flow velocity', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 30% for debris flow runout',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Voellmy Friction Model: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Debris flow friction model.`,
+    recommendations: ["Mu and xi from calibration.","RAMMS model uses Voellmy."],
+  }),
+  metadata: {
+    methodology: 'Debris flow friction model.',
+    assumptions: ["Steady uniform flow","Constant friction"],
+    limitations: ["Parameters event-specific","No entrainment"],
+    references: ["Voellmy 1955"],
+    preprocessingNotes: ["Coulomb friction from material","Turbulent friction from flow velocity"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 86 — Stream Power Index
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_86: ToolWorkflowDef = {
+  toolId: 86,
+  name: 'Stream Power Index',
+  vizType: 'heatmap',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'As', min: 0, max: 1000000 },{ param: 'tanBeta', min: 0, max: 10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Flow accumulation from SRTM');
+    log.push('  Slope from DEM');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Flow accumulation', contribution: 'Varies' },
+      { factor: 'DEM resolution', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 25% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Stream Power Index: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Erosion potential from DEM.`,
+    recommendations: ["Flow accumulation from SRTM.","Log transform for visualization."],
+  }),
+  metadata: {
+    methodology: 'Erosion potential from DEM.',
+    assumptions: ["DEM represents true surface","Flow routing correct"],
+    limitations: ["DEM resolution dependent","Artifacts in flat areas"],
+    references: ["Moore et al. 1991"],
+    preprocessingNotes: ["Flow accumulation from SRTM","Slope from DEM"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 87 — Topographic Wetness Index
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_87: ToolWorkflowDef = {
+  toolId: 87,
+  name: 'Topographic Wetness Index',
+  vizType: 'heatmap',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'As', min: 0, max: 1000000 },{ param: 'tanBeta', min: 0, max: 10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Flow accumulation from SRTM');
+    log.push('  Slope from DEM');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Flow accumulation', contribution: 'Varies' },
+      { factor: 'DEM resolution', contribution: 'Varies' },
+      { factor: 'Soil transmissivity', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 25% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Topographic Wetness Index: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Soil moisture and saturation zones.`,
+    recommendations: ["High TWI = wet areas.","SRTM for DEM."],
+  }),
+  metadata: {
+    methodology: 'Soil moisture and saturation zones.',
+    assumptions: ["Steady state","Uniform soil"],
+    limitations: ["DEM resolution dependent","No soil variability"],
+    references: ["Beven & Kirkby 1979"],
+    preprocessingNotes: ["Flow accumulation from SRTM","Slope from DEM"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 88 — Lake Evaporation Estimation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_88: ToolWorkflowDef = {
+  toolId: 88,
+  name: 'Lake Evaporation Estimation',
+  vizType: 'scalar',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Km', min: 0.1, max: 1.5 },{ param: 'ew', min: 0, max: 100 },{ param: 'ea', min: 0, max: 100 },{ param: 'u', min: 0, max: 100 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Vapor pressures from temperature');
+    log.push('  Wind speed from Open-Meteo');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Pan coefficient', contribution: 'Varies' },
+      { factor: 'Wind height', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 25% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Lake Evaporation Estimation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Lake evaporation estimation.`,
+    recommendations: ["Pan coefficient Km ~ 0.7.","Wind at 9m height."],
+  }),
+  metadata: {
+    methodology: 'Lake evaporation estimation.',
+    assumptions: ["Steady conditions","Uniform lake surface"],
+    limitations: ["Pan coefficient variable","Stratification ignored"],
+    references: ["Meyer 1915"],
+    preprocessingNotes: ["Vapor pressures from temperature","Wind speed from Open-Meteo"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 89 — Schmidt Stability Number
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_89: ToolWorkflowDef = {
+  toolId: 89,
+  name: 'Schmidt Stability Number',
+  vizType: 'profile',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'A', min: 0, max: 10000000000 },{ param: 'z', min: 0, max: 1000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Temperature/density profiles from CTD');
+    log.push('  Lake morphometry from bathymetry');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Density profile', contribution: 'Varies' },
+      { factor: 'Lake morphometry', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 20% from density profile quality',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Schmidt Stability Number: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Lake stratification strength.`,
+    recommendations: ["Requires density vs depth profile.","Lake morphometry from bathymetry."],
+  }),
+  metadata: {
+    methodology: 'Lake stratification strength.',
+    assumptions: ["Static lake","No internal waves"],
+    limitations: ["Requires profile data","Lake shape matters"],
+    references: ["Schmidt 1928"],
+    preprocessingNotes: ["Temperature/density profiles from CTD","Lake morphometry from bathymetry"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 90 — Nash Cascade
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_90: ToolWorkflowDef = {
+  toolId: 90,
+  name: 'Nash Cascade',
+  vizType: 'timeseries',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'n', min: 1, max: 10 },{ param: 'K', min: 0.1, max: 48 },{ param: 't', min: 0, max: 1000 },{ param: 'Q0', min: 0, max: 10000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Nash model for unit hydrograph');
+    log.push('  N and K from calibration');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'N and K calibration', contribution: 'Varies' },
+      { factor: 'Rainfall-runoff linearity', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 20% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Nash Cascade: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Unit hydrograph and flood forecasting.`,
+    recommendations: ["N and K from calibration.","Linear reservoir assumption."],
+  }),
+  metadata: {
+    methodology: 'Unit hydrograph and flood forecasting.',
+    assumptions: ["Linear reservoirs","Lumped watershed"],
+    limitations: ["Nonlinear runoff not captured","Requires calibration"],
+    references: ["Nash 1957"],
+    preprocessingNotes: ["Nash model for unit hydrograph","N and K from calibration"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 91 — Glacier Mass Balance (PDD)
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_91: ToolWorkflowDef = {
+  toolId: 91,
+  name: 'Glacier Mass Balance (PDD)',
+  vizType: 'timeseries',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Accum', min: 0, max: 10 },{ param: 'DDF', min: 0, max: 0.1 },{ param: 'Tpos', min: 0, max: 5000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Degree-day factor for ice melt');
+    log.push('  Accumulation from snowfall');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'DDF variability', contribution: 'Varies' },
+      { factor: 'Accumulation estimation', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 30% uncertainty, DDF ice 5-8 mm/C/day',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Glacier Mass Balance (PDD): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Glacier mass balance from degree-days.`,
+    recommendations: ["DDF for ice: 5-8 mm/C/day.","Accumulation from snowfall."],
+  }),
+  metadata: {
+    methodology: 'Glacier mass balance from degree-days.',
+    assumptions: ["Constant DDF","No debris cover"],
+    limitations: ["DDF varies with debris","Requires elevation zones"],
+    references: ["Braithwaite 1989","Hock 2003"],
+    preprocessingNotes: ["Degree-day factor for ice melt","Accumulation from snowfall"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 92 — Stefan Permafrost Active Layer
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_92: ToolWorkflowDef = {
+  toolId: 92,
+  name: 'Stefan Permafrost Active Layer',
+  vizType: 'profile',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'K', min: 0.1, max: 10 },{ param: 'DIFI', min: 0, max: 10000 },{ param: 'L', min: 0, max: 500000000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Thawing index from temperature sum');
+    log.push('  Thermal conductivity from soil type');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Thawing index', contribution: 'Varies' },
+      { factor: 'Thermal conductivity', contribution: 'Varies' },
+      { factor: 'Soil moisture', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 25% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Stefan Permafrost Active Layer: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Permafrost active layer depth.`,
+    recommendations: ["Thawing index from ERA5.","K from soil type."],
+  }),
+  metadata: {
+    methodology: 'Permafrost active layer depth.',
+    assumptions: ["Homogeneous soil","Phase change only"],
+    limitations: ["No snow insulation","Soil heterogeneity"],
+    references: ["Stefan 1891"],
+    preprocessingNotes: ["Thawing index from temperature sum","Thermal conductivity from soil type"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 93 — Herron-Langway Firn Densification
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_93: ToolWorkflowDef = {
+  toolId: 93,
+  name: 'Herron-Langway Firn Densification',
+  vizType: 'timeseries',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'k', min: 0, max: 1 },{ param: 'b', min: 0, max: 10000 },{ param: 'rho_i', min: 800, max: 950 },{ param: 'rho_f', min: 300, max: 850 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Accumulation rate from ice cores');
+    log.push('  Ice density = 917 kg/m3');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Densification rate', contribution: 'Varies' },
+      { factor: 'Accumulation rate', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 30% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Herron-Langway Firn Densification: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Firn densification for ice core dating.`,
+    recommendations: ["Accumulation rate from ice cores.","k temperature-dependent."],
+  }),
+  metadata: {
+    methodology: 'Firn densification for ice core dating.',
+    assumptions: ["Steady accumulation","No melt"],
+    limitations: ["Melt events not captured","Requires accumulation data"],
+    references: ["Herron & Langway 1980"],
+    preprocessingNotes: ["Accumulation rate from ice cores","Ice density = 917 kg/m3"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 94 — VEI Volume Relationship
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_94: ToolWorkflowDef = {
+  toolId: 94,
+  name: 'VEI Volume Relationship',
+  vizType: 'gauge',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'VEI', min: 0, max: 8 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  VEI from Smithsonian GVP');
+    log.push('  Volume from deposit mapping');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.5,
+    rmseUnit: 'VEI',
+    contributingFactors: [
+      { factor: 'Volume estimation', contribution: 'Varies' },
+      { factor: 'Eruption classification', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 0.5 VEI uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `VEI Volume Relationship: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Volcanic eruption classification.`,
+    recommendations: ["VEI from Smithsonian GVP.","Volume from deposit mapping."],
+  }),
+  metadata: {
+    methodology: 'Volcanic eruption classification.',
+    assumptions: ["Volume-VEI relationship","Representative deposit"],
+    limitations: ["Volume poorly constrained","Not for effusive eruptions"],
+    references: ["Newhall & Self 1982"],
+    preprocessingNotes: ["VEI from Smithsonian GVP","Volume from deposit mapping"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 95 — Morton-Taylor-Turner Buoyant Plume
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_95: ToolWorkflowDef = {
+  toolId: 95,
+  name: 'Morton-Taylor-Turner Buoyant Plume',
+  vizType: 'profile',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Qdot', min: 0, max: 100000 },{ param: 'rho_air', min: 0.5, max: 1.5 },{ param: 'alpha', min: 0.05, max: 0.2 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Entrainment coefficient alpha ~ 0.1');
+    log.push('  Heat output from thermal observations');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Entrainment coefficient', contribution: 'Varies' },
+      { factor: 'Heat output', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 25% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Morton-Taylor-Turner Buoyant Plume: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Volcanic plume rise modeling.`,
+    recommendations: ["Alpha ~ 0.1 (standard).","Heat output from thermal satellite."],
+  }),
+  metadata: {
+    methodology: 'Volcanic plume rise modeling.',
+    assumptions: ["Steady plume","Constant entrainment"],
+    limitations: ["Crosswind effects important","Alpha varies"],
+    references: ["Morton, Taylor & Turner 1956"],
+    preprocessingNotes: ["Entrainment coefficient alpha ~ 0.1","Heat output from thermal observations"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 96 — Budyko-Sellers Energy Balance
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_96: ToolWorkflowDef = {
+  toolId: 96,
+  name: 'Budyko-Sellers Energy Balance',
+  vizType: 'timeseries',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'C', min: 1000000, max: 10000000000 },{ param: 'Q', min: 0, max: 500 },{ param: 'alpha', min: 0, max: 1 },{ param: 'I', min: 0, max: 400 },{ param: 'D', min: 0, max: 100 },{ param: 'nabla2T', min: -1, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Solar constant S/4 for sphere');
+    log.push('  Albedo temperature dependence');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'qualitative',
+    contributingFactors: [
+      { factor: 'Albedo parameterization', contribution: 'Varies' },
+      { factor: 'Diffusion coefficient', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Conceptual climate model',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Budyko-Sellers Energy Balance: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Energy balance climate model.`,
+    recommendations: ["S/4 for sphere averaging.","Ice-albedo feedback included."],
+  }),
+  metadata: {
+    methodology: 'Energy balance climate model.',
+    assumptions: ["Zero-dimensional or 1D","No ocean dynamics"],
+    limitations: ["No clouds","No ocean heat transport"],
+    references: ["Budyko 1969","Sellers 1969"],
+    preprocessingNotes: ["Solar constant S/4 for sphere","Albedo temperature dependence"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 97 — Climate Sensitivity
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_97: ToolWorkflowDef = {
+  toolId: 97,
+  name: 'Climate Sensitivity',
+  vizType: 'scalar',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'dF', min: 0, max: 20 },{ param: 'lambda0', min: 1, max: 5 },{ param: 'f', min: -5, max: 5 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  IPCC AR6: ECS ~ 3C');
+    log.push('  Planck feedback 3.76 W/m2/K');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'qualitative',
+    contributingFactors: [
+      { factor: 'Cloud feedback', contribution: 'Varies' },
+      { factor: 'Lapse rate', contribution: 'Varies' },
+      { factor: 'Water vapor', contribution: 'Varies' },
+    ],
+    overallAssessment: 'IPCC AR6 ECS: 3C (2.5-4.0)',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Climate Sensitivity: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Climate sensitivity from radiative forcing.`,
+    recommendations: ["IPCC AR6: ECS ~ 3C (2.5-4.0).","lambda0 = 3.76 W/m2/K."],
+  }),
+  metadata: {
+    methodology: 'Climate sensitivity from radiative forcing.',
+    assumptions: ["Linear feedback","Constant feedbacks"],
+    limitations: ["Nonlinear feedbacks","State-dependent"],
+    references: ["IPCC AR6 Chapter 7","Soden & Held 2006"],
+    preprocessingNotes: ["IPCC AR6: ECS ~ 3C","Planck feedback 3.76 W/m2/K"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 98 — Planck Feedback Parameter
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_98: ToolWorkflowDef = {
+  toolId: 98,
+  name: 'Planck Feedback Parameter',
+  vizType: 'scalar',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'dRdT', min: 1, max: 5 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  At T=255K: 4*sigma*T^3 = 3.76');
+    log.push('  Pure Planck response only');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Blackbody temperature', contribution: 'Varies' },
+      { factor: 'Stefan-Boltzmann constant', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Pure Planck: 3.76 W/m2/K at T=255K',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Planck Feedback Parameter: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Planck feedback parameter.`,
+    recommendations: ["3.76 W/m2/K at T=255K (not 3.2).","3.2 includes lapse rate."],
+  }),
+  metadata: {
+    methodology: 'Planck feedback parameter.',
+    assumptions: ["Blackbody emission","Constant T"],
+    limitations: ["Not total feedback","Excludes water vapor/clouds"],
+    references: ["IPCC AR6 Section 7.2"],
+    preprocessingNotes: ["At T=255K: 4*sigma*T^3 = 3.76","Pure Planck response only"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 99 — Rossby Wave Dispersion
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_99: ToolWorkflowDef = {
+  toolId: 99,
+  name: 'Rossby Wave Dispersion',
+  vizType: 'spectrum',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'beta', min: 0, max: 1e-10 },{ param: 'kx', min: 0, max: 1 },{ param: 'ky', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Beta = df/dy');
+    log.push('  Wavenumber from wavelength');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Beta parameter', contribution: 'Varies' },
+      { factor: 'Wavenumber accuracy', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for linear barotropic waves',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Rossby Wave Dispersion: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Planetary wave dynamics.`,
+    recommendations: ["Beta = df/dy.","Rossby radius from stratification."],
+  }),
+  metadata: {
+    methodology: 'Planetary wave dynamics.',
+    assumptions: ["Linear waves","Beta-plane"],
+    limitations: ["Nonlinear effects","No topographic waves"],
+    references: ["Rossby 1939"],
+    preprocessingNotes: ["Beta = df/dy","Wavenumber from wavelength"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 100 — Charney-Stern Theorem
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_100: ToolWorkflowDef = {
+  toolId: 100,
+  name: 'Charney-Stern Theorem',
+  vizType: 'scalar',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'dqdy', min: -1e-9, max: 1e-9 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  PV gradient from reanalysis');
+    log.push('  Necessary condition for instability');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'qualitative',
+    contributingFactors: [
+      { factor: 'PV gradient', contribution: 'Varies' },
+      { factor: 'Reanalysis resolution', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Necessary not sufficient condition',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Charney-Stern Theorem: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Baroclinic instability criterion.`,
+    recommendations: ["Necessary, not sufficient.","PV from reanalysis."],
+  }),
+  metadata: {
+    methodology: 'Baroclinic instability criterion.',
+    assumptions: ["Linear instability","Zonal mean flow"],
+    limitations: ["Necessary not sufficient","Requires QG"],
+    references: ["Charney & Stern 1962"],
+    preprocessingNotes: ["PV gradient from reanalysis","Necessary condition for instability"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 101 — Eady Growth Rate
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_101: ToolWorkflowDef = {
+  toolId: 101,
+  name: 'Eady Growth Rate',
+  vizType: 'gauge',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'f', min: 0, max: 0.0002 },{ param: 'N', min: 0.001, max: 0.1 },{ param: 'dudz', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Coefficient 0.3098 from Eady 1949');
+    log.push('  Wind shear from ERA5');
+    log.push('  N from stability');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Eady model assumptions', contribution: 'Varies' },
+      { factor: 'Shear measurement', contribution: 'Varies' },
+      { factor: 'N from stability', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for idealized Eady model',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Eady Growth Rate: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Baroclinic instability growth rate.`,
+    recommendations: ["0.3098 coefficient.","Wind shear from ERA5."],
+  }),
+  metadata: {
+    methodology: 'Baroclinic instability growth rate.',
+    assumptions: ["Eady model","Constant shear"],
+    limitations: ["Idealized model","No moisture"],
+    references: ["Eady 1949"],
+    preprocessingNotes: ["Coefficient 0.3098 from Eady 1949","Wind shear from ERA5","N from stability"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 102 — Quasi-Geostrophic PV
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_102: ToolWorkflowDef = {
+  toolId: 102,
+  name: 'Quasi-Geostrophic PV',
+  vizType: 'contour',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'psi', min: -1000000000, max: 1000000000 },{ param: 'f', min: 0, max: 0.0002 },{ param: 'd2psi_dp2', min: -1, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  QG PV from streamfunction');
+    log.push('  Coriolis from latitude');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'QG approximation', contribution: 'Varies' },
+      { factor: 'Streamfunction accuracy', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Conserved in QG flow',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Quasi-Geostrophic PV: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Conserved tracer for large-scale dynamics.`,
+    recommendations: ["Conserved in adiabatic QG flow.","ERA5 for streamfunction."],
+  }),
+  metadata: {
+    methodology: 'Conserved tracer for large-scale dynamics.',
+    assumptions: ["QG approximation","Small Rossby number"],
+    limitations: ["Breaks for mesoscale","No ageostrophic"],
+    references: ["Charney 1948"],
+    preprocessingNotes: ["QG PV from streamfunction","Coriolis from latitude"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 103 — Reynolds Decomposition
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_103: ToolWorkflowDef = {
+  toolId: 103,
+  name: 'Reynolds Decomposition',
+  vizType: 'scalar',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'ubar', min: 0, max: 100 },{ param: 'uprime', min: -50, max: 50 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Mean and fluctuating components');
+    log.push('  Time averaging');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Averaging period', contribution: 'Varies' },
+      { factor: 'Turbulence definition', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact decomposition',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Reynolds Decomposition: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Mean + turbulent fluctuation.`,
+    recommendations: ["Foundation of RANS.","Averaging period critical."],
+  }),
+  metadata: {
+    methodology: 'Mean + turbulent fluctuation.',
+    assumptions: ["Stationary flow","Clear scale separation"],
+    limitations: ["Averaging period subjective","Non-stationary issues"],
+    references: ["Reynolds 1895"],
+    preprocessingNotes: ["Mean and fluctuating components","Time averaging"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 104 — Ekman Layer Depth
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_104: ToolWorkflowDef = {
+  toolId: 104,
+  name: 'Ekman Layer Depth',
+  vizType: 'profile',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Km', min: 0.001, max: 1000 },{ param: 'f', min: 0, max: 0.0002 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Eddy viscosity from boundary layer');
+    log.push('  Coriolis from latitude');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Eddy viscosity', contribution: 'Varies' },
+      { factor: 'Coriolis parameter', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for constant eddy viscosity',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Ekman Layer Depth: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Frictional boundary layer depth.`,
+    recommendations: ["Constant eddy viscosity.","Breaks near equator."],
+  }),
+  metadata: {
+    methodology: 'Frictional boundary layer depth.',
+    assumptions: ["Constant Km","Steady state"],
+    limitations: ["Km not constant","Stratification effects"],
+    references: ["Ekman 1905"],
+    preprocessingNotes: ["Eddy viscosity from boundary layer","Coriolis from latitude"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 105 — Convective Velocity Scale
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_105: ToolWorkflowDef = {
+  toolId: 105,
+  name: 'Convective Velocity Scale',
+  vizType: 'scalar',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'g', min: 0, max: 20 },{ param: 'thetav', min: 200, max: 400 },{ param: 'wthetav0', min: 0, max: 10 },{ param: 'zi', min: 10, max: 5000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Surface heat flux from observations');
+    log.push('  BL height from lidar/sodar');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Surface heat flux', contribution: 'Varies' },
+      { factor: 'BL height', contribution: 'Varies' },
+      { factor: 'Mean state', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 15% from flux and BL height',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Convective Velocity Scale: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Convective boundary layer scaling.`,
+    recommendations: ["Surface heat flux from tower.","BL height from lidar."],
+  }),
+  metadata: {
+    methodology: 'Convective boundary layer scaling.',
+    assumptions: ["Free convection","Horizontally homogeneous"],
+    limitations: ["Not for wind-driven BL","Requires surface flux"],
+    references: ["Deardorff 1970"],
+    preprocessingNotes: ["Surface heat flux from observations","BL height from lidar/sodar"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 106 — Petterssen Frontogenesis
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_106: ToolWorkflowDef = {
+  toolId: 106,
+  name: 'Petterssen Frontogenesis',
+  vizType: 'scalar',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'gradtheta', min: 0, max: 1 },{ param: 'D', min: -1, max: 1 },{ param: 'beta', min: 0, max: 1.57 },{ param: 'delta', min: 0, max: 1 },{ param: 'duds', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Temperature gradient from reanalysis');
+    log.push('  Deformation from wind field');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Gradient accuracy', contribution: 'Varies' },
+      { factor: 'Deformation calculation', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for kinematic formulation',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Petterssen Frontogenesis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Frontal intensification rate.`,
+    recommendations: ["Frontal intensification rate.","From ERA5 wind and temperature."],
+  }),
+  metadata: {
+    methodology: 'Frontal intensification rate.',
+    assumptions: ["2D front","No diabatic effects"],
+    limitations: ["No diabatic heating","2D simplification"],
+    references: ["Petterssen 1936"],
+    preprocessingNotes: ["Temperature gradient from reanalysis","Deformation from wind field"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 107 — Vorticity Equation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_107: ToolWorkflowDef = {
+  toolId: 107,
+  name: 'Vorticity Equation',
+  vizType: 'vector',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'zeta', min: -1, max: 1 },{ param: 'f', min: 0, max: 0.0002 },{ param: 'divV', min: -1, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Relative vorticity from wind field');
+    log.push('  Coriolis from latitude');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Vorticity calculation', contribution: 'Varies' },
+      { factor: 'Divergence accuracy', contribution: 'Varies' },
+      { factor: 'Friction', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact from Navier-Stokes',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Vorticity Equation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Storm dynamics and cyclone development.`,
+    recommendations: ["Conservation of absolute vorticity.","ERA5 for wind fields."],
+  }),
+  metadata: {
+    methodology: 'Storm dynamics and cyclone development.',
+    assumptions: ["Inviscid or parameterized","Hydrostatic"],
+    limitations: ["Friction parameterization","No diabatic effects"],
+    references: ["Holton & Hakim 2012"],
+    preprocessingNotes: ["Relative vorticity from wind field","Coriolis from latitude"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 108 — Kohler Equation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_108: ToolWorkflowDef = {
+  toolId: 108,
+  name: 'Kohler Equation',
+  vizType: 'scalar',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'a', min: 0, max: 0.000001 },{ param: 'r', min: 1e-8, max: 0.001 },{ param: 'b', min: 0, max: 1e-10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Kelvin curvature coefficient');
+    log.push('  Solute coefficient from Raoult law');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Surface tension', contribution: 'Varies' },
+      { factor: 'Solute properties', contribution: 'Varies' },
+      { factor: 'Temperature', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for ideal solution droplets',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Kohler Equation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Cloud droplet activation.`,
+    recommendations: ["Critical radius and supersaturation.","CCN activation."],
+  }),
+  metadata: {
+    methodology: 'Cloud droplet activation.',
+    assumptions: ["Ideal solution","Spherical droplet","Equilibrium"],
+    limitations: ["Non-ideal solutions","Surface tension varies"],
+    references: ["Kohler 1936"],
+    preprocessingNotes: ["Kelvin curvature coefficient","Solute coefficient from Raoult law"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 109 — Marshall-Palmer DSD
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_109: ToolWorkflowDef = {
+  toolId: 109,
+  name: 'Marshall-Palmer DSD',
+  vizType: 'histogram',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'N0', min: 0, max: 1000000000 },{ param: 'Lambda', min: 0, max: 50000 },{ param: 'D', min: 0, max: 0.01 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Intercept N0 = 8e6 m^-4');
+    log.push('  Slope Lambda from rain rate');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'N0 variability', contribution: 'Varies' },
+      { factor: 'Lambda-rain rate', contribution: 'Varies' },
+      { factor: 'Exponential assumption', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 20%, N0 variable',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Marshall-Palmer DSD: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Exponential drop size distribution.`,
+    recommendations: ["N0 = 8e6 m^-4.","Lambda from rain rate."],
+  }),
+  metadata: {
+    methodology: 'Exponential drop size distribution.',
+    assumptions: ["Exponential distribution","Steady rain"],
+    limitations: ["Not for convective rain","N0 varies"],
+    references: ["Marshall & Palmer 1948"],
+    preprocessingNotes: ["Intercept N0 = 8e6 m^-4","Slope Lambda from rain rate"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 110 — Z-R Relationship
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_110: ToolWorkflowDef = {
+  toolId: 110,
+  name: 'Z-R Relationship',
+  vizType: 'scatter',
+  classificationBands: CLIMATE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'a', min: 0, max: 1000 },{ param: 'R', min: 0, max: 500 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Z = 200*R^1.6 (stratiform)');
+    log.push('  Z = 300*R^1.4 (convective)');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, CLIMATE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Z-R coefficients', contribution: 'Varies' },
+      { factor: 'DSD', contribution: 'Varies' },
+      { factor: 'Radar calibration', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 30%, coefficients vary',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Z-R Relationship: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Radar reflectivity to rainfall rate.`,
+    recommendations: ["200*R^1.6 (stratiform).","300*R^1.4 (convective).","Dual-pol reduces uncertainty."],
+  }),
+  metadata: {
+    methodology: 'Radar reflectivity to rainfall rate.',
+    assumptions: ["Equilibrium DSD","Single rain type"],
+    limitations: ["Coefficients vary by region","Hail contamination"],
+    references: ["Marshall & Palmer 1948"],
+    preprocessingNotes: ["Z = 200*R^1.6 (stratiform)","Z = 300*R^1.4 (convective)"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 111 — IERS Earth Rotation Matrix
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_111: ToolWorkflowDef = {
+  toolId: 111,
+  name: 'IERS Earth Rotation Matrix',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'P', min: 0, max: 1 },{ param: 'N', min: 0, max: 1 },{ param: 'R', min: 0, max: 1 },{ param: 'W', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Precession-nutation from IERS');
+    log.push('  Earth rotation from GAST');
+    log.push('  Polar motion from IERS');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'IERS conventions', contribution: 'Varies' },
+      { factor: 'Matrix order', contribution: 'Varies' },
+      { factor: 'Time system', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact with IERS conventions',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `IERS Earth Rotation Matrix: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Earth rotation for satellite positioning.`,
+    recommendations: ["IERS Conventions 2010.","Precession, nutation, rotation, polar motion."],
+  }),
+  metadata: {
+    methodology: 'Earth rotation for satellite positioning.',
+    assumptions: ["Rigid Earth","Known time"],
+    limitations: ["Non-rigid Earth effects","Requires IERS data"],
+    references: ["IERS Conventions 2010"],
+    preprocessingNotes: ["Precession-nutation from IERS","Earth rotation from GAST","Polar motion from IERS"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 112 — Earth Tides (Love Numbers)
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_112: ToolWorkflowDef = {
+  toolId: 112,
+  name: 'Earth Tides (Love Numbers)',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'hn', min: 0, max: 1 },{ param: 'Vn', min: 0, max: 10 },{ param: 'g', min: 9.8, max: 9.82 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Love numbers from Earth model');
+    log.push('  Tidal potential from Moon/Sun');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 5,
+    rmseUnit: 'mm',
+    contributingFactors: [
+      { factor: 'Love number model', contribution: 'Varies' },
+      { factor: 'Tidal potential', contribution: 'Varies' },
+      { factor: 'Local geology', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 5mm accuracy',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Earth Tides (Love Numbers): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Solid Earth deformation from tides.`,
+    recommendations: ["Love numbers from PREM model.","Sub-meter GPS correction."],
+  }),
+  metadata: {
+    methodology: 'Solid Earth deformation from tides.',
+    assumptions: ["Elastic Earth","Known Love numbers"],
+    limitations: ["Anelastic effects","Local geology variations"],
+    references: ["Wahr 1981"],
+    preprocessingNotes: ["Love numbers from Earth model","Tidal potential from Moon/Sun"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 113 — EGM2008 Gravity Field
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_113: ToolWorkflowDef = {
+  toolId: 113,
+  name: 'EGM2008 Gravity Field',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'GM', min: 0, max: 1000000000000000 },{ param: 'r', min: 6000000, max: 10000000 },{ param: 'Cnm', min: -1, max: 1 },{ param: 'Snm', min: -1, max: 1 },{ param: 'Pnm', min: -1, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Spherical harmonics degree 2190');
+    log.push('  Coefficients from EGM2008');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Harmonic degree truncation', contribution: 'Varies' },
+      { factor: 'Coefficient accuracy', contribution: 'Varies' },
+      { factor: 'Legendre functions', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact to degree 2190',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `EGM2008 Gravity Field: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Global gravity field and geoid.`,
+    recommendations: ["Degree 2190 (~5 arcmin).","Precise orbit determination."],
+  }),
+  metadata: {
+    methodology: 'Global gravity field and geoid.',
+    assumptions: ["Spherical harmonic expansion","Known coefficients"],
+    limitations: ["Truncation error","Computationally expensive"],
+    references: ["Pavlis et al. 2008"],
+    preprocessingNotes: ["Spherical harmonics degree 2190","Coefficients from EGM2008"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 114 — Helmert 7-Parameter Transformation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_114: ToolWorkflowDef = {
+  toolId: 114,
+  name: 'Helmert 7-Parameter Transformation',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'S', min: 0, max: 2 },{ param: 'R', min: 0, max: 2 },{ param: 'T', min: -1000, max: 1000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  7 parameters from datum calibration');
+    log.push('  WGS84 to ITRF conversion');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Parameter accuracy', contribution: 'Varies' },
+      { factor: 'Rotation matrix', contribution: 'Varies' },
+      { factor: 'Scale factor', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for known parameters',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Helmert 7-Parameter Transformation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. 7-parameter datum transformation.`,
+    recommendations: ["Scale, 3 rotations, 3 translations.","WGS84/ITRF conversion."],
+  }),
+  metadata: {
+    methodology: '7-parameter datum transformation.',
+    assumptions: ["Rigid body","Known parameters","Small angles"],
+    limitations: ["Not for nonlinear distortions","Parameter accuracy critical"],
+    references: ["Heiskanen & Moritz 1967"],
+    preprocessingNotes: ["7 parameters from datum calibration","WGS84 to ITRF conversion"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 115 — Geoid Height
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_115: ToolWorkflowDef = {
+  toolId: 115,
+  name: 'Geoid Height',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'h', min: -500, max: 10000 },{ param: 'N', min: -200, max: 200 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Ellipsoidal height from GPS');
+    log.push('  Geoid undulation from EGM2008');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'GPS height accuracy', contribution: 'Varies' },
+      { factor: 'Geoid model accuracy', contribution: 'Varies' },
+      { factor: 'EGM2008 resolution', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact with accurate EGM2008',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Geoid Height: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Height reference frame transformation.`,
+    recommendations: ["H = h - N (orthometric).","N from EGM2008."],
+  }),
+  metadata: {
+    methodology: 'Height reference frame transformation.',
+    assumptions: ["Known geoid undulation","GPS ellipsoidal height"],
+    limitations: ["Geoid model resolution","GPS height accuracy"],
+    references: ["Standard geodesy"],
+    preprocessingNotes: ["Ellipsoidal height from GPS","Geoid undulation from EGM2008"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 116 — NRLMSISE-00 Thermosphere
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_116: ToolWorkflowDef = {
+  toolId: 116,
+  name: 'NRLMSISE-00 Thermosphere',
+  vizType: 'profile',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'n_N2', min: 0, max: 1e+30 },{ param: 'n_O2', min: 0, max: 1e+30 },{ param: 'n_O', min: 0, max: 1e+30 },{ param: 'm_N2', min: 0, max: 1e-25 },{ param: 'm_O2', min: 0, max: 1e-25 },{ param: 'm_O', min: 0, max: 1e-25 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  NRLMSIS 2.0 with TIMED/SABER');
+    log.push('  Species densities from model');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Model coefficients', contribution: 'Varies' },
+      { factor: 'Solar activity', contribution: 'Varies' },
+      { factor: 'Geomagnetic conditions', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 15%, NRLMSIS 2.0 recommended',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `NRLMSISE-00 Thermosphere: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Satellite drag atmospheric density.`,
+    recommendations: ["Use NRLMSIS 2.0 (updated).","TIMED/SABER data assimilation."],
+  }),
+  metadata: {
+    methodology: 'Satellite drag atmospheric density.',
+    assumptions: ["Empirical model","Known solar/geomagnetic inputs"],
+    limitations: ["Solar cycle variability","Storm-time density spikes"],
+    references: ["Picone 2002"],
+    preprocessingNotes: ["NRLMSIS 2.0 with TIMED/SABER","Species densities from model"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 117 — IRI-2016 Ionosphere
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_117: ToolWorkflowDef = {
+  toolId: 117,
+  name: 'IRI-2016 Ionosphere',
+  vizType: 'profile',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Ne', min: 100000000, max: 10000000000000 },{ param: 'h', min: 50000, max: 2000000 },{ param: 'NmF2', min: 10000000000, max: 5000000000000 },{ param: 'hmF2', min: 150000, max: 600000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  IRI-2020 is latest version');
+    log.push('  Electron density profiles');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Model coefficients', contribution: 'Varies' },
+      { factor: 'Solar activity', contribution: 'Varies' },
+      { factor: 'Ionosonde data', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 15%, IRI-2020 recommended',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `IRI-2016 Ionosphere: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Ionospheric electron density profiles.`,
+    recommendations: ["Use IRI-2020 (latest).","GPS accuracy application."],
+  }),
+  metadata: {
+    methodology: 'Ionospheric electron density profiles.',
+    assumptions: ["Empirical model","Known solar inputs"],
+    limitations: ["Storm-time deviations","Equatorial anomaly"],
+    references: ["Bilitza 2017"],
+    preprocessingNotes: ["IRI-2020 is latest version","Electron density profiles"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 118 — Joule Heating
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_118: ToolWorkflowDef = {
+  toolId: 118,
+  name: 'Joule Heating',
+  vizType: 'scalar',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'J', min: 0, max: 1 },{ param: 'E', min: 0, max: 1 },{ param: 'sigma', min: 0, max: 0.01 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Current density from ionosphere');
+    log.push('  Electric field from convection');
+    log.push('  Pedersen conductivity');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Current density', contribution: 'Varies' },
+      { factor: 'Electric field', contribution: 'Varies' },
+      { factor: 'Conductivity', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 20% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Joule Heating: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Storm-time thermospheric heating.`,
+    recommendations: ["Key driver of storm-time density spikes.","Electric field from convection."],
+  }),
+  metadata: {
+    methodology: 'Storm-time thermospheric heating.',
+    assumptions: ["Steady state","Known conductivity"],
+    limitations: ["Time-varying fields","Conductivity altitude-dependent"],
+    references: ["Standard"],
+    preprocessingNotes: ["Current density from ionosphere","Electric field from convection","Pedersen conductivity"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 119 — Ionospheric Scintillation (S4)
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_119: ToolWorkflowDef = {
+  toolId: 119,
+  name: 'Ionospheric Scintillation (S4)',
+  vizType: 'gauge',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Ibar', min: 0, max: 100 },{ param: 'sigmaI', min: 0, max: 10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Signal intensity statistics');
+    log.push('  GNSS receiver data');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Signal conditions', contribution: 'Varies' },
+      { factor: 'Receiver quality', contribution: 'Varies' },
+      { factor: 'Multipath', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 15% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Ionospheric Scintillation (S4): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. GPS reliability assessment.`,
+    recommendations: ["S4 > 0.5: strong scintillation.","GNSS receiver data."],
+  }),
+  metadata: {
+    methodology: 'GPS reliability assessment.',
+    assumptions: ["Steady signal","No multipath"],
+    limitations: ["Multipath contamination","Receiver-dependent"],
+    references: ["Standard GNSS"],
+    preprocessingNotes: ["Signal intensity statistics","GNSS receiver data"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 120 — Magnetopause Standoff (Shue)
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_120: ToolWorkflowDef = {
+  toolId: 120,
+  name: 'Magnetopause Standoff (Shue)',
+  vizType: 'scalar',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Pdyn', min: 0, max: 100 },{ param: 'Bz', min: -30, max: 30 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Solar wind from NOAA SWPC');
+    log.push('  IMF Bz from ACE/DSCOVR');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 10,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Solar wind input', contribution: 'Varies' },
+      { factor: 'Model coefficients', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 10%, NOAA SWPC authoritative',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Magnetopause Standoff (Shue): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Magnetopause location from solar wind.`,
+    recommendations: ["Real-time NOAA SWPC data.","ACE/DSCOVR for IMF."],
+  }),
+  metadata: {
+    methodology: 'Magnetopause location from solar wind.',
+    assumptions: ["Steady solar wind","Axisymmetric magnetopause"],
+    limitations: ["Dynamic pressure variations","Tailward extension"],
+    references: ["Shue 1998"],
+    preprocessingNotes: ["Solar wind from NOAA SWPC","IMF Bz from ACE/DSCOVR"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 121 — Dst Ring Current Index
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_121: ToolWorkflowDef = {
+  toolId: 121,
+  name: 'Dst Ring Current Index',
+  vizType: 'gauge',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Dst', min: -500, max: 100 },{ param: 'Pdyn', min: 0, max: 100 },{ param: 'b', min: 0, max: 20 },{ param: 'c', min: -50, max: 50 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Raw Dst from WDC Kyoto');
+    log.push('  Pressure correction');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 10,
+    rmseUnit: 'nT',
+    contributingFactors: [
+      { factor: 'Pressure correction', contribution: 'Varies' },
+      { factor: 'Offset calibration', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 10 nT uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Dst Ring Current Index: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Geomagnetic storm severity.`,
+    recommendations: ["Raw Dst from WDC Kyoto.","Pressure correction."],
+  }),
+  metadata: {
+    methodology: 'Geomagnetic storm severity.',
+    assumptions: ["Steady ring current","Known pressure"],
+    limitations: ["Non-storm contamination","Offset varies"],
+    references: ["Sugiura 1964"],
+    preprocessingNotes: ["Raw Dst from WDC Kyoto","Pressure correction"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 122 — Debye Length
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_122: ToolWorkflowDef = {
+  toolId: 122,
+  name: 'Debye Length',
+  vizType: 'scalar',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'eps0', min: 8.854e-12, max: 8.854e-12 },{ param: 'kB', min: 1.381e-23, max: 1.381e-23 },{ param: 'Te', min: 1000, max: 10000000 },{ param: 'ne', min: 1000000, max: 1000000000000000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Electron temperature from plasma');
+    log.push('  Electron density from measurements');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Electron temperature', contribution: 'Varies' },
+      { factor: 'Electron density', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for Maxwellian plasma',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Debye Length: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Space plasma shielding distance.`,
+    recommendations: ["Fundamental plasma parameter.","Indicates charge neutrality scale."],
+  }),
+  metadata: {
+    methodology: 'Space plasma shielding distance.',
+    assumptions: ["Maxwellian distribution","Known Te, ne"],
+    limitations: ["Non-Maxwellian plasmas","Magnetic field effects"],
+    references: ["Debye 1923"],
+    preprocessingNotes: ["Electron temperature from plasma","Electron density from measurements"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 123 — Satellite Drag Force
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_123: ToolWorkflowDef = {
+  toolId: 123,
+  name: 'Satellite Drag Force',
+  vizType: 'scalar',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'rho', min: 1e-20, max: 0.00001 },{ param: 'CD', min: 1, max: 4 },{ param: 'A', min: 0.01, max: 1000 },{ param: 'm', min: 1, max: 100000 },{ param: 'v', min: 0, max: 15000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Atmospheric density from NRLMSIS');
+    log.push('  Drag coefficient ~ 2.2');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Atmospheric density', contribution: 'Varies' },
+      { factor: 'Drag coefficient', contribution: 'Varies' },
+      { factor: 'Cross-section', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 15%, density is key uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Satellite Drag Force: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Orbital decay prediction.`,
+    recommendations: ["Atmospheric density from NRLMSIS.","CD ~ 2.2 (varies 1-4)."],
+  }),
+  metadata: {
+    methodology: 'Orbital decay prediction.',
+    assumptions: ["Known density","Constant CD","Known area/mass"],
+    limitations: ["Density variable","CD attitude-dependent","Area varies"],
+    references: ["Standard"],
+    preprocessingNotes: ["Atmospheric density from NRLMSIS","Drag coefficient ~ 2.2"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 124 — Orbital Decay Rate
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_124: ToolWorkflowDef = {
+  toolId: 124,
+  name: 'Orbital Decay Rate',
+  vizType: 'timeseries',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'rho', min: 1e-20, max: 0.00001 },{ param: 'CD', min: 1, max: 4 },{ param: 'A', min: 0.01, max: 1000 },{ param: 'v', min: 0, max: 15000 },{ param: 'm', min: 1, max: 100000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Atmospheric density from NRLMSIS');
+    log.push('  Re-entry timeline estimation');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 15,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Atmospheric density', contribution: 'Varies' },
+      { factor: 'Drag coefficient', contribution: 'Varies' },
+      { factor: 'Velocity', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 15% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Orbital Decay Rate: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Satellite re-entry timeline.`,
+    recommendations: ["Density from NRLMSIS.","Re-entry prediction."],
+  }),
+  metadata: {
+    methodology: 'Satellite re-entry timeline.',
+    assumptions: ["Known density","Circular orbit"],
+    limitations: ["Eccentric orbit","Density variations","CD attitude-dependent"],
+    references: ["King-Hele 1987"],
+    preprocessingNotes: ["Atmospheric density from NRLMSIS","Re-entry timeline estimation"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 125 — Collision Probability
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_125: ToolWorkflowDef = {
+  toolId: 125,
+  name: 'Collision Probability',
+  vizType: 'scalar',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'A1', min: 0, max: 1000 },{ param: 'A2', min: 0, max: 1000 },{ param: 'sigmax', min: 0, max: 10000 },{ param: 'sigmay', min: 0, max: 10000 },{ param: 'd', min: 0, max: 10000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Position uncertainty from tracking');
+    log.push('  Miss distance from conjunction');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Covariance accuracy', contribution: 'Varies' },
+      { factor: 'Miss distance', contribution: 'Varies' },
+      { factor: 'Encounter geometry', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 20% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Collision Probability: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Conjunction assessment and collision avoidance.`,
+    recommendations: ["Position uncertainty from tracking.","Miss distance from conjunction."],
+  }),
+  metadata: {
+    methodology: 'Conjunction assessment and collision avoidance.',
+    assumptions: ["Gaussian distribution","Short encounter","Known covariance"],
+    limitations: ["Non-Gaussian errors","Long encounters","Maneuvers change geometry"],
+    references: ["Foster 1992"],
+    preprocessingNotes: ["Position uncertainty from tracking","Miss distance from conjunction"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 126 — Kessler Syndrome Debris Growth
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_126: ToolWorkflowDef = {
+  toolId: 126,
+  name: 'Kessler Syndrome Debris Growth',
+  vizType: 'timeseries',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'rho', min: 0, max: 1 },{ param: 'sigma', min: 0, max: 1000 },{ param: 'v', min: 0, max: 20 },{ param: 'N', min: 0, max: 1000000000 },{ param: 'L', min: 0, max: 1000 },{ param: 'beta', min: 0, max: 1 },{ param: 'gamma', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Debris population from catalog');
+    log.push('  Collision cross-section');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'qualitative',
+    contributingFactors: [
+      { factor: 'Collision rate', contribution: 'Varies' },
+      { factor: 'Launch source', contribution: 'Varies' },
+      { factor: 'Decay coefficient', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Long-term debris environment projection',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Kessler Syndrome Debris Growth: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Space debris growth modeling.`,
+    recommendations: ["Long-term projection.","Collision cascading."],
+  }),
+  metadata: {
+    methodology: 'Space debris growth modeling.',
+    assumptions: ["Mean-field approximation","Known population"],
+    limitations: ["Individual collisions stochastic","Launch rates uncertain","Decay varies"],
+    references: ["Kessler 1991"],
+    preprocessingNotes: ["Debris population from catalog","Collision cross-section"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 127 — Hill-Clohessy-Wiltshire
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_127: ToolWorkflowDef = {
+  toolId: 127,
+  name: 'Hill-Clohessy-Wiltshire',
+  vizType: 'scalar',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'n', min: 0, max: 0.01 },{ param: 'ax', min: -10, max: 10 },{ param: 'ay', min: -10, max: 10 },{ param: 'az', min: -10, max: 10 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Mean motion from orbital elements');
+    log.push('  Relative motion for rendezvous');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Linearized equations', contribution: 'Varies' },
+      { factor: 'Circular reference orbit', contribution: 'Varies' },
+      { factor: 'No perturbations', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for circular orbit',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Hill-Clohessy-Wiltshire: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Satellite rendezvous proximity operations.`,
+    recommendations: ["Linearized relative motion.","Circular reference orbit."],
+  }),
+  metadata: {
+    methodology: 'Satellite rendezvous proximity operations.',
+    assumptions: ["Circular orbit","Small separations","No perturbations"],
+    limitations: ["Not for eccentric orbits","Large separations","J2 perturbation"],
+    references: ["Hill 1878"],
+    preprocessingNotes: ["Mean motion from orbital elements","Relative motion for rendezvous"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 128 — Kp Geomagnetic Index
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_128: ToolWorkflowDef = {
+  toolId: 128,
+  name: 'Kp Geomagnetic Index',
+  vizType: 'gauge',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'wi', min: 0, max: 1 },{ param: 'Ki', min: 0, max: 9 },{ param: 'num_stations', min: 1, max: 13 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  13 station K-indices');
+    log.push('  Weighted average');
+    log.push('  NOAA SWPC real-time');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 0.5,
+    rmseUnit: 'Kp',
+    contributingFactors: [
+      { factor: 'Station weights', contribution: 'Varies' },
+      { factor: 'K-index estimation', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 0.5 Kp uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Kp Geomagnetic Index: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Primary space weather severity metric.`,
+    recommendations: ["13 stations worldwide.","NOAA SWPC for real-time.","Kp > 5: storm."],
+  }),
+  metadata: {
+    methodology: 'Primary space weather severity metric.',
+    assumptions: ["Station distribution","Quiet conditions"],
+    limitations: ["Station gaps","Local time effects"],
+    references: ["Bartels 1949"],
+    preprocessingNotes: ["13 station K-indices","Weighted average","NOAA SWPC real-time"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 129 — DOP (Dilution of Precision)
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_129: ToolWorkflowDef = {
+  toolId: 129,
+  name: 'DOP (Dilution of Precision)',
+  vizType: 'gauge',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'trH', min: 1, max: 100 },{ param: 'num_satellites', min: 4, max: 40 },{ param: 'elevation_mask', min: 0, max: 90 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Satellite geometry from ephemeris');
+    log.push('  Elevation mask from receiver');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Satellite geometry', contribution: 'Varies' },
+      { factor: 'Number of satellites', contribution: 'Varies' },
+      { factor: 'Elevation mask', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for known geometry',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `DOP (Dilution of Precision): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. GPS accuracy from satellite geometry.`,
+    recommendations: ["Lower DOP = better accuracy.","GDOP < 4: excellent."],
+  }),
+  metadata: {
+    methodology: 'GPS accuracy from satellite geometry.',
+    assumptions: ["Known satellite positions","Clear sky view"],
+    limitations: ["Obstructions","Multipath","Atmospheric delays"],
+    references: ["Standard GNSS"],
+    preprocessingNotes: ["Satellite geometry from ephemeris","Elevation mask from receiver"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 130 — Saastamoinen Tropospheric Delay
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_130: ToolWorkflowDef = {
+  toolId: 130,
+  name: 'Saastamoinen Tropospheric Delay',
+  vizType: 'scalar',
+  classificationBands: SPACE_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'theta', min: 0.05, max: 1.57 },{ param: 'P', min: 500, max: 1100 },{ param: 'T', min: 200, max: 320 },{ param: 'e', min: 0, max: 50 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Surface pressure from weather');
+    log.push('  Temperature from weather');
+    log.push('  Water vapor from humidity');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, SPACE_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Pressure accuracy', contribution: 'Varies' },
+      { factor: 'Temperature accuracy', contribution: 'Varies' },
+      { factor: 'Water vapor', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for known P, T, e',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Saastamoinen Tropospheric Delay: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. GPS signal tropospheric correction.`,
+    recommendations: ["Surface met data from Open-Meteo.","ZHD = 0.002277*P.","ZWD = 0.002277*(1255/T+0.05)*e."],
+  }),
+  metadata: {
+    methodology: 'GPS signal tropospheric correction.',
+    assumptions: ["Known surface met","Hydrostatic equilibrium"],
+    limitations: ["Wet delay variable","Elevation-dependent","Asymmetric mapping"],
+    references: ["Saastamoinen 1972"],
+    preprocessingNotes: ["Surface pressure from weather","Temperature from weather","Water vapor from humidity"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 131 — Thiem Equation (Steady Radial Flow)
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_131: ToolWorkflowDef = {
+  toolId: 131,
+  name: 'Thiem Equation (Steady Radial Flow)',
+  vizType: 'profile',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'T', min: 0.1, max: 50000 },{ param: 'h1', min: 0, max: 500 },{ param: 'h2', min: 0, max: 500 },{ param: 'r1', min: 0, max: 10000 },{ param: 'r2', min: 0, max: 100000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Transmissivity from well tests');
+    log.push('  Head from observation wells');
+    log.push('  Distance from well geometry');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 20,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Transmissivity', contribution: 'Varies' },
+      { factor: 'Head measurements', contribution: 'Varies' },
+      { factor: 'Radial flow assumption', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 20% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Thiem Equation (Steady Radial Flow): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Aquifer transmissivity from well tests.`,
+    recommendations: ["Steady-state assumption.","Radial flow to pumping well."],
+  }),
+  metadata: {
+    methodology: 'Aquifer transmissivity from well tests.',
+    assumptions: ["Confined aquifer","Steady state","Radial flow"],
+    limitations: ["Not for unconfined","Transient conditions","Well losses"],
+    references: ["Thiem 1906"],
+    preprocessingNotes: ["Transmissivity from well tests","Head from observation wells","Distance from well geometry"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 132 — Theis Transient Drawdown
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_132: ToolWorkflowDef = {
+  toolId: 132,
+  name: 'Theis Transient Drawdown',
+  vizType: 'timeseries',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Q', min: 0, max: 100000 },{ param: 'T', min: 0.1, max: 50000 },{ param: 't', min: 0, max: 10000 },{ param: 'r', min: 0, max: 10000 },{ param: 'S', min: 1e-8, max: 0.1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Pumping rate from well');
+    log.push('  Transmissivity from geology');
+    log.push('  Storativity from specific yield');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Transmissivity', contribution: 'Varies' },
+      { factor: 'Storativity', contribution: 'Varies' },
+      { factor: 'Well function', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 25% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Theis Transient Drawdown: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Transient aquifer response to pumping.`,
+    recommendations: ["Theis well function W(u).","Requires type-curve matching."],
+  }),
+  metadata: {
+    methodology: 'Transient aquifer response to pumping.',
+    assumptions: ["Confined aquifer","Homogeneous","No recharge"],
+    limitations: ["Not for unconfined","Heterogeneous aquifers","Well effects"],
+    references: ["Theis 1935"],
+    preprocessingNotes: ["Pumping rate from well","Transmissivity from geology","Storativity from specific yield"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 133 — Cooper-Jacob Approximation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_133: ToolWorkflowDef = {
+  toolId: 133,
+  name: 'Cooper-Jacob Approximation',
+  vizType: 'timeseries',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Q', min: 0, max: 100000 },{ param: 'T', min: 0.1, max: 50000 },{ param: 't', min: 0, max: 10000 },{ param: 'r', min: 0, max: 10000 },{ param: 'S', min: 1e-8, max: 0.1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Simplified Theis solution');
+    log.push('  Valid for small u');
+    log.push('  Logarithmic approximation');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Validity of approximation', contribution: 'Varies' },
+      { factor: 'Transmissivity', contribution: 'Varies' },
+      { factor: 'Storativity', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 30%, valid for u < 0.01',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Cooper-Jacob Approximation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Simplified well-test analysis.`,
+    recommendations: ["Valid for u < 0.01 (large time/small r).","Simpler than full Theis."],
+  }),
+  metadata: {
+    methodology: 'Simplified well-test analysis.',
+    assumptions: ["u < 0.01","Confined aquifer","Homogeneous"],
+    limitations: ["Not valid for early time","Not for unconfined","Heterogeneous"],
+    references: ["Cooper & Jacob 1946"],
+    preprocessingNotes: ["Simplified Theis solution","Valid for small u","Logarithmic approximation"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 134 — Horton Infiltration
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_134: ToolWorkflowDef = {
+  toolId: 134,
+  name: 'Horton Infiltration',
+  vizType: 'timeseries',
+  classificationBands: OCEAN_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'fc', min: 0, max: 50 },{ param: 'f0', min: 0, max: 500 },{ param: 'k', min: 0.01, max: 20 },{ param: 't', min: 0, max: 100 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Final infiltration from soil type');
+    log.push('  Initial infiltration from soil moisture');
+    log.push('  Decay constant from calibration');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, OCEAN_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Soil properties', contribution: 'Varies' },
+      { factor: 'Decay constant', contribution: 'Varies' },
+      { factor: 'Initial conditions', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 25% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Horton Infiltration: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Empirical infiltration capacity decay.`,
+    recommendations: ["Empirical model.","fc from soil type."],
+  }),
+  metadata: {
+    methodology: 'Empirical infiltration capacity decay.',
+    assumptions: ["Homogeneous soil","No crust formation","Constant rainfall"],
+    limitations: ["Not for layered soils","Crust effects","Rainfall intensity effects"],
+    references: ["Horton 1939"],
+    preprocessingNotes: ["Final infiltration from soil type","Initial infiltration from soil moisture","Decay constant from calibration"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 135 — Risk = Hazard x Vulnerability x Exposure
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_135: ToolWorkflowDef = {
+  toolId: 135,
+  name: 'Risk = Hazard x Vulnerability x Exposure',
+  vizType: 'gauge',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'H', min: 0, max: 1 },{ param: 'V', min: 0, max: 1 },{ param: 'E', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Hazard probability from analysis');
+    log.push('  Vulnerability index from exposure data');
+    log.push('  Exposure from population/assets');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'qualitative',
+    contributingFactors: [
+      { factor: 'Hazard assessment', contribution: 'Varies' },
+      { factor: 'Vulnerability assessment', contribution: 'Varies' },
+      { factor: 'Exposure data', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Universal risk framework',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Risk = Hazard x Vulnerability x Exposure: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Universal risk assessment framework.`,
+    recommendations: ["UNISDR framework.","Hazard x Vulnerability x Exposure."],
+  }),
+  metadata: {
+    methodology: 'Universal risk assessment framework.',
+    assumptions: ["Independent components","Linear interaction"],
+    limitations: ["Nonlinear interactions","Requires all three components"],
+    references: ["UNISDR 2004"],
+    preprocessingNotes: ["Hazard probability from analysis","Vulnerability index from exposure data","Exposure from population/assets"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 136 — Expected Annual Damage
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_136: ToolWorkflowDef = {
+  toolId: 136,
+  name: 'Expected Annual Damage',
+  vizType: 'scalar',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'D_P', min: 0, max: 10000000000 },{ param: 'P_low', min: 0, max: 0.1 },{ param: 'P_high', min: 0, max: 1 },{ param: 'num_intervals', min: 10, max: 10000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Damage function from analysis');
+    log.push('  Exceedance probability from hazard');
+    log.push('  Integration over probability');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'qualitative',
+    contributingFactors: [
+      { factor: 'Damage function', contribution: 'Varies' },
+      { factor: 'Probability distribution', contribution: 'Varies' },
+      { factor: 'Integration method', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Integral over damage-probability curve',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Expected Annual Damage: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Expected annual damage from risk curve.`,
+    recommendations: ["Integrate D(P) over P.","Dam safety, flood risk."],
+  }),
+  metadata: {
+    methodology: 'Expected annual damage from risk curve.',
+    assumptions: ["Known damage function","Continuous probability"],
+    limitations: ["Damage function uncertain","Discrete integration errors"],
+    references: ["Standard risk analysis"],
+    preprocessingNotes: ["Damage function from analysis","Exceedance probability from hazard","Integration over probability"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 137 — AQI Breakpoint
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_137: ToolWorkflowDef = {
+  toolId: 137,
+  name: 'AQI Breakpoint',
+  vizType: 'gauge',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'I_Hi', min: 0, max: 10000 },{ param: 'I_Lo', min: 0, max: 10000 },{ param: 'BP_Hi', min: 0, max: 10000 },{ param: 'BP_Lo', min: 0, max: 10000 },{ param: 'C_p', min: 0, max: 10000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  AQI breakpoints from EPA');
+    log.push('  Pollutant concentration from measurement');
+    log.push('  Linear interpolation between breakpoints');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Breakpoint accuracy', contribution: 'Varies' },
+      { factor: 'Concentration measurement', contribution: 'Varies' },
+      { factor: 'Pollutant type', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact linear interpolation',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `AQI Breakpoint: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Air quality index standardization.`,
+    recommendations: ["EPA standard breakpoints.","Linear interpolation."],
+  }),
+  metadata: {
+    methodology: 'Air quality index standardization.',
+    assumptions: ["Known breakpoints","Single pollutant"],
+    limitations: ["Multi-pollutant AQI complex","Breakpoints region-specific"],
+    references: ["US EPA"],
+    preprocessingNotes: ["AQI breakpoints from EPA","Pollutant concentration from measurement","Linear interpolation between breakpoints"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 138 — Probable Maximum Precipitation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_138: ToolWorkflowDef = {
+  toolId: 138,
+  name: 'Probable Maximum Precipitation',
+  vizType: 'gauge',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'Xbar', min: 0, max: 10000 },{ param: 'Kp', min: 0, max: 20 },{ param: 'sigmax', min: 0, max: 1000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Mean annual max from historical records');
+    log.push('  Frequency factor from statistics');
+    log.push('  Std dev from historical data');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 30,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Historical record length', contribution: 'Varies' },
+      { factor: 'Frequency factor', contribution: 'Varies' },
+      { factor: 'Distribution assumption', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 30%, requires long records',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Probable Maximum Precipitation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Extreme precipitation for dam safety.`,
+    recommendations: ["Requires long historical records.","Frequency factor from statistics."],
+  }),
+  metadata: {
+    methodology: 'Extreme precipitation for dam safety.',
+    assumptions: ["Stationary climate","Gumbel distribution","Adequate record"],
+    limitations: ["Climate non-stationarity","Short records","Distribution assumption"],
+    references: ["Chow 1964"],
+    preprocessingNotes: ["Mean annual max from historical records","Frequency factor from statistics","Std dev from historical data"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 139 — Palmer Drought Severity Index
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_139: ToolWorkflowDef = {
+  toolId: 139,
+  name: 'Palmer Drought Severity Index',
+  vizType: 'gauge',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'X_prev', min: -10, max: 10 },{ param: 'Z', min: -10, max: 10 },{ param: 'alpha', min: 0.5, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Previous month PDSI');
+    log.push('  Current moisture anomaly');
+    log.push('  Persistence factor');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 1,
+    rmseUnit: 'PDSI',
+    contributingFactors: [
+      { factor: 'Moisture anomaly', contribution: 'Varies' },
+      { factor: 'Persistence factor', contribution: 'Varies' },
+      { factor: 'Calibration', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 1 PDSI uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Palmer Drought Severity Index: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Drought monitoring index.`,
+    recommendations: ["PDSI: -4 extreme drought, +4 extreme wet.","Monthly time step."],
+  }),
+  metadata: {
+    methodology: 'Drought monitoring index.',
+    assumptions: ["Calibrated to local climate","Monthly water balance"],
+    limitations: ["Not comparable across regions","Soil-dependent calibration","Slow response"],
+    references: ["Palmer 1965"],
+    preprocessingNotes: ["Previous month PDSI","Current moisture anomaly","Persistence factor"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 140 — Froehlich Dam Breach
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_140: ToolWorkflowDef = {
+  toolId: 140,
+  name: 'Froehlich Dam Breach',
+  vizType: 'scalar',
+  classificationBands: RISK_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'K0', min: 0.5, max: 3 },{ param: 'Vres', min: 0, max: 100000000000 },{ param: 'hb', min: 1, max: 300 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Breach correction from failure mode');
+    log.push('  Reservoir volume from bathymetry');
+    log.push('  Breach height from dam geometry');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, RISK_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 25,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Correction factor', contribution: 'Varies' },
+      { factor: 'Volume estimation', contribution: 'Varies' },
+      { factor: 'Breach height', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 25% uncertainty',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Froehlich Dam Breach: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Dam breach outflow estimation.`,
+    recommendations: ["K0 from failure mode.","Reservoir volume from survey."],
+  }),
+  metadata: {
+    methodology: 'Dam breach outflow estimation.',
+    assumptions: ["Empirical regression","Known geometry"],
+    limitations: ["Regression scatter","Site-specific factors","Time to breach"],
+    references: ["Froehlich 2008"],
+    preprocessingNotes: ["Breach correction from failure mode","Reservoir volume from bathymetry","Breach height from dam geometry"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 141 — Ensemble Kalman Filter
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_141: ToolWorkflowDef = {
+  toolId: 141,
+  name: 'Ensemble Kalman Filter',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'xf', min: -Infinity, max: Infinity },{ param: 'Pf', min: -Infinity, max: Infinity },{ param: 'y', min: -Infinity, max: Infinity },{ param: 'R', min: -Infinity, max: Infinity },{ param: 'H', min: -Infinity, max: Infinity }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Forecast from model');
+    log.push('  Observation from data');
+    log.push('  Error covariances from statistics');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Ensemble size', contribution: 'Varies' },
+      { factor: 'Error covariances', contribution: 'Varies' },
+      { factor: 'Observation operator', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for linear systems',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Ensemble Kalman Filter: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. THE equation for Digital Twin assimilation.`,
+    recommendations: ["Key DA equation.","K = PfH^T(HPfH^T+R)^-1.","x_a = x_f + K(y-Hx_f)."],
+  }),
+  metadata: {
+    methodology: 'THE equation for Digital Twin assimilation.',
+    assumptions: ["Linear observation operator","Gaussian errors","Adequate ensemble"],
+    limitations: ["Nonlinear operators","Ensemble collapse","Localization needed"],
+    references: ["Evensen 1994"],
+    preprocessingNotes: ["Forecast from model","Observation from data","Error covariances from statistics"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 142 — Optimal Interpolation
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_142: ToolWorkflowDef = {
+  toolId: 142,
+  name: 'Optimal Interpolation',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'xb', min: -Infinity, max: Infinity },{ param: 'y', min: -Infinity, max: Infinity },{ param: 'B', min: -Infinity, max: Infinity },{ param: 'R', min: -Infinity, max: Infinity },{ param: 'H', min: -Infinity, max: Infinity }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Background from model');
+    log.push('  Observation from data');
+    log.push('  Background error covariance');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Background error covariance', contribution: 'Varies' },
+      { factor: 'Observation error', contribution: 'Varies' },
+      { factor: 'Observation operator', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for linear systems',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Optimal Interpolation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Spatial analysis of observations.`,
+    recommendations: ["Simpler than EnKF.","Static B matrix."],
+  }),
+  metadata: {
+    methodology: 'Spatial analysis of observations.',
+    assumptions: ["Static B","Linear operator","Known covariances"],
+    limitations: ["B not static in reality","No flow-dependence","Requires B matrix"],
+    references: ["Lorenz 1969"],
+    preprocessingNotes: ["Background from model","Observation from data","Background error covariance"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 143 — 4D-Var Cost Function
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_143: ToolWorkflowDef = {
+  toolId: 143,
+  name: '4D-Var Cost Function',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'x', min: -Infinity, max: Infinity },{ param: 'xb', min: -Infinity, max: Infinity },{ param: 'B', min: -Infinity, max: Infinity },{ param: 'yi', min: -Infinity, max: Infinity },{ param: 'Ri', min: -Infinity, max: Infinity }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Background from model');
+    log.push('  Observations over time window');
+    log.push('  Error covariances');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Background error', contribution: 'Varies' },
+      { factor: 'Observation error', contribution: 'Varies' },
+      { factor: 'Model trajectory', contribution: 'Varies' },
+    ],
+    overallAssessment: 'ECMWF operational standard',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `4D-Var Cost Function: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Weather analysis gold standard.`,
+    recommendations: ["ECMWF operational.","4D: assimilates over time window."],
+  }),
+  metadata: {
+    methodology: 'Weather analysis gold standard.',
+    assumptions: ["Tangent-linear model","Adjoint model","Known covariances"],
+    limitations: ["Requires adjoint","Computationally expensive","B matrix critical"],
+    references: ["Le Dimet 1986"],
+    preprocessingNotes: ["Background from model","Observations over time window","Error covariances"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 144 — Shannon Information Entropy
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_144: ToolWorkflowDef = {
+  toolId: 144,
+  name: 'Shannon Information Entropy',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'px', min: 0, max: 1 },{ param: 'py', min: 0, max: 1 },{ param: 'pxy', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Probability distributions from data');
+    log.push('  Joint probability from observations');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Probability estimation', contribution: 'Varies' },
+      { factor: 'Sample size', contribution: 'Varies' },
+      { factor: 'Discretization', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for known distributions',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Shannon Information Entropy: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Data source value assessment.`,
+    recommendations: ["H(X) = -sum p(x) log2 p(x).","Measures information content."],
+  }),
+  metadata: {
+    methodology: 'Data source value assessment.',
+    assumptions: ["Known probabilities","Discrete variables"],
+    limitations: ["Continuous entropy differs","Sample size for estimation","Binning effects"],
+    references: ["Shannon 1948"],
+    preprocessingNotes: ["Probability distributions from data","Joint probability from observations"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 145 — Free-Space Path Loss
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_145: ToolWorkflowDef = {
+  toolId: 145,
+  name: 'Free-Space Path Loss',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'd_km', min: 0, max: 100000 },{ param: 'f_GHz', min: 0, max: 100 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Distance from geometry');
+    log.push('  Frequency from signal');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Exact formula', contribution: 'Varies' },
+      { factor: 'Distance accuracy', contribution: 'Varies' },
+      { factor: 'Frequency accuracy', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for free space',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Free-Space Path Loss: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Satellite link budget calculation.`,
+    recommendations: ["FSPL = 32.45 + 20log10(d) + 20log10(f).","Satellite link budget."],
+  }),
+  metadata: {
+    methodology: 'Satellite link budget calculation.',
+    assumptions: ["Free space","No atmosphere","Line of sight"],
+    limitations: ["Atmospheric attenuation","Multipath","Obstructions"],
+    references: ["Fundamental"],
+    preprocessingNotes: ["Distance from geometry","Frequency from signal"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 146 — Klobuchar Ionospheric Delay
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_146: ToolWorkflowDef = {
+  toolId: 146,
+  name: 'Klobuchar Ionospheric Delay',
+  vizType: 'spectrum',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'A', min: 0, max: 0.000001 },{ param: 'x', min: 0, max: 2 },{ param: 'phi_m', min: -90, max: 90 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Amplitude from broadcast');
+    log.push('  Local time phase from receiver');
+    log.push('  Geomagnetic latitude');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'empirical',
+    rmse: 50,
+    rmseUnit: '%',
+    contributingFactors: [
+      { factor: 'Model coefficients', contribution: 'Varies' },
+      { factor: 'Ionospheric conditions', contribution: 'Varies' },
+      { factor: 'Solar activity', contribution: 'Varies' },
+    ],
+    overallAssessment: '+/- 50%, coarse model',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Klobuchar Ionospheric Delay: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Single-frequency GPS ionospheric correction.`,
+    recommendations: ["Coarse model (+/- 50%).","Better than no correction.","Dual-frequency preferred."],
+  }),
+  metadata: {
+    methodology: 'Single-frequency GPS ionospheric correction.',
+    assumptions: ["Single frequency","Daytime only","Known coefficients"],
+    limitations: ["Not for nighttime","Storm-time errors","Coefficients broadcast"],
+    references: ["Klobuchar 1987"],
+    preprocessingNotes: ["Amplitude from broadcast","Local time phase from receiver","Geomagnetic latitude"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 147 — Doppler Shift
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_147: ToolWorkflowDef = {
+  toolId: 147,
+  name: 'Doppler Shift',
+  vizType: 'spectrum',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'f0', min: 0, max: 1000000000000 },{ param: 'vrel', min: -30000, max: 30000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Transmitted frequency from signal');
+    log.push('  Relative velocity from kinematics');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Exact non-relativistic', contribution: 'Varies' },
+      { factor: 'Velocity accuracy', contribution: 'Varies' },
+      { factor: 'Frequency accuracy', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for v << c',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Doppler Shift: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Satellite tracking and GNSS.`,
+    recommendations: ["Delta_f = f0 * v_rel / c.","Non-relativistic approximation."],
+  }),
+  metadata: {
+    methodology: 'Satellite tracking and GNSS.',
+    assumptions: ["v << c","Line of sight velocity"],
+    limitations: ["Relativistic at high v","Not for transverse motion","Multipath"],
+    references: ["Doppler 1842"],
+    preprocessingNotes: ["Transmitted frequency from signal","Relative velocity from kinematics"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 148 — Hohmann Transfer
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_148: ToolWorkflowDef = {
+  toolId: 148,
+  name: 'Hohmann Transfer',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'GM', min: 0, max: 1000000000000000 },{ param: 'r1', min: 6000000, max: 10000000 },{ param: 'r2', min: 6000000, max: 100000000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Gravitational parameter from central body');
+    log.push('  Orbit radii from mission design');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Exact for circular orbits', contribution: 'Varies' },
+      { factor: 'Impulsive burns', contribution: 'Varies' },
+      { factor: 'Two-body problem', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for two-body',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Hohmann Transfer: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Optimal orbit transfer planning.`,
+    recommendations: ["Most fuel-efficient 2-burn transfer.","Between coplanar circular orbits."],
+  }),
+  metadata: {
+    methodology: 'Optimal orbit transfer planning.',
+    assumptions: ["Circular orbits","Coplanar","Impulsive burns"],
+    limitations: ["Not for elliptical","Plane changes","Finite burns"],
+    references: ["Hohmann 1925"],
+    preprocessingNotes: ["Gravitational parameter from central body","Orbit radii from mission design"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 149 — Lagrange Points (L1-L5)
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_149: ToolWorkflowDef = {
+  toolId: 149,
+  name: 'Lagrange Points (L1-L5)',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'gamma', min: 0, max: 0.5 },{ param: 'R', min: 0, max: 10000000000000 },{ param: 'point_id', min: 1, max: 5 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Mass ratio from system');
+    log.push('  Body separation from ephemeris');
+    log.push('  5th-order polynomial for collinear');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Exact for CR3BP', contribution: 'Varies' },
+      { factor: 'Mass ratio accuracy', contribution: 'Varies' },
+      { factor: 'Body separation', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for circular restricted 3-body',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Lagrange Points (L1-L5): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Mission planning for L-points.`,
+    recommendations: ["L2 is used by JWST for deep space observation.","L1 hosts solar observatories like SOHO.","L3-L5 are stable equilibrium points."],
+  }),
+  metadata: {
+    methodology: 'Mission planning for L-points.',
+    assumptions: ["Circular orbits","Restricted 3-body","Primaries in circular motion"],
+    limitations: ["Elliptical orbits","Perturbations","Stability varies"],
+    references: ["Lagrange 1772"],
+    preprocessingNotes: ["Mass ratio from system","Body separation from ephemeris","5th-order polynomial for collinear"],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 150 — Mutual Information
+// ══════════════════════════════════════════════════════════════════
+export const TOOL_150: ToolWorkflowDef = {
+  toolId: 150,
+  name: 'Mutual Information',
+  vizType: 'scalar',
+  classificationBands: GENERIC_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'px', min: 0, max: 1 },{ param: 'py', min: 0, max: 1 },{ param: 'pxy', min: 0, max: 1 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  Joint probability from observations');
+    log.push('  Marginal probabilities from data');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, GENERIC_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Probability estimation', contribution: 'Varies' },
+      { factor: 'Sample size', contribution: 'Varies' },
+      { factor: 'Discretization', contribution: 'Varies' },
+    ],
+    overallAssessment: 'Exact for known distributions',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `Mutual Information: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Quantifying data source value.`,
+    recommendations: ["I(X;Y) = sum p(x,y) log(p(x,y)/(p(x)*p(y))).","Information theory."],
+  }),
+  metadata: {
+    methodology: 'Quantifying data source value.',
+    assumptions: ["Known probabilities","Discrete variables"],
+    limitations: ["Continuous variables","Sample size","Binning effects"],
+    references: ["Shannon 1948"],
+    preprocessingNotes: ["Joint probability from observations","Marginal probabilities from data"],
+  },
+  dependencies: [],
+};
 
 export const TOOLS_PART4: Record<number, ToolWorkflowDef> = {
   66: TOOL_66,
@@ -1395,5 +7261,7 @@ export const TOOLS_PART4: Record<number, ToolWorkflowDef> = {
   147: TOOL_147,
   148: TOOL_148,
   149: TOOL_149,
-  150: TOOL_150,
+   150: TOOL_150,
 };
+
+export type { ToolWorkflowDef };
