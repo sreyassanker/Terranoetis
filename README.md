@@ -1,7 +1,5 @@
 # Terreanoetis
 
-**Display title:** Earth Intelligence
-
 A real-time geospatial data visualization and AI-powered Earth intelligence platform. Combines a Cesium-based 3D globe with a comprehensive backend serving live environmental data, satellite imagery, analytical models, simulations, and AI-driven insights.
 
 ## Architecture
