@@ -5,6 +5,7 @@ A real-time geospatial data visualization and AI-powered Earth intelligence plat
 ## Architecture
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 flowchart TB
     subgraph CLIENT["CLIENT (React 19 + CesiumJS)"]
         direction TB
@@ -99,6 +100,7 @@ flowchart TB
 **Request Flow:**
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 flowchart LR
     Q["User Query"] --> IR["IntentRouter\n(agent.ts)"]
     IR -->|"embedding + cosine similarity"| CO["CognitiveOrchestrator"]
@@ -127,6 +129,7 @@ flowchart LR
 **Background Processes:**
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 flowchart LR
     subgraph Continuous["Continuous Background Processes"]
         SE["Sentinel Engine\nPoll watch zones\nCompare vs baseline"] --> SP["Stream Processor\nFilter, Enrich, Route"]
