@@ -44,9 +44,10 @@ function parseState(state: unknown[]): FlightData | null {
 const SOURCE_COLOR = '#60a5fa';
 const SOURCE_BG = 'rgba(96,165,250,0.15)';
 
-export function AviationTrackerPanel({ onClose, onTravelView }: {
+export function AviationTrackerPanel({ onClose, onTravelView, zIndex = 1000 }: {
   onClose?: () => void;
   onTravelView?: (f: { id: string; name: string; lat: number; lon: number; altitude: number; velocity: number; heading: number; verticalRate: number }) => void;
+  zIndex?: number;
 }) {
   const [query, setQuery] = useState('');
   const [allFlights, setAllFlights] = useState<FlightData[]>([]);
@@ -101,7 +102,7 @@ export function AviationTrackerPanel({ onClose, onTravelView }: {
   const mToFt = (v: number) => (v * 3.28084);
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 1000, width: 340 }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 340 }}>
       <Panel title="AVIATION TRACKER" icon={<Plane size={16} />} accentColor={SOURCE_COLOR} iconColor={SOURCE_COLOR} titleColor={SOURCE_COLOR} onClose={onClose}>
         <div style={{ padding: '10px 14px', borderBottom: `1px solid ${SOURCE_BG}` }}>
           <div style={{ position: 'relative', display: 'flex', gap: 4 }}>

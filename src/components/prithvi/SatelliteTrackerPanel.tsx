@@ -34,7 +34,7 @@ const SOURCE_BG: Record<string, string> = {
   Starlink: 'rgba(245,158,11,0.15)',
 };
 
-export function SatelliteTrackerPanel({ onClose, onTrackSatellite, onTravelView }: { onClose?: () => void; onTrackSatellite?: (sat: { id: string; name: string; lat: number; lon: number; altitude: number; tle1: string; tle2: string }) => void; onTravelView?: () => void }) {
+export function SatelliteTrackerPanel({ onClose, onTrackSatellite, onTravelView, zIndex = 1000 }: { onClose?: () => void; onTrackSatellite?: (sat: { id: string; name: string; lat: number; lon: number; altitude: number; tle1: string; tle2: string }) => void; onTravelView?: () => void; zIndex?: number }) {
   const [query, setQuery] = useState('');
   const [allSats, setAllSats] = useState<SatelliteData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -81,7 +81,7 @@ export function SatelliteTrackerPanel({ onClose, onTrackSatellite, onTravelView 
     v != null && isFinite(v) ? fn(v) : fallback;
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 1000, width: 340 }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 340 }}>
       <Panel title="SATELLITE TRACKER" icon={<Satellite size={16} />} accentColor="#00D4FF" iconColor="#00D4FF" titleColor="#00D4FF" onClose={onClose}>
         <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(0,212,255,0.1)' }}>
           <div style={{ position: 'relative', display: 'flex', gap: 4 }}>

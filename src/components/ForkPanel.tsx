@@ -14,13 +14,14 @@ interface ForkPanelProps {
   onPauseFork: (forkId: string) => void;
   onResumeFork: (forkId: string) => void;
   onTerminateFork: (forkId: string) => void;
+  zIndex?: number;
 }
 
-export const ForkPanel: React.FC<ForkPanelProps> = ({ forks, onPauseFork, onResumeFork, onTerminateFork }) => {
+export const ForkPanel: React.FC<ForkPanelProps> = ({ forks, onPauseFork, onResumeFork, onTerminateFork, zIndex = 110 }) => {
   if (forks.length === 0) return null;
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 280 }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 280 }}>
       <Panel
         title="PARALLEL REALITIES"
         icon={<GitFork size={14} />}

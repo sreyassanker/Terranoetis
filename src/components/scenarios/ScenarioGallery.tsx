@@ -15,9 +15,10 @@ interface ScenarioGalleryProps {
   onSelect: (id: string) => void;
   onCreateNew: () => void;
   onClose: () => void;
+  zIndex?: number;
 }
 
-export default function ScenarioGallery({ scenarios: externalScenarios, loading, error, onSelect, onCreateNew, onClose }: ScenarioGalleryProps) {
+export default function ScenarioGallery({ scenarios: externalScenarios, loading, error, onSelect, onCreateNew, onClose, zIndex = 110 }: ScenarioGalleryProps) {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [sort, setSort] = useState<SortKey>('recency');
   const [search, setSearch] = useState('');
@@ -37,7 +38,7 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
   }, [externalScenarios, filter, sort, search]);
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 520 }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 520 }}>
       <Panel
         title="SCENARIO GALLERY"
         icon={<Layers size={14} />}

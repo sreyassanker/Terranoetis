@@ -99,10 +99,11 @@ const TACTICAL_GRAPHIC_TYPES: Array<{ type: TacticalGraphicType; label: string; 
   { type: 'fire_support_area', label: 'FSA / RFA / SFA', category: 'Areas' },
 ];
 
-export function MilitarySymbologyPanel({ onClose, onPlaceEntity, onAddTacticalGraphic }: {
+export function MilitarySymbologyPanel({ onClose, onPlaceEntity, onAddTacticalGraphic, zIndex = 1000 }: {
   onClose?: () => void;
   onPlaceEntity?: (entity: MilitaryEntity) => void;
   onAddTacticalGraphic?: (graphic: TacticalGraphic) => void;
+  zIndex?: number;
 }) {
   const [tab, setTab] = useState<Tab>('symbols');
   const [tracks, setTracks] = useState<MilitaryEntity[]>(() => {
@@ -184,7 +185,7 @@ export function MilitarySymbologyPanel({ onClose, onPlaceEntity, onAddTacticalGr
   ];
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 1000, width: 360, maxHeight: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 360, maxHeight: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
       <Panel title="MILITARY SYMBOLOGY" icon={<Shield size={16} />}
              accentColor="#22c55e" iconColor="#4ade80" titleColor="#86efac" onClose={onClose}>
         {/* Tab Bar */}

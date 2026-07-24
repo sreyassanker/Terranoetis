@@ -51,7 +51,7 @@ const LAND_COVER_COLORS: Record<string, string> = {
   clouds: '#94a3b8',
 };
 
-export function PrithviPanel(_props: Record<string, unknown> = {}) {
+export function PrithviPanel({ zIndex = 1000, ..._props }: { zIndex?: number } & Record<string, unknown> = {}) {
   const [activeTab, setActiveTab] = useState<TabId>('status');
   const [status, setStatus] = useState<PrithviStatus | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
@@ -139,7 +139,7 @@ export function PrithviPanel(_props: Record<string, unknown> = {}) {
     : [];
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 1000, width: 340 }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 340 }}>
       <Panel hideHeader accentColor="#6366f1">
         {/* Custom click-to-collapse header */}
         <div style={{

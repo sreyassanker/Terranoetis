@@ -1206,6 +1206,17 @@ export default function App() {
     table: { title: string; columns: string[]; rows: string[][] };
     recommendations: string[];
   }>(null);
+  // Panel z-index stacking manager
+  const [panelZStack, setPanelZStack] = useState<Record<string, number>>({});
+  const panelZCounter = useRef(999);
+  const focusPanel = useCallback((panelId: string) => {
+    panelZCounter.current += 1;
+    setPanelZStack(prev => ({ ...prev, [panelId]: panelZCounter.current }));
+  }, []);
+  const getPanelZIndex = useCallback((panelId: string, base: number = 999) =>
+    panelZStack[panelId] ?? base,
+  [panelZStack]);
+
   const [showCinematicDirector, setShowCinematicDirector] = useState(false);
   const [cinematicLayerVersion, setCinematicLayerVersion] = useState(0);
   const [cinematicFocusEntity, setCinematicFocusEntity] = useState<{ lat: number; lon: number; layer: string; name?: string } | null>(null);
@@ -3473,6 +3484,7 @@ export default function App() {
     const props = entity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
     if (!props) return;
     setInfoEntity(entity);
+    focusPanel('info');
 
     if (props.layer === 'earthquakes' && props.magnitude) {
       const m = props.magnitude as number;
@@ -4868,7 +4880,7 @@ export default function App() {
         generateHeatmap(v);
       }
     } else if (layerId === 'intel_feed') {
-      setShowIntelFeed(true);
+      setShowIntelFeed(true); focusPanel('intel-feed');
       const v = viewerRef.current;
       if (!v) return;
       if (!entityStoreRef.current['earthquakes']?.length) loadEarthquakes(v);
@@ -7271,9 +7283,9 @@ export default function App() {
       const nearby = findNearbyEvents(cm.lat, cm.lon, 200);
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant',
         content: `**Events near ${cm.lat.toFixed(2)}, ${cm.lon.toFixed(2)}**\n\n${nearby.length > 0 ? nearby.map(e => `- ${e.title} (${e.distance.toFixed(0)}km)`).join('\n') : 'No recent events found within 200km.'}` }]);
-      setShowAI(true);
+      setShowAI(true); focusPanel('ai');
     } else if (action === 'ai_intel') {
-      setShowAI(true);
+      setShowAI(true); focusPanel('ai');
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `AI Intelligence for ${cm.lat.toFixed(2)}, ${cm.lon.toFixed(2)}` }]);
       getLocationContextData(cm.lat, cm.lon);
     }
@@ -8184,8 +8196,8 @@ export default function App() {
           </div>
 
           <button className={`btn-icon ${showIntelFeed ? 'active' : ''}`} onClick={() => toggleLayer('intel_feed')} title="Intel Feed"><Radio size={16} /></button>
-          <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => setShowStudyArea(p => !p)} title="Study Area"><Crosshair size={16} /></button>
-          <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => setShowAI(p => !p)} title="AI Assistant"><Bot size={16} /></button>
+          <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => { setShowStudyArea(p => !p); focusPanel('study-area'); }} title="Study Area"><Crosshair size={16} /></button>
+          <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => { setShowAI(p => !p); focusPanel('ai'); }} title="AI Assistant"><Bot size={16} /></button>
           <button className="btn-icon" onClick={flyToIndiaDirect} title="Fly to India"><Navigation2 size={16} /></button>
           <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share"><Share2 size={16} /></button>
 
@@ -8196,10 +8208,10 @@ export default function App() {
             menuId={openMenu} setMenuId={setOpenMenu}
             active={showCognitiveDashboard || showToolWorkbench || showMemoryExplorer || showAnalytics}
             items={[
-              { label: 'Cognitive Dashboard', icon: <Brain size={15} />, active: showCognitiveDashboard, onClick: () => setShowCognitiveDashboard(p => !p) },
-              { label: 'Tool Workbench', icon: <Wrench size={15} />, active: showToolWorkbench, onClick: () => setShowToolWorkbench(p => !p) },
-              { label: 'Memory Explorer', icon: <Save size={15} />, active: showMemoryExplorer, onClick: () => setShowMemoryExplorer(p => !p) },
-              { label: 'Analytics & Insights', icon: <BarChart3 size={15} />, active: showAnalytics, onClick: () => { setShowAnalytics(p => !p); if (!analyticsData) fetch('/api/agent/analytics').then(r => r.json()).then(setAnalyticsData).catch(() => {}); } },
+              { label: 'Cognitive Dashboard', icon: <Brain size={15} />, active: showCognitiveDashboard, onClick: () => { setShowCognitiveDashboard(p => !p); focusPanel('cognitive'); } },
+              { label: 'Tool Workbench', icon: <Wrench size={15} />, active: showToolWorkbench, onClick: () => { setShowToolWorkbench(p => !p); focusPanel('toolworkbench'); } },
+              { label: 'Memory Explorer', icon: <Save size={15} />, active: showMemoryExplorer, onClick: () => { setShowMemoryExplorer(p => !p); focusPanel('memory'); } },
+              { label: 'Analytics & Insights', icon: <BarChart3 size={15} />, active: showAnalytics, onClick: () => { setShowAnalytics(p => !p); focusPanel('analytics-insights'); if (!analyticsData) fetch('/api/agent/analytics').then(r => r.json()).then(setAnalyticsData).catch(() => {}); } },
             ]}
           />
 
@@ -8208,10 +8220,10 @@ export default function App() {
             menuId={openMenu} setMenuId={setOpenMenu}
             active={showScenarioGallery || showScenarioEditor || showCinematicDirector || showSpatialSketching}
             items={[
-              { label: 'Scenarios', icon: <Flame size={15} />, active: showScenarioGallery, onClick: () => setShowScenarioGallery(p => !p) },
-              { label: 'New Scenario', icon: <Clapperboard size={15} />, active: showScenarioEditor, onClick: () => setShowScenarioEditor(p => !p) },
-              { label: 'Cinematic Director', icon: <Film size={15} />, active: showCinematicDirector, onClick: () => setShowCinematicDirector(p => !p) },
-              { label: 'Spatial Sketch', icon: <Pencil size={15} />, active: showSpatialSketching, onClick: () => setShowSpatialSketching(p => !p) },
+              { label: 'Scenarios', icon: <Flame size={15} />, active: showScenarioGallery, onClick: () => { setShowScenarioGallery(p => !p); focusPanel('scenario-gallery'); } },
+              { label: 'New Scenario', icon: <Clapperboard size={15} />, active: showScenarioEditor, onClick: () => { setShowScenarioEditor(p => !p); focusPanel('scenario-editor'); } },
+              { label: 'Cinematic Director', icon: <Film size={15} />, active: showCinematicDirector, onClick: () => { setShowCinematicDirector(p => !p); focusPanel('cinematic-director'); } },
+              { label: 'Spatial Sketch', icon: <Pencil size={15} />, active: showSpatialSketching, onClick: () => { setShowSpatialSketching(p => !p); focusPanel('spatial-sketch'); } },
             ]}
           />
 
@@ -8234,7 +8246,7 @@ export default function App() {
             active={showSettings || showPerfMonitor}
             items={[
               { label: 'API Configuration', icon: <Key size={15} />, onClick: () => setShowApiVault(true) },
-              { label: 'Settings', icon: <Cog size={15} />, active: showSettings, onClick: () => setShowSettings(p => !p) },
+              { label: 'Settings', icon: <Cog size={15} />, active: showSettings, onClick: () => { setShowSettings(p => !p); focusPanel('settings'); } },
               { label: 'Performance Monitor', icon: <Activity size={15} />, active: showPerfMonitor, onClick: () => setShowPerfMonitor(p => !p) },
             ]}
           />
@@ -8351,13 +8363,14 @@ export default function App() {
       </div>
 
       {/* Info Panel */}
-      <div className={`info-panel glass-panel ${infoEntity ? '' : 'hidden'}`}>
+      <div className={`info-panel glass-panel ${infoEntity ? '' : 'hidden'}`} style={{ zIndex: getPanelZIndex('info', 110) }}>
         {formatInfoPanel()}
       </div>
 
       {/* Study Area Panel */}
       {showStudyArea && <StudyAreaPanel
         viewer={viewerRef.current}
+        zIndex={getPanelZIndex('study-area', 110)}
         areas={studyAreas}
         setAreas={(updater: any) => {
           const next = typeof updater === 'function' ? updater(studyAreasRef.current) : updater;
@@ -8388,7 +8401,7 @@ export default function App() {
 
       {/* AI Panel */}
       {showAI && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 380 }}>
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('ai', 110), width: 380 }}>
           <Panel title="EARTH INTELLIGENCE AI" icon={<Bot size={14} />} accentColor="#6366f1" iconColor="#818cf8" titleColor="#a5b4fc" onClose={() => setShowAI(false)} headerExtra={
             <div style={{display:'flex',gap:4,alignItems:'center'}}>
               <button onClick={() => setShowChatHistory(prev => !prev)} title="Chat History" style={{background:'none',border:'none',color:'#64748b',cursor:'pointer',fontSize:13,padding:'2px 4px',lineHeight:1}}><History size={14} /></button>
@@ -8602,7 +8615,7 @@ export default function App() {
       {/* Alerts Panel */}
       {/* Analytics Panel */}
       {showAnalytics && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 340 }}>
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('analytics-insights', 110), width: 340 }}>
           <Panel title="ANALYTICS & INSIGHTS" icon={<BarChart3 size={14} />} accentColor="#3b82f6" iconColor="#60a5fa" titleColor="#93c5fd" onClose={() => setShowAnalytics(false)} style={{ maxHeight: 'calc(100vh - 96px)' }}>
             <div style={{ flex: 1, overflowY: 'auto', fontSize: 11 }}>
               {!analyticsData ? (
@@ -8677,7 +8690,7 @@ export default function App() {
 
       {/* Social Panel */}
       {showIntelFeed && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 360 }}>
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('intel-feed', 110), width: 360 }}>
           <Panel title="INTEL FEED" icon={<Radio size={16} />} accentColor="#3b82f6" iconColor="#60a5fa" titleColor="#93c5fd" onClose={() => setShowIntelFeed(false)} style={{ maxHeight: 'calc(100vh - 160px)' }}>
         <div style={{padding:'8px 12px',borderBottom:'1px solid var(--border)',display:'flex',gap:6,flexWrap:'wrap'}}>
           {['all','fire','storm','earthquake','flood','weather','space_weather'].map(f => (
@@ -8752,7 +8765,7 @@ export default function App() {
 
         <button
           className={`btn-icon monitor-btn ${!monitorCollapsed ? 'active' : ''}`}
-          onClick={() => setMonitorCollapsed(prev => !prev)}
+          onClick={() => { setMonitorCollapsed(prev => !prev); focusPanel('monitor'); }}
           title="Monitor Panel"
         >
           <Monitor size={14} />
@@ -8772,17 +8785,17 @@ export default function App() {
           menuId={openMenu} setMenuId={setOpenMenu}
           active={showIntelligencePanel || showPrithviPanel || showSearchPanel || showSatelliteTracker || showAviationTracker}
           items={[
-            { label: 'Pulse', icon: <Eye size={15} />, active: showIntelligencePanel, onClick: () => setShowIntelligencePanel(p => !p) },
-            { label: 'Prithvi EO', icon: <Brain size={15} />, active: showPrithviPanel, onClick: () => setShowPrithviPanel(p => !p) },
-            { label: 'EO Image Search', icon: <SearchIcon size={15} />, active: showSearchPanel, onClick: () => setShowSearchPanel(p => !p) },
-    { label: 'Satellite Tracker', icon: <Satellite size={15} />, active: showSatelliteTracker, onClick: () => setShowSatelliteTracker(p => !p) },
-    { label: 'Satellite Imagery', icon: <Satellite size={15} />, active: showSatelliteImagery, onClick: () => setShowSatelliteImagery(p => !p) },
-    { label: 'Aviation Tracker', icon: <Plane size={15} />, active: showAviationTracker, onClick: () => setShowAviationTracker(p => !p) },
+            { label: 'Pulse', icon: <Eye size={15} />, active: showIntelligencePanel, onClick: () => { setShowIntelligencePanel(p => !p); focusPanel('intelligence'); } },
+            { label: 'Prithvi EO', icon: <Brain size={15} />, active: showPrithviPanel, onClick: () => { setShowPrithviPanel(p => !p); focusPanel('prithvi'); } },
+            { label: 'EO Image Search', icon: <SearchIcon size={15} />, active: showSearchPanel, onClick: () => { setShowSearchPanel(p => !p); focusPanel('satellite-search'); } },
+    { label: 'Satellite Tracker', icon: <Satellite size={15} />, active: showSatelliteTracker, onClick: () => { setShowSatelliteTracker(p => !p); focusPanel('satellite-tracker'); } },
+    { label: 'Satellite Imagery', icon: <Satellite size={15} />, active: showSatelliteImagery, onClick: () => { setShowSatelliteImagery(p => !p); focusPanel('satellite-imagery'); } },
+    { label: 'Aviation Tracker', icon: <Plane size={15} />, active: showAviationTracker, onClick: () => { setShowAviationTracker(p => !p); focusPanel('aviation-tracker'); } },
           ]}
         />
         <button
           className={`btn-icon monitor-btn ${showAnalyticsWorkbench ? 'active' : ''}`}
-          onClick={() => setShowAnalyticsWorkbench(p => !p)}
+          onClick={() => { setShowAnalyticsWorkbench(p => !p); focusPanel('analytics'); }}
           title="Analytics Workbench — 150 analytical models"
           style={{ color: showAnalyticsWorkbench ? '#a78bfa' : undefined }}
         >
@@ -9033,7 +9046,7 @@ export default function App() {
 
       {/* Cognitive Dashboard */}
       {showCognitiveDashboard && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 380, maxHeight: 'calc(100vh - 160px)' }}>
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('cognitive', 110), width: 380, maxHeight: 'calc(100vh - 160px)' }}>
           <CognitiveDashboard onClose={() => setShowCognitiveDashboard(false)} />
         </div>
       )}
@@ -9044,20 +9057,20 @@ export default function App() {
       )}
 
       {/* Tool Workbench */}
-      <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 480, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', display: showToolWorkbench ? 'block' : 'none' }}>
+      <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('toolworkbench', 110), width: 480, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', display: showToolWorkbench ? 'block' : 'none' }}>
         <ToolWorkbench onClose={() => setShowToolWorkbench(false)} bbox={activeBbox} onSurfaceData={handleSurfaceData} onClear={() => { clearStudyArea(); clearInterpSurface(viewerRef.current!); }} />
       </div>
 
       {/* Memory Explorer */}
       {showMemoryExplorer && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 380, maxHeight: 'calc(100vh - 160px)' }}>
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('memory', 110), width: 380, maxHeight: 'calc(100vh - 160px)' }}>
           <MemoryExplorer onClose={() => setShowMemoryExplorer(false)} />
         </div>
       )}
 
       {/* Settings Panel */}
       {showSettings && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 360, maxHeight: 'calc(100vh - 160px)' }}>
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('settings', 110), width: 360, maxHeight: 'calc(100vh - 160px)' }}>
           <SettingsPanel onClose={() => setShowSettings(false)} />
         </div>
       )}
@@ -9068,6 +9081,7 @@ export default function App() {
         onPauseFork={handlePauseFork}
         onResumeFork={handleResumeFork}
         onTerminateFork={handleTerminateFork}
+        zIndex={getPanelZIndex('fork', 110)}
       />
 
       {/* Intelligence Panel */}
@@ -9076,30 +9090,31 @@ export default function App() {
         onClose={() => setShowIntelligencePanel(false)}
         onToggleLayer={toggleLayer}
         onFlyTo={focusLocation}
+        zIndex={getPanelZIndex('intelligence')}
       />
 
       {/* Prithvi EO Foundation Model Panel */}
-      {showPrithviPanel && <PrithviPanel />}
+      {showPrithviPanel && <PrithviPanel zIndex={getPanelZIndex('prithvi')} />}
 
       {/* EO Image Search Panel */}
-      {showSearchPanel && <SatelliteSearchPanel onClose={() => { setShowSearchPanel(false); const v = viewerRef.current; if (v) { for (const ent of searchResultEntitiesRef.current) v.entities.remove(ent); } searchResultEntitiesRef.current = []; }} onResults={handleSearchResults} onFlyTo={focusLocation} />}
+      {showSearchPanel && <SatelliteSearchPanel zIndex={getPanelZIndex('satellite-search')} onClose={() => { setShowSearchPanel(false); const v = viewerRef.current; if (v) { for (const ent of searchResultEntitiesRef.current) v.entities.remove(ent); } searchResultEntitiesRef.current = []; }} onResults={handleSearchResults} onFlyTo={focusLocation} />}
 
       {/* Satellite Tracker Panel */}
-      {showSatelliteTracker && <SatelliteTrackerPanel onClose={() => { setShowSatelliteTracker(false); if (trackedSatIntervalRef.current) { clearInterval(trackedSatIntervalRef.current); trackedSatIntervalRef.current = null; } if (trackedSatRenderTickRef.current) { trackedSatRenderTickRef.current(); trackedSatRenderTickRef.current = null; } if (trackedSatRef.current) { viewerRef.current?.entities.remove(trackedSatRef.current); trackedSatRef.current = null; } if (trackedSatTrailEntityRef.current) { viewerRef.current?.entities.remove(trackedSatTrailEntityRef.current); trackedSatTrailEntityRef.current = null; } trackedSatTleRef.current = null; trackedSatPosPropRef.current = null; trackedSatSpeedRef.current = 0; trackedSatNameRef.current = ''; }} onTrackSatellite={trackSatellite} onTravelView={travelToTrackedSatellite} />}
+      {showSatelliteTracker && <SatelliteTrackerPanel zIndex={getPanelZIndex('satellite-tracker')} onClose={() => { setShowSatelliteTracker(false); if (trackedSatIntervalRef.current) { clearInterval(trackedSatIntervalRef.current); trackedSatIntervalRef.current = null; } if (trackedSatRenderTickRef.current) { trackedSatRenderTickRef.current(); trackedSatRenderTickRef.current = null; } if (trackedSatRef.current) { viewerRef.current?.entities.remove(trackedSatRef.current); trackedSatRef.current = null; } if (trackedSatTrailEntityRef.current) { viewerRef.current?.entities.remove(trackedSatTrailEntityRef.current); trackedSatTrailEntityRef.current = null; } trackedSatTleRef.current = null; trackedSatPosPropRef.current = null; trackedSatSpeedRef.current = 0; trackedSatNameRef.current = ''; }} onTrackSatellite={trackSatellite} onTravelView={travelToTrackedSatellite} />}
 
       {/* Aviation Tracker Panel */}
-      {showAviationTracker && <AviationTrackerPanel onClose={() => setShowAviationTracker(false)} onTravelView={travelToFlight} />}
+      {showAviationTracker && <AviationTrackerPanel zIndex={getPanelZIndex('aviation-tracker')} onClose={() => setShowAviationTracker(false)} onTravelView={travelToFlight} />}
 
       {/* Satellite Imagery Panel */}
-      <SatelliteImageryPanel viewer={viewerRef.current} show={showSatelliteImagery} onClose={() => setShowSatelliteImagery(false)} />
+      <SatelliteImageryPanel viewer={viewerRef.current} show={showSatelliteImagery} onClose={() => setShowSatelliteImagery(false)} zIndex={getPanelZIndex('satellite-imagery')} />
 
       {/* Analytics Workbench Panel */}
       <ErrorBoundary label="Analytics Workbench">
-        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} onToolResult={handleToolResult} onClearResult={handleClearToolResult} />
+        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} onToolResult={handleToolResult} onClearResult={handleClearToolResult} zIndex={getPanelZIndex('analytics')} />
       </ErrorBoundary>
 
       {/* Military Symbology Panel */}
-      {showMilitarySymbology && <MilitarySymbologyPanel onClose={() => setShowMilitarySymbology(false)} />}
+      {showMilitarySymbology && <MilitarySymbologyPanel zIndex={getPanelZIndex('military-symbology')} onClose={() => setShowMilitarySymbology(false)} />}
 
       {/* Command Palette (CMD+K) */}
       <CommandPalette
@@ -9107,13 +9122,13 @@ export default function App() {
         onClose={() => setShowCommandPalette(false)}
         onToggleLayer={toggleLayer}
         onFlyTo={focusLocation}
-        onOpenIntelligencePanel={() => { setShowIntelligencePanel(true); setShowCommandPalette(false); }}
+        onOpenIntelligencePanel={() => { setShowIntelligencePanel(true); setShowCommandPalette(false); focusPanel('intelligence'); }}
       />
 
       <PerformanceMonitor viewer={viewerRef.current} visible={showPerfMonitor} onToggle={() => setShowPerfMonitor(p => !p)} />
       {/* Monitor Panel */}
       {!loading && !monitorCollapsed && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: 110, width: 320 }}>
+        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('monitor', 110), width: 320 }}>
           <Panel title="MONITOR" icon={<span>⬡</span>} accentColor="#00ff88" iconColor="#00ff88" titleColor="#00ff88" onClose={() => setMonitorCollapsed(true)} style={{ fontFamily: 'monospace', fontSize: 11, maxHeight: 'calc(100vh - 96px)' }}>
             <div style={{ padding: 8, overflowY: 'auto', flex: 1 }}>
             {/* Planetary Entropy */}
@@ -9244,6 +9259,7 @@ export default function App() {
           onSelect={(id) => { setSelectedScenarioId(id); setShowScenarioGallery(false); }}
           onCreateNew={() => { setShowScenarioGallery(false); setShowScenarioEditor(true); }}
           onClose={() => setShowScenarioGallery(false)}
+          zIndex={getPanelZIndex('scenario-gallery')}
         />
       )}
 
@@ -9254,6 +9270,7 @@ export default function App() {
           scenario={selectedScenario}
           onClose={() => setSelectedScenario(null)}
           onBack={() => { setSelectedScenario(null); setShowScenarioEditor(true); }}
+          zIndex={getPanelZIndex('scenario-viewer')}
         />
       )}
 
@@ -9261,6 +9278,7 @@ export default function App() {
       {showScenarioEditor && (
         <ScenarioEditor
           onClose={() => setShowScenarioEditor(false)}
+          zIndex={getPanelZIndex('scenario-editor')}
           onGenerateFromBbox={async (hazardType, bbox, params) => {
             try {
               const resp = await fetch('/api/scenarios/generate-from-bbox', {
@@ -9295,6 +9313,7 @@ export default function App() {
           onClose={() => { setShowCinematicDirector(false); setCinematicFocusEntity(null); }}
           layerVersion={cinematicLayerVersion}
           focusEntity={cinematicFocusEntity}
+          zIndex={getPanelZIndex('cinematic-director')}
         />
       )}
 
@@ -9303,6 +9322,7 @@ export default function App() {
         <SpatialSketching
           viewer={viewerRef.current}
           onClose={() => setShowSpatialSketching(false)}
+          zIndex={getPanelZIndex('spatial-sketch')}
           onGenerateScenario={(type, params) => {
             setShowSpatialSketching(false);
             const mappedParams = mapFrontendParams(type, params);
