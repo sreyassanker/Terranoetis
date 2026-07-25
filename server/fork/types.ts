@@ -9,6 +9,7 @@ export interface ForkDefinition {
   divergenceScore: number;
   simulatedTimeMs: number;
   maxSimulationHours: number;
+  bufferRadiusM: number;
 }
 
 export interface ForkDelta {
@@ -32,6 +33,7 @@ export interface ForkCreateRequest {
   altitudeKm?: number;
   deltas: ForkDelta[];
   maxSimulationHours?: number;
+  bufferRadiusM?: number;
 }
 
 export interface ForkStreamMessage {

@@ -9,6 +9,9 @@ export class ForkManager {
   private readonly MAX_CONCURRENT_FORKS = 50;
   private readonly TICK_MS = 100;
   private readonly SIMULATION_SPEED = 1000;
+  private readonly DEFAULT_BUFFER_RADIUS_M = 500_000;       // 500 km
+  private readonly MIN_BUFFER_RADIUS_M = 0;                 // 0 m (no minimum)
+  private readonly MAX_BUFFER_RADIUS_M = 10_000_000;        // 10,000 km
 
   constructor() {
     this.forks = new Map();
@@ -34,6 +37,7 @@ export class ForkManager {
     }
 
     const forkId = `fork_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const bufferRadiusM = this.clampBufferRadius(request.bufferRadiusM);
     const fork: ForkDefinition = {
       forkId,
       name: request.name,
@@ -45,6 +49,7 @@ export class ForkManager {
       divergenceScore: 0.0,
       simulatedTimeMs: 0,
       maxSimulationHours: request.maxSimulationHours ?? 72,
+      bufferRadiusM,
     };
 
     const state: ForkState = {
@@ -70,8 +75,16 @@ export class ForkManager {
     this.broadcast(forkId, { type: 'FORK_INIT', forkId, timestamp: Date.now(), payload: { fork, request } });
     this.applyDeltas(forkId);
 
-    console.log(`[FORK] Created ${forkId}: "${request.name}" at ${request.lat},${request.lon}`);
+    console.log(`[FORK] Created ${forkId}: "${request.name}" at ${request.lat},${request.lon} (buffer ${(fork.bufferRadiusM / 1000).toFixed(0)} km)`);
     return fork;
+  }
+
+  /** Clamp an incoming buffer radius to a safe, usable range. Falls back to default. */
+  private clampBufferRadius(requested?: number): number {
+    if (typeof requested !== 'number' || !Number.isFinite(requested) || requested < 0) {
+      return this.DEFAULT_BUFFER_RADIUS_M;
+    }
+    return Math.min(Math.max(requested, this.MIN_BUFFER_RADIUS_M), this.MAX_BUFFER_RADIUS_M);
   }
 
   private applyDeltas(forkId: string): void {

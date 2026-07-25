@@ -13,7 +13,13 @@ forkRouter.post('/create', (req, res) => {
     }
     const userId = ((req as unknown as Record<string, unknown>).userId as string) || 'anonymous';
     const fork = forkManager.createFork(body, userId);
-    res.status(201).json({ forkId: fork.forkId, name: fork.name, status: fork.status, divergenceScore: fork.divergenceScore });
+    res.status(201).json({
+      forkId: fork.forkId,
+      name: fork.name,
+      status: fork.status,
+      divergenceScore: fork.divergenceScore,
+      bufferRadiusM: fork.bufferRadiusM,
+    });
   } catch (err) {
     console.error('[FORK-API] Create failed:', err);
     res.status(500).json({ error: (err as Error).message });
