@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { computeWithContext } from '../server/analytical-models/contextEngine';
 import { EQUATION_ENGINE } from '../server/analytical-models/engine';
 import * as fs from 'fs';

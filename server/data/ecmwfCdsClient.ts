@@ -22,12 +22,15 @@
 import { NetCDFReader } from 'netcdfjs';
 import NodeCache from 'node-cache';
 
-const CDS_API_BASE = 'https://cds.climate.copernicus.eu/api/v2';
+const CDS_API_BASE = 'https://cds.climate.copernicus.eu/api/retrieve/v1';
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 60; // 3 min max
 const FETCH_TIMEOUT = 60000;  // 60s per HTTP call
 
 const cache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 }); // 24h TTL
+
+// Circuit breaker: skip CDS entirely after first failure to avoid 60s timeouts per request
+let cdsFailedOnce = false;
 
 interface CdsTaskStatus {
   status: 'queued' | 'running' | 'completed' | 'failed';
@@ -69,12 +72,17 @@ function todayStr(): string {
 }
 
 /**
- * Submit a request to CDS and poll until completion.
- * Returns the raw ArrayBuffer of the NetCDF response.
+ * Submit a request to CDS v3 and poll until completion.
+ * CDS v3 workflow:
+ *   1. POST /api/retrieve/v1/processes/{dataset}/execute → 201 + Location header (job URL)
+ *   2. Poll job URL until status "successful"
+ *   3. GET {jobUrl}/results → download URL
+ *   4. Download data
  */
 export async function fetchCdsNetCdf(
   params: CdsRequestParams,
 ): Promise<ArrayBuffer | null> {
+  if (cdsFailedOnce) return null;
   const token = getToken();
   if (!token) return null;
 
@@ -83,80 +91,92 @@ export async function fetchCdsNetCdf(
   if (cached) return cached;
 
   const body: Record<string, unknown> = {
-    variable: params.variables,
-    product_type: params.product_type ?? 'reanalysis',
-    year: params.years,
-    month: params.months,
-    day: params.days,
-    time: params.times,
-    format: params.format,
+    inputs: {
+      variable: params.variables,
+      product_type: [params.product_type ?? 'reanalysis'],
+      year: params.years,
+      month: params.months,
+      day: params.days,
+      time: params.times,
+      data_format: params.format === 'netcdf' ? 'netcdf' : 'grib',
+      ...(params.area ? {
+        area: `${params.area.north}/${params.area.west}/${params.area.south}/${params.area.east}`,
+      } : {}),
+    },
   };
-  if (params.area) {
-    body.area = `${params.area.north}/${params.area.west}/${params.area.south}/${params.area.east}`;
-  }
 
   const submitResp = await fetch(
-    `${CDS_API_BASE}/resources/${params.dataset}`,
+    `${CDS_API_BASE}/processes/${params.dataset}/execute`,
     {
       method: 'POST',
       headers: headers(),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(FETCH_TIMEOUT),
+      signal: AbortSignal.timeout(15000),
     },
   );
   if (!submitResp.ok) {
     const errText = await submitResp.text().catch(() => 'unknown');
     console.warn(`[CDS] submit failed (${submitResp.status}): ${errText.slice(0, 200)}`);
+    cdsFailedOnce = true;
     return null;
   }
 
-  const submitJson = await submitResp.json() as Record<string, unknown>;
-  const requestId = submitJson.request_id as string | undefined;
-  if (!requestId) {
-    console.warn('[CDS] no request_id in response');
+  const jobUrl = submitResp.headers.get('location');
+  if (!jobUrl) {
+    console.warn('[CDS] no Location header in submit response');
     return null;
   }
 
-  let status: CdsTaskStatus['status'] = 'queued';
+  // Poll job URL until successful
+  let jobStatus: string = 'running';
   for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-
-    const pollResp = await fetch(
-      `${CDS_API_BASE}/tasks/${requestId}`,
-      {
-        headers: headers(),
-        signal: AbortSignal.timeout(FETCH_TIMEOUT / 2),
-      },
-    );
+    const pollResp = await fetch(jobUrl, {
+      headers: headers(),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT / 2),
+    });
     if (!pollResp.ok) {
-      console.warn(`[CDS] poll failed (${pollResp.status}) for ${requestId}`);
+      console.warn(`[CDS] poll failed (${pollResp.status}) for job ${jobUrl}`);
       continue;
     }
-
-    const task = await pollResp.json() as CdsTaskStatus;
-    status = task.status;
-
-    if (status === 'completed') break;
-    if (status === 'failed') {
-      console.warn(`[CDS] request ${requestId} failed: ${task.error?.message ?? 'unknown'}`);
+    const job = await pollResp.json() as { status: string };
+    jobStatus = job.status;
+    if (jobStatus === 'successful') break;
+    if (jobStatus === 'failed') {
+      console.warn(`[CDS] job ${jobUrl} failed`);
       return null;
     }
   }
 
-  if (status !== 'completed') {
-    console.warn(`[CDS] request ${requestId} timed out after ${MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS}ms`);
+  if (jobStatus !== 'successful') {
+    console.warn(`[CDS] job ${jobUrl} timed out`);
     return null;
   }
 
-  const downloadResp = await fetch(
-    `${CDS_API_BASE}/tasks/${requestId}/download`,
-    {
-      headers: headers(),
-      signal: AbortSignal.timeout(FETCH_TIMEOUT * 2),
-    },
-  );
+  // Get download URL
+  const resultsResp = await fetch(`${jobUrl}/results`, {
+    headers: headers(),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT / 2),
+  });
+  if (!resultsResp.ok) {
+    console.warn(`[CDS] results fetch failed (${resultsResp.status})`);
+    return null;
+  }
+  const results = await resultsResp.json() as { asset?: { value?: { href?: string } } } | Array<{ href?: string }>;
+  const downloadUrl = Array.isArray(results)
+    ? results[0]?.href
+    : results?.asset?.value?.href;
+  if (!downloadUrl) {
+    console.warn('[CDS] no download URL in results');
+    return null;
+  }
+
+  const downloadResp = await fetch(downloadUrl, {
+    headers: headers(),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT * 2),
+  });
   if (!downloadResp.ok) {
-    console.warn(`[CDS] download failed (${downloadResp.status}) for ${requestId}`);
+    console.warn(`[CDS] download failed (${downloadResp.status})`);
     return null;
   }
 

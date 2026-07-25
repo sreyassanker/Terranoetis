@@ -9,6 +9,7 @@ export const askSchema = z.object({
   apiKey: z.string().optional(),
   userId: z.string().optional(),
   images: z.array(z.object({ dataUrl: z.string(), mimeType: z.string(), fileName: z.string() })).optional(),
+  recentMessages: z.array(z.object({ role: z.string(), content: z.string() })).optional(),
 });
 
 export const sandboxExecuteSchema = z.object({

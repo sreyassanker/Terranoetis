@@ -27,6 +27,71 @@ import { logger } from '../observability/logger';
 
 const FETCH_TIMEOUT = 30000;
 
+let cachedEarthdataToken: string | undefined;
+let tokenFetchPromise: Promise<string | undefined> | undefined;
+
+/** Obtain a NASA Earthdata token from EARTHDATA_USERNAME/PASSWORD if NASA_EARTHDATA_TOKEN is not set. */
+async function resolveEarthdataToken(): Promise<string | undefined> {
+  const existing = process.env.NASA_EARTHDATA_TOKEN;
+  if (existing) return existing;
+  if (cachedEarthdataToken) return cachedEarthdataToken;
+  if (tokenFetchPromise) return tokenFetchPromise;
+
+  const user = process.env.EARTHDATA_USERNAME;
+  const pass = process.env.EARTHDATA_PASSWORD;
+  if (!user || !pass) {
+    logger.info('[SatThermal] No NASA_EARTHDATA_TOKEN or EARTHDATA_USERNAME/PASSWORD — skipping AppEEARS');
+    return undefined;
+  }
+
+  const basic = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
+
+  tokenFetchPromise = (async () => {
+    // Try listing existing tokens first (user may have hit max_token_limit)
+    try {
+      const listResp = await fetch('https://urs.earthdata.nasa.gov/api/users/tokens', {
+        headers: { Authorization: basic, Accept: 'application/json' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (listResp.ok) {
+        const tokens = await listResp.json() as Array<{ access_token: string; expiration_date?: string }>;
+        const valid = tokens.filter(t => !t.expiration_date || new Date(t.expiration_date) > new Date());
+        if (valid.length > 0) {
+          cachedEarthdataToken = valid[0].access_token;
+          logger.info('[SatThermal] Reused existing Earthdata token');
+          return cachedEarthdataToken;
+        }
+      }
+    } catch { /* fall through to create */ }
+
+    // No existing token — try to create one
+    try {
+      const resp = await fetch('https://urs.earthdata.nasa.gov/api/users/token', {
+        method: 'POST',
+        headers: { Authorization: basic },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) {
+        logger.warn(`[SatThermal] Earthdata token creation failed: HTTP ${resp.status}`);
+        return undefined;
+      }
+      const data = await resp.json() as { access_token?: string };
+      if (data?.access_token) {
+        cachedEarthdataToken = data.access_token;
+        logger.info('[SatThermal] Earthdata token obtained from credentials');
+        return data.access_token;
+      }
+      logger.warn('[SatThermal] Earthdata token response missing access_token');
+      return undefined;
+    } catch (e) {
+      logger.warn(`[SatThermal] Earthdata token fetch error: ${(e as Error).message}`);
+      return undefined;
+    }
+  })();
+
+  return tokenFetchPromise;
+}
+
 async function safeJson(url: string, init?: RequestInit): Promise<Record<string, unknown> | null> {
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT), ...init });
@@ -131,6 +196,8 @@ export interface LandsatThermalData {
   source: string;
 }
 
+const APPEARS_BASE = 'https://appeears.earthdatacloud.nasa.gov/api';
+
 const LANDSAT_L2_LAYER = 'landsat-c2l2-st';   // ST product (surface temp + BT)
 const LANDSAT_SR_LAYER = 'landsat-c2l2-sr';   // surface reflectance (for NDVI/emissivity)
 
@@ -172,24 +239,28 @@ async function runApeearsPointTask(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const submit = await safeJson('https://lpdaacsvc.cr.usgs.gov/appeears/api/v1/task', {
+  const submit = await safeJson(`${APPEARS_BASE}/task`, {
     method: 'POST',
     headers,
     body: JSON.stringify(taskPayload),
   });
-  const taskId = submit?.task_id as string | undefined;
+  if (submit == null) {
+    logger.warn('[SatThermal] AppEEARS submission failed — user may need to authorize at https://appeears.earthdatacloud.nasa.gov');
+    return null;
+  }
+  const taskId = submit.task_id as string | undefined;
   if (!taskId) return null;
 
   // Poll up to ~60s
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
-    const status = await safeJson(`https://lpdaacsvc.cr.usgs.gov/appeears/api/v1/task/${taskId}`, { headers });
+    const status = await safeJson(`${APPEARS_BASE}/task/${taskId}`, { headers });
     if (status?.status === 'done') break;
     if (status?.status === 'failed' || status?.status === 'error') return null;
   }
 
   // Fetch the point JSON payload
-  const result = await safeJson(`https://lpdaacsvc.cr.usgs.gov/appeears/api/v1/task/${taskId}/point`, { headers });
+  const result = await safeJson(`${APPEARS_BASE}/task/${taskId}/point`, { headers });
   if (!result) return null;
   return result as ApeearsPointResponse;
 }
@@ -204,7 +275,7 @@ async function runApeearsPointTask(
 export async function fetchLandsatThermal(
   lat: number, lon: number, date?: string,
 ): Promise<LandsatThermalData | null> {
-  const token = process.env.NASA_EARTHDATA_TOKEN;
+  const token = await resolveEarthdataToken();
 
   // Default window: ±45 days around requested date (or today)
   const refDate = date && !date.includes('/')

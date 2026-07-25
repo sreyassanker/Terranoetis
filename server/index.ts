@@ -133,8 +133,6 @@ import { createSelfEvolutionRouter } from './routes/selfEvolution';
 import { pulseRouter } from './routes/pulse';
 import { startSentinelEngine, stopSentinelEngine } from './sentinel/engine';
 import { CorrelationEngine } from './sentinel/correlationEngine';
-import { ForcePostureEngine } from './sentinel/forcePosture';
-import { startOsintBridge, stopOsintBridge } from './military/osintBridge';
 import { initAisTracker, stopAisTracker, getAisTracker, type AisVessel } from './maritime/aisTracker';
 import { prithviV2Engine } from './foundation-models/prithvi-v2';
 import { roadTrafficDetector } from './sentinel/roadTrafficDetector';
@@ -520,6 +518,9 @@ function registerDefaultTools() {
     { name:'reliefweb', category:'osint', description:'ReliefWeb disaster reports and humanitarian updates', exampleQueries:['reliefweb','disaster reports','humanitarian','relief operations','disaster response'], schema:{type:'api',endpoint:'/api/reliefweb',method:'GET',params:{limit:'max results',country:'country filter',disaster_type:'disaster type filter'}} },
     { name:'cyber_threats_otx', category:'osint', description:'AlienVault OTX threat intelligence pulses — latest cyber threat indicators', exampleQueries:['cyber threats','threat intelligence','otx','malware indicators','cyber security'], schema:{type:'api',endpoint:'/api/otx',method:'GET',params:{section:'OTX section',limit:'max results'}} },
     { name:'displacement_data', category:'osint', description:'UNHCR displacement data — refugees and internally displaced persons by year', exampleQueries:['displacement','refugees','idp','unhcr','displaced persons','forced migration'], schema:{type:'api',endpoint:'/api/displacement',method:'GET',params:{year:'year filter'}} },
+
+    // ── Unified RAG Search ──
+    { name:'search_all', category:'general', description:'Unified natural-language search across ALL geospatial databases (earthquakes, weather, hazards, aviation, maritime, space, EO, osint). Accepts any question and returns the most relevant data. Use this when you are unsure which specific tool to call, or when the query spans multiple domains.', exampleQueries:['what is happening near japan','check all threats near tokyo','find everything about this location','analyze region','show me what is important'], schema:{type:'api',endpoint:'/api/agent/search-all',method:'POST',params:{query:'natural language query',lat:'latitude for location context',lon:'longitude for location context'},outputFormat:'JSON'} },
   ];
   for (const t of tools) toolRegistry.register(t);
 }
@@ -566,7 +567,6 @@ cognitiveAgent.init().catch(e => logger.error({ err: e }, 'CognitiveAgent init e
 
 // Module-level engine declarations (for gracefulShutdown access)
 let correlationEngine: CorrelationEngine | null = null;
-let forcePosture: ForcePostureEngine | null = null;
 
 // Sentinel: proactive continuous monitoring system
 sentinel.init().then(() => {
@@ -575,18 +575,12 @@ sentinel.init().then(() => {
 
   // Start Anomaly Correlation Engine
   correlationEngine = null;
-  forcePosture = null;
   try {
     correlationEngine = new CorrelationEngine(db);
     correlationEngine.start();
     // Fetch external data sources immediately
     correlationEngine.ingestFromExternalSources().catch(() => {});
     logger.info('[Correlation] Engine started — cross-correlating real data streams');
-
-    // Start Force Posture Intelligence
-    forcePosture = new ForcePostureEngine(db);
-    forcePosture.start();
-    logger.info('[ForcePosture] Engine started — monitoring 12 installations');
   } catch (err) {
     logger.error({ err: String(err) }, '[Correlation] Engine failed to start');
   }
@@ -618,23 +612,6 @@ sentinel.init().then(() => {
 
 
 
-
-  // ── Force Posture API ──
-  app.get('/api/force-posture/installations', (_req: express.Request, res: express.Response) => {
-    try { res.json({ installations: forcePosture?.getInstallations() || [] }); } catch (err) { res.status(500).json({ error: String(err) }); }
-  });
-  app.get('/api/force-posture/alerts', (req: express.Request, res: express.Response) => {
-    try {
-      const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-      res.json({ alerts: forcePosture?.getAlerts(limit) || [] });
-    } catch (err) { res.status(500).json({ error: String(err) }); }
-  });
-  app.post('/api/force-posture/alerts/:id/acknowledge', (req: express.Request, res: express.Response) => {
-    try { forcePosture?.acknowledgeAlert(req.params.id); res.json({ ok: true }); } catch (err) { res.status(500).json({ error: String(err) }); }
-  });
-  app.get('/api/force-posture/status', (_req: express.Request, res: express.Response) => {
-    res.json(forcePosture?.getStatus() || { running: false, installationCount: 0, alertCount: 0 });
-  });
 
   // ── Start Priority 1-10 upgraded engines ──
   try {
@@ -6992,10 +6969,20 @@ app.post('/api/agent/pipeline', authGuard, async (req: express.Request, res: exp
             timeout: 30000,
           });
           results[task.id] = execResult.stdout;
+          let globeCommands: Array<Record<string, unknown>> | null = null;
+          for (const line of execResult.stdout.split('\n')) {
+            const idx = line.indexOf('__GLOBE_COMMANDS__');
+            if (idx >= 0) {
+              const jsonStr = line.slice(idx + 18).trim();
+              try { globeCommands = JSON.parse(jsonStr); } catch { /* skip malformed */ }
+              break;
+            }
+          }
           sendEvent('subtask', { subtask: {
             id: task.id, description: task.description, status: 'completed',
             result: execResult.stdout.slice(0, 2000),
             executionTimeMs: execResult.executionTimeMs,
+            globeCommands,
           }});
         } catch (e) {
           sendEvent('subtask', { subtask: { id: task.id, description: task.description, status: 'failed', error: String(e) } });
@@ -7006,6 +6993,23 @@ app.post('/api/agent/pipeline', authGuard, async (req: express.Request, res: exp
       }
     }
 
+    const allGlobeCommands: Array<Record<string, unknown>> = [];
+    for (const r of Object.values(results)) {
+      for (const line of r.split('\n')) {
+        const idx = line.indexOf('__GLOBE_COMMANDS__');
+        if (idx >= 0) {
+          const jsonStr = line.slice(idx + 18).trim();
+          try {
+            const cmds = JSON.parse(jsonStr);
+            if (Array.isArray(cmds)) allGlobeCommands.push(...cmds);
+          } catch { /* skip */ }
+          break;
+        }
+      }
+    }
+    if (allGlobeCommands.length > 0) {
+      sendEvent('globe', { commands: allGlobeCommands });
+    }
     sendEvent('done', { done: true, workspaceId: wsId, subtaskResults: results });
   } catch (e) {
     sendEvent('error', { error: String(e) });
@@ -7018,6 +7022,55 @@ app.post('/api/agent/pipeline', authGuard, async (req: express.Request, res: exp
 // Materialized view query — instant pre-computed data
 
 
+
+// Unified RAG search across all geospatial databases
+app.post('/api/agent/search-all', async (req: express.Request, res: express.Response) => {
+  const { query, lat, lon } = req.body;
+  if (!query) return res.status(400).json({ error: 'query required' });
+  const results: Record<string, unknown> = {};
+  const lower = query.toLowerCase();
+  const hasLocation = lat != null && lon != null;
+  const base = `${req.protocol}://${req.get('host')}`;
+  try {
+    if (lower.includes('earthquake') || lower.includes('seismic') || lower.includes('quake')) {
+      const q = await fetch(`${base}/api/earthquakes?hours=72&minMag=2.5${hasLocation ? `&latMin=${lat-5}&latMax=${lat+5}&lonMin=${lon-5}&lonMax=${lon+5}` : ''}`);
+      if (q.ok) results.earthquakes = await q.json();
+    }
+    if (lower.includes('weather') || lower.includes('temperature') || lower.includes('forecast') || lower.includes('storm') || lower.includes('hurricane') || lower.includes('cyclone')) {
+      if (hasLocation) {
+        const w = await fetch(`${base}/api/weather/open-meteo?lat=${lat}&lon=${lon}`);
+        if (w.ok) results.weather = await w.json();
+      }
+      const s = await fetch(`${base}/api/weather/nhc`);
+      if (s.ok) results.storms = await s.json();
+      const a = await fetch(`${base}/api/weather/alerts`);
+      if (a.ok) results.alerts = await a.json();
+    }
+    if (lower.includes('fire') || lower.includes('wildfire') || lower.includes('burn')) {
+      const f = await fetch(`${base}/api/eonet?source=wildfires${hasLocation ? `&latMin=${lat-5}&latMax=${lat+5}&lonMin=${lon-5}&lonMax=${lon+5}` : ''}`);
+      if (f.ok) results.wildfires = await f.json();
+    }
+    if (lower.includes('flight') || lower.includes('plane') || lower.includes('aircraft') || lower.includes('aviation')) {
+      const a = await fetch(`${base}/api/flights/all${hasLocation ? `?lat=${lat}&lon=${lon}` : ''}`);
+      if (a.ok) results.aircraft = await a.json();
+    }
+    if (lower.includes('ship') || lower.includes('vessel') || lower.includes('maritime') || lower.includes('ais') || lower.includes('boat')) {
+      const v = await fetch(`${base}/api/ais/nearby?lat=${lat || 0}&lon=${lon || 0}&radius=100`);
+      if (v.ok) results.vessels = await v.json();
+    }
+    if (lower.includes('satellite') || lower.includes('space') || lower.includes('debris')) {
+      const s = await fetch(`${base}/api/satellites/tle`);
+      if (s.ok) results.satellites = await s.json();
+    }
+    if (lower.includes('volcano') || lower.includes('eruption')) {
+      const v = await fetch(`${base}/api/vaac/tokyo`);
+      if (v.ok) results.volcanoes = await v.json();
+    }
+  } catch (e) {
+    return res.json({ error: String(e), partial: results });
+  }
+  res.json({ query, results, found: Object.keys(results).length > 0 });
+});
 
 // Geocode a location name using LLM + local city DB
 app.get('/api/agent/geocode', async (req: express.Request, res: express.Response) => {
@@ -7110,7 +7163,7 @@ async function directGeminiAnswer(
 // Main agent ask endpoint — SSE streaming
 const askRateLimit = perUserRateLimiter(30, 60000); // 30 requests per minute per user
 app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (req: express.Request, res: express.Response) => {
-  const { message, images } = req.body;
+  const { message, images, recentMessages } = req.body;
   const imageContext = Array.isArray(images) && images.length > 0 ? images.map((img: any) => "[Image: " + img.fileName + " (" + img.mimeType + ")]").join(' ') : '';
   const fullMessage = imageContext ? imageContext + "\n" + message : message;
   const userId = (req as any).userId || 'default';
@@ -7276,7 +7329,8 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
 
     // Step 3: Analyze with Omninet (auto-fallback across providers)
     sendEvent('step', { stepType: 'agent_thinking', text: 'Agent analyzing...', status: 'running' });
-    const memoryContext = await memoryManager.buildWorkingMemoryContext(uid, fullMessage, []);
+    const recentMessagesArray: Array<{ role: string; content: string }> = Array.isArray(recentMessages) ? recentMessages.slice(-6) : [];
+    const memoryContext = await memoryManager.buildWorkingMemoryContext(uid, fullMessage, recentMessagesArray);
     const systemPrompt = buildAgentPrompt(toolRegistry, intent);
 
     /**
@@ -7300,11 +7354,71 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       return accumulated;
     };
 
+    const streamPassMultimodal = async (textPrompt: string, imgs: Array<{dataUrl: string; mimeType: string; fileName: string}>): Promise<string> => {
+      if (!apiKey || imgs.length === 0) {
+        sendEvent('step', { stepType: 'multimodal', text: 'No Gemini key for vision — falling back to text-only', status: 'completed' });
+        return streamPass(textPrompt);
+      }
+      const parts: Array<Record<string, unknown>> = [{ text: textPrompt.slice(0, 14000) }];
+      for (const img of imgs.slice(0, 4)) {
+        const b64 = img.dataUrl.replace(/^data:image\/\w+;base64,/, '');
+        parts.push({ inlineData: { mimeType: img.mimeType, data: b64 } });
+      }
+      const model = 'gemini-2.0-flash-001';
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+        }),
+      });
+      if (!resp.ok) {
+        logger.warn({ status: resp.status }, 'Gemini multimodal streaming failed — falling back to Omninet text-only');
+        sendEvent('step', { stepType: 'multimodal_fallback', text: `Vision model unavailable (${resp.status}) — analyzing without image data`, status: 'completed' });
+        return streamPass(textPrompt);
+      }
+      const reader = resp.body?.getReader();
+      if (!reader) throw new Error('No response body from Gemini');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let accumulated = '';
+      let tokenCount = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const chunk = JSON.parse(line.slice(6));
+              const content = chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
+              if (content) {
+                accumulated += content;
+                tokenCount++;
+                if (tokenCount % 5 === 0 || tokenCount <= 3) {
+                  sendEvent('token', { text: content });
+                } else {
+                  res.write(`event: token\ndata: ${JSON.stringify({ type: 'token', text: content })}\n\n`);
+                }
+              }
+            } catch (e) { logger.warn({ err: e }, 'Gemini multimodal SSE parse error'); }
+          }
+        }
+      }
+      logger.info({ outputLen: accumulated.length, tokenCount }, 'Gemini multimodal streaming pass complete');
+      return accumulated;
+    };
+
     let outputText = '';
     try {
-      logger.info({ msgLen: message.length, hasMemory: !!memoryContext }, 'Omninet streaming starting');
+      const hasImages = Array.isArray(images) && images.length > 0;
+      logger.info({ msgLen: message.length, hasMemory: !!memoryContext, hasImages }, 'AI streaming starting');
       const fullPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}[User query]\n${fullMessage}`;
-      outputText = await streamPass(fullPrompt);
+      outputText = hasImages ? await streamPassMultimodal(fullPrompt, images) : await streamPass(fullPrompt);
       sendEvent('step', { stepType: 'agent_thinking', text: 'Agent analysis complete', status: 'completed' });
 
       // ── Two-pass tool execution ──────────────────────────────────
@@ -7412,7 +7526,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     }
 
     // Send final output
-    sendEvent('output', { text: outputText });
+    sendEvent('output', { text: outputText, modelTier, intentType: intent.type });
     sendEvent('done', { type: 'done' });
 
   } catch (e) {
@@ -7420,6 +7534,33 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
   }
   cleanup();
   res.end();
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Phase 2.0.5: Local AI Fallback (Ollama)
+// ═══════════════════════════════════════════════════════════════════════
+app.post('/api/agent/local-ask', async (req: express.Request, res: express.Response) => {
+  const { message } = req.body;
+  if (!message || typeof message !== 'string') return res.status(400).json({ error: 'message required' });
+  try {
+    const resp = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(30000),
+      body: JSON.stringify({
+        model: 'llama3',
+        prompt: `You are an AI assistant for a geospatial Earth observation platform. Answer concisely and accurately.\n\nUser query: ${message.slice(0, 2000)}`,
+        stream: false,
+        options: { temperature: 0.3, max_tokens: 512 },
+      }),
+    });
+    if (!resp.ok) throw new Error(`Ollama HTTP ${resp.status}`);
+    const data = await resp.json() as { response?: string };
+    if (data?.response) return res.json({ response: data.response });
+    throw new Error('Empty Ollama response');
+  } catch (e) {
+    res.json({ error: String(e), fallback: true });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -9996,7 +10137,6 @@ httpServer.listen(PORT, () => {
   logger.info({ port: PORT }, 'server started');
   startMemoryLogging();
   startResourceMonitor();
-  startOsintBridge();
   startSentinelEngine();
   // Pre-warm slow caches so first user request doesn't pay the penalty
   fetchAndCacheAirspaces().then(() => logger.info('Airspace cache pre-warmed')).catch(() => {});
@@ -10047,11 +10187,9 @@ function gracefulShutdown(signal: string) {
   stopMemoryLogging();
   stopResourceMonitor();
   stopSyntheticDataGeneration();
-  stopOsintBridge();
   stopAisTracker();
   stopSentinelEngine();
   correlationEngine?.stop();
-  forcePosture?.stop();
   roadTrafficDetector.stop();
   spacexEngine.stop();
   bayFireDetector.stop();

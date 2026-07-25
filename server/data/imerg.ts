@@ -17,12 +17,12 @@ import NodeCache from 'node-cache';
 
 const cache = new NodeCache({ stdTTL: 7200, checkperiod: 600 });
 
-const GES_DISC_BASE = 'https://gpm1.gesdisc.eosdis.nasa.gov/data';
+const GES_DISC_BASE = 'https://gpm2.gesdisc.eosdis.nasa.gov/data';
 
 const ACCUMULATED_30MIN_MM = 100; // scale factor for raw IMERG values
 
 // IMERG V07 product version
-const IMERG_VERSION = 'V07';
+const IMERG_VERSION = 'V07C';
 
 type ImergProduct = 'early' | 'late' | 'final';
 
@@ -88,7 +88,13 @@ async function downloadImergFile(
   const token = getEarthdataToken();
   if (!token) return null;
 
-  const url = `${GES_DISC_BASE}/${fileInfo.productPath}/${fileInfo.date.slice(0, 4)}/${fileInfo.date.slice(4, 6)}/${fileInfo.date.slice(6, 8)}/${fileInfo.filename}`;
+  const yyyy = fileInfo.date.slice(0, 4);
+  const mm = fileInfo.date.slice(4, 6);
+  const dd = fileInfo.date.slice(6, 8);
+  const dt = new Date(+yyyy, +mm - 1, +dd);
+  const doy = Math.floor((dt.getTime() - new Date(+yyyy, 0, 0).getTime()) / 86400000);
+  const doyStr = String(doy).padStart(3, '0');
+  const url = `${GES_DISC_BASE}/${fileInfo.productPath}/${yyyy}/${doyStr}/${fileInfo.filename}`;
 
   const cacheKey = `imerg:${fileInfo.filename}`;
   const cached = cache.get<ArrayBuffer>(cacheKey);
@@ -98,10 +104,18 @@ async function downloadImergFile(
     const resp = await fetch(url, {
       headers: {
         Authorization: `Basic ${token}`,
+        'User-Agent': 'Mozilla/5.0',
+        Accept: 'application/octet-stream,*/*',
       },
+      redirect: 'follow',
       signal: AbortSignal.timeout(30000),
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      console.warn(`[IMERG] download failed ${resp.status} (redirected: ${resp.redirected}) for ${url}`);
+      const text = await resp.text().catch(() => '');
+      console.warn(`[IMERG] body: ${text.slice(0, 200)}`);
+      return null;
+    }
     const buffer = await resp.arrayBuffer();
     cache.set(cacheKey, buffer);
     return buffer;
@@ -212,24 +226,27 @@ export async function fetchImergPrecipitation(
   let lastError: string | null = null;
 
   for (const product of products) {
+    let productSlots = 0;
     try {
-      const { parseHdf5 } = await import('h5wasm');
+      const h5 = await import('h5wasm');
+      await h5.ready;
       let totalPrecip = 0;
       let maxIntensity = 0;
-      let slotsUsed = 0;
 
-      // Download each 30-min slot in the window
       const totalSlots = windowHours * 2;
       for (let slot = 0; slot < totalSlots; slot++) {
         const fileInfo = buildImergFilename(product, year, month, day, slot);
         const buffer = await downloadImergFile(fileInfo);
         if (!buffer) continue;
 
-        // Parse HDF5 with h5wasm
-        const file = await parseHdf5(buffer);
+        const tmpPath = '/tmp/imerg.h5';
+        h5.FS.writeFile(tmpPath, new Uint8Array(buffer));
+        const file = new h5.File(tmpPath, 'r');
         const precipVar = file.get('Grid/precipitation');
         const latVar = file.get('Grid/lat');
         const lonVar = file.get('Grid/lon');
+        file.close();
+        h5.FS.unlink(tmpPath);
 
         if (!precipVar || !latVar || !lonVar) continue;
 
@@ -244,19 +261,20 @@ export async function fetchImergPrecipitation(
           totalPrecip += precipMmHr;
           maxIntensity = Math.max(maxIntensity, precipMmHr);
         }
-        slotsUsed++;
+        productSlots++;
       }
 
-      if (slotsUsed > 0) {
+      if (productSlots > 0) {
         return {
           totalPrecipitation: Math.round(totalPrecip * 100) / 100,
-          slotsUsed,
+          slotsUsed: productSlots,
           source: product === 'late' ? 'imerg-late' : 'imerg-early',
           maxIntensity: Math.round(maxIntensity * 100) / 100,
         };
       }
+      console.warn(`[IMERG] ${product}: 0/${totalSlots} slots downloaded`);
     } catch (e) {
-      lastError = (e as Error).message;
+      lastError = `product=${product} slots=${productSlots} err=${(e as Error).message}`;
     }
   }
 
@@ -311,5 +329,11 @@ export function getImergUrl(
 ): string | null {
   if (!getEarthdataToken()) return null;
   const info = buildImergFilename(product, year, month, day, slot30);
-  return `${GES_DISC_BASE}/${info.productPath}/${info.date.slice(0, 4)}/${info.date.slice(4, 6)}/${info.date.slice(6, 8)}/${info.filename}`;
+  const yyyy = info.date.slice(0, 4);
+  const mm = info.date.slice(4, 6);
+  const dd = info.date.slice(6, 8);
+  const dt = new Date(+yyyy, +mm - 1, +dd);
+  const doy = Math.floor((dt.getTime() - new Date(+yyyy, 0, 0).getTime()) / 86400000);
+  const doyStr = String(doy).padStart(3, '0');
+  return `${GES_DISC_BASE}/${info.productPath}/${yyyy}/${doyStr}/${info.filename}`;
 }

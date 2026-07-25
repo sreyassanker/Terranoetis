@@ -1115,75 +1115,145 @@ export interface Era5HighFidelityData {
   } | null;
 }
 
+async function fetchOpenMeteoEra5(
+  lat: number, lon: number, dateStr?: string,
+): Promise<Era5HighFidelityData> {
+  const date = dateStr ?? new Date().toISOString().slice(0, 10);
+  const url = `https://archive-api.open-meteo.com/v1/archive`
+    + `?latitude=${lat}&longitude=${lon}`
+    + `&start_date=${date}&end_date=${date}`
+    + `&hourly=wind_speed_10m,wind_direction_10m,dew_point_2m,surface_pressure,`
+    + `shortwave_radiation,temperature_2m,cloud_cover,`
+    + `soil_temperature_0_to_7cm,soil_temperature_7_to_28cm,soil_temperature_28_to_100cm,soil_temperature_100_to_255cm,`
+    + `soil_moisture_0_to_7cm,soil_moisture_7_to_28cm,soil_moisture_28_to_100cm,soil_moisture_100_to_255cm`
+    + `&timezone=auto`;
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) return null as unknown as Era5HighFidelityData;
+    const data = await resp.json() as Record<string, unknown>;
+    const h = data.hourly as Record<string, number[]> | undefined;
+    if (!h?.wind_speed_10m) return null as unknown as Era5HighFidelityData;
+
+    const times = h.time as string[] | undefined;
+    let idx = times ? times.findIndex(t => t.includes('T12:')) : -1;
+    if (idx < 0) idx = Math.floor((times?.length ?? 1) / 2);
+    const get = (key: string): number | null =>
+      h[key]?.[idx] != null && Number.isFinite(h[key][idx]) ? h[key][idx] : null;
+
+    // Friction velocity: u* = κ * u(10m) / ln(10 / z₀), κ=0.41, z₀=0.03m grass
+    const u10 = get('wind_speed_10m');
+    const frictionVelocity = u10 != null ? 0.41 * u10 / Math.log(10 / 0.03) : null;
+
+    // TCWV from Smith (1966): PW(mm) = 0.04 * exp(0.0666 * Td) * (P / 1013.25)
+    const Td = get('dew_point_2m');
+    const P = get('surface_pressure');
+    const totalColumnWaterVapour =
+      Td != null && P != null
+        ? 0.04 * Math.exp(0.0666 * Td) * (P / 1013.25) * 0.1
+        : null;
+
+    // Surface fluxes
+    const sw = get('shortwave_radiation');
+    const T = get('temperature_2m');
+    const cc = get('cloud_cover');
+    let surfaceFluxes: Era5HighFidelityData['surfaceFluxes'] = null;
+    if (sw != null) {
+      const albedo = 0.23;
+      const netShortwave = sw * (1 - albedo);
+      let netLongwave: number | null = null;
+      if (T != null) {
+        const sigma = 5.67e-8;
+        const eps = 0.98;
+        const clearLw = eps * sigma * Math.pow(T + 273.15, 4);
+        const ccf = cc != null ? (1 - 0.84 * cc / 100) : 0.8;
+        netLongwave = clearLw * ccf;
+      }
+      const netAvail = netShortwave - (netLongwave ?? netShortwave * 0.3);
+      const bowen = 1.0;
+      const sensibleFlux = netAvail * bowen / (1 + bowen);
+      const latentFlux = netAvail / (1 + bowen);
+      surfaceFluxes = { netShortwave, netLongwave, sensibleFlux, latentFlux };
+    }
+
+    // Soil state
+    const st1 = get('soil_temperature_0_to_7cm');
+    const st2 = get('soil_temperature_7_to_28cm');
+    const st3 = get('soil_temperature_28_to_100cm');
+    const sm1 = get('soil_moisture_0_to_7cm');
+    const sm2 = get('soil_moisture_7_to_28cm');
+    const sm3 = get('soil_moisture_28_to_100cm');
+    const soilState = st1 != null || sm1 != null ? {
+      temperature0_7: st1 != null ? st1 + 273.15 : null,
+      temperature7_28: st2 != null ? st2 + 273.15 : null,
+      temperature28_100: st3 != null ? st3 + 273.15 : null,
+      moisture0_7: sm1,
+      moisture7_28: sm2,
+      moisture28_100: sm3,
+    } : null;
+
+    return {
+      frictionVelocity,
+      totalColumnWaterVapour,
+      surfaceFluxes,
+      pressureWind: null,
+      pressureState: null,
+      soilState,
+    };
+  } catch {
+    return null as unknown as Era5HighFidelityData;
+  }
+}
+
 export async function fetchEra5HighFidelity(
   lat: number, lon: number, dateStr?: string,
 ): Promise<Era5HighFidelityData> {
-  const defaultNull = {
-    frictionVelocity: null,
-    totalColumnWaterVapour: null,
-    surfaceFluxes: null,
-    pressureWind: null,
-    pressureState: null,
-    soilState: null,
+  if (process.env.CDS_API_TOKEN) {
+    try {
+      const { fetchEra5FrictionVelocity, fetchEra5Tcwv, fetchEra5SurfaceFluxes,
+        fetchEra5PressureWind, fetchEra5PressureState, fetchEra5SoilState,
+        getCdsStatus } = await import('../data/ecmwfCdsClient');
+      if (getCdsStatus().tokenConfigured) {
+        const [ustar, tcwv, fluxes, wind850, wind500, state850, state500, soil] =
+          await Promise.all([
+            fetchEra5FrictionVelocity(lat, lon).catch(() => null),
+            fetchEra5Tcwv(lat, lon, dateStr).catch(() => null),
+            fetchEra5SurfaceFluxes(lat, lon).catch(() => null),
+            fetchEra5PressureWind(lat, lon, 850).catch(() => null),
+            fetchEra5PressureWind(lat, lon, 500).catch(() => null),
+            fetchEra5PressureState(lat, lon, 850).catch(() => null),
+            fetchEra5PressureState(lat, lon, 500).catch(() => null),
+            fetchEra5SoilState(lat, lon).catch(() => null),
+          ]);
+        if (ustar || tcwv || fluxes || wind850 || soil)
+          return {
+            frictionVelocity: ustar,
+            totalColumnWaterVapour: tcwv,
+            surfaceFluxes: fluxes,
+            pressureWind: {
+              u850: wind850?.u ?? null, v850: wind850?.v ?? null,
+              u500: wind500?.u ?? null, v500: wind500?.v ?? null,
+            },
+            pressureState: {
+              temperature500: state500?.temperature ?? null,
+              geopotential500: state500?.geopotential ?? null,
+              omega500: state500?.omega ?? null,
+              temperature850: state850?.temperature ?? null,
+            },
+            soilState: soil ? {
+              temperature0_7: soil.temperature0_7,
+              temperature7_28: soil.temperature7_28,
+              temperature28_100: soil.temperature28_100,
+              moisture0_7: soil.moisture0_7,
+              moisture7_28: soil.moisture7_28,
+              moisture28_100: soil.moisture28_100,
+            } : null,
+          };
+      }
+    } catch { /* fall through to Open-Meteo */ }
+  }
+
+  return fetchOpenMeteoEra5(lat, lon, dateStr) ?? {
+    frictionVelocity: null, totalColumnWaterVapour: null,
+    surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null,
   };
-
-  // Skip if CDS token not configured (fast check)
-  if (!process.env.CDS_API_TOKEN) return defaultNull;
-
-  try {
-    const { getCdsStatus } = await import('../data/ecmwfCdsClient');
-    if (!getCdsStatus().tokenConfigured) return defaultNull;
-  } catch {
-    return defaultNull;
-  }
-
-  try {
-    const [
-      { fetchEra5FrictionVelocity, fetchEra5Tcwv, fetchEra5SurfaceFluxes,
-        fetchEra5PressureWind, fetchEra5PressureState, fetchEra5SoilState },
-    ] = await Promise.all([
-      import('../data/ecmwfCdsClient'),
-    ]);
-
-    const [ustar, tcwv, fluxes, wind850, wind500, state850, state500, soil] =
-      await Promise.all([
-        fetchEra5FrictionVelocity(lat, lon).catch(() => null),
-        fetchEra5Tcwv(lat, lon, dateStr).catch(() => null),
-        fetchEra5SurfaceFluxes(lat, lon).catch(() => null),
-        fetchEra5PressureWind(lat, lon, 850).catch(() => null),
-        fetchEra5PressureWind(lat, lon, 500).catch(() => null),
-        fetchEra5PressureState(lat, lon, 850).catch(() => null),
-        fetchEra5PressureState(lat, lon, 500).catch(() => null),
-        fetchEra5SoilState(lat, lon).catch(() => null),
-      ]);
-
-    return {
-      frictionVelocity: ustar,
-      totalColumnWaterVapour: tcwv,
-      surfaceFluxes: fluxes,
-      pressureWind: {
-        u850: wind850?.u ?? null,
-        v850: wind850?.v ?? null,
-        u500: wind500?.u ?? null,
-        v500: wind500?.v ?? null,
-      },
-      pressureState: {
-        temperature500: state500?.temperature ?? null,
-        geopotential500: state500?.geopotential ?? null,
-        omega500: state500?.omega ?? null,
-        temperature850: state850?.temperature ?? null,
-      },
-      soilState: soil ? {
-        temperature0_7: soil.temperature0_7,
-        temperature7_28: soil.temperature7_28,
-        temperature28_100: soil.temperature28_100,
-        moisture0_7: soil.moisture0_7,
-        moisture7_28: soil.moisture7_28,
-        moisture28_100: soil.moisture28_100,
-      } : null,
-    };
-  } catch (e) {
-    console.warn('[Era5HighFidelity] CDS fetch failed:', e);
-    return defaultNull;
-  }
 }

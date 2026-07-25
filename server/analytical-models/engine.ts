@@ -1364,7 +1364,9 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   },
   44: ({ psib, psi }) => {
     const lambda = 1.5;
-    const Se = Math.pow(psib / Math.max(psi, 0.01), lambda);
+    const psiAbs = Math.max(Math.abs(psi), 0.01);
+    const psibAbs = Math.max(Math.abs(psib), 0.01);
+    const Se = Math.pow(psibAbs, lambda) / Math.pow(psiAbs, lambda);
     const theta = 0.05 + (0.5 - 0.05) * Math.min(1, Se); // proxy if thetaS & thetaR unknown
     const logSe = Math.log10(Se > 0 ? Se : 1e-10);
     return {
@@ -4341,7 +4343,7 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   123: { 'ρ': 'rho', 'C_D': 'CD' },
   124: { 'ρ': 'rho', 'C_D': 'CD' },
   125: { 'A₁': 'A1', 'A₂': 'A2', 'σ_x': 'sigmax', 'σ_y': 'sigmay' },
-  126: { 'ρ': 'rho2', 'σ': 'sigma', 'β': 'beta', 'γ': 'gamma' },
+  126: { 'ρ2': 'rho2', 'σ': 'sigma', 'β': 'beta', 'γ': 'gamma' },
   128: { 'wᵢ': 'wi', 'Kᵢ': 'Ki' },
   129: { 'tr(H)': 'traceH' },
   130: { 'θ': 'Sc' },
