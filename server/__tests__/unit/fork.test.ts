@@ -41,6 +41,29 @@ describe('ForkManager', () => {
     expect(fork.name).toBe('Test Fork');
     expect(fork.status).toBe('running');
     expect(fork.divergenceScore).toBe(0);
+    expect(fork.bufferRadiusM).toBe(500_000); // default when not provided
+  });
+
+  it('createFork clamps buffer radius to valid range', () => {
+    const tiny = manager.createFork({
+      name: 'Tiny', lat: 0, lon: 0, deltas: [], bufferRadiusM: 50,
+    }, 'user');
+    expect(tiny.bufferRadiusM).toBe(50); // 0 m minimum — passes through small values
+
+    const zero = manager.createFork({
+      name: 'Zero', lat: 0, lon: 0, deltas: [], bufferRadiusM: 0,
+    }, 'user');
+    expect(zero.bufferRadiusM).toBe(0); // 0 m allowed
+
+    const huge = manager.createFork({
+      name: 'Huge', lat: 0, lon: 0, deltas: [], bufferRadiusM: 99_999_999,
+    }, 'user');
+    expect(huge.bufferRadiusM).toBe(10_000_000); // clamped down to max
+
+    const exact = manager.createFork({
+      name: 'Exact', lat: 0, lon: 0, deltas: [], bufferRadiusM: 750_000,
+    }, 'user');
+    expect(exact.bufferRadiusM).toBe(750_000); // passes through
   });
 
   it('getAllForks returns created forks', () => {

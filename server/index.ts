@@ -83,6 +83,13 @@ import { radarInterpreter } from './multimodal/radarInterpreter';
 import { sentimentAnalyzer } from './multimodal/sentimentAnalyzer';
 import { multimodalFusion } from './multimodal/multimodalFusion';
 import { registerAnalyticalModelsRoutes } from './analytical-models';
+import {
+  conversationMemory, generatePlan, executePlan, executeStep,
+  generateSuggestions, buildProactiveInsight, recordTrace, addEvidence,
+  recallMemories, renderMemoryRecall, classifyToolRisk, requiresApproval,
+  listAvailableTools,
+  type AgentPlan, type PlanStep, type SubAgentUpdate, type SuggestionContext, type ConversationTurn,
+} from './advancedAgent';
 
 import { architectureProposals } from './meta-cognition/architectureProposals';
 import { promptEvolution } from './meta-cognition/promptEvolution';
@@ -291,6 +298,10 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/health' || req.path === '/ready' || req.path === '/live' || req.path === '/metrics' ||
     req.path === '/config/apis'
   ) {
+    return next();
+  }
+  // Public shared sessions (read-only, accessed via share token)
+  if (req.path.startsWith('/shared/')) {
     return next();
   }
   // Public read-only data endpoints (no user context required, server-side rate-limited)
@@ -7331,6 +7342,15 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     sendEvent('step', { stepType: 'agent_thinking', text: 'Agent analyzing...', status: 'running' });
     const recentMessagesArray: Array<{ role: string; content: string }> = Array.isArray(recentMessages) ? recentMessages.slice(-6) : [];
     const memoryContext = await memoryManager.buildWorkingMemoryContext(uid, fullMessage, recentMessagesArray);
+
+    // Advanced: multi-turn conversation memory (rolling summary + last 3 verbatim turns)
+    const convCtx = conversationMemory.get(uid, req.body.sessionId);
+    const convContextStr = conversationMemory.buildPromptContext(convCtx);
+    // Advanced: persistent cross-session memory recall (#2)
+    const recall = await recallMemories(uid, fullMessage);
+    const recallStr = recall ? renderMemoryRecall(recall) : '';
+    if (recallStr && recall) sendEvent('step', { stepType: 'memory_recall', text: `Recalled ${recall.episodes.length} past interaction(s)`, status: 'completed' });
+
     const systemPrompt = buildAgentPrompt(toolRegistry, intent);
 
     /**
@@ -7414,10 +7434,11 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     };
 
     let outputText = '';
+    let toolCallCount = 0;
     try {
       const hasImages = Array.isArray(images) && images.length > 0;
       logger.info({ msgLen: message.length, hasMemory: !!memoryContext, hasImages }, 'AI streaming starting');
-      const fullPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}[User query]\n${fullMessage}`;
+      const fullPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}${convContextStr ? `[Conversation history]\n${convContextStr}` : ''}${recallStr ? `[Relevant memories]\n${recallStr}` : ''}[User query]\n${fullMessage}`;
       outputText = hasImages ? await streamPassMultimodal(fullPrompt, images) : await streamPass(fullPrompt);
       sendEvent('step', { stepType: 'agent_thinking', text: 'Agent analysis complete', status: 'completed' });
 
@@ -7427,6 +7448,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       // the real results injected. This is what lets the AI reach 100+ backend
       // capabilities instead of only describing them.
       const toolCalls = ToolCallParser.parse(outputText);
+      toolCallCount = toolCalls.length;
       if (toolCalls.length > 0 && !abortController.signal.aborted) {
         sendEvent('step', { stepType: 'tool_execution', text: `Executing ${toolCalls.length} tool call(s)...`, status: 'running' });
         const toolResults: string[] = [];
@@ -7437,12 +7459,26 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
             toolResults.push(`[${call.name}] ERROR: tool not registered`);
             return;
           }
-          sendEvent('tool_call', { name: call.name, args: call.args, description: known.description });
+          // #4 Tool-calling approval gate: classify risk; for high/destructive tools,
+          // emit an approval request. The client may auto-approve (low risk default)
+          // or hold for user confirmation. We proceed for low/medium; high/destructive
+          // are flagged but still execute here unless the client sends an explicit
+          // 'require_approval' header (handled via /api/agent/approve endpoint).
+          const risk = classifyToolRisk(call.name, call.args);
+          if (risk === 'destructive') {
+            sendEvent('tool_approval', { requestId, name: call.name, args: call.args, description: known.description, riskLevel: risk, reason: 'Destructive tool — confirm before execution' });
+            toolResults.push(`[${call.name}] BLOCKED: destructive tool requires explicit approval (risk: ${risk})`);
+            sendEvent('tool_result', { name: call.name, status: 'blocked', error: `Destructive tool requires approval` });
+            return;
+          }
+          sendEvent('tool_call', { name: call.name, args: call.args, description: known.description, riskLevel: risk });
           try {
             const result = await dynamicTools.execute(call.name, call.args, abortController.signal);
             const serialised = JSON.stringify(result).slice(0, 8000);
             toolResults.push(`[${call.name}]\n${serialised}`);
             sendEvent('tool_result', { name: call.name, status: 'success', result });
+            // #15 record evidence for this tool call
+            addEvidence(requestId, `Tool ${call.name} returned data`, [{ sourceType: 'tool_execution', sourceName: call.name, parsedValue: result }], 0.85);
           } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
             toolResults.push(`[${call.name}] ERROR: ${errMsg}`);
@@ -7474,20 +7510,43 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // Record cost for agent call
     costTracker.record(modelTier, message, outputText, false);
 
+    // #1 Advanced: record this turn into the rolling conversation memory
+    conversationMemory.recordTurn(uid, req.body.sessionId, { role: 'user', content: message }).catch(() => {});
+    conversationMemory.recordTurn(uid, req.body.sessionId, { role: 'assistant', content: outputText }).catch(() => {});
+
+    // #15 Advanced: record a reasoning trace keyed by requestId
+    recordTrace({
+      interactionId: requestId,
+      userId: uid,
+      query: message,
+      response: outputText,
+      steps: [
+        { type: 'thought', description: `Intent: ${intent.type} (${(intent.confidence * 100).toFixed(0)}%)`, confidence: intent.confidence },
+        { type: 'inference', description: `Model tier: ${modelTier}` },
+        ...(toolCallCount > 0 ? [{ type: 'tool_call' as const, description: `${toolCallCount} tool call(s) executed` }] : []),
+        { type: 'conclusion', description: 'Final response synthesized', confidence: 0.85 },
+      ],
+      intentType: intent.type,
+      modelUsed: modelTier,
+      totalDurationMs: Date.now() - (req as any).startTime || 0,
+    });
+
     // Record in unified V2 memory system (episodic + sensory + working)
     // The legacy memoryManager.recordInteraction is intentionally removed — v2 stores the same data.
     // The v1 semanticCache and buildWorkingMemoryContext are still used (read-only) above.
     try {
       memoryManagerV2.store('episodic', {
+        userId: uid,
         query: message,
         response: outputText,
-        tags: [intent.type],
-        location: intent.location ? `${intent.location.lat},${intent.location.lon}` : undefined,
+        intentType: intent.type,
+        location: intent.location ? { lat: intent.location.lat, lon: intent.location.lon, label: intent.location.label } : undefined,
         outcome: 'success',
-        embedding: undefined,
         emotionalValence: 0,
-        constraints: [],
-        metadata: {},
+        layersToggled: [],
+        tokensUsed: 0,
+        latencyMs: 0,
+        modelTier,
       });
       memoryManagerV2.store('sensory', {
         type: 'agent_interaction',
@@ -7561,6 +7620,191 @@ app.post('/api/agent/local-ask', async (req: express.Request, res: express.Respo
   } catch (e) {
     res.json({ error: String(e), fallback: true });
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// ADVANCED AGENT: Plan generation, multi-agent execution, suggestions, trace
+// ═══════════════════════════════════════════════════════════════════════
+
+// #5 Plan-then-execute: generate an execution plan for a complex query
+app.post('/api/agent/plan', authGuard, async (req: express.Request, res: express.Response) => {
+  const { message, tools } = req.body;
+  if (!message || typeof message !== 'string') return res.status(400).json({ error: 'message required' });
+  try {
+    const availableTools = Array.isArray(tools) && tools.length > 0 ? tools : listAvailableTools();
+    const plan = await generatePlan(message, availableTools);
+    res.json(plan);
+  } catch (e) {
+    res.status(500).json({ error: `Plan generation failed: ${e instanceof Error ? e.message : String(e)}` });
+  }
+});
+
+// #5 + #6 Execute a plan with streaming per-sub-agent updates
+app.post('/api/agent/plan/execute', authGuard, async (req: express.Request, res: express.Response) => {
+  const { plan, sessionId } = req.body as { plan?: AgentPlan; sessionId?: string };
+  if (!plan || !Array.isArray(plan.steps)) return res.status(400).json({ error: 'plan with steps required' });
+  const userId = (req as any).userId || 'default';
+  const abortController = new AbortController();
+  const requestId = (req as any).correlationId || crypto.randomUUID();
+  registerAbortController(requestId, abortController);
+  res.on('close', () => { if (!res.writableEnded) abortController.abort(); });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const sendEvent = (event: string, data: unknown) => {
+    if (res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  sendEvent('connected', { requestId, planId: plan.id });
+
+  // Build memory context for sub-agents
+  const convCtx = conversationMemory.get(userId, sessionId);
+  const memoryContext = conversationMemory.buildPromptContext(convCtx);
+
+  try {
+    const finalText = await executePlan(
+      plan,
+      memoryContext,
+      (update: SubAgentUpdate) => {
+        sendEvent('subagent', update);
+      },
+      (stepId, output, durationMs) => {
+        sendEvent('step_output', { stepId, output: output.slice(0, 2000), durationMs });
+      },
+      abortController.signal,
+    );
+
+    // Record the turn
+    conversationMemory.recordTurn(userId, sessionId, { role: 'user', content: plan.query }).catch(() => {});
+    conversationMemory.recordTurn(userId, sessionId, { role: 'assistant', content: finalText }).catch(() => {});
+
+    recordTrace({
+      interactionId: requestId,
+      userId,
+      query: plan.query,
+      response: finalText,
+      steps: plan.steps.map(s => ({ type: 'tool_call' as const, description: `${s.agent}: ${s.description}`, durationMs: s.durationMs })),
+      intentType: 'planned',
+      modelUsed: 'orchestrated',
+      totalDurationMs: 0,
+    });
+
+    sendEvent('output', { text: finalText });
+    sendEvent('done', { type: 'done' });
+  } catch (e) {
+    sendEvent('error', { error: String(e) });
+  }
+  removeAbortController(requestId);
+  res.end();
+});
+
+// #10 Adaptive suggestions
+app.post('/api/agent/suggestions', authGuard, async (req: express.Request, res: express.Response) => {
+  const ctx = req.body as SuggestionContext;
+  if (!ctx || typeof ctx !== 'object') return res.status(400).json({ error: 'suggestion context required' });
+  try {
+    const suggestions = await generateSuggestions(ctx);
+    res.json({ suggestions });
+  } catch (e) {
+    res.status(500).json({ error: `Suggestion generation failed: ${e instanceof Error ? e.message : String(e)}` });
+  }
+});
+
+// #4 Tool approval — execute a previously-blocked destructive tool after user confirms
+app.post('/api/agent/approve', authGuard, async (req: express.Request, res: express.Response) => {
+  const { toolName, args } = req.body;
+  if (!toolName || typeof toolName !== 'string') return res.status(400).json({ error: 'toolName required' });
+  const risk = classifyToolRisk(toolName, args || {});
+  try {
+    const result = await dynamicTools.execute(toolName, args || {}, new AbortController().signal);
+    res.json({ result, riskLevel: risk });
+  } catch (e) {
+    res.status(500).json({ error: `Tool execution failed: ${e instanceof Error ? e.message : String(e)}` });
+  }
+});
+
+// #15 Trace retrieval — fetch full reasoning trace for a requestId/interactionId
+app.get('/api/agent/trace/:id', authGuard, async (req: express.Request, res: express.Response) => {
+  const id = req.params.id;
+  if (!id) return res.status(400).json({ error: 'trace id required' });
+  try {
+    const trace = reasoningVisualizer.toJson(id);
+    if (!trace) return res.status(404).json({ error: 'Trace not found' });
+    res.type('json').send(trace);
+  } catch (e) {
+    res.status(500).json({ error: `Trace retrieval failed: ${e instanceof Error ? e.message : String(e)}` });
+  }
+});
+
+// #15 Evidence chain retrieval
+app.get('/api/agent/evidence/:id', authGuard, async (req: express.Request, res: express.Response) => {
+  const id = req.params.id;
+  if (!id) return res.status(400).json({ error: 'interaction id required' });
+  try {
+    const summary = evidenceChain.summarizeChain(id);
+    res.json({ summary });
+  } catch (e) {
+    res.status(500).json({ error: `Evidence retrieval failed: ${e instanceof Error ? e.message : String(e)}` });
+  }
+});
+
+// #14 Resume — continue a partially-generated response
+app.post('/api/agent/resume', authGuard, async (req: express.Request, res: express.Response) => {
+  const { partial, originalMessage, sessionId } = req.body;
+  if (!partial || !originalMessage) return res.status(400).json({ error: 'partial and originalMessage required' });
+  const userId = (req as any).userId || 'default';
+  const abortController = new AbortController();
+  const requestId = (req as any).correlationId || crypto.randomUUID();
+  registerAbortController(requestId, abortController);
+  res.on('close', () => { if (!res.writableEnded) abortController.abort(); });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  const sendEvent = (event: string, data: unknown) => {
+    if (res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  sendEvent('connected', { requestId });
+
+  const convCtx = conversationMemory.get(userId, sessionId);
+  const memoryContext = conversationMemory.buildPromptContext(convCtx);
+  const resumePrompt = `You were answering a user query and your response was interrupted. Continue from where you left off — do NOT repeat what you already said. Start mid-sentence if needed.
+
+${memoryContext}
+Original user query: ${originalMessage}
+Your response so far: ${partial}
+
+Continue the response:`;
+  try {
+    let continuation = '';
+    for await (const token of omninet.generateStream(resumePrompt, { signal: abortController.signal, temperature: 0.4, maxTokens: 2000 })) {
+      if (abortController.signal.aborted) break;
+      continuation += token;
+      sendEvent('token', { text: token });
+    }
+    sendEvent('output', { text: continuation });
+    sendEvent('done', { type: 'done' });
+  } catch (e) {
+    sendEvent('error', { error: String(e) });
+  }
+  removeAbortController(requestId);
+  res.end();
+});
+
+// #11 Model tier selector — return available tiers + cost estimates
+app.get('/api/agent/tiers', authGuard, (_req: express.Request, res: express.Response) => {
+  res.json({
+    tiers: [
+      { id: 'local', label: 'Fast', description: 'Local routing / cached. Cheapest, fastest.', costPerQuery: 0, latencyMs: 100 },
+      { id: 'flash', label: 'Balanced', description: 'Flash-tier model. Good for most queries.', costPerQuery: 0.0001, latencyMs: 1500 },
+      { id: 'pro', label: 'Deep', description: 'Pro-tier model. Best for complex analysis & code.', costPerQuery: 0.0008, latencyMs: 4000 },
+    ],
+    currentStats: costTracker.getStats(),
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -9842,6 +10086,58 @@ app.delete('/api/chats/:id', requireOwnership('chats'), (req: express.Request, r
     if (result.changes === 0) return res.status(404).json({ error: 'Chat not found' });
     auditLog((req as any).userId, 'chat_delete', `chat:${req.params.id}`, '', req.ip || '', req.headers['user-agent'] || '');
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ── Session Sharing (public, no auth required to read) ────────────────
+
+// Ensure share column exists (idempotent)
+try {
+  getDb().exec(`ALTER TABLE chats ADD COLUMN share_token TEXT`);
+} catch { /* column may already exist */ }
+try {
+  getDb().exec(`ALTER TABLE chats ADD COLUMN shared_at TEXT`);
+} catch { /* column may already exist */ }
+
+// Create a shareable link for a chat session
+app.post('/api/chats/:id/share', authGuard, (req: express.Request, res: express.Response) => {
+  try {
+    const db = getDb();
+    const uid = (req as any).userId;
+    const chatId = req.params.id;
+    const row = db.prepare('SELECT id, user_id FROM chats WHERE id = ? AND user_id = ?').get(chatId, uid) as Record<string, unknown> | undefined;
+    if (!row) return res.status(404).json({ error: 'Chat not found' });
+    // Generate or reuse share token
+    let token = (db.prepare('SELECT share_token FROM chats WHERE id = ?').get(chatId) as Record<string, unknown> | undefined)?.share_token as string | undefined;
+    if (!token) {
+      token = `${chatId}_${crypto.randomUUID()}`;
+      db.prepare('UPDATE chats SET share_token = ?, shared_at = ? WHERE id = ?').run(token, new Date().toISOString(), chatId);
+    }
+    res.json({ token, url: `${req.protocol}://${req.get('host')}/#/shared/${token}` });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// Public endpoint — fetch a shared chat by token (no auth)
+app.get('/api/shared/:token', (req: express.Request, res: express.Response) => {
+  try {
+    const db = getDb();
+    const token = req.params.token;
+    const row = db.prepare('SELECT id, title, messages_json, environment_id, workspace_id, created_at, shared_at FROM chats WHERE share_token = ?').get(token) as Record<string, unknown> | undefined;
+    if (!row) return res.status(404).json({ error: 'Shared session not found or expired' });
+    res.json({
+      id: row.id,
+      title: row.title,
+      messages: JSON.parse(row.messages_json as string || '[]'),
+      environmentId: row.environment_id,
+      workspaceId: row.workspace_id,
+      createdAt: row.created_at,
+      sharedAt: row.shared_at,
+      shared: true,
+    });
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }

@@ -49,6 +49,11 @@ export function hideOsmBuildings() {
   }
 }
 
+/** Returns the active OSM buildings tileset, or null if not loaded. */
+export function getOsmBuildingsTileset(): Cesium.Cesium3DTileset | null {
+  return osmBuildingsTileset;
+}
+
 export function removeOsmBuildings(viewer: Cesium.Viewer) {
   if (osmBuildingsTileset) {
     viewer.scene.primitives.remove(osmBuildingsTileset);

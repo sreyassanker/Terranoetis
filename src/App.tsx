@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2 } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2, FileDown } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -74,7 +74,7 @@ import { AnalyticsWorkbench } from '@/components/AnalyticsWorkbench';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { createRenderScheduler } from '@/lib/batchScheduler';
 import { createUnifiedTimer } from '@/lib/unifiedTimer'; // P0 perf: unified timer
-import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings } from '@/rendering/osmBuildings';
+import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings, getOsmBuildingsTileset } from '@/rendering/osmBuildings';
 import {
   addVolcanoEntities,
   addVaacAdvisoryEntities,
@@ -98,7 +98,10 @@ import {
 } from '@/rendering/weather';
 import { renderLayer, fetchLayerData } from '@/rendering/layerRenderer';
 import { LAYER_GROUPS, LAYER_CATEGORIES, LEGACY_DEFAULTS } from '@/lib/layerConfig';
-import { listChats, getChat, saveChat, deleteChat, generateChatId, autoTitle, groupChatsByDate, type ChatSession, type ChatListItem, type ChatMessage } from '@/lib/chatStore';
+import { listChats, getChat, saveChat, deleteChat, generateChatId, autoTitle, groupChatsByDate, type ChatSession, type ChatListItem, type ChatMessage, type ToolEvent, type PlanCard } from '@/lib/chatStore';
+import { StreamingMarkdownRenderer, extractArtifacts, fetchSuggestions, fetchTiers, resumeStream, generatePlanClient, type SuggestionContextClient } from '@/lib/advancedChat';
+import { exportConversationAsPDF } from '@/lib/pdfReport';
+import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, ModelTierSelector, TraceExpander, VoiceModeIndicator } from '@/components/chat/AdvancedChatViews';
 
 /* ═════════════════════════════════════════════════════════════════
    TYPES
@@ -1115,6 +1118,7 @@ export default function App() {
   const [showHeatmapLegend, setShowHeatmapLegend] = useState(false);
   const [showSmokeLegend, setShowSmokeLegend] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
   const [apiVault, setApiVault] = useState<ApiVaultState>(initialApiVault);
   const [showTokenSetup, setShowTokenSetup] = useState(() => !hasAnyApiVaultValue(initialApiVault) && !initialApiVault.vaultDismissed && !CESIUM_ION_ENV_TOKEN);
   const [showApiVault, setShowApiVault] = useState(false);
@@ -1138,6 +1142,19 @@ export default function App() {
   const [forkMode, setForkMode] = useState(false);
   const forkModeRef = useRef(false);
   useEffect(() => { forkModeRef.current = forkMode; }, [forkMode]);
+
+  // ── Fork creation dialog state ──
+  // When the user right-clicks the globe in Fork Mode, we open this dialog
+  // instead of a browser prompt so they can name the reality and set a
+  // buffer radius (with m/km unit toggle) in a professional manner.
+  const [forkDialog, setForkDialog] = useState<{
+    open: boolean;
+    lat: number;
+    lon: number;
+    name: string;
+    radius: number;   // always stored in meters
+    unit: 'm' | 'km';
+  }>({ open: false, lat: 0, lon: 0, name: '', radius: 500000, unit: 'km' });
 
   const [showIntelligencePanel, setShowIntelligencePanel] = useState(false);
   const [showPrithviPanel, setShowPrithviPanel] = useState(false);
@@ -1169,6 +1186,8 @@ export default function App() {
   const [notifications, setNotifications] = useState<Array<{id:number;text:string;severity:string}>>([]);
   const [populationImpact, setPopulationImpact] = useState<ReturnType<typeof calculatePopulationImpact> | null>(null);
   const aiMessagesRef = useRef<ChatMessage[]>([]);
+  const showAIRef = useRef(false);
+  showAIRef.current = showAI;
   const [aiMessages, setAiMessages] = useState<ChatMessage[]>([
     { id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' },
   ]);
@@ -1179,6 +1198,17 @@ export default function App() {
   const { isLoggedIn, isAdmin } = auth;
   const [copiedMsgId, setCopiedMsgId] = useState<number | null>(null);
   const [aiInput, setAiInput] = useState('');
+  // Advanced chat state
+  const streamingMdRef = useRef(new StreamingMarkdownRenderer());
+  const [modelTiers, setModelTiers] = useState<Array<{ id: string; label: string; description: string; costPerQuery: number; latencyMs: number }>>([]);
+  const [selectedTier, setSelectedTier] = useState('flash');
+  const [adaptiveSuggestions, setAdaptiveSuggestions] = useState<string[]>([]);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [bargeIn, setBargeIn] = useState(false);
+  const [sessionId] = useState(() => `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+  const [planningFor, setPlanningFor] = useState<string | null>(null);
+  const tiersLoadedRef = useRef(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
   const [agentSteps, setAgentSteps] = useState<Array<{type:string;text:string;code?:string;output?:string;timeMs?:number;toolName?:string;subtask?:string;status?:string}>>([]);
   const [showReasoningFor, setShowReasoningFor] = useState<Record<string, boolean>>({});
   const [showEvidenceFor, setShowEvidenceFor] = useState<Record<string, boolean>>({});
@@ -1317,12 +1347,31 @@ export default function App() {
     timestamp: number;
   }>>([]);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
+  const chatListRef = useRef<ChatListItem[]>([]);
+  chatListRef.current = chatList;
+  const [chatSearch, setChatSearch] = useState('');
   const [showChatHistory, setShowChatHistory] = useState(false);
   // Phase 8: Session sharing. New shares store session contents locally and
   // place only an opaque reference in the URL so operational chat text is not
   // continuously leaked through address bars, browser history, screenshots, or logs.
   useEffect(() => {
     const hash = window.location.hash.slice(1);
+    // New: server-backed shared sessions — fetch from /api/shared/:token
+    if (hash.startsWith('shared/')) {
+      const token = hash.slice('shared/'.length);
+      fetch(`/api/shared/${encodeURIComponent(token)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(session => {
+          if (session && Array.isArray(session.messages)) {
+            setAiMessages(session.messages.map((m: {id?:number;role:string;content:string;type?:string}) => ({...m, id: m.id || nextAiMsgIdRef.current++})));
+            if (session.title) setAiInput('');
+            // Auto-open the AI panel
+            setShowAI(true);
+          }
+        })
+        .catch(() => {});
+      return;
+    }
     if (hash.startsWith('sessionRef=')) {
       try {
         const id = decodeURIComponent(hash.slice('sessionRef='.length));
@@ -1349,19 +1398,29 @@ export default function App() {
     }
   }, []);
 
-  const buildSessionShareLink = useCallback(() => {
-    const id = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const session = {
-      messages: aiMessages.slice(-10),
-      wsId: sandboxWorkspaceId,
-      input: aiInput,
-      ts: Date.now(),
-    };
-    window.localStorage.setItem(`terranoetis.sharedSession.${id}`, JSON.stringify(session));
-    const url = new URL(window.location.href);
-    url.hash = `sessionRef=${encodeURIComponent(id)}`;
-    return url.toString();
-  }, [aiInput, aiMessages, sandboxWorkspaceId]);
+  const buildSessionShareLink = useCallback(async () => {
+    // Save the current conversation to the server first
+    const id = currentChatIdRef.current || generateChatId();
+    currentChatIdRef.current = id;
+    const title = aiMessagesRef.current.find(m => m.role === 'user')?.content.slice(0, 40) || 'Shared Session';
+    try {
+      await saveChat({
+        id,
+        title,
+        messages: aiMessagesRef.current,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    } catch { /* non-critical — may already exist */ }
+    // Request a share token from the server
+    const resp = await fetch(`/api/chats/${id}/share`, {
+      method: 'POST',
+      headers: { ...authHeaders() },
+    });
+    if (!resp.ok) throw new Error('Failed to create share link');
+    const data = await resp.json();
+    return data.url as string;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load chat list on mount
   useEffect(() => {
@@ -1717,6 +1776,11 @@ export default function App() {
     viewerRef.current = v;
     forkRendererRef.current = new ForkRenderer(v);
     forkRendererRef.current.setEntityCacheGetter(() => entityStoreRef.current);
+    forkRendererRef.current.setImageryGetter(() => overlayImageryLayersRef.current);
+    forkRendererRef.current.setTilesetsGetter(() => {
+      const ts = getOsmBuildingsTileset();
+      return ts ? [ts] : [];
+    });
     forkRendererRef.current.setSkipLayers(['live_media', 'weather_cards', 'india_cctv']);
     ghostProtocolRef.current = new GhostProtocol(v);
     entropyHaloRef.current = new EntropyHalo(v);
@@ -1946,6 +2010,18 @@ export default function App() {
         // Open the live ISS camera panel when the ISS marker is selected
         if (ent === issEntityRef.current) setShowISSInfo(true);
 
+        // #9 Spatial/chat two-way binding: clicking an entity drops a contextual
+        // "Ask about this" chip into the AI input so the user can query it.
+        if (showAIRef.current) {
+          const entName = typeof ent.name === 'string' ? ent.name : (typeof p?.place === 'string' ? p.place : undefined) || layer;
+          const entLat = p?.lat as number | undefined;
+          const entLon = p?.lon as number | undefined;
+          if (entLat != null && entLon != null) {
+            const chip = `Tell me about ${entName} at ${Number(entLat).toFixed(2)}, ${Number(entLon).toFixed(2)}`;
+            setAiInput(chip);
+          }
+        }
+
         // If CinematicDirector is open, focus on this entity
         if (showCinematicDirector) {
           const pos = ent.position?.getValue(Cesium.JulianDate.now()) as Cesium.Cartesian3 | undefined;
@@ -1986,27 +2062,15 @@ export default function App() {
         return;
       }
 
-      const forkName = window.prompt('🍴 Name this parallel reality:', `Fork-${Date.now()}`);
-      if (!forkName) return;
-      fetch('/api/fork/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' , ...authHeaders() },
-        credentials: 'include',
-        body: JSON.stringify({
-          name: forkName,
-          lat,
-          lon,
-          deltas: [{ type: 'INJECT_EVENT', targetId: 'manual_fork', parameters: { lat, lon }, effectiveTimeOffsetHours: 0 }],
-          maxSimulationHours: 72,
-        }),
-      }).then(r => r.json()).then(data => {
-        if (data.forkId) {
-          forkRendererRef.current?.createForkVisual(data.forkId, forkName, lat, lon);
-          forkRendererRef.current?.spawnGhostsWithRetry(data.forkId);
-          setForks(prev => [...prev, { forkId: data.forkId, name: forkName, divergenceScore: 0, status: 'running' }]);
-          setActiveForkCount(prev => prev + 1);
-        }
-      }).catch(e => console.error('Fork creation failed:', e));
+      // Open the fork-creation dialog (name + buffer radius) instead of a prompt.
+      setForkDialog({
+        open: true,
+        lat,
+        lon,
+        name: `Fork-${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
+        radius: 500000,   // 500 km default
+        unit: 'km',
+      });
     }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
 
     handler.setInputAction(() => setContextMenu({show:false,x:0,y:0,lat:0,lon:0}), Cesium.ScreenSpaceEventType.LEFT_DOWN);
@@ -2019,6 +2083,9 @@ export default function App() {
         unifiedTimerRef.current.register('refresh-live', () => { void refreshLiveData(v); }, 60000);
         // Slow-refresh groups (ocean, geology, space — data changes hourly+)
         unifiedTimerRef.current.register('refresh-slow', () => { void refreshGenericLayers(v, ['geology', 'space', 'ocean', 'argo', 'tides', 'usgs_water', 'ports']); }, 300000);
+        // Re-clip data layers against any active fork domes after live refresh
+        // so newly streamed entities respect dome cropping automatically.
+        unifiedTimerRef.current.register('fork-recrop', () => { forkRendererRef.current?.reapplyCrop(); }, 5000);
         unifiedTimerRef.current.start();
         // Pre-warm server cache for slow groups so first toggle is instant
         const warmGroupLayers: Record<string, string> = {
@@ -4776,6 +4843,10 @@ export default function App() {
       hideLayerEntities(layerId);
     }
 
+    // Re-clip data layers against any active fork domes (so newly
+    // shown/hidden entities respect dome cropping automatically).
+    setTimeout(() => forkRendererRef.current?.reapplyCrop(), 0);
+
     // Notify CinematicDirector that entities changed
     setCinematicLayerVersion(v => v + 1);
 
@@ -6117,11 +6188,19 @@ export default function App() {
 
       // Phase 1 (sync): immediately show any layers that already have loaded data
       const needsLoad: string[] = [];
+      const now = Cesium.JulianDate.now();
+      const hasForks = forkRendererRef.current?.hasActiveForks() ?? false;
       for (const l of layersRef.current) {
         const id = l.id;
         const ents = entityStoreRef.current[id];
         if (ents && ents.length > 0) {
-          ents.forEach(e => { if (e) e.show = true; });
+          // When a fork dome is active, entities show only if inside a dome;
+          // otherwise show everything as normal.
+          if (hasForks) {
+            ents.forEach(e => { if (e) e.show = forkRendererRef.current?.shouldEntityShow(e, now) ?? true; });
+          } else {
+            ents.forEach(e => { if (e) e.show = true; });
+          }
         } else if (overlayImageryLayersRef.current[id]) {
           // imagery already loaded, visible by default
         } else {
@@ -6142,6 +6221,8 @@ export default function App() {
         renderSchedulerRef.current.onProgress((done, total) => {
           if (done >= total && !notified) {
             notified = true;
+            // Re-clip freshly-loaded entities against any active fork domes.
+            forkRendererRef.current?.reapplyCrop();
             if (v) throttledRender(v);
             bulkOperationRef.current = false;
             showNotification(`All layers enabled (${layersRef.current.length})`, 'success');
@@ -6150,6 +6231,7 @@ export default function App() {
         renderSchedulerRef.current.enqueueAll(tasks);
       } else {
         bulkOperationRef.current = false;
+        forkRendererRef.current?.reapplyCrop();
         if (v) throttledRender(v);
         showNotification(`All layers enabled (${layersRef.current.length})`, 'success');
       }
@@ -6321,6 +6403,40 @@ export default function App() {
     reader.readAsDataURL(file);
   }, []);
 
+  // #11 Load model tiers on mount
+  useEffect(() => {
+    if (tiersLoadedRef.current) return;
+    tiersLoadedRef.current = true;
+    fetchTiers().then(({ tiers }) => setModelTiers(tiers)).catch(() => {});
+  }, []);
+
+  // #10 Adaptive suggestions — refresh when visible layers change (debounced)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const visibleLayers = layersRef.current.filter(l => l.on).map(l => l.id);
+      const ctx: SuggestionContextClient = {
+        visibleLayers,
+        recentQueries: aiMessagesRef.current.filter(m => m.role === 'user').slice(-5).map(m => m.content.slice(0, 80)),
+        activeAlerts: intelFeed.length,
+        recentDiscoveries: recentDiscoveries.slice(0, 3).map(d => d.summary),
+      };
+      fetchSuggestions(ctx).then(setAdaptiveSuggestions).catch(() => {});
+    }, 800);
+    return () => clearTimeout(t);
+  }, [activeLayerCount, intelFeed.length, recentDiscoveries]);
+
+  // #8 Continuous voice mode — re-arms STT after each response, supports barge-in
+  useEffect(() => {
+    if (!voiceMode || !recognitionRef.current) return;
+    if (aiTyping) { setBargeIn(true); recognitionRef.current.stop?.(); return; }
+    setBargeIn(false);
+    // Re-arm listening after a short pause
+    const t = setTimeout(() => {
+      try { recognitionRef.current?.start?.(); setIsListening(true); } catch { /* already listening */ }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [voiceMode, aiTyping]);
+
   // Phase 2.2: Voice — speech recognition
   // Phase 3: Connect to proactive events via WebSocket
   useEffect(() => {
@@ -6426,7 +6542,7 @@ export default function App() {
         const forkId: string = payload.forkId || forkMsg.forkId;
         const name: string = payload.name || forkMsg.name || 'Unnamed Fork';
         const request: any = payload.request || payload;
-        forkRendererRef.current?.createForkVisual(forkId, name, request?.lat || 0, request?.lon || 0);
+        forkRendererRef.current?.createForkVisual(forkId, name, request?.lat || 0, request?.lon || 0, request?.bufferRadiusM);
         // entity cache is now read via getter — no manual refresh needed
         forkRendererRef.current?.spawnGhostsWithRetry(forkId);
         setForks(prev => [...prev, { forkId, name, divergenceScore: 0, status: 'running' }]);
@@ -6684,433 +6800,11 @@ export default function App() {
     setAiTyping(false);
   }, []);
 
-  const sendToPipeline = useCallback(async (goal: string, wsId: string | null) => {
-    const resp = await fetch('/api/agent/pipeline', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' , ...authHeaders() },
-      body: JSON.stringify({ goal, workspaceId: wsId }),
-    });
-    if (!resp.ok) throw new Error(`Pipeline failed (${resp.status})`);
-
-    const reader = resp.body?.getReader();
-    if (!reader) throw new Error('No response body');
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let currentWsId = wsId;
-    const stepOutputs: string[] = [];
-
-    const processLines = () => {
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (line.startsWith('event: ')) continue;
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const data = JSON.parse(line.slice(6));
-
-          if (data.workspaceId) {
-            currentWsId = data.workspaceId;
-            setSandboxWorkspaceId(data.workspaceId);
-          }
-
-          if (data.subtasks) {
-            setPipelineProgress(data.subtasks.map((s: { id: string; description: string }) => ({ id: s.id, description: s.description, status: 'pending' })));
-          }
-
-          if (data.subtask) {
-            setPipelineProgress(prev => prev.map(p =>
-              p.id === data.subtask.id ? { ...p, status: data.subtask.status } : p
-            ));
-            if (data.subtask.status === 'running') {
-              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Running: ${data.subtask.description}`,subtask:data.subtask.description,status:'running'}]);
-            }
-            if (data.subtask.status === 'completed' && data.subtask.result) {
-              stepOutputs.push(`## ${data.subtask.description}\n\`\`\`\n${data.subtask.result.slice(0, 500)}\n\`\`\``);
-              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Completed: ${data.subtask.description} (${data.subtask.executionTimeMs || 0}ms)`,subtask:data.subtask.description,status:'completed',timeMs:data.subtask.executionTimeMs,output:data.subtask.result}]);
-            }
-            if (data.subtask.status === 'failed') {
-              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Failed: ${data.subtask.description}: ${data.subtask.error || 'Failed'}`,subtask:data.subtask.description,status:'failed',output:data.subtask.error}]);
-            }
-          }
-
-          if (data.commands && Array.isArray(data.commands)) {
-            executeAgentCommands(data.commands);
-          }
-          if (data.done) {
-            if (data.workspaceId) setSandboxWorkspaceId(data.workspaceId);
-            const summary = stepOutputs.join('\n\n');
-            if (summary) {
-              setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: summary, type: 'pipeline' }]);
-              stepOutputs.length = 0;
-            }
-          }
-        } catch { /* ignore */ }
-      }
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      processLines();
-    }
-    processLines();
-    // If data.done wasn't caught in the SSE stream (e.g. event type vs data mismatch),
-    // ensure the result is still shown
-    if (stepOutputs.length > 0) {
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: stepOutputs.join('\n\n'), type: 'pipeline' }]);
-    }
-    setPipelineProgress([]);
-  }, []);
-
-  function newChat() {
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    setAiMessages([{ id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' }]);
-    setAiTyping(false);
-    setAiInput('');
-    setAgentSteps([]);
-    setPipelineProgress([]);
-    setChatImages([]);
-    setShowChatHistory(false);
-    currentChatIdRef.current = null;
-  }
-
-  async function loadChat(id: string) {
-    if (currentChatIdRef.current) {
-      await saveChat({
-        id: currentChatIdRef.current,
-        title: autoTitle(aiMessages),
-        messages: aiMessages,
-        workspaceId: sandboxWorkspaceId || undefined,
-      });
-    }
-    const session = await getChat(id);
-    if (!session) return;
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    setAiTyping(false);
-    setAgentSteps([]);
-    setPipelineProgress([]);
-    setChatImages([]);
-    setAiMessages(session.messages.map(m => ({ ...m, id: m.id || nextAiMsgIdRef.current++ })));
-    if (session.workspaceId) setSandboxWorkspaceId(session.workspaceId);
-    currentChatIdRef.current = session.id;
-    setShowChatHistory(false);
-  }
-
-  async function deleteChatSession(id: string) {
-    await deleteChat(id);
-    if (currentChatIdRef.current === id) {
-      currentChatIdRef.current = null;
-    }
-    setChatList(prev => prev.filter(c => c.id !== id));
-  }
-
-
   const cleanupThinkingSteps = useCallback((_?: boolean) => {
     setAgentSteps([]);
   }, []);
 
-  const sendAI = useCallback(async (overrideMessage?: string) => {
-    const userMsg = typeof overrideMessage === 'string' ? overrideMessage : aiInput.trim();
-    if (!userMsg) return;
-    setAiInput('');
-    setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: userMsg }]);
-    setAiTyping(true);
-    setAgentSteps([]);
-    setPipelineProgress([]);
-
-    const loc = await extractLocation(userMsg);
-
-    // Only intercept PURE location commands (e.g. just "fly to Tokyo") — nothing else
-    const isPureFlyCommand = /^(?:fly|go|zoom)\s+(?:to|in|into)\s+/i.test(userMsg.trim());
-    if (isPureFlyCommand && loc) {
-      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 1500 });
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Flying to ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` }]);
-      setAiTyping(false);
-      return;
-    }
-
-    // Phase 3: Monitor/schedule commands — handled instantly, no agent needed
-    if (/^monitor\s+/i.test(userMsg)) {
-      const handled = await sendMonitorCommand(userMsg);
-      if (handled) {
-        cleanupThinkingSteps();
-        setAiTyping(false);
-        return;
-      }
-    }
-    if (/^schedule\s+/i.test(userMsg)) {
-      const handled = await sendScheduleCommand(userMsg);
-      if (handled) {
-        cleanupThinkingSteps();
-        setAiTyping(false);
-        return;
-      }
-    }
-
-    const isComputeTask = /\b(compute|calculate|run script|execute (?:code|script|python|node|bash)|simulate|csv|analyze (?:data|dataset|this)|pipeline)\b/i.test(userMsg) && !/\b(show|display|visualize|fly|go|zoom|toggle|enable|display|where|what|how|why|compare|near|around)\b/i.test(userMsg);
-
-    if (isComputeTask) {
-      try {
-        setAgentSteps(prev => [...prev, {type:'planning',text:'Planning computation pipeline...',status:'running'}]);
-        setExpandedStep(-1);
-        const wsId = sandboxWorkspaceId || null;
-        await sendToPipeline(userMsg, wsId);
-        setAiTyping(false);
-        return;
-      } catch (e) {
-        setAgentSteps(prev => [...prev, {type:'error',text:`Pipeline Error: ${e}`}]);
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Pipeline execution failed: ${e}\n\nFalling back to agent analysis...` }]);
-      }
-    }
-
-    // Direct command: show planes/flights/aircraft near a location
-    const lower = userMsg.toLowerCase();
-    const wantsFlights = lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb') || lower.includes('fly');
-    if (wantsFlights && loc) {
-      const layerId = 'flight_tracks';
-      const alreadyOn = isLayerEnabled(layerId);
-      if (alreadyOn) {
-        const v = viewerRef.current;
-        if (v) void loadFlightTracks(v);
-      } else {
-        toggleLayer(layerId);
-      }
-      focusLocation(loc.lat, loc.lon, { label: 'Live Aircraft', color: '#60a5fa', height: 50000 });
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Loading aircraft near ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}...` }]);
-      setAiTyping(false);
-      return;
-    }
-
-    setAgentSteps(prev => [...prev, {type:'reasoning',text:'Analyzing your request...',status:'running'}]);
-    setExpandedStep(-1);
-
-    abortControllerRef.current?.abort();
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-    try {
-      // Clear previous agent-generated entities at start of new query
-      const v0 = viewerRef.current;
-      if (v0) {
-        const toRemove = v0.entities.values.filter((e: any) => {
-          const layer = e.properties?.layer;
-          return layer === 'digital_twin' || layer === 'heatmap' || layer === 'chart' || layer === 'geojson';
-        });
-        for (const e of toRemove) v0.entities.remove(e);
-      }
-      const contextMessages = aiMessagesRef.current.slice(-8).map(m => ({ role: m.role, content: m.content.slice(0, 1000) }));
-      const resp = await fetch('/api/agent/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' , ...authHeaders() },
-        body: JSON.stringify({
-          message: userMsg,
-          userId: 'browser-user',
-          recentMessages: contextMessages,
-          images: chatImages.length > 0 ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName })) : undefined,
-        }),
-        signal: abortController.signal,
-      });
-
-      if (!resp.ok) {
-        throw new Error(`Agent request failed (${resp.status})`);
-      }
-
-      const reader = resp.body?.getReader();
-      if (!reader) throw new Error('No response body');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let finalText = '';
-      let lastTraceId: string | null = null;
-      let lastModelTier: string | null = null;
-      let serverError: string | null = null;
-      const receivedCommands: Array<{ action: string; label?: string; lat?: number; lon?: number; layerId?: string }> = [];
-      let streamingMsgId: number | null = null;
-
-      const processLines = () => {
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) continue;
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.type === 'connected' && data.requestId) {
-              currentRequestIdRef.current = data.requestId;
-            }
-            if (data.steps) {
-              setAgentSteps(data.steps.map((s: { text?: string; type?: string; code?: string; output?: string; status?: string }) => ({type:s.type||'step',text:s.text||s.type||'',code:s.code,output:s.output,status:s.status||'completed'})));
-            }
-            if (data.type === 'step') {
-              setAgentSteps(prev => [...prev, {type:data.stepType||'step',text:data.text||'',code:data.code,output:data.output,status:data.status||'completed'}]);
-            }
-            if (data.type === 'token' && data.text) {
-              if (streamingMsgId === null) {
-                streamingMsgId = nextAiMsgIdRef.current++;
-                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: data.text }]);
-              } else {
-                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: m.content + data.text } : m));
-              }
-            }
-            if (data.type === 'tool_call') {
-              if (streamingMsgId === null) {
-                streamingMsgId = nextAiMsgIdRef.current++;
-                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: '', toolEvents: [{ name: data.name, args: data.args, description: data.description, status: 'pending' }] }]);
-              } else {
-                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, toolEvents: [...(m.toolEvents || []), { name: data.name, args: data.args, description: data.description, status: 'pending' }] } : m));
-              }
-            }
-            if (data.type === 'tool_result') {
-              if (streamingMsgId !== null) {
-                setAiMessages(prev => prev.map(m => {
-                  if (m.id !== streamingMsgId || !m.toolEvents) return m;
-                  const events = [...m.toolEvents];
-                  const idx = events.findIndex(e => e.name === data.name && e.status === 'pending');
-                  if (idx >= 0) {
-                    events[idx] = { ...events[idx], status: data.status, error: data.error, result: data.result };
-                  } else {
-                    events.push({ name: data.name, status: data.status, error: data.error, result: data.result });
-                  }
-                  return { ...m, toolEvents: events };
-                }));
-              }
-            }
-            if (data.commands && Array.isArray(data.commands)) {
-              for (const cmd of data.commands) {
-                receivedCommands.push({
-                  action: cmd.action,
-                  label: cmd.label,
-                  lat: cmd.lat,
-                  lon: cmd.lon,
-                  layerId: cmd.layerId,
-                });
-              }
-              executeAgentCommands(data.commands);
-            }
-            if (data.type === 'intent') {
-              if (data.location) {
-                focusLocation(data.location.lat, data.location.lon, { label: data.location.label || 'Location', color: '#60a5fa', height: 1500 });
-              }
-              if (data.layerIds) {
-                (data.layerIds as string[]).forEach((layerId: string) => { if (!isLayerEnabled(layerId)) toggleLayer(layerId); });
-              }
-            }
-            if (data.type === 'output') {
-              finalText = data.text;
-              if (data.traceId) lastTraceId = data.traceId;
-              if (data.modelTier) lastModelTier = data.modelTier;
-            }
-            if (data.type === 'panel' || (data.stats && data.charts)) {
-              setDigitalTwinPanel(data);
-            }
-            if (data.type === 'done') {
-              if (data.traceId) lastTraceId = data.traceId;
-            }
-            if (data.type === 'error') {
-              serverError = data.error || data.message || 'Unknown server error';
-            }
-          } catch { /* skip malformed JSON */ }
-        }
-      };
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        processLines();
-      }
-      processLines();
-
-      if (serverError) {
-        if (streamingMsgId !== null) {
-          setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: `Server error: ${serverError}` } : m));
-        } else {
-          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Server error: ${serverError}` }]);
-        }
-      } else if (finalText) {
-        if (streamingMsgId !== null) {
-          // Replace streaming content with final text (which may include updates from command parsing)
-          setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: finalText, traceId: lastTraceId, commands: receivedCommands.length > 0 ? receivedCommands : undefined, modelTier: lastModelTier } : m));
-        } else {
-          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText, traceId: lastTraceId, commands: receivedCommands.length > 0 ? receivedCommands : undefined, modelTier: lastModelTier }]);
-        }
-      } else if (streamingMsgId === null) {
-        const fallback = await generateLocalResponse(userMsg, loc);
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: fallback }]);
-      }
-    } catch (e) {
-      if ((e as Error)?.name === 'AbortError') {
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: '⏹ Response stopped.' }]);
-      } else {
-        const fallback = await generateLocalResponse(userMsg, loc);
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `${fallback}\n\n*(Agent unavailable: ${e})*` }]);
-      }
-    }
-    cleanupThinkingSteps(true);
-    setAiTyping(false);
-    abortControllerRef.current = null;
-  }, [aiInput, sandboxWorkspaceId, sendToPipeline, focusLocation, sendMonitorCommand, sendScheduleCommand, toggleLayer]); // eslint-disable-line react-hooks/exhaustive-deps
-  sendAIRef.current = sendAI;
-
-  async function extractLocation(text: string): Promise<{ lat: number; lon: number } | null> {
-    if (typeof text !== 'string' || !text) return null;
-    // Fast path: local coordinate regex
-    const coordMatch = text.match(/(-?\d+\.?\d*)\s*[,，]\s*(-?\d+\.?\d*)/);
-    if (coordMatch) {
-      const lat = parseFloat(coordMatch[1]);
-      const lon = parseFloat(coordMatch[2]);
-      if (isFinite(lat) && isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
-        return { lat, lon };
-      }
-    }
-
-    // Fast path: local city map (instant, no API call)
-    const cityMap: Record<string, [number, number]> = {
-      tokyo:[35.6762,139.6503], delhi:[28.7041,77.1025], shanghai:[31.2304,121.4737],
-      'new york':[40.7128,-74.006], london:[51.5074,-0.1278], paris:[48.8566,2.3522],
-      mumbai:[19.076,72.8777], cairo:[30.0444,31.2357], 'los angeles':[34.0522,-118.2437],
-      beijing:[39.9042,116.4074], moscow:[55.7558,37.6173], istanbul:[41.0082,28.9784],
-      seoul:[37.5665,126.978], bangkok:[13.7563,100.5018], singapore:[1.3521,103.8198],
-      sydney:[-33.8688,151.2093], dubai:[25.2048,55.2708], rio:[-22.9068,-43.1729],
-      chicago:[41.8781,-87.6298], 'san francisco':[37.7749,-122.4194], toronto:[43.6532,-79.3832],
-      berlin:[52.52,13.405], madrid:[40.4168,-3.7038], rome:[41.9028,12.4964],
-      hongkong:[22.3193,114.1694], 'kuala lumpur':[3.139,101.6869], jakarta:[-6.2088,106.8456],
-      'sao paulo':[-23.5505,-46.6333], 'mexico city':[19.4326,-99.1332],
-    };
-    const lower = text.toLowerCase();
-    for (const [city, coords] of Object.entries(cityMap)) {
-      if (lower.includes(city)) return { lat: coords[0], lon: coords[1] };
-    }
-
-    // Deep path: server-side LLM geocoding for any location name
-    try {
-      const resp = await fetch(`/api/agent/geocode?q=${encodeURIComponent(text)}`);
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data && data.lat !== undefined) return { lat: data.lat, lon: data.lon };
-      }
-    } catch { /* fall through to null */ }
-
-    // Fallback: if query implies "near me" and we have a last known location, use it
-    const loc = lastKnownLocationRef.current;
-    if (loc && (lower.includes('nearby') || lower.includes('nearest') || lower.includes('near me') || lower.includes('around me') || lower.includes('within ') || lower.includes('closest') || lower.includes('my location') || lower.includes('current location'))) {
-      return loc;
-    }
-
-    return null;
-  }
-
-  function extractCommand(text: string): string | null {
-    return null;
-  }
-
-  function executeCommand(_cmd: string, _loc: { lat: number; lon: number } | null) {
-  }
-
-  function executeAgentCommands(commands: Array<{ action: string; [key: string]: unknown }>) {
+  const executeAgentCommands = useCallback((commands: Array<{ action: string; [key: string]: unknown }>) => {
     const v = viewerRef.current;
     if (!v) return;
     const history = agentActionHistoryRef.current;
@@ -7336,6 +7030,460 @@ export default function App() {
         else if (action.entities && action.entities.length > 0) history.push(action as any);
       } catch { /* skip malformed commands */ }
     }
+  }, [focusLocation, toggleLayer, isLayerEnabled, setDigitalTwinPanel, cleanupThinkingSteps]);
+
+  const sendToPipeline = useCallback(async (goal: string, wsId: string | null) => {
+    const resp = await fetch('/api/agent/pipeline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' , ...authHeaders() },
+      body: JSON.stringify({ goal, workspaceId: wsId }),
+    });
+    if (!resp.ok) throw new Error(`Pipeline failed (${resp.status})`);
+
+    const reader = resp.body?.getReader();
+    if (!reader) throw new Error('No response body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentWsId = wsId;
+    const stepOutputs: string[] = [];
+
+    const processLines = () => {
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) continue;
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+
+          if (data.workspaceId) {
+            currentWsId = data.workspaceId;
+            setSandboxWorkspaceId(data.workspaceId);
+          }
+
+          if (data.subtasks) {
+            setPipelineProgress(data.subtasks.map((s: { id: string; description: string }) => ({ id: s.id, description: s.description, status: 'pending' })));
+          }
+
+          if (data.subtask) {
+            setPipelineProgress(prev => prev.map(p =>
+              p.id === data.subtask.id ? { ...p, status: data.subtask.status } : p
+            ));
+            if (data.subtask.status === 'running') {
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Running: ${data.subtask.description}`,subtask:data.subtask.description,status:'running'}]);
+            }
+            if (data.subtask.status === 'completed' && data.subtask.result) {
+              stepOutputs.push(`## ${data.subtask.description}\n\`\`\`\n${data.subtask.result.slice(0, 500)}\n\`\`\``);
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Completed: ${data.subtask.description} (${data.subtask.executionTimeMs || 0}ms)`,subtask:data.subtask.description,status:'completed',timeMs:data.subtask.executionTimeMs,output:data.subtask.result}]);
+            }
+            if (data.subtask.status === 'failed') {
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Failed: ${data.subtask.description}: ${data.subtask.error || 'Failed'}`,subtask:data.subtask.description,status:'failed',output:data.subtask.error}]);
+            }
+          }
+
+          if (data.commands && Array.isArray(data.commands)) {
+            executeAgentCommands(data.commands);
+          }
+          if (data.done) {
+            if (data.workspaceId) setSandboxWorkspaceId(data.workspaceId);
+            const summary = stepOutputs.join('\n\n');
+            if (summary) {
+              setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: summary, type: 'pipeline' }]);
+              stepOutputs.length = 0;
+            }
+          }
+        } catch { /* ignore */ }
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      processLines();
+    }
+    processLines();
+    // If data.done wasn't caught in the SSE stream (e.g. event type vs data mismatch),
+    // ensure the result is still shown
+    if (stepOutputs.length > 0) {
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: stepOutputs.join('\n\n'), type: 'pipeline' }]);
+    }
+    setPipelineProgress([]);
+  }, [executeAgentCommands]);
+
+  function newChat() {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setAiMessages([{ id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' }]);
+    setAiTyping(false);
+    setAiInput('');
+    setAgentSteps([]);
+    setPipelineProgress([]);
+    setChatImages([]);
+    setShowChatHistory(false);
+    currentChatIdRef.current = null;
+  }
+
+  async function loadChat(id: string) {
+    if (currentChatIdRef.current) {
+      await saveChat({
+        id: currentChatIdRef.current,
+        title: autoTitle(aiMessages),
+        messages: aiMessages,
+        workspaceId: sandboxWorkspaceId || undefined,
+      });
+    }
+    const session = await getChat(id);
+    if (!session) return;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setAiTyping(false);
+    setAgentSteps([]);
+    setPipelineProgress([]);
+    setChatImages([]);
+    setAiMessages(session.messages.map(m => ({ ...m, id: m.id || nextAiMsgIdRef.current++ })));
+    if (session.workspaceId) setSandboxWorkspaceId(session.workspaceId);
+    currentChatIdRef.current = session.id;
+    setShowChatHistory(false);
+  }
+
+  async function deleteChatSession(id: string) {
+    await deleteChat(id);
+    if (currentChatIdRef.current === id) {
+      currentChatIdRef.current = null;
+    }
+    setChatList(prev => prev.filter(c => c.id !== id));
+  }
+
+  async function clearAllChats() {
+    for (const chat of chatListRef.current) {
+      await deleteChat(chat.id);
+    }
+    currentChatIdRef.current = null;
+    setChatList([]);
+    setAiMessages([]);
+  }
+
+
+  const sendAI = useCallback(async (overrideMessage?: string) => {
+    const userMsg = typeof overrideMessage === 'string' ? overrideMessage : aiInput.trim();
+    if (!userMsg) return;
+    setAiInput('');
+    setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: userMsg }]);
+    setAiTyping(true);
+    setAgentSteps([]);
+    setPipelineProgress([]);
+
+    const loc = await extractLocation(userMsg);
+
+    // Only intercept PURE location commands (e.g. just "fly to Tokyo") — nothing else
+    const isPureFlyCommand = /^(?:fly|go|zoom)\s+(?:to|in|into)\s+/i.test(userMsg.trim());
+    if (isPureFlyCommand && loc) {
+      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 1500 });
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Flying to ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` }]);
+      setAiTyping(false);
+      return;
+    }
+
+    // Phase 3: Monitor/schedule commands — handled instantly, no agent needed
+    if (/^monitor\s+/i.test(userMsg)) {
+      const handled = await sendMonitorCommand(userMsg);
+      if (handled) {
+        cleanupThinkingSteps();
+        setAiTyping(false);
+        return;
+      }
+    }
+    if (/^schedule\s+/i.test(userMsg)) {
+      const handled = await sendScheduleCommand(userMsg);
+      if (handled) {
+        cleanupThinkingSteps();
+        setAiTyping(false);
+        return;
+      }
+    }
+
+    const isComputeTask = /\b(compute|calculate|run script|execute (?:code|script|python|node|bash)|simulate|csv|analyze (?:data|dataset|this)|pipeline)\b/i.test(userMsg) && !/\b(show|display|visualize|fly|go|zoom|toggle|enable|display|where|what|how|why|compare|near|around)\b/i.test(userMsg);
+
+    if (isComputeTask) {
+      try {
+        setAgentSteps(prev => [...prev, {type:'planning',text:'Planning computation pipeline...',status:'running'}]);
+        setExpandedStep(-1);
+        const wsId = sandboxWorkspaceId || null;
+        await sendToPipeline(userMsg, wsId);
+        setAiTyping(false);
+        return;
+      } catch (e) {
+        setAgentSteps(prev => [...prev, {type:'error',text:`Pipeline Error: ${e}`}]);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Pipeline execution failed: ${e}\n\nFalling back to agent analysis...` }]);
+      }
+    }
+
+    // Direct command: show planes/flights/aircraft near a location
+    const lower = userMsg.toLowerCase();
+    const wantsFlights = lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb') || lower.includes('fly');
+    if (wantsFlights && loc) {
+      const layerId = 'flight_tracks';
+      const alreadyOn = isLayerEnabled(layerId);
+      if (alreadyOn) {
+        const v = viewerRef.current;
+        if (v) void loadFlightTracks(v);
+      } else {
+        toggleLayer(layerId);
+      }
+      focusLocation(loc.lat, loc.lon, { label: 'Live Aircraft', color: '#60a5fa', height: 50000 });
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Loading aircraft near ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}...` }]);
+      setAiTyping(false);
+      return;
+    }
+
+    setAgentSteps(prev => [...prev, {type:'reasoning',text:'Analyzing your request...',status:'running'}]);
+    setExpandedStep(-1);
+
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    try {
+      // Clear previous agent-generated entities at start of new query
+      const v0 = viewerRef.current;
+      if (v0) {
+        const toRemove = v0.entities.values.filter((e: any) => {
+          const layer = e.properties?.layer;
+          return layer === 'digital_twin' || layer === 'heatmap' || layer === 'chart' || layer === 'geojson';
+        });
+        for (const e of toRemove) v0.entities.remove(e);
+      }
+      const contextMessages = aiMessagesRef.current.slice(-8).map(m => ({ role: m.role, content: m.content.slice(0, 1000) }));
+      const resp = await fetch('/api/agent/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' , ...authHeaders() },
+        body: JSON.stringify({
+          message: userMsg,
+          userId: 'browser-user',
+          sessionId,
+          tier: selectedTier,
+          recentMessages: contextMessages,
+          images: chatImages.length > 0 ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName })) : undefined,
+        }),
+        signal: abortController.signal,
+      });
+
+      if (!resp.ok) {
+        throw new Error(`Agent request failed (${resp.status})`);
+      }
+
+      const reader = resp.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalText = '';
+      let lastTraceId: string | null = null;
+      let lastModelTier: string | null = null;
+      let serverError: string | null = null;
+      const receivedCommands: Array<{ action: string; label?: string; lat?: number; lon?: number; layerId?: string }> = [];
+      let streamingMsgId: number | null = null;
+
+      const processLines = () => {
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) continue;
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'connected' && data.requestId) {
+              currentRequestIdRef.current = data.requestId;
+            }
+            if (data.steps) {
+              setAgentSteps(data.steps.map((s: { text?: string; type?: string; code?: string; output?: string; status?: string }) => ({type:s.type||'step',text:s.text||s.type||'',code:s.code,output:s.output,status:s.status||'completed'})));
+            }
+            if (data.type === 'step') {
+              setAgentSteps(prev => [...prev, {type:data.stepType||'step',text:data.text||'',code:data.code,output:data.output,status:data.status||'completed'}]);
+            }
+            if (data.type === 'token' && data.text) {
+              if (streamingMsgId === null) {
+                streamingMsgId = nextAiMsgIdRef.current++;
+                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: data.text }]);
+              } else {
+                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: m.content + data.text } : m));
+              }
+            }
+            if (data.type === 'tool_call') {
+              if (streamingMsgId === null) {
+                streamingMsgId = nextAiMsgIdRef.current++;
+                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: '', toolEvents: [{ name: data.name, args: data.args, description: data.description, status: 'pending', riskLevel: data.riskLevel }] }]);
+              } else {
+                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, toolEvents: [...(m.toolEvents || []), { name: data.name, args: data.args, description: data.description, status: 'pending', riskLevel: data.riskLevel }] } : m));
+              }
+            }
+            // #4 Tool approval request (destructive tools)
+            if (data.type === 'tool_approval') {
+              if (streamingMsgId === null) {
+                streamingMsgId = nextAiMsgIdRef.current++;
+                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: '', toolEvents: [{ name: data.name, args: data.args, description: data.description, status: 'blocked', riskLevel: data.riskLevel, approvalRequired: true }] }]);
+              } else {
+                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, toolEvents: [...(m.toolEvents || []), { name: data.name, args: data.args, description: data.description, status: 'blocked', riskLevel: data.riskLevel, approvalRequired: true }] } : m));
+              }
+            }
+            // #6 Sub-agent activity updates
+            if (data.type === 'subagent' && data.role) {
+              const activity = { role: data.role, stepId: data.stepId, status: data.status, text: data.text, partial: data.partial, timestamp: data.timestamp || Date.now() };
+              if (streamingMsgId === null) {
+                streamingMsgId = nextAiMsgIdRef.current++;
+                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: '', subAgents: [activity] }]);
+              } else {
+                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, subAgents: [...(m.subAgents || []), activity].slice(-50) } : m));
+              }
+            }
+            // #5 Plan step output
+            if (data.type === 'step_output' && data.stepId) {
+              // Tracked via subAgents; no separate UI needed
+            }
+            if (data.type === 'tool_result') {
+              if (streamingMsgId !== null) {
+                setAiMessages(prev => prev.map(m => {
+                  if (m.id !== streamingMsgId || !m.toolEvents) return m;
+                  const events = [...m.toolEvents];
+                  const idx = events.findIndex(e => e.name === data.name && (e.status === 'pending' || e.status === 'blocked'));
+                  if (idx >= 0) {
+                    events[idx] = { ...events[idx], status: data.status, error: data.error, result: data.result };
+                  } else {
+                    events.push({ name: data.name, status: data.status, error: data.error, result: data.result });
+                  }
+                  return { ...m, toolEvents: events };
+                }));
+              }
+            }
+            if (data.commands && Array.isArray(data.commands)) {
+              for (const cmd of data.commands) {
+                receivedCommands.push({
+                  action: cmd.action,
+                  label: cmd.label,
+                  lat: cmd.lat,
+                  lon: cmd.lon,
+                  layerId: cmd.layerId,
+                });
+              }
+              executeAgentCommands(data.commands);
+            }
+            if (data.type === 'intent') {
+              if (data.location) {
+                focusLocation(data.location.lat, data.location.lon, { label: data.location.label || 'Location', color: '#60a5fa', height: 1500 });
+              }
+              if (data.layerIds) {
+                (data.layerIds as string[]).forEach((layerId: string) => { if (!isLayerEnabled(layerId)) toggleLayer(layerId); });
+              }
+            }
+            if (data.type === 'output') {
+              finalText = data.text;
+              if (data.traceId) lastTraceId = data.traceId;
+              if (data.modelTier) lastModelTier = data.modelTier;
+            }
+            if (data.type === 'panel' || (data.stats && data.charts)) {
+              setDigitalTwinPanel(data);
+            }
+            if (data.type === 'done') {
+              if (data.traceId) lastTraceId = data.traceId;
+            }
+            if (data.type === 'error') {
+              serverError = data.error || data.message || 'Unknown server error';
+            }
+          } catch { /* skip malformed JSON */ }
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        processLines();
+      }
+      processLines();
+
+      if (serverError) {
+        if (streamingMsgId !== null) {
+          setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: `Server error: ${serverError}` } : m));
+        } else {
+          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Server error: ${serverError}` }]);
+        }
+      } else if (finalText) {
+        // #7 Parse artifacts (tables/charts/sliders) from the final output
+        const { cleanedContent, artifacts } = extractArtifacts(finalText);
+        const msgPatch: Partial<ChatMessage> = { content: artifacts.length > 0 ? cleanedContent : finalText, traceId: lastTraceId, commands: receivedCommands.length > 0 ? receivedCommands : undefined, modelTier: lastModelTier, artifacts: artifacts.length > 0 ? artifacts : undefined, resumable: true };
+        if (streamingMsgId !== null) {
+          // Replace streaming content with final text (which may include updates from command parsing)
+          setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, ...msgPatch } : m));
+        } else {
+          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText, ...msgPatch }]);
+        }
+        // Reset the streaming markdown renderer for the next message
+        streamingMdRef.current.reset();
+      } else if (streamingMsgId === null) {
+        const fallback = await generateLocalResponse(userMsg, loc);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: fallback }]);
+      }
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') {
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: '⏹ Response stopped.' }]);
+      } else {
+        const fallback = await generateLocalResponse(userMsg, loc);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `${fallback}\n\n*(Agent unavailable: ${e})*` }]);
+      }
+    }
+    cleanupThinkingSteps(true);
+    setAiTyping(false);
+    abortControllerRef.current = null;
+  }, [aiInput, sandboxWorkspaceId, sendToPipeline, focusLocation, sendMonitorCommand, sendScheduleCommand, toggleLayer]); // eslint-disable-line react-hooks/exhaustive-deps
+  sendAIRef.current = sendAI;
+
+  async function extractLocation(text: string): Promise<{ lat: number; lon: number } | null> {
+    if (typeof text !== 'string' || !text) return null;
+    // Fast path: local coordinate regex
+    const coordMatch = text.match(/(-?\d+\.?\d*)\s*[,，]\s*(-?\d+\.?\d*)/);
+    if (coordMatch) {
+      const lat = parseFloat(coordMatch[1]);
+      const lon = parseFloat(coordMatch[2]);
+      if (isFinite(lat) && isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        return { lat, lon };
+      }
+    }
+
+    // Fast path: local city map (instant, no API call)
+    const cityMap: Record<string, [number, number]> = {
+      tokyo:[35.6762,139.6503], delhi:[28.7041,77.1025], shanghai:[31.2304,121.4737],
+      'new york':[40.7128,-74.006], london:[51.5074,-0.1278], paris:[48.8566,2.3522],
+      mumbai:[19.076,72.8777], cairo:[30.0444,31.2357], 'los angeles':[34.0522,-118.2437],
+      beijing:[39.9042,116.4074], moscow:[55.7558,37.6173], istanbul:[41.0082,28.9784],
+      seoul:[37.5665,126.978], bangkok:[13.7563,100.5018], singapore:[1.3521,103.8198],
+      sydney:[-33.8688,151.2093], dubai:[25.2048,55.2708], rio:[-22.9068,-43.1729],
+      chicago:[41.8781,-87.6298], 'san francisco':[37.7749,-122.4194], toronto:[43.6532,-79.3832],
+      berlin:[52.52,13.405], madrid:[40.4168,-3.7038], rome:[41.9028,12.4964],
+      hongkong:[22.3193,114.1694], 'kuala lumpur':[3.139,101.6869], jakarta:[-6.2088,106.8456],
+      'sao paulo':[-23.5505,-46.6333], 'mexico city':[19.4326,-99.1332],
+    };
+    const lower = text.toLowerCase();
+    for (const [city, coords] of Object.entries(cityMap)) {
+      if (lower.includes(city)) return { lat: coords[0], lon: coords[1] };
+    }
+
+    // Deep path: server-side LLM geocoding for any location name
+    try {
+      const resp = await fetch(`/api/agent/geocode?q=${encodeURIComponent(text)}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.lat !== undefined) return { lat: data.lat, lon: data.lon };
+      }
+    } catch { /* fall through to null */ }
+
+    // Fallback: if query implies "near me" and we have a last known location, use it
+    const loc = lastKnownLocationRef.current;
+    if (loc && (lower.includes('nearby') || lower.includes('nearest') || lower.includes('near me') || lower.includes('around me') || lower.includes('within ') || lower.includes('closest') || lower.includes('my location') || lower.includes('current location'))) {
+      return loc;
+    }
+
+    return null;
   }
 
   function undoLastAgentAction() {
@@ -7382,6 +7530,126 @@ export default function App() {
     setDigitalTwinPanel(null);
   }
 
+  // ── Advanced chat helpers ──────────────────────────────────────────────
+
+  // #5 Execute a plan from a plan card via the /plan/execute streaming endpoint
+  const executePlanFromCard = useCallback(async (plan: PlanCard, msgId: number) => {
+    setAiTyping(true);
+    try {
+      const resp = await fetch('/api/agent/plan/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ plan, sessionId }),
+      });
+      if (!resp.ok || !resp.body) throw new Error(`Plan execution failed (${resp.status})`);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalText = '';
+      const subAgents: any[] = [];
+      const stepStatuses: Record<string, string> = {};
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'subagent' || data.role) {
+              subAgents.push({ role: data.role, stepId: data.stepId, status: data.status, text: data.text, timestamp: data.timestamp || Date.now() });
+              setAiMessages(prev => prev.map(m => m.id === msgId ? { ...m, subAgents: [...(m.subAgents || []), subAgents[subAgents.length - 1]].slice(-50) } : m));
+            }
+            if (data.type === 'step_output' && data.stepId) {
+              stepStatuses[data.stepId] = 'completed';
+              setAiMessages(prev => prev.map(m => m.id === msgId && m.plan ? { ...m, plan: { ...m.plan, steps: m.plan.steps.map(s => s.id === data.stepId ? { ...s, status: 'completed', output: data.output, durationMs: data.durationMs } : s) } } : m));
+            }
+            if (data.type === 'token' && data.text) { finalText += data.text; setAiMessages(prev => prev.map(m => m.id === msgId ? { ...m, content: m.content + data.text } : m)); }
+            if (data.type === 'output' && data.text) { finalText = data.text; }
+            if (data.type === 'error') { setAiMessages(prev => prev.map(m => m.id === msgId ? { ...m, content: `Error: ${data.error}` } : m)); }
+          } catch { /* skip */ }
+        }
+      }
+      // Mark plan as executed and parse artifacts
+      const { cleanedContent, artifacts } = extractArtifacts(finalText);
+      setAiMessages(prev => prev.map(m => m.id === msgId ? { ...m, content: artifacts.length > 0 ? cleanedContent : finalText, plan: m.plan ? { ...m.plan, executed: true } : m.plan, artifacts: artifacts.length > 0 ? artifacts : undefined, resumable: true } : m));
+    } catch (e) {
+      setAiMessages(prev => prev.map(m => m.id === msgId ? { ...m, content: `Plan execution failed: ${e}` } : m));
+    }
+    setAiTyping(false);
+  }, [sessionId]);
+
+  // #5 Toggle a plan step's enabled state
+  const togglePlanStep = useCallback((msgId: number, stepId: string) => {
+    setAiMessages(prev => prev.map(m => m.id === msgId && m.plan ? { ...m, plan: { ...m.plan, steps: m.plan.steps.map(s => s.id === stepId ? { ...s, enabled: !s.enabled } : s) } } : m));
+  }, []);
+
+  // #4 Update a tool event (after approval/denial)
+  const updateToolEvent = useCallback((msgId: number, toolName: string, patch: Partial<ToolEvent>) => {
+    setAiMessages(prev => prev.map(m => {
+      if (m.id !== msgId || !m.toolEvents) return m;
+      return { ...m, toolEvents: m.toolEvents.map(e => e.name === toolName ? { ...e, ...patch } : e) };
+    }));
+  }, []);
+
+  // #7 Re-run a query with an adjusted slider parameter
+  const rerunWithParam = useCallback((msg: ChatMessage, param: string, value: number) => {
+    // Find the original user query that produced this message
+    const idx = aiMessagesRef.current.findIndex(m => m.id === msg.id);
+    let userQuery = '';
+    for (let i = idx - 1; i >= 0; i--) {
+      if (aiMessagesRef.current[i].role === 'user') { userQuery = aiMessagesRef.current[i].content; break; }
+    }
+    if (!userQuery) return;
+    const rerunQuery = `${userQuery} (${param} = ${value})`;
+    sendAIRef.current(rerunQuery);
+  }, []);
+
+  // #14 Resume a partially-generated message
+  const resumeMessage = useCallback(async (msg: ChatMessage) => {
+    const idx = aiMessagesRef.current.findIndex(m => m.id === msg.id);
+    let originalMessage = '';
+    for (let i = idx - 1; i >= 0; i--) {
+      if (aiMessagesRef.current[i].role === 'user') { originalMessage = aiMessagesRef.current[i].content; break; }
+    }
+    if (!originalMessage) return;
+    setAiTyping(true);
+    // Mark message as being resumed
+    setAiMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: m.content + '\n\n*[continuing...]*', resumable: false } : m));
+    await resumeStream(
+      msg.content,
+      originalMessage,
+      sessionId,
+      (token) => {
+        setAiMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: m.content + token } : m));
+      },
+      (continuation) => {
+        setAiMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: m.content + '\n\n' + continuation, resumable: true } : m));
+        setAiTyping(false);
+      },
+      (err) => {
+        setAiMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: m.content + `\n\n*[Resume failed: ${err}]*`, resumable: true } : m));
+        setAiTyping(false);
+      },
+    );
+  }, [sessionId]);
+
+  // #5 Generate a plan for a complex query (triggered by user)
+  const generatePlanForQuery = useCallback(async (query: string) => {
+    setPlanningFor(query);
+    setAiTyping(true);
+    try {
+      const plan = await generatePlanClient(query) as PlanCard | undefined;
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: '', plan, type: 'plan' }]);
+    } catch (e) {
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Plan generation failed: ${e}`, type: 'error' }]);
+    }
+    setAiTyping(false);
+    setPlanningFor(null);
+  }, []);
+
   async function generateLocalResponse(message: string, location: { lat: number; lon: number } | null): Promise<string> {
     try {
       const resp = await fetch('/api/agent/local-ask', {
@@ -7406,6 +7674,36 @@ export default function App() {
     if (location) return `**Location Query**\n\nCoordinates: ${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}\n\nThis area can be analyzed for seismic risk, weather conditions, and population density. Use the sidebar layers to explore different data dimensions.`;
     return `**Earth Intelligence**\n\nI can help you explore:\n- Seismic activity and earthquake data\n- Weather conditions globally\n- Storm tracking and forecasts\n- Population impact analysis\n- Natural disaster monitoring\n\nTry: "Show earthquakes in Japan" or "Weather in London"`;
   }
+
+  /* ═════════════════════════════════════════════════════════════════
+     FORK (PARALLEL REALITY) CREATION
+     ═════════════════════════════════════════════════════════════════ */
+
+  const submitFork = useCallback((opts: { name: string; radiusM: number; lat: number; lon: number }) => {
+    const forkName = opts.name.trim() || `Fork-${Date.now()}`;
+    fetch('/api/fork/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      credentials: 'include',
+      body: JSON.stringify({
+        name: forkName,
+        lat: opts.lat,
+        lon: opts.lon,
+        bufferRadiusM: opts.radiusM,
+        deltas: [{ type: 'INJECT_EVENT', targetId: 'manual_fork', parameters: { lat: opts.lat, lon: opts.lon }, effectiveTimeOffsetHours: 0 }],
+        maxSimulationHours: 72,
+      }),
+    }).then(r => r.json()).then(data => {
+      if (data.forkId) {
+        forkRendererRef.current?.createForkVisual(data.forkId, forkName, opts.lat, opts.lon, opts.radiusM);
+        forkRendererRef.current?.spawnGhostsWithRetry(data.forkId);
+        setForks(prev => [...prev, { forkId: data.forkId, name: forkName, divergenceScore: 0, status: 'running' }]);
+        setActiveForkCount(prev => prev + 1);
+        showNotification(`Parallel reality "${forkName}" created (${(opts.radiusM / 1000).toFixed(0)} km buffer)`, 'success');
+      }
+    }).catch(e => console.error('Fork creation failed:', e));
+    setForkDialog(d => ({ ...d, open: false }));
+  }, []);
 
   /* ═════════════════════════════════════════════════════════════════
      CONTEXT MENU ACTIONS
@@ -8580,7 +8878,7 @@ export default function App() {
                   {msg.type === 'vision' && <div className="msg-label" style={{color:'#a78bfa'}}><SearchIcon size={12} style={{display:'inline',marginRight:3}} /> Vision Analysis</div>}
                   {msg.type === 'data-analysis' && <div className="msg-label" style={{color:'#34d399'}}><BarChart3 size={12} style={{display:'inline',marginRight:3}} /> Data Analysis</div>}
                   {msg.type === 'error' && <div className="msg-label" style={{color:'#ef4444'}}><AlertTriangle size={12} style={{display:'inline',marginRight:3}} /> Error</div>}
-                  <div className="rich-content" dangerouslySetInnerHTML={{ __html: richRender(msg.content) + (aiTyping && idx === aiMessages.length - 1 ? '<span class="streaming-cursor">▊</span>' : '') }} />
+                  <div className="rich-content" dangerouslySetInnerHTML={{ __html: (aiTyping && idx === aiMessages.length - 1 ? streamingMdRef.current.render(msg.content, richRender) : richRender(msg.content)) + (aiTyping && idx === aiMessages.length - 1 ? '<span class="streaming-cursor">▊</span>' : '') }} />
                   {msg.toolEvents && msg.toolEvents.length > 0 && (
                     <div style={{ display:'flex', flexDirection:'column', gap:4, marginTop:6 }}>
                       {msg.toolEvents.map((ev, i) => {
@@ -8613,9 +8911,33 @@ export default function App() {
                       })}
                     </div>
                   )}
+                  {/* #6 Sub-agent activity */}
+                  {msg.subAgents && msg.subAgents.length > 0 && <SubAgentActivityView activities={msg.subAgents} />}
+                  {/* #5 Plan card */}
+                  {msg.plan && <PlanCardView plan={msg.plan} onExecute={(p) => executePlanFromCard(p, msg.id)} onToggleStep={(sid) => togglePlanStep(msg.id, sid)} />}
+                  {/* #4 Tool approval cards */}
+                  {msg.toolEvents && msg.toolEvents.filter(e => e.approvalRequired || e.status === 'blocked').map((ev, i) => (
+                    <ToolApprovalView key={`apr_${i}`} event={ev} onApprove={() => updateToolEvent(msg.id, ev.name, { status: 'success' })} onDeny={() => updateToolEvent(msg.id, ev.name, { status: 'error', error: 'Denied by user' })} />
+                  ))}
+                  {/* #7 + #13 Inline artifacts (tables, charts, sliders) */}
+                  {msg.artifacts && msg.artifacts.map((art, i) => (
+                    <ArtifactView key={`art_${i}`} artifact={art} onRerun={(param, val) => rerunWithParam(msg, param, val)} />
+                  ))}
                   {renderCommandChips(msg.commands, focusLocation, toggleLayer)}
                   {msg.modelTier && (
                     <span style={{fontSize:9,color:'#64748b',background:'rgba(100,116,139,0.1)',borderRadius:3,padding:'1px 5px',marginTop:2,display:'inline-block'}}>{msg.modelTier}</span>
+                  )}
+                  {/* #15 Trace expander */}
+                  {msg.traceId && <TraceExpander traceId={msg.traceId} />}
+                  {/* #14 Resume button */}
+                  {msg.resumable && msg.content && msg.content.length > 50 && !aiTyping && (
+                    <button
+                      onClick={() => resumeMessage(msg)}
+                      style={{fontSize:9,color:'var(--text-dim)',background:'none',border:'1px solid transparent',cursor:'pointer',padding:'2px 8px',borderRadius:4,display:'inline-flex',alignItems:'center',gap:3,marginTop:4}}
+                      title="Continue generating this response"
+                    >
+                      <Play size={10} /> Resume
+                    </button>
                   )}
                   {msg.content && idx > 0 && (
                     <div style={{marginTop:4}}>
@@ -8721,7 +9043,8 @@ export default function App() {
         )}
         {aiMessages.length <= 1 && (
         <div className="ai-suggestion-chips">
-          {(() => {
+          {/* #10 Adaptive suggestions from LLM; falls back to rule-based if empty */}
+          {(adaptiveSuggestions.length > 0 ? adaptiveSuggestions : (() => {
             const chips: string[] = [];
             if (isLayerEnabled('earthquakes')) chips.push('Recent earthquakes?', 'Seismic hotspots?');
             else chips.push('Show earthquake data');
@@ -8731,10 +9054,10 @@ export default function App() {
             else chips.push('Aircraft near Delhi');
             if (recentDiscoveries.length > 0) chips.push(`Tell me about: ${recentDiscoveries[0].summary.slice(0, 30)}`);
             chips.push('Analyze quake stats', 'Compute averages');
-            return chips.slice(0, 6).map(chip => (
-              <span key={chip} className="ai-chip" onClick={() => { setAiInput(chip); }}>{chip}</span>
-            ));
-          })()}
+            return chips.slice(0, 6);
+          })()).map(chip => (
+            <span key={chip} className="ai-chip" onClick={() => { setAiInput(chip); }}>{chip}</span>
+          ))}
         </div>
         )}
         <div className="ai-input-wrap">
@@ -8756,40 +9079,69 @@ export default function App() {
             <button className="ai-send" onClick={() => sendAI()}><Send size={14} /></button>
           )}
         </div>
-        <div className="sandbox-file-upload" style={{borderTop:'1px solid var(--border)',padding:'4px 12px',display:'flex',gap:8,flexWrap:'wrap'}}>
-          <label className="sandbox-file-btn" style={{fontSize:10,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}}>
-            <Paperclip size={12} /> Upload data (sandbox)
+        <div className="sandbox-file-upload" style={{borderTop:'1px solid var(--border)',padding:'3px 8px',display:'flex',gap:4,flexWrap:'wrap'}}>
+          <label className="sandbox-file-btn" title="Upload data (sandbox)" style={{cursor:'pointer',display:'inline-flex',alignItems:'center'}}>
+            <Paperclip size={13} />
             <input type="file" style={{display:'none'}} onChange={e => {
               const file = e.target.files?.[0];
               if (file) handleFileUpload(file);
             }} />
           </label>
-          <label className="sandbox-file-btn" style={{fontSize:10,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}}>
-            <Image size={12} /> Upload image
+          <label className="sandbox-file-btn" title="Upload image" style={{cursor:'pointer',display:'inline-flex',alignItems:'center'}}>
+            <Image size={13} />
             <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:'none'}} onChange={e => {
               const file = e.target.files?.[0];
               if (file) handleImageUpload(file);
             }} />
           </label>
-          <label className="sandbox-file-btn" style={{fontSize:10,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}}>
-            <FileSpreadsheet size={12} /> Analyze data file
+          <label className="sandbox-file-btn" title="Analyze data file" style={{cursor:'pointer',display:'inline-flex',alignItems:'center'}}>
+            <FileSpreadsheet size={13} />
             <input type="file" accept=".csv,.json,.geojson" style={{display:'none'}} onChange={e => {
               const file = e.target.files?.[0];
               if (file) handleDataFileUpload(file);
             }} />
           </label>
-          <button className="sandbox-file-btn" style={{fontSize:10,display:'inline-flex',alignItems:'center',gap:4}}
-            onClick={() => { speakResponse(aiMessages.filter(m => m.role === 'assistant').slice(-1)[0]?.content || ''); }}
-            title="Read last response aloud">
-            <Volume2 size={12} /> Speak
+          <button className="sandbox-file-btn" title="Read last response aloud"
+            onClick={() => { speakResponse(aiMessages.filter(m => m.role === 'assistant').slice(-1)[0]?.content || ''); }}>
+            <Volume2 size={13} />
           </button>
-          <button className="sandbox-file-btn" style={{fontSize:10,display:'inline-flex',alignItems:'center',gap:4}}
-            onClick={() => { navigator.clipboard.writeText(buildSessionShareLink()).catch(() => {}); setShowShareDialog(true); setTimeout(() => setShowShareDialog(false), 1500); }}
-            title="Copy session link to clipboard">
-            <Link size={12} /> Share session
+          <button className="sandbox-file-btn" title="Share session"
+            onClick={async () => {
+              try {
+                setShowShareDialog(true);
+                const url = await buildSessionShareLink();
+                await navigator.clipboard.writeText(url);
+                setShareUrl(url);
+                setTimeout(() => setShowShareDialog(false), 2500);
+              } catch (e) {
+                setShowShareDialog(false);
+                showNotification(`Share failed: ${e}`, 'error');
+              }
+            }}>
+            <Link size={13} />
           </button>
-          {showShareDialog && <span style={{fontSize:9,color:'#34d399'}}>Copied!</span>}
-          {sandboxWorkspaceId && <span className="sandbox-workspace-badge"><Grid size={12} style={{display:'inline',marginRight:3}} /> Workspace</span>}
+          <button className="sandbox-file-btn"
+            onClick={() => {
+              setPdfExporting(true);
+              try {
+                exportConversationAsPDF(aiMessagesRef.current, {
+                  title: 'Earth Intelligence Report',
+                  subtitle: 'AI Conversation Transcript',
+                  author: 'Earth Intelligence AI',
+                  sessionId: sessionId,
+                  modelTier: selectedTier,
+                });
+              } catch (e) {
+                showNotification(`PDF export failed: ${e}`, 'error');
+              }
+              setTimeout(() => setPdfExporting(false), 500);
+            }}
+            title="Download conversation as PDF report"
+            style={{background:pdfExporting?'rgba(52,211,153,0.15)':'transparent'}}>
+            {pdfExporting ? <CheckCircle size={13} style={{color:'#34d399'}} /> : <FileDown size={13} />}
+          </button>
+          {showShareDialog && <span style={{fontSize:9,color:'#34d399',maxWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={shareUrl}>{shareUrl ? 'Link copied!' : 'Creating…'}</span>}
+          {sandboxWorkspaceId && <span className="sandbox-workspace-badge" style={{fontSize:9}}><Grid size={11} style={{display:'inline',marginRight:2}} /> Workspace</span>}
         </div>
 
       </Panel>
@@ -8800,11 +9152,42 @@ export default function App() {
       <div className={`chat-history-panel glass-panel ${showChatHistory ? 'open' : ''}`} style={{position:'fixed',top:0,left:0,width:300,height:'100vh',zIndex:1001,transform:showChatHistory ? 'translateX(0)' : 'translateX(-100%)',transition:'transform 0.25s ease',display:'flex',flexDirection:'column',overflow:'hidden'}}>
         <div className="chat-history-header" style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',borderBottom:'1px solid var(--border)'}}>
           <span style={{fontWeight:600,fontSize:14}}>Chat History</span>
-          <button onClick={() => setShowChatHistory(false)} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:16}}>✕</button>
+          <div style={{display:'flex',alignItems:'center',gap:6}}>
+            {chatList.length > 0 && (
+              <button
+                onClick={() => { if (confirm('Delete all saved chats? This cannot be undone.')) clearAllChats(); }}
+                title="Clear all chats"
+                style={{background:'none',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',cursor:'pointer',fontSize:9,padding:'2px 6px',borderRadius:4,display:'inline-flex',alignItems:'center',gap:3}}>
+                <Trash2 size={10} /> Clear all
+              </button>
+            )}
+            <button onClick={() => setShowChatHistory(false)} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:16}}>✕</button>
+          </div>
         </div>
+        {chatList.length > 0 && (
+          <div style={{padding:'6px 10px',borderBottom:'1px solid var(--border)'}}>
+            <div style={{position:'relative'}}>
+              <SearchIcon size={12} style={{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',color:'var(--text-dim)'}} />
+              <input
+                value={chatSearch}
+                onChange={e => setChatSearch(e.target.value)}
+                placeholder="Search chats..."
+                style={{width:'100%',padding:'5px 8px 5px 26px',fontSize:11,background:'var(--bg-input,rgba(255,255,255,0.04))',border:'1px solid var(--border)',borderRadius:6,color:'var(--text)',outline:'none'}}
+              />
+              {chatSearch && (
+                <button onClick={() => setChatSearch('')} style={{position:'absolute',right:4,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:12,padding:'0 4px'}}>✕</button>
+              )}
+            </div>
+          </div>
+        )}
         <div className="chat-history-list" style={{flex:1,overflowY:'auto',padding:'6px 0'}}>
           {chatList.length === 0 && <div style={{padding:'20px 14px',fontSize:12,color:'var(--text-dim)',textAlign:'center'}}>No saved chats yet.</div>}
-          {groupChatsByDate(chatList).map(group => (
+          {(() => {
+            const filtered = chatSearch.trim()
+              ? chatList.filter(c => c.title?.toLowerCase().includes(chatSearch.toLowerCase()) || c.id.toLowerCase().includes(chatSearch.toLowerCase()))
+              : chatList;
+            if (chatSearch.trim() && filtered.length === 0) return <div style={{padding:'20px 14px',fontSize:12,color:'var(--text-dim)',textAlign:'center'}}>No chats match &quot;{chatSearch}&quot;.</div>;
+            return groupChatsByDate(filtered).map(group => (
             <div key={group.label}>
               <div className="chat-date-group" style={{padding:'8px 14px 4px',fontSize:10,fontWeight:600,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:0.5}}>{group.label}</div>
               {group.items.map(chat => (
@@ -8819,7 +9202,8 @@ export default function App() {
                 </div>
               ))}
             </div>
-          ))}
+            ));
+          })()}
         </div>
       </div>
 
@@ -9074,6 +9458,104 @@ export default function App() {
               }}>Copy</button>
             </div>
             <button className="btn-secondary" style={{marginTop:12}} onClick={() => setShowShareDialog(false)}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {/* Fork (Parallel Reality) Creation Dialog */}
+      {forkDialog.open && (
+        <div className="fork-dialog" onClick={e => { if (e.target === e.currentTarget) setForkDialog(d => ({ ...d, open: false })); }}>
+          <div className="fork-card">
+            <div className="fork-header">
+              <span className="fork-icon">⬡</span>
+              <div>
+                <div className="fork-title">Create Parallel Reality</div>
+                <div className="fork-sub">Define a forked simulation branch with a buffer zone.</div>
+              </div>
+            </div>
+
+            <div className="fork-field">
+              <label className="fork-label">Reality Name</label>
+              <input
+                className="fork-input"
+                value={forkDialog.name}
+                autoFocus
+                onChange={e => setForkDialog(d => ({ ...d, name: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') submitFork({ name: forkDialog.name, radiusM: forkDialog.radius, lat: forkDialog.lat, lon: forkDialog.lon }); }}
+                placeholder="e.g. Atlantic Storm Surge Variant"
+              />
+            </div>
+
+            <div className="fork-field">
+              <label className="fork-label">Origin Coordinates</label>
+              <div className="fork-coords">
+                <span>{forkDialog.lat.toFixed(4)}°, {forkDialog.lon.toFixed(4)}°</span>
+              </div>
+            </div>
+
+            <div className="fork-field">
+              <div className="fork-label-row">
+                <label className="fork-label">Buffer Radius</label>
+                <div className="fork-unit-toggle">
+                  <button className={forkDialog.unit === 'm' ? 'active' : ''} onClick={() => setForkDialog(d => ({ ...d, unit: 'm' }))}>m</button>
+                  <button className={forkDialog.unit === 'km' ? 'active' : ''} onClick={() => setForkDialog(d => ({ ...d, unit: 'km' }))}>km</button>
+                </div>
+              </div>
+              <div className="fork-radius-row">
+                <input
+                  className="fork-input fork-radius-input"
+                  type="number"
+                  min={0}
+                  step={forkDialog.unit === 'm' ? 100 : 0.1}
+                  value={forkDialog.unit === 'km' ? +(forkDialog.radius / 1000).toFixed(2) : Math.round(forkDialog.radius)}
+                  onChange={e => {
+                    const raw = parseFloat(e.target.value);
+                    if (!Number.isFinite(raw) || raw < 0) return;
+                    const meters = forkDialog.unit === 'km' ? raw * 1000 : raw;
+                    // Allow 0 m up to 10,000 km.
+                    setForkDialog(d => ({ ...d, radius: Math.min(meters, 10000000) }));
+                  }}
+                  onKeyDown={e => { if (e.key === 'Enter') submitFork({ name: forkDialog.name, radiusM: forkDialog.radius, lat: forkDialog.lat, lon: forkDialog.lon }); }}
+                />
+                <input
+                  className="fork-slider"
+                  type="range"
+                  min={0}
+                  max={10000000}
+                  step={1000}
+                  value={forkDialog.radius}
+                  onChange={e => setForkDialog(d => ({ ...d, radius: parseInt(e.target.value, 10) }))}
+                />
+              </div>
+              <div className="fork-presets">
+                {[
+                  { label: '50 km', m: 50000 },
+                  { label: '250 km', m: 250000 },
+                  { label: '500 km', m: 500000 },
+                  { label: '1,000 km', m: 1000000 },
+                  { label: '2,500 km', m: 2500000 },
+                ].map(p => (
+                  <button
+                    key={p.label}
+                    className={`fork-preset ${forkDialog.radius === p.m ? 'active' : ''}`}
+                    onClick={() => setForkDialog(d => ({ ...d, radius: p.m }))}
+                  >{p.label}</button>
+                ))}
+              </div>
+              <div className="fork-radius-hint">
+                Coverage diameter ≈ {(forkDialog.radius * 2 / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 })} km · Dome height ≈ {(() => {
+                  const h = Math.min(Math.max(forkDialog.radius * 0.25, 50000), 500000);
+                  return (h / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 });
+                })()} km · Range 0 m – 10,000 km
+              </div>
+            </div>
+
+            <div className="fork-actions">
+              <button className="btn-secondary" onClick={() => setForkDialog(d => ({ ...d, open: false }))}>Cancel</button>
+              <button className="fork-create-btn" onClick={() => submitFork({ name: forkDialog.name, radiusM: forkDialog.radius, lat: forkDialog.lat, lon: forkDialog.lon })}>
+                <Plus size={14} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} /> Create Reality
+              </button>
+            </div>
           </div>
         </div>
       )}
