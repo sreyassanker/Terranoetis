@@ -2226,6 +2226,9 @@ p { text-align: justify; }
   .ai-typing > span:nth-child(2) { animation-delay: 0.2s; }
   .ai-typing > span:nth-child(3) { animation-delay: 0.4s; }
 
+  @keyframes blink-cursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+  .streaming-cursor { animation: blink-cursor 0.8s step-end infinite; color: #818cf8; font-size: 14px; margin-left: 1px; display: inline; }
+
   .agent-steps {
     display: flex;
     flex-direction: column;

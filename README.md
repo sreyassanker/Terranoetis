@@ -186,7 +186,7 @@ flowchart LR
 
 | Module | Purpose |
 |--------|---------|
-| `server/index.ts` | Main Express application entry point (~1500+ lines) with route registration, middleware, agent system, and all API integrations |
+| `server/index.ts` | Main Express application entry point (~10200 lines) with route registration, middleware, agent system, AI pipeline, and all API integrations |
 | `server/agent.ts` | Cognitive agent system with command parsing, intent routing, tool registry, and LLM orchestration |
 | `server/analytical-models/` | 150 scientific equation engines with workflow runners, context engine, and REST API |
 | `server/cognition/` | Cognitive architecture: System 1 (fast), System 2 (slow), tree-of-thoughts, MCTS engine, reasoning tree, execution orchestrator |
@@ -254,6 +254,7 @@ The server exposes hundreds of API endpoints across the following categories:
 - **Fork:** `/api/fork/*`
 - **Pulse:** `/api/pulse/*`
 - **Vault:** `/api/vault/*`
+- **AI Agent:** `/api/agent/ask` (SSE streaming or JSON), `/api/agent/analyze-vision` (multimodal), `/api/agent/analyze-data` (CSV/GeoJSON), `/api/agent/local-ask` (Ollama fallback), `/api/agent/search-all` (unified RAG), `/api/agent/pipeline` (code execution + globe commands), `/api/agent/geocode` (LLM-based location lookup)
 - **Self-Evolution:** `/api/self-evolve/*`
 - **Health:** `/api/health`, `/api/ready`, `/api/live`, `/api/metrics`
 
@@ -286,6 +287,22 @@ Each tool is defined with:
 - Structured workflow steps with `equation`, `calculation`, `intermediate variables`, `unit conversion`
 - Quality control checks with `name`, `passed`, `message`, `severity`
 - Academic references with `paperUrl` (DOI or Google Scholar)
+
+## AI Intelligence Panel
+
+The EARTH INTELLIGENCE AI panel (`Panel.tsx` wrapper with inline UI in `src/App.tsx`) provides a conversational AI assistant for the 3D globe. Nine major improvements have been implemented:
+
+| # | Feature | Server | Client | Description |
+|---|---------|--------|--------|-------------|
+| 1 | **Multimodal in main chat** | `POST /api/agent/analyze-vision` | `streamPassMultimodal()` | Images attached to chat are sent as base64 to Gemini's streaming vision API. Falls back to text-only Omninet when Gemini is unavailable. |
+| 2 | **Agentic globe control with undo** | `executeAgentCommands()` in SSE output | `agentActionHistoryRef`, `undoLastAgentAction()`, `clearAllAgentActions()` | Every AI action (flyTo, toggleLayer, addPin, addHeatmap, addPolygon, addGeoJSON, addChart, addPanel) is recorded. Undo reverts the last action; Clear removes all AI entities. Undo/Clear buttons in panel header. |
+| 3 | **Persistent memory across sessions** | `buildWorkingMemoryContext(recentMessages)` | Sends last 8 messages as `recentMessages` | Client passes conversation history to server; server folds it into the working memory context instead of starting from empty on each query. |
+| 4 | **Proactive context-aware suggestions** | Dynamic chip generation | Chips adapt to active layers + recent discoveries | Suggestion chips (earthquake, wildfire, flight, voyage, etc.) update based on which layers are active and recent discoveries from the ambient intelligence engine. |
+| 5 | **Local model fallback** | `POST /api/agent/local-ask` → Ollama | `generateLocalResponse()` | When remote AI providers are unreachable, queries route to Ollama (llama3 on `localhost:11434`). Falls back to keyword matching if Ollama is also unavailable. |
+| 6 | **Real-time streaming markdown** | SSE `event: output` with chunked tokens | Blinking `▊` cursor, auto-scroll on content change | Streaming assistant responses render incrementally with a cursor indicator. Scroll tracks content growth during streaming. |
+| 7 | **Multi-provider transparency** | SSE includes `modelTier` in output event | Badge displayed on each assistant message | Users see which tier handled their query (e.g., "Free tier (local routing)", "Gemini Flash", "Claude") via a small badge on each AI response. |
+| 8 | **Code pipeline → 3D globe** | `__GLOBE_COMMANDS__` protocol in sandbox stdout | `data.commands` handler in pipeline SSE | Pipeline sandbox code can emit `__GLOBE_COMMANDS__::[{...}]` markers in stdout. Server extracts the JSON and sends a `globe` SSE event. Client renders pins, polygons, heatmaps, charts on Cesium. |
+| 9 | **RAG over live geospatial databases** | `POST /api/agent/search-all` + tools-v2 generator | Integrated into agent tool selection | Unified `search_all` endpoint routes natural language queries across all databases (earthquakes, weather, fires, flights, vessels, satellites, volcanoes). System prompt updated with explicit Query Planning section mapping intents → tools. |
 
 ## Panel System
 

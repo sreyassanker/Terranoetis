@@ -555,12 +555,12 @@ function mapInputs(
     };
     case 37: return {
       z: u('z', 1),
-      weights: userInputs['weights'] ?? 1,
+      weights: Array.isArray(userInputs['weights']) ? userInputs['weights'] : [1, 1, 1],
       idx: u('idx', 0),
     };
     case 38: return {
       zs: u('zs', 1),
-      weights: userInputs['weights'] ?? 1,
+      weights: Array.isArray(userInputs['weights']) ? userInputs['weights'] : [1, 1, 1],
       idx: u('idx', 0),
     };
     case 39: return {
@@ -581,7 +581,7 @@ function mapInputs(
       x: u('x', 100),
     };
     case 42: return {
-      z: u('z', 1),
+      z: Array.isArray(userInputs['z']) ? userInputs['z'] : [1.0, 1.5, 2.0, 1.8, 2.2],
       N: u('N', 10),
       h: u('h', 1),
     };
@@ -659,7 +659,7 @@ function mapInputs(
     }
     case 47: return {
       ki: u('ki', 1),
-      fractions: u('fractions', 1),
+      fractions: Array.isArray(userInputs['fractions']) ? userInputs['fractions'] : [{ k: 2.0, fi: 0.5 }, { k: 0.6, fi: 0.3 }, { k: 0.25, fi: 0.2 }],
     };
     case 48: {
       const era5Ustar = ctx.era5?.frictionVelocity;
@@ -753,14 +753,16 @@ function mapInputs(
       // Hargreaves-Samani (1985). Ra (extraterrestrial radiation) computed
       // from latitude and day-of-year per Allen FAO-56 Annex 2. Tmax/Tmin
       // from weather (real temperature range, not T±5 proxy).
+      const Gsc = 0.0820; // MJ/m²/min
       const latRad = lat * Math.PI / 180;
       const doy = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000) || 180;
       const dr = 1 + 0.033 * Math.cos(2 * Math.PI * doy / 365);
       const decl = 0.409 * Math.sin(2 * Math.PI * doy / 365 - 1.39);
       const wsArg = Math.max(-1, Math.min(1, -Math.tan(latRad) * Math.tan(decl)));
-      const ws = Math.acos(wsArg); // MJ/m²/day
+      const ws = Math.acos(wsArg);
+      const Ra = (24 * 60 / Math.PI) * Gsc * dr * (ws * Math.sin(latRad) * Math.sin(decl) + Math.cos(latRad) * Math.cos(decl) * Math.sin(ws));
       return {
-        Ra: u('Ra', RaCalc),
+        Ra: u('Ra', Ra),
         Tmax: u('Tmax', T + 5),
         Tmin: u('Tmin', T - 5),
       };
@@ -932,7 +934,7 @@ function mapInputs(
       cosB: u('cosB', 0.866),
       u: u('u', 0),
       phiP: u('phiP', 30),
-      tanPhi: u('tanPhi', 0.577),
+      tanphi: u('tanphi', 0.577),
       sinB: u('sinB', 0.5),
       cosB2: u('cosB2', 0.75),
     };
@@ -1235,7 +1237,7 @@ function mapInputs(
       d: u('d', 1000),
     };
     case 126: return {
-      ρ2: u('ρ2', 1e-10),
+      rho2: u('ρ2', 1e-10),
       sigma: u('sigma', 1e-7),
       v: u('v', 7500),
       N: u('N', 10000),
@@ -1288,9 +1290,11 @@ function mapInputs(
         ? ctx.gldas.groundwaterStorage / 1000 / 0.2
         : undefined;
       return {
+        Q: u('Q', 1000),
         T: u('T', 1000),
         S: u('S', gwDepth != null ? Math.max(0.0001, Math.min(0.01, 0.001 * (10 / Math.max(1, gwDepth)))) : 0.001),
         t: u('t', 1000),
+        r: u('r', 100),
       };
     }
     case 133: {
@@ -1298,9 +1302,11 @@ function mapInputs(
         ? ctx.gldas.groundwaterStorage / 1000 / 0.2
         : undefined;
       return {
+        Q: u('Q', 1000),
         T: u('T', 1000),
         S: u('S', gwDepth != null ? Math.max(0.0001, Math.min(0.01, 0.001 * (10 / Math.max(1, gwDepth)))) : 0.001),
         t: u('t', 1000),
+        r: u('r', 100),
       };
     }
     case 134: return {
@@ -1339,7 +1345,7 @@ function mapInputs(
     }
     case 139: return {
       ...userInputs,
-      Xim1: u('Xim1', _dr.pdsi),
+      Xim1: u('Xim1', ctx.drought?.pdsi ?? 0),
       Zi: u('Zi', 0),
     };
     case 140: return {
@@ -1454,7 +1460,12 @@ export async function computeWithContext(
   // timeout, API rate-limit, or unavailable data sources never aborts the
   // entire computation. mapInputs() already provides physical fallback
   // values via ?? operators for every parameter.
-  const safe = <T>(p: Promise<T>, fb: T): Promise<T> => p.catch(() => fb);
+  const FETCH_TIMEOUT_MS = 10000;
+  const safe = <T>(p: Promise<T>, fb: T): Promise<T> =>
+    Promise.race([
+      p.catch(() => fb),
+      new Promise<T>(r => setTimeout(() => r(fb), FETCH_TIMEOUT_MS)),
+    ]);
 
   const dateStr = context?.time?.start || undefined;
 
@@ -1580,12 +1591,12 @@ export async function computeWithContext(
   }
   if (satThermal) sources.push('landsat-c2l2-st');
   if (columnWV != null) sources.push('era5-column-water-vapor');
-  if (era5.frictionVelocity != null) sources.push('era5-cds-friction-velocity');
-  if (era5.totalColumnWaterVapour != null) sources.push('era5-cds-tcwv');
-  if (era5.surfaceFluxes) sources.push('era5-cds-surface-fluxes');
-  if (era5.pressureWind) sources.push('era5-cds-pressure-wind');
-  if (era5.pressureState) sources.push('era5-cds-pressure-state');
-  if (era5.soilState) sources.push('era5-cds-soil-state');
+  if (era5.frictionVelocity != null) sources.push('era5-approx-friction-velocity');
+  if (era5.totalColumnWaterVapour != null) sources.push('era5-tcwv');
+  if (era5.surfaceFluxes) sources.push('era5-surface-fluxes');
+  if (era5.pressureWind) sources.push('era5-pressure-wind');
+  if (era5.pressureState) sources.push('era5-pressure-state');
+  if (era5.soilState) sources.push('era5-soil-state');
   if (imerg.source) sources.push(imerg.source);
   if (gldas.source) sources.push('gldas-noah-2.1');
 

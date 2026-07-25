@@ -15,6 +15,7 @@ export interface ChatMessage {
   data?: unknown;
   feedback?: 'up' | 'down';
   traceId?: string | null;
+  modelTier?: string | null;
   commands?: Array<{ action: string; label?: string; lat?: number; lon?: number; layerId?: string }>;
   toolEvents?: ToolEvent[];
 }

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2 } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -70,10 +70,8 @@ import { IssLivePanel } from '@/components/IssLivePanel';
 import { IssTravelView } from '@/components/IssTravelView';
 import { FlightTravelView } from '@/components/FlightTravelView';
 import { CommandPalette } from '@/components/CommandPalette';
-import { MilitarySymbologyPanel } from '@/components/MilitarySymbologyPanel';
 import { AnalyticsWorkbench } from '@/components/AnalyticsWorkbench';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { MilitarySymbologyOverlay } from '@/rendering/militarySymbologyOverlay';
 import { createRenderScheduler } from '@/lib/batchScheduler';
 import { createUnifiedTimer } from '@/lib/unifiedTimer'; // P0 perf: unified timer
 import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings } from '@/rendering/osmBuildings';
@@ -1081,7 +1079,6 @@ export default function App() {
   const flightawareDrRef = useRef<FlightDeadReckoning | null>(null);
   const airlabsDrRef = useRef<FlightDeadReckoning | null>(null);
   const aisTrackerRef = useRef<AisVesselTracker | null>(null);
-  const militaryOverlayRef = useRef<MilitarySymbologyOverlay | null>(null);
   const ghostProtocolRef = useRef<GhostProtocol | null>(null);
   const entropyHaloRef = useRef<EntropyHalo | null>(null);
   const oracleChainRef = useRef<OracleChainRenderer | null>(null);
@@ -1150,7 +1147,6 @@ export default function App() {
   const [showSatelliteImagery, setShowSatelliteImagery] = useState(false);
   const [showAnalyticsWorkbench, setShowAnalyticsWorkbench] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [showMilitarySymbology, setShowMilitarySymbology] = useState(false);
   // CMD+K keyboard shortcut
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1172,9 +1168,11 @@ export default function App() {
   const [lastDream, setLastDream] = useState<{ scenariosRun: number; modelUpdates: number; newCausalEdges: number; timestamp: number } | null>(null);
   const [notifications, setNotifications] = useState<Array<{id:number;text:string;severity:string}>>([]);
   const [populationImpact, setPopulationImpact] = useState<ReturnType<typeof calculatePopulationImpact> | null>(null);
+  const aiMessagesRef = useRef<ChatMessage[]>([]);
   const [aiMessages, setAiMessages] = useState<ChatMessage[]>([
     { id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' },
   ]);
+  aiMessagesRef.current = aiMessages;
   const [aiTyping, setAiTyping] = useState(false);
   const auth = useAuth();
   const ws = useWebSocket(auth.token ?? undefined);
@@ -1308,6 +1306,16 @@ export default function App() {
   const measureEntitiesRef = useRef<Cesium.Entity[]>([]);
   const currentChatIdRef = useRef<string | null>(null);
   const chatSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentActionHistoryRef = useRef<Array<{
+    type: 'flyTo' | 'toggleLayer' | 'addEntity' | 'removeEntity' | 'addPanel';
+    entities?: Cesium.Entity[];
+    layerId?: string;
+    previousEnabled?: boolean;
+    previousCamera?: { longitude: number; latitude: number; height: number };
+    panelData?: unknown;
+    description: string;
+    timestamp: number;
+  }>>([]);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const [showChatHistory, setShowChatHistory] = useState(false);
   // Phase 8: Session sharing. New shares store session contents locally and
@@ -1449,7 +1457,7 @@ export default function App() {
   const chatMessagesRef = useRef<HTMLDivElement>(null);
 
   /* Auto-scroll chat to bottom on new messages */
-  useEffect(() => { chatMessagesRef.current?.scrollTo({ top: chatMessagesRef.current.scrollHeight, behavior: 'smooth' }); }, [aiMessages.length, aiTyping]);
+  useEffect(() => { chatMessagesRef.current?.scrollTo({ top: chatMessagesRef.current.scrollHeight, behavior: 'smooth' }); }, [aiMessages.length, aiMessages[aiMessages.length - 1]?.content, aiTyping]);
 
   const aiApiType = useMemo(() => resolveAiProvider(apiVault), [apiVault]);
   const cesiumIonToken = useMemo(() => resolveCesiumIonToken(apiVault), [apiVault]);
@@ -1669,23 +1677,6 @@ export default function App() {
     return () => { timer.unregister('clock'); };
   }, []);
 
-  /* ── Military Symbology Overlay Sync ── */
-  useEffect(() => {
-    const overlay = militaryOverlayRef.current;
-    if (!overlay) return;
-    overlay.setEnabled(showMilitarySymbology);
-    if (!showMilitarySymbology) return;
-    const interval = setInterval(() => {
-      if (!overlay.isEnabled()) return;
-      const ais = aisTrackerRef.current;
-      if (ais) overlay.updateFromVessels(ais.getVesselsSnapshot());
-      const flightDrs = [flightDrRef, adsbLolDrRef, adsbFiDrRef, flightawareDrRef, airlabsDrRef];
-      for (const dr of flightDrs) {
-        if (dr.current) overlay.updateFromFlights(dr.current.getFlightsSnapshot());
-      }
-    }, 2000);
-    return () => { clearInterval(interval); overlay.setEnabled(false); };
-  }, [showMilitarySymbology]);
   useEffect(() => {
     if (!cesiumElRef.current || viewerRef.current) return;
     window.Cesium = Cesium;
@@ -1755,7 +1746,6 @@ export default function App() {
     if (aisKey) {
       aisTrackerRef.current = new AisVesselTracker(v, aisKey);
     }
-    militaryOverlayRef.current = new MilitarySymbologyOverlay(v);
     v.scene.logarithmicDepthBuffer = true;
     v.clock.shouldAnimate = true;
     v.clock.multiplier = 1;
@@ -6744,12 +6734,15 @@ export default function App() {
             }
           }
 
+          if (data.commands && Array.isArray(data.commands)) {
+            executeAgentCommands(data.commands);
+          }
           if (data.done) {
             if (data.workspaceId) setSandboxWorkspaceId(data.workspaceId);
             const summary = stepOutputs.join('\n\n');
             if (summary) {
               setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: summary, type: 'pipeline' }]);
-              stepOutputs.length = 0; // prevent fallback duplicate
+              stepOutputs.length = 0;
             }
           }
         } catch { /* ignore */ }
@@ -6908,12 +6901,14 @@ export default function App() {
         });
         for (const e of toRemove) v0.entities.remove(e);
       }
+      const contextMessages = aiMessagesRef.current.slice(-8).map(m => ({ role: m.role, content: m.content.slice(0, 1000) }));
       const resp = await fetch('/api/agent/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' , ...authHeaders() },
         body: JSON.stringify({
           message: userMsg,
           userId: 'browser-user',
+          recentMessages: contextMessages,
           images: chatImages.length > 0 ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName })) : undefined,
         }),
         signal: abortController.signal,
@@ -6930,6 +6925,7 @@ export default function App() {
       let buffer = '';
       let finalText = '';
       let lastTraceId: string | null = null;
+      let lastModelTier: string | null = null;
       let serverError: string | null = null;
       const receivedCommands: Array<{ action: string; label?: string; lat?: number; lon?: number; layerId?: string }> = [];
       let streamingMsgId: number | null = null;
@@ -7005,6 +7001,7 @@ export default function App() {
             if (data.type === 'output') {
               finalText = data.text;
               if (data.traceId) lastTraceId = data.traceId;
+              if (data.modelTier) lastModelTier = data.modelTier;
             }
             if (data.type === 'panel' || (data.stats && data.charts)) {
               setDigitalTwinPanel(data);
@@ -7036,19 +7033,19 @@ export default function App() {
       } else if (finalText) {
         if (streamingMsgId !== null) {
           // Replace streaming content with final text (which may include updates from command parsing)
-          setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: finalText, traceId: lastTraceId, commands: receivedCommands.length > 0 ? receivedCommands : undefined } : m));
+          setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: finalText, traceId: lastTraceId, commands: receivedCommands.length > 0 ? receivedCommands : undefined, modelTier: lastModelTier } : m));
         } else {
-          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText, traceId: lastTraceId, commands: receivedCommands.length > 0 ? receivedCommands : undefined }]);
+          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText, traceId: lastTraceId, commands: receivedCommands.length > 0 ? receivedCommands : undefined, modelTier: lastModelTier }]);
         }
       } else if (streamingMsgId === null) {
-        const fallback = generateLocalResponse(userMsg, loc);
+        const fallback = await generateLocalResponse(userMsg, loc);
         setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: fallback }]);
       }
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') {
         setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: '⏹ Response stopped.' }]);
       } else {
-        const fallback = generateLocalResponse(userMsg, loc);
+        const fallback = await generateLocalResponse(userMsg, loc);
         setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `${fallback}\n\n*(Agent unavailable: ${e})*` }]);
       }
     }
@@ -7114,17 +7111,27 @@ export default function App() {
   }
 
   function executeAgentCommands(commands: Array<{ action: string; [key: string]: unknown }>) {
+    const v = viewerRef.current;
+    if (!v) return;
+    const history = agentActionHistoryRef.current;
     for (const cmd of commands) {
       try {
-        const v = viewerRef.current;
-        if (!v) continue;
+        const action: { type: 'flyTo' | 'toggleLayer' | 'addEntity' | 'addPanel'; entities?: Cesium.Entity[]; layerId?: string; previousEnabled?: boolean; previousCamera?: { longitude: number; latitude: number; height: number }; panelData?: unknown; description: string; timestamp: number } = {
+          type: 'addEntity',
+          description: cmd.action,
+          timestamp: Date.now(),
+        };
         switch (cmd.action) {
           case 'flyTo': {
             const lat = cmd.lat as number;
             const lon = cmd.lon as number;
             if (isFinite(lat) && isFinite(lon)) {
+              const cam = v.camera.positionCartographic;
+              action.type = 'flyTo';
+              action.previousCamera = { longitude: Cesium.Math.toDegrees(cam.longitude), latitude: Cesium.Math.toDegrees(cam.latitude), height: cam.height };
+              action.description = `Fly to ${(cmd.label as string) || `${lat.toFixed(2)}, ${lon.toFixed(2)}`}`;
               focusLocation(lat, lon, { label: (cmd.label as string) || 'Location', color: '#60a5fa', height: 1500 });
-      cleanupThinkingSteps(true);
+              cleanupThinkingSteps(true);
             }
             break;
           }
@@ -7133,7 +7140,13 @@ export default function App() {
             const enabled = cmd.enabled as boolean;
             if (layerId) {
               const currentOn = isLayerEnabled(layerId);
-              if (currentOn !== enabled) toggleLayer(layerId);
+              if (currentOn !== enabled) {
+                action.type = 'toggleLayer';
+                action.layerId = layerId;
+                action.previousEnabled = currentOn;
+                action.description = `${enabled ? 'Enable' : 'Disable'} layer: ${layerId}`;
+                toggleLayer(layerId);
+              }
             }
             break;
           }
@@ -7143,13 +7156,15 @@ export default function App() {
             if (isFinite(lat) && isFinite(lon)) {
               const color = (cmd.color as string) || '#ef4444';
               const label = (cmd.label as string);
-              v.entities.add({
+              const entity = v.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(lon, lat),
                 name: label || 'Agent Pin',
                 billboard: { image: createPinIcon(color, 24), width: 24, height: 24, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
                 label: label ? { text: label, font: '11px "JetBrains Mono"', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, pixelOffset: new Cesium.Cartesian2(0, -18) } : undefined,
                 properties: { layer: 'digital_twin', lat, lon, agent: true },
               });
+              action.entities = [entity];
+              action.description = label || `Pin at ${lat.toFixed(2)}, ${lon.toFixed(2)}`;
             }
             break;
           }
@@ -7157,17 +7172,20 @@ export default function App() {
             const points = cmd.points as Array<{ lat: number; lon: number; value: number }>;
             const radius = (cmd.radius as number) || 50;
             if (Array.isArray(points)) {
+              const entities: Cesium.Entity[] = [];
               for (const pt of points) {
                 if (!isFinite(pt.lat) || !isFinite(pt.lon)) continue;
                 const intensity = Math.max(0, Math.min(1, pt.value || 0.5));
                 const color = Cesium.Color.fromHsl(0.66 - intensity * 0.66, 1, 0.5, 0.6);
                 const pixelSize = Math.max(4, Math.round(radius * intensity * 0.15));
-                v.entities.add({
+                entities.push(v.entities.add({
                   position: Cesium.Cartesian3.fromDegrees(pt.lon, pt.lat),
                   point: { pixelSize, color, outlineColor: Cesium.Color.WHITE.withAlpha(0.3), outlineWidth: 1, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
                   properties: { layer: 'heatmap', lat: pt.lat, lon: pt.lon, value: pt.value, agent: true },
-                });
+                }));
               }
+              action.entities = entities;
+              action.description = `Heatmap (${entities.length} points)`;
             }
             break;
           }
@@ -7180,7 +7198,7 @@ export default function App() {
               const positions = coords.map(c => Cesium.Cartesian3.fromDegrees(c[1], c[0]));
               const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
               const fill = rgba ? Cesium.Color.fromBytes(+rgba[1], +rgba[2], +rgba[3], Math.round((parseFloat(rgba[4]) || 0.35) * 255)) : Cesium.Color.WHITE.withAlpha(0.35);
-              v.entities.add({
+              const entity = v.entities.add({
                 polygon: {
                   hierarchy: positions,
                   material: fill,
@@ -7192,6 +7210,8 @@ export default function App() {
                 name: label,
                 properties: { layer: 'digital_twin', label, agent: true },
               });
+              action.entities = [entity];
+              action.description = label;
             }
             break;
           }
@@ -7200,21 +7220,22 @@ export default function App() {
             const label = (cmd.label as string) || 'GeoJSON';
             const color = (cmd.color as string) || '#22c55e';
             const cesiumColor = (() => { try { return Cesium.Color.fromCssColorString(color); } catch { return Cesium.Color.fromCssColorString('#22c55e'); } })();
+            const entities: Cesium.Entity[] = [];
             const addPoint = (lon: number, lat: number, props?: Record<string, unknown>) => {
               if (!isFinite(lon) || !isFinite(lat)) return;
-              v.entities.add({
+              entities.push(v.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(lon, lat),
                 billboard: { image: createPinIcon(color, 20), width: 20, height: 20, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
                 properties: { layer: 'geojson', agent: true, ...props },
-              });
+              }));
             };
             const addLine = (coords: number[][], props?: Record<string, unknown>) => {
               if (!Array.isArray(coords) || coords.length < 2) return;
               const positions = coords.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]));
-              v.entities.add({
+              entities.push(v.entities.add({
                 polyline: { positions, width: 2, material: cesiumColor, clampToGround: true },
                 properties: { layer: 'geojson', agent: true, ...props },
-              });
+              }));
             };
             const addPolygon = (rings: number[][][], props?: Record<string, unknown>) => {
               if (!Array.isArray(rings) || rings.length === 0) return;
@@ -7222,7 +7243,7 @@ export default function App() {
               if (outer.length < 3) return;
               const positions = outer.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]));
               const holes = rings.slice(1).map(ring => new Cesium.PolygonHierarchy(ring.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]))));
-              v.entities.add({
+              entities.push(v.entities.add({
                 polygon: {
                   hierarchy: new Cesium.PolygonHierarchy(positions, holes),
                   material: cesiumColor.withAlpha(0.4),
@@ -7231,53 +7252,30 @@ export default function App() {
                   height: 0.5,
                 },
                 properties: { layer: 'digital_twin', agent: true, ...props },
-              });
+              }));
             };
             const renderGeometry = (geom: { type: string; coordinates: unknown }, props?: Record<string, unknown>) => {
               if (!geom) return;
               switch (geom.type) {
-                case 'Point': {
-                  const c = geom.coordinates as [number, number];
-                  addPoint(c[0], c[1], props);
-                  break;
-                }
-                case 'MultiPoint': {
-                  for (const c of (geom.coordinates as number[][])) addPoint(c[0], c[1], props);
-                  break;
-                }
-                case 'LineString': {
-                  addLine(geom.coordinates as number[][], props);
-                  break;
-                }
-                case 'MultiLineString': {
-                  for (const line of (geom.coordinates as number[][][])) addLine(line, props);
-                  break;
-                }
-                case 'Polygon': {
-                  addPolygon(geom.coordinates as number[][][], props);
-                  break;
-                }
-                case 'MultiPolygon': {
-                  for (const poly of (geom.coordinates as number[][][][])) addPolygon(poly, props);
-                  break;
-                }
-                case 'GeometryCollection': {
-                  const geoms = (geom as unknown as { geometries: Array<{ type: string; coordinates: unknown }> }).geometries;
-                  if (Array.isArray(geoms)) for (const g of geoms) renderGeometry(g, props);
-                  break;
-                }
+                case 'Point': { const c = geom.coordinates as [number, number]; addPoint(c[0], c[1], props); break; }
+                case 'MultiPoint': { for (const c of (geom.coordinates as number[][])) addPoint(c[0], c[1], props); break; }
+                case 'LineString': { addLine(geom.coordinates as number[][], props); break; }
+                case 'MultiLineString': { for (const line of (geom.coordinates as number[][][])) addLine(line, props); break; }
+                case 'Polygon': { addPolygon(geom.coordinates as number[][][], props); break; }
+                case 'MultiPolygon': { for (const poly of (geom.coordinates as number[][][][])) addPolygon(poly, props); break; }
+                case 'GeometryCollection': { const geoms = (geom as unknown as { geometries: Array<{ type: string; coordinates: unknown }> }).geometries; if (Array.isArray(geoms)) for (const g of geoms) renderGeometry(g, props); break; }
               }
             };
             if (geojson?.features) {
-              for (const feature of geojson.features) {
-                renderGeometry(feature.geometry, feature.properties);
-              }
+              for (const feature of geojson.features) renderGeometry(feature.geometry, feature.properties);
             } else if (geojson?.type === 'Feature') {
               const singleFeature = geojson as unknown as { geometry: { type: string; coordinates: unknown }; properties?: Record<string, unknown> };
               renderGeometry(singleFeature.geometry, singleFeature.properties);
             } else if (geojson?.type && geojson.type !== 'FeatureCollection') {
               renderGeometry(geojson as unknown as { type: string; coordinates: unknown }, { label });
             }
+            action.entities = entities;
+            action.description = `${label} (${entities.length} features)`;
             break;
           }
           case 'addChart': {
@@ -7311,17 +7309,22 @@ export default function App() {
                   ctx.fillText(String(values[i]), x, y - 3);
                 });
               }
-              v.entities.add({
+              const entity = v.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 5000),
                 billboard: { image: canvas.toDataURL(), width: 320, height: 200, disableDepthTestDistance: Number.POSITIVE_INFINITY },
                 properties: { layer: 'chart', agent: true },
               });
+              action.entities = [entity];
+              action.description = title;
             }
             break;
           }
           case 'addPanel': {
             const panelData = cmd.panelData as Record<string, unknown> | undefined;
             if (panelData) {
+              action.type = 'addPanel';
+              action.panelData = panelData;
+              action.description = 'Show analysis panel';
               setDigitalTwinPanel(panelData as any);
             }
             break;
@@ -7329,11 +7332,69 @@ export default function App() {
           default:
             break;
         }
+        if (action.type !== 'addEntity') history.push(action as any);
+        else if (action.entities && action.entities.length > 0) history.push(action as any);
       } catch { /* skip malformed commands */ }
     }
   }
 
-  function generateLocalResponse(message: string, location: { lat: number; lon: number } | null): string {
+  function undoLastAgentAction() {
+    const history = agentActionHistoryRef.current;
+    if (history.length === 0) return;
+    const last = history.pop()!;
+    const v = viewerRef.current;
+    if (!v) return;
+    switch (last.type) {
+      case 'flyTo':
+        if (last.previousCamera) {
+          focusLocation(last.previousCamera.latitude, last.previousCamera.longitude, { label: 'Previous view', color: '#60a5fa', height: last.previousCamera.height });
+        }
+        break;
+      case 'toggleLayer':
+        if (last.layerId) {
+          toggleLayer(last.layerId);
+        }
+        break;
+      case 'addEntity':
+        if (last.entities) {
+          for (const e of last.entities) {
+            try { v.entities.remove(e); } catch { /* ignore */ }
+          }
+        }
+        break;
+      case 'addPanel':
+        setDigitalTwinPanel(null);
+        break;
+    }
+  }
+
+  function clearAllAgentActions() {
+    const v = viewerRef.current;
+    if (!v) return;
+    const toRemove = v.entities.values.filter((e: any) => {
+      const props = e.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+      return props?.agent === true;
+    });
+    for (const e of toRemove) {
+      try { v.entities.remove(e); } catch { /* ignore */ }
+    }
+    agentActionHistoryRef.current = [];
+    setDigitalTwinPanel(null);
+  }
+
+  async function generateLocalResponse(message: string, location: { lat: number; lon: number } | null): Promise<string> {
+    try {
+      const resp = await fetch('/api/agent/local-ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: message.slice(0, 2000) }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data?.response) return data.response;
+      }
+    } catch { /* fall through to keyword matcher */ }
     const lower = message.toLowerCase();
     if (lower.includes('earthquake')) return '**Seismic Activity**\n\nRecent earthquakes are displayed on the globe. Use the sidebar to toggle earthquake data layers. The color intensity indicates magnitude - red circles show M5+ events.';
     if (lower.includes('weather')) return '**Weather Information**\n\nClick on any location to see current weather conditions. Temperature, humidity, wind speed, and conditions are displayed in real-time cards.';
@@ -8505,6 +8566,8 @@ export default function App() {
             <div style={{display:'flex',gap:4,alignItems:'center'}}>
               <button onClick={() => setShowChatHistory(prev => !prev)} title="Chat History" style={{background:'none',border:'none',color:'#64748b',cursor:'pointer',fontSize:13,padding:'2px 4px',lineHeight:1}}><History size={14} /></button>
               <button onClick={newChat} title="New Chat" style={{background:'none',border:'none',color:'#64748b',cursor:'pointer',fontSize:13,padding:'2px 4px',lineHeight:1}}><Plus size={14} /></button>
+              <button onClick={undoLastAgentAction} title="Undo last AI action" style={{background:'none',border:'none',color:'#64748b',cursor:'pointer',fontSize:13,padding:'2px 4px',lineHeight:1}}><RotateCcw size={14} /></button>
+              <button onClick={clearAllAgentActions} title="Clear all AI entities" style={{background:'none',border:'none',color:'#64748b',cursor:'pointer',fontSize:13,padding:'2px 4px',lineHeight:1}}><Trash2 size={14} /></button>
             </div>
           } style={{ maxHeight: 'calc(100vh - 160px)' }}>
         <div className="ai-messages" ref={chatMessagesRef} style={{paddingBottom:4, overflowY:'auto', maxHeight:'calc(100vh - 320px)'}}>
@@ -8517,7 +8580,7 @@ export default function App() {
                   {msg.type === 'vision' && <div className="msg-label" style={{color:'#a78bfa'}}><SearchIcon size={12} style={{display:'inline',marginRight:3}} /> Vision Analysis</div>}
                   {msg.type === 'data-analysis' && <div className="msg-label" style={{color:'#34d399'}}><BarChart3 size={12} style={{display:'inline',marginRight:3}} /> Data Analysis</div>}
                   {msg.type === 'error' && <div className="msg-label" style={{color:'#ef4444'}}><AlertTriangle size={12} style={{display:'inline',marginRight:3}} /> Error</div>}
-                  <div className="rich-content" dangerouslySetInnerHTML={{ __html: richRender(msg.content) }} />
+                  <div className="rich-content" dangerouslySetInnerHTML={{ __html: richRender(msg.content) + (aiTyping && idx === aiMessages.length - 1 ? '<span class="streaming-cursor">▊</span>' : '') }} />
                   {msg.toolEvents && msg.toolEvents.length > 0 && (
                     <div style={{ display:'flex', flexDirection:'column', gap:4, marginTop:6 }}>
                       {msg.toolEvents.map((ev, i) => {
@@ -8551,6 +8614,9 @@ export default function App() {
                     </div>
                   )}
                   {renderCommandChips(msg.commands, focusLocation, toggleLayer)}
+                  {msg.modelTier && (
+                    <span style={{fontSize:9,color:'#64748b',background:'rgba(100,116,139,0.1)',borderRadius:3,padding:'1px 5px',marginTop:2,display:'inline-block'}}>{msg.modelTier}</span>
+                  )}
                   {msg.content && idx > 0 && (
                     <div style={{marginTop:4}}>
                       <button
@@ -8655,9 +8721,20 @@ export default function App() {
         )}
         {aiMessages.length <= 1 && (
         <div className="ai-suggestion-chips">
-          {['Recent earthquakes?','Weather in Tokyo','Show wildfires','Aircraft near Delhi','Analyze quake stats','Compute averages'].map(chip => (
-            <span key={chip} className="ai-chip" onClick={() => { setAiInput(chip); }}>{chip}</span>
-          ))}
+          {(() => {
+            const chips: string[] = [];
+            if (isLayerEnabled('earthquakes')) chips.push('Recent earthquakes?', 'Seismic hotspots?');
+            else chips.push('Show earthquake data');
+            if (isLayerEnabled('wildfires') || isLayerEnabled('severe_storms') || isLayerEnabled('volcanoes')) chips.push('Active natural disasters');
+            else chips.push('Show wildfires', 'Storm tracking');
+            if (isLayerEnabled('flight_tracks') || isLayerEnabled('2_adsb_lol')) chips.push('Aircraft near me');
+            else chips.push('Aircraft near Delhi');
+            if (recentDiscoveries.length > 0) chips.push(`Tell me about: ${recentDiscoveries[0].summary.slice(0, 30)}`);
+            chips.push('Analyze quake stats', 'Compute averages');
+            return chips.slice(0, 6).map(chip => (
+              <span key={chip} className="ai-chip" onClick={() => { setAiInput(chip); }}>{chip}</span>
+            ));
+          })()}
         </div>
         )}
         <div className="ai-input-wrap">
@@ -9246,9 +9323,6 @@ export default function App() {
       <ErrorBoundary label="Analytics Workbench">
         <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} onToolResult={handleToolResult} onClearResult={handleClearToolResult} zIndex={getPanelZIndex('analytics')} />
       </ErrorBoundary>
-
-      {/* Military Symbology Panel */}
-      {showMilitarySymbology && <MilitarySymbologyPanel zIndex={getPanelZIndex('military-symbology')} onClose={() => setShowMilitarySymbology(false)} />}
 
       {/* Command Palette (CMD+K) */}
       <CommandPalette
