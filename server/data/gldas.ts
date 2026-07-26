@@ -112,13 +112,13 @@ async function downloadGldasFile(url: string): Promise<ArrayBuffer | null> {
  * The h5wasm File provides datasets with 3D shape [time, lat, lon].
  */
 function readGridScalar(
-  h5File: any,
+  h5File: import('h5wasm').File,
   varName: string,
   latIdx: number,
   lonIdx: number,
 ): number | null {
   try {
-    const dataset = h5File.get(varName);
+    const dataset = h5File.get(varName) as { value: number[]; shape?: number[] } | null;
     if (!dataset) return null;
     const data = dataset.value;
     if (!data) return null;
@@ -167,8 +167,10 @@ export async function fetchGldasData(
   if (!buffer) return DEFAULT_FALLBACK;
 
   try {
-    const { File } = await import('h5wasm');
-    const h5File = new File(buffer, url.split('/').pop()!);
+    const h5 = await import('h5wasm');
+    const tmpPath = `/tmp/gldas_${Date.now()}.h5`;
+    h5.FS!.writeFile(tmpPath, new Uint8Array(buffer));
+    const h5File = new h5.File(tmpPath, 'r');
 
     const latIdx = Math.max(0, Math.min(GLDAS_LATS - 1, latToIndex(lat)));
     const lonIdx = Math.max(0, Math.min(GLDAS_LONS - 1, lonToIndex(lon)));
@@ -187,6 +189,7 @@ export async function fetchGldasData(
     };
 
     h5File.close?.();
+    h5.FS!.unlink(tmpPath);
     return result;
   } catch {
     return DEFAULT_FALLBACK;

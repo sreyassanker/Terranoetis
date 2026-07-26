@@ -155,8 +155,6 @@ export default function KaggleFloodOverlay({
         for (let col = 0; col < gs; col++) {
           const idx = row * gs + col;
           const depth = isFinite(values[idx]) ? values[idx] : 0;
-          const terrainH = isFinite(terrainValues[idx]) ? terrainValues[idx] : 0;
-
           if (depth < 0.01) {
             // No water — transparent (show terrain underneath)
             const pi = idx * 4;
@@ -197,7 +195,7 @@ export default function KaggleFloodOverlay({
       });
       const layer = viewer.scene.imageryLayers.addImageryProvider(provider);
       layer.alpha = opacity;
-      (layer as any).name = 'kaggle_flood_depth';
+      (layer as unknown as { name: string }).name = 'kaggle_flood_depth';
       layerRef.current = layer;
 
       // Build terrain canvas (grayscale heightmap)
@@ -240,7 +238,7 @@ export default function KaggleFloodOverlay({
       });
       const tLayer = viewer.scene.imageryLayers.addImageryProvider(tProvider);
       tLayer.alpha = 0.5;
-      (tLayer as any).name = 'kaggle_terrain';
+      (tLayer as unknown as { name: string }).name = 'kaggle_terrain';
       terrainLayerRef.current = tLayer;
 
       // ── Build velocity arrow overlay ──────────────────────────────
@@ -319,7 +317,7 @@ export default function KaggleFloodOverlay({
         });
         const arrowLayer = viewer.scene.imageryLayers.addImageryProvider(arrowProvider);
         arrowLayer.alpha = 0.85;
-        (arrowLayer as any).name = 'kaggle_flood_arrows';
+        (arrowLayer as unknown as { name: string }).name = 'kaggle_flood_arrows';
       }
 
       // Fly camera to the flood area
@@ -385,12 +383,12 @@ export default function KaggleFloodOverlay({
         </div>
       )}
       {error && (
-        <div style={{ color: '#ef4444' }}>⚠ {error}</div>
+        <div style={{ color: '#ef4444' }}>Error: {error}</div>
       )}
       {stats && !loading && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-            <span style={{ fontWeight: 700, color: '#60a5fa' }}>🌊 Kaggle Flood Overlay</span>
+            <span style={{ fontWeight: 700, color: '#60a5fa' }}>Kaggle Flood Overlay</span>
             {onDismiss && (
               <button onClick={onDismiss} onMouseEnter={() => setDismissHovered(true)} onMouseLeave={() => setDismissHovered(false)} style={{
                 background: dismissHovered ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',

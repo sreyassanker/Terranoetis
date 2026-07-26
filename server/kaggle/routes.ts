@@ -59,8 +59,8 @@ router.post('/simulate', async (req: Request, res: Response) => {
       streamUrl: `/api/kaggle/simulate/${job.id}/stream`,
       createdAt: job.createdAt,
     });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -171,8 +171,8 @@ router.get('/simulate/:id/grid/:name', (req: Request, res: Response) => {
       }
 
       return res.json({ shape, dtype, values });
-    } catch (err: any) {
-      return res.status(500).json({ error: `Failed to parse .npy: ${err.message}` });
+    } catch (err: unknown) {
+      return res.status(500).json({ error: `Failed to parse .npy: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
 
@@ -215,14 +215,14 @@ router.get('/kernels', (_req: Request, res: Response) => {
     const metaPath = path.join(dir, 'kernel-metadata.json');
     let metadata: Record<string, unknown> = {};
     if (fs.existsSync(metaPath)) {
-      try { metadata = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch {}
+      try { metadata = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch { /* ignore parse errors */ }
     }
     return {
       name: t,
       exists: fs.existsSync(dir),
-      slug: (metadata as any).id || `sreyassanker/${t}`,
-      title: (metadata as any).title || t,
-      gpu: (metadata as any).enable_gpu ?? false,
+      slug: (metadata as Record<string, unknown>).id || `sreyassanker/${t}`,
+      title: (metadata as Record<string, unknown>).title || t,
+      gpu: (metadata as Record<string, unknown>).enable_gpu ?? false,
     };
   });
 

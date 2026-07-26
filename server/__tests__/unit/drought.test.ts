@@ -56,7 +56,7 @@ describe('PDSI classification logic', () => {
 
 describe('Grid coordinate indexing', () => {
   it('finds nearest latitude in PDSI 2.5° grid', () => {
-    const grid = [];
+    const grid: number[] = [];
     for (let i = 0; i < 55; i++) grid.push(88.75 - i * 2.5);
 
     const findNearest = (lat: number): number => {
@@ -83,7 +83,7 @@ describe('Grid coordinate indexing', () => {
   });
 
   it('finds nearest longitude index', () => {
-    const grid = [];
+    const grid: number[] = [];
     for (let i = 0; i < 144; i++) grid.push(i * 2.5);
 
     const findNearest = (lon: number): number => {

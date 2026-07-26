@@ -32,7 +32,7 @@ const PRODUCT_PATHS: Record<ImergProduct, string> = {
   final: 'GPM_L3/GPM_3IMERGHH.07',
 };
 
-let _h5wasm: any = null;
+let _h5wasm: typeof import('h5wasm') | null = null;
 async function getH5wasm() {
   if (!_h5wasm) {
     _h5wasm = await import('h5wasm');
@@ -135,15 +135,12 @@ async function downloadImergFile(
   }
 }
 
-interface ImergGridData {
+export interface ImergGridData {
   lat: Float32Array;
   lon: Float32Array;
   precipitation: Float32Array; // 1D array, row-major (lat × lon)
 }
 
-// IMERG grid parameters
-const IMERG_NLAT = 1800;  // 0.1° spacing: -89.95 to 89.95
-const IMERG_NLON = 3600;  // 0.1° spacing: -179.95 to 179.95
 
 /**
  * Parse IMERG HDF5 data to extract precipitation at a lat/lon point.
@@ -235,30 +232,30 @@ export async function fetchImergPrecipitation(
 
   // Parse a single buffer for precip at point; cache lat/lon grids
   async function parseSlot(
-    h5: any,
+    h5: typeof import('h5wasm'),
     buffer: ArrayBuffer,
     cachedLatLon: { lat: Float32Array; lon: Float32Array } | null,
   ): Promise<{ precip: number; latLon: { lat: Float32Array; lon: Float32Array } } | null> {
     const tmpPath = '/tmp/imerg_slot.h5';
     try {
-      h5.FS.writeFile(tmpPath, new Uint8Array(buffer));
+      h5.FS!.writeFile(tmpPath, new Uint8Array(buffer));
       const file = new h5.File(tmpPath, 'r');
       const precipVar = file.get('Grid/precipitation');
       if (!precipVar) { file.close(); return null; }
       const latVar = cachedLatLon ? null : file.get('Grid/lat');
       const lonVar = cachedLatLon ? null : file.get('Grid/lon');
-      const lat = cachedLatLon?.lat ?? new Float32Array((latVar as any).value as number[]);
-      const lon = cachedLatLon?.lon ?? new Float32Array((lonVar as any).value as number[]);
-      const precipArr = new Float32Array(precipVar.value as number[]);
+      const lat = cachedLatLon?.lat ?? new Float32Array((latVar as { value: number[] }).value);
+      const lon = cachedLatLon?.lon ?? new Float32Array((lonVar as { value: number[] }).value);
+      const precipArr = new Float32Array((precipVar as { value: number[] }).value);
       file.close();
 
       const gridData: ImergGridData = { lat, lon, precipitation: precipArr };
-      const mmHr = extractPrecipitationAtPoint(gridData, lat, lon);
+      const mmHr = extractPrecipitationAtPoint(gridData, lat as unknown as number, lon as unknown as number);
       return { precip: mmHr, latLon: { lat, lon } };
     } catch {
       return null;
     } finally {
-      try { h5.FS.unlink(tmpPath); } catch {}
+      try { h5.FS!.unlink(tmpPath); } catch { /* ignore cleanup errors */ }
     }
   }
 
@@ -278,7 +275,7 @@ export async function fetchImergPrecipitation(
         );
 
         // Download in parallel batches
-        let batchSize = 3;
+        const batchSize = 3;
         let totalPrecip = 0;
         let maxIntensity = 0;
         let productSlots = 0;

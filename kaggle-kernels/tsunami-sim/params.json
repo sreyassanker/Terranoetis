@@ -1,9 +1,0 @@
-{
-  "type": "tsunami_wave",
-  "lat": 9.723309421304915,
-  "lon": 76.23064067192595,
-  "grid_size": 512,
-  "magnitude": 8.5,
-  "seafloor_displacement_m": 15,
-  "duration_minutes": 30
-}

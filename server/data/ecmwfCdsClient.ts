@@ -33,13 +33,8 @@ const cache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 }); // 24h TTL
 let cdsFailedOnce = false;
 let cdsFailedAt = 0;
 
-interface CdsTaskStatus {
-  status: 'queued' | 'running' | 'completed' | 'failed';
-  request_id: string;
-  error?: { message: string };
-}
-
 interface CdsRequestParams {
+  [key: string]: unknown;
   dataset: string;
   variables: string[];
   area?: { north: number; west: number; south: number; east: number };
@@ -205,7 +200,7 @@ export async function fetchCdsNetCdf(
       const nc = entries.find((e: { entryName: string }) => e.entryName.endsWith('.nc'));
       if (nc) {
         const buf = nc.getData() as Buffer;
-        buffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+        buffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
       } else {
         console.warn('[CDS] ZIP has no .nc file');
         cache.set(ck, raw);
@@ -225,7 +220,7 @@ export async function fetchCdsNetCdf(
 }
 
 // Lazy h5wasm singleton (same pattern as IMERG)
-let _h5wasmCds: any = null;
+let _h5wasmCds: typeof import('h5wasm') | null = null;
 async function getH5wasm() {
   if (!_h5wasmCds) {
     _h5wasmCds = await import('h5wasm');
@@ -247,19 +242,19 @@ async function readVariable(buffer: ArrayBuffer, varName: string): Promise<Float
     // Defensive copy — ensure buffer is not detached
     const copy = new Uint8Array(buffer.byteLength);
     copy.set(new Uint8Array(buffer));
-    h5.FS.writeFile(tmpPath, copy);
+    h5.FS!.writeFile(tmpPath, copy);
     const file = new h5.File(tmpPath, 'r');
-    const item = file.get(varName);
+    const item = file.get(varName) as { value: number[] } | null;
     const val = item?.value;
     file.close();
-    h5.FS.unlink(tmpPath);
+    h5.FS!.unlink(tmpPath);
     if (val === undefined || val === null) return null;
     if (val instanceof Float32Array) return val;
     if (val instanceof Float64Array) return new Float32Array(val);
     if (Array.isArray(val)) return new Float32Array(val);
     return null;
   } catch {
-    try { (await getH5wasm()).FS.unlink(tmpPath); } catch {}
+    try { (await getH5wasm())!.FS!.unlink(tmpPath); } catch { /* ignore cleanup errors */ }
     return null;
   }
 }
@@ -425,8 +420,6 @@ export async function fetchEra5SurfaceFluxes(
 
 const ERA5_PRESSURE = 'reanalysis-era5-pressure-levels';
 
-// Pressure levels typically used for atmospheric dynamics
-const STANDARD_PRESSURE_LEVELS = ['1000', '925', '850', '700', '500', '250'];
 
 /**
  * Fetch ERA5 pressure-level wind at a point.

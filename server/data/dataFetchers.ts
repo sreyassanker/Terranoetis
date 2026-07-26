@@ -1134,7 +1134,7 @@ async function fetchOpenMeteoEra5(
     const h = data.hourly as Record<string, number[]> | undefined;
     if (!h?.wind_speed_10m) return null as unknown as Era5HighFidelityData;
 
-    const times = h.time as string[] | undefined;
+    const times = h.time as unknown as string[] | undefined;
     let idx = times ? times.findIndex(t => t.includes('T12:')) : -1;
     if (idx < 0) idx = Math.floor((times?.length ?? 1) / 2);
     const get = (key: string): number | null =>

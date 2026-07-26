@@ -110,12 +110,26 @@ const BENCHMARKS: Record<number, { description: string; expected: number; tolera
   122: { description: 'Debye(Te=1000,ne=1e12)~0.0074', expected: 0.0074, tolerance: 0.001, unit: 'm' },
 };
 
+interface BenchmarkResult {
+  description: string;
+  expected: number;
+  actual: number;
+  passed: boolean;
+  error: number;
+}
+interface UncertaintyResult {
+  method: string;
+}
+interface InterpretationResult {
+  hasClassification: boolean;
+  hasRecommendations: boolean;
+}
 interface ToolResult {
   toolId: number; status: 'Runtime Passed' | 'Runtime Passed with Warnings' | 'Runtime Failed';
   result?: number; unit?: string; finite: boolean; apiCalls: ApiCall[]; dataSourcesUsed: string[];
-  warnings: string[]; validation?: any; qualityControl?: any; uncertainty?: any; interpretation?: any;
+  warnings: string[]; validation?: unknown; qualityControl?: unknown; uncertainty?: UncertaintyResult; interpretation?: InterpretationResult;
   preprocessingNotes?: string[]; visualizationType?: string; dataQualityScore?: number; processingTimeMs?: number;
-  proxyUsed: boolean; proxyDetails?: string; benchmark?: any; error?: string;
+  proxyUsed: boolean; proxyDetails?: string; benchmark?: BenchmarkResult; error?: string;
 }
 
 async function runTool(id: number, inputs: Record<string, number>): Promise<ToolResult> {
@@ -130,7 +144,7 @@ async function runTool(id: number, inputs: Record<string, number>): Promise<Tool
     const finite = Number.isFinite(res.result);
     const proxyUsed = res.warnings?.some(w => w.includes('proxy') || w.includes('does NOT satisfy') || w.includes('unavailable')) ?? false;
     const proxyDetails = res.warnings?.find(w => w.includes('proxy') || w.includes('does NOT satisfy') || w.includes('unavailable'));
-    let benchmark: any;
+    let benchmark: BenchmarkResult | undefined;
     const bm = BENCHMARKS[id];
     if (bm && finite) {
       const error = Math.abs(res.result - bm.expected);
@@ -195,11 +209,11 @@ if (proxyTools.length === 0) console.log(`    None — no proxy variables used a
 for (const r of proxyTools) console.log(`    ⚠ Eq ${r.toolId}: ${r.proxyDetails?.slice(0, 120) ?? 'proxy'}`);
 
 const bmR = allResults.filter(r => r.benchmark);
-const bmP = bmR.filter(r => r.benchmark.passed);
+const bmP = bmR.filter(r => r.benchmark!.passed);
 console.log(`\n  NUMERICAL BENCHMARK VALIDATION: ${bmP.length}/${bmR.length} passed`);
 for (const r of bmR) {
-  const icon = r.benchmark.passed ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
-  console.log(`    ${icon} Eq ${String(r.toolId).padStart(3)}: ${r.benchmark.description} | exp=${r.benchmark.expected}, act=${r.benchmark.actual.toExponential(4)}, err=${r.benchmark.error.toExponential(2)}`);
+  const icon = r.benchmark!.passed ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
+  console.log(`    ${icon} Eq ${String(r.toolId).padStart(3)}: ${r.benchmark!.description} | exp=${r.benchmark!.expected}, act=${r.benchmark!.actual.toExponential(4)}, err=${r.benchmark!.error.toExponential(2)}`);
 }
 
 if (failed.length > 0) {

@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import { computeWithContext } from '../server/analytical-models/contextEngine';
-import { EQUATION_ENGINE } from '../server/analytical-models/engine';
 import * as fs from 'fs';
 
 const toolIds = Array.from({length: 150}, (_, i) => i + 1);
@@ -85,11 +84,11 @@ async function main() {
       }
       
       process.stderr.write(`Tool ${id}: ${status} val=${val} ${unit} filters=${filterStatus} area=${areaStatus}\n`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       failed++;
       summaryRows.push(`| ${id} | Tool ${id} | ❌ | ERROR | — | filter=— | area=— |`);
       detailLines.push(`\n---\n\n# Tool ${id}\n`);
-      detailLines.push(`**Status:** ❌ ERROR — ${(e.message ?? 'unknown').substring(0, 150)}`);
+      detailLines.push(`**Status:** ❌ ERROR — ${(e instanceof Error ? e.message : String(e)).substring(0, 150)}`);
       detailLines.push('');
       process.stderr.write(`Tool ${id}: ERROR\n`);
     }

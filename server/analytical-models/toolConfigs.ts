@@ -8,7 +8,7 @@
  * Generated from peer-reviewed references and authoritative sources.
  */
 
-import type { ClassificationBand, UncertaintyEstimate, VizType } from './toolWorkflows';
+import type { ClassificationBand, UncertaintyEstimate } from './toolWorkflows';
 
 export type VisualizationType =
   | 'scalar' | 'heatmap' | 'profile' | 'timeseries' | 'contour'

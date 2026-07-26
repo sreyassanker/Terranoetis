@@ -9,7 +9,7 @@
  * 5. Load results into frontend
  */
 
-import { exec, spawn } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
@@ -21,7 +21,6 @@ const execAsync = promisify(exec);
 const KAGGLE_KERNELS_DIR = path.resolve(process.cwd(), 'kaggle-kernels');
 const RESULTS_DIR = path.resolve(process.cwd(), 'kaggle-kernels', 'results');
 const POLL_INTERVAL_MS = 15_000; // 15 seconds between status checks
-const MAX_WAIT_MS = 600_000;     // 10 minutes max wait
 const JOB_CLEANUP_AGE_MS = 3600_000; // 1 hour — remove completed jobs after this
 
 // ═════════════════════════════════════════════════════════════════
@@ -119,9 +118,9 @@ async function kaggleCommand(cmd: string): Promise<string> {
       logger.warn({ cmd, stderr }, 'Kaggle CLI stderr');
     }
     return stdout.trim();
-  } catch (err: any) {
-    logger.error({ cmd, error: err.message }, 'Kaggle CLI error');
-    throw new Error(`Kaggle command failed: ${err.message}`);
+  } catch (err: unknown) {
+    logger.error({ cmd, error: err instanceof Error ? err.message : String(err) }, 'Kaggle CLI error');
+    throw new Error(`Kaggle command failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -131,7 +130,12 @@ async function pushKernel(kernelDir: string): Promise<void> {
 
 async function getKernelStatus(ownerSlug: string): Promise<string> {
   const output = await kaggleCommand(`kaggle kernels status ${ownerSlug}`);
-  // Output is one of: "running", "complete", "error", "cancel"
+  // Kaggle CLI v2.x outputs: "owner/kernel has status \"KernelWorkerStatus.COMPLETE\""
+  // Older versions output just: "complete"
+  const match = output.match(/KernelWorkerStatus\.(\w+)/i);
+  if (match) {
+    return match[1].toLowerCase();
+  }
   return output.toLowerCase().trim();
 }
 
@@ -246,10 +250,10 @@ async function runPipeline(
     updateJobStatus(job, 'running', 'Kernel pushed. Kaggle GPU booting...');
     logger.info({ jobId: job.id, ownerSlug }, 'Kernel pushed to Kaggle');
 
-    // ── Step 3: Poll for completion ──
+    // ── Step 3: Poll for completion (no timeout — wait until Kaggle finishes) ──
     let lastStatus = '';
     let sawComplete = false;
-    while (Date.now() - startTime < MAX_WAIT_MS) {
+    while (true) {
       await sleep(POLL_INTERVAL_MS);
 
       try {
@@ -266,14 +270,14 @@ async function runPipeline(
         if (status === 'error' || status === 'cancel') {
           throw new Error(`Kaggle kernel ${status}`);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         // Transient errors during polling — retry
-        logger.warn({ jobId: job.id, error: err.message }, 'Poll error, retrying...');
+        logger.warn({ jobId: job.id, error: err instanceof Error ? err.message : String(err) }, 'Poll error, retrying...');
       }
     }
 
-    if (!sawComplete && Date.now() - startTime >= MAX_WAIT_MS) {
-      throw new Error('Simulation timed out after 10 minutes');
+    if (!sawComplete) {
+      throw new Error('Simulation ended without completion');
     }
 
     // ── Step 4: Download results ──
