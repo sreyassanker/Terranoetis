@@ -58,6 +58,7 @@
     "e2b": "^2.31.0",
     "embla-carousel-react": "^8.6.0",
     "express": "^4.21.2",
+    "geotiff": "^3.0.5",
     "h3-js": "^4.4.0",
     "h5wasm": "^0.10.3",
     "helmet": "^8.2.0",

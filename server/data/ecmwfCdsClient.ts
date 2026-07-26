@@ -19,8 +19,8 @@
  * Falls back gracefully when no CDS_API_TOKEN is configured.
  */
 
-import { NetCDFReader } from 'netcdfjs';
 import NodeCache from 'node-cache';
+import AdmZip from 'adm-zip';
 
 const CDS_API_BASE = 'https://cds.climate.copernicus.eu/api/retrieve/v1';
 const POLL_INTERVAL_MS = 3000;
@@ -29,8 +29,9 @@ const FETCH_TIMEOUT = 60000;  // 60s per HTTP call
 
 const cache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 }); // 24h TTL
 
-// Circuit breaker: skip CDS entirely after first failure to avoid 60s timeouts per request
+// Circuit breaker: skip CDS entirely after auth failure to avoid 60s timeouts per request
 let cdsFailedOnce = false;
+let cdsFailedAt = 0;
 
 interface CdsTaskStatus {
   status: 'queued' | 'running' | 'completed' | 'failed';
@@ -54,11 +55,12 @@ function getToken(): string | null {
   return process.env.CDS_API_TOKEN ?? null;
 }
 
-function headers(): Record<string, string> {
-  const token = getToken();
+function headers(tokenOverride?: string): Record<string, string> {
+  const token = tokenOverride ?? getToken();
   return {
     'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    'Accept': 'application/json',
+    ...(token ? { 'PRIVATE-TOKEN': token } : {}),
   };
 }
 
@@ -82,6 +84,11 @@ function todayStr(): string {
 export async function fetchCdsNetCdf(
   params: CdsRequestParams,
 ): Promise<ArrayBuffer | null> {
+  // Auto-reset circuit breaker after 5 minutes for transient failures
+  if (cdsFailedOnce && Date.now() - cdsFailedAt > 300000) {
+    cdsFailedOnce = false;
+    cdsFailedAt = 0;
+  }
   if (cdsFailedOnce) return null;
   const token = getToken();
   if (!token) return null;
@@ -98,9 +105,9 @@ export async function fetchCdsNetCdf(
       month: params.months,
       day: params.days,
       time: params.times,
-      data_format: params.format === 'netcdf' ? 'netcdf' : 'grib',
+      format: params.format === 'netcdf' ? 'netcdf' : 'grib',
       ...(params.area ? {
-        area: `${params.area.north}/${params.area.west}/${params.area.south}/${params.area.east}`,
+        area: `${params.area.north}/${params.area.south}/${params.area.east}/${params.area.west}`,
       } : {}),
     },
   };
@@ -111,25 +118,32 @@ export async function fetchCdsNetCdf(
       method: 'POST',
       headers: headers(),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(30000),
     },
   );
   if (!submitResp.ok) {
     const errText = await submitResp.text().catch(() => 'unknown');
     console.warn(`[CDS] submit failed (${submitResp.status}): ${errText.slice(0, 200)}`);
-    cdsFailedOnce = true;
+    // Only circuit-break for auth errors, not transient 5xx
+    if (submitResp.status === 401 || submitResp.status === 403) {
+      cdsFailedOnce = true;
+      cdsFailedAt = Date.now();
+    }
     return null;
   }
 
-  const jobUrl = submitResp.headers.get('location');
+  const submitBody = await submitResp.json() as { jobID?: string; status?: string; links?: Array<{ rel: string; href: string }> };
+  const monitorLink = submitBody?.links?.find(l => l.rel === 'monitor');
+  const jobUrl = monitorLink?.href ?? submitResp.headers.get('location');
   if (!jobUrl) {
-    console.warn('[CDS] no Location header in submit response');
+    console.warn('[CDS] no job URL in submit response');
     return null;
   }
 
   // Poll job URL until successful
-  let jobStatus: string = 'running';
+  let jobStatus: string = submitBody?.status ?? 'accepted';
   for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
+    if (jobStatus === 'successful') break;
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
     const pollResp = await fetch(jobUrl, {
       headers: headers(),
@@ -141,7 +155,6 @@ export async function fetchCdsNetCdf(
     }
     const job = await pollResp.json() as { status: string };
     jobStatus = job.status;
-    if (jobStatus === 'successful') break;
     if (jobStatus === 'failed') {
       console.warn(`[CDS] job ${jobUrl} failed`);
       return null;
@@ -149,7 +162,7 @@ export async function fetchCdsNetCdf(
   }
 
   if (jobStatus !== 'successful') {
-    console.warn(`[CDS] job ${jobUrl} timed out`);
+    console.warn(`[CDS] job ${jobUrl} timed out with status ${jobStatus}`);
     return null;
   }
 
@@ -171,8 +184,8 @@ export async function fetchCdsNetCdf(
     return null;
   }
 
+  // Download results (no auth needed for download URL)
   const downloadResp = await fetch(downloadUrl, {
-    headers: headers(),
     signal: AbortSignal.timeout(FETCH_TIMEOUT * 2),
   });
   if (!downloadResp.ok) {
@@ -180,26 +193,73 @@ export async function fetchCdsNetCdf(
     return null;
   }
 
-  const buffer = await downloadResp.arrayBuffer();
+  const raw = await downloadResp.arrayBuffer();
+  let buffer: ArrayBuffer;
+
+  // Detect ZIP (PK\003\004) and unpack if needed — ERA5-Land returns ZIP'd NetCDF
+  const header = new Uint8Array(raw.slice(0, 4));
+  if (header[0] === 0x50 && header[1] === 0x4B) {
+    try {
+      const zip = new AdmZip(Buffer.from(raw));
+      const entries = zip.getEntries();
+      const nc = entries.find((e: { entryName: string }) => e.entryName.endsWith('.nc'));
+      if (nc) {
+        const buf = nc.getData() as Buffer;
+        buffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      } else {
+        console.warn('[CDS] ZIP has no .nc file');
+        cache.set(ck, raw);
+        return raw;
+      }
+    } catch (e) {
+      console.warn(`[CDS] ZIP extraction failed: ${(e as Error).message.slice(0, 100)}`);
+      cache.set(ck, raw);
+      return raw;
+    }
+  } else {
+    buffer = raw;
+  }
+
   cache.set(ck, buffer);
   return buffer;
 }
 
+// Lazy h5wasm singleton (same pattern as IMERG)
+let _h5wasmCds: any = null;
+async function getH5wasm() {
+  if (!_h5wasmCds) {
+    _h5wasmCds = await import('h5wasm');
+    await _h5wasmCds.ready;
+  }
+  return _h5wasmCds;
+}
+
+let _readVarCounter = 0;
+
 /**
- * Parse a NetCDF buffer and extract a named variable as a simple array.
- * Assumes: single timestep, single location (or mean over small area).
+ * Parse a NetCDF-4 (HDF5) buffer and extract a named variable as Float32Array.
+ * Variables are stored at root level with ECMWF short names (e.g. tcwv, zust, u10).
  */
-function readVariable(buffer: ArrayBuffer, varName: string): Float32Array | null {
+async function readVariable(buffer: ArrayBuffer, varName: string): Promise<Float32Array | null> {
+  const tmpPath = `/tmp/cds_${_readVarCounter++}.h5`;
   try {
-    const reader = new NetCDFReader(buffer);
-    const data = reader.getDataVariable(varName);
-    if (!data) return null;
-    // Flatten if multi-dimensional
-    const flat = data instanceof Float32Array ? data : new Float32Array(data as number[]);
-    if (flat.length === 0) return null;
-    return flat;
-  } catch (e) {
-    console.warn(`[CDS] failed to read variable ${varName}:`, e);
+    const h5 = await getH5wasm();
+    // Defensive copy — ensure buffer is not detached
+    const copy = new Uint8Array(buffer.byteLength);
+    copy.set(new Uint8Array(buffer));
+    h5.FS.writeFile(tmpPath, copy);
+    const file = new h5.File(tmpPath, 'r');
+    const item = file.get(varName);
+    const val = item?.value;
+    file.close();
+    h5.FS.unlink(tmpPath);
+    if (val === undefined || val === null) return null;
+    if (val instanceof Float32Array) return val;
+    if (val instanceof Float64Array) return new Float32Array(val);
+    if (Array.isArray(val)) return new Float32Array(val);
+    return null;
+  } catch {
+    try { (await getH5wasm()).FS.unlink(tmpPath); } catch {}
     return null;
   }
 }
@@ -208,10 +268,9 @@ function readVariable(buffer: ArrayBuffer, varName: string): Float32Array | null
  * Get a single numeric value for a variable at a point.
  * Averages over all grid cells if area > single point.
  */
-function readPoint(buffer: ArrayBuffer, varName: string): number | null {
-  const data = readVariable(buffer, varName);
+async function readPoint(buffer: ArrayBuffer, varName: string): Promise<number | null> {
+  const data = await readVariable(buffer, varName);
   if (!data) return null;
-  // Mean over all values (typically 1-4 cells for small area)
   let sum = 0, n = 0;
   for (let i = 0; i < data.length; i++) {
     if (Number.isFinite(data[i])) { sum += data[i]; n++; }
@@ -223,14 +282,16 @@ function readPoint(buffer: ArrayBuffer, varName: string): number | null {
 //  Specific Data Fetchers
 // ══════════════════════════════════════════════════════════════════
 
-/** Default area window (0.25 deg around point — ~28 km) */
+/** Default area window (0.5 deg around point — ~55 km, covers >1 ERA5 grid cell) */
 function pointArea(lat: number, lon: number) {
-  const d = 0.125;
+  const d = 0.25;
   return { north: lat + d, west: lon - d, south: lat - d, east: lon + d };
 }
 
 function recentDateWindow(): { year: string; month: string; day: string } {
+  // ERA5 reanalysis has ~3 month latency; use 6 months ago for safety
   const d = new Date();
+  d.setMonth(d.getMonth() - 6);
   return {
     year: String(d.getFullYear()),
     month: String(d.getMonth() + 1).padStart(2, '0'),
@@ -264,7 +325,7 @@ export async function fetchEra5FrictionVelocity(
   });
   if (!buffer) return null;
 
-  const val = readPoint(buffer, 'zust');
+  const val = await readPoint(buffer, 'zust');
   // Convert from m/s to standard units if needed
   const result = val !== null && Number.isFinite(val) ? val : null;
   if (result !== null) cache.set(cacheKey, result);
@@ -299,7 +360,7 @@ export async function fetchEra5Tcwv(
   });
   if (!buffer) return null;
 
-  const val = readPoint(buffer, 'tcwv');
+  const val = await readPoint(buffer, 'tcwv');
   // tcwv in kg/m² = mm → g/cm² (/10)
   const result = val !== null && Number.isFinite(val) ? val / 10 : null;
   if (result !== null) cache.set(cacheKey, result);
@@ -347,10 +408,10 @@ export async function fetchEra5SurfaceFluxes(
   });
   if (!buffer) return null;
 
-  const ssrd = readPoint(buffer, 'ssrd');   // J/m² accumulated
-  const strd = readPoint(buffer, 'strd');   // J/m² accumulated
-  const sshf = readPoint(buffer, 'sshf');   // J/m² accumulated
-  const slhf = readPoint(buffer, 'slhf');   // J/m² accumulated
+  const ssrd = await readPoint(buffer, 'ssrd');   // J/m² accumulated
+  const strd = await readPoint(buffer, 'strd');   // J/m² accumulated
+  const sshf = await readPoint(buffer, 'sshf');   // J/m² accumulated
+  const slhf = await readPoint(buffer, 'slhf');   // J/m² accumulated
 
   const result: Era5SurfaceFluxes = {
     netShortwave: ssrd !== null && Number.isFinite(ssrd) ? ssrd / 3600 : null,
@@ -399,8 +460,8 @@ export async function fetchEra5PressureWind(
   });
   if (!buffer) return null;
 
-  const u = readPoint(buffer, 'u');
-  const v = readPoint(buffer, 'v');
+  const u = await readPoint(buffer, 'u');
+  const v = await readPoint(buffer, 'v');
 
   const result: Era5PressureWind = {
     u: u !== null && Number.isFinite(u) ? u : null,
@@ -448,10 +509,10 @@ export async function fetchEra5PressureState(
   });
   if (!buffer) return null;
 
-  const t = readPoint(buffer, 't');
-  const z = readPoint(buffer, 'z');
-  const q = readPoint(buffer, 'q');
-  const w = readPoint(buffer, 'w');
+  const t = await readPoint(buffer, 't');
+  const z = await readPoint(buffer, 'z');
+  const q = await readPoint(buffer, 'q');
+  const w = await readPoint(buffer, 'w');
 
   const result: Era5PressureState = {
     temperature: t !== null && Number.isFinite(t) ? t : null,
@@ -492,9 +553,9 @@ export async function fetchEra5SoilState(
       'soil_temperature_level_1',
       'soil_temperature_level_2',
       'soil_temperature_level_3',
-      'volumetric_soil_water_level_1',
-      'volumetric_soil_water_level_2',
-      'volumetric_soil_water_level_3',
+      'volumetric_soil_water_layer_1',
+      'volumetric_soil_water_layer_2',
+      'volumetric_soil_water_layer_3',
     ],
     area: pointArea(lat, lon),
     years: [year],
@@ -507,12 +568,12 @@ export async function fetchEra5SoilState(
   if (!buffer) return null;
 
   const result: Era5SoilState = {
-    temperature0_7: readPoint(buffer, 'stl1'),
-    temperature7_28: readPoint(buffer, 'stl2'),
-    temperature28_100: readPoint(buffer, 'stl3'),
-    moisture0_7: readPoint(buffer, 'swvl1'),
-    moisture7_28: readPoint(buffer, 'swvl2'),
-    moisture28_100: readPoint(buffer, 'swvl3'),
+    temperature0_7: await readPoint(buffer, 'stl1'),
+    temperature7_28: await readPoint(buffer, 'stl2'),
+    temperature28_100: await readPoint(buffer, 'stl3'),
+    moisture0_7: await readPoint(buffer, 'swvl1'),
+    moisture7_28: await readPoint(buffer, 'swvl2'),
+    moisture28_100: await readPoint(buffer, 'swvl3'),
   };
   cache.set(cacheKey, result);
   return result;
@@ -548,7 +609,7 @@ export async function fetchEra5GeopotentialThickness(
   });
   if (!buffer) return null;
 
-  const z500 = readPoint(buffer, 'z');
+  const z500 = await readPoint(buffer, 'z');
 
   const result: Era5GeopotentialThickness = {
     z500: z500 !== null && Number.isFinite(z500) ? z500 : null,

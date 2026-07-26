@@ -32,6 +32,15 @@ const PRODUCT_PATHS: Record<ImergProduct, string> = {
   final: 'GPM_L3/GPM_3IMERGHH.07',
 };
 
+let _h5wasm: any = null;
+async function getH5wasm() {
+  if (!_h5wasm) {
+    _h5wasm = await import('h5wasm');
+    await _h5wasm.ready;
+  }
+  return _h5wasm;
+}
+
 interface ImergFileInfo {
   productPath: string;
   filename: string;
@@ -57,7 +66,8 @@ function buildImergFilename(
   const startTime = `${String(Math.floor(startMin / 60)).padStart(2, '0')}${String(startMin % 60).padStart(2, '0')}00`;
   const endTime = `${String(Math.floor(endMin / 60)).padStart(2, '0')}${String(endMin % 60).padStart(2, '0')}59`;
   const prefix = product === 'early' ? '3B-HHR-E' : product === 'late' ? '3B-HHR-L' : '3B-HHR';
-  const filename = `${prefix}.MS.MRG.3IMERG.${yyyymmdd}-S${startTime}-E${endTime}.0000.${IMERG_VERSION}.HDF5`;
+  const elapsed = String(slot30 * 30).padStart(4, '0');
+  const filename = `${prefix}.MS.MRG.3IMERG.${yyyymmdd}-S${startTime}-E${endTime}.${elapsed}.${IMERG_VERSION}.HDF5`;
   return {
     productPath: PRODUCT_PATHS[product],
     filename,
@@ -108,12 +118,13 @@ async function downloadImergFile(
         Accept: 'application/octet-stream,*/*',
       },
       redirect: 'follow',
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(60000),
     });
     if (!resp.ok) {
       console.warn(`[IMERG] download failed ${resp.status} (redirected: ${resp.redirected}) for ${url}`);
       const text = await resp.text().catch(() => '');
-      console.warn(`[IMERG] body: ${text.slice(0, 200)}`);
+      // Only log warning bodies for non-200 responses
+      if (resp.status !== 404) console.warn(`[IMERG] body: ${text.slice(0, 200)}`);
       return null;
     }
     const buffer = await resp.arrayBuffer();
@@ -194,6 +205,8 @@ export interface PrecipitationResult {
   source: 'imerg-early' | 'imerg-late' | 'imerg-final' | 'open-meteo-fallback';
   /** Max intensity in any slot (mm/hr) */
   maxIntensity: number;
+  /** Actual date used (may differ from requested date due to latency) */
+  date?: string;
 }
 
 /**
@@ -211,76 +224,103 @@ export async function fetchImergPrecipitation(
   lat: number,
   lon: number,
   dateStr?: string,
-  windowHours: number = 24,
+  windowHours: number = 6,
 ): Promise<PrecipitationResult | null> {
   const token = getEarthdataToken();
   if (!token) return null;
 
   const refDate = dateStr ? new Date(dateStr) : new Date();
-  const year = refDate.getUTCFullYear();
-  const month = refDate.getUTCMonth() + 1;
-  const day = refDate.getUTCDate();
-
-  // Try Late product first, then Early
   const products: ImergProduct[] = ['late', 'early'];
   let lastError: string | null = null;
 
-  for (const product of products) {
-    let productSlots = 0;
+  // Parse a single buffer for precip at point; cache lat/lon grids
+  async function parseSlot(
+    h5: any,
+    buffer: ArrayBuffer,
+    cachedLatLon: { lat: Float32Array; lon: Float32Array } | null,
+  ): Promise<{ precip: number; latLon: { lat: Float32Array; lon: Float32Array } } | null> {
+    const tmpPath = '/tmp/imerg_slot.h5';
     try {
-      const h5 = await import('h5wasm');
-      await h5.ready;
-      let totalPrecip = 0;
-      let maxIntensity = 0;
+      h5.FS.writeFile(tmpPath, new Uint8Array(buffer));
+      const file = new h5.File(tmpPath, 'r');
+      const precipVar = file.get('Grid/precipitation');
+      if (!precipVar) { file.close(); return null; }
+      const latVar = cachedLatLon ? null : file.get('Grid/lat');
+      const lonVar = cachedLatLon ? null : file.get('Grid/lon');
+      const lat = cachedLatLon?.lat ?? new Float32Array((latVar as any).value as number[]);
+      const lon = cachedLatLon?.lon ?? new Float32Array((lonVar as any).value as number[]);
+      const precipArr = new Float32Array(precipVar.value as number[]);
+      file.close();
 
-      const totalSlots = windowHours * 2;
-      for (let slot = 0; slot < totalSlots; slot++) {
-        const fileInfo = buildImergFilename(product, year, month, day, slot);
-        const buffer = await downloadImergFile(fileInfo);
-        if (!buffer) continue;
-
-        const tmpPath = '/tmp/imerg.h5';
-        h5.FS.writeFile(tmpPath, new Uint8Array(buffer));
-        const file = new h5.File(tmpPath, 'r');
-        const precipVar = file.get('Grid/precipitation');
-        const latVar = file.get('Grid/lat');
-        const lonVar = file.get('Grid/lon');
-        file.close();
-        h5.FS.unlink(tmpPath);
-
-        if (!precipVar || !latVar || !lonVar) continue;
-
-        const gridData: ImergGridData = {
-          lat: new Float32Array(latVar.value as number[]),
-          lon: new Float32Array(lonVar.value as number[]),
-          precipitation: new Float32Array(precipVar.value as number[]),
-        };
-
-        const precipMmHr = extractPrecipitationAtPoint(gridData, lat, lon);
-        if (precipMmHr > 0) {
-          totalPrecip += precipMmHr;
-          maxIntensity = Math.max(maxIntensity, precipMmHr);
-        }
-        productSlots++;
-      }
-
-      if (productSlots > 0) {
-        return {
-          totalPrecipitation: Math.round(totalPrecip * 100) / 100,
-          slotsUsed: productSlots,
-          source: product === 'late' ? 'imerg-late' : 'imerg-early',
-          maxIntensity: Math.round(maxIntensity * 100) / 100,
-        };
-      }
-      console.warn(`[IMERG] ${product}: 0/${totalSlots} slots downloaded`);
-    } catch (e) {
-      lastError = `product=${product} slots=${productSlots} err=${(e as Error).message}`;
+      const gridData: ImergGridData = { lat, lon, precipitation: precipArr };
+      const mmHr = extractPrecipitationAtPoint(gridData, lat, lon);
+      return { precip: mmHr, latLon: { lat, lon } };
+    } catch {
+      return null;
+    } finally {
+      try { h5.FS.unlink(tmpPath); } catch {}
     }
   }
 
-  // If IMERG failed but we have a fallback, log the error
+  for (let lookback = 0; lookback <= 7; lookback++) {
+    const attemptDate = new Date(refDate.getTime() - lookback * 86400000);
+    const year = attemptDate.getUTCFullYear();
+    const month = attemptDate.getUTCMonth() + 1;
+    const day = attemptDate.getUTCDate();
+    const dateStr2 = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+    for (const product of products) {
+      try {
+        const h5 = await getH5wasm();
+        const totalSlots = windowHours * 2;
+        const fileInfos = Array.from({ length: totalSlots }, (_, s) =>
+          buildImergFilename(product, year, month, day, s),
+        );
+
+        // Download in parallel batches
+        let batchSize = 3;
+        let totalPrecip = 0;
+        let maxIntensity = 0;
+        let productSlots = 0;
+        let cachedLatLon: { lat: Float32Array; lon: Float32Array } | null = null;
+
+        for (let i = 0; i < fileInfos.length; i += batchSize) {
+          const batch = fileInfos.slice(i, i + batchSize);
+          const buffers = await Promise.all(batch.map(fi => downloadImergFile(fi)));
+
+          for (let b = 0; b < batch.length; b++) {
+            const buffer = buffers[b];
+            if (!buffer) continue;
+            const result = await parseSlot(h5, buffer, cachedLatLon);
+            if (!result) continue;
+            if (!cachedLatLon) cachedLatLon = result.latLon;
+            totalPrecip += result.precip;
+            maxIntensity = Math.max(maxIntensity, result.precip);
+            productSlots++;
+          }
+
+          // If most files in this batch failed, try next product/date
+          const succ = buffers.filter(Boolean).length;
+          if (succ < 2 && i === 0 && productSlots === 0) break;
+        }
+
+        if (productSlots > 0) {
+          return {
+            totalPrecipitation: Math.round(totalPrecip * 100) / 100,
+            slotsUsed: productSlots,
+            date: dateStr2,
+            source: product === 'late' ? 'imerg-late' : 'imerg-early',
+            maxIntensity: Math.round(maxIntensity * 100) / 100,
+          };
+        }
+      } catch (e) {
+        lastError = `product=${product} lookback=${lookback}d err=${(e as Error).message}`;
+      }
+    }
+  }
+
   if (lastError) {
-    console.warn(`[IMERG] All products failed, last error: ${lastError}`);
+    console.warn(`[IMERG] All products/dates failed, last error: ${lastError}`);
   }
 
   return null;
