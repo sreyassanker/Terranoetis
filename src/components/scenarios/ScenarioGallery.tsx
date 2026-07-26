@@ -6,7 +6,7 @@ import ScenarioThumbnail from './ScenarioThumbnail';
 import Panel from '@/components/ui/Panel';
 
 type SortKey = 'recency' | 'confidence' | 'complexity' | 'score';
-type FilterKey = 'all' | 'earthquake_swarm' | 'hurricane_landfall' | 'wildfire_spread' | 'volcanic_eruption' | 'flood_inundation' | 'tsunami_wave';
+type FilterKey = 'all' | 'earthquake_swarm' | 'hurricane_landfall' | 'wildfire_spread' | 'volcanic_eruption' | 'flood_inundation' | 'tsunami_wave' | 'landslide';
 
 interface ScenarioGalleryProps {
   scenarios: ScenarioSummary[];
@@ -58,7 +58,7 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
 
         {/* Filters */}
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {(['all', 'earthquake_swarm', 'hurricane_landfall', 'wildfire_spread', 'volcanic_eruption', 'flood_inundation', 'tsunami_wave'] as FilterKey[]).map(f => (
+          {(['all', 'earthquake_swarm', 'hurricane_landfall', 'wildfire_spread', 'volcanic_eruption', 'flood_inundation', 'tsunami_wave', 'landslide'] as FilterKey[]).map(f => (
             <button key={f} className={`glass-button ${filter === f ? 'active' : ''}`}
               style={{ fontSize: 10, padding: '2px 6px' }}
               onClick={() => setFilter(f)}>

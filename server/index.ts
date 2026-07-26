@@ -138,6 +138,7 @@ import { forkRouter } from './fork/routes';
 import { vaultRouter } from './routes/vault';
 import { createSelfEvolutionRouter } from './routes/selfEvolution';
 import { pulseRouter } from './routes/pulse';
+import { kaggleRouter } from './kaggle';
 import { startSentinelEngine, stopSentinelEngine } from './sentinel/engine';
 import { CorrelationEngine } from './sentinel/correlationEngine';
 import { initAisTracker, stopAisTracker, getAisTracker, type AisVessel } from './maritime/aisTracker';
@@ -331,7 +332,9 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/mgrs' || req.path === '/openaq' || req.path.startsWith('/openaq/') ||
     req.path.startsWith('/ndbc/') || req.path === '/ndbc/stations' ||
     req.path === '/shakemap/recent' || req.path.startsWith('/shakemap/') ||
-    req.path === '/spc/outlook' || req.path.startsWith('/spc/')
+    req.path === '/spc/outlook' || req.path.startsWith('/spc/') ||
+    // Kaggle GPU simulation endpoints
+    req.path.startsWith('/kaggle/')
   ) {
     return next();
   }
@@ -383,6 +386,7 @@ app.use('/api', foundationModelsRouter);
 app.use('/api/fork', forkRouter);
 app.use('/api/vault', vaultRouter);
 app.use('/api/pulse', pulseRouter);
+app.use('/api/kaggle', kaggleRouter);
 registerAnalyticalModelsRoutes(app);
 
 const materializedViews = new MaterializedViewCache(`http://127.0.0.1:${PORT}`);

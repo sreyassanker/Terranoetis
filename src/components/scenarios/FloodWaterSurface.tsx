@@ -3,7 +3,6 @@ import * as Cesium from 'cesium';
 import type { ShapeData } from './types';
 import { sampleTerrainHeights } from '@/lib/terrainSampler';
 import { throttledRender } from '@/lib/throttledRender';
-import { createFloodMaterial, animateWaterMaterial } from '@/rendering/advancedWaterShader';
 
 interface FloodWaterSurfaceProps {
   viewer: Cesium.Viewer | null;
@@ -16,9 +15,8 @@ interface FloodWaterSurfaceProps {
  * Optimized Flood Water Surface Renderer
  *
  * - Terrain sampling done once per shape set (not per frame)
- * - Wave shader handles animation via GPU uniforms (no CPU CallbackProperty)
+ * - Water color animates via CallbackProperty (CPU-side, lightweight)
  * - Entity positions are static Cartesian3 arrays (pre-cached)
- * - Only the shader time uniform updates per frame (GPU-side, near-zero CPU cost)
  */
 export default function FloodWaterSurface({ viewer, shapes, progress }: FloodWaterSurfaceProps) {
   const entitiesRef = useRef<Cesium.Entity[]>([]);
@@ -55,17 +53,10 @@ export default function FloodWaterSurface({ viewer, shapes, progress }: FloodWat
 
     const heightMap = await sampleTerrainHeights(viewer, allPositions);
 
-    // Create advanced flood material with terrain-following waves
-    const waveMaterial = createFloodMaterial(1.0, 0.5);
-
-    // Animate shader uniforms via postRender — GPU-side, near-zero CPU cost
+    // Track time for water animation via CallbackProperty
+    const waterTime = { value: 0 };
     const postRenderListener = () => {
-      const deltaTime = 1.0 / 60.0; // ~60fps
-      animateWaterMaterial(waveMaterial, deltaTime);
-      // Update water level based on progress
-      if (waveMaterial.uniforms.waterLevel !== undefined) {
-        waveMaterial.uniforms.waterLevel = 0.5 + progressRef.current * 2.0;
-      }
+      waterTime.value += 1.0 / 60.0;
     };
     viewer.scene.postRender.addEventListener(postRenderListener);
     postRenderRef.current = postRenderListener;
@@ -99,7 +90,12 @@ export default function FloodWaterSurface({ viewer, shapes, progress }: FloodWat
               return Cesium.Cartesian3.fromDegrees(v.lon, v.lat, elevation);
             });
           }, false),
-          material: waveMaterial as unknown as Cesium.MaterialProperty,
+          material: new Cesium.CallbackProperty(() => {
+            const t = waterTime.value;
+            const wave = 0.02 * Math.sin(t * 2.0) + 0.02 * Math.sin(t * 1.3 + 1.0);
+            const a = Math.min(0.35 + progressRef.current * 0.4 + wave, 0.85);
+            return new Cesium.Color(0.2 + wave * 0.1, 0.35 + wave * 0.1, 0.3 + wave * 0.1, a);
+          }, false) as unknown as Cesium.MaterialProperty,
           outline: true,
           outlineColor: baseColor.withAlpha(0.6 + progressRef.current * 0.2),
         },

@@ -7,6 +7,7 @@ export const DisasterType = {
   Wildfire: "wildfire",
   Earthquake: "earthquake",
   Volcano: "volcano",
+  Landslide: "landslide",
 } as const;
 export type DisasterType = typeof DisasterType[keyof typeof DisasterType];
 

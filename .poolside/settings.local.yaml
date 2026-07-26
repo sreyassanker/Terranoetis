@@ -1,0 +1,16 @@
+tools:
+    shell:
+        allow:
+            - find *
+            - head *
+            - grep *
+            - wc *
+            - echo *
+            - cat *
+            - cd *
+            - python3 *
+            - sed *
+            - ls *
+            - mkdir *
+            - npx tsc *
+            - tail *

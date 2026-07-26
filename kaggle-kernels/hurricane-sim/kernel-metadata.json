@@ -1,0 +1,12 @@
+{
+  "id": "sreyassanker/terranoetis-hurricane-wind-surge-simulation",
+  "title": "Terranoetis Hurricane Wind Surge Simulation",
+  "code_file": "main.py",
+  "language": "python",
+  "kernel_type": "script",
+  "enable_gpu": false,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "kernel_sources": [],
+  "is_private": true
+}

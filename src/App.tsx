@@ -55,6 +55,8 @@ import { ApiVault } from '@/components/ui/ApiVault';
 import Panel from '@/components/ui/Panel';
 import ScenarioViewer from '@/components/scenarios/ScenarioViewer';
 import ScenarioEditor from '@/components/scenarios/ScenarioEditor';
+import KaggleFloodOverlay from '@/components/KaggleFloodOverlay';
+import KaggleLandslideOverlay from '@/components/KaggleLandslideOverlay';
 import ScenarioGallery from '@/components/scenarios/ScenarioGallery';
 import CinematicDirector from '@/components/scenarios/CinematicDirector';
 import SpatialSketching from '@/components/scenarios/SpatialSketching';
@@ -777,7 +779,8 @@ const RICH_MESSAGE_CACHE_MAX = 200;
 const TYPE_LABELS: Record<string, string> = {
   earthquake_swarm: 'Earthquake Swarm', hurricane_landfall: 'Hurricane Landfall',
   wildfire_spread: 'Wildfire Spread', volcanic_eruption: 'Volcanic Eruption',
-  flood_inundation: 'Flood Inundation',
+  flood_inundation: 'Flood Inundation', tsunami_wave: 'Tsunami Wave',
+  landslide: 'Landslide',
   data_layer: 'Data Layer',
 };
 
@@ -821,6 +824,8 @@ function mapFrontendParams(type: string, params: Record<string, unknown>): Recor
       return { ...base, vei: Math.min(7, Math.max(1, Math.round((magnitude as number) / 2))), ashHeight: Math.max(1000, (intensity as number) * 2000), windDir: 260, duration };
     case 'flood_inundation':
       return { ...base, rainfall: Math.max(10, (intensity as number) * 100), catchmentArea: Math.max(100, (spread as number) * 5000), soilSaturation: Math.min(1, Math.max(0, (depth as number) / 100)), duration };
+    case 'landslide':
+      return { ...base, trigger_type: 'earthquake', magnitude: Math.max(4, Math.min(9.5, magnitude as number)), pga_threshold: 0.15, rainfall_mm: Math.max(50, (intensity as number) * 100), friction_angle: 35, cohesion: 500, duration_hours: duration };
     default:
       return { ...base, ...params };
   }
@@ -1220,6 +1225,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showScenarioGallery, setShowScenarioGallery] = useState(false);
   const [showScenarioEditor, setShowScenarioEditor] = useState(false);
+  const [kaggleOverlay, setKaggleOverlay] = useState<{ jobId: string; lat: number; lon: number; scenarioType: string } | null>(null);
   const [digitalTwinPanel, setDigitalTwinPanel] = useState<null | {
     stats: { label: string; value: string; unit: string; icon: string }[];
     charts: { type: 'area' | 'bar' | 'line' | 'pie' | 'radar'; title: string; data: Record<string, unknown>[]; keys: { dataKey: string; color: string; name: string }[] }[];
@@ -9993,6 +9999,35 @@ export default function App() {
           studyAreas={studyAreas}
           activeStudyAreaId={activeStudyAreaId}
           terrainProvider={viewerRef.current?.terrainProvider}
+          onKaggleComplete={(jobId, lat, lon, scenarioType) => setKaggleOverlay({ jobId, lat, lon, scenarioType })}
+          onKaggleStart={() => setKaggleOverlay(null)}
+        />
+      )}
+
+      {/* Kaggle Flood Overlay on 3D Globe */}
+      {kaggleOverlay && kaggleOverlay.scenarioType === 'flood_inundation' && (          <KaggleFloodOverlay
+          key={kaggleOverlay.jobId}
+          viewer={viewerRef.current}
+          jobId={kaggleOverlay.jobId}
+          lat={kaggleOverlay.lat}
+          lon={kaggleOverlay.lon}
+          gridSizeKm={2.56}
+          opacity={0.7}
+          onDismiss={() => setKaggleOverlay(null)}
+        />
+      )}
+
+      {/* Kaggle Landslide Overlay on 3D Globe */}
+      {kaggleOverlay && kaggleOverlay.scenarioType === 'landslide' && (
+        <KaggleLandslideOverlay
+          key={kaggleOverlay.jobId}
+          viewer={viewerRef.current}
+          jobId={kaggleOverlay.jobId}
+          lat={kaggleOverlay.lat}
+          lon={kaggleOverlay.lon}
+          gridSizeKm={2.56}
+          opacity={0.7}
+          onDismiss={() => setKaggleOverlay(null)}
         />
       )}
 

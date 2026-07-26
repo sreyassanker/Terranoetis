@@ -19,6 +19,7 @@ const SCENARIO_PROMPTS = [
   { label: 'What if a tsunami hit this coast?', type: 'tsunami_wave' },
   { label: 'What if this area flooded?', type: 'flood_inundation' },
   { label: 'What if a volcano erupted here?', type: 'volcanic_eruption' },
+  { label: 'What if a landslide occurred here?', type: 'landslide' },
 ];
 
 export default function SpatialSketching({ viewer, onClose, onGenerateScenario, zIndex = 110 }: SpatialSketchingProps) {
