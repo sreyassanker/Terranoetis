@@ -138,6 +138,25 @@ export default function ScenarioThumbnail({ type, lat, lon, size = 48 }: Scenari
         ctx.fill();
         break;
       }
+      case 'landslide': {
+        // Draw a hill with debris flowing downslope
+        const cx = w / 2, cy = h * 0.7;
+        ctx.fillStyle = 'rgba(124,45,18,0.3)';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, w * 0.3, h * 0.15, 0, Math.PI, 2 * Math.PI);
+        ctx.fill();
+        // Debris flow lines
+        ctx.strokeStyle = 'rgba(124,45,18,0.6)';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 5; i++) {
+          const startX = cx + (i - 2) * w * 0.1;
+          ctx.beginPath();
+          ctx.moveTo(startX, cy);
+          ctx.bezierCurveTo(startX + w * 0.05, cy + h * 0.1, startX - w * 0.1, cy + h * 0.2, startX - w * 0.15, cy + h * 0.3);
+          ctx.stroke();
+        }
+        break;
+      }
       default: {
         ctx.fillStyle = baseColor;
         ctx.globalAlpha = 0.3;

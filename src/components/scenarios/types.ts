@@ -99,6 +99,7 @@ export const SCENARIO_TYPE_LABELS: Record<string, string> = {
   volcanic_eruption: 'Volcanic',
   flood_inundation: 'Flood',
   tsunami_wave: 'Tsunami',
+  landslide: 'Landslide',
   data_layer: 'Data Layer',
 };
 
@@ -109,5 +110,6 @@ export const SCENARIO_TYPE_COLORS: Record<string, string> = {
   volcanic_eruption: '#d946ef',
   flood_inundation: '#3b82f6',
   tsunami_wave: '#06b6d4',
+  landslide: '#78350f',
   data_layer: '#10b981',
 };
