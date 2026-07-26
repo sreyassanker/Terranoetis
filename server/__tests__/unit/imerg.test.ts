@@ -130,7 +130,7 @@ describe('getImergUrl', () => {
       expect(url).not.toBeNull();
       expect(url).toContain('20240615');
       expect(url).toContain('3B-HHR-L');
-      expect(url).toContain('V07.HDF5');
+      expect(url).toContain('V07C.HDF5');
     } finally {
       if (origUser !== undefined) process.env.EARTHDATA_USERNAME = origUser;
       else delete process.env.EARTHDATA_USERNAME;
