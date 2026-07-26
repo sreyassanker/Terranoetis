@@ -17,10 +17,6 @@ const cache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 });
 
 const NSIDC_BASE = 'https://noaadata.apps.nsidc.org/NOAA/G10016_V4';
 
-const NH_GRID_SIZE_Y = 448;
-const NH_GRID_SIZE_X = 304;
-const SH_GRID_SIZE_Y = 332;
-const SH_GRID_SIZE_X = 316;
 
 function buildIceUrl(
   hemisphere: 'north' | 'south',
@@ -112,8 +108,10 @@ export async function fetchSeaIce(
     if (!resp.ok) return { concentration: null, source: null, date: null };
     const buffer = await resp.arrayBuffer();
 
-    const { File } = await import('h5wasm');
-    const h5File = new File(buffer, url.split('/').pop()!);
+    const h5 = await import('h5wasm');
+    const tmpPath = `/tmp/seaice_${Date.now()}.h5`;
+    h5.FS!.writeFile(tmpPath, new Uint8Array(buffer));
+    const h5File = new h5.File(tmpPath, 'r');
 
     const latVar = h5File.get('latitude');
     const lonVar = h5File.get('longitude');
@@ -121,20 +119,22 @@ export async function fetchSeaIce(
 
     if (!latVar || !lonVar || !concVar) {
       h5File.close?.();
+      h5.FS!.unlink(tmpPath);
       return { concentration: null, source: null, date: null };
     }
 
-    const lats = new Float64Array(latVar.value as number[]);
-    const lons = new Float64Array(lonVar.value as number[]);
-    const conc = concVar.value as number[];
+    const lats = new Float64Array((latVar as { value: number[] }).value);
+    const lons = new Float64Array((lonVar as { value: number[] }).value);
+    const conc = (concVar as { value: number[] }).value;
 
-    const shape = concVar.shape ?? [1, 1, 1];
+    const shape = (concVar as { shape?: number[] }).shape ?? [1, 1, 1];
     const ny = shape[1];
     const nx = shape[2];
 
     const cell = findNearestCell(lats, lons, ny, nx, lat, lon);
     if (!cell) {
       h5File.close?.();
+      h5.FS!.unlink(tmpPath);
       return { concentration: null, source: null, date: null };
     }
 
@@ -148,6 +148,7 @@ export async function fetchSeaIce(
       : null;
 
     h5File.close?.();
+    h5.FS!.unlink(tmpPath);
 
     const result: SeaIceDataPoint = {
       concentration: fraction,

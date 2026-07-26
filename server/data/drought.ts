@@ -74,8 +74,6 @@ export async function fetchDroughtPDSI(
   const cached = cache.get<DroughtDataPoint>(cacheKey);
   if (cached) return cached;
 
-  const dodsUrl = `${OPeNDAP_BASE}/pdsi.mon.mean.selfcalibrated.nc.dds`;
-
   try {
     // First fetch the lat/lon grids to find nearest indices
     const latLonUrl = `${OPeNDAP_BASE}/pdsi.mon.mean.selfcalibrated.nc.ascii?lat,lon`;

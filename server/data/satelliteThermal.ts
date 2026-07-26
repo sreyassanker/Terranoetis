@@ -33,7 +33,7 @@ const proj4 = _require('proj4') as {
   forward(coords: number[]): number[];
   inverse(coords: number[]): number[];
 };
-import { logger } from '../observability/logger';
+
 
 const FETCH_TIMEOUT = 30000;
 
@@ -179,6 +179,8 @@ export interface LandsatThermalData {
     swir1?: number;   // SR_B6
     swir2?: number;   // SR_B7
   };
+  /** Emissivity (0–1) from USGS emis band, or derived from NDVI */
+  emissivity?: number;
   /** Source identifier */
   source: string;
 }
@@ -302,6 +304,7 @@ export async function fetchLandsatThermal(
   return {
     surfaceTemperature,
     ndvi,
+    emissivity,
     qaPixel,
     acquired: acquired ? acquired.slice(0, 10) : undefined,
     cloudCover,

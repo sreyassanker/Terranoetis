@@ -29,7 +29,6 @@ describe('findNearestCell', () => {
   const ny = 3;
   const nx = 4;
   const mkLats = (vals: number[]) => new Float64Array(vals);
-  const mkLons = (vals: number[]) => new Float64Array(vals);
 
   it('finds exact match', () => {
     const lats = mkLats([10, 10, 10, 10, 20, 20, 20, 20, 30, 30, 30, 30]);

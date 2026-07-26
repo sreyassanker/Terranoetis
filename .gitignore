@@ -15,12 +15,30 @@ dist-ssr
 .env.local
 server/.env
 
+# Poolside local settings
+.poolside
+
+# Kaggle API credentials
+Terranoetis_kaggle.json
+
 # SQLite runtime data
 server/realtime.db
 server/realtime.db-wal
 server/realtime.db-shm
 *.db-wal
 *.db-shm
+
+# Redis dump
+dump.rdb
+
+# Debug / temporary scripts
+inspect.mjs
+inspect2.mjs
+screenshot.mjs
+test_pdf2.mjs
+
+# Kaggle kernel simulation results
+kaggle-kernels/results/
 
 # Editor directories and files
 .vscode/*

@@ -19,10 +19,6 @@
  *   SST (NRT)
  */
 
-import NodeCache from 'node-cache';
-
-const cache = new NodeCache({ stdTTL: 3600, checkperiod: 600 });
-
 // ── WOA18 Monthly T/S Climatology ──
 // Static lookup tables derived from World Ocean Atlas 2018 1-degree seasonal data.
 // These provide physically accurate T/S at standard depths when no real-time profile is available.

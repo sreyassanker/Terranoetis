@@ -57,6 +57,11 @@ import ScenarioViewer from '@/components/scenarios/ScenarioViewer';
 import ScenarioEditor from '@/components/scenarios/ScenarioEditor';
 import KaggleFloodOverlay from '@/components/KaggleFloodOverlay';
 import KaggleLandslideOverlay from '@/components/KaggleLandslideOverlay';
+import KaggleEarthquakeOverlay from '@/components/KaggleEarthquakeOverlay';
+import KaggleHurricaneOverlay from '@/components/KaggleHurricaneOverlay';
+import KaggleWildfireOverlay from '@/components/KaggleWildfireOverlay';
+import KaggleVolcanoOverlay from '@/components/KaggleVolcanoOverlay';
+import KaggleTsunamiOverlay from '@/components/KaggleTsunamiOverlay';
 import ScenarioGallery from '@/components/scenarios/ScenarioGallery';
 import CinematicDirector from '@/components/scenarios/CinematicDirector';
 import SpatialSketching from '@/components/scenarios/SpatialSketching';
@@ -1426,7 +1431,7 @@ export default function App() {
     if (!resp.ok) throw new Error('Failed to create share link');
     const data = await resp.json();
     return data.url as string;
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);  
 
   // Load chat list on mount
   useEffect(() => {
@@ -9975,30 +9980,8 @@ export default function App() {
         <ScenarioEditor
           onClose={() => setShowScenarioEditor(false)}
           zIndex={getPanelZIndex('scenario-editor')}
-          onGenerateFromBbox={async (hazardType, bbox, params) => {
-            try {
-              const resp = await fetch('/api/scenarios/generate-from-bbox', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders() },
-                body: JSON.stringify({ hazardType, bbox, params }),
-              });
-              if (!resp.ok) throw new Error(resp.status === 401 ? 'Not logged in' : 'Generation failed');
-              const data = await resp.json();
-              if (data.scenario) {
-                setSelectedScenario(adaptScenario(data.scenario));
-                setShowScenarioEditor(false);
-              }
-            } catch (err: any) {
-              setAiMessages(prev => [...prev, { id: Date.now(), role: 'assistant', content: `⚠️ Real-data scenario failed: ${err.message}`, type: 'error' }]);
-            }
-          }}
-          onImport={(scenario) => {
-            setShowScenarioEditor(false);
-            setSelectedScenario(scenario);
-          }}
           studyAreas={studyAreas}
           activeStudyAreaId={activeStudyAreaId}
-          terrainProvider={viewerRef.current?.terrainProvider}
           onKaggleComplete={(jobId, lat, lon, scenarioType) => setKaggleOverlay({ jobId, lat, lon, scenarioType })}
           onKaggleStart={() => setKaggleOverlay(null)}
         />
@@ -10020,6 +10003,76 @@ export default function App() {
       {/* Kaggle Landslide Overlay on 3D Globe */}
       {kaggleOverlay && kaggleOverlay.scenarioType === 'landslide' && (
         <KaggleLandslideOverlay
+          key={kaggleOverlay.jobId}
+          viewer={viewerRef.current}
+          jobId={kaggleOverlay.jobId}
+          lat={kaggleOverlay.lat}
+          lon={kaggleOverlay.lon}
+          gridSizeKm={2.56}
+          opacity={0.7}
+          onDismiss={() => setKaggleOverlay(null)}
+        />
+      )}
+
+      {/* Kaggle Earthquake Overlay on 3D Globe */}
+      {kaggleOverlay && kaggleOverlay.scenarioType === 'earthquake_swarm' && (
+        <KaggleEarthquakeOverlay
+          key={kaggleOverlay.jobId}
+          viewer={viewerRef.current}
+          jobId={kaggleOverlay.jobId}
+          lat={kaggleOverlay.lat}
+          lon={kaggleOverlay.lon}
+          gridSizeKm={2.56}
+          opacity={0.7}
+          onDismiss={() => setKaggleOverlay(null)}
+        />
+      )}
+
+      {/* Kaggle Hurricane Overlay on 3D Globe */}
+      {kaggleOverlay && kaggleOverlay.scenarioType === 'hurricane_landfall' && (
+        <KaggleHurricaneOverlay
+          key={kaggleOverlay.jobId}
+          viewer={viewerRef.current}
+          jobId={kaggleOverlay.jobId}
+          lat={kaggleOverlay.lat}
+          lon={kaggleOverlay.lon}
+          gridSizeKm={2.56}
+          opacity={0.7}
+          onDismiss={() => setKaggleOverlay(null)}
+        />
+      )}
+
+      {/* Kaggle Wildfire Overlay on 3D Globe */}
+      {kaggleOverlay && kaggleOverlay.scenarioType === 'wildfire_spread' && (
+        <KaggleWildfireOverlay
+          key={kaggleOverlay.jobId}
+          viewer={viewerRef.current}
+          jobId={kaggleOverlay.jobId}
+          lat={kaggleOverlay.lat}
+          lon={kaggleOverlay.lon}
+          gridSizeKm={2.56}
+          opacity={0.7}
+          onDismiss={() => setKaggleOverlay(null)}
+        />
+      )}
+
+      {/* Kaggle Volcano Overlay on 3D Globe */}
+      {kaggleOverlay && kaggleOverlay.scenarioType === 'volcanic_eruption' && (
+        <KaggleVolcanoOverlay
+          key={kaggleOverlay.jobId}
+          viewer={viewerRef.current}
+          jobId={kaggleOverlay.jobId}
+          lat={kaggleOverlay.lat}
+          lon={kaggleOverlay.lon}
+          gridSizeKm={2.56}
+          opacity={0.7}
+          onDismiss={() => setKaggleOverlay(null)}
+        />
+      )}
+
+      {/* Kaggle Tsunami Overlay on 3D Globe */}
+      {kaggleOverlay && kaggleOverlay.scenarioType === 'tsunami_wave' && (
+        <KaggleTsunamiOverlay
           key={kaggleOverlay.jobId}
           viewer={viewerRef.current}
           jobId={kaggleOverlay.jobId}

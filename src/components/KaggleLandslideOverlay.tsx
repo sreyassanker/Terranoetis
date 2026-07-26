@@ -236,7 +236,7 @@ export default function KaggleLandslideOverlay({
       });
       const layer = viewer.scene.imageryLayers.addImageryProvider(provider);
       layer.alpha = opacity;
-      (layer as any).name = 'kaggle_landslide_depth';
+      (layer as unknown as { name: string }).name = 'kaggle_landslide_depth';
       depthLayerRef.current = layer;
 
       // ── Build velocity arrow overlay ──────────────────────────────
@@ -307,7 +307,7 @@ export default function KaggleLandslideOverlay({
       });
       const arrowLayer = viewer.scene.imageryLayers.addImageryProvider(arrowProvider);
       arrowLayer.alpha = 0.85;
-      (arrowLayer as any).name = 'kaggle_landslide_arrows';
+      (arrowLayer as unknown as { name: string }).name = 'kaggle_landslide_arrows';
       velocityLayerRef.current = arrowLayer;
 
       // Build terrain canvas (grayscale heightmap)
@@ -350,7 +350,7 @@ export default function KaggleLandslideOverlay({
       });
       const tLayer = viewer.scene.imageryLayers.addImageryProvider(tProvider);
       tLayer.alpha = 0.5;
-      (tLayer as any).name = 'kaggle_terrain';
+      (tLayer as unknown as { name: string }).name = 'kaggle_terrain';
       terrainLayerRef.current = tLayer;
 
       // Fly camera to the landslide area
@@ -416,12 +416,12 @@ export default function KaggleLandslideOverlay({
         </div>
       )}
       {error && (
-        <div style={{ color: '#ef4444' }}>⚠ {error}</div>
+        <div style={{ color: '#ef4444' }}>Error: {error}</div>
       )}
       {stats && !loading && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-            <span style={{ fontWeight: 700, color: '#d2b48c' }}>🌋 Kaggle Landslide Overlay</span>
+            <span style={{ fontWeight: 700, color: '#d2b48c' }}>Kaggle Landslide Overlay</span>
             {onDismiss && (
               <button onClick={onDismiss} onMouseEnter={() => setDismissHovered(true)} onMouseLeave={() => setDismissHovered(false)} style={{
                 background: dismissHovered ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',

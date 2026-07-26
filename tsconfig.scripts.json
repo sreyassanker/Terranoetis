@@ -15,5 +15,5 @@
     "noUncheckedSideEffectImports": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["scripts"]
+  "include": ["scripts", "server"]
 }

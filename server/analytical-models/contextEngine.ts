@@ -32,7 +32,7 @@ import {
 import { fetchLandsatThermal, fetchColumnWaterVapor, emissivityFromNdvi } from '../data/satelliteThermal';
 import { getOceanProfile, computeN2, computeWindStressCurl } from '../data/oceanData';
 import { fetchImergPrecipitation } from '../data/imerg';
-import { fetchGldasData, soilMoistureToVolumetric, type GldasPointData } from '../data/gldas';
+import { fetchGldasData, soilMoistureToVolumetric } from '../data/gldas';
 
 interface StudyArea {
   mode: 'point' | 'bbox' | 'two-points';
@@ -170,7 +170,7 @@ const R_SPEC = 287.058;
  *  These tools fetch actual satellite observations — never a weather proxy. */
 const SAFE_THERMAL_TOOLS = new Set<number>([1, 26, 27, 28, 29, 30, 31, 32, 33, 51]);
 
-type SatThermalData = import('./satelliteThermal').LandsatThermalData | null;
+type SatThermalData = import('../data/satelliteThermal').LandsatThermalData | null;
 
 function mapInputs(
   id: number,
@@ -1100,7 +1100,6 @@ function mapInputs(
       };
     }
     case 106: {
-      const pw = ctx.era5?.pressureWind;
       const ps = ctx.era5?.pressureState;
       // Use ERA5 850/500 hPa temperature difference for θ gradient
       const dthetaEra5 = (ps?.temperature850 != null && ps?.temperature500 != null)
