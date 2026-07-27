@@ -50,3 +50,9 @@ kaggle-kernels/results/
 *.njsproj
 *.sln
 *.sw?
+
+# Rust/WASM build artifacts
+wasm/idw/target/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
