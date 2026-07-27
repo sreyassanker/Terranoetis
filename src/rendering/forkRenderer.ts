@@ -27,7 +27,7 @@ export interface ForkVisualState {
 export class ForkRenderer {
   private viewer: Cesium.Viewer;
   private forks: Map<string, ForkVisualState>;
-  private readonly SHELL_COLOR = new Cesium.Color(1.0, 1.0, 1.0, 0.08);
+  private readonly SHELL_COLOR = new Cesium.Color(245 / 255, 158 / 255, 11 / 255, 0.08);
   private readonly WIRE_COLOR = new Cesium.Color(1.0, 1.0, 1.0, 0.6);
   private readonly SHELL_BASE_ALTITUDE_M = 0;     // dome base sits at the surface
   private readonly DEFAULT_BUFFER_RADIUS_M = 500_000;  // 500 km default dome radius
@@ -136,7 +136,7 @@ export class ForkRenderer {
         },
       }),
       appearance: new Cesium.PerInstanceColorAppearance({
-        closed: false,
+        closed: true,
         translucent: true,
         flat: true,
       }),
@@ -307,14 +307,6 @@ export class ForkRenderer {
         fillIndices.push(i0, i2, i3);
       }
     }
-    // --- Fill indices: base disk (fan from base center) ---
-    for (let j = 0; j < slices; j++) {
-      const a = baseCenterIdx;
-      const b = baseRingStart + j;
-      const c = baseRingStart + ((j + 1) % slices);
-      fillIndices.push(a, b, c);
-    }
-
     // --- Wireframe indices: latitude rings (every Nth stack) ---
     const ringEvery = 4; // draw a ring every 4 stacks => 6 rings on a 24-stack dome
     for (let i = 1; i <= stacks; i++) {

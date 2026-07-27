@@ -408,7 +408,7 @@ export default function ScenarioEditor({ onClose, onKaggleComplete, onKaggleStar
       setKaggleError(e instanceof Error ? e.message : String(e));
       setKaggleRunning(false);
     }
-  }, [mapToKaggleParams, onKaggleStart]);
+  }, [mapToKaggleParams, onKaggleStart, onKaggleComplete, scenarioType]);
 
   const active = studyAreas.find(a => a.id === activeStudyAreaId);
   const bbox = active ? computeStudyAreaBbox(active) : null;
