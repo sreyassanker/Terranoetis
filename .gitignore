@@ -25,6 +25,7 @@ Terranoetis_kaggle.json
 server/realtime.db
 server/realtime.db-wal
 server/realtime.db-shm
+server/data/terranoetis.db
 *.db-wal
 *.db-shm
 

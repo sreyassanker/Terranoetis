@@ -986,7 +986,7 @@ app.get('/api/health', async (_req: express.Request, res: express.Response) => {
     status: overallStatus,
     checks,
     uptime_ms: process.uptime() * 1000,
-    version: process.env.npm_package_version || '0.0.0',
+    version: '3.1',
     ts: Date.now(),
   });
 });
