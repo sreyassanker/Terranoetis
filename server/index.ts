@@ -1408,7 +1408,7 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
 
 
 // Backward-compatible camera route documented by earlier releases.
-app.get(['/api/cameras', '/api/cameras/:lat/:lon/:radius'], async (req: express.Request, res: express.Response) => {
+app.get(['/api/cameras', '/api/cameras/:lat/:lon/:radius', '/api/cctv/worldwide'], async (req: express.Request, res: express.Response) => {
   try {
     let payload = cache.get<WorldwideCctvPayload>('cctv_worldwide');
     if (!payload) {
