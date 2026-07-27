@@ -4849,8 +4849,10 @@ export default function App() {
 
     // Side effects outside setLayers updater — critical for React 18+ batching safety
     if (!wasOn) {
+      forkRendererRef.current?.showLayer(layerId);
       loadLayerData(layerId);
     } else {
+      forkRendererRef.current?.hideLayer(layerId);
       hideLayerEntities(layerId);
     }
 
@@ -5176,6 +5178,8 @@ export default function App() {
         }
         entityStoreRef.current[layerId] = [];
       }
+    } else {
+      setLayerEntitiesVisible(layerId, false);
     }
     
     setIntelFeed(prev => {
@@ -6202,6 +6206,7 @@ export default function App() {
       const now = Cesium.JulianDate.now();
       const hasForks = forkRendererRef.current?.hasActiveForks() ?? false;
       for (const l of layersRef.current) {
+        forkRendererRef.current?.showLayer(l.id);
         const id = l.id;
         const ents = entityStoreRef.current[id];
         if (ents && ents.length > 0) {
@@ -6258,7 +6263,10 @@ export default function App() {
         v.entities.suspendEvents();
       }
       try {
-        layersRef.current.forEach(l => { hideLayerEntities(l.id); });
+        layersRef.current.forEach(l => {
+          forkRendererRef.current?.hideLayer(l.id);
+          hideLayerEntities(l.id);
+        });
       } finally {
         if (v) {
           v.entities.resumeEvents();
@@ -6322,8 +6330,10 @@ export default function App() {
       const wasOn = prev.on;
       const isOn = prev.default;
       if (wasOn && !isOn) {
+        forkRendererRef.current?.hideLayer(prev.id);
         hideLayerEntities(prev.id);
       } else if (!wasOn && isOn) {
+        forkRendererRef.current?.showLayer(prev.id);
         loadLayerData(prev.id);
       }
     }

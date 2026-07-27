@@ -48,6 +48,7 @@ export class ForkRenderer {
   /** Getter for extra 3D tilesets (e.g. OSM buildings) that should be cropped. */
   private tilesetsGetter: (() => Cesium.Cesium3DTileset[]) | null = null;
   private skipLayers: Set<string> = new Set();
+  private hiddenLayers: Set<string> = new Set();
 
   /**
    * Provide a getter function that returns the current entity store.
@@ -70,6 +71,28 @@ export class ForkRenderer {
 
   setSkipLayers(layers: string[]): void {
     this.skipLayers = new Set(layers);
+  }
+
+  hideLayer(layerId: string): void {
+    this.hiddenLayers.add(layerId);
+  }
+
+  showLayer(layerId: string): void {
+    this.hiddenLayers.delete(layerId);
+  }
+
+  private getEntityLayer(ent: Cesium.Entity): string | null {
+    const now = Cesium.JulianDate.now();
+    const layer = (ent.properties as Record<string, unknown>)?.layer;
+    if (!layer) return null;
+    const layerVal = typeof layer === 'object' && layer !== null && 'getValue' in layer
+      ? (layer as Cesium.Property).getValue(now)
+      : layer;
+    return String(layerVal);
+  }
+
+  private isForkEntity(id: string): boolean {
+    return id.startsWith('fork_') || id.includes('_fork_');
   }
 
   constructor(viewer: Cesium.Viewer) {
@@ -596,7 +619,7 @@ export class ForkRenderer {
       this.viewer.scene.primitives.remove(fork.wireframePrimitive);
     }
     this.forks.delete(forkId);
-    this.reapplyCrop();
+    this.reapplyCrop(true);
     this.viewer.scene.requestRender();
   }
 
@@ -613,59 +636,82 @@ export class ForkRenderer {
    * the entity cache that is NOT a fork ghost/shell) are hidden unless they
    * fall inside a dome's buffer radius. This gives the visual effect of the
    * dome "containing" / cropping the live data layers automatically — no
-   * manual toggle required. With no forks, everything shows normally.
+   * manual toggle required. With no forks, entity visibility is left as-is
+   * (controlled by layer toggle state) unless restoreVisibility is true
+   * (called after fork removal to re-show entities that were cropped).
    *
    * Call this after creating/removing a fork, after a layer toggle, after a
    * bulk enable/disable, and periodically for streaming live data.
    */
-  reapplyCrop(): void {
+  reapplyCrop(restoreVisibility: boolean = false): void {
     const now = Cesium.JulianDate.now();
     const forks = Array.from(this.forks.values()).filter(f => f.status !== 'terminated');
     const hasForks = forks.length > 0;
 
+    const processed = new Set<string>();
+
+    const shouldShow = (layerId: string, ent: Cesium.Entity): boolean => {
+      const id = String(ent.id ?? '');
+      if (id.startsWith('fork_') || id.includes('_fork_')) return true;
+      if (hasForks) return this.isInsideAnyFork(ent, now, forks);
+      if (restoreVisibility) return !this.hiddenLayers.has(layerId);
+      return ent.show;
+    };
+
     // 1) Entities tracked in the store (point/billboard/heatmap/geojson/etc.)
     const cache = this.getEntityCache();
     for (const [layerId, ents] of Object.entries(cache)) {
-      if (this.skipLayers.has(layerId)) continue;
+      if (this.skipLayers.has(layerId) || this.hiddenLayers.has(layerId)) {
+        for (const ent of ents) {
+          if (ent) processed.add(String(ent.id ?? ''));
+        }
+        continue;
+      }
       for (const ent of ents) {
         if (!ent) continue;
-        const id = String(ent.id ?? '');
-        // Fork-owned entities are never cropped.
-        if (id.startsWith('fork_') || id.includes('_fork_')) {
-          ent.show = true;
-          continue;
-        }
-        ent.show = hasForks ? this.isInsideAnyFork(ent, now, forks) : true;
+        processed.add(String(ent.id ?? ''));
+        ent.show = shouldShow(layerId, ent);
       }
     }
 
     // 2) Entities inside viewer.dataSources (e.g. submarine cables, tectonic,
     //    study areas) — spawnGhosts already reads these; crop must too.
-    for (let i = 0; i < this.viewer.dataSources.length; i++) {
-      const ds = this.viewer.dataSources.get(i);
-      if (!ds?.entities) continue;
-      // Skip fork-owned data sources (none currently, but be safe).
-      if (String(ds.name ?? '').startsWith('fork_')) continue;
-      for (const ent of ds.entities.values) {
-        if (!ent) continue;
-        const id = String(ent.id ?? '');
-        if (id.startsWith('fork_') || id.includes('_fork_')) {
-          ent.show = true;
-          continue;
+    if (hasForks || restoreVisibility) {
+      for (let i = 0; i < this.viewer.dataSources.length; i++) {
+        const ds = this.viewer.dataSources.get(i);
+        if (!ds?.entities) continue;
+        if (String(ds.name ?? '').startsWith('fork_')) continue;
+        for (const ent of ds.entities.values) {
+          if (!ent) continue;
+          const id = String(ent.id ?? '');
+          if (this.isForkEntity(id)) {
+            processed.add(id);
+            const layerVal = this.getEntityLayer(ent);
+            ent.show = layerVal && this.hiddenLayers.has(layerVal) ? false : true;
+            continue;
+          }
+          processed.add(id);
+          ent.show = hasForks ? this.isInsideAnyFork(ent, now, forks) : restoreVisibility;
         }
-        ent.show = hasForks ? this.isInsideAnyFork(ent, now, forks) : true;
       }
     }
 
     // 3) Entities added directly to viewer.entities but NOT in the store
     //    (e.g. orphan trail polylines, dropped pins). Skip fork-owned ones.
-    for (const ent of this.viewer.entities.values) {
-      if (!ent) continue;
-      const id = String(ent.id ?? '');
-      if (id.startsWith('fork_') || id.includes('_fork_')) continue;
-      // Already handled above? Heuristic: skip entities we know are in the store.
-      // We crop everything else — cheaper than building a lookup set every tick.
-      ent.show = hasForks ? this.isInsideAnyFork(ent, now, forks) : true;
+    //    Skip entities already processed (sections 1 & 2 or hidden layers).
+    if (hasForks || restoreVisibility) {
+      for (const ent of this.viewer.entities.values) {
+        if (!ent) continue;
+        const id = String(ent.id ?? '');
+        if (this.isForkEntity(id)) {
+          if (processed.has(id)) continue;
+          const layerVal = this.getEntityLayer(ent);
+          ent.show = layerVal && this.hiddenLayers.has(layerVal) ? false : true;
+          continue;
+        }
+        if (processed.has(id)) continue;
+        ent.show = hasForks ? this.isInsideAnyFork(ent, now, forks) : restoreVisibility;
+      }
     }
 
     // 4) Overlay imagery layers (WMS/XYZ tiles) — these are full-globe rasters
