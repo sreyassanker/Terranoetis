@@ -1527,7 +1527,7 @@ export default function App() {
   const chatMessagesRef = useRef<HTMLDivElement>(null);
 
   /* Auto-scroll chat to bottom on new messages */
-  useEffect(() => { chatMessagesRef.current?.scrollTo({ top: chatMessagesRef.current.scrollHeight, behavior: 'smooth' }); }, [aiMessages.length, aiMessages[aiMessages.length - 1]?.content, aiTyping]);
+  useEffect(() => { chatMessagesRef.current?.scrollTo({ top: chatMessagesRef.current.scrollHeight, behavior: 'smooth' }); }, [aiMessages.length, aiMessages[aiMessages.length - 1]?.content, aiTyping]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const aiApiType = useMemo(() => resolveAiProvider(apiVault), [apiVault]);
   const cesiumIonToken = useMemo(() => resolveCesiumIonToken(apiVault), [apiVault]);
@@ -3258,9 +3258,9 @@ export default function App() {
     });
   }
 
-  function isLayerEnabled(layerId: string) {
+  const isLayerEnabled = useCallback((layerId: string) => {
     return layersRef.current.find(l => l.id === layerId)?.on ?? false;
-  }
+  }, []);
 
   function setLayerEntitiesVisible(layerId: string, visible: boolean) {
     const ents = entityStoreRef.current[layerId];
