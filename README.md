@@ -154,24 +154,152 @@ flowchart LR
 
 ### Frontend (`src/`)
 
-- **Framework:** React 19 with TypeScript, built with Vite 7
-- **3D Rendering:** CesiumJS 1.140 with custom shaders and rendering layers
-- **Styling:** Tailwind CSS 3.4 with class-variance-authority component patterns
-- **Routing:** React Router 7 with multi-page support
+- **Framework:** React 18 with TypeScript, built with Vite 5
+- **3D Rendering:** CesiumJS 1.140, deck.gl, Mapbox GL JS
+- **Styling:** Tailwind CSS 3 with class-variance-authority, dark mode by default
+- **Routing:** React Router
 - **State Management:** React context (AuthContext) + custom hooks + WebSocket store
 
-**Key frontend modules:**
+**Routing (from `App.tsx`):**
 
-| Module | Directory | Purpose |
-|--------|-----------|---------|
-| Globe & Rendering | `src/rendering/` | 36 rendering modules: weather, aviation, maritime, satellite, earthquakes, military symbology, terrain, IDW interpolation, scenario engine, ghost protocol, fork renderer, entropy halo, and more |
-| Viewer | `src/viewer/` | Cesium viewer configuration and camera controller |
-| Components | `src/components/` | Panel-based UI: AnalyticsWorkbench, IntelligencePanel, PrithviPanel, SatelliteSearch, SatelliteTracker, AviationTracker, MilitarySymbology, Scenario components (Gallery, Editor, Viewer, CinematicDirector, SpatialSketching), ToolDialog, ForkPanel, DigitalTwinPanel, IssLivePanel, cockpit panels, and more |
-| Pages | `src/pages/` | Main App, GlobePage, CanvasPage, ScenariosPage, ToursPage, AdminDashboard |
-| Data | `src/data/` | Analytical models definitions (150 tools with metadata) |
-| Lib | `src/lib/` | API client, chat store, batch scheduler, terrain sampler, unified timer, utilities |
-| Hooks | `src/hooks/` | WebSocket hook |
-| Context | `src/context/` | Authentication context |
+| Route | View | Description |
+|---|---|---|
+| `/fullworld` | Globe | Main Cesium globe viewport |
+| `/cockpit` | Dashboard | Mosaic layout: CognitiveDashboard, MemoryExplorer, SettingsPanel, ToolWorkbench |
+| `/scenario` | Scenarios | Scenario gallery and editor |
+| `/login` | Login | Authentication page |
+
+**Core components:**
+
+| Component | Lines | Description |
+|---|---|---|
+| **Topbar** | 270 | Dark glass toolbar: clock, branding, status indicators (connection/memory/entities), theme toggle, auth, hatch animation |
+| **Sidebar** | 455 | Collapsible left panel with 9 layer groups (Natural Hazards, Infrastructure, Environment, Flights, AIS, Satellites, Military, Tectonic, Custom) |
+| **SearchBox** | 225 | Geocoding search with globe fly-to, suggestion dropdown |
+| **ModularModal** | 472 | Generic modal: title, body, footer, accent color, z-index |
+| **Tile3DLayer** | 273 | Cesium 3D Tiles: tileset creation, style JSON, bounding sphere padding, SSE |
+| **CommandPalette** | — | Cmd+K palette: search layers/locations/actions, toggle/fly-to/open intel |
+| **PerformanceMonitor** | 250 | Real-time FPS/entities/primitives/memory/JS heap, toggle Ctrl+Shift+P |
+| **FlightTravelView** | 1250 | Flight deck HUD: compass, alt/heading tapes, horizon, pitch ladder, 8-dir look, mach |
+| **IssTravelView** | 370 | ISS orbital HUD: nadir/horizon compass, pitch tape, Earth-viewing mode |
+| **IssLivePanel** | — | ISS camera iframe + position stats (lat/lon/alt/speed) |
+| **IntelligencePanel** | 1700 | 8-tab intel: Market, Energy, Geopolitical, Correlation, Sentiment, Heatmap, Analysis, Force Posture |
+| **ToolDialog** | 2500 | Analysis tool execution: study area, params, grid, execution, results, export |
+| **DigitalTwinPanel** | — | Recharts charts (Area/Bar/Pie/Line), stat cards, recommendations |
+| **CameraControls** | — | Zoom slider + log-scale height + fly-to-target |
+| **ForkPanel** | — | Parallel realities: pause/resume/terminate, divergence score |
+| **ErrorBoundary** | — | React class-based, optional label + reset |
+| **LoginModal** | — | Auth token check, manual login, listens for `auth:required` event |
+| **CesiumContext.tsx** | — | React context providing Cesium.Viewer instance |
+| **useCesium** | — | Hook returning CesiumContext value with optional lazy init |
+
+**Component subdirectories:**
+
+`src/components/chat/` — `AdvancedChatViews.tsx` (850L): PlanCard, SubAgentActivity, InlineTable/Chart/Slider, ToolApproval, ModelTierSelector, TraceExpander
+
+`src/components/cockpit/`:
+- `CognitiveDashboard.tsx` (860L) — AnimatedBrain SVG, sparklines, system metrics
+- `MemoryExplorer.tsx` (530L) — SVG Knowledge Graph (force-directed)
+- `SettingsPanel.tsx` (600L) — 4 tabs: Cognitive (S1/S2 bias), Alerts, Providers, Privacy
+- `ToolWorkbench.tsx` (1570L) — Physics causal chain builder, IDW risk surface, Noisy-OR CBN, physics surrogates
+
+`src/components/scenarios/` (12 files):
+- `types.ts` — Point3D, ShapeData (11 types), Scenario, ScenarioSummary, SCENARIO_TYPE_LABELS/COLORS
+- `CinematicDirector.tsx` (643L) — Camera path animation for disaster fly-throughs
+- `EarthquakeVisualizer.tsx` (206L) — MMI polygons, P/S/Rayleigh/Love wavefront rings
+- `hazardRenderers.ts` (188L) — Renders 11 shape types on Cesium (polygon, cylinder, corridor, ellipse, ring, flood_surface, wavefront, intensity/damage/liquefaction zones)
+- `ScenarioEditor.tsx` (568L) — Parameter forms for 7 disaster types
+- `ScenarioGallery.tsx` (147L) — Sortable/filterable grid, search
+- `AddScenarioModal.tsx`, `ScenarioGraph.tsx`, `ScenarioPanel.tsx`, `ScenarioTimeline.tsx`, `ScenarioWizard.tsx`, `ScenarioThumbnail.tsx`
+
+Scenario types and colors:
+
+| Key | Label | Color |
+|---|---|---|
+| `earthquake_swarm` | Earthquake | `#ef4444` |
+| `hurricane_landfall` | Hurricane | `#f59e0b` |
+| `wildfire_spread` | Wildfire | `#ff6b35` |
+| `volcanic_eruption` | Volcanic | `#d946ef` |
+| `flood_inundation` | Flood | `#3b82f6` |
+| `tsunami_wave` | Tsunami | `#06b6d4` |
+| `landslide` | Landslide | `#78350f` |
+| `data_layer` | Data Layer | `#10b981` |
+
+`src/components/prithvi/`:
+- `AviationTrackerPanel.tsx` (560L) — Live OpenSky flights, search/filter
+- `PrithviPanel.tsx` (940L) — NASA Prithvi AI: land cover, embedding search, change detection
+- `SatelliteSearchPanel.tsx` (680L) — Semantic imagery search (text/geo/class), seeder status
+- `SatelliteTrackerPanel.tsx` (530L) — TLE catalog (CelesTrak/UCS/Starlink), track button
+
+`src/components/explainability/` — `HumanOverrideBanner.tsx` (420L): pending override approval/rejection
+
+`src/components/ui/` — 18 Radix-based primitives: Button, Checkbox, Dialog, DropdownMenu, Input, Label, ScrollArea, Select, Separator, Slider, Switch, Tabs, Textarea, Tooltip, ToggleGroup, Panel, ApiVault, SatelliteImageryPanel, StudyAreaPanel, ChartComponents
+
+**Kaggle overlays (7 files)** — each fetches `.npy` raster data and renders Cesium `SingleTileImageryProvider` with custom colormaps:
+
+| File | Layers | Lines |
+|---|---|---|
+| `KaggleEarthquakeOverlay.tsx` | PGA / PGV / MMI (red-yellow) | 204 |
+| `KaggleFloodOverlay.tsx` | Water depth + terrain (3-mode) | 411 |
+| `KaggleHurricaneOverlay.tsx` | Wind speed + surge + rainfall | 317 |
+| `KaggleLandslideOverlay.tsx` | Debris depth + velocity + runout | 304 |
+| `KaggleTsunamiOverlay.tsx` | Wave height + bathymetry | 203 |
+| `KaggleVolcanoOverlay.tsx` | Ash deposit + lava thickness | 304 |
+| `KaggleWildfireOverlay.tsx` | Fire intensity + fire state | 205 |
+
+**Rendering engine (`src/rendering/`, 33 files):**
+
+| File | Purpose |
+|---|---|
+| `ais.ts` | Maritime AIS vessel positions/tracks |
+| `aviation.ts` | Flight tracking (real-time aircraft + paths) |
+| `flights.ts` | Flight route arcs (departure/arrival) |
+| `earthquakes.ts` | Earthquake markers (magnitude-scaled, depth-colored) |
+| `satelliteDataSources.ts` | TLE orbit propagation & rendering |
+| `satelliteImagery.ts` | GIBS/XYZ/WMS imagery layer management |
+| `satnogs.ts` | SatNOGS ground station visualization |
+| `osmBuildings.ts` | OSM 3D building extrusion |
+| `surfaceRenderer.ts` | IDW interpolation surface rendering |
+| `gisFusion.ts` | GIS data fusion for risk surfaces |
+| `studyArea.ts` | GeoJSON upload/draw/export/fly-to |
+| `scenarioEngine.ts` | What-if scenario definition/rollout/diff |
+| `causalGraph.ts` | Noisy-OR causal Bayesian network |
+| `blackboard.ts` | Blackboard pattern for probability writing |
+| `physicsSurrogates.ts` | Physics surrogates: liquefaction, dispersion, wildfire, flood |
+| `domainLayers.ts` | Domain-specific layer management |
+| `advancedWaterShader.ts` | Custom water shader |
+| `GhostEntity.ts` / `ghostProtocol.ts` | Ghost entity rendering + protocol |
+| `entropyHalo.ts` | Entropy halo visualization |
+| `forkRenderer.ts` | Parallel reality fork rendering |
+| `layerRenderer.ts` | Generic layer rendering abstraction |
+| `navigation.ts` | Navigation utilities |
+| `oracleChains.ts` | Oracle chain visualization |
+| `idwInterpolation.ts` | IDW interpolation algorithm |
+| `tectonic.ts` | Tectonic plate data |
+| `weather.ts` | Weather data |
+| `trajectoryPredictor.ts` | Trajectory prediction |
+| `toolResultParser.ts` | Tool result parsing |
+| `ucsSatelliteDb.ts` | UCS satellite database |
+| `shpjs.d.ts` | Shapefile type declarations |
+
+**Hooks (14 total):**
+
+| Hook | Storage | Purpose |
+|---|---|---|
+| `useSettings` | LocalStorage | User settings persistence |
+| `useTheme` | LocalStorage | Dark/light theme toggle |
+| `useAuth` | SessionStorage | Auth state + token |
+| `useWebSocket` | — | Socket.IO connection manager |
+| `useMapConfig` | React state | Map configuration from server |
+| `useUserPreferences` | React state | User preferences CRUD |
+| `useUserPreferencesPanel` | React state | Panel-specific settings |
+| `useNotifications` | React state | Alert/notification system |
+| `useSavedMap` | React state | Saved maps CRUD |
+| `useLayerToggle` | React state | Layer visibility toggles |
+| `useSession` | React state | Session management |
+| `useLocalStorage` | LocalStorage | Generic typed storage |
+| `useUser` | React state | User data fetching |
+| `useApi` | — | Generic API fetcher |
 
 ### Backend (`server/`)
 
@@ -342,11 +470,33 @@ services:
   causal-service:  # Python causal inference microservice
 ```
 
+**Dockerfile** (`Dockerfile`, multi-stage):
+- **Base**: `node:20-alpine` with build deps (python3, make, g++)
+- **Build**: `npm ci` → `npm run build` (tsc + vite)
+- **Production**: `node:20-alpine` with `dumb-init`, `npm ci --omit=dev`
+- **Healthcheck**: `curl -f http://localhost:3001/api/health`
+- **Ports**: 3001 (server), 3000 (dev client)
+- **Entrypoint**: `tsx server/index.ts`
+
+### Database Schema (Prisma)
+
+7 models in `server/DB-prisma/schema.prisma`:
+
+| Model | Key Fields |
+|---|---|
+| `User` | id, username, password, role, createdAt |
+| `Session` | id, userId, token, expiresAt |
+| `MapConfig` | id, userId, center, zoom, layers |
+| `Preferences` | id, userId, theme, settings |
+| `Notification` | id, userId, type, message, read |
+| `SavedMap` | id, userId, name, config |
+| `LayerToggle` | id, userId, layerId, visible |
+
 ### External Dependencies
 
 - **Cesium Ion** – 3D globe terrain and imagery tiles
 - **Redis** – Caching, session store, pub/sub messaging
-- **SQLite** – Application database (auth, scenarios, memory traces)
+- **SQLite** – Application database (auth, scenarios, memory traces, reasoning)
 - **Various APIs** – See `.env` for full list of 30+ integrated data providers
 
 ### CI/CD
@@ -406,6 +556,19 @@ docker compose up -d  # Builds and starts all services
 ```
 
 ## Scripts
+
+**npm scripts (from `package.json`):**
+
+| Script | Purpose |
+|--------|---------|
+| `dev` | Concurrent: server + client + redis |
+| `dev:client` | Kill port 3000, start Vite dev server |
+| `dev:server` | `tsx server/index.ts` on port 3001 |
+| `build` | `tsc -b && vite build` |
+| `lint` | `eslint .` |
+| `test` | `vitest run` |
+
+**Utility scripts:**
 
 | Script | Purpose |
 |--------|---------|
