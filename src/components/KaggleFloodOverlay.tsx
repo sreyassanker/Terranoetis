@@ -1,60 +1,81 @@
 /**
- * KaggleFloodOverlay
+ * KaggleFloodOverlay — 3D CFD flood rendering.
  *
- * Fetches water_depth_final.npy and terrain.npy from Kaggle simulation results
- * and renders them as a colored imagery overlay on the 3D globe.
+ * Replaces the 2D canvas → PNG → SingleTileImageryProvider pipeline with a
+ * GPU-animated primitive stack:
+ *  - ScalarSurfacePrimitive  (3D water sheet, displaced per frame, lit)
+ *  - ArrowFieldPrimitive     (real 3D arrows, oriented by velocity field)
+ *  - ParticleAdvector        (stream tracers advected in real time)
  *
- * - Blue = shallow water
- * - Red = deep water
- * - Semi-transparent so terrain is visible underneath
+ * Animation is *uniform-only*: each frame is just one `material.uniforms.u_frame`
+ * write per primitive — no imagery-layer churn, no WebGL texture leaks.
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import * as Cesium from 'cesium';
 import { X } from 'lucide-react';
+import {
+  computeGridRectangle,
+  fetchGrid,
+  fetchSimMeta,
+  extentKm,
+  getColormap,
+  resolveCellSizeM,
+  addDomainBoundary,
+  schemeToCfa,
+  toFrameSeries,
+  type ColorStop,
+  type GridData,
+} from './kaggle/shared';
+import KaggleLegend, { type SchemeOption } from './kaggle/KaggleLegend';
+import KaggleAnimationControls from './kaggle/KaggleAnimationControls';
+import { ScalarSurfacePrimitive } from './kaggle/gpu/ScalarSurfacePrimitive';
+import { ArrowFieldPrimitive } from './kaggle/gpu/ArrowFieldPrimitive';
+import { ParticleAdvector } from './kaggle/gpu/ParticleAdvector';
+import { sampleDomainTerrain } from './kaggle/gpu/terrain';
+import { buildGeoFrame } from './kaggle/gpu/fieldData';
 
-
-// ── Blue-to-Red depth colormap ──────────────────────────────────────
-const DEPTH_COLORMAP: { stop: number; r: number; g: number; b: number }[] = [
-  { stop: 0.00, r: 10,  g: 60,  b: 180 },  // deep blue (shallow)
-  { stop: 0.15, r: 30,  g: 120, b: 220 },  // blue
-  { stop: 0.30, r: 50,  g: 180, b: 220 },  // cyan
-  { stop: 0.50, r: 60,  g: 210, b: 140 },  // green (medium)
-  { stop: 0.70, r: 220, g: 200, b: 50  },  // yellow
-  { stop: 0.85, r: 240, g: 120, b: 30  },  // orange
-  { stop: 1.00, r: 220, g: 30,  b: 30  },  // red (deep)
+// ── Colormap mapping (overlay UI ↔ GPU GLSL) ─────────────────────────────────
+const DEPTH_COLORMAP: ColorStop[] = [
+  { stop: 0.0, r: 10, g: 60, b: 180 },
+  { stop: 0.15, r: 30, g: 120, b: 220 },
+  { stop: 0.3, r: 50, g: 180, b: 220 },
+  { stop: 0.5, r: 60, g: 210, b: 140 },
+  { stop: 0.7, r: 220, g: 200, b: 50 },
+  { stop: 0.85, r: 240, g: 120, b: 30 },
+  { stop: 1.0, r: 220, g: 30, b: 30 },
 ];
-
-function interpolateColormap(t: number): [number, number, number] {
-  const ct = Math.max(0, Math.min(1, t));
-  for (let i = 0; i < DEPTH_COLORMAP.length - 1; i++) {
-    const c0 = DEPTH_COLORMAP[i];
-    const c1 = DEPTH_COLORMAP[i + 1];
-    if (ct >= c0.stop && ct <= c1.stop) {
-      const lt = (ct - c0.stop) / (c1.stop - c0.stop);
-      return [
-        Math.round(c0.r + (c1.r - c0.r) * lt),
-        Math.round(c0.g + (c1.g - c0.g) * lt),
-        Math.round(c0.b + (c1.b - c0.b) * lt),
-      ];
-    }
-  }
-  return [220, 30, 30];
-}
+const SCHEMES: SchemeOption[] = [
+  { name: 'default', label: 'Depth (blue→red)' },
+  { name: 'viridis', label: 'Viridis' },
+  { name: 'turbo', label: 'Turbo' },
+  { name: 'spectral', label: 'Spectral' },
+  { name: 'inferno', label: 'Inferno' },
+  { name: 'coolwarm', label: 'Cool–Warm' },
+  { name: 'grayscale', label: 'Grayscale' },
+];
 
 interface KaggleFloodOverlayProps {
   viewer: Cesium.Viewer | null;
   jobId: string | null;
   lat: number;
   lon: number;
-  gridSizeKm?: number;
   opacity?: number;
   onDismiss?: () => void;
 }
 
-interface GridData {
-  shape: number[];
-  values: number[];
+interface GpuStack {
+  surface: ScalarSurfacePrimitive;
+  arrows: ArrowFieldPrimitive;
+  particles: ParticleAdvector;
+  frames: number;
+  times: number[];
+  boundary: Cesium.Entity;
+  maxDepth: number;
+  maxVelocity: number;
+  gs: number;
+  kmExtent: number;
+  floodedPct: number;
 }
 
 export default function KaggleFloodOverlay({
@@ -62,42 +83,35 @@ export default function KaggleFloodOverlay({
   jobId,
   lat,
   lon,
-  gridSizeKm = 2.56,
-  opacity = 0.7,
+  opacity = 0.85,
   onDismiss,
 }: KaggleFloodOverlayProps) {
-  const layerRef = useRef<Cesium.ImageryLayer | null>(null);
-  const terrainLayerRef = useRef<Cesium.ImageryLayer | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<{ maxDepth: number; floodedPct: number } | null>(null);
-  const loadedJobRef = useRef<string | null>(null);
+  const [stats, setStats] = useState<{ maxDepth: number; floodedPct: number; extentKm: number } | null>(null);
+  const [frame, setFrame] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [scheme, setScheme] = useState('default');
   const [dismissHovered, setDismissHovered] = useState(false);
+  const loadedJobRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const stackRef = useRef<GpuStack | null>(null);
+  const [layerOpacity, setLayerOpacity] = useState(opacity);
 
   const cleanup = useCallback(() => {
-    if (!viewer) return;
-    if (layerRef.current) {
-      viewer.scene.imageryLayers.remove(layerRef.current, true);
-      layerRef.current = null;
-    }
-    if (terrainLayerRef.current) {
-      viewer.scene.imageryLayers.remove(terrainLayerRef.current, true);
-      terrainLayerRef.current = null;
+    const s = stackRef.current;
+    if (s) {
+      s.surface.destroy();
+      s.arrows.destroy();
+      s.particles.destroy();
+      s.boundary && viewer?.entities.remove(s.boundary);
+      stackRef.current = null;
     }
   }, [viewer]);
 
-  const fetchGrid = useCallback(async (name: string, signal?: AbortSignal): Promise<GridData | null> => {
-    if (!jobId) return null;
-    const resp = await fetch(`/api/kaggle/simulate/${jobId}/grid/${name}?format=json`, { signal });
-    if (!resp.ok) return null;
-    return resp.json();
-  }, [jobId]);
-
+  // ── Load + build ────────────────────────────────────────────────────────────
   const buildOverlay = useCallback(async () => {
     if (!viewer || !jobId || loadedJobRef.current === jobId) return;
-
-    // Abort any in-flight fetch from a previous run
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -106,304 +120,341 @@ export default function KaggleFloodOverlay({
     setError(null);
     setStats(null);
     cleanup();
-    loadedJobRef.current = jobId;
+    setFrame(0);
+    setPlaying(false);
+    // loadedJobRef is stamped only once the stack is fully built — a failed
+    // fetch must leave the overlay retryable for the same jobId.
 
     try {
-      // Fetch water depth, velocity, and terrain grids in parallel
-      const [depthGrid, terrainGrid, vxGrid, vyGrid] = await Promise.all([
-        fetchGrid('water_depth_final', controller.signal),
-        fetchGrid('terrain', controller.signal),
-        fetchGrid('velocity_x', controller.signal),
-        fetchGrid('velocity_y', controller.signal),
-      ]);
-
-      if (!depthGrid || !terrainGrid) {
-        setError('Failed to fetch grid data from Kaggle results');
-        setLoading(false);
+      const [depthGrid, vxGrid, vyGrid, snapDepth, snapVx, snapVy, snapTimes, meta] =
+        await Promise.all([
+          fetchGrid(jobId, 'water_depth_final', controller.signal),
+          fetchGrid(jobId, 'velocity_x', controller.signal),
+          fetchGrid(jobId, 'velocity_y', controller.signal),
+          fetchGrid(jobId, 'snapshots_depth', controller.signal),
+          // Some kernels (e.g. landslide) store velocity as a single combined
+          // snapshots_velocity grid; try both conventions.
+          fetchGrid(jobId, 'snapshots_vx', controller.signal)
+            .then(g => g ?? fetchGrid(jobId, 'snapshots_velocity', controller.signal)),
+          fetchGrid(jobId, 'snapshots_vy', controller.signal)
+            .then(g => g ?? fetchGrid(jobId, 'snapshots_velocity', controller.signal)),
+          fetchGrid(jobId, 'snapshot_times', controller.signal),
+          fetchSimMeta(jobId, controller.signal),
+        ]);
+      if (controller.signal.aborted) return;
+      if (!depthGrid) {
+        setError('Failed to fetch water depth grid data');
         return;
       }
 
       const gs = depthGrid.shape[0] || 512;
-      const values = depthGrid.values;
-      const terrainValues = terrainGrid.values;
+      const depthSeries = toFrameSeries(snapDepth, [], gs, gs);
+      const vxSeries = toFrameSeries(snapVx, [], gs, gs);
+      const vySeries = toFrameSeries(snapVy, [], gs, gs);
 
-      // Find min/max for normalization
-      let maxDepth = 0;
-      let totalCells = 0;
-      let floodedCells = 0;
-      for (let i = 0; i < values.length; i++) {
-        const v = isFinite(values[i]) ? values[i] : 0;
-        if (v > maxDepth) maxDepth = v;
-        totalCells++;
-        if (v > 0.01) floodedCells++;
-      }
-      if (maxDepth === 0) maxDepth = 1;
+      const cellSizeM = resolveCellSizeM('flood_inundation', meta);
+      // Surface geometry always spans gs × cellSizeM meters — never derive
+      // extent from a caller-supplied gridSizeKm that would desync the
+      // boundary rectangle from the actual GPU-rendered domain.
+      const km = extentKm(gs, cellSizeM);
+      const rect = computeGridRectangle(lat, lon, km);
 
-      setStats({
-        maxDepth,
-        floodedPct: (floodedCells / totalCells) * 100,
+      // Sequence count for animation controls
+      const frames = depthSeries?.frames ?? 1;
+      const times: number[] = snapTimes && snapTimes.values.length >= frames
+        ? snapTimes.values.slice(0, frames)
+        : Array.from({ length: frames }, (_, i) => i);
+
+      // Build the GeoFrame and sample terrain once
+      const geoFrame = buildGeoFrame(lat, lon, gs, cellSizeM);
+      const terrain = sampleDomainTerrain({
+        viewer,
+        frame: geoFrame,
+        outGs: gs,
+        debugName: `flood-${jobId}`,
       });
 
-      // Build the colored canvas (depth overlay)
-      const canvas = document.createElement('canvas');
-      canvas.width = gs;
-      canvas.height = gs;
-      const ctx = canvas.getContext('2d')!;
-      const image = ctx.createImageData(gs, gs);
+      const SURFACE_EXAGGERATION_M = 400;
 
-      for (let row = 0; row < gs; row++) {
-        for (let col = 0; col < gs; col++) {
-          const idx = row * gs + col;
-          const depth = isFinite(values[idx]) ? values[idx] : 0;
-          if (depth < 0.01) {
-            // No water — transparent (show terrain underneath)
-            const pi = idx * 4;
-            image.data[pi] = 0;
-            image.data[pi + 1] = 0;
-            image.data[pi + 2] = 0;
-            image.data[pi + 3] = 0;
-            continue;
-          }
-
-          const t = Math.min(depth / maxDepth, 1.0);
-          const [r, g, b] = interpolateColormap(t);
-          const pi = idx * 4;
-          image.data[pi] = r;
-          image.data[pi + 1] = g;
-          image.data[pi + 2] = b;
-          image.data[pi + 3] = Math.round(80 + t * 140); // alpha: 80–220
-        }
-      }
-      ctx.putImageData(image, 0, 0);
-
-      // Position the overlay centered at (lat, lon)
-      const halfKm = gridSizeKm / 2;
-      const latDelta = halfKm / 111.0; // ~111 km per degree latitude
-      const lonDelta = halfKm / (111.0 * Math.cos(lat * Math.PI / 180));
-      const rect = Cesium.Rectangle.fromDegrees(
-        lon - lonDelta, lat - latDelta,
-        lon + lonDelta, lat + latDelta,
-      );
-
-      // Add depth overlay as imagery layer
-      const url = canvas.toDataURL('image/png');
-      const provider = new Cesium.SingleTileImageryProvider({
-        url,
-        rectangle: rect,
-        tileWidth: gs,
-        tileHeight: gs,
-      });
-      const layer = viewer.scene.imageryLayers.addImageryProvider(provider);
-      layer.alpha = opacity;
-      (layer as unknown as { name: string }).name = 'kaggle_flood_depth';
-      layerRef.current = layer;
-
-      // Build terrain canvas (grayscale heightmap)
-      const terrainCanvas = document.createElement('canvas');
-      terrainCanvas.width = gs;
-      terrainCanvas.height = gs;
-      const tCtx = terrainCanvas.getContext('2d')!;
-      const tImage = tCtx.createImageData(gs, gs);
-
-      let tMin = Infinity, tMax = -Infinity;
-      for (let i = 0; i < terrainValues.length; i++) {
-        const v = isFinite(terrainValues[i]) ? terrainValues[i] : 0;
-        if (v < tMin) tMin = v;
-        if (v > tMax) tMax = v;
-      }
-      const tSpan = tMax - tMin || 1;
-
-      for (let row = 0; row < gs; row++) {
-        for (let col = 0; col < gs; col++) {
-          const idx = row * gs + col;
-          const v = isFinite(terrainValues[idx]) ? terrainValues[idx] : 0;
-          const t = (v - tMin) / tSpan;
-          // Terrain: brown-green gradient
-          const pi = idx * 4;
-          tImage.data[pi] = Math.round(60 + t * 80);
-          tImage.data[pi + 1] = Math.round(100 + t * 60);
-          tImage.data[pi + 2] = Math.round(40 + t * 30);
-          tImage.data[pi + 3] = 160;
-        }
-      }
-      tCtx.putImageData(tImage, 0, 0);
-
-      // Add terrain layer underneath the depth overlay
-      const tUrl = terrainCanvas.toDataURL('image/png');
-      const tProvider = new Cesium.SingleTileImageryProvider({
-        url: tUrl,
-        rectangle: rect,
-        tileWidth: gs,
-        tileHeight: gs,
-      });
-      const tLayer = viewer.scene.imageryLayers.addImageryProvider(tProvider);
-      tLayer.alpha = 0.5;
-      (tLayer as unknown as { name: string }).name = 'kaggle_terrain';
-      terrainLayerRef.current = tLayer;
-
-      // ── Build velocity arrow overlay ──────────────────────────────
-      // Draw arrows showing water flow direction and speed
-      if (vxGrid && vyGrid) {
-        const arrowCanvas = document.createElement('canvas');
-        arrowCanvas.width = gs;
-        arrowCanvas.height = gs;
-        const aCtx = arrowCanvas.getContext('2d')!;
-
-        const vxValues = vxGrid.values;
-        const vyValues = vyGrid.values;
-
-        // Compute max velocity for scaling
-        let maxVel = 0;
-        for (let i = 0; i < vxValues.length; i++) {
-          const v = Math.sqrt(
-            (isFinite(vxValues[i]) ? vxValues[i] : 0) ** 2 +
-            (isFinite(vyValues[i]) ? vyValues[i] : 0) ** 2
-          );
-          if (v > maxVel) maxVel = v;
-        }
-        if (maxVel === 0) maxVel = 1;
-
-        // Subsample arrows for performance
-        const arrowStride = Math.max(2, Math.floor(gs / 32));
-
-        for (let row = 0; row < gs; row += arrowStride) {
-          for (let col = 0; col < gs; col += arrowStride) {
-            const idx = row * gs + col;
-            const vx = isFinite(vxValues[idx]) ? vxValues[idx] : 0;
-            const vy = isFinite(vyValues[idx]) ? vyValues[idx] : 0;
-            const velMag = Math.sqrt(vx * vx + vy * vy);
-
-            if (velMag < 0.01) continue;
-
-            const dirX = vx / velMag;
-            const dirY = vy / velMag;
-            const arrowLen = Math.min(20, 4 + (velMag / maxVel) * 16);
-
-            // Arrow color: cyan for fast, blue for slow
-            const t = velMag / maxVel;
-            aCtx.strokeStyle = `rgba(${Math.round(100 + t * 100)}, ${Math.round(150 + t * 80)}, 255, 0.8)`;
-            aCtx.lineWidth = Math.max(1, 2 - t);
-            aCtx.lineCap = 'round';
-
-            const cx = col + 0.5;
-            const cy = row + 0.5;
-            const ex = cx + dirX * arrowLen;
-            const ey = cy + dirY * arrowLen;
-
-            aCtx.beginPath();
-            aCtx.moveTo(cx, cy);
-            aCtx.lineTo(ex, ey);
-            aCtx.stroke();
-
-            // Arrow head
-            const headLen = 3;
-            const angle = Math.atan2(dirY, dirX);
-            aCtx.beginPath();
-            aCtx.moveTo(ex, ey);
-            aCtx.lineTo(ex - headLen * Math.cos(angle - 0.4), ey - headLen * Math.sin(angle - 0.4));
-            aCtx.lineTo(ex - headLen * Math.cos(angle + 0.4), ey - headLen * Math.sin(angle + 0.4));
-            aCtx.closePath();
-            aCtx.fillStyle = `rgba(${Math.round(100 + t * 100)}, ${Math.round(150 + t * 80)}, 255, 0.8)`;
-            aCtx.fill();
-          }
-        }
-
-        const arrowUrl = arrowCanvas.toDataURL('image/png');
-        const arrowProvider = new Cesium.SingleTileImageryProvider({
-          url: arrowUrl,
-          rectangle: rect,
-          tileWidth: gs,
-          tileHeight: gs,
-        });
-        const arrowLayer = viewer.scene.imageryLayers.addImageryProvider(arrowProvider);
-        arrowLayer.alpha = 0.85;
-        (arrowLayer as unknown as { name: string }).name = 'kaggle_flood_arrows';
-      }
-
-      // Fly camera to the flood area
-      viewer.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(lon, lat, 8000),
-        orientation: {
-          heading: 0,
-          pitch: Cesium.Math.toRadians(-45),
-          roll: 0,
+      // Scalar surface: animated depth sheet (3D displaced)
+      const surface = new ScalarSurfacePrimitive({
+        viewer,
+        centerLat: lat,
+        centerLon: lon,
+        gs,
+        cellSizeM,
+        series: depthSeries ?? {
+          shape: [1, gs, gs],
+          values: Array.from(depthGrid.values),
         },
-        duration: 2.0,
+        times,
+        terrain,
+        exaggeration: SURFACE_EXAGGERATION_M,   // meters at max depth
+        maxValue: undefined,
+        colormap: 'turbo',
+        alphaFloor: 0.02,
+        sideTint: true,
       });
-    } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') return; // unmounted or new run
+
+      // Arrows: real 3D arrow field, lifted *above the displaced surface*.
+      // The water sheet is displaced up to SURFACE_EXAGGERATION_M at crest; a
+      // fixed 15 m lift that worked pre-displacement buries the arrows inside
+      // the sheet. 0.6 * exaggeration places them above the envelope.
+      const arrows = new ArrowFieldPrimitive({
+        viewer,
+        centerLat: lat,
+        centerLon: lon,
+        gs,
+        cellSizeM,
+        vxSeries: vxSeries ?? {
+          shape: [1, gs, gs],
+          values: Array.from({ length: gs * gs }, (_, i) => (vxGrid?.values[i] as number) ?? 0),
+        },
+        vySeries: vySeries ?? {
+          shape: [1, gs, gs],
+          values: Array.from({ length: gs * gs }, (_, i) => (vyGrid?.values[i] as number) ?? 0),
+        },
+        terrain,
+        lift: SURFACE_EXAGGERATION_M * 0.6,
+        stride: 6,            // every 6th cell
+        minLen: 6,
+        lenScale: 160,
+        thickness: 0.10,
+        colormap: 'inferno',
+      });
+
+      // Particles ride on the displaced water surface (mesh height at cell
+      // centers ≈ terrain + depth·exaggeration·norm) — not on the bare terrain.
+      const particles = new ParticleAdvector({
+        viewer,
+        frame: geoFrame,
+        gs,
+        cellSizeM,
+        vxSeries: vxSeries ?? {
+          shape: [1, gs, gs],
+          values: Array.from({ length: gs * gs }, () => 0),
+        },
+        vySeries: vySeries ?? {
+          shape: [1, gs, gs],
+          values: Array.from({ length: gs * gs }, () => 0),
+        },
+        depthSeries: depthSeries ?? undefined,
+        depthThreshold: 0.01,
+        count: 2000,
+        advectDt: 0.04,
+        simDtPerStep: Math.min(4, cellSizeM * 0.4), // CFL-safe: ≤ 40% of a cell per step
+        surfaceTerrain: terrain,
+        surfaceExaggerationM: SURFACE_EXAGGERATION_M,
+        surfaceMaxValue: surface.maxValue,
+        colormap: 'turbo',
+        alpha: 0.85,
+      });
+      particles.startIfNew();
+
+      // Domain outline
+      const boundary = addDomainBoundary(viewer, rect,
+        Cesium.Color.fromCssColorString('rgba(59,130,246,0.9)'));
+
+      stackRef.current = {
+        surface,
+        arrows,
+        particles,
+        frames,
+        times,
+        boundary,
+        maxDepth: surface.maxValue,
+        maxVelocity: arrows.maxSpeed,
+        gs,
+        kmExtent: km,
+        floodedPct: 0,
+      };
+      loadedJobRef.current = jobId;
+
+      // Stats
+      let flooded = 0;
+      const finalDepth = depthGrid.values;
+      for (let i = 0; i < finalDepth.length; i++) {
+        if (Number.isFinite(finalDepth[i]) && finalDepth[i] > 0.01) flooded++;
+      }
+      const floodedPct = (flooded / finalDepth.length) * 100;
+      setStats({
+        maxDepth: surface.maxValue,
+        floodedPct,
+        extentKm: km,
+      });
+      stackRef.current.floodedPct = floodedPct;
+
+      // Camera framing
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(8000, km * 550)),
+        orientation: { heading: 0, pitch: Cesium.Math.toRadians(-35), roll: 0 },
+        duration: 1.6,
+      });
+    } catch (err) {
+      if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : 'Failed to build overlay');
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [viewer, jobId, lat, lon, gridSizeKm, opacity, cleanup, fetchGrid]);
+  }, [viewer, jobId, lat, lon, cleanup]);
 
-  // Build overlay when jobId changes
   useEffect(() => {
     if (jobId) {
-      loadedJobRef.current = null; // force reload
+      loadedJobRef.current = null;
       buildOverlay();
     } else {
       cleanup();
       loadedJobRef.current = null;
       setStats(null);
     }
+    return () => {
+      cleanup();
+      if (abortRef.current) abortRef.current.abort();
+    };
   }, [jobId, buildOverlay, cleanup]);
 
-  // Cleanup on unmount: remove layers + abort in-flight fetches
+  // ── Per-frame update (GPU uniform writes only) ──────────────────────────────
   useEffect(() => {
-    return () => {
-      if (abortRef.current) abortRef.current.abort();
-      cleanup();
-    };
-  }, [cleanup]);
+    const s = stackRef.current;
+    if (!s) return;
+    s.surface.setFrame(frame);
+    s.arrows.setFrame(frame);
+    s.particles.setFrame(frame);
+  }, [frame]);
 
-  // Render status badge (floating indicator)
+  // ── Scheme change — swap the baked GLSL colormap on every primitive ─────────
+  useEffect(() => {
+    const s = stackRef.current;
+    if (!s) return;
+    const gpu = schemeToCfa(scheme, 'turbo');
+    s.surface.setColormap(gpu);
+    s.arrows.setColormap(gpu);
+    s.particles.setColormap(gpu);
+  }, [scheme]);
+
+  // ── Opacity change ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    stackRef.current?.surface.setOpacity(layerOpacity);
+    stackRef.current?.arrows.setOpacity(layerOpacity);
+    stackRef.current?.particles.setOpacity(layerOpacity);
+  }, [layerOpacity]);
+
+  const seriesFrames = stackRef.current?.frames ?? 0;
+
   if (!jobId) return null;
 
   return (
-    <div style={{
-      position: 'absolute',
-      bottom: 80,
-      left: 20,
-      zIndex: 100,
-      background: 'rgba(0,0,0,0.75)',
-      backdropFilter: 'blur(8px)',
-      borderRadius: 8,
-      padding: '8px 12px',
-      fontSize: 11,
-      color: '#fff',
-      border: '1px solid rgba(59,130,246,0.3)',
-      maxWidth: 220,
-    }}>
+    <div
+      style={{
+        position: 'absolute',
+        bottom: 80,
+        left: 20,
+        zIndex: 100,
+        background: 'rgba(0,0,0,0.82)',
+        backdropFilter: 'blur(10px)',
+        borderRadius: 8,
+        padding: '10px 13px',
+        fontSize: 11,
+        color: '#fff',
+        border: '1px solid rgba(59,130,246,0.4)',
+        maxWidth: 280,
+      }}
+    >
       {loading && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 10, height: 10, border: '2px solid #3b82f6', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-          Loading flood data...
+          <div
+            style={{
+              width: 10, height: 10,
+              border: '2px solid #3b82f6',
+              borderTopColor: 'transparent',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+            }}
+          />
+          Loading flood CFD data…
         </div>
       )}
-      {error && (
-        <div style={{ color: '#ef4444' }}>Error: {error}</div>
-      )}
+      {error && <div style={{ color: '#ef4444' }}>Error: {error}</div>}
+
       {stats && !loading && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-            <span style={{ fontWeight: 700, color: '#60a5fa' }}>Kaggle Flood Overlay</span>
+            <span style={{ fontWeight: 700, color: '#60a5fa' }}>
+              Kaggle Flood CFD
+            </span>
             {onDismiss && (
-              <button onClick={onDismiss} onMouseEnter={() => setDismissHovered(true)} onMouseLeave={() => setDismissHovered(false)} style={{
-                background: dismissHovered ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
-                border: '1px solid rgba(255,255,255,0.25)',
-                borderRadius: 4, color: '#fff', fontSize: 10, padding: '2px 8px', cursor: 'pointer',
-                transition: 'background 0.15s ease',
-              }} title="Remove overlay"><X size={10} /></button>
+              <button
+                onClick={onDismiss}
+                onMouseEnter={() => setDismissHovered(true)}
+                onMouseLeave={() => setDismissHovered(false)}
+                style={{
+                  background: dismissHovered ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  borderRadius: 4,
+                  color: '#fff',
+                  fontSize: 10,
+                  padding: '2px 8px',
+                  cursor: 'pointer',
+                  transition: 'background 0.15s ease',
+                }}
+                title="Remove overlay"
+              >
+                <X size={10} />
+              </button>
             )}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px 8px', fontSize: 10, opacity: 0.8 }}>
-            <span>Max Depth</span>
-            <span style={{ fontVariantNumeric: 'tabular-nums' }}>{stats.maxDepth.toFixed(2)} m</span>
+
+          {seriesFrames > 1 && (
+            <KaggleAnimationControls
+              frames={seriesFrames}
+              frame={frame}
+              onFrameChange={setFrame}
+              playing={playing}
+              onTogglePlay={() => setPlaying(p => !p)}
+              times={stackRef.current?.times ?? []}
+              formatTime={t => `${t.toFixed(1)}h`}
+            />
+          )}
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '2px 8px',
+            fontSize: 10,
+            opacity: 0.85,
+            marginTop: 4,
+          }}>
+            <span>Max depth</span>
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {stats.maxDepth.toFixed(2)} m
+            </span>
+            <span>Max speed</span>
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {stackRef.current ? stackRef.current.maxVelocity.toFixed(2) : '—'} m/s
+            </span>
             <span>Flooded</span>
-            <span style={{ fontVariantNumeric: 'tabular-nums' }}>{stats.floodedPct.toFixed(1)}%</span>
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {stats.floodedPct.toFixed(1)} %
+            </span>
+            <span>Domain</span>
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {stats.extentKm.toFixed(1)} km
+            </span>
           </div>
+
+          <KaggleLegend
+            title="Water depth"
+            unit="m"
+            min={0}
+            max={stats.maxDepth}
+            colormap={getColormap(scheme, DEPTH_COLORMAP)}
+            scheme={scheme}
+            schemes={SCHEMES}
+            onSchemeChange={setScheme}
+            opacity={layerOpacity}
+            onOpacityChange={setLayerOpacity}
+            decimals={2}
+          />
         </div>
       )}
     </div>

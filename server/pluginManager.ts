@@ -99,6 +99,63 @@ export class PluginManager {
     return source.handler(params);
   }
 
+  /**
+   * Install a plugin from source code content. Writes the file to the plugins
+   * directory and triggers a scan so the new plugin is immediately available.
+   * Returns the plugin ID on success, or null if installation failed.
+   */
+  async installPlugin(filename: string, content: string): Promise<string | null> {
+    if (!filename.endsWith('.ts') && !filename.endsWith('.js')) {
+      throw new Error('Plugin file must be a .ts or .js file');
+    }
+    if (!fs.existsSync(PLUGINS_DIR)) {
+      fs.mkdirSync(PLUGINS_DIR, { recursive: true });
+    }
+    const pluginPath = path.join(PLUGINS_DIR, filename);
+    fs.writeFileSync(pluginPath, content, 'utf-8');
+    await this.scanFiles();
+    const pluginId = `file:${filename}`;
+    return this.plugins.has(pluginId) ? pluginId : null;
+  }
+
+  /**
+   * Remove a plugin by ID. Only file-based plugins (file:*) can be removed;
+   * builtin plugins (builtin:*) are protected. Deletes the file from disk and
+   * unregisters all associated tools and data sources.
+   */
+  removePlugin(id: string): boolean {
+    if (id.startsWith('builtin:')) {
+      return false; // Builtin plugins cannot be removed
+    }
+    const plugin = this.plugins.get(id);
+    if (!plugin) return false;
+
+    this.plugins.delete(id);
+
+    // Unregister tools
+    for (const tool of plugin.tools || []) {
+      this.toolHandlers.delete(tool.name);
+    }
+    // Unregister data sources
+    for (const ds of plugin.dataSources || []) {
+      this.dataHandlers.delete(ds.name);
+    }
+
+    // Delete the file from disk if it's a file-based plugin
+    if (id.startsWith('file:')) {
+      const filename = id.slice(5);
+      const pluginPath = path.join(PLUGINS_DIR, filename);
+      try {
+        fs.unlinkSync(pluginPath);
+      } catch {
+        // File might not exist — ignore
+      }
+    }
+
+    if (this.onToolChange) this.onToolChange();
+    return true;
+  }
+
   private createExamplePlugin(): void {
     const exampleContent = `// Example Earth Intelligence Plugin
 // Drop .ts files into server/plugins/ — they auto-load every 30s.
@@ -353,7 +410,9 @@ module.exports.init = function(api) {
       URL: undefined as unknown,
     };
 
-    const context = vm.createContext(sandbox);
+    const context = vm.createContext(sandbox, {
+      codeGeneration: { strings: false, wasm: false },
+    });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const script = new vm.Script(wrapperCode, { filename: 'plugin' } as any);
     script.runInContext(context, { timeout: 5000 });

@@ -1,4 +1,4 @@
-export type ScenarioType = 'earthquake_swarm' | 'hurricane_landfall' | 'wildfire_spread' | 'volcanic_eruption' | 'flood_inundation' | 'tsunami_wave' | 'data_layer';
+export type ScenarioType = 'earthquake_swarm' | 'hurricane_landfall' | 'wildfire_spread' | 'volcanic_eruption' | 'flood_inundation' | 'tsunami_wave' | 'landslide' | 'data_layer';
 
 export interface Point3D { x: number; y: number; z: number }
 
@@ -51,6 +51,7 @@ export interface ScenarioBase {
   id: string;
   type: ScenarioType;
   params: Record<string, unknown>;
+  location: { lat: number; lon: number };
   pointCloud: Point3D[];
   validationScore: number;
   createdAt: string;
@@ -116,7 +117,19 @@ export interface TsunamiWaveParams {
   arrivalTimes: number[];
 }
 
-export type ScenarioParams = EarthquakeSwarmParams | HurricaneLandfallParams | WildfireSpreadParams | VolcanicEruptionParams | FloodInundationParams | TsunamiWaveParams;
+export interface LandslideParams {
+  lat: number;
+  lon: number;
+  triggerType: 'earthquake' | 'rainfall' | 'volcanic';
+  magnitude: number;
+  pgaThreshold: number;
+  rainfall: number;
+  frictionAngle: number;
+  cohesion: number;
+  duration: number;
+}
+
+export type ScenarioParams = EarthquakeSwarmParams | HurricaneLandfallParams | WildfireSpreadParams | VolcanicEruptionParams | FloodInundationParams | TsunamiWaveParams | LandslideParams;
 
 
 export const DEFAULT_PARAMS: Record<ScenarioType, Record<string, unknown>> = {
@@ -143,6 +156,10 @@ export const DEFAULT_PARAMS: Record<ScenarioType, Record<string, unknown>> = {
   tsunami_wave: {
     epicenterLat: 35.0, epicenterLon: 140.0, magnitude: 8.5,
     depth: 20, waveHeight: 15, arrivalTimes: [30, 45, 60, 90, 120],
+  },
+  landslide: {
+    lat: 36.0, lon: -118.5, triggerType: 'earthquake', magnitude: 6.5,
+    pgaThreshold: 0.15, rainfall: 200, frictionAngle: 35, cohesion: 500, duration: 2,
   },
   data_layer: {
     variableName: '', pointCloud: [], bbox: { latMin: 0, latMax: 0, lonMin: 0, lonMax: 0 },

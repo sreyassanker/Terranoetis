@@ -6,7 +6,10 @@ import ScenarioThumbnail from './ScenarioThumbnail';
 import Panel from '@/components/ui/Panel';
 
 type SortKey = 'recency' | 'confidence' | 'complexity' | 'score';
-type FilterKey = 'all' | 'earthquake_swarm' | 'hurricane_landfall' | 'wildfire_spread' | 'volcanic_eruption' | 'flood_inundation' | 'tsunami_wave' | 'landslide';
+type FilterKey = 'all' | keyof typeof SCENARIO_TYPE_LABELS;
+
+/** How many cards render before the "+N more" note appears. */
+const MAX_RENDERED = 50;
 
 interface ScenarioGalleryProps {
   scenarios: ScenarioSummary[];
@@ -18,6 +21,17 @@ interface ScenarioGalleryProps {
   zIndex?: number;
 }
 
+function sortList(list: ScenarioSummary[], key: SortKey): ScenarioSummary[] {
+  const copy = [...list];
+  switch (key) {
+    case 'confidence': copy.sort((a, b) => b.confidence - a.confidence); break;
+    case 'complexity': copy.sort((a, b) => b.complexity - a.complexity); break;
+    case 'score': copy.sort((a, b) => b.validationScore - a.validationScore); break;
+    case 'recency': copy.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); break;
+  }
+  return copy;
+}
+
 export default function ScenarioGallery({ scenarios: externalScenarios, loading, error, onSelect, onCreateNew, onClose, zIndex = 110 }: ScenarioGalleryProps) {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [sort, setSort] = useState<SortKey>('recency');
@@ -27,15 +41,12 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
     let list = externalScenarios;
     if (filter !== 'all') list = list.filter(s => s.type === filter);
     if (search) list = list.filter(s => s.name.toLowerCase().includes(search.toLowerCase()));
-    return [...list].sort((a, b) => {
-      switch (sort) {
-        case 'confidence': return b.confidence - a.confidence;
-        case 'complexity': return b.complexity - a.complexity;
-        case 'score': return b.validationScore - a.validationScore;
-        case 'recency': default: return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-      }
-    });
+    return sortList(list, sort);
   }, [externalScenarios, filter, sort, search]);
+
+  const totalMatching = scenarios.length;
+  const visible = scenarios.slice(0, MAX_RENDERED);
+  const hiddenCount = totalMatching - visible.length;
 
   return (
     <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 520 }}>
@@ -57,9 +68,9 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
           style={{ width: '100%', fontSize: 11 }} />
 
         {/* Filters */}
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {(['all', 'earthquake_swarm', 'hurricane_landfall', 'wildfire_spread', 'volcanic_eruption', 'flood_inundation', 'tsunami_wave', 'landslide'] as FilterKey[]).map(f => (
-            <button key={f} className={`glass-button ${filter === f ? 'active' : ''}`}
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }} role="tablist" aria-label="Scenario type filter">
+          {(['all', ...Object.keys(SCENARIO_TYPE_LABELS)] as FilterKey[]).map(f => (
+            <button key={f} className={`glass-button ${filter === f ? 'active' : ''}`} role="tab" aria-selected={filter === f}
               style={{ fontSize: 10, padding: '2px 6px' }}
               onClick={() => setFilter(f)}>
               {f === 'all' ? 'All' : SCENARIO_TYPE_LABELS[f]}
@@ -71,13 +82,15 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Sort:</span>
           {(['recency', 'confidence', 'complexity', 'score'] as SortKey[]).map(sk => (
-            <button key={sk} className={`glass-button ${sort === sk ? 'active' : ''}`}
+            <button key={sk} className={`glass-button ${sort === sk ? 'active' : ''}`} aria-pressed={sort === sk}
               style={{ fontSize: 10, padding: '2px 6px' }}
               onClick={() => setSort(sk)}>
               {sk.charAt(0).toUpperCase() + sk.slice(1)}
             </button>
           ))}
-          <span style={{ fontSize: 10, color: 'var(--text-dim)', marginLeft: 'auto' }}>{scenarios.length} results</span>
+          <span style={{ fontSize: 10, color: 'var(--text-dim)', marginLeft: 'auto' }}>
+            {hiddenCount > 0 ? `${visible.length} of ${totalMatching} (refine filter)` : `${totalMatching} results`}
+          </span>
         </div>
 
         {/* Loading */}
@@ -97,8 +110,13 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
         {/* Grid */}
         {!loading && !error && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
-            {scenarios.slice(0, 50).map(scenario => (
-              <div key={scenario.id} className="scenario-card"
+            {visible.map(scenario => (
+              <div
+                key={scenario.id}
+                className="scenario-card"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(scenario.id); } }}
                 style={{
                   background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10, cursor: 'pointer',
                   borderLeft: `3px solid ${SCENARIO_TYPE_COLORS[scenario.type] || '#60a5fa'}`,
@@ -107,13 +125,13 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
                 onClick={() => onSelect(scenario.id)}
                 onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.2)')}>
-                <ScenarioThumbnail type={scenario.type} lat={scenario.location.lat} lon={scenario.location.lon} size={40} />
+                <ScenarioThumbnail type={scenario.type} name={scenario.name} lat={scenario.location.lat} lon={scenario.location.lon} size={40} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{scenario.name}</div>
                   <div style={{ fontSize: 10, color: 'var(--text-dim)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ color: SCENARIO_TYPE_COLORS[scenario.type] }}>{SCENARIO_TYPE_LABELS[scenario.type]}</span>
                     <span>{(scenario.validationScore * 100).toFixed(0)}%</span>
-                    <span className={`severity-${scenario.severity}`}>{scenario.severity}</span>
+                    <span className={`severity-${(scenario.severity || '').toLowerCase()}`}>{scenario.severity}</span>
                   </div>
                   <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4 }}>
                     {scenario.location.lat.toFixed(1)}, {scenario.location.lon.toFixed(1)}
@@ -126,7 +144,7 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
         )}
 
         {/* Empty state */}
-        {!loading && !error && scenarios.length === 0 && externalScenarios.length === 0 && (
+        {!loading && !error && totalMatching === 0 && externalScenarios.length === 0 && (
           <div style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 24 }}>
             <div style={{ fontSize: 24, marginBottom: 8 }}>📋</div>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>No scenarios yet</div>
@@ -135,7 +153,7 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
           </div>
         )}
 
-        {!loading && !error && scenarios.length === 0 && externalScenarios.length > 0 && (
+        {!loading && !error && totalMatching === 0 && externalScenarios.length > 0 && (
           <div style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 24 }}>
             No scenarios match your filter
           </div>

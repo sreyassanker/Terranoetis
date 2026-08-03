@@ -20,6 +20,10 @@ import torch
 DEVICE = torch.device('cpu')
 print(f"[INIT] Using device: {DEVICE}")
 
+# Physical velocity cap (m/s) — flood waters rarely exceed this; guards
+# against wet/dry front spikes producing absurd arrow magnitudes.
+VMAX_VEL = 30.0
+
 
 class SWESolver:
     """2D Shallow Water Equations solver — Lax-Friedrichs finite volume."""
@@ -31,6 +35,8 @@ class SWESolver:
         self.g = g
         self.nu = friction
         self.device = DEVICE
+        # Physical ceiling — wet/dry fronts + steep terrain shouldn't exceed this
+        self.q_max_vel = 30.0  # m/s
 
         # State: h (depth), hu, hv (momentum)
         shape = (grid_size, grid_size)
@@ -120,6 +126,29 @@ class SWESolver:
         hu_avg = 0.25 * (hu_r + hu_l + hu_u + hu_d)
         hv_avg = 0.25 * (hv_r + hv_l + hv_u + hv_d)
 
+        # ── HYPERBOLIC CORE: conservative flux divergences ────────────────
+        # Mass fluxes F_h = hu (x-dir) and G_h = hv (y-dir)
+        dF_h_dx = (hu_r - hu_l) / (2.0 * dx)
+        dG_h_dy = (hv_d - hv_u) / (2.0 * dx)
+
+        # Clamp velocity before computing nonlinear fluxes so the wet/dry
+        # front doesn't send machine-inf into the roll/difference stencils.
+        u_clamped = u.clamp(-self.q_max_vel, self.q_max_vel)
+        v_clamped = v.clamp(-self.q_max_vel, self.q_max_vel)
+        h_clamped = h.clamp(max=200.0)  # 200 m ceiling — beyond this is a numerical artifact
+
+        # Momentum pressure + convective fluxes at cell faces
+        # F(hu) = hu²/h + ½·g·h²,   G(hv) = hv²/h + ½·g·h², cross terms hu·hv/h
+        gh2_half = 0.5 * g * h_clamped**2
+        Fu_x = h_clamped * u_clamped * u_clamped + gh2_half  # = hu²/h + ½gh²
+        Fu_y = h_clamped * u_clamped * v_clamped             # cross term
+        Gv_x = h_clamped * v_clamped * u_clamped
+        Gv_y = h_clamped * v_clamped * v_clamped + gh2_half
+        dFu_dx = (torch.roll(Fu_x, -1, dims=1) - torch.roll(Fu_x, 1, dims=1)) / (2.0 * dx)
+        dFu_dy = (torch.roll(Fu_y, -1, dims=0) - torch.roll(Fu_y, 1, dims=0)) / (2.0 * dx)
+        dGv_dx = (torch.roll(Gv_x, -1, dims=1) - torch.roll(Gv_x, 1, dims=1)) / (2.0 * dx)
+        dGv_dy = (torch.roll(Gv_y, -1, dims=0) - torch.roll(Gv_y, 1, dims=0)) / (2.0 * dx)
+
         # Lateral slopes from terrain (pressure gradient)
         dzdx = torch.zeros_like(z)
         dzdy = torch.zeros_like(z)
@@ -134,15 +163,21 @@ class SWESolver:
         src_hv = -g * h * dzdy - nu * speed * v
 
         # Update with Lax-Friedrichs (half step average + source)
-        # Reduced water decay (0.002 instead of 0.01) for more persistent flooding
-        self.h  = h_avg  + dt * (self.rainfall - 0.002 * h)
-        self.hu = hu_avg + dt * src_hu
-        self.hv = hv_avg + dt * src_hv
+        # Full 2D Lax-Friedrichs:
+        #   h_new  = avg(h)  − dt·[∂(hu)/∂x + ∂(hv)/∂y]   + rain/infiltration
+        #   hu_new = avg(hu) − dt·[∂Fu/∂x + ∂Fu/∂y]       + dt·src_hu
+        self.h  = h_avg - dt * (dF_h_dx + dG_h_dy) + dt * (self.rainfall - 0.002 * h)
+        self.hu = hu_avg - dt * (dFu_dx + dFu_dy) + dt * src_hu
+        self.hv = hv_avg - dt * (dGv_dx + dGv_dy) + dt * src_hv
 
-        # Enforce positivity
-        self.h = torch.clamp(self.h, min=0.0)
+        # Enforce positivity and cap depth (physical ceiling prevents runaway)
+        self.h = torch.clamp(self.h, min=0.0, max=200.0)
         self.hu = torch.where(self.h > 0.01, self.hu, torch.zeros_like(self.hu))
         self.hv = torch.where(self.h > 0.01, self.hv, torch.zeros_like(self.hv))
+        # Cap momentum so velocity stays in the physically defensible range
+        vel_scale = torch.clamp(self.h, min=1e-4)
+        self.hu = torch.clamp(self.hu, -self.q_max_vel * vel_scale, self.q_max_vel * vel_scale)
+        self.hv = torch.clamp(self.hv, -self.q_max_vel * vel_scale, self.q_max_vel * vel_scale)
 
         # Replace any NaN/Inf
         self.h  = torch.where(torch.isfinite(self.h),  self.h,  torch.zeros_like(self.h))
@@ -204,6 +239,10 @@ class SWESolver:
         v[wet] = hv_np[wet] / h[wet]
         u = np.nan_to_num(u, nan=0.0, posinf=0.0, neginf=0.0)
         v = np.nan_to_num(v, nan=0.0, posinf=0.0, neginf=0.0)
+        # Clamp velocities to a physical bound — wet/dry front spikes (hu/h with
+        # vanishing h) produce absurd values that would corrupt visualization.
+        u = np.clip(u, -VMAX_VEL, VMAX_VEL)
+        v = np.clip(v, -VMAX_VEL, VMAX_VEL)
         return {
             'water_depth': h, 'velocity_x': u, 'velocity_y': v,
             'terrain': self.z.cpu().numpy().astype(np.float32),
@@ -230,8 +269,10 @@ def run_flood_simulation(params):
     print(f"Grid: {gs}x{gs} ({gs**2:,} cells) | Duration: {dur:.1f}h | Device: {DEVICE}")
     print(f"Rainfall: {rain:.0f} mm/hr | Soil sat: {sat:.1f} | Dam breach: {dam}")
 
-    # Use smaller dx for higher spatial resolution (5m per cell)
-    solver = SWESolver(grid_size=gs, dx=5.0, dt=0.1, g=9.81, friction=0.005)
+    # Use smaller dx for higher spatial resolution (5m per cell), scaled to study area
+    extent_km = float(params.get('extent_km', 0.0))
+    dx_flood = (extent_km * 1000.0 / gs) if extent_km > 0 else 5.0
+    solver = SWESolver(grid_size=gs, dx=dx_flood, dt=0.1, g=9.81, friction=0.005)
     solver.generate_heightmap(method=terr)
 
     if dam:
@@ -250,7 +291,12 @@ def run_flood_simulation(params):
 
     print(f"[SIM] {total_steps} steps, snapshot every {snap_interval} steps...")
     snapshots = []
+    wallclock_max = float(params.get('wallclock_max_sec', 480))
+    print(f"Wall-clock cap: {wallclock_max:.0f}s")
     for step_i in range(total_steps):
+        if time.time() - t0 > wallclock_max:
+            print(f"  [WALL-CLOCK CAP] Stopping at step {step_i} (elapsed {time.time()-t0:.0f}s)")
+            break
         solver.step()
         if step_i % snap_interval == 0 or step_i == total_steps - 1:
             s = solver.snapshot()
@@ -273,10 +319,41 @@ def run_flood_simulation(params):
         'final': final, 'snapshots': snapshots,
         'params': {'grid_size': gs, 'rainfall_mm': rain, 'duration_hours': dur,
                     'lat': lat, 'lon': lon, 'soil_saturation': sat,
-                    'dam_breach': dam, 'terrain_type': terr},
+                    'dam_breach': dam, 'terrain_type': terr,
+                    'cell_size_m': dx_flood},
         'metadata': {'device': str(DEVICE), 'elapsed_seconds': elapsed,
                       'total_steps': total_steps, 'num_snapshots': len(snapshots)},
     }
+
+
+# simRunner injects the run's JSON params here at push time (Kaggle only
+# uploads the code file, so params cannot be passed as a sibling file).
+EMBEDDED_PARAMS = None
+
+def _load_params():
+    """Load params from EMBEDDED_PARAMS (injected into main.py at push time)
+    or from params.json anywhere on the runner."""
+    if EMBEDDED_PARAMS:
+        try:
+            if isinstance(EMBEDDED_PARAMS, dict):
+                return EMBEDDED_PARAMS
+            return json.loads(EMBEDDED_PARAMS)
+        except Exception:
+            pass
+    candidates = ['params.json', '/kaggle/working/params.json', '/kaggle/input/params.json']
+    src = '/kaggle/src'
+    if os.path.isdir(src):
+        for root, _dirs, files in os.walk(src):
+            if 'params.json' in files:
+                candidates.append(os.path.join(root, 'params.json'))
+    for p in candidates:
+        try:
+            if os.path.exists(p):
+                with open(p) as f:
+                    return json.load(f)
+        except Exception:
+            continue
+    return None
 
 
 def main():
@@ -284,10 +361,8 @@ def main():
     print("TERRANOETIS — Kaggle Flood Simulation (TUNED FOR IMPACT)")
     print("=" * 60)
 
-    params_path = 'params.json'
-    if os.path.exists(params_path):
-        with open(params_path) as f:
-            params = json.load(f)
+    params = _load_params()
+    if params is not None:
         print(f"[PARAMS] Loaded: {json.dumps(params, indent=2)}")
     else:
         # Tuned defaults for visually impressive flooding
@@ -311,10 +386,22 @@ def main():
         np.save(f'{out}/velocity_y.npy', result['final']['velocity_y'])
         np.save(f'{out}/terrain.npy', result['final']['terrain'])
 
-        snap_d = np.stack([s['water_depth'] for s in result['snapshots']])
-        np.save(f'{out}/snapshots_depth.npy', snap_d)
-        snap_t = np.array([s['time_hours'] for s in result['snapshots']])
-        np.save(f'{out}/snapshot_times.npy', snap_t)
+        if result['snapshots']:
+            snap_d = np.stack([s['water_depth'] for s in result['snapshots']])
+            np.save(f'{out}/snapshots_depth.npy', snap_d)
+            snap_t = np.array([s['time_hours'] for s in result['snapshots']])
+            np.save(f'{out}/snapshot_times.npy', snap_t)
+            snap_vx = np.stack([s['velocity_x'] for s in result['snapshots']])
+            np.save(f'{out}/snapshots_vx.npy', snap_vx)
+            snap_vy = np.stack([s['velocity_y'] for s in result['snapshots']])
+            np.save(f'{out}/snapshots_vy.npy', snap_vy)
+        else:
+            # Wall-clock cap tripped before the first snapshot — ship the
+            # final frame as the only snapshot so the client still renders.
+            np.save(f'{out}/snapshots_depth.npy', np.expand_dims(result['final']['water_depth'], axis=0))
+            np.save(f'{out}/snapshot_times.npy', np.array([0.0]))
+            np.save(f'{out}/snapshots_vx.npy', np.expand_dims(result['final']['velocity_x'], axis=0))
+            np.save(f'{out}/snapshots_vy.npy', np.expand_dims(result['final']['velocity_y'], axis=0))
 
         meta = {
             'params': result['params'], 'metadata': result['metadata'],

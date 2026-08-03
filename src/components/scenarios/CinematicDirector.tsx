@@ -186,8 +186,9 @@ function buildDynamicPaths(entityGroups: Map<string, { lat: number; lon: number;
     if (!entities.length) continue;
     const baseNarration = CATEGORY_NARRATION[layer] ?? ['Analyzing event region...'];
 
-    // Sort by magnitude descending (if available), pick top 3
-    const sorted = entities
+    // Sort by magnitude descending (if available), pick top 3 — copy first
+    // so we never mutate the caller's array.
+    const sorted = [...entities]
       .sort((a, b) => (b.magnitude ?? 0) - (a.magnitude ?? 0))
       .slice(0, 3);
 
@@ -334,6 +335,11 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
   // ── Focus entity: generate path and auto-play ─────────
 
   const focusEntityRef = useRef<string>('');
+  // Mirror showNarration so long-lived RAF loops read the latest value without
+  // the effect needing to list it as a dep (which would restart playback).
+  const showNarrationRef = useRef(showNarration);
+  useEffect(() => { showNarrationRef.current = showNarration; }, [showNarration]);
+
   useEffect(() => {
     if (!focusEntity || !viewer) return;
     const key = `${focusEntity.lat.toFixed(3)}_${focusEntity.lon.toFixed(3)}_${focusEntity.layer}`;
@@ -386,7 +392,7 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
         setCameraAtT(viewer, path, t);
         setProgress(t);
 
-        if (showNarration) {
+        if (showNarrationRef.current) {
           const seg = getSegmentIndex(path, t);
           if (seg !== lastSegmentRef.current) {
             lastSegmentRef.current = seg;
@@ -405,7 +411,7 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
     }, 0);
 
     return () => clearTimeout(id);
-  }, [focusEntity, viewer, showNarration]);
+  }, [focusEntity, viewer]);
 
   // ── Playback ──────────────────────────────────────────
 
@@ -430,22 +436,21 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
     const totalMs = path.duration * 1000;
 
     const animate = () => {
-      const pathNow = paths[selectedIdxRef.current] ?? path;
+      // Pin to the captured `path` so a mid-playback refreshPaths() reorder
+      // doesn't teleport the camera to a different path at the same index.
       const elapsed = performance.now() - startRef.current;
       const remaining = (1 - pauseTRef.current) * totalMs;
       const rawT = pauseTRef.current + (elapsed / remaining) * (1 - pauseTRef.current);
       const t = Math.min(1, rawT);
 
-      // Position camera
-      setCameraAtT(viewer, pathNow, t);
+      setCameraAtT(viewer, path, t);
       setProgress(t);
 
-      // Narration: only change on segment boundary
-      if (showNarration) {
-        const seg = getSegmentIndex(pathNow, t);
+      if (showNarrationRef.current) {
+        const seg = getSegmentIndex(path, t);
         if (seg !== lastSegmentRef.current) {
           lastSegmentRef.current = seg;
-          const lines = pathNow.narration;
+          const lines = path.narration;
           setNarrationText(lines[seg % lines.length] ?? '');
         }
       }
@@ -460,7 +465,7 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
     };
 
     animRef.current = requestAnimationFrame(animate);
-  }, [viewer, paths, showNarration, stopPlayback]);
+  }, [viewer, paths, stopPlayback]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -471,7 +476,12 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
 
   // ── Slider scrub ──────────────────────────────────────
 
+  // Resume from the scrub position if the user was playing when they grabbed
+  // the slider, otherwise leave playback stopped at the scrubbed position.
+  const wasPlayingRef = useRef(false);
+
   const handleScrubStart = useCallback(() => {
+    wasPlayingRef.current = isPlaying;
     if (isPlaying) {
       pauseTRef.current = progress;
       stopPlayback();
@@ -482,16 +492,21 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
     if (!viewer || !selectedPath) return;
     const t = val / 100;
     setProgress(t);
+    pauseTRef.current = t;
     setCameraAtT(viewer, selectedPath, t);
 
-    if (showNarration) {
+    if (showNarrationRef.current) {
       const seg = getSegmentIndex(selectedPath, t);
       const lines = selectedPath.narration;
       setNarrationText(lines[seg % lines.length] ?? '');
     }
-  }, [viewer, selectedPath, showNarration]);
+  }, [viewer, selectedPath]);
 
-  const handleScrubEnd = useCallback(() => {}, []);
+  const handleScrubEnd = useCallback(() => {
+    if (wasPlayingRef.current && progress < 1) {
+      playPath(selectedIdx, progress);
+    }
+  }, [playPath, progress, selectedIdx]);
 
   // ── Path selection ────────────────────────────────────
 

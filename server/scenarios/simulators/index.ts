@@ -5,6 +5,7 @@ import { simulateWildfire } from './wildfire';
 import { simulateVolcanic } from './volcanic';
 import { simulateFlood } from './flood';
 import { simulateTsunami } from './tsunami';
+import { simulateLandslide } from './landslide';
 import { validateScenario } from '../geographicValidator';
 
 const simulators: Record<string, (params: ScenarioParams) => ScenarioTimeSeries> = {
@@ -14,6 +15,7 @@ const simulators: Record<string, (params: ScenarioParams) => ScenarioTimeSeries>
   volcanic_eruption: simulateVolcanic,
   flood_inundation: simulateFlood,
   tsunami_wave: simulateTsunami,
+  landslide: simulateLandslide,
 };
 
 /**
@@ -25,6 +27,8 @@ function getLocationFromParams(type: string, params: ScenarioParams): { lat: num
   switch (type) {
     case 'tsunami_wave':
       return { lat: p.epicenterLat as number, lon: p.epicenterLon as number };
+    case 'landslide':
+      return { lat: p.lat as number, lon: p.lon as number };
     case 'earthquake_swarm':
     case 'hurricane_landfall':
     case 'wildfire_spread':

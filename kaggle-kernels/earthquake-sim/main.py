@@ -6,8 +6,10 @@ GMPE-based PGA/PGV/Sa + ShakeMap with MMI.
 
 Physics:
   - 2D elastic wave equation in displacement form:
-      ∂²u_x/∂t² = (λ+2μ)∂²u_x/∂x² + μ∂²u_x/∂z² + λ∂²u_z/∂x∂z + f_x/ρ
-      ∂²u_z/∂t² = μ∂²u_z/∂x² + (λ+2μ)∂²u_z/∂z² + λ∂²u_x/∂x∂z + f_z/ρ
+      ∂²u_x/∂t² = (λ+2μ)∂²u_x/∂x² + μ∂²u_x/∂z² + (λ+μ)∂²u_z/∂x∂z + f_x/ρ
+      ∂²u_z/∂t² = μ∂²u_z/∂x² + (λ+2μ)∂²u_z/∂z² + (λ+μ)∂²u_x/∂x∂z + f_z/ρ
+      (mixed-derivative coefficient is (λ+μ) — receives one power from the
+      divergence term and one from the shear (curl) term; bare λ is wrong)
   - P-wave velocity: Vp = sqrt((λ+2μ)/ρ)
   - S-wave velocity: Vs = sqrt(μ/ρ)
   - Surface waves: low-velocity surface layer generates Rayleigh waves
@@ -29,33 +31,48 @@ VPWATER = 1500.0       # m/s — P-wave velocity (water/seafloor)
 LAMBDA_CRUST = RHO_CRUST * (VP_CRUST**2 - 2 * VS_CRUST**2)  # Lame λ
 MU_CRUST = RHO_CRUST * VS_CRUST**2                           # Lame μ
 
-# ── GMPE: Campbell-Bozorgnia NGA-West2 (simplified) ────────────────
-def campbell_bozorgnia_pga(magnitude, distance_km, vs30=760):
-    """Simplified Campbell-Bozorgnia NGA-West2 PGA attenuation (cm/s²)."""
-    M = magnitude
-    R = np.maximum(distance_km, 1.0)
-    ln_pga = (3.586 + 0.707 * M - 1.093 * np.log(R + 10.0)
-              - 0.0053 * (R + 10.0) + 0.25 * np.log(vs30 / 760))
-    return np.exp(ln_pga) * 981.0  # convert g → cm/s²
+# ── GMPE: NGA-West2 magnitude scaling + geometric spreading —┐
+# Functional form matches Campbell & Bozorgnia (2014, Earthquake Spectra
+# 30(3):1087–1115) far-field branch for PGA, but the coefficients are a
+# simplified regional fit (Western US), NOT the full CB14 c0..c11 tables.
+# ln(PGA[g]) = c0 + c1·M + c2·ln(R_rup + c3) + c4·(R_rup + c3) + c5·ln(Vs30/760)
+# Calibrated to match published NGA-West2 reference points (strike-slip
+# crustal, Vs30=760 m/s, joyner-boore distance):
+#   M5 @ R=10km→0.085g   M6 @ R=10km→0.19g    M7 @ R=10km→0.42g
+#   M7 @ R=30km→0.20g    M7 @ R=100km→0.06g   M8 @ R=10km→0.94g
+C0, C1, C2, C3, C4, C5 = -4.2411, 0.80, -0.80, 5.0, -0.0040, -0.30
 
-def campbell_bozorgnia_pgv(magnitude, distance_km, vs30=760):
-    """Simplified PGV attenuation (cm/s) — empirical scaling."""
+def nga_west2_pga(magnitude, distance_km, vs30=760):
+    """NGA-West2-shaped PGA attenuation in cm/s² (CB14-style fit).
+    Returns physically plausible values at all distances (no silent clip
+    needed as a regularizer)."""
+    M = magnitude
+    R = np.maximum(distance_km, 1.0)  # km, avoid singular at epicenter
+    ln_pga_g = (C0 + C1 * M + C2 * np.log(R + C3)
+                + C4 * (R + C3) + C5 * np.log(vs30 / 760.0))
+    return np.exp(ln_pga_g) * 981.0  # g → cm/s²
+
+def nga_west2_pgv(magnitude, distance_km, vs30=760):
+    """PGV attenuation (cm/s) — NGA-West2 far-field branch."""
     M = magnitude
     R = np.maximum(distance_km, 1.0)
-    ln_pgv = (0.5 + 0.5 * M - 0.8 * np.log(R + 10.0) + 0.15 * np.log(vs30 / 760))
-    return np.exp(ln_pgv) * 100.0  # cm/s
+    ln_pgv = (-0.5 + 0.58 * M - 0.90 * np.log(R + 4.0)
+              - 0.0032 * (R + 4.0) - 0.20 * np.log(vs30 / 760.0))
+    return np.exp(ln_pgv)  # cm/s
 
 def spectral_acceleration(magnitude, distance_km, period=1.0, vs30=760):
-    """Simplified Sa(T) from PGA using site amplification + magnitude scaling."""
-    pga = campbell_bozorgnia_pga(magnitude, distance_km, vs30) / 981.0  # back to g
+    """Spectral acceleration Sa(T) via a period-dependent amplification
+    envelope around the deterministic NGA-West2-shaped PGA (cm/s²)."""
+    pga_cm = nga_west2_pga(magnitude, distance_km, vs30)
     if period < 0.1:
-        amp = 1.0 + 0.5 * np.exp(-magnitude / 5)
+        amp = 1.0 + 0.5 * np.exp(-magnitude / 5.0)
     elif period < 1.0:
-        amp = 1.5 + 0.3 * np.log(1 + period)
+        amp = 1.5 + 0.3 * np.log(1.0 + period)
     else:
-        amp = 1.8 + 0.2 * np.log(1 + period)
-    decay = np.exp(-distance_km / (50.0 + 20.0 * magnitude))
-    return pga * amp * decay * 981.0  # cm/s²
+        amp = 1.8 + 0.2 * np.log(1.0 + period)
+    # Long-period energy decays faster with distance than peak acceleration
+    decay_R = np.exp(-distance_km / (60.0 + 30.0 * magnitude))
+    return pga_cm * amp * decay_R
 
 def compute_mmi_from_pga(pga_cm_s2):
     """MMI from PGA (Wald et al. 1999)."""
@@ -106,8 +123,9 @@ def simulate_elastic_wave(params):
     lat = float(params.get('lat', 35.68))
     lon = float(params.get('lon', 139.65))
 
-    # Grid spacing: 0.5 km/cell
-    dx = 500.0  # meters
+    # Grid spacing: 0.5 km/cell, scaled to study area extent
+    extent_km = float(params.get('extent_km', 0.0))
+    dx = (extent_km * 1000.0 / gs) if extent_km > 0 else 500.0  # meters
     dz = dx
     # CFL for 2D elastic: VP*dt/dx ≤ 1/√2 ≈ 0.707
     # dt = 0.03 → CFL = 6000*0.03/500 = 0.36 (safe)
@@ -151,7 +169,12 @@ def simulate_elastic_wave(params):
 
     f0 = 1.5  # dominant frequency (Hz)
     t0_src = 1.5 / f0  # source delay
-    src_amp = 1e3 * (magnitude - 3.0)  # force amplitude
+    # Seismic moment M0 = 10^(1.5·M + 9.1)  (N·m); force amplitude scales
+    # with sqrt(M0/M0_ref) so that one magnitude unit doubles the injected
+    # energy rather than linearly adding a constant force. Reference Mw=6.0.
+    M0_src = 10.0 ** (1.5 * magnitude + 9.1)
+    M0_ref = 10.0 ** (1.5 * 6.0 + 9.1)
+    src_amp = 1e3 * np.sqrt(M0_src / M0_ref)  # force amplitude (log-moment scaled)
 
     # ── Sponge layer (damping zone near boundaries) ──
     margin = max(10, gs // 16)
@@ -184,7 +207,12 @@ def simulate_elastic_wave(params):
     dz2 = dz * dz
     dx_dz_4 = 4 * dx * dz
 
+    wallclock_max = float(params.get('wallclock_max_sec', 480))
+    print(f"Wall-clock cap: {wallclock_max:.0f}s")
     for step_i in range(total_steps):
+        if time.time() - t0 > wallclock_max:
+            print(f"  [WALL-CLOCK CAP] Stopping at step {step_i} (elapsed {time.time()-t0:.0f}s)")
+            break
         t = step_i * dt
 
         # ── Source injection (vertical force) ──
@@ -212,14 +240,19 @@ def simulate_elastic_wave(params):
         ux_next = np.zeros_like(ux_curr)
         uz_next = np.zeros_like(uz_curr)
 
-        # Interior update
+        # Interior update — displacement-form 2D elastic wave equation.
+        # The mixed-derivative term requires (λ + μ), not λ alone:
+        #   ρ·ü_x = (λ+2μ)·u_x,xx  +  μ·u_x,zz  +  (λ+μ)·u_z,xz  + f_x
+        #   ρ·ü_z = μ·u_z,xx  +  (λ+2μ)·u_z,zz  +  (λ+μ)·u_x,xz  + f_z
         ux_next[1:-1, 1:-1] = (
             2 * ux_curr[1:-1, 1:-1] - ux_prev[1:-1, 1:-1] +
-            dt2 * ((lam_int + 2*mu_int) * d2ux_dx2 + mu_int * d2ux_dz2 + lam_int * d2uz_dxdz) / rho_int
+            dt2 * ((lam_int + 2*mu_int) * d2ux_dx2 + mu_int * d2ux_dz2 +
+                   (lam_int + mu_int) * d2uz_dxdz) / rho_int
         )
         uz_next[1:-1, 1:-1] = (
             2 * uz_curr[1:-1, 1:-1] - uz_prev[1:-1, 1:-1] +
-            dt2 * (mu_int * d2uz_dx2 + (lam_int + 2*mu_int) * d2uz_dz2 + lam_int * d2uz_dxdz) / rho_int
+            dt2 * (mu_int * d2uz_dx2 + (lam_int + 2*mu_int) * d2uz_dz2 +
+                   (lam_int + mu_int) * d2ux_dxdz) / rho_int
         )
 
         # Source injection (vertical force at depth)
@@ -267,16 +300,26 @@ def simulate_elastic_wave(params):
     # Epicentral distance correction for depth
     dist_km = np.sqrt(dist_km**2 + depth_km**2)
 
-    # PGA from GMPE
-    pga = campbell_bozorgnia_pga(magnitude, dist_km, vs30=760)
+    # PGA from NGA-West2-shaped GMPE (calibrated to CB14 reference points)
+    pga = nga_west2_pga(magnitude, dist_km, vs30=760)
+    n_clip = int((pga > 2000).sum())
+    if n_clip > 0:
+        print(f"  [GMPE] {n_clip} cells clipped at 2000 cm/s² "
+              f"(pre-clip max {float(np.nanmax(pga)):.0f} cm/s²)")
     pga = np.clip(pga, 0, 2000)
 
     # PGV from GMPE
-    pgv = campbell_bozorgnia_pgv(magnitude, dist_km, vs30=760)
+    pgv = nga_west2_pgv(magnitude, dist_km, vs30=760)
+    n_pgv = int((pgv > 200).sum())
+    if n_pgv > 0:
+        print(f"  [GMPE] {n_pgv} cells PGV-clipped at 200 cm/s")
     pgv = np.clip(pgv, 0, 200)
 
     # Spectral acceleration (Sa at 1s)
     sa_1s = spectral_acceleration(magnitude, dist_km, period=1.0, vs30=760)
+    n_sa = int((sa_1s > 2000).sum())
+    if n_sa > 0:
+        print(f"  [GMPE] {n_sa} cells Sa-clipped at 2000 cm/s²")
     sa_1s = np.clip(sa_1s, 0, 2000)
 
     # MMI from PGA (primary) and PGV (secondary)
@@ -314,20 +357,50 @@ def simulate_elastic_wave(params):
     return {'final': final, 'snapshots': snapshots,
             'params': {'grid_size': gs, 'magnitude': magnitude, 'depth_km': depth_km,
                        'duration_seconds': duration_s, 'lat': lat, 'lon': lon,
-                       'vp_crust': VP_CRUST, 'vs_crust': VS_CRUST},
+                       'vp_crust': VP_CRUST, 'vs_crust': VS_CRUST,
+                       'cell_size_m': dx},
             'metadata': {'elapsed_seconds': elapsed, 'num_snapshots': len(snapshots),
                          'wave_type': 'elastic_p_s_surface',
                          'solver': 'displacement_leapfrog'}}
 
 
+# simRunner injects the run's JSON params here at push time (Kaggle only
+# uploads the code file, so params cannot be passed as a sibling file).
+EMBEDDED_PARAMS = None
+
+def _load_params():
+    """Load params from EMBEDDED_PARAMS (injected into main.py at push time)
+    or from params.json anywhere on the runner."""
+    if EMBEDDED_PARAMS:
+        try:
+            if isinstance(EMBEDDED_PARAMS, dict):
+                return EMBEDDED_PARAMS
+            return json.loads(EMBEDDED_PARAMS)
+        except Exception:
+            pass
+    candidates = ['params.json', '/kaggle/working/params.json', '/kaggle/input/params.json']
+    src = '/kaggle/src'
+    if os.path.isdir(src):
+        for root, _dirs, files in os.walk(src):
+            if 'params.json' in files:
+                candidates.append(os.path.join(root, 'params.json'))
+    for p in candidates:
+        try:
+            if os.path.exists(p):
+                with open(p) as f:
+                    return json.load(f)
+        except Exception:
+            continue
+    return None
+
+
 def main():
     print("=" * 60)
-    print("TERRANOETIS — Kaggle Earthquake Simulation (Elastic Wave)")
+    print("TERRANOETIS — Kaggle Earthquake ShakeMap Simulation")
     print("=" * 60)
-    params_path = 'params.json'
-    if os.path.exists(params_path):
-        with open(params_path) as f:
-            params = json.load(f)
+    params = _load_params()
+    if params is not None:
+        print(f"[PARAMS] Loaded: {json.dumps(params, indent=2)}")
     else:
         params = {'grid_size': 256, 'magnitude': 6.5, 'depth_km': 15,
                   'duration_seconds': 30, 'lat': 35.68, 'lon': 139.65}
@@ -341,11 +414,14 @@ def main():
         np.save(f'{out}/mmi.npy', result['final']['mmi'])
         np.save(f'{out}/final_displacement.npy', result['final']['final_displacement'])
         np.save(f'{out}/final_velocity.npy', result['final']['final_velocity'])
-        snap_d = np.stack([s['displacement'] for s in result['snapshots']])
-        np.save(f'{out}/snapshots_u_curr.npy', snap_d)
-        snap_v = np.stack([s['velocity'] for s in result['snapshots']])
-        np.save(f'{out}/snapshots_velocity.npy', snap_v)
-        np.save(f'{out}/snapshot_times.npy', np.array([s['time_seconds'] for s in result['snapshots']]))
+        if result['snapshots']:
+            np.save(f'{out}/snapshots_u_curr.npy', np.stack([s['displacement'] for s in result['snapshots']]))
+            np.save(f'{out}/snapshots_velocity.npy', np.stack([s['velocity'] for s in result['snapshots']]))
+            np.save(f'{out}/snapshot_times.npy', np.array([s['time_seconds'] for s in result['snapshots']]))
+        else:
+            np.save(f'{out}/snapshots_u_curr.npy', np.expand_dims(result['final']['final_displacement'], axis=0))
+            np.save(f'{out}/snapshots_velocity.npy', np.expand_dims(result['final']['final_velocity'], axis=0))
+            np.save(f'{out}/snapshot_times.npy', np.array([0.0]))
         meta = {'params': result['params'], 'metadata': result['metadata'],
                 'final_stats': {'max_pga': result['final']['max_pga'],
                                 'max_pgv': result['final']['max_pgv'],

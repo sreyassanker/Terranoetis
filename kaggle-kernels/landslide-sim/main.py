@@ -6,9 +6,12 @@ Physics:
   - Depth-averaged shallow water equations for debris flow:
       ∂h/∂t + ∇·(h·u) = 0                           (mass conservation)
       ∂(hu)/∂t + ∇·(hu⊗u) = -gh∇(h+z) - τ_b/ρ        (momentum)
-  - Voellmy friction law:
-      τ_b = μ·ρ·g·h·cos(θ) + ξ·ρ·|u|·u
-      where μ = Coulomb friction coefficient, ξ = turbulent friction coefficient
+      (mass solved via Lax-Friedrichs, momentum via semi-implicit Euler with
+      the free-surface pressure gradient -g·h·∇(z+h) + bed-slope gravity)
+  - Voellmy-Salm friction law:
+      τ_b/ρ = μ_c·g·h·cos²θ  +  g·u·|u|/ξ
+      where μ_c = tan φ_res is the residual (dynamic) basal friction and
+      ξ (m/s²) is Voellmy's turbulent coefficient. Debris: φ_res ≈ 14°, ξ ≈ 300.
   - Mohr-Coulomb yield criterion for initial failure:
       τ = c + σ·tan(φ)
   - Trigger mechanisms:
@@ -31,11 +34,15 @@ RHO_WATER = 1000.0    # kg/m³ — water density
 RHO_ROCK = 2650.0     # kg/m³ — rock density
 
 # ── Voellmy friction parameters ─────────────────────────────────────
-# τ_b = μ·ρ·g·h·cos(θ) + ξ·ρ·|u|·u
-# μ: Coulomb friction coefficient (0.05–0.4 for debris flows)
-# ξ: turbulent friction coefficient (100–1000 m/s² for debris flows)
-MU_DEFAULT = 0.25     # Coulomb friction coefficient
-XI_DEFAULT = 300.0    # Turbulent friction coefficient (m/s²)
+# Voellmy-Salm (1979):
+#   τ_b = μ_c·ρ·g·h·cos²θ  +  ρ·g·u·|u| / ξ
+# where μ_c = tan(φ_res) is the dynamic (residual) basal friction, and
+# ξ is the turbulent (Chézy-type) velocity-squared coefficient with
+# units m/s² (typical debris flows ξ ≈ 100–1000 m/s²).
+# Stored as the *residual* friction angle: φ_res ≈ 14° → μ_c ≈ 0.25.
+PHI_RESIDUAL_DEG = 14.0   # residual basal friction angle (degrees)
+MU_DEFAULT = float(np.tan(np.radians(PHI_RESIDUAL_DEG)))   # ≈ 0.249
+XI_DEFAULT = 300.0    # turbulent Voellmy coefficient ξ (m/s²)
 
 # ── Mohr-Coulomb parameters for initial failure ─────────────────────
 PHI_DEFAULT = 35.0    # Internal friction angle (degrees)
@@ -215,8 +222,9 @@ def simulate_landslide(params):
     lat = float(params.get('lat', 36.1699))
     lon = float(params.get('lon', -115.8090))
 
-    # Grid spacing: 20 m/cell (mountain terrain)
-    dx = 20.0  # meters
+    # Grid spacing: 20 m/cell (mountain terrain), scaled to study area extent
+    extent_km = float(params.get('extent_km', 0.0))
+    dx = (extent_km * 1000.0 / gs) if extent_km > 0 else 20.0  # meters
     dt = 0.1   # time step (s) — CFL: max_vel * dt / dx < 0.5
 
     # ── Generate terrain ──
@@ -292,9 +300,14 @@ def simulate_landslide(params):
     cos_theta = np.cos(np.radians(slope_deg))
 
     print(f"Total steps: {total_steps}")
+    wallclock_max = float(params.get('wallclock_max_sec', 480))
+    print(f"Wall-clock cap: {wallclock_max:.0f}s")
 
     for step_i in range(total_steps):
         t = step_i * dt
+        if time.time() - t0 > wallclock_max:
+            print(f"  [WALL-CLOCK CAP] Stopping at t={t:.0f}s (elapsed {time.time()-t0:.0f}s)")
+            break
 
         # ── Compute velocity from momentum (safe division) ──
         u = np.zeros_like(h)
@@ -338,35 +351,60 @@ def simulate_landslide(params):
         h_new = np.clip(h_new, 0, 100)
 
         # ── Momentum update (semi-implicit for stability) ──
-        # Gravity source: drives flow downslope
-        gravity_x = rho * G * h * sin_theta * grad_x
-        gravity_y = rho * G * h * sin_theta * grad_y
+        # Free-surface pressure gradient −g·h·∇η (η = z + h) spreads the pile.
+        eta_field = terrain + h
+        deta_dx = np.zeros_like(eta_field)
+        deta_dy = np.zeros_like(eta_field)
+        deta_dx[1:-1, 1:-1] = (eta_field[1:-1, 2:] - eta_field[1:-1, :-2]) / (2.0 * dx)
+        deta_dy[1:-1, 1:-1] = (eta_field[2:, 1:-1] - eta_field[:-2, 1:-1]) / (2.0 * dx)
+        # All momentum tendencies below are per-unit-density (units: m²/s²),
+        # consistent with hu = h·u depth-integrated momentum.
+        pressure_x = -G * h * deta_dx
+        pressure_y = -G * h * deta_dy
 
-        # Voellmy friction: τ_b = μ·ρ·g·h·cos(θ) + ξ·ρ·|u|·u
-        u_mag = np.sqrt(u**2 + v**2) + 1e-10
-        tau_coulomb = mu * rho * G * h * cos_theta
-        tau_turbulent = xi * rho * u_mag * np.maximum(h, 0)
-        tau_total = tau_coulomb + tau_turbulent
+        # Bed-slope gravity pull: g·h·sinθ along the downslope direction.
+        gravity_x = G * h * sin_theta * grad_x
+        gravity_y = G * h * sin_theta * grad_y
 
-        # Friction force (opposes velocity)
-        friction_x = -tau_total * np.where(wet, u / u_mag, 0)
-        friction_y = -tau_total * np.where(wet, v / u_mag, 0)
+        # ── Voellmy-Salm bed friction (correct form) ──
+        # τ_b/ρ = μ_c·g·h·cos²θ + g·u·|u|/ξ      (forces per unit density)
+        u_mag = np.sqrt(u**2 + v**2)
+        u_hat_x = np.where(u_mag > 1e-10, u / (u_mag + 1e-10), 0.0)
+        u_hat_y = np.where(u_mag > 1e-10, v / (u_mag + 1e-10), 0.0)
+        # Coulomb (dry-friction) core: normal stress reduced by cos²θ.
+        tau_coulomb_h = mu * G * h * cos_theta**2                      # m²/s²
+        # Turbulent (Chézy/Voellmy) velocity-squared drag, ξ in m/s² divides
+        tau_turb_h = G * u_mag * np.maximum(h, 0.0) / max(xi, 1.0)     # m²/s²
+        tau_total_h = tau_coulomb_h + tau_turb_h
 
-        # Momentum update
-        hu_new = hu + dt * (gravity_x + friction_x) / rho
-        hv_new = hv + dt * (gravity_y + friction_y) / rho
+        friction_x = -tau_total_h * u_hat_x
+        friction_y = -tau_total_h * u_hat_y
+
+        # Momentum tendency: pressure + gravity + friction (all per-ρ).
+        # Only drive wet cells; no dry-cell momentum injection.
+        tend_x = (pressure_x + gravity_x + friction_x) * wet
+        tend_y = (pressure_y + gravity_y + friction_y) * wet
+        hu_new = hu + dt * tend_x
+        hv_new = hv + dt * tend_y
+        # Clamp velocity so (hu/h) stays physical — prevents wet/dry blow-ups
+        u_lim = np.maximum(h, 0.01) * 60.0  # max velocity 60 m/s locally
+        hu_new = np.clip(hu_new, -u_lim, u_lim)
+        hv_new = np.clip(hv_new, -u_lim, u_lim)
 
         # ── Deposition: where driving stress < resisting friction ──
-        driving = rho * G * h * sin_theta
-        deposit_mask = (driving < tau_total) & wet
+        # Compare per-unit-density forces consistent with the momentum update.
+        driving_h = G * h * sin_theta
+        deposit_mask = (driving_h < tau_total_h) & wet
         hu_new = np.where(deposit_mask, 0, hu_new)
         hv_new = np.where(deposit_mask, 0, hv_new)
 
-        # ── Boundary conditions: zero gradient (outflow) ──
+        # ── Boundary conditions: zero gradient (outflow), all 4 edges, all 3 fields ──
         h_new[0, :] = h_new[1, :]; h_new[-1, :] = h_new[-2, :]
         h_new[:, 0] = h_new[:, 1]; h_new[:, -1] = h_new[:, -2]
         hu_new[0, :] = hu_new[1, :]; hu_new[-1, :] = hu_new[-2, :]
+        hu_new[:, 0] = hu_new[:, 1]; hu_new[:, -1] = hu_new[:, -2]
         hv_new[0, :] = hv_new[1, :]; hv_new[-1, :] = hv_new[-2, :]
+        hv_new[:, 0] = hv_new[:, 1]; hv_new[:, -1] = hv_new[:, -2]
 
         # ── Ensure non-negative depth ──
         h_new = np.maximum(h_new, 0)
@@ -391,6 +429,8 @@ def simulate_landslide(params):
             snapshots.append({
                 'depth': h.astype(np.float32),
                 'velocity': v_mag.astype(np.float32),
+                'velocity_x': u.astype(np.float32),
+                'velocity_y': v.astype(np.float32),
                 'time_seconds': round(t, 1),
                 'max_depth': float(h.max()),
                 'max_velocity': float(v_mag.max()),
@@ -445,21 +485,51 @@ def simulate_landslide(params):
                        'pga_threshold': pga_threshold, 'rainfall_mm': rainfall_mm,
                        'duration_hours': duration_hours, 'friction_angle': phi_deg,
                        'cohesion': cohesion, 'lat': lat, 'lon': lon,
-                       'mu': MU_DEFAULT, 'xi': XI_DEFAULT, 'rho_debris': RHO_DEBRIS},
+                       'mu': MU_DEFAULT, 'xi': XI_DEFAULT, 'rho_debris': RHO_DEBRIS,
+                       'cell_size_m': dx},
             'metadata': {'elapsed_seconds': elapsed, 'num_snapshots': len(snapshots),
                          'model': 'depth_averaged_debris_flow',
                          'friction_law': 'voellmy',
                          'solver': 'lax_friedrichs'}}
 
 
+# simRunner injects the run's JSON params here at push time (Kaggle only
+# uploads the code file, so params cannot be passed as a sibling file).
+EMBEDDED_PARAMS = None
+
+def _load_params():
+    """Load params from EMBEDDED_PARAMS (injected into main.py at push time)
+    or from params.json anywhere on the runner."""
+    if EMBEDDED_PARAMS:
+        try:
+            if isinstance(EMBEDDED_PARAMS, dict):
+                return EMBEDDED_PARAMS
+            return json.loads(EMBEDDED_PARAMS)
+        except Exception:
+            pass
+    candidates = ['params.json', '/kaggle/working/params.json', '/kaggle/input/params.json']
+    src = '/kaggle/src'
+    if os.path.isdir(src):
+        for root, _dirs, files in os.walk(src):
+            if 'params.json' in files:
+                candidates.append(os.path.join(root, 'params.json'))
+    for p in candidates:
+        try:
+            if os.path.exists(p):
+                with open(p) as f:
+                    return json.load(f)
+        except Exception:
+            continue
+    return None
+
+
 def main():
     print("=" * 60)
     print("TERRANOETIS — Kaggle Landslide Simulation (Debris Flow)")
     print("=" * 60)
-    params_path = 'params.json'
-    if os.path.exists(params_path):
-        with open(params_path) as f:
-            params = json.load(f)
+    params = _load_params()
+    if params is not None:
+        print(f"[PARAMS] Loaded: {json.dumps(params, indent=2)}")
     else:
         params = {'grid_size': 256, 'trigger_type': 'earthquake', 'magnitude': 6.5,
                   'pga_threshold': 0.15, 'rainfall_mm': 200, 'duration_hours': 2,
@@ -477,11 +547,18 @@ def main():
         np.save(f'{out}/susceptibility.npy', result['final']['susceptibility'])
         np.save(f'{out}/trigger_map.npy', result['final']['trigger_map'])
         np.save(f'{out}/slope.npy', result['final']['slope'])
-        snap_d = np.stack([s['depth'] for s in result['snapshots']])
-        np.save(f'{out}/snapshots_depth.npy', snap_d)
-        snap_v = np.stack([s['velocity'] for s in result['snapshots']])
-        np.save(f'{out}/snapshots_velocity.npy', snap_v)
-        np.save(f'{out}/snapshot_times.npy', np.array([s['time_seconds'] for s in result['snapshots']]))
+        if result['snapshots']:
+            np.save(f'{out}/snapshots_depth.npy', np.stack([s['depth'] for s in result['snapshots']]))
+            np.save(f'{out}/snapshots_velocity.npy', np.stack([s['velocity'] for s in result['snapshots']]))
+            np.save(f'{out}/snapshots_vx.npy', np.stack([s['velocity_x'] for s in result['snapshots']]))
+            np.save(f'{out}/snapshots_vy.npy', np.stack([s['velocity_y'] for s in result['snapshots']]))
+            np.save(f'{out}/snapshot_times.npy', np.array([s['time_seconds'] for s in result['snapshots']]))
+        else:
+            np.save(f'{out}/snapshots_depth.npy', np.expand_dims(result['final']['depth'], axis=0))
+            np.save(f'{out}/snapshots_velocity.npy', np.expand_dims(result['final']['velocity'], axis=0))
+            np.save(f'{out}/snapshots_vx.npy', np.expand_dims(result['final']['velocity_x'], axis=0))
+            np.save(f'{out}/snapshots_vy.npy', np.expand_dims(result['final']['velocity_y'], axis=0))
+            np.save(f'{out}/snapshot_times.npy', np.array([0.0]))
         meta = {'params': result['params'], 'metadata': result['metadata'],
                 'final_stats': {'max_depth': result['final']['max_depth'],
                                 'max_velocity': result['final']['max_velocity'],

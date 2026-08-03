@@ -16,7 +16,12 @@ Physics:
       η(T) = η_ref · exp(E_a/R · (1/T - 1/T_ref))
   - Solidification: when T < T_solid, lava stops flowing (φ → 1)
   - Eruption column: 1D plume model (Morton-Taylor) with wind advection
-  - Ash fallout: Gaussian plume with particle terminal velocity
+  - Ash transport: advection-diffusion-settling PDE on the vertically
+    integrated ash column mass field C (kg/m²):
+      ∂C/∂t + u_wx·∂C/∂x + u_wy·∂C/∂y = K·∇²C + Ṡ(x,y,t) − v_t·C/H_col
+    with first-order upwind advection, 5-point Laplacian diffusion,
+    Stokes-law particle terminal settling velocity, and ground
+    deposition via fallout: deposit += v_t·C·dt/H_col
 
 Author: Terranoetis / Freebuff
 """
@@ -40,6 +45,14 @@ T_AMBIENT = 273.0          # K — ambient temperature
 L_FUSION = 400_000.0       # J/kg — latent heat of fusion
 H_COEFF = 25.0             # W/(m²·K) — convective heat transfer coefficient
 CELL_SIZE_M = 50.0         # meters per grid cell
+
+# ── Ash particle / atmosphere constants (Stokes settling) ───────────
+RHO_AIR = 1.2              # kg/m³ — ambient air density
+ETA_AIR = 1.8e-5           # Pa·s — dynamic viscosity of air
+# Median volcanic ash particle diameter. The default is chosen so that
+# Stokes' law below yields v_t ≈ 3.0 m/s, the canonical fall velocity used
+# for fine Lapilli / coarse ash; the exact Stokes solution for ~316 µm.
+D_ASH_DEFAULT = 316e-6     # m — default particle diameter (~median coarse ash)
 
 # VEI parameters
 VEI_PARAMS = {
@@ -101,15 +114,33 @@ def simulate_volcano(params):
 
     vent_x, vent_y = gs // 2, gs // 2
     terrain = generate_volcanic_terrain(gs, vent_x, vent_y)
-    dx_m = CELL_SIZE_M
+    extent_km = float(params.get('extent_km', 0.0))
+    dx_m = (extent_km * 1000.0 / gs) if extent_km > 0 else CELL_SIZE_M
 
     # ── Lava flow state ──
     lava_thickness = np.zeros((gs, gs), dtype=np.float64)
     lava_temp = np.full((gs, gs), T_AMBIENT, dtype=np.float64)
     lava_volume = 0.0  # cumulative erupted volume (m³)
 
-    # ── Ash deposit ──
+    # ── Ash state ──
+    # Vertically-integrated ash column mass per unit area (kg/m²) — the
+    # transported field of the advection-diffusion-settling PDE.
+    ash_col = np.zeros((gs, gs), dtype=np.float64)
+    # Permanently deposited mass per unit area (kg/m²) — never re-transported.
     ash_deposit = np.zeros((gs, gs), dtype=np.float64)
+
+    # ── Ash transport physics parameters ──
+    # Particle terminal settling velocity from Stokes' law:
+    #   v_t = (ρ_p − ρ_air)·g·d² / (18·η_air)
+    # Default d = 316 µm (median coarse volcanic ash) → v_t ≈ 3.0 m/s.
+    d_ash = float(params.get('ash_particle_diameter_m', D_ASH_DEFAULT))
+    v_terminal = (RHO_ASH - RHO_AIR) * G * d_ash**2 / (18.0 * ETA_AIR)
+    v_terminal = float(np.clip(v_terminal, 0.05, 10.0))  # physically sane range
+    # Sub-grid turbulent (eddy) diffusivity of the ash cloud (m²/s).
+    K_ash = float(params.get('ash_diffusivity_m2_s', 500.0))
+    # Wind-shear factor: horizontal wind speed below mid-plume height is
+    # wind_shear·wind_speed (slower near ground, ~undisturbed aloft).
+    wind_shear = float(params.get('ash_wind_shear_factor', 0.5))
 
     # ── Eruption column (1D plume height field) ──
     column_height = np.zeros((gs, gs), dtype=np.float64)
@@ -136,8 +167,16 @@ def simulate_volcano(params):
     print(f"{'='*60}")
     print(f"VEI {vei} | Column: {col_h}m | Lava vol: {lava_vol_total:.0e} m³ | grid={gs}x{gs}")
     print(f"Cell size: {dx_m}m | dt={dt}s | Steps: {total_steps}")
+    print(f"Ash: Stokes v_t={v_terminal:.2f} m/s (d={d_ash*1e6:.0f} um) | "
+          f"K={K_ash:.0f} m^2/s | wind-shear s={wind_shear:.2f} | "
+          f"model=advection-diffusion-settling PDE")
 
+    wallclock_max = float(params.get('wallclock_max_sec', 480))
+    print(f"Wall-clock cap: {wallclock_max:.0f}s")
     for step_i in range(total_steps):
+        if time.time() - t0 > wallclock_max:
+            print(f"  [WALL-CLOCK CAP] Stopping at step {step_i} (elapsed {time.time()-t0:.0f}s)")
+            break
         t = step_i * dt
         active_eruption = step_i < total_steps * 0.5  # eruption active for first half
 
@@ -151,16 +190,95 @@ def simulate_volcano(params):
             spread = 5 + step_i * 0.3
             column_height = plume_h * np.exp(-r_from_vent**2 / (2 * spread**2))
 
-            # ── Ash fallout (Gaussian plume with terminal velocity) ──
-            # Particle terminal velocity (Stokes): v_t = 2/9 · (ρ_p - ρ_a)·g·d² / (μ·ρ_a)
-            # For ash (d ~ 50 µm): v_t ≈ 0.5 m/s
-            v_terminal = 0.5  # m/s
-            # Downwind displacement
-            drift_x = vent_x + wind_x * v_terminal * t / dx_m
-            drift_y = vent_y + wind_y * v_terminal * t / dx_m
-            ash_spread = 10 + step_i * 0.3
-            ash_deposit += (ash_rate * dt / (RHO_ASH * dx_m**2)) * \
-                np.exp(-((x_grid - drift_x)**2 + (y_grid - drift_y)**2) / (2 * ash_spread**2))
+            # ── Ash transport: advection-diffusion-settling PDE ──
+            # Column-integrated mass field C (kg/m²):
+            #   ∂C/∂t + u_wx·∂C/∂x + u_wy·∂C/∂y
+            #       = K·∇²C + Ṡ(x,y,t) − v_t·C/H_col
+            # First-order upwind advection, 5-point Laplacian diffusion,
+            # Stokes settling as a sink of characteristic depth H_col=plume_h.
+
+        # Representative plume depth H_col: active Gaussian plume height
+        # during eruption, otherwise keep the last representative depth.
+        if active_eruption:
+            H_col = max(float(plume_h), 1.0)
+        else:
+            H_col = max(float(col_h), 1.0)
+
+        # Wind-shear: below mid-plume height the wind blows at wind_shear·speed,
+        # above it at full speed; column-mean advection velocity is the average
+        # of the two layers (equal depth weighting).
+        if active_eruption:
+            u_wx = wind_x * 0.5 * (wind_shear + 1.0)
+            u_wy = wind_y * 0.5 * (wind_shear + 1.0)
+        else:
+            # Residual suspended ash keeps settling under low-level wind only.
+            u_wx = wind_x * wind_shear
+            u_wy = wind_y * wind_shear
+
+        # Sub-stepping for numerical stability: CFL for advection and the
+        # diffusion number bound for the explicit 5-point Laplacian.
+        u_mag = max(abs(u_wx), abs(u_wy))
+        dt_cfl_adv = 0.4 * dx_m / u_mag if u_mag > 0 else dt
+        dt_cfl_diff = 0.20 * dx_m**2 / K_ash if K_ash > 0 else dt
+        ash_dt_sub = min(dt, dt_cfl_adv, dt_cfl_diff)
+        n_sub = max(1, int(np.ceil(dt / ash_dt_sub)))
+        dt_ash = dt / n_sub
+
+        # Source term Ṡ: this step's ash emission injected uniformly over a
+        # small vent region (r < 3 cells), so the total column mass added
+        # each (sub-)step is ash_rate·dt_ash.
+        src_mask = None
+        if active_eruption:
+            src_mask = r_from_vent < 3.0
+            src_area_cells = float(src_mask.sum())
+
+        for _ in range(n_sub):
+            # Upwind advection (first order in space):
+            #   u·∂C/∂x ≈ u·(C_i − C_{i−1})/dx   for u > 0 (backward diff)
+            if u_wx >= 0:
+                dC_dx = np.zeros_like(ash_col)
+                dC_dx[:, 1:] = (ash_col[:, 1:] - ash_col[:, :-1]) / dx_m
+                adv_x = -u_wx * dC_dx
+            else:
+                dC_dx = np.zeros_like(ash_col)
+                dC_dx[:, :-1] = (ash_col[:, 1:] - ash_col[:, :-1]) / dx_m
+                adv_x = -u_wx * dC_dx
+            if u_wy >= 0:
+                dC_dy = np.zeros_like(ash_col)
+                dC_dy[1:, :] = (ash_col[1:, :] - ash_col[:-1, :]) / dx_m
+                adv_y = -u_wy * dC_dy
+            else:
+                dC_dy = np.zeros_like(ash_col)
+                dC_dy[:-1, :] = (ash_col[1:, :] - ash_col[:-1, :]) / dx_m
+                adv_y = -u_wy * dC_dy
+
+            # 5-point Laplacian diffusion (zero-flux boundary).
+            lap = np.zeros_like(ash_col)
+            lap[1:-1, 1:-1] = (
+                ash_col[2:, 1:-1] + ash_col[:-2, 1:-1] +
+                ash_col[1:-1, 2:] + ash_col[1:-1, :-2] -
+                4.0 * ash_col[1:-1, 1:-1]
+            ) / dx_m**2
+            diff = K_ash * lap
+
+            # Stokes settling sink: −v_t·C/H_col
+            settle = -v_terminal * ash_col / H_col
+
+            # Explicit Euler (sub-step sized by CFL/diffusion bounds above).
+            ash_col = ash_col + dt_ash * (adv_x + adv_y + diff + settle)
+
+            # Source injection (kg/m² over this sub-step).
+            if src_mask is not None:
+                src_mass = ash_rate * dt_ash
+                ash_col[src_mask] += src_mass / (src_area_cells * dx_m**2)
+
+            # Ground deposition of settled ash (never re-transported):
+            #   deposit += v_t·C·dt/H_col
+            deposit_mass = v_terminal * ash_col * dt_ash / H_col
+            ash_deposit += deposit_mass
+
+        # Numerical safety: column mass cannot go negative.
+        np.maximum(ash_col, 0.0, out=ash_col)
 
         # ── Lava flow: depth-averaged equations ──
         if active_eruption and vei >= 1:
@@ -268,6 +386,7 @@ def simulate_volcano(params):
             snapshots.append({
                 'column_height': column_height.astype(np.float32),
                 'ash_deposit': ash_deposit.astype(np.float32),
+                'ash_column': ash_col.astype(np.float32),
                 'lava_thickness': lava_thickness.astype(np.float32),
                 'lava_temp': lava_temp.astype(np.float32),
                 'time_hours': round(step_i * dt / 3600, 2),
@@ -288,6 +407,7 @@ def simulate_volcano(params):
     final = {
         'column_height': column_height.astype(np.float32),
         'ash_deposit': ash_deposit.astype(np.float32),
+        'ash_column': ash_col.astype(np.float32),
         'lava_thickness': lava_thickness.astype(np.float32),
         'lava_temp': lava_temp.astype(np.float32),
         'terrain': terrain.astype(np.float32),
@@ -308,17 +428,48 @@ def simulate_volcano(params):
                        'cell_size_m': dx_m},
             'metadata': {'elapsed_seconds': elapsed, 'num_snapshots': len(snapshots),
                          'model': 'depth_averaged_lava_flow',
+                         'ash_model': 'advection_diffusion_settling_pde',
+                         'stokes_settling_velocity_ms': v_terminal,
                          'physics': 'mass_conservation_momentum_heat'}}
+
+
+# simRunner injects the run's JSON params here at push time (Kaggle only
+# uploads the code file, so params cannot be passed as a sibling file).
+EMBEDDED_PARAMS = None
+
+def _load_params():
+    """Load params from EMBEDDED_PARAMS (injected into main.py at push time)
+    or from params.json anywhere on the runner."""
+    if EMBEDDED_PARAMS:
+        try:
+            if isinstance(EMBEDDED_PARAMS, dict):
+                return EMBEDDED_PARAMS
+            return json.loads(EMBEDDED_PARAMS)
+        except Exception:
+            pass
+    candidates = ['params.json', '/kaggle/working/params.json', '/kaggle/input/params.json']
+    src = '/kaggle/src'
+    if os.path.isdir(src):
+        for root, _dirs, files in os.walk(src):
+            if 'params.json' in files:
+                candidates.append(os.path.join(root, 'params.json'))
+    for p in candidates:
+        try:
+            if os.path.exists(p):
+                with open(p) as f:
+                    return json.load(f)
+        except Exception:
+            continue
+    return None
 
 
 def main():
     print("=" * 60)
-    print("TERRANOETIS — Kaggle Volcano Simulation (Physics-Based Lava Flow)")
+    print("TERRANOETIS — Kaggle Volcanic Eruption Simulation")
     print("=" * 60)
-    params_path = 'params.json'
-    if os.path.exists(params_path):
-        with open(params_path) as f:
-            params = json.load(f)
+    params = _load_params()
+    if params is not None:
+        print(f"[PARAMS] Loaded: {json.dumps(params, indent=2)}")
     else:
         params = {'grid_size': 256, 'vei': 3, 'wind_speed_ms': 10,
                   'wind_dir_deg': 270, 'duration_hours': 2}
@@ -328,14 +479,26 @@ def main():
         os.makedirs(out, exist_ok=True)
         np.save(f'{out}/column_height.npy', result['final']['column_height'])
         np.save(f'{out}/ash_deposit.npy', result['final']['ash_deposit'])
+        np.save(f'{out}/ash_column.npy', result['final']['ash_column'])
         np.save(f'{out}/lava_thickness.npy', result['final']['lava_thickness'])
         np.save(f'{out}/lava_temp.npy', result['final']['lava_temp'])
         np.save(f'{out}/terrain.npy', result['final']['terrain'])
-        snap_c = np.stack([s['column_height'] for s in result['snapshots']])
-        np.save(f'{out}/snapshots_column.npy', snap_c)
-        snap_l = np.stack([s['lava_thickness'] for s in result['snapshots']])
-        np.save(f'{out}/snapshots_lava.npy', snap_l)
-        np.save(f'{out}/snapshot_times.npy', np.array([s['time_hours'] for s in result['snapshots']]))
+        if result['snapshots']:
+            snap_c = np.stack([s['column_height'] for s in result['snapshots']])
+            np.save(f'{out}/snapshots_column.npy', snap_c)
+            snap_a = np.stack([s['ash_column'] for s in result['snapshots']])
+            np.save(f'{out}/snapshots_ash.npy', snap_a)
+            snap_l = np.stack([s['lava_thickness'] for s in result['snapshots']])
+            np.save(f'{out}/snapshots_lava.npy', snap_l)
+            np.save(f'{out}/snapshot_times.npy', np.array([s['time_hours'] for s in result['snapshots']]))
+        else:
+            np.save(f'{out}/snapshots_column.npy', np.expand_dims(result['final']['column_height'], axis=0))
+            np.save(f'{out}/snapshots_ash.npy', np.expand_dims(result['final']['ash_column'], axis=0))
+            np.save(f'{out}/snapshots_lava.npy', np.expand_dims(result['final']['lava_thickness'], axis=0))
+            np.save(f'{out}/snapshot_times.npy', np.array([0.0]))
+        # Guarantee the sim location is visible downstream (GeoTIFF/overlays).
+        result['params']['lat'] = params.get('lat', 0)
+        result['params']['lon'] = params.get('lon', 0)
         meta = {'params': result['params'], 'metadata': result['metadata'],
                 'final_stats': {'max_column_m': result['final']['max_column_m'],
                                 'max_ash_m': result['final']['max_ash_m'],

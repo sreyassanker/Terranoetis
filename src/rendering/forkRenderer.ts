@@ -636,6 +636,11 @@ export class ForkRenderer {
    * bulk enable/disable, and periodically for streaming live data.
    */
   reapplyCrop(restoreVisibility: boolean = false): void {
+    // Guard against running after the Cesium viewer has been destroyed:
+    // a Viewer.isDestroyed() check protects viewer.scene requestRender()
+    // calls (recrop can be driven from a long-lived unified-timer task
+    // that outlives the 3D viewer component's lifecycle).
+    if (!this.viewer || this.viewer.isDestroyed()) return;
     const now = Cesium.JulianDate.now();
     const forks = Array.from(this.forks.values()).filter(f => f.status !== 'terminated');
     const hasForks = forks.length > 0;

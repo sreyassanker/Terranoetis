@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { type PointCloud } from '../earthgen/flowMatching';
-import { type ScenarioType, type ScenarioBase, type EarthquakeSwarmParams, type HurricaneLandfallParams, type WildfireSpreadParams, type VolcanicEruptionParams, type FloodInundationParams, type TsunamiWaveParams, DEFAULT_PARAMS } from './templates';
+import { type ScenarioType, type ScenarioBase, type EarthquakeSwarmParams, type HurricaneLandfallParams, type WildfireSpreadParams, type VolcanicEruptionParams, type FloodInundationParams, type TsunamiWaveParams, type LandslideParams, DEFAULT_PARAMS } from './templates';
 import { validateScenario } from './scenarioValidator';
 import { simulateScenario } from './simulators/index';
 
@@ -66,18 +66,29 @@ export async function generateScenario(
     case 'tsunami_wave':
       pointCloud = generateTsunamiWave(params as unknown as TsunamiWaveParams);
       break;
+    case 'landslide':
+      pointCloud = generateLandslide(params as unknown as LandslideParams);
+      break;
     default:
       throw new Error(`Unknown scenario type: ${type}`);
   }
 
   const validation = validateScenario({ type, params, pointCloud } as Parameters<typeof validateScenario>[0]);
   const id = `scenario_${randomUUID().slice(0, 8)}`;
-  const timeSeries = simulateScenario(type, params as unknown as EarthquakeSwarmParams | HurricaneLandfallParams | WildfireSpreadParams | VolcanicEruptionParams | FloodInundationParams | TsunamiWaveParams);
+  const timeSeries = simulateScenario(type, params as unknown as EarthquakeSwarmParams | HurricaneLandfallParams | WildfireSpreadParams | VolcanicEruptionParams | FloodInundationParams | TsunamiWaveParams | LandslideParams);
+
+  // Derive location from params — tsunami uses epicenterLat/Lon, others use lat/lon.
+  // Landslide additionally uses the same lat/lon as other types.
+  const location: { lat: number; lon: number } =
+    'epicenterLat' in params
+      ? { lat: params.epicenterLat as number, lon: params.epicenterLon as number }
+      : { lat: params.lat as number, lon: params.lon as number };
 
   return {
     id,
     type,
     params,
+    location,
     pointCloud,
     validationScore: validation.confidence,
     createdAt: new Date().toISOString(),
@@ -709,7 +720,10 @@ function generateTsunamiWave(p: TsunamiWaveParams): PointCloud {
   const directivityAngle = faultStrikeDeg + 90; // perpendicular to fault = max energy
 
   // === EPICENTER POINT ===
-  const epicPt = geoToSphere(p.epicenterLat, p.epicenterLon, 0, 'height');
+  // Accepts both epicenterLat/epicenterLon (backend contract) and lat/lon (UI sends)
+  const epicenterLat = p.epicenterLat ?? (p as any).lat;
+  const epicenterLon = p.epicenterLon ?? (p as any).lon;
+  const epicPt = geoToSphere(epicenterLat, epicenterLon, 0, 'height');
   cloud.push({ x: epicPt[0], y: epicPt[1], z: epicPt[2] });
 
   // === WAVE PROPAGATION RINGS ===
@@ -740,8 +754,9 @@ function generateTsunamiWave(p: TsunamiWaveParams): PointCloud {
       const refraction = 1 - 0.1 * Math.sin(angle * 2 + faultStrikeDeg * Math.PI / 180);
 
       const r = waveRadiusDeg * refraction;
-      const lat = p.epicenterLat + r * Math.cos(angle);
-      const lon = p.epicenterLon + r * Math.sin(angle) / Math.cos(p.epicenterLat * Math.PI / 180);
+      // Accepts both epicenterLat/epicenterLon (backend contract) and lat/lon (UI sends)
+      const lat = epicenterLat + r * Math.cos(angle);
+      const lon = epicenterLon + r * Math.sin(angle) / Math.cos(epicenterLat * Math.PI / 180);
 
       const pt = geoToSphere(lat, lon, amplitude * directivity * 3, 'height');
       cloud.push({ x: pt[0], y: pt[1], z: pt[2] });
@@ -769,8 +784,8 @@ function generateTsunamiWave(p: TsunamiWaveParams): PointCloud {
     const inlandKm = (2 + p.waveHeight * 0.3) * inundationFactor;
     const distFromShore = 5 + rng.next() * 10; // km from epicenter to shore
 
-    const shoreLat = p.epicenterLat + distFromShore * kmToDeg * Math.cos(angle);
-    const shoreLon = p.epicenterLon + distFromShore * kmToDeg * Math.sin(angle) / Math.cos(p.epicenterLat * Math.PI / 180);
+    const shoreLat = epicenterLat + distFromShore * kmToDeg * Math.cos(angle);
+    const shoreLon = epicenterLon + distFromShore * kmToDeg * Math.sin(angle) / Math.cos(epicenterLat * Math.PI / 180);
 
     // Points along the inundation path (from shore inland)
     const numInundPts = 6;
@@ -779,7 +794,7 @@ function generateTsunamiWave(p: TsunamiWaveParams): PointCloud {
       const inlandDist = inlandKm * inlandFrac * kmToDeg;
 
       const lat = shoreLat + inlandDist * Math.cos(angle);
-      const lon = shoreLon + inlandDist * Math.sin(angle) / Math.cos(p.epicenterLat * Math.PI / 180);
+      const lon = shoreLon + inlandDist * Math.sin(angle) / Math.cos(epicenterLat * Math.PI / 180);
 
       // Water depth decreases inland (exponential decay)
       const depth = p.waveHeight * inundationFactor * Math.exp(-inlandFrac * 2);
@@ -802,4 +817,77 @@ function hashParams(type: string, params: object): number {
     hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
   }
   return Math.abs(hash) + 1;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   7. LANDSLIDE — Slope failure + debris flow runout
+
+   Research basis:
+   - Slope stability: factor of safety from cohesion, friction, saturation
+   - Failure initiation: PGA or rainfall exceeds threshold
+   - Debris runout: Voellmy-Salm friction, gravity-driven flow
+   - Depth: decreases from source, flow follows steepest descent
+   ═════════════════════════════════════════════════════════════════ */
+
+function generateLandslide(p: {
+  lat: number; lon: number; triggerType: string; magnitude: number;
+  pgaThreshold: number; rainfall: number; frictionAngle: number;
+  cohesion: number; duration: number;
+}): PointCloud {
+  const rng = new SeededRNG(hashParams('landslide', p));
+  const cloud: PointCloud = [];
+  const kmToDeg = 1 / 111;
+  const toRad = Math.PI / 180;
+
+  // Slope failure extends outward from epicenter
+  const triggerRadiusKm = p.triggerType === 'earthquake' ? 2 + p.magnitude : 1 + p.rainfall * 0.02;
+  const numSourcePts = Math.floor(40 + p.magnitude * 8);
+
+  // Source zone: area of failure
+  for (let i = 0; i < numSourcePts; i++) {
+    const angle = rng.next() * 2 * Math.PI;
+    const dist = Math.sqrt(rng.next()) * triggerRadiusKm;
+    const dLat = dist * Math.cos(angle) * kmToDeg;
+    const dLon = dist * Math.sin(angle) * kmToDeg / Math.cos(p.lat * toRad);
+    const lat = p.lat + dLat;
+    const lon = p.lon + dLon;
+    // Depth = failure depth (not depth below ground)
+    const depth = 1 + p.magnitude * 0.5 * rng.next();
+    const pt = geoToSphere(lat, lon, depth, 'height');
+    cloud.push({ x: pt[0], y: pt[1], z: pt[2] });
+  }
+
+  // Debris flow path: extends downhill from source
+  const flowLengthKm = triggerRadiusKm * (2 + p.magnitude * 0.3);
+  const numFlowPts = Math.floor(100 + p.magnitude * 15);
+
+  for (let i = 0; i < numFlowPts; i++) {
+    // Flow direction follows steepest descent (parameterize with random direction)
+    const flowAngle = rng.next() * 2 * Math.PI;
+    const frac = Math.sqrt(rng.next()) * flowLengthKm;
+    const dist = frac * kmToDeg;
+
+    const lat = p.lat + dist * Math.cos(flowAngle);
+    const lon = p.lon + dist * Math.sin(flowAngle) / Math.cos(p.lat * toRad);
+
+    // Debris thickness decreases with distance from source
+    const depth = Math.max(0.1, p.magnitude * (1 - frac / flowLengthKm) * (0.5 + rng.next() * 0.5));
+    const pt = geoToSphere(lat, lon, depth * 0.5, 'height');
+    cloud.push({ x: pt[0], y: pt[1], z: pt[2] });
+  }
+
+  // Deposition zone (toe of runout)
+  const numDepositPts = Math.floor(30 + p.magnitude * 5);
+  const depositRadiusKm = triggerRadiusKm * (1.5 + rng.next());
+  for (let i = 0; i < numDepositPts; i++) {
+    const angle = rng.next() * 2 * Math.PI;
+    const dist = depositRadiusKm * (1 + Math.abs(rng.nextGaussian()) * 0.3);
+    const lat = p.lat + dist * Math.cos(angle) * kmToDeg;
+    const lon = p.lon + dist * Math.sin(angle) * kmToDeg / Math.cos(p.lat * toRad);
+    const depth = 0.5 + p.magnitude * 0.3 * rng.next();
+    const pt = geoToSphere(lat, lon, depth * 0.5, 'height');
+    cloud.push({ x: pt[0], y: pt[1], z: pt[2] });
+  }
+
+  return cloud;
 }

@@ -3,6 +3,8 @@ import { Pen } from 'lucide-react';
 import * as Cesium from 'cesium';
 import Panel from '@/components/ui/Panel';
 
+import { haversineKm, circleBbox } from './geo';
+
 interface SpatialSketchingProps {
   viewer: Cesium.Viewer | null;
   onClose: () => void;
@@ -30,6 +32,9 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario, 
   const [isDrawing, setIsDrawing] = useState(false);
   const drawnPrimitivesRef = useRef<Cesium.Entity[]>([]);
   const handlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
+  // Mutable mirror of `points` so Cesium event handlers always read the latest
+  // vertex list (state read inside a ScreenSpaceEventHandler closure is stale).
+  const pointsRef = useRef<Array<{ lat: number; lon: number }>>([]);
 
   const clearDrawings = useCallback(() => {
     if (!viewer) return;
@@ -47,11 +52,21 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario, 
     return () => clearDrawings();
   }, [clearDrawings]);
 
+  const cancelDrawing = useCallback(() => {
+    clearDrawings();
+    pointsRef.current = [];
+    setPoints([]);
+    setBoundingBox(null);
+    setDrawMode(null);
+    setIsDrawing(false);
+  }, [clearDrawings]);
+
   const startDrawing = useCallback((mode: DrawMode) => {
     if (!viewer) return;
     clearDrawings();
     setDrawMode(mode);
     setIsDrawing(true);
+    pointsRef.current = [];
     setPoints([]);
     setBoundingBox(null);
 
@@ -65,57 +80,65 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario, 
       const lat = Cesium.Math.toDegrees(cartographic.latitude);
       const lon = Cesium.Math.toDegrees(cartographic.longitude);
 
-      setPoints(prev => {
-        const newPoints = [...prev, { lat, lon }];
-        if (mode === 'rectangle' && newPoints.length >= 2) {
-          const p0 = newPoints[0];
-          const p1 = newPoints[1];
-          const bb = {
-            minLat: Math.min(p0.lat, p1.lat),
-            maxLat: Math.max(p0.lat, p1.lat),
-            minLon: Math.min(p0.lon, p1.lon),
-            maxLon: Math.max(p0.lon, p1.lon),
-          };
-          setBoundingBox(bb);
-          drawRectangle(viewer, bb, drawnPrimitivesRef.current);
-          setIsDrawing(false);
-          if (!handler.isDestroyed()) handler.destroy();
-        } else if (mode === 'circle' && newPoints.length >= 2) {
-          const center = newPoints[0];
-          const edge = newPoints[1];
-          const radius = haversine(center.lat, center.lon, edge.lat, edge.lon);
-          const bb = {
-            minLat: center.lat - radius,
-            maxLat: center.lat + radius,
-            minLon: center.lon - radius,
-            maxLon: center.lon + radius,
-          };
-          setBoundingBox(bb);
-          drawCircle(viewer, center, radius, drawnPrimitivesRef.current);
-          setIsDrawing(false);
-          if (!handler.isDestroyed()) handler.destroy();
-        }
-        return newPoints;
-      });
+      const newPoints = [...pointsRef.current, { lat, lon }];
+      pointsRef.current = newPoints;
+      setPoints(newPoints);
+
+      if (mode === 'rectangle' && newPoints.length >= 2) {
+        const p0 = newPoints[0];
+        const p1 = newPoints[1];
+        const bb = {
+          minLat: Math.min(p0.lat, p1.lat),
+          maxLat: Math.max(p0.lat, p1.lat),
+          minLon: Math.min(p0.lon, p1.lon),
+          maxLon: Math.max(p0.lon, p1.lon),
+        };
+        setBoundingBox(bb);
+        drawRectangle(viewer, bb, drawnPrimitivesRef.current);
+        setIsDrawing(false);
+        if (!handler.isDestroyed()) handler.destroy();
+      } else if (mode === 'circle' && newPoints.length >= 2) {
+        const center = newPoints[0];
+        const radius = haversineKm(center.lat, center.lon, newPoints[1].lat, newPoints[1].lon);
+        const bb = circleBbox(center, radius);
+        setBoundingBox(bb);
+        drawCircle(viewer, center, radius, drawnPrimitivesRef.current);
+        setIsDrawing(false);
+        if (!handler.isDestroyed()) handler.destroy();
+      }
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
     if (mode === 'polygon') {
+      // Suppress the default context menu so right-click finishes cleanly.
+      viewer.scene.canvas.addEventListener('contextmenu', preventContextMenu);
       handler.setInputAction(() => {
-        if (points.length >= 3) {
+        const pts = pointsRef.current;
+        if (pts.length >= 3) {
           const bb = {
-            minLat: Math.min(...points.map(p => p.lat)),
-            maxLat: Math.max(...points.map(p => p.lat)),
-            minLon: Math.min(...points.map(p => p.lon)),
-            maxLon: Math.max(...points.map(p => p.lon)),
+            minLat: Math.min(...pts.map(p => p.lat)),
+            maxLat: Math.max(...pts.map(p => p.lat)),
+            minLon: Math.min(...pts.map(p => p.lon)),
+            maxLon: Math.max(...pts.map(p => p.lon)),
           };
           setBoundingBox(bb);
-          drawPolygon(viewer, points, drawnPrimitivesRef.current);
+          drawPolygon(viewer, pts, drawnPrimitivesRef.current);
           setIsDrawing(false);
+          viewer.scene.canvas.removeEventListener('contextmenu', preventContextMenu);
           if (!handler.isDestroyed()) handler.destroy();
         }
       }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
     }
-  }, [viewer, clearDrawings, points]);
+  }, [viewer, clearDrawings]);
+
+  // Escape cancels an in-progress drawing.
+  useEffect(() => {
+    if (!isDrawing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cancelDrawing();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isDrawing, cancelDrawing]);
 
   const handleGenerate = useCallback(() => {
     if (!boundingBox) return;
@@ -185,10 +208,15 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario, 
           </div>
           {isDrawing && (
             <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 6 }}>
-              {drawMode === 'polygon' ? 'Click to add points. Right-click to finish.' :
-               drawMode === 'rectangle' ? 'Click first corner, then opposite corner.' :
-               'Click center, then edge point.'}
+              {drawMode === 'polygon' ? 'Click to add points. Right-click to finish. Esc to cancel.' :
+               drawMode === 'rectangle' ? 'Click first corner, then opposite corner. Esc to cancel.' :
+               'Click center, then edge point. Esc to cancel.'}
             </div>
+          )}
+          {isDrawing && (
+            <button className="glass-button" style={{ fontSize: 10, marginTop: 4, width: '100%' }} onClick={cancelDrawing}>
+              Cancel ({drawMode})
+            </button>
           )}
           {points.length > 0 && (
             <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 4 }}>
@@ -220,7 +248,7 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario, 
         {/* Clear */}
         {points.length > 0 && (
           <button className="glass-button" style={{ fontSize: 10 }}
-            onClick={() => { clearDrawings(); setPoints([]); setBoundingBox(null); setDrawMode(null); setIsDrawing(false); }}>
+            onClick={cancelDrawing}>
             Clear Drawing
           </button>
         )}
@@ -230,12 +258,8 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario, 
   );
 }
 
-function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 111.32;
-  const dLat = (lat2 - lat1) * (Math.PI / 180);
-  const dLon = (lon2 - lon1) * (Math.PI / 180);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+function preventContextMenu(e: Event): void {
+  e.preventDefault();
 }
 
 function drawRectangle(viewer: Cesium.Viewer, bb: { minLat: number; maxLat: number; minLon: number; maxLon: number }, target: Cesium.Entity[]) {
@@ -258,11 +282,12 @@ function drawRectangle(viewer: Cesium.Viewer, bb: { minLat: number; maxLat: numb
 }
 
 function drawCircle(viewer: Cesium.Viewer, center: { lat: number; lon: number }, radiusKm: number, target: Cesium.Entity[]) {
+  const radiusM = radiusKm * 1000;
   const ent = viewer.entities.add({
     position: Cesium.Cartesian3.fromDegrees(center.lon, center.lat),
     ellipse: {
-      semiMinorAxis: radiusKm * 500,
-      semiMajorAxis: radiusKm * 500,
+      semiMinorAxis: radiusM,
+      semiMajorAxis: radiusM,
       material: Cesium.Color.fromAlpha(Cesium.Color.CYAN, 0.15),
       outline: true,
       outlineColor: Cesium.Color.CYAN,
