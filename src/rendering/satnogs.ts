@@ -122,6 +122,11 @@ export async function addSatnogsEntities(
     let satrec: any;
     try { satrec = satellite.twoline2satrec(item.tle1, item.tle2); } catch { continue; }
 
+    const now = new Date();
+    const testPv = satellite.propagate(satrec, now);
+    const testPos = testPv?.position;
+    if (!testPos || typeof testPos.x !== 'number' || !isFinite(testPos.x)) continue;
+
     const color = colorByFrequencyBand(freqs);
     const name = item.name || String(noradId);
 
@@ -141,7 +146,7 @@ export async function addSatnogsEntities(
             );
           }
         } catch { /* fall through */ }
-        return Cesium.Cartesian3.ZERO;
+        return Cesium.Cartesian3.fromDegrees(0, 0, 400000);
       },
       false,
     ) as unknown as Cesium.PositionProperty;

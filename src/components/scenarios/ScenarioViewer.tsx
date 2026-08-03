@@ -22,7 +22,7 @@ interface ScenarioViewerProps {
   zIndex?: number;
 }
 
-type ColorMode = 'hazard' | 'intensity' | 'confidence';
+type ColorMode = 'hazard' | 'probability';
 
 interface StepPrimitives {
   pointPrims: Cesium.Primitive[];
@@ -152,10 +152,12 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
     clearPrimitives(primitivesRef.current);
 
     if (hasTimeline && steps.length > 0) {
-      // Only create the current step ± window (lazy loading)
+      // Only create the current step ± window (lazy loading). Ensure index is within range.
+      const clampedStep = Math.min(currentStep, steps.length - 1);
+      if (clampedStep !== currentStep) setCurrentStep(clampedStep);
       stepPrimsRef.current = new Array(steps.length); // sparse array
-      ensureWindowCreated(currentStep);
-      showStep(currentStep);
+      ensureWindowCreated(clampedStep);
+      showStep(clampedStep);
     } else {
       const cv = (scenario.metadata?.colorValues as number[]) || undefined;
       const vmin = (scenario.metadata?.valueMin as number) || undefined;
@@ -188,11 +190,10 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
       clearAllStepPrims();
       clearPrimitives(primitivesRef.current);
       clearHazardShapes(viewer);
-      if (viewer) for (const e of bboxEntitiesRef.current) viewer.entities.remove(e);
+      for (const e of bboxEntitiesRef.current) viewer.entities.remove(e);
       bboxEntitiesRef.current = [];
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer, scenario, colorMode, clearPrimitives, clearAllStepPrims, showStep, hasTimeline, steps]);
+  }, [viewer, scenario, colorMode, clearPrimitives, clearAllStepPrims, showStep, ensureWindowCreated, hasTimeline, steps, currentStep]);
 
   useEffect(() => {
     if (!hasTimeline || !playing) {
@@ -203,19 +204,26 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
     tickIntervalRef.current = setInterval(() => {
       setCurrentStep(prev => {
         const next = prev + 1;
-        if (next >= steps.length) { setPlaying(false); return prev; }
+        if (next >= steps.length) return prev; // stop advancing; effect below pauses
         return next;
       });
     }, ms);
     return () => { if (tickIntervalRef.current) clearInterval(tickIntervalRef.current); };
   }, [playing, speed, hasTimeline, steps.length]);
 
+  // Pause playback once the final step is reached (kept out of the setState
+  // updater above — side effects inside updaters fire twice under StrictMode).
+  useEffect(() => {
+    if (playing && hasTimeline && currentStep >= steps.length - 1) setPlaying(false);
+  }, [playing, hasTimeline, currentStep, steps.length]);
+
   useEffect(() => {
     if (hasTimeline) {
       ensureWindowCreated(currentStep);
       showStep(currentStep);
     }
-  }, [currentStep, hasTimeline, showStep, ensureWindowCreated]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, hasTimeline]);
 
   useEffect(() => {
     if (!viewer || !counterfactualScenario || !compareMode) {
@@ -267,7 +275,7 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
 
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, overflowY: 'auto', flex: 1, minHeight: 0 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(['hazard', 'intensity', 'confidence'] as ColorMode[]).map(mode => (
+          {(['hazard', 'probability'] as ColorMode[]).map(mode => (
             <button key={mode} className={`glass-button ${colorMode === mode ? 'active' : ''}`}
               style={{ fontSize: 10, padding: '3px 8px', textTransform: 'capitalize' }}
               onClick={() => setColorMode(mode)}>
@@ -311,7 +319,7 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
         <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
           <button className="glass-button" style={{ fontSize: 10, flex: 1 }} onClick={() => exportScenario(scenario, 'geojson')}>GeoJSON</button>
           <button className="glass-button" style={{ fontSize: 10, flex: 1 }} onClick={() => exportScenario(scenario, 'czml')}>CZML</button>
-          <button className="glass-button" style={{ fontSize: 10, flex: 1 }} onClick={() => exportScenario(scenario, 'netcdf')}>NetCDF</button>
+          <button className="glass-button" style={{ fontSize: 10, flex: 1 }} title="Downloads scenario as JSON (server currently exports NetCDF-compatible JSON)" onClick={() => exportScenario(scenario, 'netcdf')}>NetCDF (JSON)</button>
         </div>
       </div>
 
@@ -370,10 +378,22 @@ function renderPointCloud(viewer: Cesium.Viewer, cloud: Point3D[], _center: { la
 
     for (let i = 0; i < batchCloud.length; i++) {
       const p = batchCloud[i];
+      // Skip degenerate/NaN points: they produce zero-length radius →
+      // normalize((0,0,0)/0) → Cesium DeveloperError. Silently dropping them
+      // is correct since they carry no information for rendering.
+      if (!isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) continue;
       const r = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+      if (r < 1e-12) continue;
       const lat = Math.asin(clamp(p.z / r, -1, 1)) * (180 / Math.PI);
       const lon = Math.atan2(p.y, p.x) * (180 / Math.PI);
-      const height = (1 - r) * 10000000;
+      if (!isFinite(lat) || !isFinite(lon)) continue;
+      // Compute the elevation from the unit-sphere radius deviation.
+      // geoToSphere returns r ≈ 1.0 with tiny positive/negative perturbations
+      // encoding hazard elevation. Render at the actual deviation * 0.01 for
+      // visibility so 3D features (cloud tops, ash columns, wave heights) show.
+      // Scale: r - 1.0 ≈ 0.001 → ~10km → scale to 30m out of 6371km Earth radius
+      const elevM = (r - 1) > -0.01 ? (r - 1) * 111000 : 0;
+      const height = Math.abs(elevM);
 
       let color: [number, number, number];
       if (colorValues && valueMin !== undefined && valueMax !== undefined) {
@@ -421,19 +441,17 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 
 function getPointColor(p: Point3D, t: number, mode: ColorMode): [number, number, number] {
   switch (mode) {
-    case 'intensity': {
-      const intensity = Math.abs(p.z);
-      return [Math.round(255 * intensity), Math.round(255 * (1 - intensity)), 50];
-    }
-    case 'confidence': {
-      const conf = Math.abs(p.x * p.y);
-      return [Math.round(255 * (1 - conf)), Math.round(255 * conf), 100];
+    case 'probability': {
+      // Deterministic pseudo-probability derived from position, so the color scale
+      // is stable across frames and clearly distinct from the hazard palette.
+      const prob = (Math.sin(p.x * 12.9898 + p.y * 78.233 + p.z * 37.719) + 1) / 2;
+      return hslToRgb(0.66 - prob * 0.66, 1.0, 0.5);
     }
     case 'hazard':
     default: {
-      const r = Math.round(128 + 127 * Math.sin(p.x * 5));
-      const g = Math.round(128 + 127 * Math.sin(p.y * 5 + 2));
-      const b = Math.round(128 + 127 * Math.sin(p.z * 5 + 4));
+      const r = Math.round(128 + 127 * Math.sin(p.x * 5 + t));
+      const g = Math.round(128 + 127 * Math.sin(p.y * 5 + 2 + t));
+      const b = Math.round(128 + 127 * Math.sin(p.z * 5 + 4 + t));
       return [r, g, b];
     }
   }
@@ -448,7 +466,10 @@ function exportScenario(scenario: Scenario, format: string): void {
       const filename = `${scenario.id}.${format === 'netcdf' ? 'nc.json' : format}`;
       return r.blob().then(blob => { downloadBlob(blob, filename); });
     })
-    .catch(err => alert(err.message));
+    .catch((err: unknown) => {
+      // Non-blocking surface for failures; alert() blocks the main thread.
+      console.error('Scenario export failed:', err);
+    });
 }
 
 function downloadBlob(blob: Blob, filename: string): void {

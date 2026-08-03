@@ -16,8 +16,10 @@ import {
   computeCausalProbabilities,
   computeFullCausalState,
   getAllNodes,
-  type CausalState,
 } from './causalGraph';
+
+/** Δ-probability above which a node counts as "significantly affected" (0.5%). */
+export const SIGNIFICANT_DELTA_THRESHOLD = 0.005;
 
 /* ═════════════════════════════════════════════════════════════════
    TYPES
@@ -28,7 +30,10 @@ export interface Scenario {
   name: string;
   description: string;
   evidence: Record<string, number>;
-  /** Physical parameters for the scenario (used by physics surrogates) */
+  /**
+   * Physical parameters intending to drive future physics-surrogate models.
+   * Currently unused by the causal rollout — kept for forward compatibility.
+   */
   physicalParams?: Record<string, number>;
 }
 
@@ -43,19 +48,6 @@ export interface ScenarioDiff {
   confidence: number;
   /** Human-readable label */
   label: string;
-}
-
-export interface ScenarioResult {
-  diffs: ScenarioDiff[];
-  scenario: Scenario;
-  /** Full causal state after scenario rollout */
-  causalState: CausalState;
-  /** Total risk increase across all nodes */
-  totalRiskDelta: number;
-  /** Maximum single-node risk change */
-  maxNodeDelta: number;
-  /** Number of nodes with >5% risk change */
-  significantChanges: number;
 }
 
 /* ═════════════════════════════════════════════════════════════════
@@ -173,7 +165,7 @@ export function rolloutScenario(
     const entropyDelta = (baseState.beliefs[toolId]?.entropy ?? 0)
       - (scenarioState.beliefs[toolId]?.entropy ?? 0);
 
-    if (Math.abs(delta) > 0.005) { // Lower threshold for sensitivity
+    if (Math.abs(delta) > SIGNIFICANT_DELTA_THRESHOLD) {
       diffs.push({
         toolId,
         baseProb,
@@ -190,11 +182,3 @@ export function rolloutScenario(
   diffs.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
   return diffs;
 }
-
-/**
- * Full scenario analysis with complete causal state.
- */
-
-/**
- * Convenience wrapper: get scenario impact with scenario lookup.
- */

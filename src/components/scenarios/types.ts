@@ -1,4 +1,10 @@
 export interface Point3D {
+  /**
+   * Cartesian coordinates on the **unit sphere** in geodetic space:
+   * `z === sin(lat)` and `x,y` encode longitude. Producers MUST normalize so
+   * `|(x,y,z)| === 1`; `ScenarioViewer.renderPointCloud` assumes this and
+   * projects back via `asin(z / r)` / `atan2(y, x)`.
+   */
   x: number;
   y: number;
   z: number;
@@ -9,8 +15,12 @@ export interface ScenarioLocation {
   lon: number;
 }
 
-export interface ShapeData {
-  type: 'polygon' | 'cylinder' | 'corridor' | 'ellipse' | 'polyline' | 'ring' | 'flood_surface' | 'wavefront' | 'intensity_zone' | 'damage_zone' | 'liquefaction_zone';
+export type ShapeType =
+  | 'polygon' | 'cylinder' | 'corridor' | 'ellipse' | 'polyline' | 'ring'
+  | 'flood_surface' | 'wavefront' | 'intensity_zone' | 'damage_zone' | 'liquefaction_zone';
+
+interface BaseShapeData {
+  type: ShapeType;
   color: string;
   opacity: number;
   positions?: { lat: number; lon: number }[];
@@ -23,29 +33,80 @@ export interface ShapeData {
   semiMajorAxis?: number;
   semiMinorAxis?: number;
   rotation?: number;
-  /** Water depth at each vertex (meters) — used for depth-based coloring */
   depths?: number[];
-  /** Maximum flood depth for color scale normalization */
   maxDepth?: number;
-  /** Water surface elevation in meters above ground */
   waterElevation?: number;
-  /** Wave type for wavefront: 'P' | 'S' | 'Rayleigh' | 'Love' */
   waveType?: string;
-  /** Wave speed in km/s for animation */
   waveSpeed?: number;
-  /** Start time in hours for wave propagation */
   startTime?: number;
-  /** MMI intensity value for intensity zones */
   mmi?: number;
-  /** Damage percentage (0-100) for damage zones */
   damagePercent?: number;
-  /** Liquefaction probability (0-1) */
   liquefactionProb?: number;
-  /** Epicenter for wave calculations */
   epicenter?: { lat: number; lon: number };
-  /** Event magnitude for wave amplitude scaling */
   magnitude?: number;
 }
+
+interface PolygonShapeData extends Omit<BaseShapeData,'type'> {
+  type: 'polygon';
+}
+
+interface CorridorShapeData extends Omit<BaseShapeData,'type'> {
+  type: 'corridor';
+}
+
+interface PolylineShapeData extends Omit<BaseShapeData,'type'> {
+  type: 'polyline';
+}
+
+interface EllipseShapeData extends Omit<BaseShapeData,'type'> {
+  type: 'ellipse';
+}
+
+interface RingShapeData extends Omit<BaseShapeData,'type'> {
+  type: 'ring';
+}
+
+interface CylinderShapeData extends Omit<BaseShapeData,'type'> {
+  type: 'cylinder';
+}
+
+interface FloodSurfaceShapeData extends Omit<BaseShapeData,'type'> {
+  type: 'flood_surface';
+}
+
+interface WavefrontShapeData extends Omit<BaseShapeData,'type'> {
+  type: 'wavefront';
+}
+
+interface IntensityZoneShapeData extends Omit<BaseShapeData,'type'> {
+  type: 'intensity_zone';
+}
+
+interface DamageZoneShapeData extends Omit<BaseShapeData,'type'> {
+  type: 'damage_zone';
+}
+
+interface LiquefactionZoneShapeData extends Omit<BaseShapeData,'type'> {
+  type: 'liquefaction_zone';
+}
+
+/**
+ * Discriminated union on `type` — consumers can narrow on `shape.type` to get
+ * type-safe access to the per-shape fields. Unknown / server-produced shapes
+ * may still need casts.
+ */
+export type ShapeData =
+  | PolygonShapeData
+  | CorridorShapeData
+  | PolylineShapeData
+  | EllipseShapeData
+  | RingShapeData
+  | CylinderShapeData
+  | FloodSurfaceShapeData
+  | WavefrontShapeData
+  | IntensityZoneShapeData
+  | DamageZoneShapeData
+  | LiquefactionZoneShapeData;
 
 export interface TimeStep {
   time: number;
@@ -90,7 +151,6 @@ export interface ScenarioSummary {
   complexity: number;
   thumbnail?: string;
 }
-
 
 export const SCENARIO_TYPE_LABELS: Record<string, string> = {
   earthquake_swarm: 'Earthquake',

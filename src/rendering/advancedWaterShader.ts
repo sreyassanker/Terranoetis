@@ -56,7 +56,7 @@ export const OCEAN_WAVE_SHADER = `
   czm_material czm_getMaterial(czm_materialInput materialInput) {
     czm_material material = czm_getDefaultMaterial(materialInput);
     vec2 st = materialInput.st;
-    vec3 pos = materialInput.positionMC;
+    vec3 pos = -materialInput.positionToEyeEC;
     
     // Multiple Gerstner waves for realistic ocean
     vec3 wave1 = gerstnerWave(pos.xz, waveHeight * 1.0, vec2(1.0, 0.0), choppy, waveSpeed, time);
@@ -86,7 +86,7 @@ export const OCEAN_WAVE_SHADER = `
     
     // Specular highlight (sun reflection)
     vec3 lightDir = normalize(czm_sunDirectionEC);
-    vec3 viewDir = normalize(czm_viewerPositionWC - materialInput.positionMC);
+    vec3 viewDir = normalize(materialInput.positionToEyeEC);
     vec3 halfDir = normalize(lightDir + viewDir);
     float specular = pow(max(dot(normal, halfDir), 0.0), 128.0);
     
@@ -100,7 +100,7 @@ export const OCEAN_WAVE_SHADER = `
     
     material.diffuse = finalColor;
     material.alpha = 0.85;
-    material.specular = vec3(0.5 + specular * 0.3);
+    material.specular = 0.5 + specular * 0.3;
     material.shininess = 100.0;
     
     return material;
@@ -135,7 +135,7 @@ export const TSUNAMI_WAVE_SHADER = `
   czm_material czm_getMaterial(czm_materialInput materialInput) {
     czm_material material = czm_getDefaultMaterial(materialInput);
     vec2 st = materialInput.st;
-    vec3 pos = materialInput.positionMC;
+    vec3 pos = -materialInput.positionToEyeEC;
     
     // Compute wave height at this point
     float height = waveAmplitude(pos.xz, epicenter, time, waveSpeed);
@@ -161,7 +161,7 @@ export const TSUNAMI_WAVE_SHADER = `
     // Specular
     vec3 lightDir = normalize(czm_sunDirectionEC);
     vec3 normal = normalize(vec3(0.0, 1.0, 0.0));
-    vec3 viewDir = normalize(czm_viewerPositionWC - materialInput.positionMC);
+    vec3 viewDir = normalize(materialInput.positionToEyeEC);
     vec3 halfDir = normalize(lightDir + viewDir);
     float specular = pow(max(dot(normal, halfDir), 0.0), 64.0);
     
@@ -169,7 +169,7 @@ export const TSUNAMI_WAVE_SHADER = `
     
     material.diffuse = finalColor;
     material.alpha = 0.8 + normalizedHeight * 0.15;
-    material.specular = vec3(0.4 + specular * 0.2);
+    material.specular = 0.4 + specular * 0.2;
     material.shininess = 80.0;
     
     return material;
@@ -203,7 +203,7 @@ export const FLOOD_SHADER = `
   czm_material czm_getMaterial(czm_materialInput materialInput) {
     czm_material material = czm_getDefaultMaterial(materialInput);
     vec2 st = materialInput.st;
-    vec3 pos = materialInput.positionMC;
+    vec3 pos = -materialInput.positionToEyeEC;
     
     // Flowing water effect
     float flow = noise(st * 10.0 + time * flowSpeed) * 0.5 +
@@ -226,7 +226,7 @@ export const FLOOD_SHADER = `
     // Specular (wet surface)
     vec3 lightDir = normalize(czm_sunDirectionEC);
     vec3 normal = normalize(vec3(waves * 0.5, 1.0, waves * 0.5));
-    vec3 viewDir = normalize(czm_viewerPositionWC - materialInput.positionMC);
+    vec3 viewDir = normalize(materialInput.positionToEyeEC);
     vec3 halfDir = normalize(lightDir + viewDir);
     float specular = pow(max(dot(normal, halfDir), 0.0), 32.0);
     
@@ -234,7 +234,7 @@ export const FLOOD_SHADER = `
     
     material.diffuse = finalColor;
     material.alpha = 0.75;
-    material.specular = vec3(0.3 + specular * 0.2);
+    material.specular = 0.3 + specular * 0.2;
     material.shininess = 40.0;
     
     return material;

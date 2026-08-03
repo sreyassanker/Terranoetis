@@ -57,3 +57,28 @@ wasm/idw/target/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Ruflo agent harness state
+agentdb.rvf
+agentdb.rvf.lock
+.claude-flow/
+.ruflo/
+.swarm/
+ruvector.db
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Test & browser artifacts
+playwright-report/
+test-results/
+
+# Local config with secrets
+opencode.json
+
+# Throwaway test scripts
+test_*.cjs
+live_*.cjs
+final_browser_test.cjs
+live_test_scenario_viewer.cjs

@@ -38,18 +38,44 @@ CN_GRASS = 70       # grassland
 CN_WATER = 99       # water (impervious)
 
 
-def holland_wind_field(r, vmax, rmax, central_pressure, env_pressure=1013):
-    """Holland B parameter wind profile (m/s) at radius r (km)."""
-    B = 1.0 + 0.25 * min(5, max(1, int((env_pressure - central_pressure) / 20)))
+OMEGA_EARTH = 7.2921159e-5  # rad/s
+
+def coriolis_param(lat_deg):
+    """f = 2·Ω·sin(latitude)   (zero at the equator)."""
+    return 2.0 * OMEGA_EARTH * np.sin(np.radians(lat_deg))
+
+def holland_B(dp_hpa, vmax_ms, rho=RHO_AIR):
+    """Holland (1980) B-parameter from max wind:  B = ρ·e·Vmax²/(Δp·100).
+    Δp in hPa → ×100 converts to Pa. Bounded to the physical range [1.0, 2.5]."""
+    dp_pa = max(dp_hpa, 1.0) * 100.0
+    B = rho * np.e * vmax_ms**2 / dp_pa
+    return np.clip(B, 1.0, 2.5)
+
+def holland_pressure_radial(r_km, pc_hpa, dp_hpa, rmax_km, B):
+    """Holland (1980) radial pressure profile
+    p(r) = pc + Δp · exp(−(Rmax/r)^B)             (NOT a Gaussian)"""
+    rr = np.maximum(r_km, 0.1)
+    return pc_hpa + dp_hpa * np.exp(-((rmax_km / rr) ** B))
+
+def holland_wind_field(r, vmax, rmax, central_pressure, env_pressure=1013, lat_deg=25.0):
+    """Holland (1980) gradient-level wind profile *with* the Coriolis term:
+       V(r) = sqrt( (B·Δp/ρ)·(Rmax/r)^B·exp(−(Rmax/r)^B)  +  (f·r/2)² ) − f·r/2
+    This reduces to the correct cyclostrophic balance at small r and
+    geostrophic at large r. B is computed from Δp, not a piecewise integer."""
     rho = RHO_AIR
-    dp = env_pressure - central_pressure  # hPa
-    r_arr = np.maximum(r, 0.1)
-    wind = np.sqrt((B * (dp * 100) / (rho * np.e)) * (rmax / r_arr)**B *
-                   np.exp(1 - (rmax / r_arr)**B))
-    return np.clip(wind, 0, vmax)
+    dp_hpa = max(env_pressure - central_pressure, 5.0)   # hPa
+    B = holland_B(dp_hpa, vmax, rho)
+    r_km = np.maximum(r, 0.1)
+    r_m = r_km * 1000.0
+    f = coriolis_param(lat_deg)
+    rr = (rmax / r_km) ** B
+    gradient_wind_sq = (B * (dp_hpa * 100) / rho) * rr * np.exp(-rr)
+    coriolis_term = 0.5 * f * r_m
+    wind = np.sqrt(gradient_wind_sq + coriolis_term**2) - coriolis_term
+    return np.clip(wind, 0.0, vmax), B
 
 
-def generate_coastal_bathymetry(N, coast_x_frac=0.35):
+def generate_coastal_bathymetry(N, coast_x_frac=0.35, cell_size_m=CELL_SIZE_M):
     """
     Generate coastal bathymetry with:
     - Deep ocean on the right (offshore)
@@ -65,7 +91,7 @@ def generate_coastal_bathymetry(N, coast_x_frac=0.35):
 
     # Ocean side (x < coast_x): depth increases offshore
     ocean_mask = x < coast_x
-    dist_to_coast = (coast_x - x) * CELL_SIZE_M / 1000.0  # km from coast
+    dist_to_coast = (coast_x - x) * cell_size_m / 1000.0  # km from coast
     # Continental shelf (shallow, 0-50m) near coast, deep ocean (up to 4000m) far out
     shelf_width = 20  # km
     shelf_slope = np.where(ocean_mask,
@@ -76,7 +102,7 @@ def generate_coastal_bathymetry(N, coast_x_frac=0.35):
 
     # Land side (x >= coast_x): gentle terrain with river valleys
     land_mask = x >= coast_x
-    dist_inland = (x - coast_x) * CELL_SIZE_M / 1000.0  # km inland
+    dist_inland = (x - coast_x) * cell_size_m / 1000.0  # km inland
     # Gentle slope (0-20m elevation)
     land_elev = 0.001 * dist_inland + 5 * np.sin(y / N * 3) * np.cos(x / N * 2)
     bathy = np.where(land_mask, land_elev, bathy)
@@ -150,23 +176,36 @@ def simulate_hurricane(params):
     storm_heading = np.radians(270)  # moving westward
 
     # ── Generate coastal bathymetry ──
-    bathy = generate_coastal_bathymetry(gs)
+    extent_km = float(params.get('extent_km', 0.0))
+    dx_cell = (extent_km * 1000.0 / gs) if extent_km > 0 else CELL_SIZE_M
+    bathy = generate_coastal_bathymetry(gs, cell_size_m=dx_cell)
     coast_x = int(gs * 0.35)
 
     # ── Grid setup ──
     y, x = np.meshgrid(np.arange(gs), np.arange(gs), indexing='ij')
-    dx_cell = CELL_SIZE_M  # 2 km per cell
 
     # ── Time stepping ──
-    dt = 300.0  # 5 min steps
+    # CFL for storm surge (long gravity waves on ~100 m shelf depth):
+    #   dt ≤ dx/(√gH · √2) ≈ 30–60 s for 2 km cells → pick 30 s by default.
+    dx_for_dx = (extent_km * 1000.0 / gs) if extent_km > 0 else CELL_SIZE_M
+    _cmax0 = np.sqrt(G * 100.0)  # ~31 m/s shelf celerity (100 m depth)
+    dt = float(params.get('dt_s', min(300.0, 0.4 * dx_for_dx / _cmax0)))
+    dt = max(dt, 10.0)
     total_steps = int(duration_hours * 3600 / dt)
     snap_interval = max(1, total_steps // 20)
 
-    # ── State variables ──
-    # Surge height (water surface elevation above still water level)
+    # ── State variables (SWE prognostics) ──
+    # Free-surface elevation (η) above still water [m]
+    eta = np.zeros((gs, gs), dtype=np.float64)
+    # Depth-integrated momentum (discharge) components [m²/s]
+    hu = np.zeros((gs, gs), dtype=np.float64)
+    hv = np.zeros((gs, gs), dtype=np.float64)
+    # Surge height η exposed to downstream consumers
     surge = np.zeros((gs, gs), dtype=np.float64)
     # Surge from previous step (for river backflow computation)
     surge_prev = np.zeros((gs, gs), dtype=np.float64)
+    # Atmospheric-pressure diagnostic surge η_p = Δp/(ρg) [m]
+    pressure_surge = np.zeros((gs, gs), dtype=np.float64)
     # Rainfall accumulation (mm)
     rainfall = np.zeros((gs, gs), dtype=np.float64)
     # Runoff depth (mm)
@@ -188,26 +227,51 @@ def simulate_hurricane(params):
     print(f"Cat {category} | Vmax={vmax}m/s | P={central_pressure}hPa | grid={gs}x{gs}")
     print(f"Forward: {forward_speed}km/h | Duration: {duration_hours}h | Steps: {total_steps}")
 
+    wallclock_max = float(params.get('wallclock_max_sec', 480))
+    print(f"Wall-clock cap: {wallclock_max:.0f}s")
     for step_i in range(total_steps):
+        if time.time() - t0 > wallclock_max:
+            print(f"  [WALL-CLOCK CAP] Stopping at step {step_i} (elapsed {time.time()-t0:.0f}s)")
+            break
         t = step_i * dt
         time_h = t / 3600.0
 
-        # ── Storm position (moving westward) ──
-        storm_y = gs // 2
-        storm_x = int(gs // 2 + storm_speed_ms * t / dx_cell * np.cos(storm_heading))
-        storm_x = max(coast_x + 10, min(gs - 10, storm_x))
+        # ── Storm position: divisible into East/North components ──
+        # heading 270° = westward;  Vx = −|V|·sin(hdg)? No: with hdg measured
+        # clockwise from North,  V_East = |V|·sin(hdg),  V_North = |V|·cos(hdg).
+        # At 270°: sin=−1 (moves −East, i.e., westward), cos=0 (no N/S drift),
+        # which is exactly correct for a full-speed westerly track.
+        storm_xf = gs // 2 + storm_speed_ms * t / dx_cell * np.sin(np.radians(270))
+        storm_yf = gs // 2 - storm_speed_ms * t / dx_cell * np.cos(np.radians(270))
+        storm_x = int(round(storm_xf))
+        storm_y = int(round(storm_yf))
+        # Allow offshore approach: clamp only as an absolute safety bound.
+        storm_x = max(5, min(gs - 6, storm_x))
+        storm_y = max(5, min(gs - 6, storm_y))
 
-        # ── Wind field (Holland model at current storm position) ──
+        # ── Wind field (Holland 1980, with Coriolis term) ──
         r_km = np.sqrt((y - storm_y)**2 + (x - storm_x)**2) * (dx_cell / 1000.0)
-        wind_speed = holland_wind_field(r_km, vmax, rmax_km, central_pressure)
+        wind_speed, B_holland = holland_wind_field(r_km, vmax, rmax_km,
+                                                   central_pressure, 1013.0, lat)
+
+        # Track asymmetry: add a fraction of the forward speed to the
+        # right-front quadrant (Northern Hemisphere cyclonic rotation means
+        # the strongest winds are to the right of the track).
+        fwd_x = storm_speed_ms * np.sin(np.radians(270))   # m/s
+        fwd_y = storm_speed_ms * np.cos(np.radians(270))
+        # azimuth of the max-wind direction is 90° CW of the track direction
+        az_wind = np.radians(270) - np.pi / 2
+        asym_factor = np.maximum(
+            np.cos(np.arctan2(y - storm_y, x - storm_x) - az_wind), 0.0)
+        wind_speed = np.clip(wind_speed + 0.5 * storm_speed_ms * asym_factor, 0, vmax)
 
         # Wind direction (cyclonic, tangential to radius)
         wind_dir = np.arctan2(x - storm_x, y - storm_y) + np.pi / 2
 
-        # ── Atmospheric pressure field ──
-        # Pressure deficit at center
-        dp_center = 1013 - central_pressure
-        pressure = 1013.0 - dp_center * np.exp(-r_km**2 / (2 * rmax_km**2))
+        # ── Atmospheric pressure field: Holland 1980 p(r) = pc + Δp·e^{-(R/r)^B} ──
+        pressure = holland_pressure_radial(r_km, central_pressure,
+                                           1013.0 - central_pressure,
+                                           rmax_km, B_holland)
 
         # ── Wave setup ──
         # Fetch: distance from coast in the offshore direction
@@ -216,74 +280,108 @@ def simulate_hurricane(params):
         wave_setup, wave_height = compute_wave_setup(wind_speed, r_km, fetch_km, np.abs(bathy))
 
         # ── Wind stress → surge forcing ──
-        # τ = ρ_a · C_d · U²
-        tau_x = RHO_AIR * C_DRAG * wind_speed**2 * np.sin(wind_dir)
-        tau_y = RHO_AIR * C_DRAG * wind_speed**2 * np.cos(wind_dir)
+        # τ = ρ_a · C_d · U² along the wind direction. wind_dir is the
+        # tangential (cyclonic) azimuth in array-index coordinates:
+        #   cos(wind_dir) = x-component of unit wind, sin(wind_dir) = y-comp.
+        U2 = wind_speed**2
+        tau_x = RHO_AIR * C_DRAG * U2 * np.cos(wind_dir)
+        tau_y = RHO_AIR * C_DRAG * U2 * np.sin(wind_dir)
 
-        # Surge accumulation rate from wind stress
-        # ∂η/∂t = τ / (ρ_w · g · H)  (simplified)
-        water_depth = np.maximum(np.abs(bathy), 5.0)  # effective depth
-        surge_rate = (tau_x / (RHO_WATER * G * water_depth)) * 0.01  # m/s
-
-        # Pressure surge: η = dp / (ρ_w · g)
+        # Total water column under the storm (bathy is negative offshore)
+        H_still = np.maximum(-bathy, 0.0)          # positive depth ocean-side
+        # Inverse-barometer surge η_p = Δp/(ρ_w·g) added to dynamics via the
+        # pressure-gradient body force a_px/a_py below; for diagnosed output
+        # also expose it directly (informative, double-count-free in dynamics).
         pressure_surge = (1013.0 - pressure) / (RHO_WATER * G)
 
-        # ── Storm surge: 2D SWE with Lax-Friedrichs ──
-        # ∂h/∂t + ∇·(hu) = forcing
-        # h = surge + wave_setup + pressure_surge (total water level)
-        total_surge = surge + wave_setup + pressure_surge
+        # Total depth incl. current free-surface elevation
+        H = np.maximum(H_still + eta, 0.1)
+        wet = H_still > 0.05  # only evolve surge over ocean cells
 
-        # Advection: wind-driven transport
-        # Simple upwind scheme for water transport
-        advective = np.zeros_like(total_surge)
-        # X-direction
-        advective[1:, :] = (
-            np.maximum(surge[1:, :], 0) * tau_x[1:, :] / (RHO_WATER * G * water_depth[1:, :]) -
-            np.minimum(surge[:-1, :], 0) * tau_x[:-1, :] / (RHO_WATER * G * water_depth[:-1, :])
-        ) * dt / dx_cell
-        # Y-direction
-        advective[:, 1:] += (
-            np.maximum(surge[:, 1:], 0) * tau_y[:, 1:] / (RHO_WATER * G * water_depth[:, 1:]) -
-            np.minimum(surge[:, :-1], 0) * tau_y[:, :-1] / (RHO_WATER * G * water_depth[:, :-1])
-        ) * dt / dx_cell
+        # LF neighbor rolls of discharge state (hu = H·u etc.)
+        hu_r = np.roll(hu, -1, 1); hu_r[:, -1] = 0.0
+        hu_l = np.roll(hu, 1, 1); hu_l[:, 0] = 0.0
+        hu_d = np.roll(hu, -1, 0); hu_d[-1, :] = 0.0
+        hu_u = np.roll(hu, 1, 0); hu_u[0, :] = 0.0
+        hv_r = np.roll(hv, -1, 1); hv_r[:, -1] = 0.0
+        hv_l = np.roll(hv, 1, 1); hv_l[:, 0] = 0.0
+        hv_d = np.roll(hv, -1, 0); hv_d[-1, :] = 0.0
+        hv_u = np.roll(hv, 1, 0); hv_u[0, :] = 0.0
+        h_r = np.roll(eta, -1, 1); h_r[:, -1] = 0.0
+        h_l = np.roll(eta, 1, 1); h_l[:, 0] = 0.0
+        h_d = np.roll(eta, -1, 0); h_d[-1, :] = 0.0
+        h_u = np.roll(eta, 1, 0); h_u[0, :] = 0.0
 
-        # Diffusion (lateral water transport)
-        D_surge = 500.0  # m²/s
-        cfl_diff = D_surge * dt / dx_cell**2
-        if cfl_diff > 0.24:
-            D_surge = 0.24 * dx_cell**2 / dt
+        # ── CONTINUITY:  ∂η/∂t = −∇·(Hu)   (Lax-Friedrichs half-step) ──
+        div_q = (hu_r - hu_l + hv_d - hv_u) / (2.0 * dx_cell)
+        h_avg_edges = 0.25 * (h_r + h_l + h_d + h_u)
+        eta = h_avg_edges - dt * div_q
 
-        lap_surge = (
-            np.roll(surge, -1, 1) + np.roll(surge, 1, 1) +
-            np.roll(surge, -1, 0) + np.roll(surge, 1, 0) - 4 * surge
-        )
-        diffusive = D_surge * dt / dx_cell**2 * lap_surge
+        # Pressure gradient source: gradients of the free surface (eta)
+        deta_dx = (h_r - h_l) / (2.0 * dx_cell)
+        deta_dy = (h_d - h_u) / (2.0 * dx_cell)
 
-        # Bottom friction (Manning's equation)
-        friction = np.zeros_like(surge)
-        wet = surge > 0.01
-        velocity = np.where(wet, surge / (water_depth + surge), 0)
-        friction = -N_MANING**2 * velocity * np.abs(velocity) * dt / \
-                   np.maximum(water_depth + surge, 0.1)**(4/3)
+        # Bottom friction (Manning), drag from surge speed.
+        # Linearize in deep water and cap so shallow cells don't blow up:
+        #   a_f = −g n² |u| u / H^(4/3),  clamped to a max deceleration.
+        u_c = np.where(wet, hu / np.maximum(H, 1.0), 0.0)
+        v_c = np.where(wet, hv / np.maximum(H, 1.0), 0.0)
+        u_c = np.clip(u_c, -10.0, 10.0); v_c = np.clip(v_c, -10.0, 10.0)
+        spd = np.sqrt(u_c**2 + v_c**2)
+        H43 = np.power(np.maximum(H, 1.0), 4.0 / 3.0)
+        a_fx = -np.where(wet, G * N_MANING**2 * spd * u_c, 0.0) / H43
+        a_fy = -np.where(wet, G * N_MANING**2 * spd * v_c, 0.0) / H43
+        # Clip friction deceleration to a physical range (≤ 0.05 m/s²)
+        a_fx = np.clip(a_fx, -0.05, 0.05)
+        a_fy = np.clip(a_fy, -0.05, 0.05)
 
-        # Update surge component only (NOT total_surge, to avoid double-counting
-        # wave_setup and pressure_surge on the next step)
-        surge_new = surge + surge_rate * dt + diffusive + friction
-        surge_new = np.maximum(surge_new, 0)  # no negative surge
+        # Wind-stress acceleration on the column (τ / (ρ H))
+        a_wx = np.where(wet, tau_x / (RHO_WATER * np.maximum(H, 1.0)), 0.0)
+        a_wy = np.where(wet, tau_y / (RHO_WATER * np.maximum(H, 1.0)), 0.0)
+
+        # Inverse-barometer pressure forcing (−(1/ρ)∇p, p in hPa→Pa)
+        p_pa = pressure * 100.0
+        dpdx = np.roll(p_pa, -1, 1) - np.roll(p_pa, 1, 1)
+        dpdy = np.roll(p_pa, -1, 0) - np.roll(p_pa, 1, 0)
+        a_px = np.where(wet, -dpdx / (2.0 * dx_cell * RHO_WATER), 0.0)
+        a_py = np.where(wet, -dpdy / (2.0 * dx_cell * RHO_WATER), 0.0)
+
+        # ── MOMENTUM:  ∂(Hu)/∂t = −g·H·∇η + H·(a_wind + a_press + a_fric) ──
+        # The H factor on body accelerations converts per-unit-mass [m/s²]
+        # into momentum tendency [m²/s²·]. Wind & pressure are per-unit-mass
+        # already, so multiply by H. Gravity term already carries H.
+        hu_avg = 0.25 * (hu_r + hu_l + hu_u + hu_d)
+        hv_avg = 0.25 * (hv_r + hv_l + hv_u + hv_d)
+        body_x = a_wx + a_px + a_fx       # [m/s²]
+        body_y = a_wy + a_py + a_fy
+        hu_new = hu_avg + dt * (-G * H * deta_dx + H * body_x)
+        hv_new = hv_avg + dt * (-G * H * deta_dy + H * body_y)
+
+        # Cap momentum magnitude per unit depth to |u| ≤ 20 m/s physically,
+        # then cap η to avoid runaway at coastlines.
+        qmax_per_H = 20.0
+        hu_new = np.clip(hu_new, -qmax_per_H * np.maximum(H, 0.1),
+                                  qmax_per_H * np.maximum(H, 0.1))
+        hv_new = np.clip(hv_new, -qmax_per_H * np.maximum(H, 0.1),
+                                  qmax_per_H * np.maximum(H, 0.1))
+
+        # Apply only over water; zero out over land
+        hu = np.where(wet, np.nan_to_num(hu_new), 0.0)
+        hv = np.where(wet, np.nan_to_num(hv_new), 0.0)
+        eta = np.clip(np.nan_to_num(eta), -10.0, 10.0)
 
         # ── Coastal inundation (wetting/drying) ──
-        # Land cells become wet when total water level exceeds terrain elevation
-        land_elev = np.maximum(bathy, 0)  # land elevation (0 at coast, positive inland)
-        total_new = surge_new + wave_setup + pressure_surge
-        inundated = total_new > land_elev
-        wet_mask = inundated
-        # Surge on land is relative to ground
-        surge_new = np.where(inundated, surge_new - land_elev, 0)
+        # Land cells become wet when total η exceeds terrain elevation
+        land_elev = np.maximum(bathy, 0)
+        total_new_eta = eta + wave_setup  # pressure term already in eta dynamics
+        wet_mask = total_new_eta > land_elev
+        surge_rel_land = np.where(wet_mask, total_new_eta - land_elev, 0.0)
+        # Track surge (as η above still-water) for downstream consumers
+        surge = np.where(~wet_mask & (H_still <= 0), 0.0, eta)
 
-        surge = surge_new
-
-        # Save surge from this step for river backflow computation next step
         surge_prev = surge.copy()
+
+        total_surge = eta + wave_setup  # for snapshot/diagnostics
 
         # ── Rainfall ──
         # Rainfall rate from wind speed (empirical: heavy rain in eyewall)
@@ -351,7 +449,10 @@ def simulate_hurricane(params):
             total_backflow += np.where(river_mask, backflow * 0.05, 0)
 
         # Apply total backflow to surge (one-time, prevents feedback)
-        surge += total_backflow
+        # Route backflow into the SWE surface field so it couples into the
+        # momentum and continuity equations on the next step.
+        eta += total_backflow
+        surge = np.where(~wet_mask & (H_still <= 0), 0.0, eta)
 
         # ── Snapshot ──
         if step_i % snap_interval == 0 or step_i == total_steps - 1:
@@ -423,14 +524,43 @@ def simulate_hurricane(params):
                          'physics': 'holland_wind_swe_wave_setup_scs_cn_river_backflow'}}
 
 
+# simRunner injects the run's JSON params here at push time (Kaggle only
+# uploads the code file, so params cannot be passed as a sibling file).
+EMBEDDED_PARAMS = None
+
+def _load_params():
+    """Load params from EMBEDDED_PARAMS (injected into main.py at push time)
+    or from params.json anywhere on the runner."""
+    if EMBEDDED_PARAMS:
+        try:
+            if isinstance(EMBEDDED_PARAMS, dict):
+                return EMBEDDED_PARAMS
+            return json.loads(EMBEDDED_PARAMS)
+        except Exception:
+            pass
+    candidates = ['params.json', '/kaggle/working/params.json', '/kaggle/input/params.json']
+    src = '/kaggle/src'
+    if os.path.isdir(src):
+        for root, _dirs, files in os.walk(src):
+            if 'params.json' in files:
+                candidates.append(os.path.join(root, 'params.json'))
+    for p in candidates:
+        try:
+            if os.path.exists(p):
+                with open(p) as f:
+                    return json.load(f)
+        except Exception:
+            continue
+    return None
+
+
 def main():
     print("=" * 60)
-    print("TERRANOETIS — Kaggle Hurricane Simulation (Comprehensive)")
+    print("TERRANOETIS — Kaggle Hurricane Wind & Surge Simulation")
     print("=" * 60)
-    params_path = 'params.json'
-    if os.path.exists(params_path):
-        with open(params_path) as f:
-            params = json.load(f)
+    params = _load_params()
+    if params is not None:
+        print(f"[PARAMS] Loaded: {json.dumps(params, indent=2)}")
     else:
         params = {'grid_size': 256, 'category': 3, 'forward_speed_kmh': 30,
                   'central_pressure_hpa': 960, 'radius_max_wind_km': 50,
@@ -448,11 +578,16 @@ def main():
         np.save(f'{out}/runoff.npy', result['final']['runoff'])
         np.save(f'{out}/river_level.npy', result['final']['river_level'])
         np.save(f'{out}/terrain.npy', result['final']['terrain'])
-        snap_w = np.stack([s['wind_speed'] for s in result['snapshots']])
-        np.save(f'{out}/snapshots_wind.npy', snap_w)
-        snap_s = np.stack([s['surge_height'] for s in result['snapshots']])
-        np.save(f'{out}/snapshots_surge.npy', snap_s)
-        np.save(f'{out}/snapshot_times.npy', np.array([s['time_hours'] for s in result['snapshots']]))
+        if result['snapshots']:
+            snap_w = np.stack([s['wind_speed'] for s in result['snapshots']])
+            np.save(f'{out}/snapshots_wind.npy', snap_w)
+            snap_s = np.stack([s['surge_height'] for s in result['snapshots']])
+            np.save(f'{out}/snapshots_surge.npy', snap_s)
+            np.save(f'{out}/snapshot_times.npy', np.array([s['time_hours'] for s in result['snapshots']]))
+        else:
+            np.save(f'{out}/snapshots_wind.npy', np.expand_dims(result['final']['wind_speed'], axis=0))
+            np.save(f'{out}/snapshots_surge.npy', np.expand_dims(result['final']['surge_height'], axis=0))
+            np.save(f'{out}/snapshot_times.npy', np.array([0.0]))
         meta = {'params': result['params'], 'metadata': result['metadata'],
                 'final_stats': {'max_wind_ms': result['final']['max_wind_ms'],
                                 'max_surge_m': result['final']['max_surge_m'],

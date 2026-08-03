@@ -139,6 +139,7 @@ import { vaultRouter } from './routes/vault';
 import { createSelfEvolutionRouter } from './routes/selfEvolution';
 import { pulseRouter } from './routes/pulse';
 import { kaggleRouter } from './kaggle';
+import { registerPowerEngine } from './kaggle/powerSaver';
 import { startSentinelEngine, stopSentinelEngine } from './sentinel/engine';
 import { CorrelationEngine } from './sentinel/correlationEngine';
 import { initAisTracker, stopAisTracker, getAisTracker, type AisVessel } from './maritime/aisTracker';
@@ -328,6 +329,7 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/gdelt' || req.path === '/fema' || req.path === '/geospatial/overpass' || req.path === '/population/worldpop' || req.path === '/usgs/water' ||
     req.path === '/flights/military' || req.path === '/military-bases' || req.path === '/ucdp' ||
     req.path === '/satellites/tle' ||
+    req.path === '/satnogs/transmitters' || req.path === '/ucs-satellites' ||
     req.path === '/flights' || req.path === '/flights/all' || req.path === '/adsb-lol' || req.path === '/airlabs' ||
     req.path === '/mgrs' || req.path === '/openaq' || req.path.startsWith('/openaq/') ||
     req.path.startsWith('/ndbc/') || req.path === '/ndbc/stations' ||
@@ -665,14 +667,15 @@ evolvingGraph.init();
 causalGraph.init();
 
 // Phase 7: Plugin system
-const pluginManager = new PluginManager();
-pluginManager.init().then(() => {
+const syncPluginTools = () => {
   for (const [name, pt] of pluginManager.getToolHandlers()) {
     if (!toolRegistry.get(name)) {
       toolRegistry.register({ name, description: pt.description, category: pt.category || 'plugin', exampleQueries: [name], schema: { type: 'api', endpoint: `/api/plugin/tool/${name}` } });
     }
   }
-}).catch(e => logger.error('Plugin init error:', e));
+};
+const pluginManager = new PluginManager(syncPluginTools);
+pluginManager.init().then(syncPluginTools).catch(e => logger.error('Plugin init error:', e));
 
 // Phase 3: Initialize proactive systems
 const monitorManager = new MonitorManager();
@@ -1032,6 +1035,144 @@ app.get('/api/admin/plugins', requireRole('admin'), (_req: express.Request, res:
   res.json({
     plugins: pluginManager.listPlugins().map((plugin) => ({ ...plugin, enabled: true })),
   });
+});
+
+function parseGitHubUrl(url: string): { owner: string; repo: string; branch: string; path: string } | null {
+  const u = new URL(url);
+  if (u.hostname !== 'github.com') return null;
+  const parts = u.pathname.replace(/^\//, '').split('/');
+  if (parts.length < 2) return null;
+  const owner = parts[0];
+  const repo = parts[1].replace(/\.git$/, '');
+  const branch = parts[3] || 'main';
+  const path = parts.slice(4).join('/') || '';
+  return { owner, repo, branch, path };
+}
+
+async function installFromGitHub(url: string): Promise<{ pluginIds: string[]; errors: string[] }> {
+  const parsed = parseGitHubUrl(url);
+  if (!parsed) throw new Error('Invalid GitHub URL');
+  const { owner, repo, branch, path } = parsed;
+  const ghToken = process.env.GITHUB_TOKEN || '';
+  const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
+  if (ghToken) headers.Authorization = `Bearer ${ghToken}`;
+
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`;
+  const resp = await fetch(apiUrl, { headers, signal: AbortSignal.timeout(15000) });
+  if (!resp.ok) throw new Error(`GitHub API error: ${resp.status} ${resp.statusText}`);
+
+  const data = await resp.json() as any;
+  const files: Array<{ name: string; downloadUrl: string }> = [];
+  const items = Array.isArray(data) ? data : [data];
+  for (const item of items) {
+    if (item.type === 'file' && (item.name.endsWith('.ts') || item.name.endsWith('.js'))) {
+      files.push({ name: item.name, downloadUrl: item.download_url });
+    }
+    if (item.type === 'dir') {
+      const subDirResp = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(item.path)}?ref=${encodeURIComponent(branch)}`,
+        { headers, signal: AbortSignal.timeout(15000) }
+      );
+      if (subDirResp.ok) {
+        const subItems = await subDirResp.json() as any[];
+        for (const sub of subItems) {
+          if (sub.type === 'file' && (sub.name.endsWith('.ts') || sub.name.endsWith('.js'))) {
+            files.push({ name: sub.name, downloadUrl: sub.download_url });
+          }
+        }
+      }
+    }
+  }
+
+  const pluginIds: string[] = [];
+  const errors: string[] = [];
+  for (const file of files) {
+    try {
+      const contentResp = await fetch(file.downloadUrl, { signal: AbortSignal.timeout(15000) });
+      if (!contentResp.ok) { errors.push(`${file.name}: download failed (${contentResp.status})`); continue; }
+      const content = await contentResp.text();
+      const pluginId = await pluginManager.installPlugin(file.name, content);
+      if (pluginId) pluginIds.push(pluginId);
+      else errors.push(`${file.name}: installed but not loaded`);
+    } catch (e) {
+      errors.push(`${file.name}: ${String(e)}`);
+    }
+  }
+  return { pluginIds, errors };
+}
+
+app.post('/api/admin/plugins/install', requireRole('admin'), async (req: express.Request, res: express.Response) => {
+  const { url, name, content } = req.body ?? {};
+
+  // Install from URL
+  if (url && typeof url === 'string') {
+    try {
+      // Detect GitHub URLs
+      if (url.includes('github.com')) {
+        const result = await installFromGitHub(url);
+        return res.json({ ok: true, type: 'github', ...result });
+      }
+      // Regular URL — single file
+      const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!resp.ok) return res.status(400).json({ error: `Failed to download plugin: ${resp.status}` });
+      const fileContent = await resp.text();
+      const filename = url.split('/').pop() || 'plugin.ts';
+      const pluginId = await pluginManager.installPlugin(filename, fileContent);
+      if (!pluginId) return res.status(500).json({ error: 'Plugin installed but not loaded — check server logs for errors' });
+      return res.json({ ok: true, pluginId, source: url });
+    } catch (e) {
+      return res.status(500).json({ error: String(e) });
+    }
+  }
+
+  // Install from raw content
+  if (name && content && typeof name === 'string' && typeof content === 'string') {
+    try {
+      const pluginId = await pluginManager.installPlugin(name, content);
+      if (!pluginId) return res.status(500).json({ error: 'Plugin installed but not loaded — check server logs for errors' });
+      return res.json({ ok: true, pluginId, source: 'content' });
+    } catch (e) {
+      return res.status(400).json({ error: String(e) });
+    }
+  }
+
+  res.status(400).json({ error: 'Either { url: "https://..." } or { name: "plugin.ts", content: "..." } is required' });
+});
+
+app.post('/api/admin/plugins/install-zip', requireRole('admin'), async (req: express.Request, res: express.Response) => {
+  const { zipB64 } = req.body ?? {};
+  if (!zipB64 || typeof zipB64 !== 'string') {
+    return res.status(400).json({ error: 'zipB64 (base64-encoded zip) is required' });
+  }
+  try {
+    const AdmZip = (await import('adm-zip')).default;
+    const buffer = Buffer.from(zipB64, 'base64');
+    const zip = new AdmZip(buffer);
+    const entries = zip.getEntries();
+    const pluginIds: string[] = [];
+    const errors: string[] = [];
+    for (const entry of entries) {
+      if (!entry.name.endsWith('.ts') && !entry.name.endsWith('.js')) continue;
+      if (entry.isDirectory) continue;
+      try {
+        const content = entry.getData().toString('utf-8');
+        const pluginId = await pluginManager.installPlugin(entry.name, content);
+        if (pluginId) pluginIds.push(pluginId);
+        else errors.push(`${entry.name}: installed but not loaded`);
+      } catch (e) {
+        errors.push(`${entry.name}: ${String(e)}`);
+      }
+    }
+    res.json({ ok: true, pluginIds, errors });
+  } catch (e) {
+    res.status(400).json({ error: String(e) });
+  }
+});
+
+app.delete('/api/admin/plugins/:id', requireRole('admin'), (req: express.Request, res: express.Response) => {
+  const removed = pluginManager.removePlugin(req.params.id);
+  if (!removed) return res.status(404).json({ error: 'Plugin not found or cannot be removed (builtin plugins are protected)' });
+  res.json({ ok: true, removed: req.params.id });
 });
 
 app.get('/api/config/apis', (_req: express.Request, res: express.Response) => {
@@ -2943,25 +3084,22 @@ const CITY_COORDS: Record<string, [number, number]> = {
   quezon: [14.676, 121.044], bandung: [-6.917, 107.619], surabaya: [-7.257, 112.752],
   medan: [3.595, 98.672], denpasar: [-8.670, 115.212],
 };
+const TRUSTED_NEWS_SOURCES = new Set([
+  'BBC News', 'BBC', 'Reuters', 'The Guardian', 'Guardian', 'NPR',
+  'Al Jazeera', 'New York Times', 'NYT', 'CNN', 'Fox News', 'NBC News',
+  'CBS News', 'ABC News', 'Sky News', 'CBC', 'Bloomberg', 'CNBC',
+  'MarketWatch', 'Yahoo Finance', 'Associated Press', 'AP',
+  'GlobeNewswire', 'PRNewswire', 'ReliefWeb', 'reliefweb',
+]);
+
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   disaster: ['earthquake', 'tsunami', 'landslide', 'mudslide', 'avalanche', 'eruption', 'volcano',
-    'explosion', 'building collapse', 'dam collapse', 'mine collapse'],
+    'explosion'],
   weather: ['hurricane', 'typhoon', 'cyclone', 'tornado', 'wildfire', 'flood', 'flooding', 'storm',
-    'blizzard', 'drought', 'heat wave', 'cold snap', 'freeze', 'hail', 'monsoon'],
-  conflict: ['war', 'attack', 'bombing', 'airstrike', 'missile', 'invasion', 'military',
-    'troops', 'rebel', 'insurgent', 'ceasefire', 'truce', 'sanctions', 'strike', 'protest',
-    'riot', 'coup', 'rebellion', 'battle', 'offensive', 'conflict'],
-  politics: ['election', 'vote', 'parliament', 'congress', 'senate', 'president', 'prime minister',
-    'government', 'law', 'policy', 'referendum', 'summit', 'diplomat', 'ambassador', 'treaty',
-    'accord', 'bill', 'legislation', 'cabinet', 'minister'],
-  health: ['pandemic', 'epidemic', 'outbreak', 'virus', 'vaccine', 'hospital', 'disease',
-    'covid', 'ebola', 'malaria', 'cholera', 'treatment', 'health', 'medical', 'patient'],
-  science: ['discover', 'research', 'study', 'scientist', 'space', 'nasa', 'climate',
-    'satellite', 'mission', 'lab', 'experiment', 'breakthrough'],
-  business: ['market', 'stock', 'economy', 'trade', 'tariff', 'inflation', 'recession',
-    'bank', 'merger', 'acquisition', 'ipo', 'profit', 'revenue', 'sanction'],
-  technology: ['ai', 'cyber', 'hack', 'breach', 'data', 'software', 'hardware', 'chip',
-    'semiconductor', 'tech', 'robot', 'blockchain', 'quantum', '5g', 'satellite'],
+    'blizzard', 'drought', 'monsoon'],
+  conflict: ['war', 'bombing', 'airstrike', 'missile', 'invasion', 'insurgent', 'ceasefire', 'truce',
+    'coup', 'rebellion', 'battle', 'offensive'],
+  science: ['discover', 'research', 'study', 'scientist', 'nasa', 'climate', 'lab', 'experiment', 'breakthrough'],
 };
 
 function geoFromText(title: string): { lat: number; lon: number; country?: string } {
@@ -2982,13 +3120,21 @@ function geoFromText(title: string): { lat: number; lon: number; country?: strin
 }
 
 function categorizeItem(title: string): string {
-  const t = title.toLowerCase();
   for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
     for (const kw of keywords) {
-      if (t.includes(kw)) return cat;
+      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp('\\b' + escaped + '\\b', 'i');
+      if (re.test(title)) return cat;
     }
   }
   return 'news';
+}
+
+function isTrustedNewsSource(source: string): boolean {
+  if (!source) return false;
+  return TRUSTED_NEWS_SOURCES.has(source) ||
+    TRUSTED_NEWS_SOURCES.has(source.split(',')[0]?.trim()) ||
+    TRUSTED_NEWS_SOURCES.has(source.split('/')[0]?.trim());
 }
 
 const SOURCE_CONFIDENCE: Record<string, number> = {
@@ -3279,7 +3425,9 @@ app.get('/api/social', async (req: express.Request, res: express.Response) => {
   allResults.sort((a, b) => b.timestamp - a.timestamp);
   // Fast-path enrichment (keyword geo + category + confidence)
   for (const item of allResults) {
-    if (item.type === 'news' || !item.type) item.type = categorizeItem(item.title);
+    if (!isTrustedNewsSource(item.source)) {
+      if (item.type === 'news' || !item.type) item.type = categorizeItem(item.title);
+    }
     if (!item.lat && !item.lon) {
       const geo = geoFromText(item.title);
       if (geo.lat || geo.lon) { item.lat = geo.lat; item.lon = geo.lon; }
@@ -3565,7 +3713,9 @@ app.get('/api/social/stream', sseAuthGuard, (req: express.Request, res: express.
   Promise.allSettled(sources).then(async () => {
     // Fast-path enrichment (keyword geo + category)
     for (const item of allResults) {
-      if (item.type === 'news' || !item.type) item.type = categorizeItem(item.title);
+      if (!isTrustedNewsSource(item.source)) {
+        if (item.type === 'news' || !item.type) item.type = categorizeItem(item.title);
+      }
       if (!item.lat && !item.lon) {
         const geo = geoFromText(item.title);
         if (geo.lat || geo.lon) { item.lat = geo.lat; item.lon = geo.lon; }
@@ -3930,9 +4080,27 @@ app.get('/api/ais/status', async (_req: express.Request, res: express.Response) 
 });
 
 // SatNOGS DB — satellite transmitter frequencies
+app.get('/api/satnogs/transmitters', async (_req: express.Request, res: express.Response) => {
+  try {
+    const resp = await fetch('https://db.satnogs.org/api/transmitters/', { signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) throw new Error(`SatNOGS ${resp.status}`);
+    const data = await resp.json();
+    res.json(data);
+  } catch (e) {
+    res.status(503).json({ error: 'SatNOGS transmitter data unavailable', detail: e instanceof Error ? e.message : String(e) });
+  }
+});
 
 // UCS Satellite Database — satellite metadata served from static JSON file under public/data/
 const UCS_JSON_PATH = path.join(__dirname, '..', 'public', 'data', 'ucs-satellites.json');
+app.get('/api/ucs-satellites', (_req: express.Request, res: express.Response) => {
+  try {
+    const data = JSON.parse(fs.readFileSync(UCS_JSON_PATH, 'utf-8'));
+    res.json(data);
+  } catch (e) {
+    res.status(503).json({ error: 'UCS Satellite DB unavailable', detail: e instanceof Error ? e.message : String(e) });
+  }
+});
 
 // 6. Global Carbon Footprints Electricity Grid
 app.get('/api/electricity-grid', async (req: express.Request, res: express.Response) => {
@@ -10469,7 +10637,40 @@ httpServer.listen(PORT, () => {
   // Start ML pipeline background tasks
   startSyntheticDataGeneration(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '', 3600000);
   logger.info('Background jobs started (monitor:scheduler:ambient:mvc:plugin:ml)');
+
+  // Register background engines with the Kaggle PowerSaver so they are
+  // paused while a GPU simulation runs and resumed when it finishes.
+  registerPowerEngines();
 });
+
+/**
+ * Registers all non-essential background engines with the Kaggle PowerSaver.
+ * When a simulation runs on Kaggle these are stopped; when it finishes they
+ * are restarted. The HTTP server, websocket, SSE stream, and job queue stay up.
+ */
+function registerPowerEngines(): void {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+  registerPowerEngine('reflexEngine', () => reflexEngine.stop(), () => reflexEngine.start());
+  registerPowerEngine('reflexActionHandler', () => reflexActionHandler.stop(), () => reflexActionHandler.start());
+  registerPowerEngine('forkManager', () => forkManager.stop(), () => forkManager.start());
+  registerPowerEngine('entropyMixer', () => entropyMixer.stop(), () => entropyMixer.start());
+  registerPowerEngine('discoveryEngine', () => discoveryEngine.stop(), () => discoveryEngine.start());
+  registerPowerEngine('dreamEngine', () => dreamEngine.stop(), () => dreamEngine.start());
+  registerPowerEngine('memorySystem', () => memorySystem.stop(), () => memorySystem.start().catch(err => logger.warn({ err }, 'PowerSaver memory restart failed')));
+  registerPowerEngine('sentinelEngine', () => stopSentinelEngine(), () => startSentinelEngine());
+  registerPowerEngine('correlationEngine', () => correlationEngine?.stop(), () => correlationEngine?.start());
+  registerPowerEngine('roadTrafficDetector', () => roadTrafficDetector.stop(), () => roadTrafficDetector.start());
+  registerPowerEngine('spacexEngine', () => spacexEngine.stop(), () => spacexEngine.start());
+  registerPowerEngine('bayFireDetector', () => bayFireDetector.stop(), () => bayFireDetector.start());
+  registerPowerEngine('weatherForecaster', () => weatherForecaster.stop(), () => weatherForecaster.start());
+  registerPowerEngine('agricultureMonitor', () => agricultureMonitor.stop(), () => agricultureMonitor.start());
+  registerPowerEngine('multimodal', () => multimodal.stop(), () => multimodal.start());
+  registerPowerEngine('syntheticDataGeneration', () => stopSyntheticDataGeneration(), () => startSyntheticDataGeneration(apiKey, 3600000));
+  registerPowerEngine('memoryLogging', () => stopMemoryLogging(), () => startMemoryLogging());
+  registerPowerEngine('resourceMonitor', () => stopResourceMonitor(), () => startResourceMonitor());
+  registerPowerEngine('aisTracker', () => stopAisTracker(), () => initAisTracker());
+  logger.info('[PowerSaver] Registered background engines');
+}
 
 let shuttingDown = false;
 

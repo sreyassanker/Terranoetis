@@ -831,6 +831,14 @@ function mapFrontendParams(type: string, params: Record<string, unknown>): Recor
       return { ...base, rainfall: Math.max(10, (intensity as number) * 100), catchmentArea: Math.max(100, (spread as number) * 5000), soilSaturation: Math.min(1, Math.max(0, (depth as number) / 100)), duration };
     case 'landslide':
       return { ...base, trigger_type: 'earthquake', magnitude: Math.max(4, Math.min(9.5, magnitude as number)), pga_threshold: 0.15, rainfall_mm: Math.max(50, (intensity as number) * 100), friction_angle: 35, cohesion: 500, duration_hours: duration };
+    case 'tsunami_wave': {
+      // Tsunami generator uses epicenterLat/epicenterLon (not lat/lon) and arrivalTimes.
+      // Map the shared bbox center → epicenter coords and synthesize arrival times.
+      const mag = magnitude as number;
+      const arr: number[] = [];
+      for (let t = 10; t <= 120; t += 10) arr.push(t);
+      return { ...base, epicenterLat: lat, epicenterLon: lon, magnitude: mag, depth: 20, waveHeight: Math.max(1, Math.round((spread as number) * 10)), arrivalTimes: arr, duration };
+    }
     default:
       return { ...base, ...params };
   }
@@ -1231,6 +1239,19 @@ export default function App() {
   const [showScenarioGallery, setShowScenarioGallery] = useState(false);
   const [showScenarioEditor, setShowScenarioEditor] = useState(false);
   const [kaggleOverlay, setKaggleOverlay] = useState<{ jobId: string; lat: number; lon: number; scenarioType: string } | null>(null);
+  // E2E bridge: Playwright live-render tests invoke this to trigger overlays
+  // without driving the full ScenarioEditor UI. Production users never see it.
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).setKaggleOverlay = (v: { jobId: string; lat: number; lon: number; scenarioType: string }) =>
+        setKaggleOverlay(v);
+      (window as unknown as Record<string, unknown>).kaggleOverlayState = kaggleOverlay;
+      return () => {
+        delete (window as unknown as Record<string, unknown>).setKaggleOverlay;
+      };
+    }
+  }, [kaggleOverlay]);
+
   const [digitalTwinPanel, setDigitalTwinPanel] = useState<null | {
     stats: { label: string; value: string; unit: string; icon: string }[];
     charts: { type: 'area' | 'bar' | 'line' | 'pie' | 'radar'; title: string; data: Record<string, unknown>[]; keys: { dataKey: string; color: string; name: string }[] }[];
@@ -9309,7 +9330,7 @@ export default function App() {
         <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('intel-feed', 110), width: 360 }}>
           <Panel title="INTEL FEED" icon={<Radio size={16} />} accentColor="#3b82f6" iconColor="#60a5fa" titleColor="#93c5fd" onClose={() => setShowIntelFeed(false)} style={{ maxHeight: 'calc(100vh - 160px)' }}>
         <div style={{padding:'8px 12px',borderBottom:'1px solid var(--border)',display:'flex',gap:6,flexWrap:'wrap'}}>
-          {['all','fire','storm','earthquake','flood','weather','space_weather'].map(f => (
+          {['all','news','fire','storm','earthquake','flood','weather','space_weather'].map(f => (
             <button key={f} className={`social-filter-chip ${intelFilter === f ? 'active' : ''}`}
               onClick={() => setIntelFilter(f)}>
               {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
@@ -9967,7 +9988,15 @@ export default function App() {
           scenarios={scenarioGalleryScenarios}
           loading={scenarioGalleryLoading}
           error={scenarioGalleryError}
-          onSelect={(id) => { setSelectedScenarioId(id); setShowScenarioGallery(false); }}
+          onSelect={(id) => {
+            // Load the scenario object and select it so ScenarioViewer renders
+            const found = scenarioGalleryScenarios.find(s => s.id === id);
+            if (found) {
+              setSelectedScenario(found as any);
+              setSelectedScenarioId(id);
+              setShowScenarioGallery(false);
+            }
+          }}
           onCreateNew={() => { setShowScenarioGallery(false); setShowScenarioEditor(true); }}
           onClose={() => setShowScenarioGallery(false)}
           zIndex={getPanelZIndex('scenario-gallery')}
@@ -9992,8 +10021,28 @@ export default function App() {
           zIndex={getPanelZIndex('scenario-editor')}
           studyAreas={studyAreas}
           activeStudyAreaId={activeStudyAreaId}
-          onKaggleComplete={(jobId, lat, lon, scenarioType) => setKaggleOverlay({ jobId, lat, lon, scenarioType })}
-          onKaggleStart={() => setKaggleOverlay(null)}
+          onKaggleComplete={(jobId, lat, lon, scenarioType) => {
+            setShowScenarioEditor(false);
+            // Also trigger the procedural viewer so ScenarioViewer renders on the globe
+            const mappedParams = mapFrontendParams(scenarioType, { lat, lon });
+            fetch('/api/scenarios/generate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...authHeaders() },
+              body: JSON.stringify({ type: scenarioType, params: mappedParams }),
+            }).then(r => {
+              if (!r.ok) throw new Error(r.status === 401 ? 'Not logged in' : 'Generation failed');
+              return r.json();
+            }).then(data => {
+              if (data.scenario) {
+                setSelectedScenario(adaptScenario(data.scenario));
+                // Now that the scenario is injected, trigger the Kaggle overlay as well
+                setKaggleOverlay({ jobId, lat, lon, scenarioType });
+              }
+            }).catch(() => {
+              setKaggleOverlay({ jobId, lat, lon, scenarioType }); // Still show overlay
+            });
+          }}
+          onKaggleStart={() => setKaggleOverlay(null)} // Clear old overlay when starting a new run
         />
       )}
 
@@ -10004,7 +10053,7 @@ export default function App() {
           jobId={kaggleOverlay.jobId}
           lat={kaggleOverlay.lat}
           lon={kaggleOverlay.lon}
-          gridSizeKm={2.56}
+          // extent auto-derived from grid shape & cell size
           opacity={0.7}
           onDismiss={() => setKaggleOverlay(null)}
         />
@@ -10018,7 +10067,7 @@ export default function App() {
           jobId={kaggleOverlay.jobId}
           lat={kaggleOverlay.lat}
           lon={kaggleOverlay.lon}
-          gridSizeKm={2.56}
+          // extent auto-derived from grid shape & cell size
           opacity={0.7}
           onDismiss={() => setKaggleOverlay(null)}
         />
@@ -10032,7 +10081,7 @@ export default function App() {
           jobId={kaggleOverlay.jobId}
           lat={kaggleOverlay.lat}
           lon={kaggleOverlay.lon}
-          gridSizeKm={2.56}
+          // extent auto-derived from grid shape & cell size
           opacity={0.7}
           onDismiss={() => setKaggleOverlay(null)}
         />
@@ -10046,7 +10095,7 @@ export default function App() {
           jobId={kaggleOverlay.jobId}
           lat={kaggleOverlay.lat}
           lon={kaggleOverlay.lon}
-          gridSizeKm={2.56}
+          // extent auto-derived from grid shape & cell size
           opacity={0.7}
           onDismiss={() => setKaggleOverlay(null)}
         />
@@ -10060,7 +10109,7 @@ export default function App() {
           jobId={kaggleOverlay.jobId}
           lat={kaggleOverlay.lat}
           lon={kaggleOverlay.lon}
-          gridSizeKm={2.56}
+          // extent auto-derived from grid shape & cell size
           opacity={0.7}
           onDismiss={() => setKaggleOverlay(null)}
         />
@@ -10074,7 +10123,7 @@ export default function App() {
           jobId={kaggleOverlay.jobId}
           lat={kaggleOverlay.lat}
           lon={kaggleOverlay.lon}
-          gridSizeKm={2.56}
+          // extent auto-derived from grid shape & cell size
           opacity={0.7}
           onDismiss={() => setKaggleOverlay(null)}
         />
@@ -10088,7 +10137,7 @@ export default function App() {
           jobId={kaggleOverlay.jobId}
           lat={kaggleOverlay.lat}
           lon={kaggleOverlay.lon}
-          gridSizeKm={2.56}
+          // extent auto-derived from grid shape & cell size
           opacity={0.7}
           onDismiss={() => setKaggleOverlay(null)}
         />

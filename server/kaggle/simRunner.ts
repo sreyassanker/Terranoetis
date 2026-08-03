@@ -13,8 +13,10 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { randomUUID } from 'crypto';
 import { logger } from '../observability/logger';
+import { pauseBackgroundEngines, resumeBackgroundEngines } from './powerSaver';
 
 const execAsync = promisify(exec);
 
@@ -22,6 +24,8 @@ const KAGGLE_KERNELS_DIR = path.resolve(process.cwd(), 'kaggle-kernels');
 const RESULTS_DIR = path.resolve(process.cwd(), 'kaggle-kernels', 'results');
 const POLL_INTERVAL_MS = 15_000; // 15 seconds between status checks
 const JOB_CLEANUP_AGE_MS = 3600_000; // 1 hour — remove completed jobs after this
+const MAX_POLL_MS = 45 * 60_000; // 45 min hard cap on a Kaggle run
+const MAX_CONSECUTIVE_POLL_ERRORS = 10; // give up polling after repeated transient failures
 
 // ═════════════════════════════════════════════════════════════════
 // TYPES
@@ -58,8 +62,39 @@ export interface SimulationJob {
   kernelSlug?: string;
   error?: string;
   resultPath?: string;
-  /** SSE callback for streaming status updates */
-  onStatus?: (status: SimulationJob['status'], detail?: string) => void;
+  cancelled?: boolean;
+}
+
+type StatusListener = (status: SimulationJob['status'], detail?: string, jobId?: string) => void;
+
+// SSE listeners — fan-out, so multiple clients can subscribe to the same job.
+const jobListeners = new Map<string, Set<StatusListener>>();
+
+function notifyStatus(job: SimulationJob, status: SimulationJob['status'], detail?: string): void {
+  const set = jobListeners.get(job.id);
+  if (!set) return;
+  for (const listener of set) {
+    try { listener(status, detail, job.id); } catch { /* swallow client errors */ }
+  }
+}
+
+function addJobListener(jobId: string, listener: StatusListener): () => void {
+  let set = jobListeners.get(jobId);
+  if (!set) {
+    set = new Set();
+    jobListeners.set(jobId, set);
+  }
+  set.add(listener);
+  return () => {
+    set!.delete(listener);
+    if (set!.size === 0) jobListeners.delete(jobId);
+  };
+}
+
+function updateJobStatus(job: SimulationJob, status: SimulationJob['status'], detail?: string) {
+  job.status = status;
+  notifyStatus(job, status, detail);
+  logger.info({ jobId: job.id, type: job.type, status, detail }, 'Simulation job status');
 }
 
 // Map simulation types to kernel folders AND their actual Kaggle slugs
@@ -128,6 +163,36 @@ async function pushKernel(kernelDir: string): Promise<void> {
   await kaggleCommand(`kaggle kernels push -p "${kernelDir}"`);
 }
 
+/**
+ * Kaggle's CLI only uploads the code file + kernel-metadata.json — sibling
+ * files such as params.json never reach the runner. So we bake the run's
+ * params directly into the code: replace the `EMBEDDED_PARAMS = None` marker
+ * line in main.py, stage a temp kernel folder, and push from there.
+ */
+async function pushKernelWithParams(kernelDir: string, params: SimulationParams): Promise<void> {
+  const metadataPath = path.join(kernelDir, 'kernel-metadata.json');
+  const mainPyPath = path.join(kernelDir, 'main.py');
+  if (!fs.existsSync(mainPyPath) || !fs.existsSync(metadataPath)) {
+    throw new Error(`Kernel folder incomplete (missing main.py or kernel-metadata.json): ${kernelDir}`);
+  }
+
+  const code = fs.readFileSync(mainPyPath, 'utf-8');
+  const marker = 'EMBEDDED_PARAMS = None';
+  if (!code.includes(marker)) {
+    throw new Error(`Kernel ${kernelDir} is missing the EMBEDDED_PARAMS marker`);
+  }
+  const injected = code.replace(marker, `EMBEDDED_PARAMS = ${JSON.stringify(params)}`);
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaggle-push-'));
+  try {
+    fs.writeFileSync(path.join(tmpDir, 'main.py'), injected);
+    fs.copyFileSync(metadataPath, path.join(tmpDir, 'kernel-metadata.json'));
+    await pushKernel(tmpDir);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
 async function getKernelStatus(ownerSlug: string): Promise<string> {
   const output = await kaggleCommand(`kaggle kernels status ${ownerSlug}`);
   // Kaggle CLI v2.x outputs: "owner/kernel has status \"KernelWorkerStatus.COMPLETE\""
@@ -144,15 +209,17 @@ async function downloadOutput(ownerSlug: string, outputDir: string): Promise<voi
   await kaggleCommand(`kaggle kernels output ${ownerSlug} -p "${outputDir}" --force`);
 }
 
+async function cancelKernel(ownerSlug: string): Promise<void> {
+  try {
+    await kaggleCommand(`kaggle kernels cancel ${ownerSlug}`);
+  } catch {
+    logger.warn({ ownerSlug }, 'Failed to cancel Kaggle kernel (may already be done)');
+  }
+}
+
 // ═════════════════════════════════════════════════════════════════
 // SIMULATION JOB MANAGEMENT
 // ═════════════════════════════════════════════════════════════════
-
-function updateJobStatus(job: SimulationJob, status: SimulationJob['status'], detail?: string) {
-  job.status = status;
-  job.onStatus?.(status, detail);
-  logger.info({ jobId: job.id, type: job.type, status, detail }, 'Simulation job status');
-}
 
 /**
  * Start a simulation job on Kaggle GPU.
@@ -184,16 +251,22 @@ export async function startSimulation(params: SimulationParams): Promise<Simulat
 
   activeJobs.set(jobId, job);
 
+  // Suspend non-essential background engines so the local machine stays cool
+  // while the GPU work runs on Kaggle.
+  pauseBackgroundEngines();
+
   // Run the pipeline async (don't await — return job immediately)
-  runPipeline(job, kernelDir, ownerSlug).catch(err => {
-    job.status = 'error';
-    job.error = err.message;
-    job.completedAt = new Date().toISOString();
-    updateJobStatus(job, 'error', err.message);
-  }).finally(() => {
-    // Clean up the onStatus callback to avoid holding references to SSE res objects
-    job.onStatus = undefined;
-  });
+  runPipeline(job, kernelDir, ownerSlug)
+    .catch(err => {
+      job.status = 'error';
+      job.error = err.message;
+      job.completedAt = new Date().toISOString();
+      updateJobStatus(job, 'error', err.message);
+    })
+    .finally(() => {
+      // Detach listeners after terminal state so SSE clients get the final write.
+      resumeBackgroundEngines();
+    });
 
   return job;
 }
@@ -210,6 +283,21 @@ export function getJobStatus(jobId: string): SimulationJob | undefined {
  */
 export function getAllJobs(): SimulationJob[] {
   return Array.from(activeJobs.values());
+}
+
+/**
+ * Cancel a running simulation: cancels the Kaggle kernel and stops polling.
+ */
+export function cancelJob(jobId: string): boolean {
+  const job = activeJobs.get(jobId);
+  if (!job) return false;
+  if (job.status === 'complete' || job.status === 'error') return false;
+  job.cancelled = true;
+  // Mark terminal right away — do NOT wait up to one full poll tick.
+  // We stay truthful about the Kaggle-side cancellation (fire-and-forget)
+  // by letting the poll loop's next iteration call cancelKernel().
+  updateJobStatus(job, 'error', 'Simulation cancelled by user');
+  return true;
 }
 
 /**
@@ -236,28 +324,36 @@ async function runPipeline(
   ownerSlug: string,
 ): Promise<void> {
   const startTime = Date.now();
-  const paramsPath = path.join(kernelDir, 'params.json');
 
   try {
-    // ── Step 1: Write params.json ──
-    updateJobStatus(job, 'pushing', 'Writing parameters...');
-    fs.writeFileSync(paramsPath, JSON.stringify(job.params, null, 2));
-    logger.info({ jobId: job.id, paramsPath }, 'Wrote params.json');
-
-    // ── Step 2: Push kernel (triggers Kaggle run) ──
+    // ── Step 1: Push kernel with params embedded in the code file ──
     updateJobStatus(job, 'pushing', 'Uploading to Kaggle GPU...');
-    await pushKernel(kernelDir);
+    await pushKernelWithParams(kernelDir, job.params);
     updateJobStatus(job, 'running', 'Kernel pushed. Kaggle GPU booting...');
     logger.info({ jobId: job.id, ownerSlug }, 'Kernel pushed to Kaggle');
 
-    // ── Step 3: Poll for completion (no timeout — wait until Kaggle finishes) ──
+    // ── Step 3: Poll for completion with a hard timeout so a hung kernel
+    //    doesn't burn Kaggle GPU quota (and the local machine) forever. ──
     let lastStatus = '';
     let sawComplete = false;
+    let consecutiveErrors = 0;
     while (true) {
+      if (job.cancelled) {
+        await cancelKernel(ownerSlug);
+        updateJobStatus(job, 'error', 'Simulation cancelled by user');
+        return;
+      }
+      if (Date.now() - startTime > MAX_POLL_MS) {
+        await cancelKernel(ownerSlug);
+        updateJobStatus(job, 'error', `Kaggle kernel timed out after ${MAX_POLL_MS / 60000} min — cancelled`);
+        return;
+      }
+
       await sleep(POLL_INTERVAL_MS);
 
       try {
         const status = await getKernelStatus(ownerSlug);
+        consecutiveErrors = 0;
         if (status !== lastStatus) {
           updateJobStatus(job, 'running', `Kaggle status: ${status}`);
           lastStatus = status;
@@ -268,16 +364,27 @@ async function runPipeline(
           break;
         }
         if (status === 'error' || status === 'cancel') {
-          throw new Error(`Kaggle kernel ${status}`);
+          // Terminal kernel state — fail fast. Do NOT count this as a
+          // transient network error (the previous code let a failed kernel
+          // be retried ~10 times, pointless and slow).
+          updateJobStatus(job, 'error', `Kaggle kernel ${status}`);
+          return;
         }
       } catch (err: unknown) {
-        // Transient errors during polling — retry
+        // Transient errors during polling — retry a bounded number of times
+        consecutiveErrors++;
         logger.warn({ jobId: job.id, error: err instanceof Error ? err.message : String(err) }, 'Poll error, retrying...');
+        if (consecutiveErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
+          await cancelKernel(ownerSlug);
+          updateJobStatus(job, 'error', 'Kaggle kernel polling failed repeatedly — cancelled');
+          return;
+        }
       }
     }
 
     if (!sawComplete) {
-      throw new Error('Simulation ended without completion');
+      updateJobStatus(job, 'error', 'Simulation ended without completion');
+      return;
     }
 
     // ── Step 4: Download results ──
@@ -292,8 +399,7 @@ async function runPipeline(
 
     logger.info({ jobId: job.id, resultDir, elapsed: Date.now() - startTime }, 'Simulation complete');
   } finally {
-    // Always clean up params.json
-    try { fs.unlinkSync(paramsPath); } catch { /* ignore */ }
+    // (no params.json cleanup needed — params are embedded in the pushed code)
   }
 }
 
@@ -327,8 +433,8 @@ export function streamJobStatus(jobId: string, res: import('express').Response):
     return;
   }
 
-  // Set up callback for future updates
-  job.onStatus = (status, detail) => {
+  // Fan-out listener — multiple SSE clients can subscribe to the same job.
+  const remove = addJobListener(jobId, (status, detail) => {
     try {
       if (res.writableEnded) return;
       res.write(`data: ${JSON.stringify({ status, detail: detail || '', jobId })}\n\n`);
@@ -338,7 +444,7 @@ export function streamJobStatus(jobId: string, res: import('express').Response):
     } catch {
       // Client disconnected
     }
-  };
+  });
 
   // Heartbeat to keep connection alive
   const heartbeat = setInterval(() => {
@@ -355,5 +461,6 @@ export function streamJobStatus(jobId: string, res: import('express').Response):
 
   res.on('close', () => {
     clearInterval(heartbeat);
+    remove();
   });
 }

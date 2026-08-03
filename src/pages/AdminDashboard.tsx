@@ -42,10 +42,14 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [plugins, setPlugins] = useState<PluginRow[]>([]);
   const [healthColor, setHealthColor] = useState<string>('#22c55e');
-  const [evoStatus, setEvoStatus] = useState<{ active?: boolean; proposals?: number } | null>(null);
+  const [evoStatus, setEvoStatus] = useState<{ active?: boolean; proposals?: number; pendingProposals?: number } | null>(null);
   const [archProposals, setArchProposals] = useState<Array<Record<string, unknown>>>([]);
   const [intentProposals, setIntentProposals] = useState<Array<Record<string, unknown>>>([]);
   const [ecoProposals, setEcoProposals] = useState<Array<Record<string, unknown>>>([]);
+  const [installForm, setInstallForm] = useState<{ url: string; name: string; content: string; zipFile: File | null; mode: 'url' | 'content' | 'github' | 'zip' }>({
+    url: '', name: '', content: '', zipFile: null, mode: 'url',
+  });
+  const [installStatus, setInstallStatus] = useState<string | null>(null);
 
   const token = getToken();
 
@@ -88,6 +92,92 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
     }
   }, [token]);
 
+  const installPlugin = useCallback(async () => {
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+    setInstallStatus('Installing...');
+
+    try {
+      if (installForm.mode === 'zip') {
+        if (!installForm.zipFile) { setInstallStatus('Error: No zip file selected'); return; }
+        const b64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(installForm.zipFile);
+        });
+        const resp = await fetch('/api/admin/plugins/install-zip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(headers || {}) },
+          body: JSON.stringify({ zipB64: b64 }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ error: 'Install failed' }));
+          setInstallStatus(`Error: ${err.error || resp.statusText}`);
+          return;
+        }
+        const data = await resp.json();
+        const count = data.pluginIds?.length || 0;
+        const errCount = data.errors?.length || 0;
+        setInstallStatus(`Installed ${count} plugin(s)${errCount ? ` (${errCount} errors)` : ''}`);
+      } else if (installForm.mode === 'github') {
+        const resp = await fetch('/api/admin/plugins/install', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(headers || {}) },
+          body: JSON.stringify({ url: installForm.url }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ error: 'Install failed' }));
+          setInstallStatus(`Error: ${err.error || resp.statusText}`);
+          return;
+        }
+        const data = await resp.json();
+        const count = data.pluginIds?.length || 0;
+        const errCount = data.errors?.length || 0;
+        setInstallStatus(`GitHub: installed ${count} plugin(s)${errCount ? ` (${errCount} errors)` : ''}`);
+      } else {
+        let body: Record<string, unknown>;
+        if (installForm.mode === 'url') {
+          body = { url: installForm.url };
+        } else {
+          body = { name: installForm.name, content: installForm.content };
+        }
+        const resp = await fetch('/api/admin/plugins/install', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(headers || {}) },
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ error: 'Install failed' }));
+          setInstallStatus(`Error: ${err.error || resp.statusText}`);
+          return;
+        }
+        const data = await resp.json();
+        setInstallStatus(`Installed: ${data.pluginId || 'success'}`);
+      }
+
+      setInstallForm({ url: '', name: '', content: '', zipFile: null, mode: 'url' });
+      void fetchAdminData();
+      setTimeout(() => setInstallStatus(null), 5000);
+    } catch (e) {
+      setInstallStatus(`Error: ${String(e)}`);
+    }
+  }, [token, installForm, fetchAdminData]);
+
+  const removePlugin = useCallback(async (id: string) => {
+    if (!confirm(`Remove plugin "${id}"? This cannot be undone.`)) return;
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+    const resp = await fetch(`/api/admin/plugins/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: 'Remove failed' }));
+      alert(`Error: ${err.error || resp.statusText}`);
+      return;
+    }
+    void fetchAdminData();
+  }, [token, fetchAdminData]);
+
   const fetchHealth = useCallback(async () => {
     try {
       const resp = await fetch('/api/health', { cache: 'no-store' });
@@ -108,15 +198,26 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
     ]);
     if (statusRes.status === 'fulfilled' && statusRes.value.ok) {
       const d = await statusRes.value.json();
-      setEvoStatus(typeof d === 'object' ? d : null);
+      // The /api/self-evolution/status endpoint returns { banditStats, drifts,
+      // git, perf, proposals, pendingProposals } — it does not include an
+      // `active` flag, so derive one from pending proposal activity.
+      const proposals = typeof d?.proposals === 'number' ? d.proposals : 0;
+      const pendingProposals = typeof d?.pendingProposals === 'number' ? d.pendingProposals : 0;
+      setEvoStatus({
+        active: pendingProposals > 0 || proposals > 0,
+        proposals,
+        pendingProposals,
+      });
     }
     if (archRes.status === 'fulfilled' && archRes.value.ok) {
       const d = await archRes.value.json();
-      setArchProposals(Array.isArray(d) ? d : d.proposals ?? d.data ?? []);
+      // Endpoint returns { pending, approved, top }
+      setArchProposals(Array.isArray(d) ? d : d.pending ?? d.proposals ?? d.data ?? d.all ?? []);
     }
     if (intentRes.status === 'fulfilled' && intentRes.value.ok) {
       const d = await intentRes.value.json();
-      setIntentProposals(Array.isArray(d) ? d : d.proposals ?? d.data ?? []);
+      // Endpoint returns { pending, all }
+      setIntentProposals(Array.isArray(d) ? d : d.pending ?? d.proposals ?? d.data ?? d.all ?? []);
     }
     if (ecoRes.status === 'fulfilled' && ecoRes.value.ok) {
       const d = await ecoRes.value.json();
@@ -220,19 +321,179 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
 
           {tab === 'plugins' && (
             <div>
-              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Plugin Manager</h3>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <h3 style={{ margin: 0, fontSize: 14, color: '#94a3b8' }}>Plugin Manager</h3>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    onClick={() => setInstallForm(f => ({ ...f, mode: 'url' }))}
+                    style={{
+                      padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                      background: installForm.mode === 'url' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
+                      color: installForm.mode === 'url' ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 11,
+                    }}
+                  >URL</button>
+                  <button
+                    onClick={() => setInstallForm(f => ({ ...f, mode: 'github' }))}
+                    style={{
+                      padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                      background: installForm.mode === 'github' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
+                      color: installForm.mode === 'github' ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 11,
+                    }}
+                  >GitHub</button>
+                  <button
+                    onClick={() => setInstallForm(f => ({ ...f, mode: 'content' }))}
+                    style={{
+                      padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                      background: installForm.mode === 'content' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
+                      color: installForm.mode === 'content' ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 11,
+                    }}
+                  >Code</button>
+                  <button
+                    onClick={() => setInstallForm(f => ({ ...f, mode: 'zip' }))}
+                    style={{
+                      padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                      background: installForm.mode === 'zip' ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
+                      color: installForm.mode === 'zip' ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 11,
+                    }}
+                  >Zip</button>
+                </div>
+              </div>
+
+              {/* Install form */}
+              <div style={{
+                background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: 12, marginBottom: 12,
+                border: '1px solid rgba(255,255,255,0.06)',
+              }}>
+                {installForm.mode === 'url' ? (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="url"
+                      placeholder="https://example.com/my-plugin.ts"
+                      value={installForm.url}
+                      onChange={e => setInstallForm(f => ({ ...f, url: e.target.value }))}
+                      style={{
+                        flex: 1, padding: '6px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                        background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 12, outline: 'none',
+                      }}
+                    />
+                    <button
+                      onClick={installPlugin}
+                      disabled={!installForm.url}
+                      style={{
+                        padding: '6px 14px', borderRadius: 4, border: 'none',
+                        background: installForm.url ? 'rgba(59,130,246,0.8)' : 'rgba(59,130,246,0.3)',
+                        color: '#fff', cursor: installForm.url ? 'pointer' : 'not-allowed', fontSize: 12,
+                      }}
+                    >Install</button>
+                  </div>
+                ) : installForm.mode === 'github' ? (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="url"
+                      placeholder="https://github.com/user/repo or user/repo"
+                      value={installForm.url}
+                      onChange={e => setInstallForm(f => ({ ...f, url: e.target.value }))}
+                      style={{
+                        flex: 1, padding: '6px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                        background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 12, outline: 'none',
+                      }}
+                    />
+                    <button
+                      onClick={installPlugin}
+                      disabled={!installForm.url}
+                      style={{
+                        padding: '6px 14px', borderRadius: 4, border: 'none',
+                        background: installForm.url ? 'rgba(59,130,246,0.8)' : 'rgba(59,130,246,0.3)',
+                        color: '#fff', cursor: installForm.url ? 'pointer' : 'not-allowed', fontSize: 12,
+                      }}
+                    >Install</button>
+                  </div>
+                ) : installForm.mode === 'zip' ? (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="file" accept=".zip"
+                      onChange={e => setInstallForm(f => ({ ...f, zipFile: e.target.files?.[0] || null }))}
+                      style={{
+                        flex: 1, padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                        background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 12,
+                      }}
+                    />
+                    <button
+                      onClick={installPlugin}
+                      disabled={!installForm.zipFile}
+                      style={{
+                        padding: '6px 14px', borderRadius: 4, border: 'none',
+                        background: installForm.zipFile ? 'rgba(59,130,246,0.8)' : 'rgba(59,130,246,0.3)',
+                        color: '#fff', cursor: installForm.zipFile ? 'pointer' : 'not-allowed', fontSize: 12,
+                      }}
+                    >Upload & Install</button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <input
+                      type="text"
+                      placeholder="plugin-name.ts"
+                      value={installForm.name}
+                      onChange={e => setInstallForm(f => ({ ...f, name: e.target.value }))}
+                      style={{
+                        padding: '6px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                        background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 12, outline: 'none',
+                      }}
+                    />
+                    <textarea
+                      placeholder="Plugin source code (TypeScript/JavaScript)..."
+                      value={installForm.content}
+                      onChange={e => setInstallForm(f => ({ ...f, content: e.target.value }))}
+                      style={{
+                        width: '100%', height: 120, padding: '8px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                        background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 11, fontFamily: 'monospace',
+                        outline: 'none', resize: 'vertical',
+                      }}
+                    />
+                    <button
+                      onClick={installPlugin}
+                      disabled={!installForm.name || !installForm.content}
+                      style={{
+                        alignSelf: 'flex-end', padding: '6px 14px', borderRadius: 4, border: 'none',
+                        background: installForm.name && installForm.content ? 'rgba(59,130,246,0.8)' : 'rgba(59,130,246,0.3)',
+                        color: '#fff', cursor: installForm.name && installForm.content ? 'pointer' : 'not-allowed', fontSize: 12,
+                      }}
+                    >Install</button>
+                  </div>
+                )}
+                {installStatus && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: installStatus.startsWith('Error') ? '#ef4444' : '#22c55e' }}>
+                    {installStatus}
+                  </div>
+                )}
+              </div>
+
+              {/* Plugin list */}
               {plugins.length === 0 ? (
                 <div style={{ color: '#64748b', padding: 20, textAlign: 'center' }}>
                   No plugins loaded.
                 </div>
               ) : (
                 plugins.map(p => (
-                  <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 6 }}>
+                  <div key={p.id || p.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, marginBottom: 6 }}>
                     <div style={{ flex: 1 }}>
                       <strong style={{ color: '#e2e8f0' }}>{p.name}</strong>
                       <div style={{ color: '#64748b', fontSize: 10 }}>{p.version} · {p.toolCount} tools</div>
+                      {p.id.startsWith('file:') && (
+                        <div style={{ color: '#64748b', fontSize: 9, marginTop: 2 }}>ID: {p.id}</div>
+                      )}
                     </div>
                     <div style={{ fontSize: 11, color: p.enabled ? '#22c55e' : '#ef4444' }}>{p.enabled ? 'Enabled' : 'Disabled'}</div>
+                    {p.id.startsWith('file:') && (
+                      <button
+                        onClick={() => removePlugin(p.id)}
+                        style={{
+                          padding: '4px 8px', borderRadius: 4, border: '1px solid rgba(239,68,68,0.3)',
+                          background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: 10,
+                        }}
+                        title="Remove plugin"
+                      >Remove</button>
+                    )}
                   </div>
                 ))
               )}
@@ -268,7 +529,7 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
               {/* Status cards */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: 20 }}>
                 <HealthCard label="Evolution Status" value={evoStatus?.active ? 'Active' : 'Standby'} color={evoStatus?.active ? '#22c55e' : '#94a3b8'} />
-                <HealthCard label="Pending Proposals" value={`${evoStatus?.proposals ?? 0}`} color={evoStatus && evoStatus.proposals && evoStatus.proposals > 0 ? '#f59e0b' : '#94a3b8'} />
+                <HealthCard label="Pending Proposals" value={`${evoStatus?.pendingProposals ?? evoStatus?.proposals ?? 0}`} color={evoStatus && (evoStatus.pendingProposals ?? evoStatus?.proposals ?? 0) > 0 ? '#f59e0b' : '#94a3b8'} />
                 <HealthCard label="Arch. Proposals" value={`${archProposals.length}`} color={archProposals.length > 0 ? '#818cf8' : '#94a3b8'} />
                 <HealthCard label="Intent Proposals" value={`${intentProposals.length}`} color={intentProposals.length > 0 ? '#a78bfa' : '#94a3b8'} />
               </div>
