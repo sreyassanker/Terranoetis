@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 /**
  * Regression test for the "Invalid hook call" crash on the Generate button.
  *

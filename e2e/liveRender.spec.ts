@@ -8,23 +8,14 @@
  */
 
 import { test, expect, chromium } from '@playwright/test';
-import { test, expect, chromium } from '@playwright/test';
-
 
 test('3D CFD flood overlay renders on globe with real data', async () => {
-test('3D CFD flood overlay renders on globe with real data', async () => {
-  const browser = await chromium.launch({
-  const browser = await chromium.launch({
-const CHROME_PATH = process.env.PW_CHROME_PATH
-const CHROME_PATH = process.env.PW_CHROME_PATH
-  || '~/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
-  || '~/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+  const CHROME_PATH = process.env.PW_CHROME_PATH
+    || '~/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 
-
-executablePath: CHROME_PATH,
-executablePath: CHROME_PATH,
-args: ['--enable-webgl', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist'],
-args: ['--enable-webgl', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist'],
+  const browser = await chromium.launch({
+    executablePath: CHROME_PATH,
+    args: ['--enable-webgl', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist'],
     headless: true,
   });
   const ctx = await browser.newContext({

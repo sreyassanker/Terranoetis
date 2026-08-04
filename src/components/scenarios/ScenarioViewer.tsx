@@ -11,6 +11,7 @@ import EarthquakeVisualizer from './EarthquakeVisualizer';
 import HurricaneVisualizer from './HurricaneVisualizer';
 import WildfireVisualizer from './WildfireVisualizer';
 import VolcanicVisualizer from './VolcanicVisualizer';
+import LandslideVisualizer from './LandslideVisualizer';
 import TimelineControls from './TimelineControls';
 
 interface ScenarioViewerProps {
@@ -32,6 +33,7 @@ interface StepPrimitives {
   hurricaneShapes?: ShapeData[];
   wildfireShapes?: ShapeData[];
   volcanicShapes?: ShapeData[];
+  landslideShapes?: ShapeData[];
 }
 
 /** How many steps ahead/behind the current step to pre-create */
@@ -107,6 +109,7 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
     const hurricaneShapes = step.shapes.filter(s => s.type === 'cylinder' || s.type === 'polyline' || s.type === 'intensity_zone' || s.type === 'ring' || s.type === 'polygon');
     const wildfireShapes = step.shapes.filter(s => s.type === 'polyline' || s.type === 'intensity_zone' || s.type === 'cylinder' || s.type === 'ring' || s.type === 'damage_zone');
     const volcanicShapes = step.shapes.filter(s => s.type === 'cylinder' || s.type === 'polyline' || s.type === 'intensity_zone' || s.type === 'ring');
+    const landslideShapes = step.shapes.filter(s => s.type === 'intensity_zone' || s.type === 'polyline' || s.type === 'ring' || s.type === 'polygon');
 
     // Static type sets per scenario — prevents double-rendering (static generic + animated specialized)
     const specializedTypes = new Set<string>();
@@ -118,6 +121,8 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
       for (const t of ['polyline', 'intensity_zone', 'cylinder', 'ring', 'damage_zone']) specializedTypes.add(t);
     } else if (scenario.type === 'volcanic_eruption') {
       for (const t of ['cylinder', 'polyline', 'intensity_zone', 'ring']) specializedTypes.add(t);
+    } else if (scenario.type === 'landslide') {
+      for (const t of ['intensity_zone', 'polyline', 'ring', 'polygon']) specializedTypes.add(t);
     } else if (scenario.type === 'flood_inundation' || scenario.type === 'tsunami_wave') {
       specializedTypes.add('flood_surface');
     }
@@ -129,7 +134,7 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
       : step.shapes;
     const shapeEntities = renderHazardShapes(viewer, genericShapes);
 
-    refs[stepIdx] = { pointPrims, shapeEntities, floodSurfaceShapes, earthquakeShapes, hurricaneShapes, wildfireShapes, volcanicShapes };
+    refs[stepIdx] = { pointPrims, shapeEntities, floodSurfaceShapes, earthquakeShapes, hurricaneShapes, wildfireShapes, volcanicShapes, landslideShapes };
 
     // Hide all newly created entities/primitives (showStep will show the right one)
     for (const p of pointPrims) p.show = false;
@@ -262,6 +267,8 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
   const isWildfire = scenario.type === 'wildfire_spread';
   const isVolcanic = scenario.type === 'volcanic_eruption';
   const currentVolcanicShapes = stepPrimsRef.current[currentStep]?.volcanicShapes ?? [];
+  const isLandslide = scenario.type === 'landslide';
+  const currentLandslideShapes = stepPrimsRef.current[currentStep]?.landslideShapes ?? [];
 
   const progress = hasTimeline ? currentStep / Math.max(1, steps.length - 1) : 1;
 
@@ -359,6 +366,10 @@ export default function ScenarioViewer({ viewer, scenario, counterfactualScenari
 
       {isVolcanic && currentVolcanicShapes.length > 0 && (
         <VolcanicVisualizer viewer={viewer} shapes={currentVolcanicShapes} progress={progress} />
+      )}
+
+      {isLandslide && currentLandslideShapes.length > 0 && (
+        <LandslideVisualizer viewer={viewer} shapes={currentLandslideShapes} progress={progress} />
       )}
     </Panel>
     </div>

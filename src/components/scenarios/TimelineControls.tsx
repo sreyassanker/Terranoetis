@@ -22,7 +22,7 @@ interface TimelineControlsProps {
 const SPEEDS = [0.5, 1, 2, 5, 10];
 
 /** Format seconds compactly: "1h 2m", "1m 30s", or "45s" — never drops to 0. */
-export function formatTime(s: number): string {
+function formatTime(s: number): string {
   if (!Number.isFinite(s) || s < 0) return '0s';
   const total = Math.floor(s);
   const h = Math.floor(total / 3600);
@@ -37,7 +37,7 @@ export default function TimelineControls({
   playing, onTogglePlay, currentTime, duration, speed, onSpeedChange, label, stepCount, currentStep, onStepJump,
   isFloodScenario = false, maxDepth = 0, currentProgress = 0,
 }: TimelineControlsProps) {
-  const fmt = useCallback(formatTime, []);
+  const fmt = useCallback((s: number) => formatTime(s), []);
 
   return (
     <div style={{

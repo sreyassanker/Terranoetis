@@ -116,7 +116,7 @@ export function heightfieldNormals(
       const dX = (e(r, c + 1) - e(r, c - 1)) / (2 * cellSizeM);
       const dY = (e(r + 1, c) - e(r - 1, c)) / (2 * cellSizeM);
       // Normal = normalize(-dX, dY, 1) — y flipped because row+ is south.
-      let nx = -dX, ny = dY, nz = 1;
+      const nx = -dX, ny = dY, nz = 1;
       const len = Math.hypot(nx, ny, nz);
       const i = (r * gs + c) * 3;
       out[i] = nx / len;

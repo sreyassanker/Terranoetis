@@ -19,12 +19,20 @@ import * as Cesium from 'cesium';
 import {
   buildGeoFrame,
   cellToWorld,
+  packScalarAtlas,
   packVelocityAtlas,
+  type ScalarAtlas,
   type VelocityAtlas,
   type GeoFrame,
 } from './fieldData';
 import type { GridData } from '../shared';
 import { colormapGLSL, type CfaColormapName } from './cfdColormaps';
+import {
+  runtimeCesium,
+  sceneContext,
+  type LooseMaterialAppearance,
+  type LooseTexture,
+} from './cesiumRuntime';
 
 /** Atlas tile lookup used by the vertex shader (arrow deformation). */
 const ATLAS_UV_GLSL = /* glsl */ `
@@ -124,8 +132,8 @@ function computeArrowNormals(template: ArrowTemplate): Float32Array {
     // Smooth-ish radial normal: bend outward along shaft radial, forward along tip
     const radial = Math.hypot(y, z);
     let nx = x + 0.05;   // slight forward bias so the cone tip lights correctly
-    let ny = y;
-    let nz = z;
+    const ny = y;
+    const nz = z;
     // For shaft vertices (radial>0), the surface normal points outward
     if (radial > 1e-5) {
       nx = 0;            // Zero out X so we don't double-count length
@@ -152,6 +160,19 @@ export interface ArrowFieldOptions {
   vySeries: GridData;
   /** Terrain elevation [gs*gs]; default flat ellipsoid. */
   terrain?: ArrayLike<number>;
+  /**
+   * Optional [F,R,C] depth/scalar series used to lift arrows *above the
+   * displaced surface* (not just bare terrain). The arrow shader adds
+   * `(depth/maxDepth) * exaggeration` of vertical offset, matching
+   * ScalarSurfacePrimitive's displacement, so arrows float `lift` meters
+   * above the visible debris surface each frame.
+   */
+  depthSeries?: GridData;
+  /**
+   * Vertical exaggeration (meters per normalized scalar unit) — MUST match the
+   * `exaggeration` passed to ScalarSurfacePrimitive for correct alignment.
+   */
+  exaggeration?: number;
   /** Sample every Nth cell — 1 = dense. */
   stride?: number;
   /** Shaft length at zero speed (meters). Default cellSizeM * 0.55. */
@@ -184,8 +205,11 @@ export class ArrowFieldPrimitive {
 
   private primitive: Cesium.Primitive | null = null;
   private material: Cesium.Material | null = null;
-  private appearance: Cesium.MaterialAppearance | null = null;
-  private atlasTexture: (Cesium.Texture & { type?: string }) | null = null;
+  private appearance: LooseMaterialAppearance | null = null;
+  private atlasTexture: LooseTexture | null = null;
+  private depthAtlas: ScalarAtlas | null = null;
+  private depthTexture: LooseTexture | null = null;
+  private exaggeration = 0;
   private vertexShaderSource = '';
   private minLen = 0;
   private lenScale = 0;
@@ -206,6 +230,10 @@ export class ArrowFieldPrimitive {
       : this.atlas.maxSpeed;
     this.frames = this.atlas.frames;
     this.stride = Math.max(1, opts.stride ?? Math.ceil(opts.gs / 48));
+    this.exaggeration = Math.max(0, opts.exaggeration ?? 0);
+    if (opts.depthSeries) {
+      this.depthAtlas = packScalarAtlas(opts.depthSeries);
+    }
 
     // Build arrow instances (one per active cell)
     const templ = buildArrowTemplate();
@@ -239,10 +267,12 @@ export class ArrowFieldPrimitive {
     // Expand to a single interleaved vertex buffer: [arrowVerts per arrow] * N instances
     const N = cells.length;
     const vertCount = N * arrowVertCount;
-    const positions = new Float64Array(vertCount * 3);     // position (for culling)
+    const positions = new Float64Array(vertCount * 3);     // position (for culling + RTC anchor)
     const arrowLocal = new Float32Array(vertCount * 3);
-    const centerArr = new Float32Array(vertCount * 3);
     const normalArr = new Float32Array(vertCount * 3);
+    const tangentArr = new Float32Array(vertCount * 3);
+    const bitangentArr = new Float32Array(vertCount * 3);
+    const colorArr = new Uint8Array(vertCount * 4).fill(255);
     const stArr = new Float32Array(vertCount * 2);
     const cellSizeArr = new Float32Array(vertCount);
     const indices = new Uint32Array(N * arrowIndexCount);
@@ -258,9 +288,6 @@ export class ArrowFieldPrimitive {
         normalArr[vi * 3] = arrowNormals[v * 3];
         normalArr[vi * 3 + 1] = arrowNormals[v * 3 + 1];
         normalArr[vi * 3 + 2] = arrowNormals[v * 3 + 2];
-        centerArr[vi * 3] = cell.ecef.x;
-        centerArr[vi * 3 + 1] = cell.ecef.y;
-        centerArr[vi * 3 + 2] = cell.ecef.z;
         stArr[vi * 2] = cell.s;
         stArr[vi * 2 + 1] = cell.t;
         cellSizeArr[vi] = opts.cellSizeM;
@@ -294,23 +321,35 @@ export class ArrowFieldPrimitive {
         componentsPerAttribute: 3,
         values: arrowLocal,
       }),
-      center: new Cesium.GeometryAttribute({
-        componentDatatype: Cesium.ComponentDatatype.FLOAT,
-        componentsPerAttribute: 3,
-        values: centerArr,
-      }),
       cellSize: new Cesium.GeometryAttribute({
         componentDatatype: Cesium.ComponentDatatype.FLOAT,
         componentsPerAttribute: 1,
         values: cellSizeArr,
       }),
       // Not used by the appearance shader (we compute normals procedurally
-      // in VS), but MaterialAppearance's vertex format requires this attr,
-      // even if unused by its shader. We zero-fill to keep memory footprint small.
+      // in VS), but MaterialAppearance's TEXTURED vertex format requires
+      // these attributes, even if unused by its shader. Zero-fill to keep
+      // memory footprint small, mirroring ScalarSurfacePrimitive.
       normal: new Cesium.GeometryAttribute({
         componentDatatype: Cesium.ComponentDatatype.FLOAT,
         componentsPerAttribute: 3,
         values: normalArr,
+      }),
+      tangent: new Cesium.GeometryAttribute({
+        componentDatatype: Cesium.ComponentDatatype.FLOAT,
+        componentsPerAttribute: 3,
+        values: tangentArr,
+      }),
+      bitangent: new Cesium.GeometryAttribute({
+        componentDatatype: Cesium.ComponentDatatype.FLOAT,
+        componentsPerAttribute: 3,
+        values: bitangentArr,
+      }),
+      color: new Cesium.GeometryAttribute({
+        componentDatatype: Cesium.ComponentDatatype.UNSIGNED_BYTE,
+        componentsPerAttribute: 4,
+        values: colorArr,
+        normalize: true,
       }),
     };
 
@@ -336,16 +375,17 @@ export class ArrowFieldPrimitive {
 
       // Per-vertex (instanced) attributes
       in vec3 arrowLocal;   // unit arrow, tip +X
-      in vec3 center;       // cell position (ECEF)
       in vec3 normal;       // arrow-local normal
       in float cellSize;    // meters per grid cell
 
       uniform sampler2D u_vs_field;
+      uniform sampler2D u_vs_depth;
       uniform float u_vs_frame;
       uniform vec2 u_vs_tiles;
       uniform float u_vs_minLen;
       uniform float u_vs_lenScale;
       uniform float u_vs_thickness;
+      uniform float u_vs_exaggeration;
       uniform vec3 u_vs_up;
       uniform vec3 u_vs_east;
       uniform vec3 u_vs_south;
@@ -385,16 +425,31 @@ export class ArrowFieldPrimitive {
                            arrowLocal.y * thick,
                            arrowLocal.z * thick);
 
-        vec3 worldPos = center + basis * scaled;
+        // Anchor = this arrow's cell position on the terrain, already in the
+        // eye-relative frame the rasterizer expects (czm_computePosition uses
+        // the geometry's position3DHigh/Low — the SAME path ScalarSurfacePrimitive
+        // renders with). Add the arrow's local offset directly: eye-relative
+        // coords are world meters relative to the RTC center, so a local
+        // world-unit offset is exact. (Previously we multiplied raw ECEF
+        // center attribute by czm_modelViewRelativeToEye, which is only defined for
+        // relative-to-eye input — that misplaced arrows off-globe entirely.)
+        vec4 p = czm_computePosition();
+        p.xyz += basis * scaled;
+
+        // Lift arrows above the *displaced* surface, not bare terrain:
+        // add the same (depth/maxDepth)*exaggeration offset the surface
+        // primitive applies, so arrows hover 'lift' meters over the debris.
+        // u_vs_exaggeration == 0 when no depth series was supplied -> no-op.
+        p.xyz += upDir * (texture(u_vs_depth, uv).r * u_vs_exaggeration);
+
         vec3 worldNormal = basis * normalize(normal);
 
-        // Output
-        vec4 pEC = czm_modelViewRelativeToEye * vec4(worldPos, 1.0);
-        v_positionEC = pEC.xyz;
+        // Output (same eye-relative MVP as the working surface shader).
+        v_positionEC = (czm_modelViewRelativeToEye * p).xyz;
         v_normalEC = czm_normal * worldNormal;
         v_st = st;
         v_speed = speedNorm;
-        gl_Position = czm_projection * pEC;
+        gl_Position = czm_modelViewProjectionRelativeToEye * p;
       }
     `;
     this.vertexShaderSource = vertexShaderSource;
@@ -402,14 +457,15 @@ export class ArrowFieldPrimitive {
     // The atlas is sampled only in the vertex shader (arrows are deformed per
     // cell there), so it is exposed via appearance uniforms, which — unlike
     // material-fabric uniforms — are NOT renamed by Cesium at compile time.
-    const atlasSampler = new Cesium.Sampler({
-      wrapS: Cesium.TextureWrap.CLAMP_TO_EDGE,
-      wrapT: Cesium.TextureWrap.CLAMP_TO_EDGE,
+    const R = runtimeCesium();
+    const atlasSampler = new R.Sampler({
+      wrapS: R.TextureWrap.CLAMP_TO_EDGE,
+      wrapT: R.TextureWrap.CLAMP_TO_EDGE,
       minificationFilter: Cesium.TextureMinificationFilter.NEAREST,
       magnificationFilter: Cesium.TextureMagnificationFilter.NEAREST,
     });
-    const atlasTexture = new Cesium.Texture({
-      context: this.viewer.scene.context,
+    const atlasTexture = new R.Texture({
+      context: sceneContext(this.viewer),
       source: {
         arrayBufferView: this.atlas.data,
         width: this.atlas.width,
@@ -420,10 +476,30 @@ export class ArrowFieldPrimitive {
       sampler: atlasSampler,
       // Atlas is stored row 0 = grid row 0 (north); st.t=0 must sample v=0.
       flipY: false,
-    }) as Cesium.Texture & { type?: string };
+    }) as LooseTexture;
     // Material.getUniformType() keys off `.type` to discriminate sampler2D.
     (atlasTexture as unknown as { type: string }).type = 'sampler2D';
     this.atlasTexture = atlasTexture;
+
+    // Depth atlas for surface-relative lift (optional). Same tiles/frame layout
+    // as the velocity atlas (identical F,R,C), so the shader reuses `uv`.
+    let depthTexture: LooseTexture = atlasTexture;
+    if (this.depthAtlas) {
+      depthTexture = new R.Texture({
+        context: sceneContext(this.viewer),
+        source: {
+          arrayBufferView: this.depthAtlas.data,
+          width: this.depthAtlas.width,
+          height: this.depthAtlas.height,
+        },
+        pixelFormat: Cesium.PixelFormat.RGBA,
+        pixelDatatype: Cesium.PixelDatatype.UNSIGNED_BYTE,
+        sampler: atlasSampler,
+        flipY: false,
+      }) as LooseTexture;
+      (depthTexture as unknown as { type: string }).type = 'sampler2D';
+    }
+    this.depthTexture = depthTexture;
 
     this.appearance = this.buildAppearance(this.colormap);
 
@@ -468,7 +544,7 @@ export class ArrowFieldPrimitive {
    * the appearance-level uniforms (u_vs_field) — ownership stays with the
    * class, so disposal must detach it before destroying the appearance.
    */
-  private buildAppearance(cmap: CfaColormapName): Cesium.MaterialAppearance {
+  private buildAppearance(cmap: CfaColormapName): LooseMaterialAppearance {
     if (this.destroyed || !this.atlasTexture) {
       throw new Error('buildAppearance called after destroy or without atlas');
     }
@@ -494,15 +570,17 @@ export class ArrowFieldPrimitive {
       translucent: true,
       materialSupport: Cesium.MaterialAppearance.MaterialSupport.TEXTURED,
       vertexShaderSource: this.vertexShaderSource,
-    });
+    }) as LooseMaterialAppearance;
     // South = -north in the ENU basis (grid vy is south-positive).
     appearance.uniforms = {
       u_vs_field: this.atlasTexture,
+      u_vs_depth: this.depthTexture ?? this.atlasTexture,
       u_vs_frame: frame,
       u_vs_tiles: new Cesium.Cartesian2(this.atlas.tilesX, this.atlas.tilesY),
       u_vs_minLen: this.minLen,
       u_vs_lenScale: this.lenScale,
       u_vs_thickness: this.thickRatio,
+      u_vs_exaggeration: this.exaggeration,
       u_vs_up: new Cesium.Cartesian3(this.frame.up.x, this.frame.up.y, this.frame.up.z),
       u_vs_east: new Cesium.Cartesian3(this.frame.east.x, this.frame.east.y, this.frame.east.z),
       u_vs_south: new Cesium.Cartesian3(
@@ -516,8 +594,8 @@ export class ArrowFieldPrimitive {
    * Destroy an appearance + its fabric material WITHOUT destroying the shared
    * atlas texture referenced by the appearance uniforms.
    */
-  private disposeAppearance(appearance: Cesium.MaterialAppearance | null): void {
-    if (!appearance || appearance.isDestroyed()) return;
+  private disposeAppearance(appearance: LooseMaterialAppearance | null): void {
+    if (!appearance || typeof appearance.isDestroyed !== 'function' || appearance.isDestroyed()) return;
     if (this.atlasTexture && appearance.uniforms && appearance.uniforms.u_vs_field === this.atlasTexture) {
       delete appearance.uniforms.u_vs_field;
     }
@@ -531,7 +609,7 @@ export class ArrowFieldPrimitive {
    * with ScalarSurfacePrimitive).
    */
   private disposeMaterial(mat: Cesium.Material | null): void {
-    if (!mat || mat.isDestroyed()) return;
+    if (!mat || typeof mat.isDestroyed !== 'function' || mat.isDestroyed()) return;
     const textures = (mat as unknown as { _textures?: Record<string, unknown> })._textures;
     if (textures) {
       for (const key of Object.keys(textures)) {
@@ -541,16 +619,25 @@ export class ArrowFieldPrimitive {
     mat.destroy();
   }
 
+  /** Schedule a render, no-op when the owning viewer is already torn down. */
+  private requestRender(): void {
+    try {
+      this.viewer.scene.requestRender();
+    } catch {
+      /* viewer may already be destroyed during teardown */
+    }
+  }
+
   /** Set the current animation frame — single GPU uniform update. */
   setFrame(idx: number): void {
     if (this.destroyed) return;
     const clamped = Math.max(0, Math.min(this.frames - 1, idx));
     if (clamped === this.currentFrame) return;
     this.currentFrame = clamped;
-    if (this.appearance && this.appearance.uniforms.u_vs_frame !== undefined) {
+    if (this.appearance && this.appearance.uniforms && this.appearance.uniforms.u_vs_frame !== undefined) {
       this.appearance.uniforms.u_vs_frame = clamped;
     }
-    this.viewer.scene.requestRender();
+    this.requestRender();
   }
 
   /** Global opacity (0–1) applied via the material's u_opacity uniform. */
@@ -558,7 +645,7 @@ export class ArrowFieldPrimitive {
     if (this.destroyed || !this.material) return;
     this.opacity = Math.max(0, Math.min(1, alpha));
     this.material.uniforms.u_opacity = this.opacity;
-    this.viewer.scene.requestRender();
+    this.requestRender();
   }
 
   /**
@@ -575,7 +662,7 @@ export class ArrowFieldPrimitive {
     this.material = this.appearance.material;
     this.primitive.appearance = this.appearance;
     this.disposeAppearance(oldAppearance);
-    this.viewer.scene.requestRender();
+    this.requestRender();
   }
 
   destroy(): void {
@@ -585,15 +672,24 @@ export class ArrowFieldPrimitive {
       // Detach the appearance+material from the collection before removal so
       // the collection does NOT destroy them — we own disposal order here
       // because the fabric material's uniform bag aliases our atlas texture.
-      this.viewer.scene.primitives.remove(this.primitive);
+      try {
+        this.viewer.scene.primitives.remove(this.primitive);
+      } catch {
+        /* viewer may already be destroyed during teardown */
+      }
       this.primitive = null;
     }
     this.disposeAppearance(this.appearance);
     this.appearance = null;
     this.material = null;
-    if (this.atlasTexture && !this.atlasTexture.isDestroyed()) {
+    if (this.atlasTexture && (typeof this.atlasTexture.isDestroyed !== 'function' || !this.atlasTexture.isDestroyed())) {
       this.atlasTexture.destroy();
       this.atlasTexture = null;
     }
+    if (this.depthTexture && this.depthTexture !== this.atlasTexture && (typeof this.depthTexture.isDestroyed !== 'function' || !this.depthTexture.isDestroyed())) {
+      this.depthTexture.destroy();
+    }
+    this.depthTexture = null;
+    this.depthAtlas = null;
   }
 }

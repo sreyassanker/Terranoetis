@@ -38,7 +38,9 @@ RHO_ROCK = 2650.0     # kg/m³ — rock density
 #   τ_b = μ_c·ρ·g·h·cos²θ  +  ρ·g·u·|u| / ξ
 # where μ_c = tan(φ_res) is the dynamic (residual) basal friction, and
 # ξ is the turbulent (Chézy-type) velocity-squared coefficient with
-# units m/s² (typical debris flows ξ ≈ 100–1000 m/s²).
+# units m/s² (typical debris flows ξ ≈ 100–1000 m/s²). With the quadratic
+# Voellmy drag g·h·u²/ξ the terminal speed is √(drive·ξ/g): ξ=300 gives
+# ~6–11 m/s on realistic slopes, below the V_MAX stability ceiling.
 # Stored as the *residual* friction angle: φ_res ≈ 14° → μ_c ≈ 0.25.
 PHI_RESIDUAL_DEG = 14.0   # residual basal friction angle (degrees)
 MU_DEFAULT = float(np.tan(np.radians(PHI_RESIDUAL_DEG)))   # ≈ 0.249
@@ -53,32 +55,90 @@ PGA_THRESHOLD = 0.15  # g — PGA threshold for earthquake-triggered landslides
 RAIN_THRESHOLD = 150.0  # mm — cumulative rainfall threshold for rain-triggered landslides
 
 
-def generate_terrain(N, seed=42):
+def generate_terrain(N, dx=20.0, seed=42):
     """
-    Generate synthetic mountainous terrain with steep slopes prone to landsliding.
+    Generate realistic synthetic mountainous terrain prone to landsliding.
+
+    Slope distribution is resolution-stable: every feature (ridge, valley,
+    noise) is expressed in meters with its amplitude scaled to its width, so
+    the study area has ~60% of cells on 15–35° hillslopes (where landslides
+    trigger and debris flows run), ~20% on <15° fans/valleys (where they
+    deposit), and a minority of steeper headwall cells. The old version piled
+    a 2000 m ridge and ±50 m/cell noise over a 20 m grid → 91% of cells
+    steeper than 35° (median 70°) → every lobe ran at cap speed and never
+    deposited, which is why the simulation did not look like a real debris
+    flow.
+
+    dx is the real study-area cell size (metres), so the relief spans the
+    full drawn extent regardless of its size — a small draw yields a small
+    hill, a large Himalayan draw yields a tall massif.
+
     Returns elevation in meters (positive up).
     """
     rng = np.random.RandomState(seed)
-    y, x = np.meshgrid(np.arange(N, dtype=np.float64), np.arange(N, dtype=np.float64), indexing='ij')
+    dx_terrain = dx  # cell size in meters (matches simulate_landslide default)
+    L = N * dx_terrain
+    y, x = np.meshgrid(np.arange(N, dtype=np.float64) * dx_terrain,
+                       np.arange(N, dtype=np.float64) * dx_terrain, indexing='ij')
+    c = L / 2.0
 
-    # Base topography: mountain ridge with valleys
-    # Main ridge running diagonally
-    ridge = 2000 * np.exp(-((x - N/2)**2 + (y - N/2)**2) / (2 * (N/3)**2))
-    # Secondary ridges
-    ridge2 = 1200 * np.exp(-((x - N*0.3)**2 + (y - N*0.7)**2) / (2 * (N/5)**2))
-    ridge3 = 1000 * np.exp(-((x - N*0.7)**2 + (y - N*0.3)**2) / (2 * (N/5)**2))
+    # Mountain block: Gaussian ridges whose amplitude is a fixed fraction of
+    # their width, so the maximum slope is ~constant regardless of grid size.
+    s1 = L / 3.2   # main massif (max slope 0.50·e^-0.5 ≈ 30°)
+    ridge = 0.50 * s1 * np.exp(-((x - c)**2 + (y - c)**2) / (2 * s1**2))
+    s2 = L / 5.0   # secondary ridges (~27°)
+    ridge2 = 0.45 * s2 * np.exp(-((x - L*0.32)**2 + (y - L*0.68)**2) / (2 * s2**2))
+    ridge3 = 0.45 * s2 * np.exp(-((x - L*0.68)**2 + (y - L*0.32)**2) / (2 * s2**2))
 
-    # Valley system (low elevation corridors)
-    valley = -800 * np.exp(-((x - N*0.2)**2) / (2 * (N/8)**2)) * np.exp(-((y - N*0.5)**2) / (2 * (N/4)**2))
-    valley2 = -600 * np.exp(-((y - N*0.8)**2) / (2 * (N/6)**2))
+    # Valley system: low-elevation corridors where debris deposits.
+    s4 = L / 7.0
+    valley = -0.40 * s4 * np.exp(-((x - L*0.2)**2) / (2 * (0.6*s4)**2)) * np.exp(-((y - L*0.5)**2) / (2 * s4**2))
+    s5 = L / 6.0
+    valley2 = -0.35 * s5 * np.exp(-((y - L*0.8)**2) / (2 * s5**2))
 
-    # Noise for realistic roughness
-    noise = rng.randn(N, N) * 50
+    # Smooth large-scale noise (real terrain is autocorrelated, not per-cell
+    # white noise): a coarse random field upscaled bilinearly. The amplitude
+    # is a fraction of the *actual* coarse spacing, giving ~17° RMS slopes.
+    k = max(2, N // 12)
+    spacing = (N - 1) * dx_terrain / k
+    coarse = rng.randn(k + 1, k + 1) * (0.24 * spacing)
+    cy, cx = np.meshgrid(np.arange(N), np.arange(N), indexing='ij')
+    f = cy * k / (N - 1)
+    g = cx * k / (N - 1)
+    i0 = np.clip(f.astype(int), 0, k - 1)
+    j0 = np.clip(g.astype(int), 0, k - 1)
+    fy, fx = f - i0, g - j0
+    noise = (coarse[i0, j0] * (1 - fy) * (1 - fx) + coarse[i0 + 1, j0] * fy * (1 - fx)
+             + coarse[i0, j0 + 1] * (1 - fy) * fx + coarse[i0 + 1, j0 + 1] * fy * fx)
 
     terrain = ridge + ridge2 + ridge3 + valley + valley2 + noise
-    terrain = np.clip(terrain, 0, 4000)
+    terrain = np.clip(terrain, 0, 12000)
 
     return terrain
+
+
+def _bilinear_upsample(src, src_n, out_n):
+    """
+    Bilinearly upsample a square [src_n, src_n] elevation grid to
+    [out_n, out_n]. Used to lift a coarse client-sampled Cesium terrain
+    (e.g. 64×64) to the simulation resolution (e.g. 256×256).
+    Row 0 is the north edge for both grids, matching the renderer.
+    """
+    src = np.asarray(src, dtype=np.float64)
+    s = np.arange(out_n) * (src_n - 1) / max(1, out_n - 1)
+    y0 = np.clip(s.astype(int), 0, src_n - 2)
+    y1 = y0 + 1
+    fy = s - y0
+    x0 = np.clip(s.astype(int), 0, src_n - 2)
+    x1 = x0 + 1
+    fx = s - x0
+    out = np.empty((out_n, out_n), dtype=np.float64)
+    for j in range(out_n):
+        out[j] = (src[y0[j], x0] * (1 - fy[j]) * (1 - fx)
+                  + src[y0[j], x1] * (1 - fy[j]) * fx
+                  + src[y1[j], x0] * fy[j] * (1 - fx)
+                  + src[y1[j], x1] * fy[j] * fx)
+    return out
 
 
 def compute_slope(terrain, dx):
@@ -225,10 +285,32 @@ def simulate_landslide(params):
     # Grid spacing: 20 m/cell (mountain terrain), scaled to study area extent
     extent_km = float(params.get('extent_km', 0.0))
     dx = (extent_km * 1000.0 / gs) if extent_km > 0 else 20.0  # meters
-    dt = 0.1   # time step (s) — CFL: max_vel * dt / dx < 0.5
+
+    # ── Numerical stability controls (single source of truth) ──
+    # Explicit schemes need dt·(|u| + c)/dx ≲ 0.5 per axis. We set dt from the
+    # same CFL relation the substep loop enforces, so a tiny draw (small dx ⇒
+    # small dt) advances ~1 substep per step and stays fast, while a large
+    # draw keeps the old dt=0.1 s cadence.
+    V_MAX = 30.0            # physical debris-flow velocity cap (m/s)
+    CFL = 0.15              # 2D Rusanov positivity: dt/dx * (|u| + c) per axis
+    dt = min(0.1, CFL * dx / V_MAX)   # time step (s)
 
     # ── Generate terrain ──
-    terrain = generate_terrain(gs)
+    # When the client samples real Cesium terrain for the drawn study box, it
+    # ships a coarse elevation grid (`terrain` + `terrain_gs`). Use that so the
+    # debris flow runs on the real ground the user picked; otherwise fall back
+    # to synthetic mountainous terrain.
+    terrain_gs0 = int(params.get('terrain_gs', 0) or 0)
+    terrain_vals = params.get('terrain')
+    use_real = bool(terrain_vals) and terrain_gs0 > 1 and len(terrain_vals) == terrain_gs0 * terrain_gs0
+    if use_real:
+        terrain_2d = np.asarray(terrain_vals, dtype=np.float64).reshape(terrain_gs0, terrain_gs0)
+        terrain = _bilinear_upsample(terrain_2d, terrain_gs0, gs)
+        terrain = np.clip(terrain, 0, 12000)
+        print(f"[TERRAIN] Real Cesium terrain {terrain_gs0}x{terrain_gs0} → {gs}x{gs}")
+    else:
+        terrain = generate_terrain(gs, dx)
+        print(f"[TERRAIN] Synthetic terrain {gs}x{gs}, dx={dx:.0f}m")
     slope_deg, dz_dx, dz_dy = compute_slope(terrain, dx)
 
     # ── Compute trigger fields ──
@@ -251,11 +333,30 @@ def simulate_landslide(params):
     hu = np.zeros((gs, gs), dtype=np.float64)
     hv = np.zeros((gs, gs), dtype=np.float64)
 
-    # Initial landslide volume at failure points
-    # Volume proportional to susceptibility and slope
-    initial_volume = np.where(failure_mask, susceptibility * slope_deg * 100, 0.0)
-    # Cap initial depth
-    h = np.clip(initial_volume / (dx * dx), 0, 50.0)  # max 50m initial depth
+    # Localize the initial failure to a compact source on a hillside. The raw
+    # mask (susceptibility > 0.3) covers ~99% of the grid, so the "pile" is a
+    # grid-wide slab that blows up and renders as a hollow rim. Instead seed a
+    # few-hundred-cell lobe centred on the most unstable steep cell.
+    steep_sus = np.where(slope_deg > 25, susceptibility, 0.0)
+    sy0, sx0 = np.unravel_index(np.argmax(steep_sus), susceptibility.shape)
+    yy0, xx0 = np.meshgrid(np.arange(gs), np.arange(gs), indexing='ij')
+    dist2_peak = (yy0 - sy0)**2 + (xx0 - sx0)**2
+    source_radius = max(int(gs * 0.32), 8)
+    failure_mask = (susceptibility > 0.4) & (dist2_peak <= source_radius**2)
+    if int(failure_mask.sum()) < 64:
+        failure_mask = dist2_peak <= source_radius**2
+    if int(failure_mask.sum()) > int(gs * gs * 0.05):
+        cut = float(np.quantile(susceptibility[failure_mask], 0.5))
+        failure_mask &= susceptibility >= cut
+
+    # Initial landslide depth (metres), kept cell-size independent so a tiny
+    # drawn hill gets a shallow few-metre slide and a large massif gets a
+    # commensurate one — the volume = depth × cell area then scales naturally
+    # with the draw.
+    h_init = susceptibility * (slope_deg / 30.0) * 6.0
+    h_init = np.where(failure_mask, np.maximum(h_init, 2.0), 0.0)  # >=2 m floor
+    h = np.clip(h_init, 0, 15.0)  # cap initial depth at 15 m
+    init_mass = float(h.sum())
 
     # Source cells (where landslide initiates)
     source_cells = int(failure_mask.sum())
@@ -274,7 +375,16 @@ def simulate_landslide(params):
     print(f"Source cells: {source_cells} | Initial volume: {h.sum()*dx*dx/1e6:.2f} M m³")
 
     # ── Time stepping (Lax-Friedrichs scheme) ──
-    total_steps = int(duration_hours * 3600 / dt)
+    # Cap the simulated duration so the ~20 snapshots span the fast-release
+    # phase instead of parking everything in a static deposit after frame 1.
+    max_sim_sec = float(params.get('max_sim_sec', 300.0))
+    total_steps = min(int(duration_hours * 3600 / dt), int(max_sim_sec / dt))
+    # The grid is fixed at gs² regardless of the drawn extent, so tiny draws
+    # (small dx ⇒ small dt) would otherwise demand huge step counts for a
+    # slide that is over in seconds. Cap the step count so a complete small
+    # landslide finishes in a few wall-clock seconds; large domains are
+    # already bounded by max_sim_sec above.
+    total_steps = min(total_steps, 4000)
     snap_interval = max(1, total_steps // 20)
     snapshots = []
 
@@ -282,6 +392,11 @@ def simulate_landslide(params):
     mu = MU_DEFAULT
     xi = XI_DEFAULT
     rho = RHO_DEBRIS
+
+    # Numerical stability controls (used by the CFL-safe substep loop).
+    cfl_num = CFL * dx
+    h_min = 1e-3            # momentum is killed below this depth
+    wet_thresh = 0.01       # wet/dry threshold (m)
 
     # Runout distance from source
     source_y, source_x = np.where(h > 0)
@@ -292,10 +407,17 @@ def simulate_landslide(params):
     y_grid, x_grid = np.meshgrid(np.arange(gs), np.arange(gs), indexing='ij')
     runout_distance = np.sqrt((y_grid - sy)**2 + (x_grid - sx)**2) * dx / 1000.0  # km
 
-    # Downslope direction (negative gradient)
+    # Downslope direction (negative gradient), aligned to the solver axes.
+    # `dz_dx` is the row-axis (north-south) gradient and `dz_dy` the col-axis
+    # (east-west) gradient. The `hu` momentum advects along columns (east-west,
+    # the "x" flux direction) so it must be pulled by the column gradient;
+    # `hv` advects along rows and uses the row gradient. The old mapping was
+    # swapped, which on *real* terrain would drive debris across the slope
+    # instead of down it (the synthetic ridge is roughly symmetric so it hid
+    # the bug there).
     slope_mag = np.sqrt(dz_dx**2 + dz_dy**2) + 1e-10
-    grad_x = -dz_dx / slope_mag  # downslope x-direction
-    grad_y = -dz_dy / slope_mag  # downslope y-direction
+    grad_x = -dz_dy / slope_mag  # downslope east-west (for hu / x-momentum)
+    grad_y = -dz_dx / slope_mag  # downslope north-south (for hv / y-momentum)
     sin_theta = np.sin(np.radians(slope_deg))
     cos_theta = np.cos(np.radians(slope_deg))
 
@@ -303,127 +425,181 @@ def simulate_landslide(params):
     wallclock_max = float(params.get('wallclock_max_sec', 480))
     print(f"Wall-clock cap: {wallclock_max:.0f}s")
 
+    # Mass that flowed out of the open domain (through the transmissive
+    # boundary). Conservation is tracked as interior + outflow = initial.
+    outflow = 0.0
+
     for step_i in range(total_steps):
         t = step_i * dt
         if time.time() - t0 > wallclock_max:
             print(f"  [WALL-CLOCK CAP] Stopping at t={t:.0f}s (elapsed {time.time()-t0:.0f}s)")
             break
 
-        # ── Compute velocity from momentum (safe division) ──
-        u = np.zeros_like(h)
-        v = np.zeros_like(h)
-        wet = h > 0.01
-        u[wet] = hu[wet] / h[wet]
-        v[wet] = hv[wet] / h[wet]
-        # Clamp velocity to prevent instability
-        u = np.clip(u, -50, 50)
-        v = np.clip(v, -50, 50)
+        remaining = dt
+        while remaining > 1e-12:
+            # CFL-limited substep so the explicit scheme never runs away.
+            max_speed = float(np.max(np.abs(hu) / np.maximum(h, h_min)))
+            wave = float(np.sqrt(G * max(h.max(), 0.0)))
+            dt_sub = min(remaining, cfl_num / (max_speed + wave + 1e-9))
+            if dt_sub <= 1e-12:
+                dt_sub = remaining
 
-        # ── Lax-Friedrichs for continuity equation ──
-        # ∂h/∂t + ∂(hu)/∂x + ∂(hv)/∂y = 0
-        # LF: h_new = 0.5*(h_r + h_l) - 0.5*dt/dx*(flux_r - flux_l)
-        h_r = np.roll(h, -1, 1); h_r[:, -1] = h[:, -1]
-        h_l = np.roll(h, 1, 1); h_l[:, 0] = h[:, 0]
-        h_d = np.roll(h, -1, 0); h_d[-1, :] = h[-1, :]
-        h_u = np.roll(h, 1, 0); h_u[0, :] = h[0, :]
+            # ── Compute velocity from momentum (safe division) ──
+            wet = h > wet_thresh
+            u = np.zeros_like(h)
+            v = np.zeros_like(h)
+            u[wet] = np.clip(hu[wet] / h[wet], -V_MAX, V_MAX)
+            v[wet] = np.clip(hv[wet] / h[wet], -V_MAX, V_MAX)
 
-        u_r = np.roll(u, -1, 1); u_r[:, -1] = u[:, -1]
-        u_l = np.roll(u, 1, 1); u_l[:, 0] = u[:, 0]
-        u_d = np.roll(u, -1, 0); u_d[-1, :] = u[-1, :]
-        u_u = np.roll(u, 1, 0); u_u[0, :] = u[0, :]
+            # ── Continuity: Rusanov (local Lax-Friedrichs) face flux ──
+            # ∂h/∂t + ∂(hu)/∂x + ∂(hv)/∂y = 0. Face flux
+            #   F_{i+1/2} = 0.5(hu_i + hu_{i+1}) - 0.5·a_{i+1/2}(h_{i+1} - h_i)
+            # with a = |u_face| is positivity-preserving under the CFL bound,
+            # so h never trips the old np.maximum(·,0) mass-injecting clip
+            # (plain averaged-LF went negative at fronts and added mass →
+            # the runaway pile-up).
+            h_r = np.roll(h, -1, 1)
+            h_d = np.roll(h, -1, 0)
+            u_r = np.roll(u, -1, 1)
+            v_d = np.roll(v, -1, 0)
+            u_av = 0.5 * (u + u_r)
+            v_av = 0.5 * (v + v_d)
+            Fx = 0.5 * (h * u + h_r * u_r) - 0.5 * np.abs(u_av) * (h_r - h)
+            Fy = 0.5 * (h * v + h_d * v_d) - 0.5 * np.abs(v_av) * (h_d - h)
+            Fxl = np.roll(Fx, 1, axis=1); Fxl[:, 0] = h[:, 0] * u[:, 0]
+            Fx[:, -1] = h[:, -1] * u[:, -1]
+            Fyu = np.roll(Fy, 1, axis=0); Fyu[0, :] = h[0, :] * v[0, :]
+            Fy[-1, :] = h[-1, :] * v[-1, :]
+            h_new = h - (dt_sub / dx) * ((Fx - Fxl) + (Fy - Fyu))
+            # Positivity with exact mass conservation. A bare np.maximum(·, 0)
+            # erases the numeric undershoot at open boundaries and *adds* the
+            # deficit back to the total every substep → unbounded pile-up.
+            # Instead, remove the deficit from the wet cells so Σh is kept.
+            h_new = np.maximum(h_new, 0)
+            # Interior mass before this substep's continuity update. Only the
+            # interior counts for conservation; the outer ghost ring is the
+            # transmissive outflow buffer (mass there has left the domain).
+            m_pre = float(h[1:-1, 1:-1].sum())
+            if h_new[1:-1, 1:-1].sum() > m_pre + 1e-9:
+                deficit = h_new[1:-1, 1:-1].sum() - m_pre
+                pos = h_new[1:-1, 1:-1] > 0
+                if pos.any():
+                    h_new[1:-1, 1:-1][pos] -= deficit * h_new[1:-1, 1:-1][pos] / h_new[1:-1, 1:-1][pos].sum()
+            wet_new = h_new > wet_thresh
 
-        v_r = np.roll(v, -1, 1); v_r[:, -1] = v[:, -1]
-        v_l = np.roll(v, 1, 1); v_l[:, 0] = v[:, 0]
-        v_d = np.roll(v, -1, 0); v_d[-1, :] = v[-1, :]
-        v_u = np.roll(v, 1, 0); v_u[0, :] = v[0, :]
+            # ── Momentum update (per-unit-depth tendencies) ──
+            # Free-surface pressure gradient −g·h·∇η (η = z + h).
+            eta_field = terrain + h_new
+            deta_dx = np.zeros_like(eta_field)
+            deta_dy = np.zeros_like(eta_field)
+            deta_dx[1:-1, 1:-1] = (eta_field[1:-1, 2:] - eta_field[1:-1, :-2]) / (2.0 * dx)
+            deta_dy[1:-1, 1:-1] = (eta_field[2:, 1:-1] - eta_field[:-2, 1:-1]) / (2.0 * dx)
+            pressure_x = -G * h_new * deta_dx
+            pressure_y = -G * h_new * deta_dy
 
-        # Lax-Friedrichs flux: average of neighbors minus diffusion
-        # h_new = 0.25*(h_r + h_l + h_d + h_u) - 0.5*dt/dx*(flux_x_r - flux_x_l + flux_y_d - flux_y_u)
-        flux_x_r = h_r * u_r  # flux at right face
-        flux_x_l = h_l * u_l  # flux at left face
-        flux_y_d = h_d * v_d  # flux at bottom face
-        flux_y_u = h_u * v_u  # flux at top face
+            # Bed-slope gravity pull: g·h·sinθ along the downslope direction.
+            gravity_x = G * h_new * sin_theta * grad_x
+            gravity_y = G * h_new * sin_theta * grad_y
 
-        h_new = 0.25 * (h_r + h_l + h_d + h_u) \
-                - 0.5 * (dt / dx) * ((flux_x_r - flux_x_l) + (flux_y_d - flux_y_u))
+            # ── Voellmy-Salm bed friction (yield-stress / regularized) ──
+            # Resisting stress (per-unit-depth): Coulomb yield μ·g·h·cos²θ
+            # plus turbulent drag g·u·|u|/ξ. The friction magnitude is capped
+            # by the driving tendency so it can fully stop a cell at rest
+            # (yield behaviour → angle-of-repose deposits) instead of being a
+            # pure drag that only slows a *moving* cell. This replaces the old
+            # hard deposit gate, which zeroed the momentum of any cell where
+            # driving < resisting — including the hydrostatic-pressure
+            # spreading out of flat pockets, so converging piles grew without
+            # bound (volume ×160, depths 400 m+).
+            drive_x = (pressure_x + gravity_x) * wet_new
+            drive_y = (pressure_y + gravity_y) * wet_new
+            drive_mag = np.sqrt(drive_x**2 + drive_y**2)
+            u_mag = np.sqrt(u**2 + v**2)
+            tau_coulomb_h = mu * G * h_new * cos_theta**2
+            # Voellmy turbulent drag g·h·u²/ξ (velocity-squared, as in the
+            # original Voellmy–Salm law) — a velocity-based drag that ALWAYS
+            # opposes motion, giving a natural terminal speed
+            # u ≈ √(drive·ξ/g) ~ 6–11 m/s on realistic slopes with ξ=300.
+            # Only the Coulomb yield term is capped by the drive (so a cell at
+            # rest stays at rest); the drag itself must NOT be capped by the
+            # drive, otherwise a coasting cell on a flat gets zero friction and
+            # keeps its speed forever → the whole lobe saturates the V_MAX
+            # clamp and arrows freeze. This split is the standard Voellmy–Salm
+            # formulation.
+            tau_turb_h = G * np.maximum(h_new, 0.0) * u_mag**2 / max(xi, 1.0)
+            u_safe = np.maximum(u_mag, 1e-9)
+            turb_x = -u / u_safe * tau_turb_h
+            turb_y = -v / u_safe * tau_turb_h
+            coul_mag = np.minimum(tau_coulomb_h, drive_mag)
+            coul_x = np.where(drive_mag > 1e-9, -drive_x / (drive_mag + 1e-9) * coul_mag, 0.0)
+            coul_y = np.where(drive_mag > 1e-9, -drive_y / (drive_mag + 1e-9) * coul_mag, 0.0)
 
-        # Clamp depth to prevent overflow
-        h_new = np.clip(h_new, 0, 100)
+            tend_x = drive_x + turb_x + coul_x
+            tend_y = drive_y + turb_y + coul_y
+            hu_new = hu + dt_sub * tend_x
+            hv_new = hv + dt_sub * tend_y
 
-        # ── Momentum update (semi-implicit for stability) ──
-        # Free-surface pressure gradient −g·h·∇η (η = z + h) spreads the pile.
-        eta_field = terrain + h
-        deta_dx = np.zeros_like(eta_field)
-        deta_dy = np.zeros_like(eta_field)
-        deta_dx[1:-1, 1:-1] = (eta_field[1:-1, 2:] - eta_field[1:-1, :-2]) / (2.0 * dx)
-        deta_dy[1:-1, 1:-1] = (eta_field[2:, 1:-1] - eta_field[:-2, 1:-1]) / (2.0 * dx)
-        # All momentum tendencies below are per-unit-density (units: m²/s²),
-        # consistent with hu = h·u depth-integrated momentum.
-        pressure_x = -G * h * deta_dx
-        pressure_y = -G * h * deta_dy
+            # Consistent velocity clamp: cap the speed, then rebuild momentum
+            # from h·u. The old arbitrary momentum clip (hu ≤ h·60) let thin
+            # cells carry unrealistic velocities.
+            u_new = np.zeros_like(hu_new)
+            v_new = np.zeros_like(hv_new)
+            u_new[wet_new] = np.clip(hu_new[wet_new] / np.maximum(h_new[wet_new], h_min), -V_MAX, V_MAX)
+            v_new[wet_new] = np.clip(hv_new[wet_new] / np.maximum(h_new[wet_new], h_min), -V_MAX, V_MAX)
+            hu_new = h_new * u_new
+            hv_new = h_new * v_new
 
-        # Bed-slope gravity pull: g·h·sinθ along the downslope direction.
-        gravity_x = G * h * sin_theta * grad_x
-        gravity_y = G * h * sin_theta * grad_y
+            # ── One-way outflow gates on the boundary ring ──
+            # A deep pile at a steep edge pushes its own normal velocity back
+            # INTO the domain; the zero-gradient copy then feeds that inward
+            # velocity into the ghost ring, so the boundary Rusanov flux
+            # re-injects mass into the interior every substep (bore
+            # reflection) → the deposit grows into a tower pinned to the
+            # edge. Gate the normal momentum of the outermost interior ring to
+            # be outward-only: deep material at the boundary can only drain
+            # off-domain (tracked by `outflow`) and can never build against
+            # the edge. Top/bottom rings gate v (y-normal), left/right u.
+            hu_new[:, 1] = h_new[:, 1] * np.minimum(u_new[:, 1], 0.0)
+            hu_new[:, -2] = h_new[:, -2] * np.maximum(u_new[:, -2], 0.0)
+            hv_new[1, :] = h_new[1, :] * np.minimum(v_new[1, :], 0.0)
+            hv_new[-2, :] = h_new[-2, :] * np.maximum(v_new[-2, :], 0.0)
 
-        # ── Voellmy-Salm bed friction (correct form) ──
-        # τ_b/ρ = μ_c·g·h·cos²θ + g·u·|u|/ξ      (forces per unit density)
-        u_mag = np.sqrt(u**2 + v**2)
-        u_hat_x = np.where(u_mag > 1e-10, u / (u_mag + 1e-10), 0.0)
-        u_hat_y = np.where(u_mag > 1e-10, v / (u_mag + 1e-10), 0.0)
-        # Coulomb (dry-friction) core: normal stress reduced by cos²θ.
-        tau_coulomb_h = mu * G * h * cos_theta**2                      # m²/s²
-        # Turbulent (Chézy/Voellmy) velocity-squared drag, ξ in m/s² divides
-        tau_turb_h = G * u_mag * np.maximum(h, 0.0) / max(xi, 1.0)     # m²/s²
-        tau_total_h = tau_coulomb_h + tau_turb_h
+            # ── Boundary conditions: zero gradient (outflow), all edges ──
+            h_new[0, :] = h_new[1, :]; h_new[-1, :] = h_new[-2, :]
+            h_new[:, 0] = h_new[:, 1]; h_new[:, -1] = h_new[:, -2]
+            hu_new[0, :] = hu_new[1, :]; hu_new[-1, :] = hu_new[-2, :]
+            hu_new[:, 0] = hu_new[:, 1]; hu_new[:, -1] = hu_new[:, -2]
+            hv_new[0, :] = hv_new[1, :]; hv_new[-1, :] = hv_new[-2, :]
+            hv_new[:, 0] = hv_new[:, 1]; hv_new[:, -1] = hv_new[:, -2]
 
-        friction_x = -tau_total_h * u_hat_x
-        friction_y = -tau_total_h * u_hat_y
+            # Transmissive (open) boundary: the copy BC feeds a one-cell ghost
+            # ring from the interior; mass that reaches that ring has flowed
+            # out of the domain. Track it so conservation holds as
+            # interior + outflow = initial, and the deposit cannot pile into
+            # a tower against a hard wall (the old force-Σh=m_pre re-balance
+            # made the edge a reflecting wall → the tall boundary towers and
+            # the saturated cap-speed velocities they caused).
+            outflow += max(0.0, m_pre - float(h_new[1:-1, 1:-1].sum()))
 
-        # Momentum tendency: pressure + gravity + friction (all per-ρ).
-        # Only drive wet cells; no dry-cell momentum injection.
-        tend_x = (pressure_x + gravity_x + friction_x) * wet
-        tend_y = (pressure_y + gravity_y + friction_y) * wet
-        hu_new = hu + dt * tend_x
-        hv_new = hv + dt * tend_y
-        # Clamp velocity so (hu/h) stays physical — prevents wet/dry blow-ups
-        u_lim = np.maximum(h, 0.01) * 60.0  # max velocity 60 m/s locally
-        hu_new = np.clip(hu_new, -u_lim, u_lim)
-        hv_new = np.clip(hv_new, -u_lim, u_lim)
+            # ── Check for NaN and reset if needed ──
+            if np.any(np.isnan(h_new)) or np.any(np.isinf(h_new)):
+                h_new = np.nan_to_num(h_new, nan=0, posinf=0, neginf=0)
+                hu_new = np.nan_to_num(hu_new, nan=0, posinf=0, neginf=0)
+                hv_new = np.nan_to_num(hv_new, nan=0, posinf=0, neginf=0)
 
-        # ── Deposition: where driving stress < resisting friction ──
-        # Compare per-unit-density forces consistent with the momentum update.
-        driving_h = G * h * sin_theta
-        deposit_mask = (driving_h < tau_total_h) & wet
-        hu_new = np.where(deposit_mask, 0, hu_new)
-        hv_new = np.where(deposit_mask, 0, hv_new)
-
-        # ── Boundary conditions: zero gradient (outflow), all 4 edges, all 3 fields ──
-        h_new[0, :] = h_new[1, :]; h_new[-1, :] = h_new[-2, :]
-        h_new[:, 0] = h_new[:, 1]; h_new[:, -1] = h_new[:, -2]
-        hu_new[0, :] = hu_new[1, :]; hu_new[-1, :] = hu_new[-2, :]
-        hu_new[:, 0] = hu_new[:, 1]; hu_new[:, -1] = hu_new[:, -2]
-        hv_new[0, :] = hv_new[1, :]; hv_new[-1, :] = hv_new[-2, :]
-        hv_new[:, 0] = hv_new[:, 1]; hv_new[:, -1] = hv_new[:, -2]
-
-        # ── Ensure non-negative depth ──
-        h_new = np.maximum(h_new, 0)
-
-        # ── Check for NaN and reset if needed ──
-        if np.any(np.isnan(h_new)) or np.any(np.isinf(h_new)):
-            h_new = np.nan_to_num(h_new, nan=0, posinf=0, neginf=0)
-            hu_new = np.nan_to_num(hu_new, nan=0, posinf=0, neginf=0)
-            hv_new = np.nan_to_num(hv_new, nan=0, posinf=0, neginf=0)
-
-        # Update state
-        h = h_new
-        hu = hu_new
-        hv = hv_new
+            # Update state
+            h = h_new
+            hu = hu_new
+            hv = hv_new
+            remaining -= dt_sub
 
         # ── Snapshot ──
         if step_i % snap_interval == 0 or step_i == total_steps - 1:
-            u = np.where(h > 0.01, hu / h, 0)
-            v = np.where(h > 0.01, hv / h, 0)
+            if params.get('debug_mass'):
+                print(f"  [DBG] step={step_i} interior={h[1:-1,1:-1].sum():.4f} "
+                      f"+outflow={outflow:.4f} maxh={h.max():.1f} wet={(h>0.01).sum()}")
+            u = np.divide(hu, np.maximum(h, h_min), out=np.zeros_like(h), where=h > wet_thresh)
+            v = np.divide(hv, np.maximum(h, h_min), out=np.zeros_like(h), where=h > wet_thresh)
             v_mag = np.sqrt(u**2 + v**2)
 
             snapshots.append({
@@ -443,8 +619,8 @@ def simulate_landslide(params):
     elapsed = time.time() - t0
 
     # ── Final results ──
-    u = np.where(h > 0.01, hu / h, 0)
-    v = np.where(h > 0.01, hv / h, 0)
+    u = np.divide(hu, np.maximum(h, h_min), out=np.zeros_like(h), where=h > 0.01)
+    v = np.divide(hv, np.maximum(h, h_min), out=np.zeros_like(h), where=h > 0.01)
     v_mag = np.sqrt(u**2 + v**2)
 
     # Runout distance: max distance from source where debris reached
@@ -455,8 +631,12 @@ def simulate_landslide(params):
     affected_cells = int(debris_mask.sum())
     affected_area_km2 = affected_cells * (dx / 1000.0)**2
 
-    # Total volume
-    total_volume = float(h.sum() * dx * dx)
+    # Total volume = in-domain debris + mass that flowed off the open domain.
+    # Conservation: interior + outflow == initial mass, so nothing is created
+    # or destroyed — material just ran out of the region of interest.
+    in_domain_vol = float(h[1:-1, 1:-1].sum() * dx * dx)
+    outflow_vol = float(outflow * dx * dx)
+    total_volume = in_domain_vol + outflow_vol
 
     final = {
         'landslide_depth': h.astype(np.float32),
@@ -473,12 +653,18 @@ def simulate_landslide(params):
         'max_runout_km': max_runout,
         'affected_area_km2': affected_area_km2,
         'total_volume_m3': total_volume,
+        'in_domain_volume_m3': in_domain_vol,
+        'outflow_volume_m3': outflow_vol,
         'source_cells': source_cells,
     }
 
+    drift = (h[1:-1, 1:-1].sum() + outflow - init_mass) / max(init_mass, 1e-12) * 100.0
+
     print(f"\n[DONE] {elapsed:.1f}s | max_depth={final['max_depth']:.1f}m | "
           f"max_vel={final['max_velocity']:.1f}m/s | runout={max_runout:.1f}km | "
-          f"affected={affected_area_km2:.1f}km² | vol={total_volume/1e6:.1f}M m³")
+          f"affected={affected_area_km2:.1f}km² | vol={total_volume/1e6:.1f}M m³ "
+          f"(in-domain {in_domain_vol/1e6:.2f}M + outflow {outflow_vol/1e6:.2f}M) | "
+          f"mass drift {drift:.4f}%")
 
     return {'final': final, 'snapshots': snapshots,
             'params': {'grid_size': gs, 'trigger_type': trigger_type, 'magnitude': magnitude,

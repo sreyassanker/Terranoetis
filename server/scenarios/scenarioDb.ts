@@ -122,6 +122,10 @@ export class ScenarioDatabase {
       id: row.id,
       type: row.type as ScenarioType,
       params,
+      location: {
+        lat: (params.lat as number) || (params.epicenterLat as number) || 0,
+        lon: (params.lon as number) || (params.epicenterLon as number) || 0,
+      },
       pointCloud,
       validationScore: row.validation_score,
       createdAt: row.created_at,

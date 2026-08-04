@@ -75,7 +75,6 @@ describe('GPU texture atlas packing', () => {
     // The normalized value at index world_idx = 5*16+3 is (world_idx*0.1 - min)/(max - min)
     const val = (5 * 16 + 3) * 0.1;
     const nv = (val - atlas.min) / (atlas.max - atlas.min);
-    const pxPtr = ((0 * 4 + 3 + 0) * atlas.width + (5 % 4) * 4) * 4; // frame tile -> offset = (offY + r)*width + offX + c
     const tileOffY = 1 * 4;
     const tileOffX = (5 % 4) * 4;
     const p = ((tileOffY + 0) * atlas.width + (tileOffX + 3)) * 4;

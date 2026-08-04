@@ -11,18 +11,21 @@
  * top level of the component body.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { Fragment, useCallback, useMemo, useState } from 'react';
+import type { Viewer } from 'cesium';
 import { Sliders, CheckCircle, Loader2, Cpu, Download, ExternalLink, Image, X } from 'lucide-react';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import { computeStudyAreaBbox } from '@/rendering/studyArea';
 import { SCENARIO_TYPE_LABELS } from './types';
 import Panel from '@/components/ui/Panel';
 import { useKaggleSimulation } from '@/hooks/useKaggleSimulation';
+import { sampleStudyAreaTerrain } from './studyAreaTerrain';
 import {
   buildSimulationRequest,
   deriveCenter,
   deriveExtentKm,
   derivePhysicsFormOverrides,
+  type SimulationRequest,
 } from '@/services/kaggleSim';
 
 // ── Form schema ──────────────────────────────────────────────────────────────
@@ -156,6 +159,8 @@ interface ScenarioEditorProps {
   onKaggleStart?: () => void;
   studyAreas: StudyAreaItem[];
   activeStudyAreaId: string | null;
+  /** Cesium viewer (for sampling real terrain on landslide runs). */
+  viewer?: Viewer | null;
   zIndex?: number;
 }
 
@@ -165,6 +170,7 @@ export default function ScenarioEditor({
   onKaggleStart,
   studyAreas,
   activeStudyAreaId,
+  viewer,
   zIndex = 110,
 }: ScenarioEditorProps) {
   const [scenarioType, setScenarioType] = useState('earthquake_swarm');
@@ -206,15 +212,25 @@ export default function ScenarioEditor({
     setParams(defaultsFor(type));
   }, []);
 
-  const buildRequest = useCallback(() => {
+  const buildRequest = useCallback<() => SimulationRequest>(() => {
     if (!activeBbox) {
       throw new Error('Draw and activate a study area before generating.');
     }
-    return buildSimulationRequest(
+    const base = buildSimulationRequest(
       { scenarioType, params, gridSize: 256 },
       activeBbox,
     );
-  }, [activeBbox, scenarioType, params]);
+    // Landslide only: if the Cesium globe has real elevation for the drawn
+    // box, sample it and ship it so the kernel runs on real terrain instead of
+    // the synthetic ridge. No real relief → keep synthetic (never zero/flat).
+    if (base.type === 'landslide' && viewer) {
+      const real = sampleStudyAreaTerrain(viewer, activeBbox);
+      if (real) {
+        return { ...base, terrain: real.values, terrain_gs: real.gs };
+      }
+    }
+    return base;
+  }, [activeBbox, scenarioType, params, viewer]);
 
   const handleRun = useCallback(() => {
     setRunScenarioType(scenarioType);

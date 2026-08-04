@@ -1,10 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  registerPowerEngine,
-  pauseBackgroundEngines,
-  resumeBackgroundEngines,
-  isPowerSaverPaused,
-} from '../../kaggle/powerSaver';
 
 vi.mock('../../observability/logger', () => ({
   logger: {

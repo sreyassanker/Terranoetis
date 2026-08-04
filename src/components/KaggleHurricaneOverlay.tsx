@@ -28,6 +28,7 @@ const SCHEMES = [
   { name: 'coolwarm', label: 'Cool–Warm' },
 ];
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const HURRICANE_CONFIG: ScalarOverlayConfig = {
   title: 'Hurricane CFD',
   accent: 'rgba(56,189,248,0.95)',

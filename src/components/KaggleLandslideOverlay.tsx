@@ -31,6 +31,7 @@ const SCHEMES = [
   { name: 'coolwarm', label: 'Cool–Warm' },
 ];
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const LANDSLIDE_CONFIG: ScalarOverlayConfig = {
   title: 'Landslide CFD',
   accent: 'rgba(180,83,9,0.95)',
@@ -72,7 +73,7 @@ export const LANDSLIDE_CONFIG: ScalarOverlayConfig = {
       ['Max depth', `${maxDepth.toFixed(2)} m`],
       ['Max speed', `${maxVel.toFixed(2)} m/s`],
       ['Affected', `${affected.toFixed(1)}%`],
-      ['Runout', runoutMax ? `${runoutMax.toFixed(1)} m` : '—'],
+      ['Runout', runoutMax ? `${runoutMax.toFixed(1)} km` : '—'],
       ['Domain', `${domainKm.toFixed(1)} km`],
     ];
   },
@@ -83,9 +84,6 @@ export default function KaggleLandslideOverlay(
 ) {
   return <KaggleScalarOverlay {...props} config={LANDSLIDE_CONFIG} />;
 }
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const __unused = null;
 
 // React import locally for JSX
 import * as React from 'react';

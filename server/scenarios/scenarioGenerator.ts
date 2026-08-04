@@ -721,8 +721,8 @@ function generateTsunamiWave(p: TsunamiWaveParams): PointCloud {
 
   // === EPICENTER POINT ===
   // Accepts both epicenterLat/epicenterLon (backend contract) and lat/lon (UI sends)
-  const epicenterLat = p.epicenterLat ?? (p as any).lat;
-  const epicenterLon = p.epicenterLon ?? (p as any).lon;
+  const epicenterLat = p.epicenterLat ?? (p as { lat?: number }).lat;
+  const epicenterLon = p.epicenterLon ?? (p as { lon?: number }).lon;
   const epicPt = geoToSphere(epicenterLat, epicenterLon, 0, 'height');
   cloud.push({ x: epicPt[0], y: epicPt[1], z: epicPt[2] });
 
