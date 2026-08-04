@@ -8138,33 +8138,37 @@ export default function App() {
     seismicAnimationsRef.current.forEach(a => { if (a.interval) clearInterval(a.interval); });
     seismicAnimationsRef.current = [];
     if (clickHandlerRef.current) { clickHandlerRef.current(); clickHandlerRef.current = null; }
-    if (viewerRef.current) {
-      removeOsmBuildings(viewerRef.current);
-      viewerRef.current.entities.removeAll();
-      viewerRef.current.destroy();
-      viewerRef.current = null;
+    const v = viewerRef.current;
+    if (v) {
+      // Tear down children FIRST while the viewer is still alive — several
+      // renderers (entropyHalo, oracleChain, entityTracker) dereference
+      // viewer.entities / viewer.scene in their destroy() and throw if the
+      // viewer is destroyed before them.
+      try { entropyHaloRef.current?.destroy(); } catch { /* ignore */ }
+      try { oracleChainRef.current?.destroy(); } catch { /* ignore */ }
+      try { entityTrackerRef.current?.destroy(); } catch { /* ignore */ }
+      try { aisTrackerRef.current?.stop(); aisTrackerRef.current?.clear(); } catch { /* ignore */ }
+      try { flightDrRef.current?.clear(); } catch { /* ignore */ }
+      try { adsbLolDrRef.current?.clear(); } catch { /* ignore */ }
+      try { adsbFiDrRef.current?.clear(); } catch { /* ignore */ }
+      try { flightawareDrRef.current?.clear(); } catch { /* ignore */ }
+      try { airlabsDrRef.current?.clear(); } catch { /* ignore */ }
+      try { removeOsmBuildings(v); } catch { /* ignore */ }
+      try { v.entities.removeAll(); } catch { /* ignore */ }
+      v.destroy();
     }
+    viewerRef.current = null;
     focusMarkerRef.current = null;
     smokeParticlesRef.current = [];
     Object.keys(weatherCardElementsRef.current).forEach(key => { delete weatherCardElementsRef.current[key]; });
-    entropyHaloRef.current?.destroy();
     entropyHaloRef.current = null;
-    oracleChainRef.current?.destroy();
     oracleChainRef.current = null;
-    entityTrackerRef.current?.destroy();
     entityTrackerRef.current = null;
-    aisTrackerRef.current?.stop();
-    aisTrackerRef.current?.clear();
     aisTrackerRef.current = null;
-    flightDrRef.current?.clear();
     flightDrRef.current = null;
-    adsbLolDrRef.current?.clear();
     adsbLolDrRef.current = null;
-    adsbFiDrRef.current?.clear();
     adsbFiDrRef.current = null;
-    flightawareDrRef.current?.clear();
     flightawareDrRef.current = null;
-    airlabsDrRef.current?.clear();
     airlabsDrRef.current = null;
     disasterNearMeRequestedRef.current = false;
     if (geolocationWatchRef.current !== null) {
@@ -10021,6 +10025,7 @@ export default function App() {
           zIndex={getPanelZIndex('scenario-editor')}
           studyAreas={studyAreas}
           activeStudyAreaId={activeStudyAreaId}
+          viewer={viewerRef.current}
           onKaggleComplete={(jobId, lat, lon, scenarioType) => {
             setShowScenarioEditor(false);
             // Also trigger the procedural viewer so ScenarioViewer renders on the globe

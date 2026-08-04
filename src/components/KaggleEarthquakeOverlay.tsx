@@ -30,6 +30,7 @@ const SCHEMES = [
   { name: 'coolwarm', label: 'Cool–Warm' },
 ];
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const EARTHQUAKE_CONFIG: ScalarOverlayConfig = {
   title: 'Earthquake CFD',
   accent: 'rgba(250,204,21,0.95)',

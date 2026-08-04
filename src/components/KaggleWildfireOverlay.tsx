@@ -28,6 +28,7 @@ const SCHEMES = [
   { name: 'coolwarm', label: 'Cool–Warm' },
 ];
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const WILDFIRE_CONFIG: ScalarOverlayConfig = {
   title: 'Wildfire CFD',
   accent: 'rgba(248,113,113,0.95)',

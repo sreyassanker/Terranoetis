@@ -376,8 +376,8 @@ export function sliceFrame(series: GridData, frame: number): number[] {
 export function toFrameSeries(
   series: GridData | null,
   times: number[],
-  fallbackRows: number,
-  fallbackCols: number,
+  _fallbackRows: number,
+  _fallbackCols: number,
 ): FrameSeries | null {
   if (!series || series.shape.length < 3) return null;
   const [frames, rows, cols] = series.shape;

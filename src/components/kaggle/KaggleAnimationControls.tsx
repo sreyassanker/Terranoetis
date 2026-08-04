@@ -31,16 +31,34 @@ export default function KaggleAnimationControls({
 }: KaggleAnimationControlsProps) {
   const rafRef = useRef<number | null>(null);
   const lastRef = useRef<number>(0);
+  const accumRef = useRef<number>(0);
+  const frameRef = useRef<number>(frame);
+
+  // Keep the RAF loop's frame cursor in sync with external scrubbing, but
+  // avoid mutating the ref during render (react-hooks/refs).
+  useEffect(() => {
+    frameRef.current = frame;
+  }, [frame]);
 
   useEffect(() => {
     if (!playing) return;
+    const frameMs = 1000 / fps;
     lastRef.current = performance.now();
+    accumRef.current = 0;
     const tick = (now: number) => {
       const elapsed = now - lastRef.current;
-      const frameMs = 1000 / fps;
-      const step = Math.max(1, Math.round(elapsed / frameMs));
       lastRef.current = now;
-      onFrameChange((frame + step) % frames);
+      accumRef.current += elapsed;
+      // Advance exactly one frame per frameMs — RAF runs far faster than fps,
+      // so accumulate the delta and consume whole frameMs chunks. This fixes
+      // the previous always-step-1 behavior that played the timeline at
+      // render rate (~60fps) regardless of `fps`.
+      const steps = Math.floor(accumRef.current / frameMs);
+      if (steps >= 1) {
+        accumRef.current -= steps * frameMs;
+        frameRef.current = (frameRef.current + steps) % frames;
+        onFrameChange(frameRef.current);
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
@@ -48,7 +66,7 @@ export default function KaggleAnimationControls({
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [playing, fps, frame, frames, onFrameChange]);
+  }, [playing, fps, frames, onFrameChange]);
 
   useEffect(() => () => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);

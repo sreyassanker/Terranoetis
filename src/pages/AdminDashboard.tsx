@@ -98,12 +98,13 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
 
     try {
       if (installForm.mode === 'zip') {
-        if (!installForm.zipFile) { setInstallStatus('Error: No zip file selected'); return; }
+        const zipFile = installForm.zipFile;
+        if (!zipFile) { setInstallStatus('Error: No zip file selected'); return; }
         const b64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve((reader.result as string).split(',')[1]);
           reader.onerror = () => reject(reader.error);
-          reader.readAsDataURL(installForm.zipFile);
+          reader.readAsDataURL(zipFile);
         });
         const resp = await fetch('/api/admin/plugins/install-zip', {
           method: 'POST',

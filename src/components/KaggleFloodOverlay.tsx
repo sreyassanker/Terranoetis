@@ -25,7 +25,6 @@ import {
   schemeToCfa,
   toFrameSeries,
   type ColorStop,
-  type GridData,
 } from './kaggle/shared';
 import KaggleLegend, { type SchemeOption } from './kaggle/KaggleLegend';
 import KaggleAnimationControls from './kaggle/KaggleAnimationControls';
@@ -104,7 +103,7 @@ export default function KaggleFloodOverlay({
       s.surface.destroy();
       s.arrows.destroy();
       s.particles.destroy();
-      s.boundary && viewer?.entities.remove(s.boundary);
+      if (s.boundary && viewer) viewer.entities.remove(s.boundary);
       stackRef.current = null;
     }
   }, [viewer]);

@@ -75,7 +75,6 @@ export function sampleDomainTerrain(
   }
 
   if (opts.debugName) {
-    // eslint-disable-next-line no-console
     console.debug(
       `[terrain:${opts.debugName}] sampled ${hits}/${hits + misses} coarse cells ` +
       `(${coarseGs}×${coarseGs} → ${outGs}×${outGs} bilinear upsample); ` +
@@ -100,9 +99,10 @@ export function sampleDomainTerrain(
       const refined = sampleDomainTerrain({ ...opts });
       onRefined(refined);
     };
-    // Sample each tile-loaded event once, then unsubscribe to avoid thrash.
-    globe.tileLoadedEvent.addEventListener(listener);
-    remove = () => globe.tileLoadedEvent.removeEventListener(listener);
+// Sample each tile-loaded event once, then unsubscribe to avoid thrash.
+  const globeLoose = globe as unknown as { tileLoadedEvent: Cesium.Event };
+  globeLoose.tileLoadedEvent.addEventListener(listener);
+  remove = () => globeLoose.tileLoadedEvent.removeEventListener(listener);
   }
 
   return firstPass;

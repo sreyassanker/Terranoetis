@@ -28,6 +28,7 @@ const SCHEMES = [
   { name: 'coolwarm', label: 'Cool–Warm' },
 ];
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const VOLCANO_CONFIG: ScalarOverlayConfig = {
   title: 'Volcano CFD',
   accent: 'rgba(156,163,175,0.95)',

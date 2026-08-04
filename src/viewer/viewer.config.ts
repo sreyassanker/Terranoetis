@@ -69,8 +69,11 @@ export async function applyTerrainProvider(viewer: Cesium.Viewer, ionToken?: str
     Cesium.Ion.defaultAccessToken = ionToken;
     try {
       viewer.terrainProvider = await Cesium.createWorldTerrainAsync({
-        requestVertexNormals: true,
-        requestWaterMask: true,
+        // Vertex normals / water mask are cosmetic (lighting + ocean depth) and
+        // require premium Ion assets; the plain global terrain loads with any
+        // valid Ion token, which is all we need for height sampling.
+        requestVertexNormals: false,
+        requestWaterMask: false,
       });
       return true;
     } catch {

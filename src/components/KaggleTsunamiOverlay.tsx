@@ -29,6 +29,7 @@ const SCHEMES = [
   { name: 'coolwarm', label: 'Cool–Warm' },
 ];
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const TSUNAMI_CONFIG: ScalarOverlayConfig = {
   title: 'Tsunami CFD',
   accent: 'rgba(34,211,238,0.95)',

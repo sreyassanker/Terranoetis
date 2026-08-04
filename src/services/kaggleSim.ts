@@ -101,6 +101,13 @@ export const SimulationRequestSchema = z.discriminatedUnion('type', [
     friction_angle: z.number().min(10).max(60),
     cohesion: z.number().min(0).max(5000),
     duration_hours: durationHrs,
+    /**
+     * Real terrain sampled from the Cesium globe for the drawn study box
+     * (row-major, row 0 = north, meters above ellipsoid). When present the
+     * kernel runs the debris flow on this grid instead of synthetic terrain.
+     */
+    terrain: z.array(z.number()).max(65_536).optional(),
+    terrain_gs: z.number().int().min(2).max(256).optional(),
   }),
 ]);
 

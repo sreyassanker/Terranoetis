@@ -22,6 +22,12 @@ import {
 } from './fieldData';
 import type { GridData } from '../shared';
 import { colormapGLSL, type CfaColormapName } from './cfdColormaps';
+import {
+  runtimeCesium,
+  sceneContext,
+  type LooseMaterialAppearance,
+  type LooseTexture,
+} from './cesiumRuntime';
 
 /** Atlas tile lookup used by both the vertex shader and the fabric fragment. */
 const ATLAS_UV_GLSL = /* glsl */ `
@@ -80,8 +86,8 @@ export class ScalarSurfacePrimitive {
 
   private primitive: Cesium.Primitive | null = null;
   private material: Cesium.Material | null = null;
-  private appearance: Cesium.MaterialAppearance | null = null;
-  private atlasTexture: (Cesium.Texture & { type?: string }) | null = null;
+  private appearance: LooseMaterialAppearance | null = null;
+  private atlasTexture: LooseTexture | null = null;
   private vertexShaderSource = '';
   private opacity = 1;
   private currentFrame = -1;
@@ -241,14 +247,15 @@ export class ScalarSurfacePrimitive {
     // appearance uniforms, which Cesium does NOT rename) and the material
     // fragment (fabric uniforms get renamed to `<id>_<n>` at compile time, so
     // they must stay separate).
-    const atlasSampler = new Cesium.Sampler({
-      wrapS: Cesium.TextureWrap.CLAMP_TO_EDGE,
-      wrapT: Cesium.TextureWrap.CLAMP_TO_EDGE,
+    const R = runtimeCesium();
+    const atlasSampler = new R.Sampler({
+      wrapS: R.TextureWrap.CLAMP_TO_EDGE,
+      wrapT: R.TextureWrap.CLAMP_TO_EDGE,
       minificationFilter: Cesium.TextureMinificationFilter.LINEAR,
       magnificationFilter: Cesium.TextureMagnificationFilter.LINEAR,
     });
-    const atlasTexture = new Cesium.Texture({
-      context: this.viewer.scene.context,
+    const atlasTexture = new R.Texture({
+      context: sceneContext(this.viewer),
       source: {
         arrayBufferView: this.atlas.data,
         width: this.atlas.width,
@@ -259,7 +266,7 @@ export class ScalarSurfacePrimitive {
       sampler: atlasSampler,
       // Atlas is stored row 0 = grid row 0 (north); st.t=0 must sample v=0.
       flipY: false,
-    }) as Cesium.Texture & { type?: string };
+    }) as LooseTexture;
     // Material.getUniformType() keys off `.type` to discriminate sampler2D.
     (atlasTexture as unknown as { type: string }).type = 'sampler2D';
     this.atlasTexture = atlasTexture;
@@ -276,10 +283,6 @@ export class ScalarSurfacePrimitive {
     });
     (this.primitive as unknown as { name?: string }).name =
       `kaggle-scalar-${this.colormap}`;
-    // Keep the collection from destroying the primitive on removal — the class
-    // owns both the texture (via material uniforms) and the appearance, so
-    // disposal order is handled explicitly in destroy().
-    (this.primitive as unknown as { destroyPrimitives?: boolean });
     this.viewer.scene.primitives.add(this.primitive);
     this.viewer.scene.requestRender();
   }
@@ -323,7 +326,7 @@ export class ScalarSurfacePrimitive {
    * material holds this.atlasTexture as a shared uniform — ownership of the
    * atlas stays with the class, so disposal must detach it first.
    */
-  private buildAppearance(cmap: CfaColormapName): Cesium.MaterialAppearance {
+  private buildAppearance(cmap: CfaColormapName): LooseMaterialAppearance {
     if (this.destroyed || !this.atlasTexture) {
       throw new Error('buildAppearance called after destroy or without atlas');
     }
@@ -351,7 +354,7 @@ export class ScalarSurfacePrimitive {
       translucent: !this.forceOpaque,
       materialSupport: Cesium.MaterialAppearance.MaterialSupport.TEXTURED,
       vertexShaderSource: this.vertexShaderSource,
-    });
+    }) as LooseMaterialAppearance;
     appearance.uniforms = {
       u_vs_field: this.atlasTexture,
       u_vs_frame: frame,
@@ -375,7 +378,7 @@ export class ScalarSurfacePrimitive {
    * colormap swaps — so detach it from the material first.
    */
   private disposeMaterial(mat: Cesium.Material | null): void {
-    if (!mat || mat.isDestroyed()) return;
+    if (!mat || typeof mat.isDestroyed !== 'function' || mat.isDestroyed()) return;
     const textures = (mat as unknown as { _textures?: Record<string, unknown> })._textures;
     if (textures) {
       for (const key of Object.keys(textures)) {
@@ -390,13 +393,22 @@ export class ScalarSurfacePrimitive {
    * both the fabric material's `_textures` and the appearance's own
    * `uniforms.u_vs_field`.
    */
-  private disposeAppearance(appearance: Cesium.MaterialAppearance | null): void {
-    if (!appearance || appearance.isDestroyed()) return;
+  private disposeAppearance(appearance: LooseMaterialAppearance | null): void {
+    if (!appearance || typeof appearance.isDestroyed !== 'function' || appearance.isDestroyed()) return;
     if (this.atlasTexture && appearance.uniforms && appearance.uniforms.u_vs_field === this.atlasTexture) {
       delete appearance.uniforms.u_vs_field;
     }
     this.disposeMaterial(appearance.material);
     appearance.destroy();
+  }
+
+  /** Schedule a render, no-op when the owning viewer is already torn down. */
+  private requestRender(): void {
+    try {
+      this.viewer.scene.requestRender();
+    } catch {
+      /* viewer may already be destroyed during teardown */
+    }
   }
 
   /** Set the current animation frame — a single GPU uniform update. */
@@ -406,10 +418,10 @@ export class ScalarSurfacePrimitive {
     if (clamped === this.currentFrame) return;
     this.currentFrame = clamped;
     this.material.uniforms.u_frame = clamped;
-    if (this.appearance && this.appearance.uniforms.u_vs_frame !== undefined) {
+    if (this.appearance && this.appearance.uniforms && this.appearance.uniforms.u_vs_frame !== undefined) {
       this.appearance.uniforms.u_vs_frame = clamped;
     }
-    this.viewer.scene.requestRender();
+    this.requestRender();
   }
 
   /** Live opacity (0–1) via the u_opacity uniform. */
@@ -417,7 +429,7 @@ export class ScalarSurfacePrimitive {
     if (this.destroyed || !this.material) return;
     this.opacity = Math.max(0, Math.min(1, alpha));
     this.material.uniforms.u_opacity = this.opacity;
-    this.viewer.scene.requestRender();
+    this.requestRender();
   }
 
   /**
@@ -435,7 +447,7 @@ export class ScalarSurfacePrimitive {
     this.material = this.appearance.material;
     this.primitive.appearance = this.appearance;
     this.disposeAppearance(oldAppearance);
-    this.viewer.scene.requestRender();
+    this.requestRender();
   }
 
   destroy(): void {
@@ -445,13 +457,17 @@ export class ScalarSurfacePrimitive {
       // Remove from the scene WITHOUT destroying — ownership of the material,
       // appearance, and atlas texture is this class's responsibility, and
       // dispose order matters (the atlas lives inside appearance.material).
-      this.viewer.scene.primitives.remove(this.primitive);
+      try {
+        this.viewer.scene.primitives.remove(this.primitive);
+      } catch {
+        /* viewer may already be destroyed during teardown */
+      }
       this.primitive = null;
     }
     this.disposeAppearance(this.appearance);
     this.appearance = null;
     this.material = null;
-    if (this.atlasTexture && !this.atlasTexture.isDestroyed()) {
+    if (this.atlasTexture && (typeof this.atlasTexture.isDestroyed !== 'function' || !this.atlasTexture.isDestroyed())) {
       this.atlasTexture.destroy();
       this.atlasTexture = null;
     }

@@ -145,7 +145,13 @@ export function KaggleScalarOverlay({
     if (!s) return;
     s.surface.destroy();
     s.arrows?.destroy();
-    if (viewer) viewer.entities.remove(s.boundary);
+    if (viewer && typeof viewer.isDestroyed === 'function' && !viewer.isDestroyed()) {
+      try {
+        viewer.entities.remove(s.boundary);
+      } catch {
+        /* entities may be gone if the viewer is mid-teardown */
+      }
+    }
     stackRef.current = null;
   }, [viewer]);
 
@@ -287,6 +293,11 @@ export function KaggleScalarOverlay({
           vxSeries,
           vySeries,
           terrain,
+          // Ride the displaced debris surface: arrows hover `lift` meters above
+          // the surface (which rises to (depth/maxDepth)*exaggeration), instead
+          // of being buried under it at bare-terrain height.
+          depthSeries: seriesGrid as GridData,
+          exaggeration: config.exaggeration,
           lift: config.exaggeration * 0.12,
           stride: Math.max(1, Math.ceil(gs / 72)), // ~72 max across domain
           minLen: cellSizeM * 0.55,

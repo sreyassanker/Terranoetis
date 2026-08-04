@@ -1,6 +1,8 @@
 declare module 'adm-zip' {
   interface IZipEntry {
+    name: string;
     entryName: string;
+    isDirectory: boolean;
     getData(): Buffer;
   }
   export default class AdmZip {

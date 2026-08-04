@@ -76,9 +76,13 @@ test-results/
 
 # Local config with secrets
 opencode.json
+.claude/
 
 # Throwaway test scripts
 test_*.cjs
 live_*.cjs
 final_browser_test.cjs
 live_test_scenario_viewer.cjs
+
+# Session notes
+SESSION_SUMMARY.md
