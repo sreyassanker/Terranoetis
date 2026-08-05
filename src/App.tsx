@@ -165,6 +165,32 @@ interface ApiVaultState {
 }
 
 let cachedCctvCanvas: HTMLCanvasElement | null = null;
+const cachedCctvCanvases = new Map<string, HTMLCanvasElement>();
+
+const CCTV_FEED_COLORS: Record<string, string> = {
+  m3u8: '#22c55e',
+  mjpeg: '#22c55e',
+  image: '#f59e0b',
+  iframe: '#ec4899',
+};
+const CCTV_UNKNOWN_COLOR = '#64748b';
+
+function cctvFeedColor(meta: Record<string, unknown>): string {
+  const feedType = String(meta.feedType ?? '').toLowerCase();
+  if (CCTV_FEED_COLORS[feedType]) return CCTV_FEED_COLORS[feedType];
+  const url = String(meta.previewUrl ?? meta.streamUrl ?? '');
+  if (/\.m3u8(\?|$)/i.test(url)) return CCTV_FEED_COLORS.m3u8;
+  if (/\.mjpeg|\.mjpg|multipart/i.test(url)) return CCTV_FEED_COLORS.mjpeg;
+  if (/youtube\.com\/(watch|embed)|youtu\.be|player\./i.test(url)) return CCTV_FEED_COLORS.iframe;
+  if (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(url)) return CCTV_FEED_COLORS.image;
+  return CCTV_UNKNOWN_COLOR;
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const m = hex.replace('#', '').match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!m) return null;
+  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+}
 let cachedYoutubeCanvas: HTMLCanvasElement | null = null;
 
 function extractYoutubeId(url?: string): string | undefined {
@@ -1871,6 +1897,72 @@ export default function App() {
     ctrl.enableTilt = true;
     ctrl.minimumZoomDistance = 100;
     ctrl.maximumZoomDistance = 5e8;
+    // Safari-only two-finger orbit, Google Earth Pro right-drag style: trackpad
+    // twists surface as GestureEvent.rotation (degrees, counterclockwise-
+    // positive) in Safari; Chrome/Firefox never emit these events. Twisting
+    // orbits the camera around the AREA CENTER (not the globe center, which is
+    // what camera.rotate does and what makes the whole globe spin), so the area
+    // stays centered and you see it from different sides. Only acts when the
+    // twist component dominates so plain pinch-zoom still works, and respects
+    // enableRotate (Travel View locks it while active).
+    const GestureCtor = (window as unknown as { GestureEvent?: unknown }).GestureEvent;
+    if (typeof GestureCtor !== 'undefined') {
+      const gestureCanvas = v.scene.canvas;
+      let lastGestureRotation = 0;
+      let orbitCenter: Cesium.Cartesian3 | null = null;
+      const computeOrbitCenter = (): Cesium.Cartesian3 => {
+        const cam = v.camera;
+        const px = new Cesium.Cartesian2(gestureCanvas.clientWidth / 2, gestureCanvas.clientHeight / 2);
+        const ray = cam.getPickRay(px);
+        if (ray) {
+          const picked = v.scene.globe.pick(ray, v.scene);
+          if (picked) return picked;
+        }
+        const ellipsoidPicked = cam.pickEllipsoid(px, Cesium.Ellipsoid.WGS84);
+        if (ellipsoidPicked) return ellipsoidPicked;
+        return Cesium.Cartesian3.add(
+          cam.position,
+          Cesium.Cartesian3.multiplyByScalar(cam.direction, 1e6, new Cesium.Cartesian3()),
+          new Cesium.Cartesian3()
+        );
+      };
+      const orbitAround = (axis: Cesium.Cartesian3, angle: number, center: Cesium.Cartesian3) => {
+        const cam = v.camera;
+        const quat = Cesium.Quaternion.fromAxisAngle(axis, angle, new Cesium.Quaternion());
+        const rot = Cesium.Matrix3.fromQuaternion(quat, new Cesium.Matrix3());
+        const rel = Cesium.Cartesian3.subtract(cam.position, center, new Cesium.Cartesian3());
+        Cesium.Matrix3.multiplyByVector(rot, rel, rel);
+        Cesium.Cartesian3.add(rel, center, cam.position);
+        Cesium.Matrix3.multiplyByVector(rot, cam.direction, cam.direction);
+        Cesium.Matrix3.multiplyByVector(rot, cam.up, cam.up);
+        Cesium.Cartesian3.cross(cam.direction, cam.up, cam.right);
+        Cesium.Cartesian3.cross(cam.right, cam.direction, cam.up);
+      };
+      const gestureStart = () => {
+        lastGestureRotation = 0;
+        const cam = v.camera;
+        orbitCenter = computeOrbitCenter();
+        // Looking almost straight down makes a horizontal orbit degenerate (it
+        // would just spin the view in place). Tilt toward the area so the orbit
+        // actually shows its sides.
+        if (cam.pitch < Cesium.Math.toRadians(-75)) {
+          orbitAround(cam.right, Cesium.Math.toRadians(-75) - cam.pitch, orbitCenter);
+        }
+      };
+      const gestureChange = (ev: Event) => {
+        const ge = ev as unknown as { rotation?: number };
+        const rot = typeof ge.rotation === 'number' ? ge.rotation : 0;
+        const delta = rot - lastGestureRotation;
+        lastGestureRotation = rot;
+        const gestureCtrl = v.scene.screenSpaceCameraController;
+        if (!gestureCtrl.enableRotate || Math.abs(delta) < 0.25 || !orbitCenter) return;
+        ev.preventDefault();
+        const axis = Cesium.Cartesian3.normalize(orbitCenter, new Cesium.Cartesian3());
+        orbitAround(axis, Cesium.Math.toRadians(delta), orbitCenter);
+      };
+      gestureCanvas.addEventListener('gesturestart', gestureStart);
+      gestureCanvas.addEventListener('gesturechange', gestureChange);
+    }
     unlockInteractionRef.current = () => {
       if (rotateTimerRef.current) {
         cancelAnimationFrame(rotateTimerRef.current as unknown as number);
@@ -5387,33 +5479,33 @@ export default function App() {
     return canvas;
   }
 
-  function createCctvIcon(): HTMLCanvasElement {
-    if (cachedCctvCanvas) return cachedCctvCanvas;
+  function createCctvIcon(color: string = '#67e8f9'): HTMLCanvasElement {
+    const cached = cachedCctvCanvases.get(color);
+    if (cached) return cached;
     const canvas = document.createElement('canvas');
     canvas.width = 36;
     canvas.height = 36;
     const ctx = canvas.getContext('2d')!;
     const cx = 18, cy = 18;
     const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, 16);
-    glow.addColorStop(0, 'rgba(103, 232, 249, 0.7)');
-    glow.addColorStop(0.5, 'rgba(103, 232, 249, 0.2)');
-    glow.addColorStop(1, 'rgba(103, 232, 249, 0)');
+    const glowRgb = hexToRgb(color) ?? { r: 103, g: 232, b: 249 };
+    glow.addColorStop(0, `rgba(${glowRgb.r}, ${glowRgb.g}, ${glowRgb.b}, 0.7)`);
+    glow.addColorStop(0.5, `rgba(${glowRgb.r}, ${glowRgb.g}, ${glowRgb.b}, 0.2)`);
+    glow.addColorStop(1, `rgba(${glowRgb.r}, ${glowRgb.g}, ${glowRgb.b}, 0)`);
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, 36, 36);
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.fillStyle = '#3b82f6';
-    ctx.strokeStyle = '#67e8f9';
+    ctx.fillStyle = color;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(-7, -5);
-    ctx.lineTo(-7, 5);
-    ctx.lineTo(6, 0);
-    ctx.closePath();
+    ctx.arc(0, 0, 5, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-    cachedCctvCanvas = canvas;
+    cachedCctvCanvases.set(color, canvas);
+    if (color === '#67e8f9') cachedCctvCanvas = canvas;
     return canvas;
   }
 
@@ -5434,7 +5526,6 @@ export default function App() {
       const ents: Cesium.Entity[] = [];
       let idx = 0;
       const chunkSize = 300;
-      const icon = createCctvIcon();
       const metaMap = cctvMetaRef.current;
 
       const addChunk = () => {
@@ -5442,7 +5533,7 @@ export default function App() {
         for (; idx < end; idx++) {
           const camera = cameras[idx];
           const entityId = `cctv_${camera.id || idx}`;
-          metaMap.set(entityId, {
+          const meta = {
             title: camera.name,
             lat: camera.lat,
             lon: camera.lon,
@@ -5458,13 +5549,14 @@ export default function App() {
             updatedAt: camera.updatedAt ?? Date.now(),
             description: sanitizeHtml(String(camera.description ?? '')),
             feedType: camera.feedType,
-          });
+          };
+          metaMap.set(entityId, meta);
           ents.push(viewer.entities.add({
             id: entityId,
             position: Cesium.Cartesian3.fromDegrees(camera.lon as number, camera.lat as number, 0),
             name: camera.name as string,
             billboard: {
-              image: icon,
+              image: createCctvIcon(cctvFeedColor(meta)),
               width: 28,
               height: 28,
               heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
@@ -8334,7 +8426,11 @@ export default function App() {
               {(() => {
                 const thumbUrl = String(p.thumbnailUrl ?? p.previewUrl ?? '');
                 const streamUrl = String(p.streamUrl ?? '');
-                const pageUrl = String(p.pageUrl ?? '');
+                const feedType = String(p.feedType ?? '');
+                const isHls = feedType === 'm3u8' || streamUrl.includes('.m3u8') || streamUrl.includes('m3u8');
+                if (isHls && streamUrl && !cctvPreviewFailed) {
+                  return <CctvVideoPlayer key={`${streamUrl}-${cctvPreviewTick}`} src={streamUrl} />;
+                }
                 const imgUrl = thumbUrl && !cctvPreviewFailed ? `${thumbUrl}${thumbUrl.includes('?') ? '&' : '?'}tick=${cctvPreviewTick}` : '';
                 return imgUrl ? (
                   <img key={imgUrl} src={imgUrl} alt={String(p.title ?? 'Live camera preview')} referrerPolicy="no-referrer" loading="eager" style={{width:'100%',height:'165px',objectFit:'cover',display:'block',background:'#000'}} onError={() => setCctvPreviewFailed(true)} />
@@ -8348,7 +8444,17 @@ export default function App() {
               <div className="sparkline-title">Public feed</div>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
                 <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.4}}>Open-source live public webcam feed.</div>
-                <a className="cctv-link" href={String(p.pageUrl ?? p.streamUrl ?? '')} target="_blank" rel="noreferrer">Open live</a>
+                <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                  <button
+                    type="button"
+                    className="cctv-link"
+                    style={{border:'none',background:'none',cursor:'pointer',padding:0}}
+                    onClick={() => { setCctvPreviewTick(t => t + 1); setCctvPreviewFailed(false); }}
+                  >
+                    Refresh
+                  </button>
+                  <a className="cctv-link" href={String(p.pageUrl ?? '')} target="_blank" rel="noreferrer">Open live</a>
+                </div>
               </div>
             </div>
           )}
@@ -9686,6 +9792,17 @@ export default function App() {
           <div className="pop-gradient" />
           <div className="heatmap-labels"><span>Low</span><span>High Density</span></div>
         
+        </div>
+      )}
+
+      {/* CCTV Feed Legend */}
+      {isLayerEnabled('india_cctv') && (
+        <div className="legend-panel show glass-panel">
+          <div className="heatmap-legend-title">Camera Feeds</div>
+          <div className="legend-row"><span className="legend-color" style={{ background: '#22c55e' }} />Live video (HLS / MJPEG)</div>
+          <div className="legend-row"><span className="legend-color" style={{ background: '#f59e0b' }} />Snapshot image</div>
+          <div className="legend-row"><span className="legend-color" style={{ background: '#ec4899' }} />Embedded player (YouTube)</div>
+          <div className="legend-row"><span className="legend-color" style={{ background: '#64748b' }} />Unknown feed type</div>
         </div>
       )}
 

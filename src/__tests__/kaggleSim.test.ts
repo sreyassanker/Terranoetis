@@ -142,6 +142,57 @@ describe('buildSimulationRequest', () => {
       ),
     ).toThrow();
   });
+
+  it('landslide: scientific knobs pass through (μ, ξ, entrainment, thresholds)', () => {
+    const req = buildSimulationRequest(
+      {
+        scenarioType: 'landslide',
+        gridSize: 256,
+        params: {
+          triggerType: 'earthquake', magnitude: 6.5, pgaThreshold: 0.15,
+          rainfall: 200, frictionAngle: 35, cohesion: 500, duration: 2,
+          mu: 0.25, xi: 300, entrainmentRate: 0.002, erodibleDepthM: 5,
+          rainfallThreshold: 150,
+        },
+      },
+      bbox,
+    );
+    if (req.type !== 'landslide') throw new Error('wrong type');
+    expect(req.mu).toBe(0.25);
+    expect(req.xi).toBe(300);
+    expect(req.entrainment_rate).toBe(0.002);
+    expect(req.erodible_depth_m).toBe(5);
+    expect(req.rainfall_threshold).toBe(150);
+  });
+
+  it('landslide: optional scientific knobs are omitted, not fabricated', () => {
+    const req = buildSimulationRequest(
+      {
+        scenarioType: 'landslide',
+        gridSize: 256,
+        params: {
+          triggerType: 'earthquake', magnitude: 6.5, pgaThreshold: 0.15,
+          rainfall: 200, frictionAngle: 35, cohesion: 500, duration: 2,
+          // mu/xi/entrainment intentionally absent
+        },
+      },
+      bbox,
+    );
+    if (req.type !== 'landslide') throw new Error('wrong type');
+    expect(req.mu).toBeUndefined();
+    expect(req.xi).toBeUndefined();
+    expect(req.entrainment_rate).toBeUndefined();
+  });
+
+  it('landslide: schema rejects implausible Voellmy friction', () => {
+    const r = SimulationRequestSchema.safeParse({
+      type: 'landslide', lat: 29.76, lon: -95.37, grid_size: 256, extent_km: 10,
+      trigger_type: 'earthquake', magnitude: 6.5, pga_threshold: 0.15,
+      rainfall_mm: 200, friction_angle: 35, cohesion: 500, duration_hours: 2,
+      mu: 5 /* Coulomb friction can't exceed 1 */,
+    });
+    expect(r.success).toBe(false);
+  });
 });
 
 describe('derivePhysicsFormOverrides', () => {

@@ -108,6 +108,20 @@ export const SimulationRequestSchema = z.discriminatedUnion('type', [
      */
     terrain: z.array(z.number()).max(65_536).optional(),
     terrain_gs: z.number().int().min(2).max(256).optional(),
+    /**
+     * Voellmy friction law: dry (Coulomb) friction μ [-]. The kernel's
+     * depth-averaged debris flow is a Voellmy model; these are its free
+     * parameters, calibrated against observed runout via /api/calibrate.
+     */
+    mu: z.number().min(0.01).max(1).optional(),
+    /** Voellmy turbulent friction coefficient ξ [m/s²]. */
+    xi: z.number().min(10).max(5000).optional(),
+    /** Bed entrainment rate [1/s] — 0 disables erosion growth (default). */
+    entrainment_rate: z.number().min(0).max(0.1).optional(),
+    /** Maximum erodible bed depth [m] available for entrainment. */
+    erodible_depth_m: z.number().min(0).max(50).optional(),
+    /** Cumulative rainfall needed to trigger rain-driven slides [mm]. */
+    rainfall_threshold: z.number().min(0).max(3000).optional(),
   }),
 ]);
 
@@ -187,6 +201,12 @@ export function buildSimulationRequest(
       );
     }
     return v;
+  };
+  // Presence probe for optional scientific knobs — false when the user has not
+  // provided a finite number (field simply omitted from the request).
+  const hasNum = (key: string): boolean => {
+    const v = params[key];
+    return typeof v === 'number' && Number.isFinite(v);
   };
 
   const common = {
@@ -286,6 +306,13 @@ export function buildSimulationRequest(
         friction_angle: num('frictionAngle'),
         cohesion: num('cohesion'),
         duration_hours: num('duration'),
+        // Scientific/calibration knobs — passed through only when the user
+        // supplied a finite value (never fabricated by the builder).
+        ...(hasNum('mu') ? { mu: num('mu') } : {}),
+        ...(hasNum('xi') ? { xi: num('xi') } : {}),
+        ...(hasNum('entrainmentRate') ? { entrainment_rate: num('entrainmentRate') } : {}),
+        ...(hasNum('erodibleDepthM') ? { erodible_depth_m: num('erodibleDepthM') } : {}),
+        ...(hasNum('rainfallThreshold') ? { rainfall_threshold: num('rainfallThreshold') } : {}),
       };
       break;
     default:

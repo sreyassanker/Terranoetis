@@ -1266,6 +1266,129 @@ interface WorldwideCctvPayload {
   cameras: WorldwideCctvCamera[];
 }
 
+// Provider sources whose sampled feeds all failed liveness probing
+// (probed 2026-08-05, 3 feed URLs each). Filtered out server-side so the
+// merged feed only serves playable cameras.
+const CCTV_DEAD_SOURCES = new Set([
+  "airportwebcams",
+  "algotraffic",
+  "amsbih",
+  "autobahn_nrw",
+  "balikesir",
+  "balticlivecam",
+  "birds-il",
+  "boating-vic",
+  "brownrice",
+  "camguide-ipcamlive",
+  "camsecure",
+  "chile-dgac",
+  "climaaovivo",
+  "dersp",
+  "ecrmm-udep",
+  "epic-ski",
+  "faa-weathercams",
+  "forecastweather",
+  "geonet",
+  "ineter",
+  "infoclimat",
+  "iowa_dot",
+  "ipcamlive-crwebcams",
+  "ipcamlive-midatlantic-gap",
+  "ipcamlive-ocean-city-md",
+  "ipcamlive-worldviewstream",
+  "istanbul-ibb",
+  "jogjaprov",
+  "kcscout",
+  "konya",
+  "ktict",
+  "livecameras-gr",
+  "maineturnpike",
+  "margaharjaya",
+  "medellin-simm",
+  "naodos-gr",
+  "njta",
+  "noirlab",
+  "nycdot",
+  "oktraffic",
+  "opencctv.org",
+  "paspro",
+  "recife-cttu",
+  "rtsp.me",
+  "sochi-camera",
+  "taiwan-freeway",
+  "taiwan_freeway",
+  "telpin-argentina",
+  "thailand-doh",
+  "trafficvision",
+  "travelmidwest",
+  "txdot",
+  "vdotcameras",
+  "vegvesen",
+  "weatherbug",
+  "wikaserangpanimbang",
+  "youtube_scenic"
+]);
+
+function isPlayableFeedUrl(cam: WorldwideCctvCamera): boolean {
+  const feed = cam.previewUrl ?? cam.streamUrl ?? cam.thumbnailUrl;
+  if (!feed) return true; // pageUrl-only camera; nothing to drop
+  return /^https?:\/\//i.test(feed);
+}
+
+function filterHealthyCctvCams(cams: WorldwideCctvCamera[]): {
+  cameras: WorldwideCctvCamera[];
+  removed: number;
+  removedByScheme: number;
+  removedBySource: number;
+} {
+  let removedByScheme = 0;
+  let removedBySource = 0;
+  const cameras = cams.filter(cam => {
+    if (CCTV_DEAD_SOURCES.has(cam.source)) {
+      removedBySource++;
+      return false;
+    }
+    if (!isPlayableFeedUrl(cam)) {
+      removedByScheme++;
+      return false;
+    }
+    return true;
+  });
+  return { cameras, removed: removedByScheme + removedBySource, removedByScheme, removedBySource };
+}
+
+function computeCctvHealth(cams: WorldwideCctvCamera[]) {
+  const bySource = new Map<string, { total: number; playable: number; deadByScheme: number }>();
+  for (const cam of cams) {
+    const key = cam.source || 'opencctv.org';
+    const row = bySource.get(key) ?? { total: 0, playable: 0, deadByScheme: 0 };
+    row.total++;
+    if (isPlayableFeedUrl(cam)) row.playable++;
+    else row.deadByScheme++;
+    bySource.set(key, row);
+  }
+  const sources = [...bySource.entries()]
+    .map(([source, s]) => ({
+      source,
+      total: s.total,
+      playable: s.playable,
+      deadByScheme: s.deadByScheme,
+      blocked: CCTV_DEAD_SOURCES.has(source),
+    }))
+    .sort((a, b) => b.total - a.total);
+  const filtered = filterHealthyCctvCams(cams);
+  return {
+    updatedAt: Date.now(),
+    total: cams.length,
+    filtered: filtered.cameras.length,
+    removed: filtered.removed,
+    removedByScheme: filtered.removedByScheme,
+    removedBySource: filtered.removedBySource,
+    deadSources: CCTV_DEAD_SOURCES.size,
+    sources,
+  };
+}
+
 const BOUNDS = [
   { s: 24, w: -100, n: 50, e: -65 },   // US East / Midwest
   { s: 24, w: -125, n: 50, e: -100 },  // US West
@@ -1522,6 +1645,11 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
     filteredCams.push(cam);
   }
 
+  const proxied = (url: string | undefined): string | undefined => {
+    if (!url || typeof url !== 'string' || !url.startsWith('http')) return url;
+    if (!url.startsWith('https://opencctv.org/api/')) return url;
+    return `/api/cctv/proxy?url=${encodeURIComponent(url)}`;
+  };
   return filteredCams.map(cam => {
     const pageUrl = `https://opencctv.org/cameras/${cam.id}`;
     const feedUrl = cam.feed_url;
@@ -1531,9 +1659,9 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
       lat: cam.lat,
       lon: cam.lng,
       pageUrl,
-      previewUrl: feedUrl,
-      streamUrl: feedUrl,
-      thumbnailUrl: feedUrl,
+      previewUrl: proxied(feedUrl),
+      streamUrl: proxied(feedUrl),
+      thumbnailUrl: proxied(feedUrl),
       source: cam.source || 'opencctv.org',
       category: cam.category || 'public webcam',
       city: cam.city || undefined,
@@ -1548,6 +1676,49 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
 
 
 
+// Server-side proxy for opencctv.org feeds. The upstream returns
+// `Cross-Origin-Resource-Policy: same-origin`, so browsers refuse to embed
+// those URLs directly. Strip CORP by proxying through here.
+app.get('/api/cctv/proxy', async (req: express.Request, res: express.Response) => {
+  try {
+    const target = String(req.query.url ?? '');
+    if (!target || !isAllowedUpstream(target)) {
+      return res.status(400).json({ error: 'url query param must be an allow-listed upstream' });
+    }
+    const ssrfCheck = await validateOutboundUrl(target);
+    if (!ssrfCheck.safe) {
+      return res.status(400).json({ error: `Refused: ${ssrfCheck.reason ?? 'unsafe URL'}` });
+    }
+    const isHls = /\.m3u8(\?|$)/.test(target);
+    // Upstream (opencctv.org) blocks bare non-browser UAs; send a realistic UA
+    // plus a Referer so Cloudflare doesn't reject us.
+    const headers: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+      'Referer': 'https://opencctv.org/',
+      'Accept': '*/*',
+    };
+    if (isHls) {
+      // hls.js sends Origin on some browsers; pass it through so upstream HLS
+      // endpoints that validate referer/origin keep working.
+      const origin = req.headers.origin;
+      if (origin) headers.Origin = origin;
+    }
+    const resp = await fetch(target, { headers, signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) {
+      return res.status(resp.status).json({ error: `Upstream responded ${resp.status}` });
+    }
+    const contentType = resp.headers.get('content-type') ?? (isHls ? 'application/vnd.apple.mpegurl' : 'image/jpeg');
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'no-store');
+    if (!resp.body) return res.status(502).json({ error: 'Upstream returned no body' });
+    const buf = Buffer.from(await resp.arrayBuffer());
+    res.send(buf);
+  } catch (e) {
+    logger.warn({ err: e }, 'cctv proxy failed');
+    if (!res.headersSent) res.status(502).json({ error: String(e) });
+  }
+});
+
 // Backward-compatible camera route documented by earlier releases.
 app.get(['/api/cameras', '/api/cameras/:lat/:lon/:radius', '/api/cctv/worldwide'], async (req: express.Request, res: express.Response) => {
   try {
@@ -1560,9 +1731,23 @@ app.get(['/api/cameras', '/api/cameras/:lat/:lon/:radius', '/api/cctv/worldwide'
         cameras: await fetchWorldwideCameras(),
       };
       cache.set('cctv_worldwide', payload, 1800);
+      cache.set('cctv_worldwide_health', computeCctvHealth(payload.cameras), 1800);
     }
 
-    if (req.params.lat === undefined) return res.json(payload);
+    // Serve only playable cameras: drop all-dead provider sources and any
+    // feed URLs that use a non-http scheme (txdot://, boating-vic://, ...).
+    const filtered = filterHealthyCctvCams(payload.cameras);
+    const healthyPayload = {
+      ...payload,
+      cameras: filtered.cameras,
+      filter: {
+        removed: filtered.removed,
+        removedByScheme: filtered.removedByScheme,
+        removedBySource: filtered.removedBySource,
+      },
+    };
+
+    if (req.params.lat === undefined) return res.json(healthyPayload);
     const lat = Number(req.params.lat);
     const lon = Number(req.params.lon);
     const radius = Number(req.params.radius);
@@ -1573,10 +1758,27 @@ app.get(['/api/cameras', '/api/cameras/:lat/:lon/:radius', '/api/cctv/worldwide'
     }
 
     res.json({
-      ...payload,
-      cameras: payload.cameras.filter((camera) => haversineDistance(lat, lon, camera.lat, camera.lon) <= radius),
+      ...healthyPayload,
+      cameras: filtered.cameras.filter((camera) => haversineDistance(lat, lon, camera.lat, camera.lon) <= radius),
       query: { lat, lon, radiusKm: radius },
     });
+  } catch (e) {
+    res.status(502).json({ error: String(e) });
+  }
+});
+
+// Per-source health for the merged webcam feed (structural stats computed from
+// the cached payload; does not re-probe upstream).
+app.get('/api/cctv/health', (_req: express.Request, res: express.Response) => {
+  try {
+    let health = cache.get<ReturnType<typeof computeCctvHealth>>('cctv_worldwide_health');
+    if (!health) {
+      const payload = cache.get<WorldwideCctvPayload>('cctv_worldwide');
+      if (!payload) return res.status(503).json({ error: 'cctv feed not loaded yet; hit /api/cctv/worldwide first' });
+      health = computeCctvHealth(payload.cameras);
+      cache.set('cctv_worldwide_health', health, 1800);
+    }
+    res.json(health);
   } catch (e) {
     res.status(502).json({ error: String(e) });
   }

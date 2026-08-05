@@ -26,6 +26,11 @@ import path from 'path';
 import fs from 'fs';
 import { logger } from '../observability/logger';
 import { writeArrayBuffer } from 'geotiff';
+import {
+  runLocalBatch,
+  type CalibrateRow,
+  type MonteCarloResult,
+} from './localRunner';
 
 // Physical cell sizes (meters) for each kernel — mirrors the client-side
 // SIM_CELL_SIZE_M so the GeoTIFF export matches what the user saw rendered.
@@ -426,6 +431,139 @@ router.get('/kernels', (_req: Request, res: Response) => {
   });
 
   res.json({ kernels: available });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// POST /api/calibrate — Fit Voellmy μ/ξ to an observed runout
+// ═════════════════════════════════════════════════════════════════
+//
+// Body: { request: SimulationRequest, observed_runout_km: number }
+// Runs a coarse μ×ξ grid locally (24 trials at 128²) and returns the best pair.
+
+const MU_GRID = [0.15, 0.20, 0.25, 0.30, 0.35, 0.40];
+const XI_GRID = [100, 250, 500, 800];
+const CALIBRATE_GRID_SIZE = 128;
+
+router.post('/calibrate', async (req: Request, res: Response) => {
+  try {
+    const { request, observed_runout_km } = req.body as {
+      request?: Record<string, unknown>;
+      observed_runout_km?: unknown;
+    };
+    if (!request || typeof request !== 'object' || request.type !== 'landslide') {
+      return res.status(400).json({ error: 'request must be a landslide simulation request' });
+    }
+    const target = Number(observed_runout_km);
+    if (!Number.isFinite(target) || target <= 0) {
+      return res.status(400).json({ error: 'observed_runout_km must be a positive number' });
+    }
+
+    // Drop resolution/terrain override so calibration is fast and deterministic
+    // across trials — the client's grid_size/terrain are for display fidelity,
+    // not for fitting friction (μ, ξ) on a coarse surrogate grid.
+    const base: Record<string, unknown> = {
+      ...request,
+      grid_size: CALIBRATE_GRID_SIZE,
+      terrain: undefined,
+      terrain_gs: undefined,
+    };
+    const runs = MU_GRID.flatMap((mu) =>
+      XI_GRID.map((xi) => ({ params: { ...base, mu, xi }, mu, xi })),
+    );
+
+    const payload = (await runLocalBatch('scalars', runs.map((r) => r.params), {
+      gridSize: CALIBRATE_GRID_SIZE,
+      timeoutMs: 6 * 60_000,
+    })) as { trials?: CalibrateRow[] };
+
+    const trials = payload.trials ?? [];
+    let best: CalibrateRow | null = null;
+    let bestErr = Infinity;
+    for (const t of trials) {
+      const err = Math.abs(t.runout_km - target);
+      if (err < bestErr) { bestErr = err; best = t; }
+    }
+    if (!best) {
+      return res.status(500).json({ error: 'Calibration produced no viable trials' });
+    }
+
+    logger.info({ target, bestMu: best.mu, bestXi: best.xi, err: bestErr }, 'Calibration done');
+    res.json({
+      best: { mu: best.mu, xi: best.xi, runout_km: best.runout_km, err: bestErr },
+      trials,
+    });
+  } catch (err: unknown) {
+    logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Calibration failed');
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════
+// POST /api/landslide/quantify — Monte-Carlo uncertainty quantification
+// ═════════════════════════════════════════════════════════════════
+//
+// Body: { request: SimulationRequest, samples?: number, exceedance_depth_m?: number }
+// Perturbs the uncertain physics inputs (μ, ξ, cohesion, magnitude) and returns
+// aggregated exceedance / mean / min / max depth maps plus summary statistics.
+
+router.post('/landslide/quantify', async (req: Request, res: Response) => {
+  try {
+    const { request, samples = 16, exceedance_depth_m = 0.5 } = req.body as {
+      request?: Record<string, unknown>;
+      samples?: unknown;
+      exceedance_depth_m?: unknown;
+    };
+    if (!request || typeof request !== 'object' || request.type !== 'landslide') {
+      return res.status(400).json({ error: 'request must be a landslide simulation request' });
+    }
+    const n = Math.min(40, Math.max(4, Number(samples) || 16));
+    const thr = Math.max(0.05, Number(exceedance_depth_m) || 0.5);
+
+    const base: Record<string, unknown> = { ...request, terrain: undefined, terrain_gs: undefined };
+    const baseMu = Number(base.mu) || 0.25;
+    const baseXi = Number(base.xi) || 300;
+    const baseCohesion = Number(base.cohesion);
+    const baseMag = Number(base.magnitude);
+
+    // Marsaglia polar normal — deterministic seed, no external RNG dep.
+    let z1 = 0; let z2 = 0; let haveZ2 = false;
+    const randn = (): number => {
+      if (haveZ2) { haveZ2 = false; return z2; }
+      let u1 = 0, u2 = 0, s = 0;
+      do {
+        u1 = Math.random() * 2 - 1;
+        u2 = Math.random() * 2 - 1;
+        s = u1 * u1 + u2 * u2;
+      } while (s >= 1 || s === 0);
+      const mul = Math.sqrt((-2 * Math.log(s)) / s);
+      z1 = u1 * mul; z2 = u2 * mul; haveZ2 = true;
+      return z1;
+    };
+
+    const runs: Record<string, unknown>[] = [];
+    for (let i = 0; i < n; i++) {
+      runs.push({
+        ...base,
+        grid_size: 128,
+        mu: Math.min(0.5, Math.max(0.05, baseMu * Math.exp(0.15 * randn()))),
+        xi: Math.min(1500, Math.max(50, baseXi * Math.exp(0.2 * randn()))),
+        cohesion: Math.max(0, baseCohesion * Math.exp(0.15 * randn())),
+        magnitude: Math.min(9.5, Math.max(3.5, baseMag * Math.exp(0.08 * randn()))),
+      });
+    }
+
+    const payload = (await runLocalBatch('montecarlo', runs, {
+      gridSize: 128,
+      timeoutMs: 8 * 60_000,
+      exceedanceDepthM: thr,
+    })) as unknown as MonteCarloResult;
+
+    logger.info({ n, p95: payload.summary?.p95_runout_km }, 'Monte-Carlo UQ done');
+    res.json(payload);
+  } catch (err: unknown) {
+    logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Quantification failed');
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 export default router;
