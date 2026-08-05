@@ -9,16 +9,13 @@
  * 5. Load results into frontend
  */
 
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { execFile, type ExecFileException } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { randomUUID } from 'crypto';
 import { logger } from '../observability/logger';
 import { pauseBackgroundEngines, resumeBackgroundEngines } from './powerSaver';
-
-const execAsync = promisify(exec);
 
 const KAGGLE_KERNELS_DIR = path.resolve(process.cwd(), 'kaggle-kernels');
 const RESULTS_DIR = path.resolve(process.cwd(), 'kaggle-kernels', 'results');
@@ -143,16 +140,84 @@ if (process.env.NODE_ENV !== 'test') startJobCleanup();
 // KAGGLE CLI WRAPPER
 // ═════════════════════════════════════════════════════════════════
 
-async function kaggleCommand(cmd: string): Promise<string> {
-  try {
-    const { stdout, stderr } = await execAsync(cmd, {
-      timeout: 120_000, // 2 min for push commands
-      env: { ...process.env, KAGGLE_CONFIG_DIR: path.join(process.env.HOME || '~', '.kaggle') },
-    });
-    if (stderr && !stderr.includes('Warning')) {
-      logger.warn({ cmd, stderr }, 'Kaggle CLI stderr');
+let kaggleBinCache: string | null = null;
+let kaggleBinResolved = false;
+
+/**
+ * Resolve the `kaggle` CLI binary to an absolute path.
+ *
+ * The server is often launched via npm, which sanitises PATH (dropping
+ * `~/.local/bin`), so `kaggle` may not be resolvable through the shell. We
+ * therefore search known install locations explicitly and cache the result.
+ */
+function resolveKaggleBin(): string {
+  if (kaggleBinResolved) return kaggleBinCache!;
+  kaggleBinResolved = true;
+
+  const candidates = [
+    process.env.KAGGLE_BIN,
+    path.join(process.env.HOME || '~', '.local', 'bin', 'kaggle'),
+    path.join(process.env.HOME || '~', 'bin', 'kaggle'),
+    '/usr/local/bin/kaggle',
+    '/opt/homebrew/bin/kaggle',
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      kaggleBinCache = candidate;
+      return candidate;
     }
-    return stdout.trim();
+  }
+
+  // Last resort: rely on PATH lookup.
+  kaggleBinCache = 'kaggle';
+  return kaggleBinCache;
+}
+
+/**
+ * Run a Kaggle CLI command via execFile (no shell), so PATH quirks from the
+ * hosting process can't break `kaggle kernels push` et al.
+ *
+ * Wrapped manually (not via promisify) because execFile delivers the child's
+ * stdout/stderr as separate callback args — promisify discards them on failure,
+ * and Kaggle CLI v2.x prints actionable errors to STDOUT, leaving err.message
+ * as a useless bare "Command failed: ...". We capture both streams and surface
+ * them in the thrown error.
+ */
+function runKaggle(args: string[], timeoutMs = 120_000): Promise<string> {
+  const bin = resolveKaggleBin();
+  return new Promise((resolve, reject) => {
+    execFile(
+      bin,
+      args,
+      {
+        timeout: timeoutMs, // 2 min for push commands
+        env: { ...process.env, KAGGLE_CONFIG_DIR: path.join(process.env.HOME || '~', '.kaggle') },
+      },
+      (err: ExecFileException | null, stdout: string, stderr: string) => {
+        if (err) {
+          const detail = [stdout, stderr].filter(Boolean).join('\n').trim();
+          const message = detail ? `${err.message}\n${detail}` : err.message;
+          const wrapped = new Error(message) as Error & { code?: string | number | null; signal?: string | null };
+          wrapped.code = err.code;
+          wrapped.signal = err.signal;
+          reject(wrapped);
+          return;
+        }
+        if (stderr && !stderr.includes('Warning')) {
+          logger.warn({ cmd: `${bin} ${args.join(' ')}`, stderr }, 'Kaggle CLI stderr');
+        }
+        resolve(stdout.trim());
+      },
+    );
+  });
+}
+
+async function kaggleCommand(args: string[]): Promise<string> {
+  const bin = resolveKaggleBin();
+  const cmd = `${bin} ${args.join(' ')}`;
+  try {
+    return await runKaggle(args);
   } catch (err: unknown) {
     logger.error({ cmd, error: err instanceof Error ? err.message : String(err) }, 'Kaggle CLI error');
     throw new Error(`Kaggle command failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -160,7 +225,55 @@ async function kaggleCommand(cmd: string): Promise<string> {
 }
 
 async function pushKernel(kernelDir: string): Promise<void> {
-  await kaggleCommand(`kaggle kernels push -p "${kernelDir}"`);
+  await kaggleCommand(['kernels', 'push', '-p', kernelDir]);
+}
+
+/** Sentinel marking a missing elevation cell in the compact uint16 terrain grid. */
+const TERRAIN_NAN_SENTINEL = 65535;
+
+/**
+ * Compact a 256×256 real-terrain grid so the embedded kernel stays under
+ * Kaggle's upload size limit. A raw float array balloons main.py to ~1.2 MB
+ * and Kaggle's SaveKernel API rejects it with 400 Bad Request. Quantizing each
+ * cell to uint16 (min/span-normalized — sub-decimetre vertical precision over a
+ * typical box) and base64-encoding it shrinks the payload to ~175 KB.
+ *
+ * Decoded on the kernel side from `terrain_b64` + `terrain_min` + `terrain_span`
+ * (kept alongside the existing `terrain_gs`). Returns null when there is
+ * nothing usable to ship (empty/all-non-finite), so the caller falls back to
+ * the kernel's synthetic terrain.
+ */
+function compactTerrain(terrain: number[]): { terrain_b64: string; terrain_min: number; terrain_span: number } | null {
+  if (!Array.isArray(terrain) || terrain.length === 0) {
+    return null;
+  }
+  let min = Infinity;
+  let max = -Infinity;
+  let finite = 0;
+  for (const v of terrain) {
+    if (Number.isFinite(v)) {
+      finite++;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+  }
+  if (finite === 0) {
+    return null;
+  }
+  const span = max - min || 1;
+  const buf = Buffer.alloc(terrain.length * 2);
+  for (let i = 0; i < terrain.length; i++) {
+    const v = terrain[i];
+    const q = Number.isFinite(v)
+      ? Math.round(((v - min) / span) * 65534)
+      : TERRAIN_NAN_SENTINEL;
+    buf.writeUInt16LE(q, i * 2);
+  }
+  return {
+    terrain_b64: buf.toString('base64'),
+    terrain_min: min,
+    terrain_span: span,
+  };
 }
 
 /**
@@ -181,7 +294,19 @@ async function pushKernelWithParams(kernelDir: string, params: SimulationParams)
   if (!code.includes(marker)) {
     throw new Error(`Kernel ${kernelDir} is missing the EMBEDDED_PARAMS marker`);
   }
-  const injected = code.replace(marker, `EMBEDDED_PARAMS = ${JSON.stringify(params)}`);
+  // Shrink large payloads before embedding: a 256×256 real-terrain grid as a
+  // JSON float array would exceed Kaggle's kernel size limit (400 Bad Request).
+  const embedded: Record<string, unknown> = { ...params };
+  if (Array.isArray(embedded.terrain)) {
+    const compact = compactTerrain(embedded.terrain as number[]);
+    delete embedded.terrain;
+    if (compact) {
+      embedded.terrain_b64 = compact.terrain_b64;
+      embedded.terrain_min = compact.terrain_min;
+      embedded.terrain_span = compact.terrain_span;
+    }
+  }
+  const injected = code.replace(marker, `EMBEDDED_PARAMS = ${JSON.stringify(embedded)}`);
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaggle-push-'));
   try {
@@ -194,7 +319,7 @@ async function pushKernelWithParams(kernelDir: string, params: SimulationParams)
 }
 
 async function getKernelStatus(ownerSlug: string): Promise<string> {
-  const output = await kaggleCommand(`kaggle kernels status ${ownerSlug}`);
+  const output = await kaggleCommand(['kernels', 'status', ownerSlug]);
   // Kaggle CLI v2.x outputs: "owner/kernel has status \"KernelWorkerStatus.COMPLETE\""
   // Older versions output just: "complete"
   const match = output.match(/KernelWorkerStatus\.(\w+)/i);
@@ -206,12 +331,12 @@ async function getKernelStatus(ownerSlug: string): Promise<string> {
 
 async function downloadOutput(ownerSlug: string, outputDir: string): Promise<void> {
   fs.mkdirSync(outputDir, { recursive: true });
-  await kaggleCommand(`kaggle kernels output ${ownerSlug} -p "${outputDir}" --force`);
+  await kaggleCommand(['kernels', 'output', ownerSlug, '-p', outputDir, '--force']);
 }
 
 async function cancelKernel(ownerSlug: string): Promise<void> {
   try {
-    await kaggleCommand(`kaggle kernels cancel ${ownerSlug}`);
+    await kaggleCommand(['kernels', 'cancel', ownerSlug]);
   } catch {
     logger.warn({ ownerSlug }, 'Failed to cancel Kaggle kernel (may already be done)');
   }

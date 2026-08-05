@@ -143,6 +143,9 @@ export const ALLOWED_UPSTREAMS: ReadonlyArray<string> = [
   'https://opendata.adsb.fi/',
   'https://opensky-network.org/',
   'https://volcanoes.usgs.gov/',
+  // opencctv.org serves camera feeds with `Cross-Origin-Resource-Policy: same-origin`,
+  // so browsers refuse to embed them. Route through the server-side proxy instead.
+  'https://opencctv.org/api/',
 ];
 
 export function isAllowedUpstream(url: string): boolean {

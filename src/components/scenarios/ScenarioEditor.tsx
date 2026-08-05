@@ -19,7 +19,7 @@ import { computeStudyAreaBbox } from '@/rendering/studyArea';
 import { SCENARIO_TYPE_LABELS } from './types';
 import Panel from '@/components/ui/Panel';
 import { useKaggleSimulation } from '@/hooks/useKaggleSimulation';
-import { sampleStudyAreaTerrain } from './studyAreaTerrain';
+import { sampleStudyAreaTerrainAsync } from './studyAreaTerrain';
 import {
   buildSimulationRequest,
   deriveCenter,
@@ -107,6 +107,14 @@ const SCENARIO_PARAMS: Record<string, ParameterDef[]> = {
     { key: 'frictionAngle', label: 'Friction Angle', min: 20, max: 50, step: 1, defaultValue: 35, unit: '°' },
     { key: 'cohesion', label: 'Cohesion', min: 0, max: 2000, step: 50, defaultValue: 500, unit: 'Pa' },
     { key: 'duration', label: 'Duration', min: 0.5, max: 48, step: 0.5, defaultValue: 2, unit: 'h' },
+    // ── Voellmy friction law (calibration targets) ──
+    { key: 'mu', label: 'Voellmy μ (dry friction)', min: 0.05, max: 0.5, step: 0.01, defaultValue: 0.25, unit: '' },
+    { key: 'xi', label: 'Voellmy ξ (turbulent)', min: 50, max: 1500, step: 50, defaultValue: 300, unit: 'm/s²' },
+    // ── Bed entrainment (0 = off) ──
+    { key: 'entrainmentRate', label: 'Bed Entrainment Rate', min: 0, max: 0.01, step: 0.0005, defaultValue: 0, unit: '1/s' },
+    { key: 'erodibleDepthM', label: 'Erodible Bed Depth', min: 0, max: 20, step: 0.5, defaultValue: 5, unit: 'm' },
+    // ── Trigger thresholds ──
+    { key: 'rainfallThreshold', label: 'Rain Trigger Threshold', min: 50, max: 600, step: 10, defaultValue: 150, unit: 'mm' },
   ],
 };
 
@@ -212,30 +220,123 @@ export default function ScenarioEditor({
     setParams(defaultsFor(type));
   }, []);
 
-  const buildRequest = useCallback<() => SimulationRequest>(() => {
-    if (!activeBbox) {
-      throw new Error('Draw and activate a study area before generating.');
-    }
-    const base = buildSimulationRequest(
-      { scenarioType, params, gridSize: 256 },
-      activeBbox,
-    );
-    // Landslide only: if the Cesium globe has real elevation for the drawn
-    // box, sample it and ship it so the kernel runs on real terrain instead of
-    // the synthetic ridge. No real relief → keep synthetic (never zero/flat).
-    if (base.type === 'landslide' && viewer) {
-      const real = sampleStudyAreaTerrain(viewer, activeBbox);
-      if (real) {
-        return { ...base, terrain: real.values, terrain_gs: real.gs };
-      }
-    }
-    return base;
-  }, [activeBbox, scenarioType, params, viewer]);
+  // Sampling a 256×256 real-terrain grid is async (yields to the event loop so
+  // the browser stays responsive) — the button shows progress while preparing.
+  const [preparing, setPreparing] = useState(false);
 
-  const handleRun = useCallback(() => {
+  const handleRun = useCallback(async () => {
+    if (!activeBbox) return;
     setRunScenarioType(scenarioType);
-    void kaggle.run(buildRequest, scenarioType);
-  }, [kaggle, buildRequest, scenarioType]);
+    setPreparing(true);
+    try {
+      const base = buildSimulationRequest(
+        { scenarioType, params, gridSize: 256 },
+        activeBbox,
+      );
+      // Landslide only: if the Cesium globe has real elevation for the drawn
+      // box, sample it at full resolution (256×256 — no bilinear loss, the
+      // kernel's simulation grid) and ship it so the kernel runs on real
+      // terrain instead of the synthetic ridge. No real relief → keep
+      // synthetic.
+      let request: SimulationRequest = base;
+      if (base.type === 'landslide' && viewer) {
+        const real = await sampleStudyAreaTerrainAsync(viewer, activeBbox, 256);
+        if (real) {
+          request = { ...base, terrain: real.values, terrain_gs: real.gs };
+        }
+      }
+      await kaggle.run(() => request, scenarioType);
+    } finally {
+      setPreparing(false);
+    }
+  }, [activeBbox, scenarioType, params, viewer, kaggle]);
+
+  // ── Voellmy calibration (fit μ/ξ to an observed runout) ──
+  const [calibInput, setCalibInput] = useState('2.9');
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibError, setCalibError] = useState<string | null>(null);
+  const [calibBest, setCalibBest] = useState<{
+    mu: number; xi: number; runout_km: number; err: number;
+  } | null>(null);
+
+  const handleCalibrate = useCallback(async () => {
+    if (!activeBbox) return;
+    const observed = Number(calibInput);
+    if (!Number.isFinite(observed) || observed <= 0) {
+      setCalibError('Enter a positive observed runout (km).');
+      return;
+    }
+    setCalibrating(true);
+    setCalibError(null);
+    setCalibBest(null);
+    try {
+      const base = buildSimulationRequest(
+        { scenarioType, params, gridSize: 256 },
+        activeBbox,
+      );
+      const resp = await fetch('/api/kaggle/calibrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request: base, observed_runout_km: observed }),
+      });
+      const data = (await resp.json()) as {
+        best?: { mu: number; xi: number; runout_km: number; err: number };
+        error?: string;
+      };
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      setCalibBest(data.best ?? null);
+    } catch (err) {
+      setCalibError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCalibrating(false);
+    }
+  }, [activeBbox, scenarioType, params, calibInput]);
+
+  /** Apply the calibrated μ/ξ pair back to the form so a run uses it. */
+  const applyCalibration = useCallback(() => {
+    if (!calibBest) return;
+    setParams((prev) => derivePhysicsFormOverrides('landslide', {
+      ...prev,
+      mu: Number(calibBest.mu.toFixed(3)),
+      xi: Math.round(calibBest.xi),
+    }));
+  }, [calibBest]);
+
+  // ── Monte-Carlo uncertainty quantification (exceedance ensemble) ──
+  const [uqRunning, setUqRunning] = useState(false);
+  const [uqError, setUqError] = useState<string | null>(null);
+  const [uqSummary, setUqSummary] = useState<{
+    n: number; p50_runout_km: number; p95_runout_km: number;
+    mean_max_depth_m: number; p95_max_depth_m: number; area_exceeded_pct: number;
+  } | null>(null);
+
+  const handleQuantify = useCallback(async () => {
+    if (!activeBbox) return;
+    setUqRunning(true);
+    setUqError(null);
+    setUqSummary(null);
+    try {
+      const base = buildSimulationRequest(
+        { scenarioType, params, gridSize: 256 },
+        activeBbox,
+      );
+      const resp = await fetch('/api/kaggle/landslide/quantify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request: base, samples: 16, exceedance_depth_m: 0.5 }),
+      });
+      const data = (await resp.json()) as {
+        summary?: typeof uqSummary;
+        error?: string;
+      };
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      setUqSummary(data.summary ?? null);
+    } catch (err) {
+      setUqError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUqRunning(false);
+    }
+  }, [activeBbox, scenarioType, params]);
 
   /** Download the type's primary raster as a georeferenced GeoTIFF. */
   const handleDownloadTiff = useCallback(() => {
@@ -266,7 +367,7 @@ export default function ScenarioEditor({
   // ── Presentation ──────────────────────────────────────────────────────────
 
   const formDisabled = kaggle.isRunning;
-  const canRun = Boolean(activeBbox) && !kaggle.isRunning;
+  const canRun = Boolean(activeBbox) && !kaggle.isRunning && !preparing;
   const currentParams = SCENARIO_PARAMS[scenarioType] ?? [];
 
   return (
@@ -357,6 +458,88 @@ export default function ScenarioEditor({
           })}
         </div>
 
+        {/* Landslide: Voellmy calibration (fit μ/ξ to an observed runout) */}
+        {scenarioType === 'landslide' && (
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 600 }}>
+              Calibrate μ/ξ to an observed event
+            </div>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.4 }}>
+              Grid-searches the Voellmy parameters so the modelled runout matches
+              a documented slide distance. Runs a fast local ensemble (GPU not needed).
+            </div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <input
+                className="token-input"
+                aria-label="Observed runout (km)"
+                type="number"
+                min={0.1}
+                step={0.1}
+                value={calibInput}
+                onChange={(e) => setCalibInput(e.target.value)}
+                disabled={calibrating || formDisabled}
+                style={{ width: 90, fontSize: 11, padding: '5px 6px' }}
+              />
+              <button
+                className="glass-button"
+                style={{
+                  flex: 1, fontSize: 11, padding: '5px 8px', cursor: calibrating ? 'wait' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+                onClick={() => void handleCalibrate()}
+                disabled={calibrating || formDisabled}
+              >
+                {calibrating ? <Loader2 size={12} className="animate-spin" /> : <Sliders size={12} />}
+                {calibrating ? 'Calibrating…' : 'Calibrate μ/ξ'}
+              </button>
+            </div>
+            {calibError && (
+              <div style={{ fontSize: 9, color: '#ef4444', marginTop: 6 }}>{calibError}</div>
+            )}
+            {calibBest && (
+              <div style={{ fontSize: 10, background: 'rgba(34,197,94,0.1)', borderRadius: 6, padding: '6px 8px', border: '1px solid rgba(34,197,94,0.2)', marginTop: 6 }}>
+                <div>Best fit: μ = {calibBest.mu.toFixed(3)}, ξ = {Math.round(calibBest.xi)} m/s²</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 9, marginTop: 2 }}>
+                  simulated runout {calibBest.runout_km.toFixed(2)} km (err {calibBest.err.toFixed(2)} km)
+                </div>
+                <button
+                  className="glass-button"
+                  style={{ fontSize: 9, padding: '4px 8px', marginTop: 6, cursor: 'pointer' }}
+                  onClick={applyCalibration}
+                >
+                  Apply μ/ξ to scenario
+                </button>
+              </div>
+            )}
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 10, marginBottom: 6, fontWeight: 600 }}>
+              Uncertainty quantification
+            </div>
+            <button
+              className="glass-button"
+              style={{
+                width: '100%', fontSize: 11, padding: '5px 8px', cursor: uqRunning ? 'wait' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}
+              onClick={() => void handleQuantify()}
+              disabled={uqRunning || formDisabled}
+            >
+              {uqRunning ? <Loader2 size={12} className="animate-spin" /> : <Cpu size={12} />}
+              {uqRunning ? 'Running 16-sample ensemble…' : 'Run Monte-Carlo UQ (16 samples)'}
+            </button>
+            {uqError && (
+              <div style={{ fontSize: 9, color: '#ef4444', marginTop: 6 }}>{uqError}</div>
+            )}
+            {uqSummary && (
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
+                {uqSummary.n}-sample ensemble over uncertain μ/ξ/cohesion/magnitude:
+                P50 runout {uqSummary.p50_runout_km.toFixed(2)} km, P95 {uqSummary.p95_runout_km.toFixed(2)} km,
+                mean max depth {uqSummary.mean_max_depth_m.toFixed(1)} m (P95 {uqSummary.p95_max_depth_m.toFixed(1)} m),
+                {` area exceeded (${'>'}0.5 m) ${(uqSummary.area_exceeded_pct * 100).toFixed(1)}%`}.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Generate / Cancel controls */}
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
           <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -385,8 +568,12 @@ export default function ScenarioEditor({
             onClick={handleRun}
             disabled={!canRun}
           >
-            {kaggle.isRunning ? <Loader2 size={12} className="animate-spin" /> : <Cpu size={12} />}
-            {kaggle.isRunning ? `Generating… ${kaggle.progress?.status ?? ''}` : 'Generate Scenario'}
+            {kaggle.isRunning ? <Loader2 size={12} className="animate-spin" /> : preparing ? <Loader2 size={12} className="animate-spin" /> : <Cpu size={12} />}
+            {kaggle.isRunning
+              ? `Generating… ${kaggle.progress?.status ?? ''}`
+              : preparing
+                ? 'Sampling terrain…'
+                : 'Generate Scenario'}
           </button>
 
           {kaggle.isRunning && (
