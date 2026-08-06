@@ -10145,7 +10145,14 @@ export default function App() {
           viewer={viewerRef.current}
           onKaggleComplete={(jobId, lat, lon, scenarioType) => {
             setShowScenarioEditor(false);
-            // Also trigger the procedural viewer so ScenarioViewer renders on the globe
+            // For flood_inundation, the Kaggle CFD overlay IS the visualization —
+            // skip the procedural ScenarioViewer (blue box) entirely so only the
+            // GPU-rendered CFD surface shows on the globe.
+            if (scenarioType === 'flood_inundation') {
+              setKaggleOverlay({ jobId, lat, lon, scenarioType });
+              return;
+            }
+            // Other hazards: trigger the procedural viewer so ScenarioViewer renders
             const mappedParams = mapFrontendParams(scenarioType, { lat, lon });
             fetch('/api/scenarios/generate', {
               method: 'POST',

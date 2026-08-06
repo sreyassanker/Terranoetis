@@ -233,13 +233,13 @@ export default function ScenarioEditor({
         { scenarioType, params, gridSize: 256 },
         activeBbox,
       );
-      // Landslide only: if the Cesium globe has real elevation for the drawn
+      // Landslide + flood: if the Cesium globe has real elevation for the drawn
       // box, sample it at full resolution (256×256 — no bilinear loss, the
       // kernel's simulation grid) and ship it so the kernel runs on real
       // terrain instead of the synthetic ridge. No real relief → keep
       // synthetic.
       let request: SimulationRequest = base;
-      if (base.type === 'landslide' && viewer) {
+      if ((base.type === 'landslide' || base.type === 'flood_inundation') && viewer) {
         const real = await sampleStudyAreaTerrainAsync(viewer, activeBbox, 256);
         if (real) {
           request = { ...base, terrain: real.values, terrain_gs: real.gs };

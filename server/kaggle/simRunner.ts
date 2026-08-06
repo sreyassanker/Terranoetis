@@ -228,9 +228,6 @@ async function pushKernel(kernelDir: string): Promise<void> {
   await kaggleCommand(['kernels', 'push', '-p', kernelDir]);
 }
 
-/** Sentinel marking a missing elevation cell in the compact uint16 terrain grid. */
-const TERRAIN_NAN_SENTINEL = 65535;
-
 /**
  * Compact a 256×256 real-terrain grid so the embedded kernel stays under
  * Kaggle's upload size limit. A raw float array balloons main.py to ~1.2 MB
@@ -250,27 +247,39 @@ function compactTerrain(terrain: number[]): { terrain_b64: string; terrain_min: 
   let min = Infinity;
   let max = -Infinity;
   let finite = 0;
+  let sum = 0;
   for (const v of terrain) {
     if (Number.isFinite(v)) {
       finite++;
       if (v < min) min = v;
       if (v > max) max = v;
+      sum += v;
     }
   }
   if (finite === 0) {
     return null;
   }
+  // Clamp NaN/undefined heights to the minimum valid height (never 0/sea level).
+  // Encoding them as 0 would produce flat synthetic terrain on the kernel side.
+  const safeMin = min;
   const span = max - min || 1;
   const buf = Buffer.alloc(terrain.length * 2);
   for (let i = 0; i < terrain.length; i++) {
     const v = terrain[i];
     const q = Number.isFinite(v)
       ? Math.round(((v - min) / span) * 65534)
-      : TERRAIN_NAN_SENTINEL;
+      : Math.round(((safeMin - min) / span) * 65534); // clamp to min, not sentinel
     buf.writeUInt16LE(q, i * 2);
   }
+  const mean = sum / finite;
+  const b64 = buf.toString('base64');
+  logger.info(
+    { grid: `${Math.round(Math.sqrt(terrain.length))}x${Math.round(Math.sqrt(terrain.length))}`,
+      elevMin: min, elevMax: max, elevMean: mean, base64Len: b64.length },
+    '[simRunner] terrain compacted',
+  );
   return {
-    terrain_b64: buf.toString('base64'),
+    terrain_b64: b64,
     terrain_min: min,
     terrain_span: span,
   };
@@ -306,7 +315,15 @@ async function pushKernelWithParams(kernelDir: string, params: SimulationParams)
       embedded.terrain_span = compact.terrain_span;
     }
   }
-  const injected = code.replace(marker, `EMBEDDED_PARAMS = ${JSON.stringify(embedded)}`);
+  // Embed the params as a JSON *string literal*. A raw `JSON.stringify` dump
+  // is not valid Python (lowercase `true`/`false`/`null` crash the kernel with
+  // NameError — every flood run sets `dam_breach: true`). `JSON.stringify` on
+  // the outer string escapes `"`/`\`/newlines, so the payload always parses as
+  // a Python string, and `json.loads` on the kernel side restores the dict.
+  const injected = code.replace(
+    marker,
+    `EMBEDDED_PARAMS = json.loads(${JSON.stringify(JSON.stringify(embedded))})`,
+  );
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaggle-push-'));
   try {
@@ -459,9 +476,29 @@ async function runPipeline(
 
     // ── Step 3: Poll for completion with a hard timeout so a hung kernel
     //    doesn't burn Kaggle GPU quota (and the local machine) forever. ──
+    //
+    // RACE-CONDITION GUARD: `kaggle kernels push` reuses the same kernel slug,
+    // so immediately after a push the status endpoint may still report the
+    // PREVIOUS run's terminal state (e.g. "error" from a stale run) before the
+    // new run has started. We therefore:
+    //   1. Wait a few seconds after push before the first poll.
+    //   2. Track whether we've seen the kernel in a non-error state. If an
+    //      "error" arrives BEFORE any non-error status, it's almost certainly
+    //      stale — retry a bounded number of times instead of failing fast.
+    //   3. If "error" arrives AFTER we've seen "running"/"queue", the kernel
+    //      actually ran and failed — fail immediately.
     let lastStatus = '';
     let sawComplete = false;
     let consecutiveErrors = 0;
+    let sawNonErrorState = false; // have we seen running/queue/complete?
+    let staleErrorRetries = 0;
+    const MAX_STALE_ERROR_RETRIES = 3;
+    const POST_PUSH_SETTLE_MS = 8_000; // let the new run register before polling
+
+    // Give the freshly-pushed kernel time to register on Kaggle's status API.
+    // Without this, the first poll can return the previous run's status.
+    await sleep(POST_PUSH_SETTLE_MS);
+
     while (true) {
       if (job.cancelled) {
         await cancelKernel(ownerSlug);
@@ -488,10 +525,28 @@ async function runPipeline(
           sawComplete = true;
           break;
         }
+        // 'queue' is a non-terminal pre-run state — the kernel is waiting for
+        // a GPU. Treat it as "running" for staleness-tracking purposes.
+        if (status === 'running' || status === 'queue' || status === 'queued') {
+          sawNonErrorState = true;
+        }
         if (status === 'error' || status === 'cancel') {
-          // Terminal kernel state — fail fast. Do NOT count this as a
-          // transient network error (the previous code let a failed kernel
-          // be retried ~10 times, pointless and slow).
+          if (!sawNonErrorState && staleErrorRetries < MAX_STALE_ERROR_RETRIES) {
+            // The error arrived before we ever saw the kernel running — this
+            // is almost certainly the PREVIOUS run's stale status. Wait and
+            // retry instead of failing the new run.
+            staleErrorRetries++;
+            logger.warn(
+              { jobId: job.id, status, attempt: staleErrorRetries, max: MAX_STALE_ERROR_RETRIES },
+              'Kaggle kernel error before run started — likely stale status, retrying',
+            );
+            updateJobStatus(job, 'running', `Waiting for new run to start (retry ${staleErrorRetries}/${MAX_STALE_ERROR_RETRIES})…`);
+            // Extra settle time before the next poll
+            await sleep(POST_PUSH_SETTLE_MS);
+            continue;
+          }
+          // Either we saw the kernel running (it genuinely failed) or we've
+          // exhausted stale-error retries — fail fast.
           updateJobStatus(job, 'error', `Kaggle kernel ${status}`);
           return;
         }
