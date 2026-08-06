@@ -1,10 +1,19 @@
 """
-Terranoetis — Shallow Water Equations (SWE) Flood Simulation
+Terranoetis — Local-Inertial Rainfall-Driven Flood Simulation
 Runs on Kaggle CPU/GPU.
 
-Solves the 2D Saint-Venant equations using a stable Lax-Friedrichs scheme.
-TUNED for visually impressive flooding: higher resolution, heavy rainfall,
-dam breach scenario, steep terrain with floodplain.
+Solves the 2D local-inertial (diffusive-inertial) shallow water equations
+with a spatially uniform rainfall source term — the approach used by
+LISFLOOD-FP, SFINCS, and RIM2D. Water accumulates everywhere rainfall falls,
+channels into topographic lows, ponds in depressions, and covers the entire
+DEM domain (not just valleys downstream of a breach).
+
+Physics:
+  Continuity:  dh/dt = rainfall_rate - infiltration + flux divergence
+  Momentum:    local-inertial (local acceleration + pressure gradient +
+               bed slope + Manning friction, semi-implicit)
+
+State: h[NY,NX], qx[NY,NX+1], qy[NY+1,NX] (face-centred fluxes on a C-grid)
 
 Author: Terranoetis / Freebuff
 """
@@ -14,301 +23,258 @@ import os
 import time
 import traceback
 import numpy as np
-import torch
 
-# Force CPU for Kaggle P100 compatibility
-DEVICE = torch.device('cpu')
-print(f"[INIT] Using device: {DEVICE}")
-
-# Physical velocity cap (m/s) — flood waters rarely exceed this; guards
-# against wet/dry front spikes producing absurd arrow magnitudes.
-VMAX_VEL = 30.0
+# ── Physical constants ──────────────────────────────────────────────
+G = 9.81              # m/s² — gravitational acceleration
+MANNING_N = 0.035     # mixed land cover default
+INFILTRATION_MM_HR = 10.0  # Green-Ampt constant loss rate (mm/hr)
+CFL = 0.5             # CFL number for adaptive timestep
+V_MAX = 5.0           # m/s — physical velocity cap for flood waters
 
 
-class SWESolver:
-    """2D Shallow Water Equations solver — Lax-Friedrichs finite volume."""
-
-    def __init__(self, grid_size=512, dx=5.0, dt=0.1, g=9.81, friction=0.005):
-        self.N = grid_size
-        self.dx = dx
-        self.dt = dt
-        self.g = g
-        self.nu = friction
-        self.device = DEVICE
-        # Physical ceiling — wet/dry fronts + steep terrain shouldn't exceed this
-        self.q_max_vel = 30.0  # m/s
-
-        # State: h (depth), hu, hv (momentum)
-        shape = (grid_size, grid_size)
-        self.h  = torch.zeros(shape, device=self.device, dtype=torch.float64)
-        self.hu = torch.zeros(shape, device=self.device, dtype=torch.float64)
-        self.hv = torch.zeros(shape, device=self.device, dtype=torch.float64)
-        self.z  = torch.zeros(shape, device=self.device, dtype=torch.float64)
-        self.rainfall = torch.zeros(shape, device=self.device, dtype=torch.float64)
-
-    def set_terrain(self, terrain_np):
-        from scipy.ndimage import zoom as scipy_zoom
-        if terrain_np.shape[0] != self.N or terrain_np.shape[1] != self.N:
-            zf = (self.N / terrain_np.shape[0], self.N / terrain_np.shape[1])
-            terrain_np = scipy_zoom(terrain_np, zf, order=1)
-        self.z = torch.from_numpy(terrain_np.astype(np.float64)).to(self.device)
-        print(f"[TERRAIN] {self.N}x{self.N}, elev {self.z.min():.1f}–{self.z.max():.1f} m  "
-              f"relief {self.z.max() - self.z.min():.1f} m")
-
-    def set_initial_water(self, frac_cy=0.5, frac_cx=0.5, frac_r=0.15, depth=5.0):
-        cy, cx, r = int(frac_cy * self.N), int(frac_cx * self.N), int(frac_r * self.N)
-        yy, xx = torch.meshgrid(
-            torch.arange(self.N, dtype=torch.float64, device=self.device),
-            torch.arange(self.N, dtype=torch.float64, device=self.device), indexing='ij')
-        dist = torch.sqrt((yy - cy)**2 + (xx - cx)**2)
-        mask = dist < r
-        self.h[mask] = depth * (1.0 - dist[mask] / r)
-        print(f"[INIT] Water blob: radius={r} cells, depth={depth:.1f} m, "
-              f"volume={self.h.sum().item()*self.dx**2/1e6:.1f} M m³")
-
-    def set_dam_reservoir(self, dam_y=0.3, dam_width=0.08, reservoir_depth=25.0):
-        """Place a dam wall across the valley and fill the reservoir behind it."""
-        N = self.N
-        yy = torch.arange(N, dtype=torch.float64, device=self.device).unsqueeze(1)
-
-        # Reservoir region: everything above the dam line
-        dam_row = int(dam_y * N)
-        half_w = int(dam_width * N)
-
-        # Fill reservoir (upstream of dam) with water
-        for row in range(0, dam_row):
-            dist_to_center = torch.abs(torch.arange(N, dtype=torch.float64, device=self.device) - N // 2)
-            # Width of valley at this row increases away from dam
-            valley_half = int((dam_row - row) * 0.4) + half_w
-            in_valley = dist_to_center < valley_half
-            depth_factor = reservoir_depth * (1.0 - (dam_row - row) / dam_row * 0.6)
-            self.h[row, in_valley] = depth_factor
-        print(f"[DAM] Reservoir at row {dam_row}, depth={reservoir_depth:.0f} m, "
-              f"volume={self.h.sum().item()*self.dx**2/1e6:.1f} M m³")
-
-    def set_rainfall(self, mm_hr):
-        self.rainfall.fill_(mm_hr / 1000.0 / 3600.0)
-        print(f"[RAIN] {mm_hr:.1f} mm/hr")
-
-    def step(self):
-        """One time step using Lax-Friedrichs (guaranteed stable for CFL ≤ 0.5)."""
-        h, hu, hv, z = self.h, self.hu, self.hv, self.z
-        g, dx, dt, nu = self.g, self.dx, self.dt, self.nu
-
-        # Wet mask: where water exists above terrain
-        h = torch.clamp(h, min=0.0)
-        total = z + h
-        wet = h > 0.01
-
-        # Velocities (safe division)
-        h_safe = torch.where(wet, h, torch.ones_like(h))
-        u = hu / h_safe
-        v = hv / h_safe
-
-        # Lax-Friedrichs averaged values (neighbor averages)
-        # Pad with zeros (solid wall boundary)
-        h_r  = torch.roll(h,  -1, dims=1);  h_r[:, -1]  = 0
-        h_l  = torch.roll(h,   1, dims=1);  h_l[:, 0]   = 0
-        h_d  = torch.roll(h,  -1, dims=0);  h_d[-1, :]  = 0
-        h_u  = torch.roll(h,   1, dims=0);  h_u[0, :]   = 0
-
-        hu_r = torch.roll(hu, -1, dims=1); hu_r[:, -1]  = 0
-        hu_l = torch.roll(hu,  1, dims=1); hu_l[:, 0]   = 0
-        hu_d = torch.roll(hu, -1, dims=0); hu_d[-1, :]  = 0
-        hu_u = torch.roll(hu,  1, dims=0); hu_u[0, :]   = 0
-        hv_r = torch.roll(hv, -1, dims=1); hv_r[:, -1]  = 0
-        hv_l = torch.roll(hv,  1, dims=1); hv_l[:, 0]   = 0
-        hv_d = torch.roll(hv, -1, dims=0); hv_d[-1, :]  = 0
-        hv_u = torch.roll(hv,  1, dims=0); hv_u[0, :]   = 0
-
-        # Averaged states (all 4 neighbors)
-        h_avg  = 0.25 * (h_r + h_l + h_u + h_d)
-        hu_avg = 0.25 * (hu_r + hu_l + hu_u + hu_d)
-        hv_avg = 0.25 * (hv_r + hv_l + hv_u + hv_d)
-
-        # ── HYPERBOLIC CORE: conservative flux divergences ────────────────
-        # Mass fluxes F_h = hu (x-dir) and G_h = hv (y-dir)
-        dF_h_dx = (hu_r - hu_l) / (2.0 * dx)
-        dG_h_dy = (hv_d - hv_u) / (2.0 * dx)
-
-        # Clamp velocity before computing nonlinear fluxes so the wet/dry
-        # front doesn't send machine-inf into the roll/difference stencils.
-        u_clamped = u.clamp(-self.q_max_vel, self.q_max_vel)
-        v_clamped = v.clamp(-self.q_max_vel, self.q_max_vel)
-        h_clamped = h.clamp(max=200.0)  # 200 m ceiling — beyond this is a numerical artifact
-
-        # Momentum pressure + convective fluxes at cell faces
-        # F(hu) = hu²/h + ½·g·h²,   G(hv) = hv²/h + ½·g·h², cross terms hu·hv/h
-        gh2_half = 0.5 * g * h_clamped**2
-        Fu_x = h_clamped * u_clamped * u_clamped + gh2_half  # = hu²/h + ½gh²
-        Fu_y = h_clamped * u_clamped * v_clamped             # cross term
-        Gv_x = h_clamped * v_clamped * u_clamped
-        Gv_y = h_clamped * v_clamped * v_clamped + gh2_half
-        dFu_dx = (torch.roll(Fu_x, -1, dims=1) - torch.roll(Fu_x, 1, dims=1)) / (2.0 * dx)
-        dFu_dy = (torch.roll(Fu_y, -1, dims=0) - torch.roll(Fu_y, 1, dims=0)) / (2.0 * dx)
-        dGv_dx = (torch.roll(Gv_x, -1, dims=1) - torch.roll(Gv_x, 1, dims=1)) / (2.0 * dx)
-        dGv_dy = (torch.roll(Gv_y, -1, dims=0) - torch.roll(Gv_y, 1, dims=0)) / (2.0 * dx)
-
-        # Lateral slopes from terrain (pressure gradient)
-        dzdx = torch.zeros_like(z)
-        dzdy = torch.zeros_like(z)
-        dzdx[:, 1:] = (total[:, 1:] - total[:, :-1]) / dx
-        dzdx[:, 0]  = dzdx[:, 1]
-        dzdy[1:, :] = (total[1:, :] - total[:-1, :]) / dx
-        dzdy[0, :]  = dzdy[1, :]
-
-        # Source terms: friction + gravity slope
-        speed = torch.sqrt(u**2 + v**2).clamp(min=1e-8)
-        src_hu = -g * h * dzdx - nu * speed * u
-        src_hv = -g * h * dzdy - nu * speed * v
-
-        # Update with Lax-Friedrichs (half step average + source)
-        # Full 2D Lax-Friedrichs:
-        #   h_new  = avg(h)  − dt·[∂(hu)/∂x + ∂(hv)/∂y]   + rain/infiltration
-        #   hu_new = avg(hu) − dt·[∂Fu/∂x + ∂Fu/∂y]       + dt·src_hu
-        self.h  = h_avg - dt * (dF_h_dx + dG_h_dy) + dt * (self.rainfall - 0.002 * h)
-        self.hu = hu_avg - dt * (dFu_dx + dFu_dy) + dt * src_hu
-        self.hv = hv_avg - dt * (dGv_dx + dGv_dy) + dt * src_hv
-
-        # Enforce positivity and cap depth (physical ceiling prevents runaway)
-        self.h = torch.clamp(self.h, min=0.0, max=200.0)
-        self.hu = torch.where(self.h > 0.01, self.hu, torch.zeros_like(self.hu))
-        self.hv = torch.where(self.h > 0.01, self.hv, torch.zeros_like(self.hv))
-        # Cap momentum so velocity stays in the physically defensible range
-        vel_scale = torch.clamp(self.h, min=1e-4)
-        self.hu = torch.clamp(self.hu, -self.q_max_vel * vel_scale, self.q_max_vel * vel_scale)
-        self.hv = torch.clamp(self.hv, -self.q_max_vel * vel_scale, self.q_max_vel * vel_scale)
-
-        # Replace any NaN/Inf
-        self.h  = torch.where(torch.isfinite(self.h),  self.h,  torch.zeros_like(self.h))
-        self.hu = torch.where(torch.isfinite(self.hu), self.hu, torch.zeros_like(self.hu))
-        self.hv = torch.where(torch.isfinite(self.hv), self.hv, torch.zeros_like(self.hv))
-
-    def generate_heightmap(self, method='valley'):
-        from scipy.ndimage import zoom as scipy_zoom, gaussian_filter
-        N = self.N
-        if method == 'valley':
-            # Dramatic river valley with steep walls and wide floodplain
-            yy, xx = torch.meshgrid(
-                torch.linspace(-1, 1, N, device=self.device),
-                torch.linspace(-1, 1, N, device=self.device), indexing='ij')
-            # Meandering river centerline
-            river_y = (0.25 * torch.sin(xx * 3.5)
-                       + 0.12 * torch.sin(xx * 6.2 + 0.5)
-                       + 0.06 * torch.sin(xx * 11 + 1.2))
-            dist = torch.abs(yy - river_y)
-
-            # Two-zone terrain: flat floodplain near river, steep hills beyond
-            floodplain_width = 0.15  # fraction of grid
-            fp_dist = torch.clamp(dist - floodplain_width, min=0.0)
-            terrain = torch.where(
-                dist < floodplain_width,
-                5.0 + 15.0 * (dist / floodplain_width)**2,       # gentle floodplain
-                20.0 + 180.0 * fp_dist**1.2                       # steep hills
-            )
-            terrain = terrain.numpy()
-            terrain += np.random.randn(N, N).astype(np.float64) * 3
-            terrain = gaussian_filter(terrain, sigma=2)
-
-        elif method == 'urban':
-            # Urban basin: mostly flat with low retaining walls
-            yy, xx = np.meshgrid(np.linspace(-1, 1, N), np.linspace(-1, 1, N))
-            # Flat center, ring of hills
-            r = np.sqrt(xx**2 + yy**2)
-            terrain = np.where(r < 0.3, 5.0, 5.0 + 200.0 * (r - 0.3)**1.5)
-            terrain += np.random.randn(N, N).astype(np.float64) * 2
-            terrain = gaussian_filter(terrain, sigma=3)
-
-        else:
-            noise = np.random.randn(max(4, N // 10), max(4, N // 10))
-            terrain = scipy_zoom(noise, N / noise.shape[0], order=1)[:N, :N]
-            terrain = ((terrain - terrain.min()) / (terrain.max() - terrain.min() + 1e-8) * 200)
-
-        self.set_terrain(terrain.astype(np.float32))
-        return terrain
-
-    def snapshot(self):
-        h = self.h.cpu().numpy().astype(np.float32)
-        # Compute velocity only at wet cells to avoid inf/nan at dry cells
-        wet = h > 0.01
-        u = np.zeros_like(h)
-        v = np.zeros_like(h)
-        hu_np = self.hu.cpu().numpy().astype(np.float32)
-        hv_np = self.hv.cpu().numpy().astype(np.float32)
-        u[wet] = hu_np[wet] / h[wet]
-        v[wet] = hv_np[wet] / h[wet]
-        u = np.nan_to_num(u, nan=0.0, posinf=0.0, neginf=0.0)
-        v = np.nan_to_num(v, nan=0.0, posinf=0.0, neginf=0.0)
-        # Clamp velocities to a physical bound — wet/dry front spikes (hu/h with
-        # vanishing h) produce absurd values that would corrupt visualization.
-        u = np.clip(u, -VMAX_VEL, VMAX_VEL)
-        v = np.clip(v, -VMAX_VEL, VMAX_VEL)
-        return {
-            'water_depth': h, 'velocity_x': u, 'velocity_y': v,
-            'terrain': self.z.cpu().numpy().astype(np.float32),
-            'max_depth': float(h.max()), 'total_volume': float(h.sum() * self.dx**2),
-            'flooded_cells': int((h > 0.01).sum()),
-        }
+def _bilinear_upsample(src, src_n, out_n):
+    """
+    Bilinearly upsample a square [src_n, src_n] elevation grid to
+    [out_n, out_n]. Used to lift a coarse client-sampled Cesium terrain
+    (e.g. 64×64) to the simulation resolution (e.g. 256×256).
+    Row 0 is the north edge for both grids, matching the renderer.
+    """
+    src = np.asarray(src, dtype=np.float64)
+    s = np.arange(out_n) * (src_n - 1) / max(1, out_n - 1)
+    y0 = np.clip(s.astype(int), 0, src_n - 2)
+    y1 = y0 + 1
+    fy = s - y0
+    x0 = np.clip(s.astype(int), 0, src_n - 2)
+    x1 = x0 + 1
+    fx = s - x0
+    out = np.empty((out_n, out_n), dtype=np.float64)
+    for j in range(out_n):
+        out[j] = (src[y0[j], x0] * (1 - fy[j]) * (1 - fx)
+                  + src[y0[j], x1] * (1 - fy[j]) * fx
+                  + src[y1[j], x0] * fy[j] * (1 - fx)
+                  + src[y1[j], x1] * fy[j] * fx)
+    return out
 
 
 def run_flood_simulation(params):
     t0 = time.time()
-    gs   = int(params.get('grid_size', 512))
-    rain = float(params.get('rainfall_mm', 300))
-    dur  = float(params.get('duration_hours', 6))
-    sat  = float(params.get('soil_saturation', 0.3))
-    dam  = params.get('dam_breach', True)
-    terr = params.get('terrain_type', 'valley')
-    lat  = float(params.get('lat', 29.76))
-    lon  = float(params.get('lon', -95.37))
+    gs = int(params.get('grid_size', 256))
+    rainfall_mm = float(params.get('rainfall_mm', 500))
+    duration_hours = float(params.get('duration_hours', 14))
+    soil_saturation = float(params.get('soil_saturation', 0.8))
+    lat = float(params.get('lat', 29.76))
+    lon = float(params.get('lon', -95.37))
 
     print(f"\n{'='*60}")
-    print(f"TERRANOETIS — FLOOD SWE SIMULATION (TUNED)")
+    print("TERRANOETIS — LOCAL-INERTIAL RAINFALL FLOOD SIMULATION")
     print(f"{'='*60}")
     print(f"Location: {lat:.4f}, {lon:.4f}")
-    print(f"Grid: {gs}x{gs} ({gs**2:,} cells) | Duration: {dur:.1f}h | Device: {DEVICE}")
-    print(f"Rainfall: {rain:.0f} mm/hr | Soil sat: {sat:.1f} | Dam breach: {dam}")
+    print(f"Grid: {gs}x{gs} ({gs**2:,} cells) | Duration: {duration_hours:.1f}h")
+    print(f"Rainfall: {rainfall_mm:.0f} mm total | Soil sat: {soil_saturation:.1f}")
 
-    # Use smaller dx for higher spatial resolution (5m per cell), scaled to study area
+    # Grid spacing: scaled to study area extent
     extent_km = float(params.get('extent_km', 0.0))
-    dx_flood = (extent_km * 1000.0 / gs) if extent_km > 0 else 5.0
-    solver = SWESolver(grid_size=gs, dx=dx_flood, dt=0.1, g=9.81, friction=0.005)
-    solver.generate_heightmap(method=terr)
+    dx = (extent_km * 1000.0 / gs) if extent_km > 0 else 20.0  # meters
+    print(f"Cell size: {dx:.1f} m | Domain: {extent_km:.1f} km")
 
-    if dam:
-        # Dramatic dam breach: large reservoir upstream
-        solver.set_dam_reservoir(dam_y=0.30, dam_width=0.06, reservoir_depth=25.0)
-    else:
-        # Heavy rain event: start with wet ground, moderate initial pooling
-        solver.set_initial_water(0.5, 0.5, 0.12, 2.0)
+    # ── Real terrain support (same contract as landslide kernel) ──
+    terrain_gs0 = int(params.get('terrain_gs', 0) or 0)
+    terrain_b64 = params.get('terrain_b64')
+    terrain_vals = params.get('terrain')
+    use_real = bool(terrain_gs0 > 1)
 
-    effective_rain = rain * (1.0 - sat * 0.3)
-    solver.set_rainfall(effective_rain)
+    if use_real and terrain_b64:
+        try:
+            import base64
+            raw = base64.b64decode(terrain_b64)
+            u16 = np.frombuffer(raw, dtype='<u2')
+            if len(u16) != terrain_gs0 * terrain_gs0:
+                use_real = False
+            else:
+                tmin = float(params.get('terrain_min', 0.0))
+                tspan = float(params.get('terrain_span', 1.0))
+                flat = np.where(u16 == 65535, np.nan, tmin + (u16 / 65534.0) * tspan)
+                flat = np.where(np.isnan(flat), tmin, flat)
+                terrain_2d = np.asarray(flat, dtype=np.float64).reshape(terrain_gs0, terrain_gs0)
+                z_b = _bilinear_upsample(terrain_2d, terrain_gs0, gs)
+                z_b = np.clip(z_b, 0, 12000)
+                print(f"[TERRAIN] Real Cesium terrain {terrain_gs0}x{terrain_gs0} -> {gs}x{gs}")
+        except Exception:
+            use_real = False
+    elif use_real and isinstance(terrain_vals, list) and len(terrain_vals) == terrain_gs0 * terrain_gs0:
+        terrain_2d = np.asarray(terrain_vals, dtype=np.float64).reshape(terrain_gs0, terrain_gs0)
+        z_b = _bilinear_upsample(terrain_2d, terrain_gs0, gs)
+        z_b = np.clip(z_b, 0, 12000)
+        print(f"[TERRAIN] Real Cesium terrain {terrain_gs0}x{terrain_gs0} -> {gs}x{gs}")
 
-    dt_sim = solver.dt * 10  # each solver step = 1s sim time
-    total_steps = int(dur * 3600 / dt_sim)
-    snap_interval = max(1, total_steps // 30)  # 30 snapshots for smoother animation
+    if not use_real:
+        # Fallback: gentle synthetic terrain (no dam breach)
+        yy, xx = np.meshgrid(np.linspace(-1, 1, gs), np.linspace(-1, 1, gs), indexing='ij')
+        z_b = 5.0 + 20.0 * (np.abs(yy) + np.abs(xx)) * 0.5
+        z_b += np.random.RandomState(42).randn(gs, gs) * 0.5
+        print(f"[TERRAIN] Synthetic terrain {gs}x{gs}, dx={dx:.0f}m")
 
-    print(f"[SIM] {total_steps} steps, snapshot every {snap_interval} steps...")
-    snapshots = []
+    # Checksum verification
+    print(f"[TERRAIN] elev min={z_b.min():.1f} max={z_b.max():.1f} mean={z_b.mean():.1f} m")
+
+    # ── Rainfall rate (m/s) ──
+    # Derive per-hour rate from total: rate = total_mm / duration_hours
+    rainfall_rate = (rainfall_mm / 1000.0) / (duration_hours * 3600.0)  # m/s
+    infiltration_rate = (INFILTRATION_MM_HR / 1000.0) / 3600.0  # m/s
+    # Soil saturation reduces infiltration (higher sat = less loss)
+    effective_infiltration = infiltration_rate * (1.0 - soil_saturation * 0.7)
+    print(f"[RAIN] {rainfall_mm:.0f} mm over {duration_hours:.1f}h = "
+          f"{rainfall_rate*3600*1000:.1f} mm/hr, infiltration {effective_infiltration*3600*1000:.1f} mm/hr")
+
+    # ── State ──
+    h = np.zeros((gs, gs), dtype=np.float64)  # water depth (m)
+    qx = np.zeros((gs, gs + 1), dtype=np.float64)  # x-face flux (m²/s)
+    qy = np.zeros((gs + 1, gs), dtype=np.float64)  # y-face flux (m²/s)
+
+    # Initial wet ground (saturated soil) so water pools broadly
+    h_init = 0.05 * soil_saturation
+    h.fill(h_init)
+
+    # ── Time stepping ──
+    total_sim_sec = duration_hours * 3600.0
     wallclock_max = float(params.get('wallclock_max_sec', 480))
-    print(f"Wall-clock cap: {wallclock_max:.0f}s")
-    for step_i in range(total_steps):
+    snap_interval_sec = total_sim_sec / 30.0  # 30 snapshots
+
+    print(f"[SIM] {total_sim_sec:.0f}s sim time, wall-clock cap {wallclock_max:.0f}s")
+    snapshots = []
+    sim_t = 0.0
+    step_i = 0
+
+    while sim_t < total_sim_sec:
         if time.time() - t0 > wallclock_max:
-            print(f"  [WALL-CLOCK CAP] Stopping at step {step_i} (elapsed {time.time()-t0:.0f}s)")
+            print(f"  [WALL-CLOCK CAP] Stopping at t={sim_t/3600:.1f}h (elapsed {time.time()-t0:.0f}s)")
             break
-        solver.step()
-        if step_i % snap_interval == 0 or step_i == total_steps - 1:
-            s = solver.snapshot()
-            s['time_hours'] = step_i * dt_sim / 3600
-            snapshots.append(s)
-            pct = (step_i + 1) / total_steps * 100
-            print(f"  [{pct:5.1f}%] t={s['time_hours']:.1f}h | "
-                  f"max={s['max_depth']:.2f}m | vol={s['total_volume']/1e6:.1f}M m³ | "
-                  f"flooded={s['flooded_cells']:,}/{gs**2:,}")
+
+        # ── Adaptive timestep (CFL) ──
+        # Wave speed = sqrt(g * max(h)) + velocity
+        max_h = float(h.max())
+        wave_speed = np.sqrt(G * max_h) + V_MAX
+        dt = CFL * dx / max(wave_speed, 1e-6)
+        dt = min(dt, 1.0)  # cap at 1s
+
+        # ── Local-inertial momentum (face-centred) ──
+        # Water surface elevation at cell centres
+        eta = z_b + h
+
+        # x-face water depth (average of adjacent cells)
+        hx = 0.5 * (h[:, :-1] + h[:, 1:])
+        # x-face surface elevation
+        etax = 0.5 * (eta[:, :-1] + eta[:, 1:])
+        # x-face bed slope (downward gradient)
+        dzdx = (z_b[:, 1:] - z_b[:, :-1]) / dx
+        # x-face water surface gradient
+        detadx = (eta[:, 1:] - eta[:, :-1]) / dx
+
+        # y-face water depth
+        hy = 0.5 * (h[:-1, :] + h[1:, :])
+        # y-face surface elevation
+        etay = 0.5 * (eta[:-1, :] + eta[1:, :])
+        # y-face bed slope
+        dzdy = (z_b[1:, :] - z_b[:-1, :]) / dx
+        # y-face water surface gradient
+        detady = (eta[1:, :] - eta[:-1, :]) / dx
+
+        # Local-inertial momentum (Bates et al. 2010):
+        #   dq/dt = -g*h*(deta/dx) - g*n²*q*|q|/h^(7/3)
+        # Semi-implicit friction:
+        #   q_new = (q + g*h*dt*S) / (1 + g*n²*dt*|q|/h^(7/3))
+        # where S = -deta/dx (downslope driving gradient)
+
+        # x-momentum
+        Sx = -detadx  # driving gradient (positive = downslope)
+        hx_safe = np.maximum(hx, 1e-6)
+        # Friction denominator (semi-implicit)
+        denom_x = 1.0 + G * MANNING_N**2 * dt * np.abs(qx[:, 1:-1]) / hx_safe**(7.0/3.0)
+        # Update flux
+        qx_new = (qx[:, 1:-1] + G * hx_safe * dt * Sx) / denom_x
+        # Cap velocity
+        ux = qx_new / hx_safe
+        ux = np.clip(ux, -V_MAX, V_MAX)
+        qx_new = ux * hx_safe
+        qx[:, 1:-1] = qx_new
+        # Boundary: zero flux at edges
+        qx[:, 0] = 0.0
+        qx[:, -1] = 0.0
+
+        # y-momentum
+        Sy = -detady
+        hy_safe = np.maximum(hy, 1e-6)
+        denom_y = 1.0 + G * MANNING_N**2 * dt * np.abs(qy[1:-1, :]) / hy_safe**(7.0/3.0)
+        qy_new = (qy[1:-1, :] + G * hy_safe * dt * Sy) / denom_y
+        uy = qy_new / hy_safe
+        uy = np.clip(uy, -V_MAX, V_MAX)
+        qy_new = uy * hy_safe
+        qy[1:-1, :] = qy_new
+        qy[0, :] = 0.0
+        qy[-1, :] = 0.0
+
+        # ── Continuity ──
+        # dh/dt = rainfall - infiltration + flux divergence
+        # Flux divergence: (qx[i+1] - qx[i])/dx + (qy[j+1] - qy[j])/dx
+        dqx = (qx[:, 1:] - qx[:, :-1]) / dx
+        dqy = (qy[1:, :] - qy[:-1, :]) / dx
+
+        h_new = h + dt * (rainfall_rate - effective_infiltration - dqx - dqy)
+
+        # Positivity
+        h_new = np.maximum(h_new, 0.0)
+
+        # NaN guard
+        if np.any(np.isnan(h_new)) or np.any(np.isinf(h_new)):
+            h_new = np.nan_to_num(h_new, nan=0, posinf=0, neginf=0)
+
+        h = h_new
+        sim_t += dt
+        step_i += 1
+
+        # ── Snapshot ──
+        if sim_t >= len(snapshots) * snap_interval_sec or sim_t >= total_sim_sec - 1e-6:
+            # Compute velocity field for output
+            u = np.zeros_like(h)
+            v = np.zeros_like(h)
+            wet = h > 0.01
+            # Face velocities -> cell centres
+            ux_c = 0.5 * (qx[:, :-1] + qx[:, 1:]) / np.maximum(h, 1e-6)
+            uy_c = 0.5 * (qy[:-1, :] + qy[1:, :]) / np.maximum(h, 1e-6)
+            u[wet] = ux_c[wet]
+            v[wet] = uy_c[wet]
+            u = np.clip(u, -V_MAX, V_MAX)
+            v = np.clip(v, -V_MAX, V_MAX)
+
+            snapshots.append({
+                'water_depth': h.astype(np.float32),
+                'velocity_x': u.astype(np.float32),
+                'velocity_y': v.astype(np.float32),
+                'time_hours': sim_t / 3600.0,
+                'max_depth': float(h.max()),
+                'flooded_cells': int((h > 0.01).sum()),
+            })
+            pct = min(100.0, sim_t / total_sim_sec * 100.0)
+            print(f"  [{pct:5.1f}%] t={sim_t/3600:.1f}h | "
+                  f"max={h.max():.2f}m | flooded={(h>0.01).sum():,}/{gs**2:,}")
 
     elapsed = time.time() - t0
-    final = solver.snapshot()
+    final = {
+        'water_depth': h.astype(np.float32),
+        'velocity_x': np.zeros_like(h, dtype=np.float32),
+        'velocity_y': np.zeros_like(h, dtype=np.float32),
+        'terrain': z_b.astype(np.float32),
+        'max_depth': float(h.max()),
+        'total_volume': float(h.sum() * dx * dx),
+        'flooded_cells': int((h > 0.01).sum()),
+    }
+    # Final velocity
+    wet = h > 0.01
+    ux_c = 0.5 * (qx[:, :-1] + qx[:, 1:]) / np.maximum(h, 1e-6)
+    uy_c = 0.5 * (qy[:-1, :] + qy[1:, :]) / np.maximum(h, 1e-6)
+    final['velocity_x'][wet] = np.clip(ux_c[wet], -V_MAX, V_MAX)
+    final['velocity_y'][wet] = np.clip(uy_c[wet], -V_MAX, V_MAX)
+
     flood_pct = final['flooded_cells'] / (gs * gs) * 100
     print(f"\n[DONE] {elapsed:.1f}s ({elapsed/60:.1f} min)")
     print(f"[DONE] max_depth={final['max_depth']:.2f}m, "
@@ -317,12 +283,14 @@ def run_flood_simulation(params):
 
     return {
         'final': final, 'snapshots': snapshots,
-        'params': {'grid_size': gs, 'rainfall_mm': rain, 'duration_hours': dur,
-                    'lat': lat, 'lon': lon, 'soil_saturation': sat,
-                    'dam_breach': dam, 'terrain_type': terr,
-                    'cell_size_m': dx_flood},
-        'metadata': {'device': str(DEVICE), 'elapsed_seconds': elapsed,
-                      'total_steps': total_steps, 'num_snapshots': len(snapshots)},
+        'params': {'grid_size': gs, 'rainfall_mm': rainfall_mm,
+                    'duration_hours': duration_hours,
+                    'lat': lat, 'lon': lon, 'soil_saturation': soil_saturation,
+                    'cell_size_m': dx},
+        'metadata': {'elapsed_seconds': elapsed,
+                      'total_steps': step_i, 'num_snapshots': len(snapshots),
+                      'model': 'local_inertial_swe',
+                      'solver': 'bates_2010'},
     }
 
 
@@ -358,22 +326,19 @@ def _load_params():
 
 def main():
     print("=" * 60)
-    print("TERRANOETIS — Kaggle Flood Simulation (TUNED FOR IMPACT)")
+    print("TERRANOETIS — Kaggle Flood Simulation (Local-Inertial)")
     print("=" * 60)
 
     params = _load_params()
     if params is not None:
         print(f"[PARAMS] Loaded: {json.dumps(params, indent=2)}")
     else:
-        # Tuned defaults for visually impressive flooding
         params = {
             'lat': 29.76, 'lon': -95.37,
-            'rainfall_mm': 300,        # Extreme rainfall (3× before)
-            'duration_hours': 6,        # 6× longer duration
-            'grid_size': 512,           # 4× more cells (512² vs 256²)
-            'soil_saturation': 0.3,     # Low absorption = more runoff
-            'dam_breach': True,         # Dramatic dam breach scenario
-            'terrain_type': 'valley',   # Steep valley with floodplain
+            'rainfall_mm': 500,
+            'duration_hours': 14,
+            'grid_size': 256,
+            'soil_saturation': 0.8,
         }
 
     try:
@@ -396,8 +361,6 @@ def main():
             snap_vy = np.stack([s['velocity_y'] for s in result['snapshots']])
             np.save(f'{out}/snapshots_vy.npy', snap_vy)
         else:
-            # Wall-clock cap tripped before the first snapshot — ship the
-            # final frame as the only snapshot so the client still renders.
             np.save(f'{out}/snapshots_depth.npy', np.expand_dims(result['final']['water_depth'], axis=0))
             np.save(f'{out}/snapshot_times.npy', np.array([0.0]))
             np.save(f'{out}/snapshots_vx.npy', np.expand_dims(result['final']['velocity_x'], axis=0))
@@ -420,8 +383,7 @@ def main():
         print(f"Volume: {result['final']['total_volume']/1e6:.1f} million m³")
         print(f"Flooded: {result['final']['flooded_cells']:,} / {result['params']['grid_size']**2:,} "
               f"({meta['final_stats']['flooded_pct']:.1f}%)")
-        print(f"Time: {result['metadata']['elapsed_seconds']:.1f}s | "
-              f"Device: {result['metadata']['device']}")
+        print(f"Time: {result['metadata']['elapsed_seconds']:.1f}s")
         print(f"Snapshots: {len(result['snapshots'])}")
         print(f"Files: {os.listdir(out)}")
         print("=" * 60)

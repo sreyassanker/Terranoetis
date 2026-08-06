@@ -36,6 +36,15 @@ export const SimulationRequestSchema = z.discriminatedUnion('type', [
     soil_saturation: z.number().min(0).max(1),
     dam_breach: z.literal(true),
     wind_speed_ms: z.number().min(0).max(60).optional(),
+    /** Per-hour rainfall rate (mm/hr) — the kernel derives it from total/duration if absent. */
+    rainfall_mm_hr: z.number().min(1).max(300).optional(),
+    /**
+     * Real terrain sampled from the Cesium globe for the drawn study box
+     * (row-major, row 0 = north, meters above ellipsoid). When present the
+     * kernel runs the flood on this grid instead of synthetic terrain.
+     */
+    terrain: z.array(z.number()).max(65_536).optional(),
+    terrain_gs: z.number().int().min(2).max(256).optional(),
   }),
   z.object({
     type: z.literal('wildfire_spread'),
