@@ -1,6 +1,19 @@
-# Terreanoetis
+<p align="center">
+  <img src="Terranoetis.png" alt="Terreanoetis" width="120" />
+</p>
+
+# Terranoetis
 
 A real-time geospatial data visualization and AI-powered Earth intelligence platform. Combines a Cesium-based 3D globe with a comprehensive backend serving live environmental data, satellite imagery, analytical models, simulations, and AI-driven insights.
+
+<div align="center">
+
+[![Website](https://img.shields.io/badge/Portfolio-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://sreyassanker.vercel.app)
+[![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sreyassanker)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/in/sreyassanker)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/sreyassanker)
+
+</div>
 
 ## Architecture
 
@@ -605,7 +618,3 @@ Services gracefully disable features when corresponding API keys are absent.
 [MIT](LICENSE)
 
 Copyright (c) 2026 Terreanoetis
-
----
-
-[Sreyassanker](https://sreyassanker.vercel.app) · [GitHub](https://github.com/sreyassanker) · [LinkedIn](https://linkedin.com/in/sreyassanker)
