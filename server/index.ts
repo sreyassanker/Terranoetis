@@ -68,9 +68,6 @@ import { ambientIntelligence } from './sentinel/ambientIntelligence';
 import { selfImproverV2 } from './selfImprover-v2';
 import { multimodal } from './multimodal/index';
 import { satelliteAnalyzer } from './multimodal/satelliteAnalyzer';
-import { prithviEngine } from './foundation-models/prithvi';
-import { satelliteSearcher, LAND_COVER_KEYWORDS } from './foundation-models/satelliteSearch';
-import { satelliteSeeder } from './foundation-models/satelliteSeeder';
 import { handleTileRequest, getTileJson, getLayerSources } from './foundation-models/mvtTileServer';
 import { explainability } from './explainability/index';
 import { reasoningVisualizer } from './explainability/reasoningVisualizer';
@@ -135,7 +132,7 @@ import { forkManager } from './fork/manager';
 (global as any).__forkManager = forkManager;
 import { foundationModelsRouter } from './routes/foundationModels';
 import { forkRouter } from './fork/routes';
-import { vaultRouter } from './routes/vault';
+import { vaultRouter, readVault } from './routes/vault';
 import { createSelfEvolutionRouter } from './routes/selfEvolution';
 import { pulseRouter } from './routes/pulse';
 import { kaggleRouter } from './kaggle';
@@ -340,9 +337,8 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
   ) {
     return next();
   }
-  // Prithvi EO foundation model endpoints (v1 + v2 + all new FM systems)
+  // Prithvi EO foundation model endpoints (v2 + all new FM systems)
   if (
-    req.path.startsWith('/fm/prithvi/') ||
     req.path.startsWith('/fm/prithvi-v2/') ||
     req.path.startsWith('/fm/clay/') ||
     req.path.startsWith('/fm/unet/') ||
@@ -473,10 +469,6 @@ function registerDefaultTools() {
     { name:'toggle_layer_command', category:'navigation', description:'Show or hide any data layer on the globe', exampleQueries:['show earthquakes','enable flights'], schema:{type:'command'} },
 
     // ── Earth Observation / Foundation Models ──
-    { name:'satellite_search', category:'eo', description:'Search satellite imagery by text description, land-cover class, or geographic area. Returns lat/lon + class labels + image URLs.', exampleQueries:['search satellite imagery','find deforestation from space','show me forest near river','satellite view of','land cover search'], schema:{type:'api',endpoint:'/api/fm/search',method:'GET',params:{text:'text description of what to find',classLabel:'land cover class (water/trees/grass/crops/built_area/bare_ground/snow_ice/clouds/flooded_vegetation)',lat:'latitude for area search',lon:'longitude for area search',radiusKm:'search radius in km',limit:'max results'}} },
-    { name:'satellite_analyze', category:'eo', description:'Analyze a lat/lon with the Prithvi EO foundation model — returns land cover classification with confidence', exampleQueries:['analyze this location from satellite','what does satellite see at','classify land cover','satellite analysis'], schema:{type:'api',endpoint:'/api/fm/prithvi/analyze',method:'POST',params:{lat:'latitude',lon:'longitude',radiusKm:'analysis radius in km'}} },
-    { name:'satellite_change', category:'eo', description:'Detect land cover change at a lat/lon using Prithvi EO model', exampleQueries:['detect change','land cover change','deforestation detection','urbanization detection'], schema:{type:'api',endpoint:'/api/fm/prithvi/change',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
-    { name:'satellite_similar', category:'eo', description:'Find similar locations to a lat/lon based on satellite imagery embeddings', exampleQueries:['similar locations','find similar terrain','matching landscape'], schema:{type:'api',endpoint:'/api/fm/prithvi/similar',method:'POST',params:{lat:'latitude',lon:'longitude',topK:'number of similar results'}} },
     { name:'clay_analyze', category:'eo', description:'Analyze a lat/lon with the IBM CLAY geospatial foundation model (multisensor). Returns embedding + classification.', exampleQueries:['clay analysis','multisensor satellite analysis','geospatial embedding'], schema:{type:'api',endpoint:'/api/fm/clay/analyze',method:'POST',params:{lat:'latitude',lon:'longitude',sensor:'satellite sensor (sentinel-2, landsat, etc.)'}} },
     { name:'clay_flood_sar', category:'eo', description:'Detect flood extent using CLAY model with SAR data at a lat/lon', exampleQueries:['flood detection sar','sar flood extent','clay flood'], schema:{type:'api',endpoint:'/api/fm/clay/flood-sar',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
     { name:'unet_segment', category:'eo', description:'U-Net land/water segmentation at a lat/lon — returns classified areas', exampleQueries:['unet segmentation','land water segmentation','image segmentation'], schema:{type:'api',endpoint:'/api/fm/unet/segment',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
@@ -7555,6 +7547,19 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
   const cloud: boolean = req.body.cloud || false;
   const requestId = (req as any).correlationId || crypto.randomUUID();
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || req.body.apiKey;
+  // Look up per-user vault keys for per-request API key overrides
+  const vault = readVault(userId);
+  const vaultKeys: Record<string, string> = {};
+  if (vault['GOOGLE_GEMINI_API_KEY']) vaultKeys['GOOGLE_GEMINI_API_KEY'] = vault['GOOGLE_GEMINI_API_KEY'];
+  if (vault['GEMINI_API_KEY']) vaultKeys['GEMINI_API_KEY'] = vault['GEMINI_API_KEY'];
+  if (vault['ANTHROPIC_API_KEY']) vaultKeys['ANTHROPIC_API_KEY'] = vault['ANTHROPIC_API_KEY'];
+  if (vault['GROQ_API_KEY']) vaultKeys['GROQ_API_KEY'] = vault['GROQ_API_KEY'];
+  if (vault['OPENROUTER_API_KEY']) vaultKeys['OPENROUTER_API_KEY'] = vault['OPENROUTER_API_KEY'];
+  if (vault['DEEPSEEK_API_KEY']) vaultKeys['DEEPSEEK_API_KEY'] = vault['DEEPSEEK_API_KEY'];
+  // Effective Gemini key: vault > env > req.body (for multimodal vision calls)
+  const effectiveGeminiKey = vaultKeys['GOOGLE_GEMINI_API_KEY'] || vaultKeys['GEMINI_API_KEY'] || apiKey;
+  // Client-selected tier from the request body
+  const clientTier = (req.body as any).tier as string | undefined;
   const abortController = new AbortController();
 
   registerAbortController(requestId, abortController);
@@ -7613,8 +7618,8 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         // Geocode location if not in city database
         let dtLocation = intent.location;
         if (!dtLocation) {
-          const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
-          const geo = await IntentRouter.geocode(message, apiKey);
+          const geoApiKey = effectiveGeminiKey || '';
+          const geo = await IntentRouter.geocode(message, geoApiKey);
           if (geo?.lat && geo?.lon) {
             dtLocation = { lat: geo.lat, lon: geo.lon, label: geo.label || message.split(' ').slice(-2).join(' ') };
           }
@@ -7734,7 +7739,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     const streamPass = async (prompt: string): Promise<string> => {
       let accumulated = '';
       let tokenCount = 0;
-      for await (const token of omninet.generateStream(prompt, { signal: abortController.signal, temperature: 0.4, maxTokens: 4096 })) {
+      for await (const token of omninet.generateStream(prompt, { signal: abortController.signal, temperature: 0.4, maxTokens: 4096, vaultKeys: Object.keys(vaultKeys).length > 0 ? vaultKeys : undefined, clientTier })) {
         if (abortController.signal.aborted) break;
         accumulated += token;
         tokenCount++;
@@ -7749,7 +7754,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     };
 
     const streamPassMultimodal = async (textPrompt: string, imgs: Array<{dataUrl: string; mimeType: string; fileName: string}>): Promise<string> => {
-      if (!apiKey || imgs.length === 0) {
+      if (!effectiveGeminiKey || imgs.length === 0) {
         sendEvent('step', { stepType: 'multimodal', text: 'No Gemini key for vision — falling back to text-only', status: 'completed' });
         return streamPass(textPrompt);
       }
@@ -7758,8 +7763,8 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         const b64 = img.dataUrl.replace(/^data:image\/\w+;base64,/, '');
         parts.push({ inlineData: { mimeType: img.mimeType, data: b64 } });
       }
-      const model = 'gemini-2.0-flash-001';
-      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`, {
+      const model = 'gemini-2.5-flash';
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${effectiveGeminiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: abortController.signal,
@@ -8197,7 +8202,7 @@ app.post('/api/agent/analyze-vision', async (req: express.Request, res: express.
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
   if (!apiKey) return res.status(502).json({ error: 'Gemini API key not configured. Set GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY in .env' });
 
-  const modelsToTry = ['gemini-2.0-flash-001', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
+  const modelsToTry = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
   let lastError: string | undefined;
 
   for (const model of modelsToTry) {
@@ -10826,16 +10831,6 @@ httpServer.listen(PORT, () => {
   discoveryEngine.start();
   dreamEngine.start();
   memorySystem.start().catch(err => logger.error({ err }, 'memory system start failed'));
-  // Initialize Prithvi foundation model
-  prithviEngine.init().then(() => {
-    logger.info('Prithvi FM initialized');
-    // Auto-start satellite seeder in background (populates prithvi_embeddings for EO search)
-    satelliteSeeder.start({ spacingDeg: 2, resume: true }).catch(err => {
-      logger.warn({ err }, 'Satellite seeder auto-start failed (will retry on demand)');
-    });
-  }).catch(err => logger.warn({ err }, 'Prithvi FM init skipped'));
-  // Initialize satellite image searcher
-  satelliteSearcher.init().then(() => logger.info('SatelliteSearcher initialized')).catch(err => logger.warn({ err }, 'SatelliteSearcher init skipped'));
   // Start ML pipeline background tasks
   startSyntheticDataGeneration(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '', 3600000);
   logger.info('Background jobs started (monitor:scheduler:ambient:mvc:plugin:ml)');

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2, FileDown } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2, FileDown, Layers } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -14,10 +14,16 @@ import StudyAreaPanel from '@/components/ui/StudyAreaPanel';
 import { CameraControls } from '@/components/CameraControls';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import { throttledRender } from '@/lib/throttledRender';
+import { useChatStore } from '@/store/chatStore';
+import { ChatPanel, ChatHistoryPanel } from '@/components/chat';
+import type { VirtualizedMessageListHandle } from '@/components/chat/VirtualizedMessageList';
+import { useCollaboration } from '@/hooks/useCollaboration';
+import { useOfflineChat } from '@/hooks/useOfflineChat';
+import { useChat } from '@/hooks/useChat';
 import {
   removeStudyAreaFromGlobe, setStudyAreaVisibility,
   flyToStudyAreaTopDown, filterDataEntitiesByStudyArea, updateStudyAreaStyle,
-  setStudyAreaActive, computeStudyAreaBbox, restoreHiddenEntities,
+  setStudyAreaActive, computeStudyAreaBbox, restoreHiddenEntities, getStudyAreaOuterRings,
 } from '@/rendering/studyArea';
 import { addBaseImagery, applyTerrainProvider, crossfadeImagery } from '@/viewer/viewer.config';
 import { cinematicFlyTo, createEntityTracker, type TrackEntityType } from '@/viewer/camera.controller';
@@ -69,8 +75,6 @@ import PerformanceMonitor from '@/components/PerformanceMonitor';
 import { DigitalTwinPanel } from '@/components/DigitalTwinPanel';
 import SatelliteImageryPanel from '@/components/ui/SatelliteImageryPanel';
 import { IntelligencePanel } from '@/components/IntelligencePanel';
-import { PrithviPanel } from '@/components/prithvi/PrithviPanel';
-import { SatelliteSearchPanel } from '@/components/prithvi/SatelliteSearchPanel';
 import { SatelliteTrackerPanel } from '@/components/prithvi/SatelliteTrackerPanel';
 import { AviationTrackerPanel } from '@/components/prithvi/AviationTrackerPanel';
 import { IssLivePanel } from '@/components/IssLivePanel';
@@ -78,6 +82,7 @@ import { IssTravelView } from '@/components/IssTravelView';
 import { FlightTravelView } from '@/components/FlightTravelView';
 import { CommandPalette } from '@/components/CommandPalette';
 import { AnalyticsWorkbench } from '@/components/AnalyticsWorkbench';
+import { LandCoverMapperPanel } from '@/components/LandCoverMapperPanel';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { createRenderScheduler } from '@/lib/batchScheduler';
 import { createUnifiedTimer } from '@/lib/unifiedTimer'; // P0 perf: unified timer
@@ -150,16 +155,12 @@ declare const window: CesiumWindow;
 
 type AiProvider = 'gemini' | 'anthropic' | 'local';
 
+/** Full API vault — dynamic flat key map loaded from the server.
+ *  The server has 83+ VAULT_KEY_NAMES; the client stores them all here
+ *  so the ApiVault dialog can show pre-filled values for every provider. */
 interface ApiVaultState {
-  gemini: string;
-  anthropic: string;
-  cesiumIonAccessToken: string;
-  sentinelHubClientId: string;
-  sentinelHubClientSecret: string;
-  marineTrafficApiKey: string;
-  aisStreamApiKey: string;
-  flightAwareAeroApiKey: string;
-  airLabsApiKey: string;
+  /** All provider keys as a flat Record<ENV_KEY, value>. */
+  keys: Record<string, string>;
   preferredAiProvider: AiProvider;
   vaultDismissed: boolean;
 }
@@ -233,15 +234,7 @@ const SESSION_VAULT_KEY = 'worldmonitor.vault.v1';
 const CESIUM_ION_ENV_TOKEN = (import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN as string | undefined)?.trim() ?? '';
 
 const DEFAULT_API_VAULT: ApiVaultState = {
-  gemini: '',
-  anthropic: '',
-  cesiumIonAccessToken: '',
-  sentinelHubClientId: '',
-  sentinelHubClientSecret: '',
-  marineTrafficApiKey: '',
-  aisStreamApiKey: '',
-  flightAwareAeroApiKey: '',
-  airLabsApiKey: '',
+  keys: {},
   preferredAiProvider: 'gemini',
   vaultDismissed: false,
 };
@@ -522,37 +515,38 @@ function sanitizeHtml(text: string): string {
   return text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] || c);
 }
 
-function vaultFromFlatKeys(keys: Record<string, string>): ApiVaultState {
-  return {
-    ...DEFAULT_API_VAULT,
-    gemini: keys.GOOGLE_GEMINI_API_KEY ?? '',
-    anthropic: keys.ANTHROPIC_API_KEY ?? '',
-    cesiumIonAccessToken: keys.CESIUM_ION_ACCESS_TOKEN ?? CESIUM_ION_ENV_TOKEN,
-    sentinelHubClientId: keys.SENTINEL_HUB_CLIENT_ID ?? '',
-    sentinelHubClientSecret: keys.SENTINEL_HUB_CLIENT_SECRET ?? '',
-    marineTrafficApiKey: keys.MARINE_TRAFFIC_API_KEY ?? '',
-    aisStreamApiKey: keys.AIS_STREAM_API_KEY ?? '',
-    flightAwareAeroApiKey: keys.FLIGHTAWARE_AEROAPI_KEY ?? '',
-    airLabsApiKey: keys.AIRLABS_API_KEY ?? '',
-  };
-}
-
 function loadApiVault(): ApiVaultState {
+  if (typeof window === 'undefined') return DEFAULT_API_VAULT;
   try {
-    const cached = sessionStorage.getItem(SESSION_VAULT_KEY);
+    const cached = window.localStorage.getItem(SESSION_VAULT_KEY);
     if (cached) {
       const parsed = JSON.parse(cached) as Partial<ApiVaultState>;
       if (parsed && typeof parsed === 'object') {
-        return { ...DEFAULT_API_VAULT, ...parsed, cesiumIonAccessToken: parsed.cesiumIonAccessToken || CESIUM_ION_ENV_TOKEN };
+        return { ...DEFAULT_API_VAULT, ...parsed, keys: parsed.keys || {} };
       }
     }
-  } catch {
-    /* ignore */
-  }
-  return {
-    ...DEFAULT_API_VAULT,
-    cesiumIonAccessToken: CESIUM_ION_ENV_TOKEN,
-  };
+    // One-time migration: check old sessionStorage for vault data
+    try {
+      const oldSession = window.sessionStorage.getItem(SESSION_VAULT_KEY);
+      if (oldSession) {
+        const old = JSON.parse(oldSession) as Record<string, unknown>;
+        if (old && typeof old === 'object') {
+          // Migrate old format (individual fields) to new flat keys format
+          const migratedKeys: Record<string, string> = {};
+          if ((old as Record<string, string>).gemini) migratedKeys.GOOGLE_GEMINI_API_KEY = (old as Record<string, string>).gemini;
+          if ((old as Record<string, string>).anthropic) migratedKeys.ANTHROPIC_API_KEY = (old as Record<string, string>).anthropic;
+          if ((old as Record<string, string>).cesiumIonAccessToken) migratedKeys.CESIUM_ION_ACCESS_TOKEN = (old as Record<string, string>).cesiumIonAccessToken;
+          if (Object.keys(migratedKeys).length > 0) {
+            const migrated = { keys: migratedKeys, preferredAiProvider: 'gemini' as AiProvider, vaultDismissed: Boolean((old as Record<string, unknown>).vaultDismissed) };
+            window.localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify(migrated));
+            window.sessionStorage.removeItem(SESSION_VAULT_KEY);
+            return migrated;
+          }
+        }
+      }
+    } catch { /* ignore */ }
+  } catch { /* ignore */ }
+  return DEFAULT_API_VAULT;
 }
 
 function purgeLegacyVaultStorage(): void {
@@ -565,30 +559,23 @@ function purgeLegacyVaultStorage(): void {
 }
 
 function hasAnyApiVaultValue(vault: ApiVaultState): boolean {
-  return Boolean(
-    vault.gemini.trim() ||
-    vault.anthropic.trim() ||
-    vault.cesiumIonAccessToken.trim() ||
-    vault.sentinelHubClientId.trim() ||
-    vault.sentinelHubClientSecret.trim() ||
-    vault.marineTrafficApiKey.trim() ||
-    vault.aisStreamApiKey.trim() ||
-    vault.flightAwareAeroApiKey.trim() ||
-    vault.airLabsApiKey.trim()
-  );
+  return Object.values(vault.keys).some(v => typeof v === 'string' && v.trim() !== '');
 }
 
 function resolveAiProvider(vault: ApiVaultState): AiProvider {
-  if (vault.preferredAiProvider === 'anthropic' && vault.anthropic.trim()) return 'anthropic';
-  if (vault.preferredAiProvider === 'gemini' && vault.gemini.trim()) return 'gemini';
-  if (vault.gemini.trim()) return 'gemini';
-  if (vault.anthropic.trim()) return 'anthropic';
+  const geminiKey = (vault.keys.GOOGLE_GEMINI_API_KEY || vault.keys.GEMINI_API_KEY || '').trim();
+  const anthropicKey = (vault.keys.ANTHROPIC_API_KEY || '').trim();
+  if (vault.preferredAiProvider === 'anthropic' && anthropicKey) return 'anthropic';
+  if (vault.preferredAiProvider === 'gemini' && geminiKey) return 'gemini';
+  if (geminiKey) return 'gemini';
+  if (anthropicKey) return 'anthropic';
   return 'local';
 }
 
 function resolveCesiumIonToken(vault: ApiVaultState): string | undefined {
-  const token = vault.cesiumIonAccessToken.trim() || CESIUM_ION_ENV_TOKEN;
-  return token || undefined;
+  const t = (vault.keys.CESIUM_ION_ACCESS_TOKEN || '').trim();
+  if (t) return t;
+  return CESIUM_ION_ENV_TOKEN || undefined;
 }
 
 function normalizeLocationQuery(value: string): string {
@@ -1136,10 +1123,11 @@ export default function App() {
   const smokeParticlesRef = useRef<Cesium.Entity[]>([]);
   const tectonicEntitiesRef = useRef<Cesium.Entity[]>([]);
   const overlayImageryLayersRef = useRef<Record<string, Cesium.ImageryLayer>>({});
-  const searchResultEntitiesRef = useRef<Cesium.Entity[]>([]);
+
   const cctvPulseEntityRef = useRef<Cesium.Entity | null>(null);
   const cctvMetaRef = useRef<Map<string, any>>(new Map());
   const nextAiMsgIdRef = useRef(1);
+  const tiersLoadedRef = useRef(false);
   const MAX_ENTITIES = 30000;
   const toggleDebounceRef = useRef<Record<string, number>>({});
 
@@ -1161,12 +1149,9 @@ export default function App() {
   const [infoEntity, setInfoEntity] = useState<Cesium.Entity | null>(null);
   const [showHeatmapLegend, setShowHeatmapLegend] = useState(false);
   const [showSmokeLegend, setShowSmokeLegend] = useState(false);
-  const [showShareDialog, setShowShareDialog] = useState(false);
-  const [shareUrl, setShareUrl] = useState('');
   const [apiVault, setApiVault] = useState<ApiVaultState>(initialApiVault);
   const [showTokenSetup, setShowTokenSetup] = useState(() => !hasAnyApiVaultValue(initialApiVault) && !initialApiVault.vaultDismissed && !CESIUM_ION_ENV_TOKEN);
   const [showApiVault, setShowApiVault] = useState(false);
-  const [showAI, setShowAI] = useState(false);
   const [showStudyArea, setShowStudyArea] = useState(false);
   const [studyWest, setStudyWest] = useState('68.0');
   const [studySouth, setStudySouth] = useState('6.0');
@@ -1201,12 +1186,11 @@ export default function App() {
   }>({ open: false, lat: 0, lon: 0, name: '', radius: 500000, unit: 'km' });
 
   const [showIntelligencePanel, setShowIntelligencePanel] = useState(false);
-  const [showPrithviPanel, setShowPrithviPanel] = useState(false);
-  const [showSearchPanel, setShowSearchPanel] = useState(false);
   const [showSatelliteTracker, setShowSatelliteTracker] = useState(false);
   const [showAviationTracker, setShowAviationTracker] = useState(false);
   const [showSatelliteImagery, setShowSatelliteImagery] = useState(false);
   const [showAnalyticsWorkbench, setShowAnalyticsWorkbench] = useState(false);
+  const [showLandCoverMapper, setShowLandCoverMapper] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   // CMD+K keyboard shortcut
   useEffect(() => {
@@ -1229,35 +1213,87 @@ export default function App() {
   const [lastDream, setLastDream] = useState<{ scenariosRun: number; modelUpdates: number; newCausalEdges: number; timestamp: number } | null>(null);
   const [notifications, setNotifications] = useState<Array<{id:number;text:string;severity:string}>>([]);
   const [populationImpact, setPopulationImpact] = useState<ReturnType<typeof calculatePopulationImpact> | null>(null);
+
+  // ── Chat state from Zustand store ──
+  const chatState = useChatStore();
+  const aiMessages = chatState.aiMessages;
+  const setAiMessages = chatState.setAiMessages;
+  const addMessage = chatState.addMessage;
+  const updateMessage = chatState.updateMessage;
+  const aiTyping = chatState.aiTyping;
+  const setAiTyping = chatState.setAiTyping;
+  const aiInput = chatState.aiInput;
+  const setAiInput = chatState.setAiInput;
+  const sessionId = chatState.sessionId;
+  const selectedTier = chatState.selectedTier;
+  const setSelectedTier = chatState.setSelectedTier;
+  const modelTiers = chatState.modelTiers;
+  const setModelTiers = chatState.setModelTiers;
+  const adaptiveSuggestions = chatState.adaptiveSuggestions;
+  const setAdaptiveSuggestions = chatState.setAdaptiveSuggestions;
+  const voiceMode = chatState.voiceMode;
+  const setVoiceMode = chatState.setVoiceMode;
+  const bargeIn = chatState.bargeIn;
+  const setBargeIn = chatState.setBargeIn;
+  const planningFor = chatState.planningFor;
+  const setPlanningFor = chatState.setPlanningFor;
+  const pdfExporting = chatState.pdfExporting;
+  const setPdfExporting = chatState.setPdfExporting;
+  const agentSteps = chatState.agentSteps;
+  const setAgentSteps = chatState.setAgentSteps;
+  const showReasoningFor = chatState.showReasoningFor;
+  const setShowReasoningFor = chatState.setShowReasoningFor;
+  const showEvidenceFor = chatState.showEvidenceFor;
+  const setShowEvidenceFor = chatState.setShowEvidenceFor;
+  const reasoningTraces = chatState.reasoningTraces;
+  const setReasoningTraces = chatState.setReasoningTraces;
+  const evidenceChains = chatState.evidenceChains;
+  const setEvidenceChains = chatState.setEvidenceChains;
+  const showAI = chatState.showAI;
+  const setShowAI = chatState.setShowAI;
+  const copiedMsgId = chatState.copiedMsgId;
+  const setCopiedMsgId = chatState.setCopiedMsgId;
+  const thinkingExpanded = chatState.thinkingExpanded;
+  const setThinkingExpanded = chatState.setThinkingExpanded;
+  const expandedStep = chatState.expandedStep;
+  const setExpandedStep = chatState.setExpandedStep;
+  const sandboxWorkspaceId = chatState.sandboxWorkspaceId;
+  const setSandboxWorkspaceId = chatState.setSandboxWorkspaceId;
+  const uploadedFiles = chatState.uploadedFiles;
+  const setUploadedFiles = chatState.setUploadedFiles;
+  const chatImages = chatState.chatImages;
+  const setChatImages = chatState.setChatImages;
+  const clearChatImages = chatState.clearChatImages;
+  const isListening = chatState.isListening;
+  const setIsListening = chatState.setIsListening;
+  const dataAnalysisResult = chatState.dataAnalysisResult;
+  const setDataAnalysisResult = chatState.setDataAnalysisResult;
+  const chatList = chatState.chatList;
+  const setChatList = chatState.setChatList;
+  const showChatHistory = chatState.showChatHistory;
+  const setShowChatHistory = chatState.setShowChatHistory;
+  const shareUrl = chatState.shareUrl;
+  const setShareUrl = chatState.setShareUrl;
+  const showShareDialog = chatState.showShareDialog;
+  const setShowShareDialog = chatState.setShowShareDialog;
+  const streamingMdRef = chatState.streamingMdRef;
+  const pipelineProgress = chatState.pipelineProgress;
+  const setPipelineProgress = chatState.setPipelineProgress;
+
   const aiMessagesRef = useRef<ChatMessage[]>([]);
+  aiMessagesRef.current = aiMessages;
   const showAIRef = useRef(false);
   showAIRef.current = showAI;
-  const [aiMessages, setAiMessages] = useState<ChatMessage[]>([
-    { id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' },
-  ]);
-  aiMessagesRef.current = aiMessages;
-  const [aiTyping, setAiTyping] = useState(false);
+
   const auth = useAuth();
   const ws = useWebSocket(auth.token ?? undefined);
   const { isLoggedIn, isAdmin } = auth;
-  const [copiedMsgId, setCopiedMsgId] = useState<number | null>(null);
-  const [aiInput, setAiInput] = useState('');
-  // Advanced chat state
-  const streamingMdRef = useRef(new StreamingMarkdownRenderer());
-  const [modelTiers, setModelTiers] = useState<Array<{ id: string; label: string; description: string; costPerQuery: number; latencyMs: number }>>([]);
-  const [selectedTier, setSelectedTier] = useState('flash');
-  const [adaptiveSuggestions, setAdaptiveSuggestions] = useState<string[]>([]);
-  const [voiceMode, setVoiceMode] = useState(false);
-  const [bargeIn, setBargeIn] = useState(false);
-  const [sessionId] = useState(() => `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-  const [planningFor, setPlanningFor] = useState<string | null>(null);
-  const tiersLoadedRef = useRef(false);
-  const [pdfExporting, setPdfExporting] = useState(false);
-  const [agentSteps, setAgentSteps] = useState<Array<{type:string;text:string;code?:string;output?:string;timeMs?:number;toolName?:string;subtask?:string;status?:string}>>([]);
-  const [showReasoningFor, setShowReasoningFor] = useState<Record<string, boolean>>({});
-  const [showEvidenceFor, setShowEvidenceFor] = useState<Record<string, boolean>>({});
-  const [reasoningTraces, setReasoningTraces] = useState<Record<string, any>>({});
-  const [evidenceChains, setEvidenceChains] = useState<Record<string, any>>({});
+
+  // ── Collaboration ──
+  const collaboration = useCollaboration(ws, sessionId, 'browser-user', 'You');
+
+  // ── Offline support ──
+  const offline = useOfflineChat();
   const [showCognitiveDashboard, setShowCognitiveDashboard] = useState(false);
   const [showToolWorkbench, setShowToolWorkbench] = useState(false);
   const [showMemoryExplorer, setShowMemoryExplorer] = useState(false);
@@ -1322,25 +1358,16 @@ export default function App() {
       .catch(err => setScenarioGalleryError(err.message))
       .finally(() => setScenarioGalleryLoading(false));
   }, [showScenarioGallery]);
-  const [expandedStep, setExpandedStep] = useState<number | null>(null);
-  const [thinkingExpanded, setThinkingExpanded] = useState(true);
-  const [sandboxWorkspaceId, setSandboxWorkspaceId] = useState<string | null>(null);
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
-  const [pipelineProgress, setPipelineProgress] = useState<Array<{id:string;description:string;status:string}>>([]);
   // Phase 2: Vision
-  const [chatImages, setChatImages] = useState<Array<{id:number;dataUrl:string;mimeType:string;fileName:string}>>([]);
   const nextImageIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Phase 2: Voice
-  const [isListening, setIsListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const recognitionRef = useRef<globalThis.SpeechRecognition | null>(null);
-  // Phase 2: Data Analysis
-  const [dataAnalysisResult, setDataAnalysisResult] = useState<Record<string, unknown> | null>(null);
-  // Chat history
+  // Chat history — abort controller and refs remain local
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentRequestIdRef = useRef<string | null>(null);
-  const sendAIRef = useRef<(overrideMessage?: string) => Promise<void>>(async () => {});
+  const sendAIRef = useRef<(overrideMessage?: string, opts?: { force?: boolean }) => Promise<void>>(async () => {});
   const [showAdmin, setShowAdmin] = useState(false);
   const [showTimeSlider, setShowTimeSlider] = useState(false);
   const [timeSliderValue, setTimeSliderValue] = useState(Date.now());
@@ -1392,7 +1419,6 @@ export default function App() {
     navEntitiesRef.current = [];
   }, []);
   const measureEntitiesRef = useRef<Cesium.Entity[]>([]);
-  const currentChatIdRef = useRef<string | null>(null);
   const chatSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentActionHistoryRef = useRef<Array<{
     type: 'flyTo' | 'toggleLayer' | 'addEntity' | 'removeEntity' | 'addPanel';
@@ -1404,11 +1430,10 @@ export default function App() {
     description: string;
     timestamp: number;
   }>>([]);
-  const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const chatListRef = useRef<ChatListItem[]>([]);
   chatListRef.current = chatList;
-  const [chatSearch, setChatSearch] = useState('');
-  const [showChatHistory, setShowChatHistory] = useState(false);
+  const chatSearch = chatState.chatSearch;
+  const setChatSearch = chatState.setChatSearch;
   // Phase 8: Session sharing. New shares store session contents locally and
   // place only an opaque reference in the URL so operational chat text is not
   // continuously leaked through address bars, browser history, screenshots, or logs.
@@ -1454,12 +1479,12 @@ export default function App() {
         if (session.input) setAiInput(session.input);
       } catch { /* ignore session parse */ }
     }
-  }, []);
+  }, [setAiMessages, setSandboxWorkspaceId, setAiInput, setShowAI]);
 
   const buildSessionShareLink = useCallback(async () => {
     // Save the current conversation to the server first
-    const id = currentChatIdRef.current || generateChatId();
-    currentChatIdRef.current = id;
+    const id = useChatStore.getState().currentChatId || generateChatId();
+    useChatStore.getState().setCurrentChatId(id);
     const title = aiMessagesRef.current.find(m => m.role === 'user')?.content.slice(0, 40) || 'Shared Session';
     try {
       await saveChat({
@@ -1484,7 +1509,7 @@ export default function App() {
   useEffect(() => {
     if (!auth.token) return;
     listChats().then(setChatList).catch(() => {});
-  }, [auth.token]);
+  }, [auth.token, setChatList]);
 
   // Poll memory stats every 30s
   useEffect(() => {
@@ -1506,8 +1531,8 @@ export default function App() {
   // Auto-save chat after each new message
   useEffect(() => {
     if (aiMessages.length <= 1) return;
-    const id = currentChatIdRef.current || generateChatId();
-    currentChatIdRef.current = id;
+    const id = useChatStore.getState().currentChatId || generateChatId();
+    useChatStore.getState().setCurrentChatId(id);
     if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current);
     chatSaveTimerRef.current = setTimeout(() => {
       saveChat({
@@ -1520,7 +1545,7 @@ export default function App() {
       }).catch(() => {});
     }, 2000);
     return () => { if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current); };
-  }, [aiMessages, sandboxWorkspaceId]);
+  }, [aiMessages, sandboxWorkspaceId, setChatList]);
   // Auto-expand thinking block when new steps arrive
   const prevStepCountRef = useRef(0);
   useEffect(() => {
@@ -1528,7 +1553,15 @@ export default function App() {
       setThinkingExpanded(true);
     }
     prevStepCountRef.current = agentSteps.length;
-  }, [agentSteps.length]);
+  }, [agentSteps.length, setThinkingExpanded]);
+  // Auto-collapse once the whole run settles (no steps running, done streaming)
+  useEffect(() => {
+    if (agentSteps.length === 0 && pipelineProgress.length === 0) return;
+    const settled = !aiTyping
+      && !agentSteps.some(s => s.status === 'running')
+      && !pipelineProgress.some(p => p.status === 'running');
+    if (settled) setThinkingExpanded(false);
+  }, [aiTyping, agentSteps, pipelineProgress, setThinkingExpanded]);
   const [searchValue, setSearchValue] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState<Array<{name:string;lat:number;lon:number}>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -1572,6 +1605,7 @@ export default function App() {
   const [studyDrawing, setStudyDrawing] = useState(false);
   const drawerRef = useRef<any>(null);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
+  const virtualizedChatRef = useRef<VirtualizedMessageListHandle>(null);
 
   /* Auto-scroll chat to bottom on new messages */
   useEffect(() => { chatMessagesRef.current?.scrollTo({ top: chatMessagesRef.current.scrollHeight, behavior: 'smooth' }); }, [aiMessages.length, aiMessages[aiMessages.length - 1]?.content, aiTyping]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1584,6 +1618,14 @@ export default function App() {
     const active = studyAreas.find(a => a.id === activeStudyAreaId);
     if (!active) return null;
     return computeStudyAreaBbox(active);
+  }, [studyAreas, activeStudyAreaId]);
+
+  const activeStudyAreaPolygon = useMemo(() => {
+    if (!activeStudyAreaId) return null;
+    const active = studyAreas.find(a => a.id === activeStudyAreaId);
+    if (!active) return null;
+    const rings = getStudyAreaOuterRings(active);
+    return rings.length > 0 ? rings : null;
   }, [studyAreas, activeStudyAreaId]);
 
   const handleSurfaceData = useCallback((toolId: string, resultJson: string) => {
@@ -1743,10 +1785,15 @@ export default function App() {
         if (!resp.ok || cancelled) return;
         const data = await resp.json() as { keys?: Record<string, string> };
         if (cancelled || !data.keys) return;
-        flatKeysRef.current = data.keys;
-        const fetchedVault = vaultFromFlatKeys(data.keys!);
-        try { sessionStorage.setItem(SESSION_VAULT_KEY, JSON.stringify(fetchedVault)); } catch { /* ignore */ }
-        setApiVault(prev => ({ ...fetchedVault, preferredAiProvider: prev.preferredAiProvider, vaultDismissed: prev.vaultDismissed }));
+        const keys = data.keys;
+        flatKeysRef.current = keys;
+        // Only overwrite local state if server has actual keys (non-empty).
+        // An empty server vault means new user — keep local keys intact.
+        const hasServerKeys = Object.keys(keys).some(k => keys[k]?.trim());
+        if (hasServerKeys) {
+          try { localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify({ keys, preferredAiProvider: 'gemini', vaultDismissed: false })); } catch { /* ignore */ }
+          setApiVault(prev => ({ ...prev, keys }));
+        }
       } catch {
         /* vault optional until user saves keys */
       }
@@ -1756,9 +1803,8 @@ export default function App() {
 
   const handleApiVaultSave = async (keys: Record<string, string>) => {
     flatKeysRef.current = keys;
-    const newVault = vaultFromFlatKeys(keys);
-    try { sessionStorage.setItem(SESSION_VAULT_KEY, JSON.stringify(newVault)); } catch { /* ignore */ }
-    setApiVault(prev => ({ ...newVault, preferredAiProvider: prev.preferredAiProvider, vaultDismissed: prev.vaultDismissed }));
+    setApiVault(prev => ({ ...prev, keys }));
+    try { localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify({ keys, preferredAiProvider: 'gemini', vaultDismissed: false })); } catch { /* ignore */ }
     try {
       await fetch('/api/vault', {
         method: 'PUT',
@@ -1847,6 +1893,7 @@ export default function App() {
       window.__terranoetisDebug = {
         ...(window.__terranoetisDebug ?? {}),
         viewer: v,
+        Cesium,
         getCameraState: () => {
           const c = v.camera.positionCartographic;
           return {
@@ -1864,7 +1911,7 @@ export default function App() {
     adsbFiDrRef.current = new FlightDeadReckoning(v);
     flightawareDrRef.current = new FlightDeadReckoning(v);
     airlabsDrRef.current = new FlightDeadReckoning(v);
-    const aisKey = apiVaultRef.current.aisStreamApiKey;
+    const aisKey = apiVaultRef.current.keys.AIS_STREAM_API_KEY || '';
     if (aisKey) {
       aisTrackerRef.current = new AisVesselTracker(v, aisKey);
     }
@@ -2035,6 +2082,8 @@ export default function App() {
     handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.WHEEL);
     handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.PINCH_START);
     handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
+      // The viewer may have been destroyed while the interaction was queued.
+      if (v.isDestroyed()) return;
       // ── Navigation / Spatial Safety tools ──
       if (navModeRef.current === 'route' || navModeRef.current === 'safest') {
         let cart = v.scene.pickPosition(click.position);
@@ -2175,6 +2224,7 @@ export default function App() {
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
     handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
+      if (v.isDestroyed()) return;
       const cart = v.camera.pickEllipsoid(click.position, v.scene.globe.ellipsoid);
       if (!cart) return;
       const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cart);
@@ -2203,6 +2253,7 @@ export default function App() {
 
     void loadAllData(v)
       .then(() => {
+        if (v.isDestroyed()) return;
         syncWeatherCardPositions();
         unifiedTimerRef.current.register('refresh-live', () => { void refreshLiveData(v); }, 60000);
         // Slow-refresh groups (ocean, geology, space — data changes hourly+)
@@ -2885,6 +2936,9 @@ export default function App() {
   const loadAllData = useCallback(async (viewer: Cesium.Viewer) => {
     feedErrorsRef.current = [];
     feedSummaryShownRef.current = false;
+    // The viewer (and the whole Cesium context) may have been torn down while
+    // this async routine was queued (e.g. unmount / hot reload).
+    if (viewer.isDestroyed()) return;
 
     // Only load data for layers that are actually enabled at startup
     const startupLoads: Promise<void>[] = [];
@@ -2898,6 +2952,7 @@ export default function App() {
     if (isLayerEnabled('tectonic')) {
       startupLoads.push(
         apiGet<Record<string, unknown>>('/tectonic').then(async (geo) => {
+          if (viewer.isDestroyed()) return;
           const src = await loadTectonicPlates(viewer, geo);
           entityStoreRef.current['tectonic'] = [...src.entities.values];
         }).catch((err) => {
@@ -2913,6 +2968,10 @@ export default function App() {
     }
 
     await Promise.all(startupLoads);
+
+    // The viewer may have been destroyed while the network requests above were
+    // in flight — stop before touching any Cesium API.
+    if (viewer.isDestroyed()) return;
 
     if (isLayerEnabled('flight_tracks')) {
       await loadFlightTracks(viewer);
@@ -2952,6 +3011,7 @@ export default function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function refreshLiveData(viewer: Cesium.Viewer) {
+    if (viewer.isDestroyed()) return;
     if (isLayerEnabled('earthquakes')) await loadEarthquakes(viewer);
     if (isLayerEnabled('wildfires') || isLayerEnabled('severe_storms') || isLayerEnabled('volcanoes')
       || isLayerEnabled('floods') || isLayerEnabled('dust') || isLayerEnabled('seaLakeIce')) {
@@ -2989,6 +3049,7 @@ export default function App() {
   }
 
   async function refreshGenericLayers(viewer: Cesium.Viewer, groups: string[]) {
+    if (viewer.isDestroyed()) return;
     const groupSet = new Set(groups);
     // Quick check: skip entirely if no layers in these groups are enabled
     const hasEnabled = LAYER_CATEGORIES.some(l => groupSet.has(l.group) && isLayerEnabled(l.id));
@@ -3006,6 +3067,7 @@ export default function App() {
       const gen = (loadGenRef.current[layer.id] = (loadGenRef.current[layer.id] ?? 0) + 1);
       try {
         const items = await fetchLayerData(layer);
+        if (viewer.isDestroyed()) return;
         if (loadGenRef.current[layer.id] !== gen) continue;
         if (!isLayerEnabled(layer.id)) continue;
         // Skip destroy+recreate if data is unchanged
@@ -3195,42 +3257,6 @@ export default function App() {
       ),
       duration: options?.duration ?? 2.5,
     });
-  }, []);
-
-  const handleSearchResults = useCallback((results: Array<{ lat: number; lon: number; classLabel: string; similarity?: number }>) => {
-    const v = viewerRef.current;
-    if (!v) return;
-    // Clear previous search markers
-    for (const ent of searchResultEntitiesRef.current) {
-      v.entities.remove(ent);
-    }
-    searchResultEntitiesRef.current = [];
-    // Place new markers (limit to 50 to avoid clutter)
-    const toShow = results.slice(0, 50);
-    for (const r of toShow) {
-      const marker = v.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(r.lon, r.lat),
-        name: r.classLabel.replace(/_/g, ' '),
-        billboard: {
-          image: createPinIcon('#22c55e', 20),
-          width: 20,
-          height: 20,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        },
-        label: {
-          text: r.classLabel.replace(/_/g, ' '),
-          font: '9px "JetBrains Mono"',
-          fillColor: Cesium.Color.fromCssColorString('#6ee7b7'),
-          outlineColor: Cesium.Color.BLACK,
-          outlineWidth: 1,
-          pixelOffset: new Cesium.Cartesian2(0, -14),
-          showBackground: true,
-          backgroundColor: new Cesium.Color(0, 0, 0, 0.6),
-        },
-        properties: { layer: 'search', lat: r.lat, lon: r.lon, classLabel: r.classLabel },
-      });
-      searchResultEntitiesRef.current.push(marker);
-    }
   }, []);
 
   const trackSatellite = useCallback((sat: { id: string; name: string; lat: number; lon: number; altitude: number; tle1: string; tle2: string }) => {
@@ -4950,8 +4976,7 @@ export default function App() {
     if (now - last < 300) return;
     toggleDebounceRef.current[layerId] = now;
     // Record toggle in user profile (fire-and-forget)
-    fetch('/api/agent/profile/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' , ...authHeaders() }, body: JSON.stringify({ userId: 'browser-user',
-          images: chatImages.length > 0 ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName })) : undefined, layerId }) }).catch(() => {});
+    fetch('/api/agent/profile/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' , ...authHeaders() }, body: JSON.stringify({ userId: 'browser-user', layerId }) }).catch(() => {});
     // Read BEFORE setLayers — the updater runs asynchronously, not synchronously
     const wasOn = layersRef.current.find(l => l.id === layerId)?.on ?? false;
     setLayers(prev => {
@@ -5225,7 +5250,7 @@ export default function App() {
           if (aisTrackerRef.current) {
             startTracker(aisTrackerRef.current);
           } else {
-            const key = apiVaultRef.current.aisStreamApiKey;
+            const key = apiVaultRef.current.keys.AIS_STREAM_API_KEY || '';
             if (!key) {
               showNotification('AISStream API Key required. Add it in settings.', 'warning');
               setTimeout(() => toggleLayer('ais_vessels'), 10);
@@ -6494,7 +6519,7 @@ export default function App() {
     } else {
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ File upload failed (${resp.status})`, type: 'error' }]);
     }
-  }, [sandboxWorkspaceId]);
+  }, [sandboxWorkspaceId, setAiMessages, setUploadedFiles, setSandboxWorkspaceId]);
 
   // Phase 2.1: Vision — analyze image via Gemini Vision API
   const handleImageUpload = useCallback(async (file: File) => {
@@ -6514,7 +6539,8 @@ export default function App() {
       const base64 = dataUrl.split(',')[1];
       const imageId = nextImageIdRef.current++;
       setChatImages(prev => [...prev, { id: imageId, dataUrl, mimeType: file.type, fileName: file.name }]);
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `[Image: ${file.name}]`, type: 'image' }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `[Image: ${file.name}]`, type: 'image', images: [{ dataUrl, mimeType: file.type, fileName: file.name }] }]);
+      clearChatImages();
       setAiTyping(true);
 
       try {
@@ -6535,14 +6561,14 @@ export default function App() {
       setAiTyping(false);
     };
     reader.readAsDataURL(file);
-  }, []);
+  }, [setAiMessages, setAiTyping, setChatImages, clearChatImages]);
 
   // #11 Load model tiers on mount
   useEffect(() => {
     if (tiersLoadedRef.current) return;
     tiersLoadedRef.current = true;
     fetchTiers().then(({ tiers }) => setModelTiers(tiers)).catch(() => {});
-  }, []);
+  }, [setModelTiers]);
 
   // #10 Adaptive suggestions — refresh when visible layers change (debounced)
   useEffect(() => {
@@ -6557,7 +6583,7 @@ export default function App() {
       fetchSuggestions(ctx).then(setAdaptiveSuggestions).catch(() => {});
     }, 800);
     return () => clearTimeout(t);
-  }, [activeLayerCount, intelFeed.length, recentDiscoveries]);
+  }, [activeLayerCount, intelFeed.length, recentDiscoveries, setAdaptiveSuggestions]);
 
   // #8 Continuous voice mode — re-arms STT after each response, supports barge-in
   useEffect(() => {
@@ -6569,7 +6595,7 @@ export default function App() {
       try { recognitionRef.current?.start?.(); setIsListening(true); } catch { /* already listening */ }
     }, 400);
     return () => clearTimeout(t);
-  }, [voiceMode, aiTyping]);
+  }, [voiceMode, aiTyping, setBargeIn, setIsListening]);
 
   // Phase 2.2: Voice — speech recognition
   // Phase 3: Connect to proactive events via WebSocket
@@ -6746,7 +6772,7 @@ export default function App() {
       ws.unsubscribe('reflex');
       ws.unsubscribe('fork:all');
     };
-  }, [ws]);
+  }, [ws, setAiMessages]);
 
   // Phase 3: Send monitor command via chat
   const sendMonitorCommand = useCallback(async (text: string) => {
@@ -6789,8 +6815,7 @@ export default function App() {
       const resp = await fetch('/api/agent/monitor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' , ...authHeaders() },
-        body: JSON.stringify({ layerId, condition: { field, operator, value }, location, label: `Monitor: ${conditionText}`, userId: 'browser-user',
-          images: chatImages.length > 0 ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName })) : undefined, intervalMs: 300000 }),
+        body: JSON.stringify({ layerId, condition: { field, operator, value }, location, label: `Monitor: ${conditionText}`, userId: 'browser-user', intervalMs: 300000 }),
       });
       if (resp.ok) {
         const rule = await resp.json();
@@ -6799,7 +6824,7 @@ export default function App() {
       }
     }
     return false;
-  }, [chatImages]);
+  }, [setAiMessages]);
 
   // Phase 3: Send schedule command via chat
   const sendScheduleCommand = useCallback(async (text: string) => {
@@ -6813,8 +6838,7 @@ export default function App() {
       const resp = await fetch('/api/agent/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' , ...authHeaders() },
-        body: JSON.stringify({ label: `Scheduled: ${goal.slice(0, 40)}`, goal, userId: 'browser-user',
-          images: chatImages.length > 0 ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName })) : undefined, intervalMs }),
+        body: JSON.stringify({ label: `Scheduled: ${goal.slice(0, 40)}`, goal, userId: 'browser-user', intervalMs }),
       });
       if (resp.ok) {
         const task = await resp.json();
@@ -6823,7 +6847,7 @@ export default function App() {
       }
     }
     return false;
-  }, [chatImages]);
+  }, [setAiMessages]);
 
   // Phase 3: Get location context
   const getLocationContextData = useCallback(async (lat: number, lon: number) => {
@@ -6834,7 +6858,7 @@ export default function App() {
         setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `**Location Context: ${ctx.location.label}**\n\n**Seismic**: ${ctx.earthquakeRisk}\n**Weather**: ${ctx.weather}\n${ctx.nearbyEvents?.length > 0 ? `**Nearby Events**:\n${ctx.nearbyEvents.slice(0, 3).map((e: { title: string; category: string }) => `- ${e.title} (${e.category})`).join('\n')}` : ''}\n\n*Data from live APIs*`, type: 'context' }]);
       }
     } catch { /* silent */ }
-  }, []);
+  }, [setAiMessages]);
 
   useEffect(() => {
     const SpeechRecognitionAPI = (window as unknown as Record<string, unknown>).SpeechRecognition as (new () => SpeechRecognition) | undefined
@@ -6867,7 +6891,7 @@ export default function App() {
       recognition.onend = () => { setIsListening(false); };
       recognitionRef.current = recognition;
     }
-  }, []);
+  }, [setIsListening, setAiInput]);
 
   const toggleVoiceInput = useCallback(() => {
     if (!recognitionRef.current) return;
@@ -6879,7 +6903,7 @@ export default function App() {
       recognitionRef.current.start();
       setIsListening(true);
     }
-  }, [isListening]);
+  }, [isListening, setAiInput, setIsListening]);
 
   // Phase 2.2: Voice — speech synthesis (text-to-speech)
   const speakResponse = useCallback((text: string) => {
@@ -6889,7 +6913,14 @@ export default function App() {
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
+    utterance.onstart = () => useChatStore.getState().setSpeaking(true);
+    utterance.onend = () => useChatStore.getState().setSpeaking(false);
+    utterance.onerror = () => useChatStore.getState().setSpeaking(false);
     window.speechSynthesis.speak(utterance);
+  }, []);
+
+  const stopSpeaking = useCallback(() => {
+    useChatStore.getState().stopSpeaking();
   }, []);
 
   // Phase 2.3: Data file analysis
@@ -6932,13 +6963,13 @@ export default function App() {
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Data analysis error: ${e}`, type: 'error' }]);
     }
     setAiTyping(false);
-  }, []);
+  }, [setAiMessages, setAiTyping, setDataAnalysisResult]);
 
   const cleanupThinkingSteps = useCallback((_?: boolean) => {
     setAgentSteps([]);
-  }, []);
+  }, [setAgentSteps]);
 
-  const executeAgentCommands = useCallback((commands: Array<{ action: string; [key: string]: unknown }>) => {
+  const executeAgentCommands = useCallback((commands: Array<Record<string, unknown>>) => {
     const v = viewerRef.current;
     if (!v) return;
     const history = agentActionHistoryRef.current;
@@ -6946,10 +6977,10 @@ export default function App() {
       try {
         const action: { type: 'flyTo' | 'toggleLayer' | 'addEntity' | 'addPanel'; entities?: Cesium.Entity[]; layerId?: string; previousEnabled?: boolean; previousCamera?: { longitude: number; latitude: number; height: number }; panelData?: unknown; description: string; timestamp: number } = {
           type: 'addEntity',
-          description: cmd.action,
+          description: cmd.action as string,
           timestamp: Date.now(),
         };
-        switch (cmd.action) {
+        switch (cmd.action as string) {
           case 'flyTo': {
             const lat = cmd.lat as number;
             const lon = cmd.lon as number;
@@ -7205,14 +7236,14 @@ export default function App() {
               p.id === data.subtask.id ? { ...p, status: data.subtask.status } : p
             ));
             if (data.subtask.status === 'running') {
-              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Running: ${data.subtask.description}`,subtask:data.subtask.description,status:'running'}]);
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Running: ${data.subtask.description}`,subtask:data.subtask.description,status:'running',startedAt:Date.now()}]);
             }
             if (data.subtask.status === 'completed' && data.subtask.result) {
               stepOutputs.push(`## ${data.subtask.description}\n\`\`\`\n${data.subtask.result.slice(0, 500)}\n\`\`\``);
-              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Completed: ${data.subtask.description} (${data.subtask.executionTimeMs || 0}ms)`,subtask:data.subtask.description,status:'completed',timeMs:data.subtask.executionTimeMs,output:data.subtask.result}]);
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Completed: ${data.subtask.description} (${data.subtask.executionTimeMs || 0}ms)`,subtask:data.subtask.description,status:'completed',timeMs:data.subtask.executionTimeMs,output:data.subtask.result,startedAt:Date.now()}]);
             }
             if (data.subtask.status === 'failed') {
-              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Failed: ${data.subtask.description}: ${data.subtask.error || 'Failed'}`,subtask:data.subtask.description,status:'failed',output:data.subtask.error}]);
+              setAgentSteps(prev => [...prev.slice(-5), {type:'subtask',text:`Failed: ${data.subtask.description}: ${data.subtask.error || 'Failed'}`,subtask:data.subtask.description,status:'failed',output:data.subtask.error,startedAt:Date.now()}]);
             }
           }
 
@@ -7244,25 +7275,21 @@ export default function App() {
       setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: stepOutputs.join('\n\n'), type: 'pipeline' }]);
     }
     setPipelineProgress([]);
-  }, [executeAgentCommands]);
+  }, [executeAgentCommands, setAgentSteps, setAiMessages, setPipelineProgress, setSandboxWorkspaceId]);
 
   function newChat() {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
-    setAiMessages([{ id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.' }]);
-    setAiTyping(false);
-    setAiInput('');
-    setAgentSteps([]);
-    setPipelineProgress([]);
-    setChatImages([]);
-    setShowChatHistory(false);
-    currentChatIdRef.current = null;
+    // Use the tab system: open a new tab (snapshots current, creates fresh)
+    chatState.openChatTab();
   }
 
   async function loadChat(id: string) {
-    if (currentChatIdRef.current) {
+    // Save the current tab's chat if it exists
+    const prevChatId = chatState.currentChatId;
+    if (prevChatId) {
       await saveChat({
-        id: currentChatIdRef.current,
+        id: prevChatId,
         title: autoTitle(aiMessages),
         messages: aiMessages,
         workspaceId: sandboxWorkspaceId || undefined,
@@ -7276,16 +7303,27 @@ export default function App() {
     setAgentSteps([]);
     setPipelineProgress([]);
     setChatImages([]);
-    setAiMessages(session.messages.map(m => ({ ...m, id: m.id || nextAiMsgIdRef.current++ })));
+    const loadedMessages = session.messages.map(m => ({ ...m, id: m.id || nextAiMsgIdRef.current++ }));
+    setAiMessages(loadedMessages);
     if (session.workspaceId) setSandboxWorkspaceId(session.workspaceId);
-    currentChatIdRef.current = session.id;
+    chatState.setCurrentChatId(session.id);
+    // Sync loaded messages into the active tab record so persistence captures them.
+    if (chatState.activeTabId) {
+      chatState.mutateTab(chatState.activeTabId, tab => ({
+        ...tab,
+        messages: loadedMessages,
+        currentChatId: session.id,
+        sandboxWorkspaceId: session.workspaceId || tab.sandboxWorkspaceId,
+      }));
+      chatState.renameChatTab(chatState.activeTabId, session.title || autoTitle(session.messages));
+    }
     setShowChatHistory(false);
   }
 
   async function deleteChatSession(id: string) {
     await deleteChat(id);
-    if (currentChatIdRef.current === id) {
-      currentChatIdRef.current = null;
+    if (chatState.currentChatId === id) {
+      chatState.setCurrentChatId(null);
     }
     setChatList(prev => prev.filter(c => c.id !== id));
   }
@@ -7294,282 +7332,27 @@ export default function App() {
     for (const chat of chatListRef.current) {
       await deleteChat(chat.id);
     }
-    currentChatIdRef.current = null;
+    chatState.setCurrentChatId(null);
     setChatList([]);
     setAiMessages([]);
   }
 
 
-  const sendAI = useCallback(async (overrideMessage?: string) => {
-    const userMsg = typeof overrideMessage === 'string' ? overrideMessage : aiInput.trim();
-    if (!userMsg) return;
-    setAiInput('');
-    setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: userMsg }]);
-    setAiTyping(true);
-    setAgentSteps([]);
-    setPipelineProgress([]);
-
-    const loc = await extractLocation(userMsg);
-
-    // Only intercept PURE location commands (e.g. just "fly to Tokyo") — nothing else
-    const isPureFlyCommand = /^(?:fly|go|zoom)\s+(?:to|in|into)\s+/i.test(userMsg.trim());
-    if (isPureFlyCommand && loc) {
-      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 1500 });
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Flying to ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` }]);
-      setAiTyping(false);
-      return;
-    }
-
-    // Phase 3: Monitor/schedule commands — handled instantly, no agent needed
-    if (/^monitor\s+/i.test(userMsg)) {
-      const handled = await sendMonitorCommand(userMsg);
-      if (handled) {
-        cleanupThinkingSteps();
-        setAiTyping(false);
-        return;
-      }
-    }
-    if (/^schedule\s+/i.test(userMsg)) {
-      const handled = await sendScheduleCommand(userMsg);
-      if (handled) {
-        cleanupThinkingSteps();
-        setAiTyping(false);
-        return;
-      }
-    }
-
-    const isComputeTask = /\b(compute|calculate|run script|execute (?:code|script|python|node|bash)|simulate|csv|analyze (?:data|dataset|this)|pipeline)\b/i.test(userMsg) && !/\b(show|display|visualize|fly|go|zoom|toggle|enable|display|where|what|how|why|compare|near|around)\b/i.test(userMsg);
-
-    if (isComputeTask) {
-      try {
-        setAgentSteps(prev => [...prev, {type:'planning',text:'Planning computation pipeline...',status:'running'}]);
-        setExpandedStep(-1);
-        const wsId = sandboxWorkspaceId || null;
-        await sendToPipeline(userMsg, wsId);
-        setAiTyping(false);
-        return;
-      } catch (e) {
-        setAgentSteps(prev => [...prev, {type:'error',text:`Pipeline Error: ${e}`}]);
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Pipeline execution failed: ${e}\n\nFalling back to agent analysis...` }]);
-      }
-    }
-
-    // Direct command: show planes/flights/aircraft near a location
-    const lower = userMsg.toLowerCase();
-    const wantsFlights = lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb') || lower.includes('fly');
-    if (wantsFlights && loc) {
-      const layerId = 'flight_tracks';
-      const alreadyOn = isLayerEnabled(layerId);
-      if (alreadyOn) {
-        const v = viewerRef.current;
-        if (v) void loadFlightTracks(v);
-      } else {
-        toggleLayer(layerId);
-      }
-      focusLocation(loc.lat, loc.lon, { label: 'Live Aircraft', color: '#60a5fa', height: 50000 });
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Loading aircraft near ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}...` }]);
-      setAiTyping(false);
-      return;
-    }
-
-    setAgentSteps(prev => [...prev, {type:'reasoning',text:'Analyzing your request...',status:'running'}]);
-    setExpandedStep(-1);
-
-    abortControllerRef.current?.abort();
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-    try {
-      // Clear previous agent-generated entities at start of new query
-      const v0 = viewerRef.current;
-      if (v0) {
-        const toRemove = v0.entities.values.filter((e: any) => {
-          const layer = e.properties?.layer;
-          return layer === 'digital_twin' || layer === 'heatmap' || layer === 'chart' || layer === 'geojson';
-        });
-        for (const e of toRemove) v0.entities.remove(e);
-      }
-      const contextMessages = aiMessagesRef.current.slice(-8).map(m => ({ role: m.role, content: m.content.slice(0, 1000) }));
-      const resp = await fetch('/api/agent/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' , ...authHeaders() },
-        body: JSON.stringify({
-          message: userMsg,
-          userId: 'browser-user',
-          sessionId,
-          tier: selectedTier,
-          recentMessages: contextMessages,
-          images: chatImages.length > 0 ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName })) : undefined,
-        }),
-        signal: abortController.signal,
-      });
-
-      if (!resp.ok) {
-        throw new Error(`Agent request failed (${resp.status})`);
-      }
-
-      const reader = resp.body?.getReader();
-      if (!reader) throw new Error('No response body');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let finalText = '';
-      let lastTraceId: string | null = null;
-      let lastModelTier: string | null = null;
-      let serverError: string | null = null;
-      const receivedCommands: Array<{ action: string; label?: string; lat?: number; lon?: number; layerId?: string }> = [];
-      let streamingMsgId: number | null = null;
-
-      const processLines = () => {
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) continue;
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.type === 'connected' && data.requestId) {
-              currentRequestIdRef.current = data.requestId;
-            }
-            if (data.steps) {
-              setAgentSteps(data.steps.map((s: { text?: string; type?: string; code?: string; output?: string; status?: string }) => ({type:s.type||'step',text:s.text||s.type||'',code:s.code,output:s.output,status:s.status||'completed'})));
-            }
-            if (data.type === 'step') {
-              setAgentSteps(prev => [...prev, {type:data.stepType||'step',text:data.text||'',code:data.code,output:data.output,status:data.status||'completed'}]);
-            }
-            if (data.type === 'token' && data.text) {
-              if (streamingMsgId === null) {
-                streamingMsgId = nextAiMsgIdRef.current++;
-                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: data.text }]);
-              } else {
-                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: m.content + data.text } : m));
-              }
-            }
-            if (data.type === 'tool_call') {
-              if (streamingMsgId === null) {
-                streamingMsgId = nextAiMsgIdRef.current++;
-                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: '', toolEvents: [{ name: data.name, args: data.args, description: data.description, status: 'pending', riskLevel: data.riskLevel }] }]);
-              } else {
-                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, toolEvents: [...(m.toolEvents || []), { name: data.name, args: data.args, description: data.description, status: 'pending', riskLevel: data.riskLevel }] } : m));
-              }
-            }
-            // #4 Tool approval request (destructive tools)
-            if (data.type === 'tool_approval') {
-              if (streamingMsgId === null) {
-                streamingMsgId = nextAiMsgIdRef.current++;
-                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: '', toolEvents: [{ name: data.name, args: data.args, description: data.description, status: 'blocked', riskLevel: data.riskLevel, approvalRequired: true }] }]);
-              } else {
-                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, toolEvents: [...(m.toolEvents || []), { name: data.name, args: data.args, description: data.description, status: 'blocked', riskLevel: data.riskLevel, approvalRequired: true }] } : m));
-              }
-            }
-            // #6 Sub-agent activity updates
-            if (data.type === 'subagent' && data.role) {
-              const activity = { role: data.role, stepId: data.stepId, status: data.status, text: data.text, partial: data.partial, timestamp: data.timestamp || Date.now() };
-              if (streamingMsgId === null) {
-                streamingMsgId = nextAiMsgIdRef.current++;
-                setAiMessages(prev => [...prev, { id: streamingMsgId!, role: 'assistant', content: '', subAgents: [activity] }]);
-              } else {
-                setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, subAgents: [...(m.subAgents || []), activity].slice(-50) } : m));
-              }
-            }
-            // #5 Plan step output
-            if (data.type === 'step_output' && data.stepId) {
-              // Tracked via subAgents; no separate UI needed
-            }
-            if (data.type === 'tool_result') {
-              if (streamingMsgId !== null) {
-                setAiMessages(prev => prev.map(m => {
-                  if (m.id !== streamingMsgId || !m.toolEvents) return m;
-                  const events = [...m.toolEvents];
-                  const idx = events.findIndex(e => e.name === data.name && (e.status === 'pending' || e.status === 'blocked'));
-                  if (idx >= 0) {
-                    events[idx] = { ...events[idx], status: data.status, error: data.error, result: data.result };
-                  } else {
-                    events.push({ name: data.name, status: data.status, error: data.error, result: data.result });
-                  }
-                  return { ...m, toolEvents: events };
-                }));
-              }
-            }
-            if (data.commands && Array.isArray(data.commands)) {
-              for (const cmd of data.commands) {
-                receivedCommands.push({
-                  action: cmd.action,
-                  label: cmd.label,
-                  lat: cmd.lat,
-                  lon: cmd.lon,
-                  layerId: cmd.layerId,
-                });
-              }
-              executeAgentCommands(data.commands);
-            }
-            if (data.type === 'intent') {
-              if (data.location) {
-                focusLocation(data.location.lat, data.location.lon, { label: data.location.label || 'Location', color: '#60a5fa', height: 1500 });
-              }
-              if (data.layerIds) {
-                (data.layerIds as string[]).forEach((layerId: string) => { if (!isLayerEnabled(layerId)) toggleLayer(layerId); });
-              }
-            }
-            if (data.type === 'output') {
-              finalText = data.text;
-              if (data.traceId) lastTraceId = data.traceId;
-              if (data.modelTier) lastModelTier = data.modelTier;
-            }
-            if (data.type === 'panel' || (data.stats && data.charts)) {
-              setDigitalTwinPanel(data);
-            }
-            if (data.type === 'done') {
-              if (data.traceId) lastTraceId = data.traceId;
-            }
-            if (data.type === 'error') {
-              serverError = data.error || data.message || 'Unknown server error';
-            }
-          } catch { /* skip malformed JSON */ }
-        }
-      };
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        processLines();
-      }
-      processLines();
-
-      if (serverError) {
-        if (streamingMsgId !== null) {
-          setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, content: `Server error: ${serverError}` } : m));
-        } else {
-          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Server error: ${serverError}` }]);
-        }
-      } else if (finalText) {
-        // #7 Parse artifacts (tables/charts/sliders) from the final output
-        const { cleanedContent, artifacts } = extractArtifacts(finalText);
-        const msgPatch: Partial<ChatMessage> = { content: artifacts.length > 0 ? cleanedContent : finalText, traceId: lastTraceId, commands: receivedCommands.length > 0 ? receivedCommands : undefined, modelTier: lastModelTier, artifacts: artifacts.length > 0 ? artifacts : undefined, resumable: true };
-        if (streamingMsgId !== null) {
-          // Replace streaming content with final text (which may include updates from command parsing)
-          setAiMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, ...msgPatch } : m));
-        } else {
-          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText, ...msgPatch }]);
-        }
-        // Reset the streaming markdown renderer for the next message
-        streamingMdRef.current.reset();
-      } else if (streamingMsgId === null) {
-        const fallback = await generateLocalResponse(userMsg, loc);
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: fallback }]);
-      }
-    } catch (e) {
-      if ((e as Error)?.name === 'AbortError') {
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: '⏹ Response stopped.' }]);
-      } else {
-        const fallback = await generateLocalResponse(userMsg, loc);
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `${fallback}\n\n*(Agent unavailable: ${e})*` }]);
-      }
-    }
-    cleanupThinkingSteps(true);
-    setAiTyping(false);
-    abortControllerRef.current = null;
-  }, [aiInput, sandboxWorkspaceId, sendToPipeline, focusLocation, sendMonitorCommand, sendScheduleCommand, toggleLayer]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { sendAI } = useChat(
+    extractLocation,
+    focusLocation,
+    toggleLayer,
+    isLayerEnabled,
+    sendToPipeline,
+    sendMonitorCommand,
+    sendScheduleCommand,
+    executeAgentCommands,
+    generateLocalResponse,
+    cleanupThinkingSteps,
+    loadFlightTracks,
+    viewerRef,
+    { abortControllerRef, currentRequestIdRef, onPanel: (data) => setDigitalTwinPanel(data as any) },
+  );
   sendAIRef.current = sendAI;
 
   async function extractLocation(text: string): Promise<{ lat: number; lon: number } | null> {
@@ -7713,12 +7496,12 @@ export default function App() {
       setAiMessages(prev => prev.map(m => m.id === msgId ? { ...m, content: `Plan execution failed: ${e}` } : m));
     }
     setAiTyping(false);
-  }, [sessionId]);
+  }, [sessionId, setAiMessages, setAiTyping]);
 
   // #5 Toggle a plan step's enabled state
   const togglePlanStep = useCallback((msgId: number, stepId: string) => {
     setAiMessages(prev => prev.map(m => m.id === msgId && m.plan ? { ...m, plan: { ...m.plan, steps: m.plan.steps.map(s => s.id === stepId ? { ...s, enabled: !s.enabled } : s) } } : m));
-  }, []);
+  }, [setAiMessages]);
 
   // #4 Update a tool event (after approval/denial)
   const updateToolEvent = useCallback((msgId: number, toolName: string, patch: Partial<ToolEvent>) => {
@@ -7726,7 +7509,7 @@ export default function App() {
       if (m.id !== msgId || !m.toolEvents) return m;
       return { ...m, toolEvents: m.toolEvents.map(e => e.name === toolName ? { ...e, ...patch } : e) };
     }));
-  }, []);
+  }, [setAiMessages]);
 
   // #7 Re-run a query with an adjusted slider parameter
   const rerunWithParam = useCallback((msg: ChatMessage, param: string, value: number) => {
@@ -7738,7 +7521,8 @@ export default function App() {
     }
     if (!userQuery) return;
     const rerunQuery = `${userQuery} (${param} = ${value})`;
-    sendAIRef.current(rerunQuery);
+    // Genuine rerun — bypass the double-send guard so a slider re-run always goes through.
+    sendAIRef.current(rerunQuery, { force: true });
   }, []);
 
   // #14 Resume a partially-generated message
@@ -7752,23 +7536,29 @@ export default function App() {
     setAiTyping(true);
     // Mark message as being resumed
     setAiMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: m.content + '\n\n*[continuing...]*', resumable: false } : m));
-    await resumeStream(
-      msg.content,
-      originalMessage,
-      sessionId,
-      (token) => {
-        setAiMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: m.content + token } : m));
-      },
-      (continuation) => {
-        setAiMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: m.content + '\n\n' + continuation, resumable: true } : m));
-        setAiTyping(false);
-      },
-      (err) => {
-        setAiMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: m.content + `\n\n*[Resume failed: ${err}]*`, resumable: true } : m));
-        setAiTyping(false);
-      },
-    );
-  }, [sessionId]);
+    try {
+      await resumeStream(
+        msg.content,
+        originalMessage,
+        sessionId,
+        (token) => {
+          setAiMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: m.content + token } : m));
+        },
+        (continuation) => {
+          setAiMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: m.content + '\n\n' + continuation, resumable: true } : m));
+          setAiTyping(false);
+        },
+        (err) => {
+          setAiMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: m.content + `\n\n*[Resume failed: ${err}]*`, resumable: true } : m));
+          setAiTyping(false);
+        },
+      );
+    } finally {
+      // Guarantee the composer unlocks even if resumeStream rejects — otherwise
+      // the double-send guard would block every future message until reload.
+      setAiTyping(false);
+    }
+  }, [sessionId, setAiMessages, setAiTyping]);
 
   // #5 Generate a plan for a complex query (triggered by user)
   const generatePlanForQuery = useCallback(async (query: string) => {
@@ -7782,7 +7572,7 @@ export default function App() {
     }
     setAiTyping(false);
     setPlanningFor(null);
-  }, []);
+  }, [setAiMessages, setAiTyping, setPlanningFor]);
 
   async function generateLocalResponse(message: string, location: { lat: number; lon: number } | null): Promise<string> {
     try {
@@ -8116,24 +7906,51 @@ export default function App() {
           const typeLabel = type === 'RECTANGLE' ? 'rectangle' : type === 'CIRCLE' ? 'circle' : 'polygon';
           const name = `${typeLabel} ${studyAreasRef.current.length + 1}`;
           const color = '#22c55e';
-          const coords = positions.map((p: Cesium.Cartesian3) => {
+          // The drawer reports a circle as its degenerate [center, center] point
+          // list, which would make the study-area bbox a zero-area point (and the
+          // land-cover grid a garbage sliver). Normalize circles to their true
+          // extent: bbox-corner positions (for bbox / fly-to math) plus a proper
+          // closed ring in GeoJSON (for point-in-polygon masking + export).
+          const toDeg = (p: Cesium.Cartesian3): [number, number] => {
             const carto = Cesium.Cartographic.fromCartesian(p);
             return [Cesium.Math.toDegrees(carto.longitude), Cesium.Math.toDegrees(carto.latitude)];
-          });
+          };
+          let finalPositions = positions;
+          let ringCoords = positions.map(toDeg);
+          if (type === 'CIRCLE') {
+            const [cLon, cLat] = toDeg(positions[0]);
+            const radiusM = entity?.ellipse?.semiMajorAxis?.getValue(Cesium.JulianDate.now()) as number | undefined;
+            const rM = typeof radiusM === 'number' && Number.isFinite(radiusM) ? radiusM : 0;
+            if (rM > 0) {
+              const dLon = rM / (111320 * Math.max(Math.cos(Cesium.Math.toRadians(cLat)), 0.2));
+              const dLat = rM / 111320;
+              finalPositions = [
+                Cesium.Cartesian3.fromDegrees(cLon - dLon, cLat + dLat),
+                Cesium.Cartesian3.fromDegrees(cLon + dLon, cLat + dLat),
+                Cesium.Cartesian3.fromDegrees(cLon + dLon, cLat - dLat),
+                Cesium.Cartesian3.fromDegrees(cLon - dLon, cLat - dLat),
+              ];
+              ringCoords = [];
+              for (let k = 0; k < 36; k++) {
+                const a = (k / 36) * Math.PI * 2;
+                ringCoords.push([cLon + Math.cos(a) * dLon, cLat + Math.sin(a) * dLat]);
+              }
+            }
+          }
           const geojson: GeoJSON.FeatureCollection = {
             type: 'FeatureCollection',
             features: [{
               type: 'Feature',
               geometry: {
                 type: 'Polygon',
-                coordinates: [coords.length >= 2 ? [...coords, coords[0]] : coords],
+                coordinates: [ringCoords.length >= 2 ? [...ringCoords, ringCoords[0]] : ringCoords],
               },
               properties: { name, type: typeLabel },
             }],
           };
           const area: StudyAreaItem = {
             id: `study_area_${Date.now()}`, name, type: typeLabel as any,
-            visible: true, active: false, entity, positions, geojson, color, width: 3,
+            visible: true, active: false, entity, positions: finalPositions, geojson, color, width: 3,
           };
           updateStudyAreaStyle(v, area, color, 3);
           // Deactivate all other areas, activate this one
@@ -8211,6 +8028,7 @@ export default function App() {
      ═════════════════════════════════════════════════════════════════ */
 
   const cleanupCesium = useCallback(() => {
+    unifiedTimerRef.current.stop();
     Object.values(notificationTimeoutsRef.current).forEach(clearTimeout);
     notificationTimeoutsRef.current = {};
     if (clockIntervalRef.current) clearInterval(clockIntervalRef.current);
@@ -8262,6 +8080,8 @@ export default function App() {
     adsbFiDrRef.current = null;
     flightawareDrRef.current = null;
     airlabsDrRef.current = null;
+    forkRendererRef.current = null;
+    ghostProtocolRef.current = null;
     disasterNearMeRequestedRef.current = false;
     if (geolocationWatchRef.current !== null) {
       navigator.geolocation.clearWatch(geolocationWatchRef.current);
@@ -8648,8 +8468,8 @@ export default function App() {
                     type="password"
                     className="token-input"
                     placeholder="Paste your Gemini API key"
-                    value={apiVault.gemini}
-                    onChange={e => setApiVault(prev => ({ ...prev, gemini: e.target.value }))}
+                    value={apiVault.keys.GOOGLE_GEMINI_API_KEY || ''}
+                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, GOOGLE_GEMINI_API_KEY: e.target.value } }))}
                   />
                 </label>
                 <label className="api-field">
@@ -8658,8 +8478,8 @@ export default function App() {
                     type="password"
                     className="token-input"
                     placeholder="Paste your Anthropic API key"
-                    value={apiVault.anthropic}
-                    onChange={e => setApiVault(prev => ({ ...prev, anthropic: e.target.value }))}
+                    value={apiVault.keys.ANTHROPIC_API_KEY || ''}
+                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, ANTHROPIC_API_KEY: e.target.value } }))}
                   />
                 </label>
                 <label className="api-field">
@@ -8668,8 +8488,8 @@ export default function App() {
                     type="password"
                     className="token-input"
                     placeholder="Paste your Cesium ion access token"
-                    value={apiVault.cesiumIonAccessToken}
-                    onChange={e => setApiVault(prev => ({ ...prev, cesiumIonAccessToken: e.target.value }))}
+                    value={apiVault.keys.CESIUM_ION_ACCESS_TOKEN || ''}
+                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, CESIUM_ION_ACCESS_TOKEN: e.target.value } }))}
                   />
                 </label>
                 <div className="token-note" style={{marginTop: 6}}>
@@ -8700,8 +8520,8 @@ export default function App() {
                     type="text"
                     className="token-input"
                     placeholder="Optional"
-                    value={apiVault.sentinelHubClientId}
-                    onChange={e => setApiVault(prev => ({ ...prev, sentinelHubClientId: e.target.value }))}
+                    value={apiVault.keys.SENTINEL_HUB_CLIENT_ID || ''}
+                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, SENTINEL_HUB_CLIENT_ID: e.target.value } }))}
                   />
                 </label>
                 <label className="api-field">
@@ -8710,8 +8530,8 @@ export default function App() {
                     type="password"
                     className="token-input"
                     placeholder="Optional"
-                    value={apiVault.sentinelHubClientSecret}
-                    onChange={e => setApiVault(prev => ({ ...prev, sentinelHubClientSecret: e.target.value }))}
+                    value={apiVault.keys.SENTINEL_HUB_CLIENT_SECRET || ''}
+                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, SENTINEL_HUB_CLIENT_SECRET: e.target.value } }))}
                   />
                 </label>
                 <label className="api-field">
@@ -8720,8 +8540,8 @@ export default function App() {
                     type="password"
                     className="token-input"
                     placeholder="Optional"
-                    value={apiVault.marineTrafficApiKey}
-                    onChange={e => setApiVault(prev => ({ ...prev, marineTrafficApiKey: e.target.value }))}
+                    value={apiVault.keys.MARINE_TRAFFIC_API_KEY || ''}
+                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, MARINE_TRAFFIC_API_KEY: e.target.value } }))}
                   />
                 </label>
                 <div className="token-note" style={{marginTop: 6}}>
@@ -8762,17 +8582,7 @@ export default function App() {
         isOpen={showApiVault}
         onClose={() => setShowApiVault(false)}
         onSave={handleApiVaultSave}
-        initialKeys={{
-          GOOGLE_GEMINI_API_KEY: apiVault.gemini,
-          ANTHROPIC_API_KEY: apiVault.anthropic,
-          CESIUM_ION_ACCESS_TOKEN: apiVault.cesiumIonAccessToken,
-          SENTINEL_HUB_CLIENT_ID: apiVault.sentinelHubClientId,
-          SENTINEL_HUB_CLIENT_SECRET: apiVault.sentinelHubClientSecret,
-          MARINE_TRAFFIC_API_KEY: apiVault.marineTrafficApiKey,
-          AIS_STREAM_API_KEY: apiVault.aisStreamApiKey,
-          FLIGHTAWARE_AEROAPI_KEY: apiVault.flightAwareAeroApiKey,
-          AIRLABS_API_KEY: apiVault.airLabsApiKey,
-        }}
+        initialKeys={apiVault.keys}
       />
 
       {/* Top Bar */}
@@ -9009,357 +8819,6 @@ export default function App() {
         setDrawing={setStudyDrawing}
       />}
 
-      {/* AI Panel */}
-      {showAI && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('ai', 110), width: 380 }}>
-          <Panel title="EARTH INTELLIGENCE AI" icon={<Bot size={14} />} accentColor="#6366f1" iconColor="#818cf8" titleColor="#a5b4fc" onClose={() => setShowAI(false)} headerExtra={
-            <div style={{display:'flex',gap:4,alignItems:'center'}}>
-              <button onClick={() => setShowChatHistory(prev => !prev)} title="Chat History" style={{background:'none',border:'none',color:'#64748b',cursor:'pointer',fontSize:13,padding:'2px 4px',lineHeight:1}}><History size={14} /></button>
-              <button onClick={newChat} title="New Chat" style={{background:'none',border:'none',color:'#64748b',cursor:'pointer',fontSize:13,padding:'2px 4px',lineHeight:1}}><Plus size={14} /></button>
-              <button onClick={undoLastAgentAction} title="Undo last AI action" style={{background:'none',border:'none',color:'#64748b',cursor:'pointer',fontSize:13,padding:'2px 4px',lineHeight:1}}><RotateCcw size={14} /></button>
-              <button onClick={clearAllAgentActions} title="Clear all AI entities" style={{background:'none',border:'none',color:'#64748b',cursor:'pointer',fontSize:13,padding:'2px 4px',lineHeight:1}}><Trash2 size={14} /></button>
-            </div>
-          } style={{ maxHeight: 'calc(100vh - 160px)' }}>
-        <div className="ai-messages" ref={chatMessagesRef} style={{paddingBottom:4, overflowY:'auto', maxHeight:'calc(100vh - 320px)'}}>
-          {aiMessages.map((msg, idx) => (
-            <div key={msg.id} className={`ai-msg ${msg.role}${msg.type === 'code-result' || msg.type === 'pipeline' || msg.type === 'data-analysis' ? ' code-result' : ''}${msg.type === 'image' ? ' image-msg' : ''}`}>
-              {msg.role === 'assistant' ? (
-                <div>
-                  {msg.type === 'pipeline' && <div className="msg-label"><Zap size={12} style={{display:'inline',marginRight:3}} /> Computation Pipeline Result</div>}
-                  {msg.type === 'upload' && <div className="msg-label" style={{color:'#60a5fa'}}><Upload size={12} style={{display:'inline',marginRight:3}} /> File Upload</div>}
-                  {msg.type === 'vision' && <div className="msg-label" style={{color:'#a78bfa'}}><SearchIcon size={12} style={{display:'inline',marginRight:3}} /> Vision Analysis</div>}
-                  {msg.type === 'data-analysis' && <div className="msg-label" style={{color:'#34d399'}}><BarChart3 size={12} style={{display:'inline',marginRight:3}} /> Data Analysis</div>}
-                  {msg.type === 'error' && <div className="msg-label" style={{color:'#ef4444'}}><AlertTriangle size={12} style={{display:'inline',marginRight:3}} /> Error</div>}
-                  <div className="rich-content" dangerouslySetInnerHTML={{ __html: (aiTyping && idx === aiMessages.length - 1 ? streamingMdRef.current.render(msg.content, richRender) : richRender(msg.content)) + (aiTyping && idx === aiMessages.length - 1 ? '<span class="streaming-cursor">▊</span>' : '') }} />
-                  {msg.toolEvents && msg.toolEvents.length > 0 && (
-                    <div style={{ display:'flex', flexDirection:'column', gap:4, marginTop:6 }}>
-                      {msg.toolEvents.map((ev, i) => {
-                        const icon = ev.status === 'pending'
-                          ? <Loader size={11} className="spin" style={{color:'#60a5fa'}} />
-                          : ev.status === 'success'
-                            ? <CheckCircle size={11} style={{color:'#34d399'}} />
-                            : ev.status === 'error'
-                              ? <XCircle size={11} style={{color:'#ef4444'}} />
-                              : <AlertTriangle size={11} style={{color:'#eab308'}} />;
-                        const bg = ev.status === 'success' ? 'rgba(52,211,153,0.08)'
-                          : ev.status === 'error' ? 'rgba(239,68,68,0.08)'
-                          : ev.status === 'unknown' ? 'rgba(234,179,8,0.08)'
-                          : 'rgba(96,165,250,0.08)';
-                        const bd = ev.status === 'success' ? 'rgba(52,211,153,0.25)'
-                          : ev.status === 'error' ? 'rgba(239,68,68,0.25)'
-                          : ev.status === 'unknown' ? 'rgba(234,179,8,0.25)'
-                          : 'rgba(96,165,250,0.25)';
-                        return (
-                          <div key={i} style={{ display:'flex', alignItems:'center', gap:6, fontSize:10, padding:'3px 8px', borderRadius:6, background:bg, border:`1px solid ${bd}` }}>
-                            {icon}
-                            <Wrench size={10} style={{color:'var(--text-dim)'}} />
-                            <span style={{fontWeight:600, color:'var(--text)'}}>{ev.name}</span>
-                            {ev.args && Object.keys(ev.args).length > 0 && (
-                              <span style={{color:'var(--text-dim)'}}>{JSON.stringify(ev.args)}</span>
-                            )}
-                            {ev.error && <span style={{color:'#ef4444'}}>{ev.error}</span>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {/* #6 Sub-agent activity */}
-                  {msg.subAgents && msg.subAgents.length > 0 && <SubAgentActivityView activities={msg.subAgents} />}
-                  {/* #5 Plan card */}
-                  {msg.plan && <PlanCardView plan={msg.plan} onExecute={(p) => executePlanFromCard(p, msg.id)} onToggleStep={(sid) => togglePlanStep(msg.id, sid)} />}
-                  {/* #4 Tool approval cards */}
-                  {msg.toolEvents && msg.toolEvents.filter(e => e.approvalRequired || e.status === 'blocked').map((ev, i) => (
-                    <ToolApprovalView key={`apr_${i}`} event={ev} onApprove={() => updateToolEvent(msg.id, ev.name, { status: 'success' })} onDeny={() => updateToolEvent(msg.id, ev.name, { status: 'error', error: 'Denied by user' })} />
-                  ))}
-                  {/* #7 + #13 Inline artifacts (tables, charts, sliders) */}
-                  {msg.artifacts && msg.artifacts.map((art, i) => (
-                    <ArtifactView key={`art_${i}`} artifact={art} onRerun={(param, val) => rerunWithParam(msg, param, val)} />
-                  ))}
-                  {renderCommandChips(msg.commands, focusLocation, toggleLayer)}
-                  {msg.modelTier && (
-                    <span style={{fontSize:9,color:'#64748b',background:'rgba(100,116,139,0.1)',borderRadius:3,padding:'1px 5px',marginTop:2,display:'inline-block'}}>{msg.modelTier}</span>
-                  )}
-                  {/* #15 Trace expander */}
-                  {msg.traceId && <TraceExpander traceId={msg.traceId} />}
-                  {/* #14 Resume button */}
-                  {msg.resumable && msg.content && msg.content.length > 50 && !aiTyping && (
-                    <button
-                      onClick={() => resumeMessage(msg)}
-                      style={{fontSize:9,color:'var(--text-dim)',background:'none',border:'1px solid transparent',cursor:'pointer',padding:'2px 8px',borderRadius:4,display:'inline-flex',alignItems:'center',gap:3,marginTop:4}}
-                      title="Continue generating this response"
-                    >
-                      <Play size={10} /> Resume
-                    </button>
-                  )}
-                  {msg.content && idx > 0 && (
-                    <div style={{marginTop:4}}>
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(msg.content.replace(/## COMMANDS[\s\S]*/, '').trim());
-                          setCopiedMsgId(msg.id);
-                          setTimeout(() => setCopiedMsgId(null), 1500);
-                        }}
-                        style={{
-                          fontSize:9,
-                          color: copiedMsgId === msg.id ? '#34d399' : 'var(--text-dim)',
-                          background:'none',
-                          border:`1px solid ${copiedMsgId === msg.id ? 'rgba(52,211,153,0.3)' : 'transparent'}`,
-                          cursor:'pointer',
-                          padding:'2px 8px',
-                          borderRadius:4,
-                          display:'inline-flex',
-                          alignItems:'center',
-                          gap:3,
-                          transition:'all 0.2s ease',
-                          transform: copiedMsgId === msg.id ? 'scale(1.05)' : 'scale(1)',
-                        }}
-                        title="Copy response"
-                      >
-                        <ClipboardList size={10} style={{display:'inline'}} />
-                        {copiedMsgId === msg.id ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : msg.type === 'image' ? (
-                <div>
-                  <div>{msg.content}</div>
-                  {chatImages.filter(img => img.fileName === msg.content.replace(/\[Image: |]/g, '')).slice(-1).map(img => (
-                    <div key={img.id} className="chat-image-container" style={{marginTop:4}}>
-                      <img src={img.dataUrl} alt={img.fileName} className="chat-image" style={{maxWidth:'100%',maxHeight:180,borderRadius:6,cursor:'pointer'}} onClick={() => window.open(img.dataUrl, '_blank')} />
-                      <div style={{fontSize:9,color:'var(--text-dim)',marginTop:2}}>{img.fileName}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : msg.content}
-            </div>
-          ))}
-          {pipelineProgress.length > 0 && (
-            <div className="ai-msg assistant" style={{borderColor:'rgba(96,165,250,0.3)',background:'rgba(96,165,250,0.04)'}}>
-              <div className="msg-label" style={{fontSize:10,fontWeight:600,color:'#60a5fa',marginBottom:4}}><RefreshCw size={12} style={{display:'inline',marginRight:3}} /> Pipeline Progress</div>
-              {pipelineProgress.map(p => (
-                <div key={p.id} className={`pipeline-step ${p.status}`}>
-                  <span className="pipeline-step-icon">
-                    {p.status === 'completed' ? <CheckCircle size={12} style={{color:'#22c55e'}} /> : p.status === 'running' ? <Loader size={12} className="spin" style={{color:'#60a5fa'}} /> : p.status === 'failed' ? <XCircle size={12} style={{color:'#ef4444'}} /> : <Hourglass size={12} style={{color:'#eab308'}} />}
-                  </span>
-                  <span>{p.description}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {agentSteps.length > 0 && (
-            <div className="thinking-block">
-              <div className="thinking-header" onClick={() => setThinkingExpanded(!thinkingExpanded)}>
-                <span className="thinking-chevron">{thinkingExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}</span>
-                <span className="thinking-title"><MessageCircle size={12} style={{display:'inline',marginRight:3}} /> Thinking... ({agentSteps.length} steps)</span>
-                <span className="thinking-count">{agentSteps.filter(s => s.status === 'completed').length}/{agentSteps.length}</span>
-              </div>
-              {thinkingExpanded && (
-                <div className="thinking-body">
-                  {agentSteps.map((step, i) => (
-                    <div key={i} className={`think-step ${step.status === 'running' ? 'running' : step.status === 'failed' ? 'failed' : ''}`}>
-                      <div className="think-step-header" onClick={(e) => { e.stopPropagation(); setExpandedStep(expandedStep === i ? null : i); }}>
-                        <span className="think-step-icon">
-                          {step.status === 'running' ? <Loader size={12} className="spin" style={{color:'#60a5fa'}} /> : step.status === 'completed' ? <CheckCircle size={12} style={{color:'#22c55e'}} /> : step.status === 'failed' ? <XCircle size={12} style={{color:'#ef4444'}} /> : <MessageCircle size={12} style={{color:'#94a3b8'}} />}
-                        </span>
-                        <span className="think-step-text">{step.text}</span>
-                        <span className="think-step-chevron">{expandedStep === i ? <ChevronDown size={10} /> : <ChevronRight size={10} />}</span>
-                      </div>
-                      {expandedStep === i && (
-                        <div className="think-step-detail">
-                          {step.code && <div className="think-code-block"><div className="think-code-label">Code</div><pre className="think-code">{step.code}</pre></div>}
-                          {step.output && <div className="think-output-block"><div className="think-output-label">Output</div><pre className="think-output">{step.output}</pre></div>}
-                          {step.timeMs !== undefined && <div className="think-timing"><Timer size={10} style={{display:'inline',marginRight:2}} /> {step.timeMs}ms</div>}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {agentSteps.length === 0 && <div className="think-step" style={{padding:8,fontSize:11,color:'var(--text-dim)'}}>Waiting for agent...</div>}
-                  {agentSteps.some(s => s.status === 'running') && <div className="think-thinking"><span /><span /><span /></div>}
-                </div>
-              )}
-            </div>
-          )}
-          {aiTyping && agentSteps.length === 0 && (
-            <div className="ai-typing">
-              <span /><span /><span />
-            </div>
-          )}
-        </div>
-        <HumanOverrideBanner />
-        {sandboxWorkspaceId && uploadedFiles.length > 0 && (
-          <div className="sandbox-file-upload">
-            <span className="sandbox-workspace-badge"><Package size={12} style={{display:'inline',marginRight:3}} /> Workspace active</span>
-            <span className="sandbox-file-name">{uploadedFiles.length} file(s)</span>
-          </div>
-        )}
-        {aiMessages.length <= 1 && (
-        <div className="ai-suggestion-chips">
-          {/* #10 Adaptive suggestions from LLM; falls back to rule-based if empty */}
-          {(adaptiveSuggestions.length > 0 ? adaptiveSuggestions : (() => {
-            const chips: string[] = [];
-            if (isLayerEnabled('earthquakes')) chips.push('Recent earthquakes?', 'Seismic hotspots?');
-            else chips.push('Show earthquake data');
-            if (isLayerEnabled('wildfires') || isLayerEnabled('severe_storms') || isLayerEnabled('volcanoes')) chips.push('Active natural disasters');
-            else chips.push('Show wildfires', 'Storm tracking');
-            if (isLayerEnabled('flight_tracks') || isLayerEnabled('2_adsb_lol')) chips.push('Aircraft near me');
-            else chips.push('Aircraft near Delhi');
-            if (recentDiscoveries.length > 0) chips.push(`Tell me about: ${recentDiscoveries[0].summary.slice(0, 30)}`);
-            chips.push('Analyze quake stats', 'Compute averages');
-            return chips.slice(0, 6);
-          })()).map(chip => (
-            <span key={chip} className="ai-chip" onClick={() => { setAiInput(chip); }}>{chip}</span>
-          ))}
-        </div>
-        )}
-        <div className="ai-input-wrap">
-          <button className={`ai-voice-btn ${isListening ? 'listening' : ''}`}
-            onClick={toggleVoiceInput} title={isListening ? 'Listening...' : 'Voice input'}
-            style={{display:voiceSupported ? 'flex' : 'none'}}>
-            {isListening ? <Circle size={14} fill="#ef4444" color="#ef4444" /> : <Mic size={14} />}
-          </button>
-          <input className="ai-input" placeholder="Ask, analyze, compute, or upload data..."
-            value={aiInput} onChange={e => setAiInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') sendAI(); }} />
-          {aiTyping ? (
-            <button className="ai-stop" onClick={() => {
-              abortControllerRef.current?.abort();
-              setAiTyping(false);
-              cleanupThinkingSteps(true);
-            }} title="Stop response" style={{background:'rgba(239,68,68,0.15)',border:'1px solid rgba(239,68,68,0.4)',color:'#ef4444',borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:600,padding:'4px 10px',display:'flex',alignItems:'center',gap:4}}><Square size={12} /> Stop</button>
-          ) : (
-            <button className="ai-send" onClick={() => sendAI()}><Send size={14} /></button>
-          )}
-        </div>
-        <div className="sandbox-file-upload" style={{borderTop:'1px solid var(--border)',padding:'3px 8px',display:'flex',gap:4,flexWrap:'wrap'}}>
-          <label className="sandbox-file-btn" title="Upload data (sandbox)" style={{cursor:'pointer',display:'inline-flex',alignItems:'center'}}>
-            <Paperclip size={13} />
-            <input type="file" style={{display:'none'}} onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) handleFileUpload(file);
-            }} />
-          </label>
-          <label className="sandbox-file-btn" title="Upload image" style={{cursor:'pointer',display:'inline-flex',alignItems:'center'}}>
-            <Image size={13} />
-            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:'none'}} onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) handleImageUpload(file);
-            }} />
-          </label>
-          <label className="sandbox-file-btn" title="Analyze data file" style={{cursor:'pointer',display:'inline-flex',alignItems:'center'}}>
-            <FileSpreadsheet size={13} />
-            <input type="file" accept=".csv,.json,.geojson" style={{display:'none'}} onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) handleDataFileUpload(file);
-            }} />
-          </label>
-          <button className="sandbox-file-btn" title="Read last response aloud"
-            onClick={() => { speakResponse(aiMessages.filter(m => m.role === 'assistant').slice(-1)[0]?.content || ''); }}>
-            <Volume2 size={13} />
-          </button>
-          <button className="sandbox-file-btn" title="Share session"
-            onClick={async () => {
-              try {
-                setShowShareDialog(true);
-                const url = await buildSessionShareLink();
-                await navigator.clipboard.writeText(url);
-                setShareUrl(url);
-                setTimeout(() => setShowShareDialog(false), 2500);
-              } catch (e) {
-                setShowShareDialog(false);
-                showNotification(`Share failed: ${e}`, 'error');
-              }
-            }}>
-            <Link size={13} />
-          </button>
-          <button className="sandbox-file-btn"
-            onClick={() => {
-              setPdfExporting(true);
-              try {
-                exportConversationAsPDF(aiMessagesRef.current, {
-                  title: 'Earth Intelligence Report',
-                  subtitle: 'AI Conversation Transcript',
-                  author: 'Earth Intelligence AI',
-                  sessionId: sessionId,
-                  modelTier: selectedTier,
-                });
-              } catch (e) {
-                showNotification(`PDF export failed: ${e}`, 'error');
-              }
-              setTimeout(() => setPdfExporting(false), 500);
-            }}
-            title="Download conversation as PDF report"
-            style={{background:pdfExporting?'rgba(52,211,153,0.15)':'transparent'}}>
-            {pdfExporting ? <CheckCircle size={13} style={{color:'#34d399'}} /> : <FileDown size={13} />}
-          </button>
-          {showShareDialog && <span style={{fontSize:9,color:'#34d399',maxWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={shareUrl}>{shareUrl ? 'Link copied!' : 'Creating…'}</span>}
-          {sandboxWorkspaceId && <span className="sandbox-workspace-badge" style={{fontSize:9}}><Grid size={11} style={{display:'inline',marginRight:2}} /> Workspace</span>}
-        </div>
-
-      </Panel>
-        </div>
-      )}
-
-      {/* Chat History Panel */}
-      <div className={`chat-history-panel glass-panel ${showChatHistory ? 'open' : ''}`} style={{position:'fixed',top:0,left:0,width:300,height:'100vh',zIndex:1001,transform:showChatHistory ? 'translateX(0)' : 'translateX(-100%)',transition:'transform 0.25s ease',display:'flex',flexDirection:'column',overflow:'hidden'}}>
-        <div className="chat-history-header" style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',borderBottom:'1px solid var(--border)'}}>
-          <span style={{fontWeight:600,fontSize:14}}>Chat History</span>
-          <div style={{display:'flex',alignItems:'center',gap:6}}>
-            {chatList.length > 0 && (
-              <button
-                onClick={() => { if (confirm('Delete all saved chats? This cannot be undone.')) clearAllChats(); }}
-                title="Clear all chats"
-                style={{background:'none',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',cursor:'pointer',fontSize:9,padding:'2px 6px',borderRadius:4,display:'inline-flex',alignItems:'center',gap:3}}>
-                <Trash2 size={10} /> Clear all
-              </button>
-            )}
-            <button onClick={() => setShowChatHistory(false)} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:16}}>✕</button>
-          </div>
-        </div>
-        {chatList.length > 0 && (
-          <div style={{padding:'6px 10px',borderBottom:'1px solid var(--border)'}}>
-            <div style={{position:'relative'}}>
-              <SearchIcon size={12} style={{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',color:'var(--text-dim)'}} />
-              <input
-                value={chatSearch}
-                onChange={e => setChatSearch(e.target.value)}
-                placeholder="Search chats..."
-                style={{width:'100%',padding:'5px 8px 5px 26px',fontSize:11,background:'var(--bg-input,rgba(255,255,255,0.04))',border:'1px solid var(--border)',borderRadius:6,color:'var(--text)',outline:'none'}}
-              />
-              {chatSearch && (
-                <button onClick={() => setChatSearch('')} style={{position:'absolute',right:4,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:12,padding:'0 4px'}}>✕</button>
-              )}
-            </div>
-          </div>
-        )}
-        <div className="chat-history-list" style={{flex:1,overflowY:'auto',padding:'6px 0'}}>
-          {chatList.length === 0 && <div style={{padding:'20px 14px',fontSize:12,color:'var(--text-dim)',textAlign:'center'}}>No saved chats yet.</div>}
-          {(() => {
-            const filtered = chatSearch.trim()
-              ? chatList.filter(c => c.title?.toLowerCase().includes(chatSearch.toLowerCase()) || c.id.toLowerCase().includes(chatSearch.toLowerCase()))
-              : chatList;
-            if (chatSearch.trim() && filtered.length === 0) return <div style={{padding:'20px 14px',fontSize:12,color:'var(--text-dim)',textAlign:'center'}}>No chats match &quot;{chatSearch}&quot;.</div>;
-            return groupChatsByDate(filtered).map(group => (
-            <div key={group.label}>
-              <div className="chat-date-group" style={{padding:'8px 14px 4px',fontSize:10,fontWeight:600,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:0.5}}>{group.label}</div>
-              {group.items.map(chat => (
-                <div key={chat.id} className={`chat-history-item ${chat.id === currentChatIdRef.current ? 'active' : ''}`}
-                  onClick={() => loadChat(chat.id)}
-                  style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 14px',cursor:'pointer',fontSize:12,borderRadius:0,background:chat.id === currentChatIdRef.current ? 'rgba(96,165,250,0.08)' : 'transparent',borderLeft: chat.id === currentChatIdRef.current ? '3px solid #60a5fa' : '3px solid transparent'}}>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{chat.title}</div>
-                    <div style={{fontSize:10,color:'var(--text-dim)',marginTop:2}}>{chat.messageCount} messages · {new Date(chat.updatedAt || chat.createdAt).toLocaleDateString()}</div>
-                  </div>
-                  <button onClick={async (e) => { e.stopPropagation(); await deleteChatSession(chat.id); }} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:12,padding:'2px 4px',opacity:0.6}} title="Delete">✕</button>
-                </div>
-              ))}
-            </div>
-            ));
-          })()}
-        </div>
-      </div>
-
-      {/* Alerts Panel */}
       {/* Analytics Panel */}
       {showAnalytics && (
         <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('analytics-insights', 110), width: 340 }}>
@@ -9434,6 +8893,41 @@ export default function App() {
           </Panel>
         </div>
       )}
+
+      {/* AI Panel — extracted component */}
+      <ChatPanel
+        getPanelZIndex={getPanelZIndex}
+        focusLocation={focusLocation}
+        toggleLayer={toggleLayer}
+        sendAI={sendAI}
+        handleFileUpload={handleFileUpload}
+        handleImageUpload={handleImageUpload}
+        handleDataFileUpload={handleDataFileUpload}
+        toggleVoiceInput={toggleVoiceInput}
+        voiceSupported={voiceSupported}
+        buildSessionShareLink={buildSessionShareLink}
+        showNotification={showNotification}
+        newChat={newChat}
+        undoLastAgentAction={undoLastAgentAction}
+        clearAllAgentActions={clearAllAgentActions}
+        cleanupThinkingSteps={cleanupThinkingSteps}
+        abortControllerRef={abortControllerRef}
+        virtualizedChatRef={virtualizedChatRef}
+        speakResponse={speakResponse}
+        stopSpeaking={stopSpeaking}
+        executePlanFromCard={executePlanFromCard}
+        togglePlanStep={togglePlanStep}
+        rerunWithParam={rerunWithParam}
+        resumeMessage={resumeMessage}
+      />
+
+      {/* Chat History Panel — extracted component */}
+      <ChatHistoryPanel
+        loadChat={loadChat}
+        deleteChatSession={deleteChatSession}
+        clearAllChats={clearAllChats}
+        currentChatId={chatState.currentChatId}
+      />
 
       {/* Social Panel */}
       {showIntelFeed && (
@@ -9530,13 +9024,12 @@ export default function App() {
           id="models" title="Models & Panels" icon={<Grid size={16} />}
           direction="up" triggerClassName="btn-icon monitor-btn"
           menuId={openMenu} setMenuId={setOpenMenu}
-          active={showIntelligencePanel || showPrithviPanel || showSearchPanel || showSatelliteTracker || showAviationTracker}
+          active={showIntelligencePanel || showSatelliteTracker || showAviationTracker || showLandCoverMapper}
           items={[
             { label: 'Pulse', icon: <Eye size={15} />, active: showIntelligencePanel, onClick: () => { setShowIntelligencePanel(p => !p); focusPanel('intelligence'); } },
-            { label: 'Prithvi EO', icon: <Brain size={15} />, active: showPrithviPanel, onClick: () => { setShowPrithviPanel(p => !p); focusPanel('prithvi'); } },
-            { label: 'EO Image Search', icon: <SearchIcon size={15} />, active: showSearchPanel, onClick: () => { setShowSearchPanel(p => !p); focusPanel('satellite-search'); } },
     { label: 'Satellite Tracker', icon: <Satellite size={15} />, active: showSatelliteTracker, onClick: () => { setShowSatelliteTracker(p => !p); focusPanel('satellite-tracker'); } },
     { label: 'Satellite Imagery', icon: <Satellite size={15} />, active: showSatelliteImagery, onClick: () => { setShowSatelliteImagery(p => !p); focusPanel('satellite-imagery'); } },
+    { label: 'Land Cover Mapper', icon: <Layers size={15} />, active: showLandCoverMapper, onClick: () => { setShowLandCoverMapper(p => !p); focusPanel('land-cover'); } },
     { label: 'Aviation Tracker', icon: <Plane size={15} />, active: showAviationTracker, onClick: () => { setShowAviationTracker(p => !p); focusPanel('aviation-tracker'); } },
           ]}
         />
@@ -9949,12 +9442,6 @@ export default function App() {
         zIndex={getPanelZIndex('intelligence')}
       />
 
-      {/* Prithvi EO Foundation Model Panel */}
-      {showPrithviPanel && <PrithviPanel zIndex={getPanelZIndex('prithvi')} />}
-
-      {/* EO Image Search Panel */}
-      {showSearchPanel && <SatelliteSearchPanel zIndex={getPanelZIndex('satellite-search')} onClose={() => { setShowSearchPanel(false); const v = viewerRef.current; if (v) { for (const ent of searchResultEntitiesRef.current) v.entities.remove(ent); } searchResultEntitiesRef.current = []; }} onResults={handleSearchResults} onFlyTo={focusLocation} />}
-
       {/* Satellite Tracker Panel */}
       {showSatelliteTracker && <SatelliteTrackerPanel zIndex={getPanelZIndex('satellite-tracker')} onClose={() => { setShowSatelliteTracker(false); if (trackedSatIntervalRef.current) { clearInterval(trackedSatIntervalRef.current); trackedSatIntervalRef.current = null; } if (trackedSatRenderTickRef.current) { trackedSatRenderTickRef.current(); trackedSatRenderTickRef.current = null; } if (trackedSatRef.current) { viewerRef.current?.entities.remove(trackedSatRef.current); trackedSatRef.current = null; } if (trackedSatTrailEntityRef.current) { viewerRef.current?.entities.remove(trackedSatTrailEntityRef.current); trackedSatTrailEntityRef.current = null; } trackedSatTleRef.current = null; trackedSatPosPropRef.current = null; trackedSatSpeedRef.current = 0; trackedSatNameRef.current = ''; }} onTrackSatellite={trackSatellite} onTravelView={travelToTrackedSatellite} />}
 
@@ -9968,6 +9455,17 @@ export default function App() {
       <ErrorBoundary label="Analytics Workbench">
         <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} onToolResult={handleToolResult} onClearResult={handleClearToolResult} zIndex={getPanelZIndex('analytics')} />
       </ErrorBoundary>
+
+      {/* Land Cover Mapper Panel */}
+      <LandCoverMapperPanel
+        open={showLandCoverMapper}
+        onClose={() => setShowLandCoverMapper(false)}
+        viewer={viewerRef.current}
+        bbox={activeBbox}
+        polygon={activeStudyAreaPolygon ?? undefined}
+        onClearResult={handleClearToolResult}
+        zIndex={getPanelZIndex('land-cover')}
+      />
 
       {/* Command Palette (CMD+K) */}
       <CommandPalette

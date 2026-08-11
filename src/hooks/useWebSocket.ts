@@ -83,10 +83,23 @@ export function useWebSocket(token?: string) {
       }
     };
 
+    // Detach every handler first, then close. Calling close() on a WebSocket
+    // that is still CONNECTING makes the browser log "WebSocket is closed
+    // before the connection is established" — avoid it by letting an in-flight
+    // connection fail on its own (its handlers are already detached).
+    const safeClose = (ws: WebSocket) => {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CLOSING) {
+        ws.close();
+      }
+    };
+
     const closeSocket = () => {
       if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
+        safeClose(wsRef.current);
         wsRef.current = null;
       }
     };
@@ -185,7 +198,15 @@ export function useWebSocket(token?: string) {
       };
 
       ws.onerror = () => {
-        ws.close();
+        // The connection attempt failed (e.g. the agent server is down).
+        // readyState may still be CONNECTING here, so don't call close() —
+        // detach handlers and let the socket settle so the browser doesn't log
+        // "WebSocket is closed before the connection is established".
+        ws.onopen = null;
+        ws.onmessage = null;
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CLOSING) {
+          ws.close();
+        }
       };
     };
 

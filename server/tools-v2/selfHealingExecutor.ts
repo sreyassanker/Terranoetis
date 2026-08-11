@@ -1,6 +1,6 @@
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
-import { dynamicTools } from './toolGenerator';
+import { dynamicTools, resolveToolUrl } from './toolGenerator';
 import { toolRepair } from './toolRepair';
 
 // ── Types ───────────────────────────────────────────────────────
@@ -162,7 +162,7 @@ export class SelfHealingExecutor {
         }
       }
 
-      const resp = await fetch(tool.schema.endpoint || '', {
+      const resp = await fetch(resolveToolUrl(tool.schema.endpoint || ''), {
         method: tool.schema.method || 'GET',
         signal: AbortSignal.timeout(10000),
       });
