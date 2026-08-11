@@ -217,7 +217,15 @@ export function ChatPanel({
         <>
         <ChatTabs
           onBeforeTabSwitch={() => {
-            // No stream abort on switch — background tabs keep generating.
+            // Abort any running stream before switching tabs.
+            const activeTabId = useChatStore.getState().activeTabId;
+            if (activeTabId) {
+              useChatStore.getState().abortTabStream(activeTabId);
+            }
+            abortControllerRef.current?.abort();
+            abortControllerRef.current = null;
+            useChatStore.getState().setAiTyping(false);
+            cleanupThinkingSteps(true);
           }}
         />
         <ErrorBoundary label="Chat Content">

@@ -52,15 +52,21 @@ export interface OmninetOptions {
   model?: string;
   stream?: boolean;
   signal?: AbortSignal;
+  /** Per-provider vault keys map (env var name → key value). Used as fallback when env var is missing. */
+  vaultKeys?: Record<string, string>;
+  /** Client-selected tier: 'local' | 'flash' | 'pro'. Influences provider ranking. */
+  clientTier?: string;
 }
 
 // ── Provider Registry ───────────────────────────────────────────
 
 const PROVIDER_CONFIGS: ProviderConfig[] = [
-  { name: 'groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'], rateLimit: 20, tier: 1, apiKeyEnvVar: 'GROQ_API_KEY', supportsStreaming: true },
-  { name: 'cerebras', type: 'openai-compatible', baseUrl: 'https://api.cerebras.ai/v1', models: ['llama-3.3-70b'], rateLimit: 1, tier: 1, apiKeyEnvVar: 'CEREBRAS_API_KEY', supportsStreaming: true },
-  { name: 'sambanova', type: 'openai-compatible', baseUrl: 'https://api.sambanova.ai/v1', models: ['llama-3.1-8b'], rateLimit: 10, tier: 1, apiKeyEnvVar: 'SAMBANOVA_API_KEY', supportsStreaming: true },
-  { name: 'gemini', type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', models: ['gemini-2.0-flash-001', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'], rateLimit: 60, tier: 2, apiKeyEnvVar: 'GOOGLE_GEMINI_API_KEY', supportsStreaming: true, supportsVision: true },
+  { name: 'groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'], rateLimit: 20, tier: 2, apiKeyEnvVar: 'GROQ_API_KEY', supportsStreaming: true },
+  { name: 'cerebras', type: 'openai-compatible', baseUrl: 'https://api.cerebras.ai/v1', models: ['llama-3.3-70b'], rateLimit: 1, tier: 2, apiKeyEnvVar: 'CEREBRAS_API_KEY', supportsStreaming: true },
+  { name: 'sambanova', type: 'openai-compatible', baseUrl: 'https://api.sambanova.ai/v1', models: ['llama-3.1-8b'], rateLimit: 10, tier: 2, apiKeyEnvVar: 'SAMBANOVA_API_KEY', supportsStreaming: true },
+  { name: 'gemini', type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'], rateLimit: 60, tier: 3, apiKeyEnvVar: 'GOOGLE_GEMINI_API_KEY', supportsStreaming: true, supportsVision: true },
+  { name: 'tokenrouter', type: 'openai-compatible', baseUrl: 'https://api.tokenrouter.com/v1', models: ['moonshotai/kimi-k3-free', 'deepseek/deepseek-v4-flash', 'qwen/qwen3.5-flash', 'openai/gpt-5.4-nano'], rateLimit: 60, tier: 1, apiKeyEnvVar: 'TOKENROUTER_API_KEY', supportsStreaming: true },
+  { name: 'freemodelsforall', type: 'openai-compatible', baseUrl: 'https://freemodelsforall.hopto.org/v1', models: ['DeepSeek-V4-Flash-0731', 'deepseek/deepseek-v4-flash-2', 'anthropic/claude-haiku-4.5', 'google/gemini-flash-lite', 'meta/llama-4-scout'], rateLimit: 60, tier: 1, apiKeyEnvVar: 'FREEMODELSFORALL_API_KEY', supportsStreaming: true },
   { name: 'openrouter', type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1', models: ['deepseek/deepseek-r1', 'qwen/qwen3-235b', 'meta-llama/llama-4-scout'], rateLimit: 200, tier: 2, apiKeyEnvVar: 'OPENROUTER_API_KEY', supportsStreaming: true },
   { name: 'together', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', models: ['meta-llama/Llama-3-70b'], rateLimit: 60, tier: 2, apiKeyEnvVar: 'TOGETHER_API_KEY', supportsStreaming: true },
   { name: 'deepseek', type: 'openai-compatible', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'], rateLimit: 50, tier: 3, apiKeyEnvVar: 'DEEPSEEK_API_KEY', supportsStreaming: true },
@@ -191,26 +197,30 @@ export class Omninet {
 
   private startHealthChecks(): void {
     this.healthTimer = setInterval(async () => {
-      for (const state of this.providers) {
-        if (state.config.local) continue;
-        const apiKey = state.config.apiKeyEnvVar ? process.env[state.config.apiKeyEnvVar] : undefined;
-        if (!apiKey) continue;
-        try {
-          await this.healthPing(state);
-          state.consecutiveSuccesses++;
-          state.failureCount = 0;
-          if (state.consecutiveSuccesses >= 3) state.status = 'healthy';
-        } catch (e) {
-          logger.warn({ err: e, provider: state.config.name }, 'Omninet health ping failed');
-          state.failureCount++;
-          state.consecutiveSuccesses = 0;
-          if (state.failureCount >= 5) state.status = 'down';
-          else if (state.failureCount >= 3) state.status = 'degraded';
-        }
-        state.lastChecked = Date.now();
-        this.persistState(state);
-      }
-    }, 30000);
+      const pings = this.providers
+        .filter(state => !state.config.local)
+        .filter(state => {
+          const apiKey = state.config.apiKeyEnvVar ? process.env[state.config.apiKeyEnvVar] : undefined;
+          return !!apiKey;
+        })
+        .map(async (state) => {
+          try {
+            await this.healthPing(state);
+            state.consecutiveSuccesses++;
+            state.failureCount = 0;
+            if (state.consecutiveSuccesses >= 3) state.status = 'healthy';
+          } catch (e) {
+            logger.warn({ err: e, provider: state.config.name }, 'Omninet health ping failed');
+            state.failureCount++;
+            state.consecutiveSuccesses = 0;
+            if (state.failureCount >= 5) state.status = 'down';
+            else if (state.failureCount >= 3) state.status = 'degraded';
+          }
+          state.lastChecked = Date.now();
+          this.persistState(state);
+        });
+      await Promise.allSettled(pings);
+    }, 120000);
   }
 
   private async healthPing(state: ProviderState): Promise<void> {
@@ -218,7 +228,7 @@ export class Omninet {
     const config = state.config;
     const model = config.models[0];
 
-    await this.executeProviderCall(config, model, 'hi', { maxTokens: 1, temperature: 0.1, signal: AbortSignal.timeout(10000) });
+    await this.executeProviderCall(config, model, 'hi', { maxTokens: 1, temperature: 0.1, signal: AbortSignal.timeout(20000) });
     state.lastLatency = Date.now() - start;
   }
 
@@ -252,31 +262,61 @@ export class Omninet {
     }
   }
 
+  /** Map client-selected tier string to provider tier. */
+  private clientTierToProviderTier(clientTier: string): ProviderTier {
+    switch (clientTier) {
+      case 'local': return 4;   // local/free providers
+      case 'flash': return 2;   // balanced tier
+      case 'pro': return 3;     // premium tier (Gemini, DeepSeek, Claude)
+      default: return 2;        // fallback to balanced
+    }
+  }
+
   // ── Routing Logic ─────────────────────────────────────────────
 
-  route(query: string, complexity: Complexity, preferredModel?: string): RouteResult {
-    this.ensureInit();
-    const targetTier = this.complexityToTier(complexity);
+  /** Resolve the API key for a provider: env var → vaultKeys fallback. */
+  private resolveApiKey(config: ProviderConfig, vaultKeys?: Record<string, string>): string | undefined {
+    if (config.apiKeyEnvVar) {
+      const envKey = process.env[config.apiKeyEnvVar];
+      if (envKey) return envKey;
+      if (vaultKeys && vaultKeys[config.apiKeyEnvVar]) return vaultKeys[config.apiKeyEnvVar];
+    }
+    return undefined;
+  }
+
+  private rankProviders(targetTier: ProviderTier, vaultKeys?: Record<string, string>): ProviderState[] {
     const eligible = this.providers.filter(s => {
       if (s.status === 'down') return false;
       if (s.circuitState === 'open') {
         if (Date.now() - s.circuitOpenedAt > 30000) s.circuitState = 'half-open';
         else return false;
       }
-      if (s.config.apiKeyEnvVar && !process.env[s.config.apiKeyEnvVar] && !s.config.local) return false;
+      // Exclude if no API key available: check env var first, then vault keys
+      const hasKey = this.resolveApiKey(s.config, vaultKeys);
+      if (!hasKey && !s.config.local) return false;
       this.refillTokens(s);
       if (s.tokens < 1) return false;
-      if (s.config.tier === 3 && this.monthlyBudgetCap <= 0) return false;
       return true;
     });
 
-    const sorted = eligible.sort((a, b) => {
+    return eligible.sort((a, b) => {
+      const statusRank = (s: ProviderState) => s.config.local ? 2 : (s.status === 'healthy' ? 0 : 1);
+      const aStatus = statusRank(a);
+      const bStatus = statusRank(b);
+      if (aStatus !== bStatus) return aStatus - bStatus;
       const aTierDiff = Math.abs(a.config.tier - targetTier);
       const bTierDiff = Math.abs(b.config.tier - targetTier);
       if (aTierDiff !== bTierDiff) return aTierDiff - bTierDiff;
       if (a.config.tier !== b.config.tier) return a.config.tier - b.config.tier;
       return a.lastLatency - b.lastLatency;
     });
+  }
+
+  route(query: string, complexity: Complexity, preferredModel?: string, clientTier?: string, vaultKeys?: Record<string, string>): RouteResult {
+    this.ensureInit();
+    // If client explicitly chose a tier, use it; otherwise derive from complexity
+    const targetTier = clientTier ? this.clientTierToProviderTier(clientTier) : this.complexityToTier(complexity);
+    const sorted = this.rankProviders(targetTier, vaultKeys);
 
     if (sorted.length > 0) {
       const selected = sorted[0];
@@ -314,7 +354,7 @@ export class Omninet {
   }
 
   private async callOpenAI(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
-    const apiKey = process.env[config.apiKeyEnvVar!];
+    const apiKey = this.resolveApiKey(config, options?.vaultKeys) || '';
     const resp = await fetch(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -332,7 +372,7 @@ export class Omninet {
   }
 
   private async callGemini(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
-    const apiKey = process.env[config.apiKeyEnvVar!] || process.env.GOOGLE_GEMINI_API_KEY || '';
+    const apiKey = this.resolveApiKey(config, options?.vaultKeys) || process.env.GOOGLE_GEMINI_API_KEY || '';
     if (!apiKey) throw new Error('Gemini API key not configured. Set GOOGLE_GEMINI_API_KEY in .env');
 
     // Try multiple models in order of preference — if the first fails with 429/404, try the next
@@ -404,7 +444,7 @@ export class Omninet {
   }
 
   private async callClaude(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
-    const apiKey = process.env[config.apiKeyEnvVar!];
+    const apiKey = this.resolveApiKey(config, options?.vaultKeys) || '';
     const resp = await fetch(`${config.baseUrl}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey!, 'anthropic-version': '2023-06-01' },
@@ -438,7 +478,7 @@ export class Omninet {
   }
 
   private async callHuggingFace(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
-    const apiKey = process.env[config.apiKeyEnvVar!];
+    const apiKey = this.resolveApiKey(config, options?.vaultKeys) || '';
     const resp = await fetch(`${config.baseUrl}/models/${model}`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -582,7 +622,7 @@ export class Omninet {
   private async callApiEmbedding(config: ProviderConfig, text: string): Promise<Float32Array> {
     if (config.type === 'gemini') {
       const apiKey = process.env[config.apiKeyEnvVar!] || process.env.GOOGLE_GEMINI_API_KEY || '';
-      const resp = await fetch(`${config.baseUrl}/models/embedding-001:embedContent?key=${apiKey}`, {
+      const resp = await fetch(`${config.baseUrl}/models/gemini-embedding-001:embedContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(15000),
@@ -625,100 +665,117 @@ export class Omninet {
   async *generateStream(prompt: string, options?: OmninetOptions): AsyncGenerator<string, void, unknown> {
     this.ensureInit();
     const complexity = classifyComplexity(prompt);
-    const routeResult = this.route(prompt, complexity, options?.model);
-    const state = this.providers.find(s => s.config.name === routeResult.provider)!;
+    const targetTier = options?.clientTier ? this.clientTierToProviderTier(options.clientTier) : this.complexityToTier(complexity);
+    const candidates = this.rankProviders(targetTier, options?.vaultKeys);
 
-    if (!this.consumeToken(state)) {
-      yield 'Rate limit exceeded. Please try again shortly.';
+    if (candidates.length === 0) {
+      yield 'All AI providers unavailable. Check API keys and provider status.';
       return;
     }
 
-    try {
+    const preferred = options?.model;
+    let lastError: string | undefined;
+
+    for (const state of candidates) {
       const config = state.config;
-      const model = routeResult.model;
-      const apiKey = config.apiKeyEnvVar ? process.env[config.apiKeyEnvVar] : undefined;
+      const model = preferred && config.models.includes(preferred) ? preferred : config.models[0];
+      const apiKey = this.resolveApiKey(config, options?.vaultKeys);
 
-      if (config.type === 'openai-compatible' && apiKey) {
-        const resp = await fetch(`${config.baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-          signal: options?.signal || AbortSignal.timeout(60000),
-          body: JSON.stringify({
-            model,
-            messages: [{ role: 'user', content: prompt.slice(0, 32000) }],
-            max_tokens: options?.maxTokens ?? 2048,
-            temperature: options?.temperature ?? 0.3,
-            stream: true,
-          }),
-        });
-        if (!resp.ok) throw new Error(`${config.name} HTTP ${resp.status}`);
-        const reader = resp.body?.getReader();
-        if (!reader) throw new Error('No response body');
-        const decoder = new TextDecoder();
-        let buffer = '';
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed === 'data: [DONE]') continue;
-            if (trimmed.startsWith('data: ')) {
-              try {
-                const chunk = JSON.parse(trimmed.slice(6));
-                const content = chunk.choices?.[0]?.delta?.content || '';
-                if (content) yield content;
-              } catch (e) { logger.warn({ err: e }, 'Omninet SSE parse error'); }
+      if (!this.consumeToken(state)) continue;
+
+      let started = false;
+      try {
+        if (config.type === 'openai-compatible' && apiKey) {
+          const resp = await fetch(`${config.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            signal: options?.signal || AbortSignal.timeout(60000),
+            body: JSON.stringify({
+              model,
+              messages: [{ role: 'user', content: prompt.slice(0, 32000) }],
+              max_tokens: options?.maxTokens ?? 2048,
+              temperature: options?.temperature ?? 0.3,
+              stream: true,
+            }),
+          });
+          if (!resp.ok) throw new Error(`${config.name} HTTP ${resp.status}`);
+          started = true;
+          const reader = resp.body?.getReader();
+          if (!reader) throw new Error('No response body');
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || trimmed === 'data: [DONE]') continue;
+              if (trimmed.startsWith('data: ')) {
+                try {
+                  const chunk = JSON.parse(trimmed.slice(6));
+                  const content = chunk.choices?.[0]?.delta?.content || '';
+                  if (content) yield content;
+                } catch (e) { logger.warn({ err: e }, 'Omninet SSE parse error'); }
+              }
             }
           }
-        }
-        this.recordSuccess(state);
-      } else if (config.type === 'gemini') {
-        const gApiKey = process.env[config.apiKeyEnvVar!] || process.env.GOOGLE_GEMINI_API_KEY || '';
-        const resp = await fetch(`${config.baseUrl}/models/${model}:streamGenerateContent?alt=sse&key=${gApiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: options?.signal || AbortSignal.timeout(60000),
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt.slice(0, 16000) }] }],
-            generationConfig: { temperature: options?.temperature ?? 0.3, maxOutputTokens: options?.maxTokens ?? 2048 },
-          }),
-        });
-        if (!resp.ok) throw new Error(`Gemini HTTP ${resp.status}`);
-        const reader = resp.body?.getReader();
-        if (!reader) throw new Error('No response body');
-        const decoder = new TextDecoder();
-        let buffer = '';
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const chunk = JSON.parse(line.slice(6));
-                const content = chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                if (content) yield content;
-              } catch (e) { logger.warn({ err: e }, 'Omninet Gemini SSE parse error'); }
+        } else if (config.type === 'gemini') {
+          const gApiKey = this.resolveApiKey(config, options?.vaultKeys) || process.env.GOOGLE_GEMINI_API_KEY || '';
+          const resp = await fetch(`${config.baseUrl}/models/${model}:streamGenerateContent?alt=sse&key=${gApiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: options?.signal || AbortSignal.timeout(60000),
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt.slice(0, 16000) }] }],
+              generationConfig: { temperature: options?.temperature ?? 0.3, maxOutputTokens: options?.maxTokens ?? 2048 },
+            }),
+          });
+          if (!resp.ok) throw new Error(`Gemini HTTP ${resp.status}`);
+          started = true;
+          const reader = resp.body?.getReader();
+          if (!reader) throw new Error('No response body');
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const chunk = JSON.parse(line.slice(6));
+                  const content = chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                  if (content) yield content;
+                } catch (e) { logger.warn({ err: e }, 'Omninet Gemini SSE parse error'); }
+              }
             }
           }
+        } else {
+          const result = await this.executeProviderCall(config, model, prompt, options);
+          started = true;
+          yield result;
         }
         this.recordSuccess(state);
-      } else {
-        const result = await this.executeProviderCall(config, model, prompt, options);
-        yield result;
+        state.totalTokens += prompt.length;
+        this.persistState(state);
+        return;
+      } catch (e) {
+        this.recordFailure(state);
+        lastError = `${config.name}: ${(e as Error).message}`;
+        if (started) {
+          yield `\n\n[Provider ${config.name} failed. ${(e as Error).message}]`;
+          return;
+        }
+        logger.warn({ err: e, provider: config.name }, 'Omninet provider failed, falling back to next');
       }
-
-      state.totalTokens += prompt.length;
-      this.persistState(state);
-    } catch (e) {
-      this.recordFailure(state);
-      yield `\n\n[Provider ${state.config.name} failed. ${(e as Error).message}]`;
     }
+
+    yield `\n\n[Provider failed. ${lastError || 'all providers unavailable'}]`;
   }
 
   // ── Cost Tracking ─────────────────────────────────────────────

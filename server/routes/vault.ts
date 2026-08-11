@@ -161,7 +161,8 @@ function ensureProfile(userId: string): void {
   }
 }
 
-function readVault(userId: string): Record<string, string> {
+/** Server-side vault lookup — reads per-user keys from DB, falling back to env vars. */
+export function readVault(userId: string): Record<string, string> {
   const row = getDb()
     .prepare('SELECT json_data FROM profiles WHERE user_id = ?')
     .get(userId) as { json_data: string } | undefined;
