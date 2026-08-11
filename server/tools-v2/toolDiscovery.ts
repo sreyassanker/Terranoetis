@@ -1,7 +1,7 @@
 import { getDb } from '../db/index';
 import { omninet } from '../ai-router/omninet';
 import { logger } from '../observability/logger';
-import { dynamicTools, type DynamicTool } from './toolGenerator';
+import { dynamicTools, resolveToolUrl, type DynamicTool } from './toolGenerator';
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -231,7 +231,7 @@ export class ToolDiscovery {
 
     try {
       if (tool.schema.type === 'api' && tool.schema.endpoint) {
-        const resp = await fetch(tool.schema.endpoint, {
+        const resp = await fetch(resolveToolUrl(tool.schema.endpoint), {
           method: tool.schema.method || 'GET',
           signal: AbortSignal.timeout(10000),
         });

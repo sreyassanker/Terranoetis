@@ -2,6 +2,17 @@ import { getDb } from '../db/index';
 import { omninet } from '../ai-router/omninet';
 import { logger } from '../observability/logger';
 
+// Internal HTTP base used to resolve relative `/api/...` tool endpoints when
+// the server calls its own routes (Node fetch requires an absolute URL).
+const INTERNAL_BASE_URL = `http://127.0.0.1:${process.env.PROXY_PORT ?? process.env.PORT ?? 3001}`;
+
+export function resolveToolUrl(endpoint: string): string {
+  if (!endpoint) return endpoint;
+  if (/^https?:\/\//i.test(endpoint)) return endpoint;
+  if (endpoint.startsWith('/')) return `${INTERNAL_BASE_URL}${endpoint}`;
+  return endpoint;
+}
+
 // ── Types ───────────────────────────────────────────────────────
 
 export type ToolType = 'api' | 'sandbox' | 'command' | 'function';
@@ -469,7 +480,7 @@ Example format:
       '- **Volcanoes**: `volcanoes`, `eonet_events`',
       '- **Air quality**: `weather_air_quality`, `air_quality_waqi`',
       '- **Conflicts/OSINT**: `acled_recent`, `acled_nearby`, `gdelt_events`, `ucdp_conflict`',
-      '- **Satellite imagery**: `satellite_search`, `satellite_analyze`, `mm_satellite_interpret`',
+      '- **Satellite imagery**: `mm_satellite_analyze`, `mm_satellite_interpret`, `satellite_analyze` (NDVI/NDWI)',
       '- **Disaster alerts**: `gdacs`, `eonet_events`, `reliefweb`',
       '- **Uncertain / multi-domain**: `search_all` — dispatches to all relevant databases at once',
       '',
@@ -525,7 +536,7 @@ Example format:
   }
 
   private interpolateUrl(endpoint: string, input: Record<string, unknown>): string {
-    let url = endpoint;
+    let url = resolveToolUrl(endpoint);
     for (const [key, value] of Object.entries(input)) {
       url = url.replace(`{${key}}`, encodeURIComponent(String(value)));
     }
