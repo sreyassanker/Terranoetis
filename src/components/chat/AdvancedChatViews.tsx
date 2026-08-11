@@ -49,7 +49,7 @@ export function PlanCardView({ plan, onExecute, onToggleStep }: {
         <span style={{ fontSize: 11, fontWeight: 600, color: '#60a5fa' }}>Execution Plan</span>
         <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{plan.steps.length} steps</span>
         {plan.requiresConfirmation && (
-          <span style={{ fontSize: 9, color: '#f59e0b', background: 'rgba(245,158,11,0.1)', padding: '1px 5px', borderRadius: 3, marginLeft: 'auto' }}>Needs approval</span>
+          <span style={{ fontSize: 10, color: '#f59e0b', background: 'rgba(245,158,11,0.1)', padding: '1px 5px', borderRadius: 3, marginLeft: 'auto' }}>Needs approval</span>
         )}
       </div>
       {expanded && (
@@ -66,9 +66,9 @@ export function PlanCardView({ plan, onExecute, onToggleStep }: {
               <div style={{ flex: 1 }}>
                 <div style={{ color: 'var(--text)' }}>{step.description}</div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
-                  <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: `${AGENT_COLORS[step.agent] || '#64748b'}22`, color: AGENT_COLORS[step.agent] || '#64748b' }}>{step.agent}</span>
+                  <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, background: `${AGENT_COLORS[step.agent] || '#64748b'}22`, color: AGENT_COLORS[step.agent] || '#64748b' }}>{step.agent}</span>
                   {step.requiresApproval && <Shield size={9} style={{ color: '#f59e0b' }} />}
-                  {step.tools && step.tools.map(t => <span key={t} style={{ fontSize: 8, color: 'var(--text-dim)' }}>🔧{t}</span>)}
+                  {step.tools && step.tools.map(t => <span key={t} style={{ fontSize: 10, color: 'var(--text-dim)' }}>🔧{t}</span>)}
                   {step.status === 'running' && <Loader size={10} className="spin" style={{ color: '#60a5fa' }} />}
                   {step.status === 'completed' && <CheckCircle size={10} style={{ color: '#34d399' }} />}
                   {step.status === 'failed' && <XCircle size={10} style={{ color: '#ef4444' }} />}
@@ -111,7 +111,7 @@ export function SubAgentActivityView({ activities }: { activities: SubAgentActiv
         {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         <Cpu size={11} style={{ color: '#a78bfa' }} />
         <span style={{ fontSize: 10, fontWeight: 600, color: '#a78bfa' }}>Multi-agent</span>
-        <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{roles.length} agents · {activities.length} events</span>
+        <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{roles.length} agents · {activities.length} events</span>
         {activeCount > 0 && <Loader size={10} className="spin" style={{ color: '#a78bfa', marginLeft: 'auto' }} />}
       </div>
       {expanded && (
@@ -160,11 +160,11 @@ export function InlineTableView({ artifact }: { artifact: ArtifactData }) {
           </tbody>
         </table>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 8px', fontSize: 9, color: 'var(--text-dim)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 8px', fontSize: 10, color: 'var(--text-dim)' }}>
         <span>{rows.length} rows</span>
         <button
           onClick={() => { const csv = [cols.join(','), ...rows.map(r => cols.map(c => r[c]).join(','))].join('\n'); navigator.clipboard.writeText(csv); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-          style={{ background: 'none', border: 'none', color: copied ? '#34d399' : 'var(--text-dim)', cursor: 'pointer', fontSize: 9, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+          style={{ background: 'none', border: 'none', color: copied ? '#34d399' : 'var(--text-dim)', cursor: 'pointer', fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 3 }}
         >
           <Copy size={9} /> {copied ? 'Copied' : 'CSV'}
         </button>
@@ -190,14 +190,14 @@ export function InlineChartView({ artifact }: { artifact: ArtifactData }) {
         {type === 'line' ? (
           <LineChart data={data} margin={{ top: 8, right: 8, bottom: 8, left: -16 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#64748b' }} />
-            <YAxis tick={{ fontSize: 9, fill: '#64748b' }} />
+            <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} />
+            <YAxis tick={{ fontSize: 10, fill: '#64748b' }} />
             <Tooltip contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid var(--border)', fontSize: 10 }} />
             <Line type="monotone" dataKey="value" stroke="#60a5fa" strokeWidth={2} dot={{ r: 2 }} />
           </LineChart>
         ) : type === 'pie' ? (
           <PieChart>
-            <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={60} label={{ fontSize: 8 }}>
+            <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={60} label={{ fontSize: 10 }}>
               {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
             </Pie>
             <Tooltip contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid var(--border)', fontSize: 10 }} />
@@ -205,8 +205,8 @@ export function InlineChartView({ artifact }: { artifact: ArtifactData }) {
         ) : (
           <BarChart data={data} margin={{ top: 8, right: 8, bottom: 8, left: -16 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#64748b' }} />
-            <YAxis tick={{ fontSize: 9, fill: '#64748b' }} />
+            <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} />
+            <YAxis tick={{ fontSize: 10, fill: '#64748b' }} />
             <Tooltip contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid var(--border)', fontSize: 10 }} />
             <Bar dataKey="value" radius={[3, 3, 0, 0]}>
               {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
@@ -227,7 +227,7 @@ export function InlineSliderView({ artifact, onRerun }: { artifact: ArtifactData
     <div style={{ margin: '6px 0', padding: '8px', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 6, background: 'rgba(245,158,11,0.03)' }}>
       <div style={{ fontSize: 10, color: 'var(--text)', marginBottom: 4 }}>{artifact.title || 'Adjust parameter'}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 9, color: 'var(--text-dim)', minWidth: 50 }}>{artifact.sliderParam}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-dim)', minWidth: 50 }}>{artifact.sliderParam}</span>
         <input
           type="range"
           min={artifact.sliderMin ?? 0}
@@ -238,7 +238,7 @@ export function InlineSliderView({ artifact, onRerun }: { artifact: ArtifactData
           style={{ flex: 1 }}
         />
         <span style={{ fontSize: 10, fontWeight: 600, color: '#f59e0b', minWidth: 40, textAlign: 'right' }}>{val}</span>
-        <button onClick={() => onRerun(artifact.sliderParam || 'value', val)} style={{ fontSize: 9, padding: '2px 6px', background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.4)', color: '#f59e0b', borderRadius: 4, cursor: 'pointer' }}>Run</button>
+        <button onClick={() => onRerun(artifact.sliderParam || 'value', val)} style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.4)', color: '#f59e0b', borderRadius: 4, cursor: 'pointer' }}>Run</button>
       </div>
     </div>
   );
@@ -276,11 +276,11 @@ export function ToolApprovalView({ event, onApprove, onDeny }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
         <Shield size={12} style={{ color: riskColor }} />
         <span style={{ fontSize: 11, fontWeight: 600, color: riskColor }}>Approval required: {event.name}</span>
-        <span style={{ fontSize: 9, color: 'var(--text-dim)', marginLeft: 'auto', textTransform: 'uppercase' }}>{event.riskLevel}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-dim)', marginLeft: 'auto', textTransform: 'uppercase' }}>{event.riskLevel}</span>
       </div>
       <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6 }}>{event.description || event.error || 'This tool modifies state and needs confirmation.'}</div>
       {event.args && Object.keys(event.args).length > 0 && (
-        <pre style={{ fontSize: 9, color: 'var(--text-dim)', background: 'rgba(0,0,0,0.2)', padding: 4, borderRadius: 4, margin: '4px 0', maxHeight: 60, overflow: 'auto' }}>{JSON.stringify(event.args, null, 2)}</pre>
+        <pre style={{ fontSize: 10, color: 'var(--text-dim)', background: 'rgba(0,0,0,0.2)', padding: 4, borderRadius: 4, margin: '4px 0', maxHeight: 60, overflow: 'auto' }}>{JSON.stringify(event.args, null, 2)}</pre>
       )}
       <div style={{ display: 'flex', gap: 6 }}>
         <button onClick={handleApprove} disabled={approving} style={{ flex: 1, fontSize: 10, padding: '4px', background: 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.4)', color: '#34d399', borderRadius: 4, cursor: approving ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
@@ -301,25 +301,44 @@ export function ModelTierSelector({ tiers, current, onSelect }: {
   current: string;
   onSelect: (tier: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const active = tiers.find(t => t.id === current) ?? tiers[0];
   return (
-    <div style={{ display: 'flex', gap: 4, padding: '4px 8px', borderTop: '1px solid var(--border)' }}>
-      {tiers.map(t => (
-        <button
-          key={t.id}
-          onClick={() => onSelect(t.id)}
-          title={t.description}
-          style={{
-            flex: 1, fontSize: 9, padding: '3px 4px', cursor: 'pointer',
-            background: current === t.id ? 'rgba(96,165,250,0.2)' : 'rgba(255,255,255,0.03)',
-            border: `1px solid ${current === t.id ? 'rgba(96,165,250,0.4)' : 'var(--border)'}`,
-            color: current === t.id ? '#60a5fa' : 'var(--text-dim)',
-            borderRadius: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>{t.label}</span>
-          <span style={{ fontSize: 8, opacity: 0.7 }}>${t.costPerQuery.toFixed(4)}</span>
-        </button>
-      ))}
+    <div style={{ borderTop: '1px solid var(--border)', padding: '2px 8px' }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        title="Model tier — click to show costs"
+        aria-expanded={expanded}
+        style={{
+          fontSize: 10, padding: '3px 6px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
+          background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text-dim)', borderRadius: 4,
+        }}
+      >
+        <Cpu size={11} />
+        {active?.label ?? 'Model'}
+        {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+      </button>
+      {expanded && (
+        <div style={{ display: 'flex', gap: 4, padding: '4px 0' }}>
+          {tiers.map(t => (
+            <button
+              key={t.id}
+              onClick={() => onSelect(t.id)}
+              title={t.description}
+              style={{
+                flex: 1, fontSize: 10, padding: '3px 4px', cursor: 'pointer',
+                background: current === t.id ? 'rgba(96,165,250,0.2)' : 'rgba(255,255,255,0.03)',
+                border: `1px solid ${current === t.id ? 'rgba(96,165,250,0.4)' : 'var(--border)'}`,
+                color: current === t.id ? '#60a5fa' : 'var(--text-dim)',
+                borderRadius: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>{t.label}</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>${t.costPerQuery.toFixed(4)}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -350,12 +369,12 @@ export function TraceExpander({ traceId }: { traceId: string }) {
   };
   return (
     <div style={{ marginTop: 4 }}>
-      <button onClick={handleExpand} style={{ fontSize: 9, color: 'var(--text-dim)', background: 'none', border: '1px solid transparent', cursor: 'pointer', padding: '2px 6px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+      <button onClick={handleExpand} style={{ fontSize: 10, color: 'var(--text-dim)', background: 'none', border: '1px solid transparent', cursor: 'pointer', padding: '2px 6px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
         {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
         <Eye size={10} /> Trace
       </button>
       {expanded && (
-        <div style={{ marginTop: 4, padding: 6, background: 'rgba(0,0,0,0.2)', borderRadius: 4, fontSize: 9, color: 'var(--text-dim)', maxHeight: 180, overflow: 'auto' }}>
+        <div style={{ marginTop: 4, padding: 6, background: 'rgba(0,0,0,0.2)', borderRadius: 4, fontSize: 10, color: 'var(--text-dim)', maxHeight: 180, overflow: 'auto' }}>
           {loading && <div><Loader size={10} className="spin" /> Loading trace...</div>}
           {!loading && trace && (
             <div>
