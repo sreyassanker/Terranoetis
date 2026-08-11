@@ -244,13 +244,20 @@ export function useChat(
       // Clear previous AI entities
       const v0 = viewerRef.current;
       if (v0) {
-        const entities = (v0 as unknown as { entities: { values(): IterableIterator<Record<string, unknown>>; remove(e: Record<string, unknown>): void } }).entities;
-        const toRemove = Array.from(entities.values()).filter((e: Record<string, unknown>) => {
+        const rawEntities = (v0 as unknown as { entities: unknown }).entities;
+        // Cesium EntityCollection has .values() method; newer builds expose an Array.
+        const entityList: Record<string, unknown>[] = typeof (rawEntities as { values?: () => unknown })?.values === 'function'
+          ? Array.from((rawEntities as { values(): IterableIterator<Record<string, unknown>> }).values())
+          : Array.isArray(rawEntities) ? rawEntities as Record<string, unknown>[] : [];
+        const toRemove = entityList.filter((e: Record<string, unknown>) => {
           const props = e.properties as Record<string, unknown> | undefined;
           const layer = props?.layer;
           return layer === 'digital_twin' || layer === 'heatmap' || layer === 'chart' || layer === 'geojson';
         });
-        for (const e of toRemove) entities.remove(e);
+        for (const e of toRemove) {
+          const coll = rawEntities as { remove(e: Record<string, unknown>): void };
+          if (typeof coll.remove === 'function') coll.remove(e);
+        }
       }
 
       const contextMessages = (streamTabId

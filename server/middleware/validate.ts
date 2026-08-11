@@ -8,6 +8,7 @@ export const askSchema = z.object({
   interactionId: z.string().optional(),
   apiKey: z.string().optional(),
   userId: z.string().optional(),
+  tier: z.enum(['local', 'flash', 'pro']).optional(),
   images: z.array(z.object({ dataUrl: z.string(), mimeType: z.string(), fileName: z.string() })).optional(),
   recentMessages: z.array(z.object({ role: z.string(), content: z.string() })).optional(),
 });
