@@ -85,6 +85,8 @@ export interface ScalarOverlayConfig {
     domainKm: number;
     /** Per-frame times (same units as the snapshot_times npy). */
     times: number[];
+    /** Parsed metadata.json for the run (mass balance, completion, …). */
+    metadata: Record<string, unknown> | null;
   }) => Array<[string, string]>;
   /** Time label formatter for AnimationControls. */
   formatTime?: (t: number) => string;
@@ -329,6 +331,7 @@ export function KaggleScalarOverlay({
             rect,
             domainKm: km,
             times,
+            metadata: meta,
           }),
         );
       } else {

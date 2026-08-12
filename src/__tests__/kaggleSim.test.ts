@@ -143,6 +143,51 @@ describe('buildSimulationRequest', () => {
     ).toThrow();
   });
 
+  it('tsunami: derived form defaults stay within the wire schema', () => {
+    const derived = derivePhysicsFormOverrides('tsunami_wave', {
+      magnitude: 8.5,
+      depth: 20,
+      waveHeight: 15,
+    });
+
+    const req = buildSimulationRequest(
+      {
+        scenarioType: 'tsunami_wave',
+        gridSize: 256,
+        params: derived,
+      },
+      bbox,
+    );
+
+    if (req.type !== 'tsunami_wave') throw new Error('wrong type');
+    expect(req.seafloor_displacement_m).toBeLessThanOrEqual(40);
+    expect(req.seafloor_displacement_m).toBeGreaterThan(0);
+  });
+
+  it('tsunami: schema accepts optional benchmark stations', () => {
+    const r = SimulationRequestSchema.safeParse({
+      type: 'tsunami_wave',
+      lat: 35,
+      lon: 140,
+      grid_size: 256,
+      extent_km: 100,
+      magnitude: 8.5,
+      seafloor_displacement_m: 5,
+      duration_minutes: 30,
+      bathymetry: [120, 120, 120, 120],
+      bathy_gs: 2,
+      benchmark_stations: [{
+        name: 'NDBC-01',
+        row: 10,
+        col: 12,
+        observed_times_min: [0, 10, 20],
+        observed_eta_m: [0.0, 0.3, 0.1],
+        arrival_threshold_m: 0.1,
+      }],
+    });
+    expect(r.success).toBe(true);
+  });
+
   it('landslide: scientific knobs pass through (μ, ξ, entrainment, thresholds)', () => {
     const req = buildSimulationRequest(
       {
@@ -205,8 +250,8 @@ describe('derivePhysicsFormOverrides', () => {
 
   it('tsunami: displacement scales with M8.5 baseline', () => {
     const p = derivePhysicsFormOverrides('tsunami_wave', { magnitude: 8.5, depth: 20 });
-    // displacement = 10^(8.5-6) * 5 ~= 1581
-    expect(p.seafloorDisplacement).toBeGreaterThan(1000);
+    expect(p.seafloorDisplacement).toBeLessThanOrEqual(40);
+    expect(p.seafloorDisplacement).toBeGreaterThan(0);
     expect(p.arrivalTime).toBeGreaterThan(0);
   });
 

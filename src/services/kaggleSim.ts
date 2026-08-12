@@ -45,6 +45,14 @@ export const SimulationRequestSchema = z.discriminatedUnion('type', [
      */
     terrain: z.array(z.number()).max(65_536).optional(),
     terrain_gs: z.number().int().min(2).max(256).optional(),
+    /**
+     * ESA WorldCover v200 land-cover class codes for the drawn study box
+     * (row-major, row 0 = north, same geometry as `terrain`). Maps to
+     * per-cell Manning's n in the kernel. Optional — the server auto-samples
+     * land cover for flood runs when this is absent.
+     */
+    landcover: z.array(z.number().int().min(0).max(255)).max(65_536).optional(),
+    landcover_gs: z.number().int().min(2).max(256).optional(),
   }),
   z.object({
     type: z.literal('wildfire_spread'),
@@ -76,6 +84,24 @@ export const SimulationRequestSchema = z.discriminatedUnion('type', [
     magnitude: z.number().min(5).max(9.7),
     seafloor_displacement_m: z.number().positive().max(40),
     duration_minutes: z.number().positive().max(720),
+    /**
+     * Real seafloor depth sampled from the GEBCO 2020 grid for the drawn
+     * study box (row-major, row 0 = north, meters positive-down; negative
+     * = dry land). When present the kernel runs the tsunami on this depth
+     * grid instead of the synthetic parabolic bowl. Optional — the server
+     * auto-samples bathymetry for tsunami runs when this is absent.
+     */
+    bathymetry: z.array(z.number()).max(65_536).optional(),
+    bathy_gs: z.number().int().min(2).max(256).optional(),
+    /** Optional benchmark stations for comparing modeled eta(t) against observed series. */
+    benchmark_stations: z.array(z.object({
+      name: z.string().min(1).max(64),
+      row: z.number().int().min(0).max(4096),
+      col: z.number().int().min(0).max(4096),
+      observed_times_min: z.array(z.number()).min(1).max(2048),
+      observed_eta_m: z.array(z.number()).min(1).max(2048),
+      arrival_threshold_m: z.number().positive().max(100).optional(),
+    })).max(16).optional(),
   }),
   z.object({
     type: z.literal('hurricane_landfall'),
@@ -97,6 +123,22 @@ export const SimulationRequestSchema = z.discriminatedUnion('type', [
     wind_speed_ms: z.number().min(0).max(60),
     wind_dir_deg: z.number().min(0).max(360),
     duration_hours: durationHrs,
+    /**
+     * Real terrain sampled from the Cesium globe for the drawn study box
+     * (row-major, row 0 = north, meters above ellipsoid). When present the
+     * kernel runs the lava flow on this grid instead of the synthetic cone.
+     */
+    terrain: z.array(z.number()).max(65_536).optional(),
+    terrain_gs: z.number().int().min(2).max(256).optional(),
+    /**
+     * Median volcanic ash particle diameter [m] — drives the Stokes-law
+     * terminal settling velocity. Default 316 µm → v_t ≈ 3 m/s.
+     */
+    ash_particle_diameter_m: z.number().min(50e-6).max(2e-3).optional(),
+    /** Sub-grid turbulent (eddy) diffusivity of the ash cloud [m²/s]. */
+    ash_diffusivity_m2_s: z.number().min(10).max(5000).optional(),
+    /** Wind-shear factor: low-level wind fraction of the free-stream speed. */
+    ash_wind_shear_factor: z.number().min(0).max(1).optional(),
   }),
   z.object({
     type: z.literal('landslide'),
@@ -270,10 +312,9 @@ export function buildSimulationRequest(
         ...common,
         type: 'tsunami_wave' as const,
         magnitude: num('magnitude'),
-        // Wave-height input → seafloor displacement via sqrt scaling.
-        // The kernel reads `seafloor_displacement_m`; the UI's wave height
-        // is the *user-facing* value, so we back-compute the displacement.
-        seafloor_displacement_m: num('waveHeight'),
+        // Prefer the derived hidden displacement when present; otherwise fall
+        // back to the user-facing wave height.
+        seafloor_displacement_m: hasNum('seafloorDisplacement') ? num('seafloorDisplacement') : num('waveHeight'),
         duration_minutes: 30,
       };
       break;
@@ -293,9 +334,14 @@ export function buildSimulationRequest(
         ...common,
         type: 'volcanic_eruption' as const,
         vei: num('vei'),
-        wind_speed_ms: 10, // Tropospheric jet-stream mean; kernel default
+        wind_speed_ms: num('windSpeed') / 3.6,
         wind_dir_deg: num('windDir'),
         duration_hours: num('duration'),
+        // Scientific/ash knobs — passed through only when the user supplied a
+        // finite value (never fabricated by the builder).
+        ...(hasNum('ashParticleDiameter') ? { ash_particle_diameter_m: num('ashParticleDiameter') / 1e6 } : {}),
+        ...(hasNum('ashDiffusivity') ? { ash_diffusivity_m2_s: num('ashDiffusivity') } : {}),
+        ...(hasNum('ashWindShear') ? { ash_wind_shear_factor: num('ashWindShear') } : {}),
       };
       break;
     case 'landslide':
@@ -442,14 +488,12 @@ export function derivePhysicsFormOverrides(
     }
     case 'tsunami_wave': {
       const mag = Number(p.magnitude) || 8.5;
-      // The builder's seafloor_displacement uses waveHeight directly (the UI's
-      // user-facing amount) — we predict it from magnitude so the forms stay
-      // physically consistent but the wire gets the backed-computed input.
-      p.seafloorDisplacement = Math.round(Math.pow(10, mag - 6) * 5);
-      const depth = Number(p.depth) || 20;
-      p.waveHeight = Math.round(Math.sqrt((p.seafloorDisplacement as number) * depth) * 0.5);
+      // Keep the visible wave-height slider stable and derive a hidden source
+      // displacement that still stays within the wire contract's bounds.
+      p.seafloorDisplacement = Math.max(1, Math.min(40, Math.round(Math.pow(10, mag - 6) * 5)));
       p.runupDistance = Math.round((p.waveHeight as number) * 5);
       // Empirical wave-phase hint for the catalogue UI (100 km standoff).
+      const depth = Number(p.depth) || 20;
       p.arrivalTime = Math.round((100_000 / Math.round(Math.sqrt(9.81 * depth * 1000))) / 60);
       break;
     }

@@ -134,9 +134,10 @@ describe('Kaggle simRunner × PowerSaver integration', () => {
     // Raw float grid must NOT be embedded (that bloated main.py to ~1.2 MB and
     // Kaggle rejected it with 400 Bad Request).
     expect(mainPy).not.toMatch(/"terrain"\s*:\s*\[/);
-    // Compact form is embedded instead.
-    expect(mainPy).toContain('"terrain_b64"');
-    expect(mainPy).toContain('"terrain_span"');
+    // Compact form is embedded instead. Params ride inside a JSON *string*
+    // literal (`json.loads("...")`), so keys carry escaped quotes.
+    expect(mainPy).toContain('terrain_b64');
+    expect(mainPy).toContain('terrain_span');
     expect(mainPy.length).toBeLessThan(300_000);
   }, 60_000);
 });
