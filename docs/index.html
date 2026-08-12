@@ -1,0 +1,1713 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terranoetis — AI-Powered Earth Intelligence Platform</title>
+    <link rel="icon" type="image/png" sizes="96x96" href="icon.png">
+    <meta name="description" content="Real-time geospatial visualization and AI-powered Earth intelligence. 3D globe, 150+ analytical models, foundation AI, and live environmental data.">
+    <meta name="keywords" content="earth intelligence, geospatial, AI, 3D globe, environmental monitoring, disaster simulation, satellite imagery">
+    
+    <meta property="og:title" content="Terranoetis — AI-Powered Earth Intelligence Platform">
+    <meta property="og:description" content="Real-time geospatial visualization and AI-powered Earth intelligence.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://terranoetis.com">
+    <meta property="og:image" content="https://terranoetis.com/icon.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Terranoetis — AI-Powered Earth Intelligence Platform">
+    <meta name="twitter:description" content="Real-time geospatial visualization and AI-powered Earth intelligence.">
+    <meta name="twitter:image" content="https://terranoetis.com/icon.png">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://terranoetis.com">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+    <script src="https://unpkg.com/lenis@1.1.18/dist/lenis.min.js"></script>
+
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <link rel="manifest" href="manifest.json">
+
+    <style>
+        :root {
+            --bg-base: #030712;
+            --bg-subtle: #090d16;
+            --bg-card: rgba(15, 23, 42, 0.45);
+            --bg-card-hover: rgba(30, 41, 59, 0.55);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-highlight: rgba(255, 255, 255, 0.18);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            
+            --accent-blue: #38bdf8;
+            --accent-indigo: #818cf8;
+            --accent-purple: #c084fc;
+            --accent-emerald: #34d399;
+            --accent-amber: #fbbf24;
+            --accent-rose: #f43f5e;
+            
+            --gradient-primary: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc);
+            --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        /* Lenis CSS integration */
+        html.lenis, html.lenis body {
+            height: auto;
+        }
+
+        .lenis.lenis-smooth {
+            scroll-behavior: auto !important;
+        }
+
+        .lenis.lenis-smooth [data-lenis-prevent] {
+            overscroll-behavior: contain;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            -webkit-font-smoothing: antialiased;
+            background-color: var(--bg-base);
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-base);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* ─── Hardware GPU Acceleration Utility Class ─── */
+        .gpu-layer {
+            will-change: transform;
+            transform: translate3d(0, 0, 0);
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+        }
+
+        /* ─── Interactive Particle Canvas ─── */
+        #particleCanvas {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ─── GPU-Optimized Radial Gradient Orbs ─── */
+        .ambient-orb {
+            position: fixed;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .orb-1 {
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(56, 189, 248, 0.12) 0%, transparent 70%);
+            top: -10%;
+            left: 10%;
+        }
+
+        .orb-2 {
+            width: 700px;
+            height: 700px;
+            background: radial-gradient(circle, rgba(192, 132, 252, 0.1) 0%, transparent 70%);
+            top: 40%;
+            right: -10%;
+        }
+
+        .orb-3 {
+            width: 550px;
+            height: 550px;
+            background: radial-gradient(circle, rgba(52, 211, 153, 0.08) 0%, transparent 70%);
+            bottom: -10%;
+            left: 20%;
+        }
+
+        .bg-grid {
+            position: fixed;
+            inset: 0;
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+            background-size: 48px 48px;
+            mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+            -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ─── Navigation ─── */
+        .nav-wrapper {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            padding: 1.25rem 2rem;
+            transition: all 0.3s ease;
+        }
+
+        .nav {
+            max-width: 1200px;
+            margin: 0 auto;
+            height: 64px;
+            padding: 0 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(9, 13, 22, 0.65);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border-subtle);
+            border-radius: 9999px;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s ease;
+        }
+
+        .nav-wrapper.scrolled .nav {
+            background: rgba(9, 13, 22, 0.88);
+            border-color: var(--border-highlight);
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+        }
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--text-primary);
+        }
+
+        .nav-logo-box {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            padding: 2px;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .nav-logo-box img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .nav-brand:hover .nav-logo-box {
+            border-color: var(--accent-blue);
+            transform: rotate(8deg) scale(1.05);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+        }
+
+        .nav-brand-text {
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 2.25rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            position: relative;
+            padding: 4px 0;
+            transition: color 0.2s ease;
+        }
+
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--gradient-primary);
+            transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            border-radius: 2px;
+        }
+
+        .nav-links a:hover {
+            color: var(--text-primary);
+        }
+
+        .nav-links a:hover::after {
+            width: 100%;
+        }
+
+        .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* ─── Buttons ─── */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 9px 18px;
+            border-radius: 9999px;
+            font-size: 13.5px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            cursor: pointer;
+            border: 1px solid transparent;
+            white-space: nowrap;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .btn:hover::before {
+            left: 100%;
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-secondary);
+        }
+
+        .btn-ghost:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--border-subtle);
+        }
+
+        .btn-primary {
+            background: #ffffff;
+            color: #030712;
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.25);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            background: #f1f5f9;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-primary);
+            border-color: var(--border-subtle);
+            backdrop-filter: blur(10px);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--border-highlight);
+            transform: translateY(-2px);
+        }
+
+        .btn-lg {
+            padding: 13px 28px;
+            font-size: 15px;
+            border-radius: 9999px;
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            cursor: pointer;
+            padding: 6px;
+        }
+
+        /* ─── Mobile Drawer ─── */
+        .mobile-drawer {
+            position: fixed;
+            inset: 0;
+            background: rgba(3, 7, 18, 0.95);
+            backdrop-filter: blur(20px);
+            z-index: 999;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 2rem;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s ease;
+        }
+
+        .mobile-drawer.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .mobile-drawer a {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+            text-decoration: none;
+        }
+
+        /* ─── Hero Section ─── */
+        .hero {
+            position: relative;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 160px 1.5rem 80px;
+            text-align: center;
+            z-index: 1;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 16px;
+            background: rgba(56, 189, 248, 0.06);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 9999px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--accent-blue);
+            margin-bottom: 28px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.1);
+        }
+
+        .hero-badge-dot {
+            width: 7px;
+            height: 7px;
+            background: var(--accent-emerald);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--accent-emerald);
+            animation: pulseGlow 2s infinite;
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .hero-title {
+            font-size: clamp(48px, 7vw, 84px);
+            font-weight: 800;
+            line-height: 1.05;
+            letter-spacing: -0.04em;
+            margin-bottom: 24px;
+            max-width: 1000px;
+        }
+
+        .hero-title-gradient {
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: inline-block;
+            background-size: 200% 200%;
+            animation: gradientShift 6s ease infinite;
+        }
+
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .hero-subtitle {
+            font-size: clamp(17px, 2vw, 21px);
+            color: var(--text-secondary);
+            max-width: 680px;
+            margin: 0 auto 40px;
+            line-height: 1.6;
+            font-weight: 400;
+        }
+
+        .hero-actions {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            margin-bottom: 72px;
+            flex-wrap: wrap;
+        }
+
+        /* Stats Bar */
+        .hero-stats-container {
+            width: 100%;
+            max-width: 960px;
+            padding: 24px 32px;
+            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--border-subtle);
+            border-radius: 24px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+            transition: border-color 0.3s ease;
+        }
+
+        .hero-stats-container:hover {
+            border-color: var(--border-highlight);
+        }
+
+        .hero-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 24px;
+            align-items: center;
+        }
+
+        .hero-stat {
+            text-align: center;
+            position: relative;
+        }
+
+        .hero-stat:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            right: -12px;
+            top: 20%;
+            height: 60%;
+            width: 1px;
+            background: var(--border-subtle);
+        }
+
+        .hero-stat-value {
+            font-size: 32px;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+        }
+
+        .hero-stat-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-top: 2px;
+        }
+
+        /* ─── Logos Section ─── */
+        .logos-section {
+            padding: 60px 1.5rem;
+            text-align: center;
+            border-top: 1px solid var(--border-subtle);
+            border-bottom: 1px solid var(--border-subtle);
+            background: rgba(9, 13, 22, 0.3);
+            position: relative;
+            z-index: 1;
+        }
+
+        .logos-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            margin-bottom: 32px;
+        }
+
+        .logos-grid {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 48px;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .logo-item {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+            opacity: 0.75;
+        }
+
+        .logo-item:hover {
+            color: var(--text-primary);
+            opacity: 1;
+            transform: translateY(-2px);
+        }
+
+        /* ─── Section Common ─── */
+        .section {
+            padding: 120px 1.5rem;
+            max-width: 1200px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 72px;
+        }
+
+        .section-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 14px;
+            background: rgba(192, 132, 252, 0.08);
+            border: 1px solid rgba(192, 132, 252, 0.2);
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent-purple);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: clamp(32px, 4vw, 48px);
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            line-height: 1.15;
+            margin-bottom: 16px;
+            background: linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .section-desc {
+            font-size: 17px;
+            color: var(--text-secondary);
+            max-width: 580px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        /* ─── Spotlight 3D Tilt Bento Cards ─── */
+        .bento-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            perspective: 1000px;
+        }
+
+        .tilt-card {
+            transform-style: preserve-3d;
+            will-change: transform;
+        }
+
+        .spotlight-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            padding: 32px;
+            position: relative;
+            overflow: hidden;
+            backdrop-filter: blur(12px);
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+            height: 100%;
+        }
+
+        /* Spotlight Effect */
+        .spotlight-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(600px circle at var(--mouse-x, 0) var(--mouse-y, 0), rgba(255, 255, 255, 0.08), transparent 40%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+
+        .spotlight-card:hover {
+            border-color: var(--border-highlight);
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6);
+        }
+
+        .spotlight-card:hover::before {
+            opacity: 1;
+        }
+
+        .bento-card.span-2 {
+            grid-column: span 2;
+        }
+
+        .bento-icon-box {
+            width: 48px;
+            height: 48px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            transition: transform 0.3s ease;
+        }
+
+        .spotlight-card:hover .bento-icon-box {
+            transform: translateZ(20px) scale(1.05);
+        }
+
+        .bento-icon-box.blue { background: rgba(56, 189, 248, 0.1); color: var(--accent-blue); }
+        .bento-icon-box.purple { background: rgba(192, 132, 252, 0.1); color: var(--accent-purple); }
+        .bento-icon-box.cyan { background: rgba(6, 182, 212, 0.1); color: #22d3ee; }
+        .bento-icon-box.green { background: rgba(52, 211, 153, 0.1); color: var(--accent-emerald); }
+
+        .bento-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            letter-spacing: -0.02em;
+            transition: transform 0.3s ease;
+        }
+
+        .spotlight-card:hover .bento-title {
+            transform: translateZ(15px);
+        }
+
+        .bento-desc {
+            font-size: 14.5px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            transition: transform 0.3s ease;
+        }
+
+        .spotlight-card:hover .bento-desc {
+            transform: translateZ(10px);
+        }
+
+        .bento-code-preview {
+            margin-top: 24px;
+            background: rgba(3, 7, 18, 0.6);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 18px;
+            font-family: var(--font-mono);
+            font-size: 12.5px;
+            line-height: 1.8;
+            color: var(--text-secondary);
+            transition: transform 0.3s ease;
+        }
+
+        .spotlight-card:hover .bento-code-preview {
+            transform: translateZ(25px);
+        }
+
+        .bento-code-preview .keyword { color: var(--accent-purple); }
+        .bento-code-preview .func { color: var(--accent-blue); }
+        .bento-code-preview .string { color: var(--accent-emerald); }
+        .bento-code-preview .comment { color: var(--text-muted); }
+
+        /* ─── Capabilities Grid ─── */
+        .capabilities-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-top: 40px;
+        }
+
+        .capability-card {
+            background: rgba(15, 23, 42, 0.3);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .capability-card:hover {
+            background: rgba(30, 41, 59, 0.4);
+            border-color: var(--border-highlight);
+            transform: translateY(-4px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+        }
+
+        .capability-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .capability-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* ─── Disaster Simulations Grid ─── */
+        .sim-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+        }
+
+        .sim-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 18px;
+            padding: 28px;
+            position: relative;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            backdrop-filter: blur(12px);
+            overflow: hidden;
+        }
+
+        .sim-card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: var(--accent-color, var(--accent-blue));
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .sim-card:hover {
+            border-color: var(--border-highlight);
+            transform: translateY(-4px);
+            box-shadow: 0 15px 30px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        .sim-card:hover::after {
+            opacity: 1;
+        }
+
+        .sim-icon-box {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            transition: transform 0.3s ease;
+        }
+
+        .sim-card:hover .sim-icon-box {
+            transform: scale(1.1) rotate(5deg);
+        }
+
+        .sim-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .sim-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* ─── Tech Cards ─── */
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .tech-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            padding: 24px;
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .tech-card:hover {
+            border-color: var(--border-highlight);
+            background: var(--bg-card-hover);
+            transform: translateY(-3px);
+        }
+
+        .tech-icon-box {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .tech-title {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .tech-desc {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        /* ─── CTA & Interactive Terminal ─── */
+        .cta-section {
+            padding: 120px 1.5rem;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .cta-card {
+            max-width: 900px;
+            margin: 0 auto;
+            background: radial-gradient(ellipse at top, rgba(30, 41, 59, 0.6), rgba(9, 13, 22, 0.8));
+            border: 1px solid var(--border-highlight);
+            border-radius: 32px;
+            padding: 72px 32px;
+            box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.7);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cta-title {
+            font-size: clamp(32px, 5vw, 48px);
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            margin-bottom: 16px;
+        }
+
+        .cta-desc {
+            font-size: 17px;
+            color: var(--text-secondary);
+            max-width: 540px;
+            margin: 0 auto 36px;
+            line-height: 1.6;
+        }
+
+        .terminal-box {
+            max-width: 520px;
+            margin: 40px auto 0;
+            background: #030712;
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 20px;
+            text-align: left;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+            position: relative;
+        }
+
+        .terminal-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .terminal-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .terminal-content {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            line-height: 1.8;
+            color: var(--text-secondary);
+            min-height: 110px;
+        }
+
+        .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 15px;
+            background: var(--accent-emerald);
+            margin-left: 4px;
+            animation: blink 1s infinite;
+            vertical-align: middle;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        /* ─── Footer ─── */
+        .footer {
+            padding: 80px 1.5rem 40px;
+            border-top: 1px solid var(--border-subtle);
+            background: var(--bg-subtle);
+            position: relative;
+            z-index: 1;
+        }
+
+        .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .footer-top {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr;
+            gap: 60px;
+            margin-bottom: 60px;
+        }
+
+        .footer-brand-desc {
+            font-size: 14px;
+            color: var(--text-muted);
+            line-height: 1.6;
+            margin: 16px 0 24px;
+            max-width: 320px;
+        }
+
+        .footer-links {
+            list-style: none;
+        }
+
+        .footer-links li {
+            margin-bottom: 12px;
+        }
+
+        .footer-links a {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+
+        .footer-links a:hover {
+            color: var(--text-primary);
+        }
+
+        .footer-bottom {
+            padding-top: 32px;
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        /* ─── Responsive ─── */
+        @media (max-width: 1024px) {
+            .bento-grid, .sim-grid, .tech-grid, .capabilities-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .bento-card.span-2 {
+                grid-column: span 2;
+            }
+            .footer-top {
+                grid-template-columns: 1fr 1fr;
+            }
+            .hero-stats {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 32px;
+            }
+            .hero-stat:not(:last-child)::after {
+                display: none;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .nav-links, .nav-actions {
+                display: none;
+            }
+            .mobile-menu-btn {
+                display: block;
+            }
+            .bento-grid, .sim-grid, .tech-grid, .capabilities-grid {
+                grid-template-columns: 1fr;
+            }
+            .bento-card.span-2 {
+                grid-column: span 1;
+            }
+            .footer-top {
+                grid-template-columns: 1fr;
+            }
+            .footer-bottom {
+                flex-direction: column;
+                gap: 16px;
+                text-align: center;
+            }
+            .hero-stats {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="particleCanvas"></canvas>
+    <div class="ambient-orb orb-1 gpu-layer"></div>
+    <div class="ambient-orb orb-2 gpu-layer"></div>
+    <div class="ambient-orb orb-3 gpu-layer"></div>
+    <div class="bg-grid"></div>
+
+    <div class="mobile-drawer" id="mobileDrawer">
+        <a href="#features" onclick="scrollToSection('#features'); toggleMobileMenu();">Features</a>
+        <a href="#simulations" onclick="scrollToSection('#simulations'); toggleMobileMenu();">Simulations</a>
+        <a href="#models" onclick="scrollToSection('#models'); toggleMobileMenu();">Models</a>
+        <a href="#tech" onclick="scrollToSection('#tech'); toggleMobileMenu();">Technology</a>
+        <a href="https://github.com/sreyassanker/Terranoetis" target="_blank">GitHub Repository</a>
+        <button onclick="toggleMobileMenu()" style="position:absolute;top:24px;right:24px;background:none;border:none;color:var(--text-primary);cursor:pointer;font-size:28px;line-height:1;">&times;</button>
+    </div>
+
+    <div class="nav-wrapper gpu-layer" id="navWrapper">
+        <nav class="nav">
+            <a href="#" class="nav-brand">
+                <div class="nav-logo-box">
+                    <img src="icon.png" alt="Terranoetis">
+                </div>
+                <span class="nav-brand-text">Terranoetis</span>
+            </a>
+
+            <ul class="nav-links">
+                <li><a href="#features" onclick="scrollToSection('#features')">Features</a></li>
+                <li><a href="#simulations" onclick="scrollToSection('#simulations')">Simulations</a></li>
+                <li><a href="#models" onclick="scrollToSection('#models')">Models</a></li>
+                <li><a href="#tech" onclick="scrollToSection('#tech')">Technology</a></li>
+            </ul>
+
+            <div class="nav-actions">
+                <a href="https://github.com/sreyassanker/Terranoetis" target="_blank" class="btn btn-ghost">
+                    <i data-lucide="github" style="width:16px;height:16px"></i>
+                    Star
+                </a>
+                <a href="https://youtube.com/playlist?list=PLFp9mjre3Lco" target="_blank" class="btn btn-primary">
+                    Watch Demo
+                    <i data-lucide="arrow-right" style="width:14px;height:14px"></i>
+                </a>
+            </div>
+
+            <button class="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Toggle Menu">
+                <i data-lucide="menu" style="width:24px;height:24px"></i>
+            </button>
+        </nav>
+    </div>
+
+    <section class="hero">
+        <div class="hero-badge" data-aos="fade-down" data-aos-duration="800">
+            <span class="hero-badge-dot"></span>
+            Open Source Earth Intelligence Platform
+        </div>
+        
+        <h1 class="hero-title" data-aos="fade-up" data-aos-duration="1000" data-aos-delay="100">
+            See the Earth.<br>
+            <span class="hero-title-gradient">Understand It.</span>
+        </h1>
+        
+        <p class="hero-subtitle" data-aos="fade-up" data-aos-duration="1000" data-aos-delay="200">
+            Next-generation geospatial visualization meets AI-powered Earth intelligence. 
+            3D global rendering, 150+ analytical engines, foundation AI models, and live planet data feeds.
+        </p>
+
+        <div class="hero-actions" data-aos="fade-up" data-aos-duration="1000" data-aos-delay="300">
+            <a href="https://youtube.com/playlist?list=PLFp9mjre3Lco" target="_blank" class="btn btn-primary btn-lg">
+                <i data-lucide="play" style="width:18px;height:18px"></i>
+                Watch Demo
+            </a>
+            <a href="https://github.com/sreyassanker/Terranoetis" target="_blank" class="btn btn-secondary btn-lg">
+                <i data-lucide="github" style="width:18px;height:18px"></i>
+                View Source Code
+            </a>
+        </div>
+
+        <div class="hero-stats-container gpu-layer" data-aos="fade-up" data-aos-duration="1000" data-aos-delay="400">
+            <div class="hero-stats">
+                <div class="hero-stat">
+                    <div class="hero-stat-value counter" data-target="150">0</div>
+                    <div class="hero-stat-label">Analytical Models</div>
+                </div>
+                <div class="hero-stat">
+                    <div class="hero-stat-value counter" data-target="26">0</div>
+                    <div class="hero-stat-label">Science Domains</div>
+                </div>
+                <div class="hero-stat">
+                    <div class="hero-stat-value counter" data-target="65">0</div>
+                    <div class="hero-stat-label">Live Endpoints</div>
+                </div>
+                <div class="hero-stat">
+                    <div class="hero-stat-value counter" data-target="7">0</div>
+                    <div class="hero-stat-label">Physics Simulations</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="logos-section">
+        <div class="logos-title" data-aos="fade-up">Engineered with Next-Gen Infrastructure</div>
+        <div class="logos-grid" data-aos="fade-up" data-aos-delay="100">
+            <div class="logo-item"><i data-lucide="box" style="width:20px;height:20px"></i> CesiumJS</div>
+            <div class="logo-item"><i data-lucide="atom" style="width:20px;height:20px"></i> React 19</div>
+            <div class="logo-item"><i data-lucide="server" style="width:20px;height:20px"></i> Express.js</div>
+            <div class="logo-item"><i data-lucide="database" style="width:20px;height:20px"></i> SQLite</div>
+            <div class="logo-item"><i data-lucide="brain" style="width:20px;height:20px"></i> Foundation AI</div>
+            <div class="logo-item"><i data-lucide="box" style="width:20px;height:20px"></i> Docker</div>
+        </div>
+    </section>
+
+    <section class="section" id="features">
+        <div class="section-header" data-aos="fade-up">
+            <div class="section-label">
+                <i data-lucide="sparkles" style="width:13px;height:13px"></i>
+                Core Platform Architecture
+            </div>
+            <h2 class="section-title">Built for High-Precision Intelligence</h2>
+            <p class="section-desc">
+                Combining spatial data streaming, cognitive multi-agent reasoning, and deep physical modeling.
+            </p>
+        </div>
+
+        <div class="bento-grid">
+            <div class="tilt-card bento-card span-2 gpu-layer" data-aos="fade-up" data-aos-delay="100">
+                <div class="spotlight-card">
+                    <div class="bento-icon-box blue">
+                        <i data-lucide="brain" style="width:24px;height:24px"></i>
+                    </div>
+                    <h3 class="bento-title">Cognitive AI Agent Architecture</h3>
+                    <p class="bento-desc">
+                        Dual-system cognitive pipeline balancing System 1 fast pattern classification with System 2 deliberate multi-agent graph reasoning and counterfactual analysis.
+                    </p>
+                    <div class="bento-code-preview">
+                        <div><span class="comment">// Cognitive reasoning loop execution</span></div>
+                        <div><span class="keyword">const</span> result = <span class="keyword">await</span> agent.<span class="func">reason</span>({</div>
+                        <div>&nbsp;&nbsp;query: <span class="string">"Assess flood risk in sector 4B"</span>,</div>
+                        <div>&nbsp;&nbsp;depth: <span class="string">"System2_Deep"</span></div>
+                        <div>});</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tilt-card bento-card gpu-layer" data-aos="fade-up" data-aos-delay="200">
+                <div class="spotlight-card">
+                    <div class="bento-icon-box cyan">
+                        <i data-lucide="globe" style="width:24px;height:24px"></i>
+                    </div>
+                    <h3 class="bento-title">3D Globe Visualization</h3>
+                    <p class="bento-desc">
+                        CesiumJS-powered globe supporting custom terrain tilesets and 36 high-frequency rendering modules.
+                    </p>
+                </div>
+            </div>
+
+            <div class="tilt-card bento-card gpu-layer" data-aos="fade-up" data-aos-delay="100">
+                <div class="spotlight-card">
+                    <div class="bento-icon-box green">
+                        <i data-lucide="activity" style="width:24px;height:24px"></i>
+                    </div>
+                    <h3 class="bento-title">Live Planetary Feeds</h3>
+                    <p class="bento-desc">
+                        30+ direct streaming feeds: seismic telemetry, weather radar, flight paths, vessel AIS, and fire satellites.
+                    </p>
+                </div>
+            </div>
+
+            <div class="tilt-card bento-card span-2 gpu-layer" id="models" data-aos="fade-up" data-aos-delay="200">
+                <div class="spotlight-card">
+                    <div class="bento-icon-box purple">
+                        <i data-lucide="layers" style="width:24px;height:24px"></i>
+                    </div>
+                    <h3 class="bento-title">Geospatial Foundation AI</h3>
+                    <p class="bento-desc">
+                        Native integration with NASA Prithvi, IBM CLAY, SAM-Geo, and custom neural models for automatic zero-shot land segmentation and change detection.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="capabilities-grid" data-aos="fade-up" data-aos-delay="300">
+            <div class="capability-card gpu-layer">
+                <div class="capability-title">Enterprise Security</div>
+                <div class="capability-desc">JWT Auth & RBAC</div>
+            </div>
+            <div class="capability-card gpu-layer">
+                <div class="capability-title">Real-Time Sync</div>
+                <div class="capability-desc">WebSocket PubSub</div>
+            </div>
+            <div class="capability-card gpu-layer">
+                <div class="capability-title">Parallel Realities</div>
+                <div class="capability-desc">Fork State Manager</div>
+            </div>
+            <div class="capability-card gpu-layer">
+                <div class="capability-title">Memory Store</div>
+                <div class="capability-desc">Episodic & Vector RAG</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section" id="simulations">
+        <div class="section-header" data-aos="fade-up">
+            <div class="section-label">
+                <i data-lucide="flame" style="width:13px;height:13px"></i>
+                Simulations
+            </div>
+            <h2 class="section-title">Physics-Driven Hazard Modeling</h2>
+            <p class="section-desc">
+                GPU-accelerated mathematical models computed directly over real 3D terrain meshes.
+            </p>
+        </div>
+
+        <div class="sim-grid">
+            <div class="sim-card gpu-layer" style="--accent-color: var(--accent-rose)" data-aos="fade-up" data-aos-delay="100">
+                <div class="sim-icon-box" style="background:rgba(244, 63, 94, 0.1);color:var(--accent-rose)">
+                    <i data-lucide="zap" style="width:22px;height:22px"></i>
+                </div>
+                <h3 class="sim-title">Earthquake Waves</h3>
+                <p class="sim-desc">Elastic wave propagation & GMPE ShakeMap PGA/PGV/MMI intensity visualization.</p>
+            </div>
+
+            <div class="sim-card gpu-layer" style="--accent-color: var(--accent-amber)" data-aos="fade-up" data-aos-delay="200">
+                <div class="sim-icon-box" style="background:rgba(251, 191, 36, 0.1);color:var(--accent-amber)">
+                    <i data-lucide="wind" style="width:22px;height:22px"></i>
+                </div>
+                <h3 class="sim-title">Hurricane Surge</h3>
+                <p class="sim-desc">Parametric wind fields, barometric pressure, wave setup, and coastal inundation.</p>
+            </div>
+
+            <div class="sim-card gpu-layer" style="--accent-color: #f97316" data-aos="fade-up" data-aos-delay="300">
+                <div class="sim-icon-box" style="background:rgba(249, 115, 22, 0.1);color:#f97316">
+                    <i data-lucide="flame" style="width:22px;height:22px"></i>
+                </div>
+                <h3 class="sim-title">Wildfire Spread</h3>
+                <p class="sim-desc">Rothermel surface fire spread models using fuel models and slope vectors.</p>
+            </div>
+
+            <div class="sim-card gpu-layer" style="--accent-color: var(--accent-emerald)" data-aos="fade-up" data-aos-delay="400">
+                <div class="sim-icon-box" style="background:rgba(52, 211, 153, 0.1);color:var(--accent-emerald)">
+                    <i data-lucide="droplets" style="width:22px;height:22px"></i>
+                </div>
+                <h3 class="sim-title">Hydrodynamic Flood</h3>
+                <p class="sim-desc">2D Shallow Water Equations (SWE) with Manning roughness friction solvers.</p>
+            </div>
+
+            <div class="sim-card gpu-layer" style="--accent-color: #06b6d4" data-aos="fade-up" data-aos-delay="100">
+                <div class="sim-icon-box" style="background:rgba(6, 182, 212, 0.1);color:#06b6d4">
+                    <i data-lucide="waves-horizontal" style="width:22px;height:22px"></i>
+                </div>
+                <h3 class="sim-title">Tsunami Propagation</h3>
+                <p class="sim-desc">Linear shallow-water wave propagation with bathymetric refraction and coastal run-up.</p>
+            </div>
+
+            <div class="sim-card gpu-layer" style="--accent-color: #a855f7" data-aos="fade-up" data-aos-delay="200">
+                <div class="sim-icon-box" style="background:rgba(168, 85, 247, 0.1);color:#a855f7">
+                    <i data-lucide="mountain" style="width:22px;height:22px"></i>
+                </div>
+                <h3 class="sim-title">Volcanic Eruption</h3>
+                <p class="sim-desc">Tephra dispersal, lava flow routing, and pyroclastic density current modeling.</p>
+            </div>
+
+            <div class="sim-card gpu-layer" style="--accent-color: #84cc16" data-aos="fade-up" data-aos-delay="300">
+                <div class="sim-icon-box" style="background:rgba(132, 204, 22, 0.1);color:#84cc16">
+                    <i data-lucide="mountain-snow" style="width:22px;height:22px"></i>
+                </div>
+                <h3 class="sim-title">Landslide Debris</h3>
+                <p class="sim-desc">Depth-averaged granular flow with Voellmy friction and terrain-coupled runout.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="section" id="tech">
+        <div class="section-header" data-aos="fade-up">
+            <div class="section-label">
+                <i data-lucide="cpu" style="width:13px;height:13px"></i>
+                Modern Tech Stack
+            </div>
+            <h2 class="section-title">Designed for Extreme Performance</h2>
+            <p class="section-desc">
+                High-throughput reactive components coupled with lightweight backend architecture.
+            </p>
+        </div>
+
+        <div class="tech-grid">
+            <div class="tech-card gpu-layer" data-aos="fade-up" data-aos-delay="100">
+                <div class="tech-icon-box">
+                    <i data-lucide="atom" style="width:20px;height:20px;color:var(--accent-blue)"></i>
+                </div>
+                <div>
+                    <div class="tech-title">React 19 + Vite 5</div>
+                    <div class="tech-desc">Ultra-fast compilation and state management for spatial dashboards.</div>
+                </div>
+            </div>
+
+            <div class="tech-card gpu-layer" data-aos="fade-up" data-aos-delay="200">
+                <div class="tech-icon-box">
+                    <i data-lucide="globe" style="width:20px;height:20px;color:var(--accent-purple)"></i>
+                </div>
+                <div>
+                    <div class="tech-title">CesiumJS 1.140</div>
+                    <div class="tech-desc">WebGPU/WebGL accelerated 3D globe rendering engine.</div>
+                </div>
+            </div>
+
+            <div class="tech-card gpu-layer" data-aos="fade-up" data-aos-delay="300">
+                <div class="tech-icon-box">
+                    <i data-lucide="server" style="width:20px;height:20px;color:var(--accent-emerald)"></i>
+                </div>
+                <div>
+                    <div class="tech-title">Node.js Express</div>
+                    <div class="tech-desc">100+ secure REST API endpoints and real-time WebSocket gateways.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta-section">
+        <div class="cta-card gpu-layer" data-aos="zoom-in-up">
+            <h2 class="cta-title">Start Exploring Planetary Data</h2>
+            <p class="cta-desc">
+                Join the open-source movement powering the next wave of geospatial AI software.
+            </p>
+            <div class="hero-actions" style="margin-bottom: 0;">
+                <a href="https://github.com/sreyassanker/Terranoetis" target="_blank" class="btn btn-primary btn-lg">
+                    <i data-lucide="github" style="width:18px;height:18px"></i>
+                    Get Started on GitHub
+                </a>
+            </div>
+
+            <div class="terminal-box">
+                <div class="terminal-header">
+                    <div class="terminal-dot" style="background:#ff5f56"></div>
+                    <div class="terminal-dot" style="background:#ffbd2e"></div>
+                    <div class="terminal-dot" style="background:#27c93f"></div>
+                    <span style="font-size:11px;color:var(--text-muted);margin-left:8px;font-family:var(--font-mono)">bash — quickstart</span>
+                </div>
+                <div class="terminal-content">
+                    <div id="typewriter"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-top">
+                <div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <div class="nav-logo-box" style="width:38px;height:38px;padding:1px">
+                            <img src="icon.png" alt="Terranoetis">
+                        </div>
+                        <span style="font-weight:700;font-size:18px">Terranoetis</span>
+                    </div>
+                    <p class="footer-brand-desc">
+                        Real-time geospatial visualization and AI-powered Earth intelligence platform. Open source under the MIT License.
+                    </p>
+                </div>
+
+                <div>
+                    <h4 style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:16px">Platform</h4>
+                    <ul class="footer-links">
+                        <li><a href="#features" onclick="scrollToSection('#features')">Features</a></li>
+                        <li><a href="#simulations" onclick="scrollToSection('#simulations')">Simulations</a></li>
+                        <li><a href="#models" onclick="scrollToSection('#models')">Models</a></li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h4 style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:16px">Resources</h4>
+                    <ul class="footer-links">
+                        <li><a href="https://github.com/sreyassanker/Terranoetis" target="_blank">Documentation</a></li>
+                        <li><a href="https://youtube.com/playlist?list=PLFp9mjre3Lco" target="_blank">Video Demos</a></li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h4 style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:16px">Author</h4>
+                    <ul class="footer-links">
+                        <li><a href="https://www.linkedin.com/in/sreyassanker" target="_blank">Sreyas Sanker</a></li>
+                        <li><a href="https://github.com/sreyassanker" target="_blank">GitHub Profile</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="footer-bottom">
+                <div>© 2026 Terranoetis. Released under the MIT License.</div>
+                <div>Built for planetary scale intelligence.</div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // ─── Initialize Lenis Smooth Scroll Engine ───
+        const lenis = new Lenis({
+            duration: 1.2,
+            easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+            touchMultiplier: 1.5,
+            smoothWheel: true
+        });
+
+        function raf(time) {
+            lenis.raf(time);
+            requestAnimationFrame(raf);
+        }
+        requestAnimationFrame(raf);
+
+        function scrollToSection(targetId) {
+            const target = document.querySelector(targetId);
+            if (target) {
+                lenis.scrollTo(target, { offset: -80 });
+            }
+        }
+
+        // ─── Initialize Lucide & AOS ───
+        lucide.createIcons();
+        AOS.init({
+            duration: 800,
+            once: true,
+            easing: 'ease-out-cubic'
+        });
+
+        // ─── Navbar Scroll Blur (Passive Event) ───
+        const navWrapper = document.getElementById('navWrapper');
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 40) {
+                navWrapper.classList.add('scrolled');
+            } else {
+                navWrapper.classList.remove('scrolled');
+            }
+        }, { passive: true });
+
+        // ─── GSAP Floating Ambient Motion ───
+        gsap.to(".orb-1", { x: 80, y: 60, duration: 12, repeat: -1, yoyo: true, ease: "sine.inOut" });
+        gsap.to(".orb-2", { x: -90, y: -70, duration: 15, repeat: -1, yoyo: true, ease: "sine.inOut" });
+        gsap.to(".orb-3", { x: 60, y: -80, duration: 10, repeat: -1, yoyo: true, ease: "sine.inOut" });
+
+        // ─── High-Performance Canvas Particle Engine ───
+        const canvas = document.getElementById('particleCanvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        let isCanvasActive = true;
+        let scrollTimeout;
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas, { passive: true });
+        resizeCanvas();
+
+        class Particle {
+            constructor() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.size = Math.random() * 1.5 + 0.5;
+                this.vx = (Math.random() - 0.5) * 0.3;
+                this.vy = (Math.random() - 0.5) * 0.3;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+
+                if (this.x < 0 || this.x > canvas.width) this.vx *= -1;
+                if (this.y < 0 || this.y > canvas.height) this.vy *= -1;
+            }
+
+            draw() {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        for (let i = 0; i < 60; i++) {
+            particles.push(new Particle());
+        }
+
+        function animateParticles() {
+            if (isCanvasActive) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                for (let i = 0; i < particles.length; i++) {
+                    particles[i].update();
+                    particles[i].draw();
+
+                    for (let j = i + 1; j < particles.length; j++) {
+                        const dx = particles[i].x - particles[j].x;
+                        const dy = particles[i].y - particles[j].y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < 110) {
+                            ctx.strokeStyle = `rgba(56, 189, 248, ${0.12 * (1 - dist / 110)})`;
+                            ctx.lineWidth = 0.5;
+                            ctx.beginPath();
+                            ctx.moveTo(particles[i].x, particles[i].y);
+                            ctx.lineTo(particles[j].x, particles[j].y);
+                            ctx.stroke();
+                        }
+                    }
+                }
+            }
+            requestAnimationFrame(animateParticles);
+        }
+        animateParticles();
+
+        // Pause particle engine during fast scrolling to eliminate GPU lag
+        lenis.on('scroll', () => {
+            isCanvasActive = false;
+            clearTimeout(scrollTimeout);
+            scrollTimeout = setTimeout(() => {
+                isCanvasActive = true;
+            }, 100);
+        });
+
+        // ─── Throttle Card Spotlight 3D Tilt ───
+        let lastMove = 0;
+        document.querySelectorAll('.tilt-card').forEach(card => {
+            card.addEventListener('mousemove', e => {
+                const now = performance.now();
+                if (now - lastMove < 16) return; // Cap at ~60fps updates
+                lastMove = now;
+
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                const rotateX = ((y - rect.height / 2) / (rect.height / 2)) * -8;
+                const rotateY = ((x - rect.width / 2) / (rect.width / 2)) * 8;
+
+                card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+                
+                const spotlight = card.querySelector('.spotlight-card');
+                if (spotlight) {
+                    spotlight.style.setProperty('--mouse-x', `${x}px`);
+                    spotlight.style.setProperty('--mouse-y', `${y}px`);
+                }
+            }, { passive: true });
+
+            card.addEventListener('mouseleave', () => {
+                card.style.transform = `perspective(1000px) rotateX(0deg) rotateY(0deg)`;
+            });
+        });
+
+        // ─── Counter Animated Numbers ───
+        let countersTriggered = false;
+        function animateCounters() {
+            const counterElements = document.querySelectorAll('.counter');
+            counterElements.forEach(el => {
+                const target = +el.getAttribute('data-target');
+                let count = 0;
+                const speed = target / 40;
+                
+                const updateCount = () => {
+                    count += speed;
+                    if (count < target) {
+                        el.innerText = Math.ceil(count) + (target === 150 || target === 65 ? '+' : '');
+                        setTimeout(updateCount, 30);
+                    } else {
+                        el.innerText = target + (target === 150 || target === 65 ? '+' : '');
+                    }
+                };
+                updateCount();
+            });
+        }
+
+        lenis.on('scroll', () => {
+            const statsSection = document.querySelector('.hero-stats-container');
+            if (statsSection && !countersTriggered) {
+                const rect = statsSection.getBoundingClientRect();
+                if (rect.top <= window.innerHeight) {
+                    animateCounters();
+                    countersTriggered = true;
+                }
+            }
+        });
+
+        // ─── Terminal Typewriter ───
+        const terminalLines = [
+            '<span style="color:var(--accent-emerald)">$</span> git clone https://github.com/sreyassanker/Terranoetis.git',
+            '<span style="color:var(--accent-emerald)">$</span> cd Terranoetis && npm install',
+            '<span style="color:var(--accent-emerald)">$</span> npm run dev',
+            '<span style="color:var(--text-muted)">✓ Server running on http://localhost:3001</span>'
+        ];
+
+        let lineIdx = 0;
+        const typewriterEl = document.getElementById('typewriter');
+
+        function typeTerminal() {
+            if (lineIdx < terminalLines.length) {
+                const div = document.createElement('div');
+                typewriterEl.appendChild(div);
+                div.innerHTML = terminalLines[lineIdx];
+                lineIdx++;
+                setTimeout(typeTerminal, 350);
+            } else {
+                const cursorDiv = document.createElement('span');
+                cursorDiv.className = 'cursor';
+                typewriterEl.appendChild(cursorDiv);
+            }
+        }
+
+        let typewriterTriggered = false;
+        lenis.on('scroll', () => {
+            const ctaTerminal = document.querySelector('.terminal-box');
+            if (ctaTerminal && !typewriterTriggered) {
+                const rect = ctaTerminal.getBoundingClientRect();
+                if (rect.top <= window.innerHeight - 80) {
+                    typeTerminal();
+                    typewriterTriggered = true;
+                }
+            }
+        });
+
+        // ─── Mobile Menu Drawer ───
+        function toggleMobileMenu() {
+            const drawer = document.getElementById('mobileDrawer');
+            drawer.classList.toggle('active');
+        }
+
+        // Close mobile drawer when clicking outside the links
+        document.getElementById('mobileDrawer').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) {
+                toggleMobileMenu();
+            }
+        });
+    </script>
+</body>
+</html>
