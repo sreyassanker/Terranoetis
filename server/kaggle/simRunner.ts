@@ -16,13 +16,22 @@ import os from 'os';
 import { randomUUID } from 'crypto';
 import { logger } from '../observability/logger';
 import { pauseBackgroundEngines, resumeBackgroundEngines } from './powerSaver';
+import { sampleLandCoverGrid, compactLandCover } from './landCover';
+import { sampleBathymetryGrid, compactBathymetry } from './bathymetry';
 
 const KAGGLE_KERNELS_DIR = path.resolve(process.cwd(), 'kaggle-kernels');
 const RESULTS_DIR = path.resolve(process.cwd(), 'kaggle-kernels', 'results');
-const POLL_INTERVAL_MS = 15_000; // 15 seconds between status checks
+const POLL_INTERVAL_MS = Number(process.env.KAGGLE_POLL_INTERVAL_MS) || 15_000; // 15 s between status checks
 const JOB_CLEANUP_AGE_MS = 3600_000; // 1 hour — remove completed jobs after this
 const MAX_POLL_MS = 45 * 60_000; // 45 min hard cap on a Kaggle run
 const MAX_CONSECUTIVE_POLL_ERRORS = 10; // give up polling after repeated transient failures
+const POST_PUSH_SETTLE_MS = Number(process.env.KAGGLE_POST_PUSH_SETTLE_MS) || 8_000; // let the new run register before polling
+// Tolerate a pre-start "error" from the status API for this long. Because every
+// push reuses the same kernel slug and Kaggle's status endpoint is only
+// eventually consistent, a freshly-pushed run can be reported with the PREVIOUS
+// run's terminal 'error' for a couple of minutes until the new version registers.
+const STALE_ERROR_GRACE_MS = Number(process.env.KAGGLE_STALE_ERROR_GRACE_MS) || 180_000; // 3 min
+const NOAA_TIDE_FETCH_LIMIT = 8;
 
 // ═════════════════════════════════════════════════════════════════
 // TYPES
@@ -90,6 +99,7 @@ function addJobListener(jobId: string, listener: StatusListener): () => void {
 
 function updateJobStatus(job: SimulationJob, status: SimulationJob['status'], detail?: string) {
   job.status = status;
+  if (status === 'error') job.error = detail ?? job.error;
   notifyStatus(job, status, detail);
   logger.info({ jobId: job.id, type: job.type, status, detail }, 'Simulation job status');
 }
@@ -115,6 +125,103 @@ const activeJobs = new Map<string, SimulationJob>();
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const toRad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toRad;
+  const dLon = (lon2 - lon1) * toRad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function fetchNoaaTideStations(): Promise<Array<{ id: string; name: string; lat: number; lon: number; state?: string }>> {
+  const resp = await fetch(
+    'https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=waterlevels',
+    { signal: AbortSignal.timeout(15_000) },
+  );
+  if (!resp.ok) return [];
+  const body = await resp.json() as { stations?: Array<Record<string, unknown>> };
+  return (body.stations ?? [])
+    .map((s) => ({
+      id: String(s.id ?? ''),
+      name: String(s.name ?? ''),
+      lat: Number(s.lat ?? NaN),
+      lon: Number(s.lng ?? NaN),
+      state: String(s.state ?? ''),
+    }))
+    .filter((s) => s.id && Number.isFinite(s.lat) && Number.isFinite(s.lon));
+}
+
+async function fetchNoaaWaterLevelSeries(stationId: string): Promise<{ observed_times_min: number[]; observed_eta_m: number[] } | null> {
+  try {
+    const resp = await fetch(
+      `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${encodeURIComponent(stationId)}&product=water_level&date=today&datum=MLLW&units=metric&format=json&time_zone=gmt`,
+      { signal: AbortSignal.timeout(12_000) },
+    );
+    if (!resp.ok) return null;
+    const body = await resp.json() as { data?: Array<{ t?: string; v?: string }> };
+    const data = body.data ?? [];
+    if (data.length < 2) return null;
+    const first = new Date(`${data[0].t}Z`).getTime();
+    const observed_times_min: number[] = [];
+    const observed_eta_m: number[] = [];
+    for (const row of data.slice(0, 240)) {
+      if (!row.t || row.v === undefined || row.v === 'null') continue;
+      const ts = new Date(`${row.t}Z`).getTime();
+      const eta = Number.parseFloat(row.v);
+      if (!Number.isFinite(ts) || !Number.isFinite(eta)) continue;
+      observed_times_min.push((ts - first) / 60000);
+      observed_eta_m.push(eta);
+    }
+    if (observed_times_min.length < 2) return null;
+    return { observed_times_min, observed_eta_m };
+  } catch (err) {
+    logger.warn({ err, stationId }, 'NOAA water level fetch failed');
+    return null;
+  }
+}
+
+async function attachAutoTideBenchmarks(embedded: Record<string, unknown>): Promise<void> {
+  if (Array.isArray(embedded.benchmark_stations) && embedded.benchmark_stations.length > 0) return;
+  const { lat, lon } = embedded;
+  if (typeof lat !== 'number' || !Number.isFinite(lat) || typeof lon !== 'number' || !Number.isFinite(lon)) return;
+
+  try {
+    const stations = await fetchNoaaTideStations();
+    if (stations.length === 0) return;
+    const nearby = stations
+      .map((s) => ({ ...s, distanceKm: haversineKm(lat, lon, s.lat, s.lon) }))
+      .filter((s) => s.distanceKm <= 2500)
+      .sort((a, b) => a.distanceKm - b.distanceKm)
+      .slice(0, NOAA_TIDE_FETCH_LIMIT);
+
+    const benchmarks: Array<Record<string, unknown>> = [];
+    for (const station of nearby) {
+      const series = await fetchNoaaWaterLevelSeries(station.id);
+      if (!series) continue;
+      benchmarks.push({
+        name: `${station.name}${station.state ? `, ${station.state}` : ''}`,
+        row: 0,
+        col: 0,
+        observed_times_min: series.observed_times_min,
+        observed_eta_m: series.observed_eta_m,
+        arrival_threshold_m: Math.max(0.05, 0.1 * Math.max(...series.observed_eta_m.map((v) => Math.abs(v)))),
+        station_id: station.id,
+        station_lat: station.lat,
+        station_lon: station.lon,
+        distance_km: Number(station.distanceKm.toFixed(1)),
+        source: 'NOAA CO-OPS',
+      });
+    }
+
+    if (benchmarks.length > 0) {
+      embedded.benchmark_stations = benchmarks;
+      logger.info({ count: benchmarks.length }, 'Attached NOAA tide benchmark stations for tsunami sim');
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Auto NOAA tide benchmark attachment failed');
+  }
 }
 
 /**
@@ -286,6 +393,181 @@ function compactTerrain(terrain: number[]): { terrain_b64: string; terrain_min: 
 }
 
 /**
+ * Enforce a hard wall-clock on a best-effort side fetch so a slow third-party
+ * datasource (ESA S3) can never delay the kernel push.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms);
+    promise.then(
+      v => { clearTimeout(timer); resolve(v); },
+      e => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
+const LANDCOVER_FETCH_TIMEOUT_MS = 25_000;
+
+/**
+ * Attach a per-cell ESA WorldCover land-cover grid to a flood run so the
+ * kernel can use spatially variable Manning's n instead of one constant.
+ *
+ * Precedence:
+ *   1. An explicit `landcover` array from the client (sampled + compacted).
+ *   2. Automatic server-side sampling of the study box from ESA WorldCover.
+ *   3. Nothing — the kernel falls back to its constant Manning's n.
+ *
+ * The fetch is best-effort and never blocks the push on failure.
+ */
+async function attachLandCover(embedded: Record<string, unknown>): Promise<boolean> {
+  if (Array.isArray(embedded.landcover)) {
+    const compact = compactLandCover(embedded.landcover as number[]);
+    delete embedded.landcover;
+    if (compact) {
+      embedded.landcover_b64 = compact.landcover_b64;
+      embedded.landcover_gs = compact.landcover_gs;
+    }
+    return Boolean(compact);
+  }
+
+  const { lat, lon, extent_km, grid_size } = embedded;
+  if (
+    typeof lat !== 'number' || !Number.isFinite(lat) ||
+    typeof lon !== 'number' || !Number.isFinite(lon) ||
+    typeof extent_km !== 'number' || !Number.isFinite(extent_km) || extent_km <= 0
+  ) {
+    return false;
+  }
+  const gs = typeof grid_size === 'number' && grid_size > 0 ? grid_size : 256;
+
+  try {
+    const grid = await withTimeout(
+      sampleLandCoverGrid({ lat, lon, extentKm: extent_km, gs }),
+      LANDCOVER_FETCH_TIMEOUT_MS,
+    );
+    if (!grid) {
+      logger.warn({ lat, lon, extentKm: extent_km }, 'Land cover unavailable — kernel will use constant Manning n');
+      return false;
+    }
+    const compact = compactLandCover(grid.classes);
+    if (!compact) return false;
+    embedded.landcover_b64 = compact.landcover_b64;
+    embedded.landcover_gs = compact.landcover_gs;
+    const top = Object.entries(grid.histogram)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => `${name} ${Math.round((count / grid.classes.length) * 100)}%`);
+    logger.info(
+      { lat, lon, grid: `${grid.gs}x${grid.gs}`, coveragePct: Number(grid.coveragePct.toFixed(1)), top },
+      'Land cover sampled for flood sim',
+    );
+    return true;
+  } catch (err) {
+    logger.warn(
+      { error: err instanceof Error ? err.message : String(err) },
+      'Land cover fetch failed — kernel will use constant Manning n',
+    );
+    return false;
+  }
+}
+
+const BATHYMETRY_FETCH_TIMEOUT_MS = 25_000;
+
+/**
+ * Attach a real GEBCO 2020 bathymetry grid to a tsunami run so the kernel
+ * propagates over the actual seafloor instead of a synthetic parabolic bowl.
+ *
+ * Precedence:
+ *   1. An explicit `bathymetry` array from the client (sampled + compacted).
+ *   2. Automatic server-side sampling of the study box from GEBCO 2020.
+ *   3. Nothing — the kernel falls back to its synthetic bathymetry.
+ *
+ * The fetch is best-effort and never blocks the push on failure.
+ */
+async function attachBathymetry(embedded: Record<string, unknown>): Promise<boolean> {
+  if (Array.isArray(embedded.bathymetry)) {
+    const compact = compactBathymetry(embedded.bathymetry as number[]);
+    delete embedded.bathymetry;
+    if (compact) {
+     embedded.bathy_b64 = compact.bathy_b64;
+     embedded.bathy_gs = compact.bathy_gs;
+     embedded.bathy_min = compact.bathy_min;
+     embedded.bathy_span = compact.bathy_span;
+      return true;
+    }
+    return false;
+  }
+
+  const { lat, lon, extent_km, grid_size } = embedded;
+  if (
+    typeof lat !== 'number' || !Number.isFinite(lat) ||
+    typeof lon !== 'number' || !Number.isFinite(lon) ||
+    typeof extent_km !== 'number' || !Number.isFinite(extent_km) || extent_km <= 0
+  ) {
+    return false;
+  }
+  const gs = typeof grid_size === 'number' && grid_size > 0 ? grid_size : 256;
+
+  try {
+    const grid = await withTimeout(
+      sampleBathymetryGrid({ lat, lon, extentKm: extent_km, gs }),
+      BATHYMETRY_FETCH_TIMEOUT_MS,
+    );
+    if (!grid) {
+      logger.warn({ lat, lon, extentKm: extent_km }, 'Bathymetry unavailable — tsunami run requires a real GEBCO grid');
+      return false;
+    }
+    const compact = compactBathymetry(grid.depth);
+    if (!compact) return false;
+    embedded.bathy_b64 = compact.bathy_b64;
+    embedded.bathy_gs = compact.bathy_gs;
+    embedded.bathy_min = compact.bathy_min;
+    embedded.bathy_span = compact.bathy_span;
+    logger.info(
+      { lat, lon, grid: `${grid.sampleGs}x${grid.sampleGs}`,
+        coveragePct: Number(grid.coveragePct.toFixed(1)) },
+      'Bathymetry sampled for tsunami sim',
+    );
+    return true;
+  } catch (err) {
+    logger.warn(
+      { error: err instanceof Error ? err.message : String(err) },
+      'Bathymetry fetch failed — tsunami run requires a real GEBCO grid',
+    );
+    return false;
+  }
+}
+
+// Measured rates (simulated hours per wall-clock second) for each kernel on a
+// Kaggle GPU at grid 256. Flood is calibrated empirically: a 256² / 12 h run
+// advanced 7.384 h in 480 s → 0.01538 h/s. Other types reuse flood's rate as a
+// starting point until they are benchmarked individually.
+const GRID_REF = 256;
+const WALLCLOCK_RATES_H_PER_S: Record<string, number> = {
+  flood_inundation: 0.01538,
+};
+// Floor != the kernel's 480 s default: anything ≤ 480 reproduces the old
+// truncated "Partial ⚠️" behavior. Ceiling bounds Kaggle GPU quota burn.
+const WALLCLOCK_MIN_SEC = 480;
+const WALLCLOCK_MAX_SEC = 1500;
+
+/**
+ * Compute a wall-clock budget (seconds) long enough for the kernel to finish
+ * the requested duration. Without this, every kernel falls back to its 480 s
+ * default cap and every app run returns `completed: false` → "Partial".
+ * Adds ~25% headroom + boot time and clamps to [480, 1500]s.
+ */
+function estimateWallclockSeconds(params: SimulationParams): number {
+  const gs = params.grid_size || GRID_REF;
+  const durationHours = params.duration_hours || 12;
+  const rate =
+    (WALLCLOCK_RATES_H_PER_S[params.type] ?? WALLCLOCK_RATES_H_PER_S.flood_inundation) *
+    (GRID_REF / gs) ** 2;
+  const needed = (durationHours / Math.max(rate, 1e-6)) * 1.25 + 30;
+  return Math.round(Math.min(WALLCLOCK_MAX_SEC, Math.max(WALLCLOCK_MIN_SEC, needed)));
+}
+
+/**
  * Kaggle's CLI only uploads the code file + kernel-metadata.json — sibling
  * files such as params.json never reach the runner. So we bake the run's
  * params directly into the code: replace the `EMBEDDED_PARAMS = None` marker
@@ -306,6 +588,7 @@ async function pushKernelWithParams(kernelDir: string, params: SimulationParams)
   // Shrink large payloads before embedding: a 256×256 real-terrain grid as a
   // JSON float array would exceed Kaggle's kernel size limit (400 Bad Request).
   const embedded: Record<string, unknown> = { ...params };
+  embedded.wallclock_max_sec = estimateWallclockSeconds(params);
   if (Array.isArray(embedded.terrain)) {
     const compact = compactTerrain(embedded.terrain as number[]);
     delete embedded.terrain;
@@ -314,6 +597,18 @@ async function pushKernelWithParams(kernelDir: string, params: SimulationParams)
       embedded.terrain_min = compact.terrain_min;
       embedded.terrain_span = compact.terrain_span;
     }
+  }
+  // Real land cover → per-cell Manning's n (flood only, best-effort).
+  if (params.type === 'flood_inundation') {
+    await attachLandCover(embedded);
+  }
+  // Real GEBCO 2020 bathymetry → real seafloor (tsunami only, best-effort).
+  if (params.type === 'tsunami_wave') {
+    const attached = await attachBathymetry(embedded);
+    if (!attached) {
+      throw new Error('Real GEBCO bathymetry is required for tsunami runs; synthetic fallback is disabled.');
+    }
+    await attachAutoTideBenchmarks(embedded);
   }
   // Embed the params as a JSON *string literal*. A raw `JSON.stringify` dump
   // is not valid Python (lowercase `true`/`false`/`null` crash the kernel with
@@ -356,6 +651,43 @@ async function cancelKernel(ownerSlug: string): Promise<void> {
     await kaggleCommand(['kernels', 'cancel', ownerSlug]);
   } catch {
     logger.warn({ ownerSlug }, 'Failed to cancel Kaggle kernel (may already be done)');
+  }
+}
+
+/**
+ * After a genuine Kaggle kernel failure, pull the kernel's working-dir output
+ * and surface the real crash reason. The kernel's main() writes the Python
+ * traceback to `/kaggle/working/error.log` before re-raising (which is what
+ * flips the job status to 'error'), so downloading the output turns Kaggle's
+ * bare "error" status into an actionable message. Falls back gracefully when
+ * the kernel produced no harvestable output.
+ */
+async function harvestErrorDetail(ownerSlug: string, status: string, context?: string): Promise<string> {
+  const base = `Kaggle kernel ${status}`;
+  const fallback = (): string => (context ? `${base} — ${context}` : base);
+  let dlDir: string | null = null;
+  try {
+    dlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaggle-err-'));
+    await downloadOutput(ownerSlug, dlDir);
+    const files = fs.readdirSync(dlDir);
+    const errorLog = files.find(f => f.toLowerCase() === 'error.log');
+    if (errorLog) {
+      const trace = fs.readFileSync(path.join(dlDir, errorLog), 'utf-8').trim();
+      if (trace) {
+        const tail = trace.split('\n').slice(-12).join('\n');
+        logger.error({ ownerSlug, trace: trace.slice(0, 4000) }, 'Kaggle kernel failure trace captured');
+        return `${base} — kernel crashed:\n${tail}`;
+      }
+    }
+    return files.length > 0 ? `${base} — ran but failed (${files.length} output file(s), no error.log)` : fallback();
+  } catch (err) {
+    logger.warn(
+      { ownerSlug, error: err instanceof Error ? err.message : String(err) },
+      'Failed to harvest Kaggle kernel error output',
+    );
+    return fallback();
+  } finally {
+    if (dlDir) fs.rmSync(dlDir, { recursive: true, force: true });
   }
 }
 
@@ -484,16 +816,16 @@ async function runPipeline(
     //   1. Wait a few seconds after push before the first poll.
     //   2. Track whether we've seen the kernel in a non-error state. If an
     //      "error" arrives BEFORE any non-error status, it's almost certainly
-    //      stale — retry a bounded number of times instead of failing fast.
+    //      stale (or an early crash) — tolerate it up to STALE_ERROR_GRACE_MS
+    //      instead of failing the new run with a false negative.
     //   3. If "error" arrives AFTER we've seen "running"/"queue", the kernel
-    //      actually ran and failed — fail immediately.
+    //      actually ran and failed — fail immediately and harvest error.log so
+    //      the user sees the real Python traceback.
     let lastStatus = '';
     let sawComplete = false;
     let consecutiveErrors = 0;
     let sawNonErrorState = false; // have we seen running/queue/complete?
-    let staleErrorRetries = 0;
-    const MAX_STALE_ERROR_RETRIES = 3;
-    const POST_PUSH_SETTLE_MS = 8_000; // let the new run register before polling
+    let staleErrorSince: number | null = null; // when the current pre-start error streak began
 
     // Give the freshly-pushed kernel time to register on Kaggle's status API.
     // Without this, the first poll can return the previous run's status.
@@ -529,25 +861,42 @@ async function runPipeline(
         // a GPU. Treat it as "running" for staleness-tracking purposes.
         if (status === 'running' || status === 'queue' || status === 'queued') {
           sawNonErrorState = true;
+          staleErrorSince = null; // the new run is visibly starting — fresh slate
         }
         if (status === 'error' || status === 'cancel') {
-          if (!sawNonErrorState && staleErrorRetries < MAX_STALE_ERROR_RETRIES) {
-            // The error arrived before we ever saw the kernel running — this
-            // is almost certainly the PREVIOUS run's stale status. Wait and
-            // retry instead of failing the new run.
-            staleErrorRetries++;
-            logger.warn(
-              { jobId: job.id, status, attempt: staleErrorRetries, max: MAX_STALE_ERROR_RETRIES },
-              'Kaggle kernel error before run started — likely stale status, retrying',
+          if (!sawNonErrorState) {
+            // Error before we ever saw the new run start. Since the push reuses
+            // the same kernel slug and Kaggle's status API is eventually
+            // consistent, this is usually the PREVIOUS run's stale terminal
+            // state lingering until the new version registers — OR a kernel
+            // that crashed within its first poll window. Tolerate it for a
+            // generous grace window instead of failing a run that may still be
+            // starting.
+            if (staleErrorSince === null) staleErrorSince = Date.now();
+            if (Date.now() - staleErrorSince < STALE_ERROR_GRACE_MS) {
+              const waited = Math.round((Date.now() - staleErrorSince) / 1000);
+              logger.warn(
+                { jobId: job.id, status, waitedSec: waited, graceSec: STALE_ERROR_GRACE_MS / 1000 },
+                'Kaggle kernel error before run started — likely stale status, still waiting for the new run',
+              );
+              updateJobStatus(job, 'running', `Waiting for new run to start (stale status)… ${waited}s`);
+              continue;
+            }
+            // The new run never registered (or crashed before appearing as
+            // running) — tell the user which, using whatever the kernel wrote.
+            const msg = await harvestErrorDetail(
+              ownerSlug,
+              status,
+              `no run start detected after ${Math.round(STALE_ERROR_GRACE_MS / 1000)}s (stale status or early crash)`,
             );
-            updateJobStatus(job, 'running', `Waiting for new run to start (retry ${staleErrorRetries}/${MAX_STALE_ERROR_RETRIES})…`);
-            // Extra settle time before the next poll
-            await sleep(POST_PUSH_SETTLE_MS);
-            continue;
+            updateJobStatus(job, 'error', msg);
+            return;
           }
-          // Either we saw the kernel running (it genuinely failed) or we've
-          // exhausted stale-error retries — fail fast.
-          updateJobStatus(job, 'error', `Kaggle kernel ${status}`);
+          // We saw the kernel start (running/queue), then it errored — this is
+          // a genuine run failure. Pull the kernel's error.log so the user sees
+          // the real Python traceback instead of a bare "error".
+          const msg = await harvestErrorDetail(ownerSlug, status);
+          updateJobStatus(job, 'error', msg);
           return;
         }
       } catch (err: unknown) {
