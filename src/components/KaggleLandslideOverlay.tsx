@@ -33,7 +33,7 @@ const SCHEMES = [
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const LANDSLIDE_CONFIG: ScalarOverlayConfig = {
-  title: 'Landslide CFD',
+  title: 'Landslide',
   accent: 'rgba(180,83,9,0.95)',
   typeKey: 'landslide',
   fields: {
