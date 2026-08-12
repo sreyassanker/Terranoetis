@@ -716,4 +716,3 @@ CREATE TABLE IF NOT EXISTS risk_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_risk_snapshots_zone ON risk_snapshots(zone_id);
 CREATE INDEX IF NOT EXISTS idx_risk_snapshots_created ON risk_snapshots(created_at DESC);
-
