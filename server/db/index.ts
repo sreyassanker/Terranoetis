@@ -109,3 +109,4 @@ function extractCreateTableStmts(schema: string): { tableName: string; sql: stri
   }
   return results;
 }
+

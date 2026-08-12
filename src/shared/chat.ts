@@ -2,8 +2,7 @@
  * Shared chat model types.
  *
  * These live outside React components (plain .ts) so the server can import
- * them without a --jsx transform — previously server/db/repository.ts imported
- * from a .tsx component file, which failed to compile.
+ * them without a --jsx transform.
  */
 
 export interface Reaction {
