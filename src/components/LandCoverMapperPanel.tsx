@@ -1,0 +1,518 @@
+/**
+ * Land Cover Mapper UI Control Panel Component.
+ *
+ * Provides execution controls, real-time step status tracking, geospatial layer toggles,
+ * and RFC-4180 compliant CSV exporting with accessible React patterns.
+ */
+
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Layers, Play, MapPin, Trash2, Download } from 'lucide-react';
+import * as Cesium from 'cesium';
+import Panel from '@/components/ui/Panel';
+import {
+  runLandCoverPipeline,
+  showLandCoverSurface,
+  clearLandCoverSurface,
+  type LandCoverResult,
+  type StepStatus,
+  type Bbox,
+} from '@/lib/landCoverPipeline';
+
+export interface LandCoverMapperPanelProps {
+  open: boolean;
+  onClose: () => void;
+  viewer: Cesium.Viewer | null;
+  bbox: Bbox | null;
+  polygon?: Array<Array<[number, number]>>;
+  onClearResult?: () => void;
+  zIndex?: number;
+}
+
+interface StepView {
+  id: string;
+  label: string;
+  status: StepStatus;
+  msg?: string;
+}
+
+const STEP_IDS: readonly { id: string; label: string }[] = [
+  { id: 'capture', label: 'Capture 3D scene' },
+  { id: 'features', label: 'Classify land cover' },
+  { id: 'regions', label: 'Grid aggregation' },
+  { id: 'sam', label: 'Summary' },
+] as const;
+
+export const LandCoverMapperPanel: React.FC<LandCoverMapperPanelProps> = ({
+  open,
+  onClose,
+  viewer,
+  bbox,
+  polygon,
+  onClearResult,
+  zIndex = 999,
+}) => {
+  const [topDown, setTopDown] = useState(true);
+  const [useDetr, setUseDetr] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [steps, setSteps] = useState<StepView[]>(() =>
+    STEP_IDS.map(s => ({ ...s, status: 'pending' })),
+  );
+  const [result, setResult] = useState<LandCoverResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pushed, setPushed] = useState(false);
+
+  const abortRef = useRef<AbortController | null>(null);
+  const currentStepRef = useRef<string>('capture');
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const handleStep = useCallback((id: string, status: StepStatus, msg?: string) => {
+    if (!isMountedRef.current) return;
+    if (status === 'running') currentStepRef.current = id;
+    setSteps(prev => prev.map(s => (s.id === id ? { ...s, status, msg } : s)));
+  }, []);
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  const run = useCallback(async () => {
+    if (!viewer) {
+      setError('Globe not ready yet.');
+      return;
+    }
+
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    setRunning(true);
+    setError(null);
+    setResult(null);
+    setPushed(false);
+    setSteps(STEP_IDS.map(s => ({ ...s, status: 'pending' })));
+
+    try {
+      const res = await runLandCoverPipeline(
+        viewer,
+        { topDown, bbox, polygon, signal: ac.signal, useDetr },
+        { onStep: handleStep },
+      );
+
+      if (!isMountedRef.current) return;
+      setResult(res);
+      showLandCoverSurface(viewer, res.grid, res.bbox);
+      setPushed(true);
+    } catch (e) {
+      if (!isMountedRef.current) return;
+      const err = e as Error;
+      const aborted = err?.name === 'AbortError';
+      if (!aborted) setError(err?.message ?? 'Pipeline execution failed.');
+      handleStep(currentStepRef.current, 'error', aborted ? 'cancelled' : (err?.message ?? 'failed'));
+    } finally {
+      if (isMountedRef.current) {
+        abortRef.current = null;
+        setRunning(false);
+      }
+    }
+  }, [viewer, topDown, useDetr, bbox, polygon, handleStep]);
+
+  const pushToGlobe = useCallback(() => {
+    if (!viewer || !result) return;
+    showLandCoverSurface(viewer, result.grid, result.bbox);
+    setPushed(true);
+  }, [viewer, result]);
+
+  const clearGlobe = useCallback(() => {
+    if (!viewer) return;
+    clearLandCoverSurface(viewer);
+    onClearResult?.();
+    setPushed(false);
+  }, [viewer, onClearResult]);
+
+  /** Professional CSV Report Exporter — RFC-4180 compliant. */
+  const downloadGeo = useCallback(() => {
+    if (!result) return;
+    const { latMin, latMax, lonMin, lonMax } = result.bbox;
+    const { nLat, nLon, values } = result.grid;
+
+    const q = (val: string | number): string => {
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const latStep = (latMax - latMin) / nLat;
+    const lonStep = (lonMax - lonMin) / nLon;
+    const totalCells = nLat * nLon;
+    const approxAreaKm2 = (
+      (latMax - latMin) * 111.32 *
+      (lonMax - lonMin) * 111.32 * Math.cos(((latMin + latMax) / 2) * Math.PI / 180)
+    ).toFixed(1);
+
+    const lines: string[] = [];
+
+    // ── Section 1: Metadata Header ──
+    lines.push('"Land Cover Classification Report"');
+    lines.push('"Generated by","Terranoetis Land Cover Mapper"');
+    lines.push(`"Timestamp","${new Date().toISOString()}"`);
+    lines.push(`"Method","${result.classes.length > 0 ? 'Spectral indices + k-means++ clustering' : 'Unspecified'}"`);
+    lines.push('"CRS","EPSG:4326 (WGS84)"');
+    lines.push(`"Grid Size","${nLat} x ${nLon}"`);
+    lines.push(`"Resolution (approx.)","${latStep.toFixed(5)} deg lat x ${lonStep.toFixed(5)} deg lon"`);
+    lines.push(`"Study Area","${latMin.toFixed(3)}N - ${latMax.toFixed(3)}N, ${lonMin.toFixed(3)}E - ${lonMax.toFixed(3)}E"`);
+    lines.push(`"Area (approx. km2)","${approxAreaKm2}"`);
+
+    // ── Section 2: Class Legend ──
+    lines.push('');
+    lines.push('"Class Legend"');
+    lines.push('"Class ID","Class Name","Hex Color","R","G","B","Description"');
+    for (const c of result.classes) {
+      const [r, g, b] = c.rgb;
+      lines.push(
+        [c.id, q(c.name), q(c.color), r, g, b, q(c.description)].join(','),
+      );
+    }
+
+    // ── Section 3: Summary Statistics ──
+    lines.push('');
+    lines.push('"Summary Statistics"');
+    lines.push('"Class ID","Class Name","Cell Count","Percentage","Area (km2)"');
+    let totalCount = 0;
+    for (const c of result.classes) {
+      const st = result.regionStats.find(s => s.id === c.id);
+      const pct = st?.pct ?? 0;
+      const cellCount = Math.round((pct / 100) * totalCells);
+      const areaKm2 = ((pct / 100) * parseFloat(approxAreaKm2)).toFixed(1);
+      totalCount += cellCount;
+      lines.push(
+        [c.id, q(c.name), cellCount.toLocaleString('en-US'), pct.toFixed(1), areaKm2].join(','),
+      );
+    }
+    lines.push(
+      ['"TOTAL"', '"—"', totalCount.toLocaleString('en-US'), '100.0', approxAreaKm2].join(','),
+    );
+
+    // ── Section 4: Grid Data (row-major, north→south) ──
+    lines.push('');
+    lines.push('"Grid Data"');
+    lines.push('"row","col","lat","lon","class_id"');
+    for (let y = 0; y < nLat; y++) {
+      const lat = latMax - (y + 0.5) * latStep;
+      const rowOff = y * nLon;
+      for (let x = 0; x < nLon; x++) {
+        const lon = lonMin + (x + 0.5) * lonStep;
+        const classId = values[rowOff + x];
+        lines.push(`${y},${x},${lat.toFixed(5)},${lon.toFixed(5)},${classId}`);
+      }
+    }
+
+    // ── Section 5: Coordinate Reference ──
+    lines.push('');
+    lines.push('"Coordinate Reference"');
+    lines.push(`"Origin (NW corner)","${latMax.toFixed(5)}N, ${lonMin.toFixed(5)}E"`);
+    lines.push(`"Cell Size (lat)","${latStep.toFixed(5)} deg"`);
+    lines.push(`"Cell Size (lon)","${lonStep.toFixed(5)} deg"`);
+    lines.push(`"Total Cells","${totalCells}"`);
+    lines.push('"Null Value","0"');
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'land-cover-map.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    // Asynchronous revocation prevents early cancellation on webkit browsers
+    setTimeout(() => URL.revokeObjectURL(url), 500);
+  }, [result]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 60,
+        right: 10,
+        zIndex,
+        width: 420,
+        maxHeight: 'calc(100vh - 160px)',
+        overflowY: 'auto',
+      }}
+    >
+      <Panel
+        title="Land Cover Mapper"
+        icon={<Layers size={14} />}
+        accentColor="#16a34a"
+        iconColor="#4ade80"
+        titleColor="#86efac"
+        onClose={onClose}
+        style={{ width: 420 }}
+      >
+        <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {running ? (
+              <button
+                type="button"
+                onClick={cancel}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(248,113,113,0.5)',
+                  cursor: 'pointer',
+                  background: 'rgba(239,68,68,0.15)',
+                  color: '#fca5a5',
+                  fontWeight: 700,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                }}
+              >
+                <span>■</span>
+                Cancel
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={run}
+                disabled={!viewer}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: 'none',
+                  cursor: viewer ? 'pointer' : 'not-allowed',
+                  background: 'rgba(22,163,74,0.85)',
+                  color: '#052e16',
+                  fontWeight: 700,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                }}
+              >
+                <Play size={13} />
+                Map Land Cover
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={clearGlobe}
+              title="Clear globe overlay"
+              style={{
+                padding: '8px 12px',
+                borderRadius: 8,
+                border: '1px solid rgba(248,113,113,0.4)',
+                background: 'transparent',
+                color: '#f87171',
+                cursor: 'pointer',
+              }}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cbd5e1', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={topDown}
+                onChange={e => setTopDown(e.target.checked)}
+                disabled={running}
+              />
+              <span style={{ color: '#94a3b8' }}>Top-down</span>
+            </label>
+            <label
+              style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cbd5e1', cursor: 'pointer' }}
+              title="DETR adds inference time. Enable for scenes with strong object semantics (vehicles, structures)."
+            >
+              <input
+                type="checkbox"
+                checked={useDetr}
+                onChange={e => setUseDetr(e.target.checked)}
+                disabled={running}
+              />
+              <span style={{ color: '#94a3b8' }}>DETR model</span>
+            </label>
+            <span style={{ color: '#64748b', fontSize: 10 }}>Spectral indices → 6 classes</span>
+          </div>
+
+          {error && (
+            <div
+              style={{
+                padding: 8,
+                borderRadius: 6,
+                background: 'rgba(239,68,68,0.12)',
+                border: '1px solid rgba(239,68,68,0.3)',
+                color: '#fca5a5',
+                fontSize: 11,
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {/* Execution Progress Stepper */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }} aria-live="polite">
+            {steps.map(s => (
+              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 4,
+                    flexShrink: 0,
+                    background:
+                      s.status === 'done'
+                        ? '#22c55e'
+                        : s.status === 'running'
+                        ? '#f59e0b'
+                        : s.status === 'error'
+                        ? '#ef4444'
+                        : '#334155',
+                    boxShadow: s.status === 'running' ? '0 0 8px #f59e0b' : undefined,
+                  }}
+                />
+                <span style={{ color: s.status === 'error' ? '#f87171' : '#cbd5e1', width: 130, flexShrink: 0 }}>
+                  {s.label}
+                </span>
+                {s.status === 'running' && <span style={{ color: '#f59e0b' }}>▸</span>}
+                {s.status === 'done' && <span style={{ color: '#22c55e' }}>✓</span>}
+                {s.status === 'error' && <span style={{ color: '#ef4444' }}>✕</span>}
+                {s.msg && (
+                  <span style={{ color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.msg}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Results Overview */}
+        {result && (
+          <div
+            style={{
+              padding: '0 12px 12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              borderTop: '1px solid rgba(34,197,94,0.15)',
+              paddingTop: 10,
+            }}
+          >
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <img
+                  src={result.imageUrl}
+                  alt="Captured scene"
+                  style={{ width: '100%', borderRadius: 6, border: '1px solid rgba(34,197,94,0.3)' }}
+                />
+                <span style={{ position: 'absolute', top: 4, left: 4, background: 'rgba(0,0,0,0.6)', color: '#86efac', fontSize: 9, padding: '1px 5px', borderRadius: 4 }}>
+                  SOURCE
+                </span>
+              </div>
+              {result.coarseUrl && (
+                <div style={{ flex: 1, position: 'relative' }}>
+                  <img
+                    src={result.coarseUrl}
+                    alt="Region clusters"
+                    style={{ width: '100%', borderRadius: 6, border: '1px solid rgba(34,197,94,0.3)' }}
+                  />
+                  <span style={{ position: 'absolute', top: 4, left: 4, background: 'rgba(0,0,0,0.6)', color: '#86efac', fontSize: 9, padding: '1px 5px', borderRadius: 4 }}>
+                    REGIONS
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {result.regionStats.map(s => (
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 3, background: s.color, flexShrink: 0 }} />
+                  <span style={{ color: '#e2e8f0', flex: 1 }}>{s.name}</span>
+                  <span style={{ color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>{s.pct.toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={pushToGlobe}
+                disabled={pushed}
+                style={{
+                  flex: 1,
+                  padding: '7px 10px',
+                  borderRadius: 6,
+                  border: pushed ? '1px solid rgba(34,197,94,0.4)' : '1px solid rgba(34,197,94,0.6)',
+                  background: pushed ? 'rgba(34,197,94,0.12)' : 'rgba(34,197,94,0.2)',
+                  color: '#86efac',
+                  cursor: pushed ? 'default' : 'pointer',
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                }}
+              >
+                <MapPin size={12} />
+                {pushed ? 'Pushed to globe' : 'Push to globe'}
+              </button>
+              <button
+                type="button"
+                onClick={downloadGeo}
+                style={{
+                  padding: '7px 10px',
+                  borderRadius: 6,
+                  border: '1px solid rgba(148,163,184,0.4)',
+                  background: 'transparent',
+                  color: '#cbd5e1',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <Download size={12} />
+                CSV
+              </button>
+            </div>
+
+            <div style={{ color: '#64748b', fontSize: 10 }}>
+              {(() => {
+                const fmtLat = (v: number) => `${Math.abs(v).toFixed(3)}°${v >= 0 ? 'N' : 'S'}`;
+                const fmtLon = (v: number) => `${Math.abs(v).toFixed(3)}°${v >= 0 ? 'E' : 'W'}`;
+                return result.bbox
+                  ? `${fmtLat(result.bbox.latMin)} – ${fmtLat(result.bbox.latMax)}, ${fmtLon(result.bbox.lonMin)} – ${fmtLon(result.bbox.lonMax)}`
+                  : 'No bbox';
+              })()}
+              {' · '}{result.grid.nLat}×{result.grid.nLon} cells · DETR panoptic + spectral (in-browser)
+            </div>
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+};
