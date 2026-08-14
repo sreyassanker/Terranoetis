@@ -49,7 +49,7 @@ flowchart TB
         subgraph Core["Core Services"]
             direction TB
             Analytical["Analytical Models\n150 equations in 26 domains\nContextEngine + 7-stage QC Pipeline\nSandbox: FARSITE, ADCIRC, WRF, HYSPLIT, FNO"]
-            FM["Foundation Models\nPrithvi, CLAY, U-Net, SAM-Geo\nWeather, Agriculture, AlphaEarth\nBayFire, SpaceX, Satellite Search"]
+            FM["Foundation Models\nPrithvi v2, CLAY, U-Net, SAM-Geo\nWeather, Agriculture, AlphaEarth\nBayFire, SpaceX, MVT Tiles"]
             Multimodal["Multimodal Perception\nSatellite Analyzer, Seismic\nRadar, Sentiment, Fusion"]
         end
 
@@ -167,9 +167,9 @@ flowchart LR
 
 ### Frontend (`src/`)
 
-- **Framework:** React 18 with TypeScript, built with Vite 5
-- **3D Rendering:** CesiumJS 1.140, deck.gl, Mapbox GL JS
-- **Styling:** Tailwind CSS 3 with class-variance-authority, dark mode by default
+- **Framework:** React 19 with TypeScript, built with Vite 7
+- **3D Rendering:** CesiumJS 1.140 (WebGL, Cesium World Terrain)
+- **Styling:** Tailwind CSS 3 with class-variance-authority, dark mode by default, Inter + JetBrains Mono typefaces
 - **Routing:** React Router
 - **State Management:** React context (AuthContext) + custom hooks + WebSocket store
 
@@ -210,6 +210,8 @@ flowchart LR
 
 `src/components/chat/` — `AdvancedChatViews.tsx` (850L): PlanCard, SubAgentActivity, InlineTable/Chart/Slider, ToolApproval, ModelTierSelector, TraceExpander
 
+`src/components/collaboration/` — `PresenceComponents.tsx`: PresenceIndicator (avatar stack + viewer/typing count), RemoteCursor (position marker over the message input)
+
 `src/components/cockpit/`:
 - `CognitiveDashboard.tsx` (860L) — AnimatedBrain SVG, sparklines, system metrics
 - `MemoryExplorer.tsx` (530L) — SVG Knowledge Graph (force-directed)
@@ -221,9 +223,11 @@ flowchart LR
 - `CinematicDirector.tsx` (643L) — Camera path animation for disaster fly-throughs
 - `EarthquakeVisualizer.tsx` (206L) — MMI polygons, P/S/Rayleigh/Love wavefront rings
 - `hazardRenderers.ts` (188L) — Renders 11 shape types on Cesium (polygon, cylinder, corridor, ellipse, ring, flood_surface, wavefront, intensity/damage/liquefaction zones)
-- `ScenarioEditor.tsx` (568L) — Parameter forms for 7 disaster types
+- `ScenarioEditor.tsx` (568L) — Parameter forms for 7 disaster types; ships real Cesium terrain for landslide/flood/volcano runs and ash-transport knobs (particle diameter, diffusivity, wind shear)
 - `ScenarioGallery.tsx` (147L) — Sortable/filterable grid, search
 - `AddScenarioModal.tsx`, `ScenarioGraph.tsx`, `ScenarioPanel.tsx`, `ScenarioTimeline.tsx`, `ScenarioWizard.tsx`, `ScenarioThumbnail.tsx`
+
+> **Material fix (Cesium):** every scenario visualizer, `navigation.ts`, `weather.ts`, and `kaggle/shared.ts` now wrap `CallbackProperty` in `Cesium.ColorMaterialProperty` — raw `CallbackProperty` lacks `getType()`, which previously crashed `MaterialProperty.getValue` with `"materialProperty.getType is not a function"` during polygon/polyline rendering.
 
 Scenario types and colors:
 
@@ -240,8 +244,6 @@ Scenario types and colors:
 
 `src/components/prithvi/`:
 - `AviationTrackerPanel.tsx` (560L) — Live OpenSky flights, search/filter
-- `PrithviPanel.tsx` (940L) — NASA Prithvi AI: land cover, embedding search, change detection
-- `SatelliteSearchPanel.tsx` (680L) — Semantic imagery search (text/geo/class), seeder status
 - `SatelliteTrackerPanel.tsx` (530L) — TLE catalog (CelesTrak/UCS/Starlink), track button
 
 `src/components/explainability/` — `HumanOverrideBanner.tsx` (420L): pending override approval/rejection
@@ -252,13 +254,27 @@ Scenario types and colors:
 
 | File | Layers | Lines |
 |---|---|---|
-| `KaggleEarthquakeOverlay.tsx` | PGA / PGV / MMI (red-yellow) | 204 |
+| `KaggleEarthquakeOverlay.tsx` | PGA / PGV / MMI / Sa (inferno + turbo + viridis + spectral + coolwarm schemes) | 204 |
 | `KaggleFloodOverlay.tsx` | Water depth + terrain (3-mode) | 411 |
 | `KaggleHurricaneOverlay.tsx` | Wind speed + surge + rainfall | 317 |
 | `KaggleLandslideOverlay.tsx` | Debris depth + velocity + runout | 304 |
 | `KaggleTsunamiOverlay.tsx` | Wave height + bathymetry | 203 |
 | `KaggleVolcanoOverlay.tsx` | Ash deposit + lava thickness | 304 |
 | `KaggleWildfireOverlay.tsx` | Fire intensity + fire state | 205 |
+
+**Kaggle GPU simulation kernels (`kaggle-kernels/`, 7 sims)** — each is a self-contained Python runnable on Kaggle CPU/GPU, orchestrated by `server/kaggle/simRunner.ts` and pushed to the 3D globe via the overlays above:
+
+| Kernel | Physics | Notes |
+|---|---|---|
+| `earthquake-sim/main.py` | 3D elastic wave equation (leapfrog) + NGA-West2 GMPE → PGA/PGV/Sa/MMI ShakeMap | Upgraded from 2D to full 3D displacement formulation (ux, uy, uz) |
+| `tsunami-sim/main.py` | Finite-volume shallow-water equations (MUSCL + minmod + HLL fluxes) via `swe_solver.py` | Real GEBCO 2020 bathymetry sampled server-side (`server/kaggle/bathymetry.ts`); synthetic bowl is only the fallback |
+| `volcano-sim/main.py` | Conservative Rusanov lava shallow-water solver + buoyant Morton-Taylor plume + ash advection-diffusion-settling | Real terrain required (no synthetic cone); Enthalpy-porosity solidification, Arrhenius viscosity |
+| `landslide-sim/main.py` | Depth-averaged debris flow on real Cesium terrain | — |
+| `flood-sim/main.py` | Local-inertial SWE + real terrain + ESA WorldCover roughness | — |
+| `hurricane-sim/main.py` | Parametric wind field + surge + rainfall | — |
+| `fire-sim/main.py` | Rothermel fire spread + terrain/wind effects | — |
+
+All kernels ship a `_json_safe` conversion helper so NumPy 2.x scalar types serialize cleanly to JSON on Kaggle.
 
 **Rendering engine (`src/rendering/`, 33 files):**
 
@@ -274,7 +290,7 @@ Scenario types and colors:
 | `osmBuildings.ts` | OSM 3D building extrusion |
 | `surfaceRenderer.ts` | IDW interpolation surface rendering |
 | `gisFusion.ts` | GIS data fusion for risk surfaces |
-| `studyArea.ts` | GeoJSON upload/draw/export/fly-to |
+| `studyArea.ts` | GeoJSON upload/draw/export/fly-to; `getStudyAreaOuterRings` for point-in-polygon sweep filtering |
 | `scenarioEngine.ts` | What-if scenario definition/rollout/diff |
 | `causalGraph.ts` | Noisy-OR causal Bayesian network |
 | `blackboard.ts` | Blackboard pattern for probability writing |
@@ -295,7 +311,7 @@ Scenario types and colors:
 | `ucsSatelliteDb.ts` | UCS satellite database |
 | `shpjs.d.ts` | Shapefile type declarations |
 
-**Hooks (14 total):**
+**Hooks (15 total):**
 
 | Hook | Storage | Purpose |
 |---|---|---|
@@ -313,6 +329,7 @@ Scenario types and colors:
 | `useLocalStorage` | LocalStorage | Generic typed storage |
 | `useUser` | React state | User data fetching |
 | `useApi` | — | Generic API fetcher |
+| `useCollaboration` | WebSocket | Real-time presence: join/heartbeat, typing, cursor position per session |
 
 ### Backend (`server/`)
 
@@ -327,12 +344,12 @@ Scenario types and colors:
 
 | Module | Purpose |
 |--------|---------|
-| `server/index.ts` | Main Express application entry point (~10200 lines) with route registration, middleware, agent system, AI pipeline, and all API integrations |
+| `server/index.ts` | Main Express application entry point (~11000 lines) with route registration, middleware, agent system, AI pipeline, and all API integrations |
 | `server/agent.ts` | Cognitive agent system with command parsing, intent routing, tool registry, and LLM orchestration |
 | `server/analytical-models/` | 150 scientific equation engines with workflow runners, context engine, and REST API |
 | `server/cognition/` | Cognitive architecture: System 1 (fast), System 2 (slow), tree-of-thoughts, MCTS engine, reasoning tree, execution orchestrator |
 | `server/sentinel/` | Ambient intelligence engine: stream processor, anomaly detector, correlation engine, force posture analysis, road traffic detector, proactive insights |
-| `server/foundation-models/` | Earth observation AI models: Prithvi (v1 & v2), IBM CLAY, U-Net segmenter, SAM-Geo, agriculture monitor, weather forecaster, AlphaEarth, SpaceX API, bayesian fire detector, satellite search/seed, MVT tile server |
+| `server/foundation-models/` | Earth observation AI models: Prithvi v2, IBM CLAY, U-Net segmenter, SAM-Geo, agriculture monitor, weather forecaster, AlphaEarth, SpaceX API, bayesian fire detector, MVT tile server |
 | `server/multimodal/` | Multimodal perception: satellite analyzer, seismic processor, radar interpreter, sentiment analyzer, multimodal fusion |
 | `server/scenarios/` | Disaster scenario generation, batch generation, enhanced BBOX-based generation, geographic validation, simulation, export (GeoJSON/CZML/NetCDF), database |
 | `server/simulation/` | Physics simulation bridge for real-world data integration |
@@ -374,7 +391,8 @@ Scenario types and colors:
 | `server/pluginManager.ts` | Plugin manager for extensibility |
 | `server/sandboxManager.ts` | Sandbox execution manager |
 | `server/mcp.ts` | Model Context Protocol integration |
-| `server/costOptimizer.ts` | Model routing, cost tracking, enhanced caching |
+| `server/costOptimizer.ts` | Model routing, cost tracking, enhanced caching (Gemini 2.5 Flash/Pro/Flash-Lite tiers) |
+| `server/kaggle/bathymetry.ts` | GEBCO 2020 seafloor sampler (OpenTopoData) + base64 grid compaction for tsunami runs |
 
 ## API Endpoints
 
@@ -387,9 +405,10 @@ The server exposes hundreds of API endpoints across the following categories:
 - **Aviation:** `/api/flights`, `/api/flights/all`, `/api/flights/military`, `/api/adsb-lol`, `/api/airlabs`, `/api/openflights`, `/api/airspaces`
 - **Maritime:** `/api/ais`, `/api/ais/nearby`, `/api/submarine-cables`
 - **Space:** `/api/satellites/tle`, `/api/space-debris`, `/api/space-weather/kp`, `/api/space-weather/donki`, `/api/nasa-dsn`, `/api/aurora`, `/api/iss`, `/api/spacex/launches`, `/api/spacex/starlink`
-- **Earth Observation:** `/api/fm/prithvi/*`, `/api/fm/prithvi-v2/*`, `/api/fm/clay/*`, `/api/fm/unet/*`, `/api/fm/weather/*`, `/api/fm/agri/*`, `/api/fm/samgeo/*`, `/api/fm/alpha/*`, `/api/fm/search`, `/api/satellite/process`, `/api/tiles/*`, `/api/road-traffic/*`, `/api/bayfire/*`
+- **Earth Observation:** `/api/fm/prithvi-v2/*`, `/api/fm/clay/*`, `/api/fm/unet/*`, `/api/fm/weather/*`, `/api/fm/agri/*`, `/api/fm/samgeo/*`, `/api/fm/alpha/*`, `/api/satellite/process`, `/api/tiles/*`, `/api/road-traffic/*`, `/api/bayfire/*`
 - **Multimodal:** `/api/multimodal/satellite/*`, `/api/multimodal/seismic/*`, `/api/multimodal/radar/*`, `/api/multimodal/sentiment/*`, `/api/multimodal/fusion/*`
 - **Simulation:** `/api/simulate/run`, `/api/simulate/templates`
+- **Kaggle:** `/api/kaggle/simulate`, `/api/kaggle/simulate/:id`, `/api/kaggle/simulate/:id/stream`, `/api/kaggle/simulate/:id/cancel`, `/api/kaggle/simulate/:id/results`, `/api/kaggle/simulate/:id/grid/:name`, `/api/kaggle/simulate/:id/geotiff/:name`, `/api/kaggle/jobs`, `/api/kaggle/kernels`, `/api/kaggle/calibrate`, `/api/kaggle/landslide/quantify`
 - **Scenarios:** `/api/scenarios/generate`, `/api/scenarios/generate-from-bbox`, `/api/scenarios/search`, `/api/scenarios/export/*`
 - **Analytical Models:** `/api/analytical-models`, `/api/analytical-models/search`, `/api/analytical-models/:id`, `/api/analytical-models/:id/execute`
 - **Fork:** `/api/fork/*`
@@ -445,19 +464,24 @@ The EARTH INTELLIGENCE AI panel (`Panel.tsx` wrapper with inline UI in `src/App.
 | 8 | **Code pipeline → 3D globe** | `__GLOBE_COMMANDS__` protocol in sandbox stdout | `data.commands` handler in pipeline SSE | Pipeline sandbox code can emit `__GLOBE_COMMANDS__::[{...}]` markers in stdout. Server extracts the JSON and sends a `globe` SSE event. Client renders pins, polygons, heatmaps, charts on Cesium. |
 | 9 | **RAG over live geospatial databases** | `POST /api/agent/search-all` + tools-v2 generator | Integrated into agent tool selection | Unified `search_all` endpoint routes natural language queries across all databases (earthquakes, weather, fires, flights, vessels, satellites, volcanoes). System prompt updated with explicit Query Planning section mapping intents → tools. |
 
+**Chat UI additions:**
+
+- **Live Process Panel** (`src/components/chat/LiveProcessPanel.tsx`) — Claude Code-style collapsible agent trace: braille-dot spinner, rotating phase verbs, per-step status (classifying, reasoning, tool_execution, synthesis, streaming, …), progress bar and elapsed timer.
+- **Rich markdown** (`RichMarkdown.tsx`) — highlighted code blocks (highlight.js), tables, blockquotes, inline code; `ai-typing-row` replaces the old bouncing-dot indicator.
+- **Virtualized message list** (`VirtualizedMessageList.tsx`) with slim custom scrollbars.
+- **Collaboration presence** — `useCollaboration` broadcasts join/heartbeat/typing/cursor events over the WebSocket per session; `PresenceComponents` render the avatar stack, typing count, and remote input cursor. Paired with an **offline banner** when the AI provider is unreachable (`useOfflineChat`).
+
 ## Panel System
 
 The UI uses a dynamic z-index stacking manager. Panels can be toggled from the toolbar and bring themselves to front when activated.
 
 **Available panels:**
 - Analytics Workbench
-- Intelligence Feed
+- Intelligence Feed (Pulse)
 - Satellite Tracker
-- Satellite Search
 - Satellite Imagery
+- Land Cover Mapper
 - Aviation Tracker
-- Prithvi Earth Observation
-- Military Symbology
 - Fork Manager (multiverse)
 - Scenario Gallery, Editor, Viewer
 - Cinematic Director
@@ -510,6 +534,7 @@ services:
 - **Cesium Ion** – 3D globe terrain and imagery tiles
 - **Redis** – Caching, session store, pub/sub messaging
 - **SQLite** – Application database (auth, scenarios, memory traces, reasoning)
+- **Local ML weights** – downloaded to `public/models/` (see `scripts/download-models.mjs`); Vite serves a true 404 for missing files there so `transformers.js` falls back to Hugging Face instead of parsing `index.html`
 - **Various APIs** – See `.env` for full list of 30+ integrated data providers
 
 ### CI/CD
@@ -558,8 +583,8 @@ npm run build         # TypeScript compilation + Vite production build
 ### Testing
 
 ```bash
-npm test              # Vitest test runner
-npx playwright test   # E2E tests (Playwright)
+npm test              # Vitest test runner (unit + server integration)
+npx playwright test   # E2E tests (Playwright): live render, land-cover mapper, material getType regression (e2e/materialFix.spec.ts)
 ```
 
 ### Production
