@@ -1232,7 +1232,7 @@
                     </div>
                     <h3 class="bento-title">3D Globe Visualization</h3>
                     <p class="bento-desc">
-                        CesiumJS-powered globe supporting custom terrain tilesets and 36 high-frequency rendering modules.
+                        CesiumJS-powered globe with Cesium World Terrain (Ion) and ellipsoid fallback, plus 33 high-frequency rendering modules.
                     </p>
                 </div>
             </div>
@@ -1256,7 +1256,7 @@
                     </div>
                     <h3 class="bento-title">Geospatial Foundation AI</h3>
                     <p class="bento-desc">
-                        Native integration with NASA Prithvi, IBM CLAY, SAM-Geo, and custom neural models for automatic zero-shot land segmentation and change detection.
+                        Native integration with NASA Prithvi v2, IBM CLAY, SAM-Geo, and custom neural models for automatic zero-shot land segmentation and change detection.
                     </p>
                 </div>
             </div>
@@ -1300,7 +1300,7 @@
                     <i data-lucide="zap" style="width:22px;height:22px"></i>
                 </div>
                 <h3 class="sim-title">Earthquake Waves</h3>
-                <p class="sim-desc">Elastic wave propagation & GMPE ShakeMap PGA/PGV/MMI intensity visualization.</p>
+                <p class="sim-desc">3D elastic wave propagation (leapfrog) & NGA-West2 GMPE ShakeMap PGA/PGV/Sa/MMI intensity.</p>
             </div>
 
             <div class="sim-card gpu-layer" style="--accent-color: var(--accent-amber)" data-aos="fade-up" data-aos-delay="200">
@@ -1324,7 +1324,7 @@
                     <i data-lucide="droplets" style="width:22px;height:22px"></i>
                 </div>
                 <h3 class="sim-title">Hydrodynamic Flood</h3>
-                <p class="sim-desc">2D Shallow Water Equations (SWE) with Manning roughness friction solvers.</p>
+                <p class="sim-desc">Local-inertial Shallow Water Equations (SWE) with ESA WorldCover roughness over real terrain.</p>
             </div>
 
             <div class="sim-card gpu-layer" style="--accent-color: #06b6d4" data-aos="fade-up" data-aos-delay="100">
@@ -1332,7 +1332,7 @@
                     <i data-lucide="waves-horizontal" style="width:22px;height:22px"></i>
                 </div>
                 <h3 class="sim-title">Tsunami Propagation</h3>
-                <p class="sim-desc">Linear shallow-water wave propagation with bathymetric refraction and coastal run-up.</p>
+                <p class="sim-desc">Finite-volume shallow-water equations (MUSCL + minmod + HLL fluxes) over real GEBCO 2020 bathymetry.</p>
             </div>
 
             <div class="sim-card gpu-layer" style="--accent-color: #a855f7" data-aos="fade-up" data-aos-delay="200">
@@ -1340,7 +1340,7 @@
                     <i data-lucide="mountain" style="width:22px;height:22px"></i>
                 </div>
                 <h3 class="sim-title">Volcanic Eruption</h3>
-                <p class="sim-desc">Tephra dispersal, lava flow routing, and pyroclastic density current modeling.</p>
+                <p class="sim-desc">Conservative Rusanov lava shallow-water solver, buoyant plume, and ash advection-diffusion-settling.</p>
             </div>
 
             <div class="sim-card gpu-layer" style="--accent-color: #84cc16" data-aos="fade-up" data-aos-delay="300">
@@ -1348,7 +1348,7 @@
                     <i data-lucide="mountain-snow" style="width:22px;height:22px"></i>
                 </div>
                 <h3 class="sim-title">Landslide Debris</h3>
-                <p class="sim-desc">Depth-averaged granular flow with Voellmy friction and terrain-coupled runout.</p>
+                <p class="sim-desc">Depth-averaged debris flow with Voellmy friction law over real Cesium terrain.</p>
             </div>
         </div>
     </section>
@@ -1371,7 +1371,7 @@
                     <i data-lucide="atom" style="width:20px;height:20px;color:var(--accent-blue)"></i>
                 </div>
                 <div>
-                    <div class="tech-title">React 19 + Vite 5</div>
+                    <div class="tech-title">React 19 + Vite 7</div>
                     <div class="tech-desc">Ultra-fast compilation and state management for spatial dashboards.</div>
                 </div>
             </div>
@@ -1382,7 +1382,7 @@
                 </div>
                 <div>
                     <div class="tech-title">CesiumJS 1.140</div>
-                    <div class="tech-desc">WebGPU/WebGL accelerated 3D globe rendering engine.</div>
+                    <div class="tech-desc">WebGL-accelerated 3D globe rendering engine.</div>
                 </div>
             </div>
 
