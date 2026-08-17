@@ -95,6 +95,24 @@ const SOIL_BANDS: ClassificationBand[] = [
   { min: 100, max: Infinity, label: 'Very High', color: '#3b82f6', description: 'Very high' },
 ];
 
+// Stomatal conductance bands (mmol/m²s) per the catalogue's interpretation:
+// <100 near-closed, 100–200 moderate, 200–400 high, >400 very high.
+const STOMATAL_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 100, label: 'Near-Closed', color: '#f97316', description: 'Stomata nearly closed — water stress' },
+  { min: 100, max: 200, label: 'Moderate', color: '#eab308', description: 'Moderate conductance' },
+  { min: 200, max: 400, label: 'High', color: '#22c55e', description: 'Well-watered, active vegetation' },
+  { min: 400, max: Infinity, label: 'Very High', color: '#3b82f6', description: 'Mesic optimal conditions' },
+];
+
+// GPP bands (gC/m²/yr) per the catalogue's interpretation: <500 low,
+// 500–1000 moderate, 1000–2000 high, >2000 tropical-rainforest class.
+const GPP_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 500, label: 'Low', color: '#84cc16', description: 'Deserts, tundra, semi-arid' },
+  { min: 500, max: 1000, label: 'Moderate', color: '#22c55e', description: 'Boreal forests, grasslands, savanna' },
+  { min: 1000, max: 2000, label: 'High', color: '#15803d', description: 'Temperate forests, productive cropland' },
+  { min: 2000, max: Infinity, label: 'Very High', color: '#059669', description: 'Tropical rainforest' },
+];
+
 // Additional shared band sets for Part 4
 const OCEAN_BANDS: ClassificationBand[] = [
   { min: -Infinity, max: 0.1, label: 'Calm', color: '#22c55e', description: 'Calm' },
@@ -2595,33 +2613,53 @@ export const TOOL_48: ToolWorkflowDef = {
   toolId: 48,
   name: 'Surface Layer Similarity Theory',
   vizType: 'profile',
-  classificationBands: SOIL_BANDS,
+  classificationBands: [
+    { min: -Infinity, max: 0.7, label: 'Unstable', color: '#ef4444', description: 'φ_m < 0.7: enhanced mixing, shear below neutral' },
+    { min: 0.7, max: 1.15, label: 'Near-Neutral', color: '#22c55e', description: 'φ_m ≈ 1: logarithmic profile' },
+    { min: 1.15, max: 3, label: 'Stable', color: '#eab308', description: 'φ_m 1–3: mixing suppressed' },
+    { min: 3, max: Infinity, label: 'Very Stable', color: '#3b82f6', description: 'φ_m > 3: strongly damped turbulence' },
+  ],
   validate: (inputs) => {
     const res = validateRange(inputs, [
       { param: 'kappa', min: 0.3, max: 0.5 },
-      { param: 'ustar', min: 0, max: 5 },
       { param: 'z', min: 0, max: 1000 },
+      { param: 'z0M', min: 0.00001, max: 10 },
     ]);
-    const L = inputs.L, z = inputs.z;
+    // u_* and L may legitimately be NaN (no genuine CDS step resolved) —
+    // range-check them only when finite; the engine turns them into an
+    // honest NaN result, not a validation fault.
+    const ustar = inputs.ustar, L = inputs.L, z = inputs.z;
+    if (typeof ustar === 'number' && Number.isFinite(ustar) && (ustar < 0 || ustar > 5)) {
+      res.errors.push(`'ustar' = ${ustar} outside [0, 5] m/s.`);
+    }
     if (typeof L === 'number' && Number.isFinite(L)) {
-      if (Math.abs(L) < 0.01) {
+      if (L < -2000 || L > 2000) {
+        res.errors.push(`'L' = ${L} outside [−2000, 2000] m.`);
+      } else if (Math.abs(L) < 0.01) {
         res.errors.push(`'L' = ${L} too close to zero — L = ±∞ is the neutral limit; supply |L| ≥ 0.01 m.`);
       } else if (typeof z === 'number' && Number.isFinite(z)) {
         const zeta = z / L;
         if (zeta < -2 || zeta > 1) res.warnings.push(`ζ = z/L = ${zeta.toFixed(2)} outside the Högström (1988) validated range (−2 < ζ < 1) — functions evaluated at the bound.`);
       }
     }
+    res.valid = res.errors.length === 0;
     return res;
   },
   preprocess: (inputs, ctx, log) => {
     log.push('  Von Karman constant kappa = 0.40 ± 0.01 (Hogstrom 1988)');
     log.push('  Högström (1988) flux-profile functions (Foken 2006 Eqs 21–22 tabulation)');
-    log.push('  u_* and L from genuine ERA5 reanalysis when available (no static fallbacks)');
+    log.push('  u_* (zust) and L only from genuine CDS ERA5 reanalysis; the Open-Meteo subset proxy is rejected (no static fallbacks)');
+    log.push('  z₀ for r_a from MCD12Q1 land-cover class unless overridden');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, SOIL_BANDS);
+    const c = classify(result, [
+      { min: -Infinity, max: 0.7, label: 'Unstable', color: '#ef4444', description: 'φ_m < 0.7: enhanced mixing, shear below neutral' },
+      { min: 0.7, max: 1.15, label: 'Near-Neutral', color: '#22c55e', description: 'φ_m ≈ 1: logarithmic profile' },
+      { min: 1.15, max: 3, label: 'Stable', color: '#eab308', description: 'φ_m 1–3: mixing suppressed' },
+      { min: 3, max: Infinity, label: 'Very Stable', color: '#3b82f6', description: 'φ_m > 3: strongly damped turbulence' },
+    ]);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -2633,20 +2671,20 @@ export const TOOL_48: ToolWorkflowDef = {
     contributingFactors: [
       { factor: 'Universal function scatter (±10% unstable, more for stable)', contribution: 'Dominant' },
       { factor: 'Roughness sublayer effects', contribution: 'Varies' },
-      { factor: 'Obukhov length derivation (H, u_* from reanalysis)', contribution: 'Varies' },
+      { factor: 'Obukhov length derivation (H, u_* from reanalysis; virtual-temp correction omitted, < ~3%)', contribution: 'Varies' },
     ],
     overallAssessment: 'Monin-Obukhov has 10-20% inherent error in universal functions (Foken 2006).',
   }),
   interpret: (result) => ({
     contextualAnalysis: `Surface Layer Similarity Theory: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A (honest NaN — no genuine L)'}. ζ = z/L with the Högström (1988) flux-profile functions.`,
-    recommendations: ['kappa = 0.40 ± 0.01 (Hogstrom 1988).', 'Högström (1988) flux-profile functions (Foken 2006 table).', 'u_* and L derived from genuine ERA5 zust/sensible heat flux.'],
+    recommendations: ['kappa = 0.40 ± 0.01 (Hogstrom 1988).', 'Högström (1988) flux-profile functions (Foken 2006 table).', 'u_* (zust) and L derived only from genuine CDS ERA5 reanalysis — Open-Meteo subset proxy rejected.'],
   }),
   metadata: {
-    methodology: 'φ_m(ζ) = (κz/u_*)·∂ū/∂z, ζ = z/L; Högström (1988): unstable φ_m = (1−19.3ζ)^(−1/4), φ_h = 0.95(1−11.6ζ)^(−1/2) (−2<ζ<0); stable φ_m = 1+6ζ, φ_h = 0.95+7.8ζ (0<ζ<1); κ = 0.40, φ_h(0) = 0.95.',
+    methodology: 'φ_m(ζ) = (κz/u_*)·∂ū/∂z, ζ = z/L; Högström (1988): unstable φ_m = (1−19.3ζ)^(−1/4), φ_h = 0.95(1−11.6ζ)^(−1/2) (−2<ζ<0); stable φ_m = 1+6ζ, φ_h = 0.95+7.8ζ (0<ζ<1); κ = 0.40, φ_h(0) = 0.95. ψ_m/ψ_h exact integrals; r_a = [ln(z/z₀)−ψ_m]/(κ·u_*).',
     assumptions: ['Horizontally homogeneous surface', 'Stationary conditions', 'Constant flux layer'],
     limitations: ['Breaks down in roughness sublayer', 'Non-stationary conditions', 'Requires genuine u_* and L (no static fallbacks)'],
     references: ['Monin & Obukhov 1954, Trudy Geofiz. Inst. AN SSSR 24(151):163-187', 'Högström 1988, Boundary-Layer Meteorology 42:55-78', 'Foken 2006, Boundary-Layer Meteorology 119:431-447 (coefficient tabulation)'],
-    preprocessingNotes: ['Von Karman constant kappa = 0.40 ± 0.01 (Hogstrom 1988)', 'Högström (1988) flux-profile functions', 'ERA5 zust + sensible heat flux for genuine u_*, L'],
+    preprocessingNotes: ['Von Karman constant kappa = 0.40 ± 0.01 (Hogstrom 1988)', 'Högström (1988) flux-profile functions', 'ERA5 zust + sensible heat flux for genuine u_*, L; proxy rejected'],
   },
   dependencies: [],
 };
@@ -2658,17 +2696,44 @@ export const TOOL_49: ToolWorkflowDef = {
   toolId: 49,
   name: 'Logarithmic Wind Profile',
   vizType: 'profile',
-  classificationBands: SOIL_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'u_star', min: 0, max: 5 }, { param: 'z', min: 0, max: 1000 }, { param: 'z0', min: 0.00001, max: 10 }]),
+  classificationBands: [
+    { min: 0, max: 1, label: 'Calm (0–1 m/s)', color: '#94a3b8', description: 'Light air' },
+    { min: 1, max: 3, label: 'Light (1–3 m/s)', color: '#22c55e', description: 'Light breeze' },
+    { min: 3, max: 6, label: 'Moderate (3–6 m/s)', color: '#eab308', description: 'Typical daytime wind' },
+    { min: 6, max: 10, label: 'Strong (6–10 m/s)', color: '#f97316', description: 'Wind energy viable' },
+    { min: 10, max: Infinity, label: 'Very Strong (> 10 m/s)', color: '#ef4444', description: 'Storm / high resource' },
+  ],
+  validate: (inputs) => {
+    // NOTE: keys must match the engine mapInputs names for tool 49
+    // ('ustar'/'z'/'z0') — the former 'u_star' key never matched, silently
+    // skipping friction-velocity validation.
+    const res = validateRange(inputs, [
+      { param: 'ustar', min: 0, max: 5 },
+      { param: 'z', min: 0, max: 1000 },
+      { param: 'z0', min: 0.00001, max: 10 },
+    ]);
+    const ustar = inputs.ustar, z = inputs.z, z0 = inputs.z0;
+    if (typeof ustar === 'number' && Number.isFinite(ustar) && typeof z === 'number' && Number.isFinite(z)
+      && typeof z0 === 'number' && Number.isFinite(z0) && z0 > 0 && z > z0) {
+      if (z < 5 * z0) res.warnings.push(`z = ${z} m is < 5×z₀ — log law converging; interpret with care.`);
+    }
+    return res;
+  },
   preprocess: (inputs, ctx, log) => {
-    log.push('  Roughness length z0 from ESA WorldCover land cover');
-    log.push('  Friction velocity from multi-level wind');
-    log.push('  Neutral stability assumption');
+    log.push('  u_*: genuine ERA5 friction velocity (zust) via CDS when available; honest NaN otherwise');
+    log.push('  Roughness length z0 from genuine MCD12Q1 IGBP land-cover class');
+    log.push('  Neutral stability assumption (MO correction via tool 48 otherwise)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, SOIL_BANDS);
+    const c = classify(result, [
+      { min: 0, max: 1, label: 'Calm (0–1 m/s)', color: '#94a3b8', description: 'Light air' },
+      { min: 1, max: 3, label: 'Light (1–3 m/s)', color: '#22c55e', description: 'Light breeze' },
+      { min: 3, max: 6, label: 'Moderate (3–6 m/s)', color: '#eab308', description: 'Typical daytime wind' },
+      { min: 6, max: 10, label: 'Strong (6–10 m/s)', color: '#f97316', description: 'Wind energy viable' },
+      { min: 10, max: Infinity, label: 'Very Strong (> 10 m/s)', color: '#ef4444', description: 'Storm / high resource' },
+    ]);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -2678,22 +2743,22 @@ export const TOOL_49: ToolWorkflowDef = {
     rmse: 15,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'z0 estimation', contribution: 'Varies' },
-      { factor: 'Stability correction', contribution: 'Varies' },
-      { factor: 'Surface heterogeneity', contribution: 'Varies' },
+      { factor: 'z0 estimation from land-cover class', contribution: 'Dominant' },
+      { factor: 'Stability correction (neutral assumption)', contribution: 'Varies' },
+      { factor: 'Surface heterogeneity / canopy sublayer', contribution: 'Varies' },
     ],
-    overallAssessment: 'Log law has +/- 15% uncertainty. z0 from land cover classification.',
+    overallAssessment: 'Log law has +/- 15% uncertainty; z0 from the MCD12Q1 IGBP class table is the dominant error source.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Logarithmic Wind Profile: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Log wind: u(z) = (u*/kappa) * ln(z/z0). Neutral conditions only. z0 from land cover.`,
-    recommendations: ['z0 from ESA WorldCover (water ~0.0001, forest ~1).', 'Add stability correction for non-neutral.', 'Use multi-level wind (10m + 80m).'],
+    contextualAnalysis: `Logarithmic Wind Profile: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A (honest NaN — no genuine u_*)'} m/s. u(z) = (u_*/κ)·ln(z/z₀), neutral stratification, Stull 1988 Ch. 4.`,
+    recommendations: ['Add stability correction for non-neutral conditions (tool 48).', 'Verify z₀ against local anemometry for energy assessment.', 'z ≫ z₀ required (z ≥ 5×z₀).'],
   }),
   metadata: {
-    methodology: 'Log wind: u(z) = (u*/kappa) * ln(z/z0). Neutral conditions only. z0 from land cover.',
+    methodology: 'u(z) = (u_*/κ)·ln(z/z₀) with κ = 0.4 (Stull 1988 Ch. 4, p. 376). u_* = genuine ERA5 zust via CDS when available, else honest NaN; z₀ from the MCD12Q1 IGBP class table, else NaN.',
     assumptions: ['Neutral stability', 'Horizontally homogeneous', 'Above roughness sublayer'],
-    limitations: ['Not for stable/unstable without correction', 'z0 is subjective', 'Fails in complex terrain'],
-    references: ['Prandtl 1925, ZAMM 5(2):136-139'],
-    preprocessingNotes: ['Roughness length z0 from ESA WorldCover land cover', 'Friction velocity from multi-level wind', 'Neutral stability assumption'],
+    limitations: ['Not for stable/unstable without correction', 'z0 from class table is ±~50%', 'Fails in complex terrain'],
+    references: ['Stull, R.B. 1988, An Introduction to Boundary Layer Meteorology, Kluwer, DOI: 10.1007/978-94-009-3027-8 (Ch. 4)'],
+    preprocessingNotes: ['Roughness length z0 from MCD12Q1 IGBP land cover', 'u_* from genuine ERA5 (zust) when available', 'Neutral stability assumption'],
   },
   dependencies: [],
 };
@@ -2705,17 +2770,17 @@ export const TOOL_50: ToolWorkflowDef = {
   toolId: 50,
   name: 'Stomatal Conductance Model',
   vizType: 'scalar',
-  classificationBands: SOIL_BANDS,
+  classificationBands: STOMATAL_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'g0', min: 0, max: 100 }, { param: 'a1', min: 0, max: 20 }, { param: 'A', min: 0, max: 50 }, { param: 'hs', min: 0, max: 1 }, { param: 'cs', min: 100, max: 1000 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Use Leuning (1995) revision for VPD handling');
-    log.push('  CO2 from OCO-2/3 satellite');
-    log.push('  Photosynthesis from FLUXNET');
+    log.push('  CO2 from NOAA GML global monthly mean');
+    log.push('  Photosynthesis from MODIS MOD17A2H GPP (ORNL DAAC)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, SOIL_BANDS);
+    const c = classify(result, STOMATAL_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -2740,7 +2805,7 @@ export const TOOL_50: ToolWorkflowDef = {
     assumptions: ['Well-watered conditions', 'Constant a1, g0', 'Leaf-level scale'],
     limitations: ['Diverges at low cs in original form', 'Parameters species-specific', 'Not for water-stressed plants'],
     references: ['Ball et al. 1987', 'Leuning 1995, Plant Cell Environ. 18:339-355'],
-    preprocessingNotes: ['Use Leuning (1995) revision for VPD handling', 'CO2 from OCO-2/3 satellite', 'Photosynthesis from FLUXNET'],
+    preprocessingNotes: ['Use Leuning (1995) revision for VPD handling', 'CO2 from NOAA GML global monthly mean', 'Photosynthesis from MODIS MOD17A2H GPP (ORNL DAAC)'],
   },
   dependencies: [],
 };
@@ -2752,17 +2817,17 @@ export const TOOL_51: ToolWorkflowDef = {
   toolId: 51,
   name: 'Gross Primary Production',
   vizType: 'timeseries',
-  classificationBands: CARBON_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'eps', min: 0, max: 5 }, { param: 'fPAR', min: 0, max: 1 }, { param: 'PAR', min: 0, max: 10000 }]),
+  classificationBands: GPP_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'eps', min: 0, max: 5 }, { param: 'fpar', min: 0, max: 1 }, { param: 'par', min: 0, max: 10000 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  fPAR from MODIS MCD15A3H');
-    log.push('  PAR from SW radiation x 2.02 (approximate)');
+    log.push('  PAR = SW x 0.45 (PAR fraction) x 0.0864 (W->MJ/day) x 365');
     log.push('  Validate with MODIS MOD17');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, CARBON_BANDS);
+    const c = classify(result, GPP_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -2779,15 +2844,15 @@ export const TOOL_51: ToolWorkflowDef = {
     overallAssessment: 'Monteith LUE GPP has +/- 20-30% uncertainty. MODIS MOD17 is standard product.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Gross Primary Production: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. GPP = epsilon * fPAR * PAR. PAR ~ 0.495 * SW (x 2.02 inverse).`,
-    recommendations: ['PAR = SW x 2.02 is approximate (+/- 10%).', 'fPAR from MODIS MCD15A3H.', 'Validate with MOD17 and FLUXNET.'],
+    contextualAnalysis: `Gross Primary Production: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. GPP = epsilon * fPAR * PAR. PAR = SW x 0.45 x 0.0864 x 365 (MJ/m2/yr).`,
+    recommendations: ['PAR = SW x 0.45 x 0.0864 x 365 (Monteith 1972 PAR fraction).', 'fPAR from MODIS MCD15A3H.', 'Validate with MOD17 and FLUXNET.'],
   }),
   metadata: {
-    methodology: 'GPP = epsilon * fPAR * PAR. PAR ~ 0.495 * SW (x 2.02 inverse).',
+    methodology: 'GPP = epsilon * fPAR * PAR. PAR = SW x 0.45 (PAR fraction) x 0.0864 (W->MJ/day) x 365.',
     assumptions: ['Constant LUE', 'fPAR accurately retrieved', 'PAR well estimated'],
     limitations: ['LUE varies with stress', 'PAR approximation error', 'fPAR saturates at high LAI'],
-    references: ['Monteith 1977, Phil. Trans. R. Soc. B 281:277-294', 'MODIS MOD17 product'],
-    preprocessingNotes: ['fPAR from MODIS MCD15A3H', 'PAR from SW radiation x 2.02 (approximate)', 'Validate with MODIS MOD17'],
+    references: ['Monteith 1972, J. Appl. Ecol. 9(3):747-766', 'MODIS MOD17 product'],
+    preprocessingNotes: ['fPAR from MODIS MCD15A3H', 'PAR = SW x 0.45 x 0.0864 x 365 (genuine shortwave)', 'Validate with MODIS MOD17'],
   },
   dependencies: [],
 };

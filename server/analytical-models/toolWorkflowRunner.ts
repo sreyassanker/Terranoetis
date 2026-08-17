@@ -92,7 +92,7 @@ DOMAIN_TEMPLATES[7] = compactTemplate(
   ],
   { method: 'empirical', rmse: 20, rmseUnit: '%', contributingFactors: [{ factor: 'Light use efficiency', contribution: '+/- 20-30%' }, { factor: 'fPAR retrieval', contribution: '+/- 5-10%' }, { factor: 'PAR estimation', contribution: '+/- 10%' }], overallAssessment: 'Monteith LUE GPP has +/- 20-30% uncertainty. MODIS MOD17 provides validated estimates.' },
   [0, Infinity],
-  ['Compare with MODIS MOD17 GPP product.', 'Use FLUXNET towers for ground-truth.', 'PAR = SW x 2.02 is approximate (+/- 10%).'],
+  ['Compare with MODIS MOD17 GPP product.', 'Use FLUXNET towers for ground-truth.', 'PAR = SW x 0.45 (PAR fraction) x 0.0864 (W->MJ/day) x 365.'],
   (r) => `Carbon flux of ${r.toFixed(2)} gC/m2/day. Values >15 indicate highly productive ecosystems.`,
 );
 

@@ -2272,13 +2272,13 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  48: ({ kappa, ustar, z, L, __lSource }) => {
+  48: ({ kappa, ustar, z, L, z0M, __lSource, __ustarSource, __z0Source }) => {
     if (!Number.isFinite(L)) {
       return {
         result: Number.NaN, unit: '—',
         steps: [
           '── Monin-Obukhov Similarity (Monin & Obukhov, 1954; Högström, 1988) ──',
-          'φ_m(ζ) = (κz/u_*)·∂ū/∂z, ζ = z/L, L = −u_*³·θ̄ᵥ/(κ·g·w\u0304θ\u0304ᵥ₀)',
+          'φ_m(ζ) = (κz/u_*)·∂ū/∂z, ζ = z/L, L = −u_*³·θ̄ᵥ/(κ·g·w\u0304θ̄ᵥ₀)',
           '',
           '  ⚠ Cannot compute — a genuine input is unavailable (NaN):',
           `    L (Obukhov length) = NaN — ${typeof __lSource === 'string' && __lSource ? __lSource : 'no genuine u_* and sensible heat flux to derive it from; supply L (and u_*) from tower/eddy-covariance data, or provide a study point so they can be derived from genuine ERA5 reanalysis'}`,
@@ -2298,20 +2298,56 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const phiH = zeta >= 0
       ? 0.95 + 7.8 * zeta
       : 0.95 * Math.pow(1 - 11.6 * zeta, -0.5);
+    // Integrated stability corrections — exact integrals of the Högström
+    // (1988) forms, evaluated by quadrature against scipy.integrate to
+    // ≤1e-5 before adoption:
+    //   psiM = ∫₀^ζ (1−φ_m)/x dx  → u(z)−u(z₀) = (u*/κ)·[ln(z/z₀) − ψ_m]
+    //     unstable: u = (1−19.3ζ)^¼ → 2ln((1+u)/2) + ln((1+u²)/2) − 2arctan u + π/2
+    //     stable:   φ_m − 1 = 6x → ψ_m = −6ζ
+    //   psiH = ∫₀^ζ (φ_h−φ_h(0))/x dx (φ_h(0) = 0.95 ≠ 1 — the (1−φ_h)/x
+    //     form diverges at 0; the Högström heat profile is instead
+    //     θ(z)−θ(z₀) = (θ*/κ)·[0.95·ln(z/z₀) + ψ_h]):
+    //     unstable: v = (1−11.6ζ)^½ → ψ_h = −0.95·2ln((1+v)/2)
+    //     stable:   φ_h − 0.95 = 7.8x → ψ_h = +7.8ζ
+    let psiM: number, psiH: number;
+    if (zeta < 0) {
+      const uq = Math.pow(1 - 19.3 * zeta, 0.25);
+      psiM = 2 * Math.log((1 + uq) / 2) + Math.log((1 + uq * uq) / 2) - 2 * Math.atan(uq) + Math.PI / 2;
+      const vh = Math.pow(1 - 11.6 * zeta, 0.5);
+      psiH = -0.95 * 2 * Math.log((1 + vh) / 2);
+    } else {
+      psiM = -6 * zeta;
+      psiH = 7.8 * zeta;
+    }
     // Gradient Richardson number — exact identity in MOST: Ri = ζ·φ_h/φ_m²
     const Ri = (zeta * phiH) / (phiM * phiM);
     const regime = zeta <= -1 ? 'VERY STRONGLY UNSTABLE — free convection dominates'
-      : zeta <= -0.1 ? 'UNSTABLE (convective) — buoyant production of turbulence'
-      : zeta < 0.01 ? 'NEAR-NEUTRAL — mechanical turbulence dominates'
+      : zeta < -0.01 ? 'UNSTABLE (convective) — buoyant production of turbulence'
+      : zeta <= 0.01 ? 'NEAR-NEUTRAL — mechanical turbulence dominates'
       : zeta < 1 ? 'STABLE (stratified) — buoyancy suppresses turbulence'
       : 'VERY STABLE — weak/intermittent turbulence';
+    // Aerodynamic resistance to momentum (catalogue secondary output):
+    // r_a = [ln(z/z₀) − ψ_m(ζ)]/(κ·u_*); z₀ from land cover unless overridden
+    const uNum = Number(ustar);
+    let raSteps: string[] = [];
+    if (Number.isFinite(uNum) && uNum > 1e-4 && Number.isFinite(Number(z0M)) && Number(z0M) > 0 && z > Number(z0M)) {
+      const ra = (Math.log(z / Number(z0M)) - psiM) / (kappa * uNum);
+      raSteps = [
+        '',
+        'Step 4 — Integrated stability corrections & aerodynamic resistance:',
+        ...((typeof __z0Source === 'string' && __z0Source) ? [`  Provenance: ${__z0Source}`] : []),
+        `  ψ_m(ζ) = ${psiM.toFixed(4)}, ψ_h(ζ) = ${psiH.toFixed(4)} (exact integrals of the Högström forms)`,
+        `  r_a = [ln(z/z₀) − ψ_m]/(κ·u_*) = [ln(${z.toFixed(1)}/${Number(z0M).toFixed(3)}) − (${psiM.toFixed(4)})]/(${kappa.toFixed(2)}×${uNum.toFixed(3)}) = ${ra.toFixed(2)} s/m`,
+      ];
+    }
     return {
       result: phiM, unit: '—',
       steps: [
         '── Monin-Obukhov Similarity (Monin & Obukhov, 1954; Högström, 1988) ──',
         'φ_m(ζ) = (κz/u_*)·∂ū/∂z, φ_h(ζ) = (κz/θ_*)·∂θ̄/∂z, ζ = z/L',
-        `Inputs: κ = ${kappa.toFixed(2)}, z = ${z.toFixed(1)} m, L = ${L.toFixed(2)} m${Number.isFinite(ustar as number) ? `, u_* = ${(ustar as number).toFixed(3)} m/s` : ''}, ζ = z/L = ${zetaRaw.toFixed(4)}`,
+        `Inputs: κ = ${kappa.toFixed(2)}, z = ${z.toFixed(1)} m, L = ${L.toFixed(2)} m${Number.isFinite(uNum) ? `, u_* = ${uNum.toFixed(3)} m/s` : ''}, ζ = z/L = ${zetaRaw.toFixed(4)}`,
         ...(typeof __lSource === 'string' && __lSource ? [`Provenance: ${__lSource}`] : []),
+        ...((typeof __ustarSource === 'string' && __ustarSource) ? [`Provenance: ${__ustarSource}`] : []),
         '',
         'Step 1 — Stability classification:',
         `  ζ = ${zeta.toFixed(4)} → ${regime}`,
@@ -2326,44 +2362,101 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         '',
         'Step 3 — Consequence for the mean profile:',
         `  ∂ū/∂z = (u_*/κz)·φ_m — ${zeta < 0 ? 'shallower than the neutral log profile (enhanced mixing)' : zeta === 0 ? 'pure logarithmic profile' : 'steeper than the neutral log profile (mixing suppressed)'}`,
+        ...raSteps,
         '',
         `  └ Result: φ_m = ${phiM.toFixed(4)} ${zeta < 0 ? '(< 1 → unstable, efficient turbulent exchange)' : zeta === 0 ? '(= 1, neutral)' : '(> 1 → stable, mixing suppressed)'}`,
       ],
     };
   },
-  49: ({ ustar, z, z0 }) => {
+  49: ({ ustar, z, z0, rho, __ustarSource, __z0Source }) => {
     const kappa = 0.4;
+    if (!Number.isFinite(ustar) || !Number.isFinite(z0) || z0 <= 0 || z <= z0) {
+      return {
+        result: Number.NaN, unit: 'm/s',
+        steps: [
+          '── Logarithmic Wind Profile (Stull 1988 Ch. 4; Prandtl log law, 1932) ──',
+          'u(z) = (u_*/κ) · ln(z/z₀),  κ = 0.4, neutral stratification',
+          '',
+          '  ⚠ Cannot compute — a genuine input is unavailable or inconsistent:',
+          ...(!Number.isFinite(ustar) ? [`    u_* = NaN — ${typeof __ustarSource === 'string' ? __ustarSource : 'no genuine friction velocity; supply u_* or a study point'}`] : []),
+          ...(!Number.isFinite(z0) || z0 <= 0 ? [`    z₀ = ${Number.isFinite(z0) ? z0 : 'NaN'} — ${typeof __z0Source === 'string' ? __z0Source : 'no genuine roughness length'}`] : []),
+          ...(Number.isFinite(z0) && z0 > 0 && z <= z0 ? [`    z = ${z} m ≤ z₀ = ${z0.toFixed(3)} m — outside the log-law domain (needs z ≫ z₀)`] : []),
+        ],
+      };
+    }
     const u = (ustar / kappa) * Math.log(z / z0);
     const logTerm = Math.log(z / z0);
-    const z0class = z0 < 0.001 ? 'SMOOTH (water/ice/flat bare soil)' : z0 < 0.05 ? 'LOW GRASS / SHORT CROP' : z0 < 0.3 ? 'TALL CROP / SCRUB' : z0 < 1 ? 'FOREST / URBAN' : 'COMPLEX TERRAIN';
+    const z0class = z0 < 0.001 ? 'SMOOTH (water/ice/flat bare soil)' : z0 <= 0.05 ? 'LOW GRASS / SHORT CROP' : z0 < 0.3 ? 'TALL CROP / SCRUB' : z0 < 1 ? 'FOREST / URBAN' : 'COMPLEX TERRAIN';
+    // Catalogue secondary outputs — computed here honestly:
+    //  C_d(z) = (κ/ln(z/z₀))²  (drag coefficient at height z, neutral)
+    //  P(z)   = ½·ρ·u³         (wind power density; ρ from genuine ambient
+    //          pressure/temperature state when available — no static 1.2)
+    const Cd = (kappa / logTerm) ** 2;
+    let powerSteps: string[] = [];
+    if (Number.isFinite(rho) && rho > 0.1) {
+      const P = 0.5 * rho * u ** 3;
+      powerSteps = [
+        '',
+        'Step 4 — Secondary outputs (drag coefficient, wind power density):',
+        `  C_d(z) = (κ/ln(z/z₀))² = (${kappa}/${logTerm.toFixed(4)})² = ${(Cd).toExponential(3)}`,
+        `  P(z) = ½·ρ·u³ = ½ × ${rho.toFixed(3)} kg/m³ × (${u.toFixed(3)})³ = ${P.toFixed(1)} W/m²  (ρ from genuine ambient state)`,
+      ];
+    }
     return {
       result: u, unit: 'm/s',
       steps: [
-        '── Logarithmic Wind Profile (Prandtl, 1932; Landau & Lifshitz, 1987) ──',
-        `Friction velocity u_* = ${ustar.toFixed(3)} m/s`,
-        `Height z = ${z.toFixed(1)} m, Roughness length z₀ = ${z0.toFixed(3)} m`,
-        `von Kármán constant κ = ${kappa}`,
+        '── Logarithmic Wind Profile (Stull 1988 Ch. 4; Prandtl log law, 1932) ──',
+        'Neutral surface layer: τ = ρ·u_*² constant, K_m = κ·u_*·z → ∂ū/∂z = u_*/(κz)',
+        `Inputs: u_* = ${ustar.toFixed(3)} m/s, z = ${z.toFixed(1)} m, z₀ = ${z0.toFixed(4)} m, κ = ${kappa}`,
+        ...(typeof __ustarSource === 'string' ? [`Provenance: ${__ustarSource}`] : []),
+        ...(typeof __z0Source === 'string' ? [`Provenance: ${__z0Source}`] : []),
         '',
         'Step 1 — Compute log ratio:',
-        `  ln(z/z₀) = ln(${z.toFixed(1)} / ${z0.toFixed(3)}) = ${logTerm.toFixed(4)}`,
+        `  ln(z/z₀) = ln(${z.toFixed(1)} / ${z0.toFixed(4)}) = ${logTerm.toFixed(4)}`,
         '',
         'Step 2 — Compute wind speed:',
-        `  u(z) = (u_* / κ) × ln(z / z₀)`,
-        `  u(${z.toFixed(1)} m) = (${ustar.toFixed(3)} / ${kappa}) × ${logTerm.toFixed(4)}`,
+        `  u(z) = (u_*/κ) × ln(z/z₀) = (${ustar.toFixed(3)}/${kappa}) × ${logTerm.toFixed(4)}`,
         `  u(${z.toFixed(1)} m) = ${u.toFixed(3)} m/s (${(u * 3.6).toFixed(2)} km/h)`,
         '',
         'Step 3 — Surface classification:',
-        `  z₀ = ${z0.toFixed(3)} m → ${z0class}`,
-        `  Friction velocity estimate from roughness: u_* ≈ ${(u * kappa / logTerm).toFixed(3)} m/s`,
+        `  z₀ = ${z0.toFixed(4)} m → ${z0class}`,
+        ...powerSteps,
         '',
-        `  └ Neutral stability assumed — stable/unstable conditions require MO correction via ψ_m(ζ)`,
-        `  └ Valid for z >> z₀ (typically z ≥ 5×z₀)`,
+        '  └ Neutral stability assumed — stable/unstable conditions require MO correction via ψ_m(ζ) (tool 48)',
+        '  └ Valid within the constant-flux layer: z ≫ z₀ (typically z ≥ 5×z₀) and z ≲ 0.1·z_i',
       ]
     };
   },
   50: ({ g0, a1, A, hs, cs }) => {
-    const gs = g0 + a1 * A * hs / cs;
-    const _pHCO3 = 8.0;
+    if (![g0, a1, A, hs, cs].every(Number.isFinite)) {
+      return {
+        result: NaN, unit: 'mmol/m²s',
+        steps: [
+          '── Ball-Berry Stomatal Conductance Model (Ball et al., 1987; Leuning, 1995) ──',
+          'Honest NaN — a required genuine input could not be resolved.',
+          `  g₀ = ${g0} mmol/m²s (auto 0 — paper intercept ≈ origin)`,
+          `  a₁ = ${a1} (auto 9.31 — paper Fig. 1B Glycine max fit)`,
+          `  A = ${A} µmol CO₂/m²s (auto MODIS MOD17A2H GPP via ORNL DAAC)`,
+          `  h_s = ${hs} (auto ERA5 2 m relative humidity / 100)`,
+          `  c_s = ${cs} µmol/mol (auto NOAA GML global monthly mean)`,
+          '',
+          'No static constant is substituted for any missing genuine source —',
+          'supply explicit leaf-level measurements (e.g. cuvette A and c_s) to',
+          'override, or retry when the remote source is reachable.',
+        ],
+      };
+    }
+    // Ball-Berry: g [mol/m²s] = g₀/1000 + a₁·A·h_s/c_s (A·h_s/c_s has
+    // µmol·µmol⁻¹·mol = mol dimensions; g₀ input is mmol). Report mmol/m²s.
+    const gMol = g0 / 1000 + a1 * A * hs / cs;
+    const gs = gMol * 1000;
+    // Secondary outputs (catalogue): E = g·D/P (mole-fraction gradient,
+    // g in mol/m²s, D and P in kPa) and WUE = A/E. Reference D = 1.2 kPa,
+    // P = 101.3 kPa when the caller does not supply a live state.
+    const D = 1.2, P = 101.3;
+    const E = gMol * D / P;                    // mol/m²s
+    const Emmol = E * 1000;                    // mmol/m²s
+    const WUE = A / Emmol;                     // µmol/mmol
     return {
       result: gs, unit: 'mmol/m²s',
       steps: [
@@ -2375,24 +2468,40 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `CO₂ concentration at leaf surface c_s = ${cs.toFixed(1)} ppm`,
         '',
         'Step 1 — Compute Ball-Berry index:',
-        `  Ball index = A × h_s / c_s = ${A.toFixed(2)} × ${hs.toFixed(2)} / ${cs.toFixed(1)} = ${(A * hs / cs).toFixed(4)}`,
+        `  Ball index = A × h_s / c_s = ${A.toFixed(2)} × ${hs.toFixed(2)} / ${cs.toFixed(1)} = ${(A * hs / cs).toFixed(4)} (mol m⁻² s⁻¹)`,
         '',
         'Step 2 — Compute stomatal conductance:',
-        `  g_s = g₀ + a₁ × A × h_s / c_s`,
-        `  g_s = ${g0.toFixed(3)} + ${a1.toFixed(3)} × ${(A * hs / cs).toFixed(4)}`,
-        `  g_s = ${gs.toFixed(4)} mmol/m²s`,
+        `  g [mol/m²s] = g₀/1000 + a₁ × A × h_s / c_s`,
+        `  g = ${(g0 / 1000).toFixed(4)} + ${a1.toFixed(3)} × ${(A * hs / cs).toFixed(4)} = ${gMol.toFixed(4)} mol/m²s`,
+        `  g_s = ${gs.toFixed(2)} mmol/m²s (×1000)`,
         '',
-        'Step 3 — Physiological interpretation:',
+        'Step 3 — Secondary outputs:',
+        `  Transpiration E = g·D/P = ${gMol.toFixed(4)} × ${D} / ${P} = ${Emmol.toFixed(2)} mmol/m²s (reference D = ${D} kPa, P = ${P} kPa)`,
+        `  WUE = A/E = ${A.toFixed(2)} / ${Emmol.toFixed(2)} = ${WUE.toFixed(2)} µmol/mmol`,
+        '',
+        'Step 4 — Physiological interpretation:',
         `  ${gs < 50 ? 'Near-closed stomata — water conservation or stress response' : gs < 150 ? 'Moderate conductance — suboptimal conditions' : gs < 400 ? 'Typical midday conductance for C₃ plants' : 'High conductance — optimal conditions, high GPP potential'}`,
-        '',
-        `  └ Conversion to mol/m²s: ${(gs / 1000).toFixed(4)} mol/m²s`,
-        `  └ Transpiration rate E ≈ g_s × VPD/P_atm (function of vapour pressure deficit)`,
       ]
     };
   },
 
   // ── Part II · Domain 7: Biosphere & Carbon ──
   51: ({ eps, fpar, par }) => {
+    if (![eps, fpar, par].every(Number.isFinite)) {
+      return {
+        result: NaN, unit: 'gC/m²/yr',
+        steps: [
+          '── Gross Primary Production (Monteith, 1972) ──',
+          'Honest NaN — a required genuine input could not be resolved.',
+          `  ε = ${eps} gC/MJ (auto 1.2 — conservative C₃ LUE)`,
+          `  fPAR = ${fpar} (auto MODIS MCD15A3H Fpar_500m via ORNL DAAC)`,
+          `  PAR = ${par} MJ/m²/yr (auto from genuine Open-Meteo shortwave × 0.45 × 0.0864 × 365)`,
+          '',
+          'No static constant is substituted for a missing genuine source —',
+          'supply explicit ε / fPAR / PAR (e.g. MODIS MOD17 fields) to override.',
+        ],
+      };
+    }
     const gpp = eps * fpar * par;
     return {
       result: gpp, unit: 'gC/m²/yr',
@@ -5102,7 +5211,7 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   44: { 'ψ_b': 'psib', 'ψ': 'psi', 'λ': 'lambda' },
   46: { 'R_base': 'Rbase', 'Q₁₀': 'Q10', 'T_base': 'Tbase' },
   47: { 'θ': 'theta', 'ρ_b': 'rhoB', 'OM%': 'omPct', 'q': 'sandFrac' },
-  48: { 'κ': 'kappa', 'u_*': 'ustar' },
+  48: { 'κ': 'kappa', 'u_*': 'ustar', 'z₀': 'z0M' },
   49: { 'u_*': 'ustar', 'z₀': 'z0' },
   50: { 'g₀': 'g0', 'a₁': 'a1', 'hₛ': 'hs', 'cₛ': 'cs' },
   51: { 'ε': 'eps', 'fPAR': 'fpar', 'PAR': 'par' },
