@@ -57,9 +57,10 @@ function latToNearest(lat: number, grid: number[]): number {
 }
 
 function lonToNearest(lon: number, grid: number[]): number {
-  // Normalize lon to [0, 360) for PDSI grid
-  const lon360 = ((lon % 360) + 360) % 360;
-  return latToNearest(lon360, grid);
+  // The PDSI grid spans -180…178.75°E. Wrap inputs given in 0–360 form.
+  let lonW = lon;
+  if (lonW > 180) lonW -= 360;
+  return latToNearest(lonW, grid);
 }
 
 /**
@@ -82,15 +83,25 @@ export async function fetchDroughtPDSI(
 
     const text = await resp.text();
     const lines = text.trim().split('\n');
-    const latLine = lines.find(l => l.startsWith('lat'));
-    const lonLine = lines.find(l => l.startsWith('lon'));
 
-    if (!latLine || !lonLine) {
+    // DODS ASCII layout: header line (e.g. "lat[55]") followed by a
+    // comma-separated value list on the next non-empty line.
+    const findGrid = (prefix: string): number[] => {
+      const idx = lines.findIndex(l => l.trim().startsWith(prefix));
+      if (idx < 0) return [];
+      for (let i = idx + 1; i < lines.length; i++) {
+        const nums = lines[i].split(',').map(Number).filter((n): n is number => !isNaN(n));
+        if (nums.length > 0) return nums;
+      }
+      return [];
+    };
+
+    const latGrid = findGrid('lat');
+    const lonGrid = findGrid('lon');
+
+    if (latGrid.length === 0 || lonGrid.length === 0) {
       return { scPDSI: null, droughtClass: 'unknown', date: null, source: null };
     }
-
-    const latGrid = latLine.split(',').slice(1).map(Number).filter(n => !isNaN(n));
-    const lonGrid = lonLine.split(',').slice(1).map(Number).filter(n => !isNaN(n));
 
     const li = latToNearest(lat, latGrid);
     const lj = lonToNearest(lon, lonGrid);
@@ -105,16 +116,38 @@ export async function fetchDroughtPDSI(
     const dataText = await dataResp.text();
     const dataLines = dataText.trim().split('\n');
 
-    // Parse the DAP ASCII response — find the pdsi and time lines
-    const pdsiLine = dataLines.find(l => l.startsWith('pdsi'));
-    const timeLine = dataLines.find(l => l.startsWith('time'));
+    // Parse the DAP ASCII response. The data block is headed by a
+    // descriptor line (e.g. "pdsi.pdsi[12][1][1]") followed by one
+    // comma-separated value line per time step ("[i][0], value").
+    const collectValues = (prefix: string): number[] => {
+      const start = dataLines.findIndex(l => l.trim().startsWith(prefix));
+      if (start < 0) return [];
+      const out: number[] = [];
+      // Per-step format: "[i][0], value" — one line per step.
+      const stepRe = /\[(\d+)\]\[0\],\s*(-?[\d.eE+-]+)/;
+      // Inline format: "val, val, ..." on the next non-empty line.
+      for (let i = start + 1; i < dataLines.length; i++) {
+        const line = dataLines[i].trim();
+        if (line === '' || line.startsWith('Dataset') || line.startsWith('} ')) break;
+        const m = line.match(stepRe);
+        if (m) {
+          const v = Number(m[2]);
+          if (Number.isFinite(v)) out[Number(m[1])] = v;
+        } else if (line.startsWith('[') === false) {
+          const nums = line.split(',').map(Number);
+          nums.forEach((v, k) => { if (Number.isFinite(v)) out[k] = v; });
+          break;
+        }
+      }
+      return out;
+    };
 
-    if (!pdsiLine || !timeLine) {
+    const pdsiValues = collectValues('pdsi.pdsi');
+    const timeValues = collectValues('pdsi.time');
+
+    if (pdsiValues.length === 0) {
       return { scPDSI: null, droughtClass: 'unknown', date: null, source: null };
     }
-
-    const pdsiValues = pdsiLine.split(',').slice(1).map(Number).filter(n => !isNaN(n));
-    const timeValues = timeLine.split(',').slice(1).map(Number).filter(n => !isNaN(n));
 
     // Find most recent valid PDSI value
     let recentPDSI: number | null = null;
@@ -135,7 +168,8 @@ export async function fetchDroughtPDSI(
     // Convert time (hours since 1800-01-01) to YYYY-MM
     let dateStr: string | null = null;
     if (recentTime != null) {
-      const date = new Date((recentTime - 0) * 3600000);
+      const EPOCH_1800_MS = Date.UTC(1800, 0, 1);
+      const date = new Date(EPOCH_1800_MS + recentTime * 3600000);
       dateStr = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
     }
 

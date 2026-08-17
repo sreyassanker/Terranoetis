@@ -1,13 +1,20 @@
 /**
  * GLIMS/RGI Glacier Presence Client
- * ── Global glacier area from RGI v7.0 via WFS ──
+ * ── Genuine glacier inventory from the RGI v7.0 WFS (GLIMS GeoServer) ──
  *
- * Tier 1: GLIMS WFS point query for glacier area at lat/lon
- * Tier 2: Pre-computed 1° glacier-presence grid derived from RGI v7.0
- * Tier 3: Physical model (high-latitude + high-elevation)
+ * Every value returned comes from the real RGI v7.0 glacier outline layers
+ * hosted at glims.org (GeoServer WFS, EPSG:3857). No synthetic models:
  *
- * The pre-computed grid covers 19 RGI regions and includes glacier area
- * fraction per 1° cell.
+ *   Tier 1: exact point intersection — the query location lies ON an RGI
+ *           glacier outline → that glacier's measured area_km2 + name.
+ *   Tier 2: regional search — summed RGI glacier area within a radius box
+ *           around the location (count up to 500 outlines).
+ *   Tier 3: honest zero — the location/region contains no catalogued RGI
+ *           glacier (e.g. Princeton, NJ → 0 km², not an estimate).
+ *
+ * RGI v7.0 first-order region layers and their approximate lat/lon routing
+ * boxes (routing only decides WHICH layer to query; areas are always the
+ * WFS-measured values):
  */
 
 import NodeCache from 'node-cache';
@@ -15,113 +22,163 @@ import NodeCache from 'node-cache';
 const cache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 });
 
 export interface GlacierDataPoint {
-  /** Glacier area fraction in the grid cell [0, 1] */
+  /** Glacier area fraction in the search cell [0, 1] — 1 when the point is on a glacier */
   areaFraction: number | null;
-  /** Glacier area (km²) within the cell */
+  /** Glacier area (km²) — on-glacier area or regional sum within the search radius */
   areaKm2: number | null;
+  /** Name of the glacier when the point sits on one */
+  name?: string | null;
+  /** Search radius used for the regional sum (km) */
+  radiusKm?: number;
   /** Source identifier */
   source: string;
 }
 
-// RGI v7.0 regions with known glacier presence (approximate lat/lon bounds)
-// Format: [latMin, latMax, lonMin, lonMax, typical_area_fraction]
-const RGI_REGIONS: [number, number, number, number, number][] = [
-  [55, 72, -170, -130, 0.08],   // Alaska
-  [44, 62, -145, -110, 0.04],   // Western Canada/US
-  [72, 84, -120, -50, 0.25],    // Arctic Canada North
-  [60, 72, -120, -50, 0.10],    // Arctic Canada South
-  [60, 84, -80, -20, 0.15],     // Greenland Periphery
-  [63, 67, -25, -13, 0.30],     // Iceland
-  [76, 81, 10, 35, 0.40],       // Svalbard
-  [61, 72, 4, 32, 0.05],        // Scandinavia
-  [72, 82, 30, 105, 0.30],      // Russian Arctic
-  [55, 72, 100, 180, 0.05],     // North Asia
-  [43, 48, 6, 12, 0.02],        // Central Europe
-  [38, 44, 40, 50, 0.03],       // Caucasus/Middle East
-  [28, 48, 60, 105, 0.05],      // Central Asia (Himalaya, Tien Shan)
-  [25, 38, 60, 85, 0.02],       // South Asia West
-  [25, 30, 85, 105, 0.03],      // South Asia East
-  [-10, 10, -80, -70, 0.01],    // Low Latitudes (Andes near equator)
-  [-56, -15, -75, -65, 0.05],   // Southern Andes
-  [-48, -40, 165, 175, 0.05],   // New Zealand
-  [-80, -60, -180, 180, 0.50],  // Antarctic & Subantarctic
+const GLIMS_WFS = 'https://www.glims.org/geoserver/ows';
+const RGI_BASE = 'GLIMS:RGI2000-v7.0-G-';
+
+/** [latMin, latMax, lonMin, lonMax, RGI o1 region id] — routing table */
+const RGI_ROUTING: Array<[number, number, number, number, string]> = [
+  [51.5, 72, -173, -131, '01_alaska_epsg3857'],
+  [24, 62, -148, -103, '02_western_canada_usa_epsg3857'],
+  [57, 84, -130, -52, '03_arctic_canada_north_epsg3857'],
+  [58, 67, -85, -61, '04_arctic_canada_south_epsg3857'],
+  [58.5, 84, -75, -15, '05_greenland_periphery_epsg3857'],
+  [63, 67.5, -25, -13, '06_iceland_epsg3857'],
+  [74, 82.5, -10, 62, '07_svalbard_jan_mayen_epsg3857'],
+  [59.5, 72, 4.5, 35, '08_scandinavia_epsg3857'],
+  [63, 84, 29, 180, '09_russian_arctic_epsg3857'],
+  [49, 75, 75, 180, '10_north_asia_epsg3857'],
+  [43, 48.5, 5, 18, '11_central_europe_epsg3857'],
+  [29, 45, 35, 65, '12_caucasus_middle_east_epsg3857'],
+  [29, 52, 62, 105, '13_central_asia_epsg3857'],
+  [25, 39, 60, 85, '14_south_asia_west_epsg3857'],
+  [25, 32, 85, 105, '15_south_asia_east_epsg3857'],
+  [-12, 12, -87, -70, '16_low_latitudes_epsg3857'],
+  [-56.5, -7, -80, -65, '17_southern_andes_epsg3857'],
+  [-48, -35, 165, 179, '18_new_zealand_epsg3857'],
+  [-90, -60, -180, 180, '19_subantarctic_antarctic_islands_epsg3857'],
 ];
 
-function findRgiRegion(lat: number, lon: number): number | null {
-  for (const [lMin, lMax, oMin, oMax, _frac] of RGI_REGIONS) {
-    if (lat >= lMin && lat <= lMax && lon >= oMin && lon <= oMax) return _frac as number;
+function routeLayer(lat: number, lon: number): string | null {
+  for (const [latMin, latMax, lonMin, lonMax, layer] of RGI_ROUTING) {
+    if (lat >= latMin && lat <= latMax && lon >= lonMin && lon <= lonMax) {
+      return RGI_BASE + layer;
+    }
   }
   return null;
 }
 
-function glacierProbability(lat: number, _lon: number, elevation?: number): number {
-  const absLat = Math.abs(lat);
-  const elev = elevation ?? 0;
+const D2R = Math.PI / 180;
 
-  // Glaciers require cold temperatures. Annual mean T < 0°C ≈ f(lat, elev)
-  // Simple model: T_mean ≈ 15 - 0.0065*elev - 0.5*absLat
-  const estAnnualT = 15 - 0.0065 * elev - 0.5 * absLat;
-  if (estAnnualT > 2) return 0; // Too warm
-  if (estAnnualT < -10) return 0.5; // Very cold → high probability in mountains
-  return Math.max(0, Math.min(1, (-estAnnualT + 2) / 12 * 0.3));
+/** Web Mercator (EPSG:3857) projection — the RGI layers' native CRS. */
+function mercX(lon: number): number { return lon * 111319.49079327358; }
+function mercY(lat: number): number {
+  return 6378137 * Math.log(Math.tan(Math.PI / 4 + (lat * D2R) / 2));
+}
+
+interface WfsFeatureProps {
+  area_km2?: number;
+  glac_name?: string;
+  rgi_id?: string;
+  zmed_m?: number;
+}
+
+async function queryRgi(typeName: string, cql: string, count: number): Promise<{
+  total: number; features: Array<{ properties?: WfsFeatureProps }>;
+} | null> {
+  const url =
+    `${GLIMS_WFS}?service=WFS&version=1.1.0&request=GetFeature` +
+    `&typeName=${encodeURIComponent(typeName)}&outputFormat=application%2Fjson` +
+    `&propertyName=area_km2,glac_name,rgi_id,zmed_m` +
+    `&cql_filter=${encodeURIComponent(cql)}&count=${count}`;
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(20000) });
+    if (!resp.ok) return null;
+    const data = await resp.json() as {
+      totalFeatures?: number;
+      features?: Array<{ properties?: WfsFeatureProps }>;
+    };
+    return { total: data.totalFeatures ?? 0, features: data.features ?? [] };
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Fetch glacier data for a given lat/lon.
- * Tier 1: GLIMS WFS query
- * Tier 2: RGI precomputed grid
- * Tier 3: Physical model
+ * Fetch genuine glacier data for a given lat/lon from the RGI v7.0 WFS.
  */
 export async function fetchGlacier(
   lat: number,
   lon: number,
-  elevation?: number,
+  radiusKm: number = 25,
 ): Promise<GlacierDataPoint> {
-  const cacheKey = `glacier:${Math.round(lat)}:${Math.round(lon)}`;
+  const cacheKey = `glacier:${Math.round(lat * 100)}:${Math.round(lon * 100)}:${radiusKm}`;
   const cached = cache.get<GlacierDataPoint>(cacheKey);
   if (cached) return cached;
 
-  // Tier 1: GLIMS WFS
-  try {
-    const wfsUrl =
-      `https://www.glims.org/geoserver/ows?` +
-      `service=WFS&version=1.1.0&request=GetFeature&` +
-      `typeName=GLIMS:GLIMS_Glacier_Outlines&` +
-      `cql_filter=INTERSECTS(entity_geom,POINT(${lon}%20${lat}))&` +
-      `outputFormat=application/json&count=1`;
+  const layer = routeLayer(lat, lon);
+  if (!layer) {
+    // Outside every RGI region definition → no catalogued glacier inventory
+    return { areaFraction: 0, areaKm2: 0, name: null, radiusKm, source: 'rgi-v7-out-of-region' };
+  }
 
-    const resp = await fetch(wfsUrl, { signal: AbortSignal.timeout(10000) });
-    if (resp.ok) {
-      const data = await resp.json() as { totalFeatures?: number };
-      if (data.totalFeatures && data.totalFeatures > 0) {
-        const result: GlacierDataPoint = {
-          areaFraction: 1, // Point is on a glacier
-          areaKm2: null,
-          source: 'glims-wfs-glacier-outlines',
-        };
-        cache.set(cacheKey, result);
-        return result;
-      }
-    }
-  } catch { /* fall through */ }
+  const x = mercX(lon);
+  const y = mercY(lat);
 
-  // Tier 2: RGI precomputed grid
-  const rgiFrac = findRgiRegion(lat, lon);
-  if (rgiFrac != null && rgiFrac > 0) {
+  // Tier 1 — point sits ON a glacier?
+  const point = await queryRgi(layer, `INTERSECTS(the_geom,POINT(${x.toFixed(0)} ${y.toFixed(0)}))`, 1);
+  if (point && point.total > 0) {
+    const p = point.features[0]?.properties ?? {};
+    const areaKm2 = Number(p.area_km2 ?? NaN);
     const result: GlacierDataPoint = {
-      areaFraction: rgiFrac,
-      areaKm2: rgiFrac * 100 * 100, // Rough: fraction × cell area (1° ~ 100km)
-      source: 'rgi-v7-regions',
+      areaFraction: 1,
+      areaKm2: Number.isFinite(areaKm2) ? areaKm2 : null,
+      name: p.glac_name || p.rgi_id || null,
+      radiusKm,
+      source: 'rgi-v7-wfs-outline',
     };
     cache.set(cacheKey, result);
     return result;
   }
 
-  // Tier 3: Physical model
-  const prob = glacierProbability(lat, lon, elevation);
-  return {
-    areaFraction: prob,
-    areaKm2: prob * 100 * 100,
-    source: 'physical-estimate',
+  // Tier 2 — regional glacier sum within the search radius
+  const rMeters = Math.abs(radiusKm) * 1000;
+  const regional = await queryRgi(
+    layer,
+    `BBOX(the_geom,${(x - rMeters).toFixed(0)},${(y - rMeters).toFixed(0)},${(x + rMeters).toFixed(0)},${(y + rMeters).toFixed(0)})`,
+    500,
+  );
+  if (!regional) {
+    // WFS unreachable — be honest instead of inventing a value.
+    return { areaFraction: null, areaKm2: null, name: null, radiusKm, source: 'rgi-v7-wfs-unavailable' };
+  }
+  if (regional.total === 0) {
+    const result: GlacierDataPoint = {
+      areaFraction: 0,
+      areaKm2: 0,
+      name: null,
+      radiusKm,
+      source: 'rgi-v7-wfs-none',
+    };
+    cache.set(cacheKey, result);
+    return result;
+  }
+  let areaSum = 0;
+  let nearestName: string | null = null;
+  for (const f of regional.features) {
+    const p = f.properties ?? {};
+    const a = Number(p.area_km2 ?? 0);
+    if (Number.isFinite(a) && a > 0) areaSum += a;
+    if (!nearestName && p.glac_name) nearestName = p.glac_name;
+  }
+  const result: GlacierDataPoint = {
+    areaFraction: Math.min(1, areaSum / (Math.PI * radiusKm * radiusKm)),
+    areaKm2: Math.round(areaSum * 100) / 100,
+    name: nearestName,
+    radiusKm,
+    source: 'rgi-v7-wfs-regional',
   };
+  cache.set(cacheKey, result);
+  return result;
 }

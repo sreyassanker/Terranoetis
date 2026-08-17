@@ -21,6 +21,7 @@ interface ToolDialogProps {
   color: string;
   onClose: () => void;
   bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
+  polygon?: Array<Array<[number, number]>>;
   onToolResult?: (
     toolId: number, label: string, lat: number, lon: number,
     value?: number, grid?: ToolGrid, unit?: string,
@@ -141,10 +142,17 @@ const GridHeatmap: React.FC<{ grid: ToolGrid; color: string }> = ({ grid }) => {
   );
 };
 
-const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, onToolResult, onClearResult }) => {
+const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, polygon, onToolResult, onClearResult }) => {
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
-  const allowedModes = tool.analysisMeta?.allowedStudyAreaModes ?? ['point'];
-  const defaultMode = allowedModes[0];
+  // When a study area is drawn on the globe, default every tool to bbox/grid
+  // mode so the model is swept across the area's interior and overlaid as IDW
+  // (not collapsed to a single centroid point). The mode toggle remains
+  // available for tools that support more than one spatial selection.
+  const baseModes = tool.analysisMeta?.allowedStudyAreaModes ?? ['point'];
+  const allowedModes: StudyAreaMode[] = bbox && !baseModes.includes('bbox' as StudyAreaMode)
+    ? ['bbox', ...baseModes]
+    : baseModes;
+  const defaultMode: StudyAreaMode = bbox ? 'bbox' : (allowedModes[0] ?? 'point');
   const initialArea: StudyArea = defaultMode === 'bbox' && bbox
     ? { mode: 'bbox' as const, lat: 0, lon: 0, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, lat1: bbox.latMin, lon1: bbox.lonMin, lat2: bbox.latMax, lon2: bbox.lonMax }
     : { ...DEFAULT_STUDY_AREA, mode: defaultMode };
@@ -196,14 +204,20 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, onT
       const payload: Record<string, number> = {};
       if (tool.inputs) for (const inp of tool.inputs) {
         const val = paramValues[inp.symbol]?.trim();
-        payload[inp.symbol] = val ? Number(val) : (inp.default as number);
+        if (val) payload[inp.symbol] = Number(val);
+        // Parameters without a numeric default (and left empty) are NOT
+        // sent as fabricated values — the server derives them genuinely
+        // from live context data or reports honest NaN.
+        else if (inp.default !== undefined && inp.default !== null) {
+          payload[inp.symbol] = inp.default as number;
+        }
       }
       const res = await fetch(`/api/analytical-models/${tool.id}/execute`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           inputs: payload,
           context: {
-            studyArea: { mode: area.mode, point: [area.lat, area.lon], bbox: [[area.latMin, area.lonMin], [area.latMax, area.lonMax]], twoPoints: [[area.lat1, area.lon1], [area.lat2, area.lon2]] },
+            studyArea: { mode: area.mode, point: [area.lat, area.lon], bbox: [[area.latMin, area.lonMin], [area.latMax, area.lonMax]], twoPoints: [[area.lat1, area.lon1], [area.lat2, area.lon2]], polygon: area.mode === 'bbox' ? polygon : undefined },
             time: { granularity: meta?.timeGranularity ?? null, start, end },
             filters: filterValues,
             autoDataSources: meta?.autoDataSources ?? [],
@@ -231,7 +245,7 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, onT
       }
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setRunning(false); }
-  }, [tool.id, tool.inputs, paramValues, area, meta, start, end, filterValues, onToolResult, bbox, tool.name]);
+  }, [tool.id, tool.inputs, paramValues, area, meta, start, end, filterValues, onToolResult, bbox, polygon, tool.name]);
 
   const resultIsFinite = result && Number.isFinite(result.result);
 
@@ -293,19 +307,19 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, onT
         )}
 
         {/* Study Area — only show controls for scientifically relevant modes */}
-        {(meta?.allowedStudyAreaModes ?? ['point']).length > 0 && (
+        {allowedModes.length > 0 && (
         <div style={{ marginBottom: 10 }}>
           <div style={sectionStyle}>
             <MapPin size={10} /> Study Area
-            {(meta?.allowedStudyAreaModes ?? ['point']).length === 1 && (
+            {allowedModes.length === 1 && (
               <span style={{ marginLeft: 4, fontSize: 9, color: color, fontFamily: 'JetBrains Mono, monospace' }}>
-                {STUDY_AREA_MODE_LABELS[(meta?.allowedStudyAreaModes ?? ['point'])[0]]}
+                {STUDY_AREA_MODE_LABELS[allowedModes[0]]}
               </span>
             )}
           </div>
-          {(meta?.allowedStudyAreaModes ?? ['point']).length > 1 && (
+          {allowedModes.length > 1 && (
           <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-            {(meta?.allowedStudyAreaModes ?? ['point']).map((m) => (
+            {allowedModes.map((m) => (
               <button key={m} onClick={() => setArea(a => ({ ...a, mode: m }))}
                 style={{
                   flex: 1, padding: '3px 0', borderRadius: 4, fontSize: 9, cursor: 'pointer',

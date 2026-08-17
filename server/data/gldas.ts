@@ -29,6 +29,38 @@ function getEarthdataToken(): string | null {
   return Buffer.from(`${user}:${pass}`).toString('base64');
 }
 
+/** URS OAuth bearer token, cached for its lifetime. Required for GES DISC
+ *  file downloads: Basic auth works for listings, but file GETs 302-redirect
+ *  to URS and Node strips the Authorization header on cross-origin hops, so
+ *  we obtain an EDL bearer token (GET /api/users/tokens accepts Basic auth). */
+let cachedBearer: { token: string; expiresAt: number } | null = null;
+
+async function getEarthdataBearer(): Promise<string | null> {
+  const basic = getEarthdataToken();
+  if (!basic) return null;
+  if (cachedBearer && cachedBearer.expiresAt > Date.now()) return cachedBearer.token;
+
+  try {
+    const resp = await fetch('https://urs.earthdata.nasa.gov/api/users/tokens', {
+      headers: { Authorization: `Basic ${basic}`, 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!resp.ok) return null;
+    const tokens = await resp.json() as { access_token?: string; exp?: number }[];
+    const token = tokens[0]?.access_token;
+    if (!token) return null;
+    // JWT exp is seconds since epoch; add a safety margin.
+    const expSec = tokens[0]?.exp;
+    const expiresAt = typeof expSec === 'number'
+      ? (expSec - 300) * 1000
+      : Date.now() + 6 * 3600 * 1000;
+    cachedBearer = { token, expiresAt };
+    return token;
+  } catch {
+    return null;
+  }
+}
+
 function latToIndex(lat: number): number {
   return Math.round((lat + 89.875) / GLDAS_RESOLUTION);
 }
@@ -68,6 +100,7 @@ export interface GldasPointData {
   snowWaterEquivalent: number | null;     // kg/m² → Eq 91
   canopyInterception: number | null;      // kg/m² → Eqs 9-12
   surfaceTemp: number | null;             // K → Eq 43
+  granuleTime: string | null;             // ISO timestamp of the granule actually read
   source: string | null;
 }
 
@@ -81,21 +114,43 @@ const DEFAULT_FALLBACK: GldasPointData = {
   snowWaterEquivalent: null,
   canopyInterception: null,
   surfaceTemp: null,
+  granuleTime: null,
   source: null,
 };
 
 /**
  * Download a GLDAS NetCDF4 file from GES DISC.
  * Returns the raw bytes (HDF5/NetCDF4 format) or null on failure.
+ *
+ * Latency hardening (Tool 47 audit, 2026-08): the 2026 NRT stream is halted,
+ * so pass-1 walk-back probes ~20 dead slots. A GET on a 404 slot costs ~5 s
+ * (URS redirect + body), which pushed the whole fetch past the GLDAS timeout
+ * budget (~20 dead GETs + binary search + a 22.5 MB download). HEADs are
+ * fast (~1.7 s) and the dir-existence cache is shared, so probe-existence
+ * first and only GET slots that answer 200.
  */
 async function downloadGldasFile(url: string): Promise<ArrayBuffer | null> {
   const cacheKey = `gldas:${url}`;
   const cached = cache.get<ArrayBuffer>(cacheKey);
   if (cached) return cached;
 
+  const bearer = await getEarthdataBearer();
+  if (!bearer) return null;
+
+  try {
+    const head = await fetch(url, {
+      method: 'HEAD',
+      headers: { Authorization: `Bearer ${bearer}`, 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!head.ok) return null;
+  } catch {
+    return null;
+  }
+
   try {
     const resp = await fetch(url, {
-      headers: { Authorization: `Basic ${getEarthdataToken()!}` },
+      headers: { Authorization: `Bearer ${bearer}`, 'User-Agent': 'Mozilla/5.0' },
       signal: AbortSignal.timeout(60000),
     });
     if (!resp.ok) return null;
@@ -141,33 +196,136 @@ function readGridScalar(
   }
 }
 
+/** HEAD-probe whether a GLDAS day-directory exists (cheap existence check). */
+async function gldasDayExists(year: number, doy: number): Promise<boolean> {
+  const bearer = await getEarthdataBearer();
+  if (!bearer) return false;
+  const url = `${GES_DISC_BASE}/${year}/${String(doy).padStart(3, '0')}/`;
+  const cacheKey = `gldas:dir:${url}`;
+  const cached = cache.get<boolean>(cacheKey);
+  if (cached != null) return cached;
+  try {
+    const resp = await fetch(url, {
+      method: 'HEAD',
+      headers: { Authorization: `Bearer ${bearer}`, 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(30000),
+    });
+    const exists = resp.ok;
+    cache.set(cacheKey, exists, 21600); // 6 h
+    return exists;
+  } catch {
+    return false;
+  }
+}
+
+/** Binary-search the latest published day-of-year for the given year.
+ *  GLDAS granules are published contiguously, so dir-existence is monotonic
+ *  decreasing — binary search finds the newest published DOY in ~9 HEADs. */
+async function latestPublishedDoy(year: number): Promise<number | null> {
+  const startUTC = Date.UTC(year, 0, 1);
+  if (startUTC > Date.now()) return null; // future year
+  let hi = Math.floor((Date.now() - startUTC) / 86400000) + 1;
+  hi = Math.min(hi, (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) ? 366 : 365);
+  let lo = 1;
+  let best: number | null = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (await gldasDayExists(year, mid)) { best = mid; lo = mid + 1; } else { hi = mid - 1; }
+  }
+  return best;
+}
+
+/** Fetch the latest available granule for a given day (slot 21→00). */
+async function fetchLatestSlotForDoy(year: number, doy: number): Promise<{ buffer: ArrayBuffer; url: string } | null> {
+  const d = new Date(Date.UTC(year, 0, doy));
+  for (const hour of [21, 18, 15, 12, 9, 6, 3, 0]) {
+    const url = buildGldasUrl(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), hour);
+    if (!url) continue;
+    const buffer = await downloadGldasFile(url);
+    if (buffer) return { buffer, url };
+  }
+  return null;
+}
+
 /**
  * Fetch GLDAS-Noah data for a given lat/lon and date.
  * Uses Earthdata authentication. Returns null if credentials are missing
  * or the download fails.
+ *
+ * Granule availability handling (Tool 47 audit, 2026-08):
+ *  - Pass 1 (normal NRT latency): walk back at most `maxSlots` 3-hourly
+ *    slots from the requested date/hour and download the first published
+ *    granule. With an explicit date this stays within that day (8 slots).
+ *  - Pass 2 (stream halt, "now" only): the Noah 2.1 NRT production stream
+ *    can halt (2026-08 audit found data ended 2026-05-31). When the caller
+ *    asked for "current" data (no dateStr) and pass 1 found nothing,
+ *    binary-search the latest published DOY and use its newest slot —
+ *    genuine measurements of the newest available state, never fabricated.
+ *    The granule timestamp is recorded in `source` for provenance.
  */
 export async function fetchGldasData(
   lat: number,
   lon: number,
   dateStr?: string,
-  hour?: number,
+  _hour?: number,
 ): Promise<GldasPointData> {
   const token = getEarthdataToken();
   if (!token) return DEFAULT_FALLBACK;
 
-  const refDate = dateStr ? new Date(dateStr) : new Date();
-  const year = refDate.getUTCFullYear();
-  const month = refDate.getUTCMonth() + 1;
-  const day = refDate.getUTCDate();
+  const now = new Date();
+  const refDate = dateStr ? new Date(dateStr) : now;
+  if (!Number.isFinite(refDate.getTime())) return DEFAULT_FALLBACK;
 
-  const url = buildGldasUrl(year, month, day, hour);
-  if (!url) return DEFAULT_FALLBACK;
+  const SLOT_MS = 3 * 3600 * 1000;
+  const snap = new Date(Math.floor(refDate.getTime() / SLOT_MS) * SLOT_MS);
+  const maxSlots = dateStr ? 8 : 20; // 24 h / 2.5 days of walkback
 
-  const buffer = await downloadGldasFile(url);
+  // Pass-1 gate (stream-halt fast path): if the entire day directories that
+  // the walk-back would cover are unpublished, probing individual slots is
+  // guaranteed to fail — skip straight to pass 2 (latest published DOY).
+  let pass1Viable = true;
+  if (!dateStr && maxSlots > 8) {
+    const d0 = snap;
+    const d1 = new Date(snap.getTime() - Math.floor((maxSlots - 1) / 8) * 86400000);
+    const doyOf = (d: Date) =>
+      Math.floor((d.getTime() - Date.UTC(d.getUTCFullYear(), 0, 1)) / 86400000) + 1;
+    pass1Viable =
+      (await gldasDayExists(d0.getUTCFullYear(), doyOf(d0))) ||
+      (await gldasDayExists(d1.getUTCFullYear(), doyOf(d1)));
+  }
+
+  let buffer: ArrayBuffer | null = null;
+  let granuleUrl: string | null = null;
+  for (let back = 0; back < maxSlots && !buffer && pass1Viable; back++) {
+    const t = new Date(snap.getTime() - back * SLOT_MS);
+    const url = buildGldasUrl(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate(), t.getUTCHours());
+    if (!url) break;
+    const buf = await downloadGldasFile(url);
+    if (buf) { buffer = buf; granuleUrl = url; }
+  }
+
+  // Pass 2 — stream-halt fallback: only for "current" requests.
+  if (!buffer && !dateStr) {
+    let doy = await latestPublishedDoy(now.getUTCFullYear());
+    let year = now.getUTCFullYear();
+    if (doy == null && year > 2000) { // nothing this year — try Dec of prior year
+      year -= 1;
+      doy = await latestPublishedDoy(year);
+    }
+    if (doy != null) {
+      const hit = await fetchLatestSlotForDoy(year, doy);
+      if (hit) { buffer = hit.buffer; granuleUrl = hit.url; }
+    }
+  }
   if (!buffer) return DEFAULT_FALLBACK;
+
+  // Granule timestamp for provenance (…A<yyyymmdd>.<hhmm>.021.nc4)
+  const gm = granuleUrl?.match(/A(\d{8})\.(\d{4})\./);
+  const granuleTag = gm ? `${gm[1].slice(0, 4)}-${gm[1].slice(4, 6)}-${gm[1].slice(6, 8)}T${gm[2].slice(0, 2)}:00Z` : '';
 
   try {
     const h5 = await import('h5wasm');
+    await h5.ready;
     const tmpPath = `/tmp/gldas_${Date.now()}.h5`;
     h5.FS!.writeFile(tmpPath, new Uint8Array(buffer));
     const h5File = new h5.File(tmpPath, 'r');
@@ -176,6 +334,9 @@ export async function fetchGldasData(
     const lonIdx = Math.max(0, Math.min(GLDAS_LONS - 1, lonToIndex(lon)));
 
     const result: GldasPointData = {
+      // NOTE: 'TkeDiss_tavg' is not a native GLDAS Noah variable — the read
+      // returns null for real files. A physically-grounded ε estimate from
+      // fetched weather (u*, z₀, z_i) is applied in mapInputs case 8 below.
       tkeDissipation: readGridScalar(h5File, 'TkeDiss_tavg', latIdx, lonIdx),
       soilMoisture0_10: readGridScalar(h5File, 'SoilMoi0_10cm_inst', latIdx, lonIdx),
       soilMoisture10_40: readGridScalar(h5File, 'SoilMoi10_40cm_inst', latIdx, lonIdx),
@@ -185,7 +346,8 @@ export async function fetchGldasData(
       snowWaterEquivalent: readGridScalar(h5File, 'SWE_inst', latIdx, lonIdx),
       canopyInterception: readGridScalar(h5File, 'CanopInt_inst', latIdx, lonIdx),
       surfaceTemp: readGridScalar(h5File, 'AvgSurfT_inst', latIdx, lonIdx),
-      source: 'gldas-noah-2.1',
+      source: granuleTag ? `gldas-noah-2.1 (granule ${granuleTag})` : 'gldas-noah-2.1',
+      granuleTime: granuleTag || null,
     };
 
     h5File.close?.();

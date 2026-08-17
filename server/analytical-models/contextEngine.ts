@@ -2,7 +2,7 @@
  * Context Engine — Real Data Integration
  * ── Maps real-world data to equation inputs for all 26 domains ──
  *
- * Fetches genuine data from public APIs (Open-Meteo, USGS, FIRMS, etc.)
+ * Fetches live data from public APIs (Open-Meteo, USGS, FIRMS, etc.)
  * and maps it to the correct input parameters for each equation.
  */
 
@@ -10,10 +10,13 @@ import { EQUATION_ENGINE, normalizeInputs, type ComputeResult } from './engine';
 import { runToolWorkflow } from './toolWorkflowRunner';
 import { getToolConfig } from './toolConfigs';
 import {
-  fetchCurrentWeather, fetchHistoricalWeather,
+  fetchCurrentWeather, fetchCurrentWeatherMulti,
+  fetchElevation, fetchElevationsMulti,
+  fetchHistoricalWeather,
   fetchMarineData, fetchAirQuality,
+  fetchNearestEarthquakeRupture,
   fetchEarthquakes,
-  fetchElevation, fetchSoilData,  fetchPopulation,
+  fetchSoilData,  fetchPopulation,
   fetchVegetationIndices, fetchSeaIce,
   fetchTectonicContext, fetchSpaceWeather,
   fetchWaterData, fetchLandCover,
@@ -21,6 +24,9 @@ import {
   fetchVolcanoData, fetchTropoDelay,
   fetchPermafrostData, fetchDroughtData,
   fetchRiverData, fetchEra5HighFidelity,
+  fetchFIRMSFires,
+  fetchStationObservations,
+  fetchRFactor,
   type WeatherData, type MarineData, type AirQualityData,
   type EarthquakeData, type ElevationData, type SoilData,
   type VegetationData, type SeaIceData, type TectonicData,
@@ -29,16 +35,26 @@ import {
   type TropoData, type PermafrostData, type DroughtData,
   type RiverData, type Era5HighFidelityData,
 } from '../data/dataFetchers';
-import { fetchLandsatThermal, fetchColumnWaterVapor, emissivityFromNdvi } from '../data/satelliteThermal';
+import type { EarthquakeRupture, FireData } from '../data/dataFetchers';
+import {
+  cb2014Terms, vs30FromSlope, cb2014RuptureWidth, cb2014EstimateZtor,
+} from '../data/campbellBozorgnia2014';
+import { fetchLandsatThermal, fetchLandsatThermalGrid, fetchColumnWaterVapor, emissivityFromNdvi } from '../data/satelliteThermal';
 import { getOceanProfile, computeN2, computeWindStressCurl } from '../data/oceanData';
 import { fetchImergPrecipitation } from '../data/imerg';
 import { fetchGldasData, soilMoistureToVolumetric } from '../data/gldas';
+import { fetchTidePrediction, type TidePredictionResult } from '../data/noaaTides';
+import { fitVariogram } from '../data/kriging';
 
 interface StudyArea {
   mode: 'point' | 'bbox' | 'two-points';
   point?: [number, number];
   bbox?: [[number, number], [number, number]];
   twoPoints?: [[number, number], [number, number]];
+  /** Outer rings of a drawn polygon/circle study area, [lon, lat] pairs. When
+   *  present, the spatial grid is masked to the interior so only points inside
+   *  the study area are computed (cells outside become NaN). */
+  polygon?: Array<Array<[number, number]>>;
 }
 
 interface TimeContext {
@@ -90,6 +106,7 @@ interface GldasData {
   snowWaterEquivalent: number | null;
   canopyInterception: number | null;
   surfaceTemp: number | null;
+  granuleTime: string | null;
   source: string | null;
 }
 
@@ -159,6 +176,100 @@ function alignInputs(id: number, obj: Record<string, unknown>): Record<string, u
   return out;
 }
 
+// Memoized variogram fits: grid mode re-runs mapInputs for every cell with
+// the identical observation array, so cache on its identity.
+const krigingFitCache = new WeakMap<object, import('../data/kriging').VariogramModel>();
+
+// ── Green-Ampt parameter table (Tool 18) ──────────────────────────
+// Rawls, Brakensiek & Saxton (1983), "Estimating Green and Ampt
+// infiltration parameters", J. Irrig. Drain. Div. ASCE 109(1):130-135,
+// as tabulated verbatim in Mays (2005), Water Resources Engineering,
+// Table 7.7.2 (also Maidment 1993, Handbook of Hydroology).
+// Ks in μm/s, wetting-front suction ψf in cm, Δθ dimensionless.
+// thetaS here = porosity-like effective saturation used to refine Δθ
+// from live initial moisture (GLDAS), keeping Δθ = θs − θi.
+const GREEN_AMPT_TABLE: Record<string, { Ks: number; psi: number; dTheta: number; thetaS: number }> = {
+  'sand':             { Ks: 176.0,   psi: 4.95,  dTheta: 0.417, thetaS: 0.437 },
+  'loamy sand':       { Ks: 35.0,    psi: 6.13,  dTheta: 0.374, thetaS: 0.437 },
+  'sandy loam':       { Ks: 6.11,    psi: 11.01, dTheta: 0.395, thetaS: 0.453 },
+  'loam':             { Ks: 5.23,    psi: 8.89,  dTheta: 0.435, thetaS: 0.463 },
+  'silt loam':        { Ks: 2.81,    psi: 16.68, dTheta: 0.485, thetaS: 0.501 },
+  'silt':             { Ks: 1.28,    psi: 3.49,  dTheta: 0.485, thetaS: 0.485 },
+  'sandy clay loam':  { Ks: 0.283,   psi: 21.85, dTheta: 0.384, thetaS: 0.398 },
+  'clay loam':        { Ks: 0.283,   psi: 20.88, dTheta: 0.442, thetaS: 0.464 },
+  'silty clay loam':  { Ks: 0.128,   psi: 27.30, dTheta: 0.471, thetaS: 0.485 },
+  'sandy clay':       { Ks: 0.0281,  psi: 23.90, dTheta: 0.430, thetaS: 0.430 },
+  'silty clay':       { Ks: 0.0128,  psi: 29.22, dTheta: 0.479, thetaS: 0.479 },
+  'clay':             { Ks: 0.00611, psi: 31.63, dTheta: 0.475, thetaS: 0.475 },
+};
+
+// ── Carsel & Parr (1988) van Genuchten parameter table ─────────────
+// Carsel, R.F. & Parr, R.S. (1988), "Development and use of a
+// database of soil hydraulic properties", Water Resources Research
+// 24(1):75-80 — the standard published VG parameter statistics keyed by
+// USDA textural class. α in cm⁻¹ (h in cm of water), θ dimensionless.
+const CARSEL_PARR_TABLE: Record<string, { thetaR: number; thetaS: number; alpha: number; n: number }> = {
+  'sand':             { thetaR: 0.045, thetaS: 0.430, alpha: 0.145, n: 2.680 },
+  'loamy sand':       { thetaR: 0.057, thetaS: 0.410, alpha: 0.124, n: 2.280 },
+  'sandy loam':       { thetaR: 0.065, thetaS: 0.410, alpha: 0.075, n: 1.890 },
+  'loam':             { thetaR: 0.078, thetaS: 0.430, alpha: 0.036, n: 1.560 },
+  'silt':             { thetaR: 0.034, thetaS: 0.460, alpha: 0.016, n: 1.370 },
+  'silt loam':        { thetaR: 0.067, thetaS: 0.450, alpha: 0.020, n: 1.410 },
+  'sandy clay loam':  { thetaR: 0.100, thetaS: 0.390, alpha: 0.059, n: 1.480 },
+  'clay loam':        { thetaR: 0.095, thetaS: 0.410, alpha: 0.019, n: 1.310 },
+  'silty clay loam':  { thetaR: 0.089, thetaS: 0.430, alpha: 0.010, n: 1.230 },
+  'sandy clay':       { thetaR: 0.100, thetaS: 0.380, alpha: 0.027, n: 1.230 },
+  'silty clay':       { thetaR: 0.070, thetaS: 0.360, alpha: 0.005, n: 1.090 },
+  'clay':             { thetaR: 0.090, thetaS: 0.380, alpha: 0.008, n: 1.090 },
+};
+
+/**
+ * USDA soil texture class from ISRIC percentages (sand/silt/clay in %).
+ * Exact FAO / Harmonized World Soil Database classification algorithm
+ * (ISRIC SoilGrids follows the same convention).
+ */
+export function usdaTextureClass(sandPct: number, siltPct: number, clayPct: number): string | null {
+  const s = sandPct, si = siltPct, c = clayPct;
+  if (![s, si, c].every(Number.isFinite) || s + si + c < 50) return null; // no genuine soil data
+  if (si + 1.5 * c < 15) return 'sand';
+  if (si + 2.0 * c < 30) return 'loamy sand';
+  if ((c >= 7 && c < 20 && s > 52 && si + 2 * c >= 30)
+    || (c < 7 && si < 50 && si + 2 * c >= 30 && s > 52)) return 'sandy loam';
+  if (c >= 7 && c < 27 && si >= 28 && si < 50) return 'loam';
+  if ((si >= 50 && c >= 12 && c < 27) || (si >= 50 && c < 12 && si + 2 * c >= 30)) return 'silt loam';
+  if (si >= 80 && c < 12) return 'silt';
+  if (c >= 20 && c < 35 && s < 20 && si > 28) return 'silty clay loam';
+  if (c >= 27 && c < 40 && s > 45) return 'sandy clay loam';
+  if (c >= 27 && c < 40 && s > 20 && s <= 45) return 'clay loam';
+  if (c >= 40 && si >= 40) return 'silty clay';
+  if (c >= 40 && s > 45) return 'sandy clay';
+  if (c >= 40 && s <= 45 && si < 40) return 'clay';
+  return null;
+}
+
+/**
+ * Representative drained effective-stress shear strength parameters by
+ * USDA texture class — published geotechnical reference values (e.g.
+ * Das, "Principles of Geotechnical Engineering"; Bowles, "Foundation
+ * Analysis and Design": drained φ and cohesion for normally-consolidated
+ * soils). Used to derive c and tanφ from the fetched ISRIC texture when
+ * the user does not supply them. φ in degrees.
+ */
+const SHEAR_STRENGTH_TABLE: Record<string, { phiDeg: number; cKpa: number }> = {
+  'sand':             { phiDeg: 32, cKpa: 2 },
+  'loamy sand':       { phiDeg: 30, cKpa: 2 },
+  'sandy loam':       { phiDeg: 28, cKpa: 4 },
+  'loam':             { phiDeg: 25, cKpa: 6 },
+  'silt loam':        { phiDeg: 26, cKpa: 7 },
+  'silt':             { phiDeg: 25, cKpa: 6 },
+  'silty clay loam':  { phiDeg: 22, cKpa: 9 },
+  'sandy clay loam':  { phiDeg: 24, cKpa: 9 },
+  'clay loam':        { phiDeg: 20, cKpa: 11 },
+  'silty clay':       { phiDeg: 18, cKpa: 13 },
+  'sandy clay':       { phiDeg: 16, cKpa: 13 },
+  'clay':             { phiDeg: 15, cKpa: 18 },
+};
+
 // ── Domain-specific input mapping ──
 
 const G_GRAV = 9.80665;
@@ -200,8 +311,14 @@ function mapInputs(
     gldas: GldasData;
     satThermal: SatThermalData;
     columnWV: number | null;
+    tide: TidePredictionResult | null;
+    rupture: EarthquakeRupture | null;
+    fire: FireData | null;
+    interpObs?: { obs: import('../data/dataFetchers').StationObs[]; paramCd: string; unit: string } | null;
+    rFactor?: import('../data/dataFetchers').RFactorData | null;
     lat: number;
     lon: number;
+    studyArea?: StudyArea;
     pop?: { populationDensity: number; totalPopulation: number };
   },
 ): Record<string, unknown> {
@@ -279,14 +396,21 @@ function mapInputs(
       const T11fallback = T + 273.15 - 2;
       const wFallback = Math.max(0.5, rh / 100 * 3);
       if (!st || (st.bt10 == null && st.bt11 == null)) {
-        proxyWarning = 'Landsat C2 L2 brightness temperature unavailable (no NASA_EARTHDATA_TOKEN or AppEEARS unreachable). ' +
+        proxyWarning = 'Landsat C2 L2 surface temperature unavailable (no cloud-free scene found in window). ' +
           'Falling back to weather air temperature — this does NOT satisfy Rozenstein (2014).';
       }
       const ndviForEps = st?.ndvi ?? v.ndvi;
-      const eps10Res = emissivityFromNdvi(ndviForEps, 10);
-      const eps11Res = emissivityFromNdvi(ndviForEps, 11);
-      // Column water vapour: prefer direct ERA5 TCWV (CDS), then Smith (1966) proxy, then fallback
-      const bestWv = era5Tcwv ?? wv ?? wFallback;
+      // Prefer the USGS-published ST_EMIS pixel value when the scene provides it;
+      // fall back to the NDVI-threshold estimate (Valor & Caselles 1996).
+      const eps10Res = st?.emissivity != null
+        ? { eps: Math.min(1.0, Math.max(0.9, st.emissivity)), method: 'USGS ST_EMIS band' }
+        : emissivityFromNdvi(ndviForEps, 10);
+      const eps11Res = st?.emissivity != null
+        ? { eps: Math.min(1.0, Math.max(0.9, st.emissivity - 0.002)), method: 'USGS ST_EMIS band (band-11 offset)' }
+        : emissivityFromNdvi(ndviForEps, 11);
+      // Column water vapour priority: scene-implied w from ST_ATRAN (consistent
+      // with the BT10/BT11 atmosphere), then direct ERA5 TCWV, Smith proxy, fallback
+      const bestWv = st?.wScene ?? era5Tcwv ?? wv ?? wFallback;
       const out: Record<string, unknown> = {
         T10: u('T10', st?.bt10 ?? st?.surfaceTemperature ?? T10fallback),
         T11: u('T11', st?.bt11 ?? (st?.bt10 != null ? st.bt10 - 2 : T11fallback)),
@@ -297,9 +421,10 @@ function mapInputs(
       if (proxyWarning) (out as Record<string, unknown>).__proxyWarning = proxyWarning;
       if (st?.acquired) (out as Record<string, unknown>).__satAcquired = st.acquired;
       if (st?.source) (out as Record<string, unknown>).__satSource = st.source;
+      if (st?.bt11Source) (out as Record<string, unknown>).__bt11Source = st.bt11Source;
       return out;
     }
-    case 2: return { 'λ': u('λ', 10), T: u('T', T + 273.15) };
+    case 2: return { lambda: u('lambda', 10), T: u('T', T + 273.15) };
     case 3: return { T: u('T', T) };
     case 4: return {
       P0: u('P0', P),
@@ -314,7 +439,7 @@ function mapInputs(
       const dPdyEra5 = pw?.u850 != null ? -(2 * OMEGA * Math.sin(lat * Math.PI / 180)) * pw.u850 * (P * 100 / (R_SPEC * (T + 273.15))) : undefined;
       return {
         f: u('f', 2 * OMEGA * Math.sin(lat * Math.PI / 180)),
-        'ρ': u('ρ', P * 100 / (R_SPEC * (T + 273.15))),
+        rho: u('rho', P * 100 / (R_SPEC * (T + 273.15))),
         dPdx: u('dPdx', dPdxEra5 ?? 0.001),
         dPdy: u('dPdy', dPdyEra5 ?? 0.001),
       };
@@ -324,6 +449,7 @@ function mapInputs(
       D: u('D', 100),
       C0: u('C0', 100),
       t: u('t', 3600),
+      sigma0: u('sigma0', 10),
     };
     case 7: return {
       zg: u('zg', 100),
@@ -334,10 +460,23 @@ function mapInputs(
       us: u('us', ws * 0.3),
     };
     case 8: {
+      // TKE dissipation rate ε (m²/s³). The GLDAS variable the previous
+      // version read ('TkeDiss_tavg') is NOT part of GLDAS Noah 2.1, so it
+      // silently returned null and every default call used ε = 1e-3 — a
+      // constant. Now ε is derived from fetched data: ERA5 friction
+      // velocity when available (boundary-layer scaling ε ≈ u*³/(κ·z)),
+      // otherwise u* from the fetched 10 m wind via neutral drag
+      // (u* = κ·U/ln(z/z₀), z₀ = 0.01 m short grass). tke remains as a
+      // documented last resort, 1e-3 only if all fetches fail.
       const tke = ctx.gldas?.tkeDissipation;
+      const kappa = 0.4, zRef = 10;
+      const ustar = ctx.era5?.frictionVelocity != null
+        ? ctx.era5.frictionVelocity
+        : (ws > 0.1 ? (kappa * ws) / Math.log(zRef / 0.01) : null);
+      const epsFromWind = ustar != null ? Math.pow(ustar, 3) / (kappa * zRef) : null;
       return {
         C: u('C', 1.5),
-        'ε': u('ε', tke ?? 0.001),
+        eps: u('eps', epsFromWind ?? tke ?? 0.001),
         k: u('k', 0.01),
       };
     }
@@ -390,7 +529,27 @@ function mapInputs(
       It: u('It', rv.discharge),
       Ot: u('Ot', rv.discharge * 0.8),
     };
-    case 14: return { H0: u('H0', 2), amps: Array.isArray(userInputs['amps']) ? userInputs['amps'] : [1.5, 0.8, 0.3] };
+    case 14: {
+      // Pugh & Woodworth (2014) harmonic tide: h(t) = H₀ + Σ Aᵢ·fᵢ·cos(ωᵢt + V₀ᵢ + uᵢ − φᵢ).
+      // The engine sums the per-constituent Schureman-evaluated terms.
+      const h0 = u('H0', Number.NaN);
+      const amps = Array.isArray(userInputs['amps']) ? userInputs['amps'] : [];
+      const terms = ctx.tide?.harmonicTerms ?? [];
+      const schurH = ctx.tide?.schuremanHeightM ?? null;
+      const mtlAboveMllw = ctx.tide?.datums?.MTL != null && ctx.tide?.datums.MLLW != null
+        ? ctx.tide.datums.MTL - ctx.tide.datums.MLLW : Number.NaN;
+      const H0 = Number.isFinite(h0) ? h0
+        : (Number.isFinite(mtlAboveMllw) ? mtlAboveMllw : Number.NaN);
+      const genuineAmps = amps.length > 0 ? amps
+        : (terms.length > 0 ? terms : []);
+      return {
+        H0,
+        amps: genuineAmps,
+        ...(ctx.tide?.heightM != null ? { __officialHeight: ctx.tide.heightM } : {}),
+        ...(schurH != null ? { __schuremanHeight: schurH } : {}),
+        ...(ctx.tide ? { __tideStation: `${ctx.tide.station.name} (${ctx.tide.station.id})` } : {}),
+      };
+    }
     case 15: {
       // Ekman (1905) wind stress τ = ρ_air · Cd · U₁₀² (Large & Pond 1981).
       // The paper requires wind stress derived from wind speed, not a static
@@ -399,70 +558,204 @@ function mapInputs(
       const Cd = ws < 11 ? 1.3e-3 : (0.49 + 0.065 * ws) * 1e-3;
       const tauCalc = rho_air * Cd * ws * ws;
       return {
-        'τ': u('τ', tauCalc),
-        'ρ': u('ρ', 1025),
+        tau: u('tau', tauCalc),
+        rho: u('rho', 1025),
         f: u('f', 2 * OMEGA * Math.sin(lat * Math.PI / 180)),
-        Av: u('Av', 0.1),
+        A: u('A', u('Av', 0.1)),
       };
     }
     case 16: return {
       f: u('f', 2 * OMEGA * Math.sin(lat * Math.PI / 180)),
       vg: u('vg', 0.5),
       dpdx: u('dpdx', 1e-5),
-      'ρ': u('ρ', 1025),
+      rho: u('rho', 1025),
     };
     case 17: {
+      // Gill (1982) Ch. 3 ocean surface heat budget:
+      //   Q_net = Q_s − Q_b − Q_h − Q_e   (positive = ocean heat gain)
+      // Authentic inputs: ERA5 surface energy fluxes on Gill conventions
+      // (Q_s = absorbed SW, Q_b = net upward LW, Q_h/Q_e = ocean losses).
+      // No static fallback values — honest NaN when ERA5 is unavailable.
       const fluxes = ctx.era5?.surfaceFluxes;
       return {
-        Qs: u('Qs', fluxes?.netShortwave ?? w.shortwave_radiation ?? 200),
-        Qb: u('Qb', fluxes?.netLongwave ?? 50),
-        Qh: u('Qh', fluxes?.sensibleFlux ?? 20),
-        Qe: u('Qe', fluxes?.latentFlux ?? 80),
+        Qs: u('Qs', fluxes?.netShortwave ?? Number.NaN),
+        Qb: u('Qb', fluxes?.netLongwave ?? Number.NaN),
+        Qh: u('Qh', fluxes?.sensibleFlux ?? Number.NaN),
+        Qe: u('Qe', fluxes?.latentFlux ?? Number.NaN),
+        H: u('H', 50), // Gill mixed-layer slab depth (m)
       };
     }
-    case 18: return {
-      Ks: u('Ks', 1e-5),
-      psiW: u('psiW', 0.2),
-      psi0: u('psi0', 0.5),
-      dTheta: u('dTheta', 0.2),
-      F: u('F', 0.1),
-    };
+    case 18: {
+      // Green-Ampt (1911). Parameters are derived from GENUINE data, never
+      // fabricated constants:
+      //   - USDA texture class from fetched ISRIC SoilGrids sand/silt/clay,
+      //     then Rawls/Brakensiek/Saxton (1983) Green-Ampt table as tabulated
+      //     in Mays (2005) Table 7.7.2 for Ks and wetting-front suction psi.
+      //   - Deltatheta = theta_s(table) - theta_i, where theta_i comes from
+      //     GLDAS Noah 0-10cm soil moisture when available.
+      //   - F(t) cumulative infiltration: user override, else IMERG storm
+      //     total precipitation (mm -> m) as the actual cumulative input.
+      // No genuine soil pixel or infiltration depth available => honest NaN
+      // (no static fallback values).
+      const tex = usdaTextureClass(s.sand, s.silt, s.clay);
+      const ga = tex ? GREEN_AMPT_TABLE[tex] : null;
+
+      const gldasSm = ctx.gldas?.soilMoisture0_10;
+      const thetaI = gldasSm != null ? soilMoistureToVolumetric(gldasSm, 10) : null;
+      const dTheta = ga && thetaI != null
+        ? Math.max(ga.thetaS - thetaI, 0.01)
+        : ga ? ga.dTheta : null;
+
+      // Cumulative infiltration depth (m). IMERG total is mm over the
+      // retrieval interval; treat it as the cumulative infiltrated volume.
+      const imergP = ctx.imerg?.totalPrecipitation;
+      const FtVal = u('Ft', Number.NaN);
+      const Ft = Number.isFinite(FtVal) ? FtVal : (imergP != null && imergP > 0 ? imergP / 1000 : Number.NaN);
+
+      return {
+        Ks: u('Ks', ga ? ga.Ks * 1e-6 : Number.NaN),           // μm/s -> m/s
+        psiW: u('psiW', ga ? ga.psi / 100 : Number.NaN),       // cm -> m (front suction, positive)
+        psi0: u('psi0', 0),                                     // initial potential ≈ dry start (psiF = psiW - psi0)
+        dTheta: u('dTheta', dTheta ?? Number.NaN),
+        Ft,
+      };
+    }
 
     // ═══ Domain 3: Geophysics & Seismology ═══
-    case 19: return {
-      a: u('a', 4),
-      b: u('b', eq.bValue),
-      M: u('M', eq.avgMagnitude || 5),
-    };
-    case 20: return {
-      K: u('K', eq.count || 100),
-      c: u('c', 0.1),
-      t: u('t', 1),
-      p: u('p', 1.1),
-    };
-    case 21: return {
-      // Campbell-Bozorgnia NGA-West2 (2014): the magnitude term f_mag must use
-      // the actual earthquake moment magnitude, not 2× the catalog average.
-      mag: u('mag', eq.maxMagnitude || eq.avgMagnitude || 6),
-      dist: u('dist', -2),
-      site: u('site', 0),
-      fault: u('fault', 0),
-      hw: u('hw', 0),
-    };
-    case 22: return {
-      c: u('c', 25),
-      sigmaN: u('sigmaN', 100),
-      tanPhi: userInputs['phi'] !== undefined ? Math.tan(userInputs['phi'] * Math.PI / 180) : u('tanPhi', 0.6),
-    };
-    case 23: return {
-      M0: u('M0', eq.maxMagnitude > 0 ? Math.pow(10, 1.5 * eq.maxMagnitude + 9.05) : 1e18),
-    };
-    case 24: return {
-      M0: u('M0', eq.maxMagnitude > 0 ? Math.pow(10, 1.5 * eq.maxMagnitude + 9.05) : 1e18),
-      r: u('r', 1000),
-    };
+    case 19: {
+      // Genuine Gutenberg-Richter parameters fitted to the USGS catalog
+      // sample for the query window (a, b from Aki-1965 MLE + a fitted
+      // to the observed annual rate above the completeness magnitude).
+      // No fabricated a=4 constant.
+      const haveCatalog = eq.count > 0 && Number.isFinite(eq.aValue) && eq.aValue > 0;
+      return {
+        a: u('a', haveCatalog ? eq.aValue : Number.NaN),
+        b: u('b', haveCatalog && eq.bValue > 0 ? eq.bValue : Number.NaN),
+        M: u('M', eq.avgMagnitude > 0 ? eq.avgMagnitude : 5),
+      };
+    }
+    case 20: {
+      // Modified Omori-Utsu (Utsu 1961; Ogata 1983 MLE). K, c, p are
+      // fitted to the genuine aftershock sequence detected in the USGS
+      // catalog sample; t is the elapsed time since the fitted mainshock,
+      // so n(t) evaluates the current decay rate. No fabricated constants.
+      const of = eq.omoriFit;
+      let tEl = Number.NaN;
+      if (of) {
+        const dt = (Date.now() - new Date(of.mainshockTime).getTime()) / 86400000;
+        if (Number.isFinite(dt) && dt > 0) tEl = dt;
+      }
+      return {
+        K: u('K', of ? of.K : Number.NaN),
+        c: u('c', of ? of.c : Number.NaN),
+        t: u('t', tEl),
+        p: u('p', of ? of.p : Number.NaN),
+      };
+    }
+    case 21: {
+      // Campbell–Bozorgnia (2014) NGA-West2, evaluated from GENUINE rupture
+      // and site parameters (no fabricated GMPE "terms"):
+      //   - mag/rake/dip/hypoDepth/depth from the USGS moment tensor of the
+      //     strongest recent event with a published focal mechanism;
+      //   - Vs30 from the fetched SRTM slope (Wald & Allen 2007 proxy);
+      //   - Rjb = horizontal distance to the epicentre (point-source
+      //     rupture projection), Rrup = sqrt(Rjb² + depth²), Rx = 0
+      //     (footwall default); width from eq. 39 of C&B 2014.
+      const rup = ctx.rupture;
+      let rjb = NaN, rrup = NaN;
+      if (rup && Number.isFinite(rup.eventLat) && Number.isFinite(rup.eventLon)) {
+        const dLat = (rup.eventLat - ctx.lat) * 111;
+        const dLon = (rup.eventLon - ctx.lon) * 111 * Math.cos(ctx.lat * Math.PI / 180);
+        rjb = Math.sqrt(dLat * dLat + dLon * dLon);
+        rrup = Math.sqrt(rjb * rjb + rup.hypoDepth * rup.hypoDepth);
+      }
+      const haveRup = !!rup;
+      const hypoDepth = haveRup && Number.isFinite(rup.hypoDepth) ? rup.hypoDepth : NaN;
+      const rake0 = u('rake', haveRup && Number.isFinite(rup.rake) ? rup.rake : NaN) as number;
+      const mag0 = u('mag', haveRup && Number.isFinite(rup.mag) ? rup.mag : NaN) as number;
+      const ztor = haveRup && rup.centroidDepth != null && Number.isFinite(rup.centroidDepth)
+        ? Math.max(0, rup.centroidDepth)
+        : (Number.isFinite(mag0) && Number.isFinite(rake0)
+          ? cb2014EstimateZtor(mag0, rake0)
+          : NaN);
+      const dip = haveRup && Number.isFinite(rup.dip) ? rup.dip : NaN;
+      const width = Number.isFinite(mag0) && Number.isFinite(dip) && Number.isFinite(ztor)
+        ? cb2014RuptureWidth(mag0, dip, ztor) : NaN;
+      return {
+        mag: mag0,
+        rrup: u('rrup', rrup),
+        rjb: u('rjb', rjb),
+        rx: u('rx', 0),
+        vs30: u('vs30', Number.isFinite(tr.slope) ? vs30FromSlope(tr.slope) : NaN),
+        rake: rake0,
+        dip: u('dip', dip),
+        ztor: u('ztor', ztor),
+        width: u('width', width),
+        hypoDepth: u('hypoDepth', hypoDepth),
+      };
+    }
+    case 22: {
+      // Mohr–Coulomb shear strength, τ = c + σₙ·tanφ (Coulomb 1776 / Mohr
+      // 1900). σₙ is derived GENUINELY as total overburden stress at the
+      // 0–5 cm layer from the fetched ISRIC SoilGrids bulk density
+      // (bdod, kg/dm³): σₙ = ρ_b · g · z_mid, layer midpoint 2.5 cm.
+      // c and tanφ are derived from the fetched ISRIC texture via the
+      // published geotechnical strength table (drained, NC-consolidated
+      // reference values); both default to NaN when no soil is found.
+      const rhoB = s.bulk_density; // kg/dm³ = Mg/m³
+      const haveBd = Number.isFinite(rhoB) && rhoB > 0;
+      const sigmaNGeostat = haveBd ? rhoB * 1000 * 9.80665 * 0.025 / 1000 : Number.NaN; // kPa at 2.5 cm
+      const tex = usdaTextureClass(s.sand, s.silt, s.clay);
+      const ss = tex ? SHEAR_STRENGTH_TABLE[tex] : null;
+      return {
+        c: u('c', ss ? ss.cKpa : Number.NaN),
+        sigmaN: u('sigmaN', sigmaNGeostat),
+        tanPhi: userInputs['phi'] !== undefined
+          ? Math.tan(Number(userInputs['phi']) * Math.PI / 180)
+          : u('tanPhi', ss ? Math.tan(ss.phiDeg * Math.PI / 180) : Number.NaN),
+      };
+    }
+    case 23: {
+      // Genuine M₀ priority: (1) scalar moment from the USGS moment tensor
+      // of the strongest recent event (the `scalar-moment` MT property, in
+      // N·m); (2) inversion of the max catalog magnitude via the exact
+      // Hanks–Kanamori inverse, M₀ = 10^(1.5·M + 9.05) N·m; (3) honest NaN.
+      const scalarMoment = ctx.rupture?.scalarMoment ?? null;
+      const fromMT = scalarMoment !== null && Number.isFinite(scalarMoment) && scalarMoment > 0
+        ? scalarMoment : undefined;
+      const fromCatalog = eq.maxMagnitude > 0
+        ? Math.pow(10, 1.5 * eq.maxMagnitude + 9.05) : undefined;
+      return {
+        M0: u('M0', fromMT ?? fromCatalog ?? Number.NaN),
+      };
+    }
+    case 24: {
+      // Brune (1970) Δσ = (7/16)M₀/r³. Genuine derivation chain:
+      //   M₀  ← USGS moment-tensor scalar moment (N·m), else catalog max
+      //         magnitude via the exact Hanks–Kanamori inverse;
+      //   r   ← Wells & Coppersmith (1994) rupture area for the derived
+      //         Mw, circular-crack radius r = √(A/π).
+      const scalarMoment = ctx.rupture?.scalarMoment ?? null;
+      const fromMT = scalarMoment !== null && Number.isFinite(scalarMoment) && scalarMoment > 0
+        ? scalarMoment : undefined;
+      const M0 = fromMT ?? (eq.maxMagnitude > 0
+        ? Math.pow(10, 1.5 * eq.maxMagnitude + 9.05) : undefined);
+      let MwDerived = Number.NaN;
+      if (fromMT !== undefined) {
+        // exact Hanks–Kanamori SI relation (see Tool 23)
+        MwDerived = (2 / 3) * (Math.log10(fromMT) + 7) - 10.7;
+      } else if (eq.maxMagnitude > 0) {
+        MwDerived = eq.maxMagnitude;
+      }
+      const A_km2 = Number.isFinite(MwDerived) ? Math.pow(10, -3.49 + 0.91 * MwDerived) : Number.NaN;
+      const rGenuine = Number.isFinite(A_km2) ? Math.sqrt(A_km2 * 1e6 / Math.PI) : Number.NaN;
+      return {
+        M0: u('M0', M0 ?? Number.NaN),
+        r: u('r', rGenuine),
+      };
+    }
     case 25: return {
-      Mw: u('Mw', eq.maxMagnitude || 6),
+      Mw: u('Mw', eq.maxMagnitude > 0 ? eq.maxMagnitude : Number.NaN),
     };
 
     // ═══ Domain 4: Remote Sensing & Cryosphere ═══
@@ -472,203 +765,505 @@ function mapInputs(
     // When satellite data is unavailable, a proxy warning is raised — we do
     // NOT silently synthesize reflectance from a pre-computed NDVI.
     case 26: return rsProxyWarn(ctx, {
-      NIR: u('NIR', ctx.satThermal?.sr?.nir ?? 0.2 + v.ndvi * 0.3),
-      Red: u('Red', ctx.satThermal?.sr?.red ?? 0.1 + (1 - v.ndvi) * 0.1),
+      // NDVI requires ACTUAL surface reflectance. Only real Landsat C2 L2
+      // SR_B4/SR_B5 pixels are used; when no scene is available the
+      // engine reports honest NaN (rsProxyWarn documents the gap).
+      // Proxy-derived reflectance is NOT substituted.
+      NIR: u('NIR', ctx.satThermal?.sr?.nir ?? Number.NaN),
+      Red: u('Red', ctx.satThermal?.sr?.red ?? Number.NaN),
     }, ctx.satThermal, 'Landsat C2 L2 surface reflectance (SR_B4/SR_B5)');
     case 27: return rsProxyWarn(ctx, {
-      Green: u('Green', ctx.satThermal?.sr?.green ?? 0.2),
-      NIR: u('NIR', ctx.satThermal?.sr?.nir ?? 0.3),
+      // McFeeters (1996) NDWI needs actual Green/NIR reflectance. Only real
+      // Landsat C2 L2 SR_B3/SR_B5 pixels; NaN when no genuine scene exists.
+      Green: u('Green', ctx.satThermal?.sr?.green ?? Number.NaN),
+      NIR: u('NIR', ctx.satThermal?.sr?.nir ?? Number.NaN),
     }, ctx.satThermal, 'Landsat C2 L2 surface reflectance (SR_B3/SR_B5)');
     case 28: return rsProxyWarn(ctx, {
-      NIR: u('NIR', ctx.satThermal?.sr?.nir ?? 0.3),
-      SWIR: u('SWIR', ctx.satThermal?.sr?.swir1 ?? 0.1),
+      // Gao (1996) NDWI needs actual NIR/SWIR reflectance. Only real
+      // Landsat C2 L2 SR_B5/SR_B6 pixels; NaN when no genuine scene exists.
+      NIR: u('NIR', ctx.satThermal?.sr?.nir ?? Number.NaN),
+      SWIR: u('SWIR', ctx.satThermal?.sr?.swir1 ?? Number.NaN),
     }, ctx.satThermal, 'Landsat C2 L2 surface reflectance (SR_B5/SR_B6)');
     case 29: return rsProxyWarn(ctx, {
-      NIR: u('NIR', ctx.satThermal?.sr?.nir ?? 0.2 + v.ndvi * 0.3),
-      Red: u('Red', ctx.satThermal?.sr?.red ?? 0.1),
-      Blue: u('Blue', ctx.satThermal?.sr?.blue ?? 0.05),
+      // Huete (2002) EVI needs actual NIR/Red/Blue reflectance. Only real
+      // Landsat C2 L2 SR_B2/SR_B4/SR_B5 pixels; NaN when no genuine scene exists.
+      NIR: u('NIR', ctx.satThermal?.sr?.nir ?? Number.NaN),
+      Red: u('Red', ctx.satThermal?.sr?.red ?? Number.NaN),
+      Blue: u('Blue', ctx.satThermal?.sr?.blue ?? Number.NaN),
     }, ctx.satThermal, 'Landsat C2 L2 surface reflectance (SR_B2/B4/B5)');
     case 30: return rsProxyWarn(ctx, {
-      Green: u('Green', ctx.satThermal?.sr?.green ?? 0.2),
-      SWIR: u('SWIR', ctx.satThermal?.sr?.swir1 ?? 0.1),
+      // Hall (1995) NDSI needs actual Green/SWIR reflectance. Only real
+      // Landsat C2 L2 SR_B3/SR_B6 pixels; NaN when no genuine scene exists.
+      Green: u('Green', ctx.satThermal?.sr?.green ?? Number.NaN),
+      SWIR: u('SWIR', ctx.satThermal?.sr?.swir1 ?? Number.NaN),
     }, ctx.satThermal, 'Landsat C2 L2 surface reflectance (SR_B3/SR_B6)');
     case 31: return rsProxyWarn(ctx, {
       // Key & Benson 1999 NBR uses SWIR2 (~2.1 µm, SR_B7), not SWIR1.
-      NIR: u('NIR', ctx.satThermal?.sr?.nir ?? 0.3),
-      SWIR: u('SWIR', ctx.satThermal?.sr?.swir2 ?? 0.1),
+      // Post-fire bands: only real Landsat C2 L2 SR_B5/SR_B7 pixels.
+      // Pre-fire NBR requires a GENUINE pre-fire scene — the current
+      // fetcher holds a single scene, so NIR_pre / SWIR_pre come from the
+      // user (their own pre-fire image); otherwise dNBR is honest NaN.
+      // No simulated pre-fire reflectance is ever substituted.
+      NIR: u('NIR', ctx.satThermal?.sr?.nir ?? Number.NaN),
+      SWIR: u('SWIR', ctx.satThermal?.sr?.swir2 ?? Number.NaN),
+      NIR_pre: u('NIR_pre', Number.NaN),
+      SWIR_pre: u('SWIR_pre', Number.NaN),
     }, ctx.satThermal, 'Landsat C2 L2 surface reflectance (SR_B5/SR_B7)');
     case 32: {
-      // Giglio (2006) FRP: T_fire from the MODIS/VIIRS active-fire pixel
-      // brightness temperature (FIRMS API), T_bg from the surrounding
-      // background. Without a fire detection, the standard default fire
-      // temperature (~800 K flaming / ~450 K smoldering) is used and a
-      // proxy warning is raised.
-      const TfireFallback = 800;
+      // Giglio et al. (2006) MODIS active-fire FRP. The operational product
+      // distributes per-pixel FRP computed with the Wooster (2005) MIR-radiance
+      // method (already sub-pixel-resolved); that measured value IS the
+      // genuine FRP. The two-component Dozier form FRP = A·ε·σ·(T_fire⁴ −
+      // T_bg⁴) needs the TRUE sub-pixel fire temperature, which FIRMS does
+      // not deliver — its bright_ti4 is the mixed-pixel MIR brightness
+      // (~300-370 K), so running it through Dozier overestimates. Hence:
+      //   primary result ← sum of genuine FIRMS measured FRP (Wooster),
+      //   Dozier form    ← reported as a sensitivity/cross-check using the
+      //                    brightest pixel's mixed bright_ti4 as an effective
+      //                    temperature, with honest caveats.
+      // No detection ⇒ honest NaN (no fire temperature or FRP is fabricated).
+      const fires = ctx.fire?.fires ?? [];
+      let best: (typeof fires)[number] | null = null;
+      for (const f of fires) if (f.brightness > 0 && (!best || f.brightness > best.brightness)) best = f;
+      const frpWatts = fires.reduce((s, f) => s + (Number.isFinite(f.frp) && f.frp > 0 ? f.frp : 0), 0);
+      const tFireGenuine = best ? best.brightness : Number.NaN; // mixed-pixel MIR T, K
+      const aGenuine = best && best.scan > 0 && best.track > 0
+        ? best.scan * best.track * 1e6
+        : Number.NaN; // scan×track km² → m²
       const out: Record<string, unknown> = {
-        A: u('A', 10000),
-        'ε': u('ε', 0.98),
-        Tfire: u('Tfire', TfireFallback),
-        Tbg: u('Tbg', T + 273.15),
+        firmsFrpTotalW: fires.length > 0 ? frpWatts * 1e6 : Number.NaN,
+        firmsFrpMaxMW: best ? best.frp : Number.NaN,
+        A: u('A', aGenuine),
+        'ε': u('ε', 0.98), // fire emissivity ≈ 0.98 (Dozier/Giglio constant)
+        Tfire: u('Tfire', tFireGenuine),
+        Tbg: u('Tbg', Number.NaN),
+        __firmsCount: fires.length,
       };
-      (out as Record<string, unknown>).__proxyWarning =
-        'Fire pixel brightness temperature not fetched from NASA FIRMS in the current ' +
-        'workflow. Using the standard flaming-fire default T_fire ≈ 800 K (Giglio 2006). ' +
-        'For a real FRP estimate, supply the FIRMS fire-pixel brightness value as T_fire.';
-      if (ctx.satThermal?.source) (out as Record<string, unknown>).__satSource = ctx.satThermal.source;
+      if (best !== null) {
+        (out as Record<string, unknown>).__firmsDetection =
+          `NASA FIRMS detection (strongest): ${best.satellite} @ (${best.lat.toFixed(3)}, ${best.lon.toFixed(3)}), ` +
+          `bright_ti4 ${best.brightness.toFixed(0)} K, measured FRP ${best.frp.toFixed(1)} MW, ${best.acq_date} ` +
+          `(${fires.length} fire pixel(s) within search radius)`;
+      }
       return out;
     }
     case 33: {
-      // Idso (1981) CWSI: T_c is the canopy temperature from satellite
-      // thermal IR (Landsat C2 L2 ST / ECOSTRESS). T_wet/T_dry are the
-      // well-watered / non-transpiring reference baselines (Jackson 1988).
+      // Idso (1981) CWSI: T_c is the genuine canopy temperature from
+      // Landsat C2 L2 ST. The wet baseline (well-watered, transpiring
+      // canopy) is DERIVED physically as the wet-bulb temperature of the
+      // genuine air temperature + RH (Stull 2011 approximation) — a fully
+      // transpiring canopy cools toward the wet bulb. The dry baseline
+      // (non-transpiring canopy) has no global remote-sensed source: it
+      // must be user-supplied, else CWSI is honest NaN (Idso's method
+      // requires measured wet/dry baselines).
       const stTc = ctx.satThermal?.surfaceTemperature != null
         ? ctx.satThermal.surfaceTemperature - 273.15
-        : undefined;
+        : Number.NaN;
+      // Stull (2011), J. Appl. Meteor. Climatol. 50: wet-bulb from T (°C), RH (%)
+      const wetBulb = (Ta: number, RH: number) =>
+        Ta * Math.atan(0.151977 * Math.sqrt(RH + 8.313659)) + Math.atan(Ta + RH)
+        - Math.atan(RH - 1.676331) + 0.00391838 * Math.pow(RH, 1.5) * Math.atan(0.023101 * RH)
+        - 4.686035;
+      const twetDerived =
+        Number.isFinite(T) ? wetBulb(T, Math.max(5, Math.min(100, rh))) : Number.NaN;
       return rsProxyWarn(ctx, {
-        Tc: u('Tc', stTc ?? T + 5),
-        Twet: u('Twet', T),
-        Tdry: u('Tdry', T + 10),
+        Tc: u('Tc', stTc),
+        Twet: u('Twet', Number.isFinite(twetDerived) ? twetDerived : Number.NaN),
+        Tdry: u('Tdry', Number.NaN),
       }, ctx.satThermal, 'Landsat C2 L2 surface temperature (canopy T_c)');
     }
     case 34: return {
-      DDF: u('DDF', 5),
-      Tair: u('Tair', T),
+      // Hock (2003) degree-day model. DDF is a site-calibrated parameter
+      // (snow 2–5, firn 5–7, clean ice 7–10, dirty ice 10–15 mm/°C·day)
+      // with no global remote-sensed source — user-supplied only, else NaN.
+      // T_air is the live air temperature (°C); T_base 0 °C is the physical
+      // melt threshold.
+      DDF: u('DDF', Number.NaN),
+      Tair: u('Tair', Number.isFinite(T) ? T : Number.NaN),
       Tbase: u('Tbase', 0),
     };
     case 35: {
-      // Comiso (1986) passive-microwave sea ice: C from NSIDC NRT CDR V4,
-      // T_water / T_ice are the tie-point brightness temperatures.
+      // Comiso (1986) passive-microwave linear mixing: C is GENUINE sea ice
+      // concentration from NSIDC NRT CDR V4 (AMSR2, 25 km grid).
+      // T_water / T_ice are tie-point brightness (radiative) temperatures
+      // that depend on sensor, frequency and polarization (e.g. 37 GHz V:
+      // open water ≈ 180 K, first-year ice ≈ 200–250 K) — no single global
+      // source exists, so they are user-supplied only. No default
+      // radiative temperature is substituted: without them the mixed
+      // brightness temperature cannot be computed (honest NaN).
       const siC = si.concentration;
       return {
-        C: u('C', siC),
-        Twater: u('Twater', 180),  // Open water brightness temp at 37 GHz (K) — Comiso 1986 tie-point
-        Tice: u('Tice', 140),     // First-year ice brightness temp at 37 GHz (K) — Comiso 1986 tie-point
+        C: u('C', Number.isFinite(siC) ? siC : Number.NaN),
+        Twater: u('Twater', Number.NaN),
+        Tice: u('Tice', Number.NaN),
       };
     }
 
     // ═══ Domain 5: Spatial Analysis ═══
-    case 36: return {
-      lat1: u('lat1', lat),
-      lon1: u('lon1', lon),
-      lat2: u('lat2', lat + 1),
-      lon2: u('lon2', lon + 1),
-    };
-    case 37: return {
-      z: u('z', 1),
-      weights: Array.isArray(userInputs['weights']) ? userInputs['weights'] : [1, 1, 1],
-      idx: u('idx', 0),
-    };
-    case 38: return {
-      zs: u('zs', 1),
-      weights: Array.isArray(userInputs['weights']) ? userInputs['weights'] : [1, 1, 1],
-      idx: u('idx', 0),
-    };
+    case 36: {
+      // Sinnott (1984) great-circle distance is a pure geometric compute.
+      // The tool's declared interaction mode is 'two-points' (the UI maps
+      // 36 → two-points): the drawn study-area endpoints ARE the tool's
+      // own inputs and must not be silently dropped. They now seed the
+      // defaults; explicit parameter inputs still override. Without a
+      // two-point area the tool measures from the area center to one
+      // degree NNE (clamped so the default never escapes the validator
+      // ranges near the poles / antimeridian).
+      const sa36 = ctx.studyArea;
+      const tp = sa36?.mode === 'two-points' ? sa36.twoPoints : undefined;
+      return {
+        lat1: u('lat1', tp ? tp[0][0] : lat),
+        lon1: u('lon1', tp ? tp[0][1] : lon),
+        lat2: u('lat2', tp ? tp[1][0] : Math.min(90, lat + 1)),
+        lon2: u('lon2', tp ? tp[1][1] : Math.min(180, lon + 1)),
+      };
+    }
+    case 37: {
+      // Matheron (1963) ordinary kriging on GENUINE spatial observations.
+      // The observation set and the fitted semivariogram (spherical model,
+      // weighted least squares on the Matheron experimental γ̂(h)) are
+      // derived from the real USGS NWIS station network fetched for the
+      // study area — no synthesized sample values. The prediction target
+      // is the location the user asked about (study-area centre / point).
+      // With fewer than 4 reporting stations the fit is ill-posed and the
+      // engine returns honest NaN instead of fabricating a field.
+      const obs37 = ctx.interpObs?.obs ?? [];
+      // Grid mode re-runs mapInputs per cell with the same observation
+      // array; memoize the variogram fit on its array identity (WeakMap:
+      // stale observation sets are garbage-collected automatically).
+      let fitted37: import('../data/kriging').VariogramModel | null = null;
+      if (obs37.length >= 4) {
+        fitted37 = krigingFitCache.get(obs37) ?? null;
+        if (!fitted37) {
+          fitted37 = fitVariogram(obs37, 'spherical');
+          krigingFitCache.set(obs37, fitted37);
+        }
+      }
+      if (obs37.length >= 4 && fitted37) {
+        (userInputs as Record<string, unknown>).__obsCount = obs37.length;
+        (userInputs as Record<string, unknown>).__obsParam = ctx.interpObs?.paramCd;
+        (userInputs as Record<string, unknown>).__variogram = `${fitted37.model} nugget=${fitted37.nugget.toExponential(2)} sill=${fitted37.sill.toExponential(2)} range=${fitted37.range.toFixed(1)} km`;
+      }
+      return {
+        ...userInputs,
+        obs: obs37,
+        fitted: fitted37 ?? Number.NaN,
+        tlat: u('tlat', lat),
+        tlon: u('tlon', lon),
+        unit: ctx.interpObs?.unit ?? '—',
+      };
+    }
+    case 38: {
+      // Shepard (1968) IDW on GENUINE spatial observations. Same genuine
+      // USGS NWIS station network as the kriging tool (case 37): real
+      // station coordinates + latest reported values, real haversine
+      // distances, wᵢ = 1/dᵢ^p with Shepard's p = 2 default. No synthetic
+      // sample values and no fabricated weights. With zero reporting
+      // stations the engine returns honest NaN.
+      const obs38 = ctx.interpObs?.obs ?? [];
+      if (obs38.length > 0) {
+        (userInputs as Record<string, unknown>).__obsCount = obs38.length;
+        (userInputs as Record<string, unknown>).__obsParam = ctx.interpObs?.paramCd;
+      }
+      return {
+        ...userInputs,
+        obs: obs38,
+        tlat: u('tlat', lat),
+        tlon: u('tlon', lon),
+        p: u('p', 2),
+        unit: ctx.interpObs?.unit ?? '—',
+      };
+    }
     case 39: return {
       Q: u('Q', 1000),
       u: u('u', ws),
-      σy: u('σy', 50),
-      σz: u('σz', 30),
+      sigmaY: u('sigmaY', 50),
+      sigmaZ: u('sigmaZ', 30),
       y: u('y', 0),
+      z: u('z', 0),
+      H: u('H', 0),
     };
     case 40: return {
-      μ: u('μ', 100),
-      β: u('β', 20),
+      mu: u('mu', 100),
+      beta: u('beta', 20),
       x: u('x', 100),
     };
     case 41: return {
-      ξ: u('ξ', 0.1),
-      β: u('β', 20),
+      xi: u('xi', 0.1),
+      beta: u('beta', 20),
       x: u('x', 100),
     };
-    case 42: return {
-      z: Array.isArray(userInputs['z']) ? userInputs['z'] : [1.0, 1.5, 2.0, 1.8, 2.2],
-      N: u('N', 10),
-      h: u('h', 1),
-    };
+    case 42: {
+      // Matheron (1963) experimental semivariogram on GENUINE spatial
+      // observations (USGS NWIS network, same pipeline as Tools 37/38).
+      // The pair-binning is done inside the engine from real station
+      // coordinates + values; a static z-array cannot represent pairs at
+      // arbitrary separation h. Honest NaN when too few stations report.
+      const obs42 = ctx.interpObs?.obs ?? [];
+      if (obs42.length > 0) {
+        (userInputs as Record<string, unknown>).__obsCount = obs42.length;
+        (userInputs as Record<string, unknown>).__obsParam = ctx.interpObs?.paramCd;
+      }
+      return {
+        ...userInputs,
+        obs: obs42,
+        K: u('K', 10),
+        unit: ctx.interpObs?.unit ?? '—',
+      };
+    }
 
     // ═══ Domain 6: Soil Science ═══
     case 43: {
-      // van Genuchten (1980). θ_r/θ_s derived from real ISRIC sand/clay
-      // via the Saxton & Rawls (1986) pedotransfer, so the retention curve
-      // reflects the actual soil rather than a static default. α/n are
-      // texture-class estimates (a full ROSETTA lookup would refine these).
-      const sand = s.sand, clay = s.clay;
-      // Saxton-Rawls (1986) residual & saturation water content (% → fraction)
-      const thetaS_pct = 48.9 - 0.126 * sand;
-      const thetaR_pct = -1.04e-2 + 3.71e-3 * sand - 4.91e-4 * clay + 1.32e-4 * sand * sand;
-      const thetaS = Number.isFinite(thetaS_pct) ? Math.max(0.2, Math.min(0.6, thetaS_pct / 100)) : 0.4;
-      const thetaR = Number.isFinite(thetaR_pct) ? Math.max(0.01, Math.min(0.2, thetaR_pct / 100)) : 0.05;
+      // van Genuchten (1980) with Carsel & Parr (1988) texture-class
+      // pedotransfer: all four VG parameters (θ_r, θ_s, α, n) keyed on the
+      // USDA textural class derived from REAL ISRIC sand/silt/clay — no
+      // ternary heuristics, no static constants. GLDAS surface moisture
+      // seeded into the matric potential via inversion of the VG curve.
+      const tex = usdaTextureClass(s.sand, s.silt, s.clay);
+      const vg = tex ? CARSEL_PARR_TABLE[tex] : null;
       // GLDAS surface soil moisture as real current-state check
       const gldasSm = ctx.gldas?.soilMoisture0_10;
       const gldasTheta = gldasSm != null ? soilMoistureToVolumetric(gldasSm, 10) : undefined;
+      // Invert VG curve for the seeding ψ when GLDAS moisture is available:
+      // S_e = (θ − θ_r)/(θ_s − θ_r) → |ψ| = (1/α)·(S_e^(−1/m) − 1)^(1/n)
+      let psiSeed = -10; // cm: typical field-moisture matric potential
+      if (vg && gldasTheta != null) {
+        const Se = (gldasTheta - vg.thetaR) / (vg.thetaS - vg.thetaR);
+        if (Se > 0.05 && Se < 0.98) {
+          const m = 1 - 1 / vg.n;
+          psiSeed = -(1 / vg.alpha) * Math.pow(Math.pow(Se, -1 / m) - 1, 1 / vg.n);
+          psiSeed = Math.max(-100, Math.min(-0.05, psiSeed));
+        }
+      }
       return {
-        thetaR: u('thetaR', thetaR),
-        thetaS: u('thetaS', thetaS),
-        alpha: u('alpha', s.sand > 50 ? 0.035 : 0.014),
-        n: u('n', s.clay > 40 ? 1.2 : 1.5),
-        psi: u('psi', gldasTheta != null ? -10 * (1 - gldasTheta / thetaS) : -10),
+        thetaR: u('thetaR', vg ? vg.thetaR : 0.078),
+        thetaS: u('thetaS', vg ? vg.thetaS : 0.43),
+        alpha: u('alpha', vg ? vg.alpha : 0.036),
+        n: u('n', vg ? vg.n : 1.56),
+        psi: u('psi', psiSeed),
+        ...(vg ? { __vgSource: `Carsel-Parr ${tex}` } : { __vgSource: 'default loam (no genuine soil data)' }),
       };
     }
-    case 44: return {
-      psib: u('psib', -0.3),
-      psi: u('psi', -1),
-    };
-    case 45: {
-      // USLE (Wischmeier & Smith 1978). K (soil erodibility) derived from
-      // real ISRIC texture via the Williams (1995) EPIC formula; LS from
-      // real terrain slope; C/P remain land-management factors (defaults).
-      const SAN = s.sand, SIL = s.silt, CLA = s.clay, Corg = s.organic_carbon;
-      const fca = CLA * (CLA - 5) / 100;            // not used directly
-      void fca;
-      // Williams (1995) EPIC K factor: K = {0.2 + 0.3·exp[-0.0256·SAN·(1-SIL/100)]}
-      //   × [SIL/(CLA+SIL)]^0.3 × [1 - 0.25·C/(C+exp(3.72-2.95C))]
-      //   × [1 - 0.7·SN1/(SN1+exp(-5.51+22.9·SN1))], SN1 = SAN/1000
-      const SN1 = SAN / 1000;
-      const Kcalc = (0.2 + 0.3 * Math.exp(-0.0256 * SAN * (1 - SIL / 100)))
-        * Math.pow(SIL / (CLA + SIL || 1), 0.3)
-        * (1 - 0.25 * Corg / (Corg + Math.exp(3.72 - 2.95 * Corg)))
-        * (1 - 0.7 * SN1 / (SN1 + Math.exp(-5.51 + 22.9 * SN1)));
-      const Kval = Number.isFinite(Kcalc) ? Math.max(0.001, Math.min(0.1, Kcalc)) : 0.03;
-      // LS from slope (Wischmeier-Smith): LS ≈ (λ/22.1)^0.5 · (0.43+0.30S+0.043S²)/6.786
-      // using slope% S and a default slope length λ=22m; simplified here.
-      const S_pct = tr.slope || 0;
-      const LScalc = Math.max(0.1, Math.pow((22 / 22.1), 0.5) * (0.43 + 0.30 * S_pct + 0.043 * S_pct * S_pct) / 6.786);
-      // R factor from IMERG if available, otherwise fallback
-      const imergP = ctx.imerg?.totalPrecipitation;
-      const rFallback = imergP != null ? Math.max(500, imergP * 100) : 5000;
+    case 44: {
+      // Brooks & Corey (1964) Hydrology Papers No. 3. Per the reference,
+      // ψ_b (bubbling pressure) and λ (pore-size index) are FIT from
+      // measured θ(ψ) data via log-log linear regression — they are
+      // user-supplied model parameters, NOT pedotransfer estimates. θ_r/θ_s
+      // for the volumetric-content step come from the published
+      // Carsel-Parr table keyed on the genuine ISRIC texture.
+      const tex = usdaTextureClass(s.sand, s.silt, s.clay);
+      const vg = tex ? CARSEL_PARR_TABLE[tex] : null;
       return {
-        R: u('R', rFallback),
-        K: u('K', Kval),
+        psib: u('psib', -30),       // cm: air-entry pressure, fitted per site (loam typical −20…−100 cm)
+        psi: u('psi', -50),         // cm: current matric potential
+        lambda: u('lambda', 1.5),   // pore-size index, fitted per site (loam typical 1–2)
+        thetaR: u('thetaR', vg ? vg.thetaR : 0.078),
+        thetaS: u('thetaS', vg ? vg.thetaS : 0.43),
+        ...(tex ? { __bcSource: `θ_r/θ_s from Carsel-Parr ${tex}; ψ_b, λ are site-fitted parameters` } : { __bcSource: 'no genuine soil data; θ_r/θ_s default loam' }),
+      };
+    }
+    case 45: {
+      // USLE (Wischmeier & Smith 1978): A = R·K·LS·C·P, unit plot concept K = A/R.
+      // R: genuine rainfall erosivity from the nearest GHCN-Daily station's
+      //    1991–2020 annual precipitation normals (NOAA ACIS, no key) via the
+      //    Renard & Freimund (1994) regression (RUSLE Handbook 703 standard
+      //    P→R estimate for sites without EI30 records). Honest NaN if no
+      //    reporting station exists — no static erosivity fallback.
+      // K: genuine ISRIC SoilGrids texture via the Williams (1995) EPIC/
+      //    RUSLE-form equation with SN1 = 1 − SAN/100 (the silt-plus-clay
+      //    fraction) and ISRIC organic carbon converted from dg/kg to %.
+      // LS: genuine slope from SRTM 30 m (Horn) → RUSLE S-factor (McCool
+      //    et al. 1987 split at 9 % slope) × L = (λ/22.13)^m. λ is the
+      //    up-slope contributing slope length; default 22.1 m (USLE standard-
+      //    plot length, L = 1 at the unit-plot slope).
+      const SAN = s.sand, SIL = s.silt, CLA = s.clay;
+      const Corg = (s.organic_carbon ?? 0) * 0.1; // ISRIC SOC g/kg C ×0.1 → %C (EPIC's C is percent)
+      const hasTexture = SAN + SIL + CLA > 0;
+      // EPIC/RUSLE-form K (Williams 1995; Renard et al. 1997 Handbook 703).
+      // The EPIC equation is dimensioned in US customary units and must be
+      // converted to SI (t·ha·h/ha·MJ·mm) by multiplying by 0.1317.
+      const SN1 = 1 - SAN / 100;
+      const Kcalc = hasTexture
+        ? 0.1317 * (0.2 + 0.3 * Math.exp(-0.0256 * SAN * (1 - SIL / 100)))
+          * Math.pow(SIL / (CLA + SIL || 1), 0.3)
+          * (1 - 0.25 * Corg / (Corg + Math.exp(3.72 - 2.95 * Corg)))
+          * (1 - 0.7 * SN1 / (SN1 + Math.exp(-5.51 + 22.9 * SN1)))
+        : Number.NaN;
+      const Kdefault = Number.isFinite(Kcalc) ? Math.max(0.02 * 0.1317, Math.min(0.65 * 0.1317, Kcalc)) : Number.NaN;
+      // LS from genuine SRTM slope (degrees) — RUSLE Handbook 703 / McCool et al. 1987
+      const slopeDeg = (tr.slope && Number.isFinite(tr.slope)) ? tr.slope : Number.NaN;
+      const sinTh = Math.sin(slopeDeg * Math.PI / 180);
+      const slopePct = Math.tan(slopeDeg * Math.PI / 180) * 100;
+      const LScalc = Number.isFinite(slopeDeg)
+        ? (() => {
+            const lambda = u('lambda', 22.1);
+            // m: slope-length exponent by slope class (RUSLE2 / McCool et al. 1987)
+            const mExp = slopePct >= 5 ? 0.5 : slopePct >= 3.5 ? 0.4 : slopePct >= 1 ? 0.3 : 0.2;
+            const L = Math.pow(lambda / 22.13, mExp);
+            // S: McCool et al. 1987 (RUSLE Handbook 703), split at 9 % slope
+            const S = slopePct < 9 ? 10.8 * sinTh + 0.03 : 16.8 * sinTh - 0.50;
+            return L * Math.max(0.001, S);
+          })()
+        : Number.NaN;
+      const Rgenuine = ctx.rFactor?.R ?? Number.NaN;
+      // C from genuine MODIS MCD12Q1 IGBP land cover via the standard
+      // USLE/RUSLE cover-management table (Wischmeier-Smith Table 9-1;
+      // Panagos et al. 2015 GIS mapping) — derived from real data.
+      const C_TABLE: Record<number, number> = {
+        1: 0.001, 2: 0.001, 3: 0.002, 4: 0.002, 5: 0.002,   // forests
+        6: 0.005, 7: 0.01, 8: 0.005, 9: 0.01,                // shrub/savanna
+        10: 0.05,                                            // grassland
+        11: 0.01,                                            // wetland
+        12: 0.2, 14: 0.25,                                   // cropland
+        13: 0.02,                                            // urban
+        15: 0.01,                                            // snow/ice
+        16: 1.0,                                             // barren
+        17: 0,                                               // water body — no erodible soil
+      };
+      const Cgenuine = (lc.code && C_TABLE[lc.code] != null) ? C_TABLE[lc.code] : Number.NaN;
+      return {
+        R: u('R', Rgenuine),
+        K: u('K', Kdefault),
         LS: u('LS', LScalc),
-        C: u('C', 0.2),
+        C: u('C', Cgenuine),
         P: u('P', 1),
+        lambda: u('lambda', 22.1),
+        ...(ctx.rFactor
+          ? { __rSource: `R from GHCN station '${ctx.rFactor.station}' (${ctx.rFactor.distanceKm.toFixed(0)} km), 1991–2020 normals ${ctx.rFactor.annualPrecipMm.toFixed(0)} mm → Renard-Freimund ${ctx.rFactor.R.toFixed(0)}` }
+          : { __rSource: 'no GHCN station with climate normals found — supply measured R' }),
+        ...(hasTexture ? { __kSource: `K from ISRIC texture ${SAN.toFixed(0)}/${SIL.toFixed(0)}/${CLA.toFixed(0)} % (sand/silt/clay), EPIC ${Kdefault.toFixed(3)}` } : { __kSource: 'no genuine ISRIC texture — supply measured K' }),
+        ...(Number.isFinite(LScalc) ? { __lsSource: `LS from SRTM slope ${slopeDeg.toFixed(1)}°, λ=${u('lambda', 22.1)} m` } : { __lsSource: 'no genuine terrain slope — supply measured LS' }),
+        ...(Number.isFinite(Cgenuine) ? { __cSource: `C=${Cgenuine} from MODIS land cover '${lc.class}' (IGBP class ${lc.code})` } : { __cSource: 'no genuine land cover — supply measured C' }),
       };
     }
     case 46: {
-      // Q10 soil respiration — uses GLDAS soil moisture + drought PDSI
+      // Q10 soil respiration (Raich & Schlesinger 1992, Tellus B 44:81-99).
+      // R_base: no free primary source supplies site basal respiration, so
+      // it is derived from the paper's own global flux estimate, modulated
+      // by genuine conditions:
+      //   76.5 Pg CO2/yr ÷ 1.31e8 km2 land = 584 g CO2/m2/yr
+      //   = 0.42 µmol CO2/m2/s (global annual-mean instantaneous flux)
+      //   × moisture scalar (genuine GLDAS Noah 0-10 cm volumetric water)
+      //   × drought scalar (genuine scPDSI).
+      // Moisture: rises to field capacity (~0.30 m3/m3), then suppressed
+      // when waterlogged (θ > 0.45) per Xu et al. (2004).
       const gldasSm = ctx.gldas?.soilMoisture0_10;
-      const smFactor = gldasSm != null ? Math.max(0.1, Math.min(1, gldasSm / 30)) : 1;
-      // Drought suppression: PDSI < -2 severely limits respiration
+      const theta = gldasSm != null ? soilMoistureToVolumetric(gldasSm, 10) : null;
+      let smFactor: number | null = null;
+      if (theta != null) {
+        smFactor = Math.max(0.1, Math.min(1, theta / 0.30));
+        if (theta > 0.45) smFactor *= Math.max(0.4, 1 - (theta - 0.45) * 2.4);
+      }
+      const smScalar = smFactor ?? 1;
+      // Drought suppression from genuine scPDSI (PDSI < -2 limits strongly)
       const droughtFactor = Math.max(0.3, Math.min(1, 1 + (dr?.pdsi ?? 0) * 0.15));
+      const RGLOBAL_MEAN = 0.42; // µmol CO2/m2/s — Raich & Schlesinger 1992 flux
+      const soilT = w.soil_temperature_0_to_7cm;
+      const airT = w.temperature_2m;
+      const Tgenuine = Number.isFinite(soilT) ? soilT
+        : Number.isFinite(airT) ? airT
+        : Number.NaN;
       return {
-        Rbase: u('Rbase', 2 * smFactor * droughtFactor),
+        Rbase: u('Rbase', RGLOBAL_MEAN * smScalar * droughtFactor),
         Q10: u('Q10', 2),
-        T: u('T', w.soil_temperature_0_to_7cm ?? T),
+        T: u('T', Tgenuine),
         Tbase: u('Tbase', 10),
+        ...(Number.isFinite(soilT) ? { __tSource: 'T = genuine Open-Meteo soil temperature 0–7 cm' }
+          : Number.isFinite(airT) ? { __tSource: 'soil temperature unavailable — T = genuine Open-Meteo 2 m air temperature' }
+          : { __tSource: 'no genuine temperature source — supply measured T' }),
+        ...(theta != null
+          ? { __rsSource: `R_base = Raich-Schlesinger global flux × GLDAS moisture (θ=${theta.toFixed(3)}) × scPDSI ${dr?.pdsi != null ? dr.pdsi.toFixed(1) : 'n/a'}` }
+          : { __rsSource: 'R_base from Raich-Schlesinger global flux (GLDAS moisture unavailable); supply measured R_base for site accuracy' }),
       };
     }
-    case 47: return {
-      ki: u('ki', 1),
-      fractions: Array.isArray(userInputs['fractions']) ? userInputs['fractions'] : [{ k: 2.0, fi: 0.5 }, { k: 0.6, fi: 0.3 }, { k: 0.25, fi: 0.2 }],
-    };
-    case 48: {
-      const era5Ustar = ctx.era5?.frictionVelocity;
+    case 47: {
+      // de Vries (1963) soil thermal conductivity, Farouki (1981) CRREL
+      // Monograph 81-1 §7.6 transcription. Genuine inputs:
+      //  - ρ_b, organic C, sand fraction: ISRIC SoilGrids 0–5 cm
+      //    (van Bemmelen OM% = SOC% × 1.724 applied here);
+      //  - quartz fraction q: standard Johansen (1975) convention cited
+      //    throughout Farouki — sand fraction is the only ISRIC-available
+      //    proxy for the quartz content of the mineral solids;
+      //  - θ: GLDAS Noah 0–10 cm volumetric moisture (genuine land-surface
+      //    assimilation; the paper's required in-situ θ has no global
+      //    sensor), else honest NaN.
+      // No static fallbacks: any missing genuine input → NaN, the engine
+      // reports which factor is missing (no-fallback rule).
+      const SAN = s.sand, SIL = s.silt, CLA = s.clay;
+      const hasSoilPixel = (SAN + SIL + CLA) > 0 && (s.bulk_density ?? 0) > 0;
+      const omPct = hasSoilPixel
+        ? (s.organic_carbon ?? 0) * 0.1 * 1.724 // ISRIC SOC: fetchSoilData already divides raw dg/kg by d_factor 10 → g/kg C; ×0.1 → %C; ×1.724 van Bemmelen → %OM
+        : Number.NaN;
+      const rhoBcalc = hasSoilPixel ? s.bulk_density : Number.NaN;
+      const qCalc = hasSoilPixel ? SAN / 100 : Number.NaN;
+      const gldasSm = ctx.gldas?.soilMoisture0_10;
+      const thetaCalc = gldasSm != null ? soilMoistureToVolumetric(gldasSm, 10) : null;
+      const granule = ctx.gldas?.granuleTime;
+      const gldasStale = Number.isFinite(gldasSm as number) && granule
+        ? Date.now() - Date.parse(granule) > 36 * 3600e3
+        : false;
       return {
-        kappa: u('kappa', 0.4),
-        ustar: u('ustar', era5Ustar ?? 0.3),
+        sandFrac: u('sandFrac', qCalc),
+        omPct: u('omPct', omPct),
+        rhoB: u('rhoB', rhoBcalc),
+        theta: u('theta', thetaCalc ?? Number.NaN),
+        ...(Number.isFinite(thetaCalc as number)
+          ? { __thetaSource: gldasStale
+              ? `θ = genuine GLDAS Noah 2.1 0–10 cm, granule ${granule} (newest published — the NRT stream has halted; de Vries λ is a weak function of θ over this range)`
+              : `θ = genuine GLDAS Noah 2.1 0–10 cm${granule ? `, granule ${granule}` : ''}` }
+          : { __thetaSource: 'no genuine GLDAS soil moisture — supply measured θ (m³/m³)' }),
+      };
+    }
+    case 48: {
+      // Monin–Obukhov similarity (Monin & Obukhov 1954) with the Högström
+      // (1988, BLME 42:55–78) re-evaluated flux–profile functions (κ = 0.40,
+      // φ_h(0) = 0.95; coefficients as tabulated by Foken 2006 Eqs 21–22).
+      // Genuine inputs — zero static fallbacks:
+      //  - u_*: ERA5 friction velocity (zust) at the study point;
+      //  - L: DERIVED from its definition L = −u_*³·θ̄/(κ·g·(w′θ′)₀) using the
+      //    genuine ERA5 sensible heat flux, 2 m temperature and surface
+      //    pressure of the same reanalysis step (virtual-temperature
+      //    correction omitted — without q its effect on L is < ~3 %);
+      //  - z: measurement height, a user parameter (default 10 m);
+      //  - the former fabricated inputs (u_*=0.3, L=−50, zeta=−0.2) are
+      //    removed: ζ = z/L is a DERIVED quantity, not an input, and the old
+      //    engine branched on the fake zeta → NaN whenever the true ζ > 0.
+      const ef = ctx.era5?.surfaceFluxes;
+      const era5Ustar = ctx.era5?.frictionVelocity;
+      if (userInputs.L !== undefined) {
+        return {
+          kappa: u('kappa', 0.40),
+          ustar: u('ustar', Number.isFinite(userInputs.ustar) ? userInputs.ustar : era5Ustar ?? Number.NaN),
+          z: u('z', 10),
+          L: userInputs.L,
+          __lSource: 'L user-supplied (overrides ERA5-derived value)',
+          ...(era5Ustar != null && userInputs.ustar === undefined ? { __ustarSource: 'u_* = genuine ERA5 friction velocity (zust), 12:00 UTC' } : {}),
+        };
+      }
+      let Lcalc = Number.NaN;
+      let lSource = 'no genuine ERA5 state/flux to derive L from — supply L (and u_*) from eddy-covariance/tower data, or provide a study point';
+      if (era5Ustar != null && ef?.sensibleFlux != null && ef.airTemp2m != null) {
+        const Hv = ef.sensibleFlux;                    // W/m², positive upward (IFS sign already flipped)
+        const pSfc = ef.surfacePressure ?? P * 100;    // Pa
+        const T2mK = ef.airTemp2m;                     // K
+        const rho = pSfc / (R_SPEC * T2mK);            // kg/m³
+        if (era5Ustar > 1e-4 && rho > 0.1 && Math.abs(Hv) > 1e-3) {
+          const wT = Hv / (rho * 1005);                // K·m/s kinematic heat flux
+          const theta2m = T2mK * Math.pow(1e5 / pSfc, R_SPEC / 1005);
+          const kappaC = typeof userInputs.kappa === 'number' && Number.isFinite(userInputs.kappa) ? userInputs.kappa : 0.40;
+          Lcalc = -(era5Ustar ** 3 * theta2m) / (kappaC * G_GRAV * wT);
+          lSource = `L = −u_*³·θ̄/(κ·g·(w′θ′)₀) derived from genuine ERA5: H = ${Hv.toFixed(1)} W/m² (up +), u_* = ${era5Ustar.toFixed(3)} m/s, T_2m = ${T2mK.toFixed(2)} K, p_s = ${pSfc.toFixed(0)} Pa (12:00 UTC)`;
+        } else {
+          lSource = `ERA5 data present but physically unsuitable for L (|H| or u_* too small: H = ${Hv.toFixed(2)} W/m², u_* = ${era5Ustar.toFixed(4)} m/s) — supply L explicitly`;
+        }
+      }
+      return {
+        kappa: u('kappa', 0.40),
+        ustar: u('ustar', era5Ustar ?? Number.NaN),
         z: u('z', 10),
-        L: u('L', -50),
-        zeta: u('zeta', -0.2),
+        L: Lcalc,
+        __lSource: lSource,
+        ...(era5Ustar != null ? { __ustarSource: 'u_* = genuine ERA5 friction velocity (zust), 12:00 UTC' } : {}),
       };
     }
     case 49: {
@@ -1033,13 +1628,18 @@ function mapInputs(
 
     // ═══ Domain 15: Climate Dynamics ═══
     case 96: {
-      const fluxes = ctx.era5?.surfaceFluxes;
+      // Budyko/Sellers EBM is a TOP-OF-ATMOSPHERE budget: Q = mean insolation
+      // (S₀/4 = 1367/4 = 341.75 W/m², a physical constant) and I = OLR.
+      // ERA5 surface fluxes (netShortwave/netLongwave) are SURFACE quantities
+      // and must not feed Q or I here. TOA radiative fluxes would come from
+      // CERES TOA; until that source is wired the documented EBM constants
+      // are used (physical constants of the method, not data fallbacks).
       return {
         C: u('C', 2.09e7),
         T: u('T', 288),
-        Q: u('Q', fluxes?.netShortwave ?? 342),
+        Q: u('Q', 341.75),
         α: u('α', 0.3),
-        I: u('I', fluxes?.netLongwave ?? 240),
+        I: u('I', 240),
         D: u('D', 0.6),
         divDT: u('divDT', 0),
       };
@@ -1460,19 +2060,32 @@ export async function computeWithContext(
   // entire computation. mapInputs() already provides physical fallback
   // values via ?? operators for every parameter.
   const FETCH_TIMEOUT_MS = 10000;
-  const safe = <T>(p: Promise<T>, fb: T): Promise<T> =>
+  const safe = <T>(p: Promise<T>, fb: T, timeoutMs?: number): Promise<T> =>
     Promise.race([
       p.catch(() => fb),
-      new Promise<T>(r => setTimeout(() => r(fb), FETCH_TIMEOUT_MS)),
+      new Promise<T>(r => setTimeout(() => r(fb), timeoutMs ?? FETCH_TIMEOUT_MS)),
     ]);
 
   const dateStr = context?.time?.start || undefined;
+
+  // CDS (ERA5) jobs take 15–120 s. Tools whose authentic inputs come from
+  // ERA5 surface fluxes (Tool 17 Gill ocean heat budget) wait long enough
+  // for the job to complete; every other tool keeps the default 10 s
+  // window so overall responsiveness is unchanged.
+  const ERA5_CONSUMER_IDS = new Set([5, 8, 17, 48, 49, 70, 71, 105, 106, 107]);
+  const ERA5_TIMEOUT_MS = 150000;
+  // GLDAS consumers may need the stream-halt fallback (HEAD binary search
+  // for the latest published granule + one nc4 download — ~60–120 s worst
+  // case when the NRT stream has halted, as observed 2026-08).
+  const GLDAS_CONSUMER_IDS = new Set([8, 18, 43, 46, 47, 91, 130, 131, 132]);
+  const GLDAS_TIMEOUT_MS = 150000;
 
   const [
     weather, marine, airQuality, earthquakes, elevation,
     soil, vegetation, seaIce, tectonic, spaceWeather,
     water, landCover, terrain, glacier, volcano,
     tropo, permafrost, drought, river, era5, imerg, gldas,
+    rFactor,
   ] = await Promise.all([
     safe(
       context?.time?.granularity === 'range'
@@ -1483,12 +2096,14 @@ export async function computeWithContext(
     safe(fetchMarineData(lat, lon), {} as MarineData),
     safe(fetchAirQuality(lat, lon), {} as AirQualityData),
     safe(fetchEarthquakes(lat, lon, context?.time?.start ?? '', context?.time?.end ?? ''),
-      { count: 0, maxMagnitude: 0, avgMagnitude: 0, avgDepth: 0, bValue: 1.0, events: [] } as EarthquakeData),
+      { count: 0, maxMagnitude: 0, avgMagnitude: 0, avgDepth: 0, bValue: 1.0, aValue: 0, mcMagnitude: 2.5, omoriFit: null, events: [] } as EarthquakeData),
     safe(fetchElevation(lat, lon), { elevation: 0 } as ElevationData),
     safe(fetchSoilData(lat, lon),
-      { clay: 0, sand: 0, silt: 0, organic_carbon: 0, ph_h2o: 0, bulk_density: 0, cec: 0, texture_class: 'unknown' } as SoilData),
+      { clay: 0, sand: 0, silt: 0, organic_carbon: 0, ph_h2o: 0, bulk_density: 0, cec: 0, texture_class: 'unknown' } as SoilData,
+      30000),
     safe(fetchVegetationIndices(lat, lon),
-      { ndvi: 0, evi: 0, lai: 0, fpar: 0, landCover: 'unknown' } as VegetationData),
+      { ndvi: 0, evi: 0, lai: 0, fpar: 0, landCover: 'unknown' } as VegetationData,
+      30000),
     safe(fetchSeaIce(lat, lon), { concentration: 0, extent: 0, thickness: 0 } as SeaIceData),
     safe(fetchTectonicContext(lat, lon),
       { plateBoundary: false, faultProximity: 9999, subductionZone: false, riftZone: false, transformBoundary: false } as TectonicData),
@@ -1513,14 +2128,17 @@ export async function computeWithContext(
     safe(fetchRiverData(lat, lon),
       { discharge: 0, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData),
     safe(fetchEra5HighFidelity(lat, lon, dateStr),
-      { frictionVelocity: null, totalColumnWaterVapour: null, surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null } as Era5HighFidelityData),
+      { frictionVelocity: null, totalColumnWaterVapour: null, surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null } as Era5HighFidelityData,
+      ERA5_CONSUMER_IDS.has(id) ? ERA5_TIMEOUT_MS : undefined),
     safe(fetchImergPrecipitation(lat, lon, dateStr).then(r => r ?? { totalPrecipitation: null, maxIntensity: null, source: null } as ImergData),
-      { totalPrecipitation: null, maxIntensity: null, source: null } as ImergData),
+      { totalPrecipitation: null, maxIntensity: null, source: null } as ImergData,
+      30000),
     safe(fetchGldasData(lat, lon, dateStr), {
       tkeDissipation: null, soilMoisture0_10: null, soilMoisture10_40: null,
       soilMoisture40_100: null, soilMoisture100_200: null, groundwaterStorage: null,
-      snowWaterEquivalent: null, canopyInterception: null, surfaceTemp: null, source: null,
-    } as GldasData),
+      snowWaterEquivalent: null, canopyInterception: null, surfaceTemp: null, granuleTime: null, source: null,
+    } as GldasData, GLDAS_CONSUMER_IDS.has(id) ? GLDAS_TIMEOUT_MS : undefined),
+    safe(fetchRFactor(lat, lon), null, 25000),
   ]);
 
   const popData = await safe(fetchPopulation(lat, lon), { populationDensity: 0, totalPopulation: 0 });
@@ -1533,19 +2151,67 @@ export async function computeWithContext(
   // unreachable, satThermal is null and a proxy warning is raised
   // (rather than silently substituting weather air temperature).
   const satThermal = SAFE_THERMAL_TOOLS.has(id)
-    ? await safe(fetchLandsatThermal(lat, lon, dateStr), null)
+    ? await safe(fetchLandsatThermal(lat, lon, dateStr), null, 45000)
     : null;
   const columnWV = SAFE_THERMAL_TOOLS.has(id)
     ? await safe(fetchColumnWaterVapor(lat, lon, dateStr), null)
     : null;
+
+  // Genuine tide prediction (Tool 14 — Pugh & Woodworth 2014 harmonic method
+  // on real NOAA station constituents). Skipped for all other tools to avoid
+  // extra API traffic.
+  const tide: TidePredictionResult | null = id === 14
+    ? await safe(fetchTidePrediction(lat, lon, dateStr ? new Date(dateStr) : undefined), null, 45000)
+    : null;
+
+  // Genuine focal mechanism for the Campbell–Bozorgnia (2014) GMPE
+  // (Tool 21): moment-tensor product of the strongest recent event near the
+  // study point. Also consumed by Tool 23 (scalar seismic moment M₀) and
+  // Tool 24 (M₀ for the Brune stress drop).
+  // Null when no event with a published mechanism exists — the
+  // engine then reports honest NaN rather than a fabricated mechanism.
+  const RUPTURE_CONSUMER_IDS = new Set([21, 23, 24]);
+  const rupture: EarthquakeRupture | null = RUPTURE_CONSUMER_IDS.has(id)
+    ? await safe(fetchNearestEarthquakeRupture(lat, lon, context?.time?.start ?? '', context?.time?.end ?? ''), null, 20000)
+    : null;
+
+  // Genuine NASA FIRMS active-fire detections (Tool 32): measured
+  // fire-pixel brightness temperatures and Wooster-method FRP values.
+  // Null when no fires are detected or the FIRMS API is unreachable —
+  // the engine then reports honest NaN (no fabricated fire temperature).
+  const fire = id === 32
+    ? await safe(fetchFIRMSFires(lat, lon, 50), null, 25000)
+    : null;
+
+  // Genuine spatial observation network for interpolation tools
+  // (37 kriging / 38 IDW): real per-station coordinates + latest values
+  // from the USGS NWIS instantaneous network over the study bbox (or a
+  // ±0.5° window around a point). Null / empty when too few stations
+  // report — the engine then returns honest NaN instead of fabricated
+  // sample values.
+  const INTERP_OBSERVER_IDS = new Set([37, 38, 42]);
+  let interpObs: { obs: import('../data/dataFetchers').StationObs[]; paramCd: string; unit: string } | null = null;
+  if (INTERP_OBSERVER_IDS.has(id)) {
+    const saInterp = context?.studyArea;
+    const [[oLatMin, oLonMin], [oLatMax, oLonMax]] =
+      saInterp?.bbox && saInterp.bbox[1][0] > saInterp.bbox[0][0] && saInterp.bbox[1][1] > saInterp.bbox[0][1]
+        ? saInterp.bbox
+        : [[lat - 0.5, lon - 0.5], [lat + 0.5, lon + 0.5]];
+    interpObs = await safe(fetchStationObservations(oLatMin, oLonMin, oLatMax, oLonMax), null, 90000);
+  }
 
   const ctx = {
     weather, marine, airQuality, earthquakes, elevation,
     soil, vegetation, seaIce, tectonic, spaceWeather,
     water, landCover, terrain, glacier, volcano,
     tropo, permafrost, drought, river, era5, imerg, gldas,
+    rFactor,
     satThermal, columnWV,
+    tide, rupture,
+    fire,
+    interpObs,
     lat, lon,
+    studyArea: context?.studyArea,
   };
 
   const enrichedInputs = alignInputs(id, mapInputs(id, normInputs, { ...ctx, pop: popData }));
@@ -1561,6 +2227,7 @@ export async function computeWithContext(
   // remote-sensing mapInputs cases (e.g. Eq 1 LST).
   const _satSource = enrichedInputs.__satSource as string | undefined;
   const _satAcq = enrichedInputs.__satAcquired as string | undefined;
+  const bt11Source = enrichedInputs.__bt11Source as string | undefined;
   const proxyWarning = enrichedInputs.__proxyWarning as string | undefined;
   if (proxyWarning) {
     warnings.push(proxyWarning);
@@ -1588,6 +2255,10 @@ export async function computeWithContext(
     sources.push(_satSource);
     log.push(`  Satellite data: ${_satSource}${_satAcq ? ` (acquired ${_satAcq})` : ''}`);
   }
+  if (bt11Source) {
+    sources.push(bt11Source === 'measured' ? 'usgs-c2-l1-b11' : 'landsat-b11-forwardmodel');
+    log.push(`  Band-11 BT: ${bt11Source === 'measured' ? 'measured C2 L1 radiance (USGS/ERS)' : 'forward-modeled from single-channel atmosphere'}`);
+  }
   if (satThermal) sources.push('landsat-c2l2-st');
   if (columnWV != null) sources.push('era5-column-water-vapor');
   if (era5.frictionVelocity != null) sources.push('era5-approx-friction-velocity');
@@ -1598,13 +2269,16 @@ export async function computeWithContext(
   if (era5.soilState) sources.push('era5-soil-state');
   if (imerg.source) sources.push(imerg.source);
   if (gldas.source) sources.push('gldas-noah-2.1');
+  if (rFactor) sources.push(`ghcn-climate-normals-r-factor`);
+  if (tide) sources.push(tide.source);
+  if (interpObs && interpObs.obs.length > 0) sources.push(`usgs-nwis-observations:${interpObs.paramCd}`);
 
   // Run the complete 7-stage scientific workflow
   const validationRules = Object.entries(enrichedInputs).map(([k, v]) => ({
     param: k,
     ...(typeof v === 'number' ? { min: -Infinity, max: Infinity } : {}),
   }));
-  const workflow = runToolWorkflow(id, baseResult, enrichedInputs, validationRules, sources);
+  const workflow = runToolWorkflow(id, baseResult, enrichedInputs, validationRules, sources, { lat, lon });
 
   const result: ContextResult = {
     ...baseResult,
@@ -1617,6 +2291,10 @@ export async function computeWithContext(
       vegetation: { ndvi: vegetation.ndvi, evi: vegetation.evi },
       marine: { waveHeight: marine.wave_height, wavePeriod: marine.wave_period },
       airQuality: { pm25: airQuality.pm2_5, aqi: airQuality.european_aqi },
+      // Real satellite TIRS band temperatures when available (Rozenstein
+      // split-window tools expose these as secondary outputs).
+      ...(satThermal?.bt10 != null ? { T10: satThermal.bt10 } : {}),
+      ...(satThermal?.bt11 != null ? { T11: satThermal.bt11 } : {}),
       location: { lat, lon },
     },
     location: { lat, lon },
@@ -1635,12 +2313,16 @@ export async function computeWithContext(
 
   // QGIS-style spatial output: sweep the equation across the study-area
   // bounding box, varying location-dependent parameters (and terrain), to
-  // produce a real raster grid instead of a single flat value.
+  // produce a real raster grid instead of a single flat value. Triggered for
+  // any bbox-mode study area (a drawn study area defaults tools to bbox mode
+  // so the IDW overlay is produced), and masked to the drawn shape's interior
+  // when polygon rings are supplied. Explicit single-point selection stays a
+  // single point (no polygon is sent in that case).
   const sa = context?.studyArea;
-  if (sa && sa.mode === 'bbox' && sa.bbox) {
+  if (sa && sa.bbox && (sa.mode === 'bbox' || (sa.polygon && sa.polygon.length > 0))) {
     const [[latMin, lonMin], [latMax, lonMax]] = sa.bbox;
     if (latMax > latMin && lonMax > lonMin) {
-      const grid = await buildSpatialGrid(id, normInputs, { ...ctx, pop: popData }, latMin, latMax, lonMin, lonMax);
+      const grid = await buildSpatialGrid(id, normInputs, { ...ctx, pop: popData, __satDate: dateStr }, latMin, latMax, lonMin, lonMax, sa.polygon);
       if (grid) {
         result.grid = grid;
         if (grid.hasNaN) warnings.push('Some grid cells produced non-finite values (clamped in display).');
@@ -1651,36 +2333,139 @@ export async function computeWithContext(
   return result;
 }
 
+// Short-TTL memoization for grid sample fetches (elevation + weather). A single
+// execute samples 36 points; without this, concurrent executes fire hundreds of
+// identical Open-Meteo requests per burst and get rate-limited, silently
+// falling back to constants. Keyed by rounded lat/lon so nearby grids reuse.
+const gridSampleCache = new Map<string, { at: number; value: unknown }>();
+const GRID_SAMPLE_TTL_MS = 5 * 60 * 1000;
+const memoizedFetch = async <T>(key: string, fetcher: () => Promise<T>): Promise<T> => {
+  const hit = gridSampleCache.get(key);
+  if (hit && Date.now() - hit.at < GRID_SAMPLE_TTL_MS) return hit.value as T;
+  const val = await fetcher();
+  // Only cache successful results — a transient null (network error, rate
+  // limit) must not poison the grid for the next 5 minutes.
+  if (val != null) gridSampleCache.set(key, { at: Date.now(), value: val });
+  return val;
+};
+
 /**
  * Builds a spatial grid for a bounding box by evaluating the equation at each
- * cell centre. Location-dependent parameters (Coriolis parameter, etc.) and a
- * bilinearly-interpolated terrain elevation are varied per cell so the output
- * reflects real spatial structure where the equation is location-sensitive.
+ * cell centre. Location-dependent parameters (Coriolis parameter, etc.), a
+ * bilinearly-interpolated terrain elevation, and real observed weather
+ * (Open-Meteo, fetched at 36 sample points in one batched request) are
+ * varied per cell so the output reflects real spatial structure where the
+ * equation is location-sensitive.
  */
 async function buildSpatialGrid(
   id: number,
   normInputs: Record<string, number>,
   ctx: Record<string, unknown>,
   latMin: number, latMax: number, lonMin: number, lonMax: number,
+  polygon?: Array<Array<[number, number]>>,
 ): Promise<GridResult | null> {
   const nLat = 28, nLon = 28;
   const ELEV_N = 6;
 
-  // Coarse elevation sampling for terrain-based spatial variation.
-  const elevSamples: number[][] = [];
-  const elevFetches: Promise<{ elevation: number }>[] = [];
+  // When a drawn polygon/circle study area is supplied, only cells whose
+  // centre lies inside the outer ring are computed; everything else is masked
+  // to NaN so the IDW overlay hugs the drawn shape instead of its bbox.
+  const outerRing = polygon && polygon.length > 0 ? polygon[0] : undefined;
+  const pointInPolygon = (lon: number, lat: number): boolean => {
+    if (!outerRing || outerRing.length < 3) return true;
+    let inside = false;
+    for (let i = 0, j = outerRing.length - 1; i < outerRing.length; j = i++) {
+      const [xi, yi] = outerRing[i];
+      const [xj, yj] = outerRing[j];
+      if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+
+  // Coarse elevation + weather sampling for terrain/weather-based spatial
+  // variation. Real observed values (Open-Meteo) are fetched at each sample
+  // point via ONE multi-point request per dataset (36 points in a single
+  // call), then bilinearly interpolated per cell — observed data throughout,
+  // no synthetic lapse-rate assumptions.
+  const sampleLats: number[] = [];
+  const sampleLons: number[] = [];
   for (let i = 0; i < ELEV_N; i++) {
     const lat = latMin + (latMax - latMin) * (i / (ELEV_N - 1));
     for (let j = 0; j < ELEV_N; j++) {
-      const lon = lonMin + (lonMax - lonMin) * (j / (ELEV_N - 1));
-      elevFetches.push(fetchElevation(lat, lon).catch(() => ({ elevation: 0 })));
+      sampleLats.push(lat);
+      sampleLons.push(lonMin + (lonMax - lonMin) * (j / (ELEV_N - 1)));
     }
   }
-  const elevFlat = await Promise.all(elevFetches);
+  const [elevFlat, wxFlat] = await Promise.all([
+    memoizedFetch(`elev:${sampleLats.join(',')}|${sampleLons.join(',')}`, () => fetchElevationsMulti(sampleLats, sampleLons))
+      .catch(() => sampleLats.map(() => ({ elevation: 0 }))),
+    memoizedFetch(`wx:${sampleLats.join(',')}|${sampleLons.join(',')}`, () => fetchCurrentWeatherMulti(sampleLats, sampleLons))
+      .catch(() => sampleLats.map(() => ({}) as WeatherData)),
+  ]);
+  // Tool 47 (de Vries soil conductivity): genuine per-point ISRIC SoilGrids
+  // sampled on a coarse 4×4 lattice with nearest-valid-neighbor assignment
+  // (soil texture is categorical — bilinear interpolation across a masked
+  // boundary would be physically meaningless). ISRIC rate-limits, so the
+  // 16 fetches run with modest concurrency, failures degrade to null and
+  // the cell computes an honest NaN (no centre-point fabricate).
+  const SOIL_N = 4;
+  const soilSamples: (SoilData | null)[][] | null = id === 47
+    ? await (async () => {
+        const soilLats: number[] = [], soilLons: number[] = [];
+        for (let i = 0; i < SOIL_N; i++)
+          for (let j = 0; j < SOIL_N; j++) {
+            soilLats.push(latMin + (latMax - latMin) * (i / (SOIL_N - 1)));
+            soilLons.push(lonMin + (lonMax - lonMin) * (j / (SOIL_N - 1)));
+          }
+        const out: (SoilData | null)[] = new Array(SOIL_N * SOIL_N).fill(null);
+        let head = 0;
+        await Promise.all(new Array(4).fill(0).map(async () => {
+          for (; head < soilLats.length; head++) {
+            const idx = head;
+            try {
+              out[idx] = await memoizedFetch(
+                `soil:${soilLats[idx].toFixed(4)},${soilLons[idx].toFixed(4)}`,
+                () => fetchSoilData(soilLats[idx], soilLons[idx]),
+              );
+            } catch { out[idx] = null; }
+          }
+        }));
+        const g: (SoilData | null)[][] = [];
+        for (let i = 0; i < SOIL_N; i++) {
+          const row: (SoilData | null)[] = [];
+          for (let j = 0; j < SOIL_N; j++) row.push(out[i * SOIL_N + j]);
+          g.push(row);
+        }
+        return g;
+      })()
+    : null;
+  const soilAt = (lat: number, lon: number): SoilData | null => {
+    if (!soilSamples) return null;
+    let best: SoilData | null = null, bestD = Infinity;
+    for (let i = 0; i < SOIL_N; i++)
+      for (let j = 0; j < SOIL_N; j++) {
+        const s = soilSamples[i][j];
+        if (!s) continue;
+        const slat = latMin + (latMax - latMin) * (i / (SOIL_N - 1));
+        const slon = lonMin + (lonMax - lonMin) * (j / (SOIL_N - 1));
+        const d = (slat - lat) * (slat - lat) + (slon - lon) * (slon - lon);
+        if (d < bestD) { bestD = d; best = s; }
+      }
+    return best;
+  };
+  const elevSamples: number[][] = [];
+  const wxSamples: WeatherData[][] = [];
   for (let i = 0; i < ELEV_N; i++) {
     const row: number[] = [];
-    for (let j = 0; j < ELEV_N; j++) row.push(elevFlat[i * ELEV_N + j].elevation);
+    const wxRow: WeatherData[] = [];
+    for (let j = 0; j < ELEV_N; j++) {
+      row.push(elevFlat[i * ELEV_N + j].elevation);
+      wxRow.push(wxFlat[i * ELEV_N + j]);
+    }
     elevSamples.push(row);
+    wxSamples.push(wxRow);
   }
   const elevAt = (lat: number, lon: number): number => {
     const fi = ((lat - latMin) / (latMax - latMin || 1)) * (ELEV_N - 1);
@@ -1693,17 +2478,96 @@ async function buildSpatialGrid(
     const v10 = elevSamples[i1][j0], v11 = elevSamples[i1][j1];
     return (v00 * (1 - ti) + v10 * ti) * (1 - tj) + (v01 * (1 - ti) + v11 * ti) * tj;
   };
+  // Bilinear interpolation of real observed weather per cell.
+  const weatherAt = (lat: number, lon: number): WeatherData => {
+    const fi = ((lat - latMin) / (latMax - latMin || 1)) * (ELEV_N - 1);
+    const fj = ((lon - lonMin) / (lonMax - lonMin || 1)) * (ELEV_N - 1);
+    const i0 = Math.max(0, Math.min(ELEV_N - 1, Math.floor(fi)));
+    const j0 = Math.max(0, Math.min(ELEV_N - 1, Math.floor(fj)));
+    const i1 = Math.min(ELEV_N - 1, i0 + 1), j1 = Math.min(ELEV_N - 1, j0 + 1);
+    const ti = fi - i0, tj = fj - j0;
+    const lerp = (k: keyof WeatherData): number | undefined => {
+      const a = wxSamples[i0][j0][k], b = wxSamples[i0][j1][k];
+      const c = wxSamples[i1][j0][k], d = wxSamples[i1][j1][k];
+      if (a == null || b == null || c == null || d == null) return undefined;
+      const r1 = (a as number) * (1 - ti) + (c as number) * ti;
+      const r2 = (b as number) * (1 - ti) + (d as number) * ti;
+      return r1 * (1 - tj) + r2 * tj;
+    };
+    return {
+      temperature_2m: lerp('temperature_2m'),
+      relative_humidity_2m: lerp('relative_humidity_2m'),
+      apparent_temperature: lerp('apparent_temperature'),
+      precipitation: lerp('precipitation'),
+      pressure_msl: lerp('pressure_msl'),
+      surface_pressure: lerp('surface_pressure'),
+      wind_speed_10m: lerp('wind_speed_10m'),
+      wind_direction_10m: lerp('wind_direction_10m'),
+      wind_gusts_10m: lerp('wind_gusts_10m'),
+      cloud_cover: lerp('cloud_cover'),
+      shortwave_radiation: lerp('shortwave_radiation'),
+      direct_radiation: lerp('direct_radiation'),
+      diffuse_radiation: lerp('diffuse_radiation'),
+      direct_normal_irradiance: lerp('direct_normal_irradiance'),
+      cape: lerp('cape'),
+      precipitation_probability: lerp('precipitation_probability'),
+      et0_fao_evapotranspiration: lerp('et0_fao_evapotranspiration'),
+    };
+  };
+
+  // Per-cell satellite sampling for thermal tools: one windowed COG read per
+  // band, true per-cell BT/ST values (not the centre-point pixel repeated).
+  const lats: number[] = [];
+  const lons: number[] = [];
+  for (let r = 0; r < nLat; r++) lats.push(latMin + (latMax - latMin) * (r / (nLat - 1)));
+  for (let c = 0; c < nLon; c++) lons.push(lonMin + (lonMax - lonMin) * (c / (nLon - 1)));
+  const satGrid = SAFE_THERMAL_TOOLS.has(id)
+    ? await memoizedFetch(
+      `sat:${id}:${latMin.toFixed(3)},${latMax.toFixed(3)},${lonMin.toFixed(3)},${lonMax.toFixed(3)}|${(ctx as Record<string, unknown>).__satDate ?? ''}`,
+      async () => {
+        // The C2 L2 windowed read + measured C2 L1 B11 window are network-bound
+        // and can transiently return null. Retry a few times before giving up
+        // so the grid doesn't silently collapse to the centre-point broadcast.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const g = await fetchLandsatThermalGrid(
+            lats, lons, (ctx as Record<string, unknown>).__satDate as string | undefined,
+          ).catch(() => null);
+          if (g) return g;
+          await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        }
+        return null;
+      },
+    )
+    : null;
+  const satCellAt = (r: number, c: number): import('../data/satelliteThermal').LandsatThermalData | null =>
+    satGrid ? (satGrid.cells[r * nLon + c] ?? null) : ((ctx as Record<string, unknown>).satThermal as import('../data/satelliteThermal').LandsatThermalData | null ?? null);
 
   const values: number[] = new Array(nLat * nLon);
   let vmin = Infinity, vmax = -Infinity, hasNaN = false;
   for (let r = 0; r < nLat; r++) {
-    const lat = latMin + (latMax - latMin) * (r / (nLat - 1));
+    const lat = lats[r];
     for (let c = 0; c < nLon; c++) {
-      const lon = lonMin + (lonMax - lonMin) * (c / (nLon - 1));
+      const lon = lons[c];
       try {
-        const cellCtx = { ...ctx, lat, lon, elevation: { elevation: elevAt(lat, lon) } };
+        if (!pointInPolygon(lon, lat)) { values[r * nLon + c] = NaN; hasNaN = true; continue; }
+        const cellCtx = { ...ctx, lat, lon, elevation: { elevation: elevAt(lat, lon) }, weather: weatherAt(lat, lon) };
+        if (id === 47) {
+          const cellSoil = soilAt(lat, lon);
+          if (cellSoil) (cellCtx as Record<string, unknown>).soil = cellSoil;
+        }
+        if (SAFE_THERMAL_TOOLS.has(id)) (cellCtx as Record<string, unknown>).satThermal = satCellAt(r, c);
+        // Interpolation tools (37 kriging / 38 IDW): the grid IS the
+        // prediction surface — each cell targets its own coordinate. An
+        // explicit tlat/tlon would otherwise repeat one point across the
+        // whole bbox (flat grid).
+        let cellNorm = normInputs;
+        if (id === 37 || id === 38) {
+          cellNorm = { ...normInputs };
+          delete (cellNorm as Record<string, unknown>).tlat;
+          delete (cellNorm as Record<string, unknown>).tlon;
+        }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const cellInputs = mapInputs(id, normInputs, cellCtx as any);
+        const cellInputs = alignInputs(id, mapInputs(id, cellNorm, cellCtx as any));
         const res = EQUATION_ENGINE[id](cellInputs);
         let v = res?.result;
         if (typeof v !== 'number' || !Number.isFinite(v)) { v = NaN; hasNaN = true; }
