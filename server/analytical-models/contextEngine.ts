@@ -27,6 +27,7 @@ import {
   fetchFIRMSFires,
   fetchStationObservations,
   fetchRFactor,
+  fetchGppModis, fetchCo2Gml,
   type WeatherData, type MarineData, type AirQualityData,
   type EarthquakeData, type ElevationData, type SoilData,
   type VegetationData, type SeaIceData, type TectonicData,
@@ -34,6 +35,7 @@ import {
   type TerrainData, type GlacierData, type VolcanoData,
   type TropoData, type PermafrostData, type DroughtData,
   type RiverData, type Era5HighFidelityData,
+  type GppData, type Co2GmlData,
 } from '../data/dataFetchers';
 import type { EarthquakeRupture, FireData } from '../data/dataFetchers';
 import {
@@ -276,6 +278,21 @@ const G_GRAV = 9.80665;
 const OMEGA = 7.292115e-5;
 const R_SPEC = 287.058;
 
+/** Momentum roughness length z₀ (m) keyed to the genuine MCD12Q1 IGBP
+ *  land-cover class code — Brutsaert (1982)/Chow-style table. Shared by the
+ *  surface-layer tools (48 MOST aerodynamic resistance, 49 log wind profile).
+ *  Returns undefined (→ honest NaN, never a fabricated default) when no
+ *  genuine land-cover pixel resolves. */
+const IGBP_Z0: Record<number, [number, string]> = {
+  1: [2.0, 'evergreen needleleaf forest'], 2: [2.5, 'evergreen broadleaf forest'],
+  3: [1.8, 'deciduous needleleaf forest'], 4: [2.2, 'deciduous broadleaf forest'],
+  5: [2.0, 'mixed forest'], 6: [0.2, 'closed shrublands'], 7: [0.1, 'open shrublands'],
+  8: [0.4, 'woody savannas'], 9: [0.2, 'savannas'], 10: [0.05, 'grasslands'],
+  11: [0.3, 'permanent wetlands'], 12: [0.1, 'croplands'], 13: [2.0, 'urban/built-up'],
+  14: [0.15, 'cropland/natural mosaic'], 15: [0.002, 'snow and ice'],
+  16: [0.005, 'barren/sparsely vegetated'], 17: [0.0002, 'water'],
+};
+
 /** Tools that require real Landsat thermal/reflectance satellite data
  *  (brightness temperature, surface temperature, NDVI-derived emissivity).
  *  These tools fetch actual satellite observations — never a weather proxy. */
@@ -316,6 +333,8 @@ function mapInputs(
     fire: FireData | null;
     interpObs?: { obs: import('../data/dataFetchers').StationObs[]; paramCd: string; unit: string } | null;
     rFactor?: import('../data/dataFetchers').RFactorData | null;
+    gpp?: GppData | null;
+    co2?: Co2GmlData | null;
     lat: number;
     lon: number;
     studyArea?: StudyArea;
@@ -1219,32 +1238,55 @@ function mapInputs(
       // (1988, BLME 42:55–78) re-evaluated flux–profile functions (κ = 0.40,
       // φ_h(0) = 0.95; coefficients as tabulated by Foken 2006 Eqs 21–22).
       // Genuine inputs — zero static fallbacks:
-      //  - u_*: ERA5 friction velocity (zust) at the study point;
+      //  - u_*: ERA5 friction velocity (zust) at the study point and the
+      //    REQUESTED date (genuine only via the Copernicus CDS backend; the
+      //    Open-Meteo redistribution subset carries no zust — its log-law
+      //    estimate is flagged as a proxy and never labeled genuine);
       //  - L: DERIVED from its definition L = −u_*³·θ̄/(κ·g·(w′θ′)₀) using the
       //    genuine ERA5 sensible heat flux, 2 m temperature and surface
       //    pressure of the same reanalysis step (virtual-temperature
-      //    correction omitted — without q its effect on L is < ~3 %);
+      //    correction omitted — without q its effect on L is < ~3 %).
+      //    The Open-Meteo proxy's "sensible flux" is a static-Bowen split of
+      //    the radiation balance — NOT a flux measurement — and is rejected:
+      //    honest NaN when only the proxy is available;
       //  - z: measurement height, a user parameter (default 10 m);
-      //  - the former fabricated inputs (u_*=0.3, L=−50, zeta=−0.2) are
-      //    removed: ζ = z/L is a DERIVED quantity, not an input, and the old
-      //    engine branched on the fake zeta → NaN whenever the true ζ > 0.
+      //  - ζ = z/L is a DERIVED quantity, never an input.
       const ef = ctx.era5?.surfaceFluxes;
       const era5Ustar = ctx.era5?.frictionVelocity;
+      const cds = ctx.era5?.source === 'cds';
+      const ustarLabel = cds
+        ? `u_* = genuine ERA5 friction velocity (zust) ${ef?.asOfDate ? `@ ${ef.asOfDate} ` : ''}12:00 UTC`
+        : era5Ustar != null
+          ? 'u_* = Open-Meteo redistribution ERA5 subset, log-law estimate (PROXY — no zust in the subset; flagged, not genuine)'
+          : undefined;
+      // Momentum roughness length z₀ (for r_a) from the genuine MCD12Q1
+      // IGBP classification via the shared IGBP_Z0 table; NaN (r_a step
+      // skipped) when no genuine land-cover pixel resolves.
+      const z0pair = IGBP_Z0[lc.code ?? -1];
+      const z0FromCover = userInputs.z0M !== undefined ? Number.NaN : (z0pair ? z0pair[0] : Number.NaN);
+      const z0Source = userInputs.z0M !== undefined
+        ? 'z₀ user-supplied (overrides land-cover table)'
+        : z0pair ? `z₀ = ${z0pair[0]} m from MCD12Q1 land cover (${z0pair[1]})`
+          : 'no genuine MCD12Q1 land cover for z₀ — r_a step skipped';
       if (userInputs.L !== undefined) {
         return {
           kappa: u('kappa', 0.40),
           ustar: u('ustar', Number.isFinite(userInputs.ustar) ? userInputs.ustar : era5Ustar ?? Number.NaN),
           z: u('z', 10),
+          z0M: u('z0M', z0FromCover),
           L: userInputs.L,
-          __lSource: 'L user-supplied (overrides ERA5-derived value)',
-          ...(era5Ustar != null && userInputs.ustar === undefined ? { __ustarSource: 'u_* = genuine ERA5 friction velocity (zust), 12:00 UTC' } : {}),
+          __lSource: 'L user-supplied (overrides the ERA5-derived value)',
+          __z0Source: z0Source,
+          ...(ustarLabel ? { __ustarSource: ustarLabel } : {}),
         };
       }
       let Lcalc = Number.NaN;
       let lSource = 'no genuine ERA5 state/flux to derive L from — supply L (and u_*) from eddy-covariance/tower data, or provide a study point';
-      if (era5Ustar != null && ef?.sensibleFlux != null && ef.airTemp2m != null) {
+      if (!cds && era5Ustar != null) {
+        lSource = 'only the Open-Meteo ERA5-subset proxy is available (no genuine zust/sshf CDS reanalysis step) — its sensible flux is a static-Bowen split, not a flux, and cannot derive L honestly; supply L from tower/EC data or retry when CDS resolves';
+      } else if (cds && era5Ustar != null && ef?.sensibleFlux != null && ef.airTemp2m != null && ef.surfacePressure != null) {
         const Hv = ef.sensibleFlux;                    // W/m², positive upward (IFS sign already flipped)
-        const pSfc = ef.surfacePressure ?? P * 100;    // Pa
+        const pSfc = ef.surfacePressure;               // Pa
         const T2mK = ef.airTemp2m;                     // K
         const rho = pSfc / (R_SPEC * T2mK);            // kg/m³
         if (era5Ustar > 1e-4 && rho > 0.1 && Math.abs(Hv) > 1e-3) {
@@ -1252,7 +1294,7 @@ function mapInputs(
           const theta2m = T2mK * Math.pow(1e5 / pSfc, R_SPEC / 1005);
           const kappaC = typeof userInputs.kappa === 'number' && Number.isFinite(userInputs.kappa) ? userInputs.kappa : 0.40;
           Lcalc = -(era5Ustar ** 3 * theta2m) / (kappaC * G_GRAV * wT);
-          lSource = `L = −u_*³·θ̄/(κ·g·(w′θ′)₀) derived from genuine ERA5: H = ${Hv.toFixed(1)} W/m² (up +), u_* = ${era5Ustar.toFixed(3)} m/s, T_2m = ${T2mK.toFixed(2)} K, p_s = ${pSfc.toFixed(0)} Pa (12:00 UTC)`;
+          lSource = `L = −u_*³·θ̄/(κ·g·(w′θ′)₀) derived from genuine ERA5${ef.asOfDate ? ` (${ef.asOfDate})` : ''}: H = ${Hv.toFixed(1)} W/m² (up +), u_* = ${era5Ustar.toFixed(3)} m/s, T_2m = ${T2mK.toFixed(2)} K, p_s = ${pSfc.toFixed(0)} Pa (12:00 UTC)`;
         } else {
           lSource = `ERA5 data present but physically unsuitable for L (|H| or u_* too small: H = ${Hv.toFixed(2)} W/m², u_* = ${era5Ustar.toFixed(4)} m/s) — supply L explicitly`;
         }
@@ -1261,39 +1303,104 @@ function mapInputs(
         kappa: u('kappa', 0.40),
         ustar: u('ustar', era5Ustar ?? Number.NaN),
         z: u('z', 10),
+        z0M: u('z0M', z0FromCover),
         L: Lcalc,
         __lSource: lSource,
-        ...(era5Ustar != null ? { __ustarSource: 'u_* = genuine ERA5 friction velocity (zust), 12:00 UTC' } : {}),
+        __z0Source: z0Source,
+        ...(ustarLabel ? { __ustarSource: ustarLabel } : {}),
       };
     }
     case 49: {
+      // Logarithmic wind profile u(z) = (u_*/κ)·ln(z/z₀) (Stull 1988 Ch. 4,
+      // p. 376, DOI 10.1007/978-94-009-3027-8 — local extract in
+      // docs/Research papers/). Neutral-stratification form: constant-flux
+      // layer, ∂ū/∂z = u_*/(κz), K_m = κ·u_*·z.
+      // Genuine inputs — zero static fallbacks:
+      //  - u_*: user-supplied OR genuine ERA5 friction velocity (zust) at
+      //    the study point via CDS. The former 0.3 m/s fabrication is
+      //    removed; the Open-Meteo redistribution subset's log-law u_*
+      //    (κ·u₁₀/ln(10/0.03)) is NOT accepted as a reanalysis input —
+      //    feeding the log-law profile with a log-law-derived u_* is
+      //    circular and not genuine. Honest NaN instead.
+      //  - z₀: user-supplied OR from the genuine MCD12Q1 IGBP class table;
+      //    the former Forest→1/else→0.03 binary fallback is removed.
+      //  - z: measurement height (user parameter, default 10 m).
       const era5Ustar = ctx.era5?.frictionVelocity;
+      const cdsUstar = ctx.era5?.source === 'cds' ? era5Ustar : null;
+      const z0pair = IGBP_Z0[lc.code ?? -1];
+      const ustarOk = userInputs.ustar !== undefined || (cdsUstar != null);
+      const ustarSrc = userInputs.ustar !== undefined
+        ? 'u_* user-supplied'
+        : cdsUstar != null
+          ? `u_* = genuine ERA5 friction velocity (zust) via CDS${ctx.era5?.surfaceFluxes?.asOfDate ? ` @ ${ctx.era5.surfaceFluxes.asOfDate}` : ''}, 12:00 UTC`
+          : 'no genuine u_* available — ERA5 zust resolves only via the Copernicus CDS backend; the Open-Meteo redistribution estimate is not a reanalysis input. Supply u_* (eddy covariance / log-profile fit) or retry when CDS resolves';
+      const z0Src = userInputs.z0 !== undefined
+        ? 'z₀ user-supplied (overrides land-cover table)'
+        : z0pair ? `z₀ = ${z0pair[0]} m from MCD12Q1 land cover (${z0pair[1]})`
+          : 'no genuine MCD12Q1 land cover for z₀ — supply z₀ explicitly';
+      // Air density for the wind-power-density output (catalogue secondary
+      // output). Genuine ambient surface pressure + 2 m temperature; NaN
+      // (→ step skipped) when either is unavailable — no static 1.2 kg/m³.
+      const pSfcAmb = w.surface_pressure ?? Number.NaN;
+      const tAmbK = w.temperature_2m !== undefined ? w.temperature_2m + 273.15 : Number.NaN;
+      const rhoAmb = (Number.isFinite(pSfcAmb) && Number.isFinite(tAmbK) && tAmbK > 150)
+        ? (pSfcAmb * 100) / (R_SPEC * tAmbK)
+        : Number.NaN;
       return {
-        ustar: u('ustar', era5Ustar ?? 0.3),
+        ustar: u('ustar', ustarOk ? era5Ustar ?? Number.NaN : Number.NaN),
         z: u('z', 10),
-        z0: u('z0', lc.class === 'Forest' ? 1 : 0.03),
+        z0: u('z0', z0pair ? z0pair[0] : Number.NaN),
+        rho: rhoAmb,
+        __ustarSource: ustarSrc,
+        __z0Source: z0Src,
+        ...(Number.isFinite(rhoAmb) ? { __rhoSource: `ρ = ${rhoAmb.toFixed(3)} kg/m³ from genuine ambient p = ${pSfcAmb.toFixed(1)} hPa, T = ${w.temperature_2m?.toFixed(1)} °C` } : {}),
       };
     }
-    case 50: return {
-      g0: u('g0', 10),
-      a1: u('a1', 9),
-      A: u('A', 15),
-      hs: u('hs', rh / 100),
-      cs: u('cs', 380),
-    };
+    case 50: {
+      // Ball–Berry stomatal conductance. Photosynthesis rate A is the
+      // time-mean canopy assimilation from genuine MODIS MOD17A2H GPP
+      // (ORNL DAAC), leaf-surface CO₂ cs is the NOAA GML global monthly
+      // mean, h_s the ERA5 2 m relative humidity (fractional). No static
+      // constants are substituted: g₀ = 0 and a₁ = 9.31 are the paper's own
+      // Glycine max regression (Fig. 1B, r² = 0.971); a genuinely missing
+      // A / c_s / h_s propagates as an honest NaN to the engine.
+      const gppA = ctx.gpp?.assimilation;
+      const co2Cs = ctx.co2?.ppm;
+      const rhGenuine = w.relative_humidity_2m;
+      const out: Record<string, unknown> = {
+        g0: u('g0', 0),
+        a1: u('a1', 9.31),
+        A: u('A', gppA ?? Number.NaN),
+        hs: u('hs', rhGenuine != null ? rhGenuine / 100 : Number.NaN),
+        cs: u('cs', co2Cs ?? Number.NaN),
+      };
+      const missing: string[] = [];
+      if (gppA == null) missing.push('MODIS MOD17A2H GPP');
+      if (co2Cs == null) missing.push('NOAA GML CO₂');
+      if (rhGenuine == null) missing.push('ERA5 2 m relative humidity');
+      if (missing.length > 0) {
+        out.__proxyWarning =
+          `No genuine ${missing.join(' / ')} data at this point — the affected input(s) will be an honest NaN (no static fallback is substituted).`;
+      }
+      return out;
+    }
 
     // ═══ Domain 7: Biosphere & Carbon ═══
     case 51: {
       // Monteith (1972) GPP = ε · fPAR · PAR. fPAR from real MODIS MCD15A3H
       // (fetchVegetationIndices). PAR derived from real shortwave radiation:
       //   PAR(MJ/m²/yr) ≈ SW(W/m²) × 0.45 (PAR fraction) × 0.0864 (W→MJ/day) × 365
-      // The previous ×2.02 factor was a unit-conversion error.
-      const sw = w.shortwave_radiation ?? 150;
-      const parCalc = sw * 0.45 * 0.0864 * 365;  // MJ/m²/yr
+      // The previous ×2.02 factor was a unit-conversion error. No static SW
+      // is substituted: when no genuine shortwave resolves, PAR is an honest
+      // NaN (as are fPAR when MODIS MCD15A3H has no valid pixel).
+      const sw = w.shortwave_radiation;
+      const parCalc = sw != null ? sw * 0.45 * 0.0864 * 365 : Number.NaN;  // MJ/m²/yr
+      // ASCII keys (eps/fpar/par) — normalizeInputs + alignInputs map the
+      // catalogue's ε/fPAR/PAR onto these, so user overrides bind correctly.
       return {
-        'ε': u('ε', 1.2),
-        fPAR: u('fPAR', v.fpar),
-        PAR: u('PAR', parCalc),
+        eps: u('eps', 1.2),
+        fpar: u('fpar', v.fpar),
+        par: u('par', parCalc),
       };
     }
     case 52: return {
@@ -2072,7 +2179,7 @@ export async function computeWithContext(
   // ERA5 surface fluxes (Tool 17 Gill ocean heat budget) wait long enough
   // for the job to complete; every other tool keeps the default 10 s
   // window so overall responsiveness is unchanged.
-  const ERA5_CONSUMER_IDS = new Set([5, 8, 17, 48, 49, 70, 71, 105, 106, 107]);
+  const ERA5_CONSUMER_IDS = new Set([5, 8, 17, 48, 49, 50, 70, 71, 105, 106, 107]);
   const ERA5_TIMEOUT_MS = 150000;
   // GLDAS consumers may need the stream-halt fallback (HEAD binary search
   // for the latest published granule + one nc4 download — ~60–120 s worst
@@ -2085,7 +2192,7 @@ export async function computeWithContext(
     soil, vegetation, seaIce, tectonic, spaceWeather,
     water, landCover, terrain, glacier, volcano,
     tropo, permafrost, drought, river, era5, imerg, gldas,
-    rFactor,
+    rFactor, gpp, co2,
   ] = await Promise.all([
     safe(
       context?.time?.granularity === 'range'
@@ -2102,7 +2209,7 @@ export async function computeWithContext(
       { clay: 0, sand: 0, silt: 0, organic_carbon: 0, ph_h2o: 0, bulk_density: 0, cec: 0, texture_class: 'unknown' } as SoilData,
       30000),
     safe(fetchVegetationIndices(lat, lon),
-      { ndvi: 0, evi: 0, lai: 0, fpar: 0, landCover: 'unknown' } as VegetationData,
+      { ndvi: 0, evi: 0, lai: Number.NaN, fpar: Number.NaN, landCover: 'unknown' } as VegetationData,
       30000),
     safe(fetchSeaIce(lat, lon), { concentration: 0, extent: 0, thickness: 0 } as SeaIceData),
     safe(fetchTectonicContext(lat, lon),
@@ -2127,8 +2234,8 @@ export async function computeWithContext(
       { pdsi: 0, precipitation: 0, temperature: 0, soilMoisture: 0, droughtClass: 'unknown' } as DroughtData),
     safe(fetchRiverData(lat, lon),
       { discharge: 0, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData),
-    safe(fetchEra5HighFidelity(lat, lon, dateStr),
-      { frictionVelocity: null, totalColumnWaterVapour: null, surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null } as Era5HighFidelityData,
+    safe(fetchEra5HighFidelity(lat, lon, dateStr, { mostOnly: id === 48 || id === 49 || id === 50 }),
+      { frictionVelocity: null, totalColumnWaterVapour: null, surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null, source: 'none' } as Era5HighFidelityData,
       ERA5_CONSUMER_IDS.has(id) ? ERA5_TIMEOUT_MS : undefined),
     safe(fetchImergPrecipitation(lat, lon, dateStr).then(r => r ?? { totalPrecipitation: null, maxIntensity: null, source: null } as ImergData),
       { totalPrecipitation: null, maxIntensity: null, source: null } as ImergData,
@@ -2139,6 +2246,13 @@ export async function computeWithContext(
       snowWaterEquivalent: null, canopyInterception: null, surfaceTemp: null, granuleTime: null, source: null,
     } as GldasData, GLDAS_CONSUMER_IDS.has(id) ? GLDAS_TIMEOUT_MS : undefined),
     safe(fetchRFactor(lat, lon), null, 25000),
+    // Tool 50 (Ball–Berry stomatal conductance): genuine photosynthesis
+    // rate A from MODIS MOD17A2H GPP (ORNL DAAC) and leaf-surface CO₂ from
+    // the NOAA GML global monthly mean. Both fetched for tool 50 only —
+    // null when the study point has no valid data (e.g. ocean) and the
+    // engine then returns an honest NaN.
+    safe(id === 50 ? fetchGppModis(lat, lon, dateStr ?? undefined) : Promise.resolve(null), null, 30000),
+    safe(id === 50 ? fetchCo2Gml(dateStr ?? undefined) : Promise.resolve(null), null, 20000),
   ]);
 
   const popData = await safe(fetchPopulation(lat, lon), { populationDensity: 0, totalPopulation: 0 });
@@ -2205,7 +2319,7 @@ export async function computeWithContext(
     soil, vegetation, seaIce, tectonic, spaceWeather,
     water, landCover, terrain, glacier, volcano,
     tropo, permafrost, drought, river, era5, imerg, gldas,
-    rFactor,
+    rFactor, gpp, co2,
     satThermal, columnWV,
     tide, rupture,
     fire,
@@ -2261,15 +2375,17 @@ export async function computeWithContext(
   }
   if (satThermal) sources.push('landsat-c2l2-st');
   if (columnWV != null) sources.push('era5-column-water-vapor');
-  if (era5.frictionVelocity != null) sources.push('era5-approx-friction-velocity');
+  if (era5.frictionVelocity != null) sources.push(era5.source === 'cds' ? 'era5-cds-friction-velocity' : 'era5-proxy-friction-velocity');
   if (era5.totalColumnWaterVapour != null) sources.push('era5-tcwv');
-  if (era5.surfaceFluxes) sources.push('era5-surface-fluxes');
+  if (era5.surfaceFluxes) sources.push(era5.source === 'cds' ? 'era5-cds-surface-fluxes' : 'era5-proxy-surface-fluxes');
   if (era5.pressureWind) sources.push('era5-pressure-wind');
   if (era5.pressureState) sources.push('era5-pressure-state');
   if (era5.soilState) sources.push('era5-soil-state');
   if (imerg.source) sources.push(imerg.source);
   if (gldas.source) sources.push('gldas-noah-2.1');
   if (rFactor) sources.push(`ghcn-climate-normals-r-factor`);
+  if (gpp) sources.push('modis-mod17a2h-gpp');
+  if (co2) sources.push('noaa-gml-co2');
   if (tide) sources.push(tide.source);
   if (interpObs && interpObs.obs.length > 0) sources.push(`usgs-nwis-observations:${interpObs.paramCd}`);
 

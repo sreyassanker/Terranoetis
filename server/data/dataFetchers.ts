@@ -912,9 +912,9 @@ export async function fetchVegetationIndices(
     const laiScale = Number(laiData?.scale ?? 1) || 1;
     // MODIS fill/no-data pixels are encoded as 249-255; valid LAI is 0-100.
     const recentLai = laiVals?.filter((v) => Number(v) > 0 && Number(v) < 249).pop();
-    lai = recentLai != null ? Number(recentLai) * laiScale : 0;
+    lai = recentLai != null ? Number(recentLai) * laiScale : Number.NaN;
   } catch {
-    lai = ndvi > 0 ? ndvi * 6 : 0;
+    lai = Number.NaN;
   }
   try {
     const fparStart = toDoy(new Date(Date.now() - 70 * 86400000));
@@ -927,9 +927,9 @@ export async function fetchVegetationIndices(
     const fparScale = Number(fparData?.scale ?? 1) || 1;
     // MODIS fill/no-data pixels are encoded as 249-255; valid FPAR is 0-100.
     const recentFpar = fparVals?.filter((v) => Number(v) > 0 && Number(v) < 249).pop();
-    fpar = recentFpar != null ? Number(recentFpar) * fparScale : 0;
+    fpar = recentFpar != null ? Number(recentFpar) * fparScale : Number.NaN;
   } catch {
-    fpar = Math.max(0, Math.min(1, ndvi * 1.2));
+    fpar = Number.NaN;
   }
 
   // Resolve land cover from MODIS MCD12Q1 if possible (annual product —
@@ -1602,6 +1602,153 @@ export async function fetchRiverData(
 }
 
 // ══════════════════════════════════════════════════════════════════
+//  Atmospheric CO₂ mole fraction — genuine NOAA GML primary source
+//  (Global Monitoring Laboratory, Boulder). Global monthly means from
+//  the marine-baseline flask/insitu network (co2_mm_gl.txt):
+//    https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_gl.txt
+//  Columns: year month decimal avg uncert interp_uncert … −999.99 =
+//  unpublished. Requested month honoured (input-filter rule); when the
+//  requested month has no published value the newest published month is
+//  served with explicit provenance — never a fabricated value.
+// ══════════════════════════════════════════════════════════════════
+export interface Co2GmlData {
+  ppm: number;
+  year: number;
+  month: number;      // month actually served (1–12)
+  asOf: string;       // provenance string
+}
+
+let co2GmlCache: { at: number; rows: Array<[number, number, number]> } | null = null;
+const CO2_GML_TTL = 24 * 60 * 60 * 1000;
+
+export async function fetchCo2Gml(dateStr?: string): Promise<Co2GmlData | null> {
+  let rows = co2GmlCache && Date.now() - co2GmlCache.at < CO2_GML_TTL
+    ? co2GmlCache.rows : null;
+  if (!rows) {
+    try {
+      const res = await fetch('https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_gl.txt', {
+        headers: { 'User-Agent': 'Terranoetis/1.0 (analytical tools; genuine-source audit)' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) return null;
+      const text = await res.text();
+      rows = [];
+      for (const line of text.split('\n')) {
+        const c = line.trim().split(/\s+/);
+        if (c.length < 4) continue;
+        const yr = Number(c[0]), mo = Number(c[1]), avg = Number(c[3]);
+        if (!Number.isFinite(yr) || yr < 1979 || yr > 2100 || !Number.isFinite(mo)) continue;
+        if (!Number.isFinite(avg) || avg <= 0) continue; // −999 = unpublished
+        rows.push([yr, mo, avg]);
+      }
+      if (rows.length === 0) return null;
+      co2GmlCache = { at: Date.now(), rows };
+    } catch { return null; }
+  }
+  const served = (yr: number, mo: number, ppm: number, note: string): Co2GmlData => ({
+    ppm, year: yr, month: mo,
+    asOf: `NOAA GML global monthly mean CO₂ (${yr}-${String(mo).padStart(2, '0')}${note})`,
+  });
+  const m = dateStr ? /^(\d{4})-(\d{2})/.exec(dateStr) : null;
+  if (m) {
+    const want: [number, number] = [Number(m[1]), Number(m[2])];
+    const hit = rows.find(r => r[0] === want[0] && r[1] === want[1]);
+    if (hit) return served(hit[0], hit[1], hit[2], '');
+    const newest = rows[rows.length - 1];
+    if (newest) {
+      // Published series is monotone in (year, month); the requested slot is
+      // unpublished (or predates the series). Serve newest + disclose.
+      return served(newest[0], newest[1], newest[2], ' — requested month unpublished; newest published served');
+    }
+    return null;
+  }
+  const newest = rows[rows.length - 1];
+  return newest ? served(newest[0], newest[1], newest[2], '') : null;
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  Gross Primary Productivity — genuine MODIS MOD17A2H via ORNL DAAC
+//  MODIS Web Service (8-day composites, reported unit: kgC/m² per 8 days
+//  at scale 1e-4, fill values ≥32761). Converted to the time-mean canopy
+//  photosynthesis rate (µmol CO₂/m²/s) that stomatal conductance models
+//  consume:
+//    kgC → gC (×1000) → µmol C (÷ 12 gC/mol × 1e6) over 8 days (÷ 604 800 s)
+//    = kgC × 1e9 / (12 × 604 800) = kgC × 1.37743e-4  ≈ kgC / 7260.
+//  (Sanity: 0.0145 kgC per 8 d ≈ 2 µmol CO₂ m⁻² s⁻¹, a typical productive
+//  temperate canopy.) The ORNL subset API caps one request at 10 composites
+//  (~80 days) — a full-year window is rejected ("exceeds maximum subset
+//  tiles support of 10"), so the fetcher asks for the latest ≤10 composites
+//  ending at the requested date and, if all are fill-valued at the study
+//  point, widens once to the full year. The newest published (non-fill)
+//  pixel is served; null otherwise (no fabrication).
+// ══════════════════════════════════════════════════════════════════
+export interface GppData {
+  gpp8d_kgC: number;          // kgC/m² per 8 days, as published by MOD17A2H
+  assimilation: number;       // µmol CO₂/m²/s (time-mean canopy rate)
+  date: string;               // MODIS acquisition id (A####ddd)
+  asOf: string;               // provenance string
+}
+
+const KG_C_TO_UMOL_CO2 = 1e9 / (12 * 604800);  // kgC per 8 d → µmol CO₂ m⁻² s⁻¹
+
+export async function fetchGppModis(
+  lat: number, lon: number, dateStr?: string,
+): Promise<GppData | null> {
+  const now = new Date();
+  const year = dateStr ? Number(dateStr.slice(0, 4)) : now.getUTCFullYear();
+  if (!Number.isFinite(year) || year < 2000 || year > now.getUTCFullYear() + 1) return null;
+  const isLeap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const daysInYear = isLeap ? 366 : 365;
+  // Day-of-year for 00 UTC on Jan 1 (MODIS A####ddd tiles are UTC-referenced).
+  const date = dateStr ? new Date(`${dateStr}T00:00:00Z`) : now;
+  const doy = Math.floor((date.getTime() - Date.UTC(year, 0, 1)) / 86400000) + 1;
+  const clamp = (d: number) => Math.max(1, Math.min(daysInYear, d));
+  const pad = (d: number) => String(clamp(d)).padStart(3, '0');
+
+  const query = async (startDoy: number, endDoy: number): Promise<GppData | null> => {
+    const url = 'https://modis.ornl.gov/rst/api/v1/MOD17A2H/subset'
+      + `?latitude=${lat}&longitude=${lon}&startDate=A${year}${pad(startDoy)}&endDate=A${year}${pad(endDoy)}`
+      + '&band=Gpp_500m&kmAboveBelow=0&kmLeftRight=0';
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Terranoetis/1.0 (analytical tools; genuine-source audit)' },
+      signal: AbortSignal.timeout(25000),
+    }).catch(() => null);
+    if (!res || !res.ok) return null;
+    const data = (await res.json().catch(() => null)) as
+      | { subset?: Array<{ modis_date?: string; data?: number[]; scale?: number }> } | string | null;
+    const subset = (data && typeof data === 'object' && !Array.isArray(data) ? data.subset : null)
+      ?? (Array.isArray(data) ? data as unknown as Array<{ modis_date?: string; data?: number[]; scale?: number }> : undefined);
+    if (!Array.isArray(subset) || subset.length === 0) return null;
+    // Walk backwards to the newest composite with a published (non-fill)
+    // value at the study point.
+    for (let i = subset.length - 1; i >= 0; i--) {
+      const s = subset[i];
+      const scale = Number(s.scale ?? 1e-4);
+      const raw = Number(Array.isArray(s.data) ? s.data[0] : NaN);
+      if (!Number.isFinite(raw) || raw >= 32761 || raw < 0) continue;
+      const kgC = raw * scale;
+      const assimilation = kgC * KG_C_TO_UMOL_CO2;
+      return {
+        gpp8d_kgC: kgC,
+        assimilation,
+        date: s.modis_date ?? 'A???????',
+        asOf: `MODIS MOD17A2H 8-day GPP ${s.modis_date} (ORNL DAAC; ${kgC.toFixed(4)} kgC/m² per 8 d → ${assimilation.toFixed(2)} µmol CO₂/m²/s time-mean)`,
+      };
+    }
+    return null;
+  };
+
+  // Window 1: the ≤10 composites (~80 d) ending at the requested date —
+  // honours the API's 10-tile cap and the date input filter.
+  let hit = await query(Math.max(1, doy - 9 * 8), doy).catch(() => null);
+  if (hit) return hit;
+  // Window 2: the whole year (for dates whose recent composites are all
+  // fill-valued at this pixel — e.g. snow cover, dense water/cloud runs).
+  hit = await query(1, daysInYear).catch(() => null);
+  return hit;
+}
+
+// ══════════════════════════════════════════════════════════════════
 //  ERA5 High-Fidelity Data (ECMWF CDS API v2)
 //  Provides variables NOT available through Open-Meteo ERA5 subset:
 //  - Friction velocity (zust)   — Monin-Obukhov wind profile
@@ -1614,11 +1761,30 @@ export async function fetchRiverData(
 export interface Era5HighFidelityData {
   frictionVelocity: number | null;               // m/s (zust, var 236)
   totalColumnWaterVapour: number | null;         // g/cm² (direct, not Smith proxy)
+  /**
+   * Which backend produced these values:
+   *  'cds'     — genuine ERA5 reanalysis via the Copernicus CDS API
+   *  'proxy'   — Open-Meteo redistribution subset + log-law / static-Bowen
+   *              approximations (NOT genuine ERA5; consumers that require
+   *              authentic reanalysis must reject these values)
+   *  'none'    — no backend returned data
+   */
+  source: 'cds' | 'proxy' | 'none';
+  /** Genuine ERA5 2 m relative humidity (%) — cds backend only (tool 50).
+   *  Never populated from the Open-Meteo proxy subset (authenticity rule). */
+  rh2m?: number | null;
+  /** ISO date the cds values were actually resolved to (≤ requested date). */
+  era5AsOfDate?: string | null;
+  /** Provenance: which backend served rh2m (tool 50 provenance step). */
+  rh2mSource?: 'cds' | 'none';
   surfaceFluxes: {
     netShortwave: number | null;                 // W/m²
     netLongwave: number | null;                  // W/m²
     sensibleFlux: number | null;                 // W/m²
     latentFlux: number | null;                   // W/m²
+    airTemp2m?: number | null;                   // K (cds path only)
+    surfacePressure?: number | null;             // Pa (cds path only)
+    asOfDate?: string;                           // ISO date resolved (provenance)
   } | null;
   pressureWind: {
     u850: number | null;                         // m/s, 850 hPa
@@ -1725,6 +1891,7 @@ async function fetchOpenMeteoEra5(
       pressureWind: null,
       pressureState: null,
       soilState,
+      source: 'proxy', // Open-Meteo redistribution + approximations — NOT genuine ERA5
     };
   } catch {
     return null as unknown as Era5HighFidelityData;
@@ -1733,18 +1900,54 @@ async function fetchOpenMeteoEra5(
 
 export async function fetchEra5HighFidelity(
   lat: number, lon: number, dateStr?: string,
+  opts?: { mostOnly?: boolean },
 ): Promise<Era5HighFidelityData> {
   if (process.env.CDS_API_TOKEN) {
     try {
-      const { fetchEra5FrictionVelocity, fetchEra5Tcwv, fetchEra5SurfaceFluxes,
+      const { fetchEra5MostInput, fetchEra5FrictionVelocity, fetchEra5Tcwv, fetchEra5SurfaceFluxes,
         fetchEra5PressureWind, fetchEra5PressureState, fetchEra5SoilState,
         getCdsStatus } = await import('../data/ecmwfCdsClient');
       if (getCdsStatus().tokenConfigured) {
+        // Tool 48 (MOST) needs only zust + sshf + t2m + sp from ONE
+        // single-levels request. The full 8-job batch serializes at
+        // concurrency 2 and routinely exceeds the consumer budget; the
+        // single-job bundle resolves in ~15–60 s and honours the date.
+        if (opts?.mostOnly) {
+          const most = await fetchEra5MostInput(lat, lon, dateStr).catch(() => null);
+          if (most) {
+            return {
+              frictionVelocity: most.ustar,
+              totalColumnWaterVapour: null,
+              surfaceFluxes: {
+                netShortwave: null, netLongwave: null,
+                sensibleFlux: most.sensibleFlux, latentFlux: null,
+                airTemp2m: most.airTemp2m, surfacePressure: most.surfacePressure,
+                asOfDate: most.asOfDate,
+              },
+              pressureWind: null, pressureState: null, soilState: null,
+              source: 'cds',
+              rh2m: most.rh2m,
+              rh2mSource: 'cds',
+              era5AsOfDate: most.asOfDate,
+            };
+          }
+          // Single-job fetch genuinely unavailable — do NOT silently fall to
+          // the Open-Meteo proxy for tool 48 (its fluxes are a static-Bowen
+          // split, not a measurement). Honest 'none' so the engine NaN-fires.
+          return {
+            frictionVelocity: null, totalColumnWaterVapour: null,
+            surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null,
+            source: 'none',
+            rh2m: null,
+            rh2mSource: 'none',
+            era5AsOfDate: null,
+          };
+        }
         const [ustar, tcwv, fluxes, wind850, wind500, state850, state500, soil] =
           await Promise.all([
-            fetchEra5FrictionVelocity(lat, lon).catch(() => null),
+            fetchEra5FrictionVelocity(lat, lon, dateStr).catch(() => null),
             fetchEra5Tcwv(lat, lon, dateStr).catch(() => null),
-            fetchEra5SurfaceFluxes(lat, lon).catch(() => null),
+            fetchEra5SurfaceFluxes(lat, lon, dateStr).catch(() => null),
             fetchEra5PressureWind(lat, lon, 850).catch(() => null),
             fetchEra5PressureWind(lat, lon, 500).catch(() => null),
             fetchEra5PressureState(lat, lon, 850).catch(() => null),
@@ -1774,6 +1977,7 @@ export async function fetchEra5HighFidelity(
               moisture7_28: soil.moisture7_28,
               moisture28_100: soil.moisture28_100,
             } : null,
+            source: 'cds', // genuine ERA5 reanalysis via Copernicus CDS
           };
       }
     } catch { /* fall through to Open-Meteo */ }
@@ -1782,6 +1986,7 @@ export async function fetchEra5HighFidelity(
   return fetchOpenMeteoEra5(lat, lon, dateStr) ?? {
     frictionVelocity: null, totalColumnWaterVapour: null,
     surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null,
+    source: 'none',
   };
 }
 

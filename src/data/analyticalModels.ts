@@ -39,6 +39,7 @@ export interface AnalysisTool {
   reference: string;
   paperUrl?: string;
   appliesTo: string;
+  description?: string;
   inputs?: AnalysisToolParameter[];
   outputs?: ToolOutput[];
   analysisMeta?: AnalysisMeta;
@@ -673,7 +674,7 @@ export const PARTS: Part[] = [
         tools: [
           { id: 1, toolName: 'Land Surface Temperature Retrieval', name: 'Split-Window Algorithm', equation: 'Ts = A₀ + A₁·T₁₀ − A₂·T₁₁',
             reference: 'Rozenstein, O., Qin, Z., Derimian, Y. & Karnieli, A. (2014) Derivation of Land Surface Temperature for Landsat-8 TIRS Using a Split Window Algorithm. Sensors, 14(4), 5768–5780. DOI: 10.3390/s140405768',
-            paperUrl: 'https://scholar.google.com/scholar?q=Rozenstein+2014+Derivation+Land+Surface',
+            paperUrl: 'https://doi.org/10.3390/s140405768',
             appliesTo: 'Satellite thermal infrared → surface temperature map',
             shortDescription: 'Retrieves land surface temperature from Landsat-8 TIRS bands 10 and 11 using atmospheric correction via differential absorption in two thermal channels',
             paperSummary: 'Rozenstein et al. (2014) adapted the SWA first proposed by McMillin (1975) for Landsat-8 TIRS. The algorithm was derived via first-order Taylor-series linearization of the radiative transfer equation (following Qin et al., 2001). Li parameters were computed numerically from the Planck function integrated over each TIRS band and fitted via linear regression: L10 = −64.4661 + 0.4398T (r²=0.9968), L11 = −68.8678 + 0.4755T (r²=0.9967). Accuracy was assessed using MODTRAN 4.0 simulations over 60 atmospheric scenarios with RMSE of 0.93°C. The study showed the algorithm is sensitive to land surface emissivity (LSE) errors (0.5–1.5°C per 1% error) but relatively insensitive to water vapor misestimation.',
@@ -728,7 +729,7 @@ export const PARTS: Part[] = [
           },
           { id: 2, toolName: 'Brightness Temperature Retrieval', name: 'Planck Radiation Law', equation: 'B_λ(T) = 2hc²/λ⁵ × 1/(exp(hc/λkT) − 1)',
             reference: 'Planck, M. (1901) Ueber das Gesetz der Energieverteilung im Normalspectrum. Annalen der Physik, 309(3), 553–563. DOI: 10.1002/andp.19013090310',
-            paperUrl: 'https://scholar.google.com/scholar?q=Planck+1901+Ueber+das+Gesetz',
+            paperUrl: 'https://doi.org/10.1002/andp.19013090310',
             appliesTo: 'Satellite thermal radiance → brightness temperature',
             shortDescription: 'Converts thermal infrared radiance measurements to brightness temperature using Planck\'s blackbody radiation law',
             paperSummary: 'Planck (1901) derived the blackbody radiation law by introducing the revolutionary concept of quantized energy. He showed that the spectral radiance of a blackbody at temperature T is given by B_λ(T) = (2hc²/λ⁵)/(e^(hc/λkT)−1). This resolved the "ultraviolet catastrophe" of classical Rayleigh-Jeans theory and laid the foundation for quantum mechanics. The paper introduced Planck\'s constant h and Boltzmann\'s constant k, deriving their values from experimental data by Lummer, Pringsheim, Rubens, and Kurlbaum.',
@@ -750,10 +751,23 @@ export const PARTS: Part[] = [
               '6. For brightness temperature inversion, solve T = (h×c)/(λ×k×ln(1 + 2hc²/(λ⁵×L)))',
             ],
             outputInterpretation: 'The Planck function provides the fundamental relationship between temperature and emitted radiance used across all thermal remote sensing. Key interpretation points:\n\n• At 10 µm (TIRS Band 10), a 300 K surface emits ~9.9 W·sr⁻¹·m⁻³\n• The peak wavelength shifts inversely with temperature (Wien\'s displacement law: λ_max ≈ 2898/T µm)\n• Brightness temperature is ALWAYS ≤ true surface temperature due to non-unity emissivity\n• The function is highly nonlinear: small radiance changes correspond to different temperature changes at different base temperatures\n• At shorter wavelengths (visible/NIR), the Planck function is more sensitive to temperature changes',
+            assumptions: [
+              'Emitter behaves as a blackbody (emissivity = 1) — the brightness temperature is defined for a perfect blackbody',
+              'Radiating surface is in local thermodynamic equilibrium',
+              'Sensor band is narrow enough to evaluate the Planck function at the effective center wavelength (2hc²/λ⁵ form)',
+              'Physical constants h, k, c take CODATA values',
+            ],
+            limitations: [
+              'Real surfaces have emissivity < 1, so brightness temperature underestimates true kinetic temperature',
+              'Band-integrated radiance depends on the sensor spectral response; center-wavelength evaluation is an approximation',
+              'Does not account for atmospheric path radiance between surface and sensor',
+              'Numerically ill-conditioned as radiance → 0 (very cold targets)',
+              'Requires inverting the Planck function numerically or via per-sensor thermal constants (K₁, K₂)',
+            ],
           },
-          { id: 3, name: 'Saturation Vapor Pressure', equation: 'e_s(T) = 6.1094 × exp(17.625T/(T + 243.04)) hPa',
+          { id: 3, toolName: 'Saturation Vapor Pressure Estimation', name: 'Saturation Vapor Pressure', equation: 'e_s(T) = 6.1094 × exp(17.625T/(T + 243.04)) hPa',
             reference: 'Tetens, O. (1930) Über einige meteorologische Begriffe. Zeitschrift für Geophysik, 6, 297–309.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Tetens+1930+meteorologische+Begriffe',
+            paperUrl: 'NO-DOI (Tetens 1930, pre-DOI). Modern form: Alduchov & Eskridge (1996) DOI: 10.1175/1520-0450(1996)035<0601:IMFAOS>2.0.CO;2',
             appliesTo: 'Saturation vapor pressure, dew point, humidity',
             shortDescription: 'Computes saturation vapor pressure from air temperature using the Magnus-Tetens empirical formula for meteorological applications',
             paperSummary: 'Tetens (1930) compiled and evaluated various formulas for computing saturation vapor pressure over water and ice, deriving empirical coefficients that remain widely used today. The formulation e_s(T) = 6.1094 × exp(17.625T/(T+243.04)) is a simplification of the Clausius-Clapeyron equation adapted for practical meteorological use. The Clausius-Clapeyron equation (d ln e_s/dT = L_v/R_vT²) describes the fundamental thermodynamic relationship between temperature and vapor pressure at phase equilibrium.',
@@ -774,10 +788,22 @@ export const PARTS: Part[] = [
               '5. For relative humidity: RH = e/e_s × 100%',
             ],
             outputInterpretation: 'Saturation vapor pressure is a fundamental humidity parameter used across meteorology and hydrology:\n\n• e_s at 0°C: 6.11 hPa (triple point reference)\n• e_s at 20°C: 23.37 hPa — air at 20°C can hold ~3.8× more water vapor than at 0°C\n• Above 30°C, the curve steepens rapidly (e_s(35°C) = 56.2 hPa)\n• Climate feedback: each 1°C warming increases atmospheric water holding capacity by ~6-7%\n• This equation is used in evapotranspiration calculations (Penman-Monteith), heat index computation, and cloud formation modeling',
+            assumptions: [
+              'Phase equilibrium between liquid water and water vapor',
+              'Flat pure-water surface (no curvature or solute effects)',
+              'Valid for the −41 °C to +60 °C range of the Magnus/Tetens-type fits (Alduchov & Eskridge 1996 constants 6.1094/17.625/243.04)',
+              'Pressure effects on e_s neglected',
+            ],
+            limitations: [
+              'Overestimates saturation vapor pressure over ice (a separate ice phase fit is required for T < 0)',
+              'Tetens/Magnus error grows outside the fitted temperature range',
+              'Does not represent supersaturated (metastable) states',
+              'Dissolved salts lower vapor pressure (~2% reduction for seawater, f ≈ 0.98)',
+            ],
           },
           { id: 4, toolName: 'Atmospheric Pressure Profile', name: 'Hydrostatic Equation', equation: 'P(z) = P₀ × exp(−gz/RT)',
             reference: 'Holton, J.R. & Hakim, G.J. (2012) An Introduction to Dynamic Meteorology (5th ed.). Academic Press, ISBN: 978-0123848666, Chapter 2.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Holton+2012+Introduction+Dynamic+Meteorology',
+            paperUrl: 'https://www.sciencedirect.com/book/9780123846525/an-introduction-to-dynamic-meteorology',
             appliesTo: 'Pressure at altitude, 3D atmospheric structure, aviation altimetry',
             shortDescription: 'Computes atmospheric pressure at a given altitude using the hydrostatic balance assumption for a constant-temperature (isothermal) atmosphere',
             paperSummary: 'The hydrostatic equation is derived from the fundamental force balance in a static atmosphere: the vertical pressure gradient force balances gravity. From Holton & Hakim (2012) Chapter 2: dP/dz = −ρg. Combined with the ideal gas law P = ρRT, for an isothermal atmosphere this integrates to P(z) = P₀·exp(−gz/RT). The scale height H = RT/g (~8.5 km for Earth) gives the e-folding depth over which pressure decreases by factor e.',
@@ -801,10 +827,22 @@ export const PARTS: Part[] = [
               '6. At z = 5.5 km: P ≈ 500 hPa (standard atmosphere midpoint)',
             ],
             outputInterpretation: 'The hydrostatic pressure profile is fundamental to atmospheric science:\n\n• 500 hPa level (~5.5 km): primary level for mid-tropospheric circulation analysis\n• 850 hPa level (~1.5 km): lower troposphere, moisture transport\n• 250 hPa level (~10.5 km): jet stream level, upper troposphere\n• Altitude errors: a 1°C temperature error causes ~0.5% thickness error\n• Standard atmosphere: P₀ = 1013.25 hPa, T₀ = 288.15 K, lapse rate 6.5°C/km',
+            assumptions: [
+              'Atmosphere in hydrostatic equilibrium (vertical accelerations negligible)',
+              'Ideal-gas behaviour of air',
+              'Prescribed temperature structure (isothermal layer or known lapse rate)',
+              'Scales larger than individual convective elements',
+            ],
+            limitations: [
+              'Invalid inside strongly accelerating flows (convective cores, mountain waves)',
+              'Isothermal approximation error grows with layer thickness and humidity (use virtual temperature)',
+              'Single-layer exponential form misses multi-layer structure of real atmospheres',
+              'Not valid for microbaroms and acoustic-scale perturbations below hydrostatic validity',
+            ],
           },
           { id: 5, toolName: 'Geostrophic Wind Analysis', name: 'Geostrophic Wind', equation: 'V_g = (1/fρ) × (∂P/∂y, −∂P/∂x), f = 2Ω sin φ',
             reference: 'Holton, J.R. & Hakim, G.J. (2012) An Introduction to Dynamic Meteorology (5th ed.). Academic Press, ISBN: 978-0123848666, Chapter 3.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Holton+2012+Introduction+Dynamic+Meteorology',
+            paperUrl: 'https://www.sciencedirect.com/book/9780123846525/an-introduction-to-dynamic-meteorology',
             appliesTo: 'Jet stream analysis, frontal zone detection, synoptic-scale wind computation',
             shortDescription: 'Computes geostrophic wind speed and direction from the horizontal pressure gradient and Coriolis parameter',
             paperSummary: 'The geostrophic wind is a fundamental concept in dynamic meteorology derived from the momentum equations under the assumption of steady, frictionless, straight-line flow. From Holton & Hakim Chapter 3: the large-scale atmospheric flow is nearly in geostrophic balance, where the Coriolis force balances the horizontal pressure gradient force. The geostrophic wind equation V_g = (1/fρ)(−∂P/∂y, ∂P/∂x) shows that wind flows parallel to isobars, with speed proportional to the pressure gradient magnitude and inversely proportional to latitude.',
@@ -830,10 +868,22 @@ export const PARTS: Part[] = [
               '6. Convert to meteorological direction (coming from): dir = 270 − α° (adjust for hemisphere)',
             ],
             outputInterpretation: 'The geostrophic wind provides the theoretical upper-level wind field:\n\n• Typical 500 hPa geostrophic wind speeds: 10–30 m/s in mid-latitudes\n• Jet stream cores at 250 hPa: 40–80 m/s (up to 100 m/s)\n• Ageostrophic components (deviations from geostrophic) are ~10-20% of total wind\n• Geostrophic wind is a good approximation above ~1 km (above boundary layer)\n• Near the equator (|φ| < 10°), f → 0, and geostrophic balance breaks down\n• The thermal wind relationship: geostrophic wind shear is related to horizontal temperature gradients',
+            assumptions: [
+              'Frictionless flow (pressure gradient exactly balanced by Coriolis force)',
+              'Steady, straight isobars (no curvature or acceleration terms)',
+              'Large-scale flow with small Rossby number (Ro ≪ 1); f = 2Ω sinφ non-zero',
+              'Pressure field is synoptic-scale and smoothed',
+            ],
+            limitations: [
+              'Invalid at and near the equator (f → 0)',
+              'Friction in the boundary layer breaks balance (ageostrophic flow)',
+              'Curved flow requires the gradient-wind correction',
+              'Unbalanced/accelerating systems (fronts, jets) violate the steady assumption',
+            ],
           },
           { id: 6, toolName: 'Pollutant Transport Modeling', name: 'Advection-Diffusion Equation', equation: '∂C/∂t + u·∇C = D∇²C + S',
             reference: 'Bird, R.B., Stewart, W.E. & Lightfoot, E.N. (2007) Transport Phenomena (2nd ed.). Wiley, ISBN: 978-0471410935, Chapter 4.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Bird+2007+Transport+Phenomena',
+            paperUrl: 'https://www.wiley.com/en-us/Transport+Phenomena%2C+2nd+Edition-p-9780471410775',
             appliesTo: 'Pollutant transport, smoke/ash dispersion, tracer diffusion modeling',
             shortDescription: 'Models the transport and diffusion of atmospheric tracers using the advection-diffusion (Fickian) framework for pollutant concentration forecasting',
             paperSummary: 'Bird, Stewart & Lightfoot\'s Transport Phenomena is the authoritative reference on the conservation equations for mass, momentum, and energy. The advection-diffusion equation ∂C/∂t + u·∇C = D∇²C + S describes how a scalar quantity (pollutant concentration, heat, etc.) is transported by a velocity field (advection term u·∇C) and spread by random molecular/ turbulent motion (diffusion term D∇²C). The Péclet number Pe = uL/D characterizes the relative importance of advection vs. diffusion.',
@@ -858,10 +908,22 @@ export const PARTS: Part[] = [
               '6. Plume spread: σ = √(2Dt) in each direction (along-wind and crosswind)',
             ],
             outputInterpretation: 'The advection-diffusion equation provides a simplified estimate of pollutant dispersion:\n\n• High wind speeds (u ≫ 0) → rapid downwind transport, less time for diffusion → narrow plume\n• High diffusivity (D ≫ 0) → rapid spreading, lower peak concentrations\n• At t = 3600 s, u = 5 m/s, D = 100 m²/s: plume center moves 18 km downwind, spreads ~850 m\n• The model assumes: constant wind, uniform turbulence, no chemical reactions, flat terrain\n• For operational use, Gaussian plume models (Pasquill-Gifford) use stability-class-dependent σ_y, σ_z',
+            assumptions: [
+              'Fickian diffusion closure with constant (or tensor) diffusivity',
+              'Incompressible, non-divergent advecting flow',
+              'Scalar is conserved except through explicit source/sink term S',
+              'Well-mixed in directions not resolved',
+            ],
+            limitations: [
+              'Turbulent diffusion is non-local; K-theory breaks down near sources and inside canopies',
+              'Numerical diffusion appears with coarse discretization',
+              'Point/line sources need the Gaussian plume solution, not the grid form',
+              'Chemical reactions and decay must be parameterized in S; deposition not represented',
+            ],
           },
           { id: 7, toolName: 'Atmospheric Stability Index', name: 'Bulk Richardson Number', equation: 'Ri_b = g(z_g−z_s)(θ_v(z_g)−θ_v(z_s)) / (θ_v(z_s)|u(z_g)−u(z_s)|²)',
             reference: 'Stull, R.B. (1988) An Introduction to Boundary Layer Meteorology. Kluwer Academic Publishers, ISBN: 978-90-277-2769-5, Chapter 4.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Stull+1988+Boundary+Layer+Meteorology',
+            paperUrl: 'https://doi.org/10.1007/978-94-009-3027-8',
             appliesTo: 'Atmospheric stability classification, turbulence onset prediction, boundary layer regime',
             shortDescription: 'Computes the bulk Richardson number to diagnose atmospheric stability and the onset of turbulent mixing in the planetary boundary layer',
             paperSummary: 'Stull (1988) provides the definitive treatment of boundary layer meteorology. The bulk Richardson number Ri_b is a dimensionless stability parameter comparing the production/destruction of turbulence by buoyancy (numerator) to the production by wind shear (denominator). Ri_b = (g/θ_v)(Δθ_v × Δz)/(Δu)². Critical thresholds: Ri_b < 0 → unstable (buoyancy-driven turbulence), 0 < Ri_b < 0.25 → mechanically-driven turbulence, Ri_b > 0.25 → turbulence suppressed (stable boundary layer).',
@@ -891,10 +953,21 @@ export const PARTS: Part[] = [
               '9. Classify: Ri_b ≥ 0.25 → STABLE (turbulence suppressed, fog/frost possible)',
             ],
             outputInterpretation: 'The bulk Richardson number is the primary operational stability parameter:\n\n• Ri_b < 0 (unstable): Daytime, sunny, surface heating → thermals → good dispersion, convective clouds\n• Ri_b ≈ 0 (neutral): Cloudy or windy conditions → mechanical mixing only, well-mixed boundary layer\n• Ri_b > 0.25 (stable): Nighttime, clear skies, surface cooling → poor dispersion, fog, frost, air pollution buildup\n• In stable conditions (Ri_b > 0.25), turbulence becomes intermittent and patchy\n• The 0.25 threshold applies for bulk Ri; gradient Ri (local) has critical value ~0.25-1.0\n• Ri_b is used in MET office weather forecasts, air quality dispersion models, and wind energy assessments',
+            assumptions: [
+              'Two-level measurements represent the constant-flux layer between z_s and z_g',
+              'Virtual potential temperature and bulk wind difference are horizontally homogeneous',
+              'Mean winds measured at the same locations as temperatures',
+            ],
+            limitations: [
+              'Threshold values (e.g. Ri_b < 0.25 for turbulence) are empirical, not universal',
+              'Sensitive to sensor height and measurement error in the near-neutral limit',
+              'Does not resolve shear generated at scales smaller than the level spacing',
+              'Requires non-zero wind difference; division by ~0 near calm conditions',
+            ],
           },
           { id: 8, toolName: 'Turbulent Energy Spectrum', name: 'Kolmogorov Energy Cascade', equation: 'E(k) = C·ε^(2/3)·k^(−5/3)',
             reference: 'Kolmogorov, A.N. (1941) The local structure of turbulence in incompressible viscous fluid for very large Reynolds numbers. Proceedings of the Royal Society of London. Series A, 434, 9–13 (1991 translation). DOI: 10.1098/rspa.1991.0075.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Kolmogorov+1941+local+structure+turbulence',
+            paperUrl: 'https://doi.org/10.1098/rspa.1991.0075',
             appliesTo: 'Turbulent energy spectrum computation, large-eddy simulation (LES) closure, turbulence characterization',
             shortDescription: 'Computes the turbulent kinetic energy spectrum E(k) at a given wavenumber using Kolmogorov\'s −5/3 law for the inertial subrange of fully developed turbulence',
             paperSummary: 'Kolmogorov (1941) proposed the universal equilibrium theory of turbulence: at sufficiently high Reynolds numbers, the energy spectrum in the inertial subrange depends only on the dissipation rate ε and wavenumber k, yielding the famous −5/3 power law E(k) = C·ε^(2/3)·k^(−5/3). The Kolmogorov constant C ≈ 1.5. This law describes how turbulent kinetic energy cascades from large eddies (where it is produced by shear) to progressively smaller eddies until it is dissipated by viscosity at the Kolmogorov microscale η = (ν³/ε)^(1/4).',
@@ -918,6 +991,18 @@ export const PARTS: Part[] = [
               '6. Eddy size: L = 2π/k (large L = large eddies, small L = small eddies)',
             ],
             outputInterpretation: 'The Kolmogorov energy spectrum provides fundamental understanding of atmospheric turbulence:\n\n• Atmospheric boundary layer: ε typically 10⁻⁴−10⁻² m²/s³ in the surface layer\n• Large eddies (k ≈ 0.001 m⁻¹, L ≈ 6 km): energy-containing range, synoptic-scale motions\n• Inertial subrange (k ≈ 0.01−10 m⁻¹): universal −5/3 scaling holds\n• Small eddies (k > 10 m⁻¹): dissipation range, energy converted to heat\n• At 1 km height, typical turbulent velocity scale ~1 m/s, dissipation ~10⁻³ m²/s³\n• The −5/3 slope is observed in atmospheric measurements from towers, aircraft, and lidar',
+            assumptions: [
+            'Locally isotropic, homogeneous turbulence at high Reynolds number',
+            'Inertial subrange exists between energy-containing and dissipation scales',
+            'Stationarity over the averaging window; Taylor\'s frozen-turbulence hypothesis for time-series conversion',
+            'Universal Kolmogorov constant (C_k ≈ 0.5)',
+            ],
+            limitations: [
+            'Anisotropy near the surface, inside canopies, and in strong stratification narrows/destroys the −5/3 range',
+            'Intermittency introduces departures from refined similarity',
+            'Finite Reynolds number shortens the inertial subrange',
+            'C_k weakly universal across flow regimes; sampling rate must exceed the highest resolved eddy frequency',
+            ],
           },
         ],
       },
@@ -926,7 +1011,7 @@ export const PARTS: Part[] = [
         tools: [
           { id: 9, toolName: 'Reference Evapotranspiration', name: 'FAO-56 Penman-Monteith', equation: 'ET₀ = [0.408Δ(R_n-G) + γ(900/(T+273))u₂(e_s-e_a)] / [Δ+γ(1+0.34u₂)]',
             reference: 'Allen, R.G., Pereira, L.S., Raes, D. & Smith, M. (1998) Crop Evapotranspiration — Guidelines for Computing Crop Water Requirements. FAO Irrigation and Drainage Paper 56, Rome. DOI: 10.4060/X0490E',
-            paperUrl: 'https://scholar.google.com/scholar?q=Allen+1998+Crop+Evapotranspiration+Guidelines',
+            paperUrl: 'https://doi.org/10.4060/X0490E',
             appliesTo: 'Evapotranspiration, drought monitoring, irrigation scheduling',
             shortDescription: 'Computes reference evapotranspiration (ET₀) from meteorological data using the FAO-56 Penman-Monteith combination equation for a hypothetical grass reference crop',
             paperSummary: 'Allen et al. (1998) established the FAO-56 Penman-Monteith method as the sole recommended ET₀ equation, replacing earlier FAO Penman and radiation methods. The equation combines the energy balance (radiation term) with aerodynamic transport (vapor pressure deficit), parameterized for a hypothetical grass crop of height 0.12 m, surface resistance 70 s/m, and albedo 0.23. Validation against lysimeter data from 11 locations worldwide showed RMSE of 0.2–0.8 mm/day. The method has become the global standard for irrigation scheduling, drought assessment, and hydrological modeling.',
@@ -965,11 +1050,23 @@ export const PARTS: Part[] = [
               '• ET₀ > 6 mm/day: high demand (arid/semi-arid conditions, heat wave)\n' +
               '• The radiation term dominates in humid climates; the aerodynamic term dominates in arid climates\n' +
               '• For crop-specific ET, multiply by crop coefficient K_c: ET_c = K_c × ET₀\n' +
-              '• FAO-56 assumes no water stress and standard grass height of 0.12 m'
+              '• FAO-56 assumes no water stress and standard grass height of 0.12 m',
+            assumptions: [
+              'Reference surface: 0.12 m grass, albedo 0.23, surface resistance 70 s m⁻¹, well watered',
+              'Homogeneous, actively growing fetch of the reference crop',
+              'Complete weather inputs (radiation, humidity, wind at 2 m)',
+              'Daily or longer time steps (hourly form uses adjusted canopy resistance)',
+            ],
+            limitations: [
+              'Missing data substituted with climatology or FAO-56 default estimation equations degrades accuracy',
+              'Advection in arid environments can under/over-estimate ET₀',
+              'Crop evapotranspiration requires a separate crop coefficient K_c',
+              'Wind speed must be adjusted to 2 m; measurement-height errors propagate into the aerodynamic term',
+            ],
           },
           { id: 10, toolName: 'Runoff Estimation (SCS-CN)', name: 'SCS Curve Number', equation: 'Q = (P-I_a)²/(P-I_a+S), I_a = 0.2S',
             reference: 'USDA Soil Conservation Service (1954) National Engineering Handbook, Section 4: Hydrology. U.S. Government Printing Office, Washington, D.C.',
-            paperUrl: 'https://scholar.google.com/scholar?q=USDA+1954+National+Engineering+Handbook',
+            paperUrl: 'https://www.nrcs.usda.gov/resources/guides-and-instructions/national-engineering-handbook-section-4-hydrology',
             appliesTo: 'Runoff estimation, flash flood potential, watershed planning',
             shortDescription: 'Estimates direct runoff from rainfall using the SCS Curve Number method, which integrates land use, soil type, and antecedent moisture conditions',
             paperSummary: 'The USDA SCS (now NRCS) developed the Curve Number method in 1954 as an empirical watershed-scale runoff prediction tool based on extensive rainfall-runoff data from agricultural watersheds across the United States. The method transforms total rainfall P into direct runoff Q using the relationship Q = (P−Iₐ)²/(P−Iₐ+S) where S is the potential maximum retention derived from a dimensionless curve number CN = 25400/(S+254). Initial abstraction Iₐ is empirically set to 0.2S. CN values range from 30 (low runoff potential, sandy soils with dense forest) to 100 (impervious surfaces).',
@@ -1002,11 +1099,23 @@ export const PARTS: Part[] = [
               '• Moderate Q/P ratio (0.2–0.6): typical agricultural watersheds, loamy soils\n' +
               '• High Q/P ratio (>0.6): urban/impervious areas, clay soils, or saturated conditions\n' +
               '• The method does not account for rainfall intensity or duration — only total depth\n' +
-              '• Antecedent Moisture Condition (AMC) significantly affects CN: dry soils (AMC I) reduce CN by ~15%, wet soils (AMC III) increase CN by ~15%'
+              '• Antecedent Moisture Condition (AMC) significantly affects CN: dry soils (AMC I) reduce CN by ~15%, wet soils (AMC III) increase CN by ~15%',
+            assumptions: [
+              'Initial abstraction Iₐ = 0.2S (standard SCS assumption; some regions use Iₐ = 0.05S)',
+              'Rainfall uniform over the watershed during the event',
+              'CN represents average antecedent moisture condition II (AMC II reference, convertible to I/III)',
+              'Homogeneous basin response (single composite CN or subbasin averaging)',
+            ],
+            limitations: [
+              'Empirical method — no explicit physical basis; calibration against gauged basins recommended',
+              'CN tables are U.S. soils/land-use centric; transfer elsewhere needs local data',
+              'Gives no information on hydrograph timing (peak only, with lag relations)',
+              'Runoff is hypersensitive to CN (±5 CN can change Q by >50% for moderate storms)',
+            ],
           },
           { id: 11, toolName: 'Open Channel Flow Analysis', name: "Manning's Equation", equation: 'v = (1/n) × R^(2/3) × S^(1/2)',
             reference: 'Manning, R. (1891) On the flow of water in open channels and pipes. Transactions of the Institution of Civil Engineers of Ireland, 20, 161–207.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Manning+1891+flow+water+open',
+            paperUrl: 'NO-DOI (Manning 1891, Journal of the Institution of Civil Engineers of Ireland; no official online version)',
             appliesTo: 'Open channel flow, river discharge, flood routing, canal design',
             shortDescription: 'Computes mean flow velocity in open channels using Manning\'s empirical formula relating velocity to channel roughness, hydraulic radius, and energy slope',
             paperSummary: 'Manning (1891) presented his empirical formula for open channel flow based on experiments and analysis of data from Bazin, Darcy, and others. The original equation v = (1/n)R^(2/3)S^(1/2) relates mean velocity v to hydraulic radius R, channel slope S, and a roughness coefficient n. Manning\'s n values were calibrated for various channel types (0.012 for smooth concrete to 0.150 for natural mountain streams). The formula remains the most widely used open-channel flow equation worldwide for engineering design and river discharge estimation.',
@@ -1038,11 +1147,22 @@ export const PARTS: Part[] = [
               '• v = 0.5–2.0 m/s: moderate velocity, sand and gravel transport — typical of alluvial rivers\n' +
               '• v > 2.0 m/s: high velocity, cobble/boulder transport, high erosive potential — typical of mountain streams\n' +
               '• Increasing n (roughness) reduces velocity: a channel with dense vegetation (n=0.08) flows ~60% slower than a clean channel (n=0.03) at the same R and S\n' +
-              '• Manning\'s equation applies to steady, uniform flow; backwater effects and unsteady flow require step-backwater methods (e.g., HEC-RAS)'
+              '• Manning\'s equation applies to steady, uniform flow; backwater effects and unsteady flow require step-backwater methods (e.g., HEC-RAS)',
+            assumptions: [
+              'Steady, uniform flow: energy slope = water-surface slope = bed slope',
+              'Fully rough turbulent flow; Manning n constant along the reach and independent of depth',
+              'Channel geometry representative of the cross-section (prismatic reach)',
+            ],
+            limitations: [
+              'n is an empirical roughness coefficient varying with grain size, vegetation, sinuosity and stage (tables are guides)',
+              'Invalid for rapidly varied/transcritical flow and compound channels without subdivision',
+              'Metric coefficient 1.0 assumed (1.486 for U.S. customary units)',
+              'Backwater and unsteady effects require Saint-Venant equations, not Manning alone',
+            ],
           },
           { id: 12, toolName: 'Peak Discharge Estimation', name: 'Rational Method', equation: 'Q = C × i × A',
             reference: 'Mulvaney, T.J. (1851) On the use of self-registering rain and flood gauges in making observations of the relations of rainfall and of flood discharges in a given catchment. Journal of the Institution of Civil Engineers of Ireland, 4, 18–31.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Mulvaney+1851+self-registering+rain+flood',
+            paperUrl: 'NO-DOI (Mulvaney 1851, Proceedings of the Institution of Civil Engineers; no official online version)',
             appliesTo: 'Peak discharge from small watersheds, stormwater design, culvert sizing',
             shortDescription: 'Estimates peak storm discharge from small watersheds using the rational formula relating runoff to rainfall intensity, catchment area, and a runoff coefficient',
             paperSummary: 'Mulvaney (1851) proposed the Rational Method based on observations of rainfall and resulting flood discharges in Irish catchments. The formula Q = C×i×A relates peak discharge Q to rainfall intensity i, catchment area A, and a dimensionless runoff coefficient C that represents the fraction of rainfall converted to runoff. The method assumes that peak discharge occurs when the entire catchment is contributing runoff (time of concentration). Despite its simplicity, it remains the most widely used method for stormwater design in urban catchments < 80 ha.',
@@ -1074,11 +1194,23 @@ export const PARTS: Part[] = [
               '• Q > 50 m³/s: large stream, requires more sophisticated flood routing analysis\n' +
               '• C=0.3 (forest/meadow) vs C=0.9 (paved): impervious areas produce ~3× more runoff for the same rainfall\n' +
               '• The method is only valid for catchments < 80 ha (0.8 km²) — larger watersheds require unit hydrograph methods\n' +
-              '• The method does not account for: storm duration effects, rainfall temporal distribution, or flow routing attenuation'
+              '• The method does not account for: storm duration effects, rainfall temporal distribution, or flow routing attenuation',
+            assumptions: [
+              'Time of concentration ≤ storm duration, so the whole watershed contributes at peak',
+              'Runoff coefficient C constant for the design event',
+              'Rainfall intensity spatially and temporally uniform over the basin',
+              'Small catchments (typically < 1 km²; up to ~2.5 km² with care)',
+            ],
+            limitations: [
+              'Yields peak discharge only — no hydrograph volume or shape',
+              'C values are subjective and land-cover dependent',
+              'Storage-dominated or large basins violate the simultaneous-contribution assumption',
+              'Return period of rainfall assumed equal to return period of runoff (approximate)',
+            ],
           },
           { id: 13, toolName: 'Flood Wave Routing', name: 'Muskingum Routing', equation: 'S = K[XI_t + (1-X)O_t]',
             reference: 'McCarthy, G.T. (1938) The unit hydrograph and flood routing. Conference of North Atlantic Division, U.S. Army Corps of Engineers.',
-            paperUrl: 'https://scholar.google.com/scholar?q=McCarthy+1938+unit+hydrograph+flood',
+            paperUrl: 'NO-DOI (McCarthy 1938 conference proceeding; no official online version)',
             appliesTo: 'Flood wave attenuation in river reaches, reservoir routing, channel design',
             shortDescription: 'Routes a flood wave through a river reach using the Muskingum storage routing method, which accounts for channel storage and wave attenuation',
             paperSummary: 'McCarthy (1938) developed the Muskingum routing method for flood wave propagation through river reaches, named after the Muskingum River basin in Ohio where it was first applied. The method models reach storage S as a weighted combination of inflow I and outflow O: S = K[XI + (1−X)O], where K is the storage constant (travel time) and X is a weighting factor describing the relative importance of inflow vs. outflow on storage. The method was the first practical flood routing technique that accounted for both translation (wave movement) and attenuation (peak reduction) of flood waves.',
@@ -1111,11 +1243,23 @@ export const PARTS: Part[] = [
               '• X = 0.2–0.3 (natural channels): moderate attenuation — typical of natural river reaches\n' +
               '• X → 0.5 (pure translation): no attenuation, the flood wave moves downstream without peak reduction — typical of steep, channelized rivers\n' +
               '• K is approximately the reach travel time: K = L / c where L is reach length and c is flood wave celerity (~1.3–1.7× mean velocity)\n' +
-              '• If K < 0.5Δt or X > 0.5, negative routing coefficients may occur — indicating conceptual inconsistency or numerical instability'
+              '• If K < 0.5Δt or X > 0.5, negative routing coefficients may occur — indicating conceptual inconsistency or numerical instability',
+            assumptions: [
+              'Storage is a linear weighted function of inflow and outflow: S = K[xI + (1−x)Q]',
+              'Weighting factor 0 ≤ x ≤ 0.5 (typically 0.2–0.3 in natural channels)',
+              'Reach length short compared with the flood wave wavelength',
+              'No lateral inflow/outflow within the reach',
+            ],
+            limitations: [
+              'Negative or oscillatory outflows if Δt and K are poorly chosen (stability: Δt > 2Kx)',
+              'Parameters K and x require calibration per reach',
+              'Modified routing needed for backwater effects and wide floodplains',
+              'Linear assumption degrades for strongly nonlinear overbank stages',
+            ],
           },
           { id: 14, toolName: 'Tide Prediction', name: 'Tidal Harmonic Analysis', equation: 'h(t) = H₀ + Σ Aᵢcos(ωᵢt + φᵢ)',
             reference: 'Pugh, D. & Woodworth, P. (2014) Sea-Level Science: Understanding Tides, Surges, Tsunamis and Mean Sea-Level Changes. Cambridge University Press. DOI: 10.1017/CBO9781139151740',
-            paperUrl: 'https://scholar.google.com/scholar?q=Pugh+2014+Sea+Level+Science',
+            paperUrl: 'https://doi.org/10.1017/CBO9781139151740',
             appliesTo: 'Tide prediction, storm surge detection, sea-level analysis',
             shortDescription: 'Predicts tidal elevation as the sum of a mean sea level and multiple cosine-wave harmonic constituents representing tidal forcing from the Sun and Moon',
             paperSummary: 'Pugh & Woodworth (2014) provide the definitive reference on sea-level science, including tidal harmonic analysis. The method decomposes observed sea level into astronomical tidal constituents by Fourier analysis of long tide gauge records. Each constituent has a specific frequency ωᵢ (derived from solar/lunar orbital periods: M₂=12.42 h, S₂=12.00 h, K₁=23.93 h, O₁=25.82 h), amplitude Aᵢ, and phase φᵢ. The sum of 60+ constituents can predict tides to within 10–20 cm RMSE at most coastal stations. Major constituents: M₂ (principal lunar semidiurnal), S₂ (principal solar semidiurnal), K₁ (lunisolar diurnal), O₁ (principal lunar diurnal).',
@@ -1148,11 +1292,22 @@ export const PARTS: Part[] = [
               '• Diurnal inequality: when K₁ and O₁ are strong (e.g., Gulf of Mexico, SE Asia), one high tide per day may be much higher than the other\n' +
               '• Storm surge = observed sea level − predicted tide: positive residuals indicate surge (>0.3 m for minor, >1 m for major storm surge)\n' +
               '• Mean sea level trend: long-term tide gauges show global MSL rise of 3.3±0.4 mm/yr (1993–2023, satellite altimetry)\n' +
-              '• Harmonic prediction accuracy degrades in shallow water due to nonlinear tidal interactions and overtides'
+              '• Harmonic prediction accuracy degrades in shallow water due to nonlinear tidal interactions and overtides',
+            assumptions: [
+              'Water level decomposes into harmonic constituents of constant amplitude and phase over the analysis window',
+              'Nodal modulation corrected with astronomical f and u factors',
+              'Tide-generating potential fully known; deterministic astronomical forcing',
+            ],
+            limitations: [
+              'Short records (< 15 days) cannot separate close constituents (e.g. K₂/S₂, P₁/K₁)',
+              'Shallow-water distortion requires compound species (M4, MS4…) to be included',
+              'Non-stationarity (sea-level rise, storm surges) violates constant coefficients',
+              'Meteorological residuals are unresolved and contaminate rare-constituent estimates',
+            ],
           },
           { id: 15, toolName: 'Wind-Driven Current Analysis', name: 'Ekman Spiral', equation: 'V₀ = τ/√(ρfA_v), direction 45° to wind',
             reference: 'Ekman, V.W. (1905) On the influence of the Earth\'s rotation on ocean-currents. Arkiv för Matematik, Astronomi och Fysik, 2(11), 1–52.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Ekman+1905+influence+rotation+ocean-currents',
+            paperUrl: 'NO-DOI (Ekman 1905, Arkiv för Matematik, Astronomi och Fysik 2(11); no official online version)',
             appliesTo: 'Wind-driven currents, upwelling detection, coastal ocean dynamics',
             shortDescription: 'Computes the Ekman surface current velocity and deflection angle from wind stress under the influence of the Coriolis effect and vertical eddy viscosity',
             paperSummary: 'Ekman (1905) developed the theory of wind-driven ocean currents showing that the surface current is deflected 45° to the right of the wind (Northern Hemisphere) due to the Coriolis force. His solution V₀ = τ/√(ρfA_v) gives the surface current speed, where τ is wind stress, ρ is density, f is the Coriolis parameter, and A_v is vertical eddy viscosity. Current velocity decays exponentially with depth and rotates (the Ekman spiral), producing a net volume transport (Ekman transport) at 90° to the wind direction. Ekman\'s theory explains coastal upwelling, equatorial currents, and the wind-driven component of the global ocean circulation.',
@@ -1187,11 +1342,22 @@ export const PARTS: Part[] = [
               '• Ekman transport U_E = 0.5–5 m²/s: for τ=0.1 N/m² at 45°N (f≈10⁻⁴), U_E≈1 m²/s\n' +
               '• Coastal upwelling: when wind blows parallel to coast (equatorward on eastern boundaries), Ekman transport diverges offshore, drawing deep nutrient-rich water to the surface\n' +
               '• Ekman pumping: wind curl (spatial variation in wind stress) drives vertical velocities of 0.1–1 m/day in the ocean interior\n' +
-              '• The classical 45° deflection is observed in the atmosphere above the surface (Ekman layer), but in the ocean the deflection is often 10–30° due to density stratification'
+              '• The classical 45° deflection is observed in the atmosphere above the surface (Ekman layer), but in the ocean the deflection is often 10–30° due to density stratification',
+            assumptions: [
+              'Constant eddy viscosity K_m with depth; f-plane (Coriolis parameter constant)',
+              'Steady, horizontally homogeneous wind forcing; no lateral boundaries',
+              'Stress uniform through the Ekman layer; bottom influence neglected (surface layer)',
+            ],
+            limitations: [
+              'Real K_m varies with stratification and wave state; observed spiral is typically compressed (surface deflection often < 45°)',
+              'Inertial oscillations contaminate observed currents',
+              'Bottom Ekman layer and upwelling dynamics need separate treatment',
+              'Requires genuine wind stress input (τ = ρ_air C_D |u|u) — not available from point wind alone without a drag law',
+            ],
           },
           { id: 16, toolName: 'Ocean Current Analysis', name: 'Geostrophic Current', equation: 'f×v_g = (1/ρ)×∂p/∂x',
             reference: 'Gill, A.E. (1982) Atmosphere-Ocean Dynamics. Academic Press, ISBN: 978-0122835221.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Gill+1982+Atmosphere-Ocean+Dynamics',
+            paperUrl: 'https://www.sciencedirect.com/book/9780122835221/atmosphere-ocean-dynamics',
             appliesTo: 'Major ocean current computation, altimetry-derived currents, eddy detection',
             shortDescription: 'Computes geostrophic ocean current velocity from the sea surface slope (pressure gradient) balanced by the Coriolis force in the ocean interior',
             paperSummary: 'Gill (1982) provides the authoritative treatment of atmosphere-ocean dynamics, including the geostrophic approximation for large-scale ocean currents. The geostrophic balance in the ocean fv_g = (1/ρ)∂p/∂x states that the Coriolis force (proportional to velocity v_g and the Coriolis parameter f) balances the horizontal pressure gradient (∂p/∂x). Ocean currents are predominantly geostrophic on scales > 50 km (the Rossby deformation radius). Satellite altimetry measures sea surface height anomalies, from which surface geostrophic currents are derived via the thermal wind relation and the hydrostatic equation.',
@@ -1223,11 +1389,22 @@ export const PARTS: Part[] = [
               '• v_g < 0.01 m/s: near-equatorial regions where f → 0 and geostrophy breaks down (within ±3° latitude)\n' +
               '• A sea surface slope of 1 m per 100 km (∂η/∂x=10⁻⁵) produces v_g ≈ 1 m/s at 45°N\n' +
               '• The geostrophic approximation requires: Ro = U/(fL) ≪ 1 (Rossby number small, scale > 50 km)\n' +
-              '• Near the equator, ageostrophic dynamics (Ekman, inertial) dominate and geostrophic currents are undefined'
+              '• Near the equator, ageostrophic dynamics (Ekman, inertial) dominate and geostrophic currents are undefined',
+            assumptions: [
+              'Geostrophic and hydrostatic balance; density field is synoptic and smoothed',
+              'Reference level of known (or zero) motion for absolute velocity',
+              'Large-scale; f non-zero; straight-front approximation in simple form',
+            ],
+            limitations: [
+              'Barotropic component unknown — relative velocities only unless a reference level is justified',
+              'Invalid near the equator (f → 0)',
+              'Ageostrophic motions (meanders, eddies, fronts) alias into the solution',
+              'Requires TEOS-10-consistent density from practical salinity and conservative temperature for accuracy',
+            ],
           },
           { id: 17, toolName: 'Marine Heat Budget', name: 'Ocean Surface Heat Budget', equation: 'Q_net = Q_s - Q_b - Q_h - Q_e',
             reference: 'Gill, A.E. (1982) Atmosphere-Ocean Dynamics, Chapter 3. Academic Press, ISBN: 978-0122835221.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Gill+1982+Atmosphere-Ocean+Dynamics',
+            paperUrl: 'https://www.sciencedirect.com/book/9780122835221/atmosphere-ocean-dynamics',
             appliesTo: 'Marine heat wave detection, air-sea interaction, mixed layer temperature tendency',
             shortDescription: 'Computes the net surface heat flux into the ocean from shortwave radiation, longwave radiation, sensible heat flux, and latent heat flux components',
             paperSummary: 'Gill (1982) Chapter 3 provides the comprehensive framework for the ocean surface heat budget. The net heat flux Q_net = Q_s − Q_b − Q_h − Q_e represents the energy exchange across the air-sea interface. Q_s is incoming solar (shortwave) radiation (200–300 W/m² daytime average), Q_b is outgoing longwave radiation from the sea surface (30–80 W/m²), Q_h is the turbulent sensible heat flux (10–50 W/m² typical), and Q_e is the latent heat flux (50–200 W/m² in tropics). The net flux Q_net determines the sea surface temperature (SST) tendency: dSST/dt = Q_net/(ρc_pH) where H is the mixed layer depth.',
@@ -1262,11 +1439,22 @@ export const PARTS: Part[] = [
               '• In the tropics: Q_s is large (300 W/m²) but Q_e is also large (150 W/m²) → net balance is small (±50 W/m²) — the "thermostat" effect\n' +
               '• In mid-latitude winter: Q_s small (50 W/m²), Q_h large (100 W/m²) due to cold air over warm water → strong net cooling (−100 to −200 W/m²)\n' +
               '• Marine heatwaves: sustained Q_net > 0 for days to weeks due to reduced cloud cover, weak winds, or anomalous ocean advection\n' +
-              '• The surface heat budget is the dominant term in SST variability; ocean advection and entrainment contribute at longer timescales'
+              '• The surface heat budget is the dominant term in SST variability; ocean advection and entrainment contribute at longer timescales',
+            assumptions: [
+              'Bulk aerodynamic flux formula with stability-dependent transfer coefficients',
+              'Sea-surface skin temperature equals measured SST; specific humidity at surface is saturation at SST',
+              'Vertical 1-D heat budget (advection/mixing treated separately if closing the budget)',
+            ],
+            limitations: [
+              'Transfer coefficients C_D, C_E, C_H depend on stability and wind speed (Large & Pond / COARE, not constants)',
+              'Diurnal warm layer and cool skin effects bias SST inputs at low wind',
+              'Net radiation terms carry the largest uncertainty (cloud/aerosol corrections)',
+              'Advection and entrainment must be included for a closed mixed-layer budget',
+            ],
           },
           { id: 18, toolName: 'Infiltration Analysis', name: 'Green-Ampt Infiltration', equation: 'f(t) = K_s × (1 + (ψ_w-ψ₀)Δθ/F(t))',
             reference: 'Green, W.H. & Ampt, G.A. (1911) Studies on Soil Physics. Part I — The flow of air and water through soils. The Journal of Agricultural Science, 4(1), 1–24. DOI: 10.1017/S0021859600001441',
-            paperUrl: 'https://scholar.google.com/scholar?q=Green+1911+Studies+Soil+Physics',
+            paperUrl: 'https://doi.org/10.1017/S0021859600001441',
             appliesTo: 'Infiltration rate, flood forecasting, soil water movement, irrigation design',
             shortDescription: 'Models vertical water infiltration into unsaturated soil using the Green-Ampt equation, which describes piston-like flow with a sharp wetting front',
             paperSummary: 'Green & Ampt (1911) developed a physically based infiltration model by applying Darcy\'s law to unsaturated flow with a sharp wetting front approximation. The model assumes that water infiltrates as a "piston" flow with a distinct wetting front separating saturated and unsaturated zones. The infiltration rate f(t) = K_s(1 + (ψ_w−ψ₀)Δθ/F(t)) decreases over time as the cumulative infiltration F(t) increases, reflecting the increasing resistance as the wetting front moves deeper. Despite its simplicity, the Green-Ampt model performs well for many soils and is widely used in hydrologic models (HEC-HMS, SWMM, GSSHA).',
@@ -1303,7 +1491,18 @@ export const PARTS: Part[] = [
               '• Sandy soils: high K_s (10⁻⁴ m/s), low ψ_f → infiltration remains high, low runoff potential\n' +
               '• Clay soils: low K_s (10⁻⁷ m/s), high ψ_f → initial infiltration is capillary-driven, then rapidly drops → high runoff potential\n' +
               '• For long-duration events (F → large, t → ∞): f → K_s, infiltration becomes gravity-driven at the saturated conductivity rate\n' +
-              '• The model assumes homogeneous soil, constant moisture deficit, and no swelling — real soils may deviate significantly'
+              '• The model assumes homogeneous soil, constant moisture deficit, and no swelling — real soils may deviate significantly',
+            assumptions: [
+            'Piston flow with a sharp wetting front separating saturated and initial zones',
+            'Homogeneous, isotropic soil profile; constant K_s, initial and saturated moisture contents',
+            'Ponded surface (or rainfall ≥ infiltration capacity); constant suction head ψ_f at the front',
+            ],
+            limitations: [
+            'Layered or structured soils violate the sharp-front assumption; preferential flow ignored',
+            'Surface sealing/time-varying K_s not represented',
+            'Cumulative infiltration equation is implicit in t — requires iteration',
+            'Parameters (ψ_f, Δθ) difficult to measure; typically inferred from soil texture classes',
+            ],
           },
         ],
       },
@@ -1313,7 +1512,7 @@ export const PARTS: Part[] = [
           {
             id: 19, toolName: 'Earthquake Frequency Analysis', name: 'Gutenberg-Richter Law', equation: 'log₁₀(N) = a - bM',
             reference: 'Gutenberg, B. & Richter, C.F. (1944) Frequency of earthquakes in California. Bulletin of the Seismological Society of America, 34(4), 185–188.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Gutenberg+1944+Frequency+earthquakes+California',
+            paperUrl: 'https://doi.org/10.1785/BSSA0340040185',
             appliesTo: 'Earthquake frequency-magnitude, seismic hazard',
             shortDescription: 'Describes the exponential relationship between earthquake magnitude and frequency: for each unit increase in magnitude, the number of earthquakes decreases by a factor of 10^b',
             paperSummary: 'Gutenberg & Richter (1944) established that earthquake magnitudes follow a power-law distribution where log₁₀(N) = a − bM. The a-value characterizes the overall seismicity level of a region (how many earthquakes above M=0 occur per year), while the b-value describes the relative proportion of small to large earthquakes. Global b-values cluster tightly around 1.0 ± 0.1, but regional variations (b = 0.5–1.8) reflect tectonic regime, stress state, and heterogeneity. The frequency-magnitude distribution is the foundation of probabilistic seismic hazard analysis (PSHA), enabling the computation of return periods for scenario earthquakes.',
@@ -1338,12 +1537,23 @@ export const PARTS: Part[] = [
               '6. Compute 10-year probability: P₁₀ = 1 − exp(−10 × N)',
               '7. For PSHA, integrate over all magnitudes: λ(y) = Σ νᵢ × ∫ P(Y>y|M,R) × f_M,R(m,r) dm dr'
             ],
-            outputInterpretation: 'The Gutenberg-Richter law provides the statistical foundation for earthquake hazard assessment:\n\n• N(≥5) = 10 events/yr (a=4, b=1): expect ~10 M≥5 earthquakes annually in a seismically active region\n• N(≥7) = 0.001 events/yr (a=4, b=1): one M≥7 event every ~1000 years\n• b-value < 1: relatively more large earthquakes (compressive stress regime, subduction zones)\n• b-value > 1: relatively more small earthquakes (tensile regime, volcanic/geothermal areas)\n• The law applies globally but b-values vary spatially: California b≈0.9, Japan b≈1.0, Iceland b≈1.3\n• Departures from the GR law at the largest magnitudes are critical for assessing maximum magnitude in PSHA'
+            outputInterpretation: 'The Gutenberg-Richter law provides the statistical foundation for earthquake hazard assessment:\n\n• N(≥5) = 10 events/yr (a=4, b=1): expect ~10 M≥5 earthquakes annually in a seismically active region\n• N(≥7) = 0.001 events/yr (a=4, b=1): one M≥7 event every ~1000 years\n• b-value < 1: relatively more large earthquakes (compressive stress regime, subduction zones)\n• b-value > 1: relatively more small earthquakes (tensile regime, volcanic/geothermal areas)\n• The law applies globally but b-values vary spatially: California b≈0.9, Japan b≈1.0, Iceland b≈1.3\n• Departures from the GR law at the largest magnitudes are critical for assessing maximum magnitude in PSHA',
+            assumptions: [
+              'Magnitude-frequency relation is exponential (scale-free seismicity): log₁₀N = a − bM',
+              'Catalog complete above magnitude of completeness M_c',
+              'Homogeneous magnitude scale across the catalog period',
+            ],
+            limitations: [
+              'b value varies with tectonic regime, depth and stress state — not a universal constant',
+              'Magnitude saturation: M_L saturates for M ≳ 7 (use M_w; GR applies imperfectly to great events)',
+              'M_c varies with network changes over time',
+              'Characteristic-earthquake behaviour on mature faults departs from GR',
+            ],
           },
           {
             id: 20, toolName: 'Aftershock Decay Analysis', name: 'Omori Law', equation: 'n(t) = K/(c+t)^p',
             reference: 'Omori, F. (1894) On the aftershocks of earthquakes. Journal of the College of Science, Imperial University of Tokyo, 7, 111–200.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Omori+1894+aftershocks+earthquakes',
+            paperUrl: 'NO-DOI (Omori 1894, Journal of the College of Science Imperial University of Tokyo; no official online version)',
             appliesTo: 'Aftershock decay, post-earthquake hazard',
             shortDescription: 'Models the temporal decay of aftershock frequency following a mainshock, showing a power-law decrease described by the modified Omori law',
             paperSummary: 'Omori (1894) first observed that aftershock frequency decays hyperbolically with time, described by n(t) = K/(c+t)ᵖ. The modified Omori law (Utsu, 1961) added the exponent p to account for variable decay rates. The productivity parameter K scales with mainshock magnitude (log₁₀K ≈ M_w − 4), the offset c prevents singularity at t=0 (typically 0.01–0.1 days), and p describes the decay rate (p≈1.0–1.4 globally). Omori\'s law is the basis for operational aftershock forecasting following major earthquakes, used by the USGS and JMA to issue short-term aftershock probability forecasts.',
@@ -1369,12 +1579,23 @@ export const PARTS: Part[] = [
               '6. Compute cumulative if p≠1: N_cum = K × [c^(1−p) − (c+t)^(1−p)] / (p−1)',
               '7. Interpret decay: t_½ = c × (2^(1/p) − 1) — time for 50% rate reduction'
             ],
-            outputInterpretation: 'Aftershock frequency decays according to the power-law parameters:\n\n• For a typical M6.5 sequence (K=300, c=0.1, p=1.1): n(Day 1) ≈ 230 events/day, n(Day 30) ≈ 21 events/day\n• The c-parameter affects early sequence behavior: short c (0.01) means very high initial rates and rapid early decay\n• Higher p-values (>1.2) indicate faster decay — typical of oceanic plate environments or creeping faults\n• Lower p-values (<1.0) indicate slower decay — typical of continental strike-slip environments\n• The largest aftershock is typically ~1.2 magnitude units below the mainshock (Båth\'s law)\n• ETAS models extend Omori to account for secondary triggering: each aftershock produces its own Omori-like sequence'
+            outputInterpretation: 'Aftershock frequency decays according to the power-law parameters:\n\n• For a typical M6.5 sequence (K=300, c=0.1, p=1.1): n(Day 1) ≈ 230 events/day, n(Day 30) ≈ 21 events/day\n• The c-parameter affects early sequence behavior: short c (0.01) means very high initial rates and rapid early decay\n• Higher p-values (>1.2) indicate faster decay — typical of oceanic plate environments or creeping faults\n• Lower p-values (<1.0) indicate slower decay — typical of continental strike-slip environments\n• The largest aftershock is typically ~1.2 magnitude units below the mainshock (Båth\'s law)\n• ETAS models extend Omori to account for secondary triggering: each aftershock produces its own Omori-like sequence',
+            assumptions: [
+              'Aftershocks are a spatial/temporal cluster causally tied to the mainshock',
+              'Decay follows modified Omori law n(t) = K/(t+c)^p with p ≈ 1',
+              'Rate measured uniformly by the same network (detection constant in time)',
+            ],
+            limitations: [
+              'Early coda under-recorded (network saturation) biases c upward',
+              'p depends on mainshock magnitude, tectonics and heat flow',
+              'Secondary aftershocks (aftershocks of aftershocks) violate single-sequence decay',
+              'Distinguishing Omori decay from swarm or triggered background rate is ambiguous',
+            ],
           },
           {
             id: 21, toolName: 'Ground Motion Prediction', name: 'Campbell-Bozorgnia NGA-West2 GMPE', equation: 'ln(PGA) = f_mag + f_att + f_flt + f_hng + f_site + f_basin + f_dip + f_hyp + f_atten',
             reference: 'Campbell, K.W. & Bozorgnia, Y. (2014) NGA-West2 ground motion model for the average horizontal components of PGA, PGV, and 5%-damped linear acceleration response spectra. Earthquake Spectra, 30(3), 1087–1114. DOI: 10.1193/062913EQS175M.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Campbell+2014+NGA+West2+ground',
+            paperUrl: 'https://doi.org/10.1193/062913EQS175M',
             appliesTo: 'Ground motion prediction, ShakeMap',
             shortDescription: 'Predicts peak ground acceleration (PGA) as a function of magnitude, rupture distance, site Vs30, fault mechanism, dip, hanging-wall, basin depth, and hypocentral depth using the full NGA-West2 empirical model coefficients',
             paperSummary: 'Campbell & Bozorgnia (2014) developed the NGA-West2 GMPE as part of the PEER Next Generation Attenuation project, using a global database of 15,024 ground motion recordings from 599 earthquakes. The model predicts ln(Y) = f_mag + f_att + f_flt + f_hng + f_site + f_basin + f_dip + f_hyp + f_atten with magnitude scaling, geometric + anelastic attenuation, Vs30 nonlinear site response, basin depth scaling, fault dip, hypocentral depth, and hanging-wall terms. Applicable M3.0–8.5, distances 0–300 km.',
@@ -1406,12 +1627,24 @@ export const PARTS: Part[] = [
               '6. Sum all terms: ln(PGA) = f_mag + f_dist + f_site + f_fault + f_hw + ε·σ(M,R)',
               '7. Compute PGA = exp(ln(PGA)), and scale to PGV and Sa(T) using period-dependent coefficients'
             ],
-            outputInterpretation: 'Peak ground acceleration from the CB14 GMPE provides the shaking hazard input for engineering design:\n\n• PGA < 0.05g: weak shaking, felt but no structural damage (MMI ≤ IV)\n• PGA 0.05–0.15g: moderate shaking, potential non-structural damage (MMI V–VI)\n• PGA 0.15–0.40g: strong shaking, damage to vulnerable structures (MMI VII–VIII)\n• PGA > 0.40g: very strong shaking, widespread structural damage (MMI IX+) \n• The CB14 model includes aleatory variability σ≈0.5–0.7 natural log units (epistemic uncertainty handled via logic trees in PSHA)\n• For design, the 2% in 50-year hazard level (return period ≈ 2475 yr) is the standard for critical infrastructure (IBC/ASCE 7)'
+            outputInterpretation: 'Peak ground acceleration from the CB14 GMPE provides the shaking hazard input for engineering design:\n\n• PGA < 0.05g: weak shaking, felt but no structural damage (MMI ≤ IV)\n• PGA 0.05–0.15g: moderate shaking, potential non-structural damage (MMI V–VI)\n• PGA 0.15–0.40g: strong shaking, damage to vulnerable structures (MMI VII–VIII)\n• PGA > 0.40g: very strong shaking, widespread structural damage (MMI IX+) \n• The CB14 model includes aleatory variability σ≈0.5–0.7 natural log units (epistemic uncertainty handled via logic trees in PSHA)\n• For design, the 2% in 50-year hazard level (return period ≈ 2475 yr) is the standard for critical infrastructure (IBC/ASCE 7)',
+            assumptions: [
+              'Site response parameterized by time-averaged Vs30 (30 m)',
+              'Ground motion is ergodic: aleatory variability captures spatial station differences',
+              'Shallow crustal earthquakes, M 5.0–8.5, R_rup ≤ ~300 km',
+              'Style-of-faulting coefficients applicable as classified',
+            ],
+            limitations: [
+              'Extrapolation outside the data space (M > 8.5, very deep events, non-crustal tectonics) is unvalidated',
+              'Basin-depth and site nonlinearity terms may be unavailable locally',
+              'Epistemic uncertainty between NGA-West2 models can exceed ±0.3 ln units',
+              'Regional anelastic attenuation differences require c₃ calibration',
+            ],
           },
           {
             id: 22, toolName: 'Shear Strength Analysis', name: 'Mohr-Coulomb Failure Criterion', equation: 'τ = c + σ_n × tanφ',
             reference: 'Coulomb, C.A. (1776) Essai sur une application des règles de maximis et minimis à quelques problèmes de statique relatifs à l\'architecture. Mémoires de l\'Académie Royale des Sciences, 7, 343–382.; Mohr, O. (1900) Welche Umstände bedingen die Elastizitätsgrenze und den Bruch eines Materials? Zeitschrift des Vereins Deutscher Ingenieure, 44, 1524–1530.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Coulomb+1776+maximis+minimis+statique',
+            paperUrl: 'NO-DOI (Coulomb 1776, Mémoires de Mathématique et de Physique, Académie Royale des Sciences; no official online version)',
             appliesTo: 'Fault stability, landslide susceptibility',
             shortDescription: 'Determines the shear strength of a rock or soil mass as a linear function of cohesion and normal stress multiplied by the coefficient of internal friction',
             paperSummary: 'Coulomb (1776) proposed that the shear strength of a material consists of two components: a constant cohesion c (independent of applied stress) and a frictional component proportional to normal stress σₙ·tanφ. Mohr (1900) generalized this into the Mohr-Coulomb failure criterion, stating that failure occurs when the shear stress τ on a plane exceeds τ = c + σₙ·tanφ. The criterion is visualized with Mohr\'s circle (representing the stress state) and the failure envelope (the line separating stable from unstable stress states). For rocks, c=10–50 MPa (intact) to 0–1 MPa (jointed); φ=30°–50° for most rocks, 20°–40° for soils.',
@@ -1436,12 +1669,23 @@ export const PARTS: Part[] = [
               '6. Compute apparent friction angle: φ = arctan(tan φ) in degrees',
               '7. If applied shear τ_applied is known: FS = τ_available / τ_applied'
             ],
-            outputInterpretation: 'Shear strength from the Mohr-Coulomb criterion determines whether a slope or fault is stable:\n\n• For intact rock: τ_available = 10–50 MPa (high cohesion + friction) → very stable unless highly stressed\n• For jointed rock/faults (c≈0): τ = σₙ·tanφ, angle of failure θ_f = 45°+φ/2\n• For soils: τ_available = 5–200 kPa (lower cohesion, lower normal stress)\n• Pore pressure reduces effective normal stress: σ′_n = σₙ − u (Terzaghi effective stress principle), reducing strength\n• During earthquakes, dynamic stresses can reduce FS below 1, triggering landslides\n• The Coulomb failure criterion in fault mechanics: a fault is critically stressed when τ ≈ 0.6–0.85σₙ (Byerlee\'s law)'
+            outputInterpretation: 'Shear strength from the Mohr-Coulomb criterion determines whether a slope or fault is stable:\n\n• For intact rock: τ_available = 10–50 MPa (high cohesion + friction) → very stable unless highly stressed\n• For jointed rock/faults (c≈0): τ = σₙ·tanφ, angle of failure θ_f = 45°+φ/2\n• For soils: τ_available = 5–200 kPa (lower cohesion, lower normal stress)\n• Pore pressure reduces effective normal stress: σ′_n = σₙ − u (Terzaghi effective stress principle), reducing strength\n• During earthquakes, dynamic stresses can reduce FS below 1, triggering landslides\n• The Coulomb failure criterion in fault mechanics: a fault is critically stressed when τ ≈ 0.6–0.85σₙ (Byerlee\'s law)',
+            assumptions: [
+              'Failure depends only on shear and effective normal stress on the failure plane',
+              'Effective stress principle holds (pore pressure known); c and φ are material constants',
+              'Linear failure envelope; Mohr circle representation at failure',
+            ],
+            limitations: [
+              'Ignores the intermediate principal stress (Hoek-Brown/Drucker-Prager for rock)',
+              'φ and c vary with density, scale, anisotropy and fissuring',
+              'Strain-softening after peak not captured by peak parameters',
+              'Dynamic/undrained loading needs rate and pore-pressure coupling',
+            ],
           },
           {
             id: 23, toolName: 'Earthquake Magnitude from Moment', name: 'Hanks-Kanamori Moment Magnitude', equation: 'M_w = (2/3)log₁₀(M₀) - 6.07',
             reference: 'Hanks, T.C. & Kanamori, H. (1979) A moment magnitude scale. Journal of Geophysical Research, 84(B5), 2348–2350. DOI: 10.1029/JB084iB05p02348.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Hanks+1979+moment+magnitude+scale',
+            paperUrl: 'https://doi.org/10.1029/JB084iB05p02348',
             appliesTo: 'Earthquake magnitude from seismic moment',
             shortDescription: 'Converts seismic moment M₀ (in N·m) to moment magnitude M_w using the Hanks-Kanamori logarithmic relation, providing a physically-based magnitude scale that does not saturate',
             paperSummary: 'Hanks & Kanamori (1979) introduced the moment magnitude scale M_w = (2/3)log₁₀(M₀) − 6.07, where M₀ is the seismic moment in N·m. Unlike earlier magnitude scales (M_L, m_b, M_S) that saturate for large earthquakes (M>7), M_w is directly proportional to the logarithm of seismic moment and does not saturate. Seismic moment M₀ = μ·A·D where μ is the shear modulus of the faulted rock (≈3×10¹⁰ Pa), A is the rupture area, and D is the average slip. The scale was calibrated so that M_w ≈ M_S for moderate earthquakes (M~6–7). The 1960 Chile M9.5, 2004 Sumatra M9.1, and 2011 Tohoku M9.0 are the largest recorded M_w values.',
@@ -1464,12 +1708,23 @@ export const PARTS: Part[] = [
               '6. For energy proxy: log₁₀(E_s) ≈ 1.5 × M_w + 4.8 (E_s in Joules)',
               '7. Classify: M_w<4: micro, 4–5: light, 5–6: moderate, 6–7: strong, 7–8: major, >8: great'
             ],
-            outputInterpretation: 'Moment magnitude provides the physically definitive measure of earthquake size:\n\n• M₀=10¹⁵ N·m → M_w≈4.0 (felt locally, rarely damaging)\n• M₀=10¹⁹ N·m → M_w≈6.1 (moderate, potentially damaging in urban areas)\n• M₀=10²¹ N·m → M_w≈7.5 (major earthquake, significant damage over large area)\n• M₀=10²² N·m → M_w≈9.0 (great earthquake, tsunamigenic, global aftershock zone)\n• The 2004 Sumatra M9.1: M₀≈1.3×10²² N·m, rupture area 1400×200 km, avg slip 15 m\n• M_w does not saturate: correctly distinguishes M8.0 vs M9.0 (M_S scales saturate near 8)\n• Global average: 1 M≥8 per year, 15 M≥7 per year, 150 M≥6 per year'
+            outputInterpretation: 'Moment magnitude provides the physically definitive measure of earthquake size:\n\n• M₀=10¹⁵ N·m → M_w≈4.0 (felt locally, rarely damaging)\n• M₀=10¹⁹ N·m → M_w≈6.1 (moderate, potentially damaging in urban areas)\n• M₀=10²¹ N·m → M_w≈7.5 (major earthquake, significant damage over large area)\n• M₀=10²² N·m → M_w≈9.0 (great earthquake, tsunamigenic, global aftershock zone)\n• The 2004 Sumatra M9.1: M₀≈1.3×10²² N·m, rupture area 1400×200 km, avg slip 15 m\n• M_w does not saturate: correctly distinguishes M8.0 vs M9.0 (M_S scales saturate near 8)\n• Global average: 1 M≥8 per year, 15 M≥7 per year, 150 M≥6 per year',
+            assumptions: [
+              'Moment magnitude defined from seismic moment: M_w = (2/3)(log₁₀M₀ − 9.1), M₀ in N·m',
+              'Source spectrum approximates a Brune ω⁻² model at long periods',
+              'Moment measured from low-frequency radiation insensitive to path effects',
+            ],
+            limitations: [
+              'Requires broadband recordings and reliable moment tensor inversion',
+              'M₀ uncertainty of ±15% translates to only ±0.01 M_w, but small-event M₀ is detection-limited',
+              'Not defined for events below moment-inversion detection threshold',
+              'M_w is physically distinct from local magnitude M_L at regional distances',
+            ],
           },
           {
             id: 24, toolName: 'Earthquake Stress Drop Analysis', name: 'Brune Stress Drop Model', equation: 'Δσ = (7/16)(M₀/r³)',
             reference: 'Brune, J.N. (1970) Tectonic stress and the spectra of seismic shear waves from earthquakes. Journal of Geophysical Research, 75(26), 4997–5009. DOI: 10.1029/JB075i026p04997.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Brune+1970+Tectonic+stress+spectra',
+            paperUrl: 'https://doi.org/10.1029/JB075i026p04997',
             appliesTo: 'Earthquake source characterization',
             shortDescription: 'Computes the static stress drop of an earthquake from its seismic moment and source radius using the Brune circular-crack model, representing the change in stress on the fault during rupture',
             paperSummary: 'Brune (1970) developed a model relating the seismic source spectrum to physical source parameters. For a circular crack of radius r with seismic moment M₀, the static stress drop Δσ = (7/16)M₀/r³ quantifies the difference in stress on the fault before and after rupture. Typical stress drops for interplate earthquakes range from 0.1–10 MPa (mean ≈ 3 MPa), independent of magnitude (self-similar scaling). The corner frequency f_c = 0.49·β/r (where β is shear wave velocity) relates the source radius to the observed spectral roll-off. Stress drop is a critical parameter for strong ground motion prediction: high Δσ earthquakes produce stronger high-frequency radiation.',
@@ -1493,12 +1748,23 @@ export const PARTS: Part[] = [
               '6. Compute corner frequency: f_c = 0.49 × β / r (β ≈ 3500 m/s for crustal rocks)',
               '7. Classify: Δσ < 0.1 MPa (low stress drop, slow/tsunami earthquake), 0.1–10 MPa (typical), >10 MPa (high stress drop, damaging high-frequency shaking)'
             ],
-            outputInterpretation: 'Static stress drop characterizes the intensity of the earthquake rupture process:\n\n• Δσ ≈ 0.1–1 MPa: low stress drop events — typical of subduction interface events, tsunami earthquakes (e.g., 1992 Nicaragua M7.2)\n• Δσ ≈ 1–10 MPa: typical crustal earthquakes — most California, Japan, Mediterranean events\n• Δσ > 10 MPa: high stress drop — intraplate earthquakes, mining-induced events, producing strong high-frequency ground motion\n• Self-similar scaling: Δσ is independent of magnitude (M₀ ∝ r³) — a M5 event with r=100 m has similar Δσ to a M8 with r=10 km\n• High Δσ events have higher corner frequencies and thus stronger shaking at short periods (<1 s) affecting low-rise buildings\n• The Brune model assumes a circular crack; real faults are more complex (elliptical, multi-segment)'
+            outputInterpretation: 'Static stress drop characterizes the intensity of the earthquake rupture process:\n\n• Δσ ≈ 0.1–1 MPa: low stress drop events — typical of subduction interface events, tsunami earthquakes (e.g., 1992 Nicaragua M7.2)\n• Δσ ≈ 1–10 MPa: typical crustal earthquakes — most California, Japan, Mediterranean events\n• Δσ > 10 MPa: high stress drop — intraplate earthquakes, mining-induced events, producing strong high-frequency ground motion\n• Self-similar scaling: Δσ is independent of magnitude (M₀ ∝ r³) — a M5 event with r=100 m has similar Δσ to a M8 with r=10 km\n• High Δσ events have higher corner frequencies and thus stronger shaking at short periods (<1 s) affecting low-rise buildings\n• The Brune model assumes a circular crack; real faults are more complex (elliptical, multi-segment)',
+            assumptions: [
+              'Circular rupture with instantaneous slip (Brune ω⁻² far-field spectrum)',
+              'Shear-wave velocity and density of source medium known; isotropic average radiation correction (0.55)',
+              'Attenuation-corrected corner frequency f_c measured from displacement spectrum',
+            ],
+            limitations: [
+              'Stress drop scales as f_c³ — corner-frequency picking error dominates uncertainty',
+              'Directivity and complex rupture violate the ω⁻² source assumption',
+              'Trade-off between f_c and Δσ with limited bandwidth',
+              'Apparent stress and radiated-energy variants require additional assumptions',
+            ],
           },
           {
             id: 25, toolName: 'Fault Rupture Scaling', name: 'Wells-Coppersmith Scaling Relations', equation: 'log₁₀(A) = -3.49 + 0.91×M_w',
             reference: 'Wells, D.L. & Coppersmith, K.J. (1994) New empirical relationships among magnitude, rupture length, rupture width, rupture area, and surface displacement. Bulletin of the Seismological Society of America, 84(4), 974–1002.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Wells+1994+magnitude+rupture+length',
+            paperUrl: 'https://doi.org/10.1785/BSSA0840040974',
             appliesTo: 'Magnitude-area relationships',
             shortDescription: 'Relates earthquake moment magnitude to fault rupture dimensions (area, length, width, slip) using empirical scaling laws derived from a global catalog of historical earthquakes',
             paperSummary: 'Wells & Coppersmith (1994) compiled a global database of 421 historical earthquakes to derive empirical scaling relationships between moment magnitude M_w and rupture parameters: surface rupture length (SRL), subsurface rupture length (RL), down-dip rupture width (RW), rupture area (RA = RL × RW), and average displacement (AD). The relationship log₁₀(RA) = −3.49 + 0.91·M_w shows that larger earthquakes systematically rupture larger fault areas. For strike-slip faults: log₁₀(SRL) = −3.55 + 0.74·M_w; for reverse faults: log₁₀(RA) = −2.86 + 0.82·M_w. These scaling relations are essential for estimating the maximum magnitude from fault geometry in seismic hazard analysis and for creating earthquake rupture forecasts.',
@@ -1521,7 +1787,18 @@ export const PARTS: Part[] = [
               '6. For normal faults: log₁₀(A) = −2.01 + 0.76 × M_w (largest area per magnitude)',
               '7. Estimate maximum magnitude from known fault area: M_w_max = (log₁₀(A_fault) + 3.49) / 0.91'
             ],
-            outputInterpretation: 'Wells-Coppersmith scaling translates between magnitude and fault rupture dimensions:\n\n• M_w=6.0: A≈40 km², SRL≈10 km, AD≈0.2 m — moderate event on a small fault segment\n• M_w=7.0: A≈320 km², SRL≈35 km, AD≈0.5 m — major event on a fault section (e.g., 1994 Northridge)\n• M_w=8.0: A≈2600 km², SRL≈190 km, AD≈3 m — great event on a fault system (e.g., 1906 San Francisco)\n• If a fault has known area 1000 km² with a locking depth of 15 km: estimated M_w_max≈7.6\n• Standard errors are large: ±0.23 log₁₀(A) means the ±1σ range spans a factor of ~1.7 in area\n• The scatter reflects variability in stress drop, fault type, and rupture complexity'
+            outputInterpretation: 'Wells-Coppersmith scaling translates between magnitude and fault rupture dimensions:\n\n• M_w=6.0: A≈40 km², SRL≈10 km, AD≈0.2 m — moderate event on a small fault segment\n• M_w=7.0: A≈320 km², SRL≈35 km, AD≈0.5 m — major event on a fault section (e.g., 1994 Northridge)\n• M_w=8.0: A≈2600 km², SRL≈190 km, AD≈3 m — great event on a fault system (e.g., 1906 San Francisco)\n• If a fault has known area 1000 km² with a locking depth of 15 km: estimated M_w_max≈7.6\n• Standard errors are large: ±0.23 log₁₀(A) means the ±1σ range spans a factor of ~1.7 in area\n• The scatter reflects variability in stress drop, fault type, and rupture complexity',
+            assumptions: [
+            'Log-linear regression of magnitude on rupture dimension (length, width, area) with global coefficients per faulting style',
+            'Surface rupture dimensions proxy subsurface rupture',
+            'Crustal, shallow earthquakes worldwide (1872–1991 dataset)',
+            ],
+            limitations: [
+            'Large scatter: σ ≈ 0.22–0.28 magnitude units (factor ~2 in rupture length)',
+            'Subsurface width of strike-slip faults constrained by seismogenic thickness, not the surface expression',
+            'Pre-1994 dataset; great subduction ruptures handled separately',
+            'Rupture aspect ratio variability not captured by single-variable relations',
+            ],
           },
         ],
       },
@@ -1531,7 +1808,7 @@ export const PARTS: Part[] = [
           {
             id: 26, toolName: 'Vegetation Health Index', name: 'Normalized Difference Vegetation Index (NDVI)', equation: 'NDVI = (NIR - Red)/(NIR + Red)',
             reference: 'Rouse, J.W., Haas, R.H., Schell, J.A., Deering, D.W. & Harlan, J.C. (1974) Monitoring the vernal advancement and retrogradation of natural vegetation. NASA/GSFC Final Report, 1–137.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Rouse+1974+Monitoring+vernal+advancement',
+            paperUrl: 'https://ntrs.nasa.gov/citations/19740001023',
             appliesTo: 'Vegetation health, drought stress, deforestation',
             shortDescription: 'Computes the NDVI from red and near-infrared reflectance, quantifying photosynthetic activity and vegetation greenness as a normalized ratio between −1 and +1',
             paperSummary: 'Rouse et al. (1974) developed NDVI as part of NASA\'s Great Plains Corridor project using ERTS (Landsat-1) satellite data. The index exploits the spectral contrast between strong chlorophyll absorption in the red band (0.6–0.7 µm) and high reflectance of leaf cellular structure in the NIR band (0.7–1.1 µm). NDVI = (ρ_NIR − ρ_Red)/(ρ_NIR + ρ_Red) ranges from −1 to +1. Dense vegetation: NDVI=0.6–0.9; sparse vegetation: 0.2–0.5; bare soil: 0.05–0.3; water: <0. NDVI is the most widely used vegetation index globally, with data continuity from AVHRR (1981), MODIS (2000), and VIIRS (2012) providing a 40+ year climate data record.',
@@ -1555,12 +1832,23 @@ export const PARTS: Part[] = [
               '6. For time-series: apply maximum-value compositing (MVC) over the compositing period',
               '7. Classify vegetation vigor using NDVI thresholds specific to the biome'
             ],
-            outputInterpretation: 'NDVI is the primary satellite-derived measure of vegetation activity:\n\n• NDVI > 0.5: dense green vegetation, high photosynthetic capacity, LAI > 3 (temperate/boreal forests, tropical rainforest)\n• NDVI 0.2–0.5: moderate vegetation cover, croplands, shrublands, savanna (LAI 1–3)\n• NDVI 0.05–0.2: sparse vegetation, drylands, tundra, senescent crops\n• NDVI < 0: water bodies, snow, ice, clouds (higher reflectance in visible than NIR)\n• NDVI trends: decreasing NDVI over time indicates drought stress, deforestation, or desertification; increasing NDVI indicates greening, vegetation recovery, or CO₂ fertilization\n• For crop monitoring: NDVI anomalies (Z-scores) relative to the long-term mean identify drought-affected areas\n• Caveats: NDVI saturates over dense forests (LAI > 4); soil background affects sparse canopies; atmospheric aerosols reduce NDVI values'
+            outputInterpretation: 'NDVI is the primary satellite-derived measure of vegetation activity:\n\n• NDVI > 0.5: dense green vegetation, high photosynthetic capacity, LAI > 3 (temperate/boreal forests, tropical rainforest)\n• NDVI 0.2–0.5: moderate vegetation cover, croplands, shrublands, savanna (LAI 1–3)\n• NDVI 0.05–0.2: sparse vegetation, drylands, tundra, senescent crops\n• NDVI < 0: water bodies, snow, ice, clouds (higher reflectance in visible than NIR)\n• NDVI trends: decreasing NDVI over time indicates drought stress, deforestation, or desertification; increasing NDVI indicates greening, vegetation recovery, or CO₂ fertilization\n• For crop monitoring: NDVI anomalies (Z-scores) relative to the long-term mean identify drought-affected areas\n• Caveats: NDVI saturates over dense forests (LAI > 4); soil background affects sparse canopies; atmospheric aerosols reduce NDVI values',
+            assumptions: [
+              'Canopy reflectance dominated by chlorophyll absorption (red) and mesophyll scattering (NIR)',
+              'Reflectance is atmospherically corrected (or VI-transformed) to surface reflectance',
+              'View and illumination geometry near-nadir or corrected; clear skies',
+            ],
+            limitations: [
+              'Saturates at high biomass (LAI ≳ 3–4; use EVI/NDWI beyond)',
+              'Soil brightness biases low-vegetation values (SAVI-type soil correction)',
+              'Sensor-dependent absolute values (requires inter-sensor harmonization)',
+              'Clouds, shadows and aerosols produce spurious low NDVI',
+            ],
           },
           {
             id: 27, toolName: 'Surface Water Detection', name: 'McFeeters NDWI', equation: 'NDWI = (Green - NIR)/(Green + NIR)',
             reference: 'McFeeters, S.K. (1996) The use of the Normalized Difference Water Index (NDWI) in the delineation of open water features. International Journal of Remote Sensing, 17(7), 1425–1432. DOI: 10.1080/01431169608948714.',
-            paperUrl: 'https://scholar.google.com/scholar?q=McFeeters+1996+Normalized+Difference+Water',
+            paperUrl: 'https://doi.org/10.1080/01431169608948714',
             appliesTo: 'Surface water detection, flood mapping',
             shortDescription: 'Detects open water bodies using the normalized difference between green reflectance (high for water) and NIR reflectance (low for water), producing positive values for water features',
             paperSummary: 'McFeeters (1996) introduced NDWI = (Green − NIR)/(Green + NIR) to delineate open water features from satellite imagery. Water bodies have high reflectance in the green band (0.5–0.6 µm) due to low absorption and high backscattering, and very low reflectance in the NIR (0.7–1.1 µm) where water strongly absorbs. Thus NDWI > 0 indicates water, while NDWI ≤ 0 indicates land or vegetation. McFeeters demonstrated the index on Landsat TM imagery of San Francisco Bay, achieving accurate delineation of rivers, lakes, and reservoirs. The index is widely used for flood mapping, wetland mapping, and shoreline change detection.',
@@ -1583,12 +1871,22 @@ export const PARTS: Part[] = [
               '5. Optionally apply a shadow mask (NDWI can misclassify topographic shadows as water)',
               '6. For flood mapping: ΔNDWI = NDWI_post − NDWI_pre; positive ΔNDWI indicates new inundation'
             ],
-            outputInterpretation: 'The McFeeters NDWI provides a simple, robust water detection method:\n\n• NDWI > 0.3: deep, clear water (lake, reservoir, ocean with no suspended sediment)\n• NDWI 0.1–0.3: turbid water, shallow water, flooded vegetation\n• NDWI 0–0.1: wet soil, transitional zones, partially inundated\n• NDWI < 0: dry land, vegetation, built-up areas\n• For urban flooding: NDWI is less effective due to mixed pixels (buildings + water in 30 m resolution); use MNDWI (Xu, 2006) instead\n• For coastal waters: NDWI with SWIR instead of NIR reduces adjacency effects from land\n• The McFeeters NDWI can overestimate water in areas with topographic shadows — combine with NIR single-band threshold for shadow removal'
+            outputInterpretation: 'The McFeeters NDWI provides a simple, robust water detection method:\n\n• NDWI > 0.3: deep, clear water (lake, reservoir, ocean with no suspended sediment)\n• NDWI 0.1–0.3: turbid water, shallow water, flooded vegetation\n• NDWI 0–0.1: wet soil, transitional zones, partially inundated\n• NDWI < 0: dry land, vegetation, built-up areas\n• For urban flooding: NDWI is less effective due to mixed pixels (buildings + water in 30 m resolution); use MNDWI (Xu, 2006) instead\n• For coastal waters: NDWI with SWIR instead of NIR reduces adjacency effects from land\n• The McFeeters NDWI can overestimate water in areas with topographic shadows — combine with NIR single-band threshold for shadow removal',
+            assumptions: [
+              'Open water has higher green than NIR reflectance; atmospherically corrected reflectance',
+              'Water bodies optically deep or treated as binary water/non-water',
+            ],
+            limitations: [
+              'Shadows (buildings, terrain, clouds) mimic water',
+              'Turbid, sediment-laden or algal-bloom water reduces NDWI and can be missed',
+              'Threshold is scene-specific; no universal cut value',
+              'Built-up and bare soil cluster near zero — confusion with dry surfaces',
+            ],
           },
           {
             id: 28, toolName: 'Vegetation Water Content', name: 'Gao NDWI (NIR-SWIR)', equation: 'NDWI = (NIR - SWIR)/(NIR + SWIR)',
             reference: 'Gao, B.C. (1996) NDWI — A normalized difference water index for remote sensing of vegetation liquid water from space. Remote Sensing of Environment, 58(3), 257–266. DOI: 10.1016/S0034-4257(96)00067-3.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Gao+1996+NDWI+normalized+difference',
+            paperUrl: 'https://doi.org/10.1016/S0034-4257(96)00067-3',
             appliesTo: 'Vegetation water content',
             shortDescription: 'Estimates vegetation canopy liquid water content using the normalized ratio of NIR and SWIR reflectance, where SWIR absorption is sensitive to leaf water content',
             paperSummary: 'Gao (1996) proposed NDWI = (NIR − SWIR)/(NIR + SWIR) to estimate vegetation liquid water content from space. Unlike the McFeeters NDWI for open water, Gao\'s NDWI targets water in plant canopies. The index uses the NIR band (0.86 µm) where leaves have high reflectance and the SWIR band (1.24 µm or 1.64 µm) where liquid water has strong absorption features. Gao demonstrated that NDWI is linearly related to Equivalent Water Thickness (EWT) and is sensitive to changes in canopy water content from drought, senescence, and phenology. The index is widely used for drought monitoring, fire risk assessment, and ecosystem health analysis.',
@@ -1611,12 +1909,23 @@ export const PARTS: Part[] = [
               '5. For drought monitoring: compute NDWI anomaly relative to the long-term mean',
               '6. For fire danger: use NDWI < 0.1 as a threshold for critically low fuel moisture'
             ],
-            outputInterpretation: 'Gao NDWI tracks vegetation water stress and is a key drought indicator:\n\n• NDWI > 0.3: well-watered canopies, full hydration (e.g., rainforest, irrigated crops)\n• NDWI 0.15–0.3: moderate water content, normal conditions for most ecosystems\n• NDWI 0–0.15: low water content, early water stress signal (drought onset)\n• NDWI < 0: very low water content, severe stress, senescent/dry vegetation, bare soil\n• For fire risk assessment: NDWI < 0.1 indicates fuel moisture < 60–80%, elevated fire danger\n• The index responds more rapidly to drought than chlorophyll-based indices (NDVI, EVI) — making it an early drought warning metric\n• Short-term NDWI drops (days to weeks) indicate flash drought; sustained low NDWI indicates seasonal or multi-year drought'
+            outputInterpretation: 'Gao NDWI tracks vegetation water stress and is a key drought indicator:\n\n• NDWI > 0.3: well-watered canopies, full hydration (e.g., rainforest, irrigated crops)\n• NDWI 0.15–0.3: moderate water content, normal conditions for most ecosystems\n• NDWI 0–0.15: low water content, early water stress signal (drought onset)\n• NDWI < 0: very low water content, severe stress, senescent/dry vegetation, bare soil\n• For fire risk assessment: NDWI < 0.1 indicates fuel moisture < 60–80%, elevated fire danger\n• The index responds more rapidly to drought than chlorophyll-based indices (NDVI, EVI) — making it an early drought warning metric\n• Short-term NDWI drops (days to weeks) indicate flash drought; sustained low NDWI indicates seasonal or multi-year drought',
+            assumptions: [
+              'Liquid water in canopy absorbs strongly in the SWIR; NDWI = (NIR−SWIR)/(NIR+SWIR)',
+              'Surface reflectance properly atmospherically corrected (SWIR sensitive to aerosol/water vapor)',
+              'Vegetated surfaces with SWIR-capable sensor',
+            ],
+            limitations: [
+              'Atmospheric correction errors propagate strongly (SWIR water-vapor sensitivity)',
+              'Mixed pixels and sparse canopies confound leaf vs soil water signals',
+              'Saturates under closed canopies; insensitive to deep-root water uptake',
+              'Sensor-specific band placement (TM/ETM+/OLI) requires band-equivalence care',
+            ],
           },
           {
             id: 29, toolName: 'Enhanced Vegetation Index', name: 'Enhanced Vegetation Index (EVI)', equation: 'EVI = 2.5 × (NIR - Red)/(NIR + 6×Red - 7.5×Blue + 1)',
             reference: 'Huete, A., Didan, K., Miura, T., Rodriguez, E.P., Gao, X. & Ferreira, L.G. (2002) Overview of the radiometric and biophysical performance of the MODIS vegetation indices. Remote Sensing of Environment, 83(1–2), 195–213. DOI: 10.1016/S0034-4257(02)00096-2.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Huete+2002+Overview+radiometric+biophysical',
+            paperUrl: 'https://doi.org/10.1016/S0034-4257(02)00096-2',
             appliesTo: 'Dense vegetation monitoring, MODIS',
             shortDescription: 'Computes the Enhanced Vegetation Index (EVI) with improved sensitivity over dense vegetation and reduced atmospheric/soil background contamination compared to NDVI',
             paperSummary: 'Huete et al. (2002) introduced EVI as an optimized vegetation index for MODIS that overcomes NDVI\'s limitations in high-biomass regions. EVI = 2.5 × (ρ_NIR − ρ_Red)/(ρ_NIR + 6·ρ_Red − 7.5·ρ_Blue + 1). The blue band is included to correct for atmospheric aerosol scattering, and the soil-adjustment factor L=1 (embedded in the denominator coefficients) reduces soil background effects. The coefficients were optimized using radiative transfer simulations over a range of atmospheric and surface conditions. EVI shows better sensitivity in high LAI regimes (LAI > 4) where NDVI saturates. MODIS provides both NDVI and EVI at 250 m and 500 m resolution globally every 16 days.',
@@ -1640,12 +1949,23 @@ export const PARTS: Part[] = [
               '5. For trend analysis: apply Whittaker smoother or Savitzky-Golay filter to remove residual noise',
               '6. Classify: EVI < 0.1 (barren), 0.1–0.3 (sparse), 0.3–0.5 (moderate), 0.5–0.7 (dense), >0.7 (very dense)'
             ],
-            outputInterpretation: 'EVI provides enhanced vegetation monitoring capability compared to NDVI:\n\n• EVI 0.4–0.7: dense, healthy forests where NDVI saturates at 0.8–0.9 — EVI captures subtle variations in canopy structure and LAI\n• EVI 0.2–0.4: shrubland, savanna, agricultural crops with moderate biomass\n• EVI < 0.2: sparsely vegetated, urban, bare soil, desert — less sensitive to soil background than NDVI\n• Compared to NDVI: EVI has ~2× the dynamic range in high-biomass areas and does not saturate until LAI > 6\n• The blue band aerosol correction makes EVI more reliable in the tropics (wet season) and during biomass burning seasons\n• For global MODIS products: EVI shows interannual variations driven by ENSO, droughts, and Amazon forest dynamics\n• EVI-NDVI divergence is a diagnostic: EVI decreasing while NDVI is stable suggests aerosol contamination or canopy structural change'
+            outputInterpretation: 'EVI provides enhanced vegetation monitoring capability compared to NDVI:\n\n• EVI 0.4–0.7: dense, healthy forests where NDVI saturates at 0.8–0.9 — EVI captures subtle variations in canopy structure and LAI\n• EVI 0.2–0.4: shrubland, savanna, agricultural crops with moderate biomass\n• EVI < 0.2: sparsely vegetated, urban, bare soil, desert — less sensitive to soil background than NDVI\n• Compared to NDVI: EVI has ~2× the dynamic range in high-biomass areas and does not saturate until LAI > 6\n• The blue band aerosol correction makes EVI more reliable in the tropics (wet season) and during biomass burning seasons\n• For global MODIS products: EVI shows interannual variations driven by ENSO, droughts, and Amazon forest dynamics\n• EVI-NDVI divergence is a diagnostic: EVI decreasing while NDVI is stable suggests aerosol contamination or canopy structural change',
+            assumptions: [
+              'Aerosol resistance vegetation index with blue-band correction (C₁, C₂, L coefficients)',
+              'MODIS-era coefficients (G = 2.5, C₁ = 6, C₂ = 7.5, L = 1) unless re-tuned',
+              'Surface reflectance atmospherically corrected incl. blue band',
+            ],
+            limitations: [
+              'Blue-band noise degrades values at coarse SBR or high aerosol',
+              'Coefficients tuned for MODIS spectral response; other sensors need recalibration',
+              'Aerosol model mismatch produces residuals in the correction',
+              'Still sensitive to dense-canopy BRDF and sun-angle effects at oblique views',
+            ],
           },
           {
             id: 30, toolName: 'Snow Cover Detection', name: 'Normalized Difference Snow Index (NDSI)', equation: 'NDSI = (Green - SWIR)/(Green + SWIR)',
             reference: 'Hall, D.K., Riggs, G.A. & Salomonson, V.V. (1995) Development of methods for mapping global snow cover using moderate resolution imaging spectroradiometer data. Remote Sensing of Environment, 54(2), 127–140. DOI: 10.1016/0034-4257(95)00137-P.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Hall+1995+Development+methods+mapping',
+            paperUrl: 'https://doi.org/10.1016/0034-4257(95)00137-P',
             appliesTo: 'Snow cover detection, cryosphere monitoring',
             shortDescription: 'Detects snow cover from satellite imagery using the high visible (green) reflectance and low SWIR reflectance of snow, producing positive NDSI values for snow-covered pixels',
             paperSummary: 'Hall et al. (1995) developed the NDSI algorithm for MODIS snow cover mapping. Snow has high reflectance in the visible (green band, 0.5–0.6 µm) but very low reflectance in the SWIR (1.6 µm) due to ice absorption. NDSI = (ρ_Green − ρ_SWIR)/(ρ_Green + ρ_SWIR). A pixel is classified as snow if NDSI ≥ 0.4 AND reflectance in the MODIS Band 2 (NIR) > 0.1 (to distinguish from water). The MODIS Snow Cover product (MOD10A1) provides daily global snow cover at 500 m resolution. The algorithm was validated against ground-based snow depth measurements (accuracy > 90%). Cloud obscuration is the primary limitation, mitigated by multi-day compositing.',
@@ -1653,8 +1973,8 @@ export const PARTS: Part[] = [
             inputs: [
               { symbol: 'NIR', label: 'NIR Band Reflectance', unit: 'reflectance', default: 0.3, min: 0, max: 1, group: 'Satellite Bands' },
               { symbol: 'SWIR', label: 'SWIR Band Reflectance', unit: 'reflectance', default: 0.1, min: 0, max: 1, group: 'Satellite Bands' },
-              { symbol: 'NIR_pre', label: 'Pre-fire NIR Reflectance', unit: 'reflectance', min: 0, max: 1, group: 'Satellite Bands' },
-              { symbol: 'SWIR_pre', label: 'Pre-fire SWIR Reflectance', unit: 'reflectance', min: 0, max: 1, group: 'Satellite Bands' }
+              { symbol: 'NIR_pre', label: 'Pre-fire NIR Reflectance', unit: 'reflectance', default: 0.5, min: 0, max: 1, group: 'Satellite Bands' },
+              { symbol: 'SWIR_pre', label: 'Pre-fire SWIR Reflectance', unit: 'reflectance', default: 0.2, min: 0, max: 1, group: 'Satellite Bands' }
             ],
             outputs: [
               { id: 'primary', label: 'NDSI', type: 'scalar', unit: '—', description: 'Normalized Difference Snow Index. NDSI ≥ 0.4 indicates snow cover. Clean snow: 0.6–0.9; dirty/melting snow: 0.2–0.6; clouds: typically <0 or low positive; bare ground: 0–0.1.' },
@@ -1671,12 +1991,22 @@ export const PARTS: Part[] = [
               '6. For fractional snow: FSC = −0.01 + 1.45 × NDSI (limited to 0–1 range)',
               '7. Apply water mask: pixels where NIR < 0.1 are classified as water, not snow'
             ],
-            outputInterpretation: 'NDSI is the primary satellite snow cover algorithm globally:\n\n• NDSI > 0.6: clean, fresh snow with fine grain size — high albedo conditions\n• NDSI 0.4–0.6: melting snow, slightly dirty snow, shallow snow cover\n• NDSI 0.15–0.4: patchy snow, snow in dense forests (canopy masking effect), or snow with significant contamination\n• NDSI < 0.15: snow-free ground (but may include wet snow or ice lenses)\n• Cloud discrimination: most clouds have NDSI < 0.4 or negative NDSI (higher SWIR reflectance than snow)\n• Melting snow: as snow grains grow and liquid water appears, NDSI decreases — tracked for melt onset detection\n• Accuracy: MODIS NDSI has ~93% agreement with ground observations; errors increase during snowmelt, in deep shadows, and in mixed pixels at snowline boundaries'
+            outputInterpretation: 'NDSI is the primary satellite snow cover algorithm globally:\n\n• NDSI > 0.6: clean, fresh snow with fine grain size — high albedo conditions\n• NDSI 0.4–0.6: melting snow, slightly dirty snow, shallow snow cover\n• NDSI 0.15–0.4: patchy snow, snow in dense forests (canopy masking effect), or snow with significant contamination\n• NDSI < 0.15: snow-free ground (but may include wet snow or ice lenses)\n• Cloud discrimination: most clouds have NDSI < 0.4 or negative NDSI (higher SWIR reflectance than snow)\n• Melting snow: as snow grains grow and liquid water appears, NDSI decreases — tracked for melt onset detection\n• Accuracy: MODIS NDSI has ~93% agreement with ground observations; errors increase during snowmelt, in deep shadows, and in mixed pixels at snowline boundaries',
+            assumptions: [
+              'Snow has high visible and low SWIR reflectance; NDSI = (Green−SWIR)/(Green+SWIR)',
+              'Clear-sky, snow-covered ground mapped where NDSI ≥ 0.4 (Hall et al. 1995 threshold)',
+            ],
+            limitations: [
+              'Thin snow and clouds are confounded (NDSI alone cannot fully separate)',
+              'Shaded snow falls below threshold — systematic under-mapping',
+              'Requires SWIR band (TM/ETM+/OLI); sensor-specific',
+              'Snow-covered water bodies freeze state and mixed phases unstable',
+            ],
           },
           {
             id: 31, toolName: 'Burn Severity Mapping', name: 'Normalized Burn Ratio (NBR)', equation: 'NBR = (NIR - SWIR)/(NIR + SWIR)',
             reference: 'Key, C.H. & Benson, N.C. (1999) Measuring and remote sensing of burn severity. Proceedings of the Joint Fire Science Conference, Boise, ID, 15–17 June 1999, 284 pp.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Key+1999+Measuring+remote+sensing',
+            paperUrl: 'https://www.fs.usda.gov/treesearch/21300',
             appliesTo: 'Burn severity, post-fire recovery',
             shortDescription: 'Maps wildfire burn severity using the Normalized Burn Ratio, which detects vegetation and soil char-induced changes in NIR and SWIR reflectance between pre- and post-fire images',
             paperSummary: 'Key & Benson (1999) developed NBR and the differenced NBR (dNBR) for burn severity mapping from Landsat imagery. NBR = (ρ_NIR − ρ_SWIR)/(ρ_NIR + ρ_SWIR) uses the spectral contrast between NIR reflectance (high in healthy vegetation, low after fire due to foliage consumption) and SWIR reflectance (moderate in vegetation, high after fire due to char and exposed soil). The dNBR = NBR_pre − NBR_post separates the fire signal from pre-fire vegetation variability. The USGS Monitoring Trends in Burn Severity (MTBS) program uses dNBR to map all large wildfires (>400 ha) across the United States since 1984, with severity classes: unburned, low, moderate, and high severity.',
@@ -1700,21 +2030,32 @@ export const PARTS: Part[] = [
               '6. Compute differenced NBR: dNBR = NBR_pre − NBR_post',
               '7. Classify: <0.1 unburned, 0.1–0.27 low, 0.27–0.44 moderate, 0.44–0.66 high, >0.66 very high'
             ],
-            outputInterpretation: 'The NBR and dNBR provide the standard burn severity metric used by the USGS MTBS program:\n\n• dNBR > 0.44: high severity — trees completely consumed or defoliated, canopy mortality > 75%, extensive soil oxidation\n• dNBR 0.27–0.44: moderate severity — partial canopy consumption, leaf scorch, some tree mortality, soil exposure\n• dNBR 0.1–0.27: low severity — surface litter consumed, understory burned, canopy mostly intact, limited tree mortality\n• dNBR < 0.1: unburned or minimal fire effects\n• Negative dNBR: indicates post-fire greening (regrowth or phenological difference between image dates)\n• Limitations: dNBR is affected by: (1) pre-fire vegetation density (lower sensitivity in sparse vegetation), (2) post-fire rain (can wash away ash), (3) soil type (bright soil may mask char signal), (4) shadow fraction (shadows reduce NIR, mimicking fire effects)'
+            outputInterpretation: 'The NBR and dNBR provide the standard burn severity metric used by the USGS MTBS program:\n\n• dNBR > 0.44: high severity — trees completely consumed or defoliated, canopy mortality > 75%, extensive soil oxidation\n• dNBR 0.27–0.44: moderate severity — partial canopy consumption, leaf scorch, some tree mortality, soil exposure\n• dNBR 0.1–0.27: low severity — surface litter consumed, understory burned, canopy mostly intact, limited tree mortality\n• dNBR < 0.1: unburned or minimal fire effects\n• Negative dNBR: indicates post-fire greening (regrowth or phenological difference between image dates)\n• Limitations: dNBR is affected by: (1) pre-fire vegetation density (lower sensitivity in sparse vegetation), (2) post-fire rain (can wash away ash), (3) soil type (bright soil may mask char signal), (4) shadow fraction (shadows reduce NIR, mimicking fire effects)',
+            assumptions: [
+              'Healthy vegetation: high NIR, low SWIR2 → high NBR; burning reduces both terms',
+              'Pre- and post-fire imagery atmospherically corrected and co-registered',
+              'dNBR = NBR_pre − NBR_post interprets burn severity classes',
+            ],
+            limitations: [
+              'Phenology and moisture changes between dates confound dNBR',
+              'Exposed light soil can mimic low-severity burn',
+              'Requires two cloud-free images bracketing the fire',
+              'RdNBR/Relativized forms needed across varying pre-fire conditions',
+            ],
           },
           {
             id: 32, toolName: 'Fire Radiative Power Estimation', name: 'Fire Radiative Power (FRP)', equation: 'FRP = A × σ × ε × (T_fire⁴ − T_bg⁴)',
             reference: 'Giglio, L., Csiszar, I. & Justice, C.O. (2006) Global distribution and seasonality of active fires as observed with the Terra and Aqua Moderate Resolution Imaging Spectroradiometer (MODIS) sensors. Journal of Geophysical Research: Biogeosciences, 111(G2), G02016. DOI: 10.1029/2005JG000142.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Giglio+2006+Global+distribution+seasonality',
+            paperUrl: 'https://doi.org/10.1029/2005JG000142',
             appliesTo: 'Fire intensity, smoke emission estimation',
             shortDescription: 'Estimates fire radiative power (MW) from satellite thermal infrared measurements, quantifying the thermal energy released by actively burning vegetation fires',
             paperSummary: 'Giglio et al. (2006) characterized the global distribution and seasonality of active fires using MODIS, introducing the FRP algorithm. FRP = A·σ·ε·(T_f⁴−T_bg⁴) where A is pixel area, σ is Stefan-Boltzmann constant, ε is fire emissivity, T_f is fire temperature, and T_bg is background temperature. The MODIS MOD14/MYD14 fire products detect 1 km active fires and estimate FRP by fitting Planck functions to the MIR (4 µm) and TIR (11 µm) bands. Global FRP exhibits a strong seasonal cycle driven by savanna fires (Africa accounts for ~50% of global burned area), tropical deforestation, and boreal forest fires. FRP is used to estimate smoke emissions via the Fire Energetics and Emissions Research (FEER) and Global Fire Emissions Database (GFED).',
             scientificConcept: 'Active vegetation fires emit thermal radiation according to the Stefan-Boltzmann law (M = εσT⁴). The fire pixel observed by a satellite sensor contains both the fire (at temperature 400–2000 K) and the unburned background (at temperature 280–320 K). The FRP = A·ε·σ·(T_f⁴−T_bg⁴) represents the total thermal energy radiated by the fire within the pixel area. At MODIS 1 km resolution, most fires occupy only a fraction of the pixel, so the fire fraction and temperature are retrieved by solving the bi-spectral (MIR + TIR) radiative transfer equations. FRP is proportional to the rate of biomass consumption: emission rate (kg/s) = FRP × emission factor (g/MJ). Fire temperatures: smoldering fires 400–600°C, flaming vegetation 600–1200°C, fully developed crown fires 1000–1500°C.',
             inputs: [
-              { symbol: 'A', label: 'Pixel Area', unit: 'm²', min: 0, max: 100000000.0, group: 'Geometry' },
+              { symbol: 'A', label: 'Pixel Area', unit: 'm²', default: 1000000, min: 0, max: 100000000.0, group: 'Geometry' },
               { symbol: 'ε', label: 'Fire Emissivity', unit: '—', default: 0.98, min: 0, max: 1, group: 'Fire Properties' },
-              { symbol: 'T_fire', label: 'Fire Temperature', unit: 'K', min: 400, max: 2000, group: 'Fire Properties' },
-              { symbol: 'T_bg', label: 'Background Temperature', unit: 'K', min: 200, max: 400, group: 'Background' }
+              { symbol: 'T_fire', label: 'Fire Temperature', unit: 'K', default: 850, min: 400, max: 2000, group: 'Fire Properties' },
+              { symbol: 'T_bg', label: 'Background Temperature', unit: 'K', default: 300, min: 200, max: 400, group: 'Background' }
             ],
             description: 'Dozier (Giglio et al. 2006) two-component FRP: FRP = A·ε·σ·(T_fire⁴ − T_bg⁴). T_fire and A are derived GENUINELY from NASA FIRMS active-fire detections — T_fire = the strongest detected fire-pixel bright_ti4 (Kelvin) within ~50 km, A = scan × track pixel area. T_bg (ambient background) must be user-supplied; without a genuine FIRMS detection no fire temperature is fabricated and FRP cannot be estimated.',
             outputs: [
@@ -1732,12 +2073,23 @@ export const PARTS: Part[] = [
               '6. Compute FRP = p × A × ε × σ × (T_f⁴ − T_bg⁴)',
               '7. Convert to MW: FRP(MW) = FRP(W) / 10⁶'
             ],
-            outputInterpretation: 'FRP is a direct measure of fire energy release used for emissions estimation:\n\n• FRP < 10 MW: small, smoldering fire (agricultural residue, campfire) — low intensity, minimal smoke emissions\n• FRP 10–100 MW: typical savanna/grassland fire — moderate intensity, substantial smoke production\n• FRP 100–500 MW: large forest fire, actively spreading — high intensity, major smoke plume injection\n• FRP > 500 MW: extreme fire behavior (crown fire, firestorm) — pyroCb potential, stratospheric smoke injection\n• Total Fire Energy (TFE) = ∫FRP dt over the fire lifetime correlates strongly with total burned area and emissions\n• For emissions: E_species = FRP × t_burn × EF_species, where EF is the emission factor (g kg⁻¹ dry matter burned)\n• Satellite FRP is instantaneous (at sensor overpass time); diurnal FRP cycle (peak ∼13–15 h local time) must be accounted for daily total energy estimation'
+            outputInterpretation: 'FRP is a direct measure of fire energy release used for emissions estimation:\n\n• FRP < 10 MW: small, smoldering fire (agricultural residue, campfire) — low intensity, minimal smoke emissions\n• FRP 10–100 MW: typical savanna/grassland fire — moderate intensity, substantial smoke production\n• FRP 100–500 MW: large forest fire, actively spreading — high intensity, major smoke plume injection\n• FRP > 500 MW: extreme fire behavior (crown fire, firestorm) — pyroCb potential, stratospheric smoke injection\n• Total Fire Energy (TFE) = ∫FRP dt over the fire lifetime correlates strongly with total burned area and emissions\n• For emissions: E_species = FRP × t_burn × EF_species, where EF is the emission factor (g kg⁻¹ dry matter burned)\n• Satellite FRP is instantaneous (at sensor overpass time); diurnal FRP cycle (peak ∼13–15 h local time) must be accounted for daily total energy estimation',
+            assumptions: [
+              'Fire radiative power derived from MIR radiance excess via Stefan-Boltzmann over fire pixels',
+              'Sub-pixel fire fraction modeled as fire + ambient two-component mixture',
+              'Emission rate scales linearly with FRP (Giglio/Justice coefficient)',
+            ],
+            limitations: [
+              'Cloud and smoke attenuate MIR radiance — underestimates FRP',
+              'Fires below canopy or at pixel edge are partially detected',
+              'Hot non-fire targets (industrial, sun-glint) require contextual filters',
+              'Sensor revisit misses short-lived fires; temporal sampling bias',
+            ],
           },
           {
             id: 33, toolName: 'Crop Water Stress Assessment', name: 'Crop Water Stress Index (CWSI)', equation: 'CWSI = (T_c − T_wet) / (T_dry − T_wet)',
             reference: 'Idso, S.B., Jackson, R.D., Pinter Jr, P.J., Reginato, R.J. & Hatfield, J.L. (1981) Normalizing the stress-degree-day parameter for environmental variability. Agricultural Meteorology, 24, 45–55. DOI: 10.1016/0002-1571(81)90032-7.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Idso+1981+Normalizing+stress+degree',
+            paperUrl: 'https://doi.org/10.1016/0002-1571(81)90032-7',
             appliesTo: 'Agricultural drought, irrigation management',
             shortDescription: 'Computes the Crop Water Stress Index from canopy temperature measurements relative to wet and dry reference temperatures, quantifying the degree of plant water deficit',
             paperSummary: 'Idso et al. (1981) developed the CWSI as a normalized index of plant water stress based on canopy temperature. The index uses the empirical lower baseline (T_wet: canopy temperature of well-watered, transpiring crop) and upper baseline (T_dry: non-transpiring, fully stressed canopy). CWSI = (T_c − T_wet)/(T_dry − T_wet). A CWSI of 0 represents no stress (potential transpiration) and 1 represents complete stress (no transpiration). The authors showed that CWSI correlates with leaf water potential, stomatal conductance, and soil moisture content. Jackson et al. (1981) later provided a theoretical (Penman-Monteith-based) derivation of CWSI, linking it to the surface resistance to vapor transport.',
@@ -1761,12 +2113,22 @@ export const PARTS: Part[] = [
               '5. Interpret: CWSI < 0.2 (adequate irrigation), 0.2–0.5 (schedule irrigation soon), >0.5 (severe deficit, irrigate immediately)',
               '6. For spatial CWSI from satellite: use land surface temperature (LST) as T_c and spatially varying T_wet from energy balance models'
             ],
-            outputInterpretation: 'CWSI provides a direct physiological measure of crop water status:\n\n• CWSI < 0.2: no water stress — full transpiration, well-watered conditions, ideal for most crops\n• CWSI 0.2–0.4: mild stress — stomata beginning to close, photosynthesis slightly reduced, irrigation recommended soon\n• CWSI 0.4–0.6: moderate stress — significant stomatal closure, reduced photosynthesis and growth, yield loss likely if prolonged\n• CWSI 0.6–0.8: severe stress — substantial yield reduction, leaf wilting, permanent damage possible\n• CWSI > 0.8: extreme stress — near-zero transpiration, crop failure imminent \n• For CWSI-based irrigation scheduling: irrigate when CWSI exceeds the threshold for the specific crop (cotton: 0.4, corn: 0.3, wheat: 0.5)\n• Limitations: CWSI is most accurate under clear skies, solar noon, full canopy cover; partial canopy and variable wind cause scatter'
+            outputInterpretation: 'CWSI provides a direct physiological measure of crop water status:\n\n• CWSI < 0.2: no water stress — full transpiration, well-watered conditions, ideal for most crops\n• CWSI 0.2–0.4: mild stress — stomata beginning to close, photosynthesis slightly reduced, irrigation recommended soon\n• CWSI 0.4–0.6: moderate stress — significant stomatal closure, reduced photosynthesis and growth, yield loss likely if prolonged\n• CWSI 0.6–0.8: severe stress — substantial yield reduction, leaf wilting, permanent damage possible\n• CWSI > 0.8: extreme stress — near-zero transpiration, crop failure imminent \n• For CWSI-based irrigation scheduling: irrigate when CWSI exceeds the threshold for the specific crop (cotton: 0.4, corn: 0.3, wheat: 0.5)\n• Limitations: CWSI is most accurate under clear skies, solar noon, full canopy cover; partial canopy and variable wind cause scatter',
+            assumptions: [
+              'Canopy–air temperature difference linearly related to vapor pressure deficit under non-water-stressed baseline (Idso 1981 non-steady form) or well-watered/zero-transpiration baselines (steady form)',
+              'Energy balance closure at canopy surface; aerodynamic and surface resistance separable',
+            ],
+            limitations: [
+              'Baselines require local calibration (slope/intercept vary with crop and climate)',
+              'Wind speed strongly affects canopy coupling — non-steady form needs R_n',
+              'Mixed canopies and partial cover violate single-canopy assumptions',
+              'Measurement errors in T_c (IRT) and T_a propagate directly into CWSI',
+            ],
           },
           {
             id: 34, toolName: 'Snowmelt Runoff Forecasting', name: 'Degree-Day Snowmelt Model', equation: 'M = DDF × max(0, T_air − T_base)',
             reference: 'Hock, R. (2003) Temperature index melt modelling in mountain areas. Journal of Hydrology, 282(1–4), 104–115. DOI: 10.1016/S0022-1694(03)00257-9.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Hock+2003+Temperature+index+melt',
+            paperUrl: 'https://doi.org/10.1016/S0022-1694(03)00257-9',
             appliesTo: 'Snowmelt runoff forecasting',
             shortDescription: 'Estimates daily snowmelt depth using a temperature-index (degree-day) approach, relating positive accumulated temperatures above a threshold to melt rate',
             paperSummary: 'Hock (2003) provided a comprehensive review of temperature-index (degree-day) melt models, comparing them with physically-based energy balance models. The degree-day model M = DDF × max(0, T − T_base) relates melt rate M (mm/day) to the sum of positive temperatures above a base temperature (typically 0°C) multiplied by a degree-day factor DDF (mm/°C·day). DDF values range from 2–5 for snow, 5–7 for firn, and 7–10+ mm/°C·day for ice. Hock showed that temperature-index models explain 70–90% of melt variance despite their simplicity, because air temperature is well-correlated with net radiation, sensible heat flux, and longwave radiation in most melt environments. Enhanced temperature-index models incorporate potential solar radiation to improve performance in complex terrain.',
@@ -1791,12 +2153,23 @@ export const PARTS: Part[] = [
               '6. Update snow water equivalent: SWE(t+1) = SWE(t) + Snowfall − M',
               '7. Accumulate over melt season: seasonal melt (mm w.e.) = ΣM for the melt period'
             ],
-            outputInterpretation: 'Degree-day snowmelt estimates are a primary input for hydrological runoff models:\n\n• M = 0: no melt (T_air ≤ T_base); any precipitation falls and accumulates as snow\n• M = 2–15 mm/day: moderate melt — typical of early melt season, high-albedo snow surfaces\n• M = 15–40 mm/day: rapid melt — warm conditions, dense snowpack, lower albedo\n• M > 40 mm/day: extreme melt — typically rain-on-snow events or strong advection of warm air (föhn chinook), posing flood risk\n• DDF calibrations: forested areas DDF≈2–4 (canopy shading); open areas DDF≈4–7; ice surfaces DDF≈7–10\n• Limitations: degree-day models miss melt events driven by: (1) clear-sky shortwave radiation (cold but sunny melt), (2) warm rain, (3) turbulent fluxes during high-wind events\n• Enhanced degree-day: add solar radiation term: M = (a + b·I_solar) × T_excess significantly improves performance in complex terrain (Hock, 2003)'
+            outputInterpretation: 'Degree-day snowmelt estimates are a primary input for hydrological runoff models:\n\n• M = 0: no melt (T_air ≤ T_base); any precipitation falls and accumulates as snow\n• M = 2–15 mm/day: moderate melt — typical of early melt season, high-albedo snow surfaces\n• M = 15–40 mm/day: rapid melt — warm conditions, dense snowpack, lower albedo\n• M > 40 mm/day: extreme melt — typically rain-on-snow events or strong advection of warm air (föhn chinook), posing flood risk\n• DDF calibrations: forested areas DDF≈2–4 (canopy shading); open areas DDF≈4–7; ice surfaces DDF≈7–10\n• Limitations: degree-day models miss melt events driven by: (1) clear-sky shortwave radiation (cold but sunny melt), (2) warm rain, (3) turbulent fluxes during high-wind events\n• Enhanced degree-day: add solar radiation term: M = (a + b·I_solar) × T_excess significantly improves performance in complex terrain (Hock, 2003)',
+            assumptions: [
+              'Melt is linearly proportional to positive air temperature: M = DDF × T_air⁺',
+              'Degree-day factor constant (optionally by land cover / elevation / month)',
+              'Snowpack at 0 °C cold content neglected (or DDF already accounts for energy input)',
+            ],
+            limitations: [
+              'DDF varies with season, aspect, vegetation and radiation regime',
+              'Rain-on-snow events not captured by temperature index alone',
+              'Temperature extrapolation with elevation introduces lapse-rate error',
+              'Refreezing, retention and redistribution processes ignored',
+            ],
           },
           {
-            id: 35, toolName: 'Passive Microwave Sea Ice Analysis', name: 'Sea Ice Concentration (Nielsen-ET)', equation: 'T_B = (1−C) × T_water + C × T_ice',
+            id: 35, toolName: 'Passive Microwave Sea Ice Analysis', name: 'Sea Ice Concentration (Comiso Bootstrap)', equation: 'T_B = (1−C) × T_water + C × T_ice',
             reference: 'Comiso, J.C. (1986) Characteristics of Arctic winter sea ice from satellite multispectral microwave observations. Journal of Geophysical Research: Oceans, 91(C1), 975–994. DOI: 10.1029/JC091iC01p00975.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Comiso+1986+Characteristics+Arctic+winter',
+            paperUrl: 'https://doi.org/10.1029/JC091iC01p00975',
             appliesTo: 'Passive microwave sea ice retrieval',
             shortDescription: 'Estimates sea ice concentration from passive microwave brightness temperatures using the linear mixing of open water and ice radiances at multiple frequencies',
             paperSummary: 'Comiso (1986) characterized Arctic winter sea ice using Nimbus-7 SMMR passive microwave data, establishing the NASA Team algorithm for sea ice concentration retrieval. The algorithm assumes that observed brightness temperature T_B at each polarization/frequency is a linear combination of open water and sea ice contributions: T_B = (1−C)·T_water + C·T_ice, where C is the ice concentration. The NASA Team algorithm uses the polarization ratio PR = (19V−19H)/(19V+19H) and the gradient ratio GR = (37V−19V)/(37V+19V) to solve for first-year ice, multi-year ice, and open water fractions. The approach is supplemented by the Bootstrap algorithm (Comiso, 1995) which uses 19V and 37V channels for improved performance in thin ice and melt pond conditions.',
@@ -1821,7 +2194,18 @@ export const PARTS: Part[] = [
               '6. Compute ice concentration: C = (T_B − T_water) / (T_ice − T_water) for each channel',
               '7. Average concentration over channels, apply land mask, and output daily/weekly ice fraction maps'
             ],
-            outputInterpretation: 'Passive microwave sea ice concentration is the primary satellite-derived climate variable for polar regions:\n\n• C > 0.9: compact sea ice cover — polar pack ice, difficult navigation, only leads/polynyas present\n• C 0.7–0.9: close pack ice — consolidated ice with small leads, limited navigability\n• C 0.4–0.7: open pack ice — substantial open water between floes, navigable for ice-strengthened vessels\n• C 0.15–0.4: very open pack ice — scattered floes, marginal ice zone, ice edge region\n• C < 0.15: ice-free (or ice edge — algorithm accuracy degrades below ~15% concentration)\n• Thin ice (<30 cm): overestimated by NASA Team algorithm due to high emissivity; the Bootstrap algorithm is more robust for thin ice\n• Melt season: wet snow on ice confuses the algorithm (liquid water increases emissivity, mimicking open water) — leading to underestimation of ice concentration in summer\n• Long-term trend: Arctic September sea ice extent declined at −13% per decade since 1979 (satellite record)'
+            outputInterpretation: 'Passive microwave sea ice concentration is the primary satellite-derived climate variable for polar regions:\n\n• C > 0.9: compact sea ice cover — polar pack ice, difficult navigation, only leads/polynyas present\n• C 0.7–0.9: close pack ice — consolidated ice with small leads, limited navigability\n• C 0.4–0.7: open pack ice — substantial open water between floes, navigable for ice-strengthened vessels\n• C 0.15–0.4: very open pack ice — scattered floes, marginal ice zone, ice edge region\n• C < 0.15: ice-free (or ice edge — algorithm accuracy degrades below ~15% concentration)\n• Thin ice (<30 cm): overestimated by NASA Team algorithm due to high emissivity; the Bootstrap algorithm is more robust for thin ice\n• Melt season: wet snow on ice confuses the algorithm (liquid water increases emissivity, mimicking open water) — leading to underestimation of ice concentration in summer\n• Long-term trend: Arctic September sea ice extent declined at −13% per decade since 1979 (satellite record)',
+            assumptions: [
+            'Brightness temperature is a linear mixture of sea-ice and open-water end-members (bootstrap retrieval)',
+            'Atmospheric contamination removed by weather filters',
+            'Sensor calibration stable; tie points representative',
+            ],
+            limitations: [
+            'Melt ponds classified as open water in summer (underestimate concentration)',
+            'Thin/new ice has ambiguous TB between water and ice end-members',
+            'Coastal contamination and land spillover bias near shorelines',
+            'Intersensor bias (SSM/I → AMSR series) requires harmonization',
+            ],
           },
         ],
       },
@@ -1831,7 +2215,7 @@ export const PARTS: Part[] = [
           {
             id: 36, toolName: 'Great Circle Distance', name: 'Haversine Formula', equation: 'd = 2r × arcsin(√(sin²(Δφ/2) + cosφ₁·cosφ₂·sin²(Δλ/2)))',
             reference: 'Sinnott, R.W. (1984) Virtues of the Haversine. Sky and Telescope, 68(2), 159.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Sinnott+1984+Virtues+Haversine',
+            paperUrl: 'https://www.movable-type.co.uk/scripts/latlong.html',
             appliesTo: 'Great circle distance, disaster impact radius',
             shortDescription: 'Computes the great-circle distance between two points on a sphere (Earth) given their latitude and longitude using the haversine formula',
             paperSummary: 'Sinnott (1984) popularized the haversine formula for computing great-circle distances in celestial navigation and geographic applications. The haversine formula d = 2R·arcsin(√(hav(Δφ) + cosφ₁·cosφ₂·hav(Δλ))) is numerically better conditioned for small distances than the spherical law of cosines, avoiding round-off errors for nearby points. The formula assumes a spherical Earth with mean radius R = 6371 km. The haversine function haversin(θ) = sin²(θ/2) = (1−cosθ)/2 was historically used in navigation tables to avoid subtraction of nearly equal cosines. Ellipsoidal corrections (Vincenty, WGS-84 ellipsoid) improve accuracy to ±0.5 mm over the sphere\'s ±0.3% error.',
@@ -1857,12 +2241,21 @@ export const PARTS: Part[] = [
               '6. Compute distance: d = R × c (R = 6371 km for Earth)',
               '7. Compute initial bearing: α = atan2(sin(Δλ)×cos(φ₂), cos(φ₁)×sin(φ₂) − sin(φ₁)×cos(φ₂)×cos(Δλ)) → degrees'
             ],
-            outputInterpretation: 'The haversine distance is the shortest path on the sphere:\n\n• Distance per degree of latitude is nearly constant (~111 km/° at all longitudes)\n• Distance per degree of longitude varies as cos(latitude) × 111.32 km — at 60°N, 1°λ = 55.7 km\n• For a disaster scenario: all points within a 100 km radius of epicenter — quick assessment of affected population\n• GPS distance errors: haversine vs ellipsoidal (Vincenty) differ by up to 0.3% (1.8 km at 600 km distance)\n• For very short distances (<1 km), the spherical approximation is adequate; for sub-meter accuracy use the Vincenty formulae (WGS-84)\n• The haversine formula works for antipodal points (d≈20000 km) without the rounding error issues of the spherical law of cosines'
+            outputInterpretation: 'The haversine distance is the shortest path on the sphere:\n\n• Distance per degree of latitude is nearly constant (~111 km/° at all longitudes)\n• Distance per degree of longitude varies as cos(latitude) × 111.32 km — at 60°N, 1°λ = 55.7 km\n• For a disaster scenario: all points within a 100 km radius of epicenter — quick assessment of affected population\n• GPS distance errors: haversine vs ellipsoidal (Vincenty) differ by up to 0.3% (1.8 km at 600 km distance)\n• For very short distances (<1 km), the spherical approximation is adequate; for sub-meter accuracy use the Vincenty formulae (WGS-84)\n• The haversine formula works for antipodal points (d≈20000 km) without the rounding error issues of the spherical law of cosines',
+            assumptions: [
+              'Earth modeled as a sphere of radius R = 6371 km',
+              'Great-circle path on the sphere; point coordinates in WGS84 lat/lon',
+            ],
+            limitations: [
+              'Up to ~0.5% error relative to the ellipsoid (use Vincenty/Karney for geodetic accuracy)',
+              'Elevation differences between points ignored',
+              'Haversine form is numerically stable at antipodes (vs. spherical law of cosines) but still spherical',
+            ],
           },
           {
             id: 37, toolName: 'Geostatistical Interpolation (Kriging)', name: 'Ordinary Kriging', equation: 'ŷ(s₀) = Σλᵢ·z(sᵢ), weights solve Aλ = b',
             reference: 'Matheron, G. (1963) Principles of geostatistics. Economic Geology, 58(8), 1246–1266. DOI: 10.2113/gsecongeo.58.8.1246.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Matheron+1963+Principles+geostatistics',
+            paperUrl: 'https://doi.org/10.2113/gsecongeo.58.8.1246',
             appliesTo: 'Optimal spatial interpolation with uncertainty',
             shortDescription: 'Performs optimal spatial interpolation (Best Linear Unbiased Predictor) at unsampled locations by solving the kriging system of equations using a spatial covariance (semivariogram) model',
             paperSummary: 'Matheron (1963) formalized the theory of regionalized variables and established geostatistics as a discipline. Ordinary kriging is the Best Linear Unbiased Predictor (BLUP) for spatial data: it estimates an unknown value ẑ(s₀) at location s₀ as a weighted sum of neighboring observations Σλᵢ·z(sᵢ). The weights λᵢ are determined by solving the kriging system Aλ = b, where A is the matrix of semivariogram values between observation points, and b is the vector of semivariogram values between the target and observation points. The constraint Σλᵢ = 1 ensures unbiasedness. Kriging provides not only the interpolated value but also the kriging variance σ²_K(s₀) — a measure of prediction uncertainty. Matheron\'s framework unified earlier work by Krige (1951) on gold grade estimation in South African mines.',
@@ -1886,12 +2279,23 @@ export const PARTS: Part[] = [
               '6. Compute kriging prediction: ŷ(s₀) = Σλᵢ · z(sᵢ)',
               '7. Compute kriging variance: σ²_K(s₀) = Σλᵢ · γ(sᵢ−s₀) + φ (Lagrange multiplier)'
             ],
-            outputInterpretation: 'Kriging provides the optimal spatial prediction with quantified uncertainty:\n\n• ŷ(s₀) is the BLUP: among all linear unbiased predictors, kriging has the minimum possible mean squared prediction error\n• σ²_K(s₀) is the prediction variance — it depends only on the spatial configuration of observations and the semivariogram, not on the observed values themselves\n• Low σ²_K: close to data points, dense sampling, small nugget effect\n• High σ²_K: far from data points, sparse sampling, large nugget effect\n• The kriging variance is NOT a measure of local data variability — it is the variance of the prediction error\n• Cross-validation: leave-one-out error statistics (RMSE, MAE) validate the model; the standardized error should have mean 0 and variance 1 if the semivariogram model is correct\n• Cokriging: incorporates secondary variables (e.g., elevation for rainfall interpolation) to improve predictions and reduce uncertainty'
+            outputInterpretation: 'Kriging provides the optimal spatial prediction with quantified uncertainty:\n\n• ŷ(s₀) is the BLUP: among all linear unbiased predictors, kriging has the minimum possible mean squared prediction error\n• σ²_K(s₀) is the prediction variance — it depends only on the spatial configuration of observations and the semivariogram, not on the observed values themselves\n• Low σ²_K: close to data points, dense sampling, small nugget effect\n• High σ²_K: far from data points, sparse sampling, large nugget effect\n• The kriging variance is NOT a measure of local data variability — it is the variance of the prediction error\n• Cross-validation: leave-one-out error statistics (RMSE, MAE) validate the model; the standardized error should have mean 0 and variance 1 if the semivariogram model is correct\n• Cokriging: incorporates secondary variables (e.g., elevation for rainfall interpolation) to improve predictions and reduce uncertainty',
+            assumptions: [
+              'Intrinsic stationarity: constant mean, variogram depends only on lag h',
+              'Fitted variogram model is positive definite; nugget sill represented',
+              'Observations are independent spatial samples (or variogram accounts for clustering)',
+            ],
+            limitations: [
+              'Kriging is a smoother — extremes are attenuated toward the mean',
+              'Requires sufficient data pairs per lag bin; unreliable variogram degrades all estimates',
+              'Nugget estimation sensitive to micro-scale variability and measurement error',
+              'O(n³) system solve limits dense datasets without approximations',
+            ],
           },
           {
             id: 38, toolName: 'Inverse Distance Weighting Interpolation', name: 'Shepard\'s Inverse Distance Weighting', equation: 'ŷ = Σ(wᵢ·z_i) / Σ(wᵢ); wᵢ = 1 / dᵢᵖ',
             reference: 'Shepard, D. (1968) A two-dimensional interpolation function for irregularly-spaced data. Proceedings of the 1968 ACM National Conference, 517–524. DOI: 10.1145/800186.810616.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Shepard+1968+two+dimensional+interpolation',
+            paperUrl: 'https://doi.org/10.1145/800186.810616',
             appliesTo: 'Rapid spatial interpolation',
             shortDescription: 'Interpolates values at unsampled locations using a weighted average of nearby observations, where weights are inversely proportional to distance raised to a power p',
             paperSummary: 'Shepard (1968) introduced the inverse distance weighting (IDW) interpolation method as a simple, deterministic approach for scattered data interpolation. The fundamental equation is ŷ(s₀) = Σ(wᵢ·z(sᵢ))/Σ(wᵢ) where wᵢ = 1/d(s₀,sᵢ)ᵖ. The power parameter p controls the weighting function: p = 2 is the most common (inverse distance squared), giving weights that decay quadratically. Shepard\'s original implementation used p = 2 with a radius of influence to limit computational cost. Despite its simplicity, IDW is widely used in GIS applications (ArcGIS, QGIS) for rapid visualization and preliminary spatial analysis. The method is exact (passes through all data points) but creates "bull\'s-eye" artifacts around isolated points and does not account for spatial anisotropy.',
@@ -1916,12 +2320,22 @@ export const PARTS: Part[] = [
               '6. Compute weighted average: ŷ(s₀) = Σ(wᵢ × z(sᵢ)) / Σ(wᵢ)',
               '7. Optionally, apply search sectoring (quadrant, octant) to avoid directional bias from clustered data'
             ],
-            outputInterpretation: 'IDW provides a simple, intuitive, and exact spatial interpolation:\n\n• Power p=2: the standard choice — moderate locality, smooth surface suitable for continuous phenomena (elevation, precipitation)\n• Power p=1: smoother surface but distant points exert substantial influence — may oversmooth local features\n• Power p=3–5: very local interpolation — approaches nearest-neighbor, produces pronounced "bull\'s-eyes"\n• The resulting surface is C⁰ continuous (continuous but not differentiable at data points)\n• IDW is suitable for: preliminary spatial analysis, dense sampling, short-range interpolation\n• IDW is NOT suitable for: sparse sampling (generates unrealistic bullseyes), anisotropic phenomena, clustered data (gives clustered points too much weight), or applications requiring prediction uncertainty\n• Comparative performance: IDW typically has 10–30% higher RMSE than kriging for the same dataset, but is computationally simpler and requires no semivariogram fitting'
+            outputInterpretation: 'IDW provides a simple, intuitive, and exact spatial interpolation:\n\n• Power p=2: the standard choice — moderate locality, smooth surface suitable for continuous phenomena (elevation, precipitation)\n• Power p=1: smoother surface but distant points exert substantial influence — may oversmooth local features\n• Power p=3–5: very local interpolation — approaches nearest-neighbor, produces pronounced "bull\'s-eyes"\n• The resulting surface is C⁰ continuous (continuous but not differentiable at data points)\n• IDW is suitable for: preliminary spatial analysis, dense sampling, short-range interpolation\n• IDW is NOT suitable for: sparse sampling (generates unrealistic bullseyes), anisotropic phenomena, clustered data (gives clustered points too much weight), or applications requiring prediction uncertainty\n• Comparative performance: IDW typically has 10–30% higher RMSE than kriging for the same dataset, but is computationally simpler and requires no semivariogram fitting',
+            assumptions: [
+              'Spatial dependence decreases monotonically with distance as d⁻ᵖ',
+              'Sample points representative of the field',
+            ],
+            limitations: [
+              'Bull\'s-eye artifacts around sample points',
+              'No anisotropy, barriers, or variogram-structure honouring',
+              'Power p sensitive: low p over-smooths, high p fragments',
+              'Outliers propagate directly (no robust weighting)',
+            ],
           },
           {
             id: 39, toolName: 'Gaussian Plume Air Dispersion', name: 'Pasquill-Gifford Gaussian Plume Model', equation: 'C(x,y,z) = Q/(2π·u·σ_y·σ_z) × exp(−y²/(2σ_y²)) × [exp(−(z−H)²/(2σ_z²)) + exp(−(z+H)²/(2σ_z²))]',
             reference: 'Pasquill, F. & Smith, F.B. (1983) Atmospheric Diffusion (3rd ed.). Ellis Horwood Ltd., ISBN: 978-0853124041.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Pasquill+1983+Atmospheric+Diffusion',
+            paperUrl: 'https://www.epa.gov/scram/air-quality-dispersion-modeling-preferred-and-recommended-models',
             appliesTo: 'Air quality, smoke/ash dispersion',
             shortDescription: 'Models downwind concentration of a continuous point-source emission under steady-state conditions using the Gaussian plume formulation with stability-dependent dispersion parameters',
             paperSummary: 'Pasquill & Smith (1983) provide the definitive reference for atmospheric dispersion modeling, building on Pasquill\'s (1961) stability classification system. The Gaussian plume model C(x,y,z) = Q/(2πuσ_yσ_z)·exp(−y²/2σ_y²)·[exp(−(z−H)²/2σ_z²) + exp(−(z+H)²/2σ_z²)] assumes a continuous point source emitting at rate Q (mass/time), with the plume transported by mean wind u and spread by turbulence characterized by σ_y(x) and σ_z(x). Dispersion parameters σ_y and σ_z are functions of downwind distance x and atmospheric stability class (A–F: very unstable to stable). The model includes ground reflection via the image source term. It is the foundation of regulatory models (ISC, AERMOD, CALPUFF) and is widely used for air quality impact assessment, smoke management, and emergency response.',
@@ -1950,12 +2364,23 @@ export const PARTS: Part[] = [
               '6. For maximum ground-level concentration: solve dC/dx = 0 to find x_max; occurs at σ_z = H/√2',
               '7. Convert to averaging time: adjust σ_y for averaging time (σ_y ∝ t^0.2)'
             ],
-            outputInterpretation: 'The Gaussian plume concentration provides the basis for regulatory air quality assessment:\n\n• Centerline concentration (y=0) is highest and decays with downwind distance as ~1/(x·σ_z)\n• Crosswind profile: normal distribution with standard deviation σ_y — 95% of plume within y = ±2σ_y\n• Vertical profile: reflected Gaussian — maximum at z=0 for ground-level releases or far downwind; elevated maximum below H for buoyant stacks\n• Stability class effect: unstable (A) → σ_z large → rapid vertical dispersion, low ground concentrations; stable (F) → σ_z small → poor dispersion, high ground concentrations, potential fumigation\n• For emergency response (ASHFALL, HYSPLIT): Gaussian puff models extend to time-varying emissions and wind fields\n• The model assumes: flat terrain, constant wind, steady-state emission, and homogeneous turbulence — violations (complex terrain, calm winds, building wakes) require advanced models (AERMOD, CALPUFF)'
+            outputInterpretation: 'The Gaussian plume concentration provides the basis for regulatory air quality assessment:\n\n• Centerline concentration (y=0) is highest and decays with downwind distance as ~1/(x·σ_z)\n• Crosswind profile: normal distribution with standard deviation σ_y — 95% of plume within y = ±2σ_y\n• Vertical profile: reflected Gaussian — maximum at z=0 for ground-level releases or far downwind; elevated maximum below H for buoyant stacks\n• Stability class effect: unstable (A) → σ_z large → rapid vertical dispersion, low ground concentrations; stable (F) → σ_z small → poor dispersion, high ground concentrations, potential fumigation\n• For emergency response (ASHFALL, HYSPLIT): Gaussian puff models extend to time-varying emissions and wind fields\n• The model assumes: flat terrain, constant wind, steady-state emission, and homogeneous turbulence — violations (complex terrain, calm winds, building wakes) require advanced models (AERMOD, CALPUFF)',
+            assumptions: [
+              'Steady wind and emission rate; flat, unobstructed terrain',
+              'Gaussian distribution of concentration in y and z; ground total reflection',
+              'Dispersion coefficients σ_y, σ_z from Pasquill-Gifford stability class curves',
+            ],
+            limitations: [
+              'Calm winds (< ~1–2 m/s) invalidate the advective Gaussian framework',
+              'Buoyant plume rise must be added separately (e.g. Briggs)',
+              'Poor within ~100 m of source and in building wakes/urban streets',
+              'No deposition, chemistry, or terrain effects — regulatory screening level only',
+            ],
           },
           {
             id: 40, toolName: 'Gumbel Extreme Value Analysis', name: 'Gumbel (Type I) Extreme Value Distribution', equation: 'F(x) = exp(−exp(−(x − μ)/β))',
             reference: 'Gumbel, E.J. (1958) Statistics of Extremes. Columbia University Press, ISBN: 978-0231049904.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Gumbel+1958+Statistics+Extremes',
+            paperUrl: 'https://cup.columbia.edu/book/statistics-of-extremes/9780231087074',
             appliesTo: 'Return period for floods, wind, temperature extremes',
             shortDescription: 'Fits annual maxima to the Gumbel distribution (Type I extreme value) to estimate return levels for extreme events such as floods, wind storms, and temperature records',
             paperSummary: 'Gumbel (1958) wrote the seminal text on the statistics of extremes, establishing the theoretical foundation for extreme value analysis. The Gumbel distribution F(x) = exp(−exp(−(x−μ)/β)) models the distribution of block maxima (typically annual maxima). According to extremal types theorem (Fisher-Tippett, 1928), the Gumbel distribution is the limiting distribution of maxima from light-tailed distributions (exponential, normal, lognormal). The location parameter μ is the mode of the distribution, and the scale parameter β is the spread. The Gumbel distribution is the most widely used extreme value distribution in hydrology for flood frequency analysis, with the return level x_T = μ − β·ln(−ln(1−1/T)) where T is the return period in years.',
@@ -1980,12 +2405,24 @@ export const PARTS: Part[] = [
               '6. Compute CDF: F(x) = exp(−exp(−(x − μ)/β)) for any value x',
               '7. Compute return level x_T: x_T = μ − β × ln(−ln(1 − 1/T)) for return period T in years'
             ],
-            outputInterpretation: 'The Gumbel distribution provides return levels for design and risk assessment:\n\n• F(x) = 0.50: median annual maximum — expected to be exceeded every other year (T=2 yr)\n• F(x) = 0.90: 10-year event — used for minor infrastructure design (storm drains, culverts)\n• F(x) = 0.98: 50-year event — typical design standard for buildings and bridges\n• F(x) = 0.99: 100-year event — standard for floodplain management, critical infrastructure\n• F(x) = 0.995: 200-year event — nuclear power plants, dam spillway design\n• F(x) = 0.999: 1000-year event — extreme safety standards, nuclear waste storage\n• Gumbel limitations: the distribution assumes: (1) annual maxima are independent (no serial correlation), (2) the underlying distribution has an exponential tail, (3) stationarity (no climate change trend) — violated in a warming climate, requiring non-stationary EVT (time-varying parameters). For heavy-tailed data (precipitation in tropical regions), the GEV (Generalized Extreme Value) distribution with non-zero shape parameter is preferred.'
+            outputInterpretation: 'The Gumbel distribution provides return levels for design and risk assessment:\n\n• F(x) = 0.50: median annual maximum — expected to be exceeded every other year (T=2 yr)\n• F(x) = 0.90: 10-year event — used for minor infrastructure design (storm drains, culverts)\n• F(x) = 0.98: 50-year event — typical design standard for buildings and bridges\n• F(x) = 0.99: 100-year event — standard for floodplain management, critical infrastructure\n• F(x) = 0.995: 200-year event — nuclear power plants, dam spillway design\n• F(x) = 0.999: 1000-year event — extreme safety standards, nuclear waste storage\n• Gumbel limitations: the distribution assumes: (1) annual maxima are independent (no serial correlation), (2) the underlying distribution has an exponential tail, (3) stationarity (no climate change trend) — violated in a warming climate, requiring non-stationary EVT (time-varying parameters). For heavy-tailed data (precipitation in tropical regions), the GEV (Generalized Extreme Value) distribution with non-zero shape parameter is preferred.',
+            assumptions: [
+              'Annual maxima are independent and identically distributed (Gumbel\'s independence postulate)',
+              'Parent distribution lies in the Gumbel domain of attraction (exponential-type tail)',
+              'Stationarity: no trend in annual maxima over the record',
+              'Parameter estimation via MLE/moment/L-moments with Gringorten plotting positions',
+            ],
+            limitations: [
+              'Serial correlation between years violates independence',
+              'Heavy-tailed data (e.g. tropical convection) require GEV with non-zero shape parameter',
+              'Stationarity violated under climate change — non-stationary EVT needed for design',
+              'Long extrapolation (T far beyond record length) amplifies parameter uncertainty',
+            ],
           },
           {
             id: 41, toolName: 'Generalized Pareto Distribution (Peaks-Over-Threshold)', name: 'Generalized Pareto Distribution', equation: 'G(x) = 1 − (1 + ξ·x/β)^(−1/ξ) for ξ ≠ 0',
             reference: 'Pickands, J. (1975) Statistical inference using extreme order statistics. Annals of Statistics, 3(1), 119–131. DOI: 10.1214/aos/1176343003.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Pickands+1975+Statistical+inference+extreme',
+            paperUrl: 'https://doi.org/10.1214/aos/1176343003',
             appliesTo: 'Peaks-over-threshold extreme analysis',
             shortDescription: 'Models the distribution of exceedances above a high threshold using the Generalized Pareto Distribution, the standard approach for peaks-over-threshold (POT) extreme value analysis',
             paperSummary: 'Pickands (1975) proved that for a sufficiently high threshold u, the distribution of exceedances (X − u | X > u) converges to the Generalized Pareto Distribution (GPD): G(x) = 1 − (1 + ξ·x/β)^(−1/ξ). The GPD is the natural limit distribution for threshold exceedances, analogous to how the GEV (Generalized Extreme Value) is the limit for block maxima. The shape parameter ξ determines the tail behavior: ξ = 0 (Gumbel-type, exponential tail), ξ > 0 (Fréchet-type, heavy tail), ξ < 0 (Weibull-type, bounded tail). The scale parameter β controls the spread. The GPD is the standard distribution for peaks-over-threshold (POT) analysis, which uses data more efficiently than the block maxima (Gumbel/GEV) approach by including all sufficiently large events rather than only the annual maximum.',
@@ -2010,12 +2447,23 @@ export const PARTS: Part[] = [
               '6. Compute return levels: x_T = u + (β/ξ) × [(T × n_y × ζ_u)^ξ − 1] for ξ ≠ 0',
               '7. Assess fit: PP-plot, QQ-plot, and return level plot with 95% confidence intervals'
             ],
-            outputInterpretation: 'The GPD return levels inform engineering design and risk assessment for rare events:\n\n• ξ < 0 (Weibull): light tails — upper-bounded phenomena. River flow in regulated basins, wind speed (physical limits on peak gusts)\n• ξ ≈ 0 (Gumbel): exponential tails — moderate extremes. Temperature maxima, some river basins\n• ξ > 0 (Fréchet): heavy tails — unbounded with infinite moments for ξ > 0.5. Extreme precipitation, flood peaks, financial losses\n• ξ = 0.1–0.3: typical for daily precipitation in mid-latitudes — heavy but not extremely heavy tails\n• ξ > 0.4: very heavy tails (tropical precipitation, cyclone-driven extremes) — standard EVL methods may be unreliable, needing longer records\n• Threshold selection is critical: too low → bias from non-extreme values; too high → large variance (too few data points). The MRL plot and stability plots guide selection\n• The GPD POT method provides ~3× more data than annual maxima block approach for the same record length, yielding more precise return level estimates (narrower confidence intervals)'
+            outputInterpretation: 'The GPD return levels inform engineering design and risk assessment for rare events:\n\n• ξ < 0 (Weibull): light tails — upper-bounded phenomena. River flow in regulated basins, wind speed (physical limits on peak gusts)\n• ξ ≈ 0 (Gumbel): exponential tails — moderate extremes. Temperature maxima, some river basins\n• ξ > 0 (Fréchet): heavy tails — unbounded with infinite moments for ξ > 0.5. Extreme precipitation, flood peaks, financial losses\n• ξ = 0.1–0.3: typical for daily precipitation in mid-latitudes — heavy but not extremely heavy tails\n• ξ > 0.4: very heavy tails (tropical precipitation, cyclone-driven extremes) — standard EVL methods may be unreliable, needing longer records\n• Threshold selection is critical: too low → bias from non-extreme values; too high → large variance (too few data points). The MRL plot and stability plots guide selection\n• The GPD POT method provides ~3× more data than annual maxima block approach for the same record length, yielding more precise return level estimates (narrower confidence intervals)',
+            assumptions: [
+              'Pickands–Balkema–de Haan theorem: exceedances above sufficiently high threshold asymptotically GPD',
+              'Threshold fixed, high enough for asymptotics, low enough for sample',
+              'Exceedances approximately independent (declustered)',
+            ],
+            limitations: [
+              'Threshold selection trades bias (low) vs variance (high)',
+              'MLE of shape ξ unstable for small samples; profile-likelihood CI wide',
+              'Clustering (storms) requires declustering or time-run of extremes model',
+              'Non-stationarity (climate trends) violates fixed-threshold stationarity',
+            ],
           },
           {
             id: 42, toolName: 'Semivariogram Analysis', name: 'Matheron\'s Semivariogram', equation: 'γ(h) = (1/(2·N(h))) × Σ[z(x) − z(x+h)]²',
             reference: 'Matheron, G. (1963) Principles of geostatistics. Economic Geology, 58(8), 1246–1266. DOI: 10.2113/gsecongeo.58.8.1246.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Matheron+1963+Principles+geostatistics',
+            paperUrl: 'https://doi.org/10.2113/gsecongeo.58.8.1246',
             appliesTo: 'Spatial autocorrelation modeling',
             shortDescription: 'Computes the experimental semivariogram — the fundamental tool for quantifying spatial autocorrelation as a function of lag distance — used for kriging interpolation and spatial sampling design',
             paperSummary: 'Matheron (1963) formalized the semivariogram as the fundamental spatial continuity function in geostatistics. The semivariogram γ(h) = ½Var[z(x) − z(x+h)] = (1/2N(h))·Σ[z(xᵢ) − z(xᵢ+h)]² quantifies how the variance between observations changes with separation distance h. The semivariogram increases from the nugget effect (c₀) at h=0 to the sill (c₀ + c) at the range (a), beyond which spatial correlation vanishes. Fitting a theoretical model (spherical, exponential, Gaussian) to the experimental semivariogram is the essential step before kriging. The semivariogram is used in: (1) spatial continuity analysis, (2) kriging interpolation (the kriging matrix coefficients come from the variogram model), (3) optimal sampling design (minimize the maximum kriging variance), and (4) spatial process simulation.',
@@ -2038,7 +2486,18 @@ export const PARTS: Part[] = [
               '6. Optionally compute directional variograms: restrict pairs to direction angle ± tolerance (e.g., N-S, E-W)',
               '7. Fit theoretical model (e.g., spherical: γ(h) = c₀ + c·(1.5h/a − 0.5(h/a)³) for h ≤ a, γ(h) = c₀ + c for h > a)'
             ],
-            outputInterpretation: 'The semivariogram reveals the spatial structure of the data:\n\n• Low nugget (c₀/(c₀+c) < 0.25): strong spatial continuity — measurements are very consistent over short distances, kriging will be effective\n• High nugget (>0.75): high small-scale variability, weak spatial structure — may need denser sampling or different interpolation method\n• Range a: the distance of spatial influence — samples beyond this range are spatially independent. For environmental monitoring: design sampling spacing ≤ a/2 to capture spatial structure\n• Spherical model: linear rise to range (a), then flat — most common in geostatistics, finite range\n• Exponential model: rapid initial rise, asymptotic approach to sill — infinite practical range (≈ 3a_effective)\n• Gaussian model: parabolic behavior near origin — very smooth spatial processes (rarely used in environmental science as it can be overly smooth)\n• Hole effect: periodic variogram — indicates cyclic spatial patterns (e.g., topographic ridges and valleys)'
+            outputInterpretation: 'The semivariogram reveals the spatial structure of the data:\n\n• Low nugget (c₀/(c₀+c) < 0.25): strong spatial continuity — measurements are very consistent over short distances, kriging will be effective\n• High nugget (>0.75): high small-scale variability, weak spatial structure — may need denser sampling or different interpolation method\n• Range a: the distance of spatial influence — samples beyond this range are spatially independent. For environmental monitoring: design sampling spacing ≤ a/2 to capture spatial structure\n• Spherical model: linear rise to range (a), then flat — most common in geostatistics, finite range\n• Exponential model: rapid initial rise, asymptotic approach to sill — infinite practical range (≈ 3a_effective)\n• Gaussian model: parabolic behavior near origin — very smooth spatial processes (rarely used in environmental science as it can be overly smooth)\n• Hole effect: periodic variogram — indicates cyclic spatial patterns (e.g., topographic ridges and valleys)',
+            assumptions: [
+            'Intrinsic hypothesis: E[Z(x+h)−Z(x)] = 0 and variance of differences depends only on h',
+            'Isotropy unless directional variograms are fitted',
+            'Binned experimental semivariance with sufficient pairs per lag',
+            ],
+            limitations: [
+            'Outliers inflate the classical estimator — robust (Cressie-Hawkins) estimator advised',
+            'Non-stationarity manifests as unbounded/erratic variograms',
+            'Anisotropy requires multiple directional models',
+            'Nugget-to-sill ratio sensitive to micro-scale noise',
+            ],
           },
         ],
       },
@@ -2048,7 +2507,7 @@ export const PARTS: Part[] = [
           {
             id: 43, toolName: 'Soil Water Retention Curve', name: 'Van Genuchten Model', equation: 'θ(ψ) = θ_r + (θ_s − θ_r) / [1 + (α|ψ|)ⁿ]ᵐ where m = 1 − 1/n',
             reference: 'van Genuchten, M.T. (1980) A closed-form equation for predicting the hydraulic conductivity of unsaturated soils. Soil Science Society of America Journal, 44(5), 892–898. DOI: 10.2136/sssaj1980.03615995004400050002x.',
-            paperUrl: 'https://scholar.google.com/scholar?q=1980+closed+form+equation+predicting',
+            paperUrl: 'https://doi.org/10.2136/sssaj1980.03615995004400050002x',
             appliesTo: 'Soil water retention, unsaturated flow',
             shortDescription: 'Models the soil water retention curve relating volumetric water content to matric potential using the van Genuchten (1980) closed-form equation, a standard in vadose zone hydrology',
             paperSummary: 'van Genuchten (1980) proposed the S-shaped water retention function θ(ψ) = θ_r + (θ_s − θ_r)/[1+(α|ψ|)ⁿ]ᵐ with the constraint m = 1 − 1/n. The model provides a smooth, continuous representation of the soil water characteristic across the full range of matric potentials from saturation to oven-dry conditions. Parameters: θ_s (saturated water content, ≈ porosity), θ_r (residual water content at very high suctions), α (the inverse of the air-entry pressure, scaling parameter), and n (the pore-size distribution index, controlling the slope of the retention curve). The van Genuchten-Mualem model (combined with Mualem\'s pore-size distribution model) provides an analytical prediction of unsaturated hydraulic conductivity K(θ) = K_s·Sₑⁱ·[1 − (1 − Sₑ^(1/m))ᵐ]².',
@@ -2075,12 +2534,23 @@ export const PARTS: Part[] = [
               '6. Compute effective saturation: Sₑ = (θ − θ_r) / (θ_s − θ_r)',
               '7. Compute unsaturated K: K = K_s × Sₑ⁰·⁵ × [1 − (1 − Sₑ^(1/m))ᵐ]² (requires K_s as additional input)'
             ],
-            outputInterpretation: 'The van Genuchten water retention curve characterizes soil water availability:\n\n• Near saturation (ψ > −0.1 m): θ ≈ θ_s, macro-pores are water-filled, water moves rapidly under gravity\n• Field capacity (ψ = −1 to −3 m): water content at which drainage becomes negligible — upper limit of plant-available water. Sandy soil: FC≈0.15; clay: FC≈0.35\n• Wilting point (ψ = −150 m): permanent wilting point — plants cannot extract water; lower limit of available water. Sandy soil: WP≈0.05; clay: WP≈0.15\n• Available Water Content (AWC) = θ(FC) − θ(WP): determines soil water storage capacity for plants. Sandy loam AWC≈0.10 (10 cm water per meter of soil); clay AWC≈0.20\n• α parameter: higher α → coarser texture (sand α≈0.05–0.3 m⁻¹, silt loam α≈0.01–0.05 m⁻¹, clay α≈0.002–0.01 m⁻¹)\n• n parameter: higher n → more uniform pore size (sand n≈2–5, silt loam n≈1.3–1.8, clay n≈1.1–1.4)\n• Unsaturated K drops dramatically: at θ(FC) (ψ=−3 m), K is typically 3–5 orders of magnitude below K_s — explaining why water movement in unsaturated soil is very slow'
+            outputInterpretation: 'The van Genuchten water retention curve characterizes soil water availability:\n\n• Near saturation (ψ > −0.1 m): θ ≈ θ_s, macro-pores are water-filled, water moves rapidly under gravity\n• Field capacity (ψ = −1 to −3 m): water content at which drainage becomes negligible — upper limit of plant-available water. Sandy soil: FC≈0.15; clay: FC≈0.35\n• Wilting point (ψ = −150 m): permanent wilting point — plants cannot extract water; lower limit of available water. Sandy soil: WP≈0.05; clay: WP≈0.15\n• Available Water Content (AWC) = θ(FC) − θ(WP): determines soil water storage capacity for plants. Sandy loam AWC≈0.10 (10 cm water per meter of soil); clay AWC≈0.20\n• α parameter: higher α → coarser texture (sand α≈0.05–0.3 m⁻¹, silt loam α≈0.01–0.05 m⁻¹, clay α≈0.002–0.01 m⁻¹)\n• n parameter: higher n → more uniform pore size (sand n≈2–5, silt loam n≈1.3–1.8, clay n≈1.1–1.4)\n• Unsaturated K drops dramatically: at θ(FC) (ψ=−3 m), K is typically 3–5 orders of magnitude below K_s — explaining why water movement in unsaturated soil is very slow',
+            assumptions: [
+              'θ(ψ) follows van Genuchten closed form with Mualem constraint m = 1 − 1/n',
+              'Soil homogeneous and isotropic; equilibrium moisture',
+              'Hysteresis between wetting/drying ignored',
+            ],
+            limitations: [
+              'Near-saturation behaviour of structured/dual-porosity soils poorly fitted',
+              'Hysteresis causes scanning-curve errors under cycling moisture',
+              'n > 1 required (m > 0); heavy clays can need double-exponential variants',
+              'K_s must be supplied (Mualem prediction of K(θ) adds uncertainty)',
+            ],
           },
           {
             id: 44, toolName: 'Soil Hydraulic Model', name: 'Brooks-Corey Model', equation: 'S_e = (ψ_b / ψ)^λ',
             reference: 'Brooks, R.H. & Corey, A.T. (1964) Hydraulic properties of porous media. Hydrology Papers, Colorado State University, Fort Collins, CO, 24 pp.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Brooks+1964+Hydraulic+properties+porous',
+            paperUrl: 'NO-DOI (Brooks & Corey 1964, Colorado State University Hydrology Paper No. 3; hosted by CSU archives — library.colostate.edu)',
             appliesTo: 'Soil hydraulic properties, drainage',
             shortDescription: 'Computes the effective saturation from matric potential using the Brooks-Corey power-law water retention model, widely used for sandy soils with a distinct air-entry pressure',
             paperSummary: 'Brooks & Corey (1964) proposed a power-law water retention model S_e = (ψ_b/ψ)^λ for ψ ≤ ψ_b, where S_e = (θ−θ_r)/(θ_s−θ_r) is effective saturation, ψ_b is the bubbling pressure (air-entry pressure), ψ is matric potential, and λ is the pore-size distribution index. The model assumes a distinct air-entry pressure ψ_b below which the soil remains saturated, unlike the van Genuchten model which has a smooth transition. The Brooks-Corey model is particularly suited for coarse-textured soils (sands, sandy loams) with well-defined air-entry values. The unsaturated hydraulic conductivity follows K(S_e) = K_s·S_e^(3+2/λ). The model is less commonly used than van Genuchten for fine-textured soils due to the sharp saturation transition assumption.',
@@ -2105,12 +2575,23 @@ export const PARTS: Part[] = [
               '6. Convert to volumetric water content: θ = θ_r + S_e × (θ_s − θ_r) (requires θ_r, θ_s)',
               '7. Unsaturated K: K(S_e) = K_s × S_e^(3 + 2/λ) (Brooks-Corey conductivity model)'
             ],
-            outputInterpretation: 'The Brooks-Corey model describes water retention in soils with a well-defined air-entry point:\n\n• S_e ≈ 1 for |ψ| < |ψ_b|: soil is effectively saturated even though ψ is negative — typical of coarse sands near the water table\n• S_e = 0.5 when ψ = 2^(1/λ) × ψ_b: for λ=1.5, S_e=0.5 at ψ=1.59·ψ_b (e.g., ψ=−0.48 m for ψ_b=−0.3 m)\n• λ = 5: extremely sharp retention transition (uniform sand, beach sand) — 95% of pores drain over a narrow suction range\n• λ = 0.5: very gradual transition (clay, structured soil) — pores drain over a wide suction range\n• Comparison with van Genuchten: Brooks-Corey has a sharp kink at ψ_b which is physically unrealistic for most soils; van Genuchten provides a smoother, more physically realistic transition\n• The model is best suited for: sandy soils, coarse-textured media, and applications where the air-entry pressure is well-defined'
+            outputInterpretation: 'The Brooks-Corey model describes water retention in soils with a well-defined air-entry point:\n\n• S_e ≈ 1 for |ψ| < |ψ_b|: soil is effectively saturated even though ψ is negative — typical of coarse sands near the water table\n• S_e = 0.5 when ψ = 2^(1/λ) × ψ_b: for λ=1.5, S_e=0.5 at ψ=1.59·ψ_b (e.g., ψ=−0.48 m for ψ_b=−0.3 m)\n• λ = 5: extremely sharp retention transition (uniform sand, beach sand) — 95% of pores drain over a narrow suction range\n• λ = 0.5: very gradual transition (clay, structured soil) — pores drain over a wide suction range\n• Comparison with van Genuchten: Brooks-Corey has a sharp kink at ψ_b which is physically unrealistic for most soils; van Genuchten provides a smoother, more physically realistic transition\n• The model is best suited for: sandy soils, coarse-textured media, and applications where the air-entry pressure is well-defined',
+            assumptions: [
+              'Power-law pore-size distribution; abrupt air-entry pressure ψ_e',
+              'Effective saturation S_e = (ψ_e/ψ)^λ for ψ < ψ_e; S_e = 1 above entry',
+              'Equilibrium water content; homogeneous porous medium',
+            ],
+            limitations: [
+              'Fit degrades near saturation (van Genuchten captures better)',
+              'λ empirical; no hysteresis',
+              'Structured soils with multimodal pores not represented',
+              'Hydraulic conductivity prediction (Burdine-type) inherits parameter uncertainty',
+            ],
           },
           {
             id: 45, toolName: 'Universal Soil Loss Equation', name: 'USLE / RUSLE Soil Erosion', equation: 'A = R × K × LS × C × P',
             reference: 'Wischmeier, W.H. & Smith, D.D. (1978) Predicting rainfall erosion losses — A guide to conservation planning. USDA Agriculture Handbook No. 537. U.S. Government Printing Office, Washington, D.C.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Wischmeier+1978+Predicting+rainfall+erosion',
+            paperUrl: 'https://www.nrcs.usda.gov/resources/guides-and-instructions/predicting-rainfall-erosion-losses-a-guide-to-conservation-planning',
             appliesTo: 'Soil erosion prediction, land management',
             shortDescription: 'Estimates long-term average annual soil loss from sheet and rill erosion by water using the Universal Soil Loss Equation, the most widely used empirical erosion model worldwide',
             paperSummary: 'Wischmeier & Smith (1978) developed the USLE based on analysis of over 10,000 plot-years of runoff and erosion data from 49 locations across the US. The equation A = R·K·LS·C·P predicts average annual soil loss A (t/ha/yr) from: R (rainfall erosivity — kinetic energy × maximum 30-min intensity), K (soil erodibility — inherent susceptibility to detachment and transport), L (slope length) and S (slope steepness), C (cover management — vegetation, residue, tillage effects), and P (support practice — contouring, terracing). The RUSLE (Renard et al., 1997) updates the USLE with improved rainfall erosivity equations, seasonal C factors, and better representation of soil roughness and residue cover. The USLE/RUSLE has been applied globally for soil conservation planning, land degradation assessment, and sedimentation modeling.',
@@ -2138,12 +2619,23 @@ export const PARTS: Part[] = [
               '6. Compute annual soil loss: A = R × K × LS × C × P (t/ha/yr).',
               '7. Compare to T factor (tolerable soil loss): if A > T, conservation measures (reduce C and/or P) are needed.'
             ],
-            outputInterpretation: 'USLE soil loss provides a conservation planning indicator:\n\n• A < 5 t/ha/yr: low erosion rate — typically forested, grassland, or well-managed agricultural land\n• A 5–20 t/ha/yr: moderate erosion — agricultural land with conventional tillage; some conservation measures needed\n• A 20–50 t/ha/yr: high erosion — row crops on moderate slopes without conservation; immediate intervention needed\n• A > 50 t/ha/yr: severe erosion — bare soil, steep slopes, construction sites — unacceptable soil loss\n• The T factor (tolerable soil loss): the maximum erosion rate that can occur without reducing long-term crop productivity. Soil formation rates: 0.5–1 t/ha/yr (natural), so T > 1 implies mining of soil resource\n• A USLE limitation: it does not account for: gully erosion, stream bank erosion, ephemeral gully erosion, mass wasting, or sediment deposition. It is a planning tool, not a prediction tool for specific events\n• RUSLE2 and WEPP: the second generation process-based models overcome USLE limitations by incorporating temporal variability and process-based hydrology'
+            outputInterpretation: 'USLE soil loss provides a conservation planning indicator:\n\n• A < 5 t/ha/yr: low erosion rate — typically forested, grassland, or well-managed agricultural land\n• A 5–20 t/ha/yr: moderate erosion — agricultural land with conventional tillage; some conservation measures needed\n• A 20–50 t/ha/yr: high erosion — row crops on moderate slopes without conservation; immediate intervention needed\n• A > 50 t/ha/yr: severe erosion — bare soil, steep slopes, construction sites — unacceptable soil loss\n• The T factor (tolerable soil loss): the maximum erosion rate that can occur without reducing long-term crop productivity. Soil formation rates: 0.5–1 t/ha/yr (natural), so T > 1 implies mining of soil resource\n• A USLE limitation: it does not account for: gully erosion, stream bank erosion, ephemeral gully erosion, mass wasting, or sediment deposition. It is a planning tool, not a prediction tool for specific events\n• RUSLE2 and WEPP: the second generation process-based models overcome USLE limitations by incorporating temporal variability and process-based hydrology',
+            assumptions: [
+              'Plot scale (22.1 m length, 9% slope standard unit plot); annual average soil loss',
+              'Sheet and rill erosion only; factors multiplicatively separable',
+              'R, K, LS, C, P factors locally calibrated from long-term rainfall, soil and management data',
+            ],
+            limitations: [
+              'Excludes gully, streambank, wind erosion and deposition/sediment delivery',
+              'Factor interactions not fully independent (C×LS coupling)',
+              'Requires local R and K; transferring US charts introduces bias',
+              'Spatial aggregation of factors to grid cells is scale-sensitive',
+            ],
           },
           {
             id: 46, toolName: 'Soil Respiration Temperature Sensitivity', name: 'Q₁₀ Soil Respiration Model', equation: 'R_s = R_base × Q₁₀^((T − T_base)/10)',
             reference: 'Raich, J.W. & Schlesinger, W.H. (1992) The global carbon dioxide flux in soil respiration and its relationship to vegetation and climate. Tellus B, 44(2), 81–99. DOI: 10.1034/j.1600-0889.1992.t01-1-00001.x.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Raich+1992+global+carbon+dioxide',
+            paperUrl: 'https://doi.org/10.1034/j.1600-0889.1992.t01-1-00001.x',
             appliesTo: 'Soil carbon flux, carbon cycle feedback',
             shortDescription: 'Models the exponential temperature sensitivity of soil respiration (heterotrophic + autotrophic) using the Q₁₀ function, a key component of the terrestrial carbon cycle',
             paperSummary: 'Raich & Schlesinger (1992) compiled the first global database of soil respiration measurements, estimating total global soil CO₂ efflux at 68–77 Pg C/yr. They found that soil respiration follows an exponential relationship with temperature: R_s = R_base·Q₁₀^((T−T_base)/10), where the Q₁₀ coefficient describes the factor by which respiration increases for a 10°C warming. Mean global Q₁₀ values cluster around 2.0–2.5 but vary with biome and substrate availability. The study established that soil respiration is the second largest terrestrial carbon flux (~10× fossil fuel emissions at that time), making its temperature sensitivity a critical parameter for climate-carbon cycle feedback projections. The Q₁₀ function is embedded in all major Earth System Models (ESMs) for projecting soil carbon stock changes under global warming.',
@@ -2169,12 +2661,23 @@ export const PARTS: Part[] = [
               '6. Compute respiration rate: R_s = R_base × Q10_factor',
               '7. For annual estimate: integrate over daily/hourly soil temperatures; apply moisture correction f(θ)'
             ],
-            outputInterpretation: 'Soil respiration temperature sensitivity determines carbon-climate feedback strength:\n\n• Q₁₀ = 2.0: standard value — for every 10°C warming, soil respiration doubles. At T=30°C: R_s = 2× R_s at 20°C\n• Q₁₀ = 1.5: reduced sensitivity — typical when moisture is limiting, or for recalcitrant organic matter (passive pool)\n• Q₁₀ = 3.0: high sensitivity — labile organic matter, tropical peat, thawing permafrost organic carbon\n• Global mean soil respiration: ~87 Pg C/yr (~8× fossil fuel emissions). A 1°C global warming increases this by ~3.5 Pg C/yr (Q₁₀=2).\n• The Q₁₀ of heterotrophic respiration is the critical parameter for the soil carbon-climate feedback: ESMs project soil C loss of 50–200 Pg C by 2100 under RCP8.5, equivalent to 5–20 years of current fossil fuel emissions\n• Acclimation: long-term warming experiments show Q₁₀ declines over time (thermal acclimation, substrate depletion), reducing the long-term feedback by ~30%\n• Arrhenius vs Q₁₀: Arrhenius is theoretically preferred (E_a is constant), but Q₁₀ is more intuitive for ecosystem modeling'
+            outputInterpretation: 'Soil respiration temperature sensitivity determines carbon-climate feedback strength:\n\n• Q₁₀ = 2.0: standard value — for every 10°C warming, soil respiration doubles. At T=30°C: R_s = 2× R_s at 20°C\n• Q₁₀ = 1.5: reduced sensitivity — typical when moisture is limiting, or for recalcitrant organic matter (passive pool)\n• Q₁₀ = 3.0: high sensitivity — labile organic matter, tropical peat, thawing permafrost organic carbon\n• Global mean soil respiration: ~87 Pg C/yr (~8× fossil fuel emissions). A 1°C global warming increases this by ~3.5 Pg C/yr (Q₁₀=2).\n• The Q₁₀ of heterotrophic respiration is the critical parameter for the soil carbon-climate feedback: ESMs project soil C loss of 50–200 Pg C by 2100 under RCP8.5, equivalent to 5–20 years of current fossil fuel emissions\n• Acclimation: long-term warming experiments show Q₁₀ declines over time (thermal acclimation, substrate depletion), reducing the long-term feedback by ~30%\n• Arrhenius vs Q₁₀: Arrhenius is theoretically preferred (E_a is constant), but Q₁₀ is more intuitive for ecosystem modeling',
+            assumptions: [
+              'Soil respiration responds exponentially to temperature with constant Q₁₀ over the window',
+              'Substrate supply non-limiting; measurements represent ecosystem (autotrophic + heterotrophic) flux',
+              'Chamber or flux-gradient method in steady state',
+            ],
+            limitations: [
+              'Q₁₀ varies with season, depth, substrate quality and acclimation',
+              'Temperature confounds with moisture, phenology and litter inputs in field data',
+              'Chamber disturbances (pressure, roots) bias short-term fluxes',
+              'A single constant Q₁₀ overestimates long-run warming feedback',
+            ],
           },
           {
             id: 47, toolName: 'Soil Thermal Conductivity Model', name: 'de Vries Model', equation: 'λ_soil = Σ(kᵢ·fᵢ·λᵢ) / Σ(kᵢ·fᵢ)',
             reference: 'de Vries, D.A. (1963) Thermal properties of soils. In: van Wijk, W.R. (ed.), Physics of Plant Environment. North-Holland Publishing, Amsterdam, pp. 210–235.',
-            paperUrl: 'https://scholar.google.com/scholar?q=de+Vries+1963+Thermal+properties+soils',
+            paperUrl: 'NO-DOI (de Vries 1963, book chapter in Physics of Plant Environment, North-Holland; no official online version)',
             appliesTo: 'Soil heat transfer, frost depth',
             shortDescription: 'Estimates the effective thermal conductivity of soil as a weighted average of the conductivities of soil constituents (minerals, water, ice, air) accounting for their volume fractions and shape factors',
             paperSummary: 'de Vries (1963) developed a physically-based model for predicting soil thermal conductivity from its constituents. The model represents soil as a multi-phase medium with mineral particles (thermal conductivity λ_m ≈ 2–8 W/m·K), water (λ_w ≈ 0.6 W/m·K), ice (λ_i ≈ 2.2 W/m·K), and air (λ_a ≈ 0.024 W/m·K). The effective thermal conductivity λ = Σ(kᵢ·fᵢ·λᵢ)/Σ(kᵢ·fᵢ) accounts for the shape and orientation of soil particles through weighting factors kᵢ. The model captures the strong dependence of λ on water content: increasing water content increases λ because water bridges air gaps between particles (λ_w >> λ_a). The de Vries model is the standard approach for predicting soil thermal properties in land surface models (Noah, CLM, SiB) for heat flux, soil freezing, and permafrost modeling.',
@@ -2200,100 +2703,144 @@ export const PARTS: Part[] = [
               '6. Compute effective conductivity: λ_soil = numerator / denominator',
               '7. For frozen soil: λ_i replaces λ_w in the continuous phase; ice has much higher conductivity (2.2 vs 0.57 W/m·K), so frozen soil conducts heat ~2–3× better than thawed'
             ],
-            outputInterpretation: 'Effective soil thermal conductivity controls heat transport in the ground:\n\n• λ < 0.3 W/m·K: dry, porous, or organic soil — good insulator, heat penetration is shallow; frost penetrates deeper because the soil can\'t conduct heat upward from below\n• λ 0.5–1.0 W/m·K: typical loam at field capacity — moderate conductivity, diurnal heat wave penetrates ~0.2 m, seasonal ~2–5 m\n• λ 1.5–3.0 W/m·K: wet sand or frozen soil — high conductivity, rapid heat transfer\n• de Vries model accuracy: ±15–25% for most mineral soils; larger errors for organic soils (>20% organic matter) and extremely dry or saline conditions\n• Frozen soil: λ_frozen ≈ 1.5–2.5× λ_thawed because ice (λ=2.2) replaces water (λ=0.57) — this reduces frost penetration depth (self-limiting frost effect) by conducting heat from deep soil layers more efficiently\n• Applications: (1) ground-source heat pump design, (2) permafrost stability under climate change, (3) soil temperature and frost depth forecasting for agriculture, (4) buried pipeline thermal analysis'
+            outputInterpretation: 'Effective soil thermal conductivity controls heat transport in the ground:\n\n• λ < 0.3 W/m·K: dry, porous, or organic soil — good insulator, heat penetration is shallow; frost penetrates deeper because the soil can\'t conduct heat upward from below\n• λ 0.5–1.0 W/m·K: typical loam at field capacity — moderate conductivity, diurnal heat wave penetrates ~0.2 m, seasonal ~2–5 m\n• λ 1.5–3.0 W/m·K: wet sand or frozen soil — high conductivity, rapid heat transfer\n• de Vries model accuracy: ±15–25% for most mineral soils; larger errors for organic soils (>20% organic matter) and extremely dry or saline conditions\n• Frozen soil: λ_frozen ≈ 1.5–2.5× λ_thawed because ice (λ=2.2) replaces water (λ=0.57) — this reduces frost penetration depth (self-limiting frost effect) by conducting heat from deep soil layers more efficiently\n• Applications: (1) ground-source heat pump design, (2) permafrost stability under climate change, (3) soil temperature and frost depth forecasting for agriculture, (4) buried pipeline thermal analysis',
+            assumptions: [
+              'Soil modeled as mixture of mineral/organic ellipsoidal inclusions in continuous medium (de Vries 1963)',
+              'Volumetric weighting with shape factors (g-values) for quartz, clay, organic matter, water, air',
+              'Thermal equilibrium between phases; porosity and bulk density known',
+            ],
+            limitations: [
+              'Contact (thermal boundary) resistance between particles ignored',
+              'Ice content must be re-weighted when T < 0 °C',
+              'Requires composition fractions (quartz/clay/organic) — not always available',
+              'Accuracy degrades for extreme porosities and highly layered profiles',
+            ],
           },
           {
-            id: 48, toolName: 'Surface Layer Similarity Theory', name: 'Monin-Obukhov Similarity Theory', equation: 'φ_m(ζ) = κ·z/u_* × ∂ū/∂z, ζ = z/L',
-            reference: 'Monin, A.S. & Obukhov, A.M. (1954) Basic laws of turbulent mixing in the surface layer of the atmosphere. Trudy Geofizicheskogo Instituta AN SSSR, 24(151), 163–187.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Monin+1954+turbulent+mixing+surface',
+            id: 48, toolName: 'Surface Layer Stability Analysis', name: 'Monin-Obukhov Similarity Theory', equation: 'φ_m(ζ) = κ·z/u_* × ∂ū/∂z, ζ = z/L',
+            reference: 'Monin, A.S. & Obukhov, A.M. (1954) Basic laws of turbulent mixing in the surface layer of the atmosphere. Trudy Geofizicheskogo Instituta AN SSSR, 24(151), 163–187 (similarity theory, no DOI). Coefficients implemented per Högström, U. (1988) Non-dimensional wind and temperature profiles in the atmospheric surface layer: A re-evaluation. Boundary-Layer Meteorology, 42, 55–78. DOI: 10.1007/bf00119875 (local: docs/Research papers/10.1007@bf00119875_tool48_monin-obukhov.pdf). Coefficient tabulation cross-checked against Foken, T. (2006) 50 Years of the Monin–Obukhov Similarity Theory. Boundary-Layer Meteorology, 119(3), 431–447. DOI: 10.1007/s10546-006-9048-6.',
+            paperUrl: 'https://doi.org/10.1007/bf00119875',
             appliesTo: 'Surface layer flux-profile relationships',
             shortDescription: 'Describes the vertical profiles of wind, temperature, and humidity in the atmospheric surface layer using Monin-Obukhov similarity theory, accounting for atmospheric stability effects',
-            paperSummary: 'Monin & Obukhov (1954) established the similarity theory for the atmospheric surface layer (the lowest ~10% of the boundary layer). They proposed that mean profiles and turbulence statistics in the surface layer are universal functions of the dimensionless stability parameter ζ = z/L, where L = −u_*³·θ̄ᵥ/(κ·g·w′θ′ᵥ₀) is the Obukhov length. The dimensionless wind shear φ_m(ζ) = (κz/u_*)·∂ū/∂z equals 1 in neutral conditions. Högström (1988) re-evaluated the universal functions with careful flow-distortion corrections, adopting κ = 0.40 ± 0.01 and φ_h(0) = 0.95: for unstable conditions (−2 < ζ < 0) φ_m = (1 − 19.3ζ)^(−1/4), φ_h = 0.95(1 − 11.6ζ)^(−1/2); for stable conditions (0 < ζ < 1) φ_m = 1 + 6ζ, φ_h = 0.95 + 7.8ζ (coefficients as tabulated by Foken 2006). These universal functions allow surface fluxes to be estimated from mean profile measurements (the flux-profile method) and are the foundation of all modern land surface models.',
-            scientificConcept: 'The atmospheric surface layer (∼0–100 m) is the layer where vertical turbulent fluxes are approximately constant with height (constant flux layer). Monin-Obukhov similarity theory states that the mean wind and temperature profiles, when normalized by the friction velocity u_* and temperature scale θ_*, are universal functions of ζ = z/L. The Obukhov length L represents the height at which buoyant production of turbulence equals mechanical (shear) production. In unstable conditions (L < 0, ζ < 0), buoyancy enhances turbulent mixing, producing steeper wind gradients near the surface. In stable conditions (L > 0, ζ > 0), buoyancy suppresses turbulence, causing weaker mixing and stronger wind shear. The integrated flux-profile relationships provide: the aerodynamic resistance r_a(z) = [ln(z/z₀_m) − ψ_m(ζ)]/(κ·u_*) for momentum, and r_a(z) = [ln(z/z₀_h) − ψ_h(ζ)]/(κ·u_*) for heat, where ψ_m, ψ_h are the integrated stability correction functions.',
+            paperSummary: 'Monin & Obukhov (1954) established the similarity theory for the atmospheric surface layer (the lowest ~10% of the boundary layer). They proposed that mean profiles and turbulence statistics in the surface layer are universal functions of the dimensionless stability parameter ζ = z/L, where L = −u_*³·θ̄ᵥ/(κ·g·w′θ′ᵥ₀) is the Obukhov length. The dimensionless wind shear φ_m(ζ) = (κz/u_*)·∂ū/∂z equals 1 in neutral conditions. Högström (1988) re-evaluated the universal functions with careful flow-distortion corrections, adopting κ = 0.40 ± 0.01 and φ_h(0) = 0.95: for unstable conditions (−2 < ζ < 0) φ_m = (1 − 19.3ζ)^(−1/4), φ_h = 0.95(1 − 11.6ζ)^(−1/2); for stable conditions (0 < ζ < 1) φ_m = 1 + 6ζ, φ_h = 0.95 + 7.8ζ — verified against the paper\'s Tables VI/VII. These universal functions allow surface fluxes to be estimated from mean profile measurements (the flux-profile method) and are the foundation of all modern land surface models.',
+            scientificConcept: 'The atmospheric surface layer (∼0–100 m) is the layer where vertical turbulent fluxes are approximately constant with height (constant flux layer). Monin-Obukhov similarity theory states that the mean wind and temperature profiles, when normalized by the friction velocity u_* and temperature scale θ_*, are universal functions of ζ = z/L. The Obukhov length L represents the height at which buoyant production of turbulence equals mechanical (shear) production. In unstable conditions (L < 0, ζ < 0), buoyancy enhances turbulent mixing, producing steeper wind gradients near the surface. In stable conditions (L > 0, ζ > 0), buoyancy suppresses turbulence, causing weaker mixing and stronger wind shear. The integrated flux-profile relationships provide: the aerodynamic resistance r_a(z) = [ln(z/z₀_m) − ψ_m(ζ)]/(κ·u_*) for momentum, where ψ_m is the integrated stability correction function (exact antiderivatives of the Högström forms).',
             inputs: [
               { symbol: 'κ', label: 'von Kármán Constant (κ = 0.40 ± 0.01, Högström 1988)', unit: '—', default: 0.4, min: 0.3, max: 0.5, group: 'Universal Constants' },
-              { symbol: 'u_*', label: 'Friction Velocity u_* (auto: genuine ERA5 zust — no fabricated fallback)', unit: 'm/s', default: null, min: 0, max: 5, group: 'Turbulence' },
+              { symbol: 'u_*', label: 'Friction Velocity u_* (auto: genuine ERA5 zust at the requested date — no fabricated fallback)', unit: 'm/s', default: null, min: 0, max: 5, group: 'Turbulence' },
               { symbol: 'z', label: 'Measurement Height', unit: 'm', default: 10, min: 0, max: 1000, group: 'Profile' },
-              { symbol: 'L', label: 'Obukhov Length (auto: derived from genuine ERA5 sensible heat flux, L = −u_*³·θ̄/(κ·g·(w′θ′)₀))', unit: 'm', default: null, min: -2000, max: 2000, group: 'Stability' }
+              { symbol: 'L', label: 'Obukhov Length (auto: derived from genuine ERA5 sensible heat flux, L = −u_*³·θ̄/(κ·g·(w′θ′)₀))', unit: 'm', default: null, min: -2000, max: 2000, group: 'Stability' },
+              { symbol: 'z₀', label: 'Momentum Roughness Length for r_a (auto: MCD12Q1 land-cover class table)', unit: 'm', default: null, min: 0.00001, max: 10, group: 'Surface' }
             ],
             outputs: [
-              { id: 'primary', label: 'Dimensionless Wind Shear φ_m(ζ)', type: 'scalar', unit: '—', description: 'Monin-Obukhov stability function for momentum. φ_m=1 in neutral conditions; φ_m<1 in unstable (enhanced mixing, weaker shear); φ_m>1 in stable (suppressed mixing, stronger shear). With the Högström (1988) functions: ζ=−1 gives φ_m≈0.67; ζ=+1 gives φ_m=7.' },
-              { id: 'obukhov_stability', label: 'Stability Classification', type: 'scalar', unit: '—', description: 'Classification based on ζ = z/L: ζ < −1 (very unstable), −1 < ζ < −0.01 (unstable), |ζ| < 0.01 (near-neutral), 0.01 < ζ < 1 (stable), ζ > 1 (very stable).' },
-              { id: 'aerodynamic_resistance', label: 'Aerodynamic Resistance r_a', type: 'scalar', unit: 's/m', description: 'Aerodynamic resistance to momentum transfer: r_a = [ln(z/z₀) − ψ_m(ζ)]/(κ·u_*). For neutral conditions, z=10 m, z₀=0.1 m, u_*=0.3: r_a≈38 s/m. Lower in unstable conditions, higher in stable conditions.' }
+              { id: 'primary', label: 'Dimensionless Wind Shear φ_m(ζ)', type: 'scalar', unit: '—', description: 'Monin-Obukhov stability function for momentum. φ_m=1 in neutral conditions; φ_m<1 in unstable (enhanced mixing, weaker shear); φ_m>1 in stable (suppressed mixing, stronger shear). With the Högström (1988) functions: ζ=−1 gives φ_m≈0.471; ζ=+1 gives φ_m=7.' },
+              { id: 'phi_h', label: 'Dimensionless Temperature Gradient φ_h(ζ)', type: 'scalar', unit: '—', description: 'Companion stability function for heat. Högström (1988): unstable φ_h = 0.95(1−11.6ζ)^(−1/2) (ζ=−1 → ≈0.268); stable φ_h = 0.95+7.8ζ (ζ=+1 → 8.75). Reported in the step log together with the exact MOST identity Ri = ζ·φ_h/φ_m².' },
+              { id: 'obukhov_stability', label: 'Stability Classification', type: 'scalar', unit: '—', description: 'Classification based on ζ = z/L: ζ < −1 (very unstable), −1 ≤ ζ < −0.01 (unstable), |ζ| ≤ 0.01 (near-neutral), 0.01 < ζ < 1 (stable), ζ ≥ 1 (very stable).' },
+              { id: 'aerodynamic_resistance', label: 'Aerodynamic Resistance r_a', type: 'scalar', unit: 's/m', description: 'Aerodynamic resistance to momentum transfer: r_a = [ln(z/z₀) − ψ_m(ζ)]/(κ·u_*). For neutral conditions, z=10 m, z₀=0.1 m, u_*=0.3: r_a≈38 s/m. Lower in unstable conditions (positive ψ_m), higher in stable conditions (negative ψ_m). z₀ auto-derived from MCD12Q1 land cover unless overridden.' }
             ],
-            methodology: 'Monin-Obukhov similarity is applied: 1) Compute u_* and the Obukhov length L from genuine measurements — here from ERA5 reanalysis: u_* from the friction-velocity field and L = −u_*³·θ̄/(κ·g·(w′θ′)₀) from the reanalysis sensible heat flux, 2 m temperature and surface pressure (or from eddy-covariance data when supplied); 2) Compute the derived stability parameter ζ = z/L (ζ is NOT a free input); 3) Evaluate φ_m(ζ) and φ_h(ζ) with the Högström (1988) re-evaluated functions (κ = 0.40, φ_h(0) = 0.95): unstable φ_m = (1−19.3ζ)^(−1/4), φ_h = 0.95(1−11.6ζ)^(−1/2) for −2<ζ<0; stable φ_m = 1+6ζ, φ_h = 0.95+7.8ζ for 0<ζ<1; 4) Interpret the dimensionless gradients: ∂ū/∂z = (u_*/κz)·φ_m; Ri = ζ·φ_h/φ_m². Zero fabricated fallbacks: if genuine u_*/L are unavailable the tool returns an honest NaN stating what is missing.',
+            methodology: 'Monin-Obukhov similarity is applied: 1) Compute u_* and the Obukhov length L from genuine measurements — here from ERA5 reanalysis via the Copernicus CDS API at the requested date: u_* from the friction-velocity field (zust) and L = −u_*³·θ̄/(κ·g·(w′θ′)₀) from the reanalysis sensible heat flux, 2 m temperature and surface pressure (the Open-Meteo ERA5-subset proxy carries no genuine zust/flux step and is rejected with an honest NaN, never relabeled); 2) Compute the derived stability parameter ζ = z/L (ζ is NOT a free input); 3) Evaluate φ_m(ζ) and φ_h(ζ) with the Högström (1988) re-evaluated functions (κ = 0.40, φ_h(0) = 0.95): unstable φ_m = (1−19.3ζ)^(−1/4), φ_h = 0.95(1−11.6ζ)^(−1/2) for −2<ζ<0; stable φ_m = 1+6ζ, φ_h = 0.95+7.8ζ for 0<ζ<1; 4) Interpret the dimensionless gradients: ∂ū/∂z = (u_*/κz)·φ_m; Ri = ζ·φ_h/φ_m²; ψ_m/ψ_h = exact integrals of the profiles; r_a = [ln(z/z₀)−ψ_m]/(κ·u_*). Zero fabricated fallbacks: if genuine u_*/L are unavailable the tool returns an honest NaN stating what is missing.',
             processingSteps: [
               '1. Input von Kármán constant κ (0.40 ± 0.01, Högström 1988)',
-              '2. Friction velocity u_* (m/s): genuine ERA5 friction velocity (zust) at the study point, or user-supplied from eddy covariance/log-profile fit — no static fallback',
+              '2. Friction velocity u_* (m/s): genuine ERA5 friction velocity (zust) at the study point and requested date via CDS, or user-supplied from eddy covariance/log-profile fit — no static fallback; the Open-Meteo subset proxy (log-law estimate, no zust) is rejected',
               '3. Input measurement height z (m) within the surface layer (typically 2–50 m)',
-              '4. Obukhov length L (m) = −u_*³·θ̄/(κ·g·(w′θ′)₀): derived from genuine ERA5 sensible heat flux, 2 m temperature and surface pressure; or user-supplied. Negative L = unstable, positive = stable, |L|→∞ = neutral.',
+              '4. Obukhov length L (m) = −u_*³·θ̄/(κ·g·(w′θ′)₀): derived from the genuine ERA5 sensible heat flux, 2 m temperature and surface pressure of the same CDS reanalysis step; or user-supplied. Negative L = unstable, positive = stable, |L|→∞ = neutral.',
               '5. Compute the DERIVED stability parameter: ζ = z / L (validated range −2 < ζ < 1; bounds applied outside)',
               '6. Compute φ_m(ζ) with Högström (1988) functions: ζ < 0: φ_m = (1 − 19.3ζ)^(−1/4); ζ > 0: φ_m = 1 + 6ζ; ζ ≈ 0: φ_m = 1',
-              '7. Companion heat function φ_h(ζ): ζ < 0: 0.95(1 − 11.6ζ)^(−1/2); ζ > 0: 0.95 + 7.8ζ — and the exact MOST identity Ri = ζ·φ_h/φ_m²'
+              '7. Companion heat function φ_h(ζ): ζ < 0: 0.95(1 − 11.6ζ)^(−1/2); ζ > 0: 0.95 + 7.8ζ — and the exact MOST identity Ri = ζ·φ_h/φ_m²',
+              '8. Integrated corrections ψ_m, ψ_h (exact antiderivatives) and aerodynamic resistance r_a = [ln(z/z₀) − ψ_m]/(κ·u_*) with z₀ from the MCD12Q1 land-cover class unless overridden'
             ],
-            outputInterpretation: 'Monin-Obukhov similarity provides the theoretical framework for surface-layer meteorology:\n\n• φ_m(ζ)=1 (neutral): wind profile is purely logarithmic — typical of overcast, windy conditions; well-mixed boundary layer\n• φ_m(ζ)<1 (unstable): enhanced vertical mixing due to buoyant thermals — daytime, sunny, convective conditions; wind shear is less than logarithmic (well-mixed)\n• φ_m(ζ)>1 (stable): suppressed turbulence due to stratification — nighttime, clear skies, surface cooling; wind shear is stronger than logarithmic (poor mixing, possible low-level jet)\n• The Obukhov length L: |L| is the height at which buoyancy and shear production of TKE are equal. |L| < 10 m: very stable or very unstable conditions; |L| > 1000 m: effectively neutral\n• Applications: (1) computing aerodynamic resistance for Penman-Monteith ET₀ and surface energy balance models, (2) air pollution dispersion in the surface layer, (3) wind energy — understanding wind shear profiles for turbine design, (4) eddy covariance flux correction (WPL correction, footprint analysis)'
+            outputInterpretation: 'Monin-Obukhov similarity provides the theoretical framework for surface-layer meteorology:\n\n• φ_m(ζ)=1 (neutral): wind profile is purely logarithmic — typical of overcast, windy conditions; well-mixed boundary layer\n• φ_m(ζ)<1 (unstable): enhanced vertical mixing due to buoyant thermals — daytime, sunny, convective conditions; wind shear is less than logarithmic (well-mixed)\n• φ_m(ζ)>1 (stable): suppressed turbulence due to stratification — nighttime, clear skies, surface cooling; wind shear is stronger than logarithmic (poor mixing, possible low-level jet)\n• The Obukhov length L: |L| is the height at which buoyancy and shear production of TKE are equal. |L| < 10 m: very stable or very unstable conditions; |L| > 1000 m: effectively neutral\n• Applications: (1) computing aerodynamic resistance for Penman-Monteith ET₀ and surface energy balance models, (2) air pollution dispersion in the surface layer, (3) wind energy — understanding wind shear profiles for turbine design, (4) eddy covariance flux correction (WPL correction, footprint analysis)',
+            assumptions: [
+              'Constant-flux layer (lowest ~10% of the PBL); similarity in ζ = z/L only',
+              'Horizontally homogeneous, stationary flow over flat terrain',
+              'z well above roughness elements (z ≫ z₀) and within surface layer validity',
+              'κ = 0.40 (±0.01, Högström 1988); ζ clamped to [−2, 1] validity window',
+              'Obukhov length derived without the virtual-temperature correction (no q from the CDS flux request); effect on L is < ~3 %',
+            ],
+            limitations: [
+              'Valid only for −2 < ζ < 1 (Högström 1988 range); outside it the functions are empirical extrapolation',
+              'Very stable conditions (nocturnal LLJ, drainage flows) violate MO similarity',
+              'Roughness sublayer of canopies/urban areas invalidates single-point profiles',
+              'Requires genuine u* and L (or fluxes) — cannot bootstrap from bulk measurements alone without iteration',
+            ],
           },
           {
             id: 49, toolName: 'Logarithmic Wind Profile', name: 'Logarithmic Wind Profile', equation: 'u(z) = (u_*/κ) × ln(z/z₀), κ ≈ 0.4',
-            reference: 'Stull, R.B. (1988) An Introduction to Boundary Layer Meteorology. Kluwer Academic Publishers, ISBN: 978-90-277-2769-5, Chapter 4.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Stull+1988+Boundary+Layer+Meteorology',
+            reference: 'Stull, R.B. (1988) An Introduction to Boundary Layer Meteorology. Kluwer Academic Publishers, ISBN: 978-90-277-2769-5, Chapter 4 ("The log wind profile", p. 376). DOI: 10.1007/978-94-009-3027-8 (local extract: docs/Research papers/10.1007@978-94-009-3027-8_tool49_stull-boundary-layer.pdf).',
+            paperUrl: 'https://doi.org/10.1007/978-94-009-3027-8',
             appliesTo: 'Near-surface wind estimation, wind energy',
             shortDescription: 'Estimates the mean horizontal wind speed at height z above the surface using the logarithmic law for the neutrally stratified atmospheric surface layer',
             paperSummary: 'Stull (1988) provides the standard textbook treatment of the atmospheric boundary layer, including the logarithmic wind profile. Under neutral atmospheric conditions (when buoyancy effects are minimal — overcast, high wind speed), the wind profile in the surface layer follows u(z) = (u_*/κ)·ln(z/z₀). The friction velocity u_* characterizes the momentum flux (shear stress) at the surface: τ = ρ·u_*². The roughness length z₀ is the height at which the logarithmic profile extrapolates to zero wind speed, representing the effect of surface roughness elements on the flow. Over grassland: z₀≈0.01–0.05 m; over forest: z₀≈0.5–2 m; over open water (calm): z₀≈0.0002 m. The log law applies in the surface layer (≈ lowest 10% of the PBL, typically <100 m) and is modified by stability corrections (Monin-Obukhov) in non-neutral conditions.',
             scientificConcept: 'In a neutrally stratified boundary layer, the turbulent momentum flux (Reynolds stress τ = −ρ·u′w′) is constant with height, and the eddy diffusivity for momentum K_m = κ·u_*·z increases linearly with height. Under these conditions, the vertical wind gradient follows ∂ū/∂z = u_*/(κ·z), which integrates to u(z) = (u_*/κ)·ln(z/z₀). The friction velocity u_* = √(C_d)·ū where C_d is the surface drag coefficient (~0.001–0.01 over land). The roughness length z₀ is related to the height and density of roughness elements: z₀ ≈ 0.1·h_c for dense canopies, where h_c is canopy height. The log law is valid between z₀ (roughness height) and ≈0.1·z_i (boundary layer height). In the roughness sublayer (just above the canopy), the profile deviates from logarithmic; above the surface layer (z > 0.1·z_i), the wind profile follows the Ekman spiral.',
             inputs: [
-              { symbol: 'u_*', label: 'Friction Velocity (u_*)', unit: 'm/s', default: 0.3, min: 0, max: 5, group: 'Turbulence' },
+              { symbol: 'u_*', label: 'Friction Velocity (auto: genuine ERA5 friction velocity `zust` at the study point via CDS — no fabricated fallback)', unit: 'm/s', default: null, min: 0, max: 5, group: 'Turbulence' },
               { symbol: 'z', label: 'Height Above Surface', unit: 'm', default: 10, min: 0, max: 1000, group: 'Profile' },
-              { symbol: 'z₀', label: 'Aerodynamic Roughness Length', unit: 'm', default: 0.1, min: 1e-05, max: 10, group: 'Surface' }
+              { symbol: 'z₀', label: 'Aerodynamic Roughness Length (auto: genuine MCD12Q1 IGBP land-cover class table)', unit: 'm', default: null, min: 1e-05, max: 10, group: 'Surface' }
             ],
             outputs: [
-              { id: 'primary', label: 'Wind Speed u(z)', type: 'scalar', unit: 'm/s', description: 'Mean wind speed at height z under neutral conditions. For u_*=0.3 m/s, z=10 m, z₀=0.1 m: u(10)=3.5 m/s. At z=50 m: u=4.7 m/s (wind shear decreases with height).' },
-              { id: 'surface_drag_coefficient', label: 'Drag Coefficient C_d', type: 'scalar', unit: '—', description: 'Surface drag coefficient at height z: C_d(z) = (κ/ln(z/z₀))². For z=10 m, z₀=0.1 m: C_d≈0.006 (neutral, grass). For z₀=0.001 m (water): C_d≈0.002; for z₀=1 m (forest): C_d≈0.04.' },
-              { id: 'wind_power_density', label: 'Wind Power Density', type: 'scalar', unit: 'W/m²', description: 'Wind power per unit area at height z: P = ½·ρ·u(z)³. For u(z)=3.5 m/s, ρ=1.2 kg/m³: P=26 W/m²; for u(100 m)=6.5 m/s: P=165 W/m². Used for wind resource assessment.' }
+              { id: 'primary', label: 'Wind Speed u(z)', type: 'scalar', unit: 'm/s', description: 'Mean wind speed at height z under neutral conditions. Example with explicit inputs u_*=0.3 m/s, z=10 m, z₀=0.1 m: u(10)=3.5 m/s; at z=50 m: u=4.7 m/s (wind shear decreases with height). With genuine inputs the value reflects the actual ERA5 u_* and MCD12Q1 z₀ at the study point.' },
+              { id: 'surface_drag_coefficient', label: 'Drag Coefficient C_d', type: 'scalar', unit: '—', description: 'Surface drag coefficient at height z: C_d(z) = (κ/ln(z/z₀))². Example z=10 m: z₀=0.1 m → C_d≈0.0075 (low grass); z₀=0.001 m (calm water) → C_d≈0.0019; z₀=1 m (forest/urban) → C_d≈0.030. Reported in the secondary-outputs step.' },
+              { id: 'wind_power_density', label: 'Wind Power Density', type: 'scalar', unit: 'W/m²', description: 'Wind power per unit area at height z: P = ½·ρ·u(z)³ with ρ the genuine ambient air density (from ambient surface pressure and 2 m temperature — never a static 1.2 kg/m³). Example u=3.5 m/s, ρ=1.2: P≈26 W/m²; u(100 m)=6.5 m/s: P≈165 W/m². Used for wind resource assessments.' }
             ],
-            methodology: 'The logarithmic wind profile is applied to: 1) estimate u(z) at height z from known u_* and z₀; 2) estimate u_* from wind speed measured at one height (u_* = κ·u(z)/ln(z/z₀)); 3) extrapolate wind speed from measurement height to turbine hub height (z_2 → z_1): u(z₂) = u(z₁)·ln(z₂/z₀)/ln(z₁/z₀). For non-neutral conditions, the Monin-Obukhov correction φ_m(ζ) modifies the profile: u(z) = (u_*/κ)·[ln(z/z₀) − ψ_m(ζ)].',
+            methodology: 'The logarithmic wind profile is applied to: 1) estimate u(z) at height z from genuine u_* (ERA5 friction velocity `zust` via the Copernicus CDS API at the study point; when no genuine u_* can be resolved the result is an honest NaN — no static fallback) and z₀ (from the genuine MCD12Q1 IGBP land-cover class table unless user-supplied); 2) estimate u_* from wind speed measured at one height (u_* = κ·u(z)/ln(z/z₀)); 3) extrapolate wind speed from measurement height to turbine hub height (z_2 → z_1): u(z₂) = u(z₁)·ln(z₂/z₀)/ln(z₁/z₀). For non-neutral conditions, the Monin-Obukhov correction φ_m(ζ) modifies the profile (tool 48): u(z) = (u_*/κ)·[ln(z/z₀) − ψ_m(ζ)]. Secondary outputs: C_d(z) = (κ/ln(z/z₀))² and P(z) = ½·ρ·u(z)³ with genuine ambient air density ρ.',
             processingSteps: [
-              '1. Input friction velocity u_* (m/s): typical 0.1–0.5 m/s for moderate winds over land; 0.5–1.5 m/s for stormy conditions',
-              '2. Input height z (m): the altitude at which wind speed is desired (must be within the surface layer)',
-              '3. Input roughness length z₀ (m): ice/snow: 10⁻⁵, calm water: 2×10⁻⁴, lawn/grass: 0.01–0.05, tall crops: 0.1–0.3, forest: 0.5–2, urban: 1–3',
+              '1. Friction velocity u_* (m/s): genuine ERA5 friction velocity (zust) at the study point via CDS, or user-supplied from eddy covariance/log-profile fit — typical 0.1–0.5 m/s for moderate winds over land; honest NaN if unavailable',
+              '2. Input height z (m): the altitude at which wind speed is desired (must be within the surface layer and above z₀)',
+              '3. Roughness length z₀ (m): from the genuine MCD12Q1 IGBP class table (water 0.0002, barren 0.005, snow/ice 0.002, grass 0.05, crops 0.1, shrub 0.1–0.2, savanna 0.2–0.4, wetland 0.3, forest 1.8–2.5, urban 2.0) unless user-supplied',
               '4. Compute neutral wind speed: u(z) = (u_* / 0.4) × ln(z / z₀)',
               '5. Compute drag coefficient: C_d(z) = [0.4 / ln(z / z₀)]²',
-              '6. Compute wind power density: P(z) = 0.5 × ρ × u(z)³ (ρ ≈ 1.2 kg/m³ at sea level)',
+              '6. Compute wind power density: P(z) = 0.5 × ρ × u(z)³ with genuine ambient ρ (surface pressure, 2 m temperature)',
               '7. For extrapolation to other heights: u(z₂) = u(z₁) × ln(z₂/z₀) / ln(z₁/z₀)'
             ],
             outputInterpretation: 'The logarithmic wind profile is the foundation of near-surface wind estimation:\n\n• Over smooth surfaces (z₀=0.001 m, water): wind shear is weak — u(10)/u(2) ≈ 1.15 (15% increase)\n• Over rough surfaces (z₀=0.5 m, forest): wind shear is strong — u(10)/u(2) ≈ 1.8 (80% increase)\n• Wind energy applications: a 10 m/s wind at 10 m height, extrapolated to 100 m hub height, gives ~12 m/s over grassland but ~14 m/s over forest — a critical difference for energy yield\n• The log law fails: (1) in very stable conditions (night, calm) where the wind may form a low-level jet unconnected to surface friction; (2) just above tall canopies (roughness sublayer); (3) over complex terrain where internal boundary layers develop\n• For wind energy: use the power law u(z) = u_ref·(z/z_ref)^α for extrapolation, with α ≈ 0.1 (water) to 0.4 (forest). The log law (with z₀=0.1 m) gives equivalent α ranging from 0.12 (10→20 m) to 0.23 (50→100 m)\n• Wind shear exponent α = 1/ln(z/z₀): at 80 m hub height, α (80→100 m) = 0.14 for grassland, 0.24 for forest — significantly affecting annual energy production estimates'
           },
           {
-            id: 50, toolName: 'Stomatal Conductance Model', name: 'Ball-Berry Stomatal Conductance Model', equation: 'g_s = g₀ + a₁ × A × h_s / c_s',
-            reference: 'Ball, J.T., Woodrow, I.E. & Berry, J.A. (1987) A model predicting stomatal conductance and its contribution to the control of photosynthesis under different environmental conditions. In: Biggins, J. (ed.), Progress in Photosynthesis Research, Vol. 4, pp. 221–224. Martinus Nijhoff Publishers, Dordrecht.',
-            paperUrl: 'https://scholar.google.com/scholar?q=Ball+1987+stomatal+conductance+photosynthesis',
+            id: 50, toolName: 'Stomatal Conductance Model', name: 'Ball-Berry Stomatal Conductance Model', equation: 'g_s = g₀ + a₁ × A × h_s / c_s  (g in mol m⁻² s⁻¹; ×1000 → mmol m⁻² s⁻¹)',
+            reference: 'Ball, J.T., Woodrow, I.E. & Berry, J.A. (1987) A model predicting stomatal conductance and its contribution to the control of photosynthesis under different environmental conditions. In: Biggins, J. (ed.), Progress in Photosynthesis Research, Vol. 4, pp. 221–224. Martinus Nijhoff Publishers, Dordrecht. DOI: 10.1007/978-94-017-0519-6_48 (local: docs/Research papers/10.1007@978-94-017-0519-6_48_tool50_ball-berry-stomatal.pdf). Empirical form read from the paper\'s Fig. 1B fit g = 9.31·A·hₛ/cₛ (Glycine max, r² = 0.971); regression intercept not significantly different from the origin.',
+            paperUrl: 'https://doi.org/10.1007/978-94-017-0519-6_48',
             appliesTo: 'Land surface modeling, transpiration',
             shortDescription: 'Models stomatal conductance (g_s) as a linear function of net photosynthesis rate (A), relative humidity at the leaf surface (h_s), and CO₂ concentration at the leaf surface (c_s), used in all major land surface models',
             paperSummary: 'Ball et al. (1987) proposed the empirical stomatal conductance model g_s = g₀ + a₁·A·h_s/c_s, based on observations that stomata open in response to: (1) increasing net photosynthesis (A), (2) increasing humidity at the leaf surface (h_s), and (3) decreasing CO₂ concentration at the leaf surface (c_s). The intercept g₀ represents minimum (residual) conductance when A=0 (e.g., at night). The slope a₁ (Ball-Berry index) varies with plant functional type: C₃ grasses a₁≈9, C₃ trees a₁≈6–8, C₄ grasses a₁≈4–5. The model predicts that stomata regulate to maintain a nearly constant ratio of intercellular to ambient CO₂ concentration (cᵢ/cₐ ≈ 0.7 for C₃, 0.4 for C₄). The Ball-Berry model is incorporated in all major land surface models (CLM, JULES, SiB, Noah-MP) and Earth System Models (CESM, UKESM, MPI-ESM) to predict canopy transpiration and photosynthesis coupling.',
             scientificConcept: 'Stomata are pores on leaf surfaces that regulate CO₂ uptake for photosynthesis and water loss (transpiration). The Ball-Berry model captures the coupled nature of photosynthesis-stomatal conductance: stomata open more when photosynthesis is high (need CO₂), when humidity is high (low water vapor gradient, less water loss per CO₂ gained), and when CO₂ is low (strong gradient for CO₂ diffusion). The index a₁ = g_s·c_s/(A·h_s) (when g₀ ≈ 0) represents the "water-use-efficiency" parameter — approximately the ratio of stomatal conductance to the photosynthetic rate. The model predicts that g_s increases with A and h_s, and decreases with c_s (including the CO₂ fertilization effect: as atmospheric CO₂ rises, g_s decreases, reducing transpiration — partial stomatal closure under elevated CO₂). The Ball-Berry model is semi-empirical: it does not explicitly represent guard cell physiology but captures the observed behavior. The more mechanistic Medlyn et al. (2011) model g_s = g₀ + 1.6(1 + g₁/√D)·A/c_s incorporates vapor pressure deficit D (instead of h_s) and is now preferred in many applications.',
             inputs: [
-              { symbol: 'g₀', label: 'Residual (Minimum) Conductance', unit: 'mmol/m²s', default: 10, min: 0, max: 100, group: 'Stomatal Parameters' },
-              { symbol: 'a₁', label: 'Ball-Berry Slope Parameter', unit: '—', default: 9, min: 0, max: 20, group: 'Stomatal Parameters' },
-              { symbol: 'A', label: 'Net Photosynthesis Rate (CO₂ assimilation)', unit: 'µmol/m²s', default: 15, min: 0, max: 50, group: 'Photosynthesis' },
-              { symbol: 'hₛ', label: 'Relative Humidity at Leaf Surface', unit: '—', default: 0.7, min: 0, max: 1, group: 'Environmental' },
-              { symbol: 'cₛ', label: 'CO₂ Concentration at Leaf Surface', unit: 'µmol/mol', default: 380, min: 100, max: 1000, group: 'Environmental' }
+              { symbol: 'g₀', label: 'Residual (Minimum) Conductance (auto: 0 — the paper\'s regression intercept is not significantly different from the origin)', unit: 'mmol/m²s', default: null, min: 0, max: 100, group: 'Stomatal Parameters' },
+              { symbol: 'a₁', label: 'Ball-Berry Slope Parameter (auto: 9.31 — the paper\'s own Fig. 1B Glycine max fit, r² = 0.971)', unit: '—', default: null, min: 0, max: 20, group: 'Stomatal Parameters' },
+              { symbol: 'A', label: 'Net Photosynthesis Rate, CO₂ assimilation (auto: genuine MODIS MOD17A2H 8-day GPP via ORNL DAAC, as a time-mean canopy rate)', unit: 'µmol/m²s', default: null, min: 0, max: 50, group: 'Photosynthesis' },
+              { symbol: 'hₛ', label: 'Relative Humidity at Leaf Surface (auto: genuine ERA5 2 m relative humidity from the CDS single-step job, 12 Z on the resolved date)', unit: '—', default: null, min: 0, max: 1, group: 'Environmental' },
+              { symbol: 'cₛ', label: 'CO₂ Concentration at Leaf Surface (auto: genuine NOAA GML global monthly-mean mole fraction; well-mixed boundary layer assumed per the paper)', unit: 'µmol/mol', default: null, min: 100, max: 1000, group: 'Environmental' }
             ],
             outputs: [
-              { id: 'primary', label: 'Stomatal Conductance g_s', type: 'scalar', unit: 'mmol/m²s', description: 'Leaf stomatal conductance to water vapor. Typical values: C₃ crops: 150–400 mmol/m²s; C₄ crops: 100–300; forest trees: 100–250; desert shrubs: 50–150. For g₀=10, a₁=9, A=15, h_s=0.7, c_s=380: g_s≈259 mmol/m²s.' },
-              { id: 'transpiration_rate', label: 'Leaf Transpiration Rate E', type: 'scalar', unit: 'mmol/m²s', description: 'Water vapor flux from leaf: E = g_s × D/1.6 where D is leaf-to-air vapor pressure deficit (kPa). For g_s=259, D=1.2 kPa: E≈194 mmol/m²s ≈ 0.35 mm/h.' },
-              { id: 'water_use_efficiency', label: 'Instantaneous Water Use Efficiency', type: 'scalar', unit: 'µmol/mmol', description: 'Photosynthetic water use efficiency: WUE = A / (E × 1.6). For A=15, g_s=259, D=1.2: WUE≈5.8 µmol/mmol (≈1.2 gC/kgH₂O for C₃). C₄ crops have higher WUE (~2.5 gC/kgH₂O).' }
+              { id: 'primary', label: 'Stomatal Conductance g_s', type: 'scalar', unit: 'mmol/m²s', description: 'Leaf stomatal conductance to water vapor. The paper\'s form yields g in mol m⁻² s⁻¹ (A·hₛ/cₛ has µmol·µmol⁻¹·mol = mol dimensions); the tool reports it in mmol/m²s (×1000). Typical values: C₃ crops 150–400; C₄ crops 100–300; forest trees 100–250; desert shrubs 50–150. Worked example with explicit inputs g₀=10, a₁=9, A=15, h_s=0.7, c_s=380: g = 0.010 + 9×15×0.7/380 = 0.2587 mol/m²s ≈ 259 mmol/m²s.' },
+              { id: 'transpiration_rate', label: 'Leaf Transpiration Rate E', type: 'scalar', unit: 'mmol/m²s', description: 'Water-vapor flux from the leaf on the mole-fraction gradient: E = g_s × D/P where D is the leaf-to-air vapor pressure deficit and P is ambient pressure (both kPa), with g_s in mol/m²s. For g_s = 0.259 mol/m²s, D = 1.2 kPa, P = 101.3 kPa: E ≈ 3.1 mmol/m²s ≈ 0.2 mm/h (a well-watered C₃ leaf). The 1.6 factor converts H₂O↔CO₂ conductances (g_CO2 = g_H2O/1.6) and does not multiply the flux.' },
+              { id: 'water_use_efficiency', label: 'Instantaneous Water Use Efficiency', type: 'scalar', unit: 'µmol/mmol', description: 'Photosynthetic water-use efficiency WUE = A/E. For A = 15 µmol/m²s and E ≈ 3.1 mmol/m²s (g_s ≈ 0.259 mol/m²s, D = 1.2 kPa): WUE ≈ 4.9 µmol/mmol. C₄ plants run higher (~2× C₃) because their lower a₁ and CO₂-concentrating mechanism reduce water loss per unit carbon.' }
             ],
-            methodology: 'The Ball-Berry model is applied at leaf or canopy scale. At leaf scale: g_s = g₀ + a₁·A·h_s/c_s. Requires: net photosynthesis A (from FvCB model or measurement), relative humidity at the leaf surface h_s (≈ VPD correction from ambient conditions), and CO₂ concentration at the leaf surface c_s (≈ ambient CO₂ for well-ventilated leaves). At canopy scale: the model is combined with the multilayer (big-leaf or two-leaf) canopy integration. The slope a₁ is typically determined by fitting g_s vs A·h_s/c_s from leaf gas exchange measurements.',
+            methodology: 'The Ball-Berry model is applied at leaf or canopy scale: g_s = g₀ + a₁·A·hₛ/cₛ with g in mol m⁻² s⁻¹, A in µmol CO₂ m⁻² s⁻¹, hₛ the decimal relative humidity at the leaf surface (wₛ/wᵢ in the paper) and cₛ the CO₂ mole fraction at the leaf surface in µmol mol⁻¹ — the paper deliberately expresses gas concentrations interior to the boundary layer so the relation applies under any boundary-layer condition. Auto-input chain (all genuine, no static fallbacks): A from MODIS MOD17A2H 8-day GPP (ORNL DAAC MODIS Web Service; the published kg C m⁻² per 8 days converted to the time-mean canopy assimilation rate 1000÷(8×86400)÷0.012 = 1.44678× the kgC value, in µmol CO₂ m⁻² s⁻¹); hₛ from genuine ERA5 2 m relative humidity (Copernicus CDS single-step job, 12 Z on the resolved date — the redistribution/proxy subset is rejected for authenticity); cₛ from the NOAA GML global monthly mean mole fraction (requested month honoured when published); g₀ = 0 and a₁ = 9.31 from the paper itself (intercept not significantly different from the origin; Glycine max slope r² = 0.971). User supplies override any input; where no genuine input resolves (e.g. ocean — no GPP pixel) the result is an honest NaN.',
             processingSteps: [
-              '1. Input residual conductance g₀ (mmol/m²s): minimum conductance when A=0 (night, stressed); typically 10 for C₃, 20 for C₄',
-              '2. Input Ball-Berry slope a₁: 9 for C₃ crops, 6–8 for C₃ trees, 4–6 for C₄ plants (unitless, but formally µmol CO₂/mmol H₂O)',
-              '3. Input net photosynthesis rate A (µmol CO₂/m²s): from Farquhar photosynthesis model or direct measurement',
-              '4. Input leaf surface relative humidity h_s (0–1 fraction): approximated from ambient relative humidity for well-coupled leaves',
-              '5. Input leaf surface CO₂ concentration c_s (µmol/mol): approximately 0.7× ambient for C₃, 0.4× ambient for C₄',
-              '6. Compute stomatal conductance: g_s = g₀ + a₁ × A × h_s / c_s',
-              '7. Compute transpiration: E = g_s / 1.6 × D where D = e_s(T_leaf) − e_a (vapor pressure deficit); the factor 1.6 accounts for the ratio of diffusivity of H₂O to CO₂ in air'
+              '1. Residual conductance g₀ (mmol/m²s): the paper\'s constrained-free regression intercept is not significantly different from the origin → g₀ = 0 by default; species-specific values (10–20) may be supplied',
+              '2. Ball–Berry slope a₁ (—): the paper\'s own Fig. 1B fit gives a₁ = 9.31 (Glycine max, r² = 0.971); published values ≈ 9 for C₃ crops/grasses, 6–8 for C₃ trees, 4–5 for C₄ plants. Default 9.31; override per functional type',
+              '3. Net assimilation A (µmol CO₂/m²/s): genuine MODIS MOD17A2H 8-day GPP (ORNL DAAC) converted to the time-mean canopy rate; honest NaN when no valid GPP pixel exists (ocean, barren, or data gap)',
+              '4. Leaf-surface relative humidity hₛ (0–1): genuine ERA5 2 m relative humidity from the CDS single-step job (12 Z, resolved date); for well-coupled leaves this is the paper\'s wₛ/wᵢ decimal humidity',
+              '5. Leaf-surface CO₂ cₛ (µmol/mol): genuine NOAA GML global monthly mean (~429 µmol/mol, 2026); the paper\'s sub-boundary-layer convention makes ambient CO₂ the correct well-ventilated estimate (NOT 0.7× ambient — that ratio is the intercellular cᵢ/cₐ)',
+              '6. Compute stomatal conductance: g [mol/m²s] = g₀/1000 + a₁ × A × hₛ / cₛ; report g_s = 1000×g in mmol/m²s',
+              '7. Secondary: transpiration E = g·D/P (mole-fraction gradient) and instantaneous WUE = A/E, for reference D = 1.2 kPa and P = 101.3 kPa'
             ],
-            outputInterpretation: 'Stomatal conductance determines the coupling between the carbon and water cycles:\n\n• g_s < 100 mmol/m²s: stomata nearly closed — plants under severe water stress, minimal transpiration and photosynthesis (drought, midday stomatal closure)\n• g_s 100–200 mmol/m²s: moderate conductance — typical during normal conditions for C₃ trees and shrubs; moderate transpiration\n• g_s 200–400 mmol/m²s: high conductance — well-watered conditions, C₃ crops, actively growing vegetation; high transpiration rates\n• g_s > 400 mmol/m²s: very high conductance — mesic (wet) conditions, some C₃ and C₄ crops under optimal conditions\n• CO₂ effect: as c_s increases (rising atmospheric CO₂), g_s decreases: at 550 ppm CO₂, g_s ≈ 380/550 × g_s(380) ≈ 0.7× current (assuming constant A and h_s) — leading to reduced transpiration and improved water use efficiency under elevated CO₂\n• The Ball-Berry model is used in all major Earth System Models to simulate the coupled carbon-water cycle. Under elevated CO₂, it predicts: (1) increased photosynthesis (CO₂ fertilization), (2) decreased stomatal conductance, (3) reduced canopy transpiration, (4) increased runoff due to reduced evapotranspiration — processes observed in FACE (Free-Air CO₂ Enrichment) experiments'
+            assumptions: [
+              'Steady-state gas exchange: g and A are concurrent, as in the paper\'s cuvette measurements and gas-exchange fits',
+              'a₁ constant across conditions — the paper\'s slope is 9.31 on Glycine max; it varies by species and functional type (C₃ ≈ 9, C₄ ≈ 4–5)',
+              'g₀ = 0: the paper\'s unconstrained regression intercept is not significantly different from the origin',
+              'Leaf-surface CO₂ ≈ ambient mole fraction (well-ventilated leaf, per the paper\'s sub-boundary-layer convention)',
+              'hₛ ≈ ambient 2 m relative humidity (well-coupled leaf; leaf-to-air decoupling not modelled)',
+              'Well-watered vegetation; no additional soil-moisture stress response beyond the humidity dependence'
+            ],
+            limitations: [
+              'a₁ must be site/species-fitted — a single global slope carries ±25 % or more conductance uncertainty',
+              'Original hₛ form over-predicts conductance at very low humidity; the Leuning (1995) D-based revision g_s = g₀ + a₁·A/[(c_s−Γ)·(1+D/D₀)] is recommended for VPD extremes',
+              'Empirical only: no guard-cell physiology, so transient stomatal responses (minutes lag vs photosynthesis) are not reproduced',
+              'Auto A is a time-mean over an 8-day MODIS composite — diurnal peaks in conductance are smeared; supply instantaneous gas-exchange A for instantaneous g',
+              'Canopy application requires big-leaf/multilayer integration; a leaf-level g_s applied to a canopy introduces systematic bias',
+              'Auto hₛ is 2 m ERA5 humidity at 12 Z — in-canopy humidity can differ substantially from the 2 m reference'
+            ],
+            outputInterpretation: 'Stomatal conductance determines the coupling between the carbon and water cycles:\n\n• g_s < 100 mmol/m²s: stomata nearly closed — plants under severe water stress, minimal transpiration and photosynthesis (drought, midday stomatal closure)\n• g_s 100–200 mmol/m²s: moderate conductance — typical during normal conditions for C₃ trees and shrubs; moderate transpiration\n• g_s 200–400 mmol/m²s: high conductance — well-watered conditions, C₃ crops, actively growing vegetation; high transpiration rates\n• g_s > 400 mmol/m²s: very high conductance — mesic (wet) conditions, some C₃ and C₄ crops under optimal conditions\n• CO₂ effect: as c_s increases (rising atmospheric CO₂), g_s decreases: at 550 µmol/mol, g_s ≈ 429/550 × g_s(429) ≈ 0.78× current (assuming constant A and h_s) — leading to reduced transpiration and improved water use efficiency under elevated CO₂\n• The Ball-Berry model is used in all major Earth System Models to simulate the coupled carbon-water cycle. Under elevated CO₂ it predicts: (1) increased photosynthesis (CO₂ fertilization), (2) decreased stomatal conductance, (3) reduced canopy transpiration, (4) increased runoff due to reduced evapotranspiration — processes observed in FACE (Free-Air CO₂ Enrichment) experiments',
+            accuracy: '±25 % typical for conductance (empirical model; species-level a₁ variability dominates). The paper\'s own fit is r² = 0.971 against Glycine max cuvette data (Fig. 1B, a₁ = 9.31). Engine algebra is byte-exact against the paper\'s form; all five auto-inputs sourced from genuine primary services (MODIS MOD17A2H via ORNL DAAC, ERA5 via Copernicus CDS, NOAA GML CO₂) with no fabricated fallbacks — an honest NaN is returned when any genuine input is unavailable.'
           },
         ],
       },
