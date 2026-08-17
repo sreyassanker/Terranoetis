@@ -325,6 +325,7 @@ export function runToolWorkflow(
   inputs: Record<string, unknown>,
   validationRules: Array<{ param: string; min?: number; max?: number; unit?: string }>,
   dataSources: string[],
+  location?: { lat: number; lon: number },
 ): WorkflowResult {
   const t0 = Date.now();
   const perTool = getPerToolWorkflow(toolId);
@@ -334,7 +335,7 @@ export function runToolWorkflow(
   // Stage 1: Validation — use per-tool validator if available
   workflowLog.push('[1/7] Input Validation');
   let validation: ValidationResult;
-  const ctx = { dataSources, lat: 0, lon: 0, fetchedParams: {} };
+  const ctx = { dataSources, lat: location?.lat ?? 0, lon: location?.lon ?? 0, fetchedParams: {} };
   if (perTool) {
     validation = perTool.validate(inputs, ctx);
   } else {

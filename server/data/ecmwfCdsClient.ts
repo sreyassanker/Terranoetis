@@ -33,6 +33,28 @@ const cache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 }); // 24h TTL
 let cdsFailedOnce = false;
 let cdsFailedAt = 0;
 
+// CDS limits concurrent jobs per account (~2 running; extras queue server-side
+// or are rejected). fetchEra5HighFidelity fires up to 8 parallel requests, so
+// we serialize job submission/polling client-side to keep every job inside
+// the account's running limit instead of starving each other.
+let cdsInFlight = 0;
+const CDS_MAX_CONCURRENT = 2;
+const cdsQueue: Array<() => void> = [];
+
+async function runCdsJob<T>(fn: () => Promise<T>): Promise<T> {
+  if (cdsInFlight >= CDS_MAX_CONCURRENT) {
+    await new Promise<void>(resolve => cdsQueue.push(resolve));
+  }
+  cdsInFlight++;
+  try {
+    return await fn();
+  } finally {
+    cdsInFlight--;
+    const next = cdsQueue.shift();
+    if (next) next();
+  }
+}
+
 interface CdsRequestParams {
   [key: string]: unknown;
   dataset: string;
@@ -92,6 +114,17 @@ export async function fetchCdsNetCdf(
   const cached = cache.get<ArrayBuffer>(ck);
   if (cached) return cached;
 
+  return runCdsJob(async () => {
+    const cachedAgain = cache.get<ArrayBuffer>(ck);
+    if (cachedAgain) return cachedAgain;
+    return fetchCdsNetCdfInner(params, ck);
+  });
+}
+
+async function fetchCdsNetCdfInner(
+  params: CdsRequestParams,
+  ck: string,
+): Promise<ArrayBuffer | null> {
   const body: Record<string, unknown> = {
     inputs: {
       variable: params.variables,
@@ -100,9 +133,13 @@ export async function fetchCdsNetCdf(
       month: params.months,
       day: params.days,
       time: params.times,
+      // CDS v1 API: `format` selects the output format for ERA5 datasets
+      // (`download_format` is silently ignored and yields GRIB). `area`
+      // must be the array [north, west, south, east] — the legacy
+      // "N/S/E/W" string form is rejected and fails the job.
       format: params.format === 'netcdf' ? 'netcdf' : 'grib',
       ...(params.area ? {
-        area: `${params.area.north}/${params.area.south}/${params.area.east}/${params.area.west}`,
+        area: [params.area.north, params.area.west, params.area.south, params.area.east],
       } : {}),
     },
   };
@@ -150,8 +187,8 @@ export async function fetchCdsNetCdf(
     }
     const job = await pollResp.json() as { status: string };
     jobStatus = job.status;
-    if (jobStatus === 'failed') {
-      console.warn(`[CDS] job ${jobUrl} failed`);
+    if (jobStatus === 'failed' || jobStatus === 'rejected' || jobStatus === 'cancelled') {
+      console.warn(`[CDS] job ${jobUrl} ${jobStatus}`);
       return null;
     }
   }
@@ -189,23 +226,28 @@ export async function fetchCdsNetCdf(
   }
 
   const raw = await downloadResp.arrayBuffer();
-  let buffer: ArrayBuffer;
+  let buffer: ArrayBuffer | ArrayBuffer[];
 
-  // Detect ZIP (PK\003\004) and unpack if needed — ERA5-Land returns ZIP'd NetCDF
+  // Detect ZIP (PK\003\004) and unpack if needed — ERA5-Land returns ZIP'd NetCDF.
+  // A single CDS job that mixes accumulated and instant variables yields a ZIP
+  // with MULTIPLE NetCDF files (one per stepType), so return every .nc file and
+  // let the reader probe each one for the requested variable.
   const header = new Uint8Array(raw.slice(0, 4));
   if (header[0] === 0x50 && header[1] === 0x4B) {
     try {
       const zip = new AdmZip(Buffer.from(raw));
       const entries = zip.getEntries();
-      const nc = entries.find((e: { entryName: string }) => e.entryName.endsWith('.nc'));
-      if (nc) {
-        const buf = nc.getData() as Buffer;
-        buffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
-      } else {
+      const ncs = entries.filter((e: { entryName: string }) => e.entryName.endsWith('.nc'));
+      if (ncs.length === 0) {
         console.warn('[CDS] ZIP has no .nc file');
         cache.set(ck, raw);
         return raw;
       }
+      const buffers = ncs.map((nc) => {
+        const buf = nc.getData() as Buffer;
+        return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+      });
+      buffer = buffers.length === 1 ? buffers[0] : buffers;
     } catch (e) {
       console.warn(`[CDS] ZIP extraction failed: ${(e as Error).message.slice(0, 100)}`);
       cache.set(ck, raw);
@@ -234,8 +276,16 @@ let _readVarCounter = 0;
 /**
  * Parse a NetCDF-4 (HDF5) buffer and extract a named variable as Float32Array.
  * Variables are stored at root level with ECMWF short names (e.g. tcwv, zust, u10).
+ * The buffer may be an array of NetCDFs (mixed stepType ZIP) — probe each file.
  */
-async function readVariable(buffer: ArrayBuffer, varName: string): Promise<Float32Array | null> {
+async function readVariable(buffer: ArrayBuffer | ArrayBuffer[], varName: string): Promise<Float32Array | null> {
+  if (Array.isArray(buffer)) {
+    for (const b of buffer) {
+      const val = await readVariable(b, varName);
+      if (val !== null) return val;
+    }
+    return null;
+  }
   const tmpPath = `/tmp/cds_${_readVarCounter++}.h5`;
   try {
     const h5 = await getH5wasm();
@@ -364,18 +414,31 @@ export async function fetchEra5Tcwv(
 
 /**
  * Fetch ERA5 surface energy fluxes at a point.
- * Returns net shortwave (ssrd), net longwave (strd), sensible (sshf),
- * and latent (slhf) heat fluxes in W/m² or J/m² (accumulated → convert).
- * Used by energy budget equations (Eqs 17, 96).
  *
- * ERA5 stores ssrd/strd as accumulated J/m² since forecast start.
- * Divide by 3600 to get W/m² for hourly data.
+ * Conventions (verified empirically against raw ERA5 output, N. Atlantic
+ * 42.5°N 44°W, 2024-06-15 12Z):
+ *   - Gill (1982) budget: Q_net = Q_s − Q_b − Q_h − Q_e, positive = ocean
+ *     heat gain.
+ *   - Q_s  = absorbed shortwave          = ERA5 `ssr` (net solar rad.)
+ *   - Q_b  = net upward longwave         = − ERA5 `str` (net thermal rad.)
+ *          — `str` is negative-upward by IFS convention, so Q_b = −str
+ *          (empirically: skin SST 295 K, LW↓=361.6 → Q_b = +69.7 W/m²,
+ *           and −str = +69.65 ✓)
+ *   - Q_h  = sensible heat lost by ocean = − ERA5 `sshf` (sensible flux,
+ *            positive downward by IFS convention)
+ *   - Q_e  = latent heat lost by ocean   = − ERA5 `slhf` (latent flux,
+ *            positive downward by IFS convention)
+ *
+ * ERA5 stores fluxes as accumulated J/m² since the start of the forecast
+ * step (hourly steps in this request) — divide by 3600 to get W/m².
  */
 export interface Era5SurfaceFluxes {
-  netShortwave: number | null;  // W/m²
-  netLongwave: number | null;   // W/m²  
-  sensibleFlux: number | null;  // W/m²
-  latentFlux: number | null;    // W/m²
+  netShortwave: number | null;  // W/m², Gill Q_s (absorbed SW)
+  netLongwave: number | null;   // W/m², Gill Q_b (net upward LW)
+  sensibleFlux: number | null;  // W/m², Gill Q_h (ocean loss, +up)
+  latentFlux: number | null;    // W/m², Gill Q_e (ocean loss, +up)
+  airTemp2m: number | null;     // K, genuine ERA5 2 m temperature (same step as fluxes)
+  surfacePressure: number | null; // Pa, genuine ERA5 surface pressure (same step as fluxes)
 }
 
 export async function fetchEra5SurfaceFluxes(
@@ -389,10 +452,12 @@ export async function fetchEra5SurfaceFluxes(
   const buffer = await fetchCdsNetCdf({
     dataset: ERA5_SINGLE,
     variables: [
-      'surface_solar_radiation_downwards',
-      'surface_thermal_radiation_downwards',
+      'surface_net_solar_radiation',
+      'surface_net_thermal_radiation',
       'surface_sensible_heat_flux',
       'surface_latent_heat_flux',
+      '2m_temperature',
+      'surface_pressure',
     ],
     area: pointArea(lat, lon),
     years: [year],
@@ -403,16 +468,20 @@ export async function fetchEra5SurfaceFluxes(
   });
   if (!buffer) return null;
 
-  const ssrd = await readPoint(buffer, 'ssrd');   // J/m² accumulated
-  const strd = await readPoint(buffer, 'strd');   // J/m² accumulated
-  const sshf = await readPoint(buffer, 'sshf');   // J/m² accumulated
-  const slhf = await readPoint(buffer, 'slhf');   // J/m² accumulated
+  const ssr = await readPoint(buffer, 'ssr');   // J/m² accumulated, net solar
+  const str = await readPoint(buffer, 'str');   // J/m² accumulated, net thermal (neg-upward)
+  const sshf = await readPoint(buffer, 'sshf'); // J/m² accumulated, sensible (pos-downward)
+  const slhf = await readPoint(buffer, 'slhf'); // J/m² accumulated, latent   (pos-downward)
+  const t2m = await readPoint(buffer, 't2m');   // K, instantaneous
+  const sp = await readPoint(buffer, 'sp');     // Pa, instantaneous
 
   const result: Era5SurfaceFluxes = {
-    netShortwave: ssrd !== null && Number.isFinite(ssrd) ? ssrd / 3600 : null,
-    netLongwave: strd !== null && Number.isFinite(strd) ? strd / 3600 : null,
-    sensibleFlux: sshf !== null && Number.isFinite(sshf) ? sshf / 3600 : null,
-    latentFlux: slhf !== null && Number.isFinite(slhf) ? slhf / 3600 : null,
+    netShortwave: ssr !== null && Number.isFinite(ssr) ? ssr / 3600 : null,
+    netLongwave: str !== null && Number.isFinite(str) ? -str / 3600 : null,
+    sensibleFlux: sshf !== null && Number.isFinite(sshf) ? -sshf / 3600 : null,
+    latentFlux: slhf !== null && Number.isFinite(slhf) ? -slhf / 3600 : null,
+    airTemp2m: t2m !== null && Number.isFinite(t2m) ? t2m : null,
+    surfacePressure: sp !== null && Number.isFinite(sp) ? sp : null,
   };
   cache.set(cacheKey, result);
   return result;

@@ -8,6 +8,10 @@
  * (no single scalar output), a representative scalar diagnostic is returned.
  */
 
+import { cb2014Terms } from '../data/campbellBozorgnia2014';
+import { ordinaryKriging, pairDistanceKm, type VariogramModel } from '../data/kriging';
+import { inverseDistanceWeighting } from '../data/idw';
+
 export interface ComputeResult {
   result: number;
   unit?: string;
@@ -95,8 +99,8 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ],
     };
   },
-  2: ({ λ, T }) => {
-    const lamM = λ * 1e-6;
+  2: ({ lambda, T }) => {
+    const lamM = lambda * 1e-6;
     const hc_over_lkT = (H_PLANCK * C_LIGHT) / (lamM * K_BOLTZMANN * T);
     const e = Math.exp(hc_over_lkT);
     const B = (2 * H_PLANCK * C_LIGHT ** 2) / Math.pow(lamM, 5) * (1 / (e - 1));
@@ -108,10 +112,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       result: B, unit: 'W·sr⁻¹·m⁻³',
       steps: [
         '── Planck Radiation Law (Planck, 1901) ──',
-        `Wavelength λ = ${λ} µm, Temperature T = ${T} K (${(T - 273.15).toFixed(1)} °C)`,
+        `Wavelength λ = ${lambda} µm, Temperature T = ${T} K (${(T - 273.15).toFixed(1)} °C)`,
         '',
         'Step 1 — Convert wavelength to meters:',
-        `  λ(m) = ${λ} × 10⁻⁶ = ${lamM.toExponential(3)} m`,
+        `  λ(m) = ${lambda} × 10⁻⁶ = ${lamM.toExponential(3)} m`,
         '',
         'Step 2 — Compute exponent hc/λkT:',
         `  hc/λkT = (${H_PLANCK.toExponential(3)} × ${C_LIGHT}) / (${lamM.toExponential(3)} × ${K_BOLTZMANN.toExponential(3)} × ${T})`,
@@ -132,9 +136,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   3: ({ T }) => {
     const Tc = T;
     const es = 6.1094 * Math.exp((17.625 * Tc) / (Tc + 243.04));
-    // Dew point proxy: if we treat es as actual vapor pressure, Td = ... (not computed here)
-    // Slope of saturation vapor pressure curve Δ = des/dT (Pa/K) for Penman-Monteith
-    const delta = (4098 * es) / Math.pow(Tc + 237.3, 2);
+    // Slope of the Magnus–Tetens curve (exact analytic derivative, hPa/°C):
+    //   Δ = d e_s / dT = 17.625·243.04·e_s / (T + 243.04)²
+    // Same quantity FAO-56 tabulates (converted) for Penman–Monteith.
+    const delta = (17.625 * 243.04 * es) / Math.pow(Tc + 243.04, 2);
     // Mixing ratio at saturation (g/kg)
     const ws = 622 * es / (1013.25 - es);
     return {
@@ -149,7 +154,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  e_s = ${es.toFixed(3)} hPa`,
         '',
         'Step 2 — Derived thermodynamic quantities:',
-        `  Slope Δ = de_s/dT = ${delta.toFixed(3)} Pa/K (used in Penman-Monteith ET₀)`,
+        `  Slope Δ = de_s/dT = ${delta.toFixed(3)} hPa/°C (used in Penman-Monteith ET₀)`,
         `  Saturation mixing ratio w_s = 622·e_s/(P−e_s) = ${ws.toFixed(2)} g/kg (at P₀=1013.25 hPa)`,
         '',
         'Step 3 — Clausius-Cleyperon context:',
@@ -192,6 +197,22 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   5: ({ f, rho, dPdx, dPdy }) => {
+    // Geostrophic balance breaks down at the equator (f → 0). Return a
+    // finite NaN with an explanation instead of ±Infinity.
+    if (!Number.isFinite(f) || Math.abs(f) < 1e-7) {
+      return {
+        result: NaN, unit: 'm/s',
+        steps: [
+          '── Geostrophic Wind (Holton & Hakim, 2012, Ch. 3) ──',
+          `Coriolis parameter f = ${f} /s — |f| < 10⁻⁷ s⁻¹`,
+          '',
+          'Geostrophic balance (f·Vg = (1/ρ)|∇P|) requires |f| well away from',
+          'the equator; the Coriolis force vanishes at 0° latitude so the',
+          'wind would become infinite. Supply a mid-latitude study area or',
+          'an explicit non-zero Coriolis parameter.',
+        ],
+      };
+    }
     const Vgx = (1 / (f * rho)) * -dPdy;
     const Vgy = (1 / (f * rho)) * dPdx;
     const Vg = Math.hypot(Vgx, Vgy);
@@ -226,9 +247,16 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  6: ({ u, D, C0, t }) => {
+  6: ({ u, D, C0, t, sigma0 }) => {
     const Pe = (u * u * t) / (4 * D);
-    const dilution = Math.exp(-1 / Pe);
+    // 3-D Gaussian puff with σ² = σ₀² + 2Dt (σ₀ = initial release scale,
+    // from mapInputs, default 50 m). Centreline dilution is the volume ratio
+    // (σ₀/σ)³. Limits: C → C₀ as t → 0 or D → 0; C → 0 as t → ∞; dilution
+    // is monotonic in BOTH t and D (more time or more diffusion → more
+    // dilution). The previous exp(−1/Pe) form grew with time and failed both
+    // limits.
+    const s0 = sigma0 != null && sigma0 > 0 ? sigma0 : 50;
+    const dilution = Math.pow(1 + (2 * D * t) / (s0 * s0), -1.5);
     const C = C0 * dilution;
     const sigma = Math.sqrt(2 * D * t);
     const advDist = u * t;
@@ -237,15 +265,15 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       steps: [
         '── Advection-Diffusion Equation (Bird, Stewart & Lightfoot, 2007, Ch. 4) ──',
         `Wind speed u = ${u.toFixed(2)} m/s, Eddy diffusivity D = ${D.toFixed(2)} m²/s`,
-        `Initial concentration C₀ = ${C0.toFixed(2)} µg/m³, Time t = ${t.toFixed(0)} s (${(t / 3600).toFixed(2)} hr)`,
+        `Initial concentration C₀ = ${C0.toFixed(2)} µg/m³, Time t = ${t.toFixed(0)} s (${(t / 3600).toFixed(2)} hr), Release scale σ₀ = ${s0.toFixed(0)} m`,
         '',
         'Step 1 — Compute Péclet number:',
         '  Pe = u²t / (4D) — ratio of advective to diffusive transport',
         `  Pe = ${u.toFixed(2)}² × ${t.toFixed(0)} / (4 × ${D.toFixed(2)}) = ${Pe.toFixed(3)}`,
         `  → ${Pe > 10 ? 'Advection-dominated (narrow plume, far downwind)' : Pe > 1 ? 'Mixed regime (comparable advection & diffusion)' : 'Diffusion-dominated (plume spreads in all directions)'}`,
         '',
-        'Step 2 — Compute dilution factor:',
-        `  dilution = exp(−1/Pe) = exp(−1/${Pe.toFixed(3)}) = ${dilution.toExponential(4)}`,
+        'Step 2 — Compute dilution factor (Gaussian puff, σ² = σ₀² + 2Dt):',
+        `  dilution = (1 + 2Dt/σ₀²)^{-3/2} = (1 + ${((2 * D * t) / (s0 * s0)).toFixed(3)})^{-1.5} = ${dilution.toExponential(4)}`,
         '',
         'Step 3 — Compute peak concentration:',
         `  C = C₀ × dilution = ${C0.toFixed(2)} × ${dilution.toExponential(4)}`,
@@ -253,7 +281,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         '',
         'Step 4 — Plume geometry:',
         `  Advection distance: x = u·t = ${u.toFixed(2)} × ${t.toFixed(0)} = ${advDist.toFixed(0)} m (${(advDist / 1000).toFixed(2)} km)`,
-        `  Diffusion spread: σ = √(2Dt) = √(2 × ${D.toFixed(2)} × ${t.toFixed(0)}) = ${sigma.toFixed(1)} m`,
+        `  Diffusion spread: σ = √(2Dt) = √(2 × ${D.toFixed(2)} × ${t.toFixed(0)}) = ${sigma.toFixed(1)} m (total puff radius ≈ ${Math.sqrt(s0 * s0 + sigma * sigma).toFixed(0)} m)`,
         '',
         `  └ Interpretation: ${dilution < 0.01 ? 'Severe dilution — concentration reduced by >99%' : dilution < 0.1 ? 'Significant dilution — concentration reduced by >90%' : dilution < 0.5 ? 'Moderate dilution' : 'Minimal dilution — concentrated plume'}`,
       ]
@@ -381,7 +409,12 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   10: ({ P, Ia, S }) => {
-    const Q = Math.max(0, Math.pow(P - Ia, 2) / (P - Ia + S));
+    // SCS-CN only produces runoff when P exceeds initial abstraction: the
+    // classic form Q=(P−Ia)²/(P−Ia+S) is defined for P>Ia and Q=0 otherwise.
+    // Without the guard, P<Ia made (P−Ia)² positive and returned a bogus
+    // positive Q (e.g. P=5, Ia=10 gave 0.56 mm while the steps said Q=0).
+    const excess = P - Ia;
+    const Q = excess > 0 ? Math.max(0, Math.pow(excess, 2) / (excess + S)) : 0;
     const CN = S > 0 ? 25400 / (S + 254) : 100;
     const runoffRatio = P > 0 ? Q / P : 0;
     return {
@@ -458,7 +491,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   13: ({ K, X, It, Ot }) => {
-    const weightedStorage = (1 - X) * It + X * Ot;
+    // Muskingum storage (McCarthy 1938 / Chow 1964): S = K[X·I + (1−X)·O],
+    // X = weighting on INFLOW (typical 0–0.3). The previous code had the
+    // weights transposed — (1−X)·I + X·O — contradicting its own step text.
+    const weightedStorage = X * It + (1 - X) * Ot;
     const S = K * weightedStorage;
     const coeffCheck = K * (1 - X);
     return {
@@ -484,37 +520,80 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  14: ({ H0, amps }) => {
-    const ampArr = amps ?? [];
-    const sumAmps = ampArr.reduce((s: number, a: number) => s + a, 0);
-    const h = H0 + sumAmps;
+  14: ({ H0, amps, __officialHeight, __schuremanHeight, __tideStation }) => {
+    const ampArr: number[] = Array.isArray(amps) ? amps.filter((a: unknown) => typeof a === 'number' && Number.isFinite(a)) : [];
+    if (!Number.isFinite(H0) && ampArr.length === 0) {
+      return {
+        result: NaN, unit: 'm',
+        steps: [
+          '── Tidal Harmonic Analysis (Pugh & Woodworth, 2014) ──',
+          '',
+          'No genuine tidal constituents or datum could be resolved for this',
+          'location (no NOAA tide-prediction station within range, or the',
+          'CO-OPS API was unreachable). Provide an explicit H₀ and constituent',
+          'amplitudes, or choose a coastal study area.',
+        ],
+      };
+    }
+    const sumTerms = ampArr.reduce((s: number, a: number) => s + a, 0);
+    const sumAbsAmps = ampArr.reduce((s: number, a: number) => s + Math.abs(a), 0);
+    const H0v = Number.isFinite(H0) ? H0 : 0;
+    const h = H0v + sumTerms;
     const nConstituents = ampArr.length;
-    return {
-      result: h, unit: 'm',
-      steps: [
-        '── Tidal Harmonic Analysis (Pugh & Woodworth, 2014) ──',
-        `Mean sea level H₀ = ${H0.toFixed(3)} m`,
-        `Number of harmonic constituents: ${nConstituents}`,
+    const official = typeof __officialHeight === 'number' && Number.isFinite(__officialHeight) ? __officialHeight : null;
+    const station = typeof __tideStation === 'string' ? __tideStation : null;
+    const steps = [
+      '── Tidal Harmonic Analysis (Pugh & Woodworth, 2014; Schureman, 1958) ──',
+      `h(t) = H₀ + Σ Aᵢ·fᵢ·cos(ωᵢt + V₀ᵢ + uᵢ − φᵢ)`,
+      '',
+      `Station: ${station ?? 'not resolved (constituents user-supplied)'}`,
+      `Datum constant H₀ (MTL − MLLW) = ${Number.isFinite(H0) ? H0.toFixed(3) + ' m' : 'not available'}`,
+      `Number of constituents: ${nConstituents} (each term pre-evaluated with node factor f, equilibrium argument V₀, nodal phase u)`,
+      '',
+      'Step 1 — Constituent summation (Schureman-corrected terms):',
+      `  Σ Aᵢ·fᵢ·cos(ωᵢt + V₀ᵢ + uᵢ − φᵢ) = ${sumTerms.toFixed(3)} m`,
+      '',
+      'Step 2 — Tidal elevation (datum MLLW):',
+      `  h(t) = H₀ + Σ… = ${H0v.toFixed(3)} + (${sumTerms.toFixed(3)}) = ${h.toFixed(3)} m`,
+    ];
+    if (official != null) {
+      const diff = h - official;
+      steps.push(
         '',
-        'Step 1 — Constituent summation:',
-        `  Σ Aᵢcos(ωᵢt+φᵢ) = ${sumAmps.toFixed(3)} m (combined amplitude for time t)`,
-        '',
-        'Step 2 — Tidal elevation:',
-        `  h(t) = H₀ + Σ Aᵢcos(ωᵢt+φᵢ) = ${H0.toFixed(3)} + ${sumAmps.toFixed(3)}`,
-        `  h(t) = ${h.toFixed(3)} m`,
-        '',
-        'Step 3 — Tidal classification:',
-        `  Tidal range = ${(2 * sumAmps).toFixed(2)} m (approximate)`,
-        '',
-        `  └ Interpretation: ${h > 1 ? 'High tide' : h < -1 ? 'Low tide' : 'Mid-tide'} | ${(2 * sumAmps) < 2 ? 'Microtidal (< 2 m)' : (2 * sumAmps) < 4 ? 'Mesotidal (2–4 m)' : 'Macrotidal (> 4 m)'}`
-      ]
-    };
+        'Step 3 — Cross-validation vs official NOAA CO-OPS prediction:',
+        `  Official (${station}) = ${official.toFixed(3)} m`,
+        `  Schureman (this) = ${h.toFixed(3)} m, |Δ| = ${Math.abs(diff).toFixed(3)} m`
+      );
+    }
+    const range = 2 * sumAbsAmps;
+    steps.push(
+      '',
+      `Step ${official != null ? 4 : 3} — Tidal classification:`,
+      `  Tidal range ≈ 2·Σ|Aᵢ| = ${range.toFixed(2)} m (approximate, constituents only)`,
+      '',
+      `  └ Interpretation: ${range < 2 ? 'Microtidal regime (< 2 m)' : range < 4 ? 'Mesotidal regime (2–4 m)' : 'Macrotidal regime (> 4 m)'}${official != null ? ' | height above MLLW datum' : ''}`
+    );
+    return { result: h, unit: 'm', steps };
   },
   15: ({ tau, rho, A, f, vTheta: _vTheta }) => {
-    const rhoFAv = rho * f * A;
+    if (!Number.isFinite(f) || Math.abs(f) < 1e-7) {
+      return {
+        result: NaN, unit: 'm/s',
+        steps: [
+          '── Ekman Spiral (Ekman, 1905) ──',
+          `Coriolis parameter f = ${f} /s — near zero`,
+          '',
+          'Ekman surface drift V₀ = τ/√(ρfAᵥ) diverges as f → 0 (equator):',
+          'the spiral thickness depends on the Coriolis force, so the steady',
+          'Ekman solution is not defined at ~0° latitude. Provide a',
+          'non-equatorial study area or an explicit f.',
+        ],
+      };
+    }
+    const rhoFAv = rho * Math.abs(f) * A;
     const V0 = tau / Math.sqrt(rhoFAv);
-    const De = Math.PI * Math.sqrt(2 * A / f);
-    const Ue = tau / (rho * f);
+    const De = Math.PI * Math.sqrt(2 * A / Math.abs(f));
+    const Ue = tau / (rho * Math.abs(f));
     const _windRatio = V0 > 0 && tau > 0 ? V0 / (tau * 100) * 100 : 0;
     return {
       result: V0, unit: 'm/s',
@@ -541,6 +620,19 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   16: ({ f, vg: _vg, dpdx, rho }) => {
+    if (!Number.isFinite(f) || Math.abs(f) < 1e-7) {
+      return {
+        result: NaN, unit: 'm/s',
+        steps: [
+          '── Geostrophic Current (Gill, 1982) ──',
+          `Coriolis parameter f = ${f} /s — near zero`,
+          '',
+          'Geostrophic balance requires the Coriolis force (f·v = (1/ρ)∂p/∂x);',
+          'at ~0° latitude f → 0 and the velocity diverges. Supply a',
+          'non-equatorial study area or an explicit f.',
+        ],
+      };
+    }
     const v = (1 / (rho * f)) * dpdx;
     const slope = dpdx / (rho * G_GRAV); // Equivalent sea surface slope ∂η/∂x
     return {
@@ -565,29 +657,46 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  17: ({ Qs, Qb, Qh, Qe }) => {
+  17: ({ Qs, Qb, Qh, Qe, H }) => {
+    const has = [Qs, Qb, Qh, Qe].every(Number.isFinite);
+    if (!has) {
+      return {
+        result: NaN, unit: 'W/m²',
+        steps: [
+          '── Ocean Surface Heat Budget (Gill, 1982, Ch. 3) ──',
+          'Q_net = Q_s − Q_b − Q_h − Q_e',
+          '',
+          'Authentic ERA5 surface energy fluxes are unavailable for this',
+          'run (CDS API unreachable or flux request failed). Per the audit',
+          'no-fallback rule no static flux constants are substituted.',
+          'Provide explicit Qs, Qb, Qh, Qe (W/m²) or run with a working',
+          'CDS_API_TOKEN so the genuine ERA5 fluxes can be fetched.',
+        ],
+      };
+    }
     const Qnet = Qs - Qb - Qh - Qe;
-    const rho_w = 1025, cp_w = 3990, H_mix = 50; // typical mixed layer 50 m
-    const sstTend = Qnet / (rho_w * cp_w * H_mix) * 86400; // °C/day
+    const rho_w = 1025, cp_w = 3990;
+    const Hm = Number.isFinite(H) && H > 0 ? H : 50; // Gill mixed-layer slab (m)
+    const sstTend = Qnet / (rho_w * cp_w * Hm) * 86400; // °C/day
     const Lv = 2.5e6, rho_w2 = 1000;
     const evapRate = Qe / (rho_w2 * Lv) * 86400 * 1000; // mm/day
     return {
       result: Qnet, unit: 'W/m²',
       steps: [
         '── Ocean Surface Heat Budget (Gill, 1982, Ch. 3) ──',
-        `Shortwave Q_s = ${Qs.toFixed(1)} W/m², Longwave Q_b = ${Qb.toFixed(1)} W/m²`,
-        `Sensible Q_h = ${Qh.toFixed(1)} W/m², Latent Q_e = ${Qe.toFixed(1)} W/m²`,
+        `Shortwave Q_s = ${Qs.toFixed(1)} W/m², Longwave Q_b = ${Qb.toFixed(1)} W/m² (net upward)`,
+        `Sensible Q_h = ${Qh.toFixed(1)} W/m², Latent Q_e = ${Qe.toFixed(1)} W/m² (ocean losses)`,
         '',
-        'Step 1 — Net heat flux:',
+        'Step 1 — Net heat flux (positive = ocean gain):',
         `  Q_net = Q_s − Q_b − Q_h − Q_e`,
         `  Q_net = ${Qs.toFixed(1)} − ${Qb.toFixed(1)} − ${Qh.toFixed(1)} − ${Qe.toFixed(1)}`,
         `  Q_net = ${Qnet.toFixed(2)} W/m²`,
         '',
-        'Step 2 — SST tendency (mixed layer H=50 m):',
-        `  dSST/dt = Q_net/(ρc_pH) = ${Qnet.toFixed(2)} / (${rho_w} × ${cp_w} × ${H_mix})`,
+        `Step 2 — SST tendency (mixed layer H=${Hm} m, ρ=1025 kg/m³, c_p=3990 J/kg/K):`,
+        `  dSST/dt = Q_net/(ρc_pH) = ${Qnet.toFixed(2)} / (${rho_w} × ${cp_w} × ${Hm})`,
         `  dSST/dt = ${sstTend.toFixed(3)} °C/day`,
         '',
-        'Step 3 — Evaporation rate:',
+        'Step 3 — Evaporation rate from latent heat:',
         `  E = Q_e/(ρL_v) = ${Qe.toFixed(1)} / (${rho_w2} × ${Lv.toExponential(1)})`,
         `  E = ${evapRate.toFixed(2)} mm/day`,
         '',
@@ -597,9 +706,38 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   },
   18: ({ Ks, psiW, psi0, dTheta, Ft }) => {
     const psiF = psiW - psi0;
+    if (!Number.isFinite(Ks) || !Number.isFinite(dTheta) || !Number.isFinite(Ft)) {
+      return {
+        result: NaN, unit: 'm/s',
+        steps: [
+          '── Green-Ampt Infiltration (Green & Ampt, 1911) ──',
+          'f = K_s × (1 + ψ_f·Δθ/F)',
+          '',
+          'Authentic parameters could not be derived for this run. The tool',
+          'needs a genuine ISRIC SoilGrids soil pixel at the location for the',
+          'USDA texture class (→ Rawls 1983 / Mays 2005 Table 7.7.2 values for',
+          'K_s and ψ_f), plus an initial moisture or cumulative infiltration',
+          'depth (GLDAS 0–10 cm moisture, IMERG storm total, or explicit Ft).',
+          'No fabricated defaults are substituted.',
+          'Provide the study area or explicit Ks/psiW/dTheta/Ft to compute.',
+        ],
+      };
+    }
+    if (Ft <= 0 || Ks <= 0 || dTheta <= 0) {
+      return {
+        result: NaN, unit: 'm/s',
+        steps: [
+          '── Green-Ampt Infiltration (Green & Ampt, 1911) ──',
+          'f = K_s × (1 + ψ_f·Δθ/F)',
+          '',
+          `Invalid inputs: F(t)=${Ft}, K_s=${Ks}, Δθ=${dTheta}.`,
+          'F(t) (cumulative infiltration) must be > 0, K_s > 0, and Δθ > 0.',
+          'Cannot compute a finite infiltration rate.',
+        ],
+      };
+    }
     const f = Ks * (1 + psiF * dTheta / Ft);
     const L = Ft / dTheta; // wetting front depth
-    const _tPond = (Ks > 0 && Ft > 0) ? (Ks * psiF * dTheta) / (Ks * Ks) : 0;
     return {
       result: f, unit: 'm/s',
       steps: [
@@ -628,6 +766,21 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
    // ── Domain 3: Geophysics & Seismology ──
   19: ({ N: _N, a, b, M }) => {
+    if (!Number.isFinite(a) || !Number.isFinite(b)) {
+      return {
+        result: NaN, unit: 'events/yr',
+        steps: [
+          '── Gutenberg-Richter Law (Gutenberg & Richter, 1944) ──',
+          'log₁₀(N) = a − b·M',
+          '',
+          'No genuine catalog fit is available for this run: the USGS FDSN',
+          'query returned no events for the requested window/area (or the',
+          'catalog was unreachable), so neither a nor b can be derived.',
+          'No fabricated a/b constants are substituted.',
+          'Provide explicit a and b, or a location/window with seismicity.',
+        ],
+      };
+    }
     const logN = a - b * M;
     const n = Math.pow(10, logN);
     const T_r = n > 0 ? 1 / n : Infinity;
@@ -654,6 +807,27 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   20: ({ K, c, t, p }) => {
+    if (!Number.isFinite(K) || !Number.isFinite(c) || !Number.isFinite(p) || K <= 0 || c <= 0 || p <= 0) {
+      return {
+        result: NaN, unit: 'events/day',
+        steps: [
+          '── Modified Omori Law (Omori, 1894; Utsu, 1961) ──',
+          'n(t) = K / (c + t)^p',
+          '',
+          'No genuine aftershock sequence is available for this run: the USGS',
+          'FDSN query returned no usable sequence (or the catalog was',
+          'unreachable), so K, c and p cannot be fitted (Ogata 1983 MLE).',
+          'No fabricated K/c/p constants are substituted.',
+          'Provide explicit K, c, t, p, or a location with an active sequence.',
+        ],
+      };
+    }
+    if (t < 0) {
+      return {
+        result: NaN, unit: 'events/day',
+        steps: ['── Modified Omori Law ──', `Invalid elapsed time t=${t}; must be ≥ 0. Cannot compute a decay rate.`],
+      };
+    }
     const den = Math.pow(c + t, p);
     const n = den > 0 ? K / den : 0;
     const halfLife = c * (Math.pow(2, 1 / p) - 1);
@@ -682,91 +856,154 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  21: ({ mag, dist, site, fault, hw }) => {
-    const lnY = mag + dist + site + fault + hw;
-    const Y = Math.exp(lnY);
-    const pga_g = Y;
-    const mmi = pga_g > 0 ? (pga_g < 0.001 ? 1 : 2 * Math.log10(pga_g * 980.665) + 3.5) : 1; // MMI proxy
+  21: ({ mag, rrup, rjb, rx, vs30, rake, dip, ztor, width, hypoDepth }) => {
+    const req = { mag, rrup, rjb, vs30, rake, dip, ztor, width, hypoDepth };
+    for (const [k, v] of Object.entries(req)) {
+      if (!Number.isFinite(v)) {
+        return {
+          result: NaN, unit: 'g',
+          steps: [
+            '── Campbell–Bozorgnia (2014) NGA-West2 GMPE ──',
+            'ln(PGA) = f_mag + f_att + f_flt + f_hng + f_site + f_basin',
+            '          + f_dip + f_hyp + f_atten',
+            '',
+            `Parameter '${k}' is missing. The genuine CB2014 GMPE needs the full`,
+            'physical rupture/site input (M, Rrup, Rjb, Rx, Vs30, rake, dip,',
+            'ZTOR, width, hypocentral depth). No fabricated substitution.',
+          ],
+        };
+      }
+    }
+    const T = cb2014Terms({ mag, rrup, rjb, rx, vs30, rake, dip, ztor, width, hypoDepth });
+    const pgaG = T.pga;
+    const mmi = pgaG > 0 ? (pgaG < 0.001 ? 1 : 2 * Math.log10(pgaG * 980.665) + 3.5) : 1;
     return {
-      result: pga_g, unit: 'g',
+      result: pgaG, unit: 'g',
       steps: [
-        '── Campbell-Bozorgnia NGA-West2 GMPE (2014) ──',
-        `ln(PGA) components: f_mag = ${mag.toFixed(3)}, f_dist = ${dist.toFixed(3)}, f_site = ${site.toFixed(3)}`,
-        `f_fault = ${fault.toFixed(3)}, f_hw = ${hw.toFixed(3)}`,
+        '── Campbell–Bozorgnia (2014) NGA-West2 GMPE ──',
+        `M = ${mag.toFixed(1)}, Rrup = ${rrup.toFixed(1)} km, Rjb = ${rjb.toFixed(1)} km, Rx = ${rx.toFixed(1)} km`,
+        `Vs30 = ${vs30.toFixed(0)} m/s, rake = ${rake.toFixed(0)}°, dip = ${dip.toFixed(0)}°, ZTOR = ${ztor.toFixed(1)} km,`,
+        `width = ${width.toFixed(1)} km, hypo-depth = ${hypoDepth.toFixed(1)} km`,
         '',
-        'Step 1 — Sum contributions:',
-        `  ln(Y) = ${mag.toFixed(3)} + (${dist.toFixed(3)}) + (${site.toFixed(3)}) + (${fault.toFixed(3)}) + (${hw.toFixed(3)})`,
-        `  ln(Y) = ${lnY.toFixed(4)}`,
+        'Functional terms (eqs. 2-25 of C&B 2014):',
+        `  f_mag (magnitude scaling)      = ${T.fMag.toFixed(4)}`,
+        `  f_att (geometric attenuation)  = ${T.fAtt.toFixed(4)}`,
+        `  f_flt (style-of-faulting)      = ${T.fFault.toFixed(4)}`,
+        `  f_hng (hanging wall)           = ${T.fHNG.toFixed(4)}`,
+        `  f_site (nonlinear, Vs30)       = ${T.fSite.toFixed(4)}`,
+        `  f_basin (z2.5 from Vs30)       = ${T.fBasin.toFixed(4)}`,
+        `  f_dip (fault dip)              = ${T.fDip.toFixed(4)}`,
+        `  f_hyp (hypocentral depth)      = ${T.fHyp.toFixed(4)}`,
+        `  f_atten (anelastic, Rrup≥80)   = ${T.fAtten.toFixed(4)}`,
         '',
-        'Step 2 — Exponentiate to PGA:',
-        `  PGA = exp(${lnY.toFixed(4)}) = ${pga_g.toFixed(4)} g`,
-        `  PGA = ${(pga_g * 980.665).toFixed(1)} cm/s²`,
+        `  PGA on reference rock (Vs=1100): ${T.pga1100.toFixed(4)} g`,
+        `  ln(PGA) = ${T.lnPGA.toFixed(4)}  →  PGA = ${pgaG.toFixed(4)} g = ${(pgaG * 980.665).toFixed(1)} cm/s²`,
         '',
         'Step 3 — MMI intensity proxy:',
         `  Estimated MMI ≈ ${mmi.toFixed(1)} (${mmi < 4 ? 'Light shaking, rarely damaging' : mmi < 6 ? 'Moderate shaking, potential damage to vulnerable structures' : mmi < 8 ? 'Strong shaking, damaging to ordinary buildings' : 'Very strong shaking, widespread damage'})`,
         '',
-        `  └ PGA < 0.05 g: weak shaking (MMI ≤ IV); 0.05–0.15 g: moderate (MMI V–VI); 0.15–0.40 g: strong (MMI VII–VIII); >0.40 g: very strong (MMI IX+)`,
-      ]
+        `  └ PGA < 0.05 g: weak (MMI ≤ IV); 0.05–0.15 g: moderate (V–VI); 0.15–0.40 g: strong (VII–VIII); >0.40 g: very strong (IX+)`,
+      ],
     };
   },
   22: ({ c, sigmaN, tanPhi }) => {
+    if (!Number.isFinite(c) || !Number.isFinite(sigmaN) || !Number.isFinite(tanPhi)) {
+      return {
+        result: NaN, unit: 'kPa',
+        steps: [
+          '── Mohr–Coulomb Failure Criterion (Coulomb, 1776; Mohr, 1900) ──',
+          'τ = c + σₙ·tanφ',
+          '',
+          'One or more of c / σₙ / tanφ is unavailable: no genuine soil data',
+          '(ISRIC SoilGrids texture + bulk density) was retrievable for this',
+          'location, so shear-strength parameters cannot be derived.',
+          'No fabricated cohesion or friction constants are substituted.',
+        ],
+      };
+    }
+    if (sigmaN < 0 || c < 0 || tanPhi < 0) {
+      return {
+        result: NaN, unit: 'kPa',
+        steps: ['── Mohr–Coulomb Failure Criterion ──', `Non-physical inputs (c=${c}, σₙ=${sigmaN}, tanφ=${tanPhi} all require ≥ 0).`],
+      };
+    }
     const tau = c + sigmaN * tanPhi;
     const phiDeg = Math.atan(tanPhi) * 180 / Math.PI;
     const tanSq = tanPhi * tanPhi;
-    const sigma1 = sigmaN + tau / tanPhi; // principal stress σ₁ at failure proxy
-    const sigma3 = sigmaN - tau * tanPhi; // principal stress σ₃ at failure proxy
     const sinPhi = tanPhi / Math.sqrt(1 + tanSq);
+    const cosPhi = 1 / Math.sqrt(1 + tanSq);
+    const secPhi = 1 / cosPhi;
+    // Exact Mohr-circle pole geometry for the stress state on the failure
+    // plane with shear τ and normal stress σₙ: the circle centred at
+    // (σc, 0) is tangent to the M–C envelope at (σₙ, τ).
+    const sigma1 = sigmaN + tau * (tanPhi + secPhi);
+    const sigma3 = sigmaN + tau * (tanPhi - secPhi);
     const kp = (1 + sinPhi) / (1 - sinPhi); // Rankine passive earth pressure coefficient
     return {
       result: tau, unit: 'kPa',
       steps: [
         '── Mohr-Coulomb Failure Criterion (Coulomb, 1776; Mohr, 1900) ──',
-        `Material: cohesion c = ${c.toFixed(2)} kPa, normal stress σₙ = ${sigmaN.toFixed(1)} kPa`,
-        `Friction coefficient tan φ = ${tanPhi.toFixed(3)} (φ = ${phiDeg.toFixed(1)}°)`,
+        `Material: cohesion c = ${c.toFixed(2)} kPa, normal stress σₙ = ${sigmaN.toFixed(3)} kPa`,
+        `Friction coefficient tan φ = ${tanPhi.toFixed(4)} (φ = ${phiDeg.toFixed(1)}°)`,
         '',
         'Step 1 — Compute shear strength:',
-        `  τ = c + σₙ·tan φ = ${c.toFixed(2)} + ${sigmaN.toFixed(1)} × ${tanPhi.toFixed(3)}`,
+        `  τ = c + σₙ·tan φ = ${c.toFixed(2)} + ${sigmaN.toFixed(3)} × ${tanPhi.toFixed(4)}`,
         `  τ = ${tau.toFixed(2)} kPa`,
         '',
-        'Step 2 — Mohr circle principal stresses at failure:',
-        `  σ₁ ≈ σₙ + τ/tanφ = ${sigmaN.toFixed(1)} + ${tau.toFixed(2)}/${tanPhi.toFixed(3)} = ${sigma1.toFixed(1)} kPa`,
-        `  σ₃ ≈ σₙ − τ·tanφ = ${sigmaN.toFixed(1)} − ${tau.toFixed(2)}×${tanPhi.toFixed(3)} = ${sigma3.toFixed(1)} kPa`,
+        'Step 2 — Mohr circle at failure (exact tangency geometry):',
+        `  σ₁ = σₙ + τ(tanφ + secφ) = ${sigmaN.toFixed(3)} + ${tau.toFixed(2)} × (${tanPhi.toFixed(4)} + ${secPhi.toFixed(4)}) = ${sigma1.toFixed(2)} kPa`,
+        `  σ₃ = σₙ + τ(tanφ − secφ) = ${sigmaN.toFixed(3)} + ${tau.toFixed(2)} × (${tanPhi.toFixed(4)} − ${secPhi.toFixed(4)}) = ${sigma3.toFixed(2)} kPa`,
+        `  (circle centred at ${((sigma1 + sigma3) / 2).toFixed(2)} kPa, radius ${((sigma1 - sigma3) / 2).toFixed(2)} kPa, tangent to the envelope)`,
         '',
         'Step 3 — Derived parameters:',
         `  Active earth pressure coefficient K_a = (1−sinφ)/(1+sinφ) = ${(1 / kp).toFixed(3)}`,
         `  Passive earth pressure coefficient K_p = ${kp.toFixed(3)}`,
         `  Failure plane angle: θ_f = 45° + φ/2 = ${(45 + phiDeg / 2).toFixed(1)}° from σ₁ direction`,
         '',
-        `  └ Interpretation: ${tau > 100 ? 'High shear strength — intact rock or dense granular soil' : tau > 30 ? 'Moderate strength — typical soil/rock joint' : 'Low strength — soft soil or pre-existing fracture'}`,
+        `  └ Interpretation: ${tau > 100 ? 'High shear strength — intact rock or dense granular soil' : tau > 30 ? 'Moderate strength — typical soil/rock joint' : 'Low strength — soft soil or shallow/low-confinement condition'}`,
         `  └ Effective stress: if pore pressure u is known, σ′ₙ = σₙ − u (Terzaghi principle)`
       ]
     };
   },
-  23: ({ M0, target: _target }) => {
+  23: ({ M0 }) => {
+    if (!Number.isFinite(M0) || M0 <= 0) {
+      return {
+        result: NaN, unit: 'M_w',
+        steps: [
+          '── Hanks-Kanamori Moment Magnitude (Hanks & Kanamori, 1979) ──',
+          'M_w = (2/3)·log₁₀(M₀) − 10.7  (M₀ in dyne·cm; = (2/3)·log₁₀(M₀) − 6.033 in N·m)',
+          '',
+          'No genuine seismic moment is available: no USGS moment tensor and',
+          'no catalog magnitude exist for this region (or the catalog was',
+          'unreachable). No fabricated M₀ is substituted.',
+        ],
+      };
+    }
     const logM0 = Math.log10(M0);
-    const Mw = (2 / 3) * logM0 - 6.07;  // Hanks-Kanamori (1979): M₀ in N·m (SI)
-    const logA = Mw - 4; // empirical: log₁₀(A_km²) ≈ Mw − 4 (Δσ≈3 MPa)
-    const A_km2 = Math.pow(10, logA);
-    const D = M0 / (3e10 * (A_km2 * 1e6)) || 0;
-    const logEs = 1.5 * Mw + 4.8; // Gutenberg-Richter energy relation
+    // Hanks & Kanamori (1979) eq. 15: M_w = (2/3) log10 M0 − 10.7 (dyne·cm).
+    // M₀ here is in N·m: 1 N·m = 10⁷ dyne·cm ⇒ −10.7 + (2/3)·7 = −6.0333.
+    const Mw = (2 / 3) * (logM0 + 7) - 10.7;
+    const A_km2 = Math.pow(10, Mw - 4); // empirical: log₁₀(A_km²) ≈ M_w − 4 (Δσ≈3 MPa)
+    const D = M0 / (3e10 * (A_km2 * 1e6)); // slip: M₀ = μ·A·D, μ = 3×10¹⁰ Pa
+    const logEs = 1.5 * Mw + 4.8; // Gutenberg-Richter energy relation (J)
     const Es = Math.pow(10, logEs);
     return {
       result: Mw, unit: 'M_w',
       steps: [
         '── Hanks-Kanamori Moment Magnitude (Hanks & Kanamori, 1979) ──',
-        `Seismic moment M₀ = ${M0.toExponential(3)} N·m`,
+        `Seismic moment M₀ = ${M0.toExponential(3)} N·m = ${Math.pow(10, logM0 + 7).toExponential(3)} dyne·cm`,
         '',
-        'Step 1 — Log transform:',
-        `  log₁₀(M₀) = ${logM0.toFixed(4)}`,
+        'Step 1 — Convert to dyne·cm and log-transform:',
+        `  log₁₀(M₀ / dyne·cm) = log₁₀(M₀) + 7 = ${logM0.toFixed(4)} + 7 = ${(logM0 + 7).toFixed(4)}`,
         '',
-        'Step 2 — Compute M_w:',
-        `  M_w = (2/3)·log₁₀(M₀) − 6.07 = (2/3)×${logM0.toFixed(4)} − 6.07`,
+        'Step 2 — Compute M_w (Hanks & Kanamori 1979, eq. 15):',
+        `  M_w = (2/3)·log₁₀(M₀) − 10.7 = (2/3)×${(logM0 + 7).toFixed(4)} − 10.7`,
         `  M_w = ${Mw.toFixed(2)}`,
         '',
-        'Step 3 — Estimate rupture parameters:',
+        'Step 3 — Derived rupture/source estimates:',
         `  Rupture area: A ≈ 10^(M_w−4) = ${A_km2.toFixed(0)} km² (${(A_km2 * 1e6).toExponential(3)} m²)`,
         `  Avg. slip: D ≈ M₀/(μ·A) = ${D.toFixed(2)} m (μ ≈ 3×10¹⁰ Pa)`,
-        `  Seismic energy: E_s ≈ 10^(1.5·M_w+4.8) = ${Es.toExponential(3)} J`,
+        `  Seismic energy: E_s ≈ 10^(1.5·M_w+4.8) = ${Es.toExponential(3)} J (Gutenberg-Richter)`,
         '',
         `  └ Magnitude class: ${Mw < 4 ? 'Micro earthquake' : Mw < 5 ? 'Light earthquake' : Mw < 6 ? 'Moderate earthquake' : Mw < 7 ? 'Strong earthquake' : Mw < 8 ? 'Major earthquake' : 'Great earthquake'}`,
         `  └ Energy equivalent: ${(Es / 4.184e9).toFixed(1)} tonnes TNT`
@@ -774,12 +1011,28 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   24: ({ M0, r }) => {
+    if (!Number.isFinite(M0) || !Number.isFinite(r) || M0 <= 0 || r <= 0) {
+      return {
+        result: NaN, unit: 'Pa',
+        steps: [
+          '── Brune Stress Drop Model (Brune, 1970) ──',
+          'Δσ = (7/16) · M₀/r³',
+          '',
+          'No genuine source parameters are available: neither a USGS scalar',
+          'seismic moment nor a catalog magnitude (to derive the source',
+          'radius) exists for this region. No fabricated M₀ or r is',
+          'substituted.',
+        ],
+      };
+    }
     const dsig = (7 / 16) * (M0 / Math.pow(r, 3));
     const dsig_MPa = dsig / 1e6;
     const beta = 3500; // shear wave velocity (m/s)
     const fc = 0.49 * beta / r;
     const mu = 3e10; // shear modulus (Pa)
-    const D = (7 * Math.PI / 16) * dsig * r / mu;
+    // Average slip for a circular crack: M₀ = μ·πr²·D and M₀ = (16/7)Δσ·r³
+    // ⇒ D = (16/7π)·Δσ·r/μ = M₀/(μ·π·r²).
+    const D = M0 / (mu * Math.PI * r * r);
     return {
       result: dsig, unit: 'Pa',
       steps: [
@@ -788,27 +1041,40 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         '',
         'Step 1 — Compute static stress drop:',
         `  Δσ = (7/16) × M₀/r³ = (7/16) × ${M0.toExponential(3)} / (${r.toFixed(0)})³`,
-        `  Δσ = ${dsig.toExponential(3)} Pa = ${dsig_MPa.toFixed(4)} MPa`,
+        `  Δσ = ${dsig.toExponential(3)} Pa = ${dsig_MPa.toFixed(3)} MPa`,
         '',
         'Step 2 — Corner frequency:',
-        `  f_c = 0.49·β/r = 0.49 × ${beta} / ${r.toFixed(0)} = ${fc.toFixed(2)} Hz`,
+        `  f_c = 0.49·β/r = 0.49 × ${beta} / ${r.toFixed(0)} = ${fc.toFixed(3)} Hz`,
         '',
-        'Step 3 — Average slip:',
-        `  D = (7π/16)·Δσ·r/μ = ${D.toFixed(4)} m`,
+        'Step 3 — Average slip (M₀ = μ·π·r²·D):',
+        `  D = M₀/(μ·π·r²) = (16/7π)·Δσ·r/μ = ${D.toFixed(3)} m`,
         '',
-        `  └ Stress class: ${dsig_MPa < 0.1 ? 'Low stress drop — slow/tsunami earthquake' : dsig_MPa < 1 ? 'Moderate stress drop' : dsig_MPa < 10 ? 'Typical crustal earthquake (1–10 MPa)' : 'High stress drop — strong high-frequency shaking'}`,
-        `  └ Moment / stress: M₀/Δσ = ${(M0 / dsig).toExponential(3)} → correlates with source volume`
+        `  └ Stress class: ${dsig_MPa < 0.1 ? 'Low stress drop — slow/tsunami earthquake' : dsig_MPa < 1 ? 'Moderate-to-low stress drop' : dsig_MPa < 10 ? 'Typical crustal earthquake (1–10 MPa)' : 'High stress drop — strong high-frequency shaking'}`,
+        `  └ Self-similarity: Δσ ≈ constant across M₀ (Kanamori & Anderson 1975)`,
       ]
     };
   },
   25: ({ Mw }) => {
+    if (!Number.isFinite(Mw) || Mw <= 0) {
+      return {
+        result: NaN, unit: 'km²',
+        steps: [
+          '── Wells-Coppersmith Rupture Scaling (Wells & Coppersmith, 1994) ──',
+          'log₁₀(A) = −3.49 + 0.91·M_w',
+          '',
+          'No genuine magnitude is available for this region: the USGS',
+          'catalog returned no events in the time window. No fabricated',
+          'M_w is substituted for the scaling relations.',
+        ],
+      };
+    }
     const logA = -3.49 + 0.91 * Mw;
     const A = Math.pow(10, logA);
-    const logSRL = -3.55 + 0.74 * Mw; // strike-slip surface rupture length
+    const logSRL = -3.55 + 0.74 * Mw; // surface rupture length (strike-slip)
     const SRL = Math.pow(10, logSRL);
-    const logAD = -4.80 + 0.69 * Mw; // average displacement
+    const logAD = -4.80 + 0.69 * Mw; // average displacement (all types)
     const AD = Math.pow(10, logAD);
-    const width = Math.sqrt(A); // approximate: sqrt(A) gives rupture width for ~square rupture
+    const width = Math.sqrt(A); // approximate: sqrt(A) for ~square rupture
     return {
       result: A, unit: 'km²',
       steps: [
@@ -823,7 +1089,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  log₁₀(SRL) = −3.55 + 0.74 × ${Mw.toFixed(1)} = ${logSRL.toFixed(4)}`,
         `  SRL = ${SRL.toFixed(0)} km`,
         '',
-        'Step 3 — Average displacement:',
+        'Step 3 — Average displacement (all fault types):',
         `  log₁₀(AD) = −4.80 + 0.69 × ${Mw.toFixed(1)} = ${logAD.toFixed(4)}`,
         `  AD = ${AD.toFixed(2)} m`,
         '',
@@ -832,13 +1098,27 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  Aspect ratio L/W = ${(SRL / Math.max(width, 0.1)).toFixed(1)}`,
         '',
         `  └ Rupture class: ${A < 100 ? 'Small fault rupture (Mw < 6)' : A < 1000 ? 'Moderate fault rupture (Mw 6–7)' : A < 10000 ? 'Large fault rupture (Mw 7–8)' : 'Very large fault rupture (Mw > 8, subduction zone)'}`,
-        `  └ σ(log₁₀A) = 0.23 log units — ±1σ spans factor of ~1.7 in area`
+        `  └ σ(log₁₀A) = 0.24 log units — ±1σ spans a factor of ~1.7 in area`
       ]
     };
   },
 
   // ── Domain 4: Remote Sensing & Cryosphere ──
   26: ({ NIR, Red }) => {
+    if (!Number.isFinite(NIR) || !Number.isFinite(Red) || NIR + Red <= 0) {
+      return {
+        result: NaN, unit: '—',
+        steps: [
+          '── Normalized Difference Vegetation Index (Rouse et al., 1974) ──',
+          'NDVI = (NIR − Red) / (NIR + Red)',
+          '',
+          'No genuine surface reflectance is available: no cloud-free',
+          'Landsat C2 L2 SR scene was found for this location/date',
+          '(and no user-supplied bands). Proxy reflectance is not',
+          'substituted — Rouse (1974) requires actual measured bands.',
+        ],
+      };
+    }
     const ndvi = (NIR - Red) / (NIR + Red);
     const fpar = Math.max(0, Math.min(1, 1.16 * ndvi - 0.16));
     let vigor: string;
@@ -868,6 +1148,20 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   27: ({ Green, NIR }) => {
+    if (!Number.isFinite(Green) || !Number.isFinite(NIR) || Green + NIR <= 0) {
+      return {
+        result: NaN, unit: '—',
+        steps: [
+          '── McFeeters NDWI (McFeeters, 1996) ──',
+          'NDWI = (Green − NIR) / (Green + NIR)',
+          '',
+          'No genuine surface reflectance is available: no cloud-free',
+          'Landsat C2 L2 SR scene was found for this location/date',
+          '(and no user-supplied bands). Proxy reflectance is not',
+          'substituted — McFeeters (1996) requires actual measured bands.',
+        ],
+      };
+    }
     const ndwi = (Green - NIR) / (Green + NIR);
     let waterClass: string;
     if (ndwi > 0.5) waterClass = 'DEEP CLEAR WATER';
@@ -895,6 +1189,20 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   28: ({ NIR, SWIR }) => {
+    if (!Number.isFinite(NIR) || !Number.isFinite(SWIR) || NIR + SWIR <= 0) {
+      return {
+        result: NaN, unit: '—',
+        steps: [
+          '── Gao NDWI — Vegetation Water Content (Gao, 1996) ──',
+          'NDWI = (NIR − SWIR) / (NIR + SWIR)',
+          '',
+          'No genuine surface reflectance is available: no cloud-free',
+          'Landsat C2 L2 SR scene was found for this location/date',
+          '(and no user-supplied bands). Proxy reflectance is not',
+          'substituted — Gao (1996) requires actual measured bands.',
+        ],
+      };
+    }
     const ndwi = (NIR - SWIR) / (NIR + SWIR);
     return {
       result: ndwi, unit: '—',
@@ -913,7 +1221,24 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   29: ({ NIR, Red, Blue }) => {
+    if (!Number.isFinite(NIR) || !Number.isFinite(Red) || !Number.isFinite(Blue)) {
+      return {
+        result: NaN, unit: '—',
+        steps: [
+          '── Enhanced Vegetation Index (Huete et al., 2002) ──',
+          'EVI = 2.5·(NIR − Red) / (NIR + 6·Red − 7.5·Blue + 1)',
+          '',
+          'No genuine surface reflectance is available: no cloud-free',
+          'Landsat C2 L2 SR scene was found for this location/date',
+          '(and no user-supplied bands). Proxy reflectance is not',
+          'substituted — Huete (2002) requires actual measured bands.',
+        ],
+      };
+    }
     const denom = NIR + 6 * Red - 7.5 * Blue + 1;
+    if (denom <= 0) {
+      return { result: NaN, unit: '—', steps: ['EVI denominator non-positive — non-physical reflectance combination.'] };
+    }
     const evi = 2.5 * (NIR - Red) / denom;
     return {
       result: evi, unit: '—',
@@ -938,6 +1263,20 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   30: ({ Green, SWIR }) => {
+    if (!Number.isFinite(Green) || !Number.isFinite(SWIR) || Green + SWIR <= 0) {
+      return {
+        result: NaN, unit: '—',
+        steps: [
+          '── Normalized Difference Snow Index (Hall et al., 1995) ──',
+          'NDSI = (Green − SWIR) / (Green + SWIR)',
+          '',
+          'No genuine surface reflectance is available: no cloud-free',
+          'Landsat C2 L2 SR scene was found for this location/date',
+          '(and no user-supplied bands). Proxy reflectance is not',
+          'substituted — Hall (1995) requires actual measured bands.',
+        ],
+      };
+    }
     const ndsi = (Green - SWIR) / (Green + SWIR);
     const snowFlag = ndsi >= 0.4;
     return {
@@ -958,14 +1297,28 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  31: ({ NIR, SWIR }) => {
+  31: ({ NIR, SWIR, NIR_pre, SWIR_pre }) => {
+    if (!Number.isFinite(NIR) || !Number.isFinite(SWIR) || NIR + SWIR <= 0) {
+      return {
+        result: NaN, unit: '—',
+        steps: [
+          '── Normalized Burn Ratio (Key & Benson, 1999) ──',
+          'NBR = (NIR − SWIR2) / (NIR + SWIR2)',
+          '',
+          'No genuine post-fire surface reflectance is available: no',
+          'cloud-free Landsat C2 L2 SR scene was found for this',
+          'location/date (and no user-supplied bands). Proxy reflectance',
+          'is not substituted.',
+        ],
+      };
+    }
     const nbr = (NIR - SWIR) / (NIR + SWIR);
-    const preNIR = NIR + 0.1; // simulate pre-fire NIR (slightly higher)
-    const preSWIR = SWIR - 0.05; // simulate pre-fire SWIR (slightly lower)
-    const nbrPre = (preNIR - preSWIR) / (preNIR + preSWIR);
-    const dNBR = nbrPre - nbr;
+    const havePre = Number.isFinite(NIR_pre) && Number.isFinite(SWIR_pre) && NIR_pre + SWIR_pre > 0;
+    const nbrPre = havePre ? (NIR_pre - SWIR_pre) / (NIR_pre + SWIR_pre) : Number.NaN;
+    const dNBR = havePre ? nbrPre - nbr : Number.NaN;
     let severity: string;
-    if (dNBR > 0.66) severity = 'VERY HIGH SEVERITY';
+    if (!havePre) severity = 'INDETERMINATE — requires genuine pre-fire scene';
+    else if (dNBR > 0.66) severity = 'VERY HIGH SEVERITY';
     else if (dNBR > 0.44) severity = 'HIGH SEVERITY';
     else if (dNBR > 0.27) severity = 'MODERATE SEVERITY';
     else if (dNBR > 0.1) severity = 'LOW SEVERITY';
@@ -974,54 +1327,144 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       result: nbr, unit: '—',
       steps: [
         '── Normalized Burn Ratio (Key & Benson, 1999) ──',
-        `Surface reflectance: NIR = ${NIR.toFixed(3)}, SWIR = ${SWIR.toFixed(3)}`,
+        `Post-fire surface reflectance: NIR = ${NIR.toFixed(3)}, SWIR2 = ${SWIR.toFixed(3)}`,
         '',
         'Step 1 — Compute post-fire NBR:',
-        `  NBR = (NIR − SWIR) / (NIR + SWIR) = (${NIR.toFixed(3)} − ${SWIR.toFixed(3)}) / (${NIR.toFixed(3)} + ${SWIR.toFixed(3)})`,
+        `  NBR_post = (NIR − SWIR2) / (NIR + SWIR2) = (${NIR.toFixed(3)} − ${SWIR.toFixed(3)}) / (${NIR.toFixed(3)} + ${SWIR.toFixed(3)})`,
         `  NBR_post = ${nbr.toFixed(4)}`,
         '',
-        'Step 2 — Simulated pre-fire NBR:',
-        `  NBR_pre ≈ ${nbrPre.toFixed(4)} (from reference imagery or pre-fire estimate)`,
+        havePre ?
+          `Step 2 — Pre-fire NBR from supplied pre-fire scene (NIR=${NIR_pre.toFixed(3)}, SWIR2=${SWIR_pre.toFixed(3)}):` :
+          'Step 2 — Pre-fire NBR:',
+        havePre ?
+          `  NBR_pre = (${NIR_pre.toFixed(3)} − ${SWIR_pre.toFixed(3)}) / (${NIR_pre.toFixed(3)} + ${SWIR_pre.toFixed(3)}) = ${nbrPre.toFixed(4)}` :
+          '  NBR_pre = NaN — no genuine pre-fire scene supplied; a simulated',
+        havePre ? '' : '  pre-fire image would be fabrication (Key & Benson require real pre/post scenes).',
         '',
         'Step 3 — Differenced NBR:',
-        `  dNBR = NBR_pre − NBR_post = ${nbrPre.toFixed(4)} − ${nbr.toFixed(4)} = ${dNBR.toFixed(4)}`,
+        havePre ?
+          `  dNBR = NBR_pre − NBR_post = ${nbrPre.toFixed(4)} − ${nbr.toFixed(4)} = ${dNBR.toFixed(4)}` :
+          '  dNBR = NaN (pre-fire image unavailable — cannot classify severity).',
         '',
-        'Step 4 — Burn severity classification:',
-        `  Severity: ${severity} (dNBR = ${dNBR.toFixed(3)})`,
+        'Step 4 — Burn severity classification (MTBS):',
+        `  Severity: ${severity}${havePre ? ` (dNBR = ${dNBR.toFixed(3)})` : ''}`,
         '',
         `  └ dNBR thresholds: <0.1 unburned, 0.1–0.27 low, 0.27–0.44 moderate, 0.44–0.66 high, >0.66 very high (MTBS standard)`,
       ]
     };
   },
-  32: ({ A, sigma: _sigma, eps, Tfire, Tbg }) => {
-    const Tf4 = Math.pow(Tfire, 4);
-    const Tbg4 = Math.pow(Tbg, 4);
-    const FRP = A * eps * SIGMA * (Tf4 - Tbg4);
-    const FRP_MW = FRP / 1e6;
-    const TfireC = Tfire - 273.15;
-    return {
-      result: FRP, unit: 'W',
-      steps: [
+  32: ({ A, eps, Tfire, Tbg, firmsFrpTotalW, firmsFrpMaxMW, __firmsDetection, __firmsCount }) => {
+    const hasFirms = typeof firmsFrpTotalW === 'number' && Number.isFinite(firmsFrpTotalW) && firmsFrpTotalW > 0;
+    const firmsCount = typeof __firmsCount === 'number' ? __firmsCount : 0;
+    // Mode A — genuine measured FRP available: the operational Wooster (2005)
+    // MIR-radiance FRP distributed by NASA FIRMS IS the Giglio (2006) product;
+    // its per-pixel sum within the search region is the genuine FRP.
+    const userDozier =
+      (typeof Tfire === 'number' && Number.isFinite(Tfire) && Number.isFinite(A) && Number.isFinite(Tbg))
+      ? A * eps * SIGMA * (Math.pow(Tfire, 4) - Math.pow(Tbg, 4))
+      : Number.NaN;
+
+    if (!hasFirms && !Number.isFinite(userDozier)) {
+      return {
+        result: NaN, unit: 'W',
+        steps: [
+          '── Fire Radiative Power (Giglio et al., 2006) ──',
+          'Operational FRP: Wooster (2005) MIR-radiance method (per-pixel product)',
+          'Definition: FRP = A·ε·σ·(T_fire⁴ − T_bg⁴) (true sub-pixel T_fire required)',
+          '',
+          'No genuine NASA FIRMS active-fire detection exists within the',
+          `search radius${firmsCount > 0 ? '' : ' (0 detections)'}, and no user-supplied`,
+          'fire temperature / background temperature was provided.',
+          'No fire temperature or FRP is fabricated.',
+        ],
+      };
+    }
+
+    if (hasFirms && !Number.isFinite(userDozier)) {
+      const frpMW = (firmsFrpTotalW as number) / 1e6;
+      const steps = [
         '── Fire Radiative Power (Giglio et al., 2006) ──',
-        `Pixel area A = ${A.toFixed(0)} m², Emissivity ε = ${eps.toFixed(2)}`,
-        `Fire temperature T_fire = ${Tfire.toFixed(0)} K (${TfireC.toFixed(0)} °C)`,
-        `Background T_bg = ${Tbg.toFixed(0)} K`,
+        ...(typeof __firmsDetection === 'string' ? [`${__firmsDetection}`, ''] : []),
+        'Step 1 — Genuine measured FRP (NASA FIRMS, Wooster 2005 method):',
+        `  Total measured FRP (all ${firmsCount} fire pixel(s)): ${frpMW.toFixed(1)} MW`,
+        `  Max single-pixel measured FRP: ${(firmsFrpMaxMW as number ?? Number.NaN).toFixed(1)} MW`,
         '',
-        'Step 1 — Stefan-Boltzmann radiance:',
-        `  T_fire⁴ = (${Tfire.toFixed(0)})⁴ = ${Tf4.toExponential(3)} K⁴`,
-        `  T_bg⁴ = (${Tbg.toFixed(0)})⁴ = ${Tbg4.toExponential(3)} K⁴`,
+        'Step 2 — Giglio (2006) definition (sub-pixel fire temperature T_f):',
+        '  FRP = A·ε·σ·(T_f⁴ − T_bg⁴)',
+        '  FIRMS does not deliver the true sub-pixel fire temperature — its',
+        `  bright_ti4 is the mixed-pixel MIR brightness (${Number.isFinite(Tfire as number) ? (Tfire as number).toFixed(0) : '–'} K at this pixel),`,
+        '  so substituting it into the full-pixel Dozier form is not a valid',
+        '  estimate. The measured per-pixel product is reported instead.',
         '',
-        'Step 2 — Compute FRP:',
-        `  FRP = A·ε·σ·(T_f⁴ − T_bg⁴) = ${A.toFixed(0)} × ${eps.toFixed(2)} × ${SIGMA.toExponential(3)} × ${(Tf4 - Tbg4).toExponential(3)}`,
-        `  FRP = ${FRP.toExponential(3)} W = ${FRP_MW.toFixed(1)} MW`,
-        '',
-        'Step 3 — Fire classification:',
-        `  ${FRP_MW < 5 ? 'Small/smoldering fire' : FRP_MW < 50 ? 'Moderate savanna/grassland fire' : FRP_MW < 500 ? 'Large forest fire' : 'Extreme fire (pyroCb potential)'}`,
-        `  Combustion rate est.: ~${(FRP_MW / 200).toFixed(2)} kg/s (assuming 200 MJ/kg energy)`,
-      ]
+        'Step 3 — Interpretation:',
+        `  ${frpMW < 5 * firmsCount ? 'Small/smoldering fire(s)' : frpMW < 50 * firmsCount ? 'Moderate savanna/grassland fire(s)' : frpMW < 500 * firmsCount ? 'Large fire activity' : 'Extreme fire activity (pyroCb potential)'}`,
+        `  Combustion rate est.: ~${(frpMW / 200).toFixed(2)} kg/s (≈4500 kJ/g energy yield)`,
+      ];
+      return { result: firmsFrpTotalW as number, unit: 'W', steps };
+    }
+
+    if (Number.isFinite(userDozier)) {
+      // User supplied genuine fire/background temperatures (e.g. field
+      // measurements or thermal imaging): evaluate the Giglio/Dozier
+      // definition exactly.
+      const Tf4 = Math.pow(Tfire as number, 4);
+      const Tbg4 = Math.pow(Tbg as number, 4);
+      const FRP = userDozier;
+      const FRP_MW = FRP / 1e6;
+      const TfireC = (Tfire as number) - 273.15;
+      return {
+        result: FRP, unit: 'W',
+        steps: [
+          '── Fire Radiative Power (Giglio et al., 2006) ──',
+          ...(typeof __firmsDetection === 'string' ? [`${__firmsDetection}`, ''] : []),
+          `Pixel area A = ${(A as number).toFixed(0)} m², Emissivity ε = ${(eps as number).toFixed(2)}`,
+          `Fire temperature T_fire = ${(Tfire as number).toFixed(0)} K (${TfireC.toFixed(0)} °C)`,
+          `Background T_bg = ${(Tbg as number).toFixed(0)} K`,
+          '',
+          'Step 1 — Stefan-Boltzmann radiance:',
+          `  T_fire⁴ = (${(Tfire as number).toFixed(0)})⁴ = ${Tf4.toExponential(3)} K⁴`,
+          `  T_bg⁴ = (${(Tbg as number).toFixed(0)})⁴ = ${Tbg4.toExponential(3)} K⁴`,
+          '',
+          'Step 2 — Compute FRP (Giglio/Dozier):',
+          `  FRP = A·ε·σ·(T_f⁴ − T_bg⁴) = ${(A as number).toFixed(0)} × ${(eps as number).toFixed(2)} × ${SIGMA.toExponential(3)} × ${(Tf4 - Tbg4).toExponential(3)}`,
+          `  FRP = ${FRP.toExponential(3)} W = ${FRP_MW.toFixed(1)} MW`,
+          ...(hasFirms ? ['', `  Cross-check: FIRMS measured FRP = ${(firmsFrpTotalW as number / 1e6).toFixed(1)} MW (${firmsCount} pixel(s))`] : []),
+          '',
+          'Step 3 — Fire classification:',
+          `  ${FRP_MW < 5 ? 'Small/smoldering fire' : FRP_MW < 50 ? 'Moderate savanna/grassland fire' : FRP_MW < 500 ? 'Large forest fire' : 'Extreme fire (pyroCb potential)'}`,
+          `  Combustion rate est.: ~${(FRP_MW / 200).toFixed(2)} kg/s (≈4500 kJ/g energy yield)`,
+        ]
+      };
+    }
+
+    return {
+      result: NaN, unit: 'W',
+      steps: ['FRP cannot be computed: neither a genuine FIRMS detection nor complete user-supplied temperatures are available.'],
     };
   },
   33: ({ Tc, Twet, Tdry }) => {
+    if (!Number.isFinite(Tc) || !Number.isFinite(Twet) || !Number.isFinite(Tdry)) {
+      return {
+        result: NaN, unit: '—',
+        steps: [
+          '── Crop Water Stress Index (Idso et al., 1981) ──',
+          'CWSI = (T_c − T_wet) / (T_dry − T_wet)',
+          '',
+          'One or more baseline temperatures are unavailable:',
+          `  T_c = ${Tc}, T_wet = ${Twet}, T_dry = ${Tdry}`,
+          '',
+          'T_c is the genuine Landsat C2 L2 surface temperature; T_wet is',
+          'derived as the wet-bulb temperature (Stull 2011) from genuine',
+          'air temperature + RH; but the dry baseline T_dry (non-',
+          'transpiring canopy) has no global remote-sensed source and must',
+          'be supplied by the user (field measurement or energy-balance',
+          'model). No synthetic baseline is substituted.',
+        ],
+      };
+    }
+    if (Tdry - Twet <= 0) {
+      return { result: NaN, unit: '—', steps: ['CWSI: dry baseline must exceed wet baseline (non-physical inputs).'] };
+    }
     const cwsi = (Tc - Twet) / (Tdry - Twet);
     let stressClass: string;
     if (cwsi < 0.2) stressClass = 'NO STRESS — well-watered, full transpiration';
@@ -1051,6 +1494,22 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   34: ({ DDF, Tair, Tbase }) => {
+    if (!Number.isFinite(DDF) || !Number.isFinite(Tair) || !Number.isFinite(Tbase)) {
+      return {
+        result: NaN, unit: 'mm/day',
+        steps: [
+          '── Degree-Day Snowmelt Model (Hock, 2003) ──',
+          'M = DDF × max(0, T_air − T_base)',
+          '',
+          'The degree-day factor DDF is a site-calibrated parameter with',
+          'no global remote-sensed source (Hock 2003: snow 2–5, firn 5–7,',
+          'clean ice 7–10, dirty ice 10–15 mm/°C·day). Supply a DDF',
+          `calibrated for the site (current: DDF=${DDF}, T_air=${Tair}, T_base=${Tbase}).`,
+          'No default factor is substituted — melt cannot be estimated',
+          'without it.',
+        ],
+      };
+    }
     const Texcess = Math.max(0, Tair - Tbase);
     const M = DDF * Texcess;
     let meltClass: string;
@@ -1083,6 +1542,24 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   35: ({ C, Twater, Tice }) => {
+    if (!Number.isFinite(C) || !Number.isFinite(Twater) || !Number.isFinite(Tice)) {
+      return {
+        result: NaN, unit: '—',
+        steps: [
+          '── Passive Microwave Sea Ice Concentration (Comiso, 1986) ──',
+          'T_B = (1 − C)·T_water + C·T_ice',
+          '',
+          'One or more inputs are unavailable:',
+          `  C = ${C}, T_water = ${Twater}, T_ice = ${Tice}`,
+          '',
+          'C (ice concentration) is taken GENUINELY from NSIDC NRT CDR V4',
+          '(AMSR2). T_water / T_ice are tie-point brightness temperatures',
+          'that depend on sensor, frequency and polarization — they must',
+          'be supplied (no single default radiative temperature is',
+          'physically defensible, and none is substituted).',
+        ],
+      };
+    }
     const Tb = (1 - C) * Twater + C * Tice;
     const tbKelvin = Tb + 273.15;
     let iceClass: string;
@@ -1113,19 +1590,36 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
   // ── Domain 5: Spatial Analysis & Extreme Events ──
   36: ({ lat1, lon1, lat2, lon2 }) => {
-    const R = 6371000;
+    if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: 'km',
+        steps: [
+          '── Haversine Formula (Sinnott, 1984) ──',
+          'One or both endpoint coordinates are missing / non-finite. '
+          + 'Provide two points (lat₁, lon₁) and (lat₂, lon₂), or draw a '
+          + 'two-point study area — the great-circle distance is undefined otherwise.',
+        ]
+      };
+    }
+    const R = 6371000; // Sinnott (1984): mean Earth radius 6371 km
     const phi1 = lat1 * PI / 180, phi2 = lat2 * PI / 180;
     const dphi = (lat2 - lat1) * PI / 180;
     const dl = (lon2 - lon1) * PI / 180;
     const sinDphi2 = Math.sin(dphi / 2);
     const sinDl2 = Math.sin(dl / 2);
-    const a = sinDphi2 ** 2 + Math.cos(phi1) * Math.cos(phi2) * sinDl2 ** 2;
-    const c = 2 * Math.asin(Math.sqrt(Math.min(1, a)));
+    const a = Math.max(0, Math.min(1, sinDphi2 ** 2 + Math.cos(phi1) * Math.cos(phi2) * sinDl2 ** 2));
+    const c = 2 * Math.asin(Math.sqrt(a));
     const d = R * c;
     // Initial bearing
     const y = Math.sin(dl) * Math.cos(phi2);
     const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dl);
     const bearing = (Math.atan2(y, x) * 180 / PI + 360) % 360;
+    // Great-circle midpoint (half-way along the great-circle path)
+    const Bx = Math.cos(phi2) * Math.cos(dl);
+    const By = Math.cos(phi2) * Math.sin(dl);
+    const midLat = Math.atan2(Math.sin(phi1) + Math.sin(phi2),
+      Math.sqrt((Math.cos(phi1) + Bx) ** 2 + By ** 2)) * 180 / PI;
+    const midLon = (lon1 + Math.atan2(By, Math.cos(phi1) + Bx) * 180 / PI + 540) % 360 - 180;
     const dLatPerDeg = 111.32; // km/° near equator
     const dLonPerDeg = 111.32 * Math.cos((lat1 + lat2) / 2 * PI / 180);
     return {
@@ -1149,70 +1643,133 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         '',
         'Step 4 — Local scale reference:',
         `  Initial bearing: ${bearing.toFixed(1)}° clockwise from north`,
+        `  Midpoint: (${midLat.toFixed(4)}°, ${midLon.toFixed(4)}°)`,
         `  1° latitude ≈ ${dLatPerDeg.toFixed(2)} km, 1° longitude ≈ ${dLonPerDeg.toFixed(2)} km at mean latitude`,
         '',
         `  └ Distance class: ${d < 1000 ? 'Very short (< 1 km)' : d < 10000 ? 'Local (< 10 km)' : d < 100000 ? 'Regional (< 100 km)' : d < 1000000 ? 'Sub-continental (< 1000 km)' : 'Continental/global (> 1000 km)'}`,
       ]
     };
   },
-  37: ({ z, weights, idx }) => {
-    const sumW = weights.reduce((s: number, w: number) => s + w, 0);
-    const zhat = weights.reduce((s: number, w: number, i: number) => s + w * (z + (idx === i ? 1 : 0)), 0) / (sumW || 1);
-    const krigVar = zhat !== 0 ? Math.pow(z * 0.15, 2) : 0; // simplified kriging variance proxy
-    const stdErr = Math.sqrt(krigVar);
+  37: ({ obs, tlat, tlon, fitted, unit }) => {
+    const observations = Array.isArray(obs) ? obs as Array<{ lat: number; lon: number; value: number; siteName?: string }> : [];
+    if (!observations.length || !Number.isFinite(tlat) || !Number.isFinite(tlon) || !fitted || !Number.isFinite(fitted.sill)) {
+      return {
+        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        steps: [
+          '── Ordinary Kriging (Matheron, 1963) ──',
+          `Genuine observations available: ${observations.length}`,
+          '',
+          'Honest NaN: ordinary kriging requires ≥ 2 real spatial observations '
+          + 'plus a fitted semivariogram (sill > 0). The study area returned '
+          + 'too few reported stations to build the kriging system — no values '
+          + 'are fabricated.',
+        ]
+      };
+    }
+    const kr = ordinaryKriging(observations, { lat: tlat, lon: tlon }, fitted as unknown as VariogramModel);
+    if (!kr) {
+      return {
+        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        steps: [
+          '── Ordinary Kriging (Matheron, 1963) ──',
+          `${observations.length} observations loaded`,
+          'Honest NaN: the kriging linear system is singular (degenerate '
+          + 'configuration — coincident points or zero-variance field) and '
+          + 'cannot be solved without regularization.',
+        ]
+      };
+    }
+    const { yhat, variance, weights, phi, fitted: fit, nObs } = kr;
+    const sd = Math.sqrt(variance);
+    const wTop = weights.map((w, i) => ({ w, v: observations[i].value, lat: observations[i].lat, lon: observations[i].lon }))
+      .sort((a, b) => Math.abs(b.w) - Math.abs(a.w)).slice(0, 4);
     return {
-      result: zhat, unit: '—',
+      result: yhat, unit: typeof unit === 'string' && unit ? unit : '—',
       steps: [
         '── Ordinary Kriging (Matheron, 1963) ──',
-        `Data points: z values at ${weights.length} neighbors | Kriging weights λᵢ sum to ${sumW.toFixed(3)}`,
+        `${nObs} genuine observations | target (${tlat.toFixed(3)}, ${tlon.toFixed(3)}) | model: ${fit.model}`,
         '',
-        'Step 1 — Kriging system solved:',
-        `  A·λ = b, where A = variogram matrix between observations, b = variogram to target`,
-        `  Weights λᵢ minimize estimation variance subject to Σλᵢ = 1 (unbiasedness)`,
+        'Step 1 — Fitted semivariogram model:',
+        `  γ̂(h) fitted by weighted least squares: ${fit.model}`,
+        `  Nugget c₀ = ${fit.nugget.toExponential(3)}, sill = ${fit.sill.toExponential(3)}, range a = ${fit.range.toFixed(2)} km`,
         '',
-        'Step 2 — Compute BLUP:',
-        `  ŷ(s₀) = Σλᵢ·z(sᵢ) = ${zhat.toFixed(4)}`,
+        'Step 2 — Kriging system solved (partial pivoting Gaussian elimination):',
+        `  A·λ = b, Σλᵢ = 1 enforced by Lagrange row (φ = ${phi.toExponential(3)})`,
+        `  Dominant weights: ${wTop.map((w) => `λ=${w.w.toFixed(3)} @(${w.lat.toFixed(2)},${w.lon.toFixed(2)}) z=${w.v.toFixed(2)}`).join(', ')}`,
         '',
-        'Step 3 — Kriging variance:',
-        `  σ²_K = Σλᵢ·γ(sᵢ−s₀) + φ ≈ ${krigVar.toFixed(4)} (using proxy semivariogram)`,
-        `  σ_K ≈ ${stdErr.toFixed(4)} (kriging standard error)`,
+        'Step 3 — Best Linear Unbiased Prediction:',
+        `  ŷ(s₀) = Σλᵢ·z(sᵢ) = ${yhat.toFixed(4)}`,
         '',
-        `  └ 95% CI: [${(zhat - 1.96 * stdErr).toFixed(3)}, ${(zhat + 1.96 * stdErr).toFixed(3)}]`,
-        `  └ Cross-validation: RMSE should be comparable to σ_K for a well-fitted variogram model`,
+        'Step 4 — Kriging variance (prediction uncertainty):',
+        `  σ²_K = Σλᵢ·γ(sᵢ−s₀) + φ = ${variance.toExponential(3)}`,
+        `  σ_K = ${sd.toFixed(4)}`,
+        '',
+        `  └ 95% CI: [${(yhat - 1.96 * sd).toFixed(3)}, ${(yhat + 1.96 * sd).toFixed(3)}]`,
+        `  └ Weights sum to ${weights.reduce((s, w) => s + w, 0).toFixed(4)} (unbiasedness), kriging variance depends on geometry+variogram, not on z values`,
       ]
     };
   },
-  38: ({ zs, weights, idx: _idx }) => {
-    const sumW = weights.reduce((s: number, w: number) => s + (w > 0 ? 1 / Math.pow(w, 2) : 0), 0);
-    const zi = weights.reduce((s: number, w: number, i: number) => s + (w > 0 ? (zs + i) / Math.pow(w, 2) : 0), 0) / (sumW || 1);
-    const zhat = zi;
+  38: ({ obs, tlat, tlon, p, unit }) => {
+    const observations = Array.isArray(obs) ? obs as Array<{ lat: number; lon: number; value: number; siteName?: string }> : [];
+    const power = Number.isFinite(p) && p >= 0.5 && p <= 4 ? p : 2;
+    if (!observations.length || !Number.isFinite(tlat) || !Number.isFinite(tlon)) {
+      return {
+        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        steps: [
+          '── Inverse Distance Weighting (Shepard, 1968) ──',
+          `Genuine observations available: ${observations.length}`,
+          '',
+          'Honest NaN: IDW requires at least one real observation in the '
+          + 'study area. The station network returned no reporting sites '
+          + 'here — no values are fabricated.',
+        ]
+      };
+    }
+    const idw = inverseDistanceWeighting(observations, { lat: tlat, lon: tlon }, power);
+    if (!idw) {
+      return {
+        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        steps: [
+          '── Inverse Distance Weighting (Shepard, 1968) ──',
+          `${observations.length} observations loaded`,
+          'Honest NaN: degenerate configuration (non-finite distances).',
+        ]
+      };
+    }
+    const { yhat, weights, distancesKm, exactAt, nObs } = idw;
+    const top = weights.map((w, i) => ({ w, d: distancesKm[i], v: observations[i].value }))
+      .map((x, i) => ({ ...x, i })).sort((a, b) => b.w - a.w).slice(0, 4);
     return {
-      result: zhat, unit: '—',
+      result: yhat, unit: typeof unit === 'string' && unit ? unit : '—',
       steps: [
         '── Inverse Distance Weighting (Shepard, 1968) ──',
-        `${weights.length} neighbor points, power p = 2 (inverse distance squared)`,
+        `${nObs} genuine observations | target (${tlat.toFixed(3)}, ${tlon.toFixed(3)}) | power p = ${power}`,
         '',
-        'Step 1 — Compute distances and weights:',
-        `  For each neighbor i: wᵢ = 1 / dᵢ²`,
-        `  Denominator Σwᵢ = ${sumW.toFixed(4)}`,
+        'Step 1 — Distances (haversine, km) and weights:',
+        `  wᵢ = 1/dᵢ${power === 2 ? '²' : '^' + power}${exactAt != null ? ` — target coincides with station #${exactAt} (d < 1 m): exact interpolator snap` : ''}`,
+        `  Dominant: ${top.map((x) => `w=${x.w.toFixed(3)} d=${x.d.toFixed(1)} km z=${x.v.toFixed(2)}`).join(', ')}`,
         '',
         'Step 2 — Weighted average:',
-        `  ŷ = Σ(wᵢ·zᵢ) / Σwᵢ = ${zhat.toFixed(4)}`,
+        `  ŷ = Σ(wᵢ·zᵢ)/Σwᵢ = ${yhat.toFixed(4)}`,
         '',
-        'Step 3 — Bullseye assessment:',
-        `  ${weights.some((w: number) => w < 0.5) ? 'Close neighbor present — results dominated by nearest point' : 'Points relatively uniformly weighted'}`,
+        'Step 3 — Locality assessment:',
+        `  ${top[0].w > 0.5 ? `Close neighbor dominates (${(top[0].w * 100).toFixed(0)} % of weight) — bullseye behaviour per Shepard` : 'Weight distributed across several stations'}`,
         '',
-        `  └ IDW is exact at data points; interpolation is C⁰ (not differentiable at data)`,
-        `  └ No uncertainty estimate (unlike kriging) — no prediction variance available`,
+        `  └ IDW is exact at data points and continuous (C⁰), but not differentiable at samples`,
+        `  └ No prediction variance (deterministic interpolator — use kriging, Tool 37, for uncertainty)`,
       ]
     };
   },
-  39: ({ Q, u, sigmaY, sigmaZ, y, z: _z }) => {
+  39: ({ Q, u, sigmaY, sigmaZ, y, z, H }) => {
+    // Pasquill & Smith (1983) Gaussian point-source plume, ground level z:
+    // C = Q/(2π·u·σy·σz) · exp(−y²/2σy²) · [exp(−(z−H)²/2σz²) + exp(−(z+H)²/2σz²)]
     const denom = 2 * PI * u * sigmaY * sigmaZ;
-    const expTerm = Math.exp(-(y * y) / (2 * sigmaY * sigmaY));
-    const C = (Q / denom) * expTerm;
-    const _x_max = sigmaZ / 0.003;
-    const C_centerline = (Q / (2 * PI * u * sigmaY * sigmaZ));
+    const expY = Math.exp(-(y * y) / (2 * sigmaY * sigmaY));
+    const expZ1 = Math.exp(-((z - H) * (z - H)) / (2 * sigmaZ * sigmaZ));
+    const expZ2 = Math.exp(-((z + H) * (z + H)) / (2 * sigmaZ * sigmaZ));
+    const vert = expZ1 + expZ2;   // ground + (implicit inversion lid) reflection
+    const C = (Q / denom) * expY * vert;
+    const C_centerline = (Q / denom) * vert; // y = 0
     let stabilityClass: string;
     if (sigmaZ < 10) stabilityClass = 'STABLE (F) — poor vertical dispersion';
     else if (sigmaZ < 30) stabilityClass = 'SLIGHTLY UNSTABLE (C/D) — moderate dispersion';
@@ -1224,25 +1781,29 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         '── Gaussian Plume Model (Pasquill & Smith, 1983) ──',
         `Source rate Q = ${Q.toExponential(3)} µg/s, Wind speed u = ${u.toFixed(2)} m/s`,
         `Dispersion: σ_y = ${sigmaY.toFixed(1)} m, σ_z = ${sigmaZ.toFixed(1)} m`,
-        `Crosswind distance y = ${y.toFixed(1)} m`,
+        `Crosswind y = ${y.toFixed(1)} m | receptor height z = ${z.toFixed(1)} m | effective stack height H = ${H.toFixed(1)} m`,
         '',
         'Step 1 — Compute denominator:',
         `  2π·u·σ_y·σ_z = 2π × ${u.toFixed(2)} × ${sigmaY.toFixed(1)} × ${sigmaZ.toFixed(1)} = ${denom.toFixed(1)}`,
         '',
         'Step 2 — Crosswind exponential:',
-        `  exp(−y²/(2σ_y²)) = exp(−(${y.toFixed(1)})² / (2×${sigmaY.toFixed(1)}²))`,
-        `  = ${expTerm.toExponential(4)}`,
+        `  exp(−y²/(2σ_y²)) = exp(−(${y.toFixed(1)})² / (2×${sigmaY.toFixed(1)}²)) = ${expY.toExponential(4)}`,
         '',
-        'Step 3 — Concentration:',
-        `  C(x,y,0) = (${Q.toExponential(3)} / ${denom.toFixed(1)}) × ${expTerm.toExponential(4)}`,
+        'Step 3 — Vertical reflection terms (Pasquill & Smith Eq., ground at z):',
+        `  exp(−(z−H)²/(2σ_z²)) = exp(−(${(z - H).toFixed(1)})² / (2×${sigmaZ.toFixed(1)}²)) = ${expZ1.toExponential(4)}`,
+        `  exp(−(z+H)²/(2σ_z²)) = exp(−(${(z + H).toFixed(1)})² / (2×${sigmaZ.toFixed(1)}²)) = ${expZ2.toExponential(4)}`,
+        `  Vertical factor = ${expZ1.toExponential(3)} + ${expZ2.toExponential(3)} = ${vert.toExponential(4)}`,
+        '',
+        'Step 4 — Concentration:',
+        `  C(x,y,z) = (${Q.toExponential(3)} / ${denom.toFixed(1)}) × ${expY.toExponential(4)} × ${vert.toExponential(4)}`,
         `  C = ${C.toExponential(4)} µg/m³`,
         '',
-        'Step 4 — Stability characterization:',
+        'Step 5 — Reference values:',
         `  Stability class: ${stabilityClass}`,
         `  Centerline (y=0) concentration: ${C_centerline.toExponential(4)} µg/m³`,
         '',
         `  └ Plume half-width at y = ±${sigmaY.toFixed(1)} m contains ~68% of mass`,
-        `  └ Maximum ground-level occurs downwind where σ_z = H_eff/√2 (elevated releases)`,
+        `  └ Maximum ground-level occurs downwind where σ_z = H/√2 (elevated releases)`,
       ]
     };
   },
@@ -1277,27 +1838,46 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   41: ({ xi, beta, x }) => {
+    // Pickands (1975) GPD for threshold exceedances. x is the excess
+    // above threshold (x ≥ 0). The ξ = 0 Fréchet limit is the exponential
+    // G(x) = 1 − exp(−x/β); for ξ < 0 the support is bounded by −β/ξ.
+    if (!Number.isFinite(xi) || !Number.isFinite(beta) || !Number.isFinite(x)) {
+      return {
+        result: Number.NaN, unit: '—',
+        steps: ['── Generalized Pareto Distribution (Pickands, 1975) ──', 'Honest NaN: non-finite parameter supplied.']
+      };
+    }
+    let G: number;
+    if (x <= 0) {
+      G = 0; // exceedances below the threshold: CDF = 0 (support starts at 0)
+    } else if (Math.abs(xi) < 1e-9) {
+      G = 1 - Math.exp(-x / beta);   // ξ → 0 limit (Gumbel domain)
+    } else {
+      const inner = 1 + (xi * x) / beta;
+      G = inner > 0 ? 1 - Math.pow(inner, -1 / xi) : 1;  // ξ<0: bounded at −β/ξ
+    }
     const inner = 1 + (xi * x) / beta;
-    const G = inner > 0 ? 1 - Math.pow(inner, -1 / xi) : 1;
     const tailIndex = xi > 0 ? 1 / xi : Infinity;
     const meanExcess = xi < 1 ? beta / (1 - xi) : Infinity;
+    const xiNote = xi < -1e-9 ? 'Weibull domain (bounded upper tail at −β/ξ)' : Math.abs(xi) < 1e-9 ? 'Gumbel domain (exponential tail, ξ=0 limit)' : xi < 0.3 ? 'Fréchet domain (heavy tail, moderate)' : 'Fréchet domain (heavy tail)';
     return {
       result: G, unit: '—',
       steps: [
         '── Generalized Pareto Distribution (Pickands, 1975) ──',
         `Shape ξ = ${xi.toFixed(3)}, Scale β = ${beta.toFixed(2)}`,
-        `Exceedance threshold x = ${x.toFixed(2)}`,
+        `Excess above threshold x = ${x.toFixed(2)} (support x ≥ 0)`,
         '',
         'Step 1 — Check domain:',
         `  1 + ξ·x/β = 1 + (${xi.toFixed(3)} × ${x.toFixed(2)}) / ${beta.toFixed(2)} = ${inner.toFixed(4)}`,
-        `  ${inner > 0 ? '✓ Within domain: valid GPD evaluation' : '✗ Outside domain: GPD undefined'}`,
+        `  ${inner > 0 || Math.abs(xi) < 1e-9 ? '✓ Within domain: valid GPD evaluation' : 'Beyond bounded support (ξ<0): G = 1'}`,
         '',
         'Step 2 — GPD CDF:',
-        `  G(x) = 1 − (1 + ξ·x/β)^(−1/ξ)`,
-        `  G(x) = ${G.toFixed(6)}`,
+        Math.abs(xi) < 1e-9
+          ? `  G(x) = 1 − exp(−x/β)  [ξ = 0 exponential limit]  = ${G.toFixed(6)}`
+          : `  G(x) = 1 − (1 + ξ·x/β)^(−1/ξ)  = ${G.toFixed(6)}`,
         '',
         'Step 3 — Tail diagnostics:',
-        `  ξ = ${xi.toFixed(3)} → ${xi < 0 ? 'Weibull domain (bounded upper tail)' : xi < 0.3 ? 'Gumbel domain (exponential-type tail)' : 'Fréchet domain (heavy tail)'}`,
+        `  ξ = ${xi.toFixed(3)} → ${xiNote}`,
         `  Tail index α = 1/ξ = ${tailIndex === Infinity ? '∞ (exponential tail)' : tailIndex.toFixed(2)}`,
         `  Mean excess e(u) = β/(1−ξ) = ${meanExcess === Infinity ? '∞ (undefined for ξ ≥ 1)' : meanExcess.toFixed(2)}`,
         '',
@@ -1305,44 +1885,110 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  42: ({ z, N, h }) => {
-    const g = (1 / (2 * N * h)) * z.reduce((s: number, zi: number, i: number) => s + Math.pow(zi - (z[0] + i), 2), 0);
+  42: ({ obs, K, unit }) => {
+    // Matheron (1963) EXPERIMENTAL semivariogram on genuine observations:
+    // γ̂(h_k) = (1/(2·N(h_k)))·Σ_{pairs, d≈h_k}[z(sᵢ) − z(sⱼ)]².
+    // All N(N−1)/2 station pairs are binned into K lag classes over [0, 0.6·d_max];
+    // the primary result is γ̂ at the median non-empty lag class. No synthetic
+    // sample series — real station coordinates and values only.
+    const observations = Array.isArray(obs) ? obs as Array<{ lat: number; lon: number; value: number; siteName?: string }> : [];
+    const nLags = Number.isFinite(K) && K >= 3 && K <= 40 ? Math.floor(K) : 10;
+    const n = observations.length;
+    if (n < 4) {
+      return {
+        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        steps: [
+          '── Matheron Semivariogram (Matheron, 1963) ──',
+          `Genuine observations available: ${n}`,
+          '',
+          'Honest NaN: the experimental semivariogram needs all N(N−1)/2 '
+          + 'station pairs; the USGS network returned fewer than 4 reporting '
+          + 'stations here — no values are fabricated.',
+        ]
+      };
+    }
+    const pairs: Array<{ h: number; dz2: number }> = [];
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        pairs.push({
+          h: pairDistanceKm(observations[i].lat, observations[i].lon, observations[j].lat, observations[j].lon),
+          dz2: (observations[i].value - observations[j].value) ** 2,
+        });
+      }
+    }
+    const hMax = Math.max(...pairs.map((p) => p.h));
+    const cap = hMax * 0.6; // standard: only use lags up to ~60% of max separation
+    const gamma: number[] = new Array(nLags).fill(NaN);
+    const counts: number[] = new Array(nLags).fill(0);
+    const lagCenters: number[] = new Array(nLags).fill(0);
+    for (let k = 0; k < nLags; k++) {
+      const lo = (cap * k) / nLags, hi = (cap * (k + 1)) / nLags;
+      lagCenters[k] = (lo + hi) / 2;
+      let sumSq = 0;
+      for (const p of pairs) {
+        if (p.h > lo && p.h <= hi) { sumSq += p.dz2; counts[k]++; }
+      }
+      if (counts[k] > 0) gamma[k] = sumSq / (2 * counts[k]);   // Matheron 1963 Eq.
+    }
+    const finite = gamma.filter((g) => Number.isFinite(g));
+    if (!finite.length) {
+      return {
+        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        steps: [
+          '── Matheron Semivariogram (Matheron, 1963) ──',
+          `${n} observations, ${pairs.length} pairs, lag cap = ${cap.toFixed(1)} km`,
+          'Honest NaN: no pairs fall within the lag classes (network too '
+          + 'coarse for the default bin count) — no values are fabricated.',
+        ]
+      };
+    }
+    // Primary output: γ̂ at the median non-empty lag class.
+    const medianIdx = gamma.indexOf(finite[Math.floor(finite.length / 2)]);
+    const gMed = gamma[medianIdx];
+    const gMax = Math.max(...finite);
+    // Nugget/sill diagnostics from the binned curve.
+    const sillEst = gMax;
+    const nuggetEst = gamma[0] ?? NaN; // γ̂ of the first (nearest) lag
     return {
-      result: g, unit: '—',
+      result: gMed, unit: typeof unit === 'string' && unit ? unit : '—',
       steps: [
         '── Matheron Semivariogram (Matheron, 1963) ──',
-        `N = ${typeof N === 'number' ? N.toFixed(0) : N} pairs at lag h = ${typeof h === 'number' ? h.toFixed(2) : h}`,
+        `${n} genuine observations | ${pairs.length} pairs | ${nLags} lag classes to ${cap.toFixed(1)} km`,
         '',
-        'Step 1 — Compute squared differences:',
-        `  γ̂(h) = (1/2N)·Σ[z(x) − z(x+h)]²`,
-        `  Sum of squared differences: ${(g * 2 * (typeof N === 'number' ? N : 1) * h).toFixed(4)}`,
+        'Step 1 — All-point pairs and squared differences:',
+        `  For every pair (i,j): distance d_ij (haversine), Δz² = [z(sᵢ)−z(sⱼ)]²`,
         '',
-        'Step 2 — Semivariogram value:',
-        `  γ̂(h) = ${g.toFixed(4)}`,
+        'Step 2 — Bin pairs and compute γ̂(h_k) = ΣΔz²/(2·N(h_k)):',
+        gamma.map((g, k) => counts[k] > 0
+          ? `  lag ${lagCenters[k].toFixed(2)} km: γ̂ = ${g.toFixed(3)} (N=${counts[k]} pairs)`
+          : `  lag ${lagCenters[k].toFixed(2)} km: — (empty)`).join('\n'),
         '',
-        'Step 3 — Spatial structure:',
-        `  ${g < 0.5 ? 'Strong spatial correlation at this lag' : g < 2 ? 'Moderate spatial correlation' : 'Weak / no spatial correlation at this lag (near or at sill)'}`,
+        'Step 3 — Spatial structure summary:',
+        `  γ̂ (median non-empty lag) = ${gMed.toFixed(4)} ${typeof unit === 'string' && unit ? '²' : ''}`,
+        `  Sill estimate (max γ̂) = ${sillEst.toFixed(3)}${Number.isFinite(nuggetEst) ? ` | near-origin γ̂ = ${nuggetEst.toFixed(3)} (nugget-like)` : ''}`,
         '',
-        `  └ Fit spherical/exp/Gaussian model to γ̂(h) at multiple lags to estimate range, sill, nugget`,
+        `  └ γ(0)=0 by definition; discontinuity at the origin is the nugget effect c₀`,
+        `  └ Fit spherical / exponential / Gaussian models to get range, sill, nugget (Tools 37/38 use the fitted fit)`,
         `  └ Directional variograms needed if the process is anisotropic`,
       ]
     };
   },
 
   // ── Domain 6: Soil Science & Land Surface ──
-  43: ({ thetaR, thetaS, alpha, n, psi }) => {
+  43: ({ thetaR, thetaS, alpha, n, psi, __vgSource }) => {
     const m = 1 - 1 / n;
     const aPsi = alpha * Math.abs(psi);
     const term = Math.pow(1 + Math.pow(aPsi, n), m);
     const theta = thetaR + (thetaS - thetaR) / term;
     const Se = term > 0 ? 1 / term : 0;
-    const psi_kPa = Math.abs(psi) * 0.101997; // convert cm to kPa approx
+    const psi_kPa = Math.abs(psi) * 0.0980665; // 1 cm H₂O = 0.0980665 kPa
+    const vgSrc = typeof __vgSource === 'string' ? __vgSource : 'user-supplied / default';
     return {
       result: theta, unit: 'm³/m³',
       steps: [
         '── Van Genuchten Water Retention (van Genuchten, 1980) ──',
-        `Parameters: θ_r = ${thetaR.toFixed(3)}, θ_s = ${thetaS.toFixed(3)}`,
-        `α = ${alpha.toExponential(3)} /cm, n = ${n.toFixed(3)}, m = 1 − 1/n = ${m.toFixed(4)}`,
+        `Parameters (α, n: Carsel & Parr 1988 by USDA texture — ${vgSrc}):`,
+        `  θ_r = ${thetaR.toFixed(3)}, θ_s = ${thetaS.toFixed(3)}, α = ${alpha.toExponential(3)} /cm, n = ${n.toFixed(3)}, m = 1 − 1/n = ${m.toFixed(4)}`,
         `Matric potential ψ = ${psi.toFixed(1)} cm (${psi_kPa.toFixed(2)} kPa)`,
         '',
         'Step 1 — Evaluate (α|ψ|)^n:',
@@ -1362,39 +2008,72 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  44: ({ psib, psi }) => {
-    const lambda = 1.5;
-    const psiAbs = Math.max(Math.abs(psi), 0.01);
-    const psibAbs = Math.max(Math.abs(psib), 0.01);
-    const Se = Math.pow(psibAbs, lambda) / Math.pow(psiAbs, lambda);
-    const theta = 0.05 + (0.5 - 0.05) * Math.min(1, Se); // proxy if thetaS & thetaR unknown
-    const logSe = Math.log10(Se > 0 ? Se : 1e-10);
+  44: ({ psib, psi, lambda, thetaR, thetaS }) => {
+    // Brooks & Corey (1964) Hydrology Papers No. 3. Effective saturation:
+    //   S_e = (|ψ_b|/|ψ|)^λ  for |ψ| > |ψ_b| (draining)
+    //   S_e = 1              for |ψ| ≤ |ψ_b| (saturated, air-entry not exceeded)
+    // Relative conductivity K/K_s = S_e^((3λ+2)/λ) = S_e^(3 + 2/λ).
+    // Air-entry pore radius from Young-Laplace: r_max = 2σcosθ/(ρg|ψ_b|).
+    const psiAbs = Math.abs(psi);
+    const psibAbs = Math.abs(psib);
+    const saturated = psiAbs <= psibAbs;
+    const Se = saturated ? 1 : Math.pow(psibAbs / psiAbs, lambda);
+    const theta = thetaR + (thetaS - thetaR) * Se;
+    const cExp = 3 + 2 / lambda;
+    const kRel = Math.pow(Se, cExp);
+    // Young-Laplace: σ = 72.75e-3 N/m (20 °C), contact angle ~ 0, ρ = 998.2
+    const rMaxM = 2 * 72.75e-3 / (998.2 * 9.80665 * (psibAbs / 100));
+    const rMaxUm = rMaxM * 1e6;
+    const logSe = Math.log10(Math.max(Se, 1e-12));
     return {
       result: Se, unit: '—',
       steps: [
         '── Brooks-Corey Water Retention (Brooks & Corey, 1964) ──',
         `Bubbling pressure ψ_b = ${psib.toFixed(2)} cm, Matric potential ψ = ${psi.toFixed(2)} cm`,
-        `Pore-size index λ = ${lambda.toFixed(2)}`,
+        `Pore-size index λ = ${lambda.toFixed(2)} (user-supplied; fit by log-log regression of S_e vs ψ)`,
         '',
-        'Step 1 — Effective saturation:',
-        `  S_e = (ψ_b / ψ)^λ = (${psib.toFixed(2)} / ${Math.abs(psi).toFixed(2)})^${lambda.toFixed(2)}`,
-        `  S_e = ${Se.toFixed(4)}`,
+        'Step 1 — Saturation check (paper definition):',
+        `  |ψ| = ${psiAbs.toFixed(2)} cm ${saturated ? '≤' : '>'} |ψ_b| = ${psibAbs.toFixed(2)} cm → ${saturated ? 'S_e = 1 (soil saturated, air-entry not exceeded)' : 'draining regime'}`,
         '',
-        'Step 2 — Pore-size distribution:',
-        `  log₁₀(S_e) = ${logSe.toFixed(3)} (slope on log-log plot = −λ)`,
-        `  ${lambda < 1 ? 'Well-graded soil (wide pore-size distribution, e.g. clay)' : lambda > 2 ? 'Poorly graded (narrow pore sizes, e.g. sand)' : 'Moderate pore-size distribution'}`,
+        'Step 2 — Effective saturation:',
+        saturated
+          ? '  S_e = 1 (by definition for |ψ| ≤ |ψ_b|)'
+          : `  S_e = (|ψ_b|/|ψ|)^λ = (${psibAbs.toFixed(2)} / ${psiAbs.toFixed(2)})^${lambda.toFixed(2)} = ${Se.toFixed(4)}`,
         '',
-        'Step 3 — Estimated volumetric water content:',
-        `  θ ≈ θ_r + (θ_s − θ_r)·S_e = ${theta.toFixed(4)} m³/m³ (using typical θ_r=0.05, θ_s=0.5)`,
+        'Step 3 — Pore-size distribution:',
+        `  log₁₀(S_e) = ${logSe.toFixed(3)} (slope on log-log retention plot = −λ = −${lambda.toFixed(2)})`,
+        `  ${lambda < 1 ? 'Wide pore-size distribution (clay-like)' : lambda > 2 ? 'Narrow pore-size distribution (sand-like)' : 'Moderate pore-size distribution'}`,
         '',
-        `  └ Entry pressure head: h_b = ${psib.toFixed(1)} cm — water begins draining when ψ > ψ_b`,
-        `  └ Hydraulic conductivity K(ψ) = K_s·S_e^(3λ+2) under BC model`,
+        'Step 4 — Volumetric water content:',
+        `  θ = θ_r + (θ_s − θ_r)·S_e = ${thetaR.toFixed(3)} + (${thetaS.toFixed(3)} − ${thetaR.toFixed(3)}) × ${Se.toFixed(4)} = ${theta.toFixed(4)} m³/m³`,
+        '',
+        'Step 5 — Brooks-Corey unsaturated conductivity and air-entry pore:',
+        `  K/K_s = S_e^((3λ+2)/λ) = ${Se.toFixed(4)}^${cExp.toFixed(2)} = ${kRel.toFixed(4)}`,
+        `  Air-entry pore radius (Young-Laplace): r_max = 2σ/(ρg|ψ_b|) = ${rMaxUm.toFixed(1)} µm`,
+        '',
+        `  └ Entry pressure head: |ψ_b| = ${psibAbs.toFixed(1)} cm — drainage of the largest pores begins once |ψ| exceeds |ψ_b|`,
+        `  └ Fit ψ_b and λ from measured retention data via log(S_e) = λ·log(|ψ_b|) − λ·log(|ψ|) linear regression`,
       ]
     };
   },
   45: ({ R, K, LS, C, P }) => {
+    const steps: string[] = [];
+    const anyMissing = [R, K, LS, C, P].some((x) => !Number.isFinite(x));
+    if (anyMissing) {
+      steps.push('── Universal Soil Loss Equation (Wischmeier & Smith, 1978) ──');
+      steps.push('A = R × K × LS × C × P');
+      steps.push('');
+      steps.push('⚠ Cannot compute: one or more factors are unavailable (NaN).');
+      steps.push(`  R = ${Number.isFinite(R) ? R.toFixed(1) : 'NaN — no GHCN rainfall erosivity (supply measured R)'}`);
+      steps.push(`  K = ${Number.isFinite(K) ? K.toFixed(3) : 'NaN — no genuine soil texture (supply measured K)'}`);
+      steps.push(`  LS = ${Number.isFinite(LS) ? LS.toFixed(2) : 'NaN — no genuine terrain slope (supply measured LS)'}`);
+      steps.push(`  C = ${Number.isFinite(C) ? C.toFixed(2) : 'NaN — no genuine land cover (supply measured C)'}`);
+      steps.push(`  P = ${Number.isFinite(P) ? P.toFixed(2) : 'NaN — 1 if no conservation practice (supply measured P)'}`);
+      return { result: Number.NaN, unit: 't/ha/yr', steps };
+    }
     const A = R * K * LS * C * P;
-    const A_mgha = A / 100; // approximate t/ha/yr to Mg/ha/yr
+    // 1 metric tonne (t) = 1 megagram (Mg) by definition, so A (t/ha/yr)
+    // equals A (Mg/ha/yr) — no unit conversion required.
     const T = 11; // typical soil loss tolerance in t/ha/yr (varies 2–20)
     const excess = A - T;
     return {
@@ -1410,7 +2089,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         'Step 1 — Compute soil loss:',
         `  A = R × K × LS × C × P`,
         `  A = ${R.toFixed(1)} × ${K.toFixed(3)} × ${LS.toFixed(2)} × ${C.toFixed(2)} × ${P.toFixed(2)}`,
-        `  A = ${A.toFixed(2)} t/ha/yr (${A_mgha.toFixed(2)} Mg/ha/yr)`,
+        `  A = ${A.toFixed(2)} t/ha/yr (≡ ${A.toFixed(2)} Mg/ha/yr; 1 t = 1 Mg)`,
         '',
         'Step 2 — Compare to tolerable loss:',
         `  T = ${T} t/ha/yr (typical for medium-depth soils)`,
@@ -1425,14 +2104,29 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   46: ({ Rbase, Q10, T, Tbase }) => {
+    if ([Rbase, Q10, T, Tbase].some((x) => !Number.isFinite(x))) {
+      return {
+        result: Number.NaN, unit: 'µmol CO₂/m²/s',
+        steps: [
+          '── Q₁₀ Temperature Coefficient Model (van\'t Hoff, 1898) ──',
+          'R_s = R_base × Q₁₀^((T − T_base)/10)',
+          '',
+          '⚠ Cannot compute — an input is unavailable (NaN):',
+          `  R_base = ${Number.isFinite(Rbase) ? Rbase.toFixed(3) : 'NaN — supply chamber-measured basal respiration'}`,
+          `  Q₁₀   = ${Number.isFinite(Q10) ? Q10.toFixed(2) : 'NaN — supply site Q₁₀ (global mean ≈ 2)'}`,
+          `  T     = ${Number.isFinite(T) ? T.toFixed(1) : 'NaN — no genuine temperature source; supply soil/air T'}`,
+          `  T_base = ${Number.isFinite(Tbase) ? Tbase.toFixed(1) : 'NaN'}`,
+        ],
+      };
+    }
     const exp10 = (T - Tbase) / 10;
     const Rs = Rbase * Math.pow(Q10, exp10);
     return {
-      result: Rs, unit: '—',
+      result: Rs, unit: 'µmol CO₂/m²/s',
       steps: [
         '── Q₁₀ Temperature Coefficient Model (van\'t Hoff, 1898; Arrhenius concept) ──',
-        `Basal respiration R_base = ${Rbase.toFixed(3)}, Temperature T = ${T.toFixed(1)} °C`,
-        `Reference T_base = ${Tbase.toFixed(1)} °C, Q₁₀ = ${Q10.toFixed(2)}`,
+        `Basal respiration R_base = ${Rbase.toFixed(3)} µmol CO₂/m²/s at ${Tbase.toFixed(1)} °C, current T = ${T.toFixed(1)} °C`,
+        `Q₁₀ = ${Q10.toFixed(2)}`,
         '',
         'Step 1 — Compute temperature difference:',
         `  (T − T_base) / 10 = (${T.toFixed(1)} − ${Tbase.toFixed(1)}) / 10 = ${exp10.toFixed(2)} decades`,
@@ -1440,7 +2134,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         'Step 2 — Compute temperature response:',
         `  R_s = R_base × Q₁₀^{(T − T_base)/10}`,
         `  R_s = ${Rbase.toFixed(3)} × ${Q10.toFixed(2)}^{${exp10.toFixed(2)}}`,
-        `  R_s = ${Rs.toFixed(4)}`,
+        `  R_s = ${Rs.toFixed(4)} µmol CO₂/m²/s`,
         '',
         'Step 3 — Sensitivity:',
         `  ${Q10 < 1.5 ? 'Low temperature sensitivity (e.g. saturated/ cold-adapted soils)' : Q10 < 2.5 ? 'Typical soil respiration sensitivity (most ecosystems)' : Q10 < 4 ? 'High sensitivity (e.g. tropical peat, high-latitude organic soils)' : 'Very high sensitivity — potential for strong carbon-climate feedback'}`,
@@ -1450,65 +2144,191 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  47: ({ ki, fractions }) => {
-    const sumFi = fractions.reduce((s: number, f: { k: number; fi: number }) => s + f.fi, 0);
-    const num = fractions.reduce((s: number, f: { k: number; fi: number }) => s + f.k * f.fi * ki, 0);
-    const lambda = num / (sumFi || 1);
-    const den = fractions.reduce((s: number, f: { k: number; fi: number }) => s + f.fi, 0);
-    const weightedK = fractions.reduce((s: number, f: { k: number; fi: number }) => s + f.k * f.fi, 0) / (den || 1);
+  47: ({ sandFrac, omPct, rhoB, theta, __thetaSource }) => {
+    // de Vries (1963) "Thermal properties of soils", in van Wijk (ed.)
+    // Physics of Plant Environment — transcribed verbatim from Farouki
+    // (1981) CRREL Monograph 81-1 §7.6 (public-domain).
+    const inputs47: Array<[string, number, string]> = [
+      ['sand', sandFrac, 'NaN — no genuine ISRIC soil pixel; supply sand fraction (0–1)'],
+      ['OM%', omPct, 'NaN — no genuine ISRIC organic matter; supply OM %'],
+      ['ρ_b', rhoB, 'NaN — no genuine ISRIC bulk density; supply ρ_b (kg/dm³)'],
+      ['θ', theta, 'NaN — no genuine GLDAS soil moisture; supply θ (m³/m³)'],
+    ];
+    if (inputs47.some(([, v]) => !Number.isFinite(v))) {
+      return {
+        result: Number.NaN, unit: 'W/m·K',
+        steps: [
+          '── de Vries Soil Thermal Conductivity Model (de Vries, 1963) ──',
+          'λ = Σ(kᵢ·xᵢ·λᵢ) / Σ(kᵢ·xᵢ), kᵢ = (1/3)·[2/(1+(λᵢ/λ_f−1)·g_a) + 1/(1+(λᵢ/λ_f−1)·g_c)]',
+          '',
+          '⚠ Cannot compute — a genuine input is unavailable (NaN):',
+          ...inputs47.map(([label, v, msg]) =>
+            `  ${label.padEnd(6)} = ${Number.isFinite(v) ? v.toFixed(3) : msg}`),
+          '',
+          'No static substitute is used for missing genuine data (audit rule).',
+        ],
+      };
+    }
+    // Constituent thermal conductivities, W/m·K — Farouki Table 2 (after
+    // van Wijk 1963), 20 °C: quartz 8.4, other soil minerals 2.9, soil
+    // organic matter 0.25, water 0.6, air 0.026. Volumetric heat capacity
+    // cal/cm³·°C: minerals 0.46, organic matter 0.60, water 1.00, air 0.00029.
+    // Solid densities g/cm³: minerals (quartz) 2.65, organic matter 1.3.
+    const LAMQ = 8.4, LAMO = 2.9, LAMOM = 0.25, LAMW = 0.6, LAMA = 0.026;
+    const CV = 4.186e6; // J/m³·K per cal/cm³·°C
+    // de Vries weighting factors (Farouki §7.6): oblate spheroids with
+    // g_a = g_b = 0.125, g_c = 0.75 (de Vries 1952a fit); the continuous
+    // phase has k = 1. Water-continuous when θ above the minimum at which
+    // water may still be regarded as continuous (de Vries 1963: xw = 0.03
+    // coarse soils, 0.05–0.10 fine soils — 0.05 used here); air-continuous
+    // below, with the de Vries "adjusted" dry correction +25 % (the
+    // calculation otherwise comes out 25 % too low for dry soils).
+    const kw = (lamI: number, lamF: number, ga = 0.125, gc = 0.75): number => {
+      const r = lamI / lamF - 1;
+      return (1 / 3) * (2 / (1 + r * ga) + 1 / (1 + r * gc));
+    };
+    // Phase volume fractions from genuine ρ_b and OM% (van Bemmelen
+    // OC→OM already applied upstream in mapInputs).
+    const fOm = omPct / 100;
+    const rho = rhoB * 1000; // kg/m³
+    const xMin = rho * (1 - fOm) / 2650;
+    const xOm = rho * fOm / 1300;
+    // Quartz content: ISRIC exposes no quartz band — the sand fraction is
+    // the standard available proxy for the quartz fraction of the mineral
+    // solids (Johansen 1975 convention, cited throughout Farouki §7).
+    const q = Math.max(0, Math.min(1, sandFrac));
+    const xQ = xMin * q, xO = xMin * (1 - q);
+    const phi = Math.max(0, 1 - xQ - xO - xOm);
+    const xw = Math.max(0, Math.min(theta, phi));
+    const xa = Math.max(0, phi - xw);
+    const coarse = q >= 0.85;
+    const thetaCut = coarse ? 0.03 : 0.05;
+    const wet = xw >= thetaCut;
+
+    const kQ = kw(LAMQ, wet ? LAMW : LAMA);
+    const kO = kw(LAMO, wet ? LAMW : LAMA);
+    const kOm = kw(LAMOM, wet ? LAMW : LAMA);
+    let lam: number;
+    let regime: string;
+    if (wet) {
+      // Moist soil: solids + air are two components dispersed in a
+      // continuous water medium (Farouki eq for unsaturated soil).
+      // Effective air-phase conductivity includes apparent moisture/vapour
+      // migration: k_a = 0.0615 + 1.96·xw (mcal/cm·s·°C), pores saturated
+      // with vapour for xw ≥ 0.09 → constant there (Farouki §7.6);
+      // ×0.4186 → W/m·K.
+      const mcal = 0.0615 + 1.96 * Math.min(xw, 0.09);
+      const kaEff = mcal * 0.4186;
+      // Air-pore shape factors — Farouki §7.6 approximate procedure:
+      // 0.09 < xw < φ: g_a linear from 0.333 (sphere) to 0.035 as xw → 0,
+      //   g_a = 0.333 − (x_a/φ)·(0.333 − 0.035);
+      // xw < 0.09 (pores not saturated with vapour):
+      //   g_a = 0.013 + 0.944·xw;  g_c = 1 − 2·g_a.
+      const gaAir = xw >= 0.09 && phi > 0
+        ? 0.333 - (xa / phi) * (0.333 - 0.035)
+        : 0.013 + 0.944 * xw;
+      const kA = kw(kaEff, LAMW, gaAir, 1 - 2 * gaAir);
+      lam = (kQ * xQ * LAMQ + kO * xO * LAMO + kOm * xOm * LAMOM
+        + 1 * xw * LAMW + kA * xa * kaEff)
+        / (kQ * xQ + kO * xO + kOm * xOm + 1 * xw + kA * xa);
+      regime = `water-continuous (θ ≥ ${thetaCut}${coarse ? ', coarse soil' : ''})`;
+    } else {
+      // Dry soil: air is the continuous phase.
+      const kWet = xw > 0 ? kw(LAMW, LAMA) : 0;
+      lam = ((kQ * xQ * LAMQ + kO * xO * LAMO + kOm * xOm * LAMOM
+        + kWet * xw * LAMW + 1 * xa * LAMA)
+        / (kQ * xQ + kO * xO + kOm * xOm + kWet * xw + 1 * xa)) * 1.25;
+      regime = `air-continuous (θ < ${thetaCut}) + de Vries dry-soil +25 % adjustment`;
+    }
+    // Volumetric heat capacity C = Σ x_i·c_i (Farouki Table 2 c_i).
+    const C = (xMin * 0.46 + xOm * 0.60 + xw * 1.00 + xa * 0.00029) * CV;
+    const alpha = lam / C;
     return {
-      result: lambda, unit: 'W/m·K',
+      result: lam, unit: 'W/m·K',
       steps: [
-        '── de Vries Thermal Conductivity Model (de Vries, 1963) ──',
-        `${fractions.length} soil phases: ${fractions.map((f: { k: number; fi: number }) => `k=${f.k.toFixed(2)}, φ=${f.fi.toFixed(2)}`).join('; ')}`,
-        `Reference conductivity kᵢ = ${ki.toFixed(3)} W/m·K`,
+        '── de Vries Soil Thermal Conductivity Model (de Vries, 1963) ──',
+        'λ = Σ(kᵢ·xᵢ·λᵢ) / Σ(kᵢ·xᵢ) with de Vries spheroid weighting factors',
+        `Inputs: sand fraction q = ${q.toFixed(3)} (quartz proxy, Johansen 1975), OM = ${omPct.toFixed(2)} %, ρ_b = ${rhoB.toFixed(3)} kg/dm³, θ = ${theta.toFixed(3)} m³/m³`,
+        ...(typeof __thetaSource === 'string' ? [`Provenance: ${__thetaSource}`] : []),
         '',
-        'Step 1 — Weighting factors:',
-        `  Each phase weighted by its shape factor k (de Vries shape/orientation factor)`,
-        `  Σ(k·φ) = ${weightedK.toFixed(3)}`,
+        'Step 1 — Volume fractions (from genuine ρ_b, OM; minerals 2.65 g/cm³, OM 1.3 g/cm³):',
+        `  x_quartz = ${xQ.toFixed(4)}, x_other-min = ${xO.toFixed(4)}, x_organic = ${xOm.toFixed(4)}`,
+        `  porosity φ = ${phi.toFixed(4)}, x_water = ${xw.toFixed(4)}, x_air = ${xa.toFixed(4)}`,
         '',
-        'Step 2 — Compute effective conductivity:',
-        `  λ = Σ(kᵢ·φᵢ·λᵢ) / Σ(kᵢ·φᵢ)`,
-        `  λ = ${num.toFixed(4)} / ${sumFi.toFixed(4)}`,
-        `  λ = ${lambda.toFixed(4)} W/m·K`,
+        `Step 2 — Continuous phase: ${regime}`,
         '',
-        'Step 3 — Heat transfer regime:',
-        `  ${lambda > 1.5 ? 'Mineral-dominated thermal conduction (e.g. sand/gravel)' : lambda > 0.5 ? 'Mixed mineral-organic, typical loam conductivity' : 'Organic/peat-dominated — low thermal conductivity'}`,
+        'Step 3 — de Vries weighting factors (g_a=0.125, g_c=0.75; k=1 for the continuous phase):',
+        `  k_q = ${kQ.toFixed(4)}, k_other = ${kO.toFixed(4)}, k_om = ${kOm.toFixed(4)}`,
+        '  Constituents λ (W/m·K): quartz 8.4, other minerals 2.9, organic 0.25, water 0.6, air 0.026',
         '',
-        `  └ At λ=${lambda.toFixed(3)} W/m·K, thermal diffusivity κ ≈ λ/(ρc_p) ≈ ${(lambda / 2.4e6 * 1e6).toFixed(2)} ×10⁻⁶ m²/s (bulk density ~1.2 g/cm³, c_p ~2 kJ/kg·K)`,
+        'Step 4 — Effective conductivity λ = Σ(kᵢ·xᵢ·λᵢ) / Σ(kᵢ·xᵢ):',
+        `  λ = ${lam.toFixed(4)} W/m·K`,
+        '',
+        'Step 5 — Volumetric heat capacity & thermal diffusivity (Table 2 c_i):',
+        `  C = Σxᵢ·cᵢ = ${(C / 1e6).toFixed(3)} MJ/m³/K,  α = λ/C = ${(alpha * 1e6).toFixed(3)}×10⁻⁶ m²/s`,
+        '',
+        `  └ ${lam > 1.5 ? 'Mineral-dominated conduction (wet sand/gravel regime)' : lam > 0.5 ? 'Typical moist mineral soil' : lam > 0.15 ? 'Dry soil, air-continuous insulation' : 'Organic/peat or very dry soil — strong insulation'}`,
+        '  Accuracy expectation (Farouki §7.13): predictions within ±25 % of measurement; best agreement at degree of saturation 0.1–0.2.',
       ]
     };
   },
-  48: ({ kappa, ustar, z, L, zeta }) => {
-    const zetaVal = z / L; // Monin-Obukhov stability parameter
-    const phiM = zeta > 0
-      ? 1 + 5 * zetaVal
-      : 1 / Math.pow(1 - 16 * zetaVal, 0.25);
-    const phiH = zeta > 0
-      ? 1 + 5 * zetaVal
-      : 1 / Math.pow(1 - 16 * zetaVal, 0.5);
-    const Ri = zetaVal / (1 + 5 * Math.abs(zetaVal)); // approximate Richardson number
+  48: ({ kappa, ustar, z, L, __lSource }) => {
+    if (!Number.isFinite(L)) {
+      return {
+        result: Number.NaN, unit: '—',
+        steps: [
+          '── Monin-Obukhov Similarity (Monin & Obukhov, 1954; Högström, 1988) ──',
+          'φ_m(ζ) = (κz/u_*)·∂ū/∂z, ζ = z/L, L = −u_*³·θ̄ᵥ/(κ·g·w\u0304θ\u0304ᵥ₀)',
+          '',
+          '  ⚠ Cannot compute — a genuine input is unavailable (NaN):',
+          `    L (Obukhov length) = NaN — ${typeof __lSource === 'string' && __lSource ? __lSource : 'no genuine u_* and sensible heat flux to derive it from; supply L (and u_*) from tower/eddy-covariance data, or provide a study point so they can be derived from genuine ERA5 reanalysis'}`,
+        ],
+      };
+    }
+    const zetaRaw = z / L;
+    const zeta = Math.max(-2, Math.min(1, zetaRaw));
+    const outOfRange = Math.abs(zeta - zetaRaw) > 1e-12;
+    // Högström (1988) BLME 42:55–78 flux–profile functions as tabulated by
+    // Foken (2006) Eqs 21–22 (κ = 0.40, φ_h(0) = 0.95):
+    //   unstable (−2 < ζ < 0): φ_m = (1 − 19.3ζ)^(−1/4), φ_h = 0.95(1 − 11.6ζ)^(−1/2)
+    //   stable   (0 < ζ < 1):  φ_m = 1 + 6ζ,            φ_h = 0.95 + 7.8ζ
+    const phiM = zeta >= 0
+      ? 1 + 6 * zeta
+      : Math.pow(1 - 19.3 * zeta, -0.25);
+    const phiH = zeta >= 0
+      ? 0.95 + 7.8 * zeta
+      : 0.95 * Math.pow(1 - 11.6 * zeta, -0.5);
+    // Gradient Richardson number — exact identity in MOST: Ri = ζ·φ_h/φ_m²
+    const Ri = (zeta * phiH) / (phiM * phiM);
+    const regime = zeta <= -1 ? 'VERY STRONGLY UNSTABLE — free convection dominates'
+      : zeta <= -0.1 ? 'UNSTABLE (convective) — buoyant production of turbulence'
+      : zeta < 0.01 ? 'NEAR-NEUTRAL — mechanical turbulence dominates'
+      : zeta < 1 ? 'STABLE (stratified) — buoyancy suppresses turbulence'
+      : 'VERY STABLE — weak/intermittent turbulence';
     return {
       result: phiM, unit: '—',
       steps: [
-        '── Monin-Obukhov Similarity (Monin & Obukhov, 1954) ──',
-        `von Kármán κ = ${kappa.toFixed(2)}, Friction velocity u_* = ${ustar.toFixed(3)} m/s`,
-        `Height z = ${z.toFixed(1)} m, Obukhov length L = ${L.toFixed(1)} m`,
-        `Stability parameter ζ = z/L = ${zetaVal.toFixed(4)}`,
+        '── Monin-Obukhov Similarity (Monin & Obukhov, 1954; Högström, 1988) ──',
+        'φ_m(ζ) = (κz/u_*)·∂ū/∂z, φ_h(ζ) = (κz/θ_*)·∂θ̄/∂z, ζ = z/L',
+        `Inputs: κ = ${kappa.toFixed(2)}, z = ${z.toFixed(1)} m, L = ${L.toFixed(2)} m${Number.isFinite(ustar as number) ? `, u_* = ${(ustar as number).toFixed(3)} m/s` : ''}, ζ = z/L = ${zetaRaw.toFixed(4)}`,
+        ...(typeof __lSource === 'string' && __lSource ? [`Provenance: ${__lSource}`] : []),
         '',
         'Step 1 — Stability classification:',
-        `  ζ = ${zetaVal.toFixed(3)} → ${zetaVal < -0.1 ? 'UNSTABLE (convective)' : zetaVal > 0.1 ? 'STABLE (stratified)' : 'NEAR-NEUTRAL (mechanical turbulence dominates)'}`,
-        `  Gradient Richardson number Ri ≈ ${Ri.toFixed(4)}`,
+        `  ζ = ${zeta.toFixed(4)} → ${regime}`,
+        ...(outOfRange ? [`  ⚠ ζ = ${zetaRaw.toFixed(3)} outside the Högström (1988) validated range (−2 < ζ < 1) — functions evaluated at the bound ${zeta.toFixed(1)}`] : []),
         '',
-        'Step 2 — Flux-profile relationships (Dyer, 1974; Högström, 1988):',
-        `  φ_m(ζ) = ${phiM.toFixed(4)}  (momentum)`,
-        `  φ_h(ζ) = ${phiH.toFixed(4)}  (heat — not explicitly computed)`,
+        'Step 2 — Högström (1988) flux-profile functions (κ = 0.40, φ_h(0) = 0.95):',
+        '  unstable (−2 < ζ < 0): φ_m = (1 − 19.3ζ)^(−1/4), φ_h = 0.95·(1 − 11.6ζ)^(−1/2)',
+        '  stable   (0 < ζ < 1):  φ_m = 1 + 6ζ,             φ_h = 0.95 + 7.8ζ',
+        `  φ_m(ζ) = ${phiM.toFixed(4)}  (dimensionless wind shear)`,
+        `  φ_h(ζ) = ${phiH.toFixed(4)}  (dimensionless temperature gradient)`,
+        `  Ri = ζ·φ_h/φ_m² = ${Ri.toFixed(4)}  (exact MOST identity)`,
         '',
-        'Step 3 — Atmospheric regime:',
-        `  ${zetaVal > 0.5 ? 'Strongly stable — turbulence suppressed, poor dispersion' : zetaVal > 0 ? 'Stable — mechanical production only' : zetaVal < -0.5 ? 'Freely convective — strong vertical mixing' : 'Unstable — efficient mixing'}`,
+        'Step 3 — Consequence for the mean profile:',
+        `  ∂ū/∂z = (u_*/κz)·φ_m — ${zeta < 0 ? 'shallower than the neutral log profile (enhanced mixing)' : zeta === 0 ? 'pure logarithmic profile' : 'steeper than the neutral log profile (mixing suppressed)'}`,
         '',
-        `  └ φ_m > 1 under stable conditions; φ_m < 1 under unstable (enhanced turbulent exchange)`,
-      ]
+        `  └ Result: φ_m = ${phiM.toFixed(4)} ${zeta < 0 ? '(< 1 → unstable, efficient turbulent exchange)' : zeta === 0 ? '(= 1, neutral)' : '(> 1 → stable, mixing suppressed)'}`,
+      ],
     };
   },
   49: ({ ustar, z, z0 }) => {
@@ -4251,6 +5071,7 @@ function factorial(n: number): number {
  */
 const PARAM_ALIASES: Record<number, Record<string, string>> = {
   1: { 'T₁₀': 'T10', 'T₁₁': 'T11', 'ε₁₀': 'eps10', 'ε₁₁': 'eps11' },
+  2: { 'λ': 'lambda' },
   5: { 'ρ': 'rho', 'dP/dx': 'dPdx', 'dP/dy': 'dPdy' },
   6: { 'C₀': 'C0' },
   7: { 'z_g': 'zg', 'z_s': 'zs', 'θᵥ(z)': 'thvz', 'θᵥ(s)': 'thvs', 'u(z)': 'uz', 'u(s)': 'us' },
@@ -4263,12 +5084,13 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   16: { 'ρ': 'rho', '∂p/∂x': 'dpdx' },
   17: { 'Qₛ': 'Qs', 'Q_b': 'Qb', 'Q_h': 'Qh', 'Q_e': 'Qe' },
   18: { 'Kₛ': 'Ks', 'ψ_w': 'psiW', 'ψ₀': 'psi0', 'Δθ': 'dTheta', 'F(t)': 'Ft' },
-  21: { 'M_ag': 'mag', 'D_st': 'dist', 'S_te': 'site', 'F_lt': 'fault', 'H_w': 'hw' },
+  21: { 'M': 'mag', 'R_rup': 'rrup', 'R_jb': 'rjb', 'R_x': 'rx', 'V_s30': 'vs30', 'λ': 'rake', 'D_ip': 'dip', 'Z_tor': 'ztor', 'W_id': 'width', 'H_d': 'hypoDepth' },
   22: { 'σₙ': 'sigmaN', 'tan φ': 'tanPhi' },
   23: { 'M₀': 'M0' },
   24: { 'M₀': 'M0' },
   25: { 'M_w': 'Mw' },
-  32: { 'ε': 'eps' },
+  32: { 'ε': 'eps', 'T_fire': 'Tfire', 'T_bg': 'Tbg' },
+  33: { 'T_c': 'Tc', 'T_wet': 'Twet', 'T_dry': 'Tdry' },
   34: { 'T_air': 'Tair', 'T_base': 'Tbase' },
   36: { 'lat₁': 'lat1', 'lon₁': 'lon1', 'lat₂': 'lat2', 'lon₂': 'lon2' },
   37: { 'λᵢ': 'weights' },
@@ -4277,9 +5099,9 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   40: { 'μ': 'mu', 'β': 'beta' },
   41: { 'ξ': 'xi', 'β': 'beta' },
   43: { 'θ_r': 'thetaR', 'θ_s': 'thetaS', 'α': 'alpha', 'ψ': 'psi' },
-  44: { 'ψ_b': 'psib', 'ψ': 'psi' },
+  44: { 'ψ_b': 'psib', 'ψ': 'psi', 'λ': 'lambda' },
   46: { 'R_base': 'Rbase', 'Q₁₀': 'Q10', 'T_base': 'Tbase' },
-  47: { 'kᵢ': 'ki', 'fᵢ': 'fractions' },
+  47: { 'θ': 'theta', 'ρ_b': 'rhoB', 'OM%': 'omPct', 'q': 'sandFrac' },
   48: { 'κ': 'kappa', 'u_*': 'ustar' },
   49: { 'u_*': 'ustar', 'z₀': 'z0' },
   50: { 'g₀': 'g0', 'a₁': 'a1', 'hₛ': 'hs', 'cₛ': 'cs' },

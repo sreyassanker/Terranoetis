@@ -16,6 +16,7 @@ interface AnalyticsWorkbenchProps {
   open: boolean;
   onClose: () => void;
   bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
+  polygon?: Array<Array<[number, number]>>;
   onToolResult?: (
     toolId: number, label: string, lat: number, lon: number,
     value?: number, grid?: ToolGrid, unit?: string,
@@ -50,7 +51,7 @@ const ALL_TOOLS = flattenTools();
 /** Collect all unique domain names for the filter dropdown. */
 const ALL_DOMAIN_NAMES = Array.from(new Set(PARTS.flatMap(p => p.domains.map(d => d.name)))).sort();
 
-export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, bbox, onToolResult, onClearResult, zIndex = 999 }) => {
+export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, bbox, polygon, onToolResult, onClearResult, zIndex = 999 }) => {
   const [search, setSearch] = useState('');
   const [expandedParts, setExpandedParts] = useState<Set<string>>(new Set(['part1']));
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set(['atmo']));
@@ -138,7 +139,7 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
         <div style={{ padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(139,92,246,0.2)' }}>
             <Search size={12} color="#64748b" />
-            <input ref={searchInputRef} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tools, equations, keywords..." style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: '#e2e8f0', fontSize: 12, fontFamily: 'Space Grotesk, sans-serif' }} />
+            <input ref={searchInputRef} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tools, equations, keywords..." style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: '#e2e8f0', fontSize: 12, fontFamily: 'Inter, sans-serif' }} />
             {search && <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 2, display: 'flex' }}><X size={12} /></button>}
           </div>
         </div>
@@ -173,7 +174,7 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8b5cf6', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8, padding: 0 }}>
               <ChevronDown size={10} style={{ transform: 'rotate(90deg)' }} /> Back to tools
             </button>
-            <ToolDialog tool={selectedTool} color={selectedColor} onClose={() => setSelectedTool(null)} bbox={bbox} onToolResult={onToolResult} onClearResult={onClearResult} />
+            <ToolDialog tool={selectedTool} color={selectedColor} onClose={() => setSelectedTool(null)} bbox={bbox} polygon={polygon} onToolResult={onToolResult} onClearResult={onClearResult} />
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>

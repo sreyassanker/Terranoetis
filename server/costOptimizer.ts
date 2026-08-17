@@ -17,9 +17,9 @@ export interface ModelConfig {
 
 const TIERS: Record<ModelTier, ModelConfig> = {
   local:   { name: 'local',           inputPricePer1M: 0,    outputPricePer1M: 0,    description: 'Local keyword/rule matching — free' },
-  flash:   { name: 'gemini-2.0-flash-lite', inputPricePer1M: 0.075, outputPricePer1M: 0.30, description: 'Gemini 2.0 Flash Lite — cheapest' },
-  pro:     { name: 'gemini-2.0-flash', inputPricePer1M: 0.075, outputPricePer1M: 0.30, description: 'Gemini 2.0 Flash — fast & cheap' },
-  'pro-exp': { name: 'gemini-2.0-pro-exp', inputPricePer1M: 2.50, outputPricePer1M: 10.00, description: 'Gemini 2.0 Pro — experimental best quality' },
+  flash:   { name: 'gemini-2.5-flash', inputPricePer1M: 0.075, outputPricePer1M: 0.30, description: 'Gemini 2.5 Flash — fast & cheap' },
+  pro:     { name: 'gemini-2.5-pro', inputPricePer1M: 1.25, outputPricePer1M: 10.00, description: 'Gemini 2.5 Pro — best quality' },
+  'pro-exp': { name: 'gemini-2.5-flash-lite', inputPricePer1M: 0.075, outputPricePer1M: 0.30, description: 'Gemini 2.5 Flash Lite — cheapest' },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────

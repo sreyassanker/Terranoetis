@@ -21,8 +21,22 @@ const GES_DISC_BASE = 'https://gpm2.gesdisc.eosdis.nasa.gov/data';
 
 const ACCUMULATED_30MIN_MM = 100; // scale factor for raw IMERG values
 
-// IMERG V07 product version
+// IMERG V07 product version. The archive shipped as V07B for older dates and
+// was reprocessed/published as V07C for recent ones; the version boundary is
+// not signalled by the API, so the client probes V07C first and falls back to
+// V07B on 404 (see downloadImergFile).
 const IMERG_VERSION = 'V07C';
+const IMERG_VERSION_FALLBACK = 'V07B';
+
+// Rolling-archive retention: IMERG Early (~4h latency) and Late (~14h) are
+// only guaranteed for the most recent ~4 months; older windows are pruned from
+// GES DISC. Probing beyond this just produces 404 noise, so bail out to the
+// Open-Meteo ERA5 fallback instead.
+const IMERG_MAX_AGE_DAYS = 120;
+
+// Only warn once per (product, date) so rolling-archive gaps and unpublished
+// slots don't flood the log.
+const warnedProductDates = new Set<string>();
 
 type ImergProduct = 'early' | 'late' | 'final';
 
@@ -59,6 +73,7 @@ function buildImergFilename(
   month: number,
   day: number,
   slot30: number, // 0–47
+  version: string = IMERG_VERSION,
 ): ImergFileInfo {
   const yyyymmdd = `${year}${String(month).padStart(2, '0')}${String(day).padStart(2, '0')}`;
   const startMin = slot30 * 30;
@@ -67,7 +82,7 @@ function buildImergFilename(
   const endTime = `${String(Math.floor(endMin / 60)).padStart(2, '0')}${String(endMin % 60).padStart(2, '0')}59`;
   const prefix = product === 'early' ? '3B-HHR-E' : product === 'late' ? '3B-HHR-L' : '3B-HHR';
   const elapsed = String(slot30 * 30).padStart(4, '0');
-  const filename = `${prefix}.MS.MRG.3IMERG.${yyyymmdd}-S${startTime}-E${endTime}.${elapsed}.${IMERG_VERSION}.HDF5`;
+  const filename = `${prefix}.MS.MRG.3IMERG.${yyyymmdd}-S${startTime}-E${endTime}.${elapsed}.${version}.HDF5`;
   return {
     productPath: PRODUCT_PATHS[product],
     filename,
@@ -110,29 +125,39 @@ async function downloadImergFile(
   const cached = cache.get<ArrayBuffer>(cacheKey);
   if (cached) return cached;
 
-  try {
-    const resp = await fetch(url, {
-      headers: {
-        Authorization: `Basic ${token}`,
-        'User-Agent': 'Mozilla/5.0',
-        Accept: 'application/octet-stream,*/*',
-      },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(60000),
-    });
-    if (!resp.ok) {
-      console.warn(`[IMERG] download failed ${resp.status} (redirected: ${resp.redirected}) for ${url}`);
-      const text = await resp.text().catch(() => '');
-      // Only log warning bodies for non-200 responses
-      if (resp.status !== 404) console.warn(`[IMERG] body: ${text.slice(0, 200)}`);
-      return null;
-    }
-    const buffer = await resp.arrayBuffer();
-    cache.set(cacheKey, buffer);
-    return buffer;
-  } catch {
-    return null;
+  // The filename in fileInfo carries the primary version; the archive shipped
+  // older dates under the fallback version. Probe primary then fallback.
+  const candidates = new Set<string>([url]);
+  if (fileInfo.filename.includes(`.${IMERG_VERSION}.HDF5`)) {
+    const fb = fileInfo.filename.replace(`.${IMERG_VERSION}.HDF5`, `.${IMERG_VERSION_FALLBACK}.HDF5`);
+    candidates.add(`${GES_DISC_BASE}/${fileInfo.productPath}/${yyyy}/${doyStr}/${fb}`);
   }
+
+  for (const candidate of candidates) {
+    try {
+      const resp = await fetch(candidate, {
+        headers: {
+          Authorization: `Basic ${token}`,
+          'User-Agent': 'Mozilla/5.0',
+          Accept: 'application/octet-stream,*/*',
+        },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!resp.ok) {
+        // Silent 404: unpublished slots and older dates are expected. The
+        // caller (fetchImergPrecipitation) logs one summary line per
+        // (product, date) so a batch of missing files stays quiet.
+        continue;
+      }
+      const buffer = await resp.arrayBuffer();
+      cache.set(cacheKey, buffer);
+      return buffer;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 export interface ImergGridData {
@@ -230,6 +255,15 @@ export async function fetchImergPrecipitation(
   const products: ImergProduct[] = ['late', 'early'];
   let lastError: string | null = null;
 
+  // Rolling-archive guard: IMERG Early/Late are only retained ~120 days.
+  // Older dates aren't on GES DISC, so skip straight to the ERA5 fallback
+  // instead of probing every lookback day and logging 404s.
+  const ageDays = (Date.now() - refDate.getTime()) / 86400000;
+  if (ageDays > IMERG_MAX_AGE_DAYS) {
+    console.warn(`[IMERG] request date ${dateStr ?? 'now'} is ${Math.round(ageDays)}d old — beyond the Early/Late rolling archive; using ERA5 precipitation fallback.`);
+    return null;
+  }
+
   // Parse a single buffer for precip at point; cache lat/lon grids
   async function parseSlot(
     h5: typeof import('h5wasm'),
@@ -309,6 +343,14 @@ export async function fetchImergPrecipitation(
             source: product === 'late' ? 'imerg-late' : 'imerg-early',
             maxIntensity: Math.round(maxIntensity * 100) / 100,
           };
+        }
+
+        // Whole (product, date) came back empty. Report once per process so
+        // rolling-archive gaps and unpublished slots don't spam the log.
+        const pdKey = `${product}:${dateStr2}`;
+        if (!warnedProductDates.has(pdKey)) {
+          warnedProductDates.add(pdKey);
+          console.warn(`[IMERG] no ${product} data for ${dateStr2} — slot window ${windowHours}h over ${totalSlots} slots; skipping to next date/product.`);
         }
       } catch (e) {
         lastError = `product=${product} lookback=${lookback}d err=${(e as Error).message}`;

@@ -1308,8 +1308,21 @@ export default function App() {
       (window as unknown as Record<string, unknown>).setKaggleOverlay = (v: { jobId: string; lat: number; lon: number; scenarioType: string }) =>
         setKaggleOverlay(v);
       (window as unknown as Record<string, unknown>).kaggleOverlayState = kaggleOverlay;
+      // Load a generated scenario by id into the ScenarioViewer (used by e2e tests
+      // to bypass the gallery's top-N search results). Must be an object fetched
+      // from GET /api/scenarios/:id (or a scenario summary with timeSeries).
+      (window as unknown as Record<string, unknown>).setScenarioOverlay = (scenario: any) => {
+        if (!scenario) return;
+        setSelectedScenario(adaptScenario(scenario));
+        setSelectedScenarioId(scenario.id ?? null);
+        setShowScenarioGallery(false);
+        setShowScenarioEditor(false);
+        setShowSpatialSketching(false);
+        setShowCinematicDirector(false);
+      };
       return () => {
         delete (window as unknown as Record<string, unknown>).setKaggleOverlay;
+        delete (window as unknown as Record<string, unknown>).setScenarioOverlay;
       };
     }
   }, [kaggleOverlay]);
@@ -1689,8 +1702,10 @@ export default function App() {
       const n = grid.nLat * grid.nLon;
       const data = new Float32Array(n);
       for (let i = 0; i < n; i++) {
+        // Keep NaN as-is so cells outside a drawn polygon study area render
+        // transparent (the IDW overlay hugs the shape, not its bounding box).
         const v = grid.values[i];
-        data[i] = typeof v === 'number' && Number.isFinite(v) ? v : grid.valueMin;
+        data[i] = typeof v === 'number' && Number.isFinite(v) ? v : NaN;
       }
       const interpGrid: InterpGrid = {
         data,
@@ -9453,7 +9468,7 @@ export default function App() {
 
       {/* Analytics Workbench Panel */}
       <ErrorBoundary label="Analytics Workbench">
-        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} onToolResult={handleToolResult} onClearResult={handleClearToolResult} zIndex={getPanelZIndex('analytics')} />
+        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} onToolResult={handleToolResult} onClearResult={handleClearToolResult} zIndex={getPanelZIndex('analytics')} />
       </ErrorBoundary>
 
       {/* Land Cover Mapper Panel */}
