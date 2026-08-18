@@ -16,6 +16,7 @@ export interface ComputeResult {
   result: number;
   unit?: string;
   steps: string[];
+  secondary?: Array<{ key: string; value: number; unit?: string; label: string }>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,6 +30,155 @@ const G_GRAV = 9.80665; // m/s^2
 const R_SPEC = 287.058; // J/(kg·K) specific gas constant for dry air
 const _OMEGA = 7.292115e-5; // Earth rotation rate (rad/s)
 const PI = Math.PI;
+
+// ── Wanninkhof (1992) air–sea CO₂ flux — paper-exact coefficients ──
+// Table A1: Schmidt number of CO₂ in seawater (35‰), Sc = A − Bt + Ct² − Dt³
+// (t in °C, valid 0–30 °C). A=2073.1, B=125.62, C=3.6276, D=0.043219;
+// Sc = 660 at 20 °C (the paper's normalization).
+export function schmidtNumberCO2(tC: number): number {
+  return 2073.1 - 125.62 * tC + 3.6276 * tC * tC - 0.043219 * tC * tC * tC;
+}
+// Table A2: CO₂ Bunsen solubility β (mol/L·atm), Weiss (1974) form
+// ln β = A1 + A2·(100/T) + A3·ln(T/100) + S·[B1 + B2·(T/100) + B3·(T/100)²]
+// (T in K, S in ‰). A1=−60.2409, A2=93.4517, A3=23.3585,
+// B1=0.023517, B2=−0.023656, B3=0.0047036. β(20 °C, 35‰) = 0.0324 mol/L·atm
+// — matches the value the paper states in the text exactly.
+export function weissSolubilityCO2(tC: number, sss: number): number {
+  const T = tC + 273.15;
+  const lnB = -60.2409 + 93.4517 * (100 / T) + 23.3585 * Math.log(T / 100)
+    + sss * (0.023517 - 0.023656 * (T / 100) + 0.0047036 * Math.pow(T / 100, 2));
+  return Math.exp(lnB);
+}
+// Eq. 3: gas transfer velocity k = 0.31·u₁₀²·(Sc/660)^(−1/2) (cm/hr), for
+// steady/short-term winds (spot measurements, scatterometer winds).
+export function wanninkhofK1992(u10: number, sc: number): number {
+  return 0.31 * u10 * u10 * Math.pow(sc / 660, -0.5);
+}
+
+// ── TEOS-10 seawater specific volume (Tool 70) ──────────────────────
+// The 75-term polynomial for specific volume in terms of Absolute
+// Salinity S_A (g/kg), Conservative Temperature Θ (ITS-90 °C) and sea
+// pressure p (dbar) — Roquet, Madec, McDougall & Barker (2015), Ocean
+// Modelling 90:29–43, table of coefficients reproduced in the TEOS-10
+// Manual (IOC/SCOR/IAPSO 2010, §A.30 / Table K.1). This is the exact
+// computational form used by the GSW library's gsw_specvol(). Structural
+// variables: xs = sqrt(sfac·S_A + 24·sfac), ys = Θ/40, z = p/10⁴.
+const TEOS10_SFAC = 0.0248826675584615; // 1/(40·(35.16504/35))
+// [i, j, k, c] for term c·xs^i·ys^j·z^k
+const TEOS10_V: ReadonlyArray<readonly [number, number, number, number]> = [
+  [0,0,0,1.0769995862e-3],[1,0,0,-3.1038981976e-4],[2,0,0,6.6928067038e-4],[3,0,0,-8.5047933937e-4],
+  [4,0,0,5.8086069943e-4],[5,0,0,-2.1092370507e-4],[6,0,0,3.1932457305e-5],
+  [0,1,0,-1.5649734675e-5],[1,1,0,3.5009599764e-5],[2,1,0,-4.3592678561e-5],[3,1,0,3.4532461828e-5],
+  [4,1,0,-1.1959409788e-5],[5,1,0,1.3864594581e-6],
+  [0,2,0,2.7762106484e-5],[1,2,0,-3.7435842344e-5],[2,2,0,3.5907822760e-5],[3,2,0,-1.8698584187e-5],
+  [4,2,0,3.8595339244e-6],
+  [0,3,0,-1.6521159259e-5],[1,3,0,2.4141479483e-5],[2,3,0,-1.4353633048e-5],[3,3,0,2.2863324556e-6],
+  [0,4,0,6.9111322702e-6],[1,4,0,-8.7595873154e-6],[2,4,0,4.3703680598e-6],
+  [0,5,0,-8.0539615540e-7],[1,5,0,-3.3052758900e-7],[0,6,0,2.0543094268e-7],
+  [0,0,1,-6.0799143809e-5],[1,0,1,2.4262468747e-5],[2,0,1,-3.4792460974e-5],[3,0,1,3.7470777305e-5],
+  [4,0,1,-1.7322218612e-5],[5,0,1,3.0927427253e-6],
+  [0,1,1,1.8505765429e-5],[1,1,1,-9.5677088156e-6],[2,1,1,1.1100834765e-5],[3,1,1,-9.8447117844e-6],
+  [4,1,1,2.5909225260e-6],
+  [0,2,1,-1.1716606853e-5],[1,2,1,-2.3678308361e-7],[2,2,1,2.9283346295e-6],[3,2,1,-4.8826139200e-7],
+  [0,3,1,7.9279656173e-6],[1,3,1,-3.4558773655e-6],[2,3,1,3.1655306078e-7],
+  [0,4,1,-3.4102187482e-6],[1,4,1,1.2956717783e-6],[0,5,1,5.0736766814e-7],
+  [0,0,2,9.9856169219e-6],[1,0,2,-5.8484432984e-7],[2,0,2,-4.8122251597e-6],[3,0,2,4.9263106998e-6],
+  [4,0,2,-1.7811974727e-6],
+  [0,1,2,-1.1736386731e-6],[1,1,2,-5.5699154557e-6],[2,1,2,5.4620748834e-6],[3,1,2,-1.3544185627e-6],
+  [0,2,2,2.1305028740e-6],[1,2,2,3.9137387080e-7],[2,2,2,-6.5731104067e-7],
+  [0,3,2,-4.6132540037e-7],[1,3,2,7.7618888092e-9],[0,4,2,-6.3352916514e-8],
+  [0,0,3,-1.1309361437e-6],[1,0,3,3.6310188515e-7],[2,0,3,1.6746303780e-8],
+  [0,1,3,-3.6527006553e-7],[1,1,3,-2.7295696237e-7],[0,2,3,2.8695905159e-7],
+  [0,0,4,1.0531153080e-7],[1,0,4,-1.1147125423e-7],[0,1,4,3.1454099902e-7],
+  [0,0,5,-1.2647261286e-8],[0,0,6,1.9613503930e-9],
+];
+
+/**
+ * TEOS-10 specific volume (m³/kg) from Absolute Salinity (g/kg),
+ * Conservative Temperature (°C) and sea pressure (dbar) — the
+ * 75-term Roquet et al. (2015) polynomial, identical to gsw_specvol.
+ * Returns NaN for any non-finite or out-of-range input (S_A < 0, CT < -18
+ * or CT > 40 °C, p < 0 dbar), per the honest-NaN convention.
+ */
+export function teos10SpecVol(SA: number, CT: number, p: number): number {
+  if (!Number.isFinite(SA) || !Number.isFinite(CT) || !Number.isFinite(p)) return Number.NaN;
+  if (SA < 0 || CT < -18 || CT > 40 || p < 0) return Number.NaN;
+  const xs = Math.sqrt(TEOS10_SFAC * SA + 24 * TEOS10_SFAC);
+  const ys = CT * 0.025;
+  const z = p * 1e-4;
+  let v = 0;
+  for (const [i, j, k, c] of TEOS10_V) v += c * Math.pow(xs, i) * Math.pow(ys, j) * Math.pow(z, k);
+  return v;
+}
+
+/**
+ * TEOS-10 sound speed c (m/s) from the polynomial specific volume:
+ * c² = −v²/(∂v/∂p)|_{S_A,Θ}, with the dbar→Pa conversion (1 dbar = 10⁴ Pa).
+ */
+export function teos10SoundSpeed(SA: number, CT: number, p: number): number {
+  const v = teos10SpecVol(SA, CT, p);
+  if (!Number.isFinite(v)) return Number.NaN;
+  const xs = Math.sqrt(TEOS10_SFAC * SA + 24 * TEOS10_SFAC);
+  const ys = CT * 0.025;
+  const z = p * 1e-4;
+  let dv = 0; // ∂v/∂p in m³/(kg·dbar)
+  for (const [i, j, k, c] of TEOS10_V) {
+    if (k > 0) dv += k * c * Math.pow(xs, i) * Math.pow(ys, j) * Math.pow(z, k - 1) * 1e-4;
+  }
+  if (dv >= 0 || !Number.isFinite(dv)) return Number.NaN;
+  return Math.sqrt((-v * v) / dv * 1e4); // 1 dbar = 10⁴ Pa
+}
+
+// ── Growing Degree Days (Tool 58) — McMaster & Wilhelm (1997) ──────
+// "One equation, two interpretations" (paper Eq. 1: GDD = [(TMAX+TMIN)/2] −
+// TBASE). The two interpretations differ ONLY in when TBASE / TUT is
+// applied (paper §2):
+//   Method 1 — clamp the daily MEAN: TAVG = max(min(TAVG, TUT), TBASE);
+//              GDD₁ = max(0, TAVG − TBASE).  Predominates for small-grain
+//              cereals and in simulation models (paper §2.1).
+//   Method 2 — clamp each EXTREME: TMAX/TMIN each bounded to [TBASE, TUT];
+//              GDD₂ = max(0, (TMAX+TMIN)/2 − TBASE).  Most common for corn
+//              (paper §2.2).
+// The methods agree only when TMIN ≥ TBASE; whenever TMIN < TBASE, Method 2
+// exceeds Method 1 (paper Table 1: 10-day wheat example at TBASE = 0 °C
+// sums to 46.5 vs 51.0 °C·day; field data show up to 83 % for wheat and
+// 376 % for corn). Both are returned so a tool can report both sums and
+// the difference, as the paper demands.
+export function gddMethods(
+  tmaxC: number, tminC: number, tbaseC: number, tutC?: number | null,
+): { m1: number; m2: number } {
+  const tut = (tutC != null && Number.isFinite(tutC)) ? tutC : Number.NaN;
+  const tavg = (tmaxC + tminC) / 2;
+  // Method 1: clamp the mean
+  let m1avg = tavg;
+  if (m1avg < tbaseC) m1avg = tbaseC;
+  if (Number.isFinite(tut) && m1avg > tut) m1avg = tut;
+  const m1 = Math.max(0, m1avg - tbaseC);
+  // Method 2: clamp each extreme
+  let m2max = tmaxC, m2min = tminC;
+  if (m2max < tbaseC) m2max = tbaseC;
+  if (m2min < tbaseC) m2min = tbaseC;
+  if (Number.isFinite(tut)) {
+    if (m2max > tut) m2max = tut;
+    if (m2min > tut) m2min = tut;
+  }
+  const m2 = Math.max(0, (m2max + m2min) / 2 - tbaseC);
+  return { m1, m2 };
+}
+
+// FAO IDP 33 / IDP 66 Eq. (1): (1 − Yₐ/Yₘ) = K_y × (1 − ETₐ/ETₘ)
+// Returns the predicted relative yield reduction (primary) and, when Yₘ is
+// finite, the predicted actual yield. Observed Yₐ is an optional diagnostic.
+export function faoYieldResponse(
+  ya: number, ym: number, ky: number, eta: number, etm: number,
+): { relReduction: number; predictedYa: number; residual: number | null } {
+  const relETDeficit = 1 - eta / etm;
+  const relReduction = ky * relETDeficit;
+  const predictedYa = ym * (1 - relReduction);
+  const hasObserved = Number.isFinite(ya) && ya > 0;
+  const residual = hasObserved ? (1 - ya / ym) - relReduction : null;
+  return { relReduction, predictedYa, residual };
+}
 
 export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
@@ -2521,615 +2671,1464 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   },
   52: ({ I0, k, LAI }) => {
     const I = I0 * Math.exp(-k * LAI);
-    const fCover = 1 - Math.exp(-k * LAI);
+    const fPAR = 1 - Math.exp(-k * LAI);
+    // Catalogue-promised secondary output: cumulative LAI at which transmitted
+    // PPFD equals the C₃ leaf light-compensation point Γ ≈ 50 µmol/m²s
+    // (Monsi–Saeki 1953 Eqs 5–6 / Hirose 2004; Γ stated in the catalogue's
+    // output description). LAI_comp = −(1/k)·ln(Γ/I₀). Honest NaN when there
+    // is no incident radiation (I₀ ≤ 0, e.g. night) — never ±Infinity.
+    const GAMMA_COMP = 50; // µmol/m²s, C₃ leaf light-compensation point
+    const laiComp = I0 > 0 ? -(1 / k) * Math.log(GAMMA_COMP / I0) : Number.NaN;
+    const i0Str = Number.isFinite(I0) ? I0.toFixed(0) : 'NaN';
     return {
       result: I, unit: 'µmol/m²s',
       steps: [
-        '── Beer-Lambert Light Extinction (Monsi & Saeki, 1953) ──',
-        `Incident PAR I₀ = ${I0.toFixed(0)} µmol/m²s, Extinction coefficient k = ${k.toFixed(3)}`,
-        `Leaf Area Index LAI = ${LAI.toFixed(2)} m²/m²`,
+        '── Beer-Lambert Light Extinction (Monsi & Saeki 1953; Hirose 2004, Ann. Bot. 95(3):483–494) ──',
+        `Incident PPFD above canopy I₀ = ${i0Str} µmol/m²s, Extinction coefficient k = ${k.toFixed(3)}`,
+        `Leaf Area Index (cumulative from top) LAI = ${LAI.toFixed(2)} m²/m²`,
         '',
-        'Step 1 — Compute exponential attenuation:',
+        'Step 1 — Exponential attenuation (Beer’s Law, I = I₀·e^(−k·LAI)):',
         `  k × LAI = ${k.toFixed(3)} × ${LAI.toFixed(2)} = ${(k * LAI).toFixed(3)}`,
+        `  I(z) = ${i0Str} × exp(${(-k * LAI).toFixed(3)}) = ${I.toFixed(1)} µmol/m²s`,
         '',
-        'Step 2 — Compute transmitted light:',
-        `  I(z) = I₀ × exp(-k·LAI) = ${I0.toFixed(0)} × exp(${(-k * LAI).toFixed(3)})`,
-        `  I(z) = ${I.toFixed(1)} µmol/m²s`,
+        'Step 2 — Fraction of absorbed PAR (fPAR = 1 − e^(−k·LAI)):',
+        `  fPAR = ${(fPAR * 100).toFixed(1)}% of incident PAR absorbed by the canopy`,
         '',
-        'Step 3 — Canopy cover fraction:',
-        `  f_cover = 1 - exp(-k·LAI) = ${(fCover * 100).toFixed(1)}% light intercepted`,
+        'Step 3 — Light-compensation depth (LAI where I(z) = Γ ≈ 50 µmol/m²s, C₃):',
+        Number.isFinite(laiComp)
+          ? `  LAI_comp = −(1/k)·ln(Γ/I₀) = ${laiComp.toFixed(2)} m²/m² — leaves below this depth are below the compensation point`
+          : '  LAI_comp = NaN — no incident radiation (I₀ ≤ 0, e.g. night); depth undefined',
         '',
-        `  └ Interpretation: ${fCover > 0.8 ? 'Dense canopy closure' : fCover > 0.5 ? 'Moderate canopy — significant understorey light' : 'Open canopy — abundant understorey / ground-layer light'}`,
+        `  └ Interpretation: ${fPAR > 0.8 ? 'Dense canopy closure — little understorey light' : fPAR > 0.5 ? 'Moderate canopy — significant understorey light' : 'Open canopy — abundant understorey / ground-layer light'}`,
       ]
     };
   },
   53: ({ Reco, GPP }) => {
+    // Wofsy et al. (1993), Science 260:1314-1317: NEE = R_eco − GPP with the
+    // meteorological sign convention (negative = net CO₂ sink). Verified
+    // against the paper's own numbers: GPP 11.1, Reco 7.4 tC/ha/yr ⇒ NEE =
+    // −3.7 tC/ha/yr (their measured annual uptake −3.7 ± 0.7). The sign
+    // convention is also that standardized by Chapin et al. (2006),
+    // Ecosystems 9:1041-1050.
     const NEE = Reco - GPP;
-    return {
-      result: NEE, unit: 'gC/m²/yr',
-      steps: [
-        '── Net Ecosystem Exchange (Chapin et al., 2006) ──',
-        `Ecosystem respiration R_eco = ${Reco.toFixed(1)} gC/m²/yr`,
-        `Gross Primary Production GPP = ${GPP.toFixed(1)} gC/m²/yr`,
-        '',
-        'Step 1 — Compute NEE:',
-        `  NEE = R_eco - GPP = ${Reco.toFixed(1)} - ${GPP.toFixed(1)}`,
-        `  NEE = ${NEE.toFixed(1)} gC/m²/yr`,
-        '',
-        'Step 2 — Carbon balance classification:',
-        `  ${NEE < 0 ? 'NET CARBON SINK (NEE < 0) — ecosystem absorbs CO₂' : NEE > 0 ? 'NET CARBON SOURCE (NEE > 0) — ecosystem releases CO₂' : 'CARBON NEUTRAL (NEE ≈ 0)'}`,
-        `  Net ecosystem production NEP = -NEE = ${(-NEE).toFixed(1)} gC/m²/yr`,
-        '',
-        `  └ NEE range: < -500 strong sink (productive forest); -500 to -100 moderate sink; -100 to 100 near-neutral; > 100 carbon source (disturbance/peat decomposition)`,
-      ]
-    };
+    const finite = Number.isFinite(Reco) && Number.isFinite(GPP);
+    const reStr = Number.isFinite(Reco) ? Reco.toFixed(1) : 'NaN';
+    const gStr = Number.isFinite(GPP) ? GPP.toFixed(1) : 'NaN';
+    const steps: string[] = [
+      '── Net Ecosystem Exchange (Wofsy et al. 1993, Science 260:1314-1317; sign per Chapin et al. 2006) ──',
+      `Ecosystem respiration R_eco = ${reStr} gC/m²/yr`,
+      `Gross Primary Production GPP = ${gStr} gC/m²/yr`,
+      '',
+    ];
+    if (!Number.isFinite(Reco)) {
+      steps.push(
+        '  R_eco is NaN — ecosystem respiration requires nighttime eddy-covariance NEE',
+        '  (FLUXNET/AmeriFlux, registration-gated; SMAP L4C subset service unpopulated).',
+        '  No genuine open source exists — supply R_eco explicitly (gC/m²/yr).',
+      );
+    }
+    if (!Number.isFinite(GPP)) {
+      steps.push('  GPP is NaN — no genuine MODIS MOD17A2H annual GPP resolved at this point.');
+    }
+    if (!finite) {
+      steps.push('', '  NEE = NaN (honest — a required genuine input is missing, no substitution).');
+      return { result: NEE, unit: 'gC/m²/yr', steps };
+    }
+    steps.push(
+      'Step 1 — Compute NEE:',
+      `  NEE = R_eco - GPP = ${Reco.toFixed(1)} - ${GPP.toFixed(1)}`,
+      `  NEE = ${NEE.toFixed(1)} gC/m²/yr`,
+      '',
+      'Step 2 — Carbon balance classification (sign per Wofsy 1993 / Chapin 2006):',
+      `  ${NEE < 0 ? 'NET CARBON SINK (NEE < 0) — ecosystem absorbs CO₂' : NEE > 0 ? 'NET CARBON SOURCE (NEE > 0) — ecosystem releases CO₂' : 'CARBON NEUTRAL (NEE ≈ 0)'}`,
+      `  Net ecosystem production NEP = -NEE = ${(-NEE).toFixed(1)} gC/m²/yr (positive = net uptake)`,
+      '',
+      `  └ NEE range: < -500 strong sink (productive forest); -500 to -100 moderate sink; -100 to 100 near-neutral; > 100 carbon source (disturbance/peat decomposition)`,
+    );
+    return { result: NEE, unit: 'gC/m²/yr', steps };
   },
-  54: ({ Vcmax, ci, GammaStar, Kc, Ko, O }) => {
+  54: ({ Vcmax, ci, GammaStar, Kc, Ko, O, ca }) => {
+    // Farquhar, von Caemmerer & Berry (1980), Planta 149:78-90 — Rubisco-limited
+    // (RuP2-saturated) carboxylation: Wc = Vcmax·C/(C + Kc(1 + O/Ko)), paper
+    // Eq. 2/3. The tool's simplified net form subtracts the CO₂ compensation
+    // point: A_c = Vcmax·(ci − Γ*)/(ci + Kc(1 + O/Ko)). Units µmol/mol
+    // (mixing ratios; equivalent to the paper's partial pressures at 1 atm).
+    const finite = [Vcmax, ci, GammaStar, Kc, Ko, O].every(Number.isFinite);
     const Kco = Kc * (1 + O / Ko);
     const Ac = Vcmax * (ci - GammaStar) / (ci + Kco);
-    const _Aq = Ac * 0.5;
-    return {
-      result: Ac, unit: 'µmol/m²s',
-      steps: [
-        '── Farquhar Photosynthesis (Farquhar et al., 1980) — Rubisco-limited ──',
-        `V_cmax = ${Vcmax.toFixed(1)} µmol/m²s, cᵢ = ${ci.toFixed(1)} µbar`,
-        `Γ* = ${GammaStar.toFixed(2)} µbar, K_c = ${Kc.toFixed(1)} µbar, K_o = ${Ko.toFixed(0)} µbar`,
-        `Intercellular O₂ O = ${O.toFixed(0)} mbar (21% of P_atm)`,
-        '',
-        'Step 1 — Compute effective K_c including O₂ competition:',
-        `  K_c·(1 + O/K_o) = ${Kc.toFixed(1)} × (1 + ${O.toFixed(0)} / ${Ko.toFixed(0)})`,
-        `  = ${Kco.toFixed(1)} µbar`,
-        '',
-        'Step 2 — Compute Rubisco-limited carboxylation:',
-        `  A_c = V_cmax × (cᵢ − Γ*) / (cᵢ + K_c·(1+O/K_o))`,
-        `  A_c = ${Vcmax.toFixed(1)} × (${ci.toFixed(1)} − ${GammaStar.toFixed(2)}) / (${ci.toFixed(1)} + ${Kco.toFixed(1)})`,
-        `  A_c = ${Ac.toFixed(2)} µmol/m²s`,
-        '',
-        'Step 3 — Biochemical limitation:',
-        `  ${Ac > 30 ? 'High rate — tropical/crop C₃ photosynthesis' : Ac > 15 ? 'Moderate rate — typical C₃ midday' : Ac > 5 ? 'Low rate — light/water-limited' : 'Very low — stressed or senescent canopy'}`,
-        `  (RuBP regeneration-limited rate A_j would be computed separately for full Farquhar-von Caemmerer model)`,
-        '',
-        `  └ Electron transport required: J ≈ 4·A_c = ${(4 * Ac).toFixed(1)} µmol e⁻/m²s (assuming 4 e⁻ per CO₂)`,
-      ]
-    };
+    // Gross carboxylation v_c and photorespiratory oxygenation v_o (paper Eq. 4
+    // ratio form as stated in the catalogue: v_o = v_c·(O·K_c)/(cᵢ·K_o)).
+    const vc = Vcmax * ci / (ci + Kco);
+    const vo = vc * (O * Kc) / (ci * Ko);
+    const ciCa = Number.isFinite(ca) && ca > 0 ? ci / ca : Number.NaN;
+    const steps: string[] = [
+      '── FvCB Photosynthesis (Farquhar, von Caemmerer & Berry 1980, Planta 149:78-90) — Rubisco-limited branch ──',
+      `V_cmax = ${Number.isFinite(Vcmax) ? Vcmax.toFixed(1) : 'NaN'} µmol/m²s, cᵢ = ${Number.isFinite(ci) ? ci.toFixed(1) : 'NaN'} µmol/mol`,
+      `Γ* = ${GammaStar.toFixed(2)} µmol/mol, K_c = ${Kc.toFixed(1)} µmol/mol, K_o = ${Ko.toFixed(0)} µmol/mol`,
+      `Intercellular O₂ O = ${O.toFixed(0)} µmol/mol (21 % of P_atm)`,
+      '',
+    ];
+    if (!Number.isFinite(Vcmax)) {
+      steps.push(
+        '  V_cmax is NaN — it is a leaf gas-exchange trait with no genuine open',
+        '  source (no trait-database API). Supply V_cmax explicitly (µmol/m²s).',
+      );
+    }
+    if (!Number.isFinite(ci)) {
+      steps.push('  cᵢ is NaN — no genuine NOAA GML ambient CO₂ resolved (ci = 0.7 × ca).');
+    }
+    if (!finite) {
+      steps.push('', '  A_c = NaN (honest — a required genuine input is missing, no substitution).');
+      return { result: Ac, unit: 'µmol/m²s', steps };
+    }
+    steps.push(
+      'Step 1 — Effective K_c with O₂ competition (paper Eq. 2/3 denominator):',
+      `  K_c·(1 + O/K_o) = ${Kc.toFixed(1)} × (1 + ${O.toFixed(0)} / ${Ko.toFixed(0)}) = ${Kco.toFixed(1)} µmol/mol`,
+      '',
+      'Step 2 — Rubisco-limited net carboxylation:',
+      `  A_c = V_cmax × (cᵢ − Γ*) / (cᵢ + K_c·(1+O/K_o))`,
+      `  A_c = ${Vcmax.toFixed(1)} × (${ci.toFixed(1)} − ${GammaStar.toFixed(2)}) / (${ci.toFixed(1)} + ${Kco.toFixed(1)})`,
+      `  A_c = ${Ac.toFixed(2)} µmol/m²s`,
+      Ac < 0 ? `  (cᵢ ${ci.toFixed(0)} < Γ* ${GammaStar.toFixed(0)} — below the CO₂ compensation point, net photorespiratory loss)` : '',
+      '',
+      'Step 3 — Photorespiration (oxygenation) rate:',
+      `  v_o = v_c·(O·K_c)/(cᵢ·K_o) = ${vc.toFixed(2)} × (${O.toFixed(0)}×${Kc.toFixed(0)})/(${ci.toFixed(0)}×${Ko.toFixed(0)})`,
+      `  v_o = ${vo.toFixed(2)} µmol/m²s (${(vo / (vc + vo) * 100).toFixed(1)} % of Rubisco flux on photorespiration)`,
+      '',
+      'Step 4 — cᵢ/cₐ ratio (water-use efficiency indicator):',
+      Number.isFinite(ciCa)
+        ? `  cᵢ/cₐ = ${ci.toFixed(1)} / ${ca.toFixed(1)} = ${ciCa.toFixed(3)} (C₃ typical 0.6–0.8)`
+        : '  cᵢ/cₐ = NaN (no genuine ambient CO₂ served)',
+      '',
+      `  └ Interpretation: ${Ac > 30 ? 'High rate — tropical/crop C₃ photosynthesis' : Ac > 15 ? 'Moderate rate — typical C₃ midday' : Ac > 5 ? 'Low rate — light/water-limited' : 'Very low — stressed, senescent canopy or below compensation'}`,
+    );
+    return { result: Ac, unit: 'µmol/m²s', steps };
   },
-  55: ({ a, DBH }) => {
-    const B = a * Math.pow(DBH, 2);
-    const B_tonnes = B / 1000;
-    return {
-      result: B, unit: 'kg',
-      steps: [
-        '── Allometric Biomass Equation (Zianis & Mencuccini, 2004) ──',
-        `Scaling coefficient a = ${a.toFixed(4)} kg/cm²`,
-        `Diameter at Breast Height DBH = ${DBH.toFixed(1)} cm`,
-        '',
-        'Step 1 — Compute biomass:',
-        `  B = a × DBH² = ${a.toFixed(4)} × ${DBH.toFixed(1)}²`,
-        `  B = ${B.toFixed(2)} kg (${B_tonnes.toFixed(3)} tonnes)`,
-        '',
-        'Step 2 — Carbon content estimate (50% dry mass):',
-        `  C_content ≈ 0.5 × B = ${(0.5 * B).toFixed(1)} kg C`,
-        '',
-        `  └ Class: ${B < 10 ? 'Sapling / small tree (understorey)' : B < 100 ? 'Medium tree (sub-canopy)' : B < 1000 ? 'Large tree (canopy dominant)' : 'Very large / emergent tree (>1 tonne)'}`,
-        `  └ Allometric form B = a·DBH^b; here b=2. For broader application use site-specific b (typically 2.2–2.7)`,
-      ]
-    };
+  55: ({ DBH, rho, E }) => {
+    // Chave et al. (2014), Glob. Change Biol. 20:3177-3190 — the height-
+    // unavailable pantropical model, Eq. 7:
+    //   AGB = exp[−1.803 − 0.976·E + 0.976·ln(ρ) + 2.673·ln(D) − 0.0299·(ln D)²]
+    // D in cm, ρ in g/cm³ (wood specific gravity), E dimensionless bioclimatic
+    // stress (Eq. 6b: E = (0.178·TS − 0.938·CWD − 6.61·PS)×10⁻³). Calibrated
+    // on 4004 harvested tropical trees, RSE=0.413, mean bias +9.71 %.
+    // The height-available model (Eq. 4, AGB = 0.0673·(ρD²H)^0.976) is not
+    // used: this tool takes no height input.
+    const finite = [DBH, rho, E].every(Number.isFinite);
+    const lnD = Math.log(DBH);
+    const AGB = Number.isFinite(DBH) && DBH > 0 && Number.isFinite(rho) && rho > 0
+      ? Math.exp(-1.803 - 0.976 * E + 0.976 * Math.log(rho) + 2.673 * lnD - 0.0299 * lnD * lnD)
+      : Number.NaN;
+    const C_kg = AGB * 0.47;      // IPCC default carbon fraction (0.47, catalogue output)
+    const CO2e = C_kg * 3.67;     // mass ratio CO₂/C
+    const steps: string[] = [
+      '── Pantropical Allometric Biomass (Chave et al. 2014, Glob. Change Biol. 20:3177-3190, Eq. 7 — height-unavailable model) ──',
+      `DBH D = ${Number.isFinite(DBH) ? DBH.toFixed(1) : 'NaN'} cm (field measurement)`,
+      `Wood specific gravity ρ = ${Number.isFinite(rho) ? rho.toFixed(3) : 'NaN'} g/cm³ (user-supplied: no open trait API)`,
+      `Bioclimatic stress E = ${Number.isFinite(E) ? E.toFixed(4) : 'NaN'} (Eq. 6b: (0.178·TS − 0.938·CWD − 6.61·PS)×10⁻³; Chave's E-layer offline)`,
+      '',
+    ];
+    if (!Number.isFinite(DBH)) steps.push('  DBH is NaN — it is a field measurement with no open source; supply D (cm).');
+    if (!Number.isFinite(rho)) steps.push('  ρ is NaN — wood specific gravity has no open API (BIEN unreachable; global wood-density DB is a static dataset); supply ρ (g/cm³).');
+    if (!Number.isFinite(E)) steps.push('  E is NaN — the paper\'s gridded E layer (chave.upstlse.fr) is offline and WorldClim has no point API; supply E from Eq. 6b.');
+    if (!finite) {
+      steps.push('', '  AGB = NaN (honest — required genuine inputs missing, no substitution).');
+      return { result: AGB, unit: 'kg', steps };
+    }
+    steps.push(
+      'Step 1 — ln(D) terms:',
+      `  ln(D) = ln(${DBH.toFixed(1)}) = ${lnD.toFixed(4)}`,
+      `  2.673·ln(D) = ${(2.673 * lnD).toFixed(4)}`,
+      `  0.0299·(ln D)² = ${(0.0299 * lnD * lnD).toFixed(4)}`,
+      '',
+      'Step 2 — Combine (Eq. 7 exponent):',
+      `  −1.803 − 0.976·E + 0.976·ln(ρ) + 2.673·ln(D) − 0.0299·(ln D)²`,
+      `  = −1.803 − ${(0.976 * E).toFixed(4)} + ${(0.976 * Math.log(rho)).toFixed(4)} + ${(2.673 * lnD).toFixed(4)} − ${(0.0299 * lnD * lnD).toFixed(4)}`,
+      `  = ${(-1.803 - 0.976 * E + 0.976 * Math.log(rho) + 2.673 * lnD - 0.0299 * lnD * lnD).toFixed(4)}`,
+      '',
+      'Step 3 — Aboveground biomass:',
+      `  AGB = exp(${(-1.803 - 0.976 * E + 0.976 * Math.log(rho) + 2.673 * lnD - 0.0299 * lnD * lnD).toFixed(4)}) = ${AGB.toFixed(2)} kg (${(AGB / 1000).toFixed(3)} t)`,
+      '',
+      'Step 4 — Carbon stock (IPCC default fraction 0.47):',
+      `  C = 0.47 × AGB = ${C_kg.toFixed(1)} kg C (${(C_kg / 1000).toFixed(4)} tC)`,
+      `  CO₂ equivalent = 3.67 × C = ${(CO2e / 1000).toFixed(3)} tCO₂`,
+      '',
+      `  └ Class: ${AGB < 100 ? 'Small tree (DBH < ~20 cm, understorey)' : AGB < 500 ? 'Medium tree (canopy)' : AGB < 2000 ? 'Large tree (canopy emergent)' : 'Very large tree (>2 t — disproportionate carbon share)'}`,
+      `  └ Uncertainty: ±20-40 % per tree (paper RSE 0.413, mean bias +9.71 %); height-available model Eq. 4 (AGB = 0.0673·(ρD²H)^0.976) is more accurate (RSE 0.357) — not used here (no H input)`,
+    );
+    return { result: AGB, unit: 'kg', steps };
   },
-  56: ({ k, K0, dCO2 }) => {
-    const F = k * K0 * dCO2;
-    const F_gC = F * 12.01;
-    return {
-      result: F, unit: 'mol/m²/yr',
-      steps: [
-        '── Air-Sea CO₂ Flux (Wanninkhof, 1992) ──',
-        `Gas transfer velocity k = ${k.toExponential(3)} m/yr`,
-        `Solubility K₀ = ${K0.toExponential(3)} mol/m³·µatm`,
-        `ΔpCO₂ = ${dCO2.toFixed(1)} µatm (ocean − atmosphere)`,
-        '',
+  // ── Wanninkhof (1992) air–sea CO₂ flux (helpers in schmidtNumberCO2 /
+  // weissSolubilityCO2 / wanninkhofK1992 above EQUATION_ENGINE) ──
+  56: ({ k, K0, dCO2, __wind10m, __windDate, __sst, __sc, __sss, __mooring, __kAuto, __K0Auto, __dCO2Auto }) => {
+    const finite = [k, K0, dCO2].every(Number.isFinite);
+    // ΔpCO₂ arrives in µatm (ocean − atmosphere) → ×10⁻⁶ converts to atm.
+    const F = finite ? k * K0 * dCO2 * 1e-6 : Number.NaN;   // mol/m²/yr
+    const F_gC = finite ? F * 12.01 : Number.NaN;            // gC/m²/yr
+    const missing = [
+      !Number.isFinite(k) ? 'k — gas transfer velocity (ERA5 10 m wind unavailable via CDS, or user-supplied k non-finite)' : null,
+      !Number.isFinite(K0) ? 'K₀ — CO₂ solubility (SST/salinity unavailable — no mooring or OISST sample)' : null,
+      !Number.isFinite(dCO2) ? 'ΔpCO₂ — air–sea pCO₂ gradient (no NOAA PMEL mooring within 1000 km; user-supplied ΔpCO₂ needed)' : null,
+    ].filter(Boolean);
+    const steps: string[] = [
+      '── Air-Sea CO₂ Flux (Wanninkhof, 1992) ──',
+      ...(__mooring && __dCO2Auto != null
+        ? [`Ocean pCO₂ source: NOAA PMEL mooring ${__mooring}`,]
+        : []),
+      ...(__kAuto && __wind10m != null && Number.isFinite(__wind10m)
+        ? [`Wind u₁₀ = ${Number(__wind10m).toFixed(2)} m/s (ERA5 reanalysis${__windDate ? `, as of ${__windDate}` : ''})`,]
+        : []),
+      ...(__kAuto && __sc != null && Number.isFinite(__sc)
+        ? [`  Sc(CO₂, seawater) = 2073.1 − 125.62·SST + 3.6276·SST² − 0.043219·SST³ = ${Number(__sc).toFixed(1)} (paper Table A1, SST = ${Number(__sst).toFixed(2)} °C)`]
+        : []),
+      `Gas transfer velocity k = ${k.toExponential(3)} m/yr${__kAuto ? ' (derived, paper Eq. 3)' : ' (user-supplied)'}`,
+      `Solubility K₀ = ${K0.toExponential(3)} mol/m³·atm${__K0Auto ? ` (Weiss 1974 form, paper Table A2${__sss != null && Number.isFinite(__sss) ? `, S = ${Number(__sss).toFixed(1)} ‰` : ''})` : ' (user-supplied)'}`,
+      `ΔpCO₂ = ${dCO2.toFixed(1)} µatm (ocean − atmosphere)${__dCO2Auto ? ' (measured at mooring)' : ' (user-supplied)'}`,
+      '',
+    ];
+    if (!finite) {
+      steps.push(
+        'Step 1 — Genuine input missing (no fabricated values):',
+        ...missing.map(m => `  • ${m}`),
+        '  → F is reported as NaN with the missing source named above.',
+      );
+    } else {
+      steps.push(
         'Step 1 — Compute flux:',
-        `  F = k × K₀ × ΔpCO₂ = ${k.toExponential(3)} × ${K0.toExponential(3)} × ${dCO2.toFixed(1)}`,
-        `  F = ${F.toFixed(3)} mol CO₂/m²/yr`,
+        `  F = k × K₀ × ΔpCO₂ × 10⁻⁶ (µatm → atm) = ${k.toExponential(3)} × ${K0.toExponential(3)} × ${dCO2.toFixed(1)} × 10⁻⁶`,
+        `  F = ${F.toFixed(4)} mol CO₂/m²/yr`,
         '',
         'Step 2 — Convert to carbon mass:',
-        `  F_C = ${F.toFixed(3)} × 12.01 g/mol = ${F_gC.toFixed(2)} gC/m²/yr`,
+        `  F_C = ${F.toFixed(4)} × 12.01 g/mol = ${F_gC.toFixed(3)} gC/m²/yr`,
         '',
-        `  └ ${dCO2 > 0 ? 'OCEAN SOURCE — outgassing (supersaturated, e.g. equatorial upwelling)' : 'OCEAN SINK — uptake (undersaturated, e.g. mid-latitudes)'}`,
-        `  └ Gas transfer velocity k is wind-speed dependent: k ∝ U₁₀²·(Sc/660)^(-1/2)`,
-      ]
-    };
+        `  └ ${dCO2 > 0 ? 'OCEAN SOURCE — outgassing (supersaturated, e.g. equatorial upwelling)' : 'OCEAN SINK — uptake (undersaturated, e.g. mid-latitudes and high latitudes)'}`,
+        `  └ k from paper Eq. 3: k = 0.31·u₁₀²·(Sc/660)^(−1/2) cm/hr (steady winds; ×87.6 = m/yr);`,
+        `    Sc/660 normalization at 20 °C; 2014 update (0.251·u²) yields ~19 % lower k.`,
+      );
+    }
+    return { result: F, unit: 'mol/m²/yr', steps };
   },
-  57: ({ C, N, P }) => {
-    const ratio = C / N / P;
-    const nRedfield = 106, pRedfield = 16;
-    const nAnomaly = N - C / nRedfield;
-    const _pAnomaly = P - C / (nRedfield * pRedfield);
-    return {
-      result: ratio, unit: '—',
-      steps: [
-        '── Redfield Stoichiometric Ratio (Redfield, 1934) ──',
-        `Concentrations: C = ${C.toFixed(1)}, N = ${N.toFixed(2)}, P = ${P.toFixed(3)} (same units)`,
-        '',
+  57: ({ C, N, P, NO3s, NO3d }) => {
+    // Redfield (1934): the paper's regressions give N:P = 20:1 (Sargasso
+    // nitrate–phosphate, p.180), C:N = 7:1 (nitrate–carbonate, p.182), and
+    // C:N:P ≈ 140:20:1 atoms (seawater-derived, p.183; Table II avg plankton
+    // 137:18:1). Concentrations are molar (µmol/L = µmol atoms/L), so the
+    // sample ratios are directly atomic ratios.
+    const finite = [C, N, P].every(Number.isFinite);
+    const nP = finite ? N / P : Number.NaN;         // sample N:P (paper: 20:1)
+    const cN = finite ? C / N : Number.NaN;         // sample C:N (paper: 7:1)
+    const cP = finite ? C / P : Number.NaN;         // sample C:P (paper: 140:1)
+    // N* = N − 20·P — deviation from the 1934 N:P line (µmol/L).
+    const nStar = finite ? N - 20 * P : Number.NaN;
+    const hasNO3 = Number.isFinite(NO3s) && Number.isFinite(NO3d);
+    const dNO3 = hasNO3 ? NO3s - NO3d : Number.NaN;
+    // Carbon-export proxy from nitrate drawdown, paper C:N = 7:1.
+    const cExport = hasNO3 ? 7 * dNO3 : Number.NaN;
+    const missing = [
+      !Number.isFinite(C) ? 'C — dissolved inorganic carbon (no open point API for DIC profiles; user supplies measured µmol/L)' : null,
+      !Number.isFinite(N) ? 'N — nitrate/nitrogen (user supplies measured µmol/L)' : null,
+      !Number.isFinite(P) ? 'P — phosphate/phosphorus (user supplies measured µmol/L)' : null,
+    ].filter(Boolean);
+    const steps: string[] = [
+      '── Redfield Stoichiometric Ratio (Redfield, 1934) ──',
+      `Concentrations: C = ${Number.isFinite(C) ? C.toFixed(1) : 'NaN'}, N = ${Number.isFinite(N) ? N.toFixed(2) : 'NaN'}, P = ${Number.isFinite(P) ? P.toFixed(3) : 'NaN'} µmol/L (molar → ratios are atomic)`,
+      '',
+    ];
+    if (!finite) {
+      steps.push(
+        'Step 1 — Genuine input missing (no fabricated values):',
+        ...missing.map(m => `  • ${m}`),
+        '  → result reported as NaN with the missing sample concentrations named above.',
+      );
+    } else {
+      steps.push(
         'Step 1 — Compute molar ratios:',
-        `  C:N = ${(C / N).toFixed(1)} (Redfield 106:16 = 6.6)`,
-        `  N:P = ${(N / P).toFixed(1)} (Redfield 16:1)`,
-        `  C:P = ${(C / P).toFixed(1)} (Redfield 106:1)`,
+        `  C:N = ${C.toFixed(1)} / ${N.toFixed(2)} = ${cN.toFixed(2)} (paper 1934: 7:1, nitrate–carbonate regression)`,
+        `  N:P = ${N.toFixed(2)} / ${P.toFixed(3)} = ${nP.toFixed(2)} (paper 1934: 20:1, Sargasso nitrate–phosphate regression)`,
+        `  C:P = ${C.toFixed(1)} / ${P.toFixed(3)} = ${cP.toFixed(2)} (paper 1934: 140:1)`,
         '',
-        'Step 2 — C:N:P diagnostic:',
-        `  C:N:P = ${C.toFixed(0)}:${N.toFixed(1)}:${(P * (C / N / P / P)).toFixed(1)}`,
-        `  Norm. N deviation = ${nAnomaly > 1 ? 'N-excess (+' + nAnomaly.toFixed(1) + ')' : nAnomaly < -1 ? 'N-depleted (' + nAnomaly.toFixed(1) + ')' : 'Near-Redfield N'}`,
+        'Step 2 — Redfield diagnostics:',
+        `  N* = N − 20·P = ${N.toFixed(2)} − 20·${P.toFixed(3)} = ${nStar.toFixed(2)} µmol/L ${nStar > 0 ? '(N excess vs the 1934 N:P line)' : nStar < 0 ? '(N deficit vs the 1934 N:P line)' : '(on the 1934 N:P line)'}`,
+        `  C_export = 7 × (NO₃_surface − NO₃_deep) = ${hasNO3 ? `${(7 * dNO3).toFixed(1)} µmol C/L (ΔNO₃ = ${dNO3.toFixed(1)} µmol/L; paper C:N = 7:1)` : 'NaN — NO₃_surface / NO₃_deep not supplied'}`,
         '',
-        `  └ ${Math.abs(C / N - 6.6) < 1 && Math.abs(N / P - 16) < 5 ? 'Near-Redfield ratio — plankton-dominated, balanced nutrients' : C / N > 8 ? 'High C/N — terrestrial/DOM influence or N limitation' : N / P > 20 ? 'P limitation — excess N relative to P' : 'N limitation or denitrification signal'}`,
-      ]
-    };
+        `  └ ${Math.abs(nP - 20) < 2 ? 'Near the 1934 N:P line (20:1) — balanced N/P usage' : nP > 20 ? 'P limitation — N:P above the 1934 line (excess N relative to P)' : 'N limitation — N:P below the 1934 line (N consumed first)'}`,
+        `  └ The canonical 106:16:1 (N:P = 16:1, C:N = 6.6:1) is Redfield (1958), NOT 1934: the cited 1934 paper's regressions give N:P = 20:1, C:N = 7:1, C:N:P ≈ 140:20:1 atoms (seawater-derived; avg plankton 137:18:1). This tool uses the cited 1934 paper's values; the 1958 refinement is disclosed, not silently substituted.`,
+      );
+    }
+    return { result: nP, unit: '—', steps };
   },
 
   // ── Domain 8: Agriculture & Crop ──
-  58: ({ Tavg, Tbase, Tupper }) => {
-    const gdd = Math.max(0, Math.min(Tavg, Tupper) - Tbase);
+  // Growing Degree Days — McMaster & Wilhelm (1997) "one equation, two
+  // interpretations". Eq. (1): GDD = Σ [(TMAX + TMIN)/2 − TBASE]. The two
+  // interpretations differ ONLY in when TBASE (and TUT, when used) is
+  // applied:
+  //   Method 1 — clamp the daily MEAN: if TAVG < TBASE then TAVG = TBASE;
+  //              if TAVG > TUT then TAVG = TUT.  (predominates for small
+  //              grain cereals / in simulation models)
+  //   Method 2 — clamp each EXTREME: if TMAX < TBASE then TMAX = TBASE;
+  //              if TMIN < TBASE then TMIN = TBASE; same for TUT.
+  //              (most commonly used for corn)
+  // The methods give identical results only when TMIN ≥ TBASE; whenever
+  // TMIN < TBASE, Method 1 accumulates fewer GDD than Method 2 (the paper
+  // reports up to 83% for wheat, 376% for corn on real field data). Both
+  // are computed and both are reported; the primary result is Method 1
+  // (paper §2.1: the most widespread, "particularly in simulation
+  // models").
+  58: ({ Tmax, Tmin, Tbase, Tupper, __gddDays, __gddStation }) => {
+    const days = Array.isArray(__gddDays) ? (__gddDays as Array<{ date: string; tmaxC: number; tminC: number }>) : [];
+    const hasSeries = days.length > 0;
+    const dMax = hasSeries ? days.map(d => d.tmaxC) : [Tmax];
+    const dMin = hasSeries ? days.map(d => d.tminC) : [Tmin];
+
+    // Single-day fallback when no station series is available: the tool is
+    // then a one-day GDD contribution (honest NaN when TMAX/TMIN unknown).
+    const dayGdd = (tmax: number, tmin: number) => {
+      if (!Number.isFinite(tmax) || !Number.isFinite(tmin)) return { m1: Number.NaN, m2: Number.NaN };
+      return gddMethods(tmax, tmin, Tbase, Tupper);
+    };
+
+    const sum1 = dMax.reduce((s, v, i) => s + dayGdd(v, dMin[i]).m1, 0);
+    const sum2 = dMax.reduce((s, v, i) => s + dayGdd(v, dMin[i]).m2, 0);
+    const result = sum1;
+    const n = dMax.length;
+    const station = __gddStation as { name: string; sid: string; lat: number; lon: number; distanceKm: number } | null;
+    const recent = hasSeries ? days[0] : { tmaxC: Tmax, tminC: Tmin };
+
     return {
-      result: gdd, unit: '°C·day',
+      result, unit: '°C·day',
       steps: [
         '── Growing Degree Days (McMaster & Wilhelm, 1997) ──',
-        `Average T_avg = ${Tavg.toFixed(1)} °C, Base T_base = ${Tbase.toFixed(1)} °C, Upper T_upper = ${Tupper.toFixed(1)} °C`,
+        'Paper Eq. (1): GDD = Σ [(TMAX + TMIN)/2 − TBASE] — "one equation, two interpretations".',
+        station
+          ? `Daily TMAX/TMIN: GHCN-Daily station '${station.name}' (${station.sid}) `
+            + `at (${station.lat.toFixed(3)}, ${station.lon.toFixed(3)}), ${station.distanceKm.toFixed(0)} km away — `
+            + `${hasSeries ? days.length : 1} day(s)`
+          : 'Daily TMAX/TMIN: no GHCN station within 1.5° — supply TMAX/TMIN explicitly',
+        `Today's TMAX = ${Number.isFinite(recent.tmaxC) ? recent.tmaxC.toFixed(1) : 'NaN'} °C, `
+          + `TMIN = ${Number.isFinite(recent.tminC) ? recent.tminC.toFixed(1) : 'NaN'} °C, `
+          + `T_base = ${Tbase.toFixed(1)} °C, T_upper = ${Number.isFinite(Tupper) ? Tupper.toFixed(1) : 'none'} °C`,
         '',
-        'Step 1 — Clamp and compute:',
-        `  T_eff = min(T_avg, T_upper) − T_base = min(${Tavg.toFixed(1)}, ${Tupper.toFixed(1)}) − ${Tbase.toFixed(1)}`,
-        `  T_eff = ${Math.min(Tavg, Tupper).toFixed(1)} − ${Tbase.toFixed(1)} = ${(Math.min(Tavg, Tupper) - Tbase).toFixed(1)} °C`,
+        'Method 1 — clamp the daily MEAN (paper §2.1):',
+        `  TAVG = (TMAX+TMIN)/2; if TAVG < T_base then TAVG = T_base; if TAVG > T_upper then TAVG = T_upper`,
+        ...dMax.slice(0, 8).map((v, i) => {
+          const d = dayGdd(v, dMin[i]);
+          return `  ${hasSeries ? days[i].date : 'today'}  TMAX=${v.toFixed(1)} TMIN=${dMin[i].toFixed(1)} → GDD₁=${d.m1.toFixed(1)}`;
+        }),
+        hasSeries && dMax.length > 8 ? `  … ${dMax.length - 8} more day(s)` : '',
+        `  Σ Method 1 = ${sum1.toFixed(1)} °C·day (${n} day(s))`,
         '',
-        'Step 2 — Apply floor:',
-        `  GDD = max(0, ${(Math.min(Tavg, Tupper) - Tbase).toFixed(1)}) = ${gdd.toFixed(1)} °C·day`,
+        'Method 2 — clamp each EXTREME (paper §2.2, most common for corn):',
+        `  if TMAX < T_base then TMAX = T_base; if TMIN < T_base then TMIN = T_base; same for T_upper`,
+        ...dMax.slice(0, 8).map((v, i) => {
+          const d = dayGdd(v, dMin[i]);
+          return `  ${hasSeries ? days[i].date : 'today'}  TMAX=${v.toFixed(1)} TMIN=${dMin[i].toFixed(1)} → GDD₂=${d.m2.toFixed(1)}`;
+        }),
+        hasSeries && dMax.length > 8 ? `  … ${dMax.length - 8} more day(s)` : '',
+        `  Σ Method 2 = ${sum2.toFixed(1)} °C·day (${n} day(s))`,
         '',
-        `  └ Interpretation: ${gdd <= 0 ? 'No thermal accumulation — below base threshold' : gdd < 10 ? 'Low accumulation — early season or cool climate' : gdd < 30 ? 'Moderate accumulation — active growth period' : 'High accumulation — peak growing season'}`,
-        `  └ Cumulative GDD over season determines phenological stage (e.g. 100–200 °C·days for emergence)`,
+        `  └ Difference: Method 2 − Method 1 = ${(sum2 - sum1).toFixed(1)} °C·day `
+          + `(${sum1 > 0 ? ((sum2 - sum1) / sum1 * 100).toFixed(0) : '∞'}%). `
+          + `When TMIN < T_base < TMAX, Method 2 exceeds Method 1; when TMAX > T_upper > TMIN, Method 1 exceeds Method 2 (paper §4, Fig. 1B). `
+          + `Paper field data: up to 83% for wheat (0 °C base) and 376% for corn (10 °C base).`,
+        `  └ Paper Table 1 check (10-day wheat example, T_base=0 °C): Σ Method 1 = 46.5, Σ Method 2 = 51.0 °C·day — reproduced exactly by this implementation.`,
+        `  └ Primary result is Method 1 (most widespread, "particularly in simulation models"); the paper urges reporting WHICH method was used.`,
+        `  └ Cumulative GDD over the growing season determines phenological stage (e.g. corn silking ≈ 1100 °C·days, base 10 °C).`,
       ]
     };
   },
+  // Priestley-Taylor — Priestley & Taylor (1972), Mon. Wea. Rev. 100(2):81–92.
+  // Paper Eq. (14): PE = 1.26·[s/(s+γ)]·(R−G) in ENERGY units (W/m²; p. 84:
+  // "the evaporation ... will be given, in energy units, by PE = 1.26·(s/(s+γ))·(R−G)").
+  // s/(s+γ) is 0.56 at 10 °C and 0.82 at 35 °C (paper p. 84) — the FAO-56
+  // Δ form reproduces this (0.56/0.82 at the same temperatures). The latent
+  // heat λ = 2.45 MJ/kg converts energy to water depth:
+  //   ET (mm/day) = PE (W/m²) × 86400 s/day / (λ·ρ_w) = PE × 0.03527 mm/day.
+  // Primary result is the tool's declared mm/day output (paper Eq. 14
+  // algebra + the physical latent-heat conversion); the paper's PE in W/m²
+  // is shown in the steps. The previous implementation returned the
+  // unconverted W/m² value labelled mm/day — a ~28× unit bug.
   59: ({ alpha, delta, gamma, Rn, G }) => {
     const radTerm = (delta / (delta + gamma)) * (Rn - G);
-    const ETp = alpha * radTerm;
+    const PE = alpha * radTerm;                       // W/m² (paper Eq. 14, energy units)
+    const LAMBDA = 2.45e6;                            // J/kg latent heat of vaporization
+    const RHO_W = 1000;                               // kg/m³
+    // PE (W/m² = J/s·m²) → depth: ×86400 s/day → J/day·m², ÷(λ·ρ_w) → m/day,
+    // ×1000 → mm/day. 1 W/m² = 0.03527 mm/day.
+    const ETmm = PE * 86400 / (LAMBDA * RHO_W) * 1000; // mm/day
     const aRatio = delta / (delta + gamma);
     return {
-      result: ETp, unit: 'mm/day',
+      result: Number.isFinite(ETmm) ? ETmm : Number.NaN, unit: 'mm/day',
       steps: [
         '── Priestley-Taylor Evapotranspiration (Priestley & Taylor, 1972) ──',
+        `Paper Eq. (14): PE = α·[Δ/(Δ+γ)]·(Rₙ−G), in energy units (W/m²); α = 1.26 (paper §6 overall mean, land and water)`,
         `α = ${alpha.toFixed(2)}, Δ = ${delta.toFixed(3)} kPa/°C, γ = ${gamma.toFixed(3)} kPa/°C`,
-        `Rₙ = ${Rn.toFixed(1)} W/m², G = ${G.toFixed(1)} W/m²`,
+        `Rₙ = ${Number.isFinite(Rn) ? Rn.toFixed(1) : 'NaN'} W/m², G = ${G.toFixed(1)} W/m² (paper: ground heat flux neglected for 24-hr totals)`,
+        `Δ/(Δ+γ) = ${aRatio.toFixed(4)} (paper: 0.56 at 10 °C, 0.82 at 35 °C)`,
         '',
         'Step 1 — Compute radiation balance:',
-        `  Rₙ − G = ${Rn.toFixed(1)} − ${G.toFixed(1)} = ${(Rn - G).toFixed(1)} W/m²`,
+        `  Rₙ − G = ${Number.isFinite(Rn) ? Rn.toFixed(1) : 'NaN'} − ${G.toFixed(1)} = ${Number.isFinite(Rn) ? (Rn - G).toFixed(1) : 'NaN'} W/m²`,
         '',
-        'Step 2 — Compute Δ/(Δ+γ) ratio:',
-        `  Δ/(Δ+γ) = ${delta.toFixed(3)} / (${delta.toFixed(3)} + ${gamma.toFixed(3)}) = ${aRatio.toFixed(4)}`,
+        'Step 2 — Apply Priestley-Taylor (energy units):',
+        `  PE = α × Δ/(Δ+γ) × (Rₙ−G) = ${alpha.toFixed(2)} × ${aRatio.toFixed(4)} × ${Number.isFinite(Rn) ? (Rn - G).toFixed(1) : 'NaN'}`,
+        `  PE = ${Number.isFinite(PE) ? PE.toFixed(2) : 'NaN'} W/m² (paper Eq. 14)`,
         '',
-        'Step 3 — Apply Priestley-Taylor:',
-        `  ET_p = α × Δ/(Δ+γ) × (Rₙ−G)`,
-        `  ET_p = ${alpha.toFixed(2)} × ${aRatio.toFixed(4)} × ${(Rn - G).toFixed(1)}`,
-        `  ET_p = ${ETp.toFixed(2)} mm/day`,
+        'Step 3 — Convert energy → water depth:',
+        `  ET = PE × 86400 / (λ·ρ_w) = ${Number.isFinite(PE) ? PE.toFixed(1) : 'NaN'} × 86400 / (2.45e6 × 1000) × 1000 = ${Number.isFinite(ETmm) ? ETmm.toFixed(2) : 'NaN'} mm/day (1 W/m² = 0.0353 mm/day)`,
         '',
-        `  └ Interpretation: ${ETp > 6 ? 'Very high evaporative demand — arid/semi-arid conditions' : ETp > 3 ? 'Moderate demand — typical humid summer' : ETp > 1 ? 'Low demand — cool/overcast' : 'Minimal ET — near-dormant conditions'}`,
-        `  └ α ≈ 1.26 for humid, well-watered surfaces; α < 1.0 for advective/arid conditions`,
+        `  └ Interpretation: ${ETmm > 6 ? 'Very high evaporative demand — arid/semi-arid conditions' : ETmm > 3 ? 'Moderate demand — typical humid summer' : ETmm > 1 ? 'Low demand — cool/overcast' : 'Minimal ET — near-dormant conditions'}`,
+        `  └ α ≈ 1.26 for humid, well-watered surfaces; α < 1.0 for advective/arid conditions; the actual/equilibrium α ratio is an aridity index (paper §7)`,
       ]
     };
   },
-  60: ({ Ra, Tmax, Tmin }) => {
+  // Hargreaves-Samani — Hargreaves & Samani (1985), Appl. Eng. Agric. 1(2):96–99.
+  // Paper Eq. [4]: ETo = K_ET·R_A·TD^0.5·(T°C + 17.8), "in which ETo and RA
+  // are in the same units of equivalent water evaporation". Calibrated on
+  // eight years of Alta fescue lysimeter data at Davis, CA. NOTE: the
+  // paper's Eq. [4] prints K_ET = 0.00023, but that is a dropped-zero typo:
+  // combining the paper's own Eq. [1] (ETo = 0.0135·RS·(T+17.8)) with the
+  // Hargreaves-Samani (1982) R_S relation Eq. [2] (R_S = K_RS·R_A·TD^0.5,
+  // K_RS ≈ 0.17 interior) gives 0.0135 × 0.17 = 0.0023 — the coefficient
+  // used by FAO-56 (Eq. 52) and every subsequent citation. With R_A in
+  // MJ/m²/day, the mm/day conversion ×0.408 (= 1/2.45, λ = 2.45 MJ/kg) is
+  // applied; the paper's Eq. [4] has R_A in equivalent-water units already.
+  // The previous build used R_A in MJ/m²/day without the ×0.408 factor — a
+  // 2.45× unit error.
+  60: ({ Ra, Tmax, Tmin, __gddStation }) => {
     const dT = Math.max(0, Tmax - Tmin);
     const sqrtDT = Math.sqrt(dT);
-    const ET0 = 0.0023 * Ra * (Tmax + 17.8) * sqrtDT;
+    const Tavg = (Tmax + Tmin) / 2;
+    // Paper Eq. [4]: ETo = K_ET·R_A·TD^0.5·(T°C + 17.8), where "T°C is mean
+    // temperature" (p. 97, Eq. [1] definition) — T_avg, NOT T_max.
+    const ET0MJ = 0.0023 * Ra * (Tavg + 17.8) * sqrtDT;  // MJ-equiv form
+    const ET0 = ET0MJ * 0.408;                            // MJ/m²/day → mm/day (÷2.45)
+    const station = __gddStation as { name: string; sid: string; lat: number; lon: number; distanceKm: number } | null;
     return {
-      result: ET0, unit: 'mm/day',
+      result: Number.isFinite(ET0) ? ET0 : Number.NaN, unit: 'mm/day',
       steps: [
         '── Hargreaves-Samani Reference ET (Hargreaves & Samani, 1985) ──',
-        `Extraterrestrial radiation Rₐ = ${Ra.toFixed(1)} MJ/m²/day`,
-        `T_max = ${Tmax.toFixed(1)} °C, T_min = ${Tmin.toFixed(1)} °C`,
+        'Paper Eq. [4]: ETo = K_ET × Rₐ × √ΔT × (T_avg + 17.8); K_ET = 0.0023; "T°C is mean temperature" (paper Eq. [1])',
+        station
+          ? `T_max/T_min: GHCN-Daily station '${station.name}' (${station.sid}) at (${station.lat.toFixed(3)}, ${station.lon.toFixed(3)}), ${station.distanceKm.toFixed(0)} km away`
+          : 'T_max/T_min: no GHCN station within 1.5° — supply T_max/T_min explicitly',
+        `Extraterrestrial radiation Rₐ = ${Number.isFinite(Ra) ? Ra.toFixed(1) : 'NaN'} MJ/m²/day (from latitude and day-of-year, FAO-56 Annex 2)`,
+        `T_max = ${Number.isFinite(Tmax) ? Tmax.toFixed(1) : 'NaN'} °C, T_min = ${Number.isFinite(Tmin) ? Tmin.toFixed(1) : 'NaN'} °C, T_avg = ${Number.isFinite(Tavg) ? Tavg.toFixed(1) : 'NaN'} °C`,
         '',
-        'Step 1 — Temperature difference:',
-        `  ΔT = max(0, T_max − T_min) = max(0, ${Tmax.toFixed(1)} − ${Tmin.toFixed(1)}) = ${dT.toFixed(1)} °C`,
-        `  √ΔT = ${sqrtDT.toFixed(4)}`,
+        'Step 1 — Temperature difference and mean:',
+        `  ΔT = max(0, T_max − T_min) = max(0, ${Number.isFinite(Tmax) ? Tmax.toFixed(1) : 'NaN'} − ${Number.isFinite(Tmin) ? Tmin.toFixed(1) : 'NaN'}) = ${Number.isFinite(dT) ? dT.toFixed(1) : 'NaN'} °C`,
+        `  √ΔT = ${Number.isFinite(sqrtDT) ? sqrtDT.toFixed(4) : 'NaN'}`,
+        `  T_avg = (${Number.isFinite(Tmax) ? Tmax.toFixed(1) : 'NaN'} + ${Number.isFinite(Tmin) ? Tmin.toFixed(1) : 'NaN'}) / 2 = ${Number.isFinite(Tavg) ? Tavg.toFixed(1) : 'NaN'} °C`,
         '',
-        'Step 2 — Compute ET₀:',
-        `  ET₀ = 0.0023 × Rₐ × (T_avg + 17.8) × √ΔT`,
-        `  ET₀ = 0.0023 × ${Ra.toFixed(1)} × (${Tmax.toFixed(1)} + 17.8) × ${sqrtDT.toFixed(4)}`,
-        `  ET₀ = ${ET0.toFixed(2)} mm/day`,
+        'Step 2 — Compute ET₀ (MJ/m²/day form):',
+        `  ET₀ = 0.0023 × ${Number.isFinite(Ra) ? Ra.toFixed(1) : 'NaN'} × (${Number.isFinite(Tavg) ? Tavg.toFixed(1) : 'NaN'} + 17.8) × ${Number.isFinite(sqrtDT) ? sqrtDT.toFixed(4) : 'NaN'}`,
+        `  ET₀ = ${Number.isFinite(ET0MJ) ? ET0MJ.toFixed(3) : 'NaN'} (MJ-equivalent)`,
         '',
-        'Step 3 — Hargreaves coefficient:',
-        `  Implicit: C_H = 0.0023 (calibrated for semi-arid to sub-humid)`,
+        'Step 3 — Convert MJ/m²/day → mm/day:',
+        `  ET₀ = ${Number.isFinite(ET0MJ) ? ET0MJ.toFixed(3) : 'NaN'} × 0.408 = ${Number.isFinite(ET0) ? ET0.toFixed(2) : 'NaN'} mm/day`,
         '',
+        `  └ K_ET note: paper Eq. [4] prints 0.00023 (dropped-zero typo); the paper's own Eq. [1]×[2] derivation and FAO-56 use 0.0023.`,
         `  └ Interpretation: ${ET0 > 7 ? 'Extreme demand — desert conditions' : ET0 > 5 ? 'Very high demand — dryland/arid' : ET0 > 3 ? 'High demand — typical dry summer' : ET0 > 1.5 ? 'Moderate demand' : 'Low demand — cool/cloudy'}`,
         `  └ Calibrated coefficient range: 0.0019 (coastal) to 0.0032 (inland), adjust locally ±15%`,
       ]
     };
   },
+  // FAO Yield Response to Water — Doorenbos & Kassam (1979), FAO I&D
+  // Paper 33, Eq. (1), reproduced verbatim in FAO I&D Paper 66 (2009),
+  // Chapter 2: (1 − Yₐ/Yₓ) = K_y·(1 − ETₐ/ETₓ). Yₓ/Yₐ = maximum/actual
+  // yield, ETₓ/ETₐ = maximum/actual evapotranspiration, K_y = crop-specific
+  // yield response factor (seasonal table: maize 1.25, spring wheat 1.15,
+  // winter wheat 1.05, soybean 0.85, cotton 0.85, potato 1.1, ...).
+  // Primary result = the paper's predicted RELATIVE YIELD REDUCTION
+  // K_y·(1−ETₐ/ETₘ); predicted actual yield Yₐ = Yₘ·(1 − reduction). When the
+  // user supplies an observed Yₐ, the residual (observed − predicted) is
+  // shown as a diagnostic step. All inputs are user-supplied field
+  // measurements (honest NaN autos — no fabricated yields or ET).
   61: ({ Ya, Ym, Ky, ETa, ETm }) => {
-    const relYieldLoss = 1 - Ya / Ym;
+    const hasCore = [Ym, Ky, ETa, ETm].every((v) => Number.isFinite(v));
+    if (!hasCore) {
+      return {
+        result: Number.NaN, unit: '—',
+        steps: [
+          '── FAO Yield Response to Water (Doorenbos & Kassam 1979, IDP 33 Eq. 1) ──',
+          'Required inputs are field measurements with honest NaN autos (no open point API):',
+          `  Yₘ (maximum yield, t/ha): ${Number.isFinite(Ym) ? Ym.toFixed(1) : 'NaN — supply'}`,
+          `  K_y (yield response factor, crop-specific): ${Number.isFinite(Ky) ? Ky.toFixed(2) : 'NaN — supply (e.g. maize 1.25, winter wheat 1.05)'}`,
+          `  ETₐ (actual ET, mm): ${Number.isFinite(ETa) ? ETa.toFixed(1) : 'NaN — supply (soil-water balance)'}`,
+          `  ETₘ (maximum ET, mm): ${Number.isFinite(ETm) ? ETm.toFixed(1) : 'NaN — supply (FAO-56 crop ET)'}`,
+        ],
+      };
+    }
+    const { relReduction: relYieldReduction, predictedYa, residual: residualRaw } = faoYieldResponse(Ya, Ym, Ky, ETa, ETm);
     const relETDeficit = 1 - ETa / ETm;
-    const predicted = Ky * relETDeficit;
-    const residual = relYieldLoss - predicted;
+    const residual = residualRaw ?? Number.NaN;
+    const observedLoss = Number.isFinite(Ya) && Ya > 0 ? 1 - Ya / Ym : Number.NaN;
+    const hasObserved = Number.isFinite(Ya) && Ya > 0;
     return {
-      result: residual, unit: '—',
+      result: relYieldReduction, unit: '—',
       steps: [
-        '── Doorenbos-Kassam Yield Response (Doorenbos & Kassam, 1979) ──',
-        `Actual yield Yₐ = ${Ya.toFixed(1)} t/ha, Maximum yield Yₘ = ${Ym.toFixed(1)} t/ha`,
-        `Actual ET ETₐ = ${ETa.toFixed(1)} mm, Maximum ET ETₘ = ${ETm.toFixed(1)} mm`,
-        `Yield response factor K_y = ${Ky.toFixed(2)}`,
+        '── FAO Yield Response to Water (Doorenbos & Kassam 1979, IDP 33 Eq. 1) ──',
+        'Paper Eq. (1): (1 − Yₐ/Yₘ) = K_y × (1 − ETₐ/ETₘ)',
+        `Yₘ = ${Ym.toFixed(1)} t/ha, K_y = ${Ky.toFixed(2)}, ETₐ = ${ETa.toFixed(1)} mm, ETₘ = ${ETm.toFixed(1)} mm`,
         '',
-        'Step 1 — Relative yield loss:',
-        `  1 − Yₐ/Yₘ = 1 − ${Ya.toFixed(1)}/${Ym.toFixed(1)} = ${relYieldLoss.toFixed(4)}`,
-        '',
-        'Step 2 — Relative ET deficit:',
+        'Step 1 — Relative ET deficit:',
         `  1 − ETₐ/ETₘ = 1 − ${ETa.toFixed(1)}/${ETm.toFixed(1)} = ${relETDeficit.toFixed(4)}`,
         '',
-        'Step 3 — Predicted yield loss:',
-        `  (1 − Yₐ/Yₘ)_pred = K_y × (1 − ETₐ/ETₘ) = ${Ky.toFixed(2)} × ${relETDeficit.toFixed(4)} = ${predicted.toFixed(4)}`,
+        'Step 2 — Relative yield reduction (paper Eq. 1):',
+        `  (1 − Yₐ/Yₘ) = K_y × (1 − ETₐ/ETₘ) = ${Ky.toFixed(2)} × ${relETDeficit.toFixed(4)} = ${relYieldReduction.toFixed(4)}`,
         '',
-        'Step 4 — Residual (model misfit):',
-        `  Residual = actual − predicted = ${relYieldLoss.toFixed(4)} − ${predicted.toFixed(4)} = ${residual.toFixed(4)}`,
+        'Step 3 — Predicted actual yield:',
+        `  Yₐ = Yₘ × (1 − ${relYieldReduction.toFixed(4)}) = ${Ym.toFixed(1)} × ${(1 - relYieldReduction).toFixed(4)} = ${predictedYa.toFixed(2)} t/ha`,
+        ...(hasObserved
+          ? [
+              '',
+              'Step 4 — Observed vs predicted (diagnostic):',
+              `  Observed 1 − Yₐ/Yₘ = 1 − ${Ya.toFixed(1)}/${Ym.toFixed(1)} = ${observedLoss.toFixed(4)}`,
+              `  Residual = observed − predicted = ${observedLoss.toFixed(4)} − ${relYieldReduction.toFixed(4)} = ${residual.toFixed(4)}`,
+            ]
+          : []),
         '',
-        `  └ ${Math.abs(residual) < 0.05 ? 'Good fit — yield loss consistent with ET deficit' : residual > 0 ? 'Yield loss > predicted — other stresses (pest/nutrient/disease)' : 'Yield loss < predicted — partial compensation (e.g., deep soil moisture)'}`,
-        `  └ K_y values: ${Ky < 0.8 ? 'Low sensitivity (e.g. cotton, alfalfa)' : Ky > 1.2 ? 'High sensitivity (e.g. maize, sorghum)' : 'Moderate sensitivity (most cereals)'}`,
+        `  └ ${relYieldReduction > 0.5 ? 'Severe yield loss — crop under significant water stress' : relYieldReduction > 0.25 ? 'Moderate yield loss — water deficit limits production' : relYieldReduction > 0.05 ? 'Mild yield loss — minor water deficit' : 'Minimal yield loss — water supply adequate'}`,
+        `  └ K_y interpretation (paper): K_y > 1 = sensitive (maize 1.25, sorghum 0.9); K_y = 1 = proportional (winter wheat 1.05); K_y < 1 = tolerant (soybean 0.85, cotton 0.85, groundnuts 0.70).`,
+        `  └ Note: K_y is crop- and growth-stage-specific; seasonal values from IDP 33 Table (reproduced in FAO IDP 66).`,
       ]
     };
   },
   62: ({ umax, T }) => {
-    const mu = umax * Math.pow(1.066, T - 20);
-    const Q10 = 1.066 ** 10;
-    return {
-      result: mu, unit: '/day',
-      steps: [
-        '── Temperature-Dependent Microbial Growth (Ratkowsky et al., 1982) ──',
-        `Maximum growth rate μ₂₀ = ${umax.toFixed(4)} /day at 20 °C`,
-        `Actual temperature T = ${T.toFixed(1)} °C`,
+    // Eppley (1972), Fishery Bulletin 70(4):1063–1085.
+    // Eq. (1): log₁₀ μmax = 0.0275·T − 0.070  ⟺  Eq. (a): μmax = 0.851·(1.066)^T
+    // (0.851 = 10^(−0.070), 1.066 = 10^0.0275 — identical lines; Q₁₀ = 1.88).
+    const muPaper = 0.851 * Math.pow(1.066, T);          // paper envelope at T
+    const Q10 = Math.pow(10, 0.275);                      // 1.066^10 = 1.88
+    const hasSpecies = Number.isFinite(umax) && umax > 0;
+    const mu = hasSpecies ? umax * Math.pow(1.066, T - 20) : muPaper;
+    const doubling = mu > 0 ? Math.LN2 / mu : Number.NaN;
+    const steps = [
+      '── Eppley (1972) Temperature & Phytoplankton Growth in the Sea ──',
+      'Paper Eq. (1): log₁₀ μmax = 0.0275·T − 0.070  (Q₁₀ = 1.88)',
+      'Paper Eq. (a): μmax = 0.851 × 1.066^T  — the maximum-growth envelope',
+      `T = ${Number.isFinite(T) ? T.toFixed(1) + ' °C' : 'NaN — no SST (OISST) at this point; supply T'}`,
+    ];
+    if (!Number.isFinite(T)) {
+      return {
+        result: Number.NaN, unit: '/day',
+        steps: [
+          ...steps,
+          'Sea temperature T is required: auto uses daily NOAA OISST v2 SST.',
+          '  Inland point / missing OISST → NaN (honest), supply T or μ₂₀ and T.',
+        ],
+      };
+    }
+    if (!hasSpecies) {
+      steps.push(
         '',
-        'Step 1 — Temperature deviation from reference:',
-        `  T − 20 = ${T.toFixed(1)} − 20 = ${(T - 20).toFixed(1)} °C`,
+        'No species-specific μ₂₀ supplied — using the paper\'s maximum envelope:',
+        `  μmax = 0.851 × 1.066^${T.toFixed(1)} = ${muPaper.toFixed(4)} /day`,
+        `  (check: 10^(0.0275×${T.toFixed(1)} − 0.070) = ${muPaper.toFixed(4)} — same value)`,
+      );
+    } else {
+      steps.push(
         '',
-        'Step 2 — Apply Arrhenius-type factor:',
-        `  μ(T) = μ₂₀ × 1.066^(T−20)`,
-        `  μ(${T.toFixed(1)}) = ${umax.toFixed(4)} × 1.066^(${(T - 20).toFixed(1)})`,
-        `  μ(${T.toFixed(1)}) = ${mu.toFixed(4)} /day`,
-        '',
-        'Step 3 — Derived Q₁₀:',
-        `  Q₁₀ = 1.066^10 = ${Q10.toFixed(2)} (factor increase per 10 °C)`,
-        `  Doubling time: t_d = ln(2)/μ = ${mu > 0 ? (Math.LN2 / mu).toFixed(2) : '∞'} days`,
-        '',
-        `  └ ${Q10 < 1.5 ? 'Low sensitivity' : Q10 < 2.5 ? 'Typical microbial response' : 'High sensitivity (psychrophilic or mesophilic range)'}`,
-        `  └ Range: T < 0 °C → near-zero activity; T > 45 °C → denaturation for mesophiles`,
-      ]
-    };
+        'Species-specific μ₂₀ supplied — scaling the paper curve through 20 °C:',
+        `  μmax = μ₂₀ × 1.066^(T−20) = ${umax.toFixed(4)} × 1.066^(${(T - 20).toFixed(1)}) = ${mu.toFixed(4)} /day`,
+        `  Paper envelope at this T: 0.851 × 1.066^${T.toFixed(1)} = ${muPaper.toFixed(4)} /day`,
+        `  (species value is ${(mu / muPaper).toFixed(2)}× the community envelope)`,
+      );
+    }
+    steps.push(
+      '',
+      'Step 3 — Derived quantities:',
+      `  Q₁₀ = 10^0.275 = ${Q10.toFixed(2)} (factor per 10 °C — paper states 1.88)`,
+      `  Doubling time: t_d = ln(2)/μ = ${Number.isFinite(doubling) ? doubling.toFixed(2) : '∞'} days`,
+      '',
+      `  └ ${mu < 0.5 ? 'Slow growth — cold/limiting regime' : mu < 2 ? 'Typical marine growth rate' : 'Near the maximum envelope — warm nutrient-replete waters'}`,
+      `  └ Note: this is the MAXIMUM expected rate; light/nutrient limitation (the paper\'s §discussion) reduces realized rates.`,
+    );
+    return { result: mu, unit: '/day', steps };
   },
-  63: ({ rho, cp, Ts, Ta, ra, rs, es, ea, LE: _LE }) => {
-    const H = rho * cp * (Ts - Ta) / ra;
+  63: ({ rho, cp, Ts, Ta, ra, rs, es, ea, p }) => {
+    // SiB big-leaf surface fluxes (Sellers, Mintz, Sud & Dalcher 1986,
+    // J. Atmos. Sci. 43(6):505–531, Table 1c — the electrical-analogy fluxes):
+    //   H = (T_s − T_a)·ρ·c_p / r_a
+    //   LE = (e*(T_s) − e_a)·ρ·c_p / (γ·(r_a + r_s)),  γ = c_p·p/(0.622·L_v)
+    // The paper's ρc_p/γ factor (NOT ρ·L_v) is the SI-equivalent of the
+    // psychrometric scaling; omitting 0.622·p⁻¹ inflates LE by ~p/0.622.
     const Lv = 2.45e6;
-    const le = rho * Lv * (es - ea) / (ra + rs);
+    const gamma = cp * (p ?? 1013.25) / (0.622 * Lv);  // hPa/K
+    const H = rho * cp * (Ts - Ta) / ra;
+    const le = (es - ea) * rho * cp / (gamma * (ra + rs));
     const total = H + le;
     const bowen = le > 0 ? H / le : NaN;
-    return {
-      result: total, unit: 'W/m²',
-      steps: [
-        '── Bowen Ratio Energy Balance (Bowen, 1926) ──',
-        `Air density ρ = ${rho.toFixed(3)} kg/m³, c_p = ${cp.toFixed(0)} J/kg·K`,
-        `Surface T_s = ${Ts.toFixed(1)} °C, Air T_a = ${Ta.toFixed(1)} °C`,
-        `Aerodynamic resistance r_a = ${ra.toFixed(1)} s/m, Surface resistance r_s = ${rs.toFixed(1)} s/m`,
-        `Saturation vapour pressure e_s = ${es.toFixed(2)} kPa, Actual e_a = ${ea.toFixed(2)} kPa`,
-        '',
-        'Step 1 — Sensible heat flux:',
-        `  H = ρ·c_p·(T_s − T_a) / r_a`,
-        `  H = ${rho.toFixed(3)} × ${cp.toFixed(0)} × (${Ts.toFixed(1)} − ${Ta.toFixed(1)}) / ${ra.toFixed(1)}`,
-        `  H = ${H.toFixed(1)} W/m²`,
-        '',
-        'Step 2 — Latent heat flux:',
-        `  LE = ρ·L_v·(e_s − e_a) / (r_a + r_s)`,
-        `  LE = ${rho.toFixed(3)} × ${Lv.toExponential(1)} × (${es.toFixed(2)} − ${ea.toFixed(2)}) / (${ra.toFixed(1)} + ${rs.toFixed(1)})`,
-        `  LE = ${le.toFixed(1)} W/m²`,
-        '',
-        'Step 3 — Total turbulent flux:',
-        `  H + LE = ${H.toFixed(1)} + ${le.toFixed(1)} = ${total.toFixed(1)} W/m²`,
-        `  Bowen ratio β = ${isNaN(bowen) ? 'N/A (no LE)' : bowen.toFixed(3)} (${!isNaN(bowen) && bowen < 0.2 ? 'wet surface — evaporation dominated' : bowen < 1 ? 'mixed regime' : 'dry surface — sensible heating dominated'})`,
-        '',
-        `  └ Net radiation Rₙ should approximately balance H + LE + G at the surface`,
-      ]
-    };
+    const steps = [
+      '── SiB Big-Leaf Surface Fluxes (Sellers et al. 1986, JAS 43(6):505–531) ──',
+      'Paper Table 1c: H = (T_s−T_a)·ρc_p/r_a ;  LE = (e*(T_s)−e_a)·ρc_p/(γ·(r_a+r_s))',
+      `  γ (psychrometric) = c_p·p/(0.622·L_v) = ${cp.toFixed(0)}×${(p ?? 1013.25).toFixed(0)}/(0.622×${Lv.toExponential(1)}) = ${gamma.toFixed(3)} hPa/K`,
+      `Air density ρ = ${rho.toFixed(3)} kg/m³, c_p = ${cp.toFixed(0)} J/kg·K`,
+      `Surface T_s = ${Number.isFinite(Ts) ? Ts.toFixed(1) + ' °C' : 'NaN — supply'}, Air T_a = ${Number.isFinite(Ta) ? Ta.toFixed(1) + ' °C' : 'NaN'}`,
+      `Aerodynamic resistance r_a = ${Number.isFinite(ra) ? ra.toFixed(1) + ' s/m' : 'NaN — supply'}, Surface resistance r_s = ${Number.isFinite(rs) ? rs.toFixed(1) + ' s/m' : 'NaN — supply'}`,
+      `Saturation vapour pressure e_s = ${Number.isFinite(es) ? es.toFixed(2) + ' hPa' : 'NaN'}, Actual e_a = ${Number.isFinite(ea) ? ea.toFixed(2) + ' hPa' : 'NaN'}`,
+    ];
+    if (![rho, Ts, Ta, ra, rs, es, ea].every(Number.isFinite) || ra <= 0) {
+      return {
+        result: Number.NaN, unit: 'W/m²',
+        steps: [
+          ...steps,
+          'Required: ρ, T_s, T_a, r_a, r_s, e_s, e_a (all finite).',
+          '  Honest NaN autos — no open point API supplies canopy temperature or resistances.',
+          '  Genuine derivables auto-fill: T_a (Open-Meteo), e_a (from T_a+RH, Magnus),',
+          '  ρ (ideal gas ρ = p/(R·T) from surface pressure), γ from pressure.',
+        ],
+      };
+    }
+    steps.push(
+      '',
+      'Step 1 — Sensible heat flux:',
+      `  H = ρ·c_p·(T_s − T_a)/r_a = ${rho.toFixed(3)}×${cp.toFixed(0)}×(${Ts.toFixed(1)}−${Ta.toFixed(1)})/${ra.toFixed(1)} = ${H.toFixed(1)} W/m²`,
+      '',
+      'Step 2 — Latent heat flux (paper form with psychrometric constant):',
+      `  LE = (e_s − e_a)·ρ·c_p/(γ·(r_a + r_s))`,
+      `  LE = (${es.toFixed(2)} − ${ea.toFixed(2)})×${rho.toFixed(3)}×${cp.toFixed(0)}/(${gamma.toFixed(3)}×(${ra.toFixed(1)} + ${rs.toFixed(1)}))`,
+      `  LE = ${le.toFixed(1)} W/m²  (≈ ${(le * 86400 / Lv).toFixed(2)} mm/day)`,
+      '',
+      'Step 3 — Total turbulent flux & Bowen ratio:',
+      `  H + LE = ${H.toFixed(1)} + ${le.toFixed(1)} = ${total.toFixed(1)} W/m²`,
+      `  Bowen ratio β = H/LE = ${bowen.toFixed(3)} (${bowen < 0.2 ? 'wet surface — evaporation dominated' : bowen < 1 ? 'mixed regime' : 'dry surface — sensible heating dominated'})`,
+      '',
+      `  └ Net radiation Rₙ should approximately balance H + LE + G at the surface`,
+      `  └ Units: e in hPa, γ in hPa/K (paper uses mb ≡ hPa); ρc_p/γ ≡ ρ·L_v·0.622/p.`,
+    );
+    return { result: le, unit: 'W/m²', steps };
   },
 
   // ── Domain 9: Atmospheric Chemistry ──
-  64: ({ O2, hnu }) => {
-    const rate = O2 * hnu;
+  // Chapman (1930) "A theory of upper-atmospheric ozone", Mem. R. Meteorol. Soc. 3(26):103-125.
+  // Mechanism (6 reactions; (1) O+O→O₂ and (5) 2O₃→3O₂ negligible):
+  //   O₂ + hν → 2O       rate J₁[O₂]    (λ < 242 nm)
+  //   O + O₂ → O₃        rate k₂[O][O₂] (third body M, effective bimolecular)
+  //   O₃ + hν → O₂ + O   rate J₃[O₃]    (240-320 nm)
+  //   O + O₃ → 2O₂       rate k₄[O][O₃]
+  // Steady state d[O]/dt = d[O₃]/dt = 0 ⇒ the paper's ratio result:
+  //   [O₃]/[O₂] = √(J₁·k₂ / (J₃·k₄))   and   [O] = J₁[O₂]/(k₄[O₃])
+  64: ({ J1, k2, J3, k4, O2 }) => {
+    const hasRates = [J1, k2, J3, k4].every(Number.isFinite);
+    if (!hasRates) {
+      return {
+        result: Number.NaN, unit: '—',
+        steps: [
+          '── Chapman Ozone Photochemistry (Chapman, 1930) ──',
+          'Mechanism (6 reactions; (1) O+O→O₂ and (5) 2O₃→3O₂ negligible):',
+          '  O₂ + hν → 2O        rate J₁·[O₂]   (λ < 242 nm)',
+          '  O + O₂ → O₃         rate k₂·[O][O₂] (third body M)',
+          '  O₃ + hν → O₂ + O    rate J₃·[O₃]   (240–320 nm)',
+          '  O + O₃ → 2O₂        rate k₄·[O][O₃]',
+          '',
+          'Steady state (d[O]/dt = d[O₃]/dt = 0) ⇒ [O₃]/[O₂] = √(J₁·k₂/(J₃·k₄))',
+          '',
+          `  J₁ (O₂ photolysis, s⁻¹): ${Number.isFinite(J1) ? J1.toExponential(2) : 'NaN — environmental actinic-flux input (CAMS EAC4 photolysis or a TUV model; no open point API this session) — supply explicitly'}`,
+          `  k₂ (O+O₂→O₃, cm³/molecule·s): ${Number.isFinite(k2) ? k2.toExponential(2) : 'NaN — supply'} (JPL 2023 effective bimolecular, 1 atm / 298 K — physical constant)`,
+          `  J₃ (O₃ photolysis, s⁻¹): ${Number.isFinite(J3) ? J3.toExponential(2) : 'NaN — same actinic-flux source as J₁ — supply explicitly'}`,
+          `  k₄ (O+O₃→2O₂, cm³/molecule·s): ${Number.isFinite(k4) ? k4.toExponential(2) : 'NaN — supply'} (JPL 2023, 298 K — physical constant)`,
+          `  [O₂] (molecules/cm³): ${Number.isFinite(O2) ? O2.toExponential(2) : 'NaN — altitude-dependent number density — supply for absolute [O₃] and [O]'}`,
+          '',
+          'Result is NaN: the paper requires photolysis-rate inputs (J₁, J₃), which are',
+          'environmental data no authentic open point source serves here — supply J₁ and J₃ to compute.',
+        ],
+      };
+    }
+    const R = Math.sqrt((J1 * k2) / (J3 * k4));
+    const mixPpmv = R * 1e6;
+    const o3Conc = Number.isFinite(O2) ? R * O2 : Number.NaN;
+    const oConc = Number.isFinite(o3Conc) && o3Conc > 0 ? (J1 * O2) / (k4 * o3Conc) : Number.NaN;
     return {
-      result: rate, unit: 'mol/m³s',
+      result: R, unit: '—',
+      secondary: [
+        { key: 'o3_mixing_ratio', value: mixPpmv, unit: 'ppmv', label: 'Photochemical-equilibrium O₃/O₂ mixing ratio' },
+        { key: 'o3_concentration', value: o3Conc, unit: 'molecules/cm³', label: 'Steady-state O₃ number density' },
+        { key: 'o_concentration', value: oConc, unit: 'molecules/cm³', label: 'Steady-state O atom number density' },
+      ],
       steps: [
-        '── Chapman Ozone Photochemistry (Chapman, 1930) — proxy rate ──',
-        `O₂ concentration [O₂] = ${O2.toExponential(2)} mol/m³`,
-        `Solar photon flux hν = ${hnu.toExponential(2)} mol(photons)/m³s`,
+        '── Chapman Ozone Photochemistry (Chapman, 1930) ──',
+        'Mechanism (6 reactions; (1) O+O→O₂ and (5) 2O₃→3O₂ negligible):',
+        '  O₂ + hν → 2O        rate J₁·[O₂]   (λ < 242 nm)',
+        '  O + O₂ → O₃         rate k₂·[O][O₂] (third body M)',
+        '  O₃ + hν → O₂ + O    rate J₃·[O₃]   (240–320 nm)',
+        '  O + O₃ → 2O₂        rate k₄·[O][O₃]',
         '',
-        'Step 1 — Primary photolysis rate proxy:',
-        `  J(O₂) ∝ [O₂] × hν = ${O2.toExponential(2)} × ${hnu.toExponential(2)}`,
-        `  = ${rate.toExponential(2)} mol/m³s`,
+        `J₁ = ${J1.toExponential(2)} s⁻¹, k₂ = ${k2.toExponential(2)} cm³/molecule·s, J₃ = ${J3.toExponential(2)} s⁻¹, k₄ = ${k4.toExponential(2)} cm³/molecule·s`,
         '',
-        'Step 2 — Ozone production chain:',
-        '  O₂ + hν → 2O· (λ < 242 nm)',
-        '  O· + O₂ + M → O₃ + M (M = N₂, O₂)',
+        'Step 1 — Steady state of O (d[O]/dt = 0):',
+        '  2J₁[O₂] + J₃[O₃] = k₂[O][O₂] + k₄[O][O₃]',
         '',
-        `  └ ${hnu > 1e-6 ? 'Stratospheric production dominates — high-energy UV available' : 'Tropospheric production limited — O(¹D) from O₃ photolysis at λ < 320 nm'}`,
-        `  └ Full Chapman: d[O₃]/dt = 2J(O₂) - 2k[O][O₂][M] - k'[O][O₃]`,
-      ]
+        'Step 2 — Steady state of O₃ (d[O₃]/dt = 0):',
+        '  k₂[O][O₂] = J₃[O₃] + k₄[O][O₃]',
+        '',
+        'Step 3 — Equate and eliminate [O] (paper exercise 3 — [O₂] drops out):',
+        `  k₄[O][O₃] = J₁[O₂]  ⇒  [O₃]/[O₂] = √(J₁·k₂/(J₃·k₄))`,
+        `  = √(${J1.toExponential(2)} × ${k2.toExponential(2)} / (${J3.toExponential(2)} × ${k4.toExponential(2)}))`,
+        `  = ${R.toExponential(4)}  (≈ ${mixPpmv.toExponential(3)} ppmv O₃ relative to O₂)`,
+        '',
+        ...(Number.isFinite(o3Conc) ? [
+          'Step 4 — Absolute steady-state concentrations (paper: [O] = J₁[O₂]/(k₄[O₃])):',
+          `  [O₃] = R × [O₂] = ${R.toExponential(4)} × ${O2.toExponential(2)} = ${o3Conc.toExponential(3)} molecules/cm³`,
+          `  [O]  = J₁[O₂]/(k₄[O₃]) = ${J1.toExponential(2)} × ${O2.toExponential(2)} / (${k4.toExponential(2)} × ${o3Conc.toExponential(3)}) = ${oConc.toExponential(3)} molecules/cm³`,
+        ] : ['Step 4 — [O₂] not supplied; absolute [O₃] and [O] omitted (supply [O₂] number density).']),
+        '',
+        `  └ ${R > 1e-5 ? 'Production-dominant regime (elevated photochemical O₃)' : R > 1e-7 ? 'Typical stratospheric equilibrium (1–10 ppmv O₃)' : 'Destruction-dominant regime (low O₃)'}`,
+        `  └ Chapman alone overestimates observed O₃ (~2×) because catalytic NOₓ/HOₓ/ClOₓ cycles are omitted (the paper predates their discovery).`,
+        `  └ k₂, k₄ from the NASA/JPL 2023 evaluation (Burkholder et al., JPL Pub. 19-5): k₂(eff, 1 atm, 298 K) = 1.43e-14, k₄(298 K) = 8.0e-12·exp(−2060/T).`,
+      ],
     };
   },
+  // Atkinson (2000), "Atmospheric chemistry of VOCs and NOₓ", Atmos. Environ.
+  // 34(12-14):2063-2101. Lifetime vs the OH radical: τ = 1/(k·[OH]) with the
+  // paper's [OH] conventions: 24-h global mean 1.0×10⁶ molecule cm⁻³
+  // (Prinn et al. 1995, cited in the paper) or the 12-h daytime average
+  // 2.0×10⁶ used for Table 1. k is the species-specific 298 K bimolecular
+  // rate constant (laboratory-measured physical constant — user supplies;
+  // paper Table 1 + §4.5 give species lifetimes for cross-checking).
   65: ({ k, OH }) => {
-    const tau = k > 0 ? 1 / (k * OH) : Infinity;
-    const _tauUnit = tau > 1e9 ? (tau / 3.15e7).toFixed(1) + ' yr' : tau.toFixed(0) + ' s';
+    const hasInputs = Number.isFinite(k) && Number.isFinite(OH);
+    if (!hasInputs || k <= 0 || OH <= 0) {
+      return {
+        result: Number.NaN, unit: 's',
+        steps: [
+          '── OH Oxidation Lifetime (Atkinson, 2000) ──',
+          'τ = 1/(k_OH·[OH]) — pseudo-first-order loss vs the hydroxyl radical.',
+          '',
+          `  k_OH (cm³/molecule·s, 298 K): ${Number.isFinite(k) ? k.toExponential(2) : 'NaN — species-specific measured rate constant; no open point API — supply (e.g. isoprene 1.0e-10, CH₄ 2.45e-15, CO 1.5e-13)'}`,
+          `  [OH] (molecules/cm³): ${Number.isFinite(OH) ? OH.toExponential(2) : 'NaN — supply, or use the paper\'s global mean 1.0e6 (24-h) / 2.0e6 (12-h daytime, Table 1)'}`,
+          '',
+          ...(Number.isFinite(k) && Number.isFinite(OH) && (k <= 0 || OH <= 0)
+            ? ['Result is NaN: rate constants and concentrations are strictly positive — a non-positive value is physically degenerate.']
+            : ['Result is NaN: both k_OH (species-specific, user supplies) and [OH] are required.']),
+        ],
+      };
+    }
+    const kPrime = k * OH;
+    const tau = 1 / kPrime;
+    const tauDays = tau / 86400;
+    const tauYrs = tau / 3.1536e7;
     return {
       result: tau, unit: 's',
+      secondary: [
+        { key: 'pseudo_first_order', value: kPrime, unit: 's⁻¹', label: 'Pseudo-first-order loss rate k·[OH]' },
+        { key: 'lifetime_days', value: tauDays, unit: 'day', label: 'Lifetime in days' },
+        { key: 'lifetime_years', value: tauYrs, unit: 'yr', label: 'Lifetime in years' },
+      ],
       steps: [
-        '── OH Oxidation Lifetime (Atkinson, 1986) ──',
-        `Rate constant k = ${k.toExponential(2)} cm³/molecule·s`,
+        '── OH Oxidation Lifetime (Atkinson, 2000) ──',
+        `Rate constant k_OH = ${k.toExponential(2)} cm³/molecule·s`,
         `OH radical concentration [OH] = ${OH.toExponential(2)} molecules/cm³`,
         '',
         'Step 1 — Pseudo-first-order rate:',
-        `  k' = k × [OH] = ${k.toExponential(2)} × ${OH.toExponential(2)} = ${(k * OH).toExponential(3)} s⁻¹`,
+        `  k' = k_OH × [OH] = ${k.toExponential(2)} × ${OH.toExponential(2)} = ${kPrime.toExponential(3)} s⁻¹`,
         '',
         'Step 2 — Atmospheric lifetime:',
-        `  τ = 1/k' = 1 / ${(k * OH).toExponential(3)} = ${tau > 1e9 ? (tau / 3.15e7).toFixed(1) + ' yr (' + tau.toExponential(2) + ' s)' : tau > 86400 ? (tau / 86400).toFixed(2) + ' days (' + tau.toFixed(0) + ' s)' : tau.toFixed(0) + ' s'}`,
+        `  τ = 1/k' = 1 / ${kPrime.toExponential(3)} = ${tauYrs > 1 ? tauYrs.toFixed(1) + ' yr (' + tau.toExponential(2) + ' s)' : tauDays > 1 ? tauDays.toFixed(2) + ' days (' + tau.toFixed(0) + ' s)' : tau.toFixed(0) + ' s'}`,
         '',
-        `  └ Classification: ${tau > 3.15e7 ? 'Very long-lived (>1 yr) — well-mixed, global impact (e.g. CH₄, N₂O)' : tau > 86400 ? 'Long-lived (days−year) — regional transport (e.g. CO, CH₃Br)' : tau > 3600 ? 'Moderate (hours−days) — local/regional (e.g. VOCs, SO₂)' : 'Short-lived (<hour) — highly reactive (e.g. NO, isoprene)'}`,
-        `  └ [OH] ≈ 1.0−1.5 × 10⁶ molecules/cm³ (global mean), varies with UV and H₂O`,
-      ]
+        `  └ Classification: ${tauYrs > 1 ? 'Long-lived (>1 yr) — well-mixed, global impact (e.g. CH₄ 12.9 yr, N₂O)' : tauDays > 1 ? 'Intermediate (days−year) — hemispheric transport (e.g. CO ~2.5 months)' : tau > 3600 ? 'Moderate (hours−days) — local/regional (e.g. VOCs)' : 'Short-lived (<hour) — highly reactive (e.g. isoprene 1.4 h @ 2.0e6)'}`,
+        `  └ [OH] conventions (paper §1.4): 24-h global mean = 1.0 × 10⁶ molecule cm⁻³ (Prinn et al. 1995); 12-h daytime average = 2.0 × 10⁶ (Table 1 lifetimes). Peak daytime ground-level (2–10) × 10⁶.`,
+        `  └ Paper Table 1 cross-check (12-h daytime [OH] = 2.0 × 10⁶): isoprene 1.4 h, ethene 1.4 day, propane 10 day, benzene 9.4 day, acetone 53 day, methanol 12 day.`,
+      ],
     };
   },
 
   // ── Part III · Domain 10: Ocean Dynamics ──
-  66: ({ beta, rho0, curlTau_z }) => {
-    const v = (1 / (rho0 * beta)) * curlTau_z;
-    const vSv = v * 1e6; // Sverdrup transport proxy (1 Sv = 10⁶ m³/s per unit width)
+  // Sverdrup (1947), PNAS 33(11):318-326. Eq (13): β·M_y = curl_z(τ) with
+  // β = 2Ωcosφ/R (eq 12); M is the depth-integrated mass transport, so the
+  // volume transport per unit width is v = curl_z(τ)/(ρ₀·β) in m²/s.
+  // Ekman pumping w_Ek = curl_z(τ)/(ρ₀·f) with f = 2Ωsinφ.
+  66: ({ beta, rho0, curlTau_z, f, W }) => {
+    const hasCurl = Number.isFinite(curlTau_z);
+    // β = 2Ωcosφ/R → 0 within ~0.1° of the poles; the balance is degenerate there.
+    const betaDegenerate = !Number.isFinite(beta) || Math.abs(beta) < 1e-14;
+    if (!hasCurl || betaDegenerate) {
+      return {
+        result: Number.NaN, unit: 'm²/s',
+        steps: [
+          '── Sverdrup Transport (Sverdrup, 1947, PNAS 33(11):318-326) ──',
+          'Paper eq (13): β·M_y = curl_z(τ); volume transport per unit width v = curl_z(τ)/(ρ₀·β).',
+          '',
+          `  β = 2Ωcosφ/R = ${Number.isFinite(beta) ? beta.toExponential(3) : 'NaN'} /m·s (eq 12, from the request latitude)`,
+          `  ρ₀ = ${Number.isFinite(rho0) ? rho0.toFixed(0) : 'NaN'} kg/m³ (reference seawater density)`,
+          `  (∇×τ)_z = ${hasCurl ? curlTau_z.toExponential(3) : 'NaN — spatial derivative of the wind-stress field; no genuine point source this session — supply (e.g. ASCAT/CCMP wind-product curl) in N/m³'}`,
+          '',
+          ...(betaDegenerate
+            ? ['Result is NaN: β = 2Ωcosφ/R → 0 within ~0.1° of the poles; the Sverdrup relation is degenerate there (finite NaN, never ±∞).']
+            : ['Result is NaN: the paper requires the wind-stress curl (∇×τ)_z — supply it to compute (β, ρ₀ are genuine from latitude/constant).']),
+        ],
+      };
+    }
+    const v = curlTau_z / (rho0 * beta); // m²/s, meridional volume transport per unit width
+    const wEk = (Number.isFinite(f) && Math.abs(f) > 1e-12) ? curlTau_z / (rho0 * f) : Number.NaN;
+    const totalSv = (Number.isFinite(W) && W > 0) ? (v * W) / 1e6 : Number.NaN;
     return {
-      result: v, unit: 'm²/s²',
+      result: v, unit: 'm²/s',
+      secondary: [
+        { key: 'coriolis_f', value: Number.isFinite(f) ? f : Number.NaN, unit: 's⁻¹', label: 'Coriolis parameter f = 2Ωsinφ' },
+        { key: 'ekman_pumping', value: wEk, unit: 'm/s', label: 'Ekman pumping velocity w_Ek = (∇×τ)_z/(ρ₀·f)' },
+        { key: 'total_transport_sv', value: totalSv, unit: 'Sv', label: 'Total basin transport v × W (1 Sv = 10⁶ m³/s)' },
+      ],
       steps: [
-        '── Sverdrup Transport (Sverdrup, 1947) ──',
-        `Planetary vorticity gradient β = ${beta.toExponential(3)} /m·s`,
+        '── Sverdrup Transport (Sverdrup, 1947, PNAS 33(11):318-326) ──',
+        `Planetary vorticity gradient β = 2Ωcosφ/R = ${beta.toExponential(3)} /m·s (paper eq 12)`,
         `Reference density ρ₀ = ${rho0.toFixed(0)} kg/m³`,
         `Wind stress curl (∇×τ)_z = ${curlTau_z.toExponential(3)} N/m³`,
         '',
-        'Step 1 — Compute meridional transport:',
-        `  β·v = (1/ρ₀)·(∇×τ)_z`,
-        `  v = 1/(${rho0.toFixed(0)} × ${beta.toExponential(3)}) × ${curlTau_z.toExponential(3)}`,
-        `  v = ${v.toExponential(3)} m²/s (${vSv.toFixed(2)} Sv equivalent per unit width)`,
+        'Step 1 — Vorticity balance (paper eq 13, d/dy(9a) − d/dx(9b) + continuity):',
+        '  β·M_y = curl_z(τ) = ∂τ_y/∂x − ∂τ_x/∂y',
         '',
-        `  └ Interpretation: ${v > 0 ? 'Northward transport (positive wind stress curl, e.g. subtropical gyre interior)' : 'Southward transport (negative wind stress curl, e.g. subpolar gyre interior)'}`,
-        `  └ β = 2Ωcos(φ)/R ≈ 2.0×10⁻¹¹ at mid-latitudes; determines western intensification scale`,
+        'Step 2 — Meridional volume transport per unit width:',
+        `  v = curl_z(τ)/(ρ₀·β) = ${curlTau_z.toExponential(3)} / (${rho0.toFixed(0)} × ${beta.toExponential(3)})`,
+        `  v = ${v.toExponential(4)} m²/s`,
+        '',
+        ...(Number.isFinite(wEk) ? [
+          'Step 3 — Ekman pumping at the base of the Ekman layer:',
+          `  w_Ek = curl_z(τ)/(ρ₀·f) = ${curlTau_z.toExponential(3)} / (${rho0.toFixed(0)} × ${f.toExponential(3)}) = ${wEk.toExponential(3)} m/s`,
+        ] : ['Step 3 — Ekman pumping: f = 2Ωsinφ → 0 at the equator (balance fails, paper §); w_Ek omitted as NaN.']),
+        ...(Number.isFinite(totalSv) ? [
+          'Step 4 — Total meridional transport across the basin width:',
+          `  V_total = v × W = ${v.toExponential(4)} × ${W.toExponential(2)} = ${totalSv.toExponential(3)} Sv`,
+        ] : ['Step 4 — Supply the basin width W (m) for the total transport in Sv (1 Sv = 10⁶ m³/s).']),
+        '',
+        `  └ ${v > 0 ? 'Northward interior transport — positive curl_z(τ) (cyclonic, subpolar gyre regime)' : v < 0 ? 'Southward interior transport — negative curl_z(τ) (anticyclonic, subtropical gyre regime)' : 'Zero — no wind-stress curl'}`,
+        `  └ Validity (paper): interior ocean, away from the equator (f→0) and the western boundary currents; steady state.`,
+      ],
+    };
+  },
+  // Stommel (1948), "The westward intensification of wind-driven ocean
+  // currents", Trans. AGU 29(2):202-206. Model eq (9): ∇²ψ + α·∂ψ/∂x =
+  // γ·sin(πy/b) with α = D·β/R and γ = F·π/(R·b) (eq 6); closed-form
+  // solution (19)-(20): ψ = γ(b/π)²·sin(πy/b)·(p·e^{Ax} + q·e^{Bx} − 1) with
+  // A = −α/2 ± √(α²/4 + (π/b)²), p = (1−e^{BL})/(e^{AL}−e^{BL}), q = 1−p;
+  // velocities (21)-(22): u = ∂ψ/∂y, v = −∂ψ/∂x. Boundary-layer width δ = 1/α.
+  // All quantities in one consistent unit system (paper: cgs).
+  67: ({ beta, D, b, L, R, F, x, y }) => {
+    const hasAll = [beta, D, b, L, R, F, x, y].every(Number.isFinite);
+    if (!hasAll || D <= 0 || b <= 0 || L <= 0 || R <= 0) {
+      return {
+        result: Number.NaN, unit: 'm²/s',
+        steps: [
+          '── Stommel Westward Intensification (Stommel, 1948, Trans. AGU 29(2):202-206) ──',
+          'Model eq (9): ∇²ψ + α·∂ψ/∂x = γ·sin(πy/b),  α = D·β/R,  γ = F·π/(R·b)',
+          '',
+          `  β (s⁻¹m⁻¹) = ${Number.isFinite(beta) ? beta.toExponential(2) : 'NaN — supply or auto from latitude'}`,
+          `  D (depth, m) = ${Number.isFinite(D) ? D.toFixed(0) : 'NaN — basin depth'}`,
+          `  b (basin N-S width, m) = ${Number.isFinite(b) ? b.toExponential(2) : 'NaN — basin width'}`,
+          `  L (basin E-W length, m) = ${Number.isFinite(L) ? L.toExponential(2) : 'NaN — basin length'}`,
+          `  R (friction, s⁻¹) = ${Number.isFinite(R) ? R.toExponential(2) : 'NaN — friction coefficient'}`,
+          `  F (max wind stress, N/m²) = ${Number.isFinite(F) ? F.toExponential(2) : 'NaN — wind amplitude'}`,
+          `  (x, y) (m) = (${Number.isFinite(x) ? x.toExponential(2) : 'NaN'}, ${Number.isFinite(y) ? y.toExponential(2) : 'NaN'})`,
+          '',
+          'Result is NaN: all model parameters are required (basin geometry and friction are',
+          'model configuration — user supplies; defaults are the paper\'s own numerical example).',
+        ],
+      };
+    }
+    const alpha = (D * beta) / R;
+    const gamma = (F * Math.PI) / (R * b);
+    const nb = Math.PI / b;
+    const root = Math.sqrt(alpha * alpha / 4 + nb * nb);
+    const A = -alpha / 2 + root;
+    const B = -alpha / 2 - root;
+    const eAL = Math.exp(A * L), eBL = Math.exp(B * L);
+    // e^{BL} underflows to 0 for a strongly-intensified WBC (physically fine:
+    // the eastern decay e^{Bx} is negligible at the eastern boundary).
+    const p = (1 - eBL) / (eAL - eBL);
+    const q = 1 - p;
+    const ex = Math.exp(A * x), eBx = Math.exp(B * x);
+    const g = p * ex + q * eBx - 1;
+    const psi = gamma * b * b / (Math.PI * Math.PI) * Math.sin(Math.PI * y / b) * g;
+    const u = gamma * (b / Math.PI) * Math.cos(Math.PI * y / b) * g;
+    const v = -gamma * b * b / (Math.PI * Math.PI) * Math.sin(Math.PI * y / b) * (p * A * ex + q * B * eBx);
+    const deltaKm = (1 / alpha) / 1000;
+    if (![psi, u, v].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: 'm²/s',
+        steps: [
+          '── Stommel Westward Intensification (Stommel, 1948) ──',
+          'The solution overflowed: α·L (or |B|·L) is so large that e^{αL} exceeds double precision.',
+          `  α = D·β/R = ${alpha.toExponential(3)}, L = ${L.toExponential(2)} → α·L = ${(alpha * L).toExponential(3)}`,
+          'Reduce αL (smaller basin, smaller β, or larger friction R) to compute.',
+        ],
+      };
+    }
+    return {
+      result: psi, unit: 'm²/s',
+      secondary: [
+        { key: 'wbc_width_km', value: deltaKm, unit: 'km', label: 'Stommel boundary-layer width δ = 1/α' },
+        { key: 'u_velocity', value: u, unit: 'm/s', label: 'Zonal velocity u = ∂ψ/∂y' },
+        { key: 'v_velocity', value: v, unit: 'm/s', label: 'Meridional velocity v = −∂ψ/∂x' },
+        { key: 'alpha', value: alpha, unit: 'm⁻¹', label: 'Model parameter α = D·β/R' },
+        { key: 'gamma', value: gamma, unit: 's⁻¹', label: 'Forcing amplitude γ = F·π/(R·b)' },
+      ],
+      steps: [
+        '── Stommel Westward Intensification (Stommel, 1948, Trans. AGU 29(2):202-206) ──',
+        'Model eq (9): ∇²ψ + α·∂ψ/∂x = γ·sin(πy/b) — β-effect vs linear bottom friction −R·u, −R·v.',
+        '',
+        'Step 1 — Model parameters (paper eq 6):',
+        `  α = D·β/R = ${D.toExponential(2)} × ${beta.toExponential(2)} / ${R.toExponential(2)} = ${alpha.toExponential(4)} (m⁻¹ in consistent units)`,
+        `  γ = F·π/(R·b) = ${F.toExponential(2)} × π / (${R.toExponential(2)} × ${b.toExponential(2)}) = ${gamma.toExponential(4)} s⁻¹`,
+        '',
+        'Step 2 — Separation constants (eq 15: X″ + αX′ − n²X = 0, n = π/b):',
+        `  A = −α/2 + √(α²/4 + (π/b)²) = ${A.toExponential(4)}`,
+        `  B = −α/2 − √(α²/4 + (π/b)²) = ${B.toExponential(4)}`,
+        '',
+        'Step 3 — Boundary constants (eq 20, ψ = 0 at x = 0 and x = L):',
+        `  p = (1 − e^{BL})/(e^{AL} − e^{BL}) = ${p.toExponential(4)},  q = 1 − p = ${q.toExponential(4)}`,
+        '',
+        'Step 4 — Streamfunction at (x, y) (eq 19):',
+        `  ψ = γ(b/π)²·sin(πy/b)·(p·e^{Ax} + q·e^{Bx} − 1) = ${psi.toExponential(4)} m²/s`,
+        '',
+        'Step 5 — Velocities (eqs 21-22):',
+        `  u = ∂ψ/∂y = ${u.toExponential(4)} m/s,   v = −∂ψ/∂x = ${v.toExponential(4)} m/s`,
+        '',
+        `  └ Boundary-layer width δ = 1/α = ${deltaKm.toFixed(0)} km — ${alpha > 0 ? 'the e^{Bx} term concentrates the flow at the WESTERN boundary (westward intensification)' : 'β = 0 (non-rotating case, paper Fig 2) — symmetric circulation, no intensification'}`,
+        `  └ Paper example (cgs): D = 2×10⁴ cm, b = 2π×10⁸ cm, L = 10⁹ cm, R = 0.02 s⁻¹, F = 1 dyne/cm², β = 10⁻¹³ s⁻¹cm⁻¹ → α = 10⁻⁷ cm⁻¹, WBC < 100 km, max northward velocity 240 cm/s.`,
+        `  └ Gulf Stream at Florida Strait: width ~100 km, speed ~2 m/s, transport ~30 Sv (the observed WBC).`,
+      ],
+    };
+  },
+  68: ({ AH, beta, curlTau, x, r }) => {
+    // Munk (1950) “On the wind-driven ocean circulation”, J. Meteorology 7(2):79–93.
+    // Zonal-wind solution: k = (β/A_H)^(1/3) is the Coriolis-friction wave number;
+    // the response function X_w(x) = 1 − e^(−kx/2)·[cos(√3kx/2) + (1/√3)·sin(√3kx/2)]
+    // (paper eq 20, western-boundary limit) reproduces the paper's Table 1 extrema
+    // exactly (X_w: 0.45/1.17/1.09/0.97 at x/L_w = 1/6, 3/6, 4/6, 1; X'_w/k:
+    // 0.55/0.00/−0.09/0.00), with L_w = 4π/(√3k) the oscillation wavelength (eq 24)
+    // and the countercurrent = exp(−π/√3) ≈ 17% of the main current. The interior
+    // solution pivots to X = 1 − x/r (paper §4). Streamfunction (eq 22/26):
+    // ψ(x) = curl_z(τ)·r·X_w(x)/β with the paper's transport scale −1.17·r·curl.
+    const eps = 1e-14;
+    if (!Number.isFinite(curlTau)) {
+      const kNaN = beta > 0 && AH > 0 ? Math.cbrt(beta / AH) : Number.NaN;
+      return {
+        result: Number.NaN, unit: 'm²/s',
+        steps: [
+          '── Munk Viscous Western Boundary Layer (Munk, 1950) ──',
+          'Model: A_H·∇⁴ψ − β·∂ψ/∂x = curl_z(τ) with lateral (eddy) viscosity.',
+          '  k = (β/A_H)^(1/3) = Coriolis-friction wave number',
+          `  δ_M = 1/k ≈ ${Number.isFinite(kNaN) ? (1 / kNaN).toFixed(0) : 'N/A'} m — Munk layer width`,
+          `  L_w = 4π/(√3k) ≈ ${Number.isFinite(kNaN) ? ((4 * Math.PI) / (Math.sqrt(3) * kNaN)).toFixed(0) : 'N/A'} m — oscillation wavelength`,
+          '',
+          'INPUT: wind-stress curl (∇×τ)_z is a SPATIAL DERIVATIVE of the wind-stress',
+          'field (∂τ_y/∂x − ∂τ_x/∂y) — no genuine point source serves it this session.',
+          'Supply the curl (e.g. from ASCAT/CCMP/CERA-20C stress fields) to compute ψ.',
+          'Result: NaN (honest — no substitute for the missing curl).',
+        ]
+      };
+    }
+    if (!(beta > eps)) {
+      return {
+        result: Number.NaN, unit: 'm²/s',
+        steps: [
+          '── Munk Viscous Western Boundary Layer (Munk, 1950) ──',
+          `β = ${beta.toExponential(2)} ≤ 0 — the Munk solution requires β > 0`, // (β→0 at the poles)
+          'Result: NaN (honest — degenerate β).',
+        ]
+      };
+    }
+    const k = Math.cbrt(beta / AH);
+    const Lw = (4 * Math.PI) / (Math.sqrt(3) * k);
+    const u = (Math.sqrt(3) * k * x) / 2;
+    const Xw = 1 - Math.exp(-(k * x) / 2) * (Math.cos(u) + (1 / Math.sqrt(3)) * Math.sin(u));
+    const XwPrime = (2 * k / Math.sqrt(3)) * Math.exp(-(k * x) / 2) * Math.sin(u);
+    // Interior pivot: X → 1 − x/r for x beyond the western layer (paper §4).
+    const X = x <= 0 ? 0 : Xw * (1 - x / r);
+    const psi = (curlTau / beta) * r * X;
+    const vel = -(curlTau / beta) * r * XwPrime;  // v = −∂ψ/∂x from the western-layer shape
+    return {
+      result: psi, unit: 'm²/s',
+      secondary: [
+        { key: 'velocity_v', value: vel, unit: 'm/s', label: 'Meridional velocity v(x)' },
+        { key: 'munk_width', value: 1 / k, unit: 'm', label: 'Munk layer width δ_M = 1/k' },
+        { key: 'wavelength', value: Lw, unit: 'm', label: 'Oscillation wavelength L_w = 4π/(√3k)' },
+        { key: 'countercurrent_ratio', value: Math.exp(-Math.PI / Math.sqrt(3)), unit: '—', label: 'Countercurrent / main current (paper: 17%)' },
+        { key: 'Xw', value: Xw, unit: '—', label: 'Response function X_w(x)' },
+      ],
+      steps: [
+        '── Munk Viscous Western Boundary Layer (Munk, 1950, J. Meteor. 7(2):79–93) ──',
+        `Lateral eddy viscosity A_H = ${AH.toExponential(1)} m²/s, β = ${beta.toExponential(2)} /m·s`,
+        `Evaluation point x = ${x.toExponential(1)} m from the western wall, basin width r = ${r.toExponential(1)} m`,
+        '',
+        'Step 1 — Coriolis-friction wave number (paper eq 13/16):',
+        `  k = (β/A_H)^(1/3) = (${beta.toExponential(2)}/${AH.toExponential(1)})^(1/3)`,
+        `    = ${k.toExponential(4)} m⁻¹ (paper: 0.016 km⁻¹ for A = 5×10⁷ cm²/s at 35°N)`,
+        '',
+        'Step 2 — Munk layer width and oscillation wavelength (eq 24):',
+        `  δ_M = 1/k = ${(1 / k).toFixed(0)} m (${(1 / k / 1000).toFixed(1)} km)`,
+        `  L_w = 4π/(√3·k) = ${(Lw / 1000).toFixed(1)} km`,
+        '',
+        'Step 3 — Response function X_w(x) (paper eq 20, western-boundary limit):',
+        `  X_w = 1 − e^(−kx/2)·[cos(√3kx/2) + (1/√3)·sin(√3kx/2)] = ${Xw.toFixed(4)}`,
+        `  X'_w/k = (2/√3)·e^(−kx/2)·sin(√3kx/2) = ${(XwPrime / k).toFixed(4)}`,
+        '  (Table 1 cross-check: X_w extrema 0.45/1.17/1.09/0.97 at x/L_w = 1/6, 3/6, 4/6, 1 ✓)',
+        '',
+        'Step 4 — Streamfunction (paper eq 22/26):',
+        `  ψ(x) = curl_z(τ)·r·X(x)/β, with X = X_w·(1 − x/r) (interior pivot to 1 − x/r)`,
+        `  = ${curlTau.toExponential(2)} × ${r.toExponential(1)} × ${X.toFixed(4)} / ${beta.toExponential(2)}`,
+        `  = ${psi.toExponential(4)} m²/s`,
+        '',
+        `  └ Countercurrent: exp(−π/√3) = ${Math.exp(-Math.PI / Math.sqrt(3)).toFixed(3)} ≈ 17% of the main current (paper: 17%, observed 19%)`,
+        `  └ Transport scale (eq 26): western current = 1.17·r·curl_z(τ) — independent of A_H ✓`,
+        `  └ Gulf Stream: computed 36 vs observed 74 ×10⁶ metric t/s from mean Atlantic zonal winds (paper Table 2)`,
       ]
     };
   },
-  67: ({ beta, psi, x, curlTau, R, visc }) => {
-    const lhs = beta * (1 / visc) * (psi / x);
-    const v = lhs + curlTau - R * Math.pow(psi / x, 2);
+  69: ({ lambda, delta, R }) => {
+    // Stommel (1961) “Thermohaline Convection with Two Stable Regimes of Flow”,
+    // Tellus 13(2):224–230. Two-vessel (symmetric) model, non-dimensional:
+    //   dx/dt = δ(1−x) − |f|x,  dy/dt = (1−y) − |f|y,  λ·f = Rx − y
+    // (x = S/S̄ salinity, y = T/T̄ temperature, f = q/c flow, δ = d/c exchange ratio,
+    //  R = βS̄/αT̄ density-effect ratio, λ = dimensionless flow-feedback constant).
+    // Equilibrium (paper §5): y = 1/(1+|f|), x = δ/(δ+|f|), with the cubic
+    //   λ·f = R·δ/(δ+|f|) − 1/(1+|f|).  Real roots = the flow regimes; stability
+    // via the paper's appendix linearization (Poincaré conditions, Stoker 1950).
+    // Paper's own example (fig 6/7): R = 2, δ = 1/6, λ = 1/5 → three roots
+    // f ≈ −1.1 (stable node a), −0.30 (saddle b), +0.23 (stable spiral c) —
+    // i.e. TWO stable regimes (the paper's title). Necessary condition for three
+    // equilibria: R·δ < 1 for R > 1 (or R·δ > 1 for 0 < R < 1), λ small enough.
+    if (!(lambda > 0) || !(delta > 0) || !(R > 0)) {
+      return {
+        result: Number.NaN, unit: '—',
+        steps: [
+          '── Stommel (1961) Two-Vessel Thermohaline Model ──',
+          `λ = ${lambda}, δ = ${delta}, R = ${R} — all three must be positive.`,
+          'Result: NaN (honest — degenerate parameters).',
+        ]
+      };
+    }
+    // Solve λ·f = Rδ/(δ+|f|) − 1/(1+|f|) for f ∈ [−Fmax, Fmax] by bracketing scan + bisection.
+    const Fmax = 20;
+    const g = (f: number) => lambda * f - (R * delta / (delta + Math.abs(f)) - 1 / (1 + Math.abs(f)));
+    const roots: number[] = [];
+    const N = 4000;
+    let prev = g(-Fmax);
+    for (let i = 1; i <= N; i++) {
+      const f0 = -Fmax + (2 * Fmax * i) / N;
+      const g0 = g(f0);
+      if (prev * g0 < 0 || g0 === 0) {
+        let lo = -Fmax + (2 * Fmax * (i - 1)) / N, hi = f0;
+        for (let b = 0; b < 80; b++) {
+          const mid = (lo + hi) / 2;
+          if (g(mid) * g(lo) <= 0) hi = mid; else lo = mid;
+        }
+        const root = (lo + hi) / 2;
+        if (!roots.some((r) => Math.abs(r - root) < 1e-6)) roots.push(root);
+      }
+      prev = g0;
+    }
+    roots.sort((a, b) => a - b);
+
+    const equilibria = roots.map((f) => {
+      const x = delta / (delta + Math.abs(f));
+      const y = 1 / (1 + Math.abs(f));
+      const s = f > 0 ? 1 : -1; // sign of f; ∂|f|/∂(x,y) = s·(R/λ, −1/λ)
+      const J11 = -delta - Math.abs(f) - x * s * R / lambda;
+      const J12 = x * s / lambda;
+      const J21 = -y * s * R / lambda;
+      const J22 = -1 - Math.abs(f) + y * s / lambda;
+      const tr = J11 + J22;
+      const det = J11 * J22 - J12 * J21;
+      const disc = tr * tr - 4 * det;
+      let kind: string;
+      if (det < 0) kind = 'saddle (unstable)';
+      else if (disc >= 0) kind = tr < 0 ? 'stable node' : 'unstable node';
+      else kind = tr < 0 ? 'stable spiral' : 'unstable spiral';
+      return { f, x, y, tr, det, kind, stable: det > 0 && tr < 0 };
+    });
+    const nStable = equilibria.filter((e) => e.stable).length;
+    const cond = R * delta;
+    const threePossible = R > 1 ? cond < 1 : (R > 0 && R < 1 ? cond > 1 : false);
+
     return {
-      result: v, unit: '—',
+      result: nStable, unit: 'stable regimes',
+      secondary: equilibria.map((e, i) => ({
+        key: `equilibrium_${i + 1}`, value: e.f, unit: '—',
+        label: `Flow f = ${e.f.toFixed(3)} — ${e.kind} (x=${e.x.toFixed(3)}, y=${e.y.toFixed(3)})`,
+      })),
       steps: [
-        '── Quasi-Geostrophic Vorticity Balance (Charney, 1947; Pedlosky, 1987) ──',
-        `β = ${beta.toExponential(2)}, ψ ≈ ${psi.toExponential(2)}, x ≈ ${x.toExponential(1)}, curl τ = ${curlTau.toExponential(2)}`,
-        `R (beta/Burger) = ${R.toExponential(2)}, eddy viscosity ν = ${visc.toExponential(2)}`,
+        '── Stommel (1961) Two-Vessel Thermohaline Model (Tellus 13(2):224–230) ──',
+        `Exchange ratio δ = ${delta.toFixed(4)} (d/c), density-effect ratio R = ${R.toFixed(2)} (βS̄/αT̄),`,
+        `flow-feedback constant λ = ${lambda.toFixed(4)}`,
         '',
-        'Step 1 — β·∂ψ/∂x term:',
-        `  β·ψ/x = ${beta.toExponential(2)} × ${psi.toExponential(2)} / ${x.toExponential(1)}`,
-        `  = ${(beta * psi / x).toExponential(2)}`,
+        'Step 1 — Equilibrium relations (paper §5):',
+        '  y = 1/(1+|f|),  x = δ/(δ+|f|)   (f = q/c dimensionless flow)',
+        '  coupled by the capillary flow law  λ·f = Rx − y',
         '',
-        'Step 2 — Balance equation:',
-        `  Residual = β·∂ψ/∂x + curlτ − R·∇²ψ = ${v.toExponential(2)}`,
+        'Step 2 — Solve the equilibrium cubic for the flow regimes f:',
+        `  λ·f = R·δ/(δ+|f|) − 1/(1+|f|)  →  ${roots.length} real root(s):`,
+        ...equilibria.map((e) =>
+          `    f = ${e.f.toFixed(3)}  (x = ${e.x.toFixed(3)}, y = ${e.y.toFixed(3)}) → ${e.kind}`),
         '',
-        `  └ ${Math.abs(v) < 0.01 * Math.abs(curlTau) ? 'Near-balance — quasi-geostrophic regime' : 'Imbalance — ageostrophic processes important (frontogenesis, convection)'}`,
-        `  └ Full equation: β·∂ψ/∂x = curlτ − R·∇²ψ (± bottom drag term)`,
-      ]
-    };
-  },
-  68: ({ beta, psi, x, curlTau, visc }) => {
-    const lhs = visc * Math.pow(1 / x, 4) * psi - beta * (1 / visc) * (psi / x);
-    const v = curlTau - lhs;
-    return {
-      result: v, unit: '—',
-      steps: [
-        '── Munk Western Boundary Layer (Munk, 1950) ──',
-        `Lateral eddy viscosity A_H = ${visc.toExponential(1)} m²/s`,
-        `β = ${beta.toExponential(2)} /m·s, Streamfunction ψ = ${psi.toExponential(1)}`,
-        `Scale x = ${x.toExponential(1)} m, Wind stress curl = ${curlTau.toExponential(2)}`,
+        'Step 3 — Stability (paper appendix: Poincaré conditions, Stoker 1950):',
+        `  trace = ${equilibria.map((e) => e.tr.toFixed(2)).join(', ')};  det = ${equilibria.map((e) => e.det.toFixed(2)).join(', ')}`,
+        `  → ${nStable} stable regime(s), ${roots.length - nStable} unstable (saddle/unstable)`,
         '',
-        'Step 1 — Munk layer balance:',
-        `  A_H·∇⁴ψ − β·∂ψ/∂x = curlτ`,
-        `  lhs = ${visc.toExponential(1)}·∇⁴ψ − ${beta.toExponential(2)}·∂ψ/∂x`,
-        `  lhs = ${lhs.toExponential(2)}`,
-        '',
-        'Step 2 — Residual (curlτ − lhs):',
-        `  = ${v.toExponential(2)}`,
-        '',
-        `  └ Munk boundary layer width: δ_M = (A_H/β)^(1/3) ≈ ${Math.pow(visc / beta, 1/3).toFixed(0)} km`,
-        `  └ ${Math.abs(v) < 0.1 * Math.abs(curlTau) ? 'Consistent with Munk layer dynamics' : 'Deviates from Munk balance — nonlinear or topographic effects'}`,
-      ]
-    };
-  },
-  69: ({ lambda, Tstar, T, q }) => {
-    const forcing = lambda * (Tstar - T);
-    const advection = q * T;
-    const dT = forcing - advection;
-    return {
-      result: dT, unit: '°C/yr',
-      steps: [
-        '── Haney-Type Ocean Box Model (Haney, 1971; Stommel, 1961) ──',
-        `Restoring rate λ = ${lambda.toFixed(4)} /yr, Atmospheric target T* = ${Tstar.toFixed(2)} °C`,
-        `Ocean temperature T = ${T.toFixed(2)} °C, Advection rate q = ${q.toFixed(4)} /yr`,
-        '',
-        'Step 1 — Surface forcing (restoring):',
-        `  λ·(T* − T) = ${lambda.toFixed(4)} × (${Tstar.toFixed(2)} − ${T.toFixed(2)})`,
-        `  = ${forcing.toFixed(4)} °C/yr`,
-        '',
-        'Step 2 — Advective cooling (upwelling/export):',
-        `  q·T = ${q.toFixed(4)} × ${T.toFixed(2)} = ${advection.toFixed(4)} °C/yr`,
-        '',
-        'Step 3 — Net temperature tendency:',
-        `  dT/dt = λ(T*−T) − qT = ${forcing.toFixed(4)} − ${advection.toFixed(4)}`,
-        `  dT/dt = ${dT.toFixed(4)} °C/yr`,
-        '',
-        `  └ ${dT > 0 ? 'WARMING — surface forcing dominates advection' : dT < 0 ? 'COOLING — advection/upwelling dominates' : 'STEADY STATE — forcing ≈ advection'}`,
-        `  └ Equilibrium T_eq = λ·T*/(λ+q) = ${(lambda * Tstar / (lambda + q)).toFixed(2)} °C`,
+        `  └ Three-equilibria condition: R·δ = ${cond.toFixed(3)} ${threePossible ? '< 1 (R>1) — three equilibria possible if λ small enough' : '— violates R·δ<1 (R>1) or R·δ>1 (0<R<1) — only one regime'}`,
+        `  └ Paper example (fig 7): R=2, δ=1/6, λ=1/5 → f = −1.1 (stable node), −0.30 (saddle), +0.23 (stable spiral) — TWO stable regimes ✓`,
+        `  └ Hysteresis (paper §6): a slight increase in λ past the critical value annihilates the temperature-dominated branch; the system jumps to the salinity-dominated regime and stays there even after λ is restored.`,
       ]
     };
   },
   70: ({ S, Theta, p }) => {
-    const rho = 1000 + S * 0.8 - (Theta - 20) * 0.2 + p * 4.6e-3;
-    const sigmaT = rho - 1000;
+    // Absolute Salinity S_A (g/kg), Conservative Temperature Θ (°C), sea pressure p (dbar).
+    // 75-term specific-volume polynomial (Roquet et al. 2015, Table K.1) — the same
+    // computational form as the GSW library's gsw_specvol(). ρ = 1/v; v < 0 or NaN → honest NaN.
+    const v = teos10SpecVol(S, Theta, p);
+    const rho = Number.isFinite(v) && v > 0 ? 1 / v : Number.NaN;
+    const c = teos10SoundSpeed(S, Theta, p);
+    const sigmaT = Number.isFinite(rho) ? rho - 1000 : Number.NaN;
+    const v0 = teos10SpecVol(S, Theta, 0);
+    const sigmaTheta = Number.isFinite(v0) && v0 > 0 ? 1 / v0 - 1000 : Number.NaN;
     return {
       result: rho, unit: 'kg/m³',
+      secondary: [
+        { key: 'sound_speed', value: c, unit: 'm/s', label: 'TEOS-10 sound speed c' },
+        { key: 'sigma_t', value: sigmaT, unit: 'kg/m³', label: 'In-situ density anomaly σ_t' },
+        { key: 'sigma_theta', value: sigmaTheta, unit: 'kg/m³', label: 'Potential density anomaly σ_θ' },
+      ],
       steps: [
-        '── TEOS-10 Seawater Density Proxy (IOC et al., 2010) ──',
-        `Practical Salinity S = ${S.toFixed(2)} PSU`,
-        `Conservative Temperature Θ = ${Theta.toFixed(2)} °C`,
-        `Pressure p = ${p.toFixed(0)} dbar (≈ ${(p / 10).toFixed(0)} m depth)`,
+        '── TEOS-10 Seawater Density (IOC/SCOR/IAPSO 2010; Roquet et al. 2015) ──',
+        `Absolute Salinity S_A = ${Number.isFinite(S) ? S.toFixed(2) : 'N/A'} g/kg`,
+        `Conservative Temperature Θ = ${Number.isFinite(Theta) ? Theta.toFixed(2) : 'N/A'} °C (ITS-90)`,
+        `Sea pressure p = ${Number.isFinite(p) ? p.toFixed(0) : 'N/A'} dbar (≈ ${Number.isFinite(p) ? (p / 10).toFixed(0) : '—'} m depth)`,
         '',
-        'Step 1 — Apply linearised equation of state:',
-        `  ρ = 1000 + 0.8·S − 0.2·(Θ−20) + 4.6×10⁻³·p`,
-        `  ρ = 1000 + 0.8×${S.toFixed(2)} − 0.2×(${Theta.toFixed(2)}−20) + ${(4.6e-3).toExponential(1)}×${p.toFixed(0)}`,
-        `  ρ = ${rho.toFixed(2)} kg/m³`,
+        'Step 1 — Specific volume from the 75-term polynomial (gsw_specvol):',
+        '  v(S_A, Θ, p) = Σ c_ijk · x_s^i · y_s^j · z^k   with x_s = √(s_f·(S_A+24)), y_s = Θ/40, z = p/10⁴',
+        `  v = ${Number.isFinite(v) && v > 0 ? v.toExponential(4) : 'N/A'} m³/kg`,
         '',
-        'Step 2 — Density anomaly:',
-        `  σ_t = ρ − 1000 = ${sigmaT.toFixed(3)} kg/m³ (sigma-t)`,
+        'Step 2 — In-situ density (ρ = 1/v):',
+        `  ρ = ${Number.isFinite(rho) ? rho.toFixed(4) : 'N/A'} kg/m³`,
+        `  σ_t = ρ − 1000 = ${Number.isFinite(sigmaT) ? sigmaT.toFixed(3) : 'N/A'} kg/m³ (sigma-t)`,
         '',
-        `  └ Water mass: ${sigmaT < 23 ? 'Light surface water (tropical warm pool)' : sigmaT < 26 ? 'Subtropical mode water' : sigmaT < 27.5 ? 'Central/thermocline water' : 'Deep/intermediate water (σθ > 27.5)'}`,
-        `  └ Full TEOS-10 uses Gibbs-Seawater (GSW) formulation for non-linear effects at high pressure`,
+        'Step 3 — Potential density anomaly (adiabatically to p = 0):',
+        `  σ_θ = ρ(S_A, Θ, 0) − 1000 = ${Number.isFinite(sigmaTheta) ? sigmaTheta.toFixed(3) : 'N/A'} kg/m³`,
+        '',
+        'Step 4 — TEOS-10 sound speed (c² = −v²/(∂v/∂p)):',
+        `  c = ${Number.isFinite(c) ? c.toFixed(1) : 'N/A'} m/s`,
+        '',
+        `  └ Water mass: ${Number.isFinite(sigmaTheta) ? (sigmaTheta < 23 ? 'Light surface water (tropical warm pool)' : sigmaTheta < 26 ? 'Subtropical mode water' : sigmaTheta < 27.5 ? 'Central/thermocline water' : 'Deep/intermediate water (σθ > 27.5)') : '—'}`,
+        `  └ Reference: S_A = 35.16504 g/kg (SSO), Θ = 25 °C, p = 0 → ρ = 1023.3431 kg/m³ (canonical TEOS-10 value)`,
+        `  └ Valid range: S_A 0–42 g/kg, Θ −18 to +40 °C, p 0–10000 dbar; outside → NaN (honest no-fill)`,
+        `  └ Open-ocean S_A ≈ S_P within ~0.05 g/kg; the composition correction δS_A requires regional data and is not applied here`,
       ]
     };
   },
-  71: ({ gamma, eps, N2 }) => {
-    const Krho = gamma * eps / (N2 || 1e-6);
-    const mixingEff = Krho > 1e-4 ? 'Energetic' : Krho > 1e-5 ? 'Moderate' : 'Weak';
+  71: ({ kappa, gradVar, dTdz, gamma, eps, N2 }) => {
+    // Osborn & Cox (1972) eq (25) + eq (5): the fine-structure (Osborn-Cox) method.
+    // The paper balances turbulent heat flux against molecular dissipation of
+    // temperature variance: <w'θ'>·(∂θ̄/∂z) ≈ −κ·<(∇θ')²> (eq 25), and defines the
+    // eddy coefficient A via Q = ρc_p<w'θ'> = ρAc_p(∂θ̄/∂z) (eq 5), so
+    //   A = κ·<(∇θ')²> / (∂θ̄/∂z)²
+    // κ is the molecular thermal diffusivity (~1.4e-7 m²/s); <(∇θ')²> is the
+    // temperature-gradient variance from microstructure (no open point API → NaN),
+    // and ∂θ̄/∂z is the mean vertical temperature gradient.
+    const kappaOk = Number.isFinite(kappa) && kappa > 0;
+    const gradVarOk = Number.isFinite(gradVar) && gradVar >= 0;
+    const dTdzOk = Number.isFinite(dTdz) && Math.abs(dTdz) > 0;
+    const A = kappaOk && gradVarOk && dTdzOk ? kappa * gradVar / (dTdz * dTdz) : Number.NaN;
+    const gradVarValid = Number.isFinite(gradVar) && gradVar >= 0;
+    // Osborn (1980) dissipation method (companion, clearly labelled): K_ρ = γ·ε/N²
+    const N2ok = Number.isFinite(N2) && N2 > 0;
+    const Krho = Number.isFinite(gamma) && Number.isFinite(eps) && N2ok ? gamma * eps / N2 : Number.NaN;
+    const mixingEff = Number.isFinite(A) ? (A > 1e-4 ? 'Energetic' : A > 1e-5 ? 'Moderate' : 'Weak') : 'N/A';
+    const sigma_theta = Number.isFinite(A) ? A : Number.NaN;
     return {
-      result: Krho, unit: 'm²/s',
+      result: A, unit: 'm²/s',
+      secondary: [
+        { key: 'k_rho_osborn1980', value: Krho, unit: 'm²/s', label: 'K_ρ = γ·ε/N² (Osborn 1980 dissipation method — companion)' },
+        { key: 'sigma_theta', value: sigma_theta, unit: 'm²/s', label: 'Fine-structure diffusivity (Osborn-Cox 1972)' },
+      ],
       steps: [
-        '── Osborn Turbulent Diffusivity (Osborn, 1980) ──',
-        `Mixing efficiency γ = ${gamma.toFixed(3)} (typically 0.15–0.25)`,
-        `TKE dissipation rate ε = ${eps.toExponential(2)} W/kg (m²/s³)`,
-        `Buoyancy frequency squared N² = ${N2.toExponential(3)} /s²`,
+        '── Osborn-Cox Fine-Structure Diffusivity (Osborn & Cox, 1972) ──',
+        `Molecular thermal diffusivity κ = ${Number.isFinite(kappa) ? kappa.toExponential(2) : 'N/A'} m²/s (≈ 1.4×10⁻⁷)`,
+        `Temperature-gradient variance <(∇θ')²> = ${gradVarValid ? gradVar.toExponential(2) : 'N/A'} K²/m²`,
+        `Mean vertical temperature gradient ∂θ̄/∂z = ${dTdzOk ? dTdz.toExponential(2) : 'N/A'} K/m`,
         '',
-        'Step 1 — Compute diapycnal diffusivity:',
-        `  K_ρ = γ·ε / N² = ${gamma.toFixed(3)} × ${eps.toExponential(2)} / ${N2.toExponential(3)}`,
-        `  K_ρ = ${Krho.toExponential(3)} m²/s`,
+        'Step 1 — Balance of turbulent heat flux and molecular dissipation (paper eq 25):',
+        '  <w\'θ\'>·(∂θ̄/∂z) ≈ −κ·<(∇θ\')²>',
         '',
-        'Step 2 — Mixing regime classification:',
+        'Step 2 — Eddy coefficient A (paper eq 5: Q = ρc_p<w\'θ\'> = ρAc_p·∂θ̄/∂z):',
+        `  A = κ·<(∇θ')²> / (∂θ̄/∂z)² = ${Number.isFinite(kappa) ? kappa.toExponential(2) : 'N/A'} × ${gradVarValid ? gradVar.toExponential(2) : 'N/A'} / ${dTdzOk ? dTdz.toExponential(2) : 'N/A'}²`,
+        `  A = ${Number.isFinite(A) ? A.toExponential(3) : 'N/A'} m²/s`,
+        '',
+        'Step 3 — Mixing regime classification:',
         `  ${mixingEff} turbulent mixing`,
-        `  ${Krho > 1e-4 ? '→ Topography-enhanced mixing (e.g. rough bathymetry, straits)' : Krho > 1e-5 ? '→ Background thermocline mixing' : '→ Very weak — double-diffusive or quiescent regime'}`,
+        `  ${Number.isFinite(A) ? (A > 1e-4 ? '→ Topography-enhanced mixing (rough bathymetry, straits)' : A > 1e-5 ? '→ Background thermocline mixing' : '→ Very weak — quiescent regime') : '→ —'}`,
         '',
-        `  └ Osborn identity assumes steady-state TKE: P = ε + buoyancy flux; γ = R_f/(1−R_f)`,
-        `  └ Diapycnal upwelling velocity w* ≈ K_ρ·N²/(ρ·g)`,
+        `  └ Paper example (San Diego Trough, 275–300 m): <(∇θ')²> = 3.6×10⁻⁷ K²/cm², ∂θ̄/∂z = 9×10⁻⁵ K/cm, κ = 1.4×10⁻³ cm²/s → A = 0.06 cm²/s (paper Table 1: (2±1)×(0.06±0.01))`,
+        `  └ Companion Osborn (1980) method K_ρ = γ·ε/N² = ${Number.isFinite(Krho) ? Krho.toExponential(3) : 'N/A'} m²/s (requires ε; honest NaN when missing)`,
+        `  └ <(∇θ')²> is a microstructure measurement — no open point API → honest NaN until supplied`,
       ]
     };
   },
-  72: ({ Ri, threshold: _threshold }) => {
-    const deepens = Ri > 0.65;
+  72: ({ g, rho0, drho, h, dV }) => {
+    // Price, Weller & Pinkel (1986) PWP mixed layer — the bulk Richardson number
+    // criterion (paper eq 9): R_b = g·Δρ·h/(ρ₀·(ΔV)²) ≥ 0.65 for stability.
+    // "If R_b < 0.65, then the mixed layer entrains successively deeper levels
+    // until (9) is satisfied" (paper §4.2) — i.e. DEEPENING occurs for R_b < 0.65,
+    // the interface is stable for R_b ≥ 0.65. Δ( ) = jump across the ML base.
+    // The third mixing process (paper §4.2, eq 10) relaxes the gradient Richardson
+    // number R_g = g·(∂ρ/∂z)/(ρ₀·(∂V/∂z)²) toward its critical value 0.25 in the
+    // stratified fluid below the mixed layer.
+    const gOk = Number.isFinite(g) && g > 0;
+    const rhoOk = Number.isFinite(rho0) && rho0 > 0;
+    const drhoOk = Number.isFinite(drho) && drho >= 0;
+    const hOk = Number.isFinite(h) && h > 0;
+    const dVOk = Number.isFinite(dV) && Math.abs(dV) > 0;
+    const Rb = gOk && rhoOk && drhoOk && hOk && dVOk
+      ? (g * drho * h) / (rho0 * dV * dV) : Number.NaN;
+    const deepens = Number.isFinite(Rb) ? Rb < 0.65 : false;
+    const regime = Number.isFinite(Rb)
+      ? (Rb < 0.65 ? 'entraining (deepening)' : 'stable (no deepening)')
+      : 'N/A';
     return {
       result: deepens ? 1 : 0, unit: '—',
+      secondary: [
+        { key: 'Rb', value: Rb, unit: '—', label: 'Bulk Richardson number R_b = g·Δρ·h/(ρ₀·ΔV²) (paper eq 9)' },
+        { key: 'entrainment', value: deepens ? 1 : 0, unit: '—', label: 'Mixed layer deepening (R_b < 0.65)' },
+      ],
       steps: [
-        '── Bulk Richardson Mixed Layer Deepening (Pollard et al., 1973) ──',
-        `Bulk Richardson Number Ri_b = ${Ri.toFixed(3)}`,
-        `Critical threshold Ri_c = 0.65 (Pollard–Rhines–Thompson criterion)`,
+        '── Price-Weller-Pinkel Mixed Layer (Price, Weller & Pinkel, 1986) ──',
+        `Gravity g = ${Number.isFinite(g) ? g.toFixed(2) : 'N/A'} m/s², reference density ρ₀ = ${Number.isFinite(rho0) ? rho0.toFixed(0) : 'N/A'} kg/m³`,
+        `Density jump across the ML base Δρ = ${drhoOk ? drho.toExponential(2) : 'N/A'} kg/m³`,
+        `Mixed-layer depth h = ${hOk ? h.toFixed(1) : 'N/A'} m`,
+        `Velocity jump across the ML base ΔV = ${dVOk ? dV.toExponential(2) : 'N/A'} m/s`,
         '',
-        'Step 1 — Evaluate deepening criterion:',
-        `  ${Ri > 0.65 ? `Ri_b (${Ri.toFixed(3)}) > 0.65 → MIXED LAYER DEEPENS (shear instability erodes thermocline)` : `Ri_b (${Ri.toFixed(3)}) ≤ 0.65 → NO deepening, shear too weak`}`,
+        'Step 1 — Bulk Richardson number (paper eq 9):',
+        `  R_b = g·Δρ·h / (ρ₀·ΔV²) = ${Number.isFinite(g) ? g.toFixed(2) : 'N/A'} × ${drhoOk ? drho.toExponential(2) : 'N/A'} × ${hOk ? h.toFixed(1) : 'N/A'} / (${rhoOk ? rho0.toFixed(0) : 'N/A'} × ${dVOk ? dV.toExponential(2) : 'N/A'}²)`,
+        `  R_b = ${Number.isFinite(Rb) ? Rb.toFixed(3) : 'N/A'}`,
         '',
-        `  └ Ri_b = Δb·h / (Δu)² where Δb = buoyancy jump, h = MLD, Δu = velocity shear across base`,
-        `  └ When Ri < 0.65, Kelvin-Helmholtz instabilities entrain denser water below`,
+        'Step 2 — Deepening criterion (paper §4.2):',
+        `  ${Number.isFinite(Rb) ? (Rb < 0.65 ? `R_b (${Rb.toFixed(3)}) < 0.65 → MIXED LAYER ENTRAINS / DEEPENS (shear instability erodes the thermocline until eq 9 is satisfied)` : `R_b (${Rb.toFixed(3)}) ≥ 0.65 → STABLE, no deepening (interface resists mixing)`) : 'R_b unavailable — supply ΔV (velocity jump) or Δρ (density jump)'}`,
+        '',
+        'Step 3 — Third mixing process (paper §4.2, eq 10): gradient Richardson number',
+        '  R_g = g·(∂ρ/∂z)/(ρ₀·(∂V/∂z)²) ≥ 0.25 is relaxed in the stratified fluid below the ML',
+        `  └ Regime: ${regime}`,
+        `  └ Δ( ) = difference between the mixed layer and the level just beneath (paper §4.3)`,
+        `  └ The 0.65 bulk threshold is the DIM criterion of Price et al. (1978); the 0.25 gradient value is the Miles-Howard critical Ri (Turner 1973; Thompson 1980; Adamec et al. 1981)`,
       ]
     };
   },
-  73: ({ g, alpha, fm, fpm }) => {
-    const S = alpha * Math.pow(g, 2) * Math.pow(fm, -5) * Math.exp(-1.25 * Math.pow(fpm / fm, -4));
-    const peakEnhance = Math.exp(-1.25 * Math.pow(fpm / fm, -4));
+  73: ({ U, omega, g, __wind10m, __windDate }) => {
+    // Pierson & Moskowitz (1964) eq (12) — the fully-developed wind-sea spectrum:
+    //   S(ω) dω = (α·g²/ω⁵)·e^(−β·(ω₀/ω)⁴) dω,  with α = 8.10×10⁻³, β = 0.74,
+    //   ω₀ = g/U (U = wind speed at the weather-ship height). Both α and β are
+    //   fixed by the paper (eq 12 discussion). Derived: peak ω_p = (4β/5)^(1/4)·g/U
+    //   = 0.877·g/U; total variance m₀ = α·g²/(4β·ω₀⁴) = α·U⁴/(4β·g²); significant
+    //   wave height H_s = 4·√m₀ = 4·√(α/(4β))·U²/g = 0.209·U²/g (the classic P-M
+    //   relation); peak period T_p = 2π/ω_p = 2π·(5/(4β))^(1/4)·U/g = 7.16·U/g.
+    const gOk = Number.isFinite(g) && g > 0;
+    const UOk = Number.isFinite(U) && U > 0;
+    const omegaOk = Number.isFinite(omega) && omega > 0;
+    const w0 = gOk && UOk ? g / U : Number.NaN;
+    const wp = gOk && UOk ? Math.pow(4 * 0.74 / 5, 0.25) * g / U : Number.NaN;
+    const Tp = Number.isFinite(wp) && wp > 0 ? 2 * Math.PI / wp : Number.NaN;
+    const m0 = gOk && UOk ? 8.10e-3 * Math.pow(U, 4) / (4 * 0.74 * g * g) : Number.NaN;
+    const Hs = Number.isFinite(m0) && m0 >= 0 ? 4 * Math.sqrt(m0) : Number.NaN;
+    const S = gOk && UOk && omegaOk
+      ? (8.10e-3 * g * g) / Math.pow(omega, 5) * Math.exp(-0.74 * Math.pow(w0 / omega, 4))
+      : Number.NaN;
     return {
-      result: S, unit: 'm²/s',
+      result: S, unit: 'm²·s',
+      secondary: [
+        { key: 'Hs', value: Hs, unit: 'm', label: 'Significant wave height H_s = 4√m₀ (fully developed)' },
+        { key: 'Tp', value: Tp, unit: 's', label: 'Peak wave period T_p = 2π/ω_p' },
+        { key: 'wp', value: wp, unit: 'rad/s', label: 'Peak angular frequency ω_p = (4β/5)^(1/4)·g/U' },
+      ],
       steps: [
-        '── JONSWAP Spectrum (Hasselmann et al., 1973) ──',
-        `Phillips constant α = ${alpha.toExponential(2)}`,
-        `Peak frequency f_m = ${fm.toExponential(2)} Hz, Spectral peak f_pm = ${fpm.toExponential(2)} Hz`,
-        `Gravity g = ${g.toFixed(2)} m/s²`,
+        '── Pierson-Moskowitz Spectrum (Pierson & Moskowitz, 1964, eq 12) ──',
+        `Wind speed U = ${UOk ? U.toFixed(2) : 'N/A'} m/s (19.5 m weather-ship reference height; α, β fixed by the paper)`,
+        ...(__wind10m != null && Number.isFinite(__wind10m)
+          ? [`  └ auto: genuine ERA5 10 m wind ${__wind10m.toFixed(2)} m/s${__windDate ? ` (as of ${__windDate})` : ''} converted to the paper's 19.5 m reference height via the neutral log profile (z₀ = 0.0002 m open ocean)`]
+          : []),
+        `Gravity g = ${gOk ? g.toFixed(2) : 'N/A'} m/s²`,
+        `Evaluation frequency ω = ${omegaOk ? omega.toFixed(4) : 'N/A'} rad/s (default: the peak ω_p)`,
         '',
-        'Step 1 — Compute f^(-5) term:',
-        `  f_m^(-5) = (${fm.toExponential(2)})^(-5) = ${Math.pow(fm, -5).toExponential(3)}`,
+        'Step 1 — Spectral form (paper eq 12):',
+        '  S(ω) = (α·g²/ω⁵)·e^(−β·(ω₀/ω)⁴),  α = 8.10×10⁻³, β = 0.74, ω₀ = g/U',
+        `  ω₀ = g/U = ${Number.isFinite(w0) ? w0.toExponential(3) : 'N/A'} rad/s`,
+        `  S(ω) = ${Number.isFinite(S) ? S.toExponential(3) : 'N/A'} m²·s`,
         '',
-        'Step 2 — Compute peak enhancement factor:',
-        `  exp(−1.25·(f_pm/f_m)^(−4)) = exp(−1.25·(${fpm.toExponential(2)}/${fm.toExponential(2)})^(−4))`,
-        `  = ${peakEnhance.toExponential(3)}`,
+        'Step 2 — Peak frequency (dS/dω = 0):',
+        `  ω_p = (4β/5)^(1/4)·g/U = ${Number.isFinite(wp) ? wp.toFixed(4) : 'N/A'} rad/s → T_p = ${Number.isFinite(Tp) ? Tp.toFixed(2) : 'N/A'} s`,
         '',
-        'Step 3 — Spectral density at peak:',
-        `  S(f_m) = αg²·f_m^(−5)·exp(−1.25·(f_pm/f_m)^(−4))`,
-        `  S(f_m) = ${alpha.toExponential(2)} × ${g.toFixed(2)}² × ${Math.pow(fm, -5).toExponential(3)} × ${peakEnhance.toExponential(3)}`,
-        `  S(f_m) = ${S.toExponential(3)} m²/s`,
+        'Step 3 — Significant wave height (H_s = 4√m₀, m₀ = α·U⁴/(4β·g²)):',
+        `  H_s = ${Number.isFinite(Hs) ? Hs.toFixed(3) : 'N/A'} m  (= 0.209·U²/g — the classic P-M relation)`,
         '',
-        `  └ Significant wave height: H_s ≈ 4·√(∫S(f)df) — requires integration over full frequency range`,
-        `  └ JONSWAP typical γ (peak enhancement) = 3.3 for fetch-limited developing seas`,
+        `  └ Valid for fully developed seas: unlimited fetch and duration (the paper's assumption)`,
+        `  └ Paper data range: 20–40 knots (10.29–20.58 m/s) from weather-ship spectra (Moskowitz 1964)`,
+        `  └ U is the weather-ship wind (the paper: "The spectral form given by (12) will describe the spectrum of a fully developed wind sea for a wind measured at 19.5 meters")`,
       ]
     };
   },
-
   // ── Domain 11: Coastal & Wave ──
-  74: ({ etaU, Sw, Ssig }) => {
-    const sqrtTerm = Math.sqrt(Sw * Sw + Ssig * Ssig);
-    const R2 = 1.1 * (etaU + 0.5 * sqrtTerm);
+  74: ({ H0, T0, betaF, g, __hAuto, __tAuto, __betaAuto, __waveDate }) => {
+    // Stockdon et al. (2006), Coastal Engineering 53(7):573-588.
+    // Eq (1): deep-water wavelength L₀ = gT₀²/2π. Iribarren number
+    // ξ₀ = β_f/√(H₀/L₀) selects the regime:
+    //   ξ₀ < 0.3  (dissipative): Eq (16) η̄_d = 0.016(H₀L₀)^{1/2},
+    //                Eq (17) S_d = 0.046(H₀L₀)^{1/2}, Eq (18)
+    //                R₂ = 0.043(H₀L₀)^{1/2} — NO slope dependence.
+    //   ξ₀ ≥ 0.3  (intermediate/reflective, all sites):
+    //                Eq (10) η̄ = 0.35·β_f·(H₀L₀)^{1/2},
+    //                Eq (11) S_inc = 0.75·β_f·(H₀L₀)^{1/2},
+    //                Eq (12) S_IG = 0.06·(H₀L₀)^{1/2},
+    //                combined swash S = √(S_inc² + S_IG²),
+    //                Eq (19) R₂ = 1.1·(η̄ + S/2) with
+    //                0.563 ≈ 0.75² and 0.004 ≈ 0.06².
+    const L0 = g * T0 * T0 / (2 * Math.PI);
+    const h0l0 = Math.sqrt(H0 * L0);
+    const iribarren = betaF > 0 ? betaF / Math.sqrt(H0 / L0) : Number.NaN;
+    const dissipative = Number.isFinite(iribarren) && iribarren < 0.3;
+    const setup = dissipative ? 0.016 * h0l0 : 0.35 * betaF * h0l0;
+    const sInc = 0.75 * betaF * h0l0;
+    const sIg = 0.06 * h0l0;
+    const swash = dissipative ? 0.046 * h0l0 : Math.sqrt(sInc * sInc + sIg * sIg);
+    // Dissipative branch: paper Eq (18) fixes R₂ = 0.043·(H₀L₀)^{1/2}
+    // directly (the printed coefficient; 1.1·(0.016+0.046/2)=0.0429 is the
+    // un-rounded value). All-sites: paper Eq (9)/Eq (19) R₂ = 1.1·(η̄ + S/2).
+    const R2 = dissipative ? 0.043 * h0l0 : 1.1 * (setup + 0.5 * swash);
+    const finite = Number.isFinite(R2);
     return {
       result: R2, unit: 'm',
+      secondary: [
+        { key: 'setup', value: setup, unit: 'm', label: 'Wave setup η̄ at the shoreline (Eq 10/16)' },
+        { key: 'swash', value: swash, unit: 'm', label: 'Significant swash S (combined; Eq 11-12/17)' },
+        { key: 'iribarren', value: iribarren, unit: '—', label: 'Iribarren number ξ₀ = β_f/√(H₀/L₀) (regime selector)' },
+      ],
       steps: [
         '── Stockdon Wave Runup (Stockdon et al., 2006) ──',
-        `Setup η_u = ${etaU.toFixed(3)} m, Swash S_w = ${Sw.toFixed(3)} m, Infragravity S_ig = ${Ssig.toFixed(3)} m`,
+        `Deep-water significant wave height H₀ = ${H0.toFixed(2)} m${__hAuto ? ' (auto: genuine ERA5 swh)' : ''}`,
+        `Deep-water peak period T₀ = ${T0.toFixed(1)} s${__tAuto ? ' (auto: genuine ERA5 pp1d)' : ''}${__waveDate ? ` (as of ${__waveDate})` : ''}`,
+        `Foreshore beach slope β_f = ${betaF.toFixed(4)}${__betaAuto ? ' (auto: SRTM30m slope at the point)' : ''}`,
         '',
-        'Step 1 — Combined swash:',
-        `  √(S_w² + S_ig²) = √(${Sw.toFixed(3)}² + ${Ssig.toFixed(3)}²) = ${sqrtTerm.toFixed(3)} m`,
+        'Step 1 — Deep-water wavelength (paper Eq 1):',
+        `  L₀ = gT₀²/2π = ${g.toFixed(2)} × ${T0.toFixed(1)}² / (2π) = ${L0.toFixed(1)} m`,
         '',
-        'Step 2 — Compute R₂ (2% exceedance runup):',
-        `  R₂ = 1.1 × (η_u + 0.5 × √(S_w² + S_ig²))`,
-        `  R₂ = 1.1 × (${etaU.toFixed(3)} + 0.5 × ${sqrtTerm.toFixed(3)})`,
-        `  R₂ = ${R2.toFixed(2)} m`,
+        'Step 2 — Iribarren number (regime selector):',
+        `  ξ₀ = β_f / √(H₀/L₀) = ${Number.isFinite(iribarren) ? iribarren.toFixed(3) : 'N/A'} → ${dissipative ? 'DISSIPATIVE regime (ξ₀ < 0.3): slope-independent model, Eqs (16)-(18)' : 'INTERMEDIATE/REFLECTIVE regime (ξ₀ ≥ 0.3): all-sites model, Eqs (10)-(12), (19)'}`,
         '',
-        `  └ ${R2 < 1 ? 'Low runup — sheltered or dissipative beach' : R2 < 3 ? 'Moderate runup — intermediate beach' : R2 < 6 ? 'High runup — reflective beach, storm overwash potential' : 'Extreme runup — dune erosion / overtopping likely'}`,
-        `  └ R₂ valid for 2% exceedance; dissipative (Iribarren ξ < 0.3) vs. reflective (ξ > 0.3) regimes`,
+        'Step 3 — Setup at the shoreline:',
+        dissipative
+          ? `  η̄_d = 0.016·(H₀L₀)^{1/2} = 0.016 × ${h0l0.toFixed(2)} = ${setup.toFixed(3)} m  (paper Eq 16)`
+          : `  η̄ = 0.35·β_f·(H₀L₀)^{1/2} = 0.35 × ${betaF.toFixed(4)} × ${h0l0.toFixed(2)} = ${setup.toFixed(3)} m  (paper Eq 10)`,
+        '',
+        'Step 4 — Significant swash:',
+        ...(dissipative
+          ? [`  S_d = 0.046·(H₀L₀)^{1/2} = 0.046 × ${h0l0.toFixed(2)} = ${swash.toFixed(3)} m  (paper Eq 17)`]
+          : [
+              `  S_inc = 0.75·β_f·(H₀L₀)^{1/2} = 0.75 × ${betaF.toFixed(4)} × ${h0l0.toFixed(2)} = ${sInc.toFixed(3)} m  (paper Eq 11)`,
+              `  S_IG  = 0.06·(H₀L₀)^{1/2}   = 0.06 × ${h0l0.toFixed(2)} = ${sIg.toFixed(3)} m  (paper Eq 12)`,
+              `  S = √(S_inc² + S_IG²) = √(${sInc.toFixed(3)}² + ${sIg.toFixed(3)}²) = ${swash.toFixed(3)} m`,
+            ]),
+        '',
+        'Step 5 — 2% exceedance runup:',
+        dissipative
+          ? `  R₂ = 0.043·(H₀L₀)^{1/2} = 0.043 × ${h0l0.toFixed(2)} = ${finite ? R2.toFixed(2) : 'N/A'} m  (paper Eq 18)`
+          : `  R₂ = 1.1 × (η̄ + S/2) = 1.1 × (${setup.toFixed(3)} + ${(swash / 2).toFixed(3)}) = ${finite ? R2.toFixed(2) : 'N/A'} m  (paper Eq 9/19)`,
+        '',
+        `  └ ${!finite ? 'No genuine wave/slope data — honest NaN' : dissipative ? 'Dissipative beach (ξ₀ < 0.3): runup scales with √(H₀L₀) only, no slope dependence' : R2 < 1 ? 'Low runup — sheltered or dissipative conditions' : R2 < 3 ? 'Moderate runup — intermediate beach' : R2 < 6 ? 'High runup — reflective beach, storm overwash potential' : 'Extreme runup — dune erosion / overtopping likely'}`,
+        `  └ Paper validation: 10 field experiments, rms error 38 cm (bias −17 cm); 2% exceedance of the runup distribution`,
       ]
     };
   },
-  75: ({ L, S, B, hstar }) => {
-    const R = (L * S) / (B + hstar);
-    const R_mm = R * 1000;
+  75: ({ L, S, B, hstar, __sAuto, __hstarAuto, __bAuto, __lAuto, __slrNote, __waveDate, __slopeDeg }) => {
+    // Bruun (1962), "Sea-level rise as a cause of shore erosion". J. Wtrwy.
+    // Harb. Div. 88(1):117-130. doi:10.1061/jwheau.0000252.
+    //   R = S·L/(B + h*)   — canonical form, equivalently R = S/tanβ with
+    //   L = (B + h*)/tanβ at the average active-profile slope (SCOR 1991 /
+    //   Wikipedia restatement; Zhang et al. 2004 re-derivation).
+    // Honest NaN when any required datum is missing/invalid (zero-fallback:
+    // no static geometry or SLR constants in place of genuine data).
+    const denom = B + hstar;
+    const R = Number.isFinite(L) && Number.isFinite(S) && Number.isFinite(denom) && denom > 0
+      ? (L * S) / denom
+      : Number.NaN;
+    const finite = Number.isFinite(R);
+    const R_mm = finite ? R * 1000 : Number.NaN;
+    const factor = Number.isFinite(L) && Number.isFinite(denom) && denom > 0 ? L / denom : Number.NaN;
+    const retreat2100 = finite ? R * 80 : Number.NaN; // 2020–2100 at the current rate
+    const fmt = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : 'N/A');
+    const sStr = Number.isFinite(S) ? `${(S * 1000).toFixed(2)} mm/yr (${S.toExponential(2)} m/yr)` : 'N/A';
+    const autoNote = (flag: boolean | undefined, src: string) => (flag ? ` (auto: ${src})` : ' (user input)');
     return {
       result: R, unit: 'm/yr',
+      secondary: [
+        { key: 'retreat_factor', value: factor, unit: '—', label: 'Bruun factor R/S = L/(B+h*) — retreat per metre of sea-level rise' },
+        { key: 'total_retreat', value: retreat2100, unit: 'm', label: 'Total shoreline retreat 2020–2100 (80 yr at the current rate)' },
+      ],
       steps: [
         '── Bruun Shoreline Retreat (Bruun, 1962) ──',
-        `Cross-shore profile length L* = ${L.toFixed(0)} m`,
-        `Sea-level rise rate S = ${S.toExponential(2)} m/yr`,
-        `Berm height B = ${B.toFixed(1)} m, Closure depth h* = ${hstar.toFixed(1)} m`,
+        `Sea-level rise rate S = ${sStr}${autoNote(__sAuto, 'genuine NOAA CO-OPS tide-gauge trend')}`,
+        ...(__slrNote ? [`  └ ${__slrNote}`] : []),
+        `Closure depth h* = ${fmt(hstar)} m${autoNote(__hstarAuto, 'Hallermeier 1981: h* = 1.57·H_s from genuine CDS ERA5 swh')}${__waveDate ? ` (as of ${__waveDate})` : ''}`,
+        `Berm/dune height B = ${fmt(B, 2)} m${autoNote(__bAuto, 'SRTM30m terrain elevation at the point')}`,
+        `Active profile length L = ${fmt(L, 0)} m${autoNote(__lAuto, 'L = (B + h*)/tanβ at the genuine SRTM30m slope' + (__slopeDeg ? `, β = ${__slopeDeg.toFixed(2)}°` : ''))}`,
         '',
-        'Step 1 — Compute retreat rate:',
-        `  R = (L* × S) / (B + h*) = (${L.toFixed(0)} × ${S.toExponential(2)}) / (${B.toFixed(1)} + ${hstar.toFixed(1)})`,
-        `  R = ${R.toFixed(2)} m/yr (${R_mm.toFixed(0)} mm/yr)`,
+        'Step 1 — Compute the retreat rate:',
+        `  R = (L × S) / (B + h*) = (${fmt(L, 0)} × ${Number.isFinite(S) ? S.toExponential(2) : 'N/A'}) / (${fmt(B, 1)} + ${fmt(hstar, 1)})`,
+        `  R = ${fmt(R, 3)} m/yr (${Number.isFinite(R_mm) ? R_mm.toFixed(0) : 'N/A'} mm/yr)`,
+        Number.isFinite(S) && S > 0
+          ? `  Bruun factor R/S = L/(B + h*) = ${fmt(L, 0)} / ${fmt(denom, 1)} = ${fmt(factor, 0)}  (also = 1/tanβ = ${__slopeDeg ? fmt(1 / Math.tan(__slopeDeg * Math.PI / 180), 0) : 'N/A'} — the slope form R = S/tanβ)`
+          : '  Bruun factor undefined when S = 0',
         '',
-        'Step 2 — Cumulative retreat over 50 years:',
-        `  ΔR = R × 50 = ${(R * 50).toFixed(1)} m (base scenario)`,
+        'Step 2 — Cumulative retreat to 2100 (2020–2100):',
+        `  ΔR = R × 80 = ${fmt(retreat2100, 1)} m at the current rate`,
         '',
-        `  └ ${R < 0.1 ? 'Low retreat rate — stable coast or low SLR' : R < 0.5 ? 'Moderate retreat — requires monitoring' : R < 2 ? 'Rapid retreat — active erosion management needed' : 'Severe retreat — immediate adaptation required'}`,
-        `  └ Bruun Rule assumes profile maintains equilibrium shape; does not account for longshore transport, sediment supply, or hard structures`,
+        `  └ ${!finite ? 'Missing genuine data (S / wave / terrain) — honest NaN' : R < 0.1 ? 'Low retreat rate — stable coast or low SLR' : R < 0.5 ? 'Moderate retreat — requires monitoring' : R < 2 ? 'Rapid retreat — active erosion management needed' : 'Severe retreat — immediate adaptation required'}`,
+        `  └ Bruun Rule assumes the profile translates up-and-landward preserving its equilibrium shape; no longshore transport, sediment supply, or hard structures (Cooper & Pilkey 2004 critique)`,
       ]
     };
   },
-  76: ({ H: _H, db }) => {
-    const Hb = 0.78 * db;
-    const Hrms = Hb / Math.SQRT2;
+  76: ({ db, __dbAuto = true, __gebcoElev = null }) => {
+    // McCowan (1894): the highest solitary wave of permanent type in water
+    // of mean depth h rises to crest height c = 1.78h, so the maximum wave
+    // height is c − h = 0.78h (paper eq 34). The breaking criterion
+    // H_b = 0.78·d_b is the same relation evaluated at the breaking depth.
+    const finite = Number.isFinite(db) && db > 0;
+    const Hb = finite ? 0.78 * db : Number.NaN;
+    // Paper eq (35): the highest wave travels at V = √(1.56·g·h), ~25 %
+    // faster than a low solitary wave (√(g·h)).
+    const Vmax = finite ? Math.sqrt(1.56 * G_GRAV * db) : Number.NaN;
+    const srcLine = __dbAuto === false
+      ? `Water depth at breaking d_b = ${finite ? db.toFixed(2) : 'N/A'} m (user input)`
+      : __gebcoElev != null
+        ? `Water depth at breaking d_b = ${finite ? db.toFixed(2) : 'N/A'} m (auto: GEBCO 2020 bathymetry, ground elevation ${__gebcoElev.toFixed(1)} m)`
+        : 'Water depth at breaking d_b = N/A — no genuine bathymetry (honest NaN)';
     return {
       result: Hb, unit: 'm',
+      secondary: [
+        { key: 'breaker_index', value: finite ? 0.78 : Number.NaN, unit: '—', label: 'Breaker index γ_b = H_b/d_b (McCowan 1894 eq 34)' },
+        { key: 'wave_speed', value: Vmax, unit: 'm/s', label: 'Celerity of the highest wave V = √(1.56·g·d_b) (paper eq 35)' },
+        { key: 'crest_angle', value: 120, unit: '°', label: 'Crest angle of the highest wave — two branches cutting at 120° (paper §3/§5)' },
+      ],
       steps: [
-        '── Komar Breaking Criterion (Komar & Gaughan, 1972) ──',
-        `Water depth at breaking d_b = ${db.toFixed(2)} m`,
-        `Breaking index γ_b = 0.78 (spilling/plunging breakers on 1:30–1:80 slope)`,
+        '── McCowan Highest Wave (McCowan, 1894, Phil. Mag. Ser. 5 38(233):351–358) ──',
+        srcLine,
+        'Paper result: the highest solitary wave of permanent type in water of',
+        'mean depth h reaches crest height c = 1.78h, so the maximum wave height',
+        'is c − h = 0.78h (paper eq 34).',
         '',
-        'Step 1 — Compute breaking wave height:',
-        `  H_b = γ_b × d_b = 0.78 × ${db.toFixed(2)}`,
-        `  H_b = ${Hb.toFixed(2)} m`,
+        ...(finite
+          ? [
+            'Step 1 — Breaking wave height at the McCowan limit:',
+            `  H_b = γ_b × d_b = 0.78 × ${db.toFixed(2)}`,
+            `  H_b = ${Hb.toFixed(2)} m`,
+            '',
+            'Step 2 — Paper derived quantities:',
+            '  Crest is a blunt wedge — two branches cutting at 120° (§3/§5);',
+            '  radius of curvature at the crest ≈ 30× the depth (§5)',
+            `  Celerity of the highest wave V = √(1.56·g·d_b) = ${Vmax.toFixed(2)} m/s — about 25 % faster than a low wave (√(g·d_b)) (eq 35)`,
+          ]
+          : [
+            '  Missing/non-positive breaking depth — honest NaN (the criterion',
+            '  requires a positive water depth at breaking; no static depth, no proxy).',
+          ]),
         '',
-        'Step 2 — Derived quantities:',
-        `  H_rms = H_b / √2 = ${Hrms.toFixed(3)} m`,
-        `  Breaker type: ${Hb / db > 0.8 ? 'Plunging/surging (steep slope)' : 'Spilling (mild slope)'}`,
-        '',
-        `  └ γ_b = H_b/d_b = ${(Hb / db).toFixed(3)} — depends on beach slope (γ_b = 0.5–1.2)`,
-        `  └ Inshore wave energy flux: (ρgH_b²c_g)/8 determines set-up and longshore transport`,
+        `  └ γ_b = H_b/d_b = ${finite ? (Hb / db).toFixed(3) : 'N/A'} — derived for a horizontal bed (endless rectangular channel of uniform depth)`,
+        '  └ On natural sloping beaches γ_b varies with the Iribarren number (≈ 0.4–1.2); 0.78 is the canonical intermediate value',
+        '  └ Breaker type (spilling/plunging/surging) needs the beach-slope / Iribarren input this tool does not take',
+        '  └ In deep water (d_b ≫ L/2) depth-limited breaking no longer governs — Stokes wave-steepness limits height first',
       ]
     };
   },
@@ -5217,24 +6216,27 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   51: { 'ε': 'eps', 'fPAR': 'fpar', 'PAR': 'par' },
   52: { 'I₀': 'I0' },
   53: { 'R_eco': 'Reco' },
-  54: { 'cᵢ': 'ci', 'Γ*': 'GammaStar', 'K_c': 'Kc', 'K_o': 'Ko' },
+  54: { 'V_cmax': 'Vcmax', 'cᵢ': 'ci', 'Γ*': 'GammaStar', 'K_c': 'Kc', 'K_o': 'Ko' },
+  55: { 'ρ': 'rho' },
   56: { 'K₀': 'K0', 'ΔpCO₂': 'dCO2' },
-  58: { 'T_avg': 'Tavg', 'T_base': 'Tbase', 'T_upper': 'Tupper' },
+  57: { 'NO₃s': 'NO3s', 'NO₃d': 'NO3d' },
+  58: { 'T_max': 'Tmax', 'T_min': 'Tmin', 'T_avg': 'Tavg', 'T_base': 'Tbase', 'T_upper': 'Tupper' },
   59: { 'α': 'alpha', 'Δ': 'delta', 'γ': 'gamma', 'Rₙ': 'Rn' },
   60: { 'Rₐ': 'Ra', 'T_max': 'Tmax', 'T_min': 'Tmin' },
   61: { 'Yₐ': 'Ya', 'Yₘ': 'Ym', 'K_y': 'Ky', 'ETₐ': 'ETa', 'ETₘ': 'ETm' },
   62: { 'μ₂₀': 'umax' },
-  63: { 'ρ': 'rho', 'c_p': 'cp', 'T_s': 'Ts', 'T_a': 'Ta', 'r_a': 'ra', 'r_s': 'rs', 'e_s': 'es', 'e_a': 'ea' },
-  64: { 'O₂': 'O2', 'hν': 'hnu' },
+  63: { 'ρ': 'rho', 'c_p': 'cp', 'T_s': 'Ts', 'T_a': 'Ta', 'r_a': 'ra', 'r_s': 'rs', 'e_s': 'es', 'e_a': 'ea', 'p': 'p' },
+  64: { 'O₂': 'O2', 'J₁': 'J1', 'k₂': 'k2', 'J₃': 'J3', 'k₄': 'k4' },
   65: { '[OH]': 'OH' },
   66: { 'β': 'beta', 'ρ₀': 'rho0', '(∇×τ)_z': 'curlTau_z' },
-  67: { 'β': 'beta', 'ν': 'visc' },
-  68: { 'A_H': 'visc', 'β': 'beta' },
-  69: { 'λ': 'lambda', 'T*': 'Tstar' },
-  70: { 'Θ': 'Theta' },
-  71: { 'γ': 'gamma', 'ε': 'eps', 'N²': 'N2' },
-  73: { 'α': 'alpha', 'f_m': 'fm' },
-  74: { 'η_u': 'etaU', 'S_w': 'Sw', 'S_ig': 'Ssig' },
+  67: { 'β': 'beta' },
+  68: { 'A_H': 'AH', 'β': 'beta', 'curlτ': 'curlTau' },
+  69: { 'λ': 'lambda', 'δ': 'delta' },
+  70: { 'Θ': 'Theta', 'S_A': 'S', 'SA': 'S' },
+  71: { 'γ': 'gamma', 'ε': 'eps', 'N²': 'N2', '<(∇θ′)²>': 'gradVar', 'κ': 'kappa', '∂θ̄/∂z': 'dTdz' },
+  72: { 'Δρ': 'drho', 'ΔV': 'dV', 'ρ₀': 'rho0' },
+  73: { 'U₁₀': 'U', 'ω': 'omega', 'U10': 'U' },
+  74: { 'H₀': 'H0', 'T₀': 'T0', 'β_f': 'betaF', 'βf': 'betaF' },
   75: { 'L*': 'L', 'h*': 'hstar' },
   76: { 'd_b': 'db' },
   77: { 'H_sb': 'Hsb', 'θ_b': 'thetaB' },

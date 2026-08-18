@@ -6,7 +6,7 @@
  * and maps it to the correct input parameters for each equation.
  */
 
-import { EQUATION_ENGINE, normalizeInputs, type ComputeResult } from './engine';
+import { EQUATION_ENGINE, normalizeInputs, schmidtNumberCO2, weissSolubilityCO2, wanninkhofK1992, type ComputeResult } from './engine';
 import { runToolWorkflow } from './toolWorkflowRunner';
 import { getToolConfig } from './toolConfigs';
 import {
@@ -27,7 +27,8 @@ import {
   fetchFIRMSFires,
   fetchStationObservations,
   fetchRFactor,
-  fetchGppModis, fetchCo2Gml,
+  fetchGddStationData,
+  fetchGppModis, fetchCo2Gml, fetchAnnualGppModis, fetchSST,
   type WeatherData, type MarineData, type AirQualityData,
   type EarthquakeData, type ElevationData, type SoilData,
   type VegetationData, type SeaIceData, type TectonicData,
@@ -35,18 +36,36 @@ import {
   type TerrainData, type GlacierData, type VolcanoData,
   type TropoData, type PermafrostData, type DroughtData,
   type RiverData, type Era5HighFidelityData,
-  type GppData, type Co2GmlData,
+  type GppData, type Co2GmlData, type GppAnnualData,
+  type GddStationData,
 } from '../data/dataFetchers';
 import type { EarthquakeRupture, FireData } from '../data/dataFetchers';
 import {
   cb2014Terms, vs30FromSlope, cb2014RuptureWidth, cb2014EstimateZtor,
 } from '../data/campbellBozorgnia2014';
+import { fetchPmelPco2, type PmelPco2Sample } from '../data/pmelPco2';
 import { fetchLandsatThermal, fetchLandsatThermalGrid, fetchColumnWaterVapor, emissivityFromNdvi } from '../data/satelliteThermal';
-import { getOceanProfile, computeN2, computeWindStressCurl } from '../data/oceanData';
+import { getOceanProfile, computeN2 } from '../data/oceanData';
 import { fetchImergPrecipitation } from '../data/imerg';
 import { fetchGldasData, soilMoistureToVolumetric } from '../data/gldas';
 import { fetchTidePrediction, type TidePredictionResult } from '../data/noaaTides';
+import { fetchSeaLevelTrend, gmslRateDefault, type SeaLevelTrendResult } from '../data/noaaSeaLevelTrend';
+import { fetchGebco2020Elevations } from '../kaggle/bathymetry';
 import { fitVariogram } from '../data/kriging';
+
+/**
+ * Genuine GEBCO 2020 seafloor depth at a point. GEBCO's official point API
+ * is retired (dead DNS) and its WMS only renders maps, so the OpenTopoData
+ * mirror of the genuine GEBCO 2020 global relief grid is the scriptable
+ * path (same source the tsunami sampler uses). Positive-up elevation →
+ * positive depth only over water (elevation < 0); land points return
+ * depth ≤ 0 so callers can NaN-honestly reject them. Null on fetch failure.
+ */
+async function fetchGebcoDepth(lat: number, lon: number): Promise<{ elevation: number; depth: number } | null> {
+  const [elev] = await fetchGebco2020Elevations([{ lat, lon }]);
+  if (!Number.isFinite(elev)) return null;
+  return { elevation: elev, depth: -elev };
+}
 
 interface StudyArea {
   mode: 'point' | 'bbox' | 'two-points';
@@ -146,14 +165,15 @@ const ALIGN: Record<number, Record<string, string>> = {
   40:  { 'μ': 'mu', 'β': 'beta' },
   41:  { 'ξ': 'xi', 'β': 'beta' },
   51:  { 'ε': 'eps', 'fPAR': 'fpar', 'PAR': 'par' },
-  53:  { 'R_eco': 'Reco' },
   63:  { 'ρ': 'rho' },
+  64:  { 'O₂': 'O2', 'J₁': 'J1', 'k₂': 'k2', 'J₃': 'J3', 'k₄': 'k4' },
   66:  { 'β': 'beta', 'curlτz': 'curlTau_z' },
   67:  { 'β': 'beta', 'ψ': 'psi', 'curlτ': 'curlTau' },
-  68:  { 'β': 'beta', 'ψ': 'psi', 'curlτ': 'curlTau' },
-  69:  { 'λ': 'lambda' },
-  71:  { 'ε': 'eps' },
-  75:  { 'Lstar': 'L' },
+  68:  { 'β': 'beta', 'A_H': 'AH', 'curlτ': 'curlTau' },
+  69:  { 'λ': 'lambda', 'δ': 'delta' },
+  71:  { 'ε': 'eps', 'γ': 'gamma', 'N²': 'N2', 'κ': 'kappa', '<(∇θ′)²>': 'gradVar', '∂θ̄/∂z': 'dTdz' },
+  72:  { 'Δρ': 'drho', 'ΔV': 'dV', 'ρ₀': 'rho0' },
+  73:  { 'U₁₀': 'U', 'ω': 'omega', 'U10': 'U' },
   92:  { 'λ': 'lambda' },
   95:  { 'α': 'alpha' },
   96:  { 'α': 'alpha' },
@@ -333,8 +353,19 @@ function mapInputs(
     fire: FireData | null;
     interpObs?: { obs: import('../data/dataFetchers').StationObs[]; paramCd: string; unit: string } | null;
     rFactor?: import('../data/dataFetchers').RFactorData | null;
+    /** GHCN-Daily station daily TMAX/TMIN (°C) — Tool 58 GDD. */
+    gddStation?: GddStationData | null;
     gpp?: GppData | null;
+    gppAnnual?: GppAnnualData | null;
     co2?: Co2GmlData | null;
+    /** NOAA OISST v2 daily sea surface temperature (°C) — Tool 56. */
+    sst?: { sst: number; anomaly: number; timestamp?: string } | null;
+    /** Nearest NOAA PMEL mooring pCO₂ sample (µatm/°C/PSU) — Tool 56. */
+    pmelPco2?: PmelPco2Sample | null;
+    /** Nearest NOAA CO-OPS tide-gauge relative sea-level trend (m/yr) — Tool 75. */
+    slr?: SeaLevelTrendResult | null;
+    /** GEBCO 2020 bathymetry at the study point (positive-up elevation) — Tool 76 McCowan breaking depth. */
+    gebcoDepth?: { elevation: number; depth: number } | null;
     lat: number;
     lon: number;
     studyArea?: StudyArea;
@@ -361,6 +392,7 @@ function mapInputs(
   const pf = ctx.permafrost;
   const dr = ctx.drought;
   const rv = ctx.river;
+  const gddStation = ctx.gddStation ?? null;
   const T = w.temperature_2m ?? 15;
   const P = w.pressure_msl ?? 1013.25;
   const ws = w.wind_speed_10m ?? 5;
@@ -1403,58 +1435,205 @@ function mapInputs(
         par: u('par', parCalc),
       };
     }
-    case 52: return {
-      I0: u('I0', (w.shortwave_radiation ?? 150) * 4.6),
-      k: u('k', 0.5),
-      LAI: u('LAI', v.lai),
-    };
-    case 53: return {
-      R_eco: u('R_eco', 800),
-      GPP: u('GPP', 1200),
-    };
-    case 54: return {
-      Vcmax: u('Vcmax', 60),
-      ci: u('ci', 250),
-      GammaStar: u('GammaStar', 42.75),
-      Kc: u('Kc', 300),
-      Ko: u('Ko', 300000),
-      O: u('O', 210000),
-    };
-    case 55: return {
-      a: u('a', 0.05),
-      DBH: u('DBH', 30),
-    };
-    case 56: return {
-      k: u('k', 1000),
-      K0: u('K0', 30),
-      dCO2: u('dCO2', 10),
-    };
-    case 57: return { C: u('C', 106), N: u('N', 16), P: u('P', 1) };
+    case 52: {
+      // Monsi–Saeki (1953) / Hirose (2004) Beer-Lambert extinction — I₀ is the
+      // incident PPFD above the canopy. Auto-derived from GENUINE ERA5 ssrd
+      // (downward surface solar radiation, Copernicus CDS — authentic primary
+      // reanalysis; Open-Meteo is a proxy and is never substituted). Total
+      // shortwave → PPFD via Monteith's PAR fraction (0.45) and the quantum
+      // conversion 4.57 µmol/J within PAR (≈ ×2.06 µmol/J of total SW; the old
+      // ×4.6 factor treated total SW as PAR-only, over-estimating by ~2.2× and
+      // the `?? 150` fallback fabricated radiation — both removed). No genuine
+      // ssrd ⇒ honest NaN (zero-fallback rule).
+      const cds = ctx.era5?.source === 'cds';
+      const ssrd = cds ? (ctx.era5?.surfaceFluxes?.downwardShortwave ?? null) : null;
+      const i0Calc = ssrd != null && Number.isFinite(ssrd) ? ssrd * 0.45 * 4.57 : Number.NaN;
+      return {
+        I0: u('I0', i0Calc),
+        k: u('k', 0.5),
+        LAI: u('LAI', v.lai),
+      };
+    }
+    case 53: {
+      // Wofsy et al. (1993) NEE = R_eco − GPP (meteorological sign: negative
+      // = net CO₂ sink; verified against the paper's own numbers: GPP 11.1,
+      // Reco 7.4 tC/ha/yr → NEE = −3.7). GPP auto = genuine MODIS MOD17A2H
+      // annual sum (catalogue-sanctioned source). R_eco auto = honest NaN:
+      // ecosystem respiration requires nighttime eddy-covariance NEE
+      // (FLUXNET/AmeriFlux, registration-gated) and the SMAP L4C (SPL4CMDL)
+      // subset service on ORNL serves no data — no genuine open source
+      // exists, so R_eco must be supplied by the user (zero-fallback rule).
+      const gppYr = ctx.gppAnnual?.gppYr_gC ?? Number.NaN;
+      return { Reco: u('Reco', Number.NaN), GPP: u('GPP', gppYr) };
+    }
+    case 54: {
+      // FvCB (Farquhar 1980): A_c = Vcmax·(ci−Γ*)/(ci+Kc(1+O/Ko)). Genuine
+      // auto inputs: ci = 0.7 × NOAA GML ambient CO₂ (ca, genuine; C₃
+      // ci/ca ≈ 0.7 per the catalogue). Vcmax is a leaf gas-exchange trait
+      // with NO genuine open source (no trait database API) → honest NaN,
+      // user supplies it (zero-fallback rule). Γ*/Kc/Ko keep the catalogue's
+      // 25 °C Farquhar reference constants (user-overridable); O = 210000
+      // µmol/mol is a physical constant. ca is passed for the ci/ca ratio.
+      const ca = ctx.co2?.ppm ?? Number.NaN;
+      const ciCalc = Number.isFinite(ca) ? ca * 0.7 : Number.NaN;
+      return {
+        Vcmax: u('Vcmax', Number.NaN),
+        ci: u('ci', ciCalc),
+        GammaStar: u('GammaStar', 40),
+        Kc: u('Kc', 300),
+        Ko: u('Ko', 300000),
+        O: u('O', 210000),
+        ca,
+      };
+    }
+    case 55: {
+      // Chave et al. (2014) Eq. 7 (height-unavailable pantropical model):
+      // AGB = exp[−1.803 − 0.976E + 0.976·ln(ρ) + 2.673·ln(D) − 0.0299·(ln D)²]
+      // D (DBH) is a field measurement, ρ a species wood-density trait, E a
+      // bioclimatic-stress index — none has a genuine open point API (the
+      // paper's own E layer chave.upstlse.fr is offline; BIEN unreachable;
+      // WorldClim has no point service; DBH is measured in the field). All
+      // three are user-supplied with honest NaN autos (zero-fallback rule).
+      return {
+        DBH: u('DBH', Number.NaN),
+        rho: u('rho', u('ρ', Number.NaN)),
+        E: u('E', Number.NaN),
+      };
+    }
+    case 56: {
+      // Wanninkhof (1992) air–sea CO₂ flux, F = k·K₀·ΔpCO₂, with the
+      // paper's Eq. 3 gas-transfer velocity k = 0.31·u₁₀²·(Sc/660)^(−1/2)
+      // (steady/short-term winds). Genuine inputs only (zero-fallback rule):
+      //   • u₁₀ — ERA5 10 m wind via CDS (windOnly single job);
+      //   • SST — mooring (co-located with pCO₂) preferred, else OISST v2,
+      //     for the Table A1 Schmidt number and the Table A2 solubility;
+      //   • SSS — mooring value, else the 35 ‰ reference of the paper's
+      //     seawater Sc fit (Table A1 is defined at 35 ‰);
+      //   • ΔpCO₂ = pCO₂_sw − pCO₂_air — measured at the nearest NOAA PMEL
+      //     mooring (Sutton et al. 2019, ESSD 11:421–439).
+      // User overrides (k / K0 / dCO2) always win; any missing genuine
+      // input yields an honest NaN (no static constants standing in).
+      const pmel = ctx.pmelPco2;
+      const sstC = ctx.sst?.sst ?? null;
+      const wind = ctx.era5?.wind10m ?? null;
+      const Tsea = pmel?.SST != null && Number.isFinite(pmel.SST) ? pmel.SST : sstC;
+      const SSS = pmel?.SSS != null && Number.isFinite(pmel.SSS) ? pmel.SSS : 35;
+      const Sc = Tsea != null && Number.isFinite(Tsea) ? schmidtNumberCO2(Tsea) : Number.NaN;
+      // k in cm/hr (paper Eq. 3) → m/yr (×0.01 m/cm × 24 h/d × 365 d/yr = ×87.6).
+      const kAuto = wind != null && Number.isFinite(wind) && Number.isFinite(Sc)
+        ? wanninkhofK1992(wind, Sc) * 87.6
+        : Number.NaN;
+      // β (mol/L·atm) → mol/m³·atm (×1000).
+      const K0Auto = Tsea != null && Number.isFinite(Tsea)
+        ? weissSolubilityCO2(Tsea, SSS) * 1000
+        : Number.NaN;
+      const dCO2Auto = pmel?.pCO2_sw != null && Number.isFinite(pmel.pCO2_sw)
+        && pmel.pCO2_air != null && Number.isFinite(pmel.pCO2_air)
+        ? pmel.pCO2_sw - pmel.pCO2_air
+        : Number.NaN;
+      return {
+        k: u('k', kAuto),
+        K0: u('K0', K0Auto),
+        dCO2: u('dCO2', dCO2Auto),
+        // Provenance for the engine's derivation steps (never shown as inputs).
+        __wind10m: wind,
+        __windDate: ctx.era5?.wind10mAsOfDate ?? null,
+        __sst: Tsea,
+        __sc: Number.isFinite(Sc) ? Sc : null,
+        __sss: SSS,
+        __pco2sw: pmel?.pCO2_sw ?? null,
+        __pco2air: pmel?.pCO2_air ?? null,
+        __mooring: pmel
+          ? `${pmel.station} @ (${pmel.lat.toFixed(1)}°, ${pmel.lon.toFixed(1)}°), ${pmel.distanceKm.toFixed(0)} km from point, Δt = ${pmel.dtDays.toFixed(1)} d`
+          : null,
+        // Whether each quantity was genuinely derived (vs user-supplied), so
+        // the steps only claim the paper provenance that actually applies.
+        __kAuto: userInputs.k == null,
+        __K0Auto: userInputs.K0 == null,
+        __dCO2Auto: userInputs.dCO2 == null,
+      };
+    }
+    case 57: {
+      // Redfield (1934). C, N, P are measured water-column concentrations
+      // (µmol/L) — there is no open point API serving in-situ nutrient/DIC
+      // profiles (WOA18 climatology has NO₃/PO₄ but no DIC, and the tool
+      // needs all three), so autos are honest NaN and the user supplies
+      // measurements (zero-fallback rule). NO₃s/NO₃d are optional and drive
+      // the carbon-export step. Note: the canonical 106:16:1 is Redfield
+      // (1958) — the cited 1934 paper's regressions give N:P = 20:1,
+      // C:N = 7:1, C:N:P ≈ 140:20:1, which is what the engine compares
+      // against.
+      const out: Record<string, unknown> = {
+        C: u('C', Number.NaN),
+        N: u('N', Number.NaN),
+        P: u('P', Number.NaN),
+      };
+      // NO₃s/NO₃d are OPTIONAL (drive only the C_export step). Emit them
+      // only when the user supplies them so validation never flags the
+      // absent optional inputs as non-finite.
+      if (userInputs.NO3s != null) out.NO3s = userInputs.NO3s;
+      if (userInputs.NO3d != null) out.NO3d = userInputs.NO3d;
+      return out;
+    }
 
     // ═══ Domain 8: Agriculture ═══
-    case 58: return {
-      Tavg: u('Tavg', T),
-      Tbase: u('Tbase', 10),
-      Tupper: u('Tupper', 30),
-    };
+    case 58: {
+      // McMaster & Wilhelm (1997) Eq. (1) is defined on daily TMAX/TMIN
+      // from a weather station. Use the nearest GHCN-Daily station's daily
+      // series (authentic, no key). When no station is found the values
+      // are NaN and the engine returns an honest NaN — Open-Meteo current
+      // temperature is NOT substituted for a station's daily max/min
+      // (proxy rule). Explicit user T_max/T_min take precedence over the
+      // station series (single-day mode).
+      const recent = gddStation?.days.find(d => Number.isFinite(d.tmaxC) && Number.isFinite(d.tminC));
+      const explicitT = userInputs['Tmax'] != null || userInputs['Tmin'] != null;
+      return {
+        Tmax: u('Tmax', Number.isFinite(recent?.tmaxC ?? NaN) ? recent!.tmaxC : Number.NaN),
+        Tmin: u('Tmin', Number.isFinite(recent?.tminC ?? NaN) ? recent!.tminC : Number.NaN),
+        Tbase: u('Tbase', 10),
+        Tupper: u('Tupper', 30),
+        // Full GHCN daily series (most-recent-first) so the engine can
+        // accumulate GDD over the observation window — unless the user
+        // supplied explicit T_max/T_min, which force single-day mode.
+        __gddDays: !explicitT ? (gddStation?.days ?? null) : null,
+        __gddStation: gddStation ? {
+          name: gddStation.station, sid: gddStation.sid,
+          lat: gddStation.stationLat, lon: gddStation.stationLon,
+          distanceKm: gddStation.distanceKm,
+        } : null,
+      };
+    }
     case 59: {
-      // Priestley-Taylor (1972). Δ and γ derived from temperature/pressure
-      // (same physics as FAO-56), not defaulted.
+      // Priestley & Taylor (1972). Δ and γ derived from temperature/pressure
+      // (same physics as FAO-56), not defaulted. Net radiation R is the
+      // paper's 24-hr net radiation input — genuine ERA5 surface fluxes
+      // (absorbed shortwave − net upward longwave). Honest NaN when ERA5 is
+      // unavailable (no static radiation fallback). G defaults to 0 — the
+      // paper explicitly neglects ground heat flux for 24-hr totals
+      // (p. 83: "heat flux into the ground was neglected").
       const esT = 0.6108 * Math.exp(17.27 * T / (T + 237.3));
       const deltaCalc = (4098 * esT) / Math.pow(T + 237.3, 2);
       const gammaCalc = 0.665e-3 * (P * 0.1);
+      const fluxes = ctx.era5?.surfaceFluxes;
+      const rn = fluxes != null && fluxes.netShortwave != null && fluxes.netLongwave != null
+        ? fluxes.netShortwave - fluxes.netLongwave
+        : Number.NaN;
       return {
         alpha: u('alpha', 1.26),
         delta: u('delta', deltaCalc),
         gamma: u('gamma', gammaCalc),
-        Rn: u('Rn', w.shortwave_radiation ?? 150),
-        G: u('G', 10),
+        Rn: u('Rn', rn),
+        G: u('G', 0),
       };
     }
     case 60: {
-      // Hargreaves-Samani (1985). Ra (extraterrestrial radiation) computed
-      // from latitude and day-of-year per Allen FAO-56 Annex 2. Tmax/Tmin
-      // from weather (real temperature range, not T±5 proxy).
+      // Hargreaves & Samani (1985) Eq. [4]. R_a (extraterrestrial radiation)
+      // is computed from latitude and day-of-year per Allen FAO-56 Annex 2
+      // (the paper's "tables or calculations of extraterrestrial radiation",
+      // §A NEW METHOD). TMAX/TMIN are the paper's measured daily maxima and
+      // minima — the nearest GHCN-Daily station (the same authentic source
+      // as Tool 58), NOT a T±5 proxy and NOT Open-Meteo current temperature.
+      // Honest NaN when no station reports (zero-fallback rule).
       const Gsc = 0.0820; // MJ/m²/min
       const latRad = lat * Math.PI / 180;
       const doy = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000) || 180;
@@ -1463,84 +1642,167 @@ function mapInputs(
       const wsArg = Math.max(-1, Math.min(1, -Math.tan(latRad) * Math.tan(decl)));
       const ws = Math.acos(wsArg);
       const Ra = (24 * 60 / Math.PI) * Gsc * dr * (ws * Math.sin(latRad) * Math.sin(decl) + Math.cos(latRad) * Math.cos(decl) * Math.sin(ws));
+      const recent = gddStation?.days.find(d => Number.isFinite(d.tmaxC) && Number.isFinite(d.tminC));
       return {
         Ra: u('Ra', Ra),
-        Tmax: u('Tmax', T + 5),
-        Tmin: u('Tmin', T - 5),
+        Tmax: u('Tmax', Number.isFinite(recent?.tmaxC ?? NaN) ? recent!.tmaxC : Number.NaN),
+        Tmin: u('Tmin', Number.isFinite(recent?.tminC ?? NaN) ? recent!.tminC : Number.NaN),
+        __gddStation: gddStation ? {
+          name: gddStation.station, sid: gddStation.sid,
+          lat: gddStation.stationLat, lon: gddStation.stationLon,
+          distanceKm: gddStation.distanceKm,
+        } : null,
       };
     }
     case 61: {
-      // FAO Yield Response — drought reduces actual evapotranspiration
-      const pdsi = dr?.pdsi ?? 0;
-      const droughtET = pdsi < -2 ? Math.max(2, 4 + pdsi * 0.5) : 4;
+      // FAO Yield Response to Water (Doorenbos & Kassam 1979, IDP 33;
+      // reproduced in FAO IDP 66): (1 − Yₐ/Yₘ) = K_y·(1 − ETₐ/ETₘ).
+      // Every input is a FIELD measurement or crop-specific constant that no
+      // open point API serves: actual/maximum yield (farm records), actual
+      // ET (soil-water balance) and maximum ET (FAO-56 crop ET) are
+      // user-supplied; K_y comes from the paper's seasonal table (e.g. maize
+      // 1.25, spring wheat 1.15, winter wheat 1.05, soybean 0.85). Honest
+      // NaN autos — never fabricated defaults (the previous Ya=4/Ym=5/Ky=1.2/
+      // ETa=drought-proxy/ETm=5 were static fabrications, removed).
       return {
-        Ya: u('Ya', 4),
-        Ym: u('Ym', 5),
-        Ky: u('Ky', 1.2),
-        ETa: u('ETa', droughtET),
-        ETm: u('ETm', 5),
+        Ya: u('Ya', Number.NaN),
+        Ym: u('Ym', Number.NaN),
+        Ky: u('Ky', Number.NaN),
+        ETa: u('ETa', Number.NaN),
+        ETm: u('ETm', Number.NaN),
       };
     }
-    case 62: return {
-      umax: u('umax', 0.8),
-      T: u('T', T),
-    };
-    case 63: return {
-      'ρ': u('ρ', 1.2),
-      cp: u('cp', 1005),
-      Ts: u('Ts', T + 3),
-      Ta: u('Ta', T),
-      ra: u('ra', 50),
-      rs: u('rs', 200),
-      es: u('es', 6.1094 * Math.exp(17.625 * T / (T + 243.04))),
-      ea: u('ea', 6.1094 * Math.exp(17.625 * T / (T + 243.04)) * rh / 100),
-    };
+    case 62: {
+      // Eppley (1972) Eq. (1): log₁₀ μmax = 0.0275·T − 0.070 — the marine
+      // maximum-growth envelope. T is sea temperature: genuine daily SST from
+      // NOAA OISST v2 (the paper's own culture/environment temperature). No
+      // open point API provides μ₂₀ (species-specific growth at 20 °C), so
+      // its auto is an honest NaN; when supplied it scales the paper curve
+      // through 20 °C (μ₂₀ × 1.066^(T−20), algebraically the same family).
+      const sstC = ctx.sst?.sst ?? Number.NaN;
+      return {
+        umax: u('umax', Number.NaN),
+        T: u('T', sstC),
+      };
+    }
+    case 63: {
+      // SiB big-leaf (Sellers et al. 1986): surface fluxes need canopy/soil
+      // temperatures and aerodynamic/surface resistances that no open point
+      // API supplies — those autos are honest NaN (user must provide). The
+      // remaining inputs derive genuinely: T_a (Open-Meteo 2 m), e_s/e_a
+      // from T_a and relative humidity via the Magnus formula (hPa), air
+      // density from the ideal-gas law ρ = p/(R·T) using surface pressure
+      // (hPa) and T_a, and γ in the engine from pressure. Magnus constants
+      // (hPa, °C): e_s = 6.1094·exp(17.625·T/(T+243.04)).
+      const esat = (tC: number) => 6.1094 * Math.exp(17.625 * tC / (tC + 243.04));
+      const TaC = Number.isFinite(T) ? T : Number.NaN;
+      const pC = Number.isFinite(P) ? P : Number.NaN;
+      const rhoAuto = (Number.isFinite(TaC) && Number.isFinite(pC))
+        ? (pC * 100) / (287.05 * (TaC + 273.15))
+        : Number.NaN;
+      // normalizeInputs already renamed the user key 'ρ' → 'rho' (PARAM_ALIASES), so
+      // read the normalized name (u('rho')) and emit 'rho' for ALIGN to pass through.
+      return {
+        rho: u('rho', rhoAuto),
+        cp: u('cp', 1005),
+        Ts: u('Ts', Number.NaN),
+        Ta: u('Ta', TaC),
+        ra: u('ra', Number.NaN),
+        rs: u('rs', Number.NaN),
+        es: u('es', Number.isFinite(TaC) ? esat(TaC) : Number.NaN),
+        ea: u('ea', (Number.isFinite(TaC) && Number.isFinite(rh)) ? esat(TaC) * rh / 100 : Number.NaN),
+        p: u('p', pC),
+      };
+    }
 
     // ═══ Domain 9: Atmospheric Chemistry ═══
+    // Chapman (1930) — [O₃]/[O₂] = √(J₁·k₂/(J₃·k₄)). J₁ and J₃ (photolysis
+    // rates) are environmental actinic-flux inputs with no open point API —
+    // honest NaN autos. k₂ and k₄ are NASA/JPL 2023 evaluation rate constants
+    // (physical constants, quoted at 298 K; k₂ as the effective bimolecular
+    // rate at 1 atm). [O₂] is an altitude-dependent number density — NaN auto.
     case 64: return {
-      O2: u('O2', 0.21),
-      hnu: u('hnu', aq.uv_index ?? 5),
+      J1: u('J1', Number.NaN),
+      k2: u('k2', 1.43e-14),
+      J3: u('J3', Number.NaN),
+      k4: u('k4', 7.95e-15),
+      O2: u('O2', Number.NaN),
     };
+    // Atkinson (2000): τ = 1/(k_OH·[OH]). k is species-specific (laboratory
+    // rate constant, no open point API) — honest NaN auto. [OH] defaults to
+    // the paper's diurnally/seasonally/annually averaged 24-h global mean
+    // 1.0e6 molecule cm⁻³ (Prinn et al. 1995, cited in the paper); the 12-h
+    // daytime average 2.0e6 (Table 1 convention) is available as an override.
     case 65: return {
-      k: u('k', 1e-11),
+      k: u('k', Number.NaN),
       OH: u('OH', 1e6),
     };
 
     // ═══ Domain 10: Ocean Dynamics ═══
+    // Sverdrup (1947) eq (13): β·M_y = curl_z(τ), with β = 2Ωcosφ/R (eq 12) and
+    // f = 2Ωsinφ for the Ekman pumping output. β and f are genuinely derived
+    // from the request latitude. The wind-stress curl (∇×τ)_z is a spatial
+    // derivative of the wind-stress field — not derivable from a single-point
+    // fetch (no genuine wind-field gradient source this session) — honest NaN
+    // auto; user supplies (e.g. from ASCAT/CCMP wind products). rho0 = 1025 is
+    // a physical constant. W = basin width (m), optional, for the total in Sv.
     case 66: {
-      const tauCurl = computeWindStressCurl(ws * 0.7, ws * 0.3, 1e-6, 1e-6);
+      const latRad = (ctx.lat * Math.PI) / 180;
+      const betaLat = (2 * 7.2921e-5 * Math.cos(latRad)) / 6371000;
+      const fLat = 2 * 7.2921e-5 * Math.sin(latRad);
+      // normalizeInputs already renamed the Unicode user keys ('β'→'beta',
+      // 'ρ₀'→'rho0', '(∇×τ)_z'→'curlTau_z' via PARAM_ALIASES), so read the
+      // normalized ASCII names here.
       return {
-        'β': u('β', 2e-11),
+        beta: u('beta', betaLat),
         rho0: u('rho0', 1025),
-        curlτz: u('curlτz', tauCurl),
+        curlTau_z: u('curlTau_z', Number.NaN),
+        f: u('f', fLat),
+        W: u('W', Number.NaN),
       };
     }
+    // Stommel (1948) model eq (9): ∇²ψ + α·∂ψ/∂x = γ·sin(πy/b), α = D·β/R,
+    // γ = F·π/(R·b). Basin geometry and friction are model configuration —
+    // defaults are the paper's own numerical example (D = 2×10⁴ cm = 200 m,
+    // b = 2π×10⁸ cm ≈ 6249 km, L = 10⁹ cm = 10,000 km, R = 0.02 s⁻¹, F = 1
+    // dyne/cm² = 0.1 N/m²) converted to SI; β auto-derives from the latitude.
     case 67: {
-      const tauCurl = computeWindStressCurl(ws * 0.7, ws * 0.3, 1e-6, 1e-6);
+      const latRad = (ctx.lat * Math.PI) / 180;
+      const betaLat = (2 * 7.2921e-5 * Math.cos(latRad)) / 6371000;
       return {
-        'β': u('β', 2e-11),
-        ψ: u('ψ', 1e7),
-        x: u('x', 1e6),
-        curlτ: u('curlτ', tauCurl),
-        R: u('R', 10),
-        visc: u('visc', 100),
+        beta: u('beta', betaLat),
+        D: u('D', 200),
+        b: u('b', 6249e3),
+        L: u('L', 1e7),
+        R: u('R', 0.02),
+        F: u('F', 0.1),
+        x: u('x', 5e6),
+        y: u('y', 3124.5e3),
       };
     }
+    // Munk (1950): A_H·∇⁴ψ − β·∂ψ/∂x = curl_z(τ). A_H is the paper's adopted
+    // constant A = 5×10⁷ cm²/s = 5×10³ m²/s (paper §4); β auto-derives from the
+    // latitude; the wind-stress curl is a spatial derivative (∂τ_y/∂x − ∂τ_x/∂y) —
+    // no genuine point source this session → honest NaN, user supplies it.
     case 68: {
-      const tauCurl = computeWindStressCurl(ws * 0.7, ws * 0.3, 1e-6, 1e-6);
+      const latRad = (ctx.lat * Math.PI) / 180;
+      const betaLat = (2 * 7.2921e-5 * Math.cos(latRad)) / 6371000;
       return {
-        'β': u('β', 2e-11),
-        ψ: u('ψ', 1e7),
-        x: u('x', 1e6),
-        curlτ: u('curlτ', tauCurl),
-        visc: u('visc', 1e5),
+        AH: u('AH', 5e3),
+        beta: u('beta', betaLat),
+        curlTau: u('curlTau', Number.NaN),
+        x: u('x', 1e5),
+        r: u('r', 6e6),
       };
     }
+    // Stommel (1961) two-vessel thermohaline model — dimensionless parameters
+    // (R = βS̄/αT̄, δ = d/c, λ = flow-feedback constant). These are the paper's
+    // model-configuration parameters; defaults are the paper's own fig-6/7
+    // example (R = 2, δ = 1/6, λ = 1/5) which yields TWO stable regimes.
     case 69: return {
-      λ: u('λ', 0.1),
-      Tstar: u('Tstar', 20),
-      T: u('T', m.wave_height ? 15 : 20),
-      q: u('q', 0.5),
+      lambda: u('lambda', 0.2),
+      delta: u('delta', 1 / 6),
+      R: u('R', 2),
     };
     case 70: {
       const obsSst = ctx.era5?.surfaceFluxes?.netShortwave != null
@@ -1557,39 +1819,165 @@ function mapInputs(
       const obsSst = ctx.era5?.surfaceFluxes?.netShortwave != null
         ? T
         : undefined;
+      // Genuine mean vertical temperature gradient from the ocean T-profile
+      // (upper 200 m): ∂θ̄/∂z ≈ (T(10m) − T(200m)) / 190 m.
+      const t10 = getOceanProfile(lat, lon, 10, obsSst).temperature;
+      const t200 = getOceanProfile(lat, lon, 200, obsSst).temperature;
+      const dTdz = (t10 - t200) / 190;
       const n2 = computeN2(lat, obsSst);
       return {
-        gamma: u('gamma', 0.2),
-        'ε': u('ε', 1e-6),
+        kappa: u('kappa', 1.4e-7),      // molecular thermal diffusivity (physical constant)
+        gradVar: u('gradVar', Number.NaN), // <(∇θ')²> — microstructure, no open point API → NaN
+        dTdz: u('dTdz', dTdz),
+        gamma: u('gamma', 0.2),          // companion Osborn (1980) efficiency
+        eps: u('eps', Number.NaN),       // TKE dissipation — microstructure, no open point API → NaN
         N2: u('N2', n2),
       };
     }
-    case 72: return {
-      Ri: u('Ri', 0.3),
-    };
-    case 73: return {
-      g: u('g', G_GRAV),
-      alpha: u('alpha', 0.0002),
-      fm: u('fm', 0.1),
-      fpm: u('fpm', 0.15),
-    };
+    case 72: {
+      const obsSst = ctx.era5?.surfaceFluxes?.netShortwave != null
+        ? T
+        : undefined;
+      // Δρ = density jump across the ML base (paper eq 9: Δ( ) = mixed layer vs
+      // the level just beneath). Genuine ocean-profile density at 10 m vs 100 m.
+      const rho10 = getOceanProfile(lat, lon, 10, obsSst).density;
+      const rho100 = getOceanProfile(lat, lon, 100, obsSst).density;
+      const drho = Math.max(0, rho100 - rho10);
+      const h = getOceanProfile(lat, lon, 0, obsSst).mixedLayerDepth;
+      return {
+        g: u('g', G_GRAV),
+        rho0: u('rho0', 1025),
+        drho: u('drho', drho),
+        h: u('h', h),
+        dV: u('dV', Number.NaN), // velocity jump ΔV — no open point API → honest NaN
+      };
+    }
+    case 73: {
+      // Pierson & Moskowitz (1964) eq (12): U is the wind at the WEATHER-SHIP
+      // reference height — the paper: "The spectral form given by (12) will
+      // describe the spectrum of a fully developed wind sea for a wind
+      // measured at 19.5 meters." Genuine CDS ERA5 10 m wind (windOnly single
+      // job, zero-proxy) is converted to the paper's 19.5 m reference height
+      // via the neutral log profile U₂ = U₁·ln(z₂/z₀)/ln(z₁/z₀) with the
+      // standard open-ocean roughness z₀ = 0.0002 m (documented physical
+      // constant of the height correction, not a data substitute). Honest NaN
+      // when the genuine CDS job is unavailable (no Open-Meteo substitute).
+      const wind10 = ctx.era5?.source === 'cds' ? ctx.era5?.wind10m ?? null : null;
+      const windAt195 = wind10 != null && Number.isFinite(wind10)
+        ? wind10 * Math.log(19.5 / 0.0002) / Math.log(10 / 0.0002)
+        : Number.NaN;
+      const userSuppliedU = ['U', 'U10', 'U₁₀'].some((k) => userInputs[k] != null);
+      const Uval = u('U', windAt195);
+      const gval = u('g', G_GRAV);
+      // omega default: the paper's peak frequency ω_p = (4β/5)^(1/4)·g/U
+      const omegaDef = Number.isFinite(Uval) && Uval > 0
+        ? Math.pow(4 * 0.74 / 5, 0.25) * gval / Uval
+        : Number.NaN;
+      return {
+        U: Uval,
+        omega: u('omega', omegaDef),
+        g: gval,
+        // Provenance for the engine's derivation steps (never shown as inputs).
+        __wind10m: userSuppliedU ? null : wind10,
+        __windDate: ctx.era5?.wind10mAsOfDate ?? null,
+        __uAuto: !userSuppliedU,
+      };
+    }
 
     // ═══ Domain 11: Coastal & Wave ═══
-    case 74: return {
-      etaU: u('etaU', 0.5),
-      Sw: u('Sw', m.wave_height ?? 2),
-      Ssig: u('Ssig', m.wave_height ? m.wave_height * 0.5 : 1),
-    };
-    case 75: return {
-      Lstar: u('Lstar', 100),
-      S: u('S', 0.001),
-      B: u('B', 100),
-      hstar: u('hstar', 10),
-    };
-    case 76: return {
-      H: u('H', m.wave_height ?? 2),
-      db: u('db', 10),
-    };
+    case 74: {
+      // Stockdon et al. (2006) runup is parameterized on the paper's inputs
+      // H₀ (deep-water significant wave height), T₀ (deep-water peak period)
+      // and β_f (foreshore beach slope). Genuine CDS ERA5 swh/pp1d supply
+      // H₀ and T₀ (single wave job, zero-proxy); β_f comes from the fetched
+      // SRTM30m slope at the study point (terrain slope in degrees → tan
+      // gives the dimensionless foreshore slope). Honest NaN when the CDS
+      // job is unavailable (no Open-Meteo substitute).
+      const wave = ctx.era5?.source === 'cds' && ctx.era5?.waveHeight != null && ctx.era5?.wavePeriod != null
+        ? { H0: ctx.era5.waveHeight, T0: ctx.era5.wavePeriod }
+        : null;
+      const slopeDeg = Number.isFinite(tr.slope) && tr.slope > 0 ? tr.slope : null;
+      const betaF = slopeDeg != null ? Math.tan(slopeDeg * Math.PI / 180) : Number.NaN;
+      const userH0 = userInputs['H0'] != null || userInputs['H₀'] != null;
+      const userT0 = userInputs['T0'] != null || userInputs['T₀'] != null;
+      const userBeta = userInputs['betaF'] != null || userInputs['β_f'] != null || userInputs['βf'] != null;
+      return {
+        H0: u('H0', wave ? wave.H0 : Number.NaN),
+        T0: u('T0', wave ? wave.T0 : Number.NaN),
+        betaF: u('betaF', betaF),
+        g: u('g', G_GRAV),
+        // Provenance for the engine's derivation steps (never shown as inputs).
+        __hAuto: !userH0,
+        __tAuto: !userT0,
+        __betaAuto: !userBeta,
+        __waveDate: ctx.era5?.waveAsOfDate ?? null,
+      };
+    }
+    case 75: {
+      // Bruun (1962): R = L·S/(B + h*). S is the LOCAL sea-level rise rate
+      // — genuine OLS trend of the nearest NOAA CO-OPS tide-gauge monthly
+      // MSL series; the documented GIA-corrected global altimetry rate
+      // (~3.4 mm/yr, IPCC AR6 WGI Ch 9) is used ONLY when no gauge covers
+      // the point and is labelled as the global rate. h* = closure depth
+      // via the catalogue's Hallermeier (1981) criterion h* = 1.57·H_s
+      // from genuine CDS ERA5 swh (same waveOnly job as Tool 74). B = berm/
+      // dune elevation from genuine SRTM30m terrain at the point; L = (B +
+      // h*)/tanβ at the genuine SRTM30m beach slope (the canonical slope
+      // form R = S/tanβ). User overrides always win; missing data → honest
+      // NaN — no static geometry defaults, no fabricated SLR.
+      const slr = ctx.slr;
+      const waveH = ctx.era5?.source === 'cds' && ctx.era5?.waveHeight != null ? ctx.era5.waveHeight : null;
+      const slopeDeg = Number.isFinite(tr.slope) && tr.slope > 0 ? tr.slope : null;
+      const elev = Number.isFinite(tr.elevation) && tr.elevation > 0 ? tr.elevation : null;
+      const hstarAuto = waveH != null ? 1.57 * waveH : Number.NaN;
+      const bAuto = elev ?? Number.NaN;
+      const lAuto = slopeDeg != null && Number.isFinite(bAuto) && Number.isFinite(hstarAuto)
+        ? (bAuto + hstarAuto) / Math.tan(slopeDeg * Math.PI / 180)
+        : Number.NaN;
+      // Primary: nearest-gauge OLS trend. Fallback (no gauge coverage): the
+      // observed global altimetry rate, labelled. Only a total NOAA failure
+      // of both paths yields NaN — never a made-up local rate.
+      const sAuto = slr != null ? slr.slopeMPerYr : gmslRateDefault().slopeMPerYr;
+      const slrNote = slr != null
+        ? `S from NOAA CO-OPS gauge ${slr.stationId} (${slr.stationName}, ${slr.distanceKm} km away): OLS trend of ${slr.nMonths} monthly MSL values ${slr.fromYear}-${slr.toYear}`
+        : Number.isFinite(sAuto)
+          ? 'S = GIA-corrected GLOBAL altimetry rate (~3.4 mm/yr, IPCC AR6 WGI Ch 9) — no local NOAA gauge covers this point'
+          : 'No genuine sea-level source reachable — honest NaN';
+      // userInputs are already alias-normalized (PARAM_ALIASES[75]: 'L*'→'L', 'h*'→'hstar').
+      const userL = userInputs['L'] != null;
+      const userS = userInputs['S'] != null;
+      const userB = userInputs['B'] != null;
+      const userH = userInputs['hstar'] != null;
+      return {
+        L: u('L', lAuto),
+        S: u('S', sAuto),
+        B: u('B', bAuto),
+        hstar: u('hstar', hstarAuto),
+        // Provenance for the engine's steps (never shown as inputs).
+        __sAuto: !userS,
+        __hstarAuto: !userH,
+        __bAuto: !userB,
+        __lAuto: !userL,
+        __slrNote: slrNote,
+        __waveDate: ctx.era5?.waveAsOfDate ?? null,
+        __slopeDeg: slopeDeg ?? null,
+      };
+    }
+    case 76: {
+      // McCowan (1894): H_b = 0.78·d_b (paper eq 34: c − h = 0.78h). The
+      // paper's water-depth input auto-derives from genuine GEBCO 2020
+      // bathymetry at the study point (depth = −elevation, positive only
+      // over water). On land or when GEBCO is unreachable the auto value is
+      // an honest NaN — no static depth, no proxy. User d_b always wins.
+      const gebco = ctx.gebcoDepth;
+      const depthAuto = gebco != null && gebco.depth > 0 ? gebco.depth : Number.NaN;
+      return {
+        db: u('db', depthAuto),
+        // Provenance for the engine's steps (never shown as inputs).
+        __dbAuto: userInputs['db'] == null,
+        __gebcoElev: gebco?.elevation ?? null,
+      };
+    }
     case 77: return {
       K: u('K', 0.39),
       Hsb: u('Hsb', m.wave_height ?? 1.5),
@@ -2179,7 +2567,7 @@ export async function computeWithContext(
   // ERA5 surface fluxes (Tool 17 Gill ocean heat budget) wait long enough
   // for the job to complete; every other tool keeps the default 10 s
   // window so overall responsiveness is unchanged.
-  const ERA5_CONSUMER_IDS = new Set([5, 8, 17, 48, 49, 50, 70, 71, 105, 106, 107]);
+  const ERA5_CONSUMER_IDS = new Set([5, 8, 17, 48, 49, 50, 52, 56, 59, 70, 71, 73, 74, 75, 105, 106, 107]);
   const ERA5_TIMEOUT_MS = 150000;
   // GLDAS consumers may need the stream-halt fallback (HEAD binary search
   // for the latest published granule + one nc4 download — ~60–120 s worst
@@ -2192,7 +2580,9 @@ export async function computeWithContext(
     soil, vegetation, seaIce, tectonic, spaceWeather,
     water, landCover, terrain, glacier, volcano,
     tropo, permafrost, drought, river, era5, imerg, gldas,
-    rFactor, gpp, co2,
+    rFactor, gpp, gppAnnual, co2, sst, pmelPco2,
+    gddStation,
+    slr, gebcoDepth,
   ] = await Promise.all([
     safe(
       context?.time?.granularity === 'range'
@@ -2220,7 +2610,7 @@ export async function computeWithContext(
       { streamflow: 0, gageHeight: 0, waterTemp: 0, conductivity: 0, dissolvedOxygen: 0 } as WaterData),
     safe(fetchLandCover(lat, lon),
       { class: 'unknown', code: 0, treeCover: 0, impervious: 0, cropland: 0, wetland: 0 } as LandCoverData),
-    safe(fetchTerrain(lat, lon),
+    safe(fetchTerrain(lat, lon).then((t) => { console.error('[TERRAIN-DEBUG] resolved slope=' + t.slope + ' elev=' + t.elevation); return t; }).catch((e) => { console.error('[TERRAIN-DEBUG]', String(e).slice(0, 120)); throw e; }),
       { elevation: 0, slope: 0, aspect: 0, curvature: 0, hillshade: 0 } as TerrainData),
     safe(fetchGlacierData(lat, lon),
       { area: 0, volume: 0, massBalance: 0, equilibriumLine: 0 } as GlacierData),
@@ -2234,7 +2624,7 @@ export async function computeWithContext(
       { pdsi: 0, precipitation: 0, temperature: 0, soilMoisture: 0, droughtClass: 'unknown' } as DroughtData),
     safe(fetchRiverData(lat, lon),
       { discharge: 0, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData),
-    safe(fetchEra5HighFidelity(lat, lon, dateStr, { mostOnly: id === 48 || id === 49 || id === 50 }),
+    safe(fetchEra5HighFidelity(lat, lon, dateStr, { mostOnly: id === 48 || id === 49 || id === 50, fluxOnly: id === 52 || id === 59, fluxDailyMean: id === 59, windOnly: id === 56 || id === 73, waveOnly: id === 74 || id === 75, skip: id === 56 && normInputs.k != null }),
       { frictionVelocity: null, totalColumnWaterVapour: null, surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null, source: 'none' } as Era5HighFidelityData,
       ERA5_CONSUMER_IDS.has(id) ? ERA5_TIMEOUT_MS : undefined),
     safe(fetchImergPrecipitation(lat, lon, dateStr).then(r => r ?? { totalPrecipitation: null, maxIntensity: null, source: null } as ImergData),
@@ -2252,7 +2642,40 @@ export async function computeWithContext(
     // null when the study point has no valid data (e.g. ocean) and the
     // engine then returns an honest NaN.
     safe(id === 50 ? fetchGppModis(lat, lon, dateStr ?? undefined) : Promise.resolve(null), null, 30000),
-    safe(id === 50 ? fetchCo2Gml(dateStr ?? undefined) : Promise.resolve(null), null, 20000),
+    // Tool 53 (NEE): genuine ANNUAL GPP from MODIS MOD17A2H 8-day composites
+    // summed over the most recent complete year (5 chunked ORNL requests).
+    safe(id === 53 ? fetchAnnualGppModis(lat, lon, dateStr ? Number(dateStr.slice(0, 4)) : undefined) : Promise.resolve(null), null, 45000),
+    // Tools 50/54/56 (stomatal conductance, FvCB, Wanninkhof flux): genuine
+    // ambient CO₂ from NOAA GML (ci = 0.7 × ca; atmospheric pCO₂ for ΔpCO₂).
+    safe(id === 50 || id === 54 || id === 56 ? fetchCo2Gml(dateStr ?? undefined) : Promise.resolve(null), null, 20000),
+    // Tools 56/62: genuine SST from NCEI ERDDAP OISST v2 — for Tool 56 the
+    // paper's Schmidt-number and solubility inputs; for Tool 62 (Eppley
+    // 1972) the marine temperature T of the paper's Eq. (1)/Eq. (a).
+    safe(id === 56 || id === 62 ? fetchSST(lat, lon).catch(() => null) : Promise.resolve(null), null, 30000),
+    // Tool 56 (Wanninkhof 1992): nearest NOAA PMEL mooring pCO₂ sample
+    // (measured pCO₂_sw / pCO₂_air for ΔpCO₂, plus co-located SST/SSS for
+    // Sc and the Weiss solubility). Only for tool 56 — null when no mooring
+    // is within 1000 km (inland / open-ocean gap) and the engine NaN-fires.
+    safe(id === 56 ? fetchPmelPco2(lat, lon, dateStr).catch(() => null) : Promise.resolve(null), null, 45000),
+    // Tool 58 (Growing Degree Days): genuine daily TMAX/TMIN from the
+    // nearest GHCN-Daily station (NOAA ACIS, no key) — the paper's
+    // "standard Class A weather station" daily max/min at 2 m. Null when
+    // no reporting station is nearby and the engine then returns an
+    // honest NaN.
+    safe(id === 58 || id === 60 ? fetchGddStationData(lat, lon, 30) : Promise.resolve(null), null, 25000),
+    // Tool 75 (Bruun 1962): genuine LOCAL relative sea-level rise rate —
+    // OLS trend of the nearest NOAA CO-OPS tide-gauge monthly MSL series
+    // (≥15 yr, NOAA's own credibility threshold). Null when no long gauge
+    // record covers the point (foreign coast / open ocean) — the engine
+    // then uses the documented GIA-corrected global altimetry rate
+    // (~3.4 mm/yr, IPCC AR6 WGI Ch 9), clearly labelled as the global
+    // rate in the steps; no static local constant is invented.
+    safe(id === 75 ? fetchSeaLevelTrend(lat, lon) : Promise.resolve(null), null, 45000),
+    // Tool 76 (McCowan 1894 breaker criterion): genuine GEBCO 2020
+    // bathymetry at the study point — the paper's water-depth input d_b.
+    // Land points / fetch failures yield an honest NaN auto value (no
+    // static depth). Only fetched for tool 76.
+    safe(id === 76 ? fetchGebcoDepth(lat, lon) : Promise.resolve(null), null, 30000),
   ]);
 
   const popData = await safe(fetchPopulation(lat, lon), { populationDensity: 0, totalPopulation: 0 });
@@ -2319,7 +2742,8 @@ export async function computeWithContext(
     soil, vegetation, seaIce, tectonic, spaceWeather,
     water, landCover, terrain, glacier, volcano,
     tropo, permafrost, drought, river, era5, imerg, gldas,
-    rFactor, gpp, co2,
+    rFactor, gpp, gppAnnual, co2,
+    sst, pmelPco2, gddStation, slr, gebcoDepth,
     satThermal, columnWV,
     tide, rupture,
     fire,
@@ -2379,13 +2803,20 @@ export async function computeWithContext(
   if (era5.totalColumnWaterVapour != null) sources.push('era5-tcwv');
   if (era5.surfaceFluxes) sources.push(era5.source === 'cds' ? 'era5-cds-surface-fluxes' : 'era5-proxy-surface-fluxes');
   if (era5.pressureWind) sources.push('era5-pressure-wind');
+  if (era5.wind10m != null && (id === 56 || id === 73)) sources.push(era5.source === 'cds' ? 'era5-cds-wind10m' : 'era5-proxy-wind10m');
   if (era5.pressureState) sources.push('era5-pressure-state');
   if (era5.soilState) sources.push('era5-soil-state');
   if (imerg.source) sources.push(imerg.source);
   if (gldas.source) sources.push('gldas-noah-2.1');
   if (rFactor) sources.push(`ghcn-climate-normals-r-factor`);
   if (gpp) sources.push('modis-mod17a2h-gpp');
+  if (gppAnnual) sources.push('modis-mod17a2h-annual-gpp');
   if (co2) sources.push('noaa-gml-co2');
+  if (sst) sources.push('noaa-oisst-v2');
+  if (pmelPco2) sources.push(`noaa-pmel-co2-mooring:${pmelPco2.station}`);
+  if (slr) sources.push(`noaa-coops-sea-level-trend:${slr.stationId}`);
+  if (id === 76 && gebcoDepth && gebcoDepth.depth > 0) sources.push('gebco-2020-bathymetry');
+  if (id === 75 && (terrain.slope > 0 || terrain.elevation > 0)) sources.push('srtm30m-terrain');
   if (tide) sources.push(tide.source);
   if (interpObs && interpObs.obs.length > 0) sources.push(`usgs-nwis-observations:${interpObs.paramCd}`);
 
