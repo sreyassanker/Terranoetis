@@ -344,20 +344,44 @@ function recentDateWindow(): { year: string; month: string; day: string } {
   };
 }
 
+/**
+ * Resolve the effective ERA5 query date. A caller-supplied date (YYYY-MM-DD)
+ * is honoured when it is a valid past/present date; otherwise (missing,
+ * malformed, or future — ERA5 has ~5 day publication latency) the
+ * documented 6-months-ago window is used. The resolved date is returned as
+ * an ISO string so fetchers can include it in cache keys and provenance.
+ */
+function resolveCdsDate(dateStr?: string): { year: string; month: string; day: string; iso: string } {
+  if (dateStr) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
+    if (m) {
+      const isoToday = todayStr();
+      // Reject future dates (ERA5 cannot contain them) — fall back honestly.
+      if (dateStr.slice(0, 10) <= isoToday) {
+        return { year: m[1], month: m[2], day: m[3], iso: dateStr.slice(0, 10) };
+      }
+    }
+  }
+  const w = recentDateWindow();
+  return { ...w, iso: `${w.year}-${w.month}-${w.day}` };
+}
+
 const ERA5_SINGLE = 'reanalysis-era5-single-levels';
 
 /**
  * Fetch ERA5 friction velocity (zust) at a point.
  * Units: m/s. Used by Monin-Obukhov wind profile (Eqs 48-49).
+ * The requested date is honoured (input-filter rule); future/missing dates
+ * resolve to the documented 6-months-ago window (ERA5 publication latency).
  */
 export async function fetchEra5FrictionVelocity(
-  lat: number, lon: number,
+  lat: number, lon: number, dateStr?: string,
 ): Promise<number | null> {
-  const cacheKey = `era5:ustar:${lat.toFixed(3)}:${lon.toFixed(3)}`;
+  const { year, month, day, iso } = resolveCdsDate(dateStr);
+  const cacheKey = `era5:ustar:${lat.toFixed(3)}:${lon.toFixed(3)}:${iso}`;
   const cached = cache.get<number>(cacheKey);
   if (cached !== undefined) return cached;
 
-  const { year, month, day } = recentDateWindow();
   const buffer = await fetchCdsNetCdf({
     dataset: ERA5_SINGLE,
     variables: ['friction_velocity'],
@@ -374,6 +398,81 @@ export async function fetchEra5FrictionVelocity(
   // Convert from m/s to standard units if needed
   const result = val !== null && Number.isFinite(val) ? val : null;
   if (result !== null) cache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * Fetch ERA5 10 m wind speed at a point (genuine reanalysis, single job).
+ * Units: m/s. Reads the 10m_u_component_of_wind / 10m_v_component_of_wind
+ * variables and returns the scalar speed √(u²+v²). Used by Tool 56
+ * (Wanninkhof 1992) for k = 0.31·u₁₀²·(Sc/660)^(−1/2). The requested date is
+ * honoured (input-filter rule); future/missing dates resolve to the
+ * documented 6-months-ago window (ERA5 publication latency).
+ */
+export async function fetchEra5Wind10m(
+  lat: number, lon: number, dateStr?: string,
+): Promise<number | null> {
+  const { year, month, day, iso } = resolveCdsDate(dateStr);
+  const cacheKey = `era5:wind10:${lat.toFixed(3)}:${lon.toFixed(3)}:${iso}`;
+  const cached = cache.get<number>(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const buffer = await fetchCdsNetCdf({
+    dataset: ERA5_SINGLE,
+    variables: ['10m_u_component_of_wind', '10m_v_component_of_wind'],
+    area: pointArea(lat, lon),
+    years: [year],
+    months: [month],
+    days: [day],
+    times: ['12:00'],
+    format: 'netcdf',
+  });
+  if (!buffer) return null;
+
+  const u = await readPoint(buffer, 'u10');
+  const v = await readPoint(buffer, 'v10');
+  const result = u !== null && v !== null && Number.isFinite(u) && Number.isFinite(v)
+    ? Math.sqrt(u * u + v * v)
+    : null;
+  if (result !== null) cache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * Fetch ERA5 significant wave height (swh) and peak wave period (pp1d) at a
+ * point — the paper's deep-water H₀ and T₀ for Stockdon et al. (2006) wave
+ * runup (Tool 74). ONE CDS single-levels job (swh + pp1d together); units m
+ * and s. Genuine reanalysis — never proxied. The requested date is honoured
+ * (input-filter rule); future/missing dates resolve to the documented
+ * 6-months-ago window (ERA5 publication latency). Returns null when the job
+ * fails so consumers can NaN-fire honestly (zero-fallback rule).
+ */
+export async function fetchEra5WaveClimate(
+  lat: number, lon: number, dateStr?: string,
+): Promise<{ swh: number; pp1d: number; asOfDate: string } | null> {
+  const { year, month, day, iso } = resolveCdsDate(dateStr);
+  const cacheKey = `era5:wave:${lat.toFixed(3)}:${lon.toFixed(3)}:${iso}`;
+  const cached = cache.get<{ swh: number; pp1d: number; asOfDate: string }>(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const buffer = await fetchCdsNetCdf({
+    dataset: ERA5_SINGLE,
+    variables: ['significant_height_of_combined_wind_waves_and_swell', 'peak_wave_period'],
+    area: pointArea(lat, lon),
+    years: [year],
+    months: [month],
+    days: [day],
+    times: ['12:00'],
+    format: 'netcdf',
+  });
+  if (!buffer) return null;
+
+  const swh = await readPoint(buffer, 'swh');
+  const pp1d = await readPoint(buffer, 'pp1d');
+  if (swh === null || pp1d === null || !Number.isFinite(swh) || !Number.isFinite(pp1d)
+    || swh <= 0 || pp1d <= 0) return null;
+  const result = { swh, pp1d, asOfDate: iso };
+  cache.set(cacheKey, result);
   return result;
 }
 
@@ -439,13 +538,19 @@ export interface Era5SurfaceFluxes {
   latentFlux: number | null;    // W/m², Gill Q_e (ocean loss, +up)
   airTemp2m: number | null;     // K, genuine ERA5 2 m temperature (same step as fluxes)
   surfacePressure: number | null; // Pa, genuine ERA5 surface pressure (same step as fluxes)
+  /** Downward surface solar radiation `ssrd` (W/m², ERA5 accumulated ÷3600).
+   *  Incident irradiance at the surface / canopy top — authentic source for
+   *  Tool 52 (Monsi–Saeki Beer-Lambert I₀), never substituted by a proxy. */
+  downwardShortwave: number | null;
+  asOfDate?: string;            // ISO date the fluxes were resolved for (provenance)
 }
 
 export async function fetchEra5SurfaceFluxes(
-  lat: number, lon: number,
+  lat: number, lon: number, dateStr?: string,
+  opts?: { dailyMean?: boolean },
 ): Promise<Era5SurfaceFluxes | null> {
-  const { year, month, day } = recentDateWindow();
-  const cacheKey = `era5:flux:${lat.toFixed(3)}:${lon.toFixed(3)}`;
+  const { year, month, day, iso } = resolveCdsDate(dateStr);
+  const cacheKey = `era5:flux:${lat.toFixed(3)}:${lon.toFixed(3)}:${iso}:${opts?.dailyMean ? 'dm' : 'snap'}`;
   const cached = cache.get<Era5SurfaceFluxes>(cacheKey);
   if (cached) return cached;
 
@@ -456,8 +561,82 @@ export async function fetchEra5SurfaceFluxes(
       'surface_net_thermal_radiation',
       'surface_sensible_heat_flux',
       'surface_latent_heat_flux',
+      'surface_solar_radiation_downwards',
       '2m_temperature',
       'surface_pressure',
+    ],
+    area: pointArea(lat, lon),
+    years: [year],
+    months: [month],
+    days: [day],
+    // Tool 59 (Priestley–Taylor) needs the paper's 24-hr MEAN net
+    // radiation, not a noon snapshot (a single 12:00 UTC hour is before
+    // dawn in the Americas and gives a negative net-radiation artefact).
+    // Requesting all 24 hourly steps and averaging in readPoint() yields
+    // the genuine daily mean — one CDS job, no extra latency. Tool 52
+    // (Gill ocean budget) keeps the 12:00 UTC snapshot via default false.
+    times: opts?.dailyMean
+      ? Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`)
+      : ['12:00'],
+    format: 'netcdf',
+  });
+  if (!buffer) return null;
+
+  const ssr = await readPoint(buffer, 'ssr');   // J/m² accumulated, net solar
+  const str = await readPoint(buffer, 'str');   // J/m² accumulated, net thermal (neg-upward)
+  const sshf = await readPoint(buffer, 'sshf'); // J/m² accumulated, sensible (pos-downward)
+  const slhf = await readPoint(buffer, 'slhf'); // J/m² accumulated, latent   (pos-downward)
+  const ssrd = await readPoint(buffer, 'ssrd'); // J/m² accumulated, downward solar (incident)
+  const t2m = await readPoint(buffer, 't2m');   // K, instantaneous
+  const sp = await readPoint(buffer, 'sp');     // Pa, instantaneous
+
+  const result: Era5SurfaceFluxes = {
+    netShortwave: ssr !== null && Number.isFinite(ssr) ? ssr / 3600 : null,
+    netLongwave: str !== null && Number.isFinite(str) ? -str / 3600 : null,
+    sensibleFlux: sshf !== null && Number.isFinite(sshf) ? -sshf / 3600 : null,
+    latentFlux: slhf !== null && Number.isFinite(slhf) ? -slhf / 3600 : null,
+    downwardShortwave: ssrd !== null && Number.isFinite(ssrd) ? ssrd / 3600 : null,
+    airTemp2m: t2m !== null && Number.isFinite(t2m) ? t2m : null,
+    surfacePressure: sp !== null && Number.isFinite(sp) ? sp : null,
+    asOfDate: iso,
+  };
+  cache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * Fetch the complete Monin-Obukhov Similarity Theory input set (Tool 48)
+ * in ONE CDS job: friction velocity `zust`, accumulated sensible heat flux
+ * `sshf`, 2 m temperature `t2m` and surface pressure `sp` of the same
+ * single-level reanalysis step at the requested date (input-filter rule).
+ * A single job keeps the fetch inside the consumer budget (the full
+ * 8-job parallel batch serializes at concurrency 2 and can exceed it).
+ */
+export interface Era5MostInput {
+  ustar: number | null;          // m/s (zust)
+  sensibleFlux: number | null;   // W/m², positive upward = −sshf/3600
+  airTemp2m: number | null;      // K
+  surfacePressure: number | null; // Pa
+  rh2m: number | null;           // %, genuine 2 m relative humidity (tool 50)
+  asOfDate: string;              // ISO date resolved
+}
+
+export async function fetchEra5MostInput(
+  lat: number, lon: number, dateStr?: string,
+): Promise<Era5MostInput | null> {
+  const { year, month, day, iso } = resolveCdsDate(dateStr);
+  const cacheKey = `era5:most:${lat.toFixed(3)}:${lon.toFixed(3)}:${iso}`;
+  const cached = cache.get<Era5MostInput>(cacheKey);
+  if (cached) return cached;
+
+  const buffer = await fetchCdsNetCdf({
+    dataset: ERA5_SINGLE,
+    variables: [
+      'friction_velocity',
+      'surface_sensible_heat_flux',
+      '2m_temperature',
+      'surface_pressure',
+      '2m_relative_humidity',
     ],
     area: pointArea(lat, lon),
     years: [year],
@@ -468,20 +647,19 @@ export async function fetchEra5SurfaceFluxes(
   });
   if (!buffer) return null;
 
-  const ssr = await readPoint(buffer, 'ssr');   // J/m² accumulated, net solar
-  const str = await readPoint(buffer, 'str');   // J/m² accumulated, net thermal (neg-upward)
-  const sshf = await readPoint(buffer, 'sshf'); // J/m² accumulated, sensible (pos-downward)
-  const slhf = await readPoint(buffer, 'slhf'); // J/m² accumulated, latent   (pos-downward)
-  const t2m = await readPoint(buffer, 't2m');   // K, instantaneous
-  const sp = await readPoint(buffer, 'sp');     // Pa, instantaneous
+  const zust = await readPoint(buffer, 'zust');
+  const sshf = await readPoint(buffer, 'sshf'); // J/m² accumulated, pos-downward (IFS)
+  const t2m = await readPoint(buffer, 't2m');
+  const sp = await readPoint(buffer, 'sp');
+  const rh = await readPoint(buffer, 'r');
 
-  const result: Era5SurfaceFluxes = {
-    netShortwave: ssr !== null && Number.isFinite(ssr) ? ssr / 3600 : null,
-    netLongwave: str !== null && Number.isFinite(str) ? -str / 3600 : null,
+  const result: Era5MostInput = {
+    ustar: zust !== null && Number.isFinite(zust) ? zust : null,
     sensibleFlux: sshf !== null && Number.isFinite(sshf) ? -sshf / 3600 : null,
-    latentFlux: slhf !== null && Number.isFinite(slhf) ? -slhf / 3600 : null,
     airTemp2m: t2m !== null && Number.isFinite(t2m) ? t2m : null,
     surfacePressure: sp !== null && Number.isFinite(sp) ? sp : null,
+    rh2m: rh !== null && Number.isFinite(rh) ? rh : null,
+    asOfDate: iso,
   };
   cache.set(cacheKey, result);
   return result;

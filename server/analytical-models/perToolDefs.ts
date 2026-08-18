@@ -4160,7 +4160,7 @@ export const TOOL_75: ToolWorkflowDef = {
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  EQUATION 76 — Breaker Criterion
+//  EQUATION 76 — McCowan Breaker Criterion
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_76: ToolWorkflowDef = {
   toolId: 76,
