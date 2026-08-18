@@ -113,6 +113,51 @@ const GPP_BANDS: ClassificationBand[] = [
   { min: 2000, max: Infinity, label: 'Very High', color: '#059669', description: 'Tropical rainforest' },
 ];
 
+// NEE bands (gC/m²/yr, signed) for Tool 53 — per the catalogue's
+// carbon_sink_class output: < −500 strong sink, −500..−100 moderate sink,
+// −100..+100 near-neutral, > +100 net source (Wofsy 1993 sign convention:
+// negative NEE = net CO₂ uptake).
+const NEE_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: -500, label: 'Strong Sink', color: '#15803d', description: 'Net CO₂ sink > 500 gC/m²/yr (productive forest)' },
+  { min: -500, max: -100, label: 'Moderate Sink', color: '#22c55e', description: 'Moderate net CO₂ uptake' },
+  { min: -100, max: 100, label: 'Near-Neutral', color: '#a8a29e', description: 'Carbon balance ≈ 0 (GPP ≈ R_eco)' },
+  { min: 100, max: Infinity, label: 'Net Source', color: '#ef4444', description: 'Net CO₂ release (disturbance, peat decomposition)' },
+];
+
+// A_c bands (µmol/m²s) for Tool 54 FvCB photosynthesis, per the catalogue's
+// outputInterpretation: <5 stressed/senescent, 15–30 typical C₃ midday,
+// >30 tropical/crop, Vcmax=80 typical for wheat/soybean → A_c≈23.
+const PHOTOSYNTHESIS_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 5, label: 'Very Low', color: '#64748b', description: 'Stressed/senescent canopy or below compensation' },
+  { min: 5, max: 15, label: 'Low', color: '#eab308', description: 'Light/water-limited photosynthesis' },
+  { min: 15, max: 30, label: 'Moderate', color: '#84cc16', description: 'Typical C₃ midday rate (15–30 µmol/m²s)' },
+  { min: 30, max: 60, label: 'High', color: '#22c55e', description: 'Tropical/crop C₃ photosynthesis' },
+  { min: 60, max: Infinity, label: 'Very High', color: '#15803d', description: 'Exceptional rates (high Vcmax, optimal conditions)' },
+];
+
+// AGB bands (kg per tree) for Tool 55, per the catalogue's
+// outputInterpretation: <100 small tree, 100–500 medium, 500–2000 large,
+// >2000 very large (disproportionate carbon share).
+const AGB_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 100, label: 'Small Tree', color: '#84cc16', description: 'DBH < ~20 cm, understorey/regenerating' },
+  { min: 100, max: 500, label: 'Medium Tree', color: '#22c55e', description: 'Canopy tree, significant individual biomass' },
+  { min: 500, max: 2000, label: 'Large Tree', color: '#15803d', description: 'Canopy emergent, major carbon-stock component' },
+  { min: 2000, max: Infinity, label: 'Very Large Tree', color: '#065f46', description: 'Disproportionately important for carbon storage' },
+];
+
+// PPFD-at-depth bands (µmol/m²s) for Tool 52 Beer-Lambert extinction, per the
+// catalogue's outputInterpretation: below the C₃ compensation point (~50),
+// deep shade (LAI≈6 @ k=0.5 → 0.05·I₀), low light approaching shade-leaf
+// saturation (LAI≈4 → 0.135·I₀), moderate (LAI≈2 → 0.37·I₀), high/light-
+// saturated (canopy-top sun leaves).
+const LIGHT_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 50, label: 'Below Compensation', color: '#64748b', description: 'Below C₃ light-compensation point (~50 µmol/m²s) — net carbon loss if maintained' },
+  { min: 50, max: 200, label: 'Deep Shade', color: '#a8a29e', description: 'Shade leaves, light-limited photosynthesis' },
+  { min: 200, max: 500, label: 'Low Light', color: '#eab308', description: 'Understorey — approaching shade-leaf saturation' },
+  { min: 500, max: 1500, label: 'Moderate', color: '#84cc16', description: 'Sun/shade mix, partial light saturation' },
+  { min: 1500, max: Infinity, label: 'High Light', color: '#15803d', description: 'Light-saturated sun leaves (canopy top)' },
+];
+
 // Additional shared band sets for Part 4
 const OCEAN_BANDS: ClassificationBand[] = [
   { min: -Infinity, max: 0.1, label: 'Calm', color: '#22c55e', description: 'Calm' },
@@ -120,6 +165,16 @@ const OCEAN_BANDS: ClassificationBand[] = [
   { min: 1, max: 5, label: 'Moderate', color: '#eab308', description: 'Moderate' },
   { min: 5, max: 10, label: 'High', color: '#f97316', description: 'High' },
   { min: 10, max: Infinity, label: 'Extreme', color: '#ef4444', description: 'Storm' },
+];
+
+// Shoreline-retreat-rate bands (m/yr) — Tool 75 (Bruun Rule). OCEAN_BANDS
+// are wave-HEIGHT bands in metres and must not classify a retreat RATE;
+// the thresholds below match the engine's step-text interpretation.
+const RETREAT_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 0.1, label: 'Low', color: '#22c55e', description: '<0.1 m/yr retreat — stable coast or low SLR' },
+  { min: 0.1, max: 0.5, label: 'Moderate', color: '#eab308', description: '0.1–0.5 m/yr — requires monitoring' },
+  { min: 0.5, max: 2, label: 'High', color: '#f97316', description: '0.5–2 m/yr — active erosion management needed' },
+  { min: 2, max: Infinity, label: 'Severe', color: '#ef4444', description: '>2 m/yr — immediate adaptation required' },
 ];
 
 const SPACE_BANDS: ClassificationBand[] = [
@@ -2864,17 +2919,17 @@ export const TOOL_52: ToolWorkflowDef = {
   toolId: 52,
   name: 'Canopy Light Extinction',
   vizType: 'profile',
-  classificationBands: CARBON_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'I0', min: 0, max: 3000 }, { param: 'k', min: 0.1, max: 1 }, { param: 'LAI', min: 0, max: 12 }]),
+  classificationBands: LIGHT_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'I0', min: 0, max: 3000 }, { param: 'k', min: 0.1, max: 2 }, { param: 'LAI', min: 0, max: 12 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  LAI from MODIS MCD15A3H');
-    log.push('  Extinction coefficient k from canopy structure');
-    log.push('  Radiation from Open-Meteo');
+    log.push('  Extinction coefficient k (user-supplied; spherical default 0.5; Monsi–Saeki range 0.3–2.0)');
+    log.push('  Incident radiation I₀ from ERA5 (Copernicus CDS, ssrd — downward surface solar radiation)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, CARBON_BANDS);
+    const c = classify(result, LIGHT_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -2884,22 +2939,22 @@ export const TOOL_52: ToolWorkflowDef = {
     rmse: 15,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'k estimation', contribution: 'Varies' },
-      { factor: 'LAI accuracy', contribution: 'Varies' },
-      { factor: 'Canopy heterogeneity', contribution: 'Varies' },
+      { factor: 'k estimation', contribution: 'Varies with leaf-angle distribution' },
+      { factor: 'LAI accuracy', contribution: 'Varies (MODIS MCD15A3H ±0.5)' },
+      { factor: 'Canopy clumping / non-randomness', contribution: 'Varies' },
     ],
-    overallAssessment: 'Beer-Lambert has +/- 15% uncertainty from k variability.',
+    overallAssessment: 'Beer-Lambert has +/- 15% uncertainty from k variability across leaf-angle distributions (0.3–2.0, Monsi–Saeki 1953).',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Canopy Light Extinction: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Beer-Lambert: I(z) = I0 * exp(-k * LAI). k varies with leaf angle distribution.`,
-    recommendations: ['k varies: 0.3 (vertical leaves) to 0.8 (horizontal).', 'LAI from MODIS MCD15A3H.', 'Spherical distribution: k ~ 0.5.'],
+    contextualAnalysis: `Canopy Light Extinction: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} µmol/m²s. Beer-Lambert: I(z) = I₀·exp(-k·LAI). k varies with leaf angle distribution.`,
+    recommendations: ['k: 0.3–0.5 vertical (grass), 0.7–1.0 horizontal (broadleaf), up to 2.0 clumped (Monsi–Saeki 1953).', 'LAI from MODIS MCD15A3H.', 'Spherical distribution: k ~ 0.5.'],
   }),
   metadata: {
-    methodology: 'Beer-Lambert: I(z) = I0 * exp(-k * LAI). k varies with leaf angle distribution.',
-    assumptions: ['Random leaf distribution', 'Uniform canopy', 'Monochromatic radiation'],
-    limitations: ['Non-random leaf angles', 'Canopy clumping', 'Mixed species effects'],
-    references: ['Monsi & Saeki 1953, Japanese J. Botany 14:22-52'],
-    preprocessingNotes: ['LAI from MODIS MCD15A3H', 'Extinction coefficient k from canopy structure', 'Radiation from Open-Meteo'],
+    methodology: 'Beer-Lambert: I(z) = I0 * exp(-k * LAI), fPAR = 1 - exp(-k * LAI), LAI_comp = -(1/k)*ln(Γ/I0). k varies with leaf angle distribution.',
+    assumptions: ['Random leaf distribution', 'Uniform canopy', 'Leaves black (no transmittance m=0)'],
+    limitations: ['Non-random leaf angles', 'Canopy clumping', 'Mixed species effects', 'Leaf transmittance (m) ignored'],
+    references: ['Monsi & Saeki 1953, Japanese J. Botany 14:22-52 (NO-DOI, German)', 'Hirose 2004, Annals of Botany 95(3):483-494, doi:10.1093/aob/mci047'],
+    preprocessingNotes: ['LAI from MODIS MCD15A3H', 'Incident radiation I₀ from ERA5 CDS (ssrd, 12:00 UTC of resolved date)', 'Extinction coefficient k user-supplied (paper range 0.3–2.0)'],
   },
   dependencies: [],
 };
@@ -2911,17 +2966,17 @@ export const TOOL_53: ToolWorkflowDef = {
   toolId: 53,
   name: 'Net Carbon Flux',
   vizType: 'timeseries',
-  classificationBands: CARBON_BANDS,
+  classificationBands: NEE_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'Reco', min: 0, max: 5000 }, { param: 'GPP', min: 0, max: 5000 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  GPP from MODIS MOD17');
-    log.push('  Ecosystem respiration from FLUXNET');
-    log.push('  NEE positive = source, negative = sink');
+    log.push('  GPP from MODIS MOD17A2H (annual sum of 8-day composites)');
+    log.push('  R_eco from user input (auto is NaN: FLUXNET eddy covariance is registration-gated, no open API)');
+    log.push('  NEE positive = source, negative = sink (Wofsy 1993 sign convention)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, CARBON_BANDS);
+    const c = classify(result, NEE_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -2931,22 +2986,22 @@ export const TOOL_53: ToolWorkflowDef = {
     rmse: 25,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'GPP uncertainty', contribution: 'Varies' },
-      { factor: 'Respiration model', contribution: 'Varies' },
+      { factor: 'GPP uncertainty', contribution: 'Varies (±10-20 % MOD17)' },
+      { factor: 'Respiration estimate', contribution: 'Varies (nighttime-NEE regression per Wofsy 1993)' },
       { factor: 'Temperature dependence of Reco', contribution: 'Varies' },
     ],
     overallAssessment: 'NEE has +/- 25% uncertainty from GPP and Reco components.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Net Carbon Flux: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. NEE = R_eco - GPP. Positive = net CO2 source, negative = net sink.`,
-    recommendations: ['FLUXNET eddy covariance for validation.', 'NEE positive = source, negative = sink.', 'Reco temperature-dependent.'],
+    contextualAnalysis: `Net Carbon Flux: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. NEE = R_eco - GPP (Wofsy 1993). Positive = net CO2 source, negative = net sink.`,
+    recommendations: ['FLUXNET eddy covariance for validation.', 'NEE positive = source, negative = sink.', 'Reco temperature-dependent (nighttime NEE vs soil T).'],
   }),
   metadata: {
-    methodology: 'NEE = R_eco - GPP. Positive = net CO2 source, negative = net sink.',
+    methodology: 'NEE = R_eco - GPP. Positive = net CO2 source, negative = net sink (Wofsy 1993; Chapin 2006 sign convention).',
     assumptions: ['Ecosystem at steady state', 'No lateral carbon flux', 'Annual balance'],
     limitations: ['Legacy effects', 'Disturbance not captured', 'Lateral fluxes ignored'],
-    references: ['Wofsy et al. 1993, Science 260:1314-1317'],
-    preprocessingNotes: ['GPP from MODIS MOD17', 'Ecosystem respiration from FLUXNET', 'NEE positive = source, negative = sink'],
+    references: ['Wofsy et al. 1993, Science 260(5112):1314-1317, doi:10.1126/science.260.5112.1314', 'Chapin et al. 2006, Ecosystems 9:1041-1050 (NEE/NEP sign convention), doi:10.1007/s10021-006-0177-2'],
+    preprocessingNotes: ['GPP from MODIS MOD17A2H annual sum (genuine, ORNL DAAC)', 'R_eco auto = honest NaN (no genuine open source: FLUXNET registration-gated, SMAP L4C subset unpopulated)', 'NEE positive = source, negative = sink'],
   },
   dependencies: [51],
 };
@@ -2958,17 +3013,17 @@ export const TOOL_54: ToolWorkflowDef = {
   toolId: 54,
   name: 'C3 Photosynthesis',
   vizType: 'scalar',
-  classificationBands: CARBON_BANDS,
+  classificationBands: PHOTOSYNTHESIS_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'Vcmax', min: 0, max: 300 }, { param: 'ci', min: 0, max: 500 }, { param: 'GammaStar', min: 0, max: 100 }, { param: 'Kc', min: 50, max: 1000 }, { param: 'Ko', min: 100000, max: 500000 }, { param: 'O', min: 150000, max: 250000 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Temperature corrections from Bernacchi et al. (2001)');
-    log.push('  Vcmax from leaf trait databases');
-    log.push('  CO2 from OCO-2/3');
+    log.push('  cᵢ auto = 0.7 × NOAA GML ambient CO₂ (ca, genuine); Vcmax is a leaf trait with no open source → user-supplied');
+    log.push('  Γ*, K_c, K_o: Farquhar 1980 25 °C reference constants (user-overridable); O = 210000 µmol/mol (21 % of P_atm)');
+    log.push('  No temperature corrections applied — fixed 25 °C kinetics (Bernacchi et al. 2001 not implemented)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, CARBON_BANDS);
+    const c = classify(result, PHOTOSYNTHESIS_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -2978,22 +3033,22 @@ export const TOOL_54: ToolWorkflowDef = {
     rmse: 20,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Vcmax variability', contribution: 'Varies' },
-      { factor: 'Temperature corrections', contribution: 'Varies' },
+      { factor: 'Vcmax variability', contribution: 'Varies (leaf trait, no open source)' },
+      { factor: 'No temperature correction (fixed 25 °C kinetics)', contribution: 'Varies with leaf temperature' },
       { factor: 'Kc, Ko temperature dependence', contribution: 'Varies' },
     ],
-    overallAssessment: 'Farquhar FvCB has +/- 20% uncertainty, mainly from Vcmax.',
+    overallAssessment: 'Farquhar FvCB has +/- 20% uncertainty, mainly from Vcmax; a further +/- 10-20% from ignoring temperature (fixed 25 °C).',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `C3 Photosynthesis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. FvCB: A_c = Vcmax*(ci-Gamma*)/(ci+Kc*(1+O/Ko)). Also A_j, A_p branches.`,
-    recommendations: ['Include A_j and A_p limiting rates.', 'Temperature corrections: Bernacchi et al. 2001.', 'Vcmax@25 ~ 80 umol/m2/s typical.'],
+    contextualAnalysis: `C3 Photosynthesis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} µmol/m²s. FvCB: A_c = Vcmax*(ci-Gamma*)/(ci+Kc*(1+O/Ko)). Only the Rubisco-limited branch is computed; A_j, A_p branches are not implemented.`,
+    recommendations: ['Vcmax@25 ~ 80 umol/m2/s typical for C3 crops; supply explicitly (no open-source trait database).', 'A_j (light-limited) and A_p (TPU) branches not implemented — results valid when light is not limiting.', 'Temperature dependence of Γ*/Kc/Ko (Bernacchi et al. 2001) not applied — for leaf temperatures far from 25 °C, supply corrected values.'],
   }),
   metadata: {
-    methodology: 'FvCB: A_c = Vcmax*(ci-Gamma*)/(ci+Kc*(1+O/Ko)). Also A_j, A_p branches.',
-    assumptions: ['C3 pathway', 'Light not limiting (A_c branch)', 'Constant intercellular CO2'],
-    limitations: ['Does not include A_j (light-limited)', 'Vcmax varies with species/conditions', 'Temperature corrections needed'],
-    references: ['Farquhar, von Caemmerer & Berry 1980, Planta 149:78-90', 'Bernacchi et al. 2001, Plant Cell Environ. 24:253-259'],
-    preprocessingNotes: ['Temperature corrections from Bernacchi et al. (2001)', 'Vcmax from leaf trait databases', 'CO2 from OCO-2/3'],
+    methodology: 'FvCB (Farquhar 1980) Rubisco-limited branch: A_c = Vcmax*(ci-Gamma*)/(ci+Kc*(1+O/Ko)). Secondary: photorespiration v_o = v_c*(O*Kc)/(ci*Ko); ci/ca ratio.',
+    assumptions: ['C3 pathway', 'Light not limiting (A_c branch)', 'Constant intercellular CO2', 'Fixed 25 °C kinetics (no temperature correction)'],
+    limitations: ['Does not include A_j (light-limited) or A_p (TPU) branches', 'Vcmax varies with species/conditions and has no genuine open source', 'No temperature correction (Bernacchi et al. 2001 not implemented)', 'cᵢ approximated as 0.7 × ambient CO₂ (C₃ typical, not measured)'],
+    references: ['Farquhar, von Caemmerer & Berry 1980, Planta 149:78-90, doi:10.1007/BF00386231'],
+    preprocessingNotes: ['cᵢ auto = 0.7 × NOAA GML ambient CO₂ (ca, genuine; C₃ ci/ca ≈ 0.7)', 'Vcmax: no genuine open source (leaf gas-exchange trait, no trait-database API) → honest NaN, user-supplied', 'Γ*, K_c, K_o: Farquhar 1980 25 °C reference constants (user-overridable)', 'O = 210000 µmol/mol (21 % O₂, physical constant)'],
   },
   dependencies: [],
 };
@@ -3005,42 +3060,42 @@ export const TOOL_55: ToolWorkflowDef = {
   toolId: 55,
   name: 'Forest Biomass Estimation',
   vizType: 'scatter',
-  classificationBands: CARBON_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'a', min: 0.001, max: 1 }, { param: 'DBH', min: 0, max: 300 }]),
+  classificationBands: AGB_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'DBH', min: 0, max: 300 }, { param: 'rho', min: 0.1, max: 1.2 }, { param: 'E', min: -0.5, max: 1.5 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Allometric coefficients from Chave et al. (2014)');
-    log.push('  Include environmental stress factor E');
-    log.push('  Wood density from BIEN database');
+    log.push('  Chave et al. (2014) Eq. 7 — height-unavailable pantropical model (calibrated on 4004 harvested trees)');
+    log.push('  DBH: field measurement (no open source); ρ: wood specific gravity, user-supplied (no open trait API)');
+    log.push('  E: bioclimatic stress from Eq. 6b = (0.178·TS − 0.938·CWD − 6.61·PS)×10⁻³ (Chave\'s E-layer offline; user-supplied)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, CARBON_BANDS);
+    const c = classify(result, AGB_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
     method: 'empirical',
-    rmse: 30,
+    rmse: 40,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Allometric equation selection', contribution: 'Varies' },
-      { factor: 'Wood density variability', contribution: 'Varies' },
-      { factor: 'Environmental stress factor', contribution: 'Varies' },
+      { factor: 'Wood density variability', contribution: 'Dominant (paper: ρ key predictor)' },
+      { factor: 'Height unavailability', contribution: 'Paper: CV 71.5% vs 56.5% (Eq. 7 vs Eq. 4)' },
+      { factor: 'Bioclimatic stress E', contribution: 'Varies with site' },
     ],
-    overallAssessment: 'Allometric biomass has +/- 30% uncertainty. Chave (2014) includes E factor.',
+    overallAssessment: 'Chave Eq. 7 has ±20-40 % per-tree uncertainty (paper RSE 0.413, mean bias +9.71 %); plot-level means ±10-15 %.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Forest Biomass Estimation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Allometric biomass: AGB = a * rho_wood * DBH^b * E. Chave et al. (2014) with environmental factor.`,
-    recommendations: ['Use Chave et al. (2014) with E factor.', 'Wood density from BIEN database.', 'Global Forest Watch for cover.'],
+    contextualAnalysis: `Forest Biomass Estimation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} kg. Chave et al. (2014) Eq. 7: AGB = exp[−1.803 − 0.976E + 0.976·ln(ρ) + 2.673·ln(D) − 0.0299·(ln D)²].`,
+    recommendations: ['Measure DBH at 1.3 m (breast height) — the primary field input.', 'Wood specific gravity ρ: use species/genus means (Chave 2009/Zanne 2009 global database) or measure.', 'E from Eq. 6b: E = (0.178·TS − 0.938·CWD − 6.61·PS)×10⁻³ with WorldClim TS/CWD/PS.', 'For higher accuracy supply height and use Eq. 4: AGB = 0.0673·(ρD²H)^0.976 (RSE 0.357).'],
   }),
   metadata: {
-    methodology: 'Allometric biomass: AGB = a * rho_wood * DBH^b * E. Chave et al. (2014) with environmental factor.',
-    assumptions: ['Allometric equation valid for species', 'Single-stem trees', 'Wood density known'],
-    limitations: ['Not for multi-stem trees', 'Requires species-specific calibration', 'Environmental stress factor needed'],
-    references: ['Chave et al. 2014, Global Change Biology 20:3177-3190'],
-    preprocessingNotes: ['Allometric coefficients from Chave et al. (2014)', 'Include environmental stress factor E', 'Wood density from BIEN database'],
+    methodology: 'Chave et al. (2014) Eq. 7 (height-unavailable): AGB = exp[−1.803 − 0.976E + 0.976·ln(ρ) + 2.673·ln(D) − 0.0299·(ln D)²]; carbon C = 0.47 × AGB (IPCC), CO₂e = 3.67 × C.',
+    assumptions: ['Pantropical applicability (single model holds across tropical vegetation types)', 'Single-stem trees', 'Wood density known (ρ)' , 'No height measurement available'],
+    limitations: ['±20-40 % per tree (paper RSE 0.413, bias +9.71 %; worse than height model Eq. 4)', 'Not for multi-stem trees', 'ρ and E have no genuine open point API — user-supplied', 'DBH is a field measurement — no remote DBH source'],
+    references: ['Chave et al. 2014, Global Change Biology 20:3177-3190, doi:10.1111/gcb.12629'],
+    preprocessingNotes: ['DBH: field measurement, user-supplied (no open source)', 'ρ: wood specific gravity, user-supplied (BIEN unreachable; global wood-density DB is a static dataset, no API)', 'E: bioclimatic stress from Eq. 6b, user-supplied (Chave\'s E-layer at chave.upstlse.fr offline)', 'Height-unavailable model Eq. 7 used (no height input)'],
   },
   dependencies: [],
 };
@@ -3053,11 +3108,12 @@ export const TOOL_56: ToolWorkflowDef = {
   name: 'Ocean CO2 Uptake',
   vizType: 'scalar',
   classificationBands: CARBON_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'k', min: 0, max: 5000 }, { param: 'K0', min: 0, max: 100 }, { param: 'dpCO2', min: -100, max: 100 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'k', min: 0, max: 30000 }, { param: 'K0', min: 0, max: 100 }, { param: 'dCO2', min: -300, max: 300 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Use Wanninkhof (2014) coefficient 0.251 (not 0.31)');
-    log.push('  Nightingale (2000) alternative for coastal');
-    log.push('  pCO2 from SOCAT database');
+    log.push('  k = 0.31·u₁₀²·(Sc/660)^(−1/2) cm/hr (Wanninkhof 1992 Eq. 3, steady winds)');
+    log.push('  2014 update (0.251·u², dual-tracer) gives ~19 % lower k — disclosed, not used');
+    log.push('  Ocean pCO₂ from NOAA PMEL mooring observations (SOCAT constituent dataset)');
+    log.push('  Wind from ERA5 reanalysis (CDS); SST from OISST v2 / mooring; SSS from mooring');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -3072,22 +3128,22 @@ export const TOOL_56: ToolWorkflowDef = {
     rmse: 20,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Gas transfer coefficient', contribution: 'Varies' },
-      { factor: 'Wind speed product', contribution: 'Varies' },
-      { factor: 'pCO2 spatial variability', contribution: 'Varies' },
+      { factor: 'Gas transfer coefficient a (14C-derived)', contribution: '±15 % on k (paper: 21.9 ± 3.3 cm/hr at 7.4 m/s)' },
+      { factor: 'Wind speed product (ERA5 vs scatterometer)', contribution: 'Varies' },
+      { factor: 'pCO2 spatial/temporal variability', contribution: 'Varies' },
     ],
-    overallAssessment: 'Wanninkhof 2014 uses k = 0.251*u^2 (not 0.31). Nightingale for coastal.',
+    overallAssessment: 'Wanninkhof 1992 Eq. 3 (a = 0.31) for steady winds; bomb-14C calibration uncertainty ±15 % on k, ±3 % on the Schmidt number fit (paper Table A1).',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Ocean CO2 Uptake: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Ocean CO2: F = k * K0 * dpCO2. k = 0.251*u^2*(Sc/660)^(-0.5) (Wanninkhof 2014).`,
-    recommendations: ['Use Wanninkhof 2014 (0.251, not 0.31).', 'Nightingale (2000) for coastal waters.', 'pCO2 from SOCAT database.'],
+    contextualAnalysis: `Ocean CO2 Uptake: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} mol/m²/yr. F = k·K₀·ΔpCO₂ with k = 0.31·u₁₀²·(Sc/660)^(−1/2) cm/hr (Wanninkhof 1992 Eq. 3).`,
+    recommendations: ['ΔpCO₂ (ocean−atmosphere) from NOAA PMEL moorings or SOCAT; atmospheric pCO₂ from NOAA GML.', '2014 update (0.251·u²) gives ~19 % lower k — use for dual-tracer-calibrated runs.', 'Nightingale (2000) alternative for coastal waters.'],
   }),
   metadata: {
-    methodology: 'Ocean CO2: F = k * K0 * dpCO2. k = 0.251*u^2*(Sc/660)^(-0.5) (Wanninkhof 2014).',
-    assumptions: ['Steady wind', 'Quadratic wind dependence', 'Known pCO2 gradient'],
-    limitations: ['Wind product dependent', 'No bubble-mediated transfer', 'Seasonal pCO2 variability'],
-    references: ['Wanninkhof 2014, Limnol. Oceanogr. Methods 12:351-362', 'Nightingale et al. 2000'],
-    preprocessingNotes: ['Use Wanninkhof (2014) coefficient 0.251 (not 0.31)', 'Nightingale (2000) alternative for coastal', 'pCO2 from SOCAT database'],
+    methodology: 'Ocean CO2: F = k * K0 * dCO2 with k = 0.31·u₁₀²·(Sc/660)^(−1/2) cm/hr (Wanninkhof 1992 Eq. 3); Sc from Table A1, solubility from Table A2 (Weiss 1974 form).',
+    assumptions: ['Steady/short-term wind (Eq. 3)', 'Quadratic wind dependence', 'Known pCO2 gradient (mooring measurement)'],
+    limitations: ['No bubble-mediated transfer (high winds > 15 m/s)', 'Wind product dependent', 'Seasonal pCO2 variability'],
+    references: ['Wanninkhof 1992, JGR 97(C5):7373–7382, doi:10.1029/92JC00188', 'Sutton et al. 2019, ESSD 11:421–439 (PMEL mooring pCO2)'],
+    preprocessingNotes: ['k = 0.31·u₁₀²·(Sc/660)^(−1/2) cm/hr (Wanninkhof 1992 Eq. 3)', '2014 update (0.251·u²) disclosed, not used', 'Ocean pCO₂ from NOAA PMEL mooring observations (SOCAT constituent)'],
   },
   dependencies: [],
 };
@@ -3100,11 +3156,11 @@ export const TOOL_57: ToolWorkflowDef = {
   name: 'Ocean Nutrient Ratios',
   vizType: 'bar',
   classificationBands: CARBON_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'C', min: 0, max: 1000 }, { param: 'N', min: 0, max: 100 }, { param: 'P', min: 0, max: 10 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'C', min: 0, max: 1000 }, { param: 'N', min: 0, max: 100 }, { param: 'P', min: 0, max: 10 }, { param: 'NO3s', min: 0, max: 100 }, { param: 'NO3d', min: 0, max: 100 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Classic Redfield 106:16:1');
-    log.push('  Modern median: 163:22:1 (deviations exist)');
-    log.push('  Regional variations significant');
+    log.push('  Redfield 1934 regressions: N:P = 20:1, C:N = 7:1, C:N:P ≈ 140:20:1 atoms');
+    log.push('  Canonical 106:16:1 (N:P 16:1) is Redfield 1958 — disclosed, not the cited reference');
+    log.push('  C/N/P are measured water-column concentrations — user-supplied (no open point API)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -3116,25 +3172,25 @@ export const TOOL_57: ToolWorkflowDef = {
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
     method: 'empirical',
-    rmse: 30,
+    rmse: 20,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Regional variability', contribution: 'Varies' },
-      { factor: 'Species composition', contribution: 'Varies' },
-      { factor: 'Nutrient limitation', contribution: 'Varies' },
+      { factor: 'Sample measurement (C/N/P µmol/L)', contribution: 'Varies' },
+      { factor: 'Regional nutrient variability', contribution: 'Varies' },
+      { factor: 'Community composition', contribution: 'Varies' },
     ],
-    overallAssessment: 'Redfield ratio varies regionally. Classic 106:16:1, modern median 163:22:1.',
+    overallAssessment: 'Diagnostics compare the sample against the cited Redfield (1934) regressions (N:P 20:1, C:N 7:1, C:N:P ≈ 140:20:1); the canonical 106:16:1 (Redfield 1958) is disclosed as the literature-standard refinement.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Ocean Nutrient Ratios: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Redfield ratio: C:N:P = 106:16:1. Modern median ~163:22:1.`,
-    recommendations: ['Classic 106:16:1; modern median 163:22:1.', 'Regional deviations significant.', 'Use for biogeochemical modeling.'],
+    contextualAnalysis: `Ocean Nutrient Ratios: ${Number.isFinite(result) ? 'N:P = ' + result.toFixed(2) : 'N/A'}. Redfield 1934 regressions: N:P = 20:1, C:N = 7:1, C:N:P ≈ 140:20:1 atoms.`,
+    recommendations: ['Compare N:P against 20:1 (Redfield 1934); the canonical 16:1 is the 1958 refinement.', 'N* = N − 20·P; modern N* (Gruber & Sarmiento 1997) uses N − 16·P.', 'C_export = 7 × ΔNO₃ (paper C:N = 7:1) — supply NO₃_surface and NO₃_deep.'],
   }),
   metadata: {
-    methodology: 'Redfield ratio: C:N:P = 106:16:1. Modern median ~163:22:1.',
-    assumptions: ['Steady-state plankton', 'Balanced growth', 'No nutrient limitation'],
-    limitations: ['Regional variations large', 'Species-dependent', 'Not for nutrient-limited regions'],
-    references: ['Redfield 1934'],
-    preprocessingNotes: ['Classic Redfield 106:16:1', 'Modern median: 163:22:1 (deviations exist)', 'Regional variations significant'],
+    methodology: 'Redfield 1934: N:P = 20:1, C:N = 7:1, C:N:P ≈ 140:20:1 atoms; N* = N − 20·P; C_export = 7 × ΔNO₃.',
+    assumptions: ['Sample is bulk water-column or plankton C/N/P', 'Molar concentrations (µmol/L)', 'Steady-state stoichiometry'],
+    limitations: ['Regional/community variability', 'DIC not available from climatology — user-supplied', 'Canonical 106:16:1 (Redfield 1958) differs from the cited 1934 values'],
+    references: ['Redfield 1934, James Johnstone Memorial Volume, pp. 176–192 (NO-DOI)', 'Redfield 1958, Am. Sci. 46(3):205–221 (canonical 106:16:1 — disclosed)'],
+    preprocessingNotes: ['Redfield 1934 regressions: N:P = 20:1, C:N = 7:1, C:N:P ≈ 140:20:1 atoms', 'Canonical 106:16:1 (N:P 16:1) is Redfield 1958 — disclosed, not the cited reference', 'C/N/P are measured water-column concentrations — user-supplied (no open point API)'],
   },
   dependencies: [],
 };
@@ -3147,11 +3203,14 @@ export const TOOL_58: ToolWorkflowDef = {
   name: 'Crop Growing Degree Days',
   vizType: 'timeseries',
   classificationBands: AGRI_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'Tavg', min: -10, max: 50 }, { param: 'Tbase', min: 0, max: 20 }, { param: 'Tupper', min: 20, max: 50 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'Tmax', min: -40, max: 60 }, { param: 'Tmin', min: -40, max: 60 },
+    { param: 'Tbase', min: 0, max: 20 }, { param: 'Tupper', min: 20, max: 50 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Temperature from Open-Meteo');
-    log.push('  Crop-specific Tbase (wheat 0, maize 10, rice 10)');
-    log.push('  Upper threshold for heat stress');
+    log.push('  Daily TMAX/TMIN: nearest GHCN-Daily station (NOAA ACIS) — the paper\'s Class A station data');
+    log.push('  Both McMaster & Wilhelm (1997) methods computed: M1 clamps the mean, M2 clamps each extreme');
+    log.push('  Crop Tbase: wheat 0, maize 10, rice 10 °C; T_upper: corn 30, wheat 25 °C (paper §3)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -3166,22 +3225,22 @@ export const TOOL_58: ToolWorkflowDef = {
     rmse: 10,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Temperature data', contribution: 'Varies' },
+      { factor: 'GHCN station distance from study point', contribution: 'Varies' },
       { factor: 'Crop-specific thresholds', contribution: 'Varies' },
-      { factor: 'Daily vs hourly accumulation', contribution: 'Varies' },
+      { factor: 'Method 1 vs Method 2 interpretation', contribution: 'Up to 83–376% (paper §4)' },
     ],
-    overallAssessment: 'GDD has +/- 10% uncertainty. Crop-specific thresholds vary by cultivar.',
+    overallAssessment: 'Method choice dominates uncertainty: M1 vs M2 differ by up to 83% (wheat) / 376% (corn) on real field data (paper Table 2).',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Crop Growing Degree Days: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. GDD = sum max(min(Tavg, Tupper) - Tbase, 0). Crop-specific Tbase and Tupper.`,
-    recommendations: ['Tbase varies by crop: wheat 0, maize 10, rice 10.', 'Tupper caps heat stress.', 'Use daily Tavg from Open-Meteo.'],
+    contextualAnalysis: `Crop Growing Degree Days (Method 1): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} °C·day. McMaster & Wilhelm (1997) Eq. (1) — two interpretations; both computed, Method 2 reported in steps. Daily TMAX/TMIN from nearest GHCN-Daily station.`,
+    recommendations: ['Report WHICH method was used (paper conclusion): Method 1 clamps the daily mean, Method 2 clamps each extreme.', 'Tbase varies by crop: wheat 0, maize 10, rice 10 °C.', 'T_upper: 30 °C corn (Cross & Zuber 1972), 25 °C wheat (McMaster & Smika 1988).'],
   }),
   metadata: {
-    methodology: 'GDD = sum max(min(Tavg, Tupper) - Tbase, 0). Crop-specific Tbase and Tupper.',
-    assumptions: ['Single sine wave daily T', 'No stress above Tupper', 'Base temp constant'],
-    limitations: ['Heat stress not fully captured', 'Cultivar-specific thresholds', 'Requires daily temperature data'],
-    references: ['McMaster 1997'],
-    preprocessingNotes: ['Temperature from Open-Meteo', 'Crop-specific Tbase (wheat 0, maize 10, rice 10)', 'Upper threshold for heat stress'],
+    methodology: 'GDD = Σ [(TMAX+TMIN)/2 − TBASE] (paper Eq. 1), computed two ways: Method 1 clamps the daily mean TAVG to [TBASE, TUT]; Method 2 clamps TMAX/TMIN individually. Both reported; primary = Method 1. Daily TMAX/TMIN from nearest GHCN-Daily station (NOAA ACIS).',
+    assumptions: ['Linear development rate between Tbase and Tupper', 'No development below Tbase', 'Base temp constant per crop'],
+    limitations: ['Methods differ when TMIN < Tbase (up to 83% wheat / 376% corn — paper §4)', 'Heat stress not fully captured', 'Station data representative of study point'],
+    references: ['McMaster, G.S. & Wilhelm, W.W. (1997) Agric. For. Meteorol. 87(4):291–300. DOI 10.1016/S0168-1923(97)00027-0'],
+    preprocessingNotes: ['Daily TMAX/TMIN from nearest GHCN-Daily station (NOAA ACIS)', 'Both methods computed per the paper', 'Crop Tbase/T_upper per paper §3 (wheat 0/25, corn 10/30)'],
   },
   dependencies: [],
 };
@@ -3196,9 +3255,10 @@ export const TOOL_59: ToolWorkflowDef = {
   classificationBands: WATER_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'alpha', min: 1, max: 2 }, { param: 'delta', min: 0, max: 1 }, { param: 'gamma', min: 0.04, max: 0.1 }, { param: 'Rn', min: -100, max: 1000 }, { param: 'G', min: -100, max: 500 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Alpha = 1.26 for well-watered surfaces');
-    log.push('  May be lower (1.08-1.34) for humid regions');
-    log.push('  Net radiation from Open-Meteo');
+    log.push('  α = 1.26 (paper §6: overall mean of land and water, 1.26 ± 0.01)');
+    log.push('  Net radiation Rₙ: genuine ERA5 surface fluxes (absorbed shortwave − net upward longwave, CDS)');
+    log.push('  G = 0 — paper explicitly neglects ground heat flux for 24-hr totals (p. 83)');
+    log.push('  Paper Eq. (14): PE = α·[Δ/(Δ+γ)]·(Rₙ−G) in W/m²; mm/day via λ = 2.45 MJ/kg');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -3213,22 +3273,22 @@ export const TOOL_59: ToolWorkflowDef = {
     rmse: 15,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Alpha coefficient variability', contribution: 'Varies' },
-      { factor: 'Radiation measurement', contribution: 'Varies' },
-      { factor: 'G estimation', contribution: 'Varies' },
+      { factor: 'α variability', contribution: 'Paper §6: 1.26 ± 0.01 mean, 1.25–1.34 by site' },
+      { factor: 'Net radiation (ERA5 fluxes)', contribution: 'Varies with surface/cloud' },
+      { factor: 'Method (M1 vs M2 GDD-style unit handling)', contribution: 'n/a here; unit conversion exact (λ, ρ_w)' },
     ],
-    overallAssessment: 'Priestley-Taylor has +/- 15% uncertainty. Alpha = 1.26 varies with surface.',
+    overallAssessment: 'PE is computed in energy units per the paper (Eq. 14) and converted to mm/day with the exact latent-heat constant (±~15 % driven by ERA5 net-radiation and α).',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Priestley-Taylor Evapotranspiration: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Priestley-Taylor: ET = alpha * (delta/(delta+gamma)) * (Rn - G). alpha = 1.26.`,
-    recommendations: ['Alpha varies: 1.08-1.34 depending on surface.', 'For humid regions, alpha may be lower.', 'No wind data needed (advantage over FAO-56).'],
+    contextualAnalysis: `Priestley-Taylor Evapotranspiration: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} mm/day. Paper Eq. (14): PE = 1.26·[Δ/(Δ+γ)]·(Rₙ−G) in W/m², converted to mm/day via λ. α = 1.26 (paper §6).`,
+    recommendations: ['α = 1.26 (paper §6 overall mean); 1.25–1.34 by site, 1.30 ± 0.02 Hoeber equatorial Atlantic.', 'G = 0 for 24-hr totals (paper neglects ground heat flux); use negative G for daytime heating.', 'No wind data needed (advantage over FAO-56); α < 1.0 indicates advection (aridity index, paper §7).'],
   }),
   metadata: {
-    methodology: 'Priestley-Taylor: ET = alpha * (delta/(delta+gamma)) * (Rn - G). alpha = 1.26.',
-    assumptions: ['Well-watered surface', 'No advection', 'Alpha = 1.26'],
-    limitations: ['Alpha not universal', 'Advection increases ET', 'Not for water-stressed surfaces'],
-    references: ['Priestley & Taylor 1972'],
-    preprocessingNotes: ['Alpha = 1.26 for well-watered surfaces', 'May be lower (1.08-1.34) for humid regions', 'Net radiation from Open-Meteo'],
+    methodology: 'PE = 1.26·[Δ/(Δ+γ)]·(Rₙ−G) (paper Eq. 14, energy units W/m²), ET_mm/day = PE × 86400/(λ·ρ_w), λ = 2.45 MJ/kg. Rₙ = genuine ERA5 net surface radiation (absorbed SW − net upward LW, CDS); G = 0 (paper neglects it for 24-hr totals); Δ from air temperature, γ from surface pressure (FAO-56 forms — reproduce the paper\'s s/(s+γ) = 0.56 @ 10 °C, 0.82 @ 35 °C).',
+    assumptions: ['Well-watered, horizontally uniform saturated surface', 'No advection (equilibrium boundary layer)', 'α = 1.26 (paper §6)'],
+    limitations: ['α not universal (1.25–1.34 by site)', 'Advection increases ET', 'Not for water-stressed surfaces'],
+    references: ['Priestley, C.H.B. & Taylor, R.J. (1972) Mon. Wea. Rev. 100(2):81–92. DOI 10.1175/1520-0493(1972)100<0081:otaosh>2.3.co;2'],
+    preprocessingNotes: ['α = 1.26 (paper §6)', 'Rₙ = genuine ERA5 surface fluxes (CDS)', 'G = 0 (paper neglects ground heat flux)', 'PE in W/m² → mm/day via λ (exact)'],
   },
   dependencies: [],
 };
@@ -3241,11 +3301,12 @@ export const TOOL_60: ToolWorkflowDef = {
   name: 'Hargreaves-Samani ET',
   vizType: 'timeseries',
   classificationBands: WATER_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'Ra', min: 0, max: 50 }, { param: 'Tmax', min: -10, max: 50 }, { param: 'Tmin', min: -30, max: 40 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'Ra', min: 0, max: 50 }, { param: 'Tmax', min: -40, max: 60 }, { param: 'Tmin', min: -40, max: 60 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Extraterrestrial radiation from latitude and date');
-    log.push('  Tmax/Tmin from Open-Meteo');
-    log.push('  Coefficient 0.0023 calibrated');
+    log.push('  Rₐ (extraterrestrial radiation) from latitude and day-of-year (FAO-56 Annex 2)');
+    log.push('  T_max/T_min: nearest GHCN-Daily station (NOAA ACIS) — the paper\'s measured daily max/min');
+    log.push('  K_ET = 0.0023 (paper Eq. [4] typo 0.00023; derivation Eq. [1]×[2] and FAO-56 use 0.0023)');
+    log.push('  MJ/m²/day → mm/day ×0.408 (÷2.45)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -3267,15 +3328,15 @@ export const TOOL_60: ToolWorkflowDef = {
     overallAssessment: 'Hargreaves has +/- 20% uncertainty. Temperature-only method, no wind/humidity needed.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Hargreaves-Samani ET: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Hargreaves: ET0 = 0.0023 * Ra * (Tavg+17.8) * sqrt(Tmax-Tmin) * 0.408.`,
-    recommendations: ['Temperature-only method (no wind/RH needed).', 'Coefficient 0.0023 calibrated for semi-arid.', 'Validate against FAO-56 where data available.'],
+    contextualAnalysis: `Hargreaves-Samani ET₀: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} mm/day. Paper Eq. [4]: ET₀ = 0.0023 × Rₐ × √(T_max−T_min) × (T_avg + 17.8); Rₐ in MJ/m²/day → mm/day ×0.408. T_max/T_min from nearest GHCN-Daily station.`,
+    recommendations: ['Rₐ from latitude and day-of-year (FAO-56 Annex 2).', 'T_max/T_min from GHCN-Daily station observations (paper: measured daily max/min).', 'K_ET = 0.0023 (paper Eq. [4] prints 0.00023 — dropped-zero typo; the paper\'s own Eq. [1]×[2] derivation and FAO-56 use 0.0023).', '0.0019–0.0032 coefficient range coastal→inland; validate against FAO-56 where data available.'],
   }),
   metadata: {
-    methodology: 'Hargreaves: ET0 = 0.0023 * Ra * (Tavg+17.8) * sqrt(Tmax-Tmin) * 0.408.',
-    assumptions: ['No advection', 'Cloud-free or radiation from Tmax-Tmin', 'Calibrated for specific climate'],
-    limitations: ['Not for humid/windy regions', 'Requires Tmax-Tmin range', 'Less accurate than FAO-56'],
-    references: ['Hargreaves & Samani 1985'],
-    preprocessingNotes: ['Extraterrestrial radiation from latitude and date', 'Tmax/Tmin from Open-Meteo', 'Coefficient 0.0023 calibrated'],
+    methodology: 'ET₀ = 0.0023 × Rₐ × (T_avg+17.8) × √(T_max−T_min), Rₐ (MJ/m²/day) from latitude and day-of-year (FAO-56 Annex 2), ×0.408 to mm/day. T_max/T_min: nearest GHCN-Daily station (NOAA ACIS). K_ET 0.0023 per the paper\'s derivation (Eq. [1] 0.0135 × Eq. [2] K_RS ≈ 0.17) and FAO-56; the printed 0.00023 in Eq. [4] is a dropped-zero typo, disclosed in steps.',
+    assumptions: ['TD = T_max−T_min proxies cloud cover / net radiation', 'No advection (single K_ET compensates approximately)', 'Calibrated on Alta fescue lysimeters at Davis, CA (paper)'],
+    limitations: ['Overestimates in coastal/humid (low advection); underestimates in advective arid (paper §LIMITATIONS)', 'Wind/humidity not explicit', 'Less accurate than FAO-56 (RMSE ≈ 0.7–1.0 mm/day)'],
+    references: ['Hargreaves, G.H. & Samani, Z.A. (1985) Appl. Eng. Agric. 1(2):96–99. DOI 10.13031/2013.26773'],
+    preprocessingNotes: ['Rₐ from latitude and day-of-year (FAO-56 Annex 2)', 'T_max/T_min from nearest GHCN-Daily station (NOAA ACIS)', '×0.408 MJ→mm conversion', 'K_ET = 0.0023 (paper typo disclosed)'],
   },
   dependencies: [],
 };
@@ -3314,15 +3375,15 @@ export const TOOL_61: ToolWorkflowDef = {
     overallAssessment: 'Doorenbos-Kassam has +/- 25% uncertainty. Ky is crop-specific.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `FAO Yield-Water Response: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Yield response: (1-Ya/Ym) = Ky * (1-ETa/ETm). Ky is crop-specific from FAO-33.`,
-    recommendations: ['Ky is crop-specific (FAO-33 tables).', 'ETa/ETm from water balance.', 'Ym from regional yield statistics.'],
+    contextualAnalysis: `FAO Yield-Water Response: predicted relative yield reduction (1−Yₐ/Yₘ) = ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} (paper Eq. 1). Requires Yₘ, K_y, ETₐ, ETₘ — all field/table inputs with no open point API, so autos are NaN.`,
+    recommendations: ['K_y is crop-specific — use FAO IDP 33 Table 24 (maize 1.25, winter wheat 1.05, rice 1.1, soybean 0.85).', 'ETₘ from FAO-56 crop evapotranspiration; ETₐ from a soil-water balance.', 'Yₘ from regional yield statistics (optional, for predicted Yₐ in t/ha).'],
   }),
   metadata: {
-    methodology: 'Yield response: (1-Ya/Ym) = Ky * (1-ETa/ETm). Ky is crop-specific from FAO-33.',
+    methodology: 'Paper Eq. (1): (1−Ya/Ym) = Ky × (1−ETa/ETm). Primary output is the predicted relative yield reduction; Ya is optional diagnostic (observed vs predicted residual). Source: FAO IDP 66 (i2800e.pdf) reproduces IDP 33 Eq. (1) verbatim.',
     assumptions: ['Linear yield-ET relationship', 'No stress timing effects', 'Constant Ky'],
     limitations: ['Nonlinear for severe stress', 'Ky varies with growth stage', 'Requires crop-specific calibration'],
-    references: ['Doorenbos & Kassam 1979, FAO Irrigation and Drainage Paper 33'],
-    preprocessingNotes: ['Crop-specific Ky from FAO-33', 'ETa/ETm from water balance', 'Ym from regional yield data'],
+    references: ['Doorenbos & Kassam 1979, FAO Irrigation and Drainage Paper 33', 'Steduto et al. 2009, FAO Irrigation and Drainage Paper 66'],
+    preprocessingNotes: ['Crop-specific Ky from FAO-33 Table 24', 'ETa/ETm from water balance', 'Ym from regional yield data'],
   },
   dependencies: [],
 };
@@ -3337,9 +3398,10 @@ export const TOOL_62: ToolWorkflowDef = {
   classificationBands: AGRI_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'mu20', min: 0, max: 5 }, { param: 'T', min: 0, max: 40 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Eppley (1972) Q10 = 1.88 (1.066^10)');
-    log.push('  Modern: thermal optimum, not exponential');
-    log.push('  SST from NOAA OISST');
+    log.push('  Eppley (1972) Eq. (1): log10 μmax = 0.0275·T − 0.070 (Q10 = 1.88)');
+    log.push('  Eq. (a): μmax = 0.851 × 1.066^T — maximum-growth envelope');
+    log.push('  T from daily NOAA OISST v2 SST (marine temperature of the paper)');
+    log.push('  μ₂₀ is species-specific — honest NaN auto, optional scale input');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -3361,15 +3423,15 @@ export const TOOL_62: ToolWorkflowDef = {
     overallAssessment: 'Eppley curve is classic but modern research shows thermal optima. Q10 = 1.88.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Phytoplankton Temperature Growth: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Eppley: mu_max = mu20 * 1.066^(T-20). Q10 = 1.88. Modern: thermal optimum models.`,
-    recommendations: ['Q10 = 1.88 (1.066^10).', 'Modern: thermal optimum, not exponential.', 'Species-specific curves exist.'],
+    contextualAnalysis: `Phytoplankton Temperature Growth: μmax = ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} /day. Eppley (1972) Eq. (1): log10 μmax = 0.0275·T − 0.070 (Eq. (a) μmax = 0.851×1.066^T); Q10 = 1.88. This is the maximum-growth envelope; realized rates are light/nutrient-limited.`,
+    recommendations: ['Q10 = 1.88 (10^0.275) — paper value.', 'Supply a species-specific μ₂₀ to scale the envelope (e.g. 1.0 coastal diatoms, 0.6 open-ocean).', 'T is marine SST: auto uses daily NOAA OISST v2; NaN when none (inland).'],
   }),
   metadata: {
-    methodology: 'Eppley: mu_max = mu20 * 1.066^(T-20). Q10 = 1.88. Modern: thermal optimum models.',
-    assumptions: ['Exponential growth', 'No thermal optimum', 'Nutrient-replete'],
-    limitations: ['Thermal optimum not captured', 'Nutrient limitation ignored', 'Species-specific curves differ'],
-    references: ['Eppley 1972, Fishery Bulletin 70:1063-1085'],
-    preprocessingNotes: ['Eppley (1972) Q10 = 1.88 (1.066^10)', 'Modern: thermal optimum, not exponential', 'SST from NOAA OISST'],
+    methodology: 'Eppley (1972) Eq. (1): log10 μmax = 0.0275·T − 0.070 ⟺ Eq. (a) μmax = 0.851×1.066^T. Q10 = 1.88. Optional μ₂₀ scales through 20 °C.',
+    assumptions: ['Exponential growth envelope', 'No thermal optimum (paper-era)', 'Nutrient-replete maximum'],
+    limitations: ['Thermal optimum not captured (modern refinement)', 'Nutrient limitation ignored — envelope is a maximum', 'Species-specific curves differ'],
+    references: ['Eppley 1972, Fishery Bulletin 70(4):1063-1085'],
+    preprocessingNotes: ['Eppley (1972) Eq. (1) log10 form + Eq. (a) exponential form', 'T from NOAA OISST v2 daily SST', 'μ₂₀ species-specific honest NaN auto'],
   },
   dependencies: [],
 };
@@ -3382,11 +3444,12 @@ export const TOOL_63: ToolWorkflowDef = {
   name: 'Bigleaf Penman-Monteith',
   vizType: 'scalar',
   classificationBands: AGRI_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'rho', min: 0.5, max: 1.5 }, { param: 'cp', min: 800, max: 1200 }, { param: 'Ts', min: -10, max: 60 }, { param: 'Ta', min: -20, max: 50 }, { param: 'ra', min: 1, max: 500 }, { param: 'rs', min: 10, max: 1000 }, { param: 'es', min: 0, max: 100 }, { param: 'ea', min: 0, max: 100 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'rho', min: 0.5, max: 1.5 }, { param: 'cp', min: 800, max: 1200 }, { param: 'Ts', min: -10, max: 60 }, { param: 'Ta', min: -20, max: 50 }, { param: 'ra', min: 1, max: 500 }, { param: 'rs', min: 10, max: 1000 }, { param: 'es', min: 0, max: 100 }, { param: 'ea', min: 0, max: 100 }, { param: 'p', min: 800, max: 1100 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Aerodynamic resistance from wind and roughness');
-    log.push('  Surface resistance from stomatal conductance');
-    log.push('  Saturation vapor pressure from Eq 3');
+    log.push('  SiB big-leaf fluxes (Sellers et al. 1986, Table 1c)');
+    log.push('  H = (T_s−T_a)·ρc_p/r_a ;  LE = (e_s−e_a)·ρc_p/(γ·(r_a+r_s)), γ = c_p·p/(0.622·L_v)');
+    log.push('  Honest NaN autos: T_s, r_a, r_s (no open point API)');
+    log.push('  Genuine autos: T_a, e_s/e_a (Magnus from T_a+RH), ρ (ideal gas, p/R·T)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -3408,15 +3471,15 @@ export const TOOL_63: ToolWorkflowDef = {
     overallAssessment: 'Bigleaf PM has +/- 20% uncertainty. ra and rs are key uncertain parameters.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Bigleaf Penman-Monteith: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Bigleaf PM: H = rho*cp*(Ts-Ta)/ra; LE = rho*Lv*(es-ea)/(ra+rs).`,
-    recommendations: ['ra from wind + roughness.', 'rs from stomatal conductance model (Eq 50).', 'Used in land-surface models.'],
+    contextualAnalysis: `SiB Bigleaf fluxes: LE = ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} W/m² (primary). H = ρc_p(T_s−T_a)/r_a; LE = (e_s−e_a)·ρc_p/(γ·(r_a+r_s)) with γ = c_p·p/(0.622·L_v) — paper Table 1c. Requires T_s, r_a, r_s (no open point API → honest NaN autos).`,
+    recommendations: ['T_s from in-situ or thermal satellite; r_a from wind + roughness; r_s from stomatal conductance.', 'e_s/e_a auto from T_a+RH (Magnus); ρ auto from p and T_a (ideal gas).', 'Used in land-surface models (SiB, CLM).'],
   }),
   metadata: {
-    methodology: 'Bigleaf PM: H = rho*cp*(Ts-Ta)/ra; LE = rho*Lv*(es-ea)/(ra+rs).',
-    assumptions: ['Bigleaf approximation', 'No canopy stratification', 'Linear gradients'],
+    methodology: 'SiB Table 1c: H = (T_s−T_a)·ρc_p/r_a; LE = (e_s−e_a)·ρc_p/(γ·(r_a+r_s)), γ = c_p·p/(0.622·L_v).',
+    assumptions: ['Bigleaf (single-source) approximation', 'No canopy stratification', 'Linear gradients'],
     limitations: ['Not for tall canopies', 'Requires surface temperature', 'ra and rs uncertain'],
-    references: ['Sellers 1986'],
-    preprocessingNotes: ['Aerodynamic resistance from wind and roughness', 'Surface resistance from stomatal conductance', 'Saturation vapor pressure from Eq 3'],
+    references: ['Sellers, Mintz, Sud & Dalcher 1986, J. Atmos. Sci. 43(6):505-531'],
+    preprocessingNotes: ['SiB big-leaf fluxes (Table 1c)', 'T_s/r_a/r_s honest NaN autos', 'T_a/e_s/e_a/ρ genuine derivations'],
   },
   dependencies: [3, 50],
 };
@@ -3424,21 +3487,37 @@ export const TOOL_63: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 //  EQUATION 64 — Chapman Ozone Cycle
 // ══════════════════════════════════════════════════════════════════
+// Chapman steady-state O₃/O₂ ratio bands (ppmv-equivalent = R × 1e6):
+// photochemical-equilibrium stratospheric ozone is 1–10 ppmv; below = destruction
+// dominated, above = production dominated.
+const OZONE_RATIO_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 1e-7, label: 'Destruction-Dominant', color: '#3b82f6', description: 'O₃/O₂ < 0.1 ppmv — net O₃ loss' },
+  { min: 1e-7, max: 1e-6, label: 'Low O₃', color: '#60a5fa', description: '0.1–1 ppmv — suppressed photochemical O₃' },
+  { min: 1e-6, max: 1e-5, label: 'Typical Stratosphere', color: '#22c55e', description: '1–10 ppmv — Chapman equilibrium' },
+  { min: 1e-5, max: Infinity, label: 'Production-Dominant', color: '#f97316', description: '> 10 ppmv — O₃ production exceeds loss' },
+];
+
 export const TOOL_64: ToolWorkflowDef = {
   toolId: 64,
   name: 'Chapman Ozone Cycle',
   vizType: 'scalar',
-  classificationBands: AQI_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'O2', min: 0, max: 20 }, { param: 'hv', min: 0, max: 2 }]),
+  classificationBands: OZONE_RATIO_BANDS,
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'J1', min: 1e-20, max: 1 },      // O₂ photolysis rate s⁻¹
+    { param: 'k2', min: 1e-30, max: 1e-10 },  // O+O₂→O₃ cm³/molecule·s
+    { param: 'J3', min: 1e-20, max: 1 },      // O₃ photolysis rate s⁻¹
+    { param: 'k4', min: 1e-30, max: 1e-10 },  // O+O₃→2O₂ cm³/molecule·s
+    { param: 'O2', min: 1e10, max: 1e22 },    // [O₂] molecules/cm³
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Add NOx, HOx, ClOx catalytic cycles (Chapman alone overestimates O3 by ~2x)');
-    log.push('  Solar UV from NOAA SWPC');
-    log.push('  Stratospheric conditions');
+    log.push('  J1/J3 (photolysis rates) require actinic UV flux — no open point API; supply explicitly (CAMS EAC4 or TUV output)');
+    log.push('  k2/k4 = NASA/JPL 2023 evaluation rate constants (physical constants, 298 K)');
+    log.push('  Chapman alone overestimates O3 by ~2x (catalytic NOx/HOx/ClOx cycles omitted — paper predates their discovery)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, AQI_BANDS);
+    const c = classify(result, OZONE_RATIO_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -3448,22 +3527,22 @@ export const TOOL_64: ToolWorkflowDef = {
     rmse: 50,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Missing catalytic cycles', contribution: 'Varies' },
-      { factor: 'UV flux estimation', contribution: 'Varies' },
-      { factor: 'Stratospheric conditions', contribution: 'Varies' },
+      { factor: 'Photolysis-rate inputs (J1, J3) dominate — span orders of magnitude with altitude/SZA', contribution: 'Dominant' },
+      { factor: 'Missing catalytic cycles (NOx/HOx/ClOx)', contribution: '~2x overestimate' },
+      { factor: 'Rate constants T-dependence', contribution: '< 10%' },
     ],
-    overallAssessment: 'Chapman alone overestimates O3 by ~2x. Must include catalytic cycles (NOx, HOx, ClOx).',
+    overallAssessment: 'Ratio algebra exact per Chapman 1930; absolute O3 uncertainty dominated by the J inputs (actinic flux) and the omitted catalytic cycles (~2x overestimate).',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Chapman Ozone Cycle: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Chapman cycle: O2 + hv -> 2O; O + O2 + M -> O3; O3 + hv -> O2 + O; O + O3 -> 2O2.`,
-    recommendations: ['Add NOx, HOx, ClOx catalytic destruction.', 'Chapman alone overestimates O3 by ~2x.', 'Use CAMS for atmospheric composition.'],
+    contextualAnalysis: `Chapman Ozone Cycle: photochemical-equilibrium ratio [O₃]/[O₂] = ${Number.isFinite(result) ? result.toExponential(3) : 'N/A'} (paper result [O₃]/[O₂] = √(J₁·k₂/(J₃·k₄))). Requires J₁ and J₃ (photolysis rates, actinic-flux inputs — supply explicitly; no open point API).`,
+    recommendations: ['Supply J₁/J₃ from a photolysis calculation (e.g. TUV model) or CAMS EAC4 output — no authentic open point source is reachable this session.', 'Chapman alone overestimates O₃ by ~2x — interpret with catalytic NOₓ/HOₓ/ClOₓ cycles.', 'k₂/k₄ are NASA/JPL 2023 evaluation constants (298 K); scale k₂ with [M] for other altitudes.'],
   }),
   metadata: {
-    methodology: 'Chapman cycle: O2 + hv -> 2O; O + O2 + M -> O3; O3 + hv -> O2 + O; O + O3 -> 2O2.',
-    assumptions: ['Pure oxygen chemistry', 'Steady state', 'No catalytic cycles'],
-    limitations: ['Missing catalytic cycles', 'No transport', 'Steady-state assumption'],
-    references: ['Chapman 1930', 'WMO Ozone Assessment 2022'],
-    preprocessingNotes: ['Add NOx, HOx, ClOx catalytic cycles (Chapman alone overestimates O3 by ~2x)', 'Solar UV from NOAA SWPC', 'Stratospheric conditions'],
+    methodology: 'Chapman (1930) mechanism: O2+hv→2O (J1), O+O2→O3 (k2, third body M), O3+hv→O2+O (J3), O+O3→2O2 (k4); reactions (1) O+O→O2 and (5) 2O3→3O2 negligible. Steady state d[O]/dt=d[O3]/dt=0 ⇒ [O3]/[O2] = √(J1·k2/(J3·k4)) and [O] = J1[O2]/(k4[O3]). Source: Chapman 1930 memoir (Mem. R. Meteorol. Soc. 3(26):103-125), mechanism as transcribed by Giunta (Le Moyne, Classical Chemistry); rate constants from NASA/JPL 2023 evaluation (JPL Pub. 19-5).',
+    assumptions: ['Pure oxygen chemistry', 'Photochemical steady state', 'Reactions (1) and (5) negligible', 'No transport or catalytic cycles'],
+    limitations: ['Missing NOx/HOx/ClOx catalytic cycles (~2x O3 overestimate)', 'No vertical transport / Brewer-Dobson', 'Photolysis rates are altitude- and solar-zenith-angle dependent'],
+    references: ['Chapman, S. (1930) A theory of upper-atmospheric ozone. Memoirs of the Royal Meteorological Society, 3(26), 103-125. (NO-DOI)', 'Giunta, C. (2003) Chapman ozone exercises (Le Moyne College Classical Chemistry) — faithful transcription of the paper mechanism', 'Burkholder et al. (2020) NASA/JPL Chemical Kinetics and Photochemical Data for Use in Atmospheric Studies, Evaluation 19, JPL Pub. 19-5'],
+    preprocessingNotes: ['J1/J3 photolysis rates: no open point API — supply explicitly (CAMS EAC4 or TUV)', 'k2/k4: JPL 2023 physical constants (298 K)', 'Chapman alone overestimates O3 by ~2x'],
   },
   dependencies: [],
 };
@@ -3471,21 +3550,33 @@ export const TOOL_64: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 //  EQUATION 65 — Pollutant Lifetime
 // ══════════════════════════════════════════════════════════════════
+// Lifetime regime bands (seconds) — Atkinson 2000 §1 classification:
+// short-lived (< 1 h), moderate (hours–days), intermediate (days–year), long-lived (> 1 yr).
+const LIFETIME_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 3600, label: 'Short-Lived', color: '#ef4444', description: '< 1 h — local impacts (isoprene, terpenes, OH)' },
+  { min: 3600, max: 86400, label: 'Moderate', color: '#f97316', description: 'hours–day — regional air quality (NOₓ, SO₂, VOCs)' },
+  { min: 86400, max: 3.1536e7, label: 'Intermediate', color: '#eab308', description: 'days–1 yr — hemispheric transport (CO, ethane)' },
+  { min: 3.1536e7, max: Infinity, label: 'Long-Lived', color: '#22c55e', description: '> 1 yr — globally well-mixed (CH₄, N₂O, CFCs)' },
+];
+
 export const TOOL_65: ToolWorkflowDef = {
   toolId: 65,
   name: 'Pollutant Lifetime',
   vizType: 'scalar',
-  classificationBands: AQI_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'k', min: 1e-20, max: 1e-5 }, { param: 'OH', min: 1e-10, max: 0.001 }]),
+  classificationBands: LIFETIME_BANDS,
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'k', min: 1e-30, max: 1e-5 },   // bimolecular rate constant cm³/molecule·s (k_OH span: CH4 2.45e-15 … isoprene 1e-10)
+    { param: 'OH', min: 1e4, max: 1e8 },     // [OH] molecules/cm³ (measured range 2e5–1e7; paper global mean 1e6, daytime 2e6)
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  OH concentration ~ 1e6 molecules/cm3');
-    log.push('  Rate constants temperature-dependent');
-    log.push('  Lifetime = 1/(k*[OH])');
+    log.push('  k = species-specific 298 K rate constant (user supplies; paper Table 1 cross-checks available)');
+    log.push('  [OH] default = paper 24-h global mean 1.0e6 molecule/cm3 (Prinn et al. 1995); daytime average 2.0e6 for Table 1 lifetimes');
+    log.push('  Lifetime = 1/(k*[OH]); OH-only loss — photolysis/NO3/O3/deposition combined elsewhere');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, AQI_BANDS);
+    const c = classify(result, LIFETIME_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -3495,22 +3586,22 @@ export const TOOL_65: ToolWorkflowDef = {
     rmse: 30,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'OH concentration poorly constrained', contribution: 'Varies' },
-      { factor: 'Rate constant T-dependence', contribution: 'Varies' },
-      { factor: 'Multi-species reactions', contribution: 'Varies' },
+      { factor: '[OH] spatiotemporal variability (±30% on the global mean)', contribution: 'Dominant for long-lived species' },
+      { factor: 'Rate-constant T-dependence (298 K quoted)', contribution: '10–30%' },
+      { factor: 'Other loss processes (photolysis, NO₃, O₃, deposition)', contribution: 'Varies' },
     ],
-    overallAssessment: 'OH radical concentrations are poorly constrained (+/- 30%). [OH] ~ 1e6 mol/cm3.',
+    overallAssessment: 'Formula exact per Atkinson 2000; ±30% dominated by [OH] variability and the 298 K rate-constant convention (paper Table 1 uses the 12-h daytime 2.0e6).',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Pollutant Lifetime: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Pollutant lifetime: tau = 1/(k * [OH]). [OH] ~ 1e6 molecules/cm3.`,
-    recommendations: ['[OH] ~ 1e6 molecules/cm3 (global mean).', 'Rate constants temperature-dependent.', 'Consider multi-species reactions.'],
+    contextualAnalysis: `Pollutant Lifetime (Atkinson 2000): τ = 1/(k_OH·[OH]) = ${Number.isFinite(result) ? result.toExponential(3) : 'N/A'} s. k is species-specific (user supplies — no open point API); [OH] defaults to the paper's 24-h global mean 1.0e6 molecule cm⁻³.`,
+    recommendations: ['Supply k_OH for the species of interest (isoprene 1.0e-10, CH₄ 2.45e-15, CO 1.5e-13 cm³/molecule·s at 298 K).', 'For paper-consistent lifetimes use the 12-h daytime [OH] = 2.0e6 (Table 1 convention).', 'Combine photolysis/NO₃/O₃/deposition losses for a total lifetime: τ = 1/Σ(kᵢ·[Xᵢ] + J).'],
   }),
   metadata: {
-    methodology: 'Pollutant lifetime: tau = 1/(k * [OH]). [OH] ~ 1e6 molecules/cm3.',
-    assumptions: ['Single reaction pathway', 'Constant [OH]', 'No photolysis'],
-    limitations: ['OH poorly constrained', 'Multiple reaction pathways', 'Photolysis not included'],
-    references: ['Atkinson 2000', 'Seinfeld & Pandis 2016'],
-    preprocessingNotes: ['OH concentration ~ 1e6 molecules/cm3', 'Rate constants temperature-dependent', 'Lifetime = 1/(k*[OH])'],
+    methodology: 'Atkinson (2000): τ = 1/(k_OH·[OH]) with [OH] = 1.0e6 molecule cm⁻³ (24-h global mean, Prinn et al. 1995) or 2.0e6 (12-h daytime average, Table 1). Paper Table 1 gives OH-lifetimes for ~40 VOCs at the daytime value (isoprene 1.4 h, ethene 1.4 day, propane 10 day, benzene 9.4 day, acetone 53 day, methanol 12 day).',
+    assumptions: ['OH-only loss (single pathway)', 'Constant [OH] (pseudo-first order)', '298 K rate constants'],
+    limitations: ['[OH] varies ±30% with latitude/season/time-of-day', 'Photolysis, NO₃, O₃ and deposition losses excluded', 'Rate constants temperature-dependent'],
+    references: ['Atkinson, R. (2000) Atmospheric chemistry of VOCs and NOx. Atmospheric Environment, 34(12-14), 2063-2101. DOI 10.1016/S1352-2310(99)00460-4', 'Prinn et al. (1995) Science 269:187-192 (global [OH] estimate, as cited in the paper)'],
+    preprocessingNotes: ['k species-specific — user supplies', '[OH] default = 1.0e6 (24-h global mean); 2.0e6 daytime for Table 1', 'Lifetime = 1/(k*[OH])'],
   },
   dependencies: [],
 };
@@ -3534,20 +3625,37 @@ export const TOOLS_PART3: Record<number, ToolWorkflowDef> = {
 // ══════════════════════════════════════════════════════════════════
 //  EQUATION 66 — Sverdrup Balance
 // ══════════════════════════════════════════════════════════════════
+// Meridional transport per unit width (m²/s), signed: southward < 0 < northward.
+// Typical interior values: subtropical gyre ~ −30 to −50 m²/s, subpolar ~ +30 m²/s.
+const TRANSPORT_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: -50, label: 'Strong Southward', color: '#3b82f6', description: 'v < −50 m²/s — strong equatorward interior flow' },
+  { min: -50, max: -5, label: 'Southward', color: '#60a5fa', description: '−50 to −5 m²/s — subtropical-gyre interior' },
+  { min: -5, max: 5, label: 'Weak', color: '#a8a29e', description: '|v| < 5 m²/s — near-zero curl regime' },
+  { min: 5, max: 50, label: 'Northward', color: '#f97316', description: '5 to 50 m²/s — subpolar-gyre interior' },
+  { min: 50, max: Infinity, label: 'Strong Northward', color: '#ef4444', description: 'v > 50 m²/s — strong poleward interior flow' },
+];
+
 export const TOOL_66: ToolWorkflowDef = {
   toolId: 66,
   name: 'Sverdrup Balance',
   vizType: 'vector',
-  classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'beta', min: 0, max: 1e-10 },{ param: 'rho0', min: 1000, max: 1050 },{ param: 'curlTau_z', min: -0.001, max: 0.001 }]),
+  classificationBands: TRANSPORT_BANDS,
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'beta', min: 0, max: 1e-10 },     // 2Ωcosφ/R ∈ [0, 2.3e-11]
+    { param: 'rho0', min: 1000, max: 1050 },   // seawater kg/m³
+    { param: 'curlTau_z', min: -0.001, max: 0.001 }, // N/m³
+    { param: 'f', min: -1e-3, max: 1e-3 },     // 2Ωsinφ ∈ [±1.46e-4] s⁻¹
+    { param: 'W', min: 1e4, max: 1e8 },        // basin width m (optional)
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Wind stress curl from ASCAT');
-    log.push('  rho0 = 1025 kg/m3');
+    log.push('  β = 2Ωcosφ/R and f = 2Ωsinφ derived from the request latitude (paper eq 12)');
+    log.push('  (∇×τ)_z = spatial wind-stress curl — no genuine point source this session; honest NaN auto (user supplies, e.g. ASCAT/CCMP)');
+    log.push('  rho0 = 1025 kg/m3 (physical constant)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, OCEAN_BANDS);
+    const c = classify(result, TRANSPORT_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -3557,21 +3665,22 @@ export const TOOL_66: ToolWorkflowDef = {
     rmse: 20,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Wind stress curl', contribution: 'Varies' },
-      { factor: 'Reference density', contribution: 'Varies' },
+      { factor: 'Wind stress curl input (dominant — user-supplied)', contribution: 'Varies' },
+      { factor: 'β and f latitude derivation', contribution: '< 1%' },
+      { factor: 'Reference density (1021–1028)', contribution: '< 1%' },
     ],
-    overallAssessment: '+/- 20% uncertainty',
+    overallAssessment: 'Algebra exact per Sverdrup 1947 eq (13); ±20% typical for the interior transport driven by the (user-supplied) wind-stress curl.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Sverdrup Balance: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Wind-driven interior ocean transport.`,
-    recommendations: ["Valid for ocean interior only.","CMEMS for ocean currents."],
+    contextualAnalysis: `Sverdrup Balance (1947, PNAS 33:318-326): meridional transport per unit width v = (∇×τ)_z/(ρ₀·β) = ${Number.isFinite(result) ? result.toExponential(4) : 'N/A'} m²/s. β = 2Ωcosφ/R from the location; the wind-stress curl must be supplied (honest NaN auto).`,
+    recommendations: ['Supply (∇×τ)_z from a wind product (ASCAT/CCMP/CERA-20C) or a spatial wind-stress gradient.', 'Valid in the ocean interior only — not at the equator (f→0) or in the western boundary currents.', 'Provide the basin width W for the total transport in Sv.'],
   }),
   metadata: {
-    methodology: 'Wind-driven interior ocean transport.',
-    assumptions: ["Steady state","Interior ocean"],
-    limitations: ["Fails in western boundary currents"],
-    references: ["Sverdrup 1947"],
-    preprocessingNotes: ["Wind stress curl from ASCAT","rho0 = 1025 kg/m3"],
+    methodology: 'Sverdrup (1947) eq (13): β·M_y = curl_z(τ) = ∂τ_y/∂x − ∂τ_x/∂y, derived from the momentum equations (9a/9b) + continuity (10); volume transport per unit width v = curl_z(τ)/(ρ₀·β) in m²/s; Ekman pumping w_Ek = curl_z(τ)/(ρ₀·f); β = 2Ωcosφ/R (eq 12), f = 2Ωsinφ.',
+    assumptions: ['Steady state', 'Ocean interior (no boundaries/friction)', 'β-plane approximation', 'Wind stress curl user-supplied'],
+    limitations: ['Fails at the equator (f→0) and in western boundary currents', 'Wind-stress curl needs a spatial wind field (no genuine point source — honest NaN auto)', 'Depth-integrated, not resolved vertically', 'No bottom topography'],
+    references: ['Sverdrup, H.U. (1947) Wind-driven currents in a baroclinic ocean. PNAS 33(11), 318-326. DOI 10.1073/pnas.33.11.318'],
+    preprocessingNotes: ['β, f from latitude (eq 12)', 'Curl user-supplied (honest NaN)', 'rho0 = 1025 kg/m3'],
   },
   dependencies: [],
 };
@@ -3579,20 +3688,38 @@ export const TOOL_66: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 //  EQUATION 67 — Stommel Western Boundary Current
 // ══════════════════════════════════════════════════════════════════
+// Streamfunction-magnitude bands (m²/s) for the Stommel gyre (paper example: ψ ~ 1e5-1e6 m²/s).
+const GYRE_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 1e4, label: 'Weak Gyre', color: '#60a5fa', description: '|ψ| < 1e4 m²/s — weak circulation' },
+  { min: 1e4, max: 1e5, label: 'Moderate Gyre', color: '#22c55e', description: '1e4–1e5 m²/s' },
+  { min: 1e5, max: 1e6, label: 'Strong Gyre', color: '#eab308', description: '1e5–1e6 m²/s — Gulf-Stream-scale transport function' },
+  { min: 1e6, max: Infinity, label: 'Intense Gyre', color: '#ef4444', description: '> 1e6 m²/s' },
+];
+
 export const TOOL_67: ToolWorkflowDef = {
   toolId: 67,
   name: 'Stommel Western Boundary Current',
   vizType: 'vector',
-  classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'beta', min: 0, max: 1e-10 },{ param: 'psi', min: -1000000000, max: 1000000000 },{ param: 'curlTau', min: -0.001, max: 0.001 },{ param: 'R', min: 1e-10, max: 1 },{ param: 'nu', min: 0, max: 1 }]),
+  classificationBands: GYRE_BANDS,
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'beta', min: 0, max: 1e-10 },  // Rossby parameter s⁻¹m⁻¹
+    { param: 'D', min: 1, max: 1e5 },       // depth m
+    { param: 'b', min: 1e3, max: 1e9 },     // basin N-S width (m or cm, consistent units)
+    { param: 'L', min: 1e3, max: 1e9 },     // basin E-W length (m or cm, consistent units)
+    { param: 'R', min: 1e-10, max: 1 },     // friction s⁻¹
+    { param: 'F', min: 0, max: 10 },        // max wind stress (N/m² or dyne/cm²)
+    { param: 'x', min: 0, max: 1e9 },       // evaluation point (consistent units)
+    { param: 'y', min: 0, max: 1e9 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Linear friction model');
-    log.push('  Gulf Stream application');
+    log.push('  Stommel (1948) eq (9): ∇²ψ + α·∂ψ/∂x = γ·sin(πy/b), α = D·β/R, γ = F·π/(R·b)');
+    log.push('  Defaults are the paper\'s numerical example (cgs) converted to SI');
+    log.push('  β auto-derives from the request latitude');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, OCEAN_BANDS);
+    const c = classify(Math.abs(result), GYRE_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -3602,21 +3729,22 @@ export const TOOL_67: ToolWorkflowDef = {
     rmse: 25,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Friction parameter', contribution: 'Varies' },
-      { factor: 'Linear assumption', contribution: 'Varies' },
+      { factor: 'Friction coefficient R (user-supplied)', contribution: 'Dominant' },
+      { factor: 'Linear bottom friction idealization', contribution: 'Varies' },
+      { factor: 'β latitude derivation', contribution: '< 1%' },
     ],
-    overallAssessment: 'Idealized model for westward intensification',
+    overallAssessment: 'Solution algebra exact per Stommel 1948 eqs (9)/(19)-(22); ±25% typical, dominated by the linear-friction idealization and R.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Stommel Western Boundary Current: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Western boundary intensification with linear friction.`,
-    recommendations: ["Explains Gulf Stream, Kuroshio.","Real boundaries have eddies."],
+    contextualAnalysis: `Stommel Western Boundary Current (1948, Trans. AGU 29:202-206): steady-state streamfunction ψ(x,y) = γ(b/π)²·sin(πy/b)·(p·e^{Ax} + q·e^{Bx} − 1) = ${Number.isFinite(result) ? result.toExponential(4) : 'N/A'} m²/s. α = D·β/R; the e^{Bx} term concentrates the flow at the western boundary.`,
+    recommendations: ['Use the paper\'s parameter set (D = 200 m, b = 6249 km, L = 10⁴ km, R = 0.02 s⁻¹, F = 0.1 N/m², β = 1e-11) for the canonical westward-intensified solution.', 'Evaluate near x = 0 (western boundary) to see the Gulf-Stream-like jet; the width is δ = 1/α.', 'β = 0 recovers the non-rotating symmetric case (paper Fig 2).'],
   }),
   metadata: {
-    methodology: 'Western boundary intensification with linear friction.',
-    assumptions: ["Linear dynamics","Constant friction"],
-    limitations: ["Oversimplified friction","No eddies"],
-    references: ["Stommel 1948"],
-    preprocessingNotes: ["Linear friction model","Gulf Stream application"],
+    methodology: 'Stommel (1948) eq (9): ∇²ψ + α·∂ψ/∂x = γ·sin(πy/b), α = D·β/R, γ = F·π/(R·b); closed-form solution (19)-(20): ψ = γ(b/π)²·sin(πy/b)·(p·e^{Ax} + q·e^{Bx} − 1) with A = −α/2 ± √(α²/4 + (π/b)²), p = (1−e^{BL})/(e^{AL}−e^{BL}), q = 1−p; velocities (21)-(22); boundary-layer width δ = 1/α. Defaults = the paper\'s numerical example converted to SI.',
+    assumptions: ['Homogeneous (barotropic) ocean', 'Linear bottom friction −R·u, −R·v', 'Steady state, inertial terms omitted', 'Sinusoidal zonal wind stress F·cos(πy/b)'],
+    limitations: ['Linear friction idealization (no lateral eddy viscosity — the Munk model adds it)', 'No inertia, no topography', 'β-plane (f linear in y)', 'Single-gyre basin'],
+    references: ['Stommel, H. (1948) The westward intensification of wind-driven ocean currents. Transactions, American Geophysical Union, 29(2), 202-206. DOI 10.1029/TR029i002p00202'],
+    preprocessingNotes: ['Defaults = paper numerical example (SI)', 'β from latitude', 'Evaluate ψ at a chosen (x, y)'],
   },
   dependencies: [],
 };
@@ -3628,40 +3756,48 @@ export const TOOL_68: ToolWorkflowDef = {
   toolId: 68,
   name: 'Munk Viscous Boundary Layer',
   vizType: 'vector',
-  classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'AH', min: 0, max: 10000000 },{ param: 'beta', min: 0, max: 1e-10 },{ param: 'psi', min: -1000000000, max: 1000000000 },{ param: 'curlTau', min: -0.001, max: 0.001 }]),
+  classificationBands: GYRE_BANDS,
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'AH', min: 1, max: 1e8 },      // lateral eddy viscosity m²/s (paper: 3.3e7–6.5e7 cm²/s = 3.3e3–6.5e3 m²/s)
+    { param: 'beta', min: 0, max: 1e-10 },  // Rossby parameter s⁻¹m⁻¹
+    { param: 'curlTau', min: -0.001, max: 0.001 }, // wind-stress curl N/m³
+    { param: 'x', min: 0, max: 1e8 },       // distance from western wall m
+    { param: 'r', min: 1e5, max: 1e8 },     // basin width m
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Lateral eddy viscosity');
-    log.push('  Biharmonic operator');
+    log.push('  Munk (1950) J. Meteorology 7(2):79–93 — A_H·∇⁴ψ − β·∂ψ/∂x = curl_z(τ)');
+    log.push('  k = (β/A_H)^(1/3); ψ(x) = curl·r·X_w(x)/β with X_w = 1 − e^(−kx/2)[cos(√3kx/2) + sin(√3kx/2)/√3]');
+    log.push('  A_H default = 5×10³ m²/s (the paper\'s adopted constant, §4); β auto from latitude');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, OCEAN_BANDS);
+    const c = classify(Math.abs(result), GYRE_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
     method: 'empirical',
-    rmse: 25,
+    rmse: 30,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Eddy viscosity', contribution: 'Varies' },
-      { factor: 'Biharmonic', contribution: 'Varies' },
+      { factor: 'Wind-stress curl (user-supplied spatial field)', contribution: 'Dominant' },
+      { factor: 'Constant eddy-viscosity idealization A_H', contribution: 'Varies' },
+      { factor: 'β latitude derivation', contribution: '< 1%' },
     ],
-    overallAssessment: 'Munk model for boundary current width',
+    overallAssessment: 'Solution algebra exact per Munk 1950 eqs (13)/(16)/(20)–(22); ±30% typical, dominated by the wind-stress curl and the constant-A_H idealization (paper: computed Gulf Stream transport 36 vs observed 74 ×10⁶ t/s — the paper\'s own factor-of-two scatter).',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Munk Viscous Boundary Layer: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Lateral viscosity, biharmonic for boundary width.`,
-    recommendations: ["AH from mixing observations.","More realistic than Stommel."],
+    contextualAnalysis: `Munk Viscous Western Boundary Layer (1950, J. Meteor. 7:79–93): streamfunction ψ(x) = curl_z(τ)·r·X_w(x)/β = ${Number.isFinite(result) ? result.toExponential(4) : 'N/A'} m²/s. k = (β/A_H)^(1/3); the e^(−kx/2) oscillatory decay concentrates the flow at the western wall with a 17% countercurrent (exp(−π/√3)).`,
+    recommendations: ['Supply the wind-stress curl (∇×τ)_z from a stress field (ASCAT/CCMP/CERA-20C) — a point wind speed is not a curl.', 'A_H = 5×10³ m²/s is the paper\'s adopted constant; observed widths 200–250 km imply A = 3.3–6.5×10⁷ cm²/s.', 'Evaluate at x ≈ L_w/6 (western current axis, Table 1) to see the jet; the interior pivots to X = 1 − x/r.'],
   }),
   metadata: {
-    methodology: 'Lateral viscosity, biharmonic for boundary width.',
-    assumptions: ["Constant viscosity","Linear dynamics"],
-    limitations: ["AH poorly constrained","No eddies"],
-    references: ["Munk 1950"],
-    preprocessingNotes: ["Lateral eddy viscosity","Biharmonic operator"],
+    methodology: 'Munk (1950) zonal-wind solution: k = (β/A_H)^(1/3) (Coriolis-friction wave number); response X_w(x) = 1 − e^(−kx/2)[cos(√3kx/2) + (1/√3)sin(√3kx/2)] (paper eq 20); streamfunction ψ = curl·r·X_w·(1−x/r)/β; oscillation wavelength L_w = 4π/(√3k) (eq 24); countercurrent exp(−π/√3) ≈ 17% (paper: 17%, observed 19%); western-current transport 1.17·r·curl (eq 26). Default A_H = 5×10³ m²/s = the paper\'s adopted 5×10⁷ cm²/s (§4).',
+    assumptions: ['Constant lateral eddy viscosity A_H', 'Zonal wind stress (τ_x only)', 'Linear, steady, barotropic dynamics', 'Rectangular basin, no-slip walls'],
+    limitations: ['A_H is a poorly constrained parameterization of unresolved eddies', 'No baroclinic structure or topography', 'Paper\'s own Gulf Stream transport 36 vs observed 74 ×10⁶ t/s (factor ~2)'],
+    references: ['Munk, W.H. (1950) On the wind-driven ocean circulation. J. Meteorology 7(2), 79–93. doi:10.1175/1520-0469(1950)007<0080:otwdoc>2.0.co;2'],
+    preprocessingNotes: ['k = (β/A_H)^(1/3)', 'X_w from paper eq 20', 'β auto from latitude'],
   },
   dependencies: [],
 };
@@ -3669,63 +3805,31 @@ export const TOOL_68: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 //  EQUATION 69 — Stommel Box Model
 // ══════════════════════════════════════════════════════════════════
+// Stommel (1961) regime-count classification: 1 or 2 stable regimes.
+const REGIME_BANDS: ClassificationBand[] = [
+  { min: 0.5, max: 1.5, label: 'Single stable regime (1)', color: '#3b82f6', description: 'Monostable circulation' },
+  { min: 1.5, max: 2.5, label: 'Two stable regimes — bistable (2)', color: '#eab308', description: 'Bistable circulation (AMOC-collapse analogue)' },
+];
+
 export const TOOL_69: ToolWorkflowDef = {
   toolId: 69,
-  name: 'Stommel Box Model',
+  name: 'Stommel Two-Vessel Thermohaline Model',
   vizType: 'timeseries',
-  classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'lambda', min: 0, max: 1 },{ param: 'Tstar', min: -5, max: 40 },{ param: 'T', min: -5, max: 40 },{ param: 'q', min: 0, max: 5 }]),
+  classificationBands: REGIME_BANDS,
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'lambda', min: 0, max: 1 },   // dimensionless flow-feedback constant (paper fig 6: 1/5, 1)
+    { param: 'delta', min: 0, max: 1 },    // salinity/temperature exchange ratio d/c (paper: δ < 1)
+    { param: 'R', min: 0, max: 10 },       // density-effect ratio βS̄/αT̄ (paper: R = 2)
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Thermohaline stability');
-    log.push('  AMOC collapse analysis');
+    log.push('  Stommel (1961) Tellus 13(2):224–230 — two-vessel symmetric model');
+    log.push('  Equilibrium: y = 1/(1+|f|), x = δ/(δ+|f|), λ·f = Rx − y → regimes = real roots');
+    log.push('  Defaults = the paper\'s fig-6/7 example (R = 2, δ = 1/6, λ = 1/5): two stable regimes');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
-  },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
-  estimateUncertainty: () => ({
-    method: 'qualitative',
-    contributingFactors: [
-      { factor: 'Box model', contribution: 'Varies' },
-      { factor: 'Bifurcation', contribution: 'Varies' },
-    ],
-    overallAssessment: 'Conceptual model showing AMOC bistability',
-  }),
-  interpret: (result) => ({
-    contextualAnalysis: `Stommel Box Model: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Thermohaline circulation bistability.`,
-    recommendations: ["Shows AMOC bistability.","Freshwater forcing triggers collapse."],
-  }),
-  metadata: {
-    methodology: 'Thermohaline circulation bistability.',
-    assumptions: ["Two-box simplification","No mixing"],
-    limitations: ["Oversimplified","No transient eddies"],
-    references: ["Stommel 1961"],
-    preprocessingNotes: ["Thermohaline stability","AMOC collapse analysis"],
-  },
-  dependencies: [],
-};
-
-// ══════════════════════════════════════════════════════════════════
-//  EQUATION 70 — TEOS-10 Seawater Density
-// ══════════════════════════════════════════════════════════════════
-export const TOOL_70: ToolWorkflowDef = {
-  toolId: 70,
-  name: 'TEOS-10 Seawater Density',
-  vizType: 'profile',
-  classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'S', min: 0, max: 42 },{ param: 'Theta', min: -5, max: 40 },{ param: 'p', min: 0, max: 10000 }]),
-  preprocess: (inputs, ctx, log) => {
-    log.push('  GSW library reference');
-    log.push('  Absolute Salinity');
-    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
-    return inputs;
-  },
-  postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, OCEAN_BANDS);
+    const c = classify(result, REGIME_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -3733,21 +3837,74 @@ export const TOOL_70: ToolWorkflowDef = {
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'GSW implementation', contribution: 'Varies' },
-      { factor: 'Absolute vs Practical Salinity', contribution: 'Varies' },
+      { factor: 'Equilibrium algebra (paper §5 + appendix)', contribution: 'None — exact' },
+      { factor: 'Parameter choice (R, δ, λ)', contribution: 'User-set; defines which regimes exist' },
     ],
-    overallAssessment: 'TEOS-10 is exact with GSW library',
+    overallAssessment: 'Equilibrium computation is exact per Stommel 1961 (cubic roots + Poincaré stability); the qualitative conclusion (1 vs 2 stable regimes) depends only on the chosen R, δ, λ.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `TEOS-10 Seawater Density: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. 75-term polynomial seawater density.`,
-    recommendations: ["Use GSW library.","Absolute Salinity, Conservative Temperature."],
+    contextualAnalysis: `Stommel (1961) two-vessel thermohaline model: ${Number.isFinite(result) ? result.toFixed(0) : 'N/A'} stable equilibrium regime(s). Bistability (two stable regimes) is the paper's headline result — a temperature-dominated circulation and a salinity-dominated (reversed) circulation, with hysteresis between them.`,
+    recommendations: ['R·δ < 1 with R > 1 and a sufficiently small λ is the paper\'s necessary condition for three equilibria (two stable) — the default R=2, δ=1/6 gives R·δ = 1/3.', 'Increase λ past the critical value and the temperature-dominated branch is annihilated (paper §6): the system jumps to the salinity-dominated regime and stays there even when λ is restored — the AMOC-collapse analogue.', 'R = 2, δ = 1 yields a single stable regime (paper fig 8).'],
   }),
   metadata: {
-    methodology: '75-term polynomial seawater density.',
-    assumptions: ["TEOS-10 standard","Known S,T,p"],
-    limitations: ["Requires GSW","Absolute Salinity needs atlas"],
-    references: ["IOC 2010, TEOS-10 Manual"],
-    preprocessingNotes: ["GSW library reference","Absolute Salinity"],
+    methodology: 'Stommel (1961) two-vessel symmetric model: dx/dt = δ(1−x) − |f|x, dy/dt = (1−y) − |f|y, λ·f = Rx − y. Equilibrium y = 1/(1+|f|), x = δ/(δ+|f|); the cubic λ·f = Rδ/(δ+|f|) − 1/(1+|f|) is solved for the real flow roots f (the regimes); stability via the paper\'s appendix linearization and the Poincaré conditions of Stoker (1950). Defaults are the paper\'s fig-6/7 example (R = 2, δ = 1/6, λ = 1/5).',
+    assumptions: ['Two well-stirred vessels, symmetric T = T₁ = −T₂, S = S₁ = −S₂', 'Linear capillary flow law kq = ε₁ − ε₂', 'Linear transfer through porous walls (δ = d/c < 1)', 'Linear equation of state ε = ε₀(1 − αT + βS)'],
+    limitations: ['Conceptual model — not a quantitative AMOC forecast', 'No stratification, rotation, geometry or transients', 'Parameter values (R, δ, λ) are user-chosen, not data-derived'],
+    references: ['Stommel, H. (1961) Thermohaline convection with two stable regimes of flow. Tellus 13(2), 224–230. doi:10.3402/tellusa.v13i2.9491'],
+    preprocessingNotes: ['λ·f = Rx − y equilibrium cubic', 'Poincaré stability conditions', 'Defaults = paper fig-6/7 example'],
+  },
+  dependencies: [],
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EQUATION 70 — TEOS-10 Seawater Density
+// ══════════════════════════════════════════════════════════════════
+// Density water-mass bands on σ_t = ρ − 1000 (kg/m³), the standard classification.
+const DENSITY_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 0, label: 'Fresh / brackish', color: '#3b82f6', description: 'σ_t < 0 — pure water or river-influenced' },
+  { min: 0, max: 23, label: 'Light surface water', color: '#22c55e', description: 'Tropical warm pool / mixed layer' },
+  { min: 23, max: 26, label: 'Subtropical mode water', color: '#84cc16', description: 'Subtropical mode water' },
+  { min: 26, max: 27.5, label: 'Central / thermocline', color: '#eab308', description: 'Main pycnocline waters' },
+  { min: 27.5, max: 28.2, label: 'Deep / intermediate', color: '#f97316', description: 'NADW / intermediate waters' },
+  { min: 28.2, max: Infinity, label: 'Bottom water', color: '#ef4444', description: 'AABW and dense abyssal waters' },
+];
+
+export const TOOL_70: ToolWorkflowDef = {
+  toolId: 70,
+  name: 'TEOS-10 Seawater Density',
+  vizType: 'profile',
+  classificationBands: DENSITY_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'S', min: 0, max: 42 },{ param: 'Theta', min: -18, max: 40 },{ param: 'p', min: 0, max: 10000 }]),
+  preprocess: (inputs, ctx, log) => {
+    log.push('  75-term specific-volume polynomial — Roquet et al. (2015), same form as gsw_specvol');
+    log.push('  Inputs: Absolute Salinity S_A (g/kg), Conservative Temperature Θ (ITS-90), sea pressure p (dbar)');
+    log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
+    return inputs;
+  },
+  postProcess: (result, _base, _ctx, log) => {
+    const c = classify(result, DENSITY_BANDS);
+    if (c) log.push(`  Result: ${c.label}`);
+    return { classification: c };
+  },
+  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  estimateUncertainty: () => ({
+    method: 'analytical',
+    contributingFactors: [
+      { factor: 'Polynomial fit (75-term vs full Gibbs function)', contribution: '≤ 0.005 kg/m³ within the oceanographic funnel' },
+      { factor: 'Absolute vs Practical Salinity (δS_A not applied)', contribution: '≤ 0.04 kg/m³ open ocean' },
+    ],
+    overallAssessment: 'ρ accurate to ±0.005 kg/m³ (TEOS-10 75-term polynomial within the oceanographic funnel); dominated by the user-supplied S_A (open-ocean S_P approximation adds ≤ 0.04 kg/m³).',
+  }),
+  interpret: (result) => ({
+    contextualAnalysis: `TEOS-10 Seawater Density: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} kg/m³ (σ_t = ${Number.isFinite(result) ? (result - 1000).toFixed(2) : 'N/A'}). Computed from the 75-term Roquet et al. (2015) polynomial — the GSW gsw_specvol form.`,
+    recommendations: ["Supply Absolute Salinity for precision; open-ocean S_P ≈ S_A within 0.05 g/kg","Conservative Temperature Θ (ITS-90) is the TEOS-10 temperature variable","σ_θ (density at p = 0) is the right variable for water-mass comparison"],
+  }),
+  metadata: {
+    methodology: '75-term specific-volume polynomial in (S_A, Θ, p) — Roquet et al. (2015) Table K.1, identical to GSW gsw_specvol; ρ = 1/v.',
+    assumptions: ["TEOS-10 standard","S_A treated as input (open-ocean S_P approximation)","Within the oceanographic funnel"],
+    limitations: ["δS_A composition correction not applied","Polynomial valid S_A 0–42, Θ −18–40 °C, p 0–10000 dbar"],
+    references: ["IOC/SCOR/IAPSO 2010, TEOS-10 Manual §A.30/Table K.1","Roquet et al. 2015, Ocean Modelling 90:29–43"],
+    preprocessingNotes: ["75-term polynomial (gsw_specvol form)","Absolute Salinity / Conservative Temperature"],
   },
   dependencies: [],
 };
@@ -3760,11 +3917,18 @@ export const TOOL_71: ToolWorkflowDef = {
   name: 'Osborn-Cox Turbulent Diffusivity',
   vizType: 'scalar',
   classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'gamma', min: 0, max: 0.5 },{ param: 'eps', min: 1e-12, max: 0.0001 },{ param: 'N2', min: 0, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'kappa', min: 1e-9, max: 1e-5 },      // molecular thermal diffusivity m²/s
+    { param: 'gradVar', min: 0, max: 1e4 },        // <(∇θ')²> K²/m² (microstructure)
+    { param: 'dTdz', min: -1, max: 1 },            // mean vertical temperature gradient K/m
+    { param: 'gamma', min: 0, max: 0.5 },          // companion Osborn (1980) efficiency
+    { param: 'eps', min: 1e-12, max: 0.0001 },     // companion TKE dissipation W/kg
+    { param: 'N2', min: 0, max: 1 },               // buoyancy frequency squared
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Mixing efficiency gamma ~ 0.2');
-    log.push('  TKE from microstructure');
-    log.push('  N2 from CTD');
+    log.push('  Osborn & Cox (1972) — fine-structure method: A = κ·<(∇θ\')²>/(∂θ̄/∂z)²');
+    log.push('  <(∇θ\')²> = temperature-gradient variance (microstructure, no open API → NaN)');
+    log.push('  Companion Osborn (1980): K_ρ = γ·ε/N² (requires ε — honest NaN when missing)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -3775,30 +3939,27 @@ export const TOOL_71: ToolWorkflowDef = {
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 30,
-    rmseUnit: '%',
+    method: 'analytical',
     contributingFactors: [
-      { factor: 'Gamma', contribution: 'Varies' },
-      { factor: 'Epsilon', contribution: 'Varies' },
-      { factor: 'N2', contribution: 'Varies' },
+      { factor: '<(∇θ\')²> microstructure variance', contribution: 'Dominant — measurement ±50% typical' },
+      { factor: 'κ molecular diffusivity', contribution: 'Known to ~±5% (T/S dependent)' },
+      { factor: '∂θ̄/∂z mean gradient (CTD/profile)', contribution: '±10% typical' },
     ],
-    overallAssessment: '+/- 30% uncertainty',
+    overallAssessment: 'Algebra exact per Osborn & Cox (1972) eq (25)+(5); ±50% total uncertainty dominated by the microstructure variance input.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Osborn-Cox Turbulent Diffusivity: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Vertical diffusivity from TKE dissipation.`,
-    recommendations: ["Gamma ~ 0.2.","Epsilon from microstructure."],
+    contextualAnalysis: `Osborn-Cox fine-structure diffusivity: ${Number.isFinite(result) ? result.toExponential(3) : 'N/A'} m²/s (A = κ·<(∇θ')²>/(∂θ̄/∂z)², Osborn & Cox 1972).`,
+    recommendations: ["Supply <(∇θ')²> from temperature-microstructure profilers (MSS, VMP)","∂θ̄/∂z auto-derives from the ocean T-profile","Compare with the companion Osborn (1980) K_ρ = γ·ε/N² when ε is available"],
   }),
   metadata: {
-    methodology: 'Vertical diffusivity from TKE dissipation.',
-    assumptions: ["Steady state","Constant gamma"],
-    limitations: ["Gamma not universal","Requires microstructure"],
-    references: ["Osborn 1980"],
-    preprocessingNotes: ["Mixing efficiency gamma ~ 0.2","TKE from microstructure","N2 from CTD"],
+    methodology: 'Fine-structure (Osborn-Cox) method: A = κ·<(∇θ\')²>/(∂θ̄/∂z)² (paper eq 25 + eq 5); companion Osborn (1980) K_ρ = γ·ε/N² reported as a secondary.',
+    assumptions: ["Steady state, laterally homogeneous (paper Appendix A)","Temperature variance dominates entropy generation (salt terms neglected, paper eq 15)"],
+    limitations: ["<(∇θ')²> requires microstructure measurements — no open point API → honest NaN","ε (Osborn 1980 companion) also microstructure-only","Double-diffusive regimes violate the steady-state assumption"],
+    references: ["Osborn & Cox 1972, Geophys. Fluid Dyn. 3(1):321–345","Osborn 1980, J. Phys. Oceanogr. 10:83–89 (companion method)"],
+    preprocessingNotes: ["Fine-structure method (1972)","<(∇θ')²> from microstructure","∂θ̄/∂z auto from ocean T-profile"],
   },
   dependencies: [],
 };
-
 // ══════════════════════════════════════════════════════════════════
 //  EQUATION 72 — Price-Weller-Pinkel Mixed Layer
 // ══════════════════════════════════════════════════════════════════
@@ -3807,10 +3968,17 @@ export const TOOL_72: ToolWorkflowDef = {
   name: 'Price-Weller-Pinkel Mixed Layer',
   vizType: 'gauge',
   classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'Ri', min: 0, max: 10 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'g', min: 9, max: 10 },        // gravity m/s²
+    { param: 'rho0', min: 1000, max: 1030 }, // reference density kg/m³
+    { param: 'drho', min: 0, max: 5 },      // density jump Δρ kg/m³
+    { param: 'h', min: 0.1, max: 2000 },    // mixed-layer depth m
+    { param: 'dV', min: 0, max: 5 },        // velocity jump ΔV m/s
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Ri = 0.65 threshold');
-    log.push('  Wind from ASCAT');
+    log.push('  PWP (Price, Weller & Pinkel 1986) — bulk Richardson criterion eq (9)');
+    log.push('  R_b = g·Δρ·h/(ρ₀·ΔV²) ≥ 0.65 stable; < 0.65 → mixed layer entrains/deepens');
+    log.push('  ΔV (velocity jump) has no open point API → honest NaN until supplied');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -3821,29 +3989,27 @@ export const TOOL_72: ToolWorkflowDef = {
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 20,
-    rmseUnit: '%',
+    method: 'analytical',
     contributingFactors: [
-      { factor: 'Ri threshold', contribution: 'Varies' },
-      { factor: 'Wind forcing', contribution: 'Varies' },
+      { factor: 'Δρ density jump (profile-derived)', contribution: '±10% typical' },
+      { factor: 'ΔV velocity jump', contribution: 'Dominant — measurement ±30% typical' },
+      { factor: 'h mixed-layer depth', contribution: '±10% typical' },
     ],
-    overallAssessment: '+/- 20% uncertainty',
+    overallAssessment: 'Criterion algebra exact per PWP 1986 eq (9); the 0.65 threshold is the DIM criterion of Price et al. (1978). The binary deepening decision is robust near the threshold only when ΔV is accurate (±30% typical → ±60% in R_b).',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Price-Weller-Pinkel Mixed Layer: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Mixed layer deepening at Ri > 0.65.`,
-    recommendations: ["Ri = 0.65 threshold.","Argo for profiles."],
+    contextualAnalysis: `PWP mixed layer: ${Number.isFinite(result) ? (result === 1 ? 'DEEPENING (R_b < 0.65)' : 'stable (R_b ≥ 0.65)') : 'N/A'}. Computed from R_b = g·Δρ·h/(ρ₀·ΔV²) per the paper eq (9).`,
+    recommendations: ["Supply ΔV (velocity jump across the ML base) — no open point API, honest NaN default","Δρ and h auto-derive from the ocean T/S profile","The 0.25 gradient-Richardson value (eq 10) governs shear instability below the ML"],
   }),
   metadata: {
-    methodology: 'Mixed layer deepening at Ri > 0.65.',
-    assumptions: ["Bulk mixed layer","Linear stratification"],
-    limitations: ["Simplified mixing","No lateral processes"],
-    references: ["Price, Weller & Pinkel 1986"],
-    preprocessingNotes: ["Ri = 0.65 threshold","Wind from ASCAT"],
+    methodology: 'Bulk Richardson criterion (paper eq 9): R_b = g·Δρ·h/(ρ₀·ΔV²); mixed layer entrains when R_b < 0.65 (paper §4.2); third process relaxes gradient R_g toward 0.25 (eq 10).',
+    assumptions: ["Bulk mixed layer with a density/velocity jump at its base (paper §4.3)","Wind-driven velocity in the Richardson numbers (paper §4.2)","Linear state equation (paper eq 7)"],
+    limitations: ["ΔV velocity jump — no open point API → honest NaN default","0.65 threshold is the DIM criterion (Price et al. 1978), calibrated to the FLIP diurnal-cycle dataset","1D — no advection, Langmuir, or internal-wave breaking (paper's own caveats)"],
+    references: ["Price, Weller & Pinkel 1986, JGR 91(C7):8411–8427","Price, Mooers & Van Leer 1978 (DIM model)","Pollard, Rhines & Thompson 1973"],
+    preprocessingNotes: ["R_b from paper eq (9)","Δρ, h auto from ocean T/S profile","ΔV honest NaN (no open API)"],
   },
   dependencies: [],
 };
-
 // ══════════════════════════════════════════════════════════════════
 //  EQUATION 73 — Pierson-Moskowitz Sea State
 // ══════════════════════════════════════════════════════════════════
@@ -3852,16 +4018,24 @@ export const TOOL_73: ToolWorkflowDef = {
   name: 'Pierson-Moskowitz Sea State',
   vizType: 'spectrum',
   classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'alpha', min: 0, max: 1 },{ param: 'g', min: 9.8, max: 9.82 },{ param: 'fm', min: 0.01, max: 10 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'U', min: 3, max: 40 },          // wind speed m/s at 19.5 m (paper data 10.29–20.58 m/s)
+    { param: 'omega', min: 0.01, max: 10 },   // evaluation angular frequency rad/s
+    { param: 'g', min: 9.8, max: 9.82 },      // gravity m/s²
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Fully developed sea assumption');
-    log.push('  NDBC buoy validation');
+    log.push('  Pierson & Moskowitz (1964) eq (12): S(ω) = (αg²/ω⁵)e^(−β(ω₀/ω)⁴), α=8.10e-3, β=0.74, ω₀=g/U');
+    log.push('  Fully developed sea — unlimited fetch and duration (the paper\'s assumption)');
+    log.push('  U = wind at the paper\'s 19.5 m weather-ship reference height (genuine CDS ERA5 10 m wind converted via the neutral log profile, z₀=0.0002 m; honest NaN when unavailable)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
-  postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+  postProcess: (result, base, _ctx, log) => {
+    // Classification is by the derived significant wave height H_s (m), NOT by
+    // the spectral density S(ω) (m²·s) — OCEAN_BANDS are wave-height bands.
+    const hs = base?.secondary?.find((s) => s.key === 'Hs')?.value;
+    const c = Number.isFinite(hs) ? classify(hs as number, OCEAN_BANDS) : undefined;
+    if (c && hs != null) log.push(`  Result: ${c.label} (H_s = ${(hs as number).toFixed(2)} m)`);
     return { classification: c };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
@@ -3870,37 +4044,41 @@ export const TOOL_73: ToolWorkflowDef = {
     rmse: 15,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Fully developed', contribution: 'Varies' },
-      { factor: 'Wind speed', contribution: 'Varies' },
+      { factor: 'Fully-developed assumption', contribution: '±15% — fetch-limited seas are lower' },
+      { factor: 'Wind speed U (auto 19.5 m conversion from ERA5 10 m)', contribution: '±8% typical — neutral-log profile with z₀=0.0002 m open-ocean roughness; stability effects unmodeled' },
     ],
-    overallAssessment: '+/- 15% for fully developed seas',
+    overallAssessment: '±15% for fully developed seas; the paper\'s own spectra span the 20–40 knot wind range with sampling variability.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Pierson-Moskowitz Sea State: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Fully developed sea wave spectrum.`,
-    recommendations: ["Fully developed only.","JONSWAP for fetch-limited."],
+    contextualAnalysis: `Pierson-Moskowitz spectrum: S(ω) = ${Number.isFinite(result) ? result.toExponential(3) : 'N/A'} m²·s at the chosen ω (default: the peak ω_p). The derived significant wave height H_s = 4√m₀ = 0.209·U²/g and peak period T_p = 2π/ω_p = 7.16·U/g are reported in the secondary outputs. Fully developed sea per the paper eq (12).`,
+    recommendations: ["Valid only for fully developed seas (unlimited fetch/duration)","JONSWAP applies for fetch-limited developing seas","U is the weather-ship-height wind (19.5 m reference per the paper); the auto default converts genuine ERA5 10 m wind via the neutral log profile"],
   }),
   metadata: {
-    methodology: 'Fully developed sea wave spectrum.',
-    assumptions: ["Fully developed","Infinite fetch"],
-    limitations: ["Not for fetch-limited","No swell"],
-    references: ["Pierson & Moskowitz 1964"],
-    preprocessingNotes: ["Fully developed sea assumption","NDBC buoy validation"],
+    methodology: 'Paper eq (12): S(ω) = (α·g²/ω⁵)·e^(−β·(ω₀/ω)⁴) with the paper\'s fixed α = 8.10×10⁻³, β = 0.74, ω₀ = g/U; derived H_s = 4√m₀ = 0.209·U²/g, T_p = 7.16·U/g.',
+    assumptions: ["Fully developed sea (unlimited fetch and duration)","Steady wind (weather-ship measurement)","α = 0.0081 fixed by the paper (not a free input)","U = wind at the paper's 19.5 m weather-ship reference height"],
+    limitations: ["Not valid for fetch-limited / young seas (JONSWAP regime)","No swell component","U is the ship-height (19.5 m) wind — the auto default converts genuine ERA5 10 m wind via the neutral log profile (z₀ = 0.0002 m open ocean); stability effects unmodeled"],
+    references: ["Pierson & Moskowitz 1964, JGR 69(24):5181–5190","Kitaigorodskii 1961 (similarity theory)","Moskowitz 1964 (source spectra)"],
+    preprocessingNotes: ["α, β fixed by the paper","U auto from genuine CDS ERA5 10 m wind converted to the paper's 19.5 m reference height (honest NaN when CDS unavailable)","ω default = peak ω_p"],
   },
   dependencies: [],
 };
-
 // ══════════════════════════════════════════════════════════════════
 //  EQUATION 74 — Wave Runup (Stockdon)
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_74: ToolWorkflowDef = {
   toolId: 74,
-  name: 'Wave Runup (Stockdon)',
+  name: 'Stockdon Wave Runup',
   vizType: 'scalar',
   classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'eta_u', min: 0, max: 5 },{ param: 'Sw', min: 0, max: 5 },{ param: 'Sig', min: 0, max: 5 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'H0', min: 0.05, max: 20 },
+    { param: 'T0', min: 2, max: 30 },
+    { param: 'betaF', min: 0.001, max: 0.5 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Stockdon 2006 empirical');
-    log.push('  Beach slope from LiDAR');
+    log.push('  Stockdon et al. 2006 (Coastal Engineering 53:573-588)');
+    log.push('  H0/T0 from genuine CDS ERA5 swh/pp1d');
+    log.push('  beta_f from SRTM30m slope at the point');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -3912,24 +4090,25 @@ export const TOOL_74: ToolWorkflowDef = {
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
     method: 'empirical',
-    rmse: 20,
-    rmseUnit: '%',
+    rmse: 0.38,
+    rmseUnit: 'm',
     contributingFactors: [
-      { factor: 'Beach slope', contribution: 'Varies' },
-      { factor: 'Wave conditions', contribution: 'Varies' },
+      { factor: 'Foreshore slope β_f', contribution: '51% of relative error per slope variability (paper §4.4)' },
+      { factor: 'Wave height/period', contribution: 'H₀/L₀ input uncertainty' },
+      { factor: 'Beach type', contribution: 'Dissipative (ξ₀<0.3) vs intermediate/reflective' },
     ],
-    overallAssessment: '+/- 20% uncertainty',
+    overallAssessment: 'rms error 38 cm, bias −17 cm over 10 field experiments (paper Table 3)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Wave Runup (Stockdon): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. 2% exceedance wave runup.`,
-    recommendations: ["Most widely used.","NDBC for wave data."],
+    contextualAnalysis: `Stockdon Wave Runup R₂: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} m. 2% exceedance runup (paper Eq 9/19: R₂ = 1.1(η̄ + S/2); ξ₀<0.3 uses the dissipative form Eq 18, R₂ = 0.043(H₀L₀)^(1/2)).`,
+    recommendations: ["R₂ < 1 m: low hazard, daily conditions.","R₂ 1–3 m: moderate — storm conditions.","R₂ > 3 m: high — dune erosion / overwash potential."],
   }),
   metadata: {
-    methodology: '2% exceedance wave runup.',
-    assumptions: ["Dissipative beaches","Uniform slope"],
-    limitations: ["Not for reflective beaches","Vegetation not included"],
+    methodology: '2% exceedance wave runup from H₀, T₀ (→L₀=gT₀²/2π) and foreshore slope β_f; Iribarren ξ₀ selects dissipative (Eqs 16-18) vs all-sites (Eqs 10-12, 19) model.',
+    assumptions: ["Sandy beaches (validated 10 experiments: Duck, Scripps, San Onofre, Terschelling, Gleneden, Agate)","Deep-water wave conditions (H₀, L₀)","Shore-normal approach; linear wave theory shoaling"],
+    limitations: ["Not for engineered structures, vegetation, or reef-fronted coasts","No tide/surge/wave-current interaction included","β_f from SRTM30m slope — the paper's surveyed foreshore slope is finer","ERA5 swh/pp1d grid cell (~25 km) is a deep-water proxy, not a local buoy"],
     references: ["Stockdon et al. 2006"],
-    preprocessingNotes: ["Stockdon 2006 empirical","Beach slope from LiDAR"],
+    preprocessingNotes: ["Stockdon et al. 2006 empirical","H0/T0 from genuine CDS ERA5 swh/pp1d","beta_f from SRTM30m slope at the point"],
   },
   dependencies: [],
 };
@@ -3941,16 +4120,17 @@ export const TOOL_75: ToolWorkflowDef = {
   toolId: 75,
   name: 'Bruun Rule',
   vizType: 'timeseries',
-  classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'Lstar', min: 50, max: 5000 },{ param: 'S', min: 0, max: 1 },{ param: 'B', min: 0, max: 20 },{ param: 'hstar', min: 1, max: 50 }]),
+  classificationBands: RETREAT_BANDS,
+  validate: (inputs) => validateRange(inputs, [{ param: 'L', min: 50, max: 5000 },{ param: 'S', min: 0, max: 1 },{ param: 'B', min: 0, max: 20 },{ param: 'hstar', min: 1, max: 50 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  SLR from satellite altimetry');
-    log.push('  Closure depth from wave climate');
+    log.push('  S from NOAA CO-OPS tide-gauge trend');
+    log.push('  h* = 1.57·H_s (Hallermeier 1981) from CDS ERA5 swh');
+    log.push('  B/L from SRTM30m terrain at the point');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, OCEAN_BANDS);
+    const c = classify(result, RETREAT_BANDS);
     if (c) log.push(`  Result: ${c.label}`);
     return { classification: c };
   },
@@ -3967,14 +4147,14 @@ export const TOOL_75: ToolWorkflowDef = {
   }),
   interpret: (result) => ({
     contextualAnalysis: `Bruun Rule: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Shoreline retreat from sea level rise.`,
-    recommendations: ["Highly simplified.","GEBCO for bathymetry."],
+    recommendations: ["Highly simplified.","NOAA CO-OPS sea-level trends for local S.","ERA5 swh for closure depth."],
   }),
   metadata: {
-    methodology: 'Shoreline retreat from sea level rise.',
-    assumptions: ["Equilibrium profile","No longshore transport"],
-    limitations: ["Oversimplified","No sediment budget"],
-    references: ["Bruun 1962"],
-    preprocessingNotes: ["SLR from satellite altimetry","Closure depth from wave climate"],
+    methodology: 'R = L·S/(B+h*): shoreline retreat from sea level rise; S from the NOAA CO-OPS gauge trend, h* = 1.57·H_s (Hallermeier 1981) from ERA5 swh, B/L from SRTM30m.',
+    assumptions: ["Equilibrium profile translated up-and-landward without shape change","No longshore transport / closed sediment budget","Sandy coast with genuine profile geometry"],
+    limitations: ["Fails on many real coasts (Cooper & Pilkey 2004)","No sediment supply, overwash, or hard structures","Auto S = global altimetry rate where no local gauge exists"],
+    references: ["Bruun, P. (1962) Sea-level rise as a cause of shore erosion. J. Waterways and Harbors Division, 88(1), 117-130. doi:10.1061/jwheau.0000252"],
+    preprocessingNotes: ["S from NOAA CO-OPS tide-gauge trend","h* = 1.57·H_s (Hallermeier 1981) from ERA5 swh","B/L from SRTM30m terrain"],
   },
   dependencies: [],
 };
@@ -3984,13 +4164,13 @@ export const TOOL_75: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_76: ToolWorkflowDef = {
   toolId: 76,
-  name: 'Breaker Criterion',
+  name: 'McCowan Breaker Criterion',
   vizType: 'scalar',
   classificationBands: OCEAN_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'db', min: 0.1, max: 50 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  McCowan 0.78 coefficient');
-    log.push('  Bathymetry from GEBCO');
+    log.push('  McCowan (1894) breaker criterion: H_b = 0.78 × d_b');
+    log.push('  d_b auto = genuine GEBCO 2020 bathymetry at the point (honest NaN on land / fetch failure)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -4005,21 +4185,21 @@ export const TOOL_76: ToolWorkflowDef = {
     rmse: 15,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Breaker coefficient', contribution: 'Varies' },
-      { factor: 'Beach slope', contribution: 'Varies' },
+      { factor: 'Breaker coefficient γ_b', contribution: '0.78 fixed; ±0.4–1.2 by Iribarren number on sloping beaches' },
+      { factor: 'Water depth d_b', contribution: 'GEBCO 2020 grid resolution / local bathymetric detail' },
     ],
-    overallAssessment: '+/- 15% uncertainty',
+    overallAssessment: '+/- 15% uncertainty (γ_b variation dominates)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Breaker Criterion: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Breaking wave height from water depth.`,
-    recommendations: ["0.78 is McCowan coefficient.","NDBC for waves."],
+    contextualAnalysis: `McCowan Breaking Wave Height: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. H_b = 0.78 × d_b at the breaking depth (McCowan 1894, eq 34).`,
+    recommendations: ["0.78 is McCowan's 1894 highest-wave coefficient.","Verify d_b against local surveys — GEBCO grid is coarse in the nearshore."],
   }),
   metadata: {
-    methodology: 'Breaking wave height from water depth.',
-    assumptions: ["Spilling breakers","Uniform slope"],
-    limitations: ["Not for plunging","No current interaction"],
-    references: ["McCowan 1894"],
-    preprocessingNotes: ["McCowan 0.78 coefficient","Bathymetry from GEBCO"],
+    methodology: 'Breaking wave height at the McCowan (1894) limit H_b = 0.78·d_b (paper eq 34: the highest solitary wave of permanent type in water of depth h reaches c − h = 0.78h).',
+    assumptions: ['Horizontal bed / endless rectangular channel of uniform depth (the paper\'s geometry)', 'Solitary wave of permanent type — the limiting case as wavelength → ∞', 'd_b auto from genuine GEBCO 2020 bathymetry (positive depth only over water)', 'γ_b = 0.78 constant — slope-dependent variation (0.4–1.2) not captured'],
+    limitations: ['0.78 derived for a horizontal bed — natural sloping beaches show γ_b ≈ 0.4–1.2 by Iribarren number', 'Not applicable in deep water where Stokes wave-steepness limits breaking first', 'No current/wind interaction; solitary-wave approximation', 'Breaker type (spilling/plunging/surging) needs the beach-slope / Iribarren input this tool does not take'],
+    references: ['McCowan, J. (1894) On the highest wave of permanent type. Philosophical Magazine, Series 5, 38(233), 351–358. doi:10.1080/14786449408620643'],
+    preprocessingNotes: ['d_b auto from genuine GEBCO 2020 bathymetry (OpenTopoData)'],
   },
   dependencies: [],
 };
