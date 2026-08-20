@@ -253,7 +253,7 @@ function renderPoints(
       ...shapeConfig,
       label: {
         text: typeof name === 'string' && name.length > 20 ? name.slice(0, 18) + '...' : String(name),
-        font: '9px Space Grotesk, sans-serif',
+        font: '9px Inter, sans-serif',
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 1.5,
@@ -321,7 +321,7 @@ function renderHeatmap(
       },
       label: {
         text: s.item.name ? String(s.item.name) : `${s.val.toFixed(1)}`,
-        font: '9px Space Grotesk, sans-serif',
+        font: '9px Inter, sans-serif',
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 1.5,

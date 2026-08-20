@@ -40,10 +40,39 @@ function cesiumAssetsPlugin(): Plugin {
   }
 }
 
+/**
+ * Serve a true 404 for missing files under /models/ (the transformers.js local
+ * weights dir). Without this, Vite's SPA fallback answers a missing model file
+ * with index.html + HTTP 200, so transformers.js never falls back to
+ * huggingface.co and instead tries to JSON.parse the HTML →
+ * "Unrecognized token '<'".
+ */
+function models404Plugin(): Plugin {
+  const modelsRoot = path.resolve(__dirname, 'public', 'models')
+  return {
+    name: 'models-404',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const reqPath = (req.url ?? '').split('?')[0]
+        if (!reqPath.startsWith('/models/')) return next()
+        const rel = reqPath.replace(/^\/+/, '').replace(/^models\//, '')
+        const resolved = path.resolve(modelsRoot, rel)
+        if (!resolved.startsWith(modelsRoot + path.sep) || !fs.existsSync(resolved)) {
+          res.statusCode = 404
+          res.setHeader('Content-Type', 'text/plain')
+          res.end('Not Found')
+          return
+        }
+        next()
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
-  plugins: [react(), cesiumAssetsPlugin()],
+  plugins: [react(), cesiumAssetsPlugin(), models404Plugin()],
   server: {
     port: 3000,
     strictPort: true,

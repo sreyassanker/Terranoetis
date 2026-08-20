@@ -28,7 +28,7 @@ test('3D CFD flood overlay renders on globe with real data', async () => {
   page.on('console', (msg) => {
     const text = msg.text();
     if (msg.type() === 'error') consoleErrors.push(text);
-    if (text.includes('kaggle') || text.includes('[terrain:') || text.includes('Kaggle Flood CFD')) {
+    if (text.includes('kaggle') || text.includes('[terrain:') || text.includes('Flood')) {
       cfdLogs.push(text);
     }
   });

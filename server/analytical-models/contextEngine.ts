@@ -20,7 +20,7 @@ import {
   fetchVegetationIndices, fetchSeaIce,
   fetchTectonicContext, fetchSpaceWeather,
   fetchWaterData, fetchLandCover,
-  fetchTerrain, fetchGlacierData,
+  fetchTerrain, fetchShorelineBearing, fetchGlacierData,
   fetchVolcanoData, fetchTropoDelay,
   fetchPermafrostData, fetchDroughtData,
   fetchRiverData, fetchEra5HighFidelity,
@@ -174,13 +174,14 @@ const ALIGN: Record<number, Record<string, string>> = {
   71:  { 'ε': 'eps', 'γ': 'gamma', 'N²': 'N2', 'κ': 'kappa', '<(∇θ′)²>': 'gradVar', '∂θ̄/∂z': 'dTdz' },
   72:  { 'Δρ': 'drho', 'ΔV': 'dV', 'ρ₀': 'rho0' },
   73:  { 'U₁₀': 'U', 'ω': 'omega', 'U10': 'U' },
+  79:  { 'a': 'ka' },
   92:  { 'λ': 'lambda' },
   95:  { 'α': 'alpha' },
   96:  { 'α': 'alpha' },
   99:  { 'β': 'beta' },
   102: { 'ψ': 'psi' },
-  106: { 'dTheta': 'dtheta', 'cos2beta': 'cos2b' },
-  113: { 'λ': 'lam' },
+
+
   123: { 'ρ': 'rho' },
   124: { 'ρ': 'rho' },
   126: { 'β': 'beta', 'γ': 'gamma' },
@@ -366,6 +367,8 @@ function mapInputs(
     slr?: SeaLevelTrendResult | null;
     /** GEBCO 2020 bathymetry at the study point (positive-up elevation) — Tool 76 McCowan breaking depth. */
     gebcoDepth?: { elevation: number; depth: number } | null;
+    /** Local shoreline bearing (°, 0–180) from GEBCO 2020 relief probes — Tool 77 CERC breaker angle. */
+    shorelineBearing?: number | null;
     lat: number;
     lon: number;
     studyArea?: StudyArea;
@@ -1978,16 +1981,65 @@ function mapInputs(
         __gebcoElev: gebco?.elevation ?? null,
       };
     }
-    case 77: return {
-      K: u('K', 0.39),
-      Hsb: u('Hsb', m.wave_height ?? 1.5),
-      thetaB: u('thetaB', 20 * Math.PI / 180),
-    };
-    case 78: return {
-      g: u('g', G_GRAV),
-      k: u('k', 0.1),
-      h: u('h', 10),
-    };
+    case 77: {
+      // CERC longshore sediment transport (SPM 1984, Vol 1 Ch 4 §V — the
+      // energy-flux method, eqs 4-44/4-45/4-48/4-49/4-50, K = 0.39). Auto
+      // H_sb: genuine CDS ERA5 significant wave height (swh) — the paper's
+      // deep-water H_0s, so the engine applies the Table 4-10 deep-water
+      // form eq 4-45 (provenance-flagged); a user-supplied Hsb is treated
+      // as the breaking height and uses eq 4-44. Auto θ_b: genuine ERA5
+      // mean wave direction (mwd) relative to the genuine GEBCO 2020 shoreline
+      // bearing — the signed acute angle between the wave propagation
+      // direction and the shore-normal (sin(2α) then carries sign). Honest
+      // NaN when either genuine source is unavailable (no proxy, no
+      // fabricated angle).
+      const wave = ctx.era5?.source === 'cds' && ctx.era5?.waveHeight != null
+        ? { H0s: ctx.era5.waveHeight, mwd: ctx.era5.waveDirection }
+        : null;
+      const userH = userInputs['Hsb'] != null;
+      const userTheta = userInputs['thetaB'] != null;
+      const sb = ctx.shorelineBearing;
+      let thetaAuto = Number.NaN;
+      let thetaNote: string | null = null;
+      if (wave && Number.isFinite(wave.mwd ?? NaN) && Number.isFinite(sb ?? NaN)) {
+        const prop = (wave.mwd! + 180) % 360;                 // waves travel toward this bearing
+        const normalLand = (sb! + 90) % 360;                  // shore-normal pointing landward
+        const d = ((prop - normalLand) % 360 + 360) % 360;    // 0–360
+        const signed = d > 180 ? d - 360 : d;                 // −180..180
+        const acute = signed > 90 ? signed - 180 : signed < -90 ? signed + 180 : signed;
+        thetaAuto = acute * Math.PI / 180;
+        thetaNote = `α = signed acute angle between ERA5 mean wave direction (${Math.round(wave.mwd!)}° FROM) and the GEBCO 2020 shore-normal (shoreline bearing ${sb!.toFixed(0)}°)`;
+      }
+      return {
+        K: u('K', 0.39),
+        Hsb: u('Hsb', wave ? wave.H0s : Number.NaN),
+        thetaB: u('thetaB', thetaAuto),
+        // Provenance for the engine's steps (never shown as inputs).
+        __hAuto: !userH,
+        __thetaAuto: !userTheta,
+        __thetaNote: thetaNote,
+        __deepWaterForm: !userH,
+        __waveDate: ctx.era5?.waveAsOfDate ?? null,
+      };
+    }
+    case 78: {
+      // Airy (1845) linear wave dispersion relation (SPM 1984 Vol 1 Ch 2,
+      // eqs 2-1/2-2/2-3): ω² = g·k·tanh(kh). Auto h: genuine GEBCO 2020
+      // bathymetry at the point (the same source as Tool 76 — positive
+      // depth only over water). Land points / fetch failures yield an
+      // honest NaN auto depth (no static 10 m). User-supplied h always
+      // wins; the provenance flags tell the engine whether to label the
+      // step "auto GEBCO" or "user input".
+      const userH = userInputs['h'] != null;
+      const autoDepth = gebcoDepth && gebcoDepth.depth > 0 ? gebcoDepth.depth : Number.NaN;
+      return {
+        g: u('g', G_GRAV),
+        k: u('k', 0.1),
+        h: u('h', autoDepth),
+        __hAuto: !userH,
+        __gebcoElev: gebcoDepth ? gebcoDepth.elevation : null,
+      };
+    }
     case 79: return {
       omega: u('omega', 2 * Math.PI / (m.wave_period ?? 8)),
       ka: u('ka', 0.1),
@@ -2014,8 +2066,8 @@ function mapInputs(
       h: u('h', 0.6),
     };
     case 83: return {
-      L: u('L', 100),
-      s: u('s', 1000),
+      L1: u('L1', 100), s1: u('s1', 10),
+      L2: u('L2', 300), s2: u('s2', 1),
     };
     case 84: return {
       cprime: u('cprime', 25),
@@ -2032,6 +2084,8 @@ function mapInputs(
       mu: u('mu', 0.4),
       sigmaN: u('sigmaN', 100),
       xi: u('xi', 500),
+      rho: u('rho', 2000),
+      velocity: u('velocity', 10),
     };
     case 86: return {
       // Stream Power Index: SPI = ln(As × tanβ) — Moore et al. (1991)
@@ -2094,13 +2148,12 @@ function mapInputs(
     }
     case 92: return {
       K: u('K', 2),
-      DDF: u('DDF', 1500),
-      L: u('L', 334000),
-      'λ': u('λ', 2),
+      DIFI: u('DIFI', 1000),
+      L: u('L', 3e8),
     };
     case 93: return {
-      k: u('k', 11),
-      b: u('b', 9.16),
+      k: u('k', 0.01),
+      b: u('b', 100),
       rhoI: u('rhoI', 917),
       rhoF: u('rhoF', 550),
     };
@@ -2108,7 +2161,7 @@ function mapInputs(
       // Volcanic Explosivity Index — influenced by eruption history
       const activityBoost = vo?.recentActivity ? 1 : 0;
       return {
-        V: u('V', 4 + activityBoost),
+        VEI: u('VEI', 4 + activityBoost),
       };
     }
     case 95: {
@@ -2117,7 +2170,7 @@ function mapInputs(
       return {
         Qdot: u('Qdot', 1e6 * distFactor),
         rhoAir: u('rhoAir', 1.2),
-        α: u('α', 0.1),
+        alpha: u('alpha', 0.1),
       };
     }
 
@@ -2141,8 +2194,8 @@ function mapInputs(
     }
     case 97: return {
       dF: u('dF', 3.7),
-      lambda0: u('lambda0', 1.2),
-      f: u('f', 0),
+      lambda0: u('lambda0', 3.2),  // Planck feedback λ₀ ≈ 3.2 W/m²K (Hansen et al. 1984)
+      f: u('f', 2.0),              // Net non-Planck feedbacks (WV+LR+cloud+albedo) → ECS ≈ 3 K
     };
     case 98: return {
       dRdT: u('dRdT', -3.2),
@@ -2167,7 +2220,7 @@ function mapInputs(
 
     // ═══ Domain 16: Atmospheric Dynamics ═══
     case 102: return {
-      ψ: u('ψ', 1e7),
+      psi: u('psi', 1e7),
       f: u('f', 1e-4),
       dpy: u('dpy', 1e-11),
       dpp: u('dpp', 1e-12),
@@ -2201,9 +2254,9 @@ function mapInputs(
         ? ps.temperature850 - ps.temperature500
         : undefined;
       return {
-        dTheta: u('dTheta', dthetaEra5 ?? 5),
+        dtheta: u('dtheta', dthetaEra5 ?? 5),
         D: u('D', 1e-7),
-        cos2beta: u('cos2beta', 0.5),
+        cos2b: u('cos2b', 0.5),
         delta: u('delta', 0.5),
         dB: u('dB', 0),
         dudy: u('dudy', 1e-3),
@@ -2218,6 +2271,7 @@ function mapInputs(
         dudy: u('dudy', 1e-5),
         dvdx: u('dvdx', 1e-5),
         dvdy: u('dvdy', pw?.v850 != null && pw?.v500 != null ? (pw.v850 - pw.v500) / 100000 : 1e-5),
+        div: u('div', undefined as any),
       };
     }
 
@@ -2262,7 +2316,7 @@ function mapInputs(
       Snm: u('Snm', 0),
       Pnm: u('Pnm', 1),
       phi: u('phi', lat * Math.PI / 180),
-      λ: u('λ', lon * Math.PI / 180),
+      lam: u('lam', lon * Math.PI / 180),
     };
     case 114: return {
       S: u('S', 1),
@@ -2298,8 +2352,8 @@ function mapInputs(
     case 121: return {
       Dst: u('Dst', sw.dstIndex),
       Pdyn: u('Pdyn', 2),
-      b: u('b', 5.2),
-      c: u('c', 21),
+      b: u('b', 7.26),
+      c: u('c', 0),
     };
     case 122: return {
       eps0: u('eps0', 8.854e-12),
@@ -2341,9 +2395,15 @@ function mapInputs(
     };
     case 127: return {
       n: u('n', 0.001),
-      ax: u('ax', 0.001),
-      ay: u('ay', 0),
-      az: u('az', 0),
+      x: u('x', 100),       // radial offset in meters
+      y: u('y', 0),          // along-track offset in meters
+      z: u('z', 0),          // cross-track offset in meters
+      xdot: u('xdot', 0),    // radial velocity m/s
+      ydot: u('ydot', 0),    // along-track velocity m/s
+      zdot: u('zdot', 0),    // cross-track velocity m/s
+      ax: u('ax', 0),        // radial thrust m/s²
+      ay: u('ay', 0),        // along-track thrust m/s²
+      az: u('az', 0),        // cross-track thrust m/s²
     };
 
     // ═══ Domain 21: Solar-Terrestrial & GNSS (Eqs 128–130) ═══
@@ -2567,7 +2627,7 @@ export async function computeWithContext(
   // ERA5 surface fluxes (Tool 17 Gill ocean heat budget) wait long enough
   // for the job to complete; every other tool keeps the default 10 s
   // window so overall responsiveness is unchanged.
-  const ERA5_CONSUMER_IDS = new Set([5, 8, 17, 48, 49, 50, 52, 56, 59, 70, 71, 73, 74, 75, 105, 106, 107]);
+  const ERA5_CONSUMER_IDS = new Set([5, 8, 17, 48, 49, 50, 52, 56, 59, 70, 71, 73, 74, 75, 77, 105, 106, 107]);
   const ERA5_TIMEOUT_MS = 150000;
   // GLDAS consumers may need the stream-halt fallback (HEAD binary search
   // for the latest published granule + one nc4 download — ~60–120 s worst
@@ -2582,7 +2642,7 @@ export async function computeWithContext(
     tropo, permafrost, drought, river, era5, imerg, gldas,
     rFactor, gpp, gppAnnual, co2, sst, pmelPco2,
     gddStation,
-    slr, gebcoDepth,
+    slr, gebcoDepth, shorelineBearing,
   ] = await Promise.all([
     safe(
       context?.time?.granularity === 'range'
@@ -2624,7 +2684,7 @@ export async function computeWithContext(
       { pdsi: 0, precipitation: 0, temperature: 0, soilMoisture: 0, droughtClass: 'unknown' } as DroughtData),
     safe(fetchRiverData(lat, lon),
       { discharge: 0, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData),
-    safe(fetchEra5HighFidelity(lat, lon, dateStr, { mostOnly: id === 48 || id === 49 || id === 50, fluxOnly: id === 52 || id === 59, fluxDailyMean: id === 59, windOnly: id === 56 || id === 73, waveOnly: id === 74 || id === 75, skip: id === 56 && normInputs.k != null }),
+    safe(fetchEra5HighFidelity(lat, lon, dateStr, { mostOnly: id === 48 || id === 49 || id === 50, fluxOnly: id === 52 || id === 59, fluxDailyMean: id === 59,      windOnly: id === 56 || id === 73, waveOnly: id === 74 || id === 75 || id === 77, skip: id === 56 && normInputs.k != null }),
       { frictionVelocity: null, totalColumnWaterVapour: null, surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null, source: 'none' } as Era5HighFidelityData,
       ERA5_CONSUMER_IDS.has(id) ? ERA5_TIMEOUT_MS : undefined),
     safe(fetchImergPrecipitation(lat, lon, dateStr).then(r => r ?? { totalPrecipitation: null, maxIntensity: null, source: null } as ImergData),
@@ -2675,7 +2735,17 @@ export async function computeWithContext(
     // bathymetry at the study point — the paper's water-depth input d_b.
     // Land points / fetch failures yield an honest NaN auto value (no
     // static depth). Only fetched for tool 76.
-    safe(id === 76 ? fetchGebcoDepth(lat, lon) : Promise.resolve(null), null, 30000),
+    safe(id === 76 || id === 78 ? fetchGebcoDepth(lat, lon) : Promise.resolve(null), null, 30000),
+    // Tool 77 (CERC longshore transport, SPM 1984): genuine local shoreline
+    // bearing from GEBCO 2020 relief ring probes (positive = land, negative =
+    // seafloor — the same source as the Tool 76 auto bathymetry, unambiguous
+    // at coasts where SRTM's 0-m fill would misread water as land) — converts
+    // the genuine ERA5 mean wave direction into the breaker angle α_b/α₀
+    // relative to the shoreline (the paper's eqs 4-44/4-45 input). Null when
+    // no resolvable coast is within the probe radius (open ocean) or on
+    // fetch failure — the engine then NaN-fires honestly on the angle (no
+    // fabricated orientation). Only fetched for tool 77.
+    safe(id === 77 ? fetchShorelineBearing(lat, lon) : Promise.resolve(null), null, 25000),
   ]);
 
   const popData = await safe(fetchPopulation(lat, lon), { populationDensity: 0, totalPopulation: 0 });
@@ -2743,7 +2813,7 @@ export async function computeWithContext(
     water, landCover, terrain, glacier, volcano,
     tropo, permafrost, drought, river, era5, imerg, gldas,
     rFactor, gpp, gppAnnual, co2,
-    sst, pmelPco2, gddStation, slr, gebcoDepth,
+    sst, pmelPco2, gddStation, slr, gebcoDepth, shorelineBearing,
     satThermal, columnWV,
     tide, rupture,
     fire,
@@ -2815,7 +2885,9 @@ export async function computeWithContext(
   if (sst) sources.push('noaa-oisst-v2');
   if (pmelPco2) sources.push(`noaa-pmel-co2-mooring:${pmelPco2.station}`);
   if (slr) sources.push(`noaa-coops-sea-level-trend:${slr.stationId}`);
-  if (id === 76 && gebcoDepth && gebcoDepth.depth > 0) sources.push('gebco-2020-bathymetry');
+  if ((id === 76 || id === 78) && gebcoDepth && gebcoDepth.depth > 0) sources.push('gebco-2020-bathymetry');
+  if (id === 77 && era5?.source === 'cds' && era5?.waveHeight != null) sources.push('cds-era5-wave');
+  if (id === 77 && shorelineBearing != null) sources.push('gebco-2020-shoreline');
   if (id === 75 && (terrain.slope > 0 || terrain.elevation > 0)) sources.push('srtm30m-terrain');
   if (tide) sources.push(tide.source);
   if (interpObs && interpObs.obs.length > 0) sources.push(`usgs-nwis-observations:${interpObs.paramCd}`);

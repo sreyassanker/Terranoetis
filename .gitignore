@@ -21,10 +21,19 @@ server/.env
 # Kaggle API credentials
 Terranoetis_kaggle.json
 
+# Runtime data & dead code
+data/app.db
+data/terranoetis.db
+data/models/
+smoke-kaggle-routes.ts
+
 # SQLite runtime data
 server/realtime.db
 server/realtime.db-wal
 server/realtime.db-shm
+server/db/realtime.db
+server/db/realtime.db-wal
+server/db/realtime.db-shm
 server/data/terranoetis.db
 *.db-wal
 *.db-shm
@@ -37,6 +46,9 @@ inspect.mjs
 inspect2.mjs
 screenshot.mjs
 test_pdf2.mjs
+
+# Vite dev-server PID file
+vite_running.pid
 
 # Kaggle kernel simulation results
 kaggle-kernels/results/
@@ -74,6 +86,9 @@ __pycache__/
 playwright-report/
 test-results/
 
+# Kilo agent-manager local state
+.kilo/
+
 # Local config with secrets
 opencode.json
 .claude/
@@ -82,7 +97,20 @@ opencode.json
 test_*.cjs
 live_*.cjs
 final_browser_test.cjs
-live_test_scenario_viewer.cjs
+legacy-test-scripts/
+test-cds-audit.mjs
+start-lfm.sh
 
 # Session notes
 SESSION_SUMMARY.md
+
+# Locally downloaded ML model weights (see scripts/download-models.mjs)
+models/
+public/models/
+
+# Research papers (downloaded PDFs)
+.DS_Store
+docs/Research papers/*.pdf
+
+# Markdown files inside docs
+docs/**/*.md

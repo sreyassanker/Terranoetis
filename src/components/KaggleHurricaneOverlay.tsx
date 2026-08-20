@@ -30,7 +30,7 @@ const SCHEMES = [
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const HURRICANE_CONFIG: ScalarOverlayConfig = {
-  title: 'Hurricane CFD',
+  title: 'Hurricane',
   accent: 'rgba(56,189,248,0.95)',
   typeKey: 'hurricane_landfall',
   fields: {

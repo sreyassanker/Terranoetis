@@ -170,6 +170,28 @@ function buildTurfPolygons(items: StudyAreaItem[]): ReturnType<typeof polygon>[]
   return result;
 }
 
+/* ── Study-area outer rings in [lon, lat] (for point-in-polygon / sweep filtering) ── */
+export function getStudyAreaOuterRings(item: StudyAreaItem): Array<Array<[number, number]>> {
+  const rings: Array<Array<[number, number]>> = [];
+  if (!item.visible) return rings;
+  if (item.geojson) {
+    for (const f of item.geojson.features) {
+      const ring = getOuterRing(f.geometry);
+      if (ring && ring.length >= 3) rings.push(ring);
+    }
+  } else if (item.positions && item.positions.length >= 2) {
+    let coords = positionsToDegCoords(item.positions);
+    if (item.type === 'rectangle') coords = expandRectCoords(coords);
+    if (coords.length >= 3) {
+      if (coords[0][0] !== coords[coords.length - 1][0] || coords[0][1] !== coords[coords.length - 1][1]) {
+        coords.push(coords[0]);
+      }
+      rings.push(coords);
+    }
+  }
+  return rings;
+}
+
 export function filterDataEntitiesByStudyArea(
   viewer: Cesium.Viewer,
   items: StudyAreaItem[],

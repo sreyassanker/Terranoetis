@@ -241,7 +241,7 @@ export class AisVesselTracker {
           },
           label: {
             text: v.name || '',
-            font: '11px Space Grotesk, sans-serif',
+            font: '11px Inter, sans-serif',
             fillColor: Cesium.Color.WHITE,
             outlineColor: Cesium.Color.BLACK,
             outlineWidth: 2,

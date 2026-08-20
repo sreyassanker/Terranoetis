@@ -202,7 +202,18 @@ export function renderGridToCanvas(grid: InterpGrid, colorStops: { stop: number;
   const range = grid.valueMax - grid.valueMin || 1;
 
   for (let i = 0; i < grid.data.length; i++) {
-    const t = (grid.data[i] - grid.valueMin) / range;
+    const v = grid.data[i];
+    const idx = i * 4;
+    // Cells outside the drawn study-area polygon are NaN → render transparent
+    // so the IDW overlay hugs the shape instead of painting its bounding box.
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      imgData.data[idx] = 0;
+      imgData.data[idx + 1] = 0;
+      imgData.data[idx + 2] = 0;
+      imgData.data[idx + 3] = 0;
+      continue;
+    }
+    const t = (v - grid.valueMin) / range;
     let r = 0, g = 0, b = 0;
     for (let s = 0; s < colorStops.length - 1; s++) {
       if (t >= colorStops[s].stop && t <= colorStops[s + 1].stop) {
@@ -218,7 +229,6 @@ export function renderGridToCanvas(grid: InterpGrid, colorStops: { stop: number;
       g = colorStops[colorStops.length - 1].g;
       b = colorStops[colorStops.length - 1].b;
     }
-    const idx = i * 4;
     imgData.data[idx] = r;
     imgData.data[idx + 1] = g;
     imgData.data[idx + 2] = b;

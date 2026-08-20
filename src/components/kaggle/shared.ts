@@ -475,7 +475,7 @@ export function addDomainBoundary(
   return viewer.entities.add({
     rectangle: {
       coordinates: rect,
-      material: Cesium.Color.WHITE.withAlpha(0.0),
+      material: new Cesium.ColorMaterialProperty(Cesium.Color.WHITE.withAlpha(0.0)),
       outline: true,
       outlineColor: color,
       outlineWidth: 2,

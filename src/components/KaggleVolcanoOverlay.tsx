@@ -30,7 +30,7 @@ const SCHEMES = [
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const VOLCANO_CONFIG: ScalarOverlayConfig = {
-  title: 'Volcano CFD',
+  title: 'Volcano',
   accent: 'rgba(156,163,175,0.95)',
   typeKey: 'volcanic_eruption',
   fields: {

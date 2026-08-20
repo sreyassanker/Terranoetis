@@ -111,9 +111,11 @@ export default function WildfireVisualizer({ viewer, shapes, progress }: Wildfir
               polyline: {
                 positions: cached,
                 width: s.width || 2,
-                material: new Cesium.CallbackProperty(() => {
-                  return Cesium.Color.fromCssColorString(s.color).withAlpha((s.opacity || 0.25) * progressRef.current);
-                 }, false) as unknown as Cesium.MaterialProperty,
+                material: new Cesium.ColorMaterialProperty(
+                  new Cesium.CallbackProperty(() => {
+                    return Cesium.Color.fromCssColorString(s.color).withAlpha((s.opacity || 0.25) * progressRef.current);
+                  }, false),
+                ),
                  clampToGround: true,
               },
             });

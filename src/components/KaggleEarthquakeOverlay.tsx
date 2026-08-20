@@ -1,12 +1,11 @@
 /**
- * KaggleEarthquakeOverlay — 3D shaking-field visualization.
+ * KaggleEarthquakeOverlay — Professional 3D Shaking Field Visualization.
  *
- * The earthquake dataset's peak ground acceleration becomes a displaced
- * 3D surface (wave-liked terrain deformity). Arrows map local ADCP-style
- * rigid-body deformation at all grid cells — non-existent for earthquake
- * sims — so vectors are disabled.
+ * Renders peak ground acceleration (PGA), velocity (PGV), and macroseismic 
+ * intensity (MMI) datasets computed by the 3D elastic wave simulation.
  */
 
+import React from 'react';
 import {
   KaggleScalarOverlay,
   type ScalarOverlayConfig,
@@ -14,48 +13,55 @@ import {
 import type { ColorStop } from './kaggle/shared';
 
 const PGA_COLORMAP: ColorStop[] = [
-  { stop: 0.0, r: 35, g: 35, b: 35 },
-  { stop: 0.25, r: 90, g: 45, b: 60 },
-  { stop: 0.5, r: 200, g: 80, b: 60 },
-  { stop: 0.75, r: 245, g: 200, b: 100 },
-  { stop: 1.0, r: 255, g: 245, b: 220 },
+  { stop: 0.00, r: 25,  g: 25,  b: 30  },
+  { stop: 0.20, r: 45,  g: 85,  b: 155 },
+  { stop: 0.40, r: 50,  g: 170, b: 120 },
+  { stop: 0.60, r: 230, g: 190, b: 60  },
+  { stop: 0.80, r: 235, g: 90,  b: 45  },
+  { stop: 1.00, r: 255, g: 245, b: 230 },
 ];
 
 const SCHEMES = [
-  { name: 'default', label: 'Shaking intensity' },
-  { name: 'viridis', label: 'Viridis' },
-  { name: 'turbo', label: 'Turbo' },
-  { name: 'spectral', label: 'Spectral' },
+  { name: 'default', label: 'Shaking Intensity' },
   { name: 'inferno', label: 'Inferno' },
+  { name: 'turbo', label: 'Turbo' },
+  { name: 'viridis', label: 'Viridis' },
+  { name: 'spectral', label: 'Spectral' },
   { name: 'coolwarm', label: 'Cool–Warm' },
 ];
 
-// eslint-disable-next-line react-refresh/only-export-components
-export const EARTHQUAKE_CONFIG: ScalarOverlayConfig = {
-  title: 'Earthquake CFD',
-  accent: 'rgba(250,204,21,0.95)',
+const EARTHQUAKE_CONFIG: ScalarOverlayConfig = {
+  title: 'Earthquake 3D Wavefield',
+  accent: 'rgba(250, 204, 21, 0.95)',
   typeKey: 'earthquake_swarm',
   fields: {
-    // Kernel writes `pga_cm_s2.npy` (peak ground acceleration, cm/s²).
-    // Was 'pga_cm_s' — a 404 on every run, so the overlay never rendered.
+    // Primary scalar array exported by main.py
     finalName: 'pga_cm_s2',
   },
   defaultColormap: PGA_COLORMAP,
   surfaceColormap: 'inferno',
   arrowColormap: 'plasma',
-  exaggeration: 600,
+  exaggeration: 650,
   alphaFloor: 0.005,
   sideTint: true,
   schemes: SCHEMES,
   legendUnit: 'cm/s²',
-  auxFetchNames: ['mmi', 'pgv_cm_s'],
-  formatTime: (t) => t.toFixed(0),
+  auxFetchNames: ['mmi', 'pgv_cm_s', 'sa_1s_cm_s2'],
+  formatTime: (t) => `${t.toFixed(1)}s`,
   formatStats: ({ surface, aux, domainKm }) => {
-    const mmi = aux['mmi'] ? Math.max(...aux['mmi'].values.filter(Number.isFinite)) : null;
+    // Extract max MMI from aux dataset if present
+    const mmiArray = aux['mmi']?.values?.filter(Number.isFinite);
+    const maxMMI = mmiArray && mmiArray.length > 0 ? Math.max(...mmiArray) : null;
+
+    // Extract max PGV from aux dataset if present
+    const pgvArray = aux['pgv_cm_s']?.values?.filter(Number.isFinite);
+    const maxPGV = pgvArray && pgvArray.length > 0 ? Math.max(...pgvArray) : null;
+
     return [
-      ['Max PGA', `${surface.maxValue.toFixed(2)} cm/s²`],
-      ['Max MMI', mmi != null && isFinite(mmi) ? mmi.toFixed(1) : '—'],
-      ['Domain', `${domainKm.toFixed(1)} km`],
+      ['Max PGA', `${surface.maxValue.toFixed(1)} cm/s²`],
+      ['Max PGV', maxPGV != null ? `${maxPGV.toFixed(1)} cm/s` : '—'],
+      ['Max MMI', maxMMI != null ? `Intensity ${maxMMI.toFixed(0)}` : '—'],
+      ['Domain Extent', `${domainKm.toFixed(1)} km`],
     ];
   },
 };
@@ -65,5 +71,3 @@ export default function KaggleEarthquakeOverlay(
 ) {
   return <KaggleScalarOverlay {...props} config={EARTHQUAKE_CONFIG} />;
 }
-
-import * as React from 'react';

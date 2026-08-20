@@ -28,6 +28,11 @@ const C_LIGHT = 299792458; // m/s
 const K_BOLTZMANN = 1.380649e-23; // J/K
 const G_GRAV = 9.80665; // m/s^2
 const R_SPEC = 287.058; // J/(kg·K) specific gas constant for dry air
+// Shore Protection Manual (1984) Vol 1, Table 4-8 — "commonly assumed values"
+// for the immersed-weight/volumetric conversion, eq (4-35):
+const RHO_SW = 1025;   // kg/m³ — saltwater density
+const RHO_SAND = 2650; // kg/m³ — quartz sand grain density
+const SAND_POROSITY = 0.4; // n — void ratio of the sand matrix (1−n = 0.6)
 const _OMEGA = 7.292115e-5; // Earth rotation rate (rad/s)
 const PI = Math.PI;
 
@@ -4132,62 +4137,150 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  77: ({ K, Hsb, thetaB }) => {
-    const Hsb_2p5 = Math.pow(Hsb, 2.5);
-    const sin2t = Math.sin(2 * thetaB);
-    const Ql = K * Hsb_2p5 * sin2t;
+  77: ({ K, Hsb, thetaB, __hAuto = true, __thetaAuto = true, __thetaNote = null, __deepWaterForm = false, __waveDate = null }) => {
+    // CERC longshore sediment transport — Shore Protection Manual (1984),
+    // Vol 1, Ch 4 (Littoral Processes), §V Energy Flux Method:
+    //   eq 4-44 (breaking height):  P_ls = 0.0884·ρ·g^(3/2)·H_b^(5/2)·sin(2α_b)
+    //   eq 4-45 (deep-water H_0s):  P_ls = 0.05·ρ·g^(3/2)·H_0s^(5/2)·(cos α₀)^(1/4)·sin(2α₀)
+    //   eq 4-48: I_l = K·P_ls, K = 0.39 (SPM design value; Komar & Inman
+    //             1970 use 0.77 with deep-water H_o — the factor ~2 gap is
+    //             the significant-height vs deep-water difference, SPM text)
+    //   eq 4-35/4-49: Q = I_l/((ρs−ρ)·g·(1−n))   (Table 4-8: ρs=2650, ρ=1025, 1−n=0.6)
+    //   eq 4-50a: Q(yr) = 1290·P_ls m³/yr  (dimensional design constant)
+    const finite = Number.isFinite(K) && K > 0
+      && Number.isFinite(Hsb) && Hsb > 0
+      && Number.isFinite(thetaB);
+    const sin2t = finite ? Math.sin(2 * thetaB) : Number.NaN;
+    // Deep-water form (eq 4-45) applies when H comes from genuine ERA5 swh
+    // (the paper's H_0s); the breaking form (eq 4-44) when the user supplies
+    // a breaking height H_b.
+    const cosA = finite ? Math.cos(thetaB) : 0;
+    const cEff = __deepWaterForm ? 0.05 * Math.pow(Math.max(cosA, 0), 0.25) : 0.0884;
+    const Pls = finite
+      ? cEff * RHO_SW * Math.pow(G_GRAV, 1.5) * Math.pow(Hsb, 2.5) * sin2t
+      : Number.NaN; // J/(s·m) — longshore energy flux factor
+    const I = finite ? K * Pls : Number.NaN; // N/s — immersed-weight rate (eq 4-48)
+    const denom = (RHO_SAND - RHO_SW) * G_GRAV * (1 - SAND_POROSITY); // (2650−1025)·9.80665·0.6
+    const Q = finite ? I / denom : Number.NaN; // m³/s (eq 4-35/4-49)
+    const Qyr = finite ? 1290 * Pls : Number.NaN; // m³/yr (eq 4-50a)
+    const hLine = __hAuto
+      ? `Significant wave height H = ${finite ? Hsb.toFixed(2) : 'N/A'} m (auto: genuine CDS ERA5 swh — treated as the paper's deep-water H_0s)${__waveDate ? ` (as of ${__waveDate})` : ''}`
+      : `Breaking significant wave height H_b = ${finite ? Hsb.toFixed(2) : 'N/A'} m (user input — breaking form)`;
+    const thetaLine = __thetaAuto
+      ? `Breaker angle θ = ${finite ? (thetaB * 180 / Math.PI).toFixed(1) : 'N/A'}°${__thetaNote ? ` (${__thetaNote})` : ' — no genuine shoreline/wave-direction → honest NaN'}`
+      : `Breaker angle θ_b = ${finite ? (thetaB * 180 / Math.PI).toFixed(1) : 'N/A'}° (user input, from the shore-normal; sin(2θ) form)`;
     return {
-      result: Ql, unit: 'm³/s',
+      result: Q, unit: 'm³/s',
+      secondary: [
+        { key: 'energy_flux', value: Pls, unit: 'J/(s·m)', label: 'Longshore energy flux factor P_ls (SPM eq 4-44/4-45)' },
+        { key: 'immersed_weight', value: I, unit: 'N/s', label: 'Immersed-weight transport rate I_l = K·P_ls (eq 4-48)' },
+        { key: 'transport_annual', value: Qyr, unit: 'm³/yr', label: 'Annual volumetric transport Q = 1290·P_ls (eq 4-50a)' },
+      ],
       steps: [
-        '── CERC Longshore Sediment Transport (USACE, 1984; Shore Protection Manual) ──',
-        `empirical coefficient K = ${K.toFixed(4)} (typically 0.3–0.7)`,
-        `Significant breaking wave height H_sb = ${Hsb.toFixed(2)} m`,
-        `Breaking wave angle θ_b = ${thetaB.toFixed(1)}° (${(thetaB * 180 / Math.PI).toFixed(1)}° if radians)`,
+        '── CERC Longshore Sediment Transport (SPM 1984, Vol 1 Ch 4 §V) ──',
+        hLine,
+        thetaLine,
+        `CERC coefficient K = ${finite ? K.toFixed(3) : 'N/A'} (SPM design value 0.39; Komar & Inman 1970: 0.77 with deep-water H_o)`,
         '',
-        'Step 1 — Compute H_sb^(5/2):',
-        `  H_sb^(5/2) = ${Hsb.toFixed(2)}^(2.5) = ${Hsb_2p5.toFixed(3)}`,
+        ...(finite
+          ? [
+            'Step 1 — Longshore energy flux factor (Table 4-10):',
+            `  P_ls = ${__deepWaterForm ? `0.05·ρ·g^(3/2)·H_0s^(5/2)·(cos α₀)^(1/4)·sin(2α₀)` : `0.0884·ρ·g^(3/2)·H_b^(5/2)·sin(2α_b)`}`,
+            `  P_ls = ${cEff.toFixed(4)} × ${RHO_SW} × ${Math.pow(G_GRAV, 1.5).toFixed(2)} × ${Math.pow(Hsb, 2.5).toFixed(3)} × ${sin2t.toFixed(4)}`,
+            `  P_ls = ${Pls.toFixed(1)} J/(s·m)`,
+            '',
+            'Step 2 — Immersed-weight rate (eq 4-48):',
+            `  I_l = K × P_ls = ${K.toFixed(3)} × ${Pls.toFixed(1)} = ${I.toFixed(1)} N/s`,
+            '',
+            'Step 3 — Volumetric transport (eq 4-35/4-49):',
+            `  Q = I_l / ((ρs−ρ)·g·(1−n)) = ${I.toFixed(1)} / (${RHO_SAND - RHO_SW} × ${G_GRAV} × 0.6)`,
+            `  Q = ${Q.toFixed(4)} m³/s`,
+            '',
+            'Cross-check — SPM design relation eq 4-50a:',
+            `  Q(yr) = 1290 × P_ls = ${Qyr.toExponential(3)} m³/yr (= ${Q.toFixed(4)} m³/s × 3.156e7 s/yr)`,
+          ]
+          : ['  Missing/non-positive H or θ — honest NaN (the energy-flux method',
+             '  needs a genuine wave height and a genuine breaker angle; no proxy).']),
         '',
-        'Step 2 — Compute sin(2θ_b):',
-        `  sin(2 × ${thetaB.toFixed(2)}) = ${sin2t.toFixed(4)}`,
-        '',
-        'Step 3 — Compute transport rate:',
-        `  Q_l = K × H_sb^(5/2) × sin(2θ_b)`,
-        `  Q_l = ${K.toFixed(4)} × ${Hsb_2p5.toFixed(3)} × ${sin2t.toFixed(4)}`,
-        `  Q_l = ${Ql.toFixed(1)} m³/s (approx. ${(Ql * 3.15e7).toFixed(0)} m³/yr)`,
-        '',
-        `  └ ${Ql < 0.1 ? 'Low transport' : Ql < 1 ? 'Moderate longshore drift' : Ql < 10 ? 'High transport rate — accreting/erosive beach' : 'Very high transport — major littoral drift (>10⁶ m³/yr)'}`,
-        `  └ Direction: ${sin2t > 0 ? 'northward/eastward (depending on orientation)' : 'southward/westward'}`,
+        `  └ ${!finite ? '—' : Math.abs(Qyr) < 5e4 ? 'Low transport (<50,000 m³/yr)' : Math.abs(Qyr) < 3e5 ? 'Moderate transport (50,000–300,000 m³/yr)' : Math.abs(Qyr) < 1e6 ? 'High transport (300,000–1,000,000 m³/yr)' : 'Very high transport (>10⁶ m³/yr)'}`,
+        `  └ Direction: ${finite && sin2t > 0 ? 'positive (one side of the shore-normal)' : finite && sin2t < 0 ? 'negative (the other side)' : '—'}`,
+        `  └ SPM-stated accuracy: ±50 % on Q from the energy-flux method (Fig 4-37 scatter); K calibrates the site`,
+        `  └ Units: ρs=2650, ρ=1025 kg/m³, 1−n=0.6 (SPM Table 4-8); the eq 4-50a constant 1290 is dimensional (rounded from g=9.8)`,
       ]
     };
   },
-  78: ({ g, k, h }) => {
-    const kh = k * h;
-    const tanhKh = Math.tanh(kh);
-    const omega2 = g * k * tanhKh;
-    const omega = Math.sqrt(omega2);
-    const T = 2 * Math.PI / omega;
-    const c = omega / k;
-    const L = 2 * Math.PI / k;
+  78: ({ g, k, h, __hAuto = true, __gebcoElev = null }) => {
+    // Airy (1845) linear wave theory dispersion relation — Shore Protection
+    // Manual (1984) Vol 1 Ch 2 eqs 2-1/2-2/2-3 (the authoritative textbook
+    // restatement; Airy 1845 is pre-DOI): C² = (g/ω)·tanh(kh), equivalently
+    // ω² = g·k·tanh(kh) with k = 2π/L, ω = 2π/T (SPM defines k = 2π/L and
+    // ω = 2π/T in the text following eq 2-3). Regime classification per the
+    // SPM's d/L table (eqs 2-5/2-6/2-10): deep water d/L > 1/2 (kh > π,
+    // tanh ≈ 1); transitional 1/25 < d/L < 1/2; shallow water d/L < 1/25
+    // (kh < 2π/25, tanh(kh) ≈ kh). The engine solves the FORWARD problem
+    // (ω from k, h) — the same relation the SPM tabulates in Appendix C.
+    const finite = Number.isFinite(g) && g > 0
+      && Number.isFinite(k) && k > 0
+      && Number.isFinite(h) && h > 0;
+    const kh = finite ? k * h : Number.NaN;
+    const tanhKh = finite ? Math.tanh(kh) : Number.NaN;
+    const omega2 = finite ? g * k * tanhKh : Number.NaN;
+    const omega = finite ? Math.sqrt(omega2) : Number.NaN;
+    const T = finite ? 2 * Math.PI / omega : Number.NaN;
+    const c = finite ? omega / k : Number.NaN;
+    const L = finite ? 2 * Math.PI / k : Number.NaN;
+    // Group velocity (SPM Ch 2): C_g = C/2·[1 + 2kh/sinh(2kh)] — the rate at
+    // which wave energy propagates; deep water C_g = C/2, shallow C_g = C.
+    const Cg = finite ? c / 2 * (1 + 2 * kh / Math.sinh(2 * kh)) : Number.NaN;
+    const regime = finite
+      ? kh > Math.PI
+        ? 'Deep water (d/L > 1/2, kh > π): C = √(g/k) = gT/2π, C_g = C/2 — waves independent of depth'
+        : kh < 2 * Math.PI / 25
+          ? 'Shallow water (d/L < 1/25, kh < 2π/25): C = √(gh), C_g = C — non-dispersive, depth-limited'
+          : 'Transitional water (1/25 < d/L < 1/2): full tanh form required (SPM eqs 2-2/2-3)'
+      : null;
+    const hLine = __hAuto
+      ? __gebcoElev != null
+        ? `Water depth h = ${finite ? h.toFixed(1) : 'N/A'} m (auto: GEBCO 2020 bathymetry, ground elevation ${__gebcoElev.toFixed(1)} m)`
+        : 'Water depth h = N/A — no genuine bathymetry (honest NaN)'
+      : `Water depth h = ${finite ? h.toFixed(1) : 'N/A'} m (user input)`;
     return {
       result: omega, unit: 'rad/s',
+      secondary: [
+        { key: 'kh', value: kh, unit: '—', label: 'Relative-depth parameter kh (SPM Ch 2 d/L table)' },
+        { key: 'wave_celerity', value: c, unit: 'm/s', label: 'Phase speed C = ω/k (SPM eqs 2-2/2-3)' },
+        { key: 'wavelength', value: L, unit: 'm', label: 'Wavelength L = 2π/k (SPM eq 2-1)' },
+        { key: 'wave_period', value: T, unit: 's', label: 'Wave period T = 2π/ω' },
+        { key: 'group_velocity', value: Cg, unit: 'm/s', label: 'Group velocity C_g = C/2·[1 + 2kh/sinh(2kh)] (SPM Ch 2)' },
+      ],
       steps: [
-        '── Airy Wave Dispersion Relation (Airy, 1845; Linear Wave Theory) ──',
-        `Gravity g = ${g.toFixed(2)} m/s², Wavenumber k = ${k.toExponential(3)} rad/m`,
-        `Water depth h = ${h.toFixed(1)} m`,
+        '── Airy Wave Dispersion Relation (Airy, 1845; SPM 1984 Vol 1 Ch 2, eqs 2-1/2-2/2-3) ──',
+        `Gravity g = ${Number.isFinite(g) ? g.toFixed(2) : 'N/A'} m/s², Wavenumber k = ${Number.isFinite(k) ? k.toExponential(3) : 'N/A'} rad/m`,
+        hLine,
         '',
-        'Step 1 — Compute kh:',
-        `  kh = ${k.toExponential(3)} × ${h.toFixed(1)} = ${kh.toFixed(3)}`,
-        `  tanh(kh) = ${tanhKh.toFixed(4)}`,
-        '',
-        'Step 2 — Compute angular frequency:',
-        `  ω² = g·k·tanh(kh) = ${g.toFixed(2)} × ${k.toExponential(3)} × ${tanhKh.toFixed(4)}`,
-        `  ω = √${omega2.toFixed(4)} = ${omega.toFixed(4)} rad/s`,
-        '',
-        'Step 3 — Wave parameters:',
-        `  Period T = 2π/ω = ${T.toFixed(2)} s`,
-        `  Celerity c = ω/k = ${c.toFixed(3)} m/s`,
-        `  Wavelength L = 2π/k = ${L.toFixed(1)} m`,
-        `  ${kh > Math.PI ? 'Deep water (kh > π): c = √(g/k)' : kh < 0.1 * Math.PI ? 'Shallow water (kh < 0.1π): c = √(gh)' : 'Intermediate water'}`,
+        ...(finite
+          ? [
+            'Step 1 — Compute kh (SPM relative-depth parameter):',
+            `  kh = ${k.toExponential(3)} × ${h.toFixed(1)} = ${kh.toFixed(3)}`,
+            `  tanh(kh) = ${tanhKh.toFixed(4)}`,
+            '',
+            'Step 2 — Dispersion relation (SPM eq 2-3, ω² = g·k·tanh(kh)):',
+            `  ω² = ${g.toFixed(2)} × ${k.toExponential(3)} × ${tanhKh.toFixed(4)}`,
+            `  ω = √${omega2.toFixed(4)} = ${omega.toFixed(4)} rad/s`,
+            '',
+            'Step 3 — Wave parameters:',
+            `  Period T = 2π/ω = ${T.toFixed(2)} s`,
+            `  Celerity c = ω/k = ${c.toFixed(3)} m/s`,
+            `  Wavelength L = 2π/k = ${L.toFixed(1)} m`,
+            `  Group velocity C_g = ${Cg.toFixed(3)} m/s (energy travels at ${(Cg / c * 100).toFixed(0)} % of c)`,
+            `  Regime: ${regime}`,
+          ]
+          : [
+            '  Missing or non-positive g / k / h — honest NaN (the dispersion',
+            '  relation needs a positive wavenumber and a positive water depth).',
+            '',
+            '  └ —',
+          ]),
       ]
     };
   },
@@ -4223,30 +4316,29 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   80: ({ alpha, g2, fm, fpm, gamma }) => {
-    // JONSWAP (Hasselmann et al., 1973):
-    //   S(f) = αg²f⁻⁵ · exp[−1.25(f_p/f)⁻⁴] · γ^exp[−(f−f_p)²/(2σ²f_p²)]
+    // JONSWAP (Hasselmann et al., 1973, eq 16):
+    //   S(f) = α·g²·(2π)⁻⁴·f⁻⁵ · exp[−5/4·(f_p/f)⁻⁴] · γ^exp[−(f−f_p)²/(2σ²f_p²)]
     // with σ = 0.07 for f ≤ f_p and σ = 0.09 for f > f_p (the σ step).
-    // Evaluated at f = f_m = f_p (the peak), so (f−f_p)=0 and the Gaussian
-    // exponent = 0, giving γ^1 = γ. The σ-dependent broadening is included
-    // in the displayed formula for completeness.
-    const fp = fpm;          // peak frequency
-    const f = fm;            // frequency at which to evaluate
+    // The (2π)⁻⁴ converts from the angular-frequency form S(ω) = αg²ω⁻⁵…
+    // to ordinary-frequency S(f) — without it the result is (2π)⁴ ≈ 1559× too large.
+    const fp = fpm;          // peak frequency (Hz)
+    const f = fm;            // frequency at which to evaluate (Hz)
     const sigma = f <= fp ? 0.07 : 0.09;   // JONSWAP σ step
     const peakEnhance = Math.exp(-1.25 * Math.pow(fp / f, -4));
     const gaussExp = Math.exp(-Math.pow(f - fp, 2) / (2 * sigma * sigma * fp * fp));
     const gammaFactor = Math.pow(gamma, gaussExp);
-    const S = alpha * Math.pow(g2, 2) * Math.pow(f, -5) * peakEnhance * gammaFactor;
+    const S = alpha * Math.pow(g2, 2) * Math.pow(2 * Math.PI, -4) * Math.pow(f, -5) * peakEnhance * gammaFactor;
     return {
-      result: S, unit: 'm²/s',
+      result: S, unit: 'm²/Hz',
       steps: [
         '── JONSWAP Spectrum (Hasselmann et al., 1973) ──',
         `Phillips constant α = ${alpha.toExponential(2)}, g = ${g2.toFixed(2)} m/s²`,
         `Peak frequency f_p = ${fp.toExponential(2)} Hz, Evaluation f = ${f.toExponential(2)} Hz`,
         `Peak enhancement γ = ${gamma.toFixed(2)}, σ = ${sigma} (JONSWAP step: 0.07 if f≤f_p, 0.09 if f>f_p)`,
         '',
-        'Step 1 — Phillips f⁻⁵ tail:',
-        `  α·g²·f⁻⁵ = ${alpha.toExponential(2)} × ${g2.toFixed(2)}² × ${Math.pow(f, -5).toExponential(3)}`,
-        `  = ${(alpha * g2 * g2 * Math.pow(f, -5)).toExponential(3)}`,
+        'Step 1 — Phillips f⁻⁵ tail with (2π)⁻⁴ conversion:',
+        `  α·g²·(2π)⁻⁴·f⁻⁵ = ${alpha.toExponential(2)} × ${g2.toFixed(2)}² × ${(1/Math.pow(2*Math.PI,4)).toExponential(4)} × ${Math.pow(f, -5).toExponential(3)}`,
+        `  = ${(alpha * g2 * g2 * Math.pow(2*Math.PI, -4) * Math.pow(f, -5)).toExponential(3)} m²/Hz`,
         '',
         'Step 2 — Peak enhancement exp[−1.25(f_p/f)⁻⁴]:',
         `  = ${peakEnhance.toExponential(3)}`,
@@ -4256,10 +4348,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  γ^broadening = ${gamma.toFixed(2)}^${gaussExp.toExponential(2)} = ${gammaFactor.toExponential(3)}`,
         '',
         'Step 4 — Spectral density:',
-        `  S(f) = α·g²·f⁻⁵ · exp[−1.25(f_p/f)⁻⁴] · γ^exp[−(f−f_p)²/(2σ²f_p²)]`,
-        `  S(${f.toExponential(2)}) = ${S.toExponential(3)} m²/s`,
+        `  S(f) = α·g²·(2π)⁻⁴·f⁻⁵ · exp[−1.25(f_p/f)⁻⁴] · γ^exp[−(f−f_p)²/(2σ²f_p²)]`,
+        `  S(${f.toExponential(2)}) = ${S.toExponential(3)} m²/Hz`,
         '',
-        `  └ At the peak (f=f_p): Gaussian exponent = 0 → γ^1 = γ; S(f_p) = αg²f_p⁻⁵·exp(−1.25)·γ`,
+        `  └ At the peak (f=f_p): Gaussian exponent = 0 → γ^1 = γ; S(f_p) = αg²(2π)⁻⁴f_p⁻⁵·exp(−1.25)·γ`,
         `  └ H_m₀ = 4·√(∫S(f)df); frequency-integrated for total energy`,
       ]
     };
@@ -4309,28 +4401,51 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  83: ({ L, s }) => {
-    const D = 1 - Math.log(L) / Math.log(s);
+  83: ({ L1, s1, L2, s2 }) => {
+    // Richardson (1961) two-point fractal dimension:
+    //   L(s) = c · s^(1-D)  ⇒  D = 1 − ln(L₁/L₂) / ln(s₁/s₂)
+    // Two measurements at different ruler scales (s₁, L₁) and (s₂, L₂)
+    // eliminate the unknown constant c.
+    const lnRatioL = Math.log(L1 / L2);
+    const lnRatioS = Math.log(s1 / s2);
+    const D = (Math.abs(lnRatioS) < 1e-12)
+      ? Number.NaN
+      : 1 - lnRatioL / lnRatioS;
+    const Hurst = Number.isFinite(D) ? 2 - D : Number.NaN;
+    const complexityClass = Number.isFinite(D)
+      ? D < 1.1 ? 'Low — smooth, depositional coast (barrier islands, sandy beaches)'
+        : D < 1.3 ? 'Moderate — typical embayed coast (Atlantic-style irregular shoreline)'
+        : D < 1.5 ? 'High — rough, indented coast (ria coast, highly irregular)'
+        : 'Very high — fjord coast or strongly space-filling boundary'
+      : null;
     return {
       result: D, unit: '—',
+      secondary: [
+        { key: 'hurst_exponent', value: Hurst, unit: '—', label: 'Hurst exponent H = 2 − D (persistence measure)' },
+        { key: 'complexity_class', value: Number.isFinite(D) ? D : null, unit: '—', label: complexityClass ?? 'N/A' },
+      ],
       steps: [
-        '── Fractal Dimension of Drainage Networks (Mandelbrot, 1967; Tarboton et al., 1988) ──',
-        `Main channel length L = ${L.toFixed(1)} km`,
-        `Map scale / grid size s = ${s.toFixed(1)}`,
+        '── Richardson Fractal Dimension (Richardson 1961; Mandelbrot 1967) ──',
+        `Measurement 1: L₁ = ${L1.toFixed(1)} km at ruler scale s₁ = ${s1.toFixed(1)} km`,
+        `Measurement 2: L₂ = ${L2.toFixed(1)} km at ruler scale s₂ = ${s2.toFixed(1)} km`,
         '',
-        'Step 1 — Compute log ratios:',
-        `  ln(L) = ${Math.log(L).toFixed(4)}`,
-        `  ln(s) = ${Math.log(s).toFixed(4)}`,
+        'Step 1 — Richardson power law: L(s) = c · s^(1−D)',
+        '  Taking logs of two measurements eliminates the unknown c:',
+        `  D = 1 − ln(L₁/L₂) / ln(s₁/s₂)`,
         '',
-        'Step 2 — Compute fractal dimension:',
-        `  D = 1 − ln(L)/ln(s) = 1 − ${Math.log(L).toFixed(4)} / ${Math.log(s).toFixed(4)}`,
-        `  D = ${D.toFixed(4)}`,
+        'Step 2 — Compute log ratios:',
+        `  ln(L₁/L₂) = ln(${L1.toFixed(1)}/${L2.toFixed(1)}) = ${lnRatioL.toFixed(4)}`,
+        `  ln(s₁/s₂) = ln(${s1.toFixed(1)}/${s2.toFixed(1)}) = ${lnRatioS.toFixed(4)}`,
         '',
-        'Step 3 — Dimension interpretation:',
-        `  ${D > 1.8 ? 'Space-filling network — strongly bifurcating (e.g. tidal creeks)' : D > 1.5 ? 'Typical river network (D ≈ 1.5–1.8)' : D > 1.2 ? 'Moderate complexity' : 'Simple, low-bifurcation drainage pattern'}`,
+        'Step 3 — Fractal dimension:',
+        `  D = 1 − ${lnRatioL.toFixed(4)} / ${lnRatioS.toFixed(4)} = ${Number.isFinite(D) ? D.toFixed(4) : 'N/A'}`,
         '',
-        `  └ Theoretical range: 1 ≤ D ≤ 2; D = 1 for straight line, D = 2 for fully planar fill`,
-        `  └ Hortonian bifurcation ratio R_b ≈ (L_max/L_min)^D relates to D`,
+        'Step 4 — Interpretation:',
+        `  ${complexityClass ?? 'N/A (degenerate: s₁ ≈ s₂)'}`,
+        `  Hurst exponent H = 2 − D = ${Number.isFinite(Hurst) ? Hurst.toFixed(4) : 'N/A'}`,
+        '',
+        '  └ Theoretical range: 1 ≤ D ≤ 2; D = 1 for straight line, D = 2 for space-filling',
+        '  └ Richardson (1961) data: South Africa D≈1.02, Australia D≈1.13, Britain D≈1.24, Norway D≈1.52',
       ]
     };
   },
@@ -4351,8 +4466,8 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `sinβ = ${sinB.toFixed(4)}, cos²β = ${cosB2.toFixed(4)}`,
         '',
         'Step 1 — Compute resisting (shear strength) term:',
-        `  numerator = c' + (γz·cosβ − u)·tanφ'`,
-        `  = ${cprime.toFixed(2)} + (${gammaz.toFixed(2)}×${cosB.toFixed(4)} − ${u.toFixed(2)})×${tanphi.toFixed(4)}`,
+        `  numerator = c' + (γz·cos²β − u)·tanφ'`,
+        `  = ${cprime.toFixed(2)} + (${gammaz.toFixed(2)}×${cosB2.toFixed(4)} − ${u.toFixed(2)})×${tanphi.toFixed(4)}`,
         `  = ${num.toFixed(4)} kPa`,
         '',
         'Step 2 — Compute driving (shear stress) term:',
@@ -4369,24 +4484,45 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  85: ({ mu, sigmaN, xi: _xi }) => {
-    const tau = mu * sigmaN;
+  85: ({ mu, sigmaN, xi, rho, velocity }) => {
+    // Voellmy (1955) friction model for rapid granular flows:
+    //   τ = μ·σ_n + ρ·g·u²/ξ
+    // τ_C = μ·σ_n (dry Coulomb)  +  τ_t = ρ·g·u²/ξ (turbulent drag)
+    const g = G_GRAV;
+    const tauC = mu * sigmaN;
+    const tauT = (rho * g * velocity * velocity) / xi;
+    const tau = tauC + tauT;
+    const fraction_turbulent = tau > 0 ? tauT / tau : 0;
+    const mu_app = sigmaN > 0 ? mu + (rho * g * velocity * velocity) / (xi * sigmaN) : mu;
     return {
       result: tau, unit: 'Pa',
+      secondary: [
+        { key: 'coulomb_friction', value: tauC, unit: 'Pa', label: 'Coulomb term τ_C = μσ_n' },
+        { key: 'turbulent_drag', value: tauT, unit: 'Pa', label: 'Turbulent term τ_t = ρgu²/ξ' },
+        { key: 'fraction_turbulent', value: fraction_turbulent, unit: '—', label: 'Fraction from turbulent term' },
+        { key: 'apparent_friction', value: mu_app, unit: '—', label: 'Apparent friction μ_app = μ + ρgu²/(ξσ_n)' },
+      ],
       steps: [
-        '── Granular Flow Friction (Coulomb, 1776; Savage & Hutter, 1989) ──',
-        `Friction coefficient μ = ${mu.toFixed(4)}`,
-        `Normal stress σ_n = ${sigmaN.toFixed(2)} Pa`,
+        '── Voellmy Friction Model (Voellmy 1955; Savage & Hutter 1989) ──',
+        `Coulomb friction μ = ${mu.toFixed(4)}, Normal stress σ_n = ${sigmaN.toFixed(2)} Pa`,
+        `Flow velocity u = ${velocity.toFixed(2)} m/s, Density ρ = ${rho.toFixed(0)} kg/m³`,
+        `Turbulence parameter ξ = ${xi.toFixed(1)} m/s²`,
         '',
-        'Step 1 — Compute static Coulomb friction:',
-        `  τ = μ × σ_n = ${mu.toFixed(4)} × ${sigmaN.toFixed(2)}`,
-        `  τ = ${tau.toFixed(2)} Pa`,
+        'Step 1 — Coulomb friction term:',
+        `  τ_C = μ × σ_n = ${mu.toFixed(4)} × ${sigmaN.toFixed(2)} = ${tauC.toFixed(2)} Pa`,
         '',
-        'Step 2 — Friction angle:',
-        `  φ = atan(μ) = ${(Math.atan(mu) * 180 / Math.PI).toFixed(1)}°`,
+        'Step 2 — Turbulent drag term:',
+        `  τ_t = ρ·g·u²/ξ = ${rho.toFixed(0)} × ${g.toFixed(2)} × ${velocity.toFixed(2)}² / ${xi.toFixed(1)} = ${tauT.toFixed(2)} Pa`,
         '',
-        `  └ ${tau > 1000 ? 'High shear resistance — rock/debris avalanche basal friction' : tau > 100 ? 'Moderate — typical dry granular flow' : 'Low — near-fluidised or hydroplaning flow'}`,
-        `  └ Full model includes velocity-dependent term: τ = μσ_n + ρgv²/ξ (μ(I) rheology)`,
+        'Step 3 — Total shear stress:',
+        `  τ = τ_C + τ_t = ${tauC.toFixed(2)} + ${tauT.toFixed(2)} = ${tau.toFixed(2)} Pa`,
+        `  Apparent friction μ_app = ${mu_app.toFixed(4)} (effective μ at velocity ${velocity.toFixed(1)} m/s)`,
+        `  Turbulent fraction: ${(fraction_turbulent * 100).toFixed(1)}%`,
+        '',
+        'Step 4 — Interpretation:',
+        `  ${velocity < 1 ? 'Low velocity — Coulomb friction dominates (>99% of τ)' : velocity < 10 ? 'Moderate velocity — both terms contribute' : 'High velocity — turbulent drag dominates (avalanche/debris-flow regime)'}`,
+        `  Steady uniform flow: u_eq = √(ξ·h·(sinβ − μ·cosβ))`,
+        `  Friction angle φ = atan(μ) = ${(Math.atan(mu) * 180 / Math.PI).toFixed(1)}°`,
       ]
     };
   },
@@ -4466,7 +4602,9 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   89: ({ A: _A, z, rms }) => {
-    const S = rms * z;
+    // Schmidt (1928) simplified one-layer stability:
+    // S ≈ g × rms(Δρ) × z_v  (units: J/m²)
+    const S = G_GRAV * rms * z;
     return {
       result: S, unit: 'J/m²',
       steps: [
@@ -4519,18 +4657,20 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
   // ── Domain 14: Cryosphere & Volcanology ──
   91: ({ accum, DDF, Tpos, days }) => {
-    const ablation = DDF * Tpos * days;
+    // Braithwaite & Olesen (1989) PDD model:
+    // Ablation = DDF × T_pos  (T_pos is already the sum of positive degree-days)
+    const ablation = DDF * Tpos;
     const Bn = accum - ablation;
     return {
       result: Bn, unit: 'm w.e.',
       steps: [
-        '── Glacier Surface Mass Balance (Cogley et al., 2011; WGMS) ──',
+        '── Glacier Surface Mass Balance — PDD Model (Braithwaite & Olesen 1989; Cogley et al. 2011) ──',
         `Annual accumulation = ${accum.toFixed(2)} m w.e.`,
         `Degree-Day Factor DDF = ${DDF.toFixed(3)} m w.e./°C·day`,
-        `Positive degree-days T_pos = ${Tpos.toFixed(1)} °C, Melt season length = ${days.toFixed(0)} days`,
+        `Positive degree-days T_pos = ${Tpos.toFixed(1)} °C·day (sum over melt season)`,
         '',
         'Step 1 — Compute total ablation:',
-        `  Ablation = DDF × T_pos × days = ${DDF.toFixed(3)} × ${Tpos.toFixed(1)} × ${days.toFixed(0)}`,
+        `  Ablation = DDF × T_pos = ${DDF.toFixed(3)} × ${Tpos.toFixed(1)}`,
         `  Ablation = ${ablation.toFixed(3)} m w.e.`,
         '',
         'Step 2 — Compute net balance:',
@@ -4543,23 +4683,26 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  92: ({ K, DDF, L, lambda }) => {
-    const ALT = Math.sqrt((2 * K * DDF) / (L || 1)) * Math.sqrt(lambda);
+  92: ({ K, DIFI, L }) => {
+    // Stefan (1891): ALT = sqrt(2·K·DIFI_s / L)
+    // DIFI is in °C·day; convert to °C·s by × 86400
+    const DIFI_s = DIFI * 86400;
+    const ALT = Math.sqrt((2 * K * DIFI_s) / (L || 1));
     return {
       result: ALT, unit: 'm',
       steps: [
         '── Stefan Active Layer Thickness (Stefan, 1891; Romanovsky & Osterkamp, 1997) ──',
         `Thermal conductivity K = ${K.toFixed(2)} W/m·K`,
-        `Degree-Day Factor DDF = ${DDF.toFixed(0)} °C·days (thawing index)`,
-        `Volumetric latent heat of fusion L = ${L.toFixed(2)} MJ/m³`,
-        `Thawing season length factor λ = ${lambda.toFixed(2)}`,
+        `Thawing index DIFI = ${DIFI.toFixed(0)} °C·day`,
+        `  → DIFI_s = ${DIFI.toFixed(0)} × 86400 = ${DIFI_s.toFixed(0)} °C·s`,
+        `Volumetric latent heat of fusion L = ${L.toExponential(2)} J/m³`,
         '',
-        'Step 1 — Compute thawing index numerator:',
-        `  2K·DDF = 2 × ${K.toFixed(2)} × ${DDF.toFixed(0)} = ${(2 * K * DDF).toFixed(0)} W·°C·day/m·K`,
+        'Step 1 — Compute 2K·DIFI_s:',
+        `  2K·DIFI_s = 2 × ${K.toFixed(2)} × ${DIFI_s.toFixed(0)} = ${(2 * K * DIFI_s).toExponential(3)}`,
         '',
         'Step 2 — Compute ALT:',
-        `  ALT = √(2K·DDF/L) × √λ`,
-        `  ALT = √(${(2 * K * DDF).toFixed(0)} / ${L.toFixed(2)}) × √${lambda.toFixed(2)}`,
+        `  ALT = √(2K·DIFI_s / L)`,
+        `  ALT = √(${(2 * K * DIFI_s).toExponential(3)} / ${L.toExponential(2)})`,
         `  ALT = ${ALT.toFixed(2)} m`,
         '',
         'Step 3 — Permafrost classification:',
@@ -4573,11 +4716,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const drho = k * b * (rhoI - rhoF);
     const _halfDensity = (rhoI + rhoF) / 2;
     return {
-      result: drho, unit: 'kg/m³/s',
+      result: drho, unit: 'kg/m³/yr',
       steps: [
         '── Dry Snow Densification (Herron & Langway, 1980; Arthern et al., 2010) ──',
-        `Rate constant k = ${k.toExponential(2)} /s`,
-        `Overburden factor b = ${b.toFixed(3)} (proportional to accumulation rate)`,
+        `Rate constant k = ${k.toExponential(2)} /yr`,
+        `Accumulation rate b = ${b.toFixed(2)} kg/m²/yr`,
         `Initial snow density ρ_i = ${rhoI.toFixed(1)} kg/m³`,
         `Final firn density ρ_f = ${rhoF.toFixed(1)} kg/m³`,
         '',
@@ -4586,63 +4729,83 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         '',
         'Step 2 — Densification rate:',
         `  dρ/dt = k × b × (ρ_i − ρ_f)`,
-        `  dρ/dt = ${k.toExponential(2)} × ${b.toFixed(3)} × ${(rhoI - rhoF).toFixed(1)}`,
-        `  dρ/dt = ${drho.toExponential(2)} kg/m³/s`,
+        `  dρ/dt = ${k.toExponential(2)} × ${b.toFixed(2)} × ${(rhoI - rhoF).toFixed(1)}`,
+        `  dρ/dt = ${drho.toExponential(2)} kg/m³/yr`,
         '',
         'Step 3 — Timescale to closure (pore close-off at ρ ≈ 830 kg/m³):',
-        `  Δt ≈ (830 − ${rhoF.toFixed(0)}) / |dρ/dt| = ${drho !== 0 ? ((830 - rhoF) / Math.abs(drho)).toExponential(2) : '∞'} s`,
+        `  Δt ≈ (830 − ${rhoF.toFixed(0)}) / |dρ/dt| = ${drho !== 0 ? ((830 - rhoF) / Math.abs(drho)).toFixed(2) : '∞'} years`,
         '',
         `  └ ${drho > 0 ? 'Compaction progressing — air volume decreasing' : 'No densification — pore space saturated or equilibrium'}`,
         `  └ Main stages: (1) settling (ρ < 550), (2) densification (550–830), (3) ice bubble closure (>830 kg/m³)`,
       ]
     };
   },
-  94: ({ V }) => {
-    const logV = -4.42 + 0.75 * V;
+  94: ({ VEI }) => {
+    const logV = -4.42 + 0.75 * VEI;
     const V_km3 = Math.pow(10, logV);
     return {
       result: V_km3, unit: 'km³',
       steps: [
         '── Volcanic Explosivity Index to Volume (Newhall & Self, 1982) ──',
-        `Volcanic Explosivity Index VEI = ${V.toFixed(0)} (0–8 scale)`,
+        `Volcanic Explosivity Index VEI = ${VEI.toFixed(0)} (0–8 scale)`,
         '',
         'Step 1 — Compute log₁₀(volume):',
-        `  log₁₀(V) = −4.42 + 0.75 × VEI = −4.42 + 0.75 × ${V.toFixed(0)}`,
+        `  log₁₀(V) = −4.42 + 0.75 × VEI = −4.42 + 0.75 × ${VEI.toFixed(0)}`,
         `  log₁₀(V) = ${logV.toFixed(3)}`,
         '',
         'Step 2 — Exponentiate:',
         `  V = 10^${logV.toFixed(3)} = ${V_km3.toExponential(3)} km³ (${V_km3.toFixed(2)} km³)`,
         '',
         'Step 3 — Eruption classification:',
-        `  VEI ${V.toFixed(0)}: ${V <= 1 ? 'Gentle/Hawaiian effusive' : V <= 2 ? 'Strombolian' : V <= 3 ? 'Vulcanian' : V <= 4 ? 'Plinian (Pompeii-type)' : V <= 5 ? 'Plinian (sub-Plinian)' : V <= 6 ? 'Ultra-Plinian (e.g. Pinatubo 1991, 5 km³)' : V <= 7 ? 'Super-colossal (e.g. Tambora 1815, 50 km³)' : 'Ultra-colossal / supervolcanic (e.g. Toba 74 ka, >1000 km³)'}`,
+        `  VEI ${VEI.toFixed(0)}: ${VEI <= 1 ? 'Gentle/Hawaiian effusive' : VEI <= 2 ? 'Strombolian' : VEI <= 3 ? 'Vulcanian' : VEI <= 4 ? 'Plinian (Pompeii-type)' : VEI <= 5 ? 'Plinian (sub-Plinian)' : VEI <= 6 ? 'Ultra-Plinian (e.g. Pinatubo 1991, 5 km³)' : VEI <= 7 ? 'Super-colossal (e.g. Tambora 1815, 50 km³)' : 'Ultra-colossal / supervolcanic (e.g. Toba 74 ka, >1000 km³)'}`,
         '',
-        `  └ Plume height approx.: H ∝ V^(1/4) for Plinian eruptions (Carey & Sparks, 1986)`,
+        `  └ Note: Newhall & Self (1982) regression underestimates volumes for VEI ≥7 (Toba ~2800 km³ vs equation 38 km³). Equation calibrated for VEI 2–6.`,
       ]
     };
   },
   95: ({ Qdot, rhoAir, alpha }) => {
-    const buoyancyTerm = Math.pow(Qdot / (rhoAir + 1), 1 / 3);
-    const h = alpha * buoyancyTerm;
+    // Mastin et al. (2009) eq 1: Ṁ = 140 × H^4.14 (Ṁ in kg/s, H in km)
+    // Inverted: H = (Ṁ / 140)^(1/4.14)
+    // Catalogue input Q_dot is heat output in MW → convert to mass eruption rate
+    const cp_air = 1004;  // J/(kg·K)
+    const T_amb = 300;    // K (ambient)
+    const MER = (Qdot * 1e6) / (cp_air * T_amb);  // MW → kg/s (mass eruption rate)
+    const hMastin = Math.pow(MER / 140, 1 / 4.14);
+
+    // Morton-Taylor-Turner (1956) theoretical check:
+    // H = 5.0 × (F₀ / N³)^(1/4), F₀ = g × (Δρ/ρ₀) × MER / ρ₀
+    const g = 9.81;
+    const N = 0.012;          // Brunt-Väisälä frequency (s⁻¹) — standard troposphere
+    const drho_rho = 0.65;    // fractional density contrast (hot plume vs ambient)
+    const F0 = g * drho_rho * MER / rhoAir;
+    const H_mtt_m = 5.0 * Math.pow(F0 / (N * N * N), 0.25);
+    const hMtt = H_mtt_m / 1000;
+
+    // Use Mastin as primary (empirically calibrated for volcanoes)
+    const h = hMastin;
+
     return {
       result: h, unit: 'km',
       steps: [
-        '── Volcanic Plume Height (Mastin et al., 2009; Degruyter & Bonadonna, 2015) ──',
-        `Mass eruption rate Q̇ = ${Qdot.toExponential(2)} kg/s`,
+        '── Volcanic Plume Height (Mastin et al. 2009; Morton-Taylor-Turner 1956) ──',
+        `Heat output Q̇ = ${Qdot.toExponential(2)} MW`,
+        `Mass eruption rate Ṁ = Q̇/(cp·T_amb) = ${MER.toExponential(2)} kg/s`,
         `Ambient air density ρ_air = ${rhoAir.toFixed(3)} kg/m³`,
-        `Empirical constant α = ${alpha.toFixed(3)} (≈ 0.1–0.3)`,
+        `Entrainment coefficient α = ${alpha.toFixed(3)}`,
         '',
-        'Step 1 — Compute buoyancy scaling:',
-        `  (Q̇/ρ_air)^(1/3) = (${Qdot.toExponential(2)} / ${rhoAir.toFixed(3)})^(1/3)`,
-        `  = ${buoyancyTerm.toFixed(3)} m^(1/3)·kg^(1/3)·s^(−1/3)`,
+        'Step 1 — Mastin et al. (2009) eq 1 (inverted):',
+        `  Ṁ = 140 × H^4.14  →  H = (Ṁ/140)^(1/4.14)`,
+        `  H = (${MER.toExponential(2)} / 140)^(1/4.14) = ${hMastin.toFixed(2)} km`,
         '',
-        'Step 2 — Compute plume height:',
-        `  H = α × (Q̇/ρ_air)^(1/3) = ${alpha.toFixed(3)} × ${buoyancyTerm.toFixed(3)}`,
-        `  H = ${h.toFixed(2)} km`,
+        'Step 2 — MTT theoretical check:',
+        `  F₀ = g × (Δρ/ρ₀) × Ṁ / ρ_air = ${F0.toExponential(3)} m⁴/s³`,
+        `  H_MTT = 5.0 × (F₀ / N³)^(1/4) = ${hMtt.toFixed(2)} km`,
+        `  ${Math.abs(h - hMtt) / h < 0.5 ? '✓ Mastin and MTT agree within 50%' : '⚠ Mastin and MTT differ — Mastin preferred for volcanic plumes'}`,
         '',
         'Step 3 — Plume classification:',
         `  ${h < 1 ? 'Weak/ash-poor puffing (<1 km)' : h < 5 ? 'Low-level plume — local ashfall, aviation risk below FL200' : h < 10 ? 'Moderate plume — regional ashfall, FL200-FL350 aviation risk' : h < 20 ? 'Strong/Plinian plume (>10 km) — widespread ash, high-risk aviation' : 'Ultra-Plinian / co-ignimbrite plume (>20 km) — stratospheric injection, global dispersal'}`,
         '',
-        `  └ Mastin relation: H = 0.25·Q̇^0.25 for m < 10⁶ kg/s; buoyant plume theory applies when wind < 20 m/s`,
+        `  └ Mastin calibrated for Ṁ = 10³–10⁹ kg/s. MTT assumes steady plume, no crosswind. Column collapse when vent too narrow.`,
       ]
     };
   },
@@ -4652,7 +4815,8 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const absorbed = Q * (1 - alpha);
     const diffusion = D * divDT;
     const net = absorbed - I + diffusion;
-    const dT = net / (C || 1);
+    const SEC_PER_YEAR = 3.15576e7;  // 365.25 × 24 × 3600
+    const dT = net / (C || 1) * SEC_PER_YEAR;  // W/m² ÷ (J/m²K) × s/yr = K/yr
     return {
       result: dT, unit: 'K/yr',
       steps: [
@@ -4668,39 +4832,40 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  = ${net.toExponential(4)} W/m²`,
         '',
         'Step 3 — Temperature tendency:',
-        `  ∂T/∂t = net / C = ${net.toExponential(4)} / ${C.toExponential(3)}`,
-        `  ∂T/∂t = ${dT.toExponential(5)} K/yr`,
+        `  ∂T/∂t = net / C × 3.156×10⁷ s/yr`,
+        `  ∂T/∂t = (${net.toExponential(4)} / ${C.toExponential(3)}) × 3.156×10⁷ = ${dT.toExponential(4)} K/yr`,
         '',
         `  └ Interpretation: ${dT > 0 ? 'WARMING — positive energy imbalance' : dT < 0 ? 'COOLING — negative energy imbalance' : 'STEADY STATE — net zero imbalance'}`,
       ]
     };
   },
   97: ({ dF, lambda0, f }) => {
-    const invLambda0 = 1 / (lambda0 || 1);
-    const den = invLambda0 - f;
-    const lambda = 1 / den;
+    // Standard feedback framework (Roe 2009): ΔT = ΔF / (λ₀ − f)
+    // λ₀ = Planck response (~3.2 W/m²K), f = net non-Planck feedbacks
+    const den = lambda0 - f;
+    const lambda = den !== 0 ? 1 / den : Number.NaN;
     const dT = lambda * dF;
     return {
       result: dT, unit: 'K',
       steps: [
         '── Climate Sensitivity — Feedback Analysis (Hansen et al., 1984; Roe, 2009) ──',
         `Radiative forcing ΔF = ${dF.toFixed(2)} W/m²`,
-        `Reference sensitivity λ₀ = ${lambda0.toFixed(4)} K/(W/m²)`,
-        `Total feedback parameter f = ${f.toFixed(4)} (sum of Planck + water vapor + lapse rate + cloud + albedo)`,
+        `Planck response λ₀ = ${lambda0.toFixed(4)} W/m²K`,
+        `Net non-Planck feedbacks f = ${f.toFixed(4)} W/m²K (WV + LR + cloud + albedo)`,
         '',
         'Step 1 — Compute effective climate sensitivity parameter:',
-        `  λ = 1 / (1/λ₀ − f) = 1 / (${invLambda0.toFixed(4)} − ${f.toFixed(4)})`,
-        `  λ = 1 / ${den.toFixed(4)} = ${lambda.toFixed(3)} K/(W/m²)`,
+        `  λ = 1 / (λ₀ − f) = 1 / (${lambda0.toFixed(4)} − ${f.toFixed(4)}) = 1 / ${den.toFixed(4)}`,
+        `  λ = ${Number.isFinite(lambda) ? lambda.toFixed(4) : 'NaN (runaway)'} K/(W/m²)`,
         '',
         'Step 2 — Compute equilibrium temperature change:',
-        `  ΔT = λ × ΔF = ${lambda.toFixed(3)} × ${dF.toFixed(2)}`,
-        `  ΔT = ${dT.toFixed(2)} K`,
+        `  ΔT = λ × ΔF = ${Number.isFinite(lambda) ? lambda.toFixed(4) : 'NaN'} × ${dF.toFixed(2)}`,
+        `  ΔT = ${Number.isFinite(dT) ? dT.toFixed(2) : 'NaN'} K`,
         '',
         'Step 3 — Gain factor:',
-        `  Gain G = λ/λ₀ = ${(lambda / lambda0).toFixed(2)}`,
+        `  Gain G = λ₀ / (λ₀ − f) = ${(lambda0 / den).toFixed(2)}`,
         `  ${Math.abs(f) < 0.1 ? 'Weak feedback regime' : f > 0 ? 'POSITIVE FEEDBACK AMPLIFICATION (G > 1)' : 'NEGATIVE FEEDBACK DAMPENING (G < 1)'}`,
         '',
-        `  └ Interpretation: ${dT < 1.5 ? 'Low sensitivity — likely aerosol or cloud damping' : dT < 3 ? 'Moderate sensitivity — within IPCC likely range (2–4.5 K)' : dT < 6 ? 'High sensitivity — strong positive feedbacks' : 'Very high sensitivity — model-dependent, potential tipping cascade'}`,
+        `  └ Interpretation: ${!Number.isFinite(dT) ? 'RUNAWAY — feedback exceeds Planck damping' : dT < 1.5 ? 'Low sensitivity — likely aerosol or cloud damping' : dT < 3 ? 'Moderate sensitivity — within IPCC likely range (2–4.5 K)' : dT < 6 ? 'High sensitivity — strong positive feedbacks' : 'Very high sensitivity — model-dependent, potential tipping cascade'}`,
       ]
     };
   },
@@ -4749,34 +4914,49 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  100: ({ dpdy, f: _f, N: _N, dudy: _dudy }) => {
+  100: ({ dpdy, f, N, dudy }) => {
     const cond = dpdy < 0;
+    // Eady growth rate from provided f, N, dudy (secondary diagnostic)
+    // f, N, dudy are all in /s → σ is in /s; multiply by 86400 for /day
+    const sigmaEady_s = (f > 0 && N > 0) ? 0.31 * (f / N) * Math.abs(dudy) : 0;
+    const sigmaEady = sigmaEady_s * 86400; // /day
+    const eFoldDays = sigmaEady > 0 ? 1 / sigmaEady : Infinity;
     return {
       result: cond ? 1 : 0, unit: '—',
       steps: [
-        '── Baroclinic Instability Criterion (Charney, 1947; Eady, 1949) ──',
-        `Meridional PV gradient ∂q/∂y = ${dpdy.toExponential(4)} /m·s`,
-        `Coriolis f = ${_f ?? 0}, Brunt-Väisälä N = ${_N ?? 0}, Wind shear ∂u/∂z = ${_dudy ?? 0}`,
+        '── Charney-Stern Necessary Condition for Baroclinic Instability (Charney & Stern 1962) ──',
         '',
-        'Step 1 — Evaluate necessary condition:',
-        `  ∂q/∂y = ${dpdy.toExponential(4)} < 0 → ${cond ? 'TRUE: satisfies Charney-Stern criterion' : 'FALSE: baroclinic instability NOT possible'}`,
+        'Step 1 — Meridional QGPV gradient:',
+        `  ∂q/∂y = ${dpdy.toExponential(4)} /m·s`,
+        `  Full form: ∂q/∂y = β − ∂²ū/∂y² + (f²/N²)·(∂/∂p)(∂ū/∂p)`,
         '',
-        'Step 2 — Growth context:',
-        `  ${cond ? 'PV gradient reversal — wave energy extraction from mean flow possible' : 'Positive PV gradient — flow is baroclinically stable'}`,
+        'Step 2 — Evaluate necessary condition:',
+        `  ∂q/∂y = ${dpdy.toExponential(4)} < 0 → ${cond ? 'TRUE: sign reversal present — necessary condition for baroclinic instability SATISFIED' : 'FALSE: ∂q/∂y ≥ 0 — flow is baroclinically stable (Arnold 1st theorem)'}`,
         '',
-        `  └ Charney-Stern necessary condition: β − ∂²ū/∂y² + f²/ρ·∂/∂z(ρ/N²·∂ū/∂z) must change sign`,
-        `  └ Eady maximum growth rate: σ_max ≈ 0.31·|f|·|∂u/∂z|/N`,
+        'Step 3 — Context:',
+        `  ${cond ? 'PV gradient reversal — wave energy extraction from mean flow is possible' : 'No PV gradient reversal — no baroclinic instability possible'}`,
+        '',
+        'Step 4 — Eady growth rate (if f, N, ∂u/∂y provided):',
+        `  f = ${f.toExponential(4)} /s, N = ${N.toExponential(4)} /s, |∂u/∂y| = ${Math.abs(dudy).toExponential(4)} /s`,
+        `  σ_Eady = 0.31 × (f/N) × |∂u/∂y| = ${sigmaEady.toExponential(4)} /day`,
+        `  e-folding time: τ = ${(eFoldDays < 100 ? eFoldDays.toFixed(1) + ' days' : '∞ (inactive)')}`,
+        '',
+        `  └ Charney-Stern (1962): necessary condition — ∂q/∂y must change sign in the domain`,
+        `  └ Sufficient condition also requires boundary PV gradients of opposite sign (full theorem)`,
       ]
     };
   },
   101: ({ f, N, dudy }) => {
-    const sigma = 0.31 * (f / N) * Math.abs(dudy);
-    const eFoldHours = sigma > 0 ? (1 / sigma) * 24 : Infinity;
-    const periodDays = (2 * Math.PI) / (sigma || 1e-30) / 86400;
+    // Eady (1949): σ = 0.31 × (f/N) × |∂u/∂z|, all inputs in /s → σ in /s
+    // Convert to /day for display: × 86400
+    const sigma_s = (f > 0 && N > 0) ? 0.31 * (f / N) * Math.abs(dudy) : 0;
+    const sigma = sigma_s * 86400; // /day
+    const eFoldDays = sigma > 0 ? 1 / sigma : Infinity;
+    const periodDays = (2 * Math.PI) / (sigma || 1e-30);
     return {
       result: sigma, unit: '/day',
       steps: [
-        '── Eady Baroclinic Growth Rate (Eady, 1949) ──',
+        '── Eady Baroclinic Growth Rate (Eady 1949; coefficient 0.3098 from eigenvalue analysis) ──',
         `Coriolis parameter f = ${f.toFixed(6)} /s`,
         `Brunt-Väisälä frequency N = ${N.toExponential(4)} /s`,
         `Vertical wind shear ∂u/∂z = ${dudy.toExponential(4)} /s`,
@@ -4784,10 +4964,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         'Step 1 — Compute Eady growth rate:',
         `  σ_Eady = 0.31 × (f/N) × |∂u/∂z|`,
         `  = 0.31 × (${f.toFixed(6)} / ${N.toExponential(4)}) × ${Math.abs(dudy).toExponential(4)}`,
-        `  σ_Eady = ${sigma.toExponential(4)} /day (${(sigma / 86400).toExponential(4)} /s)`,
+        `  = ${sigma_s.toExponential(4)} /s × 86400 = ${sigma.toExponential(4)} /day`,
         '',
         'Step 2 — Growth timescales:',
-        `  e-folding time: τ_e = 1/σ = ${eFoldHours < 24 ? (eFoldHours).toFixed(1) + ' h' : (eFoldHours / 24).toFixed(1) + ' days'}`,
+        `  e-folding time: τ_e = 1/σ = ${eFoldDays < 1 ? (eFoldDays * 24).toFixed(1) + ' h' : eFoldDays.toFixed(1) + ' days'}`,
         `  Period of most unstable wave: T ≈ ${periodDays.toFixed(1)} days`,
         '',
         `  └ Classification: ${sigma > 0.5 ? 'RAPID GROWTH — explosive cyclogenesis potential' : sigma > 0.2 ? 'MODERATE GROWTH — typical mid-latitude cyclone' : sigma > 0.05 ? 'WEAK GROWTH — slowly developing system' : 'VERY WEAK / DAMPED — baroclinically inactive'}`,
@@ -4842,6 +5022,22 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   104: ({ Km, f }) => {
+    if (f <= 0) {
+      return {
+        result: Number.NaN, unit: 'm',
+        steps: [
+          '── Ekman Depth (Ekman, 1905) ──',
+          `Eddy viscosity K_m = ${Km.toExponential(3)} m²/s`,
+          `Coriolis parameter f = ${f} /s`,
+          '',
+          'RESULT: NaN — Ekman theory is invalid at the equator (f ≤ 0).',
+          'The Coriolis force vanishes at f = 0, so the frictional',
+          'boundary layer has no rotational structure and D_E is undefined.',
+          '',
+          '  └ Valid only for |f| > 0 (off-equatorial latitudes)',
+        ],
+      };
+    }
     const DE = Math.PI * Math.sqrt((2 * Km) / f);
     return {
       result: DE, unit: 'm',
@@ -4918,8 +5114,8 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  107: ({ zeta, f, dudx, dudy: _dudy, dvdx: _dvdx, dvdy }) => {
-    const div = dudx + dvdy;
+  107: ({ zeta, f, dudx, dudy: _dudy, dvdx: _dvdx, dvdy, div: divInput }) => {
+    const div = divInput ?? (dudx + dvdy);
     const DzetaDt = -(zeta + f) * div;
     return {
       result: DzetaDt, unit: '/s²',
@@ -4949,7 +5145,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const curvature = a / r;
     const solute = b / (r * r * r);
     const S = curvature - solute;
-    const rc = b / a; // approximate critical radius (if S=0 at r_c)
+    const rc = Math.sqrt(3 * b / a); // critical radius: dS/dr = 0 → r_c = √(3b/a)
     return {
       result: S, unit: '—',
       steps: [
@@ -4969,7 +5165,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  S = ${S.toExponential(4)} (${(S * 100).toFixed(4)}% supersaturation)`,
         '',
         `  └ Activation: ${S > 0 ? 'SUPERSATURATED — droplet grows spontaneously (r > r_crit)' : 'SUBSATURATED — droplet evaporates'}`,
-        `  └ Critical radius r_c ≈ √(b/a) = ${rc.toExponential(3)} m (${(rc * 1e6).toFixed(1)} µm)`,
+        `  └ Critical radius r_c = √(3b/a) = ${rc.toExponential(3)} m (${(rc * 1e6).toFixed(1)} µm)`,
       ]
     };
   },
@@ -4982,18 +5178,18 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       steps: [
         '── Marshall-Palmer Drop Size Distribution (Marshall & Palmer, 1948) ──',
         `Intercept parameter N₀ = ${N0.toExponential(3)} m⁻³·mm⁻¹`,
-        `Slope parameter Λ = ${Lambda.toExponential(3)} /mm`,
-        `Drop diameter D = ${D.toFixed(2)} mm`,
+        `Slope parameter Λ = ${Lambda.toExponential(3)} /m (${(Lambda / 1000).toFixed(2)} /mm)`,
+        `Drop diameter D = ${(D * 1000).toFixed(2)} mm (${D.toExponential(3)} m)`,
         '',
         'Step 1 — Exponential distribution:',
-        `  N(D) = N₀·exp(−Λ·D) = ${N0.toExponential(3)} × exp(−${Lambda.toExponential(3)} × ${D.toFixed(2)})`,
+        `  N(D) = N₀·exp(−Λ·D) = ${N0.toExponential(3)} × exp(−${Lambda.toExponential(3)} × ${D.toExponential(3)})`,
         `  exp(−ΛD) = ${expTerm.toExponential(4)}`,
         '',
         'Step 2 — Concentration at given diameter:',
-        `  N(${D.toFixed(1)} mm) = ${N.toExponential(3)} m⁻³·mm⁻¹`,
+        `  N(${(D * 1000).toFixed(1)} mm) = ${N.toExponential(3)} m⁻³·mm⁻¹`,
         '',
         'Step 3 — Distribution moments:',
-        `  Mean diameter: 1/Λ = ${meanD.toFixed(2)} mm`,
+        `  Mean diameter: 1/Λ = ${(meanD * 1000).toFixed(2)} mm`,
         `  Liquid water content: LWC ∝ N₀·Γ(4)/Λ⁴ ∝ N₀ × ${(6 / Math.pow(Lambda, 4)).toExponential(3)}`,
         `  Rain rate: Z = ∫N(D)D⁶dD = N₀·Γ(7)/Λ⁷ = ${(N0 * 720 / Math.pow(Lambda, 7)).toExponential(3)} mm⁶/m³`,
         '',
@@ -5245,88 +5441,154 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   120: ({ Pdyn, Bz }) => {
+    // Shue et al. (1997/1998) piecewise magnetopause standoff model
+    // J. Geophys. Res., 103(A5), 9469–9478, DOI: 10.1029/97JA03637
+    // r₀ = (11.4 + 0.14·Bz)·Pdyn^(−1/6.6)  for Bz > 0
+    // r₀ = (11.4 + 0.013·Bz)·Pdyn^(−1/6.6) for Bz ≤ 0
     const PdynExp = Math.pow(Pdyn, -1 / 6.6);
-    const expTerm = Math.exp(0.19 * Bz);
-    const Rmp = 107.4 * PdynExp * (1 + 0.013 * expTerm);
+    const bzCoeff = Bz > 0 ? 0.14 : 0.013;
+    const Rmp = (11.4 + bzCoeff * Bz) * PdynExp;
     const Rmp_km = Rmp * 6371;
+
+    // Flaring index α (shape parameter) — same paper equation (3)
+    const alpha = (0.58 - 0.0077 * Bz) * Math.pow(Pdyn, -0.074);
+
+    // GEO exposure flag: R_mp < 6.6 R_E means magnetopause inside geosynchronous orbit
+    const geoExposure = Rmp < 6.6 ? 1 : 0;
+
+    // Magnetosheath thickness (approximate): bow shock standoff minus magnetopause
+    // Using Farris & Russell (1994) for typical M_ms ≈ 6:
+    // R_bs ≈ R_mp × [1 + 1.1·M_ms^(−2/3)] ≈ R_mp × 1.38
+    const Rbs = Rmp * (1 + 1.1 * Math.pow(6, -2 / 3));
+    const sheathThickness = Rbs - Rmp;
+
+    const bzLabel = Bz > 0 ? 'northward' : Bz < 0 ? 'southward' : 'zero';
     return {
       result: Rmp, unit: 'R_E',
+      secondary: [
+        { key: 'geo_exposure', value: geoExposure, unit: '—', label: 'GEO Exposure Flag (1=exposed)' },
+        { key: 'magnetosheath_thickness', value: sheathThickness, unit: 'R_E', label: 'Magnetosheath Thickness (approx.)' },
+      ],
       steps: [
-        '── Magnetopause Standoff Distance (Shue et al., 1998; Sibeck et al., 1991) ──',
+        '── Magnetopause Standoff Distance (Shue et al. 1997, J. Geophys. Res. 103, 9469–9478) ──',
         `Solar wind dynamic pressure P_dyn = ${Pdyn.toFixed(2)} nPa`,
-        `IMF B_z (GSM) = ${Bz.toFixed(1)} nT`,
+        `IMF B_z (GSM) = ${Bz.toFixed(1)} nT (${bzLabel})`,
         '',
         'Step 1 — Dynamic pressure scaling:',
         `  P_dyn^(−1/6.6) = ${Pdyn.toFixed(2)}^{−1/6.6} = ${PdynExp.toExponential(4)}`,
         '',
-        'Step 2 — IMF B_z erosion factor:',
-        `  exp(0.19 × B_z) = exp(0.19 × ${Bz.toFixed(1)}) = ${expTerm.toExponential(4)}`,
-        `  1 + 0.013·exp(0.19·B_z) = 1 + 0.013 × ${expTerm.toExponential(4)} = ${(1 + 0.013 * expTerm).toFixed(4)}`,
+        'Step 2 — IMF B_z linear coefficient:',
+        `  Bz ${Bz > 0 ? '> 0 → northward branch' : '≤ 0 → southward branch'}`,
+        `  r₀ coefficient = 11.4 + ${bzCoeff} × (${Bz.toFixed(1)}) = ${(11.4 + bzCoeff * Bz).toFixed(4)}`,
         '',
-        'Step 3 — Standoff distance:',
-        `  R_mp = 107.4 × ${PdynExp.toExponential(4)} × ${(1 + 0.013 * expTerm).toFixed(4)}`,
+        'Step 3 — Subsolar standoff distance:',
+        `  R_mp = ${(11.4 + bzCoeff * Bz).toFixed(4)} × ${PdynExp.toExponential(4)}`,
         `  R_mp = ${Rmp.toFixed(2)} R_E (${Rmp_km.toFixed(0)} km)`,
         '',
-        'Step 4 — Magnetopause state:',
-        `  ${Rmp > 10 ? 'COMPRESSED — strong solar wind, magnetopause pushed inward' : Rmp > 8 ? 'NOMINAL — average solar wind conditions' : 'EXPANDED — weak solar wind, magnetopause far out'}`,
-        `  ${Bz < -5 ? 'Strong southward B_z — erosion enhancement, dayside reconnection active' : Bz > 5 ? 'Strong northward B_z — minimal erosion' : 'Quiet IMF orientation'}`,
+        'Step 4 — Shape parameter (flaring index):',
+        `  α = (0.58 − 0.0077 × Bz) × Pdyn^(−0.074) = ${alpha.toFixed(4)}`,
+        `  α > 0 → open magnetotail (tail flares outward)`,
         '',
-        `  └ Polar cusp latitude: θ_cusp ≈ arccos(√(1/R_mp)) ≈ ${(Math.acos(Math.sqrt(1 / Rmp)) * 180 / Math.PI).toFixed(1)}°`,
+        'Step 5 — Magnetopause state:',
+        `  ${Rmp < 6.6 ? '⚠ EXTREME COMPRESSION — inside GEO (6.6 R_E), satellites exposed to solar wind' : Rmp < 8 ? 'STRONG COMPRESSION — near GEO boundary' : Rmp < 10 ? 'NOMINAL — average solar wind conditions' : 'EXPANDED — weak solar wind, magnetopause far out'}`,
+        `  ${Bz < -5 ? 'Strong southward B_z — dayside reconnection, erosion reduces R_mp' : Bz > 5 ? 'Strong northward B_z — high-latitude reconnection, slight inflation' : 'Quiet IMF orientation'}`,
+        `  GEO exposure: ${geoExposure ? 'YES — magnetopause inside 6.6 R_E' : 'no — satellites within magnetosphere'}`,
+        `  Magnetosheath thickness ≈ ${sheathThickness.toFixed(2)} R_E (typical M_ms ≈ 6)`,
+        '',
+        `  └ Polar cusp latitude: θ_cusp ≈ arccos(√(1/R_mp)) ≈ ${(Math.acos(Math.sqrt(1 / Math.max(Rmp, 1))) * 180 / Math.PI).toFixed(1)}°`,
       ]
     };
   },
   121: ({ Dst, Pdyn, b, c }) => {
     const magPert = b * Math.sqrt(Pdyn);
     const DstStar = Dst - magPert + c;
+    // Storm classification (Loewe & Proelss 1997)
+    const stormClass = DstStar > -30 ? 0 : DstStar > -50 ? 1 : DstStar > -100 ? 2 : DstStar > -250 ? 3 : DstStar > -500 ? 4 : 5;
+    const stormLabels = ['Quiet/Recovery (Dst* > −30 nT)', 'Weak (−30 to −50 nT)', 'Moderate (−50 to −100 nT)', 'Strong (−100 to −250 nT)', 'Severe (−250 to −500 nT)', 'Extreme (Dst* < −500 nT)'];
+    // Ring current energy from Dessler-Parker-Sckopke (1959)
+    // U_RC = −(4π/μ₀) × B_E × R_E³ × Dst* × 10⁻⁹
+    const B_E = 3.12e-5;  // T — equatorial dipole field
+    const R_E = 6.371e6;  // m
+    const MU0 = 4e-7 * Math.PI;  // H/m
+    const U_RC = -(4 * Math.PI / MU0) * B_E * Math.pow(R_E, 3) * DstStar * 1e-9;
+
+    const stormLabel = stormLabels[stormClass];
     return {
       result: DstStar, unit: 'nT',
+      secondary: [
+        { key: 'storm_class', value: stormClass, unit: '—', label: `Storm Class: ${stormLabel}` },
+        { key: 'ring_current_energy', value: U_RC, unit: 'J', label: 'Ring Current Energy U_RC (Dessler-Parker-Sckopke)' },
+      ],
       steps: [
-        '── Pressure-Corrected Dst Index (Burton et al., 1975; O\'Brien & McPherron, 2000) ──',
+        '── Pressure-Corrected Dst Index (Burton et al. 1975, J. Geophys. Res. 80, 4204–4214) ──',
         `Raw Dst = ${Dst.toFixed(1)} nT`,
         `Solar wind dynamic pressure P_dyn = ${Pdyn.toFixed(2)} nPa`,
         `Pressure coefficient b = ${b.toFixed(2)} nT/nPa^(1/2), Baseline c = ${c.toFixed(1)} nT`,
         '',
-        'Step 1 — Magnetopause current contribution:',
-        `  b·√(P_dyn) = ${b.toFixed(2)} × √(${Pdyn.toFixed(2)}) = ${magPert.toFixed(2)} nT`,
+        'Step 1 — Magnetopause (Chapman-Ferraro) current contribution:',
+        `  ΔDst_mp = b × √(P_dyn) = ${b.toFixed(2)} × √(${Pdyn.toFixed(2)}) = ${magPert.toFixed(2)} nT`,
         '',
-        'Step 2 — Corrected Dst:',
-        `  Dst* = Dst − b√(P_dyn) + c`,
+        'Step 2 — Pressure-corrected Dst*:',
+        `  Dst* = Dst − b·√(P_dyn) + c`,
         `  Dst* = ${Dst.toFixed(1)} − ${magPert.toFixed(2)} + ${c.toFixed(1)}`,
         `  Dst* = ${DstStar.toFixed(1)} nT`,
         '',
-        'Step 3 — Storm classification (based on Dst*):',
-        `  ${DstStar < -200 ? 'EXTREME STORM — Dst* < -200 nT (e.g. Carrington-class)' : DstStar < -100 ? 'MAJOR STORM — Dst* -100 to -200 nT (e.g. 1989, 2003 Halloween)' : DstStar < -50 ? 'MODERATE STORM — Dst* -50 to -100 nT' : DstStar < -30 ? 'WEAK STORM — Dst* -30 to -50 nT' : 'QUIET / RECOVERY PHASE — Dst* > -30 nT'}`,
+        'Step 3 — Storm classification (Loewe & Prölss 1997):',
+        `  ${stormLabel}`,
+        '',
+        'Step 4 — Ring current energy (Dessler-Parker-Sckopke 1959):',
+        `  U_RC = −(4π/μ₀) × B_E × R_E³ × Dst* × 10⁻⁹`,
+        `  U_RC = ${U_RC.toExponential(3)} J`,
         '',
         `  └ Dst* isolates ring current injection by removing magnetopause compression effects`,
       ]
     };
   },
   122: ({ eps0, kB, Te, ne }) => {
-    const lambda = Math.sqrt((eps0 * kB * Te) / (ne || 1));
-    const N_D = ne * (4 / 3) * Math.PI * Math.pow(lambda, 3);
+    // Debye & Hückel (1923) — electron Debye length
+    // λ_D = √(ε₀·k_B·T_e / (n_e·e²))
+    // Phys. Z., 24, 185–206. (Plasma physics standard, Chen 1984)
+    const E_CHARGE = 1.602176634e-19;  // C — elementary charge (CODATA 2018, exact)
+    const M_E = 9.1093837015e-31;      // kg — electron mass (CODATA 2018)
+    const neEff = ne || 1;
+    const lambda = Math.sqrt((eps0 * kB * Te) / (neEff * E_CHARGE * E_CHARGE));
+    const N_D = neEff * (4 / 3) * Math.PI * Math.pow(lambda, 3);
+    // Electron plasma frequency: ω_pe = √(n_e·e²/(ε₀·m_e))
+    const omega_pe = Math.sqrt((neEff * E_CHARGE * E_CHARGE) / (eps0 * M_E));
+
     return {
       result: lambda, unit: 'm',
+      secondary: [
+        { key: 'plasma_parameter', value: N_D, unit: '—', label: 'Plasma Parameter N_D (Debye sphere)' },
+        { key: 'plasma_frequency', value: omega_pe, unit: 'rad/s', label: 'Electron Plasma Frequency ω_pe' },
+      ],
       steps: [
-        '── Debye Length (Debye & Hückel, 1923; Chen, 1984) ──',
+        '── Debye Length (Debye & Hückel 1923; Chen 1984 Intro. to Plasma Physics) ──',
         `Vacuum permittivity ε₀ = ${eps0.toExponential(4)} F/m`,
         `Boltzmann constant k_B = ${kB.toExponential(4)} J/K`,
         `Electron temperature T_e = ${Te.toFixed(1)} K (${(Te / 11604.5).toFixed(2)} eV)`,
-        `Electron density n_e = ${ne.toExponential(3)} m⁻³`,
+        `Electron density n_e = ${neEff.toExponential(3)} m⁻³`,
+        `Elementary charge e = ${E_CHARGE.toExponential(4)} C`,
         '',
-        'Step 1 — Compute Debye length:',
-        `  λ_D = √(ε₀·k_B·T_e / n_e)`,
-        `  λ_D = √(${eps0.toExponential(4)} × ${kB.toExponential(4)} × ${Te.toFixed(1)} / ${ne.toExponential(3)})`,
+        'Step 1 — Compute electron Debye length:',
+        `  λ_D = √(ε₀·k_B·T_e / (n_e·e²))`,
+        `  λ_D = √(${eps0.toExponential(4)} × ${kB.toExponential(4)} × ${Te.toFixed(1)} / (${neEff.toExponential(3)} × (${E_CHARGE.toExponential(4)})²))`,
         `  λ_D = ${lambda.toExponential(3)} m (${(lambda * 1000).toFixed(3)} mm)`,
         '',
-        'Step 2 — Plasma parameter (number of particles in Debye sphere):',
-        `  N_D = n_e · (4π/3) · λ_D³ = ${ne.toExponential(3)} × ${(4 * Math.PI / 3).toFixed(3)} × (${lambda.toExponential(3)})³`,
-        `  N_D = ${N_D.toExponential(3)} particles`,
+        'Step 2 — Plasma parameter (particles in Debye sphere):',
+        `  N_D = n_e · (4π/3) · λ_D³ = ${neEff.toExponential(3)} × ${(4 * Math.PI / 3).toFixed(3)} × (${lambda.toExponential(3)})³`,
+        `  N_D = ${N_D.toExponential(3)}`,
         '',
-        'Step 3 — Plasma state:',
+        'Step 3 — Electron plasma (Langmuir) frequency:',
+        `  ω_pe = √(n_e·e²/(ε₀·m_e)) = ${omega_pe.toExponential(3)} rad/s`,
+        `  f_pe = ω_pe/(2π) = ${(omega_pe / (2 * Math.PI)).toExponential(3)} Hz`,
+        '',
+        'Step 4 — Plasma state:',
         `  ${N_D > 100 ? 'IDEAL PLASMA (N_D ≫ 1) — collective behaviour dominates' : 'Non-ideal / strongly coupled — kinetic effects important'}`,
         '',
-        `  └ Debye shielding length: E-field of a test charge decays as exp(−r/λ_D)`,
-        `  └ Quasi-neutrality holds for scale L ≫ λ_D`,
+        `  └ Debye shielding: E-field of a test charge decays as exp(−r/λ_D)`,
+        `  └ Quasi-neutrality holds for system scale L ≫ λ_D`,
+        `  └ PIC simulations require grid spacing Δx < λ_D`,
       ]
     };
   },
@@ -5362,51 +5624,64 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   124: ({ rho, CD, A, v, m }) => {
-    const da = -(rho * CD * A * v) / (m || 1);
+    const GM_E = 3.986004418e14; // m³/s² — Earth gravitational parameter
+    const a = (v > 0) ? GM_E / (v * v) : 6371000 + 400000; // semi-major axis from circular orbit: v² = GM/a
+    const Bstar = CD * A / (m || 1); // ballistic coefficient m²/kg
+    const da = -(rho * Bstar * v * a); // King-Hele (1987): da/dt = −B*·ρ·v·a (m/s)
     return {
-      result: da, unit: 'm/s²',
+      result: da, unit: 'm/s',
       steps: [
-        '── Satellite Deceleration (King-Hele, 1964) ──',
+        '── Semi-Major Axis Decay Rate (King-Hele 1987; Vallado 2013) ──',
         `Atmospheric density ρ = ${rho.toExponential(3)} kg/m³`,
         `Drag coefficient C_D = ${CD.toFixed(2)}, Area A = ${A.toFixed(2)} m²`,
         `Mass m = ${m.toFixed(1)} kg, Velocity v = ${v.toFixed(0)} m/s`,
+        `Semi-major axis a = ${(a/1000).toFixed(1)} km (alt ${((a - 6371000)/1000).toFixed(0)} km, circular orbit)`,
         '',
-        'Step 1 — Compute deceleration:',
-        `  da/dt = −(ρ·C_D·A·v) / m`,
-        `  da/dt = −(${rho.toExponential(3)} × ${CD.toFixed(2)} × ${A.toFixed(2)} × ${v.toFixed(0)}) / ${m.toFixed(1)}`,
-        `  da/dt = ${da.toExponential(3)} m/s²`,
+        'Step 1 — Ballistic coefficient:',
+        `  B* = C_D·A/m = ${CD.toFixed(2)} × ${A.toFixed(2)} / ${m.toFixed(1)} = ${Bstar.toExponential(4)} m²/kg`,
         '',
-        'Step 2 — Orbital impact:',
-        `  Orbital energy loss: dE/dt = v·da/dt = ${(v * da).toExponential(3)} W/kg`,
-        `  ${Math.abs(da) > 1e-4 ? 'Rapid deceleration — orbit decay measurable within days (LEO < 400 km)' : Math.abs(da) > 1e-6 ? 'Gradual decay — typical for 500–700 km altitude' : 'Minimal drag — above 800 km, drag is negligible'}`,
+        'Step 2 — Semi-major axis decay rate (King-Hele 1987):',
+        `  da/dt = −B*·ρ·v·a`,
+        `  da/dt = −${Bstar.toExponential(4)} × ${rho.toExponential(3)} × ${v.toFixed(0)} × ${a.toExponential(4)}`,
+        `  da/dt = ${da.toExponential(4)} m/s`,
         '',
-        `  └ Decay rate: dh/dt ≈ −(da/dt)·(2a³/GM)^(1/2) — altitude loss per orbit`,
+        'Step 3 — Daily / monthly decay:',
+        `  Δh/day = ${Math.abs(da * 86400).toFixed(1)} m/day`,
+        `  Δh/month = ${Math.abs(da * 86400 * 30 / 1000).toFixed(2)} km/month`,
+        '',
+        'Step 4 — Decay significance:',
+        `  ${Math.abs(da) > 0.01 ? 'RAPID — orbit decaying by km/month (low altitude < 400 km)' : Math.abs(da) > 0.001 ? 'MODERATE — ~100 m/day, orbit maintenance needed' : Math.abs(da) > 0.0001 ? 'GRADUAL — ~10 m/day, typical for 500–700 km' : 'WEAK — < 1 m/day, above 800 km drag is negligible'}`,
       ]
     };
   },
   125: ({ A1, A2, sigmax, sigmay, d }) => {
-    const combinedArea = A1 + A2;
-    const normConst = combinedArea / (2 * Math.PI * sigmax * sigmay);
-    const expArg = -(d * d) / (2 * sigmax * sigmay);
+    // Foster (1992): P_c = A_c / (2π·σ_x·σ_y) × exp(−d²/(2σ²))
+    // where A_c = π·(R₁+R₂)², R_i = √(A_i/π)
+    const R1 = Math.sqrt(A1 / Math.PI);
+    const R2 = Math.sqrt(A2 / Math.PI);
+    const Ac = Math.PI * (R1 + R2) ** 2; // collision cross-section area
+    const sigmaEff2 = sigmax * sigmay;    // effective variance
+    const normConst = Ac / (2 * Math.PI * sigmaEff2);
+    const expArg = -(d * d) / (2 * sigmaEff2);
     const Pc = normConst * Math.exp(expArg);
     return {
       result: Pc, unit: '—',
       steps: [
-        '── Satellite Collision Probability (Akella & Alfano, 2000; Chan, 2008) ──',
-        `Covariance (radial): σ_x = ${sigmax.toFixed(3)} m, (cross-track): σ_y = ${sigmay.toFixed(3)} m`,
-        `Object cross-sections: A₁ = ${A1.toFixed(2)} m², A₂ = ${A2.toFixed(2)} m²`,
+        '── Collision Probability (Foster 1992) ──',
+        `Covariance: σ_x = ${sigmax.toFixed(3)} m, σ_y = ${sigmay.toFixed(3)} m`,
+        `Object areas: A₁ = ${A1.toFixed(2)} m², A₂ = ${A2.toFixed(2)} m²`,
         `Miss distance d = ${d.toFixed(2)} m`,
         '',
-        'Step 1 — Combined hard-body radius:',
-        `  R = √((A₁+A₂)/π) = √(${combinedArea.toFixed(2)} / π) = ${Math.sqrt(combinedArea / Math.PI).toFixed(2)} m`,
+        'Step 1 — Hard-body radii and collision cross-section:',
+        `  R₁ = √(A₁/π) = ${R1.toFixed(3)} m`,
+        `  R₂ = √(A₂/π) = ${R2.toFixed(3)} m`,
+        `  A_c = π·(R₁+R₂)² = ${Ac.toFixed(2)} m²`,
         '',
-        'Step 2 — Probability density at encounter:',
-        `  P_c = (A₁+A₂) / (2πσ_xσ_y) × exp(−d²/(2σ_xσ_y))`,
-        `  = ${combinedArea.toFixed(2)} / (2π × ${sigmax.toFixed(3)} × ${sigmay.toFixed(3)}) × exp(−(${d.toFixed(2)})² / (2 × ${sigmax.toFixed(3)} × ${sigmay.toFixed(3)}))`,
-        `  = ${normConst.toExponential(4)} × exp(${expArg.toFixed(3)})`,
-        '',
-        'Step 3 — Collision risk:',
-        `  P_c = ${Pc.toExponential(3)}`,
+        'Step 2 — Collision probability (Foster 1992):',
+        `  P_c = A_c / (2π·σ_x·σ_y) × exp(−d²/(2·σ_x·σ_y))`,
+        `  P_c = ${Ac.toFixed(2)} / (2π × ${sigmax.toFixed(3)} × ${sigmay.toFixed(3)}) × exp(−${(d*d).toFixed(1)} / ${(2*sigmaEff2).toFixed(1)})`,
+        `  P_c = ${normConst.toExponential(4)} × exp(${expArg.toFixed(3)})`,
+        `  P_c = ${Pc.toExponential(4)}`,
         '',
         `  └ Threshold: ${Pc > 1e-4 ? 'HIGH RISK — avoidance maneuver recommended (> 1/10,000)' : Pc > 1e-5 ? 'MODERATE RISK — monitor closely' : 'LOW RISK — routine monitoring'}`,
         `  └ Assumes: linear relative motion, Gaussian errors, short conjunction window`,
@@ -5414,65 +5689,86 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   126: ({ rho2, sigma, v, N, L, beta, gamma }) => {
-    const fragTerm = 0.5 * rho2 * rho2 * sigma * v * N * N;
-    const lossCubic = beta * Math.pow(N, 3);
-    const lossLinear = gamma * N;
-    const dN = fragTerm + L - lossCubic - lossLinear;
+    // Kessler (1991) equation for spatial density ρ:
+    // dρ/dt = ½·ρ²·σ·v + L − β·ρ³ − γ·ρ
+    // v input is km/s; convert to km/yr for consistent km⁻³/yr output.
+    const SEC_PER_YEAR = 365.25 * 24 * 3600; // 3.156e7 s/yr
+    const v_yr = v * SEC_PER_YEAR; // km/yr
+    const fragTerm = 0.5 * rho2 * rho2 * sigma * v_yr;  // ½ρ²σv (km⁻³/yr)
+    const lossCubic = beta * rho2 * rho2 * rho2;         // βρ³ (km⁻³/yr)
+    const lossLinear = gamma * rho2;                      // γρ (km⁻³/yr)
+    const drho = fragTerm + L - lossCubic - lossLinear;
     return {
-      result: dN, unit: 'km⁻³/yr',
+      result: drho, unit: 'km⁻³/yr',
       steps: [
-        '── Kessler-McKinley Debris Evolution (Kessler & Cour-Palais, 1978; Kessler, 1991) ──',
-        `Spatial density ρ = ${rho2.toExponential(3)} km⁻³, Collision cross-section σ = ${sigma.toExponential(3)} km²`,
-        `Relative velocity v = ${v.toExponential(3)} km/yr`,
-        `Current debris count N = ${N.toExponential(3)}, Launch rate L = ${L.toExponential(2)} km⁻³/yr`,
-        `Collision loss β = ${beta.toExponential(3)} km³/yr, Drag decay γ = ${gamma.toExponential(3)} /yr`,
+        '── Kessler Syndrome Debris Evolution (Kessler & Cour-Palais 1978; Kessler 1991) ──',
+        `Spatial density ρ = ${rho2.toExponential(3)} km⁻³`,
+        `Collision cross-section σ = ${sigma.toExponential(3)} km², Relative velocity v = ${v.toFixed(1)} km/s`,
+        `Launch rate L = ${L.toExponential(2)} km⁻³/yr`,
+        `Collisional loss β = ${beta.toExponential(3)}, Drag decay γ = ${gamma.toExponential(3)} /yr`,
         '',
-        'Step 1 — Fragmentation source term:',
-        `  ½ρ²·σ·v·N² = ½ × (${rho2.toExponential(3)})² × ${sigma.toExponential(3)} × ${v.toExponential(3)} × (${N.toExponential(3)})²`,
+        'Step 1 — Fragmentation source (Kessler 1991):',
+        `  S_coll = ½·ρ²·σ·v`,
+        `  = ½ × (${rho2.toExponential(3)})² × ${sigma.toExponential(3)} × ${v.toFixed(1)}`,
         `  = ${fragTerm.toExponential(3)} km⁻³/yr`,
         '',
         'Step 2 — Loss terms:',
-        `  Cubic (collisional) loss: βN³ = ${beta.toExponential(3)} × (${N.toExponential(3)})³ = ${lossCubic.toExponential(3)} km⁻³/yr`,
-        `  Linear (drag) loss: γN = ${gamma.toExponential(3)} × ${N.toExponential(3)} = ${lossLinear.toExponential(3)} km⁻³/yr`,
+        `  Collisional (cubic): β·ρ³ = ${beta.toExponential(3)} × (${rho2.toExponential(3)})³ = ${lossCubic.toExponential(3)} km⁻³/yr`,
+        `  Atmospheric drag (linear): γ·ρ = ${gamma.toExponential(3)} × ${rho2.toExponential(3)} = ${lossLinear.toExponential(3)} km⁻³/yr`,
         '',
         'Step 3 — Net rate of change:',
-        `  dN/dt = ${fragTerm.toExponential(3)} + ${L.toExponential(2)} − ${lossCubic.toExponential(3)} − ${lossLinear.toExponential(3)}`,
-        `  dN/dt = ${dN.toExponential(3)} km⁻³/yr`,
+        `  dρ/dt = ${fragTerm.toExponential(3)} + ${L.toExponential(2)} − ${lossCubic.toExponential(3)} − ${lossLinear.toExponential(3)}`,
+        `  dρ/dt = ${drho.toExponential(3)} km⁻³/yr`,
         '',
         'Step 4 — Kessler Syndrome assessment:',
-        `  ${dN > 0 ? 'POSITIVE GROWTH — debris population increasing (collisional cascading potential)' : dN < 0 ? 'NEGATIVE GROWTH — debris decreasing (decay > production)' : 'STEADY STATE — production balanced by removal'}`,
+        `  ${drho > 0 ? 'POSITIVE GROWTH — debris density increasing (collisional cascading potential)' : drho < 0 ? 'NEGATIVE GROWTH — debris decreasing (decay > production)' : 'STEADY STATE — production balanced by removal'}`,
         '',
-        `  └ Critical density threshold: N_crit ≈ √(2γ/(ρ²σv)) beyond which cascading is self-sustaining`,
-      ]
+        `  └ Critical density: ρ_crit ≈ √(2γ/(σ·v)) — above this, cascading is self-sustaining`,
+        N > 0 ? `  └ Population context: N = ${N.toExponential(1)} objects in the orbital shell` : '',
+      ].filter(Boolean)
     };
   },
-  127: ({ n, ax, ay, az }) => {
-    const xAccel = 2 * n * ax - 3 * n * n * ax;
-    const yAccel = 2 * n * ay;
-    const zAccel = -n * n * az + az;
-    const accelMag = Math.hypot(xAccel, yAccel, zAccel);
+  127: ({ n, x, y, z, xdot, ydot, zdot, ax, ay, az }) => {
+    // Hill-Clohessy-Wiltshire (1960) equations:
+    // ẍ = 2n·ẏ + 3n²·x + a_x
+    // ÿ = −2n·ẋ + a_y
+    // z̈ = −n²·z + a_z
+    const xddot = 2 * n * ydot + 3 * n * n * x + ax;
+    const yddot = -2 * n * xdot + ay;
+    const zddot = -n * n * z + az;
+    const accelMag = Math.hypot(xddot, yddot, zddot);
+    // Secular along-track drift rate: ẏ_drift = −3n·x/2
+    const yDrift = -1.5 * n * x;
     return {
       result: accelMag, unit: 'm/s²',
       steps: [
-        '── Hill-Clohessy-Wiltshire Equations (Clohessy & Wiltshire, 1960; Hill, 1878) ──',
+        '── Hill-Clohessy-Wiltshire Equations (Clohessy & Wiltshire 1960; Hill 1878) ──',
         `Mean motion n = ${n.toExponential(4)} rad/s`,
-        `Perturbation accelerations: a_x = ${ax.toExponential(3)} m/s², a_y = ${ay.toExponential(3)} m/s², a_z = ${az.toExponential(3)} m/s²`,
+        `Relative state: x=${x.toFixed(4)} m, y=${y.toFixed(4)} m, z=${z.toFixed(4)} m`,
+        `Relative velocity: ẋ=${xdot.toExponential(3)} m/s, ẏ=${ydot.toExponential(3)} m/s, ż=${zdot.toExponential(3)} m/s`,
+        `Thrust: a_x=${ax.toExponential(3)}, a_y=${ay.toExponential(3)}, a_z=${az.toExponential(3)} m/s²`,
         '',
-        'Step 1 — HCW relative motion:',
-        `  ẍ − 2nẏ − 3n²x = a_x`,
-        `  → ẍ = 2·${n.toExponential(4)}·${ax.toExponential(3)} − 3·(${n.toExponential(4)})²·${ax.toExponential(3)}`,
-        `  → ẍ = ${xAccel.toExponential(3)} m/s²`,
+        'Step 1 — Radial acceleration (HCW x-equation):',
+        `  ẍ = 2n·ẏ + 3n²·x + a_x`,
+        `  ẍ = 2×${n.toExponential(4)}×${ydot.toExponential(3)} + 3×(${n.toExponential(4)})²×${x.toFixed(4)} + ${ax.toExponential(3)}`,
+        `  ẍ = ${xddot.toExponential(4)} m/s²`,
         '',
-        'Step 2 — Cross-track components:',
-        `  ÿ + 2nẋ = a_y → ÿ = ${yAccel.toExponential(3)} m/s²`,
-        `  z̈ + n²z = a_z → z̈ = ${zAccel.toExponential(3)} m/s²`,
+        'Step 2 — Along-track acceleration (HCW y-equation):',
+        `  ÿ = −2n·ẋ + a_y`,
+        `  ÿ = −2×${n.toExponential(4)}×${xdot.toExponential(3)} + ${ay.toExponential(3)}`,
+        `  ÿ = ${yddot.toExponential(4)} m/s²`,
         '',
-        'Step 3 — Total perturbation acceleration:',
-        `  |a| = √(${xAccel.toExponential(3)}² + ${yAccel.toExponential(3)}² + ${zAccel.toExponential(3)}²)`,
-        `  |a| = ${accelMag.toExponential(3)} m/s²`,
+        'Step 3 — Cross-track acceleration (HCW z-equation):',
+        `  z̈ = −n²·z + a_z`,
+        `  z̈ = −(${n.toExponential(4)})²×${z.toFixed(4)} + ${az.toExponential(3)}`,
+        `  z̈ = ${zddot.toExponential(4)} m/s²`,
         '',
-        `  └ Secular drift occurs when initial conditions yield a non-zero offset in along-track position`,
-        `  └ HCW valid for close proximity manoeuvres with circular reference orbit`,
+        'Step 4 — Total relative acceleration:',
+        `  |a| = √(ẍ² + ÿ² + z̈²) = ${accelMag.toExponential(4)} m/s²`,
+        '',
+        `  └ Secular along-track drift: ẏ_drift = −1.5·n·x = ${yDrift.toExponential(4)} m/s`,
+        `  └ Bounded orbit condition: x₀ = −2ẏ₀/(3n) eliminates secular drift`,
+        '  └ HCW valid for |relative position| ≪ orbit radius (typically < 10 km)',
       ]
     };
   },
@@ -6239,7 +6535,7 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   74: { 'H₀': 'H0', 'T₀': 'T0', 'β_f': 'betaF', 'βf': 'betaF' },
   75: { 'L*': 'L', 'h*': 'hstar' },
   76: { 'd_b': 'db' },
-  77: { 'H_sb': 'Hsb', 'θ_b': 'thetaB' },
+  77: { 'H_sb': 'Hsb', 'θ_b': 'thetaB', 'theta_b': 'thetaB' },
   79: { 'ω': 'omega', 'a': 'ka' },
   80: { 'α': 'alpha', 'g': 'g2', 'f_m': 'fm', 'γ': 'gamma' },
   84: { "c'": 'cprime', 'γz': 'gammaz', 'cosβ': 'cosB', "φ'": 'tanphi', 'sinβ': 'sinB', 'cos²β': 'cosB2' },
@@ -6263,10 +6559,10 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   104: { 'K_m': 'Km' },
   105: { 'θ̄_v': 'thetaVbar', "w'θ'_v₀": 'wthetaV', 'z_i': 'zi' },
   106: { '|∇θ|': 'dtheta', 'β': 'cos2b', 'δ': 'delta' },
-  107: { 'ζ': 'zeta', '∇·V': 'dvdy' },
+  107: { 'ζ': 'zeta', '∇·V': 'div' },
   109: { 'N₀': 'N0', 'Λ': 'Lambda' },
   112: { 'hₙ': 'hn', 'Vₙ': 'Vn' },
-  113: { 'C_nm': 'Cnm', 'S_nm': 'Snm', 'P_nm': 'Pnm' },
+  113: { 'C_nm': 'Cnm', 'S_nm': 'Snm', 'P_nm': 'Pnm', 'λ': 'lam' },
   116: { 'nᵢ': 'ni', 'mᵢ': 'mi' },
   117: { 'N_e': 'Ne' },
   119: { '⟨I⟩': 'Imean', 'σ_I': 'Istd' },
