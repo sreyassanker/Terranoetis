@@ -90,12 +90,14 @@ export default function FloodWaterSurface({ viewer, shapes, progress }: FloodWat
               return Cesium.Cartesian3.fromDegrees(v.lon, v.lat, elevation);
             });
           }, false),
-          material: new Cesium.CallbackProperty(() => {
-            const t = waterTime.value;
-            const wave = 0.02 * Math.sin(t * 2.0) + 0.02 * Math.sin(t * 1.3 + 1.0);
-            const a = Math.min(0.35 + progressRef.current * 0.4 + wave, 0.85);
-            return new Cesium.Color(0.2 + wave * 0.1, 0.35 + wave * 0.1, 0.3 + wave * 0.1, a);
-          }, false) as unknown as Cesium.MaterialProperty,
+          material: new Cesium.ColorMaterialProperty(
+            new Cesium.CallbackProperty(() => {
+              const t = waterTime.value;
+              const wave = 0.02 * Math.sin(t * 2.0) + 0.02 * Math.sin(t * 1.3 + 1.0);
+              const a = Math.min(0.35 + progressRef.current * 0.4 + wave, 0.85);
+              return new Cesium.Color(0.2 + wave * 0.1, 0.35 + wave * 0.1, 0.3 + wave * 0.1, a);
+            }, false),
+          ),
           outline: true,
           outlineColor: baseColor.withAlpha(0.6 + progressRef.current * 0.2),
         },

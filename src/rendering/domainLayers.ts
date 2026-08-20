@@ -271,7 +271,7 @@ export function addNasaDsnEntities(viewer: Cesium.Viewer, dsnData: any): Cesium.
       },
       label: {
         text: friendlyName,
-        font: 'bold 11px "Space Grotesk", sans-serif',
+        font: 'bold 11px "Inter", sans-serif',
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 2,
@@ -558,7 +558,7 @@ export function addElectricityGridEntities(viewer: Cesium.Viewer, gridZones: any
       },
       label: {
         text: `${zone.id}: ${intensity}g`,
-        font: 'bold 10px "Space Grotesk", sans-serif',
+        font: 'bold 10px "Inter", sans-serif',
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 2.5,
@@ -626,7 +626,7 @@ export function addAnimalMigrationEntities(viewer: Cesium.Viewer, migrations: an
       },
       label: {
         text: m.animalId,
-        font: '10px "Space Grotesk", sans-serif',
+        font: '10px "Inter", sans-serif',
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 2,

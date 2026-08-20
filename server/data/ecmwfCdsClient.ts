@@ -439,25 +439,32 @@ export async function fetchEra5Wind10m(
 }
 
 /**
- * Fetch ERA5 significant wave height (swh) and peak wave period (pp1d) at a
- * point — the paper's deep-water H₀ and T₀ for Stockdon et al. (2006) wave
- * runup (Tool 74). ONE CDS single-levels job (swh + pp1d together); units m
- * and s. Genuine reanalysis — never proxied. The requested date is honoured
- * (input-filter rule); future/missing dates resolve to the documented
- * 6-months-ago window (ERA5 publication latency). Returns null when the job
- * fails so consumers can NaN-fire honestly (zero-fallback rule).
+ * Fetch ERA5 significant wave height (swh), peak wave period (pp1d) and mean
+ * wave direction (mwd) at a point — the paper's deep-water H₀/T₀ for
+ * Stockdon et al. (2006) runup (Tool 74) and the CERC longshore-transport
+ * inputs H₀s/α₀ (Tool 77, Shore Protection Manual 1984 eqs 4-44/4-45). ONE
+ * CDS single-levels job (swh + pp1d + mwd together); units m, s and degrees
+ * (mwd = direction FROM which waves come, meteorological convention, °
+ * clockwise from north). Genuine reanalysis — never proxied. The requested
+ * date is honoured (input-filter rule); future/missing dates resolve to the
+ * documented 6-months-ago window (ERA5 publication latency). Returns null
+ * when the job fails so consumers can NaN-fire honestly (zero-fallback rule).
  */
 export async function fetchEra5WaveClimate(
   lat: number, lon: number, dateStr?: string,
-): Promise<{ swh: number; pp1d: number; asOfDate: string } | null> {
+): Promise<{ swh: number; pp1d: number; mwd: number | null; asOfDate: string } | null> {
   const { year, month, day, iso } = resolveCdsDate(dateStr);
   const cacheKey = `era5:wave:${lat.toFixed(3)}:${lon.toFixed(3)}:${iso}`;
-  const cached = cache.get<{ swh: number; pp1d: number; asOfDate: string }>(cacheKey);
+  const cached = cache.get<{ swh: number; pp1d: number; mwd: number | null; asOfDate: string }>(cacheKey);
   if (cached !== undefined) return cached;
 
   const buffer = await fetchCdsNetCdf({
     dataset: ERA5_SINGLE,
-    variables: ['significant_height_of_combined_wind_waves_and_swell', 'peak_wave_period'],
+    variables: [
+      'significant_height_of_combined_wind_waves_and_swell',
+      'peak_wave_period',
+      'mean_wave_direction',
+    ],
     area: pointArea(lat, lon),
     years: [year],
     months: [month],
@@ -471,7 +478,13 @@ export async function fetchEra5WaveClimate(
   const pp1d = await readPoint(buffer, 'pp1d');
   if (swh === null || pp1d === null || !Number.isFinite(swh) || !Number.isFinite(pp1d)
     || swh <= 0 || pp1d <= 0) return null;
-  const result = { swh, pp1d, asOfDate: iso };
+  const mwd = await readPoint(buffer, 'mwd');
+  const result = {
+    swh,
+    pp1d,
+    mwd: mwd !== null && Number.isFinite(mwd) && mwd >= 0 && mwd <= 360 ? mwd : null,
+    asOfDate: iso,
+  };
   cache.set(cacheKey, result);
   return result;
 }

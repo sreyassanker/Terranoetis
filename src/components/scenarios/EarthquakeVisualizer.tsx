@@ -103,9 +103,11 @@ export default function EarthquakeVisualizer({ viewer, shapes, progress }: Earth
           const entity = ec.add({
             polygon: {
               hierarchy: cached,
-              material: new Cesium.CallbackProperty(() => {
-                return color.withAlpha(alpha * progressRef.current);
-              }, false) as unknown as Cesium.MaterialProperty,
+              material: new Cesium.ColorMaterialProperty(
+                new Cesium.CallbackProperty(() => {
+                  return color.withAlpha(alpha * progressRef.current);
+                }, false),
+              ),
               outline: true,
               outlineColor: new Cesium.CallbackProperty(() => {
                 return color.withAlpha(alpha * 2 * progressRef.current);

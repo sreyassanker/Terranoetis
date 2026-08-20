@@ -1378,6 +1378,7 @@ export async function fetchTerrain(
   }
   const url = `https://api.opentopodata.org/v1/srtm30m?locations=${locs.join('|')}`;
   const data = await strictFetch(url);
+  console.error('[TERRAIN-RAW] body=' + JSON.stringify(data).slice(0, 300));
   const results = data?.results as Array<{ elevation: number | null }> | undefined;
   if (!results || results.length < 9) throw new Error('Open Topo Data returned insufficient elevation points');
 
@@ -1421,6 +1422,63 @@ export async function fetchTerrain(
     curvature,
     hillshade,
   };
+}
+
+/**
+ * Genuine local shoreline bearing (°, 0–180, direction the coastline runs)
+ * from GEBCO 2020 relief probes on a ring around the point — the geometric
+ * input Tool 77 (CERC longshore transport, SPM 1984) needs to convert a
+ * wave direction into the breaker angle relative to the shoreline. Probes
+ * 8 points at ~2 km radius on the genuine OpenTopoData GEBCO 2020 grid
+ * (positive-up global relief; negative = seafloor, positive = land — the
+ * same source as the Tool 76 auto bathymetry). The resultant of the
+ * land(+1)/water(−1) unit vectors points landward (shore-normal) and the
+ * shoreline tangent is that bearing + 90°. Returns null when the ring is
+ * entirely land or entirely water (no resolvable coast) or on fetch
+ * failure — consumers then NaN-fire honestly (no fabricated orientation).
+ */
+export async function fetchShorelineBearing(
+  lat: number, lon: number,
+): Promise<number | null> {
+  const { fetchGebco2020Elevations } = await import('../kaggle/bathymetry');
+  const radiusKm = 2;
+  const R_EARTH = 6371;
+  const steps = 8;
+  const locs: Array<{ lat: number; lon: number }> = [];
+  const ux: number[] = [];
+  const uy: number[] = [];
+  for (let i = 0; i < steps; i++) {
+    const brg = (i * 360) / steps; // degrees clockwise from north
+    const br = brg * Math.PI / 180;
+    const dLat = (radiusKm / R_EARTH) * Math.cos(br);
+    const dLon = (radiusKm / R_EARTH) * Math.sin(br) / Math.max(Math.cos(lat * Math.PI / 180), 1e-6);
+    locs.push({
+      lat: lat + dLat * 180 / Math.PI,
+      lon: lon + dLon * 180 / Math.PI,
+    });
+    ux.push(Math.sin(br)); // east component of the probe unit vector
+    uy.push(Math.cos(br)); // north component
+  }
+  let elevs: number[];
+  try {
+    elevs = await fetchGebco2020Elevations(locs);
+  } catch {
+    return null; // fetch failure — consumers NaN-fire honestly
+  }
+  let gx = 0, gy = 0, nLand = 0, nWater = 0;
+  for (let i = 0; i < steps; i++) {
+    const e = elevs[i];
+    if (e == null || !Number.isFinite(e)) return null; // missing cell — honest
+    const w = e >= 0 ? 1 : -1; // GEBCO: positive = land, negative = seafloor
+    if (e >= 0) nLand++; else nWater++;
+    gx += w * ux[i];
+    gy += w * uy[i];
+  }
+  if (nLand === 0 || nWater === 0) return null; // no resolvable coast on the ring
+  const mag = Math.hypot(gx, gy);
+  if (mag < 1e-6) return null;
+  const landward = (Math.atan2(gx, gy) * 180 / Math.PI + 360) % 360; // gradient points toward land
+  return (landward + 90) % 180; // shoreline tangent, 0–180
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1748,6 +1806,69 @@ export async function fetchGppModis(
   return hit;
 }
 
+export interface GppAnnualData {
+  gppYr_gC: number;         // annual GPP, gC/m²/yr (sum of valid 8-day composites)
+  validComposites: number;  // how many of the year's ~46 composites summed
+  year: number;
+  asOf: string;             // provenance string
+}
+
+/**
+ * Annual GPP (gC/m²/yr) from MODIS MOD17A2H 8-day composites summed over a
+ * year — the standard construction of annual GPP from MOD17 (catalogue-
+ * sanctioned source for Tool 53, same product family as fetchGppModis). The
+ * ORNL subset API caps at 10 tiles per request (10 × 8-day composites ≈
+ * 80 d), so the year is fetched in 5 chunked requests; fill/missing
+ * composites are skipped and the valid count reported honestly. Null when no
+ * genuine composite resolves (no fabrication).
+ */
+export async function fetchAnnualGppModis(
+  lat: number, lon: number, year?: number,
+): Promise<GppAnnualData | null> {
+  const now = new Date();
+  const y = year ?? now.getUTCFullYear() - 1; // most recent complete year
+  if (!Number.isFinite(y) || y < 2000 || y > now.getUTCFullYear()) return null;
+  const isLeap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const daysInYear = isLeap ? 366 : 365;
+  const pad = (d: number) => String(Math.max(1, Math.min(daysInYear, d))).padStart(3, '0');
+
+  // Five 10-composite (~80 d) windows tile the year.
+  const chunks = [1, 81, 161, 241, 321];
+  let totalKgC = 0;
+  let valid = 0;
+  let lastDate = '';
+  for (const start of chunks) {
+    const url = 'https://modis.ornl.gov/rst/api/v1/MOD17A2H/subset'
+      + `?latitude=${lat}&longitude=${lon}&startDate=A${y}${pad(start)}&endDate=A${y}${pad(start + 79)}`
+      + '&band=Gpp_500m&kmAboveBelow=0&kmLeftRight=0';
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Terranoetis/1.0 (analytical tools; genuine-source audit)' },
+      signal: AbortSignal.timeout(25000),
+    }).catch(() => null);
+    if (!res || !res.ok) continue;
+    const data = (await res.json().catch(() => null)) as
+      | { subset?: Array<{ modis_date?: string; data?: number[]; scale?: number }> } | string | null;
+    const subset = (data && typeof data === 'object' && !Array.isArray(data) ? data.subset : null)
+      ?? (Array.isArray(data) ? data as unknown as Array<{ modis_date?: string; data?: number[]; scale?: number }> : undefined);
+    if (!Array.isArray(subset)) continue;
+    for (const s of subset) {
+      const scale = Number(s.scale ?? 1e-4);
+      const raw = Number(Array.isArray(s.data) ? s.data[0] : NaN);
+      if (!Number.isFinite(raw) || raw >= 32761 || raw < 0) continue;
+      totalKgC += raw * scale;
+      valid++;
+      if (s.modis_date) lastDate = s.modis_date;
+    }
+  }
+  if (valid === 0) return null;
+  return {
+    gppYr_gC: totalKgC * 1000,
+    validComposites: valid,
+    year: y,
+    asOf: `MODIS MOD17A2H 8-day GPP summed over ${valid} valid composites of ${y} (ORNL DAAC; ${totalKgC.toFixed(2)} kgC/m²/yr → ${(totalKgC * 1000).toFixed(0)} gC/m²/yr)`,
+  };
+}
+
 // ══════════════════════════════════════════════════════════════════
 //  ERA5 High-Fidelity Data (ECMWF CDS API v2)
 //  Provides variables NOT available through Open-Meteo ERA5 subset:
@@ -1775,6 +1896,18 @@ export interface Era5HighFidelityData {
   rh2m?: number | null;
   /** ISO date the cds values were actually resolved to (≤ requested date). */
   era5AsOfDate?: string | null;
+  /** Genuine ERA5 10 m wind speed (m/s) — cds backend only (tool 56). */
+  wind10m?: number | null;
+  /** ISO date the 10 m wind was resolved to (provenance). */
+  wind10mAsOfDate?: string | null;
+  /** Genuine ERA5 significant wave height (m) — cds backend only (tools 74/75/77). */
+  waveHeight?: number | null;
+  /** Genuine ERA5 peak wave period (s) — cds backend only (tool 74). */
+  wavePeriod?: number | null;
+  /** Genuine ERA5 mean wave direction (°, FROM which waves come, met convention) — cds backend only (tool 77). */
+  waveDirection?: number | null;
+  /** ISO date the wave values were resolved to (provenance). */
+  waveAsOfDate?: string | null;
   /** Provenance: which backend served rh2m (tool 50 provenance step). */
   rh2mSource?: 'cds' | 'none';
   surfaceFluxes: {
@@ -1782,6 +1915,7 @@ export interface Era5HighFidelityData {
     netLongwave: number | null;                  // W/m²
     sensibleFlux: number | null;                 // W/m²
     latentFlux: number | null;                   // W/m²
+    downwardShortwave: number | null;            // W/m² (cds: ERA5 ssrd; proxy: Open-Meteo SW)
     airTemp2m?: number | null;                   // K (cds path only)
     surfacePressure?: number | null;             // Pa (cds path only)
     asOfDate?: string;                           // ISO date resolved (provenance)
@@ -1865,7 +1999,7 @@ async function fetchOpenMeteoEra5(
       const bowen = 1.0;
       const sensibleFlux = netAvail * bowen / (1 + bowen);
       const latentFlux = netAvail / (1 + bowen);
-      surfaceFluxes = { netShortwave, netLongwave, sensibleFlux, latentFlux };
+      surfaceFluxes = { netShortwave, netLongwave, sensibleFlux, latentFlux, downwardShortwave: sw };
     }
 
     // Soil state
@@ -1900,13 +2034,24 @@ async function fetchOpenMeteoEra5(
 
 export async function fetchEra5HighFidelity(
   lat: number, lon: number, dateStr?: string,
-  opts?: { mostOnly?: boolean },
+  opts?: { mostOnly?: boolean; fluxOnly?: boolean; fluxDailyMean?: boolean; windOnly?: boolean; waveOnly?: boolean; skip?: boolean },
 ): Promise<Era5HighFidelityData> {
+  // Consumer-supplied overrides make the reanalysis inputs unnecessary
+  // (e.g. Tool 56 with an explicit gas-transfer velocity k): skip the CDS
+  // job entirely so the call returns fast. Honest 'none' provenance.
+  if (opts?.skip) {
+    return {
+      frictionVelocity: null, totalColumnWaterVapour: null,
+      surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null,
+      source: 'none',
+      rh2m: null, rh2mSource: 'none', era5AsOfDate: null,
+    };
+  }
   if (process.env.CDS_API_TOKEN) {
     try {
       const { fetchEra5MostInput, fetchEra5FrictionVelocity, fetchEra5Tcwv, fetchEra5SurfaceFluxes,
-        fetchEra5PressureWind, fetchEra5PressureState, fetchEra5SoilState,
-        getCdsStatus } = await import('../data/ecmwfCdsClient');
+        fetchEra5PressureWind, fetchEra5PressureState, fetchEra5SoilState, fetchEra5Wind10m,
+        fetchEra5WaveClimate, getCdsStatus } = await import('../data/ecmwfCdsClient');
       if (getCdsStatus().tokenConfigured) {
         // Tool 48 (MOST) needs only zust + sshf + t2m + sp from ONE
         // single-levels request. The full 8-job batch serializes at
@@ -1921,6 +2066,7 @@ export async function fetchEra5HighFidelity(
               surfaceFluxes: {
                 netShortwave: null, netLongwave: null,
                 sensibleFlux: most.sensibleFlux, latentFlux: null,
+                downwardShortwave: null,
                 airTemp2m: most.airTemp2m, surfacePressure: most.surfacePressure,
                 asOfDate: most.asOfDate,
               },
@@ -1941,6 +2087,69 @@ export async function fetchEra5HighFidelity(
             rh2m: null,
             rh2mSource: 'none',
             era5AsOfDate: null,
+          };
+        }
+        // Tool 52 (Beer-Lambert canopy extinction): needs only the surface
+        // radiation fluxes (ssrd → downward shortwave for I₀). ONE CDS job
+        // instead of the full 8-job batch — keeps the run inside the budget.
+        // No proxy fallback: when the genuine CDS job fails, source is 'none'
+        // and the engine NaN-fires honestly (zero-fallback rule).
+        if (opts?.fluxOnly) {
+          // Tool 59 (Priestley–Taylor) needs the paper's 24-hr MEAN net
+          // radiation (all 24 hourly ERA5 steps averaged); Tool 52 (Gill)
+          // keeps the 12:00 UTC snapshot.
+          const fluxes = await fetchEra5SurfaceFluxes(lat, lon, dateStr,
+            { dailyMean: opts?.fluxDailyMean })
+            .catch(() => null);
+          if (fluxes) {
+            return {
+              frictionVelocity: null, totalColumnWaterVapour: null,
+              surfaceFluxes: fluxes,
+              pressureWind: null, pressureState: null, soilState: null,
+              source: 'cds',
+              era5AsOfDate: fluxes.asOfDate ?? null,
+            };
+          }
+          return {
+            frictionVelocity: null, totalColumnWaterVapour: null,
+            surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null,
+            source: 'none',
+            era5AsOfDate: null,
+          };
+        }
+        // Tool 56 (Wanninkhof 1992 air-sea CO₂ flux): needs only the genuine
+        // ERA5 10 m wind (u10/v10 → speed) for k = 0.31·u₁₀²·(Sc/660)^(−1/2).
+        // ONE CDS job instead of the full 8-job batch. No proxy fallback:
+        // when the genuine CDS job fails, source is 'none' and the engine
+        // NaN-fires honestly (zero-fallback rule).
+        if (opts?.windOnly) {
+          const wind10m = await fetchEra5Wind10m(lat, lon, dateStr).catch(() => null);
+          return {
+            frictionVelocity: null, totalColumnWaterVapour: null,
+            surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null,
+            source: wind10m != null ? 'cds' : 'none',
+            era5AsOfDate: null,
+            wind10m,
+            wind10mAsOfDate: wind10m != null ? (dateStr ?? undefined) : null,
+          };
+        }
+        // Tools 74 (Stockdon runup) / 75 (Bruun closure depth) / 77 (CERC
+        // longshore transport): need only the genuine ERA5 wave climate
+        // (swh/pp1d → H₀/T₀ for 74; H_s → h* = 1.57·H_s for 75; H_0s/α₀ for
+        // 77). ONE CDS job instead of the full 8-job batch. No proxy
+        // fallback: when the genuine CDS job fails, source is 'none' and
+        // the engine NaN-fires honestly (zero-fallback rule).
+        if (opts?.waveOnly) {
+          const wave = await fetchEra5WaveClimate(lat, lon, dateStr).catch(() => null);
+          return {
+            frictionVelocity: null, totalColumnWaterVapour: null,
+            surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null,
+            source: wave != null ? 'cds' : 'none',
+            era5AsOfDate: null,
+            waveHeight: wave?.swh ?? null,
+            wavePeriod: wave?.pp1d ?? null,
+            waveDirection: wave?.mwd ?? null,
+            waveAsOfDate: wave?.asOfDate ?? null,
           };
         }
         const [ustar, tcwv, fluxes, wind850, wind500, state850, state500, soil] =
@@ -1983,6 +2192,16 @@ export async function fetchEra5HighFidelity(
     } catch { /* fall through to Open-Meteo */ }
   }
 
+  // Tool 56 (Wanninkhof 1992): the Open-Meteo redistribution subset is NOT
+  // an authentic wind source (per the audit rule, Open-Meteo is a proxy).
+  // Honest 'none' — the engine NaN-fires rather than using proxy wind.
+  if (opts?.windOnly) {
+    return {
+      frictionVelocity: null, totalColumnWaterVapour: null,
+      surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null,
+      source: 'none', wind10m: null, wind10mAsOfDate: null,
+    };
+  }
   return fetchOpenMeteoEra5(lat, lon, dateStr) ?? {
     frictionVelocity: null, totalColumnWaterVapour: null,
     surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null,
@@ -2077,4 +2296,93 @@ export async function fetchRFactor(
     stationLat: chosen.s.ll![1], stationLon: chosen.s.ll![0],
     distanceKm: chosen.d,
   };
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  Daily TMAX/TMIN for Growing Degree Days (Tool 58)
+//  Authentic source: NOAA GHCN-Daily station observations via the
+//  Regional Climate Center ACIS service (no key) — the "standard Class A
+//  weather station" daily maximum/minimum air temperatures at 2 m that
+//  McMaster & Wilhelm (1997) use as the inputs to Eq. (1). ACIS reports
+//  maxt/mint in °F; converted to °C here.
+// ══════════════════════════════════════════════════════════════════
+
+export interface GddDailyObs {
+  date: string;    // YYYY-MM-DD
+  tmaxC: number;   // daily maximum 2 m air temperature (°C)
+  tminC: number;   // daily minimum 2 m air temperature (°C)
+}
+
+export interface GddStationData {
+  station: string;
+  sid: string;
+  stationLat: number;
+  stationLon: number;
+  distanceKm: number;
+  days: GddDailyObs[];   // most-recent-first daily TMAX/TMIN
+}
+
+export async function fetchGddStationData(
+  lat: number, lon: number, daysBack = 30,
+): Promise<GddStationData | null> {
+  // 1) Nearest station with both daily max AND min temperature records
+  //    within ±1.5° — skip stations that only report one of the two.
+  const metaUrl = 'https://data.rcc-acis.org/StnMeta?params='
+    + encodeURIComponent(JSON.stringify({
+      bbox: [lon - 1.5, lat - 1.5, lon + 1.5, lat + 1.5],
+      elems: ['maxt', 'mint'],
+      meta: ['name', 'll', 'sids', 'elev'],
+    }));
+  const meta = await strictFetch(metaUrl, 25000) as {
+    meta?: Array<{ name?: string; ll?: [number, number]; sids?: string[] }>;
+  };
+  const stations = (meta.meta ?? []).filter((s) => Array.isArray(s.ll) && s.ll.length === 2);
+  if (!stations.length) return null;
+  const hDist = (lon1: number, lat1: number, lon2: number, lat2: number) => {
+    const R = 6371, rd = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rd, dLon = (lon2 - lon1) * rd;
+    const a = Math.sin(dLat / 2) ** 2
+      + Math.cos(lat1 * rd) * Math.cos(lat2 * rd) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  };
+  const ranked = stations
+    .map((s) => ({ s, d: hDist(lon, lat, s.ll![0], s.ll![1]) }))
+    .sort((a, b) => a.d - b.d);
+
+  const edate = new Date().toISOString().slice(0, 10);
+  const sdate = new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10);
+
+  for (const cand of ranked.slice(0, 8)) {
+    const sid6 = cand.s.sids?.find((x) => x.endsWith(' 6'))?.split(' ')[0];
+    if (!sid6) continue;
+    const dataUrl = 'https://data.rcc-acis.org/StnData?params='
+      + encodeURIComponent(JSON.stringify({
+        sid: sid6,
+        sdate, edate,
+        elems: [{ name: 'maxt' }, { name: 'mint' }],
+      }));
+    let data: { data?: Array<[string, string, string]> };
+    try {
+      data = await strictFetch(dataUrl, 25000) as { data?: Array<[string, string, string]> };
+    } catch { continue; }
+    const days: GddDailyObs[] = [];
+    for (const [date, tmaxF, tminF] of (data.data ?? [])) {
+      const tmax = parseFloat(tmaxF), tmin = parseFloat(tminF);
+      if (!Number.isFinite(tmax) || !Number.isFinite(tmin)) continue; // missing obs
+      days.push({
+        date,
+        tmaxC: (tmax - 32) * 5 / 9,
+        tminC: (tmin - 32) * 5 / 9,
+      });
+    }
+    if (days.length >= 2) {
+      return {
+        station: cand.s.name ?? sid6, sid: sid6,
+        stationLat: cand.s.ll![1], stationLon: cand.s.ll![0],
+        distanceKm: cand.d,
+        days: days.reverse(), // most-recent-first
+      };
+    }
+  }
+  return null;
 }

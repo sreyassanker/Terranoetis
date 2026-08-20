@@ -19,6 +19,29 @@ Author: Terranoetis / Freebuff
 import json, os, time, traceback
 import numpy as np
 
+# ── JSON-safe conversion ───────────────────────────────────────────
+# NumPy 2.x scalars (np.bool_, np.float64, np.int64, ...) are no longer
+# subclasses of Python's bool/float/int, so json.dump/dumps on a dict that
+# contains one raises `TypeError: Object of type bool is not JSON serializable`
+# (observed on Kaggle). Recursively convert every numpy scalar/array to native
+# Python types so result serialization is numpy-version-agnostic.
+def _json_safe(obj):
+    if isinstance(obj, np.ndarray):
+        if obj.ndim == 0:
+            return _json_safe(obj.item())
+        return [_json_safe(v) for v in obj.tolist()]
+    if isinstance(obj, np.generic):
+        obj = obj.item()
+    if isinstance(obj, float):
+        if obj != obj or obj in (float('inf'), float('-inf')):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
 # ── Physical constants ──────────────────────────────────────────────
 RHO_AIR = 1.15       # kg/m³ — air density
 RHO_WATER = 1025.0   # kg/m³ — seawater density
@@ -560,7 +583,7 @@ def main():
     print("=" * 60)
     params = _load_params()
     if params is not None:
-        print(f"[PARAMS] Loaded: {json.dumps(params, indent=2)}")
+        print(f"[PARAMS] Loaded: {json.dumps(_json_safe(params), indent=2)}")
     else:
         params = {'grid_size': 256, 'category': 3, 'forward_speed_kmh': 30,
                   'central_pressure_hpa': 960, 'radius_max_wind_km': 50,
@@ -598,7 +621,7 @@ def main():
                                 'category': result['final']['cat']},
                 'snapshot_count': len(result['snapshots'])}
         with open(f'{out}/metadata.json', 'w') as f:
-            json.dump(meta, f, indent=2)
+            json.dump(_json_safe(meta), f, indent=2)
         print(f"\n{'='*60}\nSIMULATION COMPLETE\n{'='*60}")
     except Exception as e:
         print(f"\n[ERROR] {e}"); traceback.print_exc()

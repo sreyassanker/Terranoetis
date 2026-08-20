@@ -71,7 +71,7 @@ export function addGenericPointEntities(
       },
       label: {
         text: label.length > 20 ? label.slice(0, 18) + '...' : label,
-        font: '9px Space Grotesk, sans-serif',
+        font: '9px Inter, sans-serif',
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 1.5,
@@ -141,7 +141,7 @@ export function addStormTrackEntities(
       },
       label: {
         text: `${storm.name || 'Storm'} ${storm.category ? `(Cat ${storm.category})` : ''}`,
-        font: '10px Space Grotesk, sans-serif',
+        font: '10px Inter, sans-serif',
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 2,
@@ -235,7 +235,7 @@ export function addRadarSiteEntities(
       },
       label: {
         text: site.id || '',
-        font: '9px Space Grotesk, sans-serif',
+        font: '9px Inter, sans-serif',
         fillColor: Cesium.Color.fromCssColorString('#22d3ee'),
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 1.5,
@@ -285,7 +285,7 @@ export function addClimateIndicesEntities(
         const ent = viewer.entities.add({
           polygon: {
             hierarchy: new Cesium.PolygonHierarchy(rings[0].map((c: number[]) => Cesium.Cartesian3.fromDegrees(c[0], c[1]))),
-            material: Cesium.Color.fromCssColorString(colorStr),
+            material: new Cesium.ColorMaterialProperty(Cesium.Color.fromCssColorString(colorStr)),
             outline: true,
             outlineColor: Cesium.Color.fromCssColorString(isTemp ? '#d73027' : '#1a9850').withAlpha(0.3),
             outlineWidth: 1,

@@ -31,7 +31,7 @@ const SCHEMES = [
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const TSUNAMI_CONFIG: ScalarOverlayConfig = {
-  title: 'Tsunami CFD',
+  title: 'Tsunami',
   accent: 'rgba(34,211,238,0.95)',
   typeKey: 'tsunami_wave',
   fields: {

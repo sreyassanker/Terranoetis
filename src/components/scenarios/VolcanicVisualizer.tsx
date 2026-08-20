@@ -109,9 +109,11 @@ export default function VolcanicVisualizer({ viewer, shapes, progress }: Volcani
               polyline: {
                 positions: cached,
                 width: s.width || 3,
-                material: new Cesium.CallbackProperty(() => {
-                  return Cesium.Color.fromCssColorString(s.color).withAlpha((s.opacity || 0.5) * progressRef.current);
-                 }, false) as unknown as Cesium.MaterialProperty,
+                material: new Cesium.ColorMaterialProperty(
+                  new Cesium.CallbackProperty(() => {
+                    return Cesium.Color.fromCssColorString(s.color).withAlpha((s.opacity || 0.5) * progressRef.current);
+                  }, false),
+                ),
                 clampToGround: true,
               },
             });

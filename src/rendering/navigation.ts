@@ -218,7 +218,7 @@ export function drawNavIso(viewer: Cesium.Viewer, coords: [number, number][], co
   return viewer.entities.add({
     polygon: {
       hierarchy: new Cesium.PolygonHierarchy(coords.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat))),
-      material: Cesium.Color.fromCssColorString(color).withAlpha(0.12),
+      material: new Cesium.ColorMaterialProperty(Cesium.Color.fromCssColorString(color).withAlpha(0.12)),
       outline: true,
       outlineColor: Cesium.Color.fromCssColorString(color).withAlpha(0.5),
     },

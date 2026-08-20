@@ -48,7 +48,7 @@ export function addVolcanoEntities(
       },
       label: {
         text: v.name || '',
-        font: '10px Space Grotesk, sans-serif',
+        font: '10px Inter, sans-serif',
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 2,
@@ -137,7 +137,7 @@ export function addMilitaryBaseEntities(
       },
       label: {
         text: String(name).length > 20 ? String(name).slice(0, 18) + '…' : String(name),
-        font: '10px Space Grotesk, sans-serif',
+        font: '10px Inter, sans-serif',
         fillColor: Cesium.Color.fromCssColorString('#aaaaaa'),
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 2,
@@ -203,7 +203,7 @@ export function addOpenFlightsEntities(
       },
       label: {
         text: a.iata || '',
-        font: '9px Space Grotesk, sans-serif',
+        font: '9px Inter, sans-serif',
         fillColor: Cesium.Color.fromCssColorString('#14b8a6'),
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 1.5,
@@ -365,7 +365,7 @@ export function addMilitaryFlightEntities(
       },
       label: {
         text: callsign.length > 16 ? callsign.slice(0, 14) + '…' : callsign,
-        font: '10px Space Grotesk, sans-serif',
+        font: '10px Inter, sans-serif',
         fillColor: Cesium.Color.fromCssColorString('#ff6666'),
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 2,
@@ -463,7 +463,7 @@ export function addUcdpEntities(
       },
       label: {
         text: sideInfo ? `${label} (${sideInfo})` : label,
-        font: '10px Space Grotesk, sans-serif',
+        font: '10px Inter, sans-serif',
         fillColor: Cesium.Color.fromCssColorString('#ff6666'),
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 2,

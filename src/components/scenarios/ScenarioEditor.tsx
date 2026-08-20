@@ -79,9 +79,14 @@ const SCENARIO_PARAMS: Record<string, ParameterDef[]> = {
     { key: 'duration', label: 'Duration', min: 1, max: 168, step: 1, defaultValue: 72, unit: 'h' },
   ],
   volcanic_eruption: [
-    { key: 'vei', label: 'Volcanic Explosivity Index', min: 0, max: 6, step: 1, defaultValue: 3, unit: '' },
+    { key: 'vei', label: 'Volcanic Explosivity Index', min: 0, max: 8, step: 1, defaultValue: 3, unit: '' },
+    { key: 'windSpeed', label: 'Wind Speed', min: 0, max: 120, step: 1, defaultValue: 36, unit: 'km/h' },
     { key: 'windDir', label: 'Prevailing Wind Direction', min: 0, max: 360, step: 5, defaultValue: 260, unit: '°' },
     { key: 'duration', label: 'Duration', min: 1, max: 168, step: 1, defaultValue: 48, unit: 'h' },
+    // ── Ash transport physics knobs (Stokes settling / eddy diffusion) ──
+    { key: 'ashParticleDiameter', label: 'Ash Particle Diameter', min: 50, max: 2000, step: 10, defaultValue: 316, unit: 'µm' },
+    { key: 'ashDiffusivity', label: 'Ash Cloud Diffusivity', min: 10, max: 5000, step: 10, defaultValue: 500, unit: 'm²/s' },
+    { key: 'ashWindShear', label: 'Wind-Shear Factor', min: 0, max: 1, step: 0.05, defaultValue: 0.5, unit: '' },
   ],
   flood_inundation: [
     { key: 'rainfall', label: 'Total Rainfall', min: 50, max: 2000, step: 10, defaultValue: 500, unit: 'mm' },
@@ -233,13 +238,16 @@ export default function ScenarioEditor({
         { scenarioType, params, gridSize: 256 },
         activeBbox,
       );
-      // Landslide + flood: if the Cesium globe has real elevation for the drawn
-      // box, sample it at full resolution (256×256 — no bilinear loss, the
-      // kernel's simulation grid) and ship it so the kernel runs on real
-      // terrain instead of the synthetic ridge. No real relief → keep
-      // synthetic.
+      // Landslide + flood + volcano: if the Cesium globe has real elevation for
+      // the drawn box, sample it at full resolution (256×256 — no bilinear
+      // loss, the kernel's simulation grid) and ship it so the kernel runs on
+      // real terrain instead of the synthetic ridge/cone. No real relief →
+      // keep synthetic.
       let request: SimulationRequest = base;
-      if ((base.type === 'landslide' || base.type === 'flood_inundation') && viewer) {
+      if (
+        (base.type === 'landslide' || base.type === 'flood_inundation' || base.type === 'volcanic_eruption') &&
+        viewer
+      ) {
         const real = await sampleStudyAreaTerrainAsync(viewer, activeBbox, 256);
         if (real) {
           request = { ...base, terrain: real.values, terrain_gs: real.gs };

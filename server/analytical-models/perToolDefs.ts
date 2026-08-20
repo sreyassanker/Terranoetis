@@ -177,6 +177,19 @@ const RETREAT_BANDS: ClassificationBand[] = [
   { min: 2, max: Infinity, label: 'Severe', color: '#ef4444', description: '>2 m/yr — immediate adaptation required' },
 ];
 
+// Longshore-sediment-transport bands (m³/yr) — Tool 77 (CERC, SPM 1984).
+// OCEAN_BANDS are wave-HEIGHT bands in metres and must not classify a
+// VOLUMETRIC transport rate (distinct from Sverdrup's TRANSPORT_BANDS in
+// m²/s for Tool 66); the thresholds follow the catalogue's interpretation
+// text and the SPM's Table 4-7 field range (22,500–765,000 m³/yr).
+// Classified on the annual secondary (eq 4-50a), never the m³/s primary.
+const LONGSHORE_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 5e4, label: 'Low', color: '#22c55e', description: '<50,000 m³/yr — sheltered/low-energy coast' },
+  { min: 5e4, max: 3e5, label: 'Moderate', color: '#eab308', description: '50,000–300,000 m³/yr — typical US East Coast / Gulf' },
+  { min: 3e5, max: 1e6, label: 'High', color: '#f97316', description: '300,000–1,000,000 m³/yr — exposed coast (California, Oregon, Australia)' },
+  { min: 1e6, max: Infinity, label: 'Very High', color: '#ef4444', description: '>10⁶ m³/yr — high-energy environment (SW England, South Africa)' },
+];
+
 const SPACE_BANDS: ClassificationBand[] = [
   { min: -Infinity, max: 0, label: 'Quiet', color: '#22c55e', description: 'Quiet' },
   { min: 0, max: 1, label: 'Normal', color: '#84cc16', description: 'Normal' },
@@ -4209,42 +4222,51 @@ export const TOOL_76: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_77: ToolWorkflowDef = {
   toolId: 77,
-  name: 'Longshore Sediment Transport',
+  name: 'CERC Longshore Transport Equation',
   vizType: 'vector',
-  classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'K', min: 0.2, max: 2 },{ param: 'Hsb', min: 0.1, max: 10 },{ param: 'theta_b', min: 0, max: 1.57 }]),
+  classificationBands: LONGSHORE_BANDS,
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'K', min: 0.2, max: 2 },       // CERC coefficient (SPM design 0.39; Komar-Inman 0.77 deep-water)
+    { param: 'Hsb', min: 0.1, max: 10 },    // significant breaking wave height m
+    { param: 'thetaB', min: -1.57, max: 1.57 }, // breaker angle rad from the shore-normal (signed)
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  CERC K ~ 0.77');
-    log.push('  Breaking wave from models');
+    log.push('  CERC energy-flux method (SPM 1984 Vol 1 Ch 4 §V): P_ls → I_l = K·P_ls → Q = I_l/((ρs−ρ)g(1−n))');
+    log.push('  K = 0.39 (SPM design value); auto H = genuine CDS ERA5 swh (deep-water H_0s, eq 4-45); auto θ from ERA5 mwd × GEBCO 2020 shoreline');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
-  postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+  postProcess: (result, base, _ctx, log) => {
+    // Classification is by the ANNUAL volumetric transport Q(yr) (m³/yr,
+    // SPM eq 4-50a), NOT the m³/s primary — TRANSPORT_BANDS are volumetric
+    // bands (same defect class as Tools 70/73/75 on OCEAN_BANDS).
+    const qyr = base?.secondary?.find((s) => s.key === 'transport_annual')?.value;
+    const c = Number.isFinite(qyr) ? classify(Math.abs(qyr as number), LONGSHORE_BANDS) : undefined;
+    if (c && qyr != null) log.push(`  Result: ${c.label} (Q ≈ ${(qyr as number).toExponential(2)} m³/yr)`);
     return { classification: c };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
     method: 'empirical',
-    rmse: 30,
+    rmse: 50,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'CERC coefficient', contribution: 'Varies' },
-      { factor: 'Breaking angle', contribution: 'Varies' },
+      { factor: 'CERC coefficient K', contribution: '±50 % envelope of the SPM Fig 4-37 field data' },
+      { factor: 'Breaker angle', contribution: 'mwd/shoreline-orientation uncertainty (auto chain)' },
+      { factor: 'Significant vs root-mean-square height', contribution: 'SPM notes the H_s factor-2 flux convention' },
     ],
-    overallAssessment: '+/- 30% uncertainty',
+    overallAssessment: '+/- 50% (the SPM-stated accuracy of the energy-flux method)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Longshore Sediment Transport: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Longshore sediment transport rate.`,
-    recommendations: ["K ~ 0.77 (varies 0.2-2).","Wave models for Hsb."],
+    contextualAnalysis: `CERC Longshore Transport: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} m³/s (annual Q(yr) = 1290·P_ls shown in the secondary outputs). Energy-flux method, SPM 1984 eqs 4-44/4-45/4-48/4-49/4-50.`,
+    recommendations: ['K = 0.39 is the SPM design value (0.77 = Komar & Inman deep-water H_o coefficient).', 'Calibrate K with local sediment-budget data where available (SPM: ±50 %).', 'Auto θ needs a resolvable shoreline within ~2 km — supply θ_b explicitly on open coasts.'],
   }),
   metadata: {
-    methodology: 'Longshore sediment transport rate.',
-    assumptions: ["Straight shoreline","Spilling breakers"],
-    limitations: ["K highly variable","No tidal effects"],
-    references: ["US Army Corps 1984"],
-    preprocessingNotes: ["CERC K ~ 0.77","Breaking wave from models"],
+    methodology: 'CERC energy-flux method (SPM 1984 Vol 1 Ch 4 §V): P_ls = 0.0884·ρ·g^(3/2)·H_b^(5/2)·sin(2α_b) (eq 4-44, breaking height) or 0.05·ρ·g^(3/2)·H_0s^(5/2)·(cos α₀)^(1/4)·sin(2α₀) (eq 4-45, deep-water H_0s); I_l = K·P_ls with K = 0.39 (eq 4-48); Q = I_l/((ρs−ρ)·g·(1−n)) (eq 4-35/4-49, Table 4-8 values ρs=2650, ρ=1025, 1−n=0.6); annual Q(yr) = 1290·P_ls m³/yr (eq 4-50a).',
+    assumptions: ['Straight, parallel nearshore contours (small-amplitude refraction theory; Table 4-11)', 'Group velocity equals wave speed at breaking, C_gb = √(2gH_b) (Galvin 1967; Table 4-11, γ_b = 0.5)', 'Rayleigh-distributed heights — significant height H_s used in the energy flux factor (SPM §V)', 'Sediment supply unlimited (potential transport); sand matrix ρs=2650, ρ=1025 kg/m³, 1−n=0.6 (Table 4-8)', 'Auto H = genuine CDS ERA5 swh treated as deep-water H_0s (eq 4-45); auto θ from ERA5 mwd × GEBCO 2020 shoreline'],
+    limitations: ['SPM-stated accuracy ±50 % (Fig 4-37 scatter of the field data)', 'Significant-height flux factor ≈ 2× the exact rms-height energy flux (SPM §V text)', 'No tidal currents, wind-driven currents, or cross-shore transport (SPM §V scope)', 'K varies with site — calibrate with local data; the H^(5/2) dependence makes Q very sensitive to H errors', 'Auto θ requires a resolvable shoreline within ~2 km and ERA5 mwd — honest NaN otherwise'],
+    references: ['U.S. Army Corps of Engineers (1984) Shore Protection Manual, 4th ed., Vol. I. Coastal Engineering Research Center, Vicksburg, MS. Chapter 4 (Littoral Processes), §V Energy Flux Method: eqs 4-35, 4-44–4-50; Tables 4-8, 4-10. doi:10.5962/bhl.title.47829'],
+    preprocessingNotes: ['H auto = genuine CDS ERA5 swh (deep-water H_0s, eq 4-45)', 'θ auto = ERA5 mwd relative to GEBCO 2020 shoreline bearing'],
   },
   dependencies: [],
 };
@@ -4252,42 +4274,65 @@ export const TOOL_77: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 //  EQUATION 78 — Wave Dispersion Relation
 // ══════════════════════════════════════════════════════════════════
+// Wave-regime classification by the SPM 1984 Ch 2 relative-depth parameter
+// kh = k·h (d/L table): deep water d/L > 1/2 ⇔ kh > π; shallow water
+// d/L < 1/25 ⇔ kh < 2π/25; transitional in between (full tanh required).
+const WAVE_REGIME_BANDS: ClassificationBand[] = [
+  { min: -Infinity, max: 2 * Math.PI / 25, label: 'Shallow water', color: '#22c55e', description: 'd/L < 1/25 — C = √(gh), non-dispersive, depth-limited' },
+  { min: 2 * Math.PI / 25, max: Math.PI, label: 'Transitional', color: '#eab308', description: '1/25 < d/L < 1/2 — full tanh form required (SPM eqs 2-2/2-3)' },
+  { min: Math.PI, max: Infinity, label: 'Deep water', color: '#3b82f6', description: 'd/L > 1/2 — C = gT/2π, independent of depth' },
+];
+
 export const TOOL_78: ToolWorkflowDef = {
   toolId: 78,
   name: 'Wave Dispersion Relation',
   vizType: 'scalar',
-  classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'g', min: 9.8, max: 9.82 },{ param: 'k', min: 0.001, max: 10 },{ param: 'h', min: 0, max: 10000 }]),
+  // Classification is by the WAVE REGIME (kh parameter, SPM 1984 Ch 2
+  // relative-depth table), NOT by the primary ω (rad/s) against OCEAN_BANDS
+  // (wave-HEIGHT bands in metres — the Tool 70/73/75 unit-mismatch class).
+  classificationBands: WAVE_REGIME_BANDS,
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'g', min: 9.8, max: 9.82 },      // gravitational acceleration m/s²
+    { param: 'k', min: 0.001, max: 10 },      // wavenumber rad/m
+    { param: 'h', min: 0.001, max: 10000 },   // water depth m (must be > 0)
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Water depth from GEBCO');
-    log.push('  Iterative solution');
+    const usedGebco = ctx.dataSources?.includes('gebco-2020-bathymetry');
+    if (usedGebco) log.push('  Auto h = genuine GEBCO 2020 bathymetry at the point (positive depth only over water; honest NaN on land)');
+    else log.push('  h from user input or default (no genuine bathymetry available)');
+    log.push('  Forward solution: ω = √(g·k·tanh(kh)) — the SPM Ch 2 dispersion relation (eq 2-3)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
-  postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+  postProcess: (result, base, _ctx, log) => {
+    // Regime classification needs kh (the SPM relative-depth parameter), NOT
+    // the rad/s primary — the engine exposes kh as a secondary so this stays
+    // unit-correct (deep d/L > 1/2 ⇔ kh > π; shallow d/L < 1/25 ⇔ kh < 2π/25).
+    const kh = base?.secondary?.find((s) => s.key === 'kh')?.value;
+    const c = Number.isFinite(kh) ? classify(kh as number, WAVE_REGIME_BANDS) : undefined;
+    if (c) log.push(`  Regime: ${c.label} (${c.description})`);
     return { classification: c };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Exact for linear waves', contribution: 'Varies' },
-      { factor: 'Water depth accuracy', contribution: 'Varies' },
+      { factor: 'Linear wave theory', contribution: 'Exact within small-amplitude assumptions' },
+      { factor: 'Water depth accuracy', contribution: 'GEBCO 2020 grid ~450 m — nearshore depths coarser than the cell' },
+      { factor: 'Wavenumber input', contribution: 'k = 2π/L must match the local wave field' },
     ],
-    overallAssessment: 'Exact for small amplitude waves',
+    overallAssessment: 'Exact for small-amplitude (linear) waves; SPM-stated deep-water boundary error ~0.4 % at d/L = 0.5',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Wave Dispersion Relation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Wave celerity and wavelength from depth.`,
-    recommendations: ["Exact for linear waves.","GEBCO for bathymetry."],
+    contextualAnalysis: `Wave Dispersion Relation (Airy 1845 / SPM 1984 Ch 2): ω = ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} rad/s. Phase speed C, wavelength L, period T and group velocity C_g in the secondary outputs; regime (deep/transitional/shallow) classified from kh.`,
+    recommendations: ['The full tanh form (eqs 2-2/2-3) is required for transitional depths (1/25 < d/L < 1/2) — the deep (C = gT/2π) and shallow (C = √(gh)) limits are shortcuts with known errors.', 'Use genuine GEBCO 2020 bathymetry for h (auto) — linear theory breaks down for steep waves (H/L > 1/7 Stokes limit) and near breaking.', 'For a given period T, invert iteratively (or Eckart 1952 approximation, ±5 %) to find k — the SPM Appendix C tables give the same values.'],
   }),
   metadata: {
-    methodology: 'Wave celerity and wavelength from depth.',
-    assumptions: ["Small amplitude","Incompressible"],
-    limitations: ["Not for steep waves","No breaking"],
-    references: ["Airy 1845"],
-    preprocessingNotes: ["Water depth from GEBCO","Iterative solution"],
+    methodology: 'Airy (1845) linear wave theory dispersion relation (SPM 1984 Vol 1 Ch 2, eqs 2-1/2-2/2-3): ω² = g·k·tanh(kh) with k = 2π/L and ω = 2π/T. Solved forward: ω = √(g·k·tanh(kh)); derived: phase speed C = ω/k, wavelength L = 2π/k, period T = 2π/ω, group velocity C_g = C/2·[1 + 2kh/sinh(2kh)]. Regime per the SPM relative-depth table: deep water d/L > 1/2 (kh > π), shallow water d/L < 1/25 (kh < 2π/25), transitional between (full tanh required). Auto h from genuine GEBCO 2020 bathymetry (honest NaN on land / fetch failure).',
+    assumptions: ['Small amplitude / linear waves (Stokes limiting steepness H/L < 1/7)', 'Incompressible, inviscid, irrotational fluid (potential flow)', 'Horizontal, flat bottom', 'Constant wave period across depths (SPM: T unchanged during shoaling)'],
+    limitations: ['Not for steep / breaking waves — linear theory overpredicts celerity near breaking', 'h = 0 (shoreline) is singular — honest NaN (needs positive depth)', 'Auto h is the GEBCO 2020 grid elevation (~450 m cells), coarse in the inner nearshore', 'The forward form solves ω from k — inverse problems (k from T, h) need iteration or the Eckart (1952) approximation (±5 %)'],
+    references: ['Airy, G.B. (1845) Tides and Waves. In: Encyclopaedia Metropolitana, Vol. 3, 241–396. (pre-DOI)', 'U.S. Army Corps of Engineers (1984) Shore Protection Manual, 4th ed., Vol. I, Ch 2 (Wave Theory), eqs 2-1/2-2/2-3, 2-5/2-6/2-10 and the d/L classification table. doi:10.5962/bhl.title.47829'],
+    preprocessingNotes: ['Auto h = genuine GEBCO 2020 bathymetry (honest NaN on land)', 'Forward solution ω = √(g·k·tanh(kh))'],
   },
   dependencies: [],
 };
@@ -4299,38 +4344,49 @@ export const TOOL_79: ToolWorkflowDef = {
   toolId: 79,
   name: 'Stokes Drift',
   vizType: 'profile',
+  // Classification by the surface drift magnitude (m/s), NOT by the
+  // primary ω — the unit-mismatch class from Tools 70/73/75 checked.
   classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'omega', min: 0.01, max: 10 },{ param: 'k', min: 0.001, max: 10 },{ param: 'a', min: 0, max: 20 },{ param: 'z', min: -500, max: 0 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'omega', min: 0.01, max: 10 },   // angular frequency rad/s
+    { param: 'ka', min: 0.001, max: 20 },      // wave amplitude a (engine key)
+    { param: 'z', min: -500, max: 0 },         // depth below surface m
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Wave amplitude from buoys');
-    log.push('  Wavenumber from dispersion');
+    log.push('  Forward solution: u_s(z) = (ω·k·a²/2)·exp(2kz), k = ω²/g (deep-water)');
+    log.push('  Deep-water assumption: valid when kh > π (h > L/2)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  Drift regime: ${c.label} (${c.description})`);
     return { classification: c };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Wave amplitude', contribution: 'Varies' },
-      { factor: 'Second-order', contribution: 'Varies' },
+      { factor: 'Deep-water assumption', contribution: 'Error grows when kh < π (transitional/shallow water); the finite-depth cosh/sinh form is not used' },
+      { factor: 'Linear wave theory', contribution: 'Exact for small-amplitude waves (H/L < 1/7); second-order nonlinear corrections not included' },
+      { factor: 'Wave amplitude input', contribution: 'a must represent the monochromatic wave amplitude; spectral waves require the spectral integration form' },
     ],
-    overallAssessment: 'Exact for linear waves to second order',
+    overallAssessment: 'Exact for deep-water linear monochromatic waves; systematic overestimate in transitional/shallow water (deep-water k used instead of dispersion k)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Stokes Drift: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Wave-driven mean surface drift.`,
-    recommendations: ["Second-order accurate.","Decays with depth."],
+    contextualAnalysis: `Stokes Drift: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} m/s. Wave-driven mean Lagrangian drift velocity in the direction of wave propagation. For a typical swell (H=2 m, T=10 s): u_s(0) ≈ 1.3 cm/s ≈ 1.1 km/day. For a storm (H=8 m, T=12 s): u_s(0) ≈ 11.7 cm/s ≈ 10.1 km/day.`,
+    recommendations: [
+      'The deep-water form k = ω²/g is used; for shallow/transitional water (h < L/2), the full dispersion k from Tool 78 should be used instead.',
+      'u_s(0) ≈ 1% of the wind speed at 10 m for moderate seas — a useful quick estimate.',
+      'For Langmuir circulation: compare u_s(0) to u* (friction velocity). When La_t = √(u*/u_s(0)) < 0.4, Langmuir turbulence dominates.',
+    ],
   }),
   metadata: {
-    methodology: 'Wave-driven mean surface drift.',
-    assumptions: ["Linear wave theory","Monochromatic"],
-    limitations: ["No wave-wave interactions","Single frequency"],
-    references: ["Stokes 1847"],
-    preprocessingNotes: ["Wave amplitude from buoys","Wavenumber from dispersion"],
+    methodology: 'Stokes (1847) deep-water drift: u_s(z) = (ω·k·a²/2)·exp(2kz) with k = ω²/g (deep-water dispersion). The surface value u_s(0) = ω·k·a²/2 = π²·H²/(2·L·T); depth attenuation is exp(2kz). Secondarily: e-folding depth z_e = 1/(2k), Stokes transport M_S = ∫u_s dz = u_s(0)/(2k). Finite-depth form u_s(z) = (ω·k·a²/2)·cosh(2k(h+z))/sinh²(kh)·exp(2kz) exists but is not implemented here (deep-water assumed).',
+    assumptions: ['Deep water (kh > π, h > L/2) — k derived from ω² = gk, not the full tanh dispersion', 'Small-amplitude / linear waves — Stokes limiting steepness H/L < 1/7', 'Monochromatic waves — single frequency, no spectral integration', 'Incompressible, inviscid, irrotational fluid (potential flow)'],
+    limitations: ['Deep-water only — in transitional/shallow water (kh < π) the deep-water k overestimates the true wavenumber, causing u_s to be systematically too high', 'No finite-depth cosh/sinh correction — the paper gives the full form but only the deep-water limit is implemented', 'No wave-wave interactions or spectral spreading — real ocean waves have a spectrum, not a single frequency', 'Auto wave_period defaults to 8 s when no marine data is available — user should supply the local wave period'],
+    references: ['Stokes, G.G. (1847) On the theory of oscillatory waves. Transactions of the Cambridge Philosophical Society, 8, 441–455. (pre-DOI; the drift result appears in the summation-order analysis of particle orbits)'],
+    preprocessingNotes: ['k = ω²/g (deep-water dispersion) — no GEBCO bathymetry needed for the forward deep-water solution', 'ω auto-derived from marine wave_period when available; otherwise user supplies'],
   },
   dependencies: [],
 };
@@ -4343,16 +4399,22 @@ export const TOOL_80: ToolWorkflowDef = {
   name: 'JONSWAP Wave Spectrum',
   vizType: 'spectrum',
   classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'alpha', min: 0.001, max: 0.05 },{ param: 'g', min: 9.8, max: 9.82 },{ param: 'fm', min: 0.01, max: 10 },{ param: 'gamma', min: 1, max: 10 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'alpha', min: 0.001, max: 0.05 },  // Phillips constant
+    { param: 'g2', min: 9.8, max: 9.82 },        // gravity (engine key)
+    { param: 'fm', min: 0.01, max: 10 },          // evaluation frequency Hz
+    { param: 'fpm', min: 0.01, max: 10 },         // peak frequency Hz
+    { param: 'gamma', min: 1, max: 10 },           // peak enhancement factor
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  gamma = 3.3 standard');
-    log.push('  sigma_a=0.07, sigma_b=0.09');
+    log.push('  JONSWAP spectrum: S(f) = α·g²·(2π)⁻⁴·f⁻⁵·exp[−1.25(f_p/f)⁻⁴]·γ^exp[−(f−f_p)²/(2σ²f_p²)]');
+    log.push('  σ = 0.07 for f ≤ f_p, σ = 0.09 for f > f_p (JONSWAP σ step)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  Spectral density: ${c.label} (${c.description})`);
     return { classification: c };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
@@ -4361,21 +4423,26 @@ export const TOOL_80: ToolWorkflowDef = {
     rmse: 15,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Peak enhancement', contribution: 'Varies' },
-      { factor: 'Fetch', contribution: 'Varies' },
+      { factor: 'Peak enhancement factor γ', contribution: 'Varies 1–7 depending on fetch and wind development' },
+      { factor: 'Phillips constant α', contribution: 'Fetch-dependent: α = 0.076·(gX/U₁₀²)^(−0.22)' },
+      { factor: 'Spectral resolution', contribution: 'Evaluated at a single frequency; full spectrum needs numerical integration' },
     ],
-    overallAssessment: '+/- 15% for fetch-limited',
+    overallAssessment: '±15% for fetch-limited North Sea conditions (Hasselmann et al. 1973 calibration dataset)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `JONSWAP Wave Spectrum: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Fetch-limited sea state spectrum.`,
-    recommendations: ["gamma = 3.3.","Fetch-limited seas."],
+    contextualAnalysis: `JONSWAP Wave Spectrum S(f): ${Number.isFinite(result) ? result.toFixed(2) : 'N/A'} m²/Hz. Fetch-limited sea state spectral density at the evaluation frequency. The peak enhancement factor γ=3.3 makes the spectrum 3.3× higher at the peak than the PM fully-developed spectrum.`,
+    recommendations: [
+      'γ = 3.3 is the standard North Sea value; γ = 1 recovers the PM fully-developed spectrum.',
+      'For H_s estimation: integrate S(f) numerically; H_s = 4·√(m₀) where m₀ = ∫S(f)df.',
+      'The JONSWAP spectrum is appropriate for fetch-limited wind seas (< 500 km); use PM for fully developed seas.',
+    ],
   }),
   metadata: {
-    methodology: 'Fetch-limited sea state spectrum.',
-    assumptions: ["Fetch-limited","Steady wind"],
-    limitations: ["Not for fully developed","No swell"],
-    references: ["Hasselmann et al. 1973"],
-    preprocessingNotes: ["gamma = 3.3 standard","sigma_a=0.07, sigma_b=0.09"],
+    methodology: 'Hasselmann et al. (1973, eq 16) JONSWAP spectrum: S(f) = α·g²·(2π)⁻⁴·f⁻⁵·exp[−5/4·(f_p/f)⁻⁴]·γ^exp[−(f−f_p)²/(2σ²f_p²)] with σ = 0.07 (f ≤ f_p) and σ = 0.09 (f > f_p). The (2π)⁻⁴ factor converts from the angular-frequency form S(ω) = αg²ω⁻⁵… to ordinary-frequency S(f). The peak enhancement factor γ amplifies the spectral peak relative to the PM spectrum; at f = f_p the Gaussian exponent = 0 so γ^1 = γ. The Phillips constant α decays with fetch as α = 0.076·(gX/U₁₀²)^(−0.22).',
+    assumptions: ['Fetch-limited wind-sea conditions (not fully developed, not swell)', 'Steady, uniform wind over the fetch distance', 'North Sea calibration dataset (Hasselmann et al. 1973); other basins may have different fetch-growth relationships', 'JONSWAP peak enhancement γ = 3.3 (standard; varies 1–7 depending on wave age)'],
+    limitations: ['Not applicable to fully developed seas (use PM spectrum, γ = 1) or swell from distant storms', 'The σ step (0.07/0.09) is a simplification of the actual spectral shape near the peak', 'α = 0.0081 is the standard PM value; for fetch-specific α, supply the fetch-dependent value', 'Single-point evaluation; full spectral integration requires numerical methods (SWAN, WAVEWATCH III)'],
+    references: ['Hasselmann, K., Barnett, T.P., Bouws, E., Carlson, H., Cartwright, D.E., Enke, K., Ewing, J.A., Gienapp, H., Hasselmann, D.E., Kruseman, P., Meerburg, A., Müller, P., Olbers, D.J., Richter, K., Sell, W. & Walden, H. (1973) Measurements of wind-wave growth and swell decay during the Joint North Sea Wave Project (JONSWAP). Deutsche Hydrographische Zeitschrift, Reihe A, 8(12), 1–95.'],
+    preprocessingNotes: ['γ = 3.3 is the standard JONSWAP peak enhancement (Hasselmann et al. 1973 mean value)', 'σ = 0.07 (f ≤ f_p) and σ = 0.09 (f > f_p) — the JONSWAP σ step'],
   },
   dependencies: [],
 };
@@ -4388,16 +4455,21 @@ export const TOOL_81: ToolWorkflowDef = {
   name: 'Stream Power Law',
   vizType: 'scalar',
   classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'K', min: 0, max: 1 },{ param: 'A', min: 0, max: 1000000000000 },{ param: 'm', min: 0, max: 2 },{ param: 'S', min: 0, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'K', min: 0, max: 1 },        // erodibility coefficient (dimensionless in this impl)
+    { param: 'A', min: 0.01, max: 1e12 },  // drainage area m²
+    { param: 'm', min: 0, max: 2 },         // area exponent
+    { param: 'S', min: 0, max: 1 },         // channel slope m/m
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Drainage area from HydroSHEDS');
-    log.push('  Slope from SRTM');
+    log.push('  E = K·A^m·S (Howard & Kerby 1983, n=1)');
+    log.push('  K is dimensionless in this implementation; the user interprets E in the desired units (e.g. m/yr) by choosing K with appropriate units');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, RISK_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  Erosion potential: ${c.label} (${c.description})`);
     return { classification: c };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
@@ -4406,21 +4478,26 @@ export const TOOL_81: ToolWorkflowDef = {
     rmse: 50,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Erodibility', contribution: 'Varies' },
-      { factor: 'Exponents', contribution: 'Varies' },
+      { factor: 'Erodibility K', contribution: 'Varies by orders of magnitude with lithology, sediment supply, channel width; must be calibrated per basin' },
+      { factor: 'Exponent m', contribution: 'Typical range 0.3–0.6; determined from slope-area scaling of steady-state basins' },
+      { factor: 'Slope exponent n', contribution: 'Hardcoded n=1 (simplest form); field values range 0.7–1.0 (Whipple & Tucker 1999)' },
     ],
-    overallAssessment: '+/- 50% uncertainty',
+    overallAssessment: '±50% typical uncertainty; K calibration is the dominant source of error (Howard & Kerby 1983, Whipple & Tucker 1999)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Stream Power Law: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Bedrock erosion rate from stream power.`,
-    recommendations: ["K poorly constrained.","m ~ 0.5, n ~ 1."],
+    contextualAnalysis: `Stream Power Law E = K·A^m·S: ${Number.isFinite(result) ? result.toExponential(3) : 'N/A'} (dimensionless). For K=0.001 yr⁻¹, A=10⁶ m², m=0.5, S=0.01: E = 0.01 (≈ 10 mm/yr if K is in yr⁻¹). Typical erosion rates: 0.01–0.1 mm/yr (cratonic), 0.1–1 mm/yr (orogenic), >1 mm/yr (Himalaya, Taiwan, NZ Southern Alps).`,
+    recommendations: [
+      'K is the dominant uncertainty — calibrate against measured erosion rates (cosmogenic 10Be, thermochronology) for the specific basin.',
+      'The concavity index θ = m/n characterizes the longitudinal profile shape; θ ≈ 0.4–0.6 for typical bedrock rivers.',
+      'For transient landscapes, extract channel profiles from DEM and compute the chi-transform to identify knickpoints.',
+    ],
   }),
   metadata: {
-    methodology: 'Bedrock erosion rate from stream power.',
-    assumptions: ["Steady state","Detachment-limited"],
-    limitations: ["Not for transport-limited","K varies"],
-    references: ["Howard 1983"],
-    preprocessingNotes: ["Drainage area from HydroSHEDS","Slope from SRTM"],
+    methodology: 'Howard & Kerby (1983) stream power incision model: E = K·A^m·S^n with n=1 (simplest form). The erosion rate E is a power-law function of upstream drainage area A (proxy for discharge Q ∝ A^c) and local channel slope S. The normalized steepness index k_sn = S·(A/A_ref)^(m/n) with A_ref = 10⁶ m² allows cross-basin comparison. At steady state (dz/dt = 0): S ∝ A^(-m/n), giving the characteristic concave-up longitudinal profile.',
+    assumptions: ['Detachment-limited erosion — bedrock incision rate is limited by the ability of the flow to detach rock, not by sediment transport capacity', 'Steady-state or slowly varying conditions — the model is most reliable for long-term (10³–10⁶ yr) erosion rates', 'Power-law scaling of discharge with area: Q ∝ A^c (c ≈ 0.7–1.0)', 'Channel width adjusts to maintain uniform shear stress (W ∝ Q^b, b ≈ 0.5)'],
+    limitations: ['K is poorly constrained and varies by orders of magnitude with lithology, sediment supply, and channel width — must be calibrated per basin', 'n=1 is the simplest form; field values range 0.7–1.0 (Whipple & Tucker 1999); transport-limited systems require different formulations', 'Threshold effects (critical shear stress for incision) are neglected', 'The power-law relationship breaks down in very steep channels (step-pool, cascade) where different processes dominate'],
+    references: ['Howard, A.D. & Kerby, G.E. (1983) Channel changes in badlands. Geological Society of America Bulletin, 94(6), 739–752. doi:10.1130/0016-7606(1983)94<739:CCIB>2.0.CO;2', 'Whipple, K.X. & Tucker, G.E. (1999) Dynamics of the stream-power river incision model: Implications for height limits of mountain ranges, landscape response timescales, and research needs. Journal of Geophysical Research, 104(B8), 17661–17674.'],
+    preprocessingNotes: ['A from terrain/slope context (user supplies drainage area in m²)', 'S from terrain slope context (user supplies channel slope in m/m)'],
   },
   dependencies: [],
 };
@@ -4461,11 +4538,11 @@ export const TOOL_82: ToolWorkflowDef = {
     recommendations: ["Hack exponent h ~ 0.6 is the global average value.","Use HydroSHEDS database for drainage area extraction.","Network extraction required for river length."],
   }),
   metadata: {
-    methodology: 'River length-drainage area scaling.',
-    assumptions: ["Self-similar basins","Steady state"],
-    limitations: ["h varies by region","Requires network"],
-    references: ["Hack 1957"],
-    preprocessingNotes: ["Hack exponent h ~ 0.6","HydroSHEDS for area"],
+    methodology: 'Hack (1957) empirical power-law: L = c·A^h relating main channel length L (km) to drainage basin area A (km²). The Hack exponent h ≈ 0.55–0.7 (global mean ~0.6) characterizes basin elongation: h = 0.5 for self-similar (fractal) networks; h > 0.5 indicates elongation increasing with scale. The coefficient c depends on network geometry and climate. Related to Horton ratios: h = log(R_l)/log(R_a) where R_l is the length ratio and R_a is the area ratio. The fractal dimension of the main channel D = 2h ≈ 1.2.',
+    assumptions: ['Power-law scaling of channel length with drainage area over 5+ orders of magnitude', 'The exponent h is approximately constant across scales (self-affine, not self-similar)', 'The coefficient c is basin-specific and depends on network geometry, climate, and lithology'],
+    limitations: ['h varies regionally (0.55–0.7); the global mean 0.6 may not apply to a specific basin', 'The power-law breaks down at very small scales (headwater channels) and very large scales (continent-wide)', 'c must be calibrated for the specific basin; the default c=1.5 is a typical mid-range value', 'Requires upstream drainage area A from a DEM-derived flow accumulation grid (e.g. HydroSHEDS, MERIT DEM)'],
+    references: ['Hack, J.T. (1957) Studies of longitudinal stream profiles in Virginia and Maryland. U.S. Geological Survey Professional Paper 294-B, 45–97. https://pubs.usgs.gov/publication/pp294B'],
+    preprocessingNotes: ['Hack exponent h ≈ 0.6 is the global average (Hack 1957); regional values range 0.55–0.7', 'c is basin-specific; default 1.5 is a mid-range value for temperate humid basins'],
   },
   dependencies: [],
 };
@@ -4477,40 +4554,59 @@ export const TOOL_83: ToolWorkflowDef = {
   toolId: 83,
   name: 'Richardson Fractal Dimension',
   vizType: 'scalar',
-  classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'L', min: 0, max: 10000 },{ param: 's', min: 0.1, max: 1000 }]),
+  // Classification by D value — NOT by RISK_BANDS (unit mismatch)
+  classificationBands: [
+    { min: 1, max: 1.1, label: 'Low complexity', color: '#22c55e', description: 'D < 1.1 — smooth, depositional coasts' },
+    { min: 1.1, max: 1.3, label: 'Moderate', color: '#eab308', description: 'D 1.1–1.3 — typical embayed coast' },
+    { min: 1.3, max: 1.5, label: 'High', color: '#f97316', description: 'D 1.3–1.5 — rough, indented coast' },
+    { min: 1.5, max: 2, label: 'Very high', color: '#ef4444', description: 'D > 1.5 — fjord coast' },
+  ],
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'L1', min: 0.1, max: 100000 },   // measured length at scale s1
+    { param: 's1', min: 0.01, max: 10000 },   // ruler scale 1
+    { param: 'L2', min: 0.1, max: 100000 },   // measured length at scale s2
+    { param: 's2', min: 0.01, max: 10000 },   // ruler scale 2
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Coastline from vector data');
-    log.push('  Multiple ruler lengths');
+    log.push('  Richardson (1961) two-point formula: D = 1 − ln(L₁/L₂) / ln(s₁/s₂)');
+    log.push('  Requires two coastline-length measurements at different ruler scales');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, RISK_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    if (Number.isFinite(result)) {
+      const label = result < 1.1 ? 'Low' : result < 1.3 ? 'Moderate' : result < 1.5 ? 'High' : 'Very high';
+      log.push(`  Coastline complexity: D = ${result.toFixed(4)} → ${label}`);
+    }
+    return { classification: undefined };
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' },
+    { name: 'Physical bounds', passed: Number.isFinite(result) && result >= 1 && result <= 2, message: Number.isFinite(result) ? `D=${result.toFixed(4)} (should be 1–2)` : 'N/A', severity: 'info' },
+  ]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 15,
-    rmseUnit: '%',
+    method: 'analytical',
     contributingFactors: [
-      { factor: 'Measurement scale', contribution: 'Varies' },
-      { factor: 'Data resolution', contribution: 'Varies' },
+      { factor: 'Two-point estimate', contribution: 'Only uses two measurements; the full Richardson plot (slope of log(L) vs log(s)) from multiple measurements gives a more robust D' },
+      { factor: 'Scale range', contribution: 'D may vary across scale ranges (multi-fractal behavior in real coastlines)' },
+      { factor: 'Digitization accuracy', contribution: 'Coastline digitization at each scale introduces measurement error' },
     ],
-    overallAssessment: '+/- 15% uncertainty',
+    overallAssessment: 'Exact for the two-point formula; ±0.05–0.1 typical vs full Richardson plot from multiple measurements',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Richardson Fractal Dimension: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Coastline fractal dimension.`,
-    recommendations: ["D typically 1.0-1.5.","Scale-dependent."],
+    contextualAnalysis: `Richardson Fractal Dimension: D = ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. ${Number.isFinite(result) ? (result < 1.1 ? 'Smooth, depositional coast.' : result < 1.3 ? 'Moderate embayed coast.' : result < 1.5 ? 'Rough, indented coast.' : 'Very rough fjord coast.') : 'N/A.'} Hurst exponent H = ${Number.isFinite(result) ? (2 - result).toFixed(4) : 'N/A'}.`,
+    recommendations: [
+      'Richardson (1961) data: South Africa D≈1.02, Australia D≈1.13, Britain D≈1.24, Norway D≈1.52.',
+      'For a more robust D, use the full Richardson plot: measure L at 5+ ruler scales, regress log(L) vs log(s).',
+      'H > 0.5 (D < 1.5) indicates persistent, smooth coastline; H < 0.5 indicates anti-persistent, rough coastline.',
+    ],
   }),
   metadata: {
-    methodology: 'Coastline fractal dimension.',
-    assumptions: ["Self-similar","Infinite detail"],
-    limitations: ["Limited scale range","Requires digitized coastline"],
-    references: ["Richardson 1961"],
-    preprocessingNotes: ["Coastline from vector data","Multiple ruler lengths"],
+    methodology: 'Richardson (1961) fractal dimension: L(s) = c·s^(1-D), solved as D = 1 - ln(L)/ln(s) for a single (L, s) measurement pair assuming c = 1. This is a point estimate; the full Richardson plot uses the slope of log(L) vs log(s) from multiple ruler-length measurements. Mandelbrot (1967) formalized the coastline paradox and showed D quantifies the space-filling capacity of natural boundaries.',
+    assumptions: ['The coastline is statistically self-similar (fractal) over the measurement scale range', 'The point estimate assumes c = 1 (normalization); the full Richardson plot uses the slope from multiple measurements', 'The measured length L at scale s follows the power law L(s) ∝ s^(1-D)'],
+    limitations: ['Point estimate (single L, s pair) — the full Richardson plot from multiple ruler lengths gives a more robust D', 'D varies with scale range (multi-fractal behavior is common in real coastlines)', 'The coefficient c is coastline-specific and not determined by a single measurement', 'Practical measurement requires digitized coastline data at multiple scales'],
+    references: ['Richardson, L.F. (1961) The problem of contiguity: An appendix to Statistics of Deadly Quarrels. General Systems Yearbook, 6, 139–187. (pre-DOI; NO-DOI in ledger)', 'Mandelbrot, B.B. (1967) How long is the coast of Britain? Statistical self-similarity and fractional dimension. Science, 156(3775), 636–638.'],
+    preprocessingNotes: ['L is the measured coastline length at ruler scale s', 'For the full Richardson plot, supply multiple (L, s) pairs and regress log(L) vs log(s)'],
   },
   dependencies: [],
 };
@@ -4522,42 +4618,64 @@ export const TOOL_84: ToolWorkflowDef = {
   toolId: 84,
   name: 'Slope Stability Analysis',
   vizType: 'gauge',
-  classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'cprime', min: 0, max: 100 },{ param: 'gammaz', min: 0, max: 500 },{ param: 'cosB', min: 0, max: 1 },{ param: 'u', min: 0, max: 200 },{ param: 'phiP', min: 0.1, max: 1.5 },{ param: 'sinB', min: 0, max: 1 },{ param: 'cosB2', min: 0, max: 1 }]),
+  // FS-based classification: standard geotechnical thresholds
+  classificationBands: [
+    { min: 0, max: 1, label: 'FAILURE', color: '#ef4444', description: 'FS < 1 — slope is unstable, failure imminent' },
+    { min: 1, max: 1.25, label: 'Nearly failing', color: '#f97316', description: 'FS 1.0–1.25 — marginal, requires investigation' },
+    { min: 1.25, max: 1.5, label: 'Marginally stable', color: '#eab308', description: 'FS 1.25–1.5 — monitor, minor remediation may be needed' },
+    { min: 1.5, max: 10, label: 'STABLE', color: '#22c55e', description: 'FS > 1.5 — adequate factor of safety' },
+  ],
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'cprime', min: 0, max: 100 },       // effective cohesion kPa
+    { param: 'gammaz', min: 0.1, max: 500 },     // γz = unit weight × depth kPa
+    { param: 'cosB', min: 0.01, max: 1 },         // cos(β)
+    { param: 'u', min: 0, max: 500 },             // pore pressure kPa
+    { param: 'tanphi', min: 0.01, max: 3 },       // tan(φ')
+    { param: 'sinB', min: 0.01, max: 1 },         // sin(β)
+    { param: 'cosB2', min: 0.01, max: 1 },        // cos²(β)
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Slope from SRTM/ALOS');
-    log.push('  Soil from ISRIC');
-    log.push('  Pore pressure from rainfall');
+    log.push('  Infinite slope: FS = [c\' + (γz·cos²β − u)·tanφ\'] / (γz·sinβ·cosβ)');
+    log.push('  Valid when failure-plane depth << slope length (Taylor 1948)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, RISK_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    const c = classify(result, [
+      { min: 0, max: 1, label: 'FAILURE' },
+      { min: 1, max: 1.25, label: 'Nearly failing' },
+      { min: 1.25, max: 1.5, label: 'Marginally stable' },
+      { min: 1.5, max: 10, label: 'STABLE' },
+    ]);
+    if (c) log.push(`  Stability: ${c.label}`);
     return { classification: c };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 30,
-    rmseUnit: '%',
+    method: 'analytical',
     contributingFactors: [
-      { factor: 'Cohesion', contribution: 'Varies' },
-      { factor: 'Friction angle', contribution: 'Varies' },
-      { factor: 'Pore pressure', contribution: 'Varies' },
+      { factor: 'Cohesion c\'', contribution: 'Highly variable; laboratory vs field values can differ by 2–5×' },
+      { factor: 'Friction angle φ\'', contribution: 'Typical range 20–40°; small changes in tanφ\' have large effects on FS' },
+      { factor: 'Pore pressure u', contribution: 'Most sensitive parameter; saturated vs unsaturated can change FS by 30–60%' },
+      { factor: 'Infinite-slope assumption', contribution: 'Valid when depth/length < 0.1; for deeper failures use limit-equilibrium methods (Bishop, Spencer)' },
     ],
-    overallAssessment: '+/- 30% uncertainty, FS>1.5 stable',
+    overallAssessment: '±30% typical uncertainty; FS > 1.5 is the standard stability threshold (Duncan & Wright 2005)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Slope Stability Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Infinite slope factor of safety.`,
-    recommendations: ["FS > 1.5: stable.","Soil from ISRIC SoilGrids."],
+    contextualAnalysis: `Factor of Safety: FS = ${Number.isFinite(result) ? result.toFixed(3) : 'N/A'}. ${Number.isFinite(result) ? (result >= 1.5 ? 'STABLE — adequate margin.' : result >= 1.25 ? 'Marginally stable — monitor.' : result >= 1.0 ? 'Nearly failing — investigate.' : 'FAILURE — slope is unstable.') : 'N/A.'}`,
+    recommendations: [
+      'FS > 1.5: standard threshold for permanent slopes (Duncan & Wright 2005).',
+      'FS = 1.0–1.5: sensitivity analysis recommended — vary c\', φ\', and u to assess robustness.',
+      'Pore pressure u is typically the most sensitive parameter; monitor during rainfall events.',
+      'For 3D slope geometry or non-planar failures, use limit-equilibrium methods (Bishop, Spencer, Morgenstern-Price).',
+    ],
   }),
   metadata: {
-    methodology: 'Infinite slope factor of safety.',
-    assumptions: ["Infinite slope","Uniform soil"],
-    limitations: ["Not for 3D slopes","Pore pressure critical"],
-    references: ["Skempton 1957"],
-    preprocessingNotes: ["Slope from SRTM/ALOS","Soil from ISRIC","Pore pressure from rainfall"],
+    methodology: 'Infinite slope factor of safety: FS = [c\' + (γz·cos²β − u)·tanφ\'] / (γz·sinβ·cosβ). Taylor (1948) / Duncan & Wright (2005). The numerator is the available shear strength (Mohr-Coulomb: τ_f = c\' + σ_n′·tanφ\') and the denominator is the applied shear stress along the potential failure plane. FS > 1: stable; FS = 1: limiting equilibrium; FS < 1: failure.',
+    assumptions: ['Infinite slope — failure plane is planar and parallel to the ground surface (valid when depth/length < 0.1)', 'Uniform soil properties along the failure plane (no spatial variability)', 'Steady-state or quasi-static conditions (no dynamic loading)', 'Pore pressure u is known or can be estimated from hydrologic conditions'],
+    limitations: ['Does not account for 3D slope geometry, toe effects, or non-planar failure surfaces', 'Pore pressure is the most sensitive parameter — incorrect u estimates dominate the uncertainty', 'Cohesion c\' is highly variable and difficult to measure reliably in the field', 'For deep-seated failures or complex geometry, use limit-equilibrium methods (Bishop, Spencer, Morgenstern-Price)'],
+    references: ['Skempton, A.W. & DeLory, F.A. (1957) Stability of natural slopes in London Clay. Proc. 4th Int. Conf. on Soil Mechanics and Foundation Engineering, London, 2, 378–381.', 'Taylor, D.W. (1948) Fundamentals of Soil Mechanics. Wiley.', 'Duncan, J.M. & Wright, S.G. (2005) Soil Strength and Slope Stability. Wiley.'],
+    preprocessingNotes: ['β = slope angle; cosB, sinB, cosB2 must be consistent (cos²β = cosB2 = cosB × cosB)', 'γz = total unit weight × depth of failure plane (kPa)', 'u = pore water pressure at the failure plane (kPa); 0 for dry conditions'],
   },
   dependencies: [],
 };
@@ -4569,18 +4687,31 @@ export const TOOL_85: ToolWorkflowDef = {
   toolId: 85,
   name: 'Voellmy Friction Model',
   vizType: 'scalar',
-  classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'mu', min: 0, max: 1 },{ param: 'sigma_n', min: 0, max: 1000 },{ param: 'xi', min: 0, max: 10000 }]),
+  classificationBands: [
+    { min: 0, max: 100, label: 'Low resistance', color: '#22c55e', description: 'τ < 100 Pa — slow, low-mobility flow' },
+    { min: 100, max: 1000, label: 'Moderate', color: '#eab308', description: 'τ 100–1000 Pa — typical debris flow' },
+    { min: 1000, max: 10000, label: 'High', color: '#f97316', description: 'τ 1–10 kPa — rapid avalanche/debris flow' },
+    { min: 10000, max: 1e6, label: 'Very high', color: '#ef4444', description: 'τ > 10 kPa — extreme rock avalanche' },
+  ],
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'mu', min: 0, max: 1 },          // Coulomb friction coefficient
+    { param: 'sigmaN', min: 0.1, max: 10000 }, // normal stress Pa
+    { param: 'xi', min: 1, max: 10000 },       // turbulence parameter m/s²
+    { param: 'rho', min: 100, max: 5000 },     // density kg/m³
+    { param: 'velocity', min: 0, max: 100 },    // flow velocity m/s
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Coulomb friction from material');
-    log.push('  Turbulent friction from flow velocity');
+    log.push('  Voellmy (1955): τ = μσ_n + ρgu²/ξ');
+    log.push('  τ_C = μσ_n (dry Coulomb)  +  τ_t = ρgu²/ξ (turbulent drag)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, RISK_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    if (Number.isFinite(result)) {
+      const label = result < 100 ? 'Low' : result < 1000 ? 'Moderate' : result < 10000 ? 'High' : 'Very high';
+      log.push(`  Total shear stress: ${label} (${result.toFixed(0)} Pa)`);
+    }
+    return { classification: undefined };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
@@ -4588,21 +4719,27 @@ export const TOOL_85: ToolWorkflowDef = {
     rmse: 30,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Friction coefficients', contribution: 'Varies' },
-      { factor: 'Flow velocity', contribution: 'Varies' },
+      { factor: 'Coulomb friction μ', contribution: 'Event-specific; μ = 0.05–0.2 (debris flows), 0.1–0.3 (rock avalanches)' },
+      { factor: 'Turbulence ξ', contribution: 'Event-specific; ξ = 100–1000 m/s² (debris flows), 500–2000 m/s² (rock avalanches)' },
+      { factor: 'Flow velocity u', contribution: 'Most sensitive parameter in the turbulent term (u² dependence)' },
     ],
-    overallAssessment: '+/- 30% for debris flow runout',
+    overallAssessment: '±30% typical; parameters must be calibrated per event (Voellmy 1955, Rickenmann 1990)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Voellmy Friction Model: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Debris flow friction model.`,
-    recommendations: ["Mu and xi from calibration.","RAMMS model uses Voellmy."],
+    contextualAnalysis: `Voellmy total shear stress τ = ${Number.isFinite(result) ? result.toFixed(1) : 'N/A'} Pa. The Voellmy model combines dry Coulomb friction (dominant at low velocity) with velocity-dependent turbulent drag (dominant at high velocity), producing self-limiting flow behavior.`,
+    recommendations: [
+      'μ and ξ must be calibrated per event — typical ranges: μ = 0.05–0.3, ξ = 100–2000 m/s².',
+      'The RAMMS (Rapid Mass Movements Simulation) model uses the Voellmy friction law.',
+      'At low velocities (< 1 m/s), the turbulent term is negligible; at high velocities (> 10 m/s), it dominates.',
+      'For steady uniform flow: u_eq = √(ξ·h·(sinβ − μ·cosβ)).',
+    ],
   }),
   metadata: {
-    methodology: 'Debris flow friction model.',
-    assumptions: ["Steady uniform flow","Constant friction"],
-    limitations: ["Parameters event-specific","No entrainment"],
-    references: ["Voellmy 1955"],
-    preprocessingNotes: ["Coulomb friction from material","Turbulent friction from flow velocity"],
+    methodology: 'Voellmy (1955) two-parameter friction model: τ = μ·σ_n + ρ·g·u²/ξ. The first term is dry Coulomb friction (velocity-independent); the second is turbulent drag (velocity-dependent, u²). At low velocities Coulomb friction dominates; at high velocities the turbulent term dominates, producing self-limiting velocity behavior. The model was originally for snow avalanches and later applied to debris flows (Rickenmann 1990), rock avalanches (Hungr & Evans 1996), and pyroclastic flows.',
+    assumptions: ['Depth-averaged (Saint-Venant) flow — vertically uniform velocity profile', 'Steady or quasi-steady flow conditions', 'Constant friction parameters μ and ξ (no entrainment, no deposition in this formulation)', 'Incompressible, homogeneous granular flow'],
+    limitations: ['μ and ξ are event-specific and must be calibrated against observed runout distances — no universal values exist', 'Does not account for entrainment of bed material, which can significantly increase flow volume and momentum', 'The u² dependence in the turbulent term makes the result highly sensitive to velocity input', 'For complex topography or multi-phase flows, more sophisticated models (e.g. BING, DAN3D) may be needed'],
+    references: ['Voellmy, A. (1955) Über die Zerstörungskraft von Lawinen (On the destructive force of avalanches). Schweizerische Bauzeitung, 73(12), 159–165.', 'Savage, S.B. & Hutter, K. (1989) The motion of a finite mass of granular material down a rough inclined plane. J. Fluid Mech., 199, 177–215.', 'Rickenmann, D. (1990) Bedload transport capacity of overland flow at steep slopes. J. Hydraulic Engineering, 116(10), 1196–1212.'],
+    preprocessingNotes: ['μ = Coulomb friction coefficient (0.05–0.3 depending on material)', 'ξ = Voellmy turbulence parameter (100–2000 m/s² depending on flow type)', 'ρ = flow density (typically 1500–2500 kg/m³ for debris flows)', 'u = flow velocity (user-supplied or computed from depth-averaged Saint-Venant equations)'],
   },
   dependencies: [],
 };
@@ -4614,40 +4751,55 @@ export const TOOL_86: ToolWorkflowDef = {
   toolId: 86,
   name: 'Stream Power Index',
   vizType: 'heatmap',
-  classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'As', min: 0, max: 1000000 },{ param: 'tanBeta', min: 0, max: 10 }]),
+  // SPI-based classification — NOT RISK_BANDS (SPI is dimensionless log, not a risk metric)
+  classificationBands: [
+    { min: -Infinity, max: 0, label: 'Low erosion', color: '#22c55e', description: 'SPI < 0 — divergent flow, ridges, low-gradient areas' },
+    { min: 0, max: 5, label: 'Moderate', color: '#eab308', description: 'SPI 0–5 — hillslope/channel transition, moderate erosion' },
+    { min: 5, max: 10, label: 'High erosion', color: '#f97316', description: 'SPI 5–10 — convergent flow, valleys, swales' },
+    { min: 10, max: Infinity, label: 'Very high', color: '#ef4444', description: 'SPI > 10 — major channel convergence, intense erosion' },
+  ],
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'As', min: 0.01, max: 10000000 },   // specific catchment area m²/m
+    { param: 'tanB', min: 0.0001, max: 10 },       // tan(β)
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Flow accumulation from SRTM');
-    log.push('  Slope from DEM');
+    log.push('  SPI = ln(A_s × tanβ) — Moore et al. (1991)');
+    log.push('  A_s = specific catchment area (upslope contributing area per unit contour width)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, RISK_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    if (Number.isFinite(result)) {
+      const label = result < 0 ? 'Low' : result < 5 ? 'Moderate' : result < 10 ? 'High' : 'Very high';
+      log.push(`  Erosion potential: ${label} (SPI = ${result.toFixed(2)})`);
+    }
+    return { classification: undefined };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 25,
-    rmseUnit: '%',
+    method: 'analytical',
     contributingFactors: [
-      { factor: 'Flow accumulation', contribution: 'Varies' },
-      { factor: 'DEM resolution', contribution: 'Varies' },
+      { factor: 'DEM resolution', contribution: 'Higher-resolution DEMs capture more detailed flow convergence patterns' },
+      { factor: 'Flow routing algorithm', contribution: 'D8, D∞, MFD produce different A_s values; algorithm choice affects SPI' },
+      { factor: 'Specific catchment area A_s', contribution: 'A_s = upslope contributing area / contour width; sensitive to flow routing and DEM artifacts' },
     ],
-    overallAssessment: '+/- 25% uncertainty',
+    overallAssessment: 'Exact for the log formula; ±25% uncertainty from DEM resolution and flow routing (Moore et al. 1991)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Stream Power Index: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Erosion potential from DEM.`,
-    recommendations: ["Flow accumulation from SRTM.","Log transform for visualization."],
+    contextualAnalysis: `Stream Power Index SPI = ${Number.isFinite(result) ? result.toFixed(2) : 'N/A'}. ${Number.isFinite(result) ? (result < 0 ? 'Low erosion potential — divergent flow, ridges.' : result < 5 ? 'Moderate erosion — hillslope/channel transition.' : result < 10 ? 'High erosion potential — convergent flow, valleys.' : 'Very high erosion — major channel convergence.') : 'N/A.'}`,
+    recommendations: [
+      'SPI > 5 typically indicates zones of flow convergence prone to gullying and channel incision.',
+      'SPI < 0 indicates divergent flow (ridges, divides) — erosion-resistant positions.',
+      'SPI is often combined with the LS factor in RUSLE for erosion modeling.',
+      'DEM resolution strongly affects SPI — 30 m DEMs may miss narrow convergent zones visible at 10 m.',
+    ],
   }),
   metadata: {
-    methodology: 'Erosion potential from DEM.',
-    assumptions: ["DEM represents true surface","Flow routing correct"],
-    limitations: ["DEM resolution dependent","Artifacts in flat areas"],
-    references: ["Moore et al. 1991"],
-    preprocessingNotes: ["Flow accumulation from SRTM","Slope from DEM"],
+    methodology: 'Moore et al. (1991) Stream Power Index: SPI = ln(A_s × tanβ), where A_s is the specific catchment area (m²/m) and β is the local slope angle. SPI combines the flow accumulation (A_s, proxy for discharge) with the slope gradient (tanβ, proxy for shear stress) to quantify the erosive power of concentrated overland flow. High SPI values identify zones of flow convergence (valleys, swales) prone to gully erosion and channel incision; low values identify divergent hillslopes and ridges.',
+    assumptions: ['The DEM accurately represents the ground surface (no vegetation/canopy bias)', 'Flow routing is correctly computed (D8, D∞, or MFD algorithm)', 'Specific catchment area A_s is computed per unit contour width (m²/m)', 'SPI is a relative index — not an absolute erosion rate'],
+    limitations: ['DEM resolution strongly affects SPI — narrow convergent zones may be missed at coarse resolution', 'Flat areas (tanβ → 0) produce very low SPI regardless of drainage area — may mask actual convergence', 'SPI does not account for soil properties, vegetation, or land use — combine with RUSLE for actual erosion rates', 'Flow routing artifacts (sinks, parallel flow) can produce spurious SPI patterns'],
+    references: ['Moore, I.D., Grayson, R.B. & Ladson, A.R. (1991) Digital terrain modelling: A review of hydrological, geomorphological, and biological applications. Hydrological Processes, 5(1), 3–30. doi:10.1002/hyp.3360050103'],
+    preprocessingNotes: ['A_s = specific catchment area (upslope contributing area per unit contour width, m²/m)', 'tanβ = tangent of local slope angle (from DEM; tanβ = sinβ/cosβ)'],
   },
   dependencies: [],
 };
@@ -4659,41 +4811,55 @@ export const TOOL_87: ToolWorkflowDef = {
   toolId: 87,
   name: 'Topographic Wetness Index',
   vizType: 'heatmap',
-  classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'As', min: 0, max: 1000000 },{ param: 'tanBeta', min: 0, max: 10 }]),
+  // TWI-based classification — NOT RISK_BANDS
+  classificationBands: [
+    { min: -Infinity, max: 4, label: 'Well-drained', color: '#22c55e', description: 'TWI < 4 — ridge tops, steep slopes, dry' },
+    { min: 4, max: 6, label: 'Moderate', color: '#eab308', description: 'TWI 4–6 — hillslope, periodically moist' },
+    { min: 6, max: 8, label: 'High wetness', color: '#3b82f6', description: 'TWI 6–8 — valley bottoms, periodic saturation' },
+    { min: 8, max: Infinity, label: 'Saturation zone', color: '#6366f1', description: 'TWI > 8 — wetland, riparian, permanent saturation' },
+  ],
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'As', min: 0.01, max: 10000000 },   // specific catchment area m²/m
+    { param: 'tanB', min: 0.0001, max: 10 },      // tan(β)
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Flow accumulation from SRTM');
-    log.push('  Slope from DEM');
+    log.push('  TWI = ln(A_s / tanβ) — Beven & Kirkby (1979) TOPMODEL');
+    log.push('  A_s = specific catchment area (upslope contributing area per unit contour width)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, RISK_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    if (Number.isFinite(result)) {
+      const label = result < 4 ? 'Well-drained' : result < 6 ? 'Moderate' : result < 8 ? 'High wetness' : 'Saturation zone';
+      log.push(`  Wetness class: ${label} (TWI = ${result.toFixed(2)})`);
+    }
+    return { classification: undefined };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 25,
-    rmseUnit: '%',
+    method: 'analytical',
     contributingFactors: [
-      { factor: 'Flow accumulation', contribution: 'Varies' },
-      { factor: 'DEM resolution', contribution: 'Varies' },
-      { factor: 'Soil transmissivity', contribution: 'Varies' },
+      { factor: 'DEM resolution', contribution: 'Higher-resolution DEMs capture more detailed convergence/divergence patterns' },
+      { factor: 'Flow routing algorithm', contribution: 'D8, D∞, MFD produce different A_s values; affects TWI by 1–2 units' },
+      { factor: 'Soil transmissivity T', contribution: 'TOPMODEL relates TWI to water table depth via T; uniform-T assumption limits accuracy' },
     ],
-    overallAssessment: '+/- 25% uncertainty',
+    overallAssessment: 'Exact for the log formula; ±1–2 TWI units from DEM resolution and flow routing (Beven & Kirkby 1979)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Topographic Wetness Index: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Soil moisture and saturation zones.`,
-    recommendations: ["High TWI = wet areas.","SRTM for DEM."],
+    contextualAnalysis: `Topographic Wetness Index TWI = ${Number.isFinite(result) ? result.toFixed(2) : 'N/A'}. ${Number.isFinite(result) ? (result < 4 ? 'Well-drained — ridge tops, steep slopes.' : result < 6 ? 'Moderate wetness — hillslope.' : result < 8 ? 'High wetness — valley bottoms, periodic saturation.' : 'Saturation zone — wetland, riparian, permanent saturation.') : 'N/A.'} In TOPMODEL: z = z_mean − (1/f)·(TWI − λ) where λ is the mean TWI.`,
+    recommendations: [
+      'TWI > 8 typically identifies saturation-excess overland flow source areas.',
+      'TWI correlates with depth to water table — higher TWI = shallower water table.',
+      'Combine with soil transmissivity T for TOPMODEL water-table predictions.',
+      'DEM resolution strongly affects TWI — 30 m DEMs may miss narrow valley-bottom saturation.',
+    ],
   }),
   metadata: {
-    methodology: 'Soil moisture and saturation zones.',
-    assumptions: ["Steady state","Uniform soil"],
-    limitations: ["DEM resolution dependent","No soil variability"],
-    references: ["Beven & Kirkby 1979"],
-    preprocessingNotes: ["Flow accumulation from SRTM","Slope from DEM"],
+    methodology: 'Beven & Kirkby (1979) TOPMODEL: TWI = ln(A_s / tanβ), where A_s is the specific catchment area (m²/m) and β is the local slope angle. TWI captures the topographic control on soil moisture: points with large upslope area (high A_s) and gentle slope (low tanβ) have high TWI and are prone to saturation. In TOPMODEL, the local water table depth is z = z_mean − (1/f)·(TWI − λ), where f is a decay parameter and λ is the catchment-mean TWI.',
+    assumptions: ['Steady-state or quasi-steady-state hydrologic conditions', 'Soil transmissivity T decreases exponentially with depth below the water table', 'Uniform soil transmissivity parameter f across the catchment (spatially uniform f, distributed z from TWI)', 'The DEM accurately represents the ground surface'],
+    limitations: ['TWI is a topographic index only — does not account for soil properties, vegetation, or land use directly', 'DEM resolution strongly affects TWI — narrow valley bottoms may be missed at coarse resolution', 'Flat areas (tanβ → 0) produce very high TWI regardless of drainage area — may overestimate saturation', 'TOPMODEL requires calibration of f and T against observed streamflow'],
+    references: ['Beven, K.J. & Kirkby, M.J. (1979) A physically based, variable contributing area model of basin hydrology. Hydrological Sciences Bulletin, 24(1), 43–69. doi:10.1080/02626667909491834'],
+    preprocessingNotes: ['A_s = specific catchment area (upslope contributing area per unit contour width, m²/m)', 'tanβ = tangent of local slope angle (from DEM)'],
   },
   dependencies: [],
 };
@@ -4705,18 +4871,31 @@ export const TOOL_88: ToolWorkflowDef = {
   toolId: 88,
   name: 'Lake Evaporation Estimation',
   vizType: 'scalar',
-  classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'Km', min: 0.1, max: 1.5 },{ param: 'ew', min: 0, max: 100 },{ param: 'ea', min: 0, max: 100 },{ param: 'u', min: 0, max: 100 }]),
+  // Evaporation-rate classification — NOT OCEAN_BANDS (wave height bands)
+  classificationBands: [
+    { min: 0, max: 1, label: 'Low evaporation', color: '#22c55e', description: 'E < 1 mm/day — cool, humid, low wind' },
+    { min: 1, max: 3, label: 'Moderate', color: '#eab308', description: 'E 1–3 mm/day — typical temperate lake' },
+    { min: 3, max: 6, label: 'High', color: '#f97316', description: 'E 3–6 mm/day — warm, dry, windy' },
+    { min: 6, max: 20, label: 'Very high', color: '#ef4444', description: 'E > 6 mm/day — arid, high wind' },
+  ],
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'Km', min: 0.1, max: 1.5 },       // mass-transfer coefficient
+    { param: 'ew', min: 0, max: 10 },           // saturation vapor pressure kPa
+    { param: 'ea', min: 0, max: 10 },           // actual vapor pressure kPa
+    { param: 'u', min: 0, max: 30 },             // wind speed m/s
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Vapor pressures from temperature');
-    log.push('  Wind speed from Open-Meteo');
+    log.push('  Meyer (1915): E = K_M × (e_w − e_a) × (1 + u/16)');
+    log.push('  K_M ≈ 0.7 for Class A pan; wind at 9 m height (original); u/16 empirical');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    if (Number.isFinite(result)) {
+      const label = result < 1 ? 'Low' : result < 3 ? 'Moderate' : result < 6 ? 'High' : 'Very high';
+      log.push(`  Evaporation rate: ${label} (${result.toFixed(2)} mm/day)`);
+    }
+    return { classification: undefined };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
@@ -4724,21 +4903,27 @@ export const TOOL_88: ToolWorkflowDef = {
     rmse: 25,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Pan coefficient', contribution: 'Varies' },
-      { factor: 'Wind height', contribution: 'Varies' },
+      { factor: 'Pan coefficient K_M', contribution: 'Varies 0.6–0.8 depending on pan type, exposure, and lake size' },
+      { factor: 'Wind measurement height', contribution: 'Original formula calibrated at 9 m; wind at 2 m requires adjustment' },
+      { factor: 'Vapor pressure estimation', contribution: 'e_w from water temperature (Magnus formula); e_a from air temperature and humidity' },
     ],
-    overallAssessment: '+/- 25% uncertainty',
+    overallAssessment: '±25% typical; the wind function (1 + u/16) is a simple empirical fit (Meyer 1915)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Lake Evaporation Estimation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Lake evaporation estimation.`,
-    recommendations: ["Pan coefficient Km ~ 0.7.","Wind at 9m height."],
+    contextualAnalysis: `Lake evaporation E = ${Number.isFinite(result) ? result.toFixed(2) : 'N/A'} mm/day. ${Number.isFinite(result) ? (result < 1 ? 'Low evaporation — cool, humid conditions.' : result < 3 ? 'Moderate — typical temperate lake.' : result < 6 ? 'High evaporation — warm, dry, windy.' : 'Very high — arid region, strong wind.') : 'N/A.'}`,
+    recommendations: [
+      'K_M ≈ 0.7 for US Weather Bureau Class A pan; adjust for other pan types and lake sizes.',
+      'The wind function (1 + u/16) was calibrated at 9 m height; wind at 2 m should be converted.',
+      'For annual estimates: multiply daily E by 365; typical range 500–1500 mm/yr for temperate lakes.',
+      'Meyer (1915) is one of the earliest mass-transfer evaporation equations; more modern methods include Penman (1948) and Priestley-Taylor (1972).',
+    ],
   }),
   metadata: {
-    methodology: 'Lake evaporation estimation.',
-    assumptions: ["Steady conditions","Uniform lake surface"],
-    limitations: ["Pan coefficient variable","Stratification ignored"],
-    references: ["Meyer 1915"],
-    preprocessingNotes: ["Vapor pressures from temperature","Wind speed from Open-Meteo"],
+    methodology: 'Meyer (1915) mass-transfer evaporation: E = K_M × (e_w − e_a) × (1 + u/16). The formula combines the vapor pressure deficit (e_w − e_a, the driving force for evaporation) with an empirical wind function (1 + u/16) that enhances evaporation with wind speed. K_M is a pan coefficient calibrated against US Weather Bureau Class A pan data. The formula was one of the first practical evaporation estimation methods and remains widely used for preliminary lake water-balance calculations.',
+    assumptions: ['Steady-state or quasi-steady conditions (no rapid temperature changes)', 'Uniform lake surface — no stratification, no vegetation, no ice', 'Wind speed measured at 9 m height (original calibration height)', 'Pan coefficient K_M is constant (does not vary with lake size or climate)'],
+    limitations: ['K_M is empirical and varies 0.6–0.8 depending on pan type, exposure, and lake size — no universal value', 'The wind function (1 + u/16) is a simple linear fit; more complex functions exist (Penman, Deardorff)', 'Ignores energy balance components (net radiation, heat storage) — mass-transfer methods are less accurate than energy-balance methods for large lakes', 'Does not account for stratification, ice cover, or seasonal variation in lake temperature'],
+    references: ['Meyer, A.F. (1915) Computing runoff from rainfall and other physical data. Transactions of the American Society of Civil Engineers, 79(1), 1056–1155. doi:10.1061/taceat.0002707'],
+    preprocessingNotes: ['e_w = saturation vapor pressure at water surface temperature (Magnus formula)', 'e_a = actual vapor pressure from air temperature and relative humidity', 'u = wind speed (m/s) at the measurement height; original formula uses 9 m'],
   },
   dependencies: [],
 };
@@ -4750,40 +4935,56 @@ export const TOOL_89: ToolWorkflowDef = {
   toolId: 89,
   name: 'Schmidt Stability Number',
   vizType: 'profile',
-  classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'A', min: 0, max: 10000000000 },{ param: 'z', min: 0, max: 1000 }]),
+  // Stability-based classification — NOT OCEAN_BANDS
+  classificationBands: [
+    { min: 0, max: 20, label: 'Near-mixed', color: '#22c55e', description: 'S < 20 J/m² — continuous vertical exchange, polymictic' },
+    { min: 20, max: 100, label: 'Weakly stratified', color: '#eab308', description: 'S 20–100 J/m² — frequent turnover, dimictic' },
+    { min: 100, max: 500, label: 'Moderately stratified', color: '#3b82f6', description: 'S 100–500 J/m² — seasonal thermocline present' },
+    { min: 500, max: 10000, label: 'Strongly stratified', color: '#ef4444', description: 'S > 500 J/m² — resistant to mixing, meromictic risk' },
+  ],
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'A', min: 1000, max: 1e11 },   // lake surface area m²
+    { param: 'z', min: 0.1, max: 2000 },     // maximum depth m
+    { param: 'rms', min: 0, max: 100 },       // rms density difference kg/m³
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Temperature/density profiles from CTD');
-    log.push('  Lake morphometry from bathymetry');
+    log.push('  Schmidt (1928) simplified: S ≈ g × rms(Δρ) × z_v');
+    log.push('  Full form: S = (g/A₀)∫A(z)(ρ_z − ρ_m)(z − z_v)dz');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    if (Number.isFinite(result)) {
+      const label = result < 20 ? 'Near-mixed' : result < 100 ? 'Weakly stratified' : result < 500 ? 'Moderately stratified' : 'Strongly stratified';
+      log.push(`  Stratification: ${label} (S = ${result.toFixed(1)} J/m²)`);
+    }
+    return { classification: undefined };
   },
   qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 20,
-    rmseUnit: '%',
+    method: 'analytical',
     contributingFactors: [
-      { factor: 'Density profile', contribution: 'Varies' },
-      { factor: 'Lake morphometry', contribution: 'Varies' },
+      { factor: 'Density profile accuracy', contribution: 'S depends on the full density profile; the simplified form uses rms(Δρ) as a proxy' },
+      { factor: 'Lake morphometry', contribution: 'The full integral requires A(z); the simplified form uses a characteristic depth z_v' },
+      { factor: 'Temporal variability', contribution: 'S varies seasonally (summer max, fall overturn); the simplified form is a snapshot' },
     ],
-    overallAssessment: '+/- 20% from density profile quality',
+    overallAssessment: 'Exact for the simplified formula; ±20% vs full integral from density profile (Schmidt 1928, Idso 1973)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Schmidt Stability Number: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Lake stratification strength.`,
-    recommendations: ["Requires density vs depth profile.","Lake morphometry from bathymetry."],
+    contextualAnalysis: `Schmidt Stability S = ${Number.isFinite(result) ? result.toFixed(1) : 'N/A'} J/m². ${Number.isFinite(result) ? (result < 20 ? 'Near-mixed — continuous vertical exchange, polymictic lake.' : result < 100 ? 'Weakly stratified — frequent turnover, dimictic lake.' : result < 500 ? 'Moderately stratified — seasonal thermocline present.' : 'Strongly stratified — resistant to mixing, meromictic risk.') : 'N/A.'}`,
+    recommendations: [
+      'S > 500 J/m² indicates strong stratification — hypolimnetic hypoxia likely if sustained.',
+      'S < 20 J/m² indicates near-mixed conditions — polymictic lake with frequent turnover.',
+      'The simplified form S ≈ g·rms(Δρ)·z_v is a one-layer proxy; the full integral requires density vs depth profiles.',
+      'S is the standard metric in the Lake Analyzer toolbox (Read et al. 2011) and the GLEON network.',
+    ],
   }),
   metadata: {
-    methodology: 'Lake stratification strength.',
-    assumptions: ["Static lake","No internal waves"],
-    limitations: ["Requires profile data","Lake shape matters"],
-    references: ["Schmidt 1928"],
-    preprocessingNotes: ["Temperature/density profiles from CTD","Lake morphometry from bathymetry"],
+    methodology: 'Schmidt (1928) stability number: S = (g/A₀)∫A(z)(ρ_z − ρ_m)(z − z_v)dz. Simplified one-layer proxy: S ≈ g × rms(Δρ) × z_v. S represents the gravitational potential energy required to completely mix a stratified water column. Higher S means more energy needed to overturn the lake. The standard metric for lake thermal stratification strength (Read et al. 2011 Lake Analyzer).',
+    assumptions: ['The lake is at rest (no internal waves or seiches at the time of measurement)', 'Density differences are primarily temperature-driven (freshwater lakes)', 'The simplified form uses a single rms(Δρ) value rather than the full density profile', 'Lake morphometry A(z) is approximately captured by the surface area A₀ and maximum depth z_v'],
+    limitations: ['The simplified form is a one-layer proxy — the full integral requires a density vs depth profile from CTD', 'S is a snapshot value that varies seasonally (summer max → fall overturn → winter inverse stratification)', 'In saline or meromictic lakes, density differences include salinity — the simplified form may underestimate S', 'Wind energy input (not included in S) determines whether the available energy is sufficient for mixing'],
+    references: ['Schmidt, W. (1928) Über die Temperatur- und Stabilitätsverhältnisse von Seen (On temperature and stability conditions in lakes). Geografiska Annaler, 10, 145–177. doi:10.2307/519789', 'Idso, S.B. (1973) On the concept of lake stability. Limnology and Oceanography, 18(4), 681–683.'],
+    preprocessingNotes: ['rms(Δρ) = root-mean-square density difference from the surface (user supplies, or compute from temperature profile)', 'z_v = depth to centre of volume (user supplies, or approximate as z_max/2 for a V-shaped lake)'],
   },
   dependencies: [],
 };
@@ -4932,7 +5133,7 @@ export const TOOL_93: ToolWorkflowDef = {
   name: 'Herron-Langway Firn Densification',
   vizType: 'timeseries',
   classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'k', min: 0, max: 1 },{ param: 'b', min: 0, max: 10000 },{ param: 'rho_i', min: 800, max: 950 },{ param: 'rho_f', min: 300, max: 850 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'k', min: 0, max: 1 },{ param: 'b', min: 0, max: 10000 },{ param: 'rhoI', min: 800, max: 950 },{ param: 'rhoF', min: 300, max: 850 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Accumulation rate from ice cores');
     log.push('  Ice density = 917 kg/m3');
@@ -5022,7 +5223,7 @@ export const TOOL_95: ToolWorkflowDef = {
   name: 'Morton-Taylor-Turner Buoyant Plume',
   vizType: 'profile',
   classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'Qdot', min: 0, max: 100000 },{ param: 'rho_air', min: 0.5, max: 1.5 },{ param: 'alpha', min: 0.05, max: 0.2 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'Qdot', min: 0, max: 100000 },{ param: 'rhoAir', min: 0.5, max: 1.5 },{ param: 'alpha', min: 0.05, max: 0.2 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Entrainment coefficient alpha ~ 0.1');
     log.push('  Heat output from thermal observations');
@@ -5067,7 +5268,7 @@ export const TOOL_96: ToolWorkflowDef = {
   name: 'Budyko-Sellers Energy Balance',
   vizType: 'timeseries',
   classificationBands: CLIMATE_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'C', min: 1000000, max: 10000000000 },{ param: 'Q', min: 0, max: 500 },{ param: 'alpha', min: 0, max: 1 },{ param: 'I', min: 0, max: 400 },{ param: 'D', min: 0, max: 100 },{ param: 'nabla2T', min: -1, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'C', min: 1000000, max: 10000000000 },{ param: 'Q', min: 0, max: 500 },{ param: 'alpha', min: 0, max: 1 },{ param: 'I', min: 0, max: 400 },{ param: 'D', min: 0, max: 100 },{ param: 'divDT', min: -1, max: 1 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Solar constant S/4 for sphere');
     log.push('  Albedo temperature dependence');
@@ -5240,7 +5441,12 @@ export const TOOL_100: ToolWorkflowDef = {
   name: 'Charney-Stern Theorem',
   vizType: 'scalar',
   classificationBands: CLIMATE_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'dqdy', min: -1e-9, max: 1e-9 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'dpdy', min: -1e-9, max: 1e-9 },
+    { param: 'f', min: 0, max: 0.0002 },
+    { param: 'N', min: 0.001, max: 0.1 },
+    { param: 'dudy', min: 0, max: 1 },
+  ]),
   preprocess: (inputs, ctx, log) => {
     log.push('  PV gradient from reanalysis');
     log.push('  Necessary condition for instability');
@@ -5283,7 +5489,7 @@ export const TOOL_101: ToolWorkflowDef = {
   name: 'Eady Growth Rate',
   vizType: 'gauge',
   classificationBands: CLIMATE_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'f', min: 0, max: 0.0002 },{ param: 'N', min: 0.001, max: 0.1 },{ param: 'dudz', min: 0, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'f', min: 0, max: 0.0002 },{ param: 'N', min: 0.001, max: 0.1 },{ param: 'dudy', min: 0, max: 1 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Coefficient 0.3098 from Eady 1949');
     log.push('  Wind shear from ERA5');
@@ -5457,7 +5663,7 @@ export const TOOL_105: ToolWorkflowDef = {
   name: 'Convective Velocity Scale',
   vizType: 'scalar',
   classificationBands: CLIMATE_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'g', min: 0, max: 20 },{ param: 'thetav', min: 200, max: 400 },{ param: 'wthetav0', min: 0, max: 10 },{ param: 'zi', min: 10, max: 5000 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'g', min: 0, max: 20 },{ param: 'thetaVbar', min: 200, max: 400 },{ param: 'wthetaV', min: 0, max: 10 },{ param: 'zi', min: 10, max: 5000 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Surface heat flux from observations');
     log.push('  BL height from lidar/sodar');
@@ -5503,7 +5709,7 @@ export const TOOL_106: ToolWorkflowDef = {
   name: 'Petterssen Frontogenesis',
   vizType: 'scalar',
   classificationBands: CLIMATE_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'gradtheta', min: 0, max: 1 },{ param: 'D', min: -1, max: 1 },{ param: 'beta', min: 0, max: 1.57 },{ param: 'delta', min: 0, max: 1 },{ param: 'duds', min: 0, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'dtheta', min: 0, max: 1 },{ param: 'D', min: -1, max: 1 },{ param: 'cos2b', min: -1, max: 1 },{ param: 'delta', min: -1, max: 1 },{ param: 'dudy', min: -1, max: 1 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Temperature gradient from reanalysis');
     log.push('  Deformation from wind field');
@@ -5546,7 +5752,7 @@ export const TOOL_107: ToolWorkflowDef = {
   name: 'Vorticity Equation',
   vizType: 'vector',
   classificationBands: CLIMATE_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'zeta', min: -1, max: 1 },{ param: 'f', min: 0, max: 0.0002 },{ param: 'divV', min: -1, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'zeta', min: -1, max: 1 },{ param: 'f', min: 0, max: 0.0002 },{ param: 'div', min: -1, max: 1 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Relative vorticity from wind field');
     log.push('  Coriolis from latitude');
@@ -5726,7 +5932,7 @@ export const TOOL_111: ToolWorkflowDef = {
   name: 'IERS Earth Rotation Matrix',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'P', min: 0, max: 1 },{ param: 'N', min: 0, max: 1 },{ param: 'R', min: 0, max: 1 },{ param: 'W', min: 0, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'P', min: 0, max: 1 },{ param: 'N', min: 0, max: 1 },{ param: 'Rx', min: 0, max: 1 },{ param: 'W', min: 0, max: 1 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Precession-nutation from IERS');
     log.push('  Earth rotation from GAST');
@@ -6449,7 +6655,18 @@ export const TOOL_127: ToolWorkflowDef = {
   name: 'Hill-Clohessy-Wiltshire',
   vizType: 'scalar',
   classificationBands: SPACE_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'n', min: 0, max: 0.01 },{ param: 'ax', min: -10, max: 10 },{ param: 'ay', min: -10, max: 10 },{ param: 'az', min: -10, max: 10 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'n', min: 0, max: 0.01 },
+    { param: 'x', min: -10000, max: 10000 },
+    { param: 'y', min: -10000, max: 10000 },
+    { param: 'z', min: -10000, max: 10000 },
+    { param: 'xdot', min: -100, max: 100 },
+    { param: 'ydot', min: -100, max: 100 },
+    { param: 'zdot', min: -100, max: 100 },
+    { param: 'ax', min: -10, max: 10 },
+    { param: 'ay', min: -10, max: 10 },
+    { param: 'az', min: -10, max: 10 },
+  ]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Mean motion from orbital elements');
     log.push('  Relative motion for rendezvous');

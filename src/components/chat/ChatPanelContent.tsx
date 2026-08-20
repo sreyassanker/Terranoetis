@@ -72,7 +72,7 @@ export default function ChatPanelContent({
         <LiveProcessPanel agentSteps={agentSteps} pipelineProgress={pipelineProgress} />
       )}
 
-        {aiTyping && agentSteps.length === 0 && (
+        {aiTyping && (
           <div className="ai-typing">
             <span className="ai-typing-row">
               <BrailleSpinner />

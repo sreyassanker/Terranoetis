@@ -185,7 +185,7 @@ export class FlightDeadReckoning {
           },
           label: {
             text: flight.callsign,
-            font: '10px Space Grotesk, sans-serif',
+            font: '10px Inter, sans-serif',
             fillColor: Cesium.Color.WHITE,
             outlineColor: Cesium.Color.BLACK,
             outlineWidth: 2,

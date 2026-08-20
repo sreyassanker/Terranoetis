@@ -103,6 +103,8 @@ export function useChat(
       messages: tab.messages.map(m => (m.id === id ? { ...m, ...updates } : m)),
     }));
     const setAiTyping = (v: boolean) => streamTabId ? store.getState().setTabTyping(streamTabId, v) : store.getState().setAiTyping(v);
+    // Single source of truth: agentSteps are driven entirely by server SSE updates.
+    // NO client-seeded placeholder steps - server is authoritative.
     const setAgentSteps = (fn: (prev: AgentStep[]) => AgentStep[]) => mutateTab(tab => ({
       ...tab,
       agentSteps: typeof fn === 'function' ? fn(tab.agentSteps) : fn,
@@ -173,13 +175,11 @@ export function useChat(
 
     if (isComputeTask) {
       try {
-        setAgentSteps((prev: AgentStep[]) => [...prev, { type: 'planning', text: 'Planning computation pipeline...', status: 'running', startedAt: Date.now() }]);
         setExpandedStep(-1);
         await sendToPipeline(userMsg, sandboxWorkspaceId || null);
         setAiTyping(false);
         return;
       } catch (e) {
-        setAgentSteps((prev: AgentStep[]) => [...prev, { type: 'error', text: `Pipeline Error: ${e}`, status: 'failed', startedAt: Date.now() }]);
         addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `Pipeline execution failed: ${e}\n\nFalling back to agent analysis...` });
       }
     }
@@ -202,7 +202,6 @@ export function useChat(
     }
 
     // General AI query
-    setAgentSteps((prev: AgentStep[]) => [...prev, { type: 'reasoning', text: 'Analyzing your request...', status: 'running', startedAt: Date.now() }]);
     setExpandedStep(-1);
 
     abortControllerRef.current?.abort();
