@@ -186,7 +186,8 @@ const ALIGN: Record<number, Record<string, string>> = {
   124: { 'ρ': 'rho' },
   126: { 'β': 'beta', 'γ': 'gamma' },
   134: { 'ft': 'fc' },
-  145: { 'f': 'fGHz', 'd': 'dKm' },  // Fixed: f→frequency (GHz), d→distance (km)
+  137: { 'I_Hi': 'IHi', 'I_Lo': 'ILo', 'BP_Hi': 'BPHi', 'BP_Lo': 'BPLo', 'C_p': 'Cp' },
+  // 145: no ALIGN needed — contextEngine provides fGHz and dKm directly
   147: { 'v': 'vrel' },
   149: { 'm1': 'x', 'm2': 'y' },
 };
@@ -2031,13 +2032,13 @@ function mapInputs(
       // wins; the provenance flags tell the engine whether to label the
       // step "auto GEBCO" or "user input".
       const userH = userInputs['h'] != null;
-      const autoDepth = gebcoDepth && gebcoDepth.depth > 0 ? gebcoDepth.depth : Number.NaN;
+      const autoDepth = ctx.gebcoDepth && ctx.gebcoDepth.depth > 0 ? ctx.gebcoDepth.depth : Number.NaN;
       return {
         g: u('g', G_GRAV),
         k: u('k', 0.1),
         h: u('h', autoDepth),
         __hAuto: !userH,
-        __gebcoElev: gebcoDepth ? gebcoDepth.elevation : null,
+        __gebcoElev: ctx.gebcoDepth ? ctx.gebcoDepth.elevation : null,
       };
     }
     case 79: return {
@@ -2408,11 +2409,15 @@ function mapInputs(
 
     // ═══ Domain 21: Solar-Terrestrial & GNSS (Eqs 128–130) ═══
     case 128: return {
-      wi: u('wi', 1),
-      Ki: Array.from({ length: 13 }, () => sw.kpIndex * 3),
+      kp: u('kp', sw.kpIndex),   // real observed Kp from NOAA SWPC (no key required)
+      Ki: u('Ki', 0) > 0 ? Array.from({ length: 13 }, () => u('Ki', 0)) : [],  // user-supplied station data (optional)
     };
     case 129: return {
       traceH: u('traceH', 9),
+      Q11: u('Q11', 0),  // diagonal of Q = (H^T·H)^{-1}
+      Q22: u('Q22', 0),
+      Q33: u('Q33', 0),
+      Q44: u('Q44', 0),
     };
     case 130: {
       // Saastamoinen (1972). P in hPa, T in K, e = water vapour pressure
@@ -2465,29 +2470,52 @@ function mapInputs(
     }
     case 134: return {
       f0: u('f0', 75),
-      ft: u('ft', 10),
+      fc: u('fc', 10),
       k: u('k', 1.2),
       t: u('t', 60),
     };
 
     // ═══ Domain 23: Hazard & Risk ═══
-    case 135: return {
-      H: u('H', eq.count > 10 ? 0.8 : 0.4),
-      V: u('V', 0.5),
-      E: u('E', (ctx.pop?.totalPopulation ?? 100000) / 1000 || 100),
-    };
+    case 135: {
+      // Exposure: normalize population to [0, 1] index
+      // 100k people → E≈0.5, 1M → E≈1.0, <10k → E≈0.1
+      const pop = ctx.pop?.totalPopulation ?? 100000;
+      const eNorm = Math.min(1, Math.max(0.01, pop / 200000));
+      return {
+        H: u('H', eq.count > 10 ? 0.8 : 0.4),
+        V: u('V', 0.5),
+        E: u('E', eNorm),
+      };
+    }
     case 136: return {
-      ...userInputs,
-      Parr: u('Parr', userInputs['Parr'] ?? 1e6),
+      D_P: u('D_P', 1e6),           // damage at 100-yr event ($)
+      P_low: u('P_low', 0.001),     // lower probability bound
+      P_high: u('P_high', 0.5),     // upper probability bound
+      num_intervals: u('num_intervals', 100),
     };
-    case 137: return {
-      ...userInputs,
-      I_Hi: u('I_Hi', 100),
-      I_Lo: u('I_Lo', 50),
-      BP_Hi: u('BP_Hi', 100),
-      BP_Lo: u('BP_Lo', 0),
-      C_p: u('C_p', aq.pm2_5 ?? 50),
-    };
+    case 137: {
+      // EPA AQI breakpoint lookup for PM2.5 (24-hr, µg/m³)
+      // 40 CFR Part 50 Appendix G, Table 2
+      const PM25_BP: [number, number, number][] = [
+        [0, 50, 12.0], [50, 100, 35.4], [100, 150, 55.4],
+        [150, 200, 150.4], [200, 300, 250.4], [300, 500, 500.0],
+      ];
+      const cp = aq.pm2_5 ?? 50;
+      // Find correct breakpoint interval
+      let bpLo = 0, bpHi = 12.0, iLo = 0, iHi = 50;
+      for (const [ilo, ihi, bphi] of PM25_BP) {
+        if (cp <= bphi) { iLo = ilo; iHi = ihi; bpHi = bphi; break; }
+        bpLo = bphi;
+        iLo = ihi;
+      }
+      return {
+        I_Hi: u('I_Hi', iHi),
+        I_Lo: u('I_Lo', iLo),
+        BP_Hi: u('BP_Hi', bpHi),
+        BP_Lo: u('BP_Lo', bpLo),
+        C_p: u('C_p', cp),
+      };
+    }
     case 138: {
       const ip = ctx.imerg?.totalPrecipitation;
       return {
@@ -2516,7 +2544,6 @@ function mapInputs(
       Pf: u('Pf', 10),
       y: u('y', 2),
       R: u('R', 4),
-      xb: u('xb', 0),
       H: u('H', 1),
     };
     case 142: return {
@@ -2544,10 +2571,10 @@ function mapInputs(
 
     // ═══ Domain 25: Signal Processing ═══
     case 145: return {
-      f: u('f', 2.4e9),
-      d: u('d', 20200e3),
-      Gt: u('Gt', 20),
-      Gr: u('Gr', 0),
+      fGHz: u('fGHz', 2.4),    // frequency in GHz
+      dKm: u('dKm', 20200),    // distance in km (GEO orbit)
+      Gt: u('Gt', 20),         // transmit antenna gain (dBi)
+      Gr: u('Gr', 0),          // receive antenna gain (dBi)
     };
     case 146: {
       // Full Klobuchar (1987): 8 broadcast ionospheric parameters + receiver geometry
@@ -2575,9 +2602,9 @@ function mapInputs(
     // ═══ Domain 26: Mathematical Frameworks ═══
     case 148: return {
       ...userInputs,
-      GM: u('GM', 3.986e14),
-      r1: u('r1', 6771),
-      r2: u('r2', 42164),
+      GM: u('GM', 3.986e14),   // Earth's gravitational parameter (m³/s²)
+      r1: u('r1', 6771000),    // LEO radius in meters (6771 km)
+      r2: u('r2', 42164000),   // GEO radius in meters (42164 km)
     };
     case 149: return {
       m1: u('m1', 5.97e24),
@@ -2617,7 +2644,7 @@ export async function computeWithContext(
   const FETCH_TIMEOUT_MS = 10000;
   const safe = <T>(p: Promise<T>, fb: T, timeoutMs?: number): Promise<T> =>
     Promise.race([
-      p.catch(() => fb),
+      p.then(v => (v == null && fb != null ? fb : v) as T).catch(() => fb),
       new Promise<T>(r => setTimeout(() => r(fb), timeoutMs ?? FETCH_TIMEOUT_MS)),
     ]);
 
@@ -2670,7 +2697,7 @@ export async function computeWithContext(
       { streamflow: 0, gageHeight: 0, waterTemp: 0, conductivity: 0, dissolvedOxygen: 0 } as WaterData),
     safe(fetchLandCover(lat, lon),
       { class: 'unknown', code: 0, treeCover: 0, impervious: 0, cropland: 0, wetland: 0 } as LandCoverData),
-    safe(fetchTerrain(lat, lon).then((t) => { console.error('[TERRAIN-DEBUG] resolved slope=' + t.slope + ' elev=' + t.elevation); return t; }).catch((e) => { console.error('[TERRAIN-DEBUG]', String(e).slice(0, 120)); throw e; }),
+    safe(fetchTerrain(lat, lon),
       { elevation: 0, slope: 0, aspect: 0, curvature: 0, hillshade: 0 } as TerrainData),
     safe(fetchGlacierData(lat, lon),
       { area: 0, volume: 0, massBalance: 0, equilibriumLine: 0 } as GlacierData),

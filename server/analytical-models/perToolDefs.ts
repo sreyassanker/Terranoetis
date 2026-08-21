@@ -6710,42 +6710,53 @@ export const TOOL_128: ToolWorkflowDef = {
   name: 'Kp Geomagnetic Index',
   vizType: 'gauge',
   classificationBands: SPACE_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'wi', min: 0, max: 1 },{ param: 'Ki', min: 0, max: 9 },{ param: 'num_stations', min: 1, max: 13 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'kp', min: 0, max: 9 },
+    { param: 'Ki', min: 0, max: 9 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  13 station K-indices');
-    log.push('  Weighted average');
-    log.push('  NOAA SWPC real-time');
+    log.push('  NOAA SWPC real-time planetary Kp');
+    log.push('  13 subauroral station weighted average (Bartels 1949)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, SPACE_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  ${c.label}`);
+    // G-scale classification
+    const gScale = result >= 9 ? 5 : result >= 8 ? 4 : result >= 7 ? 3 : result >= 6 ? 2 : result >= 5 ? 1 : 0;
+    if (gScale > 0) log.push(`  NOAA G${gScale} storm`);
     return { classification: c };
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result >= 0 && result <= 9, message: Number.isFinite(result) ? `${result.toFixed(2)} [0–9]` : 'NaN/Inf', severity: Number.isFinite(result) && result >= 0 && result <= 9 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 0.5,
+    method: 'instrumental',
+    rmse: 0.33,
     rmseUnit: 'Kp',
     contributingFactors: [
-      { factor: 'Station weights', contribution: 'Varies' },
-      { factor: 'K-index estimation', contribution: 'Varies' },
+      { factor: 'NOAA SWPC/KP station network', contribution: '±1/3 Kp resolution' },
+      { factor: '13-station averaging', contribution: '~5% station-coverage error' },
     ],
-    overallAssessment: '+/- 0.5 Kp uncertainty',
+    overallAssessment: '±0.33 Kp (1/3-point resolution of the official index)',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Kp Geomagnetic Index: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Primary space weather severity metric.`,
-    recommendations: ["13 stations worldwide.","NOAA SWPC for real-time.","Kp > 5: storm."],
+    contextualAnalysis: `Kp = ${Number.isFinite(result) ? result.toFixed(2) : 'N/A'}. ${result < 3 ? 'Quiet geomagnetic conditions.' : result < 5 ? 'Active conditions — aurora at high latitudes.' : result < 6 ? 'G1 minor storm — aurora visible from northern US states.' : result < 7 ? 'G2 moderate storm — power grid voltage alarms possible.' : result < 8 ? 'G3 strong storm — aurora visible at mid-latitudes.' : result < 9 ? 'G4 severe storm — widespread voltage control problems.' : 'G5 extreme storm — power grid collapse risk, GPS/HF blackout.'}`,
+    recommendations: [
+      'NOAA SWPC: swpc.noaa.gov for real-time alerts',
+      'G1–G2: monitor satellite operations',
+      'G3–G5: activate space weather contingency plans',
+    ],
   }),
   metadata: {
-    methodology: 'Primary space weather severity metric.',
-    assumptions: ["Station distribution","Quiet conditions"],
-    limitations: ["Station gaps","Local time effects"],
-    references: ["Bartels 1949"],
-    preprocessingNotes: ["13 station K-indices","Weighted average","NOAA SWPC real-time"],
+    methodology: 'Planetary Kp = weighted average of 13 subauroral station K-indices (Bartels 1949). Real data from NOAA SWPC.',
+    assumptions: ['13 Kp stations at subauroral latitudes (60–40° mag. lat.)', 'K-index scale: quasi-logarithmic (0–9), standardized per station'],
+    limitations: ['No real-time individual station data via open API', 'Spatial representativeness limited to 13 fixed stations', 'Local disturbances (Pc5 pulsations) may bias individual K values'],
+    references: ['Bartels J. (1949) IAGA Bull. No. 12, Part III, pp. 36–46'],
+    preprocessingNotes: ['NOAA SWPC observed Kp (no key required)', 'G-scale derived from Kp thresholds'],
   },
-  dependencies: [],
+  dependencies: ['spaceWeather'],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -6756,38 +6767,51 @@ export const TOOL_129: ToolWorkflowDef = {
   name: 'DOP (Dilution of Precision)',
   vizType: 'gauge',
   classificationBands: SPACE_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'trH', min: 1, max: 100 },{ param: 'num_satellites', min: 4, max: 40 },{ param: 'elevation_mask', min: 0, max: 90 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'traceH', min: 0.1, max: 100 },
+    { param: 'Q11', min: 0, max: 100 },
+    { param: 'Q22', min: 0, max: 100 },
+    { param: 'Q33', min: 0, max: 100 },
+    { param: 'Q44', min: 0, max: 100 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Satellite geometry from ephemeris');
-    log.push('  Elevation mask from receiver');
+    const hasQ = inputs.Q11 != null && inputs.Q22 != null && inputs.Q33 != null && inputs.Q44 != null
+      && (inputs.Q11 > 0 || inputs.Q22 > 0 || inputs.Q33 > 0 || inputs.Q44 > 0);
+    log.push(hasQ ? '  Q matrix diagonal provided (exact DOP)' : '  Trace only (approximate PDOP/HDOP/VDOP)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, SPACE_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  ${c.label}`);
     return { classification: c };
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result > 0, message: Number.isFinite(result) ? `${result.toFixed(2)}` : 'NaN/Inf', severity: Number.isFinite(result) && result > 0 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Satellite geometry', contribution: 'Varies' },
-      { factor: 'Number of satellites', contribution: 'Varies' },
-      { factor: 'Elevation mask', contribution: 'Varies' },
+      { factor: 'Satellite geometry', contribution: 'Exact when Q matrix provided' },
+      { factor: 'Number of satellites', contribution: 'More satellites → lower DOP' },
+      { factor: 'Elevation mask', contribution: 'Higher mask → fewer satellites → higher DOP' },
     ],
-    overallAssessment: 'Exact for known geometry',
+    overallAssessment: 'Exact from Q matrix; ±20% from trace-only approximation',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `DOP (Dilution of Precision): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. GPS accuracy from satellite geometry.`,
-    recommendations: ["Lower DOP = better accuracy.","GDOP < 4: excellent."],
+    contextualAnalysis: `GDOP = ${Number.isFinite(result) ? result.toFixed(2) : 'N/A'}. ${result < 2 ? 'Excellent geometry — high positioning accuracy.' : result < 4 ? 'Good geometry — typical open-sky conditions.' : result < 6 ? 'Moderate — some sky obstruction.' : result < 10 ? 'Poor — limited satellite visibility.' : 'Very poor — unreliable positioning.'}`,
+    recommendations: [
+      'GDOP < 2: excellent for surveying/precision applications',
+      'GDOP 2–4: good for standard navigation',
+      'GDOP > 6: consider multi-constellation (GPS+GLONASS+Galileo)',
+    ],
   }),
   metadata: {
-    methodology: 'GPS accuracy from satellite geometry.',
-    assumptions: ["Known satellite positions","Clear sky view"],
-    limitations: ["Obstructions","Multipath","Atmospheric delays"],
-    references: ["Standard GNSS"],
-    preprocessingNotes: ["Satellite geometry from ephemeris","Elevation mask from receiver"],
+    methodology: 'GDOP = √(trace(Q)) where Q = (H^T·H)^{-1}. PDOP/HDOP/VDOP/TDOP from Q diagonal elements.',
+    assumptions: ['Linearized observation model (small range errors)', 'Known satellite positions from ephemeris', 'Single epoch solution'],
+    limitations: ['Does not account for multipath or atmospheric residuals', 'Static receiver assumed (no kinematic effects)', 'Q matrix assumes uncorrelated measurement errors'],
+    references: ['Wells et al. (1987) Guide to GPS Positioning', 'Van Diggelen (2007) GPS Accuracy'],
+    preprocessingNotes: ['Q diagonal from least-squares solution', 'traceH = trace(Q) always yields exact GDOP'],
   },
   dependencies: [],
 };
@@ -6845,43 +6869,58 @@ export const TOOL_131: ToolWorkflowDef = {
   name: 'Thiem Equation (Steady Radial Flow)',
   vizType: 'profile',
   classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'T', min: 0.1, max: 50000 },{ param: 'h1', min: 0, max: 500 },{ param: 'h2', min: 0, max: 500 },{ param: 'r1', min: 0, max: 10000 },{ param: 'r2', min: 0, max: 100000 }]),
+  validate: (inputs) => {
+    const errs = validateRange(inputs, [
+      { param: 'T', min: 0.1, max: 50000 },
+      { param: 'h1', min: 0, max: 500 },
+      { param: 'h2', min: 0, max: 500 },
+      { param: 'r1', min: 0.01, max: 10000 },
+      { param: 'r2', min: 0.1, max: 100000 },
+    ]);
+    // Thiem requires r₂ > r₁ > 0 for ln(r₂/r₁) to be defined and positive
+    if (inputs.r1 != null && inputs.r2 != null && inputs.r1 >= inputs.r2) {
+      errs.push({ param: 'r1', message: `'r1' (${inputs.r1}) must be < 'r2' (${inputs.r2}) for Thiem equation` });
+    }
+    return errs;
+  },
   preprocess: (inputs, ctx, log) => {
-    log.push('  Transmissivity from well tests');
-    log.push('  Head from observation wells');
-    log.push('  Distance from well geometry');
+    log.push('  Thiem (1906) steady radial flow — confined aquifer');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  ${c.label}`);
     return { classification: c };
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result > 0, message: Number.isFinite(result) ? `${result.toFixed(2)} m³/day` : 'NaN/Inf', severity: Number.isFinite(result) && result > 0 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 20,
-    rmseUnit: '%',
+    method: 'analytical',
     contributingFactors: [
-      { factor: 'Transmissivity', contribution: 'Varies' },
-      { factor: 'Head measurements', contribution: 'Varies' },
-      { factor: 'Radial flow assumption', contribution: 'Varies' },
+      { factor: 'Transmissivity heterogeneity', contribution: '~10–30%' },
+      { factor: 'Head measurement accuracy', contribution: '~1–5%' },
+      { factor: 'Steady-state assumption', contribution: 'Varies with pumping duration' },
     ],
-    overallAssessment: '+/- 20% uncertainty',
+    overallAssessment: 'Exact for the stated assumptions; 10–30% real-world deviation from heterogeneity',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Thiem Equation (Steady Radial Flow): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Aquifer transmissivity from well tests.`,
-    recommendations: ["Steady-state assumption.","Radial flow to pumping well."],
+    contextualAnalysis: `Q = ${Number.isFinite(result) ? result.toFixed(2) : 'N/A'} m³/day. ${result > 5000 ? 'High-yield aquifer — regional water supply.' : result > 500 ? 'Moderate yield — suitable for municipal/irrigation.' : result > 50 ? 'Low yield — domestic well scale.' : 'Minor yield — limited production.'}`,
+    recommendations: [
+      'Requires steady-state conditions (constant heads over time)',
+      'Confined aquifer assumed — for unconfined, use Dupuit modification',
+      'Semi-log plot of drawdown vs log(r) should be linear to validate',
+    ],
   }),
   metadata: {
-    methodology: 'Aquifer transmissivity from well tests.',
-    assumptions: ["Confined aquifer","Steady state","Radial flow"],
-    limitations: ["Not for unconfined","Transient conditions","Well losses"],
-    references: ["Thiem 1906"],
-    preprocessingNotes: ["Transmissivity from well tests","Head from observation wells","Distance from well geometry"],
+    methodology: 'Q = 2π·T·(h₂−h₁)/ln(r₂/r₁). Steady-state confined radial flow (Thiem 1906).',
+    assumptions: ['Confined aquifer of constant thickness', 'Steady-state flow (no storage change)', 'Homogeneous, isotropic transmissivity', 'Fully penetrating well, horizontal flow', 'No recharge within the cone of depression'],
+    limitations: ['Not valid for unconfined aquifers without Dupuit correction', 'Requires steady state — transient data must be excluded', 'Well losses and partial penetration cause deviation', 'Logarithmic drawdown extends to infinity (no finite radius of influence)'],
+    references: ['Thiem, G. (1906) Hydrologische Methoden. J.A. Barth, Leipzig, 56 pp.'],
+    preprocessingNotes: ['Transmissivity from pumping test analysis', 'Heads from observation wells at known distances'],
   },
-  dependencies: [],
+  dependencies: ['groundwater'],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -6892,43 +6931,54 @@ export const TOOL_132: ToolWorkflowDef = {
   name: 'Theis Transient Drawdown',
   vizType: 'timeseries',
   classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'Q', min: 0, max: 100000 },{ param: 'T', min: 0.1, max: 50000 },{ param: 't', min: 0, max: 10000 },{ param: 'r', min: 0, max: 10000 },{ param: 'S', min: 1e-8, max: 0.1 }]),
+  validate: (inputs) => {
+    const errs = validateRange(inputs, [
+      { param: 'Q', min: 0.01, max: 100000 },
+      { param: 'T', min: 0.1, max: 50000 },
+      { param: 't', min: 0.001, max: 10000 },
+      { param: 'r', min: 0.1, max: 10000 },
+      { param: 'S', min: 1e-8, max: 0.1 },
+    ]);
+    return errs;
+  },
   preprocess: (inputs, ctx, log) => {
-    log.push('  Pumping rate from well');
-    log.push('  Transmissivity from geology');
-    log.push('  Storativity from specific yield');
+    log.push('  Theis (1935) transient radial flow — confined aquifer');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  ${c.label}`);
     return { classification: c };
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result >= 0, message: Number.isFinite(result) ? `${result.toFixed(3)} m` : 'NaN/Inf', severity: Number.isFinite(result) && result >= 0 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 25,
-    rmseUnit: '%',
+    method: 'analytical',
     contributingFactors: [
-      { factor: 'Transmissivity', contribution: 'Varies' },
-      { factor: 'Storativity', contribution: 'Varies' },
-      { factor: 'Well function', contribution: 'Varies' },
+      { factor: 'W(u) series truncation', contribution: '< 0.01% for u < 5' },
+      { factor: 'Transmissivity heterogeneity', contribution: '10–30%' },
+      { factor: 'Storativity uncertainty', contribution: 'Factor of 2–10' },
     ],
-    overallAssessment: '+/- 25% uncertainty',
+    overallAssessment: 'Exact for stated assumptions; 10–30% real-world deviation',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Theis Transient Drawdown: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Transient aquifer response to pumping.`,
-    recommendations: ["Theis well function W(u).","Requires type-curve matching."],
+    contextualAnalysis: `s = ${Number.isFinite(result) ? result.toFixed(3) : 'N/A'} m. ${result < 0.1 ? 'Minimal drawdown — high T or early time.' : result < 1 ? 'Small drawdown — good aquifer response.' : result < 5 ? 'Moderate drawdown — typical pumping test.' : 'Large drawdown — low T or excessive pumping.'}`,
+    recommendations: [
+      'Type-curve matching: plot s vs r²/t on log-log paper',
+      'Cooper-Jacob valid for u < 0.01 (semilog straight line)',
+      'Early-time data (u > 0.1) constrains S; late-time (u < 0.01) constrains T',
+    ],
   }),
   metadata: {
-    methodology: 'Transient aquifer response to pumping.',
-    assumptions: ["Confined aquifer","Homogeneous","No recharge"],
-    limitations: ["Not for unconfined","Heterogeneous aquifers","Well effects"],
-    references: ["Theis 1935"],
-    preprocessingNotes: ["Pumping rate from well","Transmissivity from geology","Storativity from specific yield"],
+    methodology: 's = (Q/4πT)·W(u), u = r²S/(4Tt). Theis (1935) well function with series expansion.',
+    assumptions: ['Confined aquifer of constant thickness', 'Homogeneous, isotropic transmissivity', 'Fully penetrating well, instantaneous storage release', 'Constant pumping rate, infinite areal extent'],
+    limitations: ['Not valid for unconfined aquifers (delayed drainage)', 'Heterogeneity causes deviation from Theis curve', 'Well-bore storage affects early-time data', 'Leakage from aquitards reduces late-time drawdown (Hantush solution)'],
+    references: ['Theis, C.V. (1935) Trans. Am. Geophys. Union, 16(2), 519–524. DOI: 10.1029/TR016i002p00519.'],
+    preprocessingNotes: ['Q from pumping rate, T from geology/well tests', 'S from specific yield (unconfined) or storativity (confined)'],
   },
-  dependencies: [],
+  dependencies: ['groundwater'],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -6936,46 +6986,56 @@ export const TOOL_132: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_133: ToolWorkflowDef = {
   toolId: 133,
-  name: 'Cooper-Jacob Approximation',
+  name: 'Cooper-Jacob Straight-Line Method',
   vizType: 'timeseries',
   classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'Q', min: 0, max: 100000 },{ param: 'T', min: 0.1, max: 50000 },{ param: 't', min: 0, max: 10000 },{ param: 'r', min: 0, max: 10000 },{ param: 'S', min: 1e-8, max: 0.1 }]),
+  validate: (inputs) => {
+    const errs = validateRange(inputs, [
+      { param: 'Q', min: 0.01, max: 100000 },
+      { param: 'T', min: 0.1, max: 50000 },
+      { param: 't', min: 0.001, max: 10000 },
+      { param: 'r', min: 0.1, max: 10000 },
+      { param: 'S', min: 1e-8, max: 0.1 },
+    ]);
+    return errs;
+  },
   preprocess: (inputs, ctx, log) => {
-    log.push('  Simplified Theis solution');
-    log.push('  Valid for small u');
-    log.push('  Logarithmic approximation');
+    log.push('  Cooper-Jacob (1946) straight-line approximation to Theis');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  ${c.label}`);
     return { classification: c };
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result >= 0, message: Number.isFinite(result) ? `${result.toFixed(3)} m` : 'NaN/Inf', severity: Number.isFinite(result) && result >= 0 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 30,
-    rmseUnit: '%',
+    method: 'analytical',
     contributingFactors: [
-      { factor: 'Validity of approximation', contribution: 'Varies' },
-      { factor: 'Transmissivity', contribution: 'Varies' },
-      { factor: 'Storativity', contribution: 'Varies' },
+      { factor: 'Approximation validity (u < 0.01)', contribution: '< 1% when valid' },
+      { factor: 'Transmissivity heterogeneity', contribution: '10–30%' },
     ],
-    overallAssessment: '+/- 30%, valid for u < 0.01',
+    overallAssessment: 'Exact for stated assumptions; < 1% when u < 0.01',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Cooper-Jacob Approximation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Simplified well-test analysis.`,
-    recommendations: ["Valid for u < 0.01 (large time/small r).","Simpler than full Theis."],
+    contextualAnalysis: `s = ${Number.isFinite(result) ? result.toFixed(3) : 'N/A'} m. ${result < 0.1 ? 'Minimal drawdown — early time or high T.' : result < 1 ? 'Small drawdown — suitable for analysis.' : result < 5 ? 'Moderate drawdown — typical pumping test.' : 'Large drawdown — low T or high Q.'}`,
+    recommendations: [
+      'Valid only for u < 0.01 (late-time data)',
+      'Plot s vs log₁₀(t) on semilog paper — slope gives T',
+      'Extrapolate to s=0 to find t₀ → S = 2.25Tt₀/r²',
+    ],
   }),
   metadata: {
-    methodology: 'Simplified well-test analysis.',
-    assumptions: ["u < 0.01","Confined aquifer","Homogeneous"],
-    limitations: ["Not valid for early time","Not for unconfined","Heterogeneous"],
-    references: ["Cooper & Jacob 1946"],
-    preprocessingNotes: ["Simplified Theis solution","Valid for small u","Logarithmic approximation"],
+    methodology: 's = (2.3Q/4πT)·log₁₀(2.25Tt/r²S). Cooper & Jacob (1946) late-time approximation to Theis.',
+    assumptions: ['u = r²S/(4Tt) < 0.01 (error < 1%)', 'Confined aquifer of constant thickness', 'Homogeneous, isotropic transmissivity', 'Constant pumping rate'],
+    limitations: ['Not valid for early-time data (u > 0.01)', 'Requires semilog straight-line fit (R² > 0.99)', 'Not for unconfined aquifers without delayed-yield modification'],
+    references: ['Cooper, H.H. & Jacob, C.E. (1946) Trans. Am. Geophys. Union, 27(4), 526–534. DOI: 10.1029/TR027i004p00526.'],
+    preprocessingNotes: ['Late-time approximation to Theis well function', 'Slope on semilog plot gives T; intercept gives S'],
   },
-  dependencies: [],
+  dependencies: ['groundwater'],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -6983,44 +7043,58 @@ export const TOOL_133: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_134: ToolWorkflowDef = {
   toolId: 134,
-  name: 'Horton Infiltration',
+  name: 'Horton Infiltration Model',
   vizType: 'timeseries',
   classificationBands: OCEAN_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'fc', min: 0, max: 50 },{ param: 'f0', min: 0, max: 500 },{ param: 'k', min: 0.01, max: 20 },{ param: 't', min: 0, max: 100 }]),
+  validate: (inputs) => {
+    const errs = validateRange(inputs, [
+      { param: 'fc', min: 0, max: 50 },
+      { param: 'f0', min: 0, max: 500 },
+      { param: 'k', min: 0.01, max: 20 },
+      { param: 't', min: 0, max: 100 },
+    ]);
+    // Horton requires f₀ ≥ f_c (infiltration decreases from initial to equilibrium)
+    if (inputs.f0 != null && inputs.fc != null && inputs.f0 < inputs.fc) {
+      errs.push({ param: 'f0', message: `'f0' (${inputs.f0}) must be ≥ 'fc' (${inputs.fc}) for Horton decay model` });
+    }
+    return errs;
+  },
   preprocess: (inputs, ctx, log) => {
-    log.push('  Final infiltration from soil type');
-    log.push('  Initial infiltration from soil moisture');
-    log.push('  Decay constant from calibration');
+    log.push('  Horton (1939) exponential infiltration decay');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, OCEAN_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  ${c.label}`);
     return { classification: c };
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result >= 0, message: Number.isFinite(result) ? `${result.toFixed(2)} mm/h` : 'NaN/Inf', severity: Number.isFinite(result) && result >= 0 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'empirical',
-    rmse: 25,
-    rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Soil properties', contribution: 'Varies' },
-      { factor: 'Decay constant', contribution: 'Varies' },
-      { factor: 'Initial conditions', contribution: 'Varies' },
+      { factor: 'Soil type variability', contribution: 'Factor of 2–5' },
+      { factor: 'Antecedent moisture', contribution: '20–50%' },
+      { factor: 'Surface sealing', contribution: 'Not represented' },
     ],
-    overallAssessment: '+/- 25% uncertainty',
+    overallAssessment: 'Empirical; 20–50% deviation from field measurements typical',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Horton Infiltration: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Empirical infiltration capacity decay.`,
-    recommendations: ["Empirical model.","fc from soil type."],
+    contextualAnalysis: `f(t) = ${Number.isFinite(result) ? result.toFixed(2) : 'N/A'} mm/h. ${result > 50 ? 'High infiltration — dry sandy soil.' : result > 10 ? 'Moderate infiltration — loam.' : result > 2 ? 'Low infiltration — clay or wet soil.' : 'Very low — near saturation, runoff imminent.'}`,
+    recommendations: [
+      'fc ≈ saturated hydraulic conductivity K_s (soil property)',
+      'k depends on soil texture: sandy=1–4, loam=0.5–2, clay=0.3–1 /h',
+      'For rainfall i < f(t): all water infiltrates; for i > f(t): runoff = i − f(t)',
+    ],
   }),
   metadata: {
-    methodology: 'Empirical infiltration capacity decay.',
-    assumptions: ["Homogeneous soil","No crust formation","Constant rainfall"],
-    limitations: ["Not for layered soils","Crust effects","Rainfall intensity effects"],
-    references: ["Horton 1939"],
-    preprocessingNotes: ["Final infiltration from soil type","Initial infiltration from soil moisture","Decay constant from calibration"],
+    methodology: 'f(t) = f_c + (f₀ − f_c)·e^{−kt}. Horton (1939) exponential infiltration decay.',
+    assumptions: ['Homogeneous soil profile', 'No surface crust formation', 'Constant rainfall intensity', 'f₀ ≥ f_c (monotonic decay)'],
+    limitations: ['Not valid for layered or heterogeneous soils', 'Does not account for surface sealing by raindrop impact', 'Rainfall intensity effects not represented', 'Recovery of infiltration capacity during dry periods not modeled'],
+    references: ['Horton, R.E. (1939) Trans. Am. Geophys. Union, 20(4), 693–711. DOI: 10.1029/TR020i004p00693.'],
+    preprocessingNotes: ['fc from soil type (≈ K_s)', 'f₀ from antecedent moisture conditions', 'k from calibration or literature values'],
   },
   dependencies: [],
 };
@@ -7030,42 +7104,51 @@ export const TOOL_134: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_135: ToolWorkflowDef = {
   toolId: 135,
-  name: 'Risk = Hazard x Vulnerability x Exposure',
+  name: 'Compute Disaster Risk Index',
   vizType: 'gauge',
   classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'H', min: 0, max: 1 },{ param: 'V', min: 0, max: 1 },{ param: 'E', min: 0, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'H', min: 0, max: 1 },
+    { param: 'V', min: 0, max: 1 },
+    { param: 'E', min: 0, max: 1 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Hazard probability from analysis');
-    log.push('  Vulnerability index from exposure data');
-    log.push('  Exposure from population/assets');
+    log.push('  UNISDR/UNDRR risk framework (H × V × E)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, RISK_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  ${c.label}`);
     return { classification: c };
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result >= 0 && result <= 1, message: Number.isFinite(result) ? `${result.toFixed(3)}` : 'NaN/Inf', severity: Number.isFinite(result) && result >= 0 && result <= 1 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'qualitative',
     contributingFactors: [
-      { factor: 'Hazard assessment', contribution: 'Varies' },
-      { factor: 'Vulnerability assessment', contribution: 'Varies' },
-      { factor: 'Exposure data', contribution: 'Varies' },
+      { factor: 'Hazard assessment uncertainty', contribution: 'High — depends on return period analysis' },
+      { factor: 'Vulnerability model uncertainty', contribution: 'High — empirical fragility curves' },
+      { factor: 'Exposure data completeness', contribution: 'Medium — census/asset databases' },
     ],
-    overallAssessment: 'Universal risk framework',
+    overallAssessment: 'Order-of-magnitude risk ranking; not for precise loss estimation',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Risk = Hazard x Vulnerability x Exposure: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Universal risk assessment framework.`,
-    recommendations: ["UNISDR framework.","Hazard x Vulnerability x Exposure."],
+    contextualAnalysis: `Risk index = ${Number.isFinite(result) ? result.toFixed(3) : 'N/A'}. ${result < 0.1 ? 'Low risk — routine monitoring.' : result < 0.3 ? 'Moderate risk — standard mitigation.' : result < 0.6 ? 'High risk — active risk reduction needed.' : 'Very high risk — priority intervention required.'}`,
+    recommendations: [
+      'Risk reduction: target the dominant component (H, V, or E)',
+      'Hazard mitigation: flood walls, seismic retrofit',
+      'Vulnerability reduction: building codes, early warning',
+      'Exposure reduction: land-use planning, relocation',
+    ],
   }),
   metadata: {
-    methodology: 'Universal risk assessment framework.',
-    assumptions: ["Independent components","Linear interaction"],
-    limitations: ["Nonlinear interactions","Requires all three components"],
-    references: ["UNISDR 2004"],
-    preprocessingNotes: ["Hazard probability from analysis","Vulnerability index from exposure data","Exposure from population/assets"],
+    methodology: 'R = H × V × E. UNISDR/UNDRR standardized risk assessment framework.',
+    assumptions: ['H, V, E are independent (no correlation)', 'Linear multiplicative interaction', 'All indices normalized to [0, 1]'],
+    limitations: ['Real risk functions are nonlinear (S-shaped damage curves)', 'Correlation between H, V, E not captured', 'Does not account for cascading/multi-hazard events'],
+    references: ['UNISDR (2004) Living with risk. United Nations, Geneva, 434 pp. ISBN 92-1-121188-6.'],
+    preprocessingNotes: ['H from return-period analysis, V from fragility curves', 'E from census/asset databases, normalized to [0,1]'],
   },
   dependencies: [],
 };
@@ -7075,42 +7158,51 @@ export const TOOL_135: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_136: ToolWorkflowDef = {
   toolId: 136,
-  name: 'Expected Annual Damage',
+  name: 'Compute Expected Annual Flood Damage',
   vizType: 'scalar',
   classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'D_P', min: 0, max: 10000000000 },{ param: 'P_low', min: 0, max: 0.1 },{ param: 'P_high', min: 0, max: 1 },{ param: 'num_intervals', min: 10, max: 10000 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'D_P', min: 0, max: 1e10 },
+    { param: 'P_low', min: 0.0001, max: 0.1 },
+    { param: 'P_high', min: 0.01, max: 0.99 },
+    { param: 'num_intervals', min: 10, max: 10000 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Damage function from analysis');
-    log.push('  Exceedance probability from hazard');
-    log.push('  Integration over probability');
+    log.push('  USACE EM 1110-2-1619 EAD computation');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, RISK_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  ${c.label}`);
     return { classification: c };
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result >= 0, message: Number.isFinite(result) ? `$${result.toFixed(0)}/yr` : 'NaN/Inf', severity: Number.isFinite(result) && result >= 0 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
-    method: 'qualitative',
+    method: 'analytical',
     contributingFactors: [
-      { factor: 'Damage function', contribution: 'Varies' },
-      { factor: 'Probability distribution', contribution: 'Varies' },
-      { factor: 'Integration method', contribution: 'Varies' },
+      { factor: 'Damage curve shape (α)', contribution: 'Factor of 2–5' },
+      { factor: 'D₁₀₀ estimate', contribution: '20–50%' },
+      { factor: 'Integration range', contribution: '< 5% for P < 0.001' },
     ],
-    overallAssessment: 'Integral over damage-probability curve',
+    overallAssessment: 'Exact for assumed power-law curve; 20–50% real-world deviation',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Expected Annual Damage: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Expected annual damage from risk curve.`,
-    recommendations: ["Integrate D(P) over P.","Dam safety, flood risk."],
+    contextualAnalysis: `EAD = $${Number.isFinite(result) ? result.toFixed(0) : 'N/A'}/yr. ${result > 1e6 ? 'Catastrophic — flood insurance essential.' : result > 1e4 ? 'High — risk transfer recommended.' : result > 1e3 ? 'Moderate — monitor regularly.' : 'Low — minimal financial risk.'}`,
+    recommendations: [
+      'EAD = ∫₀¹ D(P)·dP — average annual loss over all return periods',
+      'BCR = ΔEAD / annualized mitigation cost for cost-benefit analysis',
+      'FEMA NFIP uses EAD for flood insurance premium calculation',
+    ],
   }),
   metadata: {
-    methodology: 'Expected annual damage from risk curve.',
-    assumptions: ["Known damage function","Continuous probability"],
-    limitations: ["Damage function uncertain","Discrete integration errors"],
-    references: ["Standard risk analysis"],
-    preprocessingNotes: ["Damage function from analysis","Exceedance probability from hazard","Integration over probability"],
+    methodology: 'EAD = ∫₀¹ D(P)·dP via trapezoidal rule. Power-law D(P) = D₁₀₀×(P/0.01)^{-α}.',
+    assumptions: ['Power-law damage-exceedance curve (α=0.8 typical)', 'D₁₀₀ from depth-damage functions + asset inventory', 'Stationary hazard probabilities (no climate change)'],
+    limitations: ['Damage curve shape highly uncertain (α varies 0.5–2.0)', 'Does not account for indirect losses (business interruption)', 'Climate change invalidates stationary probability assumption'],
+    references: ['USACE (2013) Risk-based analysis for flood damage reduction studies. EM 1110-2-1619.'],
+    preprocessingNotes: ['D₁₀₀ from hydraulic model + depth-damage curves', 'α from calibration or regional flood frequency analysis'],
   },
   dependencies: [],
 };
@@ -7120,44 +7212,54 @@ export const TOOL_136: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_137: ToolWorkflowDef = {
   toolId: 137,
-  name: 'AQI Breakpoint',
+  name: 'Compute Air Quality Index from Concentration',
   vizType: 'gauge',
   classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'I_Hi', min: 0, max: 10000 },{ param: 'I_Lo', min: 0, max: 10000 },{ param: 'BP_Hi', min: 0, max: 10000 },{ param: 'BP_Lo', min: 0, max: 10000 },{ param: 'C_p', min: 0, max: 10000 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'I_Hi', min: 0, max: 500 },
+    { param: 'I_Lo', min: 0, max: 500 },
+    { param: 'BP_Hi', min: 0, max: 10000 },
+    { param: 'BP_Lo', min: 0, max: 10000 },
+    { param: 'C_p', min: 0, max: 10000 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  AQI breakpoints from EPA');
-    log.push('  Pollutant concentration from measurement');
-    log.push('  Linear interpolation between breakpoints');
+    log.push('  EPA 40 CFR Part 50 Appendix G breakpoint interpolation');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, RISK_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  ${c.label}`);
     return { classification: c };
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result >= 0 && result <= 500, message: Number.isFinite(result) ? `AQI ${Math.round(result)}` : 'NaN/Inf', severity: Number.isFinite(result) && result >= 0 && result <= 500 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Breakpoint accuracy', contribution: 'Varies' },
-      { factor: 'Concentration measurement', contribution: 'Varies' },
-      { factor: 'Pollutant type', contribution: 'Varies' },
+      { factor: 'Breakpoint table accuracy', contribution: 'Exact per EPA definition' },
+      { factor: 'Concentration measurement', contribution: '±1–5 µg/m³ typical' },
     ],
-    overallAssessment: 'Exact linear interpolation',
+    overallAssessment: 'Exact linear interpolation per EPA definition',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `AQI Breakpoint: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Air quality index standardization.`,
-    recommendations: ["EPA standard breakpoints.","Linear interpolation."],
+    contextualAnalysis: `AQI = ${Number.isFinite(result) ? Math.round(result) : 'N/A'}. ${result <= 50 ? 'Good — satisfactory air quality.' : result <= 100 ? 'Moderate — acceptable for most.' : result <= 150 ? 'Unhealthy for Sensitive Groups.' : result <= 200 ? 'Unhealthy — general population affected.' : result <= 300 ? 'Very Unhealthy — avoid outdoor activity.' : 'Hazardous — emergency conditions.'}`,
+    recommendations: [
+      'AQI ≤ 50: satisfactory, no health risk',
+      'AQI 51–100: moderate, sensitive individuals may be affected',
+      'AQI > 100: sensitive groups should reduce outdoor exertion',
+      'AQI > 150: everyone should limit prolonged outdoor exertion',
+    ],
   }),
   metadata: {
-    methodology: 'Air quality index standardization.',
-    assumptions: ["Known breakpoints","Single pollutant"],
-    limitations: ["Multi-pollutant AQI complex","Breakpoints region-specific"],
-    references: ["US EPA"],
-    preprocessingNotes: ["AQI breakpoints from EPA","Pollutant concentration from measurement","Linear interpolation between breakpoints"],
+    methodology: 'AQI = [(I_Hi−I_Lo)/(BP_Hi−BP_Lo)] × (C_p−BP_Lo) + I_Lo. EPA 40 CFR Part 50 App. G.',
+    assumptions: ['Linear interpolation within breakpoint interval', 'Single pollutant (overall AQI = max across pollutants)'],
+    limitations: ['Multi-pollutant AQI requires computing each pollutant separately', 'Breakpoints may be updated by EPA periodically'],
+    references: ['US EPA (2024) 40 CFR Part 50, Appendix G — Interpretation of NAAQS for PM2.5.'],
+    preprocessingNotes: ['PM2.5 breakpoints from EPA Table 2', 'Concentration from air quality monitor or model'],
   },
-  dependencies: [],
+  dependencies: ['airQuality'],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -7165,46 +7267,52 @@ export const TOOL_137: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_138: ToolWorkflowDef = {
   toolId: 138,
-  name: 'Probable Maximum Precipitation',
+  name: 'Estimate Probable Maximum Precipitation',
   vizType: 'gauge',
   classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'Xbar', min: 0, max: 10000 },{ param: 'Kp', min: 0, max: 20 },{ param: 'sigmax', min: 0, max: 1000 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'Xbar', min: 0, max: 10000 },
+    { param: 'Kp', min: 0, max: 25 },
+    { param: 'sigmaX', min: 0, max: 1000 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Mean annual max from historical records');
-    log.push('  Frequency factor from statistics');
-    log.push('  Std dev from historical data');
+    log.push('  Chow (1964) / Hershfield (1961) statistical PMP');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, RISK_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
+    if (c) log.push(`  ${c.label}`);
     return { classification: c };
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result > 0, message: Number.isFinite(result) ? `${result.toFixed(1)} mm` : 'NaN/Inf', severity: Number.isFinite(result) && result > 0 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
-    method: 'empirical',
-    rmse: 30,
-    rmseUnit: '%',
+    method: 'statistical',
     contributingFactors: [
-      { factor: 'Historical record length', contribution: 'Varies' },
-      { factor: 'Frequency factor', contribution: 'Varies' },
-      { factor: 'Distribution assumption', contribution: 'Varies' },
+      { factor: 'Record length (need ≥ 30 yr)', contribution: 'Factor of 2 for short records' },
+      { factor: 'Frequency factor K_p', contribution: '±30% depending on distribution' },
+      { factor: 'Climate non-stationarity', contribution: '+5–15%/°C warming (Clausius-Clapeyron)' },
     ],
-    overallAssessment: '+/- 30%, requires long records',
+    overallAssessment: '±30% for adequate records; ±50% for short records',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Probable Maximum Precipitation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Extreme precipitation for dam safety.`,
-    recommendations: ["Requires long historical records.","Frequency factor from statistics."],
+    contextualAnalysis: `PMP = ${Number.isFinite(result) ? result.toFixed(0) : 'N/A'} mm. ${result > 500 ? 'Very high — Gulf Coast / tropical basin.' : result > 300 ? 'High — Midwest / eastern US.' : result > 150 ? 'Moderate — arid/semi-arid.' : 'Low — polar or high-altitude.'}`,
+    recommendations: [
+      'PMP used for spillway design of high-hazard dams',
+      'Climate change: add Clausius-Clapeyron factor (+7%/°C)',
+      'WMO (2009) guide provides regional K_p maps',
+    ],
   }),
   metadata: {
-    methodology: 'Extreme precipitation for dam safety.',
-    assumptions: ["Stationary climate","Gumbel distribution","Adequate record"],
-    limitations: ["Climate non-stationarity","Short records","Distribution assumption"],
-    references: ["Chow 1964"],
-    preprocessingNotes: ["Mean annual max from historical records","Frequency factor from statistics","Std dev from historical data"],
+    methodology: 'PMP = X̄ + K_p × σ_x. Chow (1964) statistical Hershfield method.',
+    assumptions: ['Stationary climate (no trend in extremes)', 'Gumbel or similar extreme-value distribution', 'Sufficient record length (≥ 30 years recommended)'],
+    limitations: ['Climate change invalidates stationarity assumption', 'Short records give unreliable σ_x', 'Single-site PMP (not areally distributed)'],
+    references: ['Chow, V.T. (1964) Handbook of Applied Hydrology. McGraw-Hill, Section 14.'],
+    preprocessingNotes: ['X̄ from annual max series (> 30 yr)', 'K_p = 10–15 for 24-hr PMP (Hershfield 1961)'],
   },
-  dependencies: [],
+  dependencies: ['imerg'],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -7215,7 +7323,7 @@ export const TOOL_139: ToolWorkflowDef = {
   name: 'Palmer Drought Severity Index',
   vizType: 'gauge',
   classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'X_prev', min: -10, max: 10 },{ param: 'Z', min: -10, max: 10 },{ param: 'alpha', min: 0.5, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'Xim1', min: -10, max: 10 },{ param: 'Zi', min: -10, max: 10 },{ param: 'alpha', min: 0.5, max: 1 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Previous month PDSI');
     log.push('  Current moisture anomaly');
@@ -7242,14 +7350,14 @@ export const TOOL_139: ToolWorkflowDef = {
   }),
   interpret: (result) => ({
     contextualAnalysis: `Palmer Drought Severity Index: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Drought monitoring index.`,
-    recommendations: ["PDSI: -4 extreme drought, +4 extreme wet.","Monthly time step."],
+    recommendations: ["PDSI: −4 extreme drought, +4 extreme wet.","Monthly time step.","For operational use: see NOAA NCEI self-calibrating PDSI.","Not suitable for flash drought detection (< 1 month onset)."],
   }),
   metadata: {
-    methodology: 'Drought monitoring index.',
-    assumptions: ["Calibrated to local climate","Monthly water balance"],
-    limitations: ["Not comparable across regions","Soil-dependent calibration","Slow response"],
-    references: ["Palmer 1965"],
-    preprocessingNotes: ["Previous month PDSI","Current moisture anomaly","Persistence factor"],
+    methodology: 'PDSI recurrence: X_i = α·X_{i-1} + Z/3 where α=0.897 (US calibration).',
+    assumptions: ['Persistence factor α=0.897 calibrated for central US', 'Monthly time step', 'Z-index requires full water balance (P, T, ET, soil moisture)'],
+    limitations: ['Not directly comparable across climate regions', 'Thornthwaite PET underestimates in arid regions', 'Slow response (9-18 month timescale) not suited for flash droughts', 'Snow accumulation/melt not well represented'],
+    references: ['Palmer, W.C. (1965) Meteorological drought. US Weather Bureau Research Paper No. 45.'],
+    preprocessingNotes: ['Previous month PDSI (−10 to +10)', 'Current moisture anomaly Z (−10 to +10)', 'Persistence factor α (0.5 to 1.0)'],
   },
   dependencies: [],
 };
@@ -7259,44 +7367,55 @@ export const TOOL_139: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_140: ToolWorkflowDef = {
   toolId: 140,
-  name: 'Froehlich Dam Breach',
+  name: 'Froehlich Dam Breach Parameters',
   vizType: 'scalar',
   classificationBands: RISK_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'K0', min: 0.5, max: 3 },{ param: 'Vres', min: 0, max: 100000000000 },{ param: 'hb', min: 1, max: 300 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'K0', min: 0.5, max: 3 },
+    { param: 'Vres', min: 1000, max: 100000000000 },
+    { param: 'hb', min: 1, max: 300 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Breach correction from failure mode');
-    log.push('  Reservoir volume from bathymetry');
-    log.push('  Breach height from dam geometry');
+    log.push(`  K₀ = ${inputs.K0} ${inputs.K0 <= 1.3 ? '(overtopping)' : '(piping)'}`);
+    log.push(`  V_res = ${(inputs.Vres as number).toExponential(2)} m³`);
+    log.push(`  h_b = ${inputs.hb} m`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, RISK_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    log.push(`  B_avg = ${Number.isFinite(result) ? result.toFixed(1) : 'N/A'} m`);
+    return {};
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result > 0, message: Number.isFinite(result) && result > 0 ? 'Positive' : 'Invalid', severity: Number.isFinite(result) && result > 0 ? 'info' : 'error' },
+    { name: 'Magnitude', passed: result > 5 && result < 500, message: `${result.toFixed(0)} m — ${result > 5 && result < 500 ? 'physically plausible' : 'check inputs'}`, severity: result > 5 && result < 500 ? 'info' : 'warning' },
+  ]),
   estimateUncertainty: () => ({
     method: 'empirical',
     rmse: 25,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Correction factor', contribution: 'Varies' },
-      { factor: 'Volume estimation', contribution: 'Varies' },
-      { factor: 'Breach height', contribution: 'Varies' },
+      { factor: 'Regression scatter (±50% prediction intervals)', contribution: 'High' },
+      { factor: 'Erosion resistance of embankment material', contribution: 'Medium' },
+      { factor: 'Partial vs full breach', contribution: 'Medium' },
     ],
-    overallAssessment: '+/- 25% uncertainty',
+    overallAssessment: 'Froehlich 2008 regression: ±25% RMSE, ±50% prediction intervals. Empirical from 108 historical dam failures.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Froehlich Dam Breach: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Dam breach outflow estimation.`,
-    recommendations: ["K0 from failure mode.","Reservoir volume from survey."],
+    contextualAnalysis: `Froehlich average breach width: ${Number.isFinite(result) ? result.toFixed(1) + ' m' : 'N/A'}. Empirical regression from 108 historical dam failures (Froehlich 2008).`,
+    recommendations: [
+      'K₀ = 1.0 for overtopping, 1.3 for piping failure mode',
+      'Peak outflow Q_p ≈ 3.1 × B_avg × h_b^1.5 (broad-crested weir)',
+      'Breach formation time t_f = 0.0179 × K₁ × V^0.34 × h_b^(-0.14) hours',
+      'For downstream flood routing: use FLDWAV, HEC-RAS 2D, or NWS BREACH model',
+    ],
   }),
   metadata: {
-    methodology: 'Dam breach outflow estimation.',
-    assumptions: ["Empirical regression","Known geometry"],
-    limitations: ["Regression scatter","Site-specific factors","Time to breach"],
-    references: ["Froehlich 2008"],
-    preprocessingNotes: ["Breach correction from failure mode","Reservoir volume from bathymetry","Breach height from dam geometry"],
+    methodology: 'Froehlich (2008): B_avg = 0.1803 × K₀ × V_res^0.32 × h_b^0.19. Q_p = 3.1 × B_avg × h_b^1.5. t_f = 0.0179 × K₁ × V^0.34 × h_b^(-0.14).',
+    assumptions: ['Empirical regression from 108 historical dam failures', 'Full breach development assumed', 'Breach height = dam height (conservative)'],
+    limitations: ['Prediction intervals ±50% (considerable scatter)', 'Does not account for erosion resistance', 'Partial breaches are common but not modeled', 'Concrete/masonry dams have different failure modes'],
+    references: ['Froehlich, D.C. (2008) Embankment dam breach parameters and their uncertainties. J. Hydraul. Eng., 134(9), 1306–1314.'],
+    preprocessingNotes: ['K₀: 1.0 (overtopping), 1.3 (piping)', 'V_res: reservoir volume at time of failure (m³)', 'h_b: breach height, typically dam height (m)'],
   },
   dependencies: [],
 };
@@ -7306,42 +7425,53 @@ export const TOOL_140: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_141: ToolWorkflowDef = {
   toolId: 141,
-  name: 'Ensemble Kalman Filter',
+  name: 'Kalman Filter Analysis',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'xf', min: -Infinity, max: Infinity },{ param: 'Pf', min: -Infinity, max: Infinity },{ param: 'y', min: -Infinity, max: Infinity },{ param: 'R', min: -Infinity, max: Infinity },{ param: 'H', min: -Infinity, max: Infinity }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'xf', min: -1e6, max: 1e6 },
+    { param: 'Pf', min: 0.001, max: 1e6 },
+    { param: 'y', min: -1e6, max: 1e6 },
+    { param: 'R', min: 0, max: 1e6 },
+    { param: 'H', min: -100, max: 100 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Forecast from model');
-    log.push('  Observation from data');
-    log.push('  Error covariances from statistics');
+    log.push(`  Forecast x_f = ${inputs.xf}, P_f = ${inputs.Pf}`);
+    log.push(`  Observation y = ${inputs.y}, R = ${inputs.R}`);
+    log.push(`  Observation operator H = ${inputs.H}`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, GENERIC_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    log.push(`  Analysis state x_a = ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}`);
+    return {};
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Ensemble size', contribution: 'Varies' },
-      { factor: 'Error covariances', contribution: 'Varies' },
-      { factor: 'Observation operator', contribution: 'Varies' },
+      { factor: 'Observation operator linearity', contribution: 'Low (scalar case)' },
+      { factor: 'Error covariance specification', contribution: 'High' },
     ],
-    overallAssessment: 'Exact for linear systems',
+    overallAssessment: 'Exact for linear scalar systems; EnKF extends to nonlinear high-dimensional via ensemble.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Ensemble Kalman Filter: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. THE equation for Digital Twin assimilation.`,
-    recommendations: ["Key DA equation.","K = PfH^T(HPfH^T+R)^-1.","x_a = x_f + K(y-Hx_f)."],
+    contextualAnalysis: `Kalman filter analysis: x_a = ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. The analysis state is the optimal (minimum variance) estimate combining forecast and observations.`,
+    recommendations: [
+      'K > 0.5: observation-weighted — forecast is uncertain relative to obs',
+      'K < 0.1: model-weighted — forecast is reliable relative to obs',
+      'EnKF (Evensen 1994) extends this to ensembles for high-dimensional systems',
+      'Operational at ECMWF, NOAA GFS, NASA GEOS for weather/climate digital twins',
+    ],
   }),
   metadata: {
-    methodology: 'THE equation for Digital Twin assimilation.',
-    assumptions: ["Linear observation operator","Gaussian errors","Adequate ensemble"],
-    limitations: ["Nonlinear operators","Ensemble collapse","Localization needed"],
-    references: ["Evensen 1994"],
-    preprocessingNotes: ["Forecast from model","Observation from data","Error covariances from statistics"],
+    methodology: 'Kalman filter analysis: x_a = x_f + K·(y − H·x_f), K = P_f·H^T·(H·P_f·H^T + R)^{-1}.',
+    assumptions: ['Linear observation operator', 'Gaussian error distributions', 'Known error covariances P_f and R'],
+    limitations: ['Scalar (single state variable) — EnKF extends to high-dimensional', 'Requires accurate P_f and R specification', 'Ensemble collapse in EnKF needs inflation/localization'],
+    references: ['Kalman, R.E. (1960) A new approach to linear filtering and prediction problems.', 'Evensen, G. (1994) Sequential data assimilation with a nonlinear QG model. J. Geophys. Res.'],
+    preprocessingNotes: ['Forecast x_f from model forward integration', 'P_f from ensemble spread or climatology', 'Observation y from in-situ or remote sensing', 'R from instrument error characterization'],
   },
   dependencies: [],
 };
@@ -7354,39 +7484,50 @@ export const TOOL_142: ToolWorkflowDef = {
   name: 'Optimal Interpolation',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'xb', min: -Infinity, max: Infinity },{ param: 'y', min: -Infinity, max: Infinity },{ param: 'B', min: -Infinity, max: Infinity },{ param: 'R', min: -Infinity, max: Infinity },{ param: 'H', min: -Infinity, max: Infinity }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'xb', min: -1e6, max: 1e6 },
+    { param: 'y', min: -1e6, max: 1e6 },
+    { param: 'B', min: 0.001, max: 1e6 },
+    { param: 'R', min: 0, max: 1e6 },
+    { param: 'H', min: -100, max: 100 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Background from model');
-    log.push('  Observation from data');
-    log.push('  Background error covariance');
+    log.push(`  Background x_b = ${inputs.xb}, B = ${inputs.B}`);
+    log.push(`  Observation y = ${inputs.y}, R = ${inputs.R}`);
+    log.push(`  Observation operator H = ${inputs.H}`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, GENERIC_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    log.push(`  Analysis x_a = ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}`);
+    return {};
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Background error covariance', contribution: 'Varies' },
-      { factor: 'Observation error', contribution: 'Varies' },
-      { factor: 'Observation operator', contribution: 'Varies' },
+      { factor: 'Static B (no flow dependence)', contribution: 'High' },
+      { factor: 'Observation error specification', contribution: 'Medium' },
     ],
-    overallAssessment: 'Exact for linear systems',
+    overallAssessment: 'Exact for linear scalar systems. OI was operational at NCEP (1970s-1990s) and ECMWF (until 1996).',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Optimal Interpolation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Spatial analysis of observations.`,
-    recommendations: ["Simpler than EnKF.","Static B matrix."],
+    contextualAnalysis: `OI analysis: x_a = ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Minimum-variance estimate combining background and observations with static covariances.`,
+    recommendations: [
+      'OI uses static B — cannot capture flow-dependent error structures',
+      '3D-Var (Lorenc 1986) extends OI to cost-function minimization',
+      'EnKF (Evensen 1994) replaces static B with ensemble-derived covariances',
+      'Still used in ocean assimilation (SODA, GODAS) and regional models',
+    ],
   }),
   metadata: {
-    methodology: 'Spatial analysis of observations.',
-    assumptions: ["Static B","Linear operator","Known covariances"],
-    limitations: ["B not static in reality","No flow-dependence","Requires B matrix"],
-    references: ["Lorenz 1969"],
-    preprocessingNotes: ["Background from model","Observation from data","Background error covariance"],
+    methodology: 'OI: x_a = x_b + B·H^T·(H·B·H^T + R)^{-1}·(y − H·x_b). Static background error covariance B.',
+    assumptions: ['Static (time-invariant) background error covariance B', 'Linear observation operator H', 'Gaussian errors with known covariances'],
+    limitations: ['B is not flow-dependent — cannot capture developing weather features', 'Requires prescribed B (correlation length scale L, error variance σ_b²)', 'Observation selection needed for large N_obs (local domains)'],
+    references: ['Lorenz, E.N. (1969) A method for applying continuous corrections to empirical forecast equations.', 'Gandin, L.S. (1963) Objective analysis of meteorological fields. Gidrometeoizdat.'],
+    preprocessingNotes: ['Background x_b from previous forecast or climatology', 'Observation y from in-situ or remote sensing', 'B from prescribed correlation function (Gaussian, SOAR)'],
   },
   dependencies: [],
 };
@@ -7396,42 +7537,55 @@ export const TOOL_142: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_143: ToolWorkflowDef = {
   toolId: 143,
-  name: '4D-Var Cost Function',
+  name: '3D-Var Cost Function',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'x', min: -Infinity, max: Infinity },{ param: 'xb', min: -Infinity, max: Infinity },{ param: 'B', min: -Infinity, max: Infinity },{ param: 'yi', min: -Infinity, max: Infinity },{ param: 'Ri', min: -Infinity, max: Infinity }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'x', min: -1e6, max: 1e6 },
+    { param: 'xb', min: -1e6, max: 1e6 },
+    { param: 'B', min: 0.001, max: 1e6 },
+    { param: 'y', min: -1e6, max: 1e6 },
+    { param: 'R', min: 0.001, max: 1e6 },
+    { param: 'H', min: -100, max: 100 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Background from model');
-    log.push('  Observations over time window');
-    log.push('  Error covariances');
+    log.push(`  State x = ${inputs.x}, Background x_b = ${inputs.xb}`);
+    log.push(`  B = ${inputs.B}, R = ${inputs.R}, H = ${inputs.H}`);
+    log.push(`  Observation y = ${inputs.y}`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, GENERIC_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    log.push(`  Cost J(x) = ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}`);
+    return {};
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result >= 0, message: Number.isFinite(result) ? `${result.toFixed(4)}` : 'NaN/Inf', severity: Number.isFinite(result) && result >= 0 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Background error', contribution: 'Varies' },
-      { factor: 'Observation error', contribution: 'Varies' },
-      { factor: 'Model trajectory', contribution: 'Varies' },
+      { factor: 'B matrix accuracy', contribution: 'High' },
+      { factor: 'Observation error specification', contribution: 'Medium' },
+      { factor: 'Linearity assumption (tangent-linear)', contribution: 'High for nonlinear processes' },
     ],
-    overallAssessment: 'ECMWF operational standard',
+    overallAssessment: 'Exact for scalar linear case. 4D-Var extends to time window with adjoint model.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `4D-Var Cost Function: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Weather analysis gold standard.`,
-    recommendations: ["ECMWF operational.","4D: assimilates over time window."],
+    contextualAnalysis: `3D-Var cost function: J = ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Evaluates misfit between state x, background x_b, and observations y.`,
+    recommendations: [
+      'J = J_b + J_o: background term + observation term',
+      'Minimum at x_a = (x_b/B + H·y/R) / (1/B + H²/R)',
+      '4D-Var (Le Dimet & Talagrand 1986) extends to time window with adjoint model',
+      'Operational at ECMWF since 1997 — gold standard for global NWP',
+    ],
   }),
   metadata: {
-    methodology: 'Weather analysis gold standard.',
-    assumptions: ["Tangent-linear model","Adjoint model","Known covariances"],
-    limitations: ["Requires adjoint","Computationally expensive","B matrix critical"],
-    references: ["Le Dimet 1986"],
-    preprocessingNotes: ["Background from model","Observations over time window","Error covariances"],
+    methodology: '3D-Var: J(x) = ½(x−x_b)ᵀB⁻¹(x−x_b) + ½(y−Hx)ᵀR⁻¹(y−Hx). 4D-Var sums over time window.',
+    assumptions: ['Single time step (3D-Var)', 'Linear observation operator H', 'Gaussian errors with known B and R'],
+    limitations: ['Static B (no flow dependence)', 'Requires adjoint model for 4D-Var', 'Tangent-linear approximation breaks down for nonlinear processes'],
+    references: ['Le Dimet, F.-X. & Talagrand, O. (1986) Variational algorithms for analysis and assimilation of meteorological observations. Mon. Weather Rev., 114(9), 1689-1706.'],
+    preprocessingNotes: ['State x: current iterate (start with x_b)', 'Background x_b from previous forecast', 'B from error statistics or ensemble', 'Observation y from instruments', 'R from instrument error characterization'],
   },
   dependencies: [],
 };
@@ -7444,38 +7598,48 @@ export const TOOL_144: ToolWorkflowDef = {
   name: 'Shannon Information Entropy',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'px', min: 0, max: 1 },{ param: 'py', min: 0, max: 1 },{ param: 'pxy', min: 0, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'px', min: 0.001, max: 0.999 },
+    { param: 'py', min: 0.001, max: 0.999 },
+    { param: 'Hxy', min: 0, max: 2 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Probability distributions from data');
-    log.push('  Joint probability from observations');
+    log.push(`  p(x) = ${inputs.px}, p(y) = ${inputs.py}`);
+    log.push(`  Joint entropy H(X,Y) = ${inputs.Hxy} bits`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, GENERIC_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    log.push(`  H(X) = ${Number.isFinite(result) ? (result as number).toFixed(4) : 'N/A'} bits`);
+    return {};
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result >= 0 && result <= 1, message: Number.isFinite(result) ? `${(result as number).toFixed(4)} bits` : 'NaN', severity: Number.isFinite(result) && result >= 0 && result <= 1 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Probability estimation', contribution: 'Varies' },
-      { factor: 'Sample size', contribution: 'Varies' },
-      { factor: 'Discretization', contribution: 'Varies' },
+      { factor: 'Probability estimation from finite samples', contribution: 'Medium' },
+      { factor: 'Discretization/binning for continuous variables', contribution: 'Medium' },
     ],
-    overallAssessment: 'Exact for known distributions',
+    overallAssessment: 'Exact for known discrete distributions. For estimated probabilities: bias-corrected estimators recommended for small samples.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Shannon Information Entropy: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Data source value assessment.`,
-    recommendations: ["H(X) = -sum p(x) log2 p(x).","Measures information content."],
+    contextualAnalysis: `Shannon entropy H(X) = ${Number.isFinite(result) ? (result as number).toFixed(4) : 'N/A'} bits. Mutual information I(X;Y) quantifies shared information.`,
+    recommendations: [
+      'H(X) = 0: deterministic (no uncertainty)',
+      'H(X) = 1 bit: maximum for binary variable (fair coin)',
+      'I(X;Y) = 0: X and Y are independent',
+      'I(X;Y) = H(X): Y fully determines X',
+      'For data assimilation: entropy reduction = observation value',
+    ],
   }),
   metadata: {
-    methodology: 'Data source value assessment.',
-    assumptions: ["Known probabilities","Discrete variables"],
-    limitations: ["Continuous entropy differs","Sample size for estimation","Binning effects"],
-    references: ["Shannon 1948"],
-    preprocessingNotes: ["Probability distributions from data","Joint probability from observations"],
+    methodology: 'Binary entropy: H(X) = −p·log₂(p) − (1−p)·log₂(1−p). Mutual info: I(X;Y) = H(X) + H(Y) − H(X,Y).',
+    assumptions: ['Binary variables (two outcomes each)', 'Known probabilities', 'H(X,Y) provided directly as joint entropy (bits)'],
+    limitations: ['Binary only — multivariate requires full distribution', 'Continuous entropy differs (differential entropy)', 'Probability estimation from finite samples introduces bias'],
+    references: ['Shannon, C.E. (1948) A mathematical theory of communication. Bell Syst. Tech. J., 27(3), 379-423.'],
+    preprocessingNotes: ['p(x): probability of X=1 (binary variable)', 'p(y): probability of Y=1 (binary variable)', 'H(X,Y): joint entropy in bits (provided, not derived from a single probability)'],
   },
   dependencies: [],
 };
@@ -7488,38 +7652,51 @@ export const TOOL_145: ToolWorkflowDef = {
   name: 'Free-Space Path Loss',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'd_km', min: 0, max: 100000 },{ param: 'f_GHz', min: 0, max: 100 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'dKm', min: 0.001, max: 1e10 },
+    { param: 'fGHz', min: 0.001, max: 1000 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Distance from geometry');
-    log.push('  Frequency from signal');
+    const d = inputs.dKm as number;
+    const f = inputs.fGHz as number;
+    log.push(`  Distance d = ${d >= 1000 ? (d/1000).toFixed(1) + '×10³ km' : d.toFixed(1) + ' km'}`);
+    log.push(`  Frequency f = ${f >= 1 ? f.toFixed(2) + ' GHz' : (f*1000).toFixed(0) + ' MHz'}`);
+    log.push(`  Wavelength λ = ${(0.3/f).toFixed(3)} m`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, GENERIC_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    log.push(`  FSPL = ${Number.isFinite(result) ? (result as number).toFixed(2) : 'N/A'} dB`);
+    return {};
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result > 0, message: Number.isFinite(result) ? `${(result as number).toFixed(2)} dB` : 'NaN', severity: Number.isFinite(result) && result > 0 ? 'info' : 'error' },
+    { name: 'Magnitude', passed: result > 20 && result < 400, message: `${(result as number).toFixed(2)} dB — ${result > 20 && result < 400 ? 'physically plausible' : 'check inputs'}`, severity: result > 20 && result < 400 ? 'info' : 'warning' },
+  ]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Exact formula', contribution: 'Varies' },
-      { factor: 'Distance accuracy', contribution: 'Varies' },
-      { factor: 'Frequency accuracy', contribution: 'Varies' },
+      { factor: 'Exact formula (no approximation)', contribution: 'Zero' },
+      { factor: 'Atmospheric absorption (not included)', contribution: '1-10 dB depending on frequency/weather' },
+      { factor: 'Multipath/obstruction (not included)', contribution: '0-30 dB depending on environment' },
     ],
-    overallAssessment: 'Exact for free space',
+    overallAssessment: 'Exact for free-space propagation. Real links add 1-30 dB atmospheric/obstruction losses.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Free-Space Path Loss: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Satellite link budget calculation.`,
-    recommendations: ["FSPL = 32.45 + 20log10(d) + 20log10(f).","Satellite link budget."],
+    contextualAnalysis: `FSPL = ${Number.isFinite(result) ? (result as number).toFixed(2) : 'N/A'} dB. Free-space path loss — signal attenuation from spherical wavefront spreading.`,
+    recommendations: [
+      'FSPL = 32.45 + 20·log₁₀(d_km) + 20·log₁₀(f_GHz)',
+      'Link budget: P_r = P_t + G_t + G_r − FSPL − other losses (dB)',
+      'LEO (1000 km, 2 GHz): ~158 dB; GEO (36000 km, 2 GHz): ~180 dB',
+      'Ka-band (20 GHz) has ~20 dB more loss than L-band (2 GHz)',
+    ],
   }),
   metadata: {
-    methodology: 'Satellite link budget calculation.',
-    assumptions: ["Free space","No atmosphere","Line of sight"],
-    limitations: ["Atmospheric attenuation","Multipath","Obstructions"],
-    references: ["Fundamental"],
-    preprocessingNotes: ["Distance from geometry","Frequency from signal"],
+    methodology: 'FSPL(dB) = 32.45 + 20·log₁₀(d_km) + 20·log₁₀(f_GHz). Derived from Friis transmission equation.',
+    assumptions: ['Free-space propagation (no obstacles)', 'No atmospheric absorption', 'Line-of-sight path', 'Isotropic or specified antenna gains'],
+    limitations: ['Atmospheric attenuation (rain, clouds, gases): 1-10 dB', 'Multipath fading: 0-30 dB', 'Antenna pointing errors: 0-3 dB', 'Polarization mismatch: 0-3 dB'],
+    references: ['Friis, H.T. (1946) A note on a simple transmission formula. Proc. IRE, 34(5), 254-256.', 'ITU-R P.525-2: Calculation of free-space path loss.'],
+    preprocessingNotes: ['dKm: distance in kilometers (e.g., satellite range)', 'fGHz: frequency in GHz (e.g., 2.4 for WiFi, 12 for Ku-band)'],
   },
   dependencies: [],
 };
@@ -7532,41 +7709,63 @@ export const TOOL_146: ToolWorkflowDef = {
   name: 'Klobuchar Ionospheric Delay',
   vizType: 'spectrum',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'A', min: 0, max: 0.000001 },{ param: 'x', min: 0, max: 2 },{ param: 'phi_m', min: -90, max: 90 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'alpha1', min: -1e6, max: 1e6 },
+    { param: 'alpha2', min: -1e6, max: 1e6 },
+    { param: 'alpha3', min: -1e6, max: 1e6 },
+    { param: 'alpha4', min: -1e6, max: 1e6 },
+    { param: 'beta1', min: 0, max: 1e8 },
+    { param: 'beta2', min: -1e8, max: 1e8 },
+    { param: 'beta3', min: -1e8, max: 1e8 },
+    { param: 'beta4', min: -1e8, max: 1e8 },
+    { param: 'phi_m', min: -Math.PI / 2, max: Math.PI / 2 },
+    { param: 't_sec', min: 0, max: 86400 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Amplitude from broadcast');
-    log.push('  Local time phase from receiver');
-    log.push('  Geomagnetic latitude');
+    log.push(`  α coefficients: [${inputs.alpha1}, ${inputs.alpha2}, ${inputs.alpha3}, ${inputs.alpha4}]`);
+    log.push(`  β coefficients: [${inputs.beta1}, ${inputs.beta2}, ${inputs.beta3}, ${inputs.beta4}]`);
+    log.push(`  Geomagnetic lat φ_m = ${((inputs.phi_m as number) * 180 / Math.PI).toFixed(1)}°`);
+    log.push(`  Local time t = ${inputs.t_sec} s (${((inputs.t_sec as number) / 3600).toFixed(1)} h)`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, GENERIC_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    const delay_m = (result as number) * 1e-9 * 299792458;
+    log.push(`  Vertical delay = ${(result as number).toFixed(1)} ns = ${delay_m.toFixed(2)} m`);
+    return {};
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result >= 5, message: Number.isFinite(result) ? `${(result as number).toFixed(1)} ns` : 'NaN/Inf', severity: Number.isFinite(result) && result >= 5 ? 'info' : 'error' },
+    { name: 'Magnitude', passed: result >= 5 && result <= 100, message: `${(result as number).toFixed(1)} ns — ${result > 5 && result <= 100 ? 'physically plausible' : 'check inputs'}`, severity: result > 5 && result <= 100 ? 'info' : 'warning' },
+  ]),
   estimateUncertainty: () => ({
     method: 'empirical',
     rmse: 50,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Model coefficients', contribution: 'Varies' },
-      { factor: 'Ionospheric conditions', contribution: 'Varies' },
-      { factor: 'Solar activity', contribution: 'Varies' },
+      { factor: 'Thin-shell assumption (350 km)', contribution: 'High' },
+      { factor: 'Simplified cosine diurnal shape', contribution: 'Medium' },
+      { factor: 'No storm-time correction', contribution: 'High (during storms)' },
+      { factor: 'Broadcast coefficient freshness (1-6 day update)', contribution: 'Low' },
     ],
-    overallAssessment: '+/- 50%, coarse model',
+    overallAssessment: 'Klobuchar model: 50-60% RMS error reduction. Residual 2-5 m typical, 10-30 m during storms.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Klobuchar Ionospheric Delay: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Single-frequency GPS ionospheric correction.`,
-    recommendations: ["Coarse model (+/- 50%).","Better than no correction.","Dual-frequency preferred."],
+    contextualAnalysis: `Klobuchar vertical ionospheric delay: ${Number.isFinite(result) ? result.toFixed(1) + ' ns = ' + ((result as number) * 1e-9 * 299792458).toFixed(2) + ' m' : 'N/A'}.`,
+    recommendations: [
+      'Klobuchar corrects 50-60% of ionospheric delay RMS error',
+      'Nighttime floor: 5 ns (~1.5 m) — always applied',
+      'Peak delay at 14:00 local time (50400 s)',
+      'Dual-frequency GPS (L1+L2) removes >95% of ionospheric delay',
+      'During geomagnetic storms: residual can exceed 10 m — use SBAS or dual-freq',
+    ],
   }),
   metadata: {
-    methodology: 'Single-frequency GPS ionospheric correction.',
-    assumptions: ["Single frequency","Daytime only","Known coefficients"],
-    limitations: ["Not for nighttime","Storm-time errors","Coefficients broadcast"],
-    references: ["Klobuchar 1987"],
-    preprocessingNotes: ["Amplitude from broadcast","Local time phase from receiver","Geomagnetic latitude"],
+    methodology: 'Klobuchar (1987): T_iono = 5 ns + A·cos(x) where A = Σαᵢ·φ_m^i, P = Σβᵢ·φ_m^i, x = 2π(t-50400)/P.',
+    assumptions: ['Thin-shell ionosphere at 350 km altitude', 'Cosine diurnal variation', '8 broadcast α/β coefficients from GPS nav message', 'Single-frequency L1 (1.57542 GHz)'],
+    limitations: ['~50% residual error (2-5 m typical)', 'Degrades during geomagnetic storms (10-30 m residual)', 'Poor at equatorial anomaly (±15° magnetic latitude)', 'No storm-time or seasonal correction'],
+    references: ['Klobuchar, J.A. (1987) Ionospheric time-delay algorithms for single-frequency GPS users. IEEE Trans. Aerosp. Electron. Syst., 23(3), 325-331.'],
+    preprocessingNotes: ['α₁-α₄: broadcast ionospheric amplitude coefficients', 'β₁-β₄: broadcast ionospheric period coefficients', 'φ_m: geomagnetic latitude of ionospheric pierce point (radians)', 't_sec: local time at IPP in seconds of day (0-86400)'],
   },
   dependencies: [],
 };
@@ -7576,41 +7775,51 @@ export const TOOL_146: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_147: ToolWorkflowDef = {
   toolId: 147,
-  name: 'Doppler Shift',
+  name: 'Doppler Effect (Classical)',
   vizType: 'spectrum',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'f0', min: 0, max: 1000000000000 },{ param: 'vrel', min: -30000, max: 30000 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'f0', min: 1, max: 1e15 },
+    { param: 'vrel', min: -3e8, max: 3e8 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Transmitted frequency from signal');
-    log.push('  Relative velocity from kinematics');
+    const v = inputs.vrel as number;
+    log.push(`  Source frequency f₀ = ${inputs.f0} Hz`);
+    log.push(`  Relative velocity v = ${v.toFixed(1)} m/s (${v > 0 ? 'receding' : v < 0 ? 'approaching' : 'stationary'})`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, GENERIC_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    const df = result as number;
+    log.push(`  Δf = ${df.toExponential(3)} Hz`);
+    return {};
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? `${(result as number).toExponential(3)} Hz` : 'NaN', severity: Number.isFinite(result) ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Exact non-relativistic', contribution: 'Varies' },
-      { factor: 'Velocity accuracy', contribution: 'Varies' },
-      { factor: 'Frequency accuracy', contribution: 'Varies' },
+      { factor: 'Non-relativistic approximation (error ~β²/8)', contribution: 'Negligible for v < 0.01c' },
+      { factor: 'Velocity accuracy (radial component only)', contribution: 'User-dependent' },
     ],
-    overallAssessment: 'Exact for v << c',
+    overallAssessment: 'Exact for non-relativistic (v << c). Relativistic formula included for comparison.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Doppler Shift: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Satellite tracking and GNSS.`,
-    recommendations: ["Delta_f = f0 * v_rel / c.","Non-relativistic approximation."],
+    contextualAnalysis: `Doppler shift Δf = ${Number.isFinite(result) ? (result as number).toExponential(3) : 'N/A'} Hz. ${result < 0 ? 'Blueshift (approaching)' : result > 0 ? 'Redshift (receding)' : 'No shift'}.`,
+    recommendations: [
+      'Δf = −f₀·v/c (positive v = receding = redshift)',
+      'GPS L1 (1.575 GHz): Doppler ≈ ±5 kHz at orbital velocity',
+      'Weather radar: measures radial velocity of precipitation',
+      'For v > 0.01c: use relativistic formula f_obs = f₀·√((1−β)/(1+β))',
+    ],
   }),
   metadata: {
-    methodology: 'Satellite tracking and GNSS.',
-    assumptions: ["v << c","Line of sight velocity"],
-    limitations: ["Relativistic at high v","Not for transverse motion","Multipath"],
-    references: ["Doppler 1842"],
-    preprocessingNotes: ["Transmitted frequency from signal","Relative velocity from kinematics"],
+    methodology: 'Classical Doppler: Δf = −f₀·v/c. Sign convention: v > 0 = receding = redshift.',
+    assumptions: ['Non-relativistic (v << c)', 'Line-of-sight velocity component', 'Source and observer in inertial frames'],
+    limitations: ['Relativistic correction needed for v > 0.01c', 'Transverse Doppler effect not included', 'Atmospheric refraction can shift frequency'],
+    references: ['Doppler, C.J. (1842) Über das farbige Licht der Doppelsterne. Abh. Königl. Böhm. Ges. Wiss.'],
+    preprocessingNotes: ['f₀: source frequency (Hz)', 'vrel: radial velocity (m/s), positive = receding', 'c: speed of light (default 299792458 m/s)'],
   },
   dependencies: [],
 };
@@ -7623,38 +7832,51 @@ export const TOOL_148: ToolWorkflowDef = {
   name: 'Hohmann Transfer',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'GM', min: 0, max: 1000000000000000 },{ param: 'r1', min: 6000000, max: 10000000 },{ param: 'r2', min: 6000000, max: 100000000 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'GM', min: 1e10, max: 1e20 },
+    { param: 'r1', min: 100000, max: 1e12 },
+    { param: 'r2', min: 100000, max: 1e12 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Gravitational parameter from central body');
-    log.push('  Orbit radii from mission design');
+    const r1 = inputs.r1 as number;
+    const r2 = inputs.r2 as number;
+    log.push(`  GM = ${inputs.GM} m³/s²`);
+    log.push(`  r₁ = ${(r1/1000).toFixed(0)} km, r₂ = ${(r2/1000).toFixed(0)} km`);
+    log.push(`  r₂/r₁ = ${(r2/r1).toFixed(2)}`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, GENERIC_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    log.push(`  Δv₁ = ${(result as number/1000).toFixed(3)} km/s`);
+    return {};
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? `${(result as number/1000).toFixed(3)} km/s` : 'NaN', severity: Number.isFinite(result) ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Exact for circular orbits', contribution: 'Varies' },
-      { factor: 'Impulsive burns', contribution: 'Varies' },
-      { factor: 'Two-body problem', contribution: 'Varies' },
+      { factor: 'Exact for two-body coplanar circular orbits', contribution: 'Zero' },
+      { factor: 'Non-impulsive burns (finite burn loss)', contribution: '1-5% additional Δv' },
+      { factor: 'Perturbations (drag, third body)', contribution: '0.1-1% for LEO-GEO' },
     ],
-    overallAssessment: 'Exact for two-body',
+    overallAssessment: 'Exact for ideal Hohmann. Real transfers add 1-5% for finite burns and perturbations.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Hohmann Transfer: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Optimal orbit transfer planning.`,
-    recommendations: ["Most fuel-efficient 2-burn transfer.","Between coplanar circular orbits."],
+    contextualAnalysis: `Hohmann transfer Δv₁ = ${Number.isFinite(result) ? (result as number/1000).toFixed(3) : 'N/A'} km/s. Minimum-energy two-impulse transfer.`,
+    recommendations: [
+      'Hohmann optimal for r₂/r₁ < 11.94; above that, bi-elliptic is more efficient',
+      'LEO→GEO: total Δv ≈ 3.93 km/s, transfer time ≈ 5.3 hours',
+      'Transfer time = π·√((r₁+r₂)³/(8GM))',
+      'For interplanetary: must account for planetary phase angles (synodic period)',
+    ],
   }),
   metadata: {
-    methodology: 'Optimal orbit transfer planning.',
-    assumptions: ["Circular orbits","Coplanar","Impulsive burns"],
-    limitations: ["Not for elliptical","Plane changes","Finite burns"],
-    references: ["Hohmann 1925"],
-    preprocessingNotes: ["Gravitational parameter from central body","Orbit radii from mission design"],
+    methodology: 'Hohmann (1925): Δv₁ = √(GM/r₁)·[√(2r₂/(r₁+r₂))−1], Δv₂ = √(GM/r₂)·[1−√(2r₁/(r₁+r₂))].',
+    assumptions: ['Coplanar circular orbits', 'Two-body problem (no perturbations)', 'Impulsive burns (instantaneous Δv)'],
+    limitations: ['Not optimal for r₂/r₁ > 11.94 (bi-elliptic better)', 'No plane changes (inclination change adds Δv)', 'Finite burn losses (gravity loss 1-5%)', 'Launch window constraints for interplanetary transfers'],
+    references: ['Hohmann, W. (1925) Die Erreichbarkeit der Himmelskörper. R. Oldenbourg Verlag, München.'],
+    preprocessingNotes: ['GM: standard gravitational parameter of central body (m³/s²)', 'r₁: initial orbit radius (meters)', 'r₂: target orbit radius (meters)'],
   },
   dependencies: [],
 };
@@ -7664,42 +7886,54 @@ export const TOOL_148: ToolWorkflowDef = {
 // ══════════════════════════════════════════════════════════════════
 export const TOOL_149: ToolWorkflowDef = {
   toolId: 149,
-  name: 'Lagrange Points (L1-L5)',
+  name: 'Lagrange Points L1-L5',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'gamma', min: 0, max: 0.5 },{ param: 'R', min: 0, max: 10000000000000 },{ param: 'point_id', min: 1, max: 5 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'm1', min: 1e10, max: 1e35 },
+    { param: 'm2', min: 1e10, max: 1e35 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Mass ratio from system');
-    log.push('  Body separation from ephemeris');
-    log.push('  5th-order polynomial for collinear');
+    const m1 = (inputs.m1 as number) ?? 5.97e24;
+    const m2 = (inputs.m2 as number) ?? 7.34e22;
+    const mu = m2 / (m1 + m2);
+    log.push(`  Primary M₁ = ${m1.toExponential(2)} kg`);
+    log.push(`  Secondary M₂ = ${m2.toExponential(2)} kg`);
+    log.push(`  Mass ratio μ = ${mu.toExponential(4)}`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, GENERIC_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    log.push(`  L1 distance from secondary: ${(result as number).toFixed(6)} (normalized)`);
+    return {};
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result > 0 && result < 1, message: Number.isFinite(result) ? `${(result as number).toFixed(6)}` : 'NaN', severity: Number.isFinite(result) && result > 0 && result < 1 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Exact for CR3BP', contribution: 'Varies' },
-      { factor: 'Mass ratio accuracy', contribution: 'Varies' },
-      { factor: 'Body separation', contribution: 'Varies' },
+      { factor: 'Exact for CR3BP (circular restricted)', contribution: 'Zero for ideal case' },
+      { factor: 'Orbital eccentricity', contribution: 'Low (Earth-Moon e≈0.055)' },
     ],
-    overallAssessment: 'Exact for circular restricted 3-body',
+    overallAssessment: 'Exact solution for circular restricted 3-body problem. Newton-Raphson convergence to machine precision.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Lagrange Points (L1-L5): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Mission planning for L-points.`,
-    recommendations: ["L2 is used by JWST for deep space observation.","L1 hosts solar observatories like SOHO.","L3-L5 are stable equilibrium points."],
+    contextualAnalysis: `L1 distance from secondary: ${Number.isFinite(result) ? result.toFixed(6) + ' (normalized)' : 'N/A'}. Collinear Lagrange point.`,
+    recommendations: [
+      'L1: between bodies — SOHO, ACE, DSCOVR (Sun-Earth); DSCOVER (Earth-Moon)',
+      'L2: beyond secondary — JWST, Planck, Gaia (Sun-Earth)',
+      'L3: opposite side of primary from secondary',
+      'L4/L5: triangular points — Trojan asteroids (Jupiter)',
+      'L4/L5 stable for μ < 0.0385 (Earth-Moon: μ=0.012 → stable!)',
+    ],
   }),
   metadata: {
-    methodology: 'Mission planning for L-points.',
-    assumptions: ["Circular orbits","Restricted 3-body","Primaries in circular motion"],
-    limitations: ["Elliptical orbits","Perturbations","Stability varies"],
-    references: ["Lagrange 1772"],
-    preprocessingNotes: ["Mass ratio from system","Body separation from ephemeris","5th-order polynomial for collinear"],
+    methodology: 'CR3BP: solve quintic polynomial for collinear points (L1-L3) via Newton-Raphson; L4/L5 at ±60°.',
+    assumptions: ['Circular orbits (CR3BP)', 'Two dominant masses', 'Massless third body (spacecraft)', 'No perturbations from other bodies'],
+    limitations: ['Real orbits are elliptical (eccentricity effect)', 'Solar radiation pressure, third-body perturbations', 'Station-keeping required for L1/L2/L3 (unstable)'],
+    references: ['Lagrange, J.-L. (1772) Essai sur le problème des trois corps.', 'Euler, L. (1767) De motu rectilineo trium corporum se mutuo attrahentium.'],
+    preprocessingNotes: ['M₁: primary body mass (kg) — e.g., Sun or Earth', 'M₂: secondary body mass (kg) — e.g., Earth or Moon', 'Results normalized to orbital separation distance'],
   },
   dependencies: [],
 };
@@ -7712,38 +7946,52 @@ export const TOOL_150: ToolWorkflowDef = {
   name: 'Mutual Information',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'px', min: 0, max: 1 },{ param: 'py', min: 0, max: 1 },{ param: 'pxy', min: 0, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [
+    { param: 'px', min: 0.001, max: 0.999 },
+    { param: 'py', min: 0.001, max: 0.999 },
+    { param: 'pxy', min: 0, max: 1 },
+  ]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Joint probability from observations');
-    log.push('  Marginal probabilities from data');
+    const px = inputs.px as number;
+    const py = inputs.py as number;
+    const pxy = inputs.pxy as number;
+    log.push(`  p(x=1) = ${px}, p(y=1) = ${py}`);
+    log.push(`  p(x=1,y=1) = ${pxy}`);
+    if (pxy > Math.min(px, py)) log.push('  ⚠ p(x,y) > min(p(x),p(y)) — invalid joint probability');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
   postProcess: (result, _base, _ctx, log) => {
-    const c = classify(result, GENERIC_BANDS);
-    if (c) log.push(`  Result: ${c.label}`);
-    return { classification: c };
+    log.push(`  I(X;Y) = ${Number.isFinite(result) ? (result as number).toFixed(4) : 'N/A'} bits`);
+    return {};
   },
-  qualityCheck: (result) => makeQC([{ name: 'Range', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' }]),
+  qualityCheck: (result) => makeQC([
+    { name: 'Range', passed: Number.isFinite(result) && result >= 0, message: Number.isFinite(result) ? `${(result as number).toFixed(4)} bits` : 'NaN', severity: Number.isFinite(result) && result >= 0 ? 'info' : 'error' },
+  ]),
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Probability estimation', contribution: 'Varies' },
-      { factor: 'Sample size', contribution: 'Varies' },
-      { factor: 'Discretization', contribution: 'Varies' },
+      { factor: 'Probability estimation from finite samples', contribution: 'Medium' },
+      { factor: 'Discretization/binning for continuous variables', contribution: 'Medium' },
     ],
-    overallAssessment: 'Exact for known distributions',
+    overallAssessment: 'Exact for known discrete distributions. For estimated probabilities: bias-corrected estimators recommended.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Mutual Information: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Quantifying data source value.`,
-    recommendations: ["I(X;Y) = sum p(x,y) log(p(x,y)/(p(x)*p(y))).","Information theory."],
+    contextualAnalysis: `Mutual information I(X;Y) = ${Number.isFinite(result) ? (result as number).toFixed(4) : 'N/A'} bits. Measures shared information between X and Y.`,
+    recommendations: [
+      'I(X;Y) = 0: X and Y are independent',
+      'I(X;Y) = H(X): Y fully determines X',
+      'NMI = I/√(H(X)·H(Y)) normalizes to [0,1]',
+      'For data assimilation: I measures observation information content',
+      'Use k-nearest neighbors estimator for continuous variables (Kraskov et al. 2004)',
+    ],
   }),
   metadata: {
-    methodology: 'Quantifying data source value.',
-    assumptions: ["Known probabilities","Discrete variables"],
-    limitations: ["Continuous variables","Sample size","Binning effects"],
-    references: ["Shannon 1948"],
-    preprocessingNotes: ["Joint probability from observations","Marginal probabilities from data"],
+    methodology: 'I(X;Y) = H(X) + H(Y) − H(X,Y). Binary: 4 joint outcomes, full entropy computation.',
+    assumptions: ['Binary variables (two outcomes each)', 'Known joint probability p(x=1,y=1)', 'pxy must satisfy 0 ≤ pxy ≤ min(px,py)'],
+    limitations: ['Binary only — multivariate requires full joint distribution', 'Continuous MI requires estimator (KNN, kernel, etc.)', 'Finite sample bias in probability estimation'],
+    references: ['Shannon, C.E. (1948) A mathematical theory of communication.', 'Cover, T.M. & Thomas, J.A. (2006) Elements of Information Theory, 2nd ed.'],
+    preprocessingNotes: ['p(x=1): probability of first binary variable', 'p(y=1): probability of second binary variable', 'p(x=1,y=1): joint probability of both being 1'],
   },
   dependencies: [],
 };
