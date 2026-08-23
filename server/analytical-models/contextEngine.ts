@@ -2111,12 +2111,19 @@ function mapInputs(
       z: u('z', 20),
       rms: u('rms', 0.5),
     };
-    case 90: return {
-      n: u('n', 3),
-      K: u('K', 6),
-      t: u('t', 24),
-      Q0: u('Q0', rv.discharge || 100),
-    };
+    case 90: {
+      // Nash (1957) cascade is driven by the total inflow volume Q₀ (m³/s·h).
+      // USGS streamflow arrives as a JSON string, so coerce defensively and
+      // preserve a genuine 0 (the old `|| 100` conflated it with "missing").
+      const q0Raw = rv.discharge;
+      const q0Num = typeof q0Raw === 'number' ? q0Raw : Number(q0Raw);
+      return {
+        n: u('n', 3),
+        K: u('K', 6),
+        t: u('t', 24),
+        Q0: u('Q0', Number.isFinite(q0Num) ? q0Num : 100),
+      };
+    }
 
     // ═══ Domain 14: Cryosphere & Volcanology ═══
     case 91: {
@@ -2278,7 +2285,7 @@ function mapInputs(
 
     // ═══ Domain 17: Cloud Physics ═══
     case 108: return {
-      a: u('a', 0.01),
+      a: u('a', 1.2e-9),
       r: u('r', 1e-6),
       b: u('b', 1e-18),
     };
@@ -2577,20 +2584,30 @@ function mapInputs(
       Gr: u('Gr', 0),          // receive antenna gain (dBi)
     };
     case 146: {
-      // Full Klobuchar (1987): 8 broadcast ionospheric parameters + receiver geometry
-      const phiM = lat * Math.PI / 180;   // geomagnetic latitude ≈ geographic at low/mid latitudes
-      const hourAngle = (Date.now() % 86400000) / 1000;  // seconds of day (UTC)
+      // Klobuchar (1987) ionospheric delay. The UI exposes the simplified
+      // amplitude/phase form (A in s, x = local-time phase in rad, φ_m in °),
+      // while the engine implements the full ICD-GPS-200 8-coefficient model.
+      // Map the UI inputs into the broadcast coefficients: A becomes the
+      // constant amplitude α₀, and the phase x is converted back to a local
+      // time offset via t = 50400 + x·P/(2π) with the default 14 h period.
+      // Physically-correct defaults: real broadcast α are ~1e-8 s, NOT tens
+      // of seconds (the previous 50/60/30/20 defaults produced an impossible
+      // ~1.4e15 ns delay — a ~9-order-of-magnitude error).
+      const A = u('A', 5e-9);
+      const xPhase = u('x', 0.5);
+      const periodS = 50400; // 14 h Klobuchar default period
+      const phiMDeg = u('phi_m', lat) * 180 / Math.PI;
       return {
-        alpha1: u('alpha1', 50),
-        alpha2: u('alpha2', 60),
-        alpha3: u('alpha3', 30),
-        alpha4: u('alpha4', 20),
-        beta1: u('beta1', 90000),
-        beta2: u('beta2', 80000),
-        beta3: u('beta3', 30000),
-        beta4: u('beta4', 60000),
-        phi_m: u('phi_m', phiM),
-        t_sec: u('t_sec', hourAngle),
+        alpha1: u('alpha1', A),
+        alpha2: u('alpha2', 0),
+        alpha3: u('alpha3', 0),
+        alpha4: u('alpha4', 0),
+        beta1: u('beta1', periodS),
+        beta2: u('beta2', 0),
+        beta3: u('beta3', 0),
+        beta4: u('beta4', 0),
+        phi_m: u('phi_m', phiMDeg * Math.PI / 180),
+        t_sec: u('t_sec', 50400 + (xPhase * periodS) / (2 * Math.PI)),
       };
     }
     case 147: return {
@@ -2661,6 +2678,10 @@ export async function computeWithContext(
   // case when the NRT stream has halted, as observed 2026-08).
   const GLDAS_CONSUMER_IDS = new Set([8, 18, 43, 46, 47, 91, 130, 131, 132]);
   const GLDAS_TIMEOUT_MS = 150000;
+  // IMERG precipitation consumers: 8-slot HDF5 download + h5wasm parse
+  // takes ~120 s, so the default 30 s safe() timeout is too short.
+  const IMERG_CONSUMER_IDS = new Set([10, 12, 18, 110]);
+  const IMERG_TIMEOUT_MS = 150000;
 
   const [
     weather, marine, airQuality, earthquakes, elevation,
@@ -2716,7 +2737,7 @@ export async function computeWithContext(
       ERA5_CONSUMER_IDS.has(id) ? ERA5_TIMEOUT_MS : undefined),
     safe(fetchImergPrecipitation(lat, lon, dateStr).then(r => r ?? { totalPrecipitation: null, maxIntensity: null, source: null } as ImergData),
       { totalPrecipitation: null, maxIntensity: null, source: null } as ImergData,
-      30000),
+      IMERG_CONSUMER_IDS.has(id) ? IMERG_TIMEOUT_MS : undefined),
     safe(fetchGldasData(lat, lon, dateStr), {
       tkeDissipation: null, soilMoisture0_10: null, soilMoisture10_40: null,
       soilMoisture40_100: null, soilMoisture100_200: null, groundwaterStorage: null,
@@ -2964,8 +2985,16 @@ export async function computeWithContext(
   // so the IDW overlay is produced), and masked to the drawn shape's interior
   // when polygon rings are supplied. Explicit single-point selection stays a
   // single point (no polygon is sent in that case).
+  //
+  // Spatial tools (heatmap/contour/vector) produce a genuine field grid. Pure
+  // scalar tools are single-value by physics — sweeping them over 784 cells
+  // yields an ~flat rectangle (no information, wasted compute), so the grid is
+  // skipped and only the labelled point value is rendered.
   const sa = context?.studyArea;
-  if (sa && sa.bbox && (sa.mode === 'bbox' || (sa.polygon && sa.polygon.length > 0))) {
+  const scalarViz = ['scalar', 'gauge', 'bar', 'spectrum', 'scatter', 'distribution', 'histogram', 'timeseries', 'profile', 'table'];
+  const gridViz = ['heatmap', 'contour', 'vector'];
+  const vizType = getToolConfig(id).visualizationType;
+  if (gridViz.includes(vizType) && sa && sa.bbox && (sa.mode === 'bbox' || (sa.polygon && sa.polygon.length > 0))) {
     const [[latMin, lonMin], [latMax, lonMax]] = sa.bbox;
     if (latMax > latMin && lonMax > lonMin) {
       const grid = await buildSpatialGrid(id, normInputs, { ...ctx, pop: popData, __satDate: dateStr }, latMin, latMax, lonMin, lonMax, sa.polygon);

@@ -149,10 +149,15 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
   // (not collapsed to a single centroid point). The mode toggle remains
   // available for tools that support more than one spatial selection.
   const baseModes = tool.analysisMeta?.allowedStudyAreaModes ?? ['point'];
-  const allowedModes: StudyAreaMode[] = bbox && !baseModes.includes('bbox' as StudyAreaMode)
-    ? ['bbox', ...baseModes]
+  // Only apply a drawn globe bbox to tools that genuinely support bbox mode.
+  // Point-only tools (scalars, station-level equations) must ignore the drawn
+  // rectangle and stay in their declared mode — sweeping them across a bbox
+  // yields a single centroid value with a meaningless flat overlay.
+  const supportsBbox = baseModes.includes('bbox' as StudyAreaMode);
+  const allowedModes: StudyAreaMode[] = bbox && !supportsBbox
+    ? baseModes
     : baseModes;
-  const defaultMode: StudyAreaMode = bbox ? 'bbox' : (allowedModes[0] ?? 'point');
+  const defaultMode: StudyAreaMode = bbox && supportsBbox ? 'bbox' : (allowedModes[0] ?? 'point');
   const initialArea: StudyArea = defaultMode === 'bbox' && bbox
     ? { mode: 'bbox' as const, lat: 0, lon: 0, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, lat1: bbox.latMin, lon1: bbox.lonMin, lat2: bbox.latMax, lon2: bbox.lonMax }
     : { ...DEFAULT_STUDY_AREA, mode: defaultMode };

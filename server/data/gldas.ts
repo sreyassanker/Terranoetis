@@ -48,25 +48,54 @@ async function getEarthdataBearer(): Promise<string | null> {
     if (!resp.ok) return null;
     const tokens = await resp.json() as { access_token?: string; exp?: number }[];
     const token = tokens[0]?.access_token;
-    if (!token) return null;
-    // JWT exp is seconds since epoch; add a safety margin.
-    const expSec = tokens[0]?.exp;
-    const expiresAt = typeof expSec === 'number'
-      ? (expSec - 300) * 1000
-      : Date.now() + 6 * 3600 * 1000;
-    cachedBearer = { token, expiresAt };
-    return token;
+    if (token) {
+      const expSec = tokens[0]?.exp;
+      const expiresAt = typeof expSec === 'number'
+        ? (expSec - 300) * 1000
+        : Date.now() + 6 * 3600 * 1000;
+      cachedBearer = { token, expiresAt };
+      return token;
+    }
   } catch {
-    return null;
+    // URS token API unreachable — fall through to EDL env fallback
   }
+
+  // Fallback: EDL JWT from .env (EARTHDATA_EDL_TOKEN). This token is
+  // generated at https://urs.earthdata.nasa.gov/ — regenerate when it
+  // expires (~60 days). Without it, GES DISC downloads that require a
+  // bearer token (GLDAS, SOS, etc.) cannot authenticate.
+  const edlToken = process.env.EARTHDATA_EDL_TOKEN;
+  if (edlToken) {
+    // JWT exp is the 3rd base64 segment; decode to find expiry.
+    try {
+      const payload = JSON.parse(Buffer.from(edlToken.split('.')[1], 'base64').toString());
+      const expSec = payload.exp as number | undefined;
+      cachedBearer = {
+        token: edlToken,
+        expiresAt: typeof expSec === 'number' ? (expSec - 300) * 1000 : Date.now() + 7 * 86400000,
+      };
+      return edlToken;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 function latToIndex(lat: number): number {
   return Math.round((lat + 89.875) / GLDAS_RESOLUTION);
 }
 
+/**
+ * GLDAS-Noah 0.25° data arrays are indexed in 0–360° longitude convention
+ * (the netCDF `lon` coordinate is declared −179.875…179.875, but the data
+ * storage is 0…359.875). Negative / western longitudes must therefore map
+ * through `(lon + 360) % 360` — the previous `(lon + 179.875) % 360` form
+ * returned the wrong pixel for every western-hemisphere point, which read
+ * the GLDAS −9999 fill sentinel (Tool 47 audit, 2026-08).
+ */
 function lonToIndex(lon: number): number {
-  return Math.round(((lon + 179.875) % 360) / GLDAS_RESOLUTION);
+  return Math.round((((lon % 360) + 360) % 360) / GLDAS_RESOLUTION);
 }
 
 function getNearestTimeSlot(hours: number): number {
@@ -165,13 +194,20 @@ async function downloadGldasFile(url: string): Promise<ArrayBuffer | null> {
 /**
  * Read a scalar value from a GLDAS HDF5 grid variable at the given lat/lon.
  * The h5wasm File provides datasets with 3D shape [time, lat, lon].
+ *
+ * GLDAS-Noah uses -9999 as the fill/missing-data sentinel. A -9999 at the
+ * study pixel means "no valid geophysical value", so it is mapped to null
+ * (honest NaN upstream) rather than passed through as a real reading.
  */
+const GLDAS_FILL = -9999;
 function readGridScalar(
   h5File: import('h5wasm').File,
   varName: string,
   latIdx: number,
   lonIdx: number,
 ): number | null {
+  const clean = (val: number): number | null =>
+    typeof val === 'number' && Number.isFinite(val) && Math.abs(val - GLDAS_FILL) > 1 ? val : null;
   try {
     const dataset = h5File.get(varName) as { value: number[]; shape?: number[] } | null;
     if (!dataset) return null;
@@ -184,11 +220,11 @@ function readGridScalar(
     if (shape.length === 3) {
       const strideLat = shape[2];
       const val = data[tIdx * shape[1] * shape[2] + latIdx * strideLat + lonIdx];
-      return typeof val === 'number' && Number.isFinite(val) ? val : null;
+      return clean(val);
     }
     if (shape.length === 2) {
       const val = data[latIdx * shape[1] + lonIdx];
-      return typeof val === 'number' && Number.isFinite(val) ? val : null;
+      return clean(val);
     }
     return null;
   } catch {

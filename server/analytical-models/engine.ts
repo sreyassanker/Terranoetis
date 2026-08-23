@@ -4627,33 +4627,39 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  90: ({ n, K, t, Q0 }) => {
-    const K_n1 = Math.pow(K, n - 1);
-    const fact = factorial(n - 1);
-    const q = (Math.pow(t, n - 1) / (K_n1 * fact)) * (1 / K) * Math.exp(-t / K) * Q0;
-    return {
-      result: q, unit: 'm³/s',
-      steps: [
-        '── Nash Cascade Unit Hydrograph (Nash, 1957) ──',
-        `Number of linear reservoirs n = ${n.toFixed(0)}, Storage coefficient K = ${K.toFixed(2)} h`,
-        `Time t = ${t.toFixed(1)} h, Total inflow volume Q₀ = ${Q0.toFixed(1)} m³/s·h`,
-        '',
-        'Step 1 — Gamma-distribution coefficients:',
-        `  (n−1)! = ${n.toFixed(0)}! = ${factorial(n - 1).toExponential(2)}`,
-        `  K^(n−1) = (${K.toFixed(2)})^(${n.toFixed(0)}−1) = ${K_n1.toExponential(3)}`,
-        '',
-        'Step 2 — Compute IUH ordinate:',
-        `  q(t) = t^(n−1) / (K^(n−1)·(n−1)!) · (1/K) · exp(−t/K) · Q₀`,
-        `  q(${t.toFixed(1)} h) = ${q.toExponential(3)} m³/s`,
-        '',
-        'Step 3 — Hydrograph timing:',
-        `  Time to peak: t_p = (n−1)·K = ${((n - 1) * K).toFixed(1)} h`,
-        '',
-        `  └ Nash model: n reservoirs in series; higher n → more peaked, delayed response`,
-        `  └ Quickflow only — baseflow must be added separately for total streamflow`,
-      ]
-    };
-  },
+   90: ({ n, K, t, Q0 }) => {
+     // Defensive numeric coercion: inputs can arrive as JSON strings from the
+     // USGS-driven context engine (Nash's Q₀ is a discharge-derived volume).
+     const nn = Number(n);
+     const Kn = Number(K);
+     const tn = Number(t);
+     const Q0n = Number(Q0);
+     const K_n1 = Math.pow(Kn, nn - 1);
+     const fact = factorial(nn - 1);
+     const q = (Math.pow(tn, nn - 1) / (K_n1 * fact)) * (1 / Kn) * Math.exp(-tn / Kn) * Q0n;
+     return {
+       result: q, unit: 'm³/s',
+       steps: [
+         '── Nash Cascade Unit Hydrograph (Nash, 1957) ──',
+         `Number of linear reservoirs n = ${nn.toFixed(0)}, Storage coefficient K = ${Kn.toFixed(2)} h`,
+         `Time t = ${tn.toFixed(1)} h, Total inflow volume Q₀ = ${Q0n.toFixed(1)} m³/s·h`,
+         '',
+         'Step 1 — Gamma-distribution coefficients:',
+         `  (n−1)! = ${nn.toFixed(0)}! = ${factorial(nn - 1).toExponential(2)}`,
+         `  K^(n−1) = (${Kn.toFixed(2)})^(${nn.toFixed(0)}−1) = ${K_n1.toExponential(3)}`,
+         '',
+         'Step 2 — Compute IUH ordinate:',
+         `  q(t) = t^(n−1) / (K^(n−1)·(n−1)!) · (1/K) · exp(−t/K) · Q₀`,
+         `  q(${tn.toFixed(1)} h) = ${q.toExponential(3)} m³/s`,
+         '',
+         'Step 3 — Hydrograph timing:',
+         `  Time to peak: t_p = (n−1)·K = ${((nn - 1) * Kn).toFixed(1)} h`,
+         '',
+         `  └ Nash model: n reservoirs in series; higher n → more peaked, delayed response`,
+         `  └ Quickflow only — baseflow must be added separately for total streamflow`,
+       ]
+     };
+   },
 
   // ── Domain 14: Cryosphere & Volcanology ──
   91: ({ accum, DDF, Tpos, days }) => {
@@ -6613,13 +6619,17 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  146: ({ alpha1, alpha2, alpha3, alpha4, beta1, beta2, beta3, beta4, phi_m, t_sec }) => {
-    // Full Klobuchar (1987) ICD-GPS-200: compute amplitude & period from 8 broadcast coefficients
-    const phiM = phi_m ?? 0;          // geomagnetic latitude of receiver (rad)
-    const tSec = t_sec ?? 50400;      // local time (seconds of day), default noon
-    const phiM_deg = phiM * 180 / Math.PI;
-    const Ai = (alpha1 ?? 50) + (alpha2 ?? 60) * phiM_deg + (alpha3 ?? 30) * phiM_deg ** 2 + (alpha4 ?? 20) * phiM_deg ** 3;   // amplitude (s)
-    const Pi = Math.max(200, (beta1 ?? 90000) + (beta2 ?? 80000) * phiM_deg + (beta3 ?? 30000) * phiM_deg ** 2 + (beta4 ?? 60000) * phiM_deg ** 3); // period (s), clamped ≥200
+   146: ({ alpha1, alpha2, alpha3, alpha4, beta1, beta2, beta3, beta4, phi_m, t_sec }) => {
+     // Full Klobuchar (1987) ICD-GPS-200: compute amplitude & period from 8 broadcast coefficients
+     const phiM = phi_m ?? 0;          // geomagnetic latitude of receiver (rad)
+     const tSec = t_sec ?? 50400;      // local time (seconds of day), default noon
+     const phiM_deg = phiM * 180 / Math.PI;
+     // Physical defaults: real broadcast α coefficients are ~1e-8 s (amplitude
+     // in seconds per unit of geomagnetic latitude); β are ~1e4 s (period).
+     // The previous defaults (α=50/60/30/20 s) were ~9 orders of magnitude
+     // too large and produced an impossible ~1.4e15 ns delay.
+     const Ai = (alpha1 ?? 5e-9) + (alpha2 ?? 0) * phiM_deg + (alpha3 ?? 0) * phiM_deg ** 2 + (alpha4 ?? 0) * phiM_deg ** 3;   // amplitude (s)
+     const Pi = Math.max(200, (beta1 ?? 50400) + (beta2 ?? 0) * phiM_deg + (beta3 ?? 0) * phiM_deg ** 2 + (beta4 ?? 0) * phiM_deg ** 3); // period (s), clamped ≥200
     const x = 2 * Math.PI * (tSec - 50400) / Pi;
     const poly = 1 - (x * x) / 2 + Math.pow(x, 4) / 24;
     // Nighttime: |x| >= π/2 → no ionospheric delay beyond the 5 ns base
@@ -6958,7 +6968,7 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   52: { 'I₀': 'I0' },
   53: { 'R_eco': 'Reco' },
   54: { 'V_cmax': 'Vcmax', 'cᵢ': 'ci', 'Γ*': 'GammaStar', 'K_c': 'Kc', 'K_o': 'Ko' },
-  55: { 'ρ': 'rho' },
+  55: { 'ρ': 'rho', 'D': 'DBH' },
   56: { 'K₀': 'K0', 'ΔpCO₂': 'dCO2' },
   57: { 'NO₃s': 'NO3s', 'NO₃d': 'NO3d' },
   58: { 'T_max': 'Tmax', 'T_min': 'Tmin', 'T_avg': 'Tavg', 'T_base': 'Tbase', 'T_upper': 'Tupper' },

@@ -292,8 +292,8 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     8: ['point'],                     // Kolmogorov Spectrum → turbulence spectrum at a point
 
     // ── Domain 2: Hydrology & Oceanography (Eqs 9–18) ──
-    9: ['point'],                     // FAO-56 ET → reference station point
-    10: ['basin'],                    // SCS-CN Runoff → watershed/basin
+    9: ['bbox'],                      // FAO-56 ET → landscape ET field
+    10: ['bbox'],                      // SCS-CN Runoff → watershed runoff field
     11: ['transect'],                 // Manning's → river channel transect
     12: ['basin'],                    // Rational Method → small catchment
     13: ['transect'],                 // Muskingum Routing → river reach transect
@@ -301,7 +301,7 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     15: ['point'],                    // Ekman Spiral → ocean point
     16: ['bbox'],                     // Geostrophic Current → ocean region
     17: ['bbox'],                     // Ocean Heat Budget → regional ocean area
-    18: ['point'],                    // Green-Ampt Infiltration → soil point
+    18: ['bbox'],                     // Green-Ampt Infiltration → catchment infiltration field
 
     // ── Domain 3: Geophysics & Seismology (Eqs 19–25) ──
     19: ['region'],                   // Gutenberg-Richter → regional seismicity
@@ -328,7 +328,7 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     36: ['two-points'],               // Haversine Distance → two points
     37: ['bbox'],                     // Kriging → spatial interpolation area
     38: ['bbox'],                     // IDW → spatial interpolation area
-    39: ['point'],                    // Gaussian Plume → source point
+    39: ['bbox'],                     // Gaussian Plume → dispersion over area
     40: ['point'],                    // Gumbel Distribution → station point
     41: ['point'],                    // GPD → station point
     42: ['bbox'],                     // Semivariogram → spatial data area
@@ -336,9 +336,9 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     // ── Domain 6: Soil Science & Land Surface (Eqs 43–50) ──
     43: ['point'],                    // Van Genuchten → soil sample point
     44: ['point'],                    // Brooks-Corey → soil sample point
-    45: ['basin'],                    // USLE → hillslope/watershed
+    45: ['bbox'],                     // USLE → erosion field over watershed
     46: ['point'],                    // Q10 Soil Respiration → soil point
-    47: ['point'],                    // de Vries Thermal → soil sample point
+    47: ['bbox'],                     // de Vries Thermal → soil thermal field
     48: ['point'],                    // Monin-Obukhov → flux tower point
     49: ['point'],                    // Log Wind Profile → measurement tower point
     50: ['point'],                    // Ball-Berry → leaf/canopy point
@@ -349,19 +349,19 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     53: ['bbox'],                     // NEE → ecosystem flux area
     54: ['point'],                    // FvCB Photosynthesis → leaf/canopy point
     55: ['bbox', 'polygon'],          // Allometric Biomass → forest plot area
-    56: ['point'],                    // Ocean CO2 Uptake → ocean station point
+    56: ['bbox'],                     // Ocean CO2 Uptake → ocean flux field
     57: ['point'],                    // Redfield Ratio → ocean sample point
 
     // ── Domain 8: Agriculture & Crop Science (Eqs 58–63) ──
     58: ['bbox', 'polygon'],          // Growing Degree Days → crop field
     59: ['point'],                    // Priestley-Taylor → station point
     60: ['point'],                    // Hargreaves-Samani → station point
-    61: ['bbox', 'polygon'],          // FAO Yield-Water → crop field
+    61: ['point'],                    // FAO Yield-Water → Ky is a crop-calibrated scalar ratio
     62: ['point'],                    // Eppley Phytoplankton → ocean station point
-    63: ['point'],                    // Bigleaf PM → flux tower point
+    63: ['bbox'],                     // Bigleaf PM → canopy flux field
 
     // ── Domain 9: Atmospheric Chemistry (Eqs 64–65) ──
-    64: ['point'],                    // Chapman Ozone → atmospheric column point
+    64: ['bbox'],                     // Chapman Ozone → atmospheric O3 field
     65: ['point'],                    // Pollutant Lifetime → station point
 
     // ── Domain 10: Ocean Dynamics (Eqs 66–73) ──
@@ -370,20 +370,20 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     68: ['bbox'],                     // Munk Viscous → ocean basin
     69: ['bbox'],                     // Stommel Box → ocean basin
     70: ['point'],                    // TEOS-10 Seawater → ocean profile point
-    71: ['point'],                    // Osborn-Cox → ocean profile point
+    71: ['point'],                     // Osborn-Cox → vertical ocean profile point
     72: ['point'],                    // PWP Mixed Layer → ocean profile point
     73: ['bbox'],                     // Pierson-Moskowitz → ocean wave region
 
     // ── Domain 11: Coastal & Wave Mechanics (Eqs 74–80) ──
-    74: ['coastal'],                  // Wave Runup → coastal zone
+    74: ['bbox'],                     // Wave Runup → longshore runup field
     75: ['coastal'],                  // Bruun Rule → coastal zone     76: ['coastal'],                  // McCowan Breaker Criterion → coastal zone
     77: ['coastal'],                  // Longshore Transport → coastal zone
-    78: ['point'],                    // Wave Dispersion → ocean point
+    78: ['bbox'],                     // Wave Dispersion → depth-varying wave field
     79: ['point'],                    // Stokes Drift → ocean point
     80: ['bbox'],                     // JONSWAP → wave generation area
 
     // ── Domain 12: Geomorphology (Eqs 81–87) ──
-    81: ['transect'],                 // Stream Power → river transect
+    81: ['bbox'],                     // Stream Power → erosion field along network
     82: ['basin'],                    // River Network Scaling → drainage basin
     83: ['coastal'],                  // Richardson Fractal → coastline
     84: ['bbox'],                     // Slope Stability → slope area
@@ -405,18 +405,18 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
 
     // ── Domain 15: Climate Dynamics (Eqs 96–101) ──
     96: ['region'],                   // Budyko-Sellers → climate region
-    97: ['region'],                   // Climate Sensitivity → global/climate region
+    97: ['point'],                    // Climate Sensitivity → global-mean scalar, not a spatial field
     98: ['point'],                    // Planck Feedback → planetary point
     99: ['bbox'],                     // Rossby Wave → synoptic-scale region
-    100: ['bbox'],                    // Charney-Stern → atmospheric region
+    100: ['point'],                    // Charney-Stern → pointwise stability verdict
     101: ['bbox'],                    // Eady Growth Rate → atmospheric region
 
     // ── Domain 16: Atmospheric Dynamics (Eqs 102–107) ──
     102: ['bbox'],                    // QG PV → atmospheric region
-    103: ['point'],                   // Reynolds Decomposition → turbulence measurement point
+    103: ['bbox'],                   // Reynolds Decomposition → turbulent flow field
     104: ['point'],                   // Ekman Layer Depth → boundary layer point
     105: ['point'],                   // Convective Velocity Scale → CBL point
-    106: ['transect'],                // Petterssen Frontogenesis → frontal transect
+    106: ['bbox'],                    // Petterssen Frontogenesis → frontal field
     107: ['bbox'],                    // Vorticity Equation → synoptic region
 
     // ── Domain 17: Cloud Physics (Eqs 108–110) ──
@@ -426,15 +426,15 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
 
     // ── Domain 18: Geodesy (Eqs 111–115) ──
     111: ['point'],                   // IERS Rotation Matrix → geodetic point
-    112: ['point'],                   // Earth Tides → geodetic point
-    113: ['point'],                   // EGM2008 → geodetic point
+    112: ['bbox'],                   // Earth Tides → global tidal field
+    113: ['bbox'],                   // EGM2008 → global gravity field
     114: ['point'],                   // Helmert Transformation → datum point
-    115: ['point'],                   // Geoid Height → geodetic point
+    115: ['bbox'],                   // Geoid Height → global geoid field
 
     // ── Domain 19: Thermosphere/Ionosphere (Eqs 116–122) ──
     116: ['point'],                   // NRLMSISE-00 → atmospheric profile point
     117: ['point'],                   // IRI Ionosphere → ionospheric profile point
-    118: ['point'],                   // Joule Heating → auroral point
+    118: ['bbox'],                   // Joule Heating → auroral heating field
     119: ['point'],                   // Ionospheric Scintillation → GNSS station point
     120: ['point'],                   // Magnetopause Standoff → magnetosphere point
     121: ['point'],                   // Dst Index → geomagnetic point
@@ -469,7 +469,7 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     // ── Domain 24: Data Assimilation (Eqs 141–144) ──
     141: ['bbox'],                    // EnKF → analysis domain
     142: ['bbox'],                     // Optimal Interpolation → analysis domain
-    143: ['bbox'],                     // 4D-Var → analysis domain
+    143: ['point'],                    // 4D-Var → J is a scalar cost objective
     144: ['point'],                    // Shannon Entropy → data source point
 
     // ── Domain 25: Signal Processing (Eqs 145–147) ──
