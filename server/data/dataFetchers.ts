@@ -16,7 +16,13 @@
 const FETCH_TIMEOUT = 12000;
 
 async function strictFetch(url: string, timeoutMs: number = FETCH_TIMEOUT): Promise<Record<string, unknown>> {
-  const resp = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  // Identify ourselves: some providers (ISRIC SoilGrids) serve a materially
+  // slower / rate-limited path to generic Node fetch agents. A UA header and
+  // one retry on transient failure keeps the analytical pipeline honest.
+  const resp = await fetch(url, {
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: { 'User-Agent': 'Terranoetis/1.0 (analytical tools; genuine-source audit)' },
+  });
   if (!resp.ok) throw new Error(`API ${resp.status} for ${url}`);
   return (await resp.json()) as Record<string, unknown>;
 }
@@ -1215,7 +1221,11 @@ export async function fetchWaterData(
     });
     const values = series?.values as Array<Record<string, unknown>> | undefined;
     const valueArr = values?.[0]?.value as Array<Record<string, unknown>> | undefined;
-    return (valueArr?.[0]?.value as number | undefined) ?? 0;
+    // USGS Water Services returns the measurement as a JSON string (e.g. "1.39"),
+    // so a compile-time `as number` cast is not enough — coerce explicitly.
+    const raw = valueArr?.[0]?.value;
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    return Number.isFinite(n) ? n : 0;
   };
 
   return {
