@@ -102,7 +102,7 @@ DOMAIN_TEMPLATES[8] = compactTemplate(
     { min: 0, max: 5, label: 'Slow', color: '#3b82f6', description: 'Slow development' },
     { min: 5, max: 15, label: 'Normal', color: '#22c55e', description: 'Normal development' },
     { min: 15, max: 25, label: 'Rapid', color: '#eab308', description: 'Rapid development' },
-    { min: 25, max: Infinity, label: 'Optimal+', color: '#f97316', description: 'Optimal or above' },
+    { min: 25, max: Infinity, label: 'Optimal (≥25 °C·day)', color: '#f97316', description: 'Rapid crop development — near-optimal heat accumulation' },
   ],
   { method: 'empirical', rmse: 10, rmseUnit: '%', contributingFactors: [{ factor: 'Temperature data', contribution: '+/- 0.5-1.5 C' }, { factor: 'Crop thresholds', contribution: 'Varies by cultivar' }], overallAssessment: 'Agricultural indices have +/- 10% typical uncertainty.' },
   [0, Infinity],

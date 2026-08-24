@@ -17,6 +17,10 @@ export interface ComputeResult {
   unit?: string;
   steps: string[];
   secondary?: Array<{ key: string; value: number; unit?: string; label: string }>;
+  /** Chart-series output: ordered x/y pairs for rendering the tool's
+   *  visualization type (timeseries, profile, spectrum, scatter, etc.).
+   *  Each series has a label and an array of points. */
+  series?: Array<{ label: string; points: Array<{ x: number; y: number }>; color?: string }>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -728,7 +732,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       '',
       `  └ Interpretation: ${range < 2 ? 'Microtidal regime (< 2 m)' : range < 4 ? 'Mesotidal regime (2–4 m)' : 'Macrotidal regime (> 4 m)'}${official != null ? ' | height above MLLW datum' : ''}`
     );
-    return { result: h, unit: 'm', steps };
+    return {
+      result: h, unit: 'm',
+      steps,
+    };
   },
   15: ({ tau, rho, A, f, vTheta: _vTheta }) => {
     if (!Number.isFinite(f) || Math.abs(f) < 1e-7) {
@@ -3001,6 +3008,36 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
     return {
       result, unit: '°C·day',
+      // Series: cumulative GDD over the genuine GHCN-Daily station record.
+      // Only emitted when the station daily series is available — no synthetic
+      // fallback when no station is found (honest empty chart).
+      series: hasSeries
+        ? [
+            {
+              label: 'GDD Method 1 (clamp mean)',
+              color: '#8b5cf6',
+              points: dMax.map((_, i) => {
+                let cum = 0;
+                for (let j = 0; j <= i; j++) cum += dayGdd(dMax[j], dMin[j]).m1;
+                return { x: i, y: Number.isFinite(cum) ? cum : 0 };
+              }),
+            },
+            {
+              label: 'GDD Method 2 (clamp extremes)',
+              color: '#f59e0b',
+              points: dMax.map((_, i) => {
+                let cum = 0;
+                for (let j = 0; j <= i; j++) cum += dayGdd(dMax[j], dMin[j]).m2;
+                return { x: i, y: Number.isFinite(cum) ? cum : 0 };
+              }),
+            },
+          ]
+        : undefined,
+      secondary: [
+        { key: 'method2_gdd', value: Number.isFinite(sum2) ? sum2 : Number.NaN, unit: '°C·day', label: 'GDD (Method 2)' },
+        { key: 'method_difference', value: Number.isFinite(sum2 - sum1) ? sum2 - sum1 : Number.NaN, unit: '°C·day', label: 'Method Difference (M2 − M1)' },
+        { key: 'method2_pct', value: sum1 > 0 ? ((sum2 - sum1) / sum1 * 100) : Number.NaN, unit: '%', label: 'Difference (%)' },
+      ],
       steps: [
         '── Growing Degree Days (McMaster & Wilhelm, 1997) ──',
         'Paper Eq. (1): GDD = Σ [(TMAX + TMIN)/2 − TBASE] — "one equation, two interpretations".',

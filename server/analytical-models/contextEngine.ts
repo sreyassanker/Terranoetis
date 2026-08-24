@@ -1587,19 +1587,22 @@ function mapInputs(
       // series (authentic, no key). When no station is found the values
       // are NaN and the engine returns an honest NaN — Open-Meteo current
       // temperature is NOT substituted for a station's daily max/min
-      // (proxy rule). Explicit user T_max/T_min take precedence over the
-      // station series (single-day mode).
+      // (proxy rule).
+      // The UI sends default T_max/T_min (25/12) whenever the fields are
+      // left empty, so we must NOT treat "a number present" as an explicit
+      // user override — that would discard the genuine GHCN series and force
+      // single-day mode. The series is always used when a station resolves;
+      // explicit T_max/T_min only seed the single-day fallback (no station).
       const recent = gddStation?.days.find(d => Number.isFinite(d.tmaxC) && Number.isFinite(d.tminC));
-      const explicitT = userInputs['Tmax'] != null || userInputs['Tmin'] != null;
       return {
         Tmax: u('Tmax', Number.isFinite(recent?.tmaxC ?? NaN) ? recent!.tmaxC : Number.NaN),
         Tmin: u('Tmin', Number.isFinite(recent?.tminC ?? NaN) ? recent!.tminC : Number.NaN),
         Tbase: u('Tbase', 10),
         Tupper: u('Tupper', 30),
-        // Full GHCN daily series (most-recent-first) so the engine can
-        // accumulate GDD over the observation window — unless the user
-        // supplied explicit T_max/T_min, which force single-day mode.
-        __gddDays: !explicitT ? (gddStation?.days ?? null) : null,
+        // Full GHCN daily series (most-recent-first) powers the cumulative
+        // GDD curve. Kept even when the UI sent default T_max/T_min — the
+        // station series is the paper's genuine daily record.
+        __gddDays: gddStation?.days ?? null,
         __gddStation: gddStation ? {
           name: gddStation.station, sid: gddStation.sid,
           lat: gddStation.stationLat, lon: gddStation.stationLon,
@@ -2769,8 +2772,14 @@ export async function computeWithContext(
     // nearest GHCN-Daily station (NOAA ACIS, no key) — the paper's
     // "standard Class A weather station" daily max/min at 2 m. Null when
     // no reporting station is nearby and the engine then returns an
-    // honest NaN.
-    safe(id === 58 || id === 60 ? fetchGddStationData(lat, lon, 30) : Promise.resolve(null), null, 25000),
+    // honest NaN. The ACIS API is occasionally slow under the parallel
+    // fetch load, so retry once before giving up (the station series is
+    // what powers the GDD timeseries chart).
+    safe((async () => {
+      let g = await fetchGddStationData(lat, lon, 30).catch(() => null);
+      if (!g) g = await fetchGddStationData(lat, lon, 30).catch(() => null);
+      return g;
+    })(), null, 45000),
     // Tool 75 (Bruun 1962): genuine LOCAL relative sea-level rise rate —
     // OLS trend of the nearest NOAA CO-OPS tide-gauge monthly MSL series
     // (≥15 yr, NOAA's own credibility threshold). Null when no long gauge

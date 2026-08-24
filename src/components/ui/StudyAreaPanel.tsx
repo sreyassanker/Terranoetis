@@ -19,7 +19,7 @@ interface StudyAreaPanelProps {
   setAreas: React.Dispatch<React.SetStateAction<StudyAreaItem[]>>;
   show: boolean;
   onClose: () => void;
-  onStartDraw: (type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE') => void;
+  onStartDraw: (type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE' | 'POINT') => void;
   onStopDraw: () => void;
   drawing: boolean;
   setDrawing: React.Dispatch<React.SetStateAction<boolean>>;
@@ -36,7 +36,7 @@ export default React.memo(function StudyAreaPanel({
   const [tab, setTab] = useState<TabId>('draw');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadStatus, setUploadStatus] = useState('');
-  const [drawShape, setDrawShape] = useState<'RECTANGLE' | 'POLYGON' | 'CIRCLE' | null>(null);
+  const [drawShape, setDrawShape] = useState<'RECTANGLE' | 'POLYGON' | 'CIRCLE' | 'POINT' | null>(null);
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -88,7 +88,7 @@ export default React.memo(function StudyAreaPanel({
     setUploadStatus(`Exported ${geojson.features.length} features`);
   }, [areas]);
 
-  const handleDrawStart = useCallback((type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE') => {
+  const handleDrawStart = useCallback((type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE' | 'POINT') => {
     setDrawShape(type);
     onStartDraw(type);
     setDrawing(true);
@@ -156,6 +156,10 @@ export default React.memo(function StudyAreaPanel({
             <div className="study-section-title">Draw on Globe</div>
             {!drawing ? (
               <div className="study-draw-grid">
+                <button className="study-draw-btn" onClick={() => handleDrawStart('POINT')}>
+                  <span className="study-draw-icon">•</span>
+                  <span>Point</span>
+                </button>
                 <button className="study-draw-btn" onClick={() => handleDrawStart('RECTANGLE')}>
                   <span className="study-draw-icon">▭</span>
                   <span>Rectangle</span>

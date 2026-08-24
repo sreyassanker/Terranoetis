@@ -9,6 +9,7 @@ import {
   STUDY_AREA_MODE_LABELS, CATEGORY_FILTER_META, AUTO_DATA_SOURCE_LABELS,
   AGGREGATION_LABELS, TEMPORAL_MODE_LABELS,
 } from '@/data/analyticalModels';
+import { ToolResultChart } from './ToolResultChart';
 
 export interface ToolGrid {
   latMin: number; latMax: number; lonMin: number; lonMax: number;
@@ -24,7 +25,7 @@ interface ToolDialogProps {
   polygon?: Array<Array<[number, number]>>;
   onToolResult?: (
     toolId: number, label: string, lat: number, lon: number,
-    value?: number, grid?: ToolGrid, unit?: string,
+    value?: number, grid?: ToolGrid, unit?: string, vizType?: string,
   ) => void;
   onClearResult?: () => void;
 }
@@ -158,9 +159,17 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
     ? baseModes
     : baseModes;
   const defaultMode: StudyAreaMode = bbox && supportsBbox ? 'bbox' : (allowedModes[0] ?? 'point');
+  // Auto-detect the active study area: bbox tools use the drawn box; point-only
+  // tools use the box centre (a drawn point expands to a small ±0.05° bbox, so
+  // its centre is exactly the placed point).
+  const bboxCentre = bbox && bbox.latMax > bbox.latMin && bbox.lonMax > bbox.lonMin
+    ? { lat: (bbox.latMin + bbox.latMax) / 2, lon: (bbox.lonMin + bbox.lonMax) / 2 }
+    : null;
   const initialArea: StudyArea = defaultMode === 'bbox' && bbox
     ? { mode: 'bbox' as const, lat: 0, lon: 0, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, lat1: bbox.latMin, lon1: bbox.lonMin, lat2: bbox.latMax, lon2: bbox.lonMax }
-    : { ...DEFAULT_STUDY_AREA, mode: defaultMode };
+    : defaultMode === 'point' && bboxCentre
+      ? { ...DEFAULT_STUDY_AREA, mode: 'point' as const, lat: bboxCentre.lat, lon: bboxCentre.lon }
+      : { ...DEFAULT_STUDY_AREA, mode: defaultMode };
   const [area, setArea] = useState<StudyArea>(initialArea);
   const isMultiYear = tool.analysisMeta?.timeGranularity === 'multi-year';
   const [start, setStart] = useState(isMultiYear ? '2020' : '2024-01-01');
@@ -168,7 +177,8 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{
-    result: number; unit?: string; steps: string[]; log?: string[]; warnings?: string[];
+    result: number; unit?: string; steps: string[]; series?: Array<{ label: string; points: Array<{ x: number; y: number }>; color?: string }>; secondary?: Array<{ key: string; value: number; unit?: string; label: string }>; log?: string[]; warnings?: string[];
+    visualizationType?: string;
     grid?: ToolGrid; dataSource?: string; fetchedParams?: Record<string, unknown>; label?: string;
     validation?: { valid: boolean; errors: string[]; warnings: string[] };
     qualityControl?: { passed: boolean; checks: Array<{ name: string; passed: boolean; message: string; severity: string }> };
@@ -233,7 +243,8 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
       const data = await res.json();
       const grid = data.grid ?? undefined;
       setResult({
-        result: data.result, unit: data.unit, steps: data.steps ?? [], log: data.log,
+        result: data.result, unit: data.unit, steps: data.steps ?? [], series: data.series, secondary: data.secondary, log: data.log,
+        visualizationType: data.visualizationType,
         warnings: data.warnings, grid, dataSource: data.dataSource, fetchedParams: data.fetchedParams,
         label: tool.name,
         validation: data.validation, qualityControl: data.qualityControl,
@@ -246,7 +257,7 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
         const label = `${tool.name}: ${formatResult(val, data.unit)}`;
         const useLat = area.mode === 'point' ? area.lat : (bbox ? (bbox.latMin + bbox.latMax) / 2 : area.lat);
         const useLon = area.mode === 'point' ? area.lon : (bbox ? (bbox.lonMin + bbox.lonMax) / 2 : area.lon);
-        onToolResult(tool.id, label, useLat, useLon, Number.isFinite(val) ? val : undefined, grid, data.unit);
+        onToolResult(tool.id, label, useLat, useLon, Number.isFinite(val) ? val : undefined, grid, data.unit, data.visualizationType);
       }
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setRunning(false); }
@@ -513,6 +524,27 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
             <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 14, color: '#e2e8f0', fontWeight: 600 }}>
               {formatResult(result.result, result.unit)}
             </div>
+
+            {/* Secondary outputs (e.g. GDD Method 2, method difference) */}
+            {result.secondary && result.secondary.length > 0 && (
+              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {result.secondary.map((s) => (
+                  <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontFamily: 'JetBrains Mono, monospace', color: '#94a3b8', padding: '1px 0', borderBottom: '1px dashed rgba(255,255,255,0.06)' }}>
+                    <span>{s.label}</span>
+                    <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{Number.isFinite(s.value) ? (Math.abs(s.value) >= 100 ? s.value.toFixed(1) : s.value.toFixed(2)) + (s.unit ? ` ${s.unit}` : '') : 'NaN'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Visualization: render the tool's chart series (timeseries, profile,
+                spectrum, scatter, bar, histogram, distribution) when the engine
+                emitted numeric series data. */}
+            {result.series && result.series.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <ToolResultChart vizType={result.visualizationType ?? 'scalar'} series={result.series} unit={result.unit} color={color} />
+              </div>
+            )}
 
             {/* Data Source Provenance */}
             {result.dataSource && result.dataSource !== 'user-provided' && (

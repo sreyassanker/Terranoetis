@@ -17,6 +17,7 @@ interface AnalyticsWorkbenchProps {
   onClose: () => void;
   bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
   polygon?: Array<Array<[number, number]>>;
+  points?: Array<{ lat: number; lon: number }>;
   onToolResult?: (
     toolId: number, label: string, lat: number, lon: number,
     value?: number, grid?: ToolGrid, unit?: string,
@@ -51,7 +52,7 @@ const ALL_TOOLS = flattenTools();
 /** Collect all unique domain names for the filter dropdown. */
 const ALL_DOMAIN_NAMES = Array.from(new Set(PARTS.flatMap(p => p.domains.map(d => d.name)))).sort();
 
-export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, bbox, polygon, onToolResult, onClearResult, zIndex = 999 }) => {
+export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, bbox, polygon, points, onToolResult, onClearResult, zIndex = 999 }) => {
   const [search, setSearch] = useState('');
   const [expandedParts, setExpandedParts] = useState<Set<string>>(new Set(['part1']));
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set(['atmo']));
@@ -174,7 +175,7 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8b5cf6', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8, padding: 0 }}>
               <ChevronDown size={10} style={{ transform: 'rotate(90deg)' }} /> Back to tools
             </button>
-            <ToolDialog tool={selectedTool} color={selectedColor} onClose={() => setSelectedTool(null)} bbox={bbox} polygon={polygon} onToolResult={onToolResult} onClearResult={onClearResult} />
+            <ToolDialog tool={selectedTool} color={selectedColor} onClose={() => setSelectedTool(null)} bbox={bbox} polygon={polygon} points={points} onToolResult={onToolResult} onClearResult={onClearResult} />
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
