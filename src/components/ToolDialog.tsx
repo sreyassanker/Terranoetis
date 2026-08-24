@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   Play, Loader2, Check, AlertCircle, MapPin, Clock, Filter, Database,
-  BookOpen, X, Info, Layers, Activity, Zap, Trash2, TrendingUp,
+  BookOpen, X, Info, Layers, Activity, Zap, Trash2, TrendingUp, FileDown,
 } from 'lucide-react';
 import {
   type AnalysisTool, type AnalysisToolParameter, type StudyAreaMode,
@@ -10,6 +10,7 @@ import {
   AGGREGATION_LABELS, TEMPORAL_MODE_LABELS,
 } from '@/data/analyticalModels';
 import { ToolResultChart } from './ToolResultChart';
+import { exportToolResultAsPDF } from '@/lib/toolReportPdf';
 
 export interface ToolGrid {
   latMin: number; latMax: number; lonMin: number; lonMax: number;
@@ -23,6 +24,7 @@ interface ToolDialogProps {
   onClose: () => void;
   bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
   polygon?: Array<Array<[number, number]>>;
+  points?: Array<{ lat: number; lon: number }>;
   onToolResult?: (
     toolId: number, label: string, lat: number, lon: number,
     value?: number, grid?: ToolGrid, unit?: string, vizType?: string,
@@ -69,7 +71,7 @@ const ParamInput: React.FC<{
       ) : (
         <input
           type="number" value={value} onChange={(e) => onChange(e.target.value)}
-          placeholder={String(def)} min={min ?? undefined} max={max ?? undefined} step="any"
+          placeholder={def === null || def === undefined ? 'auto' : String(def)} min={min ?? undefined} max={max ?? undefined} step="any"
           style={{ ...fieldStyle, borderColor: `${color}30` }}
         />
       )}
@@ -143,7 +145,7 @@ const GridHeatmap: React.FC<{ grid: ToolGrid; color: string }> = ({ grid }) => {
   );
 };
 
-const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, polygon, onToolResult, onClearResult }) => {
+const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, polygon, points, onToolResult, onClearResult }) => {
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   // When a study area is drawn on the globe, default every tool to bbox/grid
   // mode so the model is swept across the area's interior and overlaid as IDW
@@ -165,11 +167,19 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
   const bboxCentre = bbox && bbox.latMax > bbox.latMin && bbox.lonMax > bbox.lonMin
     ? { lat: (bbox.latMin + bbox.latMax) / 2, lon: (bbox.lonMin + bbox.lonMax) / 2 }
     : null;
+  // Auto-detect the active point(s): placed point markers take priority; fall
+  // back to the bbox centre (a drawn point expands to a ±0.05° bbox).
+  const autoPoint = (points && points.length > 0)
+    ? points[0]
+    : bboxCentre;
+  const autoPoint2 = (points && points.length > 1) ? points[1] : undefined;
   const initialArea: StudyArea = defaultMode === 'bbox' && bbox
     ? { mode: 'bbox' as const, lat: 0, lon: 0, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, lat1: bbox.latMin, lon1: bbox.lonMin, lat2: bbox.latMax, lon2: bbox.lonMax }
-    : defaultMode === 'point' && bboxCentre
-      ? { ...DEFAULT_STUDY_AREA, mode: 'point' as const, lat: bboxCentre.lat, lon: bboxCentre.lon }
-      : { ...DEFAULT_STUDY_AREA, mode: defaultMode };
+    : defaultMode === 'point' && autoPoint
+      ? { ...DEFAULT_STUDY_AREA, mode: 'point' as const, lat: autoPoint.lat, lon: autoPoint.lon }
+      : defaultMode === 'two-points' && autoPoint
+        ? { ...DEFAULT_STUDY_AREA, mode: 'two-points' as const, lat1: autoPoint.lat, lon1: autoPoint.lon, lat2: autoPoint2?.lat ?? autoPoint.lat + 5, lon2: autoPoint2?.lon ?? autoPoint.lon + 5 }
+        : { ...DEFAULT_STUDY_AREA, mode: defaultMode };
   const [area, setArea] = useState<StudyArea>(initialArea);
   const isMultiYear = tool.analysisMeta?.timeGranularity === 'multi-year';
   const [start, setStart] = useState(isMultiYear ? '2020' : '2024-01-01');
@@ -541,7 +551,7 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
                 spectrum, scatter, bar, histogram, distribution) when the engine
                 emitted numeric series data. */}
             {result.series && result.series.length > 0 && (
-              <div style={{ marginTop: 8 }}>
+              <div id="tool-result-chart" style={{ marginTop: 8 }}>
                 <ToolResultChart vizType={result.visualizationType ?? 'scalar'} series={result.series} unit={result.unit} color={color} />
               </div>
             )}
@@ -687,6 +697,31 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
                   <div key={i} style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: l.includes('ERROR') ? '#ef4444' : l.includes('WARN') ? '#fbbf24' : l.includes('PASS') ? '#86efac' : l.match(/^\[\d\/7\]/) ? '#a78bfa' : '#94a3b8', lineHeight: 1.5 }}>{l}</div>
                 ))}
               </div>
+            )}
+
+            {resultIsFinite && (
+              <button onClick={async () => {
+                const chartEl = document.getElementById('tool-result-chart');
+                await exportToolResultAsPDF({
+                  toolName: tool.name || tool.toolName || '',
+                  toolId: tool.id,
+                  resultText: `${formatResult(result.result, result.unit)}`,
+                  resultUnit: result.unit,
+                  secondary: result.secondary?.map(s => ({ label: s.label, value: `${Number.isFinite(s.value) ? (Math.abs(s.value) >= 100 ? s.value.toFixed(1) : s.value.toFixed(2)) + (s.unit ? ' ' + s.unit : '') : 'NaN'}` })),
+                  dataSource: result.dataSource,
+                  contextualAnalysis: result.interpretation?.contextualAnalysis,
+                  recommendations: result.interpretation?.recommendations,
+                  steps: result.steps,
+                  chartEl,
+                });
+              }}
+                style={{
+                  marginTop: 6, width: '100%', padding: '5px 0', borderRadius: 6, border: '1px solid rgba(139,92,246,0.3)',
+                  background: 'rgba(139,92,246,0.08)', color: '#a78bfa', fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                }}>
+                <FileDown size={10} /> Download PDF Report
+              </button>
             )}
 
             {onClearResult && (

@@ -2333,7 +2333,7 @@ export interface GddStationData {
 }
 
 export async function fetchGddStationData(
-  lat: number, lon: number, daysBack = 30,
+  lat: number, lon: number, startDate?: string, endDate?: string,
 ): Promise<GddStationData | null> {
   // 1) Nearest station with both daily max AND min temperature records
   //    within ±1.5° — skip stations that only report one of the two.
@@ -2359,8 +2359,14 @@ export async function fetchGddStationData(
     .map((s) => ({ s, d: hDist(lon, lat, s.ll![0], s.ll![1]) }))
     .sort((a, b) => a.d - b.d);
 
-  const edate = new Date().toISOString().slice(0, 10);
-  const sdate = new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10);
+  // Request window: exactly the selected [start, end] range (honoured
+  // verbatim); when no dates are given, fall back to the trailing 30 days.
+  const sdate = startDate
+    ? new Date(startDate).toISOString().slice(0, 10)
+    : new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const edate = endDate
+    ? new Date(endDate).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
 
   for (const cand of ranked.slice(0, 8)) {
     const sid6 = cand.s.sids?.find((x) => x.endsWith(' 6'))?.split(' ')[0];

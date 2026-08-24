@@ -374,6 +374,8 @@ function mapInputs(
     lon: number;
     studyArea?: StudyArea;
     pop?: { populationDensity: number; totalPopulation: number };
+    /** User-selected category filters (e.g. crop type → T_base/T_upper). */
+    filters?: Record<string, unknown>;
   },
 ): Record<string, unknown> {
   const w = ctx.weather;
@@ -1587,18 +1589,31 @@ function mapInputs(
       // series (authentic, no key). When no station is found the values
       // are NaN and the engine returns an honest NaN — Open-Meteo current
       // temperature is NOT substituted for a station's daily max/min
-      // (proxy rule).
-      // The UI sends default T_max/T_min (25/12) whenever the fields are
-      // left empty, so we must NOT treat "a number present" as an explicit
-      // user override — that would discard the genuine GHCN series and force
-      // single-day mode. The series is always used when a station resolves;
-      // explicit T_max/T_min only seed the single-day fallback (no station).
+      // (proxy rule). T_max/T_min carry no frontend default (removed), so an
+      // empty field is NOT an override; the genuine GHCN series is always
+      // used when a station resolves, and explicit T_max/T_min only seed the
+      // single-day fallback when no station exists.
       const recent = gddStation?.days.find(d => Number.isFinite(d.tmaxC) && Number.isFinite(d.tminC));
+      // Crop-type → threshold mapping (paper §3 + Cross & Zuber 1972,
+      // McMaster & Smika 1988). General = corn reference (10/30 °C).
+      const CROP_THRESHOLDS: Record<string, { base: number; upper: number }> = {
+        'General': { base: 10, upper: 30 },
+        'Wheat': { base: 0, upper: 25 },
+        'Maize': { base: 10, upper: 30 },
+        'Rice': { base: 10, upper: 35 },
+        'Soybean': { base: 10, upper: 30 },
+        'Cotton': { base: 15, upper: 35 },
+      };
+      const cropSel = ctx.filters?.['crop-type'] ?? ctx.filters?.['Crop Type'];
+      const thresh = typeof cropSel === 'string' ? CROP_THRESHOLDS[cropSel] : undefined;
+      // Crop-type filter drives T_base/T_upper and OVERRIDES the UI's default
+      // T_base/T_upper inputs (10/30) — otherwise selecting e.g. Wheat (0/25)
+      // would be silently ignored because the default input wins in u().
       return {
         Tmax: u('Tmax', Number.isFinite(recent?.tmaxC ?? NaN) ? recent!.tmaxC : Number.NaN),
         Tmin: u('Tmin', Number.isFinite(recent?.tminC ?? NaN) ? recent!.tminC : Number.NaN),
-        Tbase: u('Tbase', 10),
-        Tupper: u('Tupper', 30),
+        Tbase: thresh ? thresh.base : u('Tbase', 10),
+        Tupper: thresh ? thresh.upper : u('Tupper', 30),
         // Full GHCN daily series (most-recent-first) powers the cumulative
         // GDD curve. Kept even when the UI sent default T_max/T_min — the
         // station series is the paper's genuine daily record.
@@ -2776,8 +2791,15 @@ export async function computeWithContext(
     // fetch load, so retry once before giving up (the station series is
     // what powers the GDD timeseries chart).
     safe((async () => {
-      let g = await fetchGddStationData(lat, lon, 30).catch(() => null);
-      if (!g) g = await fetchGddStationData(lat, lon, 30).catch(() => null);
+      // Tools 58/60 (GDD, Hargreaves): fetch the station's daily series over
+      // the exact selected [start, end] time window so the accumulated GDD
+      // reflects the user's chosen range verbatim. Retry once on transient
+      // ACIS failure. Other tools don't consume the station series.
+      if (id !== 58 && id !== 60) return null;
+      const s = context?.time?.start || undefined;
+      const e = context?.time?.end || undefined;
+      let g = await fetchGddStationData(lat, lon, s, e).catch(() => null);
+      if (!g) g = await fetchGddStationData(lat, lon, s, e).catch(() => null);
       return g;
     })(), null, 45000),
     // Tool 75 (Bruun 1962): genuine LOCAL relative sea-level rise rate —
@@ -2879,7 +2901,7 @@ export async function computeWithContext(
     studyArea: context?.studyArea,
   };
 
-  const enrichedInputs = alignInputs(id, mapInputs(id, normInputs, { ...ctx, pop: popData }));
+  const enrichedInputs = alignInputs(id, mapInputs(id, normInputs, { ...ctx, pop: popData, filters: context?.filters }));
   const computeFn = EQUATION_ENGINE[id];
   if (!computeFn) return null;
   const baseResult = computeFn(enrichedInputs);

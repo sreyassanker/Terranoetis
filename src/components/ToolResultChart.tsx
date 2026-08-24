@@ -17,7 +17,8 @@ interface Props {
   color?: string;
 }
 
-const CHART_COLORS = ['#60a5fa', '#34d399', '#a78bfa', '#f59e0b', '#ef4444', '#22d3ee', '#ec4899', '#84cc16'];
+// Q1-journal / colour-blind-safe palette (Okabe-Ito): high contrast, print-safe.
+const CHART_COLORS = ['#0072B2', '#E69F00', '#009E73', '#CC79A7', '#D55E00', '#56B4E9', '#F0E442', '#000000'];
 
 const tooltipStyle = {
   background: 'rgba(15,23,42,0.95)',
@@ -106,7 +107,7 @@ export function ToolResultChart({ vizType, series, unit, color }: Props) {
             <YAxis label={{ value: yLabel, angle: -90, position: 'insideLeft', offset: 8, dy: 45, ...labelStyle }} tick={{ fontSize: 10, fill: '#64748b' }} unit={unit ? ` ${unit}` : undefined} />
             <Tooltip contentStyle={tooltipStyle} formatter={tooltipFormatter} />
             {keys.map((k, i) => (
-              <Line key={k} type="monotone" dataKey={k} stroke={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} strokeDasharray={i === 0 ? '0' : '6 3'} dot={{ r: 2 }} isAnimationActive={false} name={series[i].label} />
+              <Line key={k} type="monotone" dataKey={k} stroke={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} strokeDasharray="0.1 7" strokeLinecap="round" dot={{ r: 3, fill: series[i].color || CHART_COLORS[i % CHART_COLORS.length], strokeWidth: 0 }} isAnimationActive={false} name={series[i].label} />
             ))}
           </LineChart>
         </ResponsiveContainer>

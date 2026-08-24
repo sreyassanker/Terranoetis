@@ -169,7 +169,7 @@ export const CATEGORY_FILTER_META: Record<CategoryFilterId, {
   'event-type': { label: 'Event Type', options: ['All events', 'Earthquakes only', 'Volcanic', 'Landslide', 'Flood', 'Storm'] },
   'cloud-phase': { label: 'Cloud Phase', options: ['All clouds', 'Liquid water', 'Ice', 'Mixed phase', 'Clear sky'] },
   'risk-threshold': { label: 'Risk Threshold', options: ['Low (1-in-100yr)', 'Moderate (1-in-50yr)', 'High (1-in-10yr)', 'Extreme (1-in-5yr)'] },
-  'crop-type': { label: 'Crop Type', options: ['Wheat', 'Maize', 'Rice', 'Soybean', 'Cotton', 'General'] },
+  'crop-type': { label: 'Crop Type', options: ['General', 'Wheat', 'Maize', 'Rice', 'Soybean', 'Cotton'] },
   'wind-height': { label: 'Wind Measurement Height', unit: 'm', min: 2, max: 200 },
   'wave-model': { label: 'Wave Model', options: ['Pierson-Moskowitz', 'JONSWAP', 'ERA5 wave', 'NDBC observed'] },
   'tidal-constituent': { label: 'Tidal Constituent', options: ['All (M2+S2+K1+O1)', 'M2 (principal lunar)', 'S2 (solar)', 'K1 (lunar diurnal)'] },
@@ -260,7 +260,7 @@ const BBOX: [number, number][] = [[1, 1], [26, 35], [37, 38], [40, 42], [66, 80]
 const TWO_POINTS = new Set([36, 125, 127, 145, 148]);
 
 const INSTANT: [number, number][] = [[1, 9], [26, 35], [64, 65], [116, 130]];
-const RANGE: [number, number][] = [[19, 25], [40, 41], [66, 80], [88, 90], [96, 110], [131, 144]];
+const RANGE: [number, number][] = [[19, 25], [40, 41], [58, 58], [66, 80], [88, 90], [96, 110], [131, 144]];
 const MULTIYEAR: [number, number][] = [[96, 101], [138, 139]];
 const NO_TIME_IDS = (() => {
   const s = new Set<number>();
@@ -646,14 +646,21 @@ export function attachAnalysisMetadata(): void {
       domain.tools.forEach(tool => {
         const tg = deriveTimeGranularity(tool.id);
         const domNum = domain.number;
+        // GDD tools accumulate daily data over the selected window — an
+        // "aggregation" control is redundant (they are already a daily sum),
+        // and category filters (land-cover, temporal-aggregation) are not wired
+        // to the GDD engine. Crop thresholds are handled via the Parameters.
+        const isGdd = tool.id === 58 || tool.id === 60;
         tool.analysisMeta = {
           needsTime: tg !== null,
           timeGranularity: tg,
           studyAreaMode: deriveStudyAreaMode(tool.id),
           allowedStudyAreaModes: deriveAllowedStudyAreaModes(tool.id, domNum),
-          categoryFilters: deriveCategoryFilters(domNum),
+          categoryFilters: isGdd ? ['crop-type'] : deriveCategoryFilters(domNum),
           autoDataSources: deriveAutoDataSources(domNum),
-          temporalControls: deriveTemporalControls(tool.id, domNum),
+          temporalControls: isGdd
+            ? deriveTemporalControls(tool.id, domNum).filter(c => c !== 'aggregation' && c !== 'time-interval')
+            : deriveTemporalControls(tool.id, domNum),
           temporalMode: deriveTemporalMode(domNum),
           defaultAggregation: deriveDefaultAggregation(domNum),
           scientificDomain: deriveScientificDomain(domNum),
@@ -3073,8 +3080,8 @@ export const PARTS: Part[] = [
             paperSummary: 'McMaster & Wilhelm (1997) is explicitly titled "one equation, two interpretations": Eq. (1) GDD = [(TMAX+TMIN)/2] − TBASE is implemented two different ways in the literature. Method 1 clamps the daily MEAN — if TAVG < TBASE then TAVG = TBASE (and if TAVG > TUT then TAVG = TUT) — the most widespread form, particularly in simulation models and for small-grain cereals. Method 2 clamps each EXTREME — if TMAX < TBASE then TMAX = TBASE, if TMIN < TBASE then TMIN = TBASE (same for TUT) — the most common form for corn. The methods agree only when TMIN ≥ TBASE; whenever TMIN < TBASE, Method 1 accumulates fewer GDD than Method 2. On real Colorado field data the paper measured up to 83% difference for wheat (0 °C base, February) and 376% (914 GDD) for corn (10 °C base). The paper\'s conclusion: researchers must state WHICH method they used, because applying one method\'s output to an algorithm parameterized with the other introduces errors of well over 50%. This tool computes BOTH methods from genuine daily TMAX/TMIN and reports both sums plus the difference. Base/upper thresholds per paper §3: wheat 0/25 °C (McMaster & Smika 1988), corn 10/30 °C (Cross & Zuber 1972).',
             scientificConcept: 'Crop phenological development is temperature-dependent: each growth stage requires a specific thermal time (GDD) accumulation. The base temperature T_base (0 °C wheat, 10 °C corn) is the threshold below which no development occurs; the upper threshold T_upper (25 °C wheat, 30 °C corn) is where development stops or becomes non-linear. The daily contribution from Eq. (1) is (TMAX+TMIN)/2 − TBASE, and the two interpretations differ in WHEN the base is applied: Method 1 clamps the mean, Method 2 clamps each extreme — Method 2 ≥ Method 1 whenever TMIN < TBASE. The linearity assumption breaks down near T_upper where heat stress reduces development rate — a limitation addressed by non-linear phenology models (e.g., Wang & Engel).',
             inputs: [
-              { symbol: 'T_max', label: 'Daily Maximum Temperature', unit: '°C', default: 25, min: -40, max: 60, group: 'Meteorological' },
-              { symbol: 'T_min', label: 'Daily Minimum Temperature', unit: '°C', default: 12, min: -40, max: 60, group: 'Meteorological' },
+              { symbol: 'T_max', label: 'Daily Maximum Temperature', unit: '°C', default: null, min: -40, max: 60, group: 'Meteorological' },
+              { symbol: 'T_min', label: 'Daily Minimum Temperature', unit: '°C', default: null, min: -40, max: 60, group: 'Meteorological' },
               { symbol: 'T_base', label: 'Base Temperature', unit: '°C', default: 10, min: 0, max: 20, group: 'Crop Parameters' },
               { symbol: 'T_upper', label: 'Upper Threshold Temperature', unit: '°C', default: 30, min: 20, max: 50, group: 'Crop Parameters' }
             ],
