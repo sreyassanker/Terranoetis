@@ -1641,6 +1641,27 @@ export default function App() {
     return rings.length > 0 ? rings : null;
   }, [studyAreas, activeStudyAreaId]);
 
+  // Auto-detected points from the active study area(s): a single point marker
+  // yields one [lat, lon]; a drawn point expands to a ±0.05° bbox whose centre
+  // is the exact placed point. Used by analytical tools to seed their study
+  // point (or the two endpoints for two-point tools) without manual entry.
+  const activeStudyPoints = useMemo(() => {
+    const pts: Array<{ lat: number; lon: number }> = [];
+    for (const a of studyAreas) {
+      if (a.active && a.type === 'point' && a.geojson) {
+        for (const f of a.geojson.features) {
+          const g = f.geometry;
+          if (g && g.type === 'Point') pts.push({ lon: g.coordinates[0] as number, lat: g.coordinates[1] as number });
+        }
+      }
+    }
+    if (pts.length === 0 && activeStudyAreaId) {
+      const b = activeBbox;
+      if (b) pts.push({ lat: (b.latMin + b.latMax) / 2, lon: (b.lonMin + b.lonMax) / 2 });
+    }
+    return pts;
+  }, [studyAreas, activeStudyAreaId, activeBbox]);
+
   const handleSurfaceData = useCallback((toolId: string, resultJson: string) => {
     const viewer = viewerRef.current;
     if (!viewer || !activeBbox) return;
@@ -1665,7 +1686,7 @@ export default function App() {
   const handleToolResult = useCallback((
     toolId: number, label: string, lat: number, lon: number, value?: number,
     grid?: { latMin: number; latMax: number; lonMin: number; lonMax: number; nLat: number; nLon: number; values: number[]; valueMin: number; valueMax: number; hasNaN: boolean },
-    unit?: string,
+    unit?: string, vizType?: string,
   ) => {
     const viewer = viewerRef.current;
     if (!viewer) return;
@@ -1720,8 +1741,11 @@ export default function App() {
     }
 
     // Fallback: point mode with no grid — paint a surface only if a study area
-    // is active and a scalar value exists.
-    if (!b || b.latMin >= b.latMax || b.lonMin >= b.lonMax || value == null) return;
+    // is active and a scalar value exists, AND the tool is a spatial viz type
+    // (heatmap/contour/vector). Non-spatial types (timeseries, profile, scatter,
+    // gauge, spectrum, bar, etc.) show only the labeled point — no flat rectangle.
+    const spatialViz = ['heatmap', 'contour', 'vector'];
+    if (!b || b.latMin >= b.latMax || b.lonMin >= b.lonMax || value == null || !spatialViz.includes(vizType ?? '')) return;
     const camAlt = viewer.camera.positionCartographic.height;
     const { width, height } = getViewDependentResolution(camAlt, 100);
     const nLat = Math.max(4, Math.floor(width / 10));
@@ -7892,15 +7916,63 @@ export default function App() {
     throttledRender(v);
   }, [studyWest, studySouth, studyEast, studyNorth]);
 
-  const startStudyDraw = useCallback(async (type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE') => {
+  const startStudyDraw = useCallback(async (type: 'RECTANGLE' | 'POLYGON' | 'CIRCLE' | 'POINT') => {
     const v = viewerRef.current;
     if (!v) return;
+    // POINT: place a single marker directly (the Drawer is for shapes only)
+    if (type === 'POINT') {
+      setStudyDrawing(true);
+      const handler = new Cesium.ScreenSpaceEventHandler(v.canvas);
+      const handleClick = (e: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
+        handler.destroy();
+        const cartesian = v.scene.globe.pick(v.camera.getPickRay(e.position)!, v.scene);
+        if (!cartesian) return;
+        const carto = Cesium.Cartographic.fromCartesian(cartesian);
+        const lon = Cesium.Math.toDegrees(carto.longitude);
+        const lat = Cesium.Math.toDegrees(carto.latitude);
+        const name = `point ${studyAreasRef.current.length + 1}`;
+        const entity = v.entities.add({
+          position: cartesian,
+          point: {
+            pixelSize: 14,
+            color: Cesium.Color.LIME,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+        const geojson: GeoJSON.FeatureCollection = {
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [lon, lat] },
+            properties: { name, type: 'point' },
+          }],
+        };
+        const area: StudyAreaItem = {
+          id: `study_area_${Date.now()}`, name, type: 'point' as any,
+          visible: true, active: false, entity, positions: [cartesian], geojson, color: '#22c55e', width: 3,
+        };
+        studyAreasRef.current.forEach(a => { if (a.id !== area.id && a.active) setStudyAreaActive(v, a, false); });
+        setStudyAreaActive(v, area, true);
+        studyAreasRef.current = [...studyAreasRef.current, area];
+        setStudyAreas(studyAreasRef.current);
+        setActiveStudyAreaId(area.id);
+        flyToStudyAreaTopDown(v, area);
+        setStudyDrawing(false);
+        throttledRender(v);
+      };
+      handler.setInputAction(handleClick, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      return;
+    }
+
     try {
       const Drawer = (await import('@cesium-extends/drawer')).default;
       if (drawerRef.current) { drawerRef.current.destroy(); drawerRef.current = null; }
       const drawer = new Drawer(v, {
         terrain: false,
-        tips: { init: 'Click to start drawing', start: 'Click to place · Double-click to finish', end: '' },
+        tips: { init: 'Click to place the point', start: 'Click to place · Double-click to finish', end: '' },
       });
       drawerRef.current = drawer;
       drawer.start({
@@ -7918,7 +7990,7 @@ export default function App() {
         },
         onEnd: (entity: any, positions: Cesium.Cartesian3[]) => {
           if (!v || !positions?.length) return;
-          const typeLabel = type === 'RECTANGLE' ? 'rectangle' : type === 'CIRCLE' ? 'circle' : 'polygon';
+          const typeLabel = type === 'RECTANGLE' ? 'rectangle' : 'polygon';
           const name = `${typeLabel} ${studyAreasRef.current.length + 1}`;
           const color = '#22c55e';
           // The drawer reports a circle as its degenerate [center, center] point
@@ -7952,6 +8024,8 @@ export default function App() {
               }
             }
           }
+          // POINT is handled separately before the Drawer — this branch is
+          // only for rectangles, circles, and polygons.
           const geojson: GeoJSON.FeatureCollection = {
             type: 'FeatureCollection',
             features: [{
@@ -9468,7 +9542,7 @@ export default function App() {
 
       {/* Analytics Workbench Panel */}
       <ErrorBoundary label="Analytics Workbench">
-        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} onToolResult={handleToolResult} onClearResult={handleClearToolResult} zIndex={getPanelZIndex('analytics')} />
+        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} onToolResult={handleToolResult} onClearResult={handleClearToolResult} zIndex={getPanelZIndex('analytics')} />
       </ErrorBoundary>
 
       {/* Land Cover Mapper Panel */}

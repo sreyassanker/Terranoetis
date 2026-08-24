@@ -74,6 +74,8 @@ export function registerAnalyticalModelsRoutes(app: express.Express): void {
         result: result.result,
         unit: result.unit,
         steps: result.steps,
+        series: result.series,
+        secondary: result.secondary,
         dataSource: result.dataSource,
         location: result.location,
         log: result.log,

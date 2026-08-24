@@ -6,7 +6,7 @@ import { throttledRender } from '@/lib/throttledRender';
 export interface StudyAreaItem {
   id: string;
   name: string;
-  type: 'rectangle' | 'polygon' | 'circle' | 'geojson' | 'shapefile';
+  type: 'rectangle' | 'polygon' | 'circle' | 'point' | 'geojson' | 'shapefile';
   visible: boolean;
   active: boolean;
   dataSource?: Cesium.GeoJsonDataSource;
@@ -69,6 +69,17 @@ export function computeStudyAreaBbox(item: StudyAreaItem): { latMin: number; lat
     rect = Cesium.Rectangle.fromCartesianArray(item.positions, Cesium.Ellipsoid.WGS84);
   } else if (item.geojson) {
     rect = computeGeoJSONBbox(item.geojson);
+  }
+  // Single-point study area: expand to a small ±0.05° bbox so tools
+  // that expect a non-zero area (fly-to, viewport, grid) still work.
+  if (rect && Math.abs(rect.north - rect.south) < 1e-10) {
+    const clat = Cesium.Math.toDegrees(rect.south);
+    const clon = Cesium.Math.toDegrees(rect.west);
+    const d = 0.05;
+    rect = new Cesium.Rectangle(
+      Cesium.Math.toRadians(clon - d), Cesium.Math.toRadians(clat - d),
+      Cesium.Math.toRadians(clon + d), Cesium.Math.toRadians(clat + d),
+    );
   }
   if (!rect) return null;
   return {

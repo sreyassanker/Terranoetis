@@ -353,7 +353,7 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     57: ['point'],                    // Redfield Ratio → ocean sample point
 
     // ── Domain 8: Agriculture & Crop Science (Eqs 58–63) ──
-    58: ['bbox', 'polygon'],          // Growing Degree Days → crop field
+    58: ['point'],                    // Growing Degree Days → nearest GHCN station (daily TMAX/TMIN)
     59: ['point'],                    // Priestley-Taylor → station point
     60: ['point'],                    // Hargreaves-Samani → station point
     61: ['point'],                    // FAO Yield-Water → Ky is a crop-calibrated scalar ratio

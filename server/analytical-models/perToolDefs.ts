@@ -3245,7 +3245,7 @@ export const TOOL_58: ToolWorkflowDef = {
     overallAssessment: 'Method choice dominates uncertainty: M1 vs M2 differ by up to 83% (wheat) / 376% (corn) on real field data (paper Table 2).',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Crop Growing Degree Days (Method 1): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} °C·day. McMaster & Wilhelm (1997) Eq. (1) — two interpretations; both computed, Method 2 reported in steps. Daily TMAX/TMIN from nearest GHCN-Daily station.`,
+    contextualAnalysis: `Crop Growing Degree Days (Method 1): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} °C·day. McMaster & Wilhelm (1997) Eq. (1) — two interpretations; both computed and shown (Method 1 solid, Method 2 dashed on the chart; both in the outputs table). Daily TMAX/TMIN from nearest GHCN-Daily station.`,
     recommendations: ['Report WHICH method was used (paper conclusion): Method 1 clamps the daily mean, Method 2 clamps each extreme.', 'Tbase varies by crop: wheat 0, maize 10, rice 10 °C.', 'T_upper: 30 °C corn (Cross & Zuber 1972), 25 °C wheat (McMaster & Smika 1988).'],
   }),
   metadata: {
