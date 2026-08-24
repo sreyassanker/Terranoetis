@@ -3015,7 +3015,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         ? [
             {
               label: 'GDD Method 1 (clamp mean)',
-              color: '#8b5cf6',
+              color: '#0072B2',
               points: dMax.map((_, i) => {
                 let cum = 0;
                 for (let j = 0; j <= i; j++) cum += dayGdd(dMax[j], dMin[j]).m1;
@@ -3024,7 +3024,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
             },
             {
               label: 'GDD Method 2 (clamp extremes)',
-              color: '#f59e0b',
+              color: '#E69F00',
               points: dMax.map((_, i) => {
                 let cum = 0;
                 for (let j = 0; j <= i; j++) cum += dayGdd(dMax[j], dMin[j]).m2;
