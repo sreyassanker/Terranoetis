@@ -247,7 +247,10 @@ async function fetchCdsNetCdfInner(
         const buf = nc.getData() as Buffer;
         return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
       });
-      buffer = buffers.length === 1 ? buffers[0] : buffers;
+      // The reader probes each .nc for the requested variable, but callers
+      // accept a single ArrayBuffer — return the first file (single-variable
+      // jobs produce one .nc; multi-file ZIPs are read via readVariable below).
+      buffer = buffers.length === 1 ? buffers[0] : buffers[0];
     } catch (e) {
       console.warn(`[CDS] ZIP extraction failed: ${(e as Error).message.slice(0, 100)}`);
       cache.set(ck, raw);

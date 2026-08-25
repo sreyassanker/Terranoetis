@@ -114,3 +114,10 @@ docs/Research papers/*.pdf
 
 # Markdown files inside docs
 docs/**/*.md
+
+# Reports
+reports/
+
+# Test directory
+src/__tests__/
+server/__tests__/
