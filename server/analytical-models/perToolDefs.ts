@@ -1009,7 +1009,7 @@ export const TOOL_13: ToolWorkflowDef = {
 export const TOOL_14: ToolWorkflowDef = {
   toolId: 14,
   name: 'Tide Prediction',
-  vizType: 'timeseries',
+  vizType: 'scalar',
   classificationBands: WATER_BANDS,
   validate: (inputs) => {
     const out = validateRange(inputs, [{ param: 'H0', min: -5, max: 10 }]);
@@ -1041,7 +1041,7 @@ export const TOOL_14: ToolWorkflowDef = {
   },
   qualityCheck: (result) => makeQC([
     { name: 'Finite result', passed: Number.isFinite(result), message: Number.isFinite(result) ? 'Finite' : 'NaN/Inf', severity: Number.isFinite(result) ? 'info' : 'error' },
-    { name: 'Plausible range', passed: Number.isFinite(result) && Math.abs(result) < 15, message: Number.isFinite(result) && Math.abs(result) < 15 ? 'Within tidal range' : 'Implausible tidal height', severity: Number.isFinite(result) && Math.abs(result) < 15 ? 'info' : 'warn' },
+    { name: 'Plausible range', passed: Number.isFinite(result) && Math.abs(result) < 15, message: Number.isFinite(result) && Math.abs(result) < 15 ? 'Within tidal range' : 'Implausible tidal height', severity: Number.isFinite(result) && Math.abs(result) < 15 ? 'info' : 'warning' },
   ]),
   estimateUncertainty: () => ({
     method: 'empirical',
@@ -1228,13 +1228,14 @@ export const TOOL_17: ToolWorkflowDef = {
 export const TOOL_18: ToolWorkflowDef = {
   toolId: 18,
   name: 'Infiltration Analysis',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   classificationBands: WATER_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'Ks', min: 1e-10, max: 1 }, { param: 'psiW', min: 0, max: 10 }, { param: 'psi0', min: -10, max: 10 }, { param: 'dTheta', min: 0, max: 0.95 }, { param: 'Ft', min: 0, max: 5 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Soil parameters from ISRIC SoilGrids');
-    log.push('  K_s via ROSETTA pedotransfer');
-    log.push('  Soil moisture from SMAP satellite');
+    log.push('  Green & Ampt (1911) Eq.: f = K_s·(1 + ψ_f·Δθ/F)');
+    log.push('  K_s, ψ_w: USDA texture from ISRIC SoilGrids sand/silt/clay → Rawls (1983) / Mays (2005) Table 7.7.2');
+    log.push('  Δθ = θ_s − θ_i: θ_s from table, θ_i from genuine GLDAS Noah 2.1 0–10 cm');
+    log.push('  F(t): cumulative infiltration from IMERG storm total (mm → m) or user-supplied');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -1249,22 +1250,22 @@ export const TOOL_18: ToolWorkflowDef = {
     rmse: 25,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'K_s estimation', contribution: 'Varies' },
-      { factor: 'Suction head variability', contribution: 'Varies' },
-      { factor: 'Initial moisture content', contribution: 'Varies' },
+      { factor: 'K_s from texture class (Rawls 1983 table)', contribution: 'Order-of-magnitude variability within texture class' },
+      { factor: 'θ_i from GLDAS proxy', contribution: 'GLDAS 0–10 cm vs point-scale variability' },
+      { factor: 'F(t) from IMERG storm total', contribution: 'IMERG retrieval uncertainty' },
     ],
-    overallAssessment: 'Green-Ampt has +/- 25% uncertainty. SMAP provides surface soil moisture.',
+    overallAssessment: 'Green-Ampt: ±25 % typical. ISRIC texture + Rawls table + GLDAS θ_i + IMERG F — all genuine data, no static fallbacks.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Infiltration Analysis: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Green-Ampt infiltration: f = K_s*(1 + psi*dTheta/F). Implicit in F, requires iteration.`,
-    recommendations: ['ISRIC SoilGrids for K_s via pedotransfer.', 'SMAP for soil moisture validation.', 'Iterative solution for cumulative F(t).'],
+    contextualAnalysis: `Green-Ampt Infiltration Rate: ${Number.isFinite(result) ? result.toExponential(4) : 'N/A'} m/s. f = K_s·(1 + ψ_f·Δθ/F). K_s, ψ_f from ISRIC texture (Rawls 1983 table); Δθ from GLDAS θ_i; F from IMERG storm total. All genuine data — honest NaN when any is missing.`,
+    recommendations: ['K_s/ψ_f from ISRIC soil texture (USDA → Rawls 1983, Mays 2005 Table 7.7.2).', 'θ_i from GLDAS Noah 2.1 0–10 cm (no global in-situ network).', 'F(t) from IMERG storm total precipitation (mm → m).', 'Wetting front depth L = F/Δθ in the outputs table.'],
   }),
   metadata: {
-    methodology: 'Green-Ampt infiltration: f = K_s*(1 + psi*dTheta/F). Implicit in F, requires iteration.',
-    assumptions: ['Homogeneous soil', 'Sharp wetting front', 'Constant K_s', 'No macropore flow'],
-    limitations: ['Not for layered soils', 'Macropores not captured', 'Requires iterative solution'],
-    references: ['Green & Ampt 1911', 'Mays 2005, Water Resources Engineering'],
-    preprocessingNotes: ['Soil parameters from ISRIC SoilGrids', 'K_s via ROSETTA pedotransfer', 'Soil moisture from SMAP satellite'],
+    methodology: 'Green & Ampt (1911): f = K_s·(1 + ψ_f·Δθ/F). ψ_f = ψ_w − ψ₀ (effective suction). K_s, ψ_w from ISRIC SoilGrids texture → Rawls (1983) / Mays (2005) Table 7.7.2. θ_i from GLDAS Noah 2.1 0–10 cm. Δθ = θ_s − θ_i (≥0.01). F(t) from IMERG storm total precipitation (mm ÷ 1000 → m). All genuine data sources — honest NaN when unavailable.',
+    assumptions: ['Homogeneous soil profile', 'Sharp wetting front (piston flow)', 'Constant K_s and ψ_f', 'No macropore or preferential flow'],
+    limitations: ['Layered or structured soils violate the sharp-front assumption', 'Surface sealing/time-varying K_s not represented', 'F(t) is implicit in t — requires iteration', 'ISRIC texture is a point estimate, not a soil-horizon profile'],
+    references: ['Green, W.H. & Ampt, G.A. (1911) J. Agric. Sci. 4(1):1–24. DOI 10.1017/S0021859600001441', 'Rawls, W.J. et al. (1983) Trans. ASAE 26(5):1362–1368. (tabulated in Mays 2005 §7.7)'],
+    preprocessingNotes: ['K_s, ψ_f from ISRIC SoilGrids texture → Rawls (1983) Green-Ampt table', 'θ_i from GLDAS Noah 2.1 0–10 cm', 'F(t) from IMERG storm total or user-supplied', 'All genuine data — no static fallbacks'],
   },
   dependencies: [],
 };
@@ -2628,7 +2629,7 @@ export const TOOL_46: ToolWorkflowDef = {
 export const TOOL_47: ToolWorkflowDef = {
   toolId: 47,
   name: 'Soil Thermal Conductivity Model',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   classificationBands: SOIL_BANDS,
   validate: (inputs) => validateRange(inputs, [
     { param: 'sandFrac', min: 0, max: 1 },
@@ -2637,6 +2638,7 @@ export const TOOL_47: ToolWorkflowDef = {
     { param: 'theta', min: 0, max: 1 },
   ]),
   preprocess: (inputs, ctx, log) => {
+    log.push('  de Vries (1963) λ = Σ(kᵢ·xᵢ·λᵢ) / Σ(kᵢ·xᵢ) — Farouki (1981) CRREL 81-1 §7.6 transcription');
     log.push('  ρ_b, organic C, sand fraction: genuine ISRIC SoilGrids 0–5 cm');
     log.push('  OM% = SOC% × 1.724 (van Bemmelen); quartz fraction q = sand fraction (Johansen 1975 proxy — ISRIC has no quartz band)');
     log.push('  θ: genuine GLDAS Noah 2.1 0–10 cm volumetric moisture (no global in-situ network exists)');
@@ -2654,22 +2656,23 @@ export const TOOL_47: ToolWorkflowDef = {
     rmse: 25,
     rmseUnit: '%',
     contributingFactors: [
-      { factor: 'Moisture content', contribution: 'Varies' },
-      { factor: 'Mineral composition', contribution: 'Varies' },
-      { factor: 'Bulk density', contribution: 'Varies' },
+      { factor: 'Moisture content (GLDAS proxy)', contribution: 'Dominant — λ varies 5× from dry to wet' },
+      { factor: 'Quartz fraction (sand proxy)', contribution: 'Quartz λ=8.4 vs other minerals 2.9 W/m·K' },
+      { factor: 'Bulk density (ISRIC)', contribution: 'Controls porosity and solids volume' },
+      { factor: 'de Vries shape factors (g_a/g_c)', contribution: 'Farouki §7.6 approximate procedure ±25%' },
     ],
-    overallAssessment: 'de Vries model has +/- 25% uncertainty, mainly from moisture.',
+    overallAssessment: 'de Vries (1963) model: ±25% on mineral soils, larger for organic (>20% OM). Farouki (1981) §7.13: best at 0.1–0.2 degree of saturation.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Soil Thermal Conductivity Model: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. de Vries: k_soil = sum(k_i * f_i * lambda_i) / sum(k_i * f_i). Weighted by volume fractions.`,
-    recommendations: ['ISRIC SoilGrids for composition.', 'Moisture content critical for k.', 'Validate with in-situ measurements.'],
+    contextualAnalysis: `Soil Thermal Conductivity (de Vries): ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} W/m·K. λ = Σ(kᵢ·xᵢ·λᵢ) / Σ(kᵢ·xᵢ) with de Vries spheroid weighting. Quartz 8.4, other minerals 2.9, OM 0.25, water 0.6, air 0.026 W/m·K (Farouki Table 2). Thermal diffusivity and heat capacity in the outputs table.`,
+    recommendations: ['ISRIC SoilGrids 0–5 cm for sand, SOC, bulk density (genuine).', 'GLDAS Noah 2.1 0–10 cm θ (genuine LSM assimilation).', 'Validate with in-situ measurements (point instruments or heat-flux plates).', 'Rate of saturation 0.1–0.2: Farouki §7.13 best-fit range.'],
   }),
   metadata: {
-    methodology: 'de Vries: k_soil = sum(k_i * f_i * lambda_i) / sum(k_i * f_i). Weighted by volume fractions.',
-    assumptions: ['Isotropic soil', 'Linear mixing', 'Known volume fractions'],
-    limitations: ['Moisture dependence complex', 'Mineral composition varies', 'Not for frozen soils'],
-    references: ['de Vries 1963, Physics of Plant Environment'],
-    preprocessingNotes: ['Soil composition from ISRIC SoilGrids', 'Mineral/organic/water/air fractions', 'Bulk density for volume fractions'],
+    methodology: 'de Vries (1963) / Farouki (1981) CRREL 81-1 §7.6: λ = Σ(kᵢ·xᵢ·λᵢ) / Σ(kᵢ·xᵢ). Constituent λ: quartz 8.4, other minerals 2.9, OM 0.25, water 0.6, air 0.026 W/m·K. Shape factors g_a=0.125, g_c=0.75 (oblate spheroids). Continuous phase: water (θ≥θ_cut) or air (×1.25 dry correction). Vapour migration: k_a = 0.0615 + 1.96·xw (mcal→W/m·K ×0.4186). Volumetric heat capacity: C = Σxᵢ·cᵢ (c_i from Farouki Table 2, ×4.186e6 J/m³·K). Thermal diffusivity α = λ/C.',
+    assumptions: ['Isotropic soil, spheroidal particles', 'Linear mixing: λ = Σkᵢxᵢλᵢ / Σkᵢxᵢ', 'Known volume fractions from ρ_b, OM, θ', 'Quartz fraction ≈ sand fraction (Johansen 1975)'],
+    limitations: ['Moisture dependence complex — GLDAS is a proxy for in-situ θ', 'Mineral composition unknown beyond sand fraction', 'de Vries shape factors are approximate (Farouki §7.6)', 'No frozen soil — ice conductivity not included'],
+    references: ['de Vries, D.A. (1963) Thermal properties of soils. In: van Wijk (ed.) Physics of Plant Environment, North-Holland, pp. 210–235.', 'Farouki, O.T. (1981) Thermal properties of soils. CRREL Monograph 81-1, §7.6.'],
+    preprocessingNotes: ['Soil composition: genuine ISRIC SoilGrids 0–5 cm', 'θ: genuine GLDAS Noah 2.1 0–10 cm', 'Van Bemmelen: OM% = SOC% × 1.724', 'Johansen (1975): q = sand fraction (ISRIC quartz band absent)'],
   },
   dependencies: [],
 };
@@ -3072,7 +3075,7 @@ export const TOOL_54: ToolWorkflowDef = {
 export const TOOL_55: ToolWorkflowDef = {
   toolId: 55,
   name: 'Forest Biomass Estimation',
-  vizType: 'scatter',
+  vizType: 'scalar',
   classificationBands: AGB_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'DBH', min: 0, max: 300 }, { param: 'rho', min: 0.1, max: 1.2 }, { param: 'E', min: -0.5, max: 1.5 }]),
   preprocess: (inputs, ctx, log) => {
@@ -3979,7 +3982,7 @@ export const TOOL_71: ToolWorkflowDef = {
 export const TOOL_72: ToolWorkflowDef = {
   toolId: 72,
   name: 'Price-Weller-Pinkel Mixed Layer',
-  vizType: 'gauge',
+  vizType: 'timeseries',
   classificationBands: OCEAN_BANDS,
   validate: (inputs) => validateRange(inputs, [
     { param: 'g', min: 9, max: 10 },        // gravity m/s²
@@ -4642,10 +4645,10 @@ export const TOOL_84: ToolWorkflowDef = {
   },
   postProcess: (result, _base, _ctx, log) => {
     const c = classify(result, [
-      { min: 0, max: 1, label: 'FAILURE' },
-      { min: 1, max: 1.25, label: 'Nearly failing' },
-      { min: 1.25, max: 1.5, label: 'Marginally stable' },
-      { min: 1.5, max: 10, label: 'STABLE' },
+      { min: 0, max: 1, label: 'FAILURE', color: '#ef4444', description: 'FS < 1 — slope failure expected' },
+      { min: 1, max: 1.25, label: 'Nearly failing', color: '#f97316', description: 'FS 1.0–1.25 — marginally stable' },
+      { min: 1.25, max: 1.5, label: 'Marginally stable', color: '#eab308', description: 'FS 1.25–1.5 — low safety margin' },
+      { min: 1.5, max: 10, label: 'STABLE', color: '#22c55e', description: 'FS > 1.5 — adequate safety margin' },
     ]);
     if (c) log.push(`  Stability: ${c.label}`);
     return { classification: c };
@@ -4999,8 +5002,9 @@ export const TOOL_90: ToolWorkflowDef = {
   classificationBands: OCEAN_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'n', min: 1, max: 10 },{ param: 'K', min: 0.1, max: 48 },{ param: 't', min: 0, max: 1000 },{ param: 'Q0', min: 0, max: 10000 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Nash model for unit hydrograph');
-    log.push('  N and K from calibration');
+    log.push('  Nash (1957) cascade of n identical linear reservoirs — the classic IUH');
+    log.push('  Q₀ (total inflow volume): genuine USGS streamflow-derived value when a gauge resolves; honest NaN otherwise');
+    log.push('  n and K from calibration (method of moments: n=(m₁/m₂)², K=m₂/m₁)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -5017,19 +5021,20 @@ export const TOOL_90: ToolWorkflowDef = {
     contributingFactors: [
       { factor: 'N and K calibration', contribution: 'Varies' },
       { factor: 'Rainfall-runoff linearity', contribution: 'Varies' },
+      { factor: 'Q₀ streamflow source', contribution: 'USGS gauge proximity' },
     ],
-    overallAssessment: '+/- 20% uncertainty',
+    overallAssessment: '+/- 20% uncertainty. The Nash IUH assumes linear, time-invariant catchment response.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Nash Cascade: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Unit hydrograph and flood forecasting.`,
-    recommendations: ["N and K from calibration.","Linear reservoir assumption."],
+    contextualAnalysis: `Nash Cascade: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'} m³/s at the selected time. Outflow hydrograph from n series linear reservoirs (Nash 1957); Q₀ from genuine USGS streamflow when available, else honest NaN. Time to peak t_p = (n−1)·K; peak factor q_p·K/Q₀ by n (see outputs).`,
+    recommendations: ["Estimate n and K by method of moments from observed rainfall-runoff events (n=(m₁/m₂)², K=m₂/m₁).","Quickflow only — add baseflow for total streamflow.","IUH is linear/time-invariant — use caution for extreme floods."],
   }),
   metadata: {
-    methodology: 'Unit hydrograph and flood forecasting.',
-    assumptions: ["Linear reservoirs","Lumped watershed"],
-    limitations: ["Nonlinear runoff not captured","Requires calibration"],
-    references: ["Nash 1957"],
-    preprocessingNotes: ["Nash model for unit hydrograph","N and K from calibration"],
+    methodology: 'q(t) = t^(n−1) / (K^(n−1)·(n−1)!) · (1/K) · exp(−t/K) · Q₀ (Nash 1957 gamma IUH). Q₀ is the total inflow volume; derived from genuine USGS streamflow when a gauge resolves, honest NaN otherwise. Time to peak t_p = (n−1)K; dimensionless peak factor (n−1)^(n−1)·e^(−(n−1))/(n−1)! (1, 0.368, 0.271, 0.224, 0.195 for n=1..5).',
+    assumptions: ["Linear reservoirs","Lumped watershed","Stationary parameters"],
+    limitations: ["Nonlinear runoff not captured","Requires calibration","No baseflow"],
+    references: ["Nash, J.E. (1957) The form of the instantaneous unit hydrograph. IASH Publ. 45:114-121. DOI 10.1080/02626665709493274"],
+    preprocessingNotes: ["Nash model for unit hydrograph","Q₀ from genuine USGS streamflow (honest NaN when unavailable)","n and K from calibration"],
   },
   dependencies: [],
 };
@@ -5085,7 +5090,7 @@ export const TOOL_91: ToolWorkflowDef = {
 export const TOOL_92: ToolWorkflowDef = {
   toolId: 92,
   name: 'Stefan Permafrost Active Layer',
-  vizType: 'profile',
+  vizType: 'timeseries',
   classificationBands: RISK_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'K', min: 0.1, max: 10 },{ param: 'DIFI', min: 0, max: 10000 },{ param: 'L', min: 0, max: 500000000 }]),
   preprocess: (inputs, ctx, log) => {
@@ -5487,7 +5492,7 @@ export const TOOL_100: ToolWorkflowDef = {
 export const TOOL_101: ToolWorkflowDef = {
   toolId: 101,
   name: 'Eady Growth Rate',
-  vizType: 'gauge',
+  vizType: 'scalar',
   classificationBands: CLIMATE_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'f', min: 0, max: 0.0002 },{ param: 'N', min: 0.001, max: 0.1 },{ param: 'dudy', min: 0, max: 1 }]),
   preprocess: (inputs, ctx, log) => {
@@ -5618,7 +5623,7 @@ export const TOOL_103: ToolWorkflowDef = {
 export const TOOL_104: ToolWorkflowDef = {
   toolId: 104,
   name: 'Ekman Layer Depth',
-  vizType: 'profile',
+  vizType: 'scalar',
   classificationBands: CLIMATE_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'Km', min: 0.001, max: 1000 },{ param: 'f', min: 0, max: 0.0002 }]),
   preprocess: (inputs, ctx, log) => {
@@ -5798,8 +5803,10 @@ export const TOOL_108: ToolWorkflowDef = {
   classificationBands: CLIMATE_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'a', min: 0, max: 0.000001 },{ param: 'r', min: 1e-8, max: 0.001 },{ param: 'b', min: 0, max: 1e-10 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Kelvin curvature coefficient');
-    log.push('  Solute coefficient from Raoult law');
+    log.push('  Köhler (1936) Eq.: S = a/r − b/r³ (supersaturation)');
+    log.push('  a = 2σ/(ρ_w·R_v·T) ≈ 1.2×10⁻⁹ m (physical constant at 273 K)');
+    log.push('  r = droplet radius (m) — site measurement, no public API → supply explicitly');
+    log.push('  b = solute coefficient (m³) — aerosol composition, no public API → supply explicitly');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -5812,22 +5819,22 @@ export const TOOL_108: ToolWorkflowDef = {
   estimateUncertainty: () => ({
     method: 'analytical',
     contributingFactors: [
-      { factor: 'Surface tension', contribution: 'Varies' },
-      { factor: 'Solute properties', contribution: 'Varies' },
-      { factor: 'Temperature', contribution: 'Varies' },
+      { factor: 'Surface tension (σ) — Kelvin coefficient', contribution: 'a = 2σ/(ρ_w·R_v·T), ~1.2×10⁻⁹ m at 273 K' },
+      { factor: 'Solute coefficient b — aerosol composition', contribution: 'b = i·n_s·M_w/(4π·ρ_w), site-specific' },
+      { factor: 'Ideal solution assumption', contribution: 'Non-ideal solutions deviate for high solute concentrations' },
     ],
-    overallAssessment: 'Exact for ideal solution droplets',
+    overallAssessment: 'Exact for ideal dilute solution droplets. Non-ideal effects (van\'t Hoff factor) add ~10% uncertainty for concentrated NaCl droplets.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Kohler Equation: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Cloud droplet activation.`,
-    recommendations: ["Critical radius and supersaturation.","CCN activation."],
+    contextualAnalysis: `Köhler Equation: S = ${Number.isFinite(result) ? result.toExponential(4) : 'N/A'} supersaturation fraction. ${Number.isFinite(result) ? (result > 0 ? 'SUPERSATURATED — droplet activates (r > r_crit)' : 'SUBSATURATED — droplet evaporates') : 'Supply r and b explicitly — no public API provides cloud-droplet radius or solute coefficient.'} Critical radius and supersaturation in the outputs table.`,
+    recommendations: ["Kelvin coefficient a = 2σ/(ρ_w·R_v·T) ≈ 1.2×10⁻⁹ m at T=273 K (physical constant).","Solute coefficient b = i·n_s·M_w/(4π·ρ_w) — depends on aerosol dry mass and van't Hoff factor.","Critical radius r_c = √(3b/a); critical supersaturation S_c = (4a³/27b)^½. No public API provides these — supply r and b explicitly."],
   }),
   metadata: {
-    methodology: 'Cloud droplet activation.',
-    assumptions: ["Ideal solution","Spherical droplet","Equilibrium"],
-    limitations: ["Non-ideal solutions","Surface tension varies"],
-    references: ["Kohler 1936"],
-    preprocessingNotes: ["Kelvin curvature coefficient","Solute coefficient from Raoult law"],
+    methodology: 'S = a/r − b/r³ (Köhler 1936, supersaturation fraction form). a = 2σ/(ρ_w·R_v·T) ≈ 1.2×10⁻⁹ m (Kelvin curvature coefficient, physical constant). b = i·n_s·M_w/(4π·ρ_w) (solute coefficient). r_c = √(3b/a). S_c = (4a³/27b)^½ (critical supersaturation in fraction; ×100 for %). S > 0 → supersaturated (droplet activates); S < 0 → subsaturated (droplet evaporates).',
+    assumptions: ["Ideal dilute solution","Spherical droplet","Equilibrium thermodynamics","Constant surface tension"],
+    limitations: ["Non-ideal solutions at high concentration","Surface tension varies with solute concentration","No public API for droplet radius / solute coefficient — must supply explicitly"],
+    references: ["Köhler, H. (1936) The nucleus in the growth of hygroscopic droplets. Trans. Faraday Soc., 32, 1152-1161. DOI 10.1039/TF9363201152","Pruppacher, H.R. & Klett, J.D. (1997) Microphysics of Clouds and Precipitation, 2nd ed. Kluwer."],
+    preprocessingNotes: ["Kelvin coefficient a = 2σ/(ρ_w·R_v·T) ≈ 1.2×10⁻⁹ m (physical constant)","Droplet radius r (m) — site measurement, no public API → supply explicitly","Solute coefficient b (m³) — aerosol composition, no public API → supply explicitly"],
   },
   dependencies: [],
 };
@@ -5842,7 +5849,7 @@ export const TOOL_109: ToolWorkflowDef = {
   classificationBands: CLIMATE_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'N0', min: 0, max: 1000000000 },{ param: 'Lambda', min: 0, max: 50000 },{ param: 'D', min: 0, max: 0.01 }]),
   preprocess: (inputs, ctx, log) => {
-    log.push('  Intercept N0 = 8e6 m^-4');
+    log.push('  Intercept N0 = 8e3 m^-3 mm^-1');
     log.push('  Slope Lambda from rain rate');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
@@ -5866,14 +5873,14 @@ export const TOOL_109: ToolWorkflowDef = {
   }),
   interpret: (result) => ({
     contextualAnalysis: `Marshall-Palmer DSD: ${Number.isFinite(result) ? result.toFixed(4) : 'N/A'}. Exponential drop size distribution.`,
-    recommendations: ["N0 = 8e6 m^-4.","Lambda from rain rate."],
+    recommendations: ["N0 = 8e3 m^-3 mm^-1.","Lambda from rain rate."],
   }),
   metadata: {
     methodology: 'Exponential drop size distribution.',
     assumptions: ["Exponential distribution","Steady rain"],
     limitations: ["Not for convective rain","N0 varies"],
     references: ["Marshall & Palmer 1948"],
-    preprocessingNotes: ["Intercept N0 = 8e6 m^-4","Slope Lambda from rain rate"],
+    preprocessingNotes: ["Intercept N0 = 8e3 m^-3 mm^-1","Slope Lambda from rain rate"],
   },
   dependencies: [],
 };
@@ -5932,7 +5939,7 @@ export const TOOL_111: ToolWorkflowDef = {
   name: 'IERS Earth Rotation Matrix',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'P', min: 0, max: 1 },{ param: 'N', min: 0, max: 1 },{ param: 'Rx', min: 0, max: 1 },{ param: 'W', min: 0, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'xp', min: -1, max: 1 },{ param: 'yp', min: -1, max: 1 },{ param: 'sp', min: -1e-3, max: 1e-3 },{ param: 'gast', min: 0, max: 6.283185307179586 },{ param: 'dx', min: -100, max: 100 },{ param: 'dy', min: -100, max: 100 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Precession-nutation from IERS');
     log.push('  Earth rotation from GAST');
@@ -5977,7 +5984,7 @@ export const TOOL_112: ToolWorkflowDef = {
   name: 'Earth Tides (Love Numbers)',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'hn', min: 0, max: 1 },{ param: 'Vn', min: 0, max: 10 },{ param: 'g', min: 9.8, max: 9.82 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'hn', min: 0.3, max: 0.7 },{ param: 'kn', min: 0.2, max: 0.4 },{ param: 'Vn', min: 0, max: 10 },{ param: 'g', min: 9.8, max: 9.82 },{ param: 'lat', min: -90, max: 90 },{ param: 'Re', min: 6e6, max: 6.4e6 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Love numbers from Earth model');
     log.push('  Tidal potential from Moon/Sun');
@@ -6023,7 +6030,7 @@ export const TOOL_113: ToolWorkflowDef = {
   name: 'EGM2008 Gravity Field',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'GM', min: 0, max: 1000000000000000 },{ param: 'r', min: 6000000, max: 10000000 },{ param: 'Cnm', min: -1, max: 1 },{ param: 'Snm', min: -1, max: 1 },{ param: 'Pnm', min: -1, max: 1 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'GM', min: 0, max: 1000000000000000 },{ param: 'r', min: 6000000, max: 10000000 },{ param: 'n', min: 0, max: 2190 },{ param: 'm', min: 0, max: 2190 },{ param: 'Cnm', min: -1, max: 1 },{ param: 'Snm', min: -1, max: 1 },{ param: 'Pnm', min: -1, max: 1 },{ param: 'phi', min: -Math.PI, max: Math.PI },{ param: 'lam', min: -2 * Math.PI, max: 2 * Math.PI },{ param: 'Re', min: 6e6, max: 6.4e6 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  Spherical harmonics degree 2190');
     log.push('  Coefficients from EGM2008');
@@ -6067,7 +6074,7 @@ export const TOOL_114: ToolWorkflowDef = {
   name: 'Helmert 7-Parameter Transformation',
   vizType: 'scalar',
   classificationBands: GENERIC_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'S', min: 0, max: 2 },{ param: 'R', min: 0, max: 2 },{ param: 'T', min: -1000, max: 1000 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'S', min: 0, max: 2 },{ param: 's', min: -100, max: 100 },{ param: 'wx', min: -100, max: 100 },{ param: 'wy', min: -100, max: 100 },{ param: 'wz', min: -100, max: 100 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  7 parameters from datum calibration');
     log.push('  WGS84 to ITRF conversion');
@@ -6201,7 +6208,7 @@ export const TOOL_117: ToolWorkflowDef = {
   name: 'IRI-2016 Ionosphere',
   vizType: 'profile',
   classificationBands: SPACE_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'Ne', min: 100000000, max: 10000000000000 },{ param: 'h', min: 50000, max: 2000000 },{ param: 'NmF2', min: 10000000000, max: 5000000000000 },{ param: 'hmF2', min: 150000, max: 600000 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'Ne', min: 100000000, max: 10000000000000 },{ param: 'alt', min: 50000, max: 2000000 },{ param: 'NmF2', min: 10000000000, max: 5000000000000 },{ param: 'hmF2', min: 150000, max: 600000 },{ param: 'H', min: 10000, max: 200000 }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  IRI-2020 is latest version');
     log.push('  Electron density profiles');
@@ -6653,7 +6660,7 @@ export const TOOL_126: ToolWorkflowDef = {
 export const TOOL_127: ToolWorkflowDef = {
   toolId: 127,
   name: 'Hill-Clohessy-Wiltshire',
-  vizType: 'scalar',
+  vizType: 'timeseries',
   classificationBands: SPACE_BANDS,
   validate: (inputs) => validateRange(inputs, [
     { param: 'n', min: 0, max: 0.01 },
@@ -6732,7 +6739,7 @@ export const TOOL_128: ToolWorkflowDef = {
     { name: 'Range', passed: Number.isFinite(result) && result >= 0 && result <= 9, message: Number.isFinite(result) ? `${result.toFixed(2)} [0–9]` : 'NaN/Inf', severity: Number.isFinite(result) && result >= 0 && result <= 9 ? 'info' : 'error' },
   ]),
   estimateUncertainty: () => ({
-    method: 'instrumental',
+    method: 'empirical',
     rmse: 0.33,
     rmseUnit: 'Kp',
     contributingFactors: [
@@ -6756,7 +6763,7 @@ export const TOOL_128: ToolWorkflowDef = {
     references: ['Bartels J. (1949) IAGA Bull. No. 12, Part III, pp. 36–46'],
     preprocessingNotes: ['NOAA SWPC observed Kp (no key required)', 'G-scale derived from Kp thresholds'],
   },
-  dependencies: ['spaceWeather'],
+  dependencies: [],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -6775,8 +6782,9 @@ export const TOOL_129: ToolWorkflowDef = {
     { param: 'Q44', min: 0, max: 100 },
   ]),
   preprocess: (inputs, ctx, log) => {
+    const q = (v: unknown) => (typeof v === 'number' ? v : Number(v));
     const hasQ = inputs.Q11 != null && inputs.Q22 != null && inputs.Q33 != null && inputs.Q44 != null
-      && (inputs.Q11 > 0 || inputs.Q22 > 0 || inputs.Q33 > 0 || inputs.Q44 > 0);
+      && (q(inputs.Q11) > 0 || q(inputs.Q22) > 0 || q(inputs.Q33) > 0 || q(inputs.Q44) > 0);
     log.push(hasQ ? '  Q matrix diagonal provided (exact DOP)' : '  Trace only (approximate PDOP/HDOP/VDOP)');
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
@@ -6822,7 +6830,7 @@ export const TOOL_129: ToolWorkflowDef = {
 export const TOOL_130: ToolWorkflowDef = {
   toolId: 130,
   name: 'Saastamoinen Tropospheric Delay',
-  vizType: 'scalar',
+  vizType: 'profile',
   classificationBands: SPACE_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'theta', min: 0.05, max: 1.57 },{ param: 'P', min: 500, max: 1100 },{ param: 'T', min: 200, max: 320 },{ param: 'e', min: 0, max: 50 }]),
   preprocess: (inputs, ctx, log) => {
@@ -6879,7 +6887,7 @@ export const TOOL_131: ToolWorkflowDef = {
     ]);
     // Thiem requires r₂ > r₁ > 0 for ln(r₂/r₁) to be defined and positive
     if (inputs.r1 != null && inputs.r2 != null && inputs.r1 >= inputs.r2) {
-      errs.push({ param: 'r1', message: `'r1' (${inputs.r1}) must be < 'r2' (${inputs.r2}) for Thiem equation` });
+      errs.errors.push(`'r1' (${inputs.r1}) must be < 'r2' (${inputs.r2}) for Thiem equation`);
     }
     return errs;
   },
@@ -6920,7 +6928,7 @@ export const TOOL_131: ToolWorkflowDef = {
     references: ['Thiem, G. (1906) Hydrologische Methoden. J.A. Barth, Leipzig, 56 pp.'],
     preprocessingNotes: ['Transmissivity from pumping test analysis', 'Heads from observation wells at known distances'],
   },
-  dependencies: ['groundwater'],
+  dependencies: [],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -6978,7 +6986,7 @@ export const TOOL_132: ToolWorkflowDef = {
     references: ['Theis, C.V. (1935) Trans. Am. Geophys. Union, 16(2), 519–524. DOI: 10.1029/TR016i002p00519.'],
     preprocessingNotes: ['Q from pumping rate, T from geology/well tests', 'S from specific yield (unconfined) or storativity (confined)'],
   },
-  dependencies: ['groundwater'],
+  dependencies: [],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -7035,7 +7043,7 @@ export const TOOL_133: ToolWorkflowDef = {
     references: ['Cooper, H.H. & Jacob, C.E. (1946) Trans. Am. Geophys. Union, 27(4), 526–534. DOI: 10.1029/TR027i004p00526.'],
     preprocessingNotes: ['Late-time approximation to Theis well function', 'Slope on semilog plot gives T; intercept gives S'],
   },
-  dependencies: ['groundwater'],
+  dependencies: [],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -7055,7 +7063,7 @@ export const TOOL_134: ToolWorkflowDef = {
     ]);
     // Horton requires f₀ ≥ f_c (infiltration decreases from initial to equilibrium)
     if (inputs.f0 != null && inputs.fc != null && inputs.f0 < inputs.fc) {
-      errs.push({ param: 'f0', message: `'f0' (${inputs.f0}) must be ≥ 'fc' (${inputs.fc}) for Horton decay model` });
+      errs.errors.push(`'f0' (${inputs.f0}) must be ≥ 'fc' (${inputs.fc}) for Horton decay model`);
     }
     return errs;
   },
@@ -7159,7 +7167,7 @@ export const TOOL_135: ToolWorkflowDef = {
 export const TOOL_136: ToolWorkflowDef = {
   toolId: 136,
   name: 'Compute Expected Annual Flood Damage',
-  vizType: 'scalar',
+  vizType: 'scatter',
   classificationBands: RISK_BANDS,
   validate: (inputs) => validateRange(inputs, [
     { param: 'D_P', min: 0, max: 1e10 },
@@ -7213,7 +7221,7 @@ export const TOOL_136: ToolWorkflowDef = {
 export const TOOL_137: ToolWorkflowDef = {
   toolId: 137,
   name: 'Compute Air Quality Index from Concentration',
-  vizType: 'gauge',
+  vizType: 'bar',
   classificationBands: RISK_BANDS,
   validate: (inputs) => validateRange(inputs, [
     { param: 'I_Hi', min: 0, max: 500 },
@@ -7259,7 +7267,7 @@ export const TOOL_137: ToolWorkflowDef = {
     references: ['US EPA (2024) 40 CFR Part 50, Appendix G — Interpretation of NAAQS for PM2.5.'],
     preprocessingNotes: ['PM2.5 breakpoints from EPA Table 2', 'Concentration from air quality monitor or model'],
   },
-  dependencies: ['airQuality'],
+  dependencies: [],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -7289,7 +7297,7 @@ export const TOOL_138: ToolWorkflowDef = {
     { name: 'Range', passed: Number.isFinite(result) && result > 0, message: Number.isFinite(result) ? `${result.toFixed(1)} mm` : 'NaN/Inf', severity: Number.isFinite(result) && result > 0 ? 'info' : 'error' },
   ]),
   estimateUncertainty: () => ({
-    method: 'statistical',
+    method: 'empirical',
     contributingFactors: [
       { factor: 'Record length (need ≥ 30 yr)', contribution: 'Factor of 2 for short records' },
       { factor: 'Frequency factor K_p', contribution: '±30% depending on distribution' },
@@ -7312,7 +7320,7 @@ export const TOOL_138: ToolWorkflowDef = {
     references: ['Chow, V.T. (1964) Handbook of Applied Hydrology. McGraw-Hill, Section 14.'],
     preprocessingNotes: ['X̄ from annual max series (> 30 yr)', 'K_p = 10–15 for 24-hr PMP (Hershfield 1961)'],
   },
-  dependencies: ['imerg'],
+  dependencies: [],
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -7376,7 +7384,8 @@ export const TOOL_140: ToolWorkflowDef = {
     { param: 'hb', min: 1, max: 300 },
   ]),
   preprocess: (inputs, ctx, log) => {
-    log.push(`  K₀ = ${inputs.K0} ${inputs.K0 <= 1.3 ? '(overtopping)' : '(piping)'}`);
+    const k0 = Number(inputs.K0);
+    log.push(`  K₀ = ${k0} ${k0 <= 1.3 ? '(overtopping)' : '(piping)'}`);
     log.push(`  V_res = ${(inputs.Vres as number).toExponential(2)} m³`);
     log.push(`  h_b = ${inputs.hb} m`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
@@ -7718,14 +7727,16 @@ export const TOOL_146: ToolWorkflowDef = {
     { param: 'beta2', min: -1e8, max: 1e8 },
     { param: 'beta3', min: -1e8, max: 1e8 },
     { param: 'beta4', min: -1e8, max: 1e8 },
-    { param: 'phi_m', min: -Math.PI / 2, max: Math.PI / 2 },
+    { param: 'phi_m', min: -90, max: 90 },
     { param: 't_sec', min: 0, max: 86400 },
+    { param: 'elevation', min: 5, max: 90 },
   ]),
   preprocess: (inputs, ctx, log) => {
     log.push(`  α coefficients: [${inputs.alpha1}, ${inputs.alpha2}, ${inputs.alpha3}, ${inputs.alpha4}]`);
     log.push(`  β coefficients: [${inputs.beta1}, ${inputs.beta2}, ${inputs.beta3}, ${inputs.beta4}]`);
-    log.push(`  Geomagnetic lat φ_m = ${((inputs.phi_m as number) * 180 / Math.PI).toFixed(1)}°`);
-    log.push(`  Local time t = ${inputs.t_sec} s (${((inputs.t_sec as number) / 3600).toFixed(1)} h)`);
+    log.push(`  Geomagnetic lat φ_m = ${inputs.phi_m}°`);
+    log.push(`  Local time t = ${inputs.t_sec} s (${(inputs.t_sec as number / 3600).toFixed(1)} h)`);
+    log.push(`  Elevation E = ${inputs.elevation}°`);
     log.push(`  Location: (${ctx.lat.toFixed(2)}, ${ctx.lon.toFixed(2)})`);
     return inputs;
   },
@@ -7751,7 +7762,7 @@ export const TOOL_146: ToolWorkflowDef = {
     overallAssessment: 'Klobuchar model: 50-60% RMS error reduction. Residual 2-5 m typical, 10-30 m during storms.',
   }),
   interpret: (result) => ({
-    contextualAnalysis: `Klobuchar vertical ionospheric delay: ${Number.isFinite(result) ? result.toFixed(1) + ' ns = ' + ((result as number) * 1e-9 * 299792458).toFixed(2) + ' m' : 'N/A'}.`,
+    contextualAnalysis: `Klobuchar vertical ionospheric delay: ${Number.isFinite(result) ? result.toFixed(1) + ' ns = ' + ((result as number) * 1e-9 * 299792458).toFixed(2) + ' m' : 'N/A'}. Slant delay, obliquity factor and range error in the outputs table.`,
     recommendations: [
       'Klobuchar corrects 50-60% of ionospheric delay RMS error',
       'Nighttime floor: 5 ns (~1.5 m) — always applied',
@@ -7761,7 +7772,7 @@ export const TOOL_146: ToolWorkflowDef = {
     ],
   }),
   metadata: {
-    methodology: 'Klobuchar (1987): T_iono = 5 ns + A·cos(x) where A = Σαᵢ·φ_m^i, P = Σβᵢ·φ_m^i, x = 2π(t-50400)/P.',
+    methodology: 'Klobuchar (1987) ICD-GPS-200: T_iono = 5 ns + A·(1−x²/2+x⁴/24), where A = Σαᵢ·φ_m^i, P = Σβᵢ·φ_m^i (φ_m in SEMICIRCLES), x = 2π(t−50400)/P. Slant factor F = 1 + 16·(0.53−E)³ (E in semicircles). Primary = vertical delay (ns); secondary = slant delay, F, range error (m), A, P. Paper worked example (40°N,100°W, E=20°): α=[3.82e-8,1.49e-8,-1.79e-7,0], β=[1.43e5,0,-3.28e5,1.13e5], φ_m=45.16°, t=50700 s → TIONO = 77.6 ns (23.3 m) — reproduced exactly.',
     assumptions: ['Thin-shell ionosphere at 350 km altitude', 'Cosine diurnal variation', '8 broadcast α/β coefficients from GPS nav message', 'Single-frequency L1 (1.57542 GHz)'],
     limitations: ['~50% residual error (2-5 m typical)', 'Degrades during geomagnetic storms (10-30 m residual)', 'Poor at equatorial anomaly (±15° magnetic latitude)', 'No storm-time or seasonal correction'],
     references: ['Klobuchar, J.A. (1987) Ionospheric time-delay algorithms for single-frequency GPS users. IEEE Trans. Aerosp. Electron. Syst., 23(3), 325-331.'],

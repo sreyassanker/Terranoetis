@@ -11,6 +11,7 @@ import {
 } from '@/data/analyticalModels';
 import { ToolResultChart } from './ToolResultChart';
 import { exportToolResultAsPDF } from '@/lib/toolReportPdf';
+import { formatSci } from '@/lib/formatSci';
 
 export interface ToolGrid {
   latMin: number; latMax: number; lonMin: number; lonMax: number;
@@ -108,7 +109,7 @@ function formatResult(val: unknown, unit?: string): string {
   const abs = Math.abs(n);
   let str: string;
   if (abs === 0) str = '0';
-  else if (abs < 0.001 || abs >= 1e6) str = n.toExponential(4);
+  else if (abs < 0.001 || abs >= 1e6) str = formatSci(n); // "3.00 × 10¹⁸"
   else str = n.toPrecision(6);
   return unit ? `${str} ${unit}` : str;
 }

@@ -1200,15 +1200,22 @@ export interface WaterData {
 }
 
 export async function fetchWaterData(
-  lat: number, lon: number,
+  lat: number, lon: number, timeoutMs: number = 25000,
 ): Promise<WaterData> {
-  // USGS Water Services API
-  const data = await strictFetch(
+  // USGS Water Services API. It can be slow (large bbox queries under the
+  // parallel analytical-tools load), so the default timeout is generous and
+  // a transient failure is retried once before throwing.
+  const url =
     `https://waterservices.usgs.gov/nwis/iv/?format=json`
     + `&bbox=${lon - 0.5},${lat - 0.5},${lon + 0.5},${lat + 0.5}`
     + `&parameterCd=00060,00065,00010,00095,00300`
-    + `&siteStatus=all`
-  );
+    + `&siteStatus=all`;
+  let data: Record<string, unknown>;
+  try {
+    data = await strictFetch(url, timeoutMs);
+  } catch {
+    data = await strictFetch(url, timeoutMs);
+  }
   const value = data.value as { timeSeries?: Array<Record<string, unknown>> } | undefined;
   const ts = value?.timeSeries;
   if (!ts) throw new Error('No USGS water data for location');
@@ -1656,7 +1663,7 @@ export interface RiverData {
 export async function fetchRiverData(
   lat: number, lon: number,
 ): Promise<RiverData> {
-  const water = await fetchWaterData(lat, lon);
+  const water = await fetchWaterData(lat, lon, 30000);
   const terrain = await fetchTerrain(lat, lon);
 
   // Discharge from USGS (real), width/depth/slope estimated from gage height and terrain

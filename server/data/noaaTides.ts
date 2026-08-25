@@ -56,6 +56,8 @@ export interface TidePredictionResult {
   schuremanHeightM: number | null;
   /** Per-constituent contribution from the Schureman sum (metres each). */
   harmonicTerms: number[];
+  /** Harmonic constituent names aligned with harmonicTerms (e.g. 'M2', 'S2'). */
+  harmonicNames?: string[];
   /** Source of the returned heightM */
   source: 'noaa-coops-official-prediction' | 'noaa-coops-water-level-observed';
 }
@@ -121,7 +123,7 @@ export async function fetchTideDatums(stationId: string): Promise<TideDatums | n
   const datums: TideDatums = {
     MHHW: get('MHHW'),
     MSL: get('MSL'),
-    MLLW: get('MLLW'),
+    MLLW: get('MLLW') ?? 0, // MLLW is the query datum by construction
     MTL: get('MTL'),
     units: String(j?.units ?? 'metric'),
   };
@@ -167,9 +169,9 @@ export async function fetchHarmonicConstituents(
  */
 export async function fetchSchuremanTideHeight(
   stationId: string, whenEpochMs: number,
-): Promise<{ heightM: number | null; H0M: number | null; count: number; terms: number[] }> {
+): Promise<{ heightM: number | null; H0M: number | null; count: number; terms: number[]; names: string[] }> {
   const cons = await fetchHarmonicConstituents(stationId);
-  if (!cons || cons.length === 0) return { heightM: null, H0M: null, count: 0, terms: [] };
+  if (!cons || cons.length === 0) return { heightM: null, H0M: null, count: 0, terms: [], names: [] };
   const datums = await fetchTideDatums(stationId);
   // H₀: mean tide level constant above MLLW (MTL − MLLW), metres
   const H0 = datums?.MTL != null && datums.MLLW != null
@@ -183,10 +185,11 @@ export async function fetchSchuremanTideHeight(
   const epoch = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
   const sum = predictHarmonic(epoch, whenEpochMs, cons); // feet
   const terms = cons.map(c => predictHarmonic(epoch, whenEpochMs, [c]) * 0.3048); // per-constituent metres
+  const names = cons.map(c => c.name);
   if (!Number.isFinite(sum) || H0 == null) {
-    return { heightM: null, H0M: H0, count: cons.length, terms };
+    return { heightM: null, H0M: H0, count: cons.length, terms, names };
   }
-  return { heightM: sum * 0.3048 + H0, H0M: H0, count: cons.length, terms };
+  return { heightM: sum * 0.3048 + H0, H0M: H0, count: cons.length, terms, names };
 }
 
 function fmtBeginDate(d: Date): string {
@@ -250,6 +253,7 @@ export async function fetchTidePrediction(
       constituentCount: schur.count,
       schuremanHeightM: schur.heightM,
       harmonicTerms: schur.terms,
+      harmonicNames: schur.names,
       source: best ? 'noaa-coops-water-level-observed' : 'noaa-coops-official-prediction',
     };
   }
@@ -278,6 +282,7 @@ export async function fetchTidePrediction(
     constituentCount: schur.count,
     schuremanHeightM: schur.heightM,
     harmonicTerms: schur.terms,
+    harmonicNames: schur.names,
     source: 'noaa-coops-official-prediction',
   };
 }

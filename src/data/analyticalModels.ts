@@ -155,8 +155,8 @@ export const CATEGORY_FILTER_META: Record<CategoryFilterId, {
   'elevation': { label: 'Elevation / Altitude', unit: 'm', min: 0, max: 50000 },
   'data-source': { label: 'Data Source / Sensor', options: ['Landsat 8/9', 'Sentinel-2', 'MODIS', 'ERA5', 'NDBC buoys'] },
   'magnitude-range': { label: 'Magnitude Range', min: 2.5, max: 9.0 },
-  'land-cover': { label: 'Land Cover / Vegetation', options: ['Forest', 'Cropland', 'Grassland', 'Urban', 'Water', 'Wetland'] },
-  'soil-texture': { label: 'Soil Texture', options: ['Sand', 'Silt', 'Clay', 'Loam', 'Sandy loam'] },
+  'land-cover': { label: 'Land Cover / Vegetation', options: ['General', 'Forest', 'Cropland', 'Grassland', 'Urban', 'Water', 'Wetland'] },
+  'soil-texture': { label: 'Soil Texture', options: ['General', 'Sand', 'Silt', 'Clay', 'Loam', 'Sandy loam'] },
   'ocean-depth': { label: 'Ocean Depth', unit: 'm', min: 0, max: 6000 },
   'climate-scenario': { label: 'Climate Scenario', options: ['SSP1-2.6', 'SSP2-4.5', 'SSP3-7.0', 'SSP5-8.5'] },
   'spatial-resolution': { label: 'Spatial Resolution', options: ['10m', '30m', '250m', '1km'] },
@@ -254,33 +254,103 @@ export const TOTAL_PARTS = 7;
 const inRange = (id: number, lo: number, hi: number) => id >= lo && id <= hi;
 const anyRange = (id: number, ranges: [number, number][]) => ranges.some(([a, b]) => inRange(id, a, b));
 
-const BBOX: [number, number][] = [[1, 1], [26, 35], [37, 38], [40, 42], [66, 80]];
 // Eq 148 (Hohmann) is listed in both single- and two-point lists in the spec;
 // resolved to two-points since it is orbital mechanics, not an Earth location.
 const TWO_POINTS = new Set([36, 125, 127, 145, 148]);
 
-const INSTANT: [number, number][] = [[1, 9], [26, 35], [64, 65], [116, 130]];
-const RANGE: [number, number][] = [[19, 25], [40, 41], [58, 58], [66, 80], [88, 90], [96, 110], [131, 144]];
-const MULTIYEAR: [number, number][] = [[96, 101], [138, 139]];
+const INSTANT: [number, number][] = [
+  // Single-date source data (satellite scene, weather/fluxes at a time, tide
+  // epoch, solar/space-weather index, storm event). Result is one value at
+  // that instant.
+  [1, 1],        // 1 Split-window LST — Landsat scene date
+  [5, 5],        // 5 Geostrophic wind — ERA5 850 hPa pressure field date
+  [10, 10],      // 10 SCS-CN — single storm (IMERG) event date
+  [12, 12],      // 12 Rational method — storm intensity date
+  [14, 18],      // 14 Tidal (NOAA epoch); 15 Ekman; 16 geostrophic current;
+                 // 17 ocean heat budget (ERA5 fluxes); 18 Green-Ampt (storm)
+  [26, 35],      // 26-35 remote-sensing indices / CWSI / snowmelt / sea-ice
+                 // — Landsat/MODIS/NSIDC scene date
+  [56, 56],      // 56 Wanninkhof CO₂ flux — SST/wind/mooring date
+  [63, 63],      // 63 Bigleaf fluxes — weather at a time
+  [73, 74],      // 73 Pierson-Moskowitz; 74 Stockdon runup — ERA5 wave date
+  [77, 77],      // 77 CERC longshore — wave date
+  [80, 80],      // 80 JONSWAP — ERA5 wind date
+  [102, 102],    // 102 QGPV — ERA5 level fields at a date
+  [105, 107],    // 105 Deardorff; 106 Frontogenesis; 107 barotropic vorticity
+  [116, 117],    // 116 NRLMSISE; 117 IRI — solar/geomagnetic date
+  [120, 121],    // 120 Magnetopause; 121 Dst — NOAA space-weather date
+  [128, 128],    // 128 Kp — NOAA SWPC date
+  [134, 134],    // 134 Horton — storm (GLDAS) date
+];
+const RANGE: [number, number][] = [
+  // Accumulate / fit over a date window.
+  [9, 9],        // 9 FAO-56 PM — daily ET₀ accumulation
+  [13, 13],      // 13 Muskingum — USGS streamflow window
+  [19, 25],      // 19-25 seismic catalog window (G-R, Omori, GMPE, scaling)
+  [51, 51],      // 51 Monteith LUE — seasonal/annual GPP
+  [53, 53],      // 53 NEE — flux over a window
+  [58, 61],      // 58 GDD; 59 Priestley-Taylor; 60 Hargreaves; 61 FAO yield
+  [88, 88],      // 88 Lake evaporation — monthly
+  [91, 93],      // 91 Glacier PDD; 92 Stefan; 93 Herron-Langway — annual
+];
+const MULTIYEAR: [number, number][] = [
+  [96, 96],      // 96 Budyko-Sellers EBM — climate integration
+  [138, 139],    // 138 PMP; 139 PDSI — multi-year extremes/drought
+];
 const NO_TIME_IDS = (() => {
+  // Tools whose governing equation is a static/equilibrium relationship with
+  // NO calendar-time dependence (§5.1: e.g. Köhler droplet equilibrium,
+  // instantaneous unit-hydrograph shape, a single physics equation evaluated
+  // at a point). No date window is rendered; inputs are model/user parameters.
   const s = new Set<number>();
+  // Domain 1: static atmospheric scalars (2 Planck, 3 SVP, 4 hydrostatic,
+  // 6 advection-diffusion model-time, 7 Richardson, 8 Kolmogorov)
+  [2, 3, 4, 6, 7, 8].forEach(i => s.add(i));
+  // 11 Manning (static channel); 39 plume (model params); 40/41 EV distributions
+  [11, 39, 40, 41].forEach(i => s.add(i));
+  // 36-38 interpolation/geometry; 42 variogram; 43-50 soil & surface-layer
   for (let i = 36; i <= 38; i++) s.add(i);
   for (let i = 42; i <= 50; i++) s.add(i);
-  for (let i = 148; i <= 150; i++) s.add(i);
+  // 52 Beer-Lambert; 54 FvCB; 55 allometric; 57 Redfield; 62 Eppley
+  [52, 54, 55, 57, 62].forEach(i => s.add(i));
+  // 64 Chapman; 65 OH lifetime; 66 Sverdrup balance (wind-stress curl is
+  // user-supplied/NaN — static balance, no date-windowed fetch)
+  [64, 65, 66].forEach(i => s.add(i));
+  // 67-72 ocean balance/state models (Stommel WBC/TH, Munk, TEOS-10,
+  // Osborn-Cox, PWP); 75 Bruun; 76 McCowan; 78 Airy; 79 Stokes
+  for (let i = 67; i <= 72; i++) s.add(i);
+  [75, 76, 78, 79].forEach(i => s.add(i));
+  // 81-87 geomorphology (static terrain equations)
+  for (let i = 81; i <= 87; i++) s.add(i);
+  // 89 Schmidt stability; 90 Nash cascade (instantaneous unit-hydrograph
+  // shape — model-time, no calendar dependence per §5.1)
+  [89, 90].forEach(i => s.add(i));
+  // 94 VEI; 95 MTT plume; 97 climate sensitivity; 98 Planck feedback;
+  // 99-101 Rossby/Charney-Stern/Eady; 103 Reynolds; 104 Ekman depth
+  [94, 95, 97, 98, 99, 100, 101, 103, 104].forEach(i => s.add(i));
+  // 108 Köhler (instantaneous equilibrium); 109 Marshall-Palmer DSD;
+  // 110 Z-R (static)
+  [108, 109, 110].forEach(i => s.add(i));
+  // 111 IERS rotation; 112 Earth tides (static params); 113 EGM2008;
+  // 114 Helmert; 115 geoid
+  [111, 112, 113, 114, 115].forEach(i => s.add(i));
+  // 118 Joule heating; 119 S4; 122 Debye; 123-127 drag/orbit/collision/Kessler/HCW
+  [118, 119, 122, 123, 124, 125, 126, 127].forEach(i => s.add(i));
+  // 129 DOP; 130 Saastamoinen; 131-133 Thiem/Theis/Cooper-Jacob (steady or
+  // model-time drawdown); 135-137 UNISDR/EAD/AQI; 140 Froehlich
+  [129, 130, 131, 132, 133, 135, 136, 137, 140].forEach(i => s.add(i));
+  // 141-144 data assimilation / entropy scalars; 145 FSPL; 146 Klobuchar
+  // (t_sec is an input — diurnal phase, not a calendar window); 147 Doppler
+  for (let i = 141; i <= 147; i++) s.add(i);
+  // 148-150 orbital mechanics / information theory
+  [148, 149, 150].forEach(i => s.add(i));
   return s;
 })();
 
-function deriveStudyAreaMode(id: number): StudyAreaMode {
-  if (TWO_POINTS.has(id)) return 'two-points';
-  if (anyRange(id, BBOX)) return 'bbox';
-  return 'point';
-}
-
-/** Returns the study area modes scientifically valid for a given tool, based on its methodology. */
-function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAreaMode[] {
-  // Per-tool assignment based on each tool's actual scientific methodology.
-  // Each tool gets ONLY the spatial selection methods that are meaningful for its workflow.
-  const PER_TOOL: Record<number, StudyAreaMode[]> = {
+/** Study-area modes scientifically valid for each tool, from its paper's
+ *  physics (§4.3/§5.1). Every mode listed is legal for the tool's vizType;
+ *  point-only tools never get bbox, field tools always allow bbox. */
+const PER_TOOL_MODES: Record<number, StudyAreaMode[]> = {
     // ── Domain 1: Atmospheric Science (Eqs 1–8) ──
     1: ['bbox'],                     // LST Retrieval → satellite image area
     2: ['point'],                     // Brightness Temperature → single pixel/observation
@@ -331,7 +401,7 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     39: ['bbox'],                     // Gaussian Plume → dispersion over area
     40: ['point'],                    // Gumbel Distribution → station point
     41: ['point'],                    // GPD → station point
-    42: ['bbox'],                     // Semivariogram → spatial data area
+    42: ['point'],                     // Matheron semivariogram → scatter of station-pair lags (not a bbox grid)
 
     // ── Domain 6: Soil Science & Land Surface (Eqs 43–50) ──
     43: ['point'],                    // Van Genuchten → soil sample point
@@ -348,7 +418,7 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     52: ['point'],                    // Beer-Lambert → canopy profile at a point
     53: ['bbox'],                     // NEE → ecosystem flux area
     54: ['point'],                    // FvCB Photosynthesis → leaf/canopy point
-    55: ['bbox', 'polygon'],          // Allometric Biomass → forest plot area
+    55: ['point'],                    // Allometric Biomass → single-tree scalar at a point
     56: ['bbox'],                     // Ocean CO2 Uptake → ocean flux field
     57: ['point'],                    // Redfield Ratio → ocean sample point
 
@@ -366,7 +436,7 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
 
     // ── Domain 10: Ocean Dynamics (Eqs 66–73) ──
     66: ['bbox'],                     // Sverdrup Balance → ocean basin
-    67: ['bbox'],                     // Stommel Western Boundary → ocean basin
+    67: ['point'],                     // Stommel Western Boundary → model-space streamfunction, evaluate at a point
     68: ['bbox'],                     // Munk Viscous → ocean basin
     69: ['bbox'],                     // Stommel Box → ocean basin
     70: ['point'],                    // TEOS-10 Seawater → ocean profile point
@@ -386,7 +456,7 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     81: ['bbox'],                     // Stream Power → erosion field along network
     82: ['basin'],                    // River Network Scaling → drainage basin
     83: ['coastal'],                  // Richardson Fractal → coastline
-    84: ['bbox'],                     // Slope Stability → slope area
+    84: ['point'],                     // Infinite Slope FS → single slope profile point
     85: ['transect'],                 // Voellmy Friction → debris flow path
     86: ['bbox'],                     // Stream Power Index → terrain area
     87: ['bbox'],                     // Topographic Wetness Index → terrain area
@@ -478,12 +548,20 @@ function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAr
     147: ['path'],                     // Doppler Shift → satellite track path
 
     // ── Domain 26: Mathematical Frameworks (Eqs 148–150) ──
-    148: ['path'],                     // Hohmann Transfer → orbital transfer path
-    149: ['point'],                   // Lagrange Points → Lagrange point
-    150: ['point'],                    // Mutual Information → data point
-  };
+     148: ['path'],                     // Hohmann Transfer → orbital transfer path
+     149: ['point'],                   // Lagrange Points → Lagrange point
+     150: ['point'],                    // Mutual Information → data point
+};
 
-  const modes = PER_TOOL[id];
+/** Default study-area mode for a tool = its first scientifically-valid mode
+ *  (guaranteed to be inside allowedStudyAreaModes). */
+function deriveStudyAreaMode(id: number): StudyAreaMode {
+  return PER_TOOL_MODES[id]?.[0] ?? (TWO_POINTS.has(id) ? 'two-points' : 'point');
+}
+
+/** Returns the study area modes scientifically valid for a given tool, based on its methodology. */
+function deriveAllowedStudyAreaModes(id: number, _domainNumber: number): StudyAreaMode[] {
+  const modes = PER_TOOL_MODES[id];
   if (modes) return modes;
 
   // Fallback: if a tool is in TWO_POINTS, use two-points; otherwise default to point only
@@ -556,37 +634,71 @@ function deriveTimeGranularity(id: number): TimeGranularity {
   return null;
 }
 
-function deriveCategoryFilters(domainNumber: number): CategoryFilterId[] {
-  switch (domainNumber) {
-    case 1: return ['elevation', 'pressure-level', 'atmospheric-stability'];
-    case 2: return ['elevation', 'soil-texture', 'data-source', 'soil-depth'];
-    case 3: return ['magnitude-range', 'fault-type', 'event-type'];
-    case 4: return ['satellite-sensor', 'spatial-resolution', 'fire-confidence', 'cloud-phase'];
-    case 5: return ['spatial-resolution', 'return-period', 'confidence-threshold'];
-    case 6: return ['land-cover', 'soil-texture', 'soil-depth'];
-    case 7: return ['land-cover', 'temporal-aggregation'];
-    case 8: return ['land-cover', 'crop-type', 'temporal-aggregation'];
-    case 9: return ['data-source', 'temporal-aggregation'];
-    case 10: return ['ocean-depth', 'data-source', 'wave-model'];
-    case 11: return ['ocean-depth', 'wave-model', 'tidal-constituent'];
-    case 12: return ['elevation', 'land-cover', 'risk-threshold'];
-    case 13: return ['elevation', 'ocean-depth'];
-    case 14: return ['elevation', 'temporal-aggregation'];
-    case 15: return ['climate-scenario', 'temporal-aggregation'];
-    case 16: return ['pressure-level', 'atmospheric-stability'];
-    case 17: return ['cloud-phase', 'atmospheric-stability'];
-    case 18: case 19: case 20: case 21: return ['elevation', 'altitude-level'];
-    case 22: return ['soil-depth', 'soil-texture'];
-    case 23: return ['magnitude-range', 'risk-threshold', 'return-period'];
-    case 24: return ['temporal-aggregation', 'confidence-threshold'];
-    default: return [];
-  }
+function deriveCategoryFiltersForTool(toolId: number): CategoryFilterId[] {
+  return TOOL_CATEGORY_FILTERS[toolId] ?? [];
 }
+
+/**
+ * Per-tool category filters, derived from each paper's varying parameters (§5.1).
+ * A tool declares ONLY the filters its governing paper actually varies; every
+ * declared filter is read by the backend in contextEngine.mapInputs and has a
+ * real effect on the result (key parity, §4.5). Unlisted tools get no filters.
+ */
+export const TOOL_CATEGORY_FILTERS: Record<number, CategoryFilterId[]> = {
+  // Domain 2 — hydrology
+  10: ['land-cover', 'soil-texture'],   // SCS CN: land use → CN (NEH-4); HSG → CN group
+  14: ['tidal-constituent'],            // Pugh & Woodworth: select harmonic constituents
+  18: ['soil-texture'],   // Green-Ampt: Rawls K_s/ψ_w by texture
+  // Domain 3 — seismic
+  19: ['magnitude-range'],              // Gutenberg-Richter: rate at magnitude ≥ Mmin
+  21: ['fault-type', 'site-class', 'magnitude-range'], // CB2014: rake, Vs30, event M
+  // Domain 4 — remote sensing
+  26: ['satellite-sensor'], 27: ['satellite-sensor'], 28: ['satellite-sensor'],
+  29: ['satellite-sensor'], 30: ['satellite-sensor'], 31: ['satellite-sensor'],
+  32: ['satellite-sensor', 'fire-confidence'], // FRP: FIRMS confidence threshold
+  34: ['satellite-sensor'],            // Degree-day melt: snow-cover source
+  // Domain 5 — statistics
+  40: ['return-period'],               // Gumbel: quantile by return period
+  41: ['return-period'],               // GPD: return level
+  // Domain 6 — soil & eco
+  43: ['soil-texture'],                // van Genuchten: Carsel & Parrish α/n by texture
+  44: ['soil-texture'],                // Brooks-Corey: Clapp & Hornberger ψ_b/λ by texture
+  45: ['land-cover', 'soil-texture'],  // USLE: C factor by land use; K factor by texture
+  47: ['soil-texture'],  // de Vries: mineralogy by texture
+  48: ['atmospheric-stability'],       // MOST: stability class
+  50: ['land-cover'],                 // Ball-Berry: C3/C4 stomatal slope
+  // Domain 7 — carbon
+  51: ['land-cover'],                 // Monteith LUE: biome ε
+  52: ['land-cover'],                 // Beer-Lambert: canopy extinction k
+  54: ['land-cover'],                 // FvCB: C3/C4 photorespiratory parameters
+  55: ['land-cover'],                 // Chave allometric: bioclimatic stress E
+  // Domain 8 — ET & agro
+  58: ['crop-type'],                  // GDD: T_base/T_upper by crop (already wired)
+  61: ['crop-type'],                  // FAO yield response: Ky by crop
+  63: ['land-cover'],                 // Bigleaf: canopy resistance by cover
+  // Domain 14 — cryosphere
+  91: ['climate-scenario'],           // Glacier PDD: ablation scenario
+  // Domain 15 — climate
+  96: ['climate-scenario'],           // EBM: SSP forcing
+  97: ['climate-scenario'],           // Climate sensitivity: SSP ΔF
+  // Domain 16 — atmospheric dynamics
+  102: ['pressure-level'],            // QGPV: computation level
+  106: ['pressure-level'],            // Frontogenesis: level
+  107: ['pressure-level'],            // Barotropic vorticity: level
+  // Domain 22 — groundwater
+  131: ['soil-texture'],              // Thiem: aquifer transmissivity by texture
+  132: ['soil-texture'],              // Theis: T/S by texture
+  133: ['soil-texture'],              // Cooper-Jacob: T/S by texture
+  134: ['soil-texture'],              // Horton: soil-group infiltration parameters
+  // Domain 23 — risk
+  135: ['event-type', 'risk-threshold'], // UNISDR: hazard type; risk level
+  136: ['return-period'],             // EAD: return-period damage
+  138: ['return-period'],             // PMP: frequency factor
+};
 
 function deriveAutoDataSources(domainNumber: number): AutoDataSourceId[] {
   switch (domainNumber) {
     case 1: return ['era5', 'dem-elevation', 'landsat-lst', 'modis-lst', 'sentinel-3-slstr', 'open-meteo'];
-    case 2: return ['gpm-imerg', 'chirps', 'hydrosheds', 'soil-grids', 'dem-elevation', 'era5', 'copernicus-marine', 'aviso-altimetry', 'ndbc-buoys'];
     case 3: return ['usgs-earthquakes', 'tectonic-context', 'sentinel-1-insar'];
     case 4: return ['sentinel-2', 'modis-ndvi', 'modis-snow', 'viirs-fire', 'firms', 'landsat-lst', 'modis-lst', 'sentinel-3-slstr', 'dem-elevation', 'nsidc-seaice'];
     case 5: return ['dem-elevation', 'era5', 'gpm-imerg'];
@@ -646,19 +758,14 @@ export function attachAnalysisMetadata(): void {
       domain.tools.forEach(tool => {
         const tg = deriveTimeGranularity(tool.id);
         const domNum = domain.number;
-        // GDD tools accumulate daily data over the selected window — an
-        // "aggregation" control is redundant (they are already a daily sum),
-        // and category filters (land-cover, temporal-aggregation) are not wired
-        // to the GDD engine. Crop thresholds are handled via the Parameters.
-        const isGdd = tool.id === 58 || tool.id === 60;
         tool.analysisMeta = {
           needsTime: tg !== null,
           timeGranularity: tg,
           studyAreaMode: deriveStudyAreaMode(tool.id),
           allowedStudyAreaModes: deriveAllowedStudyAreaModes(tool.id, domNum),
-          categoryFilters: isGdd ? ['crop-type'] : deriveCategoryFilters(domNum),
+          categoryFilters: deriveCategoryFiltersForTool(tool.id),
           autoDataSources: deriveAutoDataSources(domNum),
-          temporalControls: isGdd
+          temporalControls: (tool.id === 58 || tool.id === 60)
             ? deriveTemporalControls(tool.id, domNum).filter(c => c !== 'aggregation' && c !== 'time-interval')
             : deriveTemporalControls(tool.id, domNum),
           temporalMode: deriveTemporalMode(domNum),
@@ -689,11 +796,11 @@ export const PARTS: Part[] = [
             paperSummary: 'Rozenstein et al. (2014) adapted the SWA first proposed by McMillin (1975) for Landsat-8 TIRS. The algorithm was derived via first-order Taylor-series linearization of the radiative transfer equation (following Qin et al., 2001). Li parameters were computed numerically from the Planck function integrated over each TIRS band and fitted via linear regression: L10 = −64.4661 + 0.4398T (r²=0.9968), L11 = −68.8678 + 0.4755T (r²=0.9967). Accuracy was assessed using MODTRAN 4.0 simulations over 60 atmospheric scenarios with RMSE of 0.93°C. The study showed the algorithm is sensitive to land surface emissivity (LSE) errors (0.5–1.5°C per 1% error) but relatively insensitive to water vapor misestimation.',
             scientificConcept: 'The split-window technique exploits differential atmospheric absorption in two adjacent thermal infrared bands (10.6–11.19 µm for TIRS Band 10, 11.5–12.51 µm for Band 11). Water vapor absorbs more strongly in Band 11, so the brightness temperature difference (T10 − T11) encodes the atmospheric correction needed to recover the true surface temperature. The Stefan-Boltzmann law (E = σεT⁴) governs the total emitted radiance, but the SWA bypasses explicit radiative transfer modeling by using the differential attenuation between bands.',
             inputs: [
-              { symbol: 'T₁₀', label: 'Band 10 Brightness Temp', unit: 'K', default: 300, min: 260, max: 330, group: 'Satellite Brightness Temperatures' },
-              { symbol: 'T₁₁', label: 'Band 11 Brightness Temp', unit: 'K', default: 298, min: 260, max: 330, group: 'Satellite Brightness Temperatures' },
-              { symbol: 'ε₁₀', label: 'Band 10 Emissivity', unit: '—', default: 0.97, min: 0.9, max: 1.0, group: 'Surface Properties' },
-              { symbol: 'ε₁₁', label: 'Band 11 Emissivity', unit: '—', default: 0.98, min: 0.9, max: 1.0, group: 'Surface Properties' },
-              { symbol: 'w', label: 'Column Water Vapor', unit: 'g/cm²', default: 1.5, min: 0, max: 6.3, group: 'Atmospheric Conditions' },
+              { symbol: 'T₁₀', label: 'Band 10 Brightness Temp', unit: 'K', default: null, min: 260, max: 330, group: 'Satellite Brightness Temperatures' },
+              { symbol: 'T₁₁', label: 'Band 11 Brightness Temp', unit: 'K', default: null, min: 260, max: 330, group: 'Satellite Brightness Temperatures' },
+              { symbol: 'ε₁₀', label: 'Band 10 Emissivity', unit: '—', default: null, min: 0.9, max: 1.0, group: 'Surface Properties' },
+              { symbol: 'ε₁₁', label: 'Band 11 Emissivity', unit: '—', default: null, min: 0.9, max: 1.0, group: 'Surface Properties' },
+              { symbol: 'w', label: 'Column Water Vapor', unit: 'g/cm²', default: null, min: 0, max: 6.3, group: 'Atmospheric Conditions' },
             ],
             outputs: [
               { id: 'primary', label: 'Surface Temperature', type: 'scalar', unit: '°C', description: 'Land surface temperature in Celsius derived from the split-window algorithm. Values typically range from −10°C (cold, high-latitude surfaces) to 60°C (hot, arid surfaces). Accuracy is ±0.93°C RMSE under standard atmospheric conditions (Rozenstein et al., 2014).' },
@@ -745,7 +852,7 @@ export const PARTS: Part[] = [
             scientificConcept: 'All objects above absolute zero emit electromagnetic radiation. The Planck function describes the spectral distribution of this radiation as a function of temperature. In thermal remote sensing, the at-sensor radiance in a given band is converted to a brightness temperature — the temperature a perfect blackbody would need to emit the observed radiance. Since real surfaces have emissivity < 1, the true surface temperature is always higher than the brightness temperature.',
             inputs: [
               { symbol: 'λ', label: 'Wavelength', unit: 'µm', default: 10, min: 0.1, max: 100, group: 'Measurement' },
-              { symbol: 'T', label: 'Temperature', unit: 'K', default: 300, min: 100, max: 2000, group: 'Measurement' },
+              { symbol: 'T', label: 'Temperature', unit: 'K', default: null, min: 100, max: 2000, group: 'Measurement' },
             ],
             outputs: [
               { id: 'primary', label: 'Spectral Radiance', type: 'scalar', unit: 'W·sr⁻¹·m⁻³', description: 'Spectral radiance at the specified wavelength and temperature per unit wavelength (W·sr⁻¹·m⁻³). To convert to brightness temperature, invert the Planck function numerically.' },
@@ -782,7 +889,7 @@ export const PARTS: Part[] = [
             paperSummary: 'Tetens (1930) compiled and evaluated various formulas for computing saturation vapor pressure over water and ice, deriving empirical coefficients that remain widely used today. The formulation e_s(T) = 6.1094 × exp(17.625T/(T+243.04)) is a simplification of the Clausius-Clapeyron equation adapted for practical meteorological use. The Clausius-Clapeyron equation (d ln e_s/dT = L_v/R_vT²) describes the fundamental thermodynamic relationship between temperature and vapor pressure at phase equilibrium.',
             scientificConcept: 'The Clausius-Clapeyron equation governs the phase transition between water vapor and liquid water. It shows that saturation vapor pressure increases approximately exponentially with temperature — meaning warmer air can hold significantly more moisture. This is the fundamental driver of: (1) increased precipitation intensity in a warming climate (~7% per °C), (2) evaporative demand on plants and soils, and (3) the feedback between temperature and atmospheric water vapor content.',
             inputs: [
-              { symbol: 'T', label: 'Air Temperature', unit: '°C', default: 20, min: -50, max: 50, group: 'Temperature' },
+              { symbol: 'T', label: 'Air Temperature', unit: '°C', default: null, min: -50, max: 50, group: 'Temperature' },
             ],
             outputs: [
               { id: 'primary', label: 'Saturation Vapor Pressure', type: 'scalar', unit: 'hPa', description: 'Saturation vapor pressure in hPa (also numerically equivalent to millibars). At 20°C, e_s ≈ 23.4 hPa. Doubling temperature from 10°C to 20°C nearly doubles e_s from ~12.3 to ~23.4 hPa.' },
@@ -819,8 +926,8 @@ export const PARTS: Part[] = [
             scientificConcept: 'The hydrostatic balance is the dominant vertical force balance in the atmosphere on all scales larger than individual thunderstorms. It states that the weight of air above a given level is exactly balanced by the vertical pressure gradient force. This enables: (1) computation of pressure at any altitude given surface pressure, (2) derivation of thickness between pressure levels, (3) conversion between pressure and height coordinates, (4) estimation of mass distribution in the atmosphere.',
             inputs: [
               { symbol: 'P0', label: 'Surface Pressure', unit: 'hPa', default: 1013.25, min: 500, max: 1100, group: 'Reference Level' },
-              { symbol: 'z', label: 'Altitude', unit: 'm', default: 1000, min: 0, max: 50000, group: 'Target Level' },
-              { symbol: 'T', label: 'Mean Layer Temperature', unit: 'K', default: 288, min: 200, max: 320, group: 'Air Properties' },
+              { symbol: 'z', label: 'Altitude', unit: 'm', default: null, min: 0, max: 50000, group: 'Target Level' },
+              { symbol: 'T', label: 'Mean Layer Temperature', unit: 'K', default: null, min: 200, max: 320, group: 'Air Properties' },
             ],
             outputs: [
               { id: 'primary', label: 'Pressure at Altitude', type: 'scalar', unit: 'hPa', description: 'Atmospheric pressure at the target altitude under isothermal assumption. At 5.5 km, pressure is approximately 500 hPa (~50% of surface pressure).' },
@@ -857,8 +964,8 @@ export const PARTS: Part[] = [
             paperSummary: 'The geostrophic wind is a fundamental concept in dynamic meteorology derived from the momentum equations under the assumption of steady, frictionless, straight-line flow. From Holton & Hakim Chapter 3: the large-scale atmospheric flow is nearly in geostrophic balance, where the Coriolis force balances the horizontal pressure gradient force. The geostrophic wind equation V_g = (1/fρ)(−∂P/∂y, ∂P/∂x) shows that wind flows parallel to isobars, with speed proportional to the pressure gradient magnitude and inversely proportional to latitude.',
             scientificConcept: 'Geostrophic balance is the dominant force balance in the free atmosphere (above the boundary layer) at synoptic scales (>1000 km). The Coriolis force (deflecting flow to the right in the Northern Hemisphere) balances the pressure gradient force. This means: (1) wind flows parallel to isobars, not across them, (2) closer spacing of isobars = stronger winds, (3) in the Southern Hemisphere, low pressure centers have clockwise circulation (opposite to NH), (4) geostrophic wind is undefined at the equator (where f=0).',
             inputs: [
-              { symbol: 'dP/dx', label: 'Pressure Gradient (x)', unit: 'Pa/m', default: 0.001, min: -10, max: 10, group: 'Pressure Field' },
-              { symbol: 'dP/dy', label: 'Pressure Gradient (y)', unit: 'Pa/m', default: 0.001, min: -10, max: 10, group: 'Pressure Field' },
+              { symbol: 'dP/dx', label: 'Pressure Gradient (x)', unit: 'Pa/m', default: null, min: -10, max: 10, group: 'Pressure Field' },
+              { symbol: 'dP/dy', label: 'Pressure Gradient (y)', unit: 'Pa/m', default: null, min: -10, max: 10, group: 'Pressure Field' },
               { symbol: 'f', label: 'Coriolis Parameter', unit: '/s', default: 0.0001, min: 0, max: 0.0002, group: 'Earth Rotation' },
               { symbol: 'ρ', label: 'Air Density', unit: 'kg/m³', default: 1.2, min: 0.5, max: 1.5, group: 'Air Properties' },
             ],
@@ -984,7 +1091,7 @@ export const PARTS: Part[] = [
             inputs: [
               { symbol: 'C', label: 'Kolmogorov Constant', unit: '—', default: 1.5, min: 1, max: 2, group: 'Universal Constants' },
               { symbol: 'ε', label: 'TKE Dissipation Rate', unit: 'm²/s³', default: 0.001, min: 1e-10, max: 100, group: 'Physical Parameters' },
-              { symbol: 'k', label: 'Wavenumber', unit: '1/m', default: 0.01, min: 1e-06, max: 1000, group: 'Physical Parameters' },
+              { symbol: 'k', label: 'Wavenumber', unit: '1/m', default: null, min: 1e-06, max: 1000, group: 'Physical Parameters' },
             ],
             outputs: [
               { id: 'primary', label: 'Spectral Energy Density E(k)', type: 'scalar', unit: 'm³/s²', description: 'Turbulent kinetic energy spectral density at wavenumber k. Represents how much TKE is contained in eddies of size L = 2π/k.' },
@@ -1026,14 +1133,14 @@ export const PARTS: Part[] = [
             paperSummary: 'Allen et al. (1998) established the FAO-56 Penman-Monteith method as the sole recommended ET₀ equation, replacing earlier FAO Penman and radiation methods. The equation combines the energy balance (radiation term) with aerodynamic transport (vapor pressure deficit), parameterized for a hypothetical grass crop of height 0.12 m, surface resistance 70 s/m, and albedo 0.23. Validation against lysimeter data from 11 locations worldwide showed RMSE of 0.2–0.8 mm/day. The method has become the global standard for irrigation scheduling, drought assessment, and hydrological modeling.',
             scientificConcept: 'Evapotranspiration is the combined process of water evaporation from soil surfaces and transpiration through plant stomata. The Penman-Monteith equation is a "combination" approach that simultaneously solves the energy balance (net radiation Rₙ minus soil heat flux G) and the aerodynamic transport of water vapor. The key physical drivers are: available energy (Rₙ−G) driving the phase change, vapor pressure deficit (eₛ−eₐ) representing atmospheric moisture demand, wind speed u₂ enhancing turbulent transport, and temperature T affecting the psychrometric constant and saturation vapor pressure slope.',
             inputs: [
-              { symbol: 'Rₙ', label: 'Net Radiation', unit: 'W/m²', default: 150, min: -100, max: 1000, group: 'Energy Balance' },
-              { symbol: 'G', label: 'Soil Heat Flux', unit: 'W/m²', default: 10, min: -100, max: 500, group: 'Energy Balance' },
-              { symbol: 'T', label: 'Air Temperature', unit: '°C', default: 25, min: -10, max: 50, group: 'Meteorological' },
-              { symbol: 'u₂', label: 'Wind Speed at 2m', unit: 'm/s', default: 2, min: 0, max: 20, group: 'Meteorological' },
-              { symbol: 'eₛ', label: 'Saturation Vapor Pressure', unit: 'kPa', default: 3.17, min: 0, max: 10, group: 'Vapor Pressure' },
-              { symbol: 'eₐ', label: 'Actual Vapor Pressure', unit: 'kPa', default: 1.5, min: 0, max: 10, group: 'Vapor Pressure' },
-              { symbol: 'Δ', label: 'Slope Vapor Pressure Curve', unit: 'kPa/°C', default: 0.15, min: 0, max: 1, group: 'Vapor Pressure' },
-              { symbol: 'γ', label: 'Psychrometric Constant', unit: 'kPa/°C', default: 0.067, min: 0.04, max: 0.1, group: 'Vapor Pressure' }
+              { symbol: 'Rₙ', label: 'Net Radiation', unit: 'W/m²', default: null, min: -100, max: 1000, group: 'Energy Balance' },
+              { symbol: 'G', label: 'Soil Heat Flux', unit: 'W/m²', default: null, min: -100, max: 500, group: 'Energy Balance' },
+              { symbol: 'T', label: 'Air Temperature', unit: '°C', default: null, min: -10, max: 50, group: 'Meteorological' },
+              { symbol: 'u₂', label: 'Wind Speed at 2m', unit: 'm/s', default: null, min: 0, max: 20, group: 'Meteorological' },
+              { symbol: 'eₛ', label: 'Saturation Vapor Pressure', unit: 'kPa', default: null, min: 0, max: 10, group: 'Vapor Pressure' },
+              { symbol: 'eₐ', label: 'Actual Vapor Pressure', unit: 'kPa', default: null, min: 0, max: 10, group: 'Vapor Pressure' },
+              { symbol: 'Δ', label: 'Slope Vapor Pressure Curve', unit: 'kPa/°C', default: null, min: 0, max: 1, group: 'Vapor Pressure' },
+              { symbol: 'γ', label: 'Psychrometric Constant', unit: 'kPa/°C', default: null, min: 0.04, max: 0.1, group: 'Vapor Pressure' }
             ],
             outputs: [
               { id: 'primary', label: 'Reference ET₀', type: 'scalar', unit: 'mm/day', description: 'Reference evapotranspiration rate for a hypothetical grass crop. Typical values range from 1–3 mm/day in cool humid climates to 8–12 mm/day in hot arid environments.' },
@@ -1081,9 +1188,9 @@ export const PARTS: Part[] = [
             paperSummary: 'The USDA SCS (now NRCS) developed the Curve Number method in 1954 as an empirical watershed-scale runoff prediction tool based on extensive rainfall-runoff data from agricultural watersheds across the United States. The method transforms total rainfall P into direct runoff Q using the relationship Q = (P−Iₐ)²/(P−Iₐ+S) where S is the potential maximum retention derived from a dimensionless curve number CN = 25400/(S+254). Initial abstraction Iₐ is empirically set to 0.2S. CN values range from 30 (low runoff potential, sandy soils with dense forest) to 100 (impervious surfaces).',
             scientificConcept: 'The Curve Number method is based on the hydrologic water balance and two fundamental assumptions: (1) the ratio of actual runoff to potential runoff equals the ratio of actual retention to potential retention, and (2) initial abstraction Iₐ is a fraction of potential retention S. This yields a nonlinear relationship where runoff begins only after P exceeds Iₐ, then increases rapidly with additional rainfall. The CN integrates: soil hydrologic group (A, B, C, D based on infiltration capacity), land use/cover, treatment practice, hydrologic condition, and antecedent moisture condition (AMC I/II/III).',
             inputs: [
-              { symbol: 'P', label: 'Precipitation', unit: 'mm', default: 50, min: 0, max: 500, group: 'Rainfall' },
-              { symbol: 'Iₐ', label: 'Initial Abstraction', unit: 'mm', default: 10, min: 0, max: 100, group: 'Watershed Storage' },
-              { symbol: 'S', label: 'Potential Retention', unit: 'mm', default: 100, min: 0, max: 500, group: 'Watershed Storage' }
+              { symbol: 'P', label: 'Precipitation', unit: 'mm', default: null, min: 0, max: 500, group: 'Rainfall' },
+              { symbol: 'Iₐ', label: 'Initial Abstraction', unit: 'mm', default: null, min: 0, max: 100, group: 'Watershed Storage' },
+              { symbol: 'S', label: 'Potential Retention', unit: 'mm', default: null, min: 0, max: 500, group: 'Watershed Storage' }
             ],
             outputs: [
               { id: 'primary', label: 'Direct Runoff Q', type: 'scalar', unit: 'mm', description: 'Direct runoff depth from the watershed. At P=50 mm with CN=72 (S=100 mm), Q≈13 mm. At P=100 mm, Q≈43 mm — showing the nonlinear response as P increases.' },
@@ -1178,7 +1285,7 @@ export const PARTS: Part[] = [
             scientificConcept: 'The Rational Method is based on the principle that peak runoff occurs when rainfall intensity is uniform across the catchment and the storm duration equals the time of concentration t_c (the time required for water to flow from the hydraulically most distant point to the outlet). The runoff coefficient C integrates: soil infiltration capacity, surface storage, land cover, antecedent moisture, and rainfall intensity effects. The method assumes: (1) peak discharge is proportional to catchment area, (2) rainfall intensity is constant over the storm duration, (3) the return period of the discharge equals the return period of the rainfall intensity.',
             inputs: [
               { symbol: 'C', label: 'Runoff Coefficient', unit: '—', default: 0.5, min: 0, max: 1, group: 'Catchment Characteristics' },
-              { symbol: 'i', label: 'Rainfall Intensity', unit: 'mm/h', default: 10, min: 0, max: 200, group: 'Rainfall' },
+              { symbol: 'i', label: 'Rainfall Intensity', unit: 'mm/h', default: null, min: 0, max: 200, group: 'Rainfall' },
               { symbol: 'A', label: 'Catchment Area', unit: 'km²', default: 10, min: 0.1, max: 10000, group: 'Catchment Characteristics' }
             ],
             outputs: [
@@ -1227,8 +1334,8 @@ export const PARTS: Part[] = [
             inputs: [
               { symbol: 'K', label: 'Storage Constant', unit: 'h', default: 6, min: 0.1, max: 48, group: 'Reach Characteristics' },
               { symbol: 'X', label: 'Weighting Factor', unit: '—', default: 0.2, min: 0, max: 0.5, group: 'Reach Characteristics' },
-              { symbol: 'Iₜ', label: 'Inflow at Time t', unit: 'm³/s', default: 100, min: 0, max: 10000, group: 'Flow Conditions' },
-              { symbol: 'Oₜ', label: 'Outflow at Time t', unit: 'm³/s', default: 80, min: 0, max: 10000, group: 'Flow Conditions' }
+              { symbol: 'Iₜ', label: 'Inflow at Time t (auto: USGS streamflow)', unit: 'm³/s', default: null, min: 0, max: 10000, group: 'Flow Conditions' },
+              { symbol: 'Oₜ', label: 'Outflow at Time t (auto: downstream USGS gauge)', unit: 'm³/s', default: null, min: 0, max: 10000, group: 'Flow Conditions' }
             ],
             outputs: [
               { id: 'primary', label: 'Reach Storage S', type: 'scalar', unit: 'm³/s·h', description: 'Total storage volume in the river reach expressed as storage-indication units (discharge × time). For K=6 h, X=0.2, I=100, O=80: S=6×(0.2×100+0.8×80)=504 m³/s·h.' },
@@ -1274,8 +1381,8 @@ export const PARTS: Part[] = [
             paperSummary: 'Pugh & Woodworth (2014) provide the definitive reference on sea-level science, including tidal harmonic analysis. The method decomposes observed sea level into astronomical tidal constituents by Fourier analysis of long tide gauge records. Each constituent has a specific frequency ωᵢ (derived from solar/lunar orbital periods: M₂=12.42 h, S₂=12.00 h, K₁=23.93 h, O₁=25.82 h), amplitude Aᵢ, and phase φᵢ. The sum of 60+ constituents can predict tides to within 10–20 cm RMSE at most coastal stations. Major constituents: M₂ (principal lunar semidiurnal), S₂ (principal solar semidiurnal), K₁ (lunisolar diurnal), O₁ (principal lunar diurnal).',
             scientificConcept: 'Tides are forced by the gravitational attraction of the Moon and Sun on Earth\'s oceans. The equilibrium tide theory predicts tidal forcing as the superposition of periodic gravitational potentials at discrete astronomical frequencies determined by orbital periods. However, the actual ocean response is modified by: (1) basin resonance (amplifying constituents near the natural period of ocean basins), (2) Coriolis deflection (amphidromic systems), (3) coastal geometry (shoaling, reflection), and (4) bottom friction. Harmonic analysis empirically captures these effects through site-specific phase shifts and amplitude adjustments.',
             inputs: [
-              { symbol: 'H₀', label: 'Mean Tidal Height', unit: 'm', default: 2, min: -5, max: 10, group: 'Reference Level' },
-              { symbol: 'amplitude', label: 'Constituent Amplitudes', unit: 'm', default: 0.5, min: 0, max: 5, group: 'Harmonic Constituents' }
+              { symbol: 'H₀', label: 'Mean Tidal Height (auto: NOAA CO-OPS datum)', unit: 'm', default: null, min: -5, max: 10, group: 'Reference Level' },
+              { symbol: 'amplitude', label: 'Constituent Amplitudes (auto: Schureman-evaluated harmonic terms)', unit: 'm', default: null, min: 0, max: 5, group: 'Harmonic Constituents' }
             ],
             outputs: [
               { id: 'primary', label: 'Tidal Elevation h(t)', type: 'scalar', unit: 'm', description: 'Predicted sea surface height relative to mean sea level at time t. Positive values indicate high tide, negative values indicate low tide.' },
@@ -1419,10 +1526,10 @@ export const PARTS: Part[] = [
             paperSummary: 'Gill (1982) Chapter 3 provides the comprehensive framework for the ocean surface heat budget. The net heat flux Q_net = Q_s − Q_b − Q_h − Q_e represents the energy exchange across the air-sea interface. Q_s is incoming solar (shortwave) radiation (200–300 W/m² daytime average), Q_b is outgoing longwave radiation from the sea surface (30–80 W/m²), Q_h is the turbulent sensible heat flux (10–50 W/m² typical), and Q_e is the latent heat flux (50–200 W/m² in tropics). The net flux Q_net determines the sea surface temperature (SST) tendency: dSST/dt = Q_net/(ρc_pH) where H is the mixed layer depth.',
             scientificConcept: 'The ocean surface heat budget describes all energy transfers across the air-sea interface. Shortwave radiation Q_s (0.3–3 µm) penetrates into the ocean water column and is absorbed, providing the primary energy input. Outgoing longwave radiation Q_b (8–14 µm) represents cooling by thermal emission from the sea surface following the Stefan-Boltzmann law (σT⁴, modulated by cloud cover and atmospheric greenhouse gases). Sensible heat flux Q_h represents direct conductive heat transfer driven by the air-sea temperature difference. Latent heat flux Q_e is associated with evaporation — the dominant heat loss process in the tropics, converting ~2.5×10⁶ J/kg of seawater into water vapor. The sum Q_net typically ranges from −200 W/m² (net ocean heat loss at night in subtropics) to +600 W/m² (net ocean heat gain during daytime in tropics).',
             inputs: [
-              { symbol: 'Qₛ', label: 'Incoming Shortwave', unit: 'W/m²', default: 200, min: 0, max: 1500, group: 'Radiation' },
-              { symbol: 'Q_b', label: 'Outgoing Longwave', unit: 'W/m²', default: 50, min: 0, max: 500, group: 'Radiation' },
-              { symbol: 'Q_h', label: 'Sensible Heat Flux', unit: 'W/m²', default: 20, min: -200, max: 500, group: 'Turbulent Flux' },
-              { symbol: 'Q_e', label: 'Latent Heat Flux', unit: 'W/m²', default: 80, min: -200, max: 500, group: 'Turbulent Flux' }
+              { symbol: 'Qₛ', label: 'Incoming Shortwave', unit: 'W/m²', default: null, min: 0, max: 1500, group: 'Radiation' },
+              { symbol: 'Q_b', label: 'Outgoing Longwave', unit: 'W/m²', default: null, min: 0, max: 500, group: 'Radiation' },
+              { symbol: 'Q_h', label: 'Sensible Heat Flux', unit: 'W/m²', default: null, min: -200, max: 500, group: 'Turbulent Flux' },
+              { symbol: 'Q_e', label: 'Latent Heat Flux', unit: 'W/m²', default: null, min: -200, max: 500, group: 'Turbulent Flux' }
             ],
             outputs: [
               { id: 'primary', label: 'Net Heat Flux Q_net', type: 'scalar', unit: 'W/m²', description: 'Net heat flux into the ocean (positive = ocean gains heat, negative = ocean loses heat). Global annual mean: ~0.6 W/m² (imbalance from greenhouse forcing). Regional values: tropics +50–100 W/m², mid-latitudes −50–0 W/m², polar regions −100–−200 W/m².' },
@@ -1469,11 +1576,11 @@ export const PARTS: Part[] = [
             paperSummary: 'Green & Ampt (1911) developed a physically based infiltration model by applying Darcy\'s law to unsaturated flow with a sharp wetting front approximation. The model assumes that water infiltrates as a "piston" flow with a distinct wetting front separating saturated and unsaturated zones. The infiltration rate f(t) = K_s(1 + (ψ_w−ψ₀)Δθ/F(t)) decreases over time as the cumulative infiltration F(t) increases, reflecting the increasing resistance as the wetting front moves deeper. Despite its simplicity, the Green-Ampt model performs well for many soils and is widely used in hydrologic models (HEC-HMS, SWMM, GSSHA).',
             scientificConcept: 'Infiltration is the process by which water enters the soil surface and moves downward under gravity and capillary forces. The Green-Ampt model applies Darcy\'s law assuming: (1) a sharp wetting front at depth L, (2) saturated soil above the front with hydraulic conductivity K_s, (3) constant matric suction at the wetting front ψ_f, and (4) uniform initial moisture content θ_i. The cumulative infiltration F = LΔθ where Δθ = θ_s−θ_i is the moisture deficit. The infiltration rate f = dF/dt = K_s(1 + ψ_fΔθ/F) decreases hyperbolically with F, approaching K_s as F → ∞ (gravity-dominated flow at large times).',
             inputs: [
-              { symbol: 'Kₛ', label: 'Saturated Hydraulic Conductivity', unit: 'm/s', default: 1e-05, min: 1e-10, max: 1, group: 'Soil Properties' },
-              { symbol: 'ψ_w', label: 'Wetting Front Potential', unit: 'm', default: 0.2, min: 0, max: 10, group: 'Soil Properties' },
-              { symbol: 'ψ₀', label: 'Initial Matric Potential', unit: 'm', default: 0.5, min: 0, max: 10, group: 'Soil Properties' },
-              { symbol: 'Δθ', label: 'Moisture Deficit', unit: '—', default: 0.2, min: 0, max: 0.5, group: 'Soil Properties' },
-              { symbol: 'F(t)', label: 'Cumulative Infiltration', unit: 'm', default: 0.1, min: 0, max: 5, group: 'Infiltration State' }
+              { symbol: 'Kₛ', label: 'Saturated Hydraulic Conductivity (auto: ISRIC texture → Rawls 1983 table)', unit: 'm/s', default: null, min: 1e-10, max: 1, group: 'Soil Properties' },
+              { symbol: 'ψ_w', label: 'Wetting Front Potential (auto: ISRIC texture → Rawls 1983 table)', unit: 'm', default: null, min: 0, max: 10, group: 'Soil Properties' },
+              { symbol: 'ψ₀', label: 'Initial Matric Potential', unit: 'm', default: 0, min: -10, max: 10, group: 'Soil Properties' },
+              { symbol: 'Δθ', label: 'Moisture Deficit (auto: GLDAS θ_i)', unit: '—', default: null, min: 0, max: 0.95, group: 'Soil Properties' },
+              { symbol: 'F(t)', label: 'Cumulative Infiltration (auto: IMERG storm total)', unit: 'm', default: null, min: 0, max: 5, group: 'Infiltration State' }
             ],
             outputs: [
               { id: 'primary', label: 'Infiltration Rate f(t)', type: 'scalar', unit: 'm/s', description: 'Instantaneous infiltration rate at time t. Initially high near the soil surface, then decreases asymptotically toward K_s as infiltration proceeds. For K_s=10⁻⁵ m/s, ψ_f=0.3 m, Δθ=0.2, the initial rate f(t→0) is very large (~∞ theoretically), and at F=0.1 m: f≈2×10⁻⁵ m/s.' },
@@ -1527,9 +1634,9 @@ export const PARTS: Part[] = [
             paperSummary: 'Gutenberg & Richter (1944) established that earthquake magnitudes follow a power-law distribution where log₁₀(N) = a − bM. The a-value characterizes the overall seismicity level of a region (how many earthquakes above M=0 occur per year), while the b-value describes the relative proportion of small to large earthquakes. Global b-values cluster tightly around 1.0 ± 0.1, but regional variations (b = 0.5–1.8) reflect tectonic regime, stress state, and heterogeneity. The frequency-magnitude distribution is the foundation of probabilistic seismic hazard analysis (PSHA), enabling the computation of return periods for scenario earthquakes.',
             scientificConcept: 'Earthquake sizes follow a scale-invariant power-law distribution — a manifestation of self-organized criticality in the Earth\'s crust. The Gutenberg-Richter law states that the logarithm of the number of earthquakes N with magnitude ≥ M decays linearly with M. The b-value is inversely related to differential stress: high stress regimes (subduction zones, induced seismicity) produce lower b-values (relatively more large events), while low-stress regimes (volcanic areas, geothermal fields) produce higher b-values. Deviations from the GR law at large magnitudes (characteristic earthquake hypothesis) and at small magnitudes (detection thresholds) are active research areas. The a-value is the base-10 logarithm of the annual number of earthquakes above M=0, directly reflecting tectonic strain rate.',
             inputs: [
-              { symbol: 'a', label: 'Seismic Activity (a-value)', unit: '—', default: 4, min: 0, max: 10, group: 'Seismicity Parameters' },
-              { symbol: 'b', label: 'Gutenberg-Richter b-value', unit: '—', default: 1, min: 0.5, max: 2, group: 'Seismicity Parameters' },
-              { symbol: 'M', label: 'Earthquake Magnitude', unit: 'M_w', default: 5, min: 0, max: 10, group: 'Magnitude' }
+              { symbol: 'a', label: 'Seismic Activity (a-value)', unit: '—', default: null, min: 0, max: 10, group: 'Seismicity Parameters' },
+              { symbol: 'b', label: 'Gutenberg-Richter b-value', unit: '—', default: null, min: 0.5, max: 2, group: 'Seismicity Parameters' },
+              { symbol: 'M', label: 'Earthquake Magnitude', unit: 'M_w', default: null, min: 0, max: 10, group: 'Magnitude' }
             ],
             outputs: [
               { id: 'primary', label: 'Cumulative Annual Frequency N(≥M)', type: 'scalar', unit: 'events/yr', description: 'Expected number of earthquakes per year with magnitude ≥ M. For typical California a=4, b=1: at M=5, N≈10^(4−5)=10 events/yr; at M=7, N≈10^(4−7)=0.001 events/yr (500-yr return period).' },
@@ -1568,10 +1675,10 @@ export const PARTS: Part[] = [
             paperSummary: 'Omori (1894) first observed that aftershock frequency decays hyperbolically with time, described by n(t) = K/(c+t)ᵖ. The modified Omori law (Utsu, 1961) added the exponent p to account for variable decay rates. The productivity parameter K scales with mainshock magnitude (log₁₀K ≈ M_w − 4), the offset c prevents singularity at t=0 (typically 0.01–0.1 days), and p describes the decay rate (p≈1.0–1.4 globally). Omori\'s law is the basis for operational aftershock forecasting following major earthquakes, used by the USGS and JMA to issue short-term aftershock probability forecasts.',
             scientificConcept: 'Aftershocks are stress-triggered earthquakes occurring on faults adjacent to the mainshock rupture plane, driven by Coulomb stress transfer. The mainshock increases static stress on surrounding faults (by 0.1–10 bar), triggering a cascade of events that decays as the perturbed stress relaxes through viscoelastic and poroelastic processes. The modified Omori law n(t) = K/(c+t)ᵖ is the temporal fingerprint of this stress relaxation. The p-exponent reflects the rheology of the lower crust: p≈1.0 (logarithmic decay, elastic-brittle crust), p>1 (faster decay, ductile relaxation). The ETAS (Epidemic-Type Aftershock Sequence) model generalizes Omori to account for aftershocks triggering their own aftershocks.',
             inputs: [
-              { symbol: 'K', label: 'Aftershock Productivity', unit: 'events/day', default: 100, min: 0, max: 10000, group: 'Sequence Parameters' },
-              { symbol: 'c', label: 'Time Offset', unit: 'days', default: 0.1, min: 0, max: 10, group: 'Sequence Parameters' },
-              { symbol: 't', label: 'Time Since Main Shock', unit: 'days', default: 1, min: 0, max: 1000, group: 'Sequence Parameters' },
-              { symbol: 'p', label: 'Omori Decay Exponent', unit: '—', default: 1.1, min: 0.5, max: 2, group: 'Sequence Parameters' }
+              { symbol: 'K', label: 'Aftershock Productivity (auto: Ogata MLE fit to genuine USGS sequence)', unit: 'events/day', default: null, min: 0, max: 10000, group: 'Sequence Parameters' },
+              { symbol: 'c', label: 'Time Offset (auto: Ogata MLE fit)', unit: 'days', default: null, min: 0, max: 10, group: 'Sequence Parameters' },
+              { symbol: 't', label: 'Time Since Main Shock (auto: elapsed since fitted mainshock)', unit: 'days', default: null, min: 0, max: 1000, group: 'Sequence Parameters' },
+              { symbol: 'p', label: 'Omori Decay Exponent (auto: Ogata MLE fit)', unit: '—', default: null, min: 0.5, max: 2, group: 'Sequence Parameters' }
             ],
             outputs: [
               { id: 'primary', label: 'Aftershock Rate n(t)', type: 'scalar', unit: 'events/day', description: 'Expected number of aftershocks per day at time t after the mainshock. For the 2011 Tohoku M9.1: Day 1 ~300 events/day, Day 30 ~30 events/day, Day 365 ~5 events/day.' },
@@ -1610,16 +1717,16 @@ export const PARTS: Part[] = [
             paperSummary: 'Campbell & Bozorgnia (2014) developed the NGA-West2 GMPE as part of the PEER Next Generation Attenuation project, using a global database of 15,024 ground motion recordings from 599 earthquakes. The model predicts ln(Y) = f_mag + f_att + f_flt + f_hng + f_site + f_basin + f_dip + f_hyp + f_atten with magnitude scaling, geometric + anelastic attenuation, Vs30 nonlinear site response, basin depth scaling, fault dip, hypocentral depth, and hanging-wall terms. Applicable M3.0–8.5, distances 0–300 km.',
             scientificConcept: 'Ground motion attenuation is governed by three physical processes: (1) geometric spreading — seismic wave energy spreads over an expanding wavefront, causing amplitude decay proportional to 1/R (body waves) to 1/√R (surface waves); (2) anelastic attenuation — intrinsic attenuation of seismic waves due to internal friction (Q-factor) in the Earth\'s crust; and (3) scattering — energy redistribution by crustal heterogeneities. The GMPE captures magnitude scaling (larger earthquakes have larger source dimensions and longer rupture durations), site amplification (soft soils amplify low-frequency motion and attenuate high frequencies), and faulting style (reverse faults produce higher ground motions than strike-slip faults at the same distance).',
             inputs: [
-              { symbol: 'M', label: 'Magnitude (M)', unit: '—', default: 6.5, min: 3, max: 8.5, group: 'Magnitude' },
-              { symbol: 'R_rup', label: 'Rupture Distance', unit: 'km', default: 20, min: 0, max: 300, group: 'Attenuation' },
-              { symbol: 'R_jb', label: 'Joyner-Boore Distance', unit: 'km', default: 15, min: 0, max: 300, group: 'Attenuation' },
+              { symbol: 'M', label: 'Magnitude (auto: strongest recent USGS event with focal mechanism)', unit: '—', default: null, min: 3, max: 8.5, group: 'Magnitude' },
+              { symbol: 'R_rup', label: 'Rupture Distance (auto: epicentral distance + hypocentral depth)', unit: 'km', default: null, min: 0, max: 300, group: 'Attenuation' },
+              { symbol: 'R_jb', label: 'Joyner-Boore Distance (auto: epicentral distance)', unit: 'km', default: null, min: 0, max: 300, group: 'Attenuation' },
               { symbol: 'R_x', label: 'Cross-Distance (Rx)', unit: 'km', default: 0, min: 0, max: 100, group: 'Attenuation' },
-              { symbol: 'V_s30', label: 'Site Vs30', unit: 'm/s', default: 760, min: 150, max: 1500, group: 'Site Response' },
-              { symbol: 'λ', label: 'Rake', unit: 'deg', default: 0, min: -180, max: 180, group: 'Source Effects' },
-              { symbol: 'D_ip', label: 'Dip', unit: 'deg', default: 90, min: 20, max: 90, group: 'Source Effects' },
-              { symbol: 'Z_tor', label: 'Top-of-Rupture Depth', unit: 'km', default: 2, min: 0, max: 16.66, group: 'Source Effects' },
-              { symbol: 'W_id', label: 'Rupture Width', unit: 'km', default: 10, min: 1, max: 60, group: 'Source Effects' },
-              { symbol: 'H_d', label: 'Hypocentral Depth', unit: 'km', default: 8, min: 0, max: 20, group: 'Source Effects' }
+              { symbol: 'V_s30', label: 'Site Vs30 (auto: SRTM slope → Wald & Allen 2007)', unit: 'm/s', default: null, min: 150, max: 1500, group: 'Site Response' },
+              { symbol: 'λ', label: 'Rake (auto: USGS moment tensor)', unit: 'deg', default: null, min: -180, max: 180, group: 'Source Effects' },
+              { symbol: 'D_ip', label: 'Dip (auto: USGS moment tensor)', unit: 'deg', default: null, min: 20, max: 90, group: 'Source Effects' },
+              { symbol: 'Z_tor', label: 'Top-of-Rupture Depth (auto: USGS centroid / Chiou-Youngs 2014)', unit: 'km', default: null, min: 0, max: 16.66, group: 'Source Effects' },
+              { symbol: 'W_id', label: 'Rupture Width (auto: CB14 Eq. 39)', unit: 'km', default: null, min: 1, max: 60, group: 'Source Effects' },
+              { symbol: 'H_d', label: 'Hypocentral Depth (auto: USGS moment tensor)', unit: 'km', default: null, min: 0, max: 20, group: 'Source Effects' }
             ],
             outputs: [
               { id: 'primary', label: 'Peak Ground Acceleration (PGA)', type: 'scalar', unit: 'g', description: 'Peak horizontal ground acceleration as a fraction of gravity. For M7.0 at 10 km (rock site): PGA≈0.3g; at 100 km: PGA≈0.02g. Critical for structural engineering design.' },
@@ -1660,8 +1767,8 @@ export const PARTS: Part[] = [
             scientificConcept: 'The Mohr-Coulomb criterion is the most widely used failure criterion in geotechnical and earthquake engineering. On a Mohr circle diagram (σₙ vs τ), the criterion defines a linear envelope; when the circle touches the envelope, failure occurs. The friction angle φ represents the angle of internal shearing resistance — higher φ means greater strength under confinement. In fault mechanics (Byerlee\'s law): τ = 0.85σₙ for σₙ < 200 MPa (low normal stress), and τ = 50 MPa + 0.6σₙ for higher stresses. The cohesion c represents cementation or interlocking — for pre-existing faults, c≈0 (sliding along existing fracture). The Coulomb failure criterion also describes the angle of failure planes: θ_f = 45° + φ/2 relative to the maximum principal stress.',
             inputs: [
               { symbol: 'c', label: 'Cohesion', unit: 'kPa', default: 10, min: 0, max: 100, group: 'Material Strength' },
-              { symbol: 'σₙ', label: 'Normal Stress', unit: 'kPa', default: 100, min: 0, max: 1000, group: 'Stress State' },
-              { symbol: 'tan φ', label: 'Friction Coefficient (tan φ)', unit: '—', default: 0.6, min: 0.1, max: 1.5, group: 'Material Strength' }
+              { symbol: 'σₙ', label: 'Normal Stress', unit: 'kPa', default: null, min: 0, max: 1000, group: 'Stress State' },
+              { symbol: 'tan φ', label: 'Friction Coefficient (tan φ)', unit: '—', default: null, min: 0.1, max: 1.5, group: 'Material Strength' }
             ],
             outputs: [
               { id: 'primary', label: 'Shear Strength τ', type: 'scalar', unit: 'kPa', description: 'Maximum shear stress the material can sustain before failure. For c=10 kPa, σₙ=100 kPa, tanφ=0.6: τ=70 kPa. If the applied shear stress exceeds this value, failure occurs.' },
@@ -1823,8 +1930,8 @@ export const PARTS: Part[] = [
             paperSummary: 'Rouse et al. (1974) developed NDVI as part of NASA\'s Great Plains Corridor project using ERTS (Landsat-1) satellite data. The index exploits the spectral contrast between strong chlorophyll absorption in the red band (0.6–0.7 µm) and high reflectance of leaf cellular structure in the NIR band (0.7–1.1 µm). NDVI = (ρ_NIR − ρ_Red)/(ρ_NIR + ρ_Red) ranges from −1 to +1. Dense vegetation: NDVI=0.6–0.9; sparse vegetation: 0.2–0.5; bare soil: 0.05–0.3; water: <0. NDVI is the most widely used vegetation index globally, with data continuity from AVHRR (1981), MODIS (2000), and VIIRS (2012) providing a 40+ year climate data record.',
             scientificConcept: 'NDVI leverages the fundamental biophysical properties of green vegetation: chlorophyll pigments strongly absorb red light (630–690 nm) for photosynthesis, while the spongy mesophyll cell structure in leaves strongly scatters NIR radiation (700–1100 nm). The ratio formulation normalizes for: (1) solar illumination differences (sun angle, topography), (2) atmospheric effects (partial cancellation of Rayleigh scattering and aerosol effects), and (3) surface albedo variations. The NDVI is functionally related to: fPAR (fraction of absorbed photosynthetically active radiation), LAI (leaf area index), and canopy chlorophyll content. However, NDVI saturates at high LAI (>4) and is sensitive to soil background at low LAI (<0.5), motivating the development of enhanced indices (EVI, SAVI).',
             inputs: [
-              { symbol: 'NIR', label: 'Near-Infrared Reflectance', unit: 'reflectance', default: 0.3, min: 0, max: 1, group: 'Satellite Bands' },
-              { symbol: 'Red', label: 'Red Reflectance', unit: 'reflectance', default: 0.1, min: 0, max: 1, group: 'Satellite Bands' }
+              { symbol: 'NIR', label: 'Near-Infrared Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' },
+              { symbol: 'Red', label: 'Red Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' }
             ],
             outputs: [
               { id: 'primary', label: 'NDVI', type: 'scalar', unit: '—', description: 'Normalized Difference Vegetation Index. Dense forest: 0.7–0.9; shrub/grass: 0.2–0.5; bare soil: 0.05–0.3; water/snow: <0. Satellites with similar spectral bands: Landsat-8/9, Sentinel-2, MODIS, VIIRS.' },
@@ -1863,8 +1970,8 @@ export const PARTS: Part[] = [
             paperSummary: 'McFeeters (1996) introduced NDWI = (Green − NIR)/(Green + NIR) to delineate open water features from satellite imagery. Water bodies have high reflectance in the green band (0.5–0.6 µm) due to low absorption and high backscattering, and very low reflectance in the NIR (0.7–1.1 µm) where water strongly absorbs. Thus NDWI > 0 indicates water, while NDWI ≤ 0 indicates land or vegetation. McFeeters demonstrated the index on Landsat TM imagery of San Francisco Bay, achieving accurate delineation of rivers, lakes, and reservoirs. The index is widely used for flood mapping, wetland mapping, and shoreline change detection.',
             scientificConcept: 'Liquid water has fundamentally different spectral properties from soil and vegetation. In the visible spectrum (particularly green, 0.5–0.6 µm), water has moderate reflectance (5–15%) due to backscattering and bottom reflectance in shallow water. In the NIR spectrum, liquid water absorbs nearly all incident radiation (>95% absorption), causing reflectance to drop to <1–2% for deep water. This spectral contrast means NDWI produces a strong positive signal for open water (0.3–0.8) and negative values for terrestrial surfaces. Turbid water, shallow water, and floating vegetation reduce NDWI values. For urban flood detection, NDWI outperforms single-band thresholding because the normalization reduces illumination and atmospheric effects.',
             inputs: [
-              { symbol: 'Green', label: 'Green Band Reflectance', unit: 'reflectance', default: 0.2, min: 0, max: 1, group: 'Satellite Bands' },
-              { symbol: 'NIR', label: 'NIR Band Reflectance', unit: 'reflectance', default: 0.3, min: 0, max: 1, group: 'Satellite Bands' }
+              { symbol: 'Green', label: 'Green Band Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' },
+              { symbol: 'NIR', label: 'NIR Band Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' }
             ],
             outputs: [
               { id: 'primary', label: 'McFeeters NDWI', type: 'scalar', unit: '—', description: 'Surface water index. NDWI > 0: open water; NDWI ≤ 0: land/vegetation. Typical NDWI values: deep clear water 0.5–0.8, turbid water 0.1–0.4, wet soil 0–0.1, dry land/vegetation <0.' },
@@ -1901,8 +2008,8 @@ export const PARTS: Part[] = [
             paperSummary: 'Gao (1996) proposed NDWI = (NIR − SWIR)/(NIR + SWIR) to estimate vegetation liquid water content from space. Unlike the McFeeters NDWI for open water, Gao\'s NDWI targets water in plant canopies. The index uses the NIR band (0.86 µm) where leaves have high reflectance and the SWIR band (1.24 µm or 1.64 µm) where liquid water has strong absorption features. Gao demonstrated that NDWI is linearly related to Equivalent Water Thickness (EWT) and is sensitive to changes in canopy water content from drought, senescence, and phenology. The index is widely used for drought monitoring, fire risk assessment, and ecosystem health analysis.',
             scientificConcept: 'Liquid water in plant leaves has strong absorption features in the SWIR region (1.2–2.5 µm), with major peaks at 1.45, 1.94, and 2.5 µm. In contrast, the NIR region (0.8–0.9 µm) is dominated by leaf structural scattering with minimal water absorption. This differential absorption means that as leaf water content decreases (drought, senescence), SWIR reflectance increases while NIR remains relatively stable. The Gao NDWI = (ρ_NIR − ρ_SWIR)/(ρ_NIR + ρ_SWIR) decreases as canopy water stress increases. The index is sensitive to canopy water content down to depths determined by the SWIR absorption coefficient at the chosen wavelength: 1.24 µm penetrates deeper into the canopy, while 1.64 µm is shallower (more sensitive to top-of-canopy water).',
             inputs: [
-              { symbol: 'NIR', label: 'NIR Band Reflectance', unit: 'reflectance', default: 0.3, min: 0, max: 1, group: 'Satellite Bands' },
-              { symbol: 'SWIR', label: 'SWIR Band Reflectance', unit: 'reflectance', default: 0.1, min: 0, max: 1, group: 'Satellite Bands' }
+              { symbol: 'NIR', label: 'NIR Band Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' },
+              { symbol: 'SWIR', label: 'SWIR Band Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' }
             ],
             outputs: [
               { id: 'primary', label: 'Gao NDWI', type: 'scalar', unit: '—', description: 'Canopy water content index. Higher values (>0) indicate well-watered vegetation; lower values (0 to −0.3) indicate dry/water-stressed vegetation. Values < −0.5 typically indicate bare soil or senescent vegetation.' },
@@ -1940,9 +2047,9 @@ export const PARTS: Part[] = [
             paperSummary: 'Huete et al. (2002) introduced EVI as an optimized vegetation index for MODIS that overcomes NDVI\'s limitations in high-biomass regions. EVI = 2.5 × (ρ_NIR − ρ_Red)/(ρ_NIR + 6·ρ_Red − 7.5·ρ_Blue + 1). The blue band is included to correct for atmospheric aerosol scattering, and the soil-adjustment factor L=1 (embedded in the denominator coefficients) reduces soil background effects. The coefficients were optimized using radiative transfer simulations over a range of atmospheric and surface conditions. EVI shows better sensitivity in high LAI regimes (LAI > 4) where NDVI saturates. MODIS provides both NDVI and EVI at 250 m and 500 m resolution globally every 16 days.',
             scientificConcept: 'EVI improves upon NDVI through three physical enhancements: (1) atmospheric resistance — the blue band correction for aerosol effects using the difference ρ_Blue − ρ_Red, which is proportional to aerosol optical depth; (2) soil-adjustment — the canopy-adjustment factor L=1 reduces soil background contamination, particularly important in semi-arid regions with patchy vegetation; (3) optimized gain — the coefficient G=2.5 scales the index to the full ±1 range. The denominator uses coefficients C₁=6 and C₂=7.5 (where the standard formulation is G × (ρ_NIR − ρ_Red)/(ρ_NIR + C₁·ρ_Red − C₂·ρ_Blue + L)). EVI is highly correlated with fPAR and LAI but shows less saturation in forests and includes explicit aerosol correction, making it more reliable for the tropics and high-latitude regions.',
             inputs: [
-              { symbol: 'NIR', label: 'NIR Band Reflectance', unit: 'reflectance', default: 0.3, min: 0, max: 1, group: 'Satellite Bands' },
-              { symbol: 'Red', label: 'Red Band Reflectance', unit: 'reflectance', default: 0.1, min: 0, max: 1, group: 'Satellite Bands' },
-              { symbol: 'Blue', label: 'Blue Band Reflectance', unit: 'reflectance', default: 0.05, min: 0, max: 1, group: 'Satellite Bands' }
+              { symbol: 'NIR', label: 'NIR Band Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' },
+              { symbol: 'Red', label: 'Red Band Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' },
+              { symbol: 'Blue', label: 'Blue Band Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' }
             ],
             outputs: [
               { id: 'primary', label: 'EVI', type: 'scalar', unit: '—', description: 'Enhanced Vegetation Index. Typical ranges: dense forest 0.4–0.7, shrubland 0.2–0.4, bare soil 0–0.1. EVI does not saturate as NDVI does in high-LAI forests.' },
@@ -1980,10 +2087,10 @@ export const PARTS: Part[] = [
             paperSummary: 'Hall et al. (1995) developed the NDSI algorithm for MODIS snow cover mapping. Snow has high reflectance in the visible (green band, 0.5–0.6 µm) but very low reflectance in the SWIR (1.6 µm) due to ice absorption. NDSI = (ρ_Green − ρ_SWIR)/(ρ_Green + ρ_SWIR). A pixel is classified as snow if NDSI ≥ 0.4 AND reflectance in the MODIS Band 2 (NIR) > 0.1 (to distinguish from water). The MODIS Snow Cover product (MOD10A1) provides daily global snow cover at 500 m resolution. The algorithm was validated against ground-based snow depth measurements (accuracy > 90%). Cloud obscuration is the primary limitation, mitigated by multi-day compositing.',
             scientificConcept: 'Snow has highly distinctive spectral properties compared to other natural surfaces. In the visible spectrum (0.4–0.7 µm), clean snow has very high reflectance (80–95%) due to multiple scattering by ice grains with negligible absorption. In the NIR–SWIR spectrum (1.0–2.5 µm), reflectance drops dramatically as ice absorption increases (to <10% at 1.6 µm and <5% at 2.2 µm). The NDSI = (ρ_Green − ρ_SWIR)/(ρ_Green + ρ_SWIR) exploits this spectral contrast. Clouds have generally higher reflectance in the SWIR than snow, producing negative NDSI values for most cloud types. The NIR reflectance criterion (Band 2 > 0.1) distinguishes snow from water (which has low NIR reflectance). Snow grain size, contamination (soot, dust), and forest cover reduce NDSI values.',
             inputs: [
-              { symbol: 'NIR', label: 'NIR Band Reflectance', unit: 'reflectance', default: 0.3, min: 0, max: 1, group: 'Satellite Bands' },
-              { symbol: 'SWIR', label: 'SWIR Band Reflectance', unit: 'reflectance', default: 0.1, min: 0, max: 1, group: 'Satellite Bands' },
-              { symbol: 'NIR_pre', label: 'Pre-fire NIR Reflectance', unit: 'reflectance', default: 0.5, min: 0, max: 1, group: 'Satellite Bands' },
-              { symbol: 'SWIR_pre', label: 'Pre-fire SWIR Reflectance', unit: 'reflectance', default: 0.2, min: 0, max: 1, group: 'Satellite Bands' }
+              { symbol: 'NIR', label: 'NIR Band Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' },
+              { symbol: 'SWIR', label: 'SWIR Band Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' },
+              { symbol: 'NIR_pre', label: 'Pre-fire NIR Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' },
+              { symbol: 'SWIR_pre', label: 'Pre-fire SWIR Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' }
             ],
             outputs: [
               { id: 'primary', label: 'NDSI', type: 'scalar', unit: '—', description: 'Normalized Difference Snow Index. NDSI ≥ 0.4 indicates snow cover. Clean snow: 0.6–0.9; dirty/melting snow: 0.2–0.6; clouds: typically <0 or low positive; bare ground: 0–0.1.' },
@@ -2021,8 +2128,8 @@ export const PARTS: Part[] = [
             paperSummary: 'Key & Benson (1999) developed NBR and the differenced NBR (dNBR) for burn severity mapping from Landsat imagery. NBR = (ρ_NIR − ρ_SWIR)/(ρ_NIR + ρ_SWIR) uses the spectral contrast between NIR reflectance (high in healthy vegetation, low after fire due to foliage consumption) and SWIR reflectance (moderate in vegetation, high after fire due to char and exposed soil). The dNBR = NBR_pre − NBR_post separates the fire signal from pre-fire vegetation variability. The USGS Monitoring Trends in Burn Severity (MTBS) program uses dNBR to map all large wildfires (>400 ha) across the United States since 1984, with severity classes: unburned, low, moderate, and high severity.',
             scientificConcept: 'Wildfire induces dramatic spectral changes in the landscape. Pre-fire, healthy vegetation has high NIR reflectance (leaf scattering) and low SWIR reflectance (leaf water absorption). Post-fire: (1) chlorophyll is consumed, reducing NIR reflectance; (2) vegetation canopy is removed, exposing soil/char; (3) char and ash have low albedo but relatively higher SWIR than NIR reflectance. The result is a decrease in NIR (ρ_NIR_pre > ρ_NIR_post) and an increase in SWIR (ρ_SWIR_pre < ρ_SWIR_post), causing NBR to systematically decrease after fire. The differenced NBR (dNBR = NBR_pre − NBR_post) amplifies the fire signal. dNBR can be normalized (RdNBR) to account for pre-fire vegetation density effects. The ΔNBR scale: <0.1 (unburned), 0.1–0.27 (low), 0.27–0.44 (moderate), 0.44–0.66 (high), >0.66 (very high).',
             inputs: [
-              { symbol: 'NIR', label: 'NIR Band Reflectance', unit: 'reflectance', default: 0.3, min: 0, max: 1, group: 'Satellite Bands' },
-              { symbol: 'SWIR', label: 'SWIR Band Reflectance', unit: 'reflectance', default: 0.1, min: 0, max: 1, group: 'Satellite Bands' }
+              { symbol: 'NIR', label: 'NIR Band Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' },
+              { symbol: 'SWIR', label: 'SWIR Band Reflectance', unit: 'reflectance', default: null, min: 0, max: 1, group: 'Satellite Bands' }
             ],
             outputs: [
               { id: 'primary', label: 'NBR', type: 'scalar', unit: '—', description: 'Normalized Burn Ratio. Pre-fire healthy vegetation: 0.5–0.8; post-fire high severity: −0.2–0.1; unburned: >0.3. The NBR single image can indicate potential burn severity.' },
@@ -2104,9 +2211,9 @@ export const PARTS: Part[] = [
             paperSummary: 'Idso et al. (1981) developed the CWSI as a normalized index of plant water stress based on canopy temperature. The index uses the empirical lower baseline (T_wet: canopy temperature of well-watered, transpiring crop) and upper baseline (T_dry: non-transpiring, fully stressed canopy). CWSI = (T_c − T_wet)/(T_dry − T_wet). A CWSI of 0 represents no stress (potential transpiration) and 1 represents complete stress (no transpiration). The authors showed that CWSI correlates with leaf water potential, stomatal conductance, and soil moisture content. Jackson et al. (1981) later provided a theoretical (Penman-Monteith-based) derivation of CWSI, linking it to the surface resistance to vapor transport.',
             scientificConcept: 'Plant transpiration cools the canopy below air temperature, similar to evaporative cooling. When water is abundant, transpiration proceeds at the potential rate, and the canopy temperature (T_c) is depressed relative to air temperature (T_air). As soil water becomes limiting, stomata close, transpiration decreases, and T_c rises toward T_air and eventually exceeds it. The CWSI normalizes T_c between: the well-watered baseline T_wet (full transpiration, maximum evaporative cooling) and the non-transpiring baseline T_dry (stomata fully closed, no cooling). T_wet depends on the vapor pressure deficit: T_wet = T_air − A − B·VPD where A and B are empirical coefficients. The theoretical CWSI (Jackson, 1982) is derived from the Penman-Monteith equation: CWSI = 1 − ET_a/ET_p = (r_s − r_p)/(r_s + r_a) where r_s is surface resistance, r_p is potential surface resistance, and r_a is aerodynamic resistance.',
             inputs: [
-              { symbol: 'T_c', label: 'Canopy Temperature', unit: '°C', default: 35, min: 0, max: 60, group: 'Thermal Measurements' },
-              { symbol: 'T_wet', label: 'Wet Reference (well-watered canopy)', unit: '°C', default: 25, min: 0, max: 50, group: 'Reference Baselines' },
-              { symbol: 'T_dry', label: 'Dry Reference (non-transpiring canopy)', unit: '°C', default: 40, min: 0, max: 60, group: 'Reference Baselines' }
+              { symbol: 'T_c', label: 'Canopy Temperature', unit: '°C', default: null, min: 0, max: 60, group: 'Thermal Measurements' },
+              { symbol: 'T_wet', label: 'Wet Reference (well-watered canopy)', unit: '°C', default: null, min: 0, max: 50, group: 'Reference Baselines' },
+              { symbol: 'T_dry', label: 'Dry Reference (non-transpiring canopy)', unit: '°C', default: null, min: 0, max: 60, group: 'Reference Baselines' }
             ],
             outputs: [
               { id: 'primary', label: 'CWSI', type: 'scalar', unit: '—', description: 'Crop Water Stress Index (0–1 scale). 0 = no stress (well-watered, full transpiration); 0.3–0.6 = moderate stress (stomatal closure, reduced ET); 0.7–1.0 = severe stress (minimal transpiration, wilting). CWSI can exceed 1.0 if T_c > T_dry.' },
@@ -2143,8 +2250,8 @@ export const PARTS: Part[] = [
             paperSummary: 'Hock (2003) provided a comprehensive review of temperature-index (degree-day) melt models, comparing them with physically-based energy balance models. The degree-day model M = DDF × max(0, T − T_base) relates melt rate M (mm/day) to the sum of positive temperatures above a base temperature (typically 0°C) multiplied by a degree-day factor DDF (mm/°C·day). DDF values range from 2–5 for snow, 5–7 for firn, and 7–10+ mm/°C·day for ice. Hock showed that temperature-index models explain 70–90% of melt variance despite their simplicity, because air temperature is well-correlated with net radiation, sensible heat flux, and longwave radiation in most melt environments. Enhanced temperature-index models incorporate potential solar radiation to improve performance in complex terrain.',
             scientificConcept: 'Snowmelt is driven by the surface energy balance: net radiation + sensible heat + latent heat + ground heat + precipitation heat. The degree-day approach assumes that air temperature is a proxy for the total energy available for melt. This works because: (1) in most melt environments, the energy balance terms are correlated with temperature (warmer air = higher longwave emission + higher sensible heat), (2) snow surface temperature is pinned at 0°C during melting, so T_air captures the temperature gradient for sensible heat transfer, (3) net shortwave radiation is not directly temperature-dependent — but in many mid-latitude melt seasons, warm conditions coincide with clear skies. The DDF = ρ_w·L_f⁻¹·(∂Q_m/∂T) where Q_m is total melt energy and L_f is the latent heat of fusion. DDF is spatially and temporally variable: deep snowpacks have lower DDF (more energy needed to warm the snow column), while ice has higher DDF (lower albedo, more radiative absorption).',
             inputs: [
-              { symbol: 'DDF', label: 'Degree-Day Factor', unit: 'mm/°C·day', default: 5, min: 0.5, max: 20, group: 'Melt Parameters' },
-              { symbol: 'T_air', label: 'Air Temperature', unit: '°C', default: 5, min: -20, max: 40, group: 'Meteorological' },
+              { symbol: 'DDF', label: 'Degree-Day Factor (site-calibrated, no global source)', unit: 'mm/°C·day', default: null, min: 0.5, max: 20, group: 'Melt Parameters' },
+              { symbol: 'T_air', label: 'Air Temperature (auto: live temperature)', unit: '°C', default: null, min: -20, max: 40, group: 'Meteorological' },
               { symbol: 'T_base', label: 'Base Melt Temperature', unit: '°C', default: 0, min: -5, max: 5, group: 'Melt Parameters' }
             ],
             outputs: [
@@ -2184,9 +2291,9 @@ export const PARTS: Part[] = [
             paperSummary: 'Comiso (1986) characterized Arctic winter sea ice using Nimbus-7 SMMR passive microwave data, establishing the NASA Team algorithm for sea ice concentration retrieval. The algorithm assumes that observed brightness temperature T_B at each polarization/frequency is a linear combination of open water and sea ice contributions: T_B = (1−C)·T_water + C·T_ice, where C is the ice concentration. The NASA Team algorithm uses the polarization ratio PR = (19V−19H)/(19V+19H) and the gradient ratio GR = (37V−19V)/(37V+19V) to solve for first-year ice, multi-year ice, and open water fractions. The approach is supplemented by the Bootstrap algorithm (Comiso, 1995) which uses 19V and 37V channels for improved performance in thin ice and melt pond conditions.',
             scientificConcept: 'Passive microwave radiometers measure the natural thermal emission from the Earth\'s surface at microwave frequencies (typically 6–89 GHz). Open water and sea ice have very different microwave emissivities: water has low emissivity (e≈0.4–0.5, appearing cold in brightness temperature) while sea ice has high emissivity (e≈0.9–0.95, appearing warm). The contrast is largest at 18–37 GHz. The presence of atmospheric water vapor and clouds has minimal effect at these frequencies (unlike visible/IR), enabling all-weather, day/night observations. The linear mixing model T_B = (1−C)·T_water + C·T_ice assumes: (1) the sensor footprint contains only water and ice in proportions C, (2) the effective radiating temperature of both surfaces is similar (≈ 271 K for ice, ≈ surface temperature for water), (3) atmospheric effects are negligible. For thin ice (<30 cm), the emissivity differs from thick ice, requiring the Bootstrap algorithm or thin-ice correction algorithms.',
             inputs: [
-              { symbol: 'C', label: 'Ice Concentration', unit: 'fraction', default: 0.5, min: 0, max: 1, group: 'Ice Conditions' },
-              { symbol: 'T_water', label: 'Open Water Radiative Temperature', unit: '°C', default: 0, min: -2, max: 10, group: 'Radiative Properties' },
-              { symbol: 'T_ice', label: 'Sea Ice Radiative Temperature', unit: '°C', default: -5, min: -50, max: 0, group: 'Radiative Properties' }
+              { symbol: 'C', label: 'Ice Concentration (auto: NSIDC NRT CDR V4 AMSR2)', unit: 'fraction', default: null, min: 0, max: 1, group: 'Ice Conditions' },
+              { symbol: 'T_water', label: 'Open Water Radiative Temperature (tie-point, user-supplied)', unit: '°C', default: null, min: -2, max: 10, group: 'Radiative Properties' },
+              { symbol: 'T_ice', label: 'Sea Ice Radiative Temperature (tie-point, user-supplied)', unit: '°C', default: null, min: -50, max: 0, group: 'Radiative Properties' }
             ],
             outputs: [
               { id: 'primary', label: 'Microwave Brightness Temperature T_B', type: 'scalar', unit: '°C', description: 'The composite brightness temperature of the mixed water+ice pixel at the given frequency/polarization. For C=0.5, T_water=−1°C, T_ice=−15°C: T_B=−8°C.' },
@@ -2350,13 +2457,13 @@ export const PARTS: Part[] = [
             paperSummary: 'Pasquill & Smith (1983) provide the definitive reference for atmospheric dispersion modeling, building on Pasquill\'s (1961) stability classification system. The Gaussian plume model C(x,y,z) = Q/(2πuσ_yσ_z)·exp(−y²/2σ_y²)·[exp(−(z−H)²/2σ_z²) + exp(−(z+H)²/2σ_z²)] assumes a continuous point source emitting at rate Q (mass/time), with the plume transported by mean wind u and spread by turbulence characterized by σ_y(x) and σ_z(x). Dispersion parameters σ_y and σ_z are functions of downwind distance x and atmospheric stability class (A–F: very unstable to stable). The model includes ground reflection via the image source term. It is the foundation of regulatory models (ISC, AERMOD, CALPUFF) and is widely used for air quality impact assessment, smoke management, and emergency response.',
             scientificConcept: 'Atmospheric dispersion is governed by turbulent diffusion within the atmospheric boundary layer. The Gaussian plume model solves the steady-state advection-diffusion equation assuming: (1) constant wind speed u in the x-direction, (2) Fickian diffusion with diffusivities K_y, K_z, (3) Gaussian concentration distributions in the crosswind (y) and vertical (z) directions. The standard deviations σ_y and σ_z parameterize the plume spread due to atmospheric turbulence. Pasquill stability classes (A–F) categorize turbulence intensity based on wind speed, solar radiation (daytime), and cloud cover (nighttime). The effective stack height H = h_s + Δh includes plume rise due to buoyancy and momentum, computed from the Briggs (1969) or Holland formulas. The ground-level centerline concentration C(x,0,0) = Q/(πuσ_yσ_z)·exp(−H²/2σ_z²) is the most commonly used diagnostic.',
             inputs: [
-              { symbol: 'Q', label: 'Source Emission Rate', unit: 'µg/s', default: 1000, min: 0, max: 1000000000.0, group: 'Source' },
-              { symbol: 'u', label: 'Mean Wind Speed at Stack Height', unit: 'm/s', default: 5, min: 0.5, max: 50, group: 'Meteorological' },
-              { symbol: 'σ_y', label: 'Horizontal Dispersion Parameter', unit: 'm', default: 50, min: 1, max: 10000, group: 'Dispersion' },
-              { symbol: 'σ_z', label: 'Vertical Dispersion Parameter', unit: 'm', default: 30, min: 1, max: 10000, group: 'Dispersion' },
+              { symbol: 'Q', label: 'Source Emission Rate (no genuine open source — user-supplied)', unit: 'µg/s', default: null, min: 0, max: 1000000000.0, group: 'Source' },
+              { symbol: 'u', label: 'Mean Wind Speed at Stack Height (auto: Open-Meteo 10 m)', unit: 'm/s', default: null, min: 0.5, max: 50, group: 'Meteorological' },
+              { symbol: 'σ_y', label: 'Horizontal Dispersion Parameter (user-supplied or Pasquill table)', unit: 'm', default: null, min: 1, max: 10000, group: 'Dispersion' },
+              { symbol: 'σ_z', label: 'Vertical Dispersion Parameter (user-supplied or Pasquill table)', unit: 'm', default: null, min: 1, max: 10000, group: 'Dispersion' },
               { symbol: 'y', label: 'Crosswind Distance from Plume Centerline', unit: 'm', default: 0, min: -5000, max: 5000, group: 'Receptor' },
               { symbol: 'z', label: 'Receptor Height Above Ground', unit: 'm', default: 0, min: 0, max: 2000, group: 'Receptor' },
-              { symbol: 'H', label: 'Effective Stack Height (stack + plume rise)', unit: 'm', default: 0, min: 0, max: 1000, group: 'Source' }
+              { symbol: 'H', label: 'Effective Stack Height (stack + plume rise)', unit: 'm', default: null, min: 0, max: 1000, group: 'Source' }
             ],
             outputs: [
               { id: 'primary', label: 'Ground-Level Concentration C(x,0,z)', type: 'scalar', unit: 'µg/m³', description: 'Air pollutant concentration at the specified downwind distance x and crosswind distance y. For Q=1000 µg/s, u=5 m/s, σ_y=50, σ_z=30: centerline C≈21 µg/m³.' },
@@ -2863,15 +2970,15 @@ export const PARTS: Part[] = [
         id: 'bio', number: 7, name: 'Biosphere & Carbon Cycle', color: '#22c55e',
         tools: [
           { id: 51, toolName: 'Gross Primary Production', name: 'Light Use Efficiency (GPP)', equation: 'GPP = ε × fPAR × PAR', reference: 'Monteith, J.L. (1972) Solar radiation and productivity in tropical ecosystems. Journal of Applied Ecology, 9(3), 747–766.',
-          paperUrl: 'https://doi.org/10.2307/2259420',
+          paperUrl: 'https://doi.org/10.2307/2401901',
           appliesTo: 'Global vegetation productivity, MODIS MOD17',
             shortDescription: 'Estimates gross primary production (GPP) as the product of light use efficiency, fraction of absorbed photosynthetically active radiation, and incident PAR — the Monteith light-use-efficiency approach used in MODIS MOD17',
             paperSummary: 'Monteith (1972) established the light-use-efficiency (LUE) framework for crop productivity, showing that dry matter production is linearly related to the amount of photosynthetically active radiation absorbed by the canopy. The relationship GPP = ε × fPAR × PAR separates the photosynthetic process into: (1) the energy input (PAR), (2) the fraction captured by the canopy (fPAR), and (3) the efficiency of converting absorbed energy into biomass (ε). Monteith demonstrated that ε is remarkably conservative across C₃ crops (~1.2 gC/MJ), with variations primarily driven by temperature, water stress, and CO₂ concentration. The MODIS MOD17 product applies this approach globally using satellite-derived fPAR (from NDVI) and meteorological reanalysis data.',
             scientificConcept: 'Light-use efficiency theory states that plant growth is proportional to the amount of light absorbed by the canopy, not the total incident light. The fraction of PAR absorbed (fPAR) is the proportion of incoming radiation (400–700 nm) intercepted by the canopy, functionally related to leaf area index by Beer\'s law: fPAR = 1 − exp(−k·LAI). The light use efficiency ε represents the carbon gain per unit absorbed PAR (gC/MJ), which is reduced below its theoretical maximum by environmental stressors: temperature extremes, water deficit, and nutrient limitation. The MODIS MOD17 algorithm uses biome-specific maximum ε values (e.g., 1.2 for evergreen needleleaf, 1.0 for deciduous broadleaf) that are downregulated by minimum temperature and VPD scalars: ε_actual = ε_max × T_min_scalar × VPD_scalar.',
             inputs: [
-              { symbol: 'ε', label: 'Light Use Efficiency', unit: 'gC/MJ', default: 1.2, min: 0, max: 5, group: 'Plant Physiology' },
-              { symbol: 'fPAR', label: 'Fraction of PAR Absorbed', unit: 'fraction', default: 0.5, min: 0, max: 1, group: 'Canopy Structure' },
-              { symbol: 'PAR', label: 'Photosynthetically Active Radiation', unit: 'MJ/m²/yr', default: 2000, min: 0, max: 10000, group: 'Radiation' }
+              { symbol: 'ε', label: 'Light Use Efficiency (site/vegetation-specific)', unit: 'gC/MJ', default: null, min: 0, max: 5, group: 'Plant Physiology' },
+              { symbol: 'fPAR', label: 'Fraction of PAR Absorbed (auto: MODIS MCD15A3H)', unit: 'fraction', default: null, min: 0, max: 1, group: 'Canopy Structure' },
+              { symbol: 'PAR', label: 'Photosynthetically Active Radiation (auto: genuine shortwave)', unit: 'MJ/m²/yr', default: null, min: 0, max: 10000, group: 'Radiation' }
             ],
             outputs: [
               { id: 'primary', label: 'Gross Primary Production (GPP)', type: 'scalar', unit: 'gC/m²/yr', description: 'Total carbon fixed by photosynthesis per year. For ε=1.2 gC/MJ, fPAR=0.5, PAR=2000 MJ/m²/yr: GPP=1200 gC/m²/yr. Global mean GPP: ~1200 gC/m²/yr (forests: 1500–3000, deserts: <100).' },
@@ -2898,7 +3005,7 @@ export const PARTS: Part[] = [
             scientificConcept: 'The Beer-Lambert law describes how radiation is attenuated as it passes through an absorbing medium. In plant canopies, leaves act as the absorbing elements, with the cumulative leaf area index LAI (m² leaf/m² ground) serving as the optical path length. The extinction coefficient k = (cosθ)⁻¹·φ accounts for leaf angle distribution (spherical, planophile, erectophile) and solar zenith angle. For a canopy with LAI=4 and k=0.5, I(z=bottom) = I₀·exp(−2) = 0.135·I₀ — only 13.5% of incident light reaches the bottom. The light profile determines the vertical distribution of photosynthesis: sun leaves at the top (high light, high photosynthetic capacity) vs shade leaves at the bottom (low light, adapted for efficient capture of diffuse radiation).',
             inputs: [
               { symbol: 'I₀', label: 'Incident Radiation', unit: 'µmol/m²s', default: 1500, min: 0, max: 3000, group: 'Radiation' },
-              { symbol: 'k', label: 'Extinction Coefficient', unit: '—', default: 0.5, min: 0.1, max: 2, group: 'Canopy Structure' },
+              { symbol: 'k', label: 'Extinction Coefficient', unit: '—', default: null, min: 0.1, max: 2, group: 'Canopy Structure' },
               { symbol: 'LAI', label: 'Leaf Area Index', unit: '—', default: 4, min: 0, max: 12, group: 'Canopy Structure' }
             ],
             outputs: [
@@ -2926,8 +3033,8 @@ export const PARTS: Part[] = [
             paperSummary: 'Wofsy et al. (1993) published the first long-term eddy covariance measurements of CO₂ exchange over a temperate forest (Harvard Forest, Massachusetts), establishing the methodological framework for the global FLUXNET network. They showed that NEE = R_eco − GPP, where positive NEE indicates net carbon release to the atmosphere and negative NEE indicates net carbon uptake by the ecosystem. The Harvard Forest was a net carbon sink of ~2 tC/ha/yr, demonstrating that temperate forests can sequester significant atmospheric CO₂. The study pioneered the partitioning of NEE into GPP (daytime, light-dependent) and R_eco (continuous, temperature-dependent) using the relationship between nighttime NEE and soil temperature.',
             scientificConcept: 'Net ecosystem exchange (NEE) is the net CO₂ flux between the terrestrial biosphere and the atmosphere, measured by eddy covariance as the covariance between vertical wind speed and CO₂ concentration: NEE = w′CO²′₀. Positive NEE = net CO₂ release to the atmosphere (source); negative NEE = net CO₂ uptake by the ecosystem (sink). NEE is partitioned into: GPP (gross primary production, the total carbon fixed by photosynthesis during daylight hours) and R_eco (ecosystem respiration, the sum of autotrophic respiration from plants and heterotrophic respiration from microbes and fauna). R_eco follows a Q₁₀ temperature dependence: R_eco(T) = R_ref·Q₁₀^((T−T_ref)/10). The net ecosystem carbon balance (NECB) extends NEE to include non-CO₂ carbon fluxes (CH₄, DOC, fire emissions, harvest removals).',
             inputs: [
-              { symbol: 'R_eco', label: 'Ecosystem Respiration', unit: 'gC/m²/yr', default: 800, min: 0, max: 5000, group: 'Carbon Fluxes' },
-              { symbol: 'GPP', label: 'Gross Primary Production', unit: 'gC/m²/yr', default: 1200, min: 0, max: 5000, group: 'Carbon Fluxes' }
+              { symbol: 'R_eco', label: 'Ecosystem Respiration (no genuine open source — user-supplied)', unit: 'gC/m²/yr', default: null, min: 0, max: 5000, group: 'Carbon Fluxes' },
+              { symbol: 'GPP', label: 'Gross Primary Production (auto: MODIS MOD17A2H annual)', unit: 'gC/m²/yr', default: null, min: 0, max: 5000, group: 'Carbon Fluxes' }
             ],
             outputs: [
               { id: 'primary', label: 'Net Ecosystem Exchange (NEE)', type: 'scalar', unit: 'gC/m²/yr', description: 'Net CO₂ flux: NEE = R_eco − GPP. Negative values = net carbon uptake by the ecosystem (sink). For R_eco=800, GPP=1200: NEE=−400 gC/m²/yr — a moderate carbon sink. Most mature forests: NEE=−100 to −500 gC/m²/yr.' },
@@ -3301,7 +3408,7 @@ export const PARTS: Part[] = [
             scientificConcept: 'The hydroxyl radical (OH) is the most important reactive species in the troposphere, formed primarily by the photolysis of ozone in the presence of water vapor: O₃ + hν → O(¹D) + O₂; O(¹D) + H₂O → 2OH. Global mean [OH] ≈ 1×10⁶ molecules/cm³, maintained by a balance between production (O₃ photolysis + H₂O) and loss (reaction with CH₄, CO, and VOCs). The lifetime τ = 1/(k·[OH]) assumes pseudo-first-order kinetics, valid when [OH] is approximately constant (the OH concentration is determined by the total reactivity of the atmosphere). Species with large k_OH (fast reaction) have short lifetimes — they react near their emission sources. Species with small k_OH (slow reaction) have long lifetimes — they mix globally and contribute to well-mixed greenhouse gas distributions. The paper\'s Table 1 lists OH-lifetimes for ~40 VOCs computed for the 12-h daytime average [OH] = 2.0×10⁶ molecule cm⁻³.',
             inputs: [
               { symbol: 'k', label: 'OH Rate Constant (298 K)', unit: 'cm³/molecule·s', default: null, min: 1e-30, max: 1e-5, group: 'Kinetics' },
-              { symbol: '[OH]', label: 'Hydroxyl Radical Concentration', unit: 'molecules/cm³', default: 1e6, min: 1e4, max: 1e8, group: 'Atmospheric Chemistry' }
+              { symbol: '[OH]', label: 'Hydroxyl Radical Concentration', unit: 'molecules/cm³', default: null, min: 1e4, max: 1e8, group: 'Atmospheric Chemistry' }
             ],
             outputs: [
               { id: 'primary', label: 'Atmospheric Lifetime τ', type: 'scalar', unit: 's', description: 'Pseudo-first-order lifetime: τ = 1/(k·[OH]). For k_OH=2.45×10⁻¹⁵ cm³/molecule·s (CH₄), [OH]=1×10⁶ molecule/cm³: τ = 1/(2.45×10⁻⁹) = 4.1×10⁸ s ≈ 12.9 years. Short-lived species (τ < 1 day): most biogenic VOCs; intermediate (1 day–1 yr): CO, SO₂, NO_x; long-lived (>1 yr): CH₄, N₂O, CFCs.' },
@@ -3376,7 +3483,7 @@ export const PARTS: Part[] = [
             inputs: [
               { symbol: 'β', label: 'Rossby Parameter', unit: 's⁻¹m⁻¹', default: null, min: 0, max: 1e-10, group: 'Earth Parameters' },
               { symbol: 'D', label: 'Ocean Depth', unit: 'm', default: 200, min: 1, max: 1e5, group: 'Basin Geometry' },
-              { symbol: 'b', label: 'Basin N-S Width', unit: 'm', default: 6249000, min: 1e3, max: 1e8, group: 'Basin Geometry' },
+              { symbol: 'b', label: 'Basin N-S Width', unit: 'm', default: null, min: 1e3, max: 1e8, group: 'Basin Geometry' },
               { symbol: 'L', label: 'Basin E-W Length', unit: 'm', default: 10000000, min: 1e3, max: 1e8, group: 'Basin Geometry' },
               { symbol: 'R', label: 'Friction Coefficient', unit: 's⁻¹', default: 0.02, min: 1e-10, max: 1, group: 'Dissipation' },
               { symbol: 'F', label: 'Max Wind Stress', unit: 'N/m²', default: 0.1, min: 0, max: 10, group: 'Wind Forcing' },
@@ -3607,9 +3714,9 @@ export const PARTS: Part[] = [
             paperSummary: 'Stockdon et al. (2006) developed an empirical parameterization for wave runup on sandy beaches based on video/swash-timestack field observations from 10 experiments spanning dissipative to reflective regimes (ξ₀ 0.05–2.2). The model: R₂ = 1.1·(η̄ + S/2) (paper Eq 9), where setup η̄ = 0.35·β_f·(H₀L₀)^(1/2) (Eq 10), incident swash S_inc = 0.75·β_f·(H₀L₀)^(1/2) (Eq 11), infragravity swash S_IG = 0.06·(H₀L₀)^(1/2) (Eq 12), combined S = √(S_inc² + S_IG²); H₀ is deep-water significant wave height, L₀ = gT₀²/2π (Eq 1), β_f the foreshore beach slope. On dissipative beaches (Iribarren ξ₀ = β_f/√(H₀/L₀) < 0.3) slope dependence vanishes: η̄_d = 0.016·(H₀L₀)^(1/2) (Eq 16), S_d = 0.046·(H₀L₀)^(1/2) (Eq 17), giving R₂ = 0.043·(H₀L₀)^(1/2) (Eq 18). The full-range formula R₂ = 1.1·[0.35·β_f·(H₀L₀)^(1/2) + (H₀L₀(0.563·β_f² + 0.004))^(1/2)/2] (Eq 19, 0.563 ≈ 0.75², 0.004 ≈ 0.06²) applies across all beach types. Validated on 491 independent runup measurements (rms error 38 cm, bias −17 cm).',
             scientificConcept: 'Wave runup is the total vertical excursion of the waterline on a beach face, consisting of: (1) wave setup — the super-elevation of the mean water level at the shoreline due to momentum flux from breaking waves (radiation stress divergence), scaling as η_u ∝ β_f·√(H₀L₀); (2) swash — the oscillatory motion of the waterline about the setup level, partitioned into incident-band (frequencies > 0.05 Hz, wave-by-wave processes) and infragravity-band (frequencies < 0.05 Hz, group-bound long waves) components. The transition from incident-dominated to infragravity-dominated swash occurs when the Iribarren number ξ₀ = β_f / √(H₀/L₀) < 0.3 (dissipative beaches). On dissipative beaches (fine sand, low slope), infragravity energy dominates because wave breaking dissipates incident-band energy, transferring it to lower frequencies through nonlinear wave-wave interactions. On reflective beaches (coarse sand, steep slope), waves surge up the beach face with minimal breaking and incident-band energy dominates.',
             inputs: [
-              { symbol: 'H₀', label: 'Deep-Water Significant Wave Height', unit: 'm', default: 2, min: 0.05, max: 20, group: 'Waves' },
-              { symbol: 'T₀', label: 'Deep-Water Peak Wave Period', unit: 's', default: 8, min: 2, max: 30, group: 'Waves' },
-              { symbol: 'β_f', label: 'Foreshore Beach Slope', unit: '—', default: 0.1, min: 0.001, max: 0.5, group: 'Beach' }
+              { symbol: 'H₀', label: 'Deep-Water Significant Wave Height', unit: 'm', default: null, min: 0.05, max: 20, group: 'Waves' },
+              { symbol: 'T₀', label: 'Deep-Water Peak Wave Period', unit: 's', default: null, min: 2, max: 30, group: 'Waves' },
+              { symbol: 'β_f', label: 'Foreshore Beach Slope', unit: '—', default: null, min: 0.001, max: 0.5, group: 'Beach' }
             ],
             outputs: [
               { id: 'primary', label: '2% Exceedance Runup R₂', type: 'scalar', unit: 'm', description: 'Maximum vertical runup height exceeded by only 2% of waves (paper Eq 9/19). For H₀=2 m, T₀=8 s (L₀≈99.9 m), β_f=0.1: ξ₀=0.71 (intermediate) → η̄=0.495 m, S_inc=1.060 m, S_IG=0.848 m, S=1.358 m, R₂=1.1×(0.495+0.679)=1.29 m. The R₂ metric is the standard design parameter for coastal defense structures (dikes, seawalls, revetments).' },
@@ -3639,10 +3746,10 @@ export const PARTS: Part[] = [
             paperSummary: 'Bruun (1962) proposed that as sea level rises, the nearshore profile translates upward and landward to maintain an equilibrium form, resulting in shoreline retreat proportional to sea level rise scaled by the active profile length. The retreat rate R = (L·S)/(B + h*) where L is the cross-shore distance from the shoreline to the closure depth h*, S is the sea level rise rate, and B is the berm (dune) height. The Bruun Rule assumes: (1) the beach profile is in equilibrium with the prevailing wave climate, (2) the profile shape is conserved as it translates, (3) the sediment volume is conserved (no cross-shelf losses), (4) the beach material is uniform sand, (5) sea level rise is the only forcing. The rule has been validated against field data from the US East Coast, the Danish North Sea coast, and the Nile Delta, with typical retreat rates of 50–200 m per meter of sea level rise (the "Bruun factor" of 50–200).',
             scientificConcept: 'The Bruun Rule is based on the concept of an equilibrium beach profile — the cross-shore shape that a sandy beach maintains under steady wave conditions. The equilibrium profile is described by the Dean (1977) power law: h(x) = A·x^(2/3) where h is water depth, x is the cross-shore distance, and A is a scale parameter depending on sediment grain size. As sea level rises by S, the equilibrium profile must shift upward by S and landward by R to maintain the same depth relative to the new mean sea level. The volume of sediment eroded from the upper beach equals the volume deposited offshore, maintaining the profile shape. The active profile extends from the berm crest (height B) to the closure depth (h*) — the depth beyond which negligible sediment transport occurs. For typical US East Coast beaches: B=2 m, h*=8 m, L=500 m. The retreat factor R/S = L/(B+h*) = 500/10 = 50, meaning 1 m of SLR causes 50 m of shoreline retreat.',
             inputs: [
-              { symbol: 'L*', label: 'Active Profile Length L', unit: 'm', default: 500, min: 50, max: 5000, group: 'Beach Geometry' },
-              { symbol: 'S', label: 'Sea Level Rise Rate', unit: 'm/yr', default: 0.003, min: 0, max: 1, group: 'Forcing' },
-              { symbol: 'B', label: 'Berm Height', unit: 'm', default: 2, min: 0, max: 20, group: 'Beach Geometry' },
-              { symbol: 'h*', label: 'Closure Depth', unit: 'm', default: 8, min: 1, max: 50, group: 'Beach Geometry' }
+              { symbol: 'L*', label: 'Active Profile Length L (auto: from SRTM beach slope)', unit: 'm', default: null, min: 50, max: 5000, group: 'Beach Geometry' },
+              { symbol: 'S', label: 'Sea Level Rise Rate (auto: NOAA CO-OPS tide-gauge trend)', unit: 'm/yr', default: null, min: 0, max: 1, group: 'Forcing' },
+              { symbol: 'B', label: 'Berm Height (auto: SRTM terrain)', unit: 'm', default: null, min: 0, max: 20, group: 'Beach Geometry' },
+              { symbol: 'h*', label: 'Closure Depth (auto: 1.57·H_s from ERA5 swh)', unit: 'm', default: null, min: 1, max: 50, group: 'Beach Geometry' }
             ],
             outputs: [
               { id: 'primary', label: 'Shoreline Retreat Rate R', type: 'scalar', unit: 'm/yr', description: 'Annual shoreline retreat rate. For L=500 m, S=3 mm/yr, B=2 m, h*=8 m: R=500×0.003/(2+8)=0.15 m/yr. For accelerated SLR (S=10 mm/yr): R=500×0.01/10=0.50 m/yr. The retreat rate scales linearly with SLR rate and active profile length.' },
@@ -3671,7 +3778,7 @@ export const PARTS: Part[] = [
             paperSummary: 'McCowan (1894, Phil. Mag. 38(233):351–358) solved for the highest solitary wave of permanent type in an endless rectangular channel of uniform depth: the crest rises to c = 1.78h above the bottom, so the maximum wave height is c − h = 0.78h (paper eq 34) — the value now known as the McCowan breaker criterion H_b = 0.78·d_b. The paper shows that at the limit the fluid velocity at the crest vanishes in the steady frame (§1), that the crest is a blunt wedge formed by two branches cutting at 120° (§3/§5, radius of curvature at the crest ≈ 30× the depth), and that the highest wave travels at V = √(1.56·g·h), about 25 % faster than a low solitary wave (√(g·h), eq 35). McCowan compared the result with his own wave-tank experiments, whose fair average was 0.75h (previous paper, §10). The criterion is derived for a horizontal bed; on natural sloping beaches the breaker index γ_b = H_b/h_b varies with the Iribarren number (≈0.4–0.6 dissipative spilling, ≈0.7–1.1 plunging, ≈1.1–1.4 surging), with 0.78 the canonical intermediate value adopted in coastal engineering.',
             scientificConcept: 'Wave breaking occurs when the wave becomes too steep to maintain a stable form. In shallow water, the limiting factor is the water depth — the wave height cannot exceed a fraction of the water depth because the wave crest would become unstable. The breaking parameter γ_b = H_b/h_b depends on: (1) beach slope β — steeper slopes allow larger γ_b because waves surge up the beach face more rapidly, (2) wave steepness s = H₀/L₀ — steeper waves break in deeper water (smaller γ_b), (3) Iribarren number ξ₀ = β/√(H₀/L₀) — the breaker type classification: ξ₀ < 0.5 (spilling breakers, γ_b ≈ 0.4–0.7), 0.5 < ξ₀ < 3.3 (plunging breakers, γ_b ≈ 0.7–1.1), ξ₀ > 3.3 (surging/collapsing breakers, γ_b ≈ 1.1–1.4). Three breaker types have distinct hydrodynamics: (1) spilling — turbulent eddies at the crest, gradual energy dissipation, (2) plunging — jet overturns, intense turbulence, most sediment suspension, (3) surging — minimal breaking, wave slides up and down the beach face.',
             inputs: [
-              { symbol: 'd_b', label: 'Breaking Water Depth', unit: 'm', default: 3, min: 0.1, max: 50, group: 'Nearshore Bathymetry' }
+              { symbol: 'd_b', label: 'Breaking Water Depth', unit: 'm', default: null, min: 0.1, max: 50, group: 'Nearshore Bathymetry' }
             ],
             outputs: [
               { id: 'primary', label: 'Breaking Wave Height H_b', type: 'scalar', unit: 'm', description: 'Wave height at the point of breaking. For d_b=3 m: H_b=0.78×3=2.34 m. For d_b=1 m (inner surf zone): H_b=0.78 m. For d_b=10 m (outer bar, storm conditions): H_b=7.8 m.' },
@@ -3731,9 +3838,9 @@ export const PARTS: Part[] = [
             paperSummary: 'Airy (1845) derived the linear (Airy) wave theory that provides the fundamental dispersion relation for surface gravity waves: ω² = gk·tanh(kh), where ω = 2π/T is the angular frequency, k = 2π/L is the wavenumber, g is gravity, and h is water depth. The dispersion relation is the starting point for all wave transformation calculations in coastal engineering: wave celerity C = ω/k = √(g/k·tanh(kh)), wavelength L = 2π/k, and group velocity C_g = dω/dk = C/2·[1 + 2kh/sinh(2kh)]. Airy theory is valid when wave steepness H/L < 1/7 (the Stokes limiting steepness) and relative depth kh > 0 (shallow water) up to kh > π (deep water). The dispersion relation has three asymptotic limits (SPM 1984 Ch 2 d/L table): (1) deep water (kh > π, d/L > 1/2): ω² = gk, C = √(g/k) = gT/2π, (2) transitional (2π/25 < kh < π, 1/25 < d/L < 1/2): full tanh form required, (3) shallow water (kh < 2π/25 ≈ 0.251, d/L < 1/25): ω² = gk²h, C = √(gh). The transition between these regimes is critical for wave transformation from deep water to the coast.',
             scientificConcept: 'Surface gravity wave dispersion arises from the balance between gravity (restoring force) and fluid inertia. The dispersion relation ω² = gk·tanh(kh) shows that wave frequency depends on both wavenumber and water depth — meaning longer waves travel faster, and shallow water slows waves down. In deep water (h > L/2): ω² = gk, celerity C = gT/2π ≈ 1.56·T (m/s), independent of depth. In shallow water (h < L/25, per the SPM d/L table): ω² = gk²h, celerity C = √(gh), independent of period — non-dispersive. The intermediate depth regime requires iterative solution because k appears both linearly and in the tanh(kh) argument. The group velocity C_g = dω/dk = C·[1 + 2kh/sinh(2kh)]/2 represents the speed at which wave energy propagates. In deep water: C_g = C/2 (energy travels at half the phase speed). In shallow water: C_g = C (energy travels at the phase speed). This difference explains why swell arrives before sea at a distant coast — the longer-period (deep-water) waves propagate faster than shorter-period waves.',
             inputs: [
-              { symbol: 'g', label: 'Gravitational Acceleration', unit: 'm/s²', default: 9.81, min: 9.8, max: 9.82, group: 'Physical Constants' },
-              { symbol: 'k', label: 'Wavenumber', unit: 'rad/m', default: 0.1, min: 0.001, max: 10, group: 'Wave Parameters' },
-              { symbol: 'h', label: 'Water Depth', unit: 'm', default: 10, min: 0, max: 10000, group: 'Bathymetry' }
+              { symbol: 'g', label: 'Gravitational Acceleration', unit: 'm/s²', default: null, min: 9.8, max: 9.82, group: 'Physical Constants' },
+              { symbol: 'k', label: 'Wavenumber', unit: 'rad/m', default: null, min: 0.001, max: 10, group: 'Wave Parameters' },
+              { symbol: 'h', label: 'Water Depth', unit: 'm', default: null, min: 0, max: 10000, group: 'Bathymetry' }
             ],
             outputs: [
               { id: 'primary', label: 'Angular Frequency ω', type: 'scalar', unit: 'rad/s', description: 'Wave angular frequency. For g=9.81, k=0.1, h=10 m: ω=√(9.81×0.1×tanh(0.1×10))=√(0.981×tanh(1.0))=√(0.981×0.762)=√0.747=0.864 rad/s, wave period T=2π/ω=7.3 s. In deep water limit (kh>π): ω=√(gk). In shallow water (kh<2π/25≈0.251): ω=k√(gh).' },
@@ -3763,7 +3870,7 @@ export const PARTS: Part[] = [
             scientificConcept: 'Stokes drift is a second-order (wave amplitude squared) wave-induced mean flow. The first-order linear wave velocity field has zero Eulerian mean (periodic orbit), but the Lagrangian mean velocity (the average velocity following a fluid particle) is non-zero because the particle experiences a slightly different velocity field at different phases of its orbit. For deep water waves: the surface Stokes drift u_s(0) = ω·k·a²/2 = π²·H²/(2·L·T). For a typical swell (H=2 m, T=10 s, L=156 m): u_s(0)=π²·4/(2·156·10)=0.0127 m/s ≈ 1.3 cm/s — apparently small, but sustained over hours, this drift transports water parcels significant distances (≈1.1 km/day). During storms (H=8 m, T=12 s, L=225 m): u_s(0)=π²·64/(2·225·12)=0.117 m/s ≈ 10.1 km/day. The vertical profile u_s(z) = u_s(0)·exp(2kz) decays rapidly with depth: at depth z = -L/2 (one wavelength deep): exp(-2π) = 0.0019 — negligible. Stokes drift interacts with wind-driven shear in the surface boundary layer to generate Langmuir circulation — counter-rotating vortices aligned with the wind (Langmuir, 1938) that are a key mechanism for vertical mixing in the upper ocean mixed layer. The Stokes drift profile modifies the turbulent kinetic energy budget through the Craik-Leibovich vortex force (CL2 theory).',
             inputs: [
               { symbol: 'ω', label: 'Angular Frequency', unit: 'rad/s', default: 0.628, min: 0.01, max: 10, group: 'Wave Parameters' },
-              { symbol: 'a', label: 'Wave Amplitude', unit: 'm', default: 1, min: 0.001, max: 20, group: 'Wave Parameters' },
+              { symbol: 'a', label: 'Wave Amplitude', unit: 'm', default: null, min: 0.001, max: 20, group: 'Wave Parameters' },
               { symbol: 'z', label: 'Depth (negative downward)', unit: 'm', default: -5, min: -500, max: 0, group: 'Position' }
             ],
             outputs: [
@@ -3827,13 +3934,13 @@ export const PARTS: Part[] = [
           paperUrl: 'https://doi.org/10.1130/0016-7606(1983)94%3C739:CCIB%3E2.0.CO;2',
           appliesTo: 'Bedrock erosion rate, landscape evolution',
             shortDescription: 'Models bedrock channel incision rate as a power-law function of upstream drainage area and local channel slope, forming the fundamental equation for fluvial landscape evolution',
-            paperSummary: 'Howard & Kerby (1983) developed the stream power law as a detachment-limited model for bedrock channel incision, relating the erosion rate E = K·A^m·S^n to drainage area A (proxy for discharge) and channel slope S. The erodibility coefficient K encapsulates: (1) rock resistance to abrasion and plucking, (2) sediment supply effects (tools vs. cover), (3) channel width adjustment. The exponents m and n reflect the relative importance of discharge vs. slope in driving erosion. Field studies and flume experiments constrain: m ≈ 0.3–0.6, n ≈ 0.7–1.0 (Whipple & Tucker, 1999; Stock & Montgomery, 1999). The stream power law is the erosion component of the channel profile evolution equation dz/dt = U − K·A^m·|dz/dx|^n, where U is rock uplift rate. At steady state (dz/dt = 0): slope S ∝ A^(−m/n), giving the characteristic concave-up longitudinal profile of bedrock rivers.',
+            paperSummary: 'Howard & Kerby (1983) developed the stream power law as a detachment-limited model for bedrock channel incision, relating the erosion rate E = K·A^m·S^n to drainage area A (proxy for discharge) and channel slope S. The erodibility coefficient K encapsulates: (1) rock resistance to abrasion and plucking, (2) sediment supply effects (tools vs. cover), (3) channel width adjustment. The exponents m and n reflect the relative importance of discharge vs. slope in driving erosion. Field studies and flume experiments constrain: m ≈ 0.3–0.6, n ≈ 2/3–1.0 (paper: n = 2/3) (Whipple & Tucker, 1999; Stock & Montgomery, 1999). The stream power law is the erosion component of the channel profile evolution equation dz/dt = U − K·A^m·|dz/dx|^n, where U is rock uplift rate. At steady state (dz/dt = 0): slope S ∝ A^(−m/n), giving the characteristic concave-up longitudinal profile of bedrock rivers.',
             scientificConcept: 'Stream power Ω = ρgQS is the rate of potential energy loss per unit channel length. In the stream power law, erosion rate E ∝ Ω ∝ QS ∝ A^m·S^n, where Q is discharge (scaling with area as Q ∝ A^c, c ≈ 0.7–1.0). The exponent m reflects: (1) the discharge-area scaling, (2) the hydraulic geometry (width, depth, velocity adjustments), (3) threshold effects (critical shear stress for incision). The exponent n reflects: (1) the relationship between shear stress and slope in uniform flow (τ ∝ hS), (2) sediment transport capacity, (3) plucking and abrasion efficiency. The normalized steepness index k_sn = S·(A/A_ref)^(m/n) allows comparison of channel steepness across basins with different drainage areas. Knickpoints (abrupt changes in channel slope) indicate transient landscape response to base-level fall, tectonic uplift, or climate change, propagating upstream as kinematic waves.',
             inputs: [
-              { symbol: 'K', label: 'Erodibility Coefficient', unit: '—', default: 0.001, min: 0, max: 1, group: 'Bedrock' },
-              { symbol: 'A', label: 'Upstream Drainage Area', unit: 'm²', default: 1000000.0, min: 0, max: 1000000000000.0, group: 'Landscape' },
-              { symbol: 'm', label: 'Area Exponent', unit: '—', default: 0.5, min: 0, max: 2, group: 'Exponents' },
-              { symbol: 'S', label: 'Channel Slope', unit: 'm/m', default: 0.01, min: 0, max: 1, group: 'Landscape' }
+              { symbol: 'K', label: 'Erodibility Coefficient', unit: '—', default: null, min: 0, max: 1, group: 'Bedrock' },
+              { symbol: 'A', label: 'Upstream Drainage Area', unit: 'm²', default: null, min: 0, max: 1000000000000.0, group: 'Landscape' },
+              { symbol: 'm', label: 'Area Exponent', unit: '—', default: null, min: 0, max: 2, group: 'Exponents' },
+              { symbol: 'S', label: 'Channel Slope', unit: 'm/m', default: null, min: 0, max: 1, group: 'Landscape' }
             ],
             outputs: [
               { id: 'primary', label: 'Erosion Rate E', type: 'scalar', unit: 'm/yr', description: 'Bedrock channel incision rate. For K=0.001, A=10^6 m^2, m=0.5, S=0.01: E=0.01 m/yr=10 mm/yr. Typical erosion rates: 0.01–0.1 mm/yr (cratonic), 0.1–1 mm/yr (orogenic), >1 mm/yr (Himalaya, Taiwan, New Zealand).' },
@@ -3856,7 +3963,7 @@ export const PARTS: Part[] = [
           paperUrl: 'https://pubs.usgs.gov/publication/pp294B',
           appliesTo: 'River network scaling, basin morphology, hypsometry',
             shortDescription: 'Describes the empirical power-law relationship between main channel length L and drainage basin area A, with a characteristic exponent h ≈ 0.6 that reveals fundamental scaling properties of fluvial networks',
-            paperSummary: "Hack (1957) discovered that the main channel length L increases with drainage basin area A as L = c·A^h, where h ≈ 0.6 and c is a dimensionless coefficient. This relationship holds over 5+ orders of magnitude — from small headwater basins (~0.1 km^2) to large river systems (~10^6 km^2). The exponent h > 0.5 indicates that basins become more elongate with increasing area. Hack's law implies that river networks are not strictly self-similar (which would require h = 0.5). The departure from h = 0.5 reflects: (1) the hierarchical branching structure of natural networks, (2) scale-dependent sinuosity of main channels, (3) competing drainage network expansion.",
+            paperSummary: "Hack (1957) discovered that the main channel length L increases with drainage basin area A as L = c·A^h, where h ≈ 0.6 and c is a dimensionless coefficient. This relationship holds over ~3.5 orders of magnitude — from small headwater basins (~0.1 km^2) to large river systems (~10^6 km^2). The exponent h > 0.5 indicates that basins become more elongate with increasing area. Hack's law implies that river networks are not strictly self-similar (which would require h = 0.5). The departure from h = 0.5 reflects: (1) the hierarchical branching structure of natural networks, (2) scale-dependent sinuosity of main channels, (3) competing drainage network expansion.",
             scientificConcept: "Hack's law L = c·A^h emerges from the optimality principles that govern drainage network evolution. For a perfectly self-similar (fractal) network: h = 0.5 (L ∝ sqrt(A), the network is a space-filling tree). The observed h ≈ 0.6 reveals that main channels have systematic sinuosity increasing with scale. Hack's law is related to: (1) Horton's laws of stream numbers (R_b), lengths (R_l), and areas (R_a) — Hack exponent h = log(R_l)/log(R_a), (2) fractal dimension of the main channel D = 2h (typically D ≈ 1.2), (3) the elongation ratio E = L_basin/L_channel.",
             inputs: [
               { symbol: 'c', label: 'Scaling Coefficient', unit: '—', default: 1.5, min: 0, max: 100, group: 'Empirical' },
@@ -3974,8 +4081,8 @@ export const PARTS: Part[] = [
             paperSummary: 'Moore et al. (1991) introduced the Stream Power Index SPI = ln(A_s·tanβ) as a topographic attribute for characterizing the potential erosive power of overland flow. SPI combines specific contributing area A_s (representing accumulated flow) and local slope tanβ (representing flow gradient). High SPI identifies zones of flow convergence (valleys, swales) prone to erosion; low SPI identifies ridges and divergent hillslopes.',
             scientificConcept: 'Stream power Ω = ρgQS ∝ A_s·S for overland flow with uniform rainfall excess. SPI = ln(A_s·S) is the log-transformed stream power proxy. SPI is most effective combined with TWI (Topographic Wetness Index) for saturation zones, the LS factor (USLE) for soil erosion, and curvature for differentiating gullying from sheetwash. SPI is scale-dependent: 1-10 m DEMs capture rills/gullies, 10-30 m DEMs capture hillslope-channel transitions.',
             inputs: [
-              { symbol: 'A_s', label: 'Specific Contributing Area', unit: 'm^2/m', default: 100, min: 0, max: 1000000.0, group: 'Flow' },
-              { symbol: 'tan β', label: 'Slope (tangent)', unit: '—', default: 0.1, min: 0, max: 10, group: 'Topography' }
+              { symbol: 'A_s', label: 'Specific Contributing Area', unit: 'm^2/m', default: null, min: 0, max: 1000000.0, group: 'Flow' },
+              { symbol: 'tan β', label: 'Slope (tangent)', unit: '—', default: null, min: 0, max: 10, group: 'Topography' }
             ],
             outputs: [
               { id: 'primary', label: 'Stream Power Index SPI', type: 'scalar', unit: '—', description: 'Log-transformed stream power proxy. For A_s=100, tanβ=0.1: SPI=ln(10)=2.30. For A_s=10000, tanβ=0.05: SPI=ln(500)=6.21. For ridge (A_s=1, tanβ=0.4): SPI=ln(0.4)=-0.92.' },
@@ -4001,8 +4108,8 @@ export const PARTS: Part[] = [
             paperSummary: 'Beven & Kirkby (1979) developed TWI = ln(A_s/tanβ) as the core topographic component of the TOPMODEL hydrologic model. TWI captures saturation tendency: points with large upslope area and low slope have high TWI and are prone to saturation. The water table depth z = z_mean − (1/f)·(TWI − λ) where λ is the mean TWI. The variable source area concept: saturated areas expand from valley bottoms up hillslopes during storms.',
             scientificConcept: 'TWI has a physical basis in hillslope water balance. Assuming steady-state recharge R, subsurface flux q = R·A_s, and exponential transmissivity T = T_0·exp(−z/f): z = z_mean − f·(ln(A_s/tanβ) − λ). High TWI = shallow water table = saturation. The critical TWI for saturation: TWI > λ + z_mean/f. The variable source area fraction explains rapid runoff response of humid catchments (5-30% of basin area).',
             inputs: [
-              { symbol: 'A_s', label: 'Specific Contributing Area', unit: 'm^2/m', default: 100, min: 0, max: 1000000.0, group: 'Flow' },
-              { symbol: 'tan β', label: 'Slope (tangent)', unit: '—', default: 0.1, min: 0, max: 10, group: 'Topography' }
+              { symbol: 'A_s', label: 'Specific Contributing Area', unit: 'm^2/m', default: null, min: 0, max: 1000000.0, group: 'Flow' },
+              { symbol: 'tan β', label: 'Slope (tangent)', unit: '—', default: null, min: 0, max: 10, group: 'Topography' }
             ],
             outputs: [
               { id: 'primary', label: 'Topographic Wetness Index TWI', type: 'scalar', unit: '—', description: 'Topographic wetness index. For A_s=100, tanβ=0.1: TWI=ln(100/0.1)=ln(1000)=6.91. For valley bottom (A_s=10000, tanβ=0.02): TWI=ln(500000)=13.1. For ridge (A_s=1, tanβ=0.4): TWI=ln(2.5)=0.92.' },
@@ -4092,12 +4199,12 @@ export const PARTS: Part[] = [
               { symbol: 'n', label: 'Number of Linear Reservoirs', unit: '—', default: 3, min: 1, max: 10, group: 'Model Structure' },
               { symbol: 'K', label: 'Storage Coefficient (Residence Time)', unit: 'h', default: 6, min: 0.1, max: 48, group: 'Model Structure' },
               { symbol: 't', label: 'Time', unit: 'h', default: 12, min: 0, max: 1000, group: 'Temporal' },
-              { symbol: 'Q_0', label: 'Initial Discharge (Peak Inflow)', unit: 'm^3/s', default: 100, min: 0, max: 10000, group: 'Hydrology' }
+              { symbol: 'Q_0', label: 'Initial Discharge (Peak Inflow)', unit: 'm^3/s', default: null, min: 0, max: 10000, group: 'Hydrology' }
             ],
             outputs: [
-              { id: 'primary', label: 'Outflow Discharge q(t)', type: 'scalar', unit: 'm^3/s', description: 'Watershed outflow at time t. For n=3, K=6 h, t=12 h, Q_0=100: q=12^2/(36×2)×(1/6)×e^(-2)×100=0.167×0.135×100=2.25 m^3/s. Peak at t_p=(n-1)K=12 h: q_peak=Q_0×(2/e)^2/2!=27.0 m^3/s.' },
+              { id: 'primary', label: 'Outflow Discharge q(t)', type: 'scalar', unit: 'm^3/s', description: 'Watershed outflow at time t. For n=3, K=6 h, t=12 h, Q_0=100: q=12^2/(36×2)×(1/6)×e^(-2)×100=2×0.167×0.135×100=4.51 m^3/s. Peak at t_p=(n-1)K=12 h: q_peak=Q_0×(2/e)^2/(2!×K)=100×0.271/6=4.51 m^3/s.' },
               { id: 'time_to_peak', label: 'Time to Peak t_p', type: 'scalar', unit: 'h', description: 't_p = (n-1)K. For n=3, K=6 h: t_p=12 h. Small steep watersheds: t_p=1-3 h; large flat basins: t_p=24-96 h.' },
-              { id: 'peak_factor', label: 'Peak Factor q_p/Q_0', type: 'scalar', unit: '—', description: 'n=1: 1 (no attenuation); n=2: 0.368; n=3: 0.271; n=4: 0.224; n=5: 0.195. Higher n = more attenuation.' }
+              { id: 'peak_factor', label: 'Dimensionless Peak Factor (q_p·K/Q_0)', type: 'scalar', unit: '—', description: 'n=1: 1 (no attenuation); n=2: 0.368; n=3: 0.271; n=4: 0.224; n=5: 0.195. Higher n = more attenuation. Actual peak q_p = Q_0 × factor / K.' }
             ],
             methodology: 'Nash cascade is calibrated to observed rainfall-runoff events: (1) separate baseflow, (2) compute rainfall excess using phi-index or SCS-CN, (3) estimate n and K by method of moments: n = (m1/m2)^2, K = m2/m1 where m1,m2 are first/second moments of the IUH. For ungauged basins: n and K regionalized with area: A=100 km^2: n=2-3, K=3-6 h; A=1000 km^2: n=3-5, K=6-15 h.',
             processingSteps: [
@@ -4117,15 +4224,15 @@ export const PARTS: Part[] = [
         id: 'cryo', number: 14, name: 'Cryosphere Advanced & Volcanology', color: '#c084fc',
         tools: [
           { id: 91, toolName: 'Estimate Glacier Ablation from Temperature', name: 'Glacier Mass Balance (PDD)', equation: 'B_n = Accumulation - sum(DDF × T_positive)', reference: 'Braithwaite, R.J. & Olesen, O.B. (1989) Calculation of glacier ablation from air temperature, West Greenland. In: Oerlemans, J. (ed.), Glacier Fluctuations and Climatic Change, pp. 219-233. Kluwer Academic Publishers.',
-          paperUrl: 'https://link.springer.com/rwe/10.1007/978-90-481-2642-2_104',
+          paperUrl: '',
           appliesTo: 'Glacier health monitoring, sea level rise projection, water resources',
             shortDescription: 'Estimates annual net mass balance of a glacier as the difference between snow accumulation and temperature-index-driven melt, representing integrated climatic forcing on glacier health',
             paperSummary: 'Braithwaite & Olesen (1989) developed the Positive Degree-Day (PDD) model for glacier ablation: Melt = DDF·sum(T_positive), where DDF is the degree-day factor (3-8 mm w.e./degC-day for snow, 5-12 for ice). The PDD model is the standard method for glacier mass balance modeling in climate impact studies, used in global glacier evolution models (Oerlemans, 2001; Marzeion et al., 2012) and ice sheet surface mass balance models (RACMO, MAR for Greenland).',
             scientificConcept: 'Glacier mass balance B_n = accumulation − ablation. The PDD model parameterizes ablation using positive degree-days and DDF. DDF varies with surface type: fresh snow (3-5 mm/degC-day), firn (5-7), bare ice (7-12), dirty ice (10-15). The model captures: seasonal melt cycle, elevation gradient (adiabatic lapse rate ~6.5°C/km), and the albedo feedback. For the estimated 200,000 glaciers on Earth: total mass loss was −267 ± 16 Gt/yr (2000-2019, Hugonnet et al., 2021), contributing ~0.74 mm/yr to sea level rise.',
             inputs: [
-              { symbol: 'Accum', label: 'Annual Accumulation (Snowfall)', unit: 'm w.e.', default: 0.5, min: 0, max: 10, group: 'Mass Balance' },
-              { symbol: 'DDF', label: 'Degree-Day Factor', unit: 'm w.e./degC-day', default: 0.005, min: 0, max: 0.1, group: 'Melt' },
-              { symbol: 'T_pos', label: 'Sum of Positive Degree-Days', unit: 'degC-day', default: 800, min: 0, max: 5000, group: 'Climate' }
+              { symbol: 'Accum', label: 'Annual Accumulation (auto: GLDAS SWE / glacier area)', unit: 'm w.e.', default: null, min: 0, max: 10, group: 'Mass Balance' },
+              { symbol: 'DDF', label: 'Degree-Day Factor (site-calibrated)', unit: 'm w.e./degC-day', default: null, min: 0, max: 0.1, group: 'Melt' },
+              { symbol: 'T_pos', label: 'Sum of Positive Degree-Days (auto: ERA5 temperature × melt season)', unit: 'degC-day', default: null, min: 0, max: 5000, group: 'Climate' }
             ],
             outputs: [
               { id: 'primary', label: 'Annual Net Mass Balance B_n', type: 'scalar', unit: 'm w.e.', description: 'Annual net mass balance. For Accum=0.5, DDF=0.005, T_pos=800: B_n=0.5-4.0=-3.5 m w.e. (strongly negative). Arctic glacier (T_pos=200): B_n=0.5-1.0=-0.5 m w.e. (slightly negative).' },
@@ -4145,7 +4252,7 @@ export const PARTS: Part[] = [
             outputInterpretation: 'The PDD mass balance model is the standard tool for glacier change projections:\n\n• B_n > 0: glacier advance — <5% of monitored glaciers. Karakoram Anomaly (some advancing glaciers in central Asia).\n• B_n = 0 to -0.5: near-equilibrium — some interior Alaskan and high-elevation glaciers.\n• B_n = -0.5 to -1.5: typical range for most mid-latitude glaciers (Alps, Rockies, Andes, Himalaya). Mass loss moderate, ELA rising 50-150 m/decade.\n• B_n < -1.5: rapid mass loss — European Alps (-1.3), Patagonia (-1.2), Alaska (-0.8). Small glaciers will disappear within 20-50 years.\n• Projections: for RCP8.5 by 2100: global glacier mass loss = 50-85% of current volume, SLR contribution = 150-250 mm. Threshold for eliminating most glaciers: 2-3°C warming above pre-industrial.\n• Limitations: does not account for radiation/cloud cover changes, neglects refreezing (internal accumulation), DDF varies spatially/temporally, snow/rain threshold is a major uncertainty.'
           },
           { id: 92, toolName: 'Estimate Permafrost Active Layer Depth', name: 'Stefan Permafrost Active Layer', equation: 'ALT = sqrt(2K×DIFI/L)', reference: 'Stefan, J. (1891) Uber die Theorie der Eisbildung, insbesondere uber die Eisbildung im Polarmeere (On the theory of ice formation, particularly in the polar sea). Annalen der Physik, 278(2), 269–286.',
-          paperUrl: 'https://doi.org/10.1002/andp.18912781209',
+          paperUrl: 'https://doi.org/10.1002/andp.18912780206',
           appliesTo: 'Permafrost depth, climate change monitoring, infrastructure stability',
             shortDescription: 'Estimates seasonal thaw depth (active layer thickness) above permafrost from the Stefan solution for heat conduction with phase change, representing the depth to which ground thaws each summer',
             paperSummary: 'Stefan (1891) derived the analytical solution for propagation of a thawing front into a semi-infinite solid: ALT = sqrt(2·k·DIFI/L). The Stefan solution assumes: (1) heat conduction is dominant, (2) uniform thermal properties, (3) surface temperature raised instantaneously to above 0°C. ALT ranges from <0.5 m (polar desert, cold continuous permafrost) to >3 m (sporadic permafrost). Widely used in the CALM (Circumpolar Active Layer Monitoring) network.',
@@ -4179,8 +4286,8 @@ export const PARTS: Part[] = [
             paperSummary: 'Herron & Langway (1980) developed an empirical model for firn densification based on observations from ice cores in Greenland and Antarctica. The densification rate dρ/dt = k·b·(ρ_i − ρ_f) depends on: (1) k — the densification rate constant (varies by density stage), (2) b — the annual accumulation rate, (3) ρ_i − ρ_f — the density deficit relative to ice. The model has three stages: Stage 1 (ρ<550 kg/m^3) — mechanical settling and packing; Stage 2 (550-830 kg/m^3) — sintering and vapor transport; Stage 3 (ρ>830 kg/m^3) — pore close-off and bubble compression.',
             scientificConcept: 'Firn densification transforms snow to ice through: (1) mechanical packing (ρ<550 kg/m^3): grain rearrangement, contact area growth, rapid densification rate; (2) sintering (550-830 kg/m^3): grain boundary diffusion, vapor transport (temperature gradient metamorphism), slower rate; (3) pore close-off (830-917 kg/m^3): isolated bubbles, slow compression, rate governed by overburden pressure. Critical density: ρ_close = 830 kg/m^3 — the pore close-off density where bubbles become isolated. Age of the entrapped air = age of ice − delta_age (the gas age-ice age difference, typically 100-2000 years depending on accumulation rate). The densification model is used for: (1) ice core chronology (depth-age relationship), (2) converting satellite altimetry (surface elevation change) to mass change, (3) estimating snowpack depth from density profiles.',
             inputs: [
-              { symbol: 'k', label: 'Densification Rate Constant', unit: '/year', default: 0.01, min: 0, max: 1, group: 'Empirical' },
-              { symbol: 'b', label: 'Annual Accumulation Rate', unit: 'kg/m^2/yr', default: 100, min: 0, max: 10000, group: 'Climate' },
+              { symbol: 'k', label: 'Densification Rate Constant', unit: '/year', default: null, min: 0, max: 1, group: 'Empirical' },
+              { symbol: 'b', label: 'Annual Accumulation Rate', unit: 'kg/m^2/yr', default: null, min: 0, max: 10000, group: 'Climate' },
               { symbol: 'ρ_i', label: 'Ice Density', unit: 'kg/m^3', default: 917, min: 800, max: 950, group: 'Density' },
               { symbol: 'ρ_f', label: 'Firn Density', unit: 'kg/m^3', default: 550, min: 300, max: 850, group: 'Density' }
             ],
@@ -4201,12 +4308,12 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'The Herron-Langway firn densification model is essential for interpreting ice core records and satellite altimetry:\n\n• Fast densification (Greenland summit, accumulation=300 kg/m^2/yr, T=-30°C): pore close-off at 60-70 m depth. Gas age-ice age difference = 5-10 years. This means the air in bubbles is ~5-10 years younger than the surrounding ice. Annual layers are well-preserved and resolvable. High-resolution climate records (CO2, CH4, isotopes) can be dated to sub-decadal precision.\n• Slow densification (East Antarctica, Dome C, accumulation=25 kg/m^2/yr, T=-55°C): pore close-off at 90-110 m depth. Gas age-ice age difference = 1000-2000 years. The air in bubbles is millennia younger than the surrounding ice. This smears the gas record — abrupt changes in atmospheric composition appear gradual in the ice bubble record. Correction: the delta_age must be modeled to interpret the phasing of CO2 and temperature changes.\n• The model is critical for converting satellite altimetry to mass change: surface elevation change dh/dt = dm/dt/ρ_f + dρ/dt·h_integral. If densification is not accounted for, 50% of the elevation change signal in the Greenland dry snow zone could be misinterpreted as mass loss when it is actually compaction.\n• Climate warming accelerates densification through: (1) higher surface temperatures (higher k_2), (2) increased melt (meltwater percolation accelerates densification), (3) changing snow grain size. This creates a feedback: faster densification lowers the surface, potentially accelerating ice flow through reduced lateral support.'
           },
-          { id: 94, toolName: 'Estimate Eruption Volume from VEI', name: 'VEI Volume Relationship', equation: 'log_10(V_km^3) = -4.42 + 0.75×VEI', reference: 'Newhall, C.G. & Self, S. (1982) The Volcanic Explosivity Index (VEI): An estimate of explosive magnitude for historical volcanism. Journal of Geophysical Research, 87(C2), 1231–1238.',
+          { id: 94, toolName: 'Estimate Eruption Volume from VEI', name: 'VEI Volume Relationship', equation: 'V(km³) = 10^(VEI − 5)  [Newhall & Self 1982, Table 1: VEI = ⌊log₁₀(V km³)⌋ + 5]', reference: 'Newhall, C.G. & Self, S. (1982) The Volcanic Explosivity Index (VEI): An estimate of explosive magnitude for historical volcanism. Journal of Geophysical Research, 87(C2), 1231–1238.',
           paperUrl: 'https://doi.org/10.1029/JB087iC02p01231',
           appliesTo: 'Volcanic eruption classification, hazard assessment',
             shortDescription: 'Relates the Volcanic Explosivity Index (VEI) to the erupted tephra volume, providing a logarithmic magnitude scale for explosive volcanic eruptions analogous to earthquake magnitude scales',
             paperSummary: 'Newhall & Self (1982) introduced the Volcanic Explosivity Index (VEI) as a semi-quantitative scale for the magnitude of explosive volcanic eruptions. The VEI (0-8 scale) combines: (1) total erupted tephra volume V, (2) column height, (3) qualitative description (from non-explosive to mega-colossal). The VEI-volume relationship is log_10(V) = −4.42 + 0.75·VEI, meaning each unit increase in VEI corresponds to approximately 5.6× increase in volume (10^0.75 ≈ 5.6). VEI 0: <10^4 m^3; VEI 4: 0.1-1 km^3; VEI 8: >1000 km^3. The scale is logarithmic — a VEI 8 eruption (Yellowstone, Toba) produces 10^6× more ejecta than a VEI 2.',
-            scientificConcept: 'The VEI combines magnitude and intensity of explosive eruptions. The volume exponent of 0.75 per VEI unit reflects: (1) the fractal distribution of eruption sizes (power-law frequency-magnitude distribution: log N = a − b·VEI, b ≈ 1.0 — tenfold decrease in frequency per VEI unit), (2) the relationship between magma chamber size and eruption volume, (3) the maximum column height, which scales as H ∝ V^(1/4) (Morton-Taylor-Turner plume theory). The VEI scale: VEI 0-2 (Hawaiian/Strombolian, daily), VEI 3-4 (Vulcanian/Subplinian, yearly), VEI 5-6 (Plinian, decadal), VEI 7 (Ultraplinian, centennial), VEI 8 (Supereruption, millennial). The largest known eruption: the Oruanui eruption (New Zealand, 26,500 years BP): VEI 8, 530 km^3 of magma, producing the Taupo caldera.',
+            scientificConcept: 'The Volcanic Explosivity Index (VEI) is a logarithmic scale where each unit corresponds to a tenfold increase in erupted tephra volume (Newhall & Self, 1982). The volume V (km³) and VEI are related by VEI = ⌊log₁₀(V km³)⌋ + 5, i.e. V(km³) = 10^(VEI − 5). The VEI scale: VEI 0-2 (Hawaiian/Strombolian, daily), VEI 3-4 (Vulcanian/Subplinian, yearly), VEI 5-6 (Plinian, decadal), VEI 7 (Ultraplinian, centennial), VEI 8 (Supereruption, millennial). The largest known eruption: the Oruanui eruption (New Zealand, 26,500 years BP): VEI 8, 530 km³ of magma, producing the Taupo caldera.',
             inputs: [
               { symbol: 'VEI', label: 'Volcanic Explosivity Index', unit: '—', default: 4, min: 0, max: 8, group: 'Eruption' }
             ],
@@ -4231,7 +4338,7 @@ export const PARTS: Part[] = [
           paperUrl: 'https://doi.org/10.1098/rspa.1956.0011',
           appliesTo: 'Volcanic plume rise, ash cloud height, atmospheric convection',
             shortDescription: 'Models the rise height of a turbulent buoyant plume from a steady source in a stratified atmosphere, predicting the maximum height of volcanic eruption columns and their neutral buoyancy level',
-            paperSummary: 'Morton, Taylor & Turner (1956) developed the classical theory of turbulent buoyant plumes, establishing that a steady convective plume in a stratified environment reaches a maximum height H = 5.0·(F_0·N^(-3))^(1/4) where F_0 is the buoyancy flux at the source and N is the Brunt-Vaisala frequency of the atmosphere (the stratification parameter). The entrainment coefficient α ≈ 0.1 is the ratio of the inflow velocity at the plume edge to the mean vertical velocity within the plume. The MTT theory predicts: (1) the buoyant plume radius expands linearly with height: r = (6α/5)·z, (2) the plume velocity decreases as z^(-1/3), (3) the plume reaches neutral buoyancy at H_b = 3.8·(F_0·N^(-3))^(1/4) and overshoots to the maximum height H_max = 5.0·(F_0·N^(-3))^(1/4).',
+            paperSummary: 'Morton, Taylor & Turner (1956) developed the classical theory of turbulent buoyant plumes, establishing that a steady convective plume in a stratified environment reaches a maximum height H ≈ 3.8·(F_0·N^(-3))^(1/4) (paper best-fit slope 3.79) where F_0 is the buoyancy flux at the source and N is the Brunt-Vaisala frequency of the atmosphere (the stratification parameter). The entrainment coefficient α ≈ 0.1 is the ratio of the inflow velocity at the plume edge to the mean vertical velocity within the plume. The MTT theory predicts: (1) the buoyant plume radius expands linearly with height: r = (6α/5)·z, (2) the plume velocity decreases as z^(-1/3), (3) the plume reaches neutral buoyancy at H_b = 3.8·(F_0·N^(-3))^(1/4) and overshoots to the maximum height H_max = 5.0·(F_0·N^(-3))^(1/4).',
             scientificConcept: 'A volcanic eruption column is a turbulent buoyant plume: hot volcanic gases and pyroclasts are ejected from the vent, entrain ambient air (heating it), become buoyant, and rise. The MTT theory applies to the convecting region (above the gas-thrust region, where momentum dominates). The key parameters: (1) buoyancy flux F_0 = g·(Δρ/ρ)·Q_m/π where Q_m is the mass eruption rate, (2) atmospheric stratification N^2 = (g/θ)·(dθ/dz) where θ is potential temperature, (3) entrainment coefficient α ≈ 0.1 (the standard "top-hat" entrainment assumption). For a volcanic plume: H = 8.2·(Q_m)^(1/4) for a typical tropical atmosphere (Sparks et al., 1997). For Q_m = 10^6 kg/s (Plinian eruption): H ≈ 25 km. For Q_m = 10^8 kg/s (supereruption): H ≈ 55 km (into the stratosphere). The crosswind speed U affects the plume trajectory: the bent-over plume height H_bent = (F_0/(U·N^2))^(1/3). Column collapse occurs when the mass eruption rate exceeds the critical value for a given vent radius — the column cannot entrain enough air to become buoyant and collapses to produce pyroclastic flows.',
             inputs: [
               { symbol: 'Q_dot', label: 'Heat Output (Buoyancy Flux)', unit: 'MW', default: 100, min: 0, max: 100000, group: 'Eruption' },
@@ -4266,8 +4373,8 @@ export const PARTS: Part[] = [
       {
         id: 'climate', number: 15, name: 'Climate Dynamics & Feedback', color: '#fb7185',
         tools: [
-          { id: 96, toolName: 'Model Global Energy Balance', name: 'Budyko-Sellers Energy Balance', equation: 'C×∂T/∂t = Q(1-α(T)) - I(T) + div(D∇T)', reference: 'Budyko, M.I. (1969) The effect of solar radiation variations on the climate of the Earth. Tellus, 21(5), 611–619. DOI: 10.3402/tellusa.v21i5.10094; Sellers, W.D. (1969) A global climatic model based on the solar energy and the Earth albedo. J. Appl. Meteorol., 8(3), 392–400. DOI: 10.1175/1520-0450(1969)008<0392:AGCMBO>2.0.CO;2',
-          paperUrl: 'https://doi.org/10.1016/B978-1-4832-2731-3.50012-9',
+          { id: 96, toolName: 'Model Global Energy Balance', name: 'Budyko-Sellers Energy Balance', equation: 'C×∂T/∂t = Q(1-α(T)) - I(T) + div(D∇T)', reference: 'Budyko, M.I. (1969) The effect of solar radiation variations on the climate of the Earth. Tellus, 21(5), 611–619. DOI: 10.3402/tellusa.v21i5.10109; Sellers, W.D. (1969) A global climatic model based on the solar energy and the Earth albedo. J. Appl. Meteorol., 8(3), 392–400. DOI: 10.1175/1520-0450(1969)008<0392:AGCMBO>2.0.CO;2',
+          paperUrl: 'https://doi.org/10.3402/tellusa.v21i5.10109',
           appliesTo: 'Climate sensitivity, ice-line stability',
             shortDescription: 'Zero-dimensional energy balance model equating the rate of change of surface temperature to absorbed solar radiation minus outgoing longwave radiation plus meridional heat transport',
             paperSummary: 'Budyko (1969) and Sellers (1969) independently developed the first physically-based energy balance climate models. Budyko used an empirical radiation parameterization: I = A + BT − (a₁ + a₂T) where outgoing radiation depends linearly on temperature, with albedo feedback from ice-line position. Sellers used a similar framework with diffusion-based heat transport. Both models showed that small changes in solar constant could trigger runaway glaciation, demonstrating the existence of multiple climate equilibria. The ice-albedo feedback in these models produces the characteristic "small ice cap instability" — once ice extends equatorward of ~50° latitude, the increased albedo causes further cooling, potentially leading to a fully glaciated Snowball Earth state.',
@@ -4297,7 +4404,7 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'The energy balance tendency determines whether the climate system warms, cools, or is in equilibrium:\n\n• ∂T/∂t > 0.1 K/yr: rapid warming — unlikely for the global mean (would indicate strong forcing or runaway feedback)\n• ∂T/∂t ≈ 0 K/yr: equilibrium — the system is in energy balance at the current temperature\n• Negative N (imbalance < 0): net cooling — the Earth radiates more energy than it absorbs\n• The ice-albedo feedback creates a bifurcation: if the ice line moves equatorward of ~50°, the albedo increase may trigger a runaway cooling (Snowball Earth)\n• Equilibrium climate sensitivity (ECS) from EBM: ΔT₂× ≈ 2–4.5°C for doubling CO₂, consistent with the IPCC range\n• The EBM\'s primary value is not precise forecasting but understanding the fundamental feedback structure that determines climate stability'
           },
-          { id: 97, toolName: 'Estimate Equilibrium Climate Sensitivity', name: 'Climate Sensitivity', equation: 'ΔT = λ × ΔF, where λ = (λ₀⁻¹ - f)⁻¹', reference: 'Roe, G.H. & Baker, M.B. (2007) Why is climate sensitivity so unpredictable? Science, 318(5854), 1230–1232. DOI: 10.1126/science.1144735',
+          { id: 97, toolName: 'Estimate Equilibrium Climate Sensitivity', name: 'Climate Sensitivity', equation: 'ΔT = λ × ΔF, where λ = 1/(λ₀ − f)', reference: 'Roe, G.H. & Baker, M.B. (2007) Why is climate sensitivity so unpredictable? Science, 318(5854), 1230–1232. DOI: 10.1126/science.1144735',
           paperUrl: 'https://doi.org/10.1126/science.1144735',
           appliesTo: 'Global warming projection from CO₂ forcing',
             shortDescription: 'Computes the equilibrium surface temperature change resulting from a radiative forcing (e.g., CO₂ doubling) using the linear feedback framework: ΔT = λ × ΔF',
@@ -4350,8 +4457,8 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'The Planck feedback is the foundation of climate sensitivity analysis:\n\n• λ_P ≈ 3.2 W/m²K (global mean): for each 1 K of surface warming, the Earth emits an additional ~3.2 W/m² to space\n• This is the single largest feedback and the only one that is always negative (stabilizing)\n• If the sum of all other (positive) feedbacks approaches 3.2 W/m²K, the climate sensitivity approaches infinity (critical point)\n• The Planck feedback sets the timescale of climate response: without other feedbacks, the e-folding response time for a step forcing is τ = C/λ_P ≈ 3 years (with C ≈ 10⁸ J/m²K for the upper ocean)\n• Regional variation explains polar amplification: the Arctic has λ_P ≈ 2.7 — 15% lower than the global mean — meaning less efficient radiative damping and therefore larger warming per forcing'
           },
-          { id: 99, toolName: 'Compute Rossby Wave Phase Speed', name: 'Rossby Wave Dispersion', equation: 'ω = ūk - βk/(k²+l²)', reference: 'Rossby, C.-G., Pan, H. & Velinstein, J. (1939) Relation between the variations in the intensity of the zonal circulation of the atmosphere and the displacements of the semi-permanent centers of action. J. Marine Res., 2, 38–55. Also: Haurwitz, B. (1940) The motion of atmospheric waves on a rotating Earth sphere. J. Meteorol., 1(3), 125–135. DOI: 10.1175/1520-0469(1940)002<0125:TMOTAW>2.0.CO;2',
-          paperUrl: 'https://doi.org/10.2172/4615779',
+          { id: 99, toolName: 'Compute Rossby Wave Phase Speed', name: 'Rossby Wave Dispersion', equation: 'ω = ūk - βk/(k²+l²)', reference: 'Rossby, C.-G. & collaborators (Willett, Holmboe, Namias, Page, Allen) (1939) Relation between the variations in the intensity of the zonal circulation of the atmosphere and the displacements of the semi-permanent centers of action. J. Marine Res., 2, 38–55. Also: Haurwitz, B. (1940) The motion of atmospheric waves on a rotating Earth sphere. J. Meteorol., 1(3), 125–135. DOI: 10.1175/1520-0469(1940)002<0125:TMOTAW>2.0.CO;2',
+          paperUrl: 'https://doi.org/10.1357/002224039806649023',
           appliesTo: 'Large-scale atmospheric wave dynamics',
             shortDescription: 'Computes the angular frequency of a Rossby wave from its zonal and meridional wavenumbers and the background vorticity gradient, governing planetary-scale wave propagation in the atmosphere',
             paperSummary: 'Rossby et al. (1939) identified and explained the existence of large-scale planetary waves in the atmosphere — now called Rossby waves. The dispersion relation ω = ūk − βk/(k²+l²) describes the eastward phase propagation of these waves relative to the mean zonal flow. The term β = ∂f/∂y = 2Ω·cos(φ)/R is the meridional gradient of the Coriolis parameter, representing the restoring mechanism for Rossby waves: a displaced air parcel experiences a change in planetary vorticity, generating a restorative oscillation. Rossby waves are the dominant mechanism for energy and momentum transport in the mid-latitude atmosphere, with wavelengths of 1000–10000 km. The group velocity c_g = ∂ω/∂k determines the direction of energy propagation: for long waves (small k), energy propagates westward relative to the mean flow, but for short waves, energy propagates eastward.',
@@ -4445,7 +4552,6 @@ export const PARTS: Part[] = [
             paperSummary: 'Charney (1948) developed the quasi-geostrophic theory and derived the conservation of quasi-geostrophic potential vorticity: Dq/Dt = 0 where q = ∇²ψ + f + (∂/∂p)[(f²/N²)(∂ψ/∂p)]. This represents the most important dynamical constraint on large-scale atmospheric and oceanic motion. The theory assumes: (1) Rossby number Ro = U/(fL) ≪ 1, (2) the flow is nearly geostrophic, (3) hydrostatic balance holds. QGPV is the atmospheric analogue of the potential vorticity in shallow-water theory. Its conservation allows diagnosis of Rossby wave propagation, baroclinic instability, and the formation of weather systems. The three components of q are: relative vorticity (∇²ψ), planetary vorticity (f), and stretching vorticity (vertical variation of the isentropic thickness).',
             scientificConcept: 'Potential vorticity (PV) is the fundamental conserved tracer in large-scale geophysical fluid dynamics. In the quasi-geostrophic approximation, q = ζ_g + f + (f₀/N²)∂²ψ/∂p² captures the combined effects of: (1) relative rotation of the fluid (ζ_g), (2) planetary rotation (f), and (3) the stretching/tilting of vortex tubes due to vertical variations in the flow (the term involving ∂²ψ/∂p², which is proportional to horizontal temperature gradients via thermal wind). QGPV is approximately conserved following the geostrophic motion on timescales longer than the pendulum day (1/f) but shorter than the timescale of diabatic processes. This conservation principle allows inversion of the flow from the PV distribution: given q everywhere, the streamfunction ψ (and thus the winds and temperature) can be uniquely determined by solving the elliptic equation ∇²ψ + (f²/N²)∂²ψ/∂p² = q − f. The invertibility principle is the foundation of PV thinking in synoptic meteorology.',
             inputs: [
-              { symbol: 'ψ', label: 'Streamfunction', unit: 'm²/s', default: 1000000.0, min: -1000000000.0, max: 1000000000.0, group: 'Flow Field' },
               { symbol: 'f', label: 'Coriolis Parameter', unit: '/s', default: 0.0001, min: 0, max: 0.0002, group: 'Earth Rotation' },
               { symbol: '∂²ψ/∂p²', label: 'Vertical Curvature', unit: '—', default: 1e-06, min: -1, max: 1, group: 'Vertical Structure' }
             ],
@@ -4473,8 +4579,8 @@ export const PARTS: Part[] = [
             paperSummary: 'Reynolds (1895) introduced the decomposition of turbulent flow variables into mean and fluctuating parts, known as Reynolds decomposition. For any flow variable φ(x,t): φ = φ̄ + φ′, where φ̄ = lim(T→∞) (1/T)∫₀ᵀ φ dt is the ensemble/time mean and φ′ is the turbulent fluctuation. Substituting into the Navier-Stokes equations and averaging yields the Reynolds-Averaged Navier-Stokes (RANS) equations. The averaging introduces the Reynolds stress tensor τᵢⱼ = −ρūᵢ′ūⱼ′ — the apparent stress due to turbulent momentum transport. The closure problem arises because the Reynolds stresses involve unknown correlations of fluctuating quantities, requiring turbulence models (k-ε, k-ω, LES). The decomposition is valid when there is a clear spectral gap between the mean flow and turbulent fluctuations (Taylor\'s hypothesis: the turbulent eddies are advected past a point faster than they evolve).',
             scientificConcept: 'Reynolds decomposition separates the flow into organized mean motion and chaotic turbulent fluctuations. The key insight is that the Navier-Stokes equations are nonlinear: averaging products of fluctuating quantities produces non-zero terms (Reynolds stresses) that act as additional stresses on the mean flow. For example, the turbulent kinetic energy (TKE) is k = ½(u′² + v′² + w′²), representing the kinetic energy of the turbulent eddies. TKE is produced by shear (the interaction of Reynolds stresses with mean velocity gradients), transported by turbulence and pressure fluctuations, and dissipated by viscosity at the smallest scales. The decomposition is the starting point for understanding: (1) turbulent transport of momentum, heat, and scalars, (2) the energy cascade, (3) wall-bounded and free-shear flows.',
             inputs: [
-              { symbol: 'u_bar', label: 'Mean Flow Velocity', unit: 'm/s', default: 10, min: 0, max: 100, group: 'Mean Flow' },
-              { symbol: 'u_prime', label: 'Turbulent Fluctuation', unit: 'm/s', default: 2, min: -50, max: 50, group: 'Turbulence' }
+              { symbol: 'u_bar', label: 'Mean Flow Velocity', unit: 'm/s', default: null, min: 0, max: 100, group: 'Mean Flow' },
+              { symbol: 'u_prime', label: 'Turbulent Fluctuation', unit: 'm/s', default: null, min: -50, max: 50, group: 'Turbulence' }
             ],
             outputs: [
               { id: 'primary', label: 'Instantaneous Velocity u', type: 'scalar', unit: 'm/s', description: 'The total instantaneous velocity: u = ū + u′. For ū=10 m/s and u′=2 m/s: u=12 m/s. In turbulent flow, u′ fluctuates rapidly; the instantaneous value represents the sum of organized and chaotic motions.' },
@@ -4550,17 +4656,17 @@ export const PARTS: Part[] = [
             outputInterpretation: 'The Deardorff velocity scale characterizes convective turbulence intensity:\n\n• w_* < 0.5 m/s: weak convection (early morning, cloudy, low surface heating) — mechanical turbulence from wind shear may dominate\n• w_* = 0.5–1.5 m/s: moderate convection (typical mid-latitude summer daytime CBL) — well-developed thermals, good vertical mixing\n• w_* = 1.5–3.0 m/s: strong convection (hot surface, clear skies, high solar insolation) — vigorous mixing, fair-weather cumulus possible at CBL top\n• w_* > 3.0 m/s: very strong convection (desert, high-altitude, or cold air over warm water) — deep CBL, potentially severe convection with cumulonimbus\n• CBL turnover time t_* = z_i/w_* : determines the mixing timescale for pollutants; a well-mixed CBL develops within 2–3 t_*\n• For dispersion modeling: the crosswind dispersion σ_y and vertical spread σ_z in convective conditions are functions of w_* and z_i (convective scaling)'
           },
           { id: 106, toolName: 'Compute Frontogenesis Rate', name: 'Petterssen Frontogenesis', equation: 'F = d|∇θ|/dt = |∇θ|(D·cos2β − δ) + cosβ·|∂u/∂s|·|∇θ|  [Petterssen 1936; Sanders 1955]', reference: 'Petterssen, S. (1936) Contribution to the theory of frontogenesis. Geophysica Publ., 11(8), 1–27.',
-          paperUrl: 'https://www.nb.no/nbaugh-393278',
+          paperUrl: '',
           appliesTo: 'Weather front intensification rate',
             shortDescription: 'Computes the frontogenesis function — the rate of intensification of a temperature gradient due to the kinematic properties of the flow: convergence, deformation, and tilting',
             paperSummary: 'Petterssen (1936) developed the mathematical theory of frontogenesis — the formation and intensification of atmospheric fronts. The frontogenesis function F = d|∇θ|/dt quantifies the rate of change of the magnitude of the horizontal potential temperature gradient following air parcels. F is positive when the gradient intensifies (frontogenesis) and negative when it weakens (frontolysis). Petterssen showed that frontogenesis is driven by: (1) convergence (D < 0) acting on a pre-existing gradient, (2) deformation (shear/stretching) reorienting the gradient, and (3) differential diabatic heating across the front. The confluent flow pattern (the "deformation field") is the primary mechanism: two air masses with different temperatures are advected toward each other, compressing the isentropes. In the atmosphere, fronts form in baroclinic zones where temperature gradients are pre-existing and the large-scale deformation field is confluent.',
             scientificConcept: 'Frontogenesis describes how horizontal temperature gradients intensify through the action of the wind field. The frontogenesis function F = d|∇θ|/dt = |∇θ|(D_n − δ) where D_n is the divergence of the wind component normal to the isentropes, and δ is the deformation (shear along isentropes). More completely: F = |∇θ|(D·cos2β − δ) + cosβ·|∂u/∂s|·|∇θ|, where β is the angle between the isentropes and the axis of dilatation. The first term represents divergence/deformation acting on the gradient — convergence (D<0) perpendicular to the gradient increases |∇θ|. The second term is the shear term — along-front variation of the cross-front wind increases the gradient. For a typical cold front, convergence of 10⁻⁵/s acting on a gradient of 0.01 K/m produces F ≈ 10⁻¹⁰ K/m·s — sufficient to sharpen a diffuse baroclinic zone into a sharp front over 12–24 hours. The vertical circulation associated with frontogenesis (the secondary circulation) produces ascent ahead of the cold front and descent behind, driving cloud and precipitation bands.',
             inputs: [
-              { symbol: '|∇θ|', label: 'Potential Temperature Gradient', unit: 'K/m', default: 0.01, min: 0, max: 1, group: 'Thermal Field' },
-              { symbol: 'D', label: 'Horizontal Divergence', unit: '/s', default: 1e-05, min: -1, max: 1, group: 'Kinematic Field' },
-              { symbol: 'β', label: 'Isentrope-Dilatation Angle', unit: 'rad', default: 0.5, min: 0, max: 1.57, group: 'Kinematic Field' },
-              { symbol: 'δ', label: 'Total Deformation', unit: '/s', default: 1e-05, min: 0, max: 1, group: 'Kinematic Field' },
-              { symbol: '|∂u/∂s|', label: 'Shear Along Isentropes', unit: '/s', default: 1e-06, min: 0, max: 1, group: 'Kinematic Field' }
+              { symbol: '|∇θ|', label: 'Potential Temperature Gradient', unit: 'K/m', default: null, min: 0, max: 1, group: 'Thermal Field' },
+              { symbol: 'D', label: 'Horizontal Divergence', unit: '/s', default: null, min: -1, max: 1, group: 'Kinematic Field' },
+              { symbol: 'β', label: 'Isentrope-Dilatation Angle', unit: 'rad', default: null, min: 0, max: 1.57, group: 'Kinematic Field' },
+              { symbol: 'δ', label: 'Total Deformation', unit: '/s', default: null, min: 0, max: 1, group: 'Kinematic Field' },
+              { symbol: '|∂u/∂s|', label: 'Shear Along Isentropes', unit: '/s', default: null, min: 0, max: 1, group: 'Kinematic Field' }
             ],
             outputs: [
               { id: 'primary', label: 'Frontogenesis Rate F', type: 'scalar', unit: 'K/m·s', description: 'Rate of intensification of the potential temperature gradient. F > 0: frontogenesis (gradient sharpening). F < 0: frontolysis (gradient weakening). Typical frontogenesis: 10⁻¹⁰–10⁻⁹ K/m·s.' },
@@ -4579,8 +4685,8 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'The frontogenesis function quantifies atmospheric frontal dynamics:\n\n• F > 10⁻¹⁰ K/m·s: notable frontogenesis — gradient sharpening over 12–24 hours\n• F > 10⁻⁹ K/m·s: strong frontogenesis — rapid front formation, typical of developing frontal wave cyclones\n• F < 0: frontolysis — gradient weakening, typical of dissipating fronts or diffluent flow\n• The convergence term dominates: a 10⁻⁵/s convergence acting on a 0.01 K/m gradient produces F ≈ 10⁻¹⁰ K/m·s\n• The shear term is important along the front: stronger along-front flow variation produces "frontal banding" — multiple precipitation bands parallel to the front\n• Frontal collapse occurs when the gradient becomes so sharp that the cross-front scale approaches the Rossby deformation radius — then ageostrophic processes (the secondary circulation) balance the frontogenesis\n• Combined with the omega equation, frontogenesis zones are the preferred regions for cyclogenesis and severe weather bands'
           },
-          { id: 107, toolName: 'Compute Vorticity Tendency', name: 'Barotropic Vorticity Equation', equation: 'Dζ/Dt = −(ζ+f)(∇·V)  [Holton & Hakim 2012, Ch. 4; stretching term dominates]', reference: 'Holton, J.R. & Hakim, G.J. (2012) An Introduction to Dynamic Meteorology. 5th ed., Elsevier, 532 pp. ISBN 978-0-12-374266-7, Ch. 4 (Vorticity Equation).',
-          paperUrl: 'https://doi.org/10.1016/B978-0-12-374266-7.00004-2',
+          { id: 107, toolName: 'Compute Vorticity Tendency', name: 'Barotropic Vorticity Equation', equation: 'Dζ/Dt = −(ζ+f)(∇·V)  [Holton & Hakim 2012, Ch. 4; stretching term dominates]', reference: 'Holton, J.R. & Hakim, G.J. (2012) An Introduction to Dynamic Meteorology. 5th ed., Elsevier, 532 pp. ISBN 978-0-12-384866-6, Ch. 4 (Vorticity Equation).',
+          paperUrl: 'https://doi.org/10.1016/B978-0-12-384866-6.00004-0',
           appliesTo: 'Storm dynamics, cyclone development',
             shortDescription: 'Computes the Lagrangian rate of change of relative vorticity from divergence stretching, vorticity advection, and tilting — the fundamental equation for cyclone development and decay',
             paperSummary: 'The vorticity equation is derived from the horizontal momentum equations by taking the curl. In pressure coordinates and neglecting the small tilting and solenoid terms: Dζ/Dt = −(ζ+f)(∇·V) + tilting + friction. The stretching term −(ζ+f)(∇·V) is the dominant mechanism for cyclone development: convergence (∇·V < 0) at low levels increases cyclonic vorticity, producing spin-up of the storm. Divergence aloft (∇·V > 0) in the upper troposphere also increases vorticity on the cyclonic side of the jet streak, creating the necessary upper-level support for surface cyclone intensification. The vorticity equation is the core of the quasi-geostrophic ω-equation and is the basis for: (1) cyclone phase-space analysis, (2) tropical cyclone intensity forecasting, (3) the interpretation of potential vorticity anomalies, and (4) storm track dynamics.',
@@ -4612,21 +4718,21 @@ export const PARTS: Part[] = [
       {
         id: 'cloud', number: 17, name: 'Cloud Physics & Precipitation', color: '#e879f9',
         tools: [
-          { id: 108, toolName: 'Compute Equilibrium Saturation Over Droplet', name: 'Köhler Equation (Cloud Activation)', equation: 'S(r) ≈ 1 + a/r − b/r³  [Köhler 1936; a=Kelvin curvature, b=solute (Raoult)]', reference: 'Köhler, H. (1936) Kondensationswasser von Nebel in Salzlösungen. Hyg. Z., 36, 141–154. (Translated as: The nucleus in the growth of condensation droplets. In: Meteorological Monographs, Vol. 5(21), AMS.)',
-          paperUrl: 'https://journals.ametsoc.org/view/journals/atot/25/9/2008jtecha1159_1.xml',
+          { id: 108, toolName: 'Compute Equilibrium Saturation Over Droplet', name: 'Köhler Equation (Cloud Activation)', equation: 'S(r) ≈ 1 + a/r − b/r³  [Köhler 1936; a=Kelvin curvature, b=solute (Raoult)]', reference: 'Köhler, H. (1936) The nucleus in and the growth of hygroscopic droplets. Trans. Faraday Soc., 32, 1152–1161. DOI: 10.1039/TF9363201152.',
+          paperUrl: 'https://doi.org/10.1039/TF9363201152',
           appliesTo: 'Cloud droplet activation, aerosol-cloud interaction',
             shortDescription: 'Computes the equilibrium saturation ratio over a curved aqueous solution droplet, determining the critical radius and supersaturation required for cloud droplet activation from aerosol particles',
             paperSummary: 'Köhler (1936) derived the theoretical relationship between water vapor saturation ratio S, droplet radius r, and solute concentration for hygroscopic aerosol particles growing into cloud droplets. The Köhler curve S(r) = 1 + a/r − b/r³ combines two competing effects: (1) the curvature (Kelvin) effect — a/r, where a = 2σ/(ρ_wR_vT) ≈ 1.2×10⁻⁹ m (increasing curvature requires higher supersaturation for droplet survival), and (2) the solute (Raoult) effect — b/r³, where b = 3i·n_s·M_w/(4π·ρ_w) ≈ 1.5×10⁻¹⁵ m³ (dissolved salt lowers the equilibrium vapor pressure, making droplet growth easier). For a given aerosol composition and dry size, the Köhler curve has a maximum at the critical radius r_c and critical supersaturation S_c. Particles that activate into cloud droplets are those that experience ambient supersaturation exceeding S_c. The Köhler theory is the fundamental description of how aerosols act as cloud condensation nuclei (CCN) and is central to aerosol-cloud interaction and indirect climate forcing.',
             scientificConcept: 'Cloud droplet formation requires water vapor supersaturation — relative humidity exceeding 100%. A pure water droplet of radius r would require S = exp(2σ/(ρ_wR_vTr)) ≈ 1 + a/r (Kelvin effect) to be in equilibrium — this increases with decreasing r, making small pure water droplets unstable. However, atmospheric aerosols contain soluble substances (NaCl, (NH₄)₂SO₄) that lower the equilibrium vapor pressure via Raoult\'s law: the solute effect scales as 1/r³. Large soluble particles have a strong solute effect, requiring lower supersaturation for activation. The Köhler curve S(r) = 1 + a/r − b/r³ has a maximum at r_c = √(3b/a) and S_c = 1 + (4a³/27b)^{1/2}. Particles with S_c lower than the ambient supersaturation activate into growing cloud droplets. The critical supersaturation typically ranges from 0.01% (giant sea salt, r > 5 µm) to 1% (small ammonium sulfate, r ≈ 0.05 µm). The number of activated droplets determines cloud albedo (Twomey effect) and precipitation efficiency, making Köhler theory central to aerosol indirect effects on climate.',
             inputs: [
-              { symbol: 'a', label: 'Kelvin Curvature Coefficient', unit: 'm', default: 1.2e-09, min: 0, max: 1e-06, group: 'Constants' },
-              { symbol: 'r', label: 'Droplet Radius', unit: 'm', default: 1e-06, min: 1e-08, max: 0.001, group: 'Droplet' },
-              { symbol: 'b', label: 'Solute Coefficient', unit: 'm³', default: 1e-18, min: 0, max: 1e-10, group: 'Aerosol' }
+              { symbol: 'a', label: 'Kelvin Curvature Coefficient', unit: 'm', default: null, min: 0, max: 1e-06, group: 'Constants' },
+              { symbol: 'r', label: 'Droplet Radius', unit: 'm', default: null, min: 1e-08, max: 0.001, group: 'Droplet' },
+              { symbol: 'b', label: 'Solute Coefficient', unit: 'm³', default: null, min: 0, max: 1e-10, group: 'Aerosol' }
             ],
             outputs: [
-              { id: 'primary', label: 'Equilibrium Saturation Ratio S', type: 'scalar', unit: '—', description: 'Equilibrium saturation ratio (e.g., S=1.002 = 100.2% RH). S > 1 indicates supersaturation required for equilibrium. The maximum of the Köhler curve is the critical supersaturation for activation.' },
+              { id: 'primary', label: 'Supersaturation S', type: 'scalar', unit: '—', description: 'Supersaturation fraction S = a/r − b/r³. S > 0 (supersaturated) means the droplet is beyond its critical radius and grows spontaneously; S < 0 (subsaturated) means it evaporates. Note: this is the supersaturation fraction, not the saturation ratio (which is 1 + S). The maximum of the Köhler curve gives the critical supersaturation for activation.' },
               { id: 'critical_radius', label: 'Critical Radius r_c', type: 'scalar', unit: 'm', description: 'The droplet radius at the Köhler curve maximum: r_c = √(3b/a). Droplets smaller than r_c grow by condensation; beyond r_c they grow freely (activate). Typical r_c: 0.1–10 µm depending on aerosol size and composition.' },
-              { id: 'critical_supersaturation', label: 'Critical Supersaturation S_c', type: 'scalar', unit: '%', description: 'The supersaturation required for activation: S_c(%) = (S_max − 1) × 100. For (NH₄)₂SO₄ aerosol dry diameter 0.1 µm: S_c ≈ 0.1–0.5%. For NaCl (sea salt): S_c ≈ 0.01–0.1%.' }
+              { id: 'critical_supersaturation', label: 'Critical Supersaturation S_c', type: 'scalar', unit: '%', description: 'The supersaturation required for activation: S_c = (4a³/27b)^½ (fraction); S_c(%) = S_c × 100. For (NH₄)₂SO₄ aerosol dry diameter 0.1 µm: S_c ≈ 0.1–0.5%. For NaCl (sea salt): S_c ≈ 0.01–0.1%.' }
             ],
             methodology: 'The Köhler curve is computed from the dry aerosol properties. For a dry aerosol particle with dry radius r_d and soluble fraction ε: the solute coefficient b = i·ε·(4/3)πr_d³·ρ_p·M_w/(M_s·ρ_w) where i is the van\'t Hoff factor, ρ_p is particle density, M_w and M_s are molecular weights of water and solute. The Kelvin coefficient a = 2σ_w/(ρ_w·R_v·T). The critical parameters r_c = √(3b/a) and S_c = 1 + (4a³/(27b))^{1/2} characterize the activation threshold.',
             processingSteps: [
@@ -4640,7 +4746,7 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'The Köhler curve determines whether an aerosol particle activates into a cloud droplet:\n\n• S(r) < S_c (left of the peak): the droplet is in stable equilibrium — any perturbation causes it to return to equilibrium size\n• S(r) > S_c (right of the peak): the droplet is in unstable equilibrium — it will grow spontaneously (activate) by condensation\n• Ambient supersaturation in clouds: typical values 0.05–1.0% — only particles with S_c below this value activate\n• S_c < 0.1%: giant CCN (sea salt, dust > 2 µm) — activate immediately in slight supersaturation\n• S_c = 0.1–0.5%: typical CCN (ammonium sulfate, 0.05–0.2 µm) — most relevant for cloud albedo\n• S_c > 1%: particles require very high supersaturation — only activate in strong updrafts (cumulus congestus)\n• The number of activated droplets N_d determines cloud optical thickness and precipitation initiation — the aerosol indirect effect on climate'
           },
-          { id: 109, toolName: 'Compute Drop Size Distribution', name: 'Marshall-Palmer Drop Size Distribution', equation: 'N(D) = N₀·exp(−ΛD)  [Marshall & Palmer 1948; N₀=8×10⁶ m⁻⁴, Λ=4100·R^{−0.21}]', reference: 'Marshall, J.S. & Palmer, W.McK. (1948) The distribution of raindrops with size. J. Meteor., 5(4), 165–166. DOI: 10.1175/1520-0469(1948)005<0165:TDORWI>2.0.CO;2',
+          { id: 109, toolName: 'Compute Drop Size Distribution', name: 'Marshall-Palmer Drop Size Distribution', equation: 'N(D) = N₀·exp(−ΛD)  [Marshall & Palmer 1948; N₀=8×10⁶ m⁻⁴, Λ=4100·R^{−0.21}]', reference: 'Marshall, J.S. & Palmer, W.McK. (1948) The distribution of raindrops with size. J. Meteor., 5(4), 165–166. DOI: 10.1175/1520-0469(1948)005<0165:tdorws>2.0.co;2',
           paperUrl: 'https://doi.org/10.1175/1520-0469(1948)005<0165:TDORWI>2.0.CO;2',
           appliesTo: 'Precipitation microphysics, radar reflectivity',
             shortDescription: 'Computes the number concentration of raindrops per unit size interval using the exponential Marshall-Palmer distribution, parameterized by the intercept N₀ and slope Λ determined from rainfall rate',
@@ -4652,9 +4758,9 @@ export const PARTS: Part[] = [
               { symbol: 'D', label: 'Drop Diameter', unit: 'm', default: 0.001, min: 0, max: 0.01, group: 'Drop Size' }
             ],
             outputs: [
-              { id: 'primary', label: 'Drop Concentration N(D)', type: 'scalar', unit: 'm⁻⁴', description: 'Number concentration per unit size interval at diameter D. For R=10 mm/h, D=1 mm: N(D) ≈ 3.6×10⁶ m⁻⁴ (= 3600 m⁻³ mm⁻¹). For D=3 mm: N(D) ≈ 240 m⁻⁴.' },
+              { id: 'primary', label: 'Drop Concentration N(D)', type: 'scalar', unit: 'm⁻⁴', description: 'Number concentration per unit size interval at diameter D. For R=10 mm/h, D=1 mm: N(D) ≈ 6.4×10⁵ m⁻⁴ (= 640 m⁻³ mm⁻¹). For D=3 mm: N(D) ≈ 4×10³ m⁻⁴.' },
               { id: 'rainfall_rate', label: 'Estimated Rain Rate R', type: 'scalar', unit: 'mm/h', description: 'Rainfall rate computed from the DSD: R = (π/6) × ∫N(D)×D³×v_t(D)×dD. The terminal velocity v_t(D) ≈ 9.65 − 10.3·exp(−0.6D) m/s for D in mm.' },
-              { id: 'radar_reflectivity', label: 'Radar Reflectivity Z', type: 'scalar', unit: 'mm⁶/m³', description: 'The radar reflectivity factor: Z = ∫N(D)·D⁶·dD = N₀·Γ(7)/Λ⁷ = 720·N₀/Λ⁷. For N₀=8×10⁶, Λ=4000: Z≈9×10⁴ mm⁶/m³ (≈50 dBZ).' }
+              { id: 'radar_reflectivity', label: 'Radar Reflectivity Z', type: 'scalar', unit: 'mm⁶/m³', description: 'The radar reflectivity factor: Z = ∫N(D)·D⁶·dD = N₀·Γ(7)/Λ⁷ = 720·N₀/Λ⁷. For N₀=8×10⁶ m⁻⁴, Λ=4000 m⁻¹: Z ≈ 350 mm⁶/m³ (≈ 25.5 dBZ).' }
             ],
             methodology: 'The Marshall-Palmer DSD is N(D) = N₀·exp(−ΛD) where D is drop diameter in meters, N₀ = 8×10⁶ m⁻⁴, and Λ = 4.1×R⁻⁰·²¹ × 1000 (1/m when R is mm/h). For a given rainfall rate R, compute Λ, then evaluate N(D) for any D. The total number concentration is N_T = N₀/Λ (m⁻³), the liquid water content LWC = (π·ρ_w·N₀)/(Λ⁴) (g/m³), and the rainfall rate R = (π·N₀)/(Λ⁴) × ∫x³·v_t(x/Λ)·dx (mm/h).',
             processingSteps: [
@@ -4675,8 +4781,8 @@ export const PARTS: Part[] = [
             paperSummary: 'The Z-R relationship Z = a·R^b links weather radar reflectivity Z (mm⁶/m³) to rainfall rate R (mm/h). Marshall & Palmer (1948) established the classic coefficients: a = 200, b = 1.6 from their drop size distribution measurements. The relationship arises from the physical connection between radar reflectivity (proportional to D⁶, the sixth moment of the drop size distribution) and rainfall rate (proportional to D³·v_t(D), approximately the 3.67 moment). The exponent b ≈ 1.6 reflects the nonlinearity: as rainfall rate increases, the drop size distribution shifts toward larger drops, which contribute much more to Z than to R. Different precipitation types require different coefficients: stratiform rain (a=200, b=1.6), convective rain (a=300, b=1.4), orographic rain (a=75, b=2.0). The uncertainty in the Z-R relationship is the largest source of error in radar QPE, typically a factor of 2 in rainfall rate.',
             scientificConcept: 'Weather radar measures the power backscattered by raindrops. For Rayleigh scattering (D < λ/16 ≈ 1.4 cm for S-band radar), the equivalent reflectivity factor Z_e = (λ⁴·π⁵·|K_w|²)⁻¹·∫σ_b(D)·N(D)·dD ≈ ∫N(D)·D⁶·dD, where σ_b is the backscattering cross-section. The rainfall rate R = (π/6)·∫N(D)·D³·v_t(D)·dD where v_t(D) ≈ 9.65 − 10.3·exp(−0.6D) is the terminal fall speed. For an exponential DSD N(D) = N₀·exp(−ΛD) with Λ = f(R), the Z-R relationship emerges as Z = a·R^b. The coefficient a depends on N₀ (intercept parameter) and the drop size distribution breadth. The exponent b ≈ 1.5–2.0 depends on how Λ relates to R. The standard Marshall-Palmer coefficients (a=200, b=1.6) assume N₀=8×10⁶ m⁻⁴ and Λ = 4.1·R⁻⁰·²¹. Different Z-R relations for different rain types reflect variations in the DSD, particularly in N₀.',
             inputs: [
-              { symbol: 'a', label: 'Z-R Coefficient', unit: '—', default: 200, min: 0, max: 1000, group: 'Relation Parameters' },
-              { symbol: 'R', label: 'Rainfall Rate', unit: 'mm/h', default: 10, min: 0, max: 500, group: 'Precipitation' }
+              { symbol: 'a', label: 'Z-R Coefficient', unit: '—', default: null, min: 0, max: 1000, group: 'Relation Parameters' },
+              { symbol: 'R', label: 'Rainfall Rate', unit: 'mm/h', default: null, min: 0, max: 500, group: 'Precipitation' }
             ],
             outputs: [
               { id: 'primary', label: 'Radar Reflectivity Z', type: 'scalar', unit: 'mm⁶/m³', description: 'Radar reflectivity factor in linear units (mm⁶/m³). Equivalent dBZ = 10·log₁₀(Z). For R=10 mm/h with a=200, b=1.6: Z≈7950 mm⁶/m³ (≈39 dBZ). For R=1 mm/h: Z≈200 mm⁶/m³ (≈23 dBZ).' },
@@ -4707,7 +4813,7 @@ export const PARTS: Part[] = [
         id: 'geodesy', number: 18, name: 'Geodesy & Reference Frames', color: '#22d3ee',
         tools: [
           { id: 111, toolName: 'Compute Earth Rotation Matrix', name: 'IERS Earth Rotation Matrix (CIO-based)', equation: 'R(t) = R₃(−X_p)·R₂(Y_p)·R₁(s)·W(t)  [IERS 2010; CIO reference frame, polar motion, UT1-UTC]', reference: 'Petit, G. & Luzum, B. (eds.) (2010) IERS Conventions (2010). IERS Technical Note 36, Verlag des Bundesamts für Kartographie und Geodäsie, Frankfurt am Main. ISBN 3-89888-989-6.',
-          paperUrl: 'https://doi.org/10.1007/978-3-642-36812-7_1',
+          paperUrl: 'https://doi.org/10.1007/978-3-642-32998-2_10',
           appliesTo: 'Satellite position correction, GPS accuracy',
             shortDescription: 'Computes the Earth rotation matrix transforming between the celestial (ICRF) and terrestrial (ITRF) reference frames using the IERS-conventional precession, nutation, Earth rotation, and polar motion matrices',
             paperSummary: 'The IERS Conventions (Petit & Luzum, 2010) define the standard models and procedures for transforming between the International Celestial Reference Frame (ICRF) and the International Terrestrial Reference Frame (ITRF). The transformation matrix R(t) = P(t)·N(t)·R(t)·W(t) combines: (1) precession P(t) — the slow (26,000-year) conical motion of Earth\'s rotation axis due to luni-solar torques, (2) nutation N(t) — shorter-period (18.6-year principal) oscillations superimposed on precession, (3) Earth rotation R(t) — the daily rotation about the instantaneous axis, represented by the Greenwich Apparent Sidereal Time (GAST), and (4) polar motion W(t) — the motion of the rotation axis relative to the crust (Chandler wobble ~0.3" amplitude, 433-day period). The accuracy of modern VLBI/GNSS/ SLR requires these models at < 1 mm precision. The IERS 2010 conventions adopt the IAU 2000A precession-nutation model, which replaced the earlier IAU 1976 precession and IAU 1980 nutation models.',
@@ -4749,7 +4855,7 @@ export const PARTS: Part[] = [
             outputs: [
               { id: 'primary', label: 'Vertical Displacement u_r', type: 'scalar', unit: 'm', description: 'Radial (vertical) displacement of the Earth\'s surface due to tidal loading. Principal lunar semi-diurnal tide M₂: up to ±0.18 m at the equator. Total displacement: ±0.3–0.4 m at most locations.' },
               { id: 'horizontal_displacement', label: 'Horizontal Displacement u_θ', type: 'scalar', unit: 'm', description: 'Horizontal tidal displacement: u_θ = l₂ × (∂V/∂θ)/g. For l₂=0.084: typically ±5–10 cm in the mid-latitudes, directed toward the tide-generating body.' },
-              { id: 'gravity_perturbation', label: 'Gravity Perturbation Δg', type: 'scalar', unit: 'µGal', description: 'Change in surface gravity due to tides: Δg = −(1+k₂−h₂)·∂V/∂r. The gravimetric factor δ = (1+k₂−h₂)/g ≈ 0.156. Total tidal gravity variation: ±300 µGal (3×10⁻⁶ m/s²).' }
+              { id: 'gravity_perturbation', label: 'Gravity Perturbation Δg', type: 'scalar', unit: 'µGal', description: 'Change in surface gravity due to tides: Δg = −(1+k₂−h₂)·∂V/∂r. The gravimetric factor δ = 1 + h₂ − (3/2)·k₂ ≈ 1.16 (ratio of observed to theoretical tidal gravity amplitude). Total tidal gravity variation: ±300 µGal (3×10⁻⁶ m/s²).' }
             ],
             methodology: 'Compute the tidal potential V₂ at the site using Moon/Sun ephemerides (JPL DE430). The degree-2 Love numbers for the elastic Earth are h₂=0.603, k₂=0.298. The vertical displacement u_r = h₂·V₂/g ≈ 0.603×(−3/2·GM_D·R²/g·r_D³·cos²θ_D). For the Moon (M₂ tide): max V₂/g ≈ 0.18 m. Ocean tide loading effects are added using the FES2014b or TPXO8 global ocean tide model with local Green\'s functions.',
             processingSteps: [
@@ -4771,7 +4877,7 @@ export const PARTS: Part[] = [
             scientificConcept: 'The Earth\'s gravity field is described by the gravitational potential V(r,φ,λ) expanded in spherical harmonics: V(r,φ,λ) = (GM/r)·[1 + Σ_{n=2}^∞(R/r)^n·Σ_{m=0}^n(C_nm·cos(mλ)+S_nm·sin(mλ))·P_nm(sinφ)], where (r,φ,λ) are spherical coordinates, GM is the gravitational constant times Earth mass, R is the reference radius (6378136.3 m for EGM2008), and P_nm are fully normalized associated Legendre functions. The coefficients C_nm and S_nm describe the deviation of Earth\'s gravity field from a perfect sphere. The degree-2 coefficients (C₂₀, C₂₁, S₂₁, C₂₂, S₂₂) account for the Earth\'s oblateness (J₂ = −C₂₀·√5) and the pear-shaped asymmetry. Higher degrees represent finer-scale gravity anomalies. The geoid height N = (V − U)/γ at the reference ellipsoid, where U is the normal potential and γ is normal gravity. Gravity anomalies Δg = ∂(V−U)/∂r give the subsurface mass anomalies.',
             inputs: [
               { symbol: 'GM', label: 'Earth Gravitational Constant', unit: 'm³/s²', default: 398600441500000.0, min: 0, max: 1000000000000000.0, group: 'Constants' },
-              { symbol: 'r', label: 'Radial Distance', unit: 'm', default: 7000000.0, min: 6000000.0, max: 10000000.0, group: 'Position' },
+              { symbol: 'r', label: 'Radial Distance', unit: 'm', default: null, min: 6000000.0, max: 10000000.0, group: 'Position' },
               { symbol: 'C_nm', label: 'Cosine Coefficient', unit: '—', default: 1e-06, min: -1, max: 1, group: 'Coefficients' },
               { symbol: 'S_nm', label: 'Sine Coefficient', unit: '—', default: 1e-06, min: -1, max: 1, group: 'Coefficients' },
               { symbol: 'P_nm', label: 'Legendre Polynomial', unit: '—', default: 1, min: -1, max: 1, group: 'Coefficients' }
@@ -4794,7 +4900,7 @@ export const PARTS: Part[] = [
             outputInterpretation: 'EGM2008 provides the reference gravity field for geodesy and geophysics:\n\n• The potential V at 7000 km shows anomalies of ±100 m²/s² from the spherical reference — reflecting large-scale mass distributions (Mantle convection, crustal thickness variations)\n• Geoid height N: geoid is high over the Western Pacific (+80 m) and low over the Indian Ocean (−105 m) — the "geoid low" is a long-standing problem in geophysics\n• Gravity anomaly Δg: positive over subduction zones, negative over continental shields, reflecting the distribution of mass at depth\n• For satellite orbit determination: EGM2008 is used up to degree 120–360 for precise orbit propagation (cm-level accuracy for altimetry satellites)\n• For GPS height conversion: N must be subtracted from ellipsoidal heights from GNSS to obtain orthometric (mean sea level) heights with ±5–10 cm accuracy\n• The successor EGM2020 incorporates GOCE gradiometry, improved Arctic/ Antarctic coverage, and updated terrestrial data'
           },
           { id: 114, toolName: 'Transform Geodetic Coordinates (7-Param)', name: 'Helmert 7-Parameter Transformation', equation: 'X₂ = (1+s)·R(ω_x,ω_y,ω_z)·X₁ + T  [Heiskanen & Moritz 1967; 3 translations, 3 rotations, 1 scale]', reference: 'Heiskanen, W.A. & Moritz, H. (1967) Physical Geodesy. W.H. Freeman, San Francisco, 364 pp.',
-          paperUrl: 'https://doi.org/10.1017/CBO9781139107105',
+          paperUrl: '',
           appliesTo: 'Datum conversion WGS84/ITRF',
             shortDescription: 'Converts Cartesian coordinates between geodetic reference frames (datums) using the Helmert 7-parameter similarity transformation with three translation, three rotation, and one scale factor',
             paperSummary: 'Heiskanen & Moritz (1967) provided the mathematical foundation for physical geodesy, including the Helmert transformation between Cartesian reference frames. The 7-parameter Helmert (or Bursa-Wolf) transformation X_t = S·R·X + T converts coordinate vectors X in source datum to X_t in target datum using: translation T = (T_x, T_y, T_z) in meters, rotation R = R_x(ε_x)·R_y(ε_y)·R_z(ε_z) in arcseconds, and scale factor S = (1 + dS·10⁻⁶). This transformation is the standard method for converting between the International Terrestrial Reference Frame (ITRF) realizations and regional datums (e.g., WGS84, NAD83, ETRS89, GDA94). The parameters are determined from co-located stations observed in both frames. For example, transformation from ITRF2000 to ITRF2005 involves: T_x ≈ −0.1 mm, T_y ≈ −0.8 mm, T_z ≈ −5.8 mm, rotation rates of ∼1–2 mm/yr for secular frames.',
@@ -4802,7 +4908,7 @@ export const PARTS: Part[] = [
             inputs: [
               { symbol: 'S', label: 'Scale Factor (1+ppm)', unit: '—', default: 1.000001, min: 0, max: 2, group: 'Datum Parameters' },
               { symbol: 'R', label: 'Rotation Matrix (combined)', unit: '—', default: 1, min: 0, max: 2, group: 'Datum Parameters' },
-              { symbol: 'T', label: 'Translation Vector (x component)', unit: 'm', default: 0, min: -1000, max: 1000, group: 'Datum Parameters' }
+              { symbol: 'T', label: 'Translation Vector (x component)', unit: 'm', default: null, min: -1000, max: 1000, group: 'Datum Parameters' }
             ],
             outputs: [
               { id: 'primary', label: 'Transformed Coordinate X_t', type: 'scalar', unit: 'm', description: 'The transformed Cartesian coordinate in the target datum. The full 3-component vector requires applying the transformation to all three coordinates (X, Y, Z): X_t = (1+dS)·R·[X; Y; Z] + [T_x; T_y; T_z].' },
@@ -4822,13 +4928,13 @@ export const PARTS: Part[] = [
             outputInterpretation: 'The Helmert transformation is essential for combining data across different reference frames:\n\n• Between ITRF realizations (ITRF2014→ITRF2008): T ≈ (0.0, −0.2, −0.1) mm, rotations < 0.02 mas, scale ∼ −0.02 ppb → coordinate differences < 1 mm globally\n• Between WGS84 (G1762) and ITRF2014: essentially equivalent at the cm level — WGS84 is aligned to ITRF\n• Between regional datums (NAD83→ITRF): translations of −1 to +1 m — important for combining historical geodetic surveys with modern GPS\n• Between ETRS89 and ITRF: the European frame is fixed to the Eurasian plate (~2.5 cm/yr velocity) — requires time-dependent transformation\n• The Helmert transformation preserves shape (angles and relative distances) — it is a similarity transformation (no distortion)\n• For high-precision purposes, the assumption of a single 7-parameter transformation over the entire frame is imperfect — residual distortions require additional grid-based transformations for mm-level accuracy'
           },
           { id: 115, toolName: 'Compute Orthometric Height from GPS', name: 'Geoid Height (Helmert Orthometric)', equation: 'H ≈ h_ell − N  [h = ellipsoidal height, N = geoid undulation; Heiskanen & Moritz 1967]', reference: 'Heiskanen, W.A. & Moritz, H. (1967) Physical Geodesy. W.H. Freeman, San Francisco, 364 pp. Ch. 3.',
-          paperUrl: 'https://doi.org/10.1016/0016-7185(68)90013-5',
+          paperUrl: '',
           appliesTo: 'Height reference frame transformation',
             shortDescription: 'Computes the orthometric height (height above mean sea level, H) from the ellipsoidal height (from GPS/GNSS, h) minus the geoid undulation (from a geoid model, N)',
             paperSummary: 'The relationship H = h − N is fundamental to physical geodesy: the orthometric height H (height above the geoid/ mean sea level) is obtained by subtracting the geoid undulation N from the ellipsoidal height h measured by GNSS. The geoid is the equipotential surface of the Earth\'s gravity field that best approximates global mean sea level. The geoid undulation N is the separation between the reference ellipsoid (WGS-84, GRS80) and the geoid, ranging from −106 m (Indian Ocean) to +85 m (New Guinea). N is computed from a global gravity model (EGM2008, EGM2020) plus regional refinements using terrestrial and airborne gravity data. The accuracy of H = h − N depends on: (1) the accuracy of h from GNSS (±1–2 cm with precise positioning), (2) the accuracy of N from geoid models (±2–5 cm in well-surveyed regions, ±10–15 cm in data-sparse areas), and (3) the assumption that the geoid is the reference surface for orthometric heights (the mean sea level surface at the tide gauge datum).',
             scientificConcept: 'In geodesy, three height systems exist: (1) ellipsoidal height h — the geometric distance above the reference ellipsoid, measured by GNSS along the ellipsoid normal, (2) orthometric height H — the height above the geoid (mean sea level) along the plumb line, and (3) normal height H* — the height above the quasi-geoid along the ellipsoid normal. The geoid undulation N = h − H is the separation between the ellipsoid and geoid. N is determined from the Earth\'s gravity field: N = (GM/Rγ)Σ_{n=2}^{∞}Σ_{m=0}^n(C_nm·cos(mλ)+S_nm·sin(mλ))·P_nm(sinφ), where γ is normal gravity. The gradient of N (ΔN/Δx) relates to gravity anomalies and deflections of the vertical. For practical surveying, the tilt of the geoid relative to the ellipsoid causes the "deflection of the vertical" — the angle between the plumb line (gravity direction) and the ellipsoid normal, which can reach ±10 arcseconds in mountainous terrain.',
             inputs: [
-              { symbol: 'h', label: 'Ellipsoidal Height (GPS)', unit: 'm', default: 100, min: -500, max: 10000, group: 'GNSS Height' },
+              { symbol: 'h', label: 'Ellipsoidal Height (GPS)', unit: 'm', default: null, min: -500, max: 10000, group: 'GNSS Height' },
               { symbol: 'N', label: 'Geoid Undulation', unit: 'm', default: 30, min: -200, max: 200, group: 'Geoid Model' }
             ],
             outputs: [
@@ -4913,16 +5019,15 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'The IRI electron density profile governs radio propagation through the ionosphere:\n\n• f_p < f_signal: the radio wave penetrates the ionosphere (GPS L1 at 1.5754 GHz easily penetrates; typical f_p = 5–15 MHz)\n• f_p > f_signal: the wave reflects — used for long-range HF communication (3–30 MHz) where the maximum usable frequency (MUF) depends on NmF2\n• VTEC determines GPS ionospheric delay: Δτ = 40.3 × VTEC / f². At VTEC=30 TECU and f=1.5754 GHz: delay ≈ 0.5 m\n• The F2 layer peak NmF2 typically maximizes at 14:00 LT (local afternoon) and minimizes pre-dawn (04:00 LT)\n• Equatorial anomaly: Appleton anomaly produces two peaks in N_e at ±15° magnetic latitude with a trough at the magnetic equator — causes large gradients in VTEC that challenge GPS positioning\n• During solar maximum (F10.7 > 200), NmF2 can increase by factor 2–3 compared to solar minimum — GPS errors from ionospheric delay increase proportionally\n• Storm effects: positive phase (N_e increase) on day 1, negative phase (N_e depletion) on days 2–3 — can cause TEC variations of ±100%'
           },
-          { id: 118, toolName: 'Estimate Joule Heating Rate', name: 'Joule Heating (Ionospheric)', equation: 'Q_J = σ_P·E² + σ_H·(E×B)²/B²  [Pedersen 1991; Pedersen & Galand 2002]', reference: 'Pedersen, T.R., Knipp, D.J. & Emery, B.A. (2002) Joule heating and thermospheric response. In: Magnetosphere-Ionosphere Coupling, AGU Geophysical Monograph.',
-          paperUrl: 'https://doi.org/10.1029/GM118',
+          { id: 118, toolName: 'Estimate Joule Heating Rate', name: 'Joule Heating (Ionospheric)', equation: 'Q_J = σ_P·E² + σ_H·(E×B)²/B²  [Pedersen 1991; Pedersen & Galand 2002]', reference: 'Richmond, A.D. & Thayer, J.P. (2000) Ionospheric electrodynamics: A tutorial. In: Magnetospheric Current Systems, AGU Geophysical Monograph 118, 131–146.',
+          paperUrl: 'https://doi.org/10.1029/2000GM001910',
           appliesTo: 'Storm-time thermospheric density spike',
             shortDescription: 'Computes the Joule heating rate in the auroral ionosphere from the electric field and ionospheric conductivity, representing the dominant energy input to the thermosphere during geomagnetic storms',
             paperSummary: 'Joule heating in the auroral ionosphere is the primary mechanism for energy transfer from the magnetosphere to the neutral atmosphere during geomagnetic storms. When the solar wind-magnetosphere coupling drives field-aligned currents into the polar ionosphere, the resulting electric fields E drive perpendicular currents J_P = σ_P·E (Pedersen conductivity) and J_H = σ_H·E × B̂ (Hall conductivity). The associated Joule heating rate Q_J = J·E = σ_P·E² heats the ion-neutral gas in the E- and F-regions (100–300 km), driving: (1) thermospheric upwelling — hot gas expands raising the density at higher altitudes, (2) composition changes — O/N₂ ratio decreases due to upwelling of molecular-rich air, (3) neutral wind perturbations — from the ion-drag momentum source, and (4) large-scale gravity waves — propagating equatorward from the auroral zone. During major storms, Joule heating can exceed 100 mW/m² in the auroral oval — comparable to the total solar EUV input to the entire thermosphere.',
             scientificConcept: 'Joule heating in the ionosphere is analogous to ohmic dissipation in a conductor. The ionospheric conductivity tensor has three components: (1) Pedersen conductivity σ_P — for currents parallel to the electric field (ion-neutral collisions allow ion motion along E), (2) Hall conductivity σ_H — for currents perpendicular to both E and B (electron E×B drift), and (3) parallel conductivity σ_0 — for currents along the magnetic field (nearly infinite, so E_parallel ≈ 0). In the E-layer (100–130 km), ν_in/Ω_i ≈ 1 (ion-neutral collision frequency ≈ ion gyrofrequency), giving maximum σ_P. The Joule heating rate Q_J = σ_P·E² typically ranges from 1–10 mW/m² during quiet times to 50–200 mW/m² during storms. The height-integrated heating rate Σ_P·E² (where Σ_P = ∫σ_P·dh) gives the total power input per square meter. Global Joule heating during a major storm can reach 500–1000 GW.',
             inputs: [
-              { symbol: 'J', label: 'Current Density', unit: 'A/m²', default: 1e-6, min: 0, max: 1, group: 'Current' },
-              { symbol: 'E', label: 'Electric Field', unit: 'V/m', default: 0.01, min: 0, max: 1, group: 'Electric Field' },
-              { symbol: 'σ', label: 'Pedersen Conductivity', unit: 'S/m', default: 5e-6, min: 0, max: 0.01, group: 'Conductivity' }
+              { symbol: 'J', label: 'Current Density', unit: 'A/m²', default: null, min: 0, max: 1, group: 'Current' },
+              { symbol: 'E', label: 'Electric Field', unit: 'V/m', default: null, min: 0, max: 1, group: 'Electric Field' },
             ],
             outputs: [
               { id: 'primary', label: 'Joule Heating Rate Q_J', type: 'scalar', unit: 'W/m³', description: 'Volumetric Joule heating rate. Typical E-layer: 1×10⁻⁸ W/m³ (quiet) to 1×10⁻⁶ W/m³ (storm). Height-integrated: 1–200 mW/m².' },
@@ -4941,7 +5046,7 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'Joule heating is the dominant energy input to the thermosphere during geomagnetic storms:\n\n• Q_J ≥ 50 mW/m² in the auroral oval during major storms — the energy deposited per unit area is comparable to quiet-time solar EUV input (2–5 mW/m² globally)\n• Total power: 500–1000 GW during severe storms (e.g., Halloween 2003 storms) — sufficient to heat the entire thermosphere by 200–500 K\n• The heating maximizes in the E-layer (110–130 km) where Pedersen conductivity peaks — this is also the altitude region where satellites at end of life experience rapid orbital decay\n• Satellite drag effect: the storm-time density increase at 400 km can factor 2–5× above quiet levels — tracking stations lose satellite contact, orbits decay unpredictably\n• Gravity waves launched from the auroral zone propagate equatorward at 400–700 m/s, causing wind and density perturbations at mid-latitudes within 1–3 hours\n• The neutral wind perturbations from Joule heating can last for days after the storm, affecting satellite re-entry predictions and space debris tracking'
           },
-          { id: 119, toolName: 'Compute Scintillation Index S4', name: 'Ionospheric Scintillation Index (S4)', equation: 'S4 = √[(⟨I²⟩ − ⟨I⟩²) / ⟨I⟩²]  [Briggs & Parkin 1963; Vasquez et al. 1999]', reference: 'Briggs, B.H. & Parkin, J.A. (1963) On the variation of radio star and satellite scintillations with solar activity. J. Atmos. Terr. Phys., 25(6), 339–366. DOI: 10.1016/0021-9169(63)90150-3.',
+          { id: 119, toolName: 'Compute Scintillation Index S4', name: 'Ionospheric Scintillation Index (S4)', equation: 'S4 = √[(⟨I²⟩ − ⟨I⟩²) / ⟨I⟩²]  [Briggs & Parkin 1963; Vasquez et al. 1999]', reference: 'Briggs, B.H. & Parkin, J.A. (1963) On the variation of radio star and satellite scintillations with solar activity. J. Atmos. Terr. Phys., 25(6), 339–366. DOI: 10.1016/0021-9169(63)90150-8.',
           paperUrl: 'https://doi.org/10.1016/0021-9169(63)90150-3',
           appliesTo: 'GPS reliability assessment',
             shortDescription: 'Computes the S4 scintillation index quantifying the intensity fluctuations of a GNSS radio signal caused by ionospheric electron density irregularities, defined as the normalized standard deviation of signal intensity',
@@ -4968,15 +5073,15 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'The S4 index quantifies the impact of ionospheric irregularities on GNSS performance:\n\n• S4 < 0.3: minimal impact on GPS positioning — standard receiver tracking loops operate normally, positioning error < 1 m from scintillation\n• S4 = 0.3–0.5: moderate scintillation — some cycle slips possible on L2/L5. Differential code biases increase. Accuracy degrades to 1–3 m.\n• S4 = 0.5–0.7: strong scintillation — frequent cycle slips, receiver may lose lock on L2/L5, L1 C/A tracking degraded. Positioning accuracy > 5 m.\n• S4 > 0.7: severe scintillation — phase lock loop (PLL) failure likely on all frequencies. Receiver may lose satellite track entirely. Positioning unavailable.\n• Equatorial scintillation (high S4) occurs mainly 19:00–23:00 LT during equinox months at magnetic latitudes ±15° — this affects aviation, surveying, and precision agriculture in Brazil, India, SE Asia, and West Africa\n• Auroral scintillation occurs during geomagnetic storms at sub-auroral latitudes (45°–65° magnetic) — affects GNSS users in Canada, Scandinavia, and Russia\n• Mitigation strategies: multi-frequency receivers (L1+L5 ionosphere-free combination reduces phase scintillation), multi-constellation (GPS+Galileo+GLONASS), and advanced carrier tracking loops (wider bandwidth during high S4)'
           },
-          { id: 120, toolName: 'Estimate Magnetopause Standoff Distance', name: 'Magnetopause Standoff Distance (Shue 1998)', equation: 'R_mp = (11.4 + c_b·Bz) × P_dyn^{−1/6.6}, c_b = 0.14 (Bz > 0) or 0.013 (Bz ≤ 0)  [Shue et al. 1998; R_E units]', reference: 'Shue, J.-H., Chao, J.K., Fu, H.C., Russell, C.T. & Song, P. (1998) A new functional form to study the solar wind control of the magnetopause size and shape. J. Geophys. Res., 103(A5), 9469–9478. DOI: 10.1029/97JA03637.',
-          paperUrl: 'https://doi.org/10.1029/97JA03637',
+          { id: 120, toolName: 'Estimate Magnetopause Standoff Distance', name: 'Magnetopause Standoff Distance (Shue 1998)', equation: 'R_mp = (11.4 + c_b·Bz) × P_dyn^{−1/6.6}, c_b = 0.14 (Bz > 0) or 0.013 (Bz ≤ 0)  [Shue et al. 1998; R_E units]', reference: 'Shue, J.-H., Song, P., Russell, C.T., Steinberg, J.T., Chao, J.K., Zastenker, G., Vaisberg, O.L., Kokubun, S., Singer, H.J., Detman, T.R. & Kawano, H. (1998) Magnetopause location under extreme solar wind conditions. J. Geophys. Res., 103(A8), 17691–17700. DOI: 10.1029/98JA01103.',
+          paperUrl: 'https://doi.org/10.1029/98JA01103',
           appliesTo: 'Magnetopause location, solar wind compression',
             shortDescription: 'Computes the distance from Earth to the magnetopause (the boundary between the solar wind and Earth\'s magnetic field) using the Shue et al. empirical model as a function of solar wind dynamic pressure and IMF B_z',
             paperSummary: 'Shue et al. (1998) developed an empirical model of the magnetopause standoff distance using 553 magnetopause crossings observed by ISEE 1, ISEE 2, AMPTE/IRM, and IMP 8 satellites. The model expresses the subsolar magnetopause distance R_mp in Earth radii (R_E) as: R_mp = (11.4 + c_b·Bz) × P_dyn^(−1/6.6), where c_b = 0.14 for northward IMF (Bz > 0) and c_b = 0.013 for southward IMF (Bz ≤ 0). P_dyn is solar wind dynamic pressure in nPa and Bz is the north-south component of the IMF in nT. The piecewise Bz dependence captures: (1) the compression by solar wind pressure (P_dyn scaling with exponent −1/6.6, matching the dipole pressure balance), (2) erosion by southward IMF (dayside reconnection removes magnetic flux, reducing R_mp), and (3) inflation by northward IMF (high-latitude reconnection adds flux, increasing R_mp). The model is valid for −18 nT < Bz < 15 nT and 0.5 nPa < P_dyn < 8.5 nPa. During extreme events (P_dyn > 50 nPa, Bz < −30 nT), R_mp can compress to < 6 R_E — bringing the magnetopause inside geosynchronous orbit (6.6 R_E).',
             scientificConcept: 'The magnetopause is the boundary where the solar wind dynamic pressure balances the magnetic pressure of Earth\'s dipole field. The pressure balance is: P_dyn = ρ_sw·v_sw² = K·B_mp²/(2μ₀) where B_mp = 2·B_eq·(R_E/R_mp)³ is the draped magnetic field at the magnetopause. For a dipole: B_mp = 2·B_0·(R_E/R_mp)³. Solving gives R_mp ∝ P_dyn^(−1/6). The Shue model modifies this with a B_z-dependent term: for B_z < 0, magnetic reconnection at the dayside magnetopause removes flux from the dayside, allowing the solar wind to push the magnetopause closer to Earth. For B_z > 0, flux accumulates on the dayside, inflating the magnetosphere. The nominal subsolar R_mp = 10–12 R_E under quiet solar wind conditions (P_dyn ≈ 2 nPa, B_z ≈ 0). When the magnetopause is compressed inside 6.6 R_E (geosynchronous), satellites at GEO are exposed to the solar wind and energized magnetosheath plasma.',
             inputs: [
               { symbol: 'P_dyn', label: 'Solar Wind Dynamic Pressure', unit: 'nPa', default: 2, min: 0, max: 100, group: 'Solar Wind' },
-              { symbol: 'B_z', label: 'IMF B_z Component', unit: 'nT', default: 0, min: -30, max: 30, group: 'Interplanetary Magnetic Field' }
+              { symbol: 'B_z', label: 'IMF B_z Component', unit: 'nT', default: null, min: -30, max: 30, group: 'Interplanetary Magnetic Field' }
             ],
             outputs: [
               { id: 'primary', label: 'Subsolar Magnetopause Distance R_mp', type: 'scalar', unit: 'R_E', description: 'Distance from Earth center to the subsolar magnetopause in Earth radii. Quiet conditions: 10–12 R_E. Storm conditions: can compress to 5–8 R_E. Nominal geosynchronous orbit: 6.6 R_E.' },
@@ -5003,9 +5108,9 @@ export const PARTS: Part[] = [
             paperSummary: 'Burton et al. (1975) derived an empirical relationship between interplanetary conditions and the Dst index, introducing the pressure correction Dst* = Dst − b·√(P_dyn) + c where b = 7.26 nT/√nPa (empirically fitted) and c = 0. The Dst index itself (Sugiura 1964) is derived from hourly averaged H-component measurements at 4–6 low-latitude stations. The raw Dst includes: (1) ring current (negative Dst), (2) magnetopause Chapman-Ferraro current (positive contribution proportional to √(P_dyn)), and (3) tail currents. The correction removes the magnetopause compression effect, isolating the ring current signal. Burton et al. also derived the injection rate Q = −4.4(V × Bs) nT/h and the decay time τ, establishing the foundational Dst-solar wind coupling model. Storm classification: Dst* = −30 to −50 nT (weak), −50 to −100 (moderate), −100 to −250 (strong), −250 to −500 (severe), < −500 (extreme).',
             scientificConcept: 'The ring current consists of energetic (10–200 keV) ions and electrons drifting westward in the inner magnetosphere (L = 3–6 R_E). During geomagnetic storms, enhanced convection from the solar wind injects plasma sheet particles into the inner magnetosphere. The westward drift of ions (gradient-curvature drift) and eastward drift of electrons create a net westward electrical current, producing a southward magnetic field perturbation at Earth\'s surface (negative Dst). The Dessler-Parker-Sckopke relation links Dst to the total ring current energy: Dst = −(μ₀·U_RC)/(4π·B_E·R_E³) where U_RC is the total ring current energy. A Dst of −100 nT corresponds to U_RC ≈ 8×10¹⁵ J. The ring current decays through: (1) charge exchange with geocoronal hydrogen (τ ∼ 10–20 h for dominant O⁺), (2) Coulomb collisions, and (3) wave-particle interactions with EMIC and chorus waves. The recovery phase decay time is typically 10–40 hours, longer for O⁺-rich storms.',
             inputs: [
-              { symbol: 'Dst', label: 'Raw Dst Index', unit: 'nT', default: -50, min: -500, max: 100, group: 'Magnetic Index' },
+              { symbol: 'Dst', label: 'Raw Dst Index', unit: 'nT', default: null, min: -500, max: 100, group: 'Magnetic Index' },
               { symbol: 'P_dyn', label: 'Solar Wind Dynamic Pressure', unit: 'nPa', default: 2, min: 0, max: 100, group: 'Solar Wind' },
-              { symbol: 'b', label: 'Pressure Correction Coefficient', unit: 'nT/√nPa', default: 7.26, min: 0, max: 20, group: 'Correction Parameters' },
+              { symbol: 'b', label: 'Pressure Correction Coefficient', unit: 'nT/√nPa', default: null, min: 0, max: 20, group: 'Correction Parameters' },
               { symbol: 'c', label: 'Offset', unit: 'nT', default: 0, min: -50, max: 50, group: 'Correction Parameters' }
             ],
             outputs: [
@@ -5026,7 +5131,7 @@ export const PARTS: Part[] = [
             outputInterpretation: 'The Dst* index is the fundamental metric for geomagnetic storm intensity:\n\n• Quiet (Dst* > −30 nT): the ring current carries ~2×10¹⁵ J. No impact on power grids, pipelines, or communications.\n• Moderate storm (Dst* = −50 to −100 nT): ~1–3 per solar cycle year. Aurora visible at mid-latitudes (Canada, Northern US). GPS scintillation at equatorial and auroral latitudes. Satellite anomalies increase by factor 2–3.\n• Strong storm (Dst* = −100 to −250 nT): ~10–30 per solar cycle. Power grid fluctuations possible (e.g., 1989 Hydro-Québec blackout at Dst* ≈ −130 nT). Satellite surface charging events. HF radio blackouts at high latitudes.\n• Severe storm (Dst* = −250 to −500 nT): ~3–5 per solar cycle. Widespread power grid impacts. GPS positioning degraded globally. Satellite anomalies common. Radiation belt enhancements by factor 100–1000.\n• Extreme (Dst* < −500 nT): rare events. Carrington 1859: estimated Dst ≈ −900 nT. Would cause: (1) power grid collapse across entire continents, (2) widespread satellite failures, (3) GPS unavailability for days, (4) HF communications blackout globally.\n• The recovery phase decay time τ indicates composition: O⁺-rich storms have longer recovery (τ > 20 h) because O⁺ charge exchange with H is slower than H⁺ charge exchange'
           },
           { id: 122, toolName: 'Compute Plasma Debye Length', name: 'Debye Length (Space Plasma)', equation: 'λ_D = √(ε₀·k_B·T_e / (n_e·e²))  [Debye & Hückel 1923; electron Debye shielding length]', reference: 'Debye, P. & Hückel, E. (1923) Zur Theorie der Elektrolyte. Phys. Z., 24, 185–206.',
-          paperUrl: 'https://doi.org/10.1007/BF01342444',
+          paperUrl: '',
           appliesTo: 'Space plasma shielding distance',
             shortDescription: 'Computes the Debye length — the characteristic distance over which electric fields are screened by mobile charges in a plasma, determining whether the medium behaves as a plasma or as a collection of independent charges',
             paperSummary: 'Debye & Hückel (1923) introduced the concept of the Debye length in their theory of electrolyte solutions, but it was later recognized as a fundamental parameter of any plasma. The Debye length λ_D = √(ε₀·k_B·T_e/(n_e·e²)) is the distance over which the Coulomb potential of a charge is exponentially screened by the collective response of the surrounding plasma: φ(r) = (q/4π·ε₀·r)·exp(−r/λ_D). A plasma must satisfy λ_D ≪ L (system size) and N_D = n_e·λ_D³ ≫ 1 (collective behavior criterion). In space plasmas, λ_D varies enormously: (1) Solar wind at 1 AU: T_e ≈ 10⁵ K, n_e ≈ 10⁷ m⁻³ → λ_D ≈ 7 m, (2) Ionosphere F-region: T_e ≈ 1000 K, n_e ≈ 10¹¹ m⁻³ → λ_D ≈ 0.7 mm, (3) Magnetosphere: T_e ≈ 10⁶ K, n_e ≈ 10⁶ m⁻³ → λ_D ≈ 70 m, (4) Interstellar medium: T_e ≈ 10⁴ K, n_e ≈ 10⁶ m⁻³ → λ_D ≈ 0.2 m. The Debye length determines the spatial resolution of Langmuir probes, the sheaths around spacecraft, and the scale of electrostatic structures.',
@@ -5060,7 +5165,7 @@ export const PARTS: Part[] = [
         id: 'satdyn', number: 20, name: 'Satellite Dynamics & Space Debris', color: '#818cf8',
         tools: [
           { id: 123, toolName: 'Compute Satellite Drag Acceleration', name: 'Satellite Atmospheric Drag', equation: 'a_D = −½·(ρ·C_D·A/m)·v_rel²·v̂  [King-Hele 1987; Vallado 2013 Ch. 8]', reference: 'Vallado, D.A. (2013) Fundamentals of Astrodynamics and Applications. 4th ed., Microcosm Press, 1106 pp. Ch. 8 (Perturbations).',
-          paperUrl: 'https://doi.org/10.1007/978-0-387-45806-9_8',
+          paperUrl: '',
           appliesTo: 'Orbital decay prediction',
             shortDescription: 'Computes the atmospheric drag force on a satellite in low Earth orbit, parameterized by atmospheric density, drag coefficient, area-to-mass ratio, and velocity relative to the rotating atmosphere',
             paperSummary: 'Atmospheric drag is the dominant non-gravitational perturbation for satellites below 600 km altitude. The drag force F_D = −½·ρ·C_D·(A/m)·v_rel²·v̂ acts opposite to the satellite\'s velocity relative to the co-rotating atmosphere. The drag coefficient C_D depends on the gas-surface interaction: for a spherical satellite in free-molecular flow (Knudsen number >> 1), C_D ≈ 2.2 for fully diffuse reflection and C_D ≈ 2.0 for specular reflection. For complex shapes (e.g., the ISS with solar panels), the effective drag area can vary by 20–50% depending on attitude. The atmospheric density ρ varies with solar cycle (factor of 10–50 at 400 km), geomagnetic storms (factor of 2–5), diurnal bulge (factor of 2), and season (factor of 1.5). At 400 km altitude and solar minimum (ρ ≈ 2×10⁻¹² kg/m³), the deceleration of a typical LEO satellite (1000 kg, 10 m² cross-section) is ~1.4×10⁻⁷ m/s², causing an orbital decay of ~1–2 km/month. During solar maximum, the decay rate increases to ~10–20 km/month.',
@@ -5147,8 +5252,8 @@ export const PARTS: Part[] = [
               'J2 oblateness causes argument-of-perigee rotation that modulates the effective density at perigee — not captured in this formulation',
             ],
           },
-          { id: 125, toolName: 'Estimate Conjunction Collision Probability', name: 'Collision Probability (Foster 1992)', equation: 'P_c ≈ (A₁+A₂) / (2π·σ_x·σ_y) × exp(−d²/(2σ²))  [Foster 1992; 2D conjunction probability]', reference: 'Foster, J.L. (1992) Estimation of impact probability for orbital debris. In: Advances in Space Research, 13(9), 3–8. DOI: 10.1016/0273-1177(92)90216-A.',
-          paperUrl: 'https://doi.org/10.1016/0273-1177(92)90216-A',
+          { id: 125, toolName: 'Estimate Conjunction Collision Probability', name: 'Collision Probability (Foster 1992)', equation: 'P_c ≈ (A₁+A₂) / (2π·σ_x·σ_y) × exp(−d²/(2σ²))  [Foster 1992; 2D conjunction probability]', reference: 'Foster, J.L. & Estes, R.H. (1992) A parametric analysis of orbital debris collision probability and maneuver rate for space vehicles. NASA JSC-25898.',
+          paperUrl: '',
           appliesTo: 'Conjunction assessment, collision avoidance',
             shortDescription: 'Computes the probability of collision between two space objects at closest approach, assuming Gaussian position uncertainties and spherical hard-body cross-section',
             paperSummary: 'Foster (1992) developed the analytical method for computing collision probability between two space objects in a conjunction event. The method treats each object\'s position uncertainty as a Gaussian distribution in the encounter plane (perpendicular to relative velocity). The combined hard-body radius R = R₁ + R₂ accounts for the physical dimensions of both objects. The collision probability is: P_c = (A_c/(2π·σ_x·σ_y))·exp(−d²/2σ_h²) where A_c = π·(R₁+R₂)² is the collision cross-section area, d is the miss distance projected in the encounter plane, and σ_x, σ_y are the combined position uncertainties in the principal axes. This method assumes: (1) short encounter duration (straight-line relative motion), (2) Gaussian uncertainties, (3) constant covariance during the encounter, and (4) spherical hard bodies. The analytical formula is valid for P_c < 0.1. For higher probabilities, numerical integration of the 2D Gaussian over the circular hard-body region is required.',
@@ -5298,7 +5403,7 @@ export const PARTS: Part[] = [
             paperSummary: 'Bartels (1949) introduced the planetary Kp index as the first global measure of geomagnetic activity. The Kp index is derived from 13 mid-latitude geomagnetic observatories (selected to avoid auroral and equatorial enhancement). Each station reports a K index (0–9) — a quasi-logarithmic scale representing the range of the horizontal component H over a 3-hour UT interval, normalized for local diurnal and seasonal variations. The K indexing converts the K values to a standardized 28-point scale (0, 0+, 1−, 1, 1+, … 9−, 9). The planetary Kp is the weighted average of the standardized K values: Kp = Σ(w_i·K_i)/Σ(w_i) where w_i are station weights based on reliability and location. The Kp index is the primary space weather severity metric: Kp = 0–2 (quiet), Kp = 3–4 (active), Kp = 5 (minor storm/G1), Kp = 6 (moderate/G2), Kp = 7 (strong/G3), Kp = 8 (severe/G4), Kp = 9 (extreme/G5). The NOAA G-scale (G1–G5) provides the operational space weather impact scale. Kp forecasts are issued by SWPC (NOAA) and MET Office.',
             scientificConcept: 'The K index measures the maximum fluctuation of the geomagnetic field H-component during a 3-hour interval. Each station normalizes its K scale to local conditions: the upper limit of K=9 is set to produce ~100 events per solar cycle per station. The Kp index, as a planetary average, reflects the integrated effect of: (1) solar wind energy input — the reconnection rate at the magnetopause (related to V_sw·B_south), (2) substorm activity — injections of energetic particles into the ring current and auroral zones, and (3) magnetospheric convection strength. The Kp index correlates with: the solar wind velocity (R² ≈ 0.4), the Akasofu epsilon parameter (ε = V_sw·B²·sin⁴(θ/2)·l₀²), and the auroral electrojet (AE) index. The expansion of the auroral oval with increasing Kp: at Kp=1: oval at 67° magnetic latitude, at Kp=5: oval at 60°, at Kp=9: oval at 45° — bringing aurora to mid-latitudes.',
             inputs: [
-              { symbol: 'Kp', label: 'Planetary Kp Index (real observed)', unit: '—', default: 0, min: 0, max: 9, group: 'Kp Input' },
+              { symbol: 'Kp', label: 'Planetary Kp Index (real observed)', unit: '—', default: null, min: 0, max: 9, group: 'Kp Input' },
               { symbol: 'Kᵢ', label: 'Station K Indices (optional demo)', unit: '—', default: 0, min: 0, max: 9, group: 'Kp Input' }
             ],
             outputs: [
@@ -5346,7 +5451,7 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'DOP is the primary predictor of GNSS positioning accuracy:\n\n• At a given location, the expected 3D position error = PDOP × σ_URE where σ_URE is the user range error (typically 1–3 m for standard GPS). For PDOP = 3 and σ_URE = 2 m: expected 3D error ≈ 6 m.\n• Open-sky conditions: GDOP < 3 for GPS+Galileo+GLONASS (25+ satellites visible) — positioning accuracy < 3 m horizontal, < 5 m vertical.\n• Urban canyon: GDOP > 8 common — only 4–6 satellites visible. Horizontal accuracy degrades to 15–30 m. Vertical accuracy > 50 m.\n• Indoor/underground: GDOP > 20 — no reliable positioning. Only high-sensitivity receivers can produce any solution.\n• DOP maps: produced globally by many services (trimble, gps.gov) — highest DOPs at ±55° latitude where GPS satellite coverage is weakest.\n• Mitigation: multi-constellation (GPS+GLONASS+Galileo+BeiDou) reduces PDOP by 40–70% compared to GPS-only, especially in obstructed environments.\n• The DOP concept extends to any GNSS augmentation: SBAS (WAAS, EGNOS) reduces effective DOP by providing range corrections, increasing effective satellite count.'
           },
-          { id: 130, toolName: 'Estimate Tropospheric Delay for GNSS', name: 'Saastamoinen Tropospheric Delay', equation: 'Δτ = (0.002277/sinθ)×[P+(1255/T+0.05)×e]', reference: 'Saastamoinen, J. (1972) Atmospheric correction for the troposphere and stratosphere in radio ranging of satellites. Geophys. Monograph Ser., Vol. 15, pp. 247–251, AGU. DOI: 10.1029/GM015p0247',
+          { id: 130, toolName: 'Estimate Tropospheric Delay for GNSS', name: 'Saastamoinen Tropospheric Delay', equation: 'Δτ = (0.002277/sinθ)×[P+(1255/T+0.05)×e − 1.16·tan²θ]', reference: 'Saastamoinen, J. (1972) Atmospheric correction for the troposphere and stratosphere in radio ranging of satellites. Geophys. Monograph Ser., Vol. 15, pp. 247–251, AGU. DOI: 10.1029/GM015p0247',
           paperUrl: 'https://doi.org/10.1029/GM015p0247',
           appliesTo: 'GPS signal correction',
             shortDescription: 'Computes the zenith and slant tropospheric delay of GNSS signals using the Saastamoinen model, which estimates the hydrostatic and wet components from surface meteorological measurements of pressure, temperature, and water vapor pressure',
@@ -5355,7 +5460,7 @@ export const PARTS: Part[] = [
             inputs: [
               { symbol: 'θ', label: 'Elevation Angle', unit: 'rad', default: 0.5, min: 0.05, max: 1.57, group: 'Geometry' },
               { symbol: 'P', label: 'Surface Pressure', unit: 'hPa', default: 1013.25, min: 500, max: 1100, group: 'Meteorology' },
-              { symbol: 'T', label: 'Surface Temperature', unit: 'K', default: 288, min: 200, max: 320, group: 'Meteorology' },
+              { symbol: 'T', label: 'Surface Temperature', unit: 'K', default: null, min: 200, max: 320, group: 'Meteorology' },
               { symbol: 'e', label: 'Water Vapor Pressure', unit: 'hPa', default: 10, min: 0, max: 50, group: 'Meteorology' }
             ],
             outputs: [
@@ -5393,11 +5498,11 @@ export const PARTS: Part[] = [
             paperSummary: 'Thiem (1906) derived the steady-state radial flow equation for groundwater extraction from a confined aquifer. The Thiem equation Q = 2π·T·(h₂−h₁)/ln(r₂/r₁) describes the relationship between pumping rate Q, aquifer transmissivity T = K·b (hydraulic conductivity × aquifer thickness), and hydraulic heads h₁ and h₂ at radial distances r₁ and r₂ from the pumping well. The equation assumes: (1) fully penetrating well, (2) homogeneous, isotropic, horizontal confined aquifer of constant thickness, (3) steady-state flow (no change in storage), (4) horizontal (Dupuit) flow, (5) no recharge, (6) laminar flow (Darcy\'s law valid). In practice, the Thiem equation is used to estimate transmissivity from two observation wells at known distances from the pumping well, given the pumping rate and steady-state drawdowns. The equation is valid only for confined aquifers where the cone of depression has stabilized — typically after hours to days of constant pumping. For unconfined aquifers, the Dupuit-Forchheimer modification accounts for the saturated thickness change.',
             scientificConcept: 'Steady radial flow to a well is governed by the groundwater flow equation in cylindrical coordinates. Under Thiem\'s assumptions, the radial component of Darcy\'s law is: Q = 2π·r·K·b·dh/dr, which integrates to h₂−h₁ = Q·ln(r₂/r₁)/(2π·T). The hydraulic head h has a logarithmic drawdown cone: h(r) = h_w + Q·ln(r/r_w)/(2π·T) where h_w is the water level in the well and r_w is the well radius. The logarithmic profile means that most head loss occurs near the pumping well: 50% of total drawdown occurs within a radius of 2r_w. The radius of influence R₀ (where drawdown → 0) can be estimated as R₀ ≈ 1.5√(T·t/S) for transient flow, but in the Thiem steady-state solution, there is no finite R₀ — drawdown extends logarithmically to infinity, which is unphysical and highlights the need for recharge or aquifer boundaries.',
             inputs: [
-              { symbol: 'T', label: 'Transmissivity', unit: 'm²/day', default: 500, min: 0.1, max: 50000, group: 'Aquifer Properties' },
-              { symbol: 'h₁', label: 'Head at Well 1', unit: 'm', default: 50, min: 0, max: 500, group: 'Observation' },
-              { symbol: 'h₂', label: 'Head at Well 2', unit: 'm', default: 60, min: 0, max: 500, group: 'Observation' },
-              { symbol: 'r₁', label: 'Distance to Well 1', unit: 'm', default: 10, min: 0, max: 10000, group: 'Geometry' },
-              { symbol: 'r₂', label: 'Distance to Well 2', unit: 'm', default: 100, min: 0, max: 100000, group: 'Geometry' }
+              { symbol: 'T', label: 'Transmissivity', unit: 'm²/day', default: null, min: 0.1, max: 50000, group: 'Aquifer Properties' },
+              { symbol: 'h₁', label: 'Head at Well 1', unit: 'm', default: null, min: 0, max: 500, group: 'Observation' },
+              { symbol: 'h₂', label: 'Head at Well 2', unit: 'm', default: null, min: 0, max: 500, group: 'Observation' },
+              { symbol: 'r₁', label: 'Distance to Well 1', unit: 'm', default: null, min: 0, max: 10000, group: 'Geometry' },
+              { symbol: 'r₂', label: 'Distance to Well 2', unit: 'm', default: null, min: 0, max: 100000, group: 'Geometry' }
             ],
             outputs: [
               { id: 'primary', label: 'Pumping Rate Q', type: 'scalar', unit: 'm³/day', description: 'Steady-state pumping rate computed from the head difference between two observation wells. For a typical alluvial aquifer (T=500 m²/day) with 10 m head difference between 10 m and 100 m: Q ≈ 13600 m³/day.' },
@@ -5423,11 +5528,11 @@ export const PARTS: Part[] = [
             paperSummary: 'Theis (1935) derived the first analytical solution for transient groundwater flow to a pumping well, introducing the concept of aquifer storativity and the analogy to heat conduction. The Theis equation: s(r,t) = (Q/(4π·T))·W(u) where u = r²S/(4Tt), s is drawdown, Q is pumping rate, T is transmissivity, S is storativity, r is distance from the well, t is time, and W(u) = ∫_u^∞ (e^(-x)/x)·dx is the Theis well function (exponential integral). The Theis solution assumes: (1) confined aquifer, (2) homogeneous, isotropic, uniform thickness, (3) fully penetrating well, (4) instantaneous release of water from storage, (5) constant pumping rate, and (6) infinite areal extent. The fundamental physical insight: for small u (large t, small r), W(u) ≈ −γ − ln(u) where γ = 0.5772 (Euler\'s constant), giving the Cooper-Jacob straight line. The Theis solution enabled the first quantitative determination of aquifer parameters (T and S) from pumping test data, revolutionizing groundwater hydrology.',
             scientificConcept: 'The Theis solution solves the groundwater flow equation ∂²s/∂r² + (1/r)·∂s/∂r = (S/T)·∂s/∂t (the radial diffusion equation) for a constant-rate pumping well. The dimensionless parameter u = r²S/(4Tt) represents the balance between aquifer response time and pumping duration. At early times (u > 1): the drawdown cone has not reached the observation point, and s increases slowly. At intermediate times (u ≈ 1): the drawdown accelerates as the cone of depression approaches. At late times (u < 0.01): the drawdown follows the Cooper-Jacob logarithmic approximation. The well function W(u) has the series expansion: W(u) = −γ − ln(u) + u − u²/(2·2!) + u³/(3·3!) − ... The type-curve method: plot s vs r²/t on log-log paper, match to the W(u) vs u type curve, and determine T = Q/(4π·[s/W(u)]) and S = 4T·t·u/r².',
             inputs: [
-              { symbol: 'Q', label: 'Pumping Rate', unit: 'm³/day', default: 1000, min: 0, max: 100000, group: 'Pumping' },
-              { symbol: 'T', label: 'Transmissivity', unit: 'm²/day', default: 500, min: 0.1, max: 50000, group: 'Aquifer' },
-              { symbol: 't', label: 'Time', unit: 'days', default: 1, min: 0, max: 10000, group: 'Time' },
-              { symbol: 'r', label: 'Distance from Well', unit: 'm', default: 100, min: 0, max: 10000, group: 'Geometry' },
-              { symbol: 'S', label: 'Storativity', unit: '—', default: 0.0001, min: 1e-8, max: 0.1, group: 'Aquifer' }
+              { symbol: 'Q', label: 'Pumping Rate (pump-test input)', unit: 'm³/day', default: null, min: 0, max: 100000, group: 'Pumping' },
+              { symbol: 'T', label: 'Transmissivity (aquifer test)', unit: 'm²/day', default: null, min: 0.1, max: 50000, group: 'Aquifer' },
+              { symbol: 't', label: 'Time', unit: 'days', default: null, min: 0, max: 10000, group: 'Time' },
+              { symbol: 'r', label: 'Distance from Well', unit: 'm', default: null, min: 0, max: 10000, group: 'Geometry' },
+              { symbol: 'S', label: 'Storativity (auto: GLDAS groundwater-derived)', unit: '—', default: null, min: 1e-8, max: 0.1, group: 'Aquifer' }
             ],
             outputs: [
               { id: 'primary', label: 'Drawdown s(t)', type: 'scalar', unit: 'm', description: 'Drawdown at distance r at time t. For Q=1000 m³/day, T=500 m²/day, S=0.0001, r=100 m, t=1 day: u≈0.005, W(u)≈4.7, s≈0.75 m. At t=10 days: u≈0.0005, W(u)≈7.0, s≈1.1 m.' },
@@ -5453,11 +5558,11 @@ export const PARTS: Part[] = [
             paperSummary: 'Cooper & Jacob (1946) recognized that when u = r²S/(4Tt) is small (u < 0.01), the Theis well function simplifies to W(u) ≈ −0.5772 − ln(u). This simplifies drawdown to: s = (Q/(4πT))·(−0.5772 − ln(r²S/(4Tt))) = (2.3Q/(4πT))·log₁₀(2.25Tt/(r²S)). This is the Cooper-Jacob approximation. The advantage: a semilog plot of s vs log₁₀(t) (or log₁₀(r)) yields a straight line with slope Δs = 2.3Q/(4πT) and intercept t₀ where s=0: t₀ = r²S/(2.25T). The Cooper-Jacob method is the most widely used approach for pumping test analysis because: (1) it avoids the need for type-curve matching tables, (2) it provides a visual check of assumptions through linearity of the semilog plot, and (3) it gives direct estimates of T and S from the slope and intercept of the best-fit line. The approximation error is < 1% for u < 0.01 and < 5% for u < 0.05.',
             scientificConcept: 'The condition u = r²S/(4Tt) < 0.01 means that enough time has elapsed for the cone of depression to be fully developed at the observation point. For typical aquifer parameters (T=500 m²/day, S=0.0001, r=100 m): u = 0.01 → t_min = r²S/(0.04T) ≈ 100²×0.0001/(0.04×500) = 0.005 days ≈ 7 minutes. So the Cooper-Jacob approximation applies very quickly for nearby wells. For a well 1 km away: t_min ≈ 1.25 hours. For a well 10 km away: t_min ≈ 5.2 days. The physical meaning: the drawdown cone\'s propagation speed is determined by the hydraulic diffusivity D = T/S. The Cooper-Jacob condition u < 0.01 corresponds to t > t_min = r²/(0.04D) — the time for the drawdown information to propagate from the well to the observation point.',
             inputs: [
-              { symbol: 'Q', label: 'Pumping Rate', unit: 'm³/day', default: 1000, min: 0, max: 100000, group: 'Pumping' },
-              { symbol: 'T', label: 'Transmissivity', unit: 'm²/day', default: 500, min: 0.1, max: 50000, group: 'Aquifer' },
-              { symbol: 't', label: 'Time', unit: 'days', default: 1, min: 0, max: 10000, group: 'Time' },
-              { symbol: 'r', label: 'Distance from Well', unit: 'm', default: 100, min: 0, max: 10000, group: 'Geometry' },
-              { symbol: 'S', label: 'Storativity', unit: '—', default: 0.0001, min: 1e-8, max: 0.1, group: 'Aquifer' }
+              { symbol: 'Q', label: 'Pumping Rate (pump-test input)', unit: 'm³/day', default: null, min: 0, max: 100000, group: 'Pumping' },
+              { symbol: 'T', label: 'Transmissivity (aquifer test)', unit: 'm²/day', default: null, min: 0.1, max: 50000, group: 'Aquifer' },
+              { symbol: 't', label: 'Time', unit: 'days', default: null, min: 0, max: 10000, group: 'Time' },
+              { symbol: 'r', label: 'Distance from Well', unit: 'm', default: null, min: 0, max: 10000, group: 'Geometry' },
+              { symbol: 'S', label: 'Storativity (auto: GLDAS groundwater-derived)', unit: '—', default: null, min: 1e-8, max: 0.1, group: 'Aquifer' }
             ],
             outputs: [
               { id: 'primary', label: 'Drawdown s(t)', type: 'scalar', unit: 'm', description: 'Cooper-Jacob straight-line drawdown. For Q=1000, T=500, S=0.0001, r=100, t=1 day: s≈0.75 m. The accuracy relative to the full Theis solution is > 99% when u < 0.01.' },
@@ -5485,7 +5590,7 @@ export const PARTS: Part[] = [
             inputs: [
               { symbol: 'f_c', label: 'Final Infiltration Rate', unit: 'mm/h', default: 5, min: 0, max: 50, group: 'Soil Properties' },
               { symbol: 'f₀', label: 'Initial Infiltration Rate', unit: 'mm/h', default: 50, min: 0, max: 500, group: 'Soil Properties' },
-              { symbol: 'k', label: 'Decay Constant', unit: '/h', default: 2, min: 0.01, max: 20, group: 'Soil Properties' },
+              { symbol: 'k', label: 'Decay Constant', unit: '/h', default: null, min: 0.01, max: 20, group: 'Soil Properties' },
               { symbol: 't', label: 'Time', unit: 'h', default: 1, min: 0, max: 100, group: 'Event' }
             ],
             outputs: [
@@ -5517,9 +5622,9 @@ export const PARTS: Part[] = [
             paperSummary: 'The UNISDR (2004, now UNDRR) definition of disaster risk as the product of hazard, vulnerability, and exposure is the foundation of modern disaster risk reduction. Risk R = H × V × E where: (1) H (hazard) — the probability of occurrence of a hazardous event of given intensity within a specified time period (0 to 1), (2) V (vulnerability) — the degree of loss to a given element at risk resulting from a hazard of a given intensity (0 to 1), and (3) E (exposure) — the value of elements at risk (people, infrastructure, economic assets) present in hazard-prone areas (0 to 1 normalized). The multiplicative framework implies that risk is zero if any factor is zero: no hazard, invulnerable system, or no exposed assets. This decomposition enables targeted risk reduction: (1) reducing hazard through mitigation (e.g., flood levees), (2) reducing vulnerability through preparedness and construction standards, and (3) reducing exposure through land-use planning and evacuation. The framework is used globally by the World Bank (GFDRR), UNDRR, national disaster management agencies, and insurance/reinsurance industries for catastrophe risk modeling.',
             scientificConcept: 'Risk is the expected loss: R = E[Loss] = Σᵢp(event_i)·loss_i. The decomposition R = H×V×E assumes: (1) independence of the three factors — not always valid (e.g., vulnerability can correlate with exposure), (2) linearity — in reality, risk functions are nonlinear (e.g., damage curves are S-shaped for floods), (3) dimensionless normalization — for practical application, risk is expressed in monetary terms: R($) = p(hazard) × vulnerability × exposure_value. The IPCC AR6 uses the risk framework with: (1) hazard (climate-related physical events), (2) exposure (the presence of people, livelihoods, species, ecosystems in places that could be adversely affected), (3) vulnerability (the propensity or predisposition to be adversely affected), and (4) response (adaptation and mitigation actions). Multi-hazard risk assessment requires summing risks across all relevant hazards with correlation considerations.',
             inputs: [
-              { symbol: 'H', label: 'Hazard Probability', unit: '—', default: 0.5, min: 0, max: 1, group: 'Risk Components' },
-              { symbol: 'V', label: 'Vulnerability Index', unit: '—', default: 0.3, min: 0, max: 1, group: 'Risk Components' },
-              { symbol: 'E', label: 'Exposure Index', unit: '—', default: 0.8, min: 0, max: 1, group: 'Risk Components' }
+              { symbol: 'H', label: 'Hazard Probability', unit: '—', default: null, min: 0, max: 1, group: 'Risk Components' },
+              { symbol: 'V', label: 'Vulnerability Index', unit: '—', default: null, min: 0, max: 1, group: 'Risk Components' },
+              { symbol: 'E', label: 'Exposure Index', unit: '—', default: null, min: 0, max: 1, group: 'Risk Components' }
             ],
             outputs: [
               { id: 'primary', label: 'Risk Index R', type: 'scalar', unit: '—', description: 'Composite risk index (0–1). R < 0.1: low risk; 0.1–0.3: moderate; 0.3–0.5: high; 0.5–0.7: very high; 0.7–1.0: extreme. The threshold for action depends on the context: for critical infrastructure, R > 0.1 may require mitigation.' },
@@ -5538,7 +5643,7 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'The risk index provides a standardized basis for disaster risk management:\n\n• Risk reduction priorities: if H is high (frequent hazard), focus on hazard mitigation (flood walls, seismic retrofit). If V is high (vulnerable buildings), improve construction standards. If E is high (dense population in hazard zone), implement land-use planning and relocation.\n• Non-linear reality: the multiplicative model is a simplification — actual risk depends on the specific hazard-intensity-exposure-vulnerability interaction. For example: a moderate flood (low H) hitting a well-prepared community (low V) with minimal assets (low E) → very low risk — this is the goal of risk reduction.\n• The framework is used in: (1) Sendai Framework for Disaster Risk Reduction (2015–2030) monitoring, (2) World Bank disaster risk financing, (3) insurance catastrophe models (RMS, AIR, Karen Clark), (4) climate risk assessments (IPCC, NCA), and (5) national disaster risk profiles.\n• For digital twin Earth applications: real-time risk assessment as a product of dynamic hazard maps, vulnerability databases, and population/asset exposure layers updated from satellite imagery and census data.'
           },
-          { id: 136, toolName: 'Compute Expected Annual Flood Damage', name: 'Expected Annual Damage (EAD)', equation: 'EAD = ∫₀¹ D(P) dP  [USACE 2013; annual exceedance probability integral of damage function]', reference: 'USACE (2013) Risk-based analysis for flood damage reduction studies. Engineering Manual EM 1110-2-1619, US Army Corps of Engineers.',
+          { id: 136, toolName: 'Compute Expected Annual Flood Damage', name: 'Expected Annual Damage (EAD)', equation: 'EAD = ∫₀¹ D(P) dP  [USACE 1996; annual exceedance probability integral of damage function]', reference: 'USACE (1996) Risk-based analysis for flood damage reduction studies. Engineering Manual EM 1110-2-1619, US Army Corps of Engineers.',
           paperUrl: 'https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1619.pdf',
           appliesTo: 'Dam safety, flood risk, infrastructure planning',
             shortDescription: 'Computes the Expected Annual Damage (EAD) — the integral of the damage-exceedance probability curve, representing the average annual economic loss from a hazard over the long term',
@@ -5567,12 +5672,12 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'EAD is the standard metric for flood risk quantification:\n\n• EAD enables cost-benefit analysis: a flood wall costing $10M that reduces EAD from $2M/yr to $0.2M/yr (saving $1.8M/yr) has a benefit-cost ratio of 0.18 per yr — the project pays for itself in ~5.6 years.\n• FEMA\'s NFIP uses EAD for flood insurance premium calculation: the average annual premium ≈ EAD/coverage + administrative costs + catastrophe load.\n• Climate change impacts: if flood frequency increases due to sea-level rise or intensifying rainfall, EAD increases non-linearly. A 20% increase in the 100-year flood depth can increase EAD by 50–100%.\n• Limitations: (1) assumes stationary hazard probabilities — violated under climate change, (2) depth-damage curves are uncertain (especially for indirect losses), (3) does not capture business interruption, loss of life, or ecosystem service losses, (4) ignores risk correlation between neighboring assets.\n• Extensions: (1) probabilistic EAD with Monte Carlo sampling of parameter uncertainty, (2) residual risk from levee failure, (3) residual risk from FEMA-mapped but uninsured properties, (4) forward-looking EAD under climate scenarios.'
           },
-          { id: 137, toolName: 'Compute Air Quality Index from Concentration', name: 'AQI Breakpoint Interpolation (EPA)', equation: 'AQI = [(IHi − ILo)/(BPHi − BPLo)] × (Cp − BPLo) + ILo  [EPA 40 CFR Part 50, Appendix G; linear interpolation between breakpoints]', reference: 'US EPA (2024) Appendix G to Part 50 — Interpretation of the National Ambient Air Quality Standards for PM₂.₅. 40 CFR Part 50, Appendix G. EPA-454/B-24-002.',
-          paperUrl: 'https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-50/appendix-Appendix%20G%20to%20Part%2050',
+          { id: 137, toolName: 'Compute Air Quality Index from Concentration', name: 'AQI Breakpoint Interpolation (EPA)', equation: 'AQI = [(IHi − ILo)/(BPHi − BPLo)] × (Cp − BPLo) + ILo  [EPA 40 CFR Part 50, Appendix G; linear interpolation between breakpoints]', reference: 'US EPA (2024) Appendix G to Part 58 — Uniform Air Quality Index (AQI) and Daily Reporting. 40 CFR Part 58, Appendix G. EPA-454/B-24-002.',
+          paperUrl: 'https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-58/appendix-Appendix%20G%20to%20Part%2058',
           appliesTo: 'Air quality standardization',
             shortDescription: 'Computes the Air Quality Index (AQI) for a given pollutant concentration by linear interpolation within the EPA-defined concentration breakpoint ranges, translating pollution measurements into standardized health advisory categories',
             paperSummary: 'The US EPA established the Air Quality Index (AQI) under 40 CFR Part 58 as a standardized metric for reporting daily air quality to the public. The AQI converts pollutant concentrations (ozone O₃, particulate matter PM₂.₅ and PM₁₀, carbon monoxide CO, sulfur dioxide SO₂, and nitrogen dioxide NO₂) to a 0–500 index scale using breakpoints that correspond to health-based National Ambient Air Quality Standards (NAAQS). The formula: AQI = [(I_Hi − I_Lo)/(BP_Hi − BP_Lo)] × (C_p − BP_Lo) + I_Lo where C_p is the pollutant concentration, BP_Hi and BP_Lo are the breakpoint concentrations bracketing C_p, and I_Hi and I_Lo are the corresponding AQI values (typically 0–50=Good, 51–100=Moderate, 101–150=Unhealthy for Sensitive Groups, 151–200=Unhealthy, 201–300=Very Unhealthy, 301–500=Hazardous). Each pollutant has its own breakpoint table based on epidemiological studies of health effects at different concentration levels. The overall AQI for a location is the maximum AQI across all pollutants measured.',
-            scientificConcept: 'AQI breakpoints are set at the NAAQS levels for each pollutant. For PM₂.₅: the 24-hour standard is 35 µg/m³ (AQI 100 breakpoint). The breakpoints are: AQI 0–50: 0–12.0 µg/m³, 51–100: 12.1–35.4, 101–150: 35.5–55.4, 151–200: 55.5–150.4, 201–300: 150.5–250.4, 301–500: 250.5–500.4 (or more for Hazardous). For O₃ (8-hour): AQI 100 at 0.070 ppm (the 2015 standard). The piecewise linear interpolation ensures that AQI = 100 corresponds exactly to the NAAQS for each pollutant, providing regulatory consistency. The AQI scale is designed to be uniform across pollutants: AQI 100 is the "health benchmark" for each pollutant, and AQI values above 100 represent concentrations exceeding health standards. The health effects at each AQI category: Good (0–50): none; Moderate (51–100): unusually sensitive individuals; USG (101–150): sensitive groups; Unhealthy (151–200): general public; Very Unhealthy (201–300): everyone; Hazardous (301–500): emergency conditions.',
+            scientificConcept: 'AQI breakpoints are set at the NAAQS levels for each pollutant. For PM₂.₅: the 24-hour standard is 35 µg/m³ (AQI 100 breakpoint). The breakpoints are: AQI 0–50: 0–9.0 µg/m³, 51–100: 9.1–35.4, 101–150: 35.5–55.4, 151–200: 55.5–125.4, 201–300: 125.5–225.4, 301–500: 225.5–325.4 (2024 EPA revision). For O₃ (8-hour): AQI 100 at 0.070 ppm (the 2015 standard). The piecewise linear interpolation ensures that AQI = 100 corresponds exactly to the NAAQS for each pollutant, providing regulatory consistency. The AQI scale is designed to be uniform across pollutants: AQI 100 is the "health benchmark" for each pollutant, and AQI values above 100 represent concentrations exceeding health standards. The health effects at each AQI category: Good (0–50): none; Moderate (51–100): unusually sensitive individuals; USG (101–150): sensitive groups; Unhealthy (151–200): general public; Very Unhealthy (201–300): everyone; Hazardous (301–500): emergency conditions.',
             inputs: [
               { symbol: 'I_Hi', label: 'Concentration (Upper)', unit: 'µg/m³', default: 100, min: 0, max: 10000, group: 'Breakpoints' },
               { symbol: 'I_Lo', label: 'Concentration (Lower)', unit: 'µg/m³', default: 50, min: 0, max: 10000, group: 'Breakpoints' },
@@ -5626,7 +5731,7 @@ export const PARTS: Part[] = [
             outputInterpretation: 'PMP is the design standard for large dams and critical infrastructure:\n\n• PMP values are used as the inflow design flood (IDF) for dam spillway sizing — the spillway must safely pass the probable maximum flood (PMF) without dam failure\n• The PMP concept has been criticized for: (1) assuming stationarity — violated under climate change (observed increases in extreme precipitation of 5–15%/°C), (2) the "probable maximum" is not physically bounded — climate change is increasing atmospheric moisture (~7%/°C per Clausius-Clapeyron), (3) storm transposition assumes spatial homogeneity of extreme storms\n• For climate-resilient design: the AR6 IPCC recommends adding a climate change factor to PMP: PMP_future = PMP_present × (1 + α×ΔT) where α ≈ 0.07 per °C (the Clausius-Clapeyron scaling for extreme precipitation)\n• PMP for 24-hour duration in the US ranges from: 500–900 mm (Gulf Coast), 300–500 mm (Midwest), 200–400 mm (Northeast), 100–250 mm (West/mountain), 50–100 mm (Arid Southwest)\n• The largest observed precipitation in the US: 1092 mm in 24 hours (Hawaii, 2018), 780 mm (Texas, 1978 Tropical Storm Amelia), 635 mm (Missouri, 2015)'
           },
           { id: 139, toolName: 'Compute Palmer Drought Severity Index', name: 'Palmer Drought Severity Index (PDSI)', equation: 'X_i = 0.897·X_{i-1} + Z_i/3  [Palmer 1965; Z_i = climatic water balance anomaly]', reference: 'Palmer, W.C. (1965) Meteorological drought. US Weather Bureau Research Paper No. 45, 58 pp. (Reprinted 1965; originally circulated 1957).',
-          paperUrl: 'https://www.weather.gov/media/wrn/WBGT-117_Palmer_1965.pdf',
+          paperUrl: 'https://www.ncei.noaa.gov/monitoring-content/temp-and-precip/drought/docs/palmer.pdf',
           appliesTo: 'Drought monitoring',
             shortDescription: 'Computes the Palmer Drought Severity Index (PDSI) — a soil moisture-based meteorological drought index that incorporates antecedent precipitation, evapotranspiration, and runoff to quantify long-term drought severity',
             paperSummary: 'Palmer (1965) developed the Palmer Drought Severity Index (PDSI) as the first comprehensive drought monitoring index for the United States. The PDSI uses a water balance model that accounts for: precipitation P, evapotranspiration ET, soil moisture recharge R, and runoff RO, compared to climatically appropriate conditions. The moisture anomaly index Z: Z = d·K where d = P − P̂ (actual minus climatically expected precipitation) and K is a weighting factor based on the climate of the location. The PDSI is updated with persistence: X_i = 0.897·X_{i-1} + Z/3. The 0.897 coefficient represents the month-to-month persistence of drought conditions — drought is self-perpetuating because dry soil reduces evapotranspiration, increasing sensible heating, which further reduces precipitation. The PDSI scale: > 4 (extreme wet), 3–4 (severe wet), 2–3 (moderate wet), 1–2 (slight wet), −1 to +1 (near normal), −2 to −1 (incipient drought), −3 to −2 (moderate drought), −4 to −3 (severe drought), < −4 (extreme drought). The index\'s primary advantage is its consideration of antecedent conditions: even if current precipitation is normal, the PDSI can indicate drought if the previous months were dry.',
@@ -5653,11 +5758,11 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'PDSI is the most widely used long-term drought index:\n\n• PDSI < −2: moderate drought — crop yield reductions expected, water restrictions may be implemented, wildfire risk increases\n• PDSI < −3: severe drought — major crop losses, mandatory water restrictions, groundwater levels decline, streams reach record lows\n• PDSI < −4: extreme drought — widespread crop failure, water emergencies declared, ecosystems stressed, dust storms increase\n• The PDSI responds slowly (time scale 9–18 months) — it is not suitable for monitoring flash droughts (2–4 week onset). The Standardized Precipitation Evapotranspiration Index (SPEI) or Evaporative Demand Drought Index (EDDI) are better for rapid onset.\n• The PDSI has known limitations: (1) snow accumulation and melt are not well represented (PDSI underestimates drought in snow-dominated regions), (2) soil moisture parameters are fixed, not accounting for varying soil types, (3) the Thornthwaite PET method underestimates ET in arid regions, (4) irrigation and groundwater pumping are not included.\n• The US Drought Monitor (USDM) uses PDSI as one of several input indices, combined with SPI, streamflow, soil moisture, and satellite data, to produce the weekly operational drought assessment.'
           },
-          { id: 140, toolName: 'Estimate Dam Breach Parameters', name: 'Froehlich Dam Breach Parameters', equation: 'B_avg = 0.1803 × K₀ × V_res^{0.32} × h_b^{0.19}  [Froehlich 2008; average breach bottom width from regression]', reference: 'Froehlich, D.C. (2008) Embankment dam breach parameters and their uncertainties. J. Hydraul. Eng., 134(9), 1306–1314. DOI: 10.1061/(ASCE)0733-9429(2008)134:9(1306).',
+          { id: 140, toolName: 'Estimate Dam Breach Parameters', name: 'Froehlich Dam Breach Parameters', equation: 'B_avg = 0.27 × K₀ × V_res^{0.32} × h_b^{0.04}  [Froehlich 2008 Eq. 5; k₀=1.3 overtopping, 1.0 other; 74 embankment dam failures]', reference: 'Froehlich, D.C. (2008) Embankment dam breach parameters and their uncertainties. J. Hydraul. Eng., 134(9), 1306–1314. DOI: 10.1061/(ASCE)0733-9429(2008)134:9(1306).',
           paperUrl: 'https://doi.org/10.1061/(ASCE)0733-9429(2008)134:9(1306)',
           appliesTo: 'Dam breach outflow estimation',
             shortDescription: 'Estimates the average breach width of an embankment dam during failure using Froehlich\'s regression equation based on reservoir volume and breach height, enabling outflow hydrograph computation for downstream flood hazard assessment',
-            paperSummary: 'Froehlich (2008) updated his earlier (1995) dam breach parameter equations using a database of 108 historical dam failures (embankment, concrete, and masonry dams). The average breach width B_avg = 0.1803·K₀·V_res^0.32·h_b^0.19 where V_res is reservoir volume at time of failure (m³), h_b is breach height (m, typically the dam height), and K₀ is a correction factor: 1.0 for overtopping failure, 1.3 for piping failure. The breach formation time t_f (hours): t_f = 0.0179·K₁·V_res^0.34·h_b^−0.14 where K₁ = 1.0 for overtopping, 1.5 for piping. The peak outflow Q_p (m³/s) is estimated from: Q_p = 0.607·g^0.5·h_b^1.5·(B_avg/h_b)^0.23·(h_b/h_d)^0.34 where h_d is the depth of the breach below the dam crest. Froehlich\'s equations are the standard for dam breach analysis in the US (FEMA P-94, NWS FLDWAV) and have been adopted by the US Army Corps of Engineers and the US Bureau of Reclamation for dam safety failure analysis. The peak outflow can be 5–50× the reservoir inflow depending on the failure mode.',
+            paperSummary: 'Froehlich (2008) updated his earlier (1995) dam breach parameter equations using a database of 74 embankment dam failures (Froehlich 2008) (embankment, concrete, and masonry dams). The average breach width B_avg = 0.1803·K₀·V_res^0.32·h_b^0.19 where V_res is reservoir volume at time of failure (m³), h_b is breach height (m, typically the dam height), and K₀ is a correction factor: 1.0 for overtopping failure, 1.3 for piping failure. The breach formation time t_f (hours): t_f = 0.0179·K₁·V_res^0.34·h_b^−0.14 where K₁ = 1.0 for overtopping, 1.5 for piping. The peak outflow Q_p (m³/s) is estimated from: Q_p = 0.607·g^0.5·h_b^1.5·(B_avg/h_b)^0.23·(h_b/h_d)^0.34 where h_d is the depth of the breach below the dam crest. Froehlich\'s equations are the standard for dam breach analysis in the US (FEMA P-94, NWS FLDWAV) and have been adopted by the US Army Corps of Engineers and the US Bureau of Reclamation for dam safety failure analysis. The peak outflow can be 5–50× the reservoir inflow depending on the failure mode.',
             scientificConcept: 'Dam breach outflow estimation combines hydraulics and erosion mechanics. The breach forms when: (1) overtopping water erodes the downstream face of the embankment (progressive headcut erosion), (2) piping (internal erosion) creates a tunnel through the dam that collapses, or (3) structural failure (concrete dam sliding/overturning). The outflow hydrograph depends on: (1) breach geometry — width B, height h_b, side slope z (typical 0.5H:1V to 1H:1V for embankments), (2) breach formation time t_f — rapid breaches (minutes) produce higher peak flows than slow breaches (hours), (3) reservoir storage — larger volumes sustain outflow longer, (4) downstream tailwater conditions — subcritical flow reduces outflow. The peak outflow is computed from broad-crested weir hydraulics: Q_p = 3.1·B_avg·h_b^1.5 (for free flow with critical depth at the breach). The National Weather Service BREACH model and FLDWAV/DAMBRK models route the breach outflow downstream for flood inundation mapping.',
             inputs: [
               { symbol: 'K₀', label: 'Breach Correction Factor', unit: '—', default: 1.3, min: 0.5, max: 3, group: 'Failure Mode' },
@@ -5674,7 +5779,7 @@ export const PARTS: Part[] = [
               '1. Determine the failure mode: select K₀ = 1.0 for overtopping, 1.3 for piping failure',
               '2. Input the reservoir volume V_res (m³) at the time of failure (usually the full pool volume)',
               '3. Input the breach height h_b (m) — typically the dam height from crest to the breach invert elevation',
-              '4. Compute average breach width: B_avg = 0.1803 × K₀ × V_res^0.32 × h_b^0.19',
+              '4. Compute average breach width: B_avg = 0.27 × K₀ × V_res^0.32 × h_b^0.04 (Froehlich 2008 Eq. 5)',
               '5. Compute peak outflow: Q_p = 3.1 × B_avg × h_b^1.5 (broad-crested weir formula)',
               '6. Compute breach formation time: t_f = 0.0179 × K₁ × V_res^0.34 × h_b^(−0.14) hours',
               '7. Route the outflow hydrograph downstream using FLDWAV or HEC-RAS 2D for flood inundation mapping and evacuation planning'
@@ -5697,7 +5802,7 @@ export const PARTS: Part[] = [
               { symbol: 'P_f', label: 'Forecast Error Covariance', unit: '—', default: 1, group: 'Covariance' },
               { symbol: 'y', label: 'Observation', unit: '—', default: 1, group: 'Observations' },
               { symbol: 'R', label: 'Observation Error Covariance', unit: '—', default: 1, group: 'Covariance' },
-              { symbol: 'H', label: 'Observation Operator', unit: '—', default: 1, group: 'Operators' }
+              { symbol: 'H', label: 'Observation Operator', unit: '—', default: null, group: 'Operators' }
             ],
             outputs: [
               { id: 'primary', label: 'Analysis State x_a', type: 'scalar', unit: '—', description: 'The updated (analysis) state estimate after assimilating observations. The analysis state is the best estimate given both forecast and observations, lying on the optimal trajectory between the two weighted by their respective uncertainties.' },
@@ -5727,7 +5832,7 @@ export const PARTS: Part[] = [
               { symbol: 'y', label: 'Observation', unit: '—', default: 1, group: 'Observations' },
               { symbol: 'B', label: 'Background Error Covariance', unit: '—', default: 1, group: 'Covariance' },
               { symbol: 'R', label: 'Observation Error Covariance', unit: '—', default: 1, group: 'Covariance' },
-              { symbol: 'H', label: 'Observation Operator', unit: '—', default: 1, group: 'Operators' }
+              { symbol: 'H', label: 'Observation Operator', unit: '—', default: null, group: 'Operators' }
             ],
             outputs: [
               { id: 'primary', label: 'Analysis State x_a', type: 'scalar', unit: '—', description: 'The OI analysis state estimate. The analysis smooths the background toward observations with weights determined by the covariance functions. Areas far from observations revert to the background.' },
@@ -5836,21 +5941,22 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'FSPL is the starting point for any radio link design:\n\n• The 20 dB/decade frequency dependence means: a 20 GHz link has 20 dB more path loss than a 2 GHz link at the same distance, requiring 100× more transmitter power or 10× larger antennas.\n• The 20 dB/decade distance dependence means: a GEO satellite (36,000 km) has 31 dB more path loss than a LEO satellite (1,000 km) at the same frequency — equivalent to 1250× less received power.\n• For deep space: the FSPL to Mars is 278 dB. With P_t=100 W, G_t=40 dBi (3 m antenna), G_r=70 dBi (70 m DSN antenna): P_r ≈ −168 dBm ≈ 1.6×10⁻²⁰ W — this is why deep space requires massive antennas, cryogenic receivers, and very low data rates.\n• FSPL does not include: (1) atmospheric absorption (O₂ and H₂O absorption lines at 22, 60, 118, 183 GHz), (2) rain attenuation (significant above 10 GHz — up to 20 dB at Ka-band in heavy rain), (3) ionospheric and tropospheric scintillation, (4) multipath fading, (5) polarization mismatch loss.\n• For Earth digital twin applications: the satellite link budget determines the data rate from Earth observation satellites — higher FSPL requires lower data rates (Ka-band satellites use higher frequencies for wider bandwidth but need larger antennas and higher power).'
           },
-          { id: 146, toolName: 'Estimate Ionospheric Delay (Klobuchar)', name: 'Klobuchar Ionospheric Delay Model', equation: 'I_L1 = [5×10⁻⁹ + A·(1 − x²/2 + x⁴/24)]  [Klobuchar 1987; single-frequency GPS ionospheric correction, seconds]', reference: 'Klobuchar, J.A. (1987) Ionospheric time-delay algorithms for single-frequency GPS users. IEEE Trans. Aerosp. Electron. Syst., 23(3), 325–331. DOI: 10.1109/TAES.1987.310678.',
-          paperUrl: 'https://doi.org/10.1109/TAES.1987.310678',
+          { id: 146, toolName: 'Estimate Ionospheric Delay (Klobuchar)', name: 'Klobuchar Ionospheric Delay Model', equation: 'T_iono = F·[5×10⁻⁹ + A·(1 − x²/2 + x⁴/24)] s  [Klobuchar 1987; φ_m in semicircles; F = 1+16(0.53−E)³]', reference: 'Klobuchar, J.A. (1987) Ionospheric time-delay algorithms for single-frequency GPS users. IEEE Trans. Aerosp. Electron. Syst., 23(3), 325–331. DOI: 10.1109/TAES.1987.310678.',
+          paperUrl: 'https://doi.org/10.1109/TAES.1987.310829',
           appliesTo: 'Single-frequency GPS correction',
             shortDescription: 'Computes the Klobuchar model ionospheric time delay correction for single-frequency GPS receivers, using a thin-shell ionosphere approximation with a cosine function parameterized by eight coefficients broadcast in the GPS navigation message',
-            paperSummary: 'Klobuchar (1987) developed the ionospheric delay correction model used by all single-frequency GPS receivers worldwide. The model estimates the vertical ionospheric delay at the L1 frequency (1.57542 GHz) as: T_iono = 5×10⁻⁹ + A·cos(x) seconds (nighttime) or T_iono = 5×10⁻⁹ + A·(1−x²/2+x⁴/24) seconds (daytime series approximation, valid for |x| < 1.57). The amplitude A = Σαᵢ·φ_mⁱ and the period P = Σβᵢ·φ_mⁱ are computed from the α and β coefficients (8 numbers) broadcast in the GPS navigation message subframe 4, page 18. φ_m is the geomagnetic latitude of the ionospheric pierce point (IPP). The parameter x = 2π(t−50400)/P where t is the local time at the IPP. The Klobuchar model corrects approximately 50–60% of the ionospheric delay RMS error — the remaining 40–50% is due to: (1) the thin-shell assumption (ionosphere concentrated at 350 km), (2) the simplified cosine shape of the diurnal variation, (3) no storm-time correction, (4) no latitudinal variation of the equatorial anomaly. Despite these limitations, the Klobuchar model is the global standard for single-frequency GPS navigation, reducing the ionospheric error from 5–15 m to 2–5 m (RMS).',
+            paperSummary: 'Klobuchar (1987) developed the ionospheric delay correction model used by all single-frequency GPS receivers worldwide. The model estimates the vertical ionospheric delay at the L1 frequency (1.57542 GHz) as: T_iono = 5×10⁻⁹ + A·cos(x) seconds (nighttime floor 5 ns). The amplitude A = Σαᵢ·φ_mⁱ and the period P = Σβᵢ·φ_mⁱ are computed from the α and β coefficients (8 numbers) broadcast in the GPS navigation message subframe 4, page 18. φ_m is the geomagnetic latitude of the ionospheric pierce point (IPP), in SEMICIRCLES per the paper ("all angles are in units of semi-circle"). The parameter x = 2π(t−50400)/P where t is the local time at the IPP (s), truncated to the first two terms of the cosine expansion: 1 − x²/2 + x⁴/24. The vertical delay is multiplied by the obliquity (slant) factor F = 1 + 16·(0.53−E)³ (E in semicircles). The paper worked example (40°N,100°W, E=20°, α=[3.82e-8,1.49e-8,-1.79e-7,0], β=[1.43e5,0,-3.28e5,1.13e5], t=50700 s) yields TIONO = 77.6 ns (23.3 m) with F=2.176. The Klobuchar model corrects approximately 50–60% of the ionospheric delay RMS error.',
             scientificConcept: 'The ionosphere delays GPS signals by Δτ = 40.3·TEC/(c·f²) where TEC is the total electron content along the slant path, c is speed of light, and f is frequency. At L1 (f=1.57542 GHz): Δτ = 1.35×10⁻⁶·TEC. At zenith, TEC ranges from 10–60 TECU, giving delays of 1.3–8.1 m. The Klobuchar model approximates the diurnal variation of vertical TEC as a cosine function: TEC_v(φ_m, t) = A₀ + A·cos(2π(t−t₀)/P). The amplitude A (TEC variation from night to day maximum) varies with geomagnetic latitude: maximum at the equator (~40 TECU), minimum at mid-latitudes (~20 TECU), moderate at high latitudes (~15 TECU). The period P is typically 14 hours. The α and β coefficients in the GPS navigation message are updated every 1–6 days and are optimized for global average ionospheric conditions, not for local or storm-time conditions.',
             inputs: [
               { symbol: 'A', label: 'Amplitude', unit: 's', default: 5e-9, min: 0, max: 1e-6, group: 'Model Parameters' },
               { symbol: 'x', label: 'Local Time Phase', unit: 'rad', default: 0.5, min: 0, max: 2, group: 'Model Parameters' },
-              { symbol: 'φ_m', label: 'Geomagnetic Latitude of IPP', unit: '°', default: 45, min: -90, max: 90, group: 'Ionosphere' }
+              { symbol: 'φ_m', label: 'Geomagnetic Latitude of IPP', unit: '°', default: 45, min: -90, max: 90, group: 'Ionosphere' },
+              { symbol: 'elevation', label: 'Satellite Elevation', unit: '°', default: 90, min: 5, max: 90, group: 'Ionosphere' }
             ],
             outputs: [
-              { id: 'primary', label: 'Ionospheric Delay Δτ_L1', type: 'scalar', unit: 'm', description: 'Ionospheric delay at L1 frequency. Typical values: nighttime (0–6 LT): 1–3 m. Daytime (12–16 LT): 5–15 m at low latitudes, 3–8 m at mid-latitudes, 2–5 m at high latitudes. The model corrects 50–60% of this delay.' },
-              { id: 'tec_estimate', label: 'Vertical TEC Estimate', type: 'scalar', unit: 'TECU', description: 'Estimated vertical total electron content: VTEC = Δτ_L1 × c × f_L1² / 40.3 ≈ Δτ_L1 × 0.74 × 10¹⁶ m⁻². For Δτ=5 m: VTEC≈37 TECU.' },
-              { id: 'residual_error', label: 'Residual Delay After Correction', type: 'scalar', unit: 'm', description: 'Estimated residual delay after applying the Klobuchar correction. Typically 2–5 m (RMS). During geomagnetic storms: residual can exceed 10 m — severely degrading single-frequency GPS accuracy.' }
+              { id: 'primary', label: 'Vertical Ionospheric Delay Δτ_L1', type: 'scalar', unit: 'ns', description: 'Vertical ionospheric delay at L1 (1.57542 GHz). Typical values: nighttime (0–6 LT): 1–3 ns-equivalent; daytime (12–16 LT): 10–40 ns at low latitudes, 5–20 ns at mid-latitudes. The model corrects 50–60% of this delay. Slant delay (with obliquity factor F) and range error in m are shown in the outputs table.' },
+              { id: 'slant_delay', label: 'Slant Delay (with obliquity F)', type: 'scalar', unit: 'ns', description: 'Vertical delay × obliquity factor F = 1 + 16·(0.53−E)³ (E in semicircles). At E=90° (zenith): F=1. At E=10°: F≈2.9. The paper worked example (E=20°) gives F=2.176 and TIONO=77.6 ns.' },
+              { id: 'range_error', label: 'Range Error (c·τ)', type: 'scalar', unit: 'm', description: 'Equivalent range error = slant delay × speed of light. The Klobuchar model removes ~50% RMS of this error. Residual after correction: typically 2–5 m, up to 10–30 m during geomagnetic storms.' }
             ],
             methodology: 'The Klobuchar model computes vertical delay at the ionospheric pierce point (IPP): (1) compute the IPP location from satellite and receiver geometry assuming a thin shell at 350 km, (2) compute the geomagnetic latitude of the IPP, (3) compute the local time at the IPP, (4) compute amplitude A and period P from the broadcast α/β coefficients, (5) compute the delay using the nighttime constant (5 ns) or daytime cosine. The slant delay = vertical delay × obliquity factor F = [1−(R_E·cos(E)/(R_E+h_iono))²]^(−1/2) where E is the elevation angle. For E=90° (zenith): F=1. For E=10°: F≈3.0.',
             processingSteps: [
@@ -5904,8 +6010,8 @@ export const PARTS: Part[] = [
             scientificConcept: 'The Hohmann transfer exploits the vis-viva equation: v = √(GM·(2/r − 1/a)) where a is the semi-major axis of the orbit. For the transfer ellipse: a_transfer = (r₁+r₂)/2. At periapsis (r = r₁): v_transfer_peri = √(GM·(2/r₁ − 2/(r₁+r₂))) = √(GM/r₁)·√(2r₂/(r₁+r₂)). At apoapsis (r = r₂): v_transfer_apo = √(GM·(2/r₂ − 2/(r₁+r₂))) = √(GM/r₂)·√(2r₁/(r₁+r₂)). The circular orbital velocities: v₁ = √(GM/r₁) and v₂ = √(GM/r₂). The Hohmann transfer assumes: (1) coplanar circular orbits, (2) no third-body perturbations, (3) instantaneous impulsive burns, (4) no atmospheric drag. For interplanetary transfers: the timing must account for planetary positions — the destination planet must be at the correct phase angle when the spacecraft arrives. The synodic period between Earth and Mars (every 26 months) determines the launch window.',
             inputs: [
               { symbol: 'GM', label: 'Gravitational Parameter', unit: 'm³/s²', default: 3.986e14, min: 0, max: 1e15, group: 'Central Body' },
-              { symbol: 'r₁', label: 'Initial Orbit Radius', unit: 'm', default: 7e6, min: 6e6, max: 1e7, group: 'Orbits' },
-              { symbol: 'r₂', label: 'Target Orbit Radius', unit: 'm', default: 4.2e7, min: 6e6, max: 1e8, group: 'Orbits' }
+              { symbol: 'r₁', label: 'Initial Orbit Radius', unit: 'm', default: null, min: 6e6, max: 1e7, group: 'Orbits' },
+              { symbol: 'r₂', label: 'Target Orbit Radius', unit: 'm', default: null, min: 6e6, max: 1e8, group: 'Orbits' }
             ],
             outputs: [
               { id: 'primary', label: 'Total Delta-V Δv_total', type: 'scalar', unit: 'm/s', description: 'Total delta-v required for the complete transfer (both burns). LEO→GEO (r₁=6700 km, r₂=42164 km): Δv_total ≈ 3930 m/s. LEO→MEO (20000 km): Δv_total ≈ 2400 m/s. Low-energy transfers (r₂ ≈ r₁): Δv_total → 0.' },
@@ -5924,16 +6030,16 @@ export const PARTS: Part[] = [
             ],
             outputInterpretation: 'Hohmann transfers are the standard for most orbital maneuvers:\n\n• The total Δv from LEO to GEO is ~3.93 km/s — a typical launch vehicle upper stage delivers this with a single restartable engine (e.g., Centaur, Fregat). Most GEO satellites use their own apogee kick motor for the second burn.\n• The Hohmann transfer is optimal only for r₂/r₁ < 11.94. For larger ratios (e.g., Earth→Jupiter at r₂/r₁ ≈ 250), the three-impulse bi-elliptic transfer is more efficient (lower total Δv) but takes longer.\n• For interplanetary transfers: (1) the launch window opens at the planetary alignment (Earth-Mars every 26 months), (2) the required injection Δv from LEO to escape is ~3.2 km/s (= √2·v₁ − v₁ = 0.414·v₁), (3) the arrival maneuver at the target planet is a hyperbolic capture (closest approach speed determines Δv for orbit insertion).\n• The Hohmann transfer time from Earth to Mars is 259 days — too long for crewed missions (radiation exposure, zero-gravity health effects). Advanced propulsion (nuclear thermal, electric) can reduce transit time to 100–200 days.\n• The Hohmann model assumes impulsive burns: a finite-thrust burn (e.g., ion propulsion) uses a spiral transfer that follows the same energy principle but requires continuous thrust over many orbits — the total Δv is ~10–30% higher than the impulsive Hohmann Δv.'
           },
-          { id: 149, toolName: 'Compute Lagrange Point Positions', name: 'Lagrange Points (L1–L5)', equation: 'x^5 − (3+μ)x^4 + (3+2μ)x^3 − μx^2 − 2μx − μ = 0  [Lagrange 1772; collinear L1/L2/L3 from 5th-order polynomial; L4/L5 at 60°]', reference: 'Lagrange, J.-L. (1772) Essai sur le problème des trois corps. Prix de l\'Académie royale des Sciences de Paris, 9. (Reprinted in Œuvres, Vol. 6, pp. 229–324.)',
+          { id: 149, toolName: 'Compute Lagrange Point Positions', name: 'Lagrange Points (L1–L5)', equation: 'x⁵ − (3−μ)x⁴ + (3−2μ)x³ − μx² + 2μx − μ = 0  [Lagrange 1772; collinear L1/L2/L3 from 5th-order polynomial; L4/L5 at 60°]', reference: 'Lagrange, J.-L. (1772) Essai sur le problème des trois corps. Prix de l\'Académie royale des Sciences de Paris, 9. (Reprinted in Œuvres, Vol. 6, pp. 229–324.)',
           paperUrl: 'https://gallica.bnf.fr/ark:/12148/bpt6k56161256',
           appliesTo: 'Mission planning (JWST at L2, solar observatories)',
             shortDescription: 'Computes the positions of the five Lagrange points (L1–L5) for a circular restricted three-body system, where the gravitational forces of two massive bodies balance the centripetal force on a third test mass',
             paperSummary: 'Lagrange (1772) discovered the five equilibrium points in the circular restricted three-body problem while studying the stability of the Jupiter-Sun system. The Lagrange points are positions where the gravitational forces of two massive bodies (e.g., Sun-Earth, Earth-Moon) combine to provide exactly the centripetal acceleration needed to rotate with the same angular velocity as the two-body system. The five points are: (1) L1, L2, L3 — collinear points along the line connecting the two masses (unstable equilibrium), (2) L4, L5 — triangular points at 60° ahead and behind the smaller mass (stable equilibrium for mass ratios γ < 0.0385, including Sun-Earth and Earth-Moon). The positions of the collinear points are found by solving the 5th-order polynomial: x⁵ ± (3−γ)·x⁴ + (3−2γ)·x³ − γ·x² ± 2γ·x − γ = 0 (where x is the distance from the smaller mass to the Lagrange point, normalized by the separation between the two bodies). L1 is between the two bodies, L2 is beyond the smaller body, and L3 is beyond the larger body opposite the smaller body. Famous missions at Lagrange points: SOHO (Sun-Earth L1, solar observatory, since 1995), JWST (Sun-Earth L2, infrared telescope, 2022), WMAP/Planck (Sun-Earth L2, CMB), DSCOVR (Sun-Earth L1, solar wind monitor), and Artemis (Earth-Moon L2, lunar gateway).',
             scientificConcept: 'In the circular restricted three-body problem, two massive bodies (M₁ > M₂) orbit their common center of mass with angular velocity ω = √(G·(M₁+M₂)/R³) where R is the separation. In the rotating frame, the effective potential (including gravitational and centrifugal terms) has five stationary points where ∇Ω = 0. The collinear points (L1, L2, L3) are saddle points (unstable: perturbations grow exponentially, τ ≈ 23 days for Sun-Earth L1/L2). L4 and L5 are local maxima of the effective potential in the rotating frame but are dynamically stable due to the Coriolis force — they act as "potential wells" in the rotating frame for large enough mass ratios (γ < 0.0385, the Routh critical value). For the Sun-Earth system (γ ≈ 3×10⁻⁶): L4/L5 are stable. For the Earth-Moon system (γ ≈ 1.2×10⁻²): L4/L5 are also stable. For Pluto-Charon (γ ≈ 0.12): L4/L5 are unstable (γ > 0.0385).',
             inputs: [
-              { symbol: 'γ', label: 'Mass Ratio Parameter', unit: '—', default: 3e-6, min: 0, max: 0.5, group: 'System' },
-              { symbol: 'R', label: 'Body Separation', unit: 'm', default: 1.496e11, min: 0, max: 1e13, group: 'System' },
-              { symbol: 'point_id', label: 'Lagrange Point ID', unit: '—', default: 2, min: 1, max: 5, group: 'Selection' }
+              { symbol: 'm1', label: 'Primary Body Mass M₁', unit: 'kg', default: 5.97e24, min: 1e12, max: 1e32, group: 'System' },
+              { symbol: 'm2', label: 'Secondary Body Mass M₂', unit: 'kg', default: 7.34e22, min: 1e10, max: 1e32, group: 'System' },
+              { symbol: 'R', label: 'Body Separation', unit: 'm', default: 3.844e8, min: 0, max: 1e13, group: 'System' }
             ],
             outputs: [
               { id: 'primary', label: 'Lagrange Point Distance from M₂', type: 'scalar', unit: 'm', description: 'Distance from the smaller mass (M₂) to the selected Lagrange point. Sun-Earth L1: 1.496×10⁶ km (0.01 AU from Earth toward Sun). Sun-Earth L2: 1.500×10⁶ km (0.01 AU from Earth away from Sun). Earth-Moon L1: 58000 km from Moon. Earth-Moon L5: 384400 km (at the Moon\'s orbit, 60° ahead).' },

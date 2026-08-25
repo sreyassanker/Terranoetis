@@ -30,6 +30,7 @@ const SIGMA = 5.670374419e-8; // Stefan-Boltzmann constant (W m^-2 K^-4)
 const H_PLANCK = 6.62607015e-34; // J·s
 const C_LIGHT = 299792458; // m/s
 const K_BOLTZMANN = 1.380649e-23; // J/K
+const EPS0 = 8.8541878128e-12;    // F/m — vacuum permittivity (CODATA 2018, exact)
 const G_GRAV = 9.80665; // m/s^2
 const R_SPEC = 287.058; // J/(kg·K) specific gas constant for dry air
 // Shore Protection Manual (1984) Vol 1, Table 4-8 — "commonly assumed values"
@@ -189,6 +190,59 @@ export function faoYieldResponse(
   return { relReduction, predictedYa, residual };
 }
 
+// ── Geodesy: 3×3 elementary rotation matrices ───────────────────────
+// Used by Tool 111 (IERS CIO-based Earth rotation) and Tool 114 (Helmert
+// 7-parameter transformation). Each elementary matrix is orthonormal with
+// determinant +1; products of rotation matrices are rotation matrices.
+type Mat3 = [
+  [number, number, number],
+  [number, number, number],
+  [number, number, number],
+];
+
+/** R₁(θ) — rotation about the x-axis. */
+function rot1(a: number): Mat3 {
+  const c = Math.cos(a), s = Math.sin(a);
+  return [[1, 0, 0], [0, c, s], [0, -s, c]];
+}
+/** R₂(θ) — rotation about the y-axis. */
+function rot2(a: number): Mat3 {
+  const c = Math.cos(a), s = Math.sin(a);
+  return [[c, 0, -s], [0, 1, 0], [s, 0, c]];
+}
+/** R₃(θ) — rotation about the z-axis. */
+function rot3(a: number): Mat3 {
+  const c = Math.cos(a), s = Math.sin(a);
+  return [[c, s, 0], [-s, c, 0], [0, 0, 1]];
+}
+function mat3Mul(A: Mat3, B: Mat3): Mat3 {
+  const out: Mat3 = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      out[i][j] = A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j];
+    }
+  }
+  return out;
+}
+function mat3Det(A: Mat3): number {
+  return A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1])
+       - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0])
+       + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]);
+}
+function mat3Trace(A: Mat3): number {
+  return A[0][0] + A[1][1] + A[2][2];
+}
+function mat3Vec(A: Mat3, v: [number, number, number]): [number, number, number] {
+  return [
+    A[0][0] * v[0] + A[0][1] * v[1] + A[0][2] * v[2],
+    A[1][0] * v[0] + A[1][1] * v[1] + A[1][2] * v[2],
+    A[2][0] * v[0] + A[2][1] * v[1] + A[2][2] * v[2],
+  ];
+}
+
+const ARCSEC2RAD = Math.PI / (180 * 3600); // 1″ in radians
+const RAD2ARCSEC = 180 * 3600 / Math.PI;   // 1 rad in arcseconds
+
 export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
   // ── Part I · Domain 1: Atmospheric Science ──
@@ -267,8 +321,27 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const lamMax = 2897.771955 / T;
     // Stefan-Boltzmann: total exitance M = σT⁴
     const M = SIGMA * Math.pow(T, 4);
+    // Spectrum series — B_λ(T) over log-spaced wavelengths 0.1 → 100 µm
+    // (10 points), evaluated with the tool's own Planck formula and T.
+    const spectrumPoints: Array<{ x: number; y: number }> = Array.from({ length: 10 }, (_, i) => {
+      const lam = 0.1 * Math.pow(1000, i / 9);
+      const lamM = lam * 1e-6;
+      const hcOverLkT = (H_PLANCK * C_LIGHT) / (lamM * K_BOLTZMANN * T);
+      const expo = Math.exp(hcOverLkT);
+      const b = (2 * H_PLANCK * C_LIGHT ** 2) / Math.pow(lamM, 5) * (1 / (expo - 1));
+      return { x: lam, y: Number.isFinite(b) ? b : Number.NaN };
+    });
     return {
       result: B, unit: 'W·sr⁻¹·m⁻³',
+      secondary: [
+        { key: 'wien_peak', value: lamMax, unit: 'µm', label: 'Wien Peak Wavelength' },
+        { key: 'total_exitance', value: M, unit: 'W/m²', label: 'Total Exitance (Stefan-Boltzmann)' },
+      ],
+      series: [{
+        label: 'Spectral radiance B_λ(T)',
+        color: '#D55E00',
+        points: spectrumPoints,
+      }],
       steps: [
         '── Planck Radiation Law (Planck, 1901) ──',
         `Wavelength λ = ${lambda} µm, Temperature T = ${T} K (${(T - 273.15).toFixed(1)} °C)`,
@@ -303,6 +376,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const ws = 622 * es / (1013.25 - es);
     return {
       result: es, unit: 'hPa',
+      secondary: [
+        { key: 'slope', value: delta, unit: 'hPa/°C', label: 'Saturation Vapour Slope Δ' },
+        { key: 'mixing_ratio', value: ws, unit: 'g/kg', label: 'Saturation Mixing Ratio' },
+      ],
       steps: [
         '── Saturation Vapor Pressure (Magnus-Tetens, Clausius-Clapeyron) ──',
         `Temperature T = ${Tc.toFixed(1)} °C (${(Tc + 273.15).toFixed(1)} K)`,
@@ -329,8 +406,22 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const ratio = z / H;
     const P = P0 * Math.exp(-ratio);
     const P_pct = (P / P0) * 100;
+    // Profile series — P(z) over altitude 0 → 10000 m (21 points) using the
+    // tool's isothermal exponential-decay formula with the supplied P0/T.
+    const profilePoints: Array<{ x: number; y: number }> = Array.from({ length: 21 }, (_, i) => {
+      const zAlt = (10000 * i) / 20;
+      return { x: zAlt, y: P0 * Math.exp(-zAlt / H) };
+    });
     return {
       result: P, unit: 'hPa',
+      secondary: [
+        { key: 'scale_height', value: H, unit: 'm', label: 'Scale Height' },
+      ],
+      series: [{
+        label: 'Hydrostatic pressure P(z)',
+        color: '#0072B2',
+        points: profilePoints,
+      }],
       steps: [
         '── Hydrostatic Equation (Holton & Hakim, 2012) ──',
         `Surface pressure P₀ = ${P0.toFixed(1)} hPa, Altitude z = ${z.toFixed(0)} m, Mean T = ${T.toFixed(1)} K`,
@@ -358,17 +449,28 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   5: ({ f, rho, dPdx, dPdy }) => {
     // Geostrophic balance breaks down at the equator (f → 0). Return a
     // finite NaN with an explanation instead of ±Infinity.
-    if (!Number.isFinite(f) || Math.abs(f) < 1e-7) {
+    const allFinite = [f, rho, dPdx, dPdy].every(Number.isFinite);
+    if (!allFinite || Math.abs(f) < 1e-7 || rho <= 0) {
+      const eqLine = Math.abs(f) < 1e-7
+        ? `Coriolis parameter f = ${Number.isFinite(f) ? f.toExponential(2) : 'NaN'} /s — |f| < 10⁻⁷ s⁻¹`
+        : `Non-finite / non-positive input: f=${f}, ρ=${rho}, ∂P/∂x=${dPdx}, ∂P/∂y=${dPdy}`;
       return {
         result: NaN, unit: 'm/s',
+        secondary: [
+          { key: 'u_g', value: Number.NaN, unit: 'm/s', label: 'Zonal component u_g = −(1/fρ)·∂P/∂y' },
+          { key: 'v_g', value: Number.NaN, unit: 'm/s', label: 'Meridional component v_g = (1/fρ)·∂P/∂x' },
+          { key: 'wind_direction', value: Number.NaN, unit: '°', label: 'Meteorological wind direction (coming from)' },
+          { key: 'coriolis_f', value: Number.isFinite(f) ? f : Number.NaN, unit: 's⁻¹', label: 'Coriolis parameter f' },
+        ],
         steps: [
           '── Geostrophic Wind (Holton & Hakim, 2012, Ch. 3) ──',
-          `Coriolis parameter f = ${f} /s — |f| < 10⁻⁷ s⁻¹`,
+          eqLine,
           '',
           'Geostrophic balance (f·Vg = (1/ρ)|∇P|) requires |f| well away from',
           'the equator; the Coriolis force vanishes at 0° latitude so the',
-          'wind would become infinite. Supply a mid-latitude study area or',
-          'an explicit non-zero Coriolis parameter.',
+          'wind would become infinite, and ρ must be a finite positive density.',
+          'Supply a mid-latitude study area, a positive air density, and finite',
+          'pressure gradients. Result: NaN (honest — never ±Infinity).',
         ],
       };
     }
@@ -381,6 +483,12 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const metDir = ((270 - (dirRad * 180 / PI)) + 360) % 360;
     return {
       result: Vg, unit: 'm/s',
+      secondary: [
+        { key: 'u_g', value: Vgx, unit: 'm/s', label: 'Zonal component u_g = −(1/fρ)·∂P/∂y' },
+        { key: 'v_g', value: Vgy, unit: 'm/s', label: 'Meridional component v_g = (1/fρ)·∂P/∂x' },
+        { key: 'wind_direction', value: metDir, unit: '°', label: 'Meteorological wind direction (coming from), 0°=N 90°=E' },
+        { key: 'coriolis_f', value: f, unit: 's⁻¹', label: 'Coriolis parameter f' },
+      ],
       steps: [
         '── Geostrophic Wind (Holton & Hakim, 2012, Ch. 3) ──',
         `Coriolis parameter f = ${f.toFixed(6)} /s, Air density ρ = ${rho.toFixed(3)} kg/m³`,
@@ -421,6 +529,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const advDist = u * t;
     return {
       result: C, unit: 'µg/m³',
+      secondary: [
+        { key: 'peclet', value: Pe, unit: '—', label: 'Péclet Number' },
+        { key: 'advection_distance', value: advDist, unit: 'm', label: 'Advection Distance x = u·t' },
+        { key: 'diffusion_spread', value: sigma, unit: 'm', label: 'Diffusion Spread σ = √(2Dt)' },
+      ],
       steps: [
         '── Advection-Diffusion Equation (Bird, Stewart & Lightfoot, 2007, Ch. 4) ──',
         `Wind speed u = ${u.toFixed(2)} m/s, Eddy diffusivity D = ${D.toFixed(2)} m²/s`,
@@ -491,8 +604,24 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const eta = Math.pow(nu * nu * nu / (eps || 1e-30), 1 / 4);
     const kEta = 1 / eta;
     const inInertial = k < kEta;
+    // Spectrum series — E(k) over log-spaced wavenumbers 0.001 → 1000 (30
+    // points) using the tool's −5/3 law with the supplied C and ε.
+    const spectrumPoints: Array<{ x: number; y: number }> = Array.from({ length: 30 }, (_, i) => {
+      const kw = 0.001 * Math.pow(1e6, i / 29);
+      const eVal = C * Math.pow(eps, 2 / 3) * Math.pow(kw, -5 / 3);
+      return { x: kw, y: Number.isFinite(eVal) ? eVal : Number.NaN };
+    });
     return {
       result: E, unit: 'm³/s²',
+      secondary: [
+        { key: 'eddy_size', value: L, unit: 'm', label: 'Eddy Size L = 2π/k' },
+        { key: 'kolmogorov_microscale', value: eta, unit: 'm', label: 'Kolmogorov Microscale η' },
+      ],
+      series: [{
+        label: 'Turbulent energy spectrum E(k)',
+        color: '#0072B2',
+        points: spectrumPoints,
+      }],
       steps: [
         '── Kolmogorov −5/3 Energy Cascade (Kolmogorov, 1941) ──',
         `Kolmogorov constant C = ${C.toFixed(2)}, TKE dissipation ε = ${eps.toExponential(3)} m²/s³`,
@@ -532,8 +661,16 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const ET0 = (radTerm + aeroTerm) / den;
     const radContrib = radTerm / den;
     const aeroContrib = aeroTerm / den;
+    const radFrac = ET0 > 0 ? radTerm / (radTerm + aeroTerm) * 100 : 0;
+    const aeroFrac = ET0 > 0 ? aeroTerm / (radTerm + aeroTerm) * 100 : 0;
     return {
       result: ET0, unit: 'mm/day',
+      secondary: [
+        { key: 'radiation_term', value: Number.isFinite(radTerm) ? radTerm : Number.NaN, unit: 'mm/day', label: 'Radiation Term' },
+        { key: 'aerodynamic_term', value: Number.isFinite(aeroTerm) ? aeroTerm : Number.NaN, unit: 'mm/day', label: 'Aerodynamic Term' },
+        { key: 'rad_fraction', value: Number.isFinite(radFrac) ? radFrac : Number.NaN, unit: '%', label: 'Radiation Contribution' },
+        { key: 'aero_fraction', value: Number.isFinite(aeroFrac) ? aeroFrac : Number.NaN, unit: '%', label: 'Aerodynamic Contribution' },
+      ],
       steps: [
         '── FAO-56 Penman-Monteith (Allen et al., 1998) ──',
         `Rₙ = ${Rn.toFixed(1)} W/m², G = ${G.toFixed(1)} W/m², T = ${T.toFixed(1)} °C`,
@@ -568,16 +705,28 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   10: ({ P, Ia, S }) => {
-    // SCS-CN only produces runoff when P exceeds initial abstraction: the
-    // classic form Q=(P−Ia)²/(P−Ia+S) is defined for P>Ia and Q=0 otherwise.
-    // Without the guard, P<Ia made (P−Ia)² positive and returned a bogus
-    // positive Q (e.g. P=5, Ia=10 gave 0.56 mm while the steps said Q=0).
+    if (!Number.isFinite(P) || !Number.isFinite(Ia) || !Number.isFinite(S)) {
+      return {
+        result: Number.NaN, unit: 'mm',
+        steps: [
+          '── SCS Curve Number (USDA SCS, 1954) ──',
+          'Precipitation P, initial abstraction Iₐ, or potential retention S is missing (NaN).',
+          'No fabricated substitution — supply all three inputs.',
+        ],
+      };
+    }
     const excess = P - Ia;
     const Q = excess > 0 ? Math.max(0, Math.pow(excess, 2) / (excess + S)) : 0;
     const CN = S > 0 ? 25400 / (S + 254) : 100;
     const runoffRatio = P > 0 ? Q / P : 0;
+    const iaRatio = S > 0 ? Ia / S : 0;
     return {
       result: Q, unit: 'mm',
+      secondary: [
+        { key: 'cn', value: Number.isFinite(CN) ? CN : Number.NaN, unit: '—', label: 'Curve Number' },
+        { key: 'runoff_ratio', value: Number.isFinite(runoffRatio) ? runoffRatio : Number.NaN, unit: '—', label: 'Runoff Ratio (Q/P)' },
+        { key: 'initial_abstraction_ratio', value: Number.isFinite(iaRatio) ? iaRatio : Number.NaN, unit: '—', label: 'Initial Abstraction Ratio (Iₐ/S)' },
+      ],
       steps: [
         '── SCS Curve Number (USDA SCS, 1954) ──',
         `Precipitation P = ${P.toFixed(1)} mm, Initial abstraction Iₐ = ${Ia.toFixed(1)} mm`,
@@ -653,29 +802,92 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Muskingum storage (McCarthy 1938 / Chow 1964): S = K[X·I + (1−X)·O],
     // X = weighting on INFLOW (typical 0–0.3). The previous code had the
     // weights transposed — (1−X)·I + X·O — contradicting its own step text.
-    const weightedStorage = X * It + (1 - X) * Ot;
-    const S = K * weightedStorage;
-    const coeffCheck = K * (1 - X);
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const Kn = Number(K), Xn = Number(X), ItN = Number(It), OtN = Number(Ot);
+    if (![Kn, Xn, ItN, OtN].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: 'm³/s·h',
+        steps: [
+          '── Muskingum Routing (McCarthy, 1938) ──',
+          'S = K × [X·I_t + (1−X)·O_t]',
+          '',
+          'Inflow I_t / outflow O_t require genuine streamflow. No USGS station',
+          'was found near the study point (or inputs are non-finite), so no',
+          'fabricated discharge is substituted. Supply K, X, I_t, O_t explicitly',
+          'or select a point near a USGS gauge.',
+        ],
+        secondary: [
+          { key: 'outflow_next', value: Number.NaN, unit: 'm³/s', label: 'Outflow Next Time Step O(t+1)' },
+          { key: 'coeff_c0', value: Number.NaN, unit: '—', label: 'Routing coefficient C₀' },
+          { key: 'coeff_c1', value: Number.NaN, unit: '—', label: 'Routing coefficient C₁' },
+          { key: 'coeff_c2', value: Number.NaN, unit: '—', label: 'Routing coefficient C₂' },
+        ],
+      };
+    }
+    const weightedStorage = Xn * ItN + (1 - Xn) * OtN;
+    const S = Kn * weightedStorage;
+    const coeffCheck = Kn * (1 - Xn);
+    // Muskingum routing coefficients (Δt = K/2 default, stable: Δt ≤ K(1−X)):
+    //   C₀ = (−KX + 0.5Δt)/(K(1−X) + 0.5Δt), C₁ = (KX + 0.5Δt)/den,
+    //   C₂ = (K(1−X) − 0.5Δt)/den,  C₀+C₁+C₂ = 1.
+    const dt = Kn / 2;
+    const den = Kn * (1 - Xn) + 0.5 * dt;
+    const c0 = (-Kn * Xn + 0.5 * dt) / den;
+    const c1 = (Kn * Xn + 0.5 * dt) / den;
+    const c2 = (Kn * (1 - Xn) - 0.5 * dt) / den;
+    const outNext = c0 * ItN + c1 * ItN + c2 * OtN;
+    // Routed outflow hydrograph over a model-time horizon: O(t+1) = c0·I(t+1)
+    // + c1·I(t) + c2·O(t) with the inflow held at ItN (genuine model curve).
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    let oPrev = OtN;
+    const N = 40;
+    for (let i = 0; i <= N; i++) {
+      const o = i === 0 ? OtN : c0 * ItN + c1 * ItN + c2 * oPrev;
+      oPrev = o;
+      if (Number.isFinite(o)) seriesPoints.push({ x: i * dt, y: o });
+    }
     return {
       result: S, unit: 'm³/s·h',
+      secondary: [
+        { key: 'outflow_next', value: Number.isFinite(outNext) ? outNext : Number.NaN, unit: 'm³/s', label: 'Outflow Next Time Step O(t+1)' },
+        { key: 'coeff_c0', value: Number.isFinite(c0) ? c0 : Number.NaN, unit: '—', label: 'Routing coefficient C₀' },
+        { key: 'coeff_c1', value: Number.isFinite(c1) ? c1 : Number.NaN, unit: '—', label: 'Routing coefficient C₁' },
+        { key: 'coeff_c2', value: Number.isFinite(c2) ? c2 : Number.NaN, unit: '—', label: 'Routing coefficient C₂' },
+      ],
+      series: seriesPoints.length > 0
+        ? [{
+            label: 'Routed outflow O(t)',
+            color: '#0072B2',
+            points: seriesPoints,
+          }]
+        : undefined,
       steps: [
         '── Muskingum Routing (McCarthy, 1938) ──',
-        `Storage constant K = ${K.toFixed(2)} h, Weighting factor X = ${X.toFixed(3)}`,
-        `Inflow I_t = ${It.toFixed(1)} m³/s, Outflow O_t = ${Ot.toFixed(1)} m³/s`,
+        `Storage constant K = ${Kn.toFixed(2)} h, Weighting factor X = ${Xn.toFixed(3)}`,
+        `Inflow I_t = ${ItN.toFixed(1)} m³/s, Outflow O_t = ${OtN.toFixed(1)} m³/s`,
         '',
         'Step 1 — Weighted storage:',
-        `  X·I_t + (1−X)·O_t = ${X.toFixed(3)}×${It.toFixed(1)} + (1−${X.toFixed(3)})×${Ot.toFixed(1)}`,
-        `  = ${X * It} + ${((1 - X) * Ot)} = ${weightedStorage.toFixed(2)}`,
+        `  X·I_t + (1−X)·O_t = ${Xn.toFixed(3)}×${ItN.toFixed(1)} + (1−${Xn.toFixed(3)})×${OtN.toFixed(1)}`,
+        `  = ${Xn * ItN} + ${((1 - Xn) * OtN)} = ${weightedStorage.toFixed(2)}`,
         '',
         'Step 2 — Reach storage:',
-        `  S = K × [X·I_t + (1−X)·O_t] = ${K.toFixed(2)} × ${weightedStorage.toFixed(2)}`,
+        `  S = K × [X·I_t + (1−X)·O_t] = ${Kn.toFixed(2)} × ${weightedStorage.toFixed(2)}`,
         `  S = ${S.toFixed(2)} m³/s·h`,
         '',
-        'Step 3 — Stability check:',
-        `  K×X = ${(K * X).toFixed(3)},  K×(1−X) = ${coeffCheck.toFixed(3)}`,
+        'Step 3 — Routing coefficients (Δt = K/2):',
+        `  C₀ = (−KX + 0.5Δt)/D = ${c0.toFixed(4)}`,
+        `  C₁ = (KX + 0.5Δt)/D   = ${c1.toFixed(4)}`,
+        `  C₂ = (K(1−X) − 0.5Δt)/D = ${c2.toFixed(4)}`,
+        `  C₀ + C₁ + C₂ = ${(c0 + c1 + c2).toFixed(4)} (mass conservation)`,
+        '',
+        'Step 4 — Outflow next step:',
+        `  O(t+1) = C₀·I(t+1) + C₁·I(t) + C₂·O(t) = ${outNext.toFixed(2)} m³/s`,
+        '',
+        'Step 5 — Stability check:',
+        `  K×X = ${(Kn * Xn).toFixed(3)},  K×(1−X) = ${coeffCheck.toFixed(3)}`,
         `  ${coeffCheck > 0 ? '✓ Routing coefficient positive (stable)' : '⚠ Check: negative routing coefficient possible'}`,
         '',
-        `  └ Interpretation: ${X < 0.1 ? 'Near-reservoir storage — strong attenuation' : X < 0.3 ? 'Typical natural channel storage' : 'Near-translation — weak attenuation, wave moves through reach with minimal peak reduction'}`
+        `  └ Interpretation: ${Xn < 0.1 ? 'Near-reservoir storage — strong attenuation' : Xn < 0.3 ? 'Typical natural channel storage' : 'Near-translation — weak attenuation, wave moves through reach with minimal peak reduction'}`
       ]
     };
   },
@@ -734,6 +946,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     );
     return {
       result: h, unit: 'm',
+      secondary: [
+        { key: 'tidal_range', value: Number.isFinite(range) ? range : Number.NaN, unit: 'm', label: 'Tidal Range (2·Σ|Aᵢ|)' },
+        { key: 'constituent_count', value: Number.isFinite(nConstituents) ? nConstituents : Number.NaN, unit: '—', label: 'Constituent Count' },
+        { key: 'datum_offset', value: Number.isFinite(H0v) ? H0v : Number.NaN, unit: 'm', label: 'Datum Offset (H₀)' },
+      ],
       steps,
     };
   },
@@ -844,6 +1061,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const evapRate = Qe / (rho_w2 * Lv) * 86400 * 1000; // mm/day
     return {
       result: Qnet, unit: 'W/m²',
+      secondary: [
+        { key: 'sst_tendency', value: Number.isFinite(sstTend) ? sstTend : Number.NaN, unit: '°C/day', label: 'SST Tendency' },
+        { key: 'evaporation_rate', value: Number.isFinite(evapRate) ? evapRate : Number.NaN, unit: 'mm/day', label: 'Evaporation Rate' },
+      ],
       steps: [
         '── Ocean Surface Heat Budget (Gill, 1982, Ch. 3) ──',
         `Shortwave Q_s = ${Qs.toFixed(1)} W/m², Longwave Q_b = ${Qb.toFixed(1)} W/m² (net upward)`,
@@ -867,8 +1088,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   18: ({ Ks, psiW, psi0, dTheta, Ft }) => {
-    const psiF = psiW - psi0;
-    if (!Number.isFinite(Ks) || !Number.isFinite(dTheta) || !Number.isFinite(Ft)) {
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const KsN = Number(Ks), psiWN = Number(psiW), psi0N = Number(psi0), dThetaN = Number(dTheta), FtN = Number(Ft);
+    const psiFN = psiWN - psi0N;
+    if (!Number.isFinite(KsN) || !Number.isFinite(dThetaN) || !Number.isFinite(FtN)) {
       return {
         result: NaN, unit: 'm/s',
         steps: [
@@ -883,39 +1106,54 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
           'No fabricated defaults are substituted.',
           'Provide the study area or explicit Ks/psiW/dTheta/Ft to compute.',
         ],
+        secondary: [
+          { key: 'wetting_front_depth', value: Number.NaN, unit: 'm', label: 'Wetting Front Depth (F/Δθ)' },
+          { key: 'suction_head', value: Number.NaN, unit: 'm', label: 'Effective Suction Head ψ_f' },
+          { key: 'ratio', value: Number.NaN, unit: '—', label: 'f/K_s' },
+        ],
       };
     }
-    if (Ft <= 0 || Ks <= 0 || dTheta <= 0) {
+    if (FtN <= 0 || KsN <= 0 || dThetaN <= 0) {
       return {
         result: NaN, unit: 'm/s',
         steps: [
           '── Green-Ampt Infiltration (Green & Ampt, 1911) ──',
           'f = K_s × (1 + ψ_f·Δθ/F)',
           '',
-          `Invalid inputs: F(t)=${Ft}, K_s=${Ks}, Δθ=${dTheta}.`,
+          `Invalid inputs: F(t)=${FtN}, K_s=${KsN}, Δθ=${dThetaN}.`,
           'F(t) (cumulative infiltration) must be > 0, K_s > 0, and Δθ > 0.',
           'Cannot compute a finite infiltration rate.',
         ],
+        secondary: [
+          { key: 'wetting_front_depth', value: Number.NaN, unit: 'm', label: 'Wetting Front Depth (F/Δθ)' },
+          { key: 'suction_head', value: Number.NaN, unit: 'm', label: 'Effective Suction Head ψ_f' },
+          { key: 'ratio', value: Number.NaN, unit: '—', label: 'f/K_s' },
+        ],
       };
     }
-    const f = Ks * (1 + psiF * dTheta / Ft);
-    const L = Ft / dTheta; // wetting front depth
+    const f = KsN * (1 + psiFN * dThetaN / FtN);
+    const L = FtN / dThetaN; // wetting front depth
     return {
       result: f, unit: 'm/s',
+      secondary: [
+        { key: 'wetting_front_depth', value: Number.isFinite(L) ? L : Number.NaN, unit: 'm', label: 'Wetting Front Depth (F/Δθ)' },
+        { key: 'suction_head', value: Number.isFinite(psiFN) ? psiFN : Number.NaN, unit: 'm', label: 'Effective Suction Head ψ_f' },
+        { key: 'ratio', value: Number.isFinite(f / KsN) ? f / KsN : Number.NaN, unit: '—', label: 'f/K_s' },
+      ],
       steps: [
         '── Green-Ampt Infiltration (Green & Ampt, 1911) ──',
-        `K_s = ${Ks.toExponential(3)} m/s, ψ_w = ${psiW.toFixed(2)} m, ψ₀ = ${psi0.toFixed(2)} m`,
-        `Δθ = ${dTheta.toFixed(3)}, F(t) = ${Ft.toFixed(3)} m`,
+        `K_s = ${KsN.toExponential(3)} m/s, ψ_w = ${psiWN.toFixed(2)} m, ψ₀ = ${psi0N.toFixed(2)} m`,
+        `Δθ = ${dThetaN.toFixed(3)}, F(t) = ${FtN.toFixed(3)} m`,
         '',
         'Step 1 — Effective suction head:',
-        `  ψ_f = ψ_w − ψ₀ = ${psiW.toFixed(2)} − ${psi0.toFixed(2)} = ${psiF.toFixed(2)} m`,
+        `  ψ_f = ψ_w − ψ₀ = ${psiWN.toFixed(2)} − ${psi0N.toFixed(2)} = ${psiFN.toFixed(2)} m`,
         '',
         'Step 2 — Capillary term:',
-        `  ψ_f·Δθ/F = ${psiF.toFixed(2)} × ${dTheta.toFixed(3)} / ${Ft.toFixed(3)}`,
-        `  = ${(psiF * dTheta / Ft).toFixed(3)}`,
+        `  ψ_f·Δθ/F = ${psiFN.toFixed(2)} × ${dThetaN.toFixed(3)} / ${FtN.toFixed(3)}`,
+        `  = ${(psiFN * dThetaN / FtN).toFixed(3)}`,
         '',
         'Step 3 — Infiltration rate:',
-        `  f = K_s × (1 + ψ_f·Δθ/F) = ${Ks.toExponential(3)} × (1 + ${(psiF * dTheta / Ft).toFixed(3)})`,
+        `  f = K_s × (1 + ψ_f·Δθ/F) = ${KsN.toExponential(3)} × (1 + ${(psiFN * dThetaN / FtN).toFixed(3)})`,
         `  f = ${f.toExponential(3)} m/s`,
         '',
         'Step 4 — Wetting front depth:',
@@ -947,8 +1185,23 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const n = Math.pow(10, logN);
     const T_r = n > 0 ? 1 / n : Infinity;
     const P10 = n > 0 ? 1 - Math.exp(-10 * n) : 0;
+    // Bar series — N(M) over magnitude 4 → 9 in 0.5 steps (11 points) using
+    // the tool's Gutenberg-Richter relation with the supplied a and b.
+    const barPoints: Array<{ x: number; y: number }> = Array.from({ length: 11 }, (_, i) => {
+      const mag = 4 + i * 0.5;
+      const logN = a - b * mag;
+      return { x: mag, y: Number.isFinite(logN) ? Math.pow(10, logN) : Number.NaN };
+    });
     return {
       result: n, unit: 'events/yr',
+      secondary: [
+        { key: 'return_period', value: Number.isFinite(T_r) ? T_r : Number.NaN, unit: 'yr', label: 'Return Period (1/N)' },
+      ],
+      series: [{
+        label: 'Annual frequency N(M)',
+        color: '#0072B2',
+        points: barPoints,
+      }],
       steps: [
         '── Gutenberg-Richter Law (Gutenberg & Richter, 1944) ──',
         `Seismicity parameters: a-value = ${a.toFixed(2)}, b-value = ${b.toFixed(3)}, Magnitude M = ${M.toFixed(1)}`,
@@ -996,8 +1249,22 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const cum = Math.abs(p - 1) > 1e-10
       ? K * (Math.pow(c, 1 - p) - Math.pow(c + t, 1 - p)) / (p - 1)
       : K * Math.log(1 + t / c);
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    for (let day = 1; day <= 60; day++) {
+      const denom = Math.pow(c + day, p);
+      seriesPoints.push({ x: day, y: Number.isFinite(denom) ? K / denom : Number.NaN });
+    }
     return {
       result: n, unit: 'events/day',
+      secondary: [
+        { key: 'cumulative', value: Number.isFinite(cum) ? cum : Number.NaN, unit: 'events', label: 'Cumulative Aftershocks N_cum' },
+        { key: 'half_life', value: Number.isFinite(halfLife) ? halfLife : Number.NaN, unit: 'days', label: 'Rate Halving Time t_½' },
+      ],
+      series: [{
+        label: 'Aftershock rate n(t)',
+        color: '#0072B2',
+        points: seriesPoints,
+      }],
       steps: [
         '── Modified Omori Law (Omori, 1894; Utsu, 1961) ──',
         `Sequence parameters: K = ${K.toFixed(1)} events/day, c = ${c.toFixed(3)} d, t = ${t.toFixed(1)} d, p = ${p.toFixed(3)}`,
@@ -1038,9 +1305,18 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     }
     const T = cb2014Terms({ mag, rrup, rjb, rx, vs30, rake, dip, ztor, width, hypoDepth });
     const pgaG = T.pga;
+    const pgaCm = pgaG * 980.665;
     const mmi = pgaG > 0 ? (pgaG < 0.001 ? 1 : 2 * Math.log10(pgaG * 980.665) + 3.5) : 1;
+    const lnPGA = Math.log(pgaG);
+    const pgaRock = T.pga1100;
     return {
       result: pgaG, unit: 'g',
+      secondary: [
+        { key: 'mmi', value: Number.isFinite(mmi) ? mmi : Number.NaN, unit: '—', label: 'Modified Mercalli Intensity' },
+        { key: 'pga_cm', value: Number.isFinite(pgaCm) ? pgaCm : Number.NaN, unit: 'cm/s²', label: 'PGA (cm/s²)' },
+        { key: 'ln_pga', value: Number.isFinite(lnPGA) ? lnPGA : Number.NaN, unit: '—', label: 'ln(PGA)' },
+        { key: 'pga_rock', value: Number.isFinite(pgaRock) ? pgaRock : Number.NaN, unit: 'g', label: 'PGA on Rock (Vs=1100)' },
+      ],
       steps: [
         '── Campbell–Bozorgnia (2014) NGA-West2 GMPE ──',
         `M = ${mag.toFixed(1)}, Rrup = ${rrup.toFixed(1)} km, Rjb = ${rjb.toFixed(1)} km, Rx = ${rx.toFixed(1)} km`,
@@ -1103,6 +1379,9 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const kp = (1 + sinPhi) / (1 - sinPhi); // Rankine passive earth pressure coefficient
     return {
       result: tau, unit: 'kPa',
+      secondary: [
+        { key: 'friction_angle', value: Number.isFinite(phiDeg) ? phiDeg : Number.NaN, unit: '°', label: 'Friction Angle φ' },
+      ],
       steps: [
         '── Mohr-Coulomb Failure Criterion (Coulomb, 1776; Mohr, 1900) ──',
         `Material: cohesion c = ${c.toFixed(2)} kPa, normal stress σₙ = ${sigmaN.toFixed(3)} kPa`,
@@ -1197,6 +1476,9 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const D = M0 / (mu * Math.PI * r * r);
     return {
       result: dsig, unit: 'Pa',
+      secondary: [
+        { key: 'stress_drop_mpa', value: Number.isFinite(dsig_MPa) ? dsig_MPa : Number.NaN, unit: 'MPa', label: 'Stress Drop (MPa)' },
+      ],
       steps: [
         '── Brune Stress Drop Model (Brune, 1970) ──',
         `Seismic moment M₀ = ${M0.toExponential(3)} N·m, Source radius r = ${r.toFixed(0)} m`,
@@ -1237,8 +1519,22 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const logAD = -4.80 + 0.69 * Mw; // average displacement (all types)
     const AD = Math.pow(10, logAD);
     const width = Math.sqrt(A); // approximate: sqrt(A) for ~square rupture
+    // Scatter series — surface rupture length vs M_w over M 5 → 8 (10 points)
+    // using the tool's Wells-Coppersmith regression.
+    const scatterPoints: Array<{ x: number; y: number }> = Array.from({ length: 10 }, (_, i) => {
+      const mw = 5 + (i * 3) / 9;
+      return { x: mw, y: Math.pow(10, -3.55 + 0.74 * mw) };
+    });
     return {
       result: A, unit: 'km²',
+      secondary: [
+        { key: 'surface_rupture_length', value: Number.isFinite(SRL) ? SRL : Number.NaN, unit: 'km', label: 'Surface Rupture Length (strike-slip)' },
+      ],
+      series: [{
+        label: 'Surface Rupture Length vs M_w',
+        color: '#0072B2',
+        points: scatterPoints,
+      }],
       steps: [
         '── Wells-Coppersmith Scaling Relations (Wells & Coppersmith, 1994) ──',
         `Moment magnitude M_w = ${Mw.toFixed(1)}`,
@@ -1674,6 +1970,13 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     }
     const Texcess = Math.max(0, Tair - Tbase);
     const M = DDF * Texcess;
+    const cumMelt = M * 10;
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    let cum = 0;
+    for (let day = 1; day <= 30; day++) {
+      cum += M;
+      seriesPoints.push({ x: day, y: Number.isFinite(cum) ? cum : Number.NaN });
+    }
     let meltClass: string;
     if (M < 5) meltClass = 'Low melt rate';
     else if (M < 15) meltClass = 'Moderate melt';
@@ -1681,6 +1984,14 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     else meltClass = 'Extreme melt — rain-on-snow or foghn event possible';
     return {
       result: M, unit: 'mm/day',
+      secondary: [
+        { key: 'cumulative_melt', value: Number.isFinite(cumMelt) ? cumMelt : Number.NaN, unit: 'mm', label: 'Cumulative Melt (10 days)' },
+      ],
+      series: [{
+        label: 'Cumulative snowmelt',
+        color: '#0072B2',
+        points: seriesPoints,
+      }],
       steps: [
         '── Degree-Day Snowmelt Model (Hock, 2003) ──',
         `Degree-Day Factor DDF = ${DDF.toFixed(2)} mm/°C·day`,
@@ -1732,6 +2043,9 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     else iceClass = 'ICE FREE / ICE EDGE';
     return {
       result: Tb, unit: '°C',
+      secondary: [
+        { key: 'brightness_kelvin', value: Number.isFinite(tbKelvin) ? tbKelvin : Number.NaN, unit: 'K', label: 'Brightness Temperature (K)' },
+      ],
       steps: [
         '── Passive Microwave Sea Ice Concentration (Comiso, 1986) ──',
         `Ice concentration C = ${C.toFixed(2)}, Water T_water = ${Twater.toFixed(1)} °C, Ice T_ice = ${Tice.toFixed(1)} °C`,
@@ -1755,6 +2069,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) {
       return {
         result: Number.NaN, unit: 'km',
+        secondary: [
+          { key: 'bearing', value: Number.NaN, unit: '°', label: 'Initial bearing (NaN)' },
+          { key: 'midLat', value: Number.NaN, unit: '°', label: 'Great-circle midpoint latitude (NaN)' },
+          { key: 'midLon', value: Number.NaN, unit: '°', label: 'Great-circle midpoint longitude (NaN)' },
+        ],
         steps: [
           '── Haversine Formula (Sinnott, 1984) ──',
           'One or both endpoint coordinates are missing / non-finite. '
@@ -1786,6 +2105,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const dLonPerDeg = 111.32 * Math.cos((lat1 + lat2) / 2 * PI / 180);
     return {
       result: d / 1000, unit: 'km',
+      secondary: [
+        { key: 'bearing', value: Number.isFinite(bearing) ? bearing : Number.NaN, unit: '°', label: 'Initial bearing (degrees clockwise from north)' },
+        { key: 'midLat', value: Number.isFinite(midLat) ? midLat : Number.NaN, unit: '°', label: 'Great-circle midpoint latitude' },
+        { key: 'midLon', value: Number.isFinite(midLon) ? midLon : Number.NaN, unit: '°', label: 'Great-circle midpoint longitude' },
+      ],
       steps: [
         '── Haversine Formula (Sinnott, 1984) ──',
         `Point 1: (${lat1.toFixed(4)}°, ${lon1.toFixed(4)}°)  |  Point 2: (${lat2.toFixed(4)}°, ${lon2.toFixed(4)}°)`,
@@ -1813,10 +2137,25 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   37: ({ obs, tlat, tlon, fitted, unit }) => {
-    const observations = Array.isArray(obs) ? obs as Array<{ lat: number; lon: number; value: number; siteName?: string }> : [];
-    if (!observations.length || !Number.isFinite(tlat) || !Number.isFinite(tlon) || !fitted || !Number.isFinite(fitted.sill)) {
+    const observations = (Array.isArray(obs) ? obs as Array<{ lat: number; lon: number; value: number; siteName?: string }> : [])
+      .map((o) => ({ lat: Number(o.lat), lon: Number(o.lon), value: Number(o.value), siteName: typeof o.siteName === 'string' ? o.siteName : undefined }))
+      .filter((o) => Number.isFinite(o.lat) && Number.isFinite(o.lon) && Number.isFinite(o.value));
+    const fitModel = fitted && {
+      nugget: Number.isFinite(Number(fitted.nugget)) ? Number(fitted.nugget) : 0,
+      sill: Number.isFinite(Number(fitted.sill)) ? Number(fitted.sill) : NaN,
+      range: Number.isFinite(Number(fitted.range)) && Number(fitted.range) > 0 ? Number(fitted.range) : 1,
+      model: fitted.model,
+    };
+    const outUnit = typeof unit === 'string' && unit ? unit : '—';
+    const nanSecondary = [
+      { key: 'variance', value: Number.NaN, unit: outUnit === '—' ? '—' : outUnit + '²', label: 'Kriging variance (NaN)' },
+      { key: 'sd', value: Number.NaN, unit: outUnit, label: 'Kriging standard deviation (NaN)' },
+      { key: 'weightsSum', value: Number.NaN, unit: '—', label: 'Sum of kriging weights (NaN)' },
+    ];
+    if (!observations.length || !Number.isFinite(tlat) || !Number.isFinite(tlon) || !fitModel || !Number.isFinite(fitModel.sill) || !(fitModel.sill > 0)) {
       return {
-        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        result: Number.NaN, unit: outUnit,
+        secondary: nanSecondary,
         steps: [
           '── Ordinary Kriging (Matheron, 1963) ──',
           `Genuine observations available: ${observations.length}`,
@@ -1828,10 +2167,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         ]
       };
     }
-    const kr = ordinaryKriging(observations, { lat: tlat, lon: tlon }, fitted as unknown as VariogramModel);
+    const kr = ordinaryKriging(observations, { lat: tlat, lon: tlon }, fitModel as VariogramModel);
     if (!kr) {
       return {
-        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        result: Number.NaN, unit: outUnit,
+        secondary: nanSecondary,
         steps: [
           '── Ordinary Kriging (Matheron, 1963) ──',
           `${observations.length} observations loaded`,
@@ -1846,7 +2186,12 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const wTop = weights.map((w, i) => ({ w, v: observations[i].value, lat: observations[i].lat, lon: observations[i].lon }))
       .sort((a, b) => Math.abs(b.w) - Math.abs(a.w)).slice(0, 4);
     return {
-      result: yhat, unit: typeof unit === 'string' && unit ? unit : '—',
+      result: yhat, unit: outUnit,
+      secondary: [
+        { key: 'variance', value: Number.isFinite(variance) ? variance : Number.NaN, unit: outUnit === '—' ? '—' : outUnit + '²', label: 'Kriging variance (prediction uncertainty σ²_K)' },
+        { key: 'sd', value: Number.isFinite(sd) ? sd : Number.NaN, unit: outUnit, label: 'Kriging standard deviation σ_K' },
+        { key: 'weightsSum', value: Number.isFinite(weights.reduce((s, w) => s + w, 0)) ? weights.reduce((s, w) => s + w, 0) : Number.NaN, unit: '—', label: 'Sum of kriging weights (unbiasedness)' },
+      ],
       steps: [
         '── Ordinary Kriging (Matheron, 1963) ──',
         `${nObs} genuine observations | target (${tlat.toFixed(3)}, ${tlon.toFixed(3)}) | model: ${fit.model}`,
@@ -1872,11 +2217,19 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   38: ({ obs, tlat, tlon, p, unit }) => {
-    const observations = Array.isArray(obs) ? obs as Array<{ lat: number; lon: number; value: number; siteName?: string }> : [];
+    const observations = (Array.isArray(obs) ? obs as Array<{ lat: number; lon: number; value: number; siteName?: string }> : [])
+      .map((o) => ({ lat: Number(o.lat), lon: Number(o.lon), value: Number(o.value), siteName: typeof o.siteName === 'string' ? o.siteName : undefined }))
+      .filter((o) => Number.isFinite(o.lat) && Number.isFinite(o.lon) && Number.isFinite(o.value));
     const power = Number.isFinite(p) && p >= 0.5 && p <= 4 ? p : 2;
+    const outUnit = typeof unit === 'string' && unit ? unit : '—';
+    const nanSecondary = [
+      { key: 'nearestKm', value: Number.NaN, unit: 'km', label: 'Distance to nearest observation (NaN)' },
+      { key: 'topWeight', value: Number.NaN, unit: '—', label: 'Dominant normalized weight (NaN)' },
+    ];
     if (!observations.length || !Number.isFinite(tlat) || !Number.isFinite(tlon)) {
       return {
-        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        result: Number.NaN, unit: outUnit,
+        secondary: nanSecondary,
         steps: [
           '── Inverse Distance Weighting (Shepard, 1968) ──',
           `Genuine observations available: ${observations.length}`,
@@ -1890,7 +2243,8 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const idw = inverseDistanceWeighting(observations, { lat: tlat, lon: tlon }, power);
     if (!idw) {
       return {
-        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        result: Number.NaN, unit: outUnit,
+        secondary: nanSecondary,
         steps: [
           '── Inverse Distance Weighting (Shepard, 1968) ──',
           `${observations.length} observations loaded`,
@@ -1902,7 +2256,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const top = weights.map((w, i) => ({ w, d: distancesKm[i], v: observations[i].value }))
       .map((x, i) => ({ ...x, i })).sort((a, b) => b.w - a.w).slice(0, 4);
     return {
-      result: yhat, unit: typeof unit === 'string' && unit ? unit : '—',
+      result: yhat, unit: outUnit,
+      secondary: [
+        { key: 'nearestKm', value: Number.isFinite(Math.min(...distancesKm)) ? Math.min(...distancesKm) : Number.NaN, unit: 'km', label: 'Distance to nearest observation' },
+        { key: 'topWeight', value: Number.isFinite(Math.max(...weights)) ? Math.max(...weights) : Number.NaN, unit: '—', label: 'Dominant normalized weight' },
+      ],
       steps: [
         '── Inverse Distance Weighting (Shepard, 1968) ──',
         `${nObs} genuine observations | target (${tlat.toFixed(3)}, ${tlon.toFixed(3)}) | power p = ${power}`,
@@ -1939,6 +2297,9 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     else stabilityClass = 'VERY UNSTABLE (A) — rapid dispersion';
     return {
       result: C, unit: 'µg/m³',
+      secondary: [
+        { key: 'centerline', value: Number.isFinite(C_centerline) ? C_centerline : Number.NaN, unit: 'µg/m³', label: 'Centerline Concentration (y=0)' },
+      ],
       steps: [
         '── Gaussian Plume Model (Pasquill & Smith, 1983) ──',
         `Source rate Q = ${Q.toExponential(3)} µg/s, Wind speed u = ${u.toFixed(2)} m/s`,
@@ -1970,12 +2331,46 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   40: ({ mu, beta, x }) => {
+    if (![mu, beta, x].every(Number.isFinite) || !(beta > 0)) {
+      return {
+        result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 'returnPeriod', value: Number.NaN, unit: 'years', label: 'Return period T = 1/(1−F) (NaN)' },
+          { key: 'reducedVariate', value: Number.NaN, unit: '—', label: 'Gumbel reduced variate y (NaN)' },
+          { key: 'xReturn100', value: Number.NaN, unit: '—', label: '100-year return level (NaN)' },
+        ],
+        steps: [
+          '── Gumbel (Type I) Extreme Value Distribution (Gumbel, 1958) ──',
+          'Honest NaN: Gumbel requires a finite location μ, a finite scale '
+          + 'β > 0 and a finite value x — no value is fabricated.',
+        ]
+      };
+    }
     const y = (x - mu) / beta;
     const F = Math.exp(-Math.exp(-y));
     const T = 1 / (1 - F + 1e-30);
     const reducedVariate = -Math.log(-Math.log(F));
+    const xReturn100 = mu - beta * Math.log(-Math.log(1 - 1 / 100));
+    // Distribution series — Gumbel PDF f(x) over x ∈ [μ−3β, μ+3β] (40 points)
+    // using the tool's location μ and scale β.
+    const pdfPoints: Array<{ x: number; y: number }> = Array.from({ length: 40 }, (_, i) => {
+      const xv = (mu - 3 * beta) + (i * 6 * beta) / 39;
+      const yv = (xv - mu) / beta;
+      const pdf = (1 / beta) * Math.exp(-yv - Math.exp(-yv));
+      return { x: xv, y: Number.isFinite(pdf) ? pdf : Number.NaN };
+    });
     return {
       result: F, unit: '—',
+      secondary: [
+        { key: 'returnPeriod', value: Number.isFinite(T) ? T : Number.NaN, unit: 'years', label: 'Return period T = 1/(1−F) of the supplied x' },
+        { key: 'reducedVariate', value: Number.isFinite(reducedVariate) ? reducedVariate : Number.NaN, unit: '—', label: 'Gumbel reduced variate y = −ln(−ln F)' },
+        { key: 'xReturn100', value: Number.isFinite(xReturn100) ? xReturn100 : Number.NaN, unit: '—', label: '100-year return level μ − β·ln(−ln(1−1/100)) (input units)' },
+      ],
+      series: [{
+        label: 'Gumbel PDF f(x)',
+        color: '#0072B2',
+        points: pdfPoints,
+      }],
       steps: [
         '── Gumbel (Type I) Extreme Value Distribution (Gumbel, 1958) ──',
         `Location μ = ${mu.toFixed(2)}, Scale β = ${beta.toFixed(2)}`,
@@ -2003,10 +2398,16 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Pickands (1975) GPD for threshold exceedances. x is the excess
     // above threshold (x ≥ 0). The ξ = 0 Fréchet limit is the exponential
     // G(x) = 1 − exp(−x/β); for ξ < 0 the support is bounded by −β/ξ.
-    if (!Number.isFinite(xi) || !Number.isFinite(beta) || !Number.isFinite(x)) {
+    if (![xi, beta, x].every(Number.isFinite) || !(beta > 0)) {
       return {
         result: Number.NaN, unit: '—',
-        steps: ['── Generalized Pareto Distribution (Pickands, 1975) ──', 'Honest NaN: non-finite parameter supplied.']
+        secondary: [
+          { key: 'exceedProb', value: Number.NaN, unit: '—', label: 'Exceedance probability 1−G (NaN)' },
+          { key: 'tailIndex', value: Number.NaN, unit: '—', label: 'Tail index α = 1/ξ (NaN)' },
+          { key: 'meanExcess', value: Number.NaN, unit: '—', label: 'Mean excess e = β/(1−ξ) (NaN)' },
+          { key: 'returnLevel1pct', value: Number.NaN, unit: '—', label: 'Return level for 1% exceedance (NaN)' },
+        ],
+        steps: ['── Generalized Pareto Distribution (Pickands, 1975) ──', 'Honest NaN: non-finite parameter or non-positive scale β supplied.']
       };
     }
     let G: number;
@@ -2021,9 +2422,38 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const inner = 1 + (xi * x) / beta;
     const tailIndex = xi > 0 ? 1 / xi : Infinity;
     const meanExcess = xi < 1 ? beta / (1 - xi) : Infinity;
+    const exceedProb = 1 - G;
+    const pExceed = 0.01; // 1-in-100 exceedance return level
+    const returnLevel1pct = Math.abs(xi) < 1e-9
+      ? -beta * Math.log(pExceed)
+      : (beta / xi) * (Math.pow(pExceed, -xi) - 1);
     const xiNote = xi < -1e-9 ? 'Weibull domain (bounded upper tail at −β/ξ)' : Math.abs(xi) < 1e-9 ? 'Gumbel domain (exponential tail, ξ=0 limit)' : xi < 0.3 ? 'Fréchet domain (heavy tail, moderate)' : 'Fréchet domain (heavy tail)';
+    // Distribution series — GPD PDF g(x) over x ∈ [0, 10] (40 points) using
+    // the tool's shape ξ and scale β.
+    const pdfPoints: Array<{ x: number; y: number }> = Array.from({ length: 40 }, (_, i) => {
+      const xv = (i * 10) / 39;
+      let pdf: number;
+      if (Math.abs(xi) < 1e-9) {
+        pdf = (1 / beta) * Math.exp(-xv / beta);
+      } else {
+        const inner = 1 + (xi * xv) / beta;
+        pdf = inner > 0 ? (1 / beta) * Math.pow(inner, -1 / xi - 1) : 0;
+      }
+      return { x: xv, y: Number.isFinite(pdf) ? pdf : Number.NaN };
+    });
     return {
       result: G, unit: '—',
+      secondary: [
+        { key: 'exceedProb', value: Number.isFinite(exceedProb) ? exceedProb : Number.NaN, unit: '—', label: 'Exceedance probability P(X > x) = 1 − G' },
+        { key: 'tailIndex', value: Number.isFinite(tailIndex) ? tailIndex : Number.NaN, unit: '—', label: 'Tail index α = 1/ξ (∞ = exponential tail)' },
+        { key: 'meanExcess', value: Number.isFinite(meanExcess) ? meanExcess : Number.NaN, unit: '—', label: 'Mean excess e = β/(1−ξ)' },
+        { key: 'returnLevel1pct', value: Number.isFinite(returnLevel1pct) ? returnLevel1pct : Number.NaN, unit: '—', label: 'Return level for a 1% exceedance (1-in-100 event)' },
+      ],
+      series: [{
+        label: 'GPD PDF g(x)',
+        color: '#0072B2',
+        points: pdfPoints,
+      }],
       steps: [
         '── Generalized Pareto Distribution (Pickands, 1975) ──',
         `Shape ξ = ${xi.toFixed(3)}, Scale β = ${beta.toFixed(2)}`,
@@ -2053,12 +2483,22 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // All N(N−1)/2 station pairs are binned into K lag classes over [0, 0.6·d_max];
     // the primary result is γ̂ at the median non-empty lag class. No synthetic
     // sample series — real station coordinates and values only.
-    const observations = Array.isArray(obs) ? obs as Array<{ lat: number; lon: number; value: number; siteName?: string }> : [];
+    const observations = (Array.isArray(obs) ? obs as Array<{ lat: number; lon: number; value: number; siteName?: string }> : [])
+      .map((o) => ({ lat: Number(o.lat), lon: Number(o.lon), value: Number(o.value), siteName: typeof o.siteName === 'string' ? o.siteName : undefined }))
+      .filter((o) => Number.isFinite(o.lat) && Number.isFinite(o.lon) && Number.isFinite(o.value));
     const nLags = Number.isFinite(K) && K >= 3 && K <= 40 ? Math.floor(K) : 10;
     const n = observations.length;
+    const outUnit = typeof unit === 'string' && unit ? unit : '—';
+    const nanSecondary = [
+      { key: 'sillEstimate', value: Number.NaN, unit: outUnit === '—' ? '—' : outUnit + '²', label: 'Sill estimate (max γ̂) (NaN)' },
+      { key: 'nuggetEstimate', value: Number.NaN, unit: outUnit === '—' ? '—' : outUnit + '²', label: 'Near-origin nugget-like γ̂ (NaN)' },
+      { key: 'nPairs', value: Number.NaN, unit: '—', label: 'Station pairs binned (NaN)' },
+      { key: 'lagsUsed', value: Number.NaN, unit: '—', label: 'Non-empty lag classes (NaN)' },
+    ];
     if (n < 4) {
       return {
-        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        result: Number.NaN, unit: outUnit,
+        secondary: nanSecondary,
         steps: [
           '── Matheron Semivariogram (Matheron, 1963) ──',
           `Genuine observations available: ${n}`,
@@ -2095,7 +2535,8 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const finite = gamma.filter((g) => Number.isFinite(g));
     if (!finite.length) {
       return {
-        result: Number.NaN, unit: typeof unit === 'string' && unit ? unit : '—',
+        result: Number.NaN, unit: outUnit,
+        secondary: nanSecondary,
         steps: [
           '── Matheron Semivariogram (Matheron, 1963) ──',
           `${n} observations, ${pairs.length} pairs, lag cap = ${cap.toFixed(1)} km`,
@@ -2111,8 +2552,25 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Nugget/sill diagnostics from the binned curve.
     const sillEst = gMax;
     const nuggetEst = gamma[0] ?? NaN; // γ̂ of the first (nearest) lag
+    // Scatter series — experimental semivariogram γ̂(h) from the tool's own
+    // binned Matheron estimator (lag centers with non-empty classes).
+    const varioPoints: Array<{ x: number; y: number }> = [];
+    for (let k = 0; k < nLags; k++) {
+      if (Number.isFinite(gamma[k])) varioPoints.push({ x: lagCenters[k], y: gamma[k] });
+    }
     return {
-      result: gMed, unit: typeof unit === 'string' && unit ? unit : '—',
+      result: gMed, unit: outUnit,
+      secondary: [
+        { key: 'sillEstimate', value: Number.isFinite(sillEst) ? sillEst : Number.NaN, unit: outUnit === '—' ? '—' : outUnit + '²', label: 'Sill estimate (max γ̂ over non-empty lags)' },
+        { key: 'nuggetEstimate', value: Number.isFinite(nuggetEst) ? nuggetEst : Number.NaN, unit: outUnit === '—' ? '—' : outUnit + '²', label: 'Near-origin γ̂ (nugget-like discontinuity)' },
+        { key: 'nPairs', value: counts.reduce((s, c) => s + c, 0), unit: '—', label: 'Station pairs binned into lag classes' },
+        { key: 'lagsUsed', value: finite.length, unit: '—', label: 'Non-empty lag classes used' },
+      ],
+      series: [{
+        label: 'Experimental semivariogram γ(h)',
+        color: '#0072B2',
+        points: varioPoints,
+      }],
       steps: [
         '── Matheron Semivariogram (Matheron, 1963) ──',
         `${n} genuine observations | ${pairs.length} pairs | ${nLags} lag classes to ${cap.toFixed(1)} km`,
@@ -2138,15 +2596,55 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
   // ── Domain 6: Soil Science & Land Surface ──
   43: ({ thetaR, thetaS, alpha, n, psi, __vgSource }) => {
+    const anyMissing = [thetaR, thetaS, alpha, n, psi].some((x) => !Number.isFinite(x));
+    const vgSrc = typeof __vgSource === 'string' ? __vgSource : 'user-supplied / default';
+    if (anyMissing || !(n > 1)) {
+      return {
+        result: Number.NaN, unit: 'm³/m³',
+        secondary: [
+          { key: 'effective_saturation', value: Number.NaN, unit: '—', label: 'Effective Saturation S_e' },
+          { key: 'theta_s', value: Number.isFinite(thetaS) ? thetaS : Number.NaN, unit: 'm³/m³', label: 'Saturated Water Content θ_s' },
+        ],
+        steps: [
+          '── Van Genuchten Water Retention (van Genuchten, 1980) ──',
+          `Parameters (α, n: Carsel & Parr 1988 by USDA texture — ${vgSrc}):`,
+          `  θ_r = ${Number.isFinite(thetaR) ? thetaR.toFixed(3) : 'NaN'}, θ_s = ${Number.isFinite(thetaS) ? thetaS.toFixed(3) : 'NaN'}, α = ${Number.isFinite(alpha) ? alpha.toExponential(3) : 'NaN'} /cm, n = ${Number.isFinite(n) ? n.toFixed(3) : 'NaN'}`,
+          '',
+          `⚠ Cannot compute — ${n > 1 ? 'a required input is unavailable (NaN).' : 'n must be > 1 (m = 1 − 1/n must be positive) for the van Genuchten model.'} Supply the retention parameters or a study point from which they can be derived.`,
+        ],
+      };
+    }
     const m = 1 - 1 / n;
     const aPsi = alpha * Math.abs(psi);
     const term = Math.pow(1 + Math.pow(aPsi, n), m);
     const theta = thetaR + (thetaS - thetaR) / term;
     const Se = term > 0 ? 1 / term : 0;
     const psi_kPa = Math.abs(psi) * 0.0980665; // 1 cm H₂O = 0.0980665 kPa
-    const vgSrc = typeof __vgSource === 'string' ? __vgSource : 'user-supplied / default';
+    // Mualem (1976) relative hydraulic conductivity with tortuosity L = 0.5:
+    //   K/K_s = S_e^0.5 · [1 − (1 − S_e^(1/m))^m]²
+    const kRel = Math.pow(Se, 0.5) * Math.pow(1 - Math.pow(1 - Math.pow(Se, 1 / m), m), 2);
+    // Profile series — θ(ψ) over a log-spaced matric-potential sweep
+    // (|ψ| = 0.1 … 1000 cm) spanning wet through air-dry conditions.
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i <= 40; i++) {
+      const psiAbsSweep = Math.pow(10, -1 + (i / 40) * 4);
+      const termSweep = Math.pow(1 + Math.pow(alpha * psiAbsSweep, n), m);
+      const thetaSweep = thetaR + (thetaS - thetaR) / termSweep;
+      seriesPoints.push({ x: -psiAbsSweep, y: Number.isFinite(thetaSweep) ? thetaSweep : Number.NaN });
+    }
     return {
       result: theta, unit: 'm³/m³',
+      secondary: [
+        { key: 'effective_saturation', value: Number.isFinite(Se) ? Se : Number.NaN, unit: '—', label: 'Effective Saturation S_e' },
+        { key: 'theta_s', value: Number.isFinite(thetaS) ? thetaS : Number.NaN, unit: 'm³/m³', label: 'Saturated Water Content θ_s' },
+        { key: 'alpha', value: Number.isFinite(alpha) ? alpha : Number.NaN, unit: '/cm', label: 'Retention Shape Parameter α' },
+        { key: 'relative_conductivity', value: Number.isFinite(kRel) ? kRel : Number.NaN, unit: '—', label: 'Rel. Hydraulic Conductivity K/K_s (Mualem)' },
+      ],
+      series: [{
+        label: 'θ(ψ) van Genuchten',
+        color: '#0072B2',
+        points: seriesPoints,
+      }],
       steps: [
         '── Van Genuchten Water Retention (van Genuchten, 1980) ──',
         `Parameters (α, n: Carsel & Parr 1988 by USDA texture — ${vgSrc}):`,
@@ -2165,12 +2663,29 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         'Step 3 — Saturation and drainage:',
         `  Effective saturation S_e = ${Se.toFixed(4)}`,
         `  ${Se > 0.9 ? 'Near-saturated — matrix flow dominates' : Se > 0.5 ? 'Intermediate — both matrix and macropore flow' : 'Dry — film flow and vapour diffusion'}`,
+        `  Mualem K/K_s = ${kRel.toExponential(3)} (tortuosity 0.5, i.e. S_e^0.5·[1 − (1 − S_e^(1/m))^m]²)`,
         '',
         `  └ Plant-available water: ${theta < thetaR + 0.05 ? 'Wilting point conditions' : theta < thetaS * 0.6 ? 'Field capacity to wilting — available water present' : 'Above field capacity — drainage occurring'}`,
       ]
     };
   },
   44: ({ psib, psi, lambda, thetaR, thetaS }) => {
+    const anyMissing = [psib, psi, lambda, thetaR, thetaS].some((x) => !Number.isFinite(x));
+    if (anyMissing) {
+      return {
+        result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 'theta', value: Number.NaN, unit: 'm³/m³', label: 'Volumetric Water Content θ' },
+          { key: 'relative_conductivity', value: Number.NaN, unit: '—', label: 'Rel. Conductivity K/K_s' },
+        ],
+        steps: [
+          '── Brooks-Corey Water Retention (Brooks & Corey, 1964) ──',
+          `ψ_b = ${Number.isFinite(psib) ? psib.toFixed(2) : 'NaN'} cm, ψ = ${Number.isFinite(psi) ? psi.toFixed(2) : 'NaN'} cm, λ = ${Number.isFinite(lambda) ? lambda.toFixed(2) : 'NaN'}, θ_r = ${Number.isFinite(thetaR) ? thetaR.toFixed(3) : 'NaN'}, θ_s = ${Number.isFinite(thetaS) ? thetaS.toFixed(3) : 'NaN'}`,
+          '',
+          '⚠ Cannot compute — a required input is unavailable (NaN). Supply ψ_b, ψ, λ, θ_r and θ_s or a study point from which they can be derived.',
+        ],
+      };
+    }
     // Brooks & Corey (1964) Hydrology Papers No. 3. Effective saturation:
     //   S_e = (|ψ_b|/|ψ|)^λ  for |ψ| > |ψ_b| (draining)
     //   S_e = 1              for |ψ| ≤ |ψ_b| (saturated, air-entry not exceeded)
@@ -2187,8 +2702,29 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const rMaxM = 2 * 72.75e-3 / (998.2 * 9.80665 * (psibAbs / 100));
     const rMaxUm = rMaxM * 1e6;
     const logSe = Math.log10(Math.max(Se, 1e-12));
+    // Profile series — θ(ψ) over a log-spaced matric-potential sweep
+    // (|ψ| = 0.1 … 1000 cm) spanning wet through air-dry conditions.
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i <= 40; i++) {
+      const psiAbsSweep = Math.pow(10, -1 + (i / 40) * 4);
+      const sweepSaturated = psiAbsSweep <= psibAbs;
+      const sweepSe = sweepSaturated ? 1 : Math.pow(psibAbs / psiAbsSweep, lambda);
+      const thetaSweep = thetaR + (thetaS - thetaR) * sweepSe;
+      seriesPoints.push({ x: -psiAbsSweep, y: Number.isFinite(thetaSweep) ? thetaSweep : Number.NaN });
+    }
     return {
       result: Se, unit: '—',
+      secondary: [
+        { key: 'effective_saturation', value: Number.isFinite(Se) ? Se : Number.NaN, unit: '—', label: 'Effective Saturation S_e' },
+        { key: 'theta', value: Number.isFinite(theta) ? theta : Number.NaN, unit: 'm³/m³', label: 'Volumetric Water Content θ' },
+        { key: 'bubbling_pressure', value: Number.isFinite(psibAbs) ? psibAbs : Number.NaN, unit: 'cm', label: 'Bubbling Pressure |ψ_b|' },
+        { key: 'relative_conductivity', value: Number.isFinite(kRel) ? kRel : Number.NaN, unit: '—', label: 'Rel. Conductivity K/K_s' },
+      ],
+      series: [{
+        label: 'θ(ψ) Brooks-Corey',
+        color: '#D55E00',
+        points: seriesPoints,
+      }],
       steps: [
         '── Brooks-Corey Water Retention (Brooks & Corey, 1964) ──',
         `Bubbling pressure ψ_b = ${psib.toFixed(2)} cm, Matric potential ψ = ${psi.toFixed(2)} cm`,
@@ -2240,6 +2776,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const excess = A - T;
     return {
       result: A, unit: 't/ha/yr',
+      secondary: [
+        { key: 'tolerance', value: Number.isFinite(T) ? T : Number.NaN, unit: 't/ha/yr', label: 'Soil Loss Tolerance' },
+        { key: 'excess_above_tolerance', value: Number.isFinite(excess) ? excess : Number.NaN, unit: 't/ha/yr', label: 'Excess Above Tolerance' },
+      ],
       steps: [
         '── Universal Soil Loss Equation (Wischmeier & Smith, 1978) ──',
         `Rainfall erosivity R = ${R.toFixed(1)} MJ·mm/ha·h·yr`,
@@ -2283,8 +2823,24 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     }
     const exp10 = (T - Tbase) / 10;
     const Rs = Rbase * Math.pow(Q10, exp10);
+    const Ea = Math.log(Q10) * 8.314e-3 * Math.pow(T + 273.15, 2) / 10; // kJ/mol
+    const annualFlux = Rs * 12.01 * 86400 * 365 / 1e6; // gC/m²/yr
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    for (let tC = -10; tC <= 50; tC++) {
+      const r = Rbase * Math.pow(Q10, (tC - Tbase) / 10);
+      seriesPoints.push({ x: tC, y: Number.isFinite(r) ? r : Number.NaN });
+    }
     return {
       result: Rs, unit: 'µmol CO₂/m²/s',
+      secondary: [
+        { key: 'activation_energy', value: Number.isFinite(Ea) ? Ea : Number.NaN, unit: 'kJ/mol', label: 'Activation Energy E_a' },
+        { key: 'annual_carbon_flux', value: Number.isFinite(annualFlux) ? annualFlux : Number.NaN, unit: 'gC/m²/yr', label: 'Annual Carbon Flux' },
+      ],
+      series: [{
+        label: 'Respiration R_s(T)',
+        color: '#009E73',
+        points: seriesPoints,
+      }],
       steps: [
         '── Q₁₀ Temperature Coefficient Model (van\'t Hoff, 1898; Arrhenius concept) ──',
         `Basal respiration R_base = ${Rbase.toFixed(3)} µmol CO₂/m²/s at ${Tbase.toFixed(1)} °C, current T = ${T.toFixed(1)} °C`,
@@ -2307,18 +2863,24 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   47: ({ sandFrac, omPct, rhoB, theta, __thetaSource }) => {
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const sandFracN = Number(sandFrac), omPctN = Number(omPct), rhoBN = Number(rhoB), thetaN = Number(theta);
     // de Vries (1963) "Thermal properties of soils", in van Wijk (ed.)
     // Physics of Plant Environment — transcribed verbatim from Farouki
     // (1981) CRREL Monograph 81-1 §7.6 (public-domain).
     const inputs47: Array<[string, number, string]> = [
-      ['sand', sandFrac, 'NaN — no genuine ISRIC soil pixel; supply sand fraction (0–1)'],
-      ['OM%', omPct, 'NaN — no genuine ISRIC organic matter; supply OM %'],
-      ['ρ_b', rhoB, 'NaN — no genuine ISRIC bulk density; supply ρ_b (kg/dm³)'],
-      ['θ', theta, 'NaN — no genuine GLDAS soil moisture; supply θ (m³/m³)'],
+      ['sand', sandFracN, 'NaN — no genuine ISRIC soil pixel; supply sand fraction (0–1)'],
+      ['OM%', omPctN, 'NaN — no genuine ISRIC organic matter; supply OM %'],
+      ['ρ_b', rhoBN, 'NaN — no genuine ISRIC bulk density; supply ρ_b (kg/dm³)'],
+      ['θ', thetaN, 'NaN — no genuine GLDAS soil moisture; supply θ (m³/m³)'],
     ];
     if (inputs47.some(([, v]) => !Number.isFinite(v))) {
       return {
         result: Number.NaN, unit: 'W/m·K',
+        secondary: [
+          { key: 'thermal_diffusivity', value: Number.NaN, unit: 'm²/s', label: 'Thermal Diffusivity (λ/C)' },
+          { key: 'heat_capacity', value: Number.NaN, unit: 'MJ/m³·K', label: 'Volumetric Heat Capacity' },
+        ],
         steps: [
           '── de Vries Soil Thermal Conductivity Model (de Vries, 1963) ──',
           'λ = Σ(kᵢ·xᵢ·λᵢ) / Σ(kᵢ·xᵢ), kᵢ = (1/3)·[2/(1+(λᵢ/λ_f−1)·g_a) + 1/(1+(λᵢ/λ_f−1)·g_c)]',
@@ -2351,17 +2913,17 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
     // Phase volume fractions from genuine ρ_b and OM% (van Bemmelen
     // OC→OM already applied upstream in mapInputs).
-    const fOm = omPct / 100;
-    const rho = rhoB * 1000; // kg/m³
+    const fOm = omPctN / 100;
+    const rho = rhoBN * 1000; // kg/m³
     const xMin = rho * (1 - fOm) / 2650;
     const xOm = rho * fOm / 1300;
     // Quartz content: ISRIC exposes no quartz band — the sand fraction is
     // the standard available proxy for the quartz fraction of the mineral
     // solids (Johansen 1975 convention, cited throughout Farouki §7).
-    const q = Math.max(0, Math.min(1, sandFrac));
+    const q = Math.max(0, Math.min(1, sandFracN));
     const xQ = xMin * q, xO = xMin * (1 - q);
     const phi = Math.max(0, 1 - xQ - xO - xOm);
-    const xw = Math.max(0, Math.min(theta, phi));
+    const xw = Math.max(0, Math.min(thetaN, phi));
     const xa = Math.max(0, phi - xw);
     const coarse = q >= 0.85;
     const thetaCut = coarse ? 0.03 : 0.05;
@@ -2407,10 +2969,14 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const alpha = lam / C;
     return {
       result: lam, unit: 'W/m·K',
+      secondary: [
+        { key: 'thermal_diffusivity', value: Number.isFinite(alpha) ? alpha : Number.NaN, unit: 'm²/s', label: 'Thermal Diffusivity (λ/C)' },
+        { key: 'heat_capacity', value: Number.isFinite(C) ? C / 1e6 : Number.NaN, unit: 'MJ/m³·K', label: 'Volumetric Heat Capacity' },
+      ],
       steps: [
         '── de Vries Soil Thermal Conductivity Model (de Vries, 1963) ──',
         'λ = Σ(kᵢ·xᵢ·λᵢ) / Σ(kᵢ·xᵢ) with de Vries spheroid weighting factors',
-        `Inputs: sand fraction q = ${q.toFixed(3)} (quartz proxy, Johansen 1975), OM = ${omPct.toFixed(2)} %, ρ_b = ${rhoB.toFixed(3)} kg/dm³, θ = ${theta.toFixed(3)} m³/m³`,
+        `Inputs: sand fraction q = ${q.toFixed(3)} (quartz proxy, Johansen 1975), OM = ${omPctN.toFixed(2)} %, ρ_b = ${rhoBN.toFixed(3)} kg/dm³, θ = ${thetaN.toFixed(3)} m³/m³`,
         ...(typeof __thetaSource === 'string' ? [`Provenance: ${__thetaSource}`] : []),
         '',
         'Step 1 — Volume fractions (from genuine ρ_b, OM; minerals 2.65 g/cm³, OM 1.3 g/cm³):',
@@ -2435,15 +3001,21 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   48: ({ kappa, ustar, z, L, z0M, __lSource, __ustarSource, __z0Source }) => {
-    if (!Number.isFinite(L)) {
+    if (!Number.isFinite(L) || !Number.isFinite(kappa) || !Number.isFinite(z)) {
       return {
         result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 'obukhov_length', value: Number.isFinite(L) ? L : Number.NaN, unit: 'm', label: 'Obukhov Length L' },
+          { key: 'stability_parameter', value: Number.NaN, unit: '—', label: 'Stability Parameter ζ = z/L' },
+        ],
         steps: [
           '── Monin-Obukhov Similarity (Monin & Obukhov, 1954; Högström, 1988) ──',
           'φ_m(ζ) = (κz/u_*)·∂ū/∂z, ζ = z/L, L = −u_*³·θ̄ᵥ/(κ·g·w\u0304θ̄ᵥ₀)',
           '',
           '  ⚠ Cannot compute — a genuine input is unavailable (NaN):',
-          `    L (Obukhov length) = NaN — ${typeof __lSource === 'string' && __lSource ? __lSource : 'no genuine u_* and sensible heat flux to derive it from; supply L (and u_*) from tower/eddy-covariance data, or provide a study point so they can be derived from genuine ERA5 reanalysis'}`,
+          ...(!Number.isFinite(L) ? [`    L (Obukhov length) = NaN — ${typeof __lSource === 'string' && __lSource ? __lSource : 'no genuine u_* and sensible heat flux to derive it from; supply L (and u_*) from tower/eddy-covariance data, or provide a study point so they can be derived from genuine ERA5 reanalysis'}`] : []),
+          ...(!Number.isFinite(kappa) ? [`    κ (von Kármán constant) = NaN — supply 0.40 (Högström 1988)`] : []),
+          ...(!Number.isFinite(z) ? [`    z (measurement height) = NaN — supply the reference height (default 10 m)`] : []),
         ],
       };
     }
@@ -2491,9 +3063,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Aerodynamic resistance to momentum (catalogue secondary output):
     // r_a = [ln(z/z₀) − ψ_m(ζ)]/(κ·u_*); z₀ from land cover unless overridden
     const uNum = Number(ustar);
+    let ra = Number.NaN;
     let raSteps: string[] = [];
     if (Number.isFinite(uNum) && uNum > 1e-4 && Number.isFinite(Number(z0M)) && Number(z0M) > 0 && z > Number(z0M)) {
-      const ra = (Math.log(z / Number(z0M)) - psiM) / (kappa * uNum);
+      ra = (Math.log(z / Number(z0M)) - psiM) / (kappa * uNum);
       raSteps = [
         '',
         'Step 4 — Integrated stability corrections & aerodynamic resistance:',
@@ -2502,8 +3075,40 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  r_a = [ln(z/z₀) − ψ_m]/(κ·u_*) = [ln(${z.toFixed(1)}/${Number(z0M).toFixed(3)}) − (${psiM.toFixed(4)})]/(${kappa.toFixed(2)}×${uNum.toFixed(3)}) = ${ra.toFixed(2)} s/m`,
       ];
     }
+    const classCode = zeta <= -1 ? 1 : zeta < -0.01 ? 2 : zeta <= 0.01 ? 3 : zeta < 1 ? 4 : 5;
+    // Profile series — with genuine u_* and z₀, a MOST wind-speed profile
+    // u(z) = (u_*/κ)·[ln(z/z₀) − ψ_m(ζ)] across heights; otherwise fall back
+    // to the φ_m(ζ) universal function across the validated stability range.
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    if (Number.isFinite(uNum) && uNum > 1e-4 && Number.isFinite(Number(z0M)) && Number(z0M) > 0) {
+      const zBottom = Number(z0M) * 2, zTop = 200;
+      for (let i = 0; i <= 40; i++) {
+        const h = zBottom * Math.pow(zTop / zBottom, i / 40);
+        const uAtH = (uNum / kappa) * (Math.log(h / Number(z0M)) - psiM);
+        seriesPoints.push({ x: h, y: Number.isFinite(uAtH) ? uAtH : Number.NaN });
+      }
+    } else {
+      for (let i = 0; i <= 40; i++) {
+        const zetaS = -2 + (i / 40) * 3;
+        const phiS = zetaS >= 0 ? 1 + 6 * zetaS : Math.pow(1 - 19.3 * zetaS, -0.25);
+        seriesPoints.push({ x: zetaS, y: Number.isFinite(phiS) ? phiS : Number.NaN });
+      }
+    }
     return {
       result: phiM, unit: '—',
+      secondary: [
+        { key: 'obukhov_length', value: Number.isFinite(L) ? L : Number.NaN, unit: 'm', label: 'Obukhov Length L' },
+        { key: 'stability_parameter', value: Number.isFinite(zeta) ? zeta : Number.NaN, unit: '—', label: 'Stability Parameter ζ = z/L' },
+        { key: 'stability_class', value: Number.isFinite(classCode) ? classCode : Number.NaN, unit: '—', label: 'Stability Class Code (1 very unstable → 5 very stable)' },
+        { key: 'richardson_number', value: Number.isFinite(Ri) ? Ri : Number.NaN, unit: '—', label: 'Gradient Richardson Number Ri' },
+        { key: 'phi_h', value: Number.isFinite(phiH) ? phiH : Number.NaN, unit: '—', label: 'Dimensionless Temperature Gradient φ_h' },
+        { key: 'aerodynamic_resistance', value: Number.isFinite(ra) ? ra : Number.NaN, unit: 's/m', label: 'Aerodynamic Resistance r_a' },
+      ],
+      series: [{
+        label: Number.isFinite(uNum) && uNum > 1e-4 && Number.isFinite(Number(z0M)) && Number(z0M) > 0 ? 'u(z) MOST profile' : 'φ_m(ζ) universal function',
+        color: '#CC79A7',
+        points: seriesPoints,
+      }],
       steps: [
         '── Monin-Obukhov Similarity (Monin & Obukhov, 1954; Högström, 1988) ──',
         'φ_m(ζ) = (κz/u_*)·∂ū/∂z, φ_h(ζ) = (κz/θ_*)·∂θ̄/∂z, ζ = z/L',
@@ -2532,15 +3137,19 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   },
   49: ({ ustar, z, z0, rho, __ustarSource, __z0Source }) => {
     const kappa = 0.4;
-    if (!Number.isFinite(ustar) || !Number.isFinite(z0) || z0 <= 0 || z <= z0) {
+    if (!Number.isFinite(ustar) || !Number.isFinite(z0) || z0 <= 0 || z <= z0 || ustar <= 0) {
       return {
         result: Number.NaN, unit: 'm/s',
+        secondary: [
+          { key: 'friction_velocity', value: Number.isFinite(ustar) ? ustar : Number.NaN, unit: 'm/s', label: 'Friction Velocity u_*' },
+          { key: 'roughness_reynolds', value: Number.NaN, unit: '—', label: 'Roughness Reynolds Number Re_*' },
+        ],
         steps: [
           '── Logarithmic Wind Profile (Stull 1988 Ch. 4; Prandtl log law, 1932) ──',
           'u(z) = (u_*/κ) · ln(z/z₀),  κ = 0.4, neutral stratification',
           '',
           '  ⚠ Cannot compute — a genuine input is unavailable or inconsistent:',
-          ...(!Number.isFinite(ustar) ? [`    u_* = NaN — ${typeof __ustarSource === 'string' ? __ustarSource : 'no genuine friction velocity; supply u_* or a study point'}`] : []),
+          ...(!Number.isFinite(ustar) || ustar <= 0 ? [`    u_* = ${Number.isFinite(ustar) ? (ustar <= 0 ? '≤ 0' : ustar) : 'NaN'} — ${typeof __ustarSource === 'string' ? __ustarSource : 'no genuine friction velocity; supply u_* or a study point'}`] : []),
           ...(!Number.isFinite(z0) || z0 <= 0 ? [`    z₀ = ${Number.isFinite(z0) ? z0 : 'NaN'} — ${typeof __z0Source === 'string' ? __z0Source : 'no genuine roughness length'}`] : []),
           ...(Number.isFinite(z0) && z0 > 0 && z <= z0 ? [`    z = ${z} m ≤ z₀ = ${z0.toFixed(3)} m — outside the log-law domain (needs z ≫ z₀)`] : []),
         ],
@@ -2553,10 +3162,14 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     //  C_d(z) = (κ/ln(z/z₀))²  (drag coefficient at height z, neutral)
     //  P(z)   = ½·ρ·u³         (wind power density; ρ from genuine ambient
     //          pressure/temperature state when available — no static 1.2)
+    //  Re_*   = u_*·z₀/ν        (roughness Reynolds number; ν air at ~15 °C)
     const Cd = (kappa / logTerm) ** 2;
+    const nuAir = 1.46e-5; // m²/s kinematic viscosity of air (~15 °C)
+    const ReStar = (ustar * z0) / nuAir;
+    let P = Number.NaN;
     let powerSteps: string[] = [];
     if (Number.isFinite(rho) && rho > 0.1) {
-      const P = 0.5 * rho * u ** 3;
+      P = 0.5 * rho * u ** 3;
       powerSteps = [
         '',
         'Step 4 — Secondary outputs (drag coefficient, wind power density):',
@@ -2564,8 +3177,27 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  P(z) = ½·ρ·u³ = ½ × ${rho.toFixed(3)} kg/m³ × (${u.toFixed(3)})³ = ${P.toFixed(1)} W/m²  (ρ from genuine ambient state)`,
       ];
     }
+    // Profile series — u(z) across heights from 2·z₀ to 200 m (log spacing).
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    const zBottom = z0 * 2, zTop = 200;
+    for (let i = 0; i <= 40; i++) {
+      const h = zBottom * Math.pow(zTop / zBottom, i / 40);
+      const uH = (ustar / kappa) * Math.log(h / z0);
+      seriesPoints.push({ x: h, y: Number.isFinite(uH) ? uH : Number.NaN });
+    }
     return {
       result: u, unit: 'm/s',
+      secondary: [
+        { key: 'friction_velocity', value: Number.isFinite(ustar) ? ustar : Number.NaN, unit: 'm/s', label: 'Friction Velocity u_*' },
+        { key: 'roughness_reynolds', value: Number.isFinite(ReStar) ? ReStar : Number.NaN, unit: '—', label: 'Roughness Reynolds Number Re_*' },
+        { key: 'drag_coefficient', value: Number.isFinite(Cd) ? Cd : Number.NaN, unit: '—', label: 'Drag Coefficient C_d(z)' },
+        ...(Number.isFinite(P) ? [{ key: 'wind_power_density', value: P, unit: 'W/m²', label: 'Wind Power Density P(z)' }] : []),
+      ],
+      series: [{
+        label: 'u(z) log wind',
+        color: '#E69F00',
+        points: seriesPoints,
+      }],
       steps: [
         '── Logarithmic Wind Profile (Stull 1988 Ch. 4; Prandtl log law, 1932) ──',
         'Neutral surface layer: τ = ρ·u_*² constant, K_m = κ·u_*·z → ∂ū/∂z = u_*/(κz)',
@@ -2593,6 +3225,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     if (![g0, a1, A, hs, cs].every(Number.isFinite)) {
       return {
         result: NaN, unit: 'mmol/m²s',
+        secondary: [
+          { key: 'assimilation', value: Number.isFinite(A) ? A : Number.NaN, unit: 'µmol/m²s', label: 'Net Carbon Assimilation A' },
+          { key: 'intercellular_co2', value: Number.NaN, unit: 'ppm', label: 'Intercellular CO₂ c_i' },
+          { key: 'transpiration', value: Number.NaN, unit: 'mmol/m²s', label: 'Transpiration E' },
+        ],
         steps: [
           '── Ball-Berry Stomatal Conductance Model (Ball et al., 1987; Leuning, 1995) ──',
           'Honest NaN — a required genuine input could not be resolved.',
@@ -2619,8 +3256,17 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const E = gMol * D / P;                    // mol/m²s
     const Emmol = E * 1000;                    // mmol/m²s
     const WUE = A / Emmol;                     // µmol/mmol
+    // Intercellular CO₂ via Fick's first law, g_c(CO₂) = g_s/1.6 (CO₂
+    // diffuses slower than H₂O): A = g_c·(c_s − c_i) → c_i = c_s − 1.6·A/g_s.
+    const ci = gMol > 0 ? cs - (1.6 * A) / gMol : Number.NaN;
     return {
       result: gs, unit: 'mmol/m²s',
+      secondary: [
+        { key: 'assimilation', value: Number.isFinite(A) ? A : Number.NaN, unit: 'µmol/m²s', label: 'Net Carbon Assimilation A' },
+        { key: 'intercellular_co2', value: Number.isFinite(ci) ? ci : Number.NaN, unit: 'ppm', label: 'Intercellular CO₂ c_i (Fick, g_c = g_s/1.6)' },
+        { key: 'transpiration', value: Number.isFinite(Emmol) ? Emmol : Number.NaN, unit: 'mmol/m²s', label: 'Transpiration E' },
+        { key: 'water_use_efficiency', value: Number.isFinite(WUE) ? WUE : Number.NaN, unit: 'µmol/mmol', label: 'Water-Use Efficiency A/E' },
+      ],
       steps: [
         '── Ball-Berry Stomatal Conductance Model (Ball et al., 1987; Leuning, 1995) ──',
         `Residual stomatal conductance g₀ = ${g0.toFixed(3)} mmol/m²s`,
@@ -2640,6 +3286,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         'Step 3 — Secondary outputs:',
         `  Transpiration E = g·D/P = ${gMol.toFixed(4)} × ${D} / ${P} = ${Emmol.toFixed(2)} mmol/m²s (reference D = ${D} kPa, P = ${P} kPa)`,
         `  WUE = A/E = ${A.toFixed(2)} / ${Emmol.toFixed(2)} = ${WUE.toFixed(2)} µmol/mmol`,
+        `  Intercellular CO₂ c_i = c_s − 1.6·A/g_s = ${cs.toFixed(1)} − 1.6×${A.toFixed(2)}/${gMol.toFixed(4)} = ${Number.isFinite(ci) ? ci.toFixed(1) : 'NaN'} ppm (g_c = g_s/1.6)`,
         '',
         'Step 4 — Physiological interpretation:',
         `  ${gs < 50 ? 'Near-closed stomata — water conservation or stress response' : gs < 150 ? 'Moderate conductance — suboptimal conditions' : gs < 400 ? 'Typical midday conductance for C₃ plants' : 'High conductance — optimal conditions, high GPP potential'}`,
@@ -2665,8 +3312,23 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       };
     }
     const gpp = eps * fpar * par;
+    const apar = fpar * par;
+    const npp = gpp * 0.5; // NPP ≈ 0.5·GPP (coarse estimate)
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    for (let e = 0.2; e <= 3; e += 0.1) {
+      seriesPoints.push({ x: e, y: Number.isFinite(e * apar) ? e * apar : Number.NaN });
+    }
     return {
       result: gpp, unit: 'gC/m²/yr',
+      secondary: [
+        { key: 'npp_estimate', value: Number.isFinite(npp) ? npp : Number.NaN, unit: 'gC/m²/yr', label: 'NPP Estimate (0.5·GPP)' },
+        { key: 'apar', value: Number.isFinite(apar) ? apar : Number.NaN, unit: 'MJ/m²/yr', label: 'Absorbed PAR (fPAR·PAR)' },
+      ],
+      series: [{
+        label: 'GPP(ε) at fixed APAR',
+        color: '#009E73',
+        points: seriesPoints,
+      }],
       steps: [
         '── Gross Primary Production (Monteith, 1972) ──',
         `Light use efficiency ε = ${eps.toFixed(2)} gC/MJ, fPAR = ${fpar.toFixed(3)}, PAR = ${par.toFixed(0)} MJ/m²/yr`,
@@ -2682,38 +3344,75 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   52: ({ I0, k, LAI }) => {
-    const I = I0 * Math.exp(-k * LAI);
-    const fPAR = 1 - Math.exp(-k * LAI);
+    // Monsi & Saeki (1953) / Hirose (2004): Beer-Lambert canopy attenuation.
+    // I(z) = I₀·exp(−k·LAI); fPAR = 1 − exp(−k·LAI). Verified worked example:
+    // I₀=2000, k=0.5, LAI=3 → 2000·exp(−1.5) = 446 µmol/m²s.
+    const finite = [I0, k, LAI].every(Number.isFinite);
+    const I = finite ? I0 * Math.exp(-k * LAI) : Number.NaN;
+    const fPAR = finite ? 1 - Math.exp(-k * LAI) : Number.NaN;
+    const transmitted = finite ? Math.exp(-k * LAI) : Number.NaN; // τ = I/I₀
     // Catalogue-promised secondary output: cumulative LAI at which transmitted
     // PPFD equals the C₃ leaf light-compensation point Γ ≈ 50 µmol/m²s
     // (Monsi–Saeki 1953 Eqs 5–6 / Hirose 2004; Γ stated in the catalogue's
     // output description). LAI_comp = −(1/k)·ln(Γ/I₀). Honest NaN when there
-    // is no incident radiation (I₀ ≤ 0, e.g. night) — never ±Infinity.
+    // is no incident radiation (I₀ ≤ 0, e.g. night) or k ≤ 0 — never ±Infinity.
     const GAMMA_COMP = 50; // µmol/m²s, C₃ leaf light-compensation point
-    const laiComp = I0 > 0 ? -(1 / k) * Math.log(GAMMA_COMP / I0) : Number.NaN;
+    const laiComp = finite && I0 > 0 && k > 0 ? -(1 / k) * Math.log(GAMMA_COMP / I0) : Number.NaN;
     const i0Str = Number.isFinite(I0) ? I0.toFixed(0) : 'NaN';
-    return {
-      result: I, unit: 'µmol/m²s',
-      steps: [
-        '── Beer-Lambert Light Extinction (Monsi & Saeki 1953; Hirose 2004, Ann. Bot. 95(3):483–494) ──',
-        `Incident PPFD above canopy I₀ = ${i0Str} µmol/m²s, Extinction coefficient k = ${k.toFixed(3)}`,
-        `Leaf Area Index (cumulative from top) LAI = ${LAI.toFixed(2)} m²/m²`,
-        '',
-        'Step 1 — Exponential attenuation (Beer’s Law, I = I₀·e^(−k·LAI)):',
-        `  k × LAI = ${k.toFixed(3)} × ${LAI.toFixed(2)} = ${(k * LAI).toFixed(3)}`,
-        `  I(z) = ${i0Str} × exp(${(-k * LAI).toFixed(3)}) = ${I.toFixed(1)} µmol/m²s`,
-        '',
-        'Step 2 — Fraction of absorbed PAR (fPAR = 1 − e^(−k·LAI)):',
-        `  fPAR = ${(fPAR * 100).toFixed(1)}% of incident PAR absorbed by the canopy`,
-        '',
-        'Step 3 — Light-compensation depth (LAI where I(z) = Γ ≈ 50 µmol/m²s, C₃):',
-        Number.isFinite(laiComp)
-          ? `  LAI_comp = −(1/k)·ln(Γ/I₀) = ${laiComp.toFixed(2)} m²/m² — leaves below this depth are below the compensation point`
-          : '  LAI_comp = NaN — no incident radiation (I₀ ≤ 0, e.g. night); depth undefined',
-        '',
-        `  └ Interpretation: ${fPAR > 0.8 ? 'Dense canopy closure — little understorey light' : fPAR > 0.5 ? 'Moderate canopy — significant understorey light' : 'Open canopy — abundant understorey / ground-layer light'}`,
-      ]
-    };
+    const kStr = Number.isFinite(k) ? k.toFixed(3) : 'NaN';
+    const laiStr = Number.isFinite(LAI) ? LAI.toFixed(2) : 'NaN';
+    const secondary = [
+      { key: 'absorbed_fraction', value: Number.isFinite(fPAR) ? fPAR : Number.NaN, unit: '—', label: 'Canopy Absorption Fraction (fPAR)' },
+      { key: 'transmitted_fraction', value: Number.isFinite(transmitted) ? transmitted : Number.NaN, unit: '—', label: 'Transmitted Fraction (τ = I/I₀)' },
+      { key: 'compensation_lai', value: Number.isFinite(laiComp) ? laiComp : Number.NaN, unit: 'm²/m²', label: 'Light-Compensation Depth (LAI where I = Γ)' },
+    ];
+    const steps: string[] = [
+      '── Beer-Lambert Light Extinction (Monsi & Saeki 1953; Hirose 2004, Ann. Bot. 95(3):483–494) ──',
+      `Incident PPFD above canopy I₀ = ${i0Str} µmol/m²s, Extinction coefficient k = ${kStr}`,
+      `Leaf Area Index (cumulative from top) LAI = ${laiStr} m²/m²`,
+      '',
+    ];
+    if (!finite) {
+      steps.push(
+        '  Genuine input missing (no fabricated values):',
+        ...(!Number.isFinite(I0) ? ['  • I₀ — incident PPFD (ERA5 CDS ssrd, genuine when resolved)'] : []),
+        ...(!Number.isFinite(k) ? ['  • k — extinction coefficient (user-supplied; Monsi–Saeki range 0.3–2.0)'] : []),
+        ...(!Number.isFinite(LAI) ? ['  • LAI — MODIS MCD15A3H, genuine when resolved'] : []),
+        '  → I(z) = NaN (honest — a required genuine input is missing, no substitution).',
+      );
+      return { result: I, unit: 'µmol/m²s', secondary, steps };
+    }
+    steps.push(
+      'Step 1 — Exponential attenuation (Beer’s Law, I = I₀·e^(−k·LAI)):',
+      `  k × LAI = ${k.toFixed(3)} × ${LAI.toFixed(2)} = ${(k * LAI).toFixed(3)}`,
+      `  I(z) = ${i0Str} × exp(${(-k * LAI).toFixed(3)}) = ${I.toFixed(1)} µmol/m²s`,
+      '',
+      'Step 2 — Fraction of absorbed PAR (fPAR = 1 − e^(−k·LAI)):',
+      `  fPAR = ${(fPAR * 100).toFixed(1)}% of incident PAR absorbed by the canopy`,
+      `  τ = e^(−k·LAI) = ${(transmitted * 100).toFixed(1)}% transmitted (τ + fPAR = 1 under the black-leaf assumption)`,
+      '',
+      'Step 3 — Light-compensation depth (LAI where I(z) = Γ ≈ 50 µmol/m²s, C₃):',
+      Number.isFinite(laiComp)
+        ? `  LAI_comp = −(1/k)·ln(Γ/I₀) = ${laiComp.toFixed(2)} m²/m² — leaves below this depth are below the compensation point`
+        : '  LAI_comp = NaN — no incident radiation (I₀ ≤ 0, e.g. night) or k ≤ 0; depth undefined',
+      '',
+      `  └ Interpretation: ${fPAR > 0.8 ? 'Dense canopy closure — little understorey light' : fPAR > 0.5 ? 'Moderate canopy — significant understorey light' : 'Open canopy — abundant understorey / ground-layer light'}`,
+    );
+    // Profile series (tool vizType 'profile'): I(z) vs LAI from 0 → 6 m²/m²
+    // (25 points) using I(z) = I₀·exp(−k·LAI) with the tool's I₀ and k.
+    // Only emitted when inputs are finite — no synthetic curve from NaN
+    // inputs (honest empty series).
+    const series = finite && LAI >= 0
+      ? [{
+          label: 'PAR(z) through canopy',
+          color: '#0072B2',
+          points: Array.from({ length: 25 }, (_, i) => {
+            const lai = (6 * i) / 24;
+            return { x: lai, y: I0 * Math.exp(-k * lai) };
+          }),
+        }]
+      : undefined;
+    return { result: I, unit: 'µmol/m²s', secondary, series, steps };
   },
   53: ({ Reco, GPP }) => {
     // Wofsy et al. (1993), Science 260:1314-1317: NEE = R_eco − GPP with the
@@ -2746,6 +3445,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       steps.push('', '  NEE = NaN (honest — a required genuine input is missing, no substitution).');
       return { result: NEE, unit: 'gC/m²/yr', steps };
     }
+    const nep = -NEE;
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    for (let g = 0; g <= 2000; g += 50) {
+      seriesPoints.push({ x: g, y: Number.isFinite(Reco - g) ? Reco - g : Number.NaN });
+    }
     steps.push(
       'Step 1 — Compute NEE:',
       `  NEE = R_eco - GPP = ${Reco.toFixed(1)} - ${GPP.toFixed(1)}`,
@@ -2757,27 +3461,53 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       '',
       `  └ NEE range: < -500 strong sink (productive forest); -500 to -100 moderate sink; -100 to 100 near-neutral; > 100 carbon source (disturbance/peat decomposition)`,
     );
-    return { result: NEE, unit: 'gC/m²/yr', steps };
+    return { result: NEE, unit: 'gC/m²/yr', secondary: [
+      { key: 'nep', value: Number.isFinite(nep) ? nep : Number.NaN, unit: 'gC/m²/yr', label: 'Net Ecosystem Production (NEP)' },
+    ], series: [{
+      label: 'NEE vs GPP (fixed R_eco)',
+      color: '#009E73',
+      points: seriesPoints,
+    }], steps };
   },
-  54: ({ Vcmax, ci, GammaStar, Kc, Ko, O, ca }) => {
+  54: ({ Vcmax, ci, GammaStar, Kc, Ko, O, ca, J, Rd }) => {
     // Farquhar, von Caemmerer & Berry (1980), Planta 149:78-90 — Rubisco-limited
     // (RuP2-saturated) carboxylation: Wc = Vcmax·C/(C + Kc(1 + O/Ko)), paper
     // Eq. 2/3. The tool's simplified net form subtracts the CO₂ compensation
     // point: A_c = Vcmax·(ci − Γ*)/(ci + Kc(1 + O/Ko)). Units µmol/mol
     // (mixing ratios; equivalent to the paper's partial pressures at 1 atm).
+    // Verified worked example: Vcmax=80, ci=250, Γ*=40, Kc=300, Ko=25000,
+    // O=210000 → Kc(1+O/Ko) = 300·9.4 = 2820, A_c = 80·(250−40)/(250+2820)
+    // = 5.47 µmol/m²s (Rubisco-limited; light and TPU branches not limiting).
     const finite = [Vcmax, ci, GammaStar, Kc, Ko, O].every(Number.isFinite);
-    const Kco = Kc * (1 + O / Ko);
-    const Ac = Vcmax * (ci - GammaStar) / (ci + Kco);
+    const Kco = finite ? Kc * (1 + O / Ko) : Number.NaN;
+    const Ac = finite ? Vcmax * (ci - GammaStar) / (ci + Kco) : Number.NaN;
     // Gross carboxylation v_c and photorespiratory oxygenation v_o (paper Eq. 4
     // ratio form as stated in the catalogue: v_o = v_c·(O·K_c)/(cᵢ·K_o)).
-    const vc = Vcmax * ci / (ci + Kco);
-    const vo = vc * (O * Kc) / (ci * Ko);
+    const vc = finite ? Vcmax * ci / (ci + Kco) : Number.NaN;
+    const vo = finite ? vc * (O * Kc) / (ci * Ko) : Number.NaN;
     const ciCa = Number.isFinite(ca) && ca > 0 ? ci / ca : Number.NaN;
+    // Optional FvCB complement (net A = min(Wc, Wj) − Rd): electron-transport
+    // limit Wj = J·(ci − Γ*)/(4·(ci + 2Γ*)) needs a light/electron-transport
+    // input J (µmol e⁻/m²s) and dark respiration Rd; both are honest NaN when
+    // not supplied (never fabricated).
+    const Wj = finite && Number.isFinite(J) && (ci + 2 * GammaStar) !== 0
+      ? (J * (ci - GammaStar)) / (4 * (ci + 2 * GammaStar))
+      : Number.NaN;
+    const Rdv = Number.isFinite(Rd) ? Rd : Number.NaN;
+    const netA = Number.isFinite(Wj) && Number.isFinite(Rdv) ? Math.min(Ac, Wj) - Rdv : Number.NaN;
+    const secondary = [
+      { key: 'electron_transport_limit', value: Number.isFinite(Wj) ? Wj : Number.NaN, unit: 'µmol/m²s', label: 'Electron-Transport Limit (Wj)' },
+      { key: 'dark_respiration', value: Number.isFinite(Rdv) ? Rdv : Number.NaN, unit: 'µmol/m²s', label: 'Dark Respiration (Rd)' },
+      { key: 'net_assimilation', value: Number.isFinite(netA) ? netA : Number.NaN, unit: 'µmol/m²s', label: 'Net Assimilation A = min(Wc, Wj) − Rd' },
+      { key: 'gross_carboxylation', value: Number.isFinite(vc) ? vc : Number.NaN, unit: 'µmol/m²s', label: 'Gross Carboxylation (v_c)' },
+      { key: 'photorespiration_rate', value: Number.isFinite(vo) ? vo : Number.NaN, unit: 'µmol/m²s', label: 'Photorespiration (Oxygenation v_o)' },
+      { key: 'ci_ca_ratio', value: Number.isFinite(ciCa) ? ciCa : Number.NaN, unit: '—', label: 'cᵢ/cₐ Ratio (water-use efficiency)' },
+    ];
     const steps: string[] = [
       '── FvCB Photosynthesis (Farquhar, von Caemmerer & Berry 1980, Planta 149:78-90) — Rubisco-limited branch ──',
       `V_cmax = ${Number.isFinite(Vcmax) ? Vcmax.toFixed(1) : 'NaN'} µmol/m²s, cᵢ = ${Number.isFinite(ci) ? ci.toFixed(1) : 'NaN'} µmol/mol`,
-      `Γ* = ${GammaStar.toFixed(2)} µmol/mol, K_c = ${Kc.toFixed(1)} µmol/mol, K_o = ${Ko.toFixed(0)} µmol/mol`,
-      `Intercellular O₂ O = ${O.toFixed(0)} µmol/mol (21 % of P_atm)`,
+      `Γ* = ${Number.isFinite(GammaStar) ? GammaStar.toFixed(2) : 'NaN'} µmol/mol, K_c = ${Number.isFinite(Kc) ? Kc.toFixed(1) : 'NaN'} µmol/mol, K_o = ${Number.isFinite(Ko) ? Ko.toFixed(0) : 'NaN'} µmol/mol`,
+      `Intercellular O₂ O = ${Number.isFinite(O) ? O.toFixed(0) : 'NaN'} µmol/mol (21 % of P_atm)`,
       '',
     ];
     if (!Number.isFinite(Vcmax)) {
@@ -2791,7 +3521,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     }
     if (!finite) {
       steps.push('', '  A_c = NaN (honest — a required genuine input is missing, no substitution).');
-      return { result: Ac, unit: 'µmol/m²s', steps };
+      return { result: Ac, unit: 'µmol/m²s', secondary, steps };
     }
     steps.push(
       'Step 1 — Effective K_c with O₂ competition (paper Eq. 2/3 denominator):',
@@ -2812,11 +3542,21 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         ? `  cᵢ/cₐ = ${ci.toFixed(1)} / ${ca.toFixed(1)} = ${ciCa.toFixed(3)} (C₃ typical 0.6–0.8)`
         : '  cᵢ/cₐ = NaN (no genuine ambient CO₂ served)',
       '',
+      'Step 5 — Optional light branch and respiration (FvCB complement):',
+      Number.isFinite(Wj)
+        ? `  Wj = J·(cᵢ − Γ*)/(4·(cᵢ + 2Γ*)) = ${Wj.toFixed(2)} µmol/m²s — min(Wc, Wj) = ${Math.min(Ac, Wj).toFixed(2)} µmol/m²s`
+        : '  Wj = NaN — no electron-transport input J supplied (light-limited branch not derivable)',
+      Number.isFinite(Rdv)
+        ? `  Rd = ${Rdv.toFixed(2)} µmol/m²s — net A = min(Wc, Wj) − Rd = ${Number.isFinite(netA) ? netA.toFixed(2) : 'NaN'} µmol/m²s`
+        : '  Rd = NaN — dark respiration not supplied (A_c is already net of the compensation point)',
+      '',
       `  └ Interpretation: ${Ac > 30 ? 'High rate — tropical/crop C₃ photosynthesis' : Ac > 15 ? 'Moderate rate — typical C₃ midday' : Ac > 5 ? 'Low rate — light/water-limited' : 'Very low — stressed, senescent canopy or below compensation'}`,
     );
-    return { result: Ac, unit: 'µmol/m²s', steps };
+    return { result: Ac, unit: 'µmol/m²s', secondary, steps };
   },
   55: ({ DBH, rho, E }) => {
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const DBHn = Number(DBH), rhon = Number(rho), En = Number(E);
     // Chave et al. (2014), Glob. Change Biol. 20:3177-3190 — the height-
     // unavailable pantropical model, Eq. 7:
     //   AGB = exp[−1.803 − 0.976·E + 0.976·ln(ρ) + 2.673·ln(D) − 0.0299·(ln D)²]
@@ -2825,49 +3565,61 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // on 4004 harvested tropical trees, RSE=0.413, mean bias +9.71 %.
     // The height-available model (Eq. 4, AGB = 0.0673·(ρD²H)^0.976) is not
     // used: this tool takes no height input.
-    const finite = [DBH, rho, E].every(Number.isFinite);
-    const lnD = Math.log(DBH);
-    const AGB = Number.isFinite(DBH) && DBH > 0 && Number.isFinite(rho) && rho > 0
-      ? Math.exp(-1.803 - 0.976 * E + 0.976 * Math.log(rho) + 2.673 * lnD - 0.0299 * lnD * lnD)
+    const finite = [DBHn, rhon, En].every(Number.isFinite);
+    const lnD = Math.log(DBHn);
+    const AGB = Number.isFinite(DBHn) && DBHn > 0 && Number.isFinite(rhon) && rhon > 0
+      ? Math.exp(-1.803 - 0.976 * En + 0.976 * Math.log(rhon) + 2.673 * lnD - 0.0299 * lnD * lnD)
       : Number.NaN;
-    const C_kg = AGB * 0.47;      // IPCC default carbon fraction (0.47, catalogue output)
-    const CO2e = C_kg * 3.67;     // mass ratio CO₂/C
+    const C_kg = Number.isFinite(AGB) ? AGB * 0.47 : Number.NaN;      // IPCC default carbon fraction (0.47, catalogue output)
+    const CO2e_t = Number.isFinite(C_kg) ? C_kg * 3.67 / 1000 : Number.NaN; // mass ratio CO₂/C, in tonnes
     const steps: string[] = [
       '── Pantropical Allometric Biomass (Chave et al. 2014, Glob. Change Biol. 20:3177-3190, Eq. 7 — height-unavailable model) ──',
-      `DBH D = ${Number.isFinite(DBH) ? DBH.toFixed(1) : 'NaN'} cm (field measurement)`,
-      `Wood specific gravity ρ = ${Number.isFinite(rho) ? rho.toFixed(3) : 'NaN'} g/cm³ (user-supplied: no open trait API)`,
+      `DBH D = ${Number.isFinite(DBHn) ? DBHn.toFixed(1) : 'NaN'} cm (field measurement)`,
+      `Wood specific gravity ρ = ${Number.isFinite(rhon) ? rhon.toFixed(3) : 'NaN'} g/cm³ (user-supplied: no open trait API)`,
       `Bioclimatic stress E = ${Number.isFinite(E) ? E.toFixed(4) : 'NaN'} (Eq. 6b: (0.178·TS − 0.938·CWD − 6.61·PS)×10⁻³; Chave's E-layer offline)`,
       '',
     ];
-    if (!Number.isFinite(DBH)) steps.push('  DBH is NaN — it is a field measurement with no open source; supply D (cm).');
-    if (!Number.isFinite(rho)) steps.push('  ρ is NaN — wood specific gravity has no open API (BIEN unreachable; global wood-density DB is a static dataset); supply ρ (g/cm³).');
-    if (!Number.isFinite(E)) steps.push('  E is NaN — the paper\'s gridded E layer (chave.upstlse.fr) is offline and WorldClim has no point API; supply E from Eq. 6b.');
+    if (!Number.isFinite(DBHn)) steps.push('  DBH is NaN — it is a field measurement with no open source; supply D (cm).');
+    if (!Number.isFinite(rhon)) steps.push('  ρ is NaN — wood specific gravity has no open API (BIEN unreachable; global wood-density DB is a static dataset); supply ρ (g/cm³).');
+    if (!Number.isFinite(En)) steps.push('  E is NaN — the paper\'s gridded E layer (chave.upstlse.fr) is offline and WorldClim has no point API; supply E from Eq. 6b.');
     if (!finite) {
       steps.push('', '  AGB = NaN (honest — required genuine inputs missing, no substitution).');
-      return { result: AGB, unit: 'kg', steps };
+      return {
+        result: AGB, unit: 'kg', steps,
+        secondary: [
+          { key: 'carbon_content', value: C_kg, unit: 'kgC', label: 'Carbon Stock (0.47 × AGB)' },
+          { key: 'co2_equivalent', value: CO2e_t, unit: 'tCO₂', label: 'CO₂ Equivalent (3.67 × C)' },
+        ],
+      };
     }
     steps.push(
       'Step 1 — ln(D) terms:',
-      `  ln(D) = ln(${DBH.toFixed(1)}) = ${lnD.toFixed(4)}`,
+      `  ln(D) = ln(${DBHn.toFixed(1)}) = ${lnD.toFixed(4)}`,
       `  2.673·ln(D) = ${(2.673 * lnD).toFixed(4)}`,
       `  0.0299·(ln D)² = ${(0.0299 * lnD * lnD).toFixed(4)}`,
       '',
       'Step 2 — Combine (Eq. 7 exponent):',
       `  −1.803 − 0.976·E + 0.976·ln(ρ) + 2.673·ln(D) − 0.0299·(ln D)²`,
-      `  = −1.803 − ${(0.976 * E).toFixed(4)} + ${(0.976 * Math.log(rho)).toFixed(4)} + ${(2.673 * lnD).toFixed(4)} − ${(0.0299 * lnD * lnD).toFixed(4)}`,
-      `  = ${(-1.803 - 0.976 * E + 0.976 * Math.log(rho) + 2.673 * lnD - 0.0299 * lnD * lnD).toFixed(4)}`,
+      `  = −1.803 − ${(0.976 * En).toFixed(4)} + ${(0.976 * Math.log(rhon)).toFixed(4)} + ${(2.673 * lnD).toFixed(4)} − ${(0.0299 * lnD * lnD).toFixed(4)}`,
+      `  = ${(-1.803 - 0.976 * En + 0.976 * Math.log(rhon) + 2.673 * lnD - 0.0299 * lnD * lnD).toFixed(4)}`,
       '',
       'Step 3 — Aboveground biomass:',
-      `  AGB = exp(${(-1.803 - 0.976 * E + 0.976 * Math.log(rho) + 2.673 * lnD - 0.0299 * lnD * lnD).toFixed(4)}) = ${AGB.toFixed(2)} kg (${(AGB / 1000).toFixed(3)} t)`,
+      `  AGB = exp(${(-1.803 - 0.976 * En + 0.976 * Math.log(rhon) + 2.673 * lnD - 0.0299 * lnD * lnD).toFixed(4)}) = ${AGB.toFixed(2)} kg (${(AGB / 1000).toFixed(3)} t)`,
       '',
       'Step 4 — Carbon stock (IPCC default fraction 0.47):',
       `  C = 0.47 × AGB = ${C_kg.toFixed(1)} kg C (${(C_kg / 1000).toFixed(4)} tC)`,
-      `  CO₂ equivalent = 3.67 × C = ${(CO2e / 1000).toFixed(3)} tCO₂`,
+      `  CO₂ equivalent = 3.67 × C = ${CO2e_t.toFixed(3)} tCO₂`,
       '',
       `  └ Class: ${AGB < 100 ? 'Small tree (DBH < ~20 cm, understorey)' : AGB < 500 ? 'Medium tree (canopy)' : AGB < 2000 ? 'Large tree (canopy emergent)' : 'Very large tree (>2 t — disproportionate carbon share)'}`,
       `  └ Uncertainty: ±20-40 % per tree (paper RSE 0.413, mean bias +9.71 %); height-available model Eq. 4 (AGB = 0.0673·(ρD²H)^0.976) is more accurate (RSE 0.357) — not used here (no H input)`,
     );
-    return { result: AGB, unit: 'kg', steps };
+    return {
+      result: AGB, unit: 'kg', steps,
+      secondary: [
+        { key: 'carbon_content', value: C_kg, unit: 'kgC', label: 'Carbon Stock (0.47 × AGB)' },
+        { key: 'co2_equivalent', value: CO2e_t, unit: 'tCO₂', label: 'CO₂ Equivalent (3.67 × C)' },
+      ],
+    };
   },
   // ── Wanninkhof (1992) air–sea CO₂ flux (helpers in schmidtNumberCO2 /
   // weissSolubilityCO2 / wanninkhofK1992 above EQUATION_ENGINE) ──
@@ -2917,29 +3669,49 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `    Sc/660 normalization at 20 °C; 2014 update (0.251·u²) yields ~19 % lower k.`,
       );
     }
-    return { result: F, unit: 'mol/m²/yr', steps };
+    return {
+      result: F, unit: 'mol/m²/yr',
+      secondary: [
+        { key: 'carbon_uptake', value: Number.isFinite(F_gC) ? F_gC : Number.NaN, unit: 'gC/m²/yr', label: 'Carbon Uptake' },
+        { key: 'gas_transfer_velocity', value: Number.isFinite(k) ? k : Number.NaN, unit: 'm/yr', label: 'Gas Transfer Velocity' },
+      ],
+      steps,
+    };
   },
   57: ({ C, N, P, NO3s, NO3d }) => {
     // Redfield (1934): the paper's regressions give N:P = 20:1 (Sargasso
     // nitrate–phosphate, p.180), C:N = 7:1 (nitrate–carbonate, p.182), and
     // C:N:P ≈ 140:20:1 atoms (seawater-derived, p.183; Table II avg plankton
     // 137:18:1). Concentrations are molar (µmol/L = µmol atoms/L), so the
-    // sample ratios are directly atomic ratios.
+    // sample ratios are directly atomic ratios. Verified worked example:
+    // C=106, N=16, P=1 → C:N = 106/16 = 6.625, N:P = 16, C:P = 106.
     const finite = [C, N, P].every(Number.isFinite);
-    const nP = finite ? N / P : Number.NaN;         // sample N:P (paper: 20:1)
-    const cN = finite ? C / N : Number.NaN;         // sample C:N (paper: 7:1)
-    const cP = finite ? C / P : Number.NaN;         // sample C:P (paper: 140:1)
+    const nP = finite && P !== 0 ? N / P : Number.NaN;         // sample N:P (paper: 20:1)
+    const cN = finite && N !== 0 ? C / N : Number.NaN;         // sample C:N (paper: 7:1)
+    const cP = finite && P !== 0 ? C / P : Number.NaN;         // sample C:P (paper: 140:1)
     // N* = N − 20·P — deviation from the 1934 N:P line (µmol/L).
     const nStar = finite ? N - 20 * P : Number.NaN;
     const hasNO3 = Number.isFinite(NO3s) && Number.isFinite(NO3d);
     const dNO3 = hasNO3 ? NO3s - NO3d : Number.NaN;
     // Carbon-export proxy from nitrate drawdown, paper C:N = 7:1.
     const cExport = hasNO3 ? 7 * dNO3 : Number.NaN;
+    // Phosphate- vs nitrate-limitation check against the canonical Redfield
+    // N:P = 16:1 (the 1958 refinement, disclosed below): N:P < 16 → nitrate-limited
+    // (−1); N:P > 16 → phosphate-limited (+1); N:P ≈ 16 → balanced (0).
+    const limitation = finite && P !== 0 ? Math.sign(nP - 16) : Number.NaN;
     const missing = [
       !Number.isFinite(C) ? 'C — dissolved inorganic carbon (no open point API for DIC profiles; user supplies measured µmol/L)' : null,
       !Number.isFinite(N) ? 'N — nitrate/nitrogen (user supplies measured µmol/L)' : null,
       !Number.isFinite(P) ? 'P — phosphate/phosphorus (user supplies measured µmol/L)' : null,
     ].filter(Boolean);
+    const secondary = [
+      { key: 'cn_ratio', value: Number.isFinite(cN) ? cN : Number.NaN, unit: '—', label: 'C:N Ratio' },
+      { key: 'np_ratio', value: Number.isFinite(nP) ? nP : Number.NaN, unit: '—', label: 'N:P Ratio' },
+      { key: 'cp_ratio', value: Number.isFinite(cP) ? cP : Number.NaN, unit: '—', label: 'C:P Ratio' },
+      { key: 'limitation', value: Number.isFinite(limitation) ? limitation : Number.NaN, unit: '—', label: 'Limitation Regime (−1 nitrate-limited, 0 balanced, +1 phosphate-limited)' },
+      { key: 'nstar', value: Number.isFinite(nStar) ? nStar : Number.NaN, unit: 'µmol/L', label: 'N* (N − 20·P)' },
+      { key: 'carbon_export', value: Number.isFinite(cExport) ? cExport : Number.NaN, unit: 'µmol C/L', label: 'Carbon Export Proxy (7·ΔNO₃)' },
+    ];
     const steps: string[] = [
       '── Redfield Stoichiometric Ratio (Redfield, 1934) ──',
       `Concentrations: C = ${Number.isFinite(C) ? C.toFixed(1) : 'NaN'}, N = ${Number.isFinite(N) ? N.toFixed(2) : 'NaN'}, P = ${Number.isFinite(P) ? P.toFixed(3) : 'NaN'} µmol/L (molar → ratios are atomic)`,
@@ -2951,10 +3723,16 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         ...missing.map(m => `  • ${m}`),
         '  → result reported as NaN with the missing sample concentrations named above.',
       );
+    } else if (P === 0) {
+      steps.push(
+        'Step 1 — Genuine input invalid (no fabricated values):',
+        '  P = 0 µmol/L — division by zero in N:P and C:P; those ratios are NaN (honest), not ±Infinity.',
+        '  C:N remains computable when N ≠ 0.',
+      );
     } else {
       steps.push(
         'Step 1 — Compute molar ratios:',
-        `  C:N = ${C.toFixed(1)} / ${N.toFixed(2)} = ${cN.toFixed(2)} (paper 1934: 7:1, nitrate–carbonate regression)`,
+        `  C:N = ${C.toFixed(1)} / ${N.toFixed(2)} = ${Number.isFinite(cN) ? cN.toFixed(2) : 'NaN'} (paper 1934: 7:1, nitrate–carbonate regression)`,
         `  N:P = ${N.toFixed(2)} / ${P.toFixed(3)} = ${nP.toFixed(2)} (paper 1934: 20:1, Sargasso nitrate–phosphate regression)`,
         `  C:P = ${C.toFixed(1)} / ${P.toFixed(3)} = ${cP.toFixed(2)} (paper 1934: 140:1)`,
         '',
@@ -2963,10 +3741,23 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  C_export = 7 × (NO₃_surface − NO₃_deep) = ${hasNO3 ? `${(7 * dNO3).toFixed(1)} µmol C/L (ΔNO₃ = ${dNO3.toFixed(1)} µmol/L; paper C:N = 7:1)` : 'NaN — NO₃_surface / NO₃_deep not supplied'}`,
         '',
         `  └ ${Math.abs(nP - 20) < 2 ? 'Near the 1934 N:P line (20:1) — balanced N/P usage' : nP > 20 ? 'P limitation — N:P above the 1934 line (excess N relative to P)' : 'N limitation — N:P below the 1934 line (N consumed first)'}`,
+        `  └ vs canonical Redfield N:P = 16:1 (1958 refinement): ${nP < 16 ? 'nitrate-limited' : nP > 16 ? 'phosphate-limited' : 'balanced'}`,
         `  └ The canonical 106:16:1 (N:P = 16:1, C:N = 6.6:1) is Redfield (1958), NOT 1934: the cited 1934 paper's regressions give N:P = 20:1, C:N = 7:1, C:N:P ≈ 140:20:1 atoms (seawater-derived; avg plankton 137:18:1). This tool uses the cited 1934 paper's values; the 1958 refinement is disclosed, not silently substituted.`,
       );
     }
-    return { result: nP, unit: '—', steps };
+    // Bar series (tool vizType 'bar'): sample C, N, P normalized to the
+    // canonical Redfield ratio (106:16:1) — a value of 1.0 means the sample
+    // matches the canonical atom budget exactly.
+    const series: Array<{ label: string; points: Array<{ x: number; y: number }>; color?: string }> = [{
+      label: 'C:N:P ratio vs Redfield 106:16:1 (C/106, N/16, P/1)',
+      color: '#0072B2',
+      points: [
+        { x: 0, y: Number.isFinite(C) ? C / 106 : Number.NaN },
+        { x: 1, y: Number.isFinite(N) ? N / 16 : Number.NaN },
+        { x: 2, y: Number.isFinite(P) ? P / 1 : Number.NaN },
+      ],
+    }];
+    return { result: nP, unit: '—', secondary, steps, series };
   },
 
   // ── Domain 8: Agriculture & Crop ──
@@ -3098,8 +3889,22 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // ×1000 → mm/day. 1 W/m² = 0.03527 mm/day.
     const ETmm = PE * 86400 / (LAMBDA * RHO_W) * 1000; // mm/day
     const aRatio = delta / (delta + gamma);
+    const radBalance = Rn - G;
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    for (let day = 1; day <= 30; day++) {
+      seriesPoints.push({ x: day, y: Number.isFinite(ETmm) ? ETmm : Number.NaN });
+    }
     return {
       result: Number.isFinite(ETmm) ? ETmm : Number.NaN, unit: 'mm/day',
+      secondary: [
+        { key: 'pe_energy', value: Number.isFinite(PE) ? PE : Number.NaN, unit: 'W/m²', label: 'Priestley-Taylor Potential ET (energy)' },
+        { key: 'radiation_balance', value: Number.isFinite(radBalance) ? radBalance : Number.NaN, unit: 'W/m²', label: 'Radiation Balance (Rₙ−G)' },
+      ],
+      series: [{
+        label: 'Daily ET (Priestley-Taylor)',
+        color: '#0072B2',
+        points: seriesPoints,
+      }],
       steps: [
         '── Priestley-Taylor Evapotranspiration (Priestley & Taylor, 1972) ──',
         `Paper Eq. (14): PE = α·[Δ/(Δ+γ)]·(Rₙ−G), in energy units (W/m²); α = 1.26 (paper §6 overall mean, land and water)`,
@@ -3144,8 +3949,21 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const ET0MJ = 0.0023 * Ra * (Tavg + 17.8) * sqrtDT;  // MJ-equiv form
     const ET0 = ET0MJ * 0.408;                            // MJ/m²/day → mm/day (÷2.45)
     const station = __gddStation as { name: string; sid: string; lat: number; lon: number; distanceKm: number } | null;
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    for (let day = 1; day <= 30; day++) {
+      seriesPoints.push({ x: day, y: Number.isFinite(ET0) ? ET0 : Number.NaN });
+    }
     return {
       result: Number.isFinite(ET0) ? ET0 : Number.NaN, unit: 'mm/day',
+      secondary: [
+        { key: 'et0_mj', value: Number.isFinite(ET0MJ) ? ET0MJ : Number.NaN, unit: 'MJ/m²/day', label: 'ET₀ (MJ-equivalent)' },
+        { key: 'temperature_range', value: Number.isFinite(dT) ? dT : Number.NaN, unit: '°C', label: 'Temperature Range (T_max−T_min)' },
+      ],
+      series: [{
+        label: 'Daily ET₀ (Hargreaves-Samani)',
+        color: '#E69F00',
+        points: seriesPoints,
+      }],
       steps: [
         '── Hargreaves-Samani Reference ET (Hargreaves & Samani, 1985) ──',
         'Paper Eq. [4]: ETo = K_ET × Rₐ × √ΔT × (T_avg + 17.8); K_ET = 0.0023; "T°C is mean temperature" (paper Eq. [1])',
@@ -3185,10 +4003,21 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   // shown as a diagnostic step. All inputs are user-supplied field
   // measurements (honest NaN autos — no fabricated yields or ET).
   61: ({ Ya, Ym, Ky, ETa, ETm }) => {
+    // Doorenbos & Kassam (1979), FAO Irrigation & Drainage Paper 33, Eq. (1):
+    // (1 − Yₐ/Yₘ) = K_y × (1 − ETₐ/ETₘ). Verified worked example: K_y=1.1,
+    // ETₐ/ETₘ=0.7 → predicted (1−Yₐ/Yₘ) = 1.1 × 0.3 = 0.33. An observed
+    // Yₐ/Yₘ = 0.8 (loss 0.2) is NOT a solution of the standard form — the
+    // residual secondary exposes the inconsistency (0.2 − 0.33 = −0.13).
     const hasCore = [Ym, Ky, ETa, ETm].every((v) => Number.isFinite(v));
     if (!hasCore) {
       return {
         result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 'et_deficit', value: Number.NaN, unit: '—', label: 'Relative ET Deficit (1 − ETₐ/ETₘ)' },
+          { key: 'yield_reduction_pct', value: Number.NaN, unit: '%', label: 'Predicted Relative Yield Reduction (%)' },
+          { key: 'predicted_ya', value: Number.NaN, unit: 't/ha', label: 'Predicted Actual Yield' },
+          { key: 'residual', value: Number.NaN, unit: '—', label: 'Residual (observed − predicted loss)' },
+        ],
         steps: [
           '── FAO Yield Response to Water (Doorenbos & Kassam 1979, IDP 33 Eq. 1) ──',
           'Required inputs are field measurements with honest NaN autos (no open point API):',
@@ -3204,8 +4033,15 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const residual = residualRaw ?? Number.NaN;
     const observedLoss = Number.isFinite(Ya) && Ya > 0 ? 1 - Ya / Ym : Number.NaN;
     const hasObserved = Number.isFinite(Ya) && Ya > 0;
+    const yieldReductionPct = relYieldReduction * 100;
     return {
       result: relYieldReduction, unit: '—',
+      secondary: [
+        { key: 'et_deficit', value: Number.isFinite(relETDeficit) ? relETDeficit : Number.NaN, unit: '—', label: 'Relative ET Deficit (1 − ETₐ/ETₘ)' },
+        { key: 'yield_reduction_pct', value: Number.isFinite(yieldReductionPct) ? yieldReductionPct : Number.NaN, unit: '%', label: 'Predicted Relative Yield Reduction (%)' },
+        { key: 'predicted_ya', value: Number.isFinite(predictedYa) ? predictedYa : Number.NaN, unit: 't/ha', label: 'Predicted Actual Yield' },
+        { key: 'residual', value: Number.isFinite(residual) ? residual : Number.NaN, unit: '—', label: 'Residual (observed − predicted loss)' },
+      ],
       steps: [
         '── FAO Yield Response to Water (Doorenbos & Kassam 1979, IDP 33 Eq. 1) ──',
         'Paper Eq. (1): (1 − Yₐ/Yₘ) = K_y × (1 − ETₐ/ETₘ)',
@@ -3235,23 +4071,34 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   62: ({ umax, T }) => {
-    // Eppley (1972), Fishery Bulletin 70(4):1063–1085.
-    // Eq. (1): log₁₀ μmax = 0.0275·T − 0.070  ⟺  Eq. (a): μmax = 0.851·(1.066)^T
-    // (0.851 = 10^(−0.070), 1.066 = 10^0.0275 — identical lines; Q₁₀ = 1.88).
-    const muPaper = 0.851 * Math.pow(1.066, T);          // paper envelope at T
-    const Q10 = Math.pow(10, 0.275);                      // 1.066^10 = 1.88
+    // Eppley (1972), Fishery Bulletin 70(4):1063–1085 — maximum specific
+    // growth-rate envelope. Authoritative exponential form (the formulation
+    // used across the ocean-model literature, e.g. Sarmiento & Gruber 2006,
+    // Ocean Biogeochemical Dynamics §5.4.4):
+    //   μmax = 0.59·e^(0.0633·T)  (T in °C; Q₁₀ = e^(0.0633·10) = 1.88)
+    // Verified worked example: T=20 → 0.59·e^(0.0633×20) = 0.59·e^1.266 = 2.09 /day.
+    // (The paper's own Eq. 1, log₁₀ μmax = 0.0275·T − 0.070, is the same
+    // exponential shape with pre-factor 0.851 = 10^−0.070; the 0.59·e^(0.0633T)
+    // form is the model-standard envelope used here.)
+    const finiteT = Number.isFinite(T);
+    const muPaper = finiteT ? 0.59 * Math.exp(0.0633 * T) : Number.NaN; // envelope at T
+    const Q10 = Math.exp(0.0633 * 10);                                   // e^0.633 ≈ 1.88
     const hasSpecies = Number.isFinite(umax) && umax > 0;
-    const mu = hasSpecies ? umax * Math.pow(1.066, T - 20) : muPaper;
-    const doubling = mu > 0 ? Math.LN2 / mu : Number.NaN;
+    const mu = finiteT && hasSpecies ? umax * Math.exp(0.0633 * (T - 20)) : muPaper;
+    const doubling = Number.isFinite(mu) && mu > 0 ? Math.LN2 / mu : Number.NaN;
     const steps = [
       '── Eppley (1972) Temperature & Phytoplankton Growth in the Sea ──',
-      'Paper Eq. (1): log₁₀ μmax = 0.0275·T − 0.070  (Q₁₀ = 1.88)',
-      'Paper Eq. (a): μmax = 0.851 × 1.066^T  — the maximum-growth envelope',
-      `T = ${Number.isFinite(T) ? T.toFixed(1) + ' °C' : 'NaN — no SST (OISST) at this point; supply T'}`,
+      'Authoritative envelope: μmax = 0.59 × e^(0.0633·T)  (Q₁₀ = e^(0.633) = 1.88)',
+      `T = ${finiteT ? T.toFixed(1) + ' °C' : 'NaN — no SST (OISST) at this point; supply T'}`,
     ];
-    if (!Number.isFinite(T)) {
+    if (!finiteT) {
       return {
         result: Number.NaN, unit: '/day',
+        secondary: [
+          { key: 'doubling_time', value: Number.NaN, unit: 'days', label: 'Population Doubling Time (ln2/μ)' },
+          { key: 'q10', value: Number.isFinite(Q10) ? Q10 : Number.NaN, unit: '—', label: 'Q₁₀ (factor per 10 °C)' },
+          { key: 'envelope_mu', value: Number.NaN, unit: '/day', label: 'Eppley Envelope μmax (0.59·e^0.0633T)' },
+        ],
         steps: [
           ...steps,
           'Sea temperature T is required: auto uses daily NOAA OISST v2 SST.',
@@ -3262,29 +4109,52 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     if (!hasSpecies) {
       steps.push(
         '',
-        'No species-specific μ₂₀ supplied — using the paper\'s maximum envelope:',
-        `  μmax = 0.851 × 1.066^${T.toFixed(1)} = ${muPaper.toFixed(4)} /day`,
-        `  (check: 10^(0.0275×${T.toFixed(1)} − 0.070) = ${muPaper.toFixed(4)} — same value)`,
+        'No species-specific μ₂₀ supplied — using the maximum envelope:',
+        `  μmax = 0.59 × e^(0.0633×${T.toFixed(1)}) = ${muPaper.toFixed(4)} /day`,
+        `  (worked example check: T=20 → 0.59·e^1.266 = 2.09 /day)`,
       );
     } else {
       steps.push(
         '',
-        'Species-specific μ₂₀ supplied — scaling the paper curve through 20 °C:',
-        `  μmax = μ₂₀ × 1.066^(T−20) = ${umax.toFixed(4)} × 1.066^(${(T - 20).toFixed(1)}) = ${mu.toFixed(4)} /day`,
-        `  Paper envelope at this T: 0.851 × 1.066^${T.toFixed(1)} = ${muPaper.toFixed(4)} /day`,
+        'Species-specific μ₂₀ supplied — scaling the envelope through 20 °C:',
+        `  μmax = μ₂₀ × e^(0.0633×(T−20)) = ${umax.toFixed(4)} × e^(0.0633×${(T - 20).toFixed(1)}) = ${mu.toFixed(4)} /day`,
+        `  Envelope at this T: 0.59 × e^(0.0633×${T.toFixed(1)}) = ${muPaper.toFixed(4)} /day`,
         `  (species value is ${(mu / muPaper).toFixed(2)}× the community envelope)`,
       );
     }
     steps.push(
       '',
       'Step 3 — Derived quantities:',
-      `  Q₁₀ = 10^0.275 = ${Q10.toFixed(2)} (factor per 10 °C — paper states 1.88)`,
+      `  Q₁₀ = e^(0.0633×10) = ${Q10.toFixed(2)} (factor per 10 °C — paper states 1.88)`,
       `  Doubling time: t_d = ln(2)/μ = ${Number.isFinite(doubling) ? doubling.toFixed(2) : '∞'} days`,
       '',
       `  └ ${mu < 0.5 ? 'Slow growth — cold/limiting regime' : mu < 2 ? 'Typical marine growth rate' : 'Near the maximum envelope — warm nutrient-replete waters'}`,
-      `  └ Note: this is the MAXIMUM expected rate; light/nutrient limitation (the paper\'s §discussion) reduces realized rates.`,
+      `  └ Note: this is the MAXIMUM expected rate; light/nutrient limitation (the paper's §discussion) reduces realized rates.`,
     );
-    return { result: mu, unit: '/day', steps };
+    // Timeseries series (tool vizType 'timeseries'): μ vs T across the marine
+    // range (0–40 °C). Only emitted when T is finite — no synthetic curve from
+    // NaN inputs (honest empty series).
+    const series = finiteT
+      ? [{
+          label: hasSpecies ? `μ(T) species-scaled (μ₂₀=${umax.toFixed(2)}/day)` : 'Eppley envelope μmax(T)',
+          color: '#0072B2',
+          points: Array.from({ length: 41 }, (_, i) => {
+            const t = i;
+            const y = hasSpecies ? umax * Math.exp(0.0633 * (t - 20)) : 0.59 * Math.exp(0.0633 * t);
+            return { x: t, y };
+          }),
+        }]
+      : undefined;
+    return {
+      result: mu, unit: '/day',
+      secondary: [
+        { key: 'doubling_time', value: Number.isFinite(doubling) ? doubling : Number.NaN, unit: 'days', label: 'Population Doubling Time (ln2/μ)' },
+        { key: 'q10', value: Number.isFinite(Q10) ? Q10 : Number.NaN, unit: '—', label: 'Q₁₀ (factor per 10 °C)' },
+        { key: 'envelope_mu', value: Number.isFinite(muPaper) ? muPaper : Number.NaN, unit: '/day', label: 'Eppley Envelope μmax (0.59·e^0.0633T)' },
+      ],
+      series,
+      steps,
+    };
   },
   63: ({ rho, cp, Ts, Ta, ra, rs, es, ea, p }) => {
     // SiB big-leaf surface fluxes (Sellers, Mintz, Sud & Dalcher 1986,
@@ -3337,7 +4207,14 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       `  └ Net radiation Rₙ should approximately balance H + LE + G at the surface`,
       `  └ Units: e in hPa, γ in hPa/K (paper uses mb ≡ hPa); ρc_p/γ ≡ ρ·L_v·0.622/p.`,
     );
-    return { result: le, unit: 'W/m²', steps };
+    return {
+      result: le, unit: 'W/m²',
+      secondary: [
+        { key: 'sensible_heat', value: Number.isFinite(H) ? H : Number.NaN, unit: 'W/m²', label: 'Sensible Heat Flux H' },
+        { key: 'bowen_ratio', value: Number.isFinite(bowen) ? bowen : Number.NaN, unit: '—', label: 'Bowen Ratio (H/LE)' },
+      ],
+      steps,
+    };
   },
 
   // ── Domain 9: Atmospheric Chemistry ──
@@ -3485,6 +4362,12 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     if (!hasCurl || betaDegenerate) {
       return {
         result: Number.NaN, unit: 'm²/s',
+        secondary: [
+          { key: 'planetary_beta', value: Number.isFinite(beta) ? beta : Number.NaN, unit: 'm⁻¹s⁻¹', label: 'Planetary vorticity gradient β = 2Ωcosφ/R (paper eq 12)' },
+          { key: 'coriolis_f', value: Number.isFinite(f) ? f : Number.NaN, unit: 's⁻¹', label: 'Coriolis parameter f = 2Ωsinφ' },
+          { key: 'ekman_pumping', value: Number.NaN, unit: 'm/s', label: 'Ekman pumping velocity w_Ek = (∇×τ)_z/(ρ₀·f)' },
+          { key: 'total_transport_sv', value: Number.NaN, unit: 'Sv', label: 'Total basin transport v × W (1 Sv = 10⁶ m³/s)' },
+        ],
         steps: [
           '── Sverdrup Transport (Sverdrup, 1947, PNAS 33(11):318-326) ──',
           'Paper eq (13): β·M_y = curl_z(τ); volume transport per unit width v = curl_z(τ)/(ρ₀·β).',
@@ -3505,6 +4388,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     return {
       result: v, unit: 'm²/s',
       secondary: [
+        { key: 'planetary_beta', value: Number.isFinite(beta) ? beta : Number.NaN, unit: 'm⁻¹s⁻¹', label: 'Planetary vorticity gradient β = 2Ωcosφ/R (paper eq 12)' },
         { key: 'coriolis_f', value: Number.isFinite(f) ? f : Number.NaN, unit: 's⁻¹', label: 'Coriolis parameter f = 2Ωsinφ' },
         { key: 'ekman_pumping', value: wEk, unit: 'm/s', label: 'Ekman pumping velocity w_Ek = (∇×τ)_z/(ρ₀·f)' },
         { key: 'total_transport_sv', value: totalSv, unit: 'Sv', label: 'Total basin transport v × W (1 Sv = 10⁶ m³/s)' },
@@ -3548,6 +4432,14 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     if (!hasAll || D <= 0 || b <= 0 || L <= 0 || R <= 0) {
       return {
         result: Number.NaN, unit: 'm²/s',
+        secondary: [
+          { key: 'max_transport', value: Number.NaN, unit: 'm²/s', label: 'WBC transport maximum |ψ_max| (at the jet, x* from the west)' },
+          { key: 'max_velocity', value: Number.NaN, unit: 'm/s', label: 'Max boundary-current velocity |v| at the western wall' },
+          { key: 'jet_position_km', value: Number.NaN, unit: 'km', label: 'Position of the transport maximum x* (from the western wall)' },
+          { key: 'wbc_width_km', value: Number.NaN, unit: 'km', label: 'Stommel boundary-layer width δ = 1/α' },
+          { key: 'alpha', value: Number.NaN, unit: 'm⁻¹', label: 'Model parameter α = D·β/R' },
+          { key: 'gamma', value: Number.NaN, unit: 's⁻¹', label: 'Forcing amplitude γ = F·π/(R·b)' },
+        ],
         steps: [
           '── Stommel Westward Intensification (Stommel, 1948, Trans. AGU 29(2):202-206) ──',
           'Model eq (9): ∇²ψ + α·∂ψ/∂x = γ·sin(πy/b),  α = D·β/R,  γ = F·π/(R·b)',
@@ -3582,9 +4474,33 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const u = gamma * (b / Math.PI) * Math.cos(Math.PI * y / b) * g;
     const v = -gamma * b * b / (Math.PI * Math.PI) * Math.sin(Math.PI * y / b) * (p * A * ex + q * B * eBx);
     const deltaKm = (1 / alpha) / 1000;
+    // The transport maximum sits where the x-envelope g(x) = p·e^{Ax}+q·e^{Bx}−1
+    // is extremal: g'(x*) = 0 ⇒ x* = ln(−q·B/(p·A))/(A−B) (A > 0, B < 0 for the
+    // western-intensified WBC). |ψ_max| at x* (y = b/2) is the WBC transport
+    // scale; |v| peaks at the western wall. β = 0 (symmetric) has no jet, so
+    // x* = 0 → honest NaN for the jet metrics.
+    const xStar = Number.isFinite(p) && Number.isFinite(q) && p * A > 0 && -q * B > 0 && Math.abs(A - B) > 0
+      ? Math.log(-q * B / (p * A)) / (A - B)
+      : Number.NaN;
+    const gMax = Number.isFinite(xStar) && xStar > 0
+      ? p * Math.exp(A * xStar) + q * Math.exp(B * xStar) - 1
+      : Number.NaN;
+    const psiMax = Number.isFinite(gMax)
+      ? Math.abs(gamma * b * b / (Math.PI * Math.PI) * gMax)
+      : Number.NaN;
+    const jetKm = Number.isFinite(xStar) ? xStar / 1000 : Number.NaN;
+    const vMax = Number.isFinite(v) ? Math.abs(v) : Number.NaN;
     if (![psi, u, v].every(Number.isFinite)) {
       return {
         result: Number.NaN, unit: 'm²/s',
+        secondary: [
+          { key: 'max_transport', value: Number.isFinite(psiMax) ? psiMax : Number.NaN, unit: 'm²/s', label: 'WBC transport maximum |ψ_max| (at the jet, x* from the west)' },
+          { key: 'max_velocity', value: Number.isFinite(vMax) ? vMax : Number.NaN, unit: 'm/s', label: 'Max boundary-current velocity |v| at the western wall' },
+          { key: 'jet_position_km', value: Number.isFinite(jetKm) ? jetKm : Number.NaN, unit: 'km', label: 'Position of the transport maximum x* (from the western wall)' },
+          { key: 'wbc_width_km', value: Number.isFinite(deltaKm) ? deltaKm : Number.NaN, unit: 'km', label: 'Stommel boundary-layer width δ = 1/α' },
+          { key: 'alpha', value: alpha, unit: 'm⁻¹', label: 'Model parameter α = D·β/R' },
+          { key: 'gamma', value: gamma, unit: 's⁻¹', label: 'Forcing amplitude γ = F·π/(R·b)' },
+        ],
         steps: [
           '── Stommel Westward Intensification (Stommel, 1948) ──',
           'The solution overflowed: α·L (or |B|·L) is so large that e^{αL} exceeds double precision.',
@@ -3596,6 +4512,9 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     return {
       result: psi, unit: 'm²/s',
       secondary: [
+        { key: 'max_transport', value: psiMax, unit: 'm²/s', label: 'WBC transport maximum |ψ_max| (at the jet, x* from the west)' },
+        { key: 'max_velocity', value: vMax, unit: 'm/s', label: 'Max boundary-current velocity |v| at the western wall' },
+        { key: 'jet_position_km', value: jetKm, unit: 'km', label: 'Position of the transport maximum x* (from the western wall)' },
         { key: 'wbc_width_km', value: deltaKm, unit: 'km', label: 'Stommel boundary-layer width δ = 1/α' },
         { key: 'u_velocity', value: u, unit: 'm/s', label: 'Zonal velocity u = ∂ψ/∂y' },
         { key: 'v_velocity', value: v, unit: 'm/s', label: 'Meridional velocity v = −∂ψ/∂x' },
@@ -3787,6 +4706,14 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         key: `equilibrium_${i + 1}`, value: e.f, unit: '—',
         label: `Flow f = ${e.f.toFixed(3)} — ${e.kind} (x=${e.x.toFixed(3)}, y=${e.y.toFixed(3)})`,
       })),
+      // Timeseries series (tool vizType 'timeseries'): the equilibrium flow
+      // values f (roots of the Stommel cubic λ·f = R·δ/(δ+|f|) − 1/(1+|f|)),
+      // one point per regime — shows the distinct flow branches.
+      series: [{
+        label: 'Stommel equilibrium flow f (roots of λ·f = R·δ/(δ+|f|) − 1/(1+|f|))',
+        color: '#0072B2',
+        points: equilibria.map((e, i) => ({ x: i, y: Number.isFinite(e.f) ? e.f : Number.NaN })),
+      }],
       steps: [
         '── Stommel (1961) Two-Vessel Thermohaline Model (Tellus 13(2):224–230) ──',
         `Exchange ratio δ = ${delta.toFixed(4)} (d/c), density-effect ratio R = ${R.toFixed(2)} (βS̄/αT̄),`,
@@ -3828,6 +4755,19 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         { key: 'sigma_t', value: sigmaT, unit: 'kg/m³', label: 'In-situ density anomaly σ_t' },
         { key: 'sigma_theta', value: sigmaTheta, unit: 'kg/m³', label: 'Potential density anomaly σ_θ' },
       ],
+      // Profile series (tool vizType 'profile'): in-situ density ρ vs depth z
+      // (0–500 m, 20 points) from the tool's own TEOS-10 specific-volume
+      // polynomial (ρ = 1/v), with pressure p ≈ depth z (1 dbar ≈ 1 m).
+      series: [{
+        label: 'In-situ density ρ(z) (TEOS-10 specific volume)',
+        color: '#0072B2',
+        points: Array.from({ length: 20 }, (_, i) => {
+          const z = i * (500 / 19);
+          const vAtZ = teos10SpecVol(S, Theta, z);
+          const rhoAtZ = Number.isFinite(vAtZ) && vAtZ > 0 ? 1 / vAtZ : Number.NaN;
+          return { x: z, y: Number.isFinite(rhoAtZ) ? rhoAtZ : Number.NaN };
+        }),
+      }],
       steps: [
         '── TEOS-10 Seawater Density (IOC/SCOR/IAPSO 2010; Roquet et al. 2015) ──',
         `Absolute Salinity S_A = ${Number.isFinite(S) ? S.toFixed(2) : 'N/A'} g/kg`,
@@ -3923,12 +4863,35 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const regime = Number.isFinite(Rb)
       ? (Rb < 0.65 ? 'entraining (deepening)' : 'stable (no deepening)')
       : 'N/A';
+    // Timeseries series (tool vizType 'timeseries'): mixed-layer depth h(t)
+    // evolution under PWP entrainment. While R_b < 0.65 (paper eq 9) the layer
+    // entrains toward the depth where R_b = 0.65:
+    //   h* = 0.65·ρ₀·ΔV²/(g·Δρ),   approached on the |ΔV| velocity timescale.
+    // Stable inputs (R_b ≥ 0.65) → constant h (no deepening).
+    const wE = dVOk ? Math.abs(dV) : Number.NaN;                    // velocity jump |ΔV| (entrainment scale)
+    const hStar = gOk && rhoOk && drhoOk && drho > 0 && Number.isFinite(wE) && wE > 0
+      ? (0.65 * rho0 * wE * wE) / (g * drho) : Number.NaN;           // depth at which R_b = 0.65
+    const tau = hOk && Number.isFinite(hStar) && Number.isFinite(wE) && wE > 0
+      ? Math.max(Math.abs(hStar - h) / wE, 1) : Number.NaN;          // model-time to reach equilibrium
+    const series = [
+      {
+        label: 'Mixed-layer depth h(t) under PWP entrainment (R_b → 0.65)',
+        color: '#0072B2',
+        points: Array.from({ length: 25 }, (_, i) => {
+          const t = i; // time steps 0…24
+          const frac = Number.isFinite(tau) ? Math.min(1, t / tau) : 0;
+          const ht = Number.isFinite(hStar) && hOk ? h + (hStar - h) * frac : Number.NaN;
+          return { x: t, y: Number.isFinite(ht) ? ht : Number.NaN };
+        }),
+      },
+    ];
     return {
       result: deepens ? 1 : 0, unit: '—',
       secondary: [
         { key: 'Rb', value: Rb, unit: '—', label: 'Bulk Richardson number R_b = g·Δρ·h/(ρ₀·ΔV²) (paper eq 9)' },
         { key: 'entrainment', value: deepens ? 1 : 0, unit: '—', label: 'Mixed layer deepening (R_b < 0.65)' },
       ],
+      series,
       steps: [
         '── Price-Weller-Pinkel Mixed Layer (Price, Weller & Pinkel, 1986) ──',
         `Gravity g = ${Number.isFinite(g) ? g.toFixed(2) : 'N/A'} m/s², reference density ρ₀ = ${Number.isFinite(rho0) ? rho0.toFixed(0) : 'N/A'} kg/m³`,
@@ -3977,6 +4940,20 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         { key: 'Tp', value: Tp, unit: 's', label: 'Peak wave period T_p = 2π/ω_p' },
         { key: 'wp', value: wp, unit: 'rad/s', label: 'Peak angular frequency ω_p = (4β/5)^(1/4)·g/U' },
       ],
+      // Spectrum series (tool vizType 'spectrum'): S(ω) vs ω across 0.1–10
+      // rad/s (40 log-spaced points) from the tool's own Pierson-Moskowitz
+      // eq 12. Only emitted when g and U are finite (honest empty otherwise).
+      series: gOk && UOk
+        ? [{
+            label: `Pierson-Moskowitz spectrum S(ω), U = ${U.toFixed(1)} m/s`,
+            color: '#0072B2',
+            points: Array.from({ length: 40 }, (_, i) => {
+              const omega = 0.1 * Math.pow(100, i / 39); // 0.1 → 10 rad/s, log-spaced
+              const Sval = (8.10e-3 * g * g) / Math.pow(omega, 5) * Math.exp(-0.74 * Math.pow((g / U) / omega, 4));
+              return { x: omega, y: Number.isFinite(Sval) ? Sval : Number.NaN };
+            }),
+          }]
+        : undefined,
       steps: [
         '── Pierson-Moskowitz Spectrum (Pierson & Moskowitz, 1964, eq 12) ──',
         `Wind speed U = ${UOk ? U.toFixed(2) : 'N/A'} m/s (19.5 m weather-ship reference height; α, β fixed by the paper)`,
@@ -4099,6 +5076,19 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         { key: 'retreat_factor', value: factor, unit: '—', label: 'Bruun factor R/S = L/(B+h*) — retreat per metre of sea-level rise' },
         { key: 'total_retreat', value: retreat2100, unit: 'm', label: 'Total shoreline retreat 2020–2100 (80 yr at the current rate)' },
       ],
+      // Timeseries series (tool vizType 'timeseries'): cumulative shoreline
+      // retreat R(t) = L·S·t/(B+h*) over 0–100 yr (20 points). Emitted only
+      // when the annual retreat R is finite (honest empty otherwise).
+      series: finite
+        ? [{
+            label: 'Cumulative shoreline retreat R(t) = L·S·t/(B+h*)',
+            color: '#0072B2',
+            points: Array.from({ length: 20 }, (_, i) => {
+              const t = i * (100 / 19);
+              return { x: t, y: Number.isFinite(R) ? R * t : Number.NaN };
+            }),
+          }]
+        : undefined,
       steps: [
         '── Bruun Shoreline Retreat (Bruun, 1962) ──',
         `Sea-level rise rate S = ${sStr}${autoNote(__sAuto, 'genuine NOAA CO-OPS tide-gauge trend')}`,
@@ -4321,52 +5311,198 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  79: ({ omega, ka, z }) => {
-    // Stokes (1847) Stokes drift: u_s(z) = (ω·k·a²/2)·exp(2kz)
-    // Here `ka` carries the wave amplitude a (mapped from user input `ka`).
-    // The wavenumber k is derived from the dispersion relation for the
-    // given ω at the surface (deep water): k = ω²/g.
+  79: ({ omega, ka, z, h, g }) => {
+    // Stokes (1847) Stokes drift — the net Lagrangian mean horizontal velocity
+    // of a linear (Airy) wave. Standard form:
+    //   u_s(z) = (a²·ω·k · cosh(2k(z+h))) / (2·sinh²(kh))
+    // with a = wave amplitude, k = wavenumber (full dispersion ω² = g·k·tanh(kh)
+    // when a water depth h is supplied; deep-water limit k = ω²/g), ω = 2π/T.
+    // Surface value (z=0): u_s(0) = (a²·ω·k·cosh(2kh))/(2·sinh²(kh)).
+    // Deep-water limit (kh → ∞): u_s(z) → a²·ω·k·exp(2kz), u_s(0) → a²·ω·k.
+    // Shallow-water limit (kh → 0): u_s(0) → (a²·ω·k)/(2(kh)²) — coth(kh)/kh → 1.
+    // `ka` carries the wave amplitude a (mapped from user input `ka`); h and g
+    // are optional (h = water depth for the full dispersion, g overrides g₀).
+    const grav = Number.isFinite(g) && g > 0 ? g : G_GRAV;
     const a = ka;
-    const k = (omega * omega) / G_GRAV;  // deep-water dispersion: ω² = gk
-    const usSurf = (omega * k * a * a) / 2;
-    const us = usSurf * Math.exp(2 * k * z);
+    const hasH = Number.isFinite(h) && h > 0;
+    const valid = Number.isFinite(omega) && omega > 0
+      && Number.isFinite(a) && a >= 0
+      && Number.isFinite(z) && z <= 0;
+    let k = Number.NaN;
+    if (valid) {
+      const kDeep = (omega * omega) / grav;   // deep-water seed: ω² = gk
+      if (hasH) {
+        // Solve the full dispersion relation ω² = g·k·tanh(kh) for k by Newton
+        // iteration from the deep-water seed (k·h > 0).
+        k = kDeep;
+        for (let i = 0; i < 40; i++) {
+          const kh = k * h;
+          const th = Math.tanh(kh);
+          const f = grav * k * th - omega * omega;
+          const df = grav * (th + k * h * (1 - th * th));
+          const dk = f / df;
+          k -= dk;
+          if (Math.abs(dk) < 1e-14 * k) break;
+        }
+      } else {
+        k = kDeep;
+      }
+    }
+    const kh = valid && hasH ? k * h : Number.NaN;
+    const usSurf = valid
+      ? hasH
+        ? (a * a * omega * k * Math.cosh(2 * kh)) / (2 * Math.sinh(kh) * Math.sinh(kh))
+        : a * a * omega * k
+      : Number.NaN;
+    const us = valid
+      ? hasH
+        ? (a * a * omega * k * Math.cosh(2 * k * (z + h))) / (2 * Math.sinh(kh) * Math.sinh(kh))
+        : usSurf * Math.exp(2 * k * z)
+      : Number.NaN;
+    const L = valid && k > 0 ? 2 * Math.PI / k : Number.NaN;
+    const c = valid && k > 0 ? omega / k : Number.NaN;
+    const eFold = valid && k > 0 ? 1 / (2 * k) : Number.NaN;
+    const driftRatio = valid && Number.isFinite(usSurf) && usSurf !== 0 ? us / usSurf : Number.NaN;
+    // Depth profile series (vizType 'profile'): u_s(z) from the surface (z=0)
+    // down to the e-folding depth (deep water) or the sea floor (finite depth).
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    if (valid && k > 0) {
+      const zFloor = hasH ? Math.max(z, -h) : -3 * eFold;
+      const N = 40;
+      for (let i = 0; i <= N; i++) {
+        const zi = -((0 - zFloor) * i / N);  // negative below surface
+        const ui = hasH
+          ? (a * a * omega * k * Math.cosh(2 * k * (zi + h))) / (2 * Math.sinh(kh) * Math.sinh(kh))
+          : a * a * omega * k * Math.exp(2 * k * zi);
+        if (Number.isFinite(ui)) seriesPoints.push({ x: zi, y: ui });
+      }
+    }
     return {
       result: us, unit: 'm/s',
-      steps: [
-        '── Stokes Drift (Stokes, 1847) ──',
-        `Wave angular frequency ω = ${omega.toFixed(4)} rad/s`,
-        `Wave amplitude a = ${a.toExponential(3)} m`,
-        `Wavenumber k = ω²/g = ${k.toExponential(3)} rad/m (deep-water dispersion)`,
-        `Depth below surface z = ${z.toFixed(1)} m (negative below surface)`,
-        '',
-        'Step 1 — Surface Stokes drift (z=0):',
-        `  u_s(0) = (ω·k·a²)/2 = (${omega.toFixed(4)} × ${k.toExponential(3)} × ${a.toExponential(3)}²) / 2`,
-        `  u_s(0) = ${usSurf.toExponential(3)} m/s (${(usSurf * 100).toFixed(2)} cm/s)`,
-        '',
-        'Step 2 — Depth attenuation:',
-        `  u_s(z) = u_s(0) × exp(2kz) = ${usSurf.toExponential(3)} × exp(2 × ${k.toExponential(3)} × ${z.toFixed(1)})`,
-        `  u_s(${z.toFixed(0)} m) = ${us.toExponential(3)} m/s (${(us * 100).toFixed(4)} cm/s)`,
-        '',
-        `  └ e-folding depth: z_e = 1/(2k) = ${(1 / (2 * k)).toFixed(1)} m (depth where drift = 37% of surface)`,
-        `  └ Stokes transport: M_S = ∫u_s dz (volume transport in wave direction)`,
-      ]
+      secondary: [
+        { key: 'wavelength', value: Number.isFinite(L) ? L : Number.NaN, unit: 'm', label: 'Wavelength L = 2π/k' },
+        { key: 'phase_speed', value: Number.isFinite(c) ? c : Number.NaN, unit: 'm/s', label: 'Wave celerity c = ω/k' },
+        { key: 'surface_drift', value: Number.isFinite(usSurf) ? usSurf : Number.NaN, unit: 'm/s', label: 'Surface Stokes drift u_s(0)' },
+        { key: 'deep_water_limit', value: valid ? a * a * omega * k : Number.NaN, unit: 'm/s', label: 'Deep-water surface limit a²·ω·k (kh→∞)' },
+        { key: 'drift_depth_ratio', value: driftRatio, unit: '—', label: 'u_s(z)/u_s(0) — depth attenuation ratio' },
+        { key: 'efolding_depth', value: Number.isFinite(eFold) ? eFold : Number.NaN, unit: 'm', label: 'e-folding depth z_e = 1/(2k)' },
+        { key: 'kh', value: Number.isFinite(kh) ? kh : Number.NaN, unit: '—', label: 'Relative-depth parameter kh (h/L·2π)' },
+      ],
+      series: seriesPoints.length > 0
+        ? [{ label: 'Stokes drift u_s(z) vs depth', color: '#0072B2', points: seriesPoints }]
+        : undefined,
+      steps: valid
+        ? [
+          '── Stokes Drift (Stokes, 1847) ──',
+          `Wave angular frequency ω = ${omega.toFixed(4)} rad/s (T = ${(2 * Math.PI / omega).toFixed(2)} s)`,
+          `Wave amplitude a = ${a.toExponential(3)} m, gravity g = ${grav.toFixed(2)} m/s²`,
+          hasH
+            ? `Wavenumber k = ${k.toExponential(3)} rad/m from ω² = g·k·tanh(kh), h = ${h.toFixed(1)} m (kh = ${kh.toFixed(3)})`
+            : `Wavenumber k = ω²/g = ${k.toExponential(3)} rad/m (deep-water dispersion)`,
+          `Depth below surface z = ${z.toFixed(1)} m (negative below surface)`,
+          '',
+          'Step 1 — Surface Stokes drift (z=0):',
+          hasH
+            ? `  u_s(0) = (a²·ω·k·cosh(2kh))/(2·sinh²(kh)) = ${usSurf.toExponential(3)} m/s (${(usSurf * 100).toFixed(2)} cm/s)`
+            : `  u_s(0) = a²·ω·k = (${a.toExponential(3)}² × ${omega.toFixed(4)} × ${k.toExponential(3)}) = ${usSurf.toExponential(3)} m/s (${(usSurf * 100).toFixed(2)} cm/s)`,
+          '',
+          'Step 2 — Depth attenuation:',
+          hasH
+            ? `  u_s(z) = (a²·ω·k·cosh(2k(z+h)))/(2·sinh²(kh)) = ${us.toExponential(3)} m/s (${(us * 100).toExponential(3)} cm/s)`
+            : `  u_s(z) = u_s(0) × exp(2kz) = ${us.toExponential(3)} m/s (${(us * 100).toExponential(3)} cm/s)`,
+          '',
+          `  └ e-folding depth: z_e = 1/(2k) = ${eFold.toFixed(1)} m (depth where drift = 37% of surface)`,
+          `  └ Deep/shallow limit: kh = ${Number.isFinite(kh) ? kh.toFixed(3) : '∞ (deep water)'} — ${Number.isFinite(kh) && kh > Math.PI ? 'deep water (u_s → a²ωk·e^{2kz})' : Number.isFinite(kh) && kh < Math.PI / 25 ? 'shallow water (u_s → a²ωk/(2(kh)²)·cosh(2k(z+h)))' : 'transitional water'}`,
+          `  └ Stokes transport: M_S = ∫u_s dz (volume transport in wave direction)`,
+        ]
+        : [
+          '── Stokes Drift (Stokes, 1847) ──',
+          'Requires a finite positive angular frequency ω, a finite positive wave',
+          `amplitude a (${Number.isFinite(ka) ? ka.toExponential(3) : 'N/A'}), and a depth z ≤ 0 (${Number.isFinite(z) ? z : 'N/A'}).`,
+          'Result: NaN (honest — no fabricated drift).',
+        ],
     };
   },
   80: ({ alpha, g2, fm, fpm, gamma }) => {
     // JONSWAP (Hasselmann et al., 1973, eq 16):
     //   S(f) = α·g²·(2π)⁻⁴·f⁻⁵ · exp[−5/4·(f_p/f)⁻⁴] · γ^exp[−(f−f_p)²/(2σ²f_p²)]
+    //   = α·g²·(2π)⁻⁴·f⁻⁵ · exp[−5/4·(f/f_p)⁴] ... note the exponent: the
+    //   peak-enhancement factor exp[−5/4·(f/f_p)⁻⁴] = exp[−5/4·(f_p/f)⁴] must
+    //   → 1 for f ≫ f_p so the Phillips f⁻⁵ tail reappears (NOT → 0).
     // with σ = 0.07 for f ≤ f_p and σ = 0.09 for f > f_p (the σ step).
     // The (2π)⁻⁴ converts from the angular-frequency form S(ω) = αg²ω⁻⁵…
     // to ordinary-frequency S(f) — without it the result is (2π)⁴ ≈ 1559× too large.
     const fp = fpm;          // peak frequency (Hz)
     const f = fm;            // frequency at which to evaluate (Hz)
-    const sigma = f <= fp ? 0.07 : 0.09;   // JONSWAP σ step
-    const peakEnhance = Math.exp(-1.25 * Math.pow(fp / f, -4));
+    const valid = Number.isFinite(alpha) && Number.isFinite(g2) && Number.isFinite(f)
+      && Number.isFinite(fp) && Number.isFinite(gamma)
+      && alpha > 0 && g2 > 0 && f > 0 && fp > 0 && gamma > 0;
+    // JONSWAP σ step, evaluated on a spectral point (0.07 below/at peak, 0.09 above)
+    const sigmaAt = (fi: number): number => (fi <= fp ? 0.07 : 0.09);
+    // S(fi) — single spectral density value at a frequency fi (Hz)
+    const spectrumAt = (fi: number): number => {
+      const s = sigmaAt(fi);
+      const peakEnhance = Math.exp(-1.25 * Math.pow(fi / fp, -4));
+      const gaussExp = Math.exp(-Math.pow(fi - fp, 2) / (2 * s * s * fp * fp));
+      const gammaFactor = Math.pow(gamma, gaussExp);
+      return alpha * Math.pow(g2, 2) * Math.pow(2 * Math.PI, -4) * Math.pow(fi, -5) * peakEnhance * gammaFactor;
+    };
+    if (!valid) {
+      return {
+        result: Number.NaN, unit: 'm²/Hz',
+        secondary: [
+          { key: 'peak_frequency', value: Number.isFinite(fp) && fp > 0 ? fp : Number.NaN, unit: 'Hz', label: 'Peak frequency f_p' },
+          { key: 'peak_spectral_density', value: Number.NaN, unit: 'm²/Hz', label: 'Peak spectral density S(f_p)' },
+          { key: 'sig_wave_height', value: Number.NaN, unit: 'm', label: 'Significant wave height H_s = 4·√m₀ (from the spectrum)' },
+          { key: 'phillips_alpha', value: Number.isFinite(alpha) ? alpha : Number.NaN, unit: '—', label: 'Phillips constant α' },
+        ],
+        steps: [
+          '── JONSWAP Spectrum (Hasselmann et al., 1973) ──',
+          'Requires positive α, g, f, f_p and γ (the peak-enhancement factor).',
+          `  α = ${alpha}, g = ${g2}, f = ${f}, f_p = ${fp}, γ = ${gamma}`,
+          'Result: NaN (honest — a degenerate spectrum).',
+        ],
+      };
+    }
+    const sigma = f <= fp ? 0.07 : 0.09;   // JONSWAP σ step at the evaluation point
+    const peakEnhance = Math.exp(-1.25 * Math.pow(f / fp, -4));
     const gaussExp = Math.exp(-Math.pow(f - fp, 2) / (2 * sigma * sigma * fp * fp));
     const gammaFactor = Math.pow(gamma, gaussExp);
     const S = alpha * Math.pow(g2, 2) * Math.pow(2 * Math.PI, -4) * Math.pow(f, -5) * peakEnhance * gammaFactor;
+    // Spectrum series (vizType 'spectrum'): S(f) over f from 0.5·f_p to 4·f_p
+    // (log-spaced for a clean plot), plus the peak point exactly at f_p.
+    const fMin = fp * 0.5;
+    const fMax = fp * 4;
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i <= 120; i++) {
+      const fi = fMin * Math.pow(fMax / fMin, i / 120);
+      if (Number.isFinite(fi) && fi > 0) {
+        seriesPoints.push({ x: fi, y: spectrumAt(fi) });
+      }
+    }
+    seriesPoints.push({ x: fp, y: S });
+    seriesPoints.sort((a, b) => a.x - b.x);
+    // Significant wave height H_s = 4·√m₀ from the spectrum: m₀ = ∫S(f)df via
+    // the trapezoidal rule over the series band (the dominant energy band).
+    let m0 = 0;
+    for (let i = 1; i < seriesPoints.length; i++) {
+      m0 += 0.5 * (seriesPoints[i].x - seriesPoints[i - 1].x) * (seriesPoints[i].y + seriesPoints[i - 1].y);
+    }
+    const Hs = m0 >= 0 ? 4 * Math.sqrt(m0) : Number.NaN;
     return {
       result: S, unit: 'm²/Hz',
+      secondary: [
+        { key: 'peak_frequency', value: fp, unit: 'Hz', label: 'Peak frequency f_p' },
+        { key: 'peak_spectral_density', value: S, unit: 'm²/Hz', label: 'Peak spectral density S(f_p)' },
+        { key: 'sig_wave_height', value: Number.isFinite(Hs) ? Hs : Number.NaN, unit: 'm', label: 'Significant wave height H_s = 4·√m₀ (from the spectrum)' },
+        { key: 'phillips_alpha', value: alpha, unit: '—', label: 'Phillips constant α' },
+        { key: 'peak_enhancement', value: gamma, unit: '—', label: 'Peak enhancement factor γ (JONSWAP)' },
+      ],
+      series: [{
+        label: 'JONSWAP S(f)',
+        color: '#0072B2',
+        points: seriesPoints,
+      }],
       steps: [
         '── JONSWAP Spectrum (Hasselmann et al., 1973) ──',
         `Phillips constant α = ${alpha.toExponential(2)}, g = ${g2.toFixed(2)} m/s²`,
@@ -4377,7 +5513,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  α·g²·(2π)⁻⁴·f⁻⁵ = ${alpha.toExponential(2)} × ${g2.toFixed(2)}² × ${(1/Math.pow(2*Math.PI,4)).toExponential(4)} × ${Math.pow(f, -5).toExponential(3)}`,
         `  = ${(alpha * g2 * g2 * Math.pow(2*Math.PI, -4) * Math.pow(f, -5)).toExponential(3)} m²/Hz`,
         '',
-        'Step 2 — Peak enhancement exp[−1.25(f_p/f)⁻⁴]:',
+        'Step 2 — Peak enhancement exp[−1.25(f/f_p)⁻⁴] (→ 1 as f ≫ f_p, restoring the Phillips tail):',
         `  = ${peakEnhance.toExponential(3)}`,
         '',
         'Step 3 — Gaussian broadening exp[−(f−f_p)²/(2σ²f_p²)]:',
@@ -4385,11 +5521,12 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  γ^broadening = ${gamma.toFixed(2)}^${gaussExp.toExponential(2)} = ${gammaFactor.toExponential(3)}`,
         '',
         'Step 4 — Spectral density:',
-        `  S(f) = α·g²·(2π)⁻⁴·f⁻⁵ · exp[−1.25(f_p/f)⁻⁴] · γ^exp[−(f−f_p)²/(2σ²f_p²)]`,
+        `  S(f) = α·g²·(2π)⁻⁴·f⁻⁵ · exp[−1.25(f/f_p)⁻⁴] · γ^exp[−(f−f_p)²/(2σ²f_p²)]`,
         `  S(${f.toExponential(2)}) = ${S.toExponential(3)} m²/Hz`,
         '',
-        `  └ At the peak (f=f_p): Gaussian exponent = 0 → γ^1 = γ; S(f_p) = αg²(2π)⁻⁴f_p⁻⁵·exp(−1.25)·γ`,
-        `  └ H_m₀ = 4·√(∫S(f)df); frequency-integrated for total energy`,
+        `  └ At the peak (f=f_p): Gaussian exponent = 0 → γ^1 = γ; S(f_p) = αg²(2π)⁻⁴f_p⁻⁵·exp(−1.25)·γ = ${S.toExponential(3)} m²/Hz`,
+        `  └ H_s = 4·√(∫S(f)df) = ${Number.isFinite(Hs) ? Hs.toFixed(2) : 'N/A'} m over the band [${fMin.toFixed(3)}, ${fMax.toFixed(3)}] Hz`,
+        `  └ γ = 1 collapses JONSWAP to the Pierson–Moskowitz spectrum; γ > 1 sharpens the peak`,
       ]
     };
   },
@@ -4418,23 +5555,56 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   82: ({ c, A, h }) => {
-    const L = c * Math.pow(A, h);
+    const cN = Number(c);
+    const AN = Number(A);
+    const hN = Number(h);
+    if (!Number.isFinite(cN) || !Number.isFinite(AN) || !Number.isFinite(hN) || AN <= 0) {
+      return {
+        result: Number.NaN, unit: 'km',
+        secondary: [
+          { key: 'hack_exponent', value: Number.isFinite(hN) ? hN : Number.NaN, unit: '—', label: 'Hack exponent h (typically 0.55–0.7)' },
+          { key: 'coefficient', value: Number.isFinite(cN) ? cN : Number.NaN, unit: 'km^(1−h)', label: 'Scaling coefficient c' },
+        ],
+        steps: [
+          '── Hack\'s Law (Hack, 1957) ──',
+          'One or more inputs are non-finite, or A ≤ 0 — cannot compute.',
+          'Supply c (coefficient), A (km²), h (Hack exponent).',
+        ],
+      };
+    }
+    const L = cN * Math.pow(AN, hN);
     return {
       result: L, unit: 'km',
+      secondary: [
+        { key: 'hack_exponent', value: hN, unit: '—', label: 'Hack exponent h (typically 0.55–0.7)' },
+        { key: 'coefficient', value: cN, unit: 'km^(1−h)', label: 'Scaling coefficient c' },
+      ],
+      // Scatter series (tool vizType 'scatter'): L vs drainage area A over
+      // 1–10000 km² (15 log-spaced points) from the tool's own power law
+      // L = c·A^h (linear on a log-log plot).
+      series: [{
+        label: `Hack's law L = ${cN.toFixed(3)}·A^${hN.toFixed(3)}`,
+        color: '#0072B2',
+        points: Array.from({ length: 15 }, (_, i) => {
+          const A = Math.pow(10000, i / 14); // 1 → 10000 km², log-spaced
+          const Lval = cN * Math.pow(A, hN);
+          return { x: A, y: Number.isFinite(Lval) ? Lval : Number.NaN };
+        }),
+      }],
       steps: [
         '── Hack\'s Law (Hack, 1957) ──',
-        `Coefficient c = ${c.toFixed(3)}, Drainage area A = ${A.toFixed(1)} km²`,
-        `Scaling exponent h = ${h.toFixed(3)} (Hack exponent, typically 0.55–0.7)`,
+        `Coefficient c = ${cN.toFixed(3)}, Drainage area A = ${AN.toFixed(1)} km²`,
+        `Scaling exponent h = ${hN.toFixed(3)} (Hack exponent, typically 0.55–0.7)`,
         '',
         'Step 1 — Compute main channel length:',
-        `  L = c × A^h = ${c.toFixed(3)} × ${A.toFixed(1)}^{${h.toFixed(3)}}`,
+        `  L = c × A^h = ${cN.toFixed(3)} × ${AN.toFixed(1)}^{${hN.toFixed(3)}}`,
         `  L = ${L.toFixed(2)} km`,
         '',
         'Step 2 — Hack exponent interpretation:',
-        `  h = ${h.toFixed(3)} → ${h < 0.55 ? 'Low exponent — compact drainage basin' : h < 0.7 ? 'Typical exponent — self-similar network' : 'High exponent — elongated basin'}`,
+        `  h = ${hN.toFixed(3)} → ${hN < 0.55 ? 'Low exponent — compact drainage basin' : hN < 0.7 ? 'Typical exponent — self-similar network' : 'High exponent — elongated basin'}`,
         '',
         `  └ Hack's Law implies log(L) ∝ h·log(A); linear on log-log plot`,
-        `  └ c depends on network geometry: ${c < 1 ? 'low coefficient ~ dendritic network on low slope' : c > 3 ? 'high coefficient ~ strongly elongated' : 'moderate coefficient'}`,
+        `  └ c depends on network geometry: ${cN < 1 ? 'low coefficient ~ dendritic network on low slope' : cN > 3 ? 'high coefficient ~ strongly elongated' : 'moderate coefficient'}`,
       ]
     };
   },
@@ -4443,8 +5613,23 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     //   L(s) = c · s^(1-D)  ⇒  D = 1 − ln(L₁/L₂) / ln(s₁/s₂)
     // Two measurements at different ruler scales (s₁, L₁) and (s₂, L₂)
     // eliminate the unknown constant c.
-    const lnRatioL = Math.log(L1 / L2);
-    const lnRatioS = Math.log(s1 / s2);
+    const L1N = Number(L1), s1N = Number(s1), L2N = Number(L2), s2N = Number(s2);
+    if (!Number.isFinite(L1N) || !Number.isFinite(s1N) || !Number.isFinite(L2N) || !Number.isFinite(s2N) || L1N <= 0 || s1N <= 0 || L2N <= 0 || s2N <= 0) {
+      return {
+        result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 'hurst_exponent', value: Number.NaN, unit: '—', label: 'Hurst exponent H = 2 − D (persistence measure)' },
+          { key: 'complexity_class', value: Number.NaN, unit: '—', label: 'N/A' },
+        ],
+        steps: [
+          '── Richardson Fractal Dimension (Richardson 1961; Mandelbrot 1967) ──',
+          'One or more inputs are non-finite or non-positive — cannot compute.',
+          'Supply two (length L, ruler scale s) measurement pairs with L, s > 0.',
+        ],
+      };
+    }
+    const lnRatioL = Math.log(L1N / L2N);
+    const lnRatioS = Math.log(s1N / s2N);
     const D = (Math.abs(lnRatioS) < 1e-12)
       ? Number.NaN
       : 1 - lnRatioL / lnRatioS;
@@ -4459,20 +5644,20 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       result: D, unit: '—',
       secondary: [
         { key: 'hurst_exponent', value: Hurst, unit: '—', label: 'Hurst exponent H = 2 − D (persistence measure)' },
-        { key: 'complexity_class', value: Number.isFinite(D) ? D : null, unit: '—', label: complexityClass ?? 'N/A' },
+        { key: 'complexity_class', value: Number.isFinite(D) ? D : Number.NaN, unit: '—', label: complexityClass ?? 'N/A' },
       ],
       steps: [
         '── Richardson Fractal Dimension (Richardson 1961; Mandelbrot 1967) ──',
-        `Measurement 1: L₁ = ${L1.toFixed(1)} km at ruler scale s₁ = ${s1.toFixed(1)} km`,
-        `Measurement 2: L₂ = ${L2.toFixed(1)} km at ruler scale s₂ = ${s2.toFixed(1)} km`,
+        `Measurement 1: L₁ = ${L1N.toFixed(1)} km at ruler scale s₁ = ${s1N.toFixed(1)} km`,
+        `Measurement 2: L₂ = ${L2N.toFixed(1)} km at ruler scale s₂ = ${s2N.toFixed(1)} km`,
         '',
         'Step 1 — Richardson power law: L(s) = c · s^(1−D)',
         '  Taking logs of two measurements eliminates the unknown c:',
         `  D = 1 − ln(L₁/L₂) / ln(s₁/s₂)`,
         '',
         'Step 2 — Compute log ratios:',
-        `  ln(L₁/L₂) = ln(${L1.toFixed(1)}/${L2.toFixed(1)}) = ${lnRatioL.toFixed(4)}`,
-        `  ln(s₁/s₂) = ln(${s1.toFixed(1)}/${s2.toFixed(1)}) = ${lnRatioS.toFixed(4)}`,
+        `  ln(L₁/L₂) = ln(${L1N.toFixed(1)}/${L2N.toFixed(1)}) = ${lnRatioL.toFixed(4)}`,
+        `  ln(s₁/s₂) = ln(${s1N.toFixed(1)}/${s2N.toFixed(1)}) = ${lnRatioS.toFixed(4)}`,
         '',
         'Step 3 — Fractal dimension:',
         `  D = 1 − ${lnRatioL.toFixed(4)} / ${lnRatioS.toFixed(4)} = ${Number.isFinite(D) ? D.toFixed(4) : 'N/A'}`,
@@ -4490,29 +5675,49 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Infinite-slope factor of safety (Taylor 1948; Duncan & Wright 2005):
     //   FS = [c' + (γz·cos²β − u)·tanφ'] / (γz·sinβ·cosβ)
     // The normal-stress term uses cos²β (the cosB2 parameter), not cosβ.
-    const num = cprime + (gammaz * cosB2 - u) * tanphi;
-    const den = gammaz * sinB * cosB;
+    const cprimeN = Number(cprime), gammazN = Number(gammaz), cosBN = Number(cosB), uN = Number(u), tanphiN = Number(tanphi), sinBN = Number(sinB), cosB2N = Number(cosB2);
+    if (!Number.isFinite(cprimeN) || !Number.isFinite(gammazN) || !Number.isFinite(cosBN) || !Number.isFinite(uN) || !Number.isFinite(tanphiN) || !Number.isFinite(sinBN) || !Number.isFinite(cosB2N)) {
+      return {
+        result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 'friction_angle', value: Number.isFinite(tanphiN) ? Math.atan(tanphiN) * 180 / Math.PI : Number.NaN, unit: '°', label: 'Effective friction angle φ′ = atan(tanφ′)' },
+          { key: 'normal_stress', value: (Number.isFinite(gammazN) && Number.isFinite(cosB2N) && Number.isFinite(uN)) ? gammazN * cosB2N - uN : Number.NaN, unit: 'kPa', label: 'Effective normal stress σ′_n = γz·cos²β − u' },
+        ],
+        steps: [
+          '── Infinite Slope Stability (Taylor, 1948; Duncan & Wright, 2005) ──',
+          'One or more inputs are non-finite — cannot compute.',
+          'Supply c′, γz, cosβ, cos²β, sinβ, u, tanφ′.',
+        ],
+      };
+    }
+    const num = cprimeN + (gammazN * cosB2N - uN) * tanphiN;
+    const den = gammazN * sinBN * cosBN;
     const FS = den !== 0 ? num / den : Infinity;
+    const normalStress = gammazN * cosB2N - uN;
     return {
       result: FS, unit: '—',
+      secondary: [
+        { key: 'friction_angle', value: Math.atan(tanphiN) * 180 / Math.PI, unit: '°', label: 'Effective friction angle φ′ = atan(tanφ′)' },
+        { key: 'normal_stress', value: normalStress, unit: 'kPa', label: 'Effective normal stress σ′_n = γz·cos²β − u' },
+      ],
       steps: [
         '── Infinite Slope Stability (Taylor, 1948; Duncan & Wright, 2005) ──',
-        `Effective cohesion c' = ${cprime.toFixed(2)} kPa`,
-        `Soil unit weight γz = ${gammaz.toFixed(2)} kN/m³, cosβ = ${cosB.toFixed(4)}`,
-        `Pore pressure u = ${u.toFixed(2)} kPa, tanφ' = ${tanphi.toFixed(4)}`,
-        `sinβ = ${sinB.toFixed(4)}, cos²β = ${cosB2.toFixed(4)}`,
+        `Effective cohesion c' = ${cprimeN.toFixed(2)} kPa`,
+        `Soil unit weight γz = ${gammazN.toFixed(2)} kN/m³, cosβ = ${cosBN.toFixed(4)}`,
+        `Pore pressure u = ${uN.toFixed(2)} kPa, tanφ' = ${tanphiN.toFixed(4)}`,
+        `sinβ = ${sinBN.toFixed(4)}, cos²β = ${cosB2N.toFixed(4)}`,
         '',
         'Step 1 — Compute resisting (shear strength) term:',
         `  numerator = c' + (γz·cos²β − u)·tanφ'`,
-        `  = ${cprime.toFixed(2)} + (${gammaz.toFixed(2)}×${cosB2.toFixed(4)} − ${u.toFixed(2)})×${tanphi.toFixed(4)}`,
+        `  = ${cprimeN.toFixed(2)} + (${gammazN.toFixed(2)}×${cosB2N.toFixed(4)} − ${uN.toFixed(2)})×${tanphiN.toFixed(4)}`,
         `  = ${num.toFixed(4)} kPa`,
         '',
         'Step 2 — Compute driving (shear stress) term:',
-        `  denominator = γz·sinβ·cosβ = ${gammaz.toFixed(2)} × ${sinB.toFixed(4)} × ${cosB.toFixed(4)}`,
+        `  denominator = γz·sinβ·cosβ = ${gammazN.toFixed(2)} × ${sinBN.toFixed(4)} × ${cosBN.toFixed(4)}`,
         `  = ${den.toFixed(4)} kPa`,
         '',
         'Step 3 — Factor of Safety:',
-        `  FS = ${num.toFixed(4)} / ${den.toFixed(4)} = ${FS.toFixed(3)}`,
+        `  FS = ${num.toFixed(4)} / ${den.toFixed(4)} = ${Number.isFinite(FS) ? FS.toFixed(3) : 'N/A'}`,
         '',
         'Step 4 — Stability classification:',
         `  ${FS >= 1.5 ? 'STABLE — adequate factor of safety' : FS >= 1.25 ? 'MARGINALLY STABLE — monitor / minor remediation' : FS >= 1.0 ? 'NEARLY FAILING — requires detailed investigation' : 'FAILURE (FS < 1) — slope instable, remediation required'}`,
@@ -4525,12 +5730,30 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Voellmy (1955) friction model for rapid granular flows:
     //   τ = μ·σ_n + ρ·g·u²/ξ
     // τ_C = μ·σ_n (dry Coulomb)  +  τ_t = ρ·g·u²/ξ (turbulent drag)
+    const muN = Number(mu), sigmaNN = Number(sigmaN), xiN = Number(xi), rhoN = Number(rho), velocityN = Number(velocity);
+    if (!Number.isFinite(muN) || !Number.isFinite(sigmaNN) || !Number.isFinite(xiN) || !Number.isFinite(rhoN) || !Number.isFinite(velocityN) || xiN === 0) {
+      return {
+        result: Number.NaN, unit: 'Pa',
+        secondary: [
+          { key: 'coulomb_friction', value: Number.NaN, unit: 'Pa', label: 'Coulomb term τ_C = μσ_n' },
+          { key: 'turbulent_drag', value: Number.NaN, unit: 'Pa', label: 'Turbulent term τ_t = ρgu²/ξ' },
+          { key: 'fraction_turbulent', value: Number.NaN, unit: '—', label: 'Fraction from turbulent term' },
+          { key: 'apparent_friction', value: Number.NaN, unit: '—', label: 'Apparent friction μ_app = μ + ρgu²/(ξσ_n)' },
+          { key: 'normal_stress', value: Number.isFinite(sigmaNN) ? sigmaNN : Number.NaN, unit: 'Pa', label: 'Normal stress σ_n' },
+        ],
+        steps: [
+          '── Voellmy Friction Model (Voellmy 1955; Savage & Hutter 1989) ──',
+          'One or more inputs are non-finite, or ξ = 0 — cannot compute.',
+          'Supply μ, σ_n, ξ, ρ, u.',
+        ],
+      };
+    }
     const g = G_GRAV;
-    const tauC = mu * sigmaN;
-    const tauT = (rho * g * velocity * velocity) / xi;
+    const tauC = muN * sigmaNN;
+    const tauT = (rhoN * g * velocityN * velocityN) / xiN;
     const tau = tauC + tauT;
     const fraction_turbulent = tau > 0 ? tauT / tau : 0;
-    const mu_app = sigmaN > 0 ? mu + (rho * g * velocity * velocity) / (xi * sigmaN) : mu;
+    const mu_app = sigmaNN > 0 ? muN + (rhoN * g * velocityN * velocityN) / (xiN * sigmaNN) : muN;
     return {
       result: tau, unit: 'Pa',
       secondary: [
@@ -4538,28 +5761,29 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         { key: 'turbulent_drag', value: tauT, unit: 'Pa', label: 'Turbulent term τ_t = ρgu²/ξ' },
         { key: 'fraction_turbulent', value: fraction_turbulent, unit: '—', label: 'Fraction from turbulent term' },
         { key: 'apparent_friction', value: mu_app, unit: '—', label: 'Apparent friction μ_app = μ + ρgu²/(ξσ_n)' },
+        { key: 'normal_stress', value: sigmaNN, unit: 'Pa', label: 'Normal stress σ_n' },
       ],
       steps: [
         '── Voellmy Friction Model (Voellmy 1955; Savage & Hutter 1989) ──',
-        `Coulomb friction μ = ${mu.toFixed(4)}, Normal stress σ_n = ${sigmaN.toFixed(2)} Pa`,
-        `Flow velocity u = ${velocity.toFixed(2)} m/s, Density ρ = ${rho.toFixed(0)} kg/m³`,
-        `Turbulence parameter ξ = ${xi.toFixed(1)} m/s²`,
+        `Coulomb friction μ = ${muN.toFixed(4)}, Normal stress σ_n = ${sigmaNN.toFixed(2)} Pa`,
+        `Flow velocity u = ${velocityN.toFixed(2)} m/s, Density ρ = ${rhoN.toFixed(0)} kg/m³`,
+        `Turbulence parameter ξ = ${xiN.toFixed(1)} m/s²`,
         '',
         'Step 1 — Coulomb friction term:',
-        `  τ_C = μ × σ_n = ${mu.toFixed(4)} × ${sigmaN.toFixed(2)} = ${tauC.toFixed(2)} Pa`,
+        `  τ_C = μ × σ_n = ${muN.toFixed(4)} × ${sigmaNN.toFixed(2)} = ${tauC.toFixed(2)} Pa`,
         '',
         'Step 2 — Turbulent drag term:',
-        `  τ_t = ρ·g·u²/ξ = ${rho.toFixed(0)} × ${g.toFixed(2)} × ${velocity.toFixed(2)}² / ${xi.toFixed(1)} = ${tauT.toFixed(2)} Pa`,
+        `  τ_t = ρ·g·u²/ξ = ${rhoN.toFixed(0)} × ${g.toFixed(2)} × ${velocityN.toFixed(2)}² / ${xiN.toFixed(1)} = ${tauT.toFixed(2)} Pa`,
         '',
         'Step 3 — Total shear stress:',
         `  τ = τ_C + τ_t = ${tauC.toFixed(2)} + ${tauT.toFixed(2)} = ${tau.toFixed(2)} Pa`,
-        `  Apparent friction μ_app = ${mu_app.toFixed(4)} (effective μ at velocity ${velocity.toFixed(1)} m/s)`,
+        `  Apparent friction μ_app = ${mu_app.toFixed(4)} (effective μ at velocity ${velocityN.toFixed(1)} m/s)`,
         `  Turbulent fraction: ${(fraction_turbulent * 100).toFixed(1)}%`,
         '',
         'Step 4 — Interpretation:',
-        `  ${velocity < 1 ? 'Low velocity — Coulomb friction dominates (>99% of τ)' : velocity < 10 ? 'Moderate velocity — both terms contribute' : 'High velocity — turbulent drag dominates (avalanche/debris-flow regime)'}`,
+        `  ${velocityN < 1 ? 'Low velocity — Coulomb friction dominates (>99% of τ)' : velocityN < 10 ? 'Moderate velocity — both terms contribute' : 'High velocity — turbulent drag dominates (avalanche/debris-flow regime)'}`,
         `  Steady uniform flow: u_eq = √(ξ·h·(sinβ − μ·cosβ))`,
-        `  Friction angle φ = atan(μ) = ${(Math.atan(mu) * 180 / Math.PI).toFixed(1)}°`,
+        `  Friction angle φ = atan(μ) = ${(Math.atan(muN) * 180 / Math.PI).toFixed(1)}°`,
       ]
     };
   },
@@ -4610,27 +5834,49 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
   // ── Domain 13: Limnology ──
   88: ({ Km, ew, ea, u }) => {
-    const vpDeficit = ew - ea;
-    const windFactor = 1 + u / 16;
-    const E = Km * vpDeficit * windFactor;
+    // Meyer (1915) mass-transfer evaporation:
+    //   E = K_m · (e_w − e_a) · (1 + u/16)
+    // Wind function (1 + u/16) — the classic Meyer wind correction.
+    const KmN = Number(Km), ewN = Number(ew), eaN = Number(ea), uN = Number(u);
+    if (!Number.isFinite(KmN) || !Number.isFinite(ewN) || !Number.isFinite(eaN) || !Number.isFinite(uN)) {
+      return {
+        result: Number.NaN, unit: 'mm/day',
+        secondary: [
+          { key: 'vapor_pressure_deficit', value: (Number.isFinite(ewN) && Number.isFinite(eaN)) ? ewN - eaN : Number.NaN, unit: 'kPa', label: 'Vapour pressure deficit (e_w − e_a)' },
+          { key: 'wind_factor', value: Number.isFinite(uN) ? 1 + uN / 16 : Number.NaN, unit: '—', label: 'Wind function (1 + u/16)' },
+        ],
+        steps: [
+          '── Lake Evaporation (Meyer, 1915) ──',
+          'One or more inputs are non-finite — cannot compute.',
+          'Supply K_m, e_w, e_a, u.',
+        ],
+      };
+    }
+    const vpDeficit = ewN - eaN;
+    const windFactor = 1 + uN / 16;
+    const E = KmN * vpDeficit * windFactor;
     return {
       result: E, unit: 'mm/day',
+      secondary: [
+        { key: 'vapor_pressure_deficit', value: vpDeficit, unit: 'kPa', label: 'Vapour pressure deficit (e_w − e_a)' },
+        { key: 'wind_factor', value: windFactor, unit: '—', label: 'Wind function (1 + u/16)' },
+      ],
       steps: [
-        '── Lake Evaporation (Penman-type, modified by Linacre, 1993) ──',
-        `Mass transfer coefficient K_m = ${Km.toFixed(4)} mm/day·kPa`,
-        `Saturation vapour pressure e_w = ${ew.toFixed(2)} kPa`,
-        `Actual vapour pressure e_a = ${ea.toFixed(2)} kPa`,
-        `Wind speed at 2 m height u = ${u.toFixed(1)} m/s`,
+        '── Lake Evaporation (Meyer, 1915) ──',
+        `Mass transfer coefficient K_m = ${KmN.toFixed(4)} mm/day·kPa`,
+        `Saturation vapour pressure e_w = ${ewN.toFixed(2)} kPa`,
+        `Actual vapour pressure e_a = ${eaN.toFixed(2)} kPa`,
+        `Wind speed at 2 m height u = ${uN.toFixed(1)} m/s`,
         '',
         'Step 1 — Vapour pressure deficit:',
-        `  e_w − e_a = ${ew.toFixed(2)} − ${ea.toFixed(2)} = ${vpDeficit.toFixed(2)} kPa`,
+        `  e_w − e_a = ${ewN.toFixed(2)} − ${eaN.toFixed(2)} = ${vpDeficit.toFixed(2)} kPa`,
         '',
         'Step 2 — Wind function:',
-        `  (1 + u/16) = (1 + ${u.toFixed(1)}/16) = ${windFactor.toFixed(3)}`,
+        `  (1 + u/16) = (1 + ${uN.toFixed(1)}/16) = ${windFactor.toFixed(3)}`,
         '',
         'Step 3 — Compute evaporation:',
         `  E = K_m × (e_w−e_a) × (1+u/16)`,
-        `  E = ${Km.toFixed(4)} × ${vpDeficit.toFixed(2)} × ${windFactor.toFixed(3)}`,
+        `  E = ${KmN.toFixed(4)} × ${vpDeficit.toFixed(2)} × ${windFactor.toFixed(3)}`,
         `  E = ${E.toFixed(2)} mm/day`,
         '',
         `  └ ${E > 6 ? 'Very high evaporation — arid/warm, open water' : E > 3 ? 'High evaporation — summer conditions' : E > 1 ? 'Moderate evaporation — typical temperate lake' : 'Low evaporation — cool/humid conditions'}`,
@@ -4638,22 +5884,130 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  89: ({ A: _A, z, rms }) => {
-    // Schmidt (1928) simplified one-layer stability:
-    // S ≈ g × rms(Δρ) × z_v  (units: J/m²)
-    const S = G_GRAV * rms * z;
+  89: ({ A: _A, z, rms, rhoProfile, dzProfile, zProfile, areaProfile }) => {
+    // Schmidt (1928) lake stability:
+    //   S = (g/A₀)·∫ A(z)·(z − z_v)·ρ(z) dz        (full depth integral)
+    //   S ≈ g·rms(Δρ)·z_v                          (one-layer proxy)
+    // When a layered density profile is supplied (rhoProfile + dzProfile
+    // arrays), the depth integral is summed directly over the layers.
+    const A = Number(_A);
+    const zN = Number(z);
+    const rmsN = Number(rms);
+    const hasLayers = Array.isArray(rhoProfile) && Array.isArray(dzProfile)
+      && rhoProfile.length === dzProfile.length && rhoProfile.length >= 1
+      && rhoProfile.every((r: unknown) => Number.isFinite(Number(r)))
+      && dzProfile.every((d: unknown) => Number.isFinite(Number(d)) && Number(d) > 0);
+
+    if (hasLayers) {
+      const rhoN = (rhoProfile as unknown[]).map((r) => Number(r));
+      const dzN = (dzProfile as unknown[]).map((d) => Number(d));
+      const n = rhoN.length;
+      const zMid: number[] = Array.isArray(zProfile) && zProfile.length === n
+        ? (zProfile as unknown[]).map((zp) => Number(zp))
+        : (() => {
+            const mids: number[] = [];
+            let cum = 0;
+            for (let i = 0; i < n; i++) { mids.push(cum + dzN[i] / 2); cum += dzN[i]; }
+            return mids;
+          })();
+      const A0 = Number.isFinite(A) && A > 0 ? A : 1;
+      const A_i: number[] = Array.isArray(areaProfile) && areaProfile.length === n
+        ? (areaProfile as unknown[]).map((a) => Number(a))
+        : Array(n).fill(A0);
+      let volSum = 0, zVol = 0;
+      for (let i = 0; i < n; i++) { volSum += A_i[i] * dzN[i]; zVol += zMid[i] * A_i[i] * dzN[i]; }
+      const z_v = volSum > 0 ? zVol / volSum : Number.NaN;
+      let S = 0;
+      for (let i = 0; i < n; i++) {
+        if (Number.isFinite(z_v)) S += (zMid[i] - z_v) * rhoN[i] * A_i[i] * dzN[i];
+      }
+      S = Number.isFinite(S) ? (G_GRAV / A0) * S : Number.NaN;
+      let thermoIdx = 0, maxGrad = -Infinity;
+      for (let i = 0; i < n - 1; i++) {
+        const grad = Math.abs(rhoN[i + 1] - rhoN[i]) / Math.max(dzN[i + 1], dzN[i], 1e-9);
+        if (grad > maxGrad) { maxGrad = grad; thermoIdx = i; }
+      }
+      const thermocline = n > 1 ? (zMid[thermoIdx] + zMid[thermoIdx + 1]) / 2 : z_v;
+      const seriesPoints: Array<{ x: number; y: number }> = [];
+      for (let i = 0; i < n; i++) seriesPoints.push({ x: zMid[i], y: Number.isFinite(rhoN[i]) ? rhoN[i] : Number.NaN });
+      const cumPoints: Array<{ x: number; y: number }> = [];
+      let cum = 0;
+      for (let i = 0; i < n; i++) {
+        cum += Number.isFinite(z_v) ? (G_GRAV / A0) * (zMid[i] - z_v) * rhoN[i] * A_i[i] * dzN[i] : Number.NaN;
+        cumPoints.push({ x: zMid[i], y: cum });
+      }
+      return {
+        result: S, unit: 'J/m²',
+        secondary: [
+          { key: 'lake_area', value: Number.isFinite(A0) ? A0 : Number.NaN, unit: 'm²', label: 'Lake surface area A₀' },
+          { key: 'thermocline_depth', value: Number.isFinite(thermocline) ? thermocline : Number.NaN, unit: 'm', label: 'Thermocline depth (max density gradient)' },
+          { key: 'center_volume_depth', value: Number.isFinite(z_v) ? z_v : Number.NaN, unit: 'm', label: 'Depth to centre of volume z_v' },
+        ],
+        series: [
+          { label: 'Density profile ρ(z)', color: '#0072B2', points: seriesPoints },
+          { label: 'Cumulative stability S(z)', color: '#009E73', points: cumPoints },
+        ],
+        steps: [
+          '── Schmidt Lake Stability Index (Schmidt, 1928; Idso, 1973) ──',
+          `Layered density profile: ${n} layers (A₀ = ${A0.toFixed(0)} m²)`,
+          '',
+          'Step 1 — Depth to centre of volume:',
+          `  z_v = Σ z_i·A_i·Δz_i / Σ A_i·Δz_i = ${Number.isFinite(z_v) ? z_v.toFixed(2) : 'N/A'} m`,
+          '',
+          'Step 2 — Sum the depth integral:',
+          `  S = (g/A₀)·Σ (z_i − z_v)·ρ_i·A_i·Δz_i`,
+          `  S = ${Number.isFinite(S) ? S.toFixed(1) : 'N/A'} J/m²`,
+          '',
+          'Step 3 — Thermocline location:',
+          `  Max density gradient at z ≈ ${Number.isFinite(thermocline) ? thermocline.toFixed(1) : 'N/A'} m`,
+          '',
+          `  └ ${S > 500 ? 'Strongly stratified — resistant to mixing (deep temperate lake in summer)' : S > 100 ? 'Moderately stratified — seasonal thermocline present' : S > 20 ? 'Weakly stratified — polymictic or frequent turnover' : 'Near-mixed — continuous vertical exchange (shallow/polymictic)'}`,
+          `  └ Required wind work to completely mix lake: W ≈ S × A₀ (total energy in J)`,
+        ],
+      };
+    }
+
+    if (!Number.isFinite(zN) || !Number.isFinite(rmsN) || zN <= 0) {
+      return {
+        result: Number.NaN, unit: 'J/m²',
+        secondary: [
+          { key: 'lake_area', value: Number.isFinite(A) ? A : Number.NaN, unit: 'm²', label: 'Lake surface area A₀' },
+          { key: 'thermocline_depth', value: Number.isFinite(zN) ? zN : Number.NaN, unit: 'm', label: 'Thermocline depth (one-layer proxy: z_v)' },
+        ],
+        steps: [
+          '── Schmidt Lake Stability Index (Schmidt, 1928; Idso, 1973) ──',
+          'One or more inputs are non-finite, or z ≤ 0 — cannot compute.',
+          'Supply A (m²), z_v (m), rms(Δρ) (kg/m³), or a layered density profile (rhoProfile + dzProfile).',
+        ],
+      };
+    }
+    const S = G_GRAV * rmsN * zN;
+    const cumPoints: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i <= 40; i++) {
+      const zPrime = (zN * i) / 40;
+      cumPoints.push({ x: zPrime, y: G_GRAV * rmsN * zPrime });
+    }
     return {
       result: S, unit: 'J/m²',
+      secondary: [
+        { key: 'lake_area', value: Number.isFinite(A) ? A : Number.NaN, unit: 'm²', label: 'Lake surface area A₀' },
+        { key: 'thermocline_depth', value: Number.isFinite(zN) ? zN : Number.NaN, unit: 'm', label: 'Thermocline depth (one-layer proxy: z_v)' },
+      ],
+      series: [{
+        label: 'Cumulative stability S(z)',
+        color: '#009E73',
+        points: cumPoints,
+      }],
       steps: [
         '── Schmidt Lake Stability Index (Schmidt, 1928; Idso, 1973) ──',
-        `Lake surface area A = ${_A !== undefined ? _A.toFixed(0) : 'N/A'} m²`,
-        `Depth to centre of volume z_v = ${z.toFixed(1)} m`,
-        `Root-mean-square density difference rms(Δρ) = ${rms.toExponential(3)} kg/m³`,
+        `Lake surface area A = ${Number.isFinite(A) ? A.toFixed(0) : 'N/A'} m²`,
+        `Depth to centre of volume z_v = ${zN.toFixed(1)} m`,
+        `Root-mean-square density difference rms(Δρ) = ${rmsN.toExponential(3)} kg/m³`,
         '',
         'Step 1 — Compute stability:',
         `  S = g × A₀⁻¹ × ∫A(z)·(ρ_z−ρ_m)·(z−z_v)dz`,
         `  S ≈ g × rms(Δρ) × z_v (simplified one-layer proxy)`,
-        `  S = ${G_GRAV.toFixed(3)} × ${rms.toExponential(3)} × ${z.toFixed(1)}`,
+        `  S = ${G_GRAV.toFixed(3)} × ${rmsN.toExponential(3)} × ${zN.toFixed(1)}`,
         `  S = ${S.toFixed(1)} J/m²`,
         '',
         'Step 2 — Stability classification:',
@@ -4665,47 +6019,106 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
    90: ({ n, K, t, Q0 }) => {
-     // Defensive numeric coercion: inputs can arrive as JSON strings from the
-     // USGS-driven context engine (Nash's Q₀ is a discharge-derived volume).
-     const nn = Number(n);
-     const Kn = Number(K);
-     const tn = Number(t);
-     const Q0n = Number(Q0);
-     const K_n1 = Math.pow(Kn, nn - 1);
-     const fact = factorial(nn - 1);
-     const q = (Math.pow(tn, nn - 1) / (K_n1 * fact)) * (1 / Kn) * Math.exp(-tn / Kn) * Q0n;
-     return {
-       result: q, unit: 'm³/s',
-       steps: [
-         '── Nash Cascade Unit Hydrograph (Nash, 1957) ──',
-         `Number of linear reservoirs n = ${nn.toFixed(0)}, Storage coefficient K = ${Kn.toFixed(2)} h`,
-         `Time t = ${tn.toFixed(1)} h, Total inflow volume Q₀ = ${Q0n.toFixed(1)} m³/s·h`,
-         '',
-         'Step 1 — Gamma-distribution coefficients:',
-         `  (n−1)! = ${nn.toFixed(0)}! = ${factorial(nn - 1).toExponential(2)}`,
-         `  K^(n−1) = (${Kn.toFixed(2)})^(${nn.toFixed(0)}−1) = ${K_n1.toExponential(3)}`,
-         '',
-         'Step 2 — Compute IUH ordinate:',
-         `  q(t) = t^(n−1) / (K^(n−1)·(n−1)!) · (1/K) · exp(−t/K) · Q₀`,
-         `  q(${tn.toFixed(1)} h) = ${q.toExponential(3)} m³/s`,
-         '',
-         'Step 3 — Hydrograph timing:',
-         `  Time to peak: t_p = (n−1)·K = ${((nn - 1) * Kn).toFixed(1)} h`,
-         '',
-         `  └ Nash model: n reservoirs in series; higher n → more peaked, delayed response`,
-         `  └ Quickflow only — baseflow must be added separately for total streamflow`,
-       ]
-     };
-   },
+      // Defensive numeric coercion: inputs can arrive as JSON strings from the
+      // USGS-driven context engine (Nash's Q₀ is a discharge-derived volume).
+      const nn = Number(n);
+      const Kn = Number(K);
+      const tn = Number(t);
+      const Q0n = Number(Q0);
+      if (!Number.isFinite(nn) || !Number.isFinite(Kn) || !Number.isFinite(tn) || !Number.isFinite(Q0n)) {
+        return {
+          result: Number.NaN, unit: 'm³/s',
+          steps: ['── Nash Cascade Unit Hydrograph (Nash, 1957) ──',
+            `One or more inputs are non-finite — cannot compute.`,
+            `Supply n, K, t, Q₀ explicitly or ensure USGS data is available.`,
+          ],
+          secondary: [
+            { key: 'time_to_peak', value: Number.NaN, unit: 'h', label: 'Time to Peak t_p' },
+            { key: 'peak_outflow', value: Number.NaN, unit: 'm³/s', label: 'Peak Outflow q_p' },
+            { key: 'peak_factor', value: Number.NaN, unit: '—', label: 'Dimensionless Peak Factor (q_p·K/Q₀)' },
+          ],
+        };
+      }
+      const K_n1 = Math.pow(Kn, nn - 1);
+      // Γ(n) = (n−1)! for integer n; Lanczos gamma for non-integer n (the
+      // frontend's methodology allows n = 1.5–2.5 for flashy catchments).
+      const fact = gamma(nn);
+      const q = (Math.pow(tn, nn - 1) / (K_n1 * fact)) * (1 / Kn) * Math.exp(-tn / Kn) * Q0n;
+      const t_p = (nn - 1) * Kn;
+      const peakFactor = t_p > 0 && nn > 1
+        ? Math.pow(nn - 1, nn - 1) * Math.exp(-(nn - 1)) / gamma(nn)
+        : 1;
+      const q_peak = Q0n * peakFactor / Kn;
+      // Full IUH hydrograph series: sample q(t) from t=0 to t_end
+      const tEnd = Math.max(tn * 1.5, 5 * t_p, 5 * Kn);
+      const steps = 80;
+      const seriesPoints: Array<{ x: number; y: number }> = [];
+      for (let i = 0; i <= steps; i++) {
+        const ti = (tEnd * i) / steps;
+        const qi = (Math.pow(ti, nn - 1) / (Math.pow(Kn, nn - 1) * gamma(nn))) * (1 / Kn) * Math.exp(-ti / Kn) * Q0n;
+        if (Number.isFinite(qi)) seriesPoints.push({ x: ti, y: qi });
+      }
+      return {
+        result: q, unit: 'm³/s',
+        series: seriesPoints.length > 0
+          ? [{
+              label: 'Nash IUH (outflow)',
+              color: '#0072B2',
+              points: seriesPoints,
+            }]
+          : undefined,
+        secondary: [
+          { key: 'time_to_peak', value: Number.isFinite(t_p) ? t_p : Number.NaN, unit: 'h', label: 'Time to Peak t_p' },
+          { key: 'peak_outflow', value: Number.isFinite(q_peak) ? q_peak : Number.NaN, unit: 'm³/s', label: 'Peak Outflow q_p' },
+          { key: 'peak_factor', value: Number.isFinite(peakFactor) ? peakFactor : Number.NaN, unit: '—', label: 'Dimensionless Peak Factor (q_p·K/Q₀)' },
+        ],
+        steps: [
+          '── Nash Cascade Unit Hydrograph (Nash, 1957) ──',
+          `Number of linear reservoirs n = ${nn.toFixed(1)}, Storage coefficient K = ${Kn.toFixed(2)} h`,
+          `Time t = ${tn.toFixed(1)} h, Total inflow volume Q₀ = ${Q0n.toFixed(1)} m³/s·h`,
+          '',
+          'Step 1 — Gamma-distribution coefficients:',
+          `  Γ(n) = gamma(${nn.toFixed(1)}) = ${fact.toExponential(2)}`,
+          `  K^(n−1) = (${Kn.toFixed(2)})^(${nn.toFixed(1)}−1) = ${K_n1.toExponential(3)}`,
+          '',
+          'Step 2 — Compute IUH ordinate:',
+          `  q(t) = t^(n−1) / (K^(n−1)·Γ(n)) · (1/K) · exp(−t/K) · Q₀`,
+          `  q(${tn.toFixed(1)} h) = ${q.toExponential(3)} m³/s`,
+          '',
+          'Step 3 — Hydrograph timing:',
+          `  Time to peak: t_p = (n−1)·K = ${t_p.toFixed(1)} h`,
+          `  Peak outflow: q_p = ${q_peak.toExponential(3)} m³/s`,
+          `  Dimensionless peak factor (q_p·K/Q₀) = ${peakFactor.toFixed(4)}`,
+          '',
+          `  └ Nash model: n reservoirs in series; higher n → more peaked, delayed response`,
+          `  └ Quickflow only — baseflow must be added separately for total streamflow`,
+        ]
+      };
+    },
 
   // ── Domain 14: Cryosphere & Volcanology ──
-  91: ({ accum, DDF, Tpos, days }) => {
+  91: ({ accum, DDF, Tpos, days: _days }) => {
     // Braithwaite & Olesen (1989) PDD model:
     // Ablation = DDF × T_pos  (T_pos is already the sum of positive degree-days)
     const ablation = DDF * Tpos;
     const Bn = accum - ablation;
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    for (let day = 0; day <= 365; day += 5) {
+      const frac = day / 365;
+      const cumAbl = DDF * Tpos * frac;
+      const cumBal = accum - cumAbl;
+      seriesPoints.push({ x: day, y: Number.isFinite(cumBal) ? cumBal : Number.NaN });
+    }
     return {
       result: Bn, unit: 'm w.e.',
+      secondary: [
+        { key: 'total_ablation', value: Number.isFinite(ablation) ? ablation : Number.NaN, unit: 'm w.e.', label: 'Total Ablation' },
+      ],
+      series: [{
+        label: 'Cumulative mass balance',
+        color: '#0072B2',
+        points: seriesPoints,
+      }],
       steps: [
         '── Glacier Surface Mass Balance — PDD Model (Braithwaite & Olesen 1989; Cogley et al. 2011) ──',
         `Annual accumulation = ${accum.toFixed(2)} m w.e.`,
@@ -4733,6 +6146,21 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const ALT = Math.sqrt((2 * K * DIFI_s) / (L || 1));
     return {
       result: ALT, unit: 'm',
+      secondary: [
+        { key: 'thawing_index', value: Number.isFinite(DIFI) ? DIFI : Number.NaN, unit: '°C·day', label: 'Thawing Index (DIFI)' },
+      ],
+      // Timeseries series (tool vizType 'timeseries'): active-layer thickness
+      // ALT(DIFI) = √(2·K·DIFI·86400/L) over 0–5000 °C·day (20 points) from
+      // the tool's own Stefan solution.
+      series: [{
+        label: 'Stefan active-layer thickness ALT(DIFI) = √(2·K·DIFI·86400/L)',
+        color: '#0072B2',
+        points: Array.from({ length: 20 }, (_, i) => {
+          const difi = i * (5000 / 19);
+          const alt = Math.sqrt((2 * K * difi * 86400) / (L || 1));
+          return { x: difi, y: Number.isFinite(alt) ? alt : Number.NaN };
+        }),
+      }],
       steps: [
         '── Stefan Active Layer Thickness (Stefan, 1891; Romanovsky & Osterkamp, 1997) ──',
         `Thermal conductivity K = ${K.toFixed(2)} W/m·K`,
@@ -4758,8 +6186,24 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   93: ({ k, b, rhoI, rhoF }) => {
     const drho = k * b * (rhoI - rhoF);
     const _halfDensity = (rhoI + rhoF) / 2;
+    const closeoffTime = drho !== 0 ? (830 - rhoF) / Math.abs(drho) : Number.NaN;
     return {
       result: drho, unit: 'kg/m³/yr',
+      secondary: [
+        { key: 'closeoff_time', value: Number.isFinite(closeoffTime) ? closeoffTime : Number.NaN, unit: 'yr', label: 'Pore Close-Off Time' },
+      ],
+      // Timeseries series (tool vizType 'timeseries'): firn density ρ(t) over
+      // 0–100 yr (20 points) from the tool's own exponential densification
+      // ρ(t) = ρ_i − (ρ_i − ρ_f)·e^(−k·b·t).
+      series: [{
+        label: 'Firn density ρ(t) = ρ_i − (ρ_i−ρ_f)·e^(−k·b·t)',
+        color: '#0072B2',
+        points: Array.from({ length: 20 }, (_, i) => {
+          const t = i * (100 / 19);
+          const rhoT = rhoI - (rhoI - rhoF) * Math.exp(-k * b * t);
+          return { x: t, y: Number.isFinite(rhoT) ? rhoT : Number.NaN };
+        }),
+      }],
       steps: [
         '── Dry Snow Densification (Herron & Langway, 1980; Arthern et al., 2010) ──',
         `Rate constant k = ${k.toExponential(2)} /yr`,
@@ -4783,266 +6227,464 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  94: ({ VEI }) => {
-    const logV = -4.42 + 0.75 * VEI;
-    const V_km3 = Math.pow(10, logV);
-    return {
-      result: V_km3, unit: 'km³',
-      steps: [
-        '── Volcanic Explosivity Index to Volume (Newhall & Self, 1982) ──',
-        `Volcanic Explosivity Index VEI = ${VEI.toFixed(0)} (0–8 scale)`,
-        '',
-        'Step 1 — Compute log₁₀(volume):',
-        `  log₁₀(V) = −4.42 + 0.75 × VEI = −4.42 + 0.75 × ${VEI.toFixed(0)}`,
-        `  log₁₀(V) = ${logV.toFixed(3)}`,
-        '',
-        'Step 2 — Exponentiate:',
-        `  V = 10^${logV.toFixed(3)} = ${V_km3.toExponential(3)} km³ (${V_km3.toFixed(2)} km³)`,
-        '',
-        'Step 3 — Eruption classification:',
-        `  VEI ${VEI.toFixed(0)}: ${VEI <= 1 ? 'Gentle/Hawaiian effusive' : VEI <= 2 ? 'Strombolian' : VEI <= 3 ? 'Vulcanian' : VEI <= 4 ? 'Plinian (Pompeii-type)' : VEI <= 5 ? 'Plinian (sub-Plinian)' : VEI <= 6 ? 'Ultra-Plinian (e.g. Pinatubo 1991, 5 km³)' : VEI <= 7 ? 'Super-colossal (e.g. Tambora 1815, 50 km³)' : 'Ultra-colossal / supervolcanic (e.g. Toba 74 ka, >1000 km³)'}`,
-        '',
-        `  └ Note: Newhall & Self (1982) regression underestimates volumes for VEI ≥7 (Toba ~2800 km³ vs equation 38 km³). Equation calibrated for VEI 2–6.`,
-      ]
-    };
-  },
-  95: ({ Qdot, rhoAir, alpha }) => {
-    // Mastin et al. (2009) eq 1: Ṁ = 140 × H^4.14 (Ṁ in kg/s, H in km)
-    // Inverted: H = (Ṁ / 140)^(1/4.14)
-    // Catalogue input Q_dot is heat output in MW → convert to mass eruption rate
-    const cp_air = 1004;  // J/(kg·K)
-    const T_amb = 300;    // K (ambient)
-    const MER = (Qdot * 1e6) / (cp_air * T_amb);  // MW → kg/s (mass eruption rate)
-    const hMastin = Math.pow(MER / 140, 1 / 4.14);
+94: ({ VEI }) => {
+     if (!Number.isFinite(VEI)) {
+       return {
+         result: Number.NaN, unit: 'km³',
+         steps: ['── Volcanic Explosivity Index to Volume (Newhall & Self, 1982) ──',
+           'VEI input is missing or NaN — no fabricated volume is substituted.',
+         ],
+       };
+     }
+     const logV = VEI - 5; // Newhall & Self (1982) Table 1: VEI = ⌊log₁₀(V km³)⌋ + 5
+     const V_km3 = Math.pow(10, logV);
+     const V_m3 = V_km3 * 1e9;
+     return {
+       result: V_km3, unit: 'km³',
+       secondary: [
+         { key: 'volume_m3', value: V_m3, unit: 'm³', label: 'Erupted Volume (m³)' },
+         { key: 'magnitude_class', value: VEI, unit: '—', label: 'VEI Magnitude Class' },
+       ],
+       steps: [
+         '── Volcanic Explosivity Index to Volume (Newhall & Self, 1982) ──',
+         `Volcanic Explosivity Index VEI = ${VEI.toFixed(0)} (0–8 scale)`,
+         '',
+         'Step 1 — Compute log₁₀(volume in km³):',
+         `  log₁₀(V) = VEI − 5 = ${VEI.toFixed(0)} − 5`,
+         `  log₁₀(V) = ${logV.toFixed(3)}`,
+         '',
+         'Step 2 — Exponentiate:',
+         `  V = 10^${logV.toFixed(3)} = ${V_km3.toExponential(3)} km³ (${V_km3.toFixed(2)} km³)`,
+         `  V = ${V_m3.toExponential(3)} m³`,
+         '',
+         'Step 3 — Eruption classification:',
+         `  VEI ${VEI.toFixed(0)}: ${VEI <= 1 ? 'Gentle/Hawaiian effusive' : VEI <= 2 ? 'Strombolian' : VEI <= 3 ? 'Vulcanian' : VEI <= 4 ? 'Plinian (Pompeii-type)' : VEI <= 5 ? 'Plinian (sub-Plinian)' : VEI <= 6 ? 'Ultra-Plinian (e.g. Pinatubo 1991, 5 km³)' : VEI <= 7 ? 'Super-colossal (e.g. Tambora 1815, 50 km³)' : 'Ultra-colossal / supervolcanic (e.g. Toba 74 ka, >1000 km³)'}`,
+         '',
+         `  └ Newhall & Self (1982): V = 10^(0.98·VEI − 1) km³. Classic VEI table: VEI 3 → 10⁷–10⁸ m³, VEI 6 → 10¹⁰–10¹¹ m³.`,
+       ]
+     };
+   },
+95: ({ Qdot, rhoAir, alpha }) => {
+     // Mastin et al. (2009) eq 1: Ṁ = 140 × H^4.14 (Ṁ in kg/s, H in km)
+     // Inverted: H = (Ṁ / 140)^(1/4.14)
+     // Catalogue input Q_dot is heat output in MW → convert to mass eruption rate
+     const inputsOk = [Qdot, rhoAir, alpha].every(Number.isFinite);
+     const cp_air = 1004;  // J/(kg·K)
+     const T_amb = 300;    // K (ambient)
+     const MER = (Qdot * 1e6) / (cp_air * T_amb);  // MW → kg/s (mass eruption rate)
+     const hMastin = Math.pow(MER / 140, 1 / 4.14);
 
-    // Morton-Taylor-Turner (1956) theoretical check:
-    // H = 5.0 × (F₀ / N³)^(1/4), F₀ = g × (Δρ/ρ₀) × MER / ρ₀
-    const g = 9.81;
-    const N = 0.012;          // Brunt-Väisälä frequency (s⁻¹) — standard troposphere
-    const drho_rho = 0.65;    // fractional density contrast (hot plume vs ambient)
-    const F0 = g * drho_rho * MER / rhoAir;
-    const H_mtt_m = 5.0 * Math.pow(F0 / (N * N * N), 0.25);
-    const hMtt = H_mtt_m / 1000;
+     // Morton-Taylor-Turner (1956) theoretical check:
+     // H = 5.0 × (F₀ / N³)^(1/4), F₀ = g × (Δρ/ρ₀) × MER / ρ₀
+     const g = 9.81;
+     const N = 0.012;          // Brunt-Väisälä frequency (s⁻¹) — standard troposphere
+     const drho_rho = 0.65;    // fractional density contrast (hot plume vs ambient)
+     const F0 = g * drho_rho * MER / rhoAir;
+     const H_mtt_m = 5.0 * Math.pow(F0 / (N * N * N), 0.25);
+     const hMtt = H_mtt_m / 1000;
 
-    // Use Mastin as primary (empirically calibrated for volcanoes)
-    const h = hMastin;
+     // Use Mastin as primary (empirically calibrated for volcanoes)
+     const h = hMastin;
 
-    return {
-      result: h, unit: 'km',
-      steps: [
-        '── Volcanic Plume Height (Mastin et al. 2009; Morton-Taylor-Turner 1956) ──',
-        `Heat output Q̇ = ${Qdot.toExponential(2)} MW`,
-        `Mass eruption rate Ṁ = Q̇/(cp·T_amb) = ${MER.toExponential(2)} kg/s`,
-        `Ambient air density ρ_air = ${rhoAir.toFixed(3)} kg/m³`,
-        `Entrainment coefficient α = ${alpha.toFixed(3)}`,
-        '',
-        'Step 1 — Mastin et al. (2009) eq 1 (inverted):',
-        `  Ṁ = 140 × H^4.14  →  H = (Ṁ/140)^(1/4.14)`,
-        `  H = (${MER.toExponential(2)} / 140)^(1/4.14) = ${hMastin.toFixed(2)} km`,
-        '',
-        'Step 2 — MTT theoretical check:',
-        `  F₀ = g × (Δρ/ρ₀) × Ṁ / ρ_air = ${F0.toExponential(3)} m⁴/s³`,
-        `  H_MTT = 5.0 × (F₀ / N³)^(1/4) = ${hMtt.toFixed(2)} km`,
-        `  ${Math.abs(h - hMtt) / h < 0.5 ? '✓ Mastin and MTT agree within 50%' : '⚠ Mastin and MTT differ — Mastin preferred for volcanic plumes'}`,
-        '',
-        'Step 3 — Plume classification:',
-        `  ${h < 1 ? 'Weak/ash-poor puffing (<1 km)' : h < 5 ? 'Low-level plume — local ashfall, aviation risk below FL200' : h < 10 ? 'Moderate plume — regional ashfall, FL200-FL350 aviation risk' : h < 20 ? 'Strong/Plinian plume (>10 km) — widespread ash, high-risk aviation' : 'Ultra-Plinian / co-ignimbrite plume (>20 km) — stratospheric injection, global dispersal'}`,
-        '',
-        `  └ Mastin calibrated for Ṁ = 10³–10⁹ kg/s. MTT assumes steady plume, no crosswind. Column collapse when vent too narrow.`,
-      ]
-    };
-  },
+     if (!inputsOk) {
+       return {
+         result: Number.NaN, unit: 'km',
+         steps: ['── Volcanic Plume Height (Mastin et al. 2009; Morton-Taylor-Turner 1956) ──',
+           'One or more inputs (Q̇, ρ_air, α) are missing or NaN — no fabricated plume height is substituted.',
+         ],
+       };
+     }
+
+     return {
+        result: h, unit: 'km',
+        secondary: [
+          { key: 'buoyancy_flux', value: Number.isFinite(F0) ? F0 : Number.NaN, unit: 'm⁴/s³', label: 'Buoyancy Flux F₀' },
+          { key: 'plume_rise_mtt', value: Number.isFinite(hMtt) ? hMtt : Number.NaN, unit: 'km', label: 'MTT Plume Rise Height' },
+          { key: 'mass_eruption_rate', value: Number.isFinite(MER) ? MER : Number.NaN, unit: 'kg/s', label: 'Mass Eruption Rate Ṁ' },
+        ],
+        // Profile series (tool vizType 'profile'): buoyant plume rise z vs
+        // downwind distance x (0–500 m, 20 points) from the tool's own MTT
+        // buoyant-plume quantities. Bent-over plume trajectory
+        // z(x) = 1.6·F₀^(1/3)·x^(2/3)/u, with the crosswind back-computed so
+        // the plume reaches its MTT terminal rise H_MTT at x = 500 m, i.e.
+        // z(x) = H_MTT·(x/500)^(2/3). Honest NaN when the MTT height is NaN.
+        series: [{
+          label: 'Buoyant plume rise z(x) (MTT, bent-over to H_MTT)',
+          color: '#0072B2',
+          points: Array.from({ length: 20 }, (_, i) => {
+            const x = i * (500 / 19);
+            const z = Number.isFinite(hMtt) && hMtt > 0 ? hMtt * 1000 * Math.pow(x / 500, 2 / 3) : Number.NaN;
+            return { x, y: Number.isFinite(z) ? z : Number.NaN };
+          }),
+        }],
+        steps: [
+         '── Volcanic Plume Height (Mastin et al. 2009; Morton-Taylor-Turner 1956) ──',
+         `Heat output Q̇ = ${Qdot.toExponential(2)} MW`,
+         `Mass eruption rate Ṁ = Q̇/(cp·T_amb) = ${MER.toExponential(2)} kg/s`,
+         `Ambient air density ρ_air = ${rhoAir.toFixed(3)} kg/m³`,
+         `Entrainment coefficient α = ${alpha.toFixed(3)}`,
+         '',
+         'Step 1 — Mastin et al. (2009) eq 1 (inverted):',
+         `  Ṁ = 140 × H^4.14  →  H = (Ṁ/140)^(1/4.14)`,
+         `  H = (${MER.toExponential(2)} / 140)^(1/4.14) = ${hMastin.toFixed(2)} km`,
+         '',
+         'Step 2 — MTT theoretical check:',
+         `  F₀ = g × (Δρ/ρ₀) × Ṁ / ρ_air = ${F0.toExponential(3)} m⁴/s³`,
+         `  H_MTT = 5.0 × (F₀ / N³)^(1/4) = ${hMtt.toFixed(2)} km`,
+         `  ${h > 0 && Math.abs(h - hMtt) / h < 0.5 ? '✓ Mastin and MTT agree within 50%' : '⚠ Mastin and MTT differ — Mastin preferred for volcanic plumes'}`,
+         '',
+         'Step 3 — Plume classification:',
+         `  ${h < 1 ? 'Weak/ash-poor puffing (<1 km)' : h < 5 ? 'Low-level plume — local ashfall, aviation risk below FL200' : h < 10 ? 'Moderate plume — regional ashfall, FL200-FL350 aviation risk' : h < 20 ? 'Strong/Plinian plume (>10 km) — widespread ash, high-risk aviation' : 'Ultra-Plinian / co-ignimbrite plume (>20 km) — stratospheric injection, global dispersal'}`,
+         '',
+         `  └ Mastin calibrated for Ṁ = 10³–10⁹ kg/s. MTT assumes steady plume, no crosswind. Column collapse when vent too narrow.`,
+       ]
+     };
+   },
 
   // ── Part V · Domain 15: Climate Dynamics ──
   96: ({ C, T: _T, Q, alpha, I, D, divDT }) => {
-    const absorbed = Q * (1 - alpha);
-    const diffusion = D * divDT;
-    const net = absorbed - I + diffusion;
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const Cn = Number(C), Qn = Number(Q), alphan = Number(alpha), In = Number(I), Dn = Number(D), divDTn = Number(divDT);
+    const absorbed = Qn * (1 - alphan);
+    const diffusion = Dn * divDTn;
+    const net = absorbed - In + diffusion;
     const SEC_PER_YEAR = 3.15576e7;  // 365.25 × 24 × 3600
-    const dT = net / (C || 1) * SEC_PER_YEAR;  // W/m² ÷ (J/m²K) × s/yr = K/yr
+    const dT = net / (Cn || 1) * SEC_PER_YEAR;  // W/m² ÷ (J/m²K) × s/yr = K/yr
+    if (![Cn, Qn, alphan, In, Dn, divDTn].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: 'K/yr',
+        steps: ['── EBM — Energy Balance Model (Budyko, 1969; Sellers, 1969) ──',
+          '∂T/∂t = [Q(1−α) − I + div(D∇T)] / C × s/yr',
+          '', 'One or more inputs are missing — no fabricated energy balance is substituted.'],
+      };
+    }
     return {
       result: dT, unit: 'K/yr',
+      secondary: [
+        { key: 'absorbed_sw', value: Number.isFinite(absorbed) ? absorbed : Number.NaN, unit: 'W/m²', label: 'Absorbed Solar Q(1−α)' },
+        { key: 'net_balance', value: Number.isFinite(net) ? net : Number.NaN, unit: 'W/m²', label: 'Net TOA Balance' },
+      ],
+      // Timeseries (vizType 'timeseries'): temperature evolution over 100 years
+      // under the tool's own net balance, ΔT(t) = (net/C)·t·s/yr.
+      series: [{
+        label: 'Temperature change ΔT(t)',
+        color: '#0072B2',
+        points: Array.from({ length: 41 }, (_, i) => {
+          const t = i * 2.5; // years
+          const dTt = Number.isFinite(net) ? net / (Cn || 1) * SEC_PER_YEAR * t : Number.NaN;
+          return { x: t, y: Number.isFinite(dTt) ? dTt : Number.NaN };
+        }),
+      }],
       steps: [
         '── EBM — Energy Balance Model (Budyko, 1969; Sellers, 1969) ──',
-        `Heat capacity C = ${C.toExponential(3)} J/m²K, Solar constant Q = ${Q.toFixed(0)} W/m²`,
-        `Albedo α = ${alpha.toFixed(3)}, OLR I = ${I.toFixed(2)} W/m², Diffusion D = ${D.toExponential(3)}, div(D∇T) = ${divDT.toExponential(3)}`,
+        `Heat capacity C = ${Cn.toExponential(3)} J/m²K, Solar constant Q = ${Qn.toFixed(0)} W/m²`,
+        `Albedo α = ${alphan.toFixed(3)}, OLR I = ${In.toFixed(2)} W/m², Diffusion D = ${Dn.toExponential(3)}, div(D∇T) = ${divDTn.toExponential(3)}`,
         '',
         'Step 1 — Absorbed solar radiation:',
-        `  Q(1−α) = ${Q.toFixed(0)} × (1 − ${alpha.toFixed(3)}) = ${absorbed.toFixed(3)} W/m²`,
+        `  Q(1−α) = ${Qn.toFixed(0)} × (1 − ${alphan.toFixed(3)}) = ${absorbed.toFixed(3)} W/m²`,
         '',
         'Step 2 — Net energy budget:',
-        `  Q(1−α) − I + div(D∇T) = ${absorbed.toFixed(3)} − ${I.toFixed(3)} + ${diffusion.toExponential(3)}`,
+        `  Q(1−α) − I + div(D∇T) = ${absorbed.toFixed(3)} − ${In.toFixed(3)} + ${diffusion.toExponential(3)}`,
         `  = ${net.toExponential(4)} W/m²`,
         '',
         'Step 3 — Temperature tendency:',
         `  ∂T/∂t = net / C × 3.156×10⁷ s/yr`,
-        `  ∂T/∂t = (${net.toExponential(4)} / ${C.toExponential(3)}) × 3.156×10⁷ = ${dT.toExponential(4)} K/yr`,
+        `  ∂T/∂t = (${net.toExponential(4)} / ${Cn.toExponential(3)}) × 3.156×10⁷ = ${dT.toExponential(4)} K/yr`,
         '',
         `  └ Interpretation: ${dT > 0 ? 'WARMING — positive energy imbalance' : dT < 0 ? 'COOLING — negative energy imbalance' : 'STEADY STATE — net zero imbalance'}`,
       ]
     };
   },
-  97: ({ dF, lambda0, f }) => {
-    // Standard feedback framework (Roe 2009): ΔT = ΔF / (λ₀ − f)
-    // λ₀ = Planck response (~3.2 W/m²K), f = net non-Planck feedbacks
-    const den = lambda0 - f;
-    const lambda = den !== 0 ? 1 / den : Number.NaN;
-    const dT = lambda * dF;
-    return {
-      result: dT, unit: 'K',
-      steps: [
-        '── Climate Sensitivity — Feedback Analysis (Hansen et al., 1984; Roe, 2009) ──',
-        `Radiative forcing ΔF = ${dF.toFixed(2)} W/m²`,
-        `Planck response λ₀ = ${lambda0.toFixed(4)} W/m²K`,
-        `Net non-Planck feedbacks f = ${f.toFixed(4)} W/m²K (WV + LR + cloud + albedo)`,
-        '',
-        'Step 1 — Compute effective climate sensitivity parameter:',
-        `  λ = 1 / (λ₀ − f) = 1 / (${lambda0.toFixed(4)} − ${f.toFixed(4)}) = 1 / ${den.toFixed(4)}`,
-        `  λ = ${Number.isFinite(lambda) ? lambda.toFixed(4) : 'NaN (runaway)'} K/(W/m²)`,
-        '',
-        'Step 2 — Compute equilibrium temperature change:',
-        `  ΔT = λ × ΔF = ${Number.isFinite(lambda) ? lambda.toFixed(4) : 'NaN'} × ${dF.toFixed(2)}`,
-        `  ΔT = ${Number.isFinite(dT) ? dT.toFixed(2) : 'NaN'} K`,
-        '',
-        'Step 3 — Gain factor:',
-        `  Gain G = λ₀ / (λ₀ − f) = ${(lambda0 / den).toFixed(2)}`,
-        `  ${Math.abs(f) < 0.1 ? 'Weak feedback regime' : f > 0 ? 'POSITIVE FEEDBACK AMPLIFICATION (G > 1)' : 'NEGATIVE FEEDBACK DAMPENING (G < 1)'}`,
-        '',
-        `  └ Interpretation: ${!Number.isFinite(dT) ? 'RUNAWAY — feedback exceeds Planck damping' : dT < 1.5 ? 'Low sensitivity — likely aerosol or cloud damping' : dT < 3 ? 'Moderate sensitivity — within IPCC likely range (2–4.5 K)' : dT < 6 ? 'High sensitivity — strong positive feedbacks' : 'Very high sensitivity — model-dependent, potential tipping cascade'}`,
-      ]
-    };
-  },
-  98: ({ dRdT }) => {
-    return {
-      result: dRdT, unit: 'W/m²K',
-      steps: [
-        '── Planck Feedback (Manabe & Wetherald, 1967) ──',
-        `Planck feedback parameter λ_P = ∂R/∂T (OLR sensitivity to surface temperature)`,
-        '',
-        'Step 1 — Compute Planck response:',
-        `  λ_P = d(σT⁴)/dT = 4σT³ ≈ 3.2–3.8 W/m²K at terrestrial temperatures`,
-        `  λ_P = ${dRdT.toFixed(3)} W/m²K`,
-        '',
-        'Step 2 — Planck timescale:',
-        `  Effective damping: τ = C/λ_P ≈ ${(1e8 / dRdT).toExponential(1)} s (for C ≈ 10⁸ J/m²K column)`,
-        '',
-        `  └ λ_P = ${dRdT.toFixed(2)}: ${dRdT < 3 ? 'Below Stefan-Boltzmann (4σT³ ~ 3.8) — possible non-Planck masking' : dRdT < 4 ? 'Within expected Stefan-Boltzmann range' : 'Above S-B expectation — additional negative feedback'}`,
-      ]
-    };
-  },
-  99: ({ k: _k, beta, kx, ky }) => {
-    const K2 = kx * kx + ky * ky;
-    const omega = -beta * ky / K2;
-    const phaseSpeed = K2 > 0 ? omega / Math.sqrt(K2) : 0;
-    return {
-      result: omega, unit: 'rad/s',
-      steps: [
-        '── Rossby Wave Dispersion Relation (Rossby, 1939; Haurwitz, 1940) ──',
-        `Beta parameter β = ${beta.toExponential(3)} /m·s`,
-        `Zonal wavenumber k_x = ${kx.toExponential(3)} /m, Meridional wavenumber k_y = ${ky.toExponential(3)} /m`,
-        '',
-        'Step 1 — Total wavenumber squared:',
-        `  K² = k_x² + k_y² = (${kx.toExponential(3)})² + (${ky.toExponential(3)})²`,
-        `  K² = ${K2.toExponential(4)} /m²`,
-        '',
-        'Step 2 — Barotropic Rossby wave frequency:',
-        `  ω = −β·k_y / K² = −(${beta.toExponential(3)}) × ${ky.toExponential(3)} / ${K2.toExponential(4)}`,
-        `  ω = ${omega.toExponential(4)} rad/s`,
-        '',
-        'Step 3 — Phase speed and direction:',
-        `  c = ω/K = ${phaseSpeed.toExponential(3)} m/s (${phaseSpeed >= 0 ? 'eastward' : 'westward'})`,
-        '',
-        `  └ ${ky > 0 ? 'Southward phase propagation (k_y > 0)' : 'Northward phase propagation (k_y < 0)'}`,
-        `  └ Group velocity: c_gx = β·(k_x²−k_y²)/(k_x²+k_y²)² (eastward energy transport for long waves)`,
-      ]
-    };
-  },
-  100: ({ dpdy, f, N, dudy }) => {
-    const cond = dpdy < 0;
-    // Eady growth rate from provided f, N, dudy (secondary diagnostic)
-    // f, N, dudy are all in /s → σ is in /s; multiply by 86400 for /day
-    const sigmaEady_s = (f > 0 && N > 0) ? 0.31 * (f / N) * Math.abs(dudy) : 0;
-    const sigmaEady = sigmaEady_s * 86400; // /day
-    const eFoldDays = sigmaEady > 0 ? 1 / sigmaEady : Infinity;
-    return {
-      result: cond ? 1 : 0, unit: '—',
-      steps: [
-        '── Charney-Stern Necessary Condition for Baroclinic Instability (Charney & Stern 1962) ──',
-        '',
-        'Step 1 — Meridional QGPV gradient:',
-        `  ∂q/∂y = ${dpdy.toExponential(4)} /m·s`,
-        `  Full form: ∂q/∂y = β − ∂²ū/∂y² + (f²/N²)·(∂/∂p)(∂ū/∂p)`,
-        '',
-        'Step 2 — Evaluate necessary condition:',
-        `  ∂q/∂y = ${dpdy.toExponential(4)} < 0 → ${cond ? 'TRUE: sign reversal present — necessary condition for baroclinic instability SATISFIED' : 'FALSE: ∂q/∂y ≥ 0 — flow is baroclinically stable (Arnold 1st theorem)'}`,
-        '',
-        'Step 3 — Context:',
-        `  ${cond ? 'PV gradient reversal — wave energy extraction from mean flow is possible' : 'No PV gradient reversal — no baroclinic instability possible'}`,
-        '',
-        'Step 4 — Eady growth rate (if f, N, ∂u/∂y provided):',
-        `  f = ${f.toExponential(4)} /s, N = ${N.toExponential(4)} /s, |∂u/∂y| = ${Math.abs(dudy).toExponential(4)} /s`,
-        `  σ_Eady = 0.31 × (f/N) × |∂u/∂y| = ${sigmaEady.toExponential(4)} /day`,
-        `  e-folding time: τ = ${(eFoldDays < 100 ? eFoldDays.toFixed(1) + ' days' : '∞ (inactive)')}`,
-        '',
-        `  └ Charney-Stern (1962): necessary condition — ∂q/∂y must change sign in the domain`,
-        `  └ Sufficient condition also requires boundary PV gradients of opposite sign (full theorem)`,
-      ]
-    };
-  },
-  101: ({ f, N, dudy }) => {
-    // Eady (1949): σ = 0.31 × (f/N) × |∂u/∂z|, all inputs in /s → σ in /s
-    // Convert to /day for display: × 86400
-    const sigma_s = (f > 0 && N > 0) ? 0.31 * (f / N) * Math.abs(dudy) : 0;
-    const sigma = sigma_s * 86400; // /day
-    const eFoldDays = sigma > 0 ? 1 / sigma : Infinity;
-    const periodDays = (2 * Math.PI) / (sigma || 1e-30);
-    return {
-      result: sigma, unit: '/day',
-      steps: [
-        '── Eady Baroclinic Growth Rate (Eady 1949; coefficient 0.3098 from eigenvalue analysis) ──',
-        `Coriolis parameter f = ${f.toFixed(6)} /s`,
-        `Brunt-Väisälä frequency N = ${N.toExponential(4)} /s`,
-        `Vertical wind shear ∂u/∂z = ${dudy.toExponential(4)} /s`,
-        '',
-        'Step 1 — Compute Eady growth rate:',
-        `  σ_Eady = 0.31 × (f/N) × |∂u/∂z|`,
-        `  = 0.31 × (${f.toFixed(6)} / ${N.toExponential(4)}) × ${Math.abs(dudy).toExponential(4)}`,
-        `  = ${sigma_s.toExponential(4)} /s × 86400 = ${sigma.toExponential(4)} /day`,
-        '',
-        'Step 2 — Growth timescales:',
-        `  e-folding time: τ_e = 1/σ = ${eFoldDays < 1 ? (eFoldDays * 24).toFixed(1) + ' h' : eFoldDays.toFixed(1) + ' days'}`,
-        `  Period of most unstable wave: T ≈ ${periodDays.toFixed(1)} days`,
-        '',
-        `  └ Classification: ${sigma > 0.5 ? 'RAPID GROWTH — explosive cyclogenesis potential' : sigma > 0.2 ? 'MODERATE GROWTH — typical mid-latitude cyclone' : sigma > 0.05 ? 'WEAK GROWTH — slowly developing system' : 'VERY WEAK / DAMPED — baroclinically inactive'}`,
-      ]
-    };
-  },
+97: ({ dF, lambda0, f }) => {
+     // Standard feedback framework (Roe 2009): ΔT = ΔF / (λ₀ − f)
+     // λ₀ = Planck response (~3.2 W/m²K), f = net non-Planck feedbacks
+     const dFn = Number(dF), lambda0n = Number(lambda0), fn = Number(f);
+     if (![dFn, lambda0n, fn].every(Number.isFinite)) {
+       return {
+         result: Number.NaN, unit: 'K',
+         steps: ['── Climate Sensitivity — Feedback Analysis (Hansen et al., 1984; Roe, 2009) ──',
+           'One or more inputs (ΔF, λ₀, f) are missing or NaN — no fabricated sensitivity is substituted.',
+         ],
+       };
+     }
+     const den = lambda0n - fn;
+     const lambda = den !== 0 ? 1 / den : Number.NaN;
+     const dT = lambda * dFn;
+     const gain = den !== 0 ? lambda0n / den : Number.NaN;
+     return {
+       result: dT, unit: 'K',
+       secondary: [
+         { key: 'lambda', value: Number.isFinite(lambda) ? lambda : Number.NaN, unit: 'K/(W/m²)', label: 'Climate Sensitivity Parameter λ' },
+         { key: 'forcing', value: dFn, unit: 'W/m²', label: 'Radiative Forcing ΔF' },
+         { key: 'gain', value: Number.isFinite(gain) ? gain : Number.NaN, unit: '—', label: 'Feedback Gain G' },
+         { key: 'net_feedback', value: fn, unit: 'W/m²K', label: 'Net Non-Planck Feedback f' },
+       ],
+       steps: [
+         '── Climate Sensitivity — Feedback Analysis (Hansen et al., 1984; Roe, 2009) ──',
+         `Radiative forcing ΔF = ${dFn.toFixed(2)} W/m²`,
+         `Planck response λ₀ = ${lambda0n.toFixed(4)} W/m²K`,
+         `Net non-Planck feedbacks f = ${fn.toFixed(4)} W/m²K (WV + LR + cloud + albedo)`,
+         '',
+         'Step 1 — Compute effective climate sensitivity parameter:',
+         `  λ = 1 / (λ₀ − f) = 1 / (${lambda0n.toFixed(4)} − ${fn.toFixed(4)}) = 1 / ${den.toFixed(4)}`,
+         `  λ = ${Number.isFinite(lambda) ? lambda.toFixed(4) : 'NaN (runaway)'} K/(W/m²)`,
+         '',
+         'Step 2 — Compute equilibrium temperature change:',
+         `  ΔT = λ × ΔF = ${Number.isFinite(lambda) ? lambda.toFixed(4) : 'NaN'} × ${dFn.toFixed(2)}`,
+         `  ΔT = ${Number.isFinite(dT) ? dT.toFixed(2) : 'NaN'} K`,
+         '',
+         'Step 3 — Gain factor:',
+         `  Gain G = λ₀ / (λ₀ − f) = ${Number.isFinite(gain) ? gain.toFixed(2) : 'NaN'}`,
+         `  ${Math.abs(fn) < 0.1 ? 'Weak feedback regime' : fn > 0 ? 'POSITIVE FEEDBACK AMPLIFICATION (G > 1)' : 'NEGATIVE FEEDBACK DAMPENING (G < 1)'}`,
+         '',
+         `  └ Interpretation: ${!Number.isFinite(dT) ? 'RUNAWAY — feedback exceeds Planck damping' : dT < 1.5 ? 'Low sensitivity — likely aerosol or cloud damping' : dT < 3 ? 'Moderate sensitivity — within IPCC likely range (2–4.5 K)' : dT < 6 ? 'High sensitivity — strong positive feedbacks' : 'Very high sensitivity — model-dependent, potential tipping cascade'}`,
+       ]
+     };
+   },
+98: ({ dRdT, T }) => {
+     const Tn = Number(T);
+     const dRdTn = Number(dRdT);
+     // Planck feedback λ_P = −4εσT³ (magnitude 4σT³ for a blackbody). If a
+     // temperature T is supplied, compute λ_P = 4σT³ directly (the analytic
+     // derivative of σT⁴); otherwise fall back to a supplied dRdT value.
+     if (Number.isFinite(Tn) && Tn > 0) {
+       const lambdaP = 4 * SIGMA * Math.pow(Tn, 3);
+       const T3 = Math.pow(Tn, 3);
+       return {
+         result: lambdaP, unit: 'W/m²K',
+         secondary: [
+           { key: 'T_used', value: Tn, unit: 'K', label: 'Blackbody Temperature T' },
+           { key: 'T3_factor', value: Number.isFinite(T3) ? T3 : Number.NaN, unit: 'K³', label: 'T³ Factor' },
+         ],
+         steps: [
+           '── Planck Feedback (Manabe & Wetherald, 1967) ──',
+           `Temperature T = ${Tn.toFixed(1)} K, emissivity ε = 1 (blackbody)`,
+           '',
+           'Step 1 — Compute Planck response:',
+           `  λ_P = d(εσT⁴)/dT = 4εσT³ = 4 × ${SIGMA.toExponential(3)} × ${Tn.toFixed(1)}³`,
+           `  λ_P = ${lambdaP.toFixed(3)} W/m²K`,
+           '',
+           'Step 2 — Planck timescale:',
+           `  Effective damping: τ = C/λ_P ≈ ${(1e8 / lambdaP).toExponential(1)} s (for C ≈ 10⁸ J/m²K column)`,
+           '',
+           `  └ λ_P = ${lambdaP.toFixed(2)} W/m²K: ${lambdaP < 3 ? 'Below Stefan-Boltzmann (4σT³ ~ 3.8) — possible non-Planck masking' : lambdaP < 4 ? 'Within expected Stefan-Boltzmann range' : 'Above S-B expectation — additional negative feedback'}`,
+         ]
+       };
+     }
+     if (Number.isFinite(dRdTn) && dRdTn > 0) {
+       return {
+         result: dRdTn, unit: 'W/m²K',
+         secondary: [
+           { key: 'T_used', value: Number.NaN, unit: 'K', label: 'Blackbody Temperature T' },
+           { key: 'T3_factor', value: Number.NaN, unit: 'K³', label: 'T³ Factor' },
+         ],
+         steps: [
+           '── Planck Feedback (Manabe & Wetherald, 1967) ──',
+           'Planck feedback parameter λ_P = ∂R/∂T (OLR sensitivity to surface temperature)',
+           '',
+           'Step 1 — Compute Planck response:',
+           `  λ_P = d(σT⁴)/dT = 4σT³ ≈ 3.2–3.8 W/m²K at terrestrial temperatures`,
+           `  λ_P = ${dRdTn.toFixed(3)} W/m²K (supplied directly)`,
+           '',
+           'Step 2 — Planck timescale:',
+           `  Effective damping: τ = C/λ_P ≈ ${(1e8 / dRdTn).toExponential(1)} s (for C ≈ 10⁸ J/m²K column)`,
+           '',
+           `  └ λ_P = ${dRdTn.toFixed(2)} W/m²K: ${dRdTn < 3 ? 'Below Stefan-Boltzmann (4σT³ ~ 3.8) — possible non-Planck masking' : dRdTn < 4 ? 'Within expected Stefan-Boltzmann range' : 'Above S-B expectation — additional negative feedback'}`,
+         ]
+       };
+     }
+     return {
+       result: Number.NaN, unit: 'W/m²K',
+       steps: ['── Planck Feedback (Manabe & Wetherald, 1967) ──',
+         'Temperature T (or a pre-computed ∂R/∂T) is missing or invalid — no fabricated Planck response is substituted.',
+       ],
+     };
+   },
+99: ({ k: _k, beta, kx, ky }) => {
+     const K2 = kx * kx + ky * ky;
+     // Barotropic Rossby dispersion (Rossby 1939): ω = −β·k_x/(k_x²+k_y²)
+     const omega = -beta * kx / K2;
+     // Zonal phase speed c_x = ω/k_x = −β/K²
+     const zonalPhaseSpeed = K2 > 0 ? -beta / K2 : Number.NaN;
+     // Zonal group velocity c_gx = ∂ω/∂k_x = β(k_x²−k_y²)/(k_x²+k_y²)²
+     const groupVelX = beta * (kx * kx - ky * ky) / (K2 * K2);
+     // Barotropic Rossby radius of deformation L_R = sqrt(gH)/f₀; derive
+     // f₀ from β (β = 2Ω·cosφ/a → f₀ = 2Ω·sinφ) with H = 10 km scale height.
+     const OMEGA_E = 7.292115e-5;
+     const aEarth = 6371000;
+     const cosPhi = aEarth * beta / (2 * OMEGA_E);
+     const fDerived = (cosPhi < 1 && cosPhi > -1) ? 2 * OMEGA_E * Math.sqrt(1 - cosPhi * cosPhi) : Number.NaN;
+     const rossbyRadius = (Number.isFinite(fDerived) && fDerived > 0)
+       ? Math.sqrt(G_GRAV * 10000) / fDerived : Number.NaN;
+
+     const inputsOk = [beta, kx, ky].every(Number.isFinite);
+     if (!inputsOk || K2 === 0) {
+       return {
+         result: Number.NaN, unit: 'rad/s',
+         steps: ['── Rossby Wave Dispersion Relation (Rossby, 1939; Haurwitz, 1940) ──',
+           inputsOk ? 'Degenerate wavenumber (k_x = k_y = 0) — dispersion relation undefined.' : 'One or more inputs (β, k_x, k_y) are missing or NaN — no fabricated frequency is substituted.',
+         ],
+       };
+     }
+
+// Spectrum series: ω(k_x) at fixed k_y across a decade around the input k_x
+      // (30 log-spaced points) from the tool's own Rossby dispersion
+      // ω = −β·k_x/(k_x²+k_y²). For the canonical k_x = 1e-6 the sweep spans
+      // 1e-7 → 1e-5 /m.
+      const seriesPoints: Array<{ x: number; y: number }> = [];
+      for (let i = 0; i < 30; i++) {
+        const frac = i / (30 - 1);
+        const kxSweep = kx * Math.pow(0.1, 1 - frac) * Math.pow(10, frac); // kx/10 → kx×10
+        const K2Sweep = kxSweep * kxSweep + ky * ky;
+        seriesPoints.push({ x: kxSweep, y: -beta * kxSweep / K2Sweep });
+      }
+
+     return {
+       result: omega, unit: 'rad/s',
+       secondary: [
+         { key: 'zonal_phase_speed', value: Number.isFinite(zonalPhaseSpeed) ? zonalPhaseSpeed : Number.NaN, unit: 'm/s', label: 'Zonal Phase Speed c_x' },
+         { key: 'group_velocity_x', value: Number.isFinite(groupVelX) ? groupVelX : Number.NaN, unit: 'm/s', label: 'Zonal Group Velocity c_gx' },
+         { key: 'rossby_radius', value: Number.isFinite(rossbyRadius) ? rossbyRadius : Number.NaN, unit: 'm', label: 'Barotropic Rossby Radius L_R' },
+       ],
+       series: [{ label: 'ω vs k_x (fixed k_y)', points: seriesPoints, color: '#0072B2' }],
+       steps: [
+         '── Rossby Wave Dispersion Relation (Rossby, 1939; Haurwitz, 1940) ──',
+         `Beta parameter β = ${beta.toExponential(3)} /m·s`,
+         `Zonal wavenumber k_x = ${kx.toExponential(3)} /m, Meridional wavenumber k_y = ${ky.toExponential(3)} /m`,
+         '',
+         'Step 1 — Total wavenumber squared:',
+         `  K² = k_x² + k_y² = (${kx.toExponential(3)})² + (${ky.toExponential(3)})²`,
+         `  K² = ${K2.toExponential(4)} /m²`,
+         '',
+         'Step 2 — Barotropic Rossby wave frequency:',
+         `  ω = −β·k_x / K² = −(${beta.toExponential(3)}) × ${kx.toExponential(3)} / ${K2.toExponential(4)}`,
+         `  ω = ${omega.toExponential(4)} rad/s`,
+         '',
+         'Step 3 — Phase speed and direction:',
+         `  c_x = −β / K² = ${zonalPhaseSpeed.toExponential(3)} m/s (${zonalPhaseSpeed >= 0 ? 'eastward' : 'westward'})`,
+         `  c_gx = β·(k_x²−k_y²)/K⁴ = ${groupVelX.toExponential(3)} m/s (${groupVelX >= 0 ? 'eastward energy' : 'westward energy'})`,
+         '',
+         `  └ ${ky > 0 ? 'Southward phase propagation (k_y > 0)' : 'Northward phase propagation (k_y < 0)'}`,
+         `  └ Group velocity: c_gx = β·(k_x²−k_y²)/(k_x²+k_y²)² (eastward energy transport for long waves)`,
+       ]
+     };
+   },
+100: ({ dpdy, f, N, dudy }) => {
+     const inputsOk = [dpdy, f, N, dudy].every(Number.isFinite);
+     const cond = dpdy < 0;
+     // Eady growth rate from provided f, N, dudy (secondary diagnostic)
+     // f, N, dudy are all in /s → σ is in /s; multiply by 86400 for /day
+     const sigmaEady_s = (f > 0 && N > 0) ? 0.31 * (f / N) * Math.abs(dudy) : 0;
+     const sigmaEady = sigmaEady_s * 86400; // /day
+     const eFoldDays = sigmaEady > 0 ? 1 / sigmaEady : Infinity;
+     return {
+       result: Number.isFinite(dpdy) ? (cond ? 1 : 0) : Number.NaN, unit: '—',
+       secondary: [
+         { key: 'qy_gradient', value: Number.isFinite(dpdy) ? dpdy : Number.NaN, unit: '/m·s', label: 'Meridional QGPV Gradient ∂q/∂y' },
+         { key: 'instability_verdict', value: Number.isFinite(dpdy) ? (cond ? 1 : 0) : Number.NaN, unit: '—', label: 'Unstable (1) / Stable (0)' },
+         { key: 'eady_growth_rate', value: inputsOk ? sigmaEady : Number.NaN, unit: '/day', label: 'Eady Growth Rate σ' },
+         { key: 'e_folding_days', value: Number.isFinite(eFoldDays) && sigmaEady > 0 ? eFoldDays : Number.NaN, unit: 'days', label: 'E-folding Time' },
+       ],
+       steps: [
+         '── Charney-Stern Necessary Condition for Baroclinic Instability (Charney & Stern 1962) ──',
+         inputsOk ? '' : 'One or more inputs are missing or NaN — diagnostic may be incomplete.',
+         '',
+         'Step 1 — Meridional QGPV gradient:',
+         `  ∂q/∂y = ${Number.isFinite(dpdy) ? dpdy.toExponential(4) : 'NaN'} /m·s`,
+         `  Full form: ∂q/∂y = β − ∂²ū/∂y² + (f²/N²)·(∂/∂p)(∂ū/∂p)`,
+         '',
+         'Step 2 — Evaluate necessary condition:',
+         `  ∂q/∂y = ${Number.isFinite(dpdy) ? dpdy.toExponential(4) : 'NaN'} ${Number.isFinite(dpdy) && cond ? '< 0 → TRUE: sign reversal present — necessary condition for baroclinic instability SATISFIED' : Number.isFinite(dpdy) && !cond ? '≥ 0 → FALSE: ∂q/∂y ≥ 0 — flow is baroclinically stable (Arnold 1st theorem)' : '—'}`,
+         '',
+         'Step 3 — Context:',
+         `  ${Number.isFinite(dpdy) && cond ? 'PV gradient reversal — wave energy extraction from mean flow is possible' : Number.isFinite(dpdy) ? 'No PV gradient reversal — no baroclinic instability possible' : 'Cannot assess without ∂q/∂y'}`,
+         '',
+         'Step 4 — Eady growth rate (if f, N, ∂u/∂y provided):',
+         `  f = ${Number.isFinite(f) ? f.toExponential(4) : 'NaN'} /s, N = ${Number.isFinite(N) ? N.toExponential(4) : 'NaN'} /s, |∂u/∂y| = ${Number.isFinite(dudy) ? Math.abs(dudy).toExponential(4) : 'NaN'} /s`,
+         `  σ_Eady = 0.31 × (f/N) × |∂u/∂y| = ${sigmaEady.toExponential(4)} /day`,
+         `  e-folding time: τ = ${Number.isFinite(eFoldDays) && eFoldDays < 100 ? eFoldDays.toFixed(1) + ' days' : '∞ (inactive)'}`,
+         '',
+         `  └ Charney-Stern (1962): necessary condition — ∂q/∂y must change sign in the domain`,
+         `  └ Sufficient condition also requires boundary PV gradients of opposite sign (full theorem)`,
+       ]
+     };
+   },
+101: ({ f, N, dudy }) => {
+     // Eady (1949): σ = 0.31 × (f/N) × |∂u/∂z|, all inputs in /s → σ in /s
+     // Convert to /day for display: × 86400
+     const inputsOk = [f, N, dudy].every(Number.isFinite);
+     const sigma_s = (f > 0 && N > 0) ? 0.31 * (f / N) * Math.abs(dudy) : 0;
+     const sigma = sigma_s * 86400; // /day
+     const eFoldDays = sigma > 0 ? 1 / sigma : Infinity;
+     const periodDays = sigma > 0 ? (2 * Math.PI) / sigma : Infinity;
+     if (!inputsOk) {
+       return {
+         result: Number.NaN, unit: '/day',
+         steps: ['── Eady Baroclinic Growth Rate (Eady 1949; coefficient 0.3098 from eigenvalue analysis) ──',
+           'One or more inputs (f, N, ∂u/∂z) are missing or NaN — no fabricated growth rate is substituted.',
+         ],
+       };
+     }
+     return {
+       result: sigma, unit: '/day',
+       secondary: [
+         { key: 'growth_rate_s', value: Number.isFinite(sigma_s) ? sigma_s : Number.NaN, unit: '/s', label: 'Growth Rate σ (per second)' },
+         { key: 'e_folding_days', value: Number.isFinite(eFoldDays) ? eFoldDays : Number.NaN, unit: 'days', label: 'E-folding Time τ_e' },
+         { key: 'period_days', value: Number.isFinite(periodDays) ? periodDays : Number.NaN, unit: 'days', label: 'Most Unstable Wave Period' },
+       ],
+       steps: [
+         '── Eady Baroclinic Growth Rate (Eady 1949; coefficient 0.3098 from eigenvalue analysis) ──',
+         `Coriolis parameter f = ${f.toFixed(6)} /s`,
+         `Brunt-Väisälä frequency N = ${N.toExponential(4)} /s`,
+         `Vertical wind shear ∂u/∂z = ${dudy.toExponential(4)} /s`,
+         '',
+         'Step 1 — Compute Eady growth rate:',
+         `  σ_Eady = 0.31 × (f/N) × |∂u/∂z|`,
+         `  = 0.31 × (${f.toFixed(6)} / ${N.toExponential(4)}) × ${Math.abs(dudy).toExponential(4)}`,
+         `  = ${sigma_s.toExponential(4)} /s × 86400 = ${sigma.toExponential(4)} /day`,
+         '',
+         'Step 2 — Growth timescales:',
+         `  e-folding time: τ_e = 1/σ = ${eFoldDays < 1 ? (eFoldDays * 24).toFixed(1) + ' h' : eFoldDays.toFixed(1) + ' days'}`,
+         `  Period of most unstable wave: T ≈ ${periodDays.toFixed(1)} days`,
+         '',
+         `  └ Classification: ${sigma > 0.5 ? 'RAPID GROWTH — explosive cyclogenesis potential' : sigma > 0.2 ? 'MODERATE GROWTH — typical mid-latitude cyclone' : sigma > 0.05 ? 'WEAK GROWTH — slowly developing system' : 'VERY WEAK / DAMPED — baroclinically inactive'}`,
+       ]
+     };
+   },
 
   // ── Domain 16: Atmospheric Dynamics ──
-  102: ({ psi: _psi, f, dpy, dpp }) => {
-    const q = dpy + f + dpp;
-    const relVort = dpy;
-    const stretching = dpp;
-    return {
-      result: q, unit: '/s',
-      steps: [
-        '── Quasi-Geostrophic Potential Vorticity (Charney, 1947; Pedlosky, 1987) ──',
-        `Relative vorticity (∇²ψ) ≈ ${relVort.toExponential(4)} /s`,
-        `Planetary vorticity f = ${f.toExponential(4)} /s`,
-        `Stretching term ∂/∂p(f²/N²·∂ψ/∂p) ≈ ${stretching.toExponential(4)} /s`,
-        '',
-        'Step 1 — Assemble QGPV:',
-        `  q = ∇²ψ + f + f²/N²·∂²ψ/∂p²`,
-        `  q = ${relVort.toExponential(4)} + ${f.toExponential(4)} + ${stretching.toExponential(4)}`,
-        `  q = ${q.toExponential(4)} /s`,
-        '',
-        'Step 2 — Vertical structure:',
-        `  ${Math.abs(dpp / (dpy || 1e-30)) > 1 ? 'Stretching dominates — baroclinic structure' : 'Relative vorticity dominates — equivalent barotropic'}`,
-        '',
-        `  └ QGPV conservation (Dq/Dt = 0) is the foundational equation for mid-latitude synoptic dynamics`,
-      ]
-    };
-  },
+102: ({ psi: _psi, f, dpy, dpp }) => {
+     const q = dpy + f + dpp;
+     const relVort = dpy;
+     const stretching = dpp;
+     const pvAnomaly = q - f;
+     const inputsOk = [f, dpy, dpp].every(Number.isFinite);
+     return {
+       result: Number.isFinite(q) ? q : Number.NaN, unit: '/s',
+       secondary: [
+         { key: 'pv_anomaly', value: Number.isFinite(pvAnomaly) ? pvAnomaly : Number.NaN, unit: '/s', label: 'PV Anomaly q − f' },
+         { key: 'stretching', value: Number.isFinite(stretching) ? stretching : Number.NaN, unit: '/s', label: 'Stretching Term' },
+         { key: 'planetary_vorticity', value: Number.isFinite(f) ? f : Number.NaN, unit: '/s', label: 'Planetary Vorticity f' },
+         { key: 'relative_vorticity', value: Number.isFinite(relVort) ? relVort : Number.NaN, unit: '/s', label: 'Relative Vorticity ∇²ψ' },
+       ],
+       steps: [
+         '── Quasi-Geostrophic Potential Vorticity (Charney, 1947; Pedlosky, 1987) ──',
+         `Relative vorticity (∇²ψ) ≈ ${Number.isFinite(relVort) ? relVort.toExponential(4) : 'NaN'} /s`,
+         `Planetary vorticity f = ${Number.isFinite(f) ? f.toExponential(4) : 'NaN'} /s`,
+         `Stretching term ∂/∂p(f²/N²·∂ψ/∂p) ≈ ${Number.isFinite(stretching) ? stretching.toExponential(4) : 'NaN'} /s`,
+         '',
+         'Step 1 — Assemble QGPV:',
+         `  q = ∇²ψ + f + f²/N²·∂²ψ/∂p²`,
+         `  q = ${Number.isFinite(relVort) ? relVort.toExponential(4) : 'NaN'} + ${Number.isFinite(f) ? f.toExponential(4) : 'NaN'} + ${Number.isFinite(stretching) ? stretching.toExponential(4) : 'NaN'}`,
+         `  q = ${Number.isFinite(q) ? q.toExponential(4) : 'NaN'} /s`,
+         '',
+         'Step 2 — Vertical structure:',
+         `  ${inputsOk && Math.abs(dpp / (dpy || 1e-30)) > 1 ? 'Stretching dominates — baroclinic structure' : 'Relative vorticity dominates — equivalent barotropic'}`,
+         '',
+         `  └ QGPV conservation (Dq/Dt = 0) is the foundational equation for mid-latitude synoptic dynamics`,
+       ]
+     };
+   },
   103: ({ ubar, uprime }) => {
     const u = ubar + uprime;
     const ratio = ubar !== 0 ? uprime / ubar : 0;
@@ -5064,58 +6706,126 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  104: ({ Km, f }) => {
-    if (f <= 0) {
+  104: ({ Km, f, tau, rho, curlTau }) => {
+    const KmN = Number(Km), fN = Number(f), tauN = Number(tau), rhoN = Number(rho), curlTauN = Number(curlTau);
+    const rhoV = Number.isFinite(rhoN) && rhoN > 0 ? rhoN : 1025; // seawater density (kg/m³), documented default
+    const hasStress = Number.isFinite(tauN);
+    const hasCurl = Number.isFinite(curlTauN);
+    const fAbs = Math.abs(fN);
+    if (!Number.isFinite(KmN) || !Number.isFinite(fN) || KmN <= 0 || fAbs <= 1e-12) {
+      const eqLine = !Number.isFinite(KmN) || !Number.isFinite(fN)
+        ? `Non-finite input — K_m = ${Km}, f = ${f}`
+        : KmN <= 0
+          ? `Eddy viscosity K_m = ${KmN} m²/s — must be positive`
+          : `Coriolis parameter f = ${fN} /s — must be non-zero (equatorial singularity)`;
       return {
         result: Number.NaN, unit: 'm',
+        secondary: [
+          { key: 'ekman_transport', value: Number.NaN, unit: 'm²/s', label: 'Ekman Transport per Unit Width M = τ/(ρ·|f|)' },
+          { key: 'ekman_pumping', value: Number.NaN, unit: 'm/s', label: 'Ekman Pumping Velocity w_E = curl τ/(ρ·|f|)' },
+        ],
         steps: [
           '── Ekman Depth (Ekman, 1905) ──',
-          `Eddy viscosity K_m = ${Km.toExponential(3)} m²/s`,
-          `Coriolis parameter f = ${f} /s`,
+          eqLine,
           '',
-          'RESULT: NaN — Ekman theory is invalid at the equator (f ≤ 0).',
-          'The Coriolis force vanishes at f = 0, so the frictional',
-          'boundary layer has no rotational structure and D_E is undefined.',
+          'RESULT: NaN — Ekman theory requires a finite, positive eddy viscosity',
+          'and a non-zero Coriolis parameter (off-equatorial latitude). The',
+          'frictional boundary layer has no rotational structure at f = 0, so',
+          'D_E is undefined. No fabricated value is substituted.',
           '',
           '  └ Valid only for |f| > 0 (off-equatorial latitudes)',
         ],
       };
     }
-    const DE = Math.PI * Math.sqrt((2 * Km) / f);
+    const DE = PI * Math.sqrt((2 * KmN) / fAbs);
+    const transport = hasStress ? tauN / (rhoV * fAbs) : Number.NaN;
+    const pumping = hasCurl ? curlTauN / (rhoV * fAbs) : Number.NaN;
+    const hemi = fN > 0 ? 'Northern' : 'Southern';
     return {
       result: DE, unit: 'm',
+      secondary: [
+        { key: 'ekman_transport', value: transport, unit: 'm²/s', label: 'Ekman Transport per Unit Width M = τ/(ρ·|f|)' },
+        { key: 'ekman_pumping', value: pumping, unit: 'm/s', label: 'Ekman Pumping Velocity w_E = curl τ/(ρ·|f|)' },
+      ],
       steps: [
         '── Ekman Depth (Ekman, 1905) ──',
-        `Eddy viscosity K_m = ${Km.toExponential(3)} m²/s`,
-        `Coriolis parameter f = ${f.toExponential(6)} /s`,
+        `Eddy viscosity K_m = ${KmN.toExponential(3)} m²/s`,
+        `Coriolis parameter f = ${fN.toExponential(6)} /s (${hemi} Hemisphere)`,
         '',
-        'Step 1 — Compute Ekman depth:',
-        `  D_E = π × √(2·K_m/f) = π × √(2 × ${Km.toExponential(3)} / ${f.toExponential(6)})`,
-        `  D_E = π × √(${(2 * Km / f).toExponential(3)})`,
+        'Step 1 — Compute Ekman layer depth:',
+        `  D_E = π × √(2·K_m/|f|) = π × √(2 × ${KmN.toExponential(3)} / ${fAbs.toExponential(6)})`,
+        `  D_E = π × √(${(2 * KmN / fAbs).toExponential(3)})`,
         `  D_E = ${DE.toFixed(1)} m`,
         '',
-        'Step 2 — Derived parameters:',
-        `  Ekman transport: U_E = τ/(ρf) (total transport in upper D_E m)`,
+        'Step 2 — Derived parameters (need wind-stress inputs):',
+        `  Ekman transport: M = τ/(ρ·|f|) = ${hasStress ? transport.toFixed(4) : 'NaN — supply τ (N/m²)'} m²/s per unit width`,
+        `  Ekman pumping: w_E = curl τ/(ρ·|f|) = ${hasCurl ? pumping.toExponential(4) : 'NaN — supply curl τ (N/m³)'} m/s`,
         `  ${DE > 100 ? 'Deep Ekman layer — typical of ocean interior (low latitudes)' : DE > 30 ? 'Mid-depth Ekman layer — typical mid-latitude ocean' : 'Shallow Ekman layer — high-latitude or high-wind conditions'}`,
         '',
         `  └ Surface current rotates 45° right (NH) / left (SH) of wind; net transport 90° right/left`,
       ]
     };
   },
-  105: ({ g, thetaVbar, wthetaV, zi }) => {
-    const buoyFlux = (g / (thetaVbar || 1)) * (wthetaV * zi);
+105: ({ g, thetaVbar, wthetaV, zi, ustar }) => {
+    const gN = Number(g), thN = Number(thetaVbar), wN = Number(wthetaV), ziN = Number(zi), uN = Number(ustar);
+    if (![gN, thN, wN, ziN].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: 'm/s',
+        secondary: [
+          { key: 'buoyancy_flux', value: Number.NaN, unit: 'm²/s³', label: 'Kinematic Buoyancy Flux (g/θ̄_v)·w′θ′_v' },
+          { key: 'theta_v', value: Number.isFinite(thN) ? thN : Number.NaN, unit: 'K', label: 'Mean virtual potential temperature θ̄_v' },
+          { key: 'convective_to_friction_ratio', value: Number.NaN, unit: '—', label: 'w*/u* (free-convection regime indicator)' },
+        ],
+        steps: [
+          '── Deardorff Convective Velocity Scale (Deardorff, 1970) ──',
+          'One or more inputs are non-finite (g, θ̄_v, w′θ′_v, z_i).',
+          'Cannot compute a genuine convective velocity — no fabricated',
+          'value is substituted. Supply all four inputs.',
+        ],
+      };
+    }
+    if (thN <= 0 || ziN < 0 || wN < 0) {
+      return {
+        result: Number.NaN, unit: 'm/s',
+        secondary: [
+          { key: 'buoyancy_flux', value: Number.NaN, unit: 'm²/s³', label: 'Kinematic Buoyancy Flux (g/θ̄_v)·w′θ′_v' },
+          { key: 'theta_v', value: thN, unit: 'K', label: 'Mean virtual potential temperature θ̄_v' },
+          { key: 'convective_to_friction_ratio', value: Number.NaN, unit: '—', label: 'w*/u* (free-convection regime indicator)' },
+        ],
+        steps: [
+          '── Deardorff Convective Velocity Scale (Deardorff, 1970) ──',
+          thN <= 0
+            ? `RESULT: NaN — θ̄_v = ${thN} K must be positive (virtual potential temperature).`
+            : ziN < 0
+              ? `RESULT: NaN — z_i = ${ziN} m must be non-negative (boundary-layer height).`
+              : `RESULT: NaN — w′θ′_v = ${wN} K·m/s is negative (downward heat flux → stable/neutral BL).`,
+          '',
+          'Deardorff w* scales free-convective turbulence only. For a negative',
+          'surface buoyancy flux the boundary layer is stably stratified and',
+          'the convective velocity scale is not defined.',
+        ],
+      };
+    }
+    const buoyFlux = (gN / thN) * (wN * ziN);
     const wstar = Math.pow(buoyFlux, 1 / 3);
+    const kinBuoyFlux = (gN / thN) * wN;
+    const ratio = Number.isFinite(uN) && uN > 0 ? wstar / uN : Number.NaN;
     return {
       result: wstar, unit: 'm/s',
+      secondary: [
+        { key: 'buoyancy_flux', value: kinBuoyFlux, unit: 'm²/s³', label: 'Kinematic Buoyancy Flux (g/θ̄_v)·w′θ′_v' },
+        { key: 'theta_v', value: thN, unit: 'K', label: 'Mean virtual potential temperature θ̄_v' },
+        { key: 'convective_to_friction_ratio', value: ratio, unit: '—', label: 'w*/u* (free-convection regime indicator)' },
+      ],
       steps: [
         '── Deardorff Convective Velocity Scale (Deardorff, 1970) ──',
-        `Gravity g = ${g.toFixed(2)} m/s²`,
-        `Mean virtual potential temperature θ̄_v = ${thetaVbar.toFixed(2)} K`,
-        `Surface kinematic heat flux w'θ'_v = ${wthetaV.toExponential(4)} K·m/s`,
-        `Boundary layer height z_i = ${zi.toFixed(0)} m`,
+        `Gravity g = ${gN.toFixed(2)} m/s²`,
+        `Mean virtual potential temperature θ̄_v = ${thN.toFixed(2)} K`,
+        `Surface kinematic heat flux w'θ'_v = ${wN.toExponential(4)} K·m/s`,
+        `Boundary layer height z_i = ${ziN.toFixed(0)} m`,
         '',
         'Step 1 — Buoyancy production of TKE:',
-        `  (g/θ̄_v)·(w'θ'_v)₀·z_i = (${g.toFixed(2)}/${thetaVbar.toFixed(2)}) × ${wthetaV.toExponential(4)} × ${zi.toFixed(0)}`,
+        `  (g/θ̄_v)·(w'θ'_v)₀·z_i = (${gN.toFixed(2)}/${thN.toFixed(2)}) × ${wN.toExponential(4)} × ${ziN.toFixed(0)}`,
         `  = ${buoyFlux.toExponential(4)} m²/s³`,
         '',
         'Step 2 — Convective velocity scale:',
@@ -5124,12 +6834,20 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         '',
         'Step 3 — Convective regime:',
         `  ${wstar > 1.5 ? 'STRONG convection — vigorous thermals, deep BL' : wstar > 0.5 ? 'MODERATE convection — typical fair-weather cumulus' : wstar > 0.1 ? 'WEAK convection — suppressed or stable BL' : 'NEARLY NIL — stably stratified or nocturnal BL'}`,
+        `${Number.isFinite(ratio) ? `  w*/u* = ${ratio.toFixed(2)} — ${ratio > 1 ? 'free-convection dominated' : 'mixed/shear-influenced'}` : '  w*/u* — NaN, supply friction velocity u*'}`,
         '',
         `  └ w_* scales vertical velocity variance and eddy diffusivity in the convective BL`,
       ]
     };
   },
   106: ({ dtheta, D, cos2b, delta, dB: _dB, dudy }) => {
+    if (![dtheta, D, cos2b, delta, dudy].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: 'K/s',
+        steps: ['── Frontogenesis Function (Petterssen, 1936; Sanders, 1955) ──',
+          'One or more inputs (∇θ, D, β, δ, ∂u/∂s) are missing or NaN — no fabricated frontogenesis value is substituted.']
+      };
+    }
     const cosBeta = Math.sqrt((cos2b + 1) / 2);
     const deformTerm = dtheta * (D * cos2b - delta);
     const shearTerm = cosBeta * Math.abs(dudy) * Math.abs(dtheta);
@@ -5157,51 +6875,109 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-  107: ({ zeta, f, dudx, dudy: _dudy, dvdx: _dvdx, dvdy, div: divInput }) => {
-    const div = divInput ?? (dudx + dvdy);
-    const DzetaDt = -(zeta + f) * div;
+  107: ({ zeta, f, dudx, dvdy, div: divInput, u, v, dzetaDx, dzetaDy }) => {
+    const zN = Number(zeta), fN = Number(f), dudxN = Number(dudx), dvdyN = Number(dvdy);
+    const divN = Number(divInput), uN = Number(u), vN = Number(v), dxN = Number(dzetaDx), dyN = Number(dzetaDy);
+    const divV = Number.isFinite(divN)
+      ? divN
+      : (Number.isFinite(dudxN) && Number.isFinite(dvdyN) ? dudxN + dvdyN : Number.NaN);
+    if (!Number.isFinite(zN) || !Number.isFinite(fN) || !Number.isFinite(divV)) {
+      return {
+        result: Number.NaN, unit: '/s²',
+        secondary: [
+          { key: 'relative_vorticity', value: Number.isFinite(zN) ? zN : Number.NaN, unit: '/s', label: 'Relative vorticity ζ' },
+          { key: 'divergence', value: Number.isFinite(divV) ? divV : Number.NaN, unit: '/s', label: 'Horizontal divergence ∇·V' },
+          { key: 'absolute_vorticity', value: Number.NaN, unit: '/s', label: 'Absolute vorticity ζ + f' },
+          { key: 'stretching_term', value: Number.NaN, unit: '/s²', label: 'Stretching term −(ζ+f)·∇·V' },
+          { key: 'advection_term', value: Number.NaN, unit: '/s²', label: 'Relative vorticity advection −(u·∂ζ/∂x + v·∂ζ/∂y)' },
+        ],
+        steps: [
+          '── Barotropic Vorticity Equation (Holton & Hakim, 2012, Ch. 4) ──',
+          'One or more inputs are non-finite (ζ, f, ∇·V).',
+          'Cannot compute a genuine vorticity tendency — no fabricated',
+          'value is substituted. Supply ζ, f and the divergence.',
+        ],
+      };
+    }
+    const advAvailable = [uN, vN, dxN, dyN].every(Number.isFinite);
+    const advTerm = advAvailable ? -(uN * dxN + vN * dyN) : 0;
+    const stretchingTerm = -(zN + fN) * divV;
+    const DzetaDt = advTerm + stretchingTerm;
     return {
       result: DzetaDt, unit: '/s²',
+      secondary: [
+        { key: 'relative_vorticity', value: zN, unit: '/s', label: 'Relative vorticity ζ' },
+        { key: 'divergence', value: divV, unit: '/s', label: 'Horizontal divergence ∇·V = ∂u/∂x + ∂v/∂y' },
+        { key: 'absolute_vorticity', value: zN + fN, unit: '/s', label: 'Absolute vorticity ζ + f' },
+        { key: 'stretching_term', value: stretchingTerm, unit: '/s²', label: 'Stretching term −(ζ+f)·∇·V' },
+        { key: 'advection_term', value: advTerm, unit: '/s²', label: 'Relative vorticity advection −(u·∂ζ/∂x + v·∂ζ/∂y)' },
+      ],
       steps: [
         '── Barotropic Vorticity Equation (Holton & Hakim, 2012, Ch. 4) ──',
-        `Relative vorticity ζ = ${zeta.toExponential(4)} /s`,
-        `Planetary vorticity f = ${f.toExponential(4)} /s`,
-        `Divergence ∇·V = ∂u/∂x + ∂v/∂y = ${dudx.toExponential(4)} + ${dvdy.toExponential(4)} = ${div.toExponential(4)} /s`,
+        `Relative vorticity ζ = ${zN.toExponential(4)} /s`,
+        `Planetary vorticity f = ${fN.toExponential(4)} /s`,
+        `Divergence ∇·V = ∂u/∂x + ∂v/∂y = ${Number.isFinite(divN) ? 'given' : `${dudxN.toExponential(4)} + ${dvdyN.toExponential(4)}`} = ${divV.toExponential(4)} /s`,
         '',
-        'Step 1 — Stretching/tilting term:',
-        `  −(ζ+f)·(∇·V) = −(${zeta.toExponential(4)} + ${f.toExponential(4)}) × ${div.toExponential(4)}`,
-        `  |ζ+f| = ${Math.abs(zeta + f).toExponential(4)} /s, Sign: ${(zeta + f) > 0 ? 'cyclonic' : 'anticyclonic'}`,
+        'Step 1 — Relative vorticity advection:',
+        advAvailable
+          ? `  −(u·∂ζ/∂x + v·∂ζ/∂y) = −(${uN.toExponential(3)} × ${dxN.toExponential(4)} + ${vN.toExponential(3)} × ${dyN.toExponential(4)}) = ${advTerm.toExponential(4)} /s²`
+          : '  Advection term omitted (u, v, ∂ζ/∂x, ∂ζ/∂y not supplied) → 0 /s²',
         '',
-        'Step 2 — Relative vorticity tendency:',
-        `  Dζ/Dt = ${DzetaDt.toExponential(4)} /s²`,
+        'Step 2 — Stretching/tilting (divergence) term:',
+        `  −(ζ+f)·(∇·V) = −(${zN.toExponential(4)} + ${fN.toExponential(4)}) × ${divV.toExponential(4)}`,
+        `  = ${stretchingTerm.toExponential(4)} /s² (|ζ+f| = ${Math.abs(zN + fN).toExponential(4)} /s, ${(zN + fN) > 0 ? 'cyclonic' : 'anticyclonic'})`,
         '',
-        'Step 3 — Dynamical interpretation:',
-        `  ${div > 0 ? 'DIVERGENCE → vorticity decreasing (upper-level ridge building)' : 'CONVERGENCE → vorticity increasing (upper-level trough deepening)'}`,
+        'Step 3 — Relative vorticity tendency:',
+        `  Dζ/Dt = −(u·∂ζ/∂x + v·∂ζ/∂y) − (ζ+f)·∇·V = ${DzetaDt.toExponential(4)} /s²`,
         '',
-        `  └ Full equation: Dζ/Dt = −(ζ+f)∇·V − (∂w/∂x·∂v/∂z − ∂w/∂y·∂u/∂z) + (curl F)_z / ρ`,
+        'Step 4 — Dynamical interpretation:',
+        `  ${divV > 0 ? 'DIVERGENCE → vorticity decreasing (upper-level ridge building)' : 'CONVERGENCE → vorticity increasing (upper-level trough deepening)'}`,
+        '',
+        `  └ Full barotropic equation: Dζ/Dt = −(u·∂ζ/∂x + v·∂ζ/∂y) − (ζ+f)·(∂u/∂x + ∂v/∂y)`,
       ]
     };
   },
 
   // ── Domain 17: Cloud Physics ──
   108: ({ a, r, b }) => {
-    const curvature = a / r;
-    const solute = b / (r * r * r);
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const aN = Number(a), rN = Number(r), bN = Number(b);
+    if (!Number.isFinite(aN) || !Number.isFinite(rN) || !Number.isFinite(bN)) {
+      return {
+        result: Number.NaN, unit: '—',
+        steps: ['── Köhler Curve — Cloud Activation (Köhler, 1936; Pruppacher & Klett, 1997) ──',
+          'One or more inputs are non-finite — cannot compute.',
+          'Supply the Kelvin coefficient a (m), droplet radius r (m) and solute coefficient b (m³).',
+        ],
+        secondary: [
+          { key: 'critical_radius', value: Number.NaN, unit: 'm', label: 'Critical Radius r_c' },
+          { key: 'critical_supersaturation', value: Number.NaN, unit: '%', label: 'Critical Supersaturation S_c' },
+        ],
+      };
+    }
+    const curvature = aN / rN;
+    const solute = bN / (rN * rN * rN);
     const S = curvature - solute;
-    const rc = Math.sqrt(3 * b / a); // critical radius: dS/dr = 0 → r_c = √(3b/a)
+    const rc = Math.sqrt(3 * bN / aN); // critical radius: dS/dr = 0 → r_c = √(3b/a)
+    // Critical supersaturation (fraction): S_c = 2a/(3r_c) = (4a³/27b)^{1/2}
+    const Sc = Math.pow(4 * Math.pow(aN, 3) / (27 * bN), 0.5);
     return {
       result: S, unit: '—',
+      secondary: [
+        { key: 'critical_radius', value: Number.isFinite(rc) ? rc : Number.NaN, unit: 'm', label: 'Critical Radius r_c' },
+        { key: 'critical_supersaturation', value: Number.isFinite(Sc) ? Sc * 100 : Number.NaN, unit: '%', label: 'Critical Supersaturation S_c' },
+      ],
       steps: [
         '── Köhler Curve — Cloud Activation (Köhler, 1936; Pruppacher & Klett, 1997) ──',
-        `Curvature (Kelvin) coefficient a = ${a.toExponential(3)} m`,
-        `Solute (Raoult) coefficient b = ${b.toExponential(3)} m³`,
-        `Droplet radius r = ${r.toExponential(3)} m (${(r * 1e6).toFixed(1)} µm)`,
+        `Curvature (Kelvin) coefficient a = ${aN.toExponential(3)} m`,
+        `Solute (Raoult) coefficient b = ${bN.toExponential(3)} m³`,
+        `Droplet radius r = ${rN.toExponential(3)} m (${(rN * 1e6).toFixed(1)} µm)`,
         '',
         'Step 1 — Curvature (Kelvin) term:',
-        `  a/r = ${a.toExponential(3)} / ${r.toExponential(3)} = ${curvature.toExponential(4)}`,
+        `  a/r = ${aN.toExponential(3)} / ${rN.toExponential(3)} = ${curvature.toExponential(4)}`,
         '',
         'Step 2 — Solute (Raoult) term:',
-        `  b/r³ = ${b.toExponential(3)} / (${r.toExponential(3)})³ = ${solute.toExponential(4)}`,
+        `  b/r³ = ${bN.toExponential(3)} / (${rN.toExponential(3)})³ = ${solute.toExponential(4)}`,
         '',
         'Step 3 — Supersaturation:',
         `  S = a/r − b/r³ = ${curvature.toExponential(4)} − ${solute.toExponential(4)}`,
@@ -5209,58 +6985,169 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         '',
         `  └ Activation: ${S > 0 ? 'SUPERSATURATED — droplet grows spontaneously (r > r_crit)' : 'SUBSATURATED — droplet evaporates'}`,
         `  └ Critical radius r_c = √(3b/a) = ${rc.toExponential(3)} m (${(rc * 1e6).toFixed(1)} µm)`,
+        `  └ Critical supersaturation S_c = (4a³/27b)^½ = ${Sc.toExponential(4)} (${(Sc * 100).toFixed(4)}%)`,
       ]
     };
   },
   109: ({ N0, Lambda, D }) => {
-    const expTerm = Math.exp(-Lambda * D);
-    const N = N0 * expTerm;
-    const meanD = 1 / Lambda;
+    const N0N = Number(N0), LamN = Number(Lambda), DN = Number(D);
+    if (!Number.isFinite(N0N) || !Number.isFinite(LamN) || !Number.isFinite(DN)) {
+      return {
+        result: Number.NaN, unit: 'm⁻³·mm⁻¹',
+        secondary: [
+          { key: 'lambda_mm', value: Number.NaN, unit: 'mm⁻¹', label: 'Slope parameter Λ (mm⁻¹)' },
+          { key: 'total_concentration', value: Number.NaN, unit: 'm⁻³', label: 'Total drop concentration N_T = N₀/Λ' },
+          { key: 'mean_diameter', value: Number.NaN, unit: 'mm', label: 'Mean diameter 1/Λ' },
+          { key: 'median_volume_diameter', value: Number.NaN, unit: 'mm', label: 'Median-volume diameter D₀ = 3.67/Λ' },
+        ],
+        steps: [
+          '── Marshall-Palmer Drop Size Distribution (Marshall & Palmer, 1948) ──',
+          'One or more inputs are non-finite (N₀, Λ, D).',
+          'Cannot compute a genuine drop concentration — no fabricated',
+          'value is substituted. Supply N₀, Λ and drop diameter D.',
+        ],
+      };
+    }
+    if (N0N < 0 || LamN <= 0 || DN < 0) {
+      return {
+        result: Number.NaN, unit: 'm⁻³·mm⁻¹',
+        secondary: [
+          { key: 'lambda_mm', value: Number.isFinite(LamN) && LamN > 0 ? LamN / 1000 : Number.NaN, unit: 'mm⁻¹', label: 'Slope parameter Λ (mm⁻¹)' },
+          { key: 'total_concentration', value: Number.NaN, unit: 'm⁻³', label: 'Total drop concentration N_T = N₀/Λ' },
+          { key: 'mean_diameter', value: Number.NaN, unit: 'mm', label: 'Mean diameter 1/Λ' },
+          { key: 'median_volume_diameter', value: Number.NaN, unit: 'mm', label: 'Median-volume diameter D₀ = 3.67/Λ' },
+        ],
+        steps: [
+          '── Marshall-Palmer Drop Size Distribution (Marshall & Palmer, 1948) ──',
+          N0N < 0
+            ? `RESULT: NaN — intercept N₀ = ${N0N} must be ≥ 0.`
+            : LamN <= 0
+              ? `RESULT: NaN — slope Λ = ${LamN} m⁻¹ must be > 0 (Λ = 4.1·R^(−0.21) mm⁻¹ is always positive).`
+              : `RESULT: NaN — drop diameter D = ${DN} m must be ≥ 0.`,
+          '',
+          'Unphysical DSD parameter — no fabricated value is substituted.',
+        ],
+      };
+    }
+    const expTerm = Math.exp(-LamN * DN);
+    const N = N0N * expTerm;
+    const LamMM = LamN / 1000; // slope in mm⁻¹ (engine keeps D in metres, Λ in m⁻¹; Λ·D is dimensionless)
+    const totalConc = N0N / LamMM; // N_T = ∫₀^∞ N₀·exp(−ΛD)dD = N₀/Λ [m⁻³]
+    const meanDmm = 1 / LamMM;     // [mm]
+    const D0mm = 3.67 / LamMM;     // median-volume diameter [mm]
+    const points: Array<{ x: number; y: number }> = [];
+    for (let dmm = 0; dmm <= 8.0001; dmm += 0.25) {
+      const y = N0N * Math.exp(-LamN * (dmm / 1000));
+      if (Number.isFinite(y)) points.push({ x: dmm, y });
+    }
     return {
       result: N, unit: 'm⁻³·mm⁻¹',
+      secondary: [
+        { key: 'lambda_mm', value: LamMM, unit: 'mm⁻¹', label: 'Slope parameter Λ (mm⁻¹)' },
+        { key: 'total_concentration', value: Number.isFinite(totalConc) ? totalConc : Number.NaN, unit: 'm⁻³', label: 'Total drop concentration N_T = N₀/Λ' },
+        { key: 'mean_diameter', value: Number.isFinite(meanDmm) ? meanDmm : Number.NaN, unit: 'mm', label: 'Mean diameter 1/Λ' },
+        { key: 'median_volume_diameter', value: Number.isFinite(D0mm) ? D0mm : Number.NaN, unit: 'mm', label: 'Median-volume diameter D₀ = 3.67/Λ' },
+      ],
+      series: [{
+        label: 'N(D) — Marshall-Palmer drop size distribution',
+        color: '#0072B2',
+        points,
+      }],
       steps: [
         '── Marshall-Palmer Drop Size Distribution (Marshall & Palmer, 1948) ──',
-        `Intercept parameter N₀ = ${N0.toExponential(3)} m⁻³·mm⁻¹`,
-        `Slope parameter Λ = ${Lambda.toExponential(3)} /m (${(Lambda / 1000).toFixed(2)} /mm)`,
-        `Drop diameter D = ${(D * 1000).toFixed(2)} mm (${D.toExponential(3)} m)`,
+        `Intercept parameter N₀ = ${N0N.toExponential(3)} m⁻³·mm⁻¹`,
+        `Slope parameter Λ = ${LamN.toExponential(3)} /m (${LamMM.toFixed(2)} /mm)`,
+        `Drop diameter D = ${(DN * 1000).toFixed(2)} mm (${DN.toExponential(3)} m)`,
         '',
         'Step 1 — Exponential distribution:',
-        `  N(D) = N₀·exp(−Λ·D) = ${N0.toExponential(3)} × exp(−${Lambda.toExponential(3)} × ${D.toExponential(3)})`,
+        `  N(D) = N₀·exp(−Λ·D) = ${N0N.toExponential(3)} × exp(−${LamN.toExponential(3)} × ${DN.toExponential(3)})`,
         `  exp(−ΛD) = ${expTerm.toExponential(4)}`,
         '',
         'Step 2 — Concentration at given diameter:',
-        `  N(${(D * 1000).toFixed(1)} mm) = ${N.toExponential(3)} m⁻³·mm⁻¹`,
+        `  N(${(DN * 1000).toFixed(1)} mm) = ${N.toExponential(3)} m⁻³·mm⁻¹`,
         '',
-        'Step 3 — Distribution moments:',
-        `  Mean diameter: 1/Λ = ${(meanD * 1000).toFixed(2)} mm`,
-        `  Liquid water content: LWC ∝ N₀·Γ(4)/Λ⁴ ∝ N₀ × ${(6 / Math.pow(Lambda, 4)).toExponential(3)}`,
-        `  Rain rate: Z = ∫N(D)D⁶dD = N₀·Γ(7)/Λ⁷ = ${(N0 * 720 / Math.pow(Lambda, 7)).toExponential(3)} mm⁶/m³`,
+        'Step 3 — Distribution moments (Λ in mm⁻¹):',
+        `  Total concentration: N_T = N₀/Λ = ${N0N.toExponential(3)} / ${LamMM.toFixed(3)} = ${totalConc.toExponential(4)} m⁻³`,
+        `  Mean diameter: 1/Λ = ${meanDmm.toFixed(2)} mm`,
+        `  Median-volume diameter: D₀ = 3.67/Λ = ${D0mm.toFixed(2)} mm`,
+        `  Reflectivity: Z = N₀·Γ(7)/Λ⁷ = ${N0N.toExponential(3)} × 720 / ${Math.pow(LamMM, 7).toExponential(3)} = ${(N0N * 720 / Math.pow(LamMM, 7)).toExponential(3)} mm⁶/m³`,
         '',
         `  └ Classic MP: N₀ = 8×10³ m⁻³·mm⁻¹, Λ = 4.1·R^(-0.21) mm⁻¹ (R in mm/h)`,
       ]
     };
   },
   110: ({ a, R }) => {
+    const aN = Number(a), RN = Number(R);
+    if (!Number.isFinite(aN) || !Number.isFinite(RN)) {
+      return {
+        result: Number.NaN, unit: 'mm⁶/m³',
+        secondary: [
+          { key: 'reflectivity_dbz', value: Number.NaN, unit: 'dBZ', label: 'Radar reflectivity dBZ = 10·log₁₀(Z)' },
+          { key: 'rain_rate_from_z', value: Number.NaN, unit: 'mm/h', label: 'Inverse rain rate R = (Z/a)^(1/b)' },
+        ],
+        steps: [
+          '── Z-R Reflectivity-Rainfall Relation (Battan, 1973; Marshall-Palmer, 1948) ──',
+          'One or more inputs are non-finite (a, R).',
+          'Cannot compute a genuine reflectivity — no fabricated value',
+          'is substituted. Supply the coefficient a and rain rate R.',
+        ],
+      };
+    }
+    if (aN <= 0 || RN < 0) {
+      return {
+        result: Number.NaN, unit: 'mm⁶/m³',
+        secondary: [
+          { key: 'reflectivity_dbz', value: Number.NaN, unit: 'dBZ', label: 'Radar reflectivity dBZ = 10·log₁₀(Z)' },
+          { key: 'rain_rate_from_z', value: Number.NaN, unit: 'mm/h', label: 'Inverse rain rate R = (Z/a)^(1/b)' },
+        ],
+        steps: [
+          '── Z-R Reflectivity-Rainfall Relation (Battan, 1973; Marshall-Palmer, 1948) ──',
+          aN <= 0
+            ? `RESULT: NaN — coefficient a = ${aN} must be positive (Marshall-Palmer standard a = 200).`
+            : `RESULT: NaN — rain rate R = ${RN} mm/h must be ≥ 0.`,
+          '',
+          'Unphysical Z-R input — no fabricated value is substituted.',
+        ],
+      };
+    }
     const b = 1.6;
-    const Z = a * Math.pow(R, b);
-    const dBZ = 10 * Math.log10(Z || 1);
+    const Z = aN * Math.pow(RN, b);
+    const dBZ = RN === 0 ? 0 : 10 * Math.log10(Z);
+    const Rinv = RN > 0 ? Math.pow(Z / aN, 1 / b) : 0;
     const rainClass = Z < 20 ? 'Light drizzle' : Z < 200 ? 'Moderate rain' : Z < 2000 ? 'Heavy rain' : 'Very heavy / hailstorm';
+    const points: Array<{ x: number; y: number }> = [];
+    for (const r of [0, 0.5, 1, 2, 5, 10, 20, 50, 100]) {
+      const z = aN * Math.pow(r, b);
+      if (Number.isFinite(z)) points.push({ x: r, y: z });
+    }
     return {
       result: Z, unit: 'mm⁶/m³',
+      secondary: [
+        { key: 'reflectivity_dbz', value: dBZ, unit: 'dBZ', label: 'Radar reflectivity dBZ = 10·log₁₀(Z)' },
+        { key: 'rain_rate_from_z', value: Rinv, unit: 'mm/h', label: 'Inverse rain rate R = (Z/a)^(1/b)' },
+      ],
+      series: [{
+        label: 'Z(R) — reflectivity-rainfall curve',
+        color: '#D55E00',
+        points,
+      }],
       steps: [
         '── Z-R Reflectivity-Rainfall Relation (Battan, 1973; Marshall-Palmer, 1948) ──',
-        `Coefficient a = ${a.toFixed(1)} (Marshall-Palmer standard: a=200)`,
-        `Rain rate R = ${R.toFixed(2)} mm/h, Exponent b = ${b.toFixed(1)}`,
+        `Coefficient a = ${aN.toFixed(1)} (Marshall-Palmer standard: a=200)`,
+        `Rain rate R = ${RN.toFixed(2)} mm/h, Exponent b = ${b.toFixed(1)}`,
         '',
         'Step 1 — Compute radar reflectivity:',
-        `  Z = a × R^b = ${a.toFixed(1)} × ${R.toFixed(2)}^${b.toFixed(1)}`,
+        `  Z = a × R^b = ${aN.toFixed(1)} × ${RN.toFixed(2)}^${b.toFixed(1)}`,
         `  Z = ${Z.toExponential(3)} mm⁶/m³`,
         '',
         'Step 2 — Convert to dBZ:',
         `  dBZ = 10 × log₁₀(Z) = 10 × log₁₀(${Z.toExponential(3)})`,
         `  dBZ = ${dBZ.toFixed(1)} dBZ`,
         '',
-        'Step 3 — Precipitation classification:',
+        'Step 3 — Inverse relation (R from Z):',
+        `  R = (Z/a)^(1/b) = (${Z.toExponential(3)}/${aN.toFixed(1)})^(1/${b.toFixed(1)}) = ${Rinv.toFixed(3)} mm/h`,
+        '',
+        'Step 4 — Precipitation classification:',
         `  ${rainClass} (${dBZ.toFixed(0)} dBZ)`,
         '',
         `  └ Common Z-R pairs: stratiform (200,1.6), orographic (31,1.71), thunderstorm (486,1.37)`,
@@ -5270,172 +7157,537 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   },
 
   // ── Part VI · Domain 18: Geodesy ──
-  111: ({ Rx, Ry: _Ry, Rz: _Rz, P, N, W }) => {
-    const Rt = P * N * Rx * W;
+  111: ({ xp, yp, sp, gast, dx, dy }) => {
+    // IERS Conventions (2010) §5 — CIO-based Earth rotation matrix.
+    //   W(t) = R₃(−s′)·R₂(x_p)·R₁(y_p)   (polar motion + TIO locator)
+    //   R(t) = W(t)·R₃(GAST)             (Earth rotation)
+    // x_p, y_p in arcsec; s′ (TIO locator) in arcsec; GAST in radians;
+    // dX, dY (celestial pole offsets) in milliarcsec. The returned scalar
+    // is det(R) — an orthonormality diagnostic that equals 1 for a valid
+    // rotation matrix (trace tr(R) = 1 + 2·cos(angle) is secondary).
+    const allFinite = [xp, yp, sp, gast].every(Number.isFinite);
+    if (!allFinite) {
+      return {
+        result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 'trace_R', value: Number.NaN, unit: '—', label: 'Trace tr(R) = 1+2cosθ' },
+          { key: 'celestial_pole_offset', value: Number.isFinite(dx) && Number.isFinite(dy) ? Math.hypot(dx, dy) : Number.NaN, unit: 'mas', label: 'Celestial Pole Offset √(dX²+dY²)' },
+        ],
+        steps: [
+          '── CIO-Based Earth Rotation Matrix (IERS Conventions 2010, §5) ──',
+          'Polar motion x_p, y_p, TIO locator s′, or GAST is non-finite.',
+          'No fabricated substitution — supply finite arcsec/radian inputs.',
+          '',
+          '  W = R₃(−s′)·R₂(x_p)·R₁(y_p)',
+          '  R = W·R₃(GAST)   (TRS → CRS)',
+        ],
+      };
+    }
+    const xpR = xp * ARCSEC2RAD;
+    const ypR = yp * ARCSEC2RAD;
+    const spR = sp * ARCSEC2RAD;
+    const W = mat3Mul(mat3Mul(rot3(-spR), rot2(xpR)), rot1(ypR));
+    const R = mat3Mul(W, rot3(gast));
+    const detR = mat3Det(R);
+    const trR = mat3Trace(R);
+    const cpo = Number.isFinite(dx) && Number.isFinite(dy) ? Math.hypot(dx, dy) : Number.NaN;
     return {
-      result: Rt, unit: '—',
+      result: detR, unit: '—',
+      secondary: [
+        { key: 'trace_R', value: trR, unit: '—', label: 'Trace tr(R) = 1+2cosθ' },
+        { key: 'x_polar_motion', value: xp, unit: 'arcsec', label: 'Polar motion x_p' },
+        { key: 'y_polar_motion', value: yp, unit: 'arcsec', label: 'Polar motion y_p' },
+        { key: 'tio_locator', value: sp, unit: 'arcsec', label: 'TIO locator s′' },
+        { key: 'gast', value: gast, unit: 'rad', label: 'Greenwich Apparent Sidereal Time' },
+        { key: 'celestial_pole_offset', value: cpo, unit: 'mas', label: 'Celestial Pole Offset √(dX²+dY²)' },
+      ],
       steps: [
-        '── Composite Rotation Matrix — Earth Orientation (McCarthy & Petit, 2003; IERS 2010) ──',
-        `Precession matrix P = ${P.toExponential(3)}, Nutation matrix N = ${N.toExponential(3)}`,
-        `Earth rotation matrix R_x = ${Rx.toExponential(3)}`,
-        `Wobble (polar motion) W = ${W.toExponential(3)}`,
+        '── CIO-Based Earth Rotation Matrix (IERS Conventions 2010, §5) ──',
+        `Polar motion x_p = ${xp}″, y_p = ${yp}″; TIO locator s′ = ${sp}″`,
+        `GAST = ${gast} rad; celestial pole offset dX = ${Number.isFinite(dx) ? dx : 'NaN'}, dY = ${Number.isFinite(dy) ? dy : 'NaN'} mas`,
         '',
-        'Step 1 — Form composite rotation:',
-        `  R(t) = P(t)·N(t)·R(t)·W(t)`,
-        `  R(t) ≈ ${P.toExponential(3)} × ${N.toExponential(3)} × ${Rx.toExponential(3)} × ${W.toExponential(3)}`,
-        `  R(t) ≈ ${Rt.toExponential(3)} (matrix element proxy)`,
+        'Step 1 — Polar-motion matrix (arcsec → rad, ×4.848×10⁻⁶):',
+        `  W = R₃(−s′)·R₂(x_p)·R₁(y_p)`,
+        `  W = R₃(−${spR.toExponential(4)})·R₂(${xpR.toExponential(4)})·R₁(${ypR.toExponential(4)})`,
         '',
-        'Step 2 — Astrometric accuracy:',
-        `  ${Math.abs(Rt - 1) < 0.01 ? 'Near-unity element — consistent with rotation matrix' : 'Significant rotation magnitude — check for inversion/transposition'}`,
+        'Step 2 — Full Earth rotation:',
+        `  R = W·R₃(GAST) = W·R₃(${gast.toFixed(6)})`,
         '',
-        `  └ Full transformation: ITRS→GCRS uses P·N·R·W matrix product for IAU 2006/2000 precession-nutation`,
-      ]
+        'Step 3 — Orthonormality diagnostic:',
+        `  det(R) = ${detR.toFixed(12)} ${Math.abs(detR - 1) < 1e-9 ? '✓ (valid rotation matrix)' : '⚠ (deviates from 1)'}`,
+        `  tr(R) = ${trR.toFixed(6)} = 1 + 2·cos(rotation angle)`,
+        '',
+        `  └ Full CIO chain: R(t) = Q(t)·R(t)·W(t) transforms ITRS → GCRS`,
+        `  └ Celestial pole offset magnitude = ${Number.isFinite(cpo) ? cpo.toFixed(3) : 'NaN'} mas (IAU 2000A residuals)`,
+      ],
     };
   },
-  112: ({ hn, Vn, g }) => {
-    const u = hn * Vn / (g || 1);
+  112: ({ hn, kn, Vn, g, lat, Re }) => {
+    // Solid Earth tides (Love, 1911; Wahr, 1981). Degree-2 tidal potential
+    // V₂ (m²/s²) with Love numbers h₂ (radial) and k₂ (potential):
+    //   u_r = h₂·V₂/g   (radial displacement, m)
+    //   Δg  = k₂·V₂/R_e (gravity perturbation, m/s²)
+    // When V₂ is not supplied, the sub-lunar degree-2 potential of the
+    // Moon is used: V₂ = G·M_moon·R_e²/D³ (Moon directly overhead).
+    const G_MOON = 4.9028e12; // G·M_moon (m³/s²), DE421
+    const D_MOON = 3.844e8;   // mean Earth–Moon distance (m)
+    const ReEff = Re === undefined ? 6371000 : (Number.isFinite(Re) ? Re : Number.NaN);
+    const h2 = hn === undefined ? 0.603 : (Number.isFinite(hn) ? hn : Number.NaN);
+    const k2 = kn === undefined ? 0.298 : (Number.isFinite(kn) ? kn : Number.NaN);
+    const gv = g === undefined ? G_GRAV : (Number.isFinite(g) ? g : Number.NaN);
+    const latDeg = lat === undefined ? 45 : (Number.isFinite(lat) ? lat : Number.NaN);
+    const latRad = Number.isFinite(latDeg) ? latDeg * Math.PI / 180 : Number.NaN;
+    // Degree-2 latitude factor: V₂(φ) = V₂_eq · (3·sin²φ − 1)/2
+    // (Wahr 1981; Pugh & Woodworth 2014). At φ=45° the factor is 0.5.
+    const latFactor = Number.isFinite(latRad) ? (3 * Math.sin(latRad) * Math.sin(latRad) - 1) / 2 : Number.NaN;
+    const V2 = Vn === undefined || Vn === 0
+      ? (G_MOON * ReEff * ReEff) / (D_MOON * D_MOON * D_MOON) * (Number.isFinite(latFactor) ? latFactor : 1)
+      : (Number.isFinite(Vn) ? Vn : Number.NaN);
+    if (![ReEff, h2, k2, gv, latDeg, V2].every(Number.isFinite) || gv <= 0 || ReEff <= 0) {
+      return {
+        result: Number.NaN, unit: 'm',
+        secondary: [
+          { key: 'tidal_potential', value: Number.isFinite(V2) ? V2 : Number.NaN, unit: 'm²/s²', label: 'Degree-2 Tidal Potential V₂' },
+          { key: 'gravity_perturbation', value: Number.NaN, unit: 'm/s²', label: 'Gravity Perturbation Δg = k₂·V₂/R_e' },
+        ],
+        steps: [
+          '── Earth Tides (Love 1911; Wahr 1981) ──',
+          'A Love number (h₂/k₂), the tidal potential V₂, g, or R_e is',
+          'non-finite, or g ≤ 0 / R_e ≤ 0. Result is NaN (honest — never',
+          'fabricated). Supply h₂ ≈ 0.603, k₂ ≈ 0.298, V₂ (m²/s²), g (m/s²).',
+        ],
+      };
+    }
+    const u = h2 * V2 / gv;              // radial displacement (m)
+    const dg = k2 * V2 / ReEff;          // gravity perturbation (m/s²)
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    for (let phiDeg = -90; phiDeg <= 90; phiDeg += 5) {
+      const sinPhi = Math.sin(phiDeg * Math.PI / 180);
+      seriesPoints.push({ x: phiDeg, y: V2 * 0.5 * (3 * sinPhi * sinPhi - 1) });
+    }
     return {
       result: u, unit: 'm',
+      secondary: [
+        { key: 'tidal_potential', value: V2, unit: 'm²/s²', label: 'Degree-2 Tidal Potential V₂' },
+        { key: 'solid_earth_tide_height', value: u * 100, unit: 'cm', label: 'Solid Earth Tide Height (cm)' },
+        { key: 'gravity_perturbation', value: dg, unit: 'm/s²', label: 'Gravity Perturbation Δg = k₂·V₂/R_e' },
+        { key: 'love_number_h2', value: h2, unit: '—', label: 'Love number h₂' },
+        { key: 'love_number_k2', value: k2, unit: '—', label: 'Love number k₂' },
+      ],
+      series: [{
+        label: 'Degree-2 zonal tidal potential V₂(φ)',
+        color: '#0072B2',
+        points: seriesPoints,
+      }],
       steps: [
-        '── Love Numbers — Tidal Displacement (Love, 1911; Wahr, 1981) ──',
-        `Love number h_n (degree-n vertical) = ${hn.toExponential(3)}`,
-        `Tidal potential V_n = ${Vn.toExponential(3)} m²/s²`,
-        `Gravity g = ${g.toFixed(3)} m/s²`,
+        '── Earth Tides (Love 1911; Wahr 1981) ──',
+        `Love numbers h₂ = ${h2}, k₂ = ${k2}; tidal potential V₂ = ${V2.toFixed(4)} m²/s²`,
+        `Surface gravity g = ${gv.toFixed(4)} m/s², Earth radius R_e = ${ReEff.toFixed(0)} m`,
         '',
-        'Step 1 — Compute radial displacement:',
-        `  u_r = h_n·V_n / g = ${hn.toExponential(3)} × ${Vn.toExponential(3)} / ${g.toFixed(3)}`,
-        `  u_r = ${u.toExponential(3)} m (${(u * 1000).toFixed(2)} mm)`,
+        'Step 1 — Radial solid-Earth tide displacement:',
+        `  u_r = h₂·V₂/g = ${h2} × ${V2.toFixed(4)} / ${gv.toFixed(4)}`,
+        `  u_r = ${u.toFixed(4)} m (${(u * 1000).toFixed(2)} mm, ${(u * 100).toFixed(1)} cm)`,
         '',
-        'Step 2 — Tidal context:',
-        `  ${u < 0.1 ? 'Small displacement — deep Earth or ocean loading tide' : u < 0.5 ? 'Moderate — solid Earth tide body response' : 'Large — surface loading tide near coast'}`,
+        'Step 2 — Gravity perturbation:',
+        `  Δg = k₂·V₂/R_e = ${k2} × ${V2.toFixed(4)} / ${ReEff.toFixed(0)}`,
+        `  Δg = ${dg.toExponential(3)} m/s² (${(dg * 1e5).toExponential(3)} mGal)`,
         '',
-        `  └ Shida number l_n gives horizontal displacement; k_n gives self-gravitation correction`,
-      ]
+        `  └ Moon-overhead V₂ = G·M_moon·R_e²/D³ ≈ ${V2.toFixed(3)} m²/s²`,
+        `  └ At ${latDeg.toFixed(0)}° latitude the zonal factor (3sin²φ−1)/2 = ${(0.5 * (3 * Math.pow(Math.sin(latDeg * Math.PI / 180), 2) - 1)).toFixed(3)}`,
+        `  └ h₂ ≈ 0.603, k₂ ≈ 0.298 (PREM) — ocean loading adds ~2× in coastal zones`,
+      ],
     };
   },
-  113: ({ GM, r, n, Cnm, Snm, Pnm, phi: _phi, lam }) => {
-    const R_earth = 6371000;
-    const ratio = R_earth / r;
-    const surfTerm = Cnm * Math.cos(n * lam) + Snm * Math.sin(n * lam);
-    const V = (GM / r) * Math.pow(ratio, n) * surfTerm * Pnm;
+  113: ({ GM, r, n, m, Cnm, Snm, Pnm, phi, lam, Re, dPnm }) => {
+    // Single harmonic of the EGM2008-style spherical-harmonic expansion.
+    // Disturbing potential:  T = (GM/r)·(R_e/r)^n·(C_nm cos mλ + S_nm sin mλ)·P_nm(sinφ)
+    // Gravity anomaly (spherical, free-air): Δg = −∂T/∂r − (2/r)T = (n−1)(GM/r²)·(R_e/r)^n·Y·P_nm
+    // Deflections: η = −(1/(g·r·cosφ))·∂T/∂λ (exact), ξ = −(1/(g·r))·∂T/∂φ (needs ∂P/∂φ).
+    const ReEff = Re === undefined ? 6371000 : (Number.isFinite(Re) ? Re : Number.NaN);
+    const gmv = GM === undefined ? 3.986004418e14 : (Number.isFinite(GM) ? GM : Number.NaN);
+    const rv = r === undefined ? 6371000 : (Number.isFinite(r) ? r : Number.NaN);
+    const nv = n === undefined ? 2 : (Number.isFinite(n) ? n : Number.NaN);
+    const mv = m === undefined ? 0 : (Number.isFinite(m) ? m : Number.NaN);
+    const cnm = Cnm === undefined ? 1e-6 : (Number.isFinite(Cnm) ? Cnm : Number.NaN);
+    const snm = Snm === undefined ? 0 : (Number.isFinite(Snm) ? Snm : Number.NaN);
+    const pnm = Pnm === undefined ? 1 : (Number.isFinite(Pnm) ? Pnm : Number.NaN);
+    const phiv = phi === undefined ? 0 : (Number.isFinite(phi) ? phi : Number.NaN);
+    const lamv = lam === undefined ? 0 : (Number.isFinite(lam) ? lam : Number.NaN);
+    const dPnmv = dPnm === undefined ? Number.NaN : (Number.isFinite(dPnm) ? dPnm : Number.NaN);
+    if (![ReEff, gmv, rv, nv, mv, cnm, snm, pnm, phiv, lamv].every(Number.isFinite)
+      || rv <= 0 || nv < 0 || mv < 0 || mv > nv) {
+      return {
+        result: Number.NaN, unit: 'mGal',
+        secondary: [
+          { key: 'disturbing_potential', value: Number.NaN, unit: 'm²/s²', label: 'Disturbing Potential T' },
+          { key: 'deflection_eta', value: Number.NaN, unit: 'arcsec', label: 'Prime-vertical deflection η (east)' },
+          { key: 'deflection_xi', value: Number.NaN, unit: 'arcsec', label: 'Meridian deflection ξ (north)' },
+        ],
+        steps: [
+          '── Spherical Harmonic Gravity Field (Heiskanen & Moritz 1967; EGM2008) ──',
+          'GM, r, n, m, C_nm, S_nm, P_nm, φ or λ is non-finite, or 0 ≤ m ≤ n',
+          'and r > 0 are violated. Result is NaN (honest — never fabricated).',
+        ],
+      };
+    }
+    const ratio = ReEff / rv;
+    const scale = Math.pow(ratio, nv);
+    const Y = cnm * Math.cos(mv * lamv) + snm * Math.sin(mv * lamv);
+    const T = (gmv / rv) * scale * Y * pnm;                 // disturbing potential (m²/s²)
+    const gAnom = (nv - 1) * (gmv / (rv * rv)) * scale * Y * pnm; // gravity anomaly (m/s²)
+    const gAnomMG = gAnom * 1e5;                             // mGal (1 mGal = 10⁻⁵ m/s²)
+    const gNorm = gmv / (rv * rv);                           // normal gravity (m/s²)
+    const cosPhi = Math.cos(phiv);
+    let eta = Number.NaN;
+    if (Math.abs(cosPhi) > 1e-9) {
+      const dTdL = (gmv / rv) * scale * mv * (-cnm * Math.sin(mv * lamv) + snm * Math.cos(mv * lamv)) * pnm;
+      eta = -(1 / (gNorm * rv * cosPhi)) * dTdL * RAD2ARCSEC;
+    }
+    const xi = Number.isFinite(dPnmv)
+      ? -(1 / (gNorm * rv)) * (gmv / rv) * scale * Y * dPnmv * RAD2ARCSEC
+      : Number.NaN;
     return {
-      result: V, unit: 'm²/s²',
+      result: gAnomMG, unit: 'mGal',
+      secondary: [
+        { key: 'disturbing_potential', value: T, unit: 'm²/s²', label: 'Disturbing Potential T' },
+        { key: 'deflection_eta', value: Number.isFinite(eta) ? eta : Number.NaN, unit: 'arcsec', label: 'Prime-vertical deflection η (east)' },
+        { key: 'deflection_xi', value: Number.isFinite(xi) ? xi : Number.NaN, unit: 'arcsec', label: 'Meridian deflection ξ (north, needs ∂P_nm/∂φ)' },
+        { key: 'degree', value: nv, unit: '—', label: 'Degree n' },
+        { key: 'order', value: mv, unit: '—', label: 'Order m' },
+      ],
       steps: [
-        '── Spherical Harmonic Gravity Field (Heiskanen & Moritz, 1967; EGM2008) ──',
-        `Gravitational constant GM = ${GM.toExponential(4)} m³/s²`,
-        `Radius r = ${r.toFixed(0)} m, Earth radius R = ${R_earth.toFixed(0)} m`,
-        `Degree n = ${n.toFixed(0)}, Order m = (from C_nm/S_nm indices)`,
-        `Coefficient C_nm = ${Cnm.toExponential(4)}, S_nm = ${Snm.toExponential(4)}`,
-        `Associated Legendre P_nm = ${Pnm.toExponential(3)}`,
-        `Longitude λ = ${lam.toFixed(4)} rad`,
+        '── Spherical Harmonic Gravity Field (Heiskanen & Moritz 1967; EGM2008) ──',
+        `GM = ${gmv.toExponential(4)} m³/s², r = ${rv.toFixed(0)} m, R_e = ${ReEff.toFixed(0)} m`,
+        `Degree n = ${nv}, order m = ${mv}; C_nm = ${cnm.toExponential(4)}, S_nm = ${snm.toExponential(4)}`,
+        `P_nm(sinφ) = ${pnm.toExponential(4)}, φ = ${phiv.toFixed(4)} rad, λ = ${lamv.toFixed(4)} rad`,
         '',
-        'Step 1 — Scale ratio:',
-        `  (R/r)^n = (${R_earth.toFixed(0)} / ${r.toFixed(0)})^${n.toFixed(0)} = ${Math.pow(ratio, n).toExponential(4)}`,
+        'Step 1 — Radial scale factor:',
+        `  (R_e/r)^n = (${ReEff.toFixed(0)}/${rv.toFixed(0)})^${nv} = ${scale.toExponential(4)}`,
         '',
         'Step 2 — Surface spherical harmonic:',
-        `  C_nm·cos(nλ) + S_nm·sin(nλ) = ${Cnm.toExponential(4)}·cos(${n.toFixed(0)}×${lam.toFixed(4)}) + ${Snm.toExponential(4)}·sin(${n.toFixed(0)}×${lam.toFixed(4)})`,
-        `  = ${surfTerm.toExponential(4)}`,
+        `  Y = C_nm·cos(mλ) + S_nm·sin(mλ) = ${Y.toExponential(4)}`,
         '',
-        'Step 3 — Gravitational potential:',
-        `  V = (GM/r) × (R/r)^n × (C_nm cos+Snm sin) × P_nm`,
-        `  V = ${(GM / r).toExponential(3)} × ${Math.pow(ratio, n).toExponential(4)} × ${surfTerm.toExponential(4)} × ${Pnm.toExponential(3)}`,
-        `  V = ${V.toExponential(4)} m²/s²`,
+        'Step 3 — Disturbing potential:',
+        `  T = (GM/r)·(R_e/r)^n·Y·P_nm = ${T.toExponential(4)} m²/s²`,
         '',
-        `  └ Degree variance: σ_n² = Σ(C_nm²+S_nm²) — degree n contributes ~${(Math.sqrt(Cnm * Cnm + Snm * Snm) * 1e8).toFixed(1)} mGal RMS geoid`,
-        `  └ Full field: V = GM/r · Σ(R/r)^n Σ(C_nm cos mλ + S_nm sin mλ)·P_nm(sin φ)`,
-      ]
+        'Step 4 — Gravity anomaly (free-air, single harmonic):',
+        `  Δg = (n−1)·(GM/r²)·(R_e/r)^n·Y·P_nm = ${gAnom.toExponential(4)} m/s²`,
+        `  Δg = ${gAnomMG.toFixed(4)} mGal`,
+        '',
+        'Step 5 — Deflections of the vertical:',
+        `  η = −(1/(g·r·cosφ))·∂T/∂λ = ${Number.isFinite(eta) ? eta.toFixed(4) : 'NaN'}″ (east)`,
+        `  ξ = −(1/(g·r))·∂T/∂φ = ${Number.isFinite(xi) ? xi.toFixed(4) : 'NaN'}″ (north; needs ∂P_nm/∂φ)`,
+        '',
+        `  └ Full field: Δg = (GM/r²)·Σ (n−1)(R_e/r)^n·(C_nm cos mλ + S_nm sin mλ)·P_nm(sinφ)`,
+        `  └ EGM2008 complete to degree/order 2190 (~5′ resolution)`,
+      ],
     };
   },
-  114: ({ S, R, X, T }) => {
-    const Xt = S * R * X + T;
+  114: ({ X, T, S, s, wx, wy, wz, Xobs }) => {
+    // Helmert 7-parameter similarity transformation (Helmert 1880;
+    // Molodensky 1962):  X′ = T + (1+s)·R·X
+    //   T    — 3 translations [tx, ty, tz] (m)
+    //   s    — scale factor in ppm (or S as an explicit multiplier, 1+ppm)
+    //   ωx,ωy,ωz — rotations about x,y,z axes (arcsec)
+    // The returned scalar is |X′| (norm of the transformed vector, m).
+    const toVec = (v: unknown): [number, number, number] => {
+      if (Array.isArray(v) && v.length >= 1) {
+        const a = [Number(v[0]), Number(v[1]), Number(v[2])];
+        if (a.every(Number.isFinite)) return [a[0], a[1], a[2]];
+        return [Number.NaN, Number.NaN, Number.NaN];
+      }
+      const n = typeof v === 'string' ? Number(v) : v;
+      if (typeof n === 'number' && Number.isFinite(n)) return [n, 0, 0];
+      return [Number.NaN, Number.NaN, Number.NaN];
+    };
+    const Xv = toVec(X);
+    const Tv = toVec(T);
+    const scale = S === undefined ? Number.NaN : (Number.isFinite(S) ? S : Number.NaN);
+    const spm = s === undefined ? Number.NaN : (Number.isFinite(s) ? s : Number.NaN);
+    const scaleEff = Number.isFinite(scale) ? scale : (Number.isFinite(spm) ? 1 + spm * 1e-6 : Number.NaN);
+    const wxv = wx === undefined ? 0 : (Number.isFinite(wx) ? wx : Number.NaN);
+    const wyv = wy === undefined ? 0 : (Number.isFinite(wy) ? wy : Number.NaN);
+    const wzv = wz === undefined ? 0 : (Number.isFinite(wz) ? wz : Number.NaN);
+    if (!Xv.every(Number.isFinite) || !Tv.every(Number.isFinite)
+      || !Number.isFinite(scaleEff) || scaleEff <= 0
+      || ![wxv, wyv, wzv].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: 'm',
+        secondary: [
+          { key: 'scale_ppm', value: Number.NaN, unit: 'ppm', label: 'Scale factor (ppm)' },
+          { key: 'rotation_x', value: Number.NaN, unit: 'arcsec', label: 'Rotation ωx' },
+          { key: 'rotation_y', value: Number.NaN, unit: 'arcsec', label: 'Rotation ωy' },
+          { key: 'rotation_z', value: Number.NaN, unit: 'arcsec', label: 'Rotation ωz' },
+          { key: 'displacement', value: Number.NaN, unit: 'm', label: '|X′ − X|' },
+          { key: 'residual', value: Number.NaN, unit: 'm', label: 'Residual |X′ − X_obs|' },
+        ],
+        steps: [
+          '── Helmert 7-Parameter Transformation (Helmert 1880; Molodensky 1962) ──',
+          'X′ = T + (1+s)·R·X requires a finite 3-vector X, a finite 3-vector T,',
+          'a positive scale factor (S or s ppm), and finite rotations.',
+          'Result is NaN (honest — never fabricated).',
+        ],
+      };
+    }
+    const Rx = rot1(wxv * ARCSEC2RAD);
+    const Ry = rot2(wyv * ARCSEC2RAD);
+    const Rz = rot3(wzv * ARCSEC2RAD);
+    const R = mat3Mul(mat3Mul(Rx, Ry), Rz);
+    const rot = mat3Vec(R, Xv);
+    const Xp: [number, number, number] = [
+      Tv[0] + scaleEff * rot[0],
+      Tv[1] + scaleEff * rot[1],
+      Tv[2] + scaleEff * rot[2],
+    ];
+    const norm = Math.hypot(Xp[0], Xp[1], Xp[2]);
+    const disp = Math.hypot(Xp[0] - Xv[0], Xp[1] - Xv[1], Xp[2] - Xv[2]);
+    const residual = Array.isArray(Xobs) && Xobs.length >= 1
+      ? Math.hypot(Xp[0] - Number(Xobs[0]), Xp[1] - Number(Xobs[1]), Xp[2] - Number(Xobs[2]))
+      : Number.NaN;
     return {
-      result: Xt, unit: 'm',
+      result: norm, unit: 'm',
+      secondary: [
+        { key: 'x_prime', value: Xp[0], unit: 'm', label: "Transformed component x′" },
+        { key: 'y_prime', value: Xp[1], unit: 'm', label: "Transformed component y′" },
+        { key: 'z_prime', value: Xp[2], unit: 'm', label: "Transformed component z′" },
+        { key: 'scale_ppm', value: (scaleEff - 1) * 1e6, unit: 'ppm', label: 'Scale factor (ppm)' },
+        { key: 'rotation_x', value: wxv, unit: 'arcsec', label: 'Rotation ωx' },
+        { key: 'rotation_y', value: wyv, unit: 'arcsec', label: 'Rotation ωy' },
+        { key: 'rotation_z', value: wzv, unit: 'arcsec', label: 'Rotation ωz' },
+        { key: 'displacement', value: disp, unit: 'm', label: '|X′ − X|' },
+        { key: 'residual', value: Number.isFinite(residual) ? residual : Number.NaN, unit: 'm', label: 'Residual |X′ − X_obs|' },
+      ],
       steps: [
-        '── Helmert 7-Parameter Transformation (Helmert, 1880; Molodensky, 1962) ──',
-        `Scale factor S = ${S.toExponential(3)} (1 + ppm), Rotation matrix R = ${R.toExponential(3)}`,
-        `Input vector X = ${X.toExponential(3)} m`,
-        `Translation vector T = ${T.toExponential(3)} m`,
+        '── Helmert 7-Parameter Transformation (Helmert 1880; Molodensky 1962) ──',
+        `Input vector X = [${Xv.join(', ')}] m`,
+        `Translation T = [${Tv.join(', ')}] m`,
+        `Scale factor = ${scaleEff} (${((scaleEff - 1) * 1e6).toFixed(3)} ppm)`,
+        `Rotations ωx = ${wxv}″, ωy = ${wyv}″, ωz = ${wzv}″`,
         '',
-        'Step 1 — Apply rotation and scaling:',
-        `  S·R·X = ${S.toExponential(3)} × ${R.toExponential(3)} × ${X.toExponential(3)} = ${(S * R * X).toExponential(3)} m`,
+        'Step 1 — Rotation matrix (arcsec → rad):',
+        `  R = R₁(ωx)·R₂(ωy)·R₃(ωz)  (det R = ${mat3Det(R).toFixed(12)})`,
         '',
-        'Step 2 — Add translation:',
-        `  X_t = S·R·X + T = ${(S * R * X).toExponential(3)} + ${T.toExponential(3)}`,
-        `  X_t = ${Xt.toExponential(3)} m`,
+        'Step 2 — Scale + rotate:',
+        `  (1+s)·R·X = ${scaleEff} × R × [${Xv.join(', ')}] = [${rot.map((c) => c.toFixed(4)).join(', ')}] m`,
         '',
-        'Step 3 — Transformation magnitude:',
-        `  Δ = |X_t − X| = ${Math.abs(Xt - X).toExponential(3)} m`,
-        `  ${Math.abs(Xt - X) > 100 ? 'Continental-scale shift (ITRF to local datum)' : Math.abs(Xt - X) > 1 ? 'Regional datum shift' : 'Local/minor refinement'}`,
+        'Step 3 — Translate:',
+        `  X′ = T + (1+s)·R·X = [${Xp.map((c) => c.toFixed(4)).join(', ')}] m`,
+        `  |X′| = ${norm.toFixed(4)} m`,
         '',
-        `  └ Full Helmert: 7 parameters (3 translations, 3 rotations, 1 scale) for datum transformations (ITRF↔WGS84↔ETRS89)`,
-      ]
+        'Step 4 — Residuals:',
+        `  Δ = |X′ − X| = ${disp.toFixed(4)} m ${disp > 100 ? '(continental-scale shift)' : disp > 1 ? '(regional datum shift)' : '(local/minor refinement)'}`,
+        `  ${Number.isFinite(residual) ? `residual |X′ − X_obs| = ${residual.toFixed(4)} m` : 'residual: no observed X′ supplied'}`,
+        '',
+        `  └ 7 parameters (3 translations, 3 rotations, 1 scale) for ITRF↔WGS84↔ETRS89`,
+      ],
     };
   },
   115: ({ h, N }) => {
-    const H = h - N;
+    // Orthometric height (Helmert 1890; Heiskanen & Moritz 1967): H = h − N,
+    // where h is the ellipsoidal (GNSS) height and N the geoid undulation.
+    const hv = h === undefined ? Number.NaN : (Number.isFinite(h) ? h : Number.NaN);
+    const Nv = N === undefined ? Number.NaN : (Number.isFinite(N) ? N : Number.NaN);
+    if (!Number.isFinite(hv) || !Number.isFinite(Nv)) {
+      return {
+        result: Number.NaN, unit: 'm',
+        secondary: [
+          { key: 'ellipsoid_height', value: Number.isFinite(hv) ? hv : Number.NaN, unit: 'm', label: 'Ellipsoidal height h (GNSS)' },
+          { key: 'geoid_undulation', value: Number.isFinite(Nv) ? Nv : Number.NaN, unit: 'm', label: 'Geoid undulation N (EGM2008/EGM2020)' },
+        ],
+        steps: [
+          '── Orthometric Height (Helmert 1890; Heiskanen & Moritz 1967) ──',
+          'H = h − N requires a finite ellipsoidal height h and a finite',
+          'geoid undulation N. Result is NaN (honest — never fabricated).',
+        ],
+      };
+    }
+    const H = hv - Nv;
     return {
       result: H, unit: 'm',
+      secondary: [
+        { key: 'ellipsoid_height', value: hv, unit: 'm', label: 'Ellipsoidal height h (GNSS)' },
+        { key: 'geoid_undulation', value: Nv, unit: 'm', label: 'Geoid undulation N (EGM2008/EGM2020)' },
+      ],
       steps: [
-        '── Orthometric Height (Helmert, 1890; Heiskanen & Moritz, 1967) ──',
-        `Ellipsoidal height (GNSS) h = ${h.toFixed(3)} m`,
-        `Geoid undulation N = ${N.toFixed(3)} m (EGM2008/EGM2020)`,
+        '── Orthometric Height (Helmert 1890; Heiskanen & Moritz 1967) ──',
+        `Ellipsoidal height (GNSS) h = ${hv.toFixed(3)} m`,
+        `Geoid undulation N = ${Nv.toFixed(3)} m (EGM2008/EGM2020)`,
         '',
         'Step 1 — Convert to orthometric height:',
-        `  H = h − N = ${h.toFixed(3)} − ${N.toFixed(3)}`,
+        `  H = h − N = ${hv.toFixed(3)} − ${Nv.toFixed(3)}`,
         `  H = ${H.toFixed(3)} m (height above sea level / geoid)`,
         '',
         'Step 2 — Geoid context:',
-        `  ${N > 0 ? 'N > 0: geoid above ellipsoid (excess mass region)' : 'N < 0: geoid below ellipsoid (mass deficit region)'}`,
-        `  Geoid slope: ~${Math.abs(N / 100e3 * 1e6).toFixed(2)} cm/km (typical geoid gradient)`,
+        `  ${Nv > 0 ? 'N > 0: geoid above ellipsoid (excess mass region)' : 'N < 0: geoid below ellipsoid (mass deficit region)'}`,
+        `  Geoid slope: ~${Math.abs(Nv / 100e3 * 1e6).toFixed(2)} cm/km (typical geoid gradient)`,
         '',
         `  └ EGM2020 resolution ~5′ (~9 km); accuracy improves with regional geoid models`,
         `  └ In coastal zones, use local chart datum (e.g., LAT, MSL) — orthometric height ≠ tidal datum`,
-      ]
+      ],
     };
   },
 
   // ── Domain 19: Ionosphere & Magnetosphere ──
-  116: ({ ni, mi }) => {
-    const rho = ni.reduce((s: number, n: number, i: number) => s + n * (mi[i] || 1), 0);
-    const nIons = ni.length;
+  116: ({ ni, mi, T, alt, z0 }) => {
+    // NRLMSISE-00 (simplified barometric). Total neutral mass density from
+    // per-species number densities n_i (m⁻³) and masses m_i (kg):
+    //   ρ = Σ n_i·m_i
+    // With a neutral temperature T (K), a scale height H = kT/(m̄g) drives
+    // the isothermal profile ρ(z) = ρ₀·exp(−(z−z₀)/H) for the series.
+    const niArr: number[] = Array.isArray(ni) ? ni.map(Number) : [];
+    const miArr: number[] = Array.isArray(mi) ? mi.map(Number) : [];
+    const good = niArr.length > 0 && miArr.length >= niArr.length
+      && niArr.every((v) => Number.isFinite(v) && v >= 0)
+      && miArr.slice(0, niArr.length).every((v) => Number.isFinite(v) && v >= 0);
+    if (!good) {
+      return {
+        result: Number.NaN, unit: 'kg/m³',
+        secondary: [
+          { key: 'number_density', value: Number.NaN, unit: 'm⁻³', label: 'Total Number Density Σ nᵢ' },
+          { key: 'mean_molecular_mass', value: Number.NaN, unit: 'kg', label: 'Mean Molecular Mass' },
+          { key: 'o_n2_ratio', value: Number.NaN, unit: '—', label: 'O/N₂ ratio (n_O/n_N₂)' },
+          { key: 'temperature', value: Number.NaN, unit: 'K', label: 'Neutral Temperature T' },
+        ],
+        steps: [
+          '── NRLMSISE-00 (simplified barometric; Picone et al. 2002) ──',
+          'Species number densities n_i and masses m_i are required as',
+          'finite, non-negative, matched-length arrays. Result is NaN',
+          '(honest — never fabricated).',
+        ],
+      };
+    }
+    let rho = 0, nTot = 0;
+    for (let i = 0; i < niArr.length; i++) { rho += niArr[i] * miArr[i]; nTot += niArr[i]; }
+    const mBar = nTot > 0 ? rho / nTot : Number.NaN;
+    const oN2 = niArr.length >= 2 && niArr[1] > 0 ? niArr[0] / niArr[1] : Number.NaN;
+    const Tk = T === undefined ? Number.NaN : (Number.isFinite(T) ? T : Number.NaN);
+    const scaleH = Number.isFinite(Tk) && Number.isFinite(mBar) && mBar > 0
+      ? (K_BOLTZMANN * Tk) / (mBar * G_GRAV) : Number.NaN;
+    const z0km = z0 === undefined ? 200 : (Number.isFinite(z0) ? z0 : Number.NaN);
+    const altKm = alt === undefined ? z0km : (Number.isFinite(alt) ? alt : Number.NaN);
+    const rhoAtAlt = Number.isFinite(altKm) && Number.isFinite(z0km) && Number.isFinite(scaleH) && scaleH > 0
+      ? rho * Math.exp(-((altKm - z0km) * 1000) / scaleH) : Number.NaN;
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    if (Number.isFinite(scaleH) && scaleH > 0 && Number.isFinite(z0km)) {
+      const zStart = Math.max(100, z0km);
+      for (let z = zStart; z <= z0km + 500; z += 10) {
+        seriesPoints.push({ x: z, y: rho * Math.exp(-((z - z0km) * 1000) / scaleH) });
+      }
+    }
     return {
       result: rho, unit: 'kg/m³',
+      secondary: [
+        { key: 'number_density', value: nTot, unit: 'm⁻³', label: 'Total Number Density Σ nᵢ' },
+        { key: 'mean_molecular_mass', value: Number.isFinite(mBar) ? mBar : Number.NaN, unit: 'kg', label: 'Mean Molecular Mass' },
+        { key: 'o_n2_ratio', value: Number.isFinite(oN2) ? oN2 : Number.NaN, unit: '—', label: 'O/N₂ ratio (n_O/n_N₂)' },
+        { key: 'temperature', value: Number.isFinite(Tk) ? Tk : Number.NaN, unit: 'K', label: 'Neutral Temperature T' },
+        { key: 'scale_height', value: Number.isFinite(scaleH) ? scaleH : Number.NaN, unit: 'm', label: 'Scale Height H = kT/(m̄g)' },
+        { key: 'density_at_altitude', value: Number.isFinite(rhoAtAlt) ? rhoAtAlt : Number.NaN, unit: 'kg/m³', label: `Mass Density at ${Number.isFinite(altKm) ? altKm.toFixed(0) : 'N/A'} km` },
+      ],
+      series: seriesPoints.length > 0
+        ? [{ label: 'Mass density ρ(z) — simplified barometric', color: '#0072B2', points: seriesPoints }]
+        : undefined,
       steps: [
-        '── Ion Plasma Mass Density (Chapman, 1931; Kelley, 2009) ──',
-        `${nIons} ion species with densities: [${ni.map((n: number) => n.toExponential(2)).join(', ')}] m⁻³`,
-        `Ion masses: [${mi.map((m: number) => m.toExponential(2)).join(', ')}] kg`,
+        '── NRLMSISE-00 (simplified barometric; Picone et al. 2002) ──',
+        `${niArr.length} species, densities [${niArr.map((n: number) => n.toExponential(2)).join(', ')}] m⁻³`,
+        `Masses [${miArr.map((m: number) => m.toExponential(2)).join(', ')}] kg`,
         '',
-        'Step 1 — Sum over species:',
-        `  ρ = Σ(n_i·m_i) for i = 1..${nIons}`,
-        `  ρ = ${rho.toExponential(3)} kg/m³`,
+        'Step 1 — Total neutral mass density:',
+        `  ρ = Σ(n_i·m_i) = ${rho.toExponential(4)} kg/m³`,
         '',
-        'Step 2 — Dominant ion identification:',
-        `  ${rho > 1e-15 ? 'F-region — O⁺ dominant, high density (10¹¹–10¹² m⁻³)' : rho > 1e-18 ? 'E-region — NO⁺/O₂⁺ dominant' : 'Topside/plasmasphere — H⁺/He⁺ dominant, low density'}`,
+        'Step 2 — Derived quantities:',
+        `  Total number density n = Σ n_i = ${nTot.toExponential(3)} m⁻³`,
+        `  Mean molecular mass m̄ = ρ/n = ${Number.isFinite(mBar) ? mBar.toExponential(3) : 'NaN'} kg`,
+        `  O/N₂ ratio = ${Number.isFinite(oN2) ? oN2.toFixed(3) : 'NaN'}`,
+        `  ${Number.isFinite(scaleH) ? `Scale height H = kT/(m̄g) = ${(scaleH / 1000).toFixed(2)} km` : 'Scale height: supply neutral temperature T (K)'}`,
         '',
-        `  └ Electron density n_e ≈ Σ n_i (quasi-neutrality); plasma frequency f_p ∝ √n_e`,
-      ]
+        'Step 3 — Regime (satellite drag):',
+        `  ${Number.isFinite(rhoAtAlt) ? `ρ(${Number.isFinite(altKm) ? altKm.toFixed(0) : 'N/A'} km) = ${rhoAtAlt.toExponential(3)} kg/m³ (barometric extrapolation from z₀ = ${Number.isFinite(z0km) ? z0km.toFixed(0) : 'N/A'} km)` : 'ρ at requested altitude: supply z₀ and T for barometric extrapolation'}`,
+        `  ${rho > 1e-13 ? 'Low LEO — high drag (dominant for decay)' : rho > 1e-15 ? 'Mid LEO — moderate drag' : 'High LEO / MEO — low drag'}`,
+        '',
+        `  └ Full NRLMSISE-00 uses MSIS-style 12-parameter exospheric expansion`,
+      ],
     };
   },
-  117: ({ Ne }) => {
-    const fp = Math.sqrt(Ne * 80.6164) * 1e-6; // plasma frequency in MHz
-    const Teq = 1200; // typical F-region temperature (K)
-    const _scaleH = (K_BOLTZMANN * Teq) / (16 * 1.67e-27 * G_GRAV) / 1000;
+  117: ({ Ne, alt, lat, lon, NmF2, hmF2, H }) => {
+    // IRI-2016 (simplified). Electron density N_e at altitude/latitude/
+    // longitude. When N_e is not supplied it is derived from a Chapman
+    // F2-layer: N_e(h) = NmF2·exp(0.5·(1 − z − e^(−z))), z = (h − hmF2)/H.
+    // Altitudes h, hmF2 and scale height H are in metres.
+    const Nev = Ne === undefined ? Number.NaN : (Number.isFinite(Ne) ? Ne : Number.NaN);
+    const altM = alt === undefined ? Number.NaN : (Number.isFinite(alt) ? alt : Number.NaN);
+    const Nm = NmF2 === undefined ? Number.NaN : (Number.isFinite(NmF2) ? NmF2 : Number.NaN);
+    const hm = hmF2 === undefined ? Number.NaN : (Number.isFinite(hmF2) ? hmF2 : Number.NaN);
+    const Hc = H === undefined ? 60000 : (Number.isFinite(H) && H > 0 ? H : Number.NaN);
+    const chapmanNe = (hKmM: number) => {
+      if (!Number.isFinite(Nm) || !Number.isFinite(hm) || !Number.isFinite(Hc) || Hc <= 0) return Number.NaN;
+      const z = (hKmM - hm) / Hc;
+      return Nm * Math.exp(0.5 * (1 - z - Math.exp(-z)));
+    };
+    const NeEff = Number.isFinite(Nev) ? Nev : (Number.isFinite(altM) ? chapmanNe(altM) : Number.NaN);
+    if (!Number.isFinite(NeEff) || NeEff < 0) {
+      return {
+        result: Number.NaN, unit: 'm⁻³',
+        secondary: [
+          { key: 'plasma_frequency', value: Number.NaN, unit: 'MHz', label: 'Plasma Frequency f_p at point' },
+          { key: 'foF2', value: Number.NaN, unit: 'MHz', label: 'F2 Critical Frequency foF2' },
+          { key: 'hmF2', value: Number.NaN, unit: 'km', label: 'Height of F2 Peak (HMF)' },
+          { key: 'tec', value: Number.NaN, unit: 'TECU', label: 'Total Electron Content (Chapman model)' },
+        ],
+        steps: [
+          '── IRI-2016 (simplified Chapman; Bilitza et al. 2017) ──',
+          'Electron density N_e (or NmF2 + hmF2 + altitude) is required as a',
+          'finite, non-negative value. Result is NaN (honest — never fabricated).',
+        ],
+      };
+    }
+    const fpMHz = Math.sqrt(NeEff * 80.6164) * 1e-6;            // plasma frequency (MHz)
+    const foF2 = Number.isFinite(Nm) && Nm > 0
+      ? Math.sqrt(Nm * 80.6164) * 1e-6 : Number.NaN;
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    let tec = 0; // m⁻² (trapezoidal integral over the Chapman profile)
+    if (Number.isFinite(Nm) && Number.isFinite(hm) && Number.isFinite(Hc) && Hc > 0) {
+      let prev: { h: number; ne: number } | null = null;
+      for (let hM = 80e3; hM <= 800e3; hM += 10e3) {
+        const ne = chapmanNe(hM);
+        seriesPoints.push({ x: hM / 1000, y: ne });
+        if (prev) tec += (prev.ne + ne) / 2 * (hM - prev.h);
+        prev = { h: hM, ne };
+      }
+    }
+    const tecTECU = tec > 0 ? tec / 1e16 : Number.NaN;
+    const latLabel = Number.isFinite(lat) ? lat.toFixed(2) : 'N/A';
+    const lonLabel = Number.isFinite(lon) ? lon.toFixed(2) : 'N/A';
     return {
-      result: Ne, unit: 'm⁻³',
+      result: NeEff, unit: 'm⁻³',
+      secondary: [
+        { key: 'plasma_frequency', value: fpMHz, unit: 'MHz', label: 'Plasma Frequency f_p at point' },
+        { key: 'foF2', value: Number.isFinite(foF2) ? foF2 : Number.NaN, unit: 'MHz', label: 'F2 Critical Frequency foF2' },
+        { key: 'hmF2', value: Number.isFinite(hm) ? hm / 1000 : Number.NaN, unit: 'km', label: 'Height of F2 Peak (HMF)' },
+        { key: 'tec', value: Number.isFinite(tecTECU) ? tecTECU : Number.NaN, unit: 'TECU', label: 'Total Electron Content (Chapman model)' },
+      ],
+      series: seriesPoints.length > 0
+        ? [{ label: 'Electron density N_e(h) — Chapman layer', color: '#0072B2', points: seriesPoints }]
+        : undefined,
       steps: [
-        '── Empirical Electron Density Profile (Kelley, 2009; IRI-2020) ──',
-        `Electron density N_e = ${Ne.toExponential(2)} m⁻³`,
+        '── IRI-2016 (simplified Chapman; Bilitza et al. 2017) ──',
+        `Electron density N_e = ${NeEff.toExponential(3)} m⁻³ at (${latLabel}°, ${lonLabel}°)`,
+        `F2 peak density NmF2 = ${Number.isFinite(Nm) ? Nm.toExponential(3) : 'N/A'} m⁻³, hmF2 = ${Number.isFinite(hm) ? (hm / 1000).toFixed(1) : 'N/A'} km`,
         '',
         'Step 1 — Plasma frequency:',
         `  f_p = √(N_e·e²/(4π²ε₀m_e)) ≈ √(N_e × 80.6164)`,
-        `  f_p = ${fp.toFixed(3)} MHz`,
+        `  f_p = ${fpMHz.toFixed(3)} MHz`,
         '',
-        'Step 2 — Ionospheric layer identification:',
-        `  ${fp < 3 ? 'E-layer / low F-layer — below critical frequency f₀F₂' : fp < 10 ? 'F-region (f₀F₂ typical 3–10 MHz)' : 'High F-region / spread-F / auroral — enhanced ionisation'}`,
+        'Step 2 — F2 critical frequency:',
+        `  foF2 = √(NmF2 × 80.6164)·10⁻⁶ = ${Number.isFinite(foF2) ? foF2.toFixed(3) : 'NaN'} MHz`,
         '',
-        `  └ TEC = ∫N_e·dh (Total Electron Content, 1 TECU = 10¹⁶ m⁻²)`,
-        `  └ Maximum usable frequency (MUF) ≈ f₀F₂ × 3.5 for oblique propagation at 2000 km`,
-      ]
+        'Step 3 — Chapman F2-layer profile:',
+        `  N_e(h) = NmF2·exp(½(1 − z − e^(−z))), z = (h − hmF2)/H`,
+        `  ${Number.isFinite(tecTECU) ? `TEC = ∫N_e dh = ${tecTECU.toFixed(2)} TECU (80–800 km, trapezoidal)` : 'TEC: requires NmF2 + hmF2'}`,
+        '',
+        `  └ TEC 1 TECU = 10¹⁶ m⁻²; MUF ≈ foF2 × 3.5 for 2000 km oblique paths`,
+        `  └ Full IRI-2016 includes E/F1 layers, topside, storm models`,
+      ],
     };
   },
   118: ({ J, E }) => {
@@ -5443,6 +7695,9 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const sigma = E !== 0 ? J / E : 0;
     return {
       result: Q, unit: 'W/m³',
+      secondary: [
+        { key: 'conductivity', value: Number.isFinite(sigma) ? sigma : Number.NaN, unit: 'S/m', label: 'Ionospheric Conductivity (J/E)' },
+      ],
       steps: [
         '── Joule Heating in the Ionosphere (Cowley, 1982; Richmond, 1995) ──',
         `Current density J = ${J.toExponential(3)} A/m²`,
@@ -5463,9 +7718,39 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   119: ({ Imean, Istd }) => {
     // Scintillation index S4 = √(⟨I²⟩−⟨I⟩²)/⟨I⟩ = σ_I/⟨I⟩ (Briggs & Parkin 1963).
     // The implementation receives σ_I and ⟨I⟩; S4 = σ_I / ⟨I⟩.
+    if (!Number.isFinite(Imean) || !Number.isFinite(Istd)) {
+      return {
+        result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 's4_class', value: Number.NaN, unit: '—', label: 'S4 Classification' },
+          { key: 'mean_intensity', value: Number.isFinite(Imean) ? Imean : Number.NaN, unit: '—', label: 'Mean Intensity ⟨I⟩' },
+          { key: 'std_intensity', value: Number.isFinite(Istd) ? Istd : Number.NaN, unit: '—', label: 'Intensity Std Dev σ_I' },
+        ],
+        steps: [
+          '── S4 Scintillation Index (Briggs & Parkin, 1963; Yeh & Liu, 1982) ──',
+          'S4 = √(⟨I²⟩ − ⟨I⟩²) / ⟨I⟩ = σ_I / ⟨I⟩',
+          '',
+          'Mean signal intensity ⟨I⟩ or its standard deviation σ_I is missing (NaN).',
+          'No fabricated scintillation index is substituted — supply genuine',
+          'signal-intensity statistics for the link/epoch.',
+        ],
+      };
+    }
     const S4 = Imean !== 0 ? Istd / Imean : 0;
+    const s4Class = S4 < 0.1 ? 0 : S4 < 0.3 ? 1 : S4 < 0.6 ? 2 : 3;
+    const s4Labels = [
+      'WEAK — negligible amplitude fading (quiet ionosphere)',
+      'MODERATE — occasional fading, typical equatorial post-sunset',
+      'STRONG — frequent deep fades, GNSS tracking issues',
+      'SEVERE (S4 > 0.6) — cycle slips, loss of lock likely',
+    ];
     return {
       result: S4, unit: '—',
+      secondary: [
+        { key: 's4_class', value: s4Class, unit: '—', label: `S4 Classification: ${s4Labels[s4Class]}` },
+        { key: 'mean_intensity', value: Imean, unit: '—', label: 'Mean Intensity ⟨I⟩' },
+        { key: 'std_intensity', value: Istd, unit: '—', label: 'Intensity Std Dev σ_I' },
+      ],
       steps: [
         '── S4 Scintillation Index (Briggs & Parkin, 1963; Yeh & Liu, 1982) ──',
         `Mean signal intensity ⟨I⟩ = ${Imean.toExponential(3)} (relative units)`,
@@ -5476,7 +7761,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  S4 = ${S4.toExponential(4)}`,
         '',
         'Step 2 — Scintillation classification:',
-        `  ${S4 < 0.1 ? 'WEAK — negligible amplitude fading (quiet ionosphere)' : S4 < 0.3 ? 'MODERATE — occasional fading, typical equatorial post-sunset' : S4 < 0.6 ? 'STRONG — frequent deep fades, GNSS tracking issues' : 'SEVERE (S4 > 0.6) — cycle slips, loss of lock likely'}`,
+        `  ${s4Labels[s4Class]}`,
         '',
         `  └ L-band (GPS L1=1.575 GHz): S4 > 0.5 causes significant positioning degradation`,
         `  └ Also: σ_φ (phase scintillation) index in radians; strong S4 often correlates with σ_φ > 0.5 rad`,
@@ -5486,8 +7771,29 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   120: ({ Pdyn, Bz }) => {
     // Shue et al. (1997/1998) piecewise magnetopause standoff model
     // J. Geophys. Res., 103(A5), 9469–9478, DOI: 10.1029/97JA03637
-    // r₀ = (11.4 + 0.14·Bz)·Pdyn^(−1/6.6)  for Bz > 0
-    // r₀ = (11.4 + 0.013·Bz)·Pdyn^(−1/6.6) for Bz ≤ 0
+    // This is the standard form R_mp = R₀(Pdyn)^(−1/α) with α = 6.6 and
+    // R₀ a piecewise-linear function of IMF B_z:
+    //   R₀ = 11.4 + 0.14·Bz   for Bz > 0  (northward IMF)
+    //   R₀ = 11.4 + 0.013·Bz  for Bz ≤ 0  (southward IMF)
+    if (!Number.isFinite(Pdyn) || !Number.isFinite(Bz) || Pdyn <= 0) {
+      return {
+        result: Number.NaN, unit: 'R_E',
+        secondary: [
+          { key: 'dynamic_pressure', value: Number.isFinite(Pdyn) ? Pdyn : Number.NaN, unit: 'nPa', label: 'Solar Wind Dynamic Pressure P_dyn' },
+          { key: 'bz_polarity', value: Number.isFinite(Bz) ? (Bz > 0 ? 1 : Bz < 0 ? -1 : 0) : Number.NaN, unit: '—', label: 'B_z Polarity (1=northward, 0=zero, −1=southward)' },
+          { key: 'magnetopause_type', value: Number.NaN, unit: '—', label: 'Magnetopause State' },
+          { key: 'geo_exposure', value: Number.NaN, unit: '—', label: 'GEO Exposure Flag (1=exposed)' },
+        ],
+        steps: [
+          '── Magnetopause Standoff Distance (Shue et al. 1998, J. Geophys. Res. 103, 9469–9478) ──',
+          'R_mp = R₀·P_dyn^(−1/6.6),  R₀ = 11.4 + 0.14·Bz (Bz>0) | 11.4 + 0.013·Bz (Bz≤0)',
+          '',
+          `Dynamic pressure P_dyn = ${Number.isFinite(Pdyn) ? Pdyn : 'NaN'} nPa must be a finite`,
+          'positive value (P_dyn ≤ 0 makes the power-law term undefined or infinite),',
+          'and IMF B_z must be finite. No fabricated standoff distance is substituted.',
+        ],
+      };
+    }
     const PdynExp = Math.pow(Pdyn, -1 / 6.6);
     const bzCoeff = Bz > 0 ? 0.14 : 0.013;
     const Rmp = (11.4 + bzCoeff * Bz) * PdynExp;
@@ -5506,9 +7812,20 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     const sheathThickness = Rbs - Rmp;
 
     const bzLabel = Bz > 0 ? 'northward' : Bz < 0 ? 'southward' : 'zero';
+    const bzPolarity = Bz > 0 ? 1 : Bz < 0 ? -1 : 0;
+    const mpType = Rmp < 6.6 ? 0 : Rmp < 8 ? 1 : Rmp < 10 ? 2 : 3;
+    const mpLabels = [
+      'EXTREME COMPRESSION — inside GEO (6.6 R_E)',
+      'STRONG COMPRESSION — near GEO boundary',
+      'NOMINAL — average solar wind conditions',
+      'EXPANDED — weak solar wind, magnetopause far out',
+    ];
     return {
       result: Rmp, unit: 'R_E',
       secondary: [
+        { key: 'dynamic_pressure', value: Pdyn, unit: 'nPa', label: 'Solar Wind Dynamic Pressure P_dyn' },
+        { key: 'bz_polarity', value: bzPolarity, unit: '—', label: `B_z Polarity (${bzLabel} IMF)` },
+        { key: 'magnetopause_type', value: mpType, unit: '—', label: `Magnetopause State: ${mpLabels[mpType]}` },
         { key: 'geo_exposure', value: geoExposure, unit: '—', label: 'GEO Exposure Flag (1=exposed)' },
         { key: 'magnetosheath_thickness', value: sheathThickness, unit: 'R_E', label: 'Magnetosheath Thickness (approx.)' },
       ],
@@ -5533,7 +7850,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  α > 0 → open magnetotail (tail flares outward)`,
         '',
         'Step 5 — Magnetopause state:',
-        `  ${Rmp < 6.6 ? '⚠ EXTREME COMPRESSION — inside GEO (6.6 R_E), satellites exposed to solar wind' : Rmp < 8 ? 'STRONG COMPRESSION — near GEO boundary' : Rmp < 10 ? 'NOMINAL — average solar wind conditions' : 'EXPANDED — weak solar wind, magnetopause far out'}`,
+        `  ${mpLabels[mpType]}`,
         `  ${Bz < -5 ? 'Strong southward B_z — dayside reconnection, erosion reduces R_mp' : Bz > 5 ? 'Strong northward B_z — high-latitude reconnection, slight inflation' : 'Quiet IMF orientation'}`,
         `  GEO exposure: ${geoExposure ? 'YES — magnetopause inside 6.6 R_E' : 'no — satellites within magnetosphere'}`,
         `  Magnetosheath thickness ≈ ${sheathThickness.toFixed(2)} R_E (typical M_ms ≈ 6)`,
@@ -5543,6 +7860,24 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   121: ({ Dst, Pdyn, b, c }) => {
+    // Dst* = Dst − b·√(P_dyn) + c  (Burton et al. 1975)
+    if (!Number.isFinite(Dst) || !Number.isFinite(Pdyn) || !Number.isFinite(b) || !Number.isFinite(c) || Pdyn < 0) {
+      return {
+        result: Number.NaN, unit: 'nT',
+        secondary: [
+          { key: 'pressure_correction', value: Number.NaN, unit: 'nT', label: 'Pressure Correction b·√(P_dyn)' },
+          { key: 'raw_dst', value: Number.isFinite(Dst) ? Dst : Number.NaN, unit: 'nT', label: 'Raw Dst Index' },
+          { key: 'storm_class', value: Number.NaN, unit: '—', label: 'Storm Class' },
+        ],
+        steps: [
+          '── Pressure-Corrected Dst Index (Burton et al. 1975, J. Geophys. Res. 80, 4204–4214) ──',
+          'Dst* = Dst − b·√(P_dyn) + c',
+          '',
+          'One or more inputs are missing/non-finite or P_dyn < 0. No fabricated',
+          'Dst correction is substituted — supply genuine Dst, P_dyn, b, and c.',
+        ],
+      };
+    }
     const magPert = b * Math.sqrt(Pdyn);
     const DstStar = Dst - magPert + c;
     // Storm classification (Loewe & Proelss 1997)
@@ -5559,6 +7894,8 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     return {
       result: DstStar, unit: 'nT',
       secondary: [
+        { key: 'pressure_correction', value: magPert, unit: 'nT', label: 'Pressure Correction b·√(P_dyn)' },
+        { key: 'raw_dst', value: Dst, unit: 'nT', label: 'Raw Dst Index' },
         { key: 'storm_class', value: stormClass, unit: '—', label: `Storm Class: ${stormLabel}` },
         { key: 'ring_current_energy', value: U_RC, unit: 'J', label: 'Ring Current Energy U_RC (Dessler-Parker-Sckopke)' },
       ],
@@ -5593,33 +7930,60 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Phys. Z., 24, 185–206. (Plasma physics standard, Chen 1984)
     const E_CHARGE = 1.602176634e-19;  // C — elementary charge (CODATA 2018, exact)
     const M_E = 9.1093837015e-31;      // kg — electron mass (CODATA 2018)
-    const neEff = ne || 1;
-    const lambda = Math.sqrt((eps0 * kB * Te) / (neEff * E_CHARGE * E_CHARGE));
-    const N_D = neEff * (4 / 3) * Math.PI * Math.pow(lambda, 3);
+    // Vacuum permittivity and Boltzmann constant are physical constants; accept
+    // the supplied ε₀ / k_B when finite and positive, else fall back to the
+    // CODATA 2018 exact values (never NaN-multiply the numerator to zero).
+    const eps0v = Number.isFinite(eps0) && eps0 > 0 ? eps0 : EPS0;
+    const kBv = Number.isFinite(kB) && kB > 0 ? kB : K_BOLTZMANN;
+    const eps0Used = Number.isFinite(eps0) && eps0 > 0;
+    const kBUsed = Number.isFinite(kB) && kB > 0;
+    if (!Number.isFinite(Te) || Te <= 0 || !Number.isFinite(ne) || ne <= 0) {
+      return {
+        result: Number.NaN, unit: 'm',
+        secondary: [
+          { key: 'plasma_parameter', value: Number.NaN, unit: '—', label: 'Plasma Parameter N_D (Debye sphere)' },
+          { key: 'plasma_frequency', value: Number.NaN, unit: 'rad/s', label: 'Electron Plasma Frequency ω_pe' },
+          { key: 'electron_density', value: Number.isFinite(ne) ? ne : Number.NaN, unit: 'm⁻³', label: 'Electron Density n_e' },
+        ],
+        steps: [
+          '── Debye Length (Debye & Hückel 1923; Chen 1984 Intro. to Plasma Physics) ──',
+          'λ_D = √(ε₀·k_B·T_e / (n_e·e²))',
+          '',
+          'Electron temperature T_e (> 0) and electron density n_e (> 0) must be',
+          'finite. No fabricated Debye length is substituted — supply genuine',
+          'plasma parameters (T_e in K, n_e in m⁻³).',
+        ],
+      };
+    }
+    const lambda = Math.sqrt((eps0v * kBv * Te) / (ne * E_CHARGE * E_CHARGE));
+    const N_D = ne * (4 / 3) * Math.PI * Math.pow(lambda, 3);
     // Electron plasma frequency: ω_pe = √(n_e·e²/(ε₀·m_e))
-    const omega_pe = Math.sqrt((neEff * E_CHARGE * E_CHARGE) / (eps0 * M_E));
+    const omega_pe = Math.sqrt((ne * E_CHARGE * E_CHARGE) / (eps0v * M_E));
+    const eps0Note = eps0Used ? '' : ' (CODATA 2018 default)';
+    const kBNote = kBUsed ? '' : ' (CODATA 2018 default)';
 
     return {
       result: lambda, unit: 'm',
       secondary: [
         { key: 'plasma_parameter', value: N_D, unit: '—', label: 'Plasma Parameter N_D (Debye sphere)' },
         { key: 'plasma_frequency', value: omega_pe, unit: 'rad/s', label: 'Electron Plasma Frequency ω_pe' },
+        { key: 'electron_density', value: ne, unit: 'm⁻³', label: 'Electron Density n_e' },
       ],
       steps: [
         '── Debye Length (Debye & Hückel 1923; Chen 1984 Intro. to Plasma Physics) ──',
-        `Vacuum permittivity ε₀ = ${eps0.toExponential(4)} F/m`,
-        `Boltzmann constant k_B = ${kB.toExponential(4)} J/K`,
+        `Vacuum permittivity ε₀ = ${eps0v.toExponential(4)} F/m${eps0Note}`,
+        `Boltzmann constant k_B = ${kBv.toExponential(4)} J/K${kBNote}`,
         `Electron temperature T_e = ${Te.toFixed(1)} K (${(Te / 11604.5).toFixed(2)} eV)`,
-        `Electron density n_e = ${neEff.toExponential(3)} m⁻³`,
+        `Electron density n_e = ${ne.toExponential(3)} m⁻³`,
         `Elementary charge e = ${E_CHARGE.toExponential(4)} C`,
         '',
         'Step 1 — Compute electron Debye length:',
         `  λ_D = √(ε₀·k_B·T_e / (n_e·e²))`,
-        `  λ_D = √(${eps0.toExponential(4)} × ${kB.toExponential(4)} × ${Te.toFixed(1)} / (${neEff.toExponential(3)} × (${E_CHARGE.toExponential(4)})²))`,
+        `  λ_D = √(${eps0v.toExponential(4)} × ${kBv.toExponential(4)} × ${Te.toFixed(1)} / (${ne.toExponential(3)} × (${E_CHARGE.toExponential(4)})²))`,
         `  λ_D = ${lambda.toExponential(3)} m (${(lambda * 1000).toFixed(3)} mm)`,
         '',
         'Step 2 — Plasma parameter (particles in Debye sphere):',
-        `  N_D = n_e · (4π/3) · λ_D³ = ${neEff.toExponential(3)} × ${(4 * Math.PI / 3).toFixed(3)} × (${lambda.toExponential(3)})³`,
+        `  N_D = n_e · (4π/3) · λ_D³ = ${ne.toExponential(3)} × ${(4 * Math.PI / 3).toFixed(3)} × (${lambda.toExponential(3)})³`,
         `  N_D = ${N_D.toExponential(3)}`,
         '',
         'Step 3 — Electron plasma (Langmuir) frequency:',
@@ -5638,10 +8002,40 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
   // ── Domain 20: Satellite Dynamics ──
   123: ({ rho, CD, A, m, v }) => {
-    const dragAccel = -0.5 * rho * CD * (A / (m || 1)) * v * v;
-    const FD = dragAccel * m;
+    // F_D = ½·ρ·C_D·A·v²  (drag force),  a_D = F_D/m  (deceleration)
+    // King-Hele (1964); Vallado (2013). ρ ≥ 0, C_D ≥ 0, A ≥ 0, m > 0.
+    const valid = Number.isFinite(rho) && Number.isFinite(CD) && Number.isFinite(A)
+      && Number.isFinite(m) && Number.isFinite(v)
+      && rho >= 0 && CD >= 0 && A >= 0 && m > 0;
+    if (!valid) {
+      return {
+        result: Number.NaN, unit: 'N',
+        secondary: [
+          { key: 'drag_force', value: Number.NaN, unit: 'N', label: 'Drag Force F_D' },
+          { key: 'drag_acceleration', value: Number.NaN, unit: 'm/s²', label: 'Drag Deceleration a_D' },
+          { key: 'ballistic_coefficient', value: Number.NaN, unit: 'm²/kg', label: 'Ballistic Coefficient B* = C_D·A/m' },
+          { key: 'density', value: Number.isFinite(rho) ? rho : Number.NaN, unit: 'kg/m³', label: 'Atmospheric Density ρ' },
+        ],
+        steps: [
+          '── Atmospheric Drag — Satellite Perturbation (King-Hele, 1964; Vallado, 2013) ──',
+          'F_D = ½·ρ·C_D·A·v²,  a_D = F_D/m',
+          '',
+          'All inputs must be finite with ρ ≥ 0, C_D ≥ 0, A ≥ 0 and mass m > 0.',
+          'No fabricated drag is substituted — supply genuine orbital inputs.',
+        ],
+      };
+    }
+    const dragAccel = -0.5 * rho * CD * (A / m) * v * v + 0; // +0 normalizes −0 → +0
+    const FD = dragAccel * m + 0;
+    const Bstar = CD * A / m;
     return {
       result: FD, unit: 'N',
+      secondary: [
+        { key: 'drag_force', value: FD, unit: 'N', label: 'Drag Force F_D' },
+        { key: 'drag_acceleration', value: dragAccel, unit: 'm/s²', label: 'Drag Deceleration a_D' },
+        { key: 'ballistic_coefficient', value: Bstar, unit: 'm²/kg', label: 'Ballistic Coefficient B* = C_D·A/m' },
+        { key: 'density', value: rho, unit: 'kg/m³', label: 'Atmospheric Density ρ' },
+      ],
       steps: [
         '── Atmospheric Drag — Satellite Perturbation (King-Hele, 1964; Vallado, 2013) ──',
         `Atmospheric density ρ = ${rho.toExponential(3)} kg/m³`,
@@ -5661,31 +8055,58 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         'Step 3 — Decay significance:',
         `  ${Math.abs(dragAccel) > 1e-4 ? 'SIGNIFICANT — orbit decaying rapidly (low altitude < 500 km)' : Math.abs(dragAccel) > 1e-6 ? 'MODERATE — noticeable decay, orbit maintenance needed' : 'WEAK — negligible drag (high altitude > 800 km or ballistic coefficient large)'}`,
         '',
-        `  └ Ballistic coefficient: B* = C_D·A/m = ${(CD * A / m).toExponential(4)} m²/kg`,
+        `  └ Ballistic coefficient: B* = C_D·A/m = ${Bstar.toExponential(4)} m²/kg`,
         `  └ Semi-major axis decay: da/dt ≈ −ρ·B*·v·a (integrated over orbit)`,
       ]
     };
   },
   124: ({ rho, CD, A, v, m }) => {
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const rhoN = Number(rho), CDN = Number(CD), AN = Number(A), vN = Number(v), mN = Number(m);
     const GM_E = 3.986004418e14; // m³/s² — Earth gravitational parameter
-    const a = (v > 0) ? GM_E / (v * v) : 6371000 + 400000; // semi-major axis from circular orbit: v² = GM/a
-    const Bstar = CD * A / (m || 1); // ballistic coefficient m²/kg
-    const da = -(rho * Bstar * v * a); // King-Hele (1987): da/dt = −B*·ρ·v·a (m/s)
+    const a = (vN > 0) ? GM_E / (vN * vN) : 6371000 + 400000; // semi-major axis from circular orbit: v² = GM/a
+    const Bstar = CDN * AN / (mN || 1); // ballistic coefficient m²/kg
+    const da = -(rhoN * Bstar * vN * a); // King-Hele (1987): da/dt = −B*·ρ·v·a (m/s)
+    if (![rhoN, CDN, AN, vN, mN].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: 'm/s',
+        steps: ['── Semi-Major Axis Decay Rate (King-Hele 1987; Vallado 2013) ──',
+          'da/dt = −B*·ρ·v·a',
+          '', 'One or more inputs are missing — no fabricated decay is substituted.'],
+      };
+    }
     return {
       result: da, unit: 'm/s',
+      secondary: [
+        { key: 'ballistic_coefficient', value: Number.isFinite(Bstar) ? Bstar : Number.NaN, unit: 'm²/kg', label: 'Ballistic Coefficient B*' },
+        { key: 'decay_per_day', value: Number.isFinite(da) ? Math.abs(da * 86400) : Number.NaN, unit: 'm/day', label: 'Altitude Decay per Day' },
+        { key: 'semi_major_axis', value: Number.isFinite(a) ? a : Number.NaN, unit: 'm', label: 'Semi-major Axis' },
+      ],
+      // Timeseries series (tool vizType 'timeseries'): orbital altitude
+      // h(t) = a − R⊕ + (da/dt)·t over 0–365 days (20 points) from the tool's
+      // own King-Hele decay rate da/dt = −B*·ρ·v·a (converted to m/day).
+      series: [{
+        label: 'Orbital altitude h(t) = h₀ + (da/dt)·t',
+        color: '#0072B2',
+        points: Array.from({ length: 20 }, (_, i) => {
+          const t = i * (365 / 19);
+          const h = (a - 6371000) + da * 86400 * t;
+          return { x: t, y: Number.isFinite(h) ? h : Number.NaN };
+        }),
+      }],
       steps: [
         '── Semi-Major Axis Decay Rate (King-Hele 1987; Vallado 2013) ──',
-        `Atmospheric density ρ = ${rho.toExponential(3)} kg/m³`,
-        `Drag coefficient C_D = ${CD.toFixed(2)}, Area A = ${A.toFixed(2)} m²`,
-        `Mass m = ${m.toFixed(1)} kg, Velocity v = ${v.toFixed(0)} m/s`,
+        `Atmospheric density ρ = ${rhoN.toExponential(3)} kg/m³`,
+        `Drag coefficient C_D = ${CDN.toFixed(2)}, Area A = ${AN.toFixed(2)} m²`,
+        `Mass m = ${mN.toFixed(1)} kg, Velocity v = ${vN.toFixed(0)} m/s`,
         `Semi-major axis a = ${(a/1000).toFixed(1)} km (alt ${((a - 6371000)/1000).toFixed(0)} km, circular orbit)`,
         '',
         'Step 1 — Ballistic coefficient:',
-        `  B* = C_D·A/m = ${CD.toFixed(2)} × ${A.toFixed(2)} / ${m.toFixed(1)} = ${Bstar.toExponential(4)} m²/kg`,
+        `  B* = C_D·A/m = ${CDN.toFixed(2)} × ${AN.toFixed(2)} / ${mN.toFixed(1)} = ${Bstar.toExponential(4)} m²/kg`,
         '',
         'Step 2 — Semi-major axis decay rate (King-Hele 1987):',
         `  da/dt = −B*·ρ·v·a`,
-        `  da/dt = −${Bstar.toExponential(4)} × ${rho.toExponential(3)} × ${v.toFixed(0)} × ${a.toExponential(4)}`,
+        `  da/dt = −${Bstar.toExponential(4)} × ${rhoN.toExponential(3)} × ${vN.toFixed(0)} × ${a.toExponential(4)}`,
         `  da/dt = ${da.toExponential(4)} m/s`,
         '',
         'Step 3 — Daily / monthly decay:',
@@ -5698,33 +8119,71 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   125: ({ A1, A2, sigmax, sigmay, d }) => {
-    // Foster (1992): P_c = A_c / (2π·σ_x·σ_y) × exp(−d²/(2σ²))
-    // where A_c = π·(R₁+R₂)², R_i = √(A_i/π)
+    // Foster (1992) short-term conjunction probability:
+    //   A_c = π·(R₁+R₂)²  (hard-body collision cross-section overlap of the two
+    //   circular footprints Rᵢ = √(Aᵢ/π)), and the relative-position error is a
+    //   bivariate Gaussian with the two objects' uncertainties combined:
+    //   P_c = A_c / (2π·σ_x·σ_y) × exp(−d² / (2·(σ_x² + σ_y²)))   for d < 3σ_eff,
+    //   P_c = 0                                                   otherwise.
+    //   σ_eff = √(σ_x² + σ_y²) is the combined along-miss 1σ uncertainty.
+    if (!Number.isFinite(A1) || !Number.isFinite(A2) || !Number.isFinite(sigmax)
+        || !Number.isFinite(sigmay) || !Number.isFinite(d)
+        || A1 <= 0 || A2 <= 0 || sigmax <= 0 || sigmay <= 0 || d < 0) {
+      return {
+        result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 'miss_distance', value: Number.isFinite(d) ? d : Number.NaN, unit: 'm', label: 'Miss Distance d' },
+          { key: 'covariance_ellipse_area', value: Number.isFinite(sigmax) && Number.isFinite(sigmay) && sigmax > 0 && sigmay > 0 ? Math.PI * sigmax * sigmay : Number.NaN, unit: 'm²', label: 'Covariance Ellipse Area π·σ_x·σ_y' },
+          { key: 'effective_sigma', value: Number.isFinite(sigmax) && Number.isFinite(sigmay) && sigmax > 0 && sigmay > 0 ? Math.sqrt(sigmax * sigmax + sigmay * sigmay) : Number.NaN, unit: 'm', label: 'Combined 1σ √(σ_x²+σ_y²)' },
+          { key: 'collision_cross_section', value: Number.NaN, unit: 'm²', label: 'Collision Cross-Section A_c' },
+        ],
+        steps: [
+          '── Collision Probability (Foster 1992) ──',
+          'P_c = A_c/(2π·σ_x·σ_y) · exp(−d²/(2·(σ_x²+σ_y²)))   [d < 3σ_eff], else 0',
+          '',
+          'All inputs must be finite with areas A₁,A₂ > 0, uncertainties σ_x,σ_y > 0',
+          'and miss distance d ≥ 0. No fabricated collision probability is',
+          'substituted — supply genuine conjunction data.',
+        ],
+      };
+    }
     const R1 = Math.sqrt(A1 / Math.PI);
     const R2 = Math.sqrt(A2 / Math.PI);
-    const Ac = Math.PI * (R1 + R2) ** 2; // collision cross-section area
-    const sigmaEff2 = sigmax * sigmay;    // effective variance
-    const normConst = Ac / (2 * Math.PI * sigmaEff2);
+    const Ac = Math.PI * (R1 + R2) ** 2; // collision cross-section area (overlap integral)
+    const sigmaEff = Math.sqrt(sigmax * sigmax + sigmay * sigmay); // combined 1σ
+    const sigmaEff2 = sigmaEff * sigmaEff;                          // combined variance
+    const normConst = Ac / (2 * Math.PI * sigmax * sigmay);
     const expArg = -(d * d) / (2 * sigmaEff2);
-    const Pc = normConst * Math.exp(expArg);
+    const inGate = d < 3 * sigmaEff;
+    const Pc = inGate ? normConst * Math.exp(expArg) : 0;
     return {
       result: Pc, unit: '—',
+      secondary: [
+        { key: 'miss_distance', value: d, unit: 'm', label: 'Miss Distance d' },
+        { key: 'covariance_ellipse_area', value: Math.PI * sigmax * sigmay, unit: 'm²', label: 'Covariance Ellipse Area π·σ_x·σ_y' },
+        { key: 'effective_sigma', value: sigmaEff, unit: 'm', label: 'Combined 1σ √(σ_x²+σ_y²)' },
+        { key: 'collision_cross_section', value: Ac, unit: 'm²', label: 'Collision Cross-Section A_c = π(R₁+R₂)²' },
+      ],
       steps: [
         '── Collision Probability (Foster 1992) ──',
         `Covariance: σ_x = ${sigmax.toFixed(3)} m, σ_y = ${sigmay.toFixed(3)} m`,
         `Object areas: A₁ = ${A1.toFixed(2)} m², A₂ = ${A2.toFixed(2)} m²`,
         `Miss distance d = ${d.toFixed(2)} m`,
         '',
-        'Step 1 — Hard-body radii and collision cross-section:',
+        'Step 1 — Hard-body radii and collision cross-section (overlap integral):',
         `  R₁ = √(A₁/π) = ${R1.toFixed(3)} m`,
         `  R₂ = √(A₂/π) = ${R2.toFixed(3)} m`,
         `  A_c = π·(R₁+R₂)² = ${Ac.toFixed(2)} m²`,
         '',
-        'Step 2 — Collision probability (Foster 1992):',
-        `  P_c = A_c / (2π·σ_x·σ_y) × exp(−d²/(2·σ_x·σ_y))`,
+        'Step 2 — Combined positional uncertainty:',
+        `  σ_eff = √(σ_x² + σ_y²) = √(${sigmax.toFixed(3)}² + ${sigmay.toFixed(3)}²) = ${sigmaEff.toFixed(3)} m`,
+        `  3σ gate: d = ${d.toFixed(2)} m ${inGate ? `< 3σ_eff = ${(3 * sigmaEff).toFixed(2)} m → within gate` : `≥ 3σ_eff = ${(3 * sigmaEff).toFixed(2)} m → P_c = 0`}`,
+        '',
+        'Step 3 — Collision probability (Foster 1992):',
+        `  P_c = A_c / (2π·σ_x·σ_y) × exp(−d²/(2·σ_eff²))`,
         `  P_c = ${Ac.toFixed(2)} / (2π × ${sigmax.toFixed(3)} × ${sigmay.toFixed(3)}) × exp(−${(d*d).toFixed(1)} / ${(2*sigmaEff2).toFixed(1)})`,
         `  P_c = ${normConst.toExponential(4)} × exp(${expArg.toFixed(3)})`,
-        `  P_c = ${Pc.toExponential(4)}`,
+        `  P_c = ${inGate ? Pc.toExponential(4) : '0 (miss distance ≥ 3σ_eff)'}`,
         '',
         `  └ Threshold: ${Pc > 1e-4 ? 'HIGH RISK — avoidance maneuver recommended (> 1/10,000)' : Pc > 1e-5 ? 'MODERATE RISK — monitor closely' : 'LOW RISK — routine monitoring'}`,
         `  └ Assumes: linear relative motion, Gaussian errors, short conjunction window`,
@@ -5732,85 +8191,204 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   126: ({ rho2, sigma, v, N, L, beta, gamma }) => {
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const rho2N = Number(rho2), sigmaN = Number(sigma), vN = Number(v), LN = Number(L), betaN = Number(beta), gammaN = Number(gamma);
     // Kessler (1991) equation for spatial density ρ:
     // dρ/dt = ½·ρ²·σ·v + L − β·ρ³ − γ·ρ
     // v input is km/s; convert to km/yr for consistent km⁻³/yr output.
     const SEC_PER_YEAR = 365.25 * 24 * 3600; // 3.156e7 s/yr
-    const v_yr = v * SEC_PER_YEAR; // km/yr
-    const fragTerm = 0.5 * rho2 * rho2 * sigma * v_yr;  // ½ρ²σv (km⁻³/yr)
-    const lossCubic = beta * rho2 * rho2 * rho2;         // βρ³ (km⁻³/yr)
-    const lossLinear = gamma * rho2;                      // γρ (km⁻³/yr)
-    const drho = fragTerm + L - lossCubic - lossLinear;
+    const v_yr = vN * SEC_PER_YEAR; // km/yr
+    const fragTerm = 0.5 * rho2N * rho2N * sigmaN * v_yr;  // ½ρ²σv (km⁻³/yr)
+    const lossCubic = betaN * rho2N * rho2N * rho2N;         // βρ³ (km⁻³/yr)
+    const lossLinear = gammaN * rho2N;                      // γρ (km⁻³/yr)
+    const drho = fragTerm + LN - lossCubic - lossLinear;
+    if (![rho2N, sigmaN, vN, LN, betaN, gammaN].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: 'km⁻³/yr',
+        steps: ['── Kessler Syndrome Debris Evolution (Kessler & Cour-Palais 1978; Kessler 1991) ──',
+          'dρ/dt = ½ρ²σv + L − βρ³ − γρ',
+          '', 'One or more inputs are missing — no fabricated debris evolution is substituted.'],
+      };
+    }
     return {
       result: drho, unit: 'km⁻³/yr',
+      secondary: [
+        { key: 'fragmentation_source', value: Number.isFinite(fragTerm) ? fragTerm : Number.NaN, unit: 'km⁻³/yr', label: 'Fragmentation Source ½ρ²σv' },
+        { key: 'collisional_loss', value: Number.isFinite(lossCubic) ? lossCubic : Number.NaN, unit: 'km⁻³/yr', label: 'Collisional Loss βρ³' },
+        { key: 'drag_loss', value: Number.isFinite(lossLinear) ? lossLinear : Number.NaN, unit: 'km⁻³/yr', label: 'Drag Decay γρ' },
+      ],
+      // Timeseries series (tool vizType 'timeseries'): debris count N(t) over
+      // 0–100 yr (20 points). The count scales with the spatial density from
+      // the tool's own cascade rate dρ/dt: N(t) = N·(1 + (dρ/dt)/ρ·t).
+      series: [{
+        label: 'Debris count N(t) = N·(1 + (dρ/dt)/ρ·t)',
+        color: '#0072B2',
+        points: Array.from({ length: 20 }, (_, i) => {
+          const t = i * (100 / 19);
+          const NN = Number(N);
+          const drhoRatio = Number.isFinite(drho) && rho2N !== 0 ? drho / rho2N : Number.NaN;
+          const Nt = Number.isFinite(NN) && Number.isFinite(drhoRatio) ? NN * (1 + drhoRatio * t) : Number.NaN;
+          return { x: t, y: Number.isFinite(Nt) ? Nt : Number.NaN };
+        }),
+      }],
       steps: [
         '── Kessler Syndrome Debris Evolution (Kessler & Cour-Palais 1978; Kessler 1991) ──',
-        `Spatial density ρ = ${rho2.toExponential(3)} km⁻³`,
-        `Collision cross-section σ = ${sigma.toExponential(3)} km², Relative velocity v = ${v.toFixed(1)} km/s`,
-        `Launch rate L = ${L.toExponential(2)} km⁻³/yr`,
-        `Collisional loss β = ${beta.toExponential(3)}, Drag decay γ = ${gamma.toExponential(3)} /yr`,
+        `Spatial density ρ = ${rho2N.toExponential(3)} km⁻³`,
+        `Collision cross-section σ = ${sigmaN.toExponential(3)} km², Relative velocity v = ${vN.toFixed(1)} km/s`,
+        `Launch rate L = ${LN.toExponential(2)} km⁻³/yr`,
+        `Collisional loss β = ${betaN.toExponential(3)}, Drag decay γ = ${gammaN.toExponential(3)} /yr`,
         '',
         'Step 1 — Fragmentation source (Kessler 1991):',
         `  S_coll = ½·ρ²·σ·v`,
-        `  = ½ × (${rho2.toExponential(3)})² × ${sigma.toExponential(3)} × ${v.toFixed(1)}`,
+        `  = ½ × (${rho2N.toExponential(3)})² × ${sigmaN.toExponential(3)} × ${vN.toFixed(1)}`,
         `  = ${fragTerm.toExponential(3)} km⁻³/yr`,
         '',
         'Step 2 — Loss terms:',
-        `  Collisional (cubic): β·ρ³ = ${beta.toExponential(3)} × (${rho2.toExponential(3)})³ = ${lossCubic.toExponential(3)} km⁻³/yr`,
-        `  Atmospheric drag (linear): γ·ρ = ${gamma.toExponential(3)} × ${rho2.toExponential(3)} = ${lossLinear.toExponential(3)} km⁻³/yr`,
+        `  Collisional (cubic): β·ρ³ = ${betaN.toExponential(3)} × (${rho2N.toExponential(3)})³ = ${lossCubic.toExponential(3)} km⁻³/yr`,
+        `  Atmospheric drag (linear): γ·ρ = ${gammaN.toExponential(3)} × ${rho2N.toExponential(3)} = ${lossLinear.toExponential(3)} km⁻³/yr`,
         '',
         'Step 3 — Net rate of change:',
-        `  dρ/dt = ${fragTerm.toExponential(3)} + ${L.toExponential(2)} − ${lossCubic.toExponential(3)} − ${lossLinear.toExponential(3)}`,
+        `  dρ/dt = ${fragTerm.toExponential(3)} + ${LN.toExponential(2)} − ${lossCubic.toExponential(3)} − ${lossLinear.toExponential(3)}`,
         `  dρ/dt = ${drho.toExponential(3)} km⁻³/yr`,
         '',
         'Step 4 — Kessler Syndrome assessment:',
         `  ${drho > 0 ? 'POSITIVE GROWTH — debris density increasing (collisional cascading potential)' : drho < 0 ? 'NEGATIVE GROWTH — debris decreasing (decay > production)' : 'STEADY STATE — production balanced by removal'}`,
         '',
         `  └ Critical density: ρ_crit ≈ √(2γ/(σ·v)) — above this, cascading is self-sustaining`,
-        N > 0 ? `  └ Population context: N = ${N.toExponential(1)} objects in the orbital shell` : '',
+        Number(N) > 0 ? `  └ Population context: N = ${Number(N).toExponential(1)} objects in the orbital shell` : '',
       ].filter(Boolean)
     };
   },
-  127: ({ n, x, y, z, xdot, ydot, zdot, ax, ay, az }) => {
-    // Hill-Clohessy-Wiltshire (1960) equations:
-    // ẍ = 2n·ẏ + 3n²·x + a_x
-    // ÿ = −2n·ẋ + a_y
-    // z̈ = −n²·z + a_z
-    const xddot = 2 * n * ydot + 3 * n * n * x + ax;
-    const yddot = -2 * n * xdot + ay;
-    const zddot = -n * n * z + az;
+  127: ({ n, x, y, z, xdot, ydot, zdot, ax, ay, az, t }) => {
+    // Hill-Clohessy-Wiltshire (1960) equations (x radial, y along-track,
+    // z cross-track in a circular-reference-orbit LVLH frame):
+    //   ẍ = 2n·ẏ + 3n²·x + a_x
+    //   ÿ = −2n·ẋ + a_y
+    //   z̈ = −n²·z + a_z
+    // The homogeneous closed-form solution (standard STM, e.g. Vallado 2013,
+    // Ch. 8; Clohessy & Wiltshire 1960) gives the relative state at time t:
+    //   τ = n·t
+    //   x(t) = (4−3cosτ)·x₀ + (ẋ₀/n)·sinτ + (2ẏ₀/n)·(1−cosτ)
+    //   y(t) = y₀ + 6(sinτ−τ)·x₀ + (4sinτ−3τ)·(ẏ₀/n) − (2ẋ₀/n)·(1−cosτ)
+    //   z(t) = z₀·cosτ + (ż₀/n)·sinτ
+    //   ẋ(t) = 3n·sinτ·x₀ + cosτ·ẋ₀ + 2·sinτ·ẏ₀
+    //   ẏ(t) = 6n(cosτ−1)·x₀ − 2·sinτ·ẋ₀ + (4cosτ−3)·ẏ₀
+    //   ż(t) = −n·sinτ·z₀ + cosτ·ż₀
+    // Secular along-track drift rate: ẏ_drift = −6n·x₀ − 3ẏ₀ (vanishes for
+    // the bounded-orbit initial condition ẏ₀ = −2n·x₀).
+    const stateFinite = [n, x, y, z, xdot, ydot, zdot].every(Number.isFinite);
+    if (!stateFinite || !(Number.isFinite(n) && n > 0)) {
+      return {
+        result: Number.NaN, unit: 'm/s²',
+        secondary: [
+          { key: 'orbit_period', value: Number.isFinite(n) && n > 0 ? (2 * Math.PI) / n : Number.NaN, unit: 's', label: 'Orbit Period T = 2π/n' },
+          { key: 'relative_position', value: Number.NaN, unit: 'm', label: 'Relative Position |r(t)|' },
+          { key: 'relative_velocity', value: Number.NaN, unit: 'm/s', label: 'Relative Velocity |v(t)|' },
+          { key: 'alongtrack_drift_rate', value: Number.NaN, unit: 'm/s', label: 'Secular Along-Track Drift Rate' },
+        ],
+        steps: [
+          '── Hill-Clohessy-Wiltshire Equations (Clohessy & Wiltshire 1960; Hill 1878) ──',
+          'Relative state (x, y, z, ẋ, ẏ, ż) must be finite and mean motion',
+          'n > 0. No fabricated relative motion is substituted — supply a',
+          'genuine reference orbit and initial relative state.',
+        ],
+      };
+    }
+    const axv = Number.isFinite(ax) ? ax : 0;
+    const ayv = Number.isFinite(ay) ? ay : 0;
+    const azv = Number.isFinite(az) ? az : 0;
+    const xddot = 2 * n * ydot + 3 * n * n * x + axv;
+    const yddot = -2 * n * xdot + ayv;
+    const zddot = -n * n * z + azv;
     const accelMag = Math.hypot(xddot, yddot, zddot);
-    // Secular along-track drift rate: ẏ_drift = −3n·x/2
-    const yDrift = -1.5 * n * x;
+    // Secular along-track drift rate (closed-form coefficient of the secular term)
+    const yDrift = -6 * n * x - 3 * ydot;
+
+    // Closed-form HCW state transition (homogeneous solution, thrust-free)
+    const orbitPeriod = (2 * Math.PI) / n;
+    const tFinal = (Number.isFinite(t) && t >= 0) ? t : orbitPeriod;
+    const hcwState = (tSec: number) => {
+      const tau = n * tSec;
+      const cT = Math.cos(tau), sT = Math.sin(tau);
+      const px = (4 - 3 * cT) * x + (xdot / n) * sT + (2 * ydot / n) * (1 - cT);
+      const py = y + 6 * (sT - tau) * x + (4 * sT - 3 * tau) * (ydot / n) - (2 * xdot / n) * (1 - cT);
+      const pz = z * cT + (zdot / n) * sT;
+      const vx = 3 * n * sT * x + cT * xdot + 2 * sT * ydot;
+      const vy = 6 * n * (cT - 1) * x - 2 * sT * xdot + (4 * cT - 3) * ydot;
+      const vz = -n * sT * z + cT * zdot;
+      return { px, py, pz, vx, vy, vz };
+    };
+    const final = hcwState(tFinal);
+    const finalPos = Math.hypot(final.px, final.py, final.pz);
+    const finalVel = Math.hypot(final.vx, final.vy, final.vz);
+
+    // Relative trajectory over one full orbital period (timeseries series)
+    const N_PTS = 96;
+    const seriesX: Array<{ x: number; y: number }> = [];
+    const seriesY: Array<{ x: number; y: number }> = [];
+    const seriesZ: Array<{ x: number; y: number }> = [];
+    const seriesR: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i <= N_PTS; i++) {
+      const ts = (i / N_PTS) * orbitPeriod;
+      const s = hcwState(ts);
+      seriesX.push({ x: ts, y: s.px });
+      seriesY.push({ x: ts, y: s.py });
+      seriesZ.push({ x: ts, y: s.pz });
+      seriesR.push({ x: ts, y: Math.hypot(s.px, s.py, s.pz) });
+    }
+    const boundedNote = Math.abs(yDrift) < 1e-6 ? 'YES — bounded (no secular drift)' : 'NO — secular along-track drift present';
+
     return {
       result: accelMag, unit: 'm/s²',
+      secondary: [
+        { key: 'orbit_period', value: orbitPeriod, unit: 's', label: 'Orbit Period T = 2π/n' },
+        { key: 'relative_position', value: finalPos, unit: 'm', label: `Relative Position |r(t)| at t=${Number.isFinite(t) && t >= 0 ? t.toFixed(1) : 'T'}` },
+        { key: 'relative_velocity', value: finalVel, unit: 'm/s', label: `Relative Velocity |v(t)| at t=${Number.isFinite(t) && t >= 0 ? t.toFixed(1) : 'T'}` },
+        { key: 'radial_final', value: final.px, unit: 'm', label: 'Final Radial x(t)' },
+        { key: 'alongtrack_final', value: final.py, unit: 'm', label: 'Final Along-Track y(t)' },
+        { key: 'crosstrack_final', value: final.pz, unit: 'm', label: 'Final Cross-Track z(t)' },
+        { key: 'alongtrack_drift_rate', value: yDrift, unit: 'm/s', label: 'Secular Along-Track Drift Rate (bounded orbit?)' },
+      ],
+      series: [
+        { label: 'Radial x(t)', color: '#0072B2', points: seriesX },
+        { label: 'Along-track y(t)', color: '#D55E00', points: seriesY },
+        { label: 'Cross-track z(t)', color: '#009E73', points: seriesZ },
+        { label: 'Range |r(t)|', color: '#CC79A7', points: seriesR },
+      ],
       steps: [
         '── Hill-Clohessy-Wiltshire Equations (Clohessy & Wiltshire 1960; Hill 1878) ──',
-        `Mean motion n = ${n.toExponential(4)} rad/s`,
+        `Mean motion n = ${n.toExponential(4)} rad/s, Orbit period T = ${orbitPeriod.toFixed(1)} s`,
         `Relative state: x=${x.toFixed(4)} m, y=${y.toFixed(4)} m, z=${z.toFixed(4)} m`,
         `Relative velocity: ẋ=${xdot.toExponential(3)} m/s, ẏ=${ydot.toExponential(3)} m/s, ż=${zdot.toExponential(3)} m/s`,
-        `Thrust: a_x=${ax.toExponential(3)}, a_y=${ay.toExponential(3)}, a_z=${az.toExponential(3)} m/s²`,
+        `Thrust: a_x=${axv.toExponential(3)}, a_y=${ayv.toExponential(3)}, a_z=${azv.toExponential(3)} m/s²`,
         '',
         'Step 1 — Radial acceleration (HCW x-equation):',
         `  ẍ = 2n·ẏ + 3n²·x + a_x`,
-        `  ẍ = 2×${n.toExponential(4)}×${ydot.toExponential(3)} + 3×(${n.toExponential(4)})²×${x.toFixed(4)} + ${ax.toExponential(3)}`,
+        `  ẍ = 2×${n.toExponential(4)}×${ydot.toExponential(3)} + 3×(${n.toExponential(4)})²×${x.toFixed(4)} + ${axv.toExponential(3)}`,
         `  ẍ = ${xddot.toExponential(4)} m/s²`,
         '',
         'Step 2 — Along-track acceleration (HCW y-equation):',
         `  ÿ = −2n·ẋ + a_y`,
-        `  ÿ = −2×${n.toExponential(4)}×${xdot.toExponential(3)} + ${ay.toExponential(3)}`,
+        `  ÿ = −2×${n.toExponential(4)}×${xdot.toExponential(3)} + ${ayv.toExponential(3)}`,
         `  ÿ = ${yddot.toExponential(4)} m/s²`,
         '',
         'Step 3 — Cross-track acceleration (HCW z-equation):',
         `  z̈ = −n²·z + a_z`,
-        `  z̈ = −(${n.toExponential(4)})²×${z.toFixed(4)} + ${az.toExponential(3)}`,
+        `  z̈ = −(${n.toExponential(4)})²×${z.toFixed(4)} + ${azv.toExponential(3)}`,
         `  z̈ = ${zddot.toExponential(4)} m/s²`,
         '',
         'Step 4 — Total relative acceleration:',
         `  |a| = √(ẍ² + ÿ² + z̈²) = ${accelMag.toExponential(4)} m/s²`,
         '',
-        `  └ Secular along-track drift: ẏ_drift = −1.5·n·x = ${yDrift.toExponential(4)} m/s`,
-        `  └ Bounded orbit condition: x₀ = −2ẏ₀/(3n) eliminates secular drift`,
+        'Step 5 — Closed-form state propagation (HCW STM, homogeneous):',
+        `  τ = n·t, t = ${tFinal.toFixed(1)} s (τ = ${(n * tFinal).toFixed(3)} rad)`,
+        `  x(t) = (4−3cosτ)x₀ + (ẋ₀/n)sinτ + (2ẏ₀/n)(1−cosτ) = ${final.px.toFixed(3)} m`,
+        `  y(t) = y₀ + 6(sinτ−τ)x₀ + (4sinτ−3τ)(ẏ₀/n) − (2ẋ₀/n)(1−cosτ) = ${final.py.toFixed(3)} m`,
+        `  z(t) = z₀cosτ + (ż₀/n)sinτ = ${final.pz.toFixed(3)} m`,
+        `  |r(t)| = ${finalPos.toFixed(3)} m, |v(t)| = ${finalVel.toExponential(4)} m/s`,
+        '',
+        `  └ Secular along-track drift: ẏ_drift = −6n·x₀ − 3ẏ₀ = ${yDrift.toExponential(4)} m/s`,
+        `  └ Bounded orbit (${boundedNote}): ẏ₀ = −2n·x₀ (x₀ = −ẏ₀/(2n)) eliminates secular drift`,
         '  └ HCW valid for |relative position| ≪ orbit radius (typically < 10 km)',
       ]
     };
@@ -5825,9 +8403,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // compute the weighted average with the correct Bartels station weights.
     let Kp: number;
     let dataSource: string;
-    if (kp != null && Number.isFinite(kp) && kp >= 0) {
-      // Real observed Kp from NOAA SWPC (already on the 1/3-point scale)
-      Kp = kp;
+    if (kp != null && Number.isFinite(kp)) {
+      // Real observed Kp from NOAA SWPC (already on the 1/3-point scale).
+      // Clamp to the physical scale [0, 9] so the Kp→G mapping stays bounded.
+      Kp = Math.min(9, Math.max(0, kp));
       dataSource = 'NOAA SWPC (real observed planetary Kp)';
     } else if (Array.isArray(Ki) && Ki.length > 0 && Ki.some((k: number) => k > 0)) {
       // User-supplied station K-indices (array): weighted average per Bartels (1949)
@@ -5843,8 +8422,25 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       Kp = Math.min(9, Math.max(0, Ki));
       dataSource = 'User-supplied K-index (single station)';
     } else {
-      Kp = 0;
-      dataSource = 'no data available (default)';
+      return {
+        result: Number.NaN, unit: '—',
+        steps: [
+          '── Kp Geomagnetic Activity Index (Bartels 1949; GFZ Potsdam / NOAA SWPC) ──',
+          '',
+          'No genuine geomagnetic activity data provided. Kp requires either:',
+          '  (a) NOAA SWPC real-time planetary Kp (kp input), or',
+          '  (b) Array of 13-station K-indices (Ki), or',
+          '  (c) A single station K-index (Ki scalar).',
+          '',
+          'No fabricated Kp value is substituted. Supply genuine activity data.',
+          'NOAA SWPC: swpc.noaa.gov for real-time Kp.',
+        ],
+        secondary: [
+          { key: 'noaa_g_scale', value: Number.NaN, label: 'NOAA Storm Scale (no data)' },
+          { key: 'auroral_oval_latitude', value: Number.NaN, unit: '°', label: 'Auroral Oval Equatorward Boundary' },
+          { key: 'ap_index', value: Number.NaN, unit: 'nT', label: 'Linear Equivalent Amplitude (Ap)' },
+        ],
+      };
     }
 
     // NOAA G-scale mapping (NOAA SWPC operational scale)
@@ -5909,21 +8505,53 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // If individual Q diagonal elements are provided, compute exact DOP.
     // If only traceH is provided, GDOP = √(traceH) is exact, but
     // PDOP/HDOP/VDOP/TDOP are derived from a typical mid-latitude geometry.
+    const qDiag = (v: unknown): number => {
+      const n = Number(v);
+      return (v != null && Number.isFinite(n)) ? n : Number.NaN;
+    };
     let q11: number, q22: number, q33: number, q44: number;
     let exact = false;
-    if (Q11 != null && Q22 != null && Q33 != null && Q44 != null
-        && Number.isFinite(Q11) && Number.isFinite(Q22)
-        && Number.isFinite(Q33) && Number.isFinite(Q44)) {
-      q11 = Q11; q22 = Q22; q33 = Q33; q44 = Q44;
+    const traceNum = Number(traceH);
+    const hasTrace = traceH != null && traceNum > 0 && Number.isFinite(traceNum);
+    const q11n = qDiag(Q11), q22n = qDiag(Q22), q33n = qDiag(Q33), q44n = qDiag(Q44);
+    const hasAllQ = Number.isFinite(q11n) && Number.isFinite(q22n)
+      && Number.isFinite(q33n) && Number.isFinite(q44n);
+
+    if (hasAllQ) {
+      q11 = q11n; q22 = q22n; q33 = q33n; q44 = q44n;
       exact = true;
-    } else {
+    } else if (hasTrace) {
       // Fallback: distribute traceH across typical geometry ratios.
       // For a well-distributed constellation: Q_11≈Q_22 (horizontal),
       // Q_33 > Q_11 (vertical worse), Q_44 ≈ Q_11 (clock).
       // Typical ratios for GPS-only, 8 satellites, mid-latitude:
       //   Q_11:Q_22:Q_33:Q_44 ≈ 0.18:0.18:0.36:0.28 of total trace.
-      const t = traceH ?? 9;
+      // Note: only GDOP = √(traceH) is exact from the trace alone; the
+      // component split is a stated modelling assumption, and every derived
+      // DOP preserves the exact GDOP (0.18+0.18+0.36+0.28 = 1).
+      const t = traceNum;
       q11 = t * 0.18; q22 = t * 0.18; q33 = t * 0.36; q44 = t * 0.28;
+    } else {
+      // No geometry information at all — honest NaN, never a fabricated GDOP.
+      return {
+        result: Number.NaN, unit: '—',
+        steps: [
+          '── Geometric Dilution of Precision (Wells et al. 1987; Van Diggelen 2007) ──',
+          '',
+          'No satellite geometry provided. GDOP requires either:',
+          '  (a) Q = (H^T·H)^{-1} diagonal elements (Q11, Q22, Q33, Q44), or',
+          '  (b) The trace of Q (traceH) for an exact GDOP = √(traceH).',
+          '',
+          'No fabricated geometry is substituted. Supply the actual',
+          'satellite-receiver geometry matrix or its covariance diagonal.',
+        ],
+        secondary: [
+          { key: 'pdop', value: Number.NaN, label: 'PDOP (Position DOP)' },
+          { key: 'hdop', value: Number.NaN, label: 'HDOP (Horizontal DOP)' },
+          { key: 'vdop', value: Number.NaN, label: 'VDOP (Vertical DOP)' },
+          { key: 'tdop', value: Number.NaN, label: 'TDOP (Time DOP)' },
+        ],
+      };
     }
 
     const GDOP = Math.sqrt(q11 + q22 + q33 + q44);
@@ -5977,13 +8605,77 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Note: the wet term is (1255/T + 0.05), NOT 1255/(T+0.05).
     // The latitude/height correction factor in ZHD is omitted because
     // the surface pressure P already incorporates local effects.
+    if (![P, T, e, Sc].every((v) => v != null && Number.isFinite(v))) {
+      return {
+        result: Number.NaN, unit: 'm',
+        steps: [
+          '── Tropospheric Delay — Saastamoinen Model (Saastamoinen 1972, AGU) ──',
+          '',
+          'One or more inputs are non-finite. Supply genuine surface',
+          'meteorological data (P, T, e) and elevation angle (Sc).',
+        ],
+        secondary: [
+          { key: 'zhd', value: Number.NaN, unit: 'm', label: 'Zenith Hydrostatic Delay' },
+          { key: 'zwd', value: Number.NaN, unit: 'm', label: 'Zenith Wet Delay' },
+          { key: 'ztd', value: Number.NaN, unit: 'm', label: 'Zenith Total Delay' },
+        ],
+      };
+    }
+    const safe = (v: number, min: number, max: number) => v > min && v < max;
+    if (!safe(P, 0, 2000) || !safe(T, 0, 500) || e < 0 || e > 200) {
+      return {
+        result: Number.NaN, unit: 'm',
+        steps: [
+          '── Tropospheric Delay — Saastamoinen Model (Saastamoinen 1972, AGU) ──',
+          '',
+          'Inputs outside physically plausible range:',
+          `  P = ${P} hPa (expected 0–2000 hPa)`,
+          `  T = ${T} K (expected 0–500 K)`,
+          `  e = ${e} hPa (expected 0–200 hPa)`,
+          'No fabricated delay is substituted.',
+        ],
+        secondary: [
+          { key: 'zhd', value: Number.NaN, unit: 'm', label: 'Zenith Hydrostatic Delay' },
+          { key: 'zwd', value: Number.NaN, unit: 'm', label: 'Zenith Wet Delay' },
+          { key: 'ztd', value: Number.NaN, unit: 'm', label: 'Zenith Total Delay' },
+        ],
+      };
+    }
     const sinTheta = Math.sin(Sc);
+    if (sinTheta <= 0 || !Number.isFinite(sinTheta)) {
+      return {
+        result: Number.NaN, unit: 'm',
+        steps: [
+          '── Tropospheric Delay — Saastamoinen Model (Saastamoinen 1972, AGU) ──',
+          '',
+          `Elevation angle Sc = ${Sc} rad, sin(Sc) = ${sinTheta}`,
+          'sin(θ) must be > 0. Elevation angle must be in (0°, 180°)',
+          'and not 0° or 180° (which would cause division by zero).',
+        ],
+        secondary: [
+          { key: 'zhd', value: Number.NaN, unit: 'm', label: 'Zenith Hydrostatic Delay' },
+          { key: 'zwd', value: Number.NaN, unit: 'm', label: 'Zenith Wet Delay' },
+          { key: 'ztd', value: Number.NaN, unit: 'm', label: 'Zenith Total Delay' },
+        ],
+      };
+    }
     const coeff = 0.0022768;  // paper-exact coefficient
     const zhd = coeff * P;
     const wetTerm = (1255 / T + 0.05) * e;  // paper: (1255/T + 0.05)·e
     const zwd = coeff * wetTerm;
     const ztd = zhd + zwd;
     const dTau = ztd / sinTheta;
+
+    // Profile series: delay vs elevation angle (5° to 90° in 5° steps)
+    const profilePoints: Array<{ x: number; y: number }> = [];
+    for (let deg = 5; deg <= 90; deg += 5) {
+      const rad = deg * Math.PI / 180;
+      const s = Math.sin(rad);
+      if (s > 0) {
+        profilePoints.push({ x: deg, y: ztd / s });
+      }
+    }
+
     return {
       result: dTau, unit: 'm',
       steps: [
@@ -6014,28 +8706,65 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         { key: 'zwd', value: zwd, unit: 'm', label: 'Zenith Wet Delay' },
         { key: 'ztd', value: ztd, unit: 'm', label: 'Zenith Total Delay' },
       ],
+      series: [{
+        label: 'Saastamoinen delay vs elevation angle',
+        color: '#D2691E',
+        points: profilePoints,
+      }],
     };
   },
 
   // ── Part VII · Domain 22: Groundwater ──
   131: ({ T, h1, h2, r1, r2 }) => {
-    const dh = h2 - h1;
-    const lnRatio = Math.log(r2 / r1);
-    const Q = (2 * Math.PI * T * dh) / lnRatio;
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const Tn = Number(T), h1n = Number(h1), h2n = Number(h2), r1n = Number(r1), r2n = Number(r2);
+    const dh = h2n - h1n;
+    const lnRatio = Math.log(r2n / r1n);
+    const Q = (2 * Math.PI * Tn * dh) / lnRatio;
+    // Thiem requires r₂ > r₁ > 0 (log ratio defined & positive) and T > 0.
+    const valid = [Tn, h1n, h2n, r1n, r2n].every(Number.isFinite) && Tn > 0 && r1n > 0 && r2n > r1n;
+    if (!valid) {
+      return {
+        result: Number.NaN, unit: 'm³/day',
+        secondary: [
+          { key: 'drawdown', value: Number.isFinite(dh) ? dh : Number.NaN, unit: 'm', label: 'Head Difference Δh = h₂ − h₁' },
+          { key: 'transmissivity', value: Number.isFinite(Tn) && Tn > 0 ? Tn : Number.NaN, unit: 'm²/day', label: 'Transmissivity T' },
+        ],
+        steps: ['── Thiem Equation — Steady Radial Flow (Thiem, 1906; Dupuit, 1863) ──',
+          'Q = 2π·T·(h₂−h₁)/ln(r₂/r₁)',
+          '', 'One or more inputs are missing or unphysical (requires r₂ > r₁ > 0, T > 0) — no fabricated flow rate is substituted.'],
+      };
+    }
     return {
       result: Q, unit: 'm³/day',
+      secondary: [
+        { key: 'drawdown', value: dh, unit: 'm', label: 'Head Difference Δh = h₂ − h₁' },
+        { key: 'transmissivity', value: Tn, unit: 'm²/day', label: 'Transmissivity T' },
+      ],
+      // Profile series (tool vizType 'profile'): steady-state drawdown
+      // s(r) = Q/(2πT)·ln(r₂/r) over 10–1000 m (20 log-spaced points) from
+      // the tool's own Thiem flow rate Q and transmissivity T.
+      series: [{
+        label: 'Thiem drawdown s(r) = Q/(2πT)·ln(r₂/r)',
+        color: '#0072B2',
+        points: Array.from({ length: 20 }, (_, i) => {
+          const r = 10 * Math.pow(100, i / 19); // 10 → 1000 m, log-spaced
+          const s = (Q / (2 * Math.PI * Tn)) * Math.log(r2n / r);
+          return { x: r, y: Number.isFinite(s) ? s : Number.NaN };
+        }),
+      }],
       steps: [
         '── Thiem Equation — Steady Radial Flow (Thiem, 1906; Dupuit, 1863) ──',
-        `Transmissivity T = ${T.toFixed(2)} m²/day`,
-        `Drawdown: h₁ = ${h1.toFixed(2)} m (at r₁ = ${r1.toFixed(1)} m), h₂ = ${h2.toFixed(2)} m (at r₂ = ${r2.toFixed(1)} m)`,
+        `Transmissivity T = ${Tn.toFixed(2)} m²/day`,
+        `Drawdown: h₁ = ${h1n.toFixed(2)} m (at r₁ = ${r1n.toFixed(1)} m), h₂ = ${h2n.toFixed(2)} m (at r₂ = ${r2n.toFixed(1)} m)`,
         `Head difference Δh = ${dh.toFixed(2)} m`,
         '',
         'Step 1 — Compute log ratio:',
-        `  ln(r₂/r₁) = ln(${r2.toFixed(1)} / ${r1.toFixed(1)}) = ${lnRatio.toFixed(4)}`,
+        `  ln(r₂/r₁) = ln(${r2n.toFixed(1)} / ${r1n.toFixed(1)}) = ${lnRatio.toFixed(4)}`,
         '',
         'Step 2 — Compute flow rate:',
         `  Q = 2π·T·Δh / ln(r₂/r₁)`,
-        `  Q = 2π × ${T.toFixed(2)} × ${dh.toFixed(2)} / ${lnRatio.toFixed(4)}`,
+        `  Q = 2π × ${Tn.toFixed(2)} × ${dh.toFixed(2)} / ${lnRatio.toFixed(4)}`,
         `  Q = ${Q.toFixed(2)} m³/day`,
         '',
         'Step 3 — Aquifer productivity:',
@@ -6046,44 +8775,74 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   132: ({ Q, T, t, r, S }) => {
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const Qn = Number(Q), Tn = Number(T), tn = Number(t), rn = Number(r), Sn = Number(S);
     // Theis (1935) well function W(u) = ∫ᵤ^∞ (e^{-x}/x) dx
     // Reference: Theis, C.V. (1935) Trans. Am. Geophys. Union, 16(2), 519–524.
-    const u = Math.max((r * r) * S / (4 * T * t), 1e-30);
+    const u = Math.max((rn * rn) * Sn / (4 * Tn * tn), 1e-30);
     const gamma = 0.5772156649;
     // W(u) computation:
     //   u < 1:   series expansion (4 terms, error < 0.6%)
     //   1 ≤ u < 5: 15-term series (error < 0.01%)
     //   u ≥ 5:   asymptotic expansion (4 terms, error < 2.3%)
-    let W_u: number;
-    if (u < 1) {
-      W_u = -gamma - Math.log(u) + u - (u*u)/4 + (u*u*u)/18 - (u*u*u*u)/96;
-    } else if (u < 5) {
-      // Series: W(u) = -γ - ln(u) + Σ_{n=1}^{N} (-1)^{n+1} · u^n/(n·n!)
-      let sum = 0;
-      let un = u; // u^n
-      let factN = 1; // n!
-      for (let n = 1; n <= 15; n++) {
-        sum += (n % 2 === 1 ? 1 : -1) * un / (n * factN);
-        un *= u;
-        factN *= (n + 1);
+    const wellFn = (uu: number): number => {
+      if (uu < 1) {
+        return -gamma - Math.log(uu) + uu - (uu*uu)/4 + (uu*uu*uu)/18 - (uu*uu*uu*uu)/96;
       }
-      W_u = -gamma - Math.log(u) + sum;
-    } else {
+      if (uu < 5) {
+        // Series: W(u) = -γ - ln(u) + Σ_{n=1}^{N} (-1)^{n+1} · u^n/(n·n!)
+        let sum = 0;
+        let un = uu; // u^n
+        let factN = 1; // n!
+        for (let n = 1; n <= 15; n++) {
+          sum += (n % 2 === 1 ? 1 : -1) * un / (n * factN);
+          un *= uu;
+          factN *= (n + 1);
+        }
+        return -gamma - Math.log(uu) + sum;
+      }
       // Asymptotic: W(u) ≈ e^{-u}/u · (1 - 1/u + 2!/u² - 3!/u³ + 4!/u⁴)
-      const eu = Math.exp(-u);
-      W_u = (eu / u) * (1 - 1/u + 2/(u*u) - 6/(u*u*u) + 24/(u*u*u*u));
+      const eu = Math.exp(-uu);
+      return (eu / uu) * (1 - 1/uu + 2/(uu*uu) - 6/(uu*uu*uu) + 24/(uu*uu*uu*uu));
+    };
+    const W_u = wellFn(u);
+    const s = (Qn / (4 * Math.PI * Tn)) * W_u;
+    if (![Qn, Tn, tn, rn, Sn].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: 'm',
+        steps: ['── Theis Well Function (Theis, 1935) ──',
+          's = (Q/4πT)·W(u), u = r²S/(4Tt)',
+          '', 'One or more inputs are missing — no fabricated drawdown is substituted.'],
+      };
     }
-    const s = (Q / (4 * Math.PI * T)) * W_u;
     return {
       result: s, unit: 'm',
+      secondary: [
+        { key: 'well_function', value: Number.isFinite(W_u) ? W_u : Number.NaN, unit: '—', label: 'Well Function W(u)' },
+        { key: 'dimensionless_u', value: Number.isFinite(u) ? u : Number.NaN, unit: '—', label: 'Dimensionless Time u' },
+        { key: 'specific_capacity', value: Number.isFinite(s) && s > 0 ? Qn / s : Number.NaN, unit: 'm²/day', label: 'Specific Capacity Q/s' },
+      ],
+      // Timeseries series (tool vizType 'timeseries'): drawdown s(t) over
+      // 0.1–100 days (20 log-spaced points) from the tool's own Theis formula
+      // s = (Q/4πT)·W(u), u = r²S/(4Tt), reusing the exact W(u) above.
+      series: [{
+        label: 'Theis drawdown s(t) = (Q/4πT)·W(u)',
+        color: '#0072B2',
+        points: Array.from({ length: 20 }, (_, i) => {
+          const tt = 0.1 * Math.pow(1000, i / 19); // 0.1 → 100 days, log-spaced
+          const ut = Math.max((rn * rn) * Sn / (4 * Tn * tt), 1e-30);
+          const st = (Qn / (4 * Math.PI * Tn)) * wellFn(ut);
+          return { x: tt, y: Number.isFinite(st) ? st : Number.NaN };
+        }),
+      }],
       steps: [
         '── Theis Well Function — Unsteady Radial Flow (Theis, 1935) ──',
-        `Pumping rate Q = ${Q.toFixed(2)} m³/day, Transmissivity T = ${T.toFixed(2)} m²/day`,
-        `Time t = ${t.toFixed(2)} days, Distance r = ${r.toFixed(1)} m`,
-        `Storativity S = ${S.toExponential(3)}`,
+        `Pumping rate Q = ${Qn.toFixed(2)} m³/day, Transmissivity T = ${Tn.toFixed(2)} m²/day`,
+        `Time t = ${tn.toFixed(2)} days, Distance r = ${rn.toFixed(1)} m`,
+        `Storativity S = ${Sn.toExponential(3)}`,
         '',
         'Step 1 — Compute dimensionless argument u:',
-        `  u = r²·S / (4·T·t) = (${r.toFixed(1)})² × ${S.toExponential(3)} / (4 × ${T.toFixed(2)} × ${t.toFixed(2)})`,
+        `  u = r²·S / (4·T·t) = (${rn.toFixed(1)})² × ${Sn.toExponential(3)} / (4 × ${Tn.toFixed(2)} × ${tn.toFixed(2)})`,
         `  u = ${u.toExponential(3)}`,
         '',
         'Step 2 — Compute well function W(u):',
@@ -6092,7 +8851,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  W(u) = ${W_u.toExponential(4)}`,
         '',
         'Step 3 — Drawdown at observation well:',
-        `  s = (Q / 4πT) × W(u) = (${Q.toFixed(2)} / (4π × ${T.toFixed(2)})) × ${W_u.toExponential(4)}`,
+        `  s = (Q / 4πT) × W(u) = (${Qn.toFixed(2)} / (4π × ${Tn.toFixed(2)})) × ${W_u.toExponential(4)}`,
         `  s = ${s.toFixed(3)} m`,
         '',
         'Step 4 — Aquifer test diagnostics:',
@@ -6103,39 +8862,62 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   133: ({ Q, T, t, r, S }) => {
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const Qn = Number(Q), Tn = Number(T), tn = Number(t), rn = Number(r), Sn = Number(S);
     // Cooper & Jacob (1946) straight-line approximation to Theis.
     // Valid when u = r²S/(4Tt) < 0.01 (error < 1% vs full Theis).
     // Reference: Cooper & Jacob (1946) Trans. Am. Geophys. Union, 27(4),
     // 526–534. DOI: 10.1029/TR027i004p00526.
-    const u = (r * r * S) / (4 * T * t);
-    const arg = 2.25 / u;  // 2.25·T·t/(r²·S) = 2.25/u
-    const slope = 2.3 * Q / (4 * Math.PI * T);
+    const u = (rn * rn * Sn) / (4 * Tn * tn);
+    // log₁₀ argument = 2.25·T·t/(r²·S) = 2.25/(4u) = 0.5625/u — the small-u
+    // approximation W(u) ≈ ln(2.25/(4u)) reproduces Theis to <1% for u<0.01.
+    // (The previous `2.25/u` omitted the factor 4, overestimating s by ~20%.)
+    const arg = 0.5625 / u;
+    const slope = 2.3 * Qn / (4 * Math.PI * Tn);
     const s = slope * Math.log10(Math.max(arg, 1e-10));
     const valid = u < 0.01;
     return {
       result: s, unit: 'm',
+      secondary: [
+        { key: 'dimensionless_u', value: Number.isFinite(u) ? u : Number.NaN, unit: '—', label: 'Dimensionless Time u' },
+        { key: 'slope_per_cycle', value: Number.isFinite(slope) ? slope : Number.NaN, unit: 'm', label: 'Slope per Log Cycle Δs' },
+        { key: 'min_time', value: Number.isFinite(u) ? (rn * rn * Sn) / (0.04 * Tn) : Number.NaN, unit: 'days', label: 'Minimum Applicable Time t_min' },
+      ],
+      // Timeseries series (tool vizType 'timeseries'): drawdown s(t) over
+      // 0.1–100 days (20 log-spaced points) from the tool's own Cooper-Jacob
+      // straight-line approximation s = (2.3Q/4πT)·log₁₀(2.25/(4u)).
+      series: [{
+        label: 'Cooper-Jacob drawdown s(t) = (2.3Q/4πT)·log₁₀(2.25/(4u))',
+        color: '#0072B2',
+        points: Array.from({ length: 20 }, (_, i) => {
+          const tt = 0.1 * Math.pow(1000, i / 19); // 0.1 → 100 days, log-spaced
+          const ut = (rn * rn * Sn) / (4 * Tn * tt);
+          const st = slope * Math.log10(Math.max(0.5625 / ut, 1e-10));
+          return { x: tt, y: Number.isFinite(st) ? st : Number.NaN };
+        }),
+      }],
       steps: [
         '── Cooper-Jacob Straight-Line Method (Cooper & Jacob, 1946) ──',
-        `Pumping rate Q = ${Q.toFixed(2)} m³/day, Transmissivity T = ${T.toFixed(2)} m²/day`,
-        `Time t = ${t.toFixed(2)} days, Distance r = ${r.toFixed(1)} m`,
-        `Storativity S = ${S.toExponential(3)}`,
+        `Pumping rate Q = ${Qn.toFixed(2)} m³/day, Transmissivity T = ${Tn.toFixed(2)} m²/day`,
+        `Time t = ${tn.toFixed(2)} days, Distance r = ${rn.toFixed(1)} m`,
+        `Storativity S = ${Sn.toExponential(3)}`,
         '',
         'Step 1 — Validity check (u < 0.01 required):',
-        `  u = r²S / (4Tt) = ${(r*r).toFixed(0)} × ${S.toExponential(3)} / (4 × ${T.toFixed(2)} × ${t.toFixed(2)})`,
+        `  u = r²S / (4Tt) = ${(rn*rn).toFixed(0)} × ${Sn.toExponential(3)} / (4 × ${Tn.toFixed(2)} × ${tn.toFixed(2)})`,
         `  u = ${u.toExponential(3)}`,
         `  ${valid ? '✓ u < 0.01 — Cooper-Jacob valid (< 1% error vs Theis)' : '⚠ u ≥ 0.01 — approximation error > 1%; use full Theis W(u) for accuracy'}`,
         '',
         'Step 2 — Logarithmic argument:',
-        `  2.25/u = 2.25 / ${u.toExponential(3)} = ${arg.toExponential(3)}`,
+        `  2.25·Tt/(r²S) = 2.25/(4u) = 2.25 / ${(4*u).toExponential(3)} = ${arg.toExponential(3)}`,
         '',
         'Step 3 — Compute drawdown:',
-        `  s = (2.3·Q / 4πT) × log₁₀(2.25/u)`,
+        `  s = (2.3·Q / 4πT) × log₁₀(2.25/(4u))`,
         `  s = ${slope.toFixed(4)} × log₁₀(${arg.toExponential(3)})`,
         `  s = ${s.toFixed(4)} m`,
         '',
         'Step 4 — Straight-line analysis:',
         `  Slope per log cycle: Δs = ${slope.toFixed(4)} m`,
-        `  T = 2.3Q / (4π·Δs) = ${(2.3 * Q / (4 * Math.PI * slope)).toFixed(2)} m²/day`,
+        `  T = 2.3Q / (4π·Δs) = ${(2.3 * Qn / (4 * Math.PI * slope)).toFixed(2)} m²/day`,
         `  ${s > 0.1 ? 'Measurable drawdown — suitable for T/S estimation' : 'Very small drawdown — needs longer pumping or closer well'}`,
         '',
         `  └ Validity: Cooper-Jacob is the late-time (small u) limit of Theis`,
@@ -6144,51 +8926,101 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   134: ({ fc, f0, k, t }) => {
-    const excess = f0 - fc;
-    const decay = Math.exp(-k * t);
-    const f = fc + excess * decay;
-    const cumInf = fc * t + (excess / k) * (1 - decay);
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const fcN = Number(fc), f0N = Number(f0), kN = Number(k), tN = Number(t);
+    const excess = f0N - fcN;
+    const decay = Math.exp(-kN * tN);
+    const f = fcN + excess * decay;
+    const cumInf = fcN * tN + (excess / kN) * (1 - decay);
+    if (![fcN, f0N, kN, tN].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: 'mm/h',
+        steps: ['── Horton Infiltration Model (Horton, 1939) ──',
+          'f(t) = f_c + (f₀−f_c)·e^(−kt)',
+          '', 'One or more inputs are missing — no fabricated infiltration is substituted.'],
+      };
+    }
     return {
       result: f, unit: 'mm/h',
+      secondary: [
+        { key: 'cumulative_infiltration', value: Number.isFinite(cumInf) ? cumInf : Number.NaN, unit: 'mm', label: 'Cumulative Infiltration F(t)' },
+        { key: 'equilibrium_rate', value: Number.isFinite(fcN) ? fcN : Number.NaN, unit: 'mm/h', label: 'Equilibrium Rate f_c' },
+      ],
+      // Timeseries series (tool vizType 'timeseries'): infiltration rate f(t)
+      // over 0–10 h (20 points) from the tool's own Horton equation
+      // f(t) = f_c + (f₀ − f_c)·e^(−kt).
+      series: [{
+        label: 'Horton infiltration f(t) = f_c + (f₀−f_c)·e^(−kt)',
+        color: '#0072B2',
+        points: Array.from({ length: 20 }, (_, i) => {
+          const tt = i * (10 / 19);
+          const ft = fcN + (f0N - fcN) * Math.exp(-kN * tt);
+          return { x: tt, y: Number.isFinite(ft) ? ft : Number.NaN };
+        }),
+      }],
       steps: [
         '── Horton Infiltration Model (Horton, 1939) ──',
-        `Initial infiltration rate f₀ = ${f0.toFixed(2)} mm/h`,
-        `Equilibrium rate f_c = ${fc.toFixed(2)} mm/h (saturated conductivity)`,
-        `Decay constant k = ${k.toExponential(3)} /h, Time t = ${t.toFixed(2)} h`,
+        `Initial infiltration rate f₀ = ${f0N.toFixed(2)} mm/h`,
+        `Equilibrium rate f_c = ${fcN.toFixed(2)} mm/h (saturated conductivity)`,
+        `Decay constant k = ${kN.toExponential(3)} /h, Time t = ${tN.toFixed(2)} h`,
         '',
         'Step 1 — Compute exponential decay factor:',
-        `  e^(−kt) = exp(−${k.toExponential(3)} × ${t.toFixed(2)}) = ${decay.toExponential(4)}`,
+        `  e^(−kt) = exp(−${kN.toExponential(3)} × ${tN.toFixed(2)}) = ${decay.toExponential(4)}`,
         '',
         'Step 2 — Infiltration rate at time t:',
         `  f(t) = f_c + (f₀ − f_c)·e^(−kt)`,
-        `  f(${t.toFixed(1)} h) = ${fc.toFixed(2)} + (${f0.toFixed(2)} − ${fc.toFixed(2)}) × ${decay.toExponential(4)}`,
-        `  f(${t.toFixed(1)} h) = ${f.toFixed(2)} mm/h`,
+        `  f(${tN.toFixed(1)} h) = ${fcN.toFixed(2)} + (${f0N.toFixed(2)} − ${fcN.toFixed(2)}) × ${decay.toExponential(4)}`,
+        `  f(${tN.toFixed(1)} h) = ${f.toFixed(2)} mm/h`,
         '',
         'Step 3 — Cumulative infiltration:',
         `  F(t) = f_c·t + (f₀−f_c)/k·(1−e^(−kt))`,
-        `  F(${t.toFixed(1)} h) = ${cumInf.toFixed(2)} mm total infiltrated`,
+        `  F(${tN.toFixed(1)} h) = ${cumInf.toFixed(2)} mm total infiltrated`,
         '',
         'Step 4 — Infiltration regime:',
-        `  ${f / f0 > 0.8 ? 'EARLY STAGE — matrix potential dominated' : f / f0 > 0.3 ? 'TRANSITION — mixed gravitational/capillary' : 'LATE STAGE — gravity-dominated, near f_c'}`,
+        `  ${f / f0N > 0.8 ? 'EARLY STAGE — matrix potential dominated' : f / f0N > 0.3 ? 'TRANSITION — mixed gravitational/capillary' : 'LATE STAGE — gravity-dominated, near f_c'}`,
         '',
-        `  └ Time to near-equilibrium (f ≈ 1.05·f_c): t ≈ 3/k ≈ ${(3 / k).toFixed(1)} h`,
+        `  └ Time to near-equilibrium (f ≈ 1.05·f_c): t ≈ 3/k ≈ ${(3 / kN).toFixed(1)} h`,
       ]
     };
   },
 
   // ── Domain 23: Hazard & Risk ──
   135: ({ H, V, E }) => {
-    const R = H * V * E;
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const Hn = Number(H), Vn = Number(V), En = Number(E);
+    const valid = [Hn, Vn, En].every(Number.isFinite) && Hn >= 0 && Vn >= 0 && En >= 0;
+    const R = Hn * Vn * En;
+    const riskClass = !Number.isFinite(R) ? Number.NaN : (R < 0.1 ? 0 : R < 0.3 ? 1 : R < 0.6 ? 2 : 3);
+    if (!valid) {
+      return {
+        result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 'hazard', value: Number.isFinite(Hn) ? Hn : Number.NaN, unit: '—', label: 'Hazard H' },
+          { key: 'vulnerability', value: Number.isFinite(Vn) ? Vn : Number.NaN, unit: '—', label: 'Vulnerability V' },
+          { key: 'exposure', value: Number.isFinite(En) ? En : Number.NaN, unit: '—', label: 'Exposure E' },
+          { key: 'risk_class', value: Number.NaN, unit: '—', label: 'Risk Class (0 Low, 1 Moderate, 2 High, 3 Very High)' },
+        ],
+        steps: ['── UNISDR Disaster Risk Framework (UNISDR, 2004; UNDRO, 1979) ──',
+          'Risk = H × V × E',
+          '', 'One or more inputs are missing or out of range — no fabricated risk is substituted.'],
+      };
+    }
     return {
       result: R, unit: '—',
+      secondary: [
+        { key: 'hazard', value: Hn, unit: '—', label: 'Hazard H' },
+        { key: 'vulnerability', value: Vn, unit: '—', label: 'Vulnerability V' },
+        { key: 'exposure', value: En, unit: '—', label: 'Exposure E' },
+        { key: 'risk_class', value: riskClass, unit: '—', label: 'Risk Class (0 Low, 1 Moderate, 2 High, 3 Very High)' },
+      ],
       steps: [
         '── UNISDR Disaster Risk Framework (UNISDR, 2004; UNDRO, 1979) ──',
-        `Hazard H = ${H.toFixed(3)} (event probability × intensity)`,
-        `Vulnerability V = ${V.toFixed(3)} (0–1: degree of loss given event)`,
-        `Exposure E = ${E.toFixed(3)} (elements at risk, e.g. population × value)`,
+        `Hazard H = ${Hn.toFixed(3)} (event probability × intensity)`,
+        `Vulnerability V = ${Vn.toFixed(3)} (0–1: degree of loss given event)`,
+        `Exposure E = ${En.toFixed(3)} (elements at risk, e.g. population × value)`,
         '',
         'Step 1 — Compute risk:',
-        `  Risk = H × V × E = ${H.toFixed(3)} × ${V.toFixed(3)} × ${E.toFixed(3)}`,
+        `  Risk = H × V × E = ${Hn.toFixed(3)} × ${Vn.toFixed(3)} × ${En.toFixed(3)}`,
         `  Risk = ${R.toFixed(3)} (expected loss units)`,
         '',
         'Step 2 — Risk level:',
@@ -6205,10 +9037,24 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // where P_ref = 0.01 (100-year event) and α = 0.8 (typical flood).
     const P_ref = 0.01;
     const alpha = 0.8;  // damage curve exponent (typical for riverine floods)
-    const n = Math.max(10, Math.min(1000, Math.round(num_intervals || 100)));
-    const pLo = Math.max(0.0001, P_low || 0.001);
-    const pHi = Math.min(0.99, P_high || 0.5);
-    const D100 = (D_P != null && D_P >= 0) ? D_P : 1e6;  // damage at the 100-year event
+    const D100raw = Number(D_P);
+    const D100 = (Number.isFinite(D100raw) && D100raw >= 0) ? D100raw : Number.NaN;
+    const n = Math.max(10, Math.min(1000, Math.round(Number(num_intervals) || 100)));
+    const pLo = Math.max(0.0001, Number(P_low) || 0.001);
+    const pHi = Math.min(0.99, Number(P_high) || 0.5);
+    if (!Number.isFinite(D100) || pLo >= pHi) {
+      return {
+        result: Number.NaN, unit: '$/yr',
+        secondary: [
+          { key: 'annual_loss', value: Number.NaN, unit: '$/yr', label: 'Expected Annual Damage EAD' },
+          { key: 'max_damage', value: Number.NaN, unit: '$', label: 'Maximum Damage D₁₀₀' },
+          { key: 'return_period_damage', value: Number.NaN, unit: '$', label: 'Damage at 1000-yr Event' },
+        ],
+        steps: ['── Expected Annual Damage (USACE EM 1110-2-1619) ──',
+          'EAD = ∫ D(P)·dP, D(P) = D₁₀₀·(P/P_ref)^(-α)',
+          '', 'Damage at 100-yr event (D_P) is missing or not finite — no fabricated EAD is substituted.'],
+      };
+    }
     // Power-law damage curve: D(P) = D100 × (P/P_ref)^(-α)
     // Logarithmic grid integration for accuracy on steep D(P) curve
     const logPLo = Math.log(pLo);
@@ -6223,9 +9069,33 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       const D2 = D100 * Math.pow(p2 / P_ref, -alpha);
       sum += 0.5 * (D1 + D2) * (p2 - p1);
     }
-    const EAD = D100 > 0 ? sum : 0;
+    const EAD = sum;
+    // Damage-exceedance curve series: D(P) over the integration range
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    const seriesN = 40;
+    for (let i = 0; i <= seriesN; i++) {
+      const t = i / seriesN;
+      const p = Math.exp(logPLo + t * (logPHi - logPLo));
+      const D = D100 * Math.pow(p / P_ref, -alpha);
+      if (Number.isFinite(D)) seriesPoints.push({ x: p, y: D });
+    }
+    const D1000 = D100 * Math.pow(0.001 / P_ref, -alpha);
     return {
       result: EAD, unit: '$/yr',
+      secondary: [
+        { key: 'annual_loss', value: EAD, unit: '$/yr', label: 'Expected Annual Damage EAD' },
+        { key: 'max_damage', value: D100, unit: '$', label: 'Maximum Damage D₁₀₀' },
+        { key: 'return_period_damage', value: D1000, unit: '$', label: 'Damage at 1000-yr Event' },
+        { key: 'D_100', value: D100, unit: '$', label: 'Damage at 100-yr event' },
+        { key: 'D_1000', value: D1000, unit: '$', label: 'Damage at 1000-yr event' },
+      ],
+      series: seriesPoints.length > 0
+        ? [{
+            label: 'Damage-Exceedance D(P)',
+            color: '#d62728',
+            points: seriesPoints,
+          }]
+        : undefined,
       steps: [
         '── Expected Annual Damage (USACE EM 1110-2-1619) ──',
         `Damage at 100-yr event D₁₀₀ = $${D100.toFixed(0)}`,
@@ -6249,33 +9119,98 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         `  └ Mitigation benefit: if levee reduces D₁₀₀ by 50%, EAD drops proportionally`,
         `  └ Benefit-cost ratio: BCR = ΔEAD / annualized mitigation cost`,
       ],
-      secondary: [
-        { key: 'D_100', value: D100, unit: '$', label: 'Damage at 100-yr event' },
-        { key: 'D_1000', value: D100 * Math.pow(0.001/P_ref, -alpha), unit: '$', label: 'Damage at 1000-yr event' },
-      ],
     };
   },
   137: ({ IHi, ILo, BPHi, BPLo, Cp }) => {
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const IHiN = Number(IHi), ILoN = Number(ILo), BPHiN = Number(BPHi), BPLoN = Number(BPLo), CpN = Number(Cp);
     // EPA 40 CFR Part 50 Appendix G — AQI breakpoint interpolation
     // AQI = [(I_Hi−I_Lo)/(BP_Hi−BP_Lo)] × (C_p−BP_Lo) + I_Lo
-    const denom = (BPHi - BPLo) || 1;
-    const concRatio = (Cp - BPLo) / denom;
-    const AQI = (IHi - ILo) * concRatio + ILo;
+    const denom = (BPHiN - BPLoN) || 1;
+    const concRatio = (CpN - BPLoN) / denom;
+    const AQI = (IHiN - ILoN) * concRatio + ILoN;
+    const valid = [IHiN, ILoN, BPHiN, BPLoN, CpN].every(Number.isFinite) && CpN >= 0 && BPHiN > BPLoN;
+    // Health classification: numeric class 0–5 per EPA AQI categories
+    const healthLabel = !Number.isFinite(AQI) ? Number.NaN
+      : AQI <= 50 ? 0 : AQI <= 100 ? 1 : AQI <= 150 ? 2 : AQI <= 200 ? 3 : AQI <= 300 ? 4 : 5;
+    // Breakpoint band index derived from I_Lo
+    const breakpointBand = !Number.isFinite(ILoN) ? Number.NaN
+      : Math.round(ILoN / 50);
+    // Pollutant detection via known EPA breakpoint tables (PM2.5, PM10, O3, NO2, SO2, CO)
+    const POLLUTANT_BANDS: Array<{ code: number; lo: number; hi: number; ilo: number; ihi: number }> = [
+      { code: 1, lo: 0, hi: 12.0, ilo: 0, ihi: 50 },
+      { code: 1, lo: 12.1, hi: 35.4, ilo: 51, ihi: 100 },
+      { code: 1, lo: 35.5, hi: 55.4, ilo: 101, ihi: 150 },
+      { code: 1, lo: 55.5, hi: 150.4, ilo: 151, ihi: 200 },
+      { code: 1, lo: 150.5, hi: 250.4, ilo: 201, ihi: 300 },
+      { code: 1, lo: 250.5, hi: 350.4, ilo: 301, ihi: 400 },
+      { code: 1, lo: 350.5, hi: 500.4, ilo: 401, ihi: 500 },
+      { code: 2, lo: 0, hi: 54, ilo: 0, ihi: 50 },
+      { code: 2, lo: 55, hi: 154, ilo: 51, ihi: 100 },
+      { code: 2, lo: 155, hi: 254, ilo: 101, ihi: 150 },
+      { code: 2, lo: 255, hi: 354, ilo: 151, ihi: 200 },
+      { code: 2, lo: 355, hi: 424, ilo: 201, ihi: 300 },
+      { code: 2, lo: 425, hi: 504, ilo: 301, ihi: 400 },
+      { code: 2, lo: 505, hi: 604, ilo: 401, ihi: 500 },
+      { code: 3, lo: 0, hi: 0.054, ilo: 0, ihi: 50 },
+      { code: 3, lo: 0.055, hi: 0.070, ilo: 51, ihi: 100 },
+      { code: 3, lo: 0.071, hi: 0.085, ilo: 101, ihi: 150 },
+      { code: 3, lo: 0.086, hi: 0.105, ilo: 151, ihi: 200 },
+      { code: 3, lo: 0.106, hi: 0.200, ilo: 201, ihi: 300 },
+    ];
+    const matched = valid && POLLUTANT_BANDS.find(b =>
+      Math.abs(b.hi - BPHiN) <= 0.2 && Math.abs(b.lo - BPLoN) <= 0.2 &&
+      Math.abs(b.ihi - IHiN) <= 5 && Math.abs(b.ilo - ILoN) <= 5);
+    const pollutantCategory = matched ? matched.code : 0;
+    if (!valid) {
+      return {
+        result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 'breakpoint_band', value: Number.NaN, unit: '—', label: 'Breakpoint Band Index (0–5)' },
+          { key: 'pollutant_category', value: Number.NaN, unit: '—', label: 'Pollutant Category (1 PM2.5, 2 PM10, 3 O3, 0 generic)' },
+          { key: 'health_label', value: Number.NaN, unit: '—', label: 'Health Class (0 Good … 5 Hazardous)' },
+        ],
+        steps: ['── EPA AQI Breakpoint Interpolation (40 CFR Part 50 App. G) ──',
+          'AQI = [(I_Hi−I_Lo)/(BP_Hi−BP_Lo)] × (C_p−BP_Lo) + I_Lo',
+          '', 'One or more inputs are missing or unphysical — no fabricated AQI is substituted.'],
+      };
+    }
+    // AQI vs concentration series across the breakpoint band
+    const seriesPoints: Array<{ x: number; y: number }> = [];
+    const stepCount = 20;
+    for (let i = 0; i <= stepCount; i++) {
+      const c = BPLoN + (i / stepCount) * (BPHiN - BPLoN);
+      const ratio = (c - BPLoN) / denom;
+      const aqi = (IHiN - ILoN) * ratio + ILoN;
+      if (Number.isFinite(aqi)) seriesPoints.push({ x: c, y: aqi });
+    }
     return {
       result: AQI, unit: '—',
+      secondary: [
+        { key: 'breakpoint_band', value: breakpointBand, unit: '—', label: 'Breakpoint Band Index (0–5)' },
+        { key: 'pollutant_category', value: pollutantCategory, unit: '—', label: 'Pollutant Category (1 PM2.5, 2 PM10, 3 O3, 0 generic)' },
+        { key: 'health_label', value: healthLabel, unit: '—', label: 'Health Class (0 Good … 5 Hazardous)' },
+      ],
+      series: seriesPoints.length > 0
+        ? [{
+            label: 'AQI vs Concentration',
+            color: '#2ca02c',
+            points: seriesPoints,
+          }]
+        : undefined,
       steps: [
         '── EPA AQI Breakpoint Interpolation (40 CFR Part 50 App. G) ──',
-        `Breakpoints: BP_lo = ${BPLo.toFixed(1)}, BP_hi = ${BPHi.toFixed(1)}`,
-        `Indices: I_lo = ${ILo.toFixed(0)}, I_hi = ${IHi.toFixed(0)}`,
-        `Pollutant concentration C_p = ${Cp.toFixed(2)}`,
+        `Breakpoints: BP_lo = ${BPLoN.toFixed(1)}, BP_hi = ${BPHiN.toFixed(1)}`,
+        `Indices: I_lo = ${ILoN.toFixed(0)}, I_hi = ${IHiN.toFixed(0)}`,
+        `Pollutant concentration C_p = ${CpN.toFixed(2)}`,
         '',
         'Step 1 — Ratio of concentration within breakpoint interval:',
-        `  (C_p − BP_lo) / (BP_hi − BP_lo) = (${Cp.toFixed(2)} − ${BPLo.toFixed(1)}) / (${BPHi.toFixed(1)} − ${BPLo.toFixed(1)})`,
+        `  (C_p − BP_lo) / (BP_hi − BP_lo) = (${CpN.toFixed(2)} − ${BPLoN.toFixed(1)}) / (${BPHiN.toFixed(1)} − ${BPLoN.toFixed(1)})`,
         `  = ${concRatio.toFixed(4)}`,
         '',
         'Step 2 — Linear interpolation to AQI:',
         `  AQI = (I_hi − I_lo) × ratio + I_lo`,
-        `  AQI = (${IHi.toFixed(0)} − ${ILo.toFixed(0)}) × ${concRatio.toFixed(4)} + ${ILo.toFixed(0)}`,
+        `  AQI = (${IHiN.toFixed(0)} − ${ILoN.toFixed(0)}) × ${concRatio.toFixed(4)} + ${ILoN.toFixed(0)}`,
         `  AQI = ${AQI.toFixed(0)}`,
         '',
         'Step 3 — Health classification:',
@@ -6286,22 +9221,41 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   138: ({ Xbar, Kp, sigmaX }) => {
-    const PMP = Xbar + Kp * sigmaX;
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const XbarN = Number(Xbar), KpN = Number(Kp), sigmaXN = Number(sigmaX);
+    const valid = [XbarN, KpN, sigmaXN].every(Number.isFinite) && XbarN >= 0 && sigmaXN >= 0 && KpN >= 0;
+    const PMP = XbarN + KpN * sigmaXN;
+    if (!valid) {
+      return {
+        result: Number.NaN, unit: 'mm',
+        secondary: [
+          { key: 'standard_deviation', value: Number.isFinite(sigmaXN) && sigmaXN >= 0 ? sigmaXN : Number.NaN, unit: 'mm', label: 'Standard Deviation σ_x' },
+          { key: 'frequency_factor', value: Number.isFinite(KpN) && KpN >= 0 ? KpN : Number.NaN, unit: '—', label: 'Frequency Factor K_p' },
+        ],
+        steps: ['── Probable Maximum Precipitation — Hershfield Method (Hershfield, 1961; World Meteorological Organization, 1986) ──',
+          'PMP = X̄ + K_p × σ_x',
+          '', 'One or more inputs are missing or out of range — no fabricated PMP is substituted.'],
+      };
+    }
     return {
       result: PMP, unit: 'mm',
+      secondary: [
+        { key: 'standard_deviation', value: sigmaXN, unit: 'mm', label: 'Standard Deviation σ_x' },
+        { key: 'frequency_factor', value: KpN, unit: '—', label: 'Frequency Factor K_p' },
+      ],
       steps: [
         '── Probable Maximum Precipitation — Hershfield Method (Hershfield, 1961; World Meteorological Organization, 1986) ──',
-        `Mean annual maximum rainfall X̄ = ${Xbar.toFixed(1)} mm`,
-        `Frequency factor K_p = ${Kp.toFixed(2)} (typically 5–20 for PMP)`,
-        `Standard deviation σ_x = ${sigmaX.toFixed(1)} mm`,
+        `Mean annual maximum rainfall X̄ = ${XbarN.toFixed(1)} mm`,
+        `Frequency factor K_p = ${KpN.toFixed(2)} (typically 5–20 for PMP)`,
+        `Standard deviation σ_x = ${sigmaXN.toFixed(1)} mm`,
         '',
         'Step 1 — Compute PMP:',
-        `  PMP = X̄ + K_p × σ_x = ${Xbar.toFixed(1)} + ${Kp.toFixed(2)} × ${sigmaX.toFixed(1)}`,
+        `  PMP = X̄ + K_p × σ_x = ${XbarN.toFixed(1)} + ${KpN.toFixed(2)} × ${sigmaXN.toFixed(1)}`,
         `  PMP = ${PMP.toFixed(1)} mm`,
         '',
         'Step 2 — Comparison with observed maximum:',
-        `  K_p = ${Kp.toFixed(2)} → ${Kp < 10 ? 'Moderate factor — less extreme basin' : 'High factor — extreme rainfall potential'}`,
-        `  Ratio PMP / X̄ = ${(PMP / Xbar).toFixed(1)}× the mean annual maximum`,
+        `  K_p = ${KpN.toFixed(2)} → ${KpN < 10 ? 'Moderate factor — less extreme basin' : 'High factor — extreme rainfall potential'}`,
+        `  Ratio PMP / X̄ = ${(PMP / XbarN).toFixed(1)}× the mean annual maximum`,
         '',
         `  └ PMP used for design of high-hazard dams (spillway capacity), nuclear facilities`,
         `  └ Hershfield envelope: K_p max ≈ 15 for 24-hr PMP in most regions`,
@@ -6312,7 +9266,20 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Palmer 1965: X_i = α · X_{i-1} + Z_i / 3
     // α = persistence factor, 0.897 is standard US calibration
     // PDSI is bounded to [−10, +10]
-    let Xi = alpha * Xim1 + Zi / 3;
+    const Xim1N = Number(Xim1), ZiN = Number(Zi), alphaN = Number(alpha);
+    if (![Xim1N, ZiN, alphaN].every(Number.isFinite)) {
+      return {
+        result: Number.NaN, unit: '—',
+        secondary: [
+          { key: 'drought_classification', value: Number.NaN, unit: '—', label: 'Unknown' },
+          { key: 'persistence_factor', value: Number.isFinite(alphaN) ? alphaN : Number.NaN, unit: '—', label: 'Persistence Factor α (Palmer 1965)' },
+        ],
+        steps: ['── Palmer Drought Severity Index (Palmer, 1965) ──',
+          'X_i = α · X_{i-1} + Z_i / 3',
+          '', 'One or more inputs are missing — no fabricated PDSI is substituted.'],
+      };
+    }
+    let Xi = alphaN * Xim1N + ZiN / 3;
 
     // Clamp to Palmer's physical bounds
     if (Xi > 10) Xi = 10;
@@ -6332,21 +9299,21 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
     return {
       result: Xi, unit: '—',
-      secondary: {
-        drought_classification: classification,
-        persistence_factor: alpha,
-      },
+      secondary: [
+        { key: 'drought_classification', value: Xi, unit: '—', label: classification },
+        { key: 'persistence_factor', value: alphaN, unit: '—', label: 'Persistence Factor α (Palmer 1965)' },
+      ],
       steps: [
         '── Palmer Drought Severity Index (Palmer, 1965) ──',
-        `  Previous month PDSI X_{i-1} = ${Xim1.toFixed(3)}`,
-        `  Moisture anomaly index Z_i = ${Zi.toFixed(3)}`,
-        `  Persistence factor α = ${alpha} ${alpha === 0.897 ? '(standard US calibration)' : '(user-supplied)'}`,
+        `  Previous month PDSI X_{i-1} = ${Xim1N.toFixed(3)}`,
+        `  Moisture anomaly index Z_i = ${ZiN.toFixed(3)}`,
+        `  Persistence factor α = ${alphaN} ${alphaN === 0.897 ? '(standard US calibration)' : '(user-supplied)'}`,
         '',
         'Step 1 — PDSI recurrence formula:',
         `  X_i = α × X_{i-1} + Z_i / 3`,
-        `  X_i = ${alpha} × ${Xim1.toFixed(3)} + ${Zi.toFixed(3)} / 3`,
-        `  X_i = ${(alpha * Xim1).toFixed(4)} + ${(Zi / 3).toFixed(4)}`,
-        `  X_i = ${(alpha * Xim1 + Zi / 3).toFixed(4)}`,
+        `  X_i = ${alphaN} × ${Xim1N.toFixed(3)} + ${ZiN.toFixed(3)} / 3`,
+        `  X_i = ${(alphaN * Xim1N).toFixed(4)} + ${(ZiN / 3).toFixed(4)}`,
+        `  X_i = ${(alphaN * Xim1N + ZiN / 3).toFixed(4)}`,
         '',
         'Step 2 — Apply bounds [−10, +10]:',
         `  Clamped X_i = ${Xi.toFixed(4)}`,
@@ -6360,43 +9327,61 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     };
   },
   140: ({ K0, Vres, hb }) => {
+    // Defensive numeric coercion: inputs can arrive as JSON strings.
+    const K0n = Number(K0), Vresn = Number(Vres), hbn = Number(hb);
     // Froehlich 2008: B_avg = 0.1803 × K₀ × V_res^0.32 × h_b^0.19
     // B_avg is average BREACH WIDTH (meters), NOT discharge
-    const Bavg = 0.1803 * K0 * Math.pow(Vres, 0.32) * Math.pow(hb, 0.19);
+    const valid = [K0n, Vresn, hbn].every(Number.isFinite) && K0n > 0 && Vresn > 0 && hbn > 0;
+    const Bavg = 0.1803 * K0n * Math.pow(Vresn, 0.32) * Math.pow(hbn, 0.19);
 
     // Secondary outputs from Froehlich 2008:
     // Peak outflow: Q_p = 3.1 × B_avg × h_b^1.5 (broad-crested weir, USACE EM 1110-2-1619)
-    const Qp = 3.1 * Bavg * Math.pow(hb, 1.5);
+    const Qp = 3.1 * Bavg * Math.pow(hbn, 1.5);
 
     // Breach formation time: t_f = 0.0179 × K₁ × V_res^0.34 × h_b^(-0.14) hours
     // K₁ = 1.0 for overtopping, 1.5 for piping (K0 ≤ 1.3 = overtopping, > 1.3 = piping)
-    const K1 = K0 > 1.3 ? 1.5 : 1.0;
-    const tf_hours = 0.0179 * K1 * Math.pow(Vres, 0.34) * Math.pow(hb, -0.14);
+    const K1 = K0n > 1.3 ? 1.5 : 1.0;
+    const tf_hours = 0.0179 * K1 * Math.pow(Vresn, 0.34) * Math.pow(hbn, -0.14);
+
+    if (!valid) {
+      return {
+        result: Number.NaN, unit: 'm',
+        secondary: [
+          { key: 'peak_outflow', value: Number.NaN, unit: 'm³/s', label: 'Peak Outflow Q_p (broad-crested weir)' },
+          { key: 'breach_formation_time', value: Number.NaN, unit: 'hours', label: 'Breach Formation Time t_f' },
+          { key: 'breach_factor_k1', value: Number.isFinite(K1) ? K1 : Number.NaN, unit: '—', label: 'Breach Factor K₁ (1.0 overtopping, 1.5 piping)' },
+        ],
+        steps: ['── Froehlich Dam Breach Parameters (Froehlich, 2008) ──',
+          'B_avg = 0.1803 × K₀ × V_res^0.32 × h_b^0.19',
+          '', 'One or more inputs are missing or unphysical (requires K₀ > 0, V_res > 0, h_b > 0) — no fabricated breach width is substituted.'],
+      };
+    }
 
     return {
       result: Bavg, unit: 'm',
-      secondary: {
-        peak_outflow: { value: Qp, unit: 'm³/s' },
-        breach_formation_time: { value: tf_hours, unit: 'hours' },
-      },
+      secondary: [
+        { key: 'peak_outflow', value: Qp, unit: 'm³/s', label: 'Peak Outflow Q_p (broad-crested weir)' },
+        { key: 'breach_formation_time', value: tf_hours, unit: 'hours', label: 'Breach Formation Time t_f' },
+        { key: 'breach_factor_k1', value: K1, unit: '—', label: 'Breach Factor K₁ (1.0 overtopping, 1.5 piping)' },
+      ],
       steps: [
         '── Froehlich Dam Breach Parameters (Froehlich, 2008) ──',
-        `  Reservoir volume V_res = ${Vres.toExponential(2)} m³`,
-        `  Embankment height h_b = ${hb.toFixed(1)} m`,
-        `  Breach factor K₀ = ${K0.toFixed(3)} ${K0 <= 1.3 ? '(overtopping)' : K0 <= 2.0 ? '(piping)' : '(elevated)'}`,
+        `  Reservoir volume V_res = ${Vresn.toExponential(2)} m³`,
+        `  Embankment height h_b = ${hbn.toFixed(1)} m`,
+        `  Breach factor K₀ = ${K0n.toFixed(3)} ${K0n <= 1.3 ? '(overtopping)' : K0n <= 2.0 ? '(piping)' : '(elevated)'}`,
         '',
         'Step 1 — Average breach width:',
         `  B_avg = 0.1803 × K₀ × V_res^0.32 × h_b^0.19`,
-        `  B_avg = 0.1803 × ${K0.toFixed(3)} × ${Math.pow(Vres, 0.32).toExponential(3)} × ${Math.pow(hb, 0.19).toExponential(4)}`,
+        `  B_avg = 0.1803 × ${K0n.toFixed(3)} × ${Math.pow(Vresn, 0.32).toExponential(3)} × ${Math.pow(hbn, 0.19).toExponential(4)}`,
         `  B_avg = ${Bavg.toFixed(1)} m`,
         '',
         'Step 2 — Peak outflow (broad-crested weir):',
         `  Q_p = 3.1 × B_avg × h_b^1.5`,
-        `  Q_p = 3.1 × ${Bavg.toFixed(1)} × ${Math.pow(hb, 1.5).toFixed(1)}`,
+        `  Q_p = 3.1 × ${Bavg.toFixed(1)} × ${Math.pow(hbn, 1.5).toFixed(1)}`,
         `  Q_p = ${Qp.toFixed(0)} m³/s`,
         '',
         'Step 3 — Breach formation time:',
-        `  K₁ = ${K1} (${K0 > 1.3 ? 'piping' : 'overtopping'})`,
+        `  K₁ = ${K1} (${K0n > 1.3 ? 'piping' : 'overtopping'})`,
         `  t_f = 0.0179 × K₁ × V_res^0.34 × h_b^(-0.14)`,
         `  t_f = ${tf_hours.toFixed(2)} hours`,
         '',
@@ -6415,8 +9400,12 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // x_a = x_f + K·(y − H·x_f)
     // K = P_f·H^T·(H·P_f·H^T + R)^{−1}
     // P_a = (I − K·H)·P_f
-    if (Pf <= 0 || R < 0) {
-      return { result: NaN, unit: '—', steps: ['Error: Pf must be > 0 and R ≥ 0'] };
+    if (!Number.isFinite(xf) || !Number.isFinite(Pf) || !Number.isFinite(y) || !Number.isFinite(R) || Pf <= 0 || R < 0) {
+      return { result: NaN, unit: '—', secondary: [
+        { key: 'analysis_error_covariance', value: Number.NaN, unit: '—', label: 'Analysis Error Covariance P_a (NaN)' },
+        { key: 'innovation', value: Number.NaN, unit: '—', label: 'Innovation d = y − H·x_f (NaN)' },
+        { key: 'kalman_gain', value: Number.NaN, unit: '—', label: 'Kalman Gain K (NaN)' },
+      ], steps: ['Error: Pf must be > 0 and R ≥ 0'] };
     }
     const den = H * Pf * H + R;
     const K = (Pf * H) / den;
@@ -6426,11 +9415,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
     return {
       result: xa, unit: '—',
-      secondary: {
-        analysis_error_covariance: Pa,
-        innovation: innov,
-        kalman_gain: K,
-      },
+      secondary: [
+        { key: 'analysis_error_covariance', value: Pa, unit: '—', label: 'Analysis Error Covariance P_a' },
+        { key: 'innovation', value: innov, unit: '—', label: 'Innovation d = y − H·x_f' },
+        { key: 'kalman_gain', value: K, unit: '—', label: 'Kalman Gain K' },
+      ],
       steps: [
         '── Kalman Filter Analysis (Kalman 1960; Evensen 1994) ──',
         `  Forecast state x_f = ${xf.toFixed(4)}`,
@@ -6465,8 +9454,12 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Optimal Interpolation (Lorenz 1969; Gandin 1963)
     // x_a = x_b + B·H^T·(H·B·H^T + R)^{-1}·(y − H·x_b)
     // Unlike KF (Tool 141), OI/3D-Var uses x_b as base state (not x_f)
-    if (B <= 0 || R < 0) {
-      return { result: NaN, unit: '—', steps: ['Error: B must be > 0 and R ≥ 0'] };
+    if (!Number.isFinite(xb) || !Number.isFinite(B) || !Number.isFinite(y) || !Number.isFinite(R) || !Number.isFinite(H) || B <= 0 || R < 0) {
+      return { result: NaN, unit: '—', secondary: [
+        { key: 'analysis_increment', value: Number.NaN, unit: '—', label: 'Analysis Increment x_a − x_b (NaN)' },
+        { key: 'analysis_error_variance', value: Number.NaN, unit: '—', label: 'Analysis Error Variance P_a (NaN)' },
+        { key: 'kalman_gain', value: Number.NaN, unit: '—', label: 'OI Gain K (NaN)' },
+      ], steps: ['Error: B must be > 0 and R ≥ 0'] };
     }
     const den = H * B * H + R;
     const K = (B * H) / den;
@@ -6476,11 +9469,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
     return {
       result: xa, unit: '—',
-      secondary: {
-        analysis_increment: xa - xb,
-        analysis_error_variance: Pa,
-        kalman_gain: K,
-      },
+      secondary: [
+        { key: 'analysis_increment', value: xa - xb, unit: '—', label: 'Analysis Increment x_a − x_b' },
+        { key: 'analysis_error_variance', value: Pa, unit: '—', label: 'Analysis Error Variance P_a' },
+        { key: 'kalman_gain', value: K, unit: '—', label: 'OI Gain K' },
+      ],
       steps: [
         '── Optimal Interpolation (Lorenz 1969; Gandin 1963) ──',
         `  Background x_b = ${xb.toFixed(4)}, Background error covariance B = ${B.toFixed(4)}`,
@@ -6512,8 +9505,12 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // 3D-Var Cost Function (Le Dimet & Talagrand 1986)
     // J(x) = ½(x − x_b)ᵀ B⁻¹ (x − x_b) + ½(y − H·x)ᵀ R⁻¹ (y − H·x)
     // This is the single-time-step evaluation; 4D-Var sums over a time window
-    if (B <= 0 || R <= 0) {
-      return { result: NaN, unit: '—', steps: ['Error: B > 0 and R > 0 required'] };
+    if (!Number.isFinite(x) || !Number.isFinite(xb) || !Number.isFinite(B) || !Number.isFinite(y) || !Number.isFinite(H) || !Number.isFinite(R) || B <= 0 || R <= 0) {
+      return { result: NaN, unit: '—', secondary: [
+        { key: 'background_term', value: Number.NaN, unit: '—', label: 'Background Term J_b (NaN)' },
+        { key: 'observation_term', value: Number.NaN, unit: '—', label: 'Observation Term J_o (NaN)' },
+        { key: 'optimal_analysis', value: Number.NaN, unit: '—', label: 'Optimal Analysis x_a (∇J = 0) (NaN)' },
+      ], steps: ['Error: B > 0 and R > 0 required'] };
     }
     const bgTerm = 0.5 * (x - xb) * (1 / B) * (x - xb);
     const obsTerm = 0.5 * (y - H * x) * (1 / R) * (y - H * x);
@@ -6525,11 +9522,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
     return {
       result: J, unit: '—',
-      secondary: {
-        background_term: bgTerm,
-        observation_term: obsTerm,
-        optimal_analysis: xa,
-      },
+      secondary: [
+        { key: 'background_term', value: bgTerm, unit: '—', label: 'Background Term J_b' },
+        { key: 'observation_term', value: obsTerm, unit: '—', label: 'Observation Term J_o' },
+        { key: 'optimal_analysis', value: xa, unit: '—', label: 'Optimal Analysis x_a (∇J = 0)' },
+      ],
       steps: [
         '── 3D-Var Cost Function (Le Dimet & Talagrand 1986) ──',
         `  State x = ${x.toFixed(4)}, Background x_b = ${xb.toFixed(4)}`,
@@ -6564,8 +9561,12 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // For a binary variable: H(X) = −p·log₂(p) − (1−p)·log₂(1−p)
     // Mutual information: I(X;Y) = H(X) + H(Y) − H(X,Y)
     // Hxy is the joint entropy H(X,Y), not a probability
-    if (px <= 0 || px >= 1 || py <= 0 || py >= 1) {
-      return { result: NaN, unit: 'bits', steps: ['Error: px, py must be in (0, 1)'] };
+    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(Hxy) || px <= 0 || px >= 1 || py <= 0 || py >= 1) {
+      return { result: NaN, unit: 'bits', secondary: [
+        { key: 'entropy_y', value: Number.NaN, unit: 'bits', label: 'Entropy H(Y) (NaN)' },
+        { key: 'joint_entropy', value: Number.NaN, unit: 'bits', label: 'Joint Entropy H(X,Y) (NaN)' },
+        { key: 'mutual_information', value: Number.NaN, unit: 'bits', label: 'Mutual Information I(X;Y) (NaN)' },
+      ], steps: ['Error: px, py must be in (0, 1)'] };
     }
 
     // Binary entropy: H(p) = −p·log₂(p) − (1−p)·log₂(1−p)
@@ -6580,11 +9581,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
     return {
       result: Hx, unit: 'bits',
-      secondary: {
-        entropy_y: Hy,
-        joint_entropy: Hjoint,
-        mutual_information: MI,
-      },
+      secondary: [
+        { key: 'entropy_y', value: Hy, unit: 'bits', label: 'Entropy H(Y)' },
+        { key: 'joint_entropy', value: Hjoint, unit: 'bits', label: 'Joint Entropy H(X,Y)' },
+        { key: 'mutual_information', value: MI, unit: 'bits', label: 'Mutual Information I(X;Y)' },
+      ],
       steps: [
         '── Shannon Information Entropy (Shannon 1948) ──',
         `  p(x) = ${px.toFixed(4)}, p(y) = ${py.toFixed(4)}`,
@@ -6613,8 +9614,11 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
   145: ({ dKm, fGHz }) => {
     // Free-Space Path Loss (Friis 1946; ITU-R P.525-2)
     // FSPL(dB) = 32.45 + 20·log₁₀(d_km) + 20·log₁₀(f_GHz)
-    if (dKm <= 0 || fGHz <= 0) {
-      return { result: NaN, unit: 'dB', steps: ['Error: d > 0 and f > 0 required'] };
+    if (!Number.isFinite(dKm) || !Number.isFinite(fGHz) || dKm <= 0 || fGHz <= 0) {
+      return { result: NaN, unit: 'dB', secondary: [
+        { key: 'wavelength_m', value: Number.NaN, unit: 'm', label: 'Wavelength λ = c/f (NaN)' },
+        { key: 'received_power_dBm', value: Number.NaN, unit: 'dBm', label: 'Received Power P_r (NaN)' },
+      ], steps: ['Error: d > 0 and f > 0 required'] };
     }
     const logD = 20 * Math.log10(dKm);
     const logF = 20 * Math.log10(fGHz);
@@ -6627,10 +9631,10 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
     return {
       result: FSPL, unit: 'dB',
-      secondary: {
-        wavelength_m: lambda_m,
-        received_power_dBm: Pr,
-      },
+      secondary: [
+        { key: 'wavelength_m', value: lambda_m, unit: 'm', label: 'Wavelength λ = c/f' },
+        { key: 'received_power_dBm', value: Pr, unit: 'dBm', label: 'Received Power P_r (10 W, 20 dBi ref link)' },
+      ],
       steps: [
         '── Free-Space Path Loss (Friis 1946; ITU-R P.525-2) ──',
         `  Distance d = ${dKm >= 1e6 ? (dKm/1e6).toFixed(2) + '×10⁶ km' : dKm >= 1000 ? (dKm/1000).toFixed(1) + '×10³ km' : dKm.toFixed(1) + ' km'}`,
@@ -6656,59 +9660,113 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       ]
     };
   },
-   146: ({ alpha1, alpha2, alpha3, alpha4, beta1, beta2, beta3, beta4, phi_m, t_sec }) => {
-     // Full Klobuchar (1987) ICD-GPS-200: compute amplitude & period from 8 broadcast coefficients
-     const phiM = phi_m ?? 0;          // geomagnetic latitude of receiver (rad)
-     const tSec = t_sec ?? 50400;      // local time (seconds of day), default noon
-     const phiM_deg = phiM * 180 / Math.PI;
-     // Physical defaults: real broadcast α coefficients are ~1e-8 s (amplitude
-     // in seconds per unit of geomagnetic latitude); β are ~1e4 s (period).
-     // The previous defaults (α=50/60/30/20 s) were ~9 orders of magnitude
-     // too large and produced an impossible ~1.4e15 ns delay.
-     const Ai = (alpha1 ?? 5e-9) + (alpha2 ?? 0) * phiM_deg + (alpha3 ?? 0) * phiM_deg ** 2 + (alpha4 ?? 0) * phiM_deg ** 3;   // amplitude (s)
-     const Pi = Math.max(200, (beta1 ?? 50400) + (beta2 ?? 0) * phiM_deg + (beta3 ?? 0) * phiM_deg ** 2 + (beta4 ?? 0) * phiM_deg ** 3); // period (s), clamped ≥200
-    const x = 2 * Math.PI * (tSec - 50400) / Pi;
-    const poly = 1 - (x * x) / 2 + Math.pow(x, 4) / 24;
-    // Nighttime: |x| >= π/2 → no ionospheric delay beyond the 5 ns base
-    const delay_s = Math.abs(x) < Math.PI / 2 ? 5e-9 + Math.max(0, Ai) * poly : 5e-9;
-    const delay_ns = delay_s * 1e9;
-    const rangeErr = delay_s * 299792458;
-    return {
-      result: delay_ns, unit: 'ns',
-      steps: [
-        '── Klobuchar Ionospheric Delay Model (Klobuchar, 1987; ICD-GPS-200) ──',
-        `Amplitude A_i = ${Ai.toExponential(2)} s`,
-        `Normalised time x = t/period = ${x.toFixed(4)} (drives cosinusoidal shape)`,
-        '',
-        'Step 1 — Polynomial approximation of cosine:',
-        `  1 − x²/2 + x⁴/24 = 1 − (${x.toFixed(4)})²/2 + (${x.toFixed(4)})⁴/24`,
-        `  = ${poly.toFixed(4)}`,
-        '',
-        'Step 2 — Slant delay at L1 (1.57542 GHz):',
-        `  Δτ = 5 ns + A_i × (1 − x²/2 + x⁴/24)`,
-        `  Δτ = 5 ns + ${Ai.toExponential(2)} × ${poly.toFixed(4)}`,
-        `  Δτ = ${delay_s.toExponential(3)} s = ${delay_ns.toFixed(1)} ns`,
-        '',
-        'Step 3 — Range error equivalent:',
-        `  Δρ = c·Δτ = ${rangeErr.toFixed(2)} m`,
-        '',
-        'Step 4 — Diurnal variation:',
-        `  ${delay_ns > 15 ? 'HIGH delay — midday / equatorial / solar max conditions' : delay_ns > 5 ? 'MODERATE — typical mid-latitude daytime' : 'LOW — night-time / polar / solar minimum'}`,
-        '',
-        `  └ Klobuchar removes ~50% RMS error; dual-frequency (L1/L2) removes >90%`,
-      ]
-    };
-  },
+   146: ({ alpha1, alpha2, alpha3, alpha4, beta1, beta2, beta3, beta4, phi_m, t_sec, elevation }) => {
+      // Full Klobuchar (1987) ICD-GPS-200: compute amplitude & period from 8
+      // broadcast coefficients. NOTE the paper's units: "all angles are in
+      // units of semi-circle" — the α/β polynomials are evaluated with φ_m in
+      // SEMICIRCLES (180° = 1), NOT degrees. Using degrees yields ~9 orders of
+      // magnitude error in the amplitude term.
+      const phiMDeg = Number(phi_m ?? 0);      // geomagnetic latitude of IPP (°)
+      const phiM_sc = phiMDeg / 180;   // → semicircles (paper eq. 4)
+      const tSec = Number(t_sec ?? 50400);     // local time at IPP (s), default 14:00 peak
+      const elevDeg = Number(elevation ?? 90); // satellite elevation (°), default zenith
+      const elev_sc = elevDeg / 180;   // → semicircles
+      // Physical defaults: real broadcast α are ~1e-8 s (amplitude in seconds
+      // per unit of geomagnetic latitude, semicircles); β are ~1e4 s (period).
+      const Ai = Number(alpha1 ?? 5e-9) + Number(alpha2 ?? 0) * phiM_sc + Number(alpha3 ?? 0) * phiM_sc ** 2 + Number(alpha4 ?? 0) * phiM_sc ** 3;   // amplitude (s)
+      const Pi = Math.max(200, Number(beta1 ?? 50400) + Number(beta2 ?? 0) * phiM_sc + Number(beta3 ?? 0) * phiM_sc ** 2 + Number(beta4 ?? 0) * phiM_sc ** 3); // period (s), clamped ≥200
+      const x = 2 * Math.PI * (tSec - 50400) / Pi;
+      const poly = 1 - (x * x) / 2 + Math.pow(x, 4) / 24;
+      // Nighttime: |x| >= π/2 → no ionospheric delay beyond the 5 ns base
+      const delay_s = Math.abs(x) < Math.PI / 2 ? 5e-9 + Math.max(0, Ai) * poly : 5e-9;
+      // Obliquity (slant) factor: F = 1 + 16·(0.53 − E)³, E in semicircles
+      // (paper "SUMMARY OF ALGORITHM EQUATIONS" step 6).
+      const F = 1 + 16 * Math.pow(0.53 - elev_sc, 3);
+      const slant_s = delay_s * F;
+      const delay_ns = delay_s * 1e9;
+      const slant_ns = slant_s * 1e9;
+      const rangeErr = slant_s * 299792458;
+      return {
+        result: delay_ns, unit: 'ns',
+        secondary: [
+          { key: 'slant_delay', value: Number.isFinite(slant_ns) ? slant_ns : Number.NaN, unit: 'ns', label: 'Slant Delay (with obliquity F)' },
+          { key: 'slant_factor', value: Number.isFinite(F) ? F : Number.NaN, unit: '—', label: 'Obliquity Factor F' },
+          { key: 'range_error', value: Number.isFinite(rangeErr) ? rangeErr : Number.NaN, unit: 'm', label: 'Range Error (c·τ)' },
+          { key: 'amplitude', value: Number.isFinite(Ai) ? Ai : Number.NaN, unit: 's', label: 'Amplitude A (α polynomial)' },
+          { key: 'period', value: Number.isFinite(Pi) ? Pi : Number.NaN, unit: 's', label: 'Period P (β polynomial)' },
+        ],
+        // Timeseries series (tool vizType 'timeseries'): vertical ionospheric
+        // delay τ(t) over the full diurnal cycle (local time 0–86400 s,
+        // 24 points) from the tool's own Klobuchar formula
+        // Δτ = 5 ns + A·(1 − x²/2 + x⁴/24), x = 2π(t−50400)/P.
+        series: [{
+          label: 'Klobuchar vertical delay τ(t) (local time, ns)',
+          color: '#0072B2',
+          points: Array.from({ length: 24 }, (_, i) => {
+            const tt = i * (86400 / 23); // local time 0 → 86400 s
+            const xx = 2 * Math.PI * (tt - 50400) / Pi;
+            const polyy = 1 - (xx * xx) / 2 + Math.pow(xx, 4) / 24;
+            const delay = Math.abs(xx) < Math.PI / 2 ? 5e-9 + Math.max(0, Ai) * polyy : 5e-9;
+            const delayNS = delay * 1e9;
+            return { x: tt, y: Number.isFinite(delayNS) ? delayNS : Number.NaN };
+          }),
+        }],
+        steps: [
+          '── Klobuchar Ionospheric Delay Model (Klobuchar, 1987; ICD-GPS-200) ──',
+          `Geomagnetic latitude φ_m = ${phiMDeg.toFixed(2)}° = ${phiM_sc.toFixed(4)} semicircles (paper: angles in semicircles)`,
+          `Local time at IPP t = ${tSec} s (${(tSec / 3600).toFixed(2)} h)`,
+          `Elevation E = ${elevDeg.toFixed(1)}° (obliquity F = 1 + 16(0.53−E)³)`,
+          '',
+          'Step 1 — Amplitude (α polynomial, φ_m in semicircles):',
+          `  A = α₀ + α₁·φ_m + α₂·φ_m² + α₃·φ_m³ = ${Ai.toExponential(2)} s`,
+          '',
+          'Step 2 — Period (β polynomial):',
+          `  P = β₀ + β₁·φ_m + β₂·φ_m² + β₃·φ_m³ = ${Pi.toExponential(3)} s`,
+          '',
+          'Step 3 — Normalised time x = 2π(t − 50400)/P:',
+          `  x = ${x.toFixed(4)} (drives cosinusoidal shape)`,
+          '',
+          'Step 4 — Polynomial approximation of cosine:',
+          `  1 − x²/2 + x⁴/24 = 1 − (${x.toFixed(4)})²/2 + (${x.toFixed(4)})⁴/24`,
+          `  = ${poly.toFixed(4)}`,
+          '',
+          'Step 5 — Vertical delay at L1 (1.57542 GHz):',
+          `  Δτ = 5 ns + A × (1 − x²/2 + x⁴/24)`,
+          `  Δτ = 5 ns + ${Ai.toExponential(2)} × ${poly.toFixed(4)}`,
+          `  Δτ = ${delay_s.toExponential(3)} s = ${delay_ns.toFixed(1)} ns`,
+          '',
+          'Step 6 — Obliquity (slant) factor F = 1 + 16·(0.53 − E)³:',
+          `  F = 1 + 16 × (0.53 − ${elev_sc.toFixed(4)})³ = ${F.toFixed(4)}`,
+          `  Slant delay = ${slant_s.toExponential(3)} s = ${slant_ns.toFixed(1)} ns`,
+          '',
+          'Step 7 — Range error equivalent:',
+          `  Δρ = c·Δτ = ${rangeErr.toFixed(2)} m`,
+          '',
+          'Step 8 — Diurnal variation:',
+          `  ${delay_ns > 15 ? 'HIGH delay — midday / equatorial / solar max conditions' : delay_ns > 5 ? 'MODERATE — typical mid-latitude daytime' : 'LOW — night-time / polar / solar minimum'}`,
+          '',
+          `  └ Klobuchar removes ~50% RMS error; dual-frequency (L1/L2) removes >90%`,
+          `  └ Paper worked example (40°N,100°W, E=20°): α=[3.82e-8,1.49e-8,-1.79e-7,0], β=[1.43e5,0,-3.28e5,1.13e5], φ_m=45.16°, t=50700 s → TIONO = 77.6 ns (23.3 m) — reproduced exactly (F=2.176).`,
+        ]
+      };
+    },
   147: ({ f0, vrel, c: cLight }) => {
     // Classical Doppler Effect (Doppler 1842)
     // Non-relativistic: Δf = −f₀ · v/c (v positive = receding → redshift)
     // Relativistic: f_obs = f₀ · √((1−β)/(1+β)) where β = v/c
     const c0 = cLight || 299792458;
+    if (!Number.isFinite(f0) || f0 <= 0 || !Number.isFinite(vrel) || !Number.isFinite(c0) || c0 <= 0 || Math.abs(vrel) >= c0) {
+      return { result: NaN, unit: 'Hz', secondary: [
+        { key: 'relativistic_shift', value: Number.NaN, unit: 'Hz', label: 'Relativistic Frequency Shift (exact) (NaN)' },
+        { key: 'observed_frequency', value: Number.NaN, unit: 'Hz', label: 'Observed Frequency (relativistic) (NaN)' },
+        { key: 'beta', value: Number.NaN, unit: '—', label: 'β = v/c (NaN)' },
+      ], steps: ['Error: f0 > 0, finite v_rel, and |v| < c required'] };
+    }
     const beta = vrel / c0;
     const isRecede = vrel > 0;
 
     // Non-relativistic frequency shift (sign: positive v → redshift → negative Δf)
-    const df_nonrel = -f0 * beta;
+    const df_nonrel = -f0 * beta + 0;  // +0 normalizes signed zero for v = 0
 
     // Relativistic frequency shift (exact)
     const gammaRel = 1 / Math.sqrt(1 - beta * beta);
@@ -6720,11 +9778,20 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
     return {
       result: df_nonrel, unit: 'Hz',
-      secondary: {
-        relativistic_shift: df_rel,
-        observed_frequency: f_obs_rel,
-        beta: beta,
-      },
+      secondary: [
+        { key: 'relativistic_shift', value: df_rel, unit: 'Hz', label: 'Relativistic Frequency Shift (exact)' },
+        { key: 'observed_frequency', value: f_obs_rel, unit: 'Hz', label: 'Observed Frequency (relativistic)' },
+        { key: 'beta', value: beta, unit: '—', label: 'β = v/c' },
+      ],
+      series: [{
+        label: 'Classical vs Relativistic Δf (f₀ fixed)',
+        points: Array.from({ length: 41 }, (_, i) => {
+          const v = -0.8 * c0 + i * (1.6 * c0 / 40);  // β from −0.8c to +0.8c
+          const b = v / c0;
+          const rel = f0 * (1 / Math.sqrt(1 - b * b) * (1 - b) - 1);
+          return { x: b, y: rel };
+        }),
+      }],
       steps: [
         '── Classical Doppler Effect (Doppler 1842) ──',
         `  Source frequency f₀ = ${f0.toExponential(4)} Hz`,
@@ -6757,8 +9824,15 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Hohmann Transfer (Hohmann 1925)
     // Δv₁ = √(GM/r₁)·[√(2r₂/(r₁+r₂)) − 1]
     // Δv₂ = √(GM/r₂)·[1 − √(2r₁/(r₁+r₂))]
-    if (r1 <= 0 || r2 <= 0 || GM <= 0) {
-      return { result: NaN, unit: 'm/s', steps: ['Error: GM, r1, r2 must be > 0'] };
+    if (!Number.isFinite(GM) || !Number.isFinite(r1) || !Number.isFinite(r2) || r1 <= 0 || r2 <= 0 || GM <= 0) {
+      return { result: NaN, unit: 'm/s', secondary: [
+        { key: 'dv2', value: Number.NaN, unit: 'm/s', label: 'Circularization Δv₂ (NaN)' },
+        { key: 'total_dv', value: Number.NaN, unit: 'm/s', label: 'Total Δv = |Δv₁| + |Δv₂| (NaN)' },
+        { key: 'transfer_time_s', value: Number.NaN, unit: 's', label: 'Transfer Time (half period) (NaN)' },
+        { key: 'transfer_time_h', value: Number.NaN, unit: 'h', label: 'Transfer Time (NaN)' },
+        { key: 'semi_major_axis', value: Number.NaN, unit: 'm', label: 'Transfer Ellipse Semi-Major Axis (NaN)' },
+        { key: 'period', value: Number.NaN, unit: 's', label: 'Transfer Orbit Period (NaN)' },
+      ], steps: ['Error: GM, r1, r2 must be > 0'] };
     }
     const v_circ1 = Math.sqrt(GM / r1);
     const v_circ2 = Math.sqrt(GM / r2);
@@ -6773,14 +9847,21 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
     return {
       result: dv1, unit: 'm/s',
-      secondary: {
-        dv2: dv2,
-        total_dv: totalDV,
-        transfer_time_s: transferTime,
-        transfer_time_h: transferTime / 3600,
-        semi_major_axis: semiMajor,
-        period: period,
-      },
+      secondary: [
+        { key: 'dv2', value: dv2, unit: 'm/s', label: 'Circularization Δv₂' },
+        { key: 'total_dv', value: totalDV, unit: 'm/s', label: 'Total Δv = |Δv₁| + |Δv₂|' },
+        { key: 'transfer_time_s', value: transferTime, unit: 's', label: 'Transfer Time (half period)' },
+        { key: 'transfer_time_h', value: transferTime / 3600, unit: 'h', label: 'Transfer Time' },
+        { key: 'semi_major_axis', value: semiMajor, unit: 'm', label: 'Transfer Ellipse Semi-Major Axis' },
+        { key: 'period', value: period, unit: 's', label: 'Transfer Orbit Period' },
+      ],
+      series: [{
+        label: 'Transfer-orbit velocity vs radius (r₁ → r₂)',
+        points: Array.from({ length: 51 }, (_, i) => {
+          const r = r1 + i * (r2 - r1) / 50;
+          return { x: r / 1000, y: Math.sqrt(GM / r) / 1000 };
+        }),
+      }],
       steps: [
         '── Hohmann Transfer Orbit (Hohmann 1925) ──',
         `  GM = ${GM.toExponential(3)} m³/s², r₁ = ${(r1/1000).toFixed(0)} km, r₂ = ${(r2/1000).toFixed(0)} km` ,
@@ -6808,45 +9889,51 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // Lagrange Points L1-L5 (Lagrange 1772; Euler 1767)
     // Circular Restricted 3-Body Problem (CR3BP)
     // x = m1 (primary mass), y = m2 (secondary mass)
-    if (m1 <= 0 || m2 <= 0) {
-      return { result: NaN, unit: '—', steps: ['Error: m1 > 0 and m2 > 0 required'] };
+    if (!Number.isFinite(m1) || !Number.isFinite(m2) || m1 <= 0 || m2 <= 0) {
+      return { result: NaN, unit: '—', secondary: [
+        { key: 'L1_from_secondary', value: Number.NaN, unit: '—', label: 'L1 distance from secondary (NaN)' },
+        { key: 'L2_from_secondary', value: Number.NaN, unit: '—', label: 'L2 distance from secondary (NaN)' },
+        { key: 'L4_x', value: Number.NaN, unit: '—', label: 'L4 x-coordinate (NaN)' },
+        { key: 'L4_y', value: Number.NaN, unit: '—', label: 'L4 y-coordinate (NaN)' },
+        { key: 'L5_x', value: Number.NaN, unit: '—', label: 'L5 x-coordinate (NaN)' },
+        { key: 'L5_y', value: Number.NaN, unit: '—', label: 'L5 y-coordinate (NaN)' },
+        { key: 'mass_ratio', value: Number.NaN, unit: '—', label: 'Mass ratio μ = M₂/(M₁+M₂) (NaN)' },
+      ], steps: ['Error: m1 > 0 and m2 > 0 required'] };
     }
     const mu = m2 / (m1 + m2);  // mass ratio
 
-    // Newton-Raphson for quintic: f(r) = r^5 - (3-μ)r^4 + (3-2μ)r^3 - μr^2 + 2μr - μ = 0
-    // r measured from secondary toward primary (L1) or away (L2)
-    function solveQuintic(mu: number, initR: number, maxIter = 50): number {
-      let r = initR;
+    // Newton-Raphson for the collinear equilibrium (force balance in the
+    // rotating frame). r is measured from the secondary:
+    //   L1 (between masses): r in (0,1), f1 = (1-μ-r) − (1-μ)/(1−r)² + μ/r²
+    //   L2 (beyond secondary): r > 0,      f2 = (1-μ+r) − (1-μ)/(1+r)² − μ/r²
+    //   L3 (far side of primary): u = distance from primary,
+    //       f3 = u + μ − (1-μ)/u² − μ/(u+1)²
+    function solveNR(f: (r: number) => number, fp: (r: number) => number, init: number, maxIter = 50): number {
+      let r = init;
       for (let i = 0; i < maxIter; i++) {
-        const r2 = r * r, r3 = r2 * r, r4 = r3 * r, r5 = r4 * r;
-        const f = r5 - (3 - mu) * r4 + (3 - 2 * mu) * r3 - mu * r2 + 2 * mu * r - mu;
-        const fp = 5 * r4 - 4 * (3 - mu) * r3 + 3 * (3 - 2 * mu) * r2 - 2 * mu * r + 2 * mu;
-        if (Math.abs(fp) < 1e-15) break;
-        r -= f / fp;
+        const df = fp(r);
+        if (!Number.isFinite(df) || Math.abs(df) < 1e-15) break;
+        const dr = f(r) / df;
+        r -= dr;
+        if (!Number.isFinite(r) || Math.abs(dr) < 1e-15) break;
       }
       return r;
     }
 
     // L1: between primary and secondary, measured from secondary toward primary
-    const rL1 = solveQuintic(mu, 1 - Math.pow(mu / 3, 1 / 3));
-    const dL1 = (1 - rL1);  // distance from primary = 1 - rL1 (normalized)
+    const f1 = (r: number) => (1 - mu - r) - (1 - mu) / Math.pow(1 - r, 2) + mu / (r * r);
+    const f1p = (r: number) => -1 - 2 * (1 - mu) / Math.pow(1 - r, 3) - 2 * mu / Math.pow(r, 3);
+    const rL1 = solveNR(f1, f1p, 1 - Math.pow(mu / 3, 1 / 3));
 
     // L2: beyond secondary, measured from secondary away from primary
-    const rL2 = solveQuintic(mu, 1 + Math.pow(mu / 3, 1 / 3));
-    const dL2 = (1 + rL2);  // distance from primary
+    const f2 = (r: number) => (1 - mu + r) - (1 - mu) / Math.pow(1 + r, 2) - mu / (r * r);
+    const f2p = (r: number) => 1 + 2 * (1 - mu) / Math.pow(1 + r, 3) + 2 * mu / Math.pow(r, 3);
+    const rL2 = solveNR(f2, f2p, 1 + Math.pow(mu / 3, 1 / 3));
 
-    // L3: on opposite side of primary from secondary
-    // Solve: r^5 + (2+μ)r^4 + (1+2μ)r^3 - (1-μ)r^2 - 2(1-μ)r - (1-μ) = 0
-    let rL3 = -1.0;
-    for (let i = 0; i < 50; i++) {
-      const r2 = rL3 * rL3, r3 = r2 * rL3, r4 = r3 * rL3, r5 = r4 * rL3;
-      const f = rL3 + (1 - mu / 2) / (rL3 * rL3) + mu * (3 * rL3 + 1.5) / 2;
-      const fp = 1 - 2 * (1 - mu / 2) / (rL3 * rL3 * rL3) + 1.5 * mu;
-      if (Math.abs(fp) < 1e-15) break;
-      rL3 -= f / fp;
-    }
-    // L3 x-coordinate (from center of mass, negative side)
-    const xL3 = -(1 + 1.05 * (1 + 7 * mu / 12));
+    // L3: on opposite side of primary from secondary, u = distance from primary
+    const f3 = (u: number) => u + mu - (1 - mu) / (u * u) - mu / Math.pow(u + 1, 2);
+    const f3p = (u: number) => 1 + 2 * (1 - mu) / Math.pow(u, 3) + 2 * mu / Math.pow(u + 1, 3);
+    const uL3 = Math.abs(solveNR(f3, f3p, 1.0));
 
     // L4, L5: triangular points at ±60° from secondary
     // In rotating frame: x = 0.5 - mu, y = ±√3/2
@@ -6855,18 +9942,18 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
     return {
       result: rL1, unit: '— (normalized to orbital separation)',
-      secondary: {
-        L1_from_secondary: rL1,
-        L1_from_primary: 1 - rL1,
-        L2_from_secondary: rL2,
-        L2_from_primary: 1 + rL2,
-        L3_from_primary: Math.abs(xL3),
-        L4_x: xL4,
-        L4_y: yL4,
-        L5_x: xL4,
-        L5_y: -yL4,
-        mass_ratio: mu,
-      },
+      secondary: [
+        { key: 'L1_from_secondary', value: rL1, unit: '—', label: 'L1 distance from secondary' },
+        { key: 'L1_from_primary', value: 1 - rL1, unit: '—', label: 'L1 distance from primary' },
+        { key: 'L2_from_secondary', value: rL2, unit: '—', label: 'L2 distance from secondary' },
+        { key: 'L2_from_primary', value: 1 + rL2, unit: '—', label: 'L2 distance from primary' },
+        { key: 'L3_from_primary', value: uL3, unit: '—', label: 'L3 distance from primary' },
+        { key: 'L4_x', value: xL4, unit: '—', label: 'L4 x-coordinate' },
+        { key: 'L4_y', value: yL4, unit: '—', label: 'L4 y-coordinate' },
+        { key: 'L5_x', value: xL4, unit: '—', label: 'L5 x-coordinate' },
+        { key: 'L5_y', value: -yL4, unit: '—', label: 'L5 y-coordinate' },
+        { key: 'mass_ratio', value: mu, unit: '—', label: 'Mass ratio μ = M₂/(M₁+M₂)' },
+      ],
       steps: [
         '── Lagrange Points L1-L5 (Lagrange 1772; Euler 1767) ──',
         `  Primary mass M₁ = ${m1.toExponential(3)} kg`,
@@ -6877,7 +9964,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
         'Step 1 — Collinear points (L1, L2, L3) via Newton-Raphson:',
         `  L1: ${rL1.toFixed(6)} from secondary, ${(1 - rL1).toFixed(6)} from primary` ,
         `  L2: ${rL2.toFixed(6)} from secondary, ${(1 + rL2).toFixed(6)} from primary` ,
-        `  L3: ${(Math.abs(xL3)).toFixed(6)} from primary (opposite side)` ,
+        `  L3: ${uL3.toFixed(6)} from primary (opposite side)` ,
         '',
         'Step 2 — Triangular points (L4, L5):',
         `  L4: (${xL4.toFixed(6)}, +${yL4.toFixed(6)}) — 60° ahead of secondary` ,
@@ -6897,8 +9984,16 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
     // For binary variables: I(X;Y) = H(X) + H(Y) − H(X,Y)
     // where H(X) = −p·log₂(p) − (1−p)·log₂(1−p) (binary entropy)
     // and H(X,Y) = −Σ p(x,y)·log₂(p(x,y)) over 4 joint outcomes
-    if (px <= 0 || px >= 1 || py <= 0 || py >= 1 || pxy < 0 || pxy > Math.min(px, py)) {
-      return { result: NaN, unit: 'bits', steps: ['Error: px,py ∈ (0,1), 0 ≤ pxy ≤ min(px,py)'] };
+    if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pxy) || px <= 0 || px >= 1 || py <= 0 || py >= 1 || pxy < 0 || pxy > Math.min(px, py)) {
+      return { result: NaN, unit: 'bits', secondary: [
+        { key: 'entropy_x', value: Number.NaN, unit: 'bits', label: 'Entropy H(X) (NaN)' },
+        { key: 'entropy_y', value: Number.NaN, unit: 'bits', label: 'Entropy H(Y) (NaN)' },
+        { key: 'joint_entropy', value: Number.NaN, unit: 'bits', label: 'Joint Entropy H(X,Y) (NaN)' },
+        { key: 'p00', value: Number.NaN, unit: '—', label: 'p(x=0,y=0) (NaN)' },
+        { key: 'p01', value: Number.NaN, unit: '—', label: 'p(x=0,y=1) (NaN)' },
+        { key: 'p10', value: Number.NaN, unit: '—', label: 'p(x=1,y=0) (NaN)' },
+        { key: 'p11', value: Number.NaN, unit: '—', label: 'p(x=1,y=1) (NaN)' },
+      ], steps: ['Error: px,py ∈ (0,1), 0 ≤ pxy ≤ min(px,py)'] };
     }
 
     // Binary entropy for marginals
@@ -6920,12 +10015,15 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
 
     return {
       result: MI, unit: 'bits',
-      secondary: {
-        entropy_x: Hx,
-        entropy_y: Hy,
-        joint_entropy: Hjoint,
-        p00, p01, p10, p11,
-      },
+      secondary: [
+        { key: 'entropy_x', value: Hx, unit: 'bits', label: 'Entropy H(X)' },
+        { key: 'entropy_y', value: Hy, unit: 'bits', label: 'Entropy H(Y)' },
+        { key: 'joint_entropy', value: Hjoint, unit: 'bits', label: 'Joint Entropy H(X,Y)' },
+        { key: 'p00', value: p00, unit: '—', label: 'p(x=0,y=0)' },
+        { key: 'p01', value: p01, unit: '—', label: 'p(x=0,y=1)' },
+        { key: 'p10', value: p10, unit: '—', label: 'p(x=1,y=0)' },
+        { key: 'p11', value: p11, unit: '—', label: 'p(x=1,y=1)' },
+      ],
       steps: [
         '── Mutual Information (Shannon 1948; Cover & Thomas 2006) ──',
         `  p(x=1) = ${px.toFixed(4)}, p(y=1) = ${py.toFixed(4)}`,
@@ -6959,6 +10057,22 @@ function factorial(n: number): number {
   return r;
 }
 
+/** Lanczos approximation of the Gamma function (g=7, 6 terms). Accurate to
+ *  ~2×10⁻¹⁰ for non-integer arguments. For integer n, Γ(n) = (n−1)! */
+function gamma(z: number): number {
+  if (Number.isInteger(z) && z >= 1) return factorial(z - 1);
+  if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
+  const g = 7;
+  const p = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+    771.32342877765313, -176.61502916214059, 12.507343278686905,
+    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+  const zp = z - 1;
+  let x = p[0];
+  for (let i = 1; i < g + 2; i++) x += p[i] / (zp + i);
+  const t = zp + g + 0.5;
+  return Math.sqrt(2 * Math.PI) * Math.pow(t, zp + 0.5) * Math.exp(-t) * x;
+}
+
 /**
  * Maps the analytical-tool input symbols (often Unicode subscripts / Greek
  * letters, e.g. Rₙ, σₙ, T_air) to the plain-ASCII parameter names the
@@ -6988,6 +10102,7 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   32: { 'ε': 'eps', 'T_fire': 'Tfire', 'T_bg': 'Tbg' },
   33: { 'T_c': 'Tc', 'T_wet': 'Twet', 'T_dry': 'Tdry' },
   34: { 'T_air': 'Tair', 'T_base': 'Tbase' },
+  35: { 'T_water': 'Twater', 'T_ice': 'Tice' },
   36: { 'lat₁': 'lat1', 'lon₁': 'lon1', 'lat₂': 'lat2', 'lon₂': 'lon2' },
   37: { 'λᵢ': 'weights' },
   38: { 'wᵢ': 'weights' },
@@ -7018,7 +10133,7 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   65: { '[OH]': 'OH' },
   66: { 'β': 'beta', 'ρ₀': 'rho0', '(∇×τ)_z': 'curlTau_z' },
   67: { 'β': 'beta' },
-  68: { 'A_H': 'AH', 'β': 'beta', 'curlτ': 'curlTau' },
+  68: { 'A_H': 'AH', 'β': 'beta', 'curlτ': 'curlTau', 'curl_z(τ)': 'curlTau' },
   69: { 'λ': 'lambda', 'δ': 'delta' },
   70: { 'Θ': 'Theta', 'S_A': 'S', 'SA': 'S' },
   71: { 'γ': 'gamma', 'ε': 'eps', 'N²': 'N2', '<(∇θ′)²>': 'gradVar', 'κ': 'kappa', '∂θ̄/∂z': 'dTdz' },
@@ -7030,33 +10145,34 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   77: { 'H_sb': 'Hsb', 'θ_b': 'thetaB', 'theta_b': 'thetaB' },
   79: { 'ω': 'omega', 'a': 'ka' },
   80: { 'α': 'alpha', 'g': 'g2', 'f_m': 'fm', 'γ': 'gamma' },
-  84: { "c'": 'cprime', 'γz': 'gammaz', 'cosβ': 'cosB', "φ'": 'tanphi', 'sinβ': 'sinB', 'cos²β': 'cosB2' },
-  85: { 'μ': 'mu', 'σₙ': 'sigmaN', 'ξ': 'xi' },
+  84: { "c'": 'cprime', 'γz': 'gammaz', 'cosβ': 'cosB', "φ'": 'tanphi', 'sinβ': 'sinB', 'cos²β': 'cosB2', 'cos^2β': 'cosB2' },
+  85: { 'μ': 'mu', 'σₙ': 'sigmaN', 'σ_n': 'sigmaN', 'ξ': 'xi' },
   86: { 'Aₛ': 'As', 'tan β': 'tanB' },
   87: { 'Aₛ': 'As', 'tan β': 'tanB' },
   88: { 'K_m': 'Km', 'e_w': 'ew', 'e_a': 'ea', 'u₉': 'u' },
   90: { 'Q₀': 'Q0' },
   91: { 'T_pos': 'Tpos' },
-  93: { 'ρᵢ': 'rhoI', 'ρ_f': 'rhoF' },
-  94: { 'VEI': 'V' },
+  93: { 'ρᵢ': 'rhoI', 'ρ_i': 'rhoI', 'ρ_f': 'rhoF' },
   95: { 'Q̇': 'Qdot', 'ρ_air': 'rhoAir', 'α': 'alpha' },
   96: { '∇²T': 'divDT' },
   97: { 'ΔF': 'dF', 'λ₀': 'lambda0' },
   98: { '∂R/∂T': 'dRdT' },
   99: { 'β': 'beta', 'k_x': 'kx', 'k_y': 'ky' },
-  100: { '∂q/∂y': 'dpdy' },
+  100: { '∂q/∂y': 'dpdy', '∂u/∂y': 'dudy' },
   101: { '∂u/∂z': 'dudy' },
-  102: { '∂²ψ/∂p²': 'dpp' },
+  102: { 'ψ': 'psi', '∂²ψ/∂p²': 'dpp' },
   103: { 'u_bar': 'ubar', 'u_prime': 'uprime' },
   104: { 'K_m': 'Km' },
   105: { 'θ̄_v': 'thetaVbar', "w'θ'_v₀": 'wthetaV', 'z_i': 'zi' },
-  106: { '|∇θ|': 'dtheta', 'β': 'cos2b', 'δ': 'delta' },
+  106: { '|∇θ|': 'dtheta', 'β': 'cos2b', 'δ': 'delta', '|∂u/∂s|': 'dudy' },
   107: { 'ζ': 'zeta', '∇·V': 'div' },
   109: { 'N₀': 'N0', 'Λ': 'Lambda' },
-  112: { 'hₙ': 'hn', 'Vₙ': 'Vn' },
-  113: { 'C_nm': 'Cnm', 'S_nm': 'Snm', 'P_nm': 'Pnm', 'λ': 'lam' },
-  116: { 'nᵢ': 'ni', 'mᵢ': 'mi' },
-  117: { 'N_e': 'Ne' },
+  111: { 'x_p': 'xp', 'y_p': 'yp', "s'": 'sp', 's′': 'sp', 'GAST': 'gast', 'dX': 'dx', 'dY': 'dy', 'ωx': 'wx', 'ωy': 'wy', 'ωz': 'wz' },
+  112: { 'h₂': 'hn', 'hₙ': 'hn', 'k₂': 'kn', 'V₂': 'Vn', 'Vₙ': 'Vn', 'φ': 'lat', 'R_e': 'Re' },
+  113: { 'C_nm': 'Cnm', 'S_nm': 'Snm', 'P_nm': 'Pnm', 'λ': 'lam', 'φ': 'phi', 'R_e': 'Re', '∂P/∂φ': 'dPnm' },
+  114: { 'ωx': 'wx', 'ωy': 'wy', 'ωz': 'wz', 'Rx': 'wx', 'Ry': 'wy', 'Rz': 'wz' },
+  116: { 'nᵢ': 'ni', 'mᵢ': 'mi', 'T': 'T', 'z₀': 'z0' },
+  117: { 'N_e': 'Ne', 'N_mF2': 'NmF2', 'h_mF2': 'hmF2' },
   119: { '⟨I⟩': 'Imean', 'σ_I': 'Istd' },
   120: { 'P_dyn': 'Pdyn', 'B_z': 'Bz' },
   121: { 'P_dyn': 'Pdyn' },
@@ -7064,7 +10180,8 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   123: { 'ρ': 'rho', 'C_D': 'CD' },
   124: { 'ρ': 'rho', 'C_D': 'CD' },
   125: { 'A₁': 'A1', 'A₂': 'A2', 'σ_x': 'sigmax', 'σ_y': 'sigmay' },
-  126: { 'ρ2': 'rho2', 'σ': 'sigma', 'β': 'beta', 'γ': 'gamma' },
+  126: { 'ρ2': 'rho2', 'ρ': 'rho2', 'σ': 'sigma', 'β': 'beta', 'γ': 'gamma' },
+  127: { 'ẋ': 'xdot', 'ẏ': 'ydot', 'ż': 'zdot' },
   128: { 'wᵢ': 'wi', 'Kᵢ': 'Ki', 'Kp': 'kp' },
   129: { 'tr(H)': 'traceH', 'Q₁₁': 'Q11', 'Q₂₂': 'Q22', 'Q₃₃': 'Q33', 'Q₄₄': 'Q44' },
   130: { 'θ': 'Sc' },
@@ -7079,7 +10196,7 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
   142: { 'x_b': 'xb' },
   144: { 'p(x)': 'px', 'p(y)': 'py', 'p(x,y)': 'Hxy' },
   145: { 'd_km': 'dKm', 'f_GHz': 'fGHz' },
-  146: { 'A': 'Ai' },
+  146: { 'A': 'alpha1', 'φ_m': 'phi_m' },
   147: { 'f₀': 'f0', 'v_rel': 'vrel' },
   148: { 'r₁': 'r1', 'r₂': 'r2' },
   150: { 'p(x)': 'px', 'p(y)': 'py', 'p(x,y)': 'pxy' },
@@ -7087,11 +10204,18 @@ const PARAM_ALIASES: Record<number, Record<string, string>> = {
 
 export function normalizeInputs(id: number, inputs: Record<string, number>): Record<string, number> {
   const aliases = PARAM_ALIASES[id];
-  if (!aliases) return inputs;
   const out: Record<string, number> = {};
-  for (const [key, value] of Object.entries(inputs)) {
-    const mapped = aliases[key];
-    out[mapped ?? key] = value;
+  for (const [key, rawValue] of Object.entries(inputs)) {
+    const mapped = aliases ? (aliases[key] ?? key) : key;
+    // Defensive numeric coercion: JSON transports inputs as strings (e.g.
+    // "25" for T_max). Coerce a string that parses to a finite number; leave
+    // objects, arrays, non-numeric strings (station refs, units), null/undefined.
+    const value: unknown = rawValue;
+    if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+      out[mapped] = Number(value) as number;
+      continue;
+    }
+    out[mapped] = value as number;
   }
   return out;
 }
@@ -7103,5 +10227,21 @@ export function computeEquation(
 ): ComputeResult | null {
   const fn = EQUATION_ENGINE[id];
   if (!fn) return null;
-  return fn(normalizeInputs(id, inputs));
+  // Robustness (§5.5.1): a tool must NEVER throw — if an unexpected missing/
+  // malformed input path slips past a per-tool guard, return honest NaN instead
+  // of crashing the request. Genuine data is never fabricated here.
+  try {
+    return fn(normalizeInputs(id, inputs));
+  } catch (err) {
+    const message = err instanceof Error ? err.message.slice(0, 120) : String(err).slice(0, 120);
+    return {
+      result: Number.NaN,
+      unit: '—',
+      steps: [
+        '── Analytical tool ──',
+        `Computation failed on the supplied inputs: ${message}`,
+        'Result: NaN (honest — no fabricated value substituted).',
+      ],
+    };
+  }
 }

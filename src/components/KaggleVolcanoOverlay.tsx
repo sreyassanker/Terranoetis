@@ -10,6 +10,7 @@ import {
   type ScalarOverlayConfig,
 } from './kaggle/KaggleScalarOverlay';
 import type { ColorStop } from './kaggle/shared';
+import { formatSci } from '../lib/formatSci';
 
 const ASH_COLORMAP: ColorStop[] = [
   { stop: 0.0, r: 60, g: 60, b: 60 },
@@ -50,7 +51,7 @@ export const VOLCANO_CONFIG: ScalarOverlayConfig = {
   formatStats: ({ surface, aux, domainKm }) => {
     const lava = aux['lava_thickness'] ? Math.max(...aux['lava_thickness'].values.filter(Number.isFinite)) : null;
     return [
-      ['Max ash (kg/m²)', `${surface.maxValue.toExponential(2)}`],
+      ['Max ash (kg/m²)', formatSci(surface.maxValue)],
       ['Max lava (m)', lava != null && isFinite(lava) ? lava.toFixed(1) : '—'],
       ['Domain', `${domainKm.toFixed(1)} km`],
     ];
