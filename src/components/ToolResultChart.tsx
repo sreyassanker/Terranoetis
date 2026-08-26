@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, ScatterChart, Scatter,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
 import { CHART_COLORS, mergeSeries, type ToolSeries } from './chartShared';
 import { formatSciCompact } from '../lib/formatSci';
@@ -11,6 +11,43 @@ interface Props {
   series?: ToolSeries[];
   unit?: string;
   color?: string;
+  /** Optional value→color ramp (same stops as the heatmap). When supplied,
+   *  histogram bars are colored per-bin by their value (matches the globe). */
+  colorStops?: Array<{ stop: number; r: number; g: number; b: number }>;
+}
+
+/** Interpolate a value in [vmin, vmax] through a color-stop ramp → CSS color. */
+export function colorForValue(v: number, vmin: number, vmax: number, stops: Array<{ stop: number; r: number; g: number; b: number }>): string {
+  if (!stops || stops.length === 0) return '#8b5cf6';
+  const t = vmax > vmin ? Math.max(0, Math.min(1, (v - vmin) / (vmax - vmin))) : 0;
+  for (let i = 0; i < stops.length - 1; i++) {
+    const c0 = stops[i], c1 = stops[i + 1];
+    if (t >= c0.stop && t <= c1.stop) {
+      const seg = (c1.stop - c0.stop) === 0 ? 0 : (t - c0.stop) / (c1.stop - c0.stop);
+      const r = Math.round(c0.r + (c1.r - c0.r) * seg);
+      const g = Math.round(c0.g + (c1.g - c0.g) * seg);
+      const b = Math.round(c0.b + (c1.b - c0.b) * seg);
+      return `rgb(${r},${g},${b})`;
+    }
+  }
+  const last = stops[stops.length - 1];
+  return `rgb(${last.r},${last.g},${last.b})`;
+}
+
+/** Custom Y-axis title: rotated text pinned flush against the axis line (no
+ *  extra gap). Anchored near the bottom of the axis, lifted slightly up. */
+function AxisYLabel({ viewBox, children, fill }: {
+  viewBox?: { x: number; y: number; width: number; height: number };
+  children?: React.ReactNode; fill?: string;
+}) {
+  const vb = viewBox ?? { x: 0, y: 0, width: 0, height: 0 };
+  const cx = vb.x + 6;
+  const cy = vb.y + vb.height - 60;
+  return (
+    <text x={cx} y={cy} transform={`rotate(-90 ${cx} ${cy})`} textAnchor="middle" fill={fill ?? '#94a3b8'} fontSize={10}>
+      {children}
+    </text>
+  );
 }
 
 const tooltipStyle = {
@@ -25,7 +62,7 @@ const tooltipFormatter = (value: unknown, name: unknown) => {
   return [v, String(name ?? '')] as [string, string];
 };
 
-export function ToolResultChart({ vizType, series, unit, color }: Props) {
+export function ToolResultChart({ vizType, series, unit, color, colorStops }: Props) {
   if (!series || series.length === 0) {
     return <div style={{ fontSize: 10, color: '#f59e0b', padding: 4 }}>No chart data — no genuine series available.</div>;
   }
@@ -108,16 +145,24 @@ export function ToolResultChart({ vizType, series, unit, color }: Props) {
     case 'bar':
     case 'histogram': {
       const barKeys = keys;
+      const useBinColors = vizType === 'histogram' && !!colorStops && colorStops.length > 0;
+      // Histogram: value range for per-bin color mapping (matches the heatmap).
+      const histMin = data.length ? Math.min(...data.map(d => Number(d.x))) : 0;
+      const histMax = data.length ? Math.max(...data.map(d => Number(d.x))) : 1;
       return (
         <div style={wrapper}>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={data} margin={{ top: 8, right: 12, bottom: 18, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
             <XAxis dataKey="x" label={{ value: axisLabel(vizType), position: 'bottom', offset: -2, ...labelStyle }} tick={{ ...tickProps }} tickFormatter={fmtTick} />
-            <YAxis label={{ value: yLabel, angle: -90, position: 'insideLeft', offset: 8, ...labelStyle }} tick={{ ...tickProps }} tickFormatter={fmtTick} />
+            <YAxis label={<AxisYLabel>{yLabel}</AxisYLabel>} tick={{ ...tickProps }} tickFormatter={fmtTick} />
             <Tooltip contentStyle={tooltipStyle} formatter={tooltipFormatter} />
             {barKeys.map((k, i) => (
-              <Bar key={k} dataKey={k} fill={series[i].color || baseColor} radius={[3, 3, 0, 0]} isAnimationActive={false} name={series[i].label} />
+              <Bar key={k} dataKey={k} fill={series[i].color || baseColor} radius={[3, 3, 0, 0]} isAnimationActive={false} name={series[i].label}>
+                {useBinColors && data.map((d, bi) => (
+                  <Cell key={bi} fill={colorForValue(Number(d.x), histMin, histMax, colorStops!)} />
+                ))}
+              </Bar>
             ))}
           </BarChart>
         </ResponsiveContainer>

@@ -24,6 +24,8 @@ interface AnalyticsWorkbenchProps {
   ) => void;
   onClearResult?: () => void;
   zIndex?: number;
+  /** Color-stop ramp for the heatmap (matches the globe's active scheme). */
+  schemeColors?: Array<{ stop: number; r: number; g: number; b: number }>;
 }
 
 function getPartIcon(iconId: PartIconId): React.ReactNode {
@@ -52,7 +54,7 @@ const ALL_TOOLS = flattenTools();
 /** Collect all unique domain names for the filter dropdown. */
 const ALL_DOMAIN_NAMES = Array.from(new Set(PARTS.flatMap(p => p.domains.map(d => d.name)))).sort();
 
-export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, bbox, polygon, points, onToolResult, onClearResult, zIndex = 999 }) => {
+export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, bbox, polygon, points, onToolResult, onClearResult, zIndex = 999, schemeColors }) => {
   const [search, setSearch] = useState('');
   const [expandedParts, setExpandedParts] = useState<Set<string>>(new Set(['part1']));
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set(['atmo']));
@@ -81,7 +83,10 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
   const openTool = useCallback((tool: AnalysisTool, color: string) => {
     setSelectedTool(tool);
     setSelectedColor(color);
-  }, []);
+    // Clear the globe heatmap/legend from any previous tool run — the new
+    // tool's result panel opens fresh, and no stale field overlay lingers.
+    onClearResult?.();
+  }, [onClearResult]);
 
   const hasSearch = !!search.trim();
   const q = search.toLowerCase();
@@ -129,12 +134,10 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
     filteredParts.reduce((s, p) => s + p.domains.reduce((d, dom) => d + dom.tools.length, 0), 0),
   [filteredParts]);
 
-  if (!open) return null;
-
   const hasBbox = !!bbox;
 
   return (
-    <div style={{ position: 'fixed', top: 60, right: 10, bottom: 56, zIndex, width: 440, maxWidth: 'calc(100vw - 32px)' }}>
+    <div style={{ position: 'fixed', top: 60, right: 10, bottom: 56, zIndex, width: 440, maxWidth: 'calc(100vw - 32px)', display: open ? 'block' : 'none' }}>
       <Panel title="ANALYTICS WORKBENCH" icon={<FlaskConical size={16} />} accentColor="#8b5cf6" iconColor="#a78bfa" titleColor="#c4b5fd" onClose={onClose} style={{ height: '100%', animation: 'slideInRight 0.25s ease' }}>
         {/* Search Bar */}
         <div style={{ padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -175,7 +178,7 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8b5cf6', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8, padding: 0 }}>
               <ChevronDown size={10} style={{ transform: 'rotate(90deg)' }} /> Back to tools
             </button>
-            <ToolDialog tool={selectedTool} color={selectedColor} onClose={() => setSelectedTool(null)} bbox={bbox} polygon={polygon} points={points} onToolResult={onToolResult} onClearResult={onClearResult} />
+            <ToolDialog key={selectedTool.id} tool={selectedTool} color={selectedColor} onClose={() => setSelectedTool(null)} bbox={bbox} polygon={polygon} points={points} onToolResult={onToolResult} onClearResult={onClearResult} schemeColors={schemeColors} />
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
