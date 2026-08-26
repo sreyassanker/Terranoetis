@@ -39,6 +39,7 @@ import { interpolateIDW } from '@/rendering/idwInterpolation';
 import type { InterpGrid } from '@/rendering/idwInterpolation';
 import { extractPointsFromResult } from '@/rendering/toolResultParser';
 import { showInterpSurface, clearInterpSurface, getViewDependentResolution, getCurrentGrid, probeGridValue, legendGradientCSS } from '@/rendering/surfaceRenderer';
+import { COLORMAPS } from '@/components/kaggle/shared';
 import {
   loadAirspaces,
   addSpaceDebrisEntities,
@@ -1032,6 +1033,16 @@ function formatValue(v: number): string {
   return formatSci(v, 2);
 }
 
+/** Resolve a scheme name to the full ColorStop[] used by renderGridToCanvas
+ *  and legendGradientCSS. 'default' returns undefined (the renderer's own
+ *  DEFAULT_COLORS). */
+function schemeToColorStops(scheme: string): { stop: number; r: number; g: number; b: number }[] | undefined {
+  if (scheme === 'default') return undefined;
+  const cm = COLORMAPS[scheme];
+  if (!cm) return undefined;
+  return cm.stops;
+}
+
 export default function App() {
   /* ── Refs ── */
   const viewerRef = useRef<Cesium.Viewer | null>(null);
@@ -1058,6 +1069,12 @@ export default function App() {
   const [toolSurfaceProbe, setToolSurfaceProbe] = useState<{
     x: number; y: number; value: number; lat: number; lon: number;
   } | null>(null);
+  /** Active color scheme for the tool-result heatmap surface + legend. */
+  const [toolSurfaceScheme, setToolSurfaceScheme] = useState('default');
+  /** The rendered grid for re-coloring on scheme change. */
+  const toolSurfaceGridRef = useRef<InterpGrid | null>(null);
+  /** Polyon mask used when the surface was rendered (re-applied on recolor). */
+  const toolSurfacePolygonRef = useRef<Array<Array<[number, number]>> | undefined>(undefined);
   useEffect(() => { toolSurfaceLegendRef.current = toolSurfaceLegend; }, [toolSurfaceLegend]);
   const clickHandlerRef = useRef<Cesium.Event.RemoveCallback | null>(null);
   const screenSpaceHandlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
@@ -1773,7 +1790,10 @@ export default function App() {
         latMin: grid.latMin, latMax: grid.latMax, lonMin: grid.lonMin, lonMax: grid.lonMax,
         valueMin: grid.valueMin, valueMax: grid.valueMax,
       };
-      showInterpSurface(viewer, interpGrid, undefined, 0.6, false, activeStudyAreaPolygon ?? undefined);
+      toolSurfaceGridRef.current = interpGrid;
+      toolSurfacePolygonRef.current = activeStudyAreaPolygon ?? undefined;
+      const schemeColors = schemeToColorStops(toolSurfaceScheme);
+      showInterpSurface(viewer, interpGrid, schemeColors, 0.6, false, activeStudyAreaPolygon ?? undefined);
       // Raster-map legend: show the field colour bar + zonal statistics on the
       // globe whenever a spatial grid is displayed.
       setToolSurfaceLegend({
@@ -1815,6 +1835,9 @@ export default function App() {
   const handleClearToolResult = useCallback(() => {
     setToolSurfaceLegend(null);
     setToolSurfaceProbe(null);
+    setToolSurfaceScheme('default');
+    toolSurfaceGridRef.current = null;
+    toolSurfacePolygonRef.current = undefined;
     const viewer = viewerRef.current;
     if (!viewer) return;
     if (toolResultEntityRef.current) {
@@ -1822,6 +1845,16 @@ export default function App() {
       toolResultEntityRef.current = null;
     }
     clearInterpSurface(viewer);
+  }, []);
+
+  // Re-render the tool-result heatmap with a different color scheme (Viridis,
+  // Turbo, Spectral, ...) — the legend bar and the 3D surface stay in sync.
+  const handleToolSurfaceSchemeChange = useCallback((scheme: string) => {
+    setToolSurfaceScheme(scheme);
+    const viewer = viewerRef.current;
+    const grid = toolSurfaceGridRef.current;
+    if (!viewer || !grid) return;
+    showInterpSurface(viewer, grid, schemeToColorStops(scheme), 0.6, false, toolSurfacePolygonRef.current);
   }, []);
 
   /* ── Memo ── */
@@ -9425,33 +9458,55 @@ export default function App() {
         </div>
       )}
 
-      {/* Tool-result raster legend: vertical colour bar + zonal statistics.
-          Positioned bottom-left to avoid the right-side analytics panel. */}
+      {/* Tool-result raster legend: matches the landslide-simulation legend style
+          (bottom-left dark glass panel, vertical gradient with max/mid/min labels,
+          zonal statistics, and color-scheme switcher). */}
       {toolSurfaceLegend && (
-        <div className="glass-panel" style={{
-          position: 'absolute', left: 16, bottom: 100, zIndex: 85,
-          minWidth: 170, padding: '8px 10px', borderRadius: 8,
-          fontFamily: 'JetBrains Mono, monospace',
+        <div style={{
+          position: 'absolute', bottom: 80, left: 20, zIndex: 100,
+          background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(10px)',
+          borderRadius: 8, padding: '10px 13px', fontSize: 11, color: '#fff',
+          border: '1px solid rgba(139,92,246,0.5)', maxWidth: 260,
         }}>
-          <div style={{ fontSize: 9, fontWeight: 600, color: '#c4b5fd', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5, maxWidth: 160 }} title={toolSurfaceLegend.label}>
+          <div style={{ fontWeight: 700, fontSize: 11, color: '#c4b5fd', marginBottom: 4 }}>
             {toolSurfaceLegend.label}
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
-            {/* Vertical gradient bar */}
-            <div style={{
-              width: 14, borderRadius: 4,
-              background: legendGradientCSS(),
-              flexShrink: 0, position: 'relative',
-            }}>
-              <div style={{ position: 'absolute', top: -2, left: 18, fontSize: 8, color: '#94a3b8', whiteSpace: 'nowrap' }}>{formatValue(toolSurfaceLegend.valueMax)}</div>
-              <div style={{ position: 'absolute', bottom: -2, left: 18, fontSize: 8, color: '#94a3b8', whiteSpace: 'nowrap' }}>{formatValue(toolSurfaceLegend.valueMin)}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-end', fontSize: 9, opacity: 0.8, minWidth: 34 }}>
+              <span>{formatValue(toolSurfaceLegend.valueMax)}</span>
+              <span>{formatValue((toolSurfaceLegend.valueMin + toolSurfaceLegend.valueMax) / 2)}</span>
+              <span>{formatValue(toolSurfaceLegend.valueMin)}</span>
             </div>
-            {/* Statistics */}
-            <div style={{ fontSize: 9, color: '#94a3b8', lineHeight: 1.6, marginLeft: 6 }}>
-              <div>Mean <b style={{ color: '#e2e8f0' }}>{formatValue(toolSurfaceLegend.valueMean)}</b></div>
-              <div>σ <b style={{ color: '#e2e8f0' }}>{formatValue(toolSurfaceLegend.valueStd)}</b></div>
-              <div>Med <b style={{ color: '#e2e8f0' }}>{formatValue(toolSurfaceLegend.valueMedian)}</b></div>
-              <div style={{ color: '#64748b' }}>{toolSurfaceLegend.finiteCellCount} cells</div>
+            <div style={{
+              width: 14, borderRadius: 3,
+              background: legendGradientCSS(schemeToColorStops(toolSurfaceScheme)),
+              border: '1px solid rgba(255,255,255,0.25)',
+              minHeight: 54,
+            }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+            <span style={{ fontSize: 9, opacity: 0.7, whiteSpace: 'nowrap' }}>Colors</span>
+            <select
+              value={toolSurfaceScheme}
+              onChange={e => handleToolSurfaceSchemeChange(e.target.value)}
+              style={{
+                flex: 1, background: 'rgba(255,255,255,0.08)', color: '#fff',
+                border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4,
+                fontSize: 10, padding: '2px 4px',
+              }}
+            >
+              <option value="default" style={{ background: '#1f2937', color: '#fff' }}>Default</option>
+              {Object.entries(COLORMAPS).map(([key, cm]) => (
+                <option key={key} value={key} style={{ background: '#1f2937', color: '#fff' }}>{cm.label}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', marginTop: 6, paddingTop: 5, fontSize: 10, opacity: 0.85 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px' }}>
+              <span>Mean</span><span style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: '#e2e8f0', fontWeight: 600 }}>{formatValue(toolSurfaceLegend.valueMean)}</span>
+              <span>σ</span><span style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: '#e2e8f0', fontWeight: 600 }}>{formatValue(toolSurfaceLegend.valueStd)}</span>
+              <span>Med</span><span style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: '#e2e8f0', fontWeight: 600 }}>{formatValue(toolSurfaceLegend.valueMedian)}</span>
+              <span>Cells</span><span style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: '#64748b' }}>{toolSurfaceLegend.finiteCellCount}</span>
             </div>
           </div>
         </div>
@@ -9660,7 +9715,7 @@ export default function App() {
 
       {/* Analytics Workbench Panel */}
       <ErrorBoundary label="Analytics Workbench">
-        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} onToolResult={handleToolResult} onClearResult={handleClearToolResult} zIndex={getPanelZIndex('analytics')} />
+        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} onToolResult={handleToolResult} onClearResult={handleClearToolResult} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} />
       </ErrorBoundary>
 
       {/* Land Cover Mapper Panel */}

@@ -10,6 +10,7 @@ import {
   AGGREGATION_LABELS, TEMPORAL_MODE_LABELS,
 } from '@/data/analyticalModels';
 import { ToolResultChart } from './ToolResultChart';
+import type { ToolSeries } from './chartShared';
 import { exportToolResultAsPDF } from '@/lib/toolReportPdf';
 import { formatSci } from '@/lib/formatSci';
 
@@ -33,6 +34,9 @@ interface ToolDialogProps {
     value?: number, grid?: ToolGrid, unit?: string, vizType?: string,
   ) => void;
   onClearResult?: () => void;
+  /** Color-stop ramp for the heatmap (matches the globe's active scheme) so the
+   *  histogram bins are colored by their value the same way as the field. */
+  schemeColors?: Array<{ stop: number; r: number; g: number; b: number }>;
 }
 
 interface StudyArea {
@@ -94,16 +98,6 @@ const sectionStyle: React.CSSProperties = {
   letterSpacing: 0.5, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5,
 };
 
-/** Colour-map a scalar value to an rgba string using a blue-to-red ramp. */
-function colorRamp(v: number, vmin: number, vmax: number, alpha = 0.85): string {
-  if (!Number.isFinite(v) || vmax <= vmin) return `rgba(100,100,120,${alpha})`;
-  const t = Math.max(0, Math.min(1, (v - vmin) / (vmax - vmin)));
-  const r = Math.round(30 + t * 225);
-  const g = Math.round(100 + Math.sin(t * Math.PI) * 120);
-  const b = Math.round(255 - t * 225);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
 /** Format a result value for display, handling NaN/Infinity/null gracefully. */
 function formatResult(val: unknown, unit?: string): string {
   const n = Number(val);
@@ -116,41 +110,42 @@ function formatResult(val: unknown, unit?: string): string {
   return unit ? `${str} ${unit}` : str;
 }
 
-const GridHeatmap: React.FC<{ grid: ToolGrid; color: string }> = ({ grid }) => {
-  const { nLat, nLon, values, valueMin, valueMax, valueMean, valueStd, valueMedian, finiteCellCount, hasNaN } = grid;
-  // Flip rows so the mini-map is north-up (row 0 = latMin = south → bottom).
-  const flipped = React.useMemo(() => {
-    const arr: number[] = new Array(values.length);
-    for (let r = 0; r < nLat; r++)
-      for (let c = 0; c < nLon; c++)
-        arr[(nLat - 1 - r) * nLon + c] = values[r * nLon + c];
-    return arr;
-  }, [values, nLat, nLon]);
+/** Build a value-distribution histogram series from the finite grid cells —
+ *  the standard companion to a raster map (histogram-legend convention):
+ *  shows how the field's values are distributed across the study area. */
+function buildGridHistogram(grid: ToolGrid, bins = 20): ToolSeries {
+  const finite = grid.values.filter((v): v is number => Number.isFinite(v));
+  const lo = grid.valueMin, hi = grid.valueMax;
+  const span = hi - lo;
+  if (finite.length === 0 || !Number.isFinite(lo) || !Number.isFinite(hi) || span <= 0) {
+    return { label: 'Value Distribution', points: [] };
+  }
+  const counts = new Array<number>(bins).fill(0);
+  for (const v of finite) {
+    let b = Math.floor(((v - lo) / span) * bins);
+    if (b >= bins) b = bins - 1;
+    if (b < 0) b = 0;
+    counts[b]++;
+  }
+  const points = counts.map((c, i) => ({
+    x: lo + ((i + 0.5) / bins) * span,
+    y: c,
+  }));
+  return { label: 'Value Distribution', points, color: '#8b5cf6' };
+}
+
+const GridHeatmap: React.FC<{ grid: ToolGrid; color: string; schemeColors?: Array<{ stop: number; r: number; g: number; b: number }> }> = ({ grid, color, schemeColors }) => {
+  const { nLat, nLon, valueMin, valueMax, valueMean, valueStd, valueMedian, finiteCellCount, hasNaN } = grid;
+  const histogram = React.useMemo(() => buildGridHistogram(grid, 20), [grid]);
   return (
     <div>
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(${nLon}, 1fr)`,
-        gap: 0, borderRadius: 6, overflow: 'hidden',
-        border: '1px solid rgba(255,255,255,0.1)',
-        aspectRatio: `${nLon}/${nLat}`,
-        maxWidth: '100%',
-      }}>
-        {flipped.map((v, i) => (
-          <div key={i} title={Number.isFinite(v) ? v.toFixed(3) : 'NaN'}
-            style={{
-              background: colorRamp(v, valueMin, valueMax),
-              minHeight: 4,
-            }} />
-        ))}
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 8, color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
-        <span>{formatResult(valueMin)}</span>
-        <span>{nLat}×{nLon} grid</span>
-        <span>{formatResult(valueMax)}</span>
-      </div>
+      {histogram.points.length > 0 ? (
+        <ToolResultChart vizType="histogram" series={[histogram]} unit="" color={color} colorStops={schemeColors} />
+      ) : (
+        <div style={{ fontSize: 10, color: '#f59e0b', padding: 4 }}>No finite values to chart.</div>
+      )}
       <div style={{ marginTop: 6, padding: '6px 8px', borderRadius: 4, background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.15)' }}>
-        <div style={{ fontSize: 8, fontWeight: 600, color: '#c4b5fd', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Grid Statistics</div>
+        <div style={{ fontSize: 8, fontWeight: 600, color: '#c4b5fd', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Field Statistics</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '3px 12px', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}>
           <span style={{ color: '#94a3b8' }}>Mean <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{formatResult(valueMean)}</span></span>
           <span style={{ color: '#94a3b8' }}>Std Dev <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{formatResult(valueStd)}</span></span>
@@ -159,13 +154,13 @@ const GridHeatmap: React.FC<{ grid: ToolGrid; color: string }> = ({ grid }) => {
         </div>
       </div>
       {hasNaN && (
-        <div style={{ fontSize: 8, color: '#f59e0b', marginTop: 2 }}>Some cells produced non-finite values (shown grey).</div>
+        <div style={{ fontSize: 8, color: '#f59e0b', marginTop: 2 }}>Some cells produced non-finite values (shown as gaps in the field).</div>
       )}
     </div>
   );
 };
 
-const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, polygon, points, onToolResult, onClearResult }) => {
+const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, polygon, points, onToolResult, onClearResult, schemeColors }) => {
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   // When a study area is drawn on the globe, default every tool to bbox/grid
   // mode so the model is swept across the area's interior and overlaid as IDW
@@ -284,7 +279,12 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
       });
       if (onToolResult && data.result != null) {
         const val = Number(data.result);
-        const label = `${tool.name}: ${formatResult(val, data.unit)}`;
+        const displayName = tool.toolName || tool.name;
+        // For spatial-field tools (heatmap/contour/vector) the legend label is
+        // just the tool name — the centre-point scalar value is misleading for
+        // a varying field. Non-spatial tools keep the value in the label.
+        const isFieldViz = ['heatmap', 'contour', 'vector'].includes(data.visualizationType ?? '');
+        const label = isFieldViz ? displayName : `${displayName}: ${formatResult(val, data.unit)}`;
         const useLat = area.mode === 'point' ? area.lat : (bbox ? (bbox.latMin + bbox.latMax) / 2 : area.lat);
         const useLon = area.mode === 'point' ? area.lon : (bbox ? (bbox.lonMin + bbox.lonMax) / 2 : area.lon);
         onToolResult(tool.id, label, useLat, useLon, Number.isFinite(val) ? val : undefined, grid, data.unit, data.visualizationType);
@@ -670,13 +670,15 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
               </div>
             )}
 
-            {/* Spatial Grid Heatmap */}
+            {/* Spatial Field: the globe shows the heatmap itself, so the panel
+                shows the companion value-distribution histogram + statistics
+                (histogram-legend convention) instead of a redundant mini-map. */}
             {result.grid && (
               <div style={{ marginTop: 8 }}>
                 <div style={{ fontSize: 9, color: '#c4b5fd', fontWeight: 600, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Layers size={10} /> Spatial Grid · {result.grid.nLat}×{result.grid.nLon}
+                  <Layers size={10} /> Spatial Field · {result.grid.nLat}×{result.grid.nLon} cells
                 </div>
-                <GridHeatmap grid={result.grid} color={color} />
+                <GridHeatmap grid={result.grid} color={color} schemeColors={schemeColors} />
               </div>
             )}
 

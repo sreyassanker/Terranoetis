@@ -49,13 +49,15 @@ export function probeGridValue(lat: number, lon: number): { value: number; lat: 
   };
 }
 
-/** CSS linear-gradient string for the heatmap legend bar, matching the exact
- *  color ramp used by renderGridToCanvas (same stops, same interpolation). */
+/** CSS vertical linear-gradient string for the heatmap legend bar, matching the
+ *  color ramp used by renderGridToCanvas (same stops, same interpolation) and
+ *  the landslide-simulation legend convention: low value at the bottom,
+ *  high value at the top (linear-gradient to top). */
 export function legendGradientCSS(colors: { stop: number; r: number; g: number; b: number }[] = DEFAULT_COLORS): string {
   const stops = colors
     .map(c => `rgb(${c.r},${c.g},${c.b}) ${Math.round(c.stop * 100)}%`)
     .join(', ');
-  return `linear-gradient(90deg, ${stops})`;
+  return `linear-gradient(to top, ${stops})`;
 }
 
 export function getViewDependentResolution(
