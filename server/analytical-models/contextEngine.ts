@@ -89,6 +89,13 @@ export interface GridResult {
   nLat: number; nLon: number;
   values: number[];
   valueMin: number; valueMax: number;
+  /** Zonal statistics over finite (non-NaN) grid cells — the standard
+   *  spatial-field summary (mean/min/max/std) recommended over a single
+   *  arbitrary centre-point value for heatmap-type tools. */
+  valueMean: number;
+  valueStd: number;
+  valueMedian: number;
+  finiteCellCount: number;
   hasNaN: boolean;
 }
 
@@ -2947,7 +2954,6 @@ function mapInputs(
       // ~1e-8 s, NOT tens of seconds (the previous 50/60/30/20 defaults
       // produced an impossible ~1.4e15 ns delay — ~9 orders of magnitude).
       const A = u('alpha1', 5e-9);
-      const xPhase = u('x', 0.5);
       const periodS = 50400; // 14 h Klobuchar default period
       const phiMDeg = u('phi_m', lat); // ° (defaults to the study-point latitude)
       return {
@@ -2960,7 +2966,7 @@ function mapInputs(
         beta3: u('beta3', 0),
         beta4: u('beta4', 0),
         phi_m: phiMDeg,               // °
-        t_sec: u('t_sec', 50400 + (xPhase * periodS) / (2 * Math.PI)),
+        t_sec: u('t_sec', 50400),     // local time at IPP in seconds (14:00 default peak)
         elevation: u('elevation', 90), // ° (zenith → F = 1)
       };
     }
@@ -3630,10 +3636,13 @@ async function buildSpatialGrid(
 
   // Per-cell satellite sampling for thermal tools: one windowed COG read per
   // band, true per-cell BT/ST values (not the centre-point pixel repeated).
+  // Cell-centre sampling (r+0.5)/nLat — each value is the centre of its raster
+  // cell, so the rendered heatmap fills [latMin,latMax]×[lonMin,lonMax] exactly
+  // (no half-cell offset at the study-area boundary).
   const lats: number[] = [];
   const lons: number[] = [];
-  for (let r = 0; r < nLat; r++) lats.push(latMin + (latMax - latMin) * (r / (nLat - 1)));
-  for (let c = 0; c < nLon; c++) lons.push(lonMin + (lonMax - lonMin) * (c / (nLon - 1)));
+  for (let r = 0; r < nLat; r++) lats.push(latMin + (latMax - latMin) * ((r + 0.5) / nLat));
+  for (let c = 0; c < nLon; c++) lons.push(lonMin + (lonMax - lonMin) * ((c + 0.5) / nLon));
   const satGrid = SAFE_THERMAL_TOOLS.has(id)
     ? await memoizedFetch(
       `sat:${id}:${latMin.toFixed(3)},${latMax.toFixed(3)},${lonMin.toFixed(3)},${lonMax.toFixed(3)}|${(ctx as Record<string, unknown>).__satDate ?? ''}`,
@@ -3692,10 +3701,26 @@ async function buildSpatialGrid(
       }
     }
   }
+  // Zonal statistics over finite cells (standard spatial-field summary for
+  // raster/heatmap output — min/max/mean/std/median of the field).
+  const finite = values.filter((v): v is number => Number.isFinite(v));
+  const valueMean = finite.length > 0 ? finite.reduce((a, b) => a + b, 0) / finite.length : 0;
+  const valueStd = finite.length > 1
+    ? Math.sqrt(finite.reduce((acc, v) => acc + (v - valueMean) * (v - valueMean), 0) / (finite.length - 1))
+    : 0;
+  const sorted = [...finite].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const valueMedian = sorted.length > 0
+    ? (sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2)
+    : 0;
   return {
     latMin, latMax, lonMin, lonMax, nLat, nLon, values,
     valueMin: Number.isFinite(vmin) ? vmin : 0,
     valueMax: Number.isFinite(vmax) ? vmax : 0,
+    valueMean,
+    valueStd,
+    valueMedian,
+    finiteCellCount: finite.length,
     hasNaN,
   };
 }

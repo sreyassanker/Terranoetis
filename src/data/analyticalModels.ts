@@ -809,7 +809,7 @@ export const PARTS: Part[] = [
               { id: 'a2', label: 'SWA Coefficient A₂', type: 'scalar', unit: '—', description: 'Band 11 gain coefficient in the split-window equation' },
             ],
             methodology: 'The Split-Window Algorithm follows a 3-step methodology:\n\n' +
-              'Step 1 — Transmittance Estimation: Atmospheric transmittance for each TIRS band (τ₁₀, τ₁₁) is estimated from column water vapor content (w) using linear regression: τ₁₀ = −0.1146 × w + 1.0286, τ₁₁ = −0.1568 × w + 1.0083 (derived from MODTRAN simulations for mid-latitude summer).\n\n' +
+              'Step 1 — Transmittance Estimation: Atmospheric transmittance for each TIRS band (τ₁₀, τ₁₁) is estimated from column water vapor content (w) using linear regression: τ₁₀ = −0.1146 × w + 1.0286, τ₁₁ = −0.1568 × w + 1.0083 (derived from MODTRAN 4.0 simulations for the 1976 US Standard atmosphere).\n\n' +
               'Step 2 — Coefficient Derivation: Intermediate parameters Cᵢ = εᵢ × τᵢ and Dᵢ = (1 − τᵢ) × (1 + (1 − εᵢ) × τᵢ) are computed for each band. These capture the coupled effects of surface emissivity and atmospheric transmission. The SWA coefficients A₀, A₁, A₂ are then derived from Cᵢ, Dᵢ and the pre-computed Planck-linearization coefficients aᵢ, bᵢ (from Li = aᵢ + bᵢT regression).\n\n' +
               'Step 3 — Temperature Retrieval: The final land surface temperature is computed as Ts = A₀ + A₁ × T₁₀ − A₂ × T₁₁, where T₁₀ and T₁₁ are the at-sensor brightness temperatures from TIRS bands 10 and 11.',
             processingSteps: [
@@ -919,7 +919,7 @@ export const PARTS: Part[] = [
           },
           { id: 4, toolName: 'Atmospheric Pressure Profile', name: 'Hydrostatic Equation', equation: 'P(z) = P₀ × exp(−gz/RT)',
             reference: 'Holton, J.R. & Hakim, G.J. (2012) An Introduction to Dynamic Meteorology (5th ed.). Academic Press, ISBN: 978-0123848666, Chapter 2.',
-            paperUrl: 'https://www.sciencedirect.com/book/9780123846525/an-introduction-to-dynamic-meteorology',
+            paperUrl: 'https://www.sciencedirect.com/book/9780123848666/an-introduction-to-dynamic-meteorology',
             appliesTo: 'Pressure at altitude, 3D atmospheric structure, aviation altimetry',
             shortDescription: 'Computes atmospheric pressure at a given altitude using the hydrostatic balance assumption for a constant-temperature (isothermal) atmosphere',
             paperSummary: 'The hydrostatic equation is derived from the fundamental force balance in a static atmosphere: the vertical pressure gradient force balances gravity. From Holton & Hakim (2012) Chapter 2: dP/dz = −ρg. Combined with the ideal gas law P = ρRT, for an isothermal atmosphere this integrates to P(z) = P₀·exp(−gz/RT). The scale height H = RT/g (~8.5 km for Earth) gives the e-folding depth over which pressure decreases by factor e.',
@@ -998,7 +998,7 @@ export const PARTS: Part[] = [
             ],
           },
           { id: 6, toolName: 'Pollutant Transport Modeling', name: 'Advection-Diffusion Equation', equation: '∂C/∂t + u·∇C = D∇²C + S',
-            reference: 'Bird, R.B., Stewart, W.E. & Lightfoot, E.N. (2007) Transport Phenomena (2nd ed.). Wiley, ISBN: 978-0471410935, Chapter 4.',
+            reference: 'Bird, R.B., Stewart, W.E. & Lightfoot, E.N. (2007) Transport Phenomena (2nd ed.). Wiley, ISBN: 978-0-471-41077-5, Chapter 4.',
             paperUrl: 'https://www.wiley.com/en-us/Transport+Phenomena%2C+2nd+Edition-p-9780471410775',
             appliesTo: 'Pollutant transport, smoke/ash dispersion, tracer diffusion modeling',
             shortDescription: 'Models the transport and diffusion of atmospheric tracers using the advection-diffusion (Fickian) framework for pollutant concentration forecasting',
@@ -1126,8 +1126,8 @@ export const PARTS: Part[] = [
         id: 'hydro', number: 2, name: 'Hydrology & Oceanography', color: '#06b6d4',
         tools: [
           { id: 9, toolName: 'Reference Evapotranspiration', name: 'FAO-56 Penman-Monteith', equation: 'ET₀ = [0.408Δ(R_n-G) + γ(900/(T+273))u₂(e_s-e_a)] / [Δ+γ(1+0.34u₂)]',
-            reference: 'Allen, R.G., Pereira, L.S., Raes, D. & Smith, M. (1998) Crop Evapotranspiration — Guidelines for Computing Crop Water Requirements. FAO Irrigation and Drainage Paper 56, Rome. DOI: 10.4060/X0490E',
-            paperUrl: 'https://doi.org/10.4060/X0490E',
+            reference: 'Allen, R.G., Pereira, L.S., Raes, D. & Smith, M. (1998) Crop Evapotranspiration — Guidelines for Computing Crop Water Requirements. FAO Irrigation and Drainage Paper 56, Rome. FAO Irrigation and Drainage Paper 56 (no DOI)',
+            paperUrl: 'https://www.fao.org/3/X0490E/x0490e00.htm',
             appliesTo: 'Evapotranspiration, drought monitoring, irrigation scheduling',
             shortDescription: 'Computes reference evapotranspiration (ET₀) from meteorological data using the FAO-56 Penman-Monteith combination equation for a hypothetical grass reference crop',
             paperSummary: 'Allen et al. (1998) established the FAO-56 Penman-Monteith method as the sole recommended ET₀ equation, replacing earlier FAO Penman and radiation methods. The equation combines the energy balance (radiation term) with aerodynamic transport (vapor pressure deficit), parameterized for a hypothetical grass crop of height 0.12 m, surface resistance 70 s/m, and albedo 0.23. Validation against lysimeter data from 11 locations worldwide showed RMSE of 0.2–0.8 mm/day. The method has become the global standard for irrigation scheduling, drought assessment, and hydrological modeling.',
@@ -1374,7 +1374,7 @@ export const PARTS: Part[] = [
             ],
           },
           { id: 14, toolName: 'Tide Prediction', name: 'Tidal Harmonic Analysis', equation: 'h(t) = H₀ + Σ Aᵢcos(ωᵢt + φᵢ)',
-            reference: 'Pugh, D. & Woodworth, P. (2014) Sea-Level Science: Understanding Tides, Surges, Tsunamis and Mean Sea-Level Changes. Cambridge University Press. DOI: 10.1017/CBO9781139151740',
+            reference: 'Pugh, D. & Woodworth, P. (2014) Sea-Level Science: Understanding Tides, Surges, Tsunamis and Mean Sea-Level Changes. Cambridge University Press. DOI: 10.1017/CBO9781139235778',
             paperUrl: 'https://doi.org/10.1017/CBO9781139151740',
             appliesTo: 'Tide prediction, storm surge detection, sea-level analysis',
             shortDescription: 'Predicts tidal elevation as the sum of a mean sea level and multiple cosine-wave harmonic constituents representing tidal forcing from the Sun and Moon',
@@ -1710,7 +1710,7 @@ export const PARTS: Part[] = [
           },
           {
             id: 21, toolName: 'Ground Motion Prediction', name: 'Campbell-Bozorgnia NGA-West2 GMPE', equation: 'ln(PGA) = f_mag + f_att + f_flt + f_hng + f_site + f_basin + f_dip + f_hyp + f_atten',
-            reference: 'Campbell, K.W. & Bozorgnia, Y. (2014) NGA-West2 ground motion model for the average horizontal components of PGA, PGV, and 5%-damped linear acceleration response spectra. Earthquake Spectra, 30(3), 1087–1114. DOI: 10.1193/062913EQS175M.',
+            reference: 'Campbell, K.W. & Bozorgnia, Y. (2014) NGA-West2 ground motion model for the average horizontal components of PGA, PGV, and 5%-damped linear acceleration response spectra. Earthquake Spectra, 30(3), 1087–1115. DOI: 10.1193/062913EQS175M.',
             paperUrl: 'https://doi.org/10.1193/062913EQS175M',
             appliesTo: 'Ground motion prediction, ShakeMap',
             shortDescription: 'Predicts peak ground acceleration (PGA) as a function of magnitude, rupture distance, site Vs30, fault mechanism, dip, hanging-wall, basin depth, and hypocentral depth using the full NGA-West2 empirical model coefficients',
@@ -1924,7 +1924,7 @@ export const PARTS: Part[] = [
           {
             id: 26, toolName: 'Vegetation Health Index', name: 'Normalized Difference Vegetation Index (NDVI)', equation: 'NDVI = (NIR - Red)/(NIR + Red)',
             reference: 'Rouse, J.W., Haas, R.H., Schell, J.A., Deering, D.W. & Harlan, J.C. (1974) Monitoring the vernal advancement and retrogradation of natural vegetation. NASA/GSFC Final Report, 1–137.',
-            paperUrl: 'https://ntrs.nasa.gov/citations/19740001023',
+            paperUrl: 'https://ntrs.nasa.gov/citations/19740008955',
             appliesTo: 'Vegetation health, drought stress, deforestation',
             shortDescription: 'Computes the NDVI from red and near-infrared reflectance, quantifying photosynthetic activity and vegetation greenness as a normalized ratio between −1 and +1',
             paperSummary: 'Rouse et al. (1974) developed NDVI as part of NASA\'s Great Plains Corridor project using ERTS (Landsat-1) satellite data. The index exploits the spectral contrast between strong chlorophyll absorption in the red band (0.6–0.7 µm) and high reflectance of leaf cellular structure in the NIR band (0.7–1.1 µm). NDVI = (ρ_NIR − ρ_Red)/(ρ_NIR + ρ_Red) ranges from −1 to +1. Dense vegetation: NDVI=0.6–0.9; sparse vegetation: 0.2–0.5; bare soil: 0.05–0.3; water: <0. NDVI is the most widely used vegetation index globally, with data continuity from AVHRR (1981), MODIS (2000), and VIIRS (2012) providing a 40+ year climate data record.',
@@ -2288,7 +2288,7 @@ export const PARTS: Part[] = [
             paperUrl: 'https://doi.org/10.1029/JC091iC01p00975',
             appliesTo: 'Passive microwave sea ice retrieval',
             shortDescription: 'Estimates sea ice concentration from passive microwave brightness temperatures using the linear mixing of open water and ice radiances at multiple frequencies',
-            paperSummary: 'Comiso (1986) characterized Arctic winter sea ice using Nimbus-7 SMMR passive microwave data, establishing the NASA Team algorithm for sea ice concentration retrieval. The algorithm assumes that observed brightness temperature T_B at each polarization/frequency is a linear combination of open water and sea ice contributions: T_B = (1−C)·T_water + C·T_ice, where C is the ice concentration. The NASA Team algorithm uses the polarization ratio PR = (19V−19H)/(19V+19H) and the gradient ratio GR = (37V−19V)/(37V+19V) to solve for first-year ice, multi-year ice, and open water fractions. The approach is supplemented by the Bootstrap algorithm (Comiso, 1995) which uses 19V and 37V channels for improved performance in thin ice and melt pond conditions.',
+            paperSummary: 'Comiso (1986) characterized Arctic winter sea ice using Nimbus-7 SMMR passive microwave data, establishing the Bootstrap algorithm (Comiso-type) for sea ice concentration retrieval. The algorithm assumes that observed brightness temperature T_B at each polarization/frequency is a linear combination of open water and sea ice contributions: T_B = (1−C)·T_water + C·T_ice, where C is the ice concentration. The NASA Team algorithm uses the polarization ratio PR = (19V−19H)/(19V+19H) and the gradient ratio GR = (37V−19V)/(37V+19V) to solve for first-year ice, multi-year ice, and open water fractions. The approach is supplemented by the Bootstrap algorithm (Comiso, 1995) which uses 19V and 37V channels for improved performance in thin ice and melt pond conditions.',
             scientificConcept: 'Passive microwave radiometers measure the natural thermal emission from the Earth\'s surface at microwave frequencies (typically 6–89 GHz). Open water and sea ice have very different microwave emissivities: water has low emissivity (e≈0.4–0.5, appearing cold in brightness temperature) while sea ice has high emissivity (e≈0.9–0.95, appearing warm). The contrast is largest at 18–37 GHz. The presence of atmospheric water vapor and clouds has minimal effect at these frequencies (unlike visible/IR), enabling all-weather, day/night observations. The linear mixing model T_B = (1−C)·T_water + C·T_ice assumes: (1) the sensor footprint contains only water and ice in proportions C, (2) the effective radiating temperature of both surfaces is similar (≈ 271 K for ice, ≈ surface temperature for water), (3) atmospheric effects are negligible. For thin ice (<30 cm), the emissivity differs from thick ice, requiring the Bootstrap algorithm or thin-ice correction algorithms.',
             inputs: [
               { symbol: 'C', label: 'Ice Concentration (auto: NSIDC NRT CDR V4 AMSR2)', unit: 'fraction', default: null, min: 0, max: 1, group: 'Ice Conditions' },
@@ -5949,7 +5949,7 @@ export const PARTS: Part[] = [
             scientificConcept: 'The ionosphere delays GPS signals by Δτ = 40.3·TEC/(c·f²) where TEC is the total electron content along the slant path, c is speed of light, and f is frequency. At L1 (f=1.57542 GHz): Δτ = 1.35×10⁻⁶·TEC. At zenith, TEC ranges from 10–60 TECU, giving delays of 1.3–8.1 m. The Klobuchar model approximates the diurnal variation of vertical TEC as a cosine function: TEC_v(φ_m, t) = A₀ + A·cos(2π(t−t₀)/P). The amplitude A (TEC variation from night to day maximum) varies with geomagnetic latitude: maximum at the equator (~40 TECU), minimum at mid-latitudes (~20 TECU), moderate at high latitudes (~15 TECU). The period P is typically 14 hours. The α and β coefficients in the GPS navigation message are updated every 1–6 days and are optimized for global average ionospheric conditions, not for local or storm-time conditions.',
             inputs: [
               { symbol: 'A', label: 'Amplitude', unit: 's', default: 5e-9, min: 0, max: 1e-6, group: 'Model Parameters' },
-              { symbol: 'x', label: 'Local Time Phase', unit: 'rad', default: 0.5, min: 0, max: 2, group: 'Model Parameters' },
+              { symbol: 't_sec', label: 'Local Time at IPP', unit: 's', default: 50400, min: 0, max: 86400, group: 'Model Parameters' },
               { symbol: 'φ_m', label: 'Geomagnetic Latitude of IPP', unit: '°', default: 45, min: -90, max: 90, group: 'Ionosphere' },
               { symbol: 'elevation', label: 'Satellite Elevation', unit: '°', default: 90, min: 5, max: 90, group: 'Ionosphere' }
             ],

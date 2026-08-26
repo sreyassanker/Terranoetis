@@ -38,7 +38,7 @@ import { OracleChainRenderer, type CausalChainLink } from '@/rendering/oracleCha
 import { interpolateIDW } from '@/rendering/idwInterpolation';
 import type { InterpGrid } from '@/rendering/idwInterpolation';
 import { extractPointsFromResult } from '@/rendering/toolResultParser';
-import { showInterpSurface, clearInterpSurface, getViewDependentResolution } from '@/rendering/surfaceRenderer';
+import { showInterpSurface, clearInterpSurface, getViewDependentResolution, getCurrentGrid, probeGridValue, legendGradientCSS } from '@/rendering/surfaceRenderer';
 import {
   loadAirspaces,
   addSpaceDebrisEntities,
@@ -113,6 +113,7 @@ import { LAYER_GROUPS, LAYER_CATEGORIES, LEGACY_DEFAULTS } from '@/lib/layerConf
 import { listChats, getChat, saveChat, deleteChat, generateChatId, autoTitle, groupChatsByDate, type ChatSession, type ChatListItem, type ChatMessage, type ToolEvent, type PlanCard } from '@/lib/chatStore';
 import { StreamingMarkdownRenderer, extractArtifacts, fetchSuggestions, fetchTiers, resumeStream, generatePlanClient, type SuggestionContextClient } from '@/lib/advancedChat';
 import { exportConversationAsPDF } from '@/lib/pdfReport';
+import { formatSci } from '@/lib/formatSci';
 import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, ModelTierSelector, TraceExpander, VoiceModeIndicator } from '@/components/chat/AdvancedChatViews';
 
 /* ═════════════════════════════════════════════════════════════════
@@ -1023,6 +1024,14 @@ function TopbarMenu({
    MAIN APP COMPONENT
    ═════════════════════════════════════════════════════════════════ */
 
+/** Compact numeric formatting for the raster legend / value probe (kept small
+ *  enough for narrow legend bars; falls back to scientific notation for
+ *  extreme magnitudes). */
+function formatValue(v: number): string {
+  if (!Number.isFinite(v)) return '—';
+  return formatSci(v, 2);
+}
+
 export default function App() {
   /* ── Refs ── */
   const viewerRef = useRef<Cesium.Viewer | null>(null);
@@ -1035,6 +1044,21 @@ export default function App() {
   const weatherCardsRef = useRef<WeatherCardData[]>([]);
   const heatmapDataRef = useRef<HeatmapPoint[]>([]);
   const activeHeatmapRef = useRef<string | null>(null);
+  /** Ref synced with toolSurfaceLegend state so Cesium event closures read
+   *  the latest value without stale-closure issues. */
+  const toolSurfaceLegendRef = useRef<typeof toolSurfaceLegend>(null);
+  /** Legend metadata for the current tool-result heatmap surface (grid + unit),
+   *  shown as a color-bar legend on the globe (raster map convention). */
+  const [toolSurfaceLegend, setToolSurfaceLegend] = useState<{
+    label: string; unit?: string;
+    valueMin: number; valueMax: number; valueMean: number; valueStd: number; valueMedian: number; finiteCellCount: number;
+  } | null>(null);
+  /** Raster value probe: the heatmap cell under the cursor while hovering the
+   *  tool-result surface on the 3D globe (QGIS identify-tool behaviour). */
+  const [toolSurfaceProbe, setToolSurfaceProbe] = useState<{
+    x: number; y: number; value: number; lat: number; lon: number;
+  } | null>(null);
+  useEffect(() => { toolSurfaceLegendRef.current = toolSurfaceLegend; }, [toolSurfaceLegend]);
   const clickHandlerRef = useRef<Cesium.Event.RemoveCallback | null>(null);
   const screenSpaceHandlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
   const forkRendererRef = useRef<ForkRenderer | null>(null);
@@ -1674,52 +1698,65 @@ export default function App() {
       console.log('[Surface] Rendering', points.length, 'points, bbox:', b, 'grid:', width, 'x', height);
       if (b.latMin >= b.latMax || b.lonMin >= b.lonMax) { console.error('[Surface] Invalid bbox:', b); return; }
       const grid = interpolateIDW(points, b, width, height);
-      showInterpSurface(viewer, grid, undefined, 0.65, true);
+      showInterpSurface(viewer, grid, undefined, 0.65, true, activeStudyAreaPolygon ?? undefined);
     } catch (e) {
       console.error('[Surface] Render error:', (e as Error)?.message, (e as Error)?.stack);
     }
-  }, [activeBbox]);
+  }, [activeBbox, activeStudyAreaPolygon]);
 
   const toolResultEntityRef = useRef<Cesium.Entity | null>(null);
   const _toolSurfacePrimitive = useRef<unknown>(null);
 
   const handleToolResult = useCallback((
     toolId: number, label: string, lat: number, lon: number, value?: number,
-    grid?: { latMin: number; latMax: number; lonMin: number; lonMax: number; nLat: number; nLon: number; values: number[]; valueMin: number; valueMax: number; hasNaN: boolean },
+    grid?: { latMin: number; latMax: number; lonMin: number; lonMax: number; nLat: number; nLon: number; values: number[]; valueMin: number; valueMax: number; valueMean?: number; valueStd?: number; valueMedian?: number; finiteCellCount?: number; hasNaN: boolean },
     unit?: string, vizType?: string,
   ) => {
     const viewer = viewerRef.current;
     if (!viewer) return;
-    if (toolResultEntityRef.current) {
-      viewer.entities.remove(toolResultEntityRef.current);
-    }
-    toolResultEntityRef.current = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat),
-      label: {
-        text: label,
-        font: 'bold 18px monospace',
-        fillColor: Cesium.Color.YELLOW,
-        backgroundColor: new Cesium.Color(0, 0, 0, 0.6),
-        showBackground: true,
-        pixelOffset: new Cesium.Cartesian2(0, -30),
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        outlineWidth: 2,
-        outlineColor: Cesium.Color.BLACK,
-        scale: 1.2,
-        eyeOffset: new Cesium.Cartesian3(0, 0, -100),
-      },
-      point: {
-        pixelSize: 12,
-        color: Cesium.Color.YELLOW.withAlpha(0.8),
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-      },
-    });
 
     const b = activeBbox;
+    const spatialViz = ['heatmap', 'contour', 'vector'];
+    // Skip the yellow labelled point entirely for spatial-field tools
+    // (heatmap/contour/vector) — the field overlay IS the result; a single
+    // centre pixel value + dot on the globe is misleading (the field varies).
+    if (!spatialViz.includes(vizType ?? '')) {
+      if (toolResultEntityRef.current) {
+        viewer.entities.remove(toolResultEntityRef.current);
+      }
+      toolResultEntityRef.current = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        label: {
+          text: label,
+          font: 'bold 18px monospace',
+          fillColor: Cesium.Color.YELLOW,
+          backgroundColor: new Cesium.Color(0, 0, 0, 0.6),
+          showBackground: true,
+          pixelOffset: new Cesium.Cartesian2(0, -30),
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          outlineWidth: 2,
+          outlineColor: Cesium.Color.BLACK,
+          scale: 1.2,
+          eyeOffset: new Cesium.Cartesian3(0, 0, -100),
+        },
+        point: {
+          pixelSize: 12,
+          color: Cesium.Color.YELLOW.withAlpha(0.8),
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+        },
+      });
+    }
+
     // QGIS-style raster output: render the computed spatial grid as a styled
     // surface over the study area (real per-cell values, not a flat plane).
     if (grid && b && b.latMin < b.latMax && b.lonMin < b.lonMax) {
+      // Clear any leftover yellow point from a previous scalar-tool run — the
+      // heatmap overlay is the result for spatial tools.
+      if (toolResultEntityRef.current) {
+        viewer.entities.remove(toolResultEntityRef.current);
+        toolResultEntityRef.current = null;
+      }
       const n = grid.nLat * grid.nLon;
       const data = new Float32Array(n);
       for (let i = 0; i < n; i++) {
@@ -1736,7 +1773,18 @@ export default function App() {
         latMin: grid.latMin, latMax: grid.latMax, lonMin: grid.lonMin, lonMax: grid.lonMax,
         valueMin: grid.valueMin, valueMax: grid.valueMax,
       };
-      showInterpSurface(viewer, interpGrid, undefined, 0.6, false);
+      showInterpSurface(viewer, interpGrid, undefined, 0.6, false, activeStudyAreaPolygon ?? undefined);
+      // Raster-map legend: show the field colour bar + zonal statistics on the
+      // globe whenever a spatial grid is displayed.
+      setToolSurfaceLegend({
+        label, unit,
+        valueMin: grid.valueMin, valueMax: grid.valueMax,
+        valueMean: grid.valueMean ?? Number.NaN,
+        valueStd: grid.valueStd ?? Number.NaN,
+        valueMedian: grid.valueMedian ?? Number.NaN,
+        finiteCellCount: grid.finiteCellCount ?? 0,
+      });
+      setToolSurfaceProbe(null);
       return;
     }
 
@@ -1744,7 +1792,6 @@ export default function App() {
     // is active and a scalar value exists, AND the tool is a spatial viz type
     // (heatmap/contour/vector). Non-spatial types (timeseries, profile, scatter,
     // gauge, spectrum, bar, etc.) show only the labeled point — no flat rectangle.
-    const spatialViz = ['heatmap', 'contour', 'vector'];
     if (!b || b.latMin >= b.latMax || b.lonMin >= b.lonMax || value == null || !spatialViz.includes(vizType ?? '')) return;
     const camAlt = viewer.camera.positionCartographic.height;
     const { width, height } = getViewDependentResolution(camAlt, 100);
@@ -1760,12 +1807,14 @@ export default function App() {
         });
       }
     }
-    if (pts.length < 3) return;
+    if (pts.length < 3) { setToolSurfaceLegend(null); setToolSurfaceProbe(null); return; }
     const idwGrid = interpolateIDW(pts, b, width, height);
-    showInterpSurface(viewer, idwGrid, undefined, 0.6, true);
-  }, [activeBbox]);
+    showInterpSurface(viewer, idwGrid, undefined, 0.6, true, activeStudyAreaPolygon ?? undefined);
+  }, [activeBbox, activeStudyAreaPolygon]);
 
   const handleClearToolResult = useCallback(() => {
+    setToolSurfaceLegend(null);
+    setToolSurfaceProbe(null);
     const viewer = viewerRef.current;
     if (!viewer) return;
     if (toolResultEntityRef.current) {
@@ -2120,6 +2169,24 @@ export default function App() {
     handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.MIDDLE_DOWN);
     handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.WHEEL);
     handler.setInputAction(unlockOnInteract, Cesium.ScreenSpaceEventType.PINCH_START);
+    // ── Raster value probe ──
+    // While hovering the 3D globe with a tool-result heatmap surface active,
+    // identify the exact cell under the cursor and show its value (QGIS
+    // identify-tool behaviour, per cartographic raster-map convention).
+    handler.setInputAction((move: Cesium.ScreenSpaceEventHandler.MotionEvent) => {
+      if (v.isDestroyed() || !getCurrentGrid()) { setToolSurfaceProbe(null); return; }
+      if (toolSurfaceLegendRef.current === null) { setToolSurfaceProbe(null); return; }
+      let cart: Cesium.Cartesian3 | undefined;
+      try { cart = v.scene.pickPosition(move.endPosition); } catch { /* pick can throw outside globe */ }
+      if (!cart || !Cesium.defined(cart)) { setToolSurfaceProbe(null); return; }
+      const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cart);
+      if (!carto) { setToolSurfaceProbe(null); return; }
+      const lon = Cesium.Math.toDegrees(carto.longitude);
+      const lat = Cesium.Math.toDegrees(carto.latitude);
+      const hit = probeGridValue(lat, lon);
+      if (!hit) { setToolSurfaceProbe(null); return; }
+      setToolSurfaceProbe({ x: move.endPosition.x, y: move.endPosition.y, value: hit.value, lat: hit.lat, lon: hit.lon });
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
     handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
       // The viewer may have been destroyed while the interaction was queued.
       if (v.isDestroyed()) return;
@@ -9355,6 +9422,57 @@ export default function App() {
           <div className="heatmap-legend-title">Seismic Density</div>
           <div className="heatmap-gradient" />
           <div className="heatmap-labels"><span>Low</span><span>Medium</span><span>High</span></div>
+        </div>
+      )}
+
+      {/* Tool-result raster legend: vertical colour bar + zonal statistics.
+          Positioned bottom-left to avoid the right-side analytics panel. */}
+      {toolSurfaceLegend && (
+        <div className="glass-panel" style={{
+          position: 'absolute', left: 16, bottom: 100, zIndex: 85,
+          minWidth: 170, padding: '8px 10px', borderRadius: 8,
+          fontFamily: 'JetBrains Mono, monospace',
+        }}>
+          <div style={{ fontSize: 9, fontWeight: 600, color: '#c4b5fd', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5, maxWidth: 160 }} title={toolSurfaceLegend.label}>
+            {toolSurfaceLegend.label}
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+            {/* Vertical gradient bar */}
+            <div style={{
+              width: 14, borderRadius: 4,
+              background: legendGradientCSS(),
+              flexShrink: 0, position: 'relative',
+            }}>
+              <div style={{ position: 'absolute', top: -2, left: 18, fontSize: 8, color: '#94a3b8', whiteSpace: 'nowrap' }}>{formatValue(toolSurfaceLegend.valueMax)}</div>
+              <div style={{ position: 'absolute', bottom: -2, left: 18, fontSize: 8, color: '#94a3b8', whiteSpace: 'nowrap' }}>{formatValue(toolSurfaceLegend.valueMin)}</div>
+            </div>
+            {/* Statistics */}
+            <div style={{ fontSize: 9, color: '#94a3b8', lineHeight: 1.6, marginLeft: 6 }}>
+              <div>Mean <b style={{ color: '#e2e8f0' }}>{formatValue(toolSurfaceLegend.valueMean)}</b></div>
+              <div>σ <b style={{ color: '#e2e8f0' }}>{formatValue(toolSurfaceLegend.valueStd)}</b></div>
+              <div>Med <b style={{ color: '#e2e8f0' }}>{formatValue(toolSurfaceLegend.valueMedian)}</b></div>
+              <div style={{ color: '#64748b' }}>{toolSurfaceLegend.finiteCellCount} cells</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Raster value probe: exact heatmap cell value under the cursor */}
+      {toolSurfaceProbe && (
+        <div style={{
+          position: 'absolute', left: toolSurfaceProbe.x + 14, top: toolSurfaceProbe.y + 14,
+          zIndex: 90, pointerEvents: 'none',
+          padding: '6px 10px', borderRadius: 6,
+          background: 'rgba(0,0,0,0.78)', border: '1px solid rgba(255,255,255,0.15)',
+          fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#e2e8f0',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+        }}>
+          <div style={{ color: '#a78bfa', fontWeight: 600, marginBottom: 2 }}>
+            {formatValue(toolSurfaceProbe.value)}{toolSurfaceLegend?.unit ? ` ${toolSurfaceLegend.unit}` : ''}
+          </div>
+          <div style={{ color: '#64748b', fontSize: 9 }}>
+            {toolSurfaceProbe.lat.toFixed(4)}°, {toolSurfaceProbe.lon.toFixed(4)}°
+          </div>
         </div>
       )}
 
