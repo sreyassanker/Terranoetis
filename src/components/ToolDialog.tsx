@@ -16,7 +16,9 @@ import { formatSci } from '@/lib/formatSci';
 export interface ToolGrid {
   latMin: number; latMax: number; lonMin: number; lonMax: number;
   nLat: number; nLon: number; values: number[];
-  valueMin: number; valueMax: number; hasNaN: boolean;
+  valueMin: number; valueMax: number;
+  valueMean: number; valueStd: number; valueMedian: number;
+  finiteCellCount: number; hasNaN: boolean;
 }
 
 interface ToolDialogProps {
@@ -115,7 +117,15 @@ function formatResult(val: unknown, unit?: string): string {
 }
 
 const GridHeatmap: React.FC<{ grid: ToolGrid; color: string }> = ({ grid }) => {
-  const { nLat, nLon, values, valueMin, valueMax, hasNaN } = grid;
+  const { nLat, nLon, values, valueMin, valueMax, valueMean, valueStd, valueMedian, finiteCellCount, hasNaN } = grid;
+  // Flip rows so the mini-map is north-up (row 0 = latMin = south → bottom).
+  const flipped = React.useMemo(() => {
+    const arr: number[] = new Array(values.length);
+    for (let r = 0; r < nLat; r++)
+      for (let c = 0; c < nLon; c++)
+        arr[(nLat - 1 - r) * nLon + c] = values[r * nLon + c];
+    return arr;
+  }, [values, nLat, nLon]);
   return (
     <div>
       <div style={{
@@ -126,7 +136,7 @@ const GridHeatmap: React.FC<{ grid: ToolGrid; color: string }> = ({ grid }) => {
         aspectRatio: `${nLon}/${nLat}`,
         maxWidth: '100%',
       }}>
-        {values.map((v, i) => (
+        {flipped.map((v, i) => (
           <div key={i} title={Number.isFinite(v) ? v.toFixed(3) : 'NaN'}
             style={{
               background: colorRamp(v, valueMin, valueMax),
@@ -138,6 +148,15 @@ const GridHeatmap: React.FC<{ grid: ToolGrid; color: string }> = ({ grid }) => {
         <span>{formatResult(valueMin)}</span>
         <span>{nLat}×{nLon} grid</span>
         <span>{formatResult(valueMax)}</span>
+      </div>
+      <div style={{ marginTop: 6, padding: '6px 8px', borderRadius: 4, background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.15)' }}>
+        <div style={{ fontSize: 8, fontWeight: 600, color: '#c4b5fd', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Grid Statistics</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '3px 12px', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}>
+          <span style={{ color: '#94a3b8' }}>Mean <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{formatResult(valueMean)}</span></span>
+          <span style={{ color: '#94a3b8' }}>Std Dev <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{formatResult(valueStd)}</span></span>
+          <span style={{ color: '#94a3b8' }}>Median <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{formatResult(valueMedian)}</span></span>
+          <span style={{ color: '#94a3b8' }}>Cells <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{finiteCellCount} / {nLat * nLon}</span></span>
+        </div>
       </div>
       {hasNaN && (
         <div style={{ fontSize: 8, color: '#f59e0b', marginTop: 2 }}>Some cells produced non-finite values (shown grey).</div>
