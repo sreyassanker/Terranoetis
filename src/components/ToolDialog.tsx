@@ -196,6 +196,23 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
         ? { ...DEFAULT_STUDY_AREA, mode: 'two-points' as const, lat1: autoPoint.lat, lon1: autoPoint.lon, lat2: autoPoint2?.lat ?? autoPoint.lat + 5, lon2: autoPoint2?.lon ?? autoPoint.lon + 5 }
         : { ...DEFAULT_STUDY_AREA, mode: defaultMode };
   const [area, setArea] = useState<StudyArea>(initialArea);
+  // Sync the study area when the drawn globe bbox changes AFTER the tool is
+  // already open (e.g. user draws the box after opening the dialog). Without
+  // this, `area` stays frozen at its mount-time default and the tool keeps
+  // using stale lat/lon. Only auto-update bbox-mode tools; point-mode tools
+  // keep their explicit point until the user edits it.
+  React.useEffect(() => {
+    if (!supportsBbox || !bbox || bbox.latMin >= bbox.latMax || bbox.lonMin >= bbox.lonMax) return;
+    setArea(prev => {
+      if (prev.mode !== 'bbox') {
+        return { mode: 'bbox' as const, lat: 0, lon: 0, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, lat1: bbox.latMin, lon1: bbox.lonMin, lat2: bbox.latMax, lon2: bbox.lonMax };
+      }
+      const same = Math.abs(prev.latMin - bbox.latMin) < 1e-9 && Math.abs(prev.latMax - bbox.latMax) < 1e-9
+        && Math.abs(prev.lonMin - bbox.lonMin) < 1e-9 && Math.abs(prev.lonMax - bbox.lonMax) < 1e-9;
+      if (same) return prev;
+      return { ...prev, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, lat1: bbox.latMin, lon1: bbox.lonMin, lat2: bbox.latMax, lon2: bbox.lonMax };
+    });
+  }, [bbox, supportsBbox]);
   const isMultiYear = tool.analysisMeta?.timeGranularity === 'multi-year';
   const [start, setStart] = useState(isMultiYear ? '2020' : '2024-01-01');
   const [end, setEnd] = useState(isMultiYear ? '2024' : '2024-12-31');
