@@ -264,12 +264,13 @@ const INSTANT: [number, number][] = [
   // that instant.
   [1, 1],        // 1 Split-window LST — Landsat scene date
   [5, 5],        // 5 Geostrophic wind — ERA5 850 hPa pressure field date
+  [9, 9],        // 9 FAO-56 PM — ET₀ is a DAILY value from a single day's
+                 //   meteorology (FAO-56, Allen et al. 1998); weekly/monthly
+                 //   are averages of days, never accumulation → INSTANT
   [10, 10],      // 10 SCS-CN — single storm (IMERG) event date
   [12, 12],      // 12 Rational method — storm intensity date
-  [14, 18],      // 14 Tidal (NOAA epoch); 15 Ekman; 16 geostrophic current;
+  [15, 18],      // 15 Ekman; 16 geostrophic current;
                  // 17 ocean heat budget (ERA5 fluxes); 18 Green-Ampt (storm)
-  [26, 35],      // 26-35 remote-sensing indices / CWSI / snowmelt / sea-ice
-                 // — Landsat/MODIS/NSIDC scene date
   [56, 56],      // 56 Wanninkhof CO₂ flux — SST/wind/mooring date
   [63, 63],      // 63 Bigleaf fluxes — weather at a time
   [73, 74],      // 73 Pierson-Moskowitz; 74 Stockdon runup — ERA5 wave date
@@ -284,9 +285,14 @@ const INSTANT: [number, number][] = [
 ];
 const RANGE: [number, number][] = [
   // Accumulate / fit over a date window.
-  [9, 9],        // 9 FAO-56 PM — daily ET₀ accumulation
+  [14, 14],      // 14 Tidal harmonic prediction — periodic; a range lets the
+                 //   user produce the tide curve over days (Pugh & Woodworth)
   [13, 13],      // 13 Muskingum — USGS streamflow window
   [19, 25],      // 19-25 seismic catalog window (G-R, Omori, GMPE, scaling)
+  [26, 35],      // 26-35 satellite indices — single scene is the default, but
+                 //   a date range switches to multi-scene composite (MVC or
+                 //   mean across cloud-free scenes in the window, per the
+                 //   operational standard: MODIS 16-day composite, Holben 1986)
   [51, 51],      // 51 Monteith LUE — seasonal/annual GPP
   [53, 53],      // 53 NEE — flux over a window
   [58, 61],      // 58 GDD; 59 Priestley-Taylor; 60 Hargreaves; 61 FAO yield
@@ -597,7 +603,14 @@ function deriveTemporalControls(id: number, domainNumber: number): TemporalContr
   };
 
   const extra = domainControls[domainNumber] ?? [];
-  return Array.from(new Set([...controls, ...extra.filter(c => !c.includes('pressure') && !c.includes('return'))]));
+  let result = Array.from(new Set([...controls, ...extra.filter(c => !c.includes('pressure') && !c.includes('return'))]));
+  // Tide (14): harmonic prediction h(t) is evaluated at a specific time of day
+  // (Pugh & Woodworth 2014). With a range we expose start/end time so the user
+  // can pin/span the tidal curve — a bare date can't resolve the ~12.42 h M₂.
+  if (id === 14) {
+    result = Array.from(new Set([...result, 'start-time', 'end-time']));
+  }
+  return result;
 }
 
 function deriveTemporalMode(domainNumber: number): AnalysisMeta['temporalMode'] {

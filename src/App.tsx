@@ -1071,6 +1071,13 @@ export default function App() {
   } | null>(null);
   /** Active color scheme for the tool-result heatmap surface + legend. */
   const [toolSurfaceScheme, setToolSurfaceScheme] = useState('default');
+  /** Whether the hover value-probe is enabled. Off by default so the mouse
+   *  never runs the raycast unless the user explicitly turns it on (keeps
+   *  zoom/pan fully smooth). */
+  const [toolSurfaceProbeEnabled, setToolSurfaceProbeEnabled] = useState(false);
+  /** Ref for the MOUSE_MOVE handler to read the toggle without stale closure. */
+  const toolSurfaceProbeEnabledRef = useRef(false);
+  useEffect(() => { toolSurfaceProbeEnabledRef.current = toolSurfaceProbeEnabled; }, [toolSurfaceProbeEnabled]);
   /** The rendered grid for re-coloring on scheme change. */
   const toolSurfaceGridRef = useRef<InterpGrid | null>(null);
   /** Polyon mask used when the surface was rendered (re-applied on recolor). */
@@ -2182,6 +2189,14 @@ export default function App() {
     v.scene.postRender.addEventListener(syncWeatherCardPositions);
 
     const onPostRender = () => {
+      // Throttled to ~10 Hz: the 4 setStates force a full App re-render every
+      // frame, which competes with Cesium compositing during zoom/pan and
+      // causes the stutter that users report as "smooth without heatmap,
+      // laggy with it." (The heatmap overlay is just a static tile — the
+      // per-frame cost is the React render loop, not the tile itself.)
+      const now = performance.now();
+      if (now - lastCamTime < 100) return;
+      lastCamTime = now;
       const c = v.camera.positionCartographic;
       const latRaw = Cesium.Math.toDegrees(c.latitude);
       const lonRaw = Cesium.Math.toDegrees(c.longitude);
@@ -2190,6 +2205,7 @@ export default function App() {
       setCameraLatDir(latRaw >= 0 ? 'N' : 'S');
       setCameraLonDir(lonRaw >= 0 ? 'E' : 'W');
     };
+    let lastCamTime = 0;
     v.scene.postRender.addEventListener(onPostRender);
 
     setLoadingProgress(100);
@@ -2206,7 +2222,20 @@ export default function App() {
     // While hovering the 3D globe with a tool-result heatmap surface active,
     // identify the exact cell under the cursor and show its value (QGIS
     // identify-tool behaviour, per cartographic raster-map convention).
+    // Throttled: pickPosition is a depth-buffer raycast (~1-3 ms), and firing
+    // it on every mousemove (hundreds/sec, incl. during zoom/pan) causes the
+    // camera stutter. We cap it to ~12 Hz and skip entirely while navigating.
+    let lastProbeAt = 0;
+    let probeNav = 0;
+    v.scene.camera.moveStart.addEventListener(() => { probeNav++; });
+    v.scene.camera.moveEnd.addEventListener(() => { probeNav = Math.max(0, probeNav - 1); });
     handler.setInputAction((move: Cesium.ScreenSpaceEventHandler.MotionEvent) => {
+      // Probe only runs when explicitly enabled via the legend toggle.
+      if (!toolSurfaceProbeEnabledRef.current) { setToolSurfaceProbe(null); return; }
+      const now = performance.now();
+      if (probeNav > 0) { setToolSurfaceProbe(null); return; }
+      if (now - lastProbeAt < 80) return; // ~12 Hz cap
+      lastProbeAt = now;
       if (v.isDestroyed() || !getCurrentGrid()) { setToolSurfaceProbe(null); return; }
       if (toolSurfaceLegendRef.current === null) { setToolSurfaceProbe(null); return; }
       let cart: Cesium.Cartesian3 | undefined;
@@ -9500,6 +9529,29 @@ export default function App() {
                 <option key={key} value={key} style={{ background: '#1f2937', color: '#fff' }}>{cm.label}</option>
               ))}
             </select>
+          </div>
+          {/* Value probe toggle — hover value only runs when enabled (keeps
+              zoom/pan fully smooth otherwise). */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+            <span style={{ fontSize: 9, opacity: 0.7, whiteSpace: 'nowrap' }}>Probe</span>
+            <button
+              onClick={() => { setToolSurfaceProbeEnabled(p => { const n = !p; if (!n) setToolSurfaceProbe(null); return n; }); }}
+              style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: 'rgba(255,255,255,0.08)', color: '#fff',
+                border: `1px solid ${toolSurfaceProbeEnabled ? 'rgba(96,165,250,0.6)' : 'rgba(255,255,255,0.25)'}`,
+                borderRadius: 4, fontSize: 10, padding: '2px 6px', cursor: 'pointer',
+              }}
+              title="Show the exact heatmap value under the cursor when hovering"
+            >
+              <span>{toolSurfaceProbeEnabled ? 'On' : 'Off'}</span>
+              <span style={{ width: 20, height: 12, borderRadius: 6, background: toolSurfaceProbeEnabled ? '#3b82f6' : 'rgba(255,255,255,0.15)', position: 'relative', transition: 'background 0.15s' }}>
+                <span style={{
+                  position: 'absolute', top: 2, width: 8, height: 8, borderRadius: '50%', background: '#fff',
+                  left: toolSurfaceProbeEnabled ? 10 : 2, transition: 'left 0.15s',
+                }} />
+              </span>
+            </button>
           </div>
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', marginTop: 6, paddingTop: 5, fontSize: 10, opacity: 0.85 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px' }}>

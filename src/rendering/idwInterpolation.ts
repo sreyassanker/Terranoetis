@@ -257,8 +257,10 @@ export function renderGridToCanvas(
   // Render at a smooth sub-cell resolution so the field shows continuous
   // gradients (QGIS-style bilinear display) instead of blocky cell pixels,
   // and so a polygon mask hugs the drawn shape precisely. 4× on a 28×28 grid
-  // = 112×112 — cheap and visibly smooth.
-  const UPSCALE = 4;
+  // = 112×112 — cheap and visibly smooth. For very large grids (e.g. the IDW
+  // fallback up to 200×200) we cap the canvas at ~512px/side so the
+  // alpha-blended texture stays GPU-cheap instead of growing to 1600×1600.
+  const UPSCALE = Math.min(4, Math.max(1, Math.floor(512 / Math.max(grid.width, grid.height))));
   const W = grid.width * UPSCALE;
   const H = grid.height * UPSCALE;
   const canvas = document.createElement('canvas');

@@ -723,9 +723,8 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
 
             {resultIsFinite && (
               <button onClick={async () => {
-                const chartEl = document.getElementById('tool-result-chart');
                 await exportToolResultAsPDF({
-                  toolName: tool.name || tool.toolName || '',
+                  toolName: tool.toolName || tool.name || '',
                   toolId: tool.id,
                   resultText: `${formatResult(result.result, result.unit)}`,
                   resultUnit: result.unit,
@@ -734,7 +733,16 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
                   contextualAnalysis: result.interpretation?.contextualAnalysis,
                   recommendations: result.interpretation?.recommendations,
                   steps: result.steps,
-                  chartEl,
+                  series: result.series,
+                  seriesVizType: result.visualizationType,
+                  grid: result.grid ? {
+                    valueMin: result.grid.valueMin, valueMax: result.grid.valueMax,
+                    valueMean: result.grid.valueMean, valueStd: result.grid.valueStd,
+                    valueMedian: result.grid.valueMedian,
+                    finiteCellCount: result.grid.finiteCellCount, nLat: result.grid.nLat, nLon: result.grid.nLon,
+                  } : undefined,
+                  colorStops: schemeColors,
+                  gridValues: result.grid ? result.grid.values.filter((v): v is number => Number.isFinite(v)) : undefined,
                 });
               }}
                 style={{
