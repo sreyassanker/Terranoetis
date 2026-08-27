@@ -213,6 +213,30 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
       return { ...prev, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, lat1: bbox.latMin, lon1: bbox.lonMin, lat2: bbox.latMax, lon2: bbox.lonMax };
     });
   }, [bbox, supportsBbox]);
+  // Sync the study area when drawn points change AFTER the tool is already
+  // open (e.g. user places a point marker after opening the dialog). Without
+  // this, `area` stays frozen at its mount-time default and point-mode tools
+  // keep using stale lat/lon. The bbox effect above handles bbox-mode tools;
+  // this effect handles point-mode and two-points-mode tools.
+  React.useEffect(() => {
+    if (!points || points.length === 0) return;
+    const p = points[0];
+    setArea(prev => {
+      if (prev.mode === 'point') {
+        const same = Math.abs(prev.lat - p.lat) < 1e-9 && Math.abs(prev.lon - p.lon) < 1e-9;
+        if (same) return prev;
+        return { ...prev, lat: p.lat, lon: p.lon };
+      }
+      if (prev.mode === 'two-points') {
+        const p2 = points.length > 1 ? points[1] : { lat: p.lat + 5, lon: p.lon + 5 };
+        const same = Math.abs(prev.lat1 - p.lat) < 1e-9 && Math.abs(prev.lon1 - p.lon) < 1e-9
+          && Math.abs(prev.lat2 - p2.lat) < 1e-9 && Math.abs(prev.lon2 - p2.lon) < 1e-9;
+        if (same) return prev;
+        return { ...prev, lat1: p.lat, lon1: p.lon, lat2: p2.lat, lon2: p2.lon };
+      }
+      return prev;
+    });
+  }, [points]);
   const isMultiYear = tool.analysisMeta?.timeGranularity === 'multi-year';
   const [start, setStart] = useState(isMultiYear ? '2020' : '2024-01-01');
   const [end, setEnd] = useState(isMultiYear ? '2024' : '2024-12-31');
