@@ -420,33 +420,126 @@ The server exposes hundreds of API endpoints across the following categories:
 
 ## Analytical Models
 
-The platform implements 150 scientific equation engines covering 26 Earth science domains:
+The platform implements **150 scientific equation engines** across **26 domains in 7 parts**, each with a peer-reviewed reference (DOI-verified), a 7-stage scientific workflow pipeline, zonal grid statistics, and PDF report export.
 
-| Domain | Tools | Examples |
-|--------|-------|---------|
-| Land Surface Temperature | 1-3 | Split-window LST, Brightness Temperature, Planck Radiation |
-| Atmospheric Science | 4-10 | Pressure Profile, Geostrophic Wind, Evapotranspiration, Stability Indices |
-| Hydrology | 11-20 | Runoff, Flood Frequency, Sediment Transport, Groundwater Flow |
-| Oceanography | 21-30 | Wave Energy, Tidal Harmonic, Mixed Layer Depth, Coastal Inundation |
-| Geophysics & Seismology | 31-40 | Moment Magnitude, Seismic Moment, Attenuation, Fault Slip Rate |
-| Remote Sensing & Cryosphere | 41-50 | NDVI, NDSI, Albedo, SWE, Glacier Mass Balance |
-| Spatial & Extreme Events | 51-60 | Topographic Wetness, Slope Stability, Fire Behavior Index |
-| Soil & Land Surface | 61-70 | Soil Moisture, Erosivity, Hydraulic Conductivity, Carbon Flux |
-| Air Quality & Pollution | 71-80 | AQI, Gaussian Plume, Deposition Velocity, Ventilation Coefficient |
-| Climate & Energy | 81-90 | RQI, Cooling Degree Days, Solar Potential, Wind Power Density |
-| Ecology & Carbon Cycle | 91-100 | NPP, GPP, Carbon Stock, Habitat Suitability, Biodiversity Index |
-| Coastal & Estuarine | 101-110 | Sediment Flux, Salt Intrusion, Marsh Accretion, Tidal Prism |
-| Infrastructure & Risk | 111-120 | Seismic Hazard, Liquefaction, Flood Depth, Building Damage |
-| Agriculture & Food Security | 121-130 | Crop Yield, ET, Water Productivity, Frost Risk, Growing Degree Days |
-| Geodesy & Geodynamics | 131-140 | InSAR Displacement, GNSS Velocity, Moho Depth, Plate Motion |
-| Space & Advanced Physics | 141-150 | Ionospheric Delay, Doppler Shift, Hohmann Transfer, Lagrange Points, Mutual Information |
+### Architecture
 
-Each tool is defined with:
-- `toolId`, `name`, `vizType` (heatmap, spectrum, scalar, profile, vector, gauge, timeseries, isopleth, rose, classification)
-- Input parameters with `name`, `type`, `default`, `min`/`max`, `step`, `description`
-- Structured workflow steps with `equation`, `calculation`, `intermediate variables`, `unit conversion`
-- Quality control checks with `name`, `passed`, `message`, `severity`
-- Academic references with `paperUrl` (DOI or Google Scholar)
+Every tool passes through a **7-stage pipeline** (`server/analytical-models/toolWorkflows.ts`):
+1. **Input Validation** — range, type, physical-plausibility checks
+2. **Preprocessing** — unit conversion, derived-parameter computation
+3. **Computation** — the peer-reviewed equation (`engine.ts`, 10,247 lines of pure functions)
+4. **Post-processing** — classification, unit normalisation
+5. **Quality Control** — result sanity checks, outlier detection
+6. **Uncertainty Estimation** — error propagation / empirical RMSE
+7. **Interpretation** — contextual analysis + scientific recommendations
+
+Each tool has a scientific configuration (`toolConfigs.ts`): visualization type, classification bands, uncertainty template, QC valid range, contextual analysis, preprocessing notes, and recommendations.
+
+### Visualization Types
+
+| Type | Count | Tools |
+|------|-------|-------|
+| `scalar` | 39 | Point-value results (Planck, SVP, hydrostatic, Manning, Gumbel, GPD, FvCB, allometric, Eppley, Redfield, Chapman, Stommel, TEOS-10, Osborn-Cox, PWP, Stokes, Bruun, McCowan, Richardson, Schmidt, VEI, MTT, climate sensitivity, Planck feedback, Charney-Stern, Eady, Köhler, Z-R, satellite drag, collision, Kessler, HCW, Debye, DOP, Saastamoinen, Thiem, Cooper-Jacob, Froehlich, FSPL, etc.) |
+| `heatmap` | 27 | Spatial field (LST, pollutant transport, FAO-56 ET, SCS-CN, ocean heat budget, Green-Ampt, NDVI, NDWI, EVI, NDSI, NBR, FRP, sea ice, Gaussian plume, USLE, de Vries, ocean CO₂, Bigleaf, Chapman ozone, Stockdon runup, wave dispersion, stream power, SPI, TWI, Reynolds decomposition, frontogenesis) |
+| `timeseries` | 26 | Time-varying (Muskingum, Omori, snowmelt, GDD, Priestley-Taylor, Hargreaves, ET₀, lake evaporation, glacier PDD, Stefan, Herron-Langway, EBM, orbital decay, Kessler, Klobuchar, Hohmann, etc.) |
+| `gauge` | 13 | Dashboard-style (Richardson, GMPE, Mohr-Coulomb, CWSI, slope stability, Kp, DOP, S4, Dst, risk index, PMP, PDSI, etc.) |
+| `profile` | 12 | Vertical profiles (pressure, wind, Monin-Obukhov, log wind, FvCB, Beer-Lambert, TEOS-10, Stokes, NRLMSISE, IRI, Saastamoinen, Thiem, etc.) |
+| `vector` | 8 | Directional (geostrophic wind, Ekman, geostrophic current, Sverdrup, Stommel, Munk, vorticity, longshore transport) |
+| `scatter` | 8 | Correlation plots (semivariogram, van Genuchten, Brooks-Corey, Wells-Coppersmith, Z-R, EAD, Doppler, etc.) |
+| `contour` | 6 | Isoline maps (kriging, IDW, QGPV, Earth tides, EGM2008, geoid) |
+| `spectrum` | 5 | Spectral analysis (brightness temp, Kolmogorov, Pierson-Moskowitz, JONSWAP, Rossby wave) |
+| `bar` | 3 | Categorical bars (Gutenberg-Richter, Redfield, AQI) |
+| `distribution` | 2 | Probabilistic (Gumbel, GPD) |
+| `histogram` | 1 | Frequency distribution (Marshall-Palmer DSD) |
+
+### 7 Parts · 26 Domains · 150 Tools
+
+**Part I — Earth System Core** (Equations 1–50)
+
+| Domain | Tools | Description |
+|--------|-------|-------------|
+| 1. Atmospheric Science | 1–8 | Split-window LST, Planck brightness temperature, SVP, hydrostatic pressure, geostrophic wind, advection-diffusion, Richardson number, Kolmogorov spectrum |
+| 2. Hydrology & Oceanography | 9–18 | FAO-56 evapotranspiration, SCS curve-number runoff, Manning's, rational method, Muskingum flood routing, tide prediction, Ekman spiral, geostrophic current, ocean heat budget, Green-Ampt infiltration |
+| 3. Geophysics & Seismology | 19–25 | Gutenberg-Richter, Omori aftershock, Campbell-Bozorgnia GMPE, Mohr-Coulomb, moment magnitude, Brune stress drop, Wells-Coppersmith fault scaling |
+| 4. Remote Sensing & Cryosphere | 26–35 | NDVI, NDWI, NDMI, EVI, NDSI, NBR, FRP, CWSI, degree-day snowmelt, sea ice concentration |
+| 5. Spatial Analysis & Extreme Events | 36–42 | Haversine distance, ordinary kriging, IDW, Gaussian plume, Gumbel distribution, GPD, Matheron semivariogram |
+| 6. Soil Science & Land Surface | 43–50 | van Genuchten, Brooks-Corey, USLE/RUSLE, Q₁₀ soil respiration, de Vries thermal conductivity, Monin-Obukhov, log wind profile, Ball-Berry stomatal conductance |
+
+**Part II — Biosphere, Agriculture & Chemistry** (Equations 51–65)
+
+| Domain | Tools | Description |
+|--------|-------|-------------|
+| 7. Biosphere & Carbon Cycle | 51–57 | Monteith LUE, Beer-Lambert extinction, NEE, FvCB photosynthesis, Chave allometric biomass, Wanninkhof CO₂ uptake, Redfield ratios |
+| 8. Agriculture & Crop Science | 58–63 | McMaster GDD, Priestley-Taylor ET, Hargreaves ET, FAO-56 yield-water response, Eppley phytoplankton, Bigleaf Penman-Monteith |
+| 9. Atmospheric Chemistry | 64–65 | Chapman ozone equilibrium, Atkinson VOC-NOx lifetime |
+
+**Part III — Ocean & Coastal Advanced** (Equations 66–80)
+
+| Domain | Tools | Description |
+|--------|-------|-------------|
+| 10. Ocean Dynamics & Circulation | 66–73 | Sverdrup transport, Stommel western boundary, Munk viscous, Stommel box, TEOS-10 seawater, Osborn-Cox mixing, PWP mixed layer, Pierson-Moskowitz spectrum |
+| 11. Coastal & Wave Mechanics | 74–80 | Stockdon wave runup, Bruun rule, McCowan breaker, CERC longshore transport, Airy dispersion, Stokes drift, JONSWAP spectrum |
+
+**Part IV — Geomorphology, Limnology & Cryosphere** (Equations 81–95)
+
+| Domain | Tools | Description |
+|--------|-------|-------------|
+| 12. Geomorphology & Mass Wasting | 81–87 | Stream power law, Hack stream profiles, Richardson fractal, infinite slope stability, Voellmy friction, SPI, TWI |
+| 13. Limnology & Freshwater | 88–90 | Lake evaporation, Schmidt stability, Nash cascade unit hydrograph |
+| 14. Cryosphere & Volcanology | 91–95 | Glacier PDD, Stefan permafrost, Herron-Langway firn, VEI, Morton-Taylor plume |
+
+**Part V — Climate & Atmosphere Advanced** (Equations 96–110)
+
+| Domain | Tools | Description |
+|--------|-------|-------------|
+| 15. Climate Dynamics | 96–101 | Budyko-Sellers EBM, climate sensitivity, Planck feedback, Rossby wave, Charney-Stern baroclinic, Eady growth rate |
+| 16. Atmospheric Dynamics | 102–107 | QGPV, Reynolds decomposition, Ekman depth, Deardorff convective scale, Petterssen frontogenesis, vorticity equation |
+| 17. Cloud Physics | 108–110 | Köhler droplet, Marshall-Palmer DSD, Z-R radar relationship |
+
+**Part VI — Space Environment & Satellite** (Equations 111–130)
+
+| Domain | Tools | Description |
+|--------|-------|-------------|
+| 18. Geodesy | 111–115 | IERS rotation, Wahr Earth tides, EGM2008, Helmert transformation, orthometric height |
+| 19. Thermosphere/Ionosphere/Magnetosphere | 116–122 | NRLMSISE-00, IRI, Joule heating, S4 scintillation, magnetopause, Dst, Debye length |
+| 20. Satellite Dynamics & Space Debris | 123–127 | Satellite drag, orbital decay, collision probability, Kessler syndrome, Hill-Clohessy-Wiltshire |
+| 21. Solar-Terrestrial & GNSS | 128–130 | Kp index, DOP, Saastamoinen delay |
+
+**Part VII — Advanced Engineering & Risk** (Equations 131–150)
+
+| Domain | Tools | Description |
+|--------|-------|-------------|
+| 22. Groundwater & Subsurface | 131–134 | Thiem, Theis, Cooper-Jacob, Horton infiltration |
+| 23. Hazard, Risk & Disaster Engineering | 135–140 | UNISDR risk index, expected annual damage, AQI breakpoints, PMP, PDSI, Froehlich dam breach |
+| 24. Data Assimilation & State Estimation | 141–144 | EnKF, optimal interpolation, 4D-Var cost, Shannon entropy |
+| 25. Signal Processing & Communications | 145–147 | Free-space path loss, Klobuchar ionospheric delay, Doppler shift |
+| 26. Mathematical Frameworks | 148–150 | Hohmann transfer, Lagrange points, mutual information |
+
+### Key Features
+
+**Multi-Scene Composite (MVC):** Satellite indices (26–33) support a date-range composite mode. Single date = paper-faithful single-scene index. Date range = max-value composite (MVC, Holben 1986) across 5 cloud-free scenes — the operational standard used by MODIS 16-day and Landsat 8-day products.
+
+**Temporal Controls:** Tools have contextual time granularity — `instant` (single date, ~37 tools), `range` (start+end date, ~21 tools including GDD, seismic catalog, satellite indices, tide), `multi-year` (start/end year, 3 tools: EBM, PMP, PDSI), and `none` (static equations, ~89 tools).
+
+**Spatial Grid (28×28):** All 27 heatmap tools output a spatial field rasterized over the study-area bbox, with per-cell terrain, weather, and satellite data. Grid statistics (mean, median, σ, min, max, cell count) are computed automatically.
+
+**Zonal Statistics:** The panel shows a value-distribution histogram (20 bins) colored by the heatmap ramp, plus field statistics (Mean, Std Dev, Median, cell count).
+
+**Heatmap Rendering:** The globe surface is rendered via bilinear interpolation at 4× sub-cell resolution (112×112), with a per-pixel polygon mask for exact study-area boundary fill. Supports 8 color schemes (Default, Viridis, Turbo, Inferno, Plasma, Spectral, Cool-Warm, Grayscale, Terrain) switchable via the legend.
+
+**Colour-Scheme Switcher:** The legend includes a Colors dropdown (same 9 schemes as Kaggle simulation overlays) that re-renders both the globe heatmap and the legend gradient bar in real-time.
+
+**Raster Value Probe:** An optional On/Off toggle in the legend enables cursor hover over the heatmap to show the exact cell value + lat/lon (QGIS identify-tool behaviour). Off by default to keep zoom/pan fully smooth.
+
+**Scientific PDF Report:** Downloadable A4 report (jsPDF) with: cover header, tool title, result panel, outputs table, series chart (SVG→canvas), field statistics table, value-distribution histogram, heatmap colour bar legend, data sources, contextual analysis, recommendations, methodology steps, and two-pass "Page X of N" footers. Reports match the professional batch-generator format.
+
+**Hover Probe:** When enabled, hovering over the heatmap surface on the globe shows the exact cell value and coordinates. Throttled to ~12 Hz and skipped during camera movement to avoid zoom stutter.
+
+**7-Stage Scientific Workflow:** Each tool runs through input validation, preprocessing, equation computation, post-processing, quality control, uncertainty estimation, and interpretation — with a full workflow log visible in the advanced panel.
+
+**Data Sources:** Tools auto-fetch from 30+ live APIs (Open-Meteo, USGS, ERA5, NASA FIRMS, Landsat C2 L2, Sentinel Hub, NOAA NDBC, NOAA CO-OPS, GEBCO, ISRIC SoilGrids, WorldPop, MODIS, SMAP, SMOS, GPM IMERG, CHIRPS, HydroSHEDS, AVISO, CAMS, CERES, GOES, Himawari, Copernicus Marine, NSIDC, NOAA SWPC, and more) — all fetched contextually based on the tool's governing equation.
+
+**PDF Report Export:** Each tool result can be downloaded as a professional A4 PDF. Includes: cover header with tool name and ID, result panel, secondary outputs table, series chart (SVG-rendered), field statistics, value-distribution histogram, heatmap colour bar, data provenance, contextual analysis, recommendations, methodology steps, and two-pass page numbering. The batch generator (`scripts/generateToolReports.mjs`) produces all 150 reports in a single run.
 
 ## AI Intelligence Panel
 
