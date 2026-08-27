@@ -27,7 +27,7 @@ const OUT_DIR = new URL('../reports/', import.meta.url).pathname;
 
 // Build tool name lookup from the frontend model
 const toolNames = {};
-for (const part of PARTS) for (const d of part.domains) for (const t of d.tools) toolNames[t.id] = t.name;
+for (const part of PARTS) for (const d of part.domains) for (const t of d.tools) toolNames[t.id] = t.toolName || t.name;
 
 // ── Palette / typography ladder ─────────────────────────────────────
 const INK = [22, 27, 34], INK_SOFT = [71, 85, 105], INK_FAINT = [148, 163, 184];
@@ -68,6 +68,14 @@ function sanitize(t) {
 }
 const stripHtml = (s) => String(s ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 const fmtNum = (v) => { if (!Number.isFinite(v)) return 'NaN'; return formatSciPdf(v, 4); };
+/** Date/time in dd/MM/yyyy, HH:mm format (e.g. 27/08/2026, 14:30). */
+const fmtDate = (d = new Date()) => {
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}, ${hh}:${mi}`;
+};
 
 /** Build an SVG chart for the given series + vizType, render to PNG via headless Chrome. */
 async function renderChartPNG(series, vizType) {
@@ -154,7 +162,7 @@ export async function buildReportPdf(id, toolName, r) {
   doc.setFont('helvetica', 'normal'); doc.setFontSize(F_B); doc.setTextColor(...INK_SOFT);
   doc.text(`(Tool ${id})`, MARGIN, y); y += 10;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(F_H); doc.setTextColor(...INK_FAINT);
-  doc.text(`Generated ${new Date().toLocaleString()}`, MARGIN, y); y += 8;
+  doc.text(`Generated ${fmtDate()}`, MARGIN, y); y += 8;
   rule(); y += 6;
 
   // ── Result panel ──

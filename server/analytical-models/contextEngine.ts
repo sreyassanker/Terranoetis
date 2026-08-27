@@ -520,6 +520,15 @@ const SAFE_THERMAL_TOOLS = new Set<number>([1, 26, 27, 28, 29, 30, 31, 32, 33, 5
 
 type SatThermalData = import('../data/satelliteThermal').LandsatThermalData | null;
 
+/** Module-scope promise-with-timeout helper (computeWithContext defines its own
+ *  local `safe`; this copy serves the satellite-composite helper). */
+function safeAny<T>(p: Promise<T>, fb: T, timeoutMs = 10000): Promise<T> {
+  return Promise.race([
+    p.then(v => (v == null && fb != null ? fb : v) as T).catch(() => fb),
+    new Promise<T>(r => setTimeout(() => r(fb), timeoutMs)),
+  ]);
+}
+
 function mapInputs(
   id: number,
   userInputs: Record<string, number>,
@@ -3288,8 +3297,40 @@ export async function computeWithContext(
   const enrichedInputs = alignInputs(id, mapInputs(id, normInputs, { ...ctx, pop: popData, filters: context?.filters as Record<string, unknown> | undefined }));
   const computeFn = EQUATION_ENGINE[id];
   if (!computeFn) return null;
-  const baseResult = computeFn(enrichedInputs);
+  let baseResult = computeFn(enrichedInputs);
   if (!baseResult) return null;
+
+  // Multi-scene composite (satellite indices, date RANGE): when the user gives
+  // start≠end for a single-scene index, sample cloud-free Landsat scenes across
+  // the window and return the max-value composite (MVC, Holben 1986) with a
+  // per-scene time series — the operational standard (MODIS 16-day composite).
+  if (SATELLITE_INDEX_IDS.has(id) && context?.time?.start && context?.time?.end && context.time.start !== context.time.end) {
+    const composite = await buildSatelliteComposite(id, normInputs, ctx, lat, lon, context.time.start, context.time.end);
+    if (composite && Number.isFinite(composite.result)) {
+      baseResult = {
+        ...baseResult,
+        result: composite.result,
+        unit: baseResult.unit,
+        secondary: [
+          ...(baseResult.secondary ?? []).filter(s => s.key !== 'composite_scenes'),
+          { key: 'composite_scenes', value: composite.scenes.length, unit: 'scenes', label: `Composite Scenes (MVC over ${context.time.start} → ${context.time.end})` },
+          ...(baseResult.secondary ?? []),
+        ],
+        series: [{
+          label: `${baseResult.unit ? 'Index' : 'Index'} per scene (MVC)`,
+          points: composite.scenes.map(s => ({ x: Date.parse(s.date) / 86400000, y: s.value })),
+        }],
+        steps: [
+          `── Multi-Scene Composite (Max-Value, Holben 1986) ──`,
+          `Window: ${context.time.start} → ${context.time.end} (${composite.scenes.length} cloud-free scenes sampled)`,
+          ...composite.scenes.map(s => `  ${s.date} → ${s.value.toFixed(4)}`),
+          `MVC result = ${composite.result.toFixed(4)}`,
+          'Composite suppresses cloud/atmospheric noise across the window.',
+          ...(baseResult.steps ?? []),
+        ],
+      };
+    }
+  }
 
   const warnings: string[] = [];
   const log: string[] = [];
@@ -3723,4 +3764,74 @@ async function buildSpatialGrid(
     finiteCellCount: finite.length,
     hasNaN,
   };
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  Satellite-index multi-scene composite (MVC, Holben 1986)
+// ══════════════════════════════════════════════════════════════════
+// Tools 26–35 are single-scene by the paper equations (Rouse 1974 etc.).
+// Operational products (MODIS 16-day, Landsat 8-day) additionally support a
+// multi-scene composite over a date range to suppress cloud/atmosphere noise.
+// When the user supplies start≠end we sample cloud-free Landsat scenes across
+// the window, compute the index per scene, and return the max-value composite
+// (MVC) as the primary result with a per-scene time series + stats.
+
+/** Satellite-index tools that consume genuine Landsat C2 L2 surface
+ *  reflectance (Rouse/McFeeters/Gao/Huete/Hall/Key/Bolton) and therefore
+ *  support a multi-scene composite. */
+const SATELLITE_INDEX_IDS = new Set([26, 27, 28, 29, 30, 31, 33]);
+/** Max-value composite orientation: for "more is greener/wetter/moister/burn"
+ *  indices the MVC picks the scene with the HIGHEST index; for CWSI (stress,
+ *  more = worse) we pick the lowest (least-stressed / clearest) scene. */
+const MVC_MAX = new Set([26, 27, 28, 29, 30, 31]); // NDVI, NDWI, NDMI, EVI, NDSI, NBR
+const MVC_MIN = new Set([33]);                      // CWSI — clearest (min stress)
+
+/**
+ * Sample the [start, end] range at up to `n` cloud-free Landsat scenes,
+ * evaluate the index per scene, and aggregate into a max-value composite.
+ * Returns null when no genuine scene reflectance is resolvable (honest NaN).
+ */
+async function buildSatelliteComposite(
+  id: number,
+  normInputs: Record<string, number>,
+  ctx: Record<string, unknown>,
+  lat: number, lon: number,
+  start?: string, end?: string,
+): Promise<{ result: number; scenes: Array<{ date: string; value: number }> } | null> {
+  if (!SATELLITE_INDEX_IDS.has(id)) return null;
+  if (!start || !end || start === end) return null;
+  const t0 = Date.parse(start), t1 = Date.parse(end);
+  if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return null;
+
+  const N = 5;
+  const dates: string[] = [];
+  for (let i = 0; i < N; i++) {
+    const t = t0 + ((t1 - t0) * i) / (N - 1);
+    dates.push(new Date(t).toISOString().slice(0, 10));
+  }
+
+  const scenes: Array<{ date: string; value: number }> = [];
+  const seen = new Set<string>();
+  for (const d of dates) {
+    const scene = await safeAny(fetchLandsatThermal(lat, lon, d), null, 40000);
+    if (!scene || !scene.sr || !scene.acquired) continue;
+    const sr = scene.sr;
+    if (sr.nir == null && sr.red == null && sr.swir1 == null) continue;
+    if (seen.has(scene.acquired)) continue;
+    seen.add(scene.acquired);
+    // Evaluate the index against this scene's genuine reflectance.
+    const sceneCtx = { ...ctx, satThermal: scene };
+    const cellInputs = alignInputs(id, mapInputs(id, normInputs, sceneCtx as never));
+    const res = EQUATION_ENGINE[id](cellInputs);
+    const v = res?.result;
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      scenes.push({ date: scene.acquired, value: v });
+    }
+  }
+  if (scenes.length === 0) return null;
+
+  scenes.sort((a, b) => a.date.localeCompare(b.date));
+  const wantMax = MVC_MAX.has(id);
+  const pick = [...scenes].sort((a, b) => wantMax ? b.value - a.value : a.value - b.value)[0];
+  return { result: pick.value, scenes };
 }
