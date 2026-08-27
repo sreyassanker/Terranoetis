@@ -889,8 +889,8 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
                 await exportToolResultAsPDF({
                   toolName: tool.toolName || tool.name || '',
                   toolId: tool.id,
-                  resultText: `${formatResult(result.result, result.unit)}`,
-                  resultUnit: result.unit,
+                  resultText: `${formatResult(result.result)}`,
+                  resultUnit: result.unit || '—',
                   secondary: result.secondary?.map(s => ({ label: s.label, value: `${Number.isFinite(s.value) ? (Math.abs(s.value) >= 100 ? s.value.toFixed(1) : s.value.toFixed(2)) + (s.unit ? ' ' + s.unit : '') : 'NaN'}` })),
                   dataSource: result.dataSource,
                   contextualAnalysis: result.interpretation?.contextualAnalysis,

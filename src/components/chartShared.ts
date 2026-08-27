@@ -5,6 +5,13 @@ export interface ToolSeries {
   label: string;
   points: Array<{ x: number; y: number }>;
   color?: string;
+  /** Optional X-axis title override (e.g. "Radial distance r (m)" for the
+   *  Thiem drawdown profile instead of the generic "Depth / Height"). When
+   *  absent the renderer falls back to the per-vizType default label. */
+  xLabel?: string;
+  /** When true the X axis uses a log10 scale (physically correct for
+   *  log-spaced x data such as the Thiem radial distance sweep). */
+  logX?: boolean;
 }
 
 // Q1-journal / colour-blind-safe palette (Okabe-Ito): high contrast, print-safe.
