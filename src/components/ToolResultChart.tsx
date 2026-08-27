@@ -139,9 +139,6 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
       const yLogDomain = useLogY
         ? [Math.pow(10, yLogMin), Math.pow(10, yLogMax + 0.2)] as [number, number]
         : [0, 'auto'] as [number, 'auto'];
-      const fmtLogTick = useLogY
-        ? (v: unknown): string => (typeof v === 'number' && v > 0 ? v.toExponential(0) : String(v ?? ''))
-        : fmtTick;
       return (
         <div style={wrapper}>
         <div style={titleStyle}>{title}</div>
@@ -149,7 +146,7 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
           <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 18, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
             <XAxis dataKey="x" label={{ value: axisLabel(vizType), position: 'bottom', offset: -2, ...labelStyle }} tick={{ ...tickProps }} tickFormatter={fmtTick} />
-            <YAxis domain={yLogDomain} scale={useLogY ? 'log' : 'linear'} allowDataOverflow label={<AxisYLabel>{yLabel}</AxisYLabel>} tick={{ ...tickProps }} tickFormatter={fmtLogTick} />
+            <YAxis domain={yLogDomain} scale={useLogY ? 'log' : 'linear'} allowDataOverflow label={<AxisYLabel>{yLabel}</AxisYLabel>} tick={{ ...tickProps }} tickFormatter={fmtTick} />
             <Tooltip contentStyle={tooltipStyle} formatter={tooltipFormatter} />
             {keys.map((k, i) => (
               <Area key={k} type="monotone" dataKey={k} stroke={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} fill={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} fillOpacity={0.25} strokeWidth={2} isAnimationActive={false} name={series[i].label} />

@@ -6,7 +6,7 @@ import {
   Calculator, Database, Layers, Zap,
 } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
-import ToolDialog, { type ToolGrid } from '@/components/ToolDialog';
+import ToolDialog, { type ToolGrid, type StudyAreaDrawType } from '@/components/ToolDialog';
 import {
   PARTS, TOTAL_EQUATIONS, TOTAL_DOMAINS,
   type PartIconId, type AnalysisTool, type Domain,
@@ -18,11 +18,16 @@ interface AnalyticsWorkbenchProps {
   bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
   polygon?: Array<Array<[number, number]>>;
   points?: Array<{ lat: number; lon: number }>;
+  /** What the user actually drew on the globe (drives study-area validation). */
+  studyAreaType?: StudyAreaDrawType | null;
   onToolResult?: (
     toolId: number, label: string, lat: number, lon: number,
     value?: number, grid?: ToolGrid, unit?: string,
   ) => void;
   onClearResult?: () => void;
+  /** Notifies the host when the open tool needs two points (transect /
+   *  two-points modes), so the globe keeps multiple placed points active. */
+  onToolModeChange?: (needsTwoPoints: boolean) => void;
   zIndex?: number;
   /** Color-stop ramp for the heatmap (matches the globe's active scheme). */
   schemeColors?: Array<{ stop: number; r: number; g: number; b: number }>;
@@ -54,7 +59,7 @@ const ALL_TOOLS = flattenTools();
 /** Collect all unique domain names for the filter dropdown. */
 const ALL_DOMAIN_NAMES = Array.from(new Set(PARTS.flatMap(p => p.domains.map(d => d.name)))).sort();
 
-export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, bbox, polygon, points, onToolResult, onClearResult, zIndex = 999, schemeColors }) => {
+export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, bbox, polygon, points, studyAreaType, onToolResult, onClearResult, onToolModeChange, zIndex = 999, schemeColors }) => {
   const [search, setSearch] = useState('');
   const [expandedParts, setExpandedParts] = useState<Set<string>>(new Set(['part1']));
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set(['atmo']));
@@ -65,7 +70,13 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (open && searchInputRef.current) setTimeout(() => searchInputRef.current?.focus(), 200); }, [open]);
-  const handleKeyDown = useCallback((e: KeyboardEvent) => { if (e.key === 'Escape') { if (selectedTool) setSelectedTool(null); else onClose(); } }, [onClose, selectedTool]);
+
+  const closeTool = useCallback(() => {
+    setSelectedTool(null);
+    onToolModeChange?.(false);
+  }, [onToolModeChange]);
+
+  const handleKeyDown = useCallback((e: KeyboardEvent) => { if (e.key === 'Escape') { if (selectedTool) closeTool(); else onClose(); } }, [onClose, closeTool, selectedTool]);
   useEffect(() => { if (open) window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, [open, handleKeyDown]);
 
   const togglePart = useCallback((partId: string) => setExpandedParts((prev) => {
@@ -83,7 +94,9 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
   const openTool = useCallback((tool: AnalysisTool, color: string) => {
     setSelectedTool(tool);
     setSelectedColor(color);
-  }, []);
+    const modes = tool.analysisMeta?.allowedStudyAreaModes ?? [];
+    onToolModeChange?.(modes.includes('transect') || modes.includes('two-points'));
+  }, [onToolModeChange]);
 
   const hasSearch = !!search.trim();
   const q = search.toLowerCase();
@@ -171,11 +184,11 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
 
         {selectedTool ? (
           <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
-            <button onClick={() => setSelectedTool(null)}
+            <button onClick={closeTool}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8b5cf6', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8, padding: 0 }}>
               <ChevronDown size={10} style={{ transform: 'rotate(90deg)' }} /> Back to tools
             </button>
-            <ToolDialog key={selectedTool.id} tool={selectedTool} color={selectedColor} onClose={() => setSelectedTool(null)} bbox={bbox} polygon={polygon} points={points} onToolResult={onToolResult} onClearResult={onClearResult} schemeColors={schemeColors} />
+            <ToolDialog key={selectedTool.id} tool={selectedTool} color={selectedColor} onClose={closeTool} bbox={bbox} polygon={polygon} points={points} studyAreaType={studyAreaType} onToolResult={onToolResult} onClearResult={onClearResult} schemeColors={schemeColors} />
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>

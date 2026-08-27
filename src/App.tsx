@@ -83,6 +83,7 @@ import { IssTravelView } from '@/components/IssTravelView';
 import { FlightTravelView } from '@/components/FlightTravelView';
 import { CommandPalette } from '@/components/CommandPalette';
 import { AnalyticsWorkbench } from '@/components/AnalyticsWorkbench';
+import type { StudyAreaDrawType } from '@/components/ToolDialog';
 import { LandCoverMapperPanel } from '@/components/LandCoverMapperPanel';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { createRenderScheduler } from '@/lib/batchScheduler';
@@ -1238,6 +1239,7 @@ export default function App() {
   const [showAviationTracker, setShowAviationTracker] = useState(false);
   const [showSatelliteImagery, setShowSatelliteImagery] = useState(false);
   const [showAnalyticsWorkbench, setShowAnalyticsWorkbench] = useState(false);
+  const [analyticalNeedsTwoPoints, setAnalyticalNeedsTwoPoints] = useState(false);
   const [showLandCoverMapper, setShowLandCoverMapper] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   // CMD+K keyboard shortcut
@@ -1687,6 +1689,14 @@ export default function App() {
     if (!active) return null;
     const rings = getStudyAreaOuterRings(active);
     return rings.length > 0 ? rings : null;
+  }, [studyAreas, activeStudyAreaId]);
+
+  // The actual geometry the user drew on the globe (authoritative for study-area
+  // validation): a bbox-only tool must not accept a point and vice versa.
+  const activeStudyAreaType = useMemo<StudyAreaDrawType>(() => {
+    if (!activeStudyAreaId) return null;
+    const active = studyAreas.find(a => a.id === activeStudyAreaId);
+    return (active?.type ?? null) as StudyAreaDrawType;
   }, [studyAreas, activeStudyAreaId]);
 
   // Auto-detected points from the active study area(s): a single point marker
@@ -8086,7 +8096,15 @@ export default function App() {
           id: `study_area_${Date.now()}`, name, type: 'point' as any,
           visible: true, active: false, entity, positions: [cartesian], geojson, color: '#22c55e', width: 3,
         };
-        studyAreasRef.current.forEach(a => { if (a.id !== area.id && a.active) setStudyAreaActive(v, a, false); });
+        if (analyticalNeedsTwoPoints) {
+          const activePts = studyAreasRef.current.filter(a => a.active && a.type === 'point' && a.id !== area.id);
+          while (activePts.length >= 2) {
+            const oldest = activePts.shift();
+            if (oldest) setStudyAreaActive(v, oldest, false);
+          }
+        } else {
+          studyAreasRef.current.forEach(a => { if (a.id !== area.id && a.active) setStudyAreaActive(v, a, false); });
+        }
         setStudyAreaActive(v, area, true);
         studyAreasRef.current = [...studyAreasRef.current, area];
         setStudyAreas(studyAreasRef.current);
@@ -8191,7 +8209,7 @@ export default function App() {
       console.warn('Drawer init failed:', err);
       setStudyDrawing(false);
     }
-  }, []);
+  }, [analyticalNeedsTwoPoints]);
 
   const stopStudyDraw = useCallback(() => {
     if (drawerRef.current) {
@@ -9770,7 +9788,7 @@ export default function App() {
 
       {/* Analytics Workbench Panel */}
       <ErrorBoundary label="Analytics Workbench">
-        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} onToolResult={handleToolResult} onClearResult={handleClearToolResult} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} />
+        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} />
       </ErrorBoundary>
 
       {/* Land Cover Mapper Panel */}

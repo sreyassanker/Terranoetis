@@ -29,6 +29,9 @@ interface ToolDialogProps {
   bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
   polygon?: Array<Array<[number, number]>>;
   points?: Array<{ lat: number; lon: number }>;
+  /** What the user actually drew on the globe (drives study-area validation:
+   *  a tool requiring a bbox must not accept a point and vice versa). */
+  studyAreaType?: StudyAreaDrawType | null;
   onToolResult?: (
     toolId: number, label: string, lat: number, lon: number,
     value?: number, grid?: ToolGrid, unit?: string, vizType?: string,
@@ -52,6 +55,145 @@ const DEFAULT_STUDY_AREA: StudyArea = {
   latMin: 35.43, latMax: 35.93, lonMin: 139.51, lonMax: 140.01,
   lat1: 35.68, lon1: 139.76, lat2: 34.69, lon2: 135.50,
 };
+
+/** What the user can actually draw on the globe. `null` means nothing is drawn. */
+export type StudyAreaDrawType =
+  | 'point' | 'rectangle' | 'polygon' | 'circle' | 'geojson' | 'shapefile' | null;
+
+type SelectionKind = 'none' | 'point' | 'two-points' | 'bbox' | 'polygon';
+
+interface StudyAreaSelection {
+  kind: SelectionKind;
+  pointCount: number;
+}
+
+/** Derive what the user currently has drawn on the globe from the active
+ *  study-area type (authoritative) with a fallback to the raw geometry props. */
+function deriveSelection(
+  studyAreaType: StudyAreaDrawType,
+  bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null,
+  polygon: Array<Array<[number, number]>> | undefined,
+  points: Array<{ lat: number; lon: number }> | undefined,
+): StudyAreaSelection {
+  const type = studyAreaType;
+  if (type === 'point') {
+    const n = points?.length ?? 0;
+    if (n >= 2) return { kind: 'two-points', pointCount: n };
+    if (n === 1) return { kind: 'point', pointCount: 1 };
+    return { kind: 'none', pointCount: 0 };
+  }
+  if (type === 'rectangle') return { kind: 'bbox', pointCount: 0 };
+  if (type === 'polygon' || type === 'circle') return { kind: 'polygon', pointCount: 0 };
+  if (type === 'geojson' || type === 'shapefile') return { kind: 'polygon', pointCount: 0 };
+  // Fallback (type unknown): prefer a wide bbox/area, then points.
+  const isWideBox = bbox && (bbox.latMax - bbox.latMin > 0.2 || bbox.lonMax - bbox.lonMin > 0.2);
+  if (isWideBox) return { kind: 'bbox', pointCount: 0 };
+  if (points && points.length >= 2) return { kind: 'two-points', pointCount: points.length };
+  if (points && points.length === 1) return { kind: 'point', pointCount: 1 };
+  if (polygon && polygon.length > 0) return { kind: 'polygon', pointCount: 0 };
+  if (bbox) return { kind: 'bbox', pointCount: 0 };
+  return { kind: 'none', pointCount: 0 };
+}
+
+/** Does the user's current drawing satisfy a given tool required mode? */
+function modeSatisfied(mode: StudyAreaMode, sel: StudyAreaSelection): boolean {
+  switch (mode) {
+    case 'point': return sel.kind === 'point';
+    case 'two-points':
+    case 'transect':
+    case 'fault-line':
+    case 'path': return sel.kind === 'two-points';
+    case 'bbox': return sel.kind === 'bbox';
+    case 'polygon': return sel.kind === 'polygon';
+    case 'region':
+    case 'basin':
+    case 'coastal': return sel.kind === 'bbox' || sel.kind === 'polygon';
+    default: return false;
+  }
+}
+
+/** Build a fully-populated StudyArea for a satisfied mode from the drawn geometry. */
+function buildAreaFromSelection(
+  mode: StudyAreaMode,
+  sel: StudyAreaSelection,
+  bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null,
+  points: Array<{ lat: number; lon: number }> | undefined,
+): StudyArea {
+  const base: StudyArea = { ...DEFAULT_STUDY_AREA, mode };
+  switch (mode) {
+    case 'point': {
+      const p = sel.kind === 'point' ? points?.[0] : undefined;
+      if (!p) return base;
+      return { ...base, lat: p.lat, lon: p.lon };
+    }
+    case 'two-points':
+    case 'transect':
+    case 'fault-line':
+    case 'path': {
+      const p1 = points?.[0];
+      if (!p1) return base;
+      const p2 = points?.[1] ?? { lat: p1.lat + 5, lon: p1.lon + 5 };
+      return {
+        ...base, lat: (p1.lat + p2.lat) / 2, lon: (p1.lon + p2.lon) / 2,
+        lat1: p1.lat, lon1: p1.lon, lat2: p2.lat, lon2: p2.lon,
+      };
+    }
+    case 'bbox':
+    case 'polygon':
+    case 'region':
+    case 'basin':
+    case 'coastal': {
+      if (!bbox) return base;
+      const { latMin, latMax, lonMin, lonMax } = bbox;
+      return {
+        ...base, lat: (latMin + latMax) / 2, lon: (lonMin + lonMax) / 2,
+        latMin, latMax, lonMin, lonMax,
+        lat1: latMin, lon1: lonMin, lat2: latMax, lon2: lonMax,
+      };
+    }
+    default: return base;
+  }
+}
+
+/** Produce the guidance message shown when the drawn selection is invalid. */
+function buildStudyAreaHint(allowed: StudyAreaMode[], sel: StudyAreaSelection): string {
+  const hasTwoPointMode = allowed.some(m =>
+    ['two-points', 'transect', 'fault-line', 'path'].includes(m));
+  const hasPoint = allowed.includes('point');
+  const hasBbox = allowed.includes('bbox');
+  const hasPoly = allowed.includes('polygon');
+  const hasArea = allowed.some(m => ['region', 'basin', 'coastal'].includes(m));
+
+  if (hasTwoPointMode) {
+    if (sel.kind === 'point') return 'This tool needs two points. Select the second point on the globe.';
+    if (sel.kind === 'bbox' || sel.kind === 'polygon')
+      return 'This tool needs two points, not an area. Place two points on the globe.';
+    return 'Place two points on the globe to define the line/reach.';
+  }
+  if (hasPoint && !hasBbox && !hasPoly && !hasArea) {
+    if (sel.kind === 'bbox' || sel.kind === 'polygon')
+      return 'This tool needs a single point, not an area. Draw a point on the globe.';
+    return 'Draw a point on the globe to set the location.';
+  }
+  if (hasBbox && !hasPoint && !hasPoly && !hasArea) {
+    if (sel.kind === 'point' || sel.kind === 'two-points')
+      return 'This tool needs a bounding box, not a point. Draw a rectangle on the globe.';
+    if (sel.kind === 'polygon')
+      return 'This tool needs a bounding box. Draw a rectangle on the globe.';
+    return 'Draw a bounding box on the globe.';
+  }
+  if (hasPoly && !hasBbox && !hasArea) {
+    if (sel.kind === 'bbox')
+      return 'This tool needs a polygon. Draw a polygon on the globe.';
+    return 'Draw a polygon on the globe.';
+  }
+  if (hasArea) {
+    if (sel.kind === 'point' || sel.kind === 'two-points')
+      return 'This tool needs an area (bounding box or polygon). Draw a bounding box or polygon on the globe.';
+    return 'Draw a bounding box or polygon on the globe to define the area.';
+  }
+  return 'Select a study area on the globe to match this tool’s requirements.';
+}
 
 const fieldStyle: React.CSSProperties = {
   width: '100%', padding: '4px 6px', borderRadius: 4,
@@ -160,83 +302,49 @@ const GridHeatmap: React.FC<{ grid: ToolGrid; color: string; schemeColors?: Arra
   );
 };
 
-const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, polygon, points, onToolResult, onClearResult, schemeColors }) => {
+const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, polygon, points, studyAreaType, onToolResult, onClearResult, schemeColors }) => {
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
-  // When a study area is drawn on the globe, default every tool to bbox/grid
-  // mode so the model is swept across the area's interior and overlaid as IDW
-  // (not collapsed to a single centroid point). The mode toggle remains
-  // available for tools that support more than one spatial selection.
-  const baseModes = tool.analysisMeta?.allowedStudyAreaModes ?? ['point'];
-  // Only apply a drawn globe bbox to tools that genuinely support bbox mode.
-  // Point-only tools (scalars, station-level equations) must ignore the drawn
-  // rectangle and stay in their declared mode — sweeping them across a bbox
-  // yields a single centroid value with a meaningless flat overlay.
-  const supportsBbox = baseModes.includes('bbox' as StudyAreaMode);
-  const allowedModes: StudyAreaMode[] = bbox && !supportsBbox
-    ? baseModes
-    : baseModes;
-  const defaultMode: StudyAreaMode = bbox && supportsBbox ? 'bbox' : (allowedModes[0] ?? 'point');
-  // Auto-detect the active study area: bbox tools use the drawn box; point-only
-  // tools use the box centre (a drawn point expands to a small ±0.05° bbox, so
-  // its centre is exactly the placed point).
-  const bboxCentre = bbox && bbox.latMax > bbox.latMin && bbox.lonMax > bbox.lonMin
-    ? { lat: (bbox.latMin + bbox.latMax) / 2, lon: (bbox.lonMin + bbox.lonMax) / 2 }
-    : null;
-  // Auto-detect the active point(s): placed point markers take priority; fall
-  // back to the bbox centre (a drawn point expands to a ±0.05° bbox).
-  const autoPoint = (points && points.length > 0)
-    ? points[0]
-    : bboxCentre;
-  const autoPoint2 = (points && points.length > 1) ? points[1] : undefined;
-  const initialArea: StudyArea = defaultMode === 'bbox' && bbox
-    ? { mode: 'bbox' as const, lat: 0, lon: 0, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, lat1: bbox.latMin, lon1: bbox.lonMin, lat2: bbox.latMax, lon2: bbox.lonMax }
-    : defaultMode === 'point' && autoPoint
-      ? { ...DEFAULT_STUDY_AREA, mode: 'point' as const, lat: autoPoint.lat, lon: autoPoint.lon }
-      : defaultMode === 'two-points' && autoPoint
-        ? { ...DEFAULT_STUDY_AREA, mode: 'two-points' as const, lat1: autoPoint.lat, lon1: autoPoint.lon, lat2: autoPoint2?.lat ?? autoPoint.lat + 5, lon2: autoPoint2?.lon ?? autoPoint.lon + 5 }
-        : { ...DEFAULT_STUDY_AREA, mode: defaultMode };
+  // Strict study-area validation: a tool only runs against a drawing that
+  // satisfies one of its declared modes. A bbox-only tool must NOT accept a
+  // point, and a point-only tool must NOT accept a bounding box. The lat/long
+  // fields appear (pre-populated from the drawing) only once the selection is
+  // valid, and Run is disabled with a guidance message otherwise.
+  const allowedModes: StudyAreaMode[] = tool.analysisMeta?.allowedStudyAreaModes ?? ['point'];
+  const selection = React.useMemo<StudyAreaSelection>(
+    () => deriveSelection(studyAreaType ?? null, bbox, polygon, points),
+    [studyAreaType, bbox, polygon, points],
+  );
+  const satisfiedModes = React.useMemo<StudyAreaMode[]>(
+    () => allowedModes.filter(m => modeSatisfied(m, selection)),
+    [allowedModes, selection],
+  );
+  const validSelection = satisfiedModes.length > 0;
+  const studyAreaHint = React.useMemo(
+    () => (validSelection ? null : buildStudyAreaHint(allowedModes, selection)),
+    [validSelection, allowedModes, selection],
+  );
+  const initialArea: StudyArea = validSelection
+    ? buildAreaFromSelection(satisfiedModes[0], selection, bbox, points)
+    : { ...DEFAULT_STUDY_AREA, mode: allowedModes[0] ?? 'point' };
   const [area, setArea] = useState<StudyArea>(initialArea);
-  // Sync the study area when the drawn globe bbox changes AFTER the tool is
-  // already open (e.g. user draws the box after opening the dialog). Without
-  // this, `area` stays frozen at its mount-time default and the tool keeps
-  // using stale lat/lon. Only auto-update bbox-mode tools; point-mode tools
-  // keep their explicit point until the user edits it.
+  // Keep the study area in sync with the globe drawing: when the selection
+  // changes, snap the mode into the satisfied set and (re)populate the
+  // lat/long fields from the geometry. Manual edits to the fields are
+  // preserved until the drawing itself is changed.
   React.useEffect(() => {
-    if (!supportsBbox || !bbox || bbox.latMin >= bbox.latMax || bbox.lonMin >= bbox.lonMax) return;
+    if (satisfiedModes.length === 0) return;
     setArea(prev => {
-      if (prev.mode !== 'bbox') {
-        return { mode: 'bbox' as const, lat: 0, lon: 0, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, lat1: bbox.latMin, lon1: bbox.lonMin, lat2: bbox.latMax, lon2: bbox.lonMax };
-      }
-      const same = Math.abs(prev.latMin - bbox.latMin) < 1e-9 && Math.abs(prev.latMax - bbox.latMax) < 1e-9
-        && Math.abs(prev.lonMin - bbox.lonMin) < 1e-9 && Math.abs(prev.lonMax - bbox.lonMax) < 1e-9;
-      if (same) return prev;
-      return { ...prev, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, lat1: bbox.latMin, lon1: bbox.lonMin, lat2: bbox.latMax, lon2: bbox.lonMax };
+      const mode = satisfiedModes.includes(prev.mode) ? prev.mode : satisfiedModes[0];
+      const next = buildAreaFromSelection(mode, selection, bbox, points);
+      const same =
+        prev.mode === next.mode && prev.lat === next.lat && prev.lon === next.lon &&
+        prev.latMin === next.latMin && prev.latMax === next.latMax &&
+        prev.lonMin === next.lonMin && prev.lonMax === next.lonMax &&
+        prev.lat1 === next.lat1 && prev.lon1 === next.lon1 &&
+        prev.lat2 === next.lat2 && prev.lon2 === next.lon2;
+      return same ? prev : next;
     });
-  }, [bbox, supportsBbox]);
-  // Sync the study area when drawn points change AFTER the tool is already
-  // open (e.g. user places a point marker after opening the dialog). Without
-  // this, `area` stays frozen at its mount-time default and point-mode tools
-  // keep using stale lat/lon. The bbox effect above handles bbox-mode tools;
-  // this effect handles point-mode and two-points-mode tools.
-  React.useEffect(() => {
-    if (!points || points.length === 0) return;
-    const p = points[0];
-    setArea(prev => {
-      if (prev.mode === 'point') {
-        const same = Math.abs(prev.lat - p.lat) < 1e-9 && Math.abs(prev.lon - p.lon) < 1e-9;
-        if (same) return prev;
-        return { ...prev, lat: p.lat, lon: p.lon };
-      }
-      if (prev.mode === 'two-points') {
-        const p2 = points.length > 1 ? points[1] : { lat: p.lat + 5, lon: p.lon + 5 };
-        const same = Math.abs(prev.lat1 - p.lat) < 1e-9 && Math.abs(prev.lon1 - p.lon) < 1e-9
-          && Math.abs(prev.lat2 - p2.lat) < 1e-9 && Math.abs(prev.lon2 - p2.lon) < 1e-9;
-        if (same) return prev;
-        return { ...prev, lat1: p.lat, lon1: p.lon, lat2: p2.lat, lon2: p2.lon };
-      }
-      return prev;
-    });
-  }, [points]);
+  }, [satisfiedModes, selection, bbox, points]);
   const isMultiYear = tool.analysisMeta?.timeGranularity === 'multi-year';
   const [start, setStart] = useState(isMultiYear ? '2020' : '2024-01-01');
   const [end, setEnd] = useState(isMultiYear ? '2024' : '2024-12-31');
@@ -419,6 +527,8 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
             ))}
           </div>
           )}
+          {validSelection ? (
+            <>
           {area.mode === 'point' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
               <NumberField label="Latitude" value={area.lat} unit="°" onChange={(v) => setArea(a => ({ ...a, lat: v }))} />
@@ -447,6 +557,18 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
               <NumberField label="Center Lon" value={area.lon} unit="°" onChange={(v) => setArea(a => ({ ...a, lon: v }))} />
               <NumberField label="Lat extent" value={area.latMax - area.latMin} unit="°" onChange={(v) => setArea(a => ({ ...a, latMax: a.latMin + v, latMin: a.latMin }))} />
               <NumberField label="Lon extent" value={area.lonMax - area.lonMin} unit="°" onChange={(v) => setArea(a => ({ ...a, lonMax: a.lonMin + v, lonMin: a.lonMin }))} />
+            </div>
+          )}
+            </>
+          ) : (
+            <div style={{
+              display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 4,
+              padding: '6px 8px', borderRadius: 6, fontSize: 10, lineHeight: 1.4,
+              color: '#fcd34d', background: 'rgba(245,158,11,0.12)',
+              border: '1px solid rgba(245,158,11,0.35)',
+            }}>
+              <AlertCircle size={12} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{studyAreaHint}</span>
             </div>
           )}
         </div>
@@ -572,18 +694,18 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
           </div>
         )}
 
-        {/* Run Button — always available for all tools */}
-        <button onClick={handleRun} disabled={running}
+        {/* Run Button — disabled until a valid study area is drawn */}
+        <button onClick={handleRun} disabled={running || !validSelection}
           style={{
             width: '100%', padding: '10px 0', borderRadius: 6, border: 'none',
-            background: running ? `${color}30` : `linear-gradient(135deg, ${color}40, ${color}20)`,
-            color: running ? '#64748b' : '#e2e8f0', fontSize: 12, fontWeight: 600,
-            cursor: running ? 'default' : 'pointer',
+            background: (running || !validSelection) ? `${color}30` : `linear-gradient(135deg, ${color}40, ${color}20)`,
+            color: (running || !validSelection) ? '#64748b' : '#e2e8f0', fontSize: 12, fontWeight: 600,
+            cursor: (running || !validSelection) ? 'not-allowed' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             marginBottom: 8,
           }}>
           {running ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={14} />}
-          {running ? 'Computing with live data...' : (hasInputs ? 'Run Analysis' : 'Compute with Auto-Fetched Data')}
+          {running ? 'Computing with live data...' : (!validSelection ? 'Select a Study Area First' : (hasInputs ? 'Run Analysis' : 'Compute with Auto-Fetched Data'))}
         </button>
 
         {/* Result */}
