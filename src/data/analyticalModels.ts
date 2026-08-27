@@ -263,6 +263,8 @@ const INSTANT: [number, number][] = [
   // epoch, solar/space-weather index, storm event). Result is one value at
   // that instant.
   [1, 1],        // 1 Split-window LST — Landsat scene date
+  [2, 2],        // 2 Planck brightness temp — T auto-fills from date-specific
+                 //   weather, so the date selects which day's atmosphere
   [5, 5],        // 5 Geostrophic wind — ERA5 850 hPa pressure field date
   [9, 9],        // 9 FAO-56 PM — ET₀ is a DAILY value from a single day's
                  //   meteorology (FAO-56, Allen et al. 1998); weekly/monthly
@@ -309,9 +311,12 @@ const NO_TIME_IDS = (() => {
   // instantaneous unit-hydrograph shape, a single physics equation evaluated
   // at a point). No date window is rendered; inputs are model/user parameters.
   const s = new Set<number>();
-  // Domain 1: static atmospheric scalars (2 Planck, 3 SVP, 4 hydrostatic,
-  // 6 advection-diffusion model-time, 7 Richardson, 8 Kolmogorov)
-  [2, 3, 4, 6, 7, 8].forEach(i => s.add(i));
+  // Domain 1: static atmospheric scalars (3 SVP, 4 hydrostatic,
+  // 6 advection-diffusion model-time, 7 Richardson, 8 Kolmogorov).
+  // NOTE: 2 (Planck/Brightness Temp) is INSTANT — the engine auto-fills
+  // temperature from live weather, which is date-dependent, so a date field
+  // lets the user pick which day's weather drives the blackbody calculation.
+  [3, 4, 6, 7, 8].forEach(i => s.add(i));
   // 11 Manning (static channel); 39 plume (model params); 40/41 EV distributions
   [11, 39, 40, 41].forEach(i => s.add(i));
   // 36-38 interpolation/geometry; 42 variogram; 43-50 soil & surface-layer

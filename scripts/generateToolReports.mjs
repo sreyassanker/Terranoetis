@@ -85,15 +85,27 @@ async function renderChartPNG(series, vizType) {
   const W = 720, H = 420, ml = 70, mr = 24, mt = 24, mb = 54, iw = W - ml - mr, ih = H - mt - mb;
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
   const xmin = Math.min(...xs), xmax = Math.max(...xs);
-  const ymax = Math.max(...ys) * 1.1;
+  // Log10 Y axis for spectra whose positive range spans >3 decades (Planck
+  // ~1e-198→1e+6 would otherwise flatten into a bottom line).
+  const yPos = ys.filter(v => Number.isFinite(v) && v > 0);
+  const logY = (vizType === 'spectrum' || vizType === 'distribution')
+    && yPos.length > 0
+    && Math.log10(Math.max(...yPos)) - Math.log10(Math.min(...yPos)) > 3;
+  const yMinL = logY ? Math.log10(Math.min(...yPos)) : 0;
+  const yMaxL = logY ? Math.log10(Math.max(...yPos)) : 0;
+  const ymax = logY ? yMaxL + 0.2 : Math.max(...ys) * 1.1;
   const X = (x) => ml + ((x - xmin) / (xmax - xmin || 1)) * iw;
-  const Y = (y) => mt + ih - (y / (ymax || 1)) * ih;
+  const Y = (y) => {
+    if (logY) { const l = y > 0 ? Math.log10(y) : yMinL - 1; return mt + ih - ((l - yMinL) / (ymax - yMinL || 1)) * ih; }
+    return mt + ih - (y / (ymax || 1)) * ih;
+  };
   const path = pts.map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(2)},${Y(p.y).toFixed(2)}`).join(' ');
   const area = `M${X(pts[0].x).toFixed(2)},${(mt + ih).toFixed(2)} ` + pts.map(p => `L${X(p.x).toFixed(2)},${Y(p.y).toFixed(2)}`).join(' ') + ` Z`;
   const fill = vizType === 'spectrum' || vizType === 'distribution';
   const yTicks = Array.from({ length: 5 }, (_, i) => {
-    const y = mt + ih * i / 5; const v = ymax - ymax * i / 5;
-    return `<line x1="${ml}" y1="${y}" x2="${ml+iw}" y2="${y}" stroke="#e2e8f0" stroke-width="0.8"/><text x="${ml-8}" y="${y+3}" font-size="12" fill="#475569" text-anchor="end">${Number.isFinite(v) ? v.toFixed(3) : '0'}</text>`;
+    const y = mt + ih * i / 5;
+    const v = logY ? Math.pow(10, yMaxL - (yMaxL - yMinL) * i / 5) : ymax - ymax * i / 5;
+    return `<line x1="${ml}" y1="${y}" x2="${ml+iw}" y2="${y}" stroke="#e2e8f0" stroke-width="0.8"/><text x="${ml-8}" y="${y+3}" font-size="12" fill="#475569" text-anchor="end">${Number.isFinite(v) && v > 0 ? v.toExponential(0) : '0'}</text>`;
   }).join('');
   const xTicks = Array.from({ length: 7 }, (_, i) => {
     const x = ml + iw * i / 6; const v = xmin + (xmax - xmin) * i / 6;
@@ -106,9 +118,9 @@ async function renderChartPNG(series, vizType) {
 <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${mt+ih}" stroke="#64748b" stroke-width="1.2"/>
 ${yTicks}
 ${xTicks}
-<text x="${ml+iw/2}" y="${H-8}" font-size="13" fill="#334155" text-anchor="middle">${sanitize(series[0].xLabel || 'x')}</text>
-<text x="16" y="${mt+ih/2}" font-size="13" fill="#334155" text-anchor="middle" transform="rotate(-90 16 ${mt+ih/2})">${sanitize(series[0].yLabel || 'f(x)')}</text>
-<text x="${ml+iw/2}" y="18" font-size="14" fill="#334155" text-anchor="middle" font-weight="bold">${sanitize(series[0].label || 'Series')}</text>
+<text x="${ml+iw/2}" y="${H-8}" font-size="13" fill="#334155" text-anchor="middle">${series[0].xLabel || 'x'}</text>
+<text x="16" y="${mt+ih/2}" font-size="13" fill="#334155" text-anchor="middle" transform="rotate(-90 16 ${mt+ih/2})">${series[0].yLabel || 'f(x)'}</text>
+<text x="${ml+iw/2}" y="18" font-size="14" fill="#334155" text-anchor="middle" font-weight="bold">${series[0].label || 'Series'}</text>
 ${fill ? `<path d="${area}" fill="${c0}" fill-opacity="0.18"/><path d="${path}" fill="none" stroke="${c0}" stroke-width="2.4" stroke-linecap="round"/>` : `<path d="${path}" fill="none" stroke="${c0}" stroke-width="2.4" stroke-linecap="round"/>`}
 </svg>`;
   const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'], executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' });

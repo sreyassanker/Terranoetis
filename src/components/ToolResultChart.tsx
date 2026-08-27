@@ -17,7 +17,7 @@ interface Props {
 }
 
 /** Interpolate a value in [vmin, vmax] through a color-stop ramp → CSS color. */
-export function colorForValue(v: number, vmin: number, vmax: number, stops: Array<{ stop: number; r: number; g: number; b: number }>): string {
+function colorForValue(v: number, vmin: number, vmax: number, stops: Array<{ stop: number; r: number; g: number; b: number }>): string {
   if (!stops || stops.length === 0) return '#8b5cf6';
   const t = vmax > vmin ? Math.max(0, Math.min(1, (v - vmin) / (vmax - vmin))) : 0;
   for (let i = 0; i < stops.length - 1; i++) {
@@ -75,7 +75,6 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
   }
 
   // Axis label text (scientifically correct per vizType, from the governing papers)
-  const firstSeriesLabel = series[0]?.label ?? 'Value';
   const yLabelFor = (viz: string) => {
     if (viz === 'distribution') return unit ? `Density (${unit})` : 'Density'; // covers probability f(x) AND size N(D) densities
     if (viz === 'histogram') return 'Frequency / Count';
@@ -84,6 +83,7 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
   };
   const yLabel = yLabelFor(vizType);
   const labelStyle = { fontSize: 10, fill: '#94a3b8' };
+  const titleStyle: React.CSSProperties = { fontSize: 9, color: '#94a3b8', marginBottom: 2, fontFamily: 'JetBrains Mono, monospace' };
 
   // Clean numeric tick values: avoid full float precision ("0.37275937…"),
   // huge integers ("3000000000000000000") and cramped exponential ticks.
@@ -109,12 +109,12 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
     case 'profile':
       return (
         <div style={wrapper}>
-        <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 2, fontFamily: 'JetBrains Mono, monospace' }}>{title}</div>
+        <div style={titleStyle}>{title}</div>
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={data} margin={{ top: 8, right: 12, bottom: 18, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
             <XAxis dataKey="x" label={{ value: axisLabel(vizType), position: 'bottom', offset: -2, ...labelStyle }} tick={{ ...tickProps }} tickFormatter={fmtTick} />
-            <YAxis label={{ value: yLabel, angle: -90, position: 'insideLeft', offset: 8, ...labelStyle }} tick={{ ...tickProps }} tickFormatter={fmtTick} />
+            <YAxis label={<AxisYLabel>{yLabel}</AxisYLabel>} tick={{ ...tickProps }} tickFormatter={fmtTick} />
             <Tooltip contentStyle={tooltipStyle} formatter={tooltipFormatter} />
             {keys.map((k, i) => (
               <Line key={k} type="monotone" dataKey={k} stroke={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} strokeDasharray={i === 0 ? '0.2 7' : '4 4'} strokeLinecap="round" dot={{ r: 3, fill: series[i].color || CHART_COLORS[i % CHART_COLORS.length], strokeWidth: 0 }} isAnimationActive={false} name={series[i].label} />
@@ -125,14 +125,31 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
       );
 
     case 'spectrum':
-    case 'distribution':
+    case 'distribution': {
+      // Spectra span orders of magnitude (Planck ~1e-198→1e+6); a linear Y
+      // flattens the curve. Use a log10 Y axis when the positive range spans
+      // >3 decades so the physical shape is visible (standard practice).
+      const yAll = series.flatMap(s => s.points.map(p => p.y));
+      const yPos = yAll.filter(v => Number.isFinite(v) && v > 0);
+      const useLogY = (vizType === 'spectrum' || vizType === 'distribution')
+        && yPos.length > 0
+        && Math.log10(Math.max(...yPos)) - Math.log10(Math.min(...yPos)) > 3;
+      const yLogMin = useLogY ? Math.log10(Math.min(...yPos)) : 0;
+      const yLogMax = useLogY ? Math.log10(Math.max(...yPos)) : 0;
+      const yLogDomain = useLogY
+        ? [Math.pow(10, yLogMin), Math.pow(10, yLogMax + 0.2)] as [number, number]
+        : [0, 'auto'] as [number, 'auto'];
+      const fmtLogTick = useLogY
+        ? (v: unknown): string => (typeof v === 'number' && v > 0 ? v.toExponential(0) : String(v ?? ''))
+        : fmtTick;
       return (
         <div style={wrapper}>
+        <div style={titleStyle}>{title}</div>
         <ResponsiveContainer width="100%" height={200}>
           <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 18, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
             <XAxis dataKey="x" label={{ value: axisLabel(vizType), position: 'bottom', offset: -2, ...labelStyle }} tick={{ ...tickProps }} tickFormatter={fmtTick} />
-            <YAxis label={{ value: yLabel, angle: -90, position: 'insideLeft', offset: 8, ...labelStyle }} tick={{ ...tickProps }} tickFormatter={fmtTick} />
+            <YAxis domain={yLogDomain} scale={useLogY ? 'log' : 'linear'} allowDataOverflow label={<AxisYLabel>{yLabel}</AxisYLabel>} tick={{ ...tickProps }} tickFormatter={fmtLogTick} />
             <Tooltip contentStyle={tooltipStyle} formatter={tooltipFormatter} />
             {keys.map((k, i) => (
               <Area key={k} type="monotone" dataKey={k} stroke={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} fill={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} fillOpacity={0.25} strokeWidth={2} isAnimationActive={false} name={series[i].label} />
@@ -141,6 +158,7 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
         </ResponsiveContainer>
         </div>
       );
+    }
 
     case 'bar':
     case 'histogram': {
@@ -151,6 +169,7 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
       const histMax = data.length ? Math.max(...data.map(d => Number(d.x))) : 1;
       return (
         <div style={wrapper}>
+        <div style={titleStyle}>{title}</div>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={data} margin={{ top: 8, right: 12, bottom: 18, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -158,7 +177,7 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
             <YAxis label={<AxisYLabel>{yLabel}</AxisYLabel>} tick={{ ...tickProps }} tickFormatter={fmtTick} />
             <Tooltip contentStyle={tooltipStyle} formatter={tooltipFormatter} />
             {barKeys.map((k, i) => (
-              <Bar key={k} dataKey={k} fill={series[i].color || baseColor} radius={[3, 3, 0, 0]} isAnimationActive={false} name={series[i].label}>
+              <Bar key={k} dataKey={k} fill={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} radius={[3, 3, 0, 0]} isAnimationActive={false} name={series[i].label}>
                 {useBinColors && data.map((d, bi) => (
                   <Cell key={bi} fill={colorForValue(Number(d.x), histMin, histMax, colorStops!)} />
                 ))}
@@ -173,11 +192,12 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
     case 'scatter':
       return (
         <div style={wrapper}>
+        <div style={titleStyle}>{title}</div>
         <ResponsiveContainer width="100%" height={200}>
           <ScatterChart margin={{ top: 8, right: 12, bottom: 18, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis type="number" dataKey="x" name="x" label={{ value: firstSeriesLabel, position: 'bottom', offset: -2, ...labelStyle }} tick={{ ...tickProps }} tickFormatter={fmtTick} />
-            <YAxis type="number" dataKey="y" name="y" label={{ value: yLabel, angle: -90, position: 'insideLeft', offset: 8, ...labelStyle }} tick={{ ...tickProps }} tickFormatter={fmtTick} />
+            <XAxis type="number" dataKey="x" name="x" label={{ value: axisLabel(vizType), position: 'bottom', offset: -2, ...labelStyle }} tick={{ ...tickProps }} tickFormatter={fmtTick} />
+            <YAxis type="number" dataKey="y" name="y" label={<AxisYLabel>{yLabel}</AxisYLabel>} tick={{ ...tickProps }} tickFormatter={fmtTick} />
             <Tooltip contentStyle={tooltipStyle} formatter={tooltipFormatter} />
             {keys.map((k, i) => (
               <Scatter key={k} data={series[i].points.map(p => ({ x: p.x, y: p.y }))} fill={series[i].color || CHART_COLORS[i % CHART_COLORS.length]} isAnimationActive={false} name={series[i].label} />
@@ -192,13 +212,14 @@ export function ToolResultChart({ vizType, series, unit, color, colorStops }: Pr
       const barData = [{ x: 'value', y: lastY }];
       return (
         <div style={wrapper}>
-        <ResponsiveContainer width="100%" height={90}>
-          <BarChart data={barData} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
+        <div style={titleStyle}>{title}</div>
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={barData} margin={{ top: 8, right: 12, bottom: 18, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis dataKey="x" tick={{ ...tickProps }} tickFormatter={fmtTick} />
-            <YAxis tick={{ ...tickProps }} tickFormatter={fmtTick} />
+            <XAxis dataKey="x" label={{ value: axisLabel('bar'), position: 'bottom', offset: -2, ...labelStyle }} tick={{ ...tickProps }} tickFormatter={fmtTick} />
+            <YAxis label={<AxisYLabel>{yLabel}</AxisYLabel>} tick={{ ...tickProps }} tickFormatter={fmtTick} />
             <Tooltip contentStyle={tooltipStyle} formatter={tooltipFormatter} />
-            <Bar dataKey="y" fill={baseColor} radius={[3, 3, 0, 0]} />
+            <Bar dataKey="y" fill={series[0].color || baseColor} radius={[3, 3, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
         </div>

@@ -1752,22 +1752,25 @@ export default function App() {
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
         label: {
           text: label,
-          font: 'bold 18px monospace',
+          font: 'bold 12px monospace',
           fillColor: Cesium.Color.YELLOW,
           backgroundColor: new Cesium.Color(0, 0, 0, 0.6),
           showBackground: true,
-          pixelOffset: new Cesium.Cartesian2(0, -30),
+          pixelOffset: new Cesium.Cartesian2(0, -24),
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           outlineWidth: 2,
           outlineColor: Cesium.Color.BLACK,
-          scale: 1.2,
+          scale: 1,
           eyeOffset: new Cesium.Cartesian3(0, 0, -100),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         point: {
-          pixelSize: 12,
+          pixelSize: 10,
           color: Cesium.Color.YELLOW.withAlpha(0.8),
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         },
       });
     }
@@ -1837,7 +1840,7 @@ export default function App() {
     if (pts.length < 3) { setToolSurfaceLegend(null); setToolSurfaceProbe(null); return; }
     const idwGrid = interpolateIDW(pts, b, width, height);
     showInterpSurface(viewer, idwGrid, undefined, 0.6, true, activeStudyAreaPolygon ?? undefined);
-  }, [activeBbox, activeStudyAreaPolygon]);
+  }, [activeBbox, activeStudyAreaPolygon, toolSurfaceScheme]);
 
   const handleClearToolResult = useCallback(() => {
     setToolSurfaceLegend(null);

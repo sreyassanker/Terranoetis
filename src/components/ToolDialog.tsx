@@ -135,7 +135,7 @@ function buildGridHistogram(grid: ToolGrid, bins = 20): ToolSeries {
 }
 
 const GridHeatmap: React.FC<{ grid: ToolGrid; color: string; schemeColors?: Array<{ stop: number; r: number; g: number; b: number }> }> = ({ grid, color, schemeColors }) => {
-  const { nLat, nLon, valueMin, valueMax, valueMean, valueStd, valueMedian, finiteCellCount, hasNaN } = grid;
+  const { nLat, nLon, valueMean, valueStd, valueMedian, finiteCellCount, hasNaN } = grid;
   const histogram = React.useMemo(() => buildGridHistogram(grid, 20), [grid]);
   return (
     <div>
@@ -308,7 +308,7 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
       }
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setRunning(false); }
-  }, [tool.id, tool.inputs, paramValues, area, meta, start, end, filterValues, onToolResult, bbox, polygon, tool.name]);
+  }, [tool.id, tool.inputs, tool.toolName, tool.name, paramValues, area, meta, start, end, filterValues, onToolResult, bbox, polygon]);
 
   const resultIsFinite = result && Number.isFinite(result.result);
 

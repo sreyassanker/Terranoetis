@@ -41,7 +41,7 @@ function sanitize(t: unknown): string {
     '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
     'ₙ': 'n', 'ᵢ': 'i', 'ₘ': 'm', 'ₒ': 'o', 'ₓ': 'x', 'ₚ': 'p', 'ₛ': 's', 'ₜ': 't', 'ᵣ': 'r', 'ⱼ': 'j',
     '⁰': '^0', '¹': '^1', '²': '^2', '³': '^3', '⁴': '^4', '⁵': '^5', '⁶': '^6', '⁷': '^7', '⁸': '^8', '⁹': '^9',
-    '°': '°', '′': "'", '″': '"',
+    '⁻': '-', '°': '°', '′': "'", '″': '"',
     '\u201C': '"', '\u201D': '"', '\u2018': "'", '\u2019': "'",
     '⊂': 'subset', '∅': 'empty', '∈': 'in', '∇': 'del',
   };
@@ -87,26 +87,106 @@ async function renderChartDataURL(svg: string): Promise<string | null> {
   });
 }
 
+/**
+ * Monotone-cubic (PCHIP/Fritsch–Carlson) interpolation — the same smoothing
+ * recharts' `type="monotone"` (d3 curveMonotoneX) applies, so the PDF chart
+ * matches the on-screen chart exactly instead of using straight line segments.
+ * Returns a smooth path "M x0,y0 C c1x,c1y c2x,c2y x1,y1 ..." per segment.
+ */
+function monotonePath(pts: Array<{ x: number; y: number }>): string {
+  const n = pts.length;
+  if (n < 2) return '';
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  // Secant slopes
+  const m: number[] = new Array(n).fill(0);
+  for (let i = 0; i < n - 1; i++) {
+    const dx = xs[i + 1] - xs[i];
+    m[i] = dx === 0 ? 0 : (ys[i + 1] - ys[i]) / dx;
+  }
+  // Tangents (Fritsch–Carlson)
+  const t: number[] = new Array(n).fill(0);
+  t[0] = m[0];
+  t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    if (m[i - 1] * m[i] <= 0) t[i] = 0;
+    else {
+      const w1 = 2 * (xs[i + 1] - xs[i]) + (xs[i] - xs[i - 1]);
+      const w2 = (xs[i + 1] - xs[i]) + 2 * (xs[i] - xs[i - 1]);
+      t[i] = (w1 + w2) === 0 ? 0 : (w1 + w2) / (w1 / m[i - 1] + w2 / m[i]);
+    }
+  }
+  let d = `M${xs[0].toFixed(2)},${ys[0].toFixed(2)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const dx = xs[i + 1] - xs[i];
+    const c1x = xs[i] + dx / 3;
+    const c1y = ys[i] + (t[i] * dx) / 3;
+    const c2x = xs[i + 1] - dx / 3;
+    const c2y = ys[i + 1] - (t[i + 1] * dx) / 3;
+    d += ` C${c1x.toFixed(2)},${c1y.toFixed(2)} ${c2x.toFixed(2)},${c2y.toFixed(2)} ${xs[i + 1].toFixed(2)},${ys[i + 1].toFixed(2)}`;
+  }
+  return d;
+}
+
 /** Build an SVG chart string for the given series + vizType (matches the
  *  batch script's SVG generator exactly, so the visual is identical). */
 function buildChartSVG(
   series: Array<{ label: string; points: Array<{ x: number; y: number }>; color?: string }>,
   vizType: string,
+  unit?: string,
 ): string {
   if (!series.length || !series[0].points.length) return '';
+  // Type-specific axis labels — identical to the on-screen ToolResultChart.
+  const xLabelFor = (v: string): string => {
+    switch (v) {
+      case 'profile': return 'Depth / Height';
+      case 'spectrum': return 'Frequency / Wavelength';
+      case 'distribution': return 'Value';
+      case 'bar': return 'Category';
+      case 'histogram': return 'Bin';
+      case 'scatter': return 'X variable';
+      default: return 'Time / Index';
+    }
+  };
+  const yLabelFor = (v: string): string => {
+    if (v === 'distribution') return unit ? `Density (${unit})` : 'Density';
+    if (v === 'histogram') return 'Frequency / Count';
+    if (v === 'spectrum') return unit ? `Spectral Density (${unit})` : 'Spectral Density';
+    return unit ? `Value (${unit})` : 'Value';
+  };
+  const xLabel = xLabelFor(vizType);
+  const yLabel = yLabelFor(vizType);
   const pts = series[0].points;
   const W = 720, H = 420, ml = 70, mr = 24, mt = 24, mb = 54, iw = W - ml - mr, ih = H - mt - mb;
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
   const xmin = Math.min(...xs), xmax = Math.max(...xs);
-  const ymax = Math.max(...ys) * 1.1;
+  // Spectra span orders of magnitude (Planck ~1e-198→1e+6). A linear Y axis
+  // flattens the curve into a bottom line; use a log10 Y axis when the range
+  // exceeds ~3 decades so the physical shape is visible (standard practice).
+  const positive = ys.filter(v => Number.isFinite(v) && v > 0);
+  const logY = (vizType === 'spectrum' || vizType === 'distribution')
+    && positive.length > 0
+    && Math.log10(Math.max(...positive)) - Math.log10(Math.min(...positive)) > 3;
+  const yMinL = logY ? Math.log10(Math.min(...positive)) : 0;
+  const yMaxL = logY ? Math.log10(Math.max(...positive)) : 0;
+  const ymax = logY ? yMaxL + 0.2 : Math.max(...ys) * 1.1;
   const X = (x: number) => ml + ((x - xmin) / (xmax - xmin || 1)) * iw;
-  const Y = (y: number) => mt + ih - (y / (ymax || 1)) * ih;
-  const path = pts.map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(2)},${Y(p.y).toFixed(2)}`).join(' ');
-  const area = `M${X(pts[0].x).toFixed(2)},${(mt + ih).toFixed(2)} ` + pts.map(p => `L${X(p.x).toFixed(2)},${Y(p.y).toFixed(2)}`).join(' ') + ` Z`;
+  const Y = (y: number): number => {
+    if (logY) {
+      const l = y > 0 ? Math.log10(y) : yMinL - 1;
+      return mt + ih - ((l - yMinL) / (ymax - yMinL || 1)) * ih;
+    }
+    return mt + ih - (y / (ymax || 1)) * ih;
+  };
+  const mapped = pts.map(p => ({ x: X(p.x), y: Y(p.y) }));
+  // Monotone-smooth curve (matches the on-screen recharts monotone chart)
+  const path = monotonePath(mapped);
+  const area = `${path} L${mapped[mapped.length - 1].x.toFixed(2)},${(mt + ih).toFixed(2)} L${mapped[0].x.toFixed(2)},${(mt + ih).toFixed(2)} Z`;
   const isFill = vizType === 'spectrum' || vizType === 'distribution';
   const yTicks = Array.from({ length: 5 }, (_, i) => {
-    const y = mt + ih * i / 5; const v = ymax - ymax * i / 5;
-    return `<line x1="${ml}" y1="${y}" x2="${ml + iw}" y2="${y}" stroke="#e2e8f0" stroke-width="0.8"/><text x="${ml - 8}" y="${y + 3}" font-size="12" fill="#475569" text-anchor="end">${Number.isFinite(v) ? v.toFixed(3) : '0'}</text>`;
+    const y = mt + ih * i / 5;
+    // Log-scale ticks are powers of 10; linear ticks are evenly spaced values.
+    const v = logY ? Math.pow(10, yMaxL - (yMaxL - yMinL) * i / 5) : ymax - ymax * i / 5;
+    return `<line x1="${ml}" y1="${y}" x2="${ml + iw}" y2="${y}" stroke="#e2e8f0" stroke-width="0.8"/><text x="${ml - 8}" y="${y + 3}" font-size="12" fill="#475569" text-anchor="end">${Number.isFinite(v) && v > 0 ? v.toExponential(0) : '0'}</text>`;
   }).join('');
   const xTicks = Array.from({ length: 7 }, (_, i) => {
     const x = ml + iw * i / 6; const v = xmin + (xmax - xmin) * i / 6;
@@ -119,27 +199,10 @@ function buildChartSVG(
 <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${mt + ih}" stroke="#64748b" stroke-width="1.2"/>
 ${yTicks}
 ${xTicks}
-<text x="${ml + iw / 2}" y="${H - 8}" font-size="13" fill="#334155" text-anchor="middle">${sanitize(series[0].label)}</text>
-<text x="16" y="${mt + ih / 2}" font-size="13" fill="#334155" text-anchor="middle" transform="rotate(-90 16 ${mt + ih / 2})">Value</text>
-<text x="${ml + iw / 2}" y="18" font-size="14" fill="#334155" text-anchor="middle" font-weight="bold">${sanitize(series[0].label)}</text>
+<text x="${ml + iw / 2}" y="${H - 8}" font-size="13" fill="#334155" text-anchor="middle">${xLabel}</text>
+<text x="16" y="${mt + ih / 2}" font-size="13" fill="#334155" text-anchor="middle" transform="rotate(-90 16 ${mt + ih / 2})">${yLabel}</text>
+<text x="${ml + iw / 2}" y="18" font-size="14" fill="#334155" text-anchor="middle" font-weight="bold">${series[0].label}</text>
 ${isFill ? `<path d="${area}" fill="${c0}" fill-opacity="0.18"/><path d="${path}" fill="none" stroke="${c0}" stroke-width="2.4" stroke-linecap="round"/>` : `<path d="${path}" fill="none" stroke="${c0}" stroke-width="2.4" stroke-linecap="round"/>`}
-</svg>`;
-}
-
-/** Build a heatmap legend bar as a small SVG (vertical gradient, max/mid/min). */
-function buildHeatmapLegendSVG(valueMin: number, valueMax: number, stops: Array<{ stop: number; r: number; g: number; b: number }>): string {
-  if (!stops || stops.length === 0) stops = [{ stop: 0, r: 20, g: 40, b: 180 }, { stop: 0.5, r: 50, g: 200, b: 100 }, { stop: 1, r: 200, g: 30, b: 30 }];
-  const barW = 20, barH = 120, gap = 8;
-  const gradId = 'hgrad';
-  const gradStops = stops.map(s => `<stop offset="${Math.round(s.stop * 100)}%" stop-color="rgb(${s.r},${s.g},${s.b})"/>`).join('');
-  const mid = (valueMin + valueMax) / 2;
-  const fmt = (v: number) => Number.isFinite(v) ? v.toPrecision(4) : '—';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="${barH + 20}" viewBox="0 0 120 ${barH + 20}" style="background:#fff;font-family:Helvetica,Arial,sans-serif">
-<defs><linearGradient id="${gradId}" x1="0" y1="1" x2="0" y2="0"><${gradStops}></linearGradient></defs>
-<rect x="0" y="0" width="${barW}" height="${barH}" rx="3" fill="url(#${gradId})" stroke="#cbd5e1" stroke-width="0.8"/>
-<text x="${barW + gap}" y="8" font-size="10" fill="#475569" text-anchor="start">${fmt(valueMax)}</text>
-<text x="${barW + gap}" y="${barH / 2 + 3}" font-size="10" fill="#475569" text-anchor="start">${fmt(mid)}</text>
-<text x="${barW + gap}" y="${barH}" font-size="10" fill="#475569" text-anchor="start">${fmt(valueMin)}</text>
 </svg>`;
 }
 
@@ -195,7 +258,7 @@ ${yTicks}
 ${xTicks}
 <text x="${ml + iw / 2}" y="${H - 8}" font-size="13" fill="#334155" text-anchor="middle">Value</text>
 <text x="16" y="${mt + ih / 2}" font-size="13" fill="#334155" text-anchor="middle" transform="rotate(-90 16 ${mt + ih / 2})">Count</text>
-<text x="${ml + iw / 2}" y="18" font-size="14" fill="#334155" text-anchor="middle" font-weight="bold">Value Distribution &middot; ${finite.length} cells</text>
+<text x="${ml + iw / 2}" y="18" font-size="14" fill="#334155" text-anchor="middle" font-weight="bold">Value Distribution &#183; ${finite.length} cells</text>
 ${bars}
 </svg>`;
 }
@@ -252,12 +315,9 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
 
   // Build chart images (SVG → canvas → dataURL) — we do this early so async
   // completion doesn't break the sequential PDF layout.
-  const chartImg = report.series?.length ? await renderChartDataURL(buildChartSVG(report.series, report.seriesVizType ?? 'timeseries')) : null;
+  const chartImg = report.series?.length ? await renderChartDataURL(buildChartSVG(report.series, report.seriesVizType ?? 'timeseries', report.resultUnit)) : null;
   const histImg = report.grid && report.gridValues?.length
     ? await renderChartDataURL(buildHistogramSVG(report.gridValues, report.grid.valueMin, report.grid.valueMax, colorStops))
-    : null;
-  const legendImg = report.grid
-    ? await renderChartDataURL(buildHeatmapLegendSVG(report.grid.valueMin, report.grid.valueMax, colorStops))
     : null;
 
   // ── Header ──
@@ -267,7 +327,9 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
   doc.text('TERRANOETIS · ANALYTICAL MODEL REPORT', MARGIN, y);
   y += 18 + 14.17; // 0.5 cm gap
   doc.setFont('helvetica', 'bold'); doc.setFontSize(F_T); doc.setTextColor(...INK);
-  doc.text(sanitize(report.toolName), MARGIN, y); y += 18;
+  const nameLines = doc.splitTextToSize(sanitize(report.toolName), CW);
+  for (const l of nameLines) { ensure(20); doc.text(l, MARGIN, y); y += 20; }
+  y -= 2;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(F_B); doc.setTextColor(...INK_SOFT);
   doc.text(`(Tool ${report.toolId})`, MARGIN, y); y += 10;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(F_H); doc.setTextColor(...INK_FAINT);
@@ -281,8 +343,9 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
   doc.roundedRect(MARGIN, y, CW, 46, 4, 4, 'FD');
   doc.setFont('helvetica', 'bold'); doc.setFontSize(F_R); doc.setTextColor(...INK);
   const rv = report.resultText;
-  doc.text(rv, MARGIN + 16, y + 28);
-  const rvW = doc.getTextWidth(rv);
+  const rvLines = doc.splitTextToSize(rv, CW - 32);
+  doc.text(rvLines[0], MARGIN + 16, y + 28);
+  const rvW = doc.getTextWidth(rvLines[0]);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(F_B); doc.setTextColor(...INK_SOFT);
   const unitLabel = report.resultUnit && report.resultUnit !== '—' ? sanitize(report.resultUnit) : '(dimensionless)';
   doc.text(unitLabel, MARGIN + 16 + rvW + 12, y + 28);
@@ -316,10 +379,13 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
     y += 10;
   }
 
-  // ── Field Statistics + Histogram (for spatial/heatmap tools) ──
+  // ── Field Statistics + Heatmap + Histogram (for spatial/heatmap tools) ──
   if (report.grid) {
-    sectionTitle('Field Statistics');
     const g = report.grid;
+    // Figure numbering across the whole report: series chart already used #1.
+    let figNum = chartImg ? 2 : 1;
+
+    sectionTitle('Field Statistics');
     autoTable(doc, {
       startY: y, margin: { left: MARGIN, right: MARGIN },
       head: [['STATISTIC', 'VALUE']],
@@ -341,25 +407,15 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
 
     // Histogram figure
     if (histImg) {
-      sectionTitle('Figure 2');
+      sectionTitle(`Figure ${figNum}`);
       const finalW = CW, finalH = Math.min((finalW * 420) / 720, 320);
       ensure(finalH + 20);
       doc.addImage(histImg, 'PNG', MARGIN, y, finalW, finalH);
       y += finalH + 6;
       doc.setFont('helvetica', 'italic'); doc.setFontSize(F_B); doc.setTextColor(...INK_FAINT);
-      doc.text(`Figure 2 — Value distribution across the study area (${g.finiteCellCount} valid cells).`, MARGIN, y);
+      doc.text(`Figure ${figNum} — Value distribution across the study area (${g.finiteCellCount} valid cells).`, MARGIN, y);
       y += 10;
-    }
-
-    // Heatmap legend bar
-    if (legendImg) {
-      const lw = 120, lh = 140;
-      ensure(lh + 20);
-      doc.addImage(legendImg, 'PNG', MARGIN, y, lw, lh);
-      y += lh + 6;
-      doc.setFont('helvetica', 'italic'); doc.setFontSize(F_B); doc.setTextColor(...INK_FAINT);
-      doc.text('Field colour scale — low to high (legend).', MARGIN, y);
-      y += 10;
+      figNum++;
     }
   }
 
