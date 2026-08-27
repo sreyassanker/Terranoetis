@@ -539,7 +539,7 @@ Each tool has a scientific configuration (`toolConfigs.ts`): visualization type,
 
 **Data Sources:** Tools auto-fetch from 30+ live APIs (Open-Meteo, USGS, ERA5, NASA FIRMS, Landsat C2 L2, Sentinel Hub, NOAA NDBC, NOAA CO-OPS, GEBCO, ISRIC SoilGrids, WorldPop, MODIS, SMAP, SMOS, GPM IMERG, CHIRPS, HydroSHEDS, AVISO, CAMS, CERES, GOES, Himawari, Copernicus Marine, NSIDC, NOAA SWPC, and more) — all fetched contextually based on the tool's governing equation.
 
-**PDF Report Export:** Each tool result can be downloaded as a professional A4 PDF. Includes: cover header with tool name and ID, result panel, secondary outputs table, series chart (SVG-rendered), field statistics, value-distribution histogram, heatmap colour bar, data provenance, contextual analysis, recommendations, methodology steps, and two-pass page numbering. The batch generator (`scripts/generateToolReports.mjs`) produces all 150 reports in a single run.
+**PDF Report Export:** Each tool result can be downloaded as a professional A4 PDF. Includes: cover header with tool name and ID, result panel, secondary outputs table, series chart (SVG-rendered), field statistics, value-distribution histogram, heatmap colour bar, data provenance, contextual analysis, recommendations, methodology steps, and two-pass page numbering. The in-browser download button (via `src/lib/toolReportPdf.ts`) produces professional A4 PDFs for each tool.
 
 ## AI Intelligence Panel
 

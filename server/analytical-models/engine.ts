@@ -20,7 +20,7 @@ export interface ComputeResult {
   /** Chart-series output: ordered x/y pairs for rendering the tool's
    *  visualization type (timeseries, profile, spectrum, scatter, etc.).
    *  Each series has a label and an array of points. */
-  series?: Array<{ label: string; points: Array<{ x: number; y: number }>; color?: string }>;
+  series?: Array<{ label: string; points: Array<{ x: number; y: number }>; color?: string; xLabel?: string; logX?: boolean }>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -8709,6 +8709,7 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       series: [{
         label: 'Saastamoinen delay vs elevation angle',
         color: '#D2691E',
+        xLabel: 'Elevation angle θ (°)',
         points: profilePoints,
       }],
     };
@@ -8747,6 +8748,8 @@ export const EQUATION_ENGINE: Record<number, ComputeFn> = {
       series: [{
         label: 'Thiem drawdown s(r) = Q/(2πT)·ln(r₂/r)',
         color: '#0072B2',
+        xLabel: 'Radial distance r (m)',
+        logX: true,
         points: Array.from({ length: 20 }, (_, i) => {
           const r = 10 * Math.pow(100, i / 19); // 10 → 1000 m, log-spaced
           const s = (Q / (2 * Math.PI * Tn)) * Math.log(r2n / r);

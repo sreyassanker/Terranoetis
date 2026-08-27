@@ -1,6 +1,6 @@
 /**
  * Analytical Tool Result PDF Report Generator
- * ── Professional format matching the batch script (generateToolReports.mjs)
+ * ── Professional format for the in-browser PDF download
  *
  * Q1-journal-grade report: clean cover header, structured result table,
  * crisp chart, heatmap figure, field statistics, data provenance,
@@ -11,6 +11,7 @@
  */
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatSciCompact } from './formatSci';
 
 // ── Palette (light, print-friendly) ────────────────────────────────
 const INK = [22, 27, 34] as const;
@@ -54,7 +55,6 @@ function sanitize(t: unknown): string {
   }
   return r.replace(/\s+/g, ' ').replace(/ - /g, '\u00A0-\u00A0').trim();
 }
-const stripHtml = (s: unknown): string => String(s ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 const fmtNum = (v: unknown): string => { const n = Number(v); return Number.isFinite(n) ? n.toPrecision(6) : 'NaN'; };
 
 /** Date/time in dd/MM/yyyy, HH:mm format (e.g. 27/08/2026, 14:30). */
@@ -130,12 +130,12 @@ function monotonePath(pts: Array<{ x: number; y: number }>): string {
 /** Build an SVG chart string for the given series + vizType (matches the
  *  batch script's SVG generator exactly, so the visual is identical). */
 function buildChartSVG(
-  series: Array<{ label: string; points: Array<{ x: number; y: number }>; color?: string }>,
+  series: Array<{ label: string; points: Array<{ x: number; y: number }>; color?: string; xLabel?: string; logX?: boolean }>,
   vizType: string,
   unit?: string,
+  colorStops?: Array<{ stop: number; r: number; g: number; b: number }>,
 ): string {
-  if (!series.length || !series[0].points.length) return '';
-  // Type-specific axis labels — identical to the on-screen ToolResultChart.
+  if (!series.length || !series.some(s => s.points.length)) return '';
   const xLabelFor = (v: string): string => {
     switch (v) {
       case 'profile': return 'Depth / Height';
@@ -153,46 +153,154 @@ function buildChartSVG(
     if (v === 'spectrum') return unit ? `Spectral Density (${unit})` : 'Spectral Density';
     return unit ? `Value (${unit})` : 'Value';
   };
-  const xLabel = xLabelFor(vizType);
+  const xLabel = series[0]?.xLabel ?? xLabelFor(vizType);
   const yLabel = yLabelFor(vizType);
-  const pts = series[0].points;
+
+  const continuous = ['timeseries', 'profile', 'spectrum', 'distribution'].includes(vizType);
+  const isBars = vizType === 'bar' || vizType === 'histogram';
+  const isScatter = vizType === 'scatter';
+
   const W = 720, H = 420, ml = 70, mr = 24, mt = 24, mb = 54, iw = W - ml - mr, ih = H - mt - mb;
-  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+
+  // Union of all points across all series for the scale
+  const allPoints = series.flatMap(s => s.points.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y)));
+  if (allPoints.length === 0) return '';
+  const xs = allPoints.map(p => p.x), ys = allPoints.map(p => p.y);
   const xmin = Math.min(...xs), xmax = Math.max(...xs);
-  // Spectra span orders of magnitude (Planck ~1e-198→1e+6). A linear Y axis
-  // flattens the curve into a bottom line; use a log10 Y axis when the range
-  // exceeds ~3 decades so the physical shape is visible (standard practice).
-  const positive = ys.filter(v => Number.isFinite(v) && v > 0);
-  const logY = (vizType === 'spectrum' || vizType === 'distribution')
-    && positive.length > 0
-    && Math.log10(Math.max(...positive)) - Math.log10(Math.min(...positive)) > 3;
-  const yMinL = logY ? Math.log10(Math.min(...positive)) : 0;
-  const yMaxL = logY ? Math.log10(Math.max(...positive)) : 0;
-  const ymax = logY ? yMaxL + 0.2 : Math.max(...ys) * 1.1;
-  const X = (x: number) => ml + ((x - xmin) / (xmax - xmin || 1)) * iw;
+
+  // Auto log-Y for continuous charts when the positive range spans >3 decades
+  // and no negative values exist (log scale is undefined for negatives).
+  const yFin = ys.filter(Number.isFinite);
+  const yPos = yFin.filter(v => v > 0);
+  const hasNeg = yFin.some(v => v < 0);
+  const logY = continuous && !hasNeg && yPos.length > 0 && Math.log10(Math.max(...yPos)) - Math.log10(Math.min(...yPos)) > 3;
+  const yMinL = logY ? Math.log10(Math.min(...yPos)) : 0;
+  const yMaxL = logY ? Math.log10(Math.max(...yPos)) : 0;
+  const ymin = logY ? 0 : Math.min(0, ...yFin);
+  const ymax = logY ? yMaxL + 0.2 : Math.max(0, ...yFin) * 1.1;
+
+  // Log10 X axis when a series opts in (log-spaced x, e.g. the Thiem
+  // radial-distance sweep). Requires strictly positive x values.
+  const xPos = xs.filter(v => v > 0);
+  const logX = continuous && series.some(s => s.logX) && xPos.length === xs.length;
+  const xLogMin = logX ? Math.log10(Math.min(...xPos)) : 0;
+  const xLogMax = logX ? Math.log10(Math.max(...xPos)) : 0;
+
+  // The frontend uses a recharts category X axis (evenly spaced by data index)
+  // for continuous charts and bars, unless logX is set. Match that for parity.
+  const xCategory = !logX && !isScatter;
+  const xVals = xCategory ? [...new Set(xs)].sort((a, b) => a - b) : null;
+
+  const X = (x: number) => {
+    if (logX) {
+      const l = x > 0 ? Math.log10(x) : xLogMin - 1;
+      return ml + ((l - xLogMin) / (xLogMax - xLogMin || 1)) * iw;
+    }
+    if (xCategory && xVals) {
+      const idx = xVals.indexOf(x);
+      if (idx < 0) return ml + iw / 2;
+      return ml + (idx / Math.max(1, xVals.length - 1)) * iw;
+    }
+    return ml + ((x - xmin) / (xmax - xmin || 1)) * iw;
+  };
   const Y = (y: number): number => {
     if (logY) {
       const l = y > 0 ? Math.log10(y) : yMinL - 1;
       return mt + ih - ((l - yMinL) / (ymax - yMinL || 1)) * ih;
     }
-    return mt + ih - (y / (ymax || 1)) * ih;
+    return mt + ih - ((y - ymin) / ((ymax - ymin) || 1)) * ih;
   };
-  const mapped = pts.map(p => ({ x: X(p.x), y: Y(p.y) }));
-  // Monotone-smooth curve (matches the on-screen recharts monotone chart)
-  const path = monotonePath(mapped);
-  const area = `${path} L${mapped[mapped.length - 1].x.toFixed(2)},${(mt + ih).toFixed(2)} L${mapped[0].x.toFixed(2)},${(mt + ih).toFixed(2)} Z`;
-  const isFill = vizType === 'spectrum' || vizType === 'distribution';
+  const yZero = logY ? mt + ih : Y(0);
+
   const yTicks = Array.from({ length: 5 }, (_, i) => {
     const y = mt + ih * i / 5;
-    // Log-scale ticks are powers of 10; linear ticks are evenly spaced values.
-    const v = logY ? Math.pow(10, yMaxL - (yMaxL - yMinL) * i / 5) : ymax - ymax * i / 5;
-    return `<line x1="${ml}" y1="${y}" x2="${ml + iw}" y2="${y}" stroke="#e2e8f0" stroke-width="0.8"/><text x="${ml - 8}" y="${y + 3}" font-size="12" fill="#475569" text-anchor="end">${Number.isFinite(v) && v > 0 ? v.toExponential(0) : '0'}</text>`;
+    const v = logY ? Math.pow(10, yMaxL - (yMaxL - yMinL) * i / 5) : ymax - (ymax - ymin) * i / 5;
+    const label = (logY ? (Number.isFinite(v) && v > 0) : true) ? formatSciCompact(v) : '0';
+    return `<line x1="${ml}" y1="${y}" x2="${ml + iw}" y2="${y}" stroke="#e2e8f0" stroke-width="0.8"/><text x="${ml - 8}" y="${y + 3}" font-size="12" fill="#475569" text-anchor="end">${label}</text>`;
   }).join('');
-  const xTicks = Array.from({ length: 7 }, (_, i) => {
-    const x = ml + iw * i / 6; const v = xmin + (xmax - xmin) * i / 6;
-    return `<line x1="${x}" y1="${mt + ih}" x2="${x}" y2="${mt + ih + 4}" stroke="#64748b" stroke-width="1"/><text x="${x}" y="${mt + ih + 18}" font-size="12" fill="#475569" text-anchor="middle">${v.toPrecision(4)}</text>`;
+  const xTicks = xCategory && xVals ? (() => {
+    const n = xVals.length;
+    const step = Math.max(1, Math.floor(n / 6));
+    const indices = Array.from({ length: Math.min(7, n) }, (_, i) => Math.min(n - 1, i * step));
+    return [...new Set(indices)].map(idx => {
+      const v = xVals[idx];
+      const x = ml + (idx / Math.max(1, n - 1)) * iw;
+      return `<line x1="${x}" y1="${mt + ih}" x2="${x}" y2="${mt + ih + 4}" stroke="#64748b" stroke-width="1"/><text x="${x}" y="${mt + ih + 18}" font-size="12" fill="#475569" text-anchor="middle">${formatSciCompact(v)}</text>`;
+    }).join('');
+  })() : Array.from({ length: 7 }, (_, i) => {
+    const x = ml + iw * i / 6;
+    const v = logX ? Math.pow(10, xLogMax - (xLogMax - xLogMin) * i / 6) : xmin + (xmax - xmin) * i / 6;
+    return `<line x1="${x}" y1="${mt + ih}" x2="${x}" y2="${mt + ih + 4}" stroke="#64748b" stroke-width="1"/><text x="${x}" y="${mt + ih + 18}" font-size="12" fill="#475569" text-anchor="middle">${formatSciCompact(v)}</text>`;
   }).join('');
-  const c0 = series[0].color || CHART_COLORS[0];
+
+  // Per-series rendering
+  let body = '';
+  if (isScatter) {
+    for (const s of series) {
+      const c = s.color || CHART_COLORS[series.indexOf(s) % CHART_COLORS.length];
+      for (const p of s.points) {
+        if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+        body += `<circle cx="${X(p.x).toFixed(2)}" cy="${Y(p.y).toFixed(2)}" r="4" fill="${c}" stroke="#fff" stroke-width="1"/>`;
+      }
+    }
+  } else if (isBars) {
+    const n = series.length;
+    const isHist = vizType === 'histogram';
+    const xVals = [...new Set(allPoints.map(p => p.x))].sort((a, b) => a - b);
+    const histMin = xVals.length > 0 ? Math.min(...xVals) : 0;
+    const histMax = xVals.length > 0 ? Math.max(...xVals) : 1;
+    for (let si = 0; si < n; si++) {
+      const s = series[si];
+      const c = s.color || CHART_COLORS[si % CHART_COLORS.length];
+      for (const p of s.points) {
+        if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+        const bandW = iw / (xVals.length || 1);
+        const barW = bandW / n * 0.8;
+        const xPos = X(p.x) - bandW / 2 + si * (bandW / n);
+        const top = Y(p.y);
+        const barTop = Math.min(yZero, top);
+        const barH = Math.abs(yZero - top);
+        let fillC = c;
+        if (isHist && colorStops && colorStops.length > 0 && n === 1) {
+          const t = p.x > histMin ? (p.x - histMin) / (histMax - histMin) : 0;
+          for (let st = 0; st < colorStops.length - 1; st++) {
+            if (t >= colorStops[st].stop && t <= colorStops[st + 1].stop) {
+              const seg = (colorStops[st + 1].stop - colorStops[st].stop) === 0 ? 0 : (t - colorStops[st].stop) / (colorStops[st + 1].stop - colorStops[st].stop);
+              const r = Math.round(colorStops[st].r + (colorStops[st + 1].r - colorStops[st].r) * seg);
+              const g = Math.round(colorStops[st].g + (colorStops[st + 1].g - colorStops[st].g) * seg);
+              const b = Math.round(colorStops[st].b + (colorStops[st + 1].b - colorStops[st].b) * seg);
+              fillC = `rgb(${r},${g},${b})`;
+              break;
+            }
+          }
+        }
+        body += `<rect x="${xPos.toFixed(2)}" y="${barTop.toFixed(2)}" width="${Math.max(1, barW).toFixed(2)}" height="${Math.max(0, barH).toFixed(2)}" fill="${fillC}" rx="2"/>`;
+      }
+    }
+  } else if (continuous) {
+    for (let si = 0; si < series.length; si++) {
+      const s = series[si];
+      const c = s.color || CHART_COLORS[si % CHART_COLORS.length];
+      const pts = s.points.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+      if (pts.length < 2) continue;
+      const mapped = pts.map(p => ({ x: X(p.x), y: Y(p.y) }));
+      const path = monotonePath(mapped);
+      const fillBase = logY ? (mt + ih) : yZero;
+      const area = `${path} L${mapped[mapped.length - 1].x.toFixed(2)},${fillBase.toFixed(2)} L${mapped[0].x.toFixed(2)},${fillBase.toFixed(2)} Z`;
+      body += `<path d="${area}" fill="${c}" fill-opacity="0.25"/><path d="${path}" fill="none" stroke="${c}" stroke-width="2.4" stroke-linecap="round"/>`;
+    }
+  } else {
+    const lastY = series[0].points[series[0].points.length - 1]?.y ?? 0;
+    const c = series[0].color || CHART_COLORS[0];
+    const xC = ml + iw / 2;
+    const barW = iw * 0.3;
+    const top = Y(lastY);
+    const barTop = Math.min(yZero, top);
+    const barH = Math.abs(yZero - top);
+    body += `<rect x="${(xC - barW / 2).toFixed(2)}" y="${barTop.toFixed(2)}" width="${barW.toFixed(2)}" height="${Math.max(0, barH).toFixed(2)}" fill="${c}" rx="2"/>`;
+  }
+
+  const title = series.map(s => s.label).join(' / ');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:#fff;font-family:Helvetica,Arial,sans-serif">
 <rect width="${W}" height="${H}" fill="#ffffff"/>
 <line x1="${ml}" y1="${mt + ih}" x2="${ml + iw}" y2="${mt + ih}" stroke="#64748b" stroke-width="1.2"/>
@@ -201,8 +309,8 @@ ${yTicks}
 ${xTicks}
 <text x="${ml + iw / 2}" y="${H - 8}" font-size="13" fill="#334155" text-anchor="middle">${xLabel}</text>
 <text x="16" y="${mt + ih / 2}" font-size="13" fill="#334155" text-anchor="middle" transform="rotate(-90 16 ${mt + ih / 2})">${yLabel}</text>
-<text x="${ml + iw / 2}" y="18" font-size="14" fill="#334155" text-anchor="middle" font-weight="bold">${series[0].label}</text>
-${isFill ? `<path d="${area}" fill="${c0}" fill-opacity="0.18"/><path d="${path}" fill="none" stroke="${c0}" stroke-width="2.4" stroke-linecap="round"/>` : `<path d="${path}" fill="none" stroke="${c0}" stroke-width="2.4" stroke-linecap="round"/>`}
+<text x="${ml + iw / 2}" y="18" font-size="14" fill="#334155" text-anchor="middle" font-weight="bold">${title}</text>
+${body}
 </svg>`;
 }
 
@@ -290,19 +398,51 @@ export interface PdfReportInput {
 
 export async function exportToolResultAsPDF(report: PdfReportInput): Promise<void> {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+
+  // Load DejaVuSans (Unicode font) so the PDF body can render real math symbols
+  // (×, μ, ², ³, Greek letters, superscripts, subscripts, etc.) instead of
+  // stripping them to ASCII approximations. Falls back to Helvetica + sanitize
+  // when the font fetch fails (offline / slow network).
+  let hasUnicode = false;
+  try {
+    const [reg, bold] = await Promise.all([
+      (await fetch('/fonts/DejaVuSans.ttf')).arrayBuffer(),
+      (await fetch('/fonts/DejaVuSans-Bold.ttf')).arrayBuffer(),
+    ]);
+    const toB64 = (buf: ArrayBuffer) => {
+      let bin = ''; const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin);
+    };
+    doc.addFileToVFS('DejaVu.ttf', toB64(reg));
+    doc.addFileToVFS('DejaVu-Bold.ttf', toB64(bold));
+    doc.addFont('DejaVu.ttf', 'DejaVu', 'normal');
+    doc.addFont('DejaVu-Bold.ttf', 'DejaVu', 'bold');
+    hasUnicode = true;
+  } catch { /* font unavailable — fall through to Helvetica + sanitize */ }
+
+  const getFont = (style: 'normal' | 'bold' | 'italic' | 'bolditalic' = 'normal'): [string, 'normal' | 'bold' | 'italic' | 'bolditalic'] => {
+    if (hasUnicode) return ['DejaVu', style === 'bold' ? 'bold' : 'normal'];
+    return ['helvetica', style];
+  };
+  const clean = (s: unknown): string => {
+    const t = String(s ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    if (hasUnicode) return t;
+    return sanitize(t);
+  };
   let y = MARGIN;
   const ensure = (h: number) => { if (y + h > PH - MARGIN - 20) { doc.addPage(); y = MARGIN; } };
   const sectionTitle = (t: string) => {
     ensure(28); y += 8;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(F_B); doc.setTextColor(...BRAND);
+    doc.setFont(...getFont('bold')); doc.setFontSize(F_B); doc.setTextColor(...BRAND);
     doc.text(t.toUpperCase(), MARGIN, y); y += 4;
     doc.setDrawColor(...BRAND); doc.setLineWidth(1.1); doc.line(MARGIN, y, MARGIN + 34, y); y += 14;
   };
   const textBlock = (str: string, opts: { size?: number; style?: 'normal' | 'bold' | 'italic'; color?: readonly [number, number, number]; lh?: number; gap?: number } = {}) => {
     const { size = F_B, style = 'normal', color = INK, lh = 1.5, gap = 0 } = opts;
-    const clean = sanitize(stripHtml(str));
-    doc.setFont('helvetica', style); doc.setFontSize(size); doc.setTextColor(...color);
-    for (const line of doc.splitTextToSize(clean, CW)) { ensure(size * lh); doc.text(line, MARGIN, y); y += size * lh; }
+    const cleanText = clean(str);
+    doc.setFont(...getFont(style)); doc.setFontSize(size); doc.setTextColor(...color);
+    for (const line of doc.splitTextToSize(cleanText, CW)) { ensure(size * lh); doc.text(line, MARGIN, y); y += size * lh; }
     y += gap;
   };
   const rule = () => { doc.setDrawColor(...RULE); doc.setLineWidth(0.5); doc.line(MARGIN, y, PW - MARGIN, y); y += 10; };
@@ -315,7 +455,7 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
 
   // Build chart images (SVG → canvas → dataURL) — we do this early so async
   // completion doesn't break the sequential PDF layout.
-  const chartImg = report.series?.length ? await renderChartDataURL(buildChartSVG(report.series, report.seriesVizType ?? 'timeseries', report.resultUnit)) : null;
+  const chartImg = report.series?.length ? await renderChartDataURL(buildChartSVG(report.series, report.seriesVizType ?? 'timeseries', report.resultUnit, colorStops)) : null;
   const histImg = report.grid && report.gridValues?.length
     ? await renderChartDataURL(buildHistogramSVG(report.gridValues, report.grid.valueMin, report.grid.valueMax, colorStops))
     : null;
@@ -323,16 +463,16 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
   // ── Header ──
   doc.setFillColor(...BRAND); doc.rect(0, 0, PW, 4, 'F');
   y = MARGIN + 4;
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(F_H); doc.setTextColor(...INK_FAINT);
+  doc.setFont(...getFont('bold')); doc.setFontSize(F_H); doc.setTextColor(...INK_FAINT);
   doc.text('TERRANOETIS · ANALYTICAL MODEL REPORT', MARGIN, y);
   y += 18 + 14.17; // 0.5 cm gap
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(F_T); doc.setTextColor(...INK);
-  const nameLines = doc.splitTextToSize(sanitize(report.toolName), CW);
+  doc.setFont(...getFont('bold')); doc.setFontSize(F_T); doc.setTextColor(...INK);
+  const nameLines = doc.splitTextToSize(clean(report.toolName), CW);
   for (const l of nameLines) { ensure(20); doc.text(l, MARGIN, y); y += 20; }
   y -= 2;
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(F_B); doc.setTextColor(...INK_SOFT);
+  doc.setFont(...getFont()); doc.setFontSize(F_B); doc.setTextColor(...INK_SOFT);
   doc.text(`(Tool ${report.toolId})`, MARGIN, y); y += 10;
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(F_H); doc.setTextColor(...INK_FAINT);
+  doc.setFont(...getFont()); doc.setFontSize(F_H); doc.setTextColor(...INK_FAINT);
   doc.text(`Generated ${fmtDate()}`, MARGIN, y); y += 8;
   rule(); y += 6;
 
@@ -341,13 +481,13 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
   ensure(46);
   doc.setFillColor(245, 247, 255); doc.setDrawColor(...RULE); doc.setLineWidth(0.5);
   doc.roundedRect(MARGIN, y, CW, 46, 4, 4, 'FD');
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(F_R); doc.setTextColor(...INK);
-  const rv = report.resultText;
+  doc.setFont(...getFont('bold')); doc.setFontSize(F_R); doc.setTextColor(...INK);
+  const rv = clean(report.resultText);
   const rvLines = doc.splitTextToSize(rv, CW - 32);
   doc.text(rvLines[0], MARGIN + 16, y + 28);
   const rvW = doc.getTextWidth(rvLines[0]);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(F_B); doc.setTextColor(...INK_SOFT);
-  const unitLabel = report.resultUnit && report.resultUnit !== '—' ? sanitize(report.resultUnit) : '(dimensionless)';
+  doc.setFont(...getFont()); doc.setFontSize(F_B); doc.setTextColor(...INK_SOFT);
+  const unitLabel = report.resultUnit && report.resultUnit !== '—' ? clean(report.resultUnit) : '(dimensionless)';
   doc.text(unitLabel, MARGIN + 16 + rvW + 12, y + 28);
   y += 56;
 
@@ -357,7 +497,7 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
     autoTable(doc, {
       startY: y, margin: { left: MARGIN, right: MARGIN },
       head: [['OUTPUT', 'VALUE']],
-      body: report.secondary.map(s => [sanitize(s.label), s.value]),
+      body: report.secondary.map(s => [clean(s.label), s.value]),
       theme: 'plain',
       headStyles: { fillColor: TABLE_HEAD as unknown as [number, number, number], textColor: INK_SOFT as unknown as [number, number, number], fontStyle: 'bold', fontSize: F_H, cellPadding: { top: 4, bottom: 4, left: 10, right: 10 } },
       bodyStyles: { textColor: INK as unknown as [number, number, number], fontSize: F_B, cellPadding: { top: 3, bottom: 3, left: 10, right: 10 } },
@@ -374,8 +514,8 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
     ensure(finalH + 20);
     doc.addImage(chartImg, 'PNG', MARGIN, y, finalW, finalH);
     y += finalH + 6;
-    doc.setFont('helvetica', 'italic'); doc.setFontSize(F_B); doc.setTextColor(...INK_FAINT);
-    doc.text(sanitize(`Figure 1 — ${report.series?.[0]?.label ?? 'Series'}.`), MARGIN, y);
+    doc.setFont(...getFont('italic')); doc.setFontSize(F_B); doc.setTextColor(...INK_FAINT);
+    doc.text(clean(`Figure 1 — ${report.series?.map(s => s.label).join(' / ') ?? 'Series'}.`), MARGIN, y);
     y += 10;
   }
 
@@ -412,8 +552,8 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
       ensure(finalH + 20);
       doc.addImage(histImg, 'PNG', MARGIN, y, finalW, finalH);
       y += finalH + 6;
-      doc.setFont('helvetica', 'italic'); doc.setFontSize(F_B); doc.setTextColor(...INK_FAINT);
-      doc.text(`Figure ${figNum} — Value distribution across the study area (${g.finiteCellCount} valid cells).`, MARGIN, y);
+      doc.setFont(...getFont('italic')); doc.setFontSize(F_B); doc.setTextColor(...INK_FAINT);
+      doc.text(clean(`Figure ${figNum} — Value distribution across the study area (${g.finiteCellCount} valid cells).`), MARGIN, y);
       y += 10;
       figNum++;
     }
@@ -422,13 +562,13 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
   // ── Data sources ──
   if (report.dataSource) {
     sectionTitle('Data Sources');
-    textBlock(stripHtml(report.dataSource), { size: F_B, color: INK_SOFT, lh: 1.45, gap: 2 });
+    textBlock(report.dataSource, { size: F_B, color: INK_SOFT, lh: 1.45, gap: 2 });
   }
 
   // ── Interpretation ──
   if (report.contextualAnalysis) {
     sectionTitle('Interpretation');
-    textBlock(stripHtml(report.contextualAnalysis), { size: F_B, color: INK, lh: 1.5, gap: 2 });
+    textBlock(report.contextualAnalysis, { size: F_B, color: INK, lh: 1.5, gap: 2 });
   }
 
   // ── Recommendations ──
@@ -436,10 +576,10 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
     sectionTitle('Recommendations');
     report.recommendations.forEach((rec, i) => {
       ensure(18);
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(F_B); doc.setTextColor(...BRAND);
+      doc.setFont(...getFont('bold')); doc.setFontSize(F_B); doc.setTextColor(...BRAND);
       doc.text(String(i + 1).padStart(2, '0'), MARGIN, y);
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(...INK);
-      for (const l of doc.splitTextToSize(sanitize(stripHtml(rec)), CW - 30)) { ensure(13); doc.text(l, MARGIN + 28, y); y += 13; }
+      doc.setFont(...getFont()); doc.setTextColor(...INK);
+      for (const l of doc.splitTextToSize(clean(rec), CW - 30)) { ensure(13); doc.text(l, MARGIN + 28, y); y += 13; }
       y += 4;
     });
   }
@@ -448,22 +588,22 @@ export async function exportToolResultAsPDF(report: PdfReportInput): Promise<voi
   if (report.steps && report.steps.length > 0) {
     sectionTitle('Methodology');
     for (const s of report.steps.slice(0, 24)) {
-      const clean = sanitize(stripHtml(s));
-      if (/^[—\-─═]{2,}/.test(clean) && !/^Step/i.test(clean)) continue;
-      const isStepHeader = /^Step\s+\d+/i.test(clean);
-      textBlock(clean, { size: F_B, style: isStepHeader ? 'bold' : 'normal', color: isStepHeader ? INK : INK_SOFT, lh: 1.35, gap: 1 });
+      const cleanText = clean(s);
+      if (/^[—\-─═]{2,}/.test(cleanText) && !/^Step/i.test(cleanText)) continue;
+      const isStepHeader = /^Step\s+\d+/i.test(cleanText);
+      textBlock(cleanText, { size: F_B, style: isStepHeader ? 'bold' : 'normal', color: isStepHeader ? INK : INK_SOFT, lh: 1.35, gap: 1 });
     }
   }
 
   // ── Closing + two-pass page numbers ──
   y += 10; ensure(22);
-  doc.setFont('helvetica', 'italic'); doc.setFontSize(F_H); doc.setTextColor(...INK_FAINT);
+  doc.setFont(...getFont('italic')); doc.setFontSize(F_H); doc.setTextColor(...INK_FAINT);
   doc.text('— End of report · Generated by Terranoetis —', MARGIN, y);
   const total = doc.getNumberOfPages();
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
     doc.setDrawColor(...RULE); doc.setLineWidth(0.5); doc.line(MARGIN, FOOTER_Y, PW - MARGIN, FOOTER_Y);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(...INK_FAINT);
+    doc.setFont(...getFont()); doc.setFontSize(7); doc.setTextColor(...INK_FAINT);
     doc.text('Terranoetis — Analytical Model Report', MARGIN, FOOTER_Y + 12);
     doc.text(`Page ${p} of ${total}`, PW - MARGIN, FOOTER_Y + 12, { align: 'right' });
   }
