@@ -249,6 +249,7 @@ export function renderGridToCanvas(
   grid: InterpGrid,
   colorStops: { stop: number; r: number; g: number; b: number }[],
   maskPolygon?: Array<Array<[number, number]>>,
+  upscaleOverride?: number,
 ): HTMLCanvasElement {
   // Raster convention: grid row 0 = latMin (south), row height-1 = latMax
   // (north); canvas row 0 = top = north. We flip Y so south data renders at
@@ -260,7 +261,9 @@ export function renderGridToCanvas(
   // = 112×112 — cheap and visibly smooth. For very large grids (e.g. the IDW
   // fallback up to 200×200) we cap the canvas at ~512px/side so the
   // alpha-blended texture stays GPU-cheap instead of growing to 1600×1600.
-  const UPSCALE = Math.min(4, Math.max(1, Math.floor(512 / Math.max(grid.width, grid.height))));
+  // An explicit upscaleOverride (used by the PDF export) forces a higher
+  // resolution so the embedded image is crisp, not blurry.
+  const UPSCALE = upscaleOverride ?? Math.min(4, Math.max(1, Math.floor(512 / Math.max(grid.width, grid.height))));
   const W = grid.width * UPSCALE;
   const H = grid.height * UPSCALE;
   const canvas = document.createElement('canvas');

@@ -83,10 +83,7 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
   const openTool = useCallback((tool: AnalysisTool, color: string) => {
     setSelectedTool(tool);
     setSelectedColor(color);
-    // Clear the globe heatmap/legend from any previous tool run — the new
-    // tool's result panel opens fresh, and no stale field overlay lingers.
-    onClearResult?.();
-  }, [onClearResult]);
+  }, []);
 
   const hasSearch = !!search.trim();
   const q = search.toLowerCase();
@@ -136,10 +133,8 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
 
   const hasBbox = !!bbox;
 
-  if (!open) return null;
-
   return (
-    <div style={{ position: 'fixed', top: 60, right: 10, bottom: 56, zIndex, width: 440, maxWidth: 'calc(100vw - 32px)' }}>
+    <div style={{ position: 'fixed', top: 60, right: 10, bottom: 56, zIndex, width: 440, maxWidth: 'calc(100vw - 32px)', display: open ? 'block' : 'none' }}>
       <Panel title="ANALYTICS WORKBENCH" icon={<FlaskConical size={16} />} accentColor="#8b5cf6" iconColor="#a78bfa" titleColor="#c4b5fd" onClose={onClose} style={{ height: '100%', animation: 'slideInRight 0.25s ease' }}>
         {/* Search Bar */}
         <div style={{ padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', gap: 8 }}>

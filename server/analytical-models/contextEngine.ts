@@ -3098,7 +3098,9 @@ export async function computeWithContext(
     safe(
       context?.time?.granularity === 'range'
         ? fetchHistoricalWeather(lat, lon, context?.time?.start ?? '', context?.time?.end ?? '')
-        : fetchCurrentWeather(lat, lon),
+        : context?.time?.start
+          ? fetchHistoricalWeather(lat, lon, context.time.start, context.time.start)
+          : fetchCurrentWeather(lat, lon),
       {} as WeatherData,
     ),
     safe(fetchMarineData(lat, lon), {} as MarineData),
