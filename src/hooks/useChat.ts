@@ -153,7 +153,7 @@ export function useChat(
     // Pure fly command
     const isPureFlyCommand = /^(?:fly|go|zoom)\s+(?:to|in|into)\s+/i.test(userMsg.trim());
     if (isPureFlyCommand && loc) {
-      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 1500 });
+      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 20000 });
       addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `Flying to ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` });
       setAiTyping(false);
       return;
@@ -401,7 +401,7 @@ export function useChat(
               executeAgentCommands(data.commands);
             }
             if (data.type === 'intent') {
-              if (data.location) focusLocation(data.location.lat, data.location.lon, { label: data.location.label || 'Location', color: '#60a5fa', height: 1500 });
+              if (data.location) focusLocation(data.location.lat, data.location.lon, { label: data.location.label || 'Location', color: '#60a5fa', height: 20000 });
               if (data.layerIds) (data.layerIds as string[]).forEach((lid: string) => { if (!isLayerEnabled(lid)) toggleLayer(lid); });
             }
             if (data.type === 'output') {

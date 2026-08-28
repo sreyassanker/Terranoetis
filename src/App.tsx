@@ -945,7 +945,7 @@ function renderCommandChips(
       {cmdChips.map((chip,i) => (
         <span key={i} className="ai-chip command-chip" style={{fontSize:10,padding:'2px 8px'}}
           onClick={() => {
-            if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 1500 });
+            if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 20000 });
             if (chip.action === 'toggleLayer' && chip.layerId) toggleLayer(chip.layerId);
           }}>{chip.label}</span>
       ))}
@@ -3414,11 +3414,19 @@ export default function App() {
       },
       label: options?.label ? {
         text: options.label,
-        font: '11px "JetBrains Mono"',
+        font: '12px "Inter", sans-serif',
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        pixelOffset: new Cesium.Cartesian2(0, -18),
+        outlineWidth: 3,
+        backgroundColor: Cesium.Color.fromCssColorString('#0b1220').withAlpha(0.65),
+        showBackground: true,
+        backgroundPadding: new Cesium.Cartesian2(6, 4),
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        pixelOffset: new Cesium.Cartesian2(0, -6),
       } : undefined,
       properties: {
         layer: 'focus',
@@ -5115,7 +5123,7 @@ export default function App() {
 
   const goToLocation = useCallback((lat: number, lon: number, label?: string, color?: string, duration = 0.9) => {
     setShowSuggestions(false);
-    focusLocation(lat, lon, { label, color, height: 1500, duration });
+    focusLocation(lat, lon, { label, color, height: 20000, duration });
   }, [focusLocation]);
 
   const handlePauseFork = useCallback(async (forkId: string) => {
@@ -6677,11 +6685,11 @@ export default function App() {
           workspaceId = ws.id;
           setSandboxWorkspaceId(workspaceId);
         } else {
-          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Sandbox workspace creation failed (${resp.status})`, type: 'error' }]);
+          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Error: Sandbox workspace creation failed (${resp.status})`, type: 'error' }]);
           return;
         }
       } catch (e) {
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Sandbox workspace error: ${e}`, type: 'error' }]);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Error: Sandbox workspace error: ${e}`, type: 'error' }]);
         return;
       }
     }
@@ -6698,7 +6706,7 @@ export default function App() {
       setUploadedFiles(prev => [...prev, file.name]);
               setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Uploaded **${file.name}** to sandbox workspace. You can now ask me to analyze it.`, type: 'upload' }]);
     } else {
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ File upload failed (${resp.status})`, type: 'error' }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Error: File upload failed (${resp.status})`, type: 'error' }]);
     }
   }, [sandboxWorkspaceId, setAiMessages, setUploadedFiles, setSandboxWorkspaceId]);
 
@@ -6706,11 +6714,11 @@ export default function App() {
   const handleImageUpload = useCallback(async (file: File) => {
     const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'];
     if (!validTypes.includes(file.type)) {
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Unsupported image type: ${file.type}. Supported: JPEG, PNG, WebP, GIF, BMP.`, type: 'error' }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Error: Unsupported image type: ${file.type}. Supported: JPEG, PNG, WebP, GIF, BMP.`, type: 'error' }]);
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: '❌ Image too large. Max 10MB.', type: 'error' }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: 'Error: Image too large. Max 10MB.', type: 'error' }]);
       return;
     }
 
@@ -6734,10 +6742,10 @@ export default function App() {
           const data = await resp.json();
           setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `**Image Analysis**\n\n${data.analysis || 'No analysis returned.'}`, type: 'vision' }]);
         } else {
-          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Vision analysis failed (${resp.status})`, type: 'error' }]);
+          setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Error: Vision analysis failed (${resp.status})`, type: 'error' }]);
         }
       } catch (e) {
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Vision analysis error: ${e}`, type: 'error' }]);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Error: Vision analysis error: ${e}`, type: 'error' }]);
       }
       setAiTyping(false);
     };
@@ -7000,7 +7008,7 @@ export default function App() {
       });
       if (resp.ok) {
         const rule = await resp.json();
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `✅ **Monitor Created**\n\nID: \`${rule.id}\`\nLayer: ${rule.layerId}\nCondition: ${rule.condition.field} ${rule.condition.operator} ${rule.condition.value}\nInterval: every ${rule.intervalMs / 60000} min\n\n*You'll be alerted when conditions are met.*`, type: 'monitor' }]);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `**Monitor Created**\n\nID: \`${rule.id}\`\nLayer: ${rule.layerId}\nCondition: ${rule.condition.field} ${rule.condition.operator} ${rule.condition.value}\nInterval: every ${rule.intervalMs / 60000} min\n\n*You'll be alerted when conditions are met.*`, type: 'monitor' }]);
         return true;
       }
     }
@@ -7023,7 +7031,7 @@ export default function App() {
       });
       if (resp.ok) {
         const task = await resp.json();
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `✅ **Schedule Created**\n\nID: \`${task.id}\`\nGoal: ${goal}\nEvery: ${num} ${unit}${num > 1 ? 's' : ''}\n\n*Reports will appear here automatically.*`, type: 'monitor' }]);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `**Schedule Created**\n\nID: \`${task.id}\`\nGoal: ${goal}\nEvery: ${num} ${unit}${num > 1 ? 's' : ''}\n\n*Reports will appear here automatically.*`, type: 'monitor' }]);
         return true;
       }
     }
@@ -7107,7 +7115,7 @@ export default function App() {
   // Phase 2.3: Data file analysis
   const handleDataFileUpload = useCallback(async (file: File) => {
     const content = await file.text();
-    setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `📊 [Data file: ${file.name}]`, type: 'data' }]);
+    setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'user', content: `[Data file: ${file.name}]`, type: 'data' }]);
     setAiTyping(true);
     try {
       const resp = await fetch('/api/agent/analyze-data', {
@@ -7138,10 +7146,10 @@ export default function App() {
         }
         setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: msg, type: 'data-analysis' }]);
       } else {
-        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Data analysis failed (${resp.status})`, type: 'error' }]);
+        setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Error: Data analysis failed (${resp.status})`, type: 'error' }]);
       }
     } catch (e) {
-      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `❌ Data analysis error: ${e}`, type: 'error' }]);
+      setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `Error: Data analysis error: ${e}`, type: 'error' }]);
     }
     setAiTyping(false);
   }, [setAiMessages, setAiTyping, setDataAnalysisResult]);
@@ -7154,6 +7162,9 @@ export default function App() {
     const v = viewerRef.current;
     if (!v) return;
     const history = agentActionHistoryRef.current;
+    // A flyTo creates a labelled focus marker; an addPin at the SAME spot would
+    // duplicate the label. Track the flyTo target so we can skip that pin.
+    let flyTarget: { lat: number; lon: number } | null = null;
     for (const cmd of commands) {
       try {
         const action: { type: 'flyTo' | 'toggleLayer' | 'addEntity' | 'addPanel'; entities?: Cesium.Entity[]; layerId?: string; previousEnabled?: boolean; previousCamera?: { longitude: number; latitude: number; height: number }; panelData?: unknown; description: string; timestamp: number } = {
@@ -7170,7 +7181,8 @@ export default function App() {
               action.type = 'flyTo';
               action.previousCamera = { longitude: Cesium.Math.toDegrees(cam.longitude), latitude: Cesium.Math.toDegrees(cam.latitude), height: cam.height };
               action.description = `Fly to ${(cmd.label as string) || `${lat.toFixed(2)}, ${lon.toFixed(2)}`}`;
-              focusLocation(lat, lon, { label: (cmd.label as string) || 'Location', color: '#60a5fa', height: 1500 });
+              flyTarget = { lat, lon };
+              focusLocation(lat, lon, { label: (cmd.label as string) || 'Location', color: '#60a5fa', height: 20000 });
               cleanupThinkingSteps(true);
             }
             break;
@@ -7194,13 +7206,17 @@ export default function App() {
             const lat = cmd.lat as number;
             const lon = cmd.lon as number;
             if (isFinite(lat) && isFinite(lon)) {
+              // Skip if this pin duplicates the flyTo focus marker at the same spot
+              if (flyTarget && Math.abs(flyTarget.lat - lat) < 0.0001 && Math.abs(flyTarget.lon - lon) < 0.0001) {
+                break;
+              }
               const color = (cmd.color as string) || '#ef4444';
               const label = (cmd.label as string);
               const entity = v.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(lon, lat),
                 name: label || 'Agent Pin',
                 billboard: { image: createPinIcon(color, 24), width: 24, height: 24, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
-                label: label ? { text: label, font: '11px "JetBrains Mono"', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, pixelOffset: new Cesium.Cartesian2(0, -18) } : undefined,
+                label: label ? { text: label, font: '12px "Inter", sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3, backgroundColor: Cesium.Color.fromCssColorString('#0b1220').withAlpha(0.65), showBackground: true, backgroundPadding: new Cesium.Cartesian2(6, 4), style: Cesium.LabelStyle.FILL_AND_OUTLINE, horizontalOrigin: Cesium.HorizontalOrigin.CENTER, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, pixelOffset: new Cesium.Cartesian2(0, -6) } : undefined,
                 properties: { layer: 'digital_twin', lat, lon, agent: true },
               });
               action.entities = [entity];
@@ -7820,7 +7836,7 @@ export default function App() {
     const v = viewerRef.current;
     if (!v) return;
     if (action === 'flyTo') {
-      focusLocation(cm.lat, cm.lon, { label: 'Context location', color: '#60a5fa', height: 1500 });
+      focusLocation(cm.lat, cm.lon, { label: 'Context location', color: '#60a5fa', height: 20000 });
     } else if (action === 'pin') {
       const pinId = `pin_${Date.now()}`;
       v.entities.add({
@@ -7838,9 +7854,9 @@ export default function App() {
         const oldestPin = v.entities.values.find(e => e.properties?.getValue(Cesium.JulianDate.now())?.layer === 'pin');
         if (oldestPin) { v.entities.remove(oldestPin); pinCountRef.current -= 1; }
       }
-      focusLocation(cm.lat, cm.lon, { label: 'Dropped Pin', color: '#ef4444', height: 1500 }); showNotification('Pin dropped', 'success');
+      focusLocation(cm.lat, cm.lon, { label: 'Dropped Pin', color: '#ef4444', height: 20000 }); showNotification('Pin dropped', 'success');
     } else if (action === 'weather') {
-      focusLocation(cm.lat, cm.lon, { label: 'Weather request', color: '#22d3ee', height: 1500 });
+      focusLocation(cm.lat, cm.lon, { label: 'Weather request', color: '#22d3ee', height: 20000 });
       addWeatherCard(cm.lat, cm.lon);
     } else if (action === 'events') {
       const nearby = findNearbyEvents(cm.lat, cm.lon, 200);
@@ -8421,7 +8437,7 @@ export default function App() {
           <div className="info-type-dot" style={{background:color}} />
           <div className="info-title">{title}</div>
           {hasCoords && (
-            <button className="info-fly" onClick={() => focusLocation(lat, lon, { label: title, color, height: 1500 })} title="Fly to location">
+            <button className="info-fly" onClick={() => focusLocation(lat, lon, { label: title, color, height: 20000 })} title="Fly to location">
               <Crosshair size={14} />
             </button>
           )}
@@ -9186,7 +9202,7 @@ export default function App() {
             if (intelFilter === 'social') return ['news', 'social', 'twitter', 'facebook'].includes(p.type);
             return p.type === intelFilter;
           }).map(item => (
-            <div key={item.id} className="social-post" onClick={() => focusLocation(item.lat, item.lon, { label: item.title, color: '#00D4FF', height: 1500 })}>
+            <div key={item.id} className="social-post" onClick={() => focusLocation(item.lat, item.lon, { label: item.title, color: '#00D4FF', height: 20000 })}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
                 <span className="social-user">{item.title}</span>
                 <span className="social-time">{item.timeLabel}</span>
@@ -9480,7 +9496,7 @@ export default function App() {
       {weatherCards.map(wc => (
         <div key={wc.id} ref={el => { weatherCardElementsRef.current[wc.id] = el; }} className="weather-card glass-panel"
           style={{ display: 'block', pointerEvents: 'auto', opacity: 0 }}
-          onClick={() => focusLocation(wc.lat, wc.lon, { label: 'Weather location', color: '#22d3ee', height: 1500 })}>
+          onClick={() => focusLocation(wc.lat, wc.lon, { label: 'Weather location', color: '#22d3ee', height: 20000 })}>
           <div className="weather-card-header">
             <Thermometer size={16} className="weather-icon" />
             <div>
@@ -10135,7 +10151,7 @@ export default function App() {
             }).then(data => {
               if (data.scenario) setSelectedScenario(adaptScenario(data.scenario));
             }).catch(err => {
-              setAiMessages(prev => [...prev, { id: Date.now(), role: 'assistant', content: `⚠️ Scenario generation failed: ${err.message}`, type: 'error' }]);
+              setAiMessages(prev => [...prev, { id: Date.now(), role: 'assistant', content: `Scenario generation failed: ${err.message}`, type: 'error' }]);
             });
           }}
         />

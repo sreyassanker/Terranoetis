@@ -68,7 +68,7 @@ export function PlanCardView({ plan, onExecute, onToggleStep }: {
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
                   <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, background: `${AGENT_COLORS[step.agent] || '#64748b'}22`, color: AGENT_COLORS[step.agent] || '#64748b' }}>{step.agent}</span>
                   {step.requiresApproval && <Shield size={9} style={{ color: '#f59e0b' }} />}
-                  {step.tools && step.tools.map(t => <span key={t} style={{ fontSize: 10, color: 'var(--text-dim)' }}>🔧{t}</span>)}
+                  {step.tools && step.tools.map(t => <span key={t} style={{ fontSize: 10, color: 'var(--text-dim)' }}>{t}</span>)}
                   {step.status === 'running' && <Loader size={10} className="spin" style={{ color: '#60a5fa' }} />}
                   {step.status === 'completed' && <CheckCircle size={10} style={{ color: '#34d399' }} />}
                   {step.status === 'failed' && <XCircle size={10} style={{ color: '#ef4444' }} />}

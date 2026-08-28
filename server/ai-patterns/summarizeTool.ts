@@ -35,7 +35,12 @@ function fmtScalar(v: unknown): string {
 function fmtLink(key: string, v: unknown): string {
   const url = String(v);
   if (!/^https?:\/\//i.test(url)) return '';
-  const text = label(key) === 'Text Url' ? 'View details' : label(key);
+  const k = key.toLowerCase();
+  const text = k === 'texturl' || k === 'linkurl' || k === 'href'
+    ? 'View details'
+    : k === 'url' || k === 'link'
+      ? 'View'
+      : label(key);
   return `[${text}](${url})`;
 }
 
@@ -106,21 +111,32 @@ export function summarizeToolResult(_tool: string, result: unknown): string {
 
 function renderItem(item: unknown, index: number): string {
   if (isObj(item)) {
+    // GeoJSON-style nested wrapper (needed to reach properties.mag etc.)
+    const inner = (item.properties || item.attributes || item.fields || item) as Record<string, unknown>;
+
     // Choose the best display fields for an item
     const titleCandidates = ['name', 'title', 'place', 'volcano', 'callsign', 'id', 'source', 'area'];
-    const titleVal = titleCandidates.map(c => item[c]).find(v => v !== undefined && v !== null && v !== '');
+    const titleVal = titleCandidates.map(c => inner[c]).find(v => v !== undefined && v !== null && v !== '');
     const title = titleVal ? fmtScalar(titleVal) : `Item ${index + 1}`;
 
     const meta: string[] = [];
     let itemLink = '';
-    for (const [k, v] of Object.entries(item)) {
-      if (SKIP_KEYS.has(k)) continue;
-      if (URL_KEYS.has(k)) {
-        const link = fmtLink(k, v);
-        if (link && !itemLink) itemLink = link;
-        continue;
+    // Check both the item itself and inner for URL keys
+    const urlSources = [item, inner];
+    for (const source of urlSources) {
+      for (const [k, v] of Object.entries(source as Record<string, unknown>)) {
+        if (SKIP_KEYS.has(k)) continue;
+        if (URL_KEYS.has(k)) {
+          const link = fmtLink(k, v);
+          if (link && !itemLink) itemLink = link;
+          continue;
+        }
       }
-      if (k === titleCandidates.find(c => item[c] === v)) continue; // don't duplicate title
+    }
+    for (const [k, v] of Object.entries(inner)) {
+      if (SKIP_KEYS.has(k)) continue;
+      if (URL_KEYS.has(k)) continue; // already checked above
+      if (k === titleCandidates.find(c => inner[c] === v)) continue; // don't duplicate title
       if (Array.isArray(v)) continue;
       const s = fmtScalar(v);
       if (s && s.length < 60) meta.push(`${label(k)}: ${s}`);
