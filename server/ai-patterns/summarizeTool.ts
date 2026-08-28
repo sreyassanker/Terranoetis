@@ -1,10 +1,10 @@
 /**
  * Generic readable formatter for tool results.
  *
- * Renders ANY tool result object into clean, human-readable text (bullet
- * points, key-value lines, capped arrays) — so replayed AI answers read like
- * normal prose instead of raw JSON. Deterministic: zero LLM cost, works for
- * every tool with no per-tool special-casing.
+ * Renders ANY tool result object into clean, human-readable markdown:
+ * - Lists render as real markdown bullets (`- `) so they start from the left
+ * - Important values (names, magnitudes, statuses) are **bold**
+ * - Works for every tool with no per-tool special-casing.
  */
 
 const SKIP_KEYS = new Set([
@@ -18,6 +18,16 @@ const URL_KEYS = new Set(['url', 'textUrl', 'link', 'linkUrl', 'href']);
 
 /** Keys whose nested object is unit/metadata metadata, not data — skip when a data twin exists. */
 const UNITS_KEYS = new Set(['current_units', 'hourly_units', 'daily_units', 'units']);
+
+/** Fields that carry primary importance — their value is bolded. */
+const IMPORTANT_KEYS = new Set([
+  'mag', 'magnitude', 'place', 'name', 'title', 'volcano', 'callsign', 'area',
+  'temperature', 'temperature_2m', 'temperature_c', 'aqi', 'risk', 'risklevel',
+  'severity', 'intensity', 'advisoryNumber', 'advisory_number', 'status',
+  'wind_speed', 'wind_speed_10m', 'precipitation', 'precipitation_mm',
+  'pressure', 'pressure_msl', 'elevation', 'depth', 'height', 'probability',
+  'count', 'total', 'active', 'cancelled', 'delayed',
+]);
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -51,10 +61,18 @@ function label(k: string): string {
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 
+/** Render a single "• Label: value" line with the label bolded and value bolded when important. */
+function kvLine(key: string, value: unknown): string {
+  const s = fmtScalar(value);
+  if (!s) return '';
+  const val = IMPORTANT_KEYS.has(key.toLowerCase()) ? `**${s}**` : s;
+  return `- **${label(key)}**: ${val}`;
+}
+
 /**
  * Convert a tool result into readable text.
- * - Arrays of objects → one bullet per item (primary fields)
- * - Objects → one "• Key: value" per meaningful field
+ * - Arrays of objects → one markdown bullet per item
+ * - Objects → one "- Label: value" per meaningful field
  * - Nested objects/arrays are flattened one level then capped
  */
 export function summarizeToolResult(_tool: string, result: unknown): string {
@@ -84,7 +102,7 @@ export function summarizeToolResult(_tool: string, result: unknown): string {
     if (UNITS_KEYS.has(k) && isObj(v)) continue;
     if (URL_KEYS.has(k)) {
       const link = fmtLink(k, v);
-      if (link) lines.push(`• ${link}`);
+      if (link) lines.push(`- ${link}`);
       continue;
     }
     if (isObj(v)) {
@@ -93,16 +111,16 @@ export function summarizeToolResult(_tool: string, result: unknown): string {
         if (SKIP_KEYS.has(k2) || UNITS_KEYS.has(k2)) continue;
         if (URL_KEYS.has(k2)) {
           const link = fmtLink(k2, v2);
-          if (link) lines.push(`• ${link}`);
+          if (link) lines.push(`- ${link}`);
           continue;
         }
         if (Array.isArray(v2)) continue;
-        const s = fmtScalar(v2);
-        if (s) lines.push(`• ${label(k2)}: ${s}`);
+        const s = kvLine(k2, v2);
+        if (s) lines.push(s);
       }
     } else if (!Array.isArray(v)) {
-      const s = fmtScalar(v);
-      if (s) lines.push(`• ${label(k)}: ${s}`);
+      const s = kvLine(k, v);
+      if (s) lines.push(s);
     }
   }
   if (lines.length === 0) return JSON.stringify(result).slice(0, 800);
@@ -114,10 +132,10 @@ function renderItem(item: unknown, index: number): string {
     // GeoJSON-style nested wrapper (needed to reach properties.mag etc.)
     const inner = (item.properties || item.attributes || item.fields || item) as Record<string, unknown>;
 
-    // Choose the best display fields for an item
+    // Choose the best display fields for an item (bolded as the primary label)
     const titleCandidates = ['name', 'title', 'place', 'volcano', 'callsign', 'id', 'source', 'area'];
     const titleVal = titleCandidates.map(c => inner[c]).find(v => v !== undefined && v !== null && v !== '');
-    const title = titleVal ? fmtScalar(titleVal) : `Item ${index + 1}`;
+    const title = titleVal ? `**${fmtScalar(titleVal)}**` : `**Item ${index + 1}**`;
 
     const meta: string[] = [];
     let itemLink = '';
@@ -139,12 +157,14 @@ function renderItem(item: unknown, index: number): string {
       if (k === titleCandidates.find(c => inner[c] === v)) continue; // don't duplicate title
       if (Array.isArray(v)) continue;
       const s = fmtScalar(v);
-      if (s && s.length < 60) meta.push(`${label(k)}: ${s}`);
+      if (s && s.length < 60) {
+        meta.push(IMPORTANT_KEYS.has(k.toLowerCase()) ? `**${label(k)}**: ${s}` : `${label(k)}: ${s}`);
+      }
     }
     const metaStr = meta.length > 0 ? ` — ${meta.slice(0, 4).join(' · ')}` : '';
     const linkStr = itemLink ? ` ${itemLink}` : '';
-    return `• ${title}${metaStr}${linkStr}`;
+    return `- ${title}${metaStr}${linkStr}`;
   }
   const s = fmtScalar(item);
-  return s ? `• ${s}` : '';
+  return s ? `- **${s}**` : '';
 }
