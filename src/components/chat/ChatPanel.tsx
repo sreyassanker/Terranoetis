@@ -429,7 +429,7 @@ export function ChatPanel({
 
         {!isOnline() && (
           <div style={{ padding: '4px 8px', fontSize: 10, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
-            ⚡ Offline — messages will sync when reconnected
+            Offline — messages will sync when reconnected
           </div>
         )}
         </>

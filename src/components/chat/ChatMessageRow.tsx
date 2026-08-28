@@ -120,7 +120,7 @@ export function ChatMessageRow({
         {cmdChips.map((chip, i) => (
           <span key={i} className="ai-chip command-chip" style={{ fontSize: 10, padding: '2px 8px', cursor: 'pointer' }}
             onClick={() => {
-              if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation?.(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 1500 });
+              if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation?.(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 20000 });
               if (chip.action === 'toggleLayer' && chip.layerId) toggleLayer?.(chip.layerId);
             }}>{chip.label}</span>
         ))}
@@ -203,7 +203,7 @@ export function ChatMessageRow({
           )}
 
           {msg.replayed && (
-            <span style={{ fontSize: 10, color: '#34d399', background: 'rgba(52,211,153,0.1)', borderRadius: 3, padding: '1px 5px', marginTop: 2, display: 'inline-block', marginLeft: 4 }}>⚡ Replayed</span>
+            <span style={{ fontSize: 10, color: '#34d399', background: 'rgba(52,211,153,0.1)', borderRadius: 3, padding: '1px 5px', marginTop: 2, display: 'inline-block', marginLeft: 4 }}>Replayed</span>
           )}
 
           {msg.recipe && !aiTyping && !saved && (

@@ -7683,7 +7683,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       const radiusMatch = fullMessage.match(/(?:within|radius|around|near)\s+(\d+)\s*(km|mi|miles|kilometers?)/i);
       if (patternMatch.slots.includes('radius') && radiusMatch) slotValues['radius'] = Number(radiusMatch[1]);
 
-      sendEvent('step', { stepType: 'pattern_replay', text: `⚡ Reusing saved workflow "${patternMatch.name.slice(0, 60)}" (${patternMatch.steps.length} step${patternMatch.steps.length > 1 ? 's' : ''}) — substituting new parameters`, status: 'running' });
+      sendEvent('step', { stepType: 'pattern_replay', text: `Reusing saved workflow "${patternMatch.name.slice(0, 60)}" (${patternMatch.steps.length} step${patternMatch.steps.length > 1 ? 's' : ''}) — substituting new parameters`, status: 'running' });
       const toolResults: Array<{ tool: string; ok: boolean; text: string }> = [];
       try {
         for (const step of patternMatch.steps) {
@@ -7769,9 +7769,9 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         }
         sendEvent('commands', commands);
         const parts: string[] = [];
-        if (cached.earthquakeRisk > 0) parts.push(`🌋 **Earthquake Risk**: M${cached.earthquakeRisk} max detected nearby`);
-        if (cached.nearbyEvents.length > 0) parts.push(`🔥 **Active Events**: ${cached.nearbyEvents.map(e => e.title).join(', ')}`);
-        if (cached.weatherAlerts.length > 0) parts.push(`🌤️ **Weather Alerts**: ${cached.weatherAlerts.length} active`);
+        if (cached.earthquakeRisk > 0) parts.push(`**Earthquake Risk**: M${cached.earthquakeRisk} max detected nearby`);
+        if (cached.nearbyEvents.length > 0) parts.push(`**Active Events**: ${cached.nearbyEvents.map(e => e.title).join(', ')}`);
+        if (cached.weatherAlerts.length > 0) parts.push(`**Weather Alerts**: ${cached.weatherAlerts.length} active`);
         sendEvent('output', { text: `## Quick Scan: ${intent.location.label}\n\n${parts.join('\n\n') || 'No significant issues detected.'}\n\n*Data pre-computed (≤60s old). Ask for "detailed" for live analysis.*` });
         sendEvent('done', { type: 'done' });
         cleanup();
@@ -7794,7 +7794,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         if (orchestrated.output) {
           costTracker.record(modelTier === 'pro' ? 'pro' : 'flash', message, orchestrated.output, false);
           if (orchestrated.commands?.length) sendEvent('commands', orchestrated.commands);
-          sendEvent('output', { text: orchestrated.output + '\n\n*🤖 Multi-agent orchestrated response*' });
+          sendEvent('output', { text: orchestrated.output + '\n\n*Multi-agent orchestrated response*' });
           sendEvent('done', { type: 'done' });
           cleanup();
           res.end();
