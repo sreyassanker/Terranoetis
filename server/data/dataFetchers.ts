@@ -1231,8 +1231,10 @@ export async function fetchWaterData(
     // USGS Water Services returns the measurement as a JSON string (e.g. "1.39"),
     // so a compile-time `as number` cast is not enough — coerce explicitly.
     const raw = valueArr?.[0]?.value;
+    // No USGS station returned → honest NaN, not a fabricated 0.
+    if (raw == null) return Number.NaN;
     const n = typeof raw === 'number' ? raw : Number(raw);
-    return Number.isFinite(n) ? n : 0;
+    return Number.isFinite(n) ? n : Number.NaN;
   };
 
   return {

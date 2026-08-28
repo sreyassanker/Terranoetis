@@ -346,8 +346,8 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
     });
   }, [satisfiedModes, selection, bbox, points]);
   const isMultiYear = tool.analysisMeta?.timeGranularity === 'multi-year';
-  const [start, setStart] = useState(isMultiYear ? '2020' : '2024-01-01');
-  const [end, setEnd] = useState(isMultiYear ? '2024' : '2024-12-31');
+  const [start, setStart] = useState(isMultiYear ? '2020' : '2025-01-01');
+  const [end, setEnd] = useState(isMultiYear ? '2024' : '2025-12-31');
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{

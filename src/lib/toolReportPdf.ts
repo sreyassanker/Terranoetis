@@ -160,8 +160,7 @@ function buildChartSVG(
   const isBars = vizType === 'bar' || vizType === 'histogram';
   const isScatter = vizType === 'scatter';
 
-  const W = 720, H = 420, ml = 70, mr = 24, mt = 24, mb = 54, iw = W - ml - mr, ih = H - mt - mb;
-
+  const W = 720, H = 420, mr = 24, mt = 24, mb = 54, ih = H - mt - mb;
   // Union of all points across all series for the scale
   const allPoints = series.flatMap(s => s.points.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y)));
   if (allPoints.length === 0) return '';
@@ -191,6 +190,36 @@ function buildChartSVG(
   const xCategory = !logX && !isScatter;
   const xVals = xCategory ? [...new Set(xs)].sort((a, b) => a - b) : null;
 
+  // ── Y-tick labels measure ──
+  // Build the Y-tick labels first so we can measure the widest one and set the
+  // left margin to guarantee a 0.3 cm gap between the label and the Y-axis title.
+  const yTickVals = Array.from({ length: 5 }, (_, i) =>
+    logY ? Math.pow(10, yMaxL - (yMaxL - yMinL) * i / 5) : ymax - (ymax - ymin) * i / 5);
+  const yTickLabels = yTickVals.map(v => {
+    if (logY && !(Number.isFinite(v) && v > 0)) return '0';
+    return formatSciCompact(v);
+  });
+  const estTextW = (s: string, px: number): number => {
+    let w = 0;
+    for (const ch of s) {
+      const cp = ch.codePointAt(0) ?? 0;
+      if (cp >= 0x2070 && cp <= 0x209F) w += px * 0.34;  // super/subscript
+      else if (cp === 0x00D7 || cp === 0x00B7) w += px * 0.5; // ⋅ ×
+      else w += px * 0.58;
+    }
+    return w;
+  };
+  const maxYLabelW = Math.max(...yTickLabels.map(l => estTextW(l, 12)), 20);
+  // 0.3 cm ≈ 13 px in the SVG (720 px → 483 pt PDF, 0.3 cm = 8.5 pt → 12.7 px).
+  // The rotated Y-title (font-size 13) occupies ~13 px horizontally. The Y tick
+  // labels are at ml 8 with text anchor end, so they fill [ml 8 maxYLabelW, ml 8].
+  // GAP = 13 px between title-right (≈ titleX + 7) and label-left (ml 8 maxYLabelW).
+  const GAP_Y = 13;
+  const HALF_TITLE = 7;
+  const ml = Math.max(70, Math.ceil(8 + maxYLabelW + GAP_Y + HALF_TITLE + 8));
+  const iw = W - ml - mr;
+  const titleY = ml - 8 - maxYLabelW - GAP_Y - HALF_TITLE;
+
   const X = (x: number) => {
     if (logX) {
       const l = x > 0 ? Math.log10(x) : xLogMin - 1;
@@ -212,10 +241,9 @@ function buildChartSVG(
   };
   const yZero = logY ? mt + ih : Y(0);
 
-  const yTicks = Array.from({ length: 5 }, (_, i) => {
+  const yTicks = yTickVals.map((v, i) => {
     const y = mt + ih * i / 5;
-    const v = logY ? Math.pow(10, yMaxL - (yMaxL - yMinL) * i / 5) : ymax - (ymax - ymin) * i / 5;
-    const label = (logY ? (Number.isFinite(v) && v > 0) : true) ? formatSciCompact(v) : '0';
+    const label = yTickLabels[i];
     return `<line x1="${ml}" y1="${y}" x2="${ml + iw}" y2="${y}" stroke="#e2e8f0" stroke-width="0.8"/><text x="${ml - 8}" y="${y + 3}" font-size="12" fill="#475569" text-anchor="end">${label}</text>`;
   }).join('');
   const xTicks = xCategory && xVals ? (() => {
@@ -308,7 +336,7 @@ function buildChartSVG(
 ${yTicks}
 ${xTicks}
 <text x="${ml + iw / 2}" y="${H - 8}" font-size="13" fill="#334155" text-anchor="middle">${xLabel}</text>
-<text x="16" y="${mt + ih / 2}" font-size="13" fill="#334155" text-anchor="middle" transform="rotate(-90 16 ${mt + ih / 2})">${yLabel}</text>
+<text x="${titleY}" y="${mt + ih / 2}" font-size="13" fill="#334155" text-anchor="middle" transform="rotate(-90 ${titleY} ${mt + ih / 2})">${yLabel}</text>
 <text x="${ml + iw / 2}" y="18" font-size="14" fill="#334155" text-anchor="middle" font-weight="bold">${title}</text>
 ${body}
 </svg>`;

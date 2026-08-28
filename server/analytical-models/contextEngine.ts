@@ -68,7 +68,7 @@ async function fetchGebcoDepth(lat: number, lon: number): Promise<{ elevation: n
 }
 
 interface StudyArea {
-  mode: 'point' | 'bbox' | 'two-points';
+  mode: 'point' | 'bbox' | 'two-points' | 'transect' | 'region' | 'basin' | 'coastal' | 'path' | 'fault-line' | 'polygon';
   point?: [number, number];
   bbox?: [[number, number], [number, number]];
   twoPoints?: [[number, number], [number, number]];
@@ -552,6 +552,10 @@ function mapInputs(
     permafrost: PermafrostData;
     drought: DroughtData;
     river: RiverData;
+    /** Downstream gauge discharge for transect tools (tool 13 Muskingum).
+     *  Fetched at the second transect point so O_t is a genuine second
+     *  gauge measurement; zeros when the study area is not a transect. */
+    riverDownstream?: RiverData;
     era5: Era5HighFidelityData;
     imerg: ImergData;
     gldas: GldasData;
@@ -811,17 +815,18 @@ function mapInputs(
     case 13: {
       // Muskingum (McCarthy 1938): S = K·[X·I_t + (1−X)·O_t]. The inflow I_t
       // is the genuine USGS streamflow at the study point. The outflow O_t is
-      // a SEPARATE gauge measurement downstream — the upstream USGS value
-      // cannot be re-used as a fabricated outflow (the old `rv.discharge·0.8`
-      // invented an 80% outflow). O_t is honest NaN unless the user supplies
-      // it or a second gauge resolves.
+      // a SEPARATE gauge measurement downstream — resolved from the second
+      // transect point when the user draws a two-point reach (riverDownstream);
+      // otherwise honest NaN unless the user supplies it.
       const q0Raw = rv.discharge;
       const q0Num = typeof q0Raw === 'number' ? q0Raw : Number(q0Raw);
+      const downRaw = ctx.riverDownstream?.discharge;
+      const downNum = typeof downRaw === 'number' ? downRaw : Number(downRaw);
       const out: Record<string, unknown> = {
         K: u('K', 6),
         X: u('X', 0.2),
         It: u('It', Number.isFinite(q0Num) ? q0Num : Number.NaN),
-        Ot: u('Ot', Number.NaN),
+        Ot: u('Ot', Number.isFinite(downNum) ? downNum : Number.NaN),
       };
       if (!Number.isFinite(q0Num)) {
         (out as Record<string, unknown>).__proxyWarning =
@@ -3090,7 +3095,7 @@ export async function computeWithContext(
     weather, marine, airQuality, earthquakes, elevation,
     soil, vegetation, seaIce, tectonic, spaceWeather,
     water, landCover, terrain, glacier, volcano,
-    tropo, permafrost, drought, river, era5, imerg, gldas,
+    tropo, permafrost, drought, river, riverDownstream, era5, imerg, gldas,
     rFactor, gpp, gppAnnual, co2, sst, pmelPco2,
     gddStation,
     slr, gebcoDepth, shorelineBearing,
@@ -3140,11 +3145,28 @@ export async function computeWithContext(
       // fetch load. Tools 13/90 (Muskingum, Nash cascade) drive Q₀ from the
       // discharge, so retry once with a generous timeout before falling back
       // to the honest-NaN path.
-      if (id !== 13 && id !== 90) return { discharge: 0, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData;
+      if (id !== 13 && id !== 90) return { discharge: Number.NaN, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData;
       const d = await fetchRiverData(lat, lon).catch(() => null);
       if (d) return d;
-      return fetchRiverData(lat, lon).catch(() => ({ discharge: 0, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData));
-    })(), { discharge: 0, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData, 45000),
+      return fetchRiverData(lat, lon).catch(() => ({ discharge: Number.NaN, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData));
+    })(), { discharge: Number.NaN, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData, 45000),
+    safe((async () => {
+      // Tool 13 (Muskingum routing) is a transect tool: the user draws two
+      // points (upstream → downstream reach). The main `river` fetch above
+      // resolves the upstream gauge at the study centre. Here we fetch the
+      // DOWNSTREAM discharge at the second transect point so the Muskingum
+      // outflow O_t is a genuine second-gauge measurement instead of NaN.
+      if (id !== 13) return { discharge: Number.NaN, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData;
+      const saRiv = context?.studyArea;
+      const tpRiv = saRiv?.mode === 'two-points' || saRiv?.mode === 'transect' ? saRiv.twoPoints : undefined;
+      const p2 = tpRiv && tpRiv.length >= 2 ? tpRiv[1] : undefined;
+      if (!p2 || !Number.isFinite(p2[0]) || !Number.isFinite(p2[1])) {
+        return { discharge: Number.NaN, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData;
+      }
+      const d2 = await fetchRiverData(p2[0], p2[1]).catch(() => null);
+      if (d2) return d2;
+      return fetchRiverData(p2[0], p2[1]).catch(() => ({ discharge: Number.NaN, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData));
+    })(), { discharge: Number.NaN, velocity: 0, width: 0, depth: 0, slope: 0 } as RiverData, 45000),
     safe(fetchEra5HighFidelity(lat, lon, dateStr, { mostOnly: id === 48 || id === 49 || id === 50, fluxOnly: id === 52 || id === 59, fluxDailyMean: id === 59,      windOnly: id === 56 || id === 73, waveOnly: id === 74 || id === 75 || id === 77, skip: id === 56 && normInputs.k != null }),
       { frictionVelocity: null, totalColumnWaterVapour: null, surfaceFluxes: null, pressureWind: null, pressureState: null, soilState: null, source: 'none' } as Era5HighFidelityData,
       ERA5_CONSUMER_IDS.has(id) ? ERA5_TIMEOUT_MS : undefined),
@@ -3285,7 +3307,7 @@ export async function computeWithContext(
     weather, marine, airQuality, earthquakes, elevation,
     soil, vegetation, seaIce, tectonic, spaceWeather,
     water, landCover, terrain, glacier, volcano,
-    tropo, permafrost, drought, river, era5, imerg, gldas,
+    tropo, permafrost, drought, river, riverDownstream, era5, imerg, gldas,
     rFactor, gpp, gppAnnual, co2,
     sst, pmelPco2, gddStation, slr, gebcoDepth, shorelineBearing,
     satThermal, columnWV,
