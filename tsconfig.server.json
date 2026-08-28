@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": ["ES2023", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "types": ["node"],
@@ -16,5 +16,5 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": false
   },
-  "include": ["server"]
+  "include": ["server", "src/rendering/causalGraph.ts", "src/rendering/physicsSurrogates.ts", "src/rendering/gisFusion.ts"]
 }
