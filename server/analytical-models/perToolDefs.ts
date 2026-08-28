@@ -962,7 +962,7 @@ export const TOOL_12: ToolWorkflowDef = {
 export const TOOL_13: ToolWorkflowDef = {
   toolId: 13,
   name: 'Flood Wave Routing',
-  vizType: 'scalar',
+  vizType: 'timeseries',
   classificationBands: WATER_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'K', min: 0.1, max: 48 }, { param: 'X', min: 0, max: 0.5 }, { param: 'It', min: 0, max: 10000 }, { param: 'Ot', min: 0, max: 10000 }]),
   preprocess: (inputs, ctx, log) => {
@@ -1177,7 +1177,7 @@ export const TOOL_16: ToolWorkflowDef = {
 export const TOOL_17: ToolWorkflowDef = {
   toolId: 17,
   name: 'Marine Heat Budget',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   classificationBands: WATER_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'Qs', min: 0, max: 1500 }, { param: 'Qb', min: 0, max: 500 }, { param: 'Qh', min: -200, max: 500 }, { param: 'Qe', min: -200, max: 500 }]),
   preprocess: (inputs, ctx, log) => {
@@ -1480,7 +1480,7 @@ export const TOOL_22: ToolWorkflowDef = {
 export const TOOL_23: ToolWorkflowDef = {
   toolId: 23,
   name: 'Earthquake Magnitude from Moment',
-  vizType: 'gauge',
+  vizType: 'scalar',
   classificationBands: SEISMIC_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'M0', min: 1e10, max: 1e24 }]),
   preprocess: (inputs, ctx, log) => {
@@ -1524,7 +1524,7 @@ export const TOOL_23: ToolWorkflowDef = {
 export const TOOL_24: ToolWorkflowDef = {
   toolId: 24,
   name: 'Earthquake Stress Drop Analysis',
-  vizType: 'gauge',
+  vizType: 'scalar',
   classificationBands: SEISMIC_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'M0', min: 1e10, max: 1e24 }, { param: 'r', min: 10, max: 50000 }]),
   preprocess: (inputs, ctx, log) => {
@@ -1571,7 +1571,7 @@ export const TOOL_24: ToolWorkflowDef = {
 export const TOOL_25: ToolWorkflowDef = {
   toolId: 25,
   name: 'Fault Rupture Scaling',
-  vizType: 'bar',
+  vizType: 'scatter',
   classificationBands: SEISMIC_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'Mw', min: 3, max: 10 }]),
   preprocess: (inputs, ctx, log) => {
@@ -1917,7 +1917,7 @@ export const TOOL_31: ToolWorkflowDef = {
 export const TOOL_32: ToolWorkflowDef = {
   toolId: 32,
   name: 'Fire Radiative Power Estimation',
-  vizType: 'gauge',
+  vizType: 'heatmap',
   classificationBands: INDEX_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'A', min: 0, max: 1e8 }, { param: 'eps', min: 0, max: 1 }, { param: 'Tfire', min: 250, max: 2000 }, { param: 'Tbg', min: 200, max: 400 }]),
   preprocess: (inputs, ctx, log) => {
@@ -2390,7 +2390,7 @@ export const TOOL_41: ToolWorkflowDef = {
 export const TOOL_42: ToolWorkflowDef = {
   toolId: 42,
   name: 'Semivariogram Analysis',
-  vizType: 'spectrum',
+  vizType: 'scatter',
   classificationBands: RISK_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'K', min: 3, max: 40 }]),
   preprocess: (inputs, ctx, log) => {
@@ -2437,7 +2437,7 @@ export const TOOL_42: ToolWorkflowDef = {
 export const TOOL_43: ToolWorkflowDef = {
   toolId: 43,
   name: 'Soil Water Retention Curve',
-  vizType: 'profile',
+  vizType: 'scatter',
   classificationBands: SOIL_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'thetaR', min: 0, max: 0.2 }, { param: 'thetaS', min: 0.2, max: 0.6 }, { param: 'alpha', min: 0.001, max: 1 }, { param: 'n', min: 1.1, max: 5 }, { param: 'psi', min: -100, max: -0.01 }]),
   preprocess: (inputs, ctx, log) => {
@@ -2484,7 +2484,7 @@ export const TOOL_43: ToolWorkflowDef = {
 export const TOOL_44: ToolWorkflowDef = {
   toolId: 44,
   name: 'Soil Hydraulic Model',
-  vizType: 'profile',
+  vizType: 'scatter',
   classificationBands: SOIL_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'psib', min: -300, max: -0.01 }, { param: 'psi', min: -2000, max: -0.01 }, { param: 'lambda', min: 0.1, max: 6 }, { param: 'thetaR', min: 0, max: 0.2 }, { param: 'thetaS', min: 0.2, max: 0.6 }]),
   preprocess: (inputs, ctx, log) => {
@@ -2531,7 +2531,7 @@ export const TOOL_44: ToolWorkflowDef = {
 export const TOOL_45: ToolWorkflowDef = {
   toolId: 45,
   name: 'Universal Soil Loss Equation',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   classificationBands: SOIL_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'R', min: 0, max: 50000 }, { param: 'K', min: 0, max: 1 }, { param: 'LS', min: 0, max: 20 }, { param: 'C', min: 0, max: 1 }, { param: 'P', min: 0, max: 1 }, { param: 'lambda', min: 1, max: 1000 }]),
   preprocess: (inputs, ctx, log) => {
@@ -3122,7 +3122,7 @@ export const TOOL_55: ToolWorkflowDef = {
 export const TOOL_56: ToolWorkflowDef = {
   toolId: 56,
   name: 'Ocean CO2 Uptake',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   classificationBands: CARBON_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'k', min: 0, max: 30000 }, { param: 'K0', min: 0, max: 100 }, { param: 'dCO2', min: -300, max: 300 }]),
   preprocess: (inputs, ctx, log) => {
@@ -3458,7 +3458,7 @@ export const TOOL_62: ToolWorkflowDef = {
 export const TOOL_63: ToolWorkflowDef = {
   toolId: 63,
   name: 'Bigleaf Penman-Monteith',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   classificationBands: AGRI_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'rho', min: 0.5, max: 1.5 }, { param: 'cp', min: 800, max: 1200 }, { param: 'Ts', min: -10, max: 60 }, { param: 'Ta', min: -20, max: 50 }, { param: 'ra', min: 1, max: 500 }, { param: 'rs', min: 10, max: 1000 }, { param: 'es', min: 0, max: 100 }, { param: 'ea', min: 0, max: 100 }, { param: 'p', min: 800, max: 1100 }]),
   preprocess: (inputs, ctx, log) => {
@@ -3516,7 +3516,7 @@ const OZONE_RATIO_BANDS: ClassificationBand[] = [
 export const TOOL_64: ToolWorkflowDef = {
   toolId: 64,
   name: 'Chapman Ozone Cycle',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   classificationBands: OZONE_RATIO_BANDS,
   validate: (inputs) => validateRange(inputs, [
     { param: 'J1', min: 1e-20, max: 1 },      // O₂ photolysis rate s⁻¹
@@ -4084,7 +4084,7 @@ export const TOOL_73: ToolWorkflowDef = {
 export const TOOL_74: ToolWorkflowDef = {
   toolId: 74,
   name: 'Stockdon Wave Runup',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   classificationBands: OCEAN_BANDS,
   validate: (inputs) => validateRange(inputs, [
     { param: 'H0', min: 0.05, max: 20 },
@@ -4289,7 +4289,7 @@ const WAVE_REGIME_BANDS: ClassificationBand[] = [
 export const TOOL_78: ToolWorkflowDef = {
   toolId: 78,
   name: 'Wave Dispersion Relation',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   // Classification is by the WAVE REGIME (kh parameter, SPM 1984 Ch 2
   // relative-depth table), NOT by the primary ω (rad/s) against OCEAN_BANDS
   // (wave-HEIGHT bands in metres — the Tool 70/73/75 unit-mismatch class).
@@ -4456,7 +4456,7 @@ export const TOOL_80: ToolWorkflowDef = {
 export const TOOL_81: ToolWorkflowDef = {
   toolId: 81,
   name: 'Stream Power Law',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   classificationBands: RISK_BANDS,
   validate: (inputs) => validateRange(inputs, [
     { param: 'K', min: 0, max: 1 },        // erodibility coefficient (dimensionless in this impl)
@@ -5580,7 +5580,7 @@ export const TOOL_102: ToolWorkflowDef = {
 export const TOOL_103: ToolWorkflowDef = {
   toolId: 103,
   name: 'Reynolds Decomposition',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   classificationBands: CLIMATE_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'ubar', min: 0, max: 100 },{ param: 'uprime', min: -50, max: 50 }]),
   preprocess: (inputs, ctx, log) => {
@@ -5712,7 +5712,7 @@ export const TOOL_105: ToolWorkflowDef = {
 export const TOOL_106: ToolWorkflowDef = {
   toolId: 106,
   name: 'Petterssen Frontogenesis',
-  vizType: 'scalar',
+  vizType: 'heatmap',
   classificationBands: CLIMATE_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'dtheta', min: 0, max: 1 },{ param: 'D', min: -1, max: 1 },{ param: 'cos2b', min: -1, max: 1 },{ param: 'delta', min: -1, max: 1 },{ param: 'dudy', min: -1, max: 1 }]),
   preprocess: (inputs, ctx, log) => {
@@ -5982,7 +5982,7 @@ export const TOOL_111: ToolWorkflowDef = {
 export const TOOL_112: ToolWorkflowDef = {
   toolId: 112,
   name: 'Earth Tides (Love Numbers)',
-  vizType: 'scalar',
+  vizType: 'contour',
   classificationBands: GENERIC_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'hn', min: 0.3, max: 0.7 },{ param: 'kn', min: 0.2, max: 0.4 },{ param: 'Vn', min: 0, max: 10 },{ param: 'g', min: 9.8, max: 9.82 },{ param: 'lat', min: -90, max: 90 },{ param: 'Re', min: 6e6, max: 6.4e6 }]),
   preprocess: (inputs, ctx, log) => {
@@ -6028,7 +6028,7 @@ export const TOOL_112: ToolWorkflowDef = {
 export const TOOL_113: ToolWorkflowDef = {
   toolId: 113,
   name: 'EGM2008 Gravity Field',
-  vizType: 'scalar',
+  vizType: 'contour',
   classificationBands: GENERIC_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'GM', min: 0, max: 1000000000000000 },{ param: 'r', min: 6000000, max: 10000000 },{ param: 'n', min: 0, max: 2190 },{ param: 'm', min: 0, max: 2190 },{ param: 'Cnm', min: -1, max: 1 },{ param: 'Snm', min: -1, max: 1 },{ param: 'Pnm', min: -1, max: 1 },{ param: 'phi', min: -Math.PI, max: Math.PI },{ param: 'lam', min: -2 * Math.PI, max: 2 * Math.PI },{ param: 'Re', min: 6e6, max: 6.4e6 }]),
   preprocess: (inputs, ctx, log) => {
@@ -6116,7 +6116,7 @@ export const TOOL_114: ToolWorkflowDef = {
 export const TOOL_115: ToolWorkflowDef = {
   toolId: 115,
   name: 'Geoid Height',
-  vizType: 'scalar',
+  vizType: 'contour',
   classificationBands: GENERIC_BANDS,
   validate: (inputs) => validateRange(inputs, [{ param: 'h', min: -500, max: 10000 },{ param: 'N', min: -200, max: 200 }]),
   preprocess: (inputs, ctx, log) => {
@@ -7716,7 +7716,7 @@ export const TOOL_145: ToolWorkflowDef = {
 export const TOOL_146: ToolWorkflowDef = {
   toolId: 146,
   name: 'Klobuchar Ionospheric Delay',
-  vizType: 'spectrum',
+  vizType: 'timeseries',
   classificationBands: GENERIC_BANDS,
   validate: (inputs) => validateRange(inputs, [
     { param: 'alpha1', min: -1e6, max: 1e6 },
@@ -7787,7 +7787,7 @@ export const TOOL_146: ToolWorkflowDef = {
 export const TOOL_147: ToolWorkflowDef = {
   toolId: 147,
   name: 'Doppler Effect (Classical)',
-  vizType: 'spectrum',
+  vizType: 'scatter',
   classificationBands: GENERIC_BANDS,
   validate: (inputs) => validateRange(inputs, [
     { param: 'f0', min: 1, max: 1e15 },
@@ -7841,7 +7841,7 @@ export const TOOL_147: ToolWorkflowDef = {
 export const TOOL_148: ToolWorkflowDef = {
   toolId: 148,
   name: 'Hohmann Transfer',
-  vizType: 'scalar',
+  vizType: 'timeseries',
   classificationBands: GENERIC_BANDS,
   validate: (inputs) => validateRange(inputs, [
     { param: 'GM', min: 1e10, max: 1e20 },

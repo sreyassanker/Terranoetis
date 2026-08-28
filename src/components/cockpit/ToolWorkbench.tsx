@@ -180,8 +180,8 @@ const DIRECT_API: Record<string, DirectApiEntry> = {
     transform: p => {
       const lat = p.lat ?? 35;
       const lon = p.lon ?? 140;
-      const startDate = p.startDate || '2024-01-01';
-      const endDate = p.endDate || '2024-12-31';
+      const startDate = p.startDate || '2025-01-01';
+      const endDate = p.endDate || '2025-12-31';
       return `?lat=${lat}&lon=${lon}&startDate=${startDate}&endDate=${endDate}`;
     },
   },
