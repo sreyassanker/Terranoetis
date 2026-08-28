@@ -88,8 +88,9 @@ import { sentimentAnalyzer } from './multimodal/sentimentAnalyzer';
 import { multimodalFusion } from './multimodal/multimodalFusion';
 import { registerAnalyticalModelsRoutes } from './analytical-models';
 import { computeWithContext } from './analytical-models/contextEngine';
-import { assessAndEmail, runDisasterAssessment, buildReportHtml } from './disasterAssessment';
-import { isEmailConfigured } from './email';
+import { assessAndEmail, runDisasterAssessment, buildReportHtml, reverseGeocode } from './disasterAssessment';
+import { runFusionPipeline } from './disasterFusion';
+import { isEmailConfigured, sendEmail } from './email';
 import {
   conversationMemory, generatePlan, executePlan, executeStep,
   generateSuggestions, buildProactiveInsight, recordTrace, addEvidence,
@@ -7769,6 +7770,64 @@ async function tryAnalyticalModelRunInner(
   }
 }
 
+// ── Tool Workbench → Email Report ─────────────────────────────────
+// The Tool Workbench UI sends its chain results + causal probs here to
+// email an identical executive report (same builder as the AI assessment).
+app.post('/api/agent/workbench-report', authGuard, async (req: express.Request, res: express.Response) => {
+  const { regionName, bbox, causalProbs, chainTools } = req.body as {
+    regionName?: string;
+    bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number };
+    causalProbs?: Record<string, number>;
+    chainTools?: string[];
+  };
+  if (!bbox) return res.status(400).json({ error: 'bbox required' });
+
+  const region = regionName || `Region ${bbox.latMin.toFixed(1)}-${bbox.latMax.toFixed(1)}N, ${bbox.lonMin.toFixed(1)}-${bbox.lonMax.toFixed(1)}E`;
+  const emailTo = process.env.GMAIL_REPORT_TO || '';
+
+  // Reuse the full assessment pipeline so the report is identical to the
+  // AI-command report, but overlay the workbench's live causal probs.
+  try {
+    const result = await runDisasterAssessment({
+      regionName: region,
+      ...bbox,
+      emailTo,
+    });
+    if (!result) return res.status(502).json({ error: 'Assessment data fetch failed' });
+
+    // Override fusion causal probs with the workbench's live chain output
+    // when provided (they should already match the same engine).
+    if (causalProbs && Object.keys(causalProbs).length > 0) {
+      const chainSet = new Set(chainTools || []);
+      const topHazards = Object.entries(causalProbs)
+        .filter(([k]) => chainSet.has(k) && k !== '_composite' && k !== '_confidence')
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+        .map(([label, probability]) => ({ label: label.replace(/_/g, ' '), probability: Number((probability).toFixed(2)) }));
+      result.fusion = {
+        ...result.fusion,
+        causalProbs,
+        topHazards,
+        summary: `Fused risk assessment: ${topHazards.length} hazard types analyzed. Top risks: ${topHazards.slice(0, 5).map(h => `${h.label.replace(/ /g, '_')} ${(h.probability * 100).toFixed(0)}%`).join(', ') || 'no significant risk detected'}.`,
+      };
+      result.summary = result.summary.replace(/Fused risk:[^.]*\.?/, `Fused risk: ${topHazards.slice(0, 3).map(h => `${h.label} ${(h.probability * 100).toFixed(0)}%`).join(', ') || 'no significant multi-hazard risk'}.`);
+    }
+
+    const html = buildReportHtml(region, bbox, result);
+    const emailResult = await sendEmail({
+      to: emailTo,
+      subject: `Disaster Assessment Report: ${region} — ${new Date().toISOString().slice(0, 10)}`,
+      html,
+    });
+
+    if (!emailResult.ok) return res.status(500).json({ error: emailResult.error });
+    return res.json({ ok: true, summary: result.summary, messageId: emailResult.messageId });
+  } catch (e) {
+    logger.warn({ err: e }, 'Workbench email report failed');
+    return res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (req: express.Request, res: express.Response) => {
   const { message, images, recentMessages, studyAreaBbox } = req.body;
   const imageContext = Array.isArray(images) && images.length > 0 ? images.map((img: any) => "[Image: " + img.fileName + " (" + img.mimeType + ")]").join(' ') : '';
@@ -8074,20 +8133,46 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     const lowerMsg = message.toLowerCase();
     if (lowerMsg.includes('disaster assessment') && (lowerMsg.includes('email') || lowerMsg.includes('mail') || lowerMsg.includes('send'))) {
       sendEvent('step', { stepType: 'assessment', text: 'Running full disaster assessment...', status: 'running' });
-      // Extract region: try to find a named region or use a default bbox
-      const regionName = intent.location?.label || 'Bay of Bengal';
-      const bbox = studyAreaBbox || (intent.location ? {
+      // Extract region: named region, else reverse-geocode the bbox centroid
+      // for an accurate place name (e.g. "California" not "Region 32.0-42.0N").
+      const bboxForName = studyAreaBbox || (intent.location ? {
         latMin: intent.location.lat - 5, latMax: intent.location.lat + 5,
         lonMin: intent.location.lon - 5, lonMax: intent.location.lon + 5,
-      } : { latMin: 5, latMax: 25, lonMin: 78, lonMax: 98 }); // default Bay of Bengal
+      } : { latMin: 5, latMax: 25, lonMin: 78, lonMax: 98 });
+      const midLat = (bboxForName.latMin + bboxForName.latMax) / 2;
+      const midLon = (bboxForName.lonMin + bboxForName.lonMax) / 2;
+      let regionName = intent.location?.label || null;
+      if (!regionName) {
+        try { regionName = await reverseGeocode(midLat, midLon); } catch { regionName = null; }
+      }
+      if (!regionName) {
+        regionName = `Region ${bboxForName.latMin.toFixed(1)}-${bboxForName.latMax.toFixed(1)}N, ${bboxForName.lonMin.toFixed(1)}-${bboxForName.lonMax.toFixed(1)}E`;
+      }
+      const bbox = bboxForName;
       const emailTo = process.env.GMAIL_REPORT_TO || '';
       try {
         const result = await assessAndEmail({ regionName, ...bbox, emailTo });
+        // Render the fused risk surface on the globe (same as the Tool Workbench).
+        const commands: Array<Record<string, unknown>> = [];
+        try {
+          const fused = await runFusionPipeline(bbox);
+          if (fused.fusedPoints.length >= 3) {
+            commands.push({ action: 'addHeatmap', points: fused.fusedPoints.slice(0, 800), radius: 25 });
+          }
+          if (studyAreaBbox) {
+            const midLat = (studyAreaBbox.latMin + studyAreaBbox.latMax) / 2;
+            const midLon = (studyAreaBbox.lonMin + studyAreaBbox.lonMax) / 2;
+            commands.push({ action: 'flyTo', lat: midLat, lon: midLon, label: 'Study area', zoom: 8 });
+          }
+        } catch (e) {
+          logger.warn({ err: e }, 'Fused surface render failed');
+        }
+        if (commands.length > 0) sendEvent('commands', commands);
         sendEvent('step', { stepType: 'assessment', text: result.ok ? 'Assessment complete — email sent!' : 'Assessment data fetched', status: 'completed' });
         if (result.ok) {
-          sendEvent('output', { text: `## Disaster Assessment: ${regionName}\n\n**Email sent** ✅\n\n${result.summary}\n\n*Full HTML report emailed.*`, modelTier: 'flash', intentType: 'deep_analysis' });
+          sendEvent('output', { text: `## Disaster Assessment: ${regionName}\n\n**Email sent** ✅\n\n${result.summary}\n\n*Full HTML report emailed.*`, modelTier: 'flash', intentType: 'deep_analysis', commands });
         } else {
-          sendEvent('output', { text: `## 🌍 Disaster Assessment: ${regionName}\n\n${result.summary || ''}\n\n**Email delivery failed**: ${result.error || 'unknown error'}. Report data shown above.`, modelTier: 'flash', intentType: 'deep_analysis' });
+          sendEvent('output', { text: `## Disaster Assessment: ${regionName}\n\n${result.summary || ''}\n\n**Email delivery failed**: ${result.error || 'unknown error'}. Report data shown above.`, modelTier: 'flash', intentType: 'deep_analysis' });
         }
         sendEvent('done', { type: 'done' });
         cleanup();

@@ -725,6 +725,36 @@ export default function ToolWorkbench({ onClose, bbox, onSurfaceData, onClear }:
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
+  // Email the current chain's fused risk as an executive report (same format
+  // as the AI "disaster assessment ... email me" command).
+  const [emailing, setEmailing] = useState(false);
+  const [emailMsg, setEmailMsg] = useState<string | null>(null);
+  async function emailReport() {
+    if (!bbox) { setEmailMsg('Draw a study area first.'); setTimeout(() => setEmailMsg(null), 3000); return; }
+    setEmailing(true);
+    setEmailMsg(null);
+    try {
+      const resp = await fetch('/api/agent/workbench-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          regionName: undefined,
+          bbox,
+          causalProbs,
+          chainTools: chain.map(s => s.tool),
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+      setEmailMsg(`Report emailed ✓`);
+    } catch (e) {
+      setEmailMsg(`Email failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setEmailing(false);
+      setTimeout(() => setEmailMsg(null), 4000);
+    }
+  }
+
   function label(s: string): string {
     return s.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   }
@@ -1007,6 +1037,15 @@ export default function ToolWorkbench({ onClose, bbox, onSurfaceData, onClear }:
                   cursor: chain.length === 0 ? 'default' : 'pointer', opacity: chain.length === 0 ? 0.3 : 1 }}>
                 Export
               </button>
+              <button onClick={emailReport} disabled={emailing || Object.keys(causalProbs).length === 0}
+                title="Email the fused risk report"
+                style={{ padding: '4px 10px', fontSize: 10, background: 'rgba(34,197,94,0.08)',
+                  border: '1px solid rgba(34,197,94,0.25)', borderRadius: 6, color: emailing ? '#64748b' : '#4ade80',
+                  cursor: emailing || Object.keys(causalProbs).length === 0 ? 'default' : 'pointer',
+                  opacity: Object.keys(causalProbs).length === 0 ? 0.4 : 1 }}>
+                {emailing ? '⏳ Sending…' : '✉ Email Report'}
+              </button>
+              {emailMsg && <span style={{ fontSize: 9, color: emailMsg.includes('✓') ? '#4ade80' : '#f87171', alignSelf: 'center' }}>{emailMsg}</span>}
               <button onClick={() => { setChain([]); autoPopulatedRef.current = false; setFormattedResults({});
                 setPhysicsInline({}); setCausalProbs({}); setCausalState(null); setScenarioDiffs([]); setSelectedScenario(null);
                 onClear?.(); }}
