@@ -11,7 +11,7 @@ import { dynamicTools } from './tools-v2/toolGenerator';
 
 export type GlobeAction =
   | 'flyTo' | 'toggleLayer' | 'addPin' | 'addHeatmap' | 'addPolygon'
-  | 'addGeoJSON' | 'addChart' | 'addPanel';
+  | 'addGeoJSON' | 'addChart' | 'addPanel' | 'openPanel' | 'closePanel' | 'togglePanel';
 
 export interface GlobeCommand {
   action: GlobeAction;
@@ -40,10 +40,13 @@ export interface Subtask {
 }
 
 export interface IntentResult {
-  type: 'quick_scan' | 'deep_analysis' | 'fly_to' | 'toggle_layer' | 'weather_check' | 'compute' | 'digital_twin' | 'unknown';
+  type: 'quick_scan' | 'deep_analysis' | 'fly_to' | 'toggle_layer' | 'weather_check' | 'compute' | 'digital_twin' | 'panel_command' | 'unknown';
   confidence: number;
   location?: { lat: number; lon: number; label?: string };
   layerIds?: string[];
+  panelId?: string;
+  panelAction?: 'open' | 'close' | 'toggle';
+  analyticalModelId?: number;
 }
 
 export interface PanelData {
@@ -377,6 +380,22 @@ export class IntentRouter {
       ? { lat: locationTuple[0], lon: locationTuple[1], label: locationTuple[2] }
       : undefined;
 
+    // Analytical model query — a named scientific equation/indicator should be
+    // executed deterministically, BEFORE generic weather/compute detection so
+    // e.g. "land surface temperature" isn't swallowed by weather_check.
+    if (/\b(compute|calculate|run|execute|model|equation|formula|evaluate|analyze)\b/.test(lower)) {
+      const modelId = this.detectAnalyticalModel(lower);
+      if (modelId) {
+        return { type: 'compute', confidence: 0.92, location, analyticalModelId: modelId };
+      }
+    }
+    // Direct model references without a verb ("NDVI", "evapotranspiration") also
+    // route to the analytical model.
+    const directModelId = this.detectAnalyticalModel(lower);
+    if (directModelId && /ndvi|ndwi|evapotranspiration|gdd|growing degree|spi|drought index|heat index|wave energy|soil respiration|lst|land surface|climate sensitivity|fire danger|flood frequency|coastal erosion|leaf area|gross primary|carbon flux|chlorophyll|sea surface temperature|albedo|emissivity|permafrost|active layer/i.test(lower)) {
+      return { type: 'compute', confidence: 0.9, location, analyticalModelId: directModelId };
+    }
+
     // Weather check with location (must precede generic quick_scan)
     if (location && (lower.includes('weather') || lower.includes('rain') || lower.includes('temperature') ||
                      lower.includes('wind') || lower.includes('humidity') || lower.includes('forecast') ||
@@ -391,6 +410,13 @@ export class IntentRouter {
     if (location && (lower.includes('fly') || lower.includes('go to') || lower.includes('zoom to') ||
                       lower.includes('take me') || lower.includes('navigate') || lower.includes('focus'))) {
       return { type: 'fly_to', confidence: 0.95, location };
+    }
+
+    // Panel command — open/close/toggle any UI panel (god-eye control).
+    // Deterministic so "open X panel" always works regardless of LLM behavior.
+    const panelMatch = this.detectPanelCommand(lower);
+    if (panelMatch) {
+      return { type: 'panel_command', confidence: 0.97, panelId: panelMatch.panelId, panelAction: panelMatch.action, location };
     }
 
     // Digital twin / impact analysis (must precede compute and quick_scan)
@@ -524,6 +550,39 @@ export class IntentRouter {
       }
       if (lower.includes('satellite') || lower.includes('space') || lower.includes('debris') || lower.includes('orbit')) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['space_debris'] };
+      }
+      if (lower.includes('aurora') || lower.includes('northern lights')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['aurora_oval'] };
+      }
+      if (lower.includes('lightning') || lower.includes('thunderstorm')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['lightning_strikes'] };
+      }
+      if (lower.includes('precipitation') || lower.includes('rainfall map')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['precipitation'] };
+      }
+      if (lower.includes('wind map') || lower.includes('wind speed map')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['wind'] };
+      }
+      if (lower.includes('land cover') || lower.includes('landcover')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['land_cover'] };
+      }
+      if (lower.includes('night lights') || lower.includes('city lights')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['night_lights'] };
+      }
+      if (lower.includes('submarine cable') || lower.includes('undersea cable') || lower.includes('internet cable')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['submarine_cables'] };
+      }
+      if (lower.includes('iceberg') || lower.includes('sea ice')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['icebergs', 'sea_ice'] };
+      }
+      if (lower.includes('heatmap') || lower.includes('heat map')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['heatmap'] };
+      }
+      if (lower.includes('tectonic') || lower.includes('plate boundary')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['tectonic'] };
+      }
+      if (lower.includes('building') || lower.includes('3d building') || lower.includes('osm building')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['dt_buildings'] };
       }
     }
 
@@ -700,6 +759,257 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
   }
 
   /**
+   * Deterministically detect a named analytical model from the query text.
+   * Returns the model id when a known scientific equation/indicator matches,
+   * otherwise null. Kept in sync with server/index.ts tryAnalyticalModelRun.
+   */
+  private static detectAnalyticalModel(text: string): number | null {
+    const l = text.toLowerCase();
+    // Ordered from most-specific to least-specific to avoid collisions.
+    // IDs verified against /api/analytical-models/search (the real 150 models).
+    const MODELS: Array<[RegExp, number]> = [
+      [/land surface temperature|\blst\b|surface temperature/i, 1],
+      [/brightness temperature/i, 2],
+      [/saturation vapor pressure|vapor pressure/i, 3],
+      [/pollutant transport|advection.?diffusion|pollutant dispersion/i, 6],
+      [/reference evapotranspiration|evapotranspiration|\bpenman\b/i, 9],
+      [/scs.?cn|curve number|surface runoff|\brunoff\b/i, 10],
+      [/flood wave routing/i, 13],
+      [/earthquake frequency|gutenberg|recurrence/i, 19],
+      [/aftershock decay|omori/i, 20],
+      [/ground motion|attenuation|\bpga\b/i, 21],
+      [/shear strength/i, 22],
+      [/earthquake magnitude|moment magnitude/i, 23],
+      [/stress drop/i, 24],
+      [/fault rupture/i, 25],
+      [/vegetation health index|\bvhi\b|vegetation health/i, 26],
+      [/surface water detection|water index|\bndwi\b/i, 27],
+      [/vegetation water content|canopy water/i, 28],
+      [/enhanced vegetation index|\bevi\b|\bndvi\b|vegetation index|greenness/i, 29],
+      [/snow cover detection|snow cover/i, 30],
+      [/burn severity|fire scar|burned area/i, 31],
+      [/fire radiative power|fire energy/i, 32],
+      [/crop water stress|water stress/i, 33],
+      [/snowmelt runoff|snowmelt/i, 34],
+      [/sea ice concentration|sea ice|passive microwave/i, 35],
+      [/great circle|haversine/i, 36],
+      [/kriging|geostatistical/i, 37],
+      [/inverse distance weighting|\bidw\b/i, 38],
+      [/gaussian plume|air dispersion|plume dispersion/i, 39],
+      [/\bgumbel\b|extreme value/i, 40],
+      [/generalized pareto|pareto distribution/i, 41],
+      [/semivariogram|variogram/i, 42],
+      [/universal soil loss|\busle\b|soil loss|erosion/i, 45],
+      [/soil respiration|co2 flux/i, 46],
+      [/soil thermal conductivity|thermal conductivity/i, 47],
+      [/logarithmic wind profile|wind profile|log.?wind/i, 49],
+      [/stomatal conductance|ball.?berry|leaf conductance/i, 50],
+      [/gross primary production|\bgpp\b|photosynthesis/i, 51],
+      [/net carbon flux|carbon flux|carbon balance/i, 53],
+      [/forest biomass|above.?ground biomass|\bbiomass\b/i, 55],
+      [/ocean co2|co2 uptake|ocean carbon/i, 56],
+      [/crop growing degree|growing degree|\bgdd\b|degree days/i, 58],
+      [/priestley.?taylor/i, 59],
+      [/\bhargreaves\b|reference crop/i, 60],
+      [/yield.?water|crop yield|fao yield/i, 61],
+      [/phytoplankton|chlorophyll|chl.?a/i, 62],
+      [/bigleaf penman|penman.?monteith|big.?leaf/i, 63],
+      [/jonswap|wave spectrum|wave energy/i, 80],
+      [/stream power|fluvial erosion|river incision/i, 81],
+      [/glacier mass balance|glacier melt|\bpdd\b|degree day model/i, 91],
+      [/\bvei\b|volcanic explosivity/i, 94],
+      [/disaster risk index|disaster risk|risk index/i, 135],
+      [/annual flood damage|flood damage/i, 136],
+      [/air quality index|aqi from concentration|pollution index/i, 137],
+      [/probable maximum precipitation|\bpmp\b|precipitation/i, 138],
+      [/palmer drought|\bpdsi\b|drought index|drought severity/i, 139],
+      [/climate sensitivity|\becs\b|climate feedback/i, 97],
+      [/planck feedback|\bplanck\b/i, 98],
+      [/shannon entropy|information entropy|\bentropy\b/i, 144],
+    ];
+    for (const [re, id] of MODELS) {
+      if (re.test(l)) return id;
+    }
+    return null;
+  }
+
+  /**
+   * Maps natural language ("open analytics workbench", "show satellite tracker",
+   * "close settings", "toggle timeline") to a panel id + action.
+   * Returns null when the message is not primarily a panel command.
+   * @param defaultAction When set (e.g. from a list's carry verb), used if the
+   *   text has no verb of its own but matches a panel keyword.
+   */
+  private static detectPanelCommand(text: string, defaultAction?: 'open' | 'close' | 'toggle'): { panelId: string; action: 'open' | 'close' | 'toggle' } | null {
+    // Verb must be present: open/show/launch/display/enable/close/hide/toggle
+    const openVerb = /\b(open|show|launch|display|enable|bring up|load|open up|start)\b/i.test(text);
+    const closeVerb = /\b(close|hide|dismiss|shut|quit)\b/i.test(text);
+    const toggleVerb = /\b(toggle|switch|flip)\b/i.test(text);
+    if (!openVerb && !closeVerb && !toggleVerb && !defaultAction) return null;
+
+    // "open the X" / "open X panel" / "show me X" — require a panel keyword to
+    // avoid hijacking normal queries like "show earthquakes" (that's a layer).
+    const lower = text.toLowerCase();
+
+    // Panel keyword → panelId map. Order matters (longest/most specific first).
+    const PANELS: Array<{ match: RegExp; panelId: string }> = [
+      { match: /tool\s*workbench|toolworkbench/i, panelId: 'toolworkbench' },
+      { match: /(analytics|analysis)\s*workbench|workbench/i, panelId: 'analytics-workbench' },
+      { match: /analytics\s*(&|and)\s*insights|analytics\s*insights|insights panel|analytics panel/i, panelId: 'analytics-insights' },
+      { match: /satellite\s*tracker|tracker\s*(for|of)?\s*satellites/i, panelId: 'satellite-tracker' },
+      { match: /satellite\s*imagery|imagery\s*panel|earth\s*observation/i, panelId: 'satellite-imagery' },
+      { match: /aviation\s*tracker|flight\s*tracker\s*panel/i, panelId: 'aviation-tracker' },
+      { match: /land\s*cover|landcover/i, panelId: 'land-cover' },
+      { match: /\bpulse\b|intelligence\s*panel|market\s*panel|geo\s*risk\s*panel/i, panelId: 'intelligence' },
+      { match: /intel\s*feed|intelligence\s*feed|news\s*feed/i, panelId: 'intel-feed' },
+      { match: /cognitive\s*dashboard/i, panelId: 'cognitive' },
+      { match: /memory\s*explorer|memory\s*panel|memories/i, panelId: 'memory' },
+      { match: /\bsettings\b|preferences/i, panelId: 'settings' },
+      { match: /study\s*area/i, panelId: 'study-area' },
+      { match: /api\s*vault|api\s*keys|vault/i, panelId: 'api-vault' },
+      { match: /command\s*palette/i, panelId: 'command-palette' },
+      { match: /scenario\s*gallery|scenarios?\s*panel/i, panelId: 'scenario-gallery' },
+      { match: /scenario\s*editor|new\s*scenario/i, panelId: 'scenario-editor' },
+      { match: /cinematic\s*director|director/i, panelId: 'cinematic-director' },
+      { match: /spatial\s*sketch|sketching|sketch\s*panel/i, panelId: 'spatial-sketch' },
+      { match: /performance\s*monitor|perf\s*monitor/i, panelId: 'performance' },
+      { match: /\btimeline\b/i, panelId: 'timeline' },
+      { match: /\bmeasure\b|measure\s*tool/i, panelId: 'measure' },
+      { match: /time\s*slider/i, panelId: 'time-slider' },
+      { match: /admin\s*dashboard|\badmin\b/i, panelId: 'admin' },
+      { match: /iss\s*(live|tracker)?|\binternational space station\b/i, panelId: 'iss' },
+      { match: /digital\s*twin/i, panelId: 'digital-twin' },
+    ];
+
+    for (const { match, panelId } of PANELS) {
+      if (match.test(lower)) {
+        // "show earthquakes" etc. — if the panel keyword matched only because
+        // of a generic word, don't hijack a pure layer request. But if the
+        // user explicitly asked to OPEN the panel, honour it even when a data
+        // layer keyword is also present (e.g. "open the analytics workbench,
+        // show earthquakes"). Layer toggles are handled separately.
+        if (openVerb && /^open\b|^show\b.*panel\b|panel\b.*workbench|workbench/.test(lower) && panelId === 'analytics-workbench' && /\b(analytics|analysis)\b/.test(lower)) {
+          // explicit open of the workbench — proceed
+        } else if (!/panel|workbench|dashboard|tracker|explorer|vault|director|sketch|gallery|palette|feed|pulse|settings|memory|area|mapper/i.test(lower) && panelId === 'analytics-workbench') {
+          continue;
+        }
+        const action: 'open' | 'close' | 'toggle' = closeVerb ? 'close' : toggleVerb ? 'toggle' : (openVerb ? 'open' : (defaultAction ?? 'open'));
+        return { panelId, action };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Deterministically extract MULTIPLE globe/UI commands from a single message.
+   * This is the god-eye multi-command parser: a message like
+   * "open the analytics workbench, show earthquakes, and fly to Tokyo" must
+   * produce openPanel + toggleLayer + flyTo — not just one intent. Returns an
+   * array of GlobeCommand, empty when no deterministic commands are found.
+   */
+  static extractCommands(text: string, opts: { allowAnalytical?: boolean } = {}): GlobeCommand[] {
+    const lower = text.toLowerCase().trim();
+    const commands: GlobeCommand[] = [];
+
+    // If this is primarily an analytical-model query ("compute land surface
+    // temperature..."), do NOT hijack it with panel/layer toggles — the
+    // analytical handler owns it and appends any extra commands itself.
+    // When allowAnalytical is true (called from the analytical handler), still
+    // parse panel/layer extras.
+    if (!opts.allowAnalytical && /\b(compute|calculate|run|execute|model|equation|formula|evaluate)\b/.test(lower)) {
+      if (this.detectAnalyticalModel(lower)) {
+        return commands;
+      }
+    }
+
+    // ── flyTo: "fly to X", "go to X", "zoom to X", "show X location" ──
+    const flyMatch = lower.match(/(?:fly|go|zoom|navigate)\s+(?:to|in|into)?\s+(.+)/);
+    if (flyMatch) {
+      const loc = this.extractLocation(flyMatch[1]);
+      if (loc) {
+        commands.push({ action: 'flyTo', lat: loc[0], lon: loc[1], label: loc[2], zoom: 8 });
+      }
+    }
+
+    // ── toggleLayer: show/hide any known layer keyword ──
+    // List-aware: the verb may appear only once ("show earthquakes, flights,
+    // and ships") and carries across comma/and-separated segments.
+    const segments = lower.split(/[,.;]|\band\b|\bplus\b/).map(s => s.trim()).filter(Boolean);
+    let defaultShow: boolean | null = null; // verb seen in the whole message
+    const hasHideAnywhere = /(?:hide|close|remove|disable|turn\s*off)/i.test(lower);
+    const hasShowAnywhere = /(?:show|enable|display|open)/i.test(lower);
+    if (hasShowAnywhere && !hasHideAnywhere) defaultShow = true;
+    else if (hasHideAnywhere && !hasShowAnywhere) defaultShow = false;
+
+    const LAYER_KEYWORDS: Array<{ kw: RegExp; layerId: string }> = [
+      { kw: /earthquake|quake|seismic/i, layerId: 'earthquakes' },
+      { kw: /wildfire|fire|burning/i, layerId: 'wildfires' },
+      { kw: /flight|plane|aircraft|adsb/i, layerId: 'flight_tracks' },
+      { kw: /ship|vessel|maritime|ais/i, layerId: 'ais_vessels' },
+      { kw: /volcano|volcanic|eruption/i, layerId: 'volcanoes' },
+      { kw: /storm|hurricane|cyclone|typhoon/i, layerId: 'severe_storms' },
+      { kw: /satellite|space debris|debris|orbit/i, layerId: 'space_debris' },
+      { kw: /aurora|northern lights/i, layerId: 'aurora_oval' },
+      { kw: /lightning|thunderstorm/i, layerId: 'lightning_strikes' },
+      { kw: /precipitation|rainfall/i, layerId: 'precipitation' },
+      { kw: /wind map|wind speed/i, layerId: 'wind' },
+      { kw: /land cover|landcover/i, layerId: 'land_cover' },
+      { kw: /night lights|city lights/i, layerId: 'night_lights' },
+      { kw: /submarine cable|undersea cable|internet cable/i, layerId: 'submarine_cables' },
+      { kw: /iceberg|sea ice/i, layerId: 'icebergs' },
+      { kw: /heatmap|heat map/i, layerId: 'heatmap' },
+      { kw: /tectonic|plate boundary/i, layerId: 'tectonic' },
+      { kw: /building|3d building|osm building/i, layerId: 'dt_buildings' },
+      { kw: /space weather/i, layerId: 'space_weather' },
+      { kw: /disaster alert|disaster/i, layerId: 'disaster_alerts' },
+    ];
+    if (defaultShow !== null || hasHideAnywhere || hasShowAnywhere) {
+      // Segments that clearly reference a UI PANEL (not a data layer) must be
+      // skipped here — e.g. "open the satellite imagery panel", "land cover
+      // mapper", "aviation tracker". Otherwise "satellite" would wrongly
+      // toggle the space_debris layer. The panel command is handled separately.
+      const PANEL_INDICATOR = /panel|tracker|explorer|vault|director|workbench|mapper|gallery|palette|feed|pulse|settings|memory|imagery|dashboards?|analytics\s*insights/i;
+      for (const seg of segments) {
+        if (PANEL_INDICATOR.test(seg)) continue;
+        const hide = /(?:hide|close|remove|disable|turn\s*off)/i.test(seg);
+        const show = /(?:show|enable|display|open)/i.test(seg);
+        const enabled = hide ? false : (show ? true : defaultShow ?? true);
+        if (enabled === null) continue;
+        for (const { kw, layerId } of LAYER_KEYWORDS) {
+          if (kw.test(seg)) {
+            if (!commands.some(c => c.action === 'toggleLayer' && c.layerId === layerId)) {
+              commands.push({ action: 'toggleLayer', layerId, enabled });
+            }
+          }
+        }
+      }
+    }
+
+    // ── openPanel/closePanel/togglePanel: parse MULTIPLE panel commands ──
+    // Each comma/and-separated segment can open/close a different panel.
+    // The verb ("open", "close", "toggle") may appear only in the first segment
+    // and carries across subsequent segments in a list.
+    let panelCarryAction: 'open' | 'close' | 'toggle' | null = null;
+    for (const seg of segments) {
+      const segVerb = /(?:open|show|launch|display|enable|bring up|load|open up|start)/i.test(seg) ? 'open' as const
+        : /(?:close|hide|dismiss|shut|quit)/i.test(seg) ? 'close' as const
+        : /(?:toggle|switch|flip)/i.test(seg) ? 'toggle' as const
+        : null;
+      if (segVerb) panelCarryAction = segVerb;
+      const panelMatch = this.detectPanelCommand(seg, panelCarryAction ?? undefined);
+      if (panelMatch) {
+        const action = panelMatch.action === 'close' ? 'closePanel' : panelMatch.action === 'toggle' ? 'togglePanel' : 'openPanel';
+        if (!commands.some(c => c.panelId === panelMatch.panelId && c.action === action)) {
+          commands.push({ action, panelId: panelMatch.panelId });
+        }
+      }
+    }
+
+    return commands;
+  }
+
+  /**
    * Register a custom intent prototype at runtime (e.g., from intent discovery).
    */
   static addCustomIntent(name: string, description: string, exampleQueries: string[]): void {
@@ -848,7 +1158,7 @@ export class CommandParser {
       if (!trimmed.startsWith('{')) continue;
       try {
         const cmd = JSON.parse(trimmed) as GlobeCommand;
-        const validActions = ['flyTo', 'toggleLayer', 'addPin', 'addHeatmap', 'addPolygon', 'addGeoJSON', 'addChart', 'addPanel'];
+        const validActions = ['flyTo', 'toggleLayer', 'addPin', 'addHeatmap', 'addPolygon', 'addGeoJSON', 'addChart', 'addPanel', 'openPanel', 'closePanel', 'togglePanel'];
         if (validActions.includes(cmd.action)) {
           commands.push(cmd);
         }

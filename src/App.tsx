@@ -1180,6 +1180,10 @@ export default function App() {
   const tiersLoadedRef = useRef(false);
   const MAX_ENTITIES = 30000;
   const toggleDebounceRef = useRef<Record<string, number>>({});
+  /** Track layer enables from the AI panel so loadLayerData's auto-revert
+   *  (e.g. ais_vessels toggling off when the API key is missing) does not
+   *  override explicit AI commands. */
+  const agentLayerForceRef = useRef<Record<string, boolean>>({});
 
 
 
@@ -1359,6 +1363,11 @@ export default function App() {
       (window as unknown as Record<string, unknown>).setKaggleOverlay = (v: { jobId: string; lat: number; lon: number; scenarioType: string }) =>
         setKaggleOverlay(v);
       (window as unknown as Record<string, unknown>).kaggleOverlayState = kaggleOverlay;
+      // God-eye test hook: set the active study-area bbox directly so the AI
+      // analytical engine can compute over it (used by e2e / dev tests).
+      (window as unknown as Record<string, unknown>).setStudyAreaBbox = (bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null) => {
+        useChatStore.getState().setStudyAreaBbox(bbox);
+      };
       // Load a generated scenario by id into the ScenarioViewer (used by e2e tests
       // to bypass the gallery's top-N search results). Must be an object fetched
       // from GET /api/scenarios/:id (or a scenario summary with timeSeries).
@@ -2012,6 +2021,10 @@ export default function App() {
       creditContainer: document.createElement('div'),
     });
     viewerRef.current = v;
+    // God-eye test hook: expose the viewer for e2e camera assertions.
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).__VIEWER__ = v;
+    }
     forkRendererRef.current = new ForkRenderer(v);
     forkRendererRef.current.setEntityCacheGetter(() => entityStoreRef.current);
     forkRendererRef.current.setImageryGetter(() => overlayImageryLayersRef.current);
@@ -5167,6 +5180,38 @@ export default function App() {
      LAYER TOGGLES
      ═════════════════════════════════════════════════════════════════ */
 
+  // God-eye direct setter: set a layer to an explicit on/off state, bypassing
+  // the toggle's auto-revert-on-load-error behaviour (e.g. ais_vessels toggles
+  // itself back off when the API key is missing). Used by executeAgentCommands.
+  const setLayerEnabled = useCallback((layerId: string, enabled: boolean) => {
+    const v = viewerRef.current;
+    const now = Date.now();
+    toggleDebounceRef.current[layerId] = now;
+    const wasOn = layersRef.current.find(l => l.id === layerId)?.on ?? false;
+    if (wasOn === enabled) return;
+    setLayers(prev => {
+      const next = prev.map(l => l.id === layerId ? { ...l, on: enabled } : l);
+      layersRef.current = next;
+      return next;
+    });
+    if (enabled) {
+      // Remember the AI's intended state so loadLayerData's auto-revert paths
+      // (missing API key, load errors) don't flip the layer back off.
+      agentLayerForceRef.current[layerId] = true;
+      forkRendererRef.current?.showLayer(layerId);
+      loadLayerData(layerId);
+    } else {
+      delete agentLayerForceRef.current[layerId];
+      forkRendererRef.current?.hideLayer(layerId);
+      hideLayerEntities(layerId);
+    }
+    setTimeout(() => forkRendererRef.current?.reapplyCrop(), 0);
+    setCinematicLayerVersion(x => x + 1);
+    if (['severe_storms', 'wildfires', 'smoke_dispersion'].includes(layerId)) {
+      refreshDerivedOverlays();
+    }
+  }, []);
+
   const toggleLayer = useCallback((layerId: string) => {
     const now = Date.now();
     const last = toggleDebounceRef.current[layerId] || 0;
@@ -5450,7 +5495,11 @@ export default function App() {
             const key = apiVaultRef.current.keys.AIS_STREAM_API_KEY || '';
             if (!key) {
               showNotification('AISStream API Key required. Add it in settings.', 'warning');
-              setTimeout(() => toggleLayer('ais_vessels'), 10);
+              // Don't auto-toggle back off when the enable came from the AI
+              // god-eye command — the layer stays requested-on.
+              if (!agentLayerForceRef.current['ais_vessels']) {
+                setTimeout(() => toggleLayer('ais_vessels'), 10);
+              }
             } else {
               aisTrackerRef.current = new AisVesselTracker(v, key);
               startTracker(aisTrackerRef.current);
@@ -7167,6 +7216,82 @@ export default function App() {
     setAgentSteps([]);
   }, [setAgentSteps]);
 
+  // God-eye command bridge: map a panel id to its opener/closer so the AI can
+  // open, close, or toggle ANY panel in the app. Returns true when opened,
+  // false when closed, undefined when the panel id is unknown.
+  const applyPanelCommand = useCallback((panelId: string, desired?: boolean): boolean | undefined => {
+    const isOpen = (cur: boolean) => (desired === undefined ? !cur : desired);
+    const apply = (setter: (v: boolean) => void, current: boolean, focusId?: string): boolean => {
+      const next = isOpen(current);
+      setter(next);
+      if (next && focusId) focusPanel(focusId);
+      return next;
+    };
+    switch (panelId) {
+      case 'analytics': case 'analytics-workbench': case 'workbench':
+        return apply(setShowAnalyticsWorkbench, showAnalyticsWorkbench, 'analytics');
+      case 'analytics-insights': case 'analytics_insights': case 'insights':
+        return apply(setShowAnalytics, showAnalytics, 'analytics-insights');
+      case 'satellite-tracker': case 'satellites':
+        return apply(setShowSatelliteTracker, showSatelliteTracker, 'satellite-tracker');
+      case 'satellite-imagery': case 'satellite_imagery': case 'imagery':
+        return apply(setShowSatelliteImagery, showSatelliteImagery, 'satellite-imagery');
+      case 'aviation-tracker': case 'aviation': case 'flights':
+        return apply(setShowAviationTracker, showAviationTracker, 'aviation-tracker');
+      case 'land-cover': case 'land_cover': case 'land-cover-mapper':
+        return apply(setShowLandCoverMapper, showLandCoverMapper, 'land-cover');
+      case 'intelligence': case 'pulse': case 'intel':
+        return apply(setShowIntelligencePanel, showIntelligencePanel, 'intelligence');
+      case 'intel-feed': case 'intel_feed': case 'feed':
+        return apply(setShowIntelFeed, showIntelFeed, 'intel-feed');
+      case 'cognitive': case 'cognitive-dashboard':
+        return apply(setShowCognitiveDashboard, showCognitiveDashboard, 'cognitive');
+      case 'toolworkbench': case 'tool-workbench':
+        return apply(setShowToolWorkbench, showToolWorkbench, 'toolworkbench');
+      case 'memory': case 'memory-explorer':
+        return apply(setShowMemoryExplorer, showMemoryExplorer, 'memory');
+      case 'settings': case 'settings-panel':
+        return apply(setShowSettings, showSettings, 'settings');
+      case 'study-area': case 'study_area':
+        return apply(setShowStudyArea, showStudyArea, 'study-area');
+      case 'api-vault': case 'api_vault': case 'keys':
+        return apply(setShowApiVault, showApiVault);
+      case 'command-palette': case 'command_palette': case 'palette':
+        return apply(setShowCommandPalette, showCommandPalette);
+      case 'scenario-gallery': case 'scenario_gallery': case 'scenarios':
+        return apply(setShowScenarioGallery, showScenarioGallery, 'scenario-gallery');
+      case 'scenario-editor': case 'scenario_editor': case 'new-scenario':
+        return apply(setShowScenarioEditor, showScenarioEditor, 'scenario-editor');
+      case 'cinematic-director': case 'cinematic_director': case 'cinematic':
+        return apply(setShowCinematicDirector, showCinematicDirector, 'cinematic-director');
+      case 'spatial-sketch': case 'spatial_sketch': case 'sketch':
+        return apply(setShowSpatialSketching, showSpatialSketching, 'spatial-sketch');
+      case 'performance': case 'perf': case 'perf-monitor':
+        return apply(setShowPerfMonitor, showPerfMonitor);
+      case 'timeline': case 'timeline-bar':
+        return apply(setShowTimeline, showTimeline);
+      case 'measure': case 'measure-tool':
+        return apply(setShowMeasureTool, showMeasureTool);
+      case 'time-slider': case 'time_slider':
+        return apply(setShowTimeSlider, showTimeSlider);
+      case 'admin': case 'admin-dashboard':
+        if (isAdmin) return apply(setShowAdmin, showAdmin);
+        return undefined;
+      case 'iss': case 'iss-live': case 'iss-tracker':
+        toggleISS();
+        return true;
+      case 'digital-twin': case 'digital_twin':
+        if (desired === false) setDigitalTwinPanel(null);
+        return true;
+      case 'ai': case 'chat': case 'ai-chat':
+        setShowAI(true);
+        focusPanel('ai');
+        return true;
+      default:
+        return undefined;
+    }
+  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showIntelligencePanel, showIntelFeed, showCognitiveDashboard, showToolWorkbench, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showTimeline, showMeasureTool, showTimeSlider, showAdmin, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowIntelligencePanel, setShowIntelFeed, setShowCognitiveDashboard, setShowToolWorkbench, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowTimeline, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setDigitalTwinPanel, setShowAI, focusPanel, toggleISS, isAdmin]);
+
   const executeAgentCommands = useCallback((commands: Array<Record<string, unknown>>) => {
     const v = viewerRef.current;
     if (!v) return;
@@ -7176,7 +7301,7 @@ export default function App() {
     let flyTarget: { lat: number; lon: number } | null = null;
     for (const cmd of commands) {
       try {
-        const action: { type: 'flyTo' | 'toggleLayer' | 'addEntity' | 'addPanel'; entities?: Cesium.Entity[]; layerId?: string; previousEnabled?: boolean; previousCamera?: { longitude: number; latitude: number; height: number }; panelData?: unknown; description: string; timestamp: number } = {
+        const action: { type: 'flyTo' | 'toggleLayer' | 'addEntity' | 'addPanel' | 'openPanel'; entities?: Cesium.Entity[]; layerId?: string; previousEnabled?: boolean; previousCamera?: { longitude: number; latitude: number; height: number }; panelData?: unknown; description: string; timestamp: number } = {
           type: 'addEntity',
           description: cmd.action as string,
           timestamp: Date.now(),
@@ -7206,7 +7331,10 @@ export default function App() {
                 action.layerId = layerId;
                 action.previousEnabled = currentOn;
                 action.description = `${enabled ? 'Enable' : 'Disable'} layer: ${layerId}`;
-                toggleLayer(layerId);
+                // Use the direct setter (not toggleLayer) so the AI's
+                // explicit on/off isn't overridden by layer loading errors
+                // (e.g. ais_vessels auto-toggles off when API key is missing).
+                setLayerEnabled(layerId, enabled);
               }
             }
             break;
@@ -7394,6 +7522,21 @@ export default function App() {
             }
             break;
           }
+          // God-eye control: open / close / toggle any UI panel in the app.
+          case 'openPanel':
+          case 'closePanel':
+          case 'togglePanel': {
+            const panelId = cmd.panelId as string;
+            const desired = cmd.action === 'openPanel' ? true : cmd.action === 'closePanel' ? false : undefined;
+            if (panelId) {
+              const opened = applyPanelCommand(panelId, desired);
+              if (opened !== undefined) {
+                action.type = 'openPanel';
+                action.description = `${cmd.action} ${panelId}`;
+              }
+            }
+            break;
+          }
           default:
             break;
         }
@@ -7401,7 +7544,7 @@ export default function App() {
         else if (action.entities && action.entities.length > 0) history.push(action as any);
       } catch { /* skip malformed commands */ }
     }
-  }, [focusLocation, toggleLayer, isLayerEnabled, setDigitalTwinPanel, cleanupThinkingSteps]);
+  }, [focusLocation, toggleLayer, isLayerEnabled, setDigitalTwinPanel, cleanupThinkingSteps, applyPanelCommand, setLayerEnabled]);
 
   const sendToPipeline = useCallback(async (goal: string, wsId: string | null) => {
     const resp = await fetch('/api/agent/pipeline', {
@@ -7530,8 +7673,20 @@ export default function App() {
     await deleteChat(id);
     if (chatState.currentChatId === id) {
       chatState.setCurrentChatId(null);
+      setAiMessages([]); // prevent auto-save from recreating the chat
     }
     setChatList(prev => prev.filter(c => c.id !== id));
+  }
+
+  async function deleteCurrentChat() {
+    const id = chatState.currentChatId;
+    if (!id) {
+      // No saved session yet — just clear the composer.
+      setAiMessages([]);
+      chatState.setCurrentChatId(null);
+      return;
+    }
+    await deleteChatSession(id);
   }
 
   async function clearAllChats() {
@@ -8048,6 +8203,8 @@ export default function App() {
     });
     v.camera.flyTo({ destination: rect });
     throttledRender(v);
+    // Sync the bbox to the chat store so the AI can use it for analytical models
+    useChatStore.getState().setStudyAreaBbox({ latMin: south, latMax: north, lonMin: west, lonMax: east });
   }, [studyWest, studySouth, studyEast, studyNorth]);
 
   function clearStudyArea() {
@@ -9163,6 +9320,7 @@ export default function App() {
         getPanelZIndex={getPanelZIndex}
         focusLocation={focusLocation}
         toggleLayer={toggleLayer}
+        activeLayers={layers.filter(l => l.on).map(l => ({ id: l.id, label: l.label }))}
         sendAI={sendAI}
         handleFileUpload={handleFileUpload}
         handleImageUpload={handleImageUpload}
@@ -9174,6 +9332,7 @@ export default function App() {
         newChat={newChat}
         undoLastAgentAction={undoLastAgentAction}
         clearAllAgentActions={clearAllAgentActions}
+        deleteCurrentChat={deleteCurrentChat}
         cleanupThinkingSteps={cleanupThinkingSteps}
         abortControllerRef={abortControllerRef}
         virtualizedChatRef={virtualizedChatRef}

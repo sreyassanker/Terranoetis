@@ -92,33 +92,62 @@ export function useChat(
     const mutateTab = (fn: (tab: import('@/store/chatStore').ChatTab) => import('@/store/chatStore').ChatTab) => {
       if (streamTabId) store.getState().mutateTab(streamTabId, fn);
     };
-    const addMessage = (msg: ChatMessage) => mutateTab(tab => ({
-      ...tab,
-      messages: tab.messages.some(m => m.id === msg.id)
-        ? tab.messages
-        : [...tab.messages, { ...msg, timestamp: msg.timestamp ?? Date.now() }],
-    }));
-    const updateMessage = (id: number, updates: Partial<ChatMessage>) => mutateTab(tab => ({
-      ...tab,
-      messages: tab.messages.map(m => (m.id === id ? { ...m, ...updates } : m)),
-    }));
+    // When no chat tab exists (fresh load before the user opens a tab), all of
+    // the tab mutations above no-op. Fall back to the singleton store so the
+    // message still renders. This is the pre-tab behaviour and keeps the
+    // god-eye flow (any panel command) fully functional on first load.
+    const addMessage = (msg: ChatMessage) => {
+      if (streamTabId) {
+        mutateTab(tab => ({
+          ...tab,
+          messages: tab.messages.some(m => m.id === msg.id)
+            ? tab.messages
+            : [...tab.messages, { ...msg, timestamp: msg.timestamp ?? Date.now() }],
+        }));
+      } else {
+        store.getState().addMessage(msg);
+      }
+    };
+    const updateMessage = (id: number, updates: Partial<ChatMessage>) => {
+      if (streamTabId) {
+        mutateTab(tab => ({
+          ...tab,
+          messages: tab.messages.map(m => (m.id === id ? { ...m, ...updates } : m)),
+        }));
+      } else {
+        store.getState().updateMessage(id, updates);
+      }
+    };
     const setAiTyping = (v: boolean) => streamTabId ? store.getState().setTabTyping(streamTabId, v) : store.getState().setAiTyping(v);
     // Single source of truth: agentSteps are driven entirely by server SSE updates.
     // NO client-seeded placeholder steps - server is authoritative.
-    const setAgentSteps = (fn: (prev: AgentStep[]) => AgentStep[]) => mutateTab(tab => ({
-      ...tab,
-      agentSteps: typeof fn === 'function' ? fn(tab.agentSteps) : fn,
-    }));
-    const setPipelineProgress = (fn: (prev: PipelineStep[]) => PipelineStep[]) => mutateTab(tab => ({
-      ...tab,
-      pipelineProgress: typeof fn === 'function' ? fn(tab.pipelineProgress) : fn,
-    }));
+    const setAgentSteps = (fn: (prev: AgentStep[]) => AgentStep[]) => {
+      if (streamTabId) {
+        mutateTab(tab => ({
+          ...tab,
+          agentSteps: typeof fn === 'function' ? fn(tab.agentSteps) : fn,
+        }));
+      } else {
+        store.getState().setAgentSteps(fn);
+      }
+    };
+    const setPipelineProgress = (fn: (prev: PipelineStep[]) => PipelineStep[]) => {
+      if (streamTabId) {
+        mutateTab(tab => ({
+          ...tab,
+          pipelineProgress: typeof fn === 'function' ? fn(tab.pipelineProgress) : fn,
+        }));
+      } else {
+        store.getState().setPipelineProgress(fn);
+      }
+    };
     const setExpandedStep = (v: number) => store.getState().setExpandedStep(v);
 
     const sessionId = store.getState().sessionId;
     const selectedTier = store.getState().selectedTier;
     const chatImages = store.getState().chatImages;
     const sandboxWorkspaceId = store.getState().sandboxWorkspaceId;
+    const studyAreaBbox = store.getState().studyAreaBbox;
     const requestImages = chatImages.length > 0
       ? chatImages.map(img => ({ dataUrl: img.dataUrl, mimeType: img.mimeType, fileName: img.fileName }))
       : undefined;
@@ -150,55 +179,67 @@ export function useChat(
 
     const loc = await extractLocation(userMsg);
 
-    // Pure fly command
-    const isPureFlyCommand = /^(?:fly|go|zoom)\s+(?:to|in|into)\s+/i.test(userMsg.trim());
-    if (isPureFlyCommand && loc) {
-      focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 20000 });
-      addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `Flying to ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` });
-      setAiTyping(false);
-      return;
-    }
-
-    // Monitor/schedule commands
-    if (/^monitor\s+/i.test(userMsg)) {
-      const handled = await sendMonitorCommand(userMsg);
-      if (handled) { cleanupThinkingSteps(); setAiTyping(false); return; }
-    }
-    if (/^schedule\s+/i.test(userMsg)) {
-      const handled = await sendScheduleCommand(userMsg);
-      if (handled) { cleanupThinkingSteps(); setAiTyping(false); return; }
-    }
-
-    // Compute tasks
-    const isComputeTask = /\b(compute|calculate|run script|execute (?:code|script|python|node|bash)|simulate|csv|analyze (?:data|dataset|this)|pipeline)\b/i.test(userMsg)
-      && !/\b(show|display|visualize|fly|go|zoom|toggle|enable|display|where|what|how|why|compare|near|around)\b/i.test(userMsg);
-
-    if (isComputeTask) {
-      try {
-        setExpandedStep(-1);
-        await sendToPipeline(userMsg, sandboxWorkspaceId || null);
+    // Multi-command message? (comma/and-separated: "show earthquakes, flights,
+    // and ships"). When the user asks for MULTIPLE things, skip the client-side
+    // shortcuts below (fly/flight/compute) — the server's multi-command handler
+    // parses and executes ALL of them deterministically.
+    const lower0 = userMsg.toLowerCase().trim();
+    const hasMultipleSegments = /[,;]|\band\b|\bplus\b/i.test(lower0);
+    const isExplicitMultiCommand = hasMultipleSegments && (
+      /\b(show|display|open|enable|toggle|hide|close|disable)\b/i.test(lower0)
+      || /\b(earthquake|quake|flight|plane|aircraft|ship|vessel|wildfire|volcano|storm|satellite|aurora|panel|workbench|tracker|explorer|dashboards?)\b/i.test(lower0)
+    );
+    if (!isExplicitMultiCommand) {
+      // Pure fly command
+      const isPureFlyCommand = /^(?:fly|go|zoom)\s+(?:to|in|into)\s+/i.test(userMsg.trim());
+      if (isPureFlyCommand && loc) {
+        focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 20000 });
+        addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `Flying to ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` });
         setAiTyping(false);
         return;
-      } catch (e) {
-        addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `Pipeline execution failed: ${e}\n\nFalling back to agent analysis...` });
       }
-    }
 
-    // Flight queries
-    const lower = userMsg.toLowerCase();
-    const wantsFlights = lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb');
-    if (wantsFlights && loc) {
-      const layerId = 'flight_tracks';
-      if (isLayerEnabled(layerId)) {
-        const v = viewerRef.current;
-        if (v) void loadFlightTracks(v);
-      } else {
-        toggleLayer(layerId);
+      // Monitor/schedule commands
+      if (/^monitor\s+/i.test(userMsg)) {
+        const handled = await sendMonitorCommand(userMsg);
+        if (handled) { cleanupThinkingSteps(); setAiTyping(false); return; }
       }
-      focusLocation(loc.lat, loc.lon, { label: 'Live Aircraft', color: '#60a5fa', height: 50000 });
-      addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `Loading aircraft near ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}...` });
-      setAiTyping(false);
-      return;
+      if (/^schedule\s+/i.test(userMsg)) {
+        const handled = await sendScheduleCommand(userMsg);
+        if (handled) { cleanupThinkingSteps(); setAiTyping(false); return; }
+      }
+
+      // Compute tasks
+      const isComputeTask = /\b(compute|calculate|run script|execute (?:code|script|python|node|bash)|simulate|csv|analyze (?:data|dataset|this)|pipeline)\b/i.test(userMsg)
+        && !/\b(show|display|visualize|fly|go|zoom|toggle|enable|display|where|what|how|why|compare|near|around)\b/i.test(userMsg);
+
+      if (isComputeTask) {
+        try {
+          setExpandedStep(-1);
+          await sendToPipeline(userMsg, sandboxWorkspaceId || null);
+          setAiTyping(false);
+          return;
+        } catch (e) {
+          addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `Pipeline execution failed: ${e}\n\nFalling back to agent analysis...` });
+        }
+      }
+
+      // Flight queries
+      const lower = userMsg.toLowerCase();
+      const wantsFlights = lower.includes('plane') || lower.includes('flight') || lower.includes('aircraft') || lower.includes('adsb');
+      if (wantsFlights && loc) {
+        const layerId = 'flight_tracks';
+        if (isLayerEnabled(layerId)) {
+          const v = viewerRef.current;
+          if (v) void loadFlightTracks(v);
+        } else {
+          toggleLayer(layerId);
+        }
+        focusLocation(loc.lat, loc.lon, { label: 'Live Aircraft', color: '#60a5fa', height: 50000 });
+        addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `Loading aircraft near ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}...` });
+        setAiTyping(false);
+        return;
+      }
     }
 
     // General AI query
@@ -273,6 +314,7 @@ export function useChat(
           tier: selectedTier,
           recentMessages: contextMessages,
           images: requestImages,
+          ...(studyAreaBbox ? { studyAreaBbox } : {}),
         }),
         signal: abortController.signal,
       });

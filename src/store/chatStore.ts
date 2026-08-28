@@ -282,6 +282,11 @@ interface ChatState {
   dataAnalysisResult: Record<string, unknown> | null;
   setDataAnalysisResult: (result: Record<string, unknown> | null) => void;
 
+  // Active study area bbox (drawn on globe) — sent with AI requests so the
+  // analytical engine can compute grids over the user's real study area.
+  studyAreaBbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
+  setStudyAreaBbox: (bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null) => void;
+
   // Share
   showShareDialog: boolean;
   setShowShareDialog: (value: boolean) => void;
@@ -749,6 +754,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Data analysis
   dataAnalysisResult: null,
   setDataAnalysisResult: (result) => set({ dataAnalysisResult: result }),
+
+  // Study area bbox
+  studyAreaBbox: null,
+  setStudyAreaBbox: (bbox) => set({ studyAreaBbox: bbox }),
 
   // Share
   showShareDialog: false,
