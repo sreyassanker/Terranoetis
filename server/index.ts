@@ -88,6 +88,8 @@ import { sentimentAnalyzer } from './multimodal/sentimentAnalyzer';
 import { multimodalFusion } from './multimodal/multimodalFusion';
 import { registerAnalyticalModelsRoutes } from './analytical-models';
 import { computeWithContext } from './analytical-models/contextEngine';
+import { assessAndEmail, runDisasterAssessment, buildReportHtml } from './disasterAssessment';
+import { isEmailConfigured } from './email';
 import {
   conversationMemory, generatePlan, executePlan, executeStep,
   generateSuggestions, buildProactiveInsight, recordTrace, addEvidence,
@@ -476,6 +478,7 @@ function registerDefaultTools() {
     { name:'fly_command', category:'navigation', description:'Fly the globe camera to any location', exampleQueries:['fly to tokyo','go to paris','show location'], schema:{type:'command'} },
     { name:'toggle_layer_command', category:'navigation', description:'Show or hide any data layer on the globe', exampleQueries:['show earthquakes','enable flights'], schema:{type:'command'} },
     { name:'open_panel', category:'navigation', description:'Open, close, or toggle any UI panel in the app. Use this to open tools, panels, or views. Panel IDs: analytics-workbench, satellite-tracker, aviation-tracker, satellite-imagery, land-cover, intelligence (pulse), intel-feed, cognitive-dashboard, tool-workbench, memory-explorer, settings, study-area, api-vault, command-palette, scenario-gallery, scenario-editor, cinematic-director, spatial-sketch, performance, timeline, measure, time-slider, admin, iss, digital-twin, ai-chat.', exampleQueries:['open analytics workbench','show satellite tracker','open pulse intelligence','close settings','open scenario gallery','toggle timeline'], schema:{type:'command',params:{panelId:'panel ID to open/close/toggle',desired:'optional: true to open, false to close, omit to toggle'}} },
+    { name:'assess_and_email', category:'navigation', description:'Run a FULL disaster assessment for a region (earthquakes, storms, floods, wildfires, air quality, marine) and email the HTML report. Requires a region name + bounding box (latMin/latMax/lonMin/lonMax) + optional emailTo. Use when the user asks to "assess" a region or "email a report".', exampleQueries:['full disaster assessment of the Bay of Bengal and email me a report','assess the east coast and send report','disaster assessment report'], schema:{type:'command',params:{regionName:'region name',latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude',emailTo:'optional recipient email'}} },
 
     // ── Earth Observation / Foundation Models ──
     { name:'clay_analyze', category:'eo', description:'Analyze a lat/lon with the IBM CLAY geospatial foundation model (multisensor). Returns embedding + classification.', exampleQueries:['clay analysis','multisensor satellite analysis','geospatial embedding'], schema:{type:'api',endpoint:'/api/fm/clay/analyze',method:'POST',params:{lat:'latitude',lon:'longitude',sensor:'satellite sensor (sentinel-2, landsat, etc.)'}} },
@@ -8062,6 +8065,37 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         cleanup();
         res.end();
         return;
+      }
+    }
+
+    // Step 2.45: Disaster assessment + email report. When the user asks for a
+    // full hazard assessment and to email the report, run the deterministic
+    // pipeline and send the email. No LLM needed.
+    const lowerMsg = message.toLowerCase();
+    if (lowerMsg.includes('disaster assessment') && (lowerMsg.includes('email') || lowerMsg.includes('mail') || lowerMsg.includes('send'))) {
+      sendEvent('step', { stepType: 'assessment', text: 'Running full disaster assessment...', status: 'running' });
+      // Extract region: try to find a named region or use a default bbox
+      const regionName = intent.location?.label || 'Bay of Bengal';
+      const bbox = studyAreaBbox || (intent.location ? {
+        latMin: intent.location.lat - 5, latMax: intent.location.lat + 5,
+        lonMin: intent.location.lon - 5, lonMax: intent.location.lon + 5,
+      } : { latMin: 5, latMax: 25, lonMin: 78, lonMax: 98 }); // default Bay of Bengal
+      const emailTo = process.env.GMAIL_REPORT_TO || '';
+      try {
+        const result = await assessAndEmail({ regionName, ...bbox, emailTo });
+        sendEvent('step', { stepType: 'assessment', text: result.ok ? 'Assessment complete — email sent!' : 'Assessment data fetched', status: 'completed' });
+        if (result.ok) {
+          sendEvent('output', { text: `## Disaster Assessment: ${regionName}\n\n**Email sent** ✅\n\n${result.summary}\n\n*Full HTML report emailed.*`, modelTier: 'flash', intentType: 'deep_analysis' });
+        } else {
+          sendEvent('output', { text: `## 🌍 Disaster Assessment: ${regionName}\n\n${result.summary || ''}\n\n**Email delivery failed**: ${result.error || 'unknown error'}. Report data shown above.`, modelTier: 'flash', intentType: 'deep_analysis' });
+        }
+        sendEvent('done', { type: 'done' });
+        cleanup();
+        res.end();
+        return;
+      } catch (e) {
+        logger.warn({ err: e }, 'Disaster assessment failed');
+        // Fall through to LLM
       }
     }
 
