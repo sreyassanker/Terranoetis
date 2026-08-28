@@ -7287,10 +7287,32 @@ export default function App() {
         setShowAI(true);
         focusPanel('ai');
         return true;
+      // ── Newly wired panels ──
+      case 'fork': case 'fork-manager': case 'fork-mode':
+        setForkMode(p => !p);
+        return true;
+      case 'monitor': case 'monitor-panel':
+        if (desired === false) { setMonitorCollapsed(true); return false; }
+        setMonitorCollapsed(false);
+        return true;
+      case 'route': case 'route-tool':
+        setNavMode(desired === false ? 'none' : 'route');
+        if (desired !== false) { setShowMeasureTool(false); }
+        return true;
+      case 'safest': case 'safest-location':
+        setNavMode(desired === false ? 'none' : 'safest');
+        if (desired !== false) { setShowMeasureTool(false); }
+        return true;
+      case 'heatmap-legend': case 'heatmap_legend':
+        return apply(setShowHeatmapLegend, showHeatmapLegend);
+      case 'smoke-legend': case 'smoke_legend':
+        return apply(setShowSmokeLegend, showSmokeLegend);
+      case 'population-impact': case 'population_impact':
+        return apply(setShowPopulationImpact, showPopulationImpact);
       default:
         return undefined;
     }
-  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showIntelligencePanel, showIntelFeed, showCognitiveDashboard, showToolWorkbench, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showTimeline, showMeasureTool, showTimeSlider, showAdmin, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowIntelligencePanel, setShowIntelFeed, setShowCognitiveDashboard, setShowToolWorkbench, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowTimeline, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setDigitalTwinPanel, setShowAI, focusPanel, toggleISS, isAdmin]);
+  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showIntelligencePanel, showIntelFeed, showCognitiveDashboard, showToolWorkbench, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showTimeline, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowIntelligencePanel, setShowIntelFeed, setShowCognitiveDashboard, setShowToolWorkbench, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowTimeline, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setDigitalTwinPanel, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setMonitorCollapsed, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
 
   const executeAgentCommands = useCallback((commands: Array<Record<string, unknown>>) => {
     const v = viewerRef.current;

@@ -879,6 +879,13 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
       { match: /admin\s*dashboard|\badmin\b/i, panelId: 'admin' },
       { match: /iss\s*(live|tracker)?|\binternational space station\b/i, panelId: 'iss' },
       { match: /digital\s*twin/i, panelId: 'digital-twin' },
+      { match: /fork\s*manager|fork\s*mode|parallel\s*reality|forks/i, panelId: 'fork' },
+      { match: /monitor\s*panel|ambient\s*monitor|intelligence\s*monitor/i, panelId: 'monitor' },
+      { match: /route\s*tool|\broute\b/i, panelId: 'route' },
+      { match: /safest\s*location|safest\s*route|\bsafest\b/i, panelId: 'safest' },
+      { match: /heatmap\s*legend/i, panelId: 'heatmap-legend' },
+      { match: /smoke\s*legend/i, panelId: 'smoke-legend' },
+      { match: /population\s*impact/i, panelId: 'population-impact' },
     ];
 
     for (const { match, panelId } of PANELS) {

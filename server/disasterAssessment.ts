@@ -45,6 +45,26 @@ async function fetchText(url: string, timeoutMs = 15000): Promise<string | null>
   }
 }
 
+/** Reverse-geocode a lat/lon into an accurate place name (OSM Nominatim, no key). */
+export async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+  try {
+    const resp = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=6&accept-language=en`,
+      { headers: { 'User-Agent': 'EarthIntelligenceAI/1.0' }, signal: AbortSignal.timeout(8000) },
+    );
+    if (!resp.ok) return null;
+    const d = await resp.json() as { address?: Record<string, string>; display_name?: string };
+    const a = d.address || {};
+    // Prefer a region-level name: state / province / county / country
+    const name = a.state || a.province || a.region || a.county || a.country || a.name || d.display_name;
+    if (name) return String(name);
+    return null;
+  } catch (e) {
+    logger.warn({ err: e, lat, lon }, 'Reverse geocode failed');
+    return null;
+  }
+}
+
 export interface AssessmentResult {
   earthquakes: Array<{ title: string; desc: string; severity: string; time: string; lat: number; lon: number }>;
   storms: Array<{ title: string; desc: string; severity: string; time: string }>;
@@ -311,8 +331,11 @@ export async function runDisasterAssessment(input: AssessmentInput): Promise<Ass
 }
 
 export function buildReportHtml(regionName: string, lats: {latMin:number;latMax:number;lonMin:number;lonMax:number}, result: AssessmentResult): string {
-  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  const bboxStr = `${lats.latMin.toFixed(1)}°N – ${lats.latMax.toFixed(1)}°N, ${lats.lonMin.toFixed(1)}°E – ${lats.lonMax.toFixed(1)}°E`;
+  // IST (UTC+5:30) — India Standard Time, no DST.
+  const istNow = new Date(Date.now() + 5.5 * 3600000);
+  const istStr = istNow.toISOString().slice(0, 19).replace('T', ' ');
+  const now = istStr;
+  const aoiTag = `${lats.latMin.toFixed(1)}\u00b0N, ${lats.latMax.toFixed(1)}\u00b0N | ${lats.lonMin.toFixed(1)}\u00b0E, ${lats.lonMax.toFixed(1)}\u00b0E`;
   const totalHaz = result.earthquakes.length + result.storms.length + result.floods.length + result.gdacs.length;
   const highHaz = [...result.earthquakes, ...result.storms, ...result.floods, ...result.gdacs].filter(e => e.severity === 'high').length;
   const alertLevel = highHaz > 0 ? 'HIGH' : totalHaz > 0 ? 'MODERATE' : 'LOW';
@@ -368,7 +391,7 @@ export function buildReportHtml(regionName: string, lats: {latMin:number;latMax:
   if (result.marine.waveHeightM != null && result.marine.waveHeightM > 4) activeFeeds.push({ category: 'Marine Warning', status: 'ACTIVE', count: 1, severity: 'HIGH' });
   else if (result.marine.waveHeightM != null && result.marine.waveHeightM > 2.5) activeFeeds.push({ category: 'Marine Warning', status: 'ADVISORY', count: 1, severity: 'MODERATE' });
 
-  const execSummary = `Assessment for ${regionName} — ${bboxStr}. Alert level: ${alertLevel}. ${totalHaz > 0 ? totalHaz + ' active hazard feed(s) detected (' + highHaz + ' high).' : 'No active hazard feeds.'} Wind ${result.weather.wind}, wave height ${result.marine.waveHeight}. Sea state: ${seaState}. ${impactVectors.length > 0 ? 'Leading risk vectors: ' + impactVectors.slice(0, 3).map(v => v.label + ' (' + (v.probability * 100).toFixed(0) + '%)').join(', ') + '.' : ''}`;
+  const execSummary = `Assessment for ${regionName} — AOI ${aoiTag}. Alert level: ${alertLevel}. ${totalHaz > 0 ? totalHaz + ' active hazard feed(s) detected (' + highHaz + ' high).' : 'No active hazard feeds.'} Wind ${result.weather.wind}, wave height ${result.marine.waveHeight}. Sea state: ${seaState}. ${impactVectors.length > 0 ? 'Leading risk vectors: ' + impactVectors.slice(0, 3).map(v => v.label + ' (' + (v.probability * 100).toFixed(0) + '%)').join(', ') + '.' : ''}`;
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
@@ -395,7 +418,7 @@ export function buildReportHtml(regionName: string, lats: {latMin:number;latMax:
 </style></head><body>
 <div class="header">
 <h1>Disaster Assessment Report: ${regionName}</h1>
-<div class="meta">AOI: ${bboxStr} &middot; ${now} UTC &middot; <span class="alert-badge" style="background:${alertColor}">${alertLevel} ALERT</span></div>
+<div class="meta">AOI: <small>${aoiTag}</small> &middot; ${now} IST &middot; <span class="alert-badge" style="background:${alertColor}">${alertLevel} ALERT</span></div>
 </div>
 
 <h2>Executive Summary</h2>
