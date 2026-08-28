@@ -7683,7 +7683,6 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       const radiusMatch = fullMessage.match(/(?:within|radius|around|near)\s+(\d+)\s*(km|mi|miles|kilometers?)/i);
       if (patternMatch.slots.includes('radius') && radiusMatch) slotValues['radius'] = Number(radiusMatch[1]);
 
-      sendEvent('step', { stepType: 'pattern_replay', text: `Reusing saved workflow "${patternMatch.name.slice(0, 60)}" (${patternMatch.steps.length} step${patternMatch.steps.length > 1 ? 's' : ''}) — substituting new parameters`, status: 'running' });
       const toolResults: Array<{ tool: string; ok: boolean; text: string }> = [];
       try {
         for (const step of patternMatch.steps) {
@@ -7707,7 +7706,6 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
             sendEvent('tool_result', { name: step.tool, status: 'error', error: errMsg, replayed: true });
           }
         }
-        sendEvent('step', { stepType: 'pattern_replay', text: `Replayed ${toolResults.length} tool step(s)`, status: 'completed' });
 
         const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -7736,7 +7734,6 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
           }
         }
         if (commands.length > 0) sendEvent('commands', commands);
-        sendEvent('step', { stepType: 'synthesis', text: 'Replay complete — templated from saved workflow (no LLM)', status: 'completed' });
         sendEvent('output', { text: outputText, modelTier: 'replay', intentType: intent.type, replayed: true, patternId: patternMatch.id });
         sendEvent('done', { type: 'done' });
         cleanup();
@@ -7744,7 +7741,6 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         return;
       } catch (e) {
         logger.warn({ err: e }, 'Pattern replay failed — falling through to full AI run');
-        sendEvent('step', { stepType: 'pattern_replay_error', text: 'Workflow replay failed — running full analysis', status: 'completed' });
       }
     }
 
