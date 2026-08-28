@@ -4679,6 +4679,55 @@ p { text-align: justify; }
   color: var(--text-dim);
 }
 
+/* ── AI Active Layers bar (toggleable layer chips) ── */
+.ai-active-layers {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 12px 2px;
+  flex-wrap: wrap;
+}
+
+.ai-active-layers-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding-top: 3px;
+  flex-shrink: 0;
+}
+
+.ai-active-layers-list {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ai-active-layer-chip {
+  font-size: 10.5px;
+  padding: 2px 9px;
+  border-radius: 12px;
+  border: 1px solid rgba(217, 119, 87, 0.4);
+  background: rgba(217, 119, 87, 0.1);
+  color: #b45309;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.ai-panel-light .ai-active-layer-chip {
+  border: 1px solid rgba(217, 119, 87, 0.4);
+  background: rgba(217, 119, 87, 0.12);
+  color: #b45309;
+}
+
+.ai-active-layer-chip:hover {
+  background: rgba(217, 119, 87, 0.22);
+  border-color: rgba(217, 119, 87, 0.6);
+  text-decoration: line-through;
+}
+
 .ai-panel-light .rich-content a,
 .ai-panel-light .rich-link {
   color: #2563eb;

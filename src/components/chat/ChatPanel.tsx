@@ -31,6 +31,7 @@ export function ChatPanel({
   getPanelZIndex,
   focusLocation,
   toggleLayer,
+  activeLayers,
   sendAI,
   handleFileUpload,
   handleImageUpload,
@@ -42,6 +43,7 @@ export function ChatPanel({
   newChat,
   undoLastAgentAction,
   clearAllAgentActions,
+  deleteCurrentChat,
   cleanupThinkingSteps,
   abortControllerRef,
   virtualizedChatRef,
@@ -55,6 +57,7 @@ export function ChatPanel({
   getPanelZIndex: (id: string, base: number) => number;
   focusLocation: (lat: number, lon: number, opts?: { label?: string; color?: string; height?: number; duration?: number }) => void;
   toggleLayer: (id: string) => void;
+  activeLayers: Array<{ id: string; label: string }>;
   sendAI: (msg?: string, opts?: { force?: boolean; regen?: boolean }) => Promise<void>;
   handleFileUpload: (file: File) => void;
   handleImageUpload: (file: File) => void;
@@ -66,6 +69,7 @@ export function ChatPanel({
   newChat: () => void;
   undoLastAgentAction: () => void;
   clearAllAgentActions: () => void;
+  deleteCurrentChat: () => void | Promise<void>;
   cleanupThinkingSteps: (force?: boolean) => void;
   abortControllerRef: React.MutableRefObject<AbortController | null>;
   virtualizedChatRef: React.MutableRefObject<VirtualizedMessageListHandle | null>;
@@ -191,7 +195,7 @@ export function ChatPanel({
             <button onClick={() => setShowChatHistory(!showChatHistory)} title="Chat History" aria-label="Chat history" style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 13, padding: '2px 4px', lineHeight: 1 }}><History size={14} /></button>
             <button onClick={newChat} title="New Chat" aria-label="New chat" style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 13, padding: '2px 4px', lineHeight: 1 }}><Plus size={14} /></button>
             <button onClick={undoLastAgentAction} title="Undo last AI action" aria-label="Undo last AI action" style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 13, padding: '2px 4px', lineHeight: 1 }}><RotateCcw size={14} /></button>
-            <button onClick={clearAllAgentActions} title="Clear all AI entities" aria-label="Clear all AI entities" style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 13, padding: '2px 4px', lineHeight: 1 }}><Trash2 size={14} /></button>
+            <button onClick={() => { if (window.confirm('Delete this chat?')) deleteCurrentChat(); }} title="Delete current chat" aria-label="Delete current chat" style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 13, padding: '2px 4px', lineHeight: 1 }}><Trash2 size={14} /></button>
             <button
               onClick={() => setChatCollapsed(!chatCollapsed)}
               title={chatCollapsed ? 'Expand chat panel' : 'Minimize chat panel'}
@@ -249,6 +253,24 @@ export function ChatPanel({
         </ErrorBoundary>
 
         <HumanOverrideBanner />
+
+        {activeLayers.length > 0 && (
+          <div className="ai-active-layers">
+            <span className="ai-active-layers-label">Active layers</span>
+            <div className="ai-active-layers-list">
+              {activeLayers.map(layer => (
+                <span
+                  key={layer.id}
+                  className="ai-active-layer-chip"
+                  onClick={() => toggleLayer(layer.id)}
+                  title={`Click to ${layer.id ? 'close' : 'open'} ${layer.label}`}
+                >
+                  {layer.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {sandboxWorkspaceId && uploadedFiles.length > 0 && (
           <div className="sandbox-file-upload">

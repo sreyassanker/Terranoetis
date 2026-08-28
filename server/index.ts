@@ -87,6 +87,7 @@ import { radarInterpreter } from './multimodal/radarInterpreter';
 import { sentimentAnalyzer } from './multimodal/sentimentAnalyzer';
 import { multimodalFusion } from './multimodal/multimodalFusion';
 import { registerAnalyticalModelsRoutes } from './analytical-models';
+import { computeWithContext } from './analytical-models/contextEngine';
 import {
   conversationMemory, generatePlan, executePlan, executeStep,
   generateSuggestions, buildProactiveInsight, recordTrace, addEvidence,
@@ -474,6 +475,7 @@ function registerDefaultTools() {
     // ── Navigation ──
     { name:'fly_command', category:'navigation', description:'Fly the globe camera to any location', exampleQueries:['fly to tokyo','go to paris','show location'], schema:{type:'command'} },
     { name:'toggle_layer_command', category:'navigation', description:'Show or hide any data layer on the globe', exampleQueries:['show earthquakes','enable flights'], schema:{type:'command'} },
+    { name:'open_panel', category:'navigation', description:'Open, close, or toggle any UI panel in the app. Use this to open tools, panels, or views. Panel IDs: analytics-workbench, satellite-tracker, aviation-tracker, satellite-imagery, land-cover, intelligence (pulse), intel-feed, cognitive-dashboard, tool-workbench, memory-explorer, settings, study-area, api-vault, command-palette, scenario-gallery, scenario-editor, cinematic-director, spatial-sketch, performance, timeline, measure, time-slider, admin, iss, digital-twin, ai-chat.', exampleQueries:['open analytics workbench','show satellite tracker','open pulse intelligence','close settings','open scenario gallery','toggle timeline'], schema:{type:'command',params:{panelId:'panel ID to open/close/toggle',desired:'optional: true to open, false to close, omit to toggle'}} },
 
     // ── Earth Observation / Foundation Models ──
     { name:'clay_analyze', category:'eo', description:'Analyze a lat/lon with the IBM CLAY geospatial foundation model (multisensor). Returns embedding + classification.', exampleQueries:['clay analysis','multisensor satellite analysis','geospatial embedding'], schema:{type:'api',endpoint:'/api/fm/clay/analyze',method:'POST',params:{lat:'latitude',lon:'longitude',sensor:'satellite sensor (sentinel-2, landsat, etc.)'}} },
@@ -7547,8 +7549,225 @@ async function directGeminiAnswer(
 
 // Main agent ask endpoint — SSE streaming
 const askRateLimit = perUserRateLimiter(30, 60000); // 30 requests per minute per user
+
+// ── Analytical model helper ───────────────────────────────────────
+// Deterministically search + execute a known analytical model for a
+// compute query, bypassing the LLM. Returns null when no model matches.
+const analyticalResultCache = new Map<string, { at: number; hit: { id: number; name: string; text: string; commands: Array<Record<string, unknown>> } | null }>();
+const ANALYTICAL_CACHE_TTL_MS = 10 * 60 * 1000;
+
+async function tryAnalyticalModelRun(
+  message: string,
+  location?: { lat: number; lon: number; label?: string },
+  refinedId?: number,
+  studyAreaBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null,
+): Promise<{ id: number; name: string; text: string; commands: Array<Record<string, unknown>> } | null> {
+  // Memoize identical (modelId + bbox) runs — satellite grid fetches can take
+  // ~30s cold; repeats should return instantly so chat stays responsive.
+  const cacheKey = `m${refinedId ?? 'auto'}|${studyAreaBbox ? `${studyAreaBbox.latMin},${studyAreaBbox.latMax},${studyAreaBbox.lonMin},${studyAreaBbox.lonMax}` : (location ? `loc:${location.lat},${location.lon}` : 'none')}|${message.toLowerCase().trim().slice(0, 60)}`;
+  const cached = analyticalResultCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < ANALYTICAL_CACHE_TTL_MS) {
+    return cached.hit;
+  }
+  const hit = await tryAnalyticalModelRunInner(message, location, refinedId, studyAreaBbox);
+  analyticalResultCache.set(cacheKey, { at: Date.now(), hit });
+  return hit;
+}
+
+async function tryAnalyticalModelRunInner(
+  message: string,
+  location?: { lat: number; lon: number; label?: string },
+  refinedId?: number,
+  studyAreaBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null,
+): Promise<{ id: number; name: string; text: string; commands: Array<Record<string, unknown>> } | null> {
+  const lower = message.toLowerCase().trim();
+  // Map of known analytical model keywords → model IDs (verified against
+  // /api/analytical-models/search — IDs must match the real 150 models).
+  const MODEL_KEYWORDS: Array<{ keywords: string[]; ids: number[] }> = [
+    { keywords: ['land surface temperature', 'lst', 'surface temperature'], ids: [1] },
+    { keywords: ['brightness temperature'], ids: [2] },
+    { keywords: ['saturation vapor pressure', 'vapor pressure'], ids: [3] },
+    { keywords: ['pollutant transport', 'advection diffusion', 'pollutant dispersion'], ids: [6] },
+    { keywords: ['reference evapotranspiration', 'evapotranspiration', 'penman'], ids: [9] },
+    { keywords: ['runoff', 'scs cn', 'curve number', 'surface runoff'], ids: [10] },
+    { keywords: ['flood wave routing'], ids: [13] },
+    { keywords: ['earthquake frequency', 'gutenberg', 'recurrence'], ids: [19] },
+    { keywords: ['aftershock decay', 'omori'], ids: [20] },
+    { keywords: ['ground motion', 'attenuation', 'pga'], ids: [21] },
+    { keywords: ['shear strength'], ids: [22] },
+    { keywords: ['earthquake magnitude', 'moment magnitude'], ids: [23] },
+    { keywords: ['stress drop'], ids: [24] },
+    { keywords: ['fault rupture'], ids: [25] },
+    { keywords: ['vegetation health index', 'vhi', 'vegetation health'], ids: [26] },
+    { keywords: ['surface water detection', 'water index', 'ndwi'], ids: [27] },
+    { keywords: ['vegetation water content', 'canopy water'], ids: [28] },
+    { keywords: ['enhanced vegetation index', 'evi', 'ndvi', 'vegetation index', 'greenness'], ids: [29] },
+    { keywords: ['snow cover detection', 'snow cover'], ids: [30] },
+    { keywords: ['burn severity', 'fire scar', 'burned area'], ids: [31] },
+    { keywords: ['fire radiative power', 'fire energy'], ids: [32] },
+    { keywords: ['crop water stress', 'water stress'], ids: [33] },
+    { keywords: ['snowmelt runoff', 'snowmelt'], ids: [34] },
+    { keywords: ['sea ice', 'ice concentration', 'passive microwave'], ids: [35] },
+    { keywords: ['great circle', 'haversine', 'distance between'], ids: [36] },
+    { keywords: ['kriging', 'geostatistical interpolation', 'geostatistical'], ids: [37] },
+    { keywords: ['inverse distance weighting', 'idw'], ids: [38] },
+    { keywords: ['gaussian plume', 'air dispersion', 'plume dispersion'], ids: [39] },
+    { keywords: ['gumbel', 'extreme value'], ids: [40] },
+    { keywords: ['pareto distribution', 'generalized pareto'], ids: [41] },
+    { keywords: ['semivariogram', 'variogram'], ids: [42] },
+    { keywords: ['universal soil loss', 'usle', 'soil loss', 'erosion'], ids: [45] },
+    { keywords: ['soil respiration', 'co2 flux'], ids: [46] },
+    { keywords: ['soil thermal conductivity', 'thermal conductivity'], ids: [47] },
+    { keywords: ['logarithmic wind profile', 'wind profile', 'log wind'], ids: [49] },
+    { keywords: ['stomatal conductance', 'ball berry', 'leaf conductance'], ids: [50] },
+    { keywords: ['gross primary production', 'gpp', 'photosynthesis'], ids: [51] },
+    { keywords: ['net carbon flux', 'carbon flux', 'carbon balance'], ids: [53] },
+    { keywords: ['forest biomass', 'biomass', 'above ground biomass'], ids: [55] },
+    { keywords: ['ocean co2', 'co2 uptake', 'ocean carbon'], ids: [56] },
+    { keywords: ['crop growing degree days', 'growing degree', 'gdd', 'degree days'], ids: [58] },
+    { keywords: ['priestley taylor', 'priestley-taylor evapotranspiration'], ids: [59] },
+    { keywords: ['hargreaves', 'hargreaves samani', 'reference crop'], ids: [60] },
+    { keywords: ['yield water', 'crop yield', 'fao yield'], ids: [61] },
+    { keywords: ['phytoplankton', 'chlorophyll', 'chl a'], ids: [62] },
+    { keywords: ['bigleaf penman', 'penman monteith', 'big leaf'], ids: [63] },
+    { keywords: ['jonswap', 'wave spectrum', 'wave energy'], ids: [80] },
+    { keywords: ['stream power', 'fluvial erosion', 'river incision'], ids: [81] },
+    { keywords: ['glacier mass balance', 'glacier melt', 'pdd', 'degree day model'], ids: [91] },
+    { keywords: ['vei', 'volcanic explosivity'], ids: [94] },
+    { keywords: ['disaster risk index', 'disaster risk', 'risk index'], ids: [135] },
+    { keywords: ['annual flood damage', 'flood damage', 'expected annual'], ids: [136] },
+    { keywords: ['air quality index', 'aqi from concentration', 'pollution index'], ids: [137] },
+    { keywords: ['probable maximum precipitation', 'pmp', 'precipitation'], ids: [138] },
+    { keywords: ['palmer drought', 'pdsi', 'drought index', 'drought severity'], ids: [139] },
+    { keywords: ['climate sensitivity', 'ecs', 'climate feedback'], ids: [97] },
+    { keywords: ['planck feedback', 'planck'], ids: [98] },
+    { keywords: ['shannon entropy', 'information entropy', 'entropy'], ids: [144] },
+  ];
+
+  // Search for a matching model
+  let modelIds: number[] = [];
+  if (refinedId) {
+    modelIds = [refinedId];
+  } else {
+    for (const entry of MODEL_KEYWORDS) {
+      if (entry.keywords.some(kw => lower.includes(kw))) {
+        modelIds = entry.ids;
+        break;
+      }
+    }
+    // If no keyword match, use the API search
+    if (modelIds.length === 0) {
+      try {
+        const searchResp = await fetch(`http://127.0.0.1:${PORT}/api/analytical-models/search?q=${encodeURIComponent(lower)}`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (searchResp.ok) {
+          const searchData = await searchResp.json() as { results?: Array<{ id: number }> };
+          if (searchData.results && searchData.results.length > 0) {
+            modelIds = [searchData.results[0].id];
+          }
+        }
+      } catch { /* fall through */ }
+    }
+  }
+
+  if (modelIds.length === 0) return null;
+
+  // Execute the first matching model via the engine directly (no HTTP round-trip).
+  const modelId = modelIds[0];
+  try {
+    // Build the study area for the engine:
+    //  - If the user has a drawn study area bbox, use a bbox grid (spatial)
+    //  - Else if a location is detected, use a small bbox around it (so
+    //    heatmap models produce a real grid, not a single point)
+    //  - Else fall back to no context (engine uses defaults)
+    let context: { studyArea?: { mode: 'bbox'; bbox: [[number, number], [number, number]] } } = {};
+    if (studyAreaBbox && isFinite(studyAreaBbox.latMin) && isFinite(studyAreaBbox.latMax) && isFinite(studyAreaBbox.lonMin) && isFinite(studyAreaBbox.lonMax)) {
+      context = {
+        studyArea: {
+          mode: 'bbox',
+          bbox: [[studyAreaBbox.latMin, studyAreaBbox.lonMin], [studyAreaBbox.latMax, studyAreaBbox.lonMax]],
+        },
+      };
+    } else if (location) {
+      const d = 0.5; // ~55 km default half-extent around the detected point
+      context = {
+        studyArea: {
+          mode: 'bbox',
+          bbox: [[location.lat - d, location.lon - d], [location.lat + d, location.lon + d]],
+        },
+      };
+    }
+
+    const result = await computeWithContext(modelId, {}, context) as (Record<string, unknown> & { result?: unknown; grid?: { values?: number[]; latMin?: number; latMax?: number; lonMin?: number; lonMax?: number; nLat?: number; nLon?: number } }) | null;
+    if (!result) {
+      logger.warn({ modelId }, 'Analytical model returned no result');
+      return null;
+    }
+    const resultValue = result.result;
+    const unit = (result.unit as string) || '';
+    const name = (result.modelName as string) || `Model #${modelId}`;
+    const vizType = result.visualizationType as string || 'value';
+    const steps = result.steps as Array<Record<string, unknown>> || [];
+    const warnings = result.warnings as string[] || [];
+    const interpretation = result.interpretation as
+      | string
+      | { contextualAnalysis?: string; recommendations?: string[]; classification?: { description?: string } }
+      | undefined;
+
+    // Build a concise result text
+    let text = `## ${name}\n\n**Result**: ${resultValue != null && (typeof resultValue !== 'number' || !Number.isNaN(resultValue)) ? (typeof resultValue === 'number' ? resultValue.toFixed(4) : resultValue) + (unit ? ' ' + unit : '') : 'No valid data available for this area'}\n\n`;
+    if (typeof interpretation === 'string' && interpretation) text += `${interpretation.slice(0, 1000)}\n\n`;
+    else if (interpretation && typeof interpretation === 'object') {
+      if (interpretation.classification?.description) text += `${interpretation.classification.description.slice(0, 500)}\n\n`;
+      if (interpretation.contextualAnalysis) text += `${interpretation.contextualAnalysis.slice(0, 600)}\n\n`;
+      if (interpretation.recommendations && interpretation.recommendations.length > 0) {
+        text += `**Recommendations**: ${interpretation.recommendations.slice(0, 3).join('; ')}\n\n`;
+      }
+    }
+    if (warnings.length > 0) text += `**Warnings**: ${warnings.join('; ')}\n\n`;
+    text += `*Executed via analytical model ${modelId} — ${steps.length} computation steps in ${result.processingTimeMs || 0}ms.*`;
+
+    // Build globe commands
+    const commands: Array<Record<string, unknown>> = [];
+    if (studyAreaBbox) {
+      const midLat = (studyAreaBbox.latMin + studyAreaBbox.latMax) / 2;
+      const midLon = (studyAreaBbox.lonMin + studyAreaBbox.lonMax) / 2;
+      commands.push({ action: 'flyTo', lat: midLat, lon: midLon, label: 'Study area', zoom: 8 });
+    } else if (location) {
+      commands.push({ action: 'flyTo', lat: location.lat, lon: location.lon, label: location.label || 'Location', zoom: 8 });
+    }
+    // Convert a returned grid (values + bbox) into a globe heatmap.
+    if (vizType === 'heatmap' && result.grid && Array.isArray(result.grid.values)) {
+      const g = result.grid;
+      const values = g.values as number[];
+      const nLat = g.nLat || Math.round(Math.sqrt(values.length)) || 1;
+      const nLon = g.nLon || Math.round(values.length / nLat) || 1;
+      const points: Array<{ lat: number; lon: number; value: number }> = [];
+      for (let i = 0; i < values.length && points.length < 800; i++) {
+        const v = values[i];
+        if (!Number.isFinite(v)) continue;
+        const row = Math.floor(i / (nLon || 1));
+        const col = i % (nLon || 1);
+        const lat = (g.latMin ?? 0) + ((g.latMax ?? 0) - (g.latMin ?? 0)) * (row / Math.max(1, (nLat || 1) - 1));
+        const lon = (g.lonMin ?? 0) + ((g.lonMax ?? 0) - (g.lonMin ?? 0)) * (col / Math.max(1, (nLon || 1) - 1));
+        points.push({ lat, lon, value: v });
+      }
+      if (points.length > 0) {
+        commands.push({ action: 'addHeatmap', points, radius: 30 });
+        text += `\n\n*Heatmap: ${points.length} cells rendered over the study area.*`;
+      }
+    }
+
+    return { id: modelId, name, text, commands };
+  } catch (e) {
+    logger.warn({ err: e, modelId }, 'Analytical model execution caught exception');
+    return null;
+  }
+}
+
 app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (req: express.Request, res: express.Response) => {
-  const { message, images, recentMessages } = req.body;
+  const { message, images, recentMessages, studyAreaBbox } = req.body;
   const imageContext = Array.isArray(images) && images.length > 0 ? images.map((img: any) => "[Image: " + img.fileName + " (" + img.mimeType + ")]").join(' ') : '';
   const fullMessage = imageContext ? imageContext + "\n" + message : message;
   const userId = (req as any).userId || 'default';
@@ -7619,6 +7838,28 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     sendEvent('step', { stepType: 'classifying', text: `Intent: ${intent.type} (confidence ${(intent.confidence * 100).toFixed(0)}%)`, status: 'completed' });
     sendEvent('intent', intent);
 
+    // Step 1.2: Multi-command god-eye control. When a single message asks for
+    // MULTIPLE deterministic commands (open panels + toggle layers + flyTo),
+    // parse them all and emit together — never route to the LLM which would
+    // drop or mangle most of them.
+    const multiCommands = IntentRouter.extractCommands(fullMessage);
+    if (multiCommands.length > 0) {
+      sendEvent('step', { stepType: 'multi_command', text: `Executing ${multiCommands.length} command(s)...`, status: 'completed' });
+      sendEvent('commands', multiCommands);
+      const cmdDesc = multiCommands
+        .map(c => {
+          if (c.action === 'flyTo') return `fly to ${c.label || `${Number(c.lat).toFixed(2)}, ${Number(c.lon).toFixed(2)}`}`;
+          if (c.action === 'toggleLayer') return `${c.enabled ? 'show' : 'hide'} ${c.layerId}`;
+          return `${c.action} ${c.panelId}`;
+        })
+        .join(', ');
+      sendEvent('output', { text: `## Done\n\n${cmdDesc}`, modelTier: 'local', intentType: 'multi_command', commands: multiCommands });
+      sendEvent('done', { type: 'done' });
+      cleanup();
+      res.end();
+      return;
+    }
+
     // Step 1.25: Digital Twin — run analysis if intent is digital_twin
     if (intent.type === 'digital_twin') {
       sendEvent('step', { stepType: 'digital_twin', text: 'Running digital twin analysis...', status: 'completed' });
@@ -7647,6 +7888,34 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         logger.warn({ err }, 'Digital twin analysis failed, falling through');
         sendEvent('step', { stepType: 'digital_twin_error', text: 'Digital twin analysis failed — falling back to agent', status: 'completed' });
       }
+    }
+
+    // Step 1.3: Panel command — deterministic god-eye control. Opens/closes/
+    // toggles any UI panel without burning an LLM call.
+    if (intent.type === 'panel_command' && intent.panelId) {
+      sendEvent('step', { stepType: 'panel_command', text: `${intent.panelAction} ${intent.panelId}...`, status: 'completed' });
+      const action = intent.panelAction === 'close' ? 'closePanel' : intent.panelAction === 'toggle' ? 'togglePanel' : 'openPanel';
+      sendEvent('commands', [{ action, panelId: intent.panelId }]);
+      const verb = action === 'closePanel' ? 'closed' : action === 'togglePanel' ? 'toggled' : 'opened';
+      sendEvent('output', { text: `## ${intent.panelId}\n\n${verb === 'opened' ? 'Opened' : verb === 'closed' ? 'Closed' : 'Toggled'} the **${intent.panelId}** panel on your right.`, modelTier: 'local', intentType: intent.type, commands: [{ action, panelId: intent.panelId }] });
+      sendEvent('done', { type: 'done' });
+      cleanup();
+      res.end();
+      return;
+    }
+
+    // Step 1.35: Layer toggle — deterministic god-eye control. Show/hide a data
+    // layer without an LLM call when the intent is a simple toggle.
+    if (intent.type === 'toggle_layer' && intent.layerIds && intent.layerIds.length > 0) {
+      const enabled = !/^(hide|close|remove|disable|turn off|turnoff)\b/i.test(message.trim());
+      sendEvent('step', { stepType: 'layer_toggle', text: `${enabled ? 'Showing' : 'Hiding'} ${intent.layerIds.join(', ')}...`, status: 'completed' });
+      const commands: Array<{ action: string; layerId: string; enabled: boolean }> = intent.layerIds.map(layerId => ({ action: 'toggleLayer', layerId, enabled }));
+      sendEvent('commands', commands);
+      sendEvent('output', { text: `## Layers\n\n${enabled ? 'Showing' : 'Hiding'} **${intent.layerIds.join(', ')}** on the globe.`, modelTier: 'local', intentType: intent.type, commands });
+      sendEvent('done', { type: 'done' });
+      cleanup();
+      res.end();
+      return;
     }
 
     // Step 1.5: Check semantic cache for identical queries
@@ -7769,6 +8038,26 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         if (cached.nearbyEvents.length > 0) parts.push(`**Active Events**: ${cached.nearbyEvents.map(e => e.title).join(', ')}`);
         if (cached.weatherAlerts.length > 0) parts.push(`**Weather Alerts**: ${cached.weatherAlerts.length} active`);
         sendEvent('output', { text: `## Quick Scan: ${intent.location.label}\n\n${parts.join('\n\n') || 'No significant issues detected.'}\n\n*Data pre-computed (≤60s old). Ask for "detailed" for live analysis.*` });
+        sendEvent('done', { type: 'done' });
+        cleanup();
+        res.end();
+        return;
+      }
+    }
+
+    // Step 2.4: Analytical model execution — deterministic god-eye control.
+    // When the user asks to compute/calculate a known scientific model, search
+    // and execute it directly (no LLM round-trip) and visualize the result.
+    if (intent.type === 'compute' || intent.type === 'deep_analysis') {
+      const analyticalHit = await tryAnalyticalModelRun(message, intent.location, intent.analyticalModelId, studyAreaBbox);
+      if (analyticalHit) {
+        // The message may also carry UI commands ("... and open the workbench").
+        // Parse them so the model result AND the panel/layer actions both fire.
+        const extraCommands = IntentRouter.extractCommands(message, { allowAnalytical: true });
+        const allCommands = [...analyticalHit.commands, ...extraCommands];
+        sendEvent('step', { stepType: 'analytical', text: `Executing analytical model #${analyticalHit.id} (${analyticalHit.name})...`, status: 'completed' });
+        if (allCommands.length > 0) sendEvent('commands', allCommands);
+        sendEvent('output', { text: analyticalHit.text, modelTier: 'flash', intentType: intent.type, commands: allCommands });
         sendEvent('done', { type: 'done' });
         cleanup();
         res.end();

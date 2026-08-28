@@ -11,6 +11,9 @@ export const askSchema = z.object({
   tier: z.enum(['local', 'flash', 'pro']).optional(),
   images: z.array(z.object({ dataUrl: z.string(), mimeType: z.string(), fileName: z.string() })).optional(),
   recentMessages: z.array(z.object({ role: z.string(), content: z.string() })).optional(),
+  studyAreaBbox: z.object({
+    latMin: z.number(), latMax: z.number(), lonMin: z.number(), lonMax: z.number(),
+  }).nullable().optional(),
 });
 
 export const sandboxExecuteSchema = z.object({
