@@ -3,7 +3,7 @@ import { useChatStore } from '@/store/chatStore';
 import { authHeaders } from '@/context/AuthContext';
 import { extractArtifacts } from '@/lib/advancedChat';
 import { cacheChatSession, queueMessage, isOnline } from '@/lib/offlineChat';
-import type { ChatMessage } from '@/lib/chatStore';
+import type { ChatMessage, AiRecipe } from '@/lib/chatStore';
 import * as Cesium from 'cesium';
 
 export interface UseChatOptions {
@@ -289,6 +289,9 @@ export function useChat(
       let lastTraceId: string | null = null;
       let lastModelTier: string | null = null;
       let serverError: string | null = null;
+      let lastRecipe: AiRecipe | null = null;
+      let lastReplayed: boolean | undefined;
+      let lastPatternId: string | undefined;
       const receivedCommands: Array<{ action: string; label?: string; lat?: number; lon?: number; layerId?: string }> = [];
 
       const processLines = () => {
@@ -405,6 +408,9 @@ export function useChat(
               finalText = data.text;
               if (data.traceId) lastTraceId = data.traceId;
               if (data.modelTier) lastModelTier = data.modelTier;
+              if (data.recipe) lastRecipe = data.recipe as AiRecipe;
+              if (data.replayed !== undefined) lastReplayed = data.replayed as boolean;
+              if (data.patternId) lastPatternId = data.patternId as string;
               setAgentSteps((prev: AgentStep[]) => {
                 let found = false;
                 const next = prev.map(s => {
@@ -452,6 +458,9 @@ export function useChat(
           modelTier: lastModelTier,
           artifacts: artifacts.length > 0 ? artifacts : undefined,
           resumable: true,
+          recipe: lastRecipe || undefined,
+          replayed: lastReplayed,
+          patternId: lastPatternId,
         };
         if (streamingMsgId !== null) {
           updateMessage(streamingMsgId, msgPatch);

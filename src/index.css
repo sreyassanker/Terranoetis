@@ -4588,3 +4588,106 @@ p { text-align: justify; }
   color: #a78bfa;
   border: 1px solid rgba(167, 139, 250, 0.2);
 }
+
+/* ── AI PANEL LIGHT THEME (Claude/ChatGPT-style warm cream) ── */
+.ai-panel-light {
+  --text: #1c1a18;
+  --text-dim: #57534e;
+  --text-muted: #837b70;
+  --border: #e6e2db;
+  --accent: #d97757;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+}
+
+.ai-panel-light .ai-msg,
+.ai-panel-light .ai-msg * {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+}
+
+.ai-panel-light .ai-msg {
+  color: var(--text);
+  line-height: 1.65;
+  letter-spacing: 0.01em;
+}
+
+.ai-panel-light .ai-msg.assistant pre,
+.ai-panel-light .ai-msg.assistant code {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+.ai-panel-light .ai-msg.user {
+  background: rgba(217, 119, 87, 0.08);
+  border: 1px solid rgba(217, 119, 87, 0.25);
+  border-left: 3px solid #d97757;
+}
+
+.ai-panel-light .ai-msg.assistant {
+  background: #ffffff;
+  border: 1px solid #e9e5de;
+  border-left: 3px solid #cc785c;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.ai-panel-light .ai-msg.assistant pre {
+  background: #f3f0eb;
+  border: 1px solid #e6e2db;
+  color: #2d2a26;
+}
+
+.ai-panel-light .ai-msg.assistant code {
+  background: #f3f0eb;
+  color: #c2563b;
+}
+
+.ai-panel-light .ai-input {
+  background: #ffffff;
+  border: 1px solid #e2ddd4;
+  color: #1f1e1d;
+}
+
+.ai-panel-light .ai-input::placeholder { color: #9a948c; }
+
+.ai-panel-light .ai-voice-btn,
+.ai-panel-light .ai-send-btn {
+  background: #ffffff;
+  border: 1px solid #e2ddd4;
+  color: #4a463f;
+}
+
+.ai-panel-light .live-process {
+  background: #f7f4ef;
+  border: 1px solid #e6e2db;
+  color: var(--text);
+}
+
+.ai-panel-light .live-process-header:hover { background: rgba(0,0,0,0.03); }
+
+.ai-panel-light .chat-tab-chip {
+  background: #f0ece6;
+  border: 1px solid #e2ddd4;
+  color: #6b6660;
+}
+
+.ai-panel-light .chat-tab-chip.active {
+  background: rgba(217, 119, 87, 0.12);
+  border: 1px solid rgba(217, 119, 87, 0.3);
+  color: #c2563b;
+}
+
+.ai-panel-light .msg-actions,
+.ai-panel-light .ai-chip {
+  color: var(--text-dim);
+}
+
+.ai-panel-light .rich-content a,
+.ai-panel-light .rich-link {
+  color: #2563eb;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.ai-panel-light .rich-content a:hover,
+.ai-panel-light .rich-link:hover {
+  color: #1d4ed8;
+}

@@ -4,10 +4,14 @@ import remarkGfm from 'remark-gfm';
 import { StreamingMarkdownRenderer } from '@/lib/advancedChat';
 
 function stripCommands(text: string): string {
+  // Split on section headers (## ...), then drop internal COMMANDS /
+  // TOOL_CALLS / THINKING blocks. Split on a newline followed by "## " so a
+  // block at the very end is removed too (no trailing section to anchor on).
   return text
-    .replace(/^## COMMANDS\n[\s\S]*?(?=\n^## |\n*$)/gm, '')
-    .replace(/^## TOOL_CALLS\n[\s\S]*?(?=\n^## |\n*$)/gm, '')
-    .replace(/^## THINKING\n[\s\S]*?(?=\n^## |\n*$)/gm, '');
+    .split(/\n(?=## )/)
+    .filter(part => !/^## (?:COMMANDS|TOOL_CALLS|THINKING)\b/.test(part))
+    .join('\n')
+    .trim();
 }
 
 type MarkdownComponentProps = HTMLAttributes<HTMLElement> & { children?: React.ReactNode; href?: string; className?: string };
@@ -53,8 +57,10 @@ const components: Record<string, ComponentType<MarkdownComponentProps>> = {
     return <hr className="rich-hr" />;
   },
   a({ href, children, ...props }) {
+    const { node: _node, ...rest } = props as Record<string, unknown>;
+    void _node;
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+      <a href={href} target="_blank" rel="noopener noreferrer" className="rich-link" {...rest}>
         {children}
       </a>
     );

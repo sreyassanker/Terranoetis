@@ -1,5 +1,6 @@
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
+import { isAutonomousAiAllowed } from '../aiGate';
 import { omninet } from '../ai-router/omninet';
 
 interface TrainingExample {
@@ -76,6 +77,11 @@ let generationInterval: ReturnType<typeof setInterval> | null = null;
 
 export function startSyntheticDataGeneration(apiKey: string, intervalMs = 3600000): void {
   stopSyntheticDataGeneration();
+  // Chat-only mode: background LLM generation is disabled.
+  if (!isAutonomousAiAllowed()) {
+    logger.info('Synthetic data generation: autonomous AI disabled (chat-only mode) — skipped');
+    return;
+  }
   generationInterval = setInterval(async () => {
     await generateTrainingExample(apiKey);
   }, intervalMs);

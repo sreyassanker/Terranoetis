@@ -171,7 +171,7 @@ export function ChatPanel({
   if (!showAI) return null;
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('ai', 110), width: chatPanelWidth }}>
+    <div className="ai-panel-light" style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('ai', 110), width: chatPanelWidth }}>
       {!chatCollapsed && (
         <>
           <div className="chat-resize-handle chat-resize-w" onMouseDown={onHandleMouseDown('width')} aria-hidden="true" title="Drag to resize width" />
@@ -181,9 +181,9 @@ export function ChatPanel({
       <Panel
         title="EARTH INTELLIGENCE AI"
         icon={<Bot size={14} />}
-        accentColor="#6366f1"
-        iconColor="#818cf8"
-        titleColor="#a5b4fc"
+        accentColor="#d97757"
+        iconColor="#cc785c"
+        titleColor="#9c6b55"
         onClose={() => setShowAI(false)}
         headerExtra={
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -206,11 +206,12 @@ export function ChatPanel({
         style={{
           height: chatCollapsed ? 44 : (chatPanelHeight ?? 'calc(100vh - 160px)'),
           maxHeight: chatCollapsed ? 44 : (chatPanelHeight ?? 'calc(100vh - 160px)'),
-          background: 'linear-gradient(135deg, rgba(35, 34, 82, 0.55), rgba(12, 14, 36, 0.68))',
-          backdropFilter: 'blur(28px) saturate(180%)',
-          WebkitBackdropFilter: 'blur(28px) saturate(180%)',
-          border: '1px solid rgba(129, 140, 248, 0.28)',
-          boxShadow: '0 12px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(129,140,248,0.10)',
+          background: '#faf9f5',
+          backdropFilter: 'none',
+          WebkitBackdropFilter: 'none',
+          border: '1px solid rgba(0,0,0,0.12)',
+          boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
+          color: '#1f1e1d',
         }}
       >
         {!chatCollapsed && (

@@ -25,6 +25,7 @@ Terranoetis_kaggle.json
 data/app.db
 data/terranoetis.db
 data/models/
+data/ai-patterns/
 smoke-kaggle-routes.ts
 
 # SQLite runtime data

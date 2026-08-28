@@ -3,7 +3,7 @@ import { logger } from '../observability/logger';
 
 // ── Types ───────────────────────────────────────────────────────
 
-type ProviderType = 'openai-compatible' | 'gemini' | 'claude' | 'ollama' | 'local-transformers' | 'local-onnx' | 'huggingface';
+type ProviderType = 'openai-compatible' | 'gemini' | 'claude' | 'ollama' | 'huggingface';
 type ProviderTier = 1 | 2 | 3 | 4;
 type HealthStatus = 'healthy' | 'degraded' | 'down';
 type CircuitState = 'closed' | 'open' | 'half-open';
@@ -61,20 +61,13 @@ export interface OmninetOptions {
 // ── Provider Registry ───────────────────────────────────────────
 
 const PROVIDER_CONFIGS: ProviderConfig[] = [
-  { name: 'groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'], rateLimit: 20, tier: 2, apiKeyEnvVar: 'GROQ_API_KEY', supportsStreaming: true },
-  { name: 'cerebras', type: 'openai-compatible', baseUrl: 'https://api.cerebras.ai/v1', models: ['llama-3.3-70b'], rateLimit: 1, tier: 2, apiKeyEnvVar: 'CEREBRAS_API_KEY', supportsStreaming: true },
-  { name: 'sambanova', type: 'openai-compatible', baseUrl: 'https://api.sambanova.ai/v1', models: ['llama-3.1-8b'], rateLimit: 10, tier: 2, apiKeyEnvVar: 'SAMBANOVA_API_KEY', supportsStreaming: true },
-  { name: 'gemini', type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'], rateLimit: 60, tier: 3, apiKeyEnvVar: 'GOOGLE_GEMINI_API_KEY', supportsStreaming: true, supportsVision: true },
-  { name: 'tokenrouter', type: 'openai-compatible', baseUrl: 'https://api.tokenrouter.com/v1', models: ['moonshotai/kimi-k3-free', 'deepseek/deepseek-v4-flash', 'qwen/qwen3.5-flash', 'openai/gpt-5.4-nano'], rateLimit: 60, tier: 1, apiKeyEnvVar: 'TOKENROUTER_API_KEY', supportsStreaming: true },
-  { name: 'freemodelsforall', type: 'openai-compatible', baseUrl: 'https://freemodelsforall.hopto.org/v1', models: ['DeepSeek-V4-Flash-0731', 'deepseek/deepseek-v4-flash-2', 'anthropic/claude-haiku-4.5', 'google/gemini-flash-lite', 'meta/llama-4-scout'], rateLimit: 60, tier: 1, apiKeyEnvVar: 'FREEMODELSFORALL_API_KEY', supportsStreaming: true },
-  { name: 'openrouter', type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1', models: ['deepseek/deepseek-r1', 'qwen/qwen3-235b', 'meta-llama/llama-4-scout'], rateLimit: 200, tier: 2, apiKeyEnvVar: 'OPENROUTER_API_KEY', supportsStreaming: true },
-  { name: 'together', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', models: ['meta-llama/Llama-3-70b'], rateLimit: 60, tier: 2, apiKeyEnvVar: 'TOGETHER_API_KEY', supportsStreaming: true },
+  { name: 'groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', models: ['groq/compound', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'], rateLimit: 20, tier: 2, apiKeyEnvVar: 'GROQ_API_KEY', supportsStreaming: true },
+  { name: 'gemini', type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', models: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'], rateLimit: 60, tier: 3, apiKeyEnvVar: 'GOOGLE_GEMINI_API_KEY', supportsStreaming: true, supportsVision: true },
+  { name: 'bai', type: 'openai-compatible', baseUrl: 'https://api.b.ai/v1', models: ['deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'hy3', 'mimo-v2.5', 'qwen3.8-flash'], rateLimit: 60, tier: 1, apiKeyEnvVar: 'BAI_API_KEY', supportsStreaming: true, supportsVision: true },
   { name: 'deepseek', type: 'openai-compatible', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'], rateLimit: 50, tier: 3, apiKeyEnvVar: 'DEEPSEEK_API_KEY', supportsStreaming: true },
   { name: 'claude', type: 'claude', baseUrl: 'https://api.anthropic.com/v1', models: ['claude-3-haiku'], rateLimit: 5, tier: 3, apiKeyEnvVar: 'ANTHROPIC_API_KEY', supportsStreaming: true },
   { name: 'ollama', type: 'ollama', baseUrl: 'http://localhost:11434', models: ['llama3', 'mistral'], rateLimit: 9999, tier: 4, local: true, supportsStreaming: true, supportsEmbeddings: true },
-  { name: 'xenova', type: 'local-transformers', models: ['Xenova/all-MiniLM-L6-v2'], rateLimit: 9999, tier: 4, local: true, supportsEmbeddings: true },
   { name: 'huggingface', type: 'huggingface', baseUrl: 'https://api-inference.huggingface.co', models: ['meta-llama/Llama-3.1-8B'], rateLimit: 10, tier: 4, apiKeyEnvVar: 'HUGGINGFACE_API_KEY', supportsEmbeddings: true },
-  { name: 'onnx', type: 'local-onnx', models: ['onnx-model-path'], rateLimit: 9999, tier: 4, local: true, supportsEmbeddings: true },
 ];
 
 // ── Query Classification ─────────────────────────────────────────
@@ -113,9 +106,18 @@ export class Omninet {
     if (this.initialized) return;
     this.providers = PROVIDER_CONFIGS.map(config => {
       const saved = this.loadState(config.name);
+      // Never carry a stale 'down' from a previous run into a fresh boot —
+      // reset to 'degraded' so providers with valid keys are immediately
+      // usable and the periodic health check can promote them back to healthy.
+      const savedStatus = saved?.status as HealthStatus | undefined;
+      const status: HealthStatus = config.local
+        ? 'healthy'
+        : savedStatus === 'down'
+          ? 'degraded'
+          : (savedStatus || 'healthy');
       return {
         config,
-        status: config.local ? 'healthy' : ((saved?.status as HealthStatus) || 'healthy'),
+        status,
         lastChecked: (saved?.lastChecked as number) || 0,
         failureCount: (saved?.failureCount as number) || 0,
         consecutiveSuccesses: (saved?.consecutiveSuccesses as number) || 0,
@@ -287,6 +289,9 @@ export class Omninet {
   private rankProviders(targetTier: ProviderTier, vaultKeys?: Record<string, string>): ProviderState[] {
     const eligible = this.providers.filter(s => {
       if (s.status === 'down') return false;
+      // Embedding-only local providers cannot
+      // generate text — never route chat/generation traffic to them.
+      if (s.config.local && !s.config.supportsStreaming) return false;
       if (s.circuitState === 'open') {
         if (Date.now() - s.circuitOpenedAt > 30000) s.circuitState = 'half-open';
         else return false;

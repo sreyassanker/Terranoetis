@@ -18,6 +18,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 import { getDb, closeDb } from './db/index';
+import { isAutonomousAiAllowed } from './aiGate';
+import {
+  savePattern, approvePattern, findMatchingPattern, listPatterns,
+  detectSlots, resolveDomain, substituteArgs, patternStoreStats,
+  type PatternStep, type PatternCommand,
+} from './ai-patterns/patternStore';
+import { summarizeToolResult } from './ai-patterns/summarizeTool';
 import { API_METADATA, getCategories } from './api-metadata';
 import {
   CommandParser, MaterializedViewCache, IntentRouter, TaskPlanner,
@@ -756,6 +763,7 @@ jobQueue.recurring('plugin:scan', 30000);
 
 // ML Pipeline: synthetic data generation as recurring queue job
 jobQueue.process('ml:synthetic', async () => {
+  if (!isAutonomousAiAllowed()) return; // chat-only mode: skip background LLM generation
   await generateTrainingExample();
 });
 jobQueue.recurring('ml:synthetic', 3600000);
@@ -7505,7 +7513,7 @@ async function directGeminiAnswer(
   memoryContext: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const model = 'gemini-2.5-flash';
+  const model = 'gemini-3.5-flash-lite';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const fullPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}[User query]\n${userMessage}`;
   const resp = await fetch(url, {
@@ -7659,6 +7667,87 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       return;
     }
 
+    // Step 1.6: Pattern replay — check if this query matches a saved workflow.
+    // If a matching pattern exists (same intent + similar query shape), replay
+    // the saved tool steps with the new location/params substituted. This skips
+    // the expensive LLM pass entirely. Returns true when replayed.
+    const patternMatch = findMatchingPattern(fullMessage, intent.type, resolveDomain(intent.type));
+    if (patternMatch && patternMatch.steps.length > 0 && !abortController.signal.aborted) {
+      const slotValues: Record<string, unknown> = {};
+      const loc = intent.location || patternMatch.sampleLocation;
+      if (loc) {
+        if (patternMatch.slots.includes('lat')) slotValues['lat'] = loc.lat;
+        if (patternMatch.slots.includes('lon')) slotValues['lon'] = loc.lon;
+        if (patternMatch.slots.includes('label')) slotValues['label'] = loc.label || patternMatch.name;
+      }
+      const radiusMatch = fullMessage.match(/(?:within|radius|around|near)\s+(\d+)\s*(km|mi|miles|kilometers?)/i);
+      if (patternMatch.slots.includes('radius') && radiusMatch) slotValues['radius'] = Number(radiusMatch[1]);
+
+      sendEvent('step', { stepType: 'pattern_replay', text: `⚡ Reusing saved workflow "${patternMatch.name.slice(0, 60)}" (${patternMatch.steps.length} step${patternMatch.steps.length > 1 ? 's' : ''}) — substituting new parameters`, status: 'running' });
+      const toolResults: Array<{ tool: string; ok: boolean; text: string }> = [];
+      try {
+        for (const step of patternMatch.steps) {
+          if (abortController.signal.aborted) break;
+          const known = dynamicTools.get(step.tool);
+          if (!known) {
+            toolResults.push({ tool: step.tool, ok: false, text: 'Tool not registered' });
+            continue;
+          }
+          const args = substituteArgs(step.args, slotValues);
+          sendEvent('tool_call', { name: step.tool, args, description: known.description, riskLevel: 'low', replayed: true });
+          try {
+            const result = await dynamicTools.execute(step.tool, args, abortController.signal);
+            // Keep the full result object (no truncation) — the generic
+            // formatter renders it as readable text with zero LLM cost.
+            toolResults.push({ tool: step.tool, ok: true, text: summarizeToolResult(step.tool, result) });
+            sendEvent('tool_result', { name: step.tool, status: 'success', result, replayed: true });
+          } catch (e) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            toolResults.push({ tool: step.tool, ok: false, text: `Error: ${errMsg}` });
+            sendEvent('tool_result', { name: step.tool, status: 'error', error: errMsg, replayed: true });
+          }
+        }
+        sendEvent('step', { stepType: 'pattern_replay', text: `Replayed ${toolResults.length} tool step(s)`, status: 'completed' });
+
+        const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        // Cheap template synthesis — no LLM. Each tool result was already
+        // rendered to readable prose by the generic formatter at execution time.
+        const summary = toolResults
+          .map(r => `**${r.tool}**\n${r.text}`)
+          .join('\n\n')
+          .replace(/\n{3,}/g, '\n\n');
+        const locLabel = loc?.label || (intent.location?.label) || 'this location';
+        const outputText = `## ${patternMatch.name}\n\n**Reused workflow** (saved ${patternMatch.approvalCount || 1}×)\n\n${summary.slice(0, 3000)}`;
+        const commands: PatternCommand[] = [];
+        for (const c of patternMatch.commands) {
+          if (c.action === 'flyTo' && loc) {
+            commands.push({ action: 'flyTo', lat: loc.lat, lon: loc.lon, label: locLabel, zoom: c.zoom ?? 8 });
+          } else if (c.action === 'addPin' && loc) {
+            // Substitute the new location's name into the pin label (the saved
+            // label contains the old place name, e.g. "Tokyo (24.3°C...)").
+            const oldName = patternMatch.sampleLocation?.label || 'this location';
+            const newLabel = typeof c.label === 'string'
+              ? c.label.replace(new RegExp(escapeRegExp(oldName), 'g'), locLabel)
+              : c.label;
+            commands.push({ action: 'addPin', lat: loc.lat, lon: loc.lon, label: newLabel, color: c.color });
+          } else {
+            commands.push(c);
+          }
+        }
+        if (commands.length > 0) sendEvent('commands', commands);
+        sendEvent('step', { stepType: 'synthesis', text: 'Replay complete — templated from saved workflow (no LLM)', status: 'completed' });
+        sendEvent('output', { text: outputText, modelTier: 'replay', intentType: intent.type, replayed: true, patternId: patternMatch.id });
+        sendEvent('done', { type: 'done' });
+        cleanup();
+        res.end();
+        return;
+      } catch (e) {
+        logger.warn({ err: e }, 'Pattern replay failed — falling through to full AI run');
+        sendEvent('step', { stepType: 'pattern_replay_error', text: 'Workflow replay failed — running full analysis', status: 'completed' });
+      }
+    }
+
     // Step 1.75: (CognitiveAgent removed — was returning template variables instead of real data)
 
     // Step 2: If quick scan, check materialized cache first
@@ -7692,7 +7781,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     }
 
     // Step 2.5: Multi-agent orchestration for complex queries
-    const orchestrationIntents = ['deep_analysis', 'compute', 'unknown', 'weather_check'];
+    const orchestrationIntents = ['deep_analysis', 'compute', 'unknown'];
     if (orchestrationIntents.includes(intent.type)) {
       sendEvent('step', { stepType: 'orchestrating', text: 'Multi-agent swarm analyzing...', status: 'completed' });
       try {
@@ -7763,7 +7852,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         const b64 = img.dataUrl.replace(/^data:image\/\w+;base64,/, '');
         parts.push({ inlineData: { mimeType: img.mimeType, data: b64 } });
       }
-      const model = 'gemini-2.5-flash';
+const model = 'gemini-3.5-flash-lite';
       const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${effectiveGeminiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -7814,6 +7903,10 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
 
     let outputText = '';
     let toolCallCount = 0;
+    // Recipe capture: the tool steps + commands of this run, so the client can
+    // offer a "Save workflow" action that persists a reusable pattern on disk.
+    let recipeSteps: PatternStep[] = [];
+    let recipeCommands: PatternCommand[] = [];
     try {
       const hasImages = Array.isArray(images) && images.length > 0;
       logger.info({ msgLen: message.length, hasMemory: !!memoryContext, hasImages }, 'AI streaming starting');
@@ -7831,6 +7924,18 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       if (toolCalls.length > 0 && !abortController.signal.aborted) {
         sendEvent('step', { stepType: 'tool_execution', text: `Executing ${toolCalls.length} tool call(s)...`, status: 'running' });
         const toolResults: string[] = [];
+        // Capture the recipe BEFORE execution so saved patterns store the
+        // parameter slots (e.g. {lat}/{lon}) rather than hardcoded values.
+        recipeSteps = toolCalls.map(call => {
+          const args: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(call.args || {})) {
+            if (intent.location && (k === 'lat' && v === intent.location.lat)) args[k] = '{lat}';
+            else if (intent.location && (k === 'lon' && v === intent.location.lon)) args[k] = '{lon}';
+            else if (intent.location && (k === 'label' || k === 'name') && v === intent.location.label) args[k] = '{label}';
+            else args[k] = v;
+          }
+          return { tool: call.name, args };
+        });
         await Promise.all(toolCalls.map(async (call) => {
           const known = dynamicTools.get(call.name);
           if (!known) {
@@ -7952,6 +8057,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     sendEvent('step', { stepType: 'parsing', text: 'Parsing visualization commands...', status: 'running' });
     try {
       const commands = CommandParser.parse(outputText);
+      recipeCommands = commands;
       if (commands.length > 0) {
         sendEvent('commands', commands);
         sendEvent('step', { stepType: 'parsing', text: `Parsed ${commands.length} visualization command(s)`, status: 'completed' });
@@ -7964,7 +8070,21 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     }
 
     // Send final output
-    sendEvent('output', { text: outputText, modelTier, intentType: intent.type });
+    const saveable = recipeSteps.length > 0;
+    sendEvent('output', {
+      text: outputText, modelTier, intentType: intent.type,
+      ...(saveable ? {
+        recipe: {
+          intent: intent.type,
+          query: message,
+          domain: resolveDomain(intent.type),
+          steps: recipeSteps,
+          commands: recipeCommands,
+          sampleLocation: intent.location || undefined,
+          slots: detectSlots(message, intent.location || undefined),
+        },
+      } : {}),
+    });
     sendEvent('done', { type: 'done' });
 
   } catch (e) {
@@ -7999,6 +8119,74 @@ app.post('/api/agent/local-ask', async (req: express.Request, res: express.Respo
   } catch (e) {
     res.json({ error: String(e), fallback: true });
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// AI PATTERN STORE: save / search / approve reusable workflows
+// ═══════════════════════════════════════════════════════════════════════
+
+// Save (or approve) a pattern from a chat run the user liked. Persists to
+// data/ai-patterns/<domain>/ on disk — survives restarts and browser clears.
+app.post('/api/ai-patterns/save', authGuard, (req: express.Request, res: express.Response) => {
+  const { intent, query, steps, commands, domain, sampleLocation, slots } = req.body as {
+    intent?: string; query?: string; steps?: PatternStep[]; commands?: PatternCommand[];
+    domain?: string; sampleLocation?: { lat: number; lon: number; label?: string }; slots?: string[];
+  };
+  if (!query || !Array.isArray(steps) || steps.length === 0) {
+    return res.status(400).json({ error: 'query and steps are required' });
+  }
+  try {
+    const resolvedDomain = resolveDomain(domain || intent || 'general');
+    const resolvedSlots = Array.isArray(slots) && slots.length > 0
+      ? slots
+      : detectSlots(query, sampleLocation);
+    const pattern = savePattern({
+      domain: resolvedDomain,
+      intent: intent || 'general',
+      name: query,
+      query,
+      slots: resolvedSlots,
+      steps,
+      commands: Array.isArray(commands) ? commands : [],
+      approvalCount: 1,
+      sampleLocation,
+    });
+    res.json({ ok: true, pattern });
+  } catch (e) {
+    res.status(500).json({ error: `Pattern save failed: ${e instanceof Error ? e.message : String(e)}` });
+  }
+});
+
+// Approve an already-saved pattern (strengthens it for future matching).
+app.post('/api/ai-patterns/approve', authGuard, (req: express.Request, res: express.Response) => {
+  const { id } = req.body as { id?: string };
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const pat = approvePattern(id);
+  if (!pat) return res.status(404).json({ error: 'Pattern not found' });
+  res.json({ ok: true, pattern: pat });
+});
+
+// Search saved patterns by query + intent (for reuse / review).
+app.get('/api/ai-patterns/search', authGuard, (req: express.Request, res: express.Response) => {
+  const q = String(req.query.q || '').slice(0, 300);
+  const intent = String(req.query.intent || '');
+  const domain = req.query.domain ? String(req.query.domain) : undefined;
+  try {
+    if (q) {
+      const match = findMatchingPattern(q, intent || 'general', domain);
+      res.json({ count: match ? 1 : 0, match });
+    } else {
+      const patterns = listPatterns(domain);
+      res.json({ count: patterns.length, patterns: patterns.slice(0, 100) });
+    }
+  } catch (e) {
+    res.status(500).json({ error: `Pattern search failed: ${e instanceof Error ? e.message : String(e)}` });
+  }
+});
+
+// Stats: how many patterns per domain are stored on disk.
+app.get('/api/ai-patterns/stats', authGuard, (_req: express.Request, res: express.Response) => {
+  res.json(patternStoreStats());
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -8202,7 +8390,7 @@ app.post('/api/agent/analyze-vision', async (req: express.Request, res: express.
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
   if (!apiKey) return res.status(502).json({ error: 'Gemini API key not configured. Set GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY in .env' });
 
-  const modelsToTry = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
+  const modelsToTry = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
   let lastError: string | undefined;
 
   for (const model of modelsToTry) {
