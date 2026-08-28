@@ -1156,6 +1156,7 @@ export default function App() {
   const weatherCardElementsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const weatherAbortRef = useRef<AbortController | null>(null);
   const focusMarkerRef = useRef<Cesium.Entity | null>(null);
+  const focusMarkerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flightDrRef = useRef<FlightDeadReckoning | null>(null);
   const adsbLolDrRef = useRef<FlightDeadReckoning | null>(null);
   const adsbFiDrRef = useRef<FlightDeadReckoning | null>(null);
@@ -1609,14 +1610,6 @@ export default function App() {
     }, 2000);
     return () => { if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current); };
   }, [aiMessages, sandboxWorkspaceId, setChatList]);
-  // Auto-expand thinking block when new steps arrive
-  const prevStepCountRef = useRef(0);
-  useEffect(() => {
-    if (agentSteps.length > prevStepCountRef.current) {
-      setThinkingExpanded(true);
-    }
-    prevStepCountRef.current = agentSteps.length;
-  }, [agentSteps.length, setThinkingExpanded]);
   // Auto-collapse once the whole run settles (no steps running, done streaming)
   useEffect(() => {
     if (agentSteps.length === 0 && pipelineProgress.length === 0) return;
@@ -2648,6 +2641,7 @@ export default function App() {
       if (e.key === 'Escape') {
         const v = viewerRef.current;
         if (v && focusMarkerRef.current) { v.entities.remove(focusMarkerRef.current); focusMarkerRef.current = null; }
+        if (focusMarkerTimerRef.current) { clearTimeout(focusMarkerTimerRef.current); focusMarkerTimerRef.current = null; }
         setInfoEntity(null);
         entityTrackerRef.current?.untrack();
       }
@@ -3402,7 +3396,11 @@ export default function App() {
       v.entities.remove(focusMarkerRef.current);
       focusMarkerRef.current = null;
     }
-    const height = options?.height ?? 1500;
+    if (focusMarkerTimerRef.current) {
+      clearTimeout(focusMarkerTimerRef.current);
+      focusMarkerTimerRef.current = null;
+    }
+    const height = options?.height ?? 20000;
     const marker = v.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
       name: options?.label ?? 'Selected Location',
@@ -3437,6 +3435,15 @@ export default function App() {
       },
     });
     focusMarkerRef.current = marker;
+    // Auto-hide the marker + label after a few seconds so it doesn't linger.
+    focusMarkerTimerRef.current = setTimeout(() => {
+      const v2 = viewerRef.current;
+      if (v2 && focusMarkerRef.current) {
+        v2.entities.remove(focusMarkerRef.current);
+        focusMarkerRef.current = null;
+      }
+      focusMarkerTimerRef.current = null;
+    }, 6000);
     const range = Math.max(height, 500);
     v.flyTo(marker, {
       offset: new Cesium.HeadingPitchRange(
@@ -3574,6 +3581,7 @@ export default function App() {
       v.entities.remove(focusMarkerRef.current);
       focusMarkerRef.current = null;
     }
+    if (focusMarkerTimerRef.current) { clearTimeout(focusMarkerTimerRef.current); focusMarkerTimerRef.current = null; }
     v.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(78.5, 21.0, 4200000),
       orientation: {
@@ -6610,6 +6618,7 @@ export default function App() {
         v.entities.remove(focusMarkerRef.current);
         focusMarkerRef.current = null;
       }
+      if (focusMarkerTimerRef.current) { clearTimeout(focusMarkerTimerRef.current); focusMarkerTimerRef.current = null; }
 
       if (v) {
         try {

@@ -716,7 +716,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   }),
   copiedMsgId: null,
   setCopiedMsgId: (id) => set({ copiedMsgId: id }),
-  thinkingExpanded: true,
+  thinkingExpanded: false,
   setThinkingExpanded: (value) => set({ thinkingExpanded: value }),
   expandedStep: null,
   setExpandedStep: (step) => set({ expandedStep: step }),
