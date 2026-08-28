@@ -657,6 +657,8 @@ GitHub Actions workflow (`.github/workflows/ci.yml`) for automated testing and b
 ### Installation
 
 ```bash
+git clone https://github.com/sreyassanker/Terranoetis.git
+cd Terranoetis
 cp .env .env.local    # Edit with your API keys
 npm install
 ```
