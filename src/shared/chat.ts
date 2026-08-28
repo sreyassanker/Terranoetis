@@ -108,6 +108,23 @@ export interface ChatMessage {
   reactions?: Reaction[];
   /** Inline thread replies (persisted with the chat's message JSON) */
   threadReplies?: ThreadReply[];
+  /** Reusable workflow recipe (emitted by /api/agent/ask) — enables Save */
+  recipe?: AiRecipe;
+  /** True when this response was replayed from a saved pattern */
+  replayed?: boolean;
+  /** Pattern id used for the replay */
+  patternId?: string;
+}
+
+/** A reusable workflow recipe captured from a chat run the user liked. */
+export interface AiRecipe {
+  intent: string;
+  query: string;
+  domain: string;
+  slots: string[];
+  steps: Array<{ tool: string; args: Record<string, unknown> }>;
+  commands?: Array<Record<string, unknown>>;
+  sampleLocation?: { lat: number; lon: number; label?: string };
 }
 
 export interface ChatSession {

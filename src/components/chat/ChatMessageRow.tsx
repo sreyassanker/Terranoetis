@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Zap, Upload, Search as SearchIcon, BarChart3, AlertTriangle,
   Loader, CheckCircle, XCircle, ClipboardList, Play,
-  Wrench, RotateCcw, Pencil, Trash2,
+  Wrench, RotateCcw, Pencil, Trash2, Bookmark, BookmarkCheck,
 } from 'lucide-react';
-import type { ChatMessage, PlanCard, ToolEvent } from '@/shared/chat';
+import type { ChatMessage, PlanCard, ToolEvent, AiRecipe } from '@/shared/chat';
+import { authHeaders } from '@/context/AuthContext';
 import { StreamingMarkdownRenderer } from '@/lib/advancedChat';
 import { RichMarkdown } from './RichMarkdown';
 import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, TraceExpander } from './AdvancedChatViews';
@@ -32,9 +33,34 @@ export function ChatMessageRow({
   sendAI, onEditMessage,
 }: ChatMessageRowProps) {
   const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { updateMessage } = useChatStore();
+
+  const handleSaveRecipe = async () => {
+    const recipe = msg.recipe as AiRecipe | undefined;
+    if (!recipe || saving || saved) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const resp = await fetch('/api/ai-patterns/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(recipe),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || `Save failed (${resp.status})`);
+      setSaved(true);
+      updateMessage(msg.id, { patternId: data?.pattern?.id });
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -174,6 +200,29 @@ export function ChatMessageRow({
 
           {msg.modelTier && (
             <span style={{ fontSize: 10, color: '#64748b', background: 'rgba(100,116,139,0.1)', borderRadius: 3, padding: '1px 5px', marginTop: 2, display: 'inline-block' }}>{msg.modelTier}</span>
+          )}
+
+          {msg.replayed && (
+            <span style={{ fontSize: 10, color: '#34d399', background: 'rgba(52,211,153,0.1)', borderRadius: 3, padding: '1px 5px', marginTop: 2, display: 'inline-block', marginLeft: 4 }}>⚡ Replayed</span>
+          )}
+
+          {msg.recipe && !aiTyping && !saved && (
+            <button
+              onClick={handleSaveRecipe}
+              disabled={saving}
+              style={{ fontSize: 10, color: saving ? '#64748b' : '#818cf8', background: saving ? 'rgba(100,116,139,0.1)' : 'rgba(129,140,248,0.12)', border: '1px solid rgba(129,140,248,0.35)', borderRadius: 4, padding: '2px 8px', cursor: saving ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 4, marginLeft: 4 }}
+              title="Save this workflow as a reusable pattern"
+            >
+              {saving ? <Loader size={10} className="spin" /> : <Bookmark size={10} />} Save workflow
+            </button>
+          )}
+          {saved && (
+            <span style={{ fontSize: 10, color: '#34d399', background: 'rgba(52,211,153,0.1)', borderRadius: 3, padding: '2px 8px', display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 4, marginLeft: 4 }}>
+              <BookmarkCheck size={10} /> Workflow saved
+            </span>
+          )}
+          {saveError && (
+            <span style={{ fontSize: 10, color: '#ef4444', marginLeft: 4 }}>{saveError}</span>
           )}
 
           {msg.traceId && <TraceExpander traceId={msg.traceId} />}

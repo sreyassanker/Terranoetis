@@ -5,6 +5,7 @@ import { causalGraph } from '../world-model/causalGraph';
 import { ensemblePredictor } from '../world-model/ensemblePredictor';
 import { predictionValidator } from '../world-model/predictionValidator';
 import { omninet } from '../ai-router/omninet';
+import { isAutonomousAiAllowed } from '../aiGate';
 import type { EnrichedEvent } from './streamProcessor';
 import type { ProactiveInsight } from './proactiveInsights';
 
@@ -43,6 +44,14 @@ export class AmbientIntelligence {
   start(): void {
     if (this.running) return;
     this.running = true;
+
+    // Chat-only mode: background/proactive AI is disabled — only the AI chat
+    // panel triggers LLM calls. Ambient predictions are LLM-driven, so skip
+    // them entirely unless AUTONOMOUS_AI=1.
+    if (!isAutonomousAiAllowed()) {
+      logger.info('AmbientIntelligence: autonomous AI disabled (chat-only mode) — skipping proactive predictions');
+      return;
+    }
 
     // 1h predictions for all regions
     const hourlyTimer = setInterval(() => this.refreshPredictions(), 3600000);

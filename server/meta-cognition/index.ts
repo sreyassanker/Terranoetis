@@ -7,6 +7,7 @@ import { intentDiscovery } from './intentDiscovery';
 import { architectureProposals } from './architectureProposals';
 import { FeedbackLearning, createFeedbackLearning } from './feedbackLearning';
 import { SelfReportGenerator } from './selfReport';
+import { isAutonomousAiAllowed } from '../aiGate';
 
 // ── MetaCognition ───────────────────────────────────────────────
 
@@ -42,6 +43,13 @@ export class MetaCognition {
   start(): void {
     if (this.running) return;
     this.running = true;
+
+    // Chat-only mode: background self-improvement cycles call the LLM —
+    // disabled unless AUTONOMOUS_AI=1. On-demand endpoints remain available.
+    if (!isAutonomousAiAllowed()) {
+      logger.info('MetaCognition: autonomous AI disabled (chat-only mode) — skipping self-improvement cycles');
+      return;
+    }
 
     // Run self-analysis cycles
     this.runCycle().catch(() => {});

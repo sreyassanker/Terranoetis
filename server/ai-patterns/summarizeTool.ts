@@ -1,0 +1,134 @@
+/**
+ * Generic readable formatter for tool results.
+ *
+ * Renders ANY tool result object into clean, human-readable text (bullet
+ * points, key-value lines, capped arrays) — so replayed AI answers read like
+ * normal prose instead of raw JSON. Deterministic: zero LLM cost, works for
+ * every tool with no per-tool special-casing.
+ */
+
+const SKIP_KEYS = new Set([
+  'id', 'timestamp', 'query', 'lat', 'lon', 'type', 'status',
+  'source', 'updatedAt', 'createdAt', 'requestId', 'correlationId', 'meta',
+  'utcOffsetSeconds', 'timezone', 'timezoneAbbreviation', 'generationtimeMs',
+]);
+
+/** URL-bearing keys — rendered as clickable markdown links, not skipped. */
+const URL_KEYS = new Set(['url', 'textUrl', 'link', 'linkUrl', 'href']);
+
+/** Keys whose nested object is unit/metadata metadata, not data — skip when a data twin exists. */
+const UNITS_KEYS = new Set(['current_units', 'hourly_units', 'daily_units', 'units']);
+
+function isObj(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function fmtScalar(v: unknown): string {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'number') return String(Math.round(v * 100) / 100);
+  if (typeof v === 'boolean') return v ? 'yes' : 'no';
+  if (typeof v === 'string') return v.length > 160 ? v.slice(0, 157) + '…' : v;
+  return '';
+}
+
+/** Format a URL value as an inline clickable markdown link. */
+function fmtLink(key: string, v: unknown): string {
+  const url = String(v);
+  if (!/^https?:\/\//i.test(url)) return '';
+  const text = label(key) === 'Text Url' ? 'View details' : label(key);
+  return `[${text}](${url})`;
+}
+
+function label(k: string): string {
+  return k
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * Convert a tool result into readable text.
+ * - Arrays of objects → one bullet per item (primary fields)
+ * - Objects → one "• Key: value" per meaningful field
+ * - Nested objects/arrays are flattened one level then capped
+ */
+export function summarizeToolResult(_tool: string, result: unknown): string {
+  const r = result as Record<string, unknown>;
+
+  // Top-level array of items (e.g. earthquakes.features, advisories, flights)
+  if (Array.isArray(result)) {
+    if (result.length === 0) return 'No data found.';
+    return result.slice(0, 8).map((item, i) => renderItem(item, i)).join('\n');
+  }
+
+  // Common wrapper keys — drill into the first meaningful collection
+  const wrapperKeys = ['advisories', 'features', 'events', 'items', 'results', 'data', 'aircraft', 'objects', 'list', 'rows'];
+  for (const wk of wrapperKeys) {
+    const w = r[wk];
+    if (Array.isArray(w) && w.length > 0) {
+      const heading = wk === 'data' || wk === 'items' ? '' : `**${label(wk)}**\n`;
+      return heading + w.slice(0, 8).map((item, i) => renderItem(item, i)).join('\n');
+    }
+  }
+
+  // Flat scalar-ish object (weather, iss, single record)
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(r)) {
+    if (SKIP_KEYS.has(k)) continue;
+    // Skip metadata/units blocks when a data twin exists (e.g. current_units + current)
+    if (UNITS_KEYS.has(k) && isObj(v)) continue;
+    if (URL_KEYS.has(k)) {
+      const link = fmtLink(k, v);
+      if (link) lines.push(`• ${link}`);
+      continue;
+    }
+    if (isObj(v)) {
+      // Single nested object (e.g. current, position) — inline its fields
+      for (const [k2, v2] of Object.entries(v)) {
+        if (SKIP_KEYS.has(k2) || UNITS_KEYS.has(k2)) continue;
+        if (URL_KEYS.has(k2)) {
+          const link = fmtLink(k2, v2);
+          if (link) lines.push(`• ${link}`);
+          continue;
+        }
+        if (Array.isArray(v2)) continue;
+        const s = fmtScalar(v2);
+        if (s) lines.push(`• ${label(k2)}: ${s}`);
+      }
+    } else if (!Array.isArray(v)) {
+      const s = fmtScalar(v);
+      if (s) lines.push(`• ${label(k)}: ${s}`);
+    }
+  }
+  if (lines.length === 0) return JSON.stringify(result).slice(0, 800);
+  return lines.slice(0, 20).join('\n');
+}
+
+function renderItem(item: unknown, index: number): string {
+  if (isObj(item)) {
+    // Choose the best display fields for an item
+    const titleCandidates = ['name', 'title', 'place', 'volcano', 'callsign', 'id', 'source', 'area'];
+    const titleVal = titleCandidates.map(c => item[c]).find(v => v !== undefined && v !== null && v !== '');
+    const title = titleVal ? fmtScalar(titleVal) : `Item ${index + 1}`;
+
+    const meta: string[] = [];
+    let itemLink = '';
+    for (const [k, v] of Object.entries(item)) {
+      if (SKIP_KEYS.has(k)) continue;
+      if (URL_KEYS.has(k)) {
+        const link = fmtLink(k, v);
+        if (link && !itemLink) itemLink = link;
+        continue;
+      }
+      if (k === titleCandidates.find(c => item[c] === v)) continue; // don't duplicate title
+      if (Array.isArray(v)) continue;
+      const s = fmtScalar(v);
+      if (s && s.length < 60) meta.push(`${label(k)}: ${s}`);
+    }
+    const metaStr = meta.length > 0 ? ` — ${meta.slice(0, 4).join(' · ')}` : '';
+    const linkStr = itemLink ? ` ${itemLink}` : '';
+    return `• ${title}${metaStr}${linkStr}`;
+  }
+  const s = fmtScalar(item);
+  return s ? `• ${s}` : '';
+}
