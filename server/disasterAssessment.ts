@@ -705,24 +705,35 @@ export function buildChainReportHtml(
   causalProbs: Record<string, number>,
 ): string {
   const aoiTag = aoiTagOf(bbox);
+  const chainTools = new Set(steps.map(s => s.tool));
 
-  /* Hazard feeds — one honest row per chain step */
+  /* Hazard feeds — one honest row per chain step, labelled with the SAME
+   * tool name the panel shows (e.g. "Earthquakes", "Seismic Events"). */
   const feedRows = steps.map(step => {
     const count = stepCount(step);
     const prob = typeof causalProbs[step.tool] === 'number' ? causalProbs[step.tool] : 0;
     const status = step.status === 'error' ? 'FAILED' : count != null && count > 0 ? 'OBSERVED' : count != null ? 'NO DATA' : 'REPORTED';
     return {
-      category: HAZARD_LABEL_MAP[step.tool] ?? toolLabel(step.tool),
+      tool: step.tool,
+      category: toolLabel(step.tool),
       status,
       count: count != null ? formatCount(count) : '\u2014',
       severity: stepSeverity(step, count, prob),
-      isHigh: step.status === 'error' ? false : undefined,
     };
   });
   const observedCount = feedRows.filter(r => r.status === 'OBSERVED' || r.status === 'REPORTED').length;
   const highCount = feedRows.filter(r => r.severity === 'HIGH').length;
   const alertLevel = highCount > 0 ? 'HIGH' : observedCount > 0 ? 'MODERATE' : 'LOW';
   const alertColor = highCount > 0 ? '#dc2626' : observedCount > 0 ? '#d97706' : '#16a34a';
+
+  /* Fused risk assessment — IDENTICAL to the panel's 📊 Fused Risk
+   * Assessment: every chain node, sorted desc, top 9, same labels. */
+  const fusedRisk = Object.entries(causalProbs)
+    .filter(([k]) => k !== '_composite' && k !== '_confidence' && chainTools.has(k))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 9)
+    .map(([id, prob]) => ({ label: toolLabel(id), probability: prob }));
+  const chainNodeCount = Object.keys(causalProbs).filter(k => chainTools.has(k) && !k.startsWith('_')).length;
 
   /* Environmental parameters — from the chain's own metric values */
   const temp = metricOf(steps, ['weather_forecast', 'weather_ensemble', 'gfs_forecast'], 'Temperature');
@@ -735,12 +746,10 @@ export function buildChainReportHtml(
   const windNum = numMetric(steps, ['weather_forecast', 'weather_ensemble', 'gfs_forecast'], 'Wind');
   const waveNum = numMetric(steps, ['marine'], 'Max Wave');
 
-  const impactVectors = impactVectorsFromProbs(causalProbs);
-
   const cond = metricOf(steps, ['weather_forecast'], 'Conditions');
   const execSummary = `Assessment for ${regionName} — AOI ${aoiTag}. Alert level: ${alertLevel}. ${observedCount} of ${steps.length} chain feed(s) reported data (${highCount} high-severity). `
     + `${temp ? `Temperature ${temp}` : 'Temperature N/A'}${cond ? ` (${cond})` : ''}, wind ${wind ?? 'N/A'}, wave height ${wave ?? 'N/A'}. `
-    + `${impactVectors.length > 0 ? 'Leading risk vectors: ' + impactVectors.slice(0, 3).map(v => `${v.label} (${(v.probability * 100).toFixed(0)}%)`).join(', ') + '.' : 'No significant risk vectors detected.'}`;
+    + `${fusedRisk.length > 0 ? 'Leading risk vectors: ' + fusedRisk.slice(0, 3).map(v => `${v.label} (${(v.probability * 100).toFixed(0)}%)`).join(', ') + '.' : 'No significant risk vectors detected.'}`;
 
   const sources = [...new Set(steps.map(s => TOOL_SOURCE[s.tool]).filter(Boolean))].join(', ') || 'chain tools';
 
@@ -768,20 +777,21 @@ export function buildChainReportHtml(
 
 <h2>Chain Hazard Feeds</h2>
 ${feedRows.length > 0
-  ? '<table><tr><th>Category</th><th>Status</th><th>Count</th><th>Severity</th></tr>' +
+  ? '<table><tr><th>Tool</th><th>Status</th><th>Count</th><th>Severity</th></tr>' +
     feedRows.map(f => `<tr><td>${f.category}</td><td>${f.status}</td><td>${f.count}</td><td class="${f.severity === 'HIGH' ? 'r-h' : f.severity === 'MODERATE' ? 'r-m' : 'r-l'}">${f.severity}</td></tr>`).join('') +
     '</table>'
   : '<div class="callout">Chain has no executed steps.</div>'}
 
-${impactVectors.length > 0
-  ? `<h2>Bayesian Hazard Impact Matrix</h2>
+${fusedRisk.length > 0
+  ? `<h2>Fused Risk Assessment</h2>
+<div class="callout" style="font-size:11px;color:#64748b;margin-bottom:6px;">Topological-order Noisy-OR propagation across ${chainNodeCount} chain nodes</div>
 <table><tr><th>Risk Vector</th><th>Probability</th></tr>` +
-    impactVectors.map(v => `<tr><td>${v.label}</td><td class="${v.probability > 0.6 ? 'r-h' : v.probability > 0.3 ? 'r-m' : 'r-l'}">${(v.probability * 100).toFixed(0)}%</td></tr>`).join('') +
+    fusedRisk.map(v => `<tr><td>${v.label}</td><td class="${v.probability > 0.6 ? 'r-h' : v.probability > 0.3 ? 'r-m' : 'r-l'}">${(v.probability * 100).toFixed(0)}%</td></tr>`).join('') +
     '</table>'
   : ''}
 
 <div class="footer">
-<p>Data sources: ${sources} &middot; Fused risk via causal Bayesian network (Noisy-OR propagation across 22 hazard nodes)</p>
+<p>Data sources: ${sources} &middot; Fused risk via causal Bayesian network (Noisy-OR propagation across ${chainNodeCount} chain nodes)</p>
 <p>This is an automated assessment generated by Earth Intelligence AI from the executed tool chain. Verify with local authorities. Not for operational decision-making without validation.</p>
 </div>
 </body></html>`;

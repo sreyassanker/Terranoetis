@@ -2865,12 +2865,19 @@ app.get('/api/weather/nhc', async (req: express.Request, res: express.Response) 
     );
 
     // Filter storms by bbox if provided
-    if (hasBbox && data?.storms) {
+    if (hasBbox && data?.activeStorms) {
+      // Parse NHC coordinate strings like "13.7N" or "115.5W" to signed floats
+      const parseCoord = (s: string): number => {
+        const v = parseFloat(s);
+        if (!Number.isFinite(v)) return NaN;
+        const dir = s.trim().slice(-1);
+        return (dir === 'S' || dir === 'W') ? -v : v;
+      };
       data = {
         ...data,
-        storms: data.storms.filter((s: any) => {
-          const sLat = parseFloat(s?.lat || s?.latitude);
-          const sLon = parseFloat(s?.lon || s?.longitude);
+        activeStorms: data.activeStorms.filter((s: any) => {
+          const sLat = parseCoord(s?.latitude ?? s?.lat ?? '');
+          const sLon = parseCoord(s?.longitude ?? s?.lon ?? '');
           if (!Number.isFinite(sLat) || !Number.isFinite(sLon)) return false;
           return sLat >= latMin && sLat <= latMax && sLon >= lonMin && sLon <= lonMax;
         }),
