@@ -96,37 +96,106 @@ const FALLBACK_COUNTRIES: Array<[number, number, string]> = [
 ];
 
 /** Reverse-geocode a lat/lon into an accurate place name (OSM Nominatim, no key).
+ *  Tries district/city level first (zoom=10), then falls back to state/country
+ *  (zoom=6) so a small study area is named by its district, not the whole state.
  *  Retries on rate-limit / transient failures, caches in memory, and falls back
  *  to the nearest country centroid when the API is unreachable. */
-export async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
-  const key = `${lat.toFixed(1)},${lon.toFixed(1)}`;
-  const cached = geocodeCache.get(key);
-  if (cached && Date.now() - cached.ts < GEOCODE_CACHE_TTL) return cached.name;
 
+/** Inner helper: reverse-geocode at a specific zoom with retry logic. */
+async function reverseGeocodeAtZoom(lat: number, lon: number, zoom: number): Promise<string | null> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const resp = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=6&accept-language=en`,
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=${zoom}&accept-language=en`,
         { headers: { 'User-Agent': 'EarthIntelligenceAI/1.0' }, signal: AbortSignal.timeout(10000) },
       );
       if (resp.status === 429) {
-        // Rate-limited — wait and retry
         if (attempt < 2) { await new Promise(r => setTimeout(r, 1200)); continue; }
         return null;
       }
       if (!resp.ok) return null;
       const d = await resp.json() as { address?: Record<string, string>; display_name?: string };
       const a = d.address || {};
-      const name = a.state || a.province || a.region || a.county || a.country || a.name || d.display_name;
-      if (name) {
-        geocodeCache.set(key, { name: String(name), ts: Date.now() });
-        return String(name);
-      }
+      const name = a.city_district || a.district || a.town || a.city || a.village || a.municipality ||
+        a.county || a.state || a.province || a.region || a.country || a.name || d.display_name;
+      if (name) return String(name);
       return null;
     } catch (e) {
-      logger.warn({ err: e, lat, lon, attempt }, 'Reverse geocode attempt failed');
+      logger.warn({ err: e, lat, lon, zoom, attempt }, 'Reverse geocode attempt failed');
       if (attempt < 2) { await new Promise(r => setTimeout(r, 1200)); continue; }
     }
+  }
+  return null;
+}
+
+/** Fetch at zoom=10 and compose "District, State" when both are available
+ *  (e.g. "Thiruvananthapuram, Kerala" instead of just "Thiruvananthapuram"). */
+async function reverseGeocodeWithState(lat: number, lon: number): Promise<string | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const resp = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=10&accept-language=en`,
+        { headers: { 'User-Agent': 'EarthIntelligenceAI/1.0' }, signal: AbortSignal.timeout(10000) },
+      );
+      if (resp.status === 429) {
+        if (attempt < 2) { await new Promise(r => setTimeout(r, 1200)); continue; }
+        return null;
+      }
+      if (!resp.ok) return null;
+      const d = await resp.json() as { address?: Record<string, string>; display_name?: string };
+      const a = d.address || {};
+      const local = a.city_district || a.district || a.town || a.city || a.village || a.municipality || a.county;
+      const region = a.state || a.province || a.region;
+      // Prefer the local + region combo (e.g. "Thiruvananthapuram, Kerala").
+      if (local && region && local !== region) return `${local}, ${region}`;
+      if (local) return local;
+      if (region) return region;
+      return null;
+    } catch (e) {
+      logger.warn({ err: e, lat, lon, zoom: 10, attempt }, 'reverseGeocodeWithState failed');
+      if (attempt < 2) { await new Promise(r => setTimeout(r, 1200)); continue; }
+    }
+  }
+  return null;
+}
+
+export async function reverseGeocode(
+  lat: number,
+  lon: number,
+  bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null,
+): Promise<string | null> {
+  const key = `${lat.toFixed(1)},${lon.toFixed(1)}`;
+  const cached = geocodeCache.get(key);
+  if (cached && Date.now() - cached.ts < GEOCODE_CACHE_TTL) return cached.name;
+
+  // Estimate AOI extent in km so a huge area (e.g. a whole state) is named by
+  // its state, while a small study area (e.g. one district) gets a fine name.
+  let spanKm = 0;
+  if (bbox && isFinite(bbox.latMin) && isFinite(bbox.latMax) && isFinite(bbox.lonMin) && isFinite(bbox.lonMax)) {
+    const latKm = Math.abs(bbox.latMax - bbox.latMin) * 111;
+    const lonKm = Math.abs(bbox.lonMax - bbox.lonMin) * 111 * Math.cos((bbox.latMin + bbox.latMax) / 2 * Math.PI / 180);
+    spanKm = Math.max(latKm, lonKm);
+  }
+
+  // Small AOI (< ~80 km across): name the district / town + state.
+  if (spanKm < 80 || !bbox) {
+    const local = await reverseGeocodeWithState(lat, lon);
+    if (local) {
+      geocodeCache.set(key, { name: local, ts: Date.now() });
+      return local;
+    }
+    const districtOnly = await reverseGeocodeAtZoom(lat, lon, 10);
+    if (districtOnly) {
+      geocodeCache.set(key, { name: districtOnly, ts: Date.now() });
+      return districtOnly;
+    }
+  }
+
+  // Large AOI or no fine name: state / province / country level.
+  const state = await reverseGeocodeAtZoom(lat, lon, 6);
+  if (state) {
+    geocodeCache.set(key, { name: state, ts: Date.now() });
+    return state;
   }
 
   // Fallback: nearest country centroid
@@ -521,8 +590,9 @@ export function buildReportHtml(regionName: string, lats: {latMin:number;latMax:
   const aoiTag = aoiTagOf(lats);
   const totalHaz = result.earthquakes.length + result.storms.length + result.floods.length + result.gdacs.length;
   const highHaz = [...result.earthquakes, ...result.storms, ...result.floods, ...result.gdacs].filter(e => e.severity === 'high').length;
-  const alertLevel = highHaz > 0 ? 'HIGH' : totalHaz > 0 ? 'MODERATE' : 'LOW';
-  const alertColor = highHaz > 0 ? '#dc2626' : totalHaz > 0 ? '#d97706' : '#16a34a';
+  const moderateHazFromActive = [...result.earthquakes, ...result.storms, ...result.floods, ...result.gdacs].filter(e => e.severity === 'medium').length;
+  const alertLevel = highHaz > 0 ? 'HIGH' : moderateHazFromActive > 0 ? 'MODERATE' : totalHaz > 0 ? 'LOW' : 'LOW';
+  const alertColor = highHaz > 0 ? '#dc2626' : moderateHazFromActive > 0 ? '#d97706' : '#16a34a';
   const impactVectors = impactVectorsFromProbs(result.fusion.causalProbs);
   const seaState = result.marine.seaState;
   const beaufort = result.marine.beaufort;
@@ -723,8 +793,9 @@ export function buildChainReportHtml(
   });
   const observedCount = feedRows.filter(r => r.status === 'OBSERVED' || r.status === 'REPORTED').length;
   const highCount = feedRows.filter(r => r.severity === 'HIGH').length;
-  const alertLevel = highCount > 0 ? 'HIGH' : observedCount > 0 ? 'MODERATE' : 'LOW';
-  const alertColor = highCount > 0 ? '#dc2626' : observedCount > 0 ? '#d97706' : '#16a34a';
+  const moderateCount = feedRows.filter(r => r.severity === 'MODERATE').length;
+  const alertLevel = highCount > 0 ? 'HIGH' : moderateCount > 0 ? 'MODERATE' : observedCount > 0 ? 'LOW' : 'LOW';
+  const alertColor = highCount > 0 ? '#dc2626' : moderateCount > 0 ? '#d97706' : '#16a34a';
 
   /* Fused risk assessment — IDENTICAL to the panel's 📊 Fused Risk
    * Assessment: every chain node, sorted desc, top 9, same labels. */
