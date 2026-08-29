@@ -125,6 +125,8 @@ export function formatStepResult(
       if (temp !== undefined) metrics.push({ label: 'Temperature', value: `${temp}°C` });
       if (humidity !== undefined) metrics.push({ label: 'Humidity', value: `${humidity}%` });
       if (wind !== undefined) metrics.push({ label: 'Wind', value: `${wind}${(current?.wind_speed_10m ?? cw?.windspeed) !== undefined ? ' km/h' : ' m/s'}` });
+      const pressure = (current?.pressure_msl ?? cw?.pressure) as number | undefined;
+      if (pressure !== undefined) metrics.push({ label: 'Pressure', value: `${pressure} hPa` });
       const labelStr = label != null ? String(label) : '';
       if (labelStr && !conditions) metrics.push({ label: 'Conditions', value: labelStr });
       if (metrics.length === 0) summary = 'Weather data unavailable';

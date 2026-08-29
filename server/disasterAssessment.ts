@@ -45,24 +45,106 @@ async function fetchText(url: string, timeoutMs = 15000): Promise<string | null>
   }
 }
 
-/** Reverse-geocode a lat/lon into an accurate place name (OSM Nominatim, no key). */
+// In-memory reverse-geocode cache (1 hour TTL)
+const geocodeCache = new Map<string, { name: string; ts: number }>();
+const GEOCODE_CACHE_TTL = 3_600_000;
+
+/** Country centroids for a local fallback when Nominatim is unreachable. */
+const FALLBACK_COUNTRIES: Array<[number, number, string]> = [
+  [20.6, 79.0, 'India'], [28.4, 84.1, 'Nepal'], [30.4, 69.3, 'Pakistan'],
+  [23.7, 90.4, 'Bangladesh'], [24.9, 67.0, 'Pakistan'], [33.9, 67.7, 'Afghanistan'],
+  [27.5, 90.4, 'Bhutan'], [21.9, 95.9, 'Myanmar'], [35.9, 104.2, 'China'],
+  [39.9, 116.4, 'China'], [31.2, 121.5, 'China'], [35.7, 139.7, 'Japan'],
+  [37.6, 127.0, 'South Korea'], [13.8, 100.5, 'Thailand'], [14.1, 108.3, 'Vietnam'],
+  [3.1, 101.7, 'Malaysia'], [1.4, 103.8, 'Singapore'], [-6.2, 106.8, 'Indonesia'],
+  [12.9, 121.8, 'Philippines'], [23.7, 120.9, 'Taiwan'], [42.0, 127.5, 'North Korea'],
+  [33.9, 67.7, 'Afghanistan'], [32.4, 53.7, 'Iran'], [33.2, 43.7, 'Iraq'],
+  [30.6, 36.2, 'Jordan'], [34.8, 39.0, 'Syria'], [33.9, 35.9, 'Lebanon'],
+  [31.0, 34.9, 'Israel'], [24.7, 46.7, 'Saudi Arabia'], [15.6, 48.5, 'Yemen'],
+  [23.4, 53.8, 'UAE'], [25.4, 51.2, 'Qatar'], [29.3, 47.6, 'Kuwait'],
+  [26.0, 50.6, 'Bahrain'], [21.5, 55.9, 'Oman'], [24.0, 45.1, 'Saudi Arabia'],
+  [9.1, 8.7, 'Nigeria'], [26.8, 30.8, 'Egypt'], [9.1, 40.5, 'Ethiopia'],
+  [-0.02, 37.9, 'Kenya'], [7.9, -1.0, 'Ghana'], [31.8, -7.1, 'Morocco'],
+  [33.9, 9.5, 'Tunisia'], [36.8, 10.2, 'Tunisia'], [28.0, 1.7, 'Algeria'],
+  [26.3, 17.2, 'Libya'], [12.9, 30.2, 'Sudan'], [5.9, 12.3, 'Cameroon'],
+  [7.5, -5.5, 'Côte d\'Ivoire'], [14.5, -14.5, 'Senegal'], [-4.0, 21.8, 'DR Congo'],
+  [-13.1, 27.8, 'Zambia'], [-19.0, 29.2, 'Zimbabwe'], [-22.3, 24.7, 'Botswana'],
+  [17.6, 8.1, 'Niger'], [12.4, -1.6, 'Burkina Faso'], [15.5, 18.7, 'Chad'],
+  [6.6, 20.9, 'CAR'], [17.6, -4.0, 'Mali'], [9.0, 38.7, 'Ethiopia'],
+  [39.8, -98.6, 'United States'], [56.1, -106.3, 'Canada'], [23.6, -102.6, 'Mexico'],
+  [14.0, -86.5, 'Honduras'], [15.8, -90.2, 'Guatemala'], [11.0, -74.0, 'Colombia'],
+  [-0.5, -78.0, 'Ecuador'], [-12.0, -77.0, 'Peru'], [-14.2, -51.9, 'Brazil'],
+  [-34.6, -58.4, 'Argentina'], [-33.4, -70.7, 'Chile'], [-38.4, -63.6, 'Argentina'],
+  [51.2, 10.4, 'Germany'], [55.4, -3.4, 'United Kingdom'], [46.2, 2.2, 'France'],
+  [41.9, 12.6, 'Italy'], [40.5, -3.7, 'Spain'], [38.9, 35.2, 'Turkey'],
+  [61.5, 105.3, 'Russia'], [48.4, 31.2, 'Ukraine'], [52.1, 5.3, 'Netherlands'],
+  [50.5, 4.5, 'Belgium'], [47.5, 14.6, 'Austria'], [46.8, 8.2, 'Switzerland'],
+  [60.1, 18.6, 'Sweden'], [60.5, 8.5, 'Norway'], [55.2, 23.9, 'Lithuania'],
+  [56.9, 24.1, 'Latvia'], [58.6, 25.0, 'Estonia'], [39.1, 21.8, 'Greece'],
+  [47.2, 19.5, 'Hungary'], [51.9, 19.1, 'Poland'], [49.8, 6.1, 'Luxembourg'],
+  [35.9, 14.4, 'Malta'], [33.4, 35.5, 'Lebanon'], [41.2, 20.2, 'Albania'],
+  [44.0, 21.0, 'Serbia'], [43.9, 17.7, 'Bosnia and Herzegovina'],
+  [42.7, 25.5, 'Bulgaria'], [45.1, 15.2, 'Croatia'], [46.2, 14.9, 'Slovenia'],
+  [48.7, 19.7, 'Slovakia'], [49.8, 15.5, 'Czech Republic'], [45.9, 25.0, 'Romania'],
+  [47.4, 28.4, 'Moldova'], [53.7, 27.9, 'Belarus'],
+  [-25.3, 133.8, 'Australia'], [-40.9, 174.9, 'New Zealand'],
+  [-17.7, 178.1, 'Fiji'], [-6.3, 143.9, 'Papua New Guinea'],
+  [15.9, 100.9, 'Thailand'], [4.2, 101.9, 'Malaysia'], [1.4, 103.8, 'Singapore'],
+  [46.9, 103.8, 'Mongolia'], [48.0, 68.0, 'Kazakhstan'], [40.4, 64.6, 'Uzbekistan'],
+  [38.9, 59.6, 'Turkmenistan'], [41.4, 64.6, 'Uzbekistan'], [38.9, 71.3, 'Tajikistan'],
+  [41.2, 74.8, 'Kyrgyzstan'], [50.0, 10.0, 'Germany'],
+];
+
+/** Reverse-geocode a lat/lon into an accurate place name (OSM Nominatim, no key).
+ *  Retries on rate-limit / transient failures, caches in memory, and falls back
+ *  to the nearest country centroid when the API is unreachable. */
 export async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
-  try {
-    const resp = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=6&accept-language=en`,
-      { headers: { 'User-Agent': 'EarthIntelligenceAI/1.0' }, signal: AbortSignal.timeout(8000) },
-    );
-    if (!resp.ok) return null;
-    const d = await resp.json() as { address?: Record<string, string>; display_name?: string };
-    const a = d.address || {};
-    // Prefer a region-level name: state / province / county / country
-    const name = a.state || a.province || a.region || a.county || a.country || a.name || d.display_name;
-    if (name) return String(name);
-    return null;
-  } catch (e) {
-    logger.warn({ err: e, lat, lon }, 'Reverse geocode failed');
-    return null;
+  const key = `${lat.toFixed(1)},${lon.toFixed(1)}`;
+  const cached = geocodeCache.get(key);
+  if (cached && Date.now() - cached.ts < GEOCODE_CACHE_TTL) return cached.name;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const resp = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=6&accept-language=en`,
+        { headers: { 'User-Agent': 'EarthIntelligenceAI/1.0' }, signal: AbortSignal.timeout(10000) },
+      );
+      if (resp.status === 429) {
+        // Rate-limited — wait and retry
+        if (attempt < 2) { await new Promise(r => setTimeout(r, 1200)); continue; }
+        return null;
+      }
+      if (!resp.ok) return null;
+      const d = await resp.json() as { address?: Record<string, string>; display_name?: string };
+      const a = d.address || {};
+      const name = a.state || a.province || a.region || a.county || a.country || a.name || d.display_name;
+      if (name) {
+        geocodeCache.set(key, { name: String(name), ts: Date.now() });
+        return String(name);
+      }
+      return null;
+    } catch (e) {
+      logger.warn({ err: e, lat, lon, attempt }, 'Reverse geocode attempt failed');
+      if (attempt < 2) { await new Promise(r => setTimeout(r, 1200)); continue; }
+    }
   }
+
+  // Fallback: nearest country centroid
+  let best = '';
+  let bestDist = Infinity;
+  const toRad = (d: number) => d * Math.PI / 180;
+  for (const [clat, clon, name] of FALLBACK_COUNTRIES) {
+    const dlat = toRad(lat - clat);
+    const dlon = toRad(lon - clon);
+    const a = Math.sin(dlat / 2) ** 2 + Math.cos(toRad(lat)) * Math.cos(toRad(clat)) * Math.sin(dlon / 2) ** 2;
+    const dist = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    if (dist < bestDist) { bestDist = dist; best = name; }
+  }
+  if (best && bestDist < 5000) {
+    geocodeCache.set(key, { name: best, ts: Date.now() });
+    return best;
+  }
+  return null;
 }
 
 export interface AssessmentResult {
@@ -330,71 +412,9 @@ export async function runDisasterAssessment(input: AssessmentInput): Promise<Ass
   return { earthquakes, storms, wildfires, floods, weather, airQuality, gdacs, marine, vessels, fusion, summary };
 }
 
-export function buildReportHtml(regionName: string, lats: {latMin:number;latMax:number;lonMin:number;lonMax:number}, result: AssessmentResult): string {
-  // IST (UTC+5:30) — India Standard Time, no DST.
-  const istNow = new Date(Date.now() + 5.5 * 3600000);
-  const istStr = istNow.toISOString().slice(0, 19).replace('T', ' ');
-  const now = istStr;
-  const aoiTag = `${lats.latMin.toFixed(1)}\u00b0N, ${lats.latMax.toFixed(1)}\u00b0N | ${lats.lonMin.toFixed(1)}\u00b0E, ${lats.lonMax.toFixed(1)}\u00b0E`;
-  const totalHaz = result.earthquakes.length + result.storms.length + result.floods.length + result.gdacs.length;
-  const highHaz = [...result.earthquakes, ...result.storms, ...result.floods, ...result.gdacs].filter(e => e.severity === 'high').length;
-  const alertLevel = highHaz > 0 ? 'HIGH' : totalHaz > 0 ? 'MODERATE' : 'LOW';
-  const alertColor = highHaz > 0 ? '#dc2626' : totalHaz > 0 ? '#d97706' : '#16a34a';
+/* ── Shared report building blocks (both report builders) ── */
 
-  // Map tool IDs to legitimate hazard-impact vectors
-  const hazardLabelMap: Record<string, string> = {
-    floods: 'Storm Surge / Inundation',
-    flood_forecast: 'Storm Surge / Inundation',
-    storms: 'Tropical Cyclone Activity',
-    marine: 'Coastal Exposure',
-    earthquakes: 'Seismic Hazard',
-    weather_forecast: 'Extreme Convective Activity',
-    weather_ensemble: 'Severe Weather Potential',
-    gfs_forecast: 'Severe Weather Potential',
-    seasonal_forecast: 'Seasonal Climate Risk',
-    climate_historical: 'Climate Anomaly Baseline',
-    air_quality: 'Atmospheric Quality',
-    firms_fires: 'Fire / Thermal Anomaly',
-    wildfires: 'Fire / Thermal Anomaly',
-    seismic_events: 'Seismic Hazard',
-    water_resources: 'Hydrological Stress',
-    disaster_declarations: 'Regulatory Hazard Status',
-    agriculture: 'Agricultural Stress',
-    infrastructure: 'Infrastructure Exposure',
-    satellite_analyze: 'Remote Sensing Anomaly',
-    sentiment_analyze: 'Social Sentiment Indicator',
-    gdelt: 'Geo-Event Indicator',
-    population: 'Population Exposure',
-  };
-
-  // Only include legitimate hazard-impact vectors (skip non-physical tools)
-  const impactVectors = result.fusion.topHazards
-    .filter(h => {
-      const id = h.label.replace(/ /g, '_');
-      return hazardLabelMap[id] !== undefined && !['sentiment_analyze', 'gdelt', 'population', 'satellite_analyze'].includes(id);
-    })
-    .map(h => {
-      const id = h.label.replace(/ /g, '_');
-      return { label: hazardLabelMap[id] || h.label, probability: h.probability };
-    });
-
-  // Douglas sea-state description
-  const seaState = result.marine.seaState;
-  const beaufort = result.marine.beaufort;
-
-  // Active hazard feeds — only relevant categories
-  const activeFeeds: Array<{ category: string; status: string; count: number; severity: string }> = [];
-  if (result.earthquakes.length > 0) activeFeeds.push({ category: 'Seismic Activity', status: 'OBSERVED', count: result.earthquakes.length, severity: result.earthquakes.some(e => e.severity === 'high') ? 'HIGH' : 'MODERATE' });
-  if (result.storms.length > 0) activeFeeds.push({ category: 'Tropical Cyclone', status: 'WATCH', count: result.storms.length, severity: 'HIGH' });
-  if (result.floods.length > 0) activeFeeds.push({ category: 'Flood / Inundation', status: 'OBSERVED', count: result.floods.length, severity: result.floods.some(e => e.severity === 'high') ? 'HIGH' : 'MODERATE' });
-  if (result.gdacs.length > 0) activeFeeds.push({ category: 'GDACS Alert', status: 'ACTIVE', count: result.gdacs.length, severity: result.gdacs.some(e => e.severity === 'high') ? 'HIGH' : 'MODERATE' });
-  if (result.marine.waveHeightM != null && result.marine.waveHeightM > 4) activeFeeds.push({ category: 'Marine Warning', status: 'ACTIVE', count: 1, severity: 'HIGH' });
-  else if (result.marine.waveHeightM != null && result.marine.waveHeightM > 2.5) activeFeeds.push({ category: 'Marine Warning', status: 'ADVISORY', count: 1, severity: 'MODERATE' });
-
-  const execSummary = `Assessment for ${regionName} — AOI ${aoiTag}. Alert level: ${alertLevel}. ${totalHaz > 0 ? totalHaz + ' active hazard feed(s) detected (' + highHaz + ' high).' : 'No active hazard feeds.'} Wind ${result.weather.wind}, wave height ${result.marine.waveHeight}. Sea state: ${seaState}. ${impactVectors.length > 0 ? 'Leading risk vectors: ' + impactVectors.slice(0, 3).map(v => v.label + ' (' + (v.probability * 100).toFixed(0) + '%)').join(', ') + '.' : ''}`;
-
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+const REPORT_CSS = `
   body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; background:#fff; color:#1e293b; padding:24px; max-width:780px; margin:0 auto; line-height:1.5; font-size:13px; }
   h1 { font-size:20px; font-weight:700; margin:0 0 2px 0; color:#0f172a; }
   .header { border-bottom:1px solid #e2e8f0; padding-bottom:12px; margin-bottom:16px; }
@@ -415,10 +435,114 @@ export function buildReportHtml(regionName: string, lats: {latMin:number;latMax:
   .footer { margin-top:24px; padding-top:10px; border-top:1px solid #e2e8f0; font-size:9px; color:#94a3b8; }
   .footer p { margin:1px 0; }
   @media (max-width:480px) { body { padding:12px; } .grid2 { grid-template-columns:1fr; } }
-</style></head><body>
+`;
+
+/** IST (UTC+5:30) timestamp string — India Standard Time, no DST. */
+function istNowStr(): string {
+  return new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function aoiTagOf(lats: { latMin: number; latMax: number; lonMin: number; lonMax: number }): string {
+  return `${lats.latMin.toFixed(1)}\u00b0N, ${lats.latMax.toFixed(1)}\u00b0N | ${lats.lonMin.toFixed(1)}\u00b0E, ${lats.lonMax.toFixed(1)}\u00b0E`;
+}
+
+/** Map tool IDs to legitimate hazard-impact vectors */
+const HAZARD_LABEL_MAP: Record<string, string> = {
+  floods: 'Storm Surge / Inundation',
+  flood_forecast: 'Storm Surge / Inundation',
+  storms: 'Tropical Cyclone Activity',
+  marine: 'Coastal Exposure',
+  earthquakes: 'Seismic Hazard',
+  weather_forecast: 'Extreme Convective Activity',
+  weather_ensemble: 'Severe Weather Potential',
+  gfs_forecast: 'Severe Weather Potential',
+  seasonal_forecast: 'Seasonal Climate Risk',
+  climate_historical: 'Climate Anomaly Baseline',
+  air_quality: 'Atmospheric Quality',
+  firms_fires: 'Fire / Thermal Anomaly',
+  wildfires: 'Fire / Thermal Anomaly',
+  seismic_events: 'Seismic Hazard',
+  water_resources: 'Hydrological Stress',
+  disaster_declarations: 'Regulatory Hazard Status',
+  agriculture: 'Agricultural Stress',
+  infrastructure: 'Infrastructure Exposure',
+  satellite_analyze: 'Remote Sensing Anomaly',
+  sentiment_analyze: 'Social Sentiment Indicator',
+  gdelt: 'Geo-Event Indicator',
+  population: 'Population Exposure',
+};
+
+/** Context tools — informational, never hazard-severity drivers. */
+const CONTEXT_TOOLS = new Set(['population', 'sentiment_analyze', 'gdelt', 'satellite_analyze', 'infrastructure', 'predict', 'radar_fetch']);
+
+/** Bayesian impact vectors from causal probs — only legitimate physical
+ *  hazard vectors, strongest first (same mapping as the legacy report). */
+function impactVectorsFromProbs(causalProbs: Record<string, number>): Array<{ label: string; probability: number }> {
+  return Object.entries(causalProbs)
+    .filter(([id, p]) => HAZARD_LABEL_MAP[id] !== undefined && !CONTEXT_TOOLS.has(id)
+      && id !== '_composite' && id !== '_confidence' && typeof p === 'number' && p > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([id, probability]) => ({ label: HAZARD_LABEL_MAP[id], probability }));
+}
+
+/** Beaufort wind force from wind speed in km/h. */
+function beaufortScale(windKph: number): string {
+  const kt = windKph / 1.852;
+  if (kt < 1) return 'Beaufort 0 (Calm)';
+  if (kt < 4) return 'Beaufort 1 (Light air)';
+  if (kt < 7) return 'Beaufort 2 (Light breeze)';
+  if (kt < 11) return 'Beaufort 3 (Gentle breeze)';
+  if (kt < 17) return 'Beaufort 4 (Moderate breeze)';
+  if (kt < 22) return 'Beaufort 5 (Fresh breeze)';
+  if (kt < 28) return 'Beaufort 6 (Strong breeze)';
+  if (kt < 34) return 'Beaufort 7 (Near gale)';
+  if (kt < 41) return 'Beaufort 8 (Gale)';
+  if (kt < 48) return 'Beaufort 9 (Strong gale)';
+  if (kt < 56) return 'Beaufort 10 (Storm)';
+  if (kt < 64) return 'Beaufort 11 (Violent storm)';
+  return 'Beaufort 12 (Hurricane)';
+}
+
+/** Douglas Sea State classification from significant wave height (metres). */
+function douglasSeaState(waveM: number): string {
+  if (waveM < 0.1) return 'Calm (Douglas 0)';
+  if (waveM < 0.5) return 'Smooth (Douglas 1)';
+  if (waveM < 1.25) return 'Slight (Douglas 2)';
+  if (waveM < 2.5) return 'Moderate (Douglas 3)';
+  if (waveM < 4) return 'Rough (Douglas 4)';
+  if (waveM < 6) return 'Very Rough (Douglas 5)';
+  if (waveM < 9) return 'High (Douglas 6)';
+  if (waveM < 14) return 'Very High (Douglas 7)';
+  return 'Phenomenal (Douglas 8)';
+}
+
+export function buildReportHtml(regionName: string, lats: {latMin:number;latMax:number;lonMin:number;lonMax:number}, result: AssessmentResult): string {
+  const aoiTag = aoiTagOf(lats);
+  const totalHaz = result.earthquakes.length + result.storms.length + result.floods.length + result.gdacs.length;
+  const highHaz = [...result.earthquakes, ...result.storms, ...result.floods, ...result.gdacs].filter(e => e.severity === 'high').length;
+  const alertLevel = highHaz > 0 ? 'HIGH' : totalHaz > 0 ? 'MODERATE' : 'LOW';
+  const alertColor = highHaz > 0 ? '#dc2626' : totalHaz > 0 ? '#d97706' : '#16a34a';
+  const impactVectors = impactVectorsFromProbs(result.fusion.causalProbs);
+  const seaState = result.marine.seaState;
+  const beaufort = result.marine.beaufort;
+
+  // Active hazard feeds — only relevant categories
+  const activeFeeds: Array<{ category: string; status: string; count: number; severity: string }> = [];
+  if (result.earthquakes.length > 0) activeFeeds.push({ category: 'Seismic Activity', status: 'OBSERVED', count: result.earthquakes.length, severity: result.earthquakes.some(e => e.severity === 'high') ? 'HIGH' : 'MODERATE' });
+  if (result.storms.length > 0) activeFeeds.push({ category: 'Tropical Cyclone', status: 'WATCH', count: result.storms.length, severity: 'HIGH' });
+  if (result.floods.length > 0) activeFeeds.push({ category: 'Flood / Inundation', status: 'OBSERVED', count: result.floods.length, severity: result.floods.some(e => e.severity === 'high') ? 'HIGH' : 'MODERATE' });
+  if (result.gdacs.length > 0) activeFeeds.push({ category: 'GDACS Alert', status: 'ACTIVE', count: result.gdacs.length, severity: result.gdacs.some(e => e.severity === 'high') ? 'HIGH' : 'MODERATE' });
+  if (result.marine.waveHeightM != null && result.marine.waveHeightM > 4) activeFeeds.push({ category: 'Marine Warning', status: 'ACTIVE', count: 1, severity: 'HIGH' });
+  else if (result.marine.waveHeightM != null && result.marine.waveHeightM > 2.5) activeFeeds.push({ category: 'Marine Warning', status: 'ADVISORY', count: 1, severity: 'MODERATE' });
+
+  const execSummary = `Assessment for ${regionName} — AOI ${aoiTag}. Alert level: ${alertLevel}. ${totalHaz > 0 ? totalHaz + ' active hazard feed(s) detected (' + highHaz + ' high).' : 'No active hazard feeds.'} Wind ${result.weather.wind}, wave height ${result.marine.waveHeight}. Sea state: ${seaState}. ${impactVectors.length > 0 ? 'Leading risk vectors: ' + impactVectors.slice(0, 3).map(v => v.label + ' (' + (v.probability * 100).toFixed(0) + '%)').join(', ') + '.' : ''}`;
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${REPORT_CSS}</style></head><body>
 <div class="header">
 <h1>Disaster Assessment Report: ${regionName}</h1>
-<div class="meta">AOI: <small>${aoiTag}</small> &middot; ${now} IST &middot; <span class="alert-badge" style="background:${alertColor}">${alertLevel} ALERT</span></div>
+<div class="meta">AOI: <small>${aoiTag}</small> &middot; ${istNowStr()} IST &middot; <span class="alert-badge" style="background:${alertColor}">${alertLevel} ALERT</span></div>
 </div>
 
 <h2>Executive Summary</h2>
@@ -451,6 +575,214 @@ ${impactVectors.length > 0
 <div class="footer">
 <p>Data sources: USGS, NASA EONET, Open-Meteo, GDACS, FIRMS, NHC &middot; Fused risk via causal Bayesian network (Noisy-OR propagation across 22 hazard nodes)</p>
 <p>This is an automated assessment generated by Earth Intelligence AI. Verify with local authorities. Not for operational decision-making without validation.</p>
+</div>
+</body></html>`;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   CHAIN-NATIVE REPORT — built from the Tool Workbench's ACTUAL step
+   results (what the panel shows), not a server-side re-fetch.
+   ═════════════════════════════════════════════════════════════════ */
+
+export interface ChainStepResult {
+  tool: string;
+  status: 'success' | 'synthetic' | 'error';
+  summary: string;
+  metrics: Array<{ label: string; value: string }>;
+  latencyMs: number;
+  timestamp: string;
+}
+
+const TOOL_SOURCE: Record<string, string> = {
+  earthquakes: 'USGS', seismic_events: 'USGS', water_resources: 'USGS NWIS',
+  weather_forecast: 'Open-Meteo', weather_ensemble: 'Open-Meteo Ensemble',
+  seasonal_forecast: 'Open-Meteo Seasonal', climate_historical: 'Open-Meteo Archive',
+  air_quality: 'Open-Meteo CAMS', marine: 'Open-Meteo Marine', flood_forecast: 'GloFAS',
+  floods: 'NASA EONET', wildfires: 'NASA EONET', storms: 'NOAA NHC',
+  firms_fires: 'NASA FIRMS', gfs_forecast: 'NOAA GFS', agriculture: 'NASA POWER',
+  gdelt: 'GDELT Project', sentiment_analyze: 'Social Feeds', population: 'WorldPop',
+  infrastructure: 'OpenStreetMap', disaster_declarations: 'FEMA',
+  satellite_analyze: 'NASA GIBS', space_weather: 'NOAA SWPC', radar_fetch: 'NWS',
+  predict: 'Chain Evidence',
+};
+
+const COUNT_LABELS = ['Events', 'Hotspots', 'Storms', 'Wildfires', 'Floods', 'Articles', 'Declarations', 'Sites', 'Features', 'Buildings', 'Alerts', 'Population', 'Volume', 'Frames', 'Predictions'];
+
+function toolLabel(tool: string): string {
+  return tool.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+function metricOf(steps: ChainStepResult[], tools: string[], label: string): string | null {
+  for (const tool of tools) {
+    const step = steps.find(s => s.tool === tool);
+    const m = step?.metrics.find(x => x.label === label);
+    if (m && m.value !== 'N/A' && m.value !== '') return m.value;
+  }
+  return null;
+}
+
+function numMetric(steps: ChainStepResult[], tools: string[], label: string): number | null {
+  const v = metricOf(steps, tools, label);
+  if (v == null) return null;
+  const n = parseFloat(String(v).replace(/[^\d.-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function stepCount(step: ChainStepResult): number | null {
+  for (const lbl of COUNT_LABELS) {
+    const m = step.metrics.find(x => x.label === lbl);
+    if (m) {
+      const v = parseFloat(String(m.value).replace(/,/g, ''));
+      if (Number.isFinite(v) && v >= 0) return v;
+    }
+  }
+  return null;
+}
+
+function formatCount(v: number): string {
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+  return String(Math.round(v));
+}
+
+function stepSeverity(step: ChainStepResult, count: number | null, prob: number): 'HIGH' | 'MODERATE' | 'LOW' {
+  const n = (label: string) => numMetric([step], [step.tool], label);
+  let high = false;
+  let moderate = false;
+  switch (step.tool) {
+    case 'earthquakes': case 'seismic_events': {
+      const mag = n('Max Mag');
+      high = mag != null && mag >= 6;
+      moderate = count != null && count > 0;
+      break;
+    }
+    case 'storms': {
+      const wind = n('Max Wind');
+      high = wind != null && wind >= 64;
+      moderate = count != null && count > 0;
+      break;
+    }
+    case 'marine': {
+      const wave = n('Max Wave');
+      high = wave != null && wave > 4;
+      moderate = wave != null && wave > 2.5;
+      break;
+    }
+    case 'flood_forecast': {
+      const p = n('Flood Prob');
+      high = p != null && p >= 50;
+      moderate = p != null && p >= 20;
+      break;
+    }
+    case 'air_quality': {
+      const aqi = n('US AQI');
+      high = aqi != null && aqi >= 150;
+      moderate = aqi != null && aqi >= 100;
+      break;
+    }
+    case 'firms_fires': {
+      high = count != null && count >= 50;
+      moderate = count != null && count >= 10;
+      break;
+    }
+    case 'floods': case 'wildfires': case 'space_weather':
+      moderate = count != null && count > 0;
+      break;
+    default:
+      moderate = !CONTEXT_TOOLS.has(step.tool) && count != null && count > 0;
+  }
+  // Causal-network agreement can escalate, never de-flag, a data signal.
+  if (prob >= 0.5) high = true;
+  return high ? 'HIGH' : moderate ? 'MODERATE' : 'LOW';
+}
+
+/** Build the report HTML from the workbench chain's own step results —
+ *  exactly what the user sees in the panel, no server-side re-fetch. */
+export function buildChainReportHtml(
+  regionName: string,
+  bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number },
+  steps: ChainStepResult[],
+  causalProbs: Record<string, number>,
+): string {
+  const aoiTag = aoiTagOf(bbox);
+
+  /* Hazard feeds — one honest row per chain step */
+  const feedRows = steps.map(step => {
+    const count = stepCount(step);
+    const prob = typeof causalProbs[step.tool] === 'number' ? causalProbs[step.tool] : 0;
+    const status = step.status === 'error' ? 'FAILED' : count != null && count > 0 ? 'OBSERVED' : count != null ? 'NO DATA' : 'REPORTED';
+    return {
+      category: HAZARD_LABEL_MAP[step.tool] ?? toolLabel(step.tool),
+      status,
+      count: count != null ? formatCount(count) : '\u2014',
+      severity: stepSeverity(step, count, prob),
+      isHigh: step.status === 'error' ? false : undefined,
+    };
+  });
+  const observedCount = feedRows.filter(r => r.status === 'OBSERVED' || r.status === 'REPORTED').length;
+  const highCount = feedRows.filter(r => r.severity === 'HIGH').length;
+  const alertLevel = highCount > 0 ? 'HIGH' : observedCount > 0 ? 'MODERATE' : 'LOW';
+  const alertColor = highCount > 0 ? '#dc2626' : observedCount > 0 ? '#d97706' : '#16a34a';
+
+  /* Environmental parameters — from the chain's own metric values */
+  const temp = metricOf(steps, ['weather_forecast', 'weather_ensemble', 'gfs_forecast'], 'Temperature');
+  const wind = metricOf(steps, ['weather_forecast', 'weather_ensemble', 'gfs_forecast', 'climate_historical'], 'Wind');
+  const humidity = metricOf(steps, ['weather_forecast'], 'Humidity');
+  const pressure = metricOf(steps, ['weather_forecast'], 'Pressure');
+  const wave = metricOf(steps, ['marine'], 'Max Wave');
+  const swell = metricOf(steps, ['marine'], 'Max Swell');
+  const aqi = metricOf(steps, ['air_quality'], 'US AQI');
+  const windNum = numMetric(steps, ['weather_forecast', 'weather_ensemble', 'gfs_forecast'], 'Wind');
+  const waveNum = numMetric(steps, ['marine'], 'Max Wave');
+
+  const impactVectors = impactVectorsFromProbs(causalProbs);
+
+  const cond = metricOf(steps, ['weather_forecast'], 'Conditions');
+  const execSummary = `Assessment for ${regionName} — AOI ${aoiTag}. Alert level: ${alertLevel}. ${observedCount} of ${steps.length} chain feed(s) reported data (${highCount} high-severity). `
+    + `${temp ? `Temperature ${temp}` : 'Temperature N/A'}${cond ? ` (${cond})` : ''}, wind ${wind ?? 'N/A'}, wave height ${wave ?? 'N/A'}. `
+    + `${impactVectors.length > 0 ? 'Leading risk vectors: ' + impactVectors.slice(0, 3).map(v => `${v.label} (${(v.probability * 100).toFixed(0)}%)`).join(', ') + '.' : 'No significant risk vectors detected.'}`;
+
+  const sources = [...new Set(steps.map(s => TOOL_SOURCE[s.tool]).filter(Boolean))].join(', ') || 'chain tools';
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${REPORT_CSS}</style></head><body>
+<div class="header">
+<h1>Disaster Assessment Report: ${regionName}</h1>
+<div class="meta">AOI: <small>${aoiTag}</small> &middot; ${istNowStr()} IST &middot; <span class="alert-badge" style="background:${alertColor}">${alertLevel} ALERT</span></div>
+</div>
+
+<h2>Executive Summary</h2>
+<div class="callout">${execSummary}</div>
+
+<h2>Environmental Parameters</h2>
+<div class="grid2">
+  <div class="card"><div class="card-label">Temperature (2 m)</div><div class="card-value">${temp ?? 'N/A'}</div></div>
+  <div class="card"><div class="card-label">Wind (10 m)</div><div class="card-value">${wind ?? 'N/A'}${windNum != null ? ' &middot; ' + beaufortScale(windNum) : ''}</div></div>
+  <div class="card"><div class="card-label">Humidity</div><div class="card-value">${humidity ?? 'N/A'}</div></div>
+  <div class="card"><div class="card-label">Barometric Pressure</div><div class="card-value">${pressure ?? 'N/A'}</div></div>
+  <div class="card"><div class="card-label">Significant Wave Height</div><div class="card-value">${wave ?? 'N/A'}</div></div>
+  <div class="card"><div class="card-label">Swell Height</div><div class="card-value">${swell ?? 'N/A'}</div></div>
+  <div class="card"><div class="card-label">Sea State (Douglas)</div><div class="card-value">${waveNum != null ? douglasSeaState(waveNum) : 'N/A'}</div></div>
+  <div class="card"><div class="card-label">Air Quality (US AQI)</div><div class="card-value">${aqi ?? 'N/A'}</div></div>
+</div>
+
+<h2>Chain Hazard Feeds</h2>
+${feedRows.length > 0
+  ? '<table><tr><th>Category</th><th>Status</th><th>Count</th><th>Severity</th></tr>' +
+    feedRows.map(f => `<tr><td>${f.category}</td><td>${f.status}</td><td>${f.count}</td><td class="${f.severity === 'HIGH' ? 'r-h' : f.severity === 'MODERATE' ? 'r-m' : 'r-l'}">${f.severity}</td></tr>`).join('') +
+    '</table>'
+  : '<div class="callout">Chain has no executed steps.</div>'}
+
+${impactVectors.length > 0
+  ? `<h2>Bayesian Hazard Impact Matrix</h2>
+<table><tr><th>Risk Vector</th><th>Probability</th></tr>` +
+    impactVectors.map(v => `<tr><td>${v.label}</td><td class="${v.probability > 0.6 ? 'r-h' : v.probability > 0.3 ? 'r-m' : 'r-l'}">${(v.probability * 100).toFixed(0)}%</td></tr>`).join('') +
+    '</table>'
+  : ''}
+
+<div class="footer">
+<p>Data sources: ${sources} &middot; Fused risk via causal Bayesian network (Noisy-OR propagation across 22 hazard nodes)</p>
+<p>This is an automated assessment generated by Earth Intelligence AI from the executed tool chain. Verify with local authorities. Not for operational decision-making without validation.</p>
 </div>
 </body></html>`;
 }

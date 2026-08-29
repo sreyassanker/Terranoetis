@@ -313,6 +313,8 @@ const AVAILABLE_TOOLS: Tool[] = [
 interface ToolWorkbenchProps {
   onClose: () => void;
   bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
+  /** Name of the active study area (used in the emailed report heading). */
+  studyAreaName?: string | null;
   onSurfaceData?: (toolId: string, resultJson: string) => void;
   onClear?: () => void;
 }
@@ -321,7 +323,7 @@ interface ToolWorkbenchProps {
    COMPONENT
    ═════════════════════════════════════════════════════════════════ */
 
-export default function ToolWorkbench({ onClose, bbox, onSurfaceData, onClear }: ToolWorkbenchProps) {
+export default function ToolWorkbench({ onClose, bbox, studyAreaName, onSurfaceData, onClear }: ToolWorkbenchProps) {
   const [chain, setChain] = useState<ChainStep[]>([]);
   const [executing, setExecuting] = useState(false);
   const [formattedResults, setFormattedResults] = useState<Record<string, FormattedStepResult>>({});
@@ -734,14 +736,32 @@ export default function ToolWorkbench({ onClose, bbox, onSurfaceData, onClear }:
     setEmailing(true);
     setEmailMsg(null);
     try {
+      // Send the chain's ACTUAL step results so the email mirrors the panel
+      // exactly (no server-side re-fetch with different windows/params).
+      const hasResults = Object.keys(formattedResults).length > 0;
+      const steps = hasResults
+        ? chain.map(s => {
+            const fr = formattedResults[s.id];
+            return {
+              tool: s.tool,
+              status: fr?.status ?? ('error' as const),
+              summary: fr?.summary ?? 'Not executed',
+              metrics: fr?.metrics ?? [],
+              latencyMs: fr?.latencyMs ?? 0,
+              timestamp: fr?.timestamp ?? '',
+            };
+          })
+        : undefined;
       const resp = await fetch('/api/agent/workbench-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
-          regionName: undefined,
+          regionName: studyAreaName ?? undefined,
           bbox,
           causalProbs,
           chainTools: chain.map(s => s.tool),
+          steps,
+          studyAreaName: studyAreaName ?? undefined,
         }),
       });
       const data = await resp.json();
