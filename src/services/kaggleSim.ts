@@ -228,8 +228,18 @@ export interface ScenarioFormParams {
 export function buildSimulationRequest(
   form: ScenarioFormParams,
   bbox: StudyAreaBbox,
+  ventPoint?: { lat: number; lon: number } | null,
 ): SimulationRequest {
-  const { lat: cLat, lon: cLon } = deriveCenter(bbox);
+  // Manual vent/origin point overrides the bbox centroid (clamped to the box so
+  // the simulation stays on the study-area grid). Falls back to the centroid.
+  const c = deriveCenter(bbox);
+  const vp = ventPoint;
+  const cLat = vp
+    ? Math.min(bbox.latMax, Math.max(bbox.latMin, vp.lat))
+    : c.lat;
+  const cLon = vp
+    ? Math.min(bbox.lonMax, Math.max(bbox.lonMin, vp.lon))
+    : c.lon;
   const extent_km = deriveExtentKm(bbox);
   const { params, scenarioType } = form;
 

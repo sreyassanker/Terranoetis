@@ -352,6 +352,10 @@ def simulate_volcano(params):
     total_sim_sec = duration_hours * 3600.0
     wallclock_max = float(params.get('wallclock_max_sec', 480))
     snap_interval_sec = total_sim_sec / 20.0  # 20 snapshots
+    # Hard step cap — mirrors the landslide kernel (min(total_steps, 4000)) so
+    # the heavy lava+ash+plume solve finishes quickly on Kaggle instead of
+    # burning the full wall-clock budget.
+    max_steps = int(params.get('max_steps', 8000))
 
     # Eruption rate (m³/s) — scales with VEI, active for first half of duration
     eruption_rate = lava_vol_total / (total_sim_sec * 0.5)
@@ -386,7 +390,7 @@ def simulate_volcano(params):
     sim_t = 0.0
     step_i = 0
 
-    while sim_t < total_sim_sec:
+    while sim_t < total_sim_sec and step_i < max_steps:
         if time.time() - t0 > wallclock_max:
             print(f"  [WALL-CLOCK CAP] Stopping at t={sim_t/3600:.1f}h (elapsed {time.time()-t0:.0f}s)")
             break
@@ -397,7 +401,7 @@ def simulate_volcano(params):
         max_h = float(h.max())
         wave_speed = np.sqrt(G * max_h) + V_MAX
         dt = CFL * dx_m / max(wave_speed, 1e-6)
-        dt = min(dt, 1.0)  # cap at 1s
+        dt = min(dt, 15.0)  # CFL-safe cap (≈10 s for 78 m cells) — keeps step count low
 
         # ── Eruption column: Gaussian spread of the M-T plume height ──
         if active_eruption:
@@ -675,6 +679,34 @@ def simulate_volcano(params):
 
         sim_t += dt
         step_i += 1
+
+    # ── Pad snapshots to the full configured duration ──
+    # The step/wall-clock caps can stop the solve early (a few hours in). The
+    # client animation must still span 0 → duration_hours, so pad with the last
+    # computed (settled) state at the remaining time points → always 20 frames.
+    NUM_FRAMES = 20
+    if len(snapshots) > 0:
+        last = snapshots[-1]
+        while len(snapshots) < NUM_FRAMES:
+            s = dict(last)
+            s['time_hours'] = round(min(total_sim_sec, len(snapshots) * snap_interval_sec) / 3600, 2)
+            snapshots.append(s)
+    else:
+        for k in range(NUM_FRAMES):
+            snapshots.append({
+                'column_height': column_height.astype(np.float32),
+                'ash_deposit': ash_deposit.astype(np.float32),
+                'ash_column': ash_col.astype(np.float32),
+                'lava_thickness': h.astype(np.float32),
+                'lava_temp': lava_temp.astype(np.float32),
+                'time_hours': round((k * snap_interval_sec) / 3600, 2),
+                'max_column_m': float(column_height.max()),
+                'max_ash_m': float(ash_deposit.max()),
+                'lava_cells': int((h > 0).sum()),
+                'max_lava_thickness_m': float(h.max()),
+                'avg_lava_temp_k': float(lava_temp[h > 0].mean()) if (h > 0).any() else T_AMBIENT,
+                'solidified_cells': int(((lava_temp < T_SOLIDUS) & (h > 0)).sum()),
+            })
 
     elapsed = time.time() - t0
     final = {

@@ -11,7 +11,8 @@
  * top level of the component body.
  */
 
-import { Fragment, useCallback, useMemo, useState } from 'react';
+import { Fragment, useCallback, useMemo, useRef, useEffect, useState } from 'react';
+import * as Cesium from 'cesium';
 import type { Viewer } from 'cesium';
 import { Sliders, CheckCircle, Loader2, Cpu, Download, ExternalLink, Image, X } from 'lucide-react';
 import type { StudyAreaItem } from '@/rendering/studyArea';
@@ -194,6 +195,12 @@ export default function ScenarioEditor({
   // switching the dropdown mid-run doesn't fetch the wrong raster for the old job.
   const [runScenarioType, setRunScenarioType] = useState<string | null>(null);
 
+  // Manual vent/origin point — only used for the volcanic scenario. Placed on
+  // the real terrain surface (0 m ellipsoid, CLAMP_TO_GROUND).
+  const [ventPoint, setVentPoint] = useState<{ lat: number; lon: number } | null>(null);
+  const ventHandlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
+  const ventMarkerRef = useRef<Cesium.Entity | null>(null);
+
   // Derived geometry for the active study area (memoised on identity, not on
   // every render — cheap defence against accidental recompute).
   const activeStudyArea: StudyAreaItem | undefined = useMemo(
@@ -225,6 +232,56 @@ export default function ScenarioEditor({
     setParams(defaultsFor(type));
   }, []);
 
+  /** Remove only the vent marker entity — keeps the drawn bbox on the globe. */
+  const clearVentMarker = useCallback(() => {
+    if (!viewer) return;
+    if (ventMarkerRef.current) {
+      viewer.entities.remove(ventMarkerRef.current);
+      ventMarkerRef.current = null;
+    }
+  }, [viewer]);
+
+  /** Let the user click an exact vent/ignition point inside the study area. */
+  const pickVentPoint = useCallback(() => {
+    if (!viewer || !activeBbox) return;
+    clearVentMarker();
+    setVentPoint(null);
+    if (ventHandlerRef.current && !ventHandlerRef.current.isDestroyed()) {
+      ventHandlerRef.current.destroy();
+    }
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    ventHandlerRef.current = handler;
+    handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
+      // Pick the EXACT terrain surface (not the ellipsoid) so the vent point
+      // lands precisely where the user clicks, not shifted by terrain elevation.
+      const ray = viewer.camera.getPickRay(click.position);
+      if (!ray) return;
+      const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
+      if (cartesian) {
+        const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+        const pt = {
+          lat: Cesium.Math.toDegrees(cartographic.latitude),
+          lon: Cesium.Math.toDegrees(cartographic.longitude),
+        };
+        setVentPoint(pt);
+        drawVentMarker(viewer, pt, ventMarkerRef);
+      }
+      if (!handler.isDestroyed()) handler.destroy();
+      ventHandlerRef.current = null;
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+  }, [viewer, activeBbox, clearVentMarker]);
+
+  // Clean up the vent picker handler + marker on unmount or study-area change.
+  useEffect(() => {
+    return () => {
+      if (ventHandlerRef.current && !ventHandlerRef.current.isDestroyed()) {
+        ventHandlerRef.current.destroy();
+      }
+      ventHandlerRef.current = null;
+      clearVentMarker();
+    };
+  }, [clearVentMarker, activeBbox]);
+
   // Sampling a 256×256 real-terrain grid is async (yields to the event loop so
   // the browser stays responsive) — the button shows progress while preparing.
   const [preparing, setPreparing] = useState(false);
@@ -237,6 +294,7 @@ export default function ScenarioEditor({
       const base = buildSimulationRequest(
         { scenarioType, params, gridSize: 256 },
         activeBbox,
+        scenarioType === 'volcanic_eruption' ? ventPoint : null,
       );
       // Landslide + flood + volcano: if the Cesium globe has real elevation for
       // the drawn box, sample it at full resolution (256×256 — no bilinear
@@ -257,7 +315,7 @@ export default function ScenarioEditor({
     } finally {
       setPreparing(false);
     }
-  }, [activeBbox, scenarioType, params, viewer, kaggle]);
+  }, [activeBbox, scenarioType, params, viewer, kaggle, ventPoint]);
 
   // ── Voellmy calibration (fit μ/ξ to an observed runout) ──
   const [calibInput, setCalibInput] = useState('2.9');
@@ -407,10 +465,43 @@ export default function ScenarioEditor({
           )}
         </div>
 
+        {/* Manual Vent / Origin Point — volcano only */}
+        {activeBbox && scenarioType === 'volcanic_eruption' && (
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 600 }}>
+              {ventPoint ? 'Vent / Origin Point' : 'Pinpoint the exact location'}
+            </div>
+            {ventPoint ? (
+              <div className="scenario-info" style={{ background: 'rgba(234,88,12,0.12)', borderRadius: 8, padding: 8 }}>
+                <div className="info-row"><span className="info-key">Lat</span><span className="info-val">{ventPoint.lat.toFixed(4)}°</span></div>
+                <div className="info-row"><span className="info-key">Lon</span><span className="info-val">{ventPoint.lon.toFixed(4)}°</span></div>
+              </div>
+            ) : (
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6 }}>
+                Defaults to the study-area centroid. Click a precise point on the terrain for better accuracy.
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="glass-button" style={{ fontSize: 10, flex: 1 }}
+                onClick={pickVentPoint} disabled={formDisabled}>
+                {ventPoint ? '↻ Re-pick Point' : '📍 Set Point on Globe'}
+              </button>
+              {ventPoint && (
+                <button className="glass-button" style={{ fontSize: 10 }}
+                  onClick={() => {
+                    setVentPoint(null);
+                    clearVentMarker();
+                  }}>
+                  ✕ Clear
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Scenario Type */}
         <div>
-          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4 }}>Scenario Type</div>
-          <select
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4 }}>Scenario Type</div>          <select
             className="token-input"
             value={scenarioType}
             onChange={(e) => switchScenarioType(e.target.value)}
@@ -683,4 +774,37 @@ export default function ScenarioEditor({
     </Panel>
     </div>
   );
+}
+
+/** Orange VENT marker pinned to the real terrain surface (0 m, CLAMP_TO_GROUND). */
+function drawVentMarker(
+  viewer: Viewer,
+  pt: { lat: number; lon: number },
+  markerRef: { current: Cesium.Entity | null },
+): void {
+  if (markerRef.current) {
+    viewer.entities.remove(markerRef.current);
+    markerRef.current = null;
+  }
+  markerRef.current = viewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(pt.lon, pt.lat, 0),
+    point: {
+      pixelSize: 12,
+      color: Cesium.Color.fromCssColorString('#f97316'),
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    },
+    label: {
+      text: 'VENT',
+      font: '10px monospace',
+      fillColor: Cesium.Color.fromCssColorString('#f97316'),
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset: new Cesium.Cartesian2(0, -16),
+      scale: 0.85,
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    },
+  });
 }
