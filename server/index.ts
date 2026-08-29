@@ -7799,7 +7799,7 @@ app.post('/api/agent/workbench-report', authGuard, async (req: express.Request, 
   // area's name → coordinate fallback. Coordinates alone tell a reader
   // nothing about where the report is from.
   let areaName: string | null = null;
-  try { areaName = await reverseGeocode(midLat, midLon); } catch { areaName = null; }
+  try { areaName = await reverseGeocode(midLat, midLon, bbox); } catch { areaName = null; }
   const region = areaName || regionName || studyAreaName
     || `Region ${bbox.latMin.toFixed(1)}-${bbox.latMax.toFixed(1)}N, ${bbox.lonMin.toFixed(1)}-${bbox.lonMax.toFixed(1)}E`;
   const emailTo = process.env.GMAIL_REPORT_TO || '';
@@ -8178,7 +8178,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       const midLon = (bboxForName.lonMin + bboxForName.lonMax) / 2;
       let regionName = intent.location?.label || null;
       if (!regionName) {
-        try { regionName = await reverseGeocode(midLat, midLon); } catch { regionName = null; }
+        try { regionName = await reverseGeocode(midLat, midLon, bboxForName); } catch { regionName = null; }
       }
       if (!regionName) {
         regionName = `Region ${bboxForName.latMin.toFixed(1)}-${bboxForName.latMax.toFixed(1)}N, ${bboxForName.lonMin.toFixed(1)}-${bboxForName.lonMax.toFixed(1)}E`;
