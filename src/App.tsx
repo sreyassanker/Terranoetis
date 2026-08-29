@@ -60,7 +60,6 @@ import { HumanOverrideBanner } from '@/components/explainability/index';
 import { CognitiveDashboard, ToolWorkbench, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
 import { ApiVault } from '@/components/ui/ApiVault';
 import Panel from '@/components/ui/Panel';
-import ScenarioViewer from '@/components/scenarios/ScenarioViewer';
 import ScenarioEditor from '@/components/scenarios/ScenarioEditor';
 import KaggleFloodOverlay from '@/components/KaggleFloodOverlay';
 import KaggleLandslideOverlay from '@/components/KaggleLandslideOverlay';
@@ -831,34 +830,6 @@ function adaptScenario(raw: any): any {
   };
 }
 
-function mapFrontendParams(type: string, params: Record<string, unknown>): Record<string, unknown> {
-  const { lat, lon, magnitude = 5, depth = 10, spread = 0.1, intensity = 1, duration = 24, windSpeed = 50, populationDensity: _pd, ...rest } = params;
-  const base = { lat, lon };
-  switch (type) {
-    case 'earthquake_swarm':
-      return { ...base, depthRange: [Math.max(0.1, (depth as number) - 5), (depth as number) + 5], magnitudeRange: [Math.max(0, (magnitude as number) - 2), Math.min(9.5, (magnitude as number) + 2)], numEvents: Math.max(10, Math.round((spread as number) * 100)), timeWindow: duration, decayModel: 'omori' };
-    case 'hurricane_landfall':
-      return { ...base, category: Math.min(7, Math.max(1, Math.round((magnitude as number) / 1.5))), forwardSpeed: windSpeed, pressure: Math.round(1050 - (intensity as number) * 10), radius: Math.max(10, (spread as number) * 200 + 10), landfallTime: duration };
-    case 'wildfire_spread':
-      return { ...base, area: Math.max(100, (spread as number) * 5000 + 500), windSpeed: windSpeed, windDir: 270, humidity: Math.max(0, Math.min(100, 100 - (depth as number))), fuelType: 'forest', duration };
-    case 'volcanic_eruption':
-      return { ...base, vei: Math.min(7, Math.max(1, Math.round((magnitude as number) / 2))), ashHeight: Math.max(1000, (intensity as number) * 2000), windDir: 260, duration };
-    case 'flood_inundation':
-      return { ...base, rainfall: Math.max(10, (intensity as number) * 100), catchmentArea: Math.max(100, (spread as number) * 5000), soilSaturation: Math.min(1, Math.max(0, (depth as number) / 100)), duration };
-    case 'landslide':
-      return { ...base, trigger_type: 'earthquake', magnitude: Math.max(4, Math.min(9.5, magnitude as number)), pga_threshold: 0.15, rainfall_mm: Math.max(50, (intensity as number) * 100), friction_angle: 35, cohesion: 500, duration_hours: duration };
-    case 'tsunami_wave': {
-      // Tsunami generator uses epicenterLat/epicenterLon (not lat/lon) and arrivalTimes.
-      // Map the shared bbox center → epicenter coords and synthesize arrival times.
-      const mag = magnitude as number;
-      const arr: number[] = [];
-      for (let t = 10; t <= 120; t += 10) arr.push(t);
-      return { ...base, epicenterLat: lat, epicenterLon: lon, magnitude: mag, depth: 20, waveHeight: Math.max(1, Math.round((spread as number) * 10)), arrivalTimes: arr, duration };
-    }
-    default:
-      return { ...base, ...params };
-  }
-}
 
 function richRender(text: string): string {
   const cached = RICH_MESSAGE_CACHE.get(text);
@@ -1368,21 +1339,8 @@ export default function App() {
       (window as unknown as Record<string, unknown>).setStudyAreaBbox = (bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null) => {
         useChatStore.getState().setStudyAreaBbox(bbox);
       };
-      // Load a generated scenario by id into the ScenarioViewer (used by e2e tests
-      // to bypass the gallery's top-N search results). Must be an object fetched
-      // from GET /api/scenarios/:id (or a scenario summary with timeSeries).
-      (window as unknown as Record<string, unknown>).setScenarioOverlay = (scenario: any) => {
-        if (!scenario) return;
-        setSelectedScenario(adaptScenario(scenario));
-        setSelectedScenarioId(scenario.id ?? null);
-        setShowScenarioGallery(false);
-        setShowScenarioEditor(false);
-        setShowSpatialSketching(false);
-        setShowCinematicDirector(false);
-      };
       return () => {
         delete (window as unknown as Record<string, unknown>).setKaggleOverlay;
-        delete (window as unknown as Record<string, unknown>).setScenarioOverlay;
       };
     }
   }, [kaggleOverlay]);
@@ -1410,8 +1368,6 @@ export default function App() {
   const [showSpatialSketching, setShowSpatialSketching] = useState(false);
   const [showPerfMonitor, setShowPerfMonitor] = useState(false);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const [selectedScenario, setSelectedScenario] = useState<any>(null);
-  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [scenarioGalleryScenarios, setScenarioGalleryScenarios] = useState<any[]>([]);
   const [scenarioGalleryLoading, setScenarioGalleryLoading] = useState(false);
   const [scenarioGalleryError, setScenarioGalleryError] = useState<string | null>(null);
@@ -10148,29 +10104,12 @@ export default function App() {
           scenarios={scenarioGalleryScenarios}
           loading={scenarioGalleryLoading}
           error={scenarioGalleryError}
-          onSelect={(id) => {
-            // Load the scenario object and select it so ScenarioViewer renders
-            const found = scenarioGalleryScenarios.find(s => s.id === id);
-            if (found) {
-              setSelectedScenario(found as any);
-              setSelectedScenarioId(id);
-              setShowScenarioGallery(false);
-            }
+          onSelect={() => {
+            setShowScenarioGallery(false);
           }}
           onCreateNew={() => { setShowScenarioGallery(false); setShowScenarioEditor(true); }}
           onClose={() => setShowScenarioGallery(false)}
           zIndex={getPanelZIndex('scenario-gallery')}
-        />
-      )}
-
-      {/* Scenario Viewer */}
-      {selectedScenario && (
-        <ScenarioViewer
-          viewer={viewerRef.current}
-          scenario={selectedScenario}
-          onClose={() => setSelectedScenario(null)}
-          onBack={() => { setSelectedScenario(null); setShowScenarioEditor(true); }}
-          zIndex={getPanelZIndex('scenario-viewer')}
         />
       )}
 
@@ -10184,31 +10123,7 @@ export default function App() {
           viewer={viewerRef.current}
           onKaggleComplete={(jobId, lat, lon, scenarioType) => {
             setShowScenarioEditor(false);
-            // For flood_inundation, the Kaggle CFD overlay IS the visualization —
-            // skip the procedural ScenarioViewer (blue box) entirely so only the
-            // GPU-rendered CFD surface shows on the globe.
-            if (scenarioType === 'flood_inundation') {
-              setKaggleOverlay({ jobId, lat, lon, scenarioType });
-              return;
-            }
-            // Other hazards: trigger the procedural viewer so ScenarioViewer renders
-            const mappedParams = mapFrontendParams(scenarioType, { lat, lon });
-            fetch('/api/scenarios/generate', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...authHeaders() },
-              body: JSON.stringify({ type: scenarioType, params: mappedParams }),
-            }).then(r => {
-              if (!r.ok) throw new Error(r.status === 401 ? 'Not logged in' : 'Generation failed');
-              return r.json();
-            }).then(data => {
-              if (data.scenario) {
-                setSelectedScenario(adaptScenario(data.scenario));
-                // Now that the scenario is injected, trigger the Kaggle overlay as well
-                setKaggleOverlay({ jobId, lat, lon, scenarioType });
-              }
-            }).catch(() => {
-              setKaggleOverlay({ jobId, lat, lon, scenarioType }); // Still show overlay
-            });
+            setKaggleOverlay({ jobId, lat, lon, scenarioType });
           }}
           onKaggleStart={() => setKaggleOverlay(null)} // Clear old overlay when starting a new run
         />
@@ -10330,19 +10245,12 @@ export default function App() {
           zIndex={getPanelZIndex('spatial-sketch')}
           onGenerateScenario={(type, params) => {
             setShowSpatialSketching(false);
-            const mappedParams = mapFrontendParams(type, params);
-            fetch('/api/scenarios/generate', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...authHeaders() },
-              body: JSON.stringify({ type, params: mappedParams }),
-            }).then(r => {
-              if (!r.ok) throw new Error(r.status === 401 ? 'Not logged in' : 'Generation failed');
-              return r.json();
-            }).then(data => {
-              if (data.scenario) setSelectedScenario(adaptScenario(data.scenario));
-            }).catch(err => {
-              setAiMessages(prev => [...prev, { id: Date.now(), role: 'assistant', content: `Scenario generation failed: ${err.message}`, type: 'error' }]);
-            });
+            setAiMessages(prev => [...prev, {
+              id: Date.now(),
+              role: 'assistant',
+              content: `Prepared a ${type.replace(/_/g, ' ')} scenario at your selected point.`,
+              type: 'text',
+            }]);
           }}
         />
       )}

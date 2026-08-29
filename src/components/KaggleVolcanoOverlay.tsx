@@ -1,8 +1,10 @@
 /**
- * KaggleVolcanoOverlay — 3D ash plume + blanketing CFD.
+ * KaggleVolcanoOverlay — 3D lava flow CFD.
  *
- * Ash_deposit snapshot series is displaced vertically with
- * magnitude-driven coloring; Lava thickness is auxiliary.
+ * Lava thickness is the primary scalar field, displaced vertically (3D mound)
+ * and animated over the snapshot series — the lava fills the vent area then
+ * overflows and spreads outward, exactly like the flood water-depth surface.
+ * Ash deposit is shown as an auxiliary stat.
  */
 
 import {
@@ -12,16 +14,17 @@ import {
 import type { ColorStop } from './kaggle/shared';
 import { formatSci } from '../lib/formatSci';
 
-const ASH_COLORMAP: ColorStop[] = [
-  { stop: 0.0, r: 60, g: 60, b: 60 },
-  { stop: 0.25, r: 120, g: 110, b: 100 },
-  { stop: 0.5, r: 180, g: 170, b: 160 },
-  { stop: 0.75, r: 220, g: 210, b: 200 },
-  { stop: 1.0, r: 250, g: 245, b: 240 },
+// ─── Lava Colormap: cooled dark crust → incandescent molten core ─────────
+const LAVA_COLORMAP: ColorStop[] = [
+  { stop: 0.0,  r: 25,  g: 15,  b: 10 },   // cooled dark crust
+  { stop: 0.25, r: 100, g: 25,  b: 10 },   // dark red
+  { stop: 0.5,  r: 200, g: 45,  b: 10 },   // red-orange
+  { stop: 0.75, r: 250, g: 130, b: 25 },   // orange
+  { stop: 1.0,  r: 255, g: 230, b: 120 },  // incandescent yellow-white
 ];
 
 const SCHEMES = [
-  { name: 'default', label: 'Ash load' },
+  { name: 'default', label: 'Lava flow' },
   { name: 'viridis', label: 'Viridis' },
   { name: 'turbo', label: 'Turbo' },
   { name: 'spectral', label: 'Spectral' },
@@ -32,27 +35,51 @@ const SCHEMES = [
 // eslint-disable-next-line react-refresh/only-export-components
 export const VOLCANO_CONFIG: ScalarOverlayConfig = {
   title: 'Volcano',
-  accent: 'rgba(156,163,175,0.95)',
+  accent: 'rgba(234,88,12,0.95)',
   typeKey: 'volcanic_eruption',
   fields: {
-    finalName: 'ash_deposit',
-    seriesName: 'snapshots_column',
+    finalName: 'lava_thickness',
+    seriesName: 'snapshots_lava',
+    timeName: 'snapshot_times',
   },
-  defaultColormap: ASH_COLORMAP,
-  surfaceColormap: 'plasma',
-  arrowColormap: 'viridis',
-  exaggeration: 240,
-  alphaFloor: 0.005,
+  defaultColormap: LAVA_COLORMAP,
+  surfaceColormap: 'turbo',
+  arrowColormap: 'inferno',
+  // 3D VOLUMETRIC LAVA: lava thickness is extruded into a rising mound so the
+  // "fill the vent → overflow → spread outward" behaviour is visually obvious,
+  // matching the flood overlay's water-depth mound.
+  exaggeration: 20,
+  alphaFloor: 0.01,
   sideTint: true,
   schemes: SCHEMES,
-  legendUnit: 'kg/m²',
-  auxFetchNames: ['lava_thickness'],
+  legendUnit: 'm',
+  auxFetchNames: ['ash_deposit'],
   formatTime: (t) => `${t.toFixed(1)} h`,
-  formatStats: ({ surface, aux, domainKm }) => {
-    const lava = aux['lava_thickness'] ? Math.max(...aux['lava_thickness'].values.filter(Number.isFinite)) : null;
+  formatStats: ({ surface, series, aux, domainKm, times }) => {
+    const maxLava = surface.maxValue;
+    const totalHours = times.length > 0 ? times[times.length - 1] : 0;
+
+    // Lava-extent percentage in the final frame (cells above a thin crust).
+    let lavaPct = 0;
+    if (series) {
+      const n = series.shape[1] * series.shape[2];
+      let cnt = 0;
+      for (let i = 0; i < n; i++) {
+        const idx = (series.shape[0] - 1) * n + i;
+        if (idx < series.values.length && series.values[idx] > 0.05) cnt++;
+      }
+      lavaPct = (cnt / n) * 100;
+    }
+
+    const ash = aux['ash_deposit']
+      ? Math.max(...aux['ash_deposit'].values.filter(Number.isFinite))
+      : null;
+
     return [
-      ['Max ash (kg/m²)', formatSci(surface.maxValue)],
-      ['Max lava (m)', lava != null && isFinite(lava) ? lava.toFixed(1) : '—'],
+      ['Max lava', `${maxLava.toFixed(1)} m`],
+      ['Lava extent', `${lavaPct.toFixed(1)}%`],
+      ['Max ash', ash != null && isFinite(ash) ? `${formatSci(ash)} kg/m²` : '—'],
+      ['Duration', `${totalHours.toFixed(1)} h`],
       ['Domain', `${domainKm.toFixed(1)} km`],
     ];
   },
