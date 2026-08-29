@@ -9948,7 +9948,7 @@ export default function App() {
 
       {/* Tool Workbench */}
       <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('toolworkbench', 110), width: 480, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', display: showToolWorkbench ? 'block' : 'none' }}>
-        <ToolWorkbench onClose={() => setShowToolWorkbench(false)} bbox={activeBbox} onSurfaceData={handleSurfaceData} onClear={() => { clearStudyArea(); clearInterpSurface(viewerRef.current!); }} />
+        <ToolWorkbench onClose={() => setShowToolWorkbench(false)} bbox={activeBbox} studyAreaName={studyAreas.find(a => a.id === activeStudyAreaId)?.name} onSurfaceData={handleSurfaceData} onClear={() => { clearStudyArea(); clearInterpSurface(viewerRef.current!); }} />
       </div>
 
       {/* Memory Explorer */}

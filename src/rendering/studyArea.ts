@@ -314,7 +314,13 @@ function buildOutlinePrimitive(
     }
     if (deduped.length < 2) return;
     instances.push(new Cesium.GeometryInstance({
-      geometry: new Cesium.GroundPolylineGeometry({ positions: deduped, loop: true, width }),
+      /* RHUMB arcs (constant-latitude N/S edges on boxes, constant-bearing
+       * segments on polygons) — GEODESIC's default great circles bulge
+       * poleward on a box's east-west edges, so the outline sits outside
+       * the surface at one edge and inside it at the opposite edge. Rhumb
+       * also matches how the drawer renders polygons and how the raster
+       * mask (straight lines in lon/lat space) cuts the surface. */
+      geometry: new Cesium.GroundPolylineGeometry({ positions: deduped, loop: true, width, arcType: Cesium.ArcType.RHUMB }),
       attributes: { color: colorAttr },
     }));
   };

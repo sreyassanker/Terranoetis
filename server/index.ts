@@ -88,7 +88,7 @@ import { sentimentAnalyzer } from './multimodal/sentimentAnalyzer';
 import { multimodalFusion } from './multimodal/multimodalFusion';
 import { registerAnalyticalModelsRoutes } from './analytical-models';
 import { computeWithContext } from './analytical-models/contextEngine';
-import { assessAndEmail, runDisasterAssessment, buildReportHtml, reverseGeocode } from './disasterAssessment';
+import { assessAndEmail, runDisasterAssessment, buildReportHtml, buildChainReportHtml, reverseGeocode } from './disasterAssessment';
 import { runFusionPipeline } from './disasterFusion';
 import { isEmailConfigured, sendEmail } from './email';
 import {
@@ -7774,20 +7774,48 @@ async function tryAnalyticalModelRunInner(
 // The Tool Workbench UI sends its chain results + causal probs here to
 // email an identical executive report (same builder as the AI assessment).
 app.post('/api/agent/workbench-report', authGuard, async (req: express.Request, res: express.Response) => {
-  const { regionName, bbox, causalProbs, chainTools } = req.body as {
+  const { regionName, bbox, causalProbs, chainTools, steps, studyAreaName } = req.body as {
     regionName?: string;
     bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number };
     causalProbs?: Record<string, number>;
     chainTools?: string[];
+    /** Actual per-step results from the executed chain (panel data). */
+    steps?: Array<{ tool: string; status: 'success' | 'synthetic' | 'error'; summary: string; metrics: Array<{ label: string; value: string }>; latencyMs: number; timestamp: string }>;
+    studyAreaName?: string;
   };
   if (!bbox) return res.status(400).json({ error: 'bbox required' });
 
-  const region = regionName || `Region ${bbox.latMin.toFixed(1)}-${bbox.latMax.toFixed(1)}N, ${bbox.lonMin.toFixed(1)}-${bbox.lonMax.toFixed(1)}E`;
+  const midLat = (bbox.latMin + bbox.latMax) / 2;
+  const midLon = (bbox.lonMin + bbox.lonMax) / 2;
+
+  // Area name for the heading: reverse-geocoded place name → drawn study
+  // area's name → coordinate fallback. Coordinates alone tell a reader
+  // nothing about where the report is from.
+  let areaName: string | null = null;
+  try { areaName = await reverseGeocode(midLat, midLon); } catch { areaName = null; }
+  const region = areaName || regionName || studyAreaName
+    || `Region ${bbox.latMin.toFixed(1)}-${bbox.latMax.toFixed(1)}N, ${bbox.lonMin.toFixed(1)}-${bbox.lonMax.toFixed(1)}E`;
   const emailTo = process.env.GMAIL_REPORT_TO || '';
 
-  // Reuse the full assessment pipeline so the report is identical to the
-  // AI-command report, but overlay the workbench's live causal probs.
+  // Preferred path: the chain's ACTUAL step results — identical numbers to
+  // the workbench panel. Falls back to an independent server-side assessment
+  // only when no chain has been executed (or every step failed).
+  const hasChainResults = Array.isArray(steps) && steps.length > 0
+    && steps.some(s => s?.status === 'success' || s?.status === 'synthetic');
   try {
+    if (hasChainResults) {
+      const html = buildChainReportHtml(region, bbox, steps!, causalProbs ?? {});
+      const emailResult = await sendEmail({
+        to: emailTo,
+        subject: `Disaster Assessment Report: ${region} — ${new Date().toISOString().slice(0, 10)}`,
+        html,
+      });
+      if (!emailResult.ok) return res.status(500).json({ error: emailResult.error });
+      return res.json({ ok: true, summary: `Chain report emailed for ${region} (${steps!.length} steps).`, messageId: emailResult.messageId });
+    }
+
+    // Reuse the full assessment pipeline so the report is identical to the
+    // AI-command report, but overlay the workbench's live causal probs.
     const result = await runDisasterAssessment({
       regionName: region,
       ...bbox,

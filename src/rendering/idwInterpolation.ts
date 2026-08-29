@@ -146,13 +146,18 @@ export function interpolateIDW(
   let valueMin = Infinity;
   let valueMax = -Infinity;
 
-  const xStep = (bboxMax.x - bboxMin.x) / (gridWidth - 1);
-  const yStep = (bboxMax.y - bboxMin.y) / (gridHeight - 1);
+  // Cell-centre sampling: cell (r,c) centre sits at (r+0.5, c+0.5) in grid
+  // units — the same convention the server grid and renderGridToCanvas/
+  // probeGridValue assume. Sampling edge-to-edge (row 0 at the exact bbox
+  // corner) instead would displace the whole rendered field half a cell
+  // toward the NE and smear corner values across the border band.
+  const xStep = (bboxMax.x - bboxMin.x) / gridWidth;
+  const yStep = (bboxMax.y - bboxMin.y) / gridHeight;
 
   for (let row = 0; row < gridHeight; row++) {
-    const y = bboxMin.y + row * yStep;
+    const y = bboxMin.y + (row + 0.5) * yStep;
     for (let col = 0; col < gridWidth; col++) {
-      const x = bboxMin.x + col * xStep;
+      const x = bboxMin.x + (col + 0.5) * xStep;
       const nbrs = nearestK(tree, x, y, Math.min(neighbors, projectedPoints.length));
       let weightSum = 0;
       let valueSum = 0;

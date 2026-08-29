@@ -1,5 +1,5 @@
 import * as Cesium from 'cesium';
-import { renderGridToCanvas } from './idwInterpolation';
+import { renderGridToCanvas, pointInRing } from './idwInterpolation';
 import type { InterpGrid } from './idwInterpolation';
 
 const DEFAULT_COLORS = [
@@ -70,12 +70,21 @@ export function getViewDependentResolution(
   return { width: maxGrid, height: maxGrid };
 }
 
-function renderConfidenceToCanvas(grid: InterpGrid): HTMLCanvasElement {
+function renderConfidenceToCanvas(
+  grid: InterpGrid,
+  maskPolygon?: Array<Array<[number, number]>>,
+): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = grid.width;
   canvas.height = grid.height;
   const ctx = canvas.getContext('2d')!;
   const image = ctx.createImageData(grid.width, grid.height);
+  // Same polygon mask as renderGridToCanvas: without it the confidence tint
+  // covers the full bbox rectangle and visibly spills outside a drawn
+  // polygon study area.
+  const outerRing = maskPolygon && maskPolygon.length > 0 ? maskPolygon[0] : undefined;
+  const dLon = (grid.lonMax - grid.lonMin) / grid.width;
+  const dLat = (grid.latMax - grid.latMin) / grid.height;
 
   let varMin = Infinity;
   let varMax = -Infinity;
@@ -89,8 +98,17 @@ function renderConfidenceToCanvas(grid: InterpGrid): HTMLCanvasElement {
   for (let row = 0; row < grid.height; row++) {
     // Flip Y: grid row 0 = south → canvas bottom (north-up rendering).
     const canvasRow = grid.height - 1 - row;
+    const lat = grid.latMin + (row + 0.5) * dLat;
     for (let col = 0; col < grid.width; col++) {
       const idx = row * grid.width + col;
+      const pi = (canvasRow * grid.width + col) * 4;
+      if (outerRing) {
+        const lon = grid.lonMin + (col + 0.5) * dLon;
+        if (!pointInRing(lon, lat, outerRing)) {
+          image.data[pi + 3] = 0;
+          continue;
+        }
+      }
       const t = (grid.variance[idx] - varMin) / span;
       let r = 0, g = 0, b = 0;
       for (let ci = 0; ci < CONFIDENCE_COLORS.length - 1; ci++) {
@@ -104,7 +122,6 @@ function renderConfidenceToCanvas(grid: InterpGrid): HTMLCanvasElement {
           break;
         }
       }
-      const pi = (canvasRow * grid.width + col) * 4;
       image.data[pi] = 255 - r;
       image.data[pi + 1] = 255 - g;
       image.data[pi + 2] = 255 - b;
@@ -134,7 +151,7 @@ export function showInterpSurface(
   (surfaceLayer as unknown as { name: string }).name = 'interp_surface';
 
   if (showConfidence && grid.variance.length > 0) {
-    const confCanvas = renderConfidenceToCanvas(grid);
+    const confCanvas = renderConfidenceToCanvas(grid, maskPolygon);
     const confUrl = confCanvas.toDataURL('image/png');
     const confProvider = new Cesium.SingleTileImageryProvider({ url: confUrl, rectangle: rect, tileWidth: grid.width, tileHeight: grid.height });
     confidenceLayer = viewer.scene.imageryLayers.addImageryProvider(confProvider);
