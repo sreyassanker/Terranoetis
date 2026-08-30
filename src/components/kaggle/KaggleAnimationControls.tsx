@@ -49,16 +49,15 @@ export default function KaggleAnimationControls({
       const elapsed = now - lastRef.current;
       lastRef.current = now;
       accumRef.current += elapsed;
-      // Advance exactly one frame per frameMs — RAF runs far faster than fps,
-      // so accumulate the delta and consume whole frameMs chunks. This fixes
-      // the previous always-step-1 behavior that played the timeline at
-      // render rate (~60fps) regardless of `fps`.
-      const steps = Math.floor(accumRef.current / frameMs);
-      if (steps >= 1) {
-        accumRef.current -= steps * frameMs;
-        frameRef.current = (frameRef.current + steps) % frames;
-        onFrameChange(frameRef.current);
-      }
+      // Advance at a FRACTIONAL frame rate so the shader's kaggleAtlasLerp can
+      // blend between floor(frame) and ceil(frame). Advancing by whole frames
+      // makes t = frame - floor(frame) always 0 → the interpolation never runs
+      // and the animation jumps frame-to-frame. We advance 1 frame per frameMs
+      // but pass the fractional position (frame += elapsed/frameMs) so the GPU
+      // lerps continuously.
+      const delta = elapsed / frameMs;
+      frameRef.current = (frameRef.current + delta) % frames;
+      onFrameChange(frameRef.current);
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
@@ -109,7 +108,7 @@ export default function KaggleAnimationControls({
           style={{ flex: 1, accentColor: '#fbbf24' }}
         />
         <span style={{ fontSize: 9, opacity: 0.85, minWidth: 62, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-          {fmt(curTime)} · {frame + 1}/{frames}
+          {fmt(curTime)} · {Math.floor(frame) + 1}/{frames}
         </span>
       </div>
     </div>

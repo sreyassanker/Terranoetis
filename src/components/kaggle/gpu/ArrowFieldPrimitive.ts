@@ -641,6 +641,8 @@ export class ArrowFieldPrimitive {
   /** Set the current animation frame — single GPU uniform update. */
   setFrame(idx: number): void {
     if (this.destroyed) return;
+    // Fractional frames drive kaggleAtlasLerp3; the integer early-return below
+    // would discard them (t always 0 → arrows never interpolate).
     const clamped = Math.max(0, Math.min(this.frames - 1, idx));
     if (clamped === this.currentFrame) return;
     this.currentFrame = clamped;

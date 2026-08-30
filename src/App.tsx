@@ -67,9 +67,6 @@ import KaggleEarthquakeOverlay from '@/components/KaggleEarthquakeOverlay';
 import KaggleHurricaneOverlay from '@/components/KaggleHurricaneOverlay';
 import KaggleWildfireOverlay from '@/components/KaggleWildfireOverlay';
 import KaggleVolcanoOverlay from '@/components/KaggleVolcanoOverlay';
-import VolcanoEnsembleOverlay, {
-  type VolcanicEnsembleResult,
-} from '@/components/kaggle/VolcanoEnsembleOverlay';
 import KaggleTsunamiOverlay from '@/components/KaggleTsunamiOverlay';
 import ScenarioGallery from '@/components/scenarios/ScenarioGallery';
 import CinematicDirector from '@/components/scenarios/CinematicDirector';
@@ -1330,9 +1327,6 @@ export default function App() {
   const [showScenarioGallery, setShowScenarioGallery] = useState(false);
   const [showScenarioEditor, setShowScenarioEditor] = useState(false);
   const [kaggleOverlay, setKaggleOverlay] = useState<{ jobId: string; lat: number; lon: number; scenarioType: string } | null>(null);
-  const [volcanoEnsemble, setVolcanoEnsemble] = useState<{
-    result: VolcanicEnsembleResult; lat: number; lon: number;
-  } | null>(null);
   // E2E bridge: Playwright live-render tests invoke this to trigger overlays
   // without driving the full ScenarioEditor UI. Production users never see it.
   useEffect(() => {
@@ -10132,9 +10126,6 @@ export default function App() {
             setKaggleOverlay({ jobId, lat, lon, scenarioType });
           }}
           onKaggleStart={() => setKaggleOverlay(null)} // Clear old overlay when starting a new run
-          onVolcanoUqComplete={(result, lat, lon) => {
-            setVolcanoEnsemble({ result, lat, lon });
-          }}
         />
       )}
 
@@ -10218,18 +10209,6 @@ export default function App() {
           // extent auto-derived from grid shape & cell size
           opacity={0.7}
           onDismiss={() => setKaggleOverlay(null)}
-        />
-      )}
-
-      {/* Volcano Ensemble UQ Overlay — decision-grade percentile maps */}
-      {volcanoEnsemble && (
-        <VolcanoEnsembleOverlay
-          viewer={viewerRef.current}
-          result={volcanoEnsemble.result}
-          lat={volcanoEnsemble.lat}
-          lon={volcanoEnsemble.lon}
-          cellSizeM={50}
-          onDismiss={() => setVolcanoEnsemble(null)}
         />
       )}
 
