@@ -37,6 +37,18 @@ const ATLAS_UV_GLSL = /* glsl */ `
     float row = floor(f / tiles.x);
     return (vec2(col, row) + clamp(st, 0.0, 1.0)) / tiles;
   }
+
+  /** Interpolated atlas sample — lerps between floor(frame) and ceil(frame)
+   *  for smooth animation instead of discrete frame jumps. */
+  float kaggleAtlasLerp(sampler2D tex, float frame, vec2 tiles, vec2 st) {
+    float totalFrames = tiles.x * tiles.y;
+    float f0 = floor(frame);
+    float f1 = min(f0 + 1.0, totalFrames - 1.0);
+    float t = frame - f0;
+    vec2 uv0 = kaggleAtlasUV(f0, tiles, st);
+    vec2 uv1 = kaggleAtlasUV(f1, tiles, st);
+    return mix(texture(tex, uv0).r, texture(tex, uv1).r, t);
+  }
 `;
 
 export interface ScalarSurfaceOptions {
@@ -225,8 +237,7 @@ export class ScalarSurfacePrimitive {
       ${ATLAS_UV_GLSL}
 
       void main() {
-        vec2 uv = kaggleAtlasUV(u_vs_frame, u_vs_tiles, st);
-        float norm = texture(u_vs_field, uv).r;
+        float norm = kaggleAtlasLerp(u_vs_field, u_vs_frame, u_vs_tiles, st);
 
         // czm_computePosition() yields the Cesium-encoded position
         // in the "relative-to-eye" frame the rasterizer expects.
@@ -295,8 +306,7 @@ export class ScalarSurfacePrimitive {
 
       czm_material czm_getMaterial(czm_materialInput materialInput) {
         czm_material material = czm_getDefaultMaterial(materialInput);
-        vec2 uv = kaggleAtlasUV(u_frame, u_tiles, materialInput.st);
-        float norm = texture(u_field, uv).r;
+        float norm = kaggleAtlasLerp(u_field, u_frame, u_tiles, materialInput.st);
         vec3 rgb = kaggleCmap(norm);
 
         ${this.sideTint ? `

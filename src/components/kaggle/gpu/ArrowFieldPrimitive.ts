@@ -42,6 +42,17 @@ const ATLAS_UV_GLSL = /* glsl */ `
     float row = floor(f / tiles.x);
     return (vec2(col, row) + clamp(st, 0.0, 1.0)) / tiles;
   }
+
+  /** Interpolated atlas sample for velocity — lerps between frames for smooth arrow animation. */
+  vec3 kaggleAtlasLerp3(sampler2D tex, float frame, vec2 tiles, vec2 st) {
+    float totalFrames = tiles.x * tiles.y;
+    float f0 = floor(frame);
+    float f1 = min(f0 + 1.0, totalFrames - 1.0);
+    float t = frame - f0;
+    vec2 uv0 = kaggleAtlasUV(f0, tiles, st);
+    vec2 uv1 = kaggleAtlasUV(f1, tiles, st);
+    return mix(texture(tex, uv0).rgb, texture(tex, uv1).rgb, t);
+  }
 `;
 
 // — Mesh template ----------------------------------------------------------
@@ -398,8 +409,7 @@ export class ArrowFieldPrimitive {
       ${ATLAS_UV_GLSL}
 
       void main() {
-        vec2 uv = kaggleAtlasUV(u_vs_frame, u_vs_tiles, st);
-        vec3 packed = texture(u_vs_field, uv).rgb;
+        vec3 packed = kaggleAtlasLerp3(u_vs_field, u_vs_frame, u_vs_tiles, st);
         float vx = packed.x * 2.0 - 1.0;   // east/top-right in grid frame
         float vy = packed.y * 2.0 - 1.0;   // south-positive in grid frame
         float speedNorm = packed.z;        // 0..1

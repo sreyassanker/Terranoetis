@@ -48,10 +48,14 @@ export const VOLCANO_CONFIG: ScalarOverlayConfig = {
   // 3D VOLUMETRIC LAVA: lava thickness is extruded into a rising mound so the
   // "fill the vent → overflow → spread outward" behaviour is visually obvious,
   // matching the flood overlay's water-depth mound.
-  exaggeration: 20,
+  // 60× (was 20×): thin VEI 1–2 flows (1–3 m) now visibly rise; thick VEI 5+
+  // flows (20+ m) create dramatic mounds without exceeding ~1 km displacement.
+  exaggeration: 60,
   alphaFloor: 0.01,
   sideTint: true,
   schemes: SCHEMES,
+  // 60 frames at 6 fps → 10 second smooth lava animation (vs old 5s jerky).
+  fps: 6,
   legendUnit: 'm',
   auxFetchNames: ['ash_deposit'],
   formatTime: (t) => `${t.toFixed(1)} h`,

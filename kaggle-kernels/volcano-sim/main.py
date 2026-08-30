@@ -907,29 +907,16 @@ def simulate_volcano(params):
     # ── Time stepping ──
     total_sim_sec = duration_hours * 3600.0
     wallclock_max = float(params.get('wallclock_max_sec', 480))
-    snap_interval_sec = total_sim_sec / 20.0  # 20 snapshots
-    # Hard step cap — mirrors the fire and landslide kernels (both cap at 4000)
-    # so the heavy lava+ash+plume solve is bounded for Kaggle resource limits.
-    # max_steps is a *safety* guard; the real time bound is wallclock_max. At a
-    # CFL timestep (~4 s for 150 m cells) 4000 steps ≈ 4.4 h of sim time, so a
-    # long-duration run is typically ended by wallclock_max first. If 4000 IS
-    # reached, `truncated` is set True and downstream frames are marked
-    # `settled` (frozen) so the truncation is never silent.
-    # 
-    # NEW: max_steps is auto-scaled to the duration so the full eruption
-    # actually completes. The formula: at dt ≈ 15s (CFL-capped), need
-    # total_sim_sec / 15 steps to cover the full duration. The user's
-    # complaint was "lava doesn't overflow" — the 4000 default cap stopped
-    # the simulation mid-eruption. The safety cap is still enforced by
-    # wallclock_max_sec (the Kaggle run kills after N seconds).
+    snap_interval_sec = total_sim_sec / 60.0  # 60 snapshots — dense sampling for smooth lava animation
+    # max_steps — auto-scaled to the FULL duration so the eruption completes
+    # and the animation actually shows lava progressing. The volcano's long
+    # timescale (tens of hours) needs far more steps than the landslide; the
+    # old fixed 4000 cap truncated the run before any lava flowed, leaving a
+    # frozen animation. wallclock_max_sec is the real bound for Kaggle.
     max_steps_user = int(params.get('max_steps', 0))
     if max_steps_user > 0:
         max_steps = max_steps_user
     else:
-        # Auto-scale to the FULL duration so the eruption always completes.
-        # dt ≈ CFL·dx/wave_speed; with dx=94m, VEI 7 lava (h~43m) → dt≈2.5 s,
-        # so 48 h needs ~70 000 steps. Divide by 2.0 (a conservative dt
-        # estimate — thick lava shrinks dt) and cap at 200 000.
         max_steps = max(2000, min(200_000, int(total_sim_sec / 2.0)))
 
     # Eruption rate (m³/s) — scales with VEI, active for first half of duration
@@ -1206,10 +1193,12 @@ def simulate_volcano(params):
     # ── Pad snapshots to the full configured duration ──
     # The step/wall-clock caps can stop the solve early (a few hours in). The
     # client animation must still span 0 → duration_hours, so pad with the last
-    # computed (settled) state at the remaining time points → always 20 frames.
+    # computed (settled) state at the remaining time points → always 60 frames.
+    # Dense frame count (60 vs old 20) gives ~48 min/frame for a 48h eruption
+    # so the lava APPEARS to flow rather than teleporting between positions.
     # Padded frames are marked `settled: True` so downstream consumers know the
     # state is frozen (no further evolution was simulated).
-    NUM_FRAMES = 20
+    NUM_FRAMES = 60
     truncated = sim_t < total_sim_sec - 1e-6 or step_i >= max_steps
     n_real = len(snapshots)
     if len(snapshots) > 0:
