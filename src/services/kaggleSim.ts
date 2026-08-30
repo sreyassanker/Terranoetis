@@ -66,6 +66,23 @@ export const SimulationRequestSchema = z.discriminatedUnion('type', [
     fuel_type: z.enum(['grass', 'shrub', 'forest', 'urban']),
     ignition_x: z.number().int().nonnegative().optional(),
     ignition_y: z.number().int().nonnegative().optional(),
+    /**
+     * Real terrain sampled from the Cesium globe for the drawn study box
+     * (row-major, row 0 = north, meters above ellipsoid). The server compacts
+     * this 256×256 grid to `terrain_b64` before embedding it in the kernel, and
+     * the kernel derives slope/aspect from it and runs on real topography
+     * instead of the synthetic noise field.
+     */
+    terrain: z.array(z.number()).max(65_536).optional(),
+    terrain_gs: z.number().int().min(2).max(256).optional(),
+    /** Per-cell fuel-load multiplier [0..1.2] (row-major, row 0 = north). */
+    fuel_mult: z.array(z.number()).max(65_536).optional(),
+    fuel_gs: z.number().int().min(2).max(256).optional(),
+    /** Live dead-fuel moisture override (fraction). Drives the Simard EMC. */
+    dead_moisture: z.number().min(0).max(0.6).optional(),
+    live_moisture: z.number().min(0).max(2).optional(),
+    /** Air temperature [°C] used for the equilibrium-moisture calculation. */
+    temperature_c: z.number().min(-40).max(60).optional(),
   }),
   z.object({
     type: z.literal('earthquake_swarm'),
@@ -139,6 +156,13 @@ export const SimulationRequestSchema = z.discriminatedUnion('type', [
     ash_diffusivity_m2_s: z.number().min(10).max(5000).optional(),
     /** Wind-shear factor: low-level wind fraction of the free-stream speed. */
     ash_wind_shear_factor: z.number().min(0).max(1).optional(),
+    /**
+     * Vent position as a fraction of the study box (column = x eastward,
+     * row = y southward, 0..1). Defaults to centroid (0.5, 0.5). Set from the
+     * clicked vent marker so the eruption originates where the user pinned it.
+     */
+    vent_frac_x: z.number().min(0).max(1).optional(),
+    vent_frac_y: z.number().min(0).max(1).optional(),
   }),
   z.object({
     type: z.literal('landslide'),
@@ -208,6 +232,43 @@ export function deriveExtentKm(bbox: StudyAreaBbox): number {
   return Math.max(dLatKm, dLonKm, 1.0);
 }
 
+/**
+ * Convert a vent point (lat/lon) into grid fractions (0..1) for the volcano
+ * kernel.
+ *
+ * The simulation grid is a SQUARE of `extent_km` centred on the bbox centroid
+ * (not the bbox itself — the bbox may be non-square, the grid is always
+ * square). Column 0 = west, column gs-1 = east; row 0 = north, row gs-1 =
+ * south. The old code computed the fractions relative to the *bbox*, which is
+ * a different reference frame — the vent appeared shifted whenever the bbox
+ * aspect ratio ≠ 1 or the vent sat off-centre.
+ *
+ * Returns { vent_frac_x, vent_frac_y } or null when the vent is outside the
+ * grid (caller should fall back to the grid centroid).
+ */
+export function computeVentFractions(
+  bbox: StudyAreaBbox,
+  vent: { lat: number; lon: number },
+): { vent_frac_x: number; vent_frac_y: number } | null {
+  const c = deriveCenter(bbox);
+  const extentKm = deriveExtentKm(bbox);
+  const latHalfDeg = (extentKm / 2) / EARTH_KM_PER_DEG_LAT;
+  const lonHalfDeg =
+    (extentKm / 2) /
+    (EARTH_KM_PER_DEG_LAT * Math.max(0.1, Math.cos((c.lat * Math.PI) / 180)));
+  const gridLatMin = c.lat - latHalfDeg;
+  const gridLatMax = c.lat + latHalfDeg;
+  const gridLonMin = c.lon - lonHalfDeg;
+  const gridLonMax = c.lon + lonHalfDeg;
+
+  // Clamp the vent into the grid so the run never fails (the kernel clamps too).
+  const lat = Math.min(gridLatMax, Math.max(gridLatMin, vent.lat));
+  const lon = Math.min(gridLonMax, Math.max(gridLonMin, vent.lon));
+  const fx = (lon - gridLonMin) / (gridLonMax - gridLonMin); // 0=west, 1=east
+  const fy = (gridLatMax - lat) / (gridLatMax - gridLatMin); // 0=north, 1=south
+  return { vent_frac_x: Math.min(1, Math.max(0, fx)), vent_frac_y: Math.min(1, Math.max(0, fy)) };
+}
+
 // ── Param mapping (UI parameter set → kernel contract) ──────────────────────
 
 export interface ScenarioFormParams {
@@ -228,18 +289,9 @@ export interface ScenarioFormParams {
 export function buildSimulationRequest(
   form: ScenarioFormParams,
   bbox: StudyAreaBbox,
-  ventPoint?: { lat: number; lon: number } | null,
+  _ventPoint?: { lat: number; lon: number } | null,
 ): SimulationRequest {
-  // Manual vent/origin point overrides the bbox centroid (clamped to the box so
-  // the simulation stays on the study-area grid). Falls back to the centroid.
   const c = deriveCenter(bbox);
-  const vp = ventPoint;
-  const cLat = vp
-    ? Math.min(bbox.latMax, Math.max(bbox.latMin, vp.lat))
-    : c.lat;
-  const cLon = vp
-    ? Math.min(bbox.lonMax, Math.max(bbox.lonMin, vp.lon))
-    : c.lon;
   const extent_km = deriveExtentKm(bbox);
   const { params, scenarioType } = form;
 
@@ -271,8 +323,8 @@ export function buildSimulationRequest(
   };
 
   const common = {
-    lat: cLat,
-    lon: cLon,
+    lat: c.lat,
+    lon: c.lon,
     grid_size: form.gridSize,
     extent_km,
   };

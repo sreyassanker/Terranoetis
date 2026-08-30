@@ -28,9 +28,43 @@ import { logger } from '../observability/logger';
 import { writeArrayBuffer } from 'geotiff';
 import {
   runLocalBatch,
+  runLocalVolcanicBatch,
+  runLocalVolcanicCalibration,
   type CalibrateRow,
   type MonteCarloResult,
+  type VolcanicEnsembleResult,
+  type VolcanicCalibrateRow,
 } from './localRunner';
+import { fetchEra5Profile } from './era5Profile';
+
+const router = Router();
+
+// ═════════════════════════════════════════════════════════════════
+// GET /api/volcano/profile — Fetch a real ERA5 wind profile for the
+// eruption site. Query: ?lat=&lon=&date=YYYY-MM-DD
+// ═════════════════════════════════════════════════════════════════
+
+router.get('/volcano/profile', async (req: Request, res: Response) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon);
+    const date = typeof req.query.date === 'string' ? req.query.date : undefined;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return res.status(400).json({ error: 'lat and lon are required' });
+    }
+    const profile = await fetchEra5Profile(lat, lon, date);
+    res.json({
+      lat,
+      lon,
+      date: date ?? new Date().toISOString().slice(0, 10),
+      profile,
+      source: 'open-meteo (ERA5/GFS reanalysis)',
+    });
+  } catch (err: unknown) {
+    logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Profile fetch failed');
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
 
 // Physical cell sizes (meters) for each kernel — mirrors the client-side
 // SIM_CELL_SIZE_M so the GeoTIFF export matches what the user saw rendered.
@@ -43,8 +77,6 @@ const JOB_TYPE_TO_DEFAULT_CELL_SIZE_M: Record<string, number> = {
   volcanic_eruption: 50,
   landslide: 20,
 };
-
-const router = Router();
 
 // ═════════════════════════════════════════════════════════════════
 // HELPERS
@@ -562,6 +594,215 @@ router.post('/landslide/quantify', async (req: Request, res: Response) => {
     res.json(payload);
   } catch (err: unknown) {
     logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Quantification failed');
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// POST /api/volcano/calibrate — Fit yield_scale to an observed lava runout
+// ────────────────────────────────────────────────────────────────────────
+//
+// Body: { request: SimulationRequest, observed_runout_km: number }
+// Runs a coarse yield_scale grid locally and returns the best pair.
+
+const YIELD_SCALE_GRID = [0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0];
+const VOLCANO_CALIBRATE_GRID_SIZE = 128;
+
+router.post('/volcano/calibrate', async (req: Request, res: Response) => {
+  try {
+    const { request, observed_runout_km } = req.body as {
+      request?: Record<string, unknown>;
+      observed_runout_km?: unknown;
+    };
+    if (!request || typeof request !== 'object' || request.type !== 'volcanic_eruption') {
+      return res.status(400).json({ error: 'request must be a volcanic_eruption simulation request' });
+    }
+    const target = Number(observed_runout_km);
+    if (!Number.isFinite(target) || target <= 0) {
+      return res.status(400).json({ error: 'observed_runout_km must be a positive number' });
+    }
+
+    // Drop resolution/terrain override so calibration is fast and deterministic
+    const base: Record<string, unknown> = {
+      ...request,
+      grid_size: VOLCANO_CALIBRATE_GRID_SIZE,
+      terrain: undefined,
+      terrain_gs: undefined,
+    };
+    // Terrain: sample a synthetic 5° slope so the lava has a consistent drive
+    const gs = VOLCANO_CALIBRATE_GRID_SIZE;
+    const yy: number[] = []; const xx: number[] = [];
+    for (let r = 0; r < gs; r++) {
+      for (let c = 0; c < gs; c++) { yy.push(r); xx.push(c); }
+    }
+    const slopeRad = 5.0 * Math.PI / 180;
+    const extentM = (base.extent_km as number || 10.0) * 1000;
+    const slopeTerrain = xx.map((c) => Math.max(0, (c - gs / 2) * Math.tan(slopeRad) * extentM / gs));
+    base.terrain = slopeTerrain;
+    base.terrain_gs = gs;
+
+    const runs = YIELD_SCALE_GRID.map((ys) => ({
+      ...base,
+      yield_scale: ys,
+      wallclock_max_sec: 60,
+      max_steps: 1500,
+    }));
+
+    const payload = (await runLocalVolcanicCalibration(runs, {
+      gridSize: VOLCANO_CALIBRATE_GRID_SIZE,
+      timeoutMs: 8 * 60_000,
+    })) as { trials?: VolcanicCalibrateRow[] };
+
+    const trials = payload.trials ?? [];
+    let best: VolcanicCalibrateRow | null = null;
+    let bestErr = Infinity;
+    for (const t of trials) {
+      const err = Math.abs(t.runout_km - target);
+      if (err < bestErr) { bestErr = err; best = t; }
+    }
+    if (!best) {
+      return res.status(500).json({ error: 'Calibration produced no viable trials' });
+    }
+
+    logger.info({ target, bestYieldScale: best.yield_scale, err: bestErr }, 'Volcanic calibration done');
+    res.json({
+      best: { yield_scale: best.yield_scale, runout_km: best.runout_km, err: bestErr },
+      trials,
+    });
+  } catch (err: unknown) {
+    logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Volcanic calibration failed');
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// POST /api/volcano/quantify — Volcanic Monte-Carlo uncertainty quantification
+// ────────────────────────────────────────────────────────────────────────
+//
+// Body: { request: SimulationRequest, samples?: number, exceedance_ash_mm?: number }
+// Perturbs the uncertain physics inputs (wind, ash properties, mass scale)
+// and returns aggregated percentile maps + summary statistics.
+//
+// Mirrors the landslide /api/landslide/quantify pattern but for volcanic
+// scenarios. The request MUST include terrain + terrain_gs (real relief
+// sampled from the Cesium globe) — the kernel rejects synthetic fallback.
+
+router.post('/volcano/quantify', async (req: Request, res: Response) => {
+  try {
+    const { request, samples = 16, exceedance_ash_mm = 0.5, use_real_profile = false, profile_date } = req.body as {
+      request?: Record<string, unknown>;
+      samples?: unknown;
+      exceedance_ash_mm?: unknown;
+      use_real_profile?: unknown;
+      profile_date?: unknown;
+    };
+    if (!request || typeof request !== 'object' || request.type !== 'volcanic_eruption') {
+      return res.status(400).json({ error: 'request must be a volcanic_eruption simulation request' });
+    }
+    const n = Math.min(40, Math.max(4, Number(samples) || 16));
+    const thr = Math.max(0.05, Number(exceedance_ash_mm) || 0.5);
+    const useReal = Boolean(use_real_profile);
+
+    // Build base — preserve terrain + vent position for every member.
+    const base: Record<string, unknown> = { ...request };
+    const baseLat = Number(base.lat) || 0;
+    const baseLon = Number(base.lon) || 0;
+    const baseWindMs = Number(base.wind_speed_ms) || 10;
+    const baseWindDeg = Number(base.wind_dir_deg) || 270;
+    const baseAshDiam = Number(base.ash_particle_diameter_m) || 316e-6;
+    const baseDiff = Number(base.ash_diffusivity_m2_s) || 500;
+    const baseShear = (base.ash_wind_shear_factor as number) ?? 0.5;
+
+    // Mode 1 (real data): fetch an ERA5 reanalysis wind profile for the site.
+    // Mode 2 (parameter): perturb the user's single wind vector instead — the
+    // profile is left absent so the kernel uses wind_speed_ms/wind_dir_deg.
+    const baseProfile = useReal
+      ? await fetchEra5Profile(baseLat, baseLon, typeof profile_date === 'string' ? profile_date : undefined)
+      : null;
+
+    // Marsaglia polar normal.
+    let z1 = 0; let z2 = 0; let haveZ2 = false;
+    const randn = (): number => {
+      if (haveZ2) { haveZ2 = false; return z2; }
+      let u1 = 0, u2 = 0, s = 0;
+      do {
+        u1 = Math.random() * 2 - 1;
+        u2 = Math.random() * 2 - 1;
+        s = u1 * u1 + u2 * u2;
+      } while (s >= 1 || s === 0);
+      const mul = Math.sqrt((-2 * Math.log(s)) / s);
+      z1 = u1 * mul; z2 = u2 * mul; haveZ2 = true;
+      return z1;
+    };
+
+    const runs: Record<string, unknown>[] = [];
+    for (let i = 0; i < n; i++) {
+      // Perturb ash particle diameter (log-normal, σ=0.3)
+      const ashDiam = Math.min(2e-3, Math.max(50e-6, baseAshDiam * Math.exp(0.3 * randn())));
+      // Perturb eddy diffusivity (log-normal, σ=0.3)
+      const diff = Math.min(5000, Math.max(10, baseDiff * Math.exp(0.3 * randn())));
+      // Perturb wind-shear factor (normal, σ=0.15, clamped [0,1])
+      const shear = Math.min(1, Math.max(0, baseShear + 0.15 * randn()));
+      // Perturb eruption intensity (log-normal, σ=0.25, clamped [0.3, 3])
+      const massScale = Math.min(3, Math.max(0.3, Math.exp(0.25 * randn())));
+
+      if (baseProfile) {
+        // MODE 1 — REAL DATA: perturb the full 3D ERA5 wind profile. Each
+        // level's u/v is scaled by a common log-normal factor AND rotated by a
+        // common angle (meteorological steering uncertainty).
+        const speedScale = Math.min(2.0, Math.max(0.5, Math.exp(0.25 * randn())));
+        const angleOffset = 20 * randn(); // ±20° rotation
+        const cosA = Math.cos(angleOffset * Math.PI / 180);
+        const sinA = Math.sin(angleOffset * Math.PI / 180);
+        const perturbedProfile = baseProfile.map((entry) => ({
+          altitude_km: entry.altitude_km,
+          u_ms: (entry.u_ms * cosA - entry.v_ms * sinA) * speedScale,
+          v_ms: (entry.u_ms * sinA + entry.v_ms * cosA) * speedScale,
+        }));
+        runs.push({
+          ...base,
+          grid_size: 128,
+          wind_profile: perturbedProfile,
+          wind_speed_ms: 10,  // ignored when wind_profile is present
+          wind_dir_deg: 270,
+          ash_particle_diameter_m: ashDiam,
+          ash_diffusivity_m2_s: diff,
+          ash_wind_shear_factor: shear,
+          mass_scale: massScale,
+          yield_scale: Math.min(3, Math.max(0.3, Math.exp(0.25 * randn()))),
+          wallclock_max_sec: 90,
+          max_steps: 2000,
+        });
+      } else {
+        // MODE 2 — PARAMETER: perturb the user's single wind vector directly.
+        const windMs = Math.min(60, Math.max(0.5, baseWindMs * Math.exp(0.25 * randn())));
+        const windDeg = ((baseWindDeg + 20 * randn()) % 360 + 360) % 360;
+        runs.push({
+          ...base,
+          grid_size: 128,
+          wind_speed_ms: windMs,
+          wind_dir_deg: windDeg,
+          ash_particle_diameter_m: ashDiam,
+          ash_diffusivity_m2_s: diff,
+          ash_wind_shear_factor: shear,
+          mass_scale: massScale,
+          yield_scale: Math.min(3, Math.max(0.3, Math.exp(0.25 * randn()))),
+          wallclock_max_sec: 90,
+          max_steps: 2000,
+        });
+      }
+    }
+
+    const payload = (await runLocalVolcanicBatch(runs, {
+      gridSize: 128,
+      timeoutMs: 8 * 60_000,
+      exceedanceAshMm: thr,
+    })) as VolcanicEnsembleResult;
+
+    logger.info({ n, p95: payload.summary?.p95_max_ash_mm }, 'Volcanic UQ done');
+    res.json(payload);
+  } catch (err: unknown) {
+    logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Volcanic quantification failed');
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });

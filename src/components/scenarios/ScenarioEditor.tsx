@@ -23,11 +23,13 @@ import { useKaggleSimulation } from '@/hooks/useKaggleSimulation';
 import { sampleStudyAreaTerrainAsync } from './studyAreaTerrain';
 import {
   buildSimulationRequest,
+  computeVentFractions,
   deriveCenter,
   deriveExtentKm,
   derivePhysicsFormOverrides,
   type SimulationRequest,
 } from '@/services/kaggleSim';
+import type { VolcanicEnsembleResult } from '@/components/kaggle/VolcanoEnsembleOverlay';
 
 // ── Form schema ──────────────────────────────────────────────────────────────
 
@@ -171,6 +173,11 @@ interface ScenarioEditorProps {
   onClose: () => void;
   onKaggleComplete?: (jobId: string, lat: number, lon: number, scenarioType: string) => void;
   onKaggleStart?: () => void;
+  /**
+   * Fired when a volcanic UQ ensemble completes, so the caller can render the
+   * percentile overlay. Receives the aggregated result + the study centre.
+   */
+  onVolcanoUqComplete?: (result: VolcanicEnsembleResult, lat: number, lon: number) => void;
   studyAreas: StudyAreaItem[];
   activeStudyAreaId: string | null;
   /** Cesium viewer (for sampling real terrain on landslide runs). */
@@ -182,6 +189,7 @@ export default function ScenarioEditor({
   onClose,
   onKaggleComplete,
   onKaggleStart,
+  onVolcanoUqComplete,
   studyAreas,
   activeStudyAreaId,
   viewer,
@@ -200,6 +208,17 @@ export default function ScenarioEditor({
   const [ventPoint, setVentPoint] = useState<{ lat: number; lon: number } | null>(null);
   const ventHandlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
   const ventMarkerRef = useRef<Cesium.Entity | null>(null);
+
+  // ── Real-vs-parameter mode toggle (volcano only) ──
+  // Parameter mode: the user's sliders (wind speed/dir, ash diameter) are sent
+  // to the kernel as-is — pure "what if" scenario exploration.
+  // Real-data mode: the user picks a date; an ERA5 reanalysis wind profile is
+  // fetched for the eruption site and replaces the single wind vector. VEI,
+  // duration, vent position, terrain remain under the user's control.
+  const [useRealWindProfile, setUseRealWindProfile] = useState(false);
+  const today = new Date().toISOString().slice(0, 10);
+  const [profileDate, setProfileDate] = useState(today);
+  const [cachedProfile, setCachedProfile] = useState<Array<{altitude_km: number; u_ms: number; v_ms: number}> | null>(null);
 
   // Derived geometry for the active study area (memoised on identity, not on
   // every render — cheap defence against accidental recompute).
@@ -296,14 +315,15 @@ export default function ScenarioEditor({
         activeBbox,
         scenarioType === 'volcanic_eruption' ? ventPoint : null,
       );
-      // Landslide + flood + volcano: if the Cesium globe has real elevation for
-      // the drawn box, sample it at full resolution (256×256 — no bilinear
-      // loss, the kernel's simulation grid) and ship it so the kernel runs on
-      // real terrain instead of the synthetic ridge/cone. No real relief →
-      // keep synthetic.
+      // Landslide + flood + volcano + wildfire: if the Cesium globe has real
+      // elevation for the drawn box, sample it at full resolution (256×256 —
+      // no bilinear loss, the kernel's simulation grid) and ship it so the
+      // kernel runs on real topography instead of the synthetic field. No
+      // real relief → keep synthetic.
       let request: SimulationRequest = base;
       if (
-        (base.type === 'landslide' || base.type === 'flood_inundation' || base.type === 'volcanic_eruption') &&
+        (base.type === 'landslide' || base.type === 'flood_inundation' ||
+         base.type === 'volcanic_eruption' || base.type === 'wildfire_spread') &&
         viewer
       ) {
         const real = await sampleStudyAreaTerrainAsync(viewer, activeBbox, 256);
@@ -311,11 +331,45 @@ export default function ScenarioEditor({
           request = { ...base, terrain: real.values, terrain_gs: real.gs };
         }
       }
+      // Volcano: honor the pinned vent point by passing it as a fractional
+      // position in the SIMULATION GRID (column = east, row = south). The grid
+      // is a square of extent_km centred on the bbox centroid — NOT the bbox
+      // itself — so the fraction must be computed in grid space (the bbox
+      // reference frame caused a vent/ash location mismatch).
+      if (base.type === 'volcanic_eruption' && ventPoint && activeBbox) {
+        const vf = computeVentFractions(activeBbox, ventPoint);
+        if (vf) {
+          request = {
+            ...request,
+            vent_frac_x: vf.vent_frac_x,
+            vent_frac_y: vf.vent_frac_y,
+          } as SimulationRequest;
+        }
+      }
+      // Volcano, real-data mode: fetch ERA5 wind profile and embed it.
+      if (base.type === 'volcanic_eruption' && useRealWindProfile) {
+        const c = deriveCenter(activeBbox);
+        try {
+          const resp = await fetch(
+            `/api/volcano/profile?lat=${c.lat}&lon=${c.lon}&date=${profileDate}`,
+          );
+          if (resp.ok) {
+            const data = (await resp.json()) as { profile?: Array<Record<string, unknown>> };
+            if (data.profile) {
+              (request as Record<string, unknown>).wind_profile = data.profile;
+              setCachedProfile(data.profile as Array<{altitude_km: number; u_ms: number; v_ms: number}>);
+            }
+          }
+        } catch {
+          // Profile fetch failed — fall back to slider values (no silent failure).
+          console.warn('[ScenarioEditor] ERA5 profile fetch failed, using slider wind');
+        }
+      }
       await kaggle.run(() => request, scenarioType);
     } finally {
       setPreparing(false);
     }
-  }, [activeBbox, scenarioType, params, viewer, kaggle, ventPoint]);
+  }, [activeBbox, scenarioType, params, viewer, kaggle, ventPoint, useRealWindProfile, profileDate]);
 
   // ── Voellmy calibration (fit μ/ξ to an observed runout) ──
   const [calibInput, setCalibInput] = useState('2.9');
@@ -403,6 +457,68 @@ export default function ScenarioEditor({
       setUqRunning(false);
     }
   }, [activeBbox, scenarioType, params]);
+
+  // ── Volcanic Monte-Carlo uncertainty quantification (percentile ensemble) ──
+  const [volcanoUqRunning, setVolcanoUqRunning] = useState(false);
+  const [volcanoUqError, setVolcanoUqError] = useState<string | null>(null);
+  const [volcanoUqResult, setVolcanoUqResult] = useState<VolcanicEnsembleResult | null>(null);
+
+  const handleVolcanoQuantify = useCallback(async () => {
+    if (!activeBbox) return;
+    setVolcanoUqRunning(true);
+    setVolcanoUqError(null);
+    setVolcanoUqResult(null);
+    try {
+      const base = buildSimulationRequest(
+        { scenarioType, params, gridSize: 256 },
+        activeBbox,
+        scenarioType === 'volcanic_eruption' ? ventPoint : null,
+      );
+      // Volcano ensemble needs REAL terrain (the kernel has no synthetic
+      // fallback) — sample the Cesium globe exactly like the single run does.
+      let request: SimulationRequest = base;
+      if (
+        base.type === 'volcanic_eruption' &&
+        viewer
+      ) {
+        const real = await sampleStudyAreaTerrainAsync(viewer, activeBbox, 256);
+        if (real) request = { ...base, terrain: real.values, terrain_gs: real.gs };
+      }
+      if (ventPoint && activeBbox) {
+        const vf = computeVentFractions(activeBbox, ventPoint);
+        if (vf) {
+          request = {
+            ...request,
+            vent_frac_x: vf.vent_frac_x,
+            vent_frac_y: vf.vent_frac_y,
+          } as SimulationRequest;
+        }
+      }
+      const resp = await fetch('/api/volcano/quantify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          request,
+          samples: 16,
+          exceedance_ash_mm: 0.5,
+          use_real_profile: useRealWindProfile,
+          profile_date: useRealWindProfile ? profileDate : undefined,
+        }),
+      });
+      const data = (await resp.json()) as VolcanicEnsembleResult & { error?: string };
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      setVolcanoUqResult(data);
+      const c = deriveCenter(activeBbox);
+      onVolcanoUqCompleteRef.current?.(data, c.lat, c.lon);
+    } catch (err) {
+      setVolcanoUqError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setVolcanoUqRunning(false);
+    }
+  }, [activeBbox, scenarioType, params, viewer, ventPoint, useRealWindProfile, profileDate]);
+
+  const onVolcanoUqCompleteRef = useRef(onVolcanoUqComplete);
+  useEffect(() => { onVolcanoUqCompleteRef.current = onVolcanoUqComplete; });
 
   /** Download the type's primary raster as a georeferenced GeoTIFF. */
   const handleDownloadTiff = useCallback(() => {
@@ -634,6 +750,126 @@ export default function ScenarioEditor({
                 P50 runout {uqSummary.p50_runout_km.toFixed(2)} km, P95 {uqSummary.p95_runout_km.toFixed(2)} km,
                 mean max depth {uqSummary.mean_max_depth_m.toFixed(1)} m (P95 {uqSummary.p95_max_depth_m.toFixed(1)} m),
                 {` area exceeded (${'>'}0.5 m) ${(uqSummary.area_exceeded_pct * 100).toFixed(1)}%`}.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Volcanic: Monte-Carlo uncertainty quantification (percentile ensemble) */}
+        {scenarioType === 'volcanic_eruption' && (
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 600 }}>
+              Simulation mode
+            </div>
+            {/* Mode toggle: Parameter (what-if sliders) vs Real data (ERA5 wind) */}
+            <div style={{
+              display: 'flex', gap: 4, marginBottom: 6,
+              background: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: 3,
+            }}>
+              <button
+                className="glass-button"
+                style={{
+                  flex: 1, fontSize: 10, padding: '5px 6px', cursor: 'pointer',
+                  background: !useRealWindProfile ? 'rgba(139,92,246,0.3)' : 'transparent',
+                  border: !useRealWindProfile ? '1px solid rgba(139,92,246,0.6)' : '1px solid transparent',
+                  color: '#fff',
+                }}
+                onClick={() => setUseRealWindProfile(false)}
+                title="Use the wind speed / direction / ash diameter sliders directly (pure what-if exploration)"
+              >
+                Parameter
+              </button>
+              <button
+                className="glass-button"
+                style={{
+                  flex: 1, fontSize: 10, padding: '5px 6px', cursor: 'pointer',
+                  background: useRealWindProfile ? 'rgba(34,197,94,0.3)' : 'transparent',
+                  border: useRealWindProfile ? '1px solid rgba(34,197,94,0.6)' : '1px solid transparent',
+                  color: '#fff',
+                }}
+                onClick={() => setUseRealWindProfile(true)}
+                title="Use a real ERA5/GFS wind profile for the chosen date (measured data)"
+              >
+                Real data
+              </button>
+            </div>
+            {useRealWindProfile ? (
+              <div style={{
+                fontSize: 9, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.5,
+                background: 'rgba(34,197,94,0.08)', borderRadius: 6, padding: '6px 8px',
+                border: '1px solid rgba(34,197,94,0.2)',
+              }}>
+                Real-data mode: a measured ERA5/GFS wind profile for the site will
+                be used instead of the wind sliders. Pick the date/time of the
+                eruption. VEI, duration, terrain and vent position are still yours.
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                  <input
+                    type="date"
+                    aria-label="Eruption date"
+                    value={profileDate}
+                    max={today}
+                    onChange={(e) => { setProfileDate(e.target.value); setCachedProfile(null); }}
+                    disabled={volcanoUqRunning || formDisabled}
+                    style={{
+                      flex: 1, fontSize: 10, padding: '4px 6px',
+                      background: 'rgba(255,255,255,0.08)', color: '#fff',
+                      border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4,
+                    }}
+                  />
+                </div>
+                {cachedProfile ? (
+                  <div style={{ fontSize: 8.5, color: '#4ade80', marginTop: 4 }}>
+                    ✓ Profile loaded ({cachedProfile.length} levels, last fetched run)
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 8.5, color: '#9ca3af', marginTop: 4 }}>
+                    Profile fetched automatically on run.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{
+                fontSize: 9, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.5,
+                background: 'rgba(139,92,246,0.08)', borderRadius: 6, padding: '6px 8px',
+                border: '1px solid rgba(139,92,246,0.2)',
+              }}>
+                Parameter mode: the wind speed / direction / ash sliders above are
+                used directly. For a real measured wind profile, switch to
+                Real data mode.
+              </div>
+            )}
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 4, fontWeight: 600 }}>
+              Uncertainty quantification
+            </div>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.4 }}>
+              Runs a local 16-member Monte-Carlo over wind, ash properties and
+              eruption intensity on the real terrain. Returns P5 / P50 / P95
+              ash-fall and lava maps with an exceedance probability field —
+              the decision-maker's "how confident are we?" view.
+            </div>
+            <button
+              className="glass-button"
+              style={{
+                width: '100%', fontSize: 11, padding: '5px 8px', cursor: volcanoUqRunning ? 'wait' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}
+              onClick={() => void handleVolcanoQuantify()}
+              disabled={volcanoUqRunning || formDisabled}
+            >
+              {volcanoUqRunning ? <Loader2 size={12} className="animate-spin" /> : <Cpu size={12} />}
+              {volcanoUqRunning ? 'Running 16-member ensemble…' : 'Run Monte-Carlo UQ (16 members)'}
+            </button>
+            {volcanoUqError && (
+              <div style={{ fontSize: 9, color: '#ef4444', marginTop: 6 }}>{volcanoUqError}</div>
+            )}
+            {volcanoUqResult && (
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
+                {volcanoUqResult.summary.n}-member ensemble over wind / ash / intensity:
+                median max ash {volcanoUqResult.summary.p50_max_ash_mm.toFixed(1)} mm
+                (P95 {volcanoUqResult.summary.p95_max_ash_mm.toFixed(1)} mm),
+                median plume {volcanoUqResult.summary.p50_plume_height_km.toFixed(1)} km,
+                {` ash-exceedance area ${(volcanoUqResult.summary.area_ash_exceeded_pct * 100).toFixed(1)}%`}.
+                Percentile maps rendered on the globe.
               </div>
             )}
           </div>

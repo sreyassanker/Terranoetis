@@ -1,9 +1,12 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Pen } from 'lucide-react';
 import * as Cesium from 'cesium';
 import Panel from '@/components/ui/Panel';
 
 import { haversineKm, circleBbox } from './geo';
+import { buildVolcanoShapes } from './volcanoShapes';
+import VolcanicVisualizer from './VolcanicVisualizer';
+import type { ShapeData } from './types';
 
 interface SpatialSketchingProps {
   viewer: Cesium.Viewer | null;
@@ -35,6 +38,24 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario, 
   // Mutable mirror of `points` so Cesium event handlers always read the latest
   // vertex list (state read inside a ScreenSpaceEventHandler closure is stale).
   const pointsRef = useRef<Array<{ lat: number; lon: number }>>([]);
+  // Volcanic hazard zones generated from the sketched bbox — rendered by
+  // VolcanicVisualizer. Pure derivation: rebuilt whenever the bbox or the
+  // active prompt changes (no setState-in-effect cascade).
+  const volcanoShapes = useMemo<ShapeData[]>(() => {
+    if (!boundingBox || activePrompt.type !== 'volcanic_eruption') return [];
+    const centerLat = (boundingBox.minLat + boundingBox.maxLat) / 2;
+    const centerLon = (boundingBox.minLon + boundingBox.maxLon) / 2;
+    const spreadKm = Math.max(
+      (boundingBox.maxLat - boundingBox.minLat) * 111,
+      (boundingBox.maxLon - boundingBox.minLon) * 111 * Math.cos(centerLat * Math.PI / 180),
+    );
+    return buildVolcanoShapes({
+      center: { lat: centerLat, lon: centerLon },
+      radiusKm: spreadKm / 2,
+      downslopeDeg: 180, // default south — will be refined by the terrain gradient
+    });
+  }, [boundingBox, activePrompt.type]);
+  const sketchProgress = 0.5;
 
   const clearDrawings = useCallback(() => {
     if (!viewer) return;
@@ -254,6 +275,12 @@ export default function SpatialSketching({ viewer, onClose, onGenerateScenario, 
         )}
       </div>
     </Panel>
+    {/* Volcanic hazard zones rendered on the Cesium globe */}
+    <VolcanicVisualizer
+      viewer={viewer}
+      shapes={volcanoShapes}
+      progress={sketchProgress}
+    />
     </div>
   );
 }
