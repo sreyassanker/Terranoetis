@@ -10,6 +10,8 @@ const VEI_PARAMS: Record<number, { colHeightKm: number; ejectaVol: number; blast
   4: { colHeightKm: 15, ejectaVol: 1, blastRadiusKm: 50, label: 'Cataclysmic' },
   5: { colHeightKm: 20, ejectaVol: 10, blastRadiusKm: 100, label: 'Paroxysmal' },
   6: { colHeightKm: 25, ejectaVol: 100, blastRadiusKm: 200, label: 'Colossal' },
+  7: { colHeightKm: 30, ejectaVol: 1000, blastRadiusKm: 300, label: 'Subplinian' },
+  8: { colHeightKm: 40, ejectaVol: 10000, blastRadiusKm: 500, label: 'Super-colossal' },
 };
 
 function geoToSphere(lat: number, lon: number, height: number): Point3D {
@@ -21,26 +23,26 @@ function geoToSphere(lat: number, lon: number, height: number): Point3D {
 
 /** Lava flow rate from VEI (m³/s simplified FLOWGO) */
 function _lavaFlowRate(vei: number, slopeDeg: number): number {
-  const baseRate = [1, 10, 50, 200, 500, 1000, 5000][Math.min(vei, 6)];
+  const baseRate = [1, 10, 50, 200, 500, 1000, 5000, 10000, 20000][Math.min(vei, 8)];
   return baseRate * (1 + Math.tan(slopeDeg * Math.PI / 180) * 0.5);
 }
 
 /** Pyroclastic density current runout distance (km) — simplified Energy Line model */
 function pdcRunout(vei: number, slopeDeg: number): number {
-  const base = [0, 2, 8, 20, 50, 100, 200][Math.min(vei, 6)];
+  const base = [0, 2, 8, 20, 50, 100, 200, 400, 800][Math.min(vei, 8)];
   const slopeFactor = Math.max(0.5, 1 + (15 - slopeDeg) * 0.03);
   return base * slopeFactor;
 }
 
 /** Ash fallout thickness (cm) at distance — exponential decay from vent */
 function ashThickness(distKm: number, vei: number): number {
-  const maxThick = [0.1, 1, 5, 20, 50, 100, 200][Math.min(vei, 6)];
+  const maxThick = [0.1, 1, 5, 20, 50, 100, 200, 400, 800][Math.min(vei, 8)];
   return maxThick * Math.exp(-distKm * 0.02);
 }
 
 /** Lahar volume from VEI (million m³) */
 function laharVolume(vei: number): number {
-  return [0, 0.1, 1, 10, 50, 200, 1000][Math.min(vei, 6)];
+  return [0, 0.1, 1, 10, 50, 200, 1000, 3000, 10000][Math.min(vei, 8)];
 }
 
 /** Generate lava flow path — follows steepest descent */
@@ -114,8 +116,11 @@ export function simulateVolcanic(params: ScenarioParams): ScenarioTimeSeries {
   const steps: TimeStep[] = [];
   const durationH = p.duration;
   const dt = Math.max(0.5, durationH / 60);
-  const vei = Math.max(0, Math.min(6, p.vei));
-  const windRad = p.windDir * Math.PI / 180;
+  const vei = Math.max(0, Math.min(8, p.vei));
+  // Meteorological FROM convention: ash/plume are transported in the TO
+  // direction, i.e. 180° from the reported wind bearing. This matches the
+  // rigorous volcano kernel (wind_dir is "from", drift = wind_dir + 180).
+  const driftRad = ((p.windDir + 180) % 360) * Math.PI / 180;
   const veiInfo = VEI_PARAMS[vei];
   const maxPlumeH = p.ashHeight > 0 ? p.ashHeight : veiInfo.colHeightKm * 1000;
   const eruptionPhaseH = Math.min(6, durationH * 0.15);
@@ -159,8 +164,8 @@ export function simulateVolcanic(params: ScenarioParams): ScenarioTimeSeries {
       for (let i = 0; i < numParticles; i++) {
         const h = plumeH * rng.next();
         const drift = (h / maxPlumeH) * 3 * (rng.next() - 0.5);
-        const lat = p.lat + drift * Math.cos(windRad) + (rng.next() - 0.5) * 0.5;
-        const lon = p.lon + drift * Math.sin(windRad) / Math.cos(p.lat * Math.PI / 180) + (rng.next() - 0.5) * 0.5;
+        const lat = p.lat + drift * Math.cos(driftRad) + (rng.next() - 0.5) * 0.5;
+        const lon = p.lon + drift * Math.sin(driftRad) / Math.cos(p.lat * Math.PI / 180) + (rng.next() - 0.5) * 0.5;
         points.push(geoToSphere(lat, lon, h));
         intensities.push(h / maxPlumeH);
       }
@@ -171,8 +176,8 @@ export function simulateVolcanic(params: ScenarioParams): ScenarioTimeSeries {
       for (let i = 0; i <= 24; i++) {
         const angle = (i / 24) * 2 * Math.PI;
         umbrellaPts.push({
-          lat: p.lat + (umbrellaRadius * KM_TO_DEG) * Math.cos(angle + windRad * 0.3),
-          lon: p.lon + (umbrellaRadius * KM_TO_DEG) * Math.sin(angle + windRad * 0.3) / Math.cos(p.lat * Math.PI / 180),
+          lat: p.lat + (umbrellaRadius * KM_TO_DEG) * Math.cos(angle + driftRad * 0.3),
+          lon: p.lon + (umbrellaRadius * KM_TO_DEG) * Math.sin(angle + driftRad * 0.3) / Math.cos(p.lat * Math.PI / 180),
         });
       }
       shapes.push({
@@ -195,13 +200,13 @@ export function simulateVolcanic(params: ScenarioParams): ScenarioTimeSeries {
       const crossSpread = 2 + elapsed * 0.3;
 
       // Ash plume cone
-      const ashLat = p.lat + (driftDist * 0.5 * KM_TO_DEG) * Math.cos(windRad);
-      const ashLon = p.lon + (driftDist * 0.5 * KM_TO_DEG) * Math.sin(windRad) / Math.cos(p.lat * Math.PI / 180);
+      const ashLat = p.lat + (driftDist * 0.5 * KM_TO_DEG) * Math.cos(driftRad);
+      const ashLon = p.lon + (driftDist * 0.5 * KM_TO_DEG) * Math.sin(driftRad) / Math.cos(p.lat * Math.PI / 180);
       const ashRadius = driftDist * 0.8 + crossSpread;
       const ashPts: { lat: number; lon: number }[] = [];
       for (let i = 0; i <= 32; i++) {
         const angle = (i / 32) * 2 * Math.PI;
-        const r = ashRadius * (1 + 0.3 * Math.cos(angle - windRad));
+        const r = ashRadius * (1 + 0.3 * Math.cos(angle - driftRad));
         ashPts.push({
           lat: ashLat + (r * KM_TO_DEG) * Math.cos(angle),
           lon: ashLon + (r * KM_TO_DEG) * Math.sin(angle) / Math.cos(ashLat * Math.PI / 180),
@@ -238,8 +243,8 @@ export function simulateVolcanic(params: ScenarioParams): ScenarioTimeSeries {
         const h = ashH * rng.next();
         const drift = elapsed * 2 + (rng.next() - 0.5) * (5 + elapsed * 0.5);
         const cross = (rng.next() - 0.5) * crossSpread;
-        const lat = p.lat + drift * Math.cos(windRad) + cross * Math.cos(windRad + Math.PI / 2);
-        const lon = p.lon + (drift * Math.sin(windRad) + cross * Math.sin(windRad + Math.PI / 2)) / Math.cos(p.lat * Math.PI / 180);
+        const lat = p.lat + drift * Math.cos(driftRad) + cross * Math.cos(driftRad + Math.PI / 2);
+        const lon = p.lon + (drift * Math.sin(driftRad) + cross * Math.sin(driftRad + Math.PI / 2)) / Math.cos(p.lat * Math.PI / 180);
         points.push(geoToSphere(lat, lon, h));
         intensities.push(decayH * (1 - h / ashH));
       }
@@ -301,7 +306,11 @@ export function simulateVolcanic(params: ScenarioParams): ScenarioTimeSeries {
       const lahaProgress = Math.min(1, lahaElapsed / (dispersalPhaseH * 0.4));
       const numLahars = Math.min(3, vei - 1);
       for (let l = 0; l < numLahars; l++) {
-        const lahaAngle = windRad + Math.PI * (0.4 + l * 0.4);
+        // Lahars are gravity-driven mudflows that follow valleys/downhill
+        // drainage — they do NOT respond to wind. With no DEM available in
+        // this illustrative layer we radiate them on evenly-spaced bearings
+        // away from the vent rather than tying them to the wind direction.
+        const lahaAngle = (l / Math.max(1, numLahars)) * 2 * Math.PI + 0.3;
         const lahaDist = lahaProgress * 30 * Math.pow(laharVolume(vei), 0.33);
         const lahaWidth = 1 + lahaProgress * 3;
         const lahaPts: { lat: number; lon: number }[] = [];

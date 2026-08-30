@@ -11,11 +11,21 @@ export interface HysplitInputs {
   ashMass: number;
   windFields: WindField[];
   duration: number;
+  /** Simulation-center latitude [°]; defaults to 8 (Ethiopia Rift). */
+  lat?: number;
+  /** Simulation-center longitude [°]; defaults to 72 (Ethiopia Rift). */
+  lon?: number;
 }
 
 export interface HysplitOutputs {
   ashConcentration: number[][][];
   depositionMap: number[][];
+  /** Grid origin (south-west corner) in degrees, for GeoJSON export. */
+  lat0?: number;
+  lon0?: number;
+  /** Cell size in degrees (north, east). */
+  dlat?: number;
+  dlon?: number;
 }
 
 const DEFAULT_INPUTS: HysplitInputs = {
@@ -73,18 +83,26 @@ export function hysplitOutputsToGeoJSON(outputs: HysplitOutputs): Record<string,
   const features: Record<string, unknown>[] = [];
   const rows = outputs.depositionMap.length;
   const cols = outputs.depositionMap[0]?.length || 0;
+  // Use the real grid origin/cell size emitted by the simulation so the
+  // deposition overlay lands at the correct lat/lon (was hardcoded 72°E/8°N).
+  const lat0 = outputs.lat0 ?? 8.0;
+  const lon0 = outputs.lon0 ?? 72.0;
+  const dlat = outputs.dlat ?? 0.027;
+  const dlon = outputs.dlon ?? 0.027;
 
   for (let i = 0; i < rows; i++) {
     for (let j = 0; j < cols; j++) {
-      if (outputs.depositionMap[i][j] > 0.01) {
+      const dep = outputs.depositionMap[i][j];
+      if (dep > 0.01) {
         features.push({
           type: 'Feature',
           properties: {
-            deposition: Math.round(outputs.depositionMap[i][j] * 1000) / 1000,
+            deposition: Math.round(dep * 1000) / 1000,
           },
+          // i is the row from the north; latitudes increase northward.
           geometry: {
             type: 'Point',
-            coordinates: [72 + j * 0.1, 8 + i * 0.1],
+            coordinates: [lon0 + j * dlon, lat0 + (rows - 1 - i) * dlat],
           },
         });
       }
