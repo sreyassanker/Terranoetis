@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   SimulationRequestSchema,
   buildSimulationRequest,
+  computeVentFractions,
   deriveCenter,
   deriveExtentKm,
   derivePhysicsFormOverrides,
@@ -28,6 +29,42 @@ describe('geometry', () => {
   it('deriveExtentKm: always ≥ 1 km even for a point', () => {
     const point = deriveExtentKm({ latMin: 0, latMax: 0, lonMin: 0, lonMax: 0 });
     expect(point).toBe(1);
+  });
+});
+
+describe('computeVentFractions (volcano vent location regression)', () => {
+  // Non-square study area (wider than tall) — the case that exposed the bug:
+  // fractions were computed vs the bbox but the grid is a SQUARE of extent_km
+  // centred on the bbox centroid, so the vent appeared shifted.
+  const wideBbox: StudyAreaBbox = { latMin: 46.0, latMax: 46.4, lonMin: -122.6, lonMax: -121.8 };
+  const vent = { lat: 46.35, lon: -121.9 }; // NE region of the bbox
+
+  it('maps a vent back to the exact clicked location (round-trip)', () => {
+    const vf = computeVentFractions(wideBbox, vent);
+    expect(vf).not.toBeNull();
+    const c = deriveCenter(wideBbox);
+    const extentKm = deriveExtentKm(wideBbox);
+    const latHalf = extentKm / 2 / 111;
+    const lonHalf = extentKm / 2 / (111 * Math.max(0.1, Math.cos((c.lat * Math.PI) / 180)));
+    const backLat = c.lat + latHalf - vf!.vent_frac_y * 2 * latHalf;
+    const backLon = c.lon - lonHalf + vf!.vent_frac_x * 2 * lonHalf;
+    expect(backLat).toBeCloseTo(vent.lat, 3);
+    expect(backLon).toBeCloseTo(vent.lon, 3);
+  });
+
+  it('is clamped into [0,1] even for a vent at the bbox corner', () => {
+    const corner = computeVentFractions(wideBbox, { lat: 46.4, lon: -122.6 });
+    expect(corner!.vent_frac_x).toBeGreaterThanOrEqual(0);
+    expect(corner!.vent_frac_x).toBeLessThanOrEqual(1);
+    expect(corner!.vent_frac_y).toBeGreaterThanOrEqual(0);
+    expect(corner!.vent_frac_y).toBeLessThanOrEqual(1);
+  });
+
+  it('differs from the OLD bbox-relative fraction (regression: was ~0.125, now ~0.23)', () => {
+    const vf = computeVentFractions(wideBbox, vent);
+    // Old buggy fy = (latMax - lat)/latSpan = 0.4/0.4 = ... wait, 46.4-46.35=0.05/0.4=0.125
+    const oldFy = (wideBbox.latMax - vent.lat) / (wideBbox.latMax - wideBbox.latMin);
+    expect(vf!.vent_frac_y).not.toBeCloseTo(oldFy, 3); // must differ from the buggy frame
   });
 });
 

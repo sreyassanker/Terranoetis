@@ -434,50 +434,114 @@ print(json.dumps(result))
     const eruptionHeight = typeof params.eruptionHeight === 'number' && Number.isFinite(params.eruptionHeight) ? params.eruptionHeight : 10;
     const ashMass = typeof params.ashMass === 'number' && Number.isFinite(params.ashMass) ? params.ashMass : 1000;
     const duration = typeof params.duration === 'number' && Number.isFinite(params.duration) ? params.duration : 24;
+    const lat0 = typeof params.lat === 'number' && Number.isFinite(params.lat) ? params.lat : 8.0;
+    const lon0 = typeof params.lon === 'number' && Number.isFinite(params.lon) ? params.lon : 72.0;
 
     return `
 eruption_height = ${eruptionHeight}
 ash_mass = ${ashMass}
 wind_fields = ${JSON.stringify(params.windFields ?? [])}
 duration = ${duration}
+lat0 = ${lat0}
+lon0 = ${lon0}
 
-nx, ny, nz = 100, 100, 20
-dx, dy = 5000.0, 5000.0
-K_h = 5000.0
-K_v = 50.0
+# ── Grid ────────────────────────────────────────────────────────────────
+# Vectorized 3-D advection–diffusion. The previous implementation used a
+# Python triple-nested loop (O(n^3) per step) that never completed inside
+# the 60 s budget; this runs fully vectorized on numpy in a few seconds.
+nx, ny, nz = 81, 81, 20
+dx = dy = 3000.0
+dz = 500.0
+K_h = 1000.0
+K_v = 20.0
 dt = 60.0
+timeSteps = min(int(duration * 3600.0 / dt), 1440)
 
+cell_area = dx * dy
+mass_kg = ash_mass * 1000.0
+
+# ── Wind profile: interpolate (speed, direction) vs altitude ─────────────
+wfs = sorted(wind_fields, key=lambda w: w['altitude'])
+alts = [w['altitude'] for w in wfs]
+speeds = [w['speed'] for w in wfs]
+dirs = [w['direction'] for w in wfs]
+
+def wind_at(z):
+    if z <= alts[0]:
+        return speeds[0], dirs[0]
+    if z >= alts[-1]:
+        return speeds[-1], dirs[-1]
+    for a in range(len(alts) - 1):
+        if alts[a] <= z <= alts[a + 1]:
+            f = (z - alts[a]) / max(alts[a + 1] - alts[a], 1e-9)
+            return speeds[a] + f * (speeds[a + 1] - speeds[a]), dirs[a] + f * (dirs[a + 1] - dirs[a])
+    return speeds[-1], dirs[-1]
+
+# Wind direction is reported as the FROM bearing (meteorological convention);
+# ash is transported in the TO direction (bearing + 180). u = east, v = north.
+u_k = np.zeros(nz)
+v_k = np.zeros(nz)
+for k in range(nz):
+    sp, d = wind_at(k * dz)
+    to_rad = math.radians(d + 180.0)
+    u_k[k] = sp * math.sin(to_rad)
+    v_k[k] = sp * math.cos(to_rad)
+
+# Gravitational settling: tephra falls at its terminal velocity, so apply a
+# constant downward (toward the surface) vertical advection. Without this the
+# ash stays aloft and essentially no ashfall is produced, which is unphysical.
+w_settle = 1.5
+w_k = np.full(nz, -w_settle)
+
+# ── Seed the eruption column ─────────────────────────────────────────────
 C = np.zeros((nx, ny, nz))
-plume_rise = eruption_height * 1000.0
-cz = int(min(plume_rise / 500.0, nz - 1))
+plume_top = min(int(eruption_height * 1000.0 / dz), nz - 1)
 cx, cy = nx // 2, ny // 2
-C[cx-2:cx+2, cy-2:cy+2, cz-1:cz+2] = ash_mass / 100.0
+vz0 = max(0, plume_top - 1); vz1 = min(nz, plume_top + 1)
+vent = (slice(cx - 2, cx + 3), slice(cy - 2, cy + 3), slice(vz0, vz1))
+nvox = (vent[0].stop - vent[0].start) * (vent[1].stop - vent[1].start) * (vent[2].stop - vent[2].start)
+C[vent] = mass_kg / max(nvox, 1)
 
-deposition = np.zeros((nx, ny))
-timeSteps = min(int(duration * 3600 / dt), 2000)
+deposition = np.zeros((nx, ny))  # kg/m^2 (numerically == mm at 1000 kg/m^3)
+
+def advect_axis(C, vel, axis, dt, d):
+    # Wind varies with altitude (z), so align the velocity with axis 2.
+    s = [1] * C.ndim
+    s[2] = vel.shape[0]
+    v = vel.reshape(s)
+    c_roll = np.roll(C, 1, axis=axis)
+    c_back = np.roll(C, -1, axis=axis)
+    grad = np.where(v > 0, (C - c_roll) / d, (c_back - C) / d)
+    return -v * grad * dt
+
 for t in range(timeSteps):
-    dC = np.zeros((nx, ny, nz))
-    for i in range(1, nx - 1):
-        for j in range(1, ny - 1):
-            for k in range(1, nz - 1):
-                adv_x = K_h * (C[i+1,j,k] - 2*C[i,j,k] + C[i-1,j,k]) / dx**2
-                adv_y = K_h * (C[i,j+1,k] - 2*C[i,j,k] + C[i,j-1,k]) / dy**2
-                adv_z = K_v * (C[i,j,k+1] - 2*C[i,j,k] + C[i,j,k-1]) / (250**2)
-                dC[i,j,k] = adv_x + adv_y + adv_z
-                if k == 0:
-                    deposition[i,j] += C[i,j,0] * 0.001
-                    dC[i,j,0] -= C[i,j,0] * 0.001
-    C += dC * dt
-    C = np.maximum(C, 0)
+    lap_x = np.gradient(np.gradient(C, dx, axis=0), dx, axis=0)
+    lap_y = np.gradient(np.gradient(C, dy, axis=1), dy, axis=1)
+    lap_z = np.gradient(np.gradient(C, dz, axis=2), dz, axis=2)
+    diff = K_h * (lap_x + lap_y) + K_v * lap_z
+    adv_x = advect_axis(C, u_k, 0, dt, dx)
+    adv_y = advect_axis(C, v_k, 1, dt, dy)
+    adv_z = advect_axis(C, w_k, 2, dt, dz)
+    C = C + dt * diff + adv_x + adv_y + adv_z
+    C = np.maximum(C, 0.0)
+    # Ground-level ash settles onto the surface (mass-conserving).
+    settle = C[:, :, 0] * 0.002 * dt
+    deposition += settle / cell_area
+    C[:, :, 0] -= settle
+    C = np.maximum(C, 0.0)
 
 ash_series = []
-for t_step in range(min(10, timeSteps)):
-    idx = int(t_step * timeSteps / 10)
-    ash_series.append(C[:, :, nz//2].tolist())
+for ts in range(min(10, timeSteps)):
+    idx = int(ts * (timeSteps - 1) / max(min(10, timeSteps) - 1, 1))
+    ash_series.append(C[:, :, nz // 2].tolist())
+
+dlat = dx / 111320.0
+dlon = dx / (111320.0 * math.cos(math.radians(lat0)))
 
 result = {
     "ashConcentration": ash_series,
-    "depositionMap": deposition.tolist()
+    "depositionMap": deposition.tolist(),
+    "lat0": lat0, "lon0": lon0, "dlat": dlat, "dlon": dlon,
 }
 print(json.dumps(result))
 `;

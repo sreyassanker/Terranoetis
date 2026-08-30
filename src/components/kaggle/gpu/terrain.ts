@@ -88,21 +88,31 @@ export function sampleDomainTerrain(
   // immediately and subscribe to tile loads to refine later. Without this,
   // overlays built right after a camera move are permanently flat.
   if (misses > 0 && onRefined) {
+    const globeLoose = globe as unknown as { tileLoadedEvent: Cesium.Event };
     let remove: (() => void) | null = null;
+    let attempts = 0;
+    // Cesium streams tiles in bursts, so re-arm the listener (bounded) and
+    // re-sample each burst. Without this, a single one-shot refinement can
+    // fire before the vent tile itself has loaded, leaving the surface at 0 m.
+    const MAX_ATTEMPTS = 16;
+    const arm = () => {
+      globeLoose.tileLoadedEvent.addEventListener(listener);
+      remove = () => globeLoose.tileLoadedEvent.removeEventListener(listener);
+    };
     const listener = () => {
-      // Debounce: let tiles settle before resampling.
+      // Unsubscribe before resync to debounce tile-load bursts.
       if (remove) {
         remove();
         remove = null;
       }
-      // Resync synchronously once — subsequent tile loads merely increase detail.
+      attempts++;
+      // Re-sample with current terrain. `onRefined` is intentionally omitted
+      // here so this recursive call does NOT arm another listener.
       const refined = sampleDomainTerrain({ ...opts });
       onRefined(refined);
+      if (attempts < MAX_ATTEMPTS) arm();
     };
-// Sample each tile-loaded event once, then unsubscribe to avoid thrash.
-  const globeLoose = globe as unknown as { tileLoadedEvent: Cesium.Event };
-  globeLoose.tileLoadedEvent.addEventListener(listener);
-  remove = () => globeLoose.tileLoadedEvent.removeEventListener(listener);
+    arm();
   }
 
   return firstPass;
