@@ -1,0 +1,28 @@
+{
+  "passed": 4,
+  "total": 4,
+  "all_pass": true,
+  "elapsed_sec": 85.4,
+  "results": [
+    {
+      "name": "B1 flat-box lava conservation",
+      "passed": true,
+      "detail": "|\u0394|=2.87e-16"
+    },
+    {
+      "name": "B2 steep-box lava conservation",
+      "passed": true,
+      "detail": "|\u0394|=1.05e-04 well-balanced=True int-vel=1.0e+00m/s"
+    },
+    {
+      "name": "B3 Pinatubo ash isopach",
+      "passed": true,
+      "detail": "near(25km)=2253mm(OK) far(200km)=1308mm monotonic=True"
+    },
+    {
+      "name": "B4 VEI lava flow physics",
+      "passed": true,
+      "detail": "runout=15.0km budget=True downslope=True (centroid_c=35 < vent 64) cells=71"
+    }
+  ]
+}

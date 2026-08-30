@@ -262,60 +262,94 @@ export function KaggleScalarOverlay({
       const rect = computeGridRectangle(lat, lon, km);
 
       const geoFrame = buildGeoFrame(lat, lon, gs, cellSizeM);
-      const terrain = sampleDomainTerrain({
-        viewer,
-        frame: geoFrame,
-        outGs: gs,
-        debugName: `${config.typeKey}-${jobId}`,
-      });
 
-      const surface = new ScalarSurfacePrimitive({
-        viewer,
-        centerLat: lat,
-        centerLon: lon,
-        gs,
-        cellSizeM,
-        series: seriesGrid!, // frames are known
-        times,
-        terrain,
-        exaggeration: config.exaggeration,
-        colormap: config.surfaceColormap,
-        alphaFloor: config.alphaFloor,
-        sideTint: config.sideTint,
-      });
-
-      let arrows: ArrowFieldPrimitive | null = null;
-      if (vxSeries && vySeries) {
-        arrows = new ArrowFieldPrimitive({
+      // Build (or rebuild) the GPU stack for a given terrain heightfield.
+      // Reused when Cesium streams tiles in: the surface re-seats onto the real
+      // terrain instead of floating at the 0 m fallback. The same geo-frame,
+      // grid size and center are used every time, so the lava stays centered
+      // on the vent — only its elevation tracks the terrain.
+      const buildStack = (stackTerrain: Float32Array) => {
+        if (controller.signal.aborted) return;
+        const prev = stackRef.current;
+        if (prev) {
+          try { prev.surface.destroy(); } catch { /* already gone */ }
+          if (prev.arrows) { try { prev.arrows.destroy(); } catch { /* already gone */ } }
+          try { viewer.entities.remove(prev.boundary); } catch { /* already gone */ }
+        }
+        const surface = new ScalarSurfacePrimitive({
           viewer,
           centerLat: lat,
           centerLon: lon,
           gs,
           cellSizeM,
-          vxSeries,
-          vySeries,
-          terrain,
-          // Ride the displaced debris surface: arrows hover `lift` meters above
-          // the surface (which rises to (depth/maxDepth)*exaggeration), instead
-          // of being buried under it at bare-terrain height.
-          depthSeries: seriesGrid as GridData,
+          series: seriesGrid!, // frames are known
+          times,
+          terrain: stackTerrain,
           exaggeration: config.exaggeration,
-          lift: config.exaggeration * 0.12,
-          stride: Math.max(1, Math.ceil(gs / 72)), // ~72 max across domain
-          minLen: cellSizeM * 0.55,
-          lenScale: cellSizeM * 2.2,
-          thickness: 0.08,
-          colormap: config.arrowColormap,
+          colormap: config.surfaceColormap,
+          alphaFloor: config.alphaFloor,
+          sideTint: config.sideTint,
         });
-      }
+        let arrows: ArrowFieldPrimitive | null = null;
+        if (vxSeries && vySeries) {
+          arrows = new ArrowFieldPrimitive({
+            viewer,
+            centerLat: lat,
+            centerLon: lon,
+            gs,
+            cellSizeM,
+            vxSeries,
+            vySeries,
+            terrain: stackTerrain,
+            // Ride the displaced debris surface: arrows hover `lift` meters above
+            // the surface (which rises to (depth/maxDepth)*exaggeration), instead
+            // of being buried under it at bare-terrain height.
+            depthSeries: seriesGrid as GridData,
+            exaggeration: config.exaggeration,
+            lift: config.exaggeration * 0.12,
+            stride: Math.max(1, Math.ceil(gs / 72)), // ~72 max across domain
+            minLen: cellSizeM * 0.55,
+            lenScale: cellSizeM * 2.2,
+            thickness: 0.08,
+            colormap: config.arrowColormap,
+          });
+        }
+        const boundary = addDomainBoundary(
+          viewer,
+          rect,
+          Cesium.Color.fromCssColorString(config.accent),
+        );
+        stackRef.current = { surface, arrows, frames, times, boundary };
+      };
 
-      const boundary = addDomainBoundary(
-        viewer,
-        rect,
-        Cesium.Color.fromCssColorString(config.accent),
+      // Initial build with whatever terrain is currently streamed. If some cells
+      // missed (0 m fallback), sampleDomainTerrain also arms `onRefined` to
+      // re-sample as tiles arrive and call buildStack again with real heights.
+      const terrain = sampleDomainTerrain(
+        {
+          viewer,
+          frame: geoFrame,
+          outGs: gs,
+          // Sample terrain at the full overlay resolution so the lava base
+          // equals globe.getHeight at every cell (bilinearUpsample becomes an
+          // identity pass). A coarse 72-point sample over a steep volcano leaves
+          // the surface floating slightly above the real relief.
+          coarseLimit: Math.min(gs, 256),
+          debugName: `${config.typeKey}-${jobId}`,
+        },
+        buildStack,
       );
+      buildStack(terrain);
+      const surface = stackRef.current!.surface;
+      const arrows = stackRef.current!.arrows;
 
-      stackRef.current = { surface, arrows, frames, times, boundary };
+      // The viewer runs in requestRenderMode (on-demand rendering), so a newly
+      // added surface/arrows primitive stays invisible until something calls
+      // scene.requestRender(). Without this the result only appears after the
+      // user nudges a control (e.g. changing the colour scheme, which happens
+      // to call requestRender via setColormap). Render immediately instead.
+      try { viewer.scene.requestRender(); } catch { /* viewer may be torn down */ }
+
       loadedJobRef.current = jobId;
 
       // Stats
@@ -341,13 +375,6 @@ export function KaggleScalarOverlay({
           ['Max', String(surface.maxValue.toFixed(2))],
         ]);
       }
-
-      // Camera
-      viewer.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(8000, km * 550)),
-        orientation: { heading: 0, pitch: Cesium.Math.toRadians(-35), roll: 0 },
-        duration: 1.6,
-      });
     } catch (err) {
       if (controller.signal.aborted) return;
       // Debug: log the real exception so we can see what actually broke
@@ -388,6 +415,20 @@ export function KaggleScalarOverlay({
     stackRef.current?.surface.setOpacity(layerOpacity);
     stackRef.current?.arrows?.setOpacity(layerOpacity);
   }, [layerOpacity]);
+
+  // ── Play/pause — toggling must also force a render, because the viewer runs
+  // in requestRenderMode and only repaints when something calls requestRender.
+  // Without this, clicking Play changes the state but the first animated frame
+  // never paints until the user nudges another control.
+  const handleTogglePlay = useCallback(() => {
+    setPlaying((p) => {
+      const next = !p;
+      if (next) {
+        try { viewer?.scene.requestRender(); } catch { /* teardown */ }
+      }
+      return next;
+    });
+  }, [viewer]);
 
   // ── Scheme change — swap the baked GLSL colormap on every primitive ─────────
   useEffect(() => {
@@ -455,7 +496,7 @@ export function KaggleScalarOverlay({
               frame={frame}
               onFrameChange={setFrame}
               playing={playing}
-              onTogglePlay={() => setPlaying(p => !p)}
+              onTogglePlay={handleTogglePlay}
               times={stackRef.current?.times ?? []}
               formatTime={config.formatTime ?? ((t) => `${t.toFixed(1)}`)}
             />
