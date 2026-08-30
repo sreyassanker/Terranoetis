@@ -7690,7 +7690,24 @@ export default function App() {
     cleanupThinkingSteps,
     loadFlightTracks,
     viewerRef,
-    { abortControllerRef, currentRequestIdRef, onPanel: (data) => setDigitalTwinPanel(data as any) },
+    { abortControllerRef, currentRequestIdRef, onPanel: (data) => setDigitalTwinPanel(data as any), onAnalyticalResult: (data) => {
+      // Analytical compute → globe: render the real computed field as a
+      // heatmap over the study area when the agent runs analytical_execute.
+      const d = data as { toolId?: number; label?: string; lat?: number; lon?: number; unit?: string; vizType?: string; value?: number; grid?: { latMin: number; latMax: number; lonMin: number; lonMax: number; nLat: number; nLon: number; values: number[]; valueMin: number; valueMax: number; valueMean?: number; valueStd?: number; valueMedian?: number; finiteCellCount?: number; hasNaN?: boolean } };
+      if (d?.grid) {
+        const g = d.grid;
+        handleToolResult(
+          d.toolId ?? 0,
+          d.label || `Model ${d.toolId}`,
+          d.lat ?? 0,
+          d.lon ?? 0,
+          d.value,
+          { ...g, valueMean: g.valueMean, valueStd: g.valueStd, valueMedian: g.valueMedian, finiteCellCount: g.finiteCellCount, hasNaN: g.hasNaN ?? g.values.some(v => typeof v !== 'number' || !Number.isFinite(v)) },
+          d.unit,
+          d.vizType,
+        );
+      }
+    } },
   );
   sendAIRef.current = sendAI;
 

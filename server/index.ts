@@ -7599,7 +7599,7 @@ const askRateLimit = perUserRateLimiter(30, 60000); // 30 requests per minute pe
 // ── Analytical model helper ───────────────────────────────────────
 // Deterministically search + execute a known analytical model for a
 // compute query, bypassing the LLM. Returns null when no model matches.
-const analyticalResultCache = new Map<string, { at: number; hit: { id: number; name: string; text: string; commands: Array<Record<string, unknown>> } | null }>();
+const analyticalResultCache = new Map<string, { at: number; hit: AnalyticalRunResult | null }>();
 const ANALYTICAL_CACHE_TTL_MS = 10 * 60 * 1000;
 
 async function tryAnalyticalModelRun(
@@ -7607,7 +7607,7 @@ async function tryAnalyticalModelRun(
   location?: { lat: number; lon: number; label?: string },
   refinedId?: number,
   studyAreaBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null,
-): Promise<{ id: number; name: string; text: string; commands: Array<Record<string, unknown>> } | null> {
+): Promise<AnalyticalRunResult | null> {
   // Memoize identical (modelId + bbox) runs — satellite grid fetches can take
   // ~30s cold; repeats should return instantly so chat stays responsive.
   const cacheKey = `m${refinedId ?? 'auto'}|${studyAreaBbox ? `${studyAreaBbox.latMin},${studyAreaBbox.latMax},${studyAreaBbox.lonMin},${studyAreaBbox.lonMax}` : (location ? `loc:${location.lat},${location.lon}` : 'none')}|${message.toLowerCase().trim().slice(0, 60)}`;
@@ -7620,12 +7620,26 @@ async function tryAnalyticalModelRun(
   return hit;
 }
 
+interface AnalyticalRunResult {
+  id: number;
+  name: string;
+  text: string;
+  commands: Array<Record<string, unknown>>;
+  /** Rich result payload streamed to the client for globe rendering. */
+  grid?: Record<string, unknown> | null;
+  unit?: string;
+  vizType?: string;
+  resultValue?: number;
+  lat?: number;
+  lon?: number;
+}
+
 async function tryAnalyticalModelRunInner(
   message: string,
   location?: { lat: number; lon: number; label?: string },
   refinedId?: number,
   studyAreaBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null,
-): Promise<{ id: number; name: string; text: string; commands: Array<Record<string, unknown>> } | null> {
+): Promise<AnalyticalRunResult | null> {
   const lower = message.toLowerCase().trim();
   // Map of known analytical model keywords → model IDs (verified against
   // /api/analytical-models/search — IDs must match the real 150 models).
@@ -7805,7 +7819,7 @@ async function tryAnalyticalModelRunInner(
       }
     }
 
-    return { id: modelId, name, text, commands };
+    return { id: modelId, name, text, commands, grid: result.grid || null, unit, vizType, resultValue: typeof resultValue === 'number' ? resultValue : undefined, lat: location?.lat, lon: location?.lon };
   } catch (e) {
     logger.warn({ err: e, modelId }, 'Analytical model execution caught exception');
     return null;
@@ -8190,6 +8204,21 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         sendEvent('step', { stepType: 'analytical', text: `Executing analytical model #${analyticalHit.id} (${analyticalHit.name})...`, status: 'completed' });
         if (allCommands.length > 0) sendEvent('commands', allCommands);
         sendEvent('output', { text: analyticalHit.text, modelTier: 'flash', intentType: intent.type, commands: allCommands });
+        // Analytical compute → globe: stream the real computed grid so the
+        // client renders the field as a proper heatmap surface (QGIS-style),
+        // not just the coarse point cloud in the addHeatmap command above.
+        if (analyticalHit.grid && Array.isArray((analyticalHit.grid as Record<string, unknown>).values)) {
+          sendEvent('analytical_result', {
+            toolId: analyticalHit.id,
+            label: analyticalHit.name,
+            lat: analyticalHit.lat,
+            lon: analyticalHit.lon,
+            unit: analyticalHit.unit,
+            vizType: analyticalHit.vizType,
+            value: analyticalHit.resultValue,
+            grid: analyticalHit.grid,
+          });
+        }
         sendEvent('done', { type: 'done' });
         cleanup();
         res.end();
@@ -8475,6 +8504,31 @@ const model = 'gemini-3.5-flash-lite';
             sendEvent('tool_result', { name: call.name, status: 'success', result });
             // #15 record evidence for this tool call
             addEvidence(requestId, `Tool ${call.name} returned data`, [{ sourceType: 'tool_execution', sourceName: call.name, parsedValue: result }], 0.85);
+            // Analytical compute → globe: when analytical_execute returns a
+            // spatial grid, stream it as a dedicated event so the client can
+            // render the real computed field as a heatmap over the study area
+            // (QGIS-style), not just print the number in the chat.
+            if (call.name === 'analytical_execute') {
+              const res = (result ?? {}) as Record<string, unknown>;
+              const grid = res.grid as {
+                latMin?: number; latMax?: number; lonMin?: number; lonMax?: number;
+                nLat?: number; nLon?: number; values?: number[]; valueMin?: number; valueMax?: number;
+              } | null;
+              const location = res.location as { lat?: number; lon?: number; label?: string } | null;
+              if (grid && Array.isArray(grid.values) && typeof grid.nLat === 'number' && typeof grid.nLon === 'number') {
+                sendEvent('analytical_result', {
+                  toolId: res.id,
+                  label: `Model ${res.id} — ${String(res.visualizationType || 'result')}`,
+                  lat: location?.lat ?? intent.location?.lat,
+                  lon: location?.lon ?? intent.location?.lon,
+                  unit: res.unit,
+                  vizType: res.visualizationType,
+                  value: res.result as number | undefined,
+                  grid,
+                  interpretation: res.interpretation,
+                });
+              }
+            }
           } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
             toolResults.push(`[${call.name}] ERROR: ${errMsg}`);
