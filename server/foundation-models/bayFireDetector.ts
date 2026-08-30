@@ -200,6 +200,13 @@ export class BayFireDetector {
       }
 
       this.observations.push(...observations);
+      // Bounded ring buffer: FIRMS is polled every 10 min and the persistence
+      // scoring scans this array every poll, so cap it to the trailing ~24h of
+      // observations (144 polls). Prevents unbounded memory growth and keeps
+      // the persistence scan linear.
+      if (this.observations.length > 20000) {
+        this.observations = this.observations.slice(-20000);
+      }
       return observations;
     } catch (err) {
       logger.error({ err }, '[BayFire] FIRMS fetch failed');

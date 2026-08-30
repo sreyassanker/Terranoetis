@@ -129,11 +129,16 @@ export class DiscoveryEngine {
 
       for (const edge of (result.edges as Array<Record<string, unknown>>) || []) {
         if ((edge.type as string) === 'directed') {
+          // Use the real correlation and weight from the Python PC algorithm
+          // (causal-learn) instead of hardcoded defaults. The Python service
+          // returns each edge with a weight, p-value, and direction.
+          const realWeight = typeof edge.weight === 'number' ? edge.weight : 0.5;
+          const realLag = typeof edge.avg_lag_hours === 'number' ? edge.avg_lag_hours : 0;
           pairs.push({
             source: eventTypes[edge.source as number] || `var_${edge.source}`,
             target: eventTypes[edge.target as number] || `var_${edge.target}`,
-            correlation: 0.7,
-            avgLagHours: 12,
+            correlation: realWeight,
+            avgLagHours: realLag,
             count: rows.length,
           });
         }

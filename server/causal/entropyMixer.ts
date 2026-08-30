@@ -1,19 +1,30 @@
 import { pubsub } from '../pubsub';
 import type { EntropyReading } from './types';
 
+/**
+ * EntropyMixer — aggregate planetary anomaly index.
+ *
+ * This is NOT an autoencoder / neural network. It tracks a rolling window of
+ * per-domain anomaly scores published on the pubsub bus and computes a
+ * normalized "restlessness" index from how far the latest score deviates from
+ * that domain's recent mean. The name "planetary entropy" is product language
+ * for this aggregate anomaly index, not a physics or information-theoretic
+ * quantity. Kept as a plain windowed tracker on purpose: real autoencoders
+ * would add no signal here without a trained model per domain.
+ */
 export class EntropyMixer {
-  private domainAutoencoders: Map<string, { lastError: number; window: number[] }>;
-  private metaEncoder: { anomalyScores: number[] };
+  private domainTrackers: Map<string, { lastError: number; window: number[] }>;
+  private metaTracker: { anomalyScores: number[] };
   private lastReading: EntropyReading | null = null;
   private broadcastInterval: NodeJS.Timeout | null = null;
   private unsubs: Array<() => void> = [];
   private readonly DOMAINS = ['seismic', 'ocean', 'aviation', 'weather', 'satellite', 'hazard', 'geospatial'];
 
   constructor() {
-    this.domainAutoencoders = new Map();
-    this.metaEncoder = { anomalyScores: [] };
+    this.domainTrackers = new Map();
+    this.metaTracker = { anomalyScores: [] };
     for (const d of this.DOMAINS) {
-      this.domainAutoencoders.set(d, { lastError: 0, window: [] });
+      this.domainTrackers.set(d, { lastError: 0, window: [] });
     }
   }
 
@@ -36,20 +47,20 @@ export class EntropyMixer {
   }
 
   private feedDomain(domain: string, score: number): void {
-    const encoder = this.domainAutoencoders.get(domain);
-    if (!encoder) return;
-    encoder.window.push(score);
-    if (encoder.window.length > 360) encoder.window.shift();
-    const mean = encoder.window.reduce((a, b) => a + b, 0) / encoder.window.length;
-    encoder.lastError = Math.abs(score - mean);
+    const tracker = this.domainTrackers.get(domain);
+    if (!tracker) return;
+    tracker.window.push(score);
+    if (tracker.window.length > 360) tracker.window.shift();
+    const mean = tracker.window.reduce((a, b) => a + b, 0) / tracker.window.length;
+    tracker.lastError = Math.abs(score - mean);
   }
 
   private computeAndBroadcast(): void {
     const domainScores: Record<string, number> = {};
     let totalError = 0;
 
-    for (const [domain, encoder] of this.domainAutoencoders) {
-      const normalized = 1 / (1 + Math.exp(-encoder.lastError * 2));
+    for (const [domain, tracker] of this.domainTrackers) {
+      const normalized = 1 / (1 + Math.exp(-tracker.lastError * 2));
       domainScores[domain] = normalized;
       totalError += normalized;
     }

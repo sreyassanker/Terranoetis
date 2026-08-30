@@ -151,16 +151,11 @@ import { registerPowerEngine } from './kaggle/powerSaver';
 import { startSentinelEngine, stopSentinelEngine } from './sentinel/engine';
 import { CorrelationEngine } from './sentinel/correlationEngine';
 import { initAisTracker, stopAisTracker, getAisTracker, type AisVessel } from './maritime/aisTracker';
-import { prithviV2Engine } from './foundation-models/prithvi-v2';
 import { roadTrafficDetector } from './sentinel/roadTrafficDetector';
 import { spacexEngine } from './foundation-models/spacexApi';
-import { clayEngine } from './foundation-models/clayModel';
 import { bayFireDetector } from './foundation-models/bayFireDetector';
-import { unetSegmenter } from './foundation-models/unetSegmenter';
 import { weatherForecaster } from './foundation-models/weatherForecaster';
 import { agricultureMonitor } from './foundation-models/agricultureMonitor';
-import { samGeoSegmenter } from './foundation-models/samgeoSegmenter';
-import { alphaEarthLookup } from './foundation-models/alphaEarthLookup';
 dotenv.config();
 
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -301,6 +296,58 @@ app.post('/api/auth/login', loginRateLimit, login);
 if (!IS_PROD) {
   app.post('/api/auth/dev-login', devAutoLogin);
 }
+
+// Internal analytical-model execution for the agent tool registry. The
+// registry's tools call this server's own endpoints (via 127.0.0.1) with no
+// auth token, so this loopback-only route lets them run the REAL physics
+// engines in-process. Remote clients are rejected (non-loopback → 403), and
+// the normal authenticated /api/analytical-models/:id/execute stays as the
+// public surface. This is what powers the agent's "compute" intent end-to-end.
+const isLoopback = (ip: string | undefined): boolean => {
+  const v = (ip || '').replace(/^::ffff:/, '');
+  return v === '127.0.0.1' || v === '::1' || v === 'localhost';
+};
+app.post('/api/analytical-models/:id/execute-internal', (req: express.Request, res: express.Response) => {
+  if (!isLoopback(req.ip) && !isLoopback(req.socket?.remoteAddress)) {
+    return res.status(403).json({ error: 'Internal endpoint only' });
+  }
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid equation id' });
+  const inputs: Record<string, number> = req.body?.inputs ?? {};
+  const context = req.body?.context;
+  (async () => {
+    try {
+      const result = await computeWithContext(id, inputs, context);
+      if (!result) return res.status(404).json({ error: `Equation ${id} not implemented` });
+      return res.json({
+        id,
+        result: result.result,
+        unit: result.unit,
+        steps: result.steps,
+        series: result.series,
+        secondary: result.secondary,
+        dataSource: result.dataSource,
+        location: result.location,
+        log: result.log,
+        warnings: result.warnings,
+        grid: result.grid,
+        fetchedParams: result.fetchedParams,
+        validation: result.validation,
+        qualityControl: result.qualityControl,
+        uncertainty: result.uncertainty,
+        interpretation: result.interpretation,
+        workflowLog: result.workflowLog,
+        dataQualityScore: result.dataQualityScore,
+        processingTimeMs: result.processingTimeMs,
+        visualizationType: result.visualizationType,
+        preprocessingNotes: result.preprocessingNotes,
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err instanceof Error ? err.message : 'Computation failed' });
+    }
+  })();
+});
+
 app.use('/api', (req: express.Request, res: express.Response, next: express.NextFunction) => {
   // Health/metrics are public
   if (
@@ -348,15 +395,10 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
   ) {
     return next();
   }
-  // Prithvi EO foundation model endpoints (v2 + all new FM systems)
+  // EO foundation endpoints (weather forecast + agriculture, real Open-Meteo/Sentinel-2 data)
   if (
-    req.path.startsWith('/fm/prithvi-v2/') ||
-    req.path.startsWith('/fm/clay/') ||
-    req.path.startsWith('/fm/unet/') ||
     req.path.startsWith('/fm/weather/') ||
     req.path.startsWith('/fm/agri/') ||
-    req.path.startsWith('/fm/samgeo/') ||
-    req.path.startsWith('/fm/alpha/') ||
     req.path.startsWith('/road-traffic/') ||
     req.path.startsWith('/spacex/') ||
     req.path.startsWith('/bayfire/') ||
@@ -482,17 +524,10 @@ function registerDefaultTools() {
     { name:'assess_and_email', category:'navigation', description:'Run a FULL disaster assessment for a region (earthquakes, storms, floods, wildfires, air quality, marine) and email the HTML report. Requires a region name + bounding box (latMin/latMax/lonMin/lonMax) + optional emailTo. Use when the user asks to "assess" a region or "email a report".', exampleQueries:['full disaster assessment of the Bay of Bengal and email me a report','assess the east coast and send report','disaster assessment report'], schema:{type:'command',params:{regionName:'region name',latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude',emailTo:'optional recipient email'}} },
 
     // ── Earth Observation / Foundation Models ──
-    { name:'clay_analyze', category:'eo', description:'Analyze a lat/lon with the IBM CLAY geospatial foundation model (multisensor). Returns embedding + classification.', exampleQueries:['clay analysis','multisensor satellite analysis','geospatial embedding'], schema:{type:'api',endpoint:'/api/fm/clay/analyze',method:'POST',params:{lat:'latitude',lon:'longitude',sensor:'satellite sensor (sentinel-2, landsat, etc.)'}} },
-    { name:'clay_flood_sar', category:'eo', description:'Detect flood extent using CLAY model with SAR data at a lat/lon', exampleQueries:['flood detection sar','sar flood extent','clay flood'], schema:{type:'api',endpoint:'/api/fm/clay/flood-sar',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
-    { name:'unet_segment', category:'eo', description:'U-Net land/water segmentation at a lat/lon — returns classified areas', exampleQueries:['unet segmentation','land water segmentation','image segmentation'], schema:{type:'api',endpoint:'/api/fm/unet/segment',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
-    { name:'unet_change', category:'eo', description:'Detect change using U-Net segmentation at a lat/lon', exampleQueries:['unet change detection','segmentation change'], schema:{type:'api',endpoint:'/api/fm/unet/change',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
-    { name:'weather_fm_forecast', category:'eo', description:'ML weather forecasting using foundation model at a lat/lon. Returns multi-day predictions.', exampleQueries:['ml weather forecast','ai weather prediction','foundation model weather'], schema:{type:'api',endpoint:'/api/fm/weather/forecast',method:'POST',params:{lat:'latitude',lon:'longitude',forecastDays:'number of forecast days'}} },
-    { name:'weather_fm_anomalies', category:'eo', description:'Detect weather anomalies for a region using ML foundation model', exampleQueries:['weather anomalies','climate anomaly detection','temperature anomaly'], schema:{type:'api',endpoint:'/api/fm/weather/anomalies',method:'POST',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude'}} },
+    { name:'weather_fm_forecast', category:'eo', description:'Multi-day weather forecast at a lat/lon — Open-Meteo with anomaly detection against 2020-2024 climatology.', exampleQueries:['weather forecast','temperature forecast','precipitation outlook'], schema:{type:'api',endpoint:'/api/fm/weather/forecast',method:'POST',params:{lat:'latitude',lon:'longitude',forecastDays:'number of forecast days'}} },
+    { name:'weather_fm_anomalies', category:'eo', description:'Detect weather anomalies for a region using Open-Meteo climatology comparison', exampleQueries:['weather anomalies','climate anomaly detection','temperature anomaly'], schema:{type:'api',endpoint:'/api/fm/weather/anomalies',method:'POST',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude'}} },
     { name:'agri_analyze', category:'eo', description:'Agriculture crop health analysis at a lat/lon — NDVI/EVI, stress level, alerts', exampleQueries:['crop health','agriculture analysis','crop stress','ndvi','farming conditions'], schema:{type:'api',endpoint:'/api/fm/agri/analyze',method:'POST',params:{lat:'latitude',lon:'longitude'}} },
     { name:'agri_alerts', category:'eo', description:'Active agriculture stress alerts from crop monitoring', exampleQueries:['crop alerts','agriculture alerts','farming alerts'], schema:{type:'api',endpoint:'/api/fm/agri/alerts',method:'GET'} },
-    { name:'samgeo_segment', category:'eo', description:'Segment-Anything-Model for geospatial — point/box prompt segmentation at a lat/lon. Returns masks and polygons.', exampleQueries:['sam segmentation','segment anything','geospatial segmentation','samgeo'], schema:{type:'api',endpoint:'/api/fm/samgeo/segment',method:'POST',params:{lat:'latitude',lon:'longitude',pointPrompts:'array of [lat,lon] points',boxPrompt:'bounding box prompt'}} },
-    { name:'alpha_earth_lookup', category:'eo', description:'Earth embeddings lookup at a lat/lon — returns embedding + land class for a year', exampleQueries:['earth embedding','alpha earth','location embedding'], schema:{type:'api',endpoint:'/api/fm/alpha/lookup',method:'POST',params:{lat:'latitude',lon:'longitude',year:'year for historical lookup'}} },
-    { name:'alpha_earth_change', category:'eo', description:'Temporal change detection at a lat/lon across years using AlphaEarth embeddings', exampleQueries:['temporal change','alpha earth change','multi-year change detection'], schema:{type:'api',endpoint:'/api/fm/alpha/change',method:'POST',params:{lat:'latitude',lon:'longitude',yearStart:'start year',yearEnd:'end year'}} },
     { name:'bayfire_clusters', category:'eo', description:'Bayesian wildfire detection clusters from satellite + weather data fusion', exampleQueries:['bayesian fire','wildfire clusters','fire detection model','bay fire'], schema:{type:'api',endpoint:'/api/bayfire/clusters',method:'GET'} },
     { name:'spacex_launches', category:'space', description:'SpaceX launch data and schedule', exampleQueries:['spacex launches','rocket launches','spacex schedule'], schema:{type:'api',endpoint:'/api/spacex/launches',method:'GET',params:{limit:'max results'}} },
     { name:'spacex_starlink', category:'space', description:'SpaceX Starlink satellite positions. Supports bbox filtering via latMin/latMax/lonMin/lonMax.', exampleQueries:['starlink satellites','starlink positions','spacex starlink'], schema:{type:'api',endpoint:'/api/spacex/starlink',method:'GET',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude'}} },
@@ -521,7 +556,7 @@ function registerDefaultTools() {
 
     // ── Analytical Models (150 scientific equations) ──
     { name:'analytical_search', category:'analytical', description:'Search 150 scientific analytical models by natural language (e.g., "land surface temperature", "wave energy", "NDVI"). Returns matching equation IDs and names.', exampleQueries:['find equation','search analytical model','scientific formula','land surface temperature','wave energy','ndvi','seismic magnitude','carbon flux'], schema:{type:'api',endpoint:'/api/analytical-models/search',method:'GET',params:{q:'natural language search query'}} },
-    { name:'analytical_execute', category:'analytical', description:'Execute a scientific analytical model by ID. Returns result with steps, validation, uncertainty, interpretation, and visualization type. Use analytical_search first to find the ID.', exampleQueries:['calculate equation','run scientific model','compute formula','analytical model'], schema:{type:'api',endpoint:'/api/analytical-models/:id/execute',method:'POST',params:{id:'equation ID (from search)',inputs:'input parameters object',context:'optional context (location, study area)'}} },
+    { name:'analytical_execute', category:'analytical', description:'Execute a scientific analytical model by ID against real contextual data. Returns the computed result with units, validation, uncertainty, interpretation, and optional spatial grid. Use analytical_search first to find the ID.', exampleQueries:['calculate equation','run scientific model','compute formula','analytical model'], schema:{type:'api',endpoint:'/api/analytical-models/{id}/execute-internal',method:'POST',params:{id:'equation ID (from search)',inputs:'input parameters object',context:'optional context (location, study area)'}} },
 
     // ── Pulse / Intelligence ──
     { name:'pulse_market_quotes', category:'intelligence', description:'Live stock and crypto price quotes. Returns price, change, changePct, sparkline for each symbol.', exampleQueries:['stock price','market quotes','crypto price','stock market','sp500','bitcoin price','apple stock'], schema:{type:'api',endpoint:'/api/pulse/market/quotes',method:'GET',params:{symbols:'comma-separated symbols (e.g., SPY,AAPL,BTC-USD)'}} },
@@ -8219,6 +8254,44 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       }
     }
 
+    // Step 2.25: Cognitive dual-process reasoning (System 1 real-data fast
+    // path → System 2 deep reasoning with MCTS/ToT). Runs only for intents
+    // where it beats the generic streaming path: analytical/deep intents
+    // (System 2) and intents System 1 can resolve through REAL registered
+    // tools (no canned templates). Everything else keeps the fast path below.
+    const cognitionIntents = ['deep_analysis', 'compute', 'unknown', 'weather_check', 'earthquake_check', 'aviation', 'quick_scan', 'hazard_query', 'space_weather'];
+    if (cognitionIntents.includes(intent.type)) {
+      sendEvent('step', { stepType: 'cognition', text: 'Running cognitive analysis...', status: 'running' });
+      try {
+        const cognitionResult = await cognitiveAgent.process(message, {
+          location: intent.location?.label,
+          lat: intent.location?.lat,
+          lon: intent.location?.lon,
+          intent: intent.type,
+        }, (event, data) => {
+          if (event === 'reasoning') {
+            sendEvent('step', { stepType: 'reasoning', text: String(data.text || ''), status: 'running' });
+          } else if (event === 'system2_complete') {
+            sendEvent('step', { stepType: 'cognition', text: 'Deep reasoning complete', status: 'completed' });
+          }
+        });
+        if (cognitionResult && cognitionResult.finalOutput) {
+          costTracker.record('flash', message, cognitionResult.finalOutput, false);
+          const modeLabel = cognitionResult.mode === 'system1_only' ? ' (fast path, real data)' : ' (deep reasoning)';
+          sendEvent('output', { text: cognitionResult.finalOutput + `\n\n*Cognitive analysis${modeLabel}*` });
+          if (cognitionResult.traceId) {
+            sendEvent('trace', { traceId: cognitionResult.traceId, criticScore: cognitionResult.criticScore });
+          }
+          sendEvent('done', { type: 'done' });
+          cleanup();
+          res.end();
+          return;
+        }
+      } catch (e) {
+        logger.warn({ err: (e as Error).message }, 'Cognition path failed — falling through to multi-agent orchestration');
+        sendEvent('step', { stepType: 'cognition', text: 'Cognitive analysis unavailable — continuing with multi-agent analysis', status: 'completed' });
+      }
+    }
     // Step 2.5: Multi-agent orchestration for complex queries
     const orchestrationIntents = ['deep_analysis', 'compute', 'unknown'];
     if (orchestrationIntents.includes(intent.type)) {
@@ -8742,6 +8815,36 @@ app.get('/api/agent/trace/:id', authGuard, async (req: express.Request, res: exp
     res.type('json').send(trace);
   } catch (e) {
     res.status(500).json({ error: `Trace retrieval failed: ${e instanceof Error ? e.message : String(e)}` });
+  }
+});
+
+// Cognitive deep-reasoning endpoint: runs the dual-process architecture
+// (System 1 real-data fast path → System 2 with MCTS/ToT) explicitly and
+// returns the full result including the reasoning trace. Never emits canned
+// templates — System 1 resolves through real registered tools, System 2 uses
+// real LLM reasoning over real data.
+app.post('/api/agent/cognize', authGuard, validate(askSchema), async (req: express.Request, res: express.Response) => {
+  const { message, recentMessages } = req.body;
+  if (!message || typeof message !== 'string') return res.status(400).json({ error: 'message required' });
+  const start = Date.now();
+  try {
+    const cognitionResult = await cognitiveAgent.process(message, {
+      location: undefined,
+      lat: undefined,
+      lon: undefined,
+      intent: undefined,
+    });
+    res.json({
+      ok: true,
+      mode: cognitionResult.mode,
+      output: cognitionResult.finalOutput,
+      criticScore: cognitionResult.criticScore,
+      traceId: cognitionResult.traceId,
+      latencyMs: Date.now() - start,
+      flagsForReview: cognitionResult.flagsForReview,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: `Cognition failed: ${e instanceof Error ? e.message : String(e)}` });
   }
 });
 
