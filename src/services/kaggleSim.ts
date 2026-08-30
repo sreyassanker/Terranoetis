@@ -163,6 +163,10 @@ export const SimulationRequestSchema = z.discriminatedUnion('type', [
      */
     vent_frac_x: z.number().min(0).max(1).optional(),
     vent_frac_y: z.number().min(0).max(1).optional(),
+    /** Lava rheology multiplier — lower = more fluid, overflows further. */
+    yield_scale: z.number().min(0.01).max(10).optional(),
+    /** Lava volume multiplier — higher = more lava, fills the crater first. */
+    mass_scale: z.number().min(0.1).max(100).optional(),
   }),
   z.object({
     type: z.literal('landslide'),
@@ -399,6 +403,9 @@ export function buildSimulationRequest(
         wind_speed_ms: num('windSpeed') / 3.6,
         wind_dir_deg: num('windDir'),
         duration_hours: num('duration'),
+        // Lava rheology + eruption scale knobs (crater-fill and overflow)
+        ...(hasNum('yieldScale') ? { yield_scale: num('yieldScale') } : {}),
+        ...(hasNum('massScale') ? { mass_scale: num('massScale') } : {}),
         // Scientific/ash knobs — passed through only when the user supplied a
         // finite value (never fabricated by the builder).
         ...(hasNum('ashParticleDiameter') ? { ash_particle_diameter_m: num('ashParticleDiameter') / 1e6 } : {}),

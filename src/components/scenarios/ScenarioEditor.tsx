@@ -86,6 +86,9 @@ const SCENARIO_PARAMS: Record<string, ParameterDef[]> = {
     { key: 'windSpeed', label: 'Wind Speed', min: 0, max: 120, step: 1, defaultValue: 36, unit: 'km/h' },
     { key: 'windDir', label: 'Prevailing Wind Direction', min: 0, max: 360, step: 5, defaultValue: 260, unit: '°' },
     { key: 'duration', label: 'Duration', min: 1, max: 168, step: 1, defaultValue: 48, unit: 'h' },
+    // ── Lava overflow knobs (yield = fluidity, scale = eruption size) ──
+    { key: 'yieldScale', label: 'Lava Yield Scale (↓ = more fluid, overflows further)', min: 0.05, max: 3, step: 0.05, defaultValue: 0.3, unit: '' },
+    { key: 'massScale', label: 'Lava Volume Scale (↑ = more lava, fills crater first)', min: 0.5, max: 5, step: 0.1, defaultValue: 2, unit: '×' },
     // ── Ash transport physics knobs (Stokes settling / eddy diffusion) ──
     { key: 'ashParticleDiameter', label: 'Ash Particle Diameter', min: 50, max: 2000, step: 10, defaultValue: 316, unit: 'µm' },
     { key: 'ashDiffusivity', label: 'Ash Cloud Diffusivity', min: 10, max: 5000, step: 10, defaultValue: 500, unit: 'm²/s' },

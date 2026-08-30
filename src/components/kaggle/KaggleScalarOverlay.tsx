@@ -97,6 +97,8 @@ export interface ScalarOverlayConfig {
   legendUnit?: string;
   /** Colormap options available in the Legend UI. */
   schemes?: SchemeOption[];
+  /** Animation frames per second (default 4). */
+  fps?: number;
 }
 
 export interface ScalarOverlayProps {
@@ -409,7 +411,11 @@ export function KaggleScalarOverlay({
     if (!s) return;
     s.surface.setFrame(frame);
     s.arrows?.setFrame(frame);
-  }, [frame]);
+    // The viewer runs in requestRenderMode — uniform updates from setFrame
+    // may not trigger a repaint reliably across all browsers without a
+    // redundant requestRender here (belt-and-suspenders).
+    try { viewer?.scene.requestRender(); } catch { /* teardown */ }
+  }, [frame, viewer, cleanup]);
 
   useEffect(() => {
     stackRef.current?.surface.setOpacity(layerOpacity);
@@ -499,6 +505,7 @@ export function KaggleScalarOverlay({
               onTogglePlay={handleTogglePlay}
               times={stackRef.current?.times ?? []}
               formatTime={config.formatTime ?? ((t) => `${t.toFixed(1)}`)}
+              fps={config.fps}
             />
           )}
 
