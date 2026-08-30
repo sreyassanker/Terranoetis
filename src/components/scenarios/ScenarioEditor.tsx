@@ -24,6 +24,7 @@ import { sampleStudyAreaTerrainAsync } from './studyAreaTerrain';
 import {
   buildSimulationRequest,
   computeVentFractions,
+  snapVentToCraterFloor,
   deriveCenter,
   deriveExtentKm,
   derivePhysicsFormOverrides,
@@ -340,7 +341,15 @@ export default function ScenarioEditor({
       // itself — so the fraction must be computed in grid space (the bbox
       // reference frame caused a vent/ash location mismatch).
       if (base.type === 'volcanic_eruption' && ventPoint && activeBbox) {
-        const vf = computeVentFractions(activeBbox, ventPoint);
+        // Snap the clicked vent to the crater FLOOR (lowest cell within ~1.5 km)
+        // so lava pools inside the crater and overflows the rim — instead of
+        // streaming downhill from a rim/slope placement.
+        const terrArr = (request as Record<string, unknown>).terrain as number[] | undefined;
+        const terrGs = Number((request as Record<string, unknown>).terrain_gs) || 0;
+        const snapped = terrArr && terrGs > 0
+          ? snapVentToCraterFloor(activeBbox, ventPoint, terrArr, terrGs)
+          : ventPoint;
+        const vf = computeVentFractions(activeBbox, snapped);
         if (vf) {
           request = {
             ...request,
@@ -354,7 +363,7 @@ export default function ScenarioEditor({
         const c = deriveCenter(activeBbox);
         try {
           const resp = await fetch(
-            `/api/volcano/profile?lat=${c.lat}&lon=${c.lon}&date=${profileDate}`,
+            `/api/kaggle/volcano/profile?lat=${c.lat}&lon=${c.lon}&date=${profileDate}`,
           );
           if (resp.ok) {
             const data = (await resp.json()) as { profile?: Array<Record<string, unknown>> };
@@ -488,7 +497,12 @@ export default function ScenarioEditor({
         if (real) request = { ...base, terrain: real.values, terrain_gs: real.gs };
       }
       if (ventPoint && activeBbox) {
-        const vf = computeVentFractions(activeBbox, ventPoint);
+        const terrArr = (request as Record<string, unknown>).terrain as number[] | undefined;
+        const terrGs = Number((request as Record<string, unknown>).terrain_gs) || 0;
+        const snapped = terrArr && terrGs > 0
+          ? snapVentToCraterFloor(activeBbox, ventPoint, terrArr, terrGs)
+          : ventPoint;
+        const vf = computeVentFractions(activeBbox, snapped);
         if (vf) {
           request = {
             ...request,
@@ -497,7 +511,7 @@ export default function ScenarioEditor({
           } as SimulationRequest;
         }
       }
-      const resp = await fetch('/api/volcano/quantify', {
+      const resp = await fetch('/api/kaggle/volcano/quantify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -508,8 +522,19 @@ export default function ScenarioEditor({
           profile_date: useRealWindProfile ? profileDate : undefined,
         }),
       });
-      const data = (await resp.json()) as VolcanicEnsembleResult & { error?: string };
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      if (!resp.ok) {
+        // Extract a readable message — never render the raw error object.
+        let msg = `HTTP ${resp.status}`;
+        try {
+          const body = (await resp.json()) as { error?: unknown };
+          if (typeof body?.error === 'string') msg = body.error;
+          else if (body?.error != null) msg = JSON.stringify(body.error);
+        } catch {
+          /* non-JSON error body — keep the status code */
+        }
+        throw new Error(msg);
+      }
+      const data = (await resp.json()) as VolcanicEnsembleResult;
       setVolcanoUqResult(data);
       const c = deriveCenter(activeBbox);
       onVolcanoUqCompleteRef.current?.(data, c.lat, c.lon);

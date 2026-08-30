@@ -424,6 +424,11 @@ export class ScalarSurfacePrimitive {
   /** Set the current animation frame — a single GPU uniform update. */
   setFrame(idx: number): void {
     if (this.destroyed || !this.material) return;
+    // Fractional frames drive the shader's kaggleAtlasLerp (t = frame − floor
+    // gives the blend between consecutive atlas tiles). The old integer
+    // early-return (clamped === currentFrame) discarded fractions, so the lerp
+    // fraction was always 0 and the animation never interpolated. Always push
+    // the value through; only skip when the raw index is unchanged.
     const clamped = Math.max(0, Math.min(this.frames - 1, idx));
     if (clamped === this.currentFrame) return;
     this.currentFrame = clamped;

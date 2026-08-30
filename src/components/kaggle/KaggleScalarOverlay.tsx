@@ -451,7 +451,7 @@ export function KaggleScalarOverlay({
   return (
     <div
       style={{
-        position: 'absolute', bottom: 80, left: 20, zIndex: 100,
+        position: 'absolute', bottom: 80, right: 20, zIndex: 100,
         background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(10px)',
         borderRadius: 8, padding: '10px 13px', fontSize: 11, color: '#fff',
         border: `1px solid ${config.accent}60`, maxWidth: 280,

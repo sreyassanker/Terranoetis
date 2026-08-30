@@ -273,6 +273,59 @@ export function computeVentFractions(
   return { vent_frac_x: Math.min(1, Math.max(0, fx)), vent_frac_y: Math.min(1, Math.max(0, fy)) };
 }
 
+/**
+ * Snap a user-clicked vent point to the floor of the volcanic crater so lava
+ * POOLS inside the crater first, then overflows the lowest rim point — instead
+ * of streaming straight downhill from a vent placed on the crater rim/slope.
+ *
+ * Scans the real terrain grid within `radiusKm` of the click, finds the lowest
+ * elevation cell, and returns its lat/lon. When no lower cell is found (flat /
+ * already at a local minimum) the original point is returned unchanged.
+ */
+export function snapVentToCraterFloor(
+  bbox: StudyAreaBbox,
+  vent: { lat: number; lon: number },
+  terrain: number[],
+  terrainGs: number,
+  radiusKm = 1.5,
+): { lat: number; lon: number } {
+  if (!terrain || terrain.length === 0 || terrainGs < 2) return vent;
+  const c = deriveCenter(bbox);
+  const extentKm = deriveExtentKm(bbox);
+  const cellKm = extentKm / terrainGs;
+  const rCells = Math.max(1, Math.round(radiusKm / cellKm));
+
+  // grid coords of the click
+  const latHalfDeg = (extentKm / 2) / EARTH_KM_PER_DEG_LAT;
+  const lonHalfDeg =
+    (extentKm / 2) /
+    (EARTH_KM_PER_DEG_LAT * Math.max(0.1, Math.cos((c.lat * Math.PI) / 180)));
+  const gridLatMin = c.lat - latHalfDeg;
+  const gridLatMax = c.lat + latHalfDeg;
+  const gridLonMin = c.lon - lonHalfDeg;
+  const gridLonMax = c.lon + lonHalfDeg;
+  const clickRow = Math.round(((gridLatMax - vent.lat) / (gridLatMax - gridLatMin)) * (terrainGs - 1));
+  const clickCol = Math.round(((vent.lon - gridLonMin) / (gridLonMax - gridLonMin)) * (terrainGs - 1));
+
+  let bestElev = Infinity;
+  let bestRow = clickRow;
+  let bestCol = clickCol;
+  for (let r = Math.max(0, clickRow - rCells); r <= Math.min(terrainGs - 1, clickRow + rCells); r++) {
+    for (let c2 = Math.max(0, clickCol - rCells); c2 <= Math.min(terrainGs - 1, clickCol + rCells); c2++) {
+      const elev = terrain[r * terrainGs + c2];
+      if (Number.isFinite(elev) && elev < bestElev) {
+        bestElev = elev;
+        bestRow = r;
+        bestCol = c2;
+      }
+    }
+  }
+  if (bestRow === clickRow && bestCol === clickCol) return vent; // already a local min
+  const lat = gridLatMax - (bestRow / (terrainGs - 1)) * (gridLatMax - gridLatMin);
+  const lon = gridLonMin + (bestCol / (terrainGs - 1)) * (gridLonMax - gridLonMin);
+  return { lat, lon };
+}
+
 // ── Param mapping (UI parameter set → kernel contract) ──────────────────────
 
 export interface ScenarioFormParams {

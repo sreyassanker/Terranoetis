@@ -2,7 +2,7 @@
  * VolcanoEnsembleOverlay — decision-grade Monte-Carlo uncertainty overlay.
  *
  * Renders the percentile ash-fall / lava-thickness maps (P5 / P50 / P95) from
- * the `/api/volcano/quantify` ensemble as Cesium imagery layers, plus a compact
+ * the `/api/kaggle/volcano/quantify` ensemble as Cesium imagery layers, plus a compact
  * panel of the ensemble summary. The 3D surface primitive from the single-run
  * overlay is deliberately NOT reused here: for a decision-maker the percentile
  * rasters ARE the product, and 2D imagery is the honest way to show them.
