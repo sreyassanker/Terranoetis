@@ -10,6 +10,7 @@ export interface UseChatOptions {
   abortControllerRef?: React.MutableRefObject<AbortController | null>;
   currentRequestIdRef?: React.MutableRefObject<string | null>;
   onPanel?: (data: unknown) => void;
+  onAnalyticalResult?: (data: Record<string, unknown>) => void;
 }
 
 interface LocationResult {
@@ -467,6 +468,13 @@ export function useChat(
             }
             if (data.type === 'panel' || (data.stats && data.charts)) {
               options.onPanel?.(data);
+            }
+            // Analytical compute → globe: when the agent runs analytical_execute
+            // and the server streams the real computed spatial grid back, hand it
+            // to the globe renderer so the result appears as a heatmap over the
+            // study area (not just text in the chat).
+            if (data.type === 'analytical_result') {
+              options.onAnalyticalResult?.(data);
             }
             if (data.type === 'done' && data.traceId) lastTraceId = data.traceId;
             if (data.type === 'error') serverError = data.error || data.message || 'Unknown server error';
