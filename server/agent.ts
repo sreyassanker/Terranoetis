@@ -1354,7 +1354,7 @@ export class CognitiveAgent {
    */
   async process(
     query: string,
-    context?: { location?: string; intent?: string },
+    context?: { location?: string; lat?: number; lon?: number; intent?: string },
     onProgress?: AgentProgressCallback,
   ): Promise<CognitionResult> {
     return cognitiveOrchestrator.processQuery(query, context, onProgress);

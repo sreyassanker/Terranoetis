@@ -2,16 +2,11 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 
 import { getTileJson, getLayerSources, handleTileRequest } from '../foundation-models/mvtTileServer';
-import { prithviV2Engine } from '../foundation-models/prithvi-v2';
 import { roadTrafficDetector } from '../sentinel/roadTrafficDetector';
 import { spacexEngine } from '../foundation-models/spacexApi';
-import { clayEngine } from '../foundation-models/clayModel';
 import { bayFireDetector } from '../foundation-models/bayFireDetector';
-import { unetSegmenter } from '../foundation-models/unetSegmenter';
 import { weatherForecaster } from '../foundation-models/weatherForecaster';
 import { agricultureMonitor } from '../foundation-models/agricultureMonitor';
-import { samGeoSegmenter } from '../foundation-models/samgeoSegmenter';
-import { alphaEarthLookup } from '../foundation-models/alphaEarthLookup';
 
 export const foundationModelsRouter = Router();
 
@@ -67,29 +62,6 @@ foundationModelsRouter.get('/tiles/:z/:x/:y/:layer.mvt', async (req: Request, re
    PRIORITY 1-10: Upgraded Systems Routes
    ══════════════════════════════════════════════════════════════════ */
 
-/* ── Prithvi V2 ─────────────────────────────────────────────────── */
-foundationModelsRouter.get('/fm/prithvi-v2/status', (_req: Request, res: Response) => {
-  res.json(prithviV2Engine.getStatus());
-});
-
-foundationModelsRouter.post('/fm/prithvi-v2/analyze', async (req: Request, res: Response) => {
-  try {
-    const { lat, lon, radiusKm, temporalSteps } = req.body;
-    if (lat == null || lon == null) return res.status(400).json({ error: 'lat and lon required' });
-    const result = await prithviV2Engine.analyze({ lat, lon, radiusKm, temporalSteps });
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: String(err) }); }
-});
-
-foundationModelsRouter.post('/fm/prithvi-v2/change', async (req: Request, res: Response) => {
-  try {
-    const { lat, lon } = req.body;
-    if (lat == null || lon == null) return res.status(400).json({ error: 'lat and lon required' });
-    const result = await prithviV2Engine.detectChangeV2(lat, lon);
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: String(err) }); }
-});
-
 /* ── Road Traffic Detector ──────────────────────────────────────── */
 foundationModelsRouter.get('/road-traffic/status', (_req: Request, res: Response) => {
   res.json(roadTrafficDetector.getStatus());
@@ -135,29 +107,6 @@ foundationModelsRouter.get('/spacex/correlations', (_req: Request, res: Response
   res.json({ correlations: spacexEngine.getCorrelations() });
 });
 
-/* ── Clay Model ─────────────────────────────────────────────────── */
-foundationModelsRouter.get('/fm/clay/status', (_req: Request, res: Response) => {
-  res.json(clayEngine.getStatus());
-});
-
-foundationModelsRouter.post('/fm/clay/analyze', async (req: Request, res: Response) => {
-  try {
-    const { lat, lon, sensor } = req.body;
-    if (lat == null || lon == null) return res.status(400).json({ error: 'lat and lon required' });
-    const result = await clayEngine.analyze({ lat, lon, sensor: sensor || 'sentinel-2' });
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: String(err) }); }
-});
-
-foundationModelsRouter.post('/fm/clay/flood-sar', async (req: Request, res: Response) => {
-  try {
-    const { lat, lon } = req.body;
-    if (lat == null || lon == null) return res.status(400).json({ error: 'lat and lon required' });
-    const result = await clayEngine.detectFloodSAR(lat, lon);
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: String(err) }); }
-});
-
 /* ── Bayesian Fire Detector ─────────────────────────────────────── */
 foundationModelsRouter.get('/bayfire/status', (_req: Request, res: Response) => {
   res.json(bayFireDetector.getStatus());
@@ -170,31 +119,6 @@ foundationModelsRouter.get('/bayfire/clusters', (_req: Request, res: Response) =
 foundationModelsRouter.get('/bayfire/results', (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 50;
   res.json({ results: bayFireDetector.getRecentResults(limit) });
-});
-
-/* ── U-Net Segmenter ────────────────────────────────────────────── */
-foundationModelsRouter.get('/fm/unet/status', (_req: Request, res: Response) => {
-  res.json(unetSegmenter.getStatus());
-});
-
-foundationModelsRouter.post('/fm/unet/segment', async (req: Request, res: Response) => {
-  try {
-    const { lat, lon } = req.body;
-    if (lat == null || lon == null) return res.status(400).json({ error: 'lat and lon required' });
-    const result = await unetSegmenter.segment({ lat, lon });
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { probabilityMap, segmentationMap, ...lightResult } = result;
-    res.json(lightResult);
-  } catch (err) { res.status(500).json({ error: String(err) }); }
-});
-
-foundationModelsRouter.post('/fm/unet/change', async (req: Request, res: Response) => {
-  try {
-    const { lat, lon } = req.body;
-    if (lat == null || lon == null) return res.status(400).json({ error: 'lat and lon required' });
-    const result = await unetSegmenter.detectChange(lat, lon);
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: String(err) }); }
 });
 
 /* ── Weather Forecaster ─────────────────────────────────────────── */
@@ -235,50 +159,4 @@ foundationModelsRouter.post('/fm/agri/analyze', async (req: Request, res: Respon
 
 foundationModelsRouter.get('/fm/agri/alerts', (_req: Request, res: Response) => {
   res.json({ alerts: agricultureMonitor.getAlerts() });
-});
-
-/* ── SAMGeo Segmenter ───────────────────────────────────────────── */
-foundationModelsRouter.get('/fm/samgeo/status', (_req: Request, res: Response) => {
-  res.json(samGeoSegmenter.getStatus());
-});
-
-foundationModelsRouter.post('/fm/samgeo/segment', async (req: Request, res: Response) => {
-  try {
-    const { lat, lon, pointPrompts, boxPrompt } = req.body;
-    if (lat == null || lon == null) return res.status(400).json({ error: 'lat and lon required' });
-    const result = await samGeoSegmenter.segment({ lat, lon, pointPrompts, boxPrompt });
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: String(err) }); }
-});
-
-/* ── AlphaEarth Embeddings ──────────────────────────────────────── */
-foundationModelsRouter.get('/fm/alpha/status', (_req: Request, res: Response) => {
-  res.json(alphaEarthLookup.getStatus());
-});
-
-foundationModelsRouter.post('/fm/alpha/lookup', async (req: Request, res: Response) => {
-  try {
-    const { lat, lon, year } = req.body;
-    if (lat == null || lon == null) return res.status(400).json({ error: 'lat and lon required' });
-    const result = await alphaEarthLookup.lookup(lat, lon, year);
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: String(err) }); }
-});
-
-foundationModelsRouter.post('/fm/alpha/change', async (req: Request, res: Response) => {
-  try {
-    const { lat, lon, yearStart, yearEnd } = req.body;
-    if (lat == null || lon == null) return res.status(400).json({ error: 'lat and lon required' });
-    const result = await alphaEarthLookup.temporalChange(lat, lon, yearStart || 2020, yearEnd || 2024);
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: String(err) }); }
-});
-
-foundationModelsRouter.post('/fm/alpha/similar', async (req: Request, res: Response) => {
-  try {
-    const { lat, lon, topK } = req.body;
-    if (lat == null || lon == null) return res.status(400).json({ error: 'lat and lon required' });
-    const result = await alphaEarthLookup.findSimilar(lat, lon, topK || 5);
-    res.json({ similar: result });
-  } catch (err) { res.status(500).json({ error: String(err) }); }
 });

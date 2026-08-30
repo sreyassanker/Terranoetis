@@ -37,6 +37,151 @@ export interface CognitionTrace {
 
 export type ProgressCallback = (event: string, data: Record<string, unknown>) => void;
 
+// ── System 1 real-data fast path ────────────────────────────────
+// System 1's high-confidence match must NEVER emit its canned
+// responseTemplate (those carry {variable} placeholders). Instead we map the
+// matched intent to a REAL registered tool, execute it, and build the reply
+// from the tool's actual output. If no real tool is registered for the intent,
+// or the tool fails, we fall through to System 2 — never fabricate data.
+
+const INTENT_TOOL_MAP: Record<string, { tool: string; describe: (r: unknown) => string }> = {
+  weather_check: {
+    tool: 'weather_forecast',
+    describe: describeWeather,
+  },
+  earthquake_check: {
+    tool: 'earthquakes',
+    describe: describeEarthquakes,
+  },
+  aviation: {
+    tool: 'flights_all',
+    describe: describeFlights,
+  },
+  quick_scan: {
+    tool: 'eonet_events',
+    describe: describeEonet,
+  },
+  hazard_query: {
+    tool: 'gdacs',
+    describe: describeGdacs,
+  },
+  space_weather: {
+    tool: 'space_weather_kp',
+    describe: describeSpaceWeather,
+  },
+};
+
+function describeWeather(r: unknown): string {
+  const d = r as { current?: { temperature_2m?: number; relative_humidity_2m?: number; wind_speed_10m?: number; precipitation?: number; weather_code?: number; pressure_msl?: number } };
+  const c = d?.current;
+  if (!c || typeof c.temperature_2m !== 'number') return 'Weather tool returned no current conditions.';
+  const codeDesc = weatherCodeText(c.weather_code);
+  return [
+    `Current conditions: ${codeDesc}.`,
+    `Temperature ${c.temperature_2m}°C, humidity ${c.relative_humidity_2m ?? 'n/a'}%, wind ${c.wind_speed_10m ?? 'n/a'} km/h, precipitation ${c.precipitation ?? 0} mm/h.`,
+  ].join(' ');
+}
+
+function describeEarthquakes(r: unknown): string {
+  const d = r as { features?: Array<{ properties?: { mag?: number; place?: string; time?: number; depth?: number } }> };
+  const feats = (d?.features || []).slice(0, 8);
+  if (feats.length === 0) return 'No earthquakes detected in the queried window.';
+  const lines = feats.map((f) => {
+    const p = f.properties || {};
+    const mag = typeof p.mag === 'number' ? `M${p.mag.toFixed(1)}` : 'unknown magnitude';
+    const when = p.time ? ` (${new Date(p.time).toISOString()})` : '';
+    return `${mag} ${p.place || 'unknown location'}${when}`;
+  });
+  return `${feats.length} earthquake(s) detected. ${lines.join(' · ')}`;
+}
+
+function describeFlights(r: unknown): string {
+  const d = r as { states?: unknown[][]; count?: number };
+  const n = typeof d?.count === 'number' ? d.count : (Array.isArray(d?.states) ? d.states.length : 0);
+  if (n === 0) return 'No aircraft found in the queried area right now.';
+  return `${n} aircraft currently tracked in the queried area (live ADS-B/OpenSky).`;
+}
+
+function describeEonet(r: unknown): string {
+  const d = r as { events?: Array<{ title?: string; categories?: Array<{ title?: string }>; geometry?: Array<{ date?: string }> }> };
+  const evts = (d?.events || []).slice(0, 8);
+  if (evts.length === 0) return 'No active natural hazard events found near the location.';
+  const lines = evts.map((e) => {
+    const cats = (e.categories || []).map((c) => c.title).filter(Boolean).join('/') || 'hazard';
+    return `${e.title || 'Untitled event'} (${cats})${e.geometry?.[0]?.date ? ` ${new Date(e.geometry[0].date).toISOString().slice(0, 10)}` : ''}`;
+  });
+  return `${evts.length} active hazard event(s). ${lines.join(' · ')}`;
+}
+
+function describeGdacs(r: unknown): string {
+  // The /api/gdacs/alerts endpoint returns raw GDACS RSS XML (not JSON).
+  const text = typeof r === 'string' ? r : (r as { text?: string })?.text ?? '';
+  if (!text || !text.includes('<item>')) {
+    // Fall back to a GeoJSON-ish shape if the endpoint ever changes.
+    const d = r as { features?: Array<{ properties?: { name?: string; alertlevel?: string; severity?: string; eventtype?: string } }> };
+    const feats = (d?.features || []).slice(0, 8);
+    if (feats.length === 0) return 'No active GDACS alerts near the location.';
+    const lines = feats.map((f) => {
+      const p = f.properties || {};
+      return `${p.name || 'alert'} (${p.eventtype || 'event'}) — ${p.alertlevel || 'level'}${p.severity ? ` severity ${p.severity}` : ''}`;
+    });
+    return `${feats.length} active GDACS alert(s). ${lines.join(' · ')}`;
+  }
+  const titles = [...text.matchAll(/<title>(.*?)<\/title>/g)]
+    .map((m) => m[1].trim().replace(/<!\[CDATA\[|\]\]>/g, ''))
+    .filter((t) => t && !/^GDACS|^GDACS - This service/i.test(t))
+    .slice(0, 6);
+  if (titles.length === 0) return 'No active GDACS alerts near the location.';
+  return `${titles.length} active GDACS alert(s). ${titles.join(' · ')}`;
+}
+
+function describeSpaceWeather(r: unknown): string {
+  // /api/space-weather/kp returns NOAA SWPC's raw array-of-arrays:
+  // [[timeTag, Kp, estimated, source], ...] — latest row first.
+  const rows = Array.isArray(r) ? r : (r as { data?: unknown[] })?.data;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return 'Space weather (Kp index) data unavailable from NOAA SWPC right now.';
+  }
+  const latest = rows[0] as Array<string | number | null>;
+  const kp = Number(latest[1]);
+  if (Number.isFinite(kp)) {
+    return `Current Kp index: ${kp.toFixed(1)} (${kpText(kp)}), measured ${String(latest[0] ?? 'recently')}. Source: NOAA SWPC.`;
+  }
+  return `Kp data loaded from NOAA SWPC (${rows.length} observation(s)).`;
+}
+
+function weatherCodeText(code?: number): string {
+  const map: Record<number, string> = {
+    0: 'clear sky', 1: 'mainly clear', 2: 'partly cloudy', 3: 'overcast', 45: 'fog',
+    48: 'depositing rime fog', 51: 'light drizzle', 53: 'moderate drizzle', 55: 'dense drizzle',
+    61: 'slight rain', 63: 'moderate rain', 65: 'heavy rain', 71: 'slight snow',
+    73: 'moderate snow', 75: 'heavy snow', 80: 'slight rain showers', 81: 'moderate rain showers',
+    82: 'violent rain showers', 95: 'thunderstorm', 96: 'thunderstorm with slight hail', 99: 'thunderstorm with heavy hail',
+  };
+  return code === undefined ? 'unknown' : (map[code] ?? `code ${code}`);
+}
+
+function kpText(kp: number): string {
+  if (kp <= 2) return 'quiet';
+  if (kp <= 4) return 'active';
+  if (kp <= 6) return 'storm';
+  return 'severe storm';
+}
+
+// Test seam — export the System 1 real-data describers so tests can pin them
+// against the actual upstream API response shapes (prevents the fast path from
+// silently rendering the wrong fields if an endpoint shape changes).
+export const __system1Describers = {
+  weather: describeWeather,
+  earthquakes: describeEarthquakes,
+  flights: describeFlights,
+  eonet: describeEonet,
+  gdacs: describeGdacs,
+  spaceWeather: describeSpaceWeather,
+  weatherCode: weatherCodeText,
+  kp: kpText,
+};
+
 // ── Timestamp ───────────────────────────────────────────────────
 
 function now(): string {
@@ -93,7 +238,7 @@ export class CognitiveOrchestrator {
 
   async processQuery(
     query: string,
-    context?: { location?: string; intent?: string },
+    context?: { location?: string; lat?: number; lon?: number; intent?: string },
     onProgress?: ProgressCallback,
   ): Promise<CognitionResult> {
     const start = Date.now();
@@ -108,22 +253,33 @@ export class CognitiveOrchestrator {
     const isMediumConfidence = s1Result.match !== null && s1Result.match.similarity >= 0.7 && s1Result.match.similarity < 0.92;
 
     if (isHighConfidence && !s1Result.isAnomaly) {
-      onProgress?.('reasoning', { phase: 'system1', text: 'Fast match found (confidence > 0.92)' });
+      onProgress?.('reasoning', { phase: 'system1', text: 'Fast match found — resolving with real data...' });
 
-      const result: CognitionResult = {
-        finalOutput: s1Result.match!.responseTemplate,
-        mode: 'system1_only',
-        system1Result: s1Result,
-        system2Result: null,
-        criticScore: null,
-        traceId: null,
-        latencyMs: Date.now() - start,
-        iterationCount: 0,
-        flagsForReview: false,
-      };
-
-      logger.info({ query: query.slice(0, 50), mode: 'system1_only', latency: result.latencyMs }, 'S1 fast path');
-      return result;
+      // System 1 must NEVER return its canned template. Resolve the matched
+      // intent through a REAL registered tool and build the reply from actual
+      // data. Falls back to System 2 when no real tool is mapped or it fails.
+      const mapping = INTENT_TOOL_MAP[s1Result.match!.intent];
+      if (mapping) {
+        const realOutput = await this.resolveSystem1WithRealData(mapping.tool, s1Result.match!.intent, context);
+        if (realOutput !== null) {
+          const result: CognitionResult = {
+            finalOutput: realOutput,
+            mode: 'system1_only',
+            system1Result: s1Result,
+            system2Result: null,
+            criticScore: null,
+            traceId: null,
+            latencyMs: Date.now() - start,
+            iterationCount: 0,
+            flagsForReview: false,
+          };
+          logger.info({ query: query.slice(0, 50), mode: 'system1_only', latency: result.latencyMs }, 'S1 fast path (real data)');
+          return result;
+        }
+        onProgress?.('reasoning', { phase: 'system1', text: 'Fast-path tool unavailable — escalating to deep reasoning...' });
+      } else {
+        onProgress?.('reasoning', { phase: 'system1', text: 'No fast-path tool for this intent — escalating to deep reasoning...' });
+      }
     }
 
     // Phase 2: Determine if we need System 2
@@ -241,6 +397,49 @@ export class CognitiveOrchestrator {
   }
 
   // ── System 2 with timeout ────────────────────────────────────
+
+  /**
+   * Execute the real tool mapped to a System 1 intent and render a reply from
+   * its ACTUAL output. When the caller supplies lat/lon (from intent routing),
+   * those are forwarded to location-aware tools so the reply reflects real
+   * data for the asked-about place, not the tool default. Returns null when
+   * the tool is unregistered, fails, or returns nothing usable — in which case
+   * the caller escalates to System 2.
+   */
+  private async resolveSystem1WithRealData(
+    toolName: string,
+    intent: string,
+    context?: { location?: string; lat?: number; lon?: number },
+  ): Promise<string | null> {
+    try {
+      const { dynamicTools } = await import('../tools-v2/toolGenerator');
+      if (!dynamicTools.get(toolName)) return null;
+      const args: Record<string, unknown> = {};
+      const lat = typeof context?.lat === 'number' ? context.lat : undefined;
+      const lon = typeof context?.lon === 'number' ? context.lon : undefined;
+      const hasCoords = lat !== undefined && lon !== undefined;
+      if (hasCoords) {
+        args['lat'] = lat;
+        args['lon'] = lon;
+        // Earthquakes/quick-scan endpoints accept a bbox; a small box around
+        // the queried location keeps answers local to the place the user asked
+        // about instead of the whole planet.
+        if (intent === 'earthquake_check' || intent === 'quick_scan') {
+          args['bbox'] = `${lon - 4},${lat - 4},${lon + 4},${lat + 4}`;
+        }
+      }
+      const result = await dynamicTools.execute(toolName, args);
+      const describe = INTENT_TOOL_MAP[intent]?.describe;
+      if (!describe) return null;
+      const summary = describe(result);
+      if (!summary) return null;
+      const place = context?.location ? ` near ${context.location}` : '';
+      return `## System 1 fast path (live data${place})\n\n${summary}`;
+    } catch (e) {
+      logger.warn({ err: (e as Error).message, toolName }, 'System 1 real-data resolution failed');
+      return null;
+    }
+  }
 
   private async runSystem2WithTimeout(
     query: string,

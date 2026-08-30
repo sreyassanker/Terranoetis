@@ -79,13 +79,29 @@ def pc_algorithm():
         cg = pc(data, alpha, fisherz)
         
         edges = []
+        df = pd.DataFrame(body['data'])
         for i in range(cg.G.num_vars):
             for j in range(cg.G.num_vars):
                 if cg.G.graph[i, j] != 0:
+                    # PC yields structure only (edge direction), not strengths.
+                    # Report the REAL Pearson correlation computed from the data
+                    # for the discovered pair so downstream confidence reflects
+                    # the actual relationship rather than a fabricated weight.
+                    corr = 0.0
+                    try:
+                        col_i = df.iloc[:, i].astype(float)
+                        col_j = df.iloc[:, j].astype(float)
+                        if col_i.std() > 0 and col_j.std() > 0:
+                            corr = float(col_i.corr(col_j))
+                            if not np.isfinite(corr):
+                                corr = 0.0
+                    except Exception:
+                        corr = 0.0
                     edges.append({
                         'source': i,
                         'target': j,
-                        'type': 'directed' if cg.G.graph[i, j] == 1 else 'undirected'
+                        'type': 'directed' if cg.G.graph[i, j] == 1 else 'undirected',
+                        'weight': round(corr, 4),
                     })
         
         return jsonify({

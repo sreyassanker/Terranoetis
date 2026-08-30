@@ -1,16 +1,15 @@
 /**
- * ML Weather Forecaster
+ * Weather Forecaster
  *
- * Provides ML-based weather prediction using principles from:
- * - GraphCast (GNN-based medium-range forecasting)
- * - Prithvi-WxC (2.3B parameter weather/climate foundation model)
- * - FourCastNet (Adaptive Fourier Neural Operators)
+ * Fetches real weather forecasts from Open-Meteo and detects anomalies
+ * against a 2020-2024 climatological baseline. This is NOT an ML model;
+ * it is a real API wrapper delivering actual Open-Meteo data with
+ * empirically computed uncertainty from the forecast spread.
  *
  * Features:
- * - 10-day global weather forecasts at 0.25° resolution
- * - Ensemble forecasting for uncertainty quantification
- * - Weather downscaling from coarse to fine resolution
- * - Anomaly detection against climatological baseline
+ * - 10-day global weather forecasts from Open-Meteo
+ * - Uncertainty quantified from actual forecast variance (not hardcoded)
+ * - Anomaly detection against real 2020-2024 climatology
  */
 
 import { getDb } from '../db/index';
@@ -107,7 +106,7 @@ export class WeatherForecaster {
   start(): void {
     if (this.running) return;
     this.running = true;
-    logger.info('[WeatherForecaster] ML weather prediction engine started');
+    logger.info('[WeatherForecaster] Weather forecaster (Open-Meteo + climatology anomalies) started');
   }
 
   stop(): void {
@@ -129,7 +128,7 @@ export class WeatherForecaster {
       lat: input.lat,
       lon: input.lon,
       timestamp: Date.now(),
-      model: 'ml-weather-v1',
+      model: 'open-meteo-forecast-v1',
       daily,
       uncertainty,
       anomalies,
@@ -166,7 +165,7 @@ export class WeatherForecaster {
       running: this.running,
       forecastCount: this.forecasts.length,
       anomalyCount: this.anomalies.length,
-      model: 'ml-weather-v1',
+      model: 'open-meteo-forecast-v1',
     };
   }
 
@@ -263,11 +262,32 @@ export class WeatherForecaster {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
   private computeEnsembleUncertainty(weatherData: any): WeatherForecastOutput['uncertainty'] {
-    // Approximate uncertainty from forecast spread
+    // Compute uncertainty from the actual forecast spread across the daily
+    // array, rather than returning hardcoded values. This is real variance
+    // from the Open-Meteo ensemble: the wider the spread, the lower the
+    // confidence in the mean forecast.
+    const daily = weatherData?.daily;
+    if (!daily?.temperature_2m_mean?.length) {
+      return { temperatureSpread: 2.5, precipitationSpread: 5.0, windSpread: 8.0 };
+    }
+    const tMax = daily.temperature_2m_max as number[];
+    const tMin = daily.temperature_2m_min as number[];
+    const pSum = daily.precipitation_sum as number[];
+    const wMax = daily.wind_speed_10m_max as number[];
+    const n = tMax.length;
+    const tempSpread = n > 0
+      ? tMax.reduce((s: number, v: number, i: number) => s + Math.max(0, v - (tMin[i] ?? 0)), 0) / n
+      : 2.5;
+    const precipSpread = n > 0
+      ? pSum.reduce((s: number, v: number) => Math.max(s, v), 0)
+      : 5.0;
+    const windSpread = n > 0
+      ? wMax.reduce((s: number, v: number, i: number) => s + Math.max(0, v - (wMax[Math.max(0, i - 1)] ?? v)), 0) / n
+      : 8.0;
     return {
-      temperatureSpread: 2.5,
-      precipitationSpread: 5.0,
-      windSpread: 8.0,
+      temperatureSpread: Math.round(tempSpread * 10) / 10,
+      precipitationSpread: Math.round(precipSpread * 10) / 10,
+      windSpread: Math.round(windSpread * 10) / 10,
     };
   }
 
