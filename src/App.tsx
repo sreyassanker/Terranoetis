@@ -56,7 +56,7 @@ import { fetchAndStoreSatnogsData, getSatnogsForNorad, addSatnogsEntities } from
 import { fetchAndStoreUcsData, getUcsForNorad, addUcsEntities } from '@/rendering/ucsSatelliteDb';
 import { HumanOverrideBanner } from '@/components/explainability/index';
 
-import { CognitiveDashboard, ToolWorkbench, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
+import { CognitiveDashboard, MultiHazardPanel, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
 import { ApiVault } from '@/components/ui/ApiVault';
 import Panel from '@/components/ui/Panel';
 import ScenarioEditor from '@/components/scenarios/ScenarioEditor';
@@ -131,7 +131,7 @@ const LazyAviationTrackerPanel = lazy(() => import('@/components/prithvi/Aviatio
 const LazyChatHistoryPanel = lazy(() => import('@/components/chat/ChatHistoryPanel').then(m => ({ default: m.ChatHistoryPanel })));
 const LazyDigitalTwinPanel = lazy(() => import('@/components/DigitalTwinPanel').then(m => ({ default: m.DigitalTwinPanel })));
 const LazyForkPanel = lazy(() => import('@/components/ForkPanel').then(m => ({ default: m.ForkPanel })));
-const LazyIntelligencePanel = lazy(() => import('@/components/IntelligencePanel').then(m => ({ default: m.IntelligencePanel })));
+const LazyMarketIntelPanel = lazy(() => import('@/components/MarketIntelPanel').then(m => ({ default: m.MarketIntelPanel })));
 const LazyIssLivePanel = lazy(() => import('@/components/IssLivePanel').then(m => ({ default: m.IssLivePanel })));
 const LazyLandCoverMapperPanel = lazy(() => import('@/components/LandCoverMapperPanel').then(m => ({ default: m.LandCoverMapperPanel })));
 const LazyLaunchReplayPanel = lazy(() => import('@/components/LaunchReplayPanel').then(m => ({ default: m.LaunchReplayPanel })));
@@ -1246,7 +1246,7 @@ export default function App() {
     unit: 'm' | 'km';
   }>({ open: false, lat: 0, lon: 0, name: '', radius: 500000, unit: 'km' });
 
-  const [showIntelligencePanel, setShowIntelligencePanel] = useState(false);
+  const [showMarketIntelPanel, setShowMarketIntelPanel] = useState(false);
   const [showSatelliteTracker, setShowSatelliteTracker] = useState(false);
   const [showAviationTracker, setShowAviationTracker] = useState(false);
   const [showSatelliteImagery, setShowSatelliteImagery] = useState(false);
@@ -1386,7 +1386,7 @@ export default function App() {
   // ── Offline support ──
   const offline = useOfflineChat();
   const [showCognitiveDashboard, setShowCognitiveDashboard] = useState(false);
-  const [showToolWorkbench, setShowToolWorkbench] = useState(false);
+  const [showMultiHazardPanel, setShowMultiHazardPanel] = useState(false);
   const [showMemoryExplorer, setShowMemoryExplorer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showScenarioGallery, setShowScenarioGallery] = useState(false);
@@ -7406,14 +7406,14 @@ export default function App() {
         return apply(setShowAviationTracker, showAviationTracker, 'aviation-tracker');
       case 'land-cover': case 'land_cover': case 'land-cover-mapper':
         return apply(setShowLandCoverMapper, showLandCoverMapper, 'land-cover');
-      case 'intelligence': case 'pulse': case 'intel':
-        return apply(setShowIntelligencePanel, showIntelligencePanel, 'intelligence');
+      case 'market-intel': case 'market_intel': case 'intelligence': case 'pulse': case 'intel':
+        return apply(setShowMarketIntelPanel, showMarketIntelPanel, 'market-intel');
       case 'intel-feed': case 'intel_feed': case 'feed':
         return apply(setShowIntelFeed, showIntelFeed, 'intel-feed');
       case 'cognitive': case 'cognitive-dashboard':
         return apply(setShowCognitiveDashboard, showCognitiveDashboard, 'cognitive');
-      case 'toolworkbench': case 'tool-workbench':
-        return apply(setShowToolWorkbench, showToolWorkbench, 'toolworkbench');
+      case 'multihazard': case 'multi-hazard': case 'toolworkbench': case 'tool-workbench':
+        return apply(setShowMultiHazardPanel, showMultiHazardPanel, 'multihazard');
       case 'memory': case 'memory-explorer':
         return apply(setShowMemoryExplorer, showMemoryExplorer, 'memory');
       case 'settings': case 'settings-panel':
@@ -7478,7 +7478,7 @@ export default function App() {
       default:
         return undefined;
     }
-  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showIntelligencePanel, showIntelFeed, showCognitiveDashboard, showToolWorkbench, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showTimeline, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowIntelligencePanel, setShowIntelFeed, setShowCognitiveDashboard, setShowToolWorkbench, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowTimeline, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setDigitalTwinPanel, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setMonitorCollapsed, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
+  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showCognitiveDashboard, showMultiHazardPanel, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showTimeline, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowCognitiveDashboard, setShowMultiHazardPanel, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowTimeline, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setDigitalTwinPanel, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setMonitorCollapsed, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
 
   const executeAgentCommands = useCallback((commands: Array<Record<string, unknown>>) => {
     const v = viewerRef.current;
@@ -9395,10 +9395,10 @@ export default function App() {
           <TopbarMenu
             id="analysis" title="AI & Analysis" icon={<Brain size={16} />}
             menuId={openMenu} setMenuId={setOpenMenu}
-            active={showCognitiveDashboard || showToolWorkbench || showMemoryExplorer || showAnalytics}
+            active={showCognitiveDashboard || showMultiHazardPanel || showMemoryExplorer || showAnalytics}
             items={[
               { label: 'Cognitive Dashboard', icon: <Brain size={15} />, active: showCognitiveDashboard, onClick: () => { setShowCognitiveDashboard(p => !p); focusPanel('cognitive'); } },
-              { label: 'Tool Workbench', icon: <Wrench size={15} />, active: showToolWorkbench, onClick: () => { setShowToolWorkbench(p => !p); focusPanel('toolworkbench'); } },
+              { label: 'Multi-Hazard', icon: <Wrench size={15} />, active: showMultiHazardPanel, onClick: () => { setShowMultiHazardPanel(p => !p); focusPanel('multihazard'); } },
               { label: 'Memory Explorer', icon: <Save size={15} />, active: showMemoryExplorer, onClick: () => { setShowMemoryExplorer(p => !p); focusPanel('memory'); } },
               { label: 'Analytics & Insights', icon: <BarChart3 size={15} />, active: showAnalytics, onClick: () => { setShowAnalytics(p => !p); focusPanel('analytics-insights'); if (!analyticsData) fetch('/api/agent/analytics').then(r => r.json()).then(setAnalyticsData).catch(() => {}); } },
             ]}
@@ -9795,9 +9795,9 @@ export default function App() {
           id="models" title="Models & Panels" icon={<Grid size={16} />}
           direction="up" triggerClassName="btn-icon monitor-btn"
           menuId={openMenu} setMenuId={setOpenMenu}
-          active={showIntelligencePanel || showSatelliteTracker || showAviationTracker || showLandCoverMapper}
+          active={showMarketIntelPanel || showSatelliteTracker || showAviationTracker || showLandCoverMapper}
           items={[
-            { label: 'Pulse', icon: <Eye size={15} />, active: showIntelligencePanel, onClick: () => { setShowIntelligencePanel(p => !p); focusPanel('intelligence'); } },
+            { label: 'Pulse', icon: <Eye size={15} />, active: showMarketIntelPanel, onClick: () => { setShowMarketIntelPanel(p => !p); focusPanel('market-intel'); } },
     { label: 'Satellite Tracker', icon: <Satellite size={15} />, active: showSatelliteTracker, onClick: () => { setShowSatelliteTracker(p => !p); focusPanel('satellite-tracker'); } },
     { label: 'Satellite Imagery', icon: <Satellite size={15} />, active: showSatelliteImagery, onClick: () => { setShowSatelliteImagery(p => !p); focusPanel('satellite-imagery'); } },
     { label: 'Land Cover Mapper', icon: <Layers size={15} />, active: showLandCoverMapper, onClick: () => { setShowLandCoverMapper(p => !p); focusPanel('land-cover'); } },
@@ -10408,9 +10408,9 @@ export default function App() {
         <PanelSuspense><LazyDigitalTwinPanel panel={digitalTwinPanel} onClose={() => setDigitalTwinPanel(null)} /></PanelSuspense>
       )}
 
-      {/* Tool Workbench */}
-      <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('toolworkbench', 110), width: 480, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', display: showToolWorkbench ? 'block' : 'none' }}>
-        <ToolWorkbench onClose={() => setShowToolWorkbench(false)} bbox={activeBbox} studyAreaName={studyAreas.find(a => a.id === activeStudyAreaId)?.name} onSurfaceData={handleSurfaceData} onClear={() => { clearStudyArea(); clearInterpSurface(viewerRef.current!); }} />
+      {/* Multi-Hazard Panel */}
+      <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('multihazard', 110), width: 480, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', display: showMultiHazardPanel ? 'block' : 'none' }}>
+        <MultiHazardPanel onClose={() => setShowMultiHazardPanel(false)} bbox={activeBbox} studyAreaName={studyAreas.find(a => a.id === activeStudyAreaId)?.name} onSurfaceData={handleSurfaceData} onClear={() => { clearStudyArea(); clearInterpSurface(viewerRef.current!); }} />
       </div>
 
       {/* Memory Explorer */}
@@ -10436,13 +10436,13 @@ export default function App() {
         zIndex={getPanelZIndex('fork', 110)}
       /></PanelSuspense>
 
-      {/* Intelligence Panel */}
-      <PanelSuspense><LazyIntelligencePanel
-        open={showIntelligencePanel}
-        onClose={() => setShowIntelligencePanel(false)}
+      {/* Market Intel Panel */}
+      <PanelSuspense><LazyMarketIntelPanel
+        open={showMarketIntelPanel}
+        onClose={() => setShowMarketIntelPanel(false)}
         onToggleLayer={toggleLayer}
         onFlyTo={focusLocation}
-        zIndex={getPanelZIndex('intelligence')}
+        zIndex={getPanelZIndex('market-intel')}
       /></PanelSuspense>
 
       {/* Satellite Tracker Panel */}
@@ -10510,7 +10510,7 @@ export default function App() {
         onClose={() => setShowCommandPalette(false)}
         onToggleLayer={toggleLayer}
         onFlyTo={focusLocation}
-        onOpenIntelligencePanel={() => { setShowIntelligencePanel(true); setShowCommandPalette(false); focusPanel('intelligence'); }}
+        onOpenMarketIntelPanel={() => { setShowMarketIntelPanel(true); setShowCommandPalette(false); focusPanel('market-intel'); }}
       />
 
       <PerformanceMonitor viewer={viewerRef.current} visible={showPerfMonitor} onToggle={() => setShowPerfMonitor(p => !p)} />

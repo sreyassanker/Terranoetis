@@ -1,7 +1,7 @@
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
 import { pubsub } from '../pubsub';
-import { memoryManagerV2 } from '../memory-v2/memoryManager-v2';
+import { memoryManagerV2 } from '../memoryV2/memoryManagerV2';
 
 export interface SatelliteObservation {
   source: string;

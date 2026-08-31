@@ -66,7 +66,7 @@ npm run build         # tsc + vite build
 
 1. Add the fetch function in `server/data/dataFetchers.ts`.
 2. Add the route in `server/index.ts` and register it in the public/authenticated bypass list if needed.
-3. Add the API metadata in `server/api-metadata.ts`.
+3. Add the API metadata in `server/apiMetadata.ts`.
 4. Add the endpoint to the OpenAPI spec in `server/routes/openapi.ts`.
 5. Add the layer to the catalog in `src/lib/layerConfig.ts`.
 6. Verify the route returns real data: `curl http://localhost:3001/api/your-endpoint`.

@@ -9,7 +9,7 @@ export function extractPointsFromResult(toolId: string, resultJson: string): Int
   const result = (data?.result as Record<string, unknown>) || data;
   if (!result) return [];
 
-  // Fused mode: points are pre-extracted by the ToolWorkbench chain executor
+  // Fused mode: points are pre-extracted by the MultiHazardPanel chain executor
   if ((data as Record<string, unknown>)?._surfaceMode === 'fused') {
     return extractFusedPoints(result);
   }
@@ -266,7 +266,7 @@ function extractRadarPoints(_result: Record<string, unknown>): InterpPoint[] {
   return [];
 }
 
-/** Extract pre-accumulated fused points from the ToolWorkbench chain executor */
+/** Extract pre-accumulated fused points from the MultiHazardPanel chain executor */
 function extractFusedPoints(result: Record<string, unknown>): InterpPoint[] {
   const features = result?.features as Array<Record<string, unknown>> | undefined;
   if (!features) return [];

@@ -1,5 +1,5 @@
 /**
- * ToolWorkbench — Physics-Integrated Causal Chain Builder
+ * MultiHazardPanel — Multi-Hazard Causal Risk Chain
  *
  * Executes a sequential chain of geospatial tools, runs physics surrogates
  * at each relevant step, propagates evidence through the Noisy-OR CBN,
@@ -310,7 +310,7 @@ const AVAILABLE_TOOLS: Tool[] = [
   { name: 'predict', category: 'ml', description: 'Multi-hazard risk prediction' },
 ];
 
-interface ToolWorkbenchProps {
+interface MultiHazardPanelProps {
   onClose: () => void;
   bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
   /** Name of the active study area (used in the emailed report heading). */
@@ -323,7 +323,7 @@ interface ToolWorkbenchProps {
    COMPONENT
    ═════════════════════════════════════════════════════════════════ */
 
-export default function ToolWorkbench({ onClose, bbox, studyAreaName, onSurfaceData, onClear }: ToolWorkbenchProps) {
+export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfaceData, onClear }: MultiHazardPanelProps) {
   const [chain, setChain] = useState<ChainStep[]>([]);
   const [executing, setExecuting] = useState(false);
   const [formattedResults, setFormattedResults] = useState<Record<string, FormattedStepResult>>({});

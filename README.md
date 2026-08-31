@@ -148,7 +148,7 @@ flowchart LR
 | **FlightTravelView** | 507 | Flight deck HUD: compass, alt/heading tapes, horizon, pitch ladder, 8-dir look, mach |
 | **IssTravelView** | 172 | ISS orbital HUD: nadir/horizon compass, pitch tape, Earth-viewing mode |
 | **IssLivePanel** | 67 | ISS camera iframe + position stats (lat/lon/alt/speed) |
-| **IntelligencePanel** | 1202 | 8-tab intel: Markets, Energy, Risk, Signals, Sentiment, Heatmap, Analysis, Intel |
+| **MarketIntelPanel** | 1202 | 8-tab intel: Markets, Energy, Risk, Signals, Sentiment, Heatmap, Analysis, Intel |
 | **ToolDialog** | 1040 | Analysis tool execution: study area, params, grid, execution, results, export |
 | **AnalyticsWorkbench** | 331 | 150-tool browser: tree/flat search over equations, domains, live-source counts |
 | **LaunchReplayPanel** | 202 | Scrubbable rocket ascent replay (Launch Library 2), color-scheme trail |
@@ -173,7 +173,7 @@ flowchart LR
 - `CognitiveDashboard.tsx` (314L) — AnimatedBrain SVG, sparklines, system metrics
 - `MemoryExplorer.tsx` (244L) — SVG Knowledge Graph (force-directed)
 - `SettingsPanel.tsx` (220L) — 4 tabs: Cognitive (S1/S2 bias), Alerts, Providers, Privacy
-- `ToolWorkbench.tsx` (1168L) — Physics causal chain builder, IDW risk surface, Noisy-OR CBN, physics surrogates
+- `MultiHazardPanel.tsx` (1168L) — Multi-hazard causal risk chain, IDW risk surface, Noisy-OR CBN, physics surrogates
 
 `src/components/scenarios/` (18 files):
 - `types.ts` — Point3D, ShapeData (11 types), Scenario, ScenarioSummary, SCENARIO_TYPE_LABELS/COLORS
@@ -329,10 +329,10 @@ All kernels ship a `_json_safe` conversion helper so NumPy 2.x scalar types seri
 | `server/simulation/` | Physics simulation bridge for real-world data integration |
 | `server/world-model/` | World modeling: causal graph, ensemble predictor, physics neural network, prediction validator, scenario simulator |
 | `server/causal/` | Causal reasoning: knowledge graph, discovery engine, entropy mixer, Python microservice (DoWhy + causal-learn PC algorithm) |
-| `server/kg-v2/` | Knowledge graph v2: entity generation, edge generation, graph completion, counterfactual graph, evolving graph |
+| `server/kgV2/` | Knowledge graph v2: entity generation, edge generation, graph completion, counterfactual graph, evolving graph |
 | `server/memory/` | Memory systems: planetary memory system, Redis adapter |
-| `server/memory-v2/` | Memory v2: working memory, episodic memory, semantic memory, procedural memory, predictive memory, sensory buffer |
-| `server/tools-v2/` | Dynamic tool system: generator, composer, discovery, self-healing executor, repair |
+| `server/memoryV2/` | Memory v2: working memory, episodic memory, semantic memory, procedural memory, predictive memory, sensory buffer |
+| `server/toolsV2/` | Dynamic tool system: generator, composer, discovery, self-healing executor, repair |
 | `server/self-evolution/` | Self-improvement: code writer, test runner, git integration, intent discovery, bandit router, performance monitor |
 | `server/meta-cognition/` | Meta-cognition: architecture proposals, prompt evolution, intent discovery, performance analysis, feedback learning, self-report |
 | `server/explainability/` | AI explainability: reasoning visualizer, evidence chain, uncertainty quantification, bias auditor, human override |
@@ -353,7 +353,7 @@ All kernels ship a `_json_safe` conversion helper so NumPy 2.x scalar types seri
 | `server/queue/` | Simple task queue for background processing |
 | `server/infrastructure/` | Redis infrastructure setup |
 | `server/plugins/` | Plugin system with example plugin |
-| `server/sandbox-v2/` | Sandbox simulation engines: FARSITE (wildfire), ADCIRC (tsunami), WRF (atmosphere), HYSPLIT (ash dispersion), FNO surrogate (fast neural weather prediction) |
+| `server/sandboxV2/` | Sandbox simulation engines: FARSITE (wildfire), ADCIRC (tsunami), WRF (atmosphere), HYSPLIT (ash dispersion), FNO surrogate (fast neural weather prediction) |
 | `server/embedding.ts` | Text embedding engine for semantic search |
 | `server/orchestrator.ts` | Agent orchestrator for multi-agent coordination |
 | `server/pubsub.ts` | Publish-subscribe event bus |
@@ -361,7 +361,7 @@ All kernels ship a `_json_safe` conversion helper so NumPy 2.x scalar types seri
 | `server/websocket.ts` | WebSocket server for real-time bidirectional communication (agent channel + `/ws/voice` realtime voice channel) |
 | `server/voiceRealtime.ts` | Realtime voice bridge: proxies browser ↔ OpenAI Realtime (`gpt-realtime-2025-08-28`), auto-falls back to Gemini Live (`gemini-3.1-flash-live-preview`) on billing/quota errors. Keys stay server-side |
 | `server/selfImprover.ts` | Self-improvement engine with feedback management and analytics |
-| `server/selfImprover-v2.ts` | Improved self-improvement architecture |
+| `server/selfImproverV2.ts` | Improved self-improvement architecture |
 | `server/pluginManager.ts` | Plugin manager for extensibility |
 | `server/sandboxManager.ts` | Sandbox execution manager |
 | `server/mcp.ts` | Model Context Protocol integration |
@@ -374,7 +374,7 @@ All kernels ship a `_json_safe` conversion helper so NumPy 2.x scalar types seri
 | `server/disasterAssessment.ts` | Multi-hazard disaster assessment + email report builder |
 | `server/disasterFusion.ts` | Multi-source disaster data fusion |
 | `server/monitor.ts` | Ambient event detection, scheduler, monitor manager |
-| `server/api-metadata.ts` | API metadata and category definitions |
+| `server/apiMetadata.ts` | API metadata and category definitions |
 
 ## API Endpoints
 
@@ -543,7 +543,7 @@ The EARTH INTELLIGENCE AI panel (`Panel.tsx` wrapper with inline UI in `src/App.
 | 9 | **Real-time streaming markdown** | SSE `event: output` with chunked tokens | Blinking `▊` cursor, auto-scroll on content change | Streaming assistant responses render incrementally with a cursor indicator. Scroll tracks content growth during streaming. |
 | 10 | **Multi-provider transparency** | SSE includes `modelTier` in output event | Badge displayed on each assistant message | Users see which tier handled their query (e.g., "Free tier (local routing)", "Gemini Flash", "Claude") via a small badge on each AI response. |
 | 11 | **Code pipeline → 3D globe** | `__GLOBE_COMMANDS__` protocol in sandbox stdout | `data.commands` handler in pipeline SSE | Pipeline sandbox code can emit `__GLOBE_COMMANDS__::[{...}]` markers in stdout. Server extracts the JSON and sends a `globe` SSE event. Client renders pins, polygons, heatmaps, charts on Cesium. |
-| 12 | **RAG over live geospatial databases** | `POST /api/agent/search-all` + tools-v2 generator | Integrated into agent tool selection | Unified `search_all` endpoint routes natural language queries across all databases (earthquakes, weather, fires, flights, vessels, satellites, volcanoes). System prompt updated with explicit Query Planning section mapping intents → tools. |
+| 12 | **RAG over live geospatial databases** | `POST /api/agent/search-all` + toolsV2 generator | Integrated into agent tool selection | Unified `search_all` endpoint routes natural language queries across all databases (earthquakes, weather, fires, flights, vessels, satellites, volcanoes). System prompt updated with explicit Query Planning section mapping intents → tools. |
 | 13 | **Voice compute → globe** | `detectAnalyticalModel` + semantic `searchAnalyticalModels` fallback in `server/analytical-models/search.ts` | Mic → `/api/agent/ask` → `analytical_result` SSE | "Compute 100-year flood return over Austin" resolves deterministically to Gumbel (model 40) via natural-language→equation matching and paints the real result on the globe — no LLM round-trip needed. |
 | 14 | **Voice-driven cinematic camera** | Deterministic `moveCamera` verb extraction in `IntentRouter.extractCommands` | `executeAgentCommands` → `CinematicCamera` | "Orbit around this area slowly", "pan left", "tilt up", "rotate", "stop the camera", "reset globe" all drive the tick-based camera engine (orbit/pan/tilt/rotate + banked-turn route dolly). |
 | 15 | **Realtime voice (replaces text round-trip)** | `/ws/voice` bridge: OpenAI Realtime → Gemini Live fallback | `useRealtimeVoice` + AudioWorklet PCM16 capture | Interruptible audio-in/audio-out; auto-switches provider when OpenAI hits billing/quota. Web Speech → `/api/agent/ask` remains the last-resort fallback. |
@@ -732,7 +732,10 @@ docker compose up -d  # Builds and starts all services
 | `dev:server` | `tsx server/index.ts` on port 3001 |
 | `build` | `tsc -b && vite build` |
 | `lint` | `eslint .` |
-| `test` | `vitest run` |
+| `test` | `vitest run` — full suite (1,624 unit + integration tests) |
+| `test:unit` | `vitest run` — unit tests only (`server/__tests__/unit` + `src/__tests__`) |
+| `test:integration` | `vitest run` — integration + e2e tests (`server/__tests__/integration` + `server/__tests__/e2e`) |
+| `test:coverage` | `vitest run --coverage` |
 
 **Utility scripts:**
 
