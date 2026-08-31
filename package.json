@@ -1,7 +1,7 @@
 {
-  "name": "my-app",
+  "name": "terranoetis",
   "private": true,
-  "version": "0.0.0",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\" \"bash -c 'redis-cli ping &>/dev/null || redis-server 2>/dev/null || true; exec tail -f /dev/null'\"",
