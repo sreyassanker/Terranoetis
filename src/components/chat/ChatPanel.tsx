@@ -42,7 +42,7 @@ export function ChatPanel({
   showNotification,
   newChat,
   undoLastAgentAction,
-  clearAllAgentActions,
+  clearAllAgentActions: _clearAllAgentActions,
   deleteCurrentChat,
   cleanupThinkingSteps,
   abortControllerRef,

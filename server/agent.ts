@@ -4,6 +4,7 @@ import { cognitiveOrchestrator, type CognitionResult, type ProgressCallback } fr
 import { AgentOrchestrator, type AgentResult } from './orchestrator';
 import { logger } from './observability/logger';
 import { dynamicTools } from './tools-v2/toolGenerator';
+import { searchAnalyticalModels } from './analytical-models/index';
 
 // ═══════════════════════════════════════════════════════════════════════
 // TYPES
@@ -11,7 +12,7 @@ import { dynamicTools } from './tools-v2/toolGenerator';
 
 export type GlobeAction =
   | 'flyTo' | 'toggleLayer' | 'addPin' | 'addHeatmap' | 'addPolygon'
-  | 'addGeoJSON' | 'addChart' | 'addPanel' | 'openPanel' | 'closePanel' | 'togglePanel';
+  | 'addGeoJSON' | 'addChart' | 'addPanel' | 'openPanel' | 'closePanel' | 'togglePanel' | 'addRoute' | 'moveCamera';
 
 export interface GlobeCommand {
   action: GlobeAction;
@@ -797,6 +798,7 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
       [/inverse distance weighting|\bidw\b/i, 38],
       [/gaussian plume|air dispersion|plume dispersion/i, 39],
       [/\bgumbel\b|extreme value/i, 40],
+      [/flood return|return level|return period|100.?year.*flood|recurrence interval/i, 40],
       [/generalized pareto|pareto distribution/i, 41],
       [/semivariogram|variogram/i, 42],
       [/universal soil loss|\busle\b|soil loss|erosion/i, 45],
@@ -830,6 +832,21 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
     for (const [re, id] of MODELS) {
       if (re.test(l)) return id;
     }
+    // Fallback: semantic search over the full 150-model catalog (name +
+    // scientific metadata). This catches natural phrasing that the hand-written
+    // keyword list misses — e.g. "100-year flood return level", "how fast does
+    // the wind blow up high" — and resolves it deterministically to the right
+    // equation instead of relying on the LLM. Requires a strong match (a top
+    // hit from the relevance ranker); otherwise null (the LLM path handles it).
+    try {
+      const searchRes = searchAnalyticalModels(text, 3);
+      const top = searchRes.results[0];
+      if (top && /name|description|terms/.test(top.match)) {
+        // Only trust the top hit when it scored meaningfully (name-level match,
+        // not a single generic token). Reject weak single-token matches.
+        if (top.id >= 1 && top.id <= 150) return top.id;
+      }
+    } catch { /* fall through — LLM path handles ambiguous queries */ }
     return null;
   }
 
@@ -1013,6 +1030,33 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
       }
     }
 
+    // ── moveCamera: cinematic camera verbs (orbit / pan / tilt / rotate / stop)
+    // Deterministic so "orbit around this area", "pan left", "tilt up",
+    // "rotate", "stop the camera" all work without the LLM guessing JSON.
+    const camVerb = /(?:orbit|pan|tilt|rotate|stop\s*(?:the\s*)?camera|stop\s*motion|reset\s*globe)/i.exec(lower);
+    if (camVerb) {
+      const verb = camVerb[0].toLowerCase();
+      if (/orbit/.test(verb)) {
+        const speed = /(?:slowly|slow)\b/.test(lower) ? 'slow' : /(?:fast|quickly)\b/.test(lower) ? 'fast' : 'normal';
+        commands.push({ action: 'moveCamera', motion: 'orbit', direction: 'right', speed });
+      } else if (/pan/.test(verb)) {
+        const dir = /(?:left)\b/.test(lower) ? 'left' : /(?:right)\b/.test(lower) ? 'right' : /(?:up)\b/.test(lower) ? 'up' : 'down';
+        const speed = /(?:slowly|slow)\b/.test(lower) ? 'slow' : /(?:fast|quickly)\b/.test(lower) ? 'fast' : 'normal';
+        commands.push({ action: 'moveCamera', motion: 'pan', direction: dir, speed });
+      } else if (/tilt/.test(verb)) {
+        const dir = /(?:up)\b/.test(lower) ? 'up' : 'down';
+        commands.push({ action: 'moveCamera', motion: 'tilt', direction: dir, speed: 'normal' });
+      } else if (/rotate/.test(verb)) {
+        const dir = /(?:left)\b/.test(lower) ? 'left' : 'right';
+        commands.push({ action: 'moveCamera', motion: 'rotate', direction: dir, speed: 'normal' });
+      } else if (/stop/.test(verb) || /reset\s*globe/.test(lower)) {
+        commands.push({ action: 'moveCamera', motion: 'stop' });
+        if (/reset\s*globe/.test(lower)) {
+          commands.push({ action: 'flyTo', lat: 20, lon: 0, label: 'Earth', zoom: 1 });
+        }
+      }
+    }
+
     return commands;
   }
 
@@ -1165,7 +1209,7 @@ export class CommandParser {
       if (!trimmed.startsWith('{')) continue;
       try {
         const cmd = JSON.parse(trimmed) as GlobeCommand;
-        const validActions = ['flyTo', 'toggleLayer', 'addPin', 'addHeatmap', 'addPolygon', 'addGeoJSON', 'addChart', 'addPanel', 'openPanel', 'closePanel', 'togglePanel'];
+        const validActions = ['flyTo', 'toggleLayer', 'addPin', 'addHeatmap', 'addPolygon', 'addGeoJSON', 'addChart', 'addPanel', 'openPanel', 'closePanel', 'togglePanel', 'addRoute', 'moveCamera'];
         if (validActions.includes(cmd.action)) {
           commands.push(cmd);
         }

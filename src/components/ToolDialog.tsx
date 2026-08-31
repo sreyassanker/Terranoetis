@@ -40,6 +40,10 @@ interface ToolDialogProps {
   /** Color-stop ramp for the heatmap (matches the globe's active scheme) so the
    *  histogram bins are colored by their value the same way as the field. */
   schemeColors?: Array<{ stop: number; r: number; g: number; b: number }>;
+  /** When this integer changes (and a valid study area is present), the tool
+   *  runs automatically. Powers the one-click "Compute demo" flow: a host can
+   *  mount a tool + study area and signal it to compute without a click. */
+  autoRunKey?: number;
 }
 
 interface StudyArea {
@@ -302,14 +306,17 @@ const GridHeatmap: React.FC<{ grid: ToolGrid; color: string; schemeColors?: Arra
   );
 };
 
-const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, polygon, points, studyAreaType, onToolResult, onClearResult, schemeColors }) => {
+const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, polygon, points, studyAreaType, onToolResult, onClearResult, schemeColors, autoRunKey }) => {
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   // Strict study-area validation: a tool only runs against a drawing that
   // satisfies one of its declared modes. A bbox-only tool must NOT accept a
   // point, and a point-only tool must NOT accept a bounding box. The lat/long
   // fields appear (pre-populated from the drawing) only once the selection is
   // valid, and Run is disabled with a guidance message otherwise.
-  const allowedModes: StudyAreaMode[] = tool.analysisMeta?.allowedStudyAreaModes ?? ['point'];
+  const allowedModes: StudyAreaMode[] = React.useMemo(
+    () => tool.analysisMeta?.allowedStudyAreaModes ?? ['point'],
+    [tool.analysisMeta],
+  );
   const selection = React.useMemo<StudyAreaSelection>(
     () => deriveSelection(studyAreaType ?? null, bbox, polygon, points),
     [studyAreaType, bbox, polygon, points],
@@ -441,6 +448,17 @@ const ToolDialog: React.FC<ToolDialogProps> = ({ tool, color, onClose, bbox, pol
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setRunning(false); }
   }, [tool.id, tool.inputs, tool.toolName, tool.name, paramValues, area, meta, start, end, filterValues, onToolResult, bbox, polygon]);
+
+  // Auto-run: when autoRunKey changes, a valid study area is drawn, and the tool
+  // is not already running, trigger the computation. This powers the one-click
+  // "Compute demo" flow without requiring a manual button press.
+  const prevAutoRunKey = React.useRef(autoRunKey);
+  React.useEffect(() => {
+    if (autoRunKey !== undefined && autoRunKey !== prevAutoRunKey.current && validSelection && !running) {
+      prevAutoRunKey.current = autoRunKey;
+      handleRun();
+    }
+  }, [autoRunKey, validSelection, running, handleRun]);
 
   const resultIsFinite = result && Number.isFinite(result.result);
 

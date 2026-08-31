@@ -44,6 +44,9 @@ export const VAULT_KEY_NAMES = [
   'WINDY_API_KEY',
   'CLOUDFLARE_API_TOKEN',
 
+  // Traffic
+  'TOMTOM_API_KEY',
+
   // Economic / Financial
   'FRED_API_KEY',
   'EIA_API_KEY',

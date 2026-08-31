@@ -20,5 +20,11 @@
     "paths": {
       "@/*": ["./src/*"]
     }
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "public/cesium",
+    "public/voice-pcm-processor.js"
+  ]
 }

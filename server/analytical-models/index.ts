@@ -1,47 +1,27 @@
 import express from 'express';
 import { EQUATION_ENGINE } from './engine';
 import { computeWithContext } from './contextEngine';
-import { TOOLS_PART1, TOOLS_PART2, TOOLS_PART3, TOOLS_PART4, type ToolWorkflowDef } from './perToolDefs';
 import { getToolConfig } from './toolConfigs';
+import { searchAnalyticalModels, getAnalyticalModelDef } from './search';
 
-const ALL_TOOL_DEFS: Record<number, ToolWorkflowDef> = {
-  ...TOOLS_PART1,
-  ...TOOLS_PART2,
-  ...TOOLS_PART3,
-  ...TOOLS_PART4,
-};
+export { searchAnalyticalModels, getAnalyticalModelDef };
 
 export function registerAnalyticalModelsRoutes(app: express.Express): void {
   app.get('/api/analytical-models', (_req: express.Request, res: express.Response) => {
     res.json({ implemented: Object.keys(EQUATION_ENGINE).map(Number) });
   });
 
-  // Natural-language search for analytical model equation IDs
+  // Natural-language search for analytical model equation IDs.
   app.get('/api/analytical-models/search', (req: express.Request, res: express.Response) => {
-    const query = (req.query.q as string || '').toLowerCase().trim();
-    if (!query) {
-      const all = Object.entries(ALL_TOOL_DEFS).map(([id, def]) => ({
-        id: Number(id),
-        name: def.name,
-        vizType: def.vizType,
-      }));
-      return res.json({ results: all, count: all.length });
-    }
-    const results = Object.entries(ALL_TOOL_DEFS)
-      .filter(([, def]) => def.name.toLowerCase().includes(query))
-      .map(([id, def]) => ({
-        id: Number(id),
-        name: def.name,
-        vizType: def.vizType,
-      }))
-      .slice(0, 20);
-    res.json({ results, count: results.length, query });
+    const query = (req.query.q as string || '').trim();
+    const limit = Number(req.query.limit) || 20;
+    res.json(searchAnalyticalModels(query, limit));
   });
 
   // Get detailed info about a specific analytical model
   app.get('/api/analytical-models/:id', (req: express.Request, res: express.Response) => {
     const id = Number(req.params.id);
-    const def = ALL_TOOL_DEFS[id];
+    const def = getAnalyticalModelDef(id);
     if (!def) {
       return res.status(404).json({ error: `Analytical model ${id} not found` });
     }

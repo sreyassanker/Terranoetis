@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2, FileDown, Layers } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2, FileDown, Layers, Rocket } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -20,6 +20,7 @@ import type { VirtualizedMessageListHandle } from '@/components/chat/Virtualized
 import { useCollaboration } from '@/hooks/useCollaboration';
 import { useOfflineChat } from '@/hooks/useOfflineChat';
 import { useChat } from '@/hooks/useChat';
+import { useRealtimeVoice } from '@/hooks/useRealtimeVoice';
 import {
   removeStudyAreaFromGlobe, setStudyAreaVisibility,
   flyToStudyAreaTopDown, filterDataEntitiesByStudyArea, updateStudyAreaStyle,
@@ -87,6 +88,18 @@ import { LandCoverMapperPanel } from '@/components/LandCoverMapperPanel';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { createRenderScheduler } from '@/lib/batchScheduler';
 import { createUnifiedTimer } from '@/lib/unifiedTimer'; // P0 perf: unified timer
+import { SensorStyles, SENSOR_STYLES, type SensorStyleId } from '@/rendering/sensorStyles';
+import { TomTomTrafficLayer } from '@/rendering/tomtomTraffic';
+import { FirstRunCard } from '@/components/FirstRunCard';
+import { isFirstRun, markFirstRunDone, type FirstRunMission } from '@/lib/firstRun';
+import { fetchWalkingRoute, drawRouteOnGlobe, flyRoute } from '@/rendering/osrmRoute';
+import { DetectionOverlay } from '@/rendering/detectionOverlay';
+import { CctvViewshed, type ViewshedCamera } from '@/rendering/cctvViewshed';
+import { LaunchReplayPanel } from '@/components/LaunchReplayPanel';
+import { AircraftHangar } from '@/rendering/aircraftHangar';
+import { RadioTunerPanel } from '@/components/RadioTunerPanel';
+import { PhotorealisticGlobe } from '@/rendering/photorealisticGlobe';
+import { CinematicCamera } from '@/rendering/cinematicCamera';
 import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings, getOsmBuildingsTileset } from '@/rendering/osmBuildings';
 import {
   addVolcanoEntities,
@@ -1050,6 +1063,11 @@ export default function App() {
   /** Ref for the MOUSE_MOVE handler to read the toggle without stale closure. */
   const toolSurfaceProbeEnabledRef = useRef(false);
   useEffect(() => { toolSurfaceProbeEnabledRef.current = toolSurfaceProbeEnabled; }, [toolSurfaceProbeEnabled]);
+  /** Traffic hover readout — live speed/free-flow/confidence when the cursor
+   *  is over a TomTom traffic segment entity. */
+  const [trafficHover, setTrafficHover] = useState<{
+    x: number; y: number; speed: number; freeFlow: number; confidence: number; lat: number; lon: number;
+  } | null>(null);
   /** The rendered grid for re-coloring on scheme change. */
   const toolSurfaceGridRef = useRef<InterpGrid | null>(null);
   /** Polyon mask used when the surface was rendered (re-applied on recolor). */
@@ -1215,7 +1233,20 @@ export default function App() {
   const [showAviationTracker, setShowAviationTracker] = useState(false);
   const [showSatelliteImagery, setShowSatelliteImagery] = useState(false);
   const [showAnalyticsWorkbench, setShowAnalyticsWorkbench] = useState(false);
+  const [showLaunchReplay, setShowLaunchReplay] = useState(false);
+  const [showRadioTuner, setShowRadioTuner] = useState(false);
   const [analyticalNeedsTwoPoints, setAnalyticalNeedsTwoPoints] = useState(false);
+  const [demoRequest, setDemoRequest] = useState<{ toolId: number; key: number } | null>(null);
+  const [sensorStyle, setSensorStyle] = useState<SensorStyleId>('normal');
+  const sensorStylesRef = useRef<SensorStyles | null>(null);
+  const tomtomTrafficRef = useRef<TomTomTrafficLayer | null>(null);
+  const detectionOverlayRef = useRef<DetectionOverlay | null>(null);
+  const cctvViewshedRef = useRef<CctvViewshed | null>(null);
+  const aircraftHangarRef = useRef<AircraftHangar | null>(null);
+  const photorealGlobeRef = useRef<PhotorealisticGlobe | null>(null);
+  const [photoreal, setPhotoreal] = useState(false);
+  const cinematicCameraRef = useRef<CinematicCamera | null>(null);
+  const [showFirstRun, setShowFirstRun] = useState<boolean>(() => isFirstRun());
   const [showLandCoverMapper, setShowLandCoverMapper] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   // CMD+K keyboard shortcut
@@ -1225,10 +1256,25 @@ export default function App() {
         e.preventDefault();
         setShowCommandPalette(prev => !prev);
       }
+      // Sensor styles: 1–6 cycle CRT / NVG / FLIR / Noir / Snow (1 = Normal).
+      // Only when no text input has focus.
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && /^[1-6]$/.test(e.key)) {
+        const el = document.activeElement as HTMLElement | null;
+        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+        const def = SENSOR_STYLES[Number(e.key) - 1];
+        if (def) {
+          e.preventDefault();
+          setSensorStyle(prev => sensorStylesRef.current?.toggle(def.id) ?? def.id);
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+  // Sync sensor-style state → the Cesium post-process stage (created after viewer).
+  useEffect(() => {
+    sensorStylesRef.current?.set(sensorStyle);
+  }, [sensorStyle]);
   const [memoryStats, setMemoryStats] = useState<Record<string, { count: number }> | null>(null);
   const [reflexStates, setReflexStates] = useState<Array<{ reflexId: string; status: string }>>([
     { reflexId: 'seismic-pupillary', status: 'IDLE' },
@@ -1393,6 +1439,14 @@ export default function App() {
   // Phase 2: Voice
   const [voiceSupported, setVoiceSupported] = useState(false);
   const recognitionRef = useRef<globalThis.SpeechRecognition | null>(null);
+  // PRIMARY voice: OpenAI Realtime (interruptible audio-in/audio-out).
+  // Web Speech → /api/agent/ask remains the FALLBACK when Realtime can't connect.
+  const [realtimeVoiceAvailable, setRealtimeVoiceAvailable] = useState(false);
+  const realtimeVoice = useRealtimeVoice({
+    getToken: () => localStorage.getItem('auth_token'),
+    onStatus: (s) => { if (import.meta.env.DEV) console.log('[Voice]', s); },
+    onError: (msg) => { setRealtimeVoiceAvailable(false); if (import.meta.env.DEV) console.warn('[Voice]', msg); },
+  });
   // Chat history — abort controller and refs remain local
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentRequestIdRef = useRef<string | null>(null);
@@ -1991,6 +2045,14 @@ export default function App() {
     forkRendererRef.current.setSkipLayers(['live_media', 'weather_cards', 'india_cctv']);
     ghostProtocolRef.current = new GhostProtocol(v);
     entropyHaloRef.current = new EntropyHalo(v);
+    sensorStylesRef.current = new SensorStyles(v);
+    // Photorealistic 3D globe (Google Photorealistic 3D Tiles via Cesium Ion).
+    // Gracefully degrades to standard imagery + terrain if the Ion asset is
+    // unreachable — the app never breaks.
+    photorealGlobeRef.current = new PhotorealisticGlobe(v);
+    void photorealGlobeRef.current.enable().then(ok => setPhotoreal(ok));
+    // Cinematic camera engine — orbit/pan/tilt/rotate/route dolly.
+    cinematicCameraRef.current = new CinematicCamera(v);
     oracleChainRef.current = new OracleChainRenderer(v);
     if (import.meta.env.DEV) {
       window.__terranoetisDebug = {
@@ -2205,6 +2267,34 @@ export default function App() {
     v.scene.camera.moveStart.addEventListener(() => { probeNav++; });
     v.scene.camera.moveEnd.addEventListener(() => { probeNav = Math.max(0, probeNav - 1); });
     handler.setInputAction((move: Cesium.ScreenSpaceEventHandler.MotionEvent) => {
+      // Traffic hover readout: when the street-traffic layer is active, pick
+      // the entity under the cursor and surface its real speed/free-flow/
+      // confidence (TomTom data), independent of the heatmap probe toggle.
+      if (isLayerEnabled('tomtom_traffic')) {
+        let picked: any = null;
+        try { picked = v.scene.pick(move.endPosition); } catch { /* ignore */ }
+        const ent = picked?.id;
+        if (ent?.properties) {
+          const props = ent.properties.getValue(Cesium.JulianDate.now()) as Record<string, unknown>;
+          const speed = Number(props.speed);
+          if (Number.isFinite(speed)) {
+            const freeFlow = Number(props.freeFlow);
+            const confidence = Number(props.confidence);
+            setTrafficHover({
+              x: move.endPosition.x, y: move.endPosition.y,
+              speed, freeFlow: Number.isFinite(freeFlow) ? freeFlow : NaN,
+              confidence: Number.isFinite(confidence) ? confidence : NaN,
+              lat: Number(props.lat ?? NaN), lon: Number(props.lon ?? NaN),
+            });
+          } else {
+            setTrafficHover(null);
+          }
+        } else {
+          setTrafficHover(null);
+        }
+      } else {
+        setTrafficHover(null);
+      }
       // Probe only runs when explicitly enabled via the legend toggle.
       if (!toolSurfaceProbeEnabledRef.current) { setToolSurfaceProbe(null); return; }
       const now = performance.now();
@@ -5166,7 +5256,7 @@ export default function App() {
     if (['severe_storms', 'wildfires', 'smoke_dispersion'].includes(layerId)) {
       refreshDerivedOverlays();
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleLayer = useCallback((layerId: string) => {
     const now = Date.now();
@@ -5294,6 +5384,31 @@ export default function App() {
       entityStoreRef.current['disaster_alerts']?.forEach(e => { if (e) e.show = true; });
     } else if (layerId === 'india_cctv') {
       if (!showExisting('india_cctv')) void loadIndiaCctv(v);
+      return;
+    } else if (layerId === 'tomtom_traffic') {
+      startTomTomTraffic(v);
+      return;
+    } else if (layerId === 'detection_overlay') {
+      if (!detectionOverlayRef.current) detectionOverlayRef.current = new DetectionOverlay(v);
+      detectionOverlayRef.current.start();
+      return;
+    } else if (layerId === 'cctv_viewshed') {
+      // Upgrade of the existing CCTV layer: draw estimated coverage cones over
+      // the already-loaded public webcams. Requires india_cctv to be loaded.
+      const cams = cctvMetaRef.current;
+      if (!cams.size && !entityStoreRef.current['india_cctv']?.length) {
+        void loadIndiaCctv(v).then(() => {
+          if (isLayerEnabled('cctv_viewshed')) renderCctvViewshed(v);
+        });
+      } else {
+        renderCctvViewshed(v);
+      }
+      return;
+    } else if (layerId === 'aircraft_hangar') {
+      // Upgrade of the aviation layers: swap flight glyphs for 3D models on
+      // close approach. Requires a flight layer to be active; runs continuously.
+      if (!aircraftHangarRef.current) aircraftHangarRef.current = new AircraftHangar(v);
+      aircraftHangarRef.current.start();
       return;
     } else if (layerId === 'live_media') {
       if (!showExisting('live_media')) void loadLiveMedia(v);
@@ -5482,6 +5597,19 @@ export default function App() {
     if (layerId === 'ais_vessels') {
       aisTrackerRef.current?.stop();
       aisTrackerRef.current?.clear();
+    }
+    if (layerId === 'tomtom_traffic') {
+      tomtomTrafficRef.current?.stop();
+      tomtomTrafficRef.current?.clearEntities();
+    }
+    if (layerId === 'detection_overlay') {
+      detectionOverlayRef.current?.stop();
+    }
+    if (layerId === 'cctv_viewshed') {
+      cctvViewshedRef.current?.stop();
+    }
+    if (layerId === 'aircraft_hangar') {
+      aircraftHangarRef.current?.stop();
     }
     if (layerId === 'airspaces' && v) {
       // Remove airspace entities that were added directly to viewer.entities
@@ -5841,6 +5969,46 @@ export default function App() {
         viewer.camera.flyToBoundingSphere(Cesium.BoundingSphere.fromPoints(positions), { duration: 1.2 });
       } catch { /* ignore */ }
     }
+  }
+
+  // TomTom street-level traffic: per-vehicle flow, congestion-colored, refreshed
+  // on a timer as the camera moves. Real API data when TOMTOM_API_KEY is set;
+  // an empty layer (no fabricated vehicles) when the key is absent.
+  function startTomTomTraffic(viewer: Cesium.Viewer) {
+    if (!tomtomTrafficRef.current) {
+      tomtomTrafficRef.current = new TomTomTrafficLayer(viewer, apiVaultRef.current.keys.TOMTOM_API_KEY || null);
+    }
+    tomtomTrafficRef.current.start();
+  }
+
+  // CCTV viewshed — coverage cones over the existing webcam layer. Poses are
+  // estimated (azimuth/FOV/range heuristics) and labeled as such, matching how
+  // the public-camera data actually arrives (positions real, poses estimated).
+  function renderCctvViewshed(viewer: Cesium.Viewer) {
+    if (!cctvViewshedRef.current) {
+      cctvViewshedRef.current = new CctvViewshed(viewer);
+      cctvViewshedRef.current.start();
+    }
+    const ents = entityStoreRef.current['india_cctv'] ?? [];
+    const cams: ViewshedCamera[] = [];
+    for (const e of ents) {
+      const pos = e.position?.getValue(Cesium.JulianDate.now());
+      if (!pos) continue;
+      const carto = Cesium.Cartographic.fromCartesian(pos);
+      if (!carto) continue;
+      const lon = Cesium.Math.toDegrees(carto.longitude);
+      const lat = Cesium.Math.toDegrees(carto.latitude);
+      // Deterministic pseudo-azimuth per camera so cones are stable across
+      // refreshes while still being an estimated prior (honest framing).
+      const seed = Math.abs(Math.sin(lon * 12.9898) * 43758.5453) % 1;
+      const azimuthDeg = (seed * 360 + 45) % 360;
+      const rangeM = 150 + Math.abs(Math.sin(lat)) * 500; // 150–650 m coverage
+      cams.push({
+        lat, lon, name: e.name || 'camera',
+        azimuthDeg, fovDeg: 60, rangeM, mountHeightM: 5,
+      });
+    }
+    cctvViewshedRef.current.render(cams);
   }
 
   async function loadLiveMedia(viewer: Cesium.Viewer) {
@@ -7096,17 +7264,37 @@ export default function App() {
     }
   }, [setIsListening, setAiInput]);
 
-  const toggleVoiceInput = useCallback(() => {
-    if (!recognitionRef.current) return;
+  const toggleVoiceInput = useCallback(async () => {
+    // PRIMARY: OpenAI Realtime voice (interruptible audio-in/audio-out).
     if (isListening) {
-      recognitionRef.current.stop();
+      // If realtime is active, stop it; if it's the fallback, stop recognition.
+      if (realtimeVoice.active) {
+        realtimeVoice.stop();
+        setIsListening(false);
+        return;
+      }
+      recognitionRef.current?.stop();
       setIsListening(false);
-    } else {
-      setAiInput('');
-      recognitionRef.current.start();
-      setIsListening(true);
+      return;
     }
-  }, [isListening, setAiInput, setIsListening]);
+
+    // Try Realtime first; fall back to Web Speech if it can't connect.
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      const started = await realtimeVoice.start().catch(() => false);
+      if (started) {
+        setRealtimeVoiceAvailable(true);
+        setAiInput('');
+        setIsListening(true);
+        return;
+      }
+    }
+    // Fallback: Web Speech API → /api/agent/ask
+    if (!recognitionRef.current) return;
+    setAiInput('');
+    recognitionRef.current.start();
+    setIsListening(true);
+  }, [isListening, setAiInput, setIsListening, realtimeVoice]);
 
   // Phase 2.2: Voice — speech synthesis (text-to-speech)
   const speakResponse = useCallback((text: string) => {
@@ -7490,6 +7678,64 @@ export default function App() {
             }
             break;
           }
+          case 'addRoute': {
+            // Real OSRM street-following walking route drawn on the globe and
+            // flown with a banked camera path. fromLat/fromLon/toLat/toLon are
+            // required; label + color optional.
+            const fromLat = cmd.fromLat as number;
+            const fromLon = cmd.fromLon as number;
+            const toLat = cmd.toLat as number;
+            const toLon = cmd.toLon as number;
+            if (isFinite(fromLat) && isFinite(fromLon) && isFinite(toLat) && isFinite(toLon)) {
+              const label = (cmd.label as string) || 'Route';
+              const routeColor = Cesium.Color.CYAN;
+              const routeEntity = drawRouteOnGlobe(v, [[fromLat, fromLon], [toLat, toLon]], routeColor);
+              action.entities = [routeEntity];
+              action.description = label;
+              fetchWalkingRoute(fromLat, fromLon, toLat, toLon).then(res => {
+                if (res.error || res.polyline.length < 2) return;
+                if (action.entities?.[0]) v.entities.remove(action.entities[0]);
+                const realRoute = drawRouteOnGlobe(v, res.polyline, routeColor);
+                action.entities = [realRoute];
+                flyRoute(v, res.polyline, 8);
+              });
+            }
+            break;
+          }
+          case 'moveCamera': {
+            // Cinematic camera verbs driven by voice/text: orbit / pan / tilt /
+            // rotate / stop, with optional speed (slow|normal|fast). This is the
+            // GEV-parity "camera choreography" path — real continuous motion.
+            const motion = String(cmd.motion || '');
+            const direction = String(cmd.direction || 'right');
+            const speed = String(cmd.speed || 'normal') as 'slow' | 'normal' | 'fast';
+            const cam = cinematicCameraRef.current;
+            if (motion === 'stop') {
+              cam?.stop();
+              action.description = 'Stop camera motion';
+            } else if (motion === 'orbit') {
+              // Orbit around the current view center — pick the globe under the
+              // crosshair as the pivot.
+              const pos = v.camera.pickEllipsoid(new Cesium.Cartesian2(v.canvas.clientWidth / 2, v.canvas.clientHeight / 2), v.scene.globe.ellipsoid);
+              if (pos) {
+                // Create a transient entity at the pivot so the camera orbits it.
+                const pivot = v.entities.add({ position: pos, point: { pixelSize: 0 } });
+                cam?.orbit(pivot, speed, 'continuous');
+                action.description = `Orbit ${speed}`;
+                setTimeout(() => v.entities.remove(pivot), 50);
+              }
+            } else if (motion === 'pan') {
+              cam?.pan(direction as 'left' | 'right' | 'up' | 'down', speed, 'continuous');
+              action.description = `Pan ${direction}`;
+            } else if (motion === 'tilt') {
+              cam?.tilt(direction as 'up' | 'down', speed, 'continuous');
+              action.description = `Tilt ${direction}`;
+            } else if (motion === 'rotate') {
+              cam?.rotate(direction as 'left' | 'right', speed, 'continuous');
+              action.description = `Rotate ${direction}`;
+            }
+            break;
+          }
           case 'addPanel': {
             const panelData = cmd.panelData as Record<string, unknown> | undefined;
             if (panelData) {
@@ -7522,7 +7768,7 @@ export default function App() {
         else if (action.entities && action.entities.length > 0) history.push(action as any);
       } catch { /* skip malformed commands */ }
     }
-  }, [focusLocation, toggleLayer, isLayerEnabled, setDigitalTwinPanel, cleanupThinkingSteps, applyPanelCommand, setLayerEnabled]);
+  }, [focusLocation, isLayerEnabled, setDigitalTwinPanel, cleanupThinkingSteps, applyPanelCommand, setLayerEnabled]);
 
   const sendToPipeline = useCallback(async (goal: string, wsId: string | null) => {
     const resp = await fetch('/api/agent/pipeline', {
@@ -8397,6 +8643,90 @@ export default function App() {
   }, []);
 
   /* ═════════════════════════════════════════════════════════════════
+     ONE-CLICK COMPUTE DEMO — "pick Austin, watch a real equation paint
+     the globe". Programmatically lays down a study-area rectangle over a
+     real location, opens the Analytics Workbench, auto-selects a showcase
+     equation (Land Surface Temperature, tool 1) and auto-runs it. The
+     computation is a genuine server-side run (Landsat + ERA5 context).
+     ═════════════════════════════════════════════════════════════════ */
+
+  const runComputeDemo = useCallback(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+    // Austin, TX study area (approx. 0.45° x 0.35° box).
+    const demoBbox = { latMin: 30.05, latMax: 30.5, lonMin: -97.95, lonMax: -97.6 };
+    const corners = [
+      Cesium.Cartesian3.fromDegrees(demoBbox.lonMin, demoBbox.latMin),
+      Cesium.Cartesian3.fromDegrees(demoBbox.lonMax, demoBbox.latMin),
+      Cesium.Cartesian3.fromDegrees(demoBbox.lonMax, demoBbox.latMax),
+      Cesium.Cartesian3.fromDegrees(demoBbox.lonMin, demoBbox.latMax),
+    ];
+    const name = 'Austin demo';
+    const entity = v.entities.add({
+      rectangle: {
+        coordinates: Cesium.Rectangle.fromDegrees(demoBbox.lonMin, demoBbox.latMin, demoBbox.lonMax, demoBbox.latMax),
+        material: new Cesium.Color(0.2, 0.8, 0.3, 0.12),
+        outline: true,
+        outlineColor: Cesium.Color.LIME,
+        outlineWidth: 2,
+      },
+    });
+    const ringCoords: Array<[number, number]> = [
+      [demoBbox.lonMin, demoBbox.latMin], [demoBbox.lonMax, demoBbox.latMin],
+      [demoBbox.lonMax, demoBbox.latMax], [demoBbox.lonMin, demoBbox.latMax],
+    ];
+    const geojson: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [[...ringCoords, ringCoords[0]]] },
+        properties: { name, type: 'rectangle' },
+      }],
+    };
+    const area: StudyAreaItem = {
+      id: `study_area_demo_${Date.now()}`, name, type: 'rectangle',
+      visible: true, active: false, entity, positions: corners, geojson, color: '#22c55e', width: 3,
+    };
+    updateStudyAreaStyle(v, area, '#22c55e', 3);
+    studyAreasRef.current.forEach(a => { if (a.id !== area.id && a.active) setStudyAreaActive(v, a, false); });
+    setStudyAreaActive(v, area, true);
+    studyAreasRef.current = [...studyAreasRef.current, area];
+    setStudyAreas(studyAreasRef.current);
+    setActiveStudyAreaId(area.id);
+    flyToStudyAreaTopDown(v, area);
+    throttledRender(v);
+    useChatStore.getState().setStudyAreaBbox(demoBbox);
+    // Open the workbench + signal it to auto-select LST and run.
+    setShowAnalyticsWorkbench(true);
+    focusPanel('analytics');
+    setDemoRequest({ toolId: 1, key: Date.now() });
+  }, [focusPanel]);
+
+  // Stage a mission from the first-run card.
+  const stageFirstRunMission = useCallback((mission: FirstRunMission) => {
+    switch (mission) {
+      case 'compute-demo':
+        runComputeDemo();
+        break;
+      case 'live-contacts':
+        // Enable flights, AIS, satellites, earthquakes — the "live world" view.
+        toggleLayer('2_adsb_lol');
+        toggleLayer('ais_vessels');
+        toggleLayer('6_celestrak_gp_api');
+        toggleLayer('earthquakes');
+        break;
+      case 'environmental':
+        // Enable fire, storms, alerts, floods.
+        toggleLayer('wildfires');
+        toggleLayer('severe_storms');
+        toggleLayer('disaster_alerts');
+        toggleLayer('flood_extent');
+        break;
+    }
+    markFirstRunDone();
+  }, [runComputeDemo, toggleLayer]);
+
+  /* ═════════════════════════════════════════════════════════════════
      AUTO CLIP TO ACTIVE STUDY AREA
      ═════════════════════════════════════════════════════════════════ */
 
@@ -8471,6 +8801,7 @@ export default function App() {
       // viewer.entities / viewer.scene in their destroy() and throw if the
       // viewer is destroyed before them.
       try { entropyHaloRef.current?.destroy(); } catch { /* ignore */ }
+      try { sensorStylesRef.current?.destroy(); sensorStylesRef.current = null; } catch { /* ignore */ }
       try { oracleChainRef.current?.destroy(); } catch { /* ignore */ }
       try { entityTrackerRef.current?.destroy(); } catch { /* ignore */ }
       try { aisTrackerRef.current?.stop(); aisTrackerRef.current?.clear(); } catch { /* ignore */ }
@@ -9031,7 +9362,7 @@ export default function App() {
             <span>Live</span>
           </div>
 
-          <button className={`btn-icon ${showIntelFeed ? 'active' : ''}`} onClick={() => toggleLayer('intel_feed')} title="Intel Feed"><Radio size={16} /></button>
+          <button className={`btn-icon ${showIntelFeed ? 'active' : ''}`} onClick={() => toggleLayer('intel_feed')} title="Intel Feed"><Activity size={16} /></button>
           <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => { setShowStudyArea(p => !p); focusPanel('study-area'); }} title="Study Area"><Crosshair size={16} /></button>
           <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => { setShowAI(p => !p); focusPanel('ai'); }} title="AI Assistant"><Bot size={16} /></button>
           <button className="btn-icon" onClick={flyToIndiaDirect} title="Fly to India"><Navigation2 size={16} /></button>
@@ -9459,6 +9790,80 @@ export default function App() {
         >
           <FlaskConical size={14} />
         </button>
+        <button
+          className="btn-icon monitor-btn"
+          onClick={runComputeDemo}
+          title="Compute demo — run Land Surface Temperature over Austin, TX with live satellite data"
+          style={{ color: '#34d399', background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.3)' }}
+        >
+          <Zap size={14} />
+        </button>
+        <button
+          className={`btn-icon monitor-btn ${showLaunchReplay ? 'active' : ''}`}
+          onClick={() => { setShowLaunchReplay(p => !p); focusPanel('analytics'); }}
+          title="Launch Replay — scrubbable rocket ascent reconstruction (Launch Library 2)"
+          style={{ color: showLaunchReplay ? '#fb923c' : undefined }}
+        >
+          <Rocket size={14} />
+        </button>
+        <button
+          className={`btn-icon monitor-btn ${showRadioTuner ? 'active' : ''}`}
+          onClick={() => {
+            setShowRadioTuner(p => !p);
+            focusPanel('analytics');
+            // Ensure the radio station markers are on the globe for the tuner.
+            if (!isLayerEnabled('radio_stations')) toggleLayer('radio_stations');
+          }}
+          title="World Radio — analog tuner over 500 real geolocated stations"
+          style={{ color: showRadioTuner ? '#22d3ee' : undefined }}
+        >
+          <Radio size={14} />
+        </button>
+        {/* Sensor-style switcher — 1–6, only one active at a time */}
+        <div style={{ display: 'flex', gap: 1, marginLeft: 4, alignItems: 'center' }}>
+          <span style={{ fontSize: 8, color: '#475569', marginRight: 2 }}>STYLE</span>
+          {SENSOR_STYLES.map(s => {
+            const isActive = sensorStyle === s.id;
+            const keyLabel = s.key ?? '';
+            const hue = s.id === 'normal' ? 180 : s.id === 'crt' ? 0 : s.id === 'nvg' ? 120 : s.id === 'flir' ? 30 : s.id === 'noir' ? 0 : 200;
+            const sat = s.id === 'noir' ? 0 : 60;
+            const lit = isActive ? 55 : 35;
+            const bgLit = isActive ? 15 : 5;
+            return (
+              <button key={s.id} className="btn-icon monitor-btn"
+                onClick={() => setSensorStyle(prev => sensorStylesRef.current?.toggle(s.id) ?? s.id)}
+                title={`${s.label}: ${s.hint} (key ${keyLabel})`}
+                style={{
+                  width: 24, height: 24, borderRadius: 4, padding: 0, fontSize: 9,
+                  color: `hsl(${hue}, ${sat}%, ${lit}%)`,
+                  background: `hsl(${hue}, ${sat}%, ${bgLit}%)`,
+                  border: isActive ? `1px solid hsl(${hue}, ${sat}%, 45%)` : '1px solid transparent',
+                  transition: 'all 0.15s',
+                }}>
+                {s.id === 'normal' ? '1' : s.id === 'crt' ? '2' : s.id === 'nvg' ? '3' : s.id === 'flir' ? '4' : s.id === 'noir' ? '5' : '6'}
+              </button>
+            );
+          })}
+        </div>
+        {/* Photorealistic globe toggle — Google 3D Tiles via Cesium Ion */}
+        <button
+          className="btn-icon monitor-btn"
+          onClick={() => {
+            const g = photorealGlobeRef.current;
+            if (!g) return;
+            void g.toggle().then(ok => setPhotoreal(ok));
+          }}
+          title={`${photoreal ? 'Disable' : 'Enable'} Google Photorealistic 3D Globe — real photogrammetry (photorealistic-grade visuals)`}
+          style={{
+            color: photoreal ? '#22d3ee' : '#475569',
+            background: photoreal ? 'rgba(34,211,238,0.15)' : 'transparent',
+            border: photoreal ? '1px solid rgba(34,211,238,0.4)' : '1px solid transparent',
+            fontSize: 9, padding: '4px 8px', borderRadius: 4, marginLeft: 4,
+            transition: 'all 0.15s',
+          }}
+        >
+          <Globe size={13} />
+        </button>
       </div>
 
       {/* Camera Controls — advanced zoom with smooth flyTo */}
@@ -9783,6 +10188,29 @@ export default function App() {
         </div>
       )}
 
+      {/* Traffic hover readout — live TomTom speed/free-flow/confidence */}
+      {trafficHover && (
+        <div style={{
+          position: 'absolute', left: trafficHover.x + 14, top: trafficHover.y + 14,
+          zIndex: 91, pointerEvents: 'none',
+          padding: '6px 10px', borderRadius: 6,
+          background: 'rgba(0,0,0,0.82)', border: '1px solid rgba(249,115,22,0.4)',
+          fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#e2e8f0',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.4)', minWidth: 150,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: trafficHover.speed / trafficHover.freeFlow > 0.85 ? '#22c55e' : trafficHover.speed / trafficHover.freeFlow > 0.6 ? '#eab308' : '#ef4444', flexShrink: 0 }} />
+            <span style={{ color: '#fdba74', fontWeight: 700 }}>TRAFFIC</span>
+            <span style={{ color: '#64748b', marginLeft: 'auto' }}>{trafficHover.speed} km/h</span>
+          </div>
+          <div style={{ color: '#94a3b8', fontSize: 9, lineHeight: 1.5 }}>
+            Free flow <b style={{ color: '#e2e8f0' }}>{Number.isFinite(trafficHover.freeFlow) ? `${trafficHover.freeFlow} km/h` : '—'}</b>
+            {' · '}Conf {Number.isFinite(trafficHover.confidence) ? trafficHover.confidence.toFixed(2) : '—'}
+            {Number.isFinite(trafficHover.lat) && <><br />{trafficHover.lat.toFixed(4)}°, {trafficHover.lon.toFixed(4)}°</>}
+          </div>
+        </div>
+      )}
+
       {/* Smoke Legend */}
       {showSmokeLegend && (
         <div className="heatmap-legend show glass-panel" style={{ bottom: 280 }}>
@@ -9965,9 +10393,40 @@ export default function App() {
       {/* Satellite Imagery Panel */}
       <SatelliteImageryPanel viewer={viewerRef.current} show={showSatelliteImagery} onClose={() => setShowSatelliteImagery(false)} zIndex={getPanelZIndex('satellite-imagery')} />
 
+      {/* First-run mission card */}
+      {showFirstRun && (
+        <FirstRunCard
+          onDismiss={() => setShowFirstRun(false)}
+          onStage={(mission) => { stageFirstRunMission(mission); setShowFirstRun(false); }}
+        />
+      )}
+
+      {/* Launch Replay Panel */}
+      <LaunchReplayPanel open={showLaunchReplay} onClose={() => setShowLaunchReplay(false)} viewer={viewerRef.current} zIndex={getPanelZIndex('analytics') + 1} />
+
+      {/* World Radio Tuner */}
+      <RadioTunerPanel open={showRadioTuner} onClose={() => setShowRadioTuner(false)} zIndex={getPanelZIndex('analytics') + 2}
+        getStations={() => {
+          const ents = entityStoreRef.current['radio_stations'] ?? [];
+          return ents.map(e => {
+            const props = e.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined ?? {};
+            return {
+              lat: Number(props.lat ?? 0), lon: Number(props.lon ?? 0),
+              name: String(props.name ?? e.name ?? 'Unknown'),
+              url: String(props.url ?? ''), tags: String(props.tags ?? ''),
+              codec: String(props.codec ?? ''), bitrate: Number(props.bitrate ?? 0),
+              stationuuid: String(props.stationuuid ?? ''), favicon: String(props.favicon ?? ''),
+            };
+          });
+        }}
+        flyTo={(lat, lon, alt) => {
+          const v = viewerRef.current;
+          if (v) v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt ?? 30000), duration: 1.0 });
+        }}
+      />
+
       {/* Analytics Workbench Panel */}
-      <ErrorBoundary label="Analytics Workbench">
-        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} />
+      <ErrorBoundary label="Analytics Workbench">        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} demoRequest={demoRequest} />
       </ErrorBoundary>
 
       {/* Land Cover Mapper Panel */}

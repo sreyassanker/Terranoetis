@@ -94,6 +94,13 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     dataSource: 'https://opensky-network.org/',
     sub: 'Aviation',
   },
+  {
+    id: 'aircraft_hangar', label: '3D Aircraft Models', symbol: '✈',
+    color: '#60a5fa', motionType: 'glow', group: 'aviation',
+    type: 'effect', description: 'Swap flight glyphs for real 3D aircraft models on close approach (self-contained glTF, no downloads)',
+    dataSource: '',
+    sub: '3D models on approach',
+  },
   // ── 3. Satellite Imagery & Earth Observation ──
   {
     id: '3_planetary_computer_stac', label: 'MODIS Terra True Color', symbol: '┎',
@@ -869,6 +876,13 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     sub: 'Open live public webcams worldwide',
   },
   {
+    id: 'cctv_viewshed', label: 'Camera Viewsheds', symbol: '⊞',
+    color: '#22d3ee', motionType: 'glow', group: 'advanced',
+    type: 'effect', description: 'Estimated coverage cones for public cameras — where each camera reaches (poses estimated, labeled as such)',
+    dataSource: '',
+    sub: 'Estimated coverage volumes',
+  },
+  {
     id: 'intel_feed', label: 'Intel Feed', symbol: '⊍',
     color: '#b113d0', motionType: 'pulse', group: 'advanced',
     type: 'panel', description: 'Real-time events from all sources',
@@ -883,6 +897,37 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     dataSource: '',
     badge: 'LIVE',
     sub: 'YouTube news videos',
+  },
+  {
+    id: 'tomtom_traffic', label: 'Street Traffic', symbol: '⊖',
+    color: '#f97316', motionType: 'glow', group: 'advanced',
+    type: 'point', description: 'Per-vehicle street-level traffic flow with congestion coloring (TomTom)',
+    dataSource: 'https://developer.tomtom.com/traffic-apis',
+    badge: 'KEY',
+    sub: 'Live per-vehicle flow',
+  },
+  {
+    id: 'radio_stations', label: 'World Radio', symbol: '≡',
+    color: '#22d3ee', motionType: 'pulse', group: 'advanced',
+    type: 'point', description: 'Geolocated world radio stations (Radio Browser API)',
+    dataSource: 'https://www.radio-browser.info/',
+    badge: 'LIVE',
+    sub: 'Geolocated radio broadcasters',
+  },
+  {
+    id: 'bikeshare', label: 'Bikeshare', symbol: '≣',
+    color: '#4ade80', motionType: 'pulse', group: 'advanced',
+    type: 'point', description: 'Live bikeshare station availability (GBFS)',
+    dataSource: 'https://gbfs.org/',
+    badge: 'LIVE',
+    sub: 'Live station availability',
+  },
+  {
+    id: 'detection_overlay', label: 'Detection Overlay', symbol: '⊛',
+    color: '#38bdf8', motionType: 'glow', group: 'advanced',
+    type: 'effect', description: 'Screen-space bounding boxes + IDs on live entities (client-side)',
+    dataSource: '',
+    sub: 'Screen-space detection mesh',
   },
   {
     id: 'population_impact', label: 'Population Impact Zones', symbol: '⊎',

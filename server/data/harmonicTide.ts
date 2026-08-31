@@ -51,8 +51,8 @@ const SOLAR_LONGITUDE = [280.46645, 36000.76983, 0.0003032]; // h
 const LUNAR_PERIGEE = [83.3532430, 4069.0137111, -0.0103238, -1 / 80053, 1 / 18999000]; // p
 const LUNAR_NODE = [125.0445550, -1934.1361849, 0.0020762, 1 / 467410, -1 / 60616000]; // N
 const SOLAR_PERIGEE = [280.46645 - 357.52910, 36000.76932 - 35999.05030, 0.0003032 + 0.0001559, 0.00000048]; // pp
-const OBLIQUITY = [
-  23.439291111111112, -1300 * 3600 / 3600000000 * 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+const _OBLIQUITY = [
+  23.43929111, -1300 * 3600 / 3600000000 * 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]; // placeholder; recomputed below to match pytides
 
 function terrestrialObliquityCoeffs(): number[] {
@@ -158,7 +158,7 @@ export function astro(t: Date): Astro {
 }
 
 // ── Nodal corrections (node factor f, nodal phase u) per constituent ──
-const fUnity = (a: Astro) => 1.0;
+const fUnity = (_a: Astro) => 1.0;
 const uZero = (_a: Astro) => 0.0;
 
 const f_Mm = (a: Astro) => {
@@ -268,7 +268,7 @@ function base(name: string, xdo: string, f: Fx = fUnity, u: Fx = uZero): Constit
   return { name, coeff: xdoToCoeff(xdo), f, u };
 }
 
-const BASE: ConstituentDef[] = [
+const _BASE: ConstituentDef[] = [
   base('Z0', 'ZZZZZZZ'),
   base('Sa', 'ZAZZZZZ'),
   base('Ssa', 'ZBZZZZZ'),

@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'wasm']),
+  globalIgnores(['dist', 'wasm', '.kilo', 'public', 'server/__tests__/**/*.js']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -21,6 +21,13 @@ export default defineConfig([
     },
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+    },
+  },
+  {
+    // Test files legitimately cast fixtures / inputs — allow explicit any there.
+    files: ['server/__tests__/**/*.ts', 'src/__tests__/**/*.ts', 'src/__tests__/**/*.tsx', 'test_*.ts', 'test_*.mjs', 'e2e/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
     },
   },
 ])

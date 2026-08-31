@@ -3808,7 +3808,7 @@ const SATELLITE_INDEX_IDS = new Set([26, 27, 28, 29, 30, 31, 33]);
  *  indices the MVC picks the scene with the HIGHEST index; for CWSI (stress,
  *  more = worse) we pick the lowest (least-stressed / clearest) scene. */
 const MVC_MAX = new Set([26, 27, 28, 29, 30, 31]); // NDVI, NDWI, NDMI, EVI, NDSI, NBR
-const MVC_MIN = new Set([33]);                      // CWSI — clearest (min stress)
+const _MVC_MIN = new Set([33]);                      // CWSI — clearest (min stress)
 
 /**
  * Sample the [start, end] range at up to `n` cloud-free Landsat scenes,

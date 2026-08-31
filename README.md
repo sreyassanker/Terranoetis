@@ -4,7 +4,7 @@
 
 # Terranoetis
 
-A real-time geospatial data visualization and AI-powered Earth intelligence platform. Combines a Cesium-based 3D globe with a comprehensive backend serving live environmental data, satellite imagery, analytical models, simulations, and AI-driven insights.
+A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3D globe with a comprehensive backend serving live environmental data, satellite imagery, **150 real scientific equation engines**, physics simulations, realtime voice, and AI-driven cognition. Unlike a passive globe viewer, Terranoetis **computes** — it runs peer-reviewed equations over live data, reasons about what it sees, and paints real results back onto the Earth.
 
 <div align="center">
 
@@ -18,96 +18,52 @@ A real-time geospatial data visualization and AI-powered Earth intelligence plat
 ## Architecture
 
 ```mermaid
-%%{init: {'theme': 'neutral'}}%%
-flowchart TB
+%%{init: {'theme': 'neutral', 'flowchart': {'htmlLabels': false}}}%%
+flowchart LR
     subgraph CLIENT["CLIENT (React 19 + CesiumJS)"]
-        direction TB
-        Pages["Pages: App / Globe / Canvas / Scenarios / Tours"]
-        UI["UI Panels: Analytics, Intelligence, Satellite, Scenarios, Cockpit"]
-        Render["Rendering Engine: 32 modules for weather, aviation, maritime, satellites, earthquakes, military symbology, scenarios"]
-        Api["Data Layer: REST Client + WebSocket"]
-        Pages --> UI
-        UI --> Api
-        Render --> Api
-    end
-
-    subgraph PROXY["VITE DEV PROXY"]
-        Proxy["/api/* -> :3001\n/ws/* -> ws://:3001"]
+        direction LR
+        UI["UI\nPanels"]
+        Render["Rendering\nCesium + 40 modules"]
+        WS["WebSocket\nClient"]
+        API["REST\nClient"]
+        UI --> API
+        Render --> API
+        UI --> WS
     end
 
     subgraph SERVER["EXPRESS.JS SERVER"]
-        direction TB
-        Security["Security & Observability\nHelmet CSP, CORS, JWT Auth, Rate Limiter, Logger, Prometheus Metrics"]
-        
-        subgraph Data["Data Integration"]
-            direction LR
-            Fetchers["Data Fetchers\n(server/data/)"]
-            Utils["Utility Modules\n(server/utils/)"]
-            Fetchers --- Utils
-        end
-
-        subgraph Core["Core Services"]
-            direction TB
-            Analytical["Analytical Models\n150 equations in 26 domains\nContextEngine + 7-stage QC Pipeline\nSandbox: FARSITE, ADCIRC, WRF, HYSPLIT, FNO"]
-            FM["Foundation Models\nWeather Forecaster, Agriculture Monitor\nBayesian Fire Detection, SpaceX\nMVT Tiles, STAC Search"]
-            Multimodal["Multimodal Perception\nSatellite Analyzer, Seismic\nRadar, Sentiment, Fusion"]
-        end
-
-        subgraph AI["AI & Cognition"]
-            direction TB
-            OmniNet["OmniNet LLM Router\nMulti-model orchestration"]
-            CogOrch["Cognitive Orchestrator\nSystem 1 (fast) + System 2 (deep)"]
-            S2["System 2 Reasoning\nHTN Decomposition\nMulti-Agent Debate\nCausal Reasoning\nCounterfactual Analysis\nHypothesis Synthesis"]
-            Meta["Meta-Cognition\nSelf-Improvement\nPrompt Evolution\nExplainability (Traces, Bias, Uncertainty, Human Override)"]
-            OmniNet --> CogOrch
-            CogOrch --> S2
-            CogOrch --> Meta
-        end
-
-        subgraph Realtime["Realtime Intelligence"]
-            direction TB
-            Sentinel["Sentinel Engine\nBackground monitoring\nStream Processing\nAnomaly Detection\nCorrelation Engine\nForce Posture"]
-            Reflex["Reflex Engine\nAutonomic responses to\nreal-time events\nTrauma mode"]
-            Monitor["Monitor Manager\nRules + Scheduled Tasks\nAmbient Event Detection"]
-        end
-
-        subgraph World["World Modeling"]
-            direction TB
-            Causal["Causal Knowledge Graph\nDiscovery Engine\nEntropy Mixer\nEntity & Edge Generation\nGraph Completion\nCounterfactual Graph"]
-            Dream["Dream Engine\nSynthetic scenario generation\nFork simulation\nCausal KG refinement"]
-            Fork["Fork Manager\nDivergent what-if\nsimulation threads"]
-            Sim["Scenario Simulator\nEnsemble Predictor\nPhysics NN"]
-        end
+        Security["Security &\nObservability"]
+        Agents["Agent &\nCognition\nSystem 1 + System 2\n7-LLM Router"]
+        Engine["Analytical Engine\n150 equations\n7-stage QC\nKaggle kernels"]
+        Data["Data Layer\n30+ live APIs\nFetchers + Cache"]
+        Realtime["Realtime\nSentinel · Reflex\nVoice Bridge\nPubSub"]
+        Services["World Model\nCausal KG · Memory\nDream · Forks\nScenarios"]
+        Security --> Agents
+        Security --> Data
+        Agents --> Engine
+        Data --> Engine
+        Agents --> Realtime
+        Agents --> Services
+        Engine --> Services
     end
 
-    subgraph STORAGE["PERSISTENCE & CACHING"]
-        direction TB
-        SQLite["SQLite\nAuth, Scenarios, Forks\nMemory Traces, Sentinel\nWatch Zones, Evaluations"]
-        Redis["Redis\nCache, PubSub\nSession, Queue"]
+    subgraph STORAGE["PERSISTENCE"]
+        SQLite["SQLite\nAuth · Scenarios\nMemory · Forks"]
+        Redis["Redis\nCache · Session\nPubSub · Queue"]
     end
 
-    subgraph COMMS["REAL-TIME COMMUNICATION"]
-        Ws["WebSocket Server\nClient channels (ws:<userId>)\nBroadcast (ws:all)\nFork channels (fork:<id>)\nHeartbeat 30s"]
-        PubSub["PubSub Event Bus\nsentinel:raw -> enriched -> alerts\nseismic | weather | ais | adsb\nproactive, fork, sse channels"]
+    subgraph EXTERNAL["EXTERNAL APIs"]
+        LLM["LLM Providers\nGemini · Claude\nGroq · DeepSeek"]
+        Live["Live Data\nOpenSky · USGS\nTomTom · Landsat\nFIRMS · AIS · LL2"]
+        Voice["Realtime Voice\nOpenAI → Gemini\n(brokered server-side)"]
     end
 
-    CLIENT -->|HTTP| Proxy
-    CLIENT -->|WebSocket| Ws
-    Proxy --> Security
-    Security --> Data
-    Data --> Core
-    Security --> AI
-    AI --> Core
-    Core --> World
-    Data --> Realtime
-    Realtime --> COMMS
-    World --> STORAGE
-    Core --> STORAGE
-    COMMS --> CLIENT
-    COMMS --> SERVER
-    AI --> Realtime
-    Realtime --> Ws
-    Ws --> PubSub
+    CLIENT -->|HTTP| Security
+    CLIENT -->|WebSocket| Realtime
+    Services --> STORAGE
+    Engine --> Live
+    Agents --> LLM
+    Realtime --> Voice
 ```
 
 **Request Flow:**
@@ -194,6 +150,10 @@ flowchart LR
 | **IssLivePanel** | 67 | ISS camera iframe + position stats (lat/lon/alt/speed) |
 | **IntelligencePanel** | 1202 | 8-tab intel: Markets, Energy, Risk, Signals, Sentiment, Heatmap, Analysis, Intel |
 | **ToolDialog** | 1040 | Analysis tool execution: study area, params, grid, execution, results, export |
+| **AnalyticsWorkbench** | 331 | 150-tool browser: tree/flat search over equations, domains, live-source counts |
+| **LaunchReplayPanel** | 202 | Scrubbable rocket ascent replay (Launch Library 2), color-scheme trail |
+| **RadioTunerPanel** | 191 | Analog tuner over 500 geolocated radio stations, stream playback, keyboard scrub |
+| **FirstRunCard** | 137 | First-load "stage a mission" card (compute demo / live contacts / environmental) |
 | **DigitalTwinPanel** | 220 | Recharts charts (Area/Bar/Pie/Line), stat cards, recommendations |
 | **CameraControls** | 332 | Zoom slider + log-scale height + fly-to-target |
 | **ForkPanel** | 68 | Parallel realities: pause/resume/terminate, divergence score |
@@ -283,7 +243,7 @@ Disaster wrappers (`src/components/`):
 
 All kernels ship a `_json_safe` conversion helper so NumPy 2.x scalar types serialize cleanly to JSON on Kaggle.
 
-**Rendering engine (`src/rendering/`, 32 files):**
+**Rendering engine (`src/rendering/`, 40 files):**
 
 | File | Purpose |
 |---|---|
@@ -318,8 +278,17 @@ All kernels ship a `_json_safe` conversion helper so NumPy 2.x scalar types seri
 | `ucsSatelliteDb.ts` | UCS satellite database |
 | `formatStepResult.ts` | Step result formatting |
 | `shpjs.d.ts` | Shapefile type declarations |
+| `sensorStyles.ts` | GLSL sensor looks over the whole globe (CRT · NVG · FLIR · Noir · Snow) via `PostProcessStage` |
+| `photorealisticGlobe.ts` | Google Photorealistic 3D Tiles (Cesium Ion asset 2275207) with graceful fallback |
+| `cinematicCamera.ts` | Tick-based camera engine: continuous orbit / pan / tilt / rotate, banked-turn route dolly, interrupt-on-input |
+| `tomtomTraffic.ts` | Per-vehicle street-level traffic flow (TomTom), congestion-colored, viewport-sampled |
+| `cctvViewshed.ts` | Estimated coverage cones for public webcams (positions real, poses labeled as estimated) |
+| `launchReplay.ts` | Scrubbable rocket ascent reconstruction from real pad→orbit data (Launch Library 2) |
+| `aircraftHangar.ts` | LOD swap: flight glyphs → per-class 3D glTF models (airliner/regional/helicopter/military), built at runtime |
+| `osrmRoute.ts` | Street-following walking route (OSRM) + camera fly-through |
+| `detectionOverlay.ts` | Screen-space bounding boxes + IDs over live entities (client-side) |
 
-**Hooks (6 total):**
+**Hooks (7 total):**
 
 | Hook | Purpose |
 |---|---|
@@ -329,6 +298,7 @@ All kernels ship a `_json_safe` conversion helper so NumPy 2.x scalar types seri
 | `useCollaboration` | Real-time presence: join/heartbeat, typing, cursor position per session |
 | `useKaggleSimulation` | Kaggle GPU simulation job lifecycle |
 | `useOfflineChat` | Offline banner + local fallback when AI provider is unreachable |
+| `useRealtimeVoice` | PRIMARY voice: OpenAI Realtime → Gemini Live fallback via server bridge (interruptible audio-in/audio-out) |
 
 ### Backend (`server/`)
 
@@ -344,9 +314,9 @@ All kernels ship a `_json_safe` conversion helper so NumPy 2.x scalar types seri
 | Module | Purpose |
 |--------|---------|
 | `server/index.ts` | Main Express application entry point (~11,710 lines) with route registration, middleware, agent system, AI pipeline, and all API integrations |
-| `server/agent.ts` | Cognitive agent system with command parsing, intent routing, tool registry, and LLM orchestration |
+| `server/agent.ts` | Cognitive agent system with command parsing, intent routing, tool registry, and LLM orchestration. Includes deterministic camera-verb extraction (orbit/pan/tilt/rotate/stop) for voice-driven cine camera |
 | `server/advancedAgent.ts` | Advanced agent with plan generation, memory recall, tool-approval gating, sub-agent streaming |
-| `server/analytical-models/` | 150 scientific equation engines with workflow runners, context engine, and REST API |
+| `server/analytical-models/` | 150 scientific equation engines with workflow runners, context engine, REST API, and semantic `search.ts` (relevance-ranked natural-language search over name + scientific metadata) |
 | `server/cognition/` | Cognitive architecture: System 1 (fast), System 2 (slow), tree-of-thoughts, MCTS engine, reasoning tree, execution orchestrator |
 | `server/ai-router/` | OmniNet multi-model LLM router: 7 providers (Gemini, Claude, Groq, DeepSeek, Ollama, Bai, HuggingFace), circuit breakers, token-bucket rate limiting, health monitoring |
 | `server/ai-patterns/` | Pattern store for saved workflows: slot detection, domain resolution, substitution |
@@ -387,7 +357,8 @@ All kernels ship a `_json_safe` conversion helper so NumPy 2.x scalar types seri
 | `server/orchestrator.ts` | Agent orchestrator for multi-agent coordination |
 | `server/pubsub.ts` | Publish-subscribe event bus |
 | `server/resilience.ts` | Circuit breaker and retry mechanisms |
-| `server/websocket.ts` | WebSocket server for real-time bidirectional communication |
+| `server/websocket.ts` | WebSocket server for real-time bidirectional communication (agent channel + `/ws/voice` realtime voice channel) |
+| `server/voiceRealtime.ts` | Realtime voice bridge: proxies browser ↔ OpenAI Realtime (`gpt-realtime-2025-08-28`), auto-falls back to Gemini Live (`gemini-3.1-flash-live-preview`) on billing/quota errors. Keys stay server-side |
 | `server/selfImprover.ts` | Self-improvement engine with feedback management and analytics |
 | `server/selfImprover-v2.ts` | Improved self-improvement architecture |
 | `server/pluginManager.ts` | Plugin manager for extensibility |
@@ -425,6 +396,8 @@ The server exposes hundreds of API endpoints across the following categories:
 - **Pulse:** `/api/pulse/*`
 - **Vault:** `/api/vault/*`
 - **AI Agent:** `/api/agent/ask` (SSE streaming or JSON), `/api/agent/cognize` (dual-process System 1/System 2 reasoning with trace), `/api/agent/analyze-vision` (multimodal), `/api/agent/analyze-data` (CSV/GeoJSON), `/api/agent/local-ask` (Ollama fallback), `/api/agent/search-all` (unified RAG), `/api/agent/pipeline` (code execution + globe commands), `/api/agent/geocode` (LLM-based location lookup), `/api/agent/trace/:id` (reasoning trace), `/api/agent/evidence/:id` (evidence chain)
+- **Realtime Voice:** `ws://host/ws/voice?token=...` — bidirectional audio via OpenAI Realtime with automatic Gemini Live fallback (keys held server-side)
+- **Live Layers:** `/api/data/radio_stations` (500 stations), `/api/data/bikeshare` (969 GBFS stations) — plus `/api/cctv/worldwide` powering the viewshed overlay
 - **Self-Evolution:** `/api/self-evolve/*`
 - **Health:** `/api/health`, `/api/ready`, `/api/live`, `/api/metrics`
 
@@ -569,6 +542,9 @@ The EARTH INTELLIGENCE AI panel (`Panel.tsx` wrapper with inline UI in `src/App.
 | 10 | **Multi-provider transparency** | SSE includes `modelTier` in output event | Badge displayed on each assistant message | Users see which tier handled their query (e.g., "Free tier (local routing)", "Gemini Flash", "Claude") via a small badge on each AI response. |
 | 11 | **Code pipeline → 3D globe** | `__GLOBE_COMMANDS__` protocol in sandbox stdout | `data.commands` handler in pipeline SSE | Pipeline sandbox code can emit `__GLOBE_COMMANDS__::[{...}]` markers in stdout. Server extracts the JSON and sends a `globe` SSE event. Client renders pins, polygons, heatmaps, charts on Cesium. |
 | 12 | **RAG over live geospatial databases** | `POST /api/agent/search-all` + tools-v2 generator | Integrated into agent tool selection | Unified `search_all` endpoint routes natural language queries across all databases (earthquakes, weather, fires, flights, vessels, satellites, volcanoes). System prompt updated with explicit Query Planning section mapping intents → tools. |
+| 13 | **Voice compute → globe** | `detectAnalyticalModel` + semantic `searchAnalyticalModels` fallback in `server/analytical-models/search.ts` | Mic → `/api/agent/ask` → `analytical_result` SSE | "Compute 100-year flood return over Austin" resolves deterministically to Gumbel (model 40) via natural-language→equation matching and paints the real result on the globe — no LLM round-trip needed. |
+| 14 | **Voice-driven cinematic camera** | Deterministic `moveCamera` verb extraction in `IntentRouter.extractCommands` | `executeAgentCommands` → `CinematicCamera` | "Orbit around this area slowly", "pan left", "tilt up", "rotate", "stop the camera", "reset globe" all drive the tick-based camera engine (orbit/pan/tilt/rotate + banked-turn route dolly). |
+| 15 | **Realtime voice (replaces text round-trip)** | `/ws/voice` bridge: OpenAI Realtime → Gemini Live fallback | `useRealtimeVoice` + AudioWorklet PCM16 capture | Interruptible audio-in/audio-out; auto-switches provider when OpenAI hits billing/quota. Web Speech → `/api/agent/ask` remains the last-resort fallback. |
 
 **Chat UI additions:**
 
@@ -583,6 +559,8 @@ The UI uses a dynamic z-index stacking manager. Panels can be toggled from the t
 
 **Available panels:**
 - Analytics Workbench
+- Launch Replay
+- World Radio Tuner
 - Intelligence Panel
 - Intelligence Feed (Pulse)
 - Satellite Tracker
@@ -604,6 +582,29 @@ The UI uses a dynamic z-index stacking manager. Panels can be toggled from the t
 - API Vault
 - Command Palette
 - Admin Dashboard
+
+**Toolbar toggles:** Compute Demo (one-click Austin LST), Sensor Styles 1–6 (Normal/CRT/NVG/FLIR/Noir/Snow), Photorealistic Globe, plus layer toggles for Street Traffic, World Radio, Bikeshare, Camera Viewsheds, Detection Overlay, 3D Aircraft Models.
+
+## Spatial Intelligence & Realtime Voice
+
+Beyond the analytical engine, Terranoetis ships a set of first-class live layers and realtime controls:
+
+| Feature | What it is | Data source / key |
+|---|---|---|
+| **Google Photorealistic Globe** | Photorealistic 3D tiles planet surface (toggleable) | Cesium Ion asset 2275207 (existing token) |
+| **Street Traffic** | Per-vehicle flow, congestion-colored, refreshed as you move | TomTom (`TOMTOM_API_KEY`) |
+| **World Radio** | Analog tuner over geolocated stations; click to fly, play live streams | Radio Browser (free) |
+| **Bikeshare** | Live station availability dots | GBFS (free) |
+| **CCTV Viewsheds** | Estimated coverage cones over public webcams (poses labeled as estimated) | opencctv.org (free) |
+| **Detection Overlay** | Screen-space bounding boxes + IDs over live entities | client-side |
+| **3D Aircraft Models** | Flight glyphs swap to per-class glTF models (airliner / regional / helicopter / military) on approach | runtime-built, no downloads |
+| **Launch Replay** | Scrubbable rocket ascent reconstruction from real pad→orbit data | Launch Library 2 (free) |
+| **Walking Route + Fly** | Street-following OSRM route drawn on the globe, camera flies the path | OSRM (free) |
+| **Sensor Styles** | CRT / NVG / FLIR / Noir / Snow GLSL post-processing over the whole globe | client-side |
+| **Cinematic Camera** | Orbit / pan / tilt / rotate / route dolly — voice-driven | client-side |
+| **Realtime Voice** | Interruptible audio-in/audio-out via `/ws/voice` | OpenAI Realtime → Gemini Live fallback |
+
+**Voice compute** is the flagship flow: say *"compute 100-year flood return level over Austin"* and the agent resolves the phrase to Gumbel (model 40), runs the real equation against live study-area context, and streams the result as an `analytical_result` SSE event that paints the globe. No fabricated numbers, no canned templates — the fast path resolves through real registered tools and only escalates to deep reasoning when a tool genuinely fails.
 
 ## Infrastructure
 
@@ -640,7 +641,15 @@ The application uses **SQLite** (via `better-sqlite3`) with 47 tables in the cor
 
 ### External Dependencies
 
-- **Cesium Ion** – 3D globe terrain and imagery tiles
+- **Cesium Ion** – 3D globe terrain, imagery tiles, and Google Photorealistic 3D Tiles (asset 2275207)
+- **Google Photorealistic 3D Tiles** – photorealistic planet surface via Cesium Ion (toggleable; graceful fallback to standard globe)
+- **OpenAI Realtime** (optional) – interruptible realtime voice (`gpt-realtime-2025-08-28`); auto-falls back to Gemini Live when absent or out of credits
+- **Gemini Live** (`gemini-3.1-flash-live-preview`) – realtime voice fallback via the existing Google Gemini key
+- **TomTom** – per-vehicle street-level traffic flow
+- **Radio Browser** – geolocated world radio (free, no key)
+- **GBFS** – bikeshare station availability (free, no key)
+- **OSRM** – street-following walking routes (free, no key)
+- **Launch Library 2** – 7,900+ launch records for replay (free, no key)
 - **Redis** – Caching, session store, pub/sub messaging
 - **SQLite** – Application database (auth, scenarios, memory traces, reasoning)
 - **Local ML models** – stored on disk at `public/models/Xenova/` (DETR panoptic 42MB, DINOv2 87MB, SAM-ViT 101MB), loaded in the browser via `@xenova/transformers` for the land-cover mapper (`src/lib/landCoverPipeline.ts`). A Prithvi EO ONNX remains in `data/models/` but is no longer loaded by server code
@@ -695,7 +704,7 @@ npm run build         # TypeScript compilation + Vite production build
 
 ```bash
 npm test              # Vitest test runner (unit + server integration)
-npx playwright test   # E2E tests (Playwright): live render, land-cover mapper, material getType regression (e2e/materialFix.spec.ts)
+npx playwright test   # E2E tests (Playwright): live render, land-cover mapper, photorealistic globe + sensor styles (e2e/photorealGlobe.spec.ts), material getType regression (e2e/materialFix.spec.ts)
 ```
 
 ### Production
@@ -736,6 +745,8 @@ The `.env` file contains configuration for 60+ integrated services across catego
 - **Satellite & Imagery:** VITE_CESIUM_ION_ACCESS_TOKEN, Sentinel Hub, Copernicus (incl. SAR), NASA FIRMS, Planet Labs, Maxar
 - **Aviation:** FlightAware, AirLabs
 - **Maritime:** AISStream, MarineTraffic
+- **Traffic:** TOMTOM_API_KEY (street-level flow)
+- **Realtime Voice:** OPENAI_API_KEY (primary, optional) — falls back to GOOGLE_GEMINI_API_KEY Live
 - **AI/LLM:** Google Gemini, Anthropic Claude, Groq, OpenRouter, DeepSeek, Bai, Ollama
 - **Weather & Disaster:** USGS, NASA EONET, GDACS, NOAA, OpenAQ, WAQI, Windy
 - **Economic & Financial:** FRED, EIA, Alpha Vantage, ENTSO-E, UN Comtrade, IMF, GoldAPI

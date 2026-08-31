@@ -6724,6 +6724,80 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
   '16_pbdb': fetchPbdbOccurrences,
   '16_macrostrat': fetchMacrostratRegional,
   '50_ocean_currents': fetchOceanCurrents,
+  'radio_stations': async () => {
+    try {
+      // Radio Browser public API — free, no key required. Try multiple mirrors.
+      const mirrors = ['de1.api.radio-browser.info', 'de2.api.radio-browser.info', 'fr1.api.radio-browser.info', 'at1.api.radio-browser.info'];
+      for (const host of mirrors) {
+        try {
+          const resp = await fetch(`https://${host}/json/stations/search?limit=500&has_geo_info=true&hidebroken=true`, { signal: AbortSignal.timeout(8000) });
+          if (resp.ok) {
+            const data = await resp.json();
+            return (Array.isArray(data) ? data : []).map((s: any) => ({
+              lat: parseFloat(s.geo_lat ?? 0),
+              lon: parseFloat(s.geo_long ?? 0),
+              name: s.name ?? 'Unknown Station',
+              url: s.url ?? '',
+              tags: s.tags ?? '',
+              codec: s.codec ?? '',
+              bitrate: s.bitrate ?? 0,
+              source: 'Radio Browser',
+              stationuuid: s.stationuuid ?? '',
+              favicon: s.favicon ?? '',
+            }));
+          }
+        } catch { /* try next mirror */ }
+      }
+      return [];
+    } catch { return []; }
+  },
+  'bikeshare': async () => {
+    try {
+      // GBFS systems list from the official GitHub repository CSV
+      const resp = await fetch('https://raw.githubusercontent.com/NABSA/gbfs/master/systems.csv', { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) return [];
+      const csv = await resp.text();
+      const lines = csv.split('\n');
+      if (lines.length < 2) return [];
+      // Skip header, find auto-discovery URL column
+      const header = lines[0].split(',');
+      const urlIdx = header.findIndex((h: string) => h.trim() === 'Auto-Discovery URL');
+      if (urlIdx < 0) return [];
+      const results: any[] = [];
+      const seen = new Set<string>();
+      for (let i = 1; i < Math.min(lines.length, 80); i++) {
+        const cols = lines[i].split(',');
+        const url = (cols[urlIdx] ?? '').trim().replace(/^"|"$/g, '');
+        if (!url) continue;
+        if (seen.has(url)) continue;
+        seen.add(url);
+        try {
+          const discResp = await fetch(url, { signal: AbortSignal.timeout(5000) });
+          if (!discResp.ok) continue;
+          const disc = await discResp.json();
+          const feeds = disc.data?.en?.feeds ?? disc.data?.nl?.feeds ?? [];
+          const siFeed = feeds.find((f: any) => f.name === 'station_information');
+          if (!siFeed?.url) continue;
+          const siResp = await fetch(siFeed.url, { signal: AbortSignal.timeout(5000) });
+          if (!siResp.ok) continue;
+          const siData = await siResp.json();
+          const stations = siData.data?.stations ?? [];
+          for (const st of stations.slice(0, 30)) {
+            results.push({
+              lat: st.lat,
+              lon: st.lon,
+              name: st.name ?? 'Bikeshare Station',
+              stationId: st.station_id,
+              capacity: st.capacity ?? 0,
+              system: lines[i].split(',')[0] ?? 'Unknown',
+              source: 'GBFS',
+            });
+          }
+        } catch { /* skip single system on failure */ }
+      }
+      return results;
+    } catch { return []; }
+  },
 };
 
 // Group dispatcher: each group fetches from a real data source
@@ -7672,7 +7746,7 @@ async function tryAnalyticalModelRunInner(
     { keywords: ['kriging', 'geostatistical interpolation', 'geostatistical'], ids: [37] },
     { keywords: ['inverse distance weighting', 'idw'], ids: [38] },
     { keywords: ['gaussian plume', 'air dispersion', 'plume dispersion'], ids: [39] },
-    { keywords: ['gumbel', 'extreme value'], ids: [40] },
+    { keywords: ['gumbel', 'extreme value', 'flood return', 'return level', 'return period', '100 year flood', 'recurrence interval'], ids: [40] },
     { keywords: ['pareto distribution', 'generalized pareto'], ids: [41] },
     { keywords: ['semivariogram', 'variogram'], ids: [42] },
     { keywords: ['universal soil loss', 'usle', 'soil loss', 'erosion'], ids: [45] },
