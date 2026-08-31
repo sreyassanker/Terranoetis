@@ -1314,6 +1314,153 @@ export async function fetchStationObservations(
 }
 
 // ══════════════════════════════════════════════════════════════════
+//  USGS annual-maxima flood series → Gumbel (Type I) fit
+//  ── genuine flood-frequency data for extreme-value models ──
+// ══════════════════════════════════════════════════════════════════
+
+export interface AnnualMaximaFit {
+  mu: number;         // Gumbel location parameter (m³/s)
+  beta: number;       // Gumbel scale parameter (m³/s)
+  years: number;      // number of water years in the record
+  startYear: number;
+  endYear: number;
+  siteName: string;
+  siteId: string;
+  lat: number;
+  lon: number;
+  annualMaxima: number[]; // m³/s, one per water year (chronological)
+}
+
+/**
+ * Fetches a genuine USGS NWIS annual-maxima flood series for the gauge nearest
+ * a location and fits the Gumbel (Type I) extreme-value distribution to the
+ * ANNUAL MAXIMA (water-year maxima of daily mean discharge).
+ *
+ * Data path (all real, no synthesis):
+ *   1. Enumerate active discharge gauges near (lat,lon) via the NWIS Daily
+ *      Values bbox query with a short window (gauges + their coordinates).
+ *   2. Pick the nearest gauge to the study point.
+ *   3. Pull ~40 water years of daily mean discharge (00060 / statCd 00003).
+ *   4. Annual maxima = max daily discharge per water year (Oct 1 – Sep 30).
+ *   5. Gumbel fit by method of moments: β = σ·√6/π, μ = x̄ − 0.5772·β (Gumbel 1958).
+ *
+ * Returns null (honest) when no gauge is found or the record is too short
+ * (<10 water years) — callers must then report NaN rather than fabricate.
+ */
+export async function fetchAnnualMaximaGumbel(
+  lat: number,
+  lon: number,
+  timeoutMs: number = 50000,
+): Promise<AnnualMaximaFit | null> {
+  // 1) Enumerate active discharge gauges near the point (small bbox + 1 water
+  //    year). The NWIS site service rejects bbox queries on this network, but
+  //    the DV service accepts a bbox — so we list gauges from a DV call.
+  let nearest: { code: string; name: string; lat: number; lon: number } | null = null;
+  let nearestDist = Infinity;
+  try {
+    // One complete water year ending last Sep 30 (never an inverted window).
+    const probeEndYear = new Date().getFullYear() - 1;
+    const probeStart = `${probeEndYear - 1}-10-01`;
+    const probeEnd = `${probeEndYear}-09-30`;
+    const bbox = [
+      (lon - 0.9).toFixed(4), (lat - 0.9).toFixed(4),
+      (lon + 0.9).toFixed(4), (lat + 0.9).toFixed(4),
+    ].join(',');
+    const enumData = await strictFetch(
+      `https://waterservices.usgs.gov/nwis/dv/?format=json&bBox=${bbox}&parameterCd=00060&statCd=00003&startDT=${probeStart}&endDT=${probeEnd}`,
+      timeoutMs,
+    );
+    const ts = (enumData.value as { timeSeries?: Array<Record<string, unknown>> } | undefined)?.timeSeries ?? [];
+    for (const s of ts) {
+      const si = s.sourceInfo as Record<string, unknown> | undefined;
+      const geo = (si?.geoLocation as Record<string, unknown> | undefined)?.geogLocation as Record<string, unknown> | undefined;
+      const sLat = Number(geo?.latitude), sLon = Number(geo?.longitude);
+      if (!Number.isFinite(sLat) || !Number.isFinite(sLon)) continue;
+      const d = (sLat - lat) ** 2 + (sLon - lon) ** 2;
+      if (d < nearestDist) {
+        nearestDist = d;
+        const code = (si?.siteCode as Array<{ value?: string }> | undefined)?.[0]?.value ?? '';
+        nearest = { code, name: String(si?.siteName ?? ''), lat: sLat, lon: sLon };
+      }
+    }
+  } catch {
+    // enumeration failed — fall through to null
+  }
+  if (!nearest || !nearest.code) return null;
+
+  // 2) Daily mean discharge for the last 40 water years at that gauge.
+  const endYear = new Date().getFullYear() - 1; // last complete water year
+  const startYear = endYear - 39;
+  const start = `${startYear}-10-01`;
+  const end = `${endYear}-09-30`;
+  const url =
+    `https://waterservices.usgs.gov/nwis/dv/?format=json`
+    + `&sites=${nearest.code}&parameterCd=00060&statCd=00003`
+    + `&startDT=${start}&endDT=${end}`;
+
+  let data: Record<string, unknown>;
+  try {
+    data = await strictFetch(url, timeoutMs);
+  } catch {
+    return null;
+  }
+  const ts = (data.value as { timeSeries?: Array<Record<string, unknown>> } | undefined)?.timeSeries ?? [];
+  const series = ts.find((s) => {
+    const v = s.variable as Record<string, unknown> | undefined;
+    const vc = v?.variableCode as Array<Record<string, unknown>> | undefined;
+    return vc?.[0]?.value === '00060';
+  });
+  if (!series) return null;
+  const values = (series.values as Array<Record<string, unknown>> | undefined)?.[0]?.value as
+    | Array<{ value?: string; dateTime?: string }>
+    | undefined;
+  if (!values || values.length < 365) return null; // need at least a year of daily data
+
+  // 3) Water-year maxima of daily mean discharge (m³/s for parameter 00060).
+  const daily: Array<{ date: Date; q: number }> = [];
+  for (const v of values) {
+    const q = Number(v.value);
+    if (!Number.isFinite(q) || q < 0) continue;
+    const t = Date.parse(v.dateTime ?? '');
+    if (Number.isNaN(t)) continue;
+    daily.push({ date: new Date(t), q });
+  }
+  if (daily.length === 0) return null;
+
+  const waterYear = (d: Date): number => (d.getUTCMonth() >= 9 ? d.getUTCFullYear() + 1 : d.getUTCFullYear());
+  const maxima = new Map<number, number>();
+  for (const { date, q } of daily) {
+    const wy = waterYear(date);
+    const cur = maxima.get(wy);
+    if (cur === undefined || q > cur) maxima.set(wy, q);
+  }
+  const yearsArr = [...maxima.keys()].sort((a, b) => a - b);
+  if (yearsArr.length < 10) return null; // need ≥10 water years for a defensible fit
+  const annualMaxima = yearsArr.map((wy) => maxima.get(wy) as number);
+
+  // 4) Gumbel method of moments: β = σ·√6/π, μ = x̄ − 0.5772·β.
+  const n = annualMaxima.length;
+  const mean = annualMaxima.reduce((a, b) => a + b, 0) / n;
+  const variance = annualMaxima.reduce((acc, v) => acc + (v - mean) ** 2, 0) / (n - 1);
+  const sigma = Math.sqrt(variance);
+  const beta = (sigma * Math.sqrt(6)) / Math.PI;
+  const mu = mean - 0.5772 * beta;
+
+  return {
+    mu,
+    beta,
+    years: n,
+    startYear: yearsArr[0],
+    endYear: yearsArr[n - 1],
+    siteName: nearest.name,
+    siteId: nearest.code,
+    lat: nearest.lat,
+    lon: nearest.lon,
+    annualMaxima,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════
 //  Land Cover Classification (ESA WorldCover proxy)
 // ══════════════════════════════════════════════════════════════════
 

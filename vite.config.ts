@@ -73,6 +73,7 @@ function models404Plugin(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [react(), cesiumAssetsPlugin(), models404Plugin()],
+  assetsInclude: ['**/*.wasm', '**/*.worker.js'],
   server: {
     port: 3000,
     strictPort: true,
