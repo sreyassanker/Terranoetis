@@ -65,7 +65,7 @@ function run() {
   for (const r of order) console.log(`  ${CLASS_NAME[r].padEnd(10)}|${row(r)}`);
 
   console.log('\nper-class (pixel-level)');
-  const gtTotal = conf.reduce((s, row) => s + row.reduce((a, b) => a + b, 0), 0);
+  const _gtTotal = conf.reduce((s, row) => s + row.reduce((a, b) => a + b, 0), 0);
   for (const c of order) {
     const tp = conf[c][c];
     const fp = order.reduce((s, r) => s + (r === c ? 0 : conf[r][c]), 0);

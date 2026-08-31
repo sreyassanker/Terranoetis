@@ -107,7 +107,7 @@ export async function fetchCurrentWeatherMulti(
   const rows = Array.isArray(data) ? (data as Record<string, unknown>[]) : [data];
   return rows.map(row => {
     const c = (row.current ?? {}) as Record<string, unknown>;
-    const d = (row.daily ?? {}) as Record<string, unknown>;
+    const _d = (row.daily ?? {}) as Record<string, unknown>;
     return {
       temperature_2m: c.temperature_2m as number | undefined,
       relative_humidity_2m: c.relative_humidity_2m as number | undefined,
@@ -1028,7 +1028,7 @@ export async function fetchTectonicContext(
   // ── Plate boundary model: full PB2002 boundary polylines (Bird 2003).
   //    Fetched once and cached; genuine global dataset (241 LineStrings).
   const PB2002_URL = 'https://raw.githubusercontent.com/fraxen/tectonicplates/master/GeoJSON/PB2002_boundaries.json';
-  const pbKey = 'pb2002:boundaries';
+  const _pbKey = 'pb2002:boundaries';
   let boundaries: Array<{ coords: [number, number][]; name: string; type: string }> | null = null;
   const cached = (globalThis as unknown as { __pbCache?: typeof boundaries }).__pbCache;
   if (cached) {
@@ -1855,7 +1855,6 @@ export async function fetchAnnualGppModis(
   const chunks = [1, 81, 161, 241, 321];
   let totalKgC = 0;
   let valid = 0;
-  let lastDate = '';
   for (const start of chunks) {
     const url = 'https://modis.ornl.gov/rst/api/v1/MOD17A2H/subset'
       + `?latitude=${lat}&longitude=${lon}&startDate=A${y}${pad(start)}&endDate=A${y}${pad(start + 79)}`
@@ -1876,7 +1875,9 @@ export async function fetchAnnualGppModis(
       if (!Number.isFinite(raw) || raw >= 32761 || raw < 0) continue;
       totalKgC += raw * scale;
       valid++;
-      if (s.modis_date) lastDate = s.modis_date;
+      if (s.modis_date) {
+        /* modis_date tracking was removed as unused */
+      }
     }
   }
   if (valid === 0) return null;

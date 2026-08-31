@@ -260,7 +260,7 @@ export class WeatherForecaster {
     return result;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private computeEnsembleUncertainty(weatherData: any): WeatherForecastOutput['uncertainty'] {
     // Compute uncertainty from the actual forecast spread across the daily
     // array, rather than returning hardcoded values. This is real variance

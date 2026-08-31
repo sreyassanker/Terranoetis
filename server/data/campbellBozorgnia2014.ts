@@ -47,7 +47,7 @@ const C: Record<string, number> = {
   a2: 0.167, h1: 0.241, h2: 1.474, h3: -0.715, h5: -0.337, h6: -0.27,
   k1: 865, k2: -1.186, k3: 1.839,
 };
-const K3 = C.k3;
+const _K3 = C.k3;
 const HC = { h4: 1.0, c: 1.88, n: 1.18 };
 
 function getFMag(mag: number): number {

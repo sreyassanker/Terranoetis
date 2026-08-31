@@ -105,7 +105,7 @@ const SC_RAD_SCALE = 1e-3;
  * to brightness temperature: BT = K2 / ln(K1 / L + 1).
  * K1/K2 are read per scene — they vary slightly between Landsat 8 and 9 TIRS.
  */
-function planckToBt(radiance: number, k1: number, k2: number): number | null {
+function _planckToBt(radiance: number, k1: number, k2: number): number | null {
   if (!Number.isFinite(radiance) || radiance <= 0) return null;
   return k2 / Math.log(k1 / radiance + 1);
 }

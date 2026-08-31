@@ -173,7 +173,6 @@ export async function fetchSeaIce(
   if (cached) return cached;
 
   try {
-    let resolvedUrl = url;
     let resolvedDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     let resp = await fetch(url, { signal: AbortSignal.timeout(30000) });
 
@@ -196,7 +195,6 @@ export async function fetchSeaIce(
           .then(r => (r.ok ? u : null)).catch(() => null)));
         const hit = heads.find((u): u is string => u !== null);
         if (hit) {
-          resolvedUrl = hit;
           const ymd = hit.match(/sic_\w+_(\d{8})_/);
           if (ymd) {
             resolvedDate = `${ymd[1].slice(0, 4)}-${ymd[1].slice(4, 6)}-${ymd[1].slice(6, 8)}`;

@@ -12,7 +12,7 @@
  * thrown and the canvas still renders.
  */
 
-import { test, expect, chromium, type Browser, type Page, type BrowserContext, type APIRequestContext } from '@playwright/test';
+import { test, expect, chromium, type _Browser, type _Page, type _BrowserContext, type APIRequestContext } from '@playwright/test';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 
