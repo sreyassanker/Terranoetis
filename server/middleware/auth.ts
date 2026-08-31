@@ -51,6 +51,17 @@ function getUserByName(name: string): UserRow | null {
   }
 }
 
+function getUserById(id: string): UserRow | null {
+  try {
+    const row = getDb()
+      .prepare('SELECT id, name, password_hash, role, failed_attempts, locked_until FROM users WHERE id = ?')
+      .get(id) as UserRow | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function recordFailedAttempt(userId: string): void {
   try {
     getDb()
@@ -234,6 +245,39 @@ export function devAutoLogin(req: Request, res: Response): void {
   }
   const token = jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET(), { expiresIn: TOKEN_TTL });
   res.json({ token, userId: user.id, role: user.role });
+}
+
+/**
+ * Refresh an unexpired JWT: re-issues the same identity with a fresh expiry.
+ * The incoming token must be structurally valid and still within its lifetime;
+ * expired/invalid tokens are rejected (401) rather than silently extended.
+ * Requires a valid Bearer token — no credentials are exchanged, so no refresh
+ * secret is stored or rotated.
+ */
+export function refreshToken(req: Request, res: Response): void {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Missing or invalid Authorization header. Use: Bearer <token>' });
+    return;
+  }
+  try {
+    const payload = jwt.verify(header.slice(7), JWT_SECRET()) as { sub?: unknown; role?: unknown };
+    if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
+      res.status(401).json({ error: 'Invalid token payload' });
+      return;
+    }
+    // Verify the user still exists before minting a fresh token
+    const user = getUserById(payload.sub);
+    if (!user) {
+      res.status(401).json({ error: 'User no longer exists' });
+      return;
+    }
+    const role = typeof payload.role === 'string' ? payload.role : user.role;
+    const token = jwt.sign({ sub: user.id, role }, JWT_SECRET(), { expiresIn: TOKEN_TTL });
+    res.json({ token, userId: user.id, role });
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
 }
 
 

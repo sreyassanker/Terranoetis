@@ -36,7 +36,22 @@ const proj4 = _require('proj4') as {
 };
 
 
-const FETCH_TIMEOUT = 30000;
+const FETCH_TIMEOUT = 60000;
+
+/**
+ * A fetch that never hangs the COG read path. geotiff's default `fromUrl`
+ * uses the global fetch with no timeout, so a slow blob read could stall the
+ * grid for minutes. Binding a generous (60s) AbortSignal keeps the read
+ * bounded while still allowing Planetary Computer's occasionally-slow COG
+ * range requests to complete.
+ */
+function cogFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return fetch(input, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+}
+
+/** geotiff's RemoteSourceOptions plus the (runtime-supported, untyped) fetch override. */
+type CogSourceOptions = { fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> };
+const COG_READ_OPTS: CogSourceOptions = { fetch: cogFetch };
 
 // ── Planetary Computer ──────────────────────────────────────────────
 const PC_STAC = 'https://planetarycomputer.microsoft.com/api/stac/v1';
@@ -61,7 +76,7 @@ async function readCogPixel(
   const toUtm = proj4('EPSG:4326', `EPSG:${epsg}`);
   const [utmX, utmY] = toUtm.forward([lon, lat]);
 
-  const tiff = await fromUrl(signedUrl);
+  const tiff = await fromUrl(signedUrl, COG_READ_OPTS as unknown as Parameters<typeof fromUrl>[1]);
   const image = await tiff.getImage();
   const [xMin, yMin, xMax, yMax] = image.getBoundingBox();
   const w = image.getWidth();
@@ -555,7 +570,7 @@ async function readCogBboxWindow(
   const uxMin = Math.min(...xs), uxMax = Math.max(...xs);
   const uyMin = Math.min(...ys), uyMax = Math.max(...ys);
 
-  const tiff = await fromUrl(signedUrl);
+  const tiff = await fromUrl(signedUrl, COG_READ_OPTS as unknown as Parameters<typeof fromUrl>[1]);
   let image = await tiff.getImage();
 
   const computeWindow = (img: Awaited<ReturnType<typeof tiff.getImage>>): BandWindow | null => {

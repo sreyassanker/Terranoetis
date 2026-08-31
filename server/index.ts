@@ -111,7 +111,7 @@ import { knowledgeGraph } from './ml/knowledgeGraph';
 import { entityGenerator, edgeGenerator, counterfactualGraph, graphCompletion, evolvingGraph } from './kg-v2/index';
 import { predictor, type Prediction } from './ml/predictor';
 import { omninet, classifyComplexity } from './ai-router/omninet';
-import { login, authGuard, sseAuthGuard, ensureDefaultAdmin, requireRole, devAutoLogin } from './middleware/auth';
+import { login, authGuard, sseAuthGuard, ensureDefaultAdmin, requireRole, devAutoLogin, refreshToken } from './middleware/auth';
 import { perUserRateLimiter, perIpRateLimiter } from './middleware/rateLimiter';
 import { requireOwnership } from './middleware/tenantIsolation';
 import { auditLog } from './middleware/audit';
@@ -136,6 +136,7 @@ import { fetchDayOutlook, getRiskForLocation } from './utils/spc';
 import http from 'http';
 import { SimpleQueue } from './queue/simple-queue';
 import { pubsub } from './pubsub';
+import { redisHealthCheck } from './infrastructure/redis';
 import { createWsServer, shutdownWsServer, registerAbortController, removeAbortController } from './websocket';
 import { ReflexEngine } from './reflex/engine';
 import { ReflexActionHandler } from './reflex/actionHandlers';
@@ -212,6 +213,8 @@ function validateEnvTemplate(): void {
 validateEnvTemplate();
 
 import { cache } from './routes/routeHelpers';
+import { getCached, setCached, getCachedAt } from './routes/cacheService';
+import { registerOpenApiRoutes } from './routes/openapi';
 const app = express();
 app.set('trust proxy', 1);
 const PORT = Number(process.env.PROXY_PORT ?? 3001);
@@ -291,11 +294,14 @@ function stopResourceMonitor(): void {
 
 // ── Authentication ────────────────────────────────────────────
 const loginRateLimit = perIpRateLimiter(5, 15 * 60 * 1000);
+const publicDataRateLimit = perIpRateLimiter(300, 60000);
 app.post('/api/auth/login', loginRateLimit, login);
 
 if (!IS_PROD) {
   app.post('/api/auth/dev-login', devAutoLogin);
 }
+
+app.post('/api/auth/refresh', refreshToken);
 
 // Internal analytical-model execution for the agent tool registry. The
 // registry's tools call this server's own endpoints (via 127.0.0.1) with no
@@ -351,9 +357,11 @@ app.post('/api/analytical-models/:id/execute-internal', (req: express.Request, r
 app.use('/api', (req: express.Request, res: express.Response, next: express.NextFunction) => {
   // Health/metrics are public
   if (
-    req.path === '/auth/login' || req.path === '/auth/dev-login' ||
+    req.path === '/auth/login' || req.path === '/auth/dev-login' || req.path === '/auth/refresh' ||
     req.path === '/health' || req.path === '/ready' || req.path === '/live' || req.path === '/metrics' ||
-    req.path === '/config/apis'
+    req.path === '/config/apis' ||
+    req.path === '/openapi.json' || req.path === '/docs' ||
+    req.path === '/observability/traces' || req.path === '/observability/metrics'
   ) {
     return next();
   }
@@ -393,7 +401,7 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     // Kaggle GPU simulation endpoints
     req.path.startsWith('/kaggle/')
   ) {
-    return next();
+    return publicDataRateLimit(req, res, next);
   }
   // EO foundation endpoints (weather forecast + agriculture, real Open-Meteo/Sentinel-2 data)
   if (
@@ -408,7 +416,7 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     // Simulation endpoints (physics models)
     req.path.startsWith('/simulate/')
   ) {
-    return next();
+    return publicDataRateLimit(req, res, next);
   }
   // Satellite image search endpoints
   if (req.path.startsWith('/fm/search')) {
@@ -439,6 +447,7 @@ app.use('/api/vault', vaultRouter);
 app.use('/api/pulse', pulseRouter);
 app.use('/api/kaggle', kaggleRouter);
 registerAnalyticalModelsRoutes(app);
+registerOpenApiRoutes(app);
 
 const materializedViews = new MaterializedViewCache(`http://127.0.0.1:${PORT}`);
 const sandboxManager = new SandboxManager();
@@ -828,13 +837,24 @@ async function getBrowser() {
   return puppeteerBrowser;
 }
 
-async function cachedFetch<T>(key: string, url: string, ttl = 60, init?: RequestInit): Promise<T> {
-  const hit = cache.get<T>(key);
-  if (hit) return hit;
+async function cachedFetch<T>(key: string, url: string, ttl = 60, init?: RequestInit, res?: express.Response): Promise<T> {
+  const hit = await getCached<T>(key);
+  if (hit.value !== undefined) {
+    if (res) {
+      res.set('X-Cache', hit.source.toUpperCase());
+      const at = getCachedAt(key);
+      if (at) res.set('X-Data-Age', `${Date.now() - at}ms`);
+    }
+    return hit.value;
+  }
   const resp = await fetch(url, { ...init, signal: AbortSignal.timeout(15000) });
   if (!resp.ok) throw new Error(`${key} upstream ${resp.status}`);
   const data = (await resp.json()) as T;
-  cache.set(key, data, ttl);
+  await setCached(key, data, ttl);
+  if (res) {
+    res.set('X-Cache', 'MISS');
+    res.set('X-Data-Age', '0ms');
+  }
   return data;
 }
 
@@ -1022,6 +1042,16 @@ app.get('/api/health', async (_req: express.Request, res: express.Response) => {
   } catch (e) {
     logger.warn({ err: e }, 'Health check: pubsub unavailable');
     checks.pubsub = { status: 'fail' };
+  }
+
+  // Redis check — a Redis outage silently degrades caching + pubsub, so it
+  // must be visible in /api/health (and thus the Docker HEALTHCHECK + alerting).
+  try {
+    const redisOk = await redisHealthCheck();
+    checks.redis = { status: redisOk ? 'ok' : 'fail', detail: redisOk ? 'PONG' : 'unreachable' };
+  } catch (e) {
+    logger.warn({ err: e }, 'Health check: redis unavailable');
+    checks.redis = { status: 'fail', detail: (e as Error).message };
   }
 
   const overallStatus = Object.values(checks).every(c => c.status === 'ok' || c.status === 'not_configured') ? 'healthy' : 'degraded';
@@ -1247,7 +1277,7 @@ app.get('/api/earthquakes', async (req: express.Request, res: express.Response) 
     const data = await cachedFetch(
       'earthquakes',
       'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson',
-      60,
+      60, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -1260,7 +1290,7 @@ app.get('/api/earthquakes/significant', async (_req: express.Request, res: expre
     const data = await cachedFetch(
       'earthquakes_significant',
       'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_month.geojson',
-      300,
+      300, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -1273,7 +1303,7 @@ app.get('/api/tectonic', async (_req: express.Request, res: express.Response) =>
     const data = await cachedFetch(
       'tectonic',
       'https://raw.githubusercontent.com/fraxen/tectonicplates/master/GeoJSON/PB2002_boundaries.json',
-      86400,
+      86400, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -2550,7 +2580,7 @@ app.get('/api/weather/flood', async (req: express.Request, res: express.Response
     const data = await cachedFetch(
       `flood_${lat}_${lon}${dateSuffix}`,
       `https://flood-api.open-meteo.com/v1/flood?latitude=${lat}&longitude=${lon}&daily=river_discharge&timezone=auto${dateParam}`,
-      3600,
+      3600, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -2571,7 +2601,7 @@ app.get('/api/weather/marine', async (req: express.Request, res: express.Respons
     const data = await cachedFetch(
       `marine_${lat}_${lon}${dateSuffix}`,
       `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}&daily=wave_height_max,swell_wave_height_max,wave_period_max&timezone=auto${dateParam}`,
-      3600,
+      3600, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -2592,7 +2622,7 @@ app.get('/api/weather/ensemble', async (req: express.Request, res: express.Respo
     const data = await cachedFetch(
       `ensemble_${lat}_${lon}${dateSuffix}`,
       `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${lat}&longitude=${lon}&current=temperature_2m,precipitation,wind_speed_10m&ensemble_members=10${dateParam}`,
-      1800,
+      1800, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -2609,7 +2639,7 @@ app.get('/api/weather/seasonal', async (req: express.Request, res: express.Respo
     const data = await cachedFetch(
       `seasonal_${lat}_${lon}`,
       `https://seasonal-api.open-meteo.com/v1/seasonal?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&forecast_days=180`,
-      86400,
+      86400, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -2629,7 +2659,7 @@ app.get('/api/weather/historical', async (req: express.Request, res: express.Res
     const data = await cachedFetch(
       `historical_${lat}_${lon}_${startDate}_${endDate}`,
       `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max&timezone=auto${dateRange}`,
-      86400,
+      86400, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -2650,7 +2680,7 @@ app.get('/api/weather/air-quality', async (req: express.Request, res: express.Re
     const data = await cachedFetch(
       `airq_${lat}_${lon}${dateSuffix}`,
       `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi,european_aqi,pm2_5,pm10,carbon_monoxide,nitrogen_dioxide,ozone,uv_index${dateParam}`,
-      1800,
+      1800, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -2658,7 +2688,7 @@ app.get('/api/weather/air-quality', async (req: express.Request, res: express.Re
   }
 });
 
-// ── GFS Weather Model via Open-Meteo ─────────────────────────────────
+// ── Open-Meteo GFS Model Forecast (16-day) ────────────────────────────
 app.get('/api/weather/gfs', async (req: express.Request, res: express.Response) => {
   const lat = req.query.lat as string;
   const lon = req.query.lon as string;
@@ -2667,7 +2697,7 @@ app.get('/api/weather/gfs', async (req: express.Request, res: express.Response) 
     const data = await cachedFetch(
       `gfs_${lat}_${lon}`,
       `https://api.open-meteo.com/v1/gfs?latitude=${lat}&longitude=${lon}&current=temperature_2m,precipitation,wind_speed_10m,pressure_msl&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max&forecast_days=16`,
-      3600,
+      3600, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -2896,7 +2926,7 @@ app.get('/api/weather/nhc', async (req: express.Request, res: express.Response) 
     let data: any = await cachedFetch(
       'nhc_cyclones',
       'https://www.nhc.noaa.gov/CurrentStorms.json',
-      600,
+      600, undefined, res,
     );
 
     // Filter storms by bbox if provided
@@ -2991,6 +3021,7 @@ app.get('/api/weather/alerts', async (_req: express.Request, res: express.Respon
       'https://api.weather.gov/alerts/active',
       60,
       { headers: { 'User-Agent': 'Terranoetis/1.0 (earth-intelligence)' } },
+      res,
     );
     res.json(data);
   } catch (e) {
@@ -3003,7 +3034,7 @@ app.get('/api/space-weather/kp', async (_req: express.Request, res: express.Resp
     const data = await cachedFetch(
       'kp_index',
       'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json',
-      300,
+      300, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -3028,7 +3059,7 @@ app.get('/api/radar/rainviewer', async (_req: express.Request, res: express.Resp
     const data = await cachedFetch(
       'rainviewer',
       'https://api.rainviewer.com/public/weather-maps.json',
-      120,
+      120, undefined, res,
     );
     res.json(data);
   } catch (e) {
@@ -5972,17 +6003,21 @@ async function fetchSatellites(): Promise<any[]> {
 
   const now = new Date();
   const results: any[] = [];
+  const seenIds = new Set<string>();
 
-  // 1) CelesTrak TLE — sequential per-group to avoid rate limiting
-  for (const group of CELESTRAK_TLE_GROUPS) {
+  // 1) CelesTrak TLE — fetch groups in parallel with bounded concurrency.
+  //    Sequential per-group round-trips made the first (cold) call take
+  //    2-3 minutes; running up to 6 groups at once keeps the cold start to
+  //    a few seconds while still staying polite to the upstream API.
+  const fetchTleGroup = async (group: string): Promise<void> => {
     try {
       const resp = await fetch(
         `https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=tle`,
         { signal: AbortSignal.timeout(20000) },
       );
-      if (!resp.ok) continue;
+      if (!resp.ok) return;
       const text = await resp.text();
-      if (text.includes('GP data has not updated') || text.includes('Invalid query')) continue;
+      if (text.includes('GP data has not updated') || text.includes('Invalid query')) return;
       const lines = text.trim().split('\n');
       for (let i = 0; i + 2 < lines.length; i += 3) {
         const name = lines[i].trim();
@@ -5990,7 +6025,7 @@ async function fetchSatellites(): Promise<any[]> {
         const line2 = lines[i + 2].trim();
         if (!line1.startsWith('1 ') || !line2.startsWith('2 ')) continue;
         const noradCat = line1.slice(2, 7).trim();
-        if (results.some(r => r.id === noradCat)) continue;
+        if (seenIds.has(noradCat)) continue;
         try {
           const rec = satellite.twoline2satrec(line1, line2);
           const pv = satellite.propagate(rec, now);
@@ -6000,6 +6035,7 @@ async function fetchSatellites(): Promise<any[]> {
           const lat = satellite.degreesLat(gd.latitude);
           const lon = satellite.degreesLong(gd.longitude);
           if (!isFinite(lat) || !isFinite(lon)) continue;
+          seenIds.add(noradCat);
           results.push({
             id: `${noradCat}`,
             name: name || `${noradCat}`,
@@ -6020,12 +6056,21 @@ async function fetchSatellites(): Promise<any[]> {
         }
       }
     } catch (e) {
-      continue;
+      // upstream unavailable — group skipped, other groups still resolve
     }
-  }
+  };
+
+  const TLE_CONCURRENCY = 6;
+  let tleHead = 0;
+  await Promise.all(new Array(Math.min(TLE_CONCURRENCY, CELESTRAK_TLE_GROUPS.length)).fill(0).map(async () => {
+    for (; tleHead < CELESTRAK_TLE_GROUPS.length; tleHead++) {
+      await fetchTleGroup(CELESTRAK_TLE_GROUPS[tleHead]);
+    }
+  }));
 
   // 2) UCS Satellite Database (static orbital elements, no TLE)
   //    Merges metadata into existing CelesTrak entries when NORAD ID matches
+  const resultsById = new Map<string, any>(results.map(r => [r.id, r]));
   try {
     const ucsPath = path.join(__dirname, '..', 'public', 'data', 'ucs-satellites.json');
     if (fs.existsSync(ucsPath)) {
@@ -6033,7 +6078,7 @@ async function fetchSatellites(): Promise<any[]> {
       const ucsRecords = JSON.parse(raw) as any[];
       for (const u of ucsRecords) {
         const noradId = String(u.norad_id ?? u.NORAD_ID ?? '').trim();
-        const existing = noradId ? results.find(r => r.id === noradId) : null;
+        const existing = noradId ? resultsById.get(noradId) : null;
         if (existing) {
           if (u.country) existing.country = u.country;
           if (u.purpose) existing.purpose = u.purpose;
@@ -6050,7 +6095,7 @@ async function fetchSatellites(): Promise<any[]> {
           tle = generateTle(noradId || '00000', uInclination, 0, uEccentricity, 0, 0, uMeanMotion);
         // eslint-disable-next-line no-empty
         } catch {}
-        results.push({
+        const entry = {
           id: noradId || `ucs_${u.name ?? Math.random()}`,
           name: u.name ?? u.OBJECT_NAME ?? 'Unknown',
           lat: null,
@@ -6069,7 +6114,9 @@ async function fetchSatellites(): Promise<any[]> {
           orbitClass: u.orbit_class ?? null,
           apogee: u.apogee ?? null,
           perigee: u.perigee ?? null,
-        });
+        };
+        results.push(entry);
+        resultsById.set(entry.id, entry);
       }
     }
   } catch (e) {
@@ -6097,7 +6144,7 @@ async function fetchSatellites(): Promise<any[]> {
       // eslint-disable-next-line no-empty
       } catch {}
 
-      const existing = noradId ? results.find(r => r.id === noradId) : null;
+      const existing = noradId ? resultsById.get(noradId) : null;
       if (existing) {
         if (s.velocity_kms != null) existing.velocity = s.velocity_kms;
         if (s.latitude != null && s.longitude != null) { existing.lat = +s.latitude.toFixed(4); existing.lon = +s.longitude.toFixed(4); }
@@ -6106,7 +6153,7 @@ async function fetchSatellites(): Promise<any[]> {
         existing.source = 'CelesTrak';
         continue;
       }
-      results.push({
+      const entry = {
         id: noradId || `starlink_${st?.OBJECT_NAME ?? Math.random()}`,
         name: st?.OBJECT_NAME ?? 'Starlink',
         lat: s.latitude != null ? +s.latitude.toFixed(4) : null,
@@ -6122,7 +6169,9 @@ async function fetchSatellites(): Promise<any[]> {
         tle2: stTle?.tle2 ?? null,
         velocity: s.velocity_kms ?? null,
         version: s.version ?? null,
-      });
+      };
+      results.push(entry);
+      resultsById.set(entry.id, entry);
     }
   } catch (e) {
     logger.warn({ err: e }, 'Failed to load Starlink data');
@@ -11668,12 +11717,20 @@ const wss = createWsServer(httpServer);
 
 httpServer.listen(PORT, () => {
   logger.info({ port: PORT }, 'server started');
+  initObservability({
+    serviceName: 'terranoetis',
+    serviceVersion: '3.1',
+    environment: process.env.NODE_ENV || 'development',
+    enabled: true,
+    sampleRate: 1.0,
+  });
   startMemoryLogging();
   startResourceMonitor();
   startSentinelEngine();
   // Pre-warm slow caches so first user request doesn't pay the penalty
   fetchAndCacheAirspaces().then(() => logger.info('Airspace cache pre-warmed')).catch(() => {});
   fetchOceanCurrents().then(r => logger.info({ count: r.length }, 'Ocean currents cache pre-warmed')).catch(e => logger.error({ err: String(e) }, 'Ocean currents pre-warm failed'));
+  fetchSatellites().then(r => logger.info({ count: r.length }, 'Satellite TLE cache pre-warmed')).catch(e => logger.warn({ err: String(e) }, 'Satellite TLE pre-warm failed (will warm on first user request)'));
   setInterval(() => {
     fetchOceanCurrents().then(r => logger.info({ count: r.length }, 'Ocean currents cache refreshed')).catch(e => logger.error({ err: String(e) }, 'Ocean currents refresh failed'));
   }, 3600000);

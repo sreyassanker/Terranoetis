@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2, FileDown, Layers, Rocket } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
@@ -15,7 +15,7 @@ import { CameraControls } from '@/components/CameraControls';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import { throttledRender } from '@/lib/throttledRender';
 import { useChatStore } from '@/store/chatStore';
-import { ChatPanel, ChatHistoryPanel } from '@/components/chat';
+import { ChatPanel } from '@/components/chat';
 import type { VirtualizedMessageListHandle } from '@/components/chat/VirtualizedMessageList';
 import { useCollaboration } from '@/hooks/useCollaboration';
 import { useOfflineChat } from '@/hooks/useOfflineChat';
@@ -52,10 +52,8 @@ import {
   addAnimalMigrationEntities,
   getDebrisOrbitPositions
 } from '@/rendering/domainLayers';
-import { ForkPanel } from '@/components/ForkPanel';
 import { fetchAndStoreSatnogsData, getSatnogsForNorad, addSatnogsEntities } from '@/rendering/satnogs';
 import { fetchAndStoreUcsData, getUcsForNorad, addUcsEntities } from '@/rendering/ucsSatelliteDb';
-
 import { HumanOverrideBanner } from '@/components/explainability/index';
 
 import { CognitiveDashboard, ToolWorkbench, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
@@ -73,18 +71,11 @@ import ScenarioGallery from '@/components/scenarios/ScenarioGallery';
 import CinematicDirector from '@/components/scenarios/CinematicDirector';
 import SpatialSketching from '@/components/scenarios/SpatialSketching';
 import PerformanceMonitor from '@/components/PerformanceMonitor';
-import { DigitalTwinPanel } from '@/components/DigitalTwinPanel';
-import SatelliteImageryPanel from '@/components/ui/SatelliteImageryPanel';
-import { IntelligencePanel } from '@/components/IntelligencePanel';
-import { SatelliteTrackerPanel } from '@/components/prithvi/SatelliteTrackerPanel';
-import { AviationTrackerPanel } from '@/components/prithvi/AviationTrackerPanel';
-import { IssLivePanel } from '@/components/IssLivePanel';
 import { IssTravelView } from '@/components/IssTravelView';
 import { FlightTravelView } from '@/components/FlightTravelView';
 import { CommandPalette } from '@/components/CommandPalette';
 import { AnalyticsWorkbench } from '@/components/AnalyticsWorkbench';
 import type { StudyAreaDrawType } from '@/components/ToolDialog';
-import { LandCoverMapperPanel } from '@/components/LandCoverMapperPanel';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { createRenderScheduler } from '@/lib/batchScheduler';
 import { createUnifiedTimer } from '@/lib/unifiedTimer'; // P0 perf: unified timer
@@ -95,9 +86,7 @@ import { isFirstRun, markFirstRunDone, type FirstRunMission } from '@/lib/firstR
 import { fetchWalkingRoute, drawRouteOnGlobe, flyRoute } from '@/rendering/osrmRoute';
 import { DetectionOverlay } from '@/rendering/detectionOverlay';
 import { CctvViewshed, type ViewshedCamera } from '@/rendering/cctvViewshed';
-import { LaunchReplayPanel } from '@/components/LaunchReplayPanel';
 import { AircraftHangar } from '@/rendering/aircraftHangar';
-import { RadioTunerPanel } from '@/components/RadioTunerPanel';
 import { PhotorealisticGlobe } from '@/rendering/photorealisticGlobe';
 import { CinematicCamera } from '@/rendering/cinematicCamera';
 import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings, getOsmBuildingsTileset } from '@/rendering/osmBuildings';
@@ -129,6 +118,33 @@ import { StreamingMarkdownRenderer, extractArtifacts, fetchSuggestions, fetchTie
 import { exportConversationAsPDF } from '@/lib/pdfReport';
 import { formatSci } from '@/lib/formatSci';
 import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, ModelTierSelector, TraceExpander, VoiceModeIndicator } from '@/components/chat/AdvancedChatViews';
+
+/* ═════════════════════════════════════════════════════════════════
+   LAZY PANELS
+   Panels are heavy (Cesium rendering, live-data polling) and only ever
+   opened on demand. Loading them lazily keeps them out of the initial
+   bundle — the first paint ships without several MB of panel code and
+   each chunk only downloads when the user opens that panel.
+   ═════════════════════════════════════════════════════════════════ */
+
+const LazyAviationTrackerPanel = lazy(() => import('@/components/prithvi/AviationTrackerPanel').then(m => ({ default: m.AviationTrackerPanel })));
+const LazyChatHistoryPanel = lazy(() => import('@/components/chat/ChatHistoryPanel').then(m => ({ default: m.ChatHistoryPanel })));
+const LazyDigitalTwinPanel = lazy(() => import('@/components/DigitalTwinPanel').then(m => ({ default: m.DigitalTwinPanel })));
+const LazyForkPanel = lazy(() => import('@/components/ForkPanel').then(m => ({ default: m.ForkPanel })));
+const LazyIntelligencePanel = lazy(() => import('@/components/IntelligencePanel').then(m => ({ default: m.IntelligencePanel })));
+const LazyIssLivePanel = lazy(() => import('@/components/IssLivePanel').then(m => ({ default: m.IssLivePanel })));
+const LazyLandCoverMapperPanel = lazy(() => import('@/components/LandCoverMapperPanel').then(m => ({ default: m.LandCoverMapperPanel })));
+const LazyLaunchReplayPanel = lazy(() => import('@/components/LaunchReplayPanel').then(m => ({ default: m.LaunchReplayPanel })));
+const LazyRadioTunerPanel = lazy(() => import('@/components/RadioTunerPanel').then(m => ({ default: m.RadioTunerPanel })));
+const LazySatelliteImageryPanel = lazy(() => import('@/components/ui/SatelliteImageryPanel'));
+const LazySatelliteTrackerPanel = lazy(() => import('@/components/prithvi/SatelliteTrackerPanel').then(m => ({ default: m.SatelliteTrackerPanel })));
+
+/** Suspense boundary for the lazy panels — a silent null keeps the layout
+ *  stable while a panel chunk loads (panels render after user interaction,
+ *  so there is no visible flicker). */
+function PanelSuspense({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={null}>{children}</Suspense>;
+}
 
 /* ═════════════════════════════════════════════════════════════════
    TYPES
@@ -7705,7 +7721,7 @@ export default function App() {
           case 'moveCamera': {
             // Cinematic camera verbs driven by voice/text: orbit / pan / tilt /
             // rotate / stop, with optional speed (slow|normal|fast). This is the
-            // GEV-parity "camera choreography" path — real continuous motion.
+            // "camera choreography" path — real continuous motion.
             const motion = String(cmd.motion || '');
             const direction = String(cmd.direction || 'right');
             const speed = String(cmd.speed || 'normal') as 'slow' | 'normal' | 'fast';
@@ -9671,12 +9687,12 @@ export default function App() {
       />
 
       {/* Chat History Panel — extracted component */}
-      <ChatHistoryPanel
+      <PanelSuspense><LazyChatHistoryPanel
         loadChat={loadChat}
         deleteChatSession={deleteChatSession}
         clearAllChats={clearAllChats}
         currentChatId={chatState.currentChatId}
-      />
+      /></PanelSuspense>
 
       {/* Social Panel */}
       {showIntelFeed && (
@@ -10030,14 +10046,14 @@ export default function App() {
 
       {/* ISS Live Camera — top-right panel */}
       {showISSInfo && issInfo && (
-        <IssLivePanel
+        <PanelSuspense><LazyIssLivePanel
           lat={issInfo.lat}
           lon={issInfo.lon}
           src={ISS_LIVE_EMBED}
           onClose={toggleISS}
           isTraveling={satTravel}
           onBoard={() => toggleIssTravel()}
-        />
+        /></PanelSuspense>
       )}
 
       {satTravel && (
@@ -10344,7 +10360,7 @@ export default function App() {
 
       {/* Digital Twin Panel */}
       {digitalTwinPanel && (
-        <DigitalTwinPanel panel={digitalTwinPanel} onClose={() => setDigitalTwinPanel(null)} />
+        <PanelSuspense><LazyDigitalTwinPanel panel={digitalTwinPanel} onClose={() => setDigitalTwinPanel(null)} /></PanelSuspense>
       )}
 
       {/* Tool Workbench */}
@@ -10367,31 +10383,31 @@ export default function App() {
       )}
 
       {/* Fork Panel */}
-      <ForkPanel
+      <PanelSuspense><LazyForkPanel
         forks={forks}
         onPauseFork={handlePauseFork}
         onResumeFork={handleResumeFork}
         onTerminateFork={handleTerminateFork}
         zIndex={getPanelZIndex('fork', 110)}
-      />
+      /></PanelSuspense>
 
       {/* Intelligence Panel */}
-      <IntelligencePanel
+      <PanelSuspense><LazyIntelligencePanel
         open={showIntelligencePanel}
         onClose={() => setShowIntelligencePanel(false)}
         onToggleLayer={toggleLayer}
         onFlyTo={focusLocation}
         zIndex={getPanelZIndex('intelligence')}
-      />
+      /></PanelSuspense>
 
       {/* Satellite Tracker Panel */}
-      {showSatelliteTracker && <SatelliteTrackerPanel zIndex={getPanelZIndex('satellite-tracker')} onClose={() => { setShowSatelliteTracker(false); if (trackedSatIntervalRef.current) { clearInterval(trackedSatIntervalRef.current); trackedSatIntervalRef.current = null; } if (trackedSatRenderTickRef.current) { trackedSatRenderTickRef.current(); trackedSatRenderTickRef.current = null; } if (trackedSatRef.current) { viewerRef.current?.entities.remove(trackedSatRef.current); trackedSatRef.current = null; } if (trackedSatTrailEntityRef.current) { viewerRef.current?.entities.remove(trackedSatTrailEntityRef.current); trackedSatTrailEntityRef.current = null; } trackedSatTleRef.current = null; trackedSatPosPropRef.current = null; trackedSatSpeedRef.current = 0; trackedSatNameRef.current = ''; }} onTrackSatellite={trackSatellite} onTravelView={travelToTrackedSatellite} />}
+      {showSatelliteTracker && <PanelSuspense><LazySatelliteTrackerPanel zIndex={getPanelZIndex('satellite-tracker')} onClose={() => { setShowSatelliteTracker(false); if (trackedSatIntervalRef.current) { clearInterval(trackedSatIntervalRef.current); trackedSatIntervalRef.current = null; } if (trackedSatRenderTickRef.current) { trackedSatRenderTickRef.current(); trackedSatRenderTickRef.current = null; } if (trackedSatRef.current) { viewerRef.current?.entities.remove(trackedSatRef.current); trackedSatRef.current = null; } if (trackedSatTrailEntityRef.current) { viewerRef.current?.entities.remove(trackedSatTrailEntityRef.current); trackedSatTrailEntityRef.current = null; } trackedSatTleRef.current = null; trackedSatPosPropRef.current = null; trackedSatSpeedRef.current = 0; trackedSatNameRef.current = ''; }} onTrackSatellite={trackSatellite} onTravelView={travelToTrackedSatellite} /></PanelSuspense>}
 
       {/* Aviation Tracker Panel */}
-      {showAviationTracker && <AviationTrackerPanel zIndex={getPanelZIndex('aviation-tracker')} onClose={() => setShowAviationTracker(false)} onTravelView={travelToFlight} />}
+      {showAviationTracker && <PanelSuspense><LazyAviationTrackerPanel zIndex={getPanelZIndex('aviation-tracker')} onClose={() => setShowAviationTracker(false)} onTravelView={travelToFlight} /></PanelSuspense>}
 
       {/* Satellite Imagery Panel */}
-      <SatelliteImageryPanel viewer={viewerRef.current} show={showSatelliteImagery} onClose={() => setShowSatelliteImagery(false)} zIndex={getPanelZIndex('satellite-imagery')} />
+      <PanelSuspense><LazySatelliteImageryPanel viewer={viewerRef.current} show={showSatelliteImagery} onClose={() => setShowSatelliteImagery(false)} zIndex={getPanelZIndex('satellite-imagery')} /></PanelSuspense>
 
       {/* First-run mission card */}
       {showFirstRun && (
@@ -10402,10 +10418,10 @@ export default function App() {
       )}
 
       {/* Launch Replay Panel */}
-      <LaunchReplayPanel open={showLaunchReplay} onClose={() => setShowLaunchReplay(false)} viewer={viewerRef.current} zIndex={getPanelZIndex('analytics') + 1} />
+      <PanelSuspense><LazyLaunchReplayPanel open={showLaunchReplay} onClose={() => setShowLaunchReplay(false)} viewer={viewerRef.current} zIndex={getPanelZIndex('analytics') + 1} /></PanelSuspense>
 
       {/* World Radio Tuner */}
-      <RadioTunerPanel open={showRadioTuner} onClose={() => setShowRadioTuner(false)} zIndex={getPanelZIndex('analytics') + 2}
+      <PanelSuspense><LazyRadioTunerPanel open={showRadioTuner} onClose={() => setShowRadioTuner(false)} zIndex={getPanelZIndex('analytics') + 2}
         getStations={() => {
           const ents = entityStoreRef.current['radio_stations'] ?? [];
           return ents.map(e => {
@@ -10423,14 +10439,14 @@ export default function App() {
           const v = viewerRef.current;
           if (v) v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt ?? 30000), duration: 1.0 });
         }}
-      />
+      /></PanelSuspense>
 
       {/* Analytics Workbench Panel */}
       <ErrorBoundary label="Analytics Workbench">        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} demoRequest={demoRequest} />
       </ErrorBoundary>
 
       {/* Land Cover Mapper Panel */}
-      <LandCoverMapperPanel
+      <PanelSuspense><LazyLandCoverMapperPanel
         open={showLandCoverMapper}
         onClose={() => setShowLandCoverMapper(false)}
         viewer={viewerRef.current}
@@ -10438,7 +10454,7 @@ export default function App() {
         polygon={activeStudyAreaPolygon ?? undefined}
         onClearResult={handleClearToolResult}
         zIndex={getPanelZIndex('land-cover')}
-      />
+      /></PanelSuspense>
 
       {/* Command Palette (CMD+K) */}
       <CommandPalette
