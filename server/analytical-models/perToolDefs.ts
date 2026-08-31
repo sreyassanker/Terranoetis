@@ -35,7 +35,7 @@ const WATER_BANDS: ClassificationBand[] = [
 ];
 
 // Helper: default validation that checks each input against its min/max
-function validateRange(inputs: Record<string, unknown>, rules: Array<{ param: string; min?: number; max?: number }>): ValidationResult {
+function validateRange(inputs: Record<string, unknown>, rules: Array<{ param: string; min?: number; max?: number; required?: boolean }>): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   const validated: Record<string, number> = {};
@@ -46,7 +46,17 @@ function validateRange(inputs: Record<string, unknown>, rules: Array<{ param: st
       continue;
     }
     const num = typeof val === 'number' ? val : Number(val);
-    if (!Number.isFinite(num)) { errors.push(`Parameter '${rule.param}' is not finite.`); continue; }
+    if (!Number.isFinite(num)) {
+      // Optional params (e.g. Dozier-form T_bg on model 32) legitimately arrive
+      // as NaN when the engine has a valid alternative path (measured FRP).
+      // Downgrade to a warning instead of failing the whole computation.
+      if (rule.required === false) {
+        warnings.push(`Parameter '${rule.param}' not finite — using measured/alternative value.`);
+      } else {
+        errors.push(`Parameter '${rule.param}' is not finite.`);
+      }
+      continue;
+    }
     if (rule.min !== undefined && num < rule.min) errors.push(`'${rule.param}' = ${num} below min ${rule.min}.`);
     if (rule.max !== undefined && num > rule.max) errors.push(`'${rule.param}' = ${num} above max ${rule.max}.`);
     validated[rule.param] = num;
@@ -1919,7 +1929,7 @@ export const TOOL_32: ToolWorkflowDef = {
   name: 'Fire Radiative Power Estimation',
   vizType: 'heatmap',
   classificationBands: INDEX_BANDS,
-  validate: (inputs) => validateRange(inputs, [{ param: 'A', min: 0, max: 1e8 }, { param: 'eps', min: 0, max: 1 }, { param: 'Tfire', min: 250, max: 2000 }, { param: 'Tbg', min: 200, max: 400 }]),
+  validate: (inputs) => validateRange(inputs, [{ param: 'A', min: 0, max: 1e8 }, { param: 'eps', min: 0, max: 1 }, { param: 'Tfire', min: 250, max: 2000 }, { param: 'Tbg', min: 200, max: 400, required: false }]),
   preprocess: (inputs, ctx, log) => {
     log.push('  NASA FIRMS active-fire detections (VIIRS 375 m / MODIS 1 km NRT)');
     log.push('  T_fire = measured fire-pixel bright_ti4 (Kelvin) of strongest detection');
