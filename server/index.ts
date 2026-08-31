@@ -25,19 +25,19 @@ import {
   type PatternStep, type PatternCommand,
 } from './ai-patterns/patternStore';
 import { summarizeToolResult } from './ai-patterns/summarizeTool';
-import { API_METADATA, getCategories } from './api-metadata';
+import { API_METADATA, getCategories } from './apiMetadata';
 import {
   CommandParser, MaterializedViewCache, IntentRouter, TaskPlanner,
   ToolRegistry, buildAgentPrompt, ToolCallParser,
   type GlobeCommand, type AgentStep, type AgentTool, type ToolCall,
 } from './agent';
 import { SandboxManager } from './sandboxManager';
-import { SimulationEngine } from './sandbox-v2/simulationEngine';
-import { runFarsiteSimulation, farsiteOutputsToGeoJSON } from './sandbox-v2/farsiteLite';
-import { runAdcircSimulation, adcircOutputsToGeoJSON } from './sandbox-v2/adcircLite';
-import { runWrfSimulation, wrfOutputsToGridJSON } from './sandbox-v2/wrfLite';
-import { runHysplitSimulation, hysplitOutputsToGeoJSON } from './sandbox-v2/hysplitLite';
-import { runFnoPrediction, getFastPrediction } from './sandbox-v2/fnoSurrogate';
+import { SimulationEngine } from './sandboxV2/simulationEngine';
+import { runFarsiteSimulation, farsiteOutputsToGeoJSON } from './sandboxV2/farsiteLite';
+import { runAdcircSimulation, adcircOutputsToGeoJSON } from './sandboxV2/adcircLite';
+import { runWrfSimulation, wrfOutputsToGridJSON } from './sandboxV2/wrfLite';
+import { runHysplitSimulation, hysplitOutputsToGeoJSON } from './sandboxV2/hysplitLite';
+import { runFnoPrediction, getFastPrediction } from './sandboxV2/fnoSurrogate';
 import spatialRouter, { initSpatialEngine } from './h3-engine/spatialQuery';
 import { CodeWriter } from './self-evolution/codeWriter';
 import { TestRunner } from './self-evolution/testRunner';
@@ -46,14 +46,14 @@ import { IntentDiscoveryV2 } from './self-evolution/intentDiscoveryV2';
 import { BanditRouter } from './self-evolution/banditRouter';
 import { PerfMonitor } from './self-evolution/perfMonitor';
 import { MonitorManager, SchedulerManager, AmbientEventDetector, getLocationContext } from './monitor';
-import { MemoryManager, type Fact, type ProceduralPattern } from './memory';
-import { memoryManagerV2 } from './memory-v2/memoryManager-v2';
+import { MemoryManager, type Fact, type ProceduralPattern } from './memoryManager';
+import { memoryManagerV2 } from './memoryV2/memoryManagerV2';
 import { EmbeddingEngine } from './embedding';
-import { dynamicTools } from './tools-v2/toolGenerator';
-import { ToolComposer } from './tools-v2/toolComposer';
-import { toolDiscovery } from './tools-v2/toolDiscovery';
-import { toolRepair } from './tools-v2/toolRepair';
-import { executor } from './tools-v2/selfHealingExecutor';
+import { dynamicTools } from './toolsV2/toolGenerator';
+import { ToolComposer } from './toolsV2/toolComposer';
+import { toolDiscovery } from './toolsV2/toolDiscovery';
+import { toolRepair } from './toolsV2/toolRepair';
+import { executor } from './toolsV2/selfHealingExecutor';
 import { CircuitBreaker, withCircuitBreak, withRetry } from './resilience';
 import { AgentOrchestrator } from './orchestrator';
 import { CognitiveAgent } from './agent';
@@ -72,7 +72,7 @@ import { DreamEngine } from './dream/engine';
 import { PlanetaryMemorySystem } from './memory/memorySystem';
 import { sentinel } from './sentinel/index';
 import { ambientIntelligence } from './sentinel/ambientIntelligence';
-import { selfImproverV2 } from './selfImprover-v2';
+import { selfImproverV2 } from './selfImproverV2';
 import { multimodal } from './multimodal/index';
 import { satelliteAnalyzer } from './multimodal/satelliteAnalyzer';
 import { handleTileRequest, getTileJson, getLayerSources } from './foundation-models/mvtTileServer';
@@ -108,7 +108,7 @@ import { evaluateResponse, storeEval, getRecentEvals, getAvgScoresByIntent } fro
 import { promptLab } from './ml/promptLab';
 import { generateTrainingExample, getSyntheticData, startSyntheticDataGeneration, stopSyntheticDataGeneration } from './ml/syntheticData';
 import { knowledgeGraph } from './ml/knowledgeGraph';
-import { entityGenerator, edgeGenerator, counterfactualGraph, graphCompletion, evolvingGraph } from './kg-v2/index';
+import { entityGenerator, edgeGenerator, counterfactualGraph, graphCompletion, evolvingGraph } from './kgV2/index';
 import { predictor, type Prediction } from './ml/predictor';
 import { omninet, classifyComplexity } from './ai-router/omninet';
 import { login, authGuard, sseAuthGuard, ensureDefaultAdmin, requireRole, devAutoLogin, refreshToken } from './middleware/auth';
@@ -10960,8 +10960,8 @@ app.post('/api/scenarios/import-from-path', authGuard, async (req: express.Reque
 
 // ── Knowledge Graph v2 API (Generative KG) ──────────────────────
 
-// POST /api/kg-v2/generate-entities — generate plausible connected entities from a trigger event
-app.post('/api/kg-v2/generate-entities', authGuard, (req: express.Request, res: express.Response) => {
+// POST /api/kgV2/generate-entities — generate plausible connected entities from a trigger event
+app.post('/api/kgV2/generate-entities', authGuard, (req: express.Request, res: express.Response) => {
   const correlationId = (req as any).correlationId || crypto.randomUUID();
   const { event } = req.body;
   if (!event?.type || !event?.location) return res.status(400).json({ error: 'Event with type and location required' });
@@ -10975,8 +10975,8 @@ app.post('/api/kg-v2/generate-entities', authGuard, (req: express.Request, res: 
   }
 });
 
-// POST /api/kg-v2/generate-edges — generate probable causal relationships between entities
-app.post('/api/kg-v2/generate-edges', authGuard, (req: express.Request, res: express.Response) => {
+// POST /api/kgV2/generate-edges — generate probable causal relationships between entities
+app.post('/api/kgV2/generate-edges', authGuard, (req: express.Request, res: express.Response) => {
   const correlationId = (req as any).correlationId || crypto.randomUUID();
   const { entities } = req.body;
   if (!entities?.length) return res.status(400).json({ error: 'Entities array required' });
@@ -10990,8 +10990,8 @@ app.post('/api/kg-v2/generate-edges', authGuard, (req: express.Request, res: exp
   }
 });
 
-// POST /api/kg-v2/counterfactual — generate counterfactual graph for what-if scenarios
-app.post('/api/kg-v2/counterfactual', authGuard, (req: express.Request, res: express.Response) => {
+// POST /api/kgV2/counterfactual — generate counterfactual graph for what-if scenarios
+app.post('/api/kgV2/counterfactual', authGuard, (req: express.Request, res: express.Response) => {
   const correlationId = (req as any).correlationId || crypto.randomUUID();
   const { event, change } = req.body;
   if (!event || !change) return res.status(400).json({ error: 'Event and change required' });
@@ -11005,8 +11005,8 @@ app.post('/api/kg-v2/counterfactual', authGuard, (req: express.Request, res: exp
   }
 });
 
-// POST /api/kg-v2/complete — complete missing edges in partial knowledge graph
-app.post('/api/kg-v2/complete', authGuard, (req: express.Request, res: express.Response) => {
+// POST /api/kgV2/complete — complete missing edges in partial knowledge graph
+app.post('/api/kgV2/complete', authGuard, (req: express.Request, res: express.Response) => {
   const correlationId = (req as any).correlationId || crypto.randomUUID();
   const { graph } = req.body;
   if (!graph?.entities) return res.status(400).json({ error: 'Graph with entities array required' });
@@ -11020,8 +11020,8 @@ app.post('/api/kg-v2/complete', authGuard, (req: express.Request, res: express.R
   }
 });
 
-// GET /api/kg-v2/evolve — apply decay, get evolution log & state
-app.get('/api/kg-v2/evolve', authGuard, (req: express.Request, res: express.Response) => {
+// GET /api/kgV2/evolve — apply decay, get evolution log & state
+app.get('/api/kgV2/evolve', authGuard, (req: express.Request, res: express.Response) => {
   const correlationId = (req as any).correlationId || crypto.randomUUID();
   try {
     const evolutionLog = evolvingGraph.tick();

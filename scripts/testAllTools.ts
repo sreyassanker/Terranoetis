@@ -4,8 +4,8 @@
  * Uses empty inputs (contextEngine fills defaults).
  */
 
-import { computeWithContext } from './server/analytical-models/contextEngine';
-import { EQUATION_ENGINE } from './server/analytical-models/engine';
+import { computeWithContext } from '../server/analytical-models/contextEngine';
+import { EQUATION_ENGINE } from '../server/analytical-models/engine';
 
 const ALL_IDS = Array.from({ length: 150 }, (_, i) => i + 1);
 
@@ -13,9 +13,9 @@ const ALL_IDS = Array.from({ length: 150 }, (_, i) => i + 1);
 const CONTEXT = {
   studyArea: {
     mode: 'point' as const,
-    point: [37.7749, -122.4194],
-    bbox: [[37.7, -122.5], [37.8, -122.4]],
-    twoPoints: [[37.7, -122.5], [37.8, -122.4]],
+    point: [37.7749, -122.4194] as [number, number],
+    bbox: [[37.7, -122.5], [37.8, -122.4]] as [[number, number], [number, number]],
+    twoPoints: [[37.7, -122.5], [37.8, -122.4]] as [[number, number], [number, number]],
   },
   time: {
     start: '2025-01-15',

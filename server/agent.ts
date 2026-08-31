@@ -3,7 +3,7 @@ import { omninet } from './ai-router/omninet';
 import { cognitiveOrchestrator, type CognitionResult, type ProgressCallback } from './cognition/cognitiveOrchestrator';
 import { AgentOrchestrator, type AgentResult } from './orchestrator';
 import { logger } from './observability/logger';
-import { dynamicTools } from './tools-v2/toolGenerator';
+import { dynamicTools } from './toolsV2/toolGenerator';
 import { searchAnalyticalModels } from './analytical-models/index';
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -870,14 +870,14 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
 
     // Panel keyword → panelId map. Order matters (longest/most specific first).
     const PANELS: Array<{ match: RegExp; panelId: string }> = [
-      { match: /tool\s*workbench|toolworkbench/i, panelId: 'toolworkbench' },
+      { match: /multi[- ]?hazard|hazard\s*panel|tool\s*workbench|toolworkbench/i, panelId: 'multihazard' },
       { match: /(analytics|analysis)\s*workbench|workbench/i, panelId: 'analytics-workbench' },
       { match: /analytics\s*(&|and)\s*insights|analytics\s*insights|insights panel|analytics panel/i, panelId: 'analytics-insights' },
       { match: /satellite\s*tracker|tracker\s*(for|of)?\s*satellites/i, panelId: 'satellite-tracker' },
       { match: /satellite\s*imagery|imagery\s*panel|earth\s*observation/i, panelId: 'satellite-imagery' },
       { match: /aviation\s*tracker|flight\s*tracker\s*panel/i, panelId: 'aviation-tracker' },
       { match: /land\s*cover|landcover/i, panelId: 'land-cover' },
-      { match: /\bpulse\b|intelligence\s*panel|market\s*panel|geo\s*risk\s*panel/i, panelId: 'intelligence' },
+      { match: /\bpulse\b|market\s*intel|intelligence\s*panel|market\s*panel|geo\s*risk\s*panel/i, panelId: 'market-intel' },
       { match: /intel\s*feed|intelligence\s*feed|news\s*feed/i, panelId: 'intel-feed' },
       { match: /cognitive\s*dashboard/i, panelId: 'cognitive' },
       { match: /memory\s*explorer|memory\s*panel|memories/i, panelId: 'memory' },

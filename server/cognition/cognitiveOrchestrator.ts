@@ -205,7 +205,7 @@ export class CognitiveOrchestrator {
   };
   private toolRegistry = {
     executeTool: async (name: string, args: Record<string, unknown>) => {
-      const { dynamicTools } = await import('../tools-v2/toolGenerator');
+      const { dynamicTools } = await import('../toolsV2/toolGenerator');
       return dynamicTools.execute(name, args) as unknown as { success: boolean; output: unknown };
     },
     listTools: () => {
@@ -412,7 +412,7 @@ export class CognitiveOrchestrator {
     context?: { location?: string; lat?: number; lon?: number },
   ): Promise<string | null> {
     try {
-      const { dynamicTools } = await import('../tools-v2/toolGenerator');
+      const { dynamicTools } = await import('../toolsV2/toolGenerator');
       if (!dynamicTools.get(toolName)) return null;
       const args: Record<string, unknown> = {};
       const lat = typeof context?.lat === 'number' ? context.lat : undefined;

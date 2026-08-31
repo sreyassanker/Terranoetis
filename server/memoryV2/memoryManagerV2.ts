@@ -3,9 +3,9 @@ import { EmbeddingEngine } from '../embedding';
 import { logger } from '../observability/logger';
 import { sensoryBuffer, type PerceptualEvent } from './sensoryBuffer';
 import { workingMemory, type WorkingMemoryContext } from './workingMemory';
-import { EpisodicMemoryV2, type EpisodeV2 } from './episodicMemory-v2';
+import { EpisodicMemoryV2, type EpisodeV2 } from './episodicMemoryV2';
 import { SemanticMemory, type InferenceResult } from './semanticMemory';
-import { proceduralMemoryV2, type ProcedureTemplate, type ToolStep } from './proceduralMemory-v2';
+import { proceduralMemoryV2, type ProcedureTemplate, type ToolStep } from './proceduralMemoryV2';
 import { predictiveMemory, type EnsembleResult } from './predictiveMemory';
 
 // ── Types ───────────────────────────────────────────────────────

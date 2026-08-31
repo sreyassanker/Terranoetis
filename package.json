@@ -11,6 +11,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:unit": "vitest run server/__tests__/unit src/__tests__",
+    "test:integration": "vitest run server/__tests__/integration server/__tests__/e2e",
+    "test:coverage": "vitest run --coverage",
     "claude": "claude"
   },
   "dependencies": {

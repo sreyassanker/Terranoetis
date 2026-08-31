@@ -20,8 +20,8 @@
 import { omninet } from './ai-router/omninet';
 import { reasoningVisualizer } from './explainability/reasoningVisualizer';
 import { evidenceChain } from './explainability/evidenceChain';
-import { dynamicTools } from './tools-v2/toolGenerator';
-import { memoryManagerV2 } from './memory-v2/memoryManager-v2';
+import { dynamicTools } from './toolsV2/toolGenerator';
+import { memoryManagerV2 } from './memoryV2/memoryManagerV2';
 import { logger } from './observability/logger';
 
 // ─── Types ────────────────────────────────────────────────────────────────

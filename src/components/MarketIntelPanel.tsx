@@ -46,7 +46,7 @@ interface ConvergenceCard {
   assessment?: string;
 }
 
-interface IntelligencePanelProps {
+interface MarketIntelPanelProps {
   open: boolean;
   onClose: () => void;
   onToggleLayer: (id: string) => void;
@@ -1094,7 +1094,7 @@ const IntelTab: React.FC = () => {
    MAIN INTELLIGENCE PANEL
    ═════════════════════════════════════════════════════════════════ */
 
-export const IntelligencePanel: React.FC<IntelligencePanelProps> = ({
+export const MarketIntelPanel: React.FC<MarketIntelPanelProps> = ({
   open, onClose, onToggleLayer: _onToggleLayer, onFlyTo, zIndex = 999,
 }): React.ReactElement => {
   const [activeTab, setActiveTab] = useState<TabId>('market');

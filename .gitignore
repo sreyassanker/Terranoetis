@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 .env
+.env.*.local
 .env.local
 server/.env
 
@@ -100,8 +101,8 @@ opencode.json
 test_*.cjs
 live_*.cjs
 final_browser_test.cjs
-legacy-test-scripts/
-test-cds-audit.mjs
+scripts/legacy-tests/
+scripts/*.mjs
 start-lfm.sh
 
 # Session notes
@@ -112,7 +113,6 @@ models/
 public/models/
 
 # Research papers (downloaded PDFs)
-.DS_Store
 docs/Research papers/*.pdf
 
 # Markdown files inside docs
@@ -121,6 +121,23 @@ docs/**/*.md
 # Reports
 reports/
 
-# Test directory
-src/__tests__/
-server/__tests__/
+# Compiled JS artifacts (Vitest runs only the .ts/.tsx sources)
+*.test.js
+*.test.js.map
+
+# Test coverage output
+coverage/
+.nyc_output/
+.eslintcache
+
+# Build tool caches
+.vite/
+.cache/
+.turbo/
+.npm/
+
+# Archives & merge artifacts
+*.tgz
+*.zip
+*.orig
+*.rej

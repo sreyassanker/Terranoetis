@@ -1,6 +1,6 @@
 import { logger } from '../observability/logger';
 import { pubsub } from '../pubsub';
-import { memoryManagerV2 } from '../memory-v2/memoryManager-v2';
+import { memoryManagerV2 } from '../memoryV2/memoryManagerV2';
 import { causalGraph } from '../world-model/causalGraph';
 import { getDb } from '../db/index';
 import { satelliteAnalyzer, type SatelliteObservation } from './satelliteAnalyzer';

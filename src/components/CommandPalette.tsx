@@ -18,7 +18,7 @@ interface CommandPaletteProps {
   onClose: () => void;
   onToggleLayer: (id: string) => void;
   onFlyTo: (lat: number, lon: number, opts?: { height?: number; label?: string }) => void;
-  onOpenIntelligencePanel?: () => void;
+  onOpenMarketIntelPanel?: () => void;
 }
 
 /* ═════════════════════════════════════════════════════════════════
@@ -89,7 +89,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onClose,
   onToggleLayer,
   onFlyTo,
-  onOpenIntelligencePanel,
+onOpenMarketIntelPanel,
 }) => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -119,7 +119,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         label: 'Open Pulse',
         description: 'Market, energy, geopolitical, and correlation data',
         icon: '🔬',
-        action: onOpenIntelligencePanel,
+        action: onOpenMarketIntelPanel,
       });
     }
 
@@ -154,7 +154,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     }
 
     return items.slice(0, 20); // Limit results
-  }, [query, onToggleLayer, onFlyTo, onOpenIntelligencePanel]);
+  }, [query, onToggleLayer, onFlyTo, onOpenMarketIntelPanel]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {

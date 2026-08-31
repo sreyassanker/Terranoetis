@@ -2,7 +2,7 @@ import { logger } from '../observability/logger';
 import { pubsub } from '../pubsub';
 import { broadcastToUser, broadcastToAll } from '../websocket';
 import { getDb } from '../db/index';
-import { memoryManagerV2 } from '../memory-v2/memoryManager-v2';
+import { memoryManagerV2 } from '../memoryV2/memoryManagerV2';
 import { ensemblePredictor } from '../world-model/ensemblePredictor';
 import type { Alert } from './alertIntelligence';
 import type { EnrichedEvent } from './streamProcessor';
