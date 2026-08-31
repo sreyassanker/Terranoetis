@@ -68,7 +68,7 @@ async function testTool(id: number): Promise<TestResult> {
       unit: result.unit,
       timeMs: elapsed,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     return {
       id,
       status: 'FAIL',
