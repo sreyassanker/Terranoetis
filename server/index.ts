@@ -2834,6 +2834,7 @@ import { getFloodConditions, getFloodAlerts, estimateInundation } from './utils/
 import { getHistoricalDaily, calculateClimateStats, detectExtremes } from './utils/era5';
 import { getCoralReefStatus, getActiveBleachingAlerts, getSstData } from './utils/coralReefWatch';
 import { initObservability, traceAsync, recordMetric, incrementCounter, getRecentTraces, getMetricsSummary } from './observability/openTelemetry';
+import { initSentry } from './observability/sentry';
 
 // ── ERA5 Climate Reanalysis ──
 
@@ -10006,12 +10007,13 @@ app.post('/api/agent/feedback', validate(feedbackSchema), (req: express.Request,
   res.json({ ok: true, id: entry.id });
 });
 
-app.get('/api/agent/feedback', (_req: express.Request, res: express.Response) => {
+app.get('/api/agent/feedback', (req: express.Request, res: express.Response) => {
+  const uid = (req as any).userId;
   res.json({
     stats: feedbackManager.getStats(),
     byIntent: feedbackManager.getByIntent(),
     byModel: feedbackManager.getByModel(),
-    recent: feedbackManager.recent(20),
+    recent: uid ? feedbackManager.recentByUser(uid, 20) : [],
   });
 });
 
@@ -11354,6 +11356,13 @@ app.post('/api/chats', validate(chatCreateSchema), (req: express.Request, res: e
     const { id, title, messages, environmentId, workspaceId } = req.body;
     const db = getDb();
     const now = new Date().toISOString();
+    // Multi-tenant guard: if the chat already exists, only its owner may
+    // overwrite it. Without this, any authenticated user could pass another
+    // user's chat id and clobber their conversation (cross-tenant IDOR).
+    const existing = db.prepare('SELECT user_id FROM chats WHERE id = ?').get(id) as { user_id: string } | undefined;
+    if (existing && existing.user_id !== (req as any).userId) {
+      return res.status(403).json({ error: 'Forbidden: you do not own this chat' });
+    }
     db.prepare(`
       INSERT INTO chats (id, user_id, title, messages_json, environment_id, workspace_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -11731,6 +11740,7 @@ const wss = createWsServer(httpServer);
 
 httpServer.listen(PORT, () => {
   logger.info({ port: PORT }, 'server started');
+  initSentry();
   initObservability({
     serviceName: 'terranoetis',
     serviceVersion: '3.1',

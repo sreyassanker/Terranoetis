@@ -166,6 +166,29 @@ export class FeedbackManager {
     }
   }
 
+  /** Recent feedback scoped to a single user (multi-tenant safe). */
+  recentByUser(userId: string, limit = 20): FeedbackEntry[] {
+    if (!userId) return [];
+    try {
+      const db = getDb();
+      const rows = db.prepare(
+        'SELECT * FROM feedback WHERE user_id = ? ORDER BY created_at DESC LIMIT ?'
+      ).all(userId, limit) as Array<Record<string, unknown>>;
+      return rows.map(r => ({
+        id: r.feedback_id as string,
+        userId: r.user_id as string,
+        query: r.query as string,
+        response: r.response as string,
+        vote: r.vote as 'up' | 'down',
+        intentType: r.intent_type as string,
+        modelTier: r.model_tier as string,
+        timestamp: new Date(r.created_at as string).getTime(),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   all(): FeedbackEntry[] {
     return this.recent(10000);
   }

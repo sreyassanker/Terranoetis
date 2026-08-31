@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { AppError } from '../observability/errors';
 import { logger } from '../observability/logger';
+import { reportError } from '../observability/sentry';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -41,6 +42,7 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   if (err instanceof AppError) {
     if (err.statusCode >= 500) {
       logger.error({ err, correlationId }, 'app error');
+      reportError(err, { correlationId: typeof correlationId === 'string' ? correlationId : undefined, path: req.path, method: req.method });
     } else {
       logger.warn({ err: { message: err.message, code: err.errorCode }, correlationId }, 'app error');
     }
@@ -56,6 +58,7 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   const status = e?.statusCode || e?.status || 500;
   if (status >= 500) {
     logger.error({ err, correlationId, path: req.path }, 'unhandled error');
+    reportError(err, { correlationId: typeof correlationId === 'string' ? correlationId : undefined, path: req.path, method: req.method });
     res.status(status).json({
       error: { code: 'INTERNAL_ERROR', message: IS_PROD ? 'Internal server error' : (e?.message || 'Internal server error') },
       ...(IS_PROD ? {} : { correlationId }),
