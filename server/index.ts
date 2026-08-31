@@ -7864,7 +7864,7 @@ async function tryAnalyticalModelRunInner(
     //  - Else if a location is detected, use a small bbox around it (so
     //    heatmap models produce a real grid, not a single point)
     //  - Else fall back to no context (engine uses defaults)
-    let context: { studyArea?: { mode: 'bbox'; bbox: [[number, number], [number, number]] } } = {};
+    let context: { studyArea?: { mode: 'bbox'; bbox: [[number, number], [number, number]] }; filters?: Record<string, number> } = {};
     if (studyAreaBbox && isFinite(studyAreaBbox.latMin) && isFinite(studyAreaBbox.latMax) && isFinite(studyAreaBbox.lonMin) && isFinite(studyAreaBbox.lonMax)) {
       context = {
         studyArea: {
@@ -7880,6 +7880,20 @@ async function tryAnalyticalModelRunInner(
           bbox: [[location.lat - d, location.lon - d], [location.lat + d, location.lon + d]],
         },
       };
+    }
+
+    // Extreme-value flood models (40 Gumbel / 41 GPD) honour a return-period
+    // filter. Parse it from the natural-language message: "100 year flood",
+    // "500-year return level", "T = 25 years", etc. (default 100 when the
+    // message mentions a flood return level but gives no number).
+    if (modelId === 40 || modelId === 41) {
+      const Tmatch = lower.match(/(\d{1,4})\s*-?\s*year|(\d{1,4})\s*yr|return\s*(?:level|period)[^\d]*(\d{1,4})/i);
+      let T = 100;
+      if (Tmatch) {
+        const n = Number(Tmatch[1] ?? Tmatch[2] ?? Tmatch[3]);
+        if (Number.isFinite(n) && n > 1 && n < 10000) T = n;
+      }
+      context.filters = { 'return-period': T };
     }
 
     const result = await computeWithContext(modelId, {}, context) as (Record<string, unknown> & { result?: unknown; grid?: { values?: number[]; latMin?: number; latMax?: number; lonMin?: number; lonMax?: number; nLat?: number; nLon?: number } }) | null;

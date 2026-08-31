@@ -2095,61 +2095,69 @@ export const PART1: Record<number, ComputeFn> = {
       ]
     };
   },
-  40: ({ mu, beta, x }) => {
-    if (![mu, beta, x].every(Number.isFinite) || !(beta > 0)) {
-      return {
-        result: Number.NaN, unit: '—',
-        secondary: [
-          { key: 'returnPeriod', value: Number.NaN, unit: 'years', label: 'Return period T = 1/(1−F) (NaN)' },
-          { key: 'reducedVariate', value: Number.NaN, unit: '—', label: 'Gumbel reduced variate y (NaN)' },
-          { key: 'xReturn100', value: Number.NaN, unit: '—', label: '100-year return level (NaN)' },
-        ],
-        steps: [
-          '── Gumbel (Type I) Extreme Value Distribution (Gumbel, 1958) ──',
-          'Honest NaN: Gumbel requires a finite location μ, a finite scale '
-          + 'β > 0 and a finite value x — no value is fabricated.',
-        ]
-      };
-    }
-    const y = (x - mu) / beta;
-    const F = Math.exp(-Math.exp(-y));
-    const T = 1 / (1 - F + 1e-30);
-    const reducedVariate = -Math.log(-Math.log(F));
-    const xReturn100 = mu - beta * Math.log(-Math.log(1 - 1 / 100));
-    // Distribution series — Gumbel PDF f(x) over x ∈ [μ−3β, μ+3β] (40 points)
-    // using the tool's location μ and scale β.
-    const pdfPoints: Array<{ x: number; y: number }> = Array.from({ length: 40 }, (_, i) => {
-      const xv = (mu - 3 * beta) + (i * 6 * beta) / 39;
-      const yv = (xv - mu) / beta;
-      const pdf = (1 / beta) * Math.exp(-yv - Math.exp(-yv));
-      return { x: xv, y: Number.isFinite(pdf) ? pdf : Number.NaN };
-    });
-    return {
-      result: F, unit: '—',
-      secondary: [
-        { key: 'returnPeriod', value: Number.isFinite(T) ? T : Number.NaN, unit: 'years', label: 'Return period T = 1/(1−F) of the supplied x' },
-        { key: 'reducedVariate', value: Number.isFinite(reducedVariate) ? reducedVariate : Number.NaN, unit: '—', label: 'Gumbel reduced variate y = −ln(−ln F)' },
-        { key: 'xReturn100', value: Number.isFinite(xReturn100) ? xReturn100 : Number.NaN, unit: '—', label: '100-year return level μ − β·ln(−ln(1−1/100)) (input units)' },
-      ],
-      series: [{
-        label: 'Gumbel PDF f(x)',
-        color: '#0072B2',
-        points: pdfPoints,
-      }],
-      steps: [
-        '── Gumbel (Type I) Extreme Value Distribution (Gumbel, 1958) ──',
-        `Location μ = ${mu.toFixed(2)}, Scale β = ${beta.toFixed(2)}`,
-        `Value x = ${x.toFixed(2)}`,
-        '',
-        'Step 1 — Reduced variate:',
-        `  y = (x − μ) / β = (${x.toFixed(2)} − ${mu.toFixed(2)}) / ${beta.toFixed(2)} = ${y.toFixed(4)}`,
-        '',
-        'Step 2 — CDF:',
-        `  F(x) = exp(−exp(−y)) = exp(−exp(−${y.toFixed(4)}))`,
-        `  P(X ≤ ${x.toFixed(2)}) = ${F.toFixed(6)}`,
-        '',
-        'Step 3 — Return period:',
-        `  T = 1 / (1 − F) = 1 / (1 − ${F.toFixed(6)}) = ${T.toFixed(1)} years`,
+   40: ({ mu, beta, x, T }) => {
+     if (![mu, beta].every(Number.isFinite) || !(beta > 0)) {
+       return {
+         result: Number.NaN, unit: '—',
+         secondary: [
+           { key: 'returnPeriod', value: Number.NaN, unit: 'years', label: 'Return period T = 1/(1−F) (NaN)' },
+           { key: 'reducedVariate', value: Number.NaN, unit: '—', label: 'Gumbel reduced variate y (NaN)' },
+           { key: 'xReturn100', value: Number.NaN, unit: '—', label: '100-year return level (NaN)' },
+         ],
+         steps: [
+           '── Gumbel (Type I) Extreme Value Distribution (Gumbel, 1958) ──',
+           'Honest NaN: Gumbel requires a finite location μ, a finite scale '
+           + 'β > 0 and a finite value x — no value is fabricated.',
+         ]
+       };
+     }
+     // When a return period T is supplied (e.g. "100 year flood"), the primary
+     // result is the T-year return LEVEL x_T = μ − β·ln(−ln(1−1/T)) — the
+     // discharge equalled/exceeded once every T years on average. Without T,
+     // fall back to the CDF F(x) of the supplied value x (Gumbel 1958).
+     const hasT = Number.isFinite(T) && T > 1;
+     const isQuantile = hasT && !Number.isFinite(x);
+     const xEff = isQuantile ? mu - beta * Math.log(-Math.log(1 - 1 / T)) : x;
+     const y = hasT ? (xEff - mu) / beta : (x - mu) / beta;
+     const F = hasT ? 1 - 1 / T : Math.exp(-Math.exp(-y));
+     const T_out = hasT ? T : 1 / (1 - F + 1e-30);
+     const reducedVariate = -Math.log(-Math.log(F));
+     const xReturn100 = mu - beta * Math.log(-Math.log(1 - 1 / 100));
+     // Distribution series — Gumbel PDF f(x) over x ∈ [μ−3β, μ+3β] (40 points)
+     // using the tool's location μ and scale β.
+     const pdfPoints: Array<{ x: number; y: number }> = Array.from({ length: 40 }, (_, i) => {
+       const xv = (mu - 3 * beta) + (i * 6 * beta) / 39;
+       const yv = (xv - mu) / beta;
+       const pdf = (1 / beta) * Math.exp(-yv - Math.exp(-yv));
+       return { x: xv, y: Number.isFinite(pdf) ? pdf : Number.NaN };
+     });
+     const result = hasT ? xEff : F;
+     return {
+       result, unit: hasT ? 'm³/s' : '—',
+       secondary: [
+         { key: 'returnPeriod', value: Number.isFinite(T_out) ? T_out : Number.NaN, unit: 'years', label: 'Return period T = 1/(1−F) of the supplied x' },
+         { key: 'reducedVariate', value: Number.isFinite(reducedVariate) ? reducedVariate : Number.NaN, unit: '—', label: 'Gumbel reduced variate y = −ln(−ln F)' },
+         { key: 'xReturn100', value: Number.isFinite(xReturn100) ? xReturn100 : Number.NaN, unit: 'm³/s', label: '100-year return level μ − β·ln(−ln(1−1/100))' },
+       ],
+       series: [{
+         label: 'Gumbel PDF f(x)',
+         color: '#0072B2',
+         points: pdfPoints,
+       }],
+       steps: [
+         '── Gumbel (Type I) Extreme Value Distribution (Gumbel, 1958) ──',
+         `Location μ = ${mu.toFixed(2)}, Scale β = ${beta.toFixed(2)}`,
+         hasT ? `Return period T = ${T.toFixed(0)} years` : `Value x = ${x.toFixed(2)}`,
+         '',
+         'Step 1 — Reduced variate:',
+         `  y = (x − μ) / β = (${(xEff ?? x).toFixed(2)} − ${mu.toFixed(2)}) / ${beta.toFixed(2)} = ${y.toFixed(4)}`,
+         '',
+         'Step 2 — Return level (quantile):',
+         `  x_T = μ − β·ln(−ln(1−1/T)) = ${mu.toFixed(2)} − ${beta.toFixed(2)}·ln(−ln(1−1/${(hasT ? T : 100).toFixed(0)}))`,
+         `  x_T = ${(xEff ?? x).toFixed(2)} ${hasT ? 'm³/s' : ''}`,
+         '',
+         'Step 3 — Return period:',
+         `  T = 1 / (1 − F) = ${T_out.toFixed(1)} years`,
         '',
         'Step 4 — Gumbel plot slope check:',
         `  Gumbel reduced variate: y = ${reducedVariate.toFixed(4)}`,

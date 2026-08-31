@@ -118,3 +118,44 @@ test('radio tuner loads real geolocated stations', async ({ page, request }) => 
   }
   expect(apiStations > 0 || opened, 'no radio stations reachable through API or panel').toBe(true);
 });
+test('duckdb spatial sql: loads real layers and runs a query', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForSelector('canvas', { timeout: 30000 });
+
+  // Open the DuckDB panel via its toolbar button
+  const opened = await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
+    const b = buttons.find((x) => /duckdb spatial sql/i.test(x.getAttribute('title') ?? ''));
+    if (b) { b.click(); return true; }
+    return false;
+  });
+  expect(opened, 'DuckDB toolbar button not found').toBe(true);
+
+  // Wait for the panel header
+  await page.getByText('DuckDB Spatial SQL', { exact: true }).first().isVisible({ timeout: 20000 });
+  // Allow layer loading (8 layers from live APIs + DuckDB wasm init)
+  await page.waitForTimeout(30000);
+
+  // Verify at least one real table is registered (the panel shows "Tables:" + table-name buttons)
+  const body = await page.evaluate(() => document.body.innerText);
+  expect(body).toContain('earthquakes');
+  expect(body).toContain('flights');
+  expect(body).toContain('satellites');
+  console.log(`[duckdb] body contains earthquakes, flights, satellites`);
+
+  // Run a real query through the panel's textarea + Run button, assert a result table renders.
+  await page.evaluate(() => {
+    const ta = document.querySelector('textarea') as HTMLTextAreaElement | null;
+    if (ta) {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(ta, 'SELECT mag, place FROM earthquakes WHERE mag >= 6 ORDER BY mag DESC LIMIT 5');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  });
+  await page.waitForTimeout(500);
+  const runBtn = page.locator('button:has-text("Run Query")').first();
+  await runBtn.click();
+  await page.waitForSelector('text=/rows in [0-9]+ ms/', { timeout: 30000 });
+  const queryBody = await page.evaluate(() => document.body.innerText);
+  console.log(`[duckdb] query ran; contains result header: ${/rows in/.test(queryBody)}`);
+});

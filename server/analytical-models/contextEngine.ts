@@ -20,6 +20,7 @@ import {
   fetchVegetationIndices, fetchSeaIce,
   fetchTectonicContext, fetchSpaceWeather,
   fetchWaterData, fetchLandCover,
+  fetchAnnualMaximaGumbel, type AnnualMaximaFit,
   fetchTerrain, fetchShorelineBearing, fetchGlacierData,
   fetchVolcanoData, fetchTropoDelay,
   fetchPermafrostData, fetchDroughtData,
@@ -556,6 +557,10 @@ function mapInputs(
      *  Fetched at the second transect point so O_t is a genuine second
      *  gauge measurement; zeros when the study area is not a transect. */
     riverDownstream?: RiverData;
+    /** Genuine USGS annual-maxima Gumbel fit for extreme-value flood models
+     *  (40 / 41). Null when no gauge record could be resolved — the engine
+     *  reports honest NaN rather than a fabricated fit. */
+    annualMaxGumbel?: AnnualMaximaFit | null;
     era5: Era5HighFidelityData;
     imerg: ImergData;
     gldas: GldasData;
@@ -1324,11 +1329,18 @@ function mapInputs(
       };
     }
     case 40: {
-      const mu = u('mu', 100), beta = u('beta', 20);
-      // return-period filter → Gumbel quantile x_T = μ − β·ln(−ln(1−1/T)) (Gumbel 1958)
-      const T = Number(ctx.filters?.['return-period']);
-      const xT = Number.isFinite(T) && T > 1 ? mu - beta * Math.log(-Math.log(1 - 1 / T)) : u('x', 100);
-      return { mu, beta, x: xT };
+      // Genuine USGS annual-maxima Gumbel fit (real water-year maxima from
+      // the nearest active gauge). When a fit resolves, μ/β come from the
+      // measured record — NOT hardcoded defaults. Without a gauge record we
+      // report honest NaN (no fabricated flood statistics).
+      const fit = ctx.annualMaxGumbel;
+      const mu = fit ? fit.mu : Number.NaN;
+      const beta = fit ? fit.beta : Number.NaN;
+      // return-period filter (default 100 yr) → the engine computes the
+      // T-year return LEVEL as the primary result (not the CDF).
+      const Traw = Number(ctx.filters?.['return-period']);
+      const T = Number.isFinite(Traw) && Traw > 1 ? Traw : 100;
+      return { mu, beta, x: Number.NaN, T, __gumbelFit: fit ?? null };
     }
     case 41: {
       const xi = u('xi', 0.1), beta = u('beta', 20);
@@ -3286,6 +3298,14 @@ export async function computeWithContext(
     ? await safe(fetchFIRMSFires(lat, lon, 50), null, 25000)
     : null;
 
+  // Genuine USGS annual-maxima flood series → Gumbel (Type I) fit for
+  // extreme-value flood models (40 Gumbel / 41 GPD return levels). Real
+  // water-year maxima from the nearest active gauge (see fetchAnnualMaximaGumbel).
+  // Null when no gauge is found — the engine reports honest NaN, not a fit.
+  const annualMaxGumbel: AnnualMaximaFit | null = id === 40 || id === 41
+    ? await safe(fetchAnnualMaximaGumbel(lat, lon), null, 45000)
+    : null;
+
   // Genuine spatial observation network for interpolation tools
   // (37 kriging / 38 IDW): real per-station coordinates + latest values
   // from the USGS NWIS instantaneous network over the study bbox (or a
@@ -3313,6 +3333,7 @@ export async function computeWithContext(
     satThermal, columnWV,
     tide, rupture,
     fire,
+    annualMaxGumbel,
     interpObs,
     lat, lon,
     studyArea: context?.studyArea,
@@ -3424,6 +3445,10 @@ export async function computeWithContext(
   if (id === 75 && (terrain.slope > 0 || terrain.elevation > 0)) sources.push('srtm30m-terrain');
   if (tide) sources.push(tide.source);
   if (interpObs && interpObs.obs.length > 0) sources.push(`usgs-nwis-observations:${interpObs.paramCd}`);
+  if (annualMaxGumbel && (id === 40 || id === 41)) {
+    sources.push(`usgs-nwis-annual-maxima:${annualMaxGumbel.siteId}`);
+    log.push(`  Gumbel fit: ${annualMaxGumbel.years} water years (${annualMaxGumbel.startYear}-${annualMaxGumbel.endYear}) of daily discharge @ ${annualMaxGumbel.siteName} (${annualMaxGumbel.siteId})`);
+  }
 
   // Run the complete 7-stage scientific workflow
   const validationRules = Object.entries(enrichedInputs).map(([k, v]) => ({
@@ -3447,6 +3472,7 @@ export async function computeWithContext(
       // split-window tools expose these as secondary outputs).
       ...(satThermal?.bt10 != null ? { T10: satThermal.bt10 } : {}),
       ...(satThermal?.bt11 != null ? { T11: satThermal.bt11 } : {}),
+      ...(annualMaxGumbel ? { gumbel: { mu: annualMaxGumbel.mu, beta: annualMaxGumbel.beta, years: annualMaxGumbel.years, site: `${annualMaxGumbel.siteName} (${annualMaxGumbel.siteId})` } } : {}),
       location: { lat, lon },
     },
     location: { lat, lon },

@@ -138,6 +138,7 @@ const LazyLaunchReplayPanel = lazy(() => import('@/components/LaunchReplayPanel'
 const LazyRadioTunerPanel = lazy(() => import('@/components/RadioTunerPanel').then(m => ({ default: m.RadioTunerPanel })));
 const LazySatelliteImageryPanel = lazy(() => import('@/components/ui/SatelliteImageryPanel'));
 const LazySatelliteTrackerPanel = lazy(() => import('@/components/prithvi/SatelliteTrackerPanel').then(m => ({ default: m.SatelliteTrackerPanel })));
+const LazyDuckdbAnalyticsPanel = lazy(() => import('@/components/DuckdbAnalyticsPanel').then(m => ({ default: m.DuckdbAnalyticsPanel })));
 
 /** Suspense boundary for the lazy panels — a silent null keeps the layout
  *  stable while a panel chunk loads (panels render after user interaction,
@@ -1083,6 +1084,7 @@ export default function App() {
    *  is over a TomTom traffic segment entity. */
   const [trafficHover, setTrafficHover] = useState<{
     x: number; y: number; speed: number; freeFlow: number; confidence: number; lat: number; lon: number;
+    length?: number; travelTime?: number; freeFlowTravelTime?: number;
   } | null>(null);
   /** The rendered grid for re-coloring on scheme change. */
   const toolSurfaceGridRef = useRef<InterpGrid | null>(null);
@@ -1251,6 +1253,7 @@ export default function App() {
   const [showAnalyticsWorkbench, setShowAnalyticsWorkbench] = useState(false);
   const [showLaunchReplay, setShowLaunchReplay] = useState(false);
   const [showRadioTuner, setShowRadioTuner] = useState(false);
+  const [showDuckdbAnalytics, setShowDuckdbAnalytics] = useState(false);
   const [analyticalNeedsTwoPoints, setAnalyticalNeedsTwoPoints] = useState(false);
   const [demoRequest, setDemoRequest] = useState<{ toolId: number; key: number } | null>(null);
   const [sensorStyle, setSensorStyle] = useState<SensorStyleId>('normal');
@@ -2301,6 +2304,9 @@ export default function App() {
               speed, freeFlow: Number.isFinite(freeFlow) ? freeFlow : NaN,
               confidence: Number.isFinite(confidence) ? confidence : NaN,
               lat: Number(props.lat ?? NaN), lon: Number(props.lon ?? NaN),
+              length: Number(props.length) || undefined,
+              travelTime: Number(props.travelTime) || undefined,
+              freeFlowTravelTime: Number(props.freeFlowTravelTime) || undefined,
             });
           } else {
             setTrafficHover(null);
@@ -9835,6 +9841,15 @@ export default function App() {
         >
           <Radio size={14} />
         </button>
+        {/* DuckDB Spatial SQL — query live data layers with real SQL */}
+        <button
+          className={`btn-icon monitor-btn ${showDuckdbAnalytics ? 'active' : ''}`}
+          onClick={() => { setShowDuckdbAnalytics(p => !p); focusPanel('analytics'); }}
+          title="DuckDB Spatial SQL — run SQL over live data layers (earthquakes, flights, satellites, radio, weather)"
+          style={{ color: showDuckdbAnalytics ? '#34d399' : undefined }}
+        >
+          <Database size={14} />
+        </button>
         {/* Sensor-style switcher — 1–6, only one active at a time */}
         <div style={{ display: 'flex', gap: 1, marginLeft: 4, alignItems: 'center' }}>
           <span style={{ fontSize: 8, color: '#475569', marginRight: 2 }}>STYLE</span>
@@ -10204,25 +10219,55 @@ export default function App() {
         </div>
       )}
 
-      {/* Traffic hover readout — live TomTom speed/free-flow/confidence */}
+      {/* Traffic hover readout — live TomTom speed/free-flow/confidence/travel-time */}
       {trafficHover && (
         <div style={{
           position: 'absolute', left: trafficHover.x + 14, top: trafficHover.y + 14,
           zIndex: 91, pointerEvents: 'none',
-          padding: '6px 10px', borderRadius: 6,
-          background: 'rgba(0,0,0,0.82)', border: '1px solid rgba(249,115,22,0.4)',
+          padding: '8px 12px', borderRadius: 8,
+          background: 'rgba(0,0,0,0.85)', border: '1px solid rgba(249,115,22,0.35)',
           fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: '#e2e8f0',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.4)', minWidth: 150,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)', minWidth: 180, lineHeight: 1.5,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: trafficHover.speed / trafficHover.freeFlow > 0.85 ? '#22c55e' : trafficHover.speed / trafficHover.freeFlow > 0.6 ? '#eab308' : '#ef4444', flexShrink: 0 }} />
-            <span style={{ color: '#fdba74', fontWeight: 700 }}>TRAFFIC</span>
-            <span style={{ color: '#64748b', marginLeft: 'auto' }}>{trafficHover.speed} km/h</span>
+          {/* Header: status dot + label */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+            {(() => {
+              const ratio = trafficHover.freeFlow > 0 ? trafficHover.speed / trafficHover.freeFlow : 0;
+              const dotColor = ratio > 0.85 ? '#22c55e' : ratio > 0.6 ? '#eab308' : '#ef4444';
+              return <span style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />;
+            })()}
+            <span style={{ color: '#fdba74', fontWeight: 700, fontSize: 11 }}>TRAFFIC</span>
+            <span style={{ color: '#94a3b8', marginLeft: 'auto', fontSize: 11 }}>{trafficHover.speed} <span style={{ color: '#64748b', fontSize: 9 }}>km/h</span></span>
           </div>
-          <div style={{ color: '#94a3b8', fontSize: 9, lineHeight: 1.5 }}>
-            Free flow <b style={{ color: '#e2e8f0' }}>{Number.isFinite(trafficHover.freeFlow) ? `${trafficHover.freeFlow} km/h` : '—'}</b>
-            {' · '}Conf {Number.isFinite(trafficHover.confidence) ? trafficHover.confidence.toFixed(2) : '—'}
-            {Number.isFinite(trafficHover.lat) && <><br />{trafficHover.lat.toFixed(4)}°, {trafficHover.lon.toFixed(4)}°</>}
+          {/* Speed bar: visual comparison current vs free-flow */}
+          <div style={{ marginBottom: 5 }}>
+            <div style={{ background: 'rgba(148,163,184,0.15)', borderRadius: 3, height: 4, overflow: 'hidden' }}>
+              <div style={{
+                width: `${Math.min(100, (trafficHover.speed / Math.max(trafficHover.freeFlow, 1)) * 100)}%`,
+                height: '100%', background: 'linear-gradient(90deg, #ef4444, #eab308, #22c55e)',
+                borderRadius: 3, transition: 'width 0.15s',
+              }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#64748b', marginTop: 2 }}>
+              <span>0</span>
+              <span>Free flow {Number.isFinite(trafficHover.freeFlow) ? `${trafficHover.freeFlow} km/h` : '—'}</span>
+            </div>
+          </div>
+          {/* Detail row: travel time, delay, length */}
+          <div style={{ color: '#94a3b8', fontSize: 9, display: 'flex', flexWrap: 'wrap', gap: '4px 10px' }}>
+            {trafficHover.travelTime != null && (
+              <span>Travel <b style={{ color: '#e2e8f0' }}>{trafficHover.travelTime}s</b></span>
+            )}
+            {trafficHover.travelTime != null && trafficHover.freeFlowTravelTime != null && trafficHover.freeFlowTravelTime > 0 && (
+              <span>Delay <b style={{ color: trafficHover.travelTime > trafficHover.freeFlowTravelTime * 1.2 ? '#f87171' : '#4ade80' }}>
+                +{trafficHover.travelTime - trafficHover.freeFlowTravelTime}s
+              </b></span>
+            )}
+            {trafficHover.length != null && (
+              <span>Len <b style={{ color: '#e2e8f0' }}>{trafficHover.length.toFixed(1)} km</b></span>
+            )}
+            <span>Conf <b style={{ color: '#e2e8f0' }}>{Number.isFinite(trafficHover.confidence) ? `${(trafficHover.confidence * 100).toFixed(0)}%` : '—'}</b></span>
+            {Number.isFinite(trafficHover.lat) && <span style={{ color: '#64748b' }}>{trafficHover.lat.toFixed(4)}, {trafficHover.lon.toFixed(4)}</span>}
           </div>
         </div>
       )}
@@ -10440,6 +10485,9 @@ export default function App() {
           if (v) v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt ?? 30000), duration: 1.0 });
         }}
       /></PanelSuspense>
+
+      {/* DuckDB Spatial SQL Analytics */}
+      {showDuckdbAnalytics && <PanelSuspense><LazyDuckdbAnalyticsPanel open={showDuckdbAnalytics} onClose={() => setShowDuckdbAnalytics(false)} zIndex={getPanelZIndex('analytics') + 3} /></PanelSuspense>}
 
       {/* Analytics Workbench Panel */}
       <ErrorBoundary label="Analytics Workbench">        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} demoRequest={demoRequest} />
