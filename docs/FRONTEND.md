@@ -119,7 +119,6 @@ Scenario types and colors:
 | `flood_inundation` | Flood | `#3b82f6` |
 | `tsunami_wave` | Tsunami | `#06b6d4` |
 | `landslide` | Landslide | `#78350f` |
-| `data_layer` | Data Layer | `#10b981` |
 
 ---
 
