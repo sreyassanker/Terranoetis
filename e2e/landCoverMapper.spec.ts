@@ -54,7 +54,7 @@ function seriousErrors(errs: string[]): string[] {
 async function launch(): Promise<{ browser: import('@playwright/test').Browser; page: import('@playwright/test').Page }> {
   const browser = await chromium.launch({
     executablePath: CHROME_PATH,
-    args: ['--enable-webgl', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist'],
+    args: ['--enable-webgl', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--use-gl=angle', '--enable-unsafe-swiftshader'],
     headless: true,
   });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
