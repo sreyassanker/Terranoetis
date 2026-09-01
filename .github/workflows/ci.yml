@@ -134,6 +134,19 @@ jobs:
         run: npm run build
       - name: Create .env for dev servers
         run: cp .env.example .env || true
+      - name: Debug dev-login response
+        run: |
+          npx tsx server/index.ts & SRV=$!
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:3001/api/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          echo '--- dev-login body ---'
+          curl -s -X POST http://127.0.0.1:3001/api/auth/dev-login
+          echo ''
+          echo '--- dev-login status ---'
+          curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3001/api/auth/dev-login
+          kill $SRV 2>/dev/null || true
       - name: Run Playwright tests
         run: npx playwright test
         env:
