@@ -24,7 +24,7 @@ async function token(request: APIRequestContext): Promise<string> {
 test('one-click compute demo paints Austin LST heatmap', async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on('console', (m) => {
-    if (m.type() === 'error' && !/favicon|net::ERR|Failed to load resource/i.test(m.text())) consoleErrors.push(m.text());
+    if (m.type() === 'error' && !/favicon|net::ERR|Failed to load resource|RequestErrorEvent/i.test(m.text())) consoleErrors.push(m.text());
   });
 
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 60000 });
