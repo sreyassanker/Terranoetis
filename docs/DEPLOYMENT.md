@@ -1,0 +1,202 @@
+# Deployment & Operations
+
+Terranoetis runs in a Docker Compose stack with three services, or directly with Node.js for development. This document covers setup, configuration, production deployment, and CI/CD.
+
+---
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Quick Start (Development)](#quick-start-development)
+- [Docker Deployment](#docker-deployment)
+- [Configuration](#configuration)
+- [Environment Variables](#environment-variables)
+- [CI/CD Pipeline](#cicd-pipeline)
+- [Security](#security)
+
+---
+
+## Prerequisites
+
+| Dependency | Version | Purpose |
+|---|---|---|
+| Node.js | ≥ 20 | Runtime (matches CI and Docker image) |
+| npm | ≥ 10 | Package management |
+| Redis | 7.x | Caching, session, pub/sub (optional — graceful fallback to SQLite) |
+| Docker & Compose | Latest | Containerized deployment |
+| Cesium Ion token | — | Photorealistic 3D Tiles (set `VITE_CESIUM_ION_ACCESS_TOKEN`) |
+
+---
+
+## Quick Start (Development)
+
+```bash
+# Clone and install
+git clone https://github.com/sreyassanker/Terranoetis.git
+cd Terranoetis
+cp .env.example .env    # Fill in API keys as needed
+npm install
+
+# Start development servers
+npm run dev
+
+# In a separate terminal:
+npm run dev:client      # Vite dev server (port 3000) only
+npm run dev:server      # Express API (port 3001) only
+```
+
+The `dev` command starts the Vite dev server and the Express API concurrently. Redis is started automatically if installed; otherwise the server falls back to SQLite.
+
+### Verification
+
+```bash
+# Frontend
+open http://localhost:3000
+
+# API health
+curl http://localhost:3001/api/health
+```
+
+---
+
+## Docker Deployment
+
+### Services
+
+| Service | Image | Port | Purpose |
+|---|---|---|---|
+| `terranoetis` | Custom (Dockerfile) | 3001 (API) + 3000 (static) | Express API server + built frontend |
+| `redis` | `redis:7-alpine` | 6379 | Cache, session, pub/sub |
+| `causal-service` | Custom (Python) | 5001 | Causal inference microservice (DoWhy) |
+
+### Production Start
+
+```bash
+# Copy environment (edit with your production values)
+cp .env.example .env
+
+# Build and start all services
+docker compose up -d
+
+# Verify
+curl http://localhost:3001/api/health
+
+# View logs
+docker compose logs -f terranoetis
+```
+
+### Build
+
+```bash
+docker compose build    # Rebuild images
+docker compose up -d    # Restart with rebuilt images
+```
+
+### Data Persistence
+
+| Volume | Mount | Contents |
+|---|---|---|
+| `terranoetis-data` | `/app/data` | SQLite databases, runtime state |
+| `redis-data` | `/data` | Redis persistence |
+| `.env` mount | `/app/.env:ro` | Environment configuration (read-only) |
+
+---
+
+## Configuration
+
+### Ports
+
+| Variable | Default | Description |
+|---|---|---|
+| `PROXY_PORT` | `3001` | Express API port (empty = 3001) |
+| Vite port | `3000` | Frontend dev server (hardcoded) |
+| `PORT` | `3001` | Server runtime port (Docker) |
+
+### NODE_ENV Behavior
+
+| Mode | Dev (`development`) | Production (`production`) |
+|---|---|---|
+| JWT_SECRET | Auto-generated weak secret | Required, ≥ 32 chars |
+| ADMIN_BOOTSTRAP_PASSWORD | Auto-generated | Required, ≥ 16 chars |
+| Dev auto-login | Enabled | Disabled (returns 404) |
+| CSP / HSTS | Relaxed | Strict |
+| Startup validation | Warning | Hard error |
+
+---
+
+## Environment Variables
+
+The `.env` file configures 60+ integrated services. Missing keys disable the corresponding feature — services degrade gracefully.
+
+### Required (production)
+
+| Variable | Notes |
+|---|---|
+| `JWT_SECRET` | ≥ 32 characters |
+| `ADMIN_BOOTSTRAP_PASSWORD` | ≥ 16 characters, used to provision the initial admin account |
+| `VITE_CESIUM_ION_ACCESS_TOKEN` | For Google Photorealistic 3D Tiles |
+
+### Category Reference
+
+| Category | Variables |
+|---|---|
+| Server | `PROXY_PORT`, `CLIENT_ORIGIN`, `NODE_ENV` |
+| NASA Earthdata | `EARTHDATA_USERNAME`, `EARTHDATA_PASSWORD`, `EARTHDATA_EDL_TOKEN`, `USGS_ERS_*` |
+| Satellite & Imagery | `VITE_CESIUM_ION_ACCESS_TOKEN`, Sentinel Hub, Copernicus, NASA FIRMS, Planet Labs, Maxar |
+| Aviation | FlightAware, AirLabs |
+| Maritime | AISStream, MarineTraffic |
+| Traffic | TOMTOM_API_KEY |
+| Realtime Voice | `OPENAI_API_KEY` (primary), `GOOGLE_GEMINI_API_KEY` (Live fallback) |
+| AI/LLM | Google Gemini, Anthropic Claude, Groq, OpenRouter, DeepSeek, Bai, Ollama |
+| Error Tracking | `SENTRY_DSN` (optional, unset = no-op) |
+| Weather & Disaster | USGS, NASA EONET, GDACS, NOAA, OpenAQ, WAQI, Windy |
+| Economic & Financial | FRED, EIA, Alpha Vantage, ENTSO-E, UN Comtrade, IMF, GoldAPI |
+| Search & Scraping | Brave Search, Exa, Firecrawl, Guardian, NewsAPI |
+| Other | Telegram, Resend, ACLED, Cloudflare Radar, AbuseIPDB, AlienVault OTX, Gmail SMTP |
+
+---
+
+## CI/CD Pipeline
+
+The GitHub Actions workflow (`.github/workflows/ci.yml`) runs the following on every push and pull request:
+
+| Job | Description |
+|---|---|
+| TypeScript Check | `tsc --noEmit` for frontend + server |
+| Lint | `eslint .` |
+| Unit Tests | Vitest in `server/__tests__/unit` + `src/__tests__` |
+| Integration Tests | Vitest in `server/__tests__/Integration` |
+| Coverage | Vitest with `--coverage` |
+| Build | `npm run build` (tsc -b + vite build) |
+| Docker Build | Docker build verification |
+| Security Audit | `npm audit` |
+| Browser Tests | Playwright (requires display/GPU — skipped in CI) |
+
+### CI Notes
+
+- **Node version:** 20 (specified in workflow and `.nvmrc`)
+- **Browser tests** require WebGL/GPU; currently they run only on local machines with a display. They are present in the workflow but are inherently flaky in headless CI.
+- **Redis** is optional in both development and CI (the server falls back to SQLite gracefully)
+- **Docker Compose** is recommended for production
+
+---
+
+## Security
+
+| Control | Implementation |
+|---|---|
+| Authentication | JWT bearer tokens |
+| Password hashing | scrypt (RFC 7914, N=16384, r=8, p=1) |
+| Authorization | Role-based access control (RBAC) |
+| Rate limiting | Per-IP + per-user (middleware/rateLimiter.ts) |
+| Input validation | Zod schemas |
+| SSRF protection | `utils/ssrfGuard.ts` |
+| Security headers | CSP, HSTS, X-Frame-Options |
+| Prod mode only | Dev auto-login, auto-generated passwords disabled in NODE_ENV=production |
+
+### Best Practices
+
+- Always set a strong JWT_SECRET and ADMIN_BOOTSTRAP_PASSWORD in production
+- Keep the .env file out of version control (gitignored)
+- Periodically rotate API keys
+- Seal the Docker network if deploying in a multi-tenant environment

@@ -113,10 +113,9 @@ models/
 public/models/
 
 # Research papers (downloaded PDFs)
+ # Research papers (downloaded PDFs)
+docs/Research papers/
 docs/Research papers/*.pdf
-
-# Markdown files inside docs
-docs/**/*.md
 
 # Reports
 reports/
