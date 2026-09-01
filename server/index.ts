@@ -217,7 +217,10 @@ import { getCached, setCached, getCachedAt } from './routes/cacheService';
 import { registerOpenApiRoutes } from './routes/openapi';
 const app = express();
 app.set('trust proxy', 1);
-const PORT = Number(process.env.PROXY_PORT ?? 3001);
+const PORT = (() => {
+  const p = Number(process.env.PROXY_PORT);
+  return Number.isFinite(p) && p > 0 ? p : 3001;
+})();
 
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
 app.use(helmet({
