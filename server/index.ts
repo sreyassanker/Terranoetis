@@ -11738,7 +11738,7 @@ app.use(errorHandler);
 const httpServer = http.createServer(app);
 const wss = createWsServer(httpServer);
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   logger.info({ port: PORT }, 'server started');
   initSentry();
   initObservability({
