@@ -69,10 +69,11 @@ async function testTool(id: number): Promise<TestResult> {
       timeMs: elapsed,
     };
   } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
     return {
       id,
       status: 'FAIL',
-      error: err?.message?.slice(0, 120) || String(err).slice(0, 120),
+      error: msg.slice(0, 120),
       timeMs: Date.now() - start,
     };
   }
