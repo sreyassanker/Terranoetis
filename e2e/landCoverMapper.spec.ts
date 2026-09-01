@@ -12,6 +12,13 @@
 import { test, expect, chromium } from '@playwright/test';
 
 import { homedir } from 'os';
+import { existsSync } from 'fs';
+
+const MAC_CHROME = `${homedir()}/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
+// Use PW_CHROME_PATH if provided, else the local macOS dev path when it
+// exists; otherwise omit executablePath so Playwright auto-detects the
+// browser it installed for the current platform (Linux in CI).
+const CHROME_PATH = process.env.PW_CHROME_PATH ?? (existsSync(MAC_CHROME) ? MAC_CHROME : undefined);
 
 interface TerranoetisDebug {
   viewer: {
@@ -29,9 +36,6 @@ interface TerranoetisDebug {
     };
   };
 }
-
-const CHROME_PATH = process.env.PW_CHROME_PATH
-  ?? `${homedir()}/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
 
 const APP = 'http://localhost:3000';
 // Nile Delta / Cairo: urban + Nile water + irrigated green fields + desert.
