@@ -132,12 +132,19 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Build frontend
         run: npm run build
-      - name: Start server
+      - name: Start dev servers
         run: |
           cp .env.example .env || true
-          npx tsx server/index.ts &
-          sleep 8
-          curl -f http://localhost:3001/api/health || echo 'Server health check failed but continuing'
+          npm run dev &
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:3000/ >/dev/null 2>&1; then
+              echo 'Frontend is up on :3000'
+              break
+            fi
+            echo "waiting for frontend... ($i/20)"
+            sleep 5
+          done
+          curl -sf http://localhost:3000/ >/dev/null 2>&1 || echo 'Frontend health check failed but continuing'
       - name: Run Playwright tests
         run: npx playwright test
         env:
