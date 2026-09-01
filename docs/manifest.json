@@ -1,0 +1,15 @@
+{
+  "name": "Terranoetis — Real-Time Earth Intelligence",
+  "short_name": "Terranoetis",
+  "description": "Real-time Earth intelligence platform — 150+ peer-reviewed scientific equation engines, AI cognition, and live 3D geospatial visualization on CesiumJS.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#030712",
+  "theme_color": "#030712",
+  "orientation": "any",
+  "categories": ["science", "geospatial", "weather", "utilities"],
+  "icons": [
+    { "src": "terranoetis.png", "sizes": "96x96", "type": "image/png" }
+  ]
+}
