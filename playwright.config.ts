@@ -19,7 +19,7 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     launchOptions: {
-      args: ['--enable-webgl', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist'],
+      args: ['--enable-webgl', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--use-gl=angle', '--enable-unsafe-swiftshader'],
     },
   },
   projects: [

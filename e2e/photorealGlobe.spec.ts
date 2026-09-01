@@ -12,7 +12,7 @@ test.setTimeout(120000);
 
 test('photorealistic globe loads and sensor styles toggle', async () => {
   const browser = await chromium.launch({
-    args: ['--enable-webgl', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist'],
+    args: ['--enable-webgl', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--use-gl=angle', '--enable-unsafe-swiftshader'],
     headless: true,
   });
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
