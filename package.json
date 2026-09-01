@@ -14,9 +14,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\" \"bash -c 'redis-cli ping &>/dev/null || redis-server 2>/dev/null || true; exec tail -f /dev/null'\"",
+    "dev": "npm run dev:redis && concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "lsof -ti:3000 | xargs kill -9 2>/dev/null; vite",
     "dev:server": "tsx server/index.ts",
+    "dev:redis": "bash -c 'if redis-cli ping &>/dev/null; then echo \"[dev] redis already running\"; exit 0; fi; if command -v redis-server &>/dev/null; then redis-server --daemonize yes && sleep 0.5 && redis-cli ping &>/dev/null && echo \"[dev] redis started\"; else echo \"[dev] warning: redis not found — server will fall back to SQLite\"; fi'",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
