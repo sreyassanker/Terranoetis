@@ -696,7 +696,7 @@ npm install
 ### Development
 
 ```bash
-npm run dev           # Starts client (port 3000), server (port 3001), and Redis
+npm run dev           # Starts client (port 3000), server (port 3001); starts Redis if available, falls back to SQLite
 ```
 
 ### Build
@@ -709,10 +709,10 @@ npm run build         # TypeScript compilation + Vite production build
 
 ```bash
 npm test              # Vitest test runner — 1,624 unit + integration tests
-npx playwright test   # E2E (Playwright, headless Chromium): 8 tests across 5 specs —
+npx playwright test   # E2E (Playwright, headless Chromium): 9 tests across 5 specs —
                       # one-click compute demo, voice camera, radio tuner, DuckDB spatial SQL,
                       # live render, land-cover mapper, photorealistic globe + sensor styles,
-                      # material getType regression (scenario visualizers)
+                      # material getType regression. Requires a display / GPU (skipped in CI).
 ```
 
 ### Production
@@ -727,10 +727,12 @@ docker compose up -d  # Builds and starts all services
 
 | Script | Purpose |
 |--------|---------|
-| `dev` | Concurrent: server + client + redis |
+| `dev` | Concurrent: server + client; Redis via `dev:redis` (optional, falls back to SQLite) |
 | `dev:client` | Kill port 3000, start Vite dev server |
 | `dev:server` | `tsx server/index.ts` on port 3001 |
+| `dev:redis` | Start Redis if not already running and available; warn and skip otherwise |
 | `build` | `tsc -b && vite build` |
+| `preview` | `vite preview` — serve the production build locally |
 | `lint` | `eslint .` |
 | `test` | `vitest run` — full suite (1,624 unit + integration tests) |
 | `test:unit` | `vitest run` — unit tests only (`server/__tests__/unit` + `src/__tests__`) |
@@ -771,4 +773,4 @@ Services gracefully disable features when corresponding API keys are absent.
 
 [MIT](LICENSE)
 
-Copyright (c) 2026 Terreanoetis
+Copyright (c) 2026 Terranoetis
