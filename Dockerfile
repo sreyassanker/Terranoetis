@@ -8,7 +8,7 @@ RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 RUN npm ci
 
-COPY tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts tailwind.config.js postcss.config.js ./
+COPY tsconfig.json tsconfig.app.json tsconfig.node.json tsconfig.server.json tsconfig.scripts.json vite.config.ts tailwind.config.js postcss.config.js ./
 COPY index.html ./
 COPY public/ ./public/
 COPY src/ ./src/
