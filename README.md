@@ -59,18 +59,60 @@ npm run dev             # Vite (3000) + Express API (3001); Redis optional
 ## Repository Structure
 
 ```
-src/           React 19 + CesiumJS client
-server/        Express 4 + TypeScript API, cognition, analytics
-kaggle-kernels/  7 self-contained Python physics simulations
-data/          Runtime databases and ML models
-docs/          Architecture, API, frontend, backend, models, deployment
-e2e/           Playwright browser tests
-scripts/       Development and probe scripts
+terranoetis/
+├── src/                          # React 19 + CesiumJS frontend
+│   ├── main.tsx                  # Router: /, /v2/globe, /v2/canvas, /v2/scenarios, /v2/tours
+│   ├── App.tsx                   # Globe shell (10k+ lines, 14 lazy-loaded panels)
+│   ├── components/               # UI components (chat/, cockpit/, scenarios/, kaggle/, ...)
+│   ├── rendering/                # 40 Cesium rendering modules (ais, flights, satellites, ...)
+│   ├── hooks/                    # useChat, useWebSocket, useRealtimeVoice, ...
+│   ├── lib/                      # API client, chat store, DuckDB, land-cover pipeline, PDF
+│   ├── data/                     # Analytical models catalog, land cover classes
+│   ├── store/                    # Zustand chat store
+│   └── __tests__/                # Frontend unit tests
+│
+├── server/                       # Express 4 + TypeScript API
+│   ├── index.ts                  # App entry: routes, middleware, background services (11k+ lines)
+│   ├── agent.ts                  # Intent router + cognition pipeline
+│   ├── analytical-models/        # 150 equations, 7 parts, 26 domains
+│   ├── cognition/                # System 1 / System 2, MCTS, tree-of-thoughts
+│   ├── sentinel/                 # Continuous monitoring, anomaly detection
+│   ├── memory/ + memoryV2/       # Working/episodic/semantic/procedural memory
+│   ├── ai-router/                # Omninet 7-provider LLM router
+│   ├── digitalTwin/              # Regional analysis pipeline
+│   ├── sandboxV2/                # Simulation engines (FARSITE, ADCIRC, WRF, HYSPLIT)
+│   ├── causal/ + kgV2/           # Causal reasoning + knowledge graph
+│   ├── scenarios/                # Disaster scenario generation
+│   ├── data/                     # 30+ live data fetchers
+│   ├── db/                       # SQLite schema (47 tables), migrations
+│   ├── middleware/                # JWT auth, rate limiter, validation, audit
+│   ├── observability/            # Pino, OpenTelemetry, Sentry
+│   ├── selfImprover.ts           # Feedback-driven prompt evolution
+│   └── __tests__/                # 1,600+ unit + integration tests
+│
+├── kaggle-kernels/               # 7 Python physics simulations (earthquake, tsunami, volcano, ...)
+├── docs/                         # Topic-specific documentation
+│   ├── ARCHITECTURE.md
+│   ├── API.md
+│   ├── FRONTEND.md
+│   ├── BACKEND.md
+│   ├── MODELS.md
+│   └── DEPLOYMENT.md
+│
+├── e2e/                          # Playwright browser tests (9 tests, 5 specs)
+├── scripts/                      # Dev utilities + legacy test scripts
+├── data/                         # Runtime databases + ML models
+├── public/                       # Static assets (Cesium, DuckDB-WASM, fonts, models)
+│
+├── docker-compose.yml            # 3 services (terranoetis + redis + causal-service)
+├── Dockerfile                    # Multi-stage build (node:20-alpine)
+├── .github/workflows/ci.yml      # 9 CI jobs (typecheck, lint, test, build, docker, audit)
+├── package.json                  # ~95 dependencies, 14 scripts
+├── tsconfig.json                 # Project references: app + node + server + scripts
+├── vite.config.ts                # Vite 7 config with Cesium plugin
+├── playwright.config.ts          # Playwright: WebGL args, reuse server
+└── vitest.config.ts              # Vitest: include server + frontend tests
 ```
-
----
-
-## Development Commands
 
 | Command | Purpose |
 |---|---|
