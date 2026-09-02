@@ -1,6 +1,6 @@
 # Backend
 
-The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via `tsx`), exposing **297 REST endpoints** and a WebSocket channel. It coordinates live data ingestion, the 150-equation analytical engine, AI cognition, realtime services, and persistent state.
+The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via `tsx`), exposing **300 REST endpoints** and a WebSocket channel. It coordinates live data ingestion, the 150-equation analytical engine, AI cognition, realtime services, and persistent state.
 
 ---
 
@@ -97,6 +97,34 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 | `plugins/` | Plugin system + example plugin |
 | `maritime/` | AIS tracker |
 | `simulation/` | Real-data bridge |
+
+---
+
+## Local GGUF Model
+
+The server can fall back to a **local LLM** via `llama-server` when cloud providers are unavailable. This is the `local-gguf` provider in the Omninet router.
+
+### Auto-launch
+
+On startup, the server checks for `models/LFM2.5-2.6B-Q4_K_M.gguf`. If found, it spawns `llama-server` on port **11436** (configurable via `LLAMA_SERVER_PATH`). The local model is then available as a drop-in LLM provider.
+
+### One-click download
+
+The admin panel Home tab includes a "Download Model" button that streams the model from HuggingFace (`LiquidAI/LFM2.5-2.6B-GGUF`) directly into `models/`. The download features:
+
+- **Live progress bar** with percentage, speed (MB/s), and ETA
+- **Resume support** — writes to a `.partial` temp file; on interruption, re-triggering sends an HTTP `Range` header to HuggingFace and appends to the partial file
+- **Atomic finalisation** — the `.partial` file is renamed to the final path only when 100% complete, so a corrupt file never shows as "Installed"
+
+### API
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/admin/models/gguf-status` | Install state, file size, partial size, live download progress, speed, ETA |
+| `POST /api/admin/models/gguf-download` | Start or resume download (guards against re-download if already installed) |
+| `DELETE /api/admin/models/gguf` | Remove the model file and any partial download |
+
+Override the download URL with `GGUF_DOWNLOAD_URL` environment variable.
 
 ---
 

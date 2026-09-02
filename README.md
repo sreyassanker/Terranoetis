@@ -27,6 +27,7 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 - **Realtime voice** — OpenAI Realtime → Gemini Live (server-side brokering)
 - **Explainable AI** — evidence chains, uncertainty quantification, human-override workflow
 - **Global model selector** — pick any LLM provider (or local GGUF) from the AI chat panel
+- **One-click model install** — download the local LFM 2.5 2.6B Q4_K_M GGUF model directly from the admin panel with live progress, speed, ETA, and resume-on-interrupt
 - **Smart study-area flow** — auto-detects real OSM boundaries, or lets you draw/adjust one
 - **Worldwide timezone support** — set your location + timezone; all timestamps follow it
 
@@ -51,7 +52,7 @@ npm run dev             # Vite (3000) + Express API (3001); Redis optional
 | Document | Covers |
 |---|---|
 | [Architecture](docs/ARCHITECTURE.md) | System topology, request flow, background services, module inventory |
-| [API Reference](docs/API.md) | 297 REST endpoints + WebSocket channel |
+| [API Reference](docs/API.md) | 300 REST endpoints + WebSocket channel |
 | [Frontend](docs/FRONTEND.md) | React components, rendering engine, Kaggle GPU overlays, hooks |
 | [Backend](docs/BACKEND.md) | Server modules, cognition, memory, security, observability |
 | [Analytical Models](docs/MODELS.md) | The 150 equation engines, 7 parts, 25 domains |
@@ -106,6 +107,7 @@ terranoetis/
 ├── e2e/                          # Playwright browser tests (9 tests, 5 specs)
 ├── scripts/                      # Dev utilities + legacy test scripts
 ├── data/                         # Runtime databases + ML models
+├── models/                       # Local GGUF model (downloadable from admin panel) → gitignored
 ├── public/                       # Static assets (Cesium, DuckDB-WASM, fonts, models)
 │
 ├── docker-compose.yml            # 3 services (terranoetis + redis + causal-service)

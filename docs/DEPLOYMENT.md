@@ -141,6 +141,7 @@ The `.env` file configures 60+ integrated services. Missing keys disable the cor
 | Category | Variables |
 |---|---|
 | Server | `PROXY_PORT`, `CLIENT_ORIGIN`, `NODE_ENV` |
+| Local AI Model | `GGUF_DOWNLOAD_URL` (override HuggingFace download source), `LLAMA_SERVER_PATH` (path to `llama-server` binary) |
 | NASA Earthdata | `EARTHDATA_USERNAME`, `EARTHDATA_PASSWORD`, `EARTHDATA_EDL_TOKEN`, `USGS_ERS_*` |
 | Satellite & Imagery | `VITE_CESIUM_ION_ACCESS_TOKEN`, Sentinel Hub, Copernicus, NASA FIRMS, Planet Labs, Maxar |
 | Aviation | FlightAware, AirLabs |

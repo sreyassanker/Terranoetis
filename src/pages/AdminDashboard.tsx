@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getToken } from '../context/AuthContext';
-import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart, Sparkles, Brain, CheckCircle, XCircle, Home, MapPin, Clock, Search } from 'lucide-react';
+import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart, Sparkles, Brain, CheckCircle, XCircle, Home, MapPin, Clock, Search, Cpu } from 'lucide-react';
 import { useUserPrefStore } from '../store/userPrefStore';
 import { formatISTTime, getAllTimezones } from '../lib/formatTime';
 
@@ -99,6 +99,48 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
   };
 
   const token = getToken();
+
+  // Local GGUF model download state
+  const [ggufStatus, setGgufStatus] = useState<{ installed: boolean; size: number; partialSize: number; download: { running: boolean; received: number; total: number; done: boolean; error?: string; percent: number; resuming?: boolean; speedBytes: number; etaSeconds: number } } | null>(null);
+  const [ggufDownloading, setGgufDownloading] = useState(false);
+
+const formatEta = (seconds: number): string => {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+};
+
+  const fetchGgufStatus = useCallback(async () => {
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+    try {
+      const resp = await fetch('/api/admin/models/gguf-status', { cache: 'no-store', headers });
+      if (resp.ok) {
+        const d = await resp.json();
+        setGgufStatus(d);
+        // If a download is running, keep polling until done.
+        if (d?.download?.running && !d?.download?.done) {
+          setTimeout(fetchGgufStatus, 2000);
+        }
+      }
+    } catch { /* silent */ }
+  }, [token]);
+
+  const startGgufDownload = useCallback(async () => {
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+    setGgufDownloading(true);
+    try {
+      const resp = await fetch('/api/admin/models/gguf-download', { method: 'POST', headers });
+      if (resp.ok) {
+        const d = await resp.json();
+        void fetchGgufStatus();
+      }
+    } catch { /* silent */ }
+    setGgufDownloading(false);
+  }, [token, fetchGgufStatus]);
+
+  useEffect(() => {
+    void fetchGgufStatus();
+  }, [fetchGgufStatus]);
 
   const fetchMetrics = useCallback(async () => {
     try {
@@ -428,6 +470,101 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
                 <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
                   All timestamps across the app (chat, reports, panels) now follow this timezone.
                 </div>
+              </div>
+
+              {/* ── Local AI Model ── */}
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>
+                <Cpu size={13} style={{display:'inline',marginRight:4}} /> Local AI Model (GGUF)
+              </h3>
+              <div style={{
+                background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 14, marginBottom: 20,
+                border: '1px solid rgba(255,255,255,0.06)',
+              }}>
+                {ggufStatus?.installed ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, color: '#22c55e' }}>✅ Installed</span>
+                    <span style={{ fontSize: 10, color: '#64748b' }}>{(ggufStatus.size / 1e9).toFixed(1)} GB</span>
+                    <button
+                      onClick={startGgufDownload}
+                      style={{ padding: '6px 12px', borderRadius: 4, border: '1px solid rgba(59,130,246,0.4)', background: 'rgba(59,130,246,0.1)', color: '#60a5fa', cursor: 'pointer', fontSize: 10 }}>
+                      Re-download
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {ggufStatus?.download?.running ? (
+                      <div>
+                        <div style={{ fontSize: 11, color: '#f59e0b', marginBottom: 6 }}>
+                          {ggufStatus.download.resuming ? '↻ Resuming…' : '⏳ Downloading…'} ({ggufStatus.download.percent}%)
+                        </div>
+                        <div style={{ width: '100%', height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ width: `${ggufStatus.download.percent}%`, height: '100%', background: '#60a5fa', borderRadius: 3, transition: 'width 0.5s' }} />
+                        </div>
+                        <div style={{ fontSize: 9, color: '#64748b', marginTop: 4, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+                          <span>
+                            {ggufStatus.download.percent > 0
+                              ? `${(ggufStatus.download.received / 1e9).toFixed(1)} / ${(ggufStatus.download.total / 1e9).toFixed(1)} GB`
+                              : 'Starting…'}
+                          </span>
+                          <span>
+                            {ggufStatus.download.speedBytes > 0
+                              ? `${(ggufStatus.download.speedBytes / 1e6).toFixed(1)} MB/s`
+                              : ''}
+                            {ggufStatus.download.etaSeconds > 0
+                              ? ` · ~${formatEta(ggufStatus.download.etaSeconds)} left`
+                              : ''}
+                          </span>
+                        </div>
+                      </div>
+                    ) : ggufStatus?.partialSize && ggufStatus.partialSize > 0 ? (
+                      <div>
+                        <div style={{ fontSize: 11, color: '#f59e0b', marginBottom: 6 }}>
+                          ⚠ Interrupted — {(ggufStatus.partialSize / 1e9).toFixed(1)} GB downloaded so far (partial file kept for resume)
+                        </div>
+                        <button
+                          onClick={startGgufDownload}
+                          disabled={ggufDownloading}
+                          style={{
+                            padding: '8px 16px', borderRadius: 6, border: 'none',
+                            background: ggufDownloading ? 'rgba(59,130,246,0.3)' : 'rgba(59,130,246,0.8)',
+                            color: '#fff', cursor: ggufDownloading ? 'not-allowed' : 'pointer', fontSize: 12,
+                          }}>
+                          {ggufDownloading ? 'Starting…' : '↻ Resume Download'}
+                        </button>
+                      </div>
+                    ) : ggufStatus?.download?.error ? (
+                      <div>
+                        <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 6 }}>❌ Download failed: {ggufStatus.download.error}</div>
+                        <button
+                          onClick={startGgufDownload}
+                          disabled={ggufDownloading}
+                          style={{
+                            padding: '8px 16px', borderRadius: 6, border: 'none',
+                            background: ggufDownloading ? 'rgba(59,130,246,0.3)' : 'rgba(59,130,246,0.8)',
+                            color: '#fff', cursor: ggufDownloading ? 'not-allowed' : 'pointer', fontSize: 12,
+                          }}>
+                          {ggufDownloading ? 'Starting…' : 'Retry Download'}
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8 }}>
+                          Download the LFM 2.5 2.6B Q4_K_M GGUF model (~1.6 GB) so the local AI fallback works.
+                        </div>
+                        <button
+                          onClick={startGgufDownload}
+                          disabled={ggufDownloading}
+                          style={{
+                            padding: '8px 16px', borderRadius: 6, border: 'none',
+                            background: ggufDownloading ? 'rgba(59,130,246,0.3)' : 'rgba(59,130,246,0.8)',
+                            color: '#fff', cursor: ggufDownloading ? 'not-allowed' : 'pointer', fontSize: 12,
+                          }}>
+                          {ggufDownloading ? 'Starting…' : '⬇ Download Model'}
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* ── Quick access to all sections ── */}
