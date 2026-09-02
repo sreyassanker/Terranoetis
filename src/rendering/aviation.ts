@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { parseFlightState } from './flights';
 
 interface VolcanoEntry {
   lat: number; lon: number; name?: string; status?: string;
@@ -337,18 +338,15 @@ export function addMilitaryFlightEntities(
   const states = data.states || [];
   const icon = createMilitaryArrowIcon();
   for (let i = 0; i < states.length; i++) {
-    const s = states[i];
-    const lonVal = s[5];
-    const latVal = s[6];
-    if (lonVal == null || latVal == null) continue;
-    const lon = Number(lonVal);
-    const lat = Number(latVal);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    const icao24 = String(s[0] ?? '');
-    const callsign = String(s[1] ?? '').trim() || icao24;
-    const alt = Number(s[7] ?? 0);
-    const heading = Number(s[10] ?? 0);
-    const velocity = Number(s[9] ?? 0);
+    const f = parseFlightState(states[i] as unknown[]);
+    if (!f) continue;
+    const icao24 = f.icao24;
+    const callsign = f.callsign || icao24;
+    const alt = f.alt;
+    const heading = f.heading;
+    const velocity = f.velocity;
+    const lon = f.lon;
+    const lat = f.lat;
     const id = `${layerId}_${icao24}`;
     const pos = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
     const ent = viewer.entities.add({
