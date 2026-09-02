@@ -313,14 +313,20 @@ app.post('/api/auth/refresh', refreshToken);
 // engines in-process. Remote clients are rejected (non-loopback → 403), and
 // the normal authenticated /api/analytical-models/:id/execute stays as the
 // public surface. This is what powers the agent's "compute" intent end-to-end.
+// SECURITY: only req.socket.remoteAddress is checked (not req.ip) because
+// req.ip is spoofable via X-Forwarded-For when trust proxy is enabled.
+// Non-loopback requests also require admin auth.
 const isLoopback = (ip: string | undefined): boolean => {
   const v = (ip || '').replace(/^::ffff:/, '');
   return v === '127.0.0.1' || v === '::1' || v === 'localhost';
 };
-app.post('/api/analytical-models/:id/execute-internal', (req: express.Request, res: express.Response) => {
-  if (!isLoopback(req.ip) && !isLoopback(req.socket?.remoteAddress)) {
-    return res.status(403).json({ error: 'Internal endpoint only' });
+app.post('/api/analytical-models/:id/execute-internal', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (!isLoopback(req.socket?.remoteAddress)) {
+    // Remote caller: require a valid JWT (sets userRole) then admin role.
+    return authGuard(req, res, () => requireRole('admin')(req, res, next));
   }
+  next();
+}, (req: express.Request, res: express.Response) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid equation id' });
   const inputs: Record<string, number> = req.body?.inputs ?? {};
@@ -364,8 +370,7 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/auth/login' || req.path === '/auth/dev-login' || req.path === '/auth/refresh' ||
     req.path === '/health' || req.path === '/ready' || req.path === '/live' || req.path === '/metrics' ||
     req.path === '/config/apis' ||
-    req.path === '/openapi.json' || req.path === '/docs' ||
-    req.path === '/observability/traces' || req.path === '/observability/metrics'
+    req.path === '/openapi.json' || req.path === '/docs'
   ) {
     return next();
   }
@@ -397,7 +402,7 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/flights/military' || req.path === '/military-bases' || req.path === '/ucdp' ||
     req.path === '/satellites/tle' ||
     req.path === '/satnogs/transmitters' || req.path === '/ucs-satellites' ||
-    req.path === '/flights' || req.path === '/flights/all' || req.path === '/adsb-lol' || req.path === '/airlabs' ||
+    req.path === '/flights' || req.path === '/flights/all' || req.path === '/adsb-lol' || req.path === '/adsb-fi' || req.path === '/flightaware' || req.path === '/airlabs' ||
     req.path === '/mgrs' || req.path === '/openaq' || req.path.startsWith('/openaq/') ||
     req.path.startsWith('/ndbc/') || req.path === '/ndbc/stations' ||
     req.path === '/shakemap/recent' || req.path.startsWith('/shakemap/') ||
@@ -1096,6 +1101,31 @@ app.get('/api/health', async (_req: express.Request, res: express.Response) => {
   });
 });
 
+// Liveness probe — the process is up. Always 200 while the server runs.
+app.get('/api/live', (_req: express.Request, res: express.Response) => {
+  res.json({ ok: true, ts: Date.now(), uptime_ms: process.uptime() * 1000 });
+});
+
+// Readiness probe — the server is accepting traffic and its core dependency
+// (database) is reachable. Returns 503 when not ready.
+app.get('/api/ready', async (_req: express.Request, res: express.Response) => {
+  const checks: Record<string, { status: string; detail?: string }> = {};
+  try {
+    const db = getDb();
+    db.prepare('SELECT 1').get();
+    checks.db = { status: 'ok' };
+  } catch (e) {
+    checks.db = { status: 'fail', detail: (e as Error).message };
+  }
+  const ready = checks.db.status === 'ok';
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    checks,
+    uptime_ms: process.uptime() * 1000,
+    ts: Date.now(),
+  });
+});
+
 app.get('/api/memory/stats', async (_req: express.Request, res: express.Response) => {
   const tiers = await memorySystem.getStats();
   res.json({ tiers, timestamp: Date.now() });
@@ -1321,14 +1351,19 @@ app.post('/api/admin/plugins/:id/toggle', requireRole('admin'), (req: express.Re
 const GGUF_DOWNLOAD_URL = process.env.GGUF_DOWNLOAD_URL || 'https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/main/LFM2.5-2.6B-Q4_K_M.gguf';
 const GGUF_MODEL_NAME = GGUF_MODEL.replace('./models/', '');
 const GGUF_PARTIAL_PATH = `${GGUF_MODEL}.partial`;
-const ggufDownloadState: { running: boolean; received: number; total: number; done: boolean; error?: string; startedAt?: number; resuming?: boolean; resumeOffset: number } = { running: false, received: 0, total: 0, done: false, resumeOffset: 0 };
+const ggufDownloadState: { running: boolean; received: number; total: number; done: boolean; error?: string; startedAt?: number; resuming?: boolean; resumeOffset: number; cancelled: boolean } = { running: false, received: 0, total: 0, done: false, resumeOffset: 0, cancelled: false };
+let ggufDownloadAbort: AbortController | null = null;
 
 async function downloadGGUFModel(): Promise<void> {
   if (ggufDownloadState.running) return;
   ggufDownloadState.running = true;
   ggufDownloadState.done = false;
   ggufDownloadState.error = undefined;
+  ggufDownloadState.cancelled = false;
   ggufDownloadState.startedAt = Date.now();
+
+  const abort = new AbortController();
+  ggufDownloadAbort = abort;
 
   try {
     await fs.promises.mkdir('./models', { recursive: true });
@@ -1345,9 +1380,17 @@ async function downloadGGUFModel(): Promise<void> {
 
     const headers: Record<string, string> = {};
     if (resumeFrom > 0) headers.Range = `bytes=${resumeFrom}-`;
-    const resp = await fetch(GGUF_DOWNLOAD_URL, { headers });
+    const resp = await fetch(GGUF_DOWNLOAD_URL, { headers, signal: abort.signal });
     if (!resp.ok || !resp.body) {
       ggufDownloadState.error = `Download failed (HTTP ${resp.status})`;
+      ggufDownloadState.running = false;
+      return;
+    }
+    // If we asked for a partial (resume) but the server responded 200 with the
+    // FULL body (Range ignored), appending would double/corrupt the file.
+    // Require 206 Partial Content when resuming.
+    if (resumeFrom > 0 && resp.status !== 206) {
+      ggufDownloadState.error = `Server ignored Range request (HTTP ${resp.status}) — delete the .partial file and retry from scratch`;
       ggufDownloadState.running = false;
       return;
     }
@@ -1386,10 +1429,15 @@ async function downloadGGUFModel(): Promise<void> {
     ggufDownloadState.resuming = false;
     logger.info({ path: GGUF_MODEL, bytes: ggufDownloadState.received }, 'GGUF model download complete');
   } catch (e) {
-    ggufDownloadState.error = (e as Error).message;
-    logger.error({ err: e }, 'GGUF model download failed — partial file kept for resume');
+    if (ggufDownloadState.cancelled) {
+      logger.info('GGUF model download cancelled by user');
+    } else {
+      ggufDownloadState.error = (e as Error).message;
+      logger.error({ err: e }, 'GGUF model download failed — partial file kept for resume');
+    }
   } finally {
     ggufDownloadState.running = false;
+    ggufDownloadAbort = null;
   }
 }
 
@@ -1433,6 +1481,15 @@ app.post('/api/admin/models/gguf-download', requireRole('admin'), (_req: express
 
 app.delete('/api/admin/models/gguf', requireRole('admin'), (_req: express.Request, res: express.Response) => {
   try {
+    // Abort any active download first
+    if (ggufDownloadState.running) {
+      ggufDownloadState.cancelled = true;
+      ggufDownloadAbort?.abort();
+    }
+    // Reset state
+    Object.assign(ggufDownloadState, { running: false, received: 0, total: 0, done: false, error: undefined, startedAt: undefined, resuming: false, resumeOffset: 0, cancelled: false });
+    ggufDownloadAbort = null;
+
     let removed = false;
     if (fs.existsSync(GGUF_MODEL)) {
       fs.unlinkSync(GGUF_MODEL);
@@ -12088,6 +12145,30 @@ app.get('/api/earthquakes/summary', async (_req: express.Request, res: express.R
       else buckets[4]++;
     });
 
+    const recent = features
+      .sort((a, b) => (b.properties?.time ?? 0) - (a.properties?.time ?? 0))
+      .slice(0, 20)
+      .map(f => ({
+        mag: f.properties?.mag ?? 0,
+        place: f.properties?.place ?? 'Unknown',
+        time: f.properties?.time ?? 0,
+        felt: f.properties?.felt ?? 0,
+        tsunami: f.properties?.tsunami ?? 0,
+        lat: f.geometry?.coordinates?.[1] ?? 0,
+        lon: f.geometry?.coordinates?.[0] ?? 0,
+      }));
+    res.json({
+      total: mags.length,
+      buckets,
+      averageMag: mags.length > 0 ? (mags.reduce((s, v) => s + v, 0) / mags.length).toFixed(2) : '0',
+      maxMag: mags.length > 0 ? Math.max(...mags).toFixed(1) : '0',
+      recent,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── NEW FEATURES: Internet Outage, Conflict, Health, Economy, Cyber, Supply Chain ──
 
 // 1. IODA Internet Outage Monitor
@@ -12299,30 +12380,6 @@ app.get('/api/intelligence/disinformation', async (req: express.Request, res: ex
   } catch (e) {
     logger.warn({ err: e }, 'GDELT disinformation API failed');
     res.json({ articles: [], note: 'Disinformation data temporarily unavailable' });
-  }
-});
-
-    const recent = features
-      .sort((a, b) => (b.properties?.time ?? 0) - (a.properties?.time ?? 0))
-      .slice(0, 20)
-      .map(f => ({
-        mag: f.properties?.mag ?? 0,
-        place: f.properties?.place ?? 'Unknown',
-        time: f.properties?.time ?? 0,
-        felt: f.properties?.felt ?? 0,
-        tsunami: f.properties?.tsunami ?? 0,
-        lat: f.geometry?.coordinates?.[1] ?? 0,
-        lon: f.geometry?.coordinates?.[0] ?? 0,
-      }));
-    res.json({
-      total: mags.length,
-      buckets,
-      averageMag: mags.length > 0 ? (mags.reduce((s, v) => s + v, 0) / mags.length).toFixed(2) : '0',
-      maxMag: mags.length > 0 ? Math.max(...mags).toFixed(1) : '0',
-      recent,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
   }
 });
 

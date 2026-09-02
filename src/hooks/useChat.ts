@@ -250,6 +250,7 @@ export function useChat(
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    if (options.abortControllerRef) options.abortControllerRef.current = abortController;
     if (streamTabId) store.getState().registerTabAbort(streamTabId, abortController);
 
     // Hoisted so the catch block below can append to the live streamed bubble
@@ -580,6 +581,7 @@ export function useChat(
     cleanupThinkingSteps(true);
     setAiTyping(false);
     abortControllerRef.current = null;
+    if (options.abortControllerRef) options.abortControllerRef.current = null;
     if (streamTabId) store.getState().registerTabAbort(streamTabId, null);
   }, [extractLocation, focusLocation, toggleLayer, isLayerEnabled, sendToPipeline,
     sendMonitorCommand, sendScheduleCommand, executeAgentCommands, generateLocalResponse,
@@ -589,10 +591,11 @@ export function useChat(
     const activeTabId = store.getState().activeTabId;
     if (activeTabId) store.getState().abortTabStream(activeTabId);
     abortControllerRef.current?.abort();
+    if (options.abortControllerRef) options.abortControllerRef.current = null;
     if (activeTabId) store.getState().setTabTyping(activeTabId, false);
     else store.getState().setAiTyping(false);
     cleanupThinkingSteps(true);
-  }, [cleanupThinkingSteps, store]);
+  }, [cleanupThinkingSteps, store, options]);
 
   return {
     sendAI,
