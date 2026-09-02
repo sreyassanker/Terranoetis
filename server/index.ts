@@ -2358,8 +2358,12 @@ app.get('/api/flights', async (req: express.Request, res: express.Response) => {
     cache.set(key, data, 30);
     res.json(data);
   } catch (e) {
-    cache.set(key, { elements: [] }, 600);
-    res.json({ elements: [], note: 'Overpass query failed: ' + String(e) });
+    // Do NOT cache the empty result long-term: OpenSky anonymous access is
+    // heavily rate-limited (429). A 10-minute empty cache would blank the
+    // aviation tracker even after the limit expires. Cache briefly so bursts
+    // of requests don't hammer OpenSky, but let the panel recover quickly.
+    cache.set(key, { states: [] }, 30);
+    res.json({ states: [], note: 'OpenSky unavailable: ' + String(e) });
   }
 });
 
@@ -2405,7 +2409,12 @@ app.get('/api/flights/all', async (req: express.Request, res: express.Response) 
       const id = String(state[0] ?? '');
       if (!id || seen.has(id)) continue;
       seen.add(id);
-      merged.push(state);
+      // Defensive normalization to the canonical OpenSky 17-field layout so
+      // downstream consumers (panel parseState, travel-view tracking) never
+      // see ragged arrays regardless of which upstream source produced them.
+      const s = Array.isArray(state) ? [...state] : [];
+      while (s.length < 17) s.push(null);
+      merged.push(s);
     }
   }
 
@@ -2561,11 +2570,13 @@ app.get('/api/adsb-lol', async (req: express.Request, res: express.Response) => 
       states.push([
         ac.hex,
         (ac.flight || '').trim(),
-        '', '', '',
+        '', '', Math.floor(Date.now() / 1000),
         ac.lon, ac.lat,
         ((ac.alt_baro && typeof ac.alt_baro === 'number' ? ac.alt_baro : ac.alt_geom) || 0) * 0.3048,
-        false, (ac.gs || ac.speed || 0) * 0.514444, ac.track || ac.heading || 0, 0,
-        '', ac.rssi || 0,
+        false, (ac.gs || ac.speed || 0) * 0.514444, ac.track || ac.heading || 0,
+        (ac.baro_rate || 0) * 0.3048,
+        '', ((ac.alt_geom && typeof ac.alt_geom === 'number' ? ac.alt_geom : 0) || 0) * 0.3048,
+        ac.squawk ? String(ac.squawk) : '', false, 0,
       ]);
     }
   }
@@ -2603,11 +2614,13 @@ app.get('/api/adsb-fi', async (req: express.Request, res: express.Response) => {
       states.push([
         ac.hex,
         (ac.flight || '').trim(),
-        '', '', '',
+        '', '', Math.floor(Date.now() / 1000),
         ac.lon, ac.lat,
         ((ac.alt_baro && typeof ac.alt_baro === 'number' ? ac.alt_baro : ac.alt_geom) || 0) * 0.3048,
-        false, (ac.gs || ac.speed || 0) * 0.514444, ac.track || ac.heading || 0, 0,
-        '', ac.rssi || 0,
+        false, (ac.gs || ac.speed || 0) * 0.514444, ac.track || ac.heading || 0,
+        (ac.baro_rate || 0) * 0.3048,
+        '', ((ac.alt_geom && typeof ac.alt_geom === 'number' ? ac.alt_geom : 0) || 0) * 0.3048,
+        ac.squawk ? String(ac.squawk) : '', false, 0,
       ]);
     }
   }
@@ -2633,14 +2646,18 @@ app.get('/api/flightaware', async (req: express.Request, res: express.Response) 
     const data = await resp.json() as any;
     const flights = data.flights || [];
     const now = Math.floor(Date.now() / 1000);
+    // FlightAware returns altitude in FEET and groundspeed in KNOTS.
+    // Convert to OpenSky's meters / m/s so the merged states array is uniform.
     const states = flights.map((f: any) => [
       f.ident_icao || f.ident || '',
       f.ident || '',
-      '', '', '',
+      '', '', Math.floor(Date.now() / 1000),
       f.longitude || 0, f.latitude || 0,
-      f.altitude || 0,
-      false, f.groundspeed || 0, f.heading || 0, 0,
-      '', 0,
+      (f.altitude || 0) * 0.3048,        // feet → meters
+      false, (f.groundspeed || 0) * 0.514444,  // knots → m/s
+      f.heading || 0, (f.alt_rate || 0) * 0.3048,  // fpm → m/s
+      '', 0, '',
+      false, 0,
     ]);
     const result = { states, time: now };
     cache.set(cacheKey, result, 30);
@@ -2668,14 +2685,18 @@ app.get('/api/airlabs', async (req: express.Request, res: express.Response) => {
     const data = await resp.json() as any;
     const flights = data.response || [];
     const now = Math.floor(Date.now() / 1000);
+    // AirLabs units: alt=meters, speed=km/h, v_speed=m/s.
+    // Convert to OpenSky's meters / m/s.
     const states = flights.map((f: any) => [
       f.hex || f.flight_icao || '',
       f.flight_icao || f.flight_iata || '',
-      '', '', '',
+      f.flag || '', '', Math.floor(Date.now() / 1000),
       f.lng || f.lon || 0, f.lat || 0,
-      (f.alt || 0) * 0.3048,
-      false, (f.speed || 0) * 0.514444, f.dir || 0, 0,
-      '', 0,
+      f.alt || 0,                              // already meters
+      false, (f.speed || 0) / 3.6,             // km/h → m/s
+      f.dir || 0, f.v_speed || 0,              // heading, v_speed already m/s
+      '', f.alt || 0,                           // geo_alt same as baro_alt
+      f.squawk ? String(f.squawk) : '', false, 0,
     ]);
     const result = { states, time: now };
     cache.set(cacheKey, result, 30);

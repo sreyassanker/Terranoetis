@@ -119,6 +119,7 @@ docs/Research papers/*.pdf
 
 # Reports
 reports/
+docs/PANEL-ENGINEERING-GUIDE.md
 
 # Compiled JS artifacts (Vitest runs only the .ts/.tsx sources)
 *.test.js

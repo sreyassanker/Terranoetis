@@ -3,11 +3,15 @@ import * as Cesium from 'cesium';
 export interface FlightState {
   icao24: string;
   callsign: string;
+  country: string | null;
   lon: number;
   lat: number;
   alt: number;
   heading: number;
   velocity: number;
+  onGround: boolean;
+  verticalRate: number | null;
+  squawk: string | null;
   lastUpdate: number;
 }
 
@@ -20,22 +24,36 @@ export function altitudeBandColor(altMeters: number): string {
   return '#FF3B30';
 }
 
-export function parseOpenSkyState(state: unknown[]): FlightState | null {
+/**
+ * Parse a canonical OpenSky 17-field state array into a typed FlightState.
+ * Every aviation source (OpenSky, ADSB.lol, ADSB.fi, FlightAware, AirLabs)
+ * emits this same 17-field layout via the server's normalisation layer, so a
+ * single parser is safe for all of them.
+ */
+export function parseFlightState(state: unknown[]): FlightState | null {
   const lonVal = state[5];
   const latVal = state[6];
   if (lonVal == null || latVal == null) return null;
   const lon = Number(lonVal);
   const lat = Number(latVal);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const lastContact = state[4];
   return {
     icao24: String(state[0] ?? ''),
     callsign: String(state[1] ?? 'Unknown').trim() || 'Unknown',
+    country: state[2] ? String(state[2]) : null,
     lon,
     lat,
     alt: Number(state[7] ?? 0),
     heading: Number(state[10] ?? 0),
     velocity: Number(state[9] ?? 0),
-    lastUpdate: Number(state[4] ?? Date.now() / 1000) * 1000,
+    onGround: Boolean(state[8]),
+    verticalRate: state[11] != null && Number.isFinite(Number(state[11])) ? Number(state[11]) : null,
+    squawk: state[14] ? String(state[14]) : null,
+    // last_contact (state[4]) is epoch SECONDS; empty/absent → fall back to now.
+    lastUpdate: lastContact != null && lastContact !== '' && Number.isFinite(Number(lastContact))
+      ? Number(lastContact) * 1000
+      : Date.now(),
   };
 }
 
@@ -110,7 +128,7 @@ export class FlightDeadReckoning {
   updateFromApi(states: unknown[][]) {
     const next = new Map<string, FlightState>();
     for (const state of states) {
-      const f = parseOpenSkyState(state);
+      const f = parseFlightState(state);
       if (f) next.set(`${f.icao24}_${f.callsign}`, f);
     }
     this.flights = next;

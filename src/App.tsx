@@ -32,7 +32,7 @@ import { addBaseImagery, applyTerrainProvider, crossfadeImagery } from '@/viewer
 import { cinematicFlyTo, createEntityTracker, type TrackEntityType } from '@/viewer/camera.controller';
 import { addEarthquakeEntity, type UsgsFeature } from '@/rendering/earthquakes';
 import { loadTectonicPlates } from '@/rendering/tectonic';
-import { FlightDeadReckoning, altitudeBandColor, getPlaneIcon } from '@/rendering/flights';
+import { FlightDeadReckoning, altitudeBandColor, getPlaneIcon, parseFlightState } from '@/rendering/flights';
 import { AisVesselTracker } from '@/rendering/ais';
 import { GhostProtocol } from '@/rendering/ghostProtocol';
 import { ForkRenderer } from '@/rendering/forkRenderer';
@@ -4955,18 +4955,17 @@ export default function App() {
     const active = new Set<string>();
 
     for (const s of states) {
-      const sIcao = String(s[0] ?? '');
-      const lat = Number(s[6] ?? 0);
-      const lon = Number(s[5] ?? 0);
-      const alt = Number(s[7] ?? 0);
-      if (!sIcao || !lat || !lon || sIcao.toLowerCase() === tIcao) continue;
-      if (haversineKm(centerLat, centerLon, lat, lon) > BUFFER_KM) continue;
+      const f = parseFlightState(s as unknown[]);
+      if (!f) continue;
+      const sIcao = f.icao24;
+      if (!sIcao || sIcao.toLowerCase() === tIcao) continue;
+      if (haversineKm(centerLat, centerLon, f.lat, f.lon) > BUFFER_KM) continue;
 
       const key = sIcao;
       active.add(key);
-      const cs = String(s[1] ?? '').trim();
-      const hdg = Number(s[10] ?? 0);
-      const pos = Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(alt, 0));
+      const cs = f.callsign;
+      const hdg = f.heading;
+      const pos = Cesium.Cartesian3.fromDegrees(f.lon, f.lat, Math.max(f.alt, 0));
 
       let ent = map.get(key);
       if (!ent) {
@@ -5017,21 +5016,21 @@ export default function App() {
       const qcs = cs.toLowerCase();
       let trackedLat = 0, trackedLon = 0;
       for (const s of states) {
-        const sIcao = String(s[0] ?? '').toLowerCase();
-        const sCs = String(s[1] ?? '').trim().toLowerCase();
+        const f = parseFlightState(s as unknown[]);
+        if (!f) continue;
+        const sIcao = f.icao24.toLowerCase();
+        const sCs = f.callsign.toLowerCase();
         if (sIcao === icao.toLowerCase() || sCs === qcs || sCs.includes(qcs)) {
           const sim = flightTravelSimRef.current;
           if (!sim) return;
-          const lon = s[5]; const lat = s[6];
-          if (lon == null || lat == null) return;
-          sim.lon = Number(lon);
-          sim.lat = Number(lat);
-          sim.alt = Math.max(0, s[7] != null ? Number(s[7]) : (s[13] != null ? Number(s[13]) : sim.alt));
-          sim.velocity = s[9] != null ? Number(s[9]) : sim.velocity;
-          sim.heading = s[10] != null ? Number(s[10]) : sim.heading;
-          sim.verticalRate = s[11] != null ? Number(s[11]) : sim.verticalRate;
+          sim.lon = f.lon;
+          sim.lat = f.lat;
+          sim.alt = Math.max(0, f.alt);
+          sim.velocity = f.velocity;
+          sim.heading = f.heading;
+          sim.verticalRate = f.verticalRate ?? sim.verticalRate;
           sim.lastUpdate = Date.now();
-          flightTravelIcaoRef.current = String(s[0] ?? '');
+          flightTravelIcaoRef.current = f.icao24;
           trackedLat = sim.lat;
           trackedLon = sim.lon;
           break;

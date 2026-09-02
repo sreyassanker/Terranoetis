@@ -1,45 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Plane, Search, Loader2, MapPin, Globe, Radio } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
+import { parseFlightState, type FlightState } from '@/rendering/flights';
 
-interface FlightData {
-  id: string;
-  callsign: string;
-  country: string | null;
-  lat: number | null;
-  lon: number | null;
-  altitude: number | null;
-  velocity: number | null;
-  heading: number | null;
-  onGround: boolean;
-  verticalRate: number | null;
-  sqwk: string | null;
-}
-
-function parseState(state: unknown[]): FlightData | null {
-  const icao24 = String(state[0] ?? '');
-  if (!icao24) return null;
-  const lonVal = state[5];
-  const latVal = state[6];
-  if (lonVal == null || latVal == null) return null;
-  const lon = Number(lonVal);
-  const lat = Number(latVal);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  const cs = String(state[1] ?? '').trim();
-  return {
-    id: icao24,
-    callsign: cs || icao24.toUpperCase(),
-    country: state[2] ? String(state[2]) : null,
-    lat,
-    lon,
-    altitude: state[7] != null && Number.isFinite(Number(state[7])) ? Number(state[7]) : (state[13] != null && Number.isFinite(Number(state[13])) ? Number(state[13]) : null),
-    velocity: state[9] != null && Number.isFinite(Number(state[9])) ? Number(state[9]) : null,
-    heading: state[10] != null && Number.isFinite(Number(state[10])) ? Number(state[10]) : null,
-    onGround: Boolean(state[8]),
-    verticalRate: state[11] != null && Number.isFinite(Number(state[11])) ? Number(state[11]) : null,
-    sqwk: state[14] ? String(state[14]) : null,
-  };
-}
+// Live-aviation self-refresh cadence: matches OpenSky's public ~10s update
+// rate while keeping request volume low enough for the public/whitelisted feed.
+const REFRESH_MS = 15000;
 
 const SOURCE_COLOR = '#60a5fa';
 const SOURCE_BG = 'rgba(96,165,250,0.15)';
@@ -50,46 +16,56 @@ export function AviationTrackerPanel({ onClose, onTravelView, zIndex = 1000 }: {
   zIndex?: number;
 }) {
   const [query, setQuery] = useState('');
-  const [allFlights, setAllFlights] = useState<FlightData[]>([]);
+  const [allFlights, setAllFlights] = useState<FlightState[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<FlightData | null>(null);
+  const [selected, setSelected] = useState<FlightState | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchFlights = useCallback(async () => {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    try {
+      const resp = await fetch('/api/flights/all', { headers });
+      if (!resp.ok) return;
+      const data: { states?: unknown[][] } = await resp.json();
+      const flights: FlightState[] = [];
+      const states = data.states || [];
+      for (let i = 0; i < states.length; i++) {
+        const f = parseFlightState(states[i] as unknown[]);
+        if (f) flights.push(f);
+      }
+      setAllFlights(flights);
+    } catch { /* silent */ }
+  }, []);
 
   useEffect(() => {
     inputRef.current?.focus();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
-    fetch('/api/flights/all')
-      .then(r => r.json())
-      .then((data: { states?: unknown[][] }) => {
-        const flights: FlightData[] = [];
-        const states = data.states || [];
-        for (let i = 0; i < states.length; i++) {
-          const f = parseState(states[i] as unknown[]);
-          if (f) flights.push(f);
-        }
-        setAllFlights(flights);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
+    fetchFlights().then(() => setLoading(false));
+    pollRef.current = setInterval(fetchFlights, REFRESH_MS);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [fetchFlights]);
 
   const suggestions = useMemo(() => {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
-    const out: FlightData[] = [];
+    const out: FlightState[] = [];
     for (let i = 0; i < allFlights.length && out.length < 100; i++) {
       const f = allFlights[i];
       if (
         f.callsign.toLowerCase().includes(q) ||
-        f.id.toLowerCase().includes(q) ||
+        f.icao24.toLowerCase().includes(q) ||
         (f.country && f.country.toLowerCase().includes(q))
       ) out.push(f);
     }
     return out;
   }, [query, allFlights]);
 
-  const handleSelect = useCallback((f: FlightData) => {
+  const handleSelect = useCallback((f: FlightState) => {
     setSelected(f);
     setQuery(f.callsign);
   }, []);
@@ -100,6 +76,8 @@ export function AviationTrackerPanel({ onClose, onTravelView, zIndex = 1000 }: {
   const mpsToKts = (v: number) => (v * 1.94384);
   const mpsToKmh = (v: number) => (v * 3.6);
   const mToFt = (v: number) => (v * 3.28084);
+
+  // Remove the old FlightData / parseState — replaced by shared parseFlightState
 
   return (
     <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 340 }}>
@@ -127,7 +105,7 @@ export function AviationTrackerPanel({ onClose, onTravelView, zIndex = 1000 }: {
             <div style={{ marginTop: 6, maxHeight: 250, overflowY: 'auto', borderRadius: 4, background: 'rgba(0,0,0,0.4)' }}>
               {suggestions.map(f => (
                 <div
-                  key={f.id}
+                  key={f.icao24}
                   onClick={() => handleSelect(f)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
@@ -140,10 +118,10 @@ export function AviationTrackerPanel({ onClose, onTravelView, zIndex = 1000 }: {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                       <span style={{ color: '#e2e8f0', fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.callsign}</span>
-                      <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: SOURCE_BG, color: SOURCE_COLOR, flexShrink: 0 }}>{f.id}</span>
+                      <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: SOURCE_BG, color: SOURCE_COLOR, flexShrink: 0 }}>{f.icao24}</span>
                     </div>
                     <div style={{ color: '#64748b', fontSize: 9 }}>
-                      {f.country ?? 'Unknown'}{f.altitude != null ? ` · ${Math.round(mToFt(f.altitude)).toLocaleString()} ft` : ''}
+                      {f.country ?? 'Unknown'}{f.alt != null ? ` · ${Math.round(mToFt(f.alt)).toLocaleString()} ft` : ''}
                     </div>
                   </div>
                   <Globe size={10} style={{ color: '#64748b', flexShrink: 0 }} />
@@ -160,7 +138,7 @@ export function AviationTrackerPanel({ onClose, onTravelView, zIndex = 1000 }: {
               <div>
                 <div style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 600 }}>{selected.callsign}</div>
                 <div style={{ color: '#64748b', fontSize: 9 }}>
-                  <span style={{ padding: '1px 4px', borderRadius: 3, background: SOURCE_BG, color: SOURCE_COLOR, fontSize: 8 }}>{selected.id}</span>
+                  <span style={{ padding: '1px 4px', borderRadius: 3, background: SOURCE_BG, color: SOURCE_COLOR, fontSize: 8 }}>{selected.icao24}</span>
                   {selected.country ? ` · ${selected.country}` : ''}
                 </div>
               </div>
@@ -169,14 +147,13 @@ export function AviationTrackerPanel({ onClose, onTravelView, zIndex = 1000 }: {
               {[
                 { label: 'Latitude', value: fmt(selected.lat, v => `${v.toFixed(3)}°${v >= 0 ? 'N' : 'S'}`) },
                 { label: 'Longitude', value: fmt(selected.lon, v => `${v.toFixed(3)}°${v >= 0 ? 'E' : 'W'}`) },
-                { label: 'Altitude', value: fmt(selected.altitude, v => `${Math.round(mToFt(v)).toLocaleString()} ft`) },
+                { label: 'Altitude', value: fmt(selected.alt, v => `${Math.round(mToFt(v)).toLocaleString()} ft`) },
                 { label: 'Status', value: selected.onGround ? 'On Ground' : 'In Flight' },
               ].concat(
-                selected.velocity != null ? [{ label: 'Speed', value: `${Math.round(mpsToKmh(selected.velocity))} km/h` }] : [],
-                selected.velocity != null ? [{ label: 'Speed', value: `${Math.round(mpsToKts(selected.velocity))} kts` }] : [],
+                selected.velocity != null ? [{ label: 'Speed (km/h)', value: `${Math.round(mpsToKmh(selected.velocity))} km/h` }, { label: 'Speed (kts)', value: `${Math.round(mpsToKts(selected.velocity))} kts` }] : [],
                 selected.heading != null ? [{ label: 'Heading', value: `${selected.heading.toFixed(0)}°` }] : [],
                 selected.verticalRate != null ? [{ label: 'V/S', value: `${selected.verticalRate >= 0 ? '+' : ''}${Math.round(selected.verticalRate)} m/s` }] : [],
-                selected.sqwk ? [{ label: 'Squawk', value: selected.sqwk }] : [],
+                selected.squawk ? [{ label: 'Squawk', value: selected.squawk }] : [],
               ).map(d => (
                 <div key={d.label} style={{ padding: '6px 8px', borderRadius: 4, background: 'rgba(96,165,250,0.05)', border: '1px solid rgba(96,165,250,0.08)' }}>
                   <div style={{ color: '#64748b', fontSize: 8, textTransform: 'uppercase' }}>{d.label}</div>
@@ -190,7 +167,7 @@ export function AviationTrackerPanel({ onClose, onTravelView, zIndex = 1000 }: {
                 const travelLon = selected.lon ?? 0;
                 return (
                 <button
-                  onClick={() => onTravelView({ id: selected.id, name: selected.callsign, lat: travelLat, lon: travelLon, altitude: selected.altitude ?? 0, velocity: selected.velocity ?? 0, heading: selected.heading ?? 0, verticalRate: selected.verticalRate ?? 0 })}
+                  onClick={() => onTravelView({ id: selected.icao24, name: selected.callsign, lat: travelLat, lon: travelLon, altitude: selected.alt ?? 0, velocity: selected.velocity ?? 0, heading: selected.heading ?? 0, verticalRate: selected.verticalRate ?? 0 })}
                   style={{
                     flex: 1, padding: '6px', borderRadius: 4, border: 'none',
                     cursor: 'pointer', background: 'rgba(96,165,250,0.2)', color: SOURCE_COLOR, fontSize: 9,
