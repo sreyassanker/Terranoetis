@@ -119,7 +119,7 @@ Provide a concise, complete answer based on this reasoning.`;
     const start = Date.now();
 
     const _tree = new ReasoningTree(query, context);
-    const totEngine = new TreeOfThoughts(this.llmRouter, this.toolRegistry);
+    const totEngine = new TreeOfThoughts(this.llmRouter, this.toolRegistry, { timeoutMs: this.config.timeoutMs });
     const solveResult = await totEngine.solve(query, context);
     const elapsed = Date.now() - start;
 

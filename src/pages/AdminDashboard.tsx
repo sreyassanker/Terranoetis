@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getToken } from '../context/AuthContext';
-import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart, Sparkles, Brain, CheckCircle, XCircle } from 'lucide-react';
+import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart, Sparkles, Brain, CheckCircle, XCircle, Home, MapPin, Clock, Search } from 'lucide-react';
+import { useUserPrefStore } from '../store/userPrefStore';
+import { formatISTTime, getAllTimezones } from '../lib/formatTime';
 
-type Tab = 'metrics' | 'audit' | 'plugins' | 'health' | 'evolution';
+type Tab = 'home' | 'metrics' | 'audit' | 'plugins' | 'health' | 'evolution';
 
 interface HealthData {
   status: string;
@@ -50,6 +52,51 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
     url: '', name: '', content: '', zipFile: null, mode: 'url',
   });
   const [installStatus, setInstallStatus] = useState<string | null>(null);
+  const { pref, setPref } = useUserPrefStore();
+  const [locQuery, setLocQuery] = useState('');
+  const [locSearching, setLocSearching] = useState(false);
+  const [locResults, setLocResults] = useState<Array<{ lat: number; lon: number; label: string; timezone: string }>>([]);
+  const [now, setNow] = useState<Date>(new Date());
+  const [tzQuery, setTzQuery] = useState('');
+
+  // Full IANA timezone list — works for every user worldwide.
+  const ALL_TIMEZONES = useMemo(() => getAllTimezones(), []);
+  const filteredTz = tzQuery.trim()
+    ? ALL_TIMEZONES.filter(t => t.id.toLowerCase().includes(tzQuery.toLowerCase()) || t.label.toLowerCase().includes(tzQuery.toLowerCase()))
+    : ALL_TIMEZONES;
+
+  const searchLocation = useCallback(async () => {
+    const q = locQuery.trim();
+    if (!q || locSearching) return;
+    setLocSearching(true);
+    try {
+      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(q)}`, {
+        headers: { 'User-Agent': 'Terranoetis-EarthIntelligence/3.0', 'Accept': 'application/json' },
+      });
+      const data = await resp.json() as Array<{ lat: string; lon: string; display_name: string }>;
+      setLocResults(data.slice(0, 5).map(d => ({
+        lat: parseFloat(d.lat), lon: parseFloat(d.lon), label: d.display_name.split(',')[0] + ' — ' + d.display_name.split(',').slice(-1)[0].trim(), timezone: pref.timezone,
+      })));
+    } catch { setLocResults([]); }
+    setLocSearching(false);
+  }, [locQuery, locSearching, pref.timezone]);
+
+  // Pick a location result → update the pref (keeps current timezone until user changes it).
+  const selectLocation = (r: { lat: number; lon: number; label: string }) => {
+    setPref({ label: r.label, lat: r.lat, lon: r.lon });
+    setLocResults([]);
+    setLocQuery('');
+  };
+
+  // Use "my location" via browser geolocation.
+  const useMyLocation = () => {
+    if (!navigator.geolocation) { alert('Geolocation not supported'); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setPref({ label: 'My location', lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      () => alert('Could not get your location — allow location access and retry.'),
+      { timeout: 10000 },
+    );
+  };
 
   const token = getToken();
 
@@ -121,10 +168,15 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
         const errCount = data.errors?.length || 0;
         setInstallStatus(`Installed ${count} plugin(s)${errCount ? ` (${errCount} errors)` : ''}`);
       } else if (installForm.mode === 'github') {
+        // Normalise shorthand: "user/repo" → "https://github.com/user/repo"
+        let ghUrl = installForm.url.trim();
+        if (!ghUrl.startsWith('http://') && !ghUrl.startsWith('https://')) {
+          ghUrl = `https://github.com/${ghUrl.replace(/^\/+/, '')}`;
+        }
         const resp = await fetch('/api/admin/plugins/install', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(headers || {}) },
-          body: JSON.stringify({ url: installForm.url }),
+          body: JSON.stringify({ url: ghUrl }),
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({ error: 'Install failed' }));
@@ -179,6 +231,21 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
     void fetchAdminData();
   }, [token, fetchAdminData]);
 
+  const togglePlugin = useCallback(async (id: string, enabled: boolean) => {
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+    const resp = await fetch(`/api/admin/plugins/${encodeURIComponent(id)}/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(headers || {}) },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: 'Toggle failed' }));
+      alert(`Error: ${err.error || resp.statusText}`);
+      return;
+    }
+    void fetchAdminData();
+  }, [token, fetchAdminData]);
+
   const fetchHealth = useCallback(async () => {
     try {
       const resp = await fetch('/api/health', { cache: 'no-store' });
@@ -191,11 +258,12 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
   }, []);
 
   const fetchEvolution = useCallback(async () => {
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
     const [statusRes, archRes, intentRes, ecoRes] = await Promise.allSettled([
-      fetch('/api/self-evolution/status'),
-      fetch('/api/meta/architecture-proposals'),
-      fetch('/api/meta/intent-proposals'),
-      fetch('/api/self-evolution/proposals'),
+      fetch('/api/self-evolution/status', { headers }),
+      fetch('/api/meta/architecture-proposals', { headers }),
+      fetch('/api/meta/intent-proposals', { headers }),
+      fetch('/api/self-evolution/proposals', { headers }),
     ]);
     if (statusRes.status === 'fulfilled' && statusRes.value.ok) {
       const d = await statusRes.value.json();
@@ -234,7 +302,8 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
     void fetchEvolution();
     const interval = setInterval(fetchHealth, 5000);
     const evoInterval = setInterval(fetchEvolution, 30000);
-    return () => { clearInterval(interval); clearInterval(evoInterval); };
+    const clock = setInterval(() => setNow(new Date()), 1000);
+    return () => { clearInterval(interval); clearInterval(evoInterval); clearInterval(clock); };
   }, [fetchMetrics, fetchHealth, fetchAdminData, fetchEvolution]);
 
   if (!isAdmin) {
@@ -270,19 +339,122 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
         </div>
 
         <div style={{ display: 'flex', gap: 2, padding: '8px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-          {(['metrics', 'audit', 'plugins', 'health', 'evolution'] as Tab[]).map(t => (
+          {(['home', 'metrics', 'audit', 'plugins', 'health', 'evolution'] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)}
               style={{
                 padding: '8px 16px', borderRadius: '6px 6px 0 0', border: 'none',
                 background: tab === t ? 'rgba(59,130,246,0.15)' : 'transparent',
                 color: tab === t ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontSize: 13, fontWeight: tab === t ? 600 : 400,
               }}>
-              {t === 'metrics' ? <><BarChart3 size={13} style={{display:'inline',marginRight:4}} /> Metrics</> : t === 'audit' ? <><ClipboardList size={13} style={{display:'inline',marginRight:4}} /> Audit Logs</> : t === 'plugins' ? <><Plug size={13} style={{display:'inline',marginRight:4}} /> Plugins</> : t === 'health' ? <><Heart size={13} style={{display:'inline',marginRight:4}} /> Health</> : <><Sparkles size={13} style={{display:'inline',marginRight:4}} /> Evolution</>}
+              {t === 'home' ? <><Home size={13} style={{display:'inline',marginRight:4}} /> Home</> : t === 'metrics' ? <><BarChart3 size={13} style={{display:'inline',marginRight:4}} /> Metrics</> : t === 'audit' ? <><ClipboardList size={13} style={{display:'inline',marginRight:4}} /> Audit Logs</> : t === 'plugins' ? <><Plug size={13} style={{display:'inline',marginRight:4}} /> Plugins</> : t === 'health' ? <><Heart size={13} style={{display:'inline',marginRight:4}} /> Health</> : <><Sparkles size={13} style={{display:'inline',marginRight:4}} /> Evolution</>}
             </button>
           ))}
         </div>
 
         <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+          {tab === 'home' && (
+            <div>
+              {/* ── Live location + timezone ── */}
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>
+                <MapPin size={13} style={{display:'inline',marginRight:4}} /> Location &amp; Timezone
+              </h3>
+              <div style={{
+                background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 14, marginBottom: 20,
+                border: '1px solid rgba(255,255,255,0.06)',
+              }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+                  <span style={{ fontSize: 11, color: '#94a3b8' }}>Your location:</span>
+                  <div style={{ display: 'flex', flex: 1, minWidth: 220, gap: 6 }}>
+                    <Search size={13} style={{ alignSelf: 'center', color: '#64748b' }} />
+                    <input
+                      value={locQuery}
+                      onChange={e => setLocQuery(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') void searchLocation(); }}
+                      placeholder="Search a city / region (e.g. Delhi, Punjab, Tokyo)"
+                      style={{
+                        flex: 1, padding: '6px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                        background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 12, outline: 'none',
+                      }}
+                    />
+                    <button onClick={() => void searchLocation()} disabled={locSearching}
+                      style={{ padding: '6px 12px', borderRadius: 4, border: 'none', background: 'rgba(59,130,246,0.8)', color: '#fff', cursor: 'pointer', fontSize: 12 }}>
+                      {locSearching ? '…' : 'Search'}
+                    </button>
+                    <button onClick={useMyLocation} title="Use my current location"
+                      style={{ padding: '6px 12px', borderRadius: 4, border: '1px solid rgba(52,211,153,0.4)', background: 'rgba(52,211,153,0.1)', color: '#34d399', cursor: 'pointer', fontSize: 12 }}>
+                      📍 My Location
+                    </button>
+                  </div>
+                </div>
+                {locResults.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    {locResults.map((r, i) => (
+                      <button key={i} onClick={() => selectLocation(r)}
+                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', marginBottom: 3, background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 5, color: '#e2e8f0', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+                  <Clock size={13} style={{ color: '#64748b' }} />
+                  <span style={{ fontSize: 11, color: '#94a3b8' }}>Timezone:</span>
+                  <input
+                    value={tzQuery}
+                    onChange={e => setTzQuery(e.target.value)}
+                    placeholder="Search timezone (e.g. Shanghai, Moscow, UTC−3)"
+                    style={{
+                      flex: 1, minWidth: 180, padding: '6px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                      background: 'rgba(0,0,0,0.2)', color: '#e2e8f0', fontSize: 12, outline: 'none',
+                    }}
+                  />
+                  <select
+                    value={pref.timezone}
+                    onChange={e => { setPref({ timezone: e.target.value }); setTzQuery(''); }}
+                    style={{
+                      flex: 1, minWidth: 260, padding: '6px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)',
+                      background: 'rgba(0,0,0,0.3)', color: '#e2e8f0', fontSize: 12, outline: 'none',
+                    }}>
+                    {filteredTz.map(tz => (
+                      <option key={tz.id} value={tz.id}>
+                        {tz.offset} — {tz.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>
+                  Active location: <strong style={{ color: '#60a5fa' }}>{pref.label}</strong> · {pref.lat.toFixed(4)}, {pref.lon.toFixed(4)} · Now: <strong style={{ color: '#34d399' }}>{formatISTTime(now)} ({pref.timezone})</strong>
+                </div>
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
+                  All timestamps across the app (chat, reports, panels) now follow this timezone.
+                </div>
+              </div>
+
+              {/* ── Quick access to all sections ── */}
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Dashboard Sections</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
+                {([
+                  { key: 'metrics' as Tab, icon: <BarChart3 size={18} />, title: 'Metrics', desc: `${metrics ? Object.keys(metrics).length : '…'} Prometheus metrics` },
+                  { key: 'audit' as Tab, icon: <ClipboardList size={18} />, title: 'Audit Logs', desc: `${auditLogs.length} recorded events` },
+                  { key: 'plugins' as Tab, icon: <Plug size={18} />, title: 'Plugins', desc: `${plugins.length} plugins · install / remove` },
+                  { key: 'health' as Tab, icon: <Heart size={18} />, title: 'Health', desc: health ? `${health.status} · ${Object.keys(health.checks).length} checks` : '…' },
+                  { key: 'evolution' as Tab, icon: <Sparkles size={18} />, title: 'Evolution', desc: `${archProposals.length + intentProposals.length + ecoProposals.length} proposals` },
+                ]).map(c => (
+                  <button key={c.key} onClick={() => setTab(c.key)}
+                    style={{
+                      textAlign: 'left', padding: '14px 16px', background: 'rgba(255,255,255,0.03)', borderRadius: 10,
+                      border: '1px solid rgba(255,255,255,0.07)', color: '#e2e8f0', cursor: 'pointer', fontFamily: 'inherit',
+                      display: 'flex', flexDirection: 'column', gap: 4,
+                    }}>
+                    <span style={{ color: '#60a5fa' }}>{c.icon}</span>
+                    <strong style={{ fontSize: 14 }}>{c.title}</strong>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>{c.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {tab === 'metrics' && (
             <div>
               <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Prometheus Metrics</h3>
@@ -485,6 +657,15 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
                       )}
                     </div>
                     <div style={{ fontSize: 11, color: p.enabled ? '#22c55e' : '#ef4444' }}>{p.enabled ? 'Enabled' : 'Disabled'}</div>
+                    <button
+                      onClick={() => togglePlugin(p.id, !p.enabled)}
+                      title={p.enabled ? 'Disable plugin' : 'Enable plugin'}
+                      style={{
+                        padding: '4px 8px', borderRadius: 4,
+                        border: `1px solid ${p.enabled ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.4)'}`,
+                        background: 'transparent', color: p.enabled ? '#ef4444' : '#22c55e', cursor: 'pointer', fontSize: 10,
+                      }}
+                    >{p.enabled ? 'Disable' : 'Enable'}</button>
                     {p.id.startsWith('file:') && (
                       <button
                         onClick={() => removePlugin(p.id)}

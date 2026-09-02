@@ -1,6 +1,6 @@
 # Backend
 
-The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via `tsx`), exposing **294 REST endpoints** and a WebSocket channel. It coordinates live data ingestion, the 150-equation analytical engine, AI cognition, realtime services, and persistent state.
+The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via `tsx`), exposing **297 REST endpoints** and a WebSocket channel. It coordinates live data ingestion, the 150-equation analytical engine, AI cognition, realtime services, and persistent state.
 
 ---
 
@@ -23,7 +23,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 | Database | SQLite (`better-sqlite3`), Redis (`ioredis`) |
 | Realtime | WebSocket (`ws`), SSE |
 | Auth | JWT + RBAC, scrypt password hashing |
-| LLM routing | Omninet 7-provider router |
+| LLM routing | Omninet 8-provider router (Groq, Gemini, Bai, DeepSeek, Claude, Ollama, HuggingFace, local GGUF) |
 | Observability | Pino, OpenTelemetry, Sentry |
 | Sandbox | Python / Node / Bash execution |
 
@@ -59,7 +59,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 
 | Module | Purpose |
 |---|---|
-| `analytical-models/` | 150 peer-reviewed equation engines (7 parts, 26 domains), tool configs, workflows, context engine |
+| `analytical-models/` | 150 peer-reviewed equation engines (7 parts, 25 domains), tool configs, workflows, context engine |
 | `cognition/` | CognitiveOrchestrator, System 1 / System 2, MCTS, reasoning tree, tree-of-thoughts, execution orchestrator |
 | `sentinel/` | Continuous monitoring: stream processor, anomaly detector, correlation engine, alert intelligence, ambient/proactive insights |
 | `memory/` + `memoryV2/` | Working / episodic / semantic / procedural / predictive memory, sensory buffer, Redis adapter |
@@ -70,7 +70,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 | `causal/` | Causal reasoning: KG, discovery engine, entropy mixer, Python microservice (DoWhy) |
 | `kgV2/` | Knowledge graph v2: entity/edge generation, graph completion, counterfactual, evolving graph |
 | `multimodal/` | Satellite analyzer, seismic processor, radar interpreter, sentiment analyzer, fusion |
-| `ai-router/` | Omninet 7-provider LLM router |
+| `ai-router/` | Omninet 8-provider LLM router (incl. local GGUF fallback) |
 | `rag/` | Retrieval-augmented generation: embeddings, memory bridge |
 | `h3-engine/` | H3 indexing, spatial query, ClickHouse, TimescaleDB, stream processor |
 | `foundation-models/` | Weather forecaster, agriculture monitor, BayFire detector, MVT tile server, SpaceX API, STAC search |

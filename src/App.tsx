@@ -4,6 +4,7 @@ import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Cros
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
+import { formatIST, formatISTTime, getTimezone, timezoneLabel } from '@/lib/formatTime';
 import AdminDashboard from '@/pages/AdminDashboard';
 import { useAuth, authHeaders } from '@/context/AuthContext';
 import * as Cesium from 'cesium';
@@ -15,6 +16,7 @@ import { CameraControls } from '@/components/CameraControls';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import { throttledRender } from '@/lib/throttledRender';
 import { useChatStore } from '@/store/chatStore';
+import { useUserPrefStore } from '@/store/userPrefStore';
 import { ChatPanel } from '@/components/chat';
 import type { VirtualizedMessageListHandle } from '@/components/chat/VirtualizedMessageList';
 import { useCollaboration } from '@/hooks/useCollaboration';
@@ -1416,6 +1418,34 @@ export default function App() {
     table: { title: string; columns: string[]; rows: string[][] };
     recommendations: string[];
   }>(null);
+  const [digitalTwinLoading, setDigitalTwinLoading] = useState(false);
+  const openDigitalTwin = useCallback(async () => {
+    const v = viewerRef.current;
+    if (!v) return;
+    setDigitalTwinLoading(true);
+    try {
+      const cam = v.camera.positionCartographic;
+      const lat = Cesium.Math.toDegrees(cam.latitude);
+      const lon = Cesium.Math.toDegrees(cam.longitude);
+      const resp = await fetch('/api/digital-twin/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ message: 'Analyze the current view location', lat, lon, locationName: 'Current View', radiusKm: 30 }),
+      });
+      if (!resp.ok) throw new Error(`Digital twin analysis failed (${resp.status})`);
+      const data = await resp.json();
+      if (data?.panel) {
+        setDigitalTwinPanel(data.panel as any);
+        focusPanel('digital-twin');
+      } else {
+        showNotification('No digital twin data returned for this location', 'warning');
+      }
+    } catch (e) {
+      showNotification(`Digital twin failed: ${e instanceof Error ? e.message : String(e)}`, 'warning');
+    } finally {
+      setDigitalTwinLoading(false);
+    }
+  }, []);
   // Panel z-index stacking manager
   const [panelZStack, setPanelZStack] = useState<Record<string, number>>({});
   const panelZCounter = useRef(999);
@@ -1989,12 +2019,14 @@ export default function App() {
     }
   };
 
-  /* ── IST Clock ── */
+  /* ── Clock (selected timezone) ── */
+  const clockTz = useUserPrefStore(s => s.pref.timezone);
   useEffect(() => {
+    const tz = clockTz;
     const tick = () => {
       const now = new Date();
-      const ist = now.toLocaleString('en-IN', {
-        timeZone: 'Asia/Kolkata',
+      const formatted = now.toLocaleString('en-IN', {
+        timeZone: tz,
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -2003,14 +2035,14 @@ export default function App() {
         second: '2-digit',
         hour12: false,
       });
-      setUtcTime(ist + ' IST');
+      setUtcTime(`${formatted} ${timezoneLabel(tz)}`);
     };
     tick();
     const timer = unifiedTimerRef.current;
     timer.register('clock', tick, 1000);
     timer.start();
     return () => { timer.unregister('clock'); };
-  }, []);
+  }, [clockTz]);
 
   useEffect(() => {
     if (!cesiumElRef.current || viewerRef.current) return;
@@ -2928,7 +2960,7 @@ export default function App() {
   function pushIntelFeed(item: Omit<IntelFeedItem, 'timeLabel'>) {
     const entry: IntelFeedItem = {
       ...item,
-      timeLabel: new Date(item.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
+      timeLabel: new Date(item.timestamp).toLocaleTimeString('en-IN', { timeZone: getTimezone(), hour: '2-digit', minute: '2-digit', hour12: true }),
     };
     const next = [entry, ...intelFeedRef.current.filter(i => i.id !== item.id)];
     next.sort((a, b) => b.timestamp - a.timestamp); // Keep newest at the top
@@ -7575,6 +7607,7 @@ export default function App() {
             const label = (cmd.label as string) || 'Zone';
             const color = (cmd.color as string) || 'rgba(255,0,0,0.3)';
             const extrudedHeight = (cmd.extrudedHeight as number) || (cmd.height as number) || 0;
+            const outlineOnly = (cmd.outlineOnly as boolean) || false;
             if (Array.isArray(coords) && coords.length >= 3) {
               const positions = coords.map(c => Cesium.Cartesian3.fromDegrees(c[1], c[0]));
               const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
@@ -7582,9 +7615,9 @@ export default function App() {
               const entity = v.entities.add({
                 polygon: {
                   hierarchy: positions,
-                  material: fill,
+                  material: outlineOnly ? Cesium.Color.TRANSPARENT : fill,
                   outline: true,
-                  outlineColor: fill.withAlpha(0.9),
+                  outlineColor: outlineOnly ? Cesium.Color.LIME : fill.withAlpha(0.9),
                   height: 1.0,
                   ...(extrudedHeight > 0 ? { extrudedHeight: extrudedHeight + 1.0 } : {}),
                 },
@@ -7978,6 +8011,7 @@ export default function App() {
     } },
   );
   sendAIRef.current = sendAI;
+  (window as unknown as Record<string, unknown>).__sendAI = sendAI;
 
   async function extractLocation(text: string): Promise<{ lat: number; lon: number } | null> {
     if (typeof text !== 'string' || !text) return null;
@@ -8648,6 +8682,17 @@ export default function App() {
           flyToStudyAreaTopDown(v, area);
           setStudyDrawing(false);
           throttledRender(v);
+          // Sync the drawn area to the chat store so the AI can use it
+          const bbox = computeStudyAreaBbox(area);
+          if (bbox) useChatStore.getState().setStudyAreaBbox(bbox);
+          // Auto-send any pending study-area query
+          const pending = useChatStore.getState().pendingStudyAreaQuery;
+          if (pending) {
+            useChatStore.getState().setPendingStudyAreaQuery(null);
+            // Access the sendAI from the ref (set by ChatPanel)
+            const sendFn = (window as any).__sendAI;
+            if (typeof sendFn === 'function') sendFn(pending, { force: true, studyAreaAction: 'draw' });
+          }
         },
       });
     } catch (err) {
@@ -8655,6 +8700,29 @@ export default function App() {
       setStudyDrawing(false);
     }
   }, [analyticalNeedsTwoPoints]);
+  // Expose the drawing function globally so the StudyAreaPrompt can trigger it.
+  (window as unknown as Record<string, unknown>).__startStudyAreaDraw = () => startStudyDraw('RECTANGLE');
+  // Draw the auto-detected OSM boundary on the globe so the user can see (and
+  // optionally adjust) it before the analysis runs.
+  (window as unknown as Record<string, unknown>).__drawStudyAreaBbox = (bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null) => {
+    const v = viewerRef.current;
+    if (!v || !bbox) return;
+    clearStudyArea();
+    const rect = Cesium.Rectangle.fromDegrees(bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax);
+    studyAreaEntityRef.current = v.entities.add({
+      rectangle: {
+        coordinates: rect,
+        material: new Cesium.Color(0.2, 0.8, 0.3, 0.12),
+        outline: true,
+        outlineColor: Cesium.Color.LIME,
+        outlineWidth: 2,
+      },
+    });
+    v.camera.flyTo({ destination: rect });
+    throttledRender(v);
+    // Make sure the AI uses it even if the user just clicks "Use This Area".
+    useChatStore.getState().setStudyAreaBbox(bbox);
+  };
 
   const stopStudyDraw = useCallback(() => {
     if (drawerRef.current) {
@@ -8895,19 +8963,19 @@ export default function App() {
       rows.push({ key: 'Location', val: String(p.place ?? '') });
       rows.push({ key: 'Magnitude', val: `M${Number(p.magnitude ?? 0).toFixed(1)}` });
       rows.push({ key: 'Depth', val: `${String(p.depth ?? 'N/A')} km` });
-      rows.push({ key: 'Time', val: `${new Date(Number(p.time ?? 0)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium' })} IST` });
+      rows.push({ key: 'Time', val: `${new Date(Number(p.time ?? 0)).toLocaleString('en-IN', { timeZone: getTimezone(), dateStyle: 'medium', timeStyle: 'medium' })} ${getTimezone().split('/').pop()?.replace('_', ' ') || ''}` });
     } else if (layer === 'wildfires') {
       rows.push({ key: 'Status', val: String(p.status ?? 'Active') });
       rows.push({ key: 'Date', val: String(p.date ?? '') });
     } else if (layer === 'space_debris') {
       rows.push({ key: 'ID', val: String(p.id) });
-      rows.push({ key: 'Epoch', val: new Date(String(p.epoch)).toLocaleString('en-IN') });
+      rows.push({ key: 'Epoch', val: formatIST(String(p.epoch), { dateStyle: 'medium', timeStyle: 'short' }) });
       rows.push({ key: 'Semi-major Axis', val: `${Number(p.semimajorAxis).toFixed(2)} km` });
       rows.push({ key: 'Inclination', val: `${Number(p.inclination).toFixed(4)}°` });
       rows.push({ key: 'Eccentricity', val: `${Number(p.eccentricity).toFixed(6)}` });
       rows.push({ key: 'Mean Motion', val: `${Number(p.meanMotion).toFixed(4)} revs/day` });
     } else if (layer === 'lightning_strikes') {
-      rows.push({ key: 'Time', val: `${new Date(Number(p.time)).toLocaleTimeString('en-IN')} IST` });
+      rows.push({ key: 'Time', val: `${formatIST(Number(p.time), { dateStyle: 'medium', timeStyle: 'short' })} ${timezoneLabel()}` });
     } else if (layer === 'aurora_oval') {
       rows.push({ key: 'Probability', val: `${Number(p.probability)}%` });
     } else if (layer === 'submarine_cables') {
@@ -8924,7 +8992,7 @@ export default function App() {
       const updatedAt = Number(p.updatedAt ?? Date.now());
       rows.push({ key: 'Location', val: location });
       rows.push({ key: 'Category', val: String(p.category ?? 'Public webcam') });
-      rows.push({ key: 'Updated', val: `${new Date(updatedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST` });
+      rows.push({ key: 'Updated', val: `${new Date(updatedAt).toLocaleString('en-IN', { timeZone: getTimezone(), dateStyle: 'medium', timeStyle: 'short' })} ${timezoneLabel()}` });
     } else if (px.temperature != null) {
       rows.push({ key: 'Temp', val: `${Number(px.temperature).toFixed(1)}°C` });
       rows.push({ key: 'Humidity', val: `${Number(px.humidity ?? 0).toFixed(0)}%` });
@@ -9387,6 +9455,7 @@ export default function App() {
           <button className={`btn-icon ${showIntelFeed ? 'active' : ''}`} onClick={() => toggleLayer('intel_feed')} title="Intel Feed"><Activity size={16} /></button>
           <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => { setShowStudyArea(p => !p); focusPanel('study-area'); }} title="Study Area"><Crosshair size={16} /></button>
           <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => { setShowAI(p => !p); focusPanel('ai'); }} title="AI Assistant"><Bot size={16} /></button>
+          <button className={`btn-icon ${digitalTwinPanel ? 'active' : ''}`} onClick={openDigitalTwin} title="Digital Twin" disabled={digitalTwinLoading}>{digitalTwinLoading ? <Loader size={16} /> : <Target size={16} />}</button>
           <button className="btn-icon" onClick={flyToIndiaDirect} title="Fly to India"><Navigation2 size={16} /></button>
           <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share"><Share2 size={16} /></button>
 
@@ -9757,8 +9826,8 @@ export default function App() {
         <button className="tl-btn" onClick={stopTimeline}><Square size={14} /></button>
         <div className="tl-slider-wrap">
           <div className="tl-labels">
-            <span>{new Date(timelineRef.current.start).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}</span>
-            <span>{new Date(timelineRef.current.current).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST</span>
+            <span>{new Date(timelineRef.current.start).toLocaleDateString('en-IN', { timeZone: getTimezone() })}</span>
+            <span>{new Date(timelineRef.current.current).toLocaleString('en-IN', { timeZone: getTimezone(), dateStyle: 'medium', timeStyle: 'short' })} {timezoneLabel()}</span>
             <span>Now</span>
           </div>
           <input type="range" className="tl-slider" min="0" max="100" value={timelineValue}
@@ -10389,7 +10458,7 @@ export default function App() {
             onChange={e => setTimeSliderValue(Number(e.target.value))}
             style={{ flex: 1, height: 4, accentColor: '#60a5fa' }} />
           <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 80, textAlign: 'right' }}>
-            {new Date(timeSliderValue).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {formatISTTime(timeSliderValue)}
           </span>
           <button onClick={() => setShowTimeSlider(false)}
             style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 14 }}>✕</button>
@@ -10624,7 +10693,7 @@ export default function App() {
                   <div>Scenarios: <span style={{ color: '#ddd' }}>{lastDream.scenariosRun}</span></div>
                   <div>Model updates: <span style={{ color: '#ddd' }}>{lastDream.modelUpdates}</span></div>
                   <div>New edges: <span style={{ color: '#ddd' }}>{lastDream.newCausalEdges}</span></div>
-                  <div style={{ color: '#666', fontSize: 9, marginTop: 2 }}>{new Date(lastDream.timestamp).toLocaleString()}</div>
+                  <div style={{ color: '#666', fontSize: 9, marginTop: 2 }}>{formatIST(lastDream.timestamp, { dateStyle: 'medium', timeStyle: 'short' })} IST</div>
                 </div>
               ) : (
                 <div style={{ color: '#666', fontSize: 10 }}>No dream cycle recorded</div>

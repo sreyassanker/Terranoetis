@@ -26,6 +26,9 @@ export interface Plugin {
   description: string;
   tools?: PluginTool[];
   dataSources?: PluginData[];
+  /** Whether the plugin is currently active. Disabled plugins keep their file
+   *  on disk but their tools/data-sources are unregistered until re-enabled. */
+  enabled?: boolean;
 }
 
 export type PluginAPI = {
@@ -77,14 +80,46 @@ export class PluginManager {
     return this.dataHandlers;
   }
 
-  listPlugins(): Array<{ id: string; name: string; version: string; description: string; toolCount: number }> {
+  listPlugins(): Array<{ id: string; name: string; version: string; description: string; toolCount: number; enabled: boolean }> {
     return Array.from(this.plugins.values()).map(p => ({
       id: p.id,
       name: p.name,
       version: p.version,
       description: p.description,
       toolCount: (p.tools || []).length,
+      enabled: p.enabled !== false,
     }));
+  }
+
+  /**
+   * Enable or disable a plugin. Disabling unregisters its tools and data
+   * sources; enabling re-registers them from the stored tool references.
+   */
+  setEnabled(id: string, enabled: boolean): boolean {
+    const plugin = this.plugins.get(id);
+    if (!plugin) return false;
+    const wasEnabled = plugin.enabled !== false;
+    if (wasEnabled === enabled) return true;
+    plugin.enabled = enabled;
+    if (enabled) {
+      // Re-register tools
+      for (const tool of plugin.tools || []) {
+        this.toolHandlers.set(tool.name, tool);
+      }
+      for (const ds of plugin.dataSources || []) {
+        this.dataHandlers.set(ds.name, ds);
+      }
+    } else {
+      // Unregister tools
+      for (const tool of plugin.tools || []) {
+        this.toolHandlers.delete(tool.name);
+      }
+      for (const ds of plugin.dataSources || []) {
+        this.dataHandlers.delete(ds.name);
+      }
+    }
+    if (this.onToolChange) this.onToolChange();
+    return true;
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -308,6 +343,7 @@ module.exports.init = function(api) {
   }
 
   private loadPluginDefinition(plugin: Plugin): void {
+    if (plugin.enabled === undefined) plugin.enabled = true;
     this.plugins.set(plugin.id, plugin);
     for (const tool of plugin.tools || []) {
       this.toolHandlers.set(tool.name, tool);
@@ -359,6 +395,7 @@ module.exports.init = function(api) {
           version: '0.1.0',
           description: `Plugin from ${entry}`,
           tools: newTools,
+          enabled: true,
         });
         logger.info({ plugin: entry }, 'plugin loaded');
         pluginLoadsTotal.inc({ plugin_id: entry, status: 'success' });
@@ -417,6 +454,11 @@ module.exports.init = function(api) {
     const script = new vm.Script(wrapperCode, { filename: 'plugin' } as any);
     script.runInContext(context, { timeout: 5000 });
 
-    return sandboxModule.exports.init as ((api: PluginAPI) => void) | undefined;
+    // Support two plugin shapes:
+    //   1. module.exports = { init(api) {...} }   (object with init)
+    //   2. module.exports = function(api) {...}   (bare function)
+    const exp = sandboxModule.exports as { init?: unknown } | unknown;
+    if (typeof exp === 'function') return exp as (api: PluginAPI) => void;
+    return (exp as { init?: (api: PluginAPI) => void })?.init as ((api: PluginAPI) => void) | undefined;
   }
 }

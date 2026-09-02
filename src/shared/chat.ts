@@ -114,6 +114,15 @@ export interface ChatMessage {
   replayed?: boolean;
   /** Pattern id used for the replay */
   patternId?: string;
+  /** Interactive study-area request — the AI needs a boundary before computing. */
+  studyAreaRequest?: {
+    requestId?: string;
+    query: string;
+    location?: { lat: number; lon: number; label?: string };
+    /** Auto-detected boundary (real OSM region box) shown to the user for adjustment. */
+    detectedBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number };
+    options: Array<{ id: 'draw' | 'detected' | 'skip'; label: string; description: string }>;
+  };
 }
 
 /** A reusable workflow recipe captured from a chat run the user liked. */

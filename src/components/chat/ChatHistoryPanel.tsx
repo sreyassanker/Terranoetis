@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Search as SearchIcon, Pencil, Download, Trash2 } from 'lucide-react';
 import { useChatStore } from '@/store/chatStore';
 import { groupChatsByDate, getChat, saveChat } from '@/lib/chatStore';
+import { formatISTDate } from '@/lib/formatTime';
 
 export function ChatHistoryPanel({
   loadChat,
@@ -178,7 +179,7 @@ export function ChatHistoryPanel({
                     <>
                       <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chat.title}</div>
                       <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-                        {chat.messageCount} messages · {new Date(chat.updatedAt || chat.createdAt).toLocaleDateString()}
+                        {chat.messageCount} messages · {formatISTDate(chat.updatedAt || chat.createdAt)}
                       </div>
                     </>
                   )}

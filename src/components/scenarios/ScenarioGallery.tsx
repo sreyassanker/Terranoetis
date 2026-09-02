@@ -4,6 +4,7 @@ import type { ScenarioSummary } from './types';
 import { SCENARIO_TYPE_LABELS, SCENARIO_TYPE_COLORS } from './types';
 import ScenarioThumbnail from './ScenarioThumbnail';
 import Panel from '@/components/ui/Panel';
+import { formatISTDate } from '@/lib/formatTime';
 
 type SortKey = 'recency' | 'confidence' | 'complexity' | 'score';
 type FilterKey = 'all' | keyof typeof SCENARIO_TYPE_LABELS;
@@ -135,7 +136,7 @@ export default function ScenarioGallery({ scenarios: externalScenarios, loading,
                   </div>
                   <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4 }}>
                     {scenario.location.lat.toFixed(1)}, {scenario.location.lon.toFixed(1)}
-                    {' · '}{new Date(scenario.timestamp).toLocaleDateString()}
+                    {' · '}{formatISTDate(scenario.timestamp)}
                   </div>
                 </div>
               </div>

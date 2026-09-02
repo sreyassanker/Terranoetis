@@ -40,7 +40,7 @@ flowchart LR
 
     subgraph SERVER["EXPRESS.JS SERVER"]
         Security["Security &\nObservability"]
-        Agents["Agent &\nCognition\nSystem 1 + System 2\n7-LLM Router"]
+        Agents["Agent &\nCognition\nSystem 1 + System 2\n8-LLM Router"]
         Engine["Analytical Engine\n150 equations\n7-stage QC\nKaggle kernels"]
         Data["Data Layer\n30+ live APIs\nFetchers + Cache"]
         Realtime["Realtime\nSentinel · Reflex\nVoice Bridge\nPubSub"]
@@ -78,9 +78,9 @@ flowchart LR
 | Layer | Location | Details |
 |---|---|---|
 | Client | `src/` | React 19, TypeScript, Vite 7, Tailwind CSS 3, CesiumJS 1.140 |
-| Server | `server/` | Express 4, tsx runtime, 271 TypeScript source files across 41 module directories |
+| Server | `server/` | Express 4, tsx runtime, TypeScript source files across module directories |
 | Persistence | SQLite + Redis | better-sqlite3, ioredis |
-| Containerization | Docker Compose | `terranoetis` (app), `redis` (cache) |
+| Containerization | Docker Compose | `terranoetis` (app), `redis` (cache), `causal-service` (Python) |
 
 ---
 
@@ -119,7 +119,7 @@ flowchart LR
 
 | Route | View | Description |
 |---|---|---|
-| `/` | App | Main Cesium globe application (10,802 lines, 14 lazy-loaded panels) |
+| `/` | App | Main Cesium globe application (~10,871 lines, 14 lazy-loaded panels) |
 | `/v2/globe` | GlobePage | Dedicated Cesium globe viewport |
 | `/v2/canvas` | CanvasPage | Spatial canvas |
 | `/v2/scenarios` | ScenariosPage | Scenario gallery and editor |
@@ -235,7 +235,7 @@ flowchart LR
 
 | Module Directory | Purpose |
 |---|---|
-| `analytical-models/` | 150 peer-reviewed equation engines (7 parts, 26 domains), tool configs, workflows |
+| `analytical-models/` | 150 peer-reviewed equation engines (7 parts, 25 domains), tool configs, workflows |
 | `cognition/` | Cognitive orchestrator, System 1 / System 2, MCTS, reasoning tree, tree-of-thoughts |
 | `sentinel/` | Continuous monitoring: stream processor, anomaly detector, correlation engine, alert intelligence |
 | `memory/` + `memoryV2/` | Working/episodic/semantic/procedural/predictive memory, sensory buffer, Redis adapter |
@@ -246,7 +246,7 @@ flowchart LR
 | `causal/` | Causal reasoning: KG, discovery engine, entropy mixer, Python microservice (DoWhy) |
 | `kgV2/` | Knowledge graph v2: entity/edge generation, graph completion, counterfactual, evolving graph |
 | `multimodal/` | Satellite analyzer, seismic processor, radar interpreter, sentiment analyzer, fusion |
-| `ai-router/` | Omninet 7-provider LLM router |
+| `ai-router/` | Omninet 8-provider LLM router (incl. local GGUF fallback) |
 | `rag/` | Retrieval-augmented generation: embeddings, memory bridge |
 | `h3-engine/` | H3 indexing, spatial query, ClickHouse, TimescaleDB, stream processor |
 | `observability/` | Pino logger, metrics, OpenTelemetry, Sentry |
@@ -273,7 +273,7 @@ Used for caching, session state, WebSocket pub/sub, and queueing. The server **g
 
 | Category | Providers |
 |---|---|
-| LLM | Gemini, Claude, Groq, DeepSeek, OpenRouter, Ollama, local LFM (GGUF) |
+| LLM | Gemini, Claude, Groq, DeepSeek, OpenRouter, Bai, Ollama, HuggingFace, local LFM (GGUF) |
 | Live data | OpenSky, USGS, TomTom, Landsat, FIRMS, AIS, Launch Library 2, CelesTrak, UCS |
 | Realtime voice | OpenAI Realtime → Gemini Live (server-side brokering) |
 | Earth observation | NASA Earthdata, Sentinel Hub, Copernicus, Planet Labs, Maxar |

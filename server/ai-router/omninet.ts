@@ -68,6 +68,11 @@ const PROVIDER_CONFIGS: ProviderConfig[] = [
   { name: 'claude', type: 'claude', baseUrl: 'https://api.anthropic.com/v1', models: ['claude-3-haiku'], rateLimit: 5, tier: 3, apiKeyEnvVar: 'ANTHROPIC_API_KEY', supportsStreaming: true },
   { name: 'ollama', type: 'ollama', baseUrl: 'http://localhost:11434', models: ['llama3', 'mistral'], rateLimit: 9999, tier: 4, local: true, supportsStreaming: true, supportsEmbeddings: true },
   { name: 'huggingface', type: 'huggingface', baseUrl: 'https://api-inference.huggingface.co', models: ['meta-llama/Llama-3.1-8B'], rateLimit: 10, tier: 4, apiKeyEnvVar: 'HUGGINGFACE_API_KEY', supportsEmbeddings: true },
+  // Last-resort provider: local llama-server running the GGUF model.
+  // Used when all remote providers fail. The GGUF is loaded at boot by
+  // server/index.ts; if it can't start, this provider is unreachable but
+  // harmless (fetch fails, generator falls through).
+  { name: 'local-gguf', type: 'openai-compatible', baseUrl: 'http://localhost:11436/v1', models: ['local'], rateLimit: 30, tier: 4, local: true, supportsStreaming: true },
 ];
 
 // ── Query Classification ─────────────────────────────────────────
@@ -360,9 +365,11 @@ export class Omninet {
 
   private async callOpenAI(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
     const apiKey = this.resolveApiKey(config, options?.vaultKeys) || '';
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
     const resp = await fetch(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      headers,
       signal,
       body: JSON.stringify({
         model,
@@ -373,7 +380,14 @@ export class Omninet {
     });
     if (!resp.ok) throw new Error(`${config.name} HTTP ${resp.status}`);
     const data = await resp.json() as Record<string, unknown>;
-    return ((data.choices as Array<Record<string, unknown>>)?.[0]?.message as Record<string, unknown>)?.content as string || '';
+    const msg = (data.choices as Array<Record<string, unknown>>)?.[0]?.message as Record<string, unknown> | undefined;
+    // Local GGUF models may put their output in reasoning_content (not content).
+    // Fall back to reasoning_content when content is empty.
+    const content = msg?.content as string | undefined;
+    if (content && content.trim()) return content;
+    const reasoning = msg?.reasoning_content as string | undefined;
+    if (reasoning && reasoning.trim()) return reasoning;
+    return '';
   }
 
   private async callGemini(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
@@ -690,7 +704,10 @@ export class Omninet {
 
       let started = false;
       try {
-        if (config.type === 'openai-compatible' && apiKey) {
+        // Local providers (ollama, local-gguf) route through the non-streaming
+        // path: their SSE can carry reasoning_content only, and waiting for the
+        // full JSON reliably returns message.content.
+        if (config.type === 'openai-compatible' && apiKey && !config.local) {
           const resp = await fetch(`${config.baseUrl}/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -812,7 +829,7 @@ export class Omninet {
     }));
   }
 
-  getProviderDetails(): Array<{ name: string; type: string; tier: ProviderTier; status: HealthStatus; models: string[]; rateLimit: number; local: boolean; supportsStreaming: boolean; supportsEmbeddings: boolean; tokens: number; lastLatency: number; lastChecked: number }> {
+  getProviderDetails(): Array<{ name: string; type: string; tier: ProviderTier; status: HealthStatus; models: string[]; rateLimit: number; local: boolean; supportsStreaming: boolean; supportsEmbeddings: boolean; tokens: number; lastLatency: number; lastChecked: number; apiKeyEnvVar?: string }> {
     return this.providers.map(s => ({
       name: s.config.name,
       type: s.config.type,
@@ -826,6 +843,7 @@ export class Omninet {
       tokens: s.tokens,
       lastLatency: s.lastLatency,
       lastChecked: s.lastChecked,
+      apiKeyEnvVar: s.config.apiKeyEnvVar,
     }));
   }
 

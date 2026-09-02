@@ -108,7 +108,7 @@ The analytical pipeline executes in 7 stages:
 ## Key Features
 
 - **150 non-ML equations** — every model is derived from a peer-reviewed paper with DOI citation
-- **26 domains** — atmospheric, oceanic, seismic, cryospheric, space, and beyond
+- **25 domains** — atmospheric, oceanic, seismic, cryospheric, space, and beyond
 - **7-part structure** — logically grouped from Earth system core to advanced engineering
 - **7-stage quality control** — input validation → context enrichment → execution → unit checks → uncertainty → provenance → audit
 - **Real-data context** — every model receives live context (weather, terrain, ocean, seismic) from 30+ data feeds

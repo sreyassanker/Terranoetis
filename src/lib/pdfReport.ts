@@ -6,6 +6,7 @@
  */
 import { jsPDF } from 'jspdf';
 import type { ChatMessage } from '@/lib/chatStore';
+import { formatIST } from '@/lib/formatTime';
 
 interface ReportMeta {
   title: string;
@@ -126,7 +127,7 @@ export function exportConversationAsPDF(messages: ChatMessage[], meta: ReportMet
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(...INK_LIGHT);
-  const metaParts: string[] = [new Date().toLocaleString()];
+  const metaParts: string[] = [formatIST(new Date(), { dateStyle: 'medium', timeStyle: 'short' }) + ' IST'];
   metaParts.push(`${messages.length} messages`);
   if (meta.sessionId) metaParts.push(`Session ${meta.sessionId.slice(-8)}`);
   doc.text(metaParts.join('  •  '), MARGIN, y);
@@ -223,7 +224,7 @@ export function exportConversationAsPDF(messages: ChatMessage[], meta: ReportMet
   doc.setFontSize(8);
   doc.setTextColor(...INK_LIGHT);
   ensure(20);
-  doc.text(`— End of report — ${new Date().toLocaleString()}`, MARGIN, y);
+  doc.text(`— End of report — ${formatIST(new Date(), { dateStyle: 'medium', timeStyle: 'short' })} IST`, MARGIN, y);
 
   footer();
   doc.save(`${(meta.title || 'earth-intelligence-report').replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${new Date().toISOString().slice(0, 10)}.pdf`);

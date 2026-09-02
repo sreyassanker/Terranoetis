@@ -1,6 +1,6 @@
 # API Reference
 
-Terranoetis exposes **294 REST endpoints** plus a real-time **WebSocket** channel. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
+Terranoetis exposes **297 REST endpoints** plus a real-time **WebSocket** channel. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
 
 ---
 
@@ -66,6 +66,7 @@ The agent pipeline routes natural-language queries through intent recognition (S
 | GET | `/api/agent/context` | Conversation context |
 | GET | `/api/agent/events` | Agent event stream |
 | GET | `/api/agent/tiers` | Model tier configuration |
+| GET | `/api/agent/models` | List all available LLM models with availability status |
 | GET | `/api/agent/geocode` | Geocoding |
 | GET | `/api/agent/trace/:id` | Reasoning trace for an interaction |
 | GET | `/api/agent/memory` / DELETE | Conversation memory retrieval / clear |
@@ -79,7 +80,7 @@ The agent pipeline routes natural-language queries through intent recognition (S
 
 ## Analytical Models
 
-150 peer-reviewed equation engines across 26 domains and 7 parts.
+150 peer-reviewed equation engines across 25 domains and 7 parts.
 
 | Method | Path | Description |
 |---|---|---|
@@ -189,7 +190,9 @@ The analytical pipeline applies **7-stage quality control** (input validation, u
 | GET | `/api/admin/metrics` | System metrics |
 | GET | `/api/admin/audit-logs` | Audit log |
 | GET | `/api/admin/plugins` | Installed plugins |
-| POST | `/api/admin/plugins/install` | Install plugin |
+| POST | `/api/admin/plugins/install` | Install plugin (URL / GitHub / raw code) |
+| POST | `/api/admin/plugins/install-zip` | Install plugin from a ZIP archive |
+| POST | `/api/admin/plugins/:id/toggle` | Enable or disable a plugin |
 | DELETE | `/api/admin/plugins/:id` | Remove plugin |
 | GET | `/api/tools` | Registered tools |
 | DELETE | `/api/tools/:id` | Disable tool |

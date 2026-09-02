@@ -8,7 +8,9 @@ import type { ChatMessage, PlanCard, ToolEvent, AiRecipe } from '@/shared/chat';
 import { authHeaders } from '@/context/AuthContext';
 import { StreamingMarkdownRenderer } from '@/lib/advancedChat';
 import { RichMarkdown } from './RichMarkdown';
+import { formatISTTime } from '@/lib/formatTime';
 import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, TraceExpander } from './AdvancedChatViews';
+import { StudyAreaPrompt } from './StudyAreaPrompt';
 import { useChatStore } from '@/store/chatStore';
 
 interface ChatMessageRowProps {
@@ -188,6 +190,8 @@ export function ChatMessageRow({
           {msg.subAgents && msg.subAgents.length > 0 && <SubAgentActivityView activities={msg.subAgents} />}
           {msg.plan && <PlanCardView plan={msg.plan} onExecute={(p) => executePlanFromCard?.(p, msg.id)} onToggleStep={(sid) => togglePlanStep?.(msg.id, sid)} />}
 
+          {msg.studyAreaRequest && <StudyAreaPrompt request={msg.studyAreaRequest} sendAI={sendAI!} />}
+
           {msg.toolEvents && msg.toolEvents.filter(e => e.approvalRequired || e.status === 'blocked').map((ev, i) => (
             <ToolApprovalView key={`apr_${i}`} event={ev} onApprove={() => updateToolEvent(msg.id, ev.name, { status: 'success' })} onDeny={() => updateToolEvent(msg.id, ev.name, { status: 'error', error: 'Denied by user' })} />
           ))}
@@ -252,7 +256,7 @@ export function ChatMessageRow({
 
       {msg.content && (
         <div className="msg-actions">
-          {msg.timestamp && <span className="msg-time">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+          {msg.timestamp && <span className="msg-time">{formatISTTime(msg.timestamp)}</span>}
           <button className="msg-action" onClick={handleCopy} title="Copy message">
             <ClipboardList size={10} /> {copied ? 'Copied!' : 'Copy'}
           </button>

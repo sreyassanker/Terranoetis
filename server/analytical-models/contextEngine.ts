@@ -1,6 +1,6 @@
 /**
  * Context Engine — Real Data Integration
- * ── Maps real-world data to equation inputs for all 26 domains ──
+ * ── Maps real-world data to equation inputs for all 25 domains ──
  *
  * Fetches live data from public APIs (Open-Meteo, USGS, FIRMS, etc.)
  * and maps it to the correct input parameters for each equation.

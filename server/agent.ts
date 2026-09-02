@@ -6,6 +6,10 @@ import { logger } from './observability/logger';
 import { dynamicTools } from './toolsV2/toolGenerator';
 import { searchAnalyticalModels } from './analytical-models/index';
 
+// Geocode cache — OSM Nominatim is rate-limited (1 req/s), so cache aggressively.
+// 24h TTL; location names rarely change coordinates.
+const geocodeCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 });
+
 // ═══════════════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════
@@ -415,8 +419,11 @@ export class IntentRouter {
 
     // Panel command — open/close/toggle any UI panel (god-eye control).
     // Deterministic so "open X panel" always works regardless of LLM behavior.
+    // BUT: do NOT hijack analytical queries ("analyze satellite imagery ... to
+    // detect deforestation") into a panel open — those need the LLM/deep path.
+    const hasAnalysisVerb = /\b(analyze|analyse|analyzing|detect|classify|segment|monitor|compute|calculate|estimate|measure|predict|forecast|trend|compare)\b/i.test(lower);
     const panelMatch = this.detectPanelCommand(lower);
-    if (panelMatch) {
+    if (panelMatch && !hasAnalysisVerb) {
       return { type: 'panel_command', confidence: 0.97, panelId: panelMatch.panelId, panelAction: panelMatch.action, location };
     }
 
@@ -426,16 +433,15 @@ export class IntentRouter {
     }
 
     // Maritime queries with spatial context — route to deep_analysis (not just toggle)
-    if ((lower.includes('ship') || lower.includes('vessel') || lower.includes('maritime') || lower.includes('ais')) &&
-        (lower.includes('near') || lower.includes('find') || lower.includes('show') || lower.includes('track') ||
+    if ((/\bships?\b|\bvessels?\b|\bmaritime\b|\bais\b/i.test(lower)) &&
+        (lower.includes('near') || lower.includes('find') || lower.includes('track') ||
          lower.includes('coastline') || lower.includes('port') || location)) {
       return { type: 'deep_analysis', confidence: 0.85, location, layerIds: ['ais_vessels'] };
     }
 
     // Satellite tracking with spatial context — route to deep_analysis
     if ((lower.includes('satellite') || lower.includes('starlink') || lower.includes('gps satellite')) &&
-        (lower.includes('over') || lower.includes('near') || lower.includes('track') || lower.includes('show') ||
-         lower.includes('find') || location)) {
+        (lower.includes('over') || lower.includes('near') || lower.includes('track') || lower.includes('find') || location)) {
       return { type: 'deep_analysis', confidence: 0.85, location, layerIds: ['space_debris'] };
     }
 
@@ -443,13 +449,13 @@ export class IntentRouter {
     if ((lower.includes('flight') || lower.includes('plane') || lower.includes('aircraft') || lower.includes('adsb') ||
          lower.includes('military flight') || lower.includes('military aircraft')) &&
         (lower.includes('near') || lower.includes('within') || lower.includes('radius') || lower.includes('track') ||
-         lower.includes('show') || lower.includes('find') || /flight\s+\w+\d+/i.test(lower) || location)) {
+         lower.includes('find') || /flight\s+\w+\d+/i.test(lower) || location)) {
       return { type: 'deep_analysis', confidence: 0.85, location, layerIds: ['flight_tracks'] };
     }
 
     // Wildfire hotspot queries with spatial context
     if ((lower.includes('fire') || lower.includes('wildfire') || lower.includes('hotspot') || lower.includes('burning')) &&
-        (lower.includes('near') || lower.includes('show') || lower.includes('find') || lower.includes('display') ||
+        (lower.includes('near') || lower.includes('find') || lower.includes('display') ||
          lower.includes('hotspot') || location)) {
       return { type: 'deep_analysis', confidence: 0.85, location, layerIds: ['wildfires'] };
     }
@@ -529,7 +535,8 @@ export class IntentRouter {
     const isAnalysisQuery = lower.includes('compare') || lower.includes('correlation') ||
       lower.includes('versus') || lower.includes(' vs ') || lower.includes('difference') ||
       lower.includes('research') || lower.includes('investigate') || lower.includes('study') ||
-      lower.includes('analyze');
+      lower.includes('analyze') || /\bwhy\b/.test(lower) || /\bexplain\b/.test(lower) ||
+      /\bhow\b/.test(lower) || lower.includes('tell me') || /\bshow me why\b/.test(lower);
     if (!isAnalysisQuery) {
       if (lower.includes('earthquake') || lower.includes('quake') || lower.includes('seismic')) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['earthquakes'] };
@@ -546,10 +553,10 @@ export class IntentRouter {
       if (lower.includes('volcano') || lower.includes('volcanic') || lower.includes('eruption')) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['volcanoes', '29_wovodat'] };
       }
-      if (lower.includes('ship') || lower.includes('vessel') || lower.includes('maritime') || lower.includes('ais')) {
+      if (/\bships?\b|\bvessels?\b|\bmaritime\b|\bais\b/i.test(lower)) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['ais_vessels'] };
       }
-      if (lower.includes('satellite') || lower.includes('space') || lower.includes('debris') || lower.includes('orbit')) {
+      if (lower.includes('satellite') || lower.includes('starlink') || /\bspace\s*(?:debris|junk|trash|garbage)\b/.test(lower) || lower.includes('debris') || lower.includes('orbit')) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['space_debris'] };
       }
       if (lower.includes('aurora') || lower.includes('northern lights')) {
@@ -699,11 +706,21 @@ Return JSON: {"type":"...","confidence":0.0,"location":{"lat":0,"lon":0,"label":
    * LLM-based geocoding — resolves any location name to coordinates.
    */
   static async geocode(text: string, _apiKey: string): Promise<{ lat: number; lon: number; label: string } | null> {
-    // First try the local city database
+    // First, deterministic OpenStreetMap Nominatim geocoding — resolves any
+    // named place (cities, towns, regions, states, countries) the local DB may
+    // miss. Free, no API key, cached for 24h.
+    try {
+      const osm = await this.geocodeWithOSM(text);
+      if (osm) return osm;
+    } catch (e) {
+      logger.warn({ err: (e as Error).message }, 'OSM Nominatim geocoding failed');
+    }
+
+    // Next, the local city database (fast, offline fallback).
     const fast = this.extractLocation(text.toLowerCase());
     if (fast) return { lat: fast[0], lon: fast[1], label: fast[2] };
 
-    // If not found locally, try LLM geocoding
+    // If not found via OSM or locally, try LLM geocoding
     try {
       const prompt = `You are a geocoder. Given a location name, return its latitude and longitude.
 
@@ -728,10 +745,193 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
   }
 
   /**
+   * Resolve a named area to its OSM bounding box (the real region boundary),
+   * e.g. "Punjab" → { latMin, latMax, lonMin, lonMax }. Returns null when the
+   * geocoder only found a point (cities/landmarks usually have no region box).
+   * Used to auto-set the study area before falling back to the draw prompt.
+   */
+  static async geocodeBoundingBox(text: string, _apiKey: string): Promise<{ latMin: number; latMax: number; lonMin: number; lonMax: number } | null> {
+    // Normalise the same way geocodeWithOSM does, so the cache key matches.
+    let cleaned = text
+      .replace(/\b(?:show|display|open|show me|find|track|fly to|go to|zoom to|near|around|in|at|the)\b/gi, ' ')
+      .replace(/\b(?:and|then|also|versus|vs|or)\b/gi, ' ')
+      .replace(/[,.?!]+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    const LEADING_NOISE = /\b(compare|comparison|agricultural|agriculture|drought|risk|using|latest|soil|moisture|data|information|analysis|analyze|current|recent|show|display|open|find|track|weather|climate|flood|storm|tsunami|wildfire|earthquake|volcano|ship|vessel|flight|aircraft|satellite|compute|calculate|average|mean|median|total|sum|forecast|predict|estimate|simulate|model|pattern|trend|statistics?|frequency|magnitude|intensity|depth|height|area|region|zone|sector|annual|monthly|daily|hourly|global|local|regional|between|within|across|around|over|under|above|below)\b/gi;
+    let prev: string;
+    do {
+      prev = cleaned;
+      cleaned = cleaned.replace(LEADING_NOISE, ' ').replace(/\s{2,}/g, ' ').trim();
+    } while (cleaned !== prev);
+    if (cleaned.length < 2) return null;
+
+    const cacheKey = cleaned.toLowerCase();
+    const cached = geocodeCache.get<{ latMin: number; latMax: number; lonMin: number; lonMax: number }>(cacheKey + '_bbox');
+    if (cached) return cached;
+
+    // If the point geocode hasn't run yet, run it so its bbox gets cached.
+    if (!geocodeCache.get(cacheKey)) {
+      await this.geocode(text, _apiKey);
+    }
+    return geocodeCache.get<{ latMin: number; latMax: number; lonMin: number; lonMax: number }>(cacheKey + '_bbox') || null;
+  }
+
+  /**
+   * Resolve a named area to its REAL OSM boundary polygon (GeoJSON), e.g.
+   * "Punjab" → the actual state shape, "Amritsar district" → the district
+   * outline. Returns the outer ring(s) as [lon, lat] arrays, or null when only
+   * a point is available (cities, villages usually have no administrative
+   * polygon in Nominatim search results). Cached for 24h.
+   */
+  static async geocodePolygon(text: string, _apiKey: string): Promise<Array<Array<[number, number]>> | null> {
+    let cleaned = text
+      .replace(/\b(?:show|display|open|show me|find|track|fly to|go to|zoom to|near|around|in|at|the)\b/gi, ' ')
+      .replace(/\b(?:and|then|also|versus|vs|or)\b/gi, ' ')
+      .replace(/[,.?!]+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    const LEADING_NOISE = /\b(compare|comparison|agricultural|agriculture|drought|risk|using|latest|soil|moisture|data|information|analysis|analyze|current|recent|show|display|open|find|track|weather|climate|flood|storm|tsunami|wildfire|earthquake|volcano|ship|vessel|flight|aircraft|satellite|compute|calculate|average|mean|median|total|sum|forecast|predict|estimate|simulate|model|pattern|trend|statistics?|frequency|magnitude|intensity|depth|height|area|region|zone|sector|annual|monthly|daily|hourly|global|local|regional|between|within|across|around|over|under|above|below)\b/gi;
+    let prev: string;
+    do {
+      prev = cleaned;
+      cleaned = cleaned.replace(LEADING_NOISE, ' ').replace(/\s{2,}/g, ' ').trim();
+    } while (cleaned !== prev);
+    if (cleaned.length < 2) return null;
+
+    const cacheKey = cleaned.toLowerCase();
+    const cachedPoly = geocodeCache.get<Array<Array<[number, number]>>>(cacheKey + '_poly');
+    if (cachedPoly) return cachedPoly;
+
+    // Find the OSM feature (relation/way) for this place.
+    const searchUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=1&polygon_geojson=1&q=${encodeURIComponent(cleaned)}`;
+    const searchResp = await fetch(searchUrl, {
+      headers: { 'User-Agent': 'Terranoetis-EarthIntelligence/3.0 (geospatial intelligence platform)', 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!searchResp.ok) return null;
+    const searchData = await searchResp.json() as Array<{
+      osm_type?: string; osm_id?: number; class?: string; type?: string;
+      geojson?: { type?: string; coordinates?: unknown };
+    }>;
+    const hit = searchData[0];
+    if (!hit) return null;
+
+    // Prefer a real boundary (administrative / boundary features). Only accept
+    // polygon geometry — points give no boundary.
+    const geo = hit.geojson;
+    if (!geo || (geo.type !== 'Polygon' && geo.type !== 'MultiPolygon')) {
+      // Fall back to the lookup API using osm id (more reliable geometry).
+      if (hit.osm_type && hit.osm_id) {
+        const lookupUrl = `https://nominatim.openstreetmap.org/lookup?osm_ids=${hit.osm_type[0].toUpperCase()}${hit.osm_id}&format=json&polygon_geojson=1`;
+        const lresp = await fetch(lookupUrl, {
+          headers: { 'User-Agent': 'Terranoetis-EarthIntelligence/3.0', 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (lresp.ok) {
+          const ldata = await lresp.json() as Array<{ geojson?: { type?: string; coordinates?: unknown } }>;
+          const lgeo = ldata[0]?.geojson;
+          if (lgeo && (lgeo.type === 'Polygon' || lgeo.type === 'MultiPolygon')) {
+            return this.cachePolygon(cacheKey, lgeo);
+          }
+        }
+      }
+      return null;
+    }
+
+    return this.cachePolygon(cacheKey, geo);
+  }
+
+  private static cachePolygon(cacheKey: string, geo: { type?: string; coordinates?: unknown }): Array<Array<[number, number]>> | null {
+    const coords = geo.coordinates as unknown;
+    let rings: Array<Array<[number, number]>> = [];
+    if (geo.type === 'Polygon' && Array.isArray(coords) && Array.isArray(coords[0])) {
+      rings = (coords as Array<Array<[number, number]>>).filter(r => Array.isArray(r) && r.length >= 3);
+    } else if (geo.type === 'MultiPolygon' && Array.isArray(coords)) {
+      for (const poly of coords as Array<Array<Array<[number, number]>>>) {
+        if (Array.isArray(poly) && Array.isArray(poly[0]) && poly[0].length >= 3) {
+          rings.push(poly[0]);
+        }
+      }
+    }
+    if (rings.length === 0) return null;
+    geocodeCache.set(cacheKey + '_poly', rings);
+    return rings;
+  }
+
+  /**
+   * Geocode a location name via OpenStreetMap Nominatim. Deterministic, free,
+   * no API key required. Respects OSM's usage policy (1 req/s, valid
+   * User-Agent) and caches results for 24h.
+   */
+  private static async geocodeWithOSM(text: string): Promise<{ lat: number; lon: number; label: string } | null> {
+    // Normalise: strip the trigger phrase that may precede the place name.
+    let cleaned = text
+      .replace(/\b(?:show|display|open|show me|find|track|fly to|go to|zoom to|near|around|in|at|the)\b/gi, ' ')
+      .replace(/\b(?:and|then|also|versus|vs|or)\b/gi, ' ')
+      .replace(/[,.?!]+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    // Strip LEADING analytical/command words only (never "new"/"east" etc.
+    // which are part of place names like "New York"). "Compare agricultural
+    // drought risk in California" → "California"; "Punjab using the latest
+    // soil moisture data" → "Punjab".
+    const LEADING_NOISE = /\b(compare|comparison|agricultural|agriculture|drought|risk|using|latest|soil|moisture|data|information|analysis|analyze|current|recent|show|display|open|find|track|weather|climate|flood|storm|tsunami|wildfire|earthquake|volcano|ship|vessel|flight|aircraft|satellite|compute|calculate|average|mean|median|total|sum|forecast|predict|estimate|simulate|model|pattern|trend|statistics?|frequency|magnitude|intensity|depth|height|area|region|zone|sector|annual|monthly|daily|hourly|global|local|regional|between|within|across|around|over|under|above|below)\b/gi;
+    let prev: string;
+    do {
+      prev = cleaned;
+      cleaned = cleaned.replace(LEADING_NOISE, ' ').replace(/\s{2,}/g, ' ').trim();
+    } while (cleaned !== prev);
+    if (cleaned.length < 2) return null;
+    // Avoid geocoding pure command text that isn't a place.
+    if (/\b(earthquakes?|volcanoes?|flights?|aircraft|ships?|wildfires?|storms?|weather|space weather|deforestation|satellite imagery)\b/i.test(cleaned) && !/\b(?:in|near|at|around)\s+\w{2,}/i.test(text)) {
+      return null;
+    }
+
+    const cacheKey = cleaned.toLowerCase();
+    const cached = geocodeCache.get<{ lat: number; lon: number; label: string }>(cacheKey);
+    if (cached) return cached;
+
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(cleaned)}`;
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Terranoetis-EarthIntelligence/3.0 (geospatial intelligence platform)',
+        'Accept': 'application/json',
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json() as Array<{ lat: string; lon: string; display_name: string; boundingbox?: string[] }>;
+    const hit = data[0];
+    if (!hit || !hit.lat || !hit.lon) return null;
+    const lat = parseFloat(hit.lat);
+    const lon = parseFloat(hit.lon);
+    if (!isFinite(lat) || !isFinite(lon)) return null;
+    const label = hit.display_name.split(',')[0].trim() || cleaned;
+    // Also cache the bounding box if available (for study-area auto-detection).
+    const bbox = hit.boundingbox?.length === 4 ? {
+      latMin: parseFloat(hit.boundingbox[0]),
+      latMax: parseFloat(hit.boundingbox[1]),
+      lonMin: parseFloat(hit.boundingbox[2]),
+      lonMax: parseFloat(hit.boundingbox[3]),
+    } : null;
+    if (bbox && isFinite(bbox.latMin) && isFinite(bbox.latMax) && isFinite(bbox.lonMin) && isFinite(bbox.lonMax)) {
+      geocodeCache.set(cacheKey + '_bbox', bbox);
+    }
+    const result = { lat, lon, label };
+    geocodeCache.set(cacheKey, result);
+    return result;
+  }
+
+  /**
    * Fast location extraction from text — uses city db + coordinate regex.
    */
-  private static extractLocation(text: string): [number, number, string] | null {
-    // Direct coordinates: "35.68, 139.65"
+  static extractLocationPublic(text: string): { lat: number; lon: number; label: string } | null {
+    const tuple = IntentRouter.extractLocation(text);
+    return tuple ? { lat: tuple[0], lon: tuple[1], label: tuple[2] } : null;
+  }
+
+  static extractLocation(text: string): [number, number, string] | null {
     const coordMatch = text.match(/(-?\d+\.?\d*)\s*[,，]\s*(-?\d+\.?\d*)/);
     if (coordMatch) {
       const lat = parseFloat(coordMatch[1]);
@@ -838,13 +1038,23 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
     // the wind blow up high" — and resolves it deterministically to the right
     // equation instead of relying on the LLM. Requires a strong match (a top
     // hit from the relevance ranker); otherwise null (the LLM path handles it).
+    // Reject single-token matches from generic action words — "detect" hitting
+    // "Surface Water Detection" or "predict" hitting "Tide Prediction" are
+    // false positives. A lone generic word must not pin a scientific model.
+    const GENERIC_WEAK = new Set(['detect','show','compute','calculate','analyze','find','track','predict','forecast','risk','model','run','execute','display','enable','open','close','toggle','search','list','load','get','set','create','update','delete','remove','add','edit','save','export','import','view','pattern','current','recent','latest','average','mean','median','total','sum','count','number','amount','value','data','result','output','input','detail','summary','brief','quick','fast','slow','local','regional','global','near','around','within','between','over','under','above','below','area','region','zone','city','river','ocean','sea','land','coastal','inland']);
     try {
       const searchRes = searchAnalyticalModels(text, 3);
       const top = searchRes.results[0];
-      if (top && /name|description|terms/.test(top.match)) {
-        // Only trust the top hit when it scored meaningfully (name-level match,
-        // not a single generic token). Reject weak single-token matches.
-        if (top.id >= 1 && top.id <= 150) return top.id;
+      if (top) {
+        const m = top.match || '';
+        const isName = m.startsWith('exact name') || m.startsWith('name prefix') || m.startsWith('name');
+        if (isName) {
+          if (m.startsWith('name terms:')) {
+            const terms = m.split(':')[1].trim().split(',').map(t => t.trim()).filter(Boolean);
+            if (terms.length === 1 && GENERIC_WEAK.has(terms[0])) return null;
+          }
+          if (top.id >= 1 && top.id <= 150) return top.id;
+        }
       }
     } catch { /* fall through — LLM path handles ambiguous queries */ }
     return null;
@@ -941,8 +1151,8 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
     // analytical handler owns it and appends any extra commands itself.
     // When allowAnalytical is true (called from the analytical handler), still
     // parse panel/layer extras.
-    if (!opts.allowAnalytical && /\b(compute|calculate|run|execute|model|equation|formula|evaluate)\b/.test(lower)) {
-      if (this.detectAnalyticalModel(lower)) {
+    if (!opts.allowAnalytical && /\b(compute|calculate|run|execute|model|equation|formula|evaluate|analyze|analysis|trend|pattern|statistics?|average|mean|correlation)\b/i.test(lower)) {
+      if (this.detectAnalyticalModel(lower) || /\b(analyze|analysis|trend|pattern|statistics?|average|mean|correlation)\b/i.test(lower)) {
         return commands;
       }
     }
@@ -967,26 +1177,26 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
     else if (hasHideAnywhere && !hasShowAnywhere) defaultShow = false;
 
     const LAYER_KEYWORDS: Array<{ kw: RegExp; layerId: string }> = [
-      { kw: /earthquake|quake|seismic/i, layerId: 'earthquakes' },
-      { kw: /wildfire|fire|burning/i, layerId: 'wildfires' },
-      { kw: /flight|plane|aircraft|adsb/i, layerId: 'flight_tracks' },
-      { kw: /ship|vessel|maritime|ais/i, layerId: 'ais_vessels' },
-      { kw: /volcano|volcanic|eruption/i, layerId: 'volcanoes' },
-      { kw: /storm|hurricane|cyclone|typhoon/i, layerId: 'severe_storms' },
-      { kw: /satellite|space debris|debris|orbit/i, layerId: 'space_debris' },
-      { kw: /aurora|northern lights/i, layerId: 'aurora_oval' },
-      { kw: /lightning|thunderstorm/i, layerId: 'lightning_strikes' },
-      { kw: /precipitation|rainfall/i, layerId: 'precipitation' },
-      { kw: /wind map|wind speed/i, layerId: 'wind' },
-      { kw: /land cover|landcover/i, layerId: 'land_cover' },
-      { kw: /night lights|city lights/i, layerId: 'night_lights' },
-      { kw: /submarine cable|undersea cable|internet cable/i, layerId: 'submarine_cables' },
-      { kw: /iceberg|sea ice/i, layerId: 'icebergs' },
-      { kw: /heatmap|heat map/i, layerId: 'heatmap' },
-      { kw: /tectonic|plate boundary/i, layerId: 'tectonic' },
-      { kw: /building|3d building|osm building/i, layerId: 'dt_buildings' },
-      { kw: /space weather/i, layerId: 'space_weather' },
-      { kw: /disaster alert|disaster/i, layerId: 'disaster_alerts' },
+      { kw: /\b(?:earthquake|quake|seismic)s?\b/i, layerId: 'earthquakes' },
+      { kw: /\b(?:wildfire|fire|burning)s?\b/i, layerId: 'wildfires' },
+      { kw: /\b(?:flight|plane|aircraft|adsb)s?\b/i, layerId: 'flight_tracks' },
+      { kw: /\bships?\b|\bvessel\b|\bmaritime\b|\bais\b/i, layerId: 'ais_vessels' },
+      { kw: /\bvolcanoes?\b|\bvolcanic\b|\beruptions?\b/i, layerId: 'volcanoes' },
+      { kw: /\b(?:storm|hurricane|cyclone|typhoon)s?\b/i, layerId: 'severe_storms' },
+      { kw: /\b(?:satellite|debris)s?\b|\bspace debris\b|\borbit\b/i, layerId: 'space_debris' },
+      { kw: /\baurora\b|\bnorthern lights\b/i, layerId: 'aurora_oval' },
+      { kw: /\b(?:lightning|thunderstorm)s?\b/i, layerId: 'lightning_strikes' },
+      { kw: /\bprecipitation\b|\brainfall\b/i, layerId: 'precipitation' },
+      { kw: /\bwind\s+map\b|\bwind\s+speed\b/i, layerId: 'wind' },
+      { kw: /\bland cover\b|\blandcover\b/i, layerId: 'land_cover' },
+      { kw: /\bnight lights\b|\bcity lights\b/i, layerId: 'night_lights' },
+      { kw: /\bsubmarine cable\b|\bundersea cable\b|\binternet cable\b/i, layerId: 'submarine_cables' },
+      { kw: /\b(?:iceberg|sea ice)s?\b/i, layerId: 'icebergs' },
+      { kw: /\bheatmap\b|\bheat map\b/i, layerId: 'heatmap' },
+      { kw: /\btectonic\b|\bplate boundary\b/i, layerId: 'tectonic' },
+      { kw: /\bbuilding\b|\b3d building\b|\bosm building\b/i, layerId: 'dt_buildings' },
+      { kw: /\bspace weather\b/i, layerId: 'space_weather' },
+      { kw: /\bdisaster\b/i, layerId: 'disaster_alerts' },
     ];
     if (defaultShow !== null || hasHideAnywhere || hasShowAnywhere) {
       // Segments that clearly reference a UI PANEL (not a data layer) must be
@@ -1016,7 +1226,7 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
     // and carries across subsequent segments in a list.
     let panelCarryAction: 'open' | 'close' | 'toggle' | null = null;
     for (const seg of segments) {
-      const segVerb = /(?:open|show|launch|display|enable|bring up|load|open up|start)/i.test(seg) ? 'open' as const
+      const segVerb = /(?:open|show|launch|display|enable|bring up|load|open up|start|track)/i.test(seg) ? 'open' as const
         : /(?:close|hide|dismiss|shut|quit)/i.test(seg) ? 'close' as const
         : /(?:toggle|switch|flip)/i.test(seg) ? 'toggle' as const
         : null;
@@ -1033,7 +1243,7 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
     // ── moveCamera: cinematic camera verbs (orbit / pan / tilt / rotate / stop)
     // Deterministic so "orbit around this area", "pan left", "tilt up",
     // "rotate", "stop the camera" all work without the LLM guessing JSON.
-    const camVerb = /(?:orbit|pan|tilt|rotate|stop\s*(?:the\s*)?camera|stop\s*motion|reset\s*globe)/i.exec(lower);
+    const camVerb = /\b(?:orbit|pan|tilt|rotate)\b|stop\s*(?:the\s*)?camera|stop\s*motion|reset\s*globe/i.exec(lower);
     if (camVerb) {
       const verb = camVerb[0].toLowerCase();
       if (/orbit/.test(verb)) {

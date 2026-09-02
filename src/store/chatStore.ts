@@ -75,6 +75,8 @@ function freshTabState(): {
   messages: ChatMessage[];
   input: string;
   selectedTier: string;
+  selectedModel: string;
+  availableModels: ChatState['availableModels'];
   agentSteps: AgentStep[];
   pipelineProgress: PipelineStep[];
   chatImages: ChatImage[];
@@ -88,6 +90,8 @@ function freshTabState(): {
     ],
     input: '',
     selectedTier: 'flash',
+    selectedModel: 'auto',
+    availableModels: [],
     agentSteps: [],
     pipelineProgress: [],
     chatImages: [],
@@ -201,6 +205,13 @@ interface ChatState {
   modelTiers: ModelTier[];
   setModelTiers: (tiers: ModelTier[]) => void;
 
+  // Available LLM models (from /api/agent/models) + user's selection.
+  availableModels: Array<{ id: string; provider: string; model: string; label: string; available: boolean; status: string; local: boolean; tier: number }>;
+  setAvailableModels: (models: ChatState['availableModels']) => void;
+  /** User-selected model id (e.g. "groq/compound", "local"), or "auto" for default. */
+  selectedModel: string;
+  setSelectedModel: (id: string) => void;
+
   // Suggestions
   adaptiveSuggestions: string[];
   setAdaptiveSuggestions: (suggestions: string[] | ((prev: string[]) => string[])) => void;
@@ -286,6 +297,9 @@ interface ChatState {
   // analytical engine can compute grids over the user's real study area.
   studyAreaBbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
   setStudyAreaBbox: (bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null) => void;
+  /** The AI query awaiting a drawn study area — auto-sent when drawing completes. */
+  pendingStudyAreaQuery: string | null;
+  setPendingStudyAreaQuery: (query: string | null) => void;
 
   // Share
   showShareDialog: boolean;
@@ -349,6 +363,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   ],
   aiInput: initialActiveTab ? initialActiveTab.input : '',
   selectedTier: initialActiveTab ? initialActiveTab.selectedTier : 'flash',
+  selectedModel: 'auto',
+  availableModels: [],
   agentSteps: initialActiveTab ? initialActiveTab.agentSteps : [],
   pipelineProgress: initialActiveTab ? initialActiveTab.pipelineProgress : [],
   chatImages: initialActiveTab ? initialActiveTab.chatImages : [],
@@ -623,6 +639,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   modelTiers: [],
   setModelTiers: (tiers) => set({ modelTiers: tiers }),
 
+  // Available LLM models + user's selection (auto = default behaviour)
+  setAvailableModels: (models) => set({ availableModels: models }),
+  setSelectedModel: (id) => set({ selectedModel: id }),
+
   // Suggestions
   adaptiveSuggestions: [],
   setAdaptiveSuggestions: (suggestions) => set({
@@ -758,6 +778,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Study area bbox
   studyAreaBbox: null,
   setStudyAreaBbox: (bbox) => set({ studyAreaBbox: bbox }),
+  pendingStudyAreaQuery: null,
+  setPendingStudyAreaQuery: (query) => set({ pendingStudyAreaQuery: query }),
 
   // Share
   showShareDialog: false,

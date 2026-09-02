@@ -35,7 +35,9 @@ export function searchAnalyticalModels(
     return { results: all, count: all.length, total: all.length, query: q };
   }
 
-  const tokens = q.replace(/[^\w\s-]/g, ' ').split(/\s+/).filter(t => t.length > 0 && t !== 'the' && t !== 'and' && t !== 'for' && t !== 'over');
+  const STOP = new Set(['the','and','for','over','with','from','into','about','show','showme','what','whats','how','then','also','near','using','this','that','are','you','can','me','us','to','on','in','of','a','an','is','at','by','or','do','does','where','when','which','why','its','it','they','them','ll','ve','re','lll','dont','doesnt','wont','isnt','arent','wasnt','werent','hasnt','havent','hadnt','cant','couldnt','wouldnt','shouldnt','maynt','neednt','dare','ought','used','need','dares']);
+  const tokens = q.replace(/[^\w\s-]/g, ' ').split(/\s+/)
+    .filter(t => t.length > 2 && !STOP.has(t) && !STOP.has(t.replace(/s$/, '')));
   const queryPhrase = q.replace(/-/g, ' ');
 
   interface Scored { id: number; name: string; vizType: string; match: string; score: number; }
