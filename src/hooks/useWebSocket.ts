@@ -120,10 +120,11 @@ export function useWebSocket(token?: string) {
     const connect = () => {
       if (!mountedRef.current || !token) return;
 
-      const url = `${WS_BASE}${WS_PATH}?token=${encodeURIComponent(token)}`;
+      const url = `${WS_BASE}${WS_PATH}`;
+      const protocols = token ? [token] : []; // token in subprotocol header, not URL
 
       setStatus(prev => prev === 'disconnected' ? 'connecting' : 'reconnecting');
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(url, protocols.length > 0 ? protocols : undefined);
       wsRef.current = ws;
 
       ws.onopen = () => {

@@ -590,6 +590,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (idx >= 0) patch.chatTabs = s.chatTabs.map((t, i) => i === idx ? { ...t, messages: next } : t);
     }
     set(patch);
+    const ns = get();
+    if (ns.activeTabId) scheduleTabPersist(ns.chatTabs, ns.activeTabId);
   },
   addMessage: (message) => {
     const s = get();
@@ -602,6 +604,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (idx >= 0) patch.chatTabs = s.chatTabs.map((t, i) => i === idx ? { ...t, messages: next } : t);
     }
     set(patch);
+    const ns = get();
+    if (ns.activeTabId) scheduleTabPersist(ns.chatTabs, ns.activeTabId);
   },
   updateMessage: (id, updates) => {
     const s = get();
@@ -612,6 +616,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (idx >= 0) patch.chatTabs = s.chatTabs.map((t, i) => i === idx ? { ...t, messages: next } : t);
     }
     set(patch);
+    const ns = get();
+    if (ns.activeTabId) scheduleTabPersist(ns.chatTabs, ns.activeTabId);
   },
   clearMessages: () => {
     const s = get();
@@ -621,10 +627,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (idx >= 0) patch.chatTabs = s.chatTabs.map((t, i) => i === idx ? { ...t, messages: [] } : t);
     }
     set(patch);
+    const ns = get();
+    if (ns.activeTabId) scheduleTabPersist(ns.chatTabs, ns.activeTabId);
   },
 
   // Input
-  setAiInput: (value) => set({ aiInput: value }),
+  setAiInput: (value) => {
+    set({ aiInput: value });
+    const s = get();
+    if (s.activeTabId) {
+      set({
+        chatTabs: s.chatTabs.map(t =>
+          t.id === s.activeTabId ? { ...t, input: value } : t
+        ),
+      });
+      scheduleTabPersist(get().chatTabs, s.activeTabId);
+    }
+  },
   setEditingMessageId: (value) => set({ editingMessageId: value }),
 
   // Typing

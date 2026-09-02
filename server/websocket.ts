@@ -87,7 +87,15 @@ export function createWsServer(server: HttpServer): WebSocketServer {
 
   wss.on('connection', (ws: WebSocket, request) => {
     const url = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
-    const token = url.searchParams.get('token') || '';
+    // Token is passed via the Sec-WebSocket-Protocol header (browser JS cannot
+    // set arbitrary headers on a WebSocket upgrade, but subprotocols are allowed).
+    // This keeps the JWT out of the URL/query string (no leakage into access
+    // logs, proxies, or Referer headers). Fall back to ?token= for non-browser
+    // clients (curl, tests, server-to-server).
+    const subprotocolHeader = request.headers['sec-websocket-protocol'];
+    const token = subprotocolHeader
+      ? (Array.isArray(subprotocolHeader) ? subprotocolHeader[0] : subprotocolHeader).split(',')[0].trim()
+      : url.searchParams.get('token') || '';
 
     const userId = verifyTokenOrReject(token);
     if (!userId) {
