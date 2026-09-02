@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -441,6 +442,10 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
   if (req.path === '/analytical-models' || req.path === '/analytical-models/search' || (req.path.match(/^\/analytical-models\/\d+$/) && req.method === 'GET')) {
     return next();
   }
+  // Plugin tool endpoints — called internally by the tool executor (server-to-server).
+  if (req.path.startsWith('/plugin/tool/') || req.path.startsWith('/plugin/data/')) {
+    return next();
+  }
   authGuard(req, res, next);
 });
 
@@ -606,6 +611,30 @@ executor.init();
 // Initialize Omninet — free-tier AI provider router
 omninet.init();
 
+// Auto-start local llama-server GGUF fallback if the model file exists.
+// Spawns in background; the local-gguf provider in omninet uses it as a
+// last-resort when all remote providers are unavailable.
+const GGUF_MODEL = './models/LFM2.5-2.6B-Q4_K_M.gguf';
+const GGUF_PORT = 11436;
+if (fs.existsSync(GGUF_MODEL)) {
+  const llamaBin = process.env.LLAMA_SERVER_PATH || '/opt/homebrew/bin/llama-server';
+  const llamaOut = fs.openSync('/tmp/terranoetis-llama.log', 'a');
+  const llamaServer = spawn(llamaBin, [
+    '--model', GGUF_MODEL,
+    '--port', String(GGUF_PORT),
+    '-c', '2048',
+  ], { stdio: ['ignore', llamaOut, llamaOut], detached: true });
+  llamaServer.unref();
+  llamaServer.on('error', (err: Error) => logger.warn({ err: err.message }, 'llama-server failed to start'));
+  logger.info({ port: GGUF_PORT, model: GGUF_MODEL, bin: llamaBin }, 'Local GGUF fallback model started');
+  // Give it ~15s to load the model, then the provider is ready.
+  setTimeout(() => {
+    logger.info('Local GGUF model ready (or failed silently — harmless)');
+  }, 15000);
+} else {
+  logger.warn({ path: GGUF_MODEL }, 'GGUF model not found — local-gguf fallback unavailable');
+}
+
 // Phase 4: Initialize memory systems with embedding engine
 const embeddingEngine = new EmbeddingEngine();
 const memoryManager = new MemoryManager(embeddingEngine);
@@ -721,9 +750,10 @@ causalGraph.init();
 // Phase 7: Plugin system
 const syncPluginTools = () => {
   for (const [name, pt] of pluginManager.getToolHandlers()) {
-    if (!toolRegistry.get(name)) {
-      toolRegistry.register({ name, description: pt.description, category: pt.category || 'plugin', exampleQueries: [name], schema: { type: 'api', endpoint: `/api/plugin/tool/${name}` } });
-    }
+    // Always (re)register plugin tools with the correct POST schema — the
+    // tool may already exist in the in-memory registry from a DB load with a
+    // stale schema (e.g. missing method), so don't skip based on existence.
+    toolRegistry.register({ name, description: pt.description, category: pt.category || 'plugin', exampleQueries: [name], schema: { type: 'api', endpoint: `/api/plugin/tool/${name}`, method: 'POST' } });
   }
 };
 const pluginManager = new PluginManager(syncPluginTools);
@@ -807,9 +837,7 @@ jobQueue.recurring('mvc:refresh', 60000);
 // Plugin scanner as recurring queue job
 jobQueue.process('plugin:scan', async () => {
   for (const [name, pt] of pluginManager.getToolHandlers()) {
-    if (!toolRegistry.get(name)) {
-      toolRegistry.register({ name, description: pt.description, category: pt.category || 'plugin', exampleQueries: [name], schema: { type: 'api', endpoint: `/api/plugin/tool/${name}` } });
-    }
+    toolRegistry.register({ name, description: pt.description, category: pt.category || 'plugin', exampleQueries: [name], schema: { type: 'api', endpoint: `/api/plugin/tool/${name}`, method: 'POST' } });
   }
 });
 jobQueue.recurring('plugin:scan', 30000);
@@ -1126,32 +1154,62 @@ function parseGitHubUrl(url: string): { owner: string; repo: string; branch: str
 async function installFromGitHub(url: string): Promise<{ pluginIds: string[]; errors: string[] }> {
   const parsed = parseGitHubUrl(url);
   if (!parsed) throw new Error('Invalid GitHub URL');
-  const { owner, repo, branch, path } = parsed;
+  let { owner, repo, branch, path } = parsed;
   const ghToken = process.env.GITHUB_TOKEN || '';
   const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
   if (ghToken) headers.Authorization = `Bearer ${ghToken}`;
 
-  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`;
-  const resp = await fetch(apiUrl, { headers, signal: AbortSignal.timeout(15000) });
-  if (!resp.ok) throw new Error(`GitHub API error: ${resp.status} ${resp.statusText}`);
+  // Resolve the actual default branch when none was given (many repos use
+  // "master" instead of "main").
+  if (!url.includes('/tree/') && !url.includes('/blob/')) {
+    try {
+      const repoResp = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers, signal: AbortSignal.timeout(10000) });
+      if (repoResp.ok) {
+        const repoData = await repoResp.json() as { default_branch?: string };
+        if (repoData?.default_branch) branch = repoData.default_branch;
+      }
+    } catch { /* fall back to given branch */ }
+  }
 
-  const data = await resp.json() as any;
-  const files: Array<{ name: string; downloadUrl: string }> = [];
-  const items = Array.isArray(data) ? data : [data];
-  for (const item of items) {
-    if (item.type === 'file' && (item.name.endsWith('.ts') || item.name.endsWith('.js'))) {
-      files.push({ name: item.name, downloadUrl: item.download_url });
+  // Fetch the full repo tree recursively so we find every .ts/.js file,
+  // not just the shallow top two levels.
+  let files: Array<{ name: string; downloadUrl: string }> = [];
+  try {
+    const treeResp = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      { headers, signal: AbortSignal.timeout(15000) },
+    );
+    if (treeResp.ok) {
+      const tree = await treeResp.json() as { tree?: Array<{ path?: string; type?: string }> };
+      const prefix = path ? `${path}/` : '';
+      files = (tree.tree || [])
+        .filter(t => t.type === 'blob' && t.path && t.path.startsWith(prefix) && /\.(ts|js)$/.test(t.path))
+        .map(t => ({ name: t.path!.split('/').pop()!, downloadUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}/${encodeURIComponent(t.path!)}` }));
     }
-    if (item.type === 'dir') {
-      const subDirResp = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(item.path)}?ref=${encodeURIComponent(branch)}`,
-        { headers, signal: AbortSignal.timeout(15000) }
-      );
-      if (subDirResp.ok) {
-        const subItems = await subDirResp.json() as any[];
-        for (const sub of subItems) {
-          if (sub.type === 'file' && (sub.name.endsWith('.ts') || sub.name.endsWith('.js'))) {
-            files.push({ name: sub.name, downloadUrl: sub.download_url });
+  } catch { /* fall through to contents API */ }
+
+  // Fallback: contents API (shallow) if the trees API failed.
+  if (files.length === 0) {
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`;
+    const resp = await fetch(apiUrl, { headers, signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) throw new Error(`GitHub API error: ${resp.status} ${resp.statusText}`);
+    const data = await resp.json() as any;
+    const items = Array.isArray(data) ? data : [data];
+    for (const item of items) {
+      if (item.type === 'file' && (item.name.endsWith('.ts') || item.name.endsWith('.js'))) {
+        files.push({ name: item.name, downloadUrl: item.download_url });
+      }
+      if (item.type === 'dir') {
+        const subDirResp = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(item.path)}?ref=${encodeURIComponent(branch)}`,
+          { headers, signal: AbortSignal.timeout(15000) }
+        );
+        if (subDirResp.ok) {
+          const subItems = await subDirResp.json() as any[];
+          for (const sub of subItems) {
+            if (sub.type === 'file' && (sub.name.endsWith('.ts') || sub.name.endsWith('.js'))) {
+              files.push({ name: sub.name, downloadUrl: sub.download_url });
+            }
           }
         }
       }
@@ -1247,6 +1305,13 @@ app.delete('/api/admin/plugins/:id', requireRole('admin'), (req: express.Request
   const removed = pluginManager.removePlugin(req.params.id);
   if (!removed) return res.status(404).json({ error: 'Plugin not found or cannot be removed (builtin plugins are protected)' });
   res.json({ ok: true, removed: req.params.id });
+});
+
+app.post('/api/admin/plugins/:id/toggle', requireRole('admin'), (req: express.Request, res: express.Response) => {
+  const enabled = req.body?.enabled === true;
+  const ok = pluginManager.setEnabled(req.params.id, enabled);
+  if (!ok) return res.status(404).json({ error: 'Plugin not found' });
+  res.json({ ok: true, id: req.params.id, enabled });
 });
 
 app.get('/api/config/apis', (_req: express.Request, res: express.Response) => {
@@ -7729,11 +7794,47 @@ const askRateLimit = perUserRateLimiter(30, 60000); // 30 requests per minute pe
 const analyticalResultCache = new Map<string, { at: number; hit: AnalyticalRunResult | null }>();
 const ANALYTICAL_CACHE_TTL_MS = 10 * 60 * 1000;
 
+// ── Multi-clause query decomposition ──────────────────────────────
+// Splits a message on "and", "then", "vs", "versus" when each clause
+// carries a distinct intent or location. Used to prevent "Tokyo vs Kyoto"
+// or "earthquakes near Tokyo and volcanoes near Japan" from collapsing
+// to a single location. Leaves the message untouched when the connectors
+// are purely grammatical (e.g. "flights between Delhi and Dubai").
+function decomposeByConjunction(text: string): string[] {
+  // Only split when the query is long enough to plausibly be multi-clause.
+  if (text.length < 25) return [text];
+  const lowr = text.toLowerCase();
+  // Strong multi-location signals: "vs" / "versus" / "or" between two places.
+  // These split even without per-part sync location detection (which misses
+  // states like California, Punjab). The async OSM geocode below resolves them.
+  if (/ vs | versus | or /i.test(text)) {
+    const parts = text.split(/\b(?: vs | versus | or )\b/i).map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 2) return parts;
+  }
+  const clauseSeparators = /[,;]|\b(?:,?\s*and\s+|\s*then\s+|\s*also\s+)/i;
+  const parts = text.split(clauseSeparators).map(s => s.trim()).filter(Boolean);
+  if (parts.length < 2) return [text];
+  // Heuristic: if every part contains a location or a recognizable intent
+  // keyword, split. Otherwise return the whole message.
+  let hasLocationOrIntent = 0;
+  for (const p of parts) {
+    const pl = p.toLowerCase();
+    const loc = IntentRouter.extractLocation(pl);
+    const hasIntent = /\b(show|display|toggle|open|compute|calculate|analyze|what|how|weather|flight|earthquake|wildfire|storm|ship|vessel|drought|tsunami|storm\s*surge|track|predict|forecast|simulate|risk|impact|flood)\b/i.test(pl);
+    if (loc || hasIntent) hasLocationOrIntent++;
+  }
+  // Each part must have a location or intent keyword for us to split.
+  if (hasLocationOrIntent >= Math.min(2, parts.length)) return parts;
+  return [text];
+}
+
+// ── Analytical model runner ────────────────────────────────────
 async function tryAnalyticalModelRun(
   message: string,
   location?: { lat: number; lon: number; label?: string },
   refinedId?: number,
   studyAreaBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null,
+  studyAreaPolygon?: Array<Array<[number, number]>> | null,
 ): Promise<AnalyticalRunResult | null> {
   // Memoize identical (modelId + bbox) runs — satellite grid fetches can take
   // ~30s cold; repeats should return instantly so chat stays responsive.
@@ -7742,7 +7843,7 @@ async function tryAnalyticalModelRun(
   if (cached && Date.now() - cached.at < ANALYTICAL_CACHE_TTL_MS) {
     return cached.hit;
   }
-  const hit = await tryAnalyticalModelRunInner(message, location, refinedId, studyAreaBbox);
+  const hit = await tryAnalyticalModelRunInner(message, location, refinedId, studyAreaBbox, studyAreaPolygon);
   analyticalResultCache.set(cacheKey, { at: Date.now(), hit });
   return hit;
 }
@@ -7766,6 +7867,7 @@ async function tryAnalyticalModelRunInner(
   location?: { lat: number; lon: number; label?: string },
   refinedId?: number,
   studyAreaBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null,
+  studyAreaPolygon?: Array<Array<[number, number]>> | null,
 ): Promise<AnalyticalRunResult | null> {
   const lower = message.toLowerCase().trim();
   // Map of known analytical model keywords → model IDs (verified against
@@ -7825,7 +7927,7 @@ async function tryAnalyticalModelRunInner(
     { keywords: ['annual flood damage', 'flood damage', 'expected annual'], ids: [136] },
     { keywords: ['air quality index', 'aqi from concentration', 'pollution index'], ids: [137] },
     { keywords: ['probable maximum precipitation', 'pmp', 'precipitation'], ids: [138] },
-    { keywords: ['palmer drought', 'pdsi', 'drought index', 'drought severity'], ids: [139] },
+    { keywords: ['palmer drought', 'pdsi', 'drought index', 'drought severity', 'drought risk', 'drought'], ids: [139] },
     { keywords: ['climate sensitivity', 'ecs', 'climate feedback'], ids: [97] },
     { keywords: ['planck feedback', 'planck'], ids: [98] },
     { keywords: ['shannon entropy', 'information entropy', 'entropy'], ids: [144] },
@@ -7842,16 +7944,33 @@ async function tryAnalyticalModelRunInner(
         break;
       }
     }
-    // If no keyword match, use the API search
+    // If no keyword match, use the API search — but only accept strong matches
+    // (name-level, not just a single generic token). Weak matches like
+    // "deforestation → GDOP" or "storm surge → Gaussian plume" mislead the
+    // user; we fall through to the LLM that can actually reason instead.
     if (modelIds.length === 0) {
       try {
         const searchResp = await fetch(`http://127.0.0.1:${PORT}/api/analytical-models/search?q=${encodeURIComponent(lower)}`, {
           signal: AbortSignal.timeout(5000),
         });
         if (searchResp.ok) {
-          const searchData = await searchResp.json() as { results?: Array<{ id: number }> };
+          const searchData = await searchResp.json() as { results?: Array<{ id: number; name: string; match: string }> };
           if (searchData.results && searchData.results.length > 0) {
-            modelIds = [searchData.results[0].id];
+            const top = searchData.results[0];
+            // Only accept strong name-level matches. Reject weak matches:
+            // bare "description"/"terms" (metadata tokens) and single-token
+            // "name terms: X" where X is a generic action word ("predict"
+            // hitting Tide Prediction, "detect" hitting Water Detection).
+            const GENERIC_WEAK = new Set(['detect','show','compute','calculate','analyze','find','track','predict','forecast','risk','model','run','execute','display','enable','open','close','toggle','search','list','load','get','set','create','update','delete','remove','add','edit','save','export','import','view','pattern','current','recent','latest','average','mean','median','total','sum','count','number','amount','value','data','result','output','input','detail','summary','brief','quick','fast','slow','local','regional','global','near','around','within','between','over','under','above','below','area','region','zone','city','river','ocean','sea','land','coastal','inland']);
+            const isStrongMatch = top.match === 'exact name' || top.match === 'name prefix' || top.match === 'name';
+            let isStrongTermMatch = false;
+            if (top.match.startsWith('name terms:')) {
+              const terms = top.match.split(':')[1].trim().split(',').map(t => t.trim()).filter(Boolean);
+              isStrongTermMatch = terms.length >= 2 || (terms.length === 1 && !GENERIC_WEAK.has(terms[0]));
+            }
+            if (isStrongMatch || isStrongTermMatch) {
+              modelIds = [top.id];
+            }
           }
         }
       } catch { /* fall through */ }
@@ -7864,12 +7983,34 @@ async function tryAnalyticalModelRunInner(
   const modelId = modelIds[0];
   try {
     // Build the study area for the engine:
-    //  - If the user has a drawn study area bbox, use a bbox grid (spatial)
-    //  - Else if a location is detected, use a small bbox around it (so
-    //    heatmap models produce a real grid, not a single point)
-    //  - Else fall back to no context (engine uses defaults)
-    let context: { studyArea?: { mode: 'bbox'; bbox: [[number, number], [number, number]] }; filters?: Record<string, number> } = {};
-    if (studyAreaBbox && isFinite(studyAreaBbox.latMin) && isFinite(studyAreaBbox.latMax) && isFinite(studyAreaBbox.lonMin) && isFinite(studyAreaBbox.lonMax)) {
+    //  - If a real polygon boundary was resolved (OSM admin boundary), use a
+    //    polygon-mode study area: compute the grid over the bbox but mask every
+    //    cell outside the polygon to NaN (only the real region's interior).
+    //  - Else if the user has a drawn study area bbox, use a bbox grid.
+    //  - Else if a location is detected, use a small bbox around it.
+    //  - Else fall back to no context (engine uses defaults).
+    let context: { studyArea?: { mode: 'bbox' | 'polygon'; bbox: [[number, number], [number, number]]; polygon?: Array<Array<[number, number]>> }; filters?: Record<string, number> } = {};
+    if (studyAreaPolygon && studyAreaPolygon.length > 0) {
+      // bbox for the grid extent; polygon rings for interior masking.
+      let latMin = Infinity, latMax = -Infinity, lonMin = Infinity, lonMax = -Infinity;
+      for (const ring of studyAreaPolygon) {
+        for (const [lon, lat] of ring) {
+          if (lat < latMin) latMin = lat;
+          if (lat > latMax) latMax = lat;
+          if (lon < lonMin) lonMin = lon;
+          if (lon > lonMax) lonMax = lon;
+        }
+      }
+      if (isFinite(latMin) && isFinite(latMax) && isFinite(lonMin) && isFinite(lonMax)) {
+        context = {
+          studyArea: {
+            mode: 'polygon',
+            bbox: [[latMin, lonMin], [latMax, lonMax]],
+            polygon: studyAreaPolygon,
+          },
+        };
+      }
+    } else if (studyAreaBbox && isFinite(studyAreaBbox.latMin) && isFinite(studyAreaBbox.latMax) && isFinite(studyAreaBbox.lonMin) && isFinite(studyAreaBbox.lonMax)) {
       context = {
         studyArea: {
           mode: 'bbox',
@@ -7931,6 +8072,17 @@ async function tryAnalyticalModelRunInner(
 
     // Build globe commands
     const commands: Array<Record<string, unknown>> = [];
+    // Draw the real OSM boundary polygon on the globe (if one was resolved)
+    // so the user sees the actual region shape, not just the heatmap dots.
+    if (studyAreaPolygon && studyAreaPolygon.length > 0) {
+      for (const ring of studyAreaPolygon) {
+        if (Array.isArray(ring) && ring.length >= 3) {
+          // Outline only — no fill. The heatmap dots carry the data; the
+          // boundary should just be a border, not a green-filled area.
+          commands.push({ action: 'addPolygon', coordinates: ring, label: 'Study area boundary', color: 'rgba(34,197,94,0.0)', outlineOnly: true });
+        }
+      }
+    }
     if (studyAreaBbox) {
       const midLat = (studyAreaBbox.latMin + studyAreaBbox.latMax) / 2;
       const midLon = (studyAreaBbox.lonMin + studyAreaBbox.lonMax) / 2;
@@ -8054,7 +8206,9 @@ app.post('/api/agent/workbench-report', authGuard, async (req: express.Request, 
 });
 
 app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (req: express.Request, res: express.Response) => {
-  const { message, images, recentMessages, studyAreaBbox } = req.body;
+  const { message, images, recentMessages } = req.body;
+  let studyAreaBbox = req.body.studyAreaBbox as { latMin: number; latMax: number; lonMin: number; lonMax: number } | undefined;
+  const studyAreaPolygon = req.body.studyAreaPolygon as Array<Array<[number, number]>> | undefined;
   const imageContext = Array.isArray(images) && images.length > 0 ? images.map((img: any) => "[Image: " + img.fileName + " (" + img.mimeType + ")]").join(' ') : '';
   const fullMessage = imageContext ? imageContext + "\n" + message : message;
   const userId = (req as any).userId || 'default';
@@ -8074,6 +8228,9 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
   const effectiveGeminiKey = vaultKeys['GOOGLE_GEMINI_API_KEY'] || vaultKeys['GEMINI_API_KEY'] || apiKey;
   // Client-selected tier from the request body
   const clientTier = (req.body as any).tier as string | undefined;
+  // Client-selected model override (e.g. "groq/compound", "local").
+  // When set, Omninet will prefer that provider/model.
+  const clientModel = (req.body as any).model as string | undefined;
   const abortController = new AbortController();
 
   registerAbortController(requestId, abortController);
@@ -8106,6 +8263,20 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
 
   const cleanup = () => removeAbortController(requestId);
 
+  // If the user selected a specific model, check its availability and
+  // emit a notice if it's unavailable. The fallback chain still works.
+  if (clientModel) {
+    try {
+      const providers = omninet.getProviderDetails();
+      const modelAvailable = providers.some(p =>
+        p.models.includes(clientModel) && p.status !== 'down' && (p.local || Boolean(p.apiKeyEnvVar && process.env[p.apiKeyEnvVar]))
+      );
+      if (!modelAvailable) {
+        sendEvent('step', { stepType: 'model_unavailable', text: `Selected model "${clientModel}" is not available — falling back to auto`, status: 'completed' });
+      }
+    } catch { /* availability check is best-effort */ }
+  }
+
   try {
     // Step 1: Classify intent — use ModelRouter to decide if deep classification is needed
     sendEvent('step', { stepType: 'classifying', text: 'Classifying intent...', status: 'running' });
@@ -8129,47 +8300,102 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // MULTIPLE deterministic commands (open panels + toggle layers + flyTo),
     // parse them all and emit together — never route to the LLM which would
     // drop or mangle most of them.
+    //
+    // For mixed queries ("show ships near Singapore AND compute earthquake
+    // magnitude near Manila"), emit the deterministic commands FIRST so the
+    // globe action happens immediately, then CONTINUE to the analytical/LLM
+    // path so the user gets a real answer. Pure command queries ("show
+    // earthquakes") short-circuit here with a ## Done.
+    const isAnalyticalOrReasoning = /\b(analyze|analysis|analyzing|trend|pattern|statistics?|average|mean|median|compute|calculate|correlation|compare|versus|why|how|what|which|explain|predict|forecast|simulate|research|investigate|difference)\b/i.test(fullMessage);
     const multiCommands = IntentRouter.extractCommands(fullMessage);
+    // Mixed queries already emitted their commands above; the analytical
+    // handler must NOT re-extract/re-emit them (would duplicate on the globe).
+    const commandsAlreadyEmitted = multiCommands.length > 0;
     if (multiCommands.length > 0) {
-      sendEvent('step', { stepType: 'multi_command', text: `Executing ${multiCommands.length} command(s)...`, status: 'completed' });
-      sendEvent('commands', multiCommands);
+      // Always emit the commands first — one at a time.
+      const PANEL_LABELS: Record<string, string> = {
+        'iss': 'ISS tracker',
+        'satellite-imagery': 'satellite imagery',
+        'analytics-workbench': 'analytics workbench',
+        'analytics-insights': 'analytics insights',
+        'space_weather': 'space weather',
+        'market-intel': 'market intelligence',
+        'intel-feed': 'intelligence feed',
+        'aviation-tracker': 'aviation tracker',
+        'satellite-tracker': 'satellite tracker',
+      };
       const cmdDesc = multiCommands
         .map(c => {
           if (c.action === 'flyTo') return `fly to ${c.label || `${Number(c.lat).toFixed(2)}, ${Number(c.lon).toFixed(2)}`}`;
           if (c.action === 'toggleLayer') return `${c.enabled ? 'show' : 'hide'} ${c.layerId}`;
-          return `${c.action} ${c.panelId}`;
+          const label = PANEL_LABELS[c.panelId as string] || c.panelId;
+          return `${c.action === 'closePanel' ? 'close' : 'open'} the **${label}** panel`;
         })
-        .join(', ');
-      sendEvent('output', { text: `## Done\n\n${cmdDesc}`, modelTier: 'local', intentType: 'multi_command', commands: multiCommands });
-      sendEvent('done', { type: 'done' });
-      cleanup();
-      res.end();
-      return;
+        .join(', and ');
+      sendEvent('step', { stepType: 'multi_command', text: `Executing ${multiCommands.length} command(s)...`, status: 'completed' });
+      sendEvent('commands', multiCommands);
+      if (!isAnalyticalOrReasoning) {
+        // Pure command query — no need for LLM, just acknowledge.
+        sendEvent('output', { text: `## Done\n\n${cmdDesc}`, modelTier: 'local', intentType: 'multi_command', commands: multiCommands });
+        sendEvent('done', { type: 'done' });
+        cleanup();
+        res.end();
+        return;
+      }
+      // Mixed query: commands already emitted above. Continue to
+      // analytical/model/cognition/LLM for the real answer. The later
+      // output event will include the full result.
     }
 
-    // Step 1.25: Digital Twin — run analysis if intent is digital_twin
+    // Step 1.25: Digital Twin — run analysis if intent is digital_twin.
+    // For multi-city queries ("Mumbai or San Francisco"), extract all
+    // named locations and run the scenario for each, then compare.
     if (intent.type === 'digital_twin') {
       sendEvent('step', { stepType: 'digital_twin', text: 'Running digital twin analysis...', status: 'completed' });
       try {
-        // Geocode location if not in city database
-        let dtLocation = intent.location;
-        if (!dtLocation) {
-          const geoApiKey = effectiveGeminiKey || '';
-          const geo = await IntentRouter.geocode(message, geoApiKey);
-          if (geo?.lat && geo?.lon) {
-            dtLocation = { lat: geo.lat, lon: geo.lon, label: geo.label || message.split(' ').slice(-2).join(' ') };
+        // Extract all named locations from the message
+        const dtLocations: Array<{ lat: number; lon: number; label: string }> = [];
+        if (intent.location) dtLocations.push({ lat: intent.location.lat, lon: intent.location.lon, label: intent.location.label || 'Location' });
+        // Check for "or" / "vs" separators that indicate multiple cities
+        const geoApiKey = effectiveGeminiKey || '';
+        if (/ or | vs /i.test(message)) {
+          const parts = message.split(/\b(or|vs|versus)\b/i).map((s: string) => s.trim()).filter(Boolean);
+          for (const part of parts) {
+            const geo = await IntentRouter.geocode(part, geoApiKey);
+            if (geo?.lat && geo?.lon) {
+              const dup = dtLocations.some(l => Math.abs(l.lat - geo.lat) < 1 && Math.abs(l.lon - geo.lon) < 1);
+              if (!dup) dtLocations.push({ lat: geo.lat, lon: geo.lon, label: geo.label });
+            }
           }
+        } else if (!intent.location) {
+          const geo = await IntentRouter.geocode(message, geoApiKey);
+          if (geo?.lat && geo?.lon) dtLocations.push({ lat: geo.lat, lon: geo.lon, label: geo.label });
         }
-        if (dtLocation) {
-          const dtResult = await analyzeDigitalTwin(message, dtLocation, 30);
-          sendEvent('step', { stepType: 'digital_twin_complete', text: `Analysis complete: ${dtResult.analysis.title}`, status: 'completed' });
-          if (dtResult.commands.length > 0) sendEvent('commands', dtResult.commands);
-          sendEvent('panel', dtResult.panel);
-          sendEvent('output', { text: dtResult.text });
-          sendEvent('done', { type: 'done' });
-          cleanup();
-          res.end();
-          return;
+
+        if (dtLocations.length > 0) {
+          const dtResults: Array<{ label: string; text: string; commands: Array<Record<string, unknown>>; panel?: unknown }> = [];
+          for (const dtLoc of dtLocations) {
+            const dtResult = await Promise.race([
+              analyzeDigitalTwin(message, dtLoc, 30),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 60000)),
+            ]);
+            if (dtResult) {
+              dtResults.push({ label: dtLoc.label, text: dtResult.text, commands: dtResult.commands, panel: dtResult.panel });
+            }
+          }
+          if (dtResults.length > 0) {
+            const allCommands = dtResults.flatMap(r => r.commands);
+            const combined = dtResults.length > 1
+              ? `## Multi-city comparison\n\n` + dtResults.map(r => `### ${r.label}\n\n${r.text}`).join('\n\n')
+              : dtResults[0].text;
+            if (allCommands.length > 0) sendEvent('commands', allCommands);
+            if (dtResults[0]?.panel) sendEvent('panel', dtResults[0].panel);
+            sendEvent('output', { text: combined, modelTier: 'flash', intentType: 'digital_twin', commands: allCommands });
+            sendEvent('done', { type: 'done' });
+            cleanup();
+            res.end();
+            return;
+          }
         }
       } catch (err) {
         logger.warn({ err }, 'Digital twin analysis failed, falling through');
@@ -8335,12 +8561,162 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // Step 2.4: Analytical model execution — deterministic god-eye control.
     // When the user asks to compute/calculate a known scientific model, search
     // and execute it directly (no LLM round-trip) and visualize the result.
-    if (intent.type === 'compute' || intent.type === 'deep_analysis') {
-      const analyticalHit = await tryAnalyticalModelRun(message, intent.location, intent.analyticalModelId, studyAreaBbox);
+    // Skip for pure reasoning questions (why, how, explain, tell me) — their
+    // intent might be deep_analysis but they need a semantic answer, not a model.
+    // NOTE: "compare" queries still run the analytical model path because
+    // multi-location comparison (Step 2.4) needs it. Only pure "why/how"
+    // reasoning skips the model.
+    const isReasoningQuery = /\b(why|explain|tell me|what is the difference|what is the relationship|correlation between|predict|forecast|spread|where.*will|how.*will)\b/i.test(message) && !/\b(compute|calculate|run|execute|model|equation|formula|evaluate|analyze|analysis|trend|pattern|statistics?|average|mean|compare)\b/i.test(message);
+    // ── Study area request ───────────────────────────────────────
+    // When a spatial computation needs a study area but the user hasn't drawn
+    // one yet, ask before running the model. The client shows three choices:
+    //   ✏️ Mark Study Zone  → user draws on globe, bbox syncs, chat re-sends
+    //   📍 Use Detected Area → proceed with the AI-detected location bbox
+    //   ⏭️ Skip             → proceed without a study area
+    // The user's choice comes back as studyAreaAction on the re-send, so this
+    // block is skipped then (and when a studyAreaBbox is already provided).
+    const studyAreaAction = (req.body as any).studyAreaAction as string | undefined;
+    const isSpatialCompute = (intent.type === 'compute' || intent.type === 'deep_analysis') && !isReasoningQuery;
+    if (isSpatialCompute && !studyAreaBbox && !studyAreaAction) {
+      // Determine the probe location: the sync intent.location (city DB) or
+      // OSM geocode of the message (handles states, regions the DB misses).
+      let probeLocation = intent.location;
+      if (!probeLocation) {
+        try {
+          const geoKey = effectiveGeminiKey || '';
+          const geo = await IntentRouter.geocode(message, geoKey);
+          if (geo?.lat && geo?.lon) {
+            probeLocation = { lat: geo.lat, lon: geo.lon, label: geo.label };
+          }
+        } catch { /* best-effort */ }
+      }
+      if (probeLocation) {
+        // Try to get the REAL OSM polygon geometry (the actual boundary shape).
+        // When found, use it directly — no adjust prompt needed, the polygon
+        // IS the boundary. The analytical engine masks the grid to the polygon.
+        let autoPolygon: Array<Array<[number, number]>> | null = null;
+        let autoBoundary: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null = null;
+        try {
+          const geoKey = effectiveGeminiKey || '';
+          autoPolygon = await IntentRouter.geocodePolygon(message, geoKey);
+          if (autoPolygon && autoPolygon.length > 0) {
+            // Compute bbox from polygon rings for the grid extent.
+            let lmin = Infinity, lmax = -Infinity, lomin = Infinity, lomax = -Infinity;
+            for (const ring of autoPolygon) {
+              for (const [lon, lat] of ring) {
+                if (lat < lmin) lmin = lat;
+                if (lat > lmax) lmax = lat;
+                if (lon < lomin) lomin = lon;
+                if (lon > lomax) lomax = lon;
+              }
+            }
+            if (isFinite(lmin) && isFinite(lmax) && isFinite(lomin) && isFinite(lomax)) {
+              autoBoundary = { latMin: lmin, latMax: lmax, lonMin: lomin, lonMax: lomax };
+            }
+          }
+        } catch { /* best-effort */ }
+        // Fallback: try bounding box (works for cities/points).
+        if (!autoPolygon) {
+          try {
+            const geoKey = effectiveGeminiKey || '';
+            const autoBox = await IntentRouter.geocodeBoundingBox(message, geoKey);
+            if (autoBox && Math.abs(autoBox.latMax - autoBox.latMin) > 0.01 && Math.abs(autoBox.lonMax - autoBox.lonMin) > 0.01) {
+              autoBoundary = autoBox;
+            }
+          } catch { /* best-effort */ }
+        }
+        if (autoPolygon && autoBoundary) {
+          // Real OSM boundary polygon found — use it directly. No prompt.
+          sendEvent('step', { stepType: 'study_area_auto', text: `Using real boundary for ${probeLocation.label || 'area'}`, status: 'completed' });
+          studyAreaBbox = autoBoundary;
+          // The polygon is fetched below via the detect — we need to pass it.
+          // Store it in a mutable ref so the analytical runner can use it.
+          (req as any).__studyAreaPolygon = autoPolygon;
+        } else {
+          // No real polygon, only a bounding box or point — show the prompt.
+          if (autoBoundary) {
+            sendEvent('step', { stepType: 'study_area_auto', text: `Found approximate area for ${probeLocation.label || 'area'}`, status: 'completed' });
+          }
+          sendEvent('study_area_request', {
+            requestId,
+            query: message,
+            location: probeLocation,
+            detectedBbox: autoBoundary,
+            options: autoBoundary
+              ? [
+                  { id: 'draw', label: '✏️ Adjust Boundary', description: 'Drag/resize the detected boundary on the globe' },
+                  { id: 'detected', label: '📍 Use This Area', description: `Use the detected area around ${probeLocation.label || 'this location'}` },
+                  { id: 'skip', label: '⏭️ Skip', description: 'Proceed without a study area' },
+                ]
+              : [
+                  { id: 'draw', label: '✏️ Mark Study Zone', description: 'Draw a precise boundary on the globe' },
+                  { id: 'detected', label: '📍 Use Detected Area', description: `Use the detected area around ${probeLocation.label || 'this location'}` },
+                  { id: 'skip', label: '⏭️ Skip', description: 'Proceed without a study area' },
+                ],
+          });
+          sendEvent('done', { type: 'done' });
+          cleanup();
+          res.end();
+          return;
+        }
+      }
+    }
+    if ((intent.type === 'compute' || intent.type === 'deep_analysis') && !isReasoningQuery) {
+      // ── Multi-clause decomposition ─────────────────────────────
+      // Queries like "drought risk in California vs Punjab", "earthquake
+      // magnitude near Manila and ships near Singapore", or "floods in Mumbai
+      // or San Francisco" name MULTIPLE locations with (usually) one model.
+      // Instead of collapsing to the first location, run each location and
+      // return a real comparison. Fall back to single-location behaviour when
+      // decomposition is not confident.
+      const clauses = decomposeByConjunction(message);
+      if (clauses.length >= 2) {
+        const locs: Array<{ lat: number; lon: number; label: string }> = [];
+        for (const clause of clauses) {
+          // Use OSM-first async geocoding so regions/states (California,
+          // Punjab) resolve too — the sync city DB misses them.
+          const geoKey = effectiveGeminiKey || '';
+          const g = await IntentRouter.geocode(clause, geoKey);
+          if (g?.lat && g?.lon) locs.push({ lat: g.lat, lon: g.lon, label: g.label });
+        }
+        const analyticalHit = await tryAnalyticalModelRun(message, intent.location, intent.analyticalModelId, studyAreaBbox, studyAreaPolygon ?? (req as any).__studyAreaPolygon);
+        // Only attempt multi-location when the query clearly names several
+        // distinct places AND the base model run succeeds (so we reuse its
+        // resolved model id deterministically rather than guessing again).
+        if (locs.length >= 2 && analyticalHit) {
+          try {
+            const perLoc: Array<{ label: string; text: string }> = [];
+            const locCommands: Array<Record<string, unknown>> = [];
+            for (const loc of locs) {
+              const hit = await tryAnalyticalModelRun(message, loc, analyticalHit.id, studyAreaBbox, studyAreaPolygon ?? (req as any).__studyAreaPolygon);
+              if (hit) {
+                perLoc.push({ label: loc.label, text: hit.text });
+                locCommands.push(...hit.commands);
+              }
+            }
+            if (perLoc.length >= 2) {
+              const heading = `## ${analyticalHit.name}: Multi-location comparison\n\n`;
+              const body = perLoc.map(p => `### ${p.label}\n\n${p.text}`).join('\n\n');
+              const allCommands = [...locCommands, ...analyticalHit.commands];
+              if (allCommands.length > 0) sendEvent('commands', allCommands);
+              sendEvent('output', { text: heading + body + `\n\n*Compared across ${perLoc.length} locations.*`, modelTier: 'flash', intentType: intent.type, commands: allCommands });
+              sendEvent('done', { type: 'done' });
+              cleanup();
+              res.end();
+              return;
+            }
+          } catch (e) {
+            logger.warn({ err: e }, 'Multi-location analytical comparison failed, falling back');
+          }
+        }
+      }
+      const analyticalHit = await tryAnalyticalModelRun(message, intent.location, intent.analyticalModelId, studyAreaBbox, studyAreaPolygon ?? (req as any).__studyAreaPolygon);
       if (analyticalHit) {
         // The message may also carry UI commands ("... and open the workbench").
         // Parse them so the model result AND the panel/layer actions both fire.
-        const extraCommands = IntentRouter.extractCommands(message, { allowAnalytical: true });
+        // Mixed queries already emitted their layer/panel commands in Step 1.2 —
+        // don't re-extract/re-emit (would duplicate on the globe).
+        const extraCommands = commandsAlreadyEmitted ? [] : IntentRouter.extractCommands(message, { allowAnalytical: true });
         const allCommands = [...analyticalHit.commands, ...extraCommands];
         sendEvent('step', { stepType: 'analytical', text: `Executing analytical model #${analyticalHit.id} (${analyticalHit.name})...`, status: 'completed' });
         if (allCommands.length > 0) sendEvent('commands', allCommands);
@@ -8429,8 +8805,10 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // where it beats the generic streaming path: analytical/deep intents
     // (System 2) and intents System 1 can resolve through REAL registered
     // tools (no canned templates). Everything else keeps the fast path below.
-    const cognitionIntents = ['deep_analysis', 'compute', 'unknown', 'weather_check', 'earthquake_check', 'aviation', 'quick_scan', 'hazard_query', 'space_weather'];
-    if (cognitionIntents.includes(intent.type)) {
+    const cognitionIntents = ['deep_analysis', 'compute', 'weather_check', 'earthquake_check', 'aviation', 'hazard_query', 'space_weather'];
+    // Skip cognition for pure reasoning questions (why, how, explain, tell me) —
+    // they need a semantic LLM answer, not the cognition pipeline.
+    if (cognitionIntents.includes(intent.type) && !isReasoningQuery) {
       sendEvent('step', { stepType: 'cognition', text: 'Running cognitive analysis...', status: 'running' });
       try {
         const cognitionResult = await cognitiveAgent.process(message, {
@@ -8446,16 +8824,22 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
           }
         });
         if (cognitionResult && cognitionResult.finalOutput) {
-          costTracker.record('flash', message, cognitionResult.finalOutput, false);
-          const modeLabel = cognitionResult.mode === 'system1_only' ? ' (fast path, real data)' : ' (deep reasoning)';
-          sendEvent('output', { text: cognitionResult.finalOutput + `\n\n*Cognitive analysis${modeLabel}*` });
-          if (cognitionResult.traceId) {
-            sendEvent('trace', { traceId: cognitionResult.traceId, criticScore: cognitionResult.criticScore });
+          // Don't return early if cognition timed out — the fallback local
+          // GGUF model (Step 3) can still produce a real answer.
+          if (cognitionResult.mode === 'system2_full' && /deep reasoning took too long/i.test(cognitionResult.finalOutput)) {
+            logger.warn({ query: message.slice(0, 50) }, 'Cognition timed out — falling through to local model fallback');
+          } else {
+            costTracker.record('flash', message, cognitionResult.finalOutput, false);
+            const modeLabel = cognitionResult.mode === 'system1_only' ? ' (fast path, real data)' : ' (deep reasoning)';
+            sendEvent('output', { text: cognitionResult.finalOutput + `\n\n*Cognitive analysis${modeLabel}*` });
+            if (cognitionResult.traceId) {
+              sendEvent('trace', { traceId: cognitionResult.traceId, criticScore: cognitionResult.criticScore });
+            }
+            sendEvent('done', { type: 'done' });
+            cleanup();
+            res.end();
+            return;
           }
-          sendEvent('done', { type: 'done' });
-          cleanup();
-          res.end();
-          return;
         }
       } catch (e) {
         logger.warn({ err: (e as Error).message }, 'Cognition path failed — falling through to multi-agent orchestration');
@@ -8463,17 +8847,22 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       }
     }
     // Step 2.5: Multi-agent orchestration for complex queries
-    const orchestrationIntents = ['deep_analysis', 'compute', 'unknown'];
-    if (orchestrationIntents.includes(intent.type)) {
+    const orchestrationIntents = ['deep_analysis', 'compute'];
+    if (orchestrationIntents.includes(intent.type) && !isReasoningQuery) {
       sendEvent('step', { stepType: 'orchestrating', text: 'Multi-agent swarm analyzing...', status: 'completed' });
       try {
         const orchestrator = new AgentOrchestrator(apiKey);
-        const orchestrated = await orchestrator.orchestrate(message, {
-          location: intent.location,
-          intent: intent.type,
-          cloud,
-        });
-        if (orchestrated.output) {
+        // Bound the orchestrator — reasoning questions must not block the chat
+        // while the swarm spins up. On timeout we fall through to LLM streaming.
+        const orchestrated = await Promise.race([
+          orchestrator.orchestrate(message, {
+            location: intent.location,
+            intent: intent.type,
+            cloud,
+          }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 30000)),
+        ]);
+        if (orchestrated && orchestrated.output) {
           costTracker.record(modelTier === 'pro' ? 'pro' : 'flash', message, orchestrated.output, false);
           if (orchestrated.commands?.length) sendEvent('commands', orchestrated.commands);
           sendEvent('output', { text: orchestrated.output + '\n\n*Multi-agent orchestrated response*' });
@@ -8510,7 +8899,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     const streamPass = async (prompt: string): Promise<string> => {
       let accumulated = '';
       let tokenCount = 0;
-      for await (const token of omninet.generateStream(prompt, { signal: abortController.signal, temperature: 0.4, maxTokens: 4096, vaultKeys: Object.keys(vaultKeys).length > 0 ? vaultKeys : undefined, clientTier })) {
+      for await (const token of omninet.generateStream(prompt, { signal: abortController.signal, temperature: 0.4, maxTokens: 4096, vaultKeys: Object.keys(vaultKeys).length > 0 ? vaultKeys : undefined, clientTier, model: clientModel })) {
         if (abortController.signal.aborted) break;
         accumulated += token;
         tokenCount++;
@@ -8683,6 +9072,16 @@ const model = 'gemini-3.5-flash-lite';
         const resultsBlock = toolResults.join('\n\n');
         const synthesisPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}[User query]\n${fullMessage}\n\n## TOOL_RESULTS\n${resultsBlock}\n\nUsing the tool results above, write your final answer now. Cite the real numbers from the tool results. You may still emit ## COMMANDS for visualization.`;
         outputText = ToolCallParser.strip(await streamPass(synthesisPrompt));
+        // Synthesis fallback: if the LLM returned empty but real tool data
+        // was fetched, show the raw results — the user gets real data.
+        if (!outputText || outputText.trim().length < 10) {
+          const fallbackParts = toolResults.filter(r => !r.includes('ERROR:'));
+          if (fallbackParts.length > 0) {
+            outputText = `## Real-time data\n\n${fallbackParts.map(r => r.slice(0, 600)).join('\n\n')}\n\n*Data fetched from live sources. Re-ask for a detailed analysis.*`;
+          } else {
+            outputText = 'I retrieved the data but hit a temporary issue generating the final answer. Please try again.';
+          }
+        }
         sendEvent('step', { stepType: 'synthesis', text: 'Synthesis complete', status: 'completed' });
       } else {
         // No tool calls — strip any stray TOOL_CALLS markers from a no-op pass.
@@ -8758,6 +9157,46 @@ const model = 'gemini-3.5-flash-lite';
       const locLabel = intent.location.label || `${intent.location.lat.toFixed(2)},${intent.location.lon.toFixed(2)}`;
       knowledgeGraph.ensureEntity(locLabel, 'location').catch((e: any) => logger.warn({ err: e }, 'Knowledge graph location entity failed'));
       knowledgeGraph.ensureEntity(intent.type, 'intent').catch((e: any) => logger.warn({ err: e }, 'Knowledge graph intent entity failed'));
+    }
+
+    // ── Last-resort fallback: local GGUF ─────────────────────────
+    // If the remote LLM providers are all unavailable/rate-limited and the
+    // answer came back empty, fall back to the local GGUF model (llama-server)
+    // with a tool-free prompt so the user always gets a real answer.
+    const isFallbackNeeded = !outputText || outputText.trim().length < 10 || /All AI providers unavailable|Provider failed|deep reasoning took too long/i.test(outputText);
+    if (isFallbackNeeded) {
+      try {
+        const ggufHealth = await fetch('http://localhost:11436/health', { signal: AbortSignal.timeout(3000) }).then(r => r.ok).catch(() => false);
+        if (ggufHealth) {
+          const ggufPrompt = `Answer the user's question directly. Do NOT call any tools, do NOT emit ## TOOL_CALLS or ## COMMANDS. Be accurate and cite real-world reasoning.
+
+Question: ${message}
+
+Answer:`;
+          const ggufResp = await fetch('http://localhost:11436/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(120000),
+            body: JSON.stringify({
+              model: 'local',
+              messages: [{ role: 'user', content: ggufPrompt.slice(0, 8000) }],
+              max_tokens: 1500,
+              temperature: 0.3,
+            }),
+          });
+          if (ggufResp.ok) {
+            const ggufData = await ggufResp.json() as { choices?: Array<{ message?: { content?: string; reasoning_content?: string } }> };
+            const msg = ggufData.choices?.[0]?.message;
+            const ggufText = (msg?.content || msg?.reasoning_content || '').trim();
+            if (ggufText) {
+              outputText = `## Answer (local model)\n\n${ggufText.slice(0, 3000)}`;
+              sendEvent('step', { stepType: 'synthesis', text: 'Answered via local model fallback', status: 'completed' });
+            }
+          }
+        }
+      } catch (e) {
+        logger.warn({ err: (e as Error).message }, 'Local GGUF fallback failed');
+      }
     }
 
     // Parse visualization commands from output
@@ -9109,6 +9548,43 @@ app.get('/api/agent/tiers', authGuard, (_req: express.Request, res: express.Resp
     ],
     currentStats: costTracker.getStats(),
   });
+});
+
+// GET /api/agent/models — list every available LLM model (from omninet
+// providers) with availability status, so the chat panel can offer a
+// model picker. A model is "available" when its provider is reachable
+// (not down) and has a configured API key / is local.
+app.get('/api/agent/models', authGuard, (_req: express.Request, res: express.Response) => {
+  try {
+    const providers = omninet.getProviderDetails();
+    const models: Array<{
+      id: string; provider: string; model: string; label: string;
+      available: boolean; status: string; local: boolean; tier: number;
+    }> = [];
+    for (const p of providers) {
+      const hasKey = p.local || Boolean(p.apiKeyEnvVar && process.env[p.apiKeyEnvVar]);
+      const reachable = p.status !== 'down';
+      const available = hasKey && reachable && p.supportsStreaming !== false;
+      for (const m of p.models) {
+        models.push({
+          id: `${p.name}/${m}`,
+          provider: p.name,
+          model: m,
+          label: `${p.name} — ${m}`,
+          available,
+          status: p.status,
+          local: Boolean(p.local),
+          tier: p.tier,
+        });
+      }
+    }
+    // Auto (default) entry — no explicit selection, current behaviour.
+    models.unshift({ id: 'auto', provider: 'auto', model: '', label: 'Auto (recommended)', available: true, status: 'healthy', local: false, tier: 0 });
+    res.json({ models });
+  } catch (e) {
+    logger.warn({ err: e }, 'Failed to list models');
+    res.json({ models: [{ id: 'auto', provider: 'auto', model: '', label: 'Auto (recommended)', available: true, status: 'healthy', local: false, tier: 0 }] });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════

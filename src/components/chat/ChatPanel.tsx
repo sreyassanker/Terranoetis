@@ -9,6 +9,7 @@ import { HumanOverrideBanner } from '@/components/explainability/index';
 import { exportConversationAsPDF } from '@/lib/pdfReport';
 import ChatPanelContent from './ChatPanelContent';
 import { ChatTabs } from './ChatTabs';
+import { ModelSelector } from './ModelSelector';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useChatPanelState, useStreamingRenderer } from '@/hooks/useChatSelectors';
 import type { VirtualizedMessageListHandle } from './VirtualizedMessageList';
@@ -448,6 +449,8 @@ export function ChatPanel({
           {showShareDialog && <span style={{ fontSize: 10, color: '#34d399', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={shareUrl}>{shareUrl ? 'Link copied!' : 'Creating…'}</span>}
           {sandboxWorkspaceId && <span className="sandbox-workspace-badge" style={{ fontSize: 10 }}>Workspace</span>}
         </div>
+
+        <ModelSelector />
 
         {!isOnline() && (
           <div style={{ padding: '4px 8px', fontSize: 10, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', borderTop: '1px solid var(--border)', textAlign: 'center' }}>

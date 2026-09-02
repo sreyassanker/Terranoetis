@@ -212,11 +212,15 @@ Example format:
       const url = this.interpolateUrl(tool.schema.endpoint, input);
       const method = tool.schema.method || 'GET';
 
-      const resp = await fetch(url, {
+      const fetchOpts: RequestInit = {
         method,
         headers: { 'Content-Type': 'application/json' },
         signal: signal || AbortSignal.timeout(15000),
-      });
+      };
+      if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+        fetchOpts.body = JSON.stringify(input);
+      }
+      const resp = await fetch(url, fetchOpts);
       if (!resp.ok) throw new Error(`Tool "${tool.name}" HTTP ${resp.status}`);
       return resp.json();
     }
@@ -252,11 +256,15 @@ Example format:
     const url = this.interpolateUrl(tool.schema.endpoint || '', input);
     const method = tool.schema.method || 'GET';
 
-    const resp = await fetch(url, {
+    const fetchOpts: RequestInit = {
       method,
       headers: { 'Content-Type': 'application/json' },
       signal: signal || AbortSignal.timeout(15000),
-    });
+    };
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+      fetchOpts.body = JSON.stringify(input);
+    }
+    const resp = await fetch(url, fetchOpts);
     if (!resp.ok) throw new Error(`Tool "${tool.name}" HTTP ${resp.status}`);
     return resp.json();
   }

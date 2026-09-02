@@ -286,14 +286,34 @@ export class CognitiveOrchestrator {
     const needsFullSystem2 = !s1Result.match || s1Result.isAnomaly || s1Result.match.similarity < 0.7;
 
     if (isMediumConfidence && !s1Result.isAnomaly) {
-      // S1 response + S2 verification in parallel
+      // S1 response + S2 verification in parallel. Prefer a REAL data answer
+      // (registered tool for the matched intent) over the canned template so
+      // users never see unfilled {placeholders}. Falls back to the template
+      // only when no real tool exists.
       onProgress?.('reasoning', { phase: 'verification', text: 'Running deep verification in background...' });
 
       const s2Promise = this.runSystem2WithTimeout(query, context, 10000, onProgress);
 
+      // Try the real-data fast path first (weather → live conditions, etc.).
+      const realOutput = s1Result.match
+        ? await this.resolveSystem1WithRealData(
+            INTENT_TOOL_MAP[s1Result.match.intent]?.tool || '',
+            s1Result.match.intent,
+            context,
+          )
+        : null;
+
       const s2Result = await s2Promise;
 
-      const initialOutput = s1Result.match!.responseTemplate;
+      // Raw template would leak {conditions}/{temp} placeholders — never show it.
+      // Fill remaining {vars} with generic text so the reply is always readable.
+      const fillTemplate = (tpl: string): string =>
+        tpl.replace(/\{[a-zA-Z_]+\}/g, (m) => {
+          const k = m.slice(1, -1);
+          return k === 'city' ? (context?.location || 'this location') : 'n/a';
+        });
+
+      const initialOutput = realOutput || fillTemplate(s1Result.match!.responseTemplate);
 
       if (s2Result.timeout) {
         // S2 took too long — return S1 response with indicator
@@ -364,7 +384,7 @@ export class CognitiveOrchestrator {
     // Full System 2 reasoning
     onProgress?.('reasoning', { phase: 'system2', text: 'Running deep cognitive analysis...' });
 
-    const s2FullResult = await this.runSystem2Full(query, context, onProgress);
+    const s2FullResult = await this.runSystem2WithHardTimeout(query, context, 45000, onProgress);
 
     const { finalSynthesis, criticScore, iterations } = await system2.verifyAndRevise(
       s2FullResult.synthesis,
@@ -494,6 +514,46 @@ export class CognitiveOrchestrator {
       logger.info({ query: query.slice(0, 50), traceId }, 'Background S2 complete — ready for push');
     } catch (e) {
       logger.error({ err: (e as Error).message }, 'Background S2 failed');
+    }
+  }
+
+  // ── System 2 with hard wall-clock timeout ─────────────────────
+  // Prevents the entire deep reasoning path (MCTS/ToT) from hanging
+  // the chat. When the budget is exceeded the caller should fall through
+  // to the generic LLM streaming path instead of blocking forever.
+  private async runSystem2WithHardTimeout(
+    query: string,
+    context?: { location?: string; intent?: string },
+    timeoutMs = 45000,
+    onProgress?: ProgressCallback,
+  ): Promise<System2Result> {
+    try {
+      const result = await Promise.race([
+        this.runSystem2Full(query, context, onProgress),
+        new Promise<System2Result>((resolve) => {
+          setTimeout(() => {
+            onProgress?.('reasoning', { phase: 'timeout', text: 'Deep reasoning timed out — synthesizing partial results' });
+            resolve({
+              plan: [],
+              debate: null,
+              causalGraph: null,
+              counterfactuals: [],
+              hypotheses: [],
+              reasoningTrace: [{ step: 1, type: 'decomposition' as const, description: 'Timed out after ' + (timeoutMs / 1000) + 's', input: query, output: 'partial', confidence: 0.3 }],
+              synthesis: 'The deep reasoning took too long. I will provide what I can based on available information, or you can try rephrasing the question more specifically.',
+              finalConfidence: 0.3,
+            });
+          }, timeoutMs);
+        }),
+      ]);
+      return result;
+    } catch {
+      return {
+        plan: [], debate: null, causalGraph: null, counterfactuals: [],
+        hypotheses: [], reasoningTrace: [],
+        synthesis: 'Analysis was interrupted. Please try a simpler or more specific question.',
+        finalConfidence: 0,
+      };
     }
   }
 

@@ -16,5 +16,6 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": false
   },
-  "include": ["server", "src/rendering/causalGraph.ts", "src/rendering/physicsSurrogates.ts", "src/rendering/gisFusion.ts"]
+  "include": ["server", "src/rendering/causalGraph.ts", "src/rendering/physicsSurrogates.ts", "src/rendering/gisFusion.ts"],
+  "exclude": ["server/plugins"]
 }

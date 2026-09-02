@@ -13,6 +13,7 @@ import { getDefaultScenarios, rolloutScenario } from '@/rendering/scenarioEngine
 import type { Scenario, ScenarioDiff } from '@/rendering/scenarioEngine';
 import { writeCausalProbs, initBlackboard } from '@/rendering/blackboard';
 import { authHeaders } from '@/context/AuthContext';
+import { getTimezone } from '@/lib/formatTime';
 import { formatStepResult } from '@/rendering/formatStepResult';
 import type { FormattedStepResult } from '@/rendering/formatStepResult';
 import {
@@ -346,19 +347,19 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
   useEffect(() => { initBlackboard(); }, []);
   useEffect(() => { return () => { mountedRef.current = false; }; }, []);
 
-  /* Set default date range (IST): now → 1 hour ago */
+  /* Set default date range in the selected timezone: now → 1 hour ago */
   useEffect(() => {
-    function istParts(date: Date) {
-      const ms = date.getTime() + 5.5 * 3600000;
-      const ist = new Date(ms);
-      return {
-        date: `${ist.getUTCFullYear()}-${String(ist.getUTCMonth()+1).padStart(2,'0')}-${String(ist.getUTCDate()).padStart(2,'0')}`,
-        time: `${String(ist.getUTCHours()).padStart(2,'0')}:${String(ist.getUTCMinutes()).padStart(2,'0')}`,
-      };
+    const tz = getTimezone();
+    function tzParts(date: Date) {
+      const part = (d: Date, type: 'numeric' | '2-digit') => d.toLocaleString('en-CA', { timeZone: tz, year: 'numeric', month: type, day: type, hour: type, minute: type, hour12: false });
+      const s = part(date, '2-digit');
+      // en-CA gives YYYY-MM-DD HH:MM
+      const [d, t] = s.split(' ');
+      return { date: d, time: t.slice(0, 5) };
     }
     const now = new Date();
-    const end = istParts(now);
-    const start = istParts(new Date(now.getTime() - 3600000));
+    const end = tzParts(now);
+    const start = tzParts(new Date(now.getTime() - 3600000));
     setRangeEndDate(end.date);
     setRangeEndTime(end.time);
     setRangeStartDate(start.date);

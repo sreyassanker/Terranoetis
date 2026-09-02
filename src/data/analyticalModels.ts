@@ -1,6 +1,6 @@
 /* ═════════════════════════════════════════════════════════════════
    ANALYTICAL MODELS DATA — 150 analytical earth system equations
-   26 domains · 7 parts · All non-ML, peer-reviewed, DOI-verified
+   25 domains · 7 parts · All non-ML, peer-reviewed, DOI-verified
    ═════════════════════════════════════════════════════════════════ */
 
 export interface AnalysisToolParameter {

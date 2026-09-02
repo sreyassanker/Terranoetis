@@ -140,3 +140,4 @@ coverage/
 *.zip
 *.orig
 *.rej
+server/plugins/

@@ -1,6 +1,6 @@
 # Frontend
 
-The Terranoetis client is a **React 19 + TypeScript** single-page application built with **Vite 7**, styled with **Tailwind CSS 3**, and rendered on a **CesiumJS 1.140** WebGL globe. The UI shell (topbar, sidebar, modals) is implemented inline in `src/App.tsx` (~10,800 lines); feature surfaces are split across lazy-loaded panels.
+The Terranoetis client is a **React 19 + TypeScript** single-page application built with **Vite 7**, styled with **Tailwind CSS 3**, and rendered on a **CesiumJS 1.140** WebGL globe. The UI shell (topbar, sidebar, modals) is implemented inline in `src/App.tsx` (~10,871 lines); feature surfaces are split across lazy-loaded panels.
 
 ---
 
@@ -78,9 +78,9 @@ Defined in `src/main.tsx`:
 | SettingsPanel | 220 | 4 tabs: Cognitive (S1/S2 bias), Alerts, Providers, Privacy |
 | MultiHazardPanel | 1168 | Multi-hazard causal risk chain, IDW risk surface |
 
-### Chat (`src/components/chat/`, 9 components)
+### Chat (`src/components/chat/`, 11 components)
 
-`ChatPanel.tsx`, `ChatPanelContent.tsx`, `ChatMessageRow.tsx`, `ChatTabs.tsx`, `ChatHistoryPanel.tsx`, `AdvancedChatViews.tsx` (PlanCard, SubAgentActivity, InlineTable/Chart/Slider, ToolApproval, ModelTierSelector, TraceExpander), `LiveProcessPanel.tsx`, `RichMarkdown.tsx`, `VirtualizedMessageList.tsx`
+`ChatPanel.tsx`, `ChatPanelContent.tsx`, `ChatMessageRow.tsx`, `ChatTabs.tsx`, `ChatHistoryPanel.tsx`, `AdvancedChatViews.tsx` (PlanCard, SubAgentActivity, InlineTable/Chart/Slider, ToolApproval, ModelTierSelector, TraceExpander), `LiveProcessPanel.tsx`, `RichMarkdown.tsx`, `VirtualizedMessageList.tsx`, `ModelSelector.tsx` (LLM provider picker), `StudyAreaPrompt.tsx` (auto-detect / draw / adjust boundary)
 
 ### Collaboration (`src/components/collaboration/`)
 
@@ -229,9 +229,10 @@ Scenario types and colors:
 ## State & Data
 
 | Store | Purpose |
-|---|---|
+|---|---|---|
 | `AuthContext` | Authentication state, token refresh |
-| `chatStore` (Zustand) | Chat messages, UI state |
+| `chatStore` (Zustand) | Chat messages, UI state, model selection, study-area bbox |
+| `userPrefStore` (Zustand) | User location + timezone preference (persisted, applied globally) |
 | `useChatSelectors` | Derived selectors |
 | `src/data/` | Analytical models catalog, land cover classes |
-| `src/lib/` | API client, chat store, DuckDB analytics, land-cover pipeline, PDF report, formatting |
+| `src/lib/` | API client, chat store, `formatTime.ts` (timezone-aware formatting), DuckDB, PDF |

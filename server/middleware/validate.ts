@@ -9,11 +9,14 @@ export const askSchema = z.object({
   apiKey: z.string().optional(),
   userId: z.string().optional(),
   tier: z.enum(['local', 'flash', 'pro']).optional(),
+  model: z.string().optional(),
+  studyAreaAction: z.enum(['draw', 'detected', 'skip']).optional(),
   images: z.array(z.object({ dataUrl: z.string(), mimeType: z.string(), fileName: z.string() })).optional(),
   recentMessages: z.array(z.object({ role: z.string(), content: z.string() })).optional(),
   studyAreaBbox: z.object({
     latMin: z.number(), latMax: z.number(), lonMin: z.number(), lonMax: z.number(),
   }).nullable().optional(),
+  studyAreaPolygon: z.array(z.array(z.array(z.number()))).nullable().optional(),
 });
 
 export const sandboxExecuteSchema = z.object({

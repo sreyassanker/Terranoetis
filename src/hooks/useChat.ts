@@ -64,7 +64,7 @@ export function useChat(
   const nextAiMsgIdRef = useRef(100);
   const store = useChatStore;
 
-  const sendAI = useCallback(async (overrideMessage?: string, opts?: { force?: boolean; regen?: boolean }) => {
+  const sendAI = useCallback(async (overrideMessage?: string, opts?: { force?: boolean; regen?: boolean; studyAreaAction?: 'draw' | 'detected' | 'skip'; bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number }; polygon?: Array<Array<[number, number]>> }) => {
     const state = store.getState();
     const userMsg = typeof overrideMessage === 'string' ? overrideMessage : state.aiInput.trim();
     if (!userMsg) return;
@@ -146,6 +146,7 @@ export function useChat(
 
     const sessionId = store.getState().sessionId;
     const selectedTier = store.getState().selectedTier;
+    const selectedModel = store.getState().selectedModel;
     const chatImages = store.getState().chatImages;
     const sandboxWorkspaceId = store.getState().sandboxWorkspaceId;
     const studyAreaBbox = store.getState().studyAreaBbox;
@@ -313,6 +314,10 @@ export function useChat(
           userId: 'browser-user',
           sessionId,
           tier: selectedTier,
+          ...(selectedModel && selectedModel !== 'auto' ? { model: selectedModel } : {}),
+          ...(opts?.studyAreaAction ? { studyAreaAction: opts.studyAreaAction } : {}),
+          ...(opts?.bbox ? { studyAreaBbox: opts.bbox } : {}),
+          ...(opts?.polygon ? { studyAreaPolygon: opts.polygon } : {}),
           recentMessages: contextMessages,
           images: requestImages,
           ...(studyAreaBbox ? { studyAreaBbox } : {}),
@@ -465,6 +470,29 @@ export function useChat(
                 });
                 return found ? next : prev;
               });
+            }
+            // Study area request — the server asks the user to choose how to
+            // define the spatial boundary before running a computation.
+            if (data.type === 'study_area_request') {
+              if (streamTabId) {
+                store.getState().setTabTyping(streamTabId, false);
+              } else {
+                store.getState().setAiTyping(false);
+              }
+              addMessage({
+                id: nextAiMsgIdRef.current++,
+                role: 'assistant',
+                content: data.query ? `**Study area needed**\n\n${data.message || 'This analysis needs a study area boundary. Choose how to proceed:'}` : '',
+                studyAreaRequest: {
+                  query: data.query || '',
+                  location: data.location,
+                  detectedBbox: data.detectedBbox,
+                  options: data.options || [],
+                },
+              });
+              // The stream ends after this event — skip remaining processing.
+              // (The server sends done right after.)
+              return;
             }
             if (data.type === 'panel' || (data.stats && data.charts)) {
               options.onPanel?.(data);

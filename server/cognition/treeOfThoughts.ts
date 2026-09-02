@@ -5,12 +5,19 @@ export interface ToTConfig {
   beamWidth: number;
   maxDepth: number;
   pruneThreshold: number;
+  /** Wall-clock budget (ms). The search stops expanding when exceeded — ToT
+   *  must never hang the chat. Defaults to 35s; the caller can tighten it. */
+  timeoutMs: number;
+  /** Max LLM calls allowed across the whole search (another anti-hang cap). */
+  maxLlmCalls: number;
 }
 
 const DEFAULT_CONFIG: ToTConfig = {
-  beamWidth: 5,
-  maxDepth: 8,
+  beamWidth: 3,
+  maxDepth: 6,
   pruneThreshold: 0.3,
+  timeoutMs: 35000,
+  maxLlmCalls: 40,
 };
 
 interface LLMRouter {
@@ -109,13 +116,29 @@ Return ONLY a number between 0 and 1.`;
 
     let currentLayer: ReasoningNode[] = [tree.getRoot()];
     let depth = 0;
+    const start = Date.now();
+    let llmCalls = 0;
 
-    while (depth < this.config.maxDepth && currentLayer.length > 0) {
+    const overBudget = () => {
+      const elapsed = Date.now() - start;
+      if (elapsed >= this.config.timeoutMs) {
+        logger.warn({ elapsed, maxDepth: depth }, 'ToT wall-clock budget exhausted — stopping search');
+        return true;
+      }
+      if (llmCalls >= this.config.maxLlmCalls) {
+        logger.warn({ llmCalls, maxLlmCalls: this.config.maxLlmCalls }, 'ToT LLM-call budget exhausted — stopping search');
+        return true;
+      }
+      return false;
+    };
+
+    while (depth < this.config.maxDepth && currentLayer.length > 0 && !overBudget()) {
       logger.info({ depth, nodeCount: currentLayer.length }, 'ToT search layer');
 
       const nextCandidates: ReasoningNode[] = [];
 
       for (const node of currentLayer) {
+        if (overBudget()) break;
         if (node.state.status === 'complete') {
           nextCandidates.push(node);
           continue;
@@ -123,6 +146,7 @@ Return ONLY a number between 0 and 1.`;
 
         const k = Math.min(3, this.config.beamWidth);
         const thoughts = await this.generateThoughts(node.state, k);
+        llmCalls += thoughts.length;
 
         for (const thought of thoughts) {
           const state: ReasoningState = {
@@ -139,6 +163,7 @@ Return ONLY a number between 0 and 1.`;
           const child = tree.getNode(childId);
           if (child) {
             const score = await this.evaluateThought(node.state, thought);
+            llmCalls++;
             child.value = score;
             child.visits = 1;
             child.prior = score;
@@ -147,6 +172,7 @@ Return ONLY a number between 0 and 1.`;
         }
       }
 
+      if (nextCandidates.length === 0) break;
       currentLayer = this.pruneLayer(nextCandidates, this.config.pruneThreshold);
       depth++;
     }
