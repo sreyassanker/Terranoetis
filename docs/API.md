@@ -1,6 +1,6 @@
 # API Reference
 
-Terranoetis exposes **297 REST endpoints** plus a real-time **WebSocket** channel. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
+Terranoetis exposes **300 REST endpoints** plus a real-time **WebSocket** channel. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
 
 ---
 
@@ -16,6 +16,7 @@ Terranoetis exposes **297 REST endpoints** plus a real-time **WebSocket** channe
 - [Explainability & Governance](#explainability--governance)
 - [Memory & Knowledge](#memory--knowledge)
 - [Admin & Operations](#admin--operations)
+- [Local GGUF Model](#local-gguf-model)
 - [WebSocket](#websocket)
 - [Error Handling](#error-handling)
 
@@ -194,12 +195,29 @@ The analytical pipeline applies **7-stage quality control** (input validation, u
 | POST | `/api/admin/plugins/install-zip` | Install plugin from a ZIP archive |
 | POST | `/api/admin/plugins/:id/toggle` | Enable or disable a plugin |
 | DELETE | `/api/admin/plugins/:id` | Remove plugin |
+| GET | `/api/admin/models/gguf-status` | Local GGUF model status (installed, size, partial file, download progress, speed, ETA) |
+| POST | `/api/admin/models/gguf-download` | Start or resume downloading the LFM 2.5 2.6B Q4_K_M GGUF model from HuggingFace |
+| DELETE | `/api/admin/models/gguf` | Remove the local GGUF model file (and any partial download) |
 | GET | `/api/tools` | Registered tools |
 | DELETE | `/api/tools/:id` | Disable tool |
 | GET | `/api/config/apis` | Public API config (no secrets) |
 | GET | `/api/openapi.json` | OpenAPI spec |
 | GET | `/api/docs` | API documentation UI |
 | GET | `/api/health` | Health + readiness checks |
+
+### Local GGUF Model
+
+The server ships with a built-in downloader for the **LFM 2.5 2.6B Q4_K_M** GGUF model (`~1.6 GB`). Once downloaded, the server auto-starts `llama-server` on port 11436, making the local model available as a fallback LLM provider.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/admin/models/gguf-status` | Check install state, file size, partial/resume state, and live download progress (speed, ETA) |
+| POST | `/api/admin/models/gguf-download` | Start or resume downloading. Returns `alreadyInstalled: true` if the model is already present. Writes to a `.partial` file so network interruptions don't corrupt the real path |
+| DELETE | `/api/admin/models/gguf` | Delete the model file and any partial download |
+
+**Resume behaviour**: if the download is interrupted (network drop, server restart), the partial file is kept at `models/LFM2.5-2.6B-Q4_K_M.gguf.partial`. Re-triggering the download sends an HTTP `Range` header to HuggingFace and appends to the partial file — no re-download from scratch.
+
+**Progress tracking**: the status endpoint returns `speedBytes` (bytes/s), `etaSeconds`, `percent`, `received`, `total`, `running`, `done`, and `resuming` flags for real-time UI updates.
 
 ---
 

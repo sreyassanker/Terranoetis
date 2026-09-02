@@ -1314,6 +1314,140 @@ app.post('/api/admin/plugins/:id/toggle', requireRole('admin'), (req: express.Re
   res.json({ ok: true, id: req.params.id, enabled });
 });
 
+// ── Local GGUF model download ──────────────────────────────────
+// Downloads the LFM 2.5 2.6B Q4_K_M GGUF model into ./models/ so the
+// local llama-server fallback works out of the box. Tracks progress so the
+// admin panel can show a live progress bar.
+const GGUF_DOWNLOAD_URL = process.env.GGUF_DOWNLOAD_URL || 'https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/main/LFM2.5-2.6B-Q4_K_M.gguf';
+const GGUF_MODEL_NAME = GGUF_MODEL.replace('./models/', '');
+const GGUF_PARTIAL_PATH = `${GGUF_MODEL}.partial`;
+const ggufDownloadState: { running: boolean; received: number; total: number; done: boolean; error?: string; startedAt?: number; resuming?: boolean; resumeOffset: number } = { running: false, received: 0, total: 0, done: false, resumeOffset: 0 };
+
+async function downloadGGUFModel(): Promise<void> {
+  if (ggufDownloadState.running) return;
+  ggufDownloadState.running = true;
+  ggufDownloadState.done = false;
+  ggufDownloadState.error = undefined;
+  ggufDownloadState.startedAt = Date.now();
+
+  try {
+    await fs.promises.mkdir('./models', { recursive: true });
+
+    // Resume support: if a .partial file already exists, pick up from where
+    // the last (interrupted) attempt stopped instead of starting over.
+    let resumeFrom = 0;
+    try {
+      if (fs.existsSync(GGUF_PARTIAL_PATH)) resumeFrom = fs.statSync(GGUF_PARTIAL_PATH).size;
+    } catch { /* ignore */ }
+    ggufDownloadState.resuming = resumeFrom > 0;
+    ggufDownloadState.resumeOffset = resumeFrom;
+    ggufDownloadState.received = resumeFrom;
+
+    const headers: Record<string, string> = {};
+    if (resumeFrom > 0) headers.Range = `bytes=${resumeFrom}-`;
+    const resp = await fetch(GGUF_DOWNLOAD_URL, { headers });
+    if (!resp.ok || !resp.body) {
+      ggufDownloadState.error = `Download failed (HTTP ${resp.status})`;
+      ggufDownloadState.running = false;
+      return;
+    }
+
+    // Total size: HuggingFace returns the full size in the Content-Range header
+    // when resuming, otherwise Content-Length.
+    let total = Number(resp.headers.get('content-length') || 0);
+    if (resumeFrom > 0) {
+      const cr = resp.headers.get('content-range'); // e.g. "bytes 500000000-1674455039/1674455040"
+      const m = cr ? /\/\s*(\d+)\s*$/.exec(cr) : null;
+      if (m) total = Number(m[1]);
+      else total += resumeFrom;
+    }
+    ggufDownloadState.total = total;
+
+    // Stream to a .partial temp file so an interrupted download never leaves a
+    // corrupt file at the real model path. Rename to the final path on success.
+    const writer = fs.createWriteStream(GGUF_PARTIAL_PATH, { flags: resumeFrom > 0 ? 'a' : 'w' });
+
+    const reader = resp.body.getReader();
+    const pump = async (): Promise<void> => {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          writer.write(Buffer.from(value));
+          ggufDownloadState.received += value.length;
+        }
+      }
+    };
+    await pump();
+    await new Promise<void>((resolve, reject) => writer.end((err: Error | null) => (err ? reject(err) : resolve())));
+
+    await fs.promises.rename(GGUF_PARTIAL_PATH, GGUF_MODEL);
+    ggufDownloadState.done = true;
+    ggufDownloadState.resuming = false;
+    logger.info({ path: GGUF_MODEL, bytes: ggufDownloadState.received }, 'GGUF model download complete');
+  } catch (e) {
+    ggufDownloadState.error = (e as Error).message;
+    logger.error({ err: e }, 'GGUF model download failed — partial file kept for resume');
+  } finally {
+    ggufDownloadState.running = false;
+  }
+}
+
+app.get('/api/admin/models/gguf-status', requireRole('admin'), (_req: express.Request, res: express.Response) => {
+  let exists = false;
+  let size = 0;
+  let partialExists = false;
+  let partialSize = 0;
+  try {
+    exists = fs.existsSync(GGUF_MODEL);
+    if (exists) size = fs.statSync(GGUF_MODEL).size;
+    partialExists = fs.existsSync(GGUF_PARTIAL_PATH);
+    if (partialExists) partialSize = fs.statSync(GGUF_PARTIAL_PATH).size;
+  } catch { /* ignore */ }
+  const elapsedMs = ggufDownloadState.startedAt ? Date.now() - ggufDownloadState.startedAt : 0;
+  const downloadedSinceStart = Math.max(0, ggufDownloadState.received - ggufDownloadState.resumeOffset);
+  const speedBytes = ggufDownloadState.running && elapsedMs > 0 ? (downloadedSinceStart / elapsedMs) * 1000 : 0;
+  const remaining = ggufDownloadState.total > 0 ? Math.max(0, ggufDownloadState.total - ggufDownloadState.received) : 0;
+  const etaSeconds = speedBytes > 0 && remaining > 0 ? Math.round(remaining / speedBytes) : 0;
+  res.json({
+    installed: exists && size > 1_000_000_000,
+    size,
+    partialSize,
+    url: GGUF_DOWNLOAD_URL,
+    download: {
+      ...ggufDownloadState,
+      percent: ggufDownloadState.total > 0 ? Math.min(100, Math.round((ggufDownloadState.received / ggufDownloadState.total) * 100)) : 0,
+      speedBytes,
+      etaSeconds,
+    },
+  });
+});
+
+app.post('/api/admin/models/gguf-download', requireRole('admin'), (_req: express.Request, res: express.Response) => {
+  if (fs.existsSync(GGUF_MODEL) && fs.statSync(GGUF_MODEL).size > 1_000_000_000) {
+    return res.json({ ok: true, alreadyInstalled: true });
+  }
+  void downloadGGUFModel();
+  res.json({ ok: true, started: true, message: 'Model download started' });
+});
+
+app.delete('/api/admin/models/gguf', requireRole('admin'), (_req: express.Request, res: express.Response) => {
+  try {
+    let removed = false;
+    if (fs.existsSync(GGUF_MODEL)) {
+      fs.unlinkSync(GGUF_MODEL);
+      removed = true;
+    }
+    if (fs.existsSync(GGUF_PARTIAL_PATH)) {
+      fs.unlinkSync(GGUF_PARTIAL_PATH);
+      removed = true;
+    }
+    res.json({ ok: true, removed });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.get('/api/config/apis', (_req: express.Request, res: express.Response) => {
   // Return available APIs and their registration links
   res.json({
