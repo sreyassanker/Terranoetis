@@ -79,6 +79,7 @@ export function ModelSelector() {
         alignItems: 'center',
         gap: 6,
         flexWrap: 'wrap',
+        position: 'relative',
       }}
     >
       <button
@@ -119,14 +120,15 @@ export function ModelSelector() {
           aria-label="Available AI models"
           style={{
             position: 'absolute',
-            bottom: 'calc(100% + 6px)',
-            right: 8,
+            bottom: '100%',
+            left: 0,
+            marginBottom: 4,
             zIndex: 500,
             minWidth: 220,
             maxHeight: 280,
             overflowY: 'auto',
-            background: '#17181c',
-            border: '1px solid rgba(255,255,255,0.12)',
+            background: '#faf9f5',
+            border: '1px solid #e6e2db',
             borderRadius: 8,
             boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
             padding: 4,
@@ -155,7 +157,7 @@ export function ModelSelector() {
                   background: active ? 'rgba(96,165,250,0.18)' : 'transparent',
                   border: 'none',
                   borderRadius: 6,
-                  color: unavailable ? '#f87171' : (active ? '#60a5fa' : '#e5e7eb'),
+                  color: unavailable ? '#dc2626' : (active ? '#2563eb' : '#1c1a18'),
                   opacity: unavailable ? 0.85 : 1,
                 }}
               >

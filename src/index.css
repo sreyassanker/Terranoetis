@@ -252,7 +252,7 @@ p { text-align: justify; }
     height: 28px;
     border: none;
     background: transparent;
-    color: var(--text-dim);
+    color: rgba(226, 232, 240, 0.7);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -722,13 +722,13 @@ p { text-align: justify; }
     transition: border-color 0.2s ease;
   }
   .search-box input:focus { border-color: var(--accent); }
-  .search-box input::placeholder { color: var(--text-muted); }
+  .search-box input::placeholder { color: rgba(226, 232, 240, 0.7); }
   .search-icon {
     position: absolute;
     left: 10px;
     top: 50%;
     transform: translateY(-50%);
-    color: var(--text-muted);
+    color: rgba(226, 232, 240, 0.7);
     font-size: 13px;
     pointer-events: none;
   }
@@ -1011,7 +1011,7 @@ p { text-align: justify; }
     flex-shrink: 0;
   }
 
-  .stat-label { color: var(--text-dim); }
+  .stat-label { color: rgba(226, 232, 240, 0.7); }
   .stat-val {
     color: var(--text);
     font-family: 'JetBrains Mono', monospace;
@@ -1023,7 +1023,7 @@ p { text-align: justify; }
     height: 28px;
     border: none;
     background: transparent;
-    color: var(--text-dim);
+    color: rgba(226, 232, 240, 0.7);
     cursor: pointer;
     display: flex;
     align-items: center;
