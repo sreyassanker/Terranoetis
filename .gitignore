@@ -142,3 +142,6 @@ coverage/
 *.orig
 *.rej
 server/plugins/
+
+# E2E test specs
+e2e/

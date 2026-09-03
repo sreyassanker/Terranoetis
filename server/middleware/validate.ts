@@ -60,14 +60,6 @@ export const feedbackSchema = z.object({
   modelTier: z.string().optional(),
 });
 
-export const digitalTwinSchema = z.object({
-  message: z.string().min(1).max(2000),
-  lat: z.number().min(-90).max(90).optional(),
-  lon: z.number().min(-180).max(180).optional(),
-  locationName: z.string().optional(),
-  radiusKm: z.number().min(1).max(200).optional(),
-});
-
 export function validate(schema: z.ZodSchema) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.body);

@@ -45,7 +45,7 @@ export interface Subtask {
 }
 
 export interface IntentResult {
-  type: 'quick_scan' | 'deep_analysis' | 'fly_to' | 'toggle_layer' | 'weather_check' | 'compute' | 'digital_twin' | 'panel_command' | 'unknown';
+  type: 'quick_scan' | 'deep_analysis' | 'fly_to' | 'toggle_layer' | 'weather_check' | 'compute' | 'panel_command' | 'unknown';
   confidence: number;
   location?: { lat: number; lon: number; label?: string };
   layerIds?: string[];
@@ -244,20 +244,6 @@ const INTENT_PROTOTYPES: IntentPrototype[] = [
     'research seismic activity', 'study volcanic patterns', 'investigate climate trends',
     'comprehensive report on', 'in depth analysis',
   ]},
-  { type: 'digital_twin', confidence: 0.85, patterns: [
-    'what if sea level rises 20 meters', 'impact of earthquake on city',
-    'show me flood zones for mumbai', 'how many people affected by tsunami',
-    'damage assessment for tokyo', 'risk analysis of coastal bangladesh',
-    'compare scenarios for wildfire near los angeles', 'simulate hurricane hitting florida',
-    'what happens if volcano erupts near naples', 'analyze impact on infrastructure',
-    'crisis simulation for flooding in london', 'disaster scenario for chennai',
-    'show me what will happen if sea rises 40m', 'what will happen if sea level rises 40 meters',
-    'if sea rises by 20m in coastal area', 'what happens if sea level rises 40 meters',
-    'show me impact of sea level rise on thiruvananthapuram', 'flood simulation for coastal city',
-    'what if ocean rises 30 meters', 'show me flood risk for mumbai',
-    'if hurricane hits chennai', 'earthquake damage simulation tokyo',
-    'tsunami impact on coastal area', 'wildfire spread simulation',
-  ]},
 ];
 
 // Pre-computed embeddings cache
@@ -425,11 +411,6 @@ export class IntentRouter {
     const panelMatch = this.detectPanelCommand(lower);
     if (panelMatch && !hasAnalysisVerb) {
       return { type: 'panel_command', confidence: 0.97, panelId: panelMatch.panelId, panelAction: panelMatch.action, location };
-    }
-
-    // Digital twin / impact analysis (must precede compute and quick_scan)
-    if (/\b(what if|what will happen|what would happen|impact|damage assessment|flood zone|inundation|sea level rise|sea rises|sea.*rises|sea.*level.*rises|ocean.*rises|water.*level.*rises|how many.*affected|risk analysis|compare.*scenarios?|simulate.*near|what happens if|analyze impact|show.*impact|crisis simulation|disaster scenario|show me.*zone|show me.*flood|show me.*risk|show me.*damage|show me.*impact|show me what|coastal.*flood|flood.*coastal|coastal.*area.*sea|if.*sea.*rises|if.*sea.*level|what.*happens.*if.*sea|what.*happens.*if.*flood|what.*happens.*if.*earthquake|what.*happens.*if.*tsunami|what.*happens.*if.*erupt|what.*happens.*if.*hurricane|what.*happens.*if.*cyclone|what.*happens.*if.*wildfire)\b/i.test(lower)) {
-      return { type: 'digital_twin', confidence: 0.85, location };
     }
 
     // Maritime queries with spatial context — route to deep_analysis (not just toggle)
@@ -667,7 +648,7 @@ export class IntentRouter {
     const prompt = `You are an Earth Intelligence intent classifier. Analyze the user's message and return ONLY valid JSON (no markdown, no explanation).
 
 Determine:
-- type: one of "quick_scan" (urgent hazard check), "deep_analysis" (detailed research or data query requiring backend fetch), "fly_to" (navigate to location), "toggle_layer" (show/hide data layer), "weather_check" (weather/marine/air quality query), "compute" (data analysis/computation), "digital_twin" (impact simulation/what-if scenario), or "unknown"
+- type: one of "quick_scan" (urgent hazard check), "deep_analysis" (detailed research or data query requiring backend fetch), "fly_to" (navigate to location), "toggle_layer" (show/hide data layer), "weather_check" (weather/marine/air quality query), "compute" (data analysis/computation), or "unknown"
 - confidence: 0.0 to 1.0
 - location: if a specific place is mentioned, provide {lat, lon, label}. Use known coordinates for major cities. If coordinates are given directly, parse them.
 - layerIds: if the user wants to see a specific data layer, suggest the layer ID from: earthquakes, wildfires, severe_storms, volcanoes, flight_tracks, ais_vessels, space_debris, satellite_tracker, lightning_strikes, aurora_oval, submarine_cables
@@ -679,7 +660,7 @@ Guidance:
 - "wildfire hotspots", "active fires near" → deep_analysis with layerIds ["wildfires"]
 - "rainfall over", "rain in", "temperature in" → weather_check
 - "air quality", "pollution", "AQI" → weather_check
-- "what if sea level", "impact of", "flood simulation" → digital_twin
+- "what if sea level", "impact of", "flood simulation" → compute
 - "stock price", "oil price", "market quotes" → deep_analysis
 - "geopolitical risk", "conflict risk" → deep_analysis
 - "sanctions check", "OFAC" → deep_analysis
@@ -1105,7 +1086,6 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
       { match: /time\s*slider/i, panelId: 'time-slider' },
       { match: /admin\s*dashboard|\badmin\b/i, panelId: 'admin' },
       { match: /iss\s*(live|tracker)?|\binternational space station\b/i, panelId: 'iss' },
-      { match: /digital\s*twin/i, panelId: 'digital-twin' },
       { match: /fork\s*manager|fork\s*mode|parallel\s*reality|forks/i, panelId: 'fork' },
       { match: /monitor\s*panel|ambient\s*monitor|intelligence\s*monitor/i, panelId: 'monitor' },
       { match: /route\s*tool|\broute\b/i, panelId: 'route' },

@@ -104,8 +104,8 @@ p { text-align: justify; }
   .cesium-container {
     position: absolute;
     inset: 0;
-    left: 300px;
-    width: calc(100% - 300px);
+    left: 280px;
+    width: calc(100% - 280px);
     height: 100%;
     transition: left 0.3s ease, width 0.3s ease;
     overflow: hidden;
@@ -407,7 +407,7 @@ p { text-align: justify; }
     position: absolute;
     top: 64px;
     left: 0;
-    width: 300px;
+    width: 280px;
     bottom: 0;
     background: var(--panel);
     border-right: 1px solid var(--border);
@@ -419,12 +419,12 @@ p { text-align: justify; }
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  .sidebar.collapsed { transform: translateX(-300px); }
+  .sidebar.collapsed { transform: translateX(-280px); }
 
   .sidebar-toggle {
     position: absolute;
     top: 64px;
-    left: 300px;
+    left: 280px;
     z-index: 91;
     width: 22px;
     height: 48px;
@@ -686,7 +686,8 @@ p { text-align: justify; }
 
   /* ── OPACITY SLIDER ── */
   .opacity-wrap {
-    width: 100%;
+    width: 80px;
+    flex-shrink: 0;
     padding: 4px 0 2px;
     display: flex;
     align-items: center;
@@ -699,6 +700,11 @@ p { text-align: justify; }
     font-family: 'JetBrains Mono', monospace;
     min-width: 26px;
     text-align: right;
+  }
+
+  .opacity-wrap input[type="range"] {
+    width: 54px;
+    min-width: 54px;
   }
 
   /* ── SEARCH ── */
@@ -964,7 +970,7 @@ p { text-align: justify; }
   .statsbar {
     position: absolute;
     bottom: 0;
-    left: 300px;
+    left: 280px;
     right: 0;
     height: 36px;
     background: var(--panel);
@@ -1048,7 +1054,7 @@ p { text-align: justify; }
   .timeline-bar {
     position: absolute;
     bottom: 36px;
-    left: 300px;
+    left: 280px;
     right: 0;
     height: 48px;
     background: var(--panel);
@@ -1199,14 +1205,14 @@ p { text-align: justify; }
   /* ── IMAGERY CHIPS ── */
   .imagery-row {
     display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
+    gap: 4px;
+    flex-wrap: nowrap;
     align-items: center;
   }
 
   .img-chip {
-    font-size: 10.5px;
-    padding: 3px 8px;
+    font-size: 10px;
+    padding: 3px 5px;
     border-radius: 5px;
     border: 1px solid var(--border);
     background: rgba(255,255,255,0.03);
@@ -1216,10 +1222,95 @@ p { text-align: justify; }
     font-weight: 500;
     font-family: 'Inter', sans-serif;
     white-space: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .img-chip:hover { border-color: var(--accent); color: var(--accent); }
   .img-chip.active { border-color: var(--accent); background: rgba(59,130,246,0.12); color: var(--accent); }
+
+  /* ── SENSOR STYLE ACCESSIBILITY WIDGET ── */
+  .sensor-widget {
+    position: fixed;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    pointer-events: auto;
+  }
+
+  .sensor-widget-handle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    border-radius: 9px;
+    border: 1px solid rgba(139,92,246,0.35);
+    background: rgba(15,18,38,0.9);
+    color: var(--text);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    transition: box-shadow 0.15s ease, background 0.15s ease;
+    position: relative;
+  }
+
+  .sensor-widget-handle:hover { background: rgba(25,28,52,0.95); }
+  .sensor-widget-handle:active { cursor: grabbing; }
+
+  .sensor-widget-lock {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(139,92,246,0.85);
+    color: #fff;
+    padding: 2px;
+  }
+
+  .sensor-widget-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    border-radius: 9px;
+    border: 1px solid rgba(139,92,246,0.25);
+    background: rgba(15,18,38,0.92);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+    min-width: 96px;
+  }
+
+  .sensor-widget-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 9px;
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: 'Inter', sans-serif;
+    text-align: left;
+  }
+  .sensor-widget-item:hover { filter: brightness(1.35); }
+  .sensor-widget-item.active { filter: brightness(1.5); }
+
+  .sensor-widget-item-label {
+    display: block;
+    white-space: nowrap;
+  }
 
   /* ── SEARCH SUGGESTIONS ── */
   .search-suggestions {

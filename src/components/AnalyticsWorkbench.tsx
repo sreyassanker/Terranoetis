@@ -31,11 +31,6 @@ interface AnalyticsWorkbenchProps {
   zIndex?: number;
   /** Color-stop ramp for the heatmap (matches the globe's active scheme). */
   schemeColors?: Array<{ stop: number; r: number; g: number; b: number }>;
-  /** One-click demo trigger: when this object changes identity (and toolId is
-   *  a valid tool), the workbench auto-selects the tool and signals it to run
-   *  against the current study area. The host (App) sets up the study area
-   *  first, then bumps this prop. */
-  demoRequest?: { toolId: number; key: number } | null;
 }
 
 function getPartIcon(iconId: PartIconId): React.ReactNode {
@@ -64,7 +59,7 @@ const ALL_TOOLS = flattenTools();
 /** Collect all unique domain names for the filter dropdown. */
 const ALL_DOMAIN_NAMES = Array.from(new Set(PARTS.flatMap(p => p.domains.map(d => d.name)))).sort();
 
-export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, bbox, polygon, points, studyAreaType, onToolResult, onClearResult, onToolModeChange, zIndex = 999, schemeColors, demoRequest }) => {
+export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, bbox, polygon, points, studyAreaType, onToolResult, onClearResult, onToolModeChange, zIndex = 999, schemeColors }) => {
   const [search, setSearch] = useState('');
   const [expandedParts, setExpandedParts] = useState<Set<string>>(new Set(['part1']));
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set(['atmo']));
@@ -72,33 +67,9 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
   const [selectedColor, setSelectedColor] = useState('#8b5cf6');
   const [domainFilter, setDomainFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
-  const [autoRunKey, setAutoRunKey] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (open && searchInputRef.current) setTimeout(() => searchInputRef.current?.focus(), 200); }, [open]);
-
-  // One-click demo: when the host bumps demoRequest, auto-select the requested
-  // tool (resolving by ID from the flattened catalog) and signal it to run.
-  const prevDemoRef = useRef<{ toolId: number; key: number } | null>(null);
-  useEffect(() => {
-    if (!demoRequest || demoRequest.key === prevDemoRef.current?.key) return;
-    prevDemoRef.current = demoRequest;
-    const { toolId } = demoRequest;
-    const match = ALL_TOOLS.find(t => t.tool.id === toolId);
-    if (!match) return;
-    // Defer the setState calls out of the synchronous effect body so they don't
-    // cascade a render synchronously on mount (react-hooks/set-state-in-effect).
-    const t = window.setTimeout(() => {
-      setSearch('');
-      setSelectedTool(match.tool);
-      setSelectedColor(match.domain.color);
-      const modes = match.tool.analysisMeta?.allowedStudyAreaModes ?? [];
-      onToolModeChange?.(modes.includes('transect') || modes.includes('two-points'));
-      // Bump after mount so ToolDialog (keyed by tool.id) sees the fresh key.
-      window.setTimeout(() => setAutoRunKey(k => k + 1), 350);
-    }, 0);
-    return () => window.clearTimeout(t);
-  }, [demoRequest, onToolModeChange]);
 
   const closeTool = useCallback(() => {
     setSelectedTool(null);
@@ -217,7 +188,7 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8b5cf6', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8, padding: 0 }}>
               <ChevronDown size={10} style={{ transform: 'rotate(90deg)' }} /> Back to tools
             </button>
-            <ToolDialog key={selectedTool.id} tool={selectedTool} color={selectedColor} onClose={closeTool} bbox={bbox} polygon={polygon} points={points} studyAreaType={studyAreaType} onToolResult={onToolResult} onClearResult={onClearResult} schemeColors={schemeColors} autoRunKey={autoRunKey} />
+            <ToolDialog key={selectedTool.id} tool={selectedTool} color={selectedColor} onClose={closeTool} bbox={bbox} polygon={polygon} points={points} studyAreaType={studyAreaType} onToolResult={onToolResult} onClearResult={onClearResult} schemeColors={schemeColors} />
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>

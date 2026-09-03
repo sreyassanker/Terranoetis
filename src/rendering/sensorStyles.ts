@@ -15,7 +15,7 @@ export interface SensorStyleDef {
   id: SensorStyleId;
   label: string;
   /** GLSL fragment shader body. `colorTexture` and `v_textureCoordinates` are
-   *  provided by Cesium; the shader must assign `gl_FragColor`. */
+   *  provided by Cesium; the shader must assign `out_FragColor`. */
   frag: string;
   /** Optional single-key keyboard shortcut (e.g. '1'..'7'). */
   key?: string;
@@ -51,7 +51,7 @@ void main(void) {
   vec3 rgb = vec3(r, g, b) * scanline * vignette;
   rgb = pow(rgb, vec3(0.9)); // gamma-ish lift
   rgb += vec3(0.015, 0.005, 0.01); // phosphor glow floor
-  gl_FragColor = vec4(rgb, 1.0);
+  out_FragColor = vec4(rgb, 1.0);
 }
 `;
 
@@ -76,7 +76,7 @@ void main(void) {
   vec2 c = v_textureCoordinates - 0.5;
   float vig = 1.0 - dot(c, c) * 1.3;
   nvg *= mix(0.92, 1.0, vig);
-  gl_FragColor = vec4(nvg, 1.0);
+  out_FragColor = vec4(nvg, 1.0);
 }
 `;
 
@@ -102,7 +102,7 @@ vec3 thermal(vec3 c) {
 
 void main(void) {
   vec3 col = texture(colorTexture, v_textureCoordinates).rgb;
-  gl_FragColor = vec4(thermal(col), 1.0);
+  out_FragColor = vec4(thermal(col), 1.0);
 }
 `;
 
@@ -116,7 +116,7 @@ void main(void) {
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
   lum = pow(lum, 0.85);
   float contrast = (lum - 0.45) * 1.25 + 0.45;
-  gl_FragColor = vec4(vec3(contrast), 1.0);
+  out_FragColor = vec4(vec3(contrast), 1.0);
 }
 `;
 
@@ -134,7 +134,7 @@ void main(void) {
   float n = hash(floor(v_textureCoordinates * vec2(320.0, 420.0)) + floor(time * 1.5));
   float speck = step(0.998, n);
   col += vec3(speck) * 0.7;
-  gl_FragColor = vec4(col, 1.0);
+  out_FragColor = vec4(col, 1.0);
 }
 `;
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plane, Zap, Flame, Satellite, Shield, Globe2 } from 'lucide-react';
+import { X, Plane, Flame, Satellite, Shield, Globe2 } from 'lucide-react';
 import { markFirstRunDone, type FirstRunMission } from '@/lib/firstRun';
 
 interface FirstRunCardProps {
@@ -16,13 +16,6 @@ interface MissionOption {
 }
 
 const MISSIONS: MissionOption[] = [
-  {
-    id: 'compute-demo',
-    label: 'Compute Demo',
-    desc: 'Run Land Surface Temperature over Austin — real Landsat + ERA5 data painted on the globe as a 28×28 heatmap.',
-    icon: <Zap size={18} />,
-    color: '#34d399',
-  },
   {
     id: 'live-contacts',
     label: 'Live Contacts',
