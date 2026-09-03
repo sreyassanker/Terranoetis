@@ -26,7 +26,7 @@ export function altitudeBandColor(altMeters: number): string {
 
 /**
  * Parse a canonical OpenSky 17-field state array into a typed FlightState.
- * Every aviation source (OpenSky, ADSB.lol, ADSB.fi, FlightAware, AirLabs)
+ * Every aviation source (OpenSky, ADSB.lol, ADSB.fi, AirLabs)
  * emits this same 17-field layout via the server's normalisation layer, so a
  * single parser is safe for all of them.
  */

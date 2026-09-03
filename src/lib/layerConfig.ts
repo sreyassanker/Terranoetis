@@ -63,13 +63,6 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     sub: 'Aviation',
   },
   {
-    id: '2_flightaware_aeroapi', label: 'FlightAware AeroAPI', symbol: '┋',
-    color: '#d0d013', motionType: 'orbit', group: 'aviation',
-    type: 'point', description: 'FlightAware AeroAPI — Aviation & Flight Tracking',
-    dataSource: 'https://flightaware.com/commercial/aeroapi/',
-    sub: 'Aviation',
-  },
-  {
     id: '2_airlabs_api', label: 'AirLabs API', symbol: '┌',
     color: '#129dd7', motionType: 'trail', group: 'aviation',
     type: 'point', description: 'AirLabs API — Aviation & Flight Tracking',

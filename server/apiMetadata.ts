@@ -106,18 +106,6 @@ export const API_METADATA: ApiConfig[] = [
     status: 'public',
   },
   {
-    id: 'flightaware',
-    name: 'FlightAware AeroAPI',
-    category: 'Aviation',
-    description: 'Commercial flight tracking API',
-    registrationUrl: 'https://flightaware.com/commercial/aeroapi/',
-    docsUrl: 'https://flightaware.com/commercial/aeroapi/',
-    envKey: 'FLIGHTAWARE_AEROAPI_KEY',
-    free: false,
-    rateLimit: 'Paid subscription',
-    status: 'premium',
-  },
-  {
     id: 'airlabs',
     name: 'AirLabs API',
     category: 'Aviation',
