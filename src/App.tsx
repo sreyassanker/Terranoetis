@@ -10751,7 +10751,7 @@ case 'openPanel':
       {showAdmin && <AdminDashboard onClose={() => setShowAdmin(false)} />}
 
       {/* Sensor-style accessibility widget — floating, draggable, lockable */}
-      <SensorStyleWidget activeStyle={sensorStyle} onSelect={id => setSensorStyle(prev => sensorStylesRef.current?.toggle(id) ?? id)} />
+      {!loading && <SensorStyleWidget activeStyle={sensorStyle} onSelect={id => setSensorStyle(prev => sensorStylesRef.current?.toggle(id) ?? id)} />}
     </div>
   );
 }
