@@ -1256,6 +1256,7 @@ export default function App() {
   const [showLaunchReplay, setShowLaunchReplay] = useState(false);
   const [showRadioTuner, setShowRadioTuner] = useState(false);
   const [showDuckdbAnalytics, setShowDuckdbAnalytics] = useState(false);
+  const [duckdbRestoreKey, setDuckdbRestoreKey] = useState(0);
   const [analyticalNeedsTwoPoints, setAnalyticalNeedsTwoPoints] = useState(false);
   const [sensorStyle, setSensorStyle] = useState<SensorStyleId>('normal');
   const sensorStylesRef = useRef<SensorStyles | null>(null);
@@ -2000,7 +2001,7 @@ export default function App() {
         second: '2-digit',
         hour12: false,
       });
-      setUtcTime(`${formatted} ${timezoneLabel(tz)}`);
+      setUtcTime(formatted);
     };
     tick();
     const timer = unifiedTimerRef.current;
@@ -9845,7 +9846,7 @@ case 'openPanel':
         {/* DuckDB Spatial SQL — query live data layers with real SQL */}
         <button
           className={`btn-icon monitor-btn ${showDuckdbAnalytics ? 'active' : ''}`}
-          onClick={() => { setShowDuckdbAnalytics(p => !p); focusPanel('analytics'); }}
+          onClick={() => { setShowDuckdbAnalytics(true); setDuckdbRestoreKey(k => k + 1); focusPanel('analytics'); }}
           title="DuckDB Spatial SQL — run SQL over live data layers (earthquakes, flights, satellites, radio, weather)"
           style={{ color: showDuckdbAnalytics ? '#34d399' : undefined }}
         >
@@ -10438,7 +10439,7 @@ case 'openPanel':
       /></PanelSuspense>
 
       {/* DuckDB Spatial SQL Analytics */}
-      {showDuckdbAnalytics && <PanelSuspense><LazyDuckdbAnalyticsPanel open={showDuckdbAnalytics} onClose={() => setShowDuckdbAnalytics(false)} zIndex={getPanelZIndex('analytics') + 3} /></PanelSuspense>}
+      {showDuckdbAnalytics && <PanelSuspense><LazyDuckdbAnalyticsPanel open={showDuckdbAnalytics} onClose={() => setShowDuckdbAnalytics(false)} restoreKey={duckdbRestoreKey} zIndex={getPanelZIndex('analytics') + 3} /></PanelSuspense>}
 
       {/* Analytics Workbench Panel */}
       <ErrorBoundary label="Analytics Workbench">        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} />

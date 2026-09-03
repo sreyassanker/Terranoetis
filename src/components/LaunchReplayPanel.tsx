@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as Cesium from 'cesium';
-import { Rocket, Play, Pause, SkipBack, RotateCcw, ExternalLink, Loader2 } from 'lucide-react';
+import { Rocket, Play, Pause, SkipBack, RotateCcw, ExternalLink, Loader2, Palette } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 import {
   fetchRecentLaunches, buildAscentPath, renderAscent, seekAscent,
@@ -24,7 +24,7 @@ export const LaunchReplayPanel: React.FC<LaunchReplayPanelProps> = ({ open, onCl
   const [playing, setPlaying] = useState(false);
   const [t, setT] = useState(0);
   const [state, setState] = useState<ReplayState | null>(null);
-  const [colorIdx, setColorIdx] = useState(0);
+  const [trailColor, setTrailColor] = useState(colors[0]);
   const entitiesRef = useRef<{ trail: Cesium.Entity; vehicle: Cesium.Entity } | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef(0);
@@ -75,7 +75,7 @@ export const LaunchReplayPanel: React.FC<LaunchReplayPanelProps> = ({ open, onCl
     if (!viewer || !selected) return;
     clearEntities();
     const path = buildAscentPath(selected);
-    const ents = renderAscent(viewer, path, Cesium.Color.fromCssColorString(colors[colorIdx % colors.length]));
+    const ents = renderAscent(viewer, path, Cesium.Color.fromCssColorString(trailColor));
     entitiesRef.current = ents;
     setState(seekAscent(path, 0, ents.vehicle));
     viewer.camera.flyTo({
@@ -84,7 +84,32 @@ export const LaunchReplayPanel: React.FC<LaunchReplayPanelProps> = ({ open, onCl
     });
     setT(0);
     setPlaying(true);
-  }, [viewer, selected, colorIdx, clearEntities]);
+  }, [viewer, selected, trailColor, clearEntities]);
+
+  // Single click toggles play/pause; double click resets. The timer lets us
+  // distinguish the two (a double click fires two single clicks first).
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleToggleClick = useCallback(() => {
+    if (clickTimerRef.current) return; // second click of a double → handled by dblclick
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      if (playing) {
+        setPlaying(false);
+      } else if (entitiesRef.current && viewer && selected) {
+        setPlaying(true); // resume existing path
+      } else {
+        startReplay();
+      }
+    }, 220);
+  }, [playing, entitiesRef, viewer, selected, startReplay]);
+
+  const handleResetClick = useCallback(() => {
+    if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
+    stopReplay();
+    setT(0);
+    setState(null);
+  }, [stopReplay]);
 
   // Animation loop
   useEffect(() => {
@@ -145,19 +170,25 @@ export const LaunchReplayPanel: React.FC<LaunchReplayPanelProps> = ({ open, onCl
 
           {/* Controls */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-            <button onClick={startReplay} disabled={!selected}
+            <button
+              onClick={handleToggleClick}
+              onDoubleClick={handleResetClick}
+              disabled={!selected}
+              title={selected ? 'Click to play/pause · Double-click to reset' : 'Select a launch first'}
               style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 0', borderRadius: 6, border: 'none', cursor: selected ? 'pointer' : 'not-allowed', background: selected ? 'linear-gradient(135deg, #fb923c40, #ea580c20)' : 'rgba(255,255,255,0.05)', color: selected ? '#fed7aa' : '#64748b', fontSize: 11, fontWeight: 600 }}>
-              {playing ? <Pause size={13} /> : <Play size={13} />} {playing ? 'Playing' : 'Launch Replay'}
+              {playing ? <Pause size={13} /> : <Play size={13} />} {playing ? 'Pause' : 'Play'}
             </button>
-            <button onClick={stopReplay}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', background: 'rgba(255,255,255,0.03)', color: '#94a3b8', fontSize: 11 }}>
-              <RotateCcw size={13} />
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              {colors.map((c, i) => (
-                <button key={c} onClick={() => setColorIdx(i)} title={`Trail color ${i + 1}`}
-                  style={{ width: 14, height: 14, borderRadius: '50%', border: colorIdx === i ? '2px solid white' : '1px solid rgba(255,255,255,0.2)', background: c, cursor: 'pointer' }} />
-              ))}
+            <div style={{ position: 'relative', width: 30, height: 30 }}>
+              <input
+                type="color"
+                value={trailColor}
+                onChange={e => setTrailColor(e.target.value)}
+                title="Change trail color"
+                style={{ position: 'absolute', inset: 0, width: 30, height: 30, opacity: 0, cursor: 'pointer', border: 'none', padding: 0 }}
+              />
+              <div style={{ position: 'absolute', inset: 0, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#94a3b8', pointerEvents: 'none' }}>
+                <Palette size={17} />
+              </div>
             </div>
           </div>
 

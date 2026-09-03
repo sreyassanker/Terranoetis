@@ -38,7 +38,7 @@ interface PluginRow {
 
 export default function AdminDashboard({ onClose }: { onClose: () => void }) {
   const { isAdmin, logout } = useAuth();
-  const [tab, setTab] = useState<Tab>('metrics');
+  const [tab, setTab] = useState<Tab>('home');
   const [metrics, setMetrics] = useState<MetricsData | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);

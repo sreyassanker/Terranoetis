@@ -208,7 +208,7 @@ p { text-align: justify; }
   .utc-clock {
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
-    color: var(--accent2);
+    color: #7dd3fc;
     letter-spacing: 0.05em;
     flex-shrink: 0;
   }
@@ -382,7 +382,7 @@ p { text-align: justify; }
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border);
     border-radius: 8px;
-    color: var(--text-dim);
+    color: rgba(226, 232, 240, 0.7);
     font-family: 'Inter', sans-serif;
     font-size: 12px;
     font-weight: 500;
@@ -461,7 +461,7 @@ p { text-align: justify; }
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--text);
     margin-bottom: 10px;
   }
 
@@ -484,9 +484,9 @@ p { text-align: justify; }
     font-family: inherit;
     outline: none;
   }
-  .sidebar-search input::placeholder { color: var(--text-dim); opacity: 0.6; }
+  .sidebar-search input::placeholder { color: rgba(226, 232, 240, 0.7); }
   .sidebar-search input:focus { border-color: var(--accent); }
-  .sidebar-search-icon { font-size: 13px; opacity: 0.5; flex-shrink: 0; }
+  .sidebar-search-icon { font-size: 13px; color: rgba(226, 232, 240, 0.7); flex-shrink: 0; }
 
   .sidebar-scroll {
     flex: 1;
@@ -517,7 +517,7 @@ p { text-align: justify; }
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: rgba(226, 232, 240, 0.7);
     user-select: none;
     transition: color 0.2s ease;
   }
@@ -603,13 +603,13 @@ p { text-align: justify; }
     flex: 1;
     font-size: 12.5px;
     font-weight: 400;
-    color: var(--text);
+    color: rgba(226, 232, 240, 0.7);
     line-height: 1.3;
   }
 
   .layer-sub {
     font-size: 10.5px;
-    color: var(--text-dim);
+    color: rgba(226, 232, 240, 0.6);
     margin-top: 1px;
   }
 
@@ -1216,7 +1216,7 @@ p { text-align: justify; }
     border-radius: 5px;
     border: 1px solid var(--border);
     background: rgba(255,255,255,0.03);
-    color: var(--text-dim);
+    color: rgba(226, 232, 240, 0.7);
     cursor: pointer;
     transition: all 0.15s ease;
     font-weight: 500;
