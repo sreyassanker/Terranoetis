@@ -49,7 +49,9 @@ inspect2.mjs
 screenshot.mjs
 test_pdf2.mjs
 # Any .mjs file in the root folder
-/*.mjs
+    /*.mjs
+    # Any .cjs file in the root folder
+    /*.cjs
 
 # Vite dev-server PID file
 vite_running.pid
