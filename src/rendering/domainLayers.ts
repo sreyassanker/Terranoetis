@@ -505,15 +505,17 @@ export async function loadSubmarineCablesDataSource(viewer: Cesium.Viewer, cable
       ent.polyline.width = new Cesium.ConstantProperty(3.5);
     }
     
-    // Supplement properties so standard entity info panel maps correctly
+    // Tag entities with the layer id and keep ONLY the real fields the
+    // TeleGeography cable-geo API actually returns. No invented capacity,
+    // owners, or landing-point embellishments are ever attached.
     const originalProps = ent.properties;
+    const realName = typeof originalProps?.name?.getValue === 'function' ? originalProps.name.getValue() : undefined;
+    const realId = typeof originalProps?.id?.getValue === 'function' ? originalProps.id.getValue() : undefined;
     ent.properties = new Cesium.PropertyBag({
       layer: 'submarine_cables',
-      name: originalProps?.name?.getValue() || 'Undersea Fiber Cable',
-      length: originalProps?.length?.getValue() || 'Unknown',
-      capacity: originalProps?.capacity?.getValue() || 'Multi-Tbps',
-      owners: originalProps?.owners?.getValue() || 'Telecom Consortium',
-      landing_points: originalProps?.landing_points?.getValue() || [],
+      name: realName || 'Undersea Fiber Cable',
+      cable_id: realId ?? null,
+      source: 'TeleGeography cable-geo API',
     });
   }
 
@@ -534,8 +536,10 @@ function intensityColor(intensity: number): Cesium.Color {
 export function addElectricityGridEntities(viewer: Cesium.Viewer, gridZones: any[]): Cesium.Entity[] {
   const ents: Cesium.Entity[] = [];
 
-  gridZones.forEach((zone) => {
-    const intensity = zone.intensity || 150;
+  for (const zone of gridZones) {
+    // Honest render: only zones with a real reported intensity are drawn.
+    const intensity = Number(zone.intensity);
+    if (!Number.isFinite(intensity)) continue;
     const color = intensityColor(intensity);
     
     // Scale column height based on carbon intensity (e.g. 500km max column)
@@ -570,16 +574,113 @@ export function addElectricityGridEntities(viewer: Cesium.Viewer, gridZones: any
         layer: 'electricity_grid',
         id: zone.id,
         name: zone.name,
-        intensity: intensity,
-        mix: zone.mix,
+        intensity,
         lat: zone.lat,
         lon: zone.lon,
       }
     });
 
     ents.push(column);
-  });
+  }
 
+  return ents;
+}
+
+/**
+ * Ground-clamped ring (polyline, clamped to terrain) — the supported way to
+ * draw an outline on terrain. Entity *geometry* outlines (ellipse/rectangle)
+ * are not supported when terrain-clamped, so disc layers draw their ring as
+ * a separate clamped polyline instead of geometry `outline`.
+ */
+export function addGroundClampedRing(
+  viewer: Cesium.Viewer,
+  lon: number,
+  lat: number,
+  radiusM: number,
+  color: Cesium.Color,
+  layerId: string,
+  width = 1.5,
+): Cesium.Entity {
+  const steps = 72;
+  const positions = new Array<Cesium.Cartesian3>(steps + 1);
+  const mPerDeg = 111320;
+  const cosLat = Math.max(Math.cos((lat * Math.PI) / 180), 0.15);
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    positions[i] = Cesium.Cartesian3.fromDegrees(
+      lon + (Math.sin(a) * radiusM) / (mPerDeg * cosLat),
+      lat + (Math.cos(a) * radiusM) / mPerDeg,
+      0,
+    );
+  }
+  return viewer.entities.add({
+    polyline: {
+      positions,
+      width,
+      clampToGround: true,
+      material: color,
+    },
+    properties: { layer: layerId },
+  });
+}
+
+// 6b. Render EU Gas Storage (GIE AGSI+ real storage levels)
+export function addEuGasStorageEntities(viewer: Cesium.Viewer, countries: any[]): Cesium.Entity[] {
+  const ents: Cesium.Entity[] = [];
+  const volumes = countries.map((c) => Number(c.workingGasVolume) || 0).filter((v) => v > 0);
+  const maxVol = volumes.length ? Math.max(...volumes) : 1;
+
+  for (const c of countries) {
+    const lat = Number(c.lat);
+    const lon = Number(c.lon);
+    const fillPct = Number(c.fillPct);
+    const vol = Number(c.workingGasVolume) || 0;
+    // Only real, finite readings are drawn.
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(fillPct)) continue;
+    // 0% full → red (supply risk), 100% → green (storage secure).
+    const hue = 120 * Math.min(1, Math.max(0, fillPct / 100));
+    const color = Cesium.Color.fromHsl(hue / 360, 0.8, 0.45);
+    const radius = 60000 + Math.sqrt(vol / Math.max(maxVol, 1)) * 200000;
+    // Flat disc just above the ground (RELATIVE_TO_GROUND with a defined
+    // height) — terrain-following without the clamped-geometry warnings,
+    // plus a ground-clamped polyline ring for the edge.
+    const ent = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+      name: `${c.name || c.countryCode} — ${fillPct}% full`, // e.g. "Austria — 81% full"
+      ellipse: {
+        semiMinorAxis: radius,
+        semiMajorAxis: radius,
+        material: color.withAlpha(0.4),
+        height: 2,
+        heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+      },
+      label: {
+        text: `${c.countryCode}: ${fillPct}%`,
+        font: 'bold 10px "Inter", sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2.5,
+        pixelOffset: new Cesium.Cartesian2(0, -8),
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        scaleByDistance: new Cesium.NearFarScalar(1e5, 1.2, 8e6, 0.5),
+      },
+      properties: {
+        layer: 'eu_gas_storage',
+        countryCode: c.countryCode,
+        name: c.name,
+        fillPct,
+        gasInStorage: c.gasInStorage,
+        workingGasVolume: vol,
+        gasDayStart: c.gasDayStart || null,
+        status: c.status || '',
+        lat,
+        lon,
+        source: c.source || 'GIE AGSI+',
+      },
+    });
+    ents.push(ent);
+    ents.push(addGroundClampedRing(viewer, lon, lat, radius, color.withAlpha(0.9), 'eu_gas_storage', 1.5));
+  }
   return ents;
 }
 

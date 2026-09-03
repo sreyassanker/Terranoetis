@@ -532,7 +532,7 @@ export class IntentRouter {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['severe_storms'] };
       }
       if (lower.includes('volcano') || lower.includes('volcanic') || lower.includes('eruption')) {
-        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['volcanoes', '29_wovodat'] };
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['volcanoes'] };
       }
       if (/\bships?\b|\bvessels?\b|\bmaritime\b|\bais\b/i.test(lower)) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['ais_vessels'] };

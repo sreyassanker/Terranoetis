@@ -18,7 +18,6 @@ const DIRECT_SOURCES: Record<string, string> = {
   '/adsb-lol': 'https://api.adsb.lol/v2/point/48/10/250',
   '/adsb-fi': 'https://opendata.adsb.fi/api/v3/lat/48/lon/10/dist/250',
   '/openflights': 'https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat',
-  '/volcanoes': 'https://volcanoes.usgs.gov/vsc/api/volcanoApi/elevated',
   '/satnogs/transmitters': 'https://db.satnogs.org/api/transmitters/',
 };
 

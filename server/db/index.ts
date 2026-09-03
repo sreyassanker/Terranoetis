@@ -69,6 +69,34 @@ function runMigrations(database: Database.Database): void {
     logger.info('[DB] Migrated to schema v2');
   }
 
+  // v3: Enterprise API-key hygiene — purge per-user vault keys stored in
+  // profiles.json_data.api_vault. Keys are now resolved from the server .env
+  // only (server/routes/vault.ts was removed); any keys persisted in the DB
+  // from earlier deployments are stale secrets and must not survive.
+  if (currentVersion < 3) {
+    const profilesExist = (database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='profiles'").get());
+    if (profilesExist) {
+      const rows = database.prepare('SELECT user_id, json_data FROM profiles').all() as { user_id: string; json_data: string }[];
+      const stripVault = database.prepare('UPDATE profiles SET json_data = ?, updated_at = datetime(\'now\') WHERE user_id = ?');
+      let purged = 0;
+      for (const row of rows) {
+        try {
+          const data = JSON.parse(row.json_data || '{}') as Record<string, unknown>;
+          if (data && typeof data === 'object' && data.api_vault) {
+            delete data.api_vault;
+            stripVault.run(JSON.stringify(data), row.user_id);
+            purged++;
+          }
+        } catch {
+          /* skip unparseable rows */
+        }
+      }
+      if (purged > 0) logger.info(`[DB] Purged stored API vault keys from ${purged} profile(s)`);
+    }
+    database.pragma('user_version = 3');
+    logger.info('[DB] Migrated to schema v3 (env-only API keys, vault purged)');
+  }
+
   // Tables added after v1 may be missing in existing databases.
   // Re-run any CREATE TABLE IF NOT EXISTS statements for tables that don't exist yet.
   const existingTables = new Set(

@@ -51,6 +51,8 @@ import {
   addAuroraEntities,
   loadSubmarineCablesDataSource,
   addElectricityGridEntities,
+  addEuGasStorageEntities,
+  addGroundClampedRing,
   addAnimalMigrationEntities,
   getDebrisOrbitPositions
 } from '@/rendering/domainLayers';
@@ -94,9 +96,6 @@ import { PhotorealisticGlobe } from '@/rendering/photorealisticGlobe';
 import { CinematicCamera } from '@/rendering/cinematicCamera';
 import { loadOsmBuildings, hideOsmBuildings, removeOsmBuildings, getOsmBuildingsTileset } from '@/rendering/osmBuildings';
 import {
-  addVolcanoEntities,
-  addVaacAdvisoryEntities,
-  addSo2Entities,
   addOpenFlightsEntities,
   addMilitaryFlightEntities,
   addUcdpEntities,
@@ -266,7 +265,7 @@ const LAYER_DEFS: LayerItem[] = LAYER_CATEGORIES.map(lc => {
 // The camera does NOT fly to these when toggled on.
 const STATIC_LAYER_IDS = new Set<string>([
   ...LAYER_CATEGORIES.filter(l => ['tile','3dtiles','effect','panel'].includes(l.type)).map(l => l.id),
-  'tectonic','airports','airspaces','submarine_cables','energy_pipelines_oil','energy_pipelines_gas',
+  'tectonic','airports','airspaces','submarine_cables','eu_gas_storage',
   'radio_stations','bikeshare','military_bases','electricity_grid','16_macrostrat','16_pbdb',
   'population_impact','disaster_near_me','tomtom_traffic','animal_migrations','live_media',
   'detection_overlay','smoke_dispersion',
@@ -301,6 +300,12 @@ interface WeatherCardData {
   desc: string;
 }
 
+// Static anchor seeds for search/geo-extraction and as the pre-live-load
+// snapshot: the 50 largest urban agglomerations, UN World Urbanization
+// Prospects 2018 metro ranking (population in millions, city-centre coords).
+// Once the population-impact layer fetches live data from the server
+// (Open-Meteo Geocoding / GeoNames), `livePopulationCities` replaces this.
+let livePopulationCities: Array<{ name: string; country: string; pop: number; lat: number; lon: number }> = [];
 const CITY_DATA = [
   { name: 'Tokyo', country: 'Japan', pop: 37.4, lat: 35.6762, lon: 139.6503 },
   { name: 'Delhi', country: 'India', pop: 29.4, lat: 28.7041, lon: 77.1025 },
@@ -705,7 +710,8 @@ function destinationPoint(lat: number, lon: number, distance: number, bearing: n
 }
 
 function calculatePopulationImpact(lat: number, lon: number) {
-  const affected = CITY_DATA.filter(c => {
+  const pool = livePopulationCities.length ? livePopulationCities : CITY_DATA;
+  const affected = pool.filter(c => {
     const dLat = c.lat - lat, dLon = c.lon - lon;
     const dist = Math.sqrt(dLat * dLat + dLon * dLon);
     return dist < 5;
@@ -5593,13 +5599,6 @@ export default function App() {
     } else if (layerId === 'military_bases') {
       if (!showExisting('military_bases')) void loadMilitaryBases(v);
       return;
-    } else if (layerId.startsWith('29_') || layerId === '29_wovodat' || layerId === '29_nasa_so2_monitoring' || layerId === '29_noaa_so2_portal') {
-      const needsLoad = !showExisting(layerId);
-      if (needsLoad) {
-        const isSo2 = layerId.includes('so2');
-        void loadVolcanicLayer(v, layerId, isSo2 ? '/volcanoes?format=location' : '/volcanoes');
-      }
-      return;
     } else if (layerId === 'space_debris') {
       if (!showExisting('space_debris')) void loadSpaceDebris(v);
       return;
@@ -5623,6 +5622,9 @@ export default function App() {
       return;
     } else if (layerId === 'electricity_grid') {
       if (!showExisting('electricity_grid')) void loadElectricityGrid(v);
+      return;
+    } else if (layerId === 'eu_gas_storage') {
+      if (!showExisting('eu_gas_storage')) void loadEuGasStorage(v);
       return;
     } else if (layerId === 'animal_migrations') {
       if (!showExisting('animal_migrations')) void loadAnimalMigrations(v);
@@ -5930,21 +5932,51 @@ export default function App() {
     }
   }
 
-  function loadPopulationImpact(viewer: Cesium.Viewer) {
+  async function loadPopulationImpact(viewer: Cesium.Viewer) {
     if (populationImpactLayerRef.current.length > 0) return;
-    const maxPop = Math.max(...CITY_DATA.map(c => c.pop));
+    // Live source of truth: the server fetches authoritative GeoNames city
+    // records (name, coordinates, population) via the Open-Meteo Geocoding
+    // API. On failure the layer stays empty with an honest notice — no
+    // fabricated circles.
+    let cities = CITY_DATA;
+    try {
+      const data = await apiGet<{ items?: Array<{ name?: string; country?: string; lat: number; lon: number; population: number; popM: number }> }>('/population-impact');
+      const items = data?.items;
+      if (items?.length) {
+        cities = items.map(c => ({
+          name: c.name || 'City',
+          country: c.country || '',
+          pop: c.popM,
+          lat: c.lat,
+          lon: c.lon,
+        }));
+        livePopulationCities = cities;
+      } else {
+        showNotification('Population data source returned no cities', 'warning');
+        return;
+      }
+    } catch {
+      showNotification('Population data source unavailable', 'warning');
+      return;
+    }
+    // The user may have toggled the layer off while the fetch was in flight.
+    if (!isLayerEnabled('population_impact')) return;
+    const maxPop = Math.max(...cities.map(c => c.pop));
     const newEnts: Cesium.Entity[] = [];
-    for (const city of CITY_DATA) {
+    for (const city of cities) {
       const r = 5000 + (city.pop / maxPop) * 45000;
       const alpha = 0.1 + (city.pop / maxPop) * 0.35;
+      // Flat disc 2 m above the ground (defined height + RELATIVE_TO_GROUND,
+      // no clamped-geometry warnings) with a ground-clamped polyline ring
+      // for the edge — geometry outlines are unsupported on terrain.
       const ent = viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(city.lon, city.lat),
         name: city.name,
         ellipse: {
           semiMinorAxis: r, semiMajorAxis: r,
           material: Cesium.Color.fromCssColorString('#f59e0b').withAlpha(alpha),
-          outline: true, outlineColor: Cesium.Color.fromCssColorString('#f59e0b').withAlpha(0.3), outlineWidth: 1,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          height: 2,
+          heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
         },
         label: { text: `${city.name}\n${city.pop}M`, font: '9px "JetBrains Mono"',
           fillColor: Cesium.Color.WHITE, pixelOffset: new Cesium.Cartesian2(0, 0),
@@ -5952,6 +5984,7 @@ export default function App() {
         properties: { layer:'population_impact', city, lon: city.lon, lat: city.lat },
       });
       newEnts.push(ent);
+      newEnts.push(addGroundClampedRing(viewer, city.lon, city.lat, r, Cesium.Color.fromCssColorString('#f59e0b').withAlpha(0.55), 'population_impact', 1));
     }
     populationImpactLayerRef.current = newEnts;
     entityStoreRef.current['population_impact'] = newEnts;
@@ -6128,7 +6161,7 @@ export default function App() {
   // an empty layer (no fabricated vehicles) when the key is absent.
   function startTomTomTraffic(viewer: Cesium.Viewer) {
     if (!tomtomTrafficRef.current) {
-      tomtomTrafficRef.current = new TomTomTrafficLayer(viewer, apiVaultRef.current.keys.TOMTOM_API_KEY || null);
+      tomtomTrafficRef.current = new TomTomTrafficLayer(viewer);
     }
     tomtomTrafficRef.current.start();
   }
@@ -6402,6 +6435,32 @@ export default function App() {
     }
   }
 
+  async function loadEuGasStorage(viewer: Cesium.Viewer) {
+    const existing = entityStoreRef.current['eu_gas_storage'];
+    if (existing?.length) {
+      setLayerEntitiesVisible('eu_gas_storage', true);
+      return;
+    }
+    try {
+      // Real GIE AGSI+ storage levels via the /api/data fetcher (key stays in .env).
+      const data = await apiGet<{ items?: Array<{ lat: number; lon: number; countryCode: string; name: string; fillPct: number; gasInStorage: number; workingGasVolume: number; gasDayStart?: string; status?: string; source?: string }> }>('/data/eu_gas_storage');
+      if (!isLayerEnabled('eu_gas_storage')) return;
+      const items = data?.items;
+      if (!items?.length) {
+        showNotification('EU gas storage: no data returned by GIE AGSI+', 'warning');
+        return;
+      }
+      const ents = addEuGasStorageEntities(viewer, items);
+      entityStoreRef.current['eu_gas_storage'] = ents;
+      enforceEntityCap();
+      throttledRender(viewer);
+      showNotification(`EU gas storage: ${ents.length} countries (GIE AGSI+)`, 'success');
+    } catch (err) {
+      recordFeedError('eu_gas_storage', err);
+      showNotification('EU gas storage feed unavailable', 'warning');
+    }
+  }
+
   async function loadAnimalMigrations(viewer: Cesium.Viewer) {
     const existing = entityStoreRef.current['animal_migrations'];
     if (existing?.length) {
@@ -6554,32 +6613,6 @@ export default function App() {
     }
   }
 
-  async function loadVolcanicLayer(viewer: Cesium.Viewer, layerId: string, apiPath: string) {
-    const existing = entityStoreRef.current[layerId];
-    if (existing?.length) {
-      setLayerEntitiesVisible(layerId, true);
-      return;
-    }
-    try {
-      const data = await apiGet<any>(apiPath);
-      if (!isLayerEnabled(layerId)) return;
-      removeLayerEntities(layerId);
-      let ents: Cesium.Entity[];
-      if (layerId.includes('so2')) {
-        ents = addSo2Entities(viewer, data, layerId);
-      } else {
-        ents = addVaacAdvisoryEntities(viewer, data, layerId);
-      }
-      entityStoreRef.current[layerId] = ents;
-      enforceEntityCap();
-      throttledRender(viewer);
-      showNotification(`Loaded ${ents.length} ${layerId.replace(/^\d+_/, '').replace(/_/g, ' ')} points`, 'success');
-    } catch (err) {
-      recordFeedError(layerId, err);
-      showNotification(`${layerId} data unavailable`, 'warning');
-    }
-  }
-
   async function loadWeatherStorms(viewer: Cesium.Viewer, layerId: string) {
     const existing = entityStoreRef.current[layerId];
     if (existing?.length) { setLayerEntitiesVisible(layerId, true); return; }
@@ -6710,21 +6743,17 @@ export default function App() {
       wind: 'CYGNSS_L3_Wind_Speed_Daily',
       pressure: 'MERRA2_Surface_Pressure_Monthly',
       sea_ice: 'MODIS_Terra_Sea_Ice',
-      sea_temp: 'GHRSST_L4_MUR_Sea_Surface_Temperature',
       nasa_gibs: 'VIIRS_NOAA20_CorrectedReflectance_TrueColor',
       night_lights: 'VIIRS_Black_Marble',
       land_cover: 'MODIS_Combined_L3_IGBP_Land_Cover_Type_Annual',
       aerosol_index: 'OMPS_Aerosol_Index',
-      so2_index: 'OMPS_SO2_Total_Column_Lower_Troposphere',
+      so2_index: 'OMPS_SO2_Lower_Troposphere',
       co_index: 'MOPITT_CO_Daily_Total_Column_Day',
-      dust_score: 'MODIS_Terra_Aerosol',
+      dust_score: 'MERRA2_Dust_Surface_Mass_Concentration_Monthly',
       flood_extent: 'MODIS_Combined_Flood_1-Day',
-      // Weather imagery layers via GIBS
-      '12_nhc_tropical_cyclone_data': 'GOES-East_ABI_Band13_Clean_IR',
-      '12_ibtracs': 'MODIS_Terra_Sea_Ice',
-      '26_us_drought_monitor': 'SMAP_Soil_Moisture',
-      '57_noaa_cpc': 'MERRA2_Surface_Air_Temperature_Monthly',
-      '64_nexrad_level_ii': 'GOES-East_ABI_Band14_IR',
+      // Note: NHC storms, IBTrACS, US Drought Monitor, NOAA CPC and NEXRAD are
+      // DATA layers rendered from their own API loaders (loadWeather*), not
+      // GIBS imagery — so they intentionally have no entry in this map.
       // Section 3 — Satellite Imagery & Earth Observation (each a unique GIBS product)
       '3_planetary_computer_stac': 'MODIS_Terra_CorrectedReflectance_TrueColor',
       '3_aws_earth_search': 'MODIS_Aqua_CorrectedReflectance_TrueColor',
