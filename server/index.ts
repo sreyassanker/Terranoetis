@@ -147,7 +147,6 @@ import { forkManager } from './fork/manager';
 (global as any).__forkManager = forkManager;
 import { foundationModelsRouter } from './routes/foundationModels';
 import { forkRouter } from './fork/routes';
-import { vaultRouter, readVault } from './routes/vault';
 import { createSelfEvolutionRouter } from './routes/selfEvolution';
 import { pulseRouter } from './routes/pulse';
 import { kaggleRouter } from './kaggle';
@@ -458,7 +457,6 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
 
 app.use('/api', foundationModelsRouter);
 app.use('/api/fork', forkRouter);
-app.use('/api/vault', vaultRouter);
 app.use('/api/pulse', pulseRouter);
 app.use('/api/kaggle', kaggleRouter);
 registerAnalyticalModelsRoutes(app);
@@ -4678,24 +4676,81 @@ app.get('/api/aurora', async (_req: express.Request, res: express.Response) => {
 });
 
 // 5. Global Submarine Cables (Telegeography GeoJSON)
+async function fetchSubmarineCablesGeoJson(): Promise<any> {
+  const cacheKey = 'submarine_cables_geojson';
+  const cachedData = cache.get(cacheKey);
+  if (cachedData) return cachedData;
+  const resp = await fetch('https://www.submarinecablemap.com/api/v3/cable/cable-geo.json', { signal: AbortSignal.timeout(20000) });
+  if (!resp.ok) throw new Error(`TeleGeography cable-geo API returned ${resp.status}`);
+  const data = await resp.json();
+  if (!data || !Array.isArray(data?.features)) throw new Error('TeleGeography cable-geo API returned an unexpected payload');
+  cache.set(cacheKey, data, 86400); // cables change slowly — 24 h
+  return data;
+}
+
 app.get('/api/submarine-cables', async (_req: express.Request, res: express.Response) => {
   try {
-    const cacheKey = 'submarine_cables';
-    const cachedData = cache.get(cacheKey);
-    if (cachedData) {
-      res.json(cachedData);
-      return;
-    }
+    res.json(await fetchSubmarineCablesGeoJson());
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.error({ err: msg }, 'Failed to fetch submarine cables');
+    res.status(502).json({ error: msg, code: 'UPSTREAM_ERROR' });
+  }
+});
 
-    const resp = await fetch('https://www.submarinecablemap.com/api/v3/cable/cable-geo.json', { signal: AbortSignal.timeout(15000) });
-    if (!resp.ok) throw new Error(`Telegeography error ${resp.status}`);
-    const data = await resp.json();
-    
-    cache.set(cacheKey, data, 86400); // 24 hours
+// ── TomTom Traffic Flow (street-level, point-based). Official endpoint:
+//    GET https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/{zoom}/json
+//    ?point={lat},{lon}&unit=KMPH&key=...   (service version 4, verified live)
+//    Key stays server-side (.env TOMTOM_API_KEY) — never shipped to the browser.
+async function fetchTomTomFlowSegment(lat: number, lon: number, unit: string): Promise<any> {
+  const apiKey = process.env.TOMTOM_API_KEY;
+  if (!apiKey) {
+    throw new Error('TOMTOM_API_KEY is not configured — get a key at https://developer.tomtom.com/ and set it in the server .env');
+  }
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    throw new Error('TomTom flow requires numeric lat/lon');
+  }
+  const cacheKey = `tomtom_flow_${lat.toFixed(2)}_${lon.toFixed(2)}_${unit}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const resp = await fetch(
+    `https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/22/json?point=${lat},${lon}&unit=${unit}&key=${apiKey}`,
+    { signal: AbortSignal.timeout(15000) },
+  );
+  if (!resp.ok) {
+    if (resp.status === 403 || resp.status === 401) throw new Error(`TomTom API rejected TOMTOM_API_KEY (HTTP ${resp.status})`);
+    throw new Error(`TomTom Flow API returned ${resp.status}`);
+  }
+  const data = await resp.json();
+  cache.set(cacheKey, data, 60); // flow changes fast — 60 s
+  return data;
+}
+
+app.get('/api/tomtom/flow', async (req: express.Request, res: express.Response) => {
+  try {
+    const lat = parseFloat(req.query.lat as string);
+    const lon = parseFloat(req.query.lon as string);
+    const unit = String(req.query.unit || 'kmph').toLowerCase() === 'mph' ? 'mph' : 'kmph';
+    const data = await fetchTomTomFlowSegment(lat, lon, unit);
     res.json(data);
   } catch (e) {
-    logger.error({ err: e }, 'Failed to fetch submarine cables');
-    res.json({ type: "FeatureCollection", features: [] });
+    const msg = e instanceof Error ? e.message : String(e);
+    const keyMissing = msg.includes('not configured') || msg.includes('rejected TOMTOM_API_KEY');
+    logger.warn({ err: msg }, 'tomtom flow unavailable');
+    res.status(keyMissing ? 503 : 502).json({ error: msg, code: keyMissing ? 'KEY_REQUIRED' : 'UPSTREAM_ERROR' });
+  }
+});
+
+// ── Population Impact Zones (top urban centres, live from Open-Meteo Geocoding) ──
+app.get('/api/population-impact', async (_req: express.Request, res: express.Response) => {
+  try {
+    const items = await fetchTopCitiesPopulation();
+    res.json({ items, updatedAt: Date.now(), source: 'Open-Meteo Geocoding (GeoNames)' });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.warn({ err: msg }, 'population impact unavailable');
+    res.status(502).json({ error: msg, code: 'UPSTREAM_ERROR' });
   }
 });
 
@@ -4775,80 +4830,81 @@ app.get('/api/ucs-satellites', (_req: express.Request, res: express.Response) =>
   }
 });
 
-// 6. Global Carbon Footprints Electricity Grid
-app.get('/api/electricity-grid', async (req: express.Request, res: express.Response) => {
-  const userApiKey = req.query.apiKey as string | undefined;
-  const serverApiKey = process.env.ELECTRICITY_MAPS_API_KEY;
-  const apiKey = userApiKey || serverApiKey;
+// ── 6. Electricity Maps — real-time grid carbon intensity ────────────────
+// Honest-data contract: NO synthetic fallback values. Without
+// ELECTRICITY_MAPS_API_KEY the endpoint returns an explicit 503; upstream
+// failures return 502. A zone is only ever reported with the carbon
+// intensity Electricity Maps actually returned for it.
+async function fetchElectricityMapZones(): Promise<any[]> {
+  const apiKey = process.env.ELECTRICITY_MAPS_API_KEY;
+  if (!apiKey) {
+    throw new Error('ELECTRICITY_MAPS_API_KEY is not configured — set it in the server .env (register at https://www.electricitymaps.com/)');
+  }
+  const headers = { 'auth-token': apiKey };
 
-  try {
-    const cacheKey = `electricity_grid_${apiKey ? 'key' : 'free'}`;
-    const cachedData = cache.get(cacheKey);
-    if (cachedData) {
-      res.json(cachedData);
-      return;
-    }
+  const zoneResp = await fetch('https://api.electricitymap.org/v3/zones', { headers, signal: AbortSignal.timeout(20000) });
+  if (!zoneResp.ok) throw new Error(`Electricity Maps /v3/zones returned ${zoneResp.status}`);
+  const zoneMap: Record<string, { countryName?: string; displayName?: string }> = await zoneResp.json();
 
-    // Always fetch live UK data (Free, public, no key required)
-    let ukIntensity = 180;
-    let ukMix = { wind: 35, solar: 10, nuclear: 20, gas: 30, coal: 2, biomass: 3 };
-    try {
-      const ukResp = await fetch('https://api.carbonintensity.org.uk/intensity', { signal: AbortSignal.timeout(15000) });
-      if (ukResp.ok) {
-        const ukData = await ukResp.json() as any;
-        const intensity = ukData.data?.[0]?.intensity?.actual ?? ukData.data?.[0]?.intensity?.forecast;
-        if (toNumber(intensity) != null) {
-          ukIntensity = intensity;
-        }
-      }
-      if (ukIntensity < 100) {
-        ukMix = { wind: 55, solar: 15, nuclear: 20, gas: 8, coal: 0, biomass: 2 };
-      } else if (ukIntensity > 250) {
-        ukMix = { wind: 10, solar: 5, nuclear: 15, gas: 60, coal: 5, biomass: 5 };
-      }
-    } catch (err) {
-      logger.warn({ err }, 'Failed to fetch live UK grid intensity');
-    }
+  // Only country-level zones (2-letter codes) that we can place on the globe
+  // using the authoritative country-centroid table — never invented positions.
+  const candidates = Object.entries(zoneMap)
+    .filter(([code]) => /^[A-Z]{2}$/.test(code))
+    .map(([code, info]) => ({
+      id: code,
+      countryCode: code,
+      name: info.displayName || info.countryName || code,
+      centroid: COUNTRY_CENTROIDS[code],
+    }))
+    .filter((z) => Array.isArray(z.centroid) && z.centroid.length === 2);
 
-    const zones = [
-      { id: 'GB', name: 'United Kingdom', lat: 55.3781, lon: -3.4360, intensity: ukIntensity, mix: ukMix },
-    ];
-
-    // Fetch additional zones only if ElectricityMaps API key is available
-    if (apiKey) {
-      const additionalZones = [
-        { id: 'FR', name: 'France', lat: 46.2276, lon: 2.2137 },
-        { id: 'DE', name: 'Germany', lat: 51.1657, lon: 10.4515 },
-        { id: 'US', name: 'United States', lat: 37.0902, lon: -95.7129 },
-        { id: 'IN', name: 'India', lat: 20.5937, lon: 78.9629 },
-        { id: 'AU', name: 'Australia', lat: -25.2744, lon: 133.7751 },
-        { id: 'BR', name: 'Brazil', lat: -14.2350, lon: -51.9253 },
-        { id: 'JP', name: 'Japan', lat: 36.2048, lon: 138.2529 },
-        { id: 'ZA', name: 'South Africa', lat: -30.5595, lon: 22.9375 },
-        { id: 'CA', name: 'Canada', lat: 56.1304, lon: -106.3468 },
-      ];
-      for (const zone of additionalZones) {
-        try {
-          const mResp = await fetch(`https://api.electricitymap.org/v3/carbon-intensity/latest?zone=${zone.id}`, {
-            headers: { 'auth-token': apiKey },
-            signal: AbortSignal.timeout(15000),
+  const results: any[] = [];
+  const CONCURRENCY = 8;
+  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+    const batch = candidates.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(async (z) => {
+      try {
+        const r = await fetch(`https://api.electricitymap.org/v3/carbon-intensity/latest?zone=${encodeURIComponent(z.id)}`, {
+          headers,
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!r.ok) return;
+        const d = await r.json() as { carbonIntensity?: number; updatedAt?: string };
+        if (d && typeof d.carbonIntensity === 'number' && Number.isFinite(d.carbonIntensity)) {
+          results.push({
+            id: z.id,
+            countryCode: z.countryCode,
+            name: z.name,
+            lat: z.centroid[0],
+            lon: z.centroid[1],
+            intensity: Math.round(d.carbonIntensity),
+            updatedAt: d.updatedAt || null,
+            source: 'Electricity Maps',
           });
-          if (mResp.ok) {
-            const mData = await mResp.json() as any;
-            if (mData && toNumber(mData.carbonIntensity) != null) {
-              zones.push({ ...zone, intensity: mData.carbonIntensity, mix: mData.powerMix || {} });
-            }
-          }
-        } catch (err) {
-          logger.warn({ err }, `Failed to fetch live ElectricityMaps for zone ${zone.id}`);
         }
+      } catch {
+        // A single zone failing must not poison the layer — but only values
+        // the API actually returned are ever included.
       }
-    }
+    }));
+  }
+  if (results.length === 0) throw new Error('Electricity Maps returned no usable carbon-intensity values for any zone');
+  return results.sort((a, b) => a.id.localeCompare(b.id));
+}
 
-    cache.set(cacheKey, zones, 300); // 5 minutes cache
+app.get('/api/electricity-grid', async (_req: express.Request, res: express.Response) => {
+  try {
+    const cacheKey = 'electricity_grid_zones';
+    const cached = cache.get(cacheKey);
+    if (cached) { res.json(cached); return; }
+    const zones = await fetchElectricityMapZones();
+    cache.set(cacheKey, zones, 600); // 10 min — live data, short TTL
     res.json(zones);
   } catch (e) {
-    res.status(502).json({ error: String(e) });
+    const msg = e instanceof Error ? e.message : String(e);
+    const keyMissing = msg.includes('not configured');
+    logger.warn({ err: msg }, 'electricity grid data unavailable');
+    res.status(keyMissing ? 503 : 502).json({ error: msg, code: keyMissing ? 'KEY_REQUIRED' : 'UPSTREAM_ERROR' });
   }
 });
 
@@ -5447,43 +5503,53 @@ app.post('/api/firecrawl', async (req: express.Request, res: express.Response) =
 // 10. Combined Airspaces GeoJSON (from OpenAIP GCS exports)
 
 // ── UCDP Armed Conflict Events ──────────────────────────────────
-app.get('/api/ucdp', async (req: express.Request, res: express.Response) => {
-  try {
-    const { year = new Date().getFullYear(), type = 'dyadic' } = req.query;
+// ── UCDP GED conflict events. Honest contract: no token → explicit 503;
+//    upstream failure → 502. Never a fake-empty 200 'graceful response'.
+async function fetchUcdpConflictEvents(): Promise<any[]> {
+  const token = process.env.UCDP_ACCESS_TOKEN;
+  if (!token) {
+    throw new Error('UCDP_ACCESS_TOKEN is not configured — register at https://ucdp.uu.se/apidocs/ and set it in the server .env');
+  }
+  const year = new Date().getFullYear();
+  const resp = await fetch(`https://ucdpapi.pcr.uu.se/api/ged/${year}?pagesize=100`, {
+    headers: { 'Accept': 'application/json', 'x-ucdp-access-token': token },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!resp.ok) throw new Error(`UCDP GED API returned ${resp.status}`);
+  const data = await resp.json() as any;
+  const events = Array.isArray(data) ? data : Array.isArray(data?.value) ? data.value : [];
+  if (events.length === 0) throw new Error('UCDP GED API returned no events for the current year');
+  return events.map((e: any) => ({
+    id: String(e.id ?? e.key ?? ''),
+    // GED rows carry coordinates in best_lat/best_lon; keep the client-facing
+    // field names (latitude/longitude/best/location/side_a/side_b) that
+    // addUcdpEntities in src/rendering/aviation.ts reads.
+    latitude: parseFloat(e.best_lat ?? e.latitude) || 0,
+    longitude: parseFloat(e.best_lon ?? e.longitude) || 0,
+    best: Number(e.best) || 0,
+    location: e.location ?? e.name ?? '',
+    side_a: e.side_a ?? '',
+    side_b: e.side_b ?? '',
+    country: e.country ?? '',
+    year: Number(e.year ?? new Date().getFullYear()),
+    date_start: e.date_start ?? null,
+    source: 'UCDP GED',
+  }));
+}
 
-    const cacheKey = `ucdp_${year}_${type}`;
+app.get('/api/ucdp', async (_req: express.Request, res: express.Response) => {
+  try {
+    const cacheKey = 'ucdp_conflict_latest';
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
-
-    const ucdpToken = process.env.UCDP_ACCESS_TOKEN;
-    const ucdpHeaders: Record<string, string> = { 'Accept': 'application/json' };
-    if (ucdpToken) ucdpHeaders['x-ucdp-access-token'] = ucdpToken;
-    const resp = await fetch(`https://ucdpapi.pcr.uu.se/api/${type}/${year}?pagesize=100`, {
-      headers: ucdpHeaders,
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!resp.ok) {
-      logger.warn({ status: resp.status, type, year }, 'UCDP upstream error; serving graceful response');
-      return res.json({
-        items: [],
-        available: false,
-        source: 'UCDP GED',
-        message: resp.status === 401
-          ? 'UCDP conflict data requires an access token. Set UCDP_ACCESS_TOKEN in the environment to enable live conflict events.'
-          : `UCDP conflict feed temporarily unavailable (HTTP ${resp.status}).`,
-      });
-    }
-    const data = await resp.json();
-    cache.set(cacheKey, data, 3600);
-    res.json(data);
+    const items = await fetchUcdpConflictEvents();
+    cache.set(cacheKey, items, 3600);
+    res.json(items);
   } catch (e) {
-    logger.warn({ err: e }, 'UCDP fetch failed; serving graceful response');
-    res.json({
-      items: [],
-      available: false,
-      source: 'UCDP GED',
-      message: 'UCDP conflict feed temporarily unavailable. Try again later.',
-    });
+    const msg = e instanceof Error ? e.message : String(e);
+    const keyMissing = msg.includes('not configured');
+    logger.warn({ err: msg }, 'UCDP conflict data unavailable');
+    res.status(keyMissing ? 503 : 502).json({ error: msg, code: keyMissing ? 'KEY_REQUIRED' : 'UPSTREAM_ERROR' });
   }
 });
 
@@ -6007,12 +6073,15 @@ async function fetchOceanCurrents(): Promise<any[]> {
   _oceanInFlight = (async () => {
     const results: any[] = [];
     const grid = [...OCEAN_GRID];
-    // Retry loop: up to 3 passes for throttled requests
-    for (let pass = 0; pass < 3 && grid.length > 0; pass++) {
+    const start = Date.now();
+    const FILL_DEADLINE_MS = 85_000; // bound cold fill; serve partial real coverage after
+    // Retry loop: up to 2 passes for throttled requests, hard deadline on total fill.
+    for (let pass = 0; pass < 2 && grid.length > 0; pass++) {
       const pending = [...grid];
       grid.length = 0;
-      const delay = pass === 0 ? 400 : pass === 1 ? 800 : 1500;
+      const delay = pass === 0 ? 400 : 800;
       for (let i = 0; i < pending.length; i += 8) {
+        if (Date.now() - start > FILL_DEADLINE_MS) break;
         const chunk = pending.slice(i, i + 8);
         const responses = await Promise.allSettled(
           chunk.map(pt =>
@@ -6039,7 +6108,9 @@ async function fetchOceanCurrents(): Promise<any[]> {
             timestamp: Date.now(),
           });
         }
-        if (i + 8 < pending.length) await new Promise(r => setTimeout(r, delay));
+        if (i + 8 < pending.length && Date.now() - start < FILL_DEADLINE_MS) {
+          await new Promise(r => setTimeout(r, delay));
+        }
       }
     }
     _oceanCache = { data: results, ts: Date.now() };
@@ -6175,7 +6246,7 @@ async function fetchEarthquakes(): Promise<any[]> {
 async function fetchGbifOccurrences(): Promise<any[]> {
   const resp = await fetch(
     'https://api.gbif.org/v1/occurrence/search?limit=300&hasCoordinate=true&hasGeospatialIssue=false&taxonKey=1',
-    { signal: AbortSignal.timeout(15000) },
+    { signal: AbortSignal.timeout(45000) },
   );
   const data = await resp.json() as any;
   return (data.results || []).map((r: any) => ({
@@ -7072,8 +7143,161 @@ async function fetchNaturalEarthPlaces(): Promise<any[]> {
   } catch (e) { logger.warn({ err: e }, 'Natural Earth places fetch failed'); return []; }
 }
 
+// ── Population Impact Zones ──
+// Anchor seeds are the 50 largest urban agglomerations on Earth (UN World
+// Urbanization Prospects 2018 metro ranking — name + approximate centre only,
+// used to disambiguate lookups). Live city records (official name, GeoNames
+// coordinates, population) come from the Open-Meteo Geocoding API
+// (https://geocoding-api.open-meteo.com/v1/search) which serves GeoNames
+// data — keyless, machine-readable, CORS-open.
+const POP_CITY_ANCHORS: Array<[string, number, number]> = [
+  ['Tokyo', 35.6762, 139.6503], ['Delhi', 28.7041, 77.1025], ['Shanghai', 31.2304, 121.4737],
+  ['Sao Paulo', -23.5505, -46.6333], ['Mexico City', 19.4326, -99.1332], ['Cairo', 30.0444, 31.2357],
+  ['Mumbai', 19.076, 72.8777], ['Beijing', 39.9042, 116.4074], ['Dhaka', 23.8103, 90.4125],
+  ['Osaka', 34.6937, 135.5023], ['New York', 40.7128, -74.006], ['Karachi', 24.8607, 67.0011],
+  ['Buenos Aires', -34.6037, -58.3816], ['Istanbul', 41.0082, 28.9784], ['Kolkata', 22.5726, 88.3639],
+  ['Manila', 14.5995, 120.9842], ['Lagos', 6.5244, 3.3792], ['Rio de Janeiro', -22.9068, -43.1729],
+  ['Tianjin', 39.0842, 117.2009], ['Kinshasa', -4.4419, 15.2663], ['Guangzhou', 23.1291, 113.2644],
+  ['Los Angeles', 34.0522, -118.2437], ['Moscow', 55.7558, 37.6173], ['Shenzhen', 22.5431, 114.0579],
+  ['Lahore', 31.5204, 74.3587], ['Bangalore', 12.9716, 77.5946], ['Paris', 48.8566, 2.3522],
+  ['Bogota', 4.711, -74.0721], ['Jakarta', -6.2088, 106.8456], ['Chennai', 13.0827, 80.2707],
+  ['Lima', -12.0464, -77.0428], ['Bangkok', 13.7563, 100.5018], ['Hyderabad', 17.385, 78.4867],
+  ['Seoul', 37.5665, 126.978], ['London', 51.5074, -0.1278], ['Chengdu', 30.5728, 104.0668],
+  ['Nagoya', 35.1815, 136.9066], ['Tehran', 35.6892, 51.389], ['Chicago', 41.8781, -87.6298],
+  ['Ho Chi Minh', 10.8231, 106.6297], ['Luanda', -8.839, 13.2894], ['Wuhan', 30.5928, 114.3055],
+  ['Kuala Lumpur', 3.139, 101.6869], ['Hong Kong', 22.3193, 114.1694], ['Dongguan', 23.0472, 113.7493],
+  ['Riyadh', 24.7136, 46.6753], ['Baghdad', 33.3152, 44.3661], ['Singapore', 1.3521, 103.8198],
+  ['Santiago', -33.4489, -70.6693], ['Madrid', 40.4168, -3.7038],
+];
+
+function normalizeCityName(s: string): string {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/['’&.-]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+async function fetchTopCitiesPopulation(): Promise<any[]> {
+  const cacheKey = 'population_impact_v1';
+  const cached = cache.get<any[]>(cacheKey);
+  if (cached) return cached;
+
+  const results: any[] = [];
+  const unresolved: string[] = [];
+  for (let i = 0; i < POP_CITY_ANCHORS.length; i += 5) {
+    const batch = POP_CITY_ANCHORS.slice(i, i + 5);
+    await Promise.allSettled(batch.map(async ([anchorName, anchorLat, anchorLon]) => {
+      try {
+        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(anchorName)}&count=8&language=en&format=json`;
+        const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+        if (!resp.ok) throw new Error(`Open-Meteo geocoding HTTP ${resp.status}`);
+        const data = await resp.json() as any;
+        const want = normalizeCityName(anchorName);
+        const scored = (data.results ?? [])
+          .filter((c: any) => Number.isFinite(c?.latitude) && Number.isFinite(c?.longitude) && typeof c?.population === 'number' && c.population > 0)
+          .map((c: any) => {
+            const dLat = c.latitude - anchorLat;
+            const dLon = c.longitude - anchorLon;
+            const distKm = Math.sqrt(dLat * dLat + dLon * dLon) * 111.32;
+            const got = normalizeCityName(c.name);
+            return { c, distKm, nameMatch: got.includes(want) || want.includes(got) };
+          })
+          .filter((s: any) => s.distKm <= 150)
+          .sort((a: any, b: any) => (a.nameMatch === b.nameMatch ? a.distKm - b.distKm : a.nameMatch ? -1 : 1));
+        const best = scored[0];
+        if (!best) { unresolved.push(anchorName); return; }
+        const c = best.c;
+        results.push({
+          id: `geo_${c.id ?? results.length}`,
+          name: c.name,
+          country: c.country || c.country_code || '',
+          countryCode: c.country_code || '',
+          admin1: c.admin1 || '',
+          lat: c.latitude,
+          lon: c.longitude,
+          population: c.population,
+          popM: Math.round((c.population / 1e6) * 10) / 10,
+          source: 'Open-Meteo Geocoding (GeoNames)',
+        });
+      } catch {
+        unresolved.push(anchorName);
+      }
+    }));
+  }
+  results.sort((a, b) => b.population - a.population);
+  if (results.length === 0) {
+    throw new Error('Open-Meteo geocoding returned no population data — upstream unavailable');
+  }
+  cache.set(cacheKey, results, 86400); // populations change slowly — 24 h
+  logger.info({ anchors: POP_CITY_ANCHORS.length, resolved: results.length, unresolved: unresolved.slice(0, 6) }, 'Population impact cities fetched');
+  return results;
+}
+
 // Layer-specific fetchers: individual layers can have their own unique data source
 const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
+  // Energy & infrastructure layers — honest real-time sources only.
+  // Keyed fetchers throw when their env key is missing so the endpoint
+  // reports an explicit KEY_REQUIRED error instead of fake-empty data.
+  'volcanoes': async () => {
+    const all = await fetchEonetEvents();
+    return all.filter(i => String(i.category || '').toLowerCase().includes('volcano'));
+  },
+  'ucdp_conflict': async () => fetchUcdpConflictEvents(),
+  'population_impact': async () => fetchTopCitiesPopulation(),
+  'military_bases': async () => {
+    const out = await fetchMilitaryBasesWikidata();
+    return Array.isArray(out?.elements) ? out.elements : [];
+  },
+  'electricity_grid': async () => fetchElectricityMapZones(),
+  'submarine_cables': async () => {
+    const geo = await fetchSubmarineCablesGeoJson();
+    return Array.isArray(geo?.features) ? geo.features : [];
+  },
+  'eu_gas_storage': async () => {
+    const apiKey = process.env.GIE_API_KEY;
+    if (!apiKey) {
+      throw new Error('GIE_API_KEY is not configured — register at https://agsi.gie.eu/account and set it in the server .env');
+    }
+    // EU/UK members operating underground gas storage (ISO-2 codes, AGSI+ coverage).
+    const countryCodes = ['AT','BE','BG','HR','CZ','DK','EE','FR','DE','GR','HU','IE','IT','LV','LT','NL','PL','PT','RO','SK','SI','ES','SE','GB'];
+    const headers = { 'x-key': apiKey };
+    const items: any[] = [];
+    const fetchCountry = async (code: string): Promise<void> => {
+      try {
+        const r = await fetch(`https://agsi.gie.eu/api?country=${code}`, { headers, signal: AbortSignal.timeout(12000) });
+        if (!r.ok) return;
+        const d = await r.json() as any;
+        if (!d || !Array.isArray(d.data) || d.data.length === 0) return;
+        // Rows are daily storage readings; keep the most recent gas day and,
+        // if several facilities share it, aggregate their real volumes.
+        const latestDay = d.data.reduce((acc: any, row: any) => (String(row.gasDayStart || '') > String(acc?.gasDayStart || '') ? row : acc), null);
+        const dayRows = d.data.filter((row: any) => String(row.gasDayStart || '') === String(latestDay.gasDayStart || ''));
+        const gasInStorage = dayRows.reduce((s: number, row: any) => s + (Number(row.gasInStorage) || 0), 0);
+        const workingGasVolume = dayRows.reduce((s: number, row: any) => s + (Number(row.workingGasVolume) || 0), 0);
+        const centroid = COUNTRY_CENTROIDS[code];
+        if (!centroid || !Number.isFinite(gasInStorage) || !Number.isFinite(workingGasVolume) || workingGasVolume <= 0) return;
+        items.push({
+          lat: centroid[0],
+          lon: centroid[1],
+          countryCode: code,
+          name: String(latestDay.name || code),
+          fillPct: Math.round((gasInStorage / workingGasVolume) * 1000) / 10,
+          gasInStorage,
+          workingGasVolume,
+          gasDayStart: latestDay.gasDayStart || null,
+          status: latestDay.status || null,
+          source: 'GIE AGSI+',
+        });
+      } catch {
+        // Skip a country whose upstream call failed — only real values included.
+      }
+    };
+    // Countries in parallel batches — a single slow/blocked upstream must not
+    // stall the whole layer for 23 sequential timeouts.
+    for (let i = 0; i < countryCodes.length; i += 6) {
+      await Promise.all(countryCodes.slice(i, i + 6).map(c => fetchCountry(c)));
+    }
+    if (items.length === 0) throw new Error('GIE AGSI+ returned no storage data — verify GIE_API_KEY');
+    return items;
+  },
   'internet_outages': async () => {
     try {
       const resp = await fetch('https://api.ioda.inetintel.cc.gatech.edu/v2/alerts/country?format=json', { signal: AbortSignal.timeout(15000) });
@@ -7635,36 +7859,49 @@ app.get('/api/geospatial/overpass', async (req: express.Request, res: express.Re
 });
 
 // ── Military Bases (Wikidata SPARQL) ───────────────────────────────
-app.get('/api/military-bases', async (_req: express.Request, res: express.Response) => {
-  const cacheKey = 'military_bases_global_v4';
-  const hit = cache.get(cacheKey);
-  if (hit) { res.json(hit); return; }
-  try {
-    const sparql = `SELECT ?item ?itemLabel ?coords WHERE {
+// ── Military bases from live Wikidata SPARQL (class Q245016). Honest
+//    contract: never a fake-empty 200 — upstream errors are surfaced.
+async function fetchMilitaryBasesWikidata(): Promise<{ elements: any[] }> {
+  const sparql = `SELECT ?item ?itemLabel ?coords WHERE {
   ?item wdt:P31/wdt:P279* wd:Q245016 ; wdt:P625 ?coords .
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
-} LIMIT 200`;
-    const url = `https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(sparql)}`;
-    const resp = await fetch(url, {
-      headers: { 'User-Agent': 'EarthReplica/1.0' },
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!resp.ok) { res.json({ elements: [], note: 'Wikidata unavailable' }); return; }
-    const data = await resp.json() as { results?: { bindings?: any[] } };
-    const results = data.results?.bindings || [];
-    const elements = results.map((r: any) => {
-      const wkt = r.coords?.value || '';
-      const m = wkt.match(/Point\(([-\d.]+)\s+([-\d.]+)\)/);
-      const lon = m ? parseFloat(m[1]) : NaN;
-      const lat = m ? parseFloat(m[2]) : NaN;
-      return { type: 'node', id: r.item?.value?.split('/').pop() || 0, lat, lon,
-        tags: { name: r.itemLabel?.value || '', type: 'military_base' } };
-    }).filter((e: any) => isFinite(e.lat) && isFinite(e.lon));
-    const out = { elements };
-    cache.set(cacheKey, out, 86400);
+} LIMIT 300`;
+  const url = `https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(sparql)}`;
+  const resp = await fetch(url, {
+    headers: { 'User-Agent': 'Terranoetis/1.0 (military-bases layer)' },
+    signal: AbortSignal.timeout(25000),
+  });
+  if (!resp.ok) throw new Error(`Wikidata SPARQL returned ${resp.status}`);
+  const data = await resp.json() as { results?: { bindings?: any[] } };
+  const results = data.results?.bindings || [];
+  const elements = results.map((r: any) => {
+    const wkt = r.coords?.value || '';
+    const m = wkt.match(/Point\(([-\d.]+)\s+([-\d.]+)\)/);
+    const lon = m ? parseFloat(m[1]) : NaN;
+    const lat = m ? parseFloat(m[2]) : NaN;
+    return {
+      type: 'node',
+      id: r.item?.value?.split('/').pop() || 0,
+      lat,
+      lon,
+      tags: { name: r.itemLabel?.value || '', type: 'military_base' },
+    };
+  }).filter((e: any) => isFinite(e.lat) && isFinite(e.lon));
+  return { elements };
+}
+
+app.get('/api/military-bases', async (_req: express.Request, res: express.Response) => {
+  try {
+    const cacheKey = 'military_bases_global_v4';
+    const hit = cache.get(cacheKey);
+    if (hit) { res.json(hit); return; }
+    const out = await fetchMilitaryBasesWikidata();
+    cache.set(cacheKey, out, 86400); // Wikidata instances change slowly — 24 h
     res.json(out);
   } catch (e) {
-    res.json({ elements: [], note: 'Wikidata query failed' });
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.warn({ err: msg }, 'military bases unavailable');
+    res.status(502).json({ error: msg, code: 'UPSTREAM_ERROR' });
   }
 });
 
@@ -7775,6 +8012,10 @@ app.get('/api/data/:layerId', async (req: express.Request, res: express.Response
     }
   }
 
+  // Track the real reason so the final error response is actionable, never a
+  // generic 'something failed' when we know exactly what went wrong.
+  let upstreamFailure: string | undefined;
+
   // Try 2: Check for a layer-specific fetcher
   if (layerFetcher) {
     try {
@@ -7783,7 +8024,10 @@ app.get('/api/data/:layerId', async (req: express.Request, res: express.Response
       cache.set(cacheKey, payload, 3600);
       res.json(payload);
       return;
-    } catch (e) { logger.warn({ err: e, layerId }, 'Layer-specific fetcher failed, falling through to group'); }
+    } catch (e) {
+      upstreamFailure = e instanceof Error ? e.message : String(e);
+      logger.warn({ err: e, layerId }, 'Layer-specific fetcher failed, falling through to group');
+    }
   }
 
   // Try 3: Use group-specific real data fetcher
@@ -7800,16 +8044,33 @@ app.get('/api/data/:layerId', async (req: express.Request, res: express.Response
       cache.set(cacheKey, payload, 600);
       res.json(payload);
       return;
-    } catch (e) { logger.warn({ err: e, group }, 'Group fetcher failed, falling through'); }
+    } catch (e) {
+      upstreamFailure = e instanceof Error ? e.message : String(e);
+      logger.warn({ err: e, group }, 'Group fetcher failed, falling through');
+    }
   }
 
-  // No real data available — short TTL to allow recovery when upstream APIs come back
+  // No data path produced a result. Enterprise contract: NEVER pretend success
+  // with an empty payload — a layer either has a working data source or it
+  // reports an explicit error. (A successful fetcher that legitimately returns
+  // zero records already returned { items: [] } with HTTP 200 above; reaching
+  // this block means no fetcher exists, or every fetcher that does exist threw.)
   const COMMERCIAL_API_DOMAINS = ['airlabs.co', 'api.windy.com', 'api.purpleair.com', 'api.airnowapi.org', 'aisstream.io'];
   if (dataSourceUrl && COMMERCIAL_API_DOMAINS.some(d => dataSourceUrl.includes(d))) {
-    logger.warn({ layerId, url: dataSourceUrl }, '[API KEY NEEDED] Layer requires a commercial API key. Add it in Settings > API Vault.');
+    logger.warn({ layerId, url: dataSourceUrl }, '[API KEY NEEDED] Layer requires a commercial API key. Configure it in the server .env (deployment-managed, no per-user keys).');
   }
-  cache.set(cacheKey, { items: [] }, 60);
-  res.json({ items: [] });
+  const fetcherAttempted = Boolean(layerFetcher || groupFetcher);
+  const keyRequired = fetcherAttempted && upstreamFailure ? /(?:[A-Z_]+_KEY|_TOKEN) is not configured/.test(upstreamFailure) : false;
+  const status = fetcherAttempted ? (keyRequired ? 503 : 502) : 503;
+  const code = !fetcherAttempted ? 'NO_DATA_PATH' : keyRequired ? 'KEY_REQUIRED' : 'UPSTREAM_ERROR';
+  const message = !fetcherAttempted
+    ? `No data path configured for layer '${layerId}' (group '${group}') — add a LAYER_FETCHERS/group fetcher or a proxyable dataSource, or remove the layer from the catalog`
+    : upstreamFailure
+      ? `Layer '${layerId}' data unavailable: ${upstreamFailure}`
+      : `Upstream data source failed for layer '${layerId}' (group '${group}')`;
+  cache.set(cacheKey, { error: message, code }, 30);
+  logger.warn({ layerId, group, code }, message);
+  res.status(status).json({ error: message, code });
 });
 
 /* ═════════════════════════════════════════════════════════════════
@@ -8692,18 +8953,11 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
   const userId = (req as any).userId || 'default';
   const cloud: boolean = req.body.cloud || false;
   const requestId = (req as any).correlationId || crypto.randomUUID();
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || req.body.apiKey;
-  // Look up per-user vault keys for per-request API key overrides
-  const vault = readVault(userId);
-  const vaultKeys: Record<string, string> = {};
-  if (vault['GOOGLE_GEMINI_API_KEY']) vaultKeys['GOOGLE_GEMINI_API_KEY'] = vault['GOOGLE_GEMINI_API_KEY'];
-  if (vault['GEMINI_API_KEY']) vaultKeys['GEMINI_API_KEY'] = vault['GEMINI_API_KEY'];
-  if (vault['ANTHROPIC_API_KEY']) vaultKeys['ANTHROPIC_API_KEY'] = vault['ANTHROPIC_API_KEY'];
-  if (vault['GROQ_API_KEY']) vaultKeys['GROQ_API_KEY'] = vault['GROQ_API_KEY'];
-  if (vault['OPENROUTER_API_KEY']) vaultKeys['OPENROUTER_API_KEY'] = vault['OPENROUTER_API_KEY'];
-  if (vault['DEEPSEEK_API_KEY']) vaultKeys['DEEPSEEK_API_KEY'] = vault['DEEPSEEK_API_KEY'];
-  // Effective Gemini key: vault > env > req.body (for multimodal vision calls)
-  const effectiveGeminiKey = vaultKeys['GOOGLE_GEMINI_API_KEY'] || vaultKeys['GEMINI_API_KEY'] || apiKey;
+  // Enterprise: API keys are resolved exclusively from the server environment (.env).
+  // No per-user vault — users can no longer paste keys in the browser.
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+  // Effective Gemini key for multimodal vision calls — env only.
+  const effectiveGeminiKey = apiKey;
   // Client-selected tier from the request body
   const clientTier = (req.body as any).tier as string | undefined;
   // Client-selected model override (e.g. "groq/compound", "local").
@@ -9321,7 +9575,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     const streamPass = async (prompt: string): Promise<string> => {
       let accumulated = '';
       let tokenCount = 0;
-      for await (const token of omninet.generateStream(prompt, { signal: abortController.signal, temperature: 0.4, maxTokens: 4096, vaultKeys: Object.keys(vaultKeys).length > 0 ? vaultKeys : undefined, clientTier, model: clientModel })) {
+      for await (const token of omninet.generateStream(prompt, { signal: abortController.signal, temperature: 0.4, maxTokens: 4096, clientTier, model: clientModel })) {
         if (abortController.signal.aborted) break;
         accumulated += token;
         tokenCount++;

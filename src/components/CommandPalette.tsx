@@ -45,10 +45,10 @@ const LAYERS: Array<{ id: string; label: string; icon: string }> = [
   { id: 'electricity_grid', label: 'Electricity Grid', icon: '⚡' },
   { id: 'animal_migrations', label: 'Animal Migrations', icon: '🐋' },
   { id: 'dt_buildings', label: 'OSM Buildings', icon: '🏙️' },
-  { id: 'temp_anomaly', label: 'Temperature Anomaly', icon: '🌡️' },
+  { id: 'temp_anomaly', label: 'Surface Air Temp (AIRS)', icon: '🌡️' },
   { id: 'sea_ice', label: 'Sea Ice', icon: '🧊' },
   { id: 'precipitation', label: 'Precipitation', icon: '🌧️' },
-  { id: 'wind', label: 'Wind', icon: '💨' },
+  { id: 'wind', label: 'Ocean Wind Speed', icon: '💨' },
   { id: 'live_media', label: 'Live Media', icon: '📺' },
   { id: 'disaster_alerts', label: 'Disaster Alerts', icon: '🚨' },
 ];

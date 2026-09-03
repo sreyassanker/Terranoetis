@@ -945,18 +945,7 @@ export const API_METADATA: ApiConfig[] = [
     status: 'authenticated',
   },
 
-  // ── GPS & NAVIGATION ──
-  {
-    id: 'gpsjam',
-    name: 'GPSJam.org',
-    category: 'Aviation',
-    description: 'GPS/GNSS jamming and spoofing heatmap — aviation safety indicator',
-    registrationUrl: 'https://gpsjam.org/',
-    docsUrl: 'https://gpsjam.org/',
-    free: true,
-    rateLimit: 'Free public data',
-    status: 'public',
-  },
+  // (gpsjam removed — no public machine-readable feed)
 
   // ── CLIMATE & ENVIRONMENT ──
   {

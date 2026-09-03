@@ -52,8 +52,6 @@ export interface OmninetOptions {
   model?: string;
   stream?: boolean;
   signal?: AbortSignal;
-  /** Per-provider vault keys map (env var name → key value). Used as fallback when env var is missing. */
-  vaultKeys?: Record<string, string>;
   /** Client-selected tier: 'local' | 'flash' | 'pro'. Influences provider ranking. */
   clientTier?: string;
 }
@@ -281,17 +279,16 @@ export class Omninet {
 
   // ── Routing Logic ─────────────────────────────────────────────
 
-  /** Resolve the API key for a provider: env var → vaultKeys fallback. */
-  private resolveApiKey(config: ProviderConfig, vaultKeys?: Record<string, string>): string | undefined {
+  /** Resolve the API key for a provider: server environment (.env) only. */
+  private resolveApiKey(config: ProviderConfig): string | undefined {
     if (config.apiKeyEnvVar) {
       const envKey = process.env[config.apiKeyEnvVar];
       if (envKey) return envKey;
-      if (vaultKeys && vaultKeys[config.apiKeyEnvVar]) return vaultKeys[config.apiKeyEnvVar];
     }
     return undefined;
   }
 
-  private rankProviders(targetTier: ProviderTier, vaultKeys?: Record<string, string>): ProviderState[] {
+  private rankProviders(targetTier: ProviderTier): ProviderState[] {
     const eligible = this.providers.filter(s => {
       if (s.status === 'down') return false;
       // Embedding-only local providers cannot
@@ -301,8 +298,8 @@ export class Omninet {
         if (Date.now() - s.circuitOpenedAt > 30000) s.circuitState = 'half-open';
         else return false;
       }
-      // Exclude if no API key available: check env var first, then vault keys
-      const hasKey = this.resolveApiKey(s.config, vaultKeys);
+      // Exclude if no API key is configured in the server environment (.env)
+      const hasKey = this.resolveApiKey(s.config);
       if (!hasKey && !s.config.local) return false;
       this.refillTokens(s);
       if (s.tokens < 1) return false;
@@ -322,11 +319,11 @@ export class Omninet {
     });
   }
 
-  route(query: string, complexity: Complexity, preferredModel?: string, clientTier?: string, vaultKeys?: Record<string, string>): RouteResult {
+  route(query: string, complexity: Complexity, preferredModel?: string, clientTier?: string): RouteResult {
     this.ensureInit();
     // If client explicitly chose a tier, use it; otherwise derive from complexity
     const targetTier = clientTier ? this.clientTierToProviderTier(clientTier) : this.complexityToTier(complexity);
-    const sorted = this.rankProviders(targetTier, vaultKeys);
+    const sorted = this.rankProviders(targetTier);
 
     if (sorted.length > 0) {
       const selected = sorted[0];
@@ -364,7 +361,7 @@ export class Omninet {
   }
 
   private async callOpenAI(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
-    const apiKey = this.resolveApiKey(config, options?.vaultKeys) || '';
+    const apiKey = this.resolveApiKey(config) || '';
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
     const resp = await fetch(`${config.baseUrl}/chat/completions`, {
@@ -391,7 +388,7 @@ export class Omninet {
   }
 
   private async callGemini(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
-    const apiKey = this.resolveApiKey(config, options?.vaultKeys) || process.env.GOOGLE_GEMINI_API_KEY || '';
+    const apiKey = this.resolveApiKey(config) || process.env.GOOGLE_GEMINI_API_KEY || '';
     if (!apiKey) throw new Error('Gemini API key not configured. Set GOOGLE_GEMINI_API_KEY in .env');
 
     // Try multiple models in order of preference — if the first fails with 429/404, try the next
@@ -463,7 +460,7 @@ export class Omninet {
   }
 
   private async callClaude(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
-    const apiKey = this.resolveApiKey(config, options?.vaultKeys) || '';
+    const apiKey = this.resolveApiKey(config) || '';
     const resp = await fetch(`${config.baseUrl}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey!, 'anthropic-version': '2023-06-01' },
@@ -497,7 +494,7 @@ export class Omninet {
   }
 
   private async callHuggingFace(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
-    const apiKey = this.resolveApiKey(config, options?.vaultKeys) || '';
+    const apiKey = this.resolveApiKey(config) || '';
     const resp = await fetch(`${config.baseUrl}/models/${model}`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -685,7 +682,7 @@ export class Omninet {
     this.ensureInit();
     const complexity = classifyComplexity(prompt);
     const targetTier = options?.clientTier ? this.clientTierToProviderTier(options.clientTier) : this.complexityToTier(complexity);
-    const candidates = this.rankProviders(targetTier, options?.vaultKeys);
+    const candidates = this.rankProviders(targetTier);
 
     if (candidates.length === 0) {
       yield 'All AI providers unavailable. Check API keys and provider status.';
@@ -698,7 +695,7 @@ export class Omninet {
     for (const state of candidates) {
       const config = state.config;
       const model = preferred && config.models.includes(preferred) ? preferred : config.models[0];
-      const apiKey = this.resolveApiKey(config, options?.vaultKeys);
+      const apiKey = this.resolveApiKey(config);
 
       if (!this.consumeToken(state)) continue;
 
@@ -745,7 +742,7 @@ export class Omninet {
             }
           }
         } else if (config.type === 'gemini') {
-          const gApiKey = this.resolveApiKey(config, options?.vaultKeys) || process.env.GOOGLE_GEMINI_API_KEY || '';
+          const gApiKey = this.resolveApiKey(config) || process.env.GOOGLE_GEMINI_API_KEY || '';
           const resp = await fetch(`${config.baseUrl}/models/${model}:streamGenerateContent?alt=sse&key=${gApiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

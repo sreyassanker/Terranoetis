@@ -1,17 +1,16 @@
 /**
- * TomTom Traffic Layer — per-vehicle street-level traffic flow.
- * Uses TomTom Traffic Flow API to fetch live congestion data at street level.
- * Real data when a valid TOMTOM_API_KEY is present; otherwise registers
- * an empty layer (no fabricated data).
+ * TomTom Traffic Layer — street-level traffic flow with congestion coloring.
  *
- * This is a genuinely NEW feature — not an upgrade of the existing Sentinel-1
- * road traffic detector (which analyzes corridor-level SAR data for anomaly
- * detection). This layer shows per-vehicle flow with congestion coloring.
+ * Data is fetched through the server proxy (GET /api/tomtom/flow) which holds
+ * TOMTOM_API_KEY in .env — no key ever reaches the browser. The proxy calls
+ * the official TomTom Flow Segment Data API (service version 4):
+ *   https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/{zoom}/json
+ * When TOMTOM_API_KEY is unset the proxy returns 503 KEY_REQUIRED and this
+ * layer stays empty (no fabricated data).
  */
 
 import * as Cesium from 'cesium';
-
-const TOMTOM_BASE = 'https://api.tomtom.com/traffic/services/4/flowSegmentData';
+import { apiGet } from '@/lib/api';
 
 interface FlowSegment {
   coordinates: { coordinate: { longitude: number; latitude: number } };
@@ -28,13 +27,9 @@ interface FlowResponse {
   flowSegmentData: FlowSegment;
 }
 
-export interface TomTomKeyConfig {
-  apiKey: string;
-}
 
 export class TomTomTrafficLayer {
   private viewer: Cesium.Viewer;
-  private apiKey: string | null;
   private entities: Cesium.Entity[] = [];
   private active = false;
   private abortController: AbortController | null = null;
@@ -42,16 +37,13 @@ export class TomTomTrafficLayer {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private destroyed = false;
 
-  constructor(viewer: Cesium.Viewer, apiKey: string | null) {
+  constructor(viewer: Cesium.Viewer) {
     this.viewer = viewer;
-    this.apiKey = apiKey;
   }
 
   async start(): Promise<void> {
     if (this.destroyed || this.active) return;
     this.active = true;
-    const key = this.apiKey;
-    if (!key) return;
     await this.refresh();
     this.intervalId = setInterval(() => this.refresh(), this.refreshIntervalMs);
   }
@@ -78,7 +70,7 @@ export class TomTomTrafficLayer {
   }
 
   private async refresh(): Promise<void> {
-    if (!this.active || !this.apiKey) return;
+    if (!this.active) return;
     this.abortController?.abort();
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
@@ -113,14 +105,33 @@ export class TomTomTrafficLayer {
 
     this.clear();
     const results = await Promise.allSettled(
-      points.map(p => this.fetchFlowSegment(p.lat, p.lon, signal)),
+      points.map(async p => ({ point: p, resp: await this.fetchFlowSegment(p.lat, p.lon, signal) })),
     );
 
     for (const r of results) {
-      if (r.status !== 'fulfilled' || !r.value) continue;
-      const seg = r.value.flowSegmentData;
-      if (seg.roadClosure) continue;
-      const { latitude, longitude } = seg.coordinates.coordinate;
+      if (r.status !== 'fulfilled') continue;
+      const seg = r.value.resp?.flowSegmentData;
+      if (!seg || seg.roadClosure) continue;
+      const lat = r.value.point.lat;
+      const lon = r.value.point.lon;
+      // The TomTom payload's coordinates.coordinate is an array of points
+      // describing the segment shape (verified against the live API). Anchor
+      // the entity at the shape point closest to the requested sample point.
+      const raw = seg.coordinates?.coordinate;
+      const shape = Array.isArray(raw) ? raw : raw ? [raw] : [];
+      let nearest = shape[0];
+      if (shape.length > 1) {
+        let bestDist = Infinity;
+        for (const pt of shape) {
+          if (!pt || !Number.isFinite(pt.latitude) || !Number.isFinite(pt.longitude)) continue;
+          const dLat = pt.latitude - lat;
+          const dLon = pt.longitude - lon;
+          const dist = dLat * dLat + dLon * dLon;
+          if (dist < bestDist) { bestDist = dist; nearest = pt; }
+        }
+      }
+      if (!nearest || !Number.isFinite(nearest.latitude) || !Number.isFinite(nearest.longitude)) continue;
+      const { latitude, longitude } = nearest;
       const congestion = seg.currentSpeed / Math.max(seg.freeFlowSpeed, 1);
       // Color: green (free flow) → yellow → red (congested)
       const hue = 120 * Math.min(1, Math.max(0, congestion)); // 120° = green, 0° = red
@@ -156,13 +167,10 @@ export class TomTomTrafficLayer {
     lon: number,
     signal: AbortSignal,
   ): Promise<FlowResponse | null> {
-    const key = this.apiKey;
-    if (!key) return null;
-    const url = `${TOMTOM_BASE}/absolute/22/json?point=${lat},${lon}&unit=KMPH&key=${key}`;
     try {
-      const resp = await fetch(url, { signal });
-      if (!resp.ok) return null;
-      return (await resp.json()) as FlowResponse;
+      // Server proxy holds TOMTOM_API_KEY; AbortSignal passes through to it.
+      const data = await apiGet<FlowResponse>(`/tomtom/flow?lat=${lat}&lon=${lon}&unit=kmph`, { signal });
+      return data && data.flowSegmentData ? data : null;
     } catch {
       return null;
     }
