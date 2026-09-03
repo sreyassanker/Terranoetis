@@ -104,7 +104,7 @@ The analytical pipeline applies **7-stage quality control** (input validation, u
 | Fires & hazards | `/api/firms`, `/api/eonet`, `/api/gdacs/alerts`, `/api/fema`, `/api/geospatial/overpass` |
 | Space | `/api/satellites/tle`, `/api/ucs-satellites`, `/api/spacex/launches`, `/api/space-debris`, `/api/space-weather/donki`, `/api/space-weather/kp`, `/api/aurora`, `/api/iss` |
 | Traffic | `/api/road-traffic/analyze` |
-| Climate | `/api/climate/power`, `/api/displacement`, `/api/electricity-grid` |
+| Climate | `/api/climate/power`, `/api/electricity-grid` |
 
 ---
 

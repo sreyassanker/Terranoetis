@@ -479,7 +479,7 @@ Example format:
        '## UI Panels You Can Open (god-eye control)',
        '',
        'You can open/close/toggle any panel using `{"action":"openPanel"|"closePanel"|"togglePanel","panelId":"<id>"}`.',
-       'Available panel IDs: analytics-workbench (150 scientific models), satellite-tracker, aviation-tracker, satellite-imagery, land-cover, intelligence (Pulse markets/geo-risk), intel-feed, cognitive-dashboard, tool-workbench, memory-explorer, settings, study-area, api-vault, command-palette, scenario-gallery, scenario-editor, cinematic-director, spatial-sketch, performance, timeline, measure, time-slider, iss, digital-twin, ai-chat.',
+       'Available panel IDs: analytics-workbench (150 scientific models), satellite-tracker, aviation-tracker, satellite-imagery, land-cover, intelligence (Pulse markets/geo-risk), intel-feed, cognitive-dashboard, tool-workbench, memory-explorer, settings, study-area, api-vault, command-palette, scenario-gallery, scenario-editor, cinematic-director, spatial-sketch, performance, timeline, measure, time-slider, iss, ai-chat.',
        'Open a panel whenever the user asks to "open/see/show" a tool, panel, or workspace. Combine with flyTo/toggleLayer for full control.',
        '',
        '## Key Globe Layers (toggleLayer)',

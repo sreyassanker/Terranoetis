@@ -26,7 +26,6 @@ const PHASE_VERBS: Record<string, string[]> = {
   parsing: ['Parsing', 'Structuring', 'Formatting'],
   memory_recall: ['Recalling', 'Searching', 'Retrieving'],
   multimodal: ['Analyzing', 'Scanning', 'Inspecting'],
-  digital_twin: ['Analyzing', 'Modeling', 'Simulating'],
   cache_check: ['Checking', 'Scanning', 'Verifying'],
   streaming: ['Generating', 'Writing', 'Streaming'],
   planning: ['Planning', 'Designing', 'Scheduling'],
@@ -54,9 +53,6 @@ export function BrailleSpinner({ seed = 0, size = 'md' }: { seed?: number; size?
 const PHASE_LABEL: Record<string, string> = {
   classifying: 'Classifying intent',
   model_tier: 'Model tier',
-  digital_twin: 'Digital twin analysis',
-  digital_twin_complete: 'Digital twin analysis',
-  digital_twin_error: 'Digital twin analysis',
   cache_check: 'Checking cache',
   cache_hit: 'Cache hit',
   orchestrating: 'Orchestrating agents',
@@ -78,9 +74,6 @@ const PHASE_LABEL: Record<string, string> = {
 const PHASE_COLOR: Record<string, string> = {
   classifying: '#8b5cf6',
   model_tier: '#06b6d4',
-  digital_twin: '#a855f7',
-  digital_twin_complete: '#a855f7',
-  digital_twin_error: '#ef4444',
   cache_check: '#eab308',
   cache_hit: '#22c55e',
   orchestrating: '#f97316',
@@ -103,7 +96,6 @@ function phaseIcon(type: string): LucideIcon {
   switch (type) {
     case 'classifying': return ScanSearch;
     case 'model_tier': return Cpu;
-    case 'digital_twin': case 'digital_twin_complete': case 'digital_twin_error': return Brain;
     case 'cache_check': case 'memory_recall': return Database;
     case 'cache_hit': return Zap;
     case 'orchestrating': return Network;

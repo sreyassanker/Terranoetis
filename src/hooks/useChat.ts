@@ -295,7 +295,7 @@ export function useChat(
         const toRemove = entityList.filter((e: Record<string, unknown>) => {
           const props = e.properties as Record<string, unknown> | undefined;
           const layer = props?.layer;
-          return layer === 'digital_twin' || layer === 'heatmap' || layer === 'chart' || layer === 'geojson';
+          return layer === 'heatmap' || layer === 'chart' || layer === 'geojson';
         });
         for (const e of toRemove) {
           const coll = rawEntities as { remove(e: Record<string, unknown>): void };

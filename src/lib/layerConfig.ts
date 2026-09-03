@@ -16,33 +16,29 @@ export interface LayerGroup { id: string; label: string; icon: string; color: st
 /* ── Groups ── */
 export const LAYER_GROUPS: LayerGroup[] = [
   { id: 'seismic', label: 'Seismic', icon: '⬡', color: '#a31f1f' },
+  { id: 'volcanic', label: 'Volcanic', icon: '◬', color: '#c31b76' },
   { id: 'ocean', label: 'Ocean', icon: '◈', color: '#1ea947' },
   { id: 'argo', label: 'ARGO Floats', icon: '◈', color: '#0d7bbf' },
   { id: 'tides', label: 'Tides', icon: '◈', color: '#2596be' },
   { id: 'usgs_water', label: 'Water Quality', icon: '◈', color: '#2e86ab' },
-  { id: 'ports', label: 'World Ports', icon: '◈', color: '#1a6d8a' },
   { id: 'aviation', label: 'Aviation', icon: '◆', color: '#731eaf' },
   { id: 'satellite', label: 'Satellite', icon: '◇', color: '#b6a31d' },
   { id: 'weather', label: 'Weather', icon: '▣', color: '#1ca1bc' },
   { id: 'hazards', label: 'Hazards', icon: '◉', color: '#c31b76' },
   { id: 'space', label: 'Space', icon: '◎', color: '#46c91a' },
-  { id: 'geospatial', label: 'Geospatial', icon: '◰', color: '#2119d0' },
   { id: 'atmosphere', label: 'Atmosphere', icon: '◐', color: '#d75818' },
   { id: 'geology', label: 'Geology', icon: '▤', color: '#17de93' },
   { id: 'ecology', label: 'Ecology', icon: '▥', color: '#d415e5' },
   { id: 'cryosphere', label: 'Cryosphere', icon: '◒', color: '#beeb14' },
-  { id: 'advanced', label: 'Advanced', icon: '▦', color: '#1882ee' },
+  { id: 'energy', label: 'Energy', icon: '⌁', color: '#f4a261' },
+  { id: 'security', label: 'Security & Conflict', icon: '⊗', color: '#780000' },
+  { id: 'geospatial', label: 'Geospatial', icon: '◰', color: '#2119d0' },
+  { id: 'media', label: 'Media', icon: '◔', color: '#15c977' },
+  { id: 'infrastructure', label: 'Infrastructure', icon: '▦', color: '#1882ee' },
 ];
 
 export const LAYER_CATEGORIES: LayerCategory[] = [
   // ── 1. Maritime Data APIs ──
-  {
-    id: '1_world_port_index', label: 'World Port Index', symbol: '┆',
-    color: '#5daf18', motionType: 'wave', group: 'ports',
-    type: 'point', description: 'World Port Index — Maritime Data APIs',
-    dataSource: 'https://msi.nga.mil/',
-    sub: 'Maritime data',
-  },
   {
     id: 'ais_vessels', label: 'AIS Vessels', symbol: '━',
     color: '#0ea5e9', motionType: 'wave', group: 'ocean',
@@ -95,7 +91,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     sub: 'Aviation',
   },
   {
-    id: 'aircraft_hangar', label: '3D Aircraft Models', symbol: '✈',
+    id: 'aircraft_hangar', label: '3D Aircraft Models', symbol: '✪',
     color: '#60a5fa', motionType: 'glow', group: 'aviation',
     type: 'effect', description: 'Swap flight glyphs for real 3D aircraft models on close approach (self-contained glTF, no downloads)',
     dataSource: '',
@@ -444,49 +440,49 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   // ── 29. Volcanic Hazards & Ash ──
   {
     id: '29_tokyo_vaac', label: 'Tokyo VAAC', symbol: '⌱',
-    color: '#b40e84', motionType: 'orbit', group: 'aviation',
+    color: '#b40e84', motionType: 'orbit', group: 'volcanic',
     type: 'point', description: 'Tokyo VAAC — Volcanic Hazards & Ash',
     dataSource: 'https://ds.data.jma.go.jp/svd/vaac/data/',
     sub: 'Volcanic ash advisory',
   },
   {
     id: '29_anchorage_vaac', label: 'Anchorage VAAC', symbol: '⌲',
-    color: '#55bb0c', motionType: 'trail', group: 'aviation',
+    color: '#55bb0c', motionType: 'trail', group: 'volcanic',
     type: 'point', description: 'Anchorage VAAC — Volcanic Hazards & Ash',
     dataSource: 'https://www.weather.gov/vaac/',
     sub: 'Volcanic ash advisory',
   },
   {
     id: '29_washington_vaac', label: 'Washington VAAC', symbol: '⌳',
-    color: '#2132ac', motionType: 'dash', group: 'aviation',
+    color: '#2132ac', motionType: 'dash', group: 'volcanic',
     type: 'point', description: 'Washington VAAC — Volcanic Hazards & Ash',
     dataSource: 'https://www.nhc.noaa.gov/',
     sub: 'Volcanic ash advisory',
   },
   {
     id: '29_wovodat', label: 'WOVOdat', symbol: '⌴',
-    color: '#b33820', motionType: 'orbit', group: 'aviation',
+    color: '#b33820', motionType: 'orbit', group: 'volcanic',
     type: 'point', description: 'WOVOdat — Volcanic Hazards & Ash',
     dataSource: 'https://www.wovodat.org/',
     sub: 'Volcano observatory data',
   },
   {
     id: '29_nasa_so2_monitoring', label: 'NASA SO2 Monitoring', symbol: '⌵',
-    color: '#1fb966', motionType: 'trail', group: 'aviation',
+    color: '#1fb966', motionType: 'trail', group: 'volcanic',
     type: 'point', description: 'NASA SO2 Monitoring — Volcanic Hazards & Ash',
     dataSource: 'https://so2.gsfc.nasa.gov/',
     sub: 'Volcanic SO2 data',
   },
   {
     id: '29_noaa_so2_portal', label: 'NOAA SO2 Portal', symbol: '⌶',
-    color: '#971fbf', motionType: 'dash', group: 'aviation',
+    color: '#971fbf', motionType: 'dash', group: 'volcanic',
     type: 'point', description: 'NOAA SO2 Portal — Volcanic Hazards & Ash',
     dataSource: 'https://satepsanone.nesdis.noaa.gov/pub/OMI/OMISO2/',
     sub: 'Volcanic hazards',
   },
   {
     id: '29_volcano_discovery', label: 'Volcano Discovery', symbol: '⌷',
-    color: '#bfc61e', motionType: 'orbit', group: 'aviation',
+    color: '#bfc61e', motionType: 'orbit', group: 'volcanic',
     type: 'point', description: 'Volcano Discovery — Volcanic Hazards & Ash',
     dataSource: 'https://www.volcanodiscovery.com/',
     sub: 'Volcanic activity',
@@ -596,13 +592,6 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   // ── 48. (deleted) ──
   // ── 49. (deleted) ──
   // ── 50. Seafloor Mapping & Bathymetry ──
-  {
-    id: '50_emodnet_bathymetry_pt', label: 'EMODnet Bathymetry (Points)', symbol: '⏺',
-    color: '#1d26b6', motionType: 'float', group: 'bathymetry_pt',
-    type: 'point', description: 'EMODnet Bathymetry — Seafloor Mapping & Bathymetry',
-    dataSource: 'https://emodnet.ec.europa.eu/bathymetry',
-    sub: 'European bathymetry',
-  },
   {
     id: '50_gebco', label: 'GEBCO Grid', symbol: '⏾',
     color: '#1d86b6', motionType: 'float', group: 'ocean',
@@ -797,7 +786,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   },
   {
     id: 'aurora_oval', label: 'Polar Auroral Oval', symbol: '≿',
-    color: '#15e5b1', motionType: 'glow', group: 'atmosphere',
+    color: '#15e5b1', motionType: 'glow', group: 'space',
     type: 'point', description: 'NOAA Ovation aurora forecast',
     dataSource: '',
     sub: 'NOAA SWPC Ovation Model',
@@ -805,42 +794,42 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
 
   {
     id: 'smoke_dispersion', label: 'Smoke Dispersion', symbol: '⊁',
-    color: '#a6ee18', motionType: 'flicker', group: 'weather',
+    color: '#a6ee18', motionType: 'flicker', group: 'hazards',
     type: 'effect', description: 'Wind-driven plume from active fires',
     dataSource: '',
     sub: 'EONET active fire sources',
   },
   {
     id: 'wildfires', label: 'Wildfires', symbol: '⊂',
-    color: '#1b6af0', motionType: 'dash', group: 'weather',
+    color: '#1b6af0', motionType: 'dash', group: 'hazards',
     type: 'point', description: 'Active fire detection from EONET',
     dataSource: '',
     sub: 'EONET fire events',
   },
   {
     id: 'severe_storms', label: 'Severe Storms', symbol: '⊃',
-    color: '#d93744', motionType: 'wave', group: 'weather',
+    color: '#d93744', motionType: 'wave', group: 'hazards',
     type: 'point', description: 'Severe weather events from EONET',
     dataSource: '',
     sub: 'EONET storm events',
   },
   {
     id: 'volcanoes', label: 'Volcanoes', symbol: '⊄',
-    color: '#3adc5c', motionType: 'flicker', group: 'weather',
+    color: '#3adc5c', motionType: 'flicker', group: 'volcanic',
     type: 'point', description: 'Volcanic activity from EONET',
     dataSource: '',
     sub: 'EONET volcano events',
   },
   {
     id: 'dust', label: 'Dust Storms', symbol: '⊆',
-    color: '#e1c041', motionType: 'breathe', group: 'atmosphere',
+    color: '#e1c041', motionType: 'breathe', group: 'hazards',
     type: 'point', description: 'Dust storm events from EONET',
     dataSource: '',
     sub: 'EONET dust events',
   },
   {
     id: 'seaLakeIce', label: 'Icebergs & Sea Ice', symbol: '⊇',
-    color: '#199ca9', motionType: 'float', group: 'cryosphere',
+    color: '#199ca9', motionType: 'float', group: 'hazards',
     type: 'point', description: 'EONET sea and lake ice events',
     dataSource: '',
     sub: 'Antarctic iceberg calving & sea ice events',
@@ -868,31 +857,8 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     badge: 'KEY',
   },
   {
-    id: 'india_cctv', label: 'Live Webcams', symbol: '⊌',
-    color: '#15c977', motionType: 'orbit', group: 'advanced',
-    type: 'point', description: 'Open live public webcams worldwide',
-    dataSource: '',
-    badge: 'LIVE',
-    sub: 'Open live public webcams worldwide',
-  },
-  {
-    id: 'cctv_viewshed', label: 'Camera Viewsheds', symbol: '⊞',
-    color: '#22d3ee', motionType: 'glow', group: 'advanced',
-    type: 'effect', description: 'Estimated coverage cones for public cameras — where each camera reaches (poses estimated, labeled as such)',
-    dataSource: '',
-    sub: 'Estimated coverage volumes',
-  },
-  {
-    id: 'intel_feed', label: 'Intel Feed', symbol: '⊍',
-    color: '#b113d0', motionType: 'pulse', group: 'advanced',
-    type: 'panel', description: 'Real-time events from all sources',
-    dataSource: '',
-    badge: 'LIVE',
-    sub: 'Aggregated alert feed',
-  },
-  {
     id: 'live_media', label: 'Live Media', symbol: '▶',
-    color: '#ef4444', motionType: 'breathe', group: 'advanced',
+    color: '#ef4444', motionType: 'breathe', group: 'media',
     type: 'point', description: 'YouTube news videos auto-placed by geo extraction',
     dataSource: '',
     badge: 'LIVE',
@@ -900,7 +866,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   },
   {
     id: 'tomtom_traffic', label: 'Street Traffic', symbol: '⊖',
-    color: '#f97316', motionType: 'glow', group: 'advanced',
+    color: '#f97316', motionType: 'glow', group: 'infrastructure',
     type: 'point', description: 'Per-vehicle street-level traffic flow with congestion coloring (TomTom)',
     dataSource: 'https://developer.tomtom.com/traffic-apis',
     badge: 'KEY',
@@ -908,7 +874,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   },
   {
     id: 'radio_stations', label: 'World Radio', symbol: '≡',
-    color: '#22d3ee', motionType: 'pulse', group: 'advanced',
+    color: '#22d3ee', motionType: 'pulse', group: 'infrastructure',
     type: 'point', description: 'Geolocated world radio stations (Radio Browser API)',
     dataSource: 'https://www.radio-browser.info/',
     badge: 'LIVE',
@@ -916,7 +882,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   },
   {
     id: 'bikeshare', label: 'Bikeshare', symbol: '≣',
-    color: '#4ade80', motionType: 'pulse', group: 'advanced',
+    color: '#4ade80', motionType: 'pulse', group: 'infrastructure',
     type: 'point', description: 'Live bikeshare station availability (GBFS)',
     dataSource: 'https://gbfs.org/',
     badge: 'LIVE',
@@ -924,7 +890,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   },
   {
     id: 'detection_overlay', label: 'Detection Overlay', symbol: '⊛',
-    color: '#38bdf8', motionType: 'glow', group: 'advanced',
+    color: '#38bdf8', motionType: 'glow', group: 'media',
     type: 'effect', description: 'Screen-space bounding boxes + IDs on live entities (client-side)',
     dataSource: '',
     sub: 'Screen-space detection mesh',
@@ -938,7 +904,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   },
   {
     id: 'submarine_cables', label: 'Undersea Fiber Cables', symbol: '⊏',
-    color: '#1188de', motionType: 'orbit', group: 'advanced',
+    color: '#1188de', motionType: 'orbit', group: 'infrastructure',
     type: 'geojson', description: 'Global submarine cable network from Telegeography',
     dataSource: 'https://www.submarinecablemap.com/',
   },
@@ -951,7 +917,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   },
   {
     id: 'electricity_grid', label: 'Electricity Grid', symbol: '⊑',
-    color: '#28d229', motionType: 'radar', group: 'advanced',
+    color: '#28d229', motionType: 'radar', group: 'energy',
     type: 'point', description: 'Global electricity grid carbon intensity',
     dataSource: 'https://energydata.info/',
     sub: 'Energydata.info',
@@ -982,7 +948,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     dataSource: '',
   },
   {
-    id: 'sea_ice', label: 'Sea Ice', symbol: '⊖',
+    id: 'sea_ice', label: 'Sea Ice', symbol: '❄',
     color: '#91e333', motionType: 'float', group: 'cryosphere',
     type: 'tile', description: 'AMSR2 sea ice concentration from NASA GIBS',
     dataSource: '',
@@ -1006,7 +972,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     dataSource: '',
   },
   {
-    id: 'pressure', label: 'Pressure', symbol: '⊛',
+    id: 'pressure', label: 'Pressure', symbol: '⭘',
     color: '#bcae11', motionType: 'wave', group: 'weather',
     type: 'tile', description: 'GEOS pressure from NASA GIBS',
     dataSource: '',
@@ -1030,16 +996,16 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     dataSource: '',
   },
   {
-    id: 'dt_buildings', label: 'Digital Twin Buildings', symbol: '⊟',
+    id: 'dt_buildings', label: 'OSM Buildings', symbol: '⊟',
     color: '#3224bf', motionType: 'dash', group: 'geospatial',
-    type: '3dtiles', description: 'OSM buildings digital twin',
+    type: '3dtiles', description: 'OSM buildings 3D tiles',
     dataSource: '',
   },
 
   // ── NEW LAYERS: Energy & Resources (from Reference) ──
   {
     id: 'energy_chokepoints', label: 'Energy Chokepoints', symbol: '⧖',
-    color: '#e63946', motionType: 'pulse', group: 'geospatial',
+    color: '#e63946', motionType: 'pulse', group: 'energy',
     type: 'point', description: 'Critical maritime energy chokepoints (Strait of Hormuz, Malacca, Suez, etc.)',
     dataSource: 'https://www.eia.gov/',
     sub: 'EIA Chokepoint Data',
@@ -1047,93 +1013,35 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   },
   {
     id: 'energy_pipelines_oil', label: 'Oil Pipelines', symbol: '┃',
-    color: '#2d2d2d', motionType: 'dash', group: 'geospatial',
+    color: '#2d2d2d', motionType: 'dash', group: 'energy',
     type: 'geojson', description: 'Global oil pipeline network — flow directions and capacity',
     dataSource: 'https://www.eia.gov/',
     sub: 'EIA Pipeline Data',
   },
   {
-    id: 'energy_pipelines_gas', label: 'Gas Pipelines', symbol: '┃',
-    color: '#457b9d', motionType: 'dash', group: 'geospatial',
+    id: 'energy_pipelines_gas', label: 'Gas Pipelines', symbol: '╏',
+    color: '#457b9d', motionType: 'dash', group: 'energy',
     type: 'geojson', description: 'Global natural gas pipeline network — LNG and pipeline routes',
     dataSource: 'https://www.eia.gov/',
     sub: 'EIA Pipeline Data',
   },
   {
     id: 'energy_storage', label: 'Storage Facilities', symbol: '⬢',
-    color: '#6d6875', motionType: 'breathe', group: 'geospatial',
+    color: '#6d6875', motionType: 'breathe', group: 'energy',
     type: 'point', description: 'Oil and gas storage facilities — tank farms, LNG terminals',
     dataSource: 'https://www.eia.gov/',
     sub: 'EIA Storage Data',
   },
   {
-    id: 'spr_levels', label: 'Strategic Petroleum Reserve', symbol: '◼',
-    color: '#1d3557', motionType: 'glow', group: 'geospatial',
-    type: 'panel', description: 'US SPR levels and release schedules — strategic reserve tracking',
-    dataSource: 'https://www.energy.gov/',
-    sub: 'SPR Data',
-    badge: 'LIVE',
-  },
-  {
-    id: 'refinery_utilization', label: 'Refinery Utilization', symbol: '⊡',
-    color: '#e76f51', motionType: 'flicker', group: 'geospatial',
-    type: 'panel', description: 'US refinery inputs and utilization rates — crude processing capacity',
-    dataSource: 'https://www.eia.gov/',
-    sub: 'EIA Refinery Data',
-  },
-  {
     id: 'eu_gas_storage', label: 'EU Gas Storage', symbol: '◧',
-    color: '#264653', motionType: 'breathe', group: 'geospatial',
+    color: '#264653', motionType: 'breathe', group: 'energy',
     type: 'point', description: 'European gas storage fill levels by country — energy security indicator',
     dataSource: 'https://agsi.gie.eu/',
     sub: 'GIE AGSI Data',
   },
   {
-    id: 'electricity_prices', label: 'Electricity Prices', symbol: '⚡',
-    color: '#f4a261', motionType: 'glow', group: 'geospatial',
-    type: 'panel', description: 'European electricity spot prices by region — day-ahead market',
-    dataSource: 'https://transparency.entsoe.eu/',
-    sub: 'ENTSO-E Data',
-  },
-  {
-    id: 'electricity_mix', label: 'Electricity Generation Mix', symbol: '⏻',
-    color: '#2a9d8f', motionType: 'pulse', group: 'geospatial',
-    type: 'panel', description: 'Country electricity generation by fuel type — fossil, renewable, nuclear shares',
-    dataSource: 'https://ember-climate.org/',
-    sub: 'Ember Climate Data',
-  },
-  {
-    id: 'jodi_oil', label: 'JODI Oil Data', symbol: '▮',
-    color: '#3d405b', motionType: 'wave', group: 'geospatial',
-    type: 'panel', description: 'Joint Organisations Data Initiative — monthly oil supply/demand by country',
-    dataSource: 'https://www.jodidb.org/',
-    sub: 'JODI Oil',
-  },
-  {
-    id: 'jodi_gas', label: 'JODI Gas Data', symbol: '▮',
-    color: '#588157', motionType: 'wave', group: 'geospatial',
-    type: 'panel', description: 'Joint Organisations Data Initiative — monthly gas supply/demand by country',
-    dataSource: 'https://www.jodidb.org/',
-    sub: 'JODI Gas',
-  },
-  {
-    id: 'iea_oil_stocks', label: 'IEA Oil Stocks', symbol: '◫',
-    color: '#bc6c25', motionType: 'breathe', group: 'geospatial',
-    type: 'panel', description: 'IEA oil stock levels and days of cover — IEA obligation tracking',
-    dataSource: 'https://www.iea.org/',
-    sub: 'IEA Stocks',
-  },
-  {
-    id: 'energy_intelligence', label: 'Energy Intelligence', symbol: '◉',
-    color: '#9b2226', motionType: 'flicker', group: 'geospatial',
-    type: 'panel', description: 'Aggregated energy sector intelligence — supply disruptions, policy changes',
-    dataSource: 'Internal aggregation',
-    sub: 'Energy Intel Feed',
-    badge: 'LIVE',
-  },
-  {
-    id: 'fuel_shortages', label: 'Fuel Shortages', symbol: '⚠',
-    color: '#ae2012', motionType: 'pulse', group: 'geospatial',
+    id: 'fuel_shortages', label: 'Fuel Shortages', symbol: '⛽',
+    color: '#ae2012', motionType: 'pulse', group: 'energy',
     type: 'point', description: 'Reported fuel shortages and supply disruptions globally',
     dataSource: 'Multiple sources',
     sub: 'Fuel Shortage Alerts',
@@ -1142,30 +1050,15 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
 
   // ── NEW LAYERS: Risk & Security ──
   {
-    id: 'cii_risk_scores', label: 'Country Instability Index', symbol: '◈',
-    color: '#d62828', motionType: 'glow', group: 'geospatial',
-    type: 'panel', description: 'Country Instability Index — composite risk scoring for 190+ countries',
-    dataSource: 'Internal CII Model',
-    sub: 'CII Risk Scores',
-    badge: 'KEY',
-  },
-  {
     id: 'sanctions_pressure', label: 'Sanctions Pressure', symbol: '⊗',
-    color: '#780000', motionType: 'contract', group: 'geospatial',
+    color: '#780000', motionType: 'contract', group: 'security',
     type: 'point', description: 'Global sanctions regime — OFAC, EU, UN sanctions by country',
     dataSource: 'https://www.treasury.gov/',
     sub: 'OFAC/EU/UN Sanctions',
   },
   {
-    id: 'sanctions_counts', label: 'Sanctions Entity Counts', symbol: '⊗',
-    color: '#c1121f', motionType: 'flicker', group: 'geospatial',
-    type: 'panel', description: 'Number of sanctioned entities per country — sanctions density map',
-    dataSource: 'https://www.treasury.gov/',
-    sub: 'Sanctions Entity Data',
-  },
-  {
-    id: 'gpsjam', label: 'GPS Jamming', symbol: '⊞',
-    color: '#e85d04', motionType: 'radar', group: 'geospatial',
+    id: 'gpsjam', label: 'GPS Jamming', symbol: '⊠',
+    color: '#e85d04', motionType: 'radar', group: 'security',
     type: 'heatmap', description: 'GPS/GNSS jamming and spoofing events — aviation safety indicator',
     dataSource: 'https://gpsjam.org/',
     sub: 'GPS Jamming Data',
@@ -1173,7 +1066,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   },
   {
     id: 'military_bases', label: 'Military Bases', symbol: '▲',
-    color: '#555555', motionType: 'glow', group: 'geospatial',
+    color: '#555555', motionType: 'glow', group: 'security',
     type: 'point', description: 'Active military installations worldwide — bases, ports, airfields',
     dataSource: 'Open source intelligence',
     sub: 'Military Installations',
@@ -1182,7 +1075,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   // ── NEW LAYERS: Conflict & Geopolitics ──
   {
     id: 'ucdp_conflict', label: 'Armed Conflict Events', symbol: '⚔',
-    color: '#9d0208', motionType: 'pulse', group: 'geospatial',
+    color: '#9d0208', motionType: 'pulse', group: 'security',
     type: 'point', description: 'UCDP armed conflict events — battles, attacks, violence against civilians',
     dataSource: 'https://ucdp.uu.se/',
     sub: 'Uppsala Conflict Data Program',
@@ -1190,7 +1083,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   },
   {
     id: 'iran_events', label: 'Iran Regional Events', symbol: '◆',
-    color: '#370617', motionType: 'flicker', group: 'geospatial',
+    color: '#370617', motionType: 'flicker', group: 'security',
     type: 'point', description: 'Iran-focused geopolitical events — military, protests, nuclear',
     dataSource: 'Multiple OSINT sources',
     sub: 'Iran Intel Feed',
@@ -1198,112 +1091,24 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   },
   {
     id: 'oref_alerts', label: 'Israel OREF Alerts', symbol: '⚠',
-    color: '#dc2f02', motionType: 'pulse', group: 'geospatial',
+    color: '#dc2f02', motionType: 'pulse', group: 'security',
     type: 'point', description: 'Israel Home Front Command rocket alerts — real-time threat data',
     dataSource: 'https://www.oref.org.il/',
     sub: 'OREF Alert System',
     badge: 'LIVE',
   },
 
-  // ── NEW LAYERS: Climate & Environment ──
-  {
-    id: 'climate_anomalies', label: 'Climate Anomalies', symbol: '◐',
-    color: '#ff7b00', motionType: 'shimmer', group: 'atmosphere',
-    type: 'tile', description: 'Global temperature anomalies — departure from baseline average',
-    dataSource: 'https://www.ncdc.noaa.gov/',
-    sub: 'NOAA Climate Data',
-  },
-  {
-    id: 'co2_monitoring', label: 'CO2 Monitoring', symbol: '◑',
-    color: '#8ac926', motionType: 'breathe', group: 'atmosphere',
-    type: 'tile', description: 'Atmospheric CO2 concentration — Mauna Loa and global stations',
-    dataSource: 'https://gml.noaa.gov/',
-    sub: 'NOAA GML CO2',
-  },
-  {
-    id: 'ocean_ice', label: 'Ocean Ice Cover', symbol: '◒',
-    color: '#caf0f8', motionType: 'contract', group: 'cryosphere',
-    type: 'tile', description: 'Arctic and Antarctic sea ice extent — daily concentration maps',
-    dataSource: 'https://nsidc.org/',
-    sub: 'NSIDC Sea Ice',
-  },
-  {
-    id: 'climate_news', label: 'Climate News Feed', symbol: '☰',
-    color: '#52b788', motionType: 'float', group: 'geospatial',
-    type: 'panel', description: 'Aggregated climate change news and reports — policy, science, impacts',
-    dataSource: 'Multiple climate news sources',
-    sub: 'Climate News Aggregator',
-  },
-
-  // ── NEW LAYERS: Displacement & Migration ──
-  {
-    id: 'displacement', label: 'Population Displacement', symbol: '◍',
-    color: '#7209b7', motionType: 'wave', group: 'geospatial',
-    type: 'panel', description: 'UNHCR and IDMC displacement data — refugees, IDPs, returns',
-    dataSource: 'https://www.unhcr.org/',
-    sub: 'UNHCR/IDMC Displacement',
-    badge: 'KEY',
-  },
-
   // ── NEW LAYERS: Infrastructure & Resilience ──
   {
-    id: 'infra_outages', label: 'Infrastructure Outages', symbol: '⊘',
-    color: '#5a189a', motionType: 'flicker', group: 'geospatial',
+    id: 'infra_outages', label: 'Infrastructure Outages', symbol: '⧉',
+    color: '#5a189a', motionType: 'flicker', group: 'security',
     type: 'point', description: 'Internet and power infrastructure outages — network disruptions',
     dataSource: 'https://radar.cloudflare.com/',
     sub: 'Cloudflare Radar / Downdetector',
     badge: 'LIVE',
   },
-  {
-    id: 'resilience_ranking', label: 'Country Resilience', symbol: ' ◈',
-    color: '#3a0ca3', motionType: 'glow', group: 'geospatial',
-    type: 'panel', description: 'Country infrastructure resilience ranking — supply chain robustness',
-    dataSource: 'Internal resilience model',
-    sub: 'Resilience Index',
-  },
-  {
-    id: 'customs_trade', label: 'Customs & Trade Data', symbol: '▣',
-    color: '#4361ee', motionType: 'wave', group: 'geospatial',
-    type: 'panel', description: 'International customs and trade flow data — import/export volumes',
-    dataSource: 'https://comtradeapi.un.org/',
-    sub: 'UN Comtrade',
-  },
 
   // ── NEW LAYERS: Markets & Economy ──
-  {
-    id: 'macro_signals', label: 'Macro Economic Signals', symbol: '◈',
-    color: '#4895ef', motionType: 'pulse', group: 'geospatial',
-    type: 'panel', description: 'Recession probability, yield curve, unemployment claims — macro regime detection',
-    dataSource: 'https://fred.stlouisfed.org/',
-    sub: 'FRED Economic Data',
-    badge: 'KEY',
-  },
-  {
-    id: 'prediction_markets', label: 'Prediction Markets', symbol: '◱',
-    color: '#4cc9f0', motionType: 'float', group: 'geospatial',
-    type: 'panel', description: 'Polymarket and Metaculus prediction odds — geopolitical and economic events',
-    dataSource: 'https://polymarket.com/',
-    sub: 'Polymarket/Metaculus',
-  },
-  {
-    id: 'gold_data', label: 'Gold Markets', symbol: '◆',
-    color: '#ffd60a', motionType: 'glow', group: 'geospatial',
-    type: 'panel', description: 'Gold price, central bank reserves, ETF flows — safe haven indicator',
-    dataSource: 'https://www.gold.org/',
-    sub: 'World Gold Council',
-  },
-
-  // ── NEW LAYERS: Cyber ──
-  {
-    id: 'cyber_threats', label: 'Cyber Threat Intelligence', symbol: '⊘',
-    color: '#7209b7', motionType: 'radar', group: 'geospatial',
-    type: 'panel', description: 'Aggregated cyber threat indicators — malware, phishing, DDoS by region',
-    dataSource: 'https://otx.alienvault.com/',
-    sub: 'AlienVault OTX',
-    badge: 'LIVE',
-  },
-
-  // ── NEW LAYERS: Health ──
   {
     id: 'air_quality_health', label: 'Health Air Quality', symbol: '◐',
     color: '#06d6a0', motionType: 'shimmer', group: 'atmosphere',
@@ -1338,7 +1143,6 @@ export const LEGACY_DEFAULTS: Record<string, { on?: boolean; badge?: string; sub
   flight_tracks: { sub: 'ADSB.lol Live' },
   space_debris: { sub: 'CelesTrak GP (1500+ objects)' },
   ais_vessels: { badge: 'KEY', sub: 'AISStream Real-Time' },
-  intel_feed: { badge: 'LIVE', sub: 'Aggregated alert feed' },
   live_media: { badge: 'LIVE', sub: 'YouTube news videos', on: false },
   lightning_strikes: { badge: 'LIVE', sub: 'Real-Time Lightning' },
   aurora_oval: { opacity: 0.8, sub: 'NOAA Ovation Forecast' },
@@ -1351,12 +1155,10 @@ export const LEGACY_DEFAULTS: Record<string, { on?: boolean; badge?: string; sub
   heatmap: { opacity: 0.7 },
   airspaces: { sub: 'OpenAIP Airspace' },
   submarine_cables: { sub: 'Submarine Cable Map' },
-  floods: { sub: 'EONET flood events' },
-  landslides: { sub: 'NASA landslide reports' },
   seaLakeIce: { sub: 'EONET sea ice events' },
   satnogs_db: { badge: 'LIVE', sub: 'SatNOGS transmitter frequencies', on: false },
   ucs_satellite_db: { badge: 'KEY', sub: 'UCS satellite metadata catalog', on: false },
-  ocean_currents: { badge: 'LIVE', sub: 'Open-Meteo surface currents' },
+  '50_ocean_currents': { badge: 'LIVE', sub: 'Open-Meteo surface currents' },
 };
 
 

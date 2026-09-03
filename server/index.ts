@@ -27,6 +27,8 @@ import {
 } from './ai-patterns/patternStore';
 import { summarizeToolResult } from './ai-patterns/summarizeTool';
 import { API_METADATA, getCategories } from './apiMetadata';
+import { COUNTRY_CENTROIDS } from './data/countryCentroids';
+import { WHO_GEO } from './data/whoGeo';
 import {
   CommandParser, MaterializedViewCache, IntentRouter, TaskPlanner,
   ToolRegistry, buildAgentPrompt, ToolCallParser,
@@ -116,7 +118,7 @@ import { login, authGuard, sseAuthGuard, ensureDefaultAdmin, requireRole, devAut
 import { perUserRateLimiter, perIpRateLimiter } from './middleware/rateLimiter';
 import { requireOwnership } from './middleware/tenantIsolation';
 import { auditLog } from './middleware/audit';
-import { validate, askSchema, sandboxExecuteSchema, chatCreateSchema, feedbackSchema, monitorRuleSchema, digitalTwinSchema } from './middleware/validate';
+import { validate, askSchema, sandboxExecuteSchema, chatCreateSchema, feedbackSchema, monitorRuleSchema } from './middleware/validate';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { logger, requestLoggerMiddleware, startMemoryLogging, stopMemoryLogging } from './observability/logger';
 import { metricsMiddleware, getMetrics, getMetricsContentType, activeSseConnections, sandboxExecutionsTotal, dbQueryDuration, cacheHitRate, omninetCallsTotal, toolExecutionsTotal, toolGenerationsTotal } from './observability/metrics';
@@ -542,7 +544,7 @@ function registerDefaultTools() {
     // ── Navigation ──
     { name:'fly_command', category:'navigation', description:'Fly the globe camera to any location', exampleQueries:['fly to tokyo','go to paris','show location'], schema:{type:'command'} },
     { name:'toggle_layer_command', category:'navigation', description:'Show or hide any data layer on the globe', exampleQueries:['show earthquakes','enable flights'], schema:{type:'command'} },
-    { name:'open_panel', category:'navigation', description:'Open, close, or toggle any UI panel in the app. Use this to open tools, panels, or views. Panel IDs: analytics-workbench, satellite-tracker, aviation-tracker, satellite-imagery, land-cover, intelligence (pulse), intel-feed, cognitive-dashboard, tool-workbench, memory-explorer, settings, study-area, api-vault, command-palette, scenario-gallery, scenario-editor, cinematic-director, spatial-sketch, performance, timeline, measure, time-slider, admin, iss, digital-twin, ai-chat.', exampleQueries:['open analytics workbench','show satellite tracker','open pulse intelligence','close settings','open scenario gallery','toggle timeline'], schema:{type:'command',params:{panelId:'panel ID to open/close/toggle',desired:'optional: true to open, false to close, omit to toggle'}} },
+    { name:'open_panel', category:'navigation', description:'Open, close, or toggle any UI panel in the app. Use this to open tools, panels, or views. Panel IDs: analytics-workbench, satellite-tracker, aviation-tracker, satellite-imagery, land-cover, intelligence (pulse), intel-feed, cognitive-dashboard, tool-workbench, memory-explorer, settings, study-area, api-vault, command-palette, scenario-gallery, scenario-editor, cinematic-director, spatial-sketch, performance, timeline, measure, time-slider, admin, iss, ai-chat.', exampleQueries:['open analytics workbench','show satellite tracker','open pulse intelligence','close settings','open scenario gallery','toggle timeline'], schema:{type:'command',params:{panelId:'panel ID to open/close/toggle',desired:'optional: true to open, false to close, omit to toggle'}} },
     { name:'assess_and_email', category:'navigation', description:'Run a FULL disaster assessment for a region (earthquakes, storms, floods, wildfires, air quality, marine) and email the HTML report. Requires a region name + bounding box (latMin/latMax/lonMin/lonMax) + optional emailTo. Use when the user asks to "assess" a region or "email a report".', exampleQueries:['full disaster assessment of the Bay of Bengal and email me a report','assess the east coast and send report','disaster assessment report'], schema:{type:'command',params:{regionName:'region name',latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude',emailTo:'optional recipient email'}} },
 
     // ── Earth Observation / Foundation Models ──
@@ -596,7 +598,6 @@ function registerDefaultTools() {
     { name:'gdelt_events', category:'osint', description:'GDELT global event database — news events by location and date range', exampleQueries:['gdelt','global events','news events','world events','media events'], schema:{type:'api',endpoint:'/api/gdelt',method:'GET',params:{lat:'latitude',lon:'longitude',startDate:'ISO start date',endDate:'ISO end date'}} },
     { name:'reliefweb', category:'osint', description:'ReliefWeb disaster reports and humanitarian updates', exampleQueries:['reliefweb','disaster reports','humanitarian','relief operations','disaster response'], schema:{type:'api',endpoint:'/api/reliefweb',method:'GET',params:{limit:'max results',country:'country filter',disaster_type:'disaster type filter'}} },
     { name:'cyber_threats_otx', category:'osint', description:'AlienVault OTX threat intelligence pulses — latest cyber threat indicators', exampleQueries:['cyber threats','threat intelligence','otx','malware indicators','cyber security'], schema:{type:'api',endpoint:'/api/otx',method:'GET',params:{section:'OTX section',limit:'max results'}} },
-    { name:'displacement_data', category:'osint', description:'UNHCR displacement data — refugees and internally displaced persons by year', exampleQueries:['displacement','refugees','idp','unhcr','displaced persons','forced migration'], schema:{type:'api',endpoint:'/api/displacement',method:'GET',params:{year:'year filter'}} },
 
     // ── Unified RAG Search ──
     { name:'search_all', category:'general', description:'Unified natural-language search across ALL geospatial databases (earthquakes, weather, hazards, aviation, maritime, space, EO, osint). Accepts any question and returns the most relevant data. Use this when you are unsure which specific tool to call, or when the query spans multiple domains.', exampleQueries:['what is happening near japan','check all threats near tokyo','find everything about this location','analyze region','show me what is important'], schema:{type:'api',endpoint:'/api/agent/search-all',method:'POST',params:{query:'natural language query',lat:'latitude for location context',lon:'longitude for location context'},outputFormat:'JSON'} },
@@ -2423,14 +2424,10 @@ app.get('/api/flights/all', async (req: express.Request, res: express.Response) 
 
 // ── Military flights (OpenSky, filtered by callsign pattern) ──────────
 const MILITARY_CALLSIGN_PATTERNS = [
-  /^RCH\d*$/i, /^NAF\d*$/i, /^GAF\d*$/i, /^RAF\d*$/i, /^IAF\d*$/i,
-  /^PLF\d*$/i, /^CFC\d*$/i, /^BKA\d*$/i, /^DUCK\d*$/i, /^SNAKE\d*$/i,
-  /^VIPR\d*$/i, /^SNDL\d*$/i, /^MAGIC\d*$/i, /^DEATH\d*$/i,
-  /^HAWG\d*$/i, /^RAVEN\d*$/i, /^STING\d*$/i, /^VIPER\d*$/i,
-  /^JEDI\d*$/i, /^SABER\d*$/i, /^STEEL\d*$/i, /^GORilla\d*$/i,
-  /^UAF\d*$/i, /^RMAF\d*$/i, /^USAF\d*$/i, /^JASDF\d*$/i,
-  /^AAC\d*$/i, /^RTAF\d*$/i, /^ROCAF\d*$/i, /^PAF\d*$/i,
-  /^FNF\d*$/i, /^KAF\d*$/i, /^ETAF\d*$/i,
+  /^RCH\d*$/i, /^GAF\d*$/i, /^PLF\d*$/i, /^NAF\d*$/i, /^RAF\d*$/i,
+  /^IAF\d*$/i, /^CFC\d*$/i, /^UAF\d*$/i, /^RMAF\d*$/i, /^JASDF\d*$/i,
+  /^AAC\d*$/i, /^RTAF\d*$/i, /^ROCAF\d*$/i, /^PAF\d*$/i, /^FNF\d*$/i,
+  /^KAF\d*$/i, /^ETAF\d*$/i, /^VALOR\d*$/i, /^DUKE\d*$/i,
 ];
 
 app.get('/api/flights/military', async (_req: express.Request, res: express.Response) => {
@@ -5522,26 +5519,6 @@ app.get('/api/space-weather/donki', async (req: express.Request, res: express.Re
 // ── NSIDC Sea Ice Extent ────────────────────────────────────────
 
 // ── UNHCR Displacement Data ─────────────────────────────────────
-app.get('/api/displacement', async (req: express.Request, res: express.Response) => {
-  try {
-    const { year = new Date().getFullYear() } = req.query;
-
-    const cacheKey = `displacement_${year}`;
-    const cached = cache.get(cacheKey);
-    if (cached) return res.json(cached);
-
-    const resp = await fetch(`https://api.unhcr.org/population/v1/per-country/?year=${year}&limit=200`, {
-      headers: { 'Accept': 'application/json' },
-    });
-    if (!resp.ok) return res.status(resp.status).json({ error: `UNHCR ${resp.status}` });
-    const data = await resp.json();
-    cache.set(cacheKey, data, 86400);
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
-});
-
 // ── Polymarket Prediction Markets ───────────────────────────────
 app.get('/api/prediction-markets', async (req: express.Request, res: express.Response) => {
   try {
@@ -6071,46 +6048,7 @@ async function fetchUsgsWaterQuality(): Promise<any[]> {
   } catch (e) { logger.warn({ err: e }, 'USGS water quality fetch failed'); return []; }
 }
 
-// WORLD PORTS: Static dataset (~800 major ports)
-async function fetchWorldPorts(): Promise<any[]> {
-  try {
-    // Fetch real port data from UNECE UN/LOCODE database (public, PDDL license)
-    const resp = await fetch(
-      'https://www.freightutils.com/api/unlocode?function=port&limit=500',
-      { signal: AbortSignal.timeout(15000) },
-    );
-    if (!resp.ok) throw new Error(`UN/LOCODE API returned ${resp.status}`);
-    const body = await resp.json() as any;
-    const locations = body?.data ?? body?.locations ?? [];
-    if (!Array.isArray(locations) || locations.length === 0) throw new Error('No port data');
 
-    return locations
-      .filter((p: any) => {
-        const lat = parseFloat(p.latitude ?? p.lat);
-        const lon = parseFloat(p.longitude ?? p.lon ?? p.lng);
-        return Number.isFinite(lat) && Number.isFinite(lon);
-      })
-      .map((p: any) => {
-        const lat = parseFloat(p.latitude ?? p.lat);
-        const lon = parseFloat(p.longitude ?? p.lon ?? p.lng);
-        return {
-          id: p.code ?? p.unlocode ?? p.id,
-          name: p.name ?? p.port_name ?? 'Unknown Port',
-          country: p.country_name ?? p.country ?? '',
-          lat: +lat.toFixed(4),
-          lon: +lon.toFixed(4),
-          type: 'Seaport',
-          value: 1,
-          magnitude: 0.5,
-          source: 'UNECE UN/LOCODE',
-          timestamp: Date.now(),
-        };
-      });
-  } catch (e) {
-    logger.warn({ err: e }, 'UN/LOCODE port fetch failed');
-    return [];
-  }
-}
 
 // SEISMIC: USGS Earthquakes (real-time) — uses shared cachedFetch to deduplicate with /api/earthquakes
 async function fetchEarthquakes(): Promise<any[]> {
@@ -7158,11 +7096,10 @@ const GROUP_DATA_SOURCES: Record<string, () => Promise<any[]>> = {
   argo: () => cachedFetchGroup('argo_floats', fetchArgoFloats, 3600),
   tides: () => cachedFetchGroup('noaa_tides', fetchNoaaTides, 1800),
   usgs_water: () => cachedFetchGroup('usgs_water_q', fetchUsgsWaterQuality, 7200),
-  ports: () => cachedFetchGroup('world_ports', fetchWorldPorts, 86400),
   geospatial: () => cachedFetchGroup('osm_pois', fetchOverpassPois, 3600),
-  advanced: () => cachedFetchGroup('hdx_datasets', fetchHdxDatasets, 7200),
+  energy: () => cachedFetchGroup('osm_pois', fetchOverpassPois, 3600),
+  security: () => cachedFetchGroup('osm_pois', fetchOverpassPois, 3600),
   satellite: () => cachedFetchGroup('celestrak_sats', fetchSatellites, 3600),
-  bathymetry_pt: async () => [],
   aviation: () => cachedFetchGroup('airports_data', fetchAirports, 86400),
 };
 
@@ -7919,41 +7856,6 @@ app.get('/api/agent/geocode', async (req: express.Request, res: express.Response
   res.json({ found: false, error: 'Location not found' });
 });
 
-// ── Digital Twin Analysis Endpoint ─────────────────────────────
-import { analyzeDigitalTwin } from './digitalTwin/orchestrator';
-import { COUNTRY_CENTROIDS } from './data/countryCentroids';
-import { WHO_GEO } from './data/whoGeo';
-
-app.post('/api/digital-twin/analyze', authGuard, validate(digitalTwinSchema), async (req: express.Request, res: express.Response) => {
-  const { message, lat, lon, locationName, radiusKm } = req.body;
-  try {
-    // Geocode if no coordinates provided
-    let location = { lat: lat || 0, lon: lon || 0, label: locationName || '' };
-    if (!lat || !lon) {
-      const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
-      const geo = await IntentRouter.geocode(message, apiKey);
-      if (geo?.lat && geo?.lon) {
-        location = { lat: geo.lat, lon: geo.lon, label: locationName || message.split(' ').slice(-2).join(' ') };
-      }
-    }
-
-    const result = await analyzeDigitalTwin(message, location, radiusKm || 30);
-    res.json({
-      title: result.analysis.title,
-      summary: result.text,
-      riskLevel: result.analysis.riskLevel,
-      affectedAreaKm2: result.analysis.affectedAreaKm2,
-      affectedPopulation: result.analysis.affectedPopulation,
-      commands: result.commands,
-      panel: result.panel,
-      infrastructure: result.analysis.affectedInfrastructure.slice(0, 20),
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: `Digital twin analysis failed: ${msg}` });
-  }
-});
-
 // ── Direct Gemini fallback ─────────────────────────────────────
 // Used when the Antigravity "interactions" API is unavailable (quota, 404, etc).
 // Streams nothing — returns the full text once Gemini completes. Keeps the
@@ -8557,62 +8459,6 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       // Mixed query: commands already emitted above. Continue to
       // analytical/model/cognition/LLM for the real answer. The later
       // output event will include the full result.
-    }
-
-    // Step 1.25: Digital Twin — run analysis if intent is digital_twin.
-    // For multi-city queries ("Mumbai or San Francisco"), extract all
-    // named locations and run the scenario for each, then compare.
-    if (intent.type === 'digital_twin') {
-      sendEvent('step', { stepType: 'digital_twin', text: 'Running digital twin analysis...', status: 'completed' });
-      try {
-        // Extract all named locations from the message
-        const dtLocations: Array<{ lat: number; lon: number; label: string }> = [];
-        if (intent.location) dtLocations.push({ lat: intent.location.lat, lon: intent.location.lon, label: intent.location.label || 'Location' });
-        // Check for "or" / "vs" separators that indicate multiple cities
-        const geoApiKey = effectiveGeminiKey || '';
-        if (/ or | vs /i.test(message)) {
-          const parts = message.split(/\b(or|vs|versus)\b/i).map((s: string) => s.trim()).filter(Boolean);
-          for (const part of parts) {
-            const geo = await IntentRouter.geocode(part, geoApiKey);
-            if (geo?.lat && geo?.lon) {
-              const dup = dtLocations.some(l => Math.abs(l.lat - geo.lat) < 1 && Math.abs(l.lon - geo.lon) < 1);
-              if (!dup) dtLocations.push({ lat: geo.lat, lon: geo.lon, label: geo.label });
-            }
-          }
-        } else if (!intent.location) {
-          const geo = await IntentRouter.geocode(message, geoApiKey);
-          if (geo?.lat && geo?.lon) dtLocations.push({ lat: geo.lat, lon: geo.lon, label: geo.label });
-        }
-
-        if (dtLocations.length > 0) {
-          const dtResults: Array<{ label: string; text: string; commands: Array<Record<string, unknown>>; panel?: unknown }> = [];
-          for (const dtLoc of dtLocations) {
-            const dtResult = await Promise.race([
-              analyzeDigitalTwin(message, dtLoc, 30),
-              new Promise<null>((resolve) => setTimeout(() => resolve(null), 60000)),
-            ]);
-            if (dtResult) {
-              dtResults.push({ label: dtLoc.label, text: dtResult.text, commands: dtResult.commands, panel: dtResult.panel });
-            }
-          }
-          if (dtResults.length > 0) {
-            const allCommands = dtResults.flatMap(r => r.commands);
-            const combined = dtResults.length > 1
-              ? `## Multi-city comparison\n\n` + dtResults.map(r => `### ${r.label}\n\n${r.text}`).join('\n\n')
-              : dtResults[0].text;
-            if (allCommands.length > 0) sendEvent('commands', allCommands);
-            if (dtResults[0]?.panel) sendEvent('panel', dtResults[0].panel);
-            sendEvent('output', { text: combined, modelTier: 'flash', intentType: 'digital_twin', commands: allCommands });
-            sendEvent('done', { type: 'done' });
-            cleanup();
-            res.end();
-            return;
-          }
-        }
-      } catch (err) {
-        logger.warn({ err }, 'Digital twin analysis failed, falling through');
-        sendEvent('step', { stepType: 'digital_twin_error', text: 'Digital twin analysis failed — falling back to agent', status: 'completed' });
-      }
     }
 
     // Step 1.3: Panel command — deterministic god-eye control. Opens/closes/

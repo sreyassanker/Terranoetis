@@ -3,7 +3,7 @@
  * only exports the component (keeps react-refresh fast-refresh happy).
  */
 
-export type FirstRunMission = 'live-contacts' | 'compute-demo' | 'environmental';
+export type FirstRunMission = 'live-contacts' | 'environmental';
 
 const STORAGE_KEY = 'terranoetis.firstRun.v1';
 

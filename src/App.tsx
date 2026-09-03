@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Zap, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2, FileDown, Layers, Rocket } from 'lucide-react';
+import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Crosshair, Network, Bot, BarChart3, Share2, Key, Wrench, Save, Cog, Flame, Clapperboard, Film, Pencil, Navigation2, Satellite, Timer, RefreshCw, History, Plus, Upload, AlertTriangle, ClipboardList, CheckCircle, Loader, XCircle, Hourglass, MessageCircle, ChevronDown, ChevronRight, Package, Mic, Square, Send, Paperclip, Image, FileSpreadsheet, Volume2, Link, Grid, Circle, DollarSign, Target, ThumbsUp, ThumbsDown, Database, Radio, MapPin, Globe, Newspaper, Moon, Mountain, X, ChevronLeft, Ruler, Clock, Play, Pause, SkipBack, Thermometer, Shield, Plane, FlaskConical, RotateCcw, Trash2, FileDown, Layers, Rocket } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
@@ -28,7 +28,7 @@ import {
   flyToStudyAreaTopDown, filterDataEntitiesByStudyArea, updateStudyAreaStyle,
   setStudyAreaActive, computeStudyAreaBbox, restoreHiddenEntities, getStudyAreaOuterRings,
 } from '@/rendering/studyArea';
-import { addBaseImagery, applyTerrainProvider, crossfadeImagery } from '@/viewer/viewer.config';
+import { addBaseImagery, applyTerrainProvider, replaceBaseImagery } from '@/viewer/viewer.config';
 import { cinematicFlyTo, createEntityTracker, type TrackEntityType } from '@/viewer/camera.controller';
 import { addEarthquakeEntity, type UsgsFeature } from '@/rendering/earthquakes';
 import { loadTectonicPlates } from '@/rendering/tectonic';
@@ -82,6 +82,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { createRenderScheduler } from '@/lib/batchScheduler';
 import { createUnifiedTimer } from '@/lib/unifiedTimer'; // P0 perf: unified timer
 import { SensorStyles, SENSOR_STYLES, type SensorStyleId } from '@/rendering/sensorStyles';
+import SensorStyleWidget from '@/components/SensorStyleWidget';
 import { TomTomTrafficLayer } from '@/rendering/tomtomTraffic';
 import { FirstRunCard } from '@/components/FirstRunCard';
 import { isFirstRun, markFirstRunDone, type FirstRunMission } from '@/lib/firstRun';
@@ -131,7 +132,6 @@ import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, Mod
 
 const LazyAviationTrackerPanel = lazy(() => import('@/components/prithvi/AviationTrackerPanel').then(m => ({ default: m.AviationTrackerPanel })));
 const LazyChatHistoryPanel = lazy(() => import('@/components/chat/ChatHistoryPanel').then(m => ({ default: m.ChatHistoryPanel })));
-const LazyDigitalTwinPanel = lazy(() => import('@/components/DigitalTwinPanel').then(m => ({ default: m.DigitalTwinPanel })));
 const LazyForkPanel = lazy(() => import('@/components/ForkPanel').then(m => ({ default: m.ForkPanel })));
 const LazyMarketIntelPanel = lazy(() => import('@/components/MarketIntelPanel').then(m => ({ default: m.MarketIntelPanel })));
 const LazyIssLivePanel = lazy(() => import('@/components/IssLivePanel').then(m => ({ default: m.IssLivePanel })));
@@ -1257,7 +1257,6 @@ export default function App() {
   const [showRadioTuner, setShowRadioTuner] = useState(false);
   const [showDuckdbAnalytics, setShowDuckdbAnalytics] = useState(false);
   const [analyticalNeedsTwoPoints, setAnalyticalNeedsTwoPoints] = useState(false);
-  const [demoRequest, setDemoRequest] = useState<{ toolId: number; key: number } | null>(null);
   const [sensorStyle, setSensorStyle] = useState<SensorStyleId>('normal');
   const sensorStylesRef = useRef<SensorStyles | null>(null);
   const tomtomTrafficRef = useRef<TomTomTrafficLayer | null>(null);
@@ -1412,40 +1411,6 @@ export default function App() {
     }
   }, [kaggleOverlay]);
 
-  const [digitalTwinPanel, setDigitalTwinPanel] = useState<null | {
-    stats: { label: string; value: string; unit: string; icon: string }[];
-    charts: { type: 'area' | 'bar' | 'line' | 'pie' | 'radar'; title: string; data: Record<string, unknown>[]; keys: { dataKey: string; color: string; name: string }[] }[];
-    table: { title: string; columns: string[]; rows: string[][] };
-    recommendations: string[];
-  }>(null);
-  const [digitalTwinLoading, setDigitalTwinLoading] = useState(false);
-  const openDigitalTwin = useCallback(async () => {
-    const v = viewerRef.current;
-    if (!v) return;
-    setDigitalTwinLoading(true);
-    try {
-      const cam = v.camera.positionCartographic;
-      const lat = Cesium.Math.toDegrees(cam.latitude);
-      const lon = Cesium.Math.toDegrees(cam.longitude);
-      const resp = await fetch('/api/digital-twin/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ message: 'Analyze the current view location', lat, lon, locationName: 'Current View', radiusKm: 30 }),
-      });
-      if (!resp.ok) throw new Error(`Digital twin analysis failed (${resp.status})`);
-      const data = await resp.json();
-      if (data?.panel) {
-        setDigitalTwinPanel(data.panel as any);
-        focusPanel('digital-twin');
-      } else {
-        showNotification('No digital twin data returned for this location', 'warning');
-      }
-    } catch (e) {
-      showNotification(`Digital twin failed: ${e instanceof Error ? e.message : String(e)}`, 'warning');
-    } finally {
-      setDigitalTwinLoading(false);
-    }
-  }, []);
   // Panel z-index stacking manager
   const [panelZStack, setPanelZStack] = useState<Record<string, number>>({});
   const panelZCounter = useRef(999);
@@ -1950,7 +1915,7 @@ export default function App() {
       'aurora_oval', 'dust', 'co_index', 'so2_index', 'temp_anomaly',
       'volcanoes', 'floods', 'seaLakeIce',
       'disaster_alerts', 'landslides', 'flood_extent', 'disaster_near_me',
-      'india_cctv', 'intel_feed', 'live_media', 'electricity_grid',
+      'live_media', 'electricity_grid',
       'population_impact', 'dt_buildings',
       'animal_migrations', 'land_cover',
       'nasa_gibs', 'night_lights', 'aerosol_index', 'dust_score',
@@ -2101,7 +2066,7 @@ export default function App() {
     // Gracefully degrades to standard imagery + terrain if the Ion asset is
     // unreachable — the app never breaks.
     photorealGlobeRef.current = new PhotorealisticGlobe(v);
-    void photorealGlobeRef.current.enable().then(ok => setPhotoreal(ok));
+    // Not auto-enabled — user clicks the Photo chip in the sidebar to turn it on.
     // Cinematic camera engine — orbit/pan/tilt/rotate/route dolly.
     cinematicCameraRef.current = new CinematicCamera(v);
     oracleChainRef.current = new OracleChainRenderer(v);
@@ -2544,7 +2509,7 @@ export default function App() {
         syncWeatherCardPositions();
         unifiedTimerRef.current.register('refresh-live', () => { void refreshLiveData(v); }, 60000);
         // Slow-refresh groups (ocean, geology, space — data changes hourly+)
-        unifiedTimerRef.current.register('refresh-slow', () => { void refreshGenericLayers(v, ['geology', 'space', 'ocean', 'argo', 'tides', 'usgs_water', 'ports']); }, 300000);
+        unifiedTimerRef.current.register('refresh-slow', () => { void refreshGenericLayers(v, ['geology', 'space', 'ocean', 'argo', 'tides', 'usgs_water']); }, 300000);
         // Re-clip data layers against any active fork domes after live refresh
         // so newly streamed entities respect dome cropping automatically.
         unifiedTimerRef.current.register('fork-recrop', () => { forkRendererRef.current?.reapplyCrop(); }, 5000);
@@ -2552,7 +2517,7 @@ export default function App() {
         // Pre-warm server cache for slow groups so first toggle is instant
         const warmGroupLayers: Record<string, string> = {
           ocean: '42_ndbc_buoy_data', argo: '31_argo_floats', tides: '31_noaa_tides_currents',
-          usgs_water: '27_usgs_nawqa', ports: '1_world_port_index',
+          usgs_water: '27_usgs_nawqa',
           geology: '5_usgs_mineral_deposits', space: '6_celestrak_gp_api',
         };
         Promise.all(Object.entries(warmGroupLayers).map(([, lid]) => {
@@ -4336,33 +4301,73 @@ export default function App() {
   const setImagery = useCallback((type: string) => {
     const v = viewerRef.current;
     if (!v) return;
-    setActiveImagery(type);
-    try {
-      if (type === 'terrain') {
-        imageryGenRef.current += 1;
-        const gen = imageryGenRef.current;
-        void (async () => {
-          const enabled = await applyTerrainProvider(v, cesiumIonToken);
-          if (gen !== imageryGenRef.current) return;
-          crossfadeImagery(v, 'terrain');
-          showNotification(
-            enabled ? '3D terrain enabled' : 'Terrain needs a Cesium ion token',
-            enabled ? 'success' : 'warning',
-          );
-          throttledRender(v);
-        })();
-        return;
+    const photo = photorealGlobeRef.current;
+
+    // ── PHOTOREAL: tileset on top of current base imagery (fills tile gaps) ──
+    if (type === 'photoreal') {
+      if (!photo) return;
+      if (photo.isPhotoreal) {
+        photo.disable();
+        setPhotoreal(false);
+        setActiveImagery('satellite');
+        replaceBaseImagery(v, 'satellite');
+        showNotification('Satellite imagery restored', 'success');
+      } else {
+        setActiveImagery('photoreal');
+        void photo.enable().then(ok => {
+          setPhotoreal(ok);
+          if (!ok) {
+            setActiveImagery('satellite');
+            replaceBaseImagery(v, 'satellite');
+          }
+        });
       }
-      const mapType = type === 'satellite'
-        ? 'satellite'
-        : type === 'dark'
-          ? 'dark'
-          : 'earth';
-      crossfadeImagery(v, mapType);
-    } catch (e) {
-      console.error('Imagery error:', e);
+      return;
     }
-  }, [cesiumIonToken]);
+
+    // Leaving photoreal → tear the tileset down
+    if (photo?.isPhotoreal) {
+      photo.disable();
+      setPhotoreal(false);
+    }
+
+    // Clicking the already-active chip → revert to satellite (default)
+    if (type === activeImagery) {
+      setActiveImagery('satellite');
+      if (type === 'terrain') {
+        imageryGenRef.current += 1; // invalidate any in-flight terrain apply
+        v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        throttledRender(v);
+        replaceBaseImagery(v, 'satellite');
+        showNotification('3D terrain disabled — satellite view restored', 'success');
+      } else {
+        replaceBaseImagery(v, 'satellite');
+        showNotification('Satellite imagery restored', 'success');
+      }
+      return;
+    }
+
+    setActiveImagery(type);
+
+    if (type === 'terrain') {
+      imageryGenRef.current += 1;
+      const gen = imageryGenRef.current;
+      void (async () => {
+        const enabled = await applyTerrainProvider(v, cesiumIonToken);
+        if (gen !== imageryGenRef.current) return;
+        replaceBaseImagery(v, 'terrain');
+        showNotification(
+          enabled ? '3D terrain enabled' : 'Terrain needs a Cesium ion token',
+          enabled ? 'success' : 'warning',
+        );
+        throttledRender(v);
+      })();
+      return;
+    }
+
+    const mapType = type === 'satellite' ? 'satellite' : 'earth';
+    replaceBaseImagery(v, mapType);
+  }, [cesiumIonToken, activeImagery]);
 
   /* ═════════════════════════════════════════════════════════════════
      WEATHER CARDS
@@ -6749,7 +6754,17 @@ export default function App() {
   }, [layerOpacity]);
 
   const toggleAllLayers = useCallback((state: boolean) => {
-    const next = layersRef.current.map(l => ({ ...l, on: state }));
+    // "Enable All" turns on a curated lightweight set (real-time + low-entity
+    // layers) instead of all 145 — enabling every layer at once floods the
+    // scene with tens of thousands of entities and freezes the browser.
+    // "Disable All" still turns every layer off.
+    const ENABLE_ALL_WHITELIST = new Set([
+      'earthquakes', 'lightning_strikes', 'space_weather',
+      'wildfires', 'severe_storms', 'aurora_oval',
+      '31_noaa_tides_currents', '50_ocean_currents', 'nasa_gibs',
+      'ais_vessels', 'space_debris',
+    ]);
+    const next = layersRef.current.map(l => ({ ...l, on: state && ENABLE_ALL_WHITELIST.has(l.id) }));
     layersRef.current = next;
     setLayers(next);
 
@@ -6767,6 +6782,11 @@ export default function App() {
       const now = Cesium.JulianDate.now();
       const hasForks = forkRendererRef.current?.hasActiveForks() ?? false;
       for (const l of layersRef.current) {
+        if (!l.on) {
+          forkRendererRef.current?.hideLayer(l.id);
+          hideLayerEntities(l.id);
+          continue;
+        }
         forkRendererRef.current?.showLayer(l.id);
         const id = l.id;
         const ents = entityStoreRef.current[id];
@@ -6802,7 +6822,7 @@ export default function App() {
             forkRendererRef.current?.reapplyCrop();
             if (v) throttledRender(v);
             bulkOperationRef.current = false;
-            showNotification(`All layers enabled (${layersRef.current.length})`, 'success');
+showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, 'success');
           }
         });
         renderSchedulerRef.current.enqueueAll(tasks);
@@ -6810,7 +6830,7 @@ export default function App() {
         bulkOperationRef.current = false;
         forkRendererRef.current?.reapplyCrop();
         if (v) throttledRender(v);
-        showNotification(`All layers enabled (${layersRef.current.length})`, 'success');
+        showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, 'success');
       }
 
       if (v) void loadFlightTracks(v);
@@ -7477,9 +7497,6 @@ export default function App() {
       case 'iss': case 'iss-live': case 'iss-tracker':
         toggleISS();
         return true;
-      case 'digital-twin': case 'digital_twin':
-        if (desired === false) setDigitalTwinPanel(null);
-        return true;
       case 'ai': case 'chat': case 'ai-chat':
         setShowAI(true);
         focusPanel('ai');
@@ -7509,7 +7526,7 @@ export default function App() {
       default:
         return undefined;
     }
-  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showCognitiveDashboard, showMultiHazardPanel, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showTimeline, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowCognitiveDashboard, setShowMultiHazardPanel, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowTimeline, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setDigitalTwinPanel, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setMonitorCollapsed, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
+  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showCognitiveDashboard, showMultiHazardPanel, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showTimeline, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowCognitiveDashboard, setShowMultiHazardPanel, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowTimeline, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setMonitorCollapsed, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
 
   const executeAgentCommands = useCallback((commands: Array<Record<string, unknown>>) => {
     const v = viewerRef.current;
@@ -7573,7 +7590,7 @@ export default function App() {
                 name: label || 'Agent Pin',
                 billboard: { image: createPinIcon(color, 24), width: 24, height: 24, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
                 label: label ? { text: label, font: '12px "Inter", sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3, backgroundColor: Cesium.Color.fromCssColorString('#0b1220').withAlpha(0.65), showBackground: true, backgroundPadding: new Cesium.Cartesian2(6, 4), style: Cesium.LabelStyle.FILL_AND_OUTLINE, horizontalOrigin: Cesium.HorizontalOrigin.CENTER, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, pixelOffset: new Cesium.Cartesian2(0, -6) } : undefined,
-                properties: { layer: 'digital_twin', lat, lon, agent: true },
+                properties: { lat, lon, agent: true },
               });
               action.entities = [entity];
               action.description = label || `Pin at ${lat.toFixed(2)}, ${lon.toFixed(2)}`;
@@ -7621,7 +7638,7 @@ export default function App() {
                   ...(extrudedHeight > 0 ? { extrudedHeight: extrudedHeight + 1.0 } : {}),
                 },
                 name: label,
-                properties: { layer: 'digital_twin', label, agent: true },
+                properties: { label, agent: true },
               });
               action.entities = [entity];
               action.description = label;
@@ -7664,7 +7681,7 @@ export default function App() {
                   outlineColor: cesiumColor.withAlpha(0.9),
                   height: 0.5,
                 },
-                properties: { layer: 'digital_twin', agent: true, ...props },
+                properties: { agent: true, ...props },
               }));
             };
             const renderGeometry = (geom: { type: string; coordinates: unknown }, props?: Record<string, unknown>) => {
@@ -7790,18 +7807,7 @@ export default function App() {
             }
             break;
           }
-          case 'addPanel': {
-            const panelData = cmd.panelData as Record<string, unknown> | undefined;
-            if (panelData) {
-              action.type = 'addPanel';
-              action.panelData = panelData;
-              action.description = 'Show analysis panel';
-              setDigitalTwinPanel(panelData as any);
-            }
-            break;
-          }
-          // God-eye control: open / close / toggle any UI panel in the app.
-          case 'openPanel':
+case 'openPanel':
           case 'closePanel':
           case 'togglePanel': {
             const panelId = cmd.panelId as string;
@@ -7822,7 +7828,7 @@ export default function App() {
         else if (action.entities && action.entities.length > 0) history.push(action as any);
       } catch { /* skip malformed commands */ }
     }
-  }, [focusLocation, isLayerEnabled, setDigitalTwinPanel, cleanupThinkingSteps, applyPanelCommand, setLayerEnabled]);
+  }, [focusLocation, isLayerEnabled, cleanupThinkingSteps, applyPanelCommand, setLayerEnabled]);
 
   const sendToPipeline = useCallback(async (goal: string, wsId: string | null) => {
     const resp = await fetch('/api/agent/pipeline', {
@@ -7990,7 +7996,7 @@ export default function App() {
     cleanupThinkingSteps,
     loadFlightTracks,
     viewerRef,
-    { abortControllerRef, currentRequestIdRef, onPanel: (data) => setDigitalTwinPanel(data as any), onAnalyticalResult: (data) => {
+    { abortControllerRef, currentRequestIdRef, onAnalyticalResult: (data) => {
       // Analytical compute → globe: render the real computed field as a
       // heatmap over the study area when the agent runs analytical_execute.
       const d = data as { toolId?: number; label?: string; lat?: number; lon?: number; unit?: string; vizType?: string; value?: number; grid?: { latMin: number; latMax: number; lonMin: number; lonMax: number; nLat: number; nLon: number; values: number[]; valueMin: number; valueMax: number; valueMean?: number; valueStd?: number; valueMedian?: number; finiteCellCount?: number; hasNaN?: boolean } };
@@ -8084,9 +8090,6 @@ export default function App() {
           }
         }
         break;
-      case 'addPanel':
-        setDigitalTwinPanel(null);
-        break;
     }
   }
 
@@ -8101,7 +8104,6 @@ export default function App() {
       try { v.entities.remove(e); } catch { /* ignore */ }
     }
     agentActionHistoryRef.current = [];
-    setDigitalTwinPanel(null);
   }
 
   // ── Advanced chat helpers ──────────────────────────────────────────────
@@ -8731,72 +8733,9 @@ export default function App() {
     setStudyDrawing(false);
   }, []);
 
-  /* ═════════════════════════════════════════════════════════════════
-     ONE-CLICK COMPUTE DEMO — "pick Austin, watch a real equation paint
-     the globe". Programmatically lays down a study-area rectangle over a
-     real location, opens the Analytics Workbench, auto-selects a showcase
-     equation (Land Surface Temperature, tool 1) and auto-runs it. The
-     computation is a genuine server-side run (Landsat + ERA5 context).
-     ═════════════════════════════════════════════════════════════════ */
-
-  const runComputeDemo = useCallback(() => {
-    const v = viewerRef.current;
-    if (!v) return;
-    // Austin, TX study area (approx. 0.45° x 0.35° box).
-    const demoBbox = { latMin: 30.05, latMax: 30.5, lonMin: -97.95, lonMax: -97.6 };
-    const corners = [
-      Cesium.Cartesian3.fromDegrees(demoBbox.lonMin, demoBbox.latMin),
-      Cesium.Cartesian3.fromDegrees(demoBbox.lonMax, demoBbox.latMin),
-      Cesium.Cartesian3.fromDegrees(demoBbox.lonMax, demoBbox.latMax),
-      Cesium.Cartesian3.fromDegrees(demoBbox.lonMin, demoBbox.latMax),
-    ];
-    const name = 'Austin demo';
-    const entity = v.entities.add({
-      rectangle: {
-        coordinates: Cesium.Rectangle.fromDegrees(demoBbox.lonMin, demoBbox.latMin, demoBbox.lonMax, demoBbox.latMax),
-        material: new Cesium.Color(0.2, 0.8, 0.3, 0.12),
-        outline: true,
-        outlineColor: Cesium.Color.LIME,
-        outlineWidth: 2,
-      },
-    });
-    const ringCoords: Array<[number, number]> = [
-      [demoBbox.lonMin, demoBbox.latMin], [demoBbox.lonMax, demoBbox.latMin],
-      [demoBbox.lonMax, demoBbox.latMax], [demoBbox.lonMin, demoBbox.latMax],
-    ];
-    const geojson: GeoJSON.FeatureCollection = {
-      type: 'FeatureCollection',
-      features: [{
-        type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: [[...ringCoords, ringCoords[0]]] },
-        properties: { name, type: 'rectangle' },
-      }],
-    };
-    const area: StudyAreaItem = {
-      id: `study_area_demo_${Date.now()}`, name, type: 'rectangle',
-      visible: true, active: false, entity, positions: corners, geojson, color: '#22c55e', width: 3,
-    };
-    updateStudyAreaStyle(v, area, '#22c55e', 3);
-    studyAreasRef.current.forEach(a => { if (a.id !== area.id && a.active) setStudyAreaActive(v, a, false); });
-    setStudyAreaActive(v, area, true);
-    studyAreasRef.current = [...studyAreasRef.current, area];
-    setStudyAreas(studyAreasRef.current);
-    setActiveStudyAreaId(area.id);
-    flyToStudyAreaTopDown(v, area);
-    throttledRender(v);
-    useChatStore.getState().setStudyAreaBbox(demoBbox);
-    // Open the workbench + signal it to auto-select LST and run.
-    setShowAnalyticsWorkbench(true);
-    focusPanel('analytics');
-    setDemoRequest({ toolId: 1, key: Date.now() });
-  }, [focusPanel]);
-
   // Stage a mission from the first-run card.
   const stageFirstRunMission = useCallback((mission: FirstRunMission) => {
     switch (mission) {
-      case 'compute-demo':
-        runComputeDemo();
-        break;
       case 'live-contacts':
         // Enable flights, AIS, satellites, earthquakes — the "live world" view.
         toggleLayer('2_adsb_lol');
@@ -8813,7 +8752,7 @@ export default function App() {
         break;
     }
     markFirstRunDone();
-  }, [runComputeDemo, toggleLayer]);
+  }, [toggleLayer]);
 
   /* ═════════════════════════════════════════════════════════════════
      AUTO CLIP TO ACTIVE STUDY AREA
@@ -9271,7 +9210,7 @@ export default function App() {
       <div
         ref={cesiumElRef}
         className={`cesium-container ${sidebarCollapsed ? 'full-width' : ''}`}
-        style={{ position: 'absolute', inset: 0, left: sidebarCollapsed ? 0 : 300, width: sidebarCollapsed ? '100%' : 'calc(100% - 300px)', height: '100%' }}
+        style={{ position: 'absolute', inset: 0, left: sidebarCollapsed ? 0 : 280, width: sidebarCollapsed ? '100%' : 'calc(100% - 280px)', height: '100%' }}
       />
 
       {/* Loading Overlay */}
@@ -9451,10 +9390,9 @@ export default function App() {
             <span>Live</span>
           </div>
 
-          <button className={`btn-icon ${showIntelFeed ? 'active' : ''}`} onClick={() => toggleLayer('intel_feed')} title="Intel Feed"><Activity size={16} /></button>
+          <button className={`btn-icon ${showIntelFeed ? 'active' : ''}`} onClick={() => { setShowIntelFeed(p => !p); focusPanel('intel-feed'); }} title="Intel Feed"><Activity size={16} /></button>
           <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => { setShowStudyArea(p => !p); focusPanel('study-area'); }} title="Study Area"><Crosshair size={16} /></button>
           <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => { setShowAI(p => !p); focusPanel('ai'); }} title="AI Assistant"><Bot size={16} /></button>
-          <button className={`btn-icon ${digitalTwinPanel ? 'active' : ''}`} onClick={openDigitalTwin} title="Digital Twin" disabled={digitalTwinLoading}>{digitalTwinLoading ? <Loader size={16} /> : <Target size={16} />}</button>
           <button className="btn-icon" onClick={flyToIndiaDirect} title="Fly to India"><Navigation2 size={16} /></button>
           <button className={`btn-icon ${showShareDialog ? 'active' : ''}`} onClick={() => setShowShareDialog(true)} title="Share"><Share2 size={16} /></button>
 
@@ -9528,12 +9466,15 @@ export default function App() {
         <div className="sidebar-header">
           <div className="sidebar-title">Data Layers ({activeLayerCount} active)</div>
           <div className="imagery-row">
-            {['earth','satellite','dark','terrain'].map(type => (
-              <button key={type} className={`img-chip ${activeImagery === type ? 'active' : ''}`}
-                onClick={() => setImagery(type)}>
-                {type === 'earth' ? <><Globe size={12} style={{display:'inline',marginRight:3}} /> Earth</> : type === 'satellite' ? <><Satellite size={12} style={{display:'inline',marginRight:3}} /> Sat</> : type === 'dark' ? <><Moon size={12} style={{display:'inline',marginRight:3}} /> Dark</> : <><Mountain size={12} style={{display:'inline',marginRight:3}} /> Ter</>}
-              </button>
-            ))}
+            {['earth','satellite','photoreal','terrain'].map(type => {
+              const isActive = type === 'photoreal' ? photoreal : (activeImagery === type && !photoreal);
+              return (
+                <button key={type} className={`img-chip ${isActive ? 'active' : ''}`}
+                  onClick={() => setImagery(type)}>
+                  {type === 'earth' ? <><Globe size={12} style={{display:'inline',marginRight:3}} /> Street</> : type === 'satellite' ? <><Satellite size={12} style={{display:'inline',marginRight:3}} /> Sat</> : type === 'photoreal' ? <><Globe size={12} style={{display:'inline',marginRight:3}} /> Photo</> : <><Mountain size={12} style={{display:'inline',marginRight:3}} /> Hybrid</>}
+                </button>
+              );
+            })}
           </div>
         </div>
         <div className="sidebar-search">
@@ -9579,7 +9520,7 @@ export default function App() {
                             <span className="opacity-label">{(layerOpacity[layer.id] ?? layer.opacity) * 100 >> 0}%</span>
                             <input type="range" min="0" max="100" value={((layerOpacity[layer.id] ?? layer.opacity) * 100) >> 0}
                               onChange={e => { e.stopPropagation(); setLayerOpacity(prev => ({...prev,[layer.id]:parseInt(e.target.value)/100})); }} />
-                          </div>
+      </div>
                         )}
                         <div className="toggle">
                           <input type="checkbox" checked={layer.on} onChange={e => { e.stopPropagation(); toggleLayer(layer.id); }} />
@@ -9614,7 +9555,7 @@ export default function App() {
 
       {/* Sidebar Toggle */}
       <div className={`sidebar-toggle ${sidebarCollapsed ? 'collapsed' : ''}`}
-        style={{ left: sidebarCollapsed ? 0 : 300 }}
+        style={{ left: sidebarCollapsed ? 0 : 280 }}
         onClick={() => setSidebarCollapsed(p => !p)}>
         {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
       </div>
@@ -9881,14 +9822,6 @@ export default function App() {
           <FlaskConical size={14} />
         </button>
         <button
-          className="btn-icon monitor-btn"
-          onClick={runComputeDemo}
-          title="Compute demo — run Land Surface Temperature over Austin, TX with live satellite data"
-          style={{ color: '#34d399', background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.3)' }}
-        >
-          <Zap size={14} />
-        </button>
-        <button
           className={`btn-icon monitor-btn ${showLaunchReplay ? 'active' : ''}`}
           onClick={() => { setShowLaunchReplay(p => !p); focusPanel('analytics'); }}
           title="Launch Replay — scrubbable rocket ascent reconstruction (Launch Library 2)"
@@ -9918,52 +9851,7 @@ export default function App() {
         >
           <Database size={14} />
         </button>
-        {/* Sensor-style switcher — 1–6, only one active at a time */}
-        <div style={{ display: 'flex', gap: 1, marginLeft: 4, alignItems: 'center' }}>
-          <span style={{ fontSize: 8, color: '#475569', marginRight: 2 }}>STYLE</span>
-          {SENSOR_STYLES.map(s => {
-            const isActive = sensorStyle === s.id;
-            const keyLabel = s.key ?? '';
-            const hue = s.id === 'normal' ? 180 : s.id === 'crt' ? 0 : s.id === 'nvg' ? 120 : s.id === 'flir' ? 30 : s.id === 'noir' ? 0 : 200;
-            const sat = s.id === 'noir' ? 0 : 60;
-            const lit = isActive ? 55 : 35;
-            const bgLit = isActive ? 15 : 5;
-            return (
-              <button key={s.id} className="btn-icon monitor-btn"
-                onClick={() => setSensorStyle(prev => sensorStylesRef.current?.toggle(s.id) ?? s.id)}
-                title={`${s.label}: ${s.hint} (key ${keyLabel})`}
-                style={{
-                  width: 24, height: 24, borderRadius: 4, padding: 0, fontSize: 9,
-                  color: `hsl(${hue}, ${sat}%, ${lit}%)`,
-                  background: `hsl(${hue}, ${sat}%, ${bgLit}%)`,
-                  border: isActive ? `1px solid hsl(${hue}, ${sat}%, 45%)` : '1px solid transparent',
-                  transition: 'all 0.15s',
-                }}>
-                {s.id === 'normal' ? '1' : s.id === 'crt' ? '2' : s.id === 'nvg' ? '3' : s.id === 'flir' ? '4' : s.id === 'noir' ? '5' : '6'}
-              </button>
-            );
-          })}
         </div>
-        {/* Photorealistic globe toggle — Google 3D Tiles via Cesium Ion */}
-        <button
-          className="btn-icon monitor-btn"
-          onClick={() => {
-            const g = photorealGlobeRef.current;
-            if (!g) return;
-            void g.toggle().then(ok => setPhotoreal(ok));
-          }}
-          title={`${photoreal ? 'Disable' : 'Enable'} Google Photorealistic 3D Globe — real photogrammetry (photorealistic-grade visuals)`}
-          style={{
-            color: photoreal ? '#22d3ee' : '#475569',
-            background: photoreal ? 'rgba(34,211,238,0.15)' : 'transparent',
-            border: photoreal ? '1px solid rgba(34,211,238,0.4)' : '1px solid transparent',
-            fontSize: 9, padding: '4px 8px', borderRadius: 4, marginLeft: 4,
-            transition: 'all 0.15s',
-          }}
-        >
-          <Globe size={13} />
-        </button>
-      </div>
 
       {/* Camera Controls — advanced zoom with smooth flyTo */}
       {!satTravel && !flightTravel && <CameraControls viewer={viewerRef.current} />}
@@ -10471,12 +10359,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Digital Twin Panel */}
-      {digitalTwinPanel && (
-        <PanelSuspense><LazyDigitalTwinPanel panel={digitalTwinPanel} onClose={() => setDigitalTwinPanel(null)} /></PanelSuspense>
-      )}
-
-      {/* Multi-Hazard Panel */}
+{/* Multi-Hazard Panel */}
       <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('multihazard', 110), width: 480, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', display: showMultiHazardPanel ? 'block' : 'none' }}>
         <MultiHazardPanel onClose={() => setShowMultiHazardPanel(false)} bbox={activeBbox} studyAreaName={studyAreas.find(a => a.id === activeStudyAreaId)?.name} onSurfaceData={handleSurfaceData} onClear={() => { clearStudyArea(); clearInterpSurface(viewerRef.current!); }} />
       </div>
@@ -10558,7 +10441,7 @@ export default function App() {
       {showDuckdbAnalytics && <PanelSuspense><LazyDuckdbAnalyticsPanel open={showDuckdbAnalytics} onClose={() => setShowDuckdbAnalytics(false)} zIndex={getPanelZIndex('analytics') + 3} /></PanelSuspense>}
 
       {/* Analytics Workbench Panel */}
-      <ErrorBoundary label="Analytics Workbench">        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} demoRequest={demoRequest} />
+      <ErrorBoundary label="Analytics Workbench">        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} />
       </ErrorBoundary>
 
       {/* Land Cover Mapper Panel */}
@@ -10865,6 +10748,9 @@ export default function App() {
 
       {/* Admin Dashboard */}
       {showAdmin && <AdminDashboard onClose={() => setShowAdmin(false)} />}
+
+      {/* Sensor-style accessibility widget — floating, draggable, lockable */}
+      <SensorStyleWidget activeStyle={sensorStyle} onSelect={id => setSensorStyle(prev => sensorStylesRef.current?.toggle(id) ?? id)} />
     </div>
   );
 }

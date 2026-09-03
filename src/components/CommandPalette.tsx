@@ -49,8 +49,6 @@ const LAYERS: Array<{ id: string; label: string; icon: string }> = [
   { id: 'sea_ice', label: 'Sea Ice', icon: '🧊' },
   { id: 'precipitation', label: 'Precipitation', icon: '🌧️' },
   { id: 'wind', label: 'Wind', icon: '💨' },
-  { id: 'india_cctv', label: 'CCTV Cameras', icon: '📷' },
-  { id: 'intel_feed', label: 'Intel Feed', icon: '📰' },
   { id: 'live_media', label: 'Live Media', icon: '📺' },
   { id: 'disaster_alerts', label: 'Disaster Alerts', icon: '🚨' },
 ];
