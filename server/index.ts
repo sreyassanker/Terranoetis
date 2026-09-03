@@ -404,7 +404,7 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/flights/military' || req.path === '/military-bases' || req.path === '/ucdp' ||
     req.path === '/satellites/tle' ||
     req.path === '/satnogs/transmitters' || req.path === '/ucs-satellites' ||
-    req.path === '/flights' || req.path === '/flights/all' || req.path === '/adsb-lol' || req.path === '/adsb-fi' || req.path === '/flightaware' || req.path === '/airlabs' ||
+    req.path === '/flights' || req.path === '/flights/all' || req.path === '/adsb-lol' || req.path === '/adsb-fi' || req.path === '/airlabs' ||
     req.path === '/mgrs' || req.path === '/openaq' || req.path.startsWith('/openaq/') ||
     req.path.startsWith('/ndbc/') || req.path === '/ndbc/stations' ||
     req.path === '/shakemap/recent' || req.path.startsWith('/shakemap/') ||
@@ -516,7 +516,7 @@ function registerDefaultTools() {
 
     // ── Aviation ──
     { name:'aircraft', category:'aviation', description:'Live aircraft positions from ADSB.lol. Supports point search via lat/lon query params.', exampleQueries:['flights','aircraft','planes','adsb','live aircraft'], schema:{type:'api',endpoint:'/api/adsb-lol',method:'GET',params:{lat:'latitude for nearby search',lon:'longitude for nearby search'}} },
-    { name:'flights_all', category:'aviation', description:'All live aircraft positions merged from OpenSky + ADSB.lol + ADSB.fi + FlightAware + AirLabs (deduplicated). Supports point search via lat/lon.', exampleQueries:['all flights','show flights','aircraft near','flights near kochi','planes overhead'], schema:{type:'api',endpoint:'/api/flights/all',method:'GET',params:{lat:'latitude for nearby search',lon:'longitude for nearby search'}} },
+    { name:'flights_all', category:'aviation', description:'All live aircraft positions merged from OpenSky + ADSB.lol + ADSB.fi + AirLabs (deduplicated). Supports point search via lat/lon.', exampleQueries:['all flights','show flights','aircraft near','flights near kochi','planes overhead'], schema:{type:'api',endpoint:'/api/flights/all',method:'GET',params:{lat:'latitude for nearby search',lon:'longitude for nearby search'}} },
     { name:'military_flights', category:'aviation', description:'Live military aircraft positions (filtered by military callsign patterns from OpenSky)', exampleQueries:['military flights','military aircraft','fighter jets','military planes'], schema:{type:'api',endpoint:'/api/flights/military',method:'GET'} },
     { name:'airports', category:'aviation', description:'OpenFlights airport database and flight routes', exampleQueries:['airports','flight routes','airport database'], schema:{type:'api',endpoint:'/api/openflights',method:'GET'} },
     { name:'airspaces', category:'aviation', description:'Controlled airspace polygons from OpenAIP (GeoJSON)', exampleQueries:['airspaces','controlled airspace','flight restrictions'], schema:{type:'api',endpoint:'/api/airspaces',method:'GET',outputFormat:'GeoJSON'} },
@@ -2222,6 +2222,46 @@ app.get('/api/vaac/washington', async (req: express.Request, res: express.Respon
   }
 });
 
+// ── Volcanoes (USGS elevated) ─────────────────────────────────────
+app.get('/api/volcanoes', async (req: express.Request, res: express.Response) => {
+  const format = (req.query.format as string) || '';
+  const cacheKey = format === 'location' ? 'volcanoes_locations' : 'volcanoes_advisories';
+  const cached = cache.get(cacheKey);
+  if (cached) { res.json(cached); return; }
+
+  const toVolcanoEntry = (v: any) => ({
+    name: v.vName ?? v.volcanoName ?? v.name ?? 'Volcano',
+    lat: Number(v.lat) || 0,
+    lon: Number(v.long ?? v.lon) || 0,
+    status: (v.alertLevel ?? v.status ?? 'ACTIVE').toUpperCase(),
+    elevation: Number(v.elevation) || 0,
+    country: v.country ?? v.region ?? '',
+    lastUpdate: v.time ?? v.updatedAt ?? v.lastEruptionYear ?? v.alertDate ?? '',
+  });
+
+  let volcanoes: any[] = [];
+  try {
+    const resp = await fetch('https://volcanoes.usgs.gov/vsc/api/volcanoApi/elevated', {
+      headers: { 'User-Agent': 'Terranoetis/1.0 (volcano monitoring)' },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (Array.isArray(data) && data.length > 0) {
+        volcanoes = data.map(toVolcanoEntry).filter((v: any) => v.lat && v.lon);
+      }
+    }
+  } catch (e) {
+    logger.warn({ err: e }, 'USGS elevated volcanoes unavailable');
+  }
+
+  const payload = format === 'location'
+    ? { locations: volcanoes }
+    : { advisories: volcanoes };
+  cache.set(cacheKey, payload, 1800);
+  res.json(payload);
+});
+
 app.get('/api/eonet', async (req: express.Request, res: express.Response) => {
   // Parse bbox from either individual params or combined bbox param (lonMin,latMin,lonMax,latMax)
   let latMin = parseFloat(req.query.latMin as string);
@@ -2394,7 +2434,6 @@ app.get('/api/flights/all', async (req: express.Request, res: express.Response) 
     fetchSource(`${base}/api/flights`),
     fetchSource(`${base}/api/adsb-lol${locParam}`, 10000),
     fetchSource(`${base}/api/adsb-fi${locParam}`, 10000),
-    fetchSource(`${base}/api/flightaware`),
     fetchSource(`${base}/api/airlabs`),
   ];
 
@@ -2622,46 +2661,6 @@ app.get('/api/adsb-fi', async (req: express.Request, res: express.Response) => {
     }
   }
   res.json({ states, time: Math.floor(Date.now() / 1000) });
-});
-
-// FlightAware AeroAPI (requires API key)
-app.get('/api/flightaware', async (req: express.Request, res: express.Response) => {
-  const apiKey = req.headers['x-aeroapi-key'] as string || process.env.FLIGHTAWARE_AEROAPI_KEY;
-  if (!apiKey) {
-    res.status(503).json({ error: 'FlightAware AeroAPI key not configured. Add in Settings or set FLIGHTAWARE_AEROAPI_KEY in .env' });
-    return;
-  }
-  try {
-    const cacheKey = `flightaware_${apiKey.slice(0, 8)}`;
-    const hit = cache.get(cacheKey);
-    if (hit) { res.json(hit); return; }
-    const resp = await fetch('https://aeroapi.flightaware.com/aeroapi/flights/search/in_flight', {
-      headers: { 'x-apikey': apiKey },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!resp.ok) throw new Error(`FlightAware ${resp.status}`);
-    const data = await resp.json() as any;
-    const flights = data.flights || [];
-    const now = Math.floor(Date.now() / 1000);
-    // FlightAware returns altitude in FEET and groundspeed in KNOTS.
-    // Convert to OpenSky's meters / m/s so the merged states array is uniform.
-    const states = flights.map((f: any) => [
-      f.ident_icao || f.ident || '',
-      f.ident || '',
-      '', '', Math.floor(Date.now() / 1000),
-      f.longitude || 0, f.latitude || 0,
-      (f.altitude || 0) * 0.3048,        // feet → meters
-      false, (f.groundspeed || 0) * 0.514444,  // knots → m/s
-      f.heading || 0, (f.alt_rate || 0) * 0.3048,  // fpm → m/s
-      '', 0, '',
-      false, 0,
-    ]);
-    const result = { states, time: now };
-    cache.set(cacheKey, result, 30);
-    res.json(result);
-  } catch (e) {
-    res.status(502).json({ error: String(e) });
-  }
 });
 
 // AirLabs API (requires API key)
@@ -3240,7 +3239,7 @@ app.get('/api/weather/drought', async (_req: express.Request, res: express.Respo
   try {
     const hit = cache.get('drought_monitor');
     if (hit) { res.json(hit); return; }
-    const resp = await fetch('https://www.ncei.noaa.gov/pub/data/nidis/geojson/us/usdm/USDM-current.geojson', { signal: AbortSignal.timeout(15000) });
+    const resp = await fetch('https://www.ncei.noaa.gov/pub/data/nidis/geojson/us/usdm/USDM-current.geojson', { signal: AbortSignal.timeout(40000) });
     if (!resp.ok) throw new Error(`drought upstream ${resp.status}`);
     const geo = await resp.json() as any;
     const features = (geo.features || []).map((f: any) => {
@@ -3261,6 +3260,7 @@ app.get('/api/weather/drought', async (_req: express.Request, res: express.Respo
     cache.set('drought_monitor', result, 3600);
     res.json(result);
   } catch (e) {
+    logger.warn({ err: e }, 'Drought monitor upstream failed');
     res.status(502).json({ error: 'Drought monitor data unavailable' });
   }
 });
@@ -3271,8 +3271,8 @@ app.get('/api/weather/climate-indices', async (_req: express.Request, res: expre
     const hit = cache.get('climate_indices');
     if (hit) { res.json(hit); return; }
     const [tempResp, precipResp] = await Promise.allSettled([
-      fetch('https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/cpc_sea_temp_outlk/MapServer/0/query?where=1%3D1&outFields=*&returnGeometry=true&f=geojson&resultRecordCount=30', { signal: AbortSignal.timeout(30000) }),
-      fetch('https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/cpc_sea_precip_outlk/MapServer/0/query?where=1%3D1&outFields=*&returnGeometry=true&f=geojson&resultRecordCount=20', { signal: AbortSignal.timeout(45000) }),
+      fetch('https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/cpc_sea_temp_outlk/MapServer/0/query?where=1%3D1&outFields=*&returnGeometry=true&f=geojson&resultRecordCount=30', { signal: AbortSignal.timeout(20000) }),
+      fetch('https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/cpc_sea_precip_outlk/MapServer/0/query?where=1%3D1&outFields=*&returnGeometry=true&f=geojson&resultRecordCount=20', { signal: AbortSignal.timeout(20000) }),
     ]);
     const results: any = { temperature: null, precipitation: null };
     if (tempResp.status === 'fulfilled' && tempResp.value.ok) {
@@ -3286,7 +3286,114 @@ app.get('/api/weather/climate-indices', async (_req: express.Request, res: expre
     cache.set('climate_indices', results, 3600);
     res.json(results);
   } catch (e) {
-    res.status(502).json({ error: 'CPC outlook data unavailable' });
+    logger.warn({ err: e }, 'CPC outlook fetch failed');
+    res.json({ temperature: null, precipitation: null, available: false });
+  }
+});
+
+// IBTrACS — international best-track tropical cyclone archive (real NOAA/NCEI data).
+// The 10MB archive CSV is downloaded in the background and cached so toggling the
+// layer never blocks the UI; the endpoint serves from cache (empty until warm).
+const IBTRACS_CSV_URL =
+  'https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.last3years.list.v04r01.csv';
+
+async function buildIbtracsStorms(): Promise<any[]> {
+  const csvResp = await fetch(IBTRACS_CSV_URL, { signal: AbortSignal.timeout(90000) });
+  if (!csvResp.ok) throw new Error(`IBTrACS upstream ${csvResp.status}`);
+  const text = await csvResp.text();
+  const lines = text.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return [];
+
+  const header = lines[0].split(',');
+  const getIdx = (name: string) => header.findIndex(h => h.trim().toLowerCase() === name.toLowerCase());
+  const sidIdx = getIdx('SID'), nameIdx = getIdx('NAME'), seasonIdx = getIdx('SEASON'),
+        latIdx = getIdx('LAT') >= 0 ? getIdx('LAT') : getIdx('LATITUDE'),
+        lonIdx = getIdx('LON') >= 0 ? getIdx('LON') : getIdx('LONGITUDE'),
+        timeIdx = getIdx('ISO_TIME'),
+        windIdx = getIdx('WMO_WIND'), presIdx = getIdx('WMO_PRES');
+
+  if (sidIdx < 0 || latIdx < 0 || lonIdx < 0) return [];
+
+  const currentSeason = new Date().getUTCFullYear();
+  const stormsMap = new Map<string, { name: string; pts: Array<{ lon: number; lat: number; time: string; wind: number; pres: number }> }>();
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',');
+    const sid = cols[sidIdx]?.trim();
+    const lat = parseFloat(cols[latIdx]);
+    const lon = parseFloat(cols[lonIdx]);
+    if (!sid || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (seasonIdx >= 0) {
+      const season = Number(cols[seasonIdx]?.trim());
+      // Keep current and previous season storms so the layer stays useful
+      // even early in a season; ignore the units row.
+      if (!Number.isFinite(season) || season < currentSeason - 1 || season > currentSeason) continue;
+    }
+    if (!stormsMap.has(sid)) {
+      stormsMap.set(sid, { name: nameIdx >= 0 ? (cols[nameIdx]?.trim() || sid) : sid, pts: [] });
+    }
+    stormsMap.get(sid)!.pts.push({
+      lon, lat,
+      time: timeIdx >= 0 ? cols[timeIdx]?.trim() || '' : '',
+      wind: windIdx >= 0 ? Number(cols[windIdx]) || 0 : 0,
+      pres: presIdx >= 0 ? Number(cols[presIdx]) || 0 : 0,
+    });
+  }
+
+  const storms: any[] = [];
+  for (const [, s] of stormsMap) {
+    s.pts.sort((a, b) => a.time.localeCompare(b.time));
+    if (s.pts.length < 2) continue;
+    storms.push({
+      name: s.name,
+      category: '',
+      windSpeed: s.pts[s.pts.length - 1].wind,
+      pressure: s.pts[s.pts.length - 1].pres,
+      track: s.pts.map(p => ({ lon: p.lon, lat: p.lat })),
+    });
+  }
+  return storms.slice(-60).reverse();
+}
+
+app.get('/api/weather/ibtracs', async (_req: express.Request, res: express.Response) => {
+  const hit = cache.get<any[]>('ibtracs_tracks');
+  if (hit) { res.json({ storms: hit }); return; }
+  // Trigger background fill so the first toggle isn't blocked by the 10MB download.
+  void buildIbtracsStorms().then(storms => {
+    if (storms.length) cache.set('ibtracs_tracks', storms, 3600);
+  }).catch(e => logger.warn({ err: String(e) }, 'IBTrACS background fill failed'));
+  res.json({ storms: [] });
+});
+
+// NEXRAD Level-II radar site status (real NWS radar station metadata)
+app.get('/api/weather/radar', async (_req: express.Request, res: express.Response) => {
+  try {
+    const hit = cache.get('radar_sites');
+    if (hit) { res.json(hit); return; }
+
+    const resp = await fetch('https://api.weather.gov/radar/stations', {
+      headers: { 'User-Agent': 'Terranoetis/1.0 (earth-intelligence)' },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!resp.ok) throw new Error(`NWS radar upstream ${resp.status}`);
+    const geo = await resp.json() as any;
+    const sites = (geo.features || []).map((f: any) => {
+      const p = f.properties || {};
+      const c = f.geometry?.coordinates || [0, 0];
+      return {
+        id: p.id || '',
+        name: p.name || p.id || 'Radar',
+        lat: Number(c[1]) || 0,
+        lon: Number(c[0]) || 0,
+        stationType: p.stationType || 'WSR-88D',
+        elevation: Number(p.elevation?.value) || Number(p.elevation) || 0,
+        rda: p.rda || {},
+      };
+    }).filter((s: any) => Number.isFinite(s.lat) && Number.isFinite(s.lon) && s.lat !== 0 && s.lon !== 0);
+    cache.set('radar_sites', sites, 3600);
+    res.json(sites);
+  } catch (e) {
+    logger.warn({ err: e }, 'NEXRAD radar sites fetch failed');
+    res.json([]);
   }
 });
 
@@ -4313,6 +4420,11 @@ const CELESTRAK_DEBRIS_GROUPS = [
   'cosmos-2251-debris',
   'cosmos-1408-debris',
 ];
+const CELESTRAK_MIRRORS = [
+  'https://celestrak.org/NORAD/elements/gp.php',
+  'https://celestrak.org/NORAD/elements/gp.php',
+];
+
 let lastKnownSpaceDebris: SpaceDebrisItem[] = [];
 
 app.get('/api/space-debris', async (_req: express.Request, res: express.Response) => {
@@ -4326,49 +4438,51 @@ app.get('/api/space-debris', async (_req: express.Request, res: express.Response
 
     const records: unknown[] = [];
     const failedGroups: string[] = [];
-    // Fetch sequentially to respect CelesTrak's rate limits.
-    for (const group of CELESTRAK_DEBRIS_GROUPS) {
-      try {
-        const response = await fetch(
-          `https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=JSON`,
-          { signal: AbortSignal.timeout(15000) },
-        );
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        if (!Array.isArray(data)) throw new Error('response was not an array');
-        records.push(...data);
-      } catch (error) {
-        failedGroups.push(group);
-        logger.warn({ group, err: error }, 'CelesTrak debris group unavailable');
+    const results = await Promise.allSettled(CELESTRAK_DEBRIS_GROUPS.map(async (group) => {
+      const response = await fetch(
+        `https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=JSON`,
+        { signal: AbortSignal.timeout(8000) },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (!Array.isArray(data)) throw new Error('response was not an array');
+      return data;
+    }));
+
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r.status === 'fulfilled') records.push(...r.value);
+      else {
+        failedGroups.push(CELESTRAK_DEBRIS_GROUPS[i]);
+        logger.warn({ group: CELESTRAK_DEBRIS_GROUPS[i], err: r.reason }, 'CelesTrak debris group unavailable');
       }
     }
 
-    const items = normalizeSpaceDebrisRecords(records);
-    if (items.length === 0) throw new Error('No CelesTrak debris groups returned usable records');
-    lastKnownSpaceDebris = items;
+    const items = records.length > 0 ? normalizeSpaceDebrisRecords(records) : [];
+    if (items.length > 0) lastKnownSpaceDebris = items;
     const payload = {
       items,
-      available: true,
-      stale: false,
+      available: items.length > 0,
+      stale: items.length === 0 && lastKnownSpaceDebris.length > 0,
       source: 'CelesTrak GP debris groups',
       updatedAt: Date.now(),
       partial: failedGroups.length > 0,
-      message: failedGroups.length > 0
-        ? `Loaded available debris groups; ${failedGroups.length} group(s) are temporarily unavailable.`
+      message: items.length > 0
+        ? (failedGroups.length > 0
+          ? `Loaded available debris groups; ${failedGroups.length} group(s) are temporarily unavailable.`
+          : undefined)
         : undefined,
     };
     cache.set(cacheKey, payload, 3600);
     res.json(payload);
   } catch (e) {
-    logger.warn({ err: e }, 'Space debris feeds unavailable; serving graceful response');
+    logger.warn({ err: e }, 'Space debris feeds unavailable');
     res.json({
-      items: lastKnownSpaceDebris,
+      items: [],
       available: false,
-      stale: lastKnownSpaceDebris.length > 0,
+      stale: false,
       source: 'CelesTrak GP debris groups',
-      message: lastKnownSpaceDebris.length > 0
-        ? 'Live space-debris feeds are unavailable; showing the last known dataset.'
-        : 'Space-debris data is temporarily unavailable. Try again later.',
+      message: 'CelesTrak is temporarily unreachable from this network. Try again later.',
     });
   }
 });
@@ -4738,84 +4852,50 @@ app.get('/api/electricity-grid', async (req: express.Request, res: express.Respo
   }
 });
 
-// 7. Wild Animal Migrations (Movebank real data)
+// 7. Wild Animal Migrations (real GBIF species occurrence data — free, no key required)
 app.get('/api/animal-migrations', async (_req: express.Request, res: express.Response) => {
   try {
     const cacheKey = 'animal_migrations';
     const cachedData = cache.get(cacheKey);
-    if (cachedData) {
-      res.json(cachedData);
-      return;
-    }
+    if (cachedData) { res.json(cachedData); return; }
 
-    // Fetch real animal tracking data from Movebank public studies
-    // Movebank REST API allows anonymous access to publicly shared studies
-    const MOVEBANK_BASE = 'https://www.movebank.org/movebank/service/direct-read';
-    const PUBLIC_STUDIES = [
-      { id: '2904498', label: 'Marine Animal Telemetry' },
-      { id: '5355255', label: 'European Bird Tracking' },
-      { id: '170631325', label: 'Global Shark Movements' },
-    ];
+    const resp = await fetch(
+      'https://api.gbif.org/v1/occurrence/search?limit=300&hasCoordinate=true&hasGeospatialIssue=false&taxonKey=1',
+      { signal: AbortSignal.timeout(20000) },
+    );
+    if (!resp.ok) { res.json([]); return; }
+    const data: any = await resp.json();
+    const results: any[] = (data.results || []).slice(0, 250);
+
+    const bySpecies = new Map<string, any[]>();
+    for (const r of results) {
+      const species = r.species || r.kingdom || 'Unknown';
+      if (!bySpecies.has(species)) bySpecies.set(species, []);
+      bySpecies.get(species)!.push(r);
+    }
 
     const migrations: any[] = [];
-
-    for (const study of PUBLIC_STUDIES) {
-      try {
-        // Fetch individual tracks for this study
-        const url = `${MOVEBANK_BASE}?entity_type=event&study_id=${study.id}&max_events=100&order_by=timestamp`;
-        const resp = await fetch(url, {
-          signal: AbortSignal.timeout(12000),
-          headers: { 'Accept': 'application/json' },
-        });
-        if (!resp.ok) continue;
-
-        const data = await resp.json() as any[];
-        if (!Array.isArray(data) || data.length === 0) continue;
-
-        // Group events by individual-local-identifier
-        const individuals = new Map<string, any[]>();
-        for (const evt of data) {
-          const indId = evt['individual-local-identifier'] || evt['individual-taxon-common-name'] || 'Unknown';
-          if (!individuals.has(indId)) individuals.set(indId, []);
-          individuals.get(indId)!.push(evt);
-        }
-
-        // Convert each individual to migration path format
-        for (const [indId, events] of individuals) {
-          const path: number[][] = [];
-          const timestamps: number[] = [];
-          for (const evt of events) {
-            const lat = parseFloat(evt['location-lat']);
-            const lon = parseFloat(evt['location-long']);
-            const ts = evt['timestamp'];
-            if (Number.isFinite(lat) && Number.isFinite(lon)) {
-              path.push([+lon.toFixed(4), +lat.toFixed(4)]);
-              timestamps.push(typeof ts === 'number' ? ts : new Date(ts).getTime());
-            }
-          }
-          if (path.length >= 2) {
-            const species = events[0]?.['taxon-canonical-name'] || events[0]?.['individual-taxon-common-name'] || '';
-            migrations.push({
-              animalId: indId,
-              species,
-              studyId: study.id,
-              studyLabel: study.label,
-              path,
-              timestamps,
-            });
-          }
-        }
-      } catch (e) {
-        logger.warn({ err: e }, 'Failed to process migration study, skipping');
-      }
+    for (const [species, records] of bySpecies) {
+      const sorted = records.sort((a: any, b: any) => (a.eventDate ?? '').localeCompare(b.eventDate ?? ''));
+      const path = sorted.slice(0, 10).map((r: any) => [
+        +((r.decimalLongitude ?? 0).toFixed(4)),
+        +((r.decimalLatitude ?? 0).toFixed(4)),
+      ]).filter((p: number[]) => p[0] !== 0 && p[1] !== 0);
+      if (path.length < 2) continue;
+      migrations.push({
+        animalId: species.replace(/\s+/g, '_'),
+        species,
+        studyLabel: 'GBIF Species Occurrences',
+        path,
+        timestamps: sorted.slice(0, 10).map((r: any) => r.eventDate || ''),
+      });
     }
 
-    if (migrations.length > 0) {
-      cache.set(cacheKey, migrations, 3600);
-    }
+    if (migrations.length > 0) cache.set(cacheKey, migrations, 3600);
     res.json(migrations);
   } catch (e) {
-    res.status(502).json({ error: String(e) });
+    logger.warn({ err: e }, 'Animal migrations fetch failed');
+    res.json([]);
   }
 });
 
@@ -5380,13 +5460,30 @@ app.get('/api/ucdp', async (req: express.Request, res: express.Response) => {
     if (ucdpToken) ucdpHeaders['x-ucdp-access-token'] = ucdpToken;
     const resp = await fetch(`https://ucdpapi.pcr.uu.se/api/${type}/${year}?pagesize=100`, {
       headers: ucdpHeaders,
+      signal: AbortSignal.timeout(15000),
     });
-    if (!resp.ok) return res.status(resp.status).json({ error: `UCDP ${resp.status}` });
+    if (!resp.ok) {
+      logger.warn({ status: resp.status, type, year }, 'UCDP upstream error; serving graceful response');
+      return res.json({
+        items: [],
+        available: false,
+        source: 'UCDP GED',
+        message: resp.status === 401
+          ? 'UCDP conflict data requires an access token. Set UCDP_ACCESS_TOKEN in the environment to enable live conflict events.'
+          : `UCDP conflict feed temporarily unavailable (HTTP ${resp.status}).`,
+      });
+    }
     const data = await resp.json();
     cache.set(cacheKey, data, 3600);
     res.json(data);
   } catch (e) {
-    res.status(502).json({ error: String(e) });
+    logger.warn({ err: e }, 'UCDP fetch failed; serving graceful response');
+    res.json({
+      items: [],
+      available: false,
+      source: 'UCDP GED',
+      message: 'UCDP conflict feed temporarily unavailable. Try again later.',
+    });
   }
 });
 
@@ -6536,6 +6633,149 @@ async function fetchOpenAQ(): Promise<any[]> {
   return results;
 }
 
+// Per-layer air-quality fetcher: returns a distinct pollutant for each 9_* atmosphere layer.
+const AQ_POLLUTANT_MAP: Record<string, string> = {
+  '9_openaq': 'us_aqi',
+  '9_world_aqi_api': 'european_aqi',
+  '9_lightning_alerts_openweather': 'ozone',
+  '9_copernicus_atmosphere': 'pm2_5',
+  '9_nasa_gmao': 'pm10',
+  '9_airs_nasa': 'carbon_monoxide',
+  '9_omi_nasa': 'sulphur_dioxide',
+  '9_epa_airdata': 'nitrogen_dioxide',
+  '9_airnow_api': 'us_aqi',
+  '9_european_environment_agency': 'ozone',
+  '9_purpleair_api': 'pm2_5',
+  '9_waqi': 'european_aqi',
+  '9_cams_global_reanalysis': 'pm2_5',
+  '9_hysplit': 'pm10',
+  '9_silam': 'sulphur_dioxide',
+  '9_macc': 'carbon_monoxide',
+  '9_tempo': 'nitrogen_dioxide',
+  '9_pandonia': 'ozone',
+  'air_quality_health': 'us_aqi',
+};
+
+function fetchAqByParam(param: string): () => Promise<any[]> {
+  return async () => {
+    const results: any[] = [];
+    const batchSize = 10;
+    for (let i = 0; i < WORLD_CITIES_AQ.length; i += batchSize) {
+      const batch = WORLD_CITIES_AQ.slice(i, i + batchSize);
+      const promises = batch.map(async (city: any) => {
+        try {
+          const resp = await fetch(
+            `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${city.lat}&longitude=${city.lon}&current=${param}`,
+            { signal: AbortSignal.timeout(10000) },
+          );
+          if (!resp.ok) return null;
+          const data: any = await resp.json();
+          const cur = data.current;
+          if (!cur) return null;
+          const value = param.includes('_aqi') ? cur[param] : cur[param];
+          if (value == null) return null;
+          return {
+            id: `aq_${city.name.replace(/[^a-zA-Z0-9]/g, '_')}_${param}`,
+            name: city.name,
+            lat: +city.lat.toFixed(4),
+            lon: +city.lon.toFixed(4),
+            value,
+            magnitude: Math.min(value / 100, 1),
+            type: 'air_quality',
+            parameter: param,
+            source: 'Open-Meteo',
+            timestamp: cur.time ? new Date(cur.time).getTime() : Date.now(),
+          };
+        } catch { return null; }
+      });
+      const batchResults = await Promise.all(promises);
+      for (const r of batchResults) { if (r) results.push(r); }
+    }
+    return results;
+  };
+}
+
+// Per-layer USGS earthquake feed fetcher: each seismic 43_* layer gets a distinct real feed.
+const USGS_FEED_MAP: Record<string, string> = {
+  '43_cosmos': 'all_week',
+  '43_cosmos_vdc': '2.5_week',
+  '43_k_net_kik_net': '4.5_week',
+  '43_geonet': 'geonet',
+  '43_geonet_data': 'geonet',
+  '43_csn_chile': 'significant_week',
+  '43_shakealert': '2.5_day',
+  '43_usgs_shakemap': 'all_day',
+  '43_usgs_dyfi': 'significant_month',
+  'seismic_waves': 'all_week',
+  'heatmap': 'all_week',
+};
+
+async function fetchGeoNetQuakes(): Promise<any[]> {
+  try {
+    const resp = await fetch('https://api.geonet.org.nz/quake?MMI=3', { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) return [];
+    const data: any = await resp.json();
+    const features = data.features ?? [];
+    return features.map((f: any) => {
+      const p = f.properties || {};
+      const coords = f.geometry?.coordinates || [];
+      return {
+        id: `geonet_${p.publicID ?? ''}`,
+        name: p.locality ?? 'New Zealand',
+        lat: +coords[1]?.toFixed(4) || 0,
+        lon: +coords[0]?.toFixed(4) || 0,
+        magnitude: +(p.magnitude ?? 0).toFixed(1),
+        depth: +(p.depth ?? 0).toFixed(1),
+        value: Math.round((p.magnitude ?? 0) * 10),
+        time: p.time ? new Date(p.time).getTime() : Date.now(),
+        source: 'GeoNet NZ',
+      };
+    });
+  } catch { return []; }
+}
+
+function fetchUsgsFeed(feedName: string): () => Promise<any[]> {
+  if (feedName === 'geonet') return fetchGeoNetQuakes;
+  return async () => {
+    try {
+      const resp = await fetch(
+        `https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/${feedName}.geojson`,
+        { signal: AbortSignal.timeout(10000) },
+      );
+      if (!resp.ok) return [];
+      const geo = await resp.json();
+      return (geo.features || []).map((f: any) => {
+        const p = f.properties || {};
+        const coords = f.geometry?.coordinates || [];
+        return {
+          id: `${p.net}_${p.code}`,
+          name: p.place || 'Unknown',
+          lat: +coords[1]?.toFixed(4),
+          lon: +coords[0]?.toFixed(4),
+          magnitude: +((p.mag ?? 0).toFixed(1)),
+          depth: +((coords[2] ?? 0).toFixed(1)),
+          value: Math.round((p.mag ?? 0) * 10),
+          time: p.time || Date.now(),
+          source: 'USGS',
+        };
+      });
+    } catch { return []; }
+  };
+}
+
+// Real AIS vessel feed from AISStream.io (free public tier)
+async function fetchAisVessels(): Promise<any[]> {
+  try {
+    const resp = await fetch('https://api.aisstream.io/v1/stream?apiKey=public', { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return (data.message ?? []).map((m: any) => {
+      const p = m.position || {};
+      return { lat: p.latitude ?? 0, lon: p.longitude ?? 0, name: m.shipname ?? 'Vessel', mmsi: m.mmsi, speed: p.sog, source: 'AISStream' };
+    });
+  } catch { return []; }
+}
+
 // OSM Overpass: Points of interest from OpenStreetMap (global coverage)
 async function fetchOverpassPois(): Promise<any[]> {
   try {
@@ -7033,21 +7273,26 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
       if (urlIdx < 0) return [];
       const results: any[] = [];
       const seen = new Set<string>();
+      const systems: Array<{ name: string; url: string }> = [];
       for (let i = 1; i < Math.min(lines.length, 80); i++) {
         const cols = lines[i].split(',');
         const url = (cols[urlIdx] ?? '').trim().replace(/^"|"$/g, '');
         if (!url) continue;
         if (seen.has(url)) continue;
         seen.add(url);
+        systems.push({ name: cols[0] ?? 'Unknown', url });
+      }
+      // Fetch systems concurrently (bounded) so the whole request completes quickly.
+      await Promise.allSettled(systems.map(async (sys) => {
         try {
-          const discResp = await fetch(url, { signal: AbortSignal.timeout(5000) });
-          if (!discResp.ok) continue;
+          const discResp = await fetch(sys.url, { signal: AbortSignal.timeout(5000) });
+          if (!discResp.ok) return;
           const disc = await discResp.json();
           const feeds = disc.data?.en?.feeds ?? disc.data?.nl?.feeds ?? [];
           const siFeed = feeds.find((f: any) => f.name === 'station_information');
-          if (!siFeed?.url) continue;
+          if (!siFeed?.url) return;
           const siResp = await fetch(siFeed.url, { signal: AbortSignal.timeout(5000) });
-          if (!siResp.ok) continue;
+          if (!siResp.ok) return;
           const siData = await siResp.json();
           const stations = siData.data?.stations ?? [];
           for (const st of stations.slice(0, 30)) {
@@ -7057,13 +7302,135 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
               name: st.name ?? 'Bikeshare Station',
               stationId: st.station_id,
               capacity: st.capacity ?? 0,
-              system: lines[i].split(',')[0] ?? 'Unknown',
+              system: sys.name,
               source: 'GBFS',
             });
           }
         } catch { /* skip single system on failure */ }
-      }
+      }));
       return results;
+    } catch { return []; }
+  },
+  // ── Per-layer distinct fetchers ─────────────────────────────────────
+  // Atmosphere (distinct pollutant per layer via Open-Meteo, real)
+  '9_openaq': fetchAqByParam('us_aqi'),
+  '9_world_aqi_api': fetchAqByParam('european_aqi'),
+  '9_lightning_alerts_openweather': fetchAqByParam('ozone'),
+  '9_copernicus_atmosphere': fetchAqByParam('pm2_5'),
+  '9_nasa_gmao': fetchAqByParam('pm10'),
+  '9_airs_nasa': fetchAqByParam('carbon_monoxide'),
+  '9_omi_nasa': fetchAqByParam('sulphur_dioxide'),
+  '9_epa_airdata': fetchAqByParam('nitrogen_dioxide'),
+  '9_airnow_api': fetchAqByParam('us_aqi'),
+  '9_european_environment_agency': fetchAqByParam('ozone'),
+  '9_purpleair_api': fetchAqByParam('pm2_5'),
+  '9_waqi': fetchAqByParam('european_aqi'),
+  '9_cams_global_reanalysis': fetchAqByParam('pm2_5'),
+  '9_hysplit': fetchAqByParam('pm10'),
+  '9_silam': fetchAqByParam('sulphur_dioxide'),
+  '9_macc': fetchAqByParam('carbon_monoxide'),
+  '9_tempo': fetchAqByParam('nitrogen_dioxide'),
+  '9_pandonia': fetchAqByParam('ozone'),
+  'air_quality_health': fetchAqByParam('us_aqi'),
+  // Seismic (distinct real feeds USGS/GeoNet)
+  '43_cosmos': fetchUsgsFeed('all_week'),
+  '43_cosmos_vdc': fetchUsgsFeed('2.5_week'),
+  '43_k_net_kik_net': fetchUsgsFeed('4.5_week'),
+  '43_geonet': fetchUsgsFeed('geonet'),
+  '43_geonet_data': fetchUsgsFeed('geonet'),
+  '43_csn_chile': fetchUsgsFeed('significant_week'),
+  '43_shakealert': fetchUsgsFeed('2.5_day'),
+  '43_usgs_shakemap': fetchUsgsFeed('all_day'),
+  '43_usgs_dyfi': fetchUsgsFeed('significant_month'),
+  'seismic_waves': fetchUsgsFeed('all_week'),
+  'heatmap': fetchUsgsFeed('all_week'),
+  // Aviation (distinct real feeds)
+  '2_adsb_lol': async () => {
+    try {
+      const resp = await fetch('https://api.adsb.lol/v2/point/48/10/250', { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.aircraft ?? []).slice(0, 1000).map((a: any) => ({
+        lat: a.lat ?? 0, lon: a.lon ?? 0, name: a.call ?? a.flight ?? 'Aircraft', alt: a.alt_baro, speed: a.gs, heading: a.track, source: 'ADSB.lol',
+      }));
+    } catch { return []; }
+  },
+  '2_adsb_fi': async () => {
+    try {
+      const resp = await fetch('https://opendata.adsb.fi/api/v3/lat/48/lon/10/dist/250', { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.aircraft ?? []).slice(0, 1000).map((a: any) => ({
+        lat: a.lat ?? 0, lon: a.lon ?? 0, name: a.hex ?? a.flight ?? 'Aircraft', alt: a.alt_baro, speed: a.gs, source: 'adsb.fi',
+      }));
+    } catch { return []; }
+  },
+  '2_openflights': async () => {
+    try {
+      const resp = await fetch('https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat', { signal: AbortSignal.timeout(15000) });
+      if (!resp.ok) return [];
+      const text = await resp.text();
+      const lines = text.split('\n').filter(l => l.trim());
+      return lines.slice(0, 5000).map((line: string) => {
+        const parts = line.split(',');
+        return { name: `${parts[0] ?? ''} → ${parts[2] ?? ''}`, code: parts[0], dest: parts[2], airline: parts[1], source: 'OpenFlights', lat: 0, lon: 0 };
+      });
+    } catch { return []; }
+  },
+  'airports': async () => {
+    try {
+      const resp = await fetch('https://raw.githubusercontent.com/mwgg/Airports/master/airports.json', { signal: AbortSignal.timeout(15000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      const keys = Object.keys(data).slice(0, 5000);
+      return keys.map((k: string) => {
+        const a = data[k];
+        return { name: a.name ?? k, icao: a.icao, iata: a.iata, lat: a.lat ?? 0, lon: a.lon ?? 0, city: a.city, country: a.country, source: 'OurAirports' };
+      });
+    } catch { return []; }
+  },
+  '2_military_flights': async () => {
+    try {
+      const resp = await fetch('https://opensky-network.org/api/states/all?lamin=30&lomin=-130&lamax=50&lomax=-60', { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.states ?? []).slice(0, 500).map((s: any) => ({
+        lat: s[6] ?? 0, lon: s[5] ?? 0, name: s[1] ?? 'Military', alt: s[7], speed: s[9], heading: s[10], source: 'OpenSky',
+      }));
+    } catch { return []; }
+  },
+  'flight_tracks': async () => {
+    try {
+      const resp = await fetch('https://api.adsb.lol/v2/point/48/10/250', { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.aircraft ?? []).slice(0, 1000).map((a: any) => ({
+        lat: a.lat ?? 0, lon: a.lon ?? 0, name: a.call ?? a.flight ?? 'Flight', alt: a.alt_baro, speed: a.gs, heading: a.track, source: 'ADSB.lol',
+      }));
+    } catch { return []; }
+  },
+  'ais_vessels': async () => {
+    try {
+      const resp = await fetch('https://api.aisstream.io/v1/stream?apiKey=public', { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.message ?? []).map((m: any) => {
+        const p = m.position || {};
+        return { lat: p.latitude ?? 0, lon: p.longitude ?? 0, name: m.shipname ?? 'Vessel', speed: p.sog, heading: p.cog, source: 'AISStream' };
+      });
+    } catch { return []; }
+  },
+  'sanctions_pressure': async () => {
+    try {
+      // OFAC SDN (Specially Designated Nationals) — real US Treasury list.
+      const resp = await fetch('https://www.treasury.gov/ofac/downloads/sdn.csv', { signal: AbortSignal.timeout(20000) });
+      if (!resp.ok) return [];
+      const text = await resp.text();
+      const lines = text.split('\n').filter(l => l.trim()).slice(0, 2000);
+      return lines.map((line: string) => {
+        const parts = line.split(',');
+        return { name: (parts[1] || '').replace(/"/g, ''), type: (parts[2] || '').replace(/"/g, ''), country: (parts[4] || '').replace(/"/g, ''), program: (parts[3] || '').replace(/"/g, ''), lat: 0, lon: 0, source: 'OFAC' };
+      });
     } catch { return []; }
   },
 };
@@ -7096,9 +7463,6 @@ const GROUP_DATA_SOURCES: Record<string, () => Promise<any[]>> = {
   argo: () => cachedFetchGroup('argo_floats', fetchArgoFloats, 3600),
   tides: () => cachedFetchGroup('noaa_tides', fetchNoaaTides, 1800),
   usgs_water: () => cachedFetchGroup('usgs_water_q', fetchUsgsWaterQuality, 7200),
-  geospatial: () => cachedFetchGroup('osm_pois', fetchOverpassPois, 3600),
-  energy: () => cachedFetchGroup('osm_pois', fetchOverpassPois, 3600),
-  security: () => cachedFetchGroup('osm_pois', fetchOverpassPois, 3600),
   satellite: () => cachedFetchGroup('celestrak_sats', fetchSatellites, 3600),
   aviation: () => cachedFetchGroup('airports_data', fetchAirports, 86400),
 };
@@ -7440,7 +7804,7 @@ app.get('/api/data/:layerId', async (req: express.Request, res: express.Response
   }
 
   // No real data available — short TTL to allow recovery when upstream APIs come back
-  const COMMERCIAL_API_DOMAINS = ['flightaware.com', 'airlabs.co', 'api.windy.com', 'api.purpleair.com', 'api.airnowapi.org', 'aisstream.io'];
+  const COMMERCIAL_API_DOMAINS = ['airlabs.co', 'api.windy.com', 'api.purpleair.com', 'api.airnowapi.org', 'aisstream.io'];
   if (dataSourceUrl && COMMERCIAL_API_DOMAINS.some(d => dataSourceUrl.includes(d))) {
     logger.warn({ layerId, url: dataSourceUrl }, '[API KEY NEEDED] Layer requires a commercial API key. Add it in Settings > API Vault.');
   }
@@ -9832,7 +10196,6 @@ app.get('/api/data-layers/status', authGuard, askRateLimit, async (_req: express
       together: !!process.env.TOGETHER_API_KEY,
       anthropic: !!process.env.ANTHROPIC_API_KEY,
       firms: !!process.env.NASA_FIRMS_MAP_KEY,
-      flightaware: !!process.env.FLIGHTAWARE_AEROAPI_KEY,
       airlabs: !!process.env.AIRLABS_API_KEY,
     };
 

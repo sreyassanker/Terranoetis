@@ -262,6 +262,16 @@ const LAYER_DEFS: LayerItem[] = LAYER_CATEGORIES.map(lc => {
   };
 });
 
+// Static/reference layers: tile/3dtiles/effect/panel imagery + fixed geodata.
+// The camera does NOT fly to these when toggled on.
+const STATIC_LAYER_IDS = new Set<string>([
+  ...LAYER_CATEGORIES.filter(l => ['tile','3dtiles','effect','panel'].includes(l.type)).map(l => l.id),
+  'tectonic','airports','airspaces','submarine_cables','energy_pipelines_oil','energy_pipelines_gas',
+  'radio_stations','bikeshare','military_bases','electricity_grid','16_macrostrat','16_pbdb',
+  'population_impact','disaster_near_me','tomtom_traffic','animal_migrations','live_media',
+  'detection_overlay','smoke_dispersion',
+]);
+
 const LEGACY_VAULT_KEYS = 'terranoetis.apiKeys.v1';
 const LEGACY_VAULT_STATE = 'terranoetis.apiVault.v1';
 const SESSION_VAULT_KEY = 'worldmonitor.vault.v1';
@@ -1169,7 +1179,6 @@ export default function App() {
   const flightDrRef = useRef<FlightDeadReckoning | null>(null);
   const adsbLolDrRef = useRef<FlightDeadReckoning | null>(null);
   const adsbFiDrRef = useRef<FlightDeadReckoning | null>(null);
-  const flightawareDrRef = useRef<FlightDeadReckoning | null>(null);
   const airlabsDrRef = useRef<FlightDeadReckoning | null>(null);
   const aisTrackerRef = useRef<AisVesselTracker | null>(null);
   const ghostProtocolRef = useRef<GhostProtocol | null>(null);
@@ -2057,7 +2066,7 @@ export default function App() {
     forkRendererRef.current.setImageryGetter(() => overlayImageryLayersRef.current);
     forkRendererRef.current.setTilesetsGetter(() => {
       const ts = getOsmBuildingsTileset();
-      return ts ? [ts] : [];
+      return ts ? [{ tileset: ts, layerId: 'dt_buildings' }] : [];
     });
     forkRendererRef.current.setSkipLayers(['live_media', 'weather_cards', 'india_cctv']);
     ghostProtocolRef.current = new GhostProtocol(v);
@@ -2091,7 +2100,6 @@ export default function App() {
     flightDrRef.current = new FlightDeadReckoning(v);
     adsbLolDrRef.current = new FlightDeadReckoning(v);
     adsbFiDrRef.current = new FlightDeadReckoning(v);
-    flightawareDrRef.current = new FlightDeadReckoning(v);
     airlabsDrRef.current = new FlightDeadReckoning(v);
     const aisKey = apiVaultRef.current.keys.AIS_STREAM_API_KEY || '';
     if (aisKey) {
@@ -3274,7 +3282,6 @@ export default function App() {
     if (isLayerEnabled('flight_tracks')) await loadFlightTracks(viewer);
     if (isLayerEnabled('2_adsb_lol')) await loadAdsbLolFlights(viewer);
     if (isLayerEnabled('2_adsb_fi')) await loadAdsbFiFlights(viewer);
-    if (isLayerEnabled('2_flightaware_aeroapi')) await loadFlightawareFlights(viewer);
     if (isLayerEnabled('2_airlabs_api')) await loadAirlabsFlights(viewer);
     if (isLayerEnabled('2_military_flights')) await loadMilitaryFlights(viewer);
     if (isLayerEnabled('ucdp_conflict')) await loadUcdp(viewer);
@@ -3957,7 +3964,11 @@ export default function App() {
 
   const showInfoPanel = useCallback((entity: Cesium.Entity) => {
     const props = entity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-    if (!props) return;
+    if (!props || Object.keys(props).length === 0) {
+      setInfoEntity(null);
+      entityTrackerRef.current?.untrack();
+      return;
+    }
     setInfoEntity(entity);
     focusPanel('info');
 
@@ -5336,6 +5347,7 @@ export default function App() {
     if (!wasOn) {
       forkRendererRef.current?.showLayer(layerId);
       loadLayerData(layerId);
+      scheduleFlyToLayer(layerId);
     } else {
       forkRendererRef.current?.hideLayer(layerId);
       hideLayerEntities(layerId);
@@ -5383,7 +5395,12 @@ export default function App() {
     const gen = (layerGenRef.current[layerId] = (layerGenRef.current[layerId] || 0) + 1);
     fetchLayerData(layer).then(async (items) => {
       if (layerGenRef.current[layerId] !== gen) return;
-      if (!isLayerEnabled(layerId) || !items.length) return;
+      if (!isLayerEnabled(layerId)) return;
+      if (!items.length) {
+        recordFeedError(layerId, new Error('no data returned'));
+        showNotification(`${layer.label} — no data available from upstream`, 'warning');
+        return;
+      }
       const keys = Object.keys(layerDataCacheRef.current);
       if (keys.length > LAYER_CACHE_MAX) {
         for (const k of keys.slice(0, keys.length - LAYER_CACHE_MAX)) delete layerDataCacheRef.current[k];
@@ -5395,14 +5412,85 @@ export default function App() {
         entityStoreRef.current[layerId] = ents;
         throttledRender(viewer);
         enforceEntityCap();
-        // Debounce zoomTo — only zoom if 3+ seconds since last zoom
-        const now = Date.now();
-        if (now - lastZoomToRef.current > 3000) {
-          lastZoomToRef.current = now;
-          viewer.zoomTo(ents);
-        }
       }
     }).catch((e: any) => console.warn(`Failed to load generic layer ${layerId}:`, e));
+  }
+
+  /**
+   * Fly the camera to a data layer's rendered entities on the 3D globe.
+   * Only dynamic layers trigger this — static/reference layers keep the
+   * camera where it is.
+   */
+  function flyToLayerEntities(layerId: string) {
+    const v = viewerRef.current;
+    if (!v) return;
+    if (STATIC_LAYER_IDS.has(layerId)) return;
+
+    // Collect positions from entityStoreRef (point/geojson layers)
+    const ents = entityStoreRef.current[layerId];
+    const positions: Cesium.Cartesian3[] = [];
+    const clock = v.clock;
+
+    if (ents?.length) {
+      for (const e of ents) {
+        const pos = e.position?.getValue(clock.currentTime);
+        if (pos && Cesium.defined(pos)) positions.push(pos);
+      }
+    }
+
+    // Also collect positions from FlightDeadReckoning for aviation layers
+    const drMap: Record<string, React.MutableRefObject<FlightDeadReckoning | null>> = {
+      'flight_tracks': flightDrRef,
+      '2_adsb_lol': adsbLolDrRef,
+      '2_adsb_fi': adsbFiDrRef,
+      '2_airlabs_api': airlabsDrRef,
+    };
+    const drRef = drMap[layerId];
+    if (drRef?.current) {
+      const flights = drRef.current.getFlightsSnapshot();
+      for (const f of flights) {
+        if (Number.isFinite(f.lat) && Number.isFinite(f.lon)) {
+          positions.push(Cesium.Cartesian3.fromDegrees(f.lon, f.lat, f.alt || 0));
+        }
+      }
+    }
+
+    if (!positions.length) return;
+    const now = Date.now();
+    if (now - lastZoomToRef.current < 3000) return;
+    lastZoomToRef.current = now;
+
+    try {
+      const sphere = Cesium.BoundingSphere.fromPoints(positions);
+      if (!Number.isFinite(sphere.radius) || sphere.radius <= 0) return;
+      const range = Math.max(sphere.radius * 3.5, 20000);
+      v.camera.flyToBoundingSphere(sphere, {
+        duration: 1.6,
+        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), range),
+      });
+    } catch {
+      /* camera move is best-effort */
+    }
+  }
+
+  /** Schedule a fly-to once the layer's entities have been rendered. */
+  function scheduleFlyToLayer(layerId: string) {
+    if (STATIC_LAYER_IDS.has(layerId)) return;
+    if (entityStoreRef.current[layerId]?.length) {
+      flyToLayerEntities(layerId);
+      return;
+    }
+    // Retry briefly while async loaders populate entityStoreRef.
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      if (entityStoreRef.current[layerId]?.length) {
+        window.clearInterval(timer);
+        flyToLayerEntities(layerId);
+      } else if (attempts > 30) {
+        window.clearInterval(timer);
+      }
+    }, 200);
   }
 
   function loadLayerData(layerId: string) {
@@ -5423,6 +5511,7 @@ export default function App() {
       loadPopulationImpact(v);
       setLayerEntitiesVisible('population_impact', true);
       setShowPopulationImpact(true);
+      return;
     } else if (layerId === 'heatmap' && entityStoreRef.current['earthquakes']) {
       if (entityStoreRef.current['heatmap']?.length) {
         entityStoreRef.current['heatmap'].forEach(e => { if (e) e.show = true; });
@@ -5430,6 +5519,7 @@ export default function App() {
       } else {
         generateHeatmap(v);
       }
+      return;
     } else if (layerId === 'intel_feed') {
       setShowIntelFeed(true); focusPanel('intel-feed');
       const v = viewerRef.current;
@@ -5438,9 +5528,10 @@ export default function App() {
       if (!entityStoreRef.current['wildfires']?.length && !entityStoreRef.current['severe_storms']?.length) loadEonetEvents(v);
       if (!entityStoreRef.current['disaster_alerts']) loadNwsAlerts(v);
       if (!entityStoreRef.current['space_weather']?.length) loadSpaceWeather(v);
-
+      return;
     } else if (layerId === 'disaster_alerts') {
       entityStoreRef.current['disaster_alerts']?.forEach(e => { if (e) e.show = true; });
+      return;
     } else if (layerId === 'india_cctv') {
       if (!showExisting('india_cctv')) void loadIndiaCctv(v);
       return;
@@ -5477,6 +5568,7 @@ export default function App() {
       return;
     } else if (layerId === 'disaster_near_me') {
       renderDisasterNearMeLayer();
+      return;
     } else if (layerId === 'flight_tracks') {
       if (!showExisting('flight_tracks')) void loadFlightTracks(v);
       return;
@@ -5485,9 +5577,6 @@ export default function App() {
       return;
     } else if (layerId === '2_adsb_fi') {
       if (!showExisting('2_adsb_fi')) void loadAdsbFiFlights(v);
-      return;
-    } else if (layerId === '2_flightaware_aeroapi') {
-      if (!showExisting('2_flightaware_aeroapi')) void loadFlightawareFlights(v);
       return;
     } else if (layerId === '2_airlabs_api') {
       if (!showExisting('2_airlabs_api')) void loadAirlabsFlights(v);
@@ -5551,20 +5640,27 @@ export default function App() {
           recordFeedError('tectonic plates', err);
         });
       }
+      return;
     } else if (layerId === 'earthquakes') {
       if (!showExisting('earthquakes')) {
         void loadEarthquakes(v);
       }
+      return;
     } else if (['wildfires','severe_storms','volcanoes','floods','dust','seaLakeIce'].includes(layerId)) {
       if (!showExisting(layerId)) {
         void loadEonetEvents(v);
       }
+      return;
     } else if (layerId === 'airports') {
-      showExisting('airports');
+      if (!showExisting('airports')) {
+        loadGenericLayer(v, layerId);
+      }
+      return;
     } else if (layerId === 'space_weather') {
       if (!showExisting('space_weather')) {
         void loadSpaceWeather(v);
       }
+      return;
     } else if (['12_nhc_tropical_cyclone_data','12_ibtracs'].includes(layerId)) {
       if (!showExisting(layerId)) void loadWeatherStorms(v, layerId);
       return;
@@ -5783,9 +5879,6 @@ export default function App() {
     }
     if (layerId === '2_adsb_fi') {
       adsbFiDrRef.current?.clear();
-    }
-    if (layerId === '2_flightaware_aeroapi') {
-      flightawareDrRef.current?.clear();
     }
     if (layerId === '2_airlabs_api') {
       airlabsDrRef.current?.clear();
@@ -6342,11 +6435,9 @@ export default function App() {
     drRef.current?.clear();
     removeLayerEntities(layerId);
     try {
-      const fetchOpts: RequestInit | undefined = layerId === '2_flightaware_aeroapi'
-        ? { headers: { 'x-aeroapi-key': getApiKey('FLIGHTAWARE_AEROAPI_KEY') || '' } }
-        : layerId === '2_airlabs_api'
-          ? { headers: { 'x-airlabs-key': getApiKey('AIRLABS_API_KEY') || '' } }
-          : undefined;
+      const fetchOpts: RequestInit | undefined = layerId === '2_airlabs_api'
+        ? { headers: { 'x-airlabs-key': getApiKey('AIRLABS_API_KEY') || '' } }
+        : undefined;
       const cam = viewer.camera.positionCartographic;
       const lat = cam ? (cam.latitude * 180 / Math.PI).toFixed(2) : '';
       const lon = cam ? (cam.longitude * 180 / Math.PI).toFixed(2) : '';
@@ -6367,10 +6458,6 @@ export default function App() {
 
   async function loadAirlabsFlights(viewer: Cesium.Viewer) {
     return loadAviationLayer(viewer, '2_airlabs_api', '/airlabs', airlabsDrRef);
-  }
-
-  async function loadFlightawareFlights(viewer: Cesium.Viewer) {
-    return loadAviationLayer(viewer, '2_flightaware_aeroapi', '/flightaware', flightawareDrRef);
   }
 
   async function loadAdsbLolFlights(viewer: Cesium.Viewer) {
@@ -8837,7 +8924,6 @@ case 'openPanel':
       try { flightDrRef.current?.clear(); } catch { /* ignore */ }
       try { adsbLolDrRef.current?.clear(); } catch { /* ignore */ }
       try { adsbFiDrRef.current?.clear(); } catch { /* ignore */ }
-      try { flightawareDrRef.current?.clear(); } catch { /* ignore */ }
       try { airlabsDrRef.current?.clear(); } catch { /* ignore */ }
       try { removeOsmBuildings(v); } catch { /* ignore */ }
       try { v.entities.removeAll(); } catch { /* ignore */ }
@@ -8854,7 +8940,6 @@ case 'openPanel':
     flightDrRef.current = null;
     adsbLolDrRef.current = null;
     adsbFiDrRef.current = null;
-    flightawareDrRef.current = null;
     airlabsDrRef.current = null;
     forkRendererRef.current = null;
     ghostProtocolRef.current = null;
@@ -8874,7 +8959,7 @@ case 'openPanel':
     if (!infoEntity) return null;
     try {
       const p = infoEntity.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-      if (!p) return <div className="cctv-preview-empty">No data available</div>;
+      if (!p || Object.keys(p).length === 0) return null;
       const cctvMeta = p.layer === 'india_cctv' ? cctvMetaRef.current.get(infoEntity.id) : null;
       if (p.layer === 'india_cctv' && cctvMeta) {
         Object.assign(p, cctvMeta);
@@ -9507,15 +9592,10 @@ case 'openPanel':
                       onClick={() => toggleLayer(layer.id)}>
                       <div className="layer-dot" style={{background:layer.color,boxShadow:layer.on ? `0 0 8px ${layer.color}` : 'none'}} />
                       <div style={{flex:1}}>
-                        <div className="layer-label">{layer.label}</div>
+                        <div className="layer-label">{layer.label.replace(/\sAPI$/i, '')}</div>
                         {layer.sub && <div className="layer-sub">{layer.sub}</div>}
                       </div>
                       <div className="layer-controls">
-                        {layer.badge && <span className={`layer-badge badge-${layer.badge.toLowerCase()}`}>{layer.badge}</span>}
-                        {layer.badge === 'LIVE' && <div className="layer-status">
-                          <div className="live-dot" />
-                          <span>Live</span>
-                        </div>}
                         {layer.type === 'tile' && layer.on && (
                           <div className="opacity-wrap">
                             <span className="opacity-label">{(layerOpacity[layer.id] ?? layer.opacity) * 100 >> 0}%</span>

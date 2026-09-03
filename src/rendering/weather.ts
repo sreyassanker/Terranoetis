@@ -97,7 +97,6 @@ export function addStormTrackEntities(
   const ents: Cesium.Entity[] = [];
   storms.forEach((storm) => {
     const track = storm.track || storm.positions || storm.coordinates || [];
-    if (track.length < 2) return;
     const positions = track
       .map((pt) => {
         const lon = pt.lon ?? pt.longitude ?? Number(pt[0]);
@@ -106,6 +105,38 @@ export function addStormTrackEntities(
         return Cesium.Cartesian3.fromDegrees(lon, lat);
       })
       .filter(Boolean) as Cesium.Cartesian3[];
+
+    // A storm with no multi-point track is still a live point (e.g. NHC
+    // CurrentStorms) — render it as a marker so the layer always appears.
+    if (positions.length === 1) {
+      const marker = viewer.entities.add({
+        position: positions[0],
+        name: storm.name || 'Storm Center',
+        billboard: {
+          image: createColoredDot('#ef4444', 16),
+          width: 16,
+          height: 16,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        },
+        label: {
+          text: `${storm.name || 'Storm'}${storm.category ? ` (Cat ${storm.category})` : ''}`,
+          font: '10px Inter, sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          pixelOffset: new Cesium.Cartesian2(0, -14),
+        },
+        properties: {
+          layer: layerId,
+          name: storm.name || 'Storm',
+          windSpeed: storm.windSpeed || 0,
+          pressure: storm.pressure || 0,
+          isStormCenter: true,
+        },
+      });
+      ents.push(marker);
+      return;
+    }
 
     if (positions.length < 2) return;
 

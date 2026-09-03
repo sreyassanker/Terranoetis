@@ -46,7 +46,7 @@ export class ForkRenderer {
   /** Getter for overlay imagery layers (WMS/XYZ tiles) — keyed by layerId. */
   private imageryGetter: (() => Record<string, Cesium.ImageryLayer>) | null = null;
   /** Getter for extra 3D tilesets (e.g. OSM buildings) that should be cropped. */
-  private tilesetsGetter: (() => Cesium.Cesium3DTileset[]) | null = null;
+  private tilesetsGetter: (() => Array<{ tileset: Cesium.Cesium3DTileset; layerId: string }>) | null = null;
   private skipLayers: Set<string> = new Set();
   private hiddenLayers: Set<string> = new Set();
 
@@ -65,7 +65,7 @@ export class ForkRenderer {
   }
 
   /** Provide 3D tilesets (e.g. OSM buildings) so they can be cropped. */
-  setTilesetsGetter(getter: () => Cesium.Cesium3DTileset[]): void {
+  setTilesetsGetter(getter: () => Array<{ tileset: Cesium.Cesium3DTileset; layerId: string }>): void {
     this.tilesetsGetter = getter;
   }
 
@@ -722,9 +722,13 @@ export class ForkRenderer {
     }
 
     // 5) 3D tilesets (e.g. OSM buildings) — also full-coverage; hide when cropping.
+    //    Also respect per-layer toggle: a hidden layer's tileset stays hidden even
+    //    when no fork dome is active.
     if (this.tilesetsGetter) {
-      for (const ts of this.tilesetsGetter()) {
-        if (ts) ts.show = !hasForks;
+      for (const { tileset: ts, layerId } of this.tilesetsGetter()) {
+        if (!ts) continue;
+        const layerHidden = this.hiddenLayers.has(layerId);
+        ts.show = !hasForks && !layerHidden && (restoreVisibility || ts.show);
       }
     }
 

@@ -25,7 +25,6 @@ export const VAULT_KEY_NAMES = [
   // Aviation
   'OPENSKY_CLIENT_ID',
   'OPENSKY_CLIENT_SECRET',
-  'FLIGHTAWARE_AEROAPI_KEY',
   'AIRLABS_API_KEY',
   'AVIATIONSTACK_API',
   'ICAO_API_KEY',
@@ -143,12 +142,12 @@ const VAULT_KEY_ENV_ALIASES: Record<string, string[]> = {
 
 function resolveEnvVar(vaultKey: string): string {
   const direct = process.env[vaultKey];
-  if (direct) return direct;
+  if (direct) return direct.trim();
   const aliases = VAULT_KEY_ENV_ALIASES[vaultKey];
   if (aliases) {
     for (const alias of aliases) {
       const val = process.env[alias];
-      if (val) return val;
+      if (val) return val.trim();
     }
   }
   return '';
@@ -164,7 +163,11 @@ function ensureProfile(userId: string): void {
   }
 }
 
-/** Server-side vault lookup — reads per-user keys from DB, falling back to env vars. */
+/**
+ * Server-side vault lookup — sources API keys strictly from the environment
+ * (.env). Per-user DB entries are only used when no env value exists, so the
+ * deployment's .env remains the single source of truth for secrets.
+ */
 export function readVault(userId: string): Record<string, string> {
   const row = getDb()
     .prepare('SELECT json_data FROM profiles WHERE user_id = ?')
@@ -174,9 +177,11 @@ export function readVault(userId: string): Record<string, string> {
     const vault = data.api_vault ?? {};
     const out: Record<string, string> = {};
     for (const k of VAULT_KEY_NAMES) {
-      out[k] = typeof vault[k] === 'string' && vault[k] !== ''
-        ? vault[k]
-        : resolveEnvVar(k);
+      const envVal = resolveEnvVar(k);
+      // .env wins; only fall back to a stored per-user key when env is unset.
+      out[k] = envVal !== ''
+        ? envVal
+        : (typeof vault[k] === 'string' && vault[k] !== '' ? vault[k] : '');
     }
     return out;
   } catch (e) {

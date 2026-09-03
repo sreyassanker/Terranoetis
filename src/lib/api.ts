@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_PROXY ?? '/api';
+const API_BASE = import.meta.env.VITE_API_PROXY || '/api';
 
 /** Direct upstream URLs used when the local proxy is down or misconfigured */
 const DIRECT_SOURCES: Record<string, string> = {
