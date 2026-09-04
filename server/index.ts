@@ -6704,83 +6704,6 @@ async function fetchOpenAQ(): Promise<any[]> {
   return results;
 }
 
-// Per-layer air-quality fetcher: returns a distinct pollutant for each 9_* atmosphere layer.
-const AQ_POLLUTANT_MAP: Record<string, string> = {
-  '9_openaq': 'us_aqi',
-  '9_world_aqi_api': 'european_aqi',
-  '9_lightning_alerts_openweather': 'ozone',
-  '9_copernicus_atmosphere': 'pm2_5',
-  '9_nasa_gmao': 'pm10',
-  '9_airs_nasa': 'carbon_monoxide',
-  '9_omi_nasa': 'sulphur_dioxide',
-  '9_epa_airdata': 'nitrogen_dioxide',
-  '9_airnow_api': 'us_aqi',
-  '9_european_environment_agency': 'ozone',
-  '9_purpleair_api': 'pm2_5',
-  '9_waqi': 'european_aqi',
-  '9_cams_global_reanalysis': 'pm2_5',
-  '9_hysplit': 'pm10',
-  '9_silam': 'sulphur_dioxide',
-  '9_macc': 'carbon_monoxide',
-  '9_tempo': 'nitrogen_dioxide',
-  '9_pandonia': 'ozone',
-  'air_quality_health': 'us_aqi',
-};
-
-function fetchAqByParam(param: string): () => Promise<any[]> {
-  return async () => {
-    const results: any[] = [];
-    const batchSize = 10;
-    for (let i = 0; i < WORLD_CITIES_AQ.length; i += batchSize) {
-      const batch = WORLD_CITIES_AQ.slice(i, i + batchSize);
-      const promises = batch.map(async (city: any) => {
-        try {
-          const resp = await fetch(
-            `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${city.lat}&longitude=${city.lon}&current=${param}`,
-            { signal: AbortSignal.timeout(10000) },
-          );
-          if (!resp.ok) return null;
-          const data: any = await resp.json();
-          const cur = data.current;
-          if (!cur) return null;
-          const value = param.includes('_aqi') ? cur[param] : cur[param];
-          if (value == null) return null;
-          return {
-            id: `aq_${city.name.replace(/[^a-zA-Z0-9]/g, '_')}_${param}`,
-            name: city.name,
-            lat: +city.lat.toFixed(4),
-            lon: +city.lon.toFixed(4),
-            value,
-            magnitude: Math.min(value / 100, 1),
-            type: 'air_quality',
-            parameter: param,
-            source: 'Open-Meteo',
-            timestamp: cur.time ? new Date(cur.time).getTime() : Date.now(),
-          };
-        } catch { return null; }
-      });
-      const batchResults = await Promise.all(promises);
-      for (const r of batchResults) { if (r) results.push(r); }
-    }
-    return results;
-  };
-}
-
-// Per-layer USGS earthquake feed fetcher: each seismic 43_* layer gets a distinct real feed.
-const USGS_FEED_MAP: Record<string, string> = {
-  '43_cosmos': 'all_week',
-  '43_cosmos_vdc': '2.5_week',
-  '43_k_net_kik_net': '4.5_week',
-  '43_geonet': 'geonet',
-  '43_geonet_data': 'geonet',
-  '43_csn_chile': 'significant_week',
-  '43_shakealert': '2.5_day',
-  '43_usgs_shakemap': 'all_day',
-  '43_usgs_dyfi': 'significant_month',
-  'seismic_waves': 'all_week',
-  'heatmap': 'all_week',
-};
-
 async function fetchGeoNetQuakes(): Promise<any[]> {
   try {
     const resp = await fetch('https://api.geonet.org.nz/quake?MMI=3', { signal: AbortSignal.timeout(10000) });
@@ -6805,8 +6728,37 @@ async function fetchGeoNetQuakes(): Promise<any[]> {
   } catch { return []; }
 }
 
+// GeoNet Volcano Alert Level (VAL) feed — real NZ volcano status from
+// api.geonet.org.nz. Distinct product from the quake feed above.
+async function fetchGeoNetVolcano(): Promise<any[]> {
+  try {
+    const resp = await fetch('https://api.geonet.org.nz/volcano/val', { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) return [];
+    const data: any = await resp.json();
+    const features = data.features ?? [];
+    return features.map((f: any) => {
+      const p = f.properties || {};
+      const coords = f.geometry?.coordinates || [];
+      const levelMap: Record<string, number> = { '0': 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5 };
+      const level = levelMap[String(p.level ?? 0)] ?? 0;
+      return {
+        id: `geonet_vol_${p.volcanoID ?? ''}`,
+        name: p.volcanoTitle ?? 'NZ Volcano',
+        lat: +coords[1]?.toFixed(4) || 0,
+        lon: +coords[0]?.toFixed(4) || 0,
+        level,
+        value: level * 20,
+        activity: p.activity ?? '',
+        hazards: p.hazards ?? '',
+        alert: String(p.acc ?? 'green'),
+        time: Date.now(),
+        source: 'GeoNet NZ Volcano',
+      };
+    });
+  } catch { return []; }
+}
+
 function fetchUsgsFeed(feedName: string): () => Promise<any[]> {
-  if (feedName === 'geonet') return fetchGeoNetQuakes;
   return async () => {
     try {
       const resp = await fetch(
@@ -7537,35 +7489,14 @@ const LAYER_FETCHERS: Record<string, () => Promise<any[]>> = {
   },
   // ── Per-layer distinct fetchers ─────────────────────────────────────
   // Atmosphere (distinct pollutant per layer via Open-Meteo, real)
-  '9_openaq': fetchAqByParam('us_aqi'),
-  '9_world_aqi_api': fetchAqByParam('european_aqi'),
-  '9_lightning_alerts_openweather': fetchAqByParam('ozone'),
-  '9_copernicus_atmosphere': fetchAqByParam('pm2_5'),
-  '9_nasa_gmao': fetchAqByParam('pm10'),
-  '9_airs_nasa': fetchAqByParam('carbon_monoxide'),
-  '9_omi_nasa': fetchAqByParam('sulphur_dioxide'),
-  '9_epa_airdata': fetchAqByParam('nitrogen_dioxide'),
-  '9_airnow_api': fetchAqByParam('us_aqi'),
-  '9_european_environment_agency': fetchAqByParam('ozone'),
-  '9_purpleair_api': fetchAqByParam('pm2_5'),
-  '9_waqi': fetchAqByParam('european_aqi'),
-  '9_cams_global_reanalysis': fetchAqByParam('pm2_5'),
-  '9_hysplit': fetchAqByParam('pm10'),
-  '9_silam': fetchAqByParam('sulphur_dioxide'),
-  '9_macc': fetchAqByParam('carbon_monoxide'),
-  '9_tempo': fetchAqByParam('nitrogen_dioxide'),
-  '9_pandonia': fetchAqByParam('ozone'),
-  'air_quality_health': fetchAqByParam('us_aqi'),
+  // One honest atmosphere heatmap: Open-Meteo air-quality API (multi-pollutant).
+  // The previous 18 branded entries each served this same feed under a
+  // different brand name (OpenAQ, AirNow, PurpleAir, WAQI, CAMS, NASA…); they
+  // were removed rather than keep misattributed labels.
+  '9_city_air_quality': fetchOpenAQ,
   // Seismic (distinct real feeds USGS/GeoNet)
-  '43_cosmos': fetchUsgsFeed('all_week'),
-  '43_cosmos_vdc': fetchUsgsFeed('2.5_week'),
-  '43_k_net_kik_net': fetchUsgsFeed('4.5_week'),
-  '43_geonet': fetchUsgsFeed('geonet'),
-  '43_geonet_data': fetchUsgsFeed('geonet'),
-  '43_csn_chile': fetchUsgsFeed('significant_week'),
-  '43_shakealert': fetchUsgsFeed('2.5_day'),
-  '43_usgs_shakemap': fetchUsgsFeed('all_day'),
-  '43_usgs_dyfi': fetchUsgsFeed('significant_month'),
+  '43_geonet': fetchGeoNetQuakes,
+  '43_geonet_volcano': fetchGeoNetVolcano,
   'seismic_waves': fetchUsgsFeed('all_week'),
   'heatmap': fetchUsgsFeed('all_week'),
   // Aviation (distinct real feeds)

@@ -51,7 +51,7 @@ test_pdf2.mjs
 # Any .mjs file in the root folder
     /*.mjs
     # Any .cjs file in the root folder
-    /*.cjs
+/*.cjs
 
 # Vite dev-server PID file
 vite_running.pid

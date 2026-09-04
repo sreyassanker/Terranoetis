@@ -45,7 +45,7 @@ const FRAME_BUDGET_MS = 8;
 
 function batchCreate(
   items: any[],
-  createFn: (item: any, i: number) => Cesium.Entity | null,
+  createFn: (item: any, i: number) => Cesium.Entity | Cesium.Entity[] | null,
 ): Promise<Cesium.Entity[]> {
   return new Promise((resolve) => {
     const ents: Cesium.Entity[] = [];
@@ -54,8 +54,14 @@ function batchCreate(
     function processBatch() {
       const start = performance.now();
       while (idx < items.length) {
-        const ent = createFn(items[idx], idx);
-        if (ent) ents.push(ent);
+        const res = createFn(items[idx], idx);
+        if (Array.isArray(res)) {
+          for (const ent of res) {
+            if (ent) ents.push(ent);
+          }
+        } else if (res) {
+          ents.push(res);
+        }
         idx++;
         if (idx % BATCH_SIZE === 0 && performance.now() - start > FRAME_BUDGET_MS) break;
       }
@@ -113,7 +119,7 @@ function renderPoints(
   const isSpace = layer.group === 'space';
   const domain = mapGroupToDomain(layer.group);
 
-  function createOne(item: any, i: number): Cesium.Entity | null {
+  function createOne(item: any, i: number): Cesium.Entity | Cesium.Entity[] | null {
     const lat = item.lat ?? item.latitude ?? item.latDeg;
     const lon = item.lon ?? item.longitude ?? item.lng ?? item.lonDeg;
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
@@ -148,6 +154,10 @@ function renderPoints(
 
     let entityPosition: Cesium.PositionProperty | Cesium.Cartesian3 = position;
     let shapeConfig: any = null;
+    // Motion-trail polyline added alongside heading-bearing arrows. Tracked with
+    // the layer so toggling the layer off removes it too (was previously added
+    // directly to the viewer and leaked forever after hide).
+    let trailEntity: Cesium.Entity | null = null;
 
     if (hasHeading) {
       const phaseOffset = ((i * 137.5 + Math.abs(lat * 7) + Math.abs(lon * 13)) % 10000);
@@ -223,7 +233,7 @@ function renderPoints(
         return new Cesium.Color(cr, cg, cb, a);
       }, false);
 
-      viewer.entities.add({
+      trailEntity = viewer.entities.add({
         id: `${entityId}_trail`,
         polyline: {
           positions: trailPos,
@@ -231,6 +241,9 @@ function renderPoints(
           material: new Cesium.ColorMaterialProperty(trailMat),
           clampToGround: true,
           arcType: Cesium.ArcType.RHUMB,
+        },
+        properties: {
+          layer: layer.id,
         },
       });
     } else {
@@ -273,9 +286,11 @@ function renderPoints(
     if (ghostProtocol && domain) {
       ghostProtocol.createGhost(entityId, config, domain, null, null);
       const ghostEntity = ghostProtocol.getGhost(entityId)?.getRealEntity();
-      return ghostEntity ?? null;
+      if (!ghostEntity) return trailEntity ? [trailEntity] : null;
+      return trailEntity ? [trailEntity, ghostEntity] : ghostEntity;
     } else {
-      return viewer.entities.add(config);
+      const main = viewer.entities.add(config);
+      return trailEntity ? [trailEntity, main] : main;
     }
   }
 

@@ -484,7 +484,7 @@ Example format:
        '',
        '## Key Globe Layers (toggleLayer)',
        '',
-       'Common layer IDs you can enable: earthquakes, tectonic, heatmap, flight_tracks, ais_vessels, wildfires, severe_storms, volcanoes, dust, seaLakeIce, disaster_alerts, space_debris, 6_celestrak_gp_api, aurora_oval, precipitation, wind, pressure, temp_anomaly, night_lights, land_cover, submarine_cables, electricity_grid, eu_gas_storage, india_cctv, animal_migrations, population_impact, military_bases, sea_ice. Use `toggleLayer` with `enabled:true` to show any of these. (satellites_tle/icebergs were removed from the catalog — do not use them.)',
+       'Common layer IDs you can enable: earthquakes, tectonic, heatmap, flight_tracks, ais_vessels, wildfires, severe_storms, volcanoes, dust, seaLakeIce, disaster_alerts, space_debris, 6_celestrak_gp_api, aurora_oval, precipitation, wind, pressure, temp_anomaly, night_lights, land_cover, submarine_cables, electricity_grid, eu_gas_storage, animal_migrations, population_impact, military_bases, sea_ice, 9_city_air_quality, 43_geonet, 43_geonet_volcano, 31_argo_floats, 42_ndbc_buoy_data, eu_gas_storage. Use `toggleLayer` with `enabled:true` to show any of these. (satellites_tle/icebergs/india_cctv were removed from the catalog — do not use them.)',
        '',
       '## Query Planning — Which Tool to Use',
       '',

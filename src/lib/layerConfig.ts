@@ -244,131 +244,17 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   // ── 7. (deleted) ──
   // ── 8. (deleted) ──
   // ── 9. Atmosphere & Environmental Science ──
+  // Honesty note: the previous 18 branded entries (OpenAQ, AirNow, PurpleAir,
+  // WAQI, CAMS, NASA GMAO/AIRS/OMI, Copernicus, HYSPLIT, SILAM, MACC, TEMPO,
+  // Pandonia, EPA, EEA…) ALL served one generic Open-Meteo air-quality feed
+  // under each brand's name — none fetched from the named organization. They
+  // were removed. One layer remains, labeled truthfully for the data it serves:
   {
-    id: '9_openaq', label: 'OpenAQ', symbol: '▃',
+    id: '9_city_air_quality', label: 'City Air Quality', symbol: '▃',
     color: '#a91c19', motionType: 'shimmer', group: 'atmosphere',
-    type: 'heatmap', description: 'OpenAQ — Atmosphere & Environmental Science',
-    dataSource: 'https://openaq.org/',
-    sub: 'Air quality data',
-  },
-  {
-    id: '9_world_aqi_api', label: 'World AQI API', symbol: '▄',
-    color: '#18af47', motionType: 'glow', group: 'atmosphere',
-    type: 'heatmap', description: 'World AQI API — Atmosphere & Environmental Science',
-    dataSource: 'https://aqicn.org/api/',
-    sub: 'Air quality index',
-  },
-  {
-    id: '9_lightning_alerts_openweather', label: 'Lightning Alerts (OpenWeather)', symbol: '▅',
-    color: '#7718b5', motionType: 'breathe', group: 'atmosphere',
-    type: 'heatmap', description: 'Lightning Alerts (OpenWeather) — Atmosphere & Environmental Science',
-    dataSource: 'https://openweathermap.org/api/lightning',
-    sub: 'Atmospheric data',
-  },
-  {
-    id: '9_copernicus_atmosphere', label: 'Copernicus Atmosphere', symbol: '▆',
-    color: '#bcab17', motionType: 'shimmer', group: 'atmosphere',
-    type: 'heatmap', description: 'Copernicus Atmosphere — Atmosphere & Environmental Science',
-    dataSource: 'https://atmosphere.copernicus.eu/',
-    sub: 'Atmospheric data',
-  },
-  {
-    id: '9_nasa_gmao', label: 'NASA GMAO', symbol: '▇',
-    color: '#16a2c3', motionType: 'glow', group: 'atmosphere',
-    type: 'heatmap', description: 'NASA GMAO — Atmosphere & Environmental Science',
-    dataSource: 'https://gmao.gsfc.nasa.gov/',
-    sub: 'Global modeling data',
-  },
-  {
-    id: '9_airs_nasa', label: 'AIRS (NASA)', symbol: '█',
-    color: '#c91573', motionType: 'breathe', group: 'atmosphere',
-    type: 'heatmap', description: 'AIRS (NASA) — Atmosphere & Environmental Science',
-    dataSource: 'https://airs.jpl.nasa.gov/',
-    sub: 'Atmospheric infrared',
-  },
-  {
-    id: '9_omi_nasa', label: 'OMI (NASA)', symbol: '▉',
-    color: '#3fd013', motionType: 'shimmer', group: 'atmosphere',
-    type: 'heatmap', description: 'OMI (NASA) — Atmosphere & Environmental Science',
-    dataSource: 'https://ozoneaq.gsfc.nasa.gov/',
-    sub: 'Ozone monitoring',
-  },
-  {
-    id: '9_epa_airdata', label: 'EPA AirData', symbol: '▊',
-    color: '#1e12d7', motionType: 'glow', group: 'atmosphere',
-    type: 'heatmap', description: 'EPA AirData — Atmosphere & Environmental Science',
-    dataSource: 'https://www.epa.gov/outdoor-air-quality-data',
-    sub: 'US air quality',
-  },
-  {
-    id: '9_airnow_api', label: 'AirNow API', symbol: '▋',
-    color: '#de5911', motionType: 'breathe', group: 'atmosphere',
-    type: 'heatmap', description: 'AirNow API — Atmosphere & Environmental Science',
-    dataSource: 'https://www.airnowapi.org/',
-    sub: 'US air quality',
-  },
-  {
-    id: '9_european_environment_agency', label: 'European Environment Agency', symbol: '▌',
-    color: '#0fe599', motionType: 'shimmer', group: 'atmosphere',
-    type: 'heatmap', description: 'European Environment Agency — Atmosphere & Environmental Science',
-    dataSource: 'https://www.eea.europa.eu/',
-    sub: 'Atmospheric data',
-  },
-  {
-    id: '9_purpleair_api', label: 'PurpleAir API', symbol: '▍',
-    color: '#c728d2', motionType: 'glow', group: 'atmosphere',
-    type: 'heatmap', description: 'PurpleAir API — Atmosphere & Environmental Science',
-    dataSource: 'https://api.purpleair.com/',
-    sub: 'Community air quality',
-  },
-  {
-    id: '9_waqi', label: 'WAQI', symbol: '▎',
-    color: '#b0d827', motionType: 'breathe', group: 'atmosphere',
-    type: 'heatmap', description: 'WAQI — Atmosphere & Environmental Science',
-    dataSource: 'https://waqi.info/',
-    sub: 'Atmospheric data',
-  },
-  {
-    id: '9_cams_global_reanalysis', label: 'CAMS Global Reanalysis', symbol: '▏',
-    color: '#2a7fdb', motionType: 'shimmer', group: 'atmosphere',
-    type: 'heatmap', description: 'CAMS Global Reanalysis — Atmosphere & Environmental Science',
-    dataSource: 'https://ads.atmosphere.copernicus.eu/',
-    sub: 'Atmospheric reanalysis',
-  },
-  {
-    id: '9_hysplit', label: 'HYSPLIT', symbol: '▐',
-    color: '#de2d4e', motionType: 'glow', group: 'atmosphere',
-    type: 'heatmap', description: 'HYSPLIT — Atmosphere & Environmental Science',
-    dataSource: 'https://www.ready.noaa.gov/',
-    sub: 'Air trajectory model',
-  },
-  {
-    id: '9_silam', label: 'SILAM', symbol: '░',
-    color: '#30e043', motionType: 'breathe', group: 'atmosphere',
-    type: 'heatmap', description: 'SILAM — Atmosphere & Environmental Science',
-    dataSource: 'https://silam.fmi.fi/',
-    sub: 'Air quality modeling',
-  },
-  {
-    id: '9_macc', label: 'MACC', symbol: '▒',
-    color: '#7933e3', motionType: 'shimmer', group: 'atmosphere',
-    type: 'heatmap', description: 'MACC — Atmosphere & Environmental Science',
-    dataSource: 'https://atmosphere.copernicus.eu/',
-    sub: 'Atmospheric data',
-  },
-  {
-    id: '9_tempo', label: 'TEMPO', symbol: '▓',
-    color: '#e5af37', motionType: 'glow', group: 'atmosphere',
-    type: 'heatmap', description: 'TEMPO — Atmosphere & Environmental Science',
-    dataSource: 'https://tempo.si.edu/',
-    sub: 'Air quality satellite',
-  },
-  {
-    id: '9_pandonia', label: 'Pandonia', symbol: '▔',
-    color: '#3ae7e4', motionType: 'breathe', group: 'atmosphere',
-    type: 'heatmap', description: 'Pandonia — Atmosphere & Environmental Science',
-    dataSource: 'https://www.pandonia-global-network.org/',
-    sub: 'Pandora instrument data',
+    type: 'heatmap', description: 'Live city-level air quality (US/EU AQI, PM2.5, PM10, O3, NO2, SO2, CO) from the Open-Meteo air-quality API',
+    dataSource: 'https://open-meteo.com/en/docs/air-quality-api',
+    sub: 'Open-Meteo air quality',
   },
   // ── 10. (deleted) ──
   // ── 11. (deleted) ──
@@ -468,69 +354,23 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     dataSource: 'https://www.ndbc.noaa.gov/',
     sub: 'Weather buoy data',
   },
-  // ── 43. Strong Motion & EQ Engineering ──
+  // ── 43. GeoNet (New Zealand) — real api.geonet.org.nz feeds only.
+  // (COSMOS / COSMOS VDC / K-NET / KiK-net / CSN Chile / ShakeAlert layers were
+  // removed: those networks publish no usable live JSON point feed, and the old
+  // entries silently served USGS worldwide quakes under regional labels.)
   {
-    id: '43_cosmos', label: 'COSMOS', symbol: '⏉',
-    color: '#da145b', motionType: 'flicker', group: 'seismic',
-    type: 'point', description: 'COSMOS — Strong Motion & EQ Engineering',
-    dataSource: 'https://www.strongmotion.org/',
-    sub: 'Strong motion data',
-  },
-  {
-    id: '43_cosmos_vdc', label: 'COSMOS VDC', symbol: '⏊',
-    color: '#20e113', motionType: 'radar', group: 'seismic',
-    type: 'point', description: 'COSMOS VDC — Strong Motion & EQ Engineering',
-    dataSource: 'https://www.strongmotioncenter.org/vdc/',
-    sub: 'Strong motion data',
-  },
-  {
-    id: '43_k_net_kik_net', label: 'K-NET / KiK-net', symbol: '⏋',
-    color: '#4211e8', motionType: 'pulse', group: 'seismic',
-    type: 'point', description: 'K-NET / KiK-net — Strong Motion & EQ Engineering',
-    dataSource: 'https://www.kyoshin.bosai.go.jp/',
-    sub: 'Japan strong motion',
-  },
-  {
-    id: '43_geonet', label: 'GeoNet', symbol: '⏌',
+    id: '43_geonet', label: 'GeoNet Quakes', symbol: '⏌',
     color: '#ef8410', motionType: 'flicker', group: 'seismic',
-    type: 'point', description: 'GeoNet — Strong Motion & EQ Engineering',
-    dataSource: 'https://www.geonet.org.nz/',
-    sub: 'New Zealand geohazards',
+    type: 'point', description: 'GeoNet — live New Zealand earthquakes (api.geonet.org.nz quake feed)',
+    dataSource: 'https://api.geonet.org.nz/quake',
+    sub: 'New Zealand earthquakes',
   },
   {
-    id: '43_geonet_data', label: 'GeoNet Data', symbol: '⏍',
+    id: '43_geonet_volcano', label: 'GeoNet Volcano', symbol: '⏍',
     color: '#2ed7b7', motionType: 'radar', group: 'seismic',
-    type: 'point', description: 'GeoNet Data — Strong Motion & EQ Engineering',
-    dataSource: 'https://www.geonet.org.nz/data',
-    sub: 'NZ geohazard data',
-  },
-  {
-    id: '43_csn_chile', label: 'CSN Chile', symbol: '⏎',
-    color: '#da31c8', motionType: 'pulse', group: 'seismic',
-    type: 'point', description: 'CSN Chile — Strong Motion & EQ Engineering',
-    dataSource: 'https://evtdb.csn.uchile.cl/',
-    sub: 'Chile seismic data',
-  },
-  {
-    id: '43_shakealert', label: 'ShakeAlert', symbol: '⏏',
-    color: '#9add34', motionType: 'flicker', group: 'seismic',
-    type: 'point', description: 'ShakeAlert — Strong Motion & EQ Engineering',
-    dataSource: 'https://www.shakealert.org/',
-    sub: 'Early earthquake warning',
-  },
-  {
-    id: '43_usgs_shakemap', label: 'USGS ShakeMap', symbol: '⏐',
-    color: '#376cdf', motionType: 'radar', group: 'seismic',
-    type: 'point', description: 'USGS ShakeMap — Strong Motion & EQ Engineering',
-    dataSource: 'https://earthquake.usgs.gov/data/shakemap/',
-    sub: 'Shaking intensity maps',
-  },
-  {
-    id: '43_usgs_dyfi', label: 'USGS DyFI', symbol: '⏑',
-    color: '#e23a3e', motionType: 'pulse', group: 'seismic',
-    type: 'point', description: 'USGS DyFI — Strong Motion & EQ Engineering',
-    dataSource: 'https://earthquake.usgs.gov/data/dyfi/',
-    sub: 'Earthquake felt reports',
+    type: 'point', description: 'GeoNet — New Zealand volcano alert levels (api.geonet.org.nz volcano VAL feed)',
+    dataSource: 'https://api.geonet.org.nz/volcano/val',
+    sub: 'NZ volcano alert levels',
   },
   // ── 44. (deleted) ──
   // ── 45. (deleted) ──
@@ -1002,15 +842,6 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     dataSource: 'https://ucdpapi.pcr.uu.se/api/',
     sub: 'UCDP API',
     badge: 'LIVE',
-  },
-
-  // ── NEW LAYERS: Markets & Economy ──
-  {
-    id: 'air_quality_health', label: 'Health Air Quality', symbol: '◐',
-    color: '#06d6a0', motionType: 'shimmer', group: 'atmosphere',
-    type: 'heatmap', description: 'PM2.5 and AQI health impact data — WHO guideline exceedances',
-    dataSource: 'https://www.who.int/',
-    sub: 'WHO Air Quality',
   },
 
   // ── Satellite Data Enrichment Layers ──

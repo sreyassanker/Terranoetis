@@ -562,7 +562,7 @@ export class IntentRouter {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['submarine_cables'] };
       }
       if (lower.includes('iceberg') || lower.includes('sea ice')) {
-        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['icebergs', 'sea_ice'] };
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['seaLakeIce'] };
       }
       if (lower.includes('heatmap') || lower.includes('heat map')) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['heatmap'] };
@@ -1171,7 +1171,7 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
       { kw: /\bland cover\b|\blandcover\b/i, layerId: 'land_cover' },
       { kw: /\bnight lights\b|\bcity lights\b/i, layerId: 'night_lights' },
       { kw: /\bsubmarine cable\b|\bundersea cable\b|\binternet cable\b/i, layerId: 'submarine_cables' },
-      { kw: /\b(?:iceberg|sea ice)s?\b/i, layerId: 'icebergs' },
+      { kw: /\b(?:iceberg|sea ice)s?\b/i, layerId: 'seaLakeIce' },
       { kw: /\bheatmap\b|\bheat map\b/i, layerId: 'heatmap' },
       { kw: /\btectonic\b|\bplate boundary\b/i, layerId: 'tectonic' },
       { kw: /\bbuilding\b|\b3d building\b|\bosm building\b/i, layerId: 'dt_buildings' },
