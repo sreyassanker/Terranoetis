@@ -1693,6 +1693,7 @@ export default function App() {
   const [layerSearch, setLayerSearch] = useState('');
   const [pulsingLayer, setPulsingLayer] = useState<string | null>(null);
   const [cctvPreviewTick, setCctvPreviewTick] = useState(0);
+  const [videoNonce, setVideoNonce] = useState(0);
   const [cctvPreviewFailed, setCctvPreviewFailed] = useState(false);
   useEffect(() => { setCctvPreviewFailed(false); }, [infoEntity]);
   useEffect(() => {
@@ -6052,8 +6053,17 @@ export default function App() {
     try {
       const data = await apiGet<{ cameras?: Array<Record<string, unknown>> }>('/cctv/worldwide');
       if (!isLayerEnabled('india_cctv')) return;
-      const cameras = (data.cameras ?? [])
+      const allCameras = (data.cameras ?? [])
         .filter((camera) => Number.isFinite(camera.lat) && Number.isFinite(camera.lon));
+
+      // The worldwide feed has ~18k cameras; rendering them all as ground-clamped
+      // billboards freezes the globe. Show an evenly-spread global sample and be
+      // honest about it in the notification.
+      const MAX_CCTV = 2500;
+      const totalAvailable = allCameras.length;
+      const cameras = totalAvailable > MAX_CCTV
+        ? allCameras.filter((_, i) => i % Math.ceil(totalAvailable / MAX_CCTV) === 0).slice(0, MAX_CCTV)
+        : allCameras;
 
       const total = cameras.length;
       const ents: Cesium.Entity[] = [];
@@ -6106,7 +6116,12 @@ export default function App() {
           entityStoreRef.current['india_cctv'] = ents;
           enforceEntityCap();
           throttledRender(viewer);
-          showNotification(`Loaded ${ents.length} worldwide webcams`, 'success');
+          showNotification(
+            totalAvailable > ents.length
+              ? `Showing ${ents.length.toLocaleString()} of ${totalAvailable.toLocaleString()} worldwide cameras — zoom near a region for local feeds`
+              : `Loaded ${ents.length.toLocaleString()} worldwide webcams`,
+            'success',
+          );
         }
       };
       addChunk();
@@ -9260,7 +9275,9 @@ case 'openPanel':
                 const feedType = String(p.feedType ?? '');
                 const isHls = feedType === 'm3u8' || streamUrl.includes('.m3u8') || streamUrl.includes('m3u8');
                 if (isHls && streamUrl && !cctvPreviewFailed) {
-                  return <CctvVideoPlayer key={`${streamUrl}-${cctvPreviewTick}`} src={streamUrl} />;
+                  // Key on stream + a manual-refresh nonce only — NOT the 10s
+                  // auto-tick, which would remount hls.js and restart the video.
+                  return <CctvVideoPlayer key={`${streamUrl}-${videoNonce}`} src={streamUrl} />;
                 }
                 const imgUrl = thumbUrl && !cctvPreviewFailed ? `${thumbUrl}${thumbUrl.includes('?') ? '&' : '?'}tick=${cctvPreviewTick}` : '';
                 return imgUrl ? (
@@ -9280,7 +9297,7 @@ case 'openPanel':
                     type="button"
                     className="cctv-link"
                     style={{border:'none',background:'none',cursor:'pointer',padding:0}}
-                    onClick={() => { setCctvPreviewTick(t => t + 1); setCctvPreviewFailed(false); }}
+                    onClick={() => { setCctvPreviewTick(t => t + 1); setVideoNonce(n => n + 1); setCctvPreviewFailed(false); }}
                   >
                     Refresh
                   </button>
