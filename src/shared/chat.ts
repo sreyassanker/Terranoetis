@@ -27,6 +27,8 @@ export interface ToolEvent {
   result?: unknown;
   riskLevel?: 'low' | 'medium' | 'high' | 'destructive';
   approvalRequired?: boolean;
+  /** Enterprise: true when the dataset is unavailable (missing key / upstream down). */
+  degraded?: boolean;
 }
 
 export interface SubAgentActivity {

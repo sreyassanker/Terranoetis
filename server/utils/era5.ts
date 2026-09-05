@@ -85,7 +85,7 @@ export async function getHistoricalDaily(
 ): Promise<Era5DailyData[]> {
   try {
     // Open-Meteo Historical Weather API (free, uses ERA5 data)
-    const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${startDate}&end_date=${endDate}&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant,surface_pressure&timezone=auto`;
+    const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${startDate}&end_date=${endDate}&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,wind_speed_10m_max&timezone=auto`;
 
     const response = await fetch(url, {
       signal: AbortSignal.timeout(20000),

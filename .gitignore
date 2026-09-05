@@ -147,3 +147,7 @@ server/plugins/
 
 # E2E test specs
 e2e/
+
+# Editor/manual backup cruft
+*.bak
+*.bak[0-9]

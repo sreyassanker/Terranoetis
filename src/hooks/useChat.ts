@@ -434,12 +434,17 @@ export function useChat(
               }
             }
             if (data.type === 'tool_result' && streamingMsgId !== null) {
+              // Enterprise: surface dataset degradation visibly (missing key, upstream down).
+              if (data.degraded && data.error) {
+                const reason = /KEY_REQUIRED|not configured/i.test(data.error) ? 'API key missing' : 'upstream unavailable';
+                import('sonner').then(({ toast }) => toast.warning(`${data.name}: dataset unavailable (${reason})`, { description: String(data.error).slice(0, 120) }));
+              }
               patchStreamingMsg(m => {
-                if (!m.toolEvents) return { toolEvents: [{ name: data.name, status: data.status, error: data.error, result: data.result }] };
+                if (!m.toolEvents) return { toolEvents: [{ name: data.name, status: data.status, error: data.error, result: data.result, degraded: data.degraded }] };
                 const events = [...m.toolEvents];
                 const idx = events.findIndex(e => e.name === data.name && (e.status === 'pending' || e.status === 'blocked'));
-                if (idx >= 0) events[idx] = { ...events[idx], status: data.status, error: data.error, result: data.result };
-                else events.push({ name: data.name, status: data.status, error: data.error, result: data.result });
+                if (idx >= 0) events[idx] = { ...events[idx], status: data.status, error: data.error, result: data.result, degraded: data.degraded };
+                else events.push({ name: data.name, status: data.status, error: data.error, result: data.result, degraded: data.degraded });
                 return { toolEvents: events };
               });
             }
