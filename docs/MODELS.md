@@ -1,6 +1,6 @@
 # Analytical Models
 
-Terranoetis ships **150 peer-reviewed scientific equation engines** organized across **7 parts** and **25 domains**. Every model is paper-grounded, math-verified, and DOI-indexed — no machine learning, no black boxes.
+Terranoetis ships **150 peer-reviewed scientific equation engines** organized across **7 parts** and **26 domains**. Every model is paper-grounded, math-verified, and DOI-indexed — no machine learning, no black boxes.
 
 ---
 
@@ -16,27 +16,28 @@ Terranoetis ships **150 peer-reviewed scientific equation engines** organized ac
 
 ## Architecture
 
-The analytical pipeline executes in 7 stages:
+Before execution, the **context engine** (`contextEngine.ts`) enriches inputs from live data feeds (weather, terrain, ocean, seismic, air quality, satellite thermal). Each tool then runs through the **7-stage workflow** defined in `toolWorkflows.ts`:
 
-1. **Input validation** — verify coordinate bounds, time ranges, parameter types
-2. **Context enrichment** — fill missing parameters from real data feeds (weather, terrain, ocean, seismic)
-3. **Equation execution** — run the selected model with validated inputs
-4. **Unit checks** — verify result dimensionality and physical plausibility
-5. **Uncertainty bounds** — compute confidence intervals from input sensitivity
-6. **Provenance capture** — record the full execution trace (inputs, intermediate values, citations)
-7. **Audit logging** — persist the execution record for governance
+1. **Input validation** — range, type, and physical-plausibility checks
+2. **Preprocessing** — unit conversion, derived-parameter computation
+3. **Computation** — the peer-reviewed equation (`engine.ts`)
+4. **Post-processing** — classification, unit normalisation
+5. **Quality control** — result sanity checks, outlier detection
+6. **Uncertainty estimation** — error propagation / empirical RMSE
+7. **Interpretation** — contextual analysis + scientific recommendations
 
 ---
 
 ## Visualization Types
 
+Each tool declares a `vizType`; the client renders it via Recharts (charts) or Cesium (field surfaces):
+
 | Type | Description |
 |---|---|
-| **Heatmap** | IDW-interpolated surface over the study area |
-| **Charts** | Time-series, bar charts, scatter plots (Recharts) |
+| **scalar** | Single computed value with unit + interpretation |
+| **timeseries / bar / histogram / scatter / distribution / gauge / profile / spectrum** | Recharts visualizations |
+| **heatmap / contour / vector** | IDW-interpolated field surfaces over the study area (Cesium) |
 | **Grid** | Structured data grid for downstream GIS fusion |
-| **3D surface** | Cesium primitives over real terrain |
-| **Annotations** | Map pins, markers, labels |
 | **Report** | PDF export with charts and methodology |
 
 ---
@@ -62,11 +63,12 @@ The analytical pipeline executes in 7 stages:
 | Agriculture & Crop Science | 58–63 | Growing degree days, Priestley-Taylor evapotranspiration, Hargreaves-Samani ET, FAO yield-water response, phytoplankton temperature growth, Bigleaf Penman-Monteith |
 | Atmospheric Chemistry & Aerosols | 64–65 | Stratospheric ozone equilibrium, pollutant lifetime estimation |
 
-### Part III — Ocean & Coastal Advanced (Tools 66–80) · 1 Domain
+### Part III — Ocean & Coastal Advanced (Tools 66–80) · 2 Domains
 
 | Domain | Tools | Topics |
 |---|---|---|
-| Ocean Dynamics & Circulation | 66–80 | Wind-driven ocean transport, westward-intensified gyre flow (Stommel), western boundary current structure, thermohaline flow, seawater density (TEOS-10), ocean mixing diffusivity, mixed layer deepening, fully developed sea state, coastal wave runup, shoreline retreat (Bruun Rule), breaking wave height (McCowan), longshore sediment transport (CERC), wave dispersion (Airy), Stokes drift, JONSWAP wave spectrum |
+| Ocean Dynamics | 66–73 | Wind-driven ocean transport, westward-intensified gyre flow (Stommel), western boundary current structure, thermohaline flow, seawater density (TEOS-10), ocean mixing diffusivity, mixed layer deepening, fully developed sea state |
+| Coastal & Wave Mechanics | 74–80 | Coastal wave runup, shoreline retreat (Bruun Rule), breaking wave height (McCowan), longshore sediment transport (CERC), wave dispersion (Airy), Stokes drift, JONSWAP wave spectrum |
 
 ### Part IV — Geomorphology, Limnology & Cryosphere (Tools 81–95) · 3 Domains
 
@@ -108,22 +110,24 @@ The analytical pipeline executes in 7 stages:
 ## Key Features
 
 - **150 non-ML equations** — every model is derived from a peer-reviewed paper with DOI citation
-- **25 domains** — atmospheric, oceanic, seismic, cryospheric, space, and beyond
+- **26 domains** — atmospheric, oceanic, seismic, cryospheric, space, and beyond
 - **7-part structure** — logically grouped from Earth system core to advanced engineering
-- **7-stage quality control** — input validation → context enrichment → execution → unit checks → uncertainty → provenance → audit
+- **7-stage workflow** — input validation → preprocessing → computation → post-processing → quality control → uncertainty estimation → interpretation
 - **Real-data context** — every model receives live context (weather, terrain, ocean, seismic) from 30+ data feeds
 - **DOI-indexed** — each model references its source paper with a resolvable DOI
 
 ---
 
-## 7-Stage Quality Control
+## 7-Stage Workflow
+
+Defined in `server/analytical-models/toolWorkflows.ts` (preceded by live-data context enrichment in `contextEngine.ts`):
 
 | Stage | Description |
 |---|---|
-| 1. Input validation | Verify coordinate bounds, time ranges, parameter types |
-| 2. Context enrichment | Fill missing parameters from live data feeds |
-| 3. Equation execution | Run the selected model with validated inputs |
-| 4. Unit checks | Verify result dimensionality and physical bounds |
-| 5. Uncertainty bounds | Compute confidence intervals from input sensitivity |
-| 6. Provenance capture | Full execution trace (inputs, intermediates, DOIs) |
-| 7. Audit logging | Persist execution record for governance |
+| 1. Input validation | Range, type, and physical-plausibility checks |
+| 2. Preprocessing | Unit conversion, derived-parameter computation |
+| 3. Computation | The peer-reviewed equation (`engine.ts`) |
+| 4. Post-processing | Classification, unit normalisation |
+| 5. Quality control | Result sanity checks, outlier detection |
+| 6. Uncertainty estimation | Error propagation / empirical RMSE |
+| 7. Interpretation | Contextual analysis + scientific recommendations |

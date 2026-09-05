@@ -2,7 +2,7 @@
   <img src="docs/terranoetis.png" alt="Terranoetis" width="120" />
 </p>
 
-# Terranoetis
+<h1 align="center">Terranoetis</h1>
 
 A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3D globe with a comprehensive backend serving live environmental data, satellite imagery, **150 real scientific equation engines**, physics simulations, realtime voice, and AI-driven cognition. Unlike a passive globe viewer, Terranoetis **computes** — it runs peer-reviewed equations over live data, reasons about what it sees, and paints real results back onto the Earth.
 

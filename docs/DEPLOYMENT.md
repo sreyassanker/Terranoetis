@@ -166,17 +166,17 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) runs the following on e
 | TypeScript Check | `tsc --noEmit` for frontend + server |
 | Lint | `eslint .` |
 | Unit Tests | Vitest in `server/__tests__/unit` + `src/__tests__` |
-| Integration Tests | Vitest in `server/__tests__/Integration` |
+| Integration Tests | Vitest in `server/__tests__/integration` |
 | Coverage | Vitest with `--coverage` |
 | Build | `npm run build` (tsc -b + vite build) |
 | Docker Build | Docker build verification |
 | Security Audit | `npm audit` |
-| Browser Tests | Playwright (requires display/GPU — skipped in CI) |
+| Browser Tests | Playwright — headless Chromium with software WebGL (SwiftShader) |
 
 ### CI Notes
 
 - **Node version:** 20 (specified in workflow and `.nvmrc`)
-- **Browser tests** require WebGL/GPU; currently they run only on local machines with a display. They are present in the workflow but are inherently flaky in headless CI.
+- **Browser tests** run headless in CI on `ubuntu-latest` using Chromium with software WebGL (`--use-gl=angle --enable-unsafe-swiftshader`), so no physical display/GPU is required. They are still the most environment-sensitive job and can be flaky.
 - **Redis** is optional in both development and CI (the server falls back to SQLite gracefully)
 - **Docker Compose** is recommended for production
 

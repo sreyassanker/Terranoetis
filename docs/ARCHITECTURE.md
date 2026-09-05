@@ -30,7 +30,7 @@ flowchart LR
     subgraph CLIENT["CLIENT (React 19 + CesiumJS)"]
         direction LR
         UI["UI\nPanels"]
-        Render["Rendering\nCesium + 40 modules"]
+        Render["Rendering\nCesium + 41 modules"]
         WS["WebSocket\nClient"]
         API["REST\nClient"]
         UI --> API
@@ -40,7 +40,7 @@ flowchart LR
 
     subgraph SERVER["EXPRESS.JS SERVER"]
         Security["Security &\nObservability"]
-        Agents["Agent &\nCognition\nSystem 1 + System 2\n8-LLM Router"]
+        Agents["Agent &\nCognition\nSystem 1 + System 2\n9-LLM Router"]
         Engine["Analytical Engine\n150 equations\n7-stage QC\nKaggle kernels"]
         Data["Data Layer\n30+ live APIs\nFetchers + Cache"]
         Realtime["Realtime\nSentinel · Reflex\nVoice Bridge\nPubSub"]
@@ -119,7 +119,7 @@ flowchart LR
 
 | Route | View | Description |
 |---|---|---|
-| `/` | App | Main Cesium globe application (~10,871 lines, 14 lazy-loaded panels) |
+| `/` | App | Main Cesium globe application (~11,000 lines, 11 lazy-loaded panels) |
 | `/v2/globe` | GlobePage | Dedicated Cesium globe viewport |
 | `/v2/canvas` | CanvasPage | Spatial canvas |
 | `/v2/scenarios` | ScenariosPage | Scenario gallery and editor |
@@ -171,7 +171,7 @@ flowchart LR
 
 ## Frontend (`src/`)
 
-### Rendering Engine (`src/rendering/`, 40 files)
+### Rendering Engine (`src/rendering/`, 41 files)
 
 | File | Purpose |
 |---|---|
@@ -213,6 +213,7 @@ flowchart LR
 | `launchReplay.ts` | Rocket ascent reconstruction (Launch Library 2) |
 | `aircraftHangar.ts` | LOD swap: flight glyphs → 3D glTF models |
 | `osrmRoute.ts` | Street-following walking route (OSRM) |
+| `radioWave.ts` | Radio tuner globe wave animation |
 | `detectionOverlay.ts` | Screen-space bounding boxes over live entities |
 
 ### Hooks (7 total)
@@ -235,18 +236,17 @@ flowchart LR
 
 | Module Directory | Purpose |
 |---|---|
-| `analytical-models/` | 150 peer-reviewed equation engines (7 parts, 25 domains), tool configs, workflows |
+| `analytical-models/` | 150 peer-reviewed equation engines (7 parts, 26 domains), tool configs, workflows |
 | `cognition/` | Cognitive orchestrator, System 1 / System 2, MCTS, reasoning tree, tree-of-thoughts |
 | `sentinel/` | Continuous monitoring: stream processor, anomaly detector, correlation engine, alert intelligence |
 | `memory/` + `memoryV2/` | Working/episodic/semantic/procedural/predictive memory, sensory buffer, Redis adapter |
-| `digitalTwin/` | Regional analysis: data fetching, analysis, orchestrator |
 | `scenarios/` | Scenario generation (single + batch), simulator engines, scenario DB |
 | `sandboxV2/` | Sandbox simulation engines: FARSITE, ADCIRC, WRF, HYSPLIT, FNO surrogate |
 | `world-model/` | Causal graph, ensemble predictor, physics NN, prediction validator |
 | `causal/` | Causal reasoning: KG, discovery engine, entropy mixer, Python microservice (DoWhy) |
 | `kgV2/` | Knowledge graph v2: entity/edge generation, graph completion, counterfactual, evolving graph |
 | `multimodal/` | Satellite analyzer, seismic processor, radar interpreter, sentiment analyzer, fusion |
-| `ai-router/` | Omninet 8-provider LLM router (incl. local GGUF fallback) |
+| `ai-router/` | Omninet 9-provider LLM router (incl. local GGUF fallback) |
 | `rag/` | Retrieval-augmented generation: embeddings, memory bridge |
 | `h3-engine/` | H3 indexing, spatial query, ClickHouse, TimescaleDB, stream processor |
 | `observability/` | Pino logger, metrics, OpenTelemetry, Sentry |
