@@ -56,7 +56,7 @@ npm run dev             # Vite (3000) + Express API (3001); Redis optional
 | [Frontend](docs/FRONTEND.md) | React components, rendering engine, Kaggle GPU overlays, hooks |
 | [Backend](docs/BACKEND.md) | Server modules, cognition, memory, security, observability |
 | [Analytical Models](docs/MODELS.md) | The 150 equation engines, 7 parts, 26 domains |
-| [Deployment](docs/DEPLOYMENT.md) | Docker, environment variables, CI/CD, security |
+| [Deployment](docs/DEPLOYMENT.md) | Docker, environment variables, Kaggle token setup, CI/CD, security |
 
 ---
 

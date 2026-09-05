@@ -156,7 +156,21 @@ The `.env` file configures 100+ variables covering 70+ integrated services (see 
 | Weather & Disaster | USGS, NASA EONET, GDACS, NOAA, OpenAQ, WAQI, Windy |
 | Economic & Financial | FRED, EIA, Alpha Vantage, ENTSO-E, UN Comtrade, IMF, GoldAPI |
 | Search & Scraping | Brave Search, Exa, Firecrawl, Guardian, NewsAPI |
+| Kaggle GPU Simulations | Kaggle API token at `~/.kaggle/kaggle.json` (see below), `KAGGLE_BIN`, `KAGGLE_POLL_INTERVAL_MS`, `KAGGLE_POST_PUSH_SETTLE_MS`, `KAGGLE_STALE_ERROR_GRACE_MS` |
 | Other | Telegram, Resend, ACLED, Cloudflare Radar, AbuseIPDB, AlienVault OTX, Gmail SMTP |
+
+### Kaggle GPU Simulations (optional setup)
+
+The 7 physics simulations (earthquake, tsunami, volcano, landslide, flood, hurricane, wildfire) run as Kaggle GPU kernels. To enable them:
+
+1. Create a token at **https://www.kaggle.com/settings/account** → *Create New Token* (requires an account with phone verification).
+2. Save the downloaded `kaggle.json` as **`~/.kaggle/kaggle.json`** and restrict permissions:
+   ```bash
+   mkdir -p ~/.kaggle && mv ~/Downloads/kaggle.json ~/.kaggle/kaggle.json && chmod 600 ~/.kaggle/kaggle.json
+   ```
+3. Install the Kaggle CLI (`pip install kaggle`), or point `KAGGLE_BIN` at its path.
+
+The simulation runner reads credentials exclusively from `~/.kaggle` (`KAGGLE_CONFIG_DIR`, see `server/kaggle/simRunner.ts`) — **never from the repository**, so no secrets are ever committed. Without a token, GPU simulation features disable gracefully and the local analytical engine still works.
 
 ---
 
