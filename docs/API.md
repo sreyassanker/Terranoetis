@@ -57,10 +57,10 @@ The agent pipeline routes natural-language queries through intent recognition (S
 | POST | `/api/agent/analyze-data` | Data analysis task |
 | POST | `/api/agent/analyze-vision` | Vision/image analysis |
 | POST | `/api/agent/pipeline` | Multi-stage pipeline execution |
-| POST | `/api/agent/plan` / `/api/agent/plan/execute` | Hierarchical task network (HTN) planning + execution |
+| POST | `/api/agent/plan` | Hierarchical task network (HTN) planning |
+| POST | `/api/agent/plan/execute` | Execute an HTN plan |
 | POST | `/api/agent/search-all` | Unified natural-language search across all databases |
 | POST | `/api/agent/suggestions` | Proactive insight suggestions |
-| POST | `/api/agent/schedule` | Schedule recurring tasks |
 | POST | `/api/agent/approve` | Approve pending agent actions |
 | POST | `/api/agent/feedback` | Record feedback for self-improvement |
 | GET | `/api/agent/analytics` | Agent performance analytics |
@@ -70,11 +70,19 @@ The agent pipeline routes natural-language queries through intent recognition (S
 | GET | `/api/agent/models` | List all available LLM models with availability status |
 | GET | `/api/agent/geocode` | Geocoding |
 | GET | `/api/agent/trace/:id` | Reasoning trace for an interaction |
-| GET | `/api/agent/memory` / DELETE | Conversation memory retrieval / clear |
-| GET | `/api/agent/profile` / POST / DELETE | User profile management |
-| GET | `/api/agent/monitor` / POST / DELETE | Monitor rule management |
-| GET | `/api/agent/schedule` / POST / DELETE | Scheduled task management |
-| GET | `/api/agent/cache` / DELETE | Agent cache inspection / purge |
+| GET | `/api/agent/memory` | Conversation memory retrieval |
+| DELETE | `/api/agent/memory` | Clear conversation memory |
+| GET | `/api/agent/profile` | Get user profile |
+| POST | `/api/agent/profile` | Update user profile |
+| DELETE | `/api/agent/profile` | Delete user profile |
+| GET | `/api/agent/monitor` | List monitor rules |
+| POST | `/api/agent/monitor` | Create monitor rule |
+| DELETE | `/api/agent/monitor/:id` | Delete a monitor rule |
+| GET | `/api/agent/schedule` | List scheduled tasks |
+| POST | `/api/agent/schedule` | Create a scheduled task |
+| DELETE | `/api/agent/schedule/:id` | Delete a scheduled task |
+| GET | `/api/agent/cache` | Inspect agent cache |
+| DELETE | `/api/agent/cache` | Purge agent cache |
 | GET | `/api/agent/evidence/:id` | Evidence chain for a claim |
 
 ---
@@ -133,7 +141,11 @@ The analytical pipeline applies a **7-stage workflow** (input validation → pre
 | POST | `/api/scenarios/batch` | Batch-generate scenarios |
 | GET | `/api/scenarios/:id` | Scenario detail |
 | POST | `/api/sandbox/execute` | Execute Python / Node / Bash in the sandbox |
-| GET | `/api/sandbox/workspace` / DELETE | Sandbox workspace management |
+| POST | `/api/sandbox/workspace` | Create a sandbox workspace |
+| DELETE | `/api/sandbox/workspace/:id` | Delete a workspace |
+| POST | `/api/sandbox/workspace/:id/upload` | Upload a file to the workspace |
+| GET | `/api/sandbox/workspace/:id/files` | List workspace files |
+| GET | `/api/sandbox/workspace/:id/read` | Read a workspace file |
 | GET | `/api/kaggle/simulate/:id` | Kaggle simulation job status / results |
 | GET | `/api/kaggle/simulate/:id/results` | Simulation result data |
 | GET | `/api/kaggle/jobs` | Kaggle job queue |
@@ -154,8 +166,10 @@ The analytical pipeline applies a **7-stage workflow** (input validation → pre
 | POST | `/api/explain/evidence/:id/verify` | Verify evidence |
 | GET | `/api/explain/bias/geographic` | Geographic bias audit |
 | GET | `/api/explain/bias/temporal` | Temporal bias audit |
-| GET | `/api/explain/bias/report` / `reports` | Bias audit reports |
-| POST | `/api/explain/override/:id/approve` / `reject` | Human override workflow |
+| GET | `/api/explain/bias/report` | Latest bias audit report |
+| GET | `/api/explain/bias/reports` | List bias audit reports |
+| POST | `/api/explain/override/:id/approve` | Approve a pending override |
+| POST | `/api/explain/override/:id/reject` | Reject a pending override |
 | GET | `/api/explain/override/pending` | Pending overrides |
 | GET | `/api/explain/override/audit-log` | Override audit log |
 | POST | `/api/explain/uncertainty/compute` | Uncertainty quantification |
@@ -174,7 +188,8 @@ The analytical pipeline applies a **7-stage workflow** (input validation → pre
 | GET | `/api/memory/procedural` | Procedural memory |
 | GET | `/api/memory/predictive` | Predictive memory |
 | GET | `/api/memory/sensory` | Sensory buffer |
-| GET | `/api/memory/stats` / `status` | Memory statistics / subsystem status |
+| GET | `/api/memory/stats` | Memory statistics |
+| GET | `/api/memory/status` | Memory subsystem status |
 | GET | `/api/causal-graph` | Causal knowledge graph |
 | GET | `/api/causal-graph/dot` | GraphViz DOT export |
 | POST | `/api/kgV2/generate-entities` | Generate entities from a trigger event |
