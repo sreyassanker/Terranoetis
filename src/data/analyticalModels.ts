@@ -1,6 +1,6 @@
 /* ═════════════════════════════════════════════════════════════════
    ANALYTICAL MODELS DATA — 150 analytical earth system equations
-   25 domains · 7 parts · All non-ML, peer-reviewed, DOI-verified
+   26 domains · 7 parts · All non-ML, grounded in primary literature
    ═════════════════════════════════════════════════════════════════ */
 
 export interface AnalysisToolParameter {
@@ -3724,6 +3724,11 @@ export const PARTS: Part[] = [
             assumptions: ['Fully developed sea (unlimited fetch and duration)', 'Steady wind (weather-ship measurement)', 'α = 0.0081 fixed by the paper (not a free input)', 'U = wind at the paper\'s 19.5 m weather-ship reference height'],
             limitations: ['Not valid for fetch-limited / young seas (JONSWAP regime)', 'No swell component', 'U is the ship-height (19.5 m) wind — the auto default converts genuine ERA5 10 m wind via the neutral log profile (z₀ = 0.0002 m open ocean); stability effects unmodeled', 'Paper calibration range 20–40 knots (10.29–20.58 m/s); outside it the α = 0.0081 fit is an extrapolation'],
           },
+        ],
+      },
+      {
+        id: 'coastal', number: 11, name: 'Coastal & Wave Mechanics', color: '#06b6d4',
+        tools: [
           { id: 74, toolName: 'Estimate Coastal Wave Runup', name: 'Stockdon Wave Runup', equation: 'R₂ = 1.1(η̄ + S/2), η̄ = 0.35β_f(H₀L₀)^½, S_inc = 0.75β_f(H₀L₀)^½, S_IG = 0.06(H₀L₀)^½; ξ₀<0.3: R₂ = 0.043(H₀L₀)^½', reference: 'Stockdon, H.F., Holman, R.A., Howd, P.A. & Sallenger, A.H. (2006) Empirical parameterization of setup, swash, and runup. Coastal Engineering, 53(7), 573–588. DOI: 10.1016/j.coastaleng.2005.12.005.',
           paperUrl: 'https://doi.org/10.1016/j.coastaleng.2005.12.005',
           appliesTo: 'Coastal flooding, beach erosion, dune overtopping',

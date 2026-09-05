@@ -1,6 +1,6 @@
 # Analytical Models
 
-Terranoetis ships **150 peer-reviewed scientific equation engines** organized across **7 parts** and **26 domains**. Every model is paper-grounded, math-verified, and DOI-indexed — no machine learning, no black boxes.
+Terranoetis ships **150 scientific equation engines** organized across **7 parts** and **26 domains**. Every model is grounded in primary literature and math-verified against its source — no machine learning, no black boxes. Each model carries a full citation; **82 resolve to a DOI**, and the remainder are books (ISBN), government/standards documents, or classic pre-DOI papers, each explicitly flagged in the source with its reference PDF archived under `docs/Research papers/`.
 
 ---
 
@@ -20,7 +20,7 @@ Before execution, the **context engine** (`contextEngine.ts`) enriches inputs fr
 
 1. **Input validation** — range, type, and physical-plausibility checks
 2. **Preprocessing** — unit conversion, derived-parameter computation
-3. **Computation** — the peer-reviewed equation (`engine.ts`)
+3. **Computation** — the source equation (`engine.ts`)
 4. **Post-processing** — classification, unit normalisation
 5. **Quality control** — result sanity checks, outlier detection
 6. **Uncertainty estimation** — error propagation / empirical RMSE
@@ -67,7 +67,7 @@ Each tool declares a `vizType`; the client renders it via Recharts (charts) or C
 
 | Domain | Tools | Topics |
 |---|---|---|
-| Ocean Dynamics | 66–73 | Wind-driven ocean transport, westward-intensified gyre flow (Stommel), western boundary current structure, thermohaline flow, seawater density (TEOS-10), ocean mixing diffusivity, mixed layer deepening, fully developed sea state |
+| Ocean Dynamics & Circulation | 66–73 | Wind-driven ocean transport, westward-intensified gyre flow (Stommel), western boundary current structure, thermohaline flow, seawater density (TEOS-10), ocean mixing diffusivity, mixed layer deepening, fully developed sea state |
 | Coastal & Wave Mechanics | 74–80 | Coastal wave runup, shoreline retreat (Bruun Rule), breaking wave height (McCowan), longshore sediment transport (CERC), wave dispersion (Airy), Stokes drift, JONSWAP wave spectrum |
 
 ### Part IV — Geomorphology, Limnology & Cryosphere (Tools 81–95) · 3 Domains
@@ -109,12 +109,12 @@ Each tool declares a `vizType`; the client renders it via Recharts (charts) or C
 
 ## Key Features
 
-- **150 non-ML equations** — every model is derived from a peer-reviewed paper with DOI citation
+- **150 non-ML equations** — every model is derived from a peer-reviewed paper, textbook, or authoritative standard
 - **26 domains** — atmospheric, oceanic, seismic, cryospheric, space, and beyond
 - **7-part structure** — logically grouped from Earth system core to advanced engineering
 - **7-stage workflow** — input validation → preprocessing → computation → post-processing → quality control → uncertainty estimation → interpretation
 - **Real-data context** — every model receives live context (weather, terrain, ocean, seismic) from 30+ data feeds
-- **DOI-indexed** — each model references its source paper with a resolvable DOI
+- **Literature-indexed** — 82 models cite a resolvable DOI; the rest cite books (ISBN), standards, or pre-DOI classics, each flagged in-source with its reference PDF archived under `docs/Research papers/`
 
 ---
 
@@ -126,7 +126,7 @@ Defined in `server/analytical-models/toolWorkflows.ts` (preceded by live-data co
 |---|---|
 | 1. Input validation | Range, type, and physical-plausibility checks |
 | 2. Preprocessing | Unit conversion, derived-parameter computation |
-| 3. Computation | The peer-reviewed equation (`engine.ts`) |
+| 3. Computation | The source equation (`engine.ts`) |
 | 4. Post-processing | Classification, unit normalisation |
 | 5. Quality control | Result sanity checks, outlier detection |
 | 6. Uncertainty estimation | Error propagation / empirical RMSE |

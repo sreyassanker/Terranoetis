@@ -4,7 +4,7 @@
 
 <h1 align="center">Terranoetis</h1>
 
-A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3D globe with a comprehensive backend serving live environmental data, satellite imagery, **150 real scientific equation engines**, physics simulations, realtime voice, and AI-driven cognition. Unlike a passive globe viewer, Terranoetis **computes** — it runs peer-reviewed equations over live data, reasons about what it sees, and paints real results back onto the Earth.
+A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3D globe with a comprehensive backend serving live environmental data, satellite imagery, **150 real scientific equation engines**, physics simulations, realtime voice, and AI-driven cognition. Unlike a passive globe viewer, Terranoetis **computes** — it runs literature-grounded equations over live data, reasons about what it sees, and paints real results back onto the Earth.
 
 <div align="center">
 
@@ -19,8 +19,8 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 
 ## Highlights
 
-- **150 peer-reviewed analytical models** across 25 domains — every equation paper-grounded and DOI-indexed ([details](docs/MODELS.md))
-- **Photorealistic CesiumJS 3D globe** with 40 rendering modules, satellite imagery, and sensor styles
+- **150 analytical models grounded in primary literature** across 26 domains — every equation cites its source paper, book, or standard (82 with resolvable DOIs; pre-DOI classics explicitly flagged) ([details](docs/MODELS.md))
+- **Photorealistic CesiumJS 3D globe** with 41 rendering modules, satellite imagery, and sensor styles
 - **7 GPU physics simulations** — earthquake, tsunami, volcano, landslide, flood, hurricane, wildfire
 - **AI cognition** — System 1 / System 2 reasoning, multi-agent debate, causal + counterfactual analysis
 - **30+ live data feeds** — seismic, weather, aviation, maritime, satellite, traffic, space
@@ -52,10 +52,10 @@ npm run dev             # Vite (3000) + Express API (3001); Redis optional
 | Document | Covers |
 |---|---|
 | [Architecture](docs/ARCHITECTURE.md) | System topology, request flow, background services, module inventory |
-| [API Reference](docs/API.md) | 300 REST endpoints + WebSocket channel |
+| [API Reference](docs/API.md) | 360+ REST endpoints + WebSocket channel |
 | [Frontend](docs/FRONTEND.md) | React components, rendering engine, Kaggle GPU overlays, hooks |
 | [Backend](docs/BACKEND.md) | Server modules, cognition, memory, security, observability |
-| [Analytical Models](docs/MODELS.md) | The 150 equation engines, 7 parts, 25 domains |
+| [Analytical Models](docs/MODELS.md) | The 150 equation engines, 7 parts, 26 domains |
 | [Deployment](docs/DEPLOYMENT.md) | Docker, environment variables, CI/CD, security |
 
 ---
@@ -66,9 +66,9 @@ npm run dev             # Vite (3000) + Express API (3001); Redis optional
 terranoetis/
 ├── src/                          # React 19 + CesiumJS frontend
 │   ├── main.tsx                  # Router: /, /v2/globe, /v2/canvas, /v2/scenarios, /v2/tours
-│   ├── App.tsx                   # Globe shell (~10.8k lines, 14 lazy-loaded panels)
+│   ├── App.tsx                   # Globe shell (~11k lines, 11 lazy-loaded panels)
 │   ├── components/               # UI components (chat/, cockpit/, scenarios/, kaggle/, ...)
-│   ├── rendering/                # 40 Cesium rendering modules (ais, flights, satellites, ...)
+│   ├── rendering/                # 41 Cesium rendering modules (ais, flights, satellites, ...)
 │   ├── hooks/                    # useChat, useWebSocket, useRealtimeVoice, ...
 │   ├── lib/                      # API client, chat store, formatTime, DuckDB, PDF
 │   ├── data/                     # Analytical models catalog, land cover classes
@@ -76,13 +76,13 @@ terranoetis/
 │   └── __tests__/                # Frontend unit tests
 │
 ├── server/                       # Express 4 + TypeScript API
-│   ├── index.ts                  # App entry: routes, middleware, background services (12.3k+ lines)
+│   ├── index.ts                  # App entry: routes, middleware, background services (~13.8k lines)
 │   ├── agent.ts                  # Intent router + cognition pipeline
-│   ├── analytical-models/        # 150 equations, 7 parts, 25 domains
+│   ├── analytical-models/        # 150 equations, 7 parts, 26 domains
 │   ├── cognition/                # System 1 / System 2, MCTS, tree-of-thoughts
 │   ├── sentinel/                 # Continuous monitoring, anomaly detection
 │   ├── memory/ + memoryV2/       # Working/episodic/semantic/procedural memory
-│   ├── ai-router/                # Omninet 8-provider LLM router (incl. local GGUF)
+│   ├── ai-router/                # Omninet 9-provider LLM router (incl. local GGUF)
 │   ├── digitalTwin/              # Regional analysis pipeline
 │   ├── sandboxV2/                # Simulation engines (FARSITE, ADCIRC, WRF, HYSPLIT)
 │   ├── causal/ + kgV2/           # Causal reasoning + knowledge graph
@@ -102,9 +102,11 @@ terranoetis/
 │   ├── FRONTEND.md
 │   ├── BACKEND.md
 │   ├── MODELS.md
-│   └── DEPLOYMENT.md
+│   ├── DEPLOYMENT.md
+│   ├── index.html                # Standalone project landing page
+│   └── Research papers/          # Source PDFs for the equation catalog
 │
-├── e2e/                          # Playwright browser tests (9 tests, 5 specs)
+├── e2e/                          # Playwright browser tests (7 specs, 12 tests)
 ├── scripts/                      # Dev utilities + legacy test scripts
 ├── data/                         # Runtime databases + ML models
 ├── models/                       # Local GGUF model (downloadable from admin panel) → gitignored
@@ -112,8 +114,8 @@ terranoetis/
 │
 ├── docker-compose.yml            # 3 services (terranoetis + redis + causal-service)
 ├── Dockerfile                    # Multi-stage build (node:20-alpine)
-├── .github/workflows/ci.yml      # 9 CI jobs (typecheck, lint, test, build, docker, audit)
-├── package.json                  # ~95 dependencies, 14 scripts
+├── .github/workflows/ci.yml      # 10 CI jobs (typecheck, lint, tests, coverage, build, docker, audit, browser, summary)
+├── package.json                  # 97 dependencies, 14 scripts
 ├── tsconfig.json                 # Project references: app + node + server + scripts
 ├── vite.config.ts                # Vite 7 config with Cesium plugin
 ├── playwright.config.ts          # Playwright: WebGL args, reuse server
@@ -137,7 +139,7 @@ terranoetis/
 
 ```bash
 npm test              # Vitest — unit + integration tests
-npx playwright test   # Playwright (local, requires display/GPU — skipped in CI)
+npx playwright test   # Playwright — Chromium with software WebGL (SwiftShader); runs headless in CI
 ```
 
 ---

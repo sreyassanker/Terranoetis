@@ -65,9 +65,11 @@ curl http://localhost:3001/api/health
 
 | Service | Image | Port | Purpose |
 |---|---|---|---|
-| `terranoetis` | Custom (Dockerfile) | 3001 (API) + 3000 (static) | Express API server + built frontend |
+| `terranoetis` | Custom (Dockerfile) | 3001 | Express API + built frontend (single origin) |
 | `redis` | `redis:7-alpine` | 6379 | Cache, session, pub/sub |
 | `causal-service` | Custom (Python) | 5001 | Causal inference microservice (DoWhy) |
+
+> In production (`NODE_ENV=production`), the Express app serves the built frontend from `dist/` on the same origin as the API — open `http://localhost:3001` for the full application. In development, Vite serves the client on :3000 and proxies `/api` to :3001.
 
 ### Production Start
 
@@ -79,7 +81,8 @@ cp .env.example .env
 docker compose up -d
 
 # Verify
-curl http://localhost:3001/api/health
+curl http://localhost:3001/api/health   # API
+open http://localhost:3001              # Frontend (served by the same container)
 
 # View logs
 docker compose logs -f terranoetis
@@ -108,9 +111,9 @@ docker compose up -d    # Restart with rebuilt images
 
 | Variable | Default | Description |
 |---|---|---|
-| `PROXY_PORT` | `3001` | Express API port (empty = 3001) |
-| Vite port | `3000` | Frontend dev server (hardcoded) |
-| `PORT` | `3001` | Server runtime port (Docker) |
+| `PROXY_PORT` | `3001` | Express API port (empty = fall through to `PORT`, else 3001) |
+| `PORT` | `3001` | Standard runtime port (used when `PROXY_PORT` is unset; set by Dockerfile/compose) |
+| Vite port | `3000` | Frontend dev server (hardcoded in `vite.config.ts`) |
 
 ### NODE_ENV Behavior
 
@@ -126,7 +129,7 @@ docker compose up -d    # Restart with rebuilt images
 
 ## Environment Variables
 
-The `.env` file configures 60+ integrated services. Missing keys disable the corresponding feature — services degrade gracefully.
+The `.env` file configures 100+ variables covering 70+ integrated services (see `.env.example`). Missing keys disable the corresponding feature — services degrade gracefully.
 
 ### Required (production)
 
@@ -172,6 +175,7 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) runs the following on e
 | Docker Build | Docker build verification |
 | Security Audit | `npm audit` |
 | Browser Tests | Playwright — headless Chromium with software WebGL (SwiftShader) |
+| Summary | Aggregates job results into a single CI status comment |
 
 ### CI Notes
 

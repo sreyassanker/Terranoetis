@@ -4,7 +4,6 @@ services:
     container_name: terranoetis-v3
     ports:
       - "3001:3001"
-      - "3000:3000"
     volumes:
       - terranoetis-data:/app/data
       - ./.env:/app/.env:ro

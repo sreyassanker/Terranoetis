@@ -145,8 +145,10 @@ coverage/
 *.rej
 server/plugins/
 
-# E2E test specs
-e2e/
+# E2E: ignore ad-hoc debug specs only — real specs in e2e/ must stay tracked
+e2e/_debug*
+e2e/debug*
+e2e/tmp*
 
 # Editor/manual backup cruft
 *.bak
