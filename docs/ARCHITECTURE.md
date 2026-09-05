@@ -171,7 +171,7 @@ flowchart LR
 
 ## Frontend (`src/`)
 
-### Rendering Engine (`src/rendering/`, 41 files)
+### Rendering Engine (`src/rendering/`, 41 modules)
 
 | File | Purpose |
 |---|---|
@@ -236,7 +236,7 @@ flowchart LR
 
 | Module Directory | Purpose |
 |---|---|
-| `analytical-models/` | 150 peer-reviewed equation engines (7 parts, 26 domains), tool configs, workflows |
+| `analytical-models/` | 150 equation engines grounded in primary literature (7 parts, 26 domains), tool configs, workflows |
 | `cognition/` | Cognitive orchestrator, System 1 / System 2, MCTS, reasoning tree, tree-of-thoughts |
 | `sentinel/` | Continuous monitoring: stream processor, anomaly detector, correlation engine, alert intelligence |
 | `memory/` + `memoryV2/` | Working/episodic/semantic/procedural/predictive memory, sensory buffer, Redis adapter |

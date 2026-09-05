@@ -28,7 +28,7 @@ Terranoetis exposes **360+ REST endpoints** plus a real-time **WebSocket** chann
 - **Content-Type:** `application/json`
 - **Auth:** `Authorization: Bearer <JWT>`
 - **Rate limiting:** per-IP and per-user limits apply on public + authenticated routes
-- **Public routes** (no auth): `/auth/login`, `/auth/dev-login`, `/auth/refresh`, `/health`, `/ready`, `/live`, `/metrics`, `/config/apis`, `/openapi.json`, `/docs`. In addition, the read-only live-data endpoints (e.g. `/earthquakes`, `/weather/*`, `/flights`, `/social`, `/pulse/*`) are public but server-side rate-limited.
+- **Public routes** (no auth): `/auth/login`, `/auth/dev-login`, `/auth/refresh`, `/health`, `/ready`, `/live`, `/metrics`, `/config/apis`, `/openapi.json`, `/docs`. In addition, read-only live-data endpoints (e.g. `/earthquakes`, `/weather/*`, `/flights`, `/ais`, `/satellites/tle`, `/pulse/*`, `/kaggle/*`, `/analytical-models` search + detail) are public but server-side rate-limited, as are shared-session reads (`/shared/*`), map tiles (`/tiles/*`, `/tilejson`), foundation-model endpoints (`/fm/*`, `/road-traffic/*`, `/spacex/*`, `/bayfire/*`), multimodal endpoints (`/multimodal/*`), and simulations (`/simulate/*`). `/social/stream` authenticates via `?token=` (SSE).
 
 ---
 
@@ -81,13 +81,15 @@ The agent pipeline routes natural-language queries through intent recognition (S
 
 ## Analytical Models
 
-150 peer-reviewed equation engines across 26 domains and 7 parts.
+150 equation engines grounded in primary literature across 26 domains and 7 parts.
 
 | Method | Path | Description |
 |---|---|---|
+| GET | `/api/analytical-models` | Full catalog (all 150 models) |
 | GET | `/api/analytical-models/search` | Full-text + domain search over all 150 models |
 | GET | `/api/analytical-models/:id` | Model detail (paper citation, formula, params) |
-| POST | `/api/analytical-models/:id/execute-internal` | Execute a model with inputs |
+| POST | `/api/analytical-models/:id/execute` | Execute a model with inputs (authenticated) |
+| POST | `/api/analytical-models/:id/execute-internal` | Execute a model from the server-side tool executor (loopback; remote callers need admin JWT) |
 
 The analytical pipeline applies a **7-stage workflow** (input validation → preprocessing → computation → post-processing → quality control → uncertainty estimation → interpretation), defined in `server/analytical-models/toolWorkflows.ts`.
 

@@ -59,7 +59,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 
 | Module | Purpose |
 |---|---|
-| `analytical-models/` | 150 peer-reviewed equation engines (7 parts, 26 domains), tool configs, workflows, context engine |
+| `analytical-models/` | 150 equation engines grounded in primary literature (7 parts, 26 domains), tool configs, workflows, context engine |
 | `cognition/` | CognitiveOrchestrator, System 1 / System 2, MCTS, reasoning tree, tree-of-thoughts, execution orchestrator |
 | `sentinel/` | Continuous monitoring: stream processor, anomaly detector, correlation engine, alert intelligence, ambient/proactive insights |
 | `memory/` + `memoryV2/` | Working / episodic / semantic / procedural / predictive memory, sensory buffer, Redis adapter |

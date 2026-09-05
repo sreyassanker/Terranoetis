@@ -32,7 +32,6 @@ COPY .env.example ./
 VOLUME ["/app/data"]
 
 EXPOSE 3001
-EXPOSE 3000
 
 ENV NODE_ENV=production
 ENV PORT=3001

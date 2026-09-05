@@ -220,7 +220,7 @@ import { registerOpenApiRoutes } from './routes/openapi';
 const app = express();
 app.set('trust proxy', 1);
 const PORT = (() => {
-  const p = Number(process.env.PROXY_PORT);
+  const p = Number(process.env.PROXY_PORT || process.env.PORT);
   return Number.isFinite(p) && p > 0 ? p : 3001;
 })();
 
@@ -13700,6 +13700,20 @@ app.get('/api/intelligence/disinformation', async (req: express.Request, res: ex
 /* ═══════════════════════════════════════════════════════════════════
    PRITHVI EO FOUNDATION MODEL — routes registered above
    ═══════════════════════════════════════════════════════════════════ */
+
+// Production: serve the built frontend (dist/) from the same origin as the
+// API, so `docker compose up` yields a single-port deployment. In development
+// the Vite server on :3000 serves the client instead.
+if (IS_PROD) {
+  const distDir = path.join(__dirname, '..', 'dist');
+  if (fs.existsSync(path.join(distDir, 'index.html'))) {
+    app.use(express.static(distDir, { index: false, maxAge: '1h' }));
+    app.get(/^(?!\/api(?:\/|$)).*/, (_req: express.Request, res: express.Response) => {
+      res.sendFile(path.join(distDir, 'index.html'));
+    });
+    logger.info({ distDir }, 'serving built frontend from Express (single-origin)');
+  }
+}
 
 // Global 404 + error handler (must be last)
 app.use(notFoundHandler);

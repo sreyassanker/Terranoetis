@@ -23,7 +23,7 @@ The Terranoetis client is a **React 19 + TypeScript** single-page application bu
 | Framework | React 19, TypeScript |
 | Build | Vite 7 |
 | 3D rendering | CesiumJS 1.140 (WebGL, Cesium World Terrain) |
-| Styling | Tailwind CSS 3, class-variance-authority, dark mode by default |
+| Styling | Tailwind CSS 3, class-variance-authority, dark theme via CSS variables (no light mode) |
 | Routing | React Router 7 |
 | State | React context (AuthContext) + custom hooks + Zustand chat store |
 | Charts | Recharts |
@@ -101,10 +101,11 @@ Defined in `src/main.tsx`:
 |---|---|
 | `CinematicDirector.tsx` | Camera path animation for disaster fly-throughs |
 | `EarthquakeVisualizer.tsx` | MMI polygons, P/S/Rayleigh/Love wavefront rings |
+| `HurricaneVisualizer.tsx`, `WildfireVisualizer.tsx`, `LandslideVisualizer.tsx`, `VolcanicVisualizer.tsx`, `FloodWaterSurface.tsx` | Per-hazard scenario visualizers |
 | `ScenarioEditor.tsx` | Parameter forms for 7 disaster types |
 | `ScenarioGallery.tsx` | Sortable/filterable grid, search |
 | `hazardRenderers.ts` | Renders 6 shape types on Cesium (polygon, cylinder, corridor, ellipse, polyline, ring) |
-| `SpatialSketching.tsx`, `TimelineControls.tsx`, `FloodWaterSurface.tsx` | Supporting visualizers |
+| `SpatialSketching.tsx`, `TimelineControls.tsx`, `ScenarioThumbnail.tsx` | Supporting visualizers |
 
 Scenario types and colors:
 
@@ -197,7 +198,7 @@ Scenario types and colors:
 
 `ScalarSurfacePrimitive.ts`, `ArrowFieldPrimitive.ts`, `ParticleAdvector.ts`, `cesiumRuntime.ts`, `cfdColormaps.ts`, `fieldData.ts`, `terrain.ts`
 
-### Disaster Wrappers
+### Disaster Wrappers (`src/components/`)
 
 | File | Layers |
 |---|---|
