@@ -15,6 +15,7 @@ import StudyAreaPanel from '@/components/ui/StudyAreaPanel';
 import { CameraControls } from '@/components/CameraControls';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import { throttledRender } from '@/lib/throttledRender';
+import { startRadioWave, type RadioWaveHandle } from '@/rendering/radioWave';
 import { useChatStore } from '@/store/chatStore';
 import { useUserPrefStore } from '@/store/userPrefStore';
 import { ChatPanel } from '@/components/chat';
@@ -1271,6 +1272,8 @@ export default function App() {
   const [pendingAnalyticalToolId, setPendingAnalyticalToolId] = useState<number | null>(null);
   const [showLaunchReplay, setShowLaunchReplay] = useState(false);
   const [showRadioTuner, setShowRadioTuner] = useState(false);
+  const radioWaveRef = useRef<{ handle: RadioWaveHandle; lat: number; lon: number } | null>(null);
+  const radioLayerEnabledByTunerRef = useRef(false);
   const [showDuckdbAnalytics, setShowDuckdbAnalytics] = useState(false);
   const [duckdbRestoreKey, setDuckdbRestoreKey] = useState(0);
   const [analyticalNeedsTwoPoints, setAnalyticalNeedsTwoPoints] = useState(false);
@@ -8937,6 +8940,37 @@ case 'openPanel':
     setStudyDrawing(false);
   }, []);
 
+  // World Radio: draw a looping wave at the selected station in the picked
+  // color. Same station → recolor live; new station → restart; null → clear.
+  const handleRadioWave = useCallback((station: { lat: number; lon: number } | null, color: string) => {
+    const v = viewerRef.current;
+    if (!v) return;
+    if (!station) {
+      radioWaveRef.current?.handle.stop();
+      radioWaveRef.current = null;
+      return;
+    }
+    const cur = radioWaveRef.current;
+    if (cur && cur.lat === station.lat && cur.lon === station.lon) {
+      cur.handle.setColor(color);
+      return;
+    }
+    cur?.handle.stop();
+    radioWaveRef.current = { handle: startRadioWave(v, station.lat, station.lon, color), lat: station.lat, lon: station.lon };
+  }, []);
+
+  // Closing the tuner clears everything it put on the globe: the wave, and the
+  // radio_stations markers only if the tuner was the one that enabled them.
+  useEffect(() => {
+    if (showRadioTuner) return;
+    radioWaveRef.current?.handle.stop();
+    radioWaveRef.current = null;
+    if (radioLayerEnabledByTunerRef.current) {
+      if (isLayerEnabled('radio_stations')) toggleLayer('radio_stations');
+      radioLayerEnabledByTunerRef.current = false;
+    }
+  }, [showRadioTuner, isLayerEnabled, toggleLayer]);
+
   // Stage a mission from the first-run card.
   const stageFirstRunMission = useCallback((mission: FirstRunMission) => {
     switch (mission) {
@@ -10029,10 +10063,15 @@ case 'openPanel':
         <button
           className={`btn-icon monitor-btn ${showRadioTuner ? 'active' : ''}`}
           onClick={() => {
-            setShowRadioTuner(p => !p);
+            const next = !showRadioTuner;
+            setShowRadioTuner(next);
             focusPanel('analytics');
-            // Ensure the radio station markers are on the globe for the tuner.
-            if (!isLayerEnabled('radio_stations')) toggleLayer('radio_stations');
+            // Opening: ensure the radio station markers are on the globe (and
+            // remember we enabled them so closing can clean them up).
+            if (next && !isLayerEnabled('radio_stations')) {
+              toggleLayer('radio_stations');
+              radioLayerEnabledByTunerRef.current = true;
+            }
           }}
           title="World Radio — analog tuner over 500 real geolocated stations"
           style={{ color: showRadioTuner ? '#22d3ee' : undefined }}
@@ -10614,7 +10653,7 @@ case 'openPanel':
       <PanelSuspense><LazyLaunchReplayPanel open={showLaunchReplay} onClose={() => setShowLaunchReplay(false)} viewer={viewerRef.current} zIndex={getPanelZIndex('analytics') + 1} /></PanelSuspense>
 
       {/* World Radio Tuner */}
-      <PanelSuspense><LazyRadioTunerPanel open={showRadioTuner} onClose={() => setShowRadioTuner(false)} zIndex={getPanelZIndex('analytics') + 2}
+      <PanelSuspense><LazyRadioTunerPanel open={showRadioTuner} onClose={() => setShowRadioTuner(false)} onWave={handleRadioWave} zIndex={getPanelZIndex('analytics') + 2}
         getStations={() => {
           const ents = entityStoreRef.current['radio_stations'] ?? [];
           return ents.map(e => {
@@ -10630,7 +10669,7 @@ case 'openPanel':
         }}
         flyTo={(lat, lon, alt) => {
           const v = viewerRef.current;
-          if (v) v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt ?? 30000), duration: 1.0 });
+          if (v) v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt ?? 350000), duration: 1.0 });
         }}
       /></PanelSuspense>
 

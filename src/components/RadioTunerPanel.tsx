@@ -10,6 +10,8 @@ interface RadioTunerPanelProps {
   getStations?: () => Array<{ lat: number; lon: number; name: string; url?: string; tags?: string; codec?: string; bitrate?: number; stationuuid?: string; favicon?: string }>;
   /** Fly the camera to a lat/lon. */
   flyTo?: (lat: number, lon: number, alt?: number) => void;
+  /** Draw/clear the looping radio wave on the globe for the selected station. */
+  onWave?: (station: { lat: number; lon: number } | null, color: string) => void;
   zIndex?: number;
 }
 
@@ -18,14 +20,14 @@ interface Station {
   codec?: string; bitrate?: number; stationuuid?: string; favicon?: string;
 }
 
-const TUNER_COLORS = ['#22d3ee', '#a78bfa', '#34d399', '#f472b6', '#fb923c', '#facc15'];
+const TUNER_COLORS = ['#7c3aed', '#22d3ee', '#a78bfa', '#34d399', '#f472b6', '#fb923c', '#facc15'];
 
-export const RadioTunerPanel: React.FC<RadioTunerPanelProps> = ({ open, onClose, getStations, flyTo, zIndex = 9996 }) => {
+export const RadioTunerPanel: React.FC<RadioTunerPanelProps> = ({ open, onClose, getStations, flyTo, onWave, zIndex = 9996 }) => {
   const [stations, setStations] = useState<Station[]>([]);
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [colorIdx, setColorIdx] = useState(0);
+  const [customColor, setCustomColor] = useState<string>(TUNER_COLORS[0]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -89,10 +91,10 @@ export const RadioTunerPanel: React.FC<RadioTunerPanelProps> = ({ open, onClose,
     const clamped = Math.max(0, Math.min(stations.length - 1, i));
     setIdx(clamped);
     const st = stations[clamped];
-    if (st && flyTo) flyTo(st.lat, st.lon, 30000);
+    if (st && flyTo) flyTo(st.lat, st.lon, 350000);
   }, [stations, flyTo]);
 
-  useEffect(() => { if (current && flyTo) flyTo(current.lat, current.lon, 30000); }, [idx]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (current && flyTo) flyTo(current.lat, current.lon, 350000); }, [idx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keyboard: arrows scrub the tuner
   useEffect(() => {
@@ -106,8 +108,17 @@ export const RadioTunerPanel: React.FC<RadioTunerPanelProps> = ({ open, onClose,
     return () => window.removeEventListener('keydown', onKey);
   }, [open, idx, current, playing, select, stopAudio, playStation]);
 
-  // const hue = 190 + colorIdx * 15;
-  const accent = TUNER_COLORS[colorIdx % TUNER_COLORS.length];
+  const accent = customColor;
+
+  // Drive the globe wave: emit the selected station + current color; clear on
+  // close or when there is no station. Deps are primitives so it only fires on
+  // an actual station/color/open change.
+  useEffect(() => {
+    if (!onWave) return;
+    const st = stations[idx];
+    if (open && st) onWave({ lat: st.lat, lon: st.lon }, accent);
+    else onWave(null, accent);
+  }, [open, idx, accent, stations, onWave]);
 
   return (
     <div style={{ position: 'fixed', top: 60, right: 10, bottom: 56, zIndex, width: 380, maxWidth: 'calc(100vw - 32px)', display: open ? 'block' : 'none' }}>
@@ -119,22 +130,21 @@ export const RadioTunerPanel: React.FC<RadioTunerPanelProps> = ({ open, onClose,
           {/* Analog tuner */}
           {stations.length > 0 && (
             <div style={{ marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <div style={{ fontSize: 9, color: '#64748b', display: 'flex', alignItems: 'center', gap: 4 }}><MapPin size={9} /> {stations.length} geolocated stations</div>
-                <div style={{ display: 'flex', gap: 3 }}>
-                  {TUNER_COLORS.map((c, i) => (
-                    <button key={c} onClick={() => setColorIdx(i)} title="marker color" style={{ width: 12, height: 12, borderRadius: '50%', border: colorIdx === i ? '2px solid white' : '1px solid rgba(255,255,255,0.2)', background: c, cursor: 'pointer' }} />
-                  ))}
+              <div style={{ fontSize: 9, color: '#64748b', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}><MapPin size={9} /> {stations.length} geolocated stations</div>
+              {/* Dial + color palette (palette sits to the right of the dial) */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ flex: 1, minWidth: 0, position: 'relative', height: 34, borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: `1px solid ${accent}40`, overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, bottom: 0, width: 2, background: accent, left: `${(idx / Math.max(stations.length - 1, 1)) * 100}%`, transition: 'left 0.1s linear', boxShadow: `0 0 6px ${accent}` }} />
+                  <div style={{ position: 'absolute', top: 0, left: 8, right: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: '100%', pointerEvents: 'none' }}>
+                    {stations.slice(0, 7).map((s, i) => (
+                      <span key={i} style={{ fontSize: 6, color: '#475569', width: 1 }}>·</span>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              {/* Dial */}
-              <div style={{ position: 'relative', height: 34, borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: `1px solid ${accent}40`, overflow: 'hidden' }}>
-                <div style={{ position: 'absolute', top: 0, bottom: 0, width: 2, background: accent, left: `${(idx / Math.max(stations.length - 1, 1)) * 100}%`, transition: 'left 0.1s linear', boxShadow: `0 0 6px ${accent}` }} />
-                <div style={{ position: 'absolute', top: 0, left: 8, right: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: '100%', pointerEvents: 'none' }}>
-                  {stations.slice(0, 7).map((s, i) => (
-                    <span key={i} style={{ fontSize: 6, color: '#475569', width: 1 }}>·</span>
-                  ))}
-                </div>
+                {/* Color picker — choose any color for the tuner accent */}
+                <label title="Pick color" aria-label="Pick tuner color" style={{ position: 'relative', width: 26, height: 26, borderRadius: '50%', background: accent, border: '1px solid rgba(255,255,255,0.35)', boxShadow: `0 0 8px ${accent}66`, overflow: 'hidden', flexShrink: 0, cursor: 'pointer', display: 'inline-flex' }}>
+                  <input type="color" value={accent} onChange={e => setCustomColor(e.target.value)} aria-label="Pick tuner accent color" style={{ position: 'absolute', inset: -8, width: 'calc(100% + 16px)', height: 'calc(100% + 16px)', opacity: 0, cursor: 'pointer', border: 'none', padding: 0 }} />
+                </label>
               </div>
               <input type="range" min={0} max={Math.max(stations.length - 1, 0)} step={1} value={idx}
                 onChange={e => select(Number(e.target.value))}
