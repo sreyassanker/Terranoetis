@@ -10689,6 +10689,20 @@ Answer:`;
     if (/All AI providers|Provider failed|providers unavailable|returned no content|streamed no content/i.test(outputText)) {
       outputText = 'Live data is unavailable right now — every AI provider is rate-limited or unreachable, and the local fallback produced no answer. Your question is valid; please try again in a moment.';
     }
+    // Deterministic honesty safety-net: when the answer used NO live data tools
+    // it is by definition not from platform data, so it must be labeled as
+    // general knowledge. The model does this most of the time but not always —
+    // enforce it server-side so the honesty contract never depends on sampling.
+    // Skips refusals/clarifications, empty/short text, live-data-unavailable
+    // statements, and answers already carrying a label (no double-labeling).
+    {
+      const alreadyLabeled = /general knowledge|not live (platform )?data|live data is (not available|unavailable)|not available in this platform|no (relevant )?data|couldn'?t find|could not find|not a recogni|mythical|unable to (find|retrieve|access)/i.test(outputText);
+      const isRefusalOrClarify = /^\s*(i (cannot|can't|am unable|won'?t|apolog)|sorry|as an ai|i'?m (an ai|only able|just)|please (specify|provide|clarify|tell me)|which (location|place|city|area|one))/i.test(outputText);
+      const looksLikeLiveDataAsk = /\b(today|now|current|latest|right now|live)\b/i.test(message);
+      if (toolCallCount === 0 && outputText.trim().length >= 40 && !alreadyLabeled && !isRefusalOrClarify && !looksLikeLiveDataAsk) {
+        outputText = `*From general knowledge (not live platform data).*\n\n${outputText}`;
+      }
+    }
     const saveable = recipeSteps.length > 0;
     sendEvent('output', {
       text: outputText, modelTier, intentType: intent.type,
