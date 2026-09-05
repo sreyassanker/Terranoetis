@@ -148,25 +148,9 @@ export function DuckdbAnalyticsPanel({ open, onClose, restoreKey = 0, zIndex = 1
 
   if (!open) return null;
 
-  // Minimized → collapse to a small floating icon; click to restore.
-  if (minimized) {
-    return (
-      <button
-        onClick={() => setMinimized(false)}
-        title="Restore DuckDB Spatial SQL"
-        style={{
-          position: 'fixed', left: pos.x, top: pos.y, zIndex,
-          width: 42, height: 42, borderRadius: 10,
-          background: 'rgba(139,92,246,0.15)', backdropFilter: 'blur(12px)',
-          border: '1px solid rgba(139,92,246,0.4)', color: '#a78bfa',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
-        }}
-      >
-        <Database size={20} />
-      </button>
-    );
-  }
+  // Minimized → hide the panel entirely. The stats-bar Database button restores
+  // it (it bumps restoreKey, which clears `minimized` via the effect above).
+  if (minimized) return null;
 
   return (
     <div style={{
