@@ -38,4 +38,4 @@ Please include:
 The following are documented and **resolved**:
 
 1. **Cesium Ion access token** — a live token was committed via `server/.env.example` in an early commit. The token was **rotated** (the old token in git history is now invalid). If you see the old token in history, no action is needed — it no longer works.
-2. **Kaggle placeholder credentials** — `Terranoetis_kaggle.json` contains placeholder values (`YOUR_KAGGLE_USERNAME`). No real secrets were ever committed.
+2. **Kaggle placeholder credentials** — `Terranoetis_kaggle.json` contained only placeholder values (`YOUR_KAGGLE_USERNAME`); no real secrets were ever committed. The file has since been removed from the repo — real Kaggle credentials belong in `~/.kaggle/kaggle.json` (outside the repository, `chmod 600`), which is where the simulation runner reads them.
