@@ -85,9 +85,7 @@ function freshTabState(): {
   sandboxWorkspaceId: string | null;
 } {
   return {
-    messages: [
-      { id: 0, role: 'assistant', content: 'Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.', timestamp: Date.now() },
-    ],
+    messages: [],
     input: '',
     selectedTier: 'flash',
     selectedModel: 'auto',
@@ -358,9 +356,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   tabTyping: {},
 
   // ── Singleton hydrated from the persisted active tab (if any) ──
-  aiMessages: initialActiveTab ? initialActiveTab.messages : [
-    { id: 0, role: 'assistant', content: 'Welcome to Earth Intelligence AI. Ask me about earthquakes, weather, flights, or any location on Earth.', timestamp: Date.now() },
-  ],
+  // No seeded "welcome" bubble — the premium empty-state block in ChatPanel is
+  // the single onboarding surface (shown while there are ≤1 messages).
+  aiMessages: initialActiveTab ? initialActiveTab.messages : [],
   aiInput: initialActiveTab ? initialActiveTab.input : '',
   selectedTier: initialActiveTab ? initialActiveTab.selectedTier : 'flash',
   selectedModel: 'auto',

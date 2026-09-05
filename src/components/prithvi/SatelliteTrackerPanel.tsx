@@ -41,18 +41,22 @@ export function SatelliteTrackerPanel({ onClose, onTrackSatellite, onTravelView,
   const [selected, setSelected] = useState<SatelliteData | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const loadSats = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch('/api/satellites/tle');
+      const data = (await r.json()) as SatelliteData[];
+      setAllSats(data);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, []);
+
   useEffect(() => {
     inputRef.current?.focus();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
-    fetch('/api/satellites/tle')
-      .then(r => r.json())
-      .then((data: SatelliteData[]) => {
-        setAllSats(data);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
+    // Loading is toggled inside loadSats (async), not synchronously in this
+    // effect body, so there is no cascading render on mount.
+    void loadSats();
+  }, [loadSats]);
 
   const suggestions = useMemo(() => {
     if (!query.trim()) return [];

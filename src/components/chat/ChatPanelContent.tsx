@@ -72,7 +72,10 @@ export default function ChatPanelContent({
         <LiveProcessPanel agentSteps={agentSteps} pipelineProgress={pipelineProgress} />
       )}
 
-        {aiTyping && (
+        {/* The live-process header already shows a spinner + verb while steps
+            exist; the bare typing row is only the fallback before any step
+            arrives (avoids two competing "working" indicators). */}
+        {aiTyping && agentSteps.length === 0 && (
           <div className="ai-typing">
             <span className="ai-typing-row">
               <BrailleSpinner />

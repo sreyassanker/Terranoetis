@@ -13,6 +13,43 @@ import { useShallow } from 'zustand/react/shallow';
 const BRAILLE_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const FRAME_MS = 120;
 
+/** Single shared 120ms clock for every spinner on the page (one interval,
+ *  not one per component). */
+const tickListeners = new Set<(now: number) => void>();
+let tickInterval: ReturnType<typeof setInterval> | null = null;
+function subscribeTick(fn: (now: number) => void): () => void {
+  tickListeners.add(fn);
+  if (!tickInterval) {
+    tickInterval = setInterval(() => {
+      const now = Date.now();
+      tickListeners.forEach(l => l(now));
+    }, FRAME_MS);
+  }
+  return () => {
+    tickListeners.delete(fn);
+    if (tickListeners.size === 0 && tickInterval) {
+      clearInterval(tickInterval);
+      tickInterval = null;
+    }
+  };
+}
+
+/** Honors prefers-reduced-motion: spinners freeze, verbs stop cycling. */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      : false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onChange = () => setReduced(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return reduced;
+}
+
 // Action verbs cycled while a step is running (Claude Code rotates its verb
 // list as it works). Each phase gets its own flavour; unknown phases fall
 // back to the generic set.
@@ -36,13 +73,16 @@ function brailleFrame(nowMs: number, seed = 0): string {
   return BRAILLE_FRAMES[Math.floor(nowMs / FRAME_MS + seed) % BRAILLE_FRAMES.length];
 }
 
-/** Self-contained Claude Code-style braille spinner (own 120ms interval). */
+/** Self-contained Claude Code-style braille-dot spinner (shared clock). */
 export function BrailleSpinner({ seed = 0, size = 'md' }: { seed?: number; size?: 'sm' | 'md' }) {
-  const [frame, setFrame] = useState(() => brailleFrame(Date.now(), seed));
+  const reduced = usePrefersReducedMotion();
+  const [frame, setFrame] = useState(() => (reduced ? '⠸' : brailleFrame(Date.now(), seed)));
   useEffect(() => {
-    const id = setInterval(() => setFrame(brailleFrame(Date.now(), seed)), FRAME_MS);
-    return () => clearInterval(id);
-  }, [seed]);
+    // Reduced motion: hold a static frame (set from the initializer above);
+    // no subscription, so no setState in the effect body.
+    if (reduced) return;
+    return subscribeTick(now => setFrame(brailleFrame(now, seed)));
+  }, [seed, reduced]);
   return (
     <span className={`braille-spin${size === 'sm' ? ' braille-node' : ''}`} aria-hidden="true">
       {frame}
@@ -147,14 +187,16 @@ function stepTime(step: AgentStep, nowMs: number): string | null {
   return null;
 }
 
-/** Re-tick every intervalMs while `active` is true (live elapsed timers). */
-function useNow(active: boolean, intervalMs = 250): number {
+/** Re-tick every intervalMs while `active` is true (live elapsed timers).
+ *  Reduced-motion users get a 1s cadence instead of 120ms. */
+function useNow(active: boolean, intervalMs = 250, reduced = false): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return;
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    const ms = reduced ? 1000 : intervalMs;
+    const id = setInterval(() => setNow(Date.now()), ms);
     return () => clearInterval(id);
-  }, [active, intervalMs]);
+  }, [active, intervalMs, reduced]);
   return now;
 }
 
@@ -171,6 +213,7 @@ export default function LiveProcessPanel({
     expandedStep: state.expandedStep,
     setExpandedStep: state.setExpandedStep,
   })));
+  const reduced = usePrefersReducedMotion();
 
   const steps = useMemo<AgentStep[]>(() => [
     ...agentSteps,
@@ -182,7 +225,7 @@ export default function LiveProcessPanel({
   const doneCount = steps.filter(s => s.status === 'completed' || s.status === 'failed').length;
   const active = runningCount > 0;
   const allDone = total > 0 && !active;
-  const now = useNow(active, 120);
+  const now = useNow(active, 120, reduced);
   const startMs = steps[0]?.startedAt ?? now;
   const elapsedMs = Math.max(0, now - startMs);
 
@@ -193,10 +236,11 @@ export default function LiveProcessPanel({
   const currentStep = runningStep ?? steps[steps.length - 1];
   const currentColor = currentStep ? phaseColor(currentStep.type) : '#60a5fa';
 
-  // Claude Code cycles action verbs while a step is running. Use the ticking
-  // clock so the verb rotates smoothly without a separate interval.
+  // Claude Code cycles action verbs while a step is running. Under
+  // reduced-motion the first verb is held stable.
   const verbFor = (nowMs: number, type: string, seed: number): string => {
     const verbs = PHASE_VERBS[type] ?? DEFAULT_VERBS;
+    if (reduced) return verbs[0];
     return verbs[Math.floor(nowMs / 600 + seed) % verbs.length];
   };
 
@@ -211,23 +255,30 @@ export default function LiveProcessPanel({
   const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
 
   return (
-    <div className="live-process" role="status" aria-label={`Agent process: ${title}`}>
-      <div className="live-process-header" onClick={() => setThinkingExpanded(!thinkingExpanded)}>
-        <span className="live-process-status" style={{ color: active ? currentColor : allDone ? '#22c55e' : '#94a3b8' }}>
+    // Stable accessible name; the fast-cycling verb/timer spans are
+    // aria-hidden so screen readers are not re-announced every 600ms.
+    <div className="live-process" role="status" aria-label="Agent process">
+      <button
+        type="button"
+        className="live-process-header"
+        onClick={() => setThinkingExpanded(!thinkingExpanded)}
+        aria-expanded={thinkingExpanded}
+      >
+        <span className="live-process-status" style={{ color: active ? currentColor : allDone ? '#22c55e' : '#94a3b8' }} aria-hidden="true">
           {active
             ? <BrailleSpinner />
             : allDone
-              ? <CheckCircle2 size={13} />
-              : <Bot size={13} />}
+              ? <CheckCircle2 size={14} />
+              : <Bot size={14} />}
         </span>
-        <span className="live-process-title">{title}</span>
-        <span className="live-process-meta">
+        <span className="live-process-title" aria-hidden="true">{title}</span>
+        <span className="live-process-meta" aria-hidden="true">
           <span className="live-process-count">{doneCount}/{total}</span>
           {(active || allDone) && <span className={`live-process-timer${active ? ' ticking' : ''}`}>{fmtDuration(elapsedMs)}</span>}
         </span>
-        <span className="live-process-chevron">{thinkingExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}</span>
-      </div>
-      <div className="live-process-progress"><div style={{ width: `${pct}%` }} /></div>
+        <span className="live-process-chevron">{thinkingExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+      </button>
+      <div className="live-process-progress" aria-hidden="true"><div style={{ width: `${pct}%` }} /></div>
       {thinkingExpanded && (
         <div className="live-process-body">
           {steps.map((step, i) => {
@@ -237,13 +288,14 @@ export default function LiveProcessPanel({
             const Icon = phaseIcon(step.type);
             const time = stepTime(step, now);
             const expanded = expandedStep === i;
+            const hasDetail = !!(step.code || step.output);
             return (
               <div
                 key={i}
                 className={`live-step ${cls}`}
                 style={{ '--step-color': color, animationDelay: `${Math.min(i, 10) * 45}ms` } as React.CSSProperties}
               >
-                <div className="live-step-rail">
+                <div className="live-step-rail" aria-hidden="true">
                   <span className={`live-step-node ${cls}`}>
                     {st === 'running'
                       ? <BrailleSpinner seed={i} size="sm" />
@@ -255,19 +307,32 @@ export default function LiveProcessPanel({
                   </span>
                   {i < steps.length - 1 && <span className="live-step-line" />}
                 </div>
-                <div className="live-step-content" onClick={() => setExpandedStep(expanded ? null : i)}>
+                <div
+                  className="live-step-content"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={hasDetail ? expanded : undefined}
+                  onClick={() => hasDetail && setExpandedStep(expanded ? null : i)}
+                  onKeyDown={e => {
+                    if (!hasDetail) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setExpandedStep(expanded ? null : i);
+                    }
+                  }}
+                >
                   <div className="live-step-label">
-                    <Icon size={9} style={{ display: 'inline', marginRight: 4, color }} />
+                    <Icon size={11} style={{ display: 'inline', marginRight: 4, color }} />
                     {phaseLabel(step.type)}
                   </div>
                   <div className="live-step-text">{step.text || 'Working…'}</div>
                   <div className="live-step-foot">
                     {time && <span className="live-step-time">{time}</span>}
-                    {(step.code || step.output) && (
-                      <span className="live-step-chevron">{expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}</span>
+                    {hasDetail && (
+                      <span className="live-step-chevron">{expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}</span>
                     )}
                   </div>
-                  {expanded && (
+                  {expanded && hasDetail && (
                     <div className="think-step-detail">
                       {step.code && <div className="think-code-block"><div className="think-code-label">Code</div><pre className="think-code">{step.code}</pre></div>}
                       {step.output && <div className="think-output-block"><div className="think-output-label">Output</div><pre className="think-output">{step.output}</pre></div>}
@@ -278,7 +343,7 @@ export default function LiveProcessPanel({
             );
           })}
           {active && (
-            <div className="live-process-live">
+            <div className="live-process-live" aria-hidden="true">
               <span className="live-process-live-dot" style={{ background: currentColor }} />
               <span className="live-process-live-text" style={{ color: currentColor }}>Live — updating…</span>
             </div>

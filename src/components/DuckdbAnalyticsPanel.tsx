@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Database, Play, RefreshCw, Table2, TerminalSquare, X, Minus, Maximize2 } from 'lucide-react';
+import { Database, Play, RefreshCw, Table2, TerminalSquare, X, Minus } from 'lucide-react';
 import { runQuery, listTables, type QueryResult } from '@/lib/duckdbAnalytics';
 import { loadAllLayers, type LoadResult } from '@/lib/duckdbLoader';
 

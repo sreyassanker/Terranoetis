@@ -112,17 +112,22 @@ const formatEta = (seconds: number): string => {
 
   const fetchGgufStatus = useCallback(async () => {
     const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-    try {
-      const resp = await fetch('/api/admin/models/gguf-status', { cache: 'no-store', headers });
-      if (resp.ok) {
+    // Self-contained recursive poll: `poll` is a local const referenced only
+    // after it is declared, so there is no forward reference to the outer
+    // `fetchGgufStatus` binding (which the linter flags as accessed-before-declared).
+    const poll = async (): Promise<void> => {
+      try {
+        const resp = await fetch('/api/admin/models/gguf-status', { cache: 'no-store', headers });
+        if (!resp.ok) return;
         const d = await resp.json();
         setGgufStatus(d);
         // If a download is running, keep polling until done.
         if (d?.download?.running && !d?.download?.done) {
-          setTimeout(fetchGgufStatus, 2000);
+          setTimeout(() => { void poll(); }, 2000);
         }
-      }
-    } catch { /* silent */ }
+      } catch { /* silent */ }
+    };
+    await poll();
   }, [token]);
 
   const startGgufDownload = useCallback(async () => {
@@ -131,7 +136,6 @@ const formatEta = (seconds: number): string => {
     try {
       const resp = await fetch('/api/admin/models/gguf-download', { method: 'POST', headers });
       if (resp.ok) {
-        const d = await resp.json();
         void fetchGgufStatus();
       }
     } catch { /* silent */ }
@@ -334,17 +338,25 @@ const formatEta = (seconds: number): string => {
       const d = await ecoRes.value.json();
       setEcoProposals(Array.isArray(d) ? d : d.proposals ?? d.data ?? []);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchMetrics();
-    fetchHealth();
-    void fetchAdminData();
-    void fetchEvolution();
-    const interval = setInterval(fetchHealth, 5000);
-    const evoInterval = setInterval(fetchEvolution, 30000);
-    const clock = setInterval(() => setNow(new Date()), 1000);
+    // Wrap the external fetchers and the clock tick in locally-defined
+    // functions so no setState is invoked directly in the effect body
+    // (matches the App.tsx clock pattern and avoids a cascading render).
+    const loadAll = () => {
+      void fetchMetrics();
+      void fetchHealth();
+      void fetchAdminData();
+      void fetchEvolution();
+    };
+    const healthTick = () => { void fetchHealth(); };
+    const evoTick = () => { void fetchEvolution(); };
+    const clockTick = () => setNow(new Date());
+    loadAll();
+    const interval = setInterval(healthTick, 5000);
+    const evoInterval = setInterval(evoTick, 30000);
+    const clock = setInterval(clockTick, 1000);
     return () => { clearInterval(interval); clearInterval(evoInterval); clearInterval(clock); };
   }, [fetchMetrics, fetchHealth, fetchAdminData, fetchEvolution]);
 

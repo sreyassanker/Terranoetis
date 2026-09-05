@@ -82,16 +82,23 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
   const handleKeyDown = useCallback((e: KeyboardEvent) => { if (e.key === 'Escape') { if (selectedTool) closeTool(); else onClose(); } }, [onClose, closeTool, selectedTool]);
   useEffect(() => { if (open) window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, [open, handleKeyDown]);
 
-  // Chat handoff: auto-open the requested model in the workbench.
-  useEffect(() => {
-    if (initialToolId == null) return;
+  // Chat handoff: auto-open the requested model. State is adjusted during
+  // render (React's "react to a prop change" pattern, guarded by handledToolId
+  // so it runs once per id) instead of synchronously in an effect body.
+  const [handledToolId, setHandledToolId] = useState<number | null | undefined>(undefined);
+  if (initialToolId != null && initialToolId !== handledToolId) {
+    setHandledToolId(initialToolId);
     const found = ALL_TOOLS.find(t => t.tool.id === initialToolId);
     if (found) {
       setSelectedTool(found.tool);
       setSelectedColor(found.partColor);
       setViewMode('flat');
     }
-    onInitialToolConsumed?.();
+  }
+  // Notifying the parent (clearing the handoff prop) is a real side effect,
+  // so it stays in an effect.
+  useEffect(() => {
+    if (initialToolId != null) onInitialToolConsumed?.();
   }, [initialToolId, onInitialToolConsumed]);
 
   const togglePart = useCallback((partId: string) => setExpandedParts((prev) => {

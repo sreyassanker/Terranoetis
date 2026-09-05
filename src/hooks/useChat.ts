@@ -192,14 +192,12 @@ export function useChat(
       || /\b(earthquake|quake|flight|plane|aircraft|ship|vessel|wildfire|volcano|storm|satellite|aurora|panel|workbench|tracker|explorer|dashboards?)\b/i.test(lower0)
     );
     if (!isExplicitMultiCommand) {
-      // Pure fly command
-      const isPureFlyCommand = /^(?:fly|go|zoom)\s+(?:to|in|into)\s+/i.test(userMsg.trim());
-      if (isPureFlyCommand && loc) {
-        focusLocation(loc.lat, loc.lon, { label: 'Requested location', color: '#60a5fa', height: 20000 });
-        addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `Flying to ${loc.lat.toFixed(2)}, ${loc.lon.toFixed(2)}` });
-        setAiTyping(false);
-        return;
-      }
+      // NOTE: "fly to X" is intentionally NOT short-circuited here anymore.
+      // The old client-side pure-fly shortcut flew to a fixed 20 km height and
+      // returned before reaching the server, so the OSM/admin boundary was
+      // never drawn and the camera never fit the whole area. The server's
+      // area-resolution step resolves the real boundary, emits flyTo (fit) +
+      // addPolygon (boundary) commands, and returns a clean confirmation.
 
       // Monitor/schedule commands
       if (/^monitor\s+/i.test(userMsg)) {

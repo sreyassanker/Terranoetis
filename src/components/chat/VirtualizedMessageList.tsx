@@ -1,5 +1,6 @@
 import { useCallback, useRef, useEffect, useState, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { ArrowDown } from 'lucide-react';
 import type { ChatMessage } from '@/lib/chatStore';
 import { StreamingMarkdownRenderer } from '@/lib/advancedChat';
 import { ChatMessageRow } from './ChatMessageRow';
@@ -179,7 +180,7 @@ export const VirtualizedMessageList = forwardRef<VirtualizedMessageListHandle, V
             aria-label="Jump to latest message"
             title="Jump to latest"
           >
-            ↓ Latest
+            <ArrowDown size={12} /> Latest
           </button>
         )}
         <div className="visually-hidden" role="log" aria-live="polite">

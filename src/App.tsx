@@ -7741,19 +7741,43 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
               const positions = coords.map(c => Cesium.Cartesian3.fromDegrees(c[1], c[0]));
               const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
               const fill = rgba ? Cesium.Color.fromBytes(+rgba[1], +rgba[2], +rgba[3], Math.round((parseFloat(rgba[4]) || 0.35) * 255)) : Cesium.Color.WHITE.withAlpha(0.35);
-              const entity = v.entities.add({
-                polygon: {
-                  hierarchy: positions,
-                  material: outlineOnly ? Cesium.Color.TRANSPARENT : fill,
-                  outline: true,
-                  outlineColor: outlineOnly ? Cesium.Color.LIME : fill.withAlpha(0.9),
-                  height: 1.0,
-                  ...(extrudedHeight > 0 ? { extrudedHeight: extrudedHeight + 1.0 } : {}),
+              const outlineColor = rgba ? Cesium.Color.fromBytes(+rgba[1], +rgba[2], +rgba[3], 255) : Cesium.Color.LIME;
+              const entities: Cesium.Entity[] = [];
+
+              // Fill — skipped for pure boundaries (outlineOnly), where only the
+              // edge matters. Ground-clamp flat fills (classificationType) so the
+              // surface follows terrain instead of floating at a fixed height.
+              if (!outlineOnly) {
+                entities.push(v.entities.add({
+                  polygon: {
+                    hierarchy: positions,
+                    material: fill,
+                    ...(extrudedHeight > 0
+                      ? { height: 1.0, extrudedHeight: extrudedHeight + 1.0 }
+                      : { classificationType: Cesium.ClassificationType.TERRAIN }),
+                  },
+                  name: label,
+                  properties: { label, agent: true },
+                }));
+              }
+
+              // Edge as a ground-clamped polyline (GroundPolylineGeometry): renders
+              // at real width on every platform and hugs terrain, so the boundary
+              // stays visible over hills/valleys. The old polygon.outline was 1px
+              // and got occluded by terrain — that's why most OSM boundaries were
+              // invisible. Matches how the study-area outline is drawn.
+              entities.push(v.entities.add({
+                polyline: {
+                  positions: [...positions, positions[0]],
+                  width: 3,
+                  material: outlineColor,
+                  clampToGround: true,
                 },
                 name: label,
                 properties: { label, agent: true },
-              });
-              action.entities = [entity];
+              }));
+
+              action.entities = entities;
               action.description = label;
             }
             break;
@@ -8088,6 +8112,9 @@ case 'openPanel':
   function newChat() {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
+    // Fresh conversation → fresh globe: drop AI-added artifacts (boundaries,
+    // pins, heatmaps, charts, routes). User-toggled data layers are untouched.
+    clearAllAgentActions();
     // Use the tab system: open a new tab (snapshots current, creates fresh)
     chatState.openChatTab();
   }
@@ -8138,6 +8165,7 @@ case 'openPanel':
   }
 
   async function deleteCurrentChat() {
+    clearAllAgentActions();
     const id = chatState.currentChatId;
     if (!id) {
       // No saved session yet — just clear the composer.
@@ -8149,6 +8177,7 @@ case 'openPanel':
   }
 
   async function clearAllChats() {
+    clearAllAgentActions();
     for (const chat of chatListRef.current) {
       await deleteChat(chat.id);
     }
