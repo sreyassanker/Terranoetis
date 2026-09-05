@@ -1,6 +1,6 @@
 # Frontend
 
-The Terranoetis client is a **React 19 + TypeScript** single-page application built with **Vite 7**, styled with **Tailwind CSS 3**, and rendered on a **CesiumJS 1.140** WebGL globe. The UI shell (topbar, sidebar, modals) is implemented inline in `src/App.tsx` (~10,871 lines); feature surfaces are split across lazy-loaded panels.
+The Terranoetis client is a **React 19 + TypeScript** single-page application built with **Vite 7**, styled with **Tailwind CSS 3**, and rendered on a **CesiumJS 1.140** WebGL globe. The UI shell (topbar, sidebar, modals) is implemented inline in `src/App.tsx` (~11,000 lines); feature surfaces are split across lazy-loaded panels.
 
 ---
 
@@ -24,7 +24,7 @@ The Terranoetis client is a **React 19 + TypeScript** single-page application bu
 | Build | Vite 7 |
 | 3D rendering | CesiumJS 1.140 (WebGL, Cesium World Terrain) |
 | Styling | Tailwind CSS 3, class-variance-authority, dark mode by default |
-| Routing | React Router |
+| Routing | React Router 7 |
 | State | React context (AuthContext) + custom hooks + Zustand chat store |
 | Charts | Recharts |
 | Fonts | Inter + JetBrains Mono |
@@ -37,7 +37,7 @@ Defined in `src/main.tsx`:
 
 | Route | View | Description |
 |---|---|---|
-| `/` | App | Main Cesium globe application (14 lazy-loaded panels) |
+| `/` | App | Main Cesium globe application (11 lazy-loaded panels) |
 | `/v2/globe` | GlobePage | Dedicated Cesium globe viewport |
 | `/v2/canvas` | CanvasPage | Spatial canvas |
 | `/v2/scenarios` | ScenariosPage | Scenario gallery and editor |
@@ -51,20 +51,19 @@ Defined in `src/main.tsx`:
 
 | Component | Lines | Description |
 |---|---|---|
-| CommandPalette | 322 | Cmd+K palette: search layers/locations/actions, toggle/fly-to/open intel |
+| CommandPalette | 320 | Cmd+K palette: search layers/locations/actions, toggle/fly-to/open intel |
 | PerformanceMonitor | 149 | Real-time FPS/entities/primitives/memory/JS heap, Ctrl+Shift+P |
 | FlightTravelView | 507 | Flight deck HUD: compass, alt/heading tapes, horizon, pitch ladder |
 | IssTravelView | 172 | ISS orbital HUD: nadir/horizon compass, pitch tape |
-| IssLivePanel | 67 | ISS camera iframe + position stats (lat/lon/alt/speed) |
+| IssLivePanel | 67 | ISS camera iframe + position stats (lat/lon/alt) |
 | MarketIntelPanel | 1202 | 8-tab intel: Markets, Energy, Risk, Signals, Sentiment, Heatmap, Analysis, Intel |
-| ToolDialog | 1040 | Analysis tool execution: study area, params, grid, execution, results, export |
-| AnalyticsWorkbench | 331 | 150-tool browser: tree/flat search over equations, domains, live-source counts |
-| MultiHazardPanel | 1168 | Multi-hazard causal risk chain, IDW risk surface, Noisy-OR CBN, physics surrogates |
-| LaunchReplayPanel | 202 | Scrubbable rocket ascent replay (Launch Library 2) |
-| RadioTunerPanel | 191 | Analog tuner over 500 geolocated radio stations, stream playback |
+| ToolDialog | 1043 | Analysis tool execution: study area, params, grid, execution, results, export |
+| AnalyticsWorkbench | 353 | 150-tool browser: tree/flat search over equations, domains, live-source counts |
+| MultiHazardPanel | 1169 | Multi-hazard causal risk chain, IDW risk surface, Noisy-OR CBN, physics surrogates |
+| LaunchReplayPanel | 233 | Scrubbable rocket ascent replay (Launch Library 2) |
+| RadioTunerPanel | 206 | Analog tuner over 500 geolocated radio stations, stream playback |
 | DuckdbAnalyticsPanel | — | In-browser DuckDB-WASM SQL workbench over 7 live data layers |
-| FirstRunCard | 137 | First-load "stage a mission" card |
-| DigitalTwinPanel | 220 | Recharts charts, stat cards, recommendations |
+| FirstRunCard | 113 | First-load "stage a mission" card |
 | CameraControls | 332 | Zoom slider + log-scale height + fly-to-target |
 | ForkPanel | 68 | Parallel realities: pause/resume/terminate, divergence score |
 | LoginModal | 96 | Auth token check, manual login, listens for `auth:required` |
@@ -73,9 +72,9 @@ Defined in `src/main.tsx`:
 
 | Component | Lines | Description |
 |---|---|---|
-| MemoryExplorer | 244 | SVG knowledge graph (force-directed) |
+| MemoryExplorer | 244 | SVG knowledge graph (circular layout) |
 | SettingsPanel | 220 | 4 tabs: Cognitive (S1/S2 bias), Alerts, Providers, Privacy |
-| MultiHazardPanel | 1168 | Multi-hazard causal risk chain, IDW risk surface |
+| MultiHazardPanel | 1169 | Multi-hazard causal risk chain, IDW risk surface |
 
 ### Chat (`src/components/chat/`, 11 components)
 
@@ -104,7 +103,7 @@ Defined in `src/main.tsx`:
 | `EarthquakeVisualizer.tsx` | MMI polygons, P/S/Rayleigh/Love wavefront rings |
 | `ScenarioEditor.tsx` | Parameter forms for 7 disaster types |
 | `ScenarioGallery.tsx` | Sortable/filterable grid, search |
-| `hazardRenderers.ts` | Renders 11 shape types on Cesium |
+| `hazardRenderers.ts` | Renders 6 shape types on Cesium (polygon, cylinder, corridor, ellipse, polyline, ring) |
 | `SpatialSketching.tsx`, `TimelineControls.tsx`, `FloodWaterSurface.tsx` | Supporting visualizers |
 
 Scenario types and colors:
@@ -123,7 +122,7 @@ Scenario types and colors:
 
 ## Rendering Engine
 
-`src/rendering/` contains **40 rendering modules** that transform live data into Cesium entities, surfaces, and effects.
+`src/rendering/` contains **41 rendering modules** that transform live data into Cesium entities, surfaces, and effects.
 
 ### Data & Entity Modules
 
@@ -146,6 +145,7 @@ Scenario types and colors:
 | `launchReplay.ts` | Rocket ascent reconstruction |
 | `aircraftHangar.ts` | Flight glyphs → 3D glTF models (LOD) |
 | `osrmRoute.ts` | Street-following route + camera fly-through |
+| `radioWave.ts` | Radio tuner globe wave animation |
 
 ### Spatial & Analysis Modules
 

@@ -1,6 +1,6 @@
 # API Reference
 
-Terranoetis exposes **300 REST endpoints** plus a real-time **WebSocket** channel. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
+Terranoetis exposes **360+ REST endpoints** plus a real-time **WebSocket** channel. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
 
 ---
 
@@ -28,7 +28,7 @@ Terranoetis exposes **300 REST endpoints** plus a real-time **WebSocket** channe
 - **Content-Type:** `application/json`
 - **Auth:** `Authorization: Bearer <JWT>`
 - **Rate limiting:** per-IP and per-user limits apply on public + authenticated routes
-- **Public routes** (no auth): `/auth/login`, `/auth/dev-login`, `/auth/refresh`, `/health`, `/ready`, `/live`, `/metrics`, `/config/apis`, `/openapi.json`, `/docs`
+- **Public routes** (no auth): `/auth/login`, `/auth/dev-login`, `/auth/refresh`, `/health`, `/ready`, `/live`, `/metrics`, `/config/apis`, `/openapi.json`, `/docs`. In addition, the read-only live-data endpoints (e.g. `/earthquakes`, `/weather/*`, `/flights`, `/social`, `/pulse/*`) are public but server-side rate-limited.
 
 ---
 
@@ -65,7 +65,7 @@ The agent pipeline routes natural-language queries through intent recognition (S
 | POST | `/api/agent/feedback` | Record feedback for self-improvement |
 | GET | `/api/agent/analytics` | Agent performance analytics |
 | GET | `/api/agent/context` | Conversation context |
-| GET | `/api/agent/events` | Agent event stream |
+| GET | `/api/agent/events` | Agent event stream (SSE; deprecated — superseded by WebSocket `/ws/agent`) |
 | GET | `/api/agent/tiers` | Model tier configuration |
 | GET | `/api/agent/models` | List all available LLM models with availability status |
 | GET | `/api/agent/geocode` | Geocoding |
@@ -81,7 +81,7 @@ The agent pipeline routes natural-language queries through intent recognition (S
 
 ## Analytical Models
 
-150 peer-reviewed equation engines across 25 domains and 7 parts.
+150 peer-reviewed equation engines across 26 domains and 7 parts.
 
 | Method | Path | Description |
 |---|---|---|
@@ -89,7 +89,7 @@ The agent pipeline routes natural-language queries through intent recognition (S
 | GET | `/api/analytical-models/:id` | Model detail (paper citation, formula, params) |
 | POST | `/api/analytical-models/:id/execute-internal` | Execute a model with inputs |
 
-The analytical pipeline applies **7-stage quality control** (input validation, unit checks, NaN/Inf handling, physical plausibility, uncertainty bounds, provenance capture, audit logging).
+The analytical pipeline applies a **7-stage workflow** (input validation → preprocessing → computation → post-processing → quality control → uncertainty estimation → interpretation), defined in `server/analytical-models/toolWorkflows.ts`.
 
 ---
 
@@ -99,7 +99,7 @@ The analytical pipeline applies **7-stage quality control** (input validation, u
 |---|---|
 | Seismic | `/api/earthquakes`, `/api/earthquakes/significant`, `/api/earthquakes/summary` |
 | Weather | `/api/weather/open-meteo`, `/api/weather/alerts`, `/api/weather/nhc`, `/api/weather/marine`, `/api/weather/air-quality`, `/api/weather/gfs`, `/api/weather/ensemble`, `/api/weather/seasonal`, `/api/weather/historical`, `/api/weather/flood` |
-| Aviation | `/api/flights`, `/api/flights/all`, `/api/flights/military`, `/api/adsb-fi`, `/api/adsb-lol`, `/api/flightaware`, `/api/airlabs` |
+| Aviation | `/api/flights`, `/api/flights/all`, `/api/flights/military`, `/api/adsb-fi`, `/api/adsb-lol`, `/api/airlabs` |
 | Maritime | `/api/ais`, `/api/ais/nearby`, `/api/ais/status` |
 | Fires & hazards | `/api/firms`, `/api/eonet`, `/api/gdacs/alerts`, `/api/fema`, `/api/geospatial/overpass` |
 | Space | `/api/satellites/tle`, `/api/ucs-satellites`, `/api/spacex/launches`, `/api/space-debris`, `/api/space-weather/donki`, `/api/space-weather/kp`, `/api/aurora`, `/api/iss` |
@@ -116,7 +116,7 @@ The analytical pipeline applies **7-stage quality control** (input validation, u
 | GET | `/api/pulse/energy/prices` | Energy commodity prices |
 | GET | `/api/pulse/geopolitical/risks` | Geopolitical risk scores |
 | GET | `/api/pulse/correlation/cards` | Cross-asset correlation analysis |
-| GET | `/api/pulse/heatmap` | 18-asset price heatmap |
+| GET | `/api/pulse/heatmap` | 19-asset price heatmap |
 | GET | `/api/correlation/anomalies` | Anomaly detection feed |
 | GET | `/api/correlation/status` | Correlation engine status |
 | GET | `/api/gold`, `/api/fred`, `/api/eia`, `/api/entsoe`, `/api/imf`, `/api/comtrade`, `/api/alphavantage`, `/api/coingecko` | Economic & financial data |
@@ -132,7 +132,6 @@ The analytical pipeline applies **7-stage quality control** (input validation, u
 | GET | `/api/scenarios/:id` | Scenario detail |
 | POST | `/api/sandbox/execute` | Execute Python / Node / Bash in the sandbox |
 | GET | `/api/sandbox/workspace` / DELETE | Sandbox workspace management |
-| POST | `/api/digital-twin/analyze` | Full regional digital-twin analysis |
 | GET | `/api/kaggle/simulate/:id` | Kaggle simulation job status / results |
 | GET | `/api/kaggle/simulate/:id/results` | Simulation result data |
 | GET | `/api/kaggle/jobs` | Kaggle job queue |
@@ -230,7 +229,7 @@ The WebSocket server (`server/websocket.ts`) streams live data and agent events 
 - Presence (collaboration cursors, typing)
 - Pub/sub messages (alerts, fork state)
 
-Connection: `ws://<host>:3001` (brokered through the same server as REST).
+Connection: `ws://<host>:3001` on paths `/ws/agent` and `/ws/voice` (brokered through the same server as REST).
 
 ---
 
