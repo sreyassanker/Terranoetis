@@ -61,7 +61,7 @@ import { fetchAndStoreSatnogsData, getSatnogsForNorad, addSatnogsEntities } from
 import { fetchAndStoreUcsData, getUcsForNorad, addUcsEntities } from '@/rendering/ucsSatelliteDb';
 import { HumanOverrideBanner } from '@/components/explainability/index';
 
-import { CognitiveDashboard, MultiHazardPanel, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
+import { MultiHazardPanel, MemoryExplorer, SettingsPanel } from '@/components/cockpit/index';
 import { ApiVault } from '@/components/ui/ApiVault';
 import Panel from '@/components/ui/Panel';
 import ScenarioEditor from '@/components/scenarios/ScenarioEditor';
@@ -1406,7 +1406,6 @@ export default function App() {
 
   // ── Offline support ──
   const offline = useOfflineChat();
-  const [showCognitiveDashboard, setShowCognitiveDashboard] = useState(false);
   const [showMultiHazardPanel, setShowMultiHazardPanel] = useState(false);
   const [showMemoryExplorer, setShowMemoryExplorer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -2848,7 +2847,7 @@ export default function App() {
     es.onerror = () => {
       es.close();
       if (pollTimer) return;
-      pollTimer = setInterval(() => {
+      const poll = () => {
         fetch('/api/social', { headers: { ...authHeaders() } })
           .then(r => r.ok ? r.json() : [])
           .then((items: any[]) => {
@@ -2876,7 +2875,9 @@ export default function App() {
             }
           })
           .catch(() => {});
-      }, 60000);
+      };
+      poll();
+      pollTimer = setInterval(poll, 60000);
     };
 
     return () => {
@@ -7586,8 +7587,6 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
         return apply(setShowMarketIntelPanel, showMarketIntelPanel, 'market-intel');
       case 'intel-feed': case 'intel_feed': case 'feed':
         return apply(setShowIntelFeed, showIntelFeed, 'intel-feed');
-      case 'cognitive': case 'cognitive-dashboard':
-        return apply(setShowCognitiveDashboard, showCognitiveDashboard, 'cognitive');
       case 'multihazard': case 'multi-hazard': case 'toolworkbench': case 'tool-workbench':
         return apply(setShowMultiHazardPanel, showMultiHazardPanel, 'multihazard');
       case 'memory': case 'memory-explorer':
@@ -7651,7 +7650,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
       default:
         return undefined;
     }
-  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showCognitiveDashboard, showMultiHazardPanel, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showTimeline, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowCognitiveDashboard, setShowMultiHazardPanel, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowTimeline, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setMonitorCollapsed, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
+  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showMultiHazardPanel, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showTimeline, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowMultiHazardPanel, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowTimeline, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setMonitorCollapsed, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
 
   const executeAgentCommands = useCallback((commands: Array<Record<string, unknown>>) => {
     const v = viewerRef.current;
@@ -9654,9 +9653,8 @@ case 'openPanel':
           <TopbarMenu
             id="analysis" title="AI & Analysis" icon={<Brain size={16} />}
             menuId={openMenu} setMenuId={setOpenMenu}
-            active={showCognitiveDashboard || showMultiHazardPanel || showMemoryExplorer || showAnalytics}
+            active={showMultiHazardPanel || showMemoryExplorer || showAnalytics}
             items={[
-              { label: 'Cognitive Dashboard', icon: <Brain size={15} />, active: showCognitiveDashboard, onClick: () => { setShowCognitiveDashboard(p => !p); focusPanel('cognitive'); } },
               { label: 'Multi-Hazard', icon: <Wrench size={15} />, active: showMultiHazardPanel, onClick: () => { setShowMultiHazardPanel(p => !p); focusPanel('multihazard'); } },
               { label: 'Memory Explorer', icon: <Save size={15} />, active: showMemoryExplorer, onClick: () => { setShowMemoryExplorer(p => !p); focusPanel('memory'); } },
               { label: 'Analytics & Insights', icon: <BarChart3 size={15} />, active: showAnalytics, onClick: () => { setShowAnalytics(p => !p); focusPanel('analytics-insights'); if (!analyticsData) fetch('/api/agent/analytics').then(r => r.json()).then(setAnalyticsData).catch(() => {}); } },
@@ -10602,13 +10600,6 @@ case 'openPanel':
           </span>
           <button onClick={() => setShowTimeSlider(false)}
             style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 14 }}>✕</button>
-        </div>
-      )}
-
-      {/* Cognitive Dashboard */}
-      {showCognitiveDashboard && (
-        <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('cognitive', 110), width: 380, maxHeight: 'calc(100vh - 160px)' }}>
-          <CognitiveDashboard onClose={() => setShowCognitiveDashboard(false)} />
         </div>
       )}
 

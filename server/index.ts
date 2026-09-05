@@ -472,6 +472,11 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
   if (req.path.startsWith('/plugin/tool/') || req.path.startsWith('/plugin/data/')) {
     return next();
   }
+  // SSE streams: EventSource cannot send Authorization headers, so the token
+  // arrives via ?token= — the route-level sseAuthGuard handles verification.
+  if (req.path === '/social/stream') {
+    return next();
+  }
   authGuard(req, res, next);
 });
 
@@ -562,7 +567,7 @@ function registerDefaultTools() {
     // ── Navigation ──
     { name:'fly_command', category:'navigation', description:'Fly the globe camera to any location', exampleQueries:['fly to tokyo','go to paris','show location'], schema:{type:'command'} },
     { name:'toggle_layer_command', category:'navigation', description:'Show or hide any data layer on the globe', exampleQueries:['show earthquakes','enable flights'], schema:{type:'command'} },
-    { name:'open_panel', category:'navigation', description:'Open, close, or toggle any UI panel in the app. Use this to open tools, panels, or views. Panel IDs: analytics-workbench, satellite-tracker, aviation-tracker, satellite-imagery, land-cover, intelligence (pulse), intel-feed, cognitive-dashboard, tool-workbench, memory-explorer, settings, study-area, api-vault, command-palette, scenario-gallery, scenario-editor, cinematic-director, spatial-sketch, performance, timeline, measure, time-slider, admin, iss, ai-chat.', exampleQueries:['open analytics workbench','show satellite tracker','open pulse intelligence','close settings','open scenario gallery','toggle timeline'], schema:{type:'command',params:{panelId:'panel ID to open/close/toggle',desired:'optional: true to open, false to close, omit to toggle'}} },
+    { name:'open_panel', category:'navigation', description:'Open, close, or toggle any UI panel in the app. Use this to open tools, panels, or views. Panel IDs: analytics-workbench, satellite-tracker, aviation-tracker, satellite-imagery, land-cover, intelligence (pulse), intel-feed, tool-workbench, memory-explorer, settings, study-area, api-vault, command-palette, scenario-gallery, scenario-editor, cinematic-director, spatial-sketch, performance, timeline, measure, time-slider, admin, iss, ai-chat.', exampleQueries:['open analytics workbench','show satellite tracker','open pulse intelligence','close settings','open scenario gallery','toggle timeline'], schema:{type:'command',params:{panelId:'panel ID to open/close/toggle',desired:'optional: true to open, false to close, omit to toggle'}} },
     { name:'assess_and_email', category:'navigation', description:'Run a FULL disaster assessment for a region (earthquakes, storms, floods, wildfires, air quality, marine) and email the HTML report. Requires a region name + bounding box (latMin/latMax/lonMin/lonMax) + optional emailTo. Use when the user asks to "assess" a region or "email a report".', exampleQueries:['full disaster assessment of the Bay of Bengal and email me a report','assess the east coast and send report','disaster assessment report'], schema:{type:'command',params:{regionName:'region name',latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude',emailTo:'optional recipient email'}} },
 
     // ── Earth Observation / Foundation Models ──

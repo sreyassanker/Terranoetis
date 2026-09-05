@@ -73,7 +73,6 @@ Defined in `src/main.tsx`:
 
 | Component | Lines | Description |
 |---|---|---|
-| CognitiveDashboard | 314 | AnimatedBrain SVG, sparklines, system metrics |
 | MemoryExplorer | 244 | SVG knowledge graph (force-directed) |
 | SettingsPanel | 220 | 4 tabs: Cognitive (S1/S2 bias), Alerts, Providers, Privacy |
 | MultiHazardPanel | 1168 | Multi-hazard causal risk chain, IDW risk surface |

@@ -452,7 +452,12 @@ Context:
 Suggestions:`;
   try {
     const raw = await omninet.generateText(prompt, { temperature: 0.6, maxTokens: 150 });
-    const lines = raw.split('\n').map(l => l.replace(/^[\d.\-)\s]+/, '').replace(/["']/g, '').trim()).filter(l => l.length > 0 && l.length <= 60);
+    const lines = raw.split('\n')
+      // Drop markdown section headers the model sometimes emits ("**Reasoning**",
+      // "**Suggested actions (≤ 6 words each)**") — they are scaffolding, not chips.
+      .filter(l => !l.includes('**'))
+      .map(l => l.replace(/^[\d.\-)\s*]+/, '').replace(/["']/g, '').trim())
+      .filter(l => l.length > 0 && l.length <= 60);
     if (lines.length >= 2) return lines.slice(0, 6);
   } catch (e) {
     logger.warn({ err: e }, 'Suggestion generation failed');
