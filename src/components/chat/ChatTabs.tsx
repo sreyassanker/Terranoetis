@@ -1,61 +1,7 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Plus, X, MessageCircle } from 'lucide-react';
 import { useChatStore } from '@/store/chatStore';
 import type { ChatTab } from '@/store/chatStore';
-
-const TAB_CHIP_STYLE: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  padding: '3px 8px',
-  borderRadius: 6,
-  fontSize: 11,
-  fontWeight: 500,
-  cursor: 'pointer',
-  transition: 'all 0.15s ease',
-  whiteSpace: 'nowrap',
-  maxWidth: 120,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  border: '1px solid transparent',
-};
-
-const TAB_ACTIVE_STYLE: React.CSSProperties = {
-  ...TAB_CHIP_STYLE,
-  background: 'rgba(129, 140, 248, 0.18)',
-  border: '1px solid rgba(129, 140, 248, 0.4)',
-  color: '#a5b4fc',
-};
-
-const TAB_INACTIVE_STYLE: React.CSSProperties = {
-  ...TAB_CHIP_STYLE,
-  background: 'rgba(100, 116, 139, 0.1)',
-  border: '1px solid rgba(100, 116, 139, 0.2)',
-  color: '#94a3b8',
-};
-
-const CLOSE_BTN_STYLE: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  padding: 0,
-  margin: 0,
-  cursor: 'pointer',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: 'inherit',
-  opacity: 0.5,
-  transition: 'opacity 0.15s',
-  flexShrink: 0,
-};
-
-const ADD_BTN_STYLE: React.CSSProperties = {
-  ...TAB_CHIP_STYLE,
-  background: 'rgba(34, 197, 94, 0.1)',
-  border: '1px solid rgba(34, 197, 94, 0.3)',
-  color: '#4ade80',
-  padding: '3px 6px',
-};
 
 export function ChatTabs({
   onBeforeTabSwitch,
@@ -75,6 +21,7 @@ export function ChatTabs({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const tabRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const handleDoubleClick = useCallback((tab: ChatTab) => {
     setEditingId(tab.id);
@@ -98,22 +45,51 @@ export function ChatTabs({
     activateChatTab(id, onBeforeTabSwitch);
   }, [activateChatTab, onBeforeTabSwitch]);
 
+  // Roving arrow-key navigation across the tab strip (WAI-ARIA tabs pattern).
+  const onTabKeyDown = useCallback((e: React.KeyboardEvent, tab: ChatTab) => {
+    const idx = chatTabs.findIndex(t => t.id === tab.id);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      if (chatTabs.length < 2) return;
+      const next = e.key === 'ArrowRight'
+        ? chatTabs[(idx + 1) % chatTabs.length]
+        : chatTabs[(idx - 1 + chatTabs.length) % chatTabs.length];
+      handleActivate(next.id);
+      requestAnimationFrame(() => tabRefs.current.get(next.id)?.focus());
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      const first = chatTabs[0];
+      handleActivate(first.id);
+      requestAnimationFrame(() => tabRefs.current.get(first.id)?.focus());
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      const last = chatTabs[chatTabs.length - 1];
+      handleActivate(last.id);
+      requestAnimationFrame(() => tabRefs.current.get(last.id)?.focus());
+    } else if (e.key === 'Enter') {
+      handleActivate(tab.id);
+    } else if (e.key === 'Delete' || (e.key === 'Backspace' && (e.metaKey || e.ctrlKey))) {
+      closeChatTab(tab.id);
+    } else if (e.key === 'F2') {
+      e.preventDefault();
+      handleDoubleClick(tab);
+    }
+  }, [chatTabs, handleActivate, closeChatTab, handleDoubleClick]);
+
+  // Keep the active tab visible in the horizontal strip when it changes.
+  useEffect(() => {
+    if (!activeTabId) return;
+    tabRefs.current.get(activeTabId)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [activeTabId]);
+
   if (chatTabs.length === 0) return null;
 
   return (
     <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 4,
-        padding: '4px 8px',
-        borderBottom: '1px solid rgba(129, 140, 248, 0.15)',
-        overflowX: 'auto',
-        overflowY: 'hidden',
-        scrollbarWidth: 'none',
-        msOverflowStyle: 'none',
-      }}
       className="chat-tabs-strip"
+      role="tablist"
+      aria-label="Chat tabs"
+      aria-orientation="horizontal"
     >
       {chatTabs.map((tab) => {
         const isActive = tab.id === activeTabId;
@@ -122,31 +98,22 @@ export function ChatTabs({
         return (
           <div
             key={tab.id}
-            style={isActive ? TAB_ACTIVE_STYLE : TAB_INACTIVE_STYLE}
+            ref={el => { if (el) tabRefs.current.set(tab.id, el); else tabRefs.current.delete(tab.id); }}
             className={`chat-tab-chip ${isActive ? 'active' : ''}`}
             onClick={() => handleActivate(tab.id)}
             onDoubleClick={() => handleDoubleClick(tab)}
             title={tab.title}
             role="tab"
             aria-selected={isActive}
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') activateChatTab(tab.id);
-              if (e.key === 'Delete') closeChatTab(tab.id);
-            }}
+            tabIndex={isActive ? 0 : -1}
+            onKeyDown={(e) => onTabKeyDown(e, tab)}
           >
-            <MessageCircle size={10} style={{ flexShrink: 0, opacity: 0.6 }} />
+            <MessageCircle size={11} style={{ flexShrink: 0, opacity: 0.6 }} />
             {tabTyping[tab.id] && (
               <span
+                className="chat-tab-typing-dot"
                 title="Generating…"
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  flexShrink: 0,
-                  background: '#4ade80',
-                  boxShadow: '0 0 4px rgba(74, 222, 128, 0.8)',
-                }}
+                aria-label="Generating"
               />
             )}
             {isEditing ? (
@@ -159,42 +126,29 @@ export function ChatTabs({
                   if (e.key === 'Enter') commitRename();
                   if (e.key === 'Escape') setEditingId(null);
                 }}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  color: 'inherit',
-                  fontSize: 'inherit',
-                  fontWeight: 'inherit',
-                  padding: 0,
-                  margin: 0,
-                  width: '100%',
-                  minWidth: 40,
-                }}
+                className="chat-tab-rename-input"
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <span className="chat-tab-title">
                 {tab.title}
               </span>
             )}
             {chatTabs.length > 1 && (
               <button
-                style={CLOSE_BTN_STYLE}
+                className="chat-tab-close"
                 onClick={(e) => handleClose(e, tab.id)}
-                onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.5'; }}
                 title={`Close "${tab.title}"`}
                 aria-label={`Close tab ${tab.title}`}
               >
-                <X size={10} />
+                <X size={11} />
               </button>
             )}
           </div>
         );
       })}
       <button
-        style={ADD_BTN_STYLE}
+        className="chat-tab-add"
         onClick={() => openChatTab()}
         title="New Chat"
         aria-label="Open new chat tab"

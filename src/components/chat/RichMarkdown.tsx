@@ -1,6 +1,9 @@
 import React, { useMemo, type ComponentType, type HTMLAttributes } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { StreamingMarkdownRenderer } from '@/lib/advancedChat';
 
 function stripCommands(text: string): string {
@@ -12,6 +15,25 @@ function stripCommands(text: string): string {
     .filter(part => !/^## (?:COMMANDS|TOOL_CALLS|THINKING)\b/.test(part))
     .join('\n')
     .trim();
+}
+
+/**
+ * LLMs frequently emit bold headers with a stray space just inside the markers
+ * (`**Reasoning **`, `** Suggestions**`, `** Reasoning **`). CommonMark's
+ * flanking rules reject those, so react-markdown renders the literal `**`.
+ * Collapse whitespace immediately inside a `**…**` pair so it renders bold.
+ *
+ * Safety: the opening `**` must be preceded by line-start/whitespace (so a
+ * *closing* `**` is never re-paired with a later opener), the inner class
+ * excludes `*` and newlines (so nested `**a *b* c**` is left untouched), and
+ * the closing `**` must be followed by whitespace/punctuation/EOL. Unclosed
+ * `**` during streaming has no closing marker, so it is left alone.
+ */
+function normalizeEmphasis(text: string): string {
+  return text.replace(
+    /(^|[\s(])\*\*[ \t]*([^*\n]+?)[ \t]*\*\*(?=$|[\s).,!?;:])/g,
+    '$1**$2**',
+  );
 }
 
 type MarkdownComponentProps = HTMLAttributes<HTMLElement> & { children?: React.ReactNode; href?: string; className?: string };
@@ -80,7 +102,7 @@ export function RichMarkdown({
   streamingRenderer?: StreamingMarkdownRenderer;
 }) {
   const processed = useMemo(() => {
-    const text = stripCommands(content);
+    const text = normalizeEmphasis(stripCommands(content));
     if (isStreaming && streamingRenderer) {
       return streamingRenderer.render(text, (md: string) => md);
     }
@@ -92,7 +114,8 @@ export function RichMarkdown({
   return (
     <div className="rich-content">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#b45309', strict: 'ignore', output: 'html' }]]}
         components={components}
       >
         {processed}

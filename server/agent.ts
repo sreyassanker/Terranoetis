@@ -205,9 +205,9 @@ async function omninetStructured<T>(prompt: string, _apiKey?: string): Promise<T
 function cleanPlaceFromMessage(text: string): string {
   const cleaned = text
     .replace(/[,.?!]+/g, ' ')
-    .replace(/\b(?:what|whats|where|when|which|who|why|how|is|are|was|were|did|does|do|any|there|the|a|an|please|me|my|show|display|open|find|track|tell|about|of|for|to|on|at|near|around|in|happened|happening|happens|currently|right|now)\b/gi, ' ')
+    .replace(/\b(?:what|whats|where|when|which|who|why|how|is|are|was|were|did|does|do|any|there|the|a|an|please|me|my|show|display|open|find|track|tell|about|of|for|to|on|at|near|around|in|happened|happening|happens|currently|right|now|fly|go|zoom|navigate|jump|move|travel|head|focus|center|recenter|take)\b/gi, ' ')
     .replace(/\b(?:today|tonight|yesterday|tomorrow|this week|last week|this month|past day|past week|last 24 hours|24 hours|24h|recently|latest|current|recent)\b/gi, ' ')
-    .replace(/\b(?:earthquakes?|quakes?|seismic activity|seismicity|volcanoes?|volcanic|eruptions?|wildfires?|fires?|floods?|flooding|storms?|hurricanes?|cyclones?|typhoons?|tsunamis?|tsunami|droughts?|landslides?|lightning|air quality|pollution|flights?|aircraft|planes?|ships?|vessels?|maritime|satellites?|space debris|space weather|debris|deforestation|magnitudes?|aftershocks?|data|risk|risks|impact|impacts)\\b/gi, ' ')
+    .replace(/\b(?:earthquakes?|quakes?|seismic activity|seismicity|volcanoes?|volcanic|eruptions?|wildfires?|fires?|floods?|flooding|storms?|hurricanes?|cyclones?|typhoons?|tsunamis?|tsunami|droughts?|landslides?|lightning|air quality|pollution|flights?|aircraft|planes?|ships?|vessels?|maritime|satellites?|space debris|space weather|debris|deforestation|magnitudes?|aftershocks?|data|risk|risks|impact|impacts)\b/gi, ' ')
     // scientific indicator/model names must not pollute the place query
     .replace(/\b(?:land surface temperature|lst|ndvi|evi|ndwi|evapotranspiration|gdd|growing degree|pdsi|drought index|aqi|pga|ground motion|ground.?shaking intensity|sea surface temperature|chlorophyll|gpp|carbon flux|soil moisture|wave energy|albedo|emissivity)\b/gi, ' ')
     .replace(/\b(?:and|then|also|versus|vs|or)\b/gi, ' ')
@@ -419,7 +419,17 @@ export class IntentRouter {
       return { type: 'weather_check', confidence: 0.9, location };
     }
 
-    // Fly to location
+    // Fly to location. Two tiers:
+    //  1) Deterministic navigation phrase ("fly/go/zoom/navigate/take me/…
+    //     + to + place") → always fly_to, even when the place is NOT in the
+    //     known-cities list. The server's area-resolution step geocodes the
+    //     place text and draws the real OSM boundary (state/district level).
+    //  2) A known-city location + a navigation verb anywhere in the message.
+    const navPhrase = !/[,;]|\band\b|\bthen\b|\balso\b|\bplus\b/i.test(lower) &&
+      lower.match(/^(?:fly|go|zoom|navigate|jump|move|travel|head|take me|show me|focus|center|recenter)\s+(?:me\s+)?(?:to|into|in|at|onto|towards|on)\s+([a-z][a-z0-9\s,.'-]{1,60})$/);
+    if (navPhrase) {
+      return { type: 'fly_to', confidence: 0.95, location };
+    }
     if (location && (lower.includes('fly') || lower.includes('go to') || lower.includes('zoom to') ||
                       lower.includes('take me') || lower.includes('navigate') || lower.includes('focus'))) {
       return { type: 'fly_to', confidence: 0.95, location };
@@ -724,6 +734,26 @@ export class IntentRouter {
    * Async — requires an API key. Best accuracy.
    */
   static async classifyDeep(text: string, _apiKey?: string): Promise<IntentResult> {
+    // Deterministic navigation detection FIRST: an unambiguous "verb (+to) place"
+    // phrase is always fly_to, regardless of LLM behavior (the LLM mis-classified
+    // "navigate to kerala" as unknown). Location may be a known city (instant
+    // coords) or left null — the server's area-resolution step then geocodes the
+    // place text via Nominatim, which resolves states/districts to real polygons.
+    const navTrimmed = text.trim();
+    if (!/[,;]|\band\b|\bthen\b|\balso\b|\bplus\b/i.test(navTrimmed)) {
+      const navMatch = navTrimmed.match(
+        /^(?:fly|go|zoom|navigate|jump|move|travel|head|take me|show me|focus|center|recenter)\s+(?:me\s+)?(?:to|into|in|at|onto|towards|on)\s+([a-z][a-z0-9\s,.'-]{1,60})$/i,
+      );
+      if (navMatch && navMatch[1].trim().length >= 2) {
+        const loc = this.extractLocation(navTrimmed.toLowerCase());
+        return {
+          type: 'fly_to',
+          confidence: 0.97,
+          location: loc ? { lat: loc[0], lon: loc[1], label: loc[2] } : undefined,
+        };
+      }
+    }
+
     const prompt = `You are an Earth Intelligence intent classifier. Analyze the user's message and return ONLY valid JSON (no markdown, no explanation).
 
 Determine:
@@ -754,7 +784,10 @@ User message: "${text.replace(/"/g, '\\"')}"
 Return JSON: {"type":"...","confidence":0.0,"location":{"lat":0,"lon":0,"label":""},"layerIds":[]}`;
 
     const result = await omninetStructured<IntentResult>(prompt);
-    if (result && result.type && result.confidence) {
+    // Accept a confident LLM verdict; but when it shrugs ("unknown" or very low
+    // confidence), defer to the deterministic keyword classifier rather than
+    // returning a non-answer — the keyword path catches navigation/toggles/etc.
+    if (result && result.type && result.type !== 'unknown' && result.confidence && result.confidence >= 0.4) {
       return result;
     }
 
@@ -838,11 +871,16 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
   }
 
   /**
-   * Resolve a named area to its REAL OSM boundary polygon (GeoJSON), e.g.
-   * "Punjab" → the actual state shape, "Amritsar district" → the district
-   * outline. Returns the outer ring(s) as [lon, lat] arrays, or null when only
-   * a point is available (cities, villages usually have no administrative
-   * polygon in Nominatim search results). Cached for 24h.
+   * Resolve a named area to its REAL OSM boundary polygon (GeoJSON) — country,
+   * state, district, city, town, park, lake, campus, anywhere in the world.
+   * Returns the outer ring(s) as [lon, lat] arrays, or null when no polygon
+   * geometry exists at all (the caller then draws a bbox rectangle fallback).
+   *
+   * Nominatim's top hit for a settlement is frequently the place POINT
+   * (place/city node), while the actual administrative boundary is a separate
+   * `boundary/administrative` relation returned lower in the list. We therefore
+   * request several candidates and prefer a real polygon — otherwise cities
+   * like Thiruvananthapuram silently fall back to a rectangle. Cached for 24h.
    */
   static async geocodePolygon(text: string, _apiKey: string): Promise<Array<Array<[number, number]>> | null> {
     let cleaned = cleanPlaceFromMessage(text);
@@ -858,43 +896,49 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
     const cachedPoly = geocodeCache.get<Array<Array<[number, number]>>>(cacheKey + '_poly');
     if (cachedPoly) return cachedPoly;
 
-    // Find the OSM feature (relation/way) for this place.
-    const searchUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=1&polygon_geojson=1&q=${encodeURIComponent(cleaned)}`;
+    type NominatimHit = {
+      osm_type?: string; osm_id?: number; class?: string; type?: string;
+      geojson?: { type?: string; coordinates?: unknown };
+    };
+    const isPoly = (h?: NominatimHit) =>
+      !!h?.geojson && (h.geojson.type === 'Polygon' || h.geojson.type === 'MultiPolygon');
+
+    // Request several candidates so an administrative boundary that is not the
+    // #1 result is still found.
+    const searchUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=8&polygon_geojson=1&q=${encodeURIComponent(cleaned)}`;
     const searchResp = await fetch(searchUrl, {
       headers: { 'User-Agent': 'Terranoetis-EarthIntelligence/3.0 (geospatial intelligence platform)', 'Accept': 'application/json' },
       signal: AbortSignal.timeout(8000),
     });
     if (!searchResp.ok) return null;
-    const searchData = await searchResp.json() as Array<{
-      osm_type?: string; osm_id?: number; class?: string; type?: string;
-      geojson?: { type?: string; coordinates?: unknown };
-    }>;
-    const hit = searchData[0];
-    if (!hit) return null;
+    const searchData = await searchResp.json() as NominatimHit[];
+    if (!searchData.length) return null;
 
-    // Prefer a real boundary (administrative / boundary features). Only accept
-    // polygon geometry — points give no boundary.
-    const geo = hit.geojson;
-    if (!geo || (geo.type !== 'Polygon' && geo.type !== 'MultiPolygon')) {
-      // Fall back to the lookup API using osm id (more reliable geometry).
-      if (hit.osm_type && hit.osm_id) {
-        const lookupUrl = `https://nominatim.openstreetmap.org/lookup?osm_ids=${hit.osm_type[0].toUpperCase()}${hit.osm_id}&format=json&polygon_geojson=1`;
-        const lresp = await fetch(lookupUrl, {
-          headers: { 'User-Agent': 'Terranoetis-EarthIntelligence/3.0', 'Accept': 'application/json' },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (lresp.ok) {
-          const ldata = await lresp.json() as Array<{ geojson?: { type?: string; coordinates?: unknown } }>;
-          const lgeo = ldata[0]?.geojson;
-          if (lgeo && (lgeo.type === 'Polygon' || lgeo.type === 'MultiPolygon')) {
-            return this.cachePolygon(cacheKey, lgeo);
-          }
+    // Prefer an administrative boundary polygon; else any polygon feature
+    // (park, lake, campus, reserve…); else fall through to the lookup API.
+    const boundaryHit = searchData.find(h => h.class === 'boundary' && isPoly(h));
+    const polyHit = boundaryHit || searchData.find(h => isPoly(h));
+    if (polyHit?.geojson) return this.cachePolygon(cacheKey, polyHit.geojson);
+
+    // No polygon in the search results — try the lookup API on the top hit's
+    // osm id (sometimes returns boundary geometry the search omitted).
+    const hit = searchData[0];
+    if (hit?.osm_type && hit?.osm_id) {
+      const lookupUrl = `https://nominatim.openstreetmap.org/lookup?osm_ids=${hit.osm_type[0].toUpperCase()}${hit.osm_id}&format=json&polygon_geojson=1`;
+      const lresp = await fetch(lookupUrl, {
+        headers: { 'User-Agent': 'Terranoetis-EarthIntelligence/3.0', 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (lresp.ok) {
+        const ldata = await lresp.json() as NominatimHit[];
+        const lgeo = ldata[0]?.geojson;
+        if (lgeo && (lgeo.type === 'Polygon' || lgeo.type === 'MultiPolygon')) {
+          return this.cachePolygon(cacheKey, lgeo);
         }
       }
-      return null;
     }
-
-    return this.cachePolygon(cacheKey, geo);
+    // Genuinely no polygon anywhere → caller draws the bbox rectangle fallback.
+    return null;
   }
 
   private static cachePolygon(cacheKey: string, geo: { type?: string; coordinates?: unknown }): Array<Array<[number, number]>> | null {

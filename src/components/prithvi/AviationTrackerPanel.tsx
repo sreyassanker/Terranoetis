@@ -22,7 +22,8 @@ export function AviationTrackerPanel({ onClose, onTravelView, zIndex = 1000 }: {
   const inputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchFlights = useCallback(async () => {
+  const fetchFlights = useCallback(async (initial = false) => {
+    if (initial) setLoading(true);
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -38,13 +39,15 @@ export function AviationTrackerPanel({ onClose, onTravelView, zIndex = 1000 }: {
       }
       setAllFlights(flights);
     } catch { /* silent */ }
+    finally { if (initial) setLoading(false); }
   }, []);
 
   useEffect(() => {
     inputRef.current?.focus();
-    setLoading(true);
-    fetchFlights().then(() => setLoading(false));
-    pollRef.current = setInterval(fetchFlights, REFRESH_MS);
+    // Loading state is toggled inside fetchFlights (async), not synchronously
+    // in this effect body, to avoid a cascading render on mount.
+    void fetchFlights(true);
+    pollRef.current = setInterval(() => { void fetchFlights(false); }, REFRESH_MS);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };

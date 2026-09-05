@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Cpu, Check, AlertTriangle } from 'lucide-react';
+import { Cpu, Check, AlertTriangle, ChevronDown } from 'lucide-react';
 import { useChatStore } from '@/store/chatStore';
 import { authHeaders } from '@/context/AuthContext';
 
@@ -18,18 +18,22 @@ export interface AvailableModel {
  * Model picker for the Earth Intelligence AI panel.
  * - Loads the available model list from /api/agent/models.
  * - Lets the user choose a specific model (or "auto" for default behaviour).
- * - If a selected model becomes unavailable, shows a notice.
- * - No selection → works exactly as before (auto).
+ * - If a selected model becomes unavailable, shows a notice (honest fallback).
+ * - Full keyboard support: Enter/Space/Down opens, arrows move the active
+ *   option, Enter selects, Escape closes and restores focus.
  */
 export function ModelSelector() {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
   const models = useChatStore(s => s.availableModels);
   const setModels = useChatStore(s => s.setAvailableModels);
   const selectedModel = useChatStore(s => s.selectedModel);
   const setSelectedModel = useChatStore(s => s.setSelectedModel);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const loadModels = useCallback(async () => {
     if (models.length > 0) return;
@@ -66,107 +70,121 @@ export function ModelSelector() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [expanded]);
 
+  const open = useCallback(() => {
+    void loadModels();
+    const selIdx = Math.max(0, models.findIndex(m => (m.id === 'auto' ? selectedModel === 'auto' : m.model === selectedModel)));
+    setActiveIndex(selIdx);
+    setExpanded(true);
+  }, [loadModels, models, selectedModel]);
+
+  const selectAt = useCallback((idx: number) => {
+    const m = models[idx];
+    if (!m) return;
+    setSelectedModel(m.id === 'auto' ? 'auto' : m.model);
+    setExpanded(false);
+    triggerRef.current?.focus();
+  }, [models, setSelectedModel]);
+
+  const onTriggerKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (!expanded) open();
+      else if (e.key !== 'ArrowDown') selectAt(activeIndex);
+    } else if (e.key === 'Escape' && expanded) {
+      setExpanded(false);
+    }
+  };
+
+  const onListKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(i => Math.min(models.length - 1, i + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => Math.max(0, i - 1));
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      setActiveIndex(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      setActiveIndex(models.length - 1);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      selectAt(activeIndex);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setExpanded(false);
+      triggerRef.current?.focus();
+    } else if (e.key === 'Tab') {
+      setExpanded(false);
+    }
+  };
+
+  // Keep the active option scrolled into view.
+  useEffect(() => {
+    if (!expanded || !listRef.current) return;
+    const el = listRef.current.querySelector<HTMLElement>(`[data-idx="${activeIndex}"]`);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, expanded]);
+
   const selected = selectedModel === 'auto' ? null : models.find(m => m.model === selectedModel) ?? null;
   const selectedUnavailable = selected && !selected.available;
 
   return (
-    <div
-      ref={wrapRef}
-      style={{
-        borderTop: '1px solid var(--border)',
-        padding: '3px 8px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        flexWrap: 'wrap',
-        position: 'relative',
-      }}
-    >
+    <div className="model-selector-wrap">
       <button
-        onClick={() => { void loadModels(); setExpanded(!expanded); }}
+        ref={triggerRef}
+        className={`model-selector-trigger${selectedUnavailable ? ' unavailable' : ''}`}
+        onClick={() => (expanded ? setExpanded(false) : open())}
+        onKeyDown={onTriggerKeyDown}
         title="Choose AI model — Auto uses the default routing"
         aria-expanded={expanded}
         aria-haspopup="listbox"
-        style={{
-          fontSize: 10,
-          padding: '3px 8px',
-          cursor: 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 5,
-          background: selectedUnavailable ? 'rgba(239,68,68,0.12)' : 'rgba(129,140,248,0.12)',
-          border: `1px solid ${selectedUnavailable ? 'rgba(239,68,68,0.45)' : 'rgba(129,140,248,0.35)'}`,
-          color: selectedUnavailable ? '#ef4444' : 'var(--text)',
-          borderRadius: 6,
-          fontFamily: 'inherit',
-        }}
       >
-        <Cpu size={11} />
-        {selectedUnavailable ? <AlertTriangle size={11} /> : null}
-        <span>{selected ? (selectedUnavailable ? `"${selected.model}" not available` : selected.label) : 'Model'}</span>
-        <span style={{ fontSize: 9, opacity: 0.7 }}>{expanded ? '▲' : '▼'}</span>
+        <Cpu size={12} />
+        {selectedUnavailable ? <AlertTriangle size={12} /> : null}
+        <span>{selectedUnavailable ? `"${selected?.model}" not available` : selected ? selected.label : 'Model'}</span>
+        <ChevronDown size={11} style={{ transform: expanded ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s ease' }} />
       </button>
 
       {selectedUnavailable && (
-        <span style={{ fontSize: 9, color: '#ef4444' }}>Selected model unavailable — using auto.</span>
+        <span className="model-selector-notice">Selected model unavailable — using auto.</span>
       )}
 
-      {loading && <span style={{ fontSize: 9, opacity: 0.6 }}>Loading…</span>}
-      {loadError && !loading && <span style={{ fontSize: 9, color: '#f59e0b' }}>{loadError}</span>}
+      {loading && <span className="model-selector-notice">Loading…</span>}
+      {loadError && !loading && <span className="model-selector-notice warn">{loadError}</span>}
 
       {expanded && (
         <div
+          ref={listRef}
           role="listbox"
           aria-label="Available AI models"
-          style={{
-            position: 'absolute',
-            bottom: '100%',
-            left: 0,
-            marginBottom: 4,
-            zIndex: 500,
-            minWidth: 220,
-            maxHeight: 280,
-            overflowY: 'auto',
-            background: '#faf9f5',
-            border: '1px solid #e6e2db',
-            borderRadius: 8,
-            boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
-            padding: 4,
-          }}
+          aria-activedescendant={`model-opt-${activeIndex}`}
+          tabIndex={-1}
+          onKeyDown={onListKeyDown}
+          className="model-selector-list"
         >
-          {models.map(m => {
-            const active = selectedModel === m.model;
+          {models.map((m, idx) => {
+            const active = selectedModel === m.model || (m.id === 'auto' && selectedModel === 'auto');
             const unavailable = !m.available && m.id !== 'auto';
             return (
               <button
                 key={m.id}
+                id={`model-opt-${idx}`}
+                data-idx={idx}
                 role="option"
                 aria-selected={active}
-                onClick={() => { setSelectedModel(m.id === 'auto' ? 'auto' : m.model); setExpanded(false); }}
+                className={`model-option${active ? ' active' : ''}${unavailable ? ' unavailable' : ''}${idx === activeIndex ? ' focused' : ''}`}
+                onClick={() => selectAt(idx)}
+                onMouseEnter={() => setActiveIndex(idx)}
                 title={unavailable ? `Not available (${m.status})` : m.label}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  width: '100%',
-                  textAlign: 'left',
-                  padding: '5px 8px',
-                  cursor: 'pointer',
-                  fontSize: 11,
-                  fontFamily: 'inherit',
-                  background: active ? 'rgba(96,165,250,0.18)' : 'transparent',
-                  border: 'none',
-                  borderRadius: 6,
-                  color: unavailable ? '#dc2626' : (active ? '#2563eb' : '#1c1a18'),
-                  opacity: unavailable ? 0.85 : 1,
-                }}
               >
-                <span style={{ width: 12, display: 'inline-flex' }}>{active ? <Check size={11} /> : null}</span>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label}</span>
+                <span className="model-option-check">{active ? <Check size={12} /> : null}</span>
+                <span className="model-option-label">{m.label}</span>
                 {unavailable ? (
-                  <span style={{ fontSize: 9, color: '#f87171', flexShrink: 0 }}>offline</span>
+                  <span className="model-option-tag offline">offline</span>
                 ) : m.local ? (
-                  <span style={{ fontSize: 9, color: '#34d399', flexShrink: 0 }}>local</span>
+                  <span className="model-option-tag local">local</span>
                 ) : null}
               </button>
             );

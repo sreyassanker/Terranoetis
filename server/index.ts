@@ -9570,8 +9570,12 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
           }
           if (place) {
             resolvedAreaLabel = place.label || 'the area';
+            // Geocode the boundary from the RESOLVED place label, not the raw
+            // message. "fly to india" cleans to "fly india" (no polygon); the
+            // classifier's label "India" resolves to the real OSM admin polygon.
+            const placeQuery = (place.label && place.label.trim()) || message;
             try {
-              const poly = await IntentRouter.geocodePolygon(message, geoKey);
+              const poly = await IntentRouter.geocodePolygon(placeQuery, geoKey);
               if (poly && poly.length > 0) {
                 let lmin = Infinity, lmax = -Infinity, lomin = Infinity, lomax = -Infinity;
                 for (const ring of poly) for (const [lon, lat] of ring) {
@@ -9586,7 +9590,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
             } catch { /* best-effort */ }
             if (!resolvedAreaBbox) {
               try {
-                const box = await IntentRouter.geocodeBoundingBox(message, geoKey);
+                const box = await IntentRouter.geocodeBoundingBox(placeQuery, geoKey);
                 if (box && Math.abs(box.latMax - box.latMin) > 0.01 && Math.abs(box.lonMax - box.lonMin) > 0.01) {
                   resolvedAreaBbox = box;
                 }
@@ -9635,6 +9639,23 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       }
     }
     const areaResolved = resolvedAreaBbox != null;
+
+    // Pure navigation ("fly to X"): the fit-to-area flyTo + boundary addPolygon
+    // commands were already emitted by the area-resolution step above. Confirm
+    // in prose and stop — no LLM call needed, and the answer is not left as an
+    // empty ## COMMANDS block (which stripCommands would render as a blank bubble).
+    if (intent.type === 'fly_to' && areaResolved) {
+      costTracker.record('local', message, `Flying to ${resolvedAreaLabel}`, true);
+      sendEvent('output', {
+        text: `Flying to **${resolvedAreaLabel}** — camera fitted to its boundary.`,
+        modelTier: 'local',
+        intentType: 'fly_to',
+      });
+      sendEvent('done', { type: 'done' });
+      cleanup();
+      res.end();
+      return;
+    }
 
     // Step 1.2: Multi-command god-eye control. flyTo is already handled by the
     // area step above, so drop it here. A place-anchored DATA toggle must NOT

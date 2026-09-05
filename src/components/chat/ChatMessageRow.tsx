@@ -29,6 +29,69 @@ interface ChatMessageRowProps {
   onEditMessage?: (content: string, messageId: number) => void;
 }
 
+/** Compact `key=value` rendering for tool-call args — legible during
+ *  streaming instead of a raw JSON dump. Errors are always shown in full. */
+function formatArgValue(v: unknown): string {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (Array.isArray(v)) return `[${v.length}]`;
+  if (typeof v === 'object') {
+    const keys = Object.keys(v as object);
+    return `{${keys.length} keys}`;
+  }
+  return String(v);
+}
+
+const MAX_VISIBLE_ARGS = 3;
+const ARG_VALUE_MAX = 26;
+
+function ToolEventRow({ ev }: { ev: ToolEvent }) {
+  const [showAllArgs, setShowAllArgs] = useState(false);
+  const icon = ev.status === 'pending'
+    ? <Loader size={12} className="spin" />
+    : ev.status === 'success'
+      ? <CheckCircle size={12} />
+      : ev.status === 'error'
+        ? <XCircle size={12} />
+        : <AlertTriangle size={12} />;
+  const argEntries = Object.entries(ev.args ?? {});
+  const visibleArgs = showAllArgs ? argEntries : argEntries.slice(0, MAX_VISIBLE_ARGS);
+  const hiddenCount = argEntries.length - visibleArgs.length;
+  return (
+    <div className={`tool-event ${ev.status}`}>
+      <span className="te-icon" aria-hidden="true">{icon}</span>
+      <Wrench size={11} className="te-wrench" aria-hidden="true" />
+      <span className="te-name">{ev.name}</span>
+      {argEntries.length > 0 && (
+        <span className="te-args">
+          {visibleArgs.map(([k, v]) => {
+            const val = formatArgValue(v);
+            const clipped = val.length > ARG_VALUE_MAX ? `${val.slice(0, ARG_VALUE_MAX - 1)}…` : val;
+            return (
+              <span key={k} className="te-arg" title={`${k}: ${val}`}>
+                <span className="te-arg-k">{k}</span>
+                <span className="te-arg-v">{clipped}</span>
+              </span>
+            );
+          })}
+          {argEntries.length > MAX_VISIBLE_ARGS && (
+            <button
+              type="button"
+              className="te-arg-more"
+              onClick={() => setShowAllArgs(p => !p)}
+              aria-expanded={showAllArgs}
+            >
+              {showAllArgs ? 'less' : `+${hiddenCount}`}
+            </button>
+          )}
+        </span>
+      )}
+      {ev.error && <span className="te-error">{ev.error}</span>}
+    </div>
+  );
+}
+
 export function ChatMessageRow({
   msg, idx, isLast, aiTyping, streamingRenderer, focusLocation, toggleLayer,
   executePlanFromCard, togglePlanStep, rerunWithParam, resumeMessage,
@@ -118,13 +181,13 @@ export function ChatMessageRow({
     }
     if (cmdChips.length === 0) return null;
     return (
-      <div className="msg-commands" style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
+      <div className="msg-commands">
         {cmdChips.map((chip, i) => (
-          <span key={i} className="ai-chip command-chip" style={{ fontSize: 10, padding: '2px 8px', cursor: 'pointer' }}
+          <button key={i} className="ai-chip command-chip"
             onClick={() => {
               if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation?.(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 20000 });
               if (chip.action === 'toggleLayer' && chip.layerId) toggleLayer?.(chip.layerId);
-            }}>{chip.label}</span>
+            }}>{chip.label}</button>
         ))}
       </div>
     );
@@ -142,11 +205,11 @@ export function ChatMessageRow({
     <div className={`ai-msg ${msg.role}${msg.type === 'code-result' || msg.type === 'pipeline' || msg.type === 'data-analysis' ? ' code-result' : ''}${msg.type === 'image' ? ' image-msg' : ''}`}>
       {msg.role === 'assistant' ? (
         <div>
-          {msg.type === 'pipeline' && <div className="msg-label"><Zap size={12} style={{ display: 'inline', marginRight: 3 }} /> Computation Pipeline Result</div>}
-          {msg.type === 'upload' && <div className="msg-label" style={{ color: '#60a5fa' }}><Upload size={12} style={{ display: 'inline', marginRight: 3 }} /> File Upload</div>}
-          {msg.type === 'vision' && <div className="msg-label" style={{ color: '#a78bfa' }}><SearchIcon size={12} style={{ display: 'inline', marginRight: 3 }} /> Vision Analysis</div>}
-          {msg.type === 'data-analysis' && <div className="msg-label" style={{ color: '#34d399' }}><BarChart3 size={12} style={{ display: 'inline', marginRight: 3 }} /> Data Analysis</div>}
-          {msg.type === 'error' && <div className="msg-label" style={{ color: '#ef4444' }}><AlertTriangle size={12} style={{ display: 'inline', marginRight: 3 }} /> Error</div>}
+          {msg.type === 'pipeline' && <div className="msg-label"><Zap size={13} /> Computation Pipeline Result</div>}
+          {msg.type === 'upload' && <div className="msg-label upload"><Upload size={13} /> File Upload</div>}
+          {msg.type === 'vision' && <div className="msg-label vision"><SearchIcon size={13} /> Vision Analysis</div>}
+          {msg.type === 'data-analysis' && <div className="msg-label data"><BarChart3 size={13} /> Data Analysis</div>}
+          {msg.type === 'error' && <div className="msg-label error"><AlertTriangle size={13} /> Error</div>}
 
           <RichMarkdown
             content={msg.content}
@@ -155,35 +218,10 @@ export function ChatMessageRow({
           />
 
           {msg.toolEvents && msg.toolEvents.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
-              {msg.toolEvents.map((ev, i) => {
-                const icon = ev.status === 'pending'
-                  ? <Loader size={11} className="spin" style={{ color: '#60a5fa' }} />
-                  : ev.status === 'success'
-                    ? <CheckCircle size={11} style={{ color: '#34d399' }} />
-                    : ev.status === 'error'
-                      ? <XCircle size={11} style={{ color: '#ef4444' }} />
-                      : <AlertTriangle size={11} style={{ color: '#eab308' }} />;
-                const bg = ev.status === 'success' ? 'rgba(52,211,153,0.08)'
-                  : ev.status === 'error' ? 'rgba(239,68,68,0.08)'
-                    : ev.status === 'unknown' ? 'rgba(234,179,8,0.08)'
-                      : 'rgba(96,165,250,0.08)';
-                const bd = ev.status === 'success' ? 'rgba(52,211,153,0.25)'
-                  : ev.status === 'error' ? 'rgba(239,68,68,0.25)'
-                    : ev.status === 'unknown' ? 'rgba(234,179,8,0.25)'
-                      : 'rgba(96,165,250,0.25)';
-                return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, padding: '3px 8px', borderRadius: 6, background: bg, border: `1px solid ${bd}` }}>
-                    {icon}
-                    <Wrench size={10} style={{ color: 'var(--text-dim)' }} />
-                    <span style={{ fontWeight: 600, color: 'var(--text)' }}>{ev.name}</span>
-                    {ev.args && Object.keys(ev.args).length > 0 && (
-                      <span style={{ color: 'var(--text-dim)' }}>{JSON.stringify(ev.args)}</span>
-                    )}
-                    {ev.error && <span style={{ color: '#ef4444' }}>{ev.error}</span>}
-                  </div>
-                );
-              })}
+            <div className="tool-events">
+              {msg.toolEvents.map((ev, i) => (
+                <ToolEventRow key={i} ev={ev} />
+              ))}
             </div>
           )}
 
@@ -203,41 +241,41 @@ export function ChatMessageRow({
           {renderCommandChips(msg.commands, focusLocation, toggleLayer)}
 
           {msg.modelTier && (
-            <span style={{ fontSize: 10, color: '#64748b', background: 'rgba(100,116,139,0.1)', borderRadius: 3, padding: '1px 5px', marginTop: 2, display: 'inline-block' }}>{msg.modelTier}</span>
+            <span className="msg-tier-badge">{msg.modelTier}</span>
           )}
 
           {msg.replayed && (
-            <span style={{ fontSize: 10, color: '#34d399', background: 'rgba(52,211,153,0.1)', borderRadius: 3, padding: '1px 5px', marginTop: 2, display: 'inline-block', marginLeft: 4 }}>Replayed</span>
+            <span className="msg-replayed-badge">Replayed</span>
           )}
 
           {msg.recipe && !aiTyping && !saved && (
             <button
+              className="msg-save-recipe"
               onClick={handleSaveRecipe}
               disabled={saving}
-              style={{ fontSize: 10, color: saving ? '#64748b' : '#818cf8', background: saving ? 'rgba(100,116,139,0.1)' : 'rgba(129,140,248,0.12)', border: '1px solid rgba(129,140,248,0.35)', borderRadius: 4, padding: '2px 8px', cursor: saving ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 4, marginLeft: 4 }}
               title="Save this workflow as a reusable pattern"
             >
-              {saving ? <Loader size={10} className="spin" /> : <Bookmark size={10} />} Save workflow
+              {saving ? <Loader size={11} className="spin" /> : <Bookmark size={11} />} Save workflow
             </button>
           )}
           {saved && (
-            <span style={{ fontSize: 10, color: '#34d399', background: 'rgba(52,211,153,0.1)', borderRadius: 3, padding: '2px 8px', display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 4, marginLeft: 4 }}>
-              <BookmarkCheck size={10} /> Workflow saved
+            <span className="msg-recipe-saved">
+              <BookmarkCheck size={11} /> Workflow saved
             </span>
           )}
           {saveError && (
-            <span style={{ fontSize: 10, color: '#ef4444', marginLeft: 4 }}>{saveError}</span>
+            <span className="msg-save-error">{saveError}</span>
           )}
 
           {msg.traceId && <TraceExpander traceId={msg.traceId} />}
 
           {msg.resumable && msg.content && msg.content.length > 50 && !aiTyping && (
             <button
+              className="msg-resume-btn"
               onClick={() => resumeMessage?.(msg)}
-              style={{ fontSize: 10, color: 'var(--text-dim)', background: 'none', border: '1px solid transparent', cursor: 'pointer', padding: '2px 8px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 4 }}
               title="Continue generating this response"
             >
-              <Play size={10} /> Resume
+              <Play size={11} /> Resume
             </button>
           )}
         </div>
@@ -258,20 +296,20 @@ export function ChatMessageRow({
         <div className="msg-actions">
           {msg.timestamp && <span className="msg-time">{formatISTTime(msg.timestamp)}</span>}
           <button className="msg-action" onClick={handleCopy} title="Copy message">
-            <ClipboardList size={10} /> {copied ? 'Copied!' : 'Copy'}
+            <ClipboardList size={11} /> {copied ? 'Copied!' : 'Copy'}
           </button>
           {msg.role === 'user' && (
             <button className="msg-action" onClick={handleEdit} title="Edit message">
-              <Pencil size={10} /> Edit
+              <Pencil size={11} /> Edit
             </button>
           )}
           {msg.role === 'assistant' && idx > 0 && !aiTyping && (
             <button className="msg-action" onClick={handleRegenerate} title="Regenerate response">
-              <RotateCcw size={10} /> Regenerate
+              <RotateCcw size={11} /> Regenerate
             </button>
           )}
           <button className="msg-action danger" onClick={handleDelete} title="Delete message">
-            <Trash2 size={10} /> Delete
+            <Trash2 size={11} /> Delete
           </button>
         </div>
       )}

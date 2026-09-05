@@ -59,7 +59,15 @@ export default function Panel({
             {headerExtra}
           </div>
           {onClose && (
-            <X size={14} style={{ color: '#64748b', cursor: 'pointer', flexShrink: 0 }} onClick={onClose} />
+            <button
+              type="button"
+              className="panel-close"
+              onClick={onClose}
+              aria-label={`Close ${title ?? 'panel'}`}
+              title="Close"
+            >
+              <X size={14} />
+            </button>
           )}
         </div>
       )}
