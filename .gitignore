@@ -105,6 +105,7 @@ live_*.cjs
 final_browser_test.cjs
 scripts/legacy-tests/
 scripts/*.mjs
+!scripts/aiChatE2E.mjs
 start-lfm.sh
 
 # Session notes
