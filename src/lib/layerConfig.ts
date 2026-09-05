@@ -656,6 +656,14 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     sub: 'YouTube crisis videos',
   },
   {
+    id: 'india_cctv', label: 'Public Cameras', symbol: '❖',
+    color: '#fb7185', motionType: 'pulse', group: 'media',
+    type: 'point', description: 'Worldwide public webcams / CCTV (health-checked opencctv + windy list) — live camera feeds near a location',
+    dataSource: 'https://opencctv.org/',
+    badge: 'LIVE',
+    sub: 'Public webcam feeds',
+  },
+  {
     id: 'tomtom_traffic', label: 'Street Traffic', symbol: '⊖',
     color: '#f97316', motionType: 'glow', group: 'infrastructure',
     type: 'point', description: 'Street-level traffic flow with congestion coloring — TomTom Flow Segment Data API (v4)',
