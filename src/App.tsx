@@ -1268,6 +1268,7 @@ export default function App() {
   const [showAviationTracker, setShowAviationTracker] = useState(false);
   const [showSatelliteImagery, setShowSatelliteImagery] = useState(false);
   const [showAnalyticsWorkbench, setShowAnalyticsWorkbench] = useState(false);
+  const [pendingAnalyticalToolId, setPendingAnalyticalToolId] = useState<number | null>(null);
   const [showLaunchReplay, setShowLaunchReplay] = useState(false);
   const [showRadioTuner, setShowRadioTuner] = useState(false);
   const [showDuckdbAnalytics, setShowDuckdbAnalytics] = useState(false);
@@ -1960,44 +1961,20 @@ export default function App() {
 
   useEffect(() => {
     if (!isLoggedIn) return;
+    // Server-side /api/vault was removed (enterprise: keys resolve from server
+    // .env only — no per-user vault endpoint exists anymore). Purge stale
+    // browser storage; the fetch below intentionally never runs.
     purgeLegacyVaultStorage();
-    let cancelled = false;
-    (async () => {
-      try {
-        const resp = await fetch('/api/vault', { headers: authHeaders() });
-        if (!resp.ok || cancelled) return;
-        const data = await resp.json() as { keys?: Record<string, string> };
-        if (cancelled || !data.keys) return;
-        const keys = data.keys;
-        flatKeysRef.current = keys;
-        // Only overwrite local state if server has actual keys (non-empty).
-        // An empty server vault means new user — keep local keys intact.
-        const hasServerKeys = Object.keys(keys).some(k => keys[k]?.trim());
-        if (hasServerKeys) {
-          try { localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify({ keys, preferredAiProvider: 'gemini', vaultDismissed: false })); } catch { /* ignore */ }
-          setApiVault(prev => ({ ...prev, keys }));
-        }
-      } catch {
-        /* vault optional until user saves keys */
-      }
-    })();
-    return () => { cancelled = true; };
   }, [isLoggedIn, auth.token]);
 
   const handleApiVaultSave = async (keys: Record<string, string>) => {
     flatKeysRef.current = keys;
     setApiVault(prev => ({ ...prev, keys }));
+    // Keys are stored locally for UI convenience only; the SERVER ignores them
+    // entirely (enterprise: /api/vault removed — AI/data keys resolve from the
+    // server .env). No network call, so no 404.
     try { localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify({ keys, preferredAiProvider: 'gemini', vaultDismissed: false })); } catch { /* ignore */ }
-    try {
-      await fetch('/api/vault', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ keys }),
-      });
-      purgeLegacyVaultStorage();
-    } catch {
-      showNotification('Failed to save API keys to server', 'warning');
-    }
+    purgeLegacyVaultStorage();
   };
 
   /* ── Clock (selected timezone) ── */
@@ -3481,7 +3458,7 @@ export default function App() {
     return canvas;
   }
 
-  const focusLocation = useCallback((lat: number, lon: number, options?: { label?: string; color?: string; height?: number; duration?: number; }) => {
+  const focusLocation = useCallback((lat: number, lon: number, options?: { label?: string; color?: string; height?: number; duration?: number; rect?: { west: number; south: number; east: number; north: number }; }) => {
     const v = viewerRef.current;
     if (!v) return;
     if (focusMarkerRef.current) {
@@ -3537,14 +3514,27 @@ export default function App() {
       focusMarkerTimerRef.current = null;
     }, 6000);
     const range = Math.max(height, 500);
-    v.flyTo(marker, {
-      offset: new Cesium.HeadingPitchRange(
-        Cesium.Math.toRadians(20),
-        Cesium.Math.toRadians(-90),
-        range,
-      ),
-      duration: options?.duration ?? 2.5,
-    });
+    if (options?.rect) {
+      // Fit the ENTIRE area to the viewport (Cesium auto-frames the rectangle) —
+      // not too far, not too close. Pad slightly so the boundary isn't clipped.
+      const { west, south, east, north } = options.rect;
+      const padLon = Math.max((east - west) * 0.08, 0.02);
+      const padLat = Math.max((north - south) * 0.08, 0.02);
+      v.camera.flyTo({
+        destination: Cesium.Rectangle.fromDegrees(west - padLon, south - padLat, east + padLon, north + padLat),
+        orientation: { heading: Cesium.Math.toRadians(0), pitch: Cesium.Math.toRadians(-90), roll: 0 },
+        duration: options?.duration ?? 2.5,
+      });
+    } else {
+      v.flyTo(marker, {
+        offset: new Cesium.HeadingPitchRange(
+          Cesium.Math.toRadians(20),
+          Cesium.Math.toRadians(-90),
+          range,
+        ),
+        duration: options?.duration ?? 2.5,
+      });
+    }
   }, []);
 
   const trackSatellite = useCallback((sat: { id: string; name: string; lat: number; lon: number; altitude: number; tle1: string; tle2: string }) => {
@@ -7654,7 +7644,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
     let flyTarget: { lat: number; lon: number } | null = null;
     for (const cmd of commands) {
       try {
-        const action: { type: 'flyTo' | 'toggleLayer' | 'addEntity' | 'addPanel' | 'openPanel'; entities?: Cesium.Entity[]; layerId?: string; previousEnabled?: boolean; previousCamera?: { longitude: number; latitude: number; height: number }; panelData?: unknown; description: string; timestamp: number } = {
+        const action: { type: 'flyTo' | 'toggleLayer' | 'addEntity' | 'addPanel' | 'openPanel' | 'setLayerOpacity' | 'screenshot'; entities?: Cesium.Entity[]; layerId?: string; previousEnabled?: boolean; previousCamera?: { longitude: number; latitude: number; height: number }; panelData?: unknown; description: string; timestamp: number } = {
           type: 'addEntity',
           description: cmd.action as string,
           timestamp: Date.now(),
@@ -7669,7 +7659,13 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
               action.previousCamera = { longitude: Cesium.Math.toDegrees(cam.longitude), latitude: Cesium.Math.toDegrees(cam.latitude), height: cam.height };
               action.description = `Fly to ${(cmd.label as string) || `${lat.toFixed(2)}, ${lon.toFixed(2)}`}`;
               flyTarget = { lat, lon };
-              focusLocation(lat, lon, { label: (cmd.label as string) || 'Location', color: '#60a5fa', height: 20000 });
+              const bbox = cmd.bbox as { latMin: number; latMax: number; lonMin: number; lonMax: number } | undefined;
+              focusLocation(lat, lon, {
+                label: (cmd.label as string) || 'Location',
+                color: '#60a5fa',
+                height: (cmd.height as number) || 20000,
+                rect: bbox ? { west: bbox.lonMin, south: bbox.latMin, east: bbox.lonMax, north: bbox.latMax } : undefined,
+              });
               cleanupThinkingSteps(true);
             }
             break;
@@ -7938,6 +7934,68 @@ case 'openPanel':
             }
             break;
           }
+          case 'openAnalyticalModel': {
+            const modelId = cmd.modelId as number;
+            setShowAnalyticsWorkbench(true);
+            focusPanel('analytics');
+            if (typeof modelId === 'number') setPendingAnalyticalToolId(modelId);
+            action.type = 'openPanel';
+            action.description = `open ${cmd.name || `model ${modelId}`} in Analytics Workbench`;
+            break;
+          }
+          case 'setLayerOpacity': {
+            const layerId = cmd.layerId as string;
+            const opacity = cmd.opacity as number;
+            if (layerId && typeof opacity === 'number' && isFinite(opacity)) {
+              const clamped = Math.max(0, Math.min(1, opacity));
+              setLayerOpacity(prev => ({ ...prev, [layerId]: clamped }));
+              action.type = 'setLayerOpacity';
+              action.description = `Opacity ${layerId} → ${Math.round(clamped * 100)}%`;
+            }
+            break;
+          }
+          case 'screenshot': {
+            try {
+              v.render();
+              const canvas = v.canvas;
+              const url = canvas.toDataURL('image/png');
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `terranoetis-${Date.now()}.png`;
+              a.click();
+              action.type = 'screenshot';
+              action.description = 'Globe screenshot saved';
+            } catch { /* canvas tainted or render fail */ }
+            break;
+          }
+          case 'focusEntity': {
+            const entityId = cmd.entityId as string;
+            const search = entityId
+              ? v.entities.values.find(e => e.id === entityId || e.name?.toLowerCase() === String(entityId).toLowerCase())
+              : undefined;
+            if (search && search.position) {
+              const posVal = search.position.getValue(v.clock.currentTime);
+              if (!posVal) break;
+              const carto = Cesium.Cartographic.fromCartesian(posVal);
+              if (carto) {
+                const lat = Cesium.Math.toDegrees(carto.latitude);
+                const lon = Cesium.Math.toDegrees(carto.longitude);
+                flyTarget = { lat, lon };
+                focusLocation(lat, lon, { label: (cmd.label as string) || search.name || entityId, color: '#f59e0b', height: 3000000 });
+                action.type = 'flyTo';
+                action.description = `Tracking ${search.name || entityId}`;
+              }
+            } else if (cmd.lat != null && cmd.lon != null) {
+              const lat = cmd.lat as number, lon = cmd.lon as number;
+              if (isFinite(lat) && isFinite(lon)) {
+                flyTarget = { lat, lon };
+                focusLocation(lat, lon, { label: (cmd.label as string) || 'Target', color: '#f59e0b', height: 3000000 });
+                action.type = 'flyTo';
+                action.description = `Tracking ${cmd.label || 'target'}`;
+              }
+            }
+            break;
+          }
           default:
             break;
         }
@@ -7945,7 +8003,7 @@ case 'openPanel':
         else if (action.entities && action.entities.length > 0) history.push(action as any);
       } catch { /* skip malformed commands */ }
     }
-  }, [focusLocation, isLayerEnabled, cleanupThinkingSteps, applyPanelCommand, setLayerEnabled]);
+  }, [focusLocation, isLayerEnabled, cleanupThinkingSteps, applyPanelCommand, setLayerEnabled, setLayerOpacity, focusPanel]);
 
   const sendToPipeline = useCallback(async (goal: string, wsId: string | null) => {
     const resp = await fetch('/api/agent/pipeline', {
@@ -10551,7 +10609,7 @@ case 'openPanel':
       {showDuckdbAnalytics && <PanelSuspense><LazyDuckdbAnalyticsPanel open={showDuckdbAnalytics} onClose={() => setShowDuckdbAnalytics(false)} restoreKey={duckdbRestoreKey} zIndex={getPanelZIndex('analytics') + 3} /></PanelSuspense>}
 
       {/* Analytics Workbench Panel */}
-      <ErrorBoundary label="Analytics Workbench">        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} />
+      <ErrorBoundary label="Analytics Workbench">        <AnalyticsWorkbench open={showAnalyticsWorkbench} onClose={() => setShowAnalyticsWorkbench(false)} initialToolId={pendingAnalyticalToolId} onInitialToolConsumed={() => setPendingAnalyticalToolId(null)} bbox={activeBbox} polygon={activeStudyAreaPolygon ?? undefined} points={activeStudyPoints} studyAreaType={activeStudyAreaType} onToolResult={handleToolResult} onClearResult={handleClearToolResult} onToolModeChange={setAnalyticalNeedsTwoPoints} zIndex={getPanelZIndex('analytics')} schemeColors={schemeToColorStops(toolSurfaceScheme)} />
       </ErrorBoundary>
 
       {/* Land Cover Mapper Panel */}

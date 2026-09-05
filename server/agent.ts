@@ -16,7 +16,8 @@ const geocodeCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 });
 
 export type GlobeAction =
   | 'flyTo' | 'toggleLayer' | 'addPin' | 'addHeatmap' | 'addPolygon'
-  | 'addGeoJSON' | 'addChart' | 'addPanel' | 'openPanel' | 'closePanel' | 'togglePanel' | 'addRoute' | 'moveCamera';
+  | 'addGeoJSON' | 'addChart' | 'addPanel' | 'openPanel' | 'closePanel' | 'togglePanel' | 'addRoute' | 'moveCamera'
+  | 'setLayerOpacity' | 'focusEntity' | 'screenshot' | 'openAnalyticalModel';
 
 export interface GlobeCommand {
   action: GlobeAction;
@@ -192,6 +193,27 @@ async function omninetStructured<T>(prompt: string, _apiKey?: string): Promise<T
     logger.warn({ err: e }, 'omninetStructured JSON parse failed');
     return null;
   }
+}
+
+
+/**
+ * Normalise a natural-language message down to the place-name candidates:
+ * "what earthquakes happened near japan today" -> "japan". Question words,
+ * time phrases and hazard/data nouns (incl. plurals) are stripped so
+ * Nominatim is never queried with data nouns. Returns '' when nothing usable.
+ */
+function cleanPlaceFromMessage(text: string): string {
+  const cleaned = text
+    .replace(/[,.?!]+/g, ' ')
+    .replace(/\b(?:what|whats|where|when|which|who|why|how|is|are|was|were|did|does|do|any|there|the|a|an|please|me|my|show|display|open|find|track|tell|about|of|for|to|on|at|near|around|in|happened|happening|happens|currently|right|now)\b/gi, ' ')
+    .replace(/\b(?:today|tonight|yesterday|tomorrow|this week|last week|this month|past day|past week|last 24 hours|24 hours|24h|recently|latest|current|recent)\b/gi, ' ')
+    .replace(/\b(?:earthquakes?|quakes?|seismic activity|seismicity|volcanoes?|volcanic|eruptions?|wildfires?|fires?|floods?|flooding|storms?|hurricanes?|cyclones?|typhoons?|tsunamis?|tsunami|droughts?|landslides?|lightning|air quality|pollution|flights?|aircraft|planes?|ships?|vessels?|maritime|satellites?|space debris|space weather|debris|deforestation|magnitudes?|aftershocks?|data|risk|risks|impact|impacts)\\b/gi, ' ')
+    // scientific indicator/model names must not pollute the place query
+    .replace(/\b(?:land surface temperature|lst|ndvi|evi|ndwi|evapotranspiration|gdd|growing degree|pdsi|drought index|aqi|pga|ground motion|ground.?shaking intensity|sea surface temperature|chlorophyll|gpp|carbon flux|soil moisture|wave energy|albedo|emissivity)\b/gi, ' ')
+    .replace(/\b(?:and|then|also|versus|vs|or)\b/gi, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return cleaned;
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -408,7 +430,13 @@ export class IntentRouter {
     // BUT: do NOT hijack analytical queries ("analyze satellite imagery ... to
     // detect deforestation") into a panel open — those need the LLM/deep path.
     const hasAnalysisVerb = /\b(analyze|analyse|analyzing|detect|classify|segment|monitor|compute|calculate|estimate|measure|predict|forecast|trend|compare)\b/i.test(lower);
-    const panelMatch = this.detectPanelCommand(lower);
+    // Opacity/timeline phrasing is NOT a panel command even though it may start with "set"/"show".
+    const isOpacityCommand = /\b(opacity|transparency)\b/i.test(lower);
+    // "show land cover" / "show night lights" etc. are LAYER toggles, not panel opens —
+    // the panel must only win when the user actually says "panel"/"workbench"/named panel UI.
+    const isPlainLayerToggle = /^(show|display|hide|toggle|enable|disable|turn on|turn off)\b/i.test(lower)
+      && !/\bpanel\b|workbench|dashboard|tracker|explorer|vault|director|sketch|gallery|palette|feed\b|pulse\b|settings|memory|study area|mapper/i.test(lower);
+    const panelMatch = !isOpacityCommand && !isPlainLayerToggle ? this.detectPanelCommand(lower) : null;
     if (panelMatch && !hasAnalysisVerb) {
       return { type: 'panel_command', confidence: 0.97, panelId: panelMatch.panelId, panelAction: panelMatch.action, location };
     }
@@ -512,13 +540,20 @@ export class IntentRouter {
       return { type: 'deep_analysis', confidence: 0.85, location };
     }
 
-    // Layer toggles (skip if user wants analysis, not just a toggle)
+    // Layer toggles (skip if user wants analysis OR a data answer, not just a toggle).
+    // Question words and data-request phrasing ("what earthquakes happened…",
+    // "sandstorm events", "where can I see…") must route to the LLM/tool path for a
+    // real answer — only explicit display verbs or bare layer nouns toggle.
     const isAnalysisQuery = lower.includes('compare') || lower.includes('correlation') ||
       lower.includes('versus') || lower.includes(' vs ') || lower.includes('difference') ||
       lower.includes('research') || lower.includes('investigate') || lower.includes('study') ||
       lower.includes('analyze') || /\bwhy\b/.test(lower) || /\bexplain\b/.test(lower) ||
       /\bhow\b/.test(lower) || lower.includes('tell me') || /\bshow me why\b/.test(lower);
-    if (!isAnalysisQuery) {
+    const isQuestionOrDataRequest = /\b(what|when|where|which|who|any|did|is|are|events?|data|list|alerts?|news|recent|latest|today|yesterday|happened|happening|current|now)\b/.test(lower);
+    const explicitToggleVerb = /\b(show|display|toggle|enable|disable|hide|turn on|turn off|overlay|add)\b/.test(lower);
+    const canToggle = !isAnalysisQuery && (explicitToggleVerb || (!isQuestionOrDataRequest && lower.length < 25));
+    const dataRequestLayer = !isAnalysisQuery && !canToggle && isQuestionOrDataRequest;
+    if (canToggle) {
       if (lower.includes('earthquake') || lower.includes('quake') || lower.includes('seismic')) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['earthquakes'] };
       }
@@ -530,6 +565,9 @@ export class IntentRouter {
       }
       if (lower.includes('storm') || lower.includes('hurricane') || lower.includes('cyclone') || lower.includes('typhoon')) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['severe_storms'] };
+      }
+      if (lower.includes('sandstorm') || lower.includes('dust')) {
+        return { type: 'toggle_layer', confidence: 0.8, layerIds: ['dust'] };
       }
       if (lower.includes('volcano') || lower.includes('volcanic') || lower.includes('eruption')) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['volcanoes'] };
@@ -572,6 +610,47 @@ export class IntentRouter {
       }
       if (lower.includes('building') || lower.includes('3d building') || lower.includes('osm building')) {
         return { type: 'toggle_layer', confidence: 0.8, layerIds: ['dt_buildings'] };
+      }
+      // God-eye extras: opacity, screenshot, entity tracking — parsed by extractCommands.
+    }
+    // Data-phrased layer questions ("what earthquakes happened near japan",
+    // "sandstorm events", "where can I see the northern lights") → deep analysis
+    // anchored on the matching layer so the LLM fetches REAL data via tools.
+    if (dataRequestLayer) {
+      const layerMap: Array<[RegExp, string[]]> = [
+        [/earthquake|quake|seismic/, ['earthquakes']],
+        [/flight|plane|aircraft|adsb/, ['flight_tracks']],
+        [/fire|wildfire|burn/, ['wildfires']],
+        [/sandstorm|dust\b/, ['dust']],
+        [/storm|hurricane|cyclone|typhoon/, ['severe_storms']],
+        [/volcano|volcanic|eruption/, ['volcanoes']],
+        [/\bships?\b|\bvessels?\b|maritime|\bais\b/, ['ais_vessels']],
+        [/satellite|starlink|debris|orbit/, ['space_debris']],
+        [/aurora|northern lights/, ['aurora_oval']],
+        [/lightning|thunderstorm/, ['lightning_strikes']],
+        [/iceberg|sea ice|lake ice/, ['seaLakeIce']],
+        [/tectonic|plate boundary/, ['tectonic']],
+        // Extended platform coverage (Phase 1 tools)
+        [/shakemap|shake map|ground shaking/, ['shakemap_recent']],
+        [/streamflow|river gauge|gauge height|discharge/, ['usgs_streamflow']],
+        [/outbreak|epidemic|disease|who /, ['who_outbreaks']],
+        [/co2|carbon dioxide/, ['climate_co2']],
+        [/sea-?ice extent|ice extent/, ['climate_sea_ice']],
+        [/fema|federal disaster/, ['fema_declarations']],
+        [/volcanic ash|ash advisory|vaac/, ['vaac_ash']],
+        [/tornado risk|severe thunderstorm outlook|convective outlook|storm prediction/, ['spc_outlook']],
+        [/world ?bank|gdp of|inflation rate|unemployment rate|life expectancy/, ['worldbank_economy']],
+        [/prediction market|forecast market/, ['prediction_markets']],
+        [/internet shutdown|internet outage|connectivity blackout/, ['ioda_outages']],
+        [/malware urls?|urlhaus/, ['urlhaus_malware']],
+        [/crypto prices?|bitcoin price|ethereum price/, ['crypto_prices']],
+        [/prediction markets?|geopolitical odds/, ['prediction_markets']],
+        [/submarine cable|undersea cable|internet cable/, ['submarine_cables']],
+      ];
+      for (const [re, ids] of layerMap) {
+        if (re.test(lower)) {
+          return { type: 'deep_analysis', confidence: 0.8, layerIds: ids, location };
+        }
       }
     }
 
@@ -766,21 +845,16 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
    * polygon in Nominatim search results). Cached for 24h.
    */
   static async geocodePolygon(text: string, _apiKey: string): Promise<Array<Array<[number, number]>> | null> {
-    let cleaned = text
-      .replace(/\b(?:show|display|open|show me|find|track|fly to|go to|zoom to|near|around|in|at|the)\b/gi, ' ')
-      .replace(/\b(?:and|then|also|versus|vs|or)\b/gi, ' ')
-      .replace(/[,.?!]+/g, ' ')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-    const LEADING_NOISE = /\b(compare|comparison|agricultural|agriculture|drought|risk|using|latest|soil|moisture|data|information|analysis|analyze|current|recent|show|display|open|find|track|weather|climate|flood|storm|tsunami|wildfire|earthquake|volcano|ship|vessel|flight|aircraft|satellite|compute|calculate|average|mean|median|total|sum|forecast|predict|estimate|simulate|model|pattern|trend|statistics?|frequency|magnitude|intensity|depth|height|area|region|zone|sector|annual|monthly|daily|hourly|global|local|regional|between|within|across|around|over|under|above|below)\b/gi;
+    let cleaned = cleanPlaceFromMessage(text);
+    const LEADING_NOISE_POLY = /\b(?:compare|comparison|agricultural|agriculture|drought|using|soil|moisture|information|analysis|analyze|climate|compute|calculate|average|mean|median|total|sum|forecast|predict|estimate|simulate|model|pattern|trend|statistics?|frequency|magnitude|intensity|depth|height|annual|monthly|daily|hourly|global|local|regional|between|within|across|over|under|above|below)\b/gi;
     let prev: string;
     do {
       prev = cleaned;
-      cleaned = cleaned.replace(LEADING_NOISE, ' ').replace(/\s{2,}/g, ' ').trim();
+      cleaned = cleaned.replace(LEADING_NOISE_POLY, ' ').replace(/\s{2,}/g, ' ').trim();
     } while (cleaned !== prev);
     if (cleaned.length < 2) return null;
 
-    const cacheKey = cleaned.toLowerCase();
+    const cacheKey = 'poly_' + cleaned.toLowerCase();
     const cachedPoly = geocodeCache.get<Array<Array<[number, number]>>>(cacheKey + '_poly');
     if (cachedPoly) return cachedPoly;
 
@@ -847,21 +921,13 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
    */
   private static async geocodeWithOSM(text: string): Promise<{ lat: number; lon: number; label: string } | null> {
     // Normalise: strip the trigger phrase that may precede the place name.
-    let cleaned = text
-      .replace(/\b(?:show|display|open|show me|find|track|fly to|go to|zoom to|near|around|in|at|the)\b/gi, ' ')
-      .replace(/\b(?:and|then|also|versus|vs|or)\b/gi, ' ')
-      .replace(/[,.?!]+/g, ' ')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-    // Strip LEADING analytical/command words only (never "new"/"east" etc.
-    // which are part of place names like "New York"). "Compare agricultural
-    // drought risk in California" → "California"; "Punjab using the latest
-    // soil moisture data" → "Punjab".
-    const LEADING_NOISE = /\b(compare|comparison|agricultural|agriculture|drought|risk|using|latest|soil|moisture|data|information|analysis|analyze|current|recent|show|display|open|find|track|weather|climate|flood|storm|tsunami|wildfire|earthquake|volcano|ship|vessel|flight|aircraft|satellite|compute|calculate|average|mean|median|total|sum|forecast|predict|estimate|simulate|model|pattern|trend|statistics?|frequency|magnitude|intensity|depth|height|area|region|zone|sector|annual|monthly|daily|hourly|global|local|regional|between|within|across|around|over|under|above|below)\b/gi;
+    // Shared normaliser (question/time/hazard words) then LEADING_NOISE.
+    let cleaned = cleanPlaceFromMessage(text);
+    const LEADING_NOISE_OSM = /\b(?:compare|comparison|agricultural|agriculture|drought|using|soil|moisture|information|analysis|analyze|climate|compute|calculate|average|mean|median|total|sum|forecast|predict|estimate|simulate|model|pattern|trend|statistics?|frequency|magnitude|intensity|depth|height|annual|monthly|daily|hourly|global|local|regional|between|within|across|over|under|above|below)\b/gi;
     let prev: string;
     do {
       prev = cleaned;
-      cleaned = cleaned.replace(LEADING_NOISE, ' ').replace(/\s{2,}/g, ' ').trim();
+      cleaned = cleaned.replace(LEADING_NOISE_OSM, ' ').replace(/\s{2,}/g, ' ').trim();
     } while (cleaned !== prev);
     if (cleaned.length < 2) return null;
     // Avoid geocoding pure command text that isn't a place.
@@ -945,6 +1011,20 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
    * Returns the model id when a known scientific equation/indicator matches,
    * otherwise null. Kept in sync with server/index.ts tryAnalyticalModelRun.
    */
+  /**
+   * Public gate: does the message name a known analytical model? Used by the
+   * ask pipeline to decide whether a spatial study area is actually needed —
+   * generic data questions must NOT be swallowed into study-area prompts.
+   */
+  static hasAnalyticalModelMatch(text: string): boolean {
+    return this.detectAnalyticalModel(text) !== null;
+  }
+
+  /** Public: the matched analytical model id (for opening it in the workbench). */
+  static detectAnalyticalModelId(text: string): number | null {
+    return this.detectAnalyticalModel(text);
+  }
+
   private static detectAnalyticalModel(text: string): number | null {
     const l = text.toLowerCase();
     // Ordered from most-specific to least-specific to avoid collisions.
@@ -1022,8 +1102,13 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
     // Reject single-token matches from generic action words — "detect" hitting
     // "Surface Water Detection" or "predict" hitting "Tide Prediction" are
     // false positives. A lone generic word must not pin a scientific model.
-    const GENERIC_WEAK = new Set(['detect','show','compute','calculate','analyze','find','track','predict','forecast','risk','model','run','execute','display','enable','open','close','toggle','search','list','load','get','set','create','update','delete','remove','add','edit','save','export','import','view','pattern','current','recent','latest','average','mean','median','total','sum','count','number','amount','value','data','result','output','input','detail','summary','brief','quick','fast','slow','local','regional','global','near','around','within','between','over','under','above','below','area','region','zone','city','river','ocean','sea','land','coastal','inland']);
-    try {
+    const GENERIC_WEAK = new Set(['detect','show','compute','calculate','analyze','find','track','predict','forecast','risk','model','run','execute','display','enable','open','close','toggle','search','list','load','get','set','create','update','delete','remove','add','edit','save','export','import','view','pattern','current','recent','latest','average','mean','median','total','sum','count','number','amount','value','data','result','output','input','detail','summary','brief','quick','fast','slow','local','regional','global','near','around','within','between','over','under','above','below','area','region','zone','city','river','ocean','sea','land','coastal','inland','earthquake','pressure','water','co2','dispersion','congestion','intensity','shaking','trend','anomaly','population','hospital','tsunami','ship','vessel','sanction','shutdown','conflict']);
+    // Only run the semantic-search fallback when the user is explicitly asking
+    // to compute a scientific quantity — never let a single domain noun in a
+    // data question ("how many hospitals near the largest earthquake") pin an
+    // equation. Multi-word name matches only.
+    const COMPUTE_INTENT = /\b(compute|calculate|evaluate|solve|estimate the value|run the (?:model|equation|formula)|apply the (?:model|equation|formula)|what(?:'s| is) the (?:ndvi|evi|ndwi|lst|gdd|pdsi|aqi|pga|gpp|cwsi|vei|erosion|runoff|vapor pressure|moment magnitude))\b/i;
+    if (COMPUTE_INTENT.test(l)) try {
       const searchRes = searchAnalyticalModels(text, 3);
       const top = searchRes.results[0];
       if (top) {
@@ -1032,7 +1117,8 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
         if (isName) {
           if (m.startsWith('name terms:')) {
             const terms = m.split(':')[1].trim().split(',').map(t => t.trim()).filter(Boolean);
-            if (terms.length === 1 && GENERIC_WEAK.has(terms[0])) return null;
+            // Require a genuine multi-word name match — never a single token.
+            if (terms.length < 2 || terms.every((t: string) => GENERIC_WEAK.has(t))) return null;
           }
           if (top.id >= 1 && top.id <= 150) return top.id;
         }
@@ -1084,6 +1170,7 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
       { match: /\btimeline\b/i, panelId: 'timeline' },
       { match: /\bmeasure\b|measure\s*tool/i, panelId: 'measure' },
       { match: /time\s*slider/i, panelId: 'time-slider' },
+      { match: /ai\s*chat|chat\s*panel|assistant\s*panel/i, panelId: 'ai-chat' },
       { match: /admin\s*dashboard|\badmin\b/i, panelId: 'admin' },
       { match: /iss\s*(live|tracker)?|\binternational space station\b/i, panelId: 'iss' },
       { match: /fork\s*manager|fork\s*mode|parallel\s*reality|forks/i, panelId: 'fork' },
@@ -1134,6 +1221,68 @@ Location text: "${text.replace(/"/g, '\\"')}"`;
     if (!opts.allowAnalytical && /\b(compute|calculate|run|execute|model|equation|formula|evaluate|analyze|analysis|trend|pattern|statistics?|average|mean|correlation)\b/i.test(lower)) {
       if (this.detectAnalyticalModel(lower) || /\b(analyze|analysis|trend|pattern|statistics?|average|mean|correlation)\b/i.test(lower)) {
         return commands;
+      }
+    }
+
+    // ── screenshot: "take a screenshot", "capture the globe", "save an image" ──
+    if (/\b(screenshot|capture the globe|save (?:an? )?(?:image|snapshot)|export (?:an? )?image)\b/i.test(lower)) {
+      commands.push({ action: 'screenshot' });
+      return commands;
+    }
+
+    // ── setLayerOpacity: "set night lights opacity to 40%" / "show earthquakes at 50% opacity" ──
+    // Also emits a toggleLayer so "show X at N% opacity" does both.
+    const LAYER_ALIASES: Record<string, string> = {
+      'night lights': 'night_lights', 'nightlights': 'night_lights', 'city lights': 'night_lights',
+      'earthquake': 'earthquakes', 'earthquakes': 'earthquakes', 'quakes': 'earthquakes',
+      'ship': 'ais_vessels', 'ships': 'ais_vessels', 'vessel': 'ais_vessels', 'vessels': 'ais_vessels',
+      'flight': 'flight_tracks', 'flights': 'flight_tracks', 'plane': 'flight_tracks', 'planes': 'flight_tracks',
+      'wildfire': 'wildfires', 'wildfires': 'wildfires', 'fire': 'wildfires', 'fires': 'wildfires',
+      'volcano': 'volcanoes', 'volcanoes': 'volcanoes', 'storm': 'severe_storms', 'storms': 'severe_storms',
+      'aurora': 'aurora_oval', 'precipitation': 'precipitation', 'rainfall': 'precipitation',
+      'wind': 'wind', 'pressure': 'pressure', 'land cover': 'land_cover', 'sea ice': 'sea_ice',
+      'co2': 'co_index', 'so2': 'so2_index',
+    };
+    const STOP_LAYERS = new Set(['to', 'at', 'the', 'of', 'for', 'layer', 'globe']);
+    const tryOpacity = (rawName: string, pct: number): GlobeCommand | null => {
+      const name = rawName.trim().replace(/\s+/g, ' ');
+      if (!name || STOP_LAYERS.has(name) || !isFinite(pct) || pct < 0 || pct > 100) return null;
+      const layerId = LAYER_ALIASES[name] || name.replace(/\s+/g, '_');
+      return { action: 'setLayerOpacity', layerId, opacity: pct / 100 };
+    };
+    const m1 = lower.match(/(?:opacity|transparency)\s*(?:of|for)?\s*((?:[a-z]+\s+){0,2}[a-z]+?)\s*(?:to|at)?\s*(\d{1,3})\s*%?/i);
+    const m2 = lower.match(/(\d{1,3})\s*%?\s*(?:opacity|transparency)\s*(?:of|for)?\s*((?:[a-z]+\s+){0,2}[a-z]+)/i);
+    const m3 = lower.match(/\b(show|display|enable)\b\s+((?:[a-z]+\s+){0,2}[a-z]+?)\s+(?:at|with|on)\s+(\d{1,3})\s*%?\s*(?:opacity|transparency)/i);
+    // "set night lights opacity to 40%" / "make X 40% opaque"
+    const m0 = lower.match(/\b(?:set|make|change|adjust)\b\s+((?:[a-z]+\s+){0,2}[a-z]+?)\s+(?:opacity|transparency)\s+(?:to|at|by)?\s*(\d{1,3})\s*%?/i);
+    for (const m of [m3, m0, m1, m2]) {
+      if (!m) continue;
+      if (m === m0) {
+        const cmd = tryOpacity((m[1] || '').trim(), parseInt(m[2], 10));
+        if (cmd) {
+          commands.push(cmd);
+          return commands;
+        }
+        continue;
+      }
+      if (m === m3) {
+        const layerName = m[2].trim();
+        const pct = parseInt(m[3], 10);
+        const cmd = tryOpacity(layerName, pct);
+        if (cmd) {
+          // Also toggle the layer on so the opacity change is visible.
+          commands.push({ action: 'toggleLayer', layerId: cmd.layerId, enabled: true });
+          commands.push(cmd);
+          return commands;
+        }
+      } else {
+        const rawName = (m === m1 ? m[1] : m[2] || '');
+        const pct = parseInt(m === m1 ? m[2] : m[1], 10);
+        const cmd = tryOpacity(rawName || '', pct);
+        if (cmd) {
+          commands.push(cmd);
+          return commands;
+        }
       }
     }
 
@@ -1393,21 +1542,35 @@ export class CommandParser {
     const commands: GlobeCommand[] = [];
     const cmdMatch = text.match(/## COMMANDS\n([\s\S]*?)(?:\n##|$)/);
     if (!cmdMatch) return commands;
-    const lines = cmdMatch[1].trim().split('\n');
+    let body = cmdMatch[1].trim();
+    // Models often wrap the whole command array in one ```json fence — unwrap it
+    const fence = body.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+    if (fence) body = fence[1].trim();
+    // Try the whole body as a JSON array first, then line-by-line objects.
+    try {
+      const parsed = JSON.parse(body) as unknown;
+      const arr = Array.isArray(parsed) ? parsed : [parsed];
+      for (const item of arr) this.pushIfValid(commands, item as GlobeCommand);
+      if (commands.length > 0 || (Array.isArray(parsed) && parsed.length > 0)) return commands;
+    } catch { /* fall through to line parsing */ }
+    const lines = body.split('\n');
     for (const line of lines) {
-      const trimmed = line.trim();
+      const trimmed = line.trim().replace(/,$/, '');
       if (!trimmed.startsWith('{')) continue;
       try {
-        const cmd = JSON.parse(trimmed) as GlobeCommand;
-        const validActions = ['flyTo', 'toggleLayer', 'addPin', 'addHeatmap', 'addPolygon', 'addGeoJSON', 'addChart', 'addPanel', 'openPanel', 'closePanel', 'togglePanel', 'addRoute', 'moveCamera'];
-        if (validActions.includes(cmd.action)) {
-          commands.push(cmd);
-        }
+        this.pushIfValid(commands, JSON.parse(trimmed) as GlobeCommand);
       } catch (e) {
         logger.warn({ err: e }, 'Globe command parse failed');
       }
     }
     return commands;
+  }
+
+  private static pushIfValid(commands: GlobeCommand[], cmd: GlobeCommand): void {
+    const validActions = ['flyTo', 'toggleLayer', 'addPin', 'addHeatmap', 'addPolygon', 'addGeoJSON', 'addChart', 'addPanel', 'openPanel', 'closePanel', 'togglePanel', 'addRoute', 'moveCamera', 'setLayerOpacity', 'focusEntity', 'screenshot', 'openAnalyticalModel'];
+    if (cmd && typeof cmd === 'object' && validActions.includes(cmd.action)) {
+      commands.push(cmd);
+    }
   }
 }
 
@@ -1425,10 +1588,35 @@ export class ToolCallParser {
   static parse(text: string): ToolCall[] {
     const calls: ToolCall[] = [];
     const match = text.match(/## TOOL_CALLS\n([\s\S]*?)(?:\n##|$)/);
-    if (!match) return calls;
-    const lines = match[1].trim().split('\n');
+    // Fallback: some models emit tool-call objects WITHOUT the ## TOOL_CALLS
+    // header (bare ``` fence or inline). Scan the whole text for the
+    // {"name":…,"args":…} shape (distinct from ## COMMANDS which use "action").
+    if (!match) {
+      const loose = [...text.matchAll(/\{\s*"name"\s*:\s*"[a-zA-Z0-9_]+"\s*,\s*"args"\s*:\s*\{[\s\S]*?\}\s*\}/g)];
+      if (loose.length > 0) return loose.map(m => { try { return JSON.parse(m[0]); } catch { return null; } })
+        .filter((p): p is { name: string; args?: Record<string, unknown> } => !!p && typeof p.name === 'string' && p.name.length > 0)
+        .map(p => ({ name: p.name, args: p.args ?? {} }));
+      return calls;
+    }
+    let body = match[1].trim();
+    // Unwrap a single ```json fence when the model wraps the call array
+    const fence = body.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+    if (fence) body = fence[1].trim();
+    // Whole-body JSON array first, then line-by-line objects
+    try {
+      const parsed = JSON.parse(body) as unknown;
+      const arr = Array.isArray(parsed) ? parsed : [parsed];
+      for (const item of arr) {
+        const c = item as { name?: unknown; args?: Record<string, unknown> };
+        if (typeof c?.name === 'string' && c.name.length > 0) {
+          calls.push({ name: c.name, args: c.args ?? {} });
+        }
+      }
+      if (calls.length > 0) return calls;
+    } catch { /* fall through to line parsing */ }
+    const lines = body.split('\n');
     for (const line of lines) {
-      const trimmed = line.trim();
+      const trimmed = line.trim().replace(/,$/, '');
       if (!trimmed.startsWith('{')) continue;
       try {
         const parsed = JSON.parse(trimmed) as { name?: string; args?: Record<string, unknown> };
@@ -1442,9 +1630,19 @@ export class ToolCallParser {
     return calls;
   }
 
-  /** Strip the `## TOOL_CALLS` block from LLM output before showing it to the user. */
+  /** Strip protocol blocks (TOOL_CALLS/TOOL_RESULTS) and model echoes of them from user-visible output. */
   static strip(text: string): string {
-    return text.replace(/## TOOL_CALLS\n[\s\S]*?(?=\n## |$)/, '').trim();
+    return text
+      .replace(/## TOOL_CALLS\n?[\s\S]*?(?=\n## |$)/, '')
+      // Model echoing the results header it was given ("## TOOL_RESULTS [tool] {json}")
+      .replace(/^\s*#{1,4}\s*TOOL_RESULTS[\s\S]*?(?=\n(?:\*\*|##|-|[A-Z])|$)/i, '')
+      .replace(/\n?##\s*TOOL_RESULTS\s*(\[[^\]]*\])?\s*(\{[^\n]*\})?/gi, '')
+      // Provider-native tool-call tokens leaked into text (qwen/gemini special tokens)
+      .replace(/<\|tool_call_(?:start|end)\|>/g, '')
+      .replace(/<tool_call[\s\S]*?<\/?tool_call[^>]*>/g, '')
+      .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
+      .replace(/\(\s*[a-z_]+\(\)\s*\)/g, '')
+      .trim();
   }
 }
 

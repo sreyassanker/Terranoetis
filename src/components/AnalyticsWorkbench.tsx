@@ -15,6 +15,9 @@ import {
 interface AnalyticsWorkbenchProps {
   open: boolean;
   onClose: () => void;
+  /** When set (from chat handoff), auto-select this tool id and clear via callback. */
+  initialToolId?: number | null;
+  onInitialToolConsumed?: () => void;
   bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
   polygon?: Array<Array<[number, number]>>;
   points?: Array<{ lat: number; lon: number }>;
@@ -59,7 +62,7 @@ const ALL_TOOLS = flattenTools();
 /** Collect all unique domain names for the filter dropdown. */
 const ALL_DOMAIN_NAMES = Array.from(new Set(PARTS.flatMap(p => p.domains.map(d => d.name)))).sort();
 
-export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, bbox, polygon, points, studyAreaType, onToolResult, onClearResult, onToolModeChange, zIndex = 999, schemeColors }) => {
+export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, onClose, initialToolId, onInitialToolConsumed, bbox, polygon, points, studyAreaType, onToolResult, onClearResult, onToolModeChange, zIndex = 999, schemeColors }) => {
   const [search, setSearch] = useState('');
   const [expandedParts, setExpandedParts] = useState<Set<string>>(new Set(['part1']));
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set(['atmo']));
@@ -78,6 +81,18 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => { if (e.key === 'Escape') { if (selectedTool) closeTool(); else onClose(); } }, [onClose, closeTool, selectedTool]);
   useEffect(() => { if (open) window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, [open, handleKeyDown]);
+
+  // Chat handoff: auto-open the requested model in the workbench.
+  useEffect(() => {
+    if (initialToolId == null) return;
+    const found = ALL_TOOLS.find(t => t.tool.id === initialToolId);
+    if (found) {
+      setSelectedTool(found.tool);
+      setSelectedColor(found.partColor);
+      setViewMode('flat');
+    }
+    onInitialToolConsumed?.();
+  }, [initialToolId, onInitialToolConsumed]);
 
   const togglePart = useCallback((partId: string) => setExpandedParts((prev) => {
     const n = new Set(prev);

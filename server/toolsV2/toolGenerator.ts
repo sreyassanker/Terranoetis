@@ -53,8 +53,30 @@ export class DynamicToolRegistry {
     if (this.initialized) return;
     this.ensureTable();
     this.loadFromDb();
+    this.pruneRemovedCoreTools();
     this.initialized = true;
     logger.info({ toolCount: this.tools.size }, 'DynamicToolRegistry initialized');
+  }
+
+  /**
+   * Code is the source of truth for `core` tools: registerDefaultTools() re-registers
+   * every current core tool BEFORE init() runs. Any DB row with source='core' that was
+   * NOT re-registered this boot is a removed/stale tool and must be purged — otherwise
+   * persistence would resurrect tools whose code (or endpoint) no longer exists.
+   */
+  private pruneRemovedCoreTools(): void {
+    try {
+      const db = getDb();
+      const rows = db.prepare("SELECT name FROM dynamic_tools WHERE source = 'core'").all() as Array<{ name: string }>;
+      let removed = 0;
+      for (const row of rows) {
+        if (!this.tools.has(row.name)) {
+          db.prepare('DELETE FROM dynamic_tools WHERE name = ?').run(row.name);
+          removed++;
+        }
+      }
+      if (removed > 0) logger.info({ removed }, 'Pruned stale core tools removed from code');
+    } catch (e) { logger.warn({ err: e }, 'ToolGenerator pruneRemovedCoreTools failed'); }
   }
 
   private ensureTable(): void {
@@ -209,15 +231,17 @@ Example format:
 
   private async executeCoreTool(tool: DynamicTool, input: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     if (tool.schema.type === 'api' && tool.schema.endpoint) {
-      const url = this.interpolateUrl(tool.schema.endpoint, input);
-      const method = tool.schema.method || 'GET';
+      const method = (tool.schema.method || 'GET').toUpperCase();
+      const { url, body } = this.buildToolUrl(tool.schema.endpoint, input, method);
 
       const fetchOpts: RequestInit = {
         method,
         headers: { 'Content-Type': 'application/json' },
         signal: signal || AbortSignal.timeout(15000),
       };
-      if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+      if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && body !== undefined) {
+        fetchOpts.body = body;
+      } else if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
         fetchOpts.body = JSON.stringify(input);
       }
       const resp = await fetch(url, fetchOpts);
@@ -253,8 +277,8 @@ Example format:
   }
 
   private async executeApiCall(tool: DynamicTool, input: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
-    const url = this.interpolateUrl(tool.schema.endpoint || '', input);
-    const method = tool.schema.method || 'GET';
+    const method = (tool.schema.method || 'GET').toUpperCase();
+    const { url } = this.buildToolUrl(tool.schema.endpoint || '', input, method);
 
     const fetchOpts: RequestInit = {
       method,
@@ -291,12 +315,11 @@ Example format:
   remove(name: string): boolean {
     const tool = this.tools.get(name);
     if (!tool) return false;
-    if (tool.source === 'core') return false; // cannot delete core tools
     this.tools.delete(name);
     try {
       const db = getDb();
-      db.prepare('UPDATE dynamic_tools SET status = ? WHERE name = ?').run('disabled', name);
-          } catch (e) { logger.warn({ err: e }, 'ToolGenerator remove DB update failed'); }
+      db.prepare('DELETE FROM dynamic_tools WHERE name = ?').run(name);
+    } catch (e) { logger.warn({ err: e }, 'ToolGenerator remove DB update failed'); }
     return true;
   }
 
@@ -371,72 +394,53 @@ Example format:
   buildPrompt(intent?: { type: string; confidence: number; layerIds?: string[] }): string {
     let tools = this.list();
 
+    // Intent-based narrowing: only ever REMOVE clearly-irrelevant groups; the
+    // fallback must never be filtered away or a valid question hits a dead end.
     if (intent && intent.confidence > 0.3) {
-      tools = tools.filter(t => {
-        if (intent.type === 'weather_check') return t.category === 'weather';
-        if (intent.type === 'toggle_layer') {
-          if (intent.layerIds) {
-            return intent.layerIds.some((id: string) => t.name.includes(id) || t.exampleQueries.some(q => q.includes(id)));
-          }
-          return true;
+      const keep = (t: DynamicTool): boolean => {
+        if (t.category === 'general' || t.category === 'navigation' || t.category === 'analytical') return true; // search_all / globe / equations always available
+        if (intent.type === 'weather_check') return t.category === 'weather' || t.category === 'atmosphere' || t.category === 'maritime' || t.category === 'ocean' || t.category === 'hazards' || t.category === 'satellite' || t.category === 'osint';
+        if (intent.type === 'compute') return t.schema.type === 'sandbox' || t.category === 'compute' || t.category === 'simulation' || t.category === 'scenarios' || t.category === 'intelligence' || t.category === 'osint';
+        // deep_analysis anchored on a known layer → keep that layer's domain + general/nav.
+        if (intent.type === 'deep_analysis' && intent.layerIds && intent.layerIds.length > 0) {
+          const LAYER_CATS: Record<string, string[]> = {
+            earthquakes: ['seismic'], wildfires: ['hazards'], severe_storms: ['hazards', 'weather'],
+            volcanoes: ['hazards'], ais_vessels: ['maritime', 'ocean'], flight_tracks: ['aviation'],
+            space_debris: ['space'], who_outbreaks: ['health'], climate_co2: ['atmosphere'],
+            ioda_outages: ['osint'], worldbank_economy: ['osint'], dust: ['hazards'],
+          };
+          const cats = new Set<string>();
+          for (const id of intent.layerIds) (LAYER_CATS[id] || []).forEach(c => cats.add(c));
+          if (cats.size > 0) return cats.has(t.category);
         }
-        if (intent.type === 'compute') return t.schema.type === 'sandbox';
-        // For deep_analysis with layerIds, include the relevant domain tools + navigation + sandbox
-        if (intent.type === 'deep_analysis' && intent.layerIds) {
-          if (t.category === 'navigation' || t.schema.type === 'sandbox') return true;
-          return intent.layerIds.some((id: string) => {
-            // Map layer IDs to tool categories
-            if (id === 'ais_vessels') return t.category === 'maritime' || t.category === 'ocean';
-            if (id === 'space_debris') return t.category === 'space';
-            if (id === 'flight_tracks') return t.category === 'aviation';
-            if (id === 'wildfires') return t.category === 'hazards' || t.category === 'eo' || t.category === 'multimodal';
-            if (id === 'earthquakes') return t.category === 'seismic' || t.category === 'multimodal';
-            if (id === 'severe_storms') return t.category === 'weather' || t.category === 'multimodal';
-            if (id === 'volcanoes') return t.category === 'hazards' || t.category === 'multimodal';
-            return t.name.includes(id) || t.exampleQueries.some(q => q.includes(id));
-          });
-        }
-        // For deep_analysis without layerIds, include all non-compute tools
-        if (intent.type === 'deep_analysis') return true;
         return true;
-      });
+      };
+      const filtered = tools.filter(keep);
+      // Never narrow to nothing — a wrong guess must not blind the agent.
+      if (filtered.length >= 5) tools = filtered;
     }
 
+    // ── Instructions FIRST, tool catalog LAST ──────────────────────────
+    // Providers with small input budgets (groq free tier) truncate the prompt;
+    // keeping the catalog at the end means truncation drops tool entries, never
+    // the ## TOOL_CALLS protocol — so tool-calling survives a tight cap.
     const lines: string[] = [
       '# Earth Intelligence Copilot — Agent Mode',
       '',
       'You are an autonomous Earth Intelligence Copilot. Your mission:',
       '1. Understand the user\'s Earth science question',
-      '2. Fetch relevant data from the tools below or the web',
+      '2. Fetch relevant data from the tools listed at the END of this prompt',
       '3. Analyze using the sandbox code execution environment',
       '4. Visualize results on the globe using ## COMMANDS',
       '5. Respond with concise, data-backed answers',
       '',
-      '## Available Tools',
+      '## Honesty Rules (mandatory)',
       '',
-    ];
-
-    const grouped = new Map<string, DynamicTool[]>();
-    for (const tool of tools) {
-      const group = grouped.get(tool.category) || [];
-      group.push(tool);
-      grouped.set(tool.category, group);
-    }
-
-    for (const [category, categoryTools] of grouped) {
-      lines.push(`### ${category.charAt(0).toUpperCase() + category.slice(1)}`);
-      for (const tool of categoryTools) {
-        const ep = tool.schema.endpoint ? ` — \`${tool.schema.method || 'GET'} ${tool.schema.endpoint}\`` : '';
-        lines.push(`- **${tool.name}**: ${tool.description}${ep}`);
-      }
-      lines.push('');
-    }
-
-    lines.push(
-      '## Sandbox Code Execution',
-      '',
-      'You can run code via `POST /api/sandbox/execute` with `{"language":"python"|"node"|"bash", "code": "..."}`.',
-      'The sandbox has numpy, pandas, scipy, scikit-learn, geopandas, and internet access.',
+      '- Ground every data claim in what a tool ACTUALLY returned. Never invent numbers.',
+      '- If no tool covers the question, or a tool returned an error/empty result, say plainly that the data is NOT AVAILABLE in this platform. Do NOT fabricate values, do NOT present general knowledge as if it were live platform data, and do NOT claim a source you did not call.',
+      '- Answering from your own general knowledge is allowed ONLY when clearly labeled as such (e.g. "from general knowledge, not live data") — for definitions, concepts, history and explanations. It must never be mixed with fabricated live readings.',
+      '- When a tool result says error / UPSTREAM_ERROR / NO_DATA_PATH / KEY_REQUIRED, report that the layer is unavailable and why (e.g. missing API key).',
+      '- Command-type tools toggle layers or open panels; they return no data records. Never treat them as data sources.',
       '',
       '## Tool Calling Protocol',
       '',
@@ -448,15 +452,16 @@ Example format:
       '```',
       '## TOOL_CALLS',
       '{"name":"weather_forecast","args":{"lat":35.68,"lon":139.65}}',
-      '{"name":"earthquakes","args":{"minMagnitude":4}}',
+      '{"name":"earthquakes","args":{"minMag":4,"hours":24}}',
       '```',
       '',
       'Rules for TOOL_CALLS:',
-      '- `name` MUST be one of the tools listed above (exact match, case-sensitive).',
+      '- `name` MUST be one of the tools listed at the end of this prompt (exact match, case-sensitive).',
       '- `args` MUST match the tool\'s parameter schema (see the endpoint path for hints: lat/lon, radiusKm, etc.).',
       '- Emit between 0 and 4 tool calls per response. Multiple calls run in parallel.',
       '- After tool calls run, you will receive a `## TOOL_RESULTS` block and must then write your final answer.',
       '- You may ALSO emit `## COMMANDS` for globe visualization in the SAME response as TOOL_CALLS, or in the final pass.',
+      '- CRITICAL: If the answer needs live data, emit the `## TOOL_CALLS` block IMMEDIATELY. Do NOT describe a plan, say "I will fetch", "let me prepare", or "the calls have been issued" — actually emit the block now, or the data will never arrive.',
       '',
       '## How to Command the Globe',
       '',
@@ -474,7 +479,12 @@ Example format:
        '{"action":"openPanel","panelId":"analytics-workbench"}',
        '```',
        '',
-       'Supported actions: flyTo, toggleLayer, addPin, addHeatmap, addPolygon, addGeoJSON, addChart, addPanel, openPanel, closePanel, togglePanel.',
+       'Supported actions: flyTo (with optional "height" in metres for zoom), toggleLayer, addPin, addHeatmap, addPolygon, addGeoJSON, addChart, addPanel, openPanel, closePanel, togglePanel, setLayerOpacity (layerId + opacity 0-1), focusEntity (entityId OR lat/lon + label — e.g. track ISS), screenshot (no args), openAnalyticalModel (modelId + name — opens a scientific equation in the Analytics Workbench).',
+       '',
+       'Examples:',
+       '{"action":"setLayerOpacity","layerId":"night_lights","opacity":0.4}',
+       '{"action":"focusEntity","entityId":"ISS (ZARYA)","label":"ISS"}',
+       '{"action":"screenshot"}',
        '',
        '## UI Panels You Can Open (god-eye control)',
        '',
@@ -482,36 +492,68 @@ Example format:
        'Available panel IDs: analytics-workbench (150 scientific models), satellite-tracker, aviation-tracker, satellite-imagery, land-cover, intelligence (Pulse markets/geo-risk), intel-feed, cognitive-dashboard, tool-workbench, memory-explorer, settings, study-area, api-vault, command-palette, scenario-gallery, scenario-editor, cinematic-director, spatial-sketch, performance, timeline, measure, time-slider, iss, ai-chat.',
        'Open a panel whenever the user asks to "open/see/show" a tool, panel, or workspace. Combine with flyTo/toggleLayer for full control.',
        '',
-       '## Key Globe Layers (toggleLayer)',
+       '## Query Planning — Which Tool to Use',
        '',
-       'Common layer IDs you can enable: earthquakes, tectonic, heatmap, flight_tracks, ais_vessels, wildfires, severe_storms, volcanoes, dust, seaLakeIce, disaster_alerts, space_debris, 6_celestrak_gp_api, aurora_oval, precipitation, wind, pressure, temp_anomaly, night_lights, land_cover, submarine_cables, electricity_grid, eu_gas_storage, animal_migrations, population_impact, military_bases, sea_ice, 9_city_air_quality, 43_geonet, 43_geonet_volcano, 31_argo_floats, 42_ndbc_buoy_data, eu_gas_storage. Use `toggleLayer` with `enabled:true` to show any of these. (satellites_tle/icebergs/india_cctv were removed from the catalog — do not use them.)',
+       'Match the user\'s intent to the right tool:',
+       '- **Earthquakes**: `earthquakes` (with bbox/minMag/hours), `significant_quakes`, `earthquake_summary`, `43_geonet` (New Zealand)',
+       '- **Weather**: `weather_forecast` (lat/lon), `weather_alerts` (US), `storms` (tropical), `weather_historical` (past data)',
+       '- **Wildfires/fires**: `wildfires` (EONET events), `firms_fires` (NASA satellite hotspots), `eonet_events`',
+       '- **Floods**: `floods` (EONET events), `weather_flood` (river discharge), `mm_flood_extent` (satellite)',
+       '- **Aircraft/flights**: `aircraft` (ADSB.lol), `flights_all` (merged sources), `military_flights`, `airports` (airport dataset)',
+       '- **Ships/vessels**: `ais_vessels`, `maritime_nearby`',
+       '- **Satellites/space**: `satellites_tle`, `space_debris`, `iss`, `space_weather_kp`, `nasa_dsn`',
+       '- **Volcanoes**: `volcanoes` (global EONET), `43_geonet_volcano` (NZ alert levels)',
+       '- **Air quality**: `weather_air_quality` (point), `air_quality_waqi` (city), `9_city_air_quality` (world cities)',
+       '- **Ocean/marine**: `42_ndbc_buoy_data`, `31_argo_floats`, `31_noaa_tides_currents`, `50_ocean_currents`, `weather_marine`',
+       '- **Conflicts/OSINT**: `acled_recent`, `acled_nearby`, `gdelt_events`, `ucdp_conflict`, `sanctions_pressure`',
+       '- **Satellite imagery**: `mm_satellite_analyze`, `mm_satellite_interpret` (vision LLM); GIBS tile layers are toggle-only (command tools)',
+       '- **Disaster alerts**: `disaster_alerts` (GDACS), `eonet_events`, `reliefweb`',
+       '- **Scientific equations**: `analytical_search` then `analytical_execute`',
+       '- **Climate series**: `climate_co2` (CO2 ppm), `climate_sea_ice` (extent), `climate_anomalies` (per-point ERA5 stats)',
+       '- **Hazards US**: `fema_declarations`, `spc_outlook` (tornado/storm risk), `shakemap_recent` (shaking maps)',
+       '- **Water/health**: `usgs_streamflow` (river gauges, needs bbox), `who_outbreaks` (disease outbreaks)',
+       '- **Economy**: `worldbank_economy` (GDP/population/inflation), `imf_data`, `fred_series`, `comtrade_trade`, `worldpop_population` (people in bbox)',
+       '- **Cyber/OSINT**: `ioda_outages` (shutdowns), `shodan_hosts`, `virustotal_url`, `urlhaus_malware`, `abuseipdb_check`, `cloudflare_traffic`, `disinfo_monitor`',
+       '- **Markets**: `pulse_market_quotes`, `gold_price`, `crypto_prices`, `stock_timeseries`, `prediction_markets`',
+       '- **Geo utilities**: `overpass_query` (OSM features in bbox), `stac_imagery` (satellite scenes), `guardian_site`, `multimodal_seismic_history`, `live_cctv`, `vaac_ash` (volcanic ash)',
+       '- **Uncertain / multi-domain**: `search_all` — dispatches to all relevant databases at once',
        '',
-      '## Query Planning — Which Tool to Use',
-      '',
-      'Match the user\'s intent to the right tool:',
-      '- **Earthquakes**: `earthquakes` (with bbox/minMag/hours), `significant_quakes`, `earthquake_summary`',
-      '- **Weather**: `weather_forecast` (lat/lon), `weather_alerts` (US), `storms` (tropical), `weather_historical` (past data)',
-      '- **Wildfires/fires**: `wildfires`, `firms_fires` (NASA satellite), `eonet_events`',
-      '- **Floods**: `floods`, `weather_flood` (river discharge), `mm_flood_extent` (satellite)',
-      '- **Aircraft/flights**: `aircraft` (ADSB.lol), `flights_all` (merged sources), `military_flights`',
-      '- **Ships/vessels**: `ais_vessels`, `maritime_nearby`',
-      '- **Satellites/space**: `satellites_tle`, `space_debris`, `iss`, `space_weather_kp`',
-      '- **Volcanoes**: `volcanoes`, `eonet_events`',
-      '- **Air quality**: `weather_air_quality`, `air_quality_waqi`',
-      '- **Conflicts/OSINT**: `acled_recent`, `acled_nearby`, `gdelt_events`, `ucdp_conflict`',
-      '- **Satellite imagery**: `mm_satellite_analyze`, `mm_satellite_interpret`, `satellite_analyze` (NDVI/NDWI)',
-      '- **Disaster alerts**: `gdacs`, `eonet_events`, `reliefweb`',
-      '- **Uncertain / multi-domain**: `search_all` — dispatches to all relevant databases at once',
-      '',
-      '## Response Rules',
-      '- Be concise. Lead with the most important finding.',
-      '- Include specific numbers (magnitudes, counts, computed statistics).',
-      '- Suggest what the user should look at on the globe.',
-      '- Always include ## COMMANDS when globe changes are needed.',
-      '- If the user asks about a location with no data, say so honestly.',
-      '- For complex tasks, break into subtasks and show progress.',
-      '- Prefer ## TOOL_CALLS to fetch live data rather than describing what you cannot see.',
-    );
+       '## Response Rules',
+       '- Be concise. Lead with the most important finding.',
+       '- Include specific numbers (magnitudes, counts, computed statistics) only from real tool results.',
+       '- Suggest what the user should look at on the globe.',
+       '- Always include ## COMMANDS when globe changes are needed.',
+       '- If no tool covers the question or the data is unavailable, say so honestly and stop — do not invent layer data.',
+       '- For complex tasks, break into subtasks and show progress.',
+       '- Prefer ## TOOL_CALLS to fetch live data rather than describing what you cannot see.',
+       '',
+       '## Sandbox Code Execution',
+       '',
+       'You can run code via `POST /api/sandbox/execute` with `{"language":"python"|"node"|"bash", "code": "..."}`.',
+       'The sandbox has numpy, pandas, scipy, scikit-learn, geopandas, and internet access.',
+       '',
+       '## Available Tools',
+       '',
+     ];
+
+    const grouped = new Map<string, DynamicTool[]>();
+    for (const tool of tools) {
+      const group = grouped.get(tool.category) || [];
+      group.push(tool);
+      grouped.set(tool.category, group);
+    }
+
+    for (const [category, categoryTools] of grouped) {
+      lines.push(`### ${category.charAt(0).toUpperCase() + category.slice(1)}`);
+      for (const tool of categoryTools) {
+        const ep = tool.schema.endpoint ? ` — \`${tool.schema.method || 'GET'} ${tool.schema.endpoint}\`` : '';
+        // Compact listing: first sentence of the description only (full tool
+        // catalog × full descriptions ≈ 28K chars → busts free-tier ITPM caps).
+        const short = tool.description.split(/(?<=[.!?])\s/)[0] || tool.description;
+        lines.push(`- **${tool.name}**: ${short}${ep}`);
+      }
+      lines.push('');
+    }
 
     return lines.join('\n');
   }
@@ -519,7 +561,11 @@ Example format:
   private loadFromDb(): void {
     try {
       const db = getDb();
-      const rows = db.prepare("SELECT * FROM dynamic_tools WHERE status != 'disabled'")
+      // `core` tools are re-registered from code on every boot (registerDefaultTools
+      // runs before init). Loading their DB rows here would let REMOVED/stale tools
+      // resurrect and shadow the fresh code registrations — so only runtime-created
+      // tools (generated/discovered) are restored from persistence.
+      const rows = db.prepare("SELECT * FROM dynamic_tools WHERE status != 'disabled' AND source != 'core'")
         .all() as Array<Record<string, unknown>>;
 
       for (const row of rows) {
@@ -554,12 +600,25 @@ Example format:
     return `async function generatedTool(input, signal) { ${code} }`;
   }
 
-  private interpolateUrl(endpoint: string, input: Record<string, unknown>): string {
+  /**
+   * Build the final request URL for a tool call: path placeholders resolved,
+   * remaining input entries appended as query-string params (GET/DELETE).
+   */
+  private buildToolUrl(endpoint: string, input: Record<string, unknown>, method: string): { url: string; body?: string } {
     let url = resolveToolUrl(endpoint);
+    const params = new URLSearchParams();
     for (const [key, value] of Object.entries(input)) {
-      url = url.replace(`{${key}}`, encodeURIComponent(String(value)));
+      if (value === undefined || value === null) continue;
+      const placeholder = `{${key}}`;
+      if (url.includes(placeholder)) {
+        url = url.replace(placeholder, encodeURIComponent(String(value)));
+      } else if (method === 'GET' || method === 'DELETE') {
+        params.set(key, String(value));
+      }
     }
-    return url;
+    const qs = params.toString();
+    if (qs) url += (url.includes('?') ? '&' : '?') + qs;
+    return { url };
   }
 }
 

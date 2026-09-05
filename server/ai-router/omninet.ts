@@ -59,12 +59,13 @@ export interface OmninetOptions {
 // ── Provider Registry ───────────────────────────────────────────
 
 const PROVIDER_CONFIGS: ProviderConfig[] = [
-  { name: 'groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', models: ['groq/compound', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'], rateLimit: 20, tier: 2, apiKeyEnvVar: 'GROQ_API_KEY', supportsStreaming: true },
+  { name: 'groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', models: ['groq/compound', 'qwen/qwen3.8-27b'], rateLimit: 20, tier: 2, apiKeyEnvVar: 'GROQ_API_KEY', supportsStreaming: true },
   { name: 'gemini', type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', models: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'], rateLimit: 60, tier: 3, apiKeyEnvVar: 'GOOGLE_GEMINI_API_KEY', supportsStreaming: true, supportsVision: true },
   { name: 'bai', type: 'openai-compatible', baseUrl: 'https://api.b.ai/v1', models: ['deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'hy3', 'mimo-v2.5', 'qwen3.8-flash'], rateLimit: 60, tier: 1, apiKeyEnvVar: 'BAI_API_KEY', supportsStreaming: true, supportsVision: true },
   { name: 'deepseek', type: 'openai-compatible', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'], rateLimit: 50, tier: 3, apiKeyEnvVar: 'DEEPSEEK_API_KEY', supportsStreaming: true },
   { name: 'claude', type: 'claude', baseUrl: 'https://api.anthropic.com/v1', models: ['claude-3-haiku'], rateLimit: 5, tier: 3, apiKeyEnvVar: 'ANTHROPIC_API_KEY', supportsStreaming: true },
   { name: 'ollama', type: 'ollama', baseUrl: 'http://localhost:11434', models: ['llama3', 'mistral'], rateLimit: 9999, tier: 4, local: true, supportsStreaming: true, supportsEmbeddings: true },
+  { name: 'openrouter', type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1', models: ['meta-llama/llama-3.3-70b-instruct:free', 'deepseek/deepseek-chat-v3.1:free', 'google/gemini-2.0-flash-exp:free'], rateLimit: 30, tier: 2, apiKeyEnvVar: 'OPENROUTER_API_KEY', supportsStreaming: true },
   { name: 'huggingface', type: 'huggingface', baseUrl: 'https://api-inference.huggingface.co', models: ['meta-llama/Llama-3.1-8B'], rateLimit: 10, tier: 4, apiKeyEnvVar: 'HUGGINGFACE_API_KEY', supportsEmbeddings: true },
   // Last-resort provider: local llama-server running the GGUF model.
   // Used when all remote providers fail. The GGUF is loaded at boot by
@@ -74,6 +75,21 @@ const PROVIDER_CONFIGS: ProviderConfig[] = [
 ];
 
 // ── Query Classification ─────────────────────────────────────────
+
+
+/**
+ * Cap a prompt to `limit` chars WITHOUT dropping the user query. The agent
+ * system prompt (179-tool catalog) can exceed provider input budgets; the
+ * [User query] block sits at the very end and MUST survive truncation.
+ */
+export function capPromptKeepingQuery(prompt: string, limit: number): string {
+  if (prompt.length <= limit) return prompt;
+  const marker = prompt.lastIndexOf('[User query]');
+  if (marker === -1) return prompt.slice(0, limit);
+  const tail = prompt.slice(marker);
+  const bodyBudget = Math.max(limit - tail.length, 2000);
+  return prompt.slice(0, bodyBudget) + '\n\n[…truncated context…]\n\n' + tail;
+}
 
 export function classifyComplexity(query: string): Complexity {
   if (!query || query.length < 20) return 'simple';
@@ -112,12 +128,9 @@ export class Omninet {
       // Never carry a stale 'down' from a previous run into a fresh boot —
       // reset to 'degraded' so providers with valid keys are immediately
       // usable and the periodic health check can promote them back to healthy.
-      const savedStatus = saved?.status as HealthStatus | undefined;
       const status: HealthStatus = config.local
         ? 'healthy'
-        : savedStatus === 'down'
-          ? 'degraded'
-          : (savedStatus || 'healthy');
+        : 'degraded'; // boot conservative; the 2-min health check promotes real keys to healthy
       return {
         config,
         status,
@@ -128,7 +141,7 @@ export class Omninet {
         circuitFailures: 0,
         circuitOpenedAt: 0,
         tokens: (saved?.tokens as number) ?? config.rateLimit,
-        lastTokenRefill: (saved?.lastTokenRefill as number) || Date.now(),
+        lastTokenRefill: Date.now(), // start each boot with a full token window
         totalRequests: (saved?.totalRequests as number) || 0,
         totalTokens: (saved?.totalTokens as number) || 0,
         estimatedCost: (saved?.estimatedCost as number) || 0,
@@ -231,10 +244,27 @@ export class Omninet {
   private async healthPing(state: ProviderState): Promise<void> {
     const start = Date.now();
     const config = state.config;
-    const model = config.models[0];
+    // Ping the LAST listed model: the head model often carries a tiny daily
+    // quota (e.g. groq/compound 250 RPD) that health checks would burn in
+    // minutes. Last models are typically the cheap high-quota fallbacks.
+    const model = config.models[config.models.length - 1];
 
-    await this.executeProviderCall(config, model, 'hi', { maxTokens: 1, temperature: 0.1, signal: AbortSignal.timeout(20000) });
-    state.lastLatency = Date.now() - start;
+    try {
+      await this.executeProviderCall(config, model, 'hi', { maxTokens: 24, temperature: 0.1, signal: AbortSignal.timeout(20000) });
+      state.lastLatency = Date.now() - start;
+    } catch (e) {
+      // A reachable upstream is ALIVE even when the ping produced no text:
+      // "returned no content" (reasoning models burning tokens), 429 quota and
+      // 402 billing all mean the API responded. Only genuine transport/infra
+      // failures should mark the provider unhealthy.
+      const msg = (e as Error).message || '';
+      if (/HTTP 429|HTTP 402|HTTP 403|returned no content|HTTP 5\d\d/.test(msg)) {
+        state.lastLatency = Date.now() - start;
+        state.lastChecked = Date.now();
+        return;
+      }
+      throw e;
+    }
   }
 
   // ── Token Bucket Rate Limiting ────────────────────────────────
@@ -331,7 +361,7 @@ export class Omninet {
       return { provider: selected.config.name, model, estimatedLatency: selected.lastLatency || 1000 };
     }
 
-    const fallbackLocal = this.providers.find(s => s.config.local && s.config.type === 'ollama');
+    const fallbackLocal = this.providers.find(s => s.config.local && (s.config.type === 'ollama' || s.config.name === 'local-gguf'));
     if (fallbackLocal) {
       return { provider: 'ollama', model: 'llama3', estimatedLatency: 100 };
     }
@@ -370,9 +400,10 @@ export class Omninet {
       signal,
       body: JSON.stringify({
         model,
-        messages: [{ role: 'user', content: prompt.slice(0, 32000) }],
+        messages: [{ role: 'user', content: capPromptKeepingQuery(prompt, config.local ? 6000 : config.name === 'groq' ? 12000 : 32000) }],
         max_tokens: options?.maxTokens ?? 1024,
         temperature: options?.temperature ?? 0.3,
+        ...(model.includes('gpt-oss') ? { reasoning_effort: 'low' } : {}),
       }),
     });
     if (!resp.ok) throw new Error(`${config.name} HTTP ${resp.status}`);
@@ -383,8 +414,11 @@ export class Omninet {
     const content = msg?.content as string | undefined;
     if (content && content.trim()) return content;
     const reasoning = msg?.reasoning_content as string | undefined;
-    if (reasoning && reasoning.trim()) return reasoning;
-    return '';
+    if (reasoning && reasoning.trim() && (data.choices as Array<Record<string, unknown>>)?.[0] && JSON.stringify((data.choices as Array<Record<string, unknown>>)[0]).includes('"finish_reason":"length"') === false) return reasoning;
+    // No usable output (or all tokens consumed by cut-off reasoning) — treat as a
+    // failure so the router moves to the next model/provider instead of yielding
+    // an empty answer.
+    throw new Error(`${config.name}/${model} returned no content`);
   }
 
   private async callGemini(config: ProviderConfig, model: string, prompt: string, options?: OmninetOptions, signal?: AbortSignal): Promise<string> {
@@ -412,7 +446,7 @@ export class Omninet {
             headers: { 'Content-Type': 'application/json' },
             signal: attemptSignal,
             body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt.slice(0, 16000) }] }],
+              contents: [{ parts: [{ text: capPromptKeepingQuery(prompt, 30000) }] }],
               generationConfig: { temperature: options?.temperature ?? 0.3, maxOutputTokens: options?.maxTokens ?? 2048 },
               toolConfig: { functionCallingConfig: { mode: 'NONE' } },
             }),
@@ -558,6 +592,9 @@ export class Omninet {
         lastError = e as Error;
         this.recordFailure(state);
         state.status = 'degraded';
+        // Quota/auth/billing failures never reached the model — refund the token
+        // so the provider isn't locally starved while its quota window resets.
+        if (/HTTP 429|HTTP 402|HTTP 403|HTTP 404/.test(lastError.message || '')) state.tokens++;
         this.persistState(state);
 
         if (attempt < 2) {
@@ -573,9 +610,10 @@ export class Omninet {
         }
 
         try {
-          const localProvider = this.providers.find(s => s.config.local && s.config.type === 'ollama');
+          const localProvider = this.providers.find(s => s.config.local && (s.config.type === 'ollama' || s.config.name === 'local-gguf'));
           if (localProvider) {
-            return await this.executeProviderCall(localProvider.config, 'llama3', prompt, { ...options, maxTokens: 512 });
+            const localModel = localProvider.config.type === 'ollama' ? 'llama3' : 'local';
+            return await this.executeProviderCall(localProvider.config, localModel, prompt, { ...options, maxTokens: 1024 });
           }
         } catch (e) { logger.warn({ err: e }, 'Omninet local fallback also failed'); }
       }
@@ -689,66 +727,88 @@ export class Omninet {
       return;
     }
 
-    const preferred = options?.model;
     let lastError: string | undefined;
+    let yieldedAny = 0;
 
     for (const state of candidates) {
       const config = state.config;
-      const model = preferred && config.models.includes(preferred) ? preferred : config.models[0];
-      const apiKey = this.resolveApiKey(config);
+      // Try every model on the provider before moving on — the head model often
+      // has a much smaller daily quota than the provider as a whole (e.g.
+      // groq/compound RPD cap vs openai/gpt-oss-20b). modelOverride pins a
+      // specific model when the caller explicitly requested one.
+      const preferred = options?.model;
+      const modelList = preferred && config.models.includes(preferred)
+        ? [preferred]
+        : config.models;
+      for (const model of modelList) {
+        const apiKey = this.resolveApiKey(config);
 
-      if (!this.consumeToken(state)) continue;
+        if (!this.consumeToken(state)) break;
 
-      let started = false;
-      try {
-        // Local providers (ollama, local-gguf) route through the non-streaming
-        // path: their SSE can carry reasoning_content only, and waiting for the
-        // full JSON reliably returns message.content.
-        if (config.type === 'openai-compatible' && apiKey && !config.local) {
-          const resp = await fetch(`${config.baseUrl}/chat/completions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-            signal: options?.signal || AbortSignal.timeout(60000),
-            body: JSON.stringify({
-              model,
-              messages: [{ role: 'user', content: prompt.slice(0, 32000) }],
-              max_tokens: options?.maxTokens ?? 2048,
-              temperature: options?.temperature ?? 0.3,
-              stream: true,
-            }),
-          });
-          if (!resp.ok) throw new Error(`${config.name} HTTP ${resp.status}`);
-          started = true;
-          const reader = resp.body?.getReader();
-          if (!reader) throw new Error('No response body');
-          const decoder = new TextDecoder();
-          let buffer = '';
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed || trimmed === 'data: [DONE]') continue;
-              if (trimmed.startsWith('data: ')) {
-                try {
-                  const chunk = JSON.parse(trimmed.slice(6));
-                  const content = chunk.choices?.[0]?.delta?.content || '';
-                  if (content) yield content;
-                } catch (e) { logger.warn({ err: e }, 'Omninet SSE parse error'); }
+        let started = false;
+        try {
+          // Local providers (ollama, local-gguf) route through the non-streaming
+          // path: their SSE can carry reasoning_content only, and waiting for the
+          // full JSON reliably returns message.content.
+          if (config.type === 'openai-compatible' && apiKey && !config.local) {
+            const resp = await fetch(`${config.baseUrl}/chat/completions`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+              signal: options?.signal || AbortSignal.timeout(60000),
+              body: JSON.stringify({
+                model,
+                messages: [{ role: 'user', content: capPromptKeepingQuery(prompt, config.local ? 6000 : config.name === 'groq' ? 12000 : 32000) }],
+                // Free-tier OTPM caps reject 4096-token asks on qwen/compound.
+                max_tokens: config.name === 'groq' ? Math.min(options?.maxTokens ?? 2048, 950) : (options?.maxTokens ?? 2048),
+                temperature: options?.temperature ?? 0.3,
+                // Reasoning models (gpt-oss etc.) silently spend the whole token
+                // budget on invisible reasoning, yielding empty answers. Cap it.
+                // Qwen3 thinking models need reasoning hidden to follow the text
+                // tool protocol instead of emitting <tool_call> XML.
+                ...(model.includes('gpt-oss') ? { reasoning_effort: 'low' } : {}),
+                ...(model.includes('qwen3') ? { reasoning_format: 'hidden' } : {}),
+                stream: true,
+              }),
+            });
+            if (!resp.ok) {
+              state.tokens++; // refund — provider never served this request
+              const errBody = await resp.text().catch(() => '');
+              throw new Error(`${config.name} HTTP ${resp.status} (${model}) ${errBody.slice(0, 180)}`);
+            }
+            started = true;
+            const reader = resp.body?.getReader();
+            if (!reader) throw new Error('No response body');
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let yieldedChars = 0;
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed === 'data: [DONE]') continue;
+                if (trimmed.startsWith('data: ')) {
+                  try {
+                    const chunk = JSON.parse(trimmed.slice(6));
+                    const delta = chunk.choices?.[0]?.delta as { content?: string } | undefined;
+                    const content = delta?.content || '';
+                    if (content) { yield content; yieldedChars += content.length; yieldedAny += content.length; }
+                  } catch (e) { logger.warn({ err: e }, 'Omninet SSE parse error'); }
+                }
               }
             }
-          }
-        } else if (config.type === 'gemini') {
+            if (yieldedChars === 0) throw new Error(`${config.name}/${model} streamed no content (reasoning-only or empty response)`);
+          } else if (config.type === 'gemini') {
           const gApiKey = this.resolveApiKey(config) || process.env.GOOGLE_GEMINI_API_KEY || '';
           const resp = await fetch(`${config.baseUrl}/models/${model}:streamGenerateContent?alt=sse&key=${gApiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal: options?.signal || AbortSignal.timeout(60000),
             body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt.slice(0, 16000) }] }],
+              contents: [{ parts: [{ text: capPromptKeepingQuery(prompt, 30000) }] }],
               generationConfig: { temperature: options?.temperature ?? 0.3, maxOutputTokens: options?.maxTokens ?? 2048 },
             }),
           });
@@ -758,6 +818,7 @@ export class Omninet {
           if (!reader) throw new Error('No response body');
           const decoder = new TextDecoder();
           let buffer = '';
+          let yieldedChars = 0;
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -768,29 +829,44 @@ export class Omninet {
               if (line.startsWith('data: ')) {
                 try {
                   const chunk = JSON.parse(line.slice(6));
-                  const content = chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                  if (content) yield content;
+                  // Concatenate ALL text parts, skipping thinking-only parts.
+                  const parts = chunk.candidates?.[0]?.content?.parts as Array<{ text?: string; thought?: boolean }> | undefined;
+                  for (const part of parts || []) {
+                    if (part?.text && !part.thought) { yield part.text; yieldedChars += part.text.length; yieldedAny += part.text.length; }
+                  }
                 } catch (e) { logger.warn({ err: e }, 'Omninet Gemini SSE parse error'); }
               }
             }
           }
+          if (yieldedChars === 0) throw new Error(`Gemini ${model} streamed no content (reasoning-only response)`);
         } else {
           const result = await this.executeProviderCall(config, model, prompt, options);
           started = true;
-          yield result;
+          if (result) yield result;
         }
         this.recordSuccess(state);
         state.totalTokens += prompt.length;
         this.persistState(state);
         return;
       } catch (e) {
-        this.recordFailure(state);
-        lastError = `${config.name}: ${(e as Error).message}`;
-        if (started) {
-          yield `\n\n[Provider ${config.name} failed. ${(e as Error).message}]`;
+        // Quota/auth errors are MODEL-scoped, not provider-wide: another model on
+        // the same provider may work (e.g. groq/compound RPD cap vs gpt-oss-20b).
+        // Only infra failures count toward the provider circuit breaker.
+        // Timeouts DO count — a hanging provider stalls every ask by its timeout.
+        const msg = (e as Error).message || '';
+        const modelScoped = /HTTP 429|HTTP 402|HTTP 403|HTTP 404|streamed no content/.test(msg);
+        if (!modelScoped) this.recordFailure(state);
+        lastError = `${config.name}/${model}: ${msg}`;
+        if (started && yieldedAny > 0) {
+          // Mid-stream failure AFTER content reached the user — surface the break.
+          yield `\n\n[Provider ${config.name} failed. ${msg}]`;
           return;
         }
-        logger.warn({ err: e, provider: config.name }, 'Omninet provider failed, falling back to next');
+        // started-but-empty (reasoning-only response) or pre-stream failure:
+        // nothing reached the user — fall through to the next model/provider.
+        logger.warn({ err: e, provider: config.name, model }, 'Omninet provider model failed, trying next model/provider');
+        continue;
+      }
       }
     }
 

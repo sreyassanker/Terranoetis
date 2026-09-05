@@ -115,8 +115,7 @@ export async function fetchAcledEvents(params: {
 }): Promise<AcledQueryResult> {
   const apiKey = getApiKey();
   if (!apiKey) {
-    logger.warn('[ACLED] No API key configured');
-    return { events: [], total: 0, query: params, cached: false };
+    throw new Error('ACLED_API_KEY is not configured — register at acleddata.com and set it in the server .env');
   }
 
   const url = new URL(ACLED_BASE_URL);
