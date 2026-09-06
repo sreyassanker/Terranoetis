@@ -34,18 +34,20 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 
 ## Gallery
 
+*Fast previews — click any GIF to open the full-quality capture (Git LFS).*
+
 <table>
   <tr>
-    <td width="50%"><img src="gifs/Multi%20Hazard%20Risk%20Map.gif" alt="Multi-hazard risk map — fused seismic, fire, storm and flood risk rendered on the globe" /></td>
-    <td width="50%"><img src="gifs/Landslide%20simulation.gif" alt="Landslide physics simulation — GPU-run terrain failure over real topography" /></td>
+    <td width="50%"><a href="gifs/Multi%20Hazard%20Risk%20Map.gif"><img src="gifs/preview/multi-hazard.gif" alt="Multi-hazard risk map — fused seismic, fire, storm and flood risk rendered on the globe" /></a></td>
+    <td width="50%"><a href="gifs/Landslide%20simulation.gif"><img src="gifs/preview/landslide.gif" alt="Landslide physics simulation — GPU-run terrain failure over real topography" /></a></td>
   </tr>
   <tr>
     <td align="center"><b>Multi-Hazard Risk Map</b><br/>fused live risk surfaces on the 3D globe</td>
     <td align="center"><b>Landslide Simulation</b><br/>one of 7 physics engines, run over real terrain</td>
   </tr>
   <tr>
-    <td width="50%"><img src="gifs/Aviation%20Tracker.gif" alt="Live aviation tracker — ADS-B aircraft streamed onto the globe" /></td>
-    <td width="50%"><img src="gifs/Satellite%20Tracker.gif" alt="Live satellite tracker — TLE orbits propagated and rendered in real time" /></td>
+    <td width="50%"><a href="gifs/Aviation%20Tracker.gif"><img src="gifs/preview/aviation.gif" alt="Live aviation tracker — ADS-B aircraft streamed onto the globe" /></a></td>
+    <td width="50%"><a href="gifs/Satellite%20Tracker.gif"><img src="gifs/preview/satellite.gif" alt="Live satellite tracker — TLE orbits propagated and rendered in real time" /></a></td>
   </tr>
   <tr>
     <td align="center"><b>Aviation Tracker</b><br/>live ADS-B flights on the globe</td>
