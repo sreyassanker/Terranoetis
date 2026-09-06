@@ -8,15 +8,16 @@ export function ChatTabs({
 }: {
   onBeforeTabSwitch?: () => void;
 }) {
-  const {
-    chatTabs,
-    activeTabId,
-    openChatTab,
-    closeChatTab,
-    activateChatTab,
-    renameChatTab,
-    tabTyping,
-  } = useChatStore();
+  // Audit L4: subscribe to a minimal signature (ids+titles+active+typing dots)
+  // instead of the whole store. Token-streaming mutates chatTabs[].messages
+  // every ~40ms; the tab strip renders none of that, so it must not re-render.
+  const tabsSig = useChatStore((s) =>
+    s.chatTabs.map((t) => `${t.id}\u0000${t.title}`).join('\u0001')
+    + '\u0002' + (s.activeTabId ?? '')
+    + '\u0002' + Object.keys(s.tabTyping).filter((k) => s.tabTyping[k]).join(','),
+  );
+  void tabsSig; // subscription trigger only — data read fresh below
+  const { chatTabs, activeTabId, tabTyping, openChatTab, closeChatTab, activateChatTab, renameChatTab } = useChatStore.getState();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');

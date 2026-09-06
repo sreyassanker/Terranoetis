@@ -231,7 +231,7 @@ export function ChatMessageRow({
           {msg.studyAreaRequest && <StudyAreaPrompt request={msg.studyAreaRequest} sendAI={sendAI!} />}
 
           {msg.toolEvents && msg.toolEvents.filter(e => e.approvalRequired || e.status === 'blocked').map((ev, i) => (
-            <ToolApprovalView key={`apr_${i}`} event={ev} onApprove={(result) => updateToolEvent(msg.id, ev.name, { status: 'success', result })} onDeny={() => updateToolEvent(msg.id, ev.name, { status: 'error', error: 'Denied by user' })} />
+            <ToolApprovalView key={`apr_${i}`} event={ev} onApprove={(result, answer) => { updateToolEvent(msg.id, ev.name, { status: 'success', result }); if (answer) updateMessage(msg.id, { content: `${msg.content}\n\n${answer}` }); }} onDeny={() => updateToolEvent(msg.id, ev.name, { status: 'error', error: 'Denied by user' })} />
           ))}
 
           {msg.artifacts && msg.artifacts.map((art, i) => (
@@ -241,7 +241,7 @@ export function ChatMessageRow({
           {renderCommandChips(msg.commands, focusLocation, toggleLayer)}
 
           {msg.modelTier && (
-            <span className="msg-tier-badge">{msg.modelTier}</span>
+            <span className="msg-tier-badge" title={msg.modelUsed ? `served by ${msg.modelUsed}` : undefined}>{msg.modelUsed || msg.modelTier}</span>
           )}
 
           {msg.replayed && (

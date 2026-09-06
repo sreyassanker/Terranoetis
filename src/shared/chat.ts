@@ -96,6 +96,8 @@ export interface ChatMessage {
   feedback?: 'up' | 'down';
   traceId?: string | null;
   modelTier?: string | null;
+  /** provider/model that actually served the answer (audit: cost honesty) */
+  modelUsed?: string | null;
   commands?: Array<{ action: string; label?: string; lat?: number; lon?: number; layerId?: string }>;
   toolEvents?: ToolEvent[];
   subAgents?: SubAgentActivity[];

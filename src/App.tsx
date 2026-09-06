@@ -5336,7 +5336,7 @@ export default function App() {
     if (now - last < 300) return;
     toggleDebounceRef.current[layerId] = now;
     // Record toggle in user profile (fire-and-forget)
-    fetch('/api/agent/profile/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' , ...authHeaders() }, body: JSON.stringify({ userId: 'browser-user', layerId }) }).catch(() => {});
+    fetch('/api/agent/profile/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' , ...authHeaders() }, body: JSON.stringify({ layerId }) }).catch(() => {});
     // Read BEFORE setLayers — the updater runs asynchronously, not synchronously
     const wasOn = layersRef.current.find(l => l.id === layerId)?.on ?? false;
     setLayers(prev => {
@@ -7060,7 +7060,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
         const resp = await fetch('/api/sandbox/workspace', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' , ...authHeaders() },
-          body: JSON.stringify({ userId: 'browser-user' }),
+          body: JSON.stringify({}),
         });
         if (resp.ok) {
           const ws = await resp.json();
@@ -7386,7 +7386,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
       const resp = await fetch('/api/agent/monitor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' , ...authHeaders() },
-        body: JSON.stringify({ layerId, condition: { field, operator, value }, location, label: `Monitor: ${conditionText}`, userId: 'browser-user', intervalMs: 300000 }),
+        body: JSON.stringify({ layerId, condition: { field, operator, value }, location, label: `Monitor: ${conditionText}`, intervalMs: 300000 }),
       });
       if (resp.ok) {
         const rule = await resp.json();
@@ -7409,7 +7409,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
       const resp = await fetch('/api/agent/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' , ...authHeaders() },
-        body: JSON.stringify({ label: `Scheduled: ${goal.slice(0, 40)}`, goal, userId: 'browser-user', intervalMs }),
+        body: JSON.stringify({ label: `Scheduled: ${goal.slice(0, 40)}`, goal, intervalMs }),
       });
       if (resp.ok) {
         const task = await resp.json();

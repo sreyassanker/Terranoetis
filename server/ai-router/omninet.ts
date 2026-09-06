@@ -54,6 +54,15 @@ export interface OmninetOptions {
   signal?: AbortSignal;
   /** Client-selected tier: 'local' | 'flash' | 'pro'. Influences provider ranking. */
   clientTier?: string;
+  /** Audit (cost honesty): called once with the provider+model that ACTUALLY
+   *  served the stream — the router's requested tier is not the truth when
+   *  fallbacks kick in. */
+  onProviderUsed?: (info: { provider: string; model: string }) => void;
+  /** Audit T1: native function-calling. When present AND the serving provider
+   *  supports the tools API, the model may answer with structured tool calls
+   *  instead of the ## TOOL_CALLS text protocol. onToolCalls receives them. */
+  tools?: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
+  onToolCalls?: (calls: Array<{ name: string; args: Record<string, unknown> }>) => void;
 }
 
 // ── Provider Registry ───────────────────────────────────────────
@@ -746,11 +755,19 @@ export class Omninet {
         if (!this.consumeToken(state)) break;
 
         let started = false;
+        let usedReported = false;
+        const reportUsed = () => { if (!usedReported) { usedReported = true; options?.onProviderUsed?.({ provider: config.name, model }); } };
         try {
           // Local providers (ollama, local-gguf) route through the non-streaming
           // path: their SSE can carry reasoning_content only, and waiting for the
           // full JSON reliably returns message.content.
           if (config.type === 'openai-compatible' && apiKey && !config.local) {
+            // Audit T1: native function-calling for OpenAI-compatible providers
+            // (groq/openrouter/openai). Tool-call deltas are accumulated by
+            // index and delivered via onToolCalls at stream end.
+            const nativeTools = options?.tools && options.tools.length > 0 && config.name !== 'openrouter'
+              ? options.tools.slice(0, 60).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }))
+              : undefined;
             const resp = await fetch(`${config.baseUrl}/chat/completions`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -767,6 +784,7 @@ export class Omninet {
                 // tool protocol instead of emitting <tool_call> XML.
                 ...(model.includes('gpt-oss') ? { reasoning_effort: 'low' } : {}),
                 ...(model.includes('qwen3') ? { reasoning_format: 'hidden' } : {}),
+                ...(nativeTools ? { tools: nativeTools, tool_choice: 'auto' } : {}),
                 stream: true,
               }),
             });
@@ -781,6 +799,7 @@ export class Omninet {
             const decoder = new TextDecoder();
             let buffer = '';
             let yieldedChars = 0;
+            const toolAcc = new Map<number, { name: string; args: string }>();
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
@@ -793,16 +812,43 @@ export class Omninet {
                 if (trimmed.startsWith('data: ')) {
                   try {
                     const chunk = JSON.parse(trimmed.slice(6));
-                    const delta = chunk.choices?.[0]?.delta as { content?: string } | undefined;
+                    const delta = chunk.choices?.[0]?.delta as { content?: string; tool_calls?: Array<{ index?: number; function?: { name?: string; arguments?: string } }> } | undefined;
                     const content = delta?.content || '';
-                    if (content) { yield content; yieldedChars += content.length; yieldedAny += content.length; }
+                    if (content) { reportUsed(); yield content; yieldedChars += content.length; yieldedAny += content.length; }
+                    for (const tc of delta?.tool_calls || []) {
+                      const idx = tc.index ?? 0;
+                      const cur = toolAcc.get(idx) || { name: '', args: '' };
+                      if (tc.function?.name) cur.name = tc.function.name;
+                      if (tc.function?.arguments) cur.args += tc.function.arguments;
+                      toolAcc.set(idx, cur);
+                    }
                   } catch (e) { logger.warn({ err: e }, 'Omninet SSE parse error'); }
                 }
               }
             }
+            if (toolAcc.size > 0 && options?.onToolCalls) {
+              reportUsed();
+              const calls = [...toolAcc.values()].filter(c => c.name).map(c => {
+                let args: Record<string, unknown> = {};
+                try { args = JSON.parse(c.args || '{}'); } catch { /* malformed args → empty, normalizer will flag */ }
+                return { name: c.name, args };
+              });
+              if (calls.length > 0) { options.onToolCalls(calls); return; }
+            }
             if (yieldedChars === 0) throw new Error(`${config.name}/${model} streamed no content (reasoning-only or empty response)`);
           } else if (config.type === 'gemini') {
           const gApiKey = this.resolveApiKey(config) || process.env.GOOGLE_GEMINI_API_KEY || '';
+          // Audit T1: native function-calling for Gemini (functionDeclarations).
+          const geminiTools = options?.tools && options.tools.length > 0
+            ? [{ functionDeclarations: options.tools.slice(0, 60).map(t => ({
+                name: t.name,
+                description: t.description,
+                parameters: {
+                  type: 'OBJECT',
+                  properties: Object.fromEntries(Object.entries((t.parameters?.properties || {}) as Record<string, { description?: string }>).map(([k, v]) => [k, { type: 'STRING', description: v?.description || '' }])),
+                },
+              })) }]
+            : undefined;
           const resp = await fetch(`${config.baseUrl}/models/${model}:streamGenerateContent?alt=sse&key=${gApiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -810,6 +856,7 @@ export class Omninet {
             body: JSON.stringify({
               contents: [{ parts: [{ text: capPromptKeepingQuery(prompt, 30000) }] }],
               generationConfig: { temperature: options?.temperature ?? 0.3, maxOutputTokens: options?.maxTokens ?? 2048 },
+              ...(geminiTools ? { tools: geminiTools, toolConfig: { functionCallingConfig: { mode: 'AUTO' } } } : {}),
             }),
           });
           if (!resp.ok) throw new Error(`Gemini HTTP ${resp.status}`);
@@ -819,6 +866,7 @@ export class Omninet {
           const decoder = new TextDecoder();
           let buffer = '';
           let yieldedChars = 0;
+          const geminiCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -830,19 +878,26 @@ export class Omninet {
                 try {
                   const chunk = JSON.parse(line.slice(6));
                   // Concatenate ALL text parts, skipping thinking-only parts.
-                  const parts = chunk.candidates?.[0]?.content?.parts as Array<{ text?: string; thought?: boolean }> | undefined;
+                  const parts = chunk.candidates?.[0]?.content?.parts as Array<{ text?: string; thought?: boolean; functionCall?: { name?: string; args?: Record<string, unknown> } }> | undefined;
                   for (const part of parts || []) {
-                    if (part?.text && !part.thought) { yield part.text; yieldedChars += part.text.length; yieldedAny += part.text.length; }
+                    if (part?.functionCall?.name) {
+                      geminiCalls.push({ name: part.functionCall.name, args: part.functionCall.args || {} });
+                    } else if (part?.text && !part.thought) { reportUsed(); yield part.text; yieldedChars += part.text.length; yieldedAny += part.text.length; }
                   }
                 } catch (e) { logger.warn({ err: e }, 'Omninet Gemini SSE parse error'); }
               }
             }
           }
+          if (geminiCalls.length > 0 && options?.onToolCalls) {
+            reportUsed();
+            options.onToolCalls(geminiCalls);
+            return;
+          }
           if (yieldedChars === 0) throw new Error(`Gemini ${model} streamed no content (reasoning-only response)`);
         } else {
           const result = await this.executeProviderCall(config, model, prompt, options);
           started = true;
-          if (result) yield result;
+          if (result) { reportUsed(); yield result; }
         }
         this.recordSuccess(state);
         state.totalTokens += prompt.length;

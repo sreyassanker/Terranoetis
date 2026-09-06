@@ -213,6 +213,10 @@ const DESTRUCTIVE_TOOLS = new Set([
   'clear_layers', 'delete_entity', 'reset_workspace', 'wipe_cache',
   'run_pipeline', 'execute_code', 'execute_script', 'run_simulation',
   'delete_file', 'overwrite_file', 'deploy', 'publish', 'send_alert',
+  // Audit T2/S3: the ACTUAL registered names for code execution and outbound
+  // email were missing from this list → chat could run sandbox_python / send
+  // email with riskLevel 'low' and no approval gate.
+  'sandbox_python', 'sandbox_node', 'sandbox_bash', 'assess_and_email',
 ]);
 const HIGH_RISK_TOOLS = new Set([
   'fly_to', 'toggle_layer', 'add_pin', 'add_heatmap', 'add_polygon',

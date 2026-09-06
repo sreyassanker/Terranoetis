@@ -101,3 +101,31 @@ describe('opacity phrasing is never a panel command', () => {
     expect(route('show earthquakes at 50% opacity').type).not.toBe('panel_command');
   });
 });
+
+// Audit C1/C2 — substring verbs ('run'/'average'/'forecast'/'pipeline') must
+// not turn DATA QUESTIONS into compute jobs (which get hijacked into an
+// analytical-model handoff and never answered).
+describe('data questions are never compute (audit C1/C2)', () => {
+  const dataQuestions: Array<[string, string[]?]> = [
+    ['what rivers run through Texas?'],
+    ['what is the average earthquake magnitude near japan this month', ['earthquakes']],
+    ['does anyone use pipeline engineering in flood control'],
+    ['what is the average temperature on Mars'],
+    ['what was the seismic magnitude of the last quake in chile'],
+    ['how many flights are over the atlantic right now'],
+  ];
+  for (const [q, layers] of dataQuestions) {
+    it(`"${q}" → not compute`, () => {
+      const r = route(q);
+      expect(r.type).not.toBe('compute');
+      if (layers && r.type === 'deep_analysis') expect(r.layerIds).toEqual(layers);
+    });
+  }
+  // Positive controls: genuine compute still routes to compute.
+  it('genuine compute commands still route to compute', () => {
+    expect(route('calculate statistics on this dataset').type).toBe('compute');
+    expect(route('analyze earthquake patterns').type).toBe('compute');
+    expect(route('run a script to process this csv').type).toBe('compute');
+    expect(route('simulate tsunami propagation').type).toBe('compute');
+  });
+});

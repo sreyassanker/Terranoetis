@@ -259,7 +259,7 @@ export function ArtifactView({ artifact, onRerun }: { artifact: ArtifactData; on
 
 export function ToolApprovalView({ event, onApprove, onDeny }: {
   event: ToolEvent;
-  onApprove: (result?: unknown) => void;
+  onApprove: (result?: unknown, answer?: string) => void;
   onDeny: () => void;
 }) {
   const [approving, setApproving] = useState(false);
@@ -270,7 +270,7 @@ export function ToolApprovalView({ event, onApprove, onDeny }: {
     try {
       if (!event.approvalId) throw new Error('no approval token');
       const r = await approveTool(event.approvalId);
-      onApprove(r?.result);
+      onApprove(r?.result, r?.answer);
     }
     catch { onDeny(); }
     finally { setApproving(false); }

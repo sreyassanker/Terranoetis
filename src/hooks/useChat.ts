@@ -317,7 +317,9 @@ export function useChat(
     // full message re-parse per token (O(n²) on long responses).
     // Raw ## COMMANDS / ## TOOL_CALLS blocks must never render while streaming
     // (the server strips them from the final text, but tokens arrive raw).
-    const INTERNAL_BLOCK_RE = /(?:^|\n)## (?:COMMANDS|TOOL_CALLS|THINKING)\b[\s\S]*$/;
+    // Audit C6: models often prefix the block with a ```json fence — strip the
+    // fence too, or "```json" flashes in the bubble until the final output.
+    const INTERNAL_BLOCK_RE = /(?:^|\n)?(?:```(?:json)?[ \t]*\n)?## (?:COMMANDS|TOOL_CALLS|THINKING)\b[\s\S]*$/;
     const stripInternalBlocks = (text: string) => text.replace(INTERNAL_BLOCK_RE, '');
     const flushTokens = () => {
       if (!tokenBuffer) return;
@@ -373,6 +375,9 @@ export function useChat(
           ...(opts?.polygon ? { studyAreaPolygon: opts.polygon } : {}),
           recentMessages: contextMessages,
           images: requestImages,
+          // Audit C8: tell the server this is a regeneration so it does not
+          // re-record the user turn into conversation memory.
+          ...(isRegen ? { regen: true } : {}),
         }),
         signal: abortController.signal,
       });
@@ -388,6 +393,7 @@ export function useChat(
 
       let lastTraceId: string | null = null;
       let lastModelTier: string | null = null;
+      let lastModelUsed: string | null | undefined;
       let serverError: string | null = null;
       // Set when the server asked the user to define a study area / scope. The
       // stream then ends with no finalText and no streamed bubble — we must NOT
@@ -410,6 +416,14 @@ export function useChat(
             // Non-token events mutate the streamed message (tools, steps) —
             // flush pending tokens first so ordering stays intact.
             if (data.type !== 'token') flushTokens();
+            // Audit C7: the server signals that everything streamed so far is
+            // pre-answer scaffolding (pass-1 planning / a superseded synthesis
+            // round). Clear the bubble so only the final pass remains visible —
+            // no append-then-snap when the output event lands.
+            if (data.type === 'stream_reset') {
+              tokenBuffer = '';
+              if (streamingMsgId !== null) patchStreamingMsg(() => ({ content: '' }));
+            }
             if (data.type === 'connected' && data.requestId) currentRequestIdRef.current = data.requestId;
             if (data.steps) {
               setAgentSteps(data.steps.map((s: Record<string, unknown>) => ({ type: (s.type as string) || 'step', text: (s.text as string) || (s.type as string) || '', code: s.code as string | undefined, output: s.output as string | undefined, status: (s.status as string) || 'completed', timeMs: s.timeMs as number | undefined, startedAt: Date.now() })));
@@ -526,6 +540,7 @@ export function useChat(
               finalText = data.text;
               if (data.traceId) lastTraceId = data.traceId;
               if (data.modelTier) lastModelTier = data.modelTier;
+              if (data.modelUsed !== undefined) lastModelUsed = data.modelUsed as string;
               if (data.recipe) lastRecipe = data.recipe as AiRecipe;
               if (data.replayed !== undefined) lastReplayed = data.replayed as boolean;
               if (data.patternId) lastPatternId = data.patternId as string;
@@ -605,6 +620,7 @@ patchStreamingMsg(m => ({ content: `${m.content}\n\n[ERROR] Server error: ${serv
           traceId: lastTraceId,
           commands: receivedCommands.length > 0 ? receivedCommands : undefined,
           modelTier: lastModelTier,
+          modelUsed: lastModelUsed || undefined,
           artifacts: artifacts.length > 0 ? artifacts : undefined,
           resumable: true,
           recipe: lastRecipe || undefined,
