@@ -48,7 +48,7 @@ const GlobePage: React.FC = () => {
     <div className="v2-globe-page">
       <div className="v2-header">
         <div className="v2-logo">
-          <span className="v2-logo-icon">🌍</span>
+          <span className="v2-logo-icon">[GLOBE]</span>
           <span className="v2-logo-text">Geospatial Intelligence v2</span>
         </div>
         <div className="v2-nav">
@@ -66,22 +66,22 @@ const GlobePage: React.FC = () => {
           <p>Cesium Ion Globe + Photorealistic Tiles + Volumetric Weather</p>
           <div className="v2-feature-grid">
             <div className="feature-card">
-              <span className="feature-icon">🏔️</span>
+              <span className="feature-icon">[TERRAIN]</span>
               <h3>Photorealistic 3D Tiles</h3>
               <p>Cesium Ion Google 3D Tiles with OSM Buildings fallback</p>
             </div>
             <div className="feature-card">
-              <span className="feature-icon">🌤️</span>
+              <span className="feature-icon">[WEATHER]</span>
               <h3>Volumetric Weather</h3>
               <p>Real-time cloud, smoke, and rain particle systems</p>
             </div>
             <div className="feature-card">
-              <span className="feature-icon">🎤</span>
+              <span className="feature-icon">[MIC]</span>
               <h3>Voice Navigation</h3>
               <p>WebRTC speech-to-globe with VAD and command parsing</p>
             </div>
             <div className="feature-card">
-              <span className="feature-icon">🎬</span>
+              <span className="feature-icon">[CAM]</span>
               <h3>Cinematic Tours</h3>
               <p>AI-generated camera flight paths with narration</p>
             </div>

@@ -389,7 +389,7 @@ export function simulateVolcanic(params: ScenarioParams): ScenarioTimeSeries {
     }
 
     const phase = t <= eruptionPhaseH ? 'eruption' : 'dispersal';
-    const label = `🌋 VEI ${vei} — ${veiInfo.label} — ${phase} — ${t.toFixed(1)}h`;
+    const label = `[VOLCANO] VEI ${vei} — ${veiInfo.label} — ${phase} — ${t.toFixed(1)}h`;
     steps.push({ time: t * 3600, points, shapes, intensity: intensities, label });
   }
 

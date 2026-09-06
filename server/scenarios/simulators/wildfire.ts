@@ -312,7 +312,7 @@ export function simulateWildfire(params: ScenarioParams): ScenarioTimeSeries {
     }
 
     const areaKm2 = Math.PI * maxDist * maxDist;
-    const label = `🔥 ${t.toFixed(1)}h — ${maxDist.toFixed(1)}km spread — ${areaKm2.toFixed(0)} km² — ROS: ${(rothermelROS(p.windSpeed, p.humidity, p.fuelType, 5, windDir, windDir) * 3.6).toFixed(0)} km/h`;
+    const label = `[FIRE] ${t.toFixed(1)}h — ${maxDist.toFixed(1)}km spread — ${areaKm2.toFixed(0)} km² — ROS: ${(rothermelROS(p.windSpeed, p.humidity, p.fuelType, 5, windDir, windDir) * 3.6).toFixed(0)} km/h`;
     steps.push({ time: t * 3600, points, shapes, intensity: intensities, label });
   }
 

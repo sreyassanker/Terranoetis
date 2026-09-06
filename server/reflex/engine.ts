@@ -205,7 +205,7 @@ export class ReflexEngine {
         count: this.activeReflexCount,
       });
       console.log(
-        `[REFLEX] 🚨 TRAUMA MODE ENTERED — ${this.activeReflexCount} active reflexes`,
+        `[REFLEX] !! TRAUMA MODE ENTERED — ${this.activeReflexCount} active reflexes`,
       );
     } else if (!entering && this.traumaMode) {
       this.traumaMode = false;

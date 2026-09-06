@@ -166,7 +166,7 @@ export class EvidenceChain {
     }
 
     const valid = this.verifyChain(interactionId);
-    const integrity = valid.valid ? '✅ Chain intact' : '⚠️ Chain tampered!';
+    const integrity = valid.valid ? '✓ Chain intact' : '⚠ Chain tampered!';
 
     return `**Evidence Chain (${chain.length} claims)**
 ${parts.join('\n')}

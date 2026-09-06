@@ -6,7 +6,7 @@ const CanvasPage: React.FC = () => {
     <div className="v2-canvas-page">
       <div className="v2-header">
         <div className="v2-logo">
-          <span className="v2-logo-icon">🔷</span>
+          <span className="v2-logo-icon">[CANVAS]</span>
           <span className="v2-logo-text">Spatial Canvas v2</span>
         </div>
         <div className="v2-nav">

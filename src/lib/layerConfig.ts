@@ -77,14 +77,14 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     sub: 'Aviation',
   },
   {
-    id: '2_military_flights', label: 'Military Flights', symbol: '✈',
+    id: '2_military_flights', label: 'Military Flights', symbol: '[MIL]',
     color: '#ff4444', motionType: 'trail', group: 'aviation',
     type: 'point', description: 'OpenSky military aircraft — filtered by callsign heuristics, rendered as MIL-STD-2525 symbology',
     dataSource: 'https://opensky-network.org/',
     sub: 'Aviation',
   },
   {
-    id: 'aircraft_hangar', label: '3D Aircraft Models', symbol: '✪',
+    id: 'aircraft_hangar', label: '3D Aircraft Models', symbol: '[3D]',
     color: '#60a5fa', motionType: 'glow', group: 'aviation',
     type: 'effect', description: 'Swap flight glyphs for real 3D aircraft models on close approach (self-contained glTF, no downloads)',
     dataSource: '',
@@ -743,7 +743,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
     sub: 'NASA GIBS WMS',
   },
   {
-    id: 'sea_ice', label: 'Sea Ice', symbol: '❄',
+    id: 'sea_ice', label: 'Sea Ice', symbol: '[ICE]',
     color: '#91e333', motionType: 'float', group: 'cryosphere',
     type: 'tile', description: 'MODIS sea ice concentration — NASA GIBS WMS',
     dataSource: 'https://gibs.earthdata.nasa.gov/',
@@ -844,7 +844,7 @@ export const LAYER_CATEGORIES: LayerCategory[] = [
   // machine-readable, license-clean source; infra outages is covered by the
   // wired 'internet_outages' IODA layer.)
   {
-    id: 'ucdp_conflict', label: 'Armed Conflict Events', symbol: '⚔',
+    id: 'ucdp_conflict', label: 'Armed Conflict Events', symbol: '[CONF]',
     color: '#9d0208', motionType: 'pulse', group: 'security',
     type: 'point', description: 'UCDP armed conflict events — requires UCDP_ACCESS_TOKEN',
     dataSource: 'https://ucdpapi.pcr.uu.se/api/',

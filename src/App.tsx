@@ -7177,7 +7177,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
         setAiMessages(prev => [...prev, {
           id: nextAiMsgIdRef.current++,
           role: 'assistant',
-          content: `🔔 **Monitor Alert: ${r.label}**\n\nTriggered ${r.count}x — condition met on \`${r.id}\`.\n*Check the globe for current data.*`,
+          content: `[ALERT] **Monitor Alert: ${r.label}**\n\nTriggered ${r.count}x — condition met on \`${r.id}\`.\n*Check the globe for current data.*`,
           type: 'monitor'
         }]);
       }
@@ -7188,7 +7188,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
         setAiMessages(prev => [...prev, {
           id: nextAiMsgIdRef.current++,
           role: 'assistant',
-          content: `📋 **Scheduled Report: ${t.label}**\n\n${t.result || 'No results.'}`,
+          content: `[REPORT] **Scheduled Report: ${t.label}**\n\n${t.result || 'No results.'}`,
           type: 'pipeline'
         }]);
       }
@@ -7296,7 +7296,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
       if (msg.type === 'ENTROPY_UPDATE' || msg.event === 'ENTROPY_UPDATE') {
         const data: any = msg.data || msg;
         entropyHaloRef.current?.setEntropy(data.planetaryEntropy || 0);
-        console.log(`🌍 Planetary Entropy: ${(data.planetaryEntropy * 100).toFixed(1)}% — ${entropyHaloRef.current?.getInterpretation()?.toUpperCase()}`);
+        console.log(`[EARTH] Planetary Entropy: ${(data.planetaryEntropy * 100).toFixed(1)}% — ${entropyHaloRef.current?.getInterpretation()?.toUpperCase()}`);
       }
       if (msg.type === 'DISCOVERY' || msg.event === 'DISCOVERY') {
         const data: any = msg.data || msg;
@@ -7321,7 +7321,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
           newCausalEdges: data.newCausalEdges || 0,
           timestamp: Date.now(),
         });
-        console.log(`🌙 DREAM COMPLETE: ${data.scenariosRun} scenarios, ${data.modelUpdates} model updates, ${data.newCausalEdges} new causal edges`);
+        console.log(`[DREAM] DREAM COMPLETE: ${data.scenariosRun} scenarios, ${data.modelUpdates} model updates, ${data.newCausalEdges} new causal edges`);
         setAiMessages(prev => [...prev, {
           id: nextAiMsgIdRef.current++,
           role: 'assistant',
@@ -8735,6 +8735,14 @@ case 'openPanel':
       throttledRender(v);
     }
   }
+
+  // Keep the globe in sync with the store: when the chat store drops the
+  // study-area bbox (new tab / tab switch), remove the drawn rectangle too.
+  useEffect(() => {
+    return useChatStore.subscribe((state, prev) => {
+      if (state.studyAreaBbox === null && prev.studyAreaBbox !== null) clearStudyArea();
+    });
+  }, []);
 
   const flyToStudyArea = useCallback(() => {
     const v = viewerRef.current;
@@ -10599,7 +10607,7 @@ case 'openPanel':
             {formatISTTime(timeSliderValue)}
           </span>
           <button onClick={() => setShowTimeSlider(false)}
-            style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 14 }}>✕</button>
+            style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 14 }}>[X]</button>
         </div>
       )}
 

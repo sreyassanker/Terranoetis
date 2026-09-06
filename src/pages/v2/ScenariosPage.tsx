@@ -43,7 +43,7 @@ const ScenariosPage: React.FC = () => {
     <div style={styles.page}>
       <div style={styles.header}>
         <div style={styles.logo}>
-          <span style={styles.logoIcon}>🎯</span>
+          <span style={styles.logoIcon}>[TARGET]</span>
           <span style={styles.logoText}>Scenarios v2</span>
         </div>
         <div style={styles.nav}>

@@ -32,7 +32,7 @@ def main() -> int:
     failed = False
 
     # ── 1. Mass conservation (closed box, machine precision) ──
-    print(f"\n📐 1) Closed-box mass conservation (tolerance {CONSERV_TOL})")
+    print(f"\n[1] Closed-box mass conservation (tolerance {CONSERV_TOL})")
     ches = []
     for ent, erod in [(0.0, 0.0), (0.01, 5.0)]:
         passed, fin, exp, err = m.verify_closed_box(gs=64, steps=400,
@@ -42,7 +42,7 @@ def main() -> int:
         failed |= not passed
 
     # ── 2. Grid convergence study ψ(h/2) − ψ(h) → 0 ──
-    print(f"\n🔬 2) Grid-convergence study at {GRID_SIZES}")
+    print(f"\n[2] Grid-convergence study at {GRID_SIZES}")
     # FIX the domain so gs↑ refines dx on the SAME area.
     base = {'trigger_type': 'earthquake', 'magnitude': 6.5, 'pga_threshold': 0.15,
             'rainfall_mm': 200, 'duration_hours': 0.5, 'friction_angle': 35,
@@ -87,7 +87,7 @@ def main() -> int:
         failed = True
 
     # ── 3. Terrain upsampling fidelity (64→256 bilinear) ──
-    print(f"\n🗺️ 3) Terrain upsampling fidelity (64×64 → 256×256 bilinear)")
+    print(f"\n[3] Terrain upsampling fidelity (64×64 → 256×256 bilinear)")
     dx = 20.0
     full = m.generate_terrain(256, dx)
     coarse = full[::4, ::4]                       # 64×64 honest downsample
@@ -97,7 +97,7 @@ def main() -> int:
     print(f"  terrain RMSE = {rmse:.3f} m  (rel {rmse/peak:.1%} of {peak:.0f} m relief)")
     failed |= rmse > max(0.1 * peak, 30.0)
 
-    print(f"\n{'✅ PASS — all gates OK' if not failed else '❌ FAIL — see gate(s) above'}")
+    print(f"\n{'PASS — all gates OK' if not failed else 'FAIL — see gate(s) above'}")
     return 0 if not failed else 1
 
 

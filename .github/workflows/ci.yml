@@ -22,7 +22,7 @@ jobs:
   # TypeScript Type Checking
   # ═══════════════════════════════════════════════════════════════════════
   typecheck:
-    name: 🔍 TypeScript Check
+    name: TypeScript Check
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -41,7 +41,7 @@ jobs:
   # ESLint Linting
   # ═══════════════════════════════════════════════════════════════════════
   lint:
-    name: 🎨 Lint
+    name: Lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -57,7 +57,7 @@ jobs:
   # Unit Tests
   # ═══════════════════════════════════════════════════════════════════════
   test-unit:
-    name: 🧪 Unit Tests
+    name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -79,7 +79,7 @@ jobs:
   # Integration Tests
   # ═══════════════════════════════════════════════════════════════════════
   test-integration:
-    name: 🔗 Integration Tests
+    name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -95,7 +95,7 @@ jobs:
   # Build Verification
   # ═══════════════════════════════════════════════════════════════════════
   build:
-    name: 🏗️ Build
+    name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [typecheck, lint]
@@ -117,7 +117,7 @@ jobs:
   # Browser Tests (Playwright)
   # ═══════════════════════════════════════════════════════════════════════
   browser-tests:
-    name: 🌐 Browser Tests
+    name: Browser Tests
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: [build]
@@ -156,7 +156,7 @@ jobs:
   # Docker Build Verification
   # ═══════════════════════════════════════════════════════════════════════
   docker-build:
-    name: 🐳 Docker Build
+    name: Docker Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [build]
@@ -175,7 +175,7 @@ jobs:
   # Coverage Report
   # ═══════════════════════════════════════════════════════════════════════
   coverage:
-    name: 📊 Coverage Report
+    name: Coverage Report
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [test-unit]
@@ -197,7 +197,7 @@ jobs:
   # Security Audit
   # ═══════════════════════════════════════════════════════════════════════
   security:
-    name: 🔒 Security Audit
+    name: Security Audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -214,7 +214,7 @@ jobs:
   # Summary
   # ═══════════════════════════════════════════════════════════════════════
   summary:
-    name: ✅ CI Summary
+    name: CI Summary
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [typecheck, lint, test-unit, test-integration, build, browser-tests, docker-build, coverage, security]
@@ -234,7 +234,7 @@ jobs:
           echo "- Security: ${{ needs.security.result }}"
           if [[ "${{ needs.typecheck.result }}" == "failure" ]] || \
              [[ "${{ needs.test-unit.result }}" == "failure" ]]; then
-            echo "❌ Critical jobs failed!"
+            echo "FAIL: Critical jobs failed!"
             exit 1
           fi
-          echo "✅ All critical checks passed!"
+          echo "PASS: All critical checks passed!"

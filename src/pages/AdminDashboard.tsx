@@ -436,7 +436,7 @@ const formatEta = (seconds: number): string => {
                     </button>
                     <button onClick={useMyLocation} title="Use my current location"
                       style={{ padding: '6px 12px', borderRadius: 4, border: '1px solid rgba(52,211,153,0.4)', background: 'rgba(52,211,153,0.1)', color: '#34d399', cursor: 'pointer', fontSize: 12 }}>
-                      📍 My Location
+                      [LOC] My Location
                     </button>
                   </div>
                 </div>
@@ -494,7 +494,7 @@ const formatEta = (seconds: number): string => {
               }}>
                 {ggufStatus?.installed ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 11, color: '#22c55e' }}>✅ Installed</span>
+                    <span style={{ fontSize: 11, color: '#22c55e' }}>✓ Installed</span>
                     <span style={{ fontSize: 10, color: '#64748b' }}>{(ggufStatus.size / 1e9).toFixed(1)} GB</span>
                     <button
                       onClick={startGgufDownload}
@@ -546,7 +546,7 @@ const formatEta = (seconds: number): string => {
                       </div>
                     ) : ggufStatus?.download?.error ? (
                       <div>
-                        <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 6 }}>❌ Download failed: {ggufStatus.download.error}</div>
+                        <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 6 }}>✗ Download failed: {ggufStatus.download.error}</div>
                         <button
                           onClick={startGgufDownload}
                           disabled={ggufDownloading}
