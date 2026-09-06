@@ -7721,7 +7721,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
                 name: label || 'Agent Pin',
                 billboard: { image: createPinIcon(color, 24), width: 24, height: 24, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
                 label: label ? { text: label, font: '12px "Inter", sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3, backgroundColor: Cesium.Color.fromCssColorString('#0b1220').withAlpha(0.65), showBackground: true, backgroundPadding: new Cesium.Cartesian2(6, 4), style: Cesium.LabelStyle.FILL_AND_OUTLINE, horizontalOrigin: Cesium.HorizontalOrigin.CENTER, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, pixelOffset: new Cesium.Cartesian2(0, -6) } : undefined,
-                properties: { lat, lon, agent: true },
+                properties: { lat, lon, agent: true, ...(cmd.layer ? { layer: cmd.layer } : {}) },
               });
               action.entities = [entity];
               action.description = label || `Pin at ${lat.toFixed(2)}, ${lon.toFixed(2)}`;
@@ -7775,7 +7775,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
                       : { classificationType: Cesium.ClassificationType.TERRAIN }),
                   },
                   name: label,
-                  properties: { label, agent: true },
+                  properties: { label, agent: true, ...(cmd.layer ? { layer: cmd.layer } : {}) },
                 }));
               }
 
@@ -7792,7 +7792,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
                   clampToGround: true,
                 },
                 name: label,
-                properties: { label, agent: true },
+                properties: { label, agent: true, ...(cmd.layer ? { layer: cmd.layer } : {}) },
               }));
 
               action.entities = entities;
