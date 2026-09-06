@@ -83,3 +83,15 @@ npm run build         # tsc + vite build
 ## Architecture
 
 See `README.md` for the full architecture diagram and request flow.
+
+## License & Contributions
+
+Terranoetis is licensed under the **Business Source License 1.1 (BUSL-1.1)** (see `LICENSE`). Each version converts to the MIT License four years after publication.
+
+By submitting a contribution (pull request, patch, or code), you agree that:
+
+1. Your contribution is licensed to the project under the same BUSL-1.1 terms.
+2. The maintainer may relicense and use your contribution for any purpose, **including commercial licensing** of the project (e.g. offering it under a paid commercial license). This is required so the project can stay sustainable.
+3. You confirm you have the right to grant these permissions and that your contribution is original or properly attributed.
+
+Third-party components you reference (models, data sources, libraries) must keep their own licenses — do not relicense someone else's work as ours.

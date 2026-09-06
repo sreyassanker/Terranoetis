@@ -4,7 +4,7 @@
   "description": "Real-time geospatial intelligence platform — 150 peer-reviewed equation engines, AI cognition, and live 3D Earth visualization on Cesium.",
   "private": true,
   "type": "module",
-  "license": "MIT",
+  "license": "BUSL-1.1",
   "author": "sreyassanker <sreyassanker001@gmail.com>",
   "repository": {
     "type": "git",
