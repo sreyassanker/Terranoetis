@@ -290,9 +290,15 @@ export class SandboxManager {
       await writeFile(scriptPath, request.code, 'utf-8');
 
       switch (request.language) {
-        case 'python': command = 'python3'; args = ['-u', scriptPath]; break;
+        case 'python': command = process.platform === 'win32' ? 'python' : 'python3'; args = ['-u', scriptPath]; break;
         case 'node': command = 'node'; args = ['--experimental-json-modules', scriptPath]; break;
-        case 'bash': command = '/bin/bash'; args = [scriptPath]; break;
+        case 'bash':
+          if (process.platform === 'win32') {
+            // Executing a .sh under cmd.exe would fail with a cryptic error —
+            // say plainly what is unavailable instead (audit: cross-platform).
+            throw new Error('bash execution is not available on Windows local sandbox — use python/node, or set E2B_API_KEY for the cloud sandbox');
+          }
+          command = '/bin/bash'; args = [scriptPath]; break;
         case 'r': command = 'Rscript'; args = [scriptPath]; break;
         default: throw new Error(`Unsupported language: ${request.language}`);
       }
