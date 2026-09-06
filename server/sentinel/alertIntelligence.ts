@@ -138,7 +138,7 @@ export class AlertIntelligence {
 
   private formatTitle(anomaly: Anomaly): string {
     const sev = anomaly.event?.severity || 'info';
-    const prefix = sev === 'critical' ? '🚨' : sev === 'warning' ? '⚠️' : 'ℹ️';
+    const prefix = sev === 'critical' ? '!!' : sev === 'warning' ? '⚠' : 'ℹ';
     const type = anomaly.type.replace(/_/g, ' ');
     return `${prefix} ${type.charAt(0).toUpperCase() + type.slice(1)} ${anomaly.event?.derivedFeatures?.magnitude ? `M${anomaly.event.derivedFeatures.magnitude}` : ''}`.trim();
   }

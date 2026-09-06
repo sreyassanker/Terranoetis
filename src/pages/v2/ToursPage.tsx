@@ -6,7 +6,7 @@ const ToursPage: React.FC = () => {
     <div className="v2-tours-page">
       <div className="v2-header">
         <div className="v2-logo">
-          <span className="v2-logo-icon">🎬</span>
+          <span className="v2-logo-icon">[CAM]</span>
           <span className="v2-logo-text">Cinematic Tours v2</span>
         </div>
         <div className="v2-nav">

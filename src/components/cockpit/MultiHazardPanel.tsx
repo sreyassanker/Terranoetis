@@ -989,7 +989,7 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
                       {phys && (
                         <div style={{ marginTop: 3, padding: '3px 6px', borderRadius: 4, fontSize: 8,
                           background: `${phys.color}11`, border: `1px solid ${phys.color}33` }}>
-                          <span style={{ color: phys.color, fontWeight: 600 }}>🔬 {phys.model}</span>
+                          <span style={{ color: phys.color, fontWeight: 600 }}>[PHYS] {phys.model}</span>
                           {phys.metrics.map((m, mi) => (
                             <span key={mi} style={{ marginLeft: 6, color: 'var(--text-dim)' }}>
                               {m.label}=<strong style={{ color: 'var(--text)' }}>{m.value}</strong>
@@ -1006,7 +1006,7 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
                     background: 'linear-gradient(135deg, rgba(59,130,246,0.08), rgba(139,92,246,0.08))',
                     border: '1px solid rgba(59,130,246,0.2)' }}>
                     <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', marginBottom: 4 }}>
-                      📊 Fused Risk Assessment
+                      [RISK] Fused Risk Assessment
                     </div>
                     <div style={{ fontSize: 8, color: 'var(--text-dim)', marginBottom: 4 }}>
                       {(() => {

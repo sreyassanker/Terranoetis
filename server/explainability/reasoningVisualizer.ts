@@ -143,8 +143,8 @@ export class ReasoningVisualizer {
 
   private stepIcon(type: string): string {
     const icons: Record<string, string> = {
-      thought: '💭', tool_call: '🔧', tool_result: '📊',
-      observation: '👁️', inference: '🧠', conclusion: '✅',
+      thought: '[THINK]', tool_call: '[TOOL]', tool_result: '[DATA]',
+      observation: '[OBSERVE]', inference: '[AI]', conclusion: '✓',
     };
     return icons[type] || '•';
   }

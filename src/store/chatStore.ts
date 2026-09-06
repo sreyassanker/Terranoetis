@@ -39,6 +39,9 @@ interface ModelTier {
 export interface ChatTab {
   id: string;
   title: string;
+  /** True while the title is system-generated ("Chat N") and may be
+   *  auto-replaced by the first message snippet. Manual renames set false. */
+  titleAuto?: boolean;
   sessionId: string;
   messages: ChatMessage[];
   input: string;
@@ -101,6 +104,36 @@ function freshTabState(): {
 
 const TABS_STORAGE_KEY = 'chat-tabs-registry';
 
+// Titles that the system owns and may auto-replace with a message snippet.
+// The regex also covers legacy persisted tabs (pre-titleAuto field).
+const AUTO_TITLE_RE = /^(New Chat|Chat \d+)$/;
+
+function isAutoTitled(tab: Pick<ChatTab, 'title' | 'titleAuto'>): boolean {
+  return tab.titleAuto === true || (tab.titleAuto === undefined && AUTO_TITLE_RE.test(tab.title));
+}
+
+function nextChatNumber(tabs: ChatTab[]): number {
+  let max = 0;
+  for (const t of tabs) {
+    const m = /^Chat (\d+)$/.exec(t.title);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return Math.max(max, tabs.length) + 1;
+}
+
+const TAB_TITLE_MAX = 18;
+
+/** Short chip-friendly title derived from the first user message. */
+export function tabTitleFromText(text: string): string | null {
+  const clean = text
+    .replace(/^📷\s*\[Image:[^\]]*\]\s*/i, '')
+    .replace(/^📊\s*\[Data[^\]]*\]\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return null;
+  return clean.length > TAB_TITLE_MAX ? clean.slice(0, TAB_TITLE_MAX).trimEnd() + '…' : clean;
+}
+
 function loadTabRegistry(): { tabs: ChatTab[]; activeTabId: string | null } {
   if (typeof window === 'undefined') return { tabs: [], activeTabId: null };
   try {
@@ -162,6 +195,8 @@ interface ChatState {
   closeChatTab: (id: string) => void;
   activateChatTab: (id: string, onBeforeSwitch?: () => void) => void;
   renameChatTab: (id: string, title: string) => void;
+  /** Replace a still-auto tab title with a snippet of the first user message. */
+  autoTitleTabFromText: (tabId: string, text: string) => void;
 
   /** Applies a mutation to a specific tab. When that tab is active, the
    *  changed fields are mirrored to the singleton so the UI updates live.
@@ -387,7 +422,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     const newTab: ChatTab = {
       id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      title: title || 'New Chat',
+      title: title || `Chat ${nextChatNumber(get().chatTabs)}`,
+      titleAuto: !title,
       sessionId: `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       ...freshTabState(),
       width: s.chatPanelWidth,
@@ -408,6 +444,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       currentChatId: newTab.currentChatId,
       sandboxWorkspaceId: newTab.sandboxWorkspaceId,
       aiTyping: false,
+      // A new chat is a fresh spatial context — a study area drawn in another
+      // tab must not leak into (and silently scope) this one's queries.
+      studyAreaBbox: null,
+      pendingStudyAreaQuery: null,
       streamingMdRef: { current: new StreamingMarkdownRenderer() },
       showChatHistory: false,
     });
@@ -444,13 +484,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
           chatPanelHeight: nextTab.height,
           chatCollapsed: nextTab.collapsed,
           aiTyping: get().tabTyping[nextId] ?? false,
+          studyAreaBbox: null,
+          pendingStudyAreaQuery: null,
           streamingMdRef: { current: new StreamingMarkdownRenderer() },
         });
       } else {
         // No tabs left — create a fresh one
         const freshTab: ChatTab = {
           id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          title: 'New Chat',
+          title: `Chat ${nextChatNumber(newTabs)}`,
+          titleAuto: true,
           sessionId: `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           ...freshTabState(),
           width: s.chatPanelWidth,
@@ -470,6 +513,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           currentChatId: freshTab.currentChatId,
           sandboxWorkspaceId: freshTab.sandboxWorkspaceId,
           aiTyping: false,
+          studyAreaBbox: null,
+          pendingStudyAreaQuery: null,
           streamingMdRef: { current: new StreamingMarkdownRenderer() },
         });
       }
@@ -512,6 +557,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       chatPanelHeight: targetTab.height,
       chatCollapsed: targetTab.collapsed,
       aiTyping: get().tabTyping[id] ?? false,
+      studyAreaBbox: null,
+      pendingStudyAreaQuery: null,
       streamingMdRef: { current: new StreamingMarkdownRenderer() },
     });
     persistTabRegistry(get().chatTabs, id);
@@ -573,9 +620,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   renameChatTab: (id: string, title: string) => {
     const s = get();
-    const newTabs = s.chatTabs.map(t => t.id === id ? { ...t, title } : t);
+    const newTabs = s.chatTabs.map(t => t.id === id ? { ...t, title, titleAuto: false } : t);
     set({ chatTabs: newTabs });
     persistTabRegistry(newTabs, s.activeTabId);
+  },
+
+  autoTitleTabFromText: (tabId: string, text: string) => {
+    const s = get();
+    const tab = s.chatTabs.find(t => t.id === tabId);
+    if (!tab || !isAutoTitled(tab)) return;
+    const title = tabTitleFromText(text);
+    if (!title) return;
+    const newTabs = s.chatTabs.map(t => t.id === tabId ? { ...t, title, titleAuto: false } : t);
+    set({ chatTabs: newTabs });
+    scheduleTabPersist(newTabs, s.activeTabId);
   },
 
   // Messages

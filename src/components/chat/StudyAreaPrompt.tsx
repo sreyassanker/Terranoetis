@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
-import { Cpu, MapPin, SkipForward } from 'lucide-react';
+import { Globe, MapPin, SkipForward, SquareDashed } from 'lucide-react';
 import { useChatStore } from '@/store/chatStore';
 
 interface StudyAreaRequest {
   query: string;
   location?: { lat: number; lon: number; label?: string };
   detectedBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number };
-  options: Array<{ id: 'draw' | 'detected' | 'skip'; label: string; description: string }>;
+  options: Array<{ id: 'draw' | 'detected' | 'skip' | 'global'; label: string; description: string }>;
 }
 
 export function StudyAreaPrompt({
@@ -14,7 +14,7 @@ export function StudyAreaPrompt({
   sendAI,
 }: {
   request: StudyAreaRequest;
-  sendAI: (msg?: string, opts?: { force?: boolean; regen?: boolean; studyAreaAction?: 'draw' | 'detected' | 'skip'; bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } }) => void;
+  sendAI: (msg?: string, opts?: { force?: boolean; regen?: boolean; studyAreaAction?: 'draw' | 'detected' | 'skip' | 'global'; bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } }) => void;
 }) {
   const setPendingStudyAreaQuery = useChatStore(s => s.setPendingStudyAreaQuery);
 
@@ -46,16 +46,41 @@ export function StudyAreaPrompt({
     sendAI(request.query, { force: true, studyAreaAction: 'skip' });
   };
 
+  const handleGlobal = () => {
+    setPendingStudyAreaQuery(null);
+    sendAI(request.query, { force: true, studyAreaAction: 'global' });
+  };
+
   const optDraw = request.options.find(o => o.id === 'draw');
   const optDetected = request.options.find(o => o.id === 'detected');
   const optSkip = request.options.find(o => o.id === 'skip');
+  const optGlobal = request.options.find(o => o.id === 'global');
 
   return (
     <div className="study-area-prompt" style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 2 }}>
-        {request.detectedBbox ? 'I detected a study area boundary. Adjust it or use it:' : 'Choose how to define the study area:'}
+        {request.detectedBbox
+          ? 'I detected a study area boundary. Adjust it or use it:'
+          : optGlobal
+            ? 'Search the whole globe, or mark a specific area:'
+            : 'Choose how to define the study area:'}
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {optGlobal && (
+          <button
+            onClick={handleGlobal}
+            title={optGlobal.description}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px',
+              background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.35)',
+              color: '#60a5fa', borderRadius: 6, cursor: 'pointer', fontSize: 11,
+              fontFamily: 'inherit', fontWeight: 600,
+            }}
+          >
+            <Globe size={13} />
+            {optGlobal.label}
+          </button>
+        )}
         {optDraw && (
           <button
             onClick={handleDraw}
@@ -67,7 +92,7 @@ export function StudyAreaPrompt({
               fontFamily: 'inherit', fontWeight: 600,
             }}
           >
-            <Cpu size={13} />
+            <SquareDashed size={13} />
             {optDraw.label}
           </button>
         )}

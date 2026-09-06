@@ -318,7 +318,7 @@ export class CognitiveOrchestrator {
       if (s2Result.timeout) {
         // S2 took too long — return S1 response with indicator
         const result: CognitionResult = {
-          finalOutput: `${initialOutput}\n\n---\n🤔 Thinking deeper... Analyzing relationships, running simulations, and cross-referencing data. Full results will appear shortly.`,
+          finalOutput: `${initialOutput}\n\n---\nAnalyzing relationships, running simulations, and cross-referencing data. Full results will appear shortly.`,
           mode: 'system1_with_verification',
           system1Result: s1Result,
           system2Result: s2Result.result,

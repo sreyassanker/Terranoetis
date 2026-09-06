@@ -96,7 +96,7 @@ async function main() {
 
     // Print progress
     for (const r of batchResults) {
-      const icon = r.status === 'PASS' ? '✅' : r.status === 'SKIP' ? '⏭️' : '❌';
+      const icon = r.status === 'PASS' ? '✓' : r.status === 'SKIP' ? '⏭' : '✗';
       const detail = r.status === 'FAIL' ? ` — ${r.error}` : r.status === 'SKIP' ? ` — ${r.error}` : '';
       console.log(`  ${icon} Tool ${String(r.id).padStart(3)}${detail} (${r.timeMs}ms)`);
     }
@@ -117,11 +117,11 @@ async function main() {
   console.log(`\n${'='.repeat(70)}`);
   console.log(`  FINAL RESULTS`);
   console.log(`${'='.repeat(70)}`);
-  console.log(`  ✅ PASS: ${totalPass}/${ALL_IDS.length}`);
-  console.log(`  ❌ FAIL: ${totalFail}/${ALL_IDS.length}`);
-  console.log(`  ⏭️  SKIP: ${totalSkip}/${ALL_IDS.length}`);
-  console.log(`  ⏱️  Total time: ${(totalTime / 1000).toFixed(1)}s`);
-  console.log(`  ⏱️  Average: ${(totalTime / ALL_IDS.length).toFixed(0)}ms/tool`);
+  console.log(`  ✓ PASS: ${totalPass}/${ALL_IDS.length}`);
+  console.log(`  ✗ FAIL: ${totalFail}/${ALL_IDS.length}`);
+  console.log(`  ⏭ SKIP: ${totalSkip}/${ALL_IDS.length}`);
+  console.log(`  Total time: ${(totalTime / 1000).toFixed(1)}s`);
+  console.log(`  Average: ${(totalTime / ALL_IDS.length).toFixed(0)}ms/tool`);
 
   if (totalFail > 0) {
     console.log(`\n  FAILED TOOLS:`);

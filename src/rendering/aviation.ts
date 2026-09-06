@@ -410,7 +410,7 @@ function createUcdpIcon(): HTMLCanvasElement {
   ctx.font = 'bold 10px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('⚔', 0, 1);
+  ctx.fillText('[WAR]', 0, 1);
   cachedUcdpIcon = canvas;
   return canvas;
 }

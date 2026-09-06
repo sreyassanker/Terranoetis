@@ -9554,22 +9554,31 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // fetches or globe flights — declared early, used by Steps 1.15/2.x.
     const isReasoningQuery = /\b(why|explain|tell me|what is the difference|what is the relationship|correlation between|predict|forecast|spread|where.*will|how.*will)\b/i.test(message) && !/\b(compute|calculate|run|execute|model|equation|formula|evaluate|analyze|analysis|trend|pattern|statistics?|average|mean|compare)\b/i.test(message);
 
-    // ── Step 1.15: Resolve the OSM area for ANY place-anchored request ──
+    // ── Step 1.15: Resolve the OSM area for place-named requests ──
     // Runs BEFORE the fast paths so every explicitly-named place gets a
     // boundary drawn (real admin polygon, else the bbox rectangle) and the
     // globe flies there. Sets resolvedAreaBbox used to scope tool calls below.
+    // Global queries with no named place ("storm tracking") must NOT enter
+    // this path — see the gating below.
     let resolvedAreaBbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null = null;
     let resolvedAreaLabel = '';
     let resolvedAreaPolygon: Array<Array<[number, number]>> | null = null;
     {
-      const isPlaceAnchored = intent.location != null ||
-        ['deep_analysis', 'weather_check', 'quick_scan', 'compute', 'fly_to', 'toggle_layer'].includes(intent.type);
-      const wantsArea = isPlaceAnchored && !isReasoningQuery;
+      // Only resolve an area when the query actually NAMES a place. Intent
+      // type alone is not a place signal: "storm tracking" / "show wildfires"
+      // are global queries, and geocoding their raw text lets Nominatim
+      // fuzzy-match garbage (a tiny POI) that then hijacks the globe
+      // (flyTo + polygon) and the spatial-tool bbox filter.
+      const hasNamedPlace = intent.location != null;
+      // fly_to always names a destination; the city DB may miss it, so the
+      // geocode fallback below is legitimate there.
+      const isNavigation = intent.type === 'fly_to';
+      const wantsArea = (hasNamedPlace || isNavigation) && !isReasoningQuery;
       if (wantsArea) {
         try {
           const geoKey = effectiveGeminiKey || '';
           let place = intent.location;
-          if (!place) {
+          if (!place && isNavigation) {
             const geo = await IntentRouter.geocode(message, geoKey);
             if (geo?.lat != null && geo?.lon != null) place = { lat: geo.lat, lon: geo.lon, label: geo.label };
           }
@@ -9801,6 +9810,15 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
             continue;
           }
           const args = substituteArgs(step.args, slotValues);
+          // A saved bbox is a snapshot of a PAST study area — it must never
+          // silently scope a new query that has no area of its own. Drop it
+          // when the current request carries neither a study area nor a
+          // named place (the query then runs globally, like the live path).
+          if (!studyAreaBbox && !intent.location) {
+            for (const k of ['latMin', 'latMax', 'lonMin', 'lonMax', 'minLat', 'maxLat', 'minLon', 'maxLon', 'bbox']) {
+              delete (args as Record<string, unknown>)[k];
+            }
+          }
           sendEvent('tool_call', { name: step.tool, args, description: known.description, riskLevel: 'low', replayed: true });
           try {
             const result = await dynamicTools.execute(step.tool, args, abortController.signal);
@@ -9918,12 +9936,39 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // ── Study area request ───────────────────────────────────────
     // When a spatial computation needs a study area but the user hasn't drawn
     // one yet, ask before running the model. The client shows three choices:
-    //   ✏️ Mark Study Zone  → user draws on globe, bbox syncs, chat re-sends
-    //   📍 Use Detected Area → proceed with the AI-detected location bbox
-    //   ⏭️ Skip             → proceed without a study area
+    //   [EDIT] Mark Study Zone  → user draws on globe, bbox syncs, chat re-sends
+    //   [LOC] Use Detected Area → proceed with the AI-detected location bbox
+    //   [SKIP] Skip             → proceed without a study area
     // The user's choice comes back as studyAreaAction on the re-send, so this
     // block is skipped then (and when a studyAreaBbox is already provided).
     const studyAreaAction = (req.body as any).studyAreaAction as string | undefined;
+    // ── Scope request (global vs area) ─────────────────────────────
+    // A spatial DATA query with no named place and no drawn study area is
+    // ambiguous: answering it with a silently-guessed area produced garbage
+    // (a fuzzy-matched 1.5 km POI hijacking "storm tracking"). Ask the user
+    // instead: [GLOBAL] Global (no bbox filter) or [EDIT] Mark Area (draw on globe).
+    // The answer comes back as studyAreaAction on the re-send.
+    const SPATIAL_DATA_INTENTS = new Set(['weather_check', 'quick_scan', 'deep_analysis']);
+    const SPATIAL_DATA_KEYWORDS = /\b(storms?|hurricane|cyclone|typhoon|wildfires?|earthquakes?|floods?|volcanoes?|ships?|vessels?|flights?|aircraft|aurora|tsunami)\b/i;
+    const needsScopeChoice = !studyAreaBbox && !studyAreaAction && intent.location == null
+      && !isReasoningQuery
+      && (SPATIAL_DATA_INTENTS.has(intent.type) || SPATIAL_DATA_KEYWORDS.test(message));
+    if (needsScopeChoice) {
+      sendEvent('study_area_request', {
+        requestId,
+        query: message,
+        title: 'Scope needed',
+        message: 'No location was named — should I search the whole globe, or a specific area you mark?',
+        options: [
+          { id: 'global', label: 'Global', description: 'Search worldwide — no area filter' },
+          { id: 'draw', label: 'Mark Area', description: 'Draw an area on the globe, then search inside it' },
+        ],
+      });
+      sendEvent('done', { type: 'done' });
+      cleanup();
+      res.end();
+      return;
+    }
     // Study-area prompts are ONLY for spatial analytical-model runs (needs a real
     // grid extent). Generic data questions ("weather in X", "what's near Y") must
     // never be swallowed into a study-area prompt — they flow to the tool/LLM path.
@@ -9996,14 +10041,14 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
             detectedBbox: autoBoundary,
             options: autoBoundary
               ? [
-                  { id: 'draw', label: '✏️ Adjust Boundary', description: 'Drag/resize the detected boundary on the globe' },
-                  { id: 'detected', label: '📍 Use This Area', description: `Use the detected area around ${probeLocation.label || 'this location'}` },
-                  { id: 'skip', label: '⏭️ Skip', description: 'Proceed without a study area' },
+                  { id: 'draw', label: 'Adjust Boundary', description: 'Drag/resize the detected boundary on the globe' },
+                  { id: 'detected', label: 'Use This Area', description: `Use the detected area around ${probeLocation.label || 'this location'}` },
+                  { id: 'skip', label: 'Skip', description: 'Proceed without a study area' },
                 ]
               : [
-                  { id: 'draw', label: '✏️ Mark Study Zone', description: 'Draw a precise boundary on the globe' },
-                  { id: 'detected', label: '📍 Use Detected Area', description: `Use the detected area around ${probeLocation.label || 'this location'}` },
-                  { id: 'skip', label: '⏭️ Skip', description: 'Proceed without a study area' },
+                  { id: 'draw', label: 'Mark Study Zone', description: 'Draw a precise boundary on the globe' },
+                  { id: 'detected', label: 'Use Detected Area', description: `Use the detected area around ${probeLocation.label || 'this location'}` },
+                  { id: 'skip', label: 'Skip', description: 'Proceed without a study area' },
                 ],
           });
           sendEvent('done', { type: 'done' });
@@ -10138,7 +10183,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         if (commands.length > 0) sendEvent('commands', commands);
         sendEvent('step', { stepType: 'assessment', text: result.ok ? 'Assessment complete — email sent!' : 'Assessment data fetched', status: 'completed' });
         if (result.ok) {
-          sendEvent('output', { text: `## Disaster Assessment: ${regionName}\n\n**Email sent** ✅\n\n${result.summary}\n\n*Full HTML report emailed.*`, modelTier: 'flash', intentType: 'deep_analysis', commands });
+          sendEvent('output', { text: `## Disaster Assessment: ${regionName}\n\n**Email sent** ✓\n\n${result.summary}\n\n*Full HTML report emailed.*`, modelTier: 'flash', intentType: 'deep_analysis', commands });
         } else {
           sendEvent('output', { text: `## Disaster Assessment: ${regionName}\n\n${result.summary || ''}\n\n**Email delivery failed**: ${result.error || 'unknown error'}. Report data shown above.`, modelTier: 'flash', intentType: 'deep_analysis' });
         }
@@ -10478,7 +10523,7 @@ const model = 'gemini-3.5-flash-lite';
         while (true) {
         sendEvent('step', { stepType: 'synthesis', text: round === 1 ? 'Synthesizing answer from tool results...' : `Round ${round}: following up with more tool calls...`, status: 'running' });
         const resultsBlock = toolResults.join('\n\n');
-        const synthesisPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}${resolvedAreaStr ? `${resolvedAreaStr}\n\n` : ''}[User query]\n${fullMessage}\n\n## TOOL_RESULTS\n${resultsBlock}\n\nUsing the tool results above, write your final answer now. Your answer MUST START with 2-5 sentences of prose citing the real numbers from TOOL_RESULTS (counts, magnitudes, places — or state explicitly when a result is empty, e.g. 'features: 0' means no events in the queried area/period). Cite the SOURCE for every data claim inline, in parentheses, e.g. "(USGS)", "(World Bank)", "(NOAA GML)" — use the source field from the tool result when present. If a tool returned an error or a KEY_REQUIRED message, tell the user that specific dataset is unavailable and why — do not substitute other data. Only AFTER the prose may you emit a ## COMMANDS block, and its items must use the exact documented format (e.g. {"action":"flyTo","lat":…,"lon":…} — never tool names like fly_command).${round < MAX_TOOL_ROUNDS ? '\n\nIf the results above do NOT answer the question (wrong region, missing slice, need a filtered re-query), you may emit another ## TOOL_CALLS block instead of answering — the system will execute it and return updated results.' : ''}`;
+        const synthesisPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}${convContextStr ? `[Conversation history]\n${convContextStr}\n\n` : ''}${resolvedAreaStr ? `${resolvedAreaStr}\n\n` : ''}[User query]\n${fullMessage}\n\n## TOOL_RESULTS\n${resultsBlock}\n\nUsing the tool results above, write your final answer now. Your answer MUST START with 2-5 sentences of prose citing the real numbers from TOOL_RESULTS (counts, magnitudes, places — or state explicitly when a result is empty, e.g. 'features: 0' means no events in the queried area/period). Cite the SOURCE for every data claim inline, in parentheses, e.g. "(USGS)", "(World Bank)", "(NOAA GML)" — use the source field from the tool result when present. If a tool returned an error or a KEY_REQUIRED message, tell the user that specific dataset is unavailable and why — do not substitute other data. Only AFTER the prose may you emit a ## COMMANDS block, and its items must use the exact documented format (e.g. {"action":"flyTo","lat":…,"lon":…} — never tool names like fly_command).${round < MAX_TOOL_ROUNDS ? '\n\nIf the results above do NOT answer the question (wrong region, missing slice, need a filtered re-query), you may emit another ## TOOL_CALLS block instead of answering — the system will execute it and return updated results.' : ''}`;
         outputText = ToolCallParser.strip(await streamPass(synthesisPrompt));
 
         // Does the synthesis pass want more data?

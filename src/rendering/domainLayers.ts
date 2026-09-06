@@ -326,7 +326,7 @@ export function addNasaDsnEntities(viewer: Cesium.Viewer, dsnData: any): Cesium.
         });
 
         const beamEnt = viewer.entities.add({
-          name: `${dish.name} 📡 ${targets.map((t: any) => t.name).join(', ')}`,
+          name: `${dish.name} [SAT] ${targets.map((t: any) => t.name).join(', ')}`,
           polyline: {
             positions: [stationCartesian, targetPos],
             width: 3.5,

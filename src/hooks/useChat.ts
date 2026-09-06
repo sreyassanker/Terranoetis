@@ -64,7 +64,7 @@ export function useChat(
   const nextAiMsgIdRef = useRef(100);
   const store = useChatStore;
 
-  const sendAI = useCallback(async (overrideMessage?: string, opts?: { force?: boolean; regen?: boolean; studyAreaAction?: 'draw' | 'detected' | 'skip'; bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number }; polygon?: Array<Array<[number, number]>> }) => {
+  const sendAI = useCallback(async (overrideMessage?: string, opts?: { force?: boolean; regen?: boolean; studyAreaAction?: 'draw' | 'detected' | 'skip' | 'global'; bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number }; polygon?: Array<Array<[number, number]>> }) => {
     const state = store.getState();
     const userMsg = typeof overrideMessage === 'string' ? overrideMessage : state.aiInput.trim();
     if (!userMsg) return;
@@ -162,6 +162,7 @@ export function useChat(
     if (!isRegen) {
       addMessage({ id: nextAiMsgIdRef.current++, role: 'user', content: userMsg, images: requestImages });
       store.getState().clearChatImages();
+      if (streamTabId) store.getState().autoTitleTabFromText(streamTabId, userMsg);
     }
     setAiTyping(true);
     setAgentSteps(() => []);
@@ -173,7 +174,7 @@ export function useChat(
       addMessage({
         id: nextAiMsgIdRef.current++,
         role: 'assistant',
-        content: '⚡ You are offline. Your message has been queued and will be sent when you reconnect.',
+        content: '[OFFLINE] You are offline. Your message has been queued and will be sent when you reconnect.',
       });
       setAiTyping(false);
       return;
@@ -269,15 +270,19 @@ export function useChat(
     };
     // Batch streamed tokens and flush ~every 40ms — avoids a store update +
     // full message re-parse per token (O(n²) on long responses).
+    // Raw ## COMMANDS / ## TOOL_CALLS blocks must never render while streaming
+    // (the server strips them from the final text, but tokens arrive raw).
+    const INTERNAL_BLOCK_RE = /(?:^|\n)## (?:COMMANDS|TOOL_CALLS|THINKING)\b[\s\S]*$/;
+    const stripInternalBlocks = (text: string) => text.replace(INTERNAL_BLOCK_RE, '');
     const flushTokens = () => {
       if (!tokenBuffer) return;
       const chunk = tokenBuffer;
       tokenBuffer = '';
       if (streamingMsgId === null) {
         streamingMsgId = nextAiMsgIdRef.current++;
-        addMessage({ id: streamingMsgId!, role: 'assistant', content: chunk });
+        addMessage({ id: streamingMsgId!, role: 'assistant', content: stripInternalBlocks(chunk) });
       } else {
-        patchStreamingMsg(m => ({ content: m.content + chunk }));
+        patchStreamingMsg(m => ({ content: stripInternalBlocks(m.content + chunk) }));
       }
     };
 
@@ -486,7 +491,7 @@ export function useChat(
               addMessage({
                 id: nextAiMsgIdRef.current++,
                 role: 'assistant',
-                content: data.query ? `**Study area needed**\n\n${data.message || 'This analysis needs a study area boundary. Choose how to proceed:'}` : '',
+                content: data.query ? `**${(data.title as string) || 'Study area needed'}**\n\n${data.message || 'This analysis needs a study area boundary. Choose how to proceed:'}` : '',
                 studyAreaRequest: {
                   query: data.query || '',
                   location: data.location,
@@ -527,9 +532,9 @@ export function useChat(
 
       if (serverError) {
         if (streamingMsgId !== null) {
-          patchStreamingMsg(m => ({ content: `${m.content}\n\n⚠️ Server error: ${serverError}` }));
-        } else {
-          addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `⚠️ Server error: ${serverError}` });
+patchStreamingMsg(m => ({ content: `${m.content}\n\n[ERROR] Server error: ${serverError}` }));
+      } else {
+        addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: `[ERROR] Server error: ${serverError}` });
         }
       } else if (finalText) {
         const { cleanedContent, artifacts } = extractArtifacts(finalText);
