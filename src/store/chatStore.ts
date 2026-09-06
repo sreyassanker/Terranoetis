@@ -143,10 +143,32 @@ function loadTabRegistry(): { tabs: ChatTab[]; activeTabId: string | null } {
     const raw = window.localStorage.getItem(TABS_STORAGE_KEY);
     if (!raw) return { tabs: [], activeTabId: null };
     const parsed = JSON.parse(raw) as { tabs?: ChatTab[]; activeTabId?: string };
-    return { tabs: parsed.tabs || [], activeTabId: parsed.activeTabId || null };
+    return { tabs: (parsed.tabs || []).map(sanitizeInFlightState), activeTabId: parsed.activeTabId || null };
   } catch {
     return { tabs: [], activeTabId: null };
   }
+}
+
+/**
+ * A reload kills every in-flight stream. The process timeline (agentSteps /
+ * pipelineProgress) is TRANSIENT live state — once the stream is gone it has
+ * nothing to show, and hydrating it left a dead "Reasoning… 6/7 · 1518m 40s"
+ * panel on screen forever. Drop it on load; the conversation messages (and
+ * their tool chips) are the durable part and stay.
+ */
+function sanitizeInFlightState(tab: ChatTab): ChatTab {
+  const messages = (tab.messages || []).map(m => {
+    if (!m.toolEvents || !m.toolEvents.some(e => e.status === 'pending' || e.status === 'blocked')) return m;
+    return {
+      ...m,
+      toolEvents: m.toolEvents.map(e =>
+        e.status === 'pending' || e.status === 'blocked'
+          ? { ...e, status: 'error' as const, error: e.status === 'blocked' ? 'Approval expired (page reloaded)' : 'Interrupted (page reloaded)' }
+          : e,
+      ),
+    };
+  });
+  return { ...tab, agentSteps: [], pipelineProgress: [], messages };
 }
 
 function persistTabRegistry(tabs: ChatTab[], activeTabId: string | null) {

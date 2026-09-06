@@ -179,7 +179,10 @@ function fmtDuration(ms: number): string {
 
 function stepTime(step: AgentStep, nowMs: number): string | null {
   if (step.timeMs !== undefined && step.timeMs > 0) return fmtDuration(step.timeMs);
-  if (step.startedAt !== undefined) {
+  // Only a LIVE running step may derive its duration from the wall clock.
+  // Completed/failed steps without timeMs show nothing — otherwise a panel
+  // restored from localStorage would print "now - yesterday" as the time.
+  if (step.status === 'running' && step.startedAt !== undefined) {
     const ms = Math.max(0, nowMs - step.startedAt);
     if (ms <= 0) return null;
     return fmtDuration(ms);
@@ -227,7 +230,13 @@ export default function LiveProcessPanel({
   const allDone = total > 0 && !active;
   const now = useNow(active, 120, reduced);
   const startMs = steps[0]?.startedAt ?? now;
-  const elapsedMs = Math.max(0, now - startMs);
+  // While active the header timer is live wall-clock time. Once finished
+  // (including a panel restored from localStorage after a reload) it must
+  // show the ACTUAL work duration — summing recorded step times — never
+  // "now - a startedAt from yesterday".
+  const workMs = steps.reduce((acc, s) => acc + (s.timeMs && s.timeMs > 0 ? s.timeMs : 0), 0);
+  const spanMs = Math.max(0, (steps[steps.length - 1]?.startedAt ?? startMs) - startMs);
+  const elapsedMs = active ? Math.max(0, now - startMs) : (workMs > 0 ? workMs : spanMs);
 
   const runningStep = useMemo(() => {
     for (let i = steps.length - 1; i >= 0; i--) if (steps[i].status === 'running') return steps[i];
