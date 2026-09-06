@@ -6,11 +6,13 @@ export const askSchema = z.object({
   cloud: z.boolean().optional(),
   environmentId: z.string().optional(),
   interactionId: z.string().optional(),
-  apiKey: z.string().optional(),
   userId: z.string().optional(),
   tier: z.enum(['local', 'flash', 'pro']).optional(),
   model: z.string().optional(),
   studyAreaAction: z.enum(['draw', 'detected', 'skip']).optional(),
+  // Audit C8: client signals a regeneration so the server does not record a
+  // duplicate user turn into conversation memory.
+  regen: z.boolean().optional(),
   // Cap image count and per-image payload size: the previous unbounded array of
   // unbounded base64 strings was a memory-DoS vector (whole JSON is parsed into
   // RAM before the handler ever slices to 4). 4 images × ~8MB base64 each.
@@ -19,11 +21,23 @@ export const askSchema = z.object({
     mimeType: z.string().max(64),
     fileName: z.string().max(256),
   })).max(4).optional(),
-  recentMessages: z.array(z.object({ role: z.string(), content: z.string() })).optional(),
+  // Audit S4: bound the echoed conversation (was unbounded → prompt-injection
+  // and cost-amplification vector). 12 turns × 4KB max.
+  recentMessages: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string().max(4000),
+  })).max(12).optional(),
+  // Audit S4: validate coordinate ranges — a garbage bbox silently poisoned
+  // every spatial tool call downstream.
   studyAreaBbox: z.object({
-    latMin: z.number(), latMax: z.number(), lonMin: z.number(), lonMax: z.number(),
+    latMin: z.number().min(-90).max(90),
+    latMax: z.number().min(-90).max(90),
+    lonMin: z.number().min(-180).max(180),
+    lonMax: z.number().min(-180).max(180),
   }).nullable().optional(),
-  studyAreaPolygon: z.array(z.array(z.array(z.number()))).nullable().optional(),
+  // GeoJSON ring order is [lon, lat] — validate each coord against the union
+  // range ([-180,180] covers both lat and lon) rather than assuming an order.
+  studyAreaPolygon: z.array(z.array(z.array(z.number().min(-180).max(180)))).max(200).nullable().optional(),
 });
 
 export const sandboxExecuteSchema = z.object({

@@ -46,6 +46,8 @@ export interface ChatTab {
   messages: ChatMessage[];
   input: string;
   selectedTier: string;
+  /** Per-tab model choice (audit L5): 'auto' or a provider/model id. */
+  selectedModel: string;
   agentSteps: AgentStep[];
   pipelineProgress: PipelineStep[];
   chatImages: ChatImage[];
@@ -62,6 +64,7 @@ function snapshotActiveTab(state: ChatState): Omit<ChatTab, 'id' | 'title' | 'se
     messages: state.aiMessages,
     input: state.aiInput,
     selectedTier: state.selectedTier,
+    selectedModel: state.selectedModel,
     agentSteps: state.agentSteps,
     pipelineProgress: state.pipelineProgress,
     chatImages: state.chatImages,
@@ -396,7 +399,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   aiMessages: initialActiveTab ? initialActiveTab.messages : [],
   aiInput: initialActiveTab ? initialActiveTab.input : '',
   selectedTier: initialActiveTab ? initialActiveTab.selectedTier : 'flash',
-  selectedModel: 'auto',
+  selectedModel: initialActiveTab && initialActiveTab.selectedModel ? initialActiveTab.selectedModel : 'auto',
   availableModels: [],
   agentSteps: initialActiveTab ? initialActiveTab.agentSteps : [],
   pipelineProgress: initialActiveTab ? initialActiveTab.pipelineProgress : [],
@@ -411,14 +414,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   openChatTab: (title?: string) => {
     const s = get();
-    // Snapshot current active tab before switching
+    // Snapshot current active tab before switching (audit C5: functional set
+    // so concurrent background-tab updates are not clobbered).
     if (s.activeTabId) {
       const snapshot = snapshotActiveTab(s);
-      set({
-        chatTabs: s.chatTabs.map(t =>
-          t.id === s.activeTabId ? { ...t, ...snapshot, title: t.title } : t
+      const prevId = s.activeTabId;
+      set((cur) => ({
+        chatTabs: cur.chatTabs.map(t =>
+          t.id === prevId ? { ...t, ...snapshot, title: t.title } : t
         ),
-      });
+      }));
     }
     const newTab: ChatTab = {
       id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -442,6 +447,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       aiMessages: newTab.messages,
       aiInput: newTab.input,
       selectedTier: newTab.selectedTier,
+      selectedModel: newTab.selectedModel,
       agentSteps: newTab.agentSteps,
       pipelineProgress: newTab.pipelineProgress,
       chatImages: newTab.chatImages,
@@ -480,6 +486,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           aiMessages: nextTab.messages,
           aiInput: nextTab.input,
           selectedTier: nextTab.selectedTier,
+          selectedModel: nextTab.selectedModel,
           agentSteps: nextTab.agentSteps,
           pipelineProgress: nextTab.pipelineProgress,
           chatImages: nextTab.chatImages,
@@ -513,6 +520,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           aiMessages: freshTab.messages,
           aiInput: freshTab.input,
           selectedTier: freshTab.selectedTier,
+          selectedModel: freshTab.selectedModel,
           agentSteps: freshTab.agentSteps,
           pipelineProgress: freshTab.pipelineProgress,
           chatImages: freshTab.chatImages,
@@ -536,16 +544,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (s.activeTabId === id) return;
     // (No stream abort on switch — background streams keep generating.)
     onBeforeSwitch?.();
-    // Snapshot current tab
+    // Snapshot current tab. Audit C5: apply the snapshot via a FUNCTIONAL set
+    // so a background tab's mutateTab that landed between get() and set() is
+    // not clobbered by the stale chatTabs array.
     if (s.activeTabId) {
       const snapshot = snapshotActiveTab(s);
-      set({
-        chatTabs: s.chatTabs.map(t =>
-          t.id === s.activeTabId ? { ...t, ...snapshot, title: t.title } : t
+      const prevId = s.activeTabId;
+      set((cur) => ({
+        chatTabs: cur.chatTabs.map(t =>
+          t.id === prevId ? { ...t, ...snapshot, title: t.title } : t
         ),
-      });
+      }));
     }
-    const targetTab = s.chatTabs.find(t => t.id === id);
+    // Re-read from the FRESH state (audit C5): the target tab may have
+    // received background stream updates since `s` was captured.
+    const targetTab = get().chatTabs.find(t => t.id === id);
     if (!targetTab) return;
     // Hydrate singleton from target tab
     set({
@@ -554,6 +567,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       aiInput: targetTab.input,
       sessionId: targetTab.sessionId,
       selectedTier: targetTab.selectedTier,
+      selectedModel: targetTab.selectedModel ?? 'auto',
       agentSteps: targetTab.agentSteps,
       pipelineProgress: targetTab.pipelineProgress,
       chatImages: targetTab.chatImages,
@@ -582,6 +596,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       patch.aiMessages = updated.messages;
       patch.aiInput = updated.input;
       patch.selectedTier = updated.selectedTier;
+      patch.selectedModel = updated.selectedModel;
       patch.agentSteps = updated.agentSteps;
       patch.pipelineProgress = updated.pipelineProgress;
       patch.chatImages = updated.chatImages;
@@ -715,7 +730,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingMdRef: { current: new StreamingMarkdownRenderer() },
 
   // Session
-  setSelectedTier: (tier) => set({ selectedTier: tier }),
+  // Audit L5: tier/model choices must persist per-tab (registry + refresh),
+  // not live only in the singleton where a tab switch or reload reverted them.
+  setSelectedTier: (tier) => {
+    set({ selectedTier: tier });
+    const s = get();
+    if (s.activeTabId) {
+      const tabs = s.chatTabs.map(t => (t.id === s.activeTabId ? { ...t, selectedTier: tier } : t));
+      set({ chatTabs: tabs });
+      scheduleTabPersist(tabs, s.activeTabId);
+    }
+  },
 
   // Model tiers
   modelTiers: [],
@@ -723,7 +748,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // Available LLM models + user's selection (auto = default behaviour)
   setAvailableModels: (models) => set({ availableModels: models }),
-  setSelectedModel: (id) => set({ selectedModel: id }),
+  setSelectedModel: (id) => {
+    set({ selectedModel: id });
+    const s = get();
+    if (s.activeTabId) {
+      const tabs = s.chatTabs.map(t => (t.id === s.activeTabId ? { ...t, selectedModel: id } : t));
+      set({ chatTabs: tabs });
+      scheduleTabPersist(tabs, s.activeTabId);
+    }
+  },
 
   // Suggestions
   adaptiveSuggestions: [],

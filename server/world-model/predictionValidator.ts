@@ -261,7 +261,21 @@ export class PredictionValidator {
       sql += ' ORDER BY created_at DESC LIMIT ?';
       params.push(limit);
 
-      return db.prepare(sql).all(...params) as ValidationEntry[];
+      // Audit P1 fix: the DB stores snake_case columns; every consumer of this
+      // method expects ValidationEntry (camelCase). The raw rows were leaking
+      // hazardType=undefined / actualOccurred=undefined into every metric.
+      const rows = db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
+      return rows.map(r => ({
+        id: Number(r.id),
+        hazardType: String(r.hazard_type),
+        predictedProb: Number(r.predicted_prob),
+        actualOccurred: r.actual_occurred === null || r.actual_occurred === undefined
+          ? false : Boolean(Number(r.actual_occurred)),
+        predictedSeverity: String(r.predicted_severity || 'unknown'),
+        actualSeverity: String(r.actual_severity || 'unknown'),
+        modelUsed: String(r.model_used || 'ensemble'),
+        timestamp: String(r.created_at || ''),
+      }));
     } catch {
       return [];
     }

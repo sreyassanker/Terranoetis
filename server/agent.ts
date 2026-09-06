@@ -479,13 +479,15 @@ export class IntentRouter {
       return { type: 'deep_analysis', confidence: 0.85, location, layerIds: ['wildfires'] };
     }
 
-    // Compute task keywords
-    if (lower.includes('compute') || lower.includes('calculate') || lower.includes('analyze') ||
-        lower.includes('statistics') || lower.includes('average') || lower.includes('distribution') ||
-        lower.includes('correlation') || lower.includes('regression') || lower.includes('simulate') ||
-        lower.includes('cluster') || lower.includes('predict') || lower.includes('forecast') ||
-        lower.includes('run') || lower.includes('execute') || lower.includes('script') ||
-        lower.includes('pipeline')) {
+    // Compute task keywords — WORD-BOUNDARY verbs (audit C1: `.includes('run')`
+    // made "what rivers run through Texas?" a compute job). A question frame
+    // (what/where/latest…) combined with a data noun (earthquake/river/…) is a
+    // DATA QUESTION, not a compute instruction — it must reach the tool path.
+    const computeVerb = /\b(compute|calculate|run|execute|script|pipeline|simulate|predict|forecast|analyze|analyse|statistics|average|distribution|correlation|regression|cluster|evaluate)\b/;
+    const questionFrame = /\b(what|whats|where|which|who|when|how many|how much|is there|are there|does|do|did|can|could|should|any|latest|current|recent|today|yesterday|happened|happening|currently|right now)\b/;
+    const dataNoun = /\b(earthquake|earthquakes|quake|quakes|seismic|volcano|volcanoes|volcanic|eruption|wildfire|wildfires|fire|fires|flood|floods|storm|storms|hurricane|cyclone|typhoon|tsunami|weather|temperature|rain|rainfall|wind|humidity|precipitation|ship|ships|vessel|vessels|flight|flights|aircraft|plane|planes|satellite|satellites|debris|outbreak|outbreaks|disease|epidemic|co2|carbon|gdp|inflation|unemployment|population|price|prices|aqi|air quality|river|rivers|lake|lakes|glacier|glaciers|ice|drought|landslide|landslides|magnitude|events?|risk|risks|level|levels)\b/;
+    const isComputeTask = computeVerb.test(lower) && !(questionFrame.test(lower) && dataNoun.test(lower));
+    if (isComputeTask) {
       return { type: 'compute', confidence: 0.9, location };
     }
 
@@ -514,11 +516,14 @@ export class IntentRouter {
     }
 
     // Analytical model queries
-    if (lower.includes('calculate') || lower.includes('compute') || lower.includes('equation') ||
-        lower.includes('formula') || lower.includes('scientific model') || lower.includes('ndvi') ||
-        lower.includes('wave energy') || lower.includes('land surface temperature') ||
-        lower.includes('carbon flux') || lower.includes('seismic magnitude') ||
-        lower.includes('evapotranspiration') || lower.includes('runoff')) {
+    if ((lower.includes('calculate') || lower.includes('compute') || lower.includes('equation') ||
+         lower.includes('formula') || lower.includes('scientific model') || lower.includes('ndvi') ||
+         lower.includes('wave energy') || lower.includes('land surface temperature') ||
+         lower.includes('carbon flux') || lower.includes('seismic magnitude') ||
+         lower.includes('evapotranspiration') || lower.includes('runoff')) &&
+        // audit C1: a data question naming an indicator still needs live data,
+        // not an equation run ("what is the seismic magnitude of the last quake")
+        !(questionFrame.test(lower) && dataNoun.test(lower))) {
       return { type: 'compute', confidence: 0.85, location };
     }
 
