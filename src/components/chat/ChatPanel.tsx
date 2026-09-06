@@ -4,7 +4,7 @@ import { Bot, History, Plus, RotateCcw, Trash2, Send, Square, Paperclip, Image a
 import Panel from '@/components/ui/Panel';
 import { useChatStore } from '@/store/chatStore';
 import type { ChatMessage, PlanCard } from '@/lib/chatStore';
-import { queueMessage, isOnline } from '@/lib/offlineChat';
+import { isOnline } from '@/lib/offlineChat';
 import { HumanOverrideBanner } from '@/components/explainability/index';
 import { exportConversationAsPDF } from '@/lib/pdfReport';
 import ChatPanelContent from './ChatPanelContent';
@@ -404,8 +404,15 @@ export function ChatPanel({
             <button
               className="ai-stop"
               onClick={() => {
+                // abortTabStream aborts the tab's registered controller AND clears
+                // its tabTyping/aiTyping. The old handler only called setAiTyping(false)
+                // on the singleton, leaving tabTyping[activeTab]=true — so switching
+                // tabs and back restored aiTyping=true and the double-send guard
+                // deadlocked the tab (Send button stuck as Stop, no new messages).
+                const activeTabId = useChatStore.getState().activeTabId;
+                if (activeTabId) useChatStore.getState().abortTabStream(activeTabId);
                 abortControllerRef.current?.abort();
-                useChatStore.getState().setAiTyping(false);
+                abortControllerRef.current = null;
                 cleanupThinkingSteps(true);
               }}
               title="Stop response"
@@ -473,13 +480,10 @@ export function ChatPanel({
                   sessionId,
                   modelTier: selectedTier,
                 });
-                if (!isOnline()) {
-                  try {
-                    await queueMessage('pdf_export', sessionId);
-                  } catch (queueError) {
-                    showNotification(`Failed to queue PDF for sync: ${queueError}`, 'warning');
-                  }
-                }
+                // PDF generation is entirely client-side (jsPDF) — no connectivity
+                // needed, so nothing is queued. (Previously it pushed the literal
+                // string "pdf_export" into the chat queue, which — now that the
+                // queue actually flushes — would have been sent as a chat message.)
               } catch (e) {
                 showNotification(`PDF export failed: ${e}`, 'error');
               }

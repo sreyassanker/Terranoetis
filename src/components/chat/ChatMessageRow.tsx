@@ -231,7 +231,7 @@ export function ChatMessageRow({
           {msg.studyAreaRequest && <StudyAreaPrompt request={msg.studyAreaRequest} sendAI={sendAI!} />}
 
           {msg.toolEvents && msg.toolEvents.filter(e => e.approvalRequired || e.status === 'blocked').map((ev, i) => (
-            <ToolApprovalView key={`apr_${i}`} event={ev} onApprove={() => updateToolEvent(msg.id, ev.name, { status: 'success' })} onDeny={() => updateToolEvent(msg.id, ev.name, { status: 'error', error: 'Denied by user' })} />
+            <ToolApprovalView key={`apr_${i}`} event={ev} onApprove={(result) => updateToolEvent(msg.id, ev.name, { status: 'success', result })} onDeny={() => updateToolEvent(msg.id, ev.name, { status: 'error', error: 'Denied by user' })} />
           ))}
 
           {msg.artifacts && msg.artifacts.map((art, i) => (

@@ -544,7 +544,7 @@ export class IntentRouter {
     if ((lower.includes('satellite') || lower.includes('land cover') || lower.includes('segmentation') ||
          lower.includes('crop health') || lower.includes('deforestation') || lower.includes('ndvi') ||
          lower.includes('samgeo') || lower.includes('clay') || lower.includes('unet') ||
-         lower.includes('prithvi') || lower.includes('fire scar') || lower.includes('flood extent')) &&
+         lower.includes('fire scar') || lower.includes('flood extent')) &&
         (lower.includes('analyze') || lower.includes('detect') || lower.includes('classify') ||
          lower.includes('segment') || lower.includes('monitor') || location)) {
       return { type: 'deep_analysis', confidence: 0.85, location };
@@ -643,7 +643,7 @@ export class IntentRouter {
         // Extended platform coverage (Phase 1 tools)
         [/shakemap|shake map|ground shaking/, ['shakemap_recent']],
         [/streamflow|river gauge|gauge height|discharge/, ['usgs_streamflow']],
-        [/outbreak|epidemic|disease|who /, ['who_outbreaks']],
+        [/outbreak|epidemic|disease|pandemic|who (?:health|disease|outbreak)/, ['who_outbreaks']],
         [/co2|carbon dioxide/, ['climate_co2']],
         [/sea-?ice extent|ice extent/, ['climate_sea_ice']],
         [/fema|federal disaster/, ['fema_declarations']],

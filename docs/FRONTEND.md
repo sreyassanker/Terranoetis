@@ -88,7 +88,7 @@ Defined in `src/main.tsx`:
 
 - `HumanOverrideBanner.tsx` (238L) — pending override approval/rejection
 
-### Prithvi (`src/components/prithvi/`)
+### Trackers (`src/components/trackers/`)
 
 | Component | Description |
 |---|---|

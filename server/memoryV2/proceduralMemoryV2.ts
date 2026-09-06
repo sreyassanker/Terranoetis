@@ -28,6 +28,13 @@ export class ProceduralMemoryV2 {
     logger.info('ProceduralMemoryV2 initialized');
   }
 
+  /** Number of learned procedures (for status/observability). */
+  count(): number {
+    try {
+      return (getDb().prepare('SELECT COUNT(*) AS c FROM procedural_v2').get() as { c: number }).c;
+    } catch { return 0; }
+  }
+
   private ensureTable(): void {
     try {
       const db = getDb();
@@ -97,7 +104,7 @@ export class ProceduralMemoryV2 {
         WHERE trigger_condition LIKE ? AND success_rate >= 0.5
         ORDER BY success_rate DESC, usage_count DESC, last_used DESC
         LIMIT ?
-      `).run(`%${intentType}%`, limit) as unknown as Array<Record<string, unknown>>;
+      `).all(`%${intentType}%`, limit) as Array<Record<string, unknown>>;
 
       return rows.map(r => this.rowToProcedure(r));
     } catch (e) {
@@ -114,7 +121,7 @@ export class ProceduralMemoryV2 {
         WHERE trigger_condition LIKE ? AND success_rate >= 0.5
         ORDER BY usage_count DESC, last_used DESC
         LIMIT ?
-      `).run(`%${trigger}%`, limit) as unknown as Array<Record<string, unknown>>;
+      `).all(`%${trigger}%`, limit) as Array<Record<string, unknown>>;
 
       return rows.map(r => this.rowToProcedure(r));
     } catch (e) {

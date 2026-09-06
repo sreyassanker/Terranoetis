@@ -120,6 +120,39 @@ export async function getQueuedMessages(): Promise<QueuedMessage[]> {
   }
 }
 
+let _flushing = false;
+/**
+ * Drain the offline queue in order once connectivity returns. For each queued
+ * message we optimistically remove it from the store, then hand it to `sendFn`.
+ * If `sendFn` reports it could not send right now (e.g. a stream is already in
+ * flight), we stop and leave the remaining messages queued for the next attempt.
+ * Returns the number of messages successfully sent. This is the missing half of
+ * the offline feature — previously queueMessage() wrote messages nothing read.
+ */
+export async function flushQueue(
+  sendFn: (content: string, sessionId: string) => Promise<boolean>,
+): Promise<number> {
+  if (_flushing) return 0;
+  _flushing = true;
+  let sent = 0;
+  try {
+    // Bound the loop so a pathological sendFn can't spin forever.
+    for (let guard = 0; guard < MAX_QUEUE_SIZE + 1; guard++) {
+      const queue = await get<QueuedMessage[]>(MESSAGE_QUEUE_KEY) || [];
+      if (queue.length === 0) break;
+      const [head, ...rest] = queue;
+      await set(MESSAGE_QUEUE_KEY, rest); // remove first (crash-safe: no infinite retry)
+      let ok = false;
+      try { ok = await sendFn(head.content, head.sessionId); } catch { ok = false; }
+      if (ok) sent++;
+      else { await set(MESSAGE_QUEUE_KEY, [head, ...rest]); break; } // defer, restore
+    }
+  } finally {
+    _flushing = false;
+  }
+  return sent;
+}
+
 export async function clearMessageQueue(): Promise<void> {
   try {
     await del(MESSAGE_QUEUE_KEY);

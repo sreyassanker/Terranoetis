@@ -180,19 +180,45 @@ export function listPatterns(domain?: string): AiPattern[] {
 
 /**
  * Find the best matching pattern for a query.
- * Matching = same intent type (or intent alias) + simple token-overlap score.
- * Returns null when no pattern scores above the threshold.
+ *
+ * Matching = same intent family + a content-token similarity that is
+ * LOCATION-INDEPENDENT (the saved place is a slot, so "weather in tokyo" and
+ * "weather in paris" should match) but NOT so loose that unrelated questions
+ * collide. The previous scorer used `overlap / min(|q|,|p|)` with a 0.25
+ * threshold and never stripped place tokens (despite the comment claiming it
+ * did), so a 2-token query like "weather forecast" matched a saved "weather in
+ * tokyo" and replayed Tokyo's coordinates for a totally different question.
+ *
+ * New scorer:
+ *   - drop stop-words and the pattern's own place label from BOTH sides
+ *   - score = Jaccard (intersection / union) of the remaining content tokens
+ *   - require at least one shared content token
+ *   - default threshold 0.5 (was 0.25)
  */
+const PATTERN_STOP = new Set([
+  'a','an','the','is','are','was','were','do','does','did','to','of','in','on','at','for',
+  'me','my','i','we','you','it','this','that','these','those','and','or','but','if','then',
+  'with','without','from','by','as','be','can','will','would','should','could','show','tell',
+  'please','what','which','who','whom','whose','how','when','where','why','some','any','there',
+  'here','about','into','over','under','near','around','give','want','need','like','check',
+]);
+
+function contentTokens(text: string, drop: Set<string>): Set<string> {
+  return new Set(
+    text.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
+      .filter(t => t.length > 2 && !PATTERN_STOP.has(t) && !drop.has(t)),
+  );
+}
+
 export function findMatchingPattern(
   query: string,
   intent: string,
   domain?: string,
-  threshold = 0.25,
+  threshold = 0.5,
 ): AiPattern | null {
   const candidates = domain ? listPatterns(domain) : listPatterns();
   if (candidates.length === 0) return null;
 
-  const qTokens = new Set(query.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean));
   let best: AiPattern | null = null;
   let bestScore = 0;
 
@@ -200,17 +226,24 @@ export function findMatchingPattern(
     // Intent gating: same intent family only (unless pattern is generic)
     if (pat.intent !== intent && !(pat.intent === 'general' || intent === 'general')) continue;
 
-    const pTokens = new Set(pat.query.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean));
-    let overlap = 0;
-    for (const t of pTokens) if (qTokens.has(t) && t.length > 2) overlap++;
-    const score = overlap / Math.max(1, Math.min(qTokens.size, pTokens.size));
+    // Place tokens = the saved location's label words. Stripping them from both
+    // sides makes the match location-independent (the place is a slot).
+    const placeTokens = new Set(
+      (pat.sampleLocation?.label || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
+        .filter(t => t.length > 2),
+    );
 
-    // Location-independent: "weather in tokyo" vs "weather in paris" — the
-    // location token should not hurt the match, so ignore known place tokens.
-    if (score > bestScore) {
-      bestScore = score;
-      best = pat;
-    }
+    const pTokens = contentTokens(pat.query, placeTokens);
+    const qTokens = contentTokens(query, placeTokens);
+    if (pTokens.size === 0) continue; // pattern has no content signal → never auto-replay
+
+    let inter = 0;
+    for (const t of pTokens) if (qTokens.has(t)) inter++;
+    if (inter === 0) continue; // require a genuine shared content token
+
+    const union = new Set([...pTokens, ...qTokens]).size;
+    const score = union > 0 ? inter / union : 0;
+    if (score > bestScore) { bestScore = score; best = pat; }
   }
 
   if (best && bestScore >= threshold) return best;

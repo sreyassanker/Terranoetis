@@ -58,10 +58,16 @@ export class SemanticMemory {
     this.embedder = embedder;
   }
 
+  /** Number of stored semantic entities (for status/observability). */
+  count(): number {
+    try {
+      return (getDb().prepare('SELECT COUNT(*) AS c FROM semantic_entities').get() as { c: number }).c;
+    } catch { return 0; }
+  }
+
   init(): void {
     this.ensureTable();
-    logger.info('SemanticMemory initialized');
-  }
+    logger.info('SemanticMemory initialized');  }
 
   private ensureTable(): void {
     try {

@@ -118,6 +118,7 @@ import { renderLayer, fetchLayerData } from '@/rendering/layerRenderer';
 import { LAYER_GROUPS, LAYER_CATEGORIES, LEGACY_DEFAULTS } from '@/lib/layerConfig';
 import { listChats, getChat, saveChat, deleteChat, generateChatId, autoTitle, groupChatsByDate, type ChatSession, type ChatListItem, type ChatMessage, type ToolEvent, type PlanCard } from '@/lib/chatStore';
 import { StreamingMarkdownRenderer, extractArtifacts, fetchSuggestions, fetchTiers, resumeStream, generatePlanClient, type SuggestionContextClient } from '@/lib/advancedChat';
+import { flushQueue } from '@/lib/offlineChat';
 import { exportConversationAsPDF } from '@/lib/pdfReport';
 import { formatSci } from '@/lib/formatSci';
 import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, ModelTierSelector, TraceExpander, VoiceModeIndicator } from '@/components/chat/AdvancedChatViews';
@@ -130,7 +131,7 @@ import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, Mod
    each chunk only downloads when the user opens that panel.
    ═════════════════════════════════════════════════════════════════ */
 
-const LazyAviationTrackerPanel = lazy(() => import('@/components/prithvi/AviationTrackerPanel').then(m => ({ default: m.AviationTrackerPanel })));
+const LazyAviationTrackerPanel = lazy(() => import('@/components/trackers/AviationTrackerPanel').then(m => ({ default: m.AviationTrackerPanel })));
 const LazyChatHistoryPanel = lazy(() => import('@/components/chat/ChatHistoryPanel').then(m => ({ default: m.ChatHistoryPanel })));
 const LazyForkPanel = lazy(() => import('@/components/ForkPanel').then(m => ({ default: m.ForkPanel })));
 const LazyMarketIntelPanel = lazy(() => import('@/components/MarketIntelPanel').then(m => ({ default: m.MarketIntelPanel })));
@@ -139,7 +140,7 @@ const LazyLandCoverMapperPanel = lazy(() => import('@/components/LandCoverMapper
 const LazyLaunchReplayPanel = lazy(() => import('@/components/LaunchReplayPanel').then(m => ({ default: m.LaunchReplayPanel })));
 const LazyRadioTunerPanel = lazy(() => import('@/components/RadioTunerPanel').then(m => ({ default: m.RadioTunerPanel })));
 const LazySatelliteImageryPanel = lazy(() => import('@/components/ui/SatelliteImageryPanel'));
-const LazySatelliteTrackerPanel = lazy(() => import('@/components/prithvi/SatelliteTrackerPanel').then(m => ({ default: m.SatelliteTrackerPanel })));
+const LazySatelliteTrackerPanel = lazy(() => import('@/components/trackers/SatelliteTrackerPanel').then(m => ({ default: m.SatelliteTrackerPanel })));
 const LazyDuckdbAnalyticsPanel = lazy(() => import('@/components/DuckdbAnalyticsPanel').then(m => ({ default: m.DuckdbAnalyticsPanel })));
 
 /** Suspense boundary for the lazy panels — a silent null keeps the layout
@@ -8238,6 +8239,28 @@ case 'openPanel':
   );
   sendAIRef.current = sendAI;
   (window as unknown as Record<string, unknown>).__sendAI = sendAI;
+
+  // Drain the offline message queue when connectivity returns. Previously
+  // queueMessage() wrote messages that NOTHING ever sent — the UI promised
+  // "will be sent when you reconnect" but they were silently lost. Now, on
+  // going online (and on mount if already online), queued messages are replayed
+  // in order through the normal send path.
+  useEffect(() => {
+    if (!offline.isOnline) return;
+    let cancelled = false;
+    const run = async () => {
+      // let the connection settle before replaying
+      await new Promise(r => setTimeout(r, 400));
+      if (cancelled) return;
+      await flushQueue(async (content) => {
+        if (useChatStore.getState().aiTyping) return false; // a stream is active → defer
+        await sendAIRef.current(content);
+        return true;
+      });
+    };
+    void run();
+    return () => { cancelled = true; };
+  }, [offline.isOnline]);
 
   async function extractLocation(text: string): Promise<{ lat: number; lon: number } | null> {
     if (typeof text !== 'string' || !text) return null;

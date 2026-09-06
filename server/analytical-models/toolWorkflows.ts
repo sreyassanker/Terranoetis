@@ -251,7 +251,7 @@ DOMAIN_TEMPLATES[4] = {
     if (r > 0.7) recs.push('Index saturation detected. Use EVI for high-biomass canopies.');
     if (r < 0) recs.push('Negative value — verify water body or cloud contamination. Use NDWI for confirmation.');
     recs.push('For time-series, use MODIS MOD13 16-day composites for cloud-free continuity.');
-    recs.push('For 10m resolution, compute from raw Sentinel-2 L2A bands via the Prithvi engine.');
+    recs.push('For 10m resolution, compute from raw Sentinel-2 L2A bands (via the STAC search + COG tile pipeline).');
     return recs;
   },
   contextualAnalysis: (r) => {

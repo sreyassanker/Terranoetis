@@ -275,8 +275,8 @@ export class MemoryManagerV2 {
       sensory: { active: true, itemCount: this.sensoryBuffer.count() },
       working: { active: true, itemCount: this.workingMemory.getContext().itemCount },
       episodic: { active: true, itemCount: this.episodicMemory.count() },
-      semantic: { active: true, itemCount: 0 },
-      procedural: { active: true, itemCount: 0 },
+      semantic: { active: true, itemCount: this.semanticMemory?.count() ?? 0 },
+      procedural: { active: true, itemCount: this.proceduralMemory.count() },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       predictive: { active: true, itemCount: (this.predictiveMemory as any).getActiveModels().length },
     };
