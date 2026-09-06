@@ -32,6 +32,29 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 
 ---
 
+## Gallery
+
+<table>
+  <tr>
+    <td width="50%"><img src="gifs/Multi%20Hazard%20Risk%20Map.gif" alt="Multi-hazard risk map — fused seismic, fire, storm and flood risk rendered on the globe" /></td>
+    <td width="50%"><img src="gifs/Landslide%20simulation.gif" alt="Landslide physics simulation — GPU-run terrain failure over real topography" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Multi-Hazard Risk Map</b><br/>fused live risk surfaces on the 3D globe</td>
+    <td align="center"><b>Landslide Simulation</b><br/>one of 7 physics engines, run over real terrain</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="gifs/Aviation%20Tracker.gif" alt="Live aviation tracker — ADS-B aircraft streamed onto the globe" /></td>
+    <td width="50%"><img src="gifs/Satellite%20Tracker.gif" alt="Live satellite tracker — TLE orbits propagated and rendered in real time" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Aviation Tracker</b><br/>live ADS-B flights on the globe</td>
+    <td align="center"><b>Satellite Tracker</b><br/>real-time TLE orbit propagation</td>
+  </tr>
+</table>
+
+---
+
 ## Quick Start
 
 ```bash
@@ -106,6 +129,7 @@ terranoetis/
 │   └── Research papers/          # Source PDFs for the equation catalog
 │
 ├── e2e/                          # Playwright browser tests (7 specs, 12 tests)
+├── gifs/                         # README gallery captures
 ├── scripts/                      # Dev utilities + legacy test scripts
 ├── data/                         # Runtime databases + ML models
 ├── models/                       # Local GGUF model (downloadable from admin panel) → gitignored
