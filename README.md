@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/terranoetis.png" alt="Terranoetis" width="120" />
+  <img src="docs/Terranoetis_Thumbnail.png" alt="Terranoetis" width="100%" />
 </p>
 
 <h1 align="center">Terranoetis</h1>
