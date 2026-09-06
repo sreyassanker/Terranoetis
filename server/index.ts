@@ -787,16 +787,22 @@ omninet.init();
 const GGUF_MODEL = './models/LFM2.5-2.6B-Q4_K_M.gguf';
 const GGUF_PORT = 11436;
 if (fs.existsSync(GGUF_MODEL)) {
-  const llamaBin = process.env.LLAMA_SERVER_PATH || '/opt/homebrew/bin/llama-server';
-  const llamaOut = fs.openSync('/tmp/terranoetis-llama.log', 'a');
-  const llamaServer = spawn(llamaBin, [
-    '--model', GGUF_MODEL,
-    '--port', String(GGUF_PORT),
-    '-c', '2048',
-  ], { stdio: ['ignore', llamaOut, llamaOut], detached: true });
-  llamaServer.unref();
-  llamaServer.on('error', (err: Error) => logger.warn({ err: err.message }, 'llama-server failed to start'));
-  logger.info({ port: GGUF_PORT, model: GGUF_MODEL, bin: llamaBin }, 'Local GGUF fallback model started');
+  // Cross-platform: LLAMA_SERVER_PATH always wins; otherwise the conventional
+  // location per OS (Windows/Linux resolve `llama-server` from PATH).
+  const llamaBin = process.env.LLAMA_SERVER_PATH || (os.platform() === 'darwin' ? '/opt/homebrew/bin/llama-server' : 'llama-server');
+  try {
+    const llamaOut = fs.openSync(path.join(os.tmpdir(), 'terranoetis-llama.log'), 'a');
+    const llamaServer = spawn(llamaBin, [
+      '--model', GGUF_MODEL,
+      '--port', String(GGUF_PORT),
+      '-c', '2048',
+    ], { stdio: ['ignore', llamaOut, llamaOut], detached: true });
+    llamaServer.unref();
+    llamaServer.on('error', (err: Error) => logger.warn({ err: err.message }, 'llama-server failed to start'));
+    logger.info({ port: GGUF_PORT, model: GGUF_MODEL, bin: llamaBin }, 'Local GGUF fallback model started');
+  } catch (e) {
+    logger.warn({ err: (e as Error).message }, 'llama-server could not be launched on this platform — GGUF fallback disabled');
+  }
   // Give it ~15s to load the model, then the provider is ready.
   setTimeout(() => {
     logger.info('Local GGUF model ready (or failed silently — harmless)');
