@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Terranoetis, please **do not open a public issue**. Instead, send an email to the maintainer (visible on the GitHub profile). You should receive a response within 48 hours. If not, follow up via the same channel.
+If you discover a security vulnerability in Terranoetis, send an email to the maintainer at **sreyassanker001@gmail.com**. You should receive a response within 48 hours. If not, follow up via the same channel.
 
 Please include:
 - A clear description of the issue
