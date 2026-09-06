@@ -259,7 +259,7 @@ export function ArtifactView({ artifact, onRerun }: { artifact: ArtifactData; on
 
 export function ToolApprovalView({ event, onApprove, onDeny }: {
   event: ToolEvent;
-  onApprove: () => void;
+  onApprove: (result?: unknown) => void;
   onDeny: () => void;
 }) {
   const [approving, setApproving] = useState(false);
@@ -267,7 +267,11 @@ export function ToolApprovalView({ event, onApprove, onDeny }: {
   const riskColor = event.riskLevel === 'destructive' ? '#ef4444' : event.riskLevel === 'high' ? '#f59e0b' : '#64748b';
   const handleApprove = async () => {
     setApproving(true);
-    try { await approveTool(event.name, event.args || {}); onApprove(); }
+    try {
+      if (!event.approvalId) throw new Error('no approval token');
+      const r = await approveTool(event.approvalId);
+      onApprove(r?.result);
+    }
     catch { onDeny(); }
     finally { setApproving(false); }
   };

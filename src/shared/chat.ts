@@ -27,6 +27,9 @@ export interface ToolEvent {
   result?: unknown;
   riskLevel?: 'low' | 'medium' | 'high' | 'destructive';
   approvalRequired?: boolean;
+  /** Single-use, user-bound, expiring token minted server-side when a destructive
+   *  tool was blocked. Required to approve execution via /api/agent/approve. */
+  approvalId?: string;
   /** Enterprise: true when the dataset is unavailable (missing key / upstream down). */
   degraded?: boolean;
 }

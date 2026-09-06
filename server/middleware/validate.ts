@@ -11,7 +11,14 @@ export const askSchema = z.object({
   tier: z.enum(['local', 'flash', 'pro']).optional(),
   model: z.string().optional(),
   studyAreaAction: z.enum(['draw', 'detected', 'skip']).optional(),
-  images: z.array(z.object({ dataUrl: z.string(), mimeType: z.string(), fileName: z.string() })).optional(),
+  // Cap image count and per-image payload size: the previous unbounded array of
+  // unbounded base64 strings was a memory-DoS vector (whole JSON is parsed into
+  // RAM before the handler ever slices to 4). 4 images × ~8MB base64 each.
+  images: z.array(z.object({
+    dataUrl: z.string().max(8_000_000),
+    mimeType: z.string().max(64),
+    fileName: z.string().max(256),
+  })).max(4).optional(),
   recentMessages: z.array(z.object({ role: z.string(), content: z.string() })).optional(),
   studyAreaBbox: z.object({
     latMin: z.number(), latMax: z.number(), lonMin: z.number(), lonMax: z.number(),

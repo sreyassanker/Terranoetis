@@ -434,6 +434,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       chatTabs: newTabs,
       activeTabId: newTab.id,
+      // Hydrate the singleton sessionId from the new tab. Without this the
+      // singleton keeps the PREVIOUS tab's sessionId, so useChat sends the new
+      // chat's requests under the old session → server-side conversation memory
+      // cross-talk between tabs.
+      sessionId: newTab.sessionId,
       aiMessages: newTab.messages,
       aiInput: newTab.input,
       selectedTier: newTab.selectedTier,
@@ -471,6 +476,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({
           chatTabs: newTabs,
           activeTabId: nextId,
+          sessionId: nextTab.sessionId,
           aiMessages: nextTab.messages,
           aiInput: nextTab.input,
           selectedTier: nextTab.selectedTier,
@@ -503,6 +509,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({
           chatTabs: [freshTab],
           activeTabId: freshTab.id,
+          sessionId: freshTab.sessionId,
           aiMessages: freshTab.messages,
           aiInput: freshTab.input,
           selectedTier: freshTab.selectedTier,

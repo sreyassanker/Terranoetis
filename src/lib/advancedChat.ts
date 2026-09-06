@@ -245,12 +245,14 @@ export async function resumeStream(
 }
 
 // ─── #4: Tool approval ──────────────────────────────────────────────────────
-
-export async function approveTool(toolName: string, args: Record<string, unknown>): Promise<{ result: unknown; riskLevel: string }> {
+// Requires the single-use approvalId minted server-side when the tool was
+// blocked. The server executes the STORED tool+args for that token (not
+// whatever the client sends), so this can't be abused to run arbitrary tools.
+export async function approveTool(approvalId: string): Promise<{ result: unknown; riskLevel: string; toolName: string }> {
   const resp = await fetch('/api/agent/approve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeadersSafe() },
-    body: JSON.stringify({ toolName, args }),
+    body: JSON.stringify({ approvalId }),
   });
   if (!resp.ok) throw new Error(`Approval failed (${resp.status})`);
   return resp.json();

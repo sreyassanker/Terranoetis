@@ -229,7 +229,7 @@ export class RoadTrafficDetector {
     }
 
     // For simplicity, return placeholder arrays — full implementation would read COGs
-    // This demonstrates the architecture; production would use the COG reader from prithvi.ts
+    // This demonstrates the architecture; production would use a Sentinel-2 COG reader.
     const width = 224;
     const height = 224;
     const size = width * height;

@@ -53,6 +53,7 @@ import { MemoryManager, type Fact, type ProceduralPattern } from './memoryManage
 import { memoryManagerV2 } from './memoryV2/memoryManagerV2';
 import { EmbeddingEngine } from './embedding';
 import { dynamicTools } from './toolsV2/toolGenerator';
+import { normalizeToolCall } from './toolsV2/toolArgs';
 import { ToolComposer } from './toolsV2/toolComposer';
 import { toolDiscovery } from './toolsV2/toolDiscovery';
 import { toolRepair } from './toolsV2/toolRepair';
@@ -97,7 +98,7 @@ import { isEmailConfigured, sendEmail } from './email';
 import {
   conversationMemory, generatePlan, executePlan, executeStep,
   generateSuggestions, buildProactiveInsight, recordTrace, addEvidence,
-  recallMemories, renderMemoryRecall, classifyToolRisk, requiresApproval,
+  classifyToolRisk, requiresApproval,
   listAvailableTools,
   type AgentPlan, type PlanStep, type SubAgentUpdate, type SuggestionContext, type ConversationTurn,
 } from './advancedAgent';
@@ -734,7 +735,7 @@ function registerDefaultTools() {
     { name:'radar_scan', category:'weather', description:'RainViewer radar tile metadata — global precipitation radar coverage timestamps for tile overlay. Tile/record data. For station scans use 64_nexrad_level_ii.', exampleQueries:['rain radar coverage','rainviewer radar times','precipitation radar tiles'], schema:{type:'api',endpoint:'/api/radar/rainviewer',method:'GET'} },
     { name:'usgs_streamflow', category:'water_quality', description:'USGS real-time streamflow — river gauge height, discharge and water temp within a bbox (waterservices.usgs.gov). Point records.', exampleQueries:['river discharge near sacramento','usgs streamflow gauges','river levels in this area'], schema:{type:'api',endpoint:'/api/usgs/water',method:'GET',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude',startDate:'ISO start date',endDate:'ISO end date'}} },
     { name:'who_outbreaks', category:'health', description:'WHO disease outbreak news — current verified outbreaks (disease, country, date). Record data.', exampleQueries:['who disease outbreaks','current epidemics','disease outbreak news'], schema:{type:'api',endpoint:'/api/health/who-outbreaks',method:'GET'} },
-    { name:'worldbank_economy', category:'osint', description:'World Bank indicators by country — GDP, population, GDP-per-capita, inflation, unemployment, life expectancy, CO2 (no key needed). Record data.', exampleQueries:['gdp of japan','world bank population data','inflation rate germany','life expectancy by country'], schema:{type:'api',endpoint:'/api/economics/worldbank',method:'GET',params:{country:'ISO2 country code or all',indicator:'NY.GDP.MKTP.CD, SP.POP.TOTL, FP.CPI.TOTL.ZG, SL.UEM.TOTL.ZS, SP.DYN.LE00.IN, EN.ATM.CO2E.PC'}} },
+    { name:'worldbank_economy', category:'osint', description:'World Bank indicators by country — GDP, population, GDP-per-capita, inflation, unemployment, life expectancy, CO2 (no key needed). Record data.', exampleQueries:['gdp of japan','world bank population data','inflation rate germany','life expectancy by country'], schema:{type:'api',endpoint:'/api/economics/worldbank',method:'GET',params:{country:'country name or ISO2/ISO3 code (Japan, JP, JPN all work) — or "all"',indicator:'NY.GDP.MKTP.CD, SP.POP.TOTL, FP.CPI.TOTL.ZG, SL.UEM.TOTL.ZS, SP.DYN.LE00.IN, EN.ATM.CO2E.PC'}} },
     { name:'imf_data', category:'osint', description:'IMF data portal — macro indicators (e.g. NGDPD GDP) by country and year range. Record data.', exampleQueries:['imf gdp data','imf indicators for china'], schema:{type:'api',endpoint:'/api/imf',method:'GET',params:{indicator:'IMF indicator code (default NGDPD)',country:'ISO country code',startYear:'start year',endYear:'end year'}} },
     { name:'worldpop_population', category:'geospatial', description:'WorldPop population estimates — estimated people living within a bbox (grid-cell census). Record data.', exampleQueries:['population living in this area','how many people in this region','worldpop count for bbox'], schema:{type:'api',endpoint:'/api/population/worldpop',method:'GET',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude'}} },
     { name:'comtrade_trade', category:'osint', description:'UN Comtrade trade flows — imports/exports between reporter and partner countries. Record data.', exampleQueries:['us imports from china','trade flows between countries','comtrade export data'], schema:{type:'api',endpoint:'/api/supply-chain/trade',method:'GET',params:{reporter:'reporter country code',partner:'partner country code'}} },
@@ -9038,6 +9039,148 @@ function serialiseToolResultForSynthesis(result: unknown, cap = 9000): string {
 
 // Main agent ask endpoint — SSE streaming
 const askRateLimit = perUserRateLimiter(30, 60000); // 30 requests per minute per user
+const localAskRateLimit = perUserRateLimiter(20, 60000); // local fallback: 20/min per user
+
+// ── Tool-approval pending registry ────────────────────────────────
+// A destructive tool is BLOCKED during a run and surfaced to the user as an
+// approval request carrying a short-lived, single-use, user-bound token.
+// /api/agent/approve may only execute a tool that has a live pending token for
+// the SAME authenticated user — it can no longer be used to run arbitrary
+// tools with arbitrary args. Tokens expire after APPROVAL_TTL_MS and are
+// consumed on use (replay-safe).
+interface PendingApproval { userId: string; requestId: string; toolName: string; args: Record<string, unknown>; expiresAt: number }
+const pendingApprovals = new Map<string, PendingApproval>();
+const APPROVAL_TTL_MS = 5 * 60 * 1000;
+function createPendingApproval(userId: string, requestId: string, toolName: string, args: Record<string, unknown>): string {
+  const id = `apr_${crypto.randomUUID()}`;
+  pendingApprovals.set(id, { userId, requestId, toolName, args, expiresAt: Date.now() + APPROVAL_TTL_MS });
+  // Opportunistic sweep so abandoned approvals don't accumulate.
+  if (pendingApprovals.size > 500) {
+    const now = Date.now();
+    for (const [k, v] of pendingApprovals) if (v.expiresAt < now) pendingApprovals.delete(k);
+  }
+  return id;
+}
+function consumePendingApproval(id: string, userId: string): PendingApproval | null {
+  const p = pendingApprovals.get(id);
+  if (!p) return null;
+  pendingApprovals.delete(id); // single-use regardless of outcome
+  if (p.userId !== userId) return null;      // bound to the requesting user
+  if (p.expiresAt < Date.now()) return null; // expired
+  return p;
+}
+
+
+// ── Hazard forecast helper (P4: world-model into chat) ──────────
+// The ensemble predictor (physics + statistical + pattern + causal models with
+// confidence intervals) previously ran ONLY in the autonomous background paths,
+// which are disabled in chat-only mode — so chat users never saw it. This wires
+// it directly into hazard questions: for a located query about earthquake /
+// tsunami / wildfire / flood / storm risk, run the ensemble and ground the
+// answer in a real forecast. Bounded by a hard timeout so a slow model can
+// never hang the chat, and gated to hazard keywords so normal queries pay no cost.
+const HAZARD_LAYER_MAP: Array<{ re: RegExp; layers: string[] }> = [
+  { re: /\b(earthquake|quake|seismic|aftershock|tremor)\b/i, layers: ['earthquake'] },
+  { re: /\b(tsunami)\b/i, layers: ['tsunami', 'earthquake'] },
+  { re: /\b(wildfire|fire|fires|burn|hotspot)\b/i, layers: ['wildfire'] },
+  { re: /\b(flood|flooding|rainfall|precipitation)\b/i, layers: ['flood'] },
+  { re: /\b(storm|hurricane|cyclone|typhoon|tornado|severe weather)\b/i, layers: ['severe_weather'] },
+  { re: /\b(volcano|volcanic|eruption|ash)\b/i, layers: ['volcanic'] },
+];
+function hazardLayersFor(message: string): string[] {
+  const set = new Set<string>();
+  for (const { re, layers } of HAZARD_LAYER_MAP) if (re.test(message)) layers.forEach(l => set.add(l));
+  return Array.from(set);
+}
+async function computeHazardForecast(
+  location: { lat: number; lon: number; label?: string },
+  message: string,
+): Promise<{ text: string; count: number } | null> {
+  const layers = hazardLayersFor(message);
+  if (layers.length === 0 || !location) return null;
+  try {
+    // P4b: make the forecast LOCATION-AWARE. The ensemble's statistical model
+    // reads `history`, but the chat was passing [] → every place got the same
+    // generic physics. Pull real recent observations at THIS location (keyless,
+    // fast USGS/FIRMS feeds) and feed them in, so the trend reflects actual
+    // local activity. Best-effort + short timeout: on any failure we fall back
+    // to the physics/causal-only forecast (still useful).
+    const history = await fetchHazardHistory(location, layers);
+    const preds = await Promise.race([
+      predictor.predict({ location, layers, history }),
+      new Promise<Prediction[]>((res) => setTimeout(() => res([]), 6000)),
+    ]);
+    if (!preds || preds.length === 0) return null;
+    const top = preds
+      .slice()
+      .sort((a, b) => b.probability * b.confidence - a.probability * a.confidence)
+      .slice(0, 4);
+    const lines = top.map(p =>
+      `- ${p.hazardType}: ${Math.round(p.probability * 100)}% probability, ${p.severity} severity over ${p.timeframe} ` +
+      `(model confidence ${Math.round(p.confidence * 100)}%)${p.contributingFactors?.length ? ` — drivers: ${p.contributingFactors.slice(0, 2).join('; ')}` : ''}`,
+    );
+    const grounded = history.length > 0 ? ` Grounded in ${history.length} recent local observation(s).` : '';
+    return {
+      text: `\n[Hazard ensemble forecast — physics+statistical+causal models for ${location.label || `${location.lat},${location.lon}`}.${grounded} Cite these as MODEL PROBABILITIES, not observed facts; they are the platform's predictive world-model, not a live reading]\n${lines.join('\n')}\n`,
+      count: top.length,
+    };
+  } catch (e) {
+    logger.warn({ err: (e as Error).message }, 'Hazard forecast failed (non-critical)');
+    return null;
+  }
+}
+
+// Pull recent real observations near a location and shape them as the
+// {timestamp,value,type} history the ensemble's statistical model expects.
+// Counts events per day over the last 30 days. Keyless sources, best-effort.
+async function fetchHazardHistory(
+  location: { lat: number; lon: number },
+  layers: string[],
+): Promise<Array<{ timestamp: string; value: number; type: string }>> {
+  const bbox = {
+    minLat: Math.max(-90, location.lat - 3), maxLat: Math.min(90, location.lat + 3),
+    minLon: Math.max(-180, location.lon - 3), maxLon: Math.min(180, location.lon + 3),
+  };
+  const history: Array<{ timestamp: string; value: number; type: string }> = [];
+  const wantSeismic = layers.some(l => l === 'earthquake' || l === 'tsunami');
+  const wantFire = layers.includes('wildfire');
+  const fetchBounded = async <T>(p: Promise<T>, ms: number): Promise<T | null> => {
+    try { return await Promise.race([p, new Promise<T>((res) => setTimeout(() => res(null as T), ms))]); }
+    catch { return null; }
+  };
+  const dailyCounts = (times: unknown[], type: string) => {
+    const byDay = new Map<string, number>();
+    for (const t of times) {
+      // USGS returns epoch-ms numbers; other feeds return ISO strings.
+      let day = '';
+      if (typeof t === 'number' && Number.isFinite(t)) day = new Date(t).toISOString().slice(0, 10);
+      else if (typeof t === 'string' && t) day = t.slice(0, 10);
+      if (day && !isNaN(Date.parse(day))) byDay.set(day, (byDay.get(day) || 0) + 1);
+    }
+    for (const [d, n] of Array.from(byDay).sort((a, b) => a[0].localeCompare(b[0])).slice(-30)) {
+      history.push({ timestamp: d, value: n, type });
+    }
+  };
+  try {
+    if (wantSeismic) {
+      const eq = await fetchBounded<any>(
+        dynamicTools.execute('earthquakes', { ...bbox, hours: 720, minMag: 2.5 }, AbortSignal.timeout(4000)), 4500,
+      );
+      const feats = eq?.features || eq?.data?.features || [];
+      dailyCounts(feats.map((f: any) => f?.properties?.time || f?.properties?.place?.time || '').filter(Boolean), 'earthquake');
+    }
+    if (wantFire) {
+      const fr = await fetchBounded<any>(
+        dynamicTools.execute('firms_fires', { ...bbox, hours: 168 }, AbortSignal.timeout(4000)), 4500,
+      );
+      const pts = fr?.features || fr?.points || fr?.data?.features || [];
+      dailyCounts(pts.map((p: any) => p?.properties?.acq_date || p?.properties?.time || p?.acq_date || '').filter(Boolean), 'wildfire');
+    }
+  } catch (e) {
+    logger.warn({ err: (e as Error).message }, 'Hazard history fetch failed (forecast falls back to physics/causal)');
+  }
+  return history;
+}
 
 // ── Analytical model helper ───────────────────────────────────────
 // Deterministically search + execute a known analytical model for a
@@ -9766,23 +9909,17 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
       : '';
 
 
-    // Step 1.5: Check semantic cache for identical queries
+    // Step 1.5: (removed) semantic-cache read.
+    // The v1 SemanticCache was only ever written by memoryManager.recordInteraction,
+    // which was intentionally removed from this pipeline (see the V2 memory store
+    // note below). So this read ALWAYS missed while still costing an embedding +
+    // a 100-row cosine scan on every single message. Worse, its 0.7-cosine match
+    // with no place/time/user awareness would answer "weather in Paris" with
+    // cached "weather in Tokyo" data if it were ever re-enabled as-is.
+    // A SAFE response cache (context-keyed: user + intent + place-bucket +
+    // time-to-live-by-freshness-class) is a deliberate P3 enhancement, not a
+    // naive re-enable of this path. Removing the dead read cuts per-request cost.
     const uid = userId || 'default';
-    let cachedResponse: string | null = null;
-    try {
-      cachedResponse = (await memoryManager.semanticCache.get(fullMessage)) ?? null;
-    } catch (e) {
-      logger.warn({ err: e }, 'Semantic cache lookup failed (non-critical)');
-    }
-    if (cachedResponse) {
-      costTracker.record('local', message, cachedResponse, true);
-      sendEvent('step', { stepType: 'cache_hit', text: 'Found identical query in memory — returning cached response', status: 'completed' });
-      sendEvent('output', { text: cachedResponse + '\n\n*(From memory — asked before)*' });
-      sendEvent('done', { type: 'done' });
-      cleanup();
-      res.end();
-      return;
-    }
 
     // Step 1.6: Pattern replay — check if this query matches a saved workflow.
     // If a matching pattern exists (same intent + similar query shape), replay
@@ -9916,9 +10053,13 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // in the Analytics Workbench so the user runs the full process there (with
     // their own study area) — the chat does NOT auto-compute an estimate inline.
     // Skipped when the user is already mid study-area flow (studyAreaAction set).
+    // CRITICAL: only fire for a genuine COMPUTE intent. A live-data question that
+    // merely contains a model keyword ("what was the latest earthquake magnitude
+    // near Tokyo?", "is there snow cover over Colorado?") must NOT be hijacked into
+    // opening a Workbench model — it needs a real data answer from the tool path.
     {
       const studyAreaActionNow = (req.body as any).studyAreaAction as string | undefined;
-      const analyticalModelId = IntentRouter.detectAnalyticalModelId(message);
+      const analyticalModelId = intent.type === 'compute' ? IntentRouter.detectAnalyticalModelId(message) : null;
       if (analyticalModelId && !studyAreaActionNow && !isReasoningQuery) {
         const def = getAnalyticalModelDef(analyticalModelId);
         const modelLabel = def?.name || `Model #${analyticalModelId}`;
@@ -9948,11 +10089,15 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // (a fuzzy-matched 1.5 km POI hijacking "storm tracking"). Ask the user
     // instead: [GLOBAL] Global (no bbox filter) or [EDIT] Mark Area (draw on globe).
     // The answer comes back as studyAreaAction on the re-send.
-    const SPATIAL_DATA_INTENTS = new Set(['weather_check', 'quick_scan', 'deep_analysis']);
+    // Only the spatial DATA keywords justify a scope question — a bare
+    // deep_analysis intent (global scalars like CO2, GDP, outbreaks, or a
+    // general-knowledge "who won…") has no area to scope and must go straight
+    // to the tool/LLM path. (weather_check/quick_scan always carry a location,
+    // so intent-based triggering was both dead and harmful.)
     const SPATIAL_DATA_KEYWORDS = /\b(storms?|hurricane|cyclone|typhoon|wildfires?|earthquakes?|floods?|volcanoes?|ships?|vessels?|flights?|aircraft|aurora|tsunami)\b/i;
     const needsScopeChoice = !studyAreaBbox && !studyAreaAction && intent.location == null
       && !isReasoningQuery
-      && (SPATIAL_DATA_INTENTS.has(intent.type) || SPATIAL_DATA_KEYWORDS.test(message));
+      && SPATIAL_DATA_KEYWORDS.test(message);
     if (needsScopeChoice) {
       sendEvent('study_area_request', {
         requestId,
@@ -9972,8 +10117,10 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // Study-area prompts are ONLY for spatial analytical-model runs (needs a real
     // grid extent). Generic data questions ("weather in X", "what's near Y") must
     // never be swallowed into a study-area prompt — they flow to the tool/LLM path.
+    // Same compute-only contract as the model handoff/execution below: a
+    // deep_analysis data question that names a model keyword is NOT a compute run.
     const needsStudyArea = IntentRouter.hasAnalyticalModelMatch(message);
-    const isSpatialCompute = (intent.type === 'compute' || intent.type === 'deep_analysis') && !isReasoningQuery && needsStudyArea;
+    const isSpatialCompute = intent.type === 'compute' && !isReasoningQuery && needsStudyArea;
     if (isSpatialCompute && !studyAreaBbox && !studyAreaAction) {
       // Determine the probe location: the sync intent.location (city DB) or
       // OSM geocode of the message (handles states, regions the DB misses).
@@ -10058,7 +10205,12 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
         }
       }
     }
-    if ((intent.type === 'compute' || intent.type === 'deep_analysis') && !isReasoningQuery) {
+    // Analytical model EXECUTION (inline compute) — same contract as the Workbench
+    // handoff above: only a genuine COMPUTE intent runs a scientific model inline.
+    // A deep_analysis DATA question that merely contains a model keyword ("earthquake
+    // magnitude near Tokyo", "snow cover over Colorado") must reach the live tool
+    // path for a real answer, not be answered by running an equation.
+    if (intent.type === 'compute' && !isReasoningQuery) {
       // ── Multi-clause decomposition ─────────────────────────────
       // Queries like "drought risk in California vs Punjab", "earthquake
       // magnitude near Manila and ships near Singapore", or "floods in Mumbai
@@ -10281,15 +10433,53 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
     // Step 3: Analyze with Omninet (auto-fallback across providers)
     sendEvent('step', { stepType: 'agent_thinking', text: 'Agent analyzing...', status: 'running' });
     const recentMessagesArray: Array<{ role: string; content: string }> = Array.isArray(recentMessages) ? recentMessages.slice(-6) : [];
-    const memoryContext = await memoryManager.buildWorkingMemoryContext(uid, fullMessage, recentMessagesArray);
+    // P3: read from the SAME memory the chat writes to (V2). The legacy v1
+    // buildWorkingMemoryContext read tables that are no longer written (its
+    // writer recordInteraction was removed), so the agent's memory was
+    // effectively read-only-stale. V2 buildContext consolidates working +
+    // episodic + semantic + procedural + predictive into one <cognitive_context>.
+    // Falls back to v1 if V2 throws, so the pipeline never loses context.
+    let memoryContext = '';
+    try {
+      memoryContext = await memoryManagerV2.buildContext(uid, fullMessage);
+      // Surface it in the process panel so the user can SEE the agent recalling
+      // prior work (transparency principle). Only when there's real content.
+      const recalled = (memoryContext.match(/<episode /g) || []).length;
+      const inferred = (memoryContext.match(/<inference /g) || []).length;
+      if (recalled > 0 || inferred > 0) {
+        sendEvent('step', { stepType: 'memory_recall', text: `Recalled ${recalled} past analysis(es)${inferred ? ` + ${inferred} inference(s)` : ''} from memory`, status: 'completed' });
+      }
+    } catch (e) {
+      logger.warn({ err: e }, 'V2 buildContext failed — falling back to v1 working memory');
+      memoryContext = await memoryManager.buildWorkingMemoryContext(uid, fullMessage, recentMessagesArray);
+    }
 
     // Advanced: multi-turn conversation memory (rolling summary + last 3 verbatim turns)
     const convCtx = conversationMemory.get(uid, req.body.sessionId);
     const convContextStr = conversationMemory.buildPromptContext(convCtx);
-    // Advanced: persistent cross-session memory recall (#2)
-    const recall = await recallMemories(uid, fullMessage);
-    const recallStr = recall ? renderMemoryRecall(recall) : '';
-    if (recallStr && recall) sendEvent('step', { stepType: 'memory_recall', text: `Recalled ${recall.episodes.length} past interaction(s)`, status: 'completed' });
+    // (P3) The separate recallMemories() call was removed: it ran a SECOND
+    // memoryManagerV2.retrieve() and injected a duplicate recall block + step.
+    // memoryManagerV2.buildContext() above already consolidates episodic +
+    // semantic recall, so this halves the per-request memory work.
+
+    // P4: run the world-model ensemble for hazard questions that have a place,
+    // so the answer is grounded in a real predictive forecast (not just live
+    // observations). Keyword-gated + hard 6s timeout → no cost/risk elsewhere.
+    let hazardForecastStr = '';
+    {
+      const forecastLoc = intent.location
+        ? { lat: intent.location.lat, lon: intent.location.lon, label: intent.location.label }
+        : resolvedAreaBbox
+          ? { lat: (resolvedAreaBbox.latMin + resolvedAreaBbox.latMax) / 2, lon: (resolvedAreaBbox.lonMin + resolvedAreaBbox.lonMax) / 2, label: resolvedAreaLabel }
+          : null;
+      if (forecastLoc && !isReasoningQuery) {
+        const fc = await computeHazardForecast(forecastLoc, fullMessage);
+        if (fc) {
+          hazardForecastStr = fc.text;
+          sendEvent('step', { stepType: 'hazard_forecast', text: `Ran ensemble hazard forecast (${fc.count} models) for ${forecastLoc.label || 'the area'}`, status: 'completed' });
+        }
+      }
+    }
 
     const systemPrompt = buildAgentPrompt(toolRegistry, intent);
 
@@ -10382,7 +10572,7 @@ const model = 'gemini-3.5-flash-lite';
     try {
       const hasImages = Array.isArray(images) && images.length > 0;
       logger.info({ msgLen: message.length, hasMemory: !!memoryContext, hasImages }, 'AI streaming starting');
-      const fullPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}${convContextStr ? `[Conversation history]\n${convContextStr}` : ''}${recallStr ? `[Relevant memories]\n${recallStr}` : ''}${resolvedAreaStr ? `${resolvedAreaStr}\n\n` : ''}[User query]\n${fullMessage}`;
+      const fullPrompt = `${systemPrompt}\n\n${memoryContext ? `[Cognitive memory context]\n${memoryContext}\n\n` : ''}${convContextStr ? `[Conversation history]\n${convContextStr}` : ''}${resolvedAreaStr ? `${resolvedAreaStr}\n\n` : ''}${hazardForecastStr ? `${hazardForecastStr}\n` : ''}[User query]\n${fullMessage}`;
       outputText = hasImages ? await streamPassMultimodal(fullPrompt, images) : await streamPass(fullPrompt);
       sendEvent('step', { stepType: 'agent_thinking', text: 'Agent analysis complete', status: 'completed' });
 
@@ -10443,6 +10633,18 @@ const model = 'gemini-3.5-flash-lite';
             toolResults.push(`[${call.name}] ERROR: tool not registered`);
             return;
           }
+          // P2 typed tool-calling: normalize the model's args to the tool's
+          // declared parameter names (latitude→lat, min_mag→minMag, numeric
+          // coercion) and validate coordinate ranges. Hard errors are fed back
+          // to the model (via TOOL_RESULTS) so the follow-up round can correct
+          // them, instead of silently hitting the endpoint with bad params.
+          const norm = normalizeToolCall(known, call.args ?? {});
+          call.args = norm.args;
+          if (norm.errors.length > 0) {
+            sendEvent('tool_result', { name: call.name, status: 'error', error: norm.errors.join('; '), reason: 'invalid_arguments' });
+            toolResults.push(`[${call.name}] INVALID ARGS: ${norm.errors.join('; ')}. Re-issue the call with correct parameters.`);
+            return;
+          }
           // #4 Tool-calling approval gate: classify risk; for high/destructive tools,
           // emit an approval request. The client may auto-approve (low risk default)
           // or hold for user confirmation. We proceed for low/medium; high/destructive
@@ -10450,7 +10652,8 @@ const model = 'gemini-3.5-flash-lite';
           // 'require_approval' header (handled via /api/agent/approve endpoint).
           const risk = classifyToolRisk(call.name, call.args);
           if (risk === 'destructive') {
-            sendEvent('tool_approval', { requestId, name: call.name, args: call.args, description: known.description, riskLevel: risk, reason: 'Destructive tool — confirm before execution' });
+            const approvalId = createPendingApproval(uid, requestId, call.name, call.args ?? {});
+            sendEvent('tool_approval', { requestId, approvalId, name: call.name, args: call.args, description: known.description, riskLevel: risk, reason: 'Destructive tool — confirm before execution' });
             toolResults.push(`[${call.name}] BLOCKED: destructive tool requires explicit approval (risk: ${risk})`);
             sendEvent('tool_result', { name: call.name, status: 'blocked', error: `Destructive tool requires approval` });
             return;
@@ -10523,7 +10726,7 @@ const model = 'gemini-3.5-flash-lite';
         while (true) {
         sendEvent('step', { stepType: 'synthesis', text: round === 1 ? 'Synthesizing answer from tool results...' : `Round ${round}: following up with more tool calls...`, status: 'running' });
         const resultsBlock = toolResults.join('\n\n');
-        const synthesisPrompt = `${systemPrompt}\n\n${memoryContext ? `[Context from user profile]\n${memoryContext}\n\n` : ''}${convContextStr ? `[Conversation history]\n${convContextStr}\n\n` : ''}${resolvedAreaStr ? `${resolvedAreaStr}\n\n` : ''}[User query]\n${fullMessage}\n\n## TOOL_RESULTS\n${resultsBlock}\n\nUsing the tool results above, write your final answer now. Your answer MUST START with 2-5 sentences of prose citing the real numbers from TOOL_RESULTS (counts, magnitudes, places — or state explicitly when a result is empty, e.g. 'features: 0' means no events in the queried area/period). Cite the SOURCE for every data claim inline, in parentheses, e.g. "(USGS)", "(World Bank)", "(NOAA GML)" — use the source field from the tool result when present. If a tool returned an error or a KEY_REQUIRED message, tell the user that specific dataset is unavailable and why — do not substitute other data. Only AFTER the prose may you emit a ## COMMANDS block, and its items must use the exact documented format (e.g. {"action":"flyTo","lat":…,"lon":…} — never tool names like fly_command).${round < MAX_TOOL_ROUNDS ? '\n\nIf the results above do NOT answer the question (wrong region, missing slice, need a filtered re-query), you may emit another ## TOOL_CALLS block instead of answering — the system will execute it and return updated results.' : ''}`;
+        const synthesisPrompt = `${systemPrompt}\n\n${memoryContext ? `[Cognitive memory context]\n${memoryContext}\n\n` : ''}${convContextStr ? `[Conversation history]\n${convContextStr}\n\n` : ''}${resolvedAreaStr ? `${resolvedAreaStr}\n\n` : ''}${hazardForecastStr ? `${hazardForecastStr}\n` : ''}[User query]\n${fullMessage}\n\n## TOOL_RESULTS\n${resultsBlock}\n\nUsing the tool results above, write your final answer now. Your answer MUST START with 2-5 sentences of prose citing the real numbers from TOOL_RESULTS (counts, magnitudes, places — or state explicitly when a result is empty, e.g. 'features: 0' means no events in the queried area/period). Cite the SOURCE for every data claim inline, in parentheses, e.g. "(USGS)", "(World Bank)", "(NOAA GML)" — use the source field from the tool result when present. If a hazard ensemble forecast is provided above, you MUST cite its probability for the hazard the user asked about, clearly labeled as the platform's MODEL forecast (e.g. "our ensemble model estimates ~17% over 7 days"), alongside any live observations — never present it as an observed fact. If a tool returned an error or a KEY_REQUIRED message, tell the user that specific dataset is unavailable and why — do not substitute other data. Only AFTER the prose may you emit a ## COMMANDS block, and its items must use the exact documented format (e.g. {"action":"flyTo","lat":…,"lon":…} — never tool names like fly_command).${round < MAX_TOOL_ROUNDS ? '\n\nIf the results above do NOT answer the question (wrong region, missing slice, need a filtered re-query), you may emit another ## TOOL_CALLS block instead of answering — the system will execute it and return updated results.' : ''}`;
         outputText = ToolCallParser.strip(await streamPass(synthesisPrompt));
 
         // Does the synthesis pass want more data?
@@ -10539,8 +10742,17 @@ const model = 'gemini-3.5-flash-lite';
             toolResults.push(`[${call.name}] ERROR: tool not registered`);
             return;
           }
+          const norm = normalizeToolCall(known, call.args ?? {});
+          call.args = norm.args;
+          if (norm.errors.length > 0) {
+            sendEvent('tool_result', { name: call.name, status: 'error', error: norm.errors.join('; '), reason: 'invalid_arguments' });
+            toolResults.push(`[${call.name}] INVALID ARGS: ${norm.errors.join('; ')}. Re-issue the call with correct parameters.`);
+            return;
+          }
           const risk = classifyToolRisk(call.name, call.args);
           if (risk === 'destructive') {
+            const approvalId = createPendingApproval(uid, requestId, call.name, call.args ?? {});
+            sendEvent('tool_approval', { requestId, approvalId, name: call.name, args: call.args, description: known.description, riskLevel: risk, reason: 'Destructive tool — confirm before execution' });
             toolResults.push(`[${call.name}] BLOCKED: destructive tool requires explicit approval (risk: ${risk})`);
             sendEvent('tool_result', { name: call.name, status: 'blocked', error: `Destructive tool requires approval` });
             return;
@@ -10613,11 +10825,13 @@ const model = 'gemini-3.5-flash-lite';
       totalDurationMs: Date.now() - (req as any).startTime || 0,
     });
 
-    // Record in unified V2 memory system (episodic + sensory + working)
-    // The legacy memoryManager.recordInteraction is intentionally removed — v2 stores the same data.
-    // The v1 semanticCache and buildWorkingMemoryContext are still used (read-only) above.
+    // Record in unified V2 memory system (episodic + sensory + working + procedural + semantic)
+    // P3: the chat previously WROTE only episodic+sensory to V2 but READ from the
+    // legacy v1 memory (whose writer was removed) — an open loop, so the agent
+    // never used what it stored. Now we write the full picture: the tool chain
+    // becomes a reusable PROCEDURE, and the place becomes a SEMANTIC entity.
     try {
-      memoryManagerV2.store('episodic', {
+      const epId = await memoryManagerV2.episodicMemory.add({
         userId: uid,
         query: message,
         response: outputText,
@@ -10625,9 +10839,9 @@ const model = 'gemini-3.5-flash-lite';
         location: intent.location ? { lat: intent.location.lat, lon: intent.location.lon, label: intent.location.label } : undefined,
         outcome: 'success',
         emotionalValence: 0,
-        layersToggled: [],
+        layersToggled: (recipeCommands || []).filter(c => c.action === 'toggleLayer').map(c => String(c.layerId)),
         tokensUsed: 0,
-        latencyMs: 0,
+        latencyMs: Date.now() - ((req as any).startTime || Date.now()),
         modelTier,
       });
       memoryManagerV2.store('sensory', {
@@ -10636,6 +10850,23 @@ const model = 'gemini-3.5-flash-lite';
         data: { intent: intent.type, queryLength: message.length },
         importanceScore: intent.type === 'unknown' ? 0.8 : 0.5,
       });
+      // Procedural memory: learn the tool sequence so similar future questions
+      // can be answered faster (recipeSteps are the {tool,args} slots captured
+      // earlier this run; map to the ToolStep shape the procedural store expects).
+      if (recipeSteps && recipeSteps.length > 0) {
+        const toolChain = recipeSteps.map(s => ({
+          action: s.tool,
+          params: Object.fromEntries(Object.entries(s.args || {}).map(([k, v]) => [k, String(v)])),
+          description: '',
+        }));
+        memoryManagerV2.proceduralMemory.record(toolChain, true, Date.now() - ((req as any).startTime || Date.now()));
+      }
+      // Semantic memory: remember the place as an entity the user works with.
+      if (intent.location) {
+        const locName = intent.location.label || `${intent.location.lat.toFixed(2)},${intent.location.lon.toFixed(2)}`;
+        memoryManagerV2.semanticMemory.addEntity(locName, 'location', { lat: intent.location.lat, lon: intent.location.lon, lastIntent: intent.type }).catch((e: any) => logger.warn({ err: e }, 'semantic entity add failed'));
+      }
+      void epId;
     } catch (e) {
       logger.warn({ err: e }, 'V2 memory store failed (non-critical)');
     }
@@ -10749,7 +10980,9 @@ Answer:`;
       const alreadyLabeled = /general knowledge|not live (platform )?data|live data is (not available|unavailable)|not available in this platform|no (relevant )?data|couldn'?t find|could not find|not a recogni|mythical|unable to (find|retrieve|access)/i.test(outputText);
       const isRefusalOrClarify = /^\s*(i (cannot|can't|am unable|won'?t|apolog)|sorry|as an ai|i'?m (an ai|only able|just)|please (specify|provide|clarify|tell me)|which (location|place|city|area|one))/i.test(outputText);
       const looksLikeLiveDataAsk = /\b(today|now|current|latest|right now|live)\b/i.test(message);
-      if (toolCallCount === 0 && outputText.trim().length >= 40 && !alreadyLabeled && !isRefusalOrClarify && !looksLikeLiveDataAsk) {
+      // A hazard ensemble forecast IS platform data (the world-model), so an
+      // answer grounded in it must not be mislabeled "general knowledge".
+      if (toolCallCount === 0 && !hazardForecastStr && outputText.trim().length >= 40 && !alreadyLabeled && !isRefusalOrClarify && !looksLikeLiveDataAsk) {
         outputText = `*From general knowledge (not live platform data).*\n\n${outputText}`;
       }
     }
@@ -10780,7 +11013,10 @@ Answer:`;
 // ═══════════════════════════════════════════════════════════════════════
 // Phase 2.0.5: Local AI Fallback (Ollama)
 // ═══════════════════════════════════════════════════════════════════════
-app.post('/api/agent/local-ask', async (req: express.Request, res: express.Response) => {
+// SECURITY: this proxies to a local Ollama instance. It was previously
+// unauthenticated and unthrottled — an open, free LLM proxy + DoS vector.
+// Now requires auth and is rate-limited per user.
+app.post('/api/agent/local-ask', authGuard, localAskRateLimit, async (req: express.Request, res: express.Response) => {
   const { message } = req.body;
   if (!message || typeof message !== 'string') return res.status(400).json({ error: 'message required' });
   try {
@@ -10963,14 +11199,26 @@ app.post('/api/agent/suggestions', authGuard, async (req: express.Request, res: 
   }
 });
 
-// #4 Tool approval — execute a previously-blocked destructive tool after user confirms
+// #4 Tool approval — execute a previously-BLOCKED destructive tool after the user
+// confirms. SECURITY: requires the single-use, user-bound, expiring `approvalId`
+// minted when the tool was blocked. Without a live token this endpoint refuses —
+// it can no longer be used to execute arbitrary tools with arbitrary args. The
+// executed tool + args come from the stored pending record, NOT the request body,
+// so a caller cannot approve one tool and run another.
 app.post('/api/agent/approve', authGuard, async (req: express.Request, res: express.Response) => {
-  const { toolName, args } = req.body;
-  if (!toolName || typeof toolName !== 'string') return res.status(400).json({ error: 'toolName required' });
-  const risk = classifyToolRisk(toolName, args || {});
+  const { approvalId } = req.body;
+  const uid = (req as any).userId || 'default';
+  if (!approvalId || typeof approvalId !== 'string') {
+    return res.status(400).json({ error: 'approvalId required — tools are only executable via a pending approval token' });
+  }
+  const pending = consumePendingApproval(approvalId, uid);
+  if (!pending) {
+    return res.status(403).json({ error: 'Invalid, expired, or already-used approval token' });
+  }
+  const risk = classifyToolRisk(pending.toolName, pending.args);
   try {
-    const result = await dynamicTools.execute(toolName, args || {}, new AbortController().signal);
-    res.json({ result, riskLevel: risk });
+    const result = await dynamicTools.execute(pending.toolName, pending.args, AbortSignal.timeout(60000));
+    res.json({ result, riskLevel: risk, toolName: pending.toolName });
   } catch (e) {
     res.status(500).json({ error: `Tool execution failed: ${e instanceof Error ? e.message : String(e)}` });
   }
@@ -13580,9 +13828,52 @@ app.get('/api/conflict/acled', async (req: express.Request, res: express.Respons
 });
 
 // 3. World Bank Economic Indicators (free, no key required)
+// The World Bank API only accepts ISO2/ISO3 codes (or 'all') — a full country
+// name like "Japan" returns "Invalid value" and an empty result set. LLMs pass
+// full names constantly, so resolve them here before hitting the API.
+const WB_COUNTRY_NAME_TO_ISO2: Record<string, string> = {
+  'united states': 'US', usa: 'US', 'united states of america': 'US', america: 'US',
+  canada: 'CA', mexico: 'MX', brazil: 'BR', argentina: 'AR', chile: 'CL', colombia: 'CO',
+  peru: 'PE', venezuela: 'VE', ecuador: 'EC', guatemala: 'GT', cuba: 'CU', bolivia: 'BO',
+  uruguay: 'UY', paraguay: 'PY', 'costa rica': 'CR', panama: 'PA', 'dominican republic': 'DO',
+  'united kingdom': 'GB', uk: 'GB', britain: 'GB', england: 'GB', ireland: 'IE', france: 'FR',
+  germany: 'DE', italy: 'IT', spain: 'ES', portugal: 'PT', netherlands: 'NL', holland: 'NL',
+  belgium: 'BE', switzerland: 'CH', austria: 'AT', sweden: 'SE', norway: 'NO', denmark: 'DK',
+  finland: 'FI', iceland: 'IS', poland: 'PL', czechia: 'CZ', 'czech republic': 'CZ',
+  romania: 'RO', hungary: 'HU', greece: 'GR', croatia: 'HR', slovakia: 'SK', bulgaria: 'BG',
+  serbia: 'RS', ukraine: 'UA', russia: 'RU', 'russian federation': 'RU', belarus: 'BY',
+  moldova: 'MD', georgia: 'GE', armenia: 'AM', azerbaijan: 'AZ', turkey: 'TR', türkiye: 'TR',
+  israel: 'IL', palestine: 'PS', lebanon: 'LB', jordan: 'JO', syria: 'SY', iraq: 'IQ',
+  iran: 'IR', 'saudi arabia': 'SA', yemen: 'YE', oman: 'OM', qatar: 'QA', kuwait: 'KW',
+  'united arab emirates': 'AE', uae: 'AE', bahrain: 'BH', egypt: 'EG', libya: 'LY',
+  tunisia: 'TN', algeria: 'DZ', morocco: 'MA', nigeria: 'NG', ghana: 'GH', kenya: 'KE',
+  ethiopia: 'ET', 'south africa': 'ZA', tanzania: 'TZ', uganda: 'UG',
+  senegal: 'SN', cameroon: 'CM', 'democratic republic of the congo': 'CD', congo: 'CG',
+  mozambique: 'MZ', zimbabwe: 'ZW', zambia: 'ZM', rwanda: 'RW', angola: 'AO', mali: 'ML',
+  china: 'CN', taiwan: 'TW', japan: 'JP', 'south korea': 'KR', korea: 'KR', 'republic of korea': 'KR',
+  'north korea': 'KP', india: 'IN', pakistan: 'PK', bangladesh: 'BD', 'sri lanka': 'LK',
+  nepal: 'NP', bhutan: 'BT', myanmar: 'MM', burma: 'MM', thailand: 'TH', vietnam: 'VN',
+  'viet nam': 'VN', cambodia: 'KH', laos: 'LA', malaysia: 'MY', singapore: 'SG',
+  indonesia: 'ID', philippines: 'PH', mongolia: 'MN', kazakhstan: 'KZ', uzbekistan: 'UZ',
+  australia: 'AU', 'new zealand': 'NZ', fiji: 'FJ', 'papua new guinea': 'PG', afghanistan: 'AF',
+};
+function resolveWorldBankCountry(input: string): string {
+  const t = (input || 'all').trim();
+  if (!t || /^(all|world|global|globe|every country|all countries)$/i.test(t)) return 'all';
+  if (/^[A-Za-z]{2}$/.test(t)) return t.toUpperCase();           // ISO2 — API accepts directly
+  if (/^[A-Za-z]{3}$/.test(t)) return t.toUpperCase();           // ISO3 — API accepts directly
+  const norm = t.toLowerCase()
+    .replace(/^the\s+/, '')
+    .replace(/\s+$/, '')
+    .replace(/,.*$/, '')                                          // "Korea, Rep." → "korea"
+    .trim();
+  return WB_COUNTRY_NAME_TO_ISO2[norm]
+    || WB_COUNTRY_NAME_TO_ISO2[norm.replace(/\s+(islands?|republic|federation|emirates|states?)$/, '')]
+    || t;                                                          // last resort: pass through
+}
 app.get('/api/economics/worldbank', async (req: express.Request, res: express.Response) => {
   try {
-    const country = req.query.country as string || 'all';
+    const country = resolveWorldBankCountry(req.query.country as string);
     const indicatorParam = req.query.indicator as string || 'NY.GDP.MKTP.CD';
     // Support multiple indicators (comma-separated)
     const indicators = indicatorParam.split(',').map(s => s.trim()).filter(Boolean);
@@ -13741,10 +14032,6 @@ app.get('/api/intelligence/disinformation', async (req: express.Request, res: ex
 // ── Geopolitical Risks — handled by pulseRouter at /api/pulse/geopolitical/risks ──
 
 // ── Correlation Cards — handled by pulseRouter at /api/pulse/correlation/cards ──
-
-/* ═══════════════════════════════════════════════════════════════════
-   PRITHVI EO FOUNDATION MODEL — routes registered above
-   ═══════════════════════════════════════════════════════════════════ */
 
 // Production: serve the built frontend (dist/) from the same origin as the
 // API, so `docker compose up` yields a single-port deployment. In development

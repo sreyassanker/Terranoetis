@@ -62,9 +62,25 @@ export function useChat(
   }
 
   const nextAiMsgIdRef = useRef(100);
+  const msgIdSeededRef = useRef(false);
   const store = useChatStore;
 
+  // Seed the message-id counter above the highest id already in the store.
+  // After a page reload, tabs restored from localStorage already own ids 100+,
+  // and addMessage() dedupes by id — so a counter that restarts at 100 would
+  // collide with (and silently drop) the first few new messages. Seeding once
+  // above the max makes every new id unique.
+  const seedMsgIdCounter = useCallback(() => {
+    if (msgIdSeededRef.current) return;
+    const st = store.getState();
+    const all = st.chatTabs.flatMap(t => t.messages).concat(st.aiMessages);
+    const max = all.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0);
+    if (max >= nextAiMsgIdRef.current) nextAiMsgIdRef.current = max + 1;
+    msgIdSeededRef.current = true;
+  }, [store]);
+
   const sendAI = useCallback(async (overrideMessage?: string, opts?: { force?: boolean; regen?: boolean; studyAreaAction?: 'draw' | 'detected' | 'skip' | 'global'; bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number }; polygon?: Array<Array<[number, number]>> }) => {
+    seedMsgIdCounter();
     const state = store.getState();
     const userMsg = typeof overrideMessage === 'string' ? overrideMessage : state.aiInput.trim();
     if (!userMsg) return;
@@ -86,6 +102,15 @@ export function useChat(
         ]);
       }
       store.getState().setEditingMessageId(null);
+    }
+
+    // Pure regenerate (no edit): drop the assistant answer(s) that follow the
+    // last user message so the new answer REPLACES the old one instead of
+    // appending a duplicate bubble.
+    if (opts?.regen && editingId == null) {
+      const msgs = store.getState().aiMessages;
+      const lastUserIdx = msgs.map(m => m.role).lastIndexOf('user');
+      if (lastUserIdx >= 0) store.getState().setAiMessages(msgs.slice(0, lastUserIdx + 1));
     }
 
     store.getState().setAiInput('');
@@ -246,7 +271,15 @@ export function useChat(
     // General AI query
     setExpandedStep(-1);
 
-    abortControllerRef.current?.abort();
+    // Abort only THIS tab's in-flight stream before starting a new one. The
+    // shared local abortControllerRef holds the last-started controller across
+    // ALL tabs, so aborting it here killed background streams in other tabs
+    // (contradicting the per-tab streaming model). Use the per-tab registry.
+    if (streamTabId) {
+      store.getState().tabAbortControllers[streamTabId]?.abort();
+    } else {
+      abortControllerRef.current?.abort();
+    }
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     if (options.abortControllerRef) options.abortControllerRef.current = abortController;
@@ -259,14 +292,26 @@ export function useChat(
     let tokenBuffer = '';
     let flushTimer: ReturnType<typeof setInterval> | null = null;
     const patchStreamingMsg = (patch: (m: ChatMessage) => Partial<ChatMessage> | null) => {
-      mutateTab(tab => ({
-        ...tab,
-        messages: tab.messages.map(m => {
-          if (m.id !== streamingMsgId) return m;
-          const p = patch(m);
-          return p ? { ...m, ...p } : m;
-        }),
-      }));
+      if (streamingMsgId === null) return;
+      if (streamTabId) {
+        mutateTab(tab => ({
+          ...tab,
+          messages: tab.messages.map(m => {
+            if (m.id !== streamingMsgId) return m;
+            const p = patch(m);
+            return p ? { ...m, ...p } : m;
+          }),
+        }));
+      } else {
+        // No chat tab exists (god-eye command before the user opened one):
+        // addMessage wrote to the singleton, so patch the singleton too.
+        // mutateTab() would no-op and the bubble would freeze at the first chunk.
+        const cur = store.getState().aiMessages.find(m => m.id === streamingMsgId);
+        if (cur) {
+          const p = patch(cur);
+          if (p) store.getState().updateMessage(streamingMsgId, p);
+        }
+      }
     };
     // Batch streamed tokens and flush ~every 40ms — avoids a store update +
     // full message re-parse per token (O(n²) on long responses).
@@ -315,16 +360,19 @@ export function useChat(
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           message: userMsg,
-          userId: 'browser-user',
           sessionId,
           tier: selectedTier,
           ...(selectedModel && selectedModel !== 'auto' ? { model: selectedModel } : {}),
           ...(opts?.studyAreaAction ? { studyAreaAction: opts.studyAreaAction } : {}),
+          // Ambient (drawn) study area is the DEFAULT; an explicit per-request
+          // bbox (e.g. the user clicked "Use Detected Area") must OVERRIDE it.
+          // Previously the store value was spread last and clobbered opts.bbox,
+          // so "Use Detected Area" silently re-applied a stale drawn area.
+          ...(studyAreaBbox ? { studyAreaBbox } : {}),
           ...(opts?.bbox ? { studyAreaBbox: opts.bbox } : {}),
           ...(opts?.polygon ? { studyAreaPolygon: opts.polygon } : {}),
           recentMessages: contextMessages,
           images: requestImages,
-          ...(studyAreaBbox ? { studyAreaBbox } : {}),
         }),
         signal: abortController.signal,
       });
@@ -341,6 +389,11 @@ export function useChat(
       let lastTraceId: string | null = null;
       let lastModelTier: string | null = null;
       let serverError: string | null = null;
+      // Set when the server asked the user to define a study area / scope. The
+      // stream then ends with no finalText and no streamed bubble — we must NOT
+      // run the local fallback in that case, or the user sees a canned answer
+      // bubble directly under the "choose your study area" prompt (contradiction).
+      let awaitingStudyArea = false;
       let lastRecipe: AiRecipe | null = null;
       let lastReplayed: boolean | undefined;
       let lastPatternId: string | undefined;
@@ -422,9 +475,9 @@ export function useChat(
             if (data.type === 'tool_approval') {
               if (streamingMsgId === null) {
                 streamingMsgId = nextAiMsgIdRef.current++;
-                addMessage({ id: streamingMsgId!, role: 'assistant', content: '', toolEvents: [{ name: data.name, args: data.args, description: data.description, status: 'blocked', riskLevel: data.riskLevel, approvalRequired: true }] });
+                addMessage({ id: streamingMsgId!, role: 'assistant', content: '', toolEvents: [{ name: data.name, args: data.args, description: data.description, status: 'blocked', riskLevel: data.riskLevel, approvalRequired: true, approvalId: data.approvalId }] });
               } else {
-                patchStreamingMsg(m => ({ toolEvents: [...(m.toolEvents || []), { name: data.name, args: data.args, description: data.description, status: 'blocked', riskLevel: data.riskLevel, approvalRequired: true }] }));
+                patchStreamingMsg(m => ({ toolEvents: [...(m.toolEvents || []), { name: data.name, args: data.args, description: data.description, status: 'blocked', riskLevel: data.riskLevel, approvalRequired: true, approvalId: data.approvalId }] }));
               }
             }
             if (data.type === 'subagent' && data.role) {
@@ -457,9 +510,17 @@ export function useChat(
               }
               executeAgentCommands(data.commands);
             }
+            // The `intent` event is INFORMATIONAL only. The server is the single
+            // source of truth for every globe action and emits explicit `commands`
+            // events (flyTo fit-to-area, addPolygon boundary, toggleLayer, scoped
+            // addGeoJSON) which are executed by executeAgentCommands() above.
+            // Acting on the raw intent here used to (a) zoom to a bare POINT,
+            // undoing the server's fit-to-area fly, and (b) toggle the GLOBAL data
+            // layer the server deliberately stripped for place-scoped queries —
+            // showing the whole world's ships/earthquakes instead of just the area.
+            // So we intentionally do NOT fly or toggle from the intent event.
             if (data.type === 'intent') {
-              if (data.location) focusLocation(data.location.lat, data.location.lon, { label: data.location.label || 'Location', color: '#60a5fa', height: 20000 });
-              if (data.layerIds) (data.layerIds as string[]).forEach((lid: string) => { if (!isLayerEnabled(lid)) toggleLayer(lid); });
+              // no-op: server commands drive the globe
             }
             if (data.type === 'output') {
               finalText = data.text;
@@ -483,6 +544,7 @@ export function useChat(
             // Study area request — the server asks the user to choose how to
             // define the spatial boundary before running a computation.
             if (data.type === 'study_area_request') {
+              awaitingStudyArea = true;
               if (streamTabId) {
                 store.getState().setTabTyping(streamTabId, false);
               } else {
@@ -555,7 +617,7 @@ patchStreamingMsg(m => ({ content: `${m.content}\n\n[ERROR] Server error: ${serv
           addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: finalText, ...msgPatch });
         }
         store.getState().streamingMdRef.current.reset();
-      } else if (streamingMsgId === null) {
+      } else if (streamingMsgId === null && !awaitingStudyArea && !serverError) {
         const fallback = await generateLocalResponse(userMsg, loc);
         addMessage({ id: nextAiMsgIdRef.current++, role: 'assistant', content: fallback });
       }
@@ -593,7 +655,7 @@ patchStreamingMsg(m => ({ content: `${m.content}\n\n[ERROR] Server error: ${serv
     if (streamTabId) store.getState().registerTabAbort(streamTabId, null);
   }, [extractLocation, focusLocation, toggleLayer, isLayerEnabled, sendToPipeline,
     sendMonitorCommand, sendScheduleCommand, executeAgentCommands, generateLocalResponse,
-    cleanupThinkingSteps, loadFlightTracks, viewerRef, options, store]);
+    cleanupThinkingSteps, loadFlightTracks, viewerRef, options, store, seedMsgIdCounter]);
 
   const stopGeneration = useCallback(() => {
     const activeTabId = store.getState().activeTabId;
