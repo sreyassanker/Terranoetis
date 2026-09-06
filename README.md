@@ -10,6 +10,7 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 [![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sreyassanker)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/in/sreyassanker)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/sreyassanker)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/playlist?list=PLFp9mjre3Lco&si=yDAxddidcQZ4w_km)
 
 </div>
 
@@ -146,10 +147,10 @@ npx playwright test   # Playwright — Chromium with software WebGL (SwiftShader
 
 Terranoetis is licensed under the **Business Source License 1.1 (BUSL-1.1)**.
 
-- ✅ **Free** to use, run locally, self-host for yourself, modify, learn from, and **contribute**.
-- 💰 **Commercial use** — offering Terranoetis (or a modified version) to third parties as a hosted / embedded / SaaS service, or embedding it in a product you sell — requires a **separate commercial license**. Contact via [GitHub](https://github.com/sreyassanker).
-- 🕓 Each version automatically converts to the **MIT License** **4 years** after it is published.
+- **Free** to use, run locally, self-host for yourself, modify, learn from, and **contribute**.
+- **Commercial use** — offering Terranoetis (or a modified version) to third parties as a hosted / embedded / SaaS service, or embedding it in a product you sell — requires a **separate commercial license**. Contact: **sreyassanker001@gmail.com**.
+- Each version automatically converts to the **MIT License** **4 years** after it is published.
 
 Third-party components (CesiumJS, ONNX models, satellite data sources, etc.) remain under their own original licenses.
 
-Copyright (c) 2026 Terranoetis.
+Copyright (c) 2026 Sreyas S S.
