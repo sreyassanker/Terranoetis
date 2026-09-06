@@ -2,8 +2,6 @@
   <img src="docs/Terranoetis_Thumbnail.png" alt="Terranoetis" width="100%" />
 </p>
 
-<h1 align="center">Terranoetis</h1>
-
 A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3D globe with a comprehensive backend serving live environmental data, satellite imagery, **150 real scientific equation engines**, physics simulations, realtime voice, and AI-driven cognition. Unlike a passive globe viewer, Terranoetis **computes** — it runs literature-grounded equations over live data, reasons about what it sees, and paints real results back onto the Earth.
 
 <div align="center">
@@ -146,6 +144,12 @@ npx playwright test   # Playwright — Chromium with software WebGL (SwiftShader
 
 ## License
 
-Released under the [MIT License](LICENSE).
+Terranoetis is licensed under the **Business Source License 1.1 (BUSL-1.1)**.
+
+- ✅ **Free** to use, run locally, self-host for yourself, modify, learn from, and **contribute**.
+- 💰 **Commercial use** — offering Terranoetis (or a modified version) to third parties as a hosted / embedded / SaaS service, or embedding it in a product you sell — requires a **separate commercial license**. Contact via [GitHub](https://github.com/sreyassanker).
+- 🕓 Each version automatically converts to the **MIT License** **4 years** after it is published.
+
+Third-party components (CesiumJS, ONNX models, satellite data sources, etc.) remain under their own original licenses.
 
 Copyright (c) 2026 Terranoetis.
