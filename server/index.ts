@@ -10963,7 +10963,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
 - NEVER invent specific current readings, station IDs, coordinates, counts, or names. Never present recalled facts as live data.
 - If you state any figure from memory (GDP, prices, counts), you MUST prefix the answer with "General knowledge (may be outdated): ".
 - For historical/general questions, answer normally but still start with "General knowledge:".
-- Write MATH in LaTeX ($...$ inline, $$...$$ display) — the chat renders KaTeX. Never use Unicode math symbols (√, ², ±) for formulas.
+- Write math in plain readable text (e.g. x = (-b ± sqrt(b^2 - 4ac)) / (2a)). Do NOT use LaTeX ($...$, \\frac) — this interface cannot render it.
 
 Question: ${message}
 
