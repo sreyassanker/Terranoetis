@@ -147,3 +147,32 @@ test('reload with an unfinished chat does NOT resurrect a running process panel'
   await expect(page.locator('.braille-spin')).toHaveCount(0);
   await expect(page.locator('.live-process-timer.ticking')).toHaveCount(0);
 });
+
+test('hazard forecast paints a MODEL FORECAST risk area on the globe and clears on next query', async ({ page }) => {
+  await openChat(page);
+  const forecastEntities = () => page.evaluate(() => {
+    const v = (window as unknown as { __VIEWER__?: { entities: { values: Array<{ name?: string }> } } }).__VIEWER__;
+    if (!v) return [];
+    return v.entities.values
+      .filter((e) => /MODEL FORECAST/i.test(e.name || ''))
+      .map((e) => e.name || '');
+  });
+
+  expect(await forecastEntities(), 'forecast entities present before asking').toHaveLength(0);
+
+  await sendChat(page, 'earthquake risk near tokyo next week');
+  // Wait for the stream to finish (final badge on the last assistant bubble).
+  const lastAssistant = page.locator('.ai-msg.assistant').last();
+  await expect(lastAssistant).toBeVisible({ timeout: 120000 });
+  await lastAssistant.locator('.msg-tier-badge').waitFor({ timeout: 180000 }).catch(() => {});
+
+  const painted = await forecastEntities();
+  expect(painted.length, 'no forecast risk area painted on the globe').toBeGreaterThanOrEqual(2);
+  expect(painted.some((n) => /MODEL FORECAST/i.test(n)), 'forecast entity label missing MODEL FORECAST wording').toBe(true);
+
+  // A following non-hazard query must clean the forecast layer up.
+  await sendChat(page, 'what is the gdp of japan');
+  await page.locator('.ai-msg.assistant').last().locator('.msg-tier-badge').waitFor({ timeout: 180000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+  expect(await forecastEntities(), 'stale forecast entities lingered after next query').toHaveLength(0);
+});

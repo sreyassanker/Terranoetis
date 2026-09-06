@@ -69,6 +69,7 @@ import { scenarioDb } from './scenarios/scenarioDb';
 import { generateBatch, getBatchProgress } from './scenarios/batchGenerator';
 import { predictionValidator } from './world-model/predictionValidator';
 import { forecastLedger } from './world-model/forecastLedger';
+import { buildForecastGlobeCommands } from './world-model/forecastGlobe';
 import { ChatKgBridge } from './kgV2/chatKgBridge';
 import { causalGraph } from './world-model/causalGraph';
 import { CausalKnowledgeGraph } from './causal/kg';
@@ -9124,7 +9125,7 @@ function bboxOverlaps(a: { latMin: number; latMax: number; lonMin: number; lonMa
 async function computeHazardForecast(
   location: { lat: number; lon: number; label?: string },
   message: string,
-): Promise<{ text: string; count: number; hazards: string[] } | null> {
+): Promise<{ text: string; count: number; hazards: string[]; preds: Array<{ hazardType: string; probability: number; severity: string; timeframe: string; confidence: number }> } | null> {
   const layers = hazardLayersFor(message);
   if (layers.length === 0 || !location) return null;
   try {
@@ -9156,6 +9157,7 @@ async function computeHazardForecast(
       text: `\n[Hazard ensemble forecast — physics+statistical+causal models for ${location.label || `${location.lat},${location.lon}`}.${grounded} Cite these as MODEL PROBABILITIES, not observed facts; they are the platform's predictive world-model, not a live reading]\n${lines.join('\n')}\n`,
       count: top.length,
       hazards: top.map(p => p.hazardType),
+      preds: top,
     };
   } catch (e) {
     logger.warn({ err: (e as Error).message }, 'Hazard forecast failed (non-critical)');
@@ -10567,6 +10569,13 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
           hazardForecastStr = fc.text;
           hazardForecastHazards = fc.hazards;
           sendEvent('step', { stepType: 'hazard_forecast', text: `Ran ensemble hazard forecast (${fc.count} models) for ${forecastLoc.label || 'the area'}`, status: 'completed' });
+          // Roadmap item 4: paint the forecast on the globe — deterministic
+          // risk circle + labeled pin, tagged layer:'forecast' for cleanup.
+          const fcCommands = buildForecastGlobeCommands(forecastLoc, fc.preds);
+          if (fcCommands.length > 0 && !abortController.signal.aborted) {
+            sendEvent('commands', fcCommands);
+            sendEvent('step', { stepType: 'forecast_render', text: 'Rendered ensemble forecast risk area on the globe', status: 'completed' });
+          }
         }
       }
     }

@@ -333,22 +333,29 @@ export function useChat(
       }
     };
 
-    try {
+      try {
       // Clear previous AI entities
       const v0 = viewerRef.current;
       if (v0) {
-        const rawEntities = (v0 as unknown as { entities: unknown }).entities;
-        // Cesium EntityCollection has .values() method; newer builds expose an Array.
-        const entityList: Record<string, unknown>[] = typeof (rawEntities as { values?: () => unknown })?.values === 'function'
-          ? Array.from((rawEntities as { values(): IterableIterator<Record<string, unknown>> }).values())
-          : Array.isArray(rawEntities) ? rawEntities as Record<string, unknown>[] : [];
+        // Cesium EntityCollection.values is a GETTER returning a plain array
+        // (not a method) — the old `typeof values === 'function'` check always
+        // fell through to [] and the cleanup silently never ran.
+        const coll = (v0 as unknown as { entities: { values?: unknown; remove?: (e: Record<string, unknown>) => void } }).entities;
+        const entityList: Record<string, unknown>[] = Array.isArray(coll?.values)
+          ? coll.values as Record<string, unknown>[]
+          : typeof coll?.values === 'function'
+            ? Array.from((coll.values as () => IterableIterator<Record<string, unknown>>)())
+            : [];
         const toRemove = entityList.filter((e: Record<string, unknown>) => {
-          const props = e.properties as Record<string, unknown> | undefined;
-          const layer = props?.layer;
-          return layer === 'heatmap' || layer === 'chart' || layer === 'geojson';
+          // entity.properties is a Cesium PropertyBag — values are wrapped in
+          // ConstantProperty, so the raw `props.layer` comparison never matched
+          // (pre-existing bug: heatmap/chart/geojson entities accumulated across
+          // queries). Resolve the real value via getValue(time) first.
+          const bag = e.properties as { getValue?: (t: Cesium.JulianDate) => { layer?: string } } | undefined;
+          const layer = bag?.getValue?.(Cesium.JulianDate.now())?.layer;
+          return layer === 'heatmap' || layer === 'chart' || layer === 'geojson' || layer === 'forecast';
         });
         for (const e of toRemove) {
-          const coll = rawEntities as { remove(e: Record<string, unknown>): void };
           if (typeof coll.remove === 'function') coll.remove(e);
         }
       }
