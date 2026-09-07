@@ -80,6 +80,9 @@ const CASES = [
   { kind: 'vision', name: 'sees-red', q: 'what color is this image? answer in one word.', mustMatch: /red/i },
   // ── forecast grounding + labeling (audit P4) ──
   { kind: 'ground', name: 'quake-forecast-labeled', q: 'what is the probability of a major earthquake near tokyo next week', mustMatch: /%|probability|forecast/i },
+  // ── time-series comparison tools (roadmap item 5) ──
+  { kind: 'ground', name: 'quake-period-compare', q: 'are there more earthquakes near tokyo this month than last month', tools: ['earthquake_activity'], mustMatch: /\d/ },
+  { kind: 'ground', name: 'temp-anomaly-yoy', q: 'is berlin hotter this summer than last year', tools: ['temperature_anomaly'], mustMatch: /hotter|cooler|delta|mean|°C/i },
 ];
 
 async function runStream(message, sessionId, extra = {}) {

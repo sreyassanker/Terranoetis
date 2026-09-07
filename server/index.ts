@@ -70,6 +70,7 @@ import { generateBatch, getBatchProgress } from './scenarios/batchGenerator';
 import { predictionValidator } from './world-model/predictionValidator';
 import { forecastLedger } from './world-model/forecastLedger';
 import { buildForecastGlobeCommands } from './world-model/forecastGlobe';
+import { bucketQuakePeriods, quakeDelta, powerMean, annualMeansFromNsidc } from './data/timeseriesCompare';
 import { ChatKgBridge } from './kgV2/chatKgBridge';
 import { causalGraph } from './world-model/causalGraph';
 import { CausalKnowledgeGraph } from './causal/kg';
@@ -396,6 +397,7 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
     req.path === '/health/who-outbreaks' || req.path === '/health/who-disease' || req.path.startsWith('/health/who-disease/') ||
     req.path === '/shakemap/recent' || req.path === '/spc/outlook' ||
     req.path === '/climate/anomalies' || req.path === '/climate/co2' || req.path === '/climate/sea-ice' ||
+    req.path === '/climate/temp-anomaly' || req.path === '/seismic/activity-compare' ||
     req.path === '/economics/worldbank' || req.path === '/imf' || req.path === '/internet/outages' ||
     req.path === '/supply-chain/trade' || req.path === '/prediction-markets' || req.path === '/coingecko' ||
     req.path === '/population/worldpop' || req.path === '/stac/search' || req.path === '/stac/collections' ||
@@ -734,7 +736,9 @@ function registerDefaultTools() {
     { name:'acled_country', category:'osint', description:'ACLED armed-conflict events for a specific country with date range (requires ACLED_API_KEY). Point records.', exampleQueries:['conflict events in ukraine','acled events for sudan','clashes in myanmar this month'], schema:{type:'api',endpoint:'/api/conflict/acled',method:'GET',params:{country:'country name',start_date:'YYYY-MM-DD',end_date:'YYYY-MM-DD'}} },
     { name:'climate_anomalies', category:'weather', description:'Global climate anomalies — temperature/precipitation anomalies vs baseline. Record data.', exampleQueries:['climate anomalies','temperature anomaly data','precipitation anomalies'], schema:{type:'api',endpoint:'/api/climate/anomalies',method:'GET'} },
     { name:'climate_co2', category:'atmosphere', description:'Atmospheric CO2 — latest ppm, yearly increase, 24-month tail, AND annualMeans since 1959 for multi-year comparison questions. Series data.', exampleQueries:['co2 levels','atmospheric carbon dioxide','co2 trend','co2 in 2015 vs today'], schema:{type:'api',endpoint:'/api/climate/co2',method:'GET'} },
-    { name:'climate_sea_ice', category:'cryosphere', description:'Sea-ice extent series — Arctic/Antarctic sea-ice extent stats. Series data.', exampleQueries:['sea ice extent','arctic ice trend','antarctic sea ice'], schema:{type:'api',endpoint:'/api/climate/sea-ice',method:'GET'} },
+    { name:'climate_sea_ice', category:'cryosphere', description:'Sea-ice extent — latest, 45-day tail, annualMeans since 1978 and yoyDeltaMkm2 for year-over-year comparison. hemisphere=north|south.', exampleQueries:['sea ice extent','arctic ice trend','antarctic sea ice'], schema:{type:'api',endpoint:'/api/climate/sea-ice',method:'GET'} },
+    { name:'earthquake_activity', category:'seismic', description:'Earthquake activity, current period vs the previous one near a point: counts, max and avg magnitude, server-computed deltaCount/pctChange. Use for "more earthquakes this month than last month".', exampleQueries:['earthquake activity trend','earthquakes this month vs last month','increasing seismicity'], schema:{type:'api',endpoint:'/api/seismic/activity-compare',method:'GET',params:{lat:'latitude',lon:'longitude',radiusKm:'radius km (default 500)',periodDays:'period days (default 30)',minMag:'min magnitude (default 2.5)'}} },
+    { name:'temperature_anomaly', category:'weather', description:'Temperature this window vs the SAME window last year at a point — mean/min/max °C and deltaC computed server-side (NASA POWER). Use for "is it hotter than last year".', exampleQueries:['hotter than last year','temperature anomaly','this year vs last year temperature'], schema:{type:'api',endpoint:'/api/climate/temp-anomaly',method:'GET',params:{lat:'latitude',lon:'longitude',days:'window days (default 30, max 365)'}} },
     { name:'radar_scan', category:'weather', description:'RainViewer radar tile metadata — global precipitation radar coverage timestamps for tile overlay. Tile/record data. For station scans use 64_nexrad_level_ii.', exampleQueries:['rain radar coverage','rainviewer radar times','precipitation radar tiles'], schema:{type:'api',endpoint:'/api/radar/rainviewer',method:'GET'} },
     { name:'usgs_streamflow', category:'water_quality', description:'USGS real-time streamflow — river gauge height, discharge and water temp within a bbox (waterservices.usgs.gov). Point records.', exampleQueries:['river discharge near sacramento','usgs streamflow gauges','river levels in this area'], schema:{type:'api',endpoint:'/api/usgs/water',method:'GET',params:{latMin:'min latitude',latMax:'max latitude',lonMin:'min longitude',lonMax:'max longitude',startDate:'ISO start date',endDate:'ISO end date'}} },
     { name:'who_outbreaks', category:'health', description:'WHO disease outbreak news — current verified outbreaks (disease, country, date). Record data.', exampleQueries:['who disease outbreaks','current epidemics','disease outbreak news'], schema:{type:'api',endpoint:'/api/health/who-outbreaks',method:'GET'} },
@@ -5785,6 +5789,92 @@ app.get('/api/climate/power', async (req: express.Request, res: express.Response
   }
 });
 
+// ── Time-series comparison tools (roadmap item 5) ───────────────────
+// Server-side period math so the LLM cites computed deltas instead of
+// eyeballing raw arrays. All upstreams keyless; honest nulls when a
+// baseline is missing.
+
+// Earthquake activity: current period vs the one before it, near a point.
+app.get('/api/seismic/activity-compare', async (req: express.Request, res: express.Response) => {
+  const lat = Number(req.query.lat), lon = Number(req.query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    return res.status(400).json({ error: 'valid lat and lon required' });
+  }
+  const radiusKm = Math.min(2000, Math.max(50, Number(req.query.radiusKm) || 500));
+  const periodDays = Math.min(180, Math.max(7, Number(req.query.periodDays) || 30));
+  const minMag = Math.min(8, Math.max(1, Number(req.query.minMag) || 2.5));
+  const cacheKey = `quake_activity_${lat.toFixed(2)}_${lon.toFixed(2)}_${radiusKm}_${periodDays}_${minMag}`;
+  const hit = cache.get(cacheKey);
+  if (hit) { res.json(hit); return; }
+  try {
+    const dLat = radiusKm / 111.32;
+    const dLon = dLat / Math.max(0.1, Math.abs(Math.cos((lat * Math.PI) / 180)));
+    const bbox = {
+      minLat: Math.max(-90, lat - dLat), maxLat: Math.min(90, lat + dLat),
+      minLon: ((lon - dLon + 540) % 360) - 180, maxLon: ((lon + dLon + 540) % 360) - 180,
+    };
+    const eq = await dynamicTools.execute('earthquakes', { ...bbox, hours: periodDays * 2, minMag }, AbortSignal.timeout(12000)) as { features?: unknown[] };
+    const feats = (eq?.features || []) as Parameters<typeof bucketQuakePeriods>[0];
+    const now = Date.now();
+    const split = now - periodDays * 86_400_000;
+    const { current, previous } = bucketQuakePeriods(feats, split, periodDays * 86_400_000);
+    const payload = {
+      location: { lat, lon, radiusKm },
+      periodDays, minMag,
+      current: { ...current, window: { from: new Date(split).toISOString().slice(0, 10), to: new Date(now).toISOString().slice(0, 10) } },
+      previous: { ...previous, window: { from: new Date(split - periodDays * 86_400_000).toISOString().slice(0, 10), to: new Date(split).toISOString().slice(0, 10) } },
+      ...quakeDelta(current, previous),
+      source: 'USGS earthquake catalog (computed server-side)',
+    };
+    cache.set(cacheKey, payload, 600);
+    res.json(payload);
+  } catch (e) {
+    res.status(502).json({ error: `USGS activity comparison unavailable: ${String(e)}` });
+  }
+});
+
+// Temperature: this window vs the same window last year (NASA POWER).
+app.get('/api/climate/temp-anomaly', async (req: express.Request, res: express.Response) => {
+  const lat = Number(req.query.lat), lon = Number(req.query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    return res.status(400).json({ error: 'valid lat and lon required' });
+  }
+  const days = Math.min(365, Math.max(7, Number(req.query.days) || 30));
+  const cacheKey = `temp_anomaly_${lat.toFixed(2)}_${lon.toFixed(2)}_${days}`;
+  const hit = cache.get(cacheKey);
+  if (hit) { res.json(hit); return; }
+  const ymd = (d: Date) => d.toISOString().slice(0, 10).replace(/-/g, '');
+  try {
+    const end = new Date(Date.now() - 86_400_000); // POWER lags ~1 day
+    const start = new Date(end.getTime() - (days - 1) * 86_400_000);
+    // setFullYear MUTATES the Date — work on copies or the "current" window
+    // silently becomes last year's.
+    const endLY = new Date(end); endLY.setFullYear(endLY.getFullYear() - 1);
+    const startLY = new Date(start); startLY.setFullYear(startLY.getFullYear() - 1);
+    const fetchWindow = async (a: Date, b: Date) => {
+      const u = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=T2M&community=RE&longitude=${lon}&latitude=${lat}&start=${ymd(a)}&end=${ymd(b)}&format=JSON`;
+      const r = await fetch(u, { signal: AbortSignal.timeout(20000) });
+      if (!r.ok) throw new Error(`POWER upstream ${r.status}`);
+      const j = await r.json() as { properties?: { parameter?: { T2M?: Record<string, number> }; T2M?: Record<string, number> } };
+      return j.properties?.parameter?.T2M || j.properties?.T2M || {};
+    };
+    const [cur, prev] = await Promise.all([fetchWindow(start, end), fetchWindow(startLY, endLY)]);
+    const mCur = powerMean(cur), mPrev = powerMean(prev);
+    const payload = {
+      location: { lat, lon },
+      window: { from: ymd(start), to: ymd(end), days },
+      current: mCur, samePeriodLastYear: mPrev,
+      deltaC: (mCur.mean !== null && mPrev.mean !== null) ? Math.round((mCur.mean - mPrev.mean) * 10) / 10 : null,
+      note: 'T2M °C averaged server-side; deltaC = current minus same window last year',
+      source: 'NASA POWER daily (computed server-side)',
+    };
+    cache.set(cacheKey, payload, 86400);
+    res.json(payload);
+  } catch (e) {
+    res.status(502).json({ error: `POWER temperature comparison unavailable: ${String(e)}` });
+  }
+});
+
 // ── GDELT Global Event Database ──────────────────────────────────────
 app.get('/api/gdelt', async (req: express.Request, res: express.Response) => {
   const lat = req.query.lat as string;
@@ -7945,7 +8035,19 @@ app.get('/api/climate/sea-ice', async (req: express.Request, res: express.Respon
     }
     if (tail.length === 0) return res.status(502).json({ error: 'NSIDC sea-ice series empty' });
     const latest = tail[tail.length - 1];
-    const payload = { hemisphere, latest, seriesTail: tail, source: 'NSIDC G02135 daily extent' };
+    // Roadmap item 5: annual means over the FULL daily series enable
+    // year-over-year comparison questions ("Arctic ice extent vs 2012").
+    const annualMeans = annualMeansFromNsidc(lines);
+    const complete = annualMeans.filter(a => a.days >= 300);
+    const lastFull = complete[complete.length - 1];
+    const prevFull = complete[complete.length - 2];
+    const payload = {
+      hemisphere, latest, seriesTail: tail,
+      annualMeans,
+      yoyDeltaMkm2: (lastFull && prevFull) ? Math.round((lastFull.meanExtentMkm2 - prevFull.meanExtentMkm2) * 100) / 100 : null,
+      yoyYears: (lastFull && prevFull) ? `${prevFull.year} → ${lastFull.year}` : null,
+      source: 'NSIDC G02135 daily extent',
+    };
     cache.set(cacheKey, payload, 86400);
     res.json(payload);
   } catch (e) {
