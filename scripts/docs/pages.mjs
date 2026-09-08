@@ -12,9 +12,9 @@ const verifiedFact = (label, value, cite) => [`<strong>${label}</strong>`, `${va
 export const CORE_PAGES = [
   // ═════════════════════════════════ DOCS HOME ══════════════════════════
   {
-    path: 'index.html', depth: 0,
+    path: 'documentation.html', depth: 0,
     title: 'Documentation',
-    desc: 'Official documentation for Terranoetis — a geospatial intelligence platform with 150 literature-cited equation engines, seven hazard-physics simulation kernels, AI cognition and live-data monitoring. Every claim is cited to source and labelled measured or inspected.',
+    desc: 'Official documentation hub for Terranoetis — a geospatial intelligence platform with 150 literature-cited equation engines, seven hazard-physics simulation kernels, AI cognition and live-data monitoring. Every claim is cited to source and labelled measured or inspected.',
     breadcrumb: [{ label: 'Documentation home' }],
     tags: ['<span class="tag tag-measured">REVIEWED 2026-09-08</span>'],
     sections: [

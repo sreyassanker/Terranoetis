@@ -1,22 +1,29 @@
-<!DOCTYPE html>
+// Product landing page (docs/index.html). Generated — content must remain
+// traceable: numbers here are the measured values published in the docs set.
+import { DOCS_VERSION, LAST_REVIEWED, SITE_ORIGIN, REPO } from './site.mjs';
+
+export const LANDING_PATH = 'index.html';
+
+export function renderLanding() {
+  return `<!DOCTYPE html>
 <html lang="en" class="landing">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Terranoetis — Real-Time Geospatial Intelligence Platform</title>
 <meta name="description" content="Terranoetis: 150 literature-cited equation engines, seven hazard-physics simulation kernels, live-data monitoring and AI-assisted analysis on a CesiumJS globe. Documentation with file-level citations and measured verification.">
-<link rel="canonical" href="https://terranoetis.com/">
+<link rel="canonical" href="${SITE_ORIGIN}/">
 <link rel="stylesheet" href="assets/docs.css">
 <link rel="stylesheet" href="assets/landing.css">
 <link rel="icon" href="terranoetis.png" type="image/png">
 <meta property="og:title" content="Terranoetis — Real-Time Geospatial Intelligence Platform">
 <meta property="og:description" content="150 literature-cited equation engines · 7 hazard-physics kernels · live-data monitoring · AI-assisted analysis on a 3D globe.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://terranoetis.com/">
-<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta property="og:url" content="${SITE_ORIGIN}/">
+<meta property="og:image" content="${SITE_ORIGIN}/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="docs-version" content="${DOCS_VERSION}">
+<meta name="docs-last-reviewed" content="${LAST_REVIEWED}">
 <meta name="generator" content="scripts/docs/landing.mjs">
 </head>
 <body>
@@ -29,7 +36,7 @@
       <a href="capabilities/hazard-simulations.html">Capabilities</a>
       <a href="methodology.html">Verification</a>
       <a href="deployment.html">Deployment</a>
-      <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
+      <a href="${REPO}" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
@@ -39,13 +46,13 @@
   <section class="hero" aria-labelledby="hero-title">
     <div class="hero-inner">
       <div>
-        <span class="hero-badge">Open source (BUSL-1.1) · verified documentation · 2026-09-08</span>
+        <span class="hero-badge">Open source (BUSL-1.1) · verified documentation · ${LAST_REVIEWED}</span>
         <h1 id="hero-title">Terranoetis</h1>
         <p class="tagline">A real-time geospatial intelligence platform for disaster research and operations: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equations, seven hazard-physics simulation kernels, continuous live-data monitoring, and an AI chat pipeline with dual-process reasoning. The documentation states what the code does — with file-level citations, and measured evidence wherever it was executable.</p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="documentation.html">Open the documentation</a>
           <a class="btn btn-ghost" href="capabilities/hazard-simulations.html">Hazard simulations</a>
-          <a class="btn btn-ghost" href="https://github.com/sreyassanker/Terranoetis" rel="noopener">Source on GitHub</a>
+          <a class="btn btn-ghost" href="${REPO}" rel="noopener">Source on GitHub</a>
         </div>
       </div>
       <figure>
@@ -127,15 +134,16 @@ curl -s http://localhost:3001/api/health   # measured boot: status + component c
     <p>Capability pages, parameter contracts, API reference and verification records — all cited to source.</p>
     <div class="hero-actions" style="justify-content:center">
       <a class="btn btn-primary" href="documentation.html">Documentation hub</a>
-      <a class="btn btn-ghost" href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub repository</a>
+      <a class="btn btn-ghost" href="${REPO}" rel="noopener">GitHub repository</a>
     </div>
   </section>
 </main>
 <footer class="landing-footer">
   <div class="inner">
-    <span>Terranoetis v3.0.0 · landing verified 2026-09-08 · <a href="sitemap.xml">sitemap</a> · <a href="governance/style-guide.html">style guide</a></span>
-    <span>License <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> · source <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> · third-party components retain their own licenses (CesiumJS et al.)</span>
+    <span>Terranoetis v${DOCS_VERSION} · landing verified ${LAST_REVIEWED} · <a href="sitemap.xml">sitemap</a> · <a href="governance/style-guide.html">style guide</a></span>
+    <span>License <a href="${REPO}/blob/main/LICENSE">BUSL-1.1</a> · source <a href="${REPO}">${REPO.replace('https://', '')}</a> · third-party components retain their own licenses (CesiumJS et al.)</span>
   </div>
 </footer>
 </body>
-</html>
+</html>`;
+}
