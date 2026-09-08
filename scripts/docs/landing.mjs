@@ -30,7 +30,7 @@ export function renderLanding() {
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="index.html">TERRANOETIS<small>Platform &amp; Documentation</small></a>
+    <a class="brand" href="index.html">TERRANOETIS</a>
     <nav class="top-nav" aria-label="Primary">
       <a href="documentation.html">Documentation</a>
       <a href="capabilities/hazard-simulations.html">Capabilities</a>
@@ -46,7 +46,7 @@ export function renderLanding() {
   <section class="hero" aria-labelledby="hero-title">
     <div class="hero-inner">
       <div>
-        <span class="hero-badge">Open source (BUSL-1.1) · verified documentation · ${LAST_REVIEWED}</span>
+        <span class="hero-badge">Open source · BUSL-1.1 · v${DOCS_VERSION}</span>
         <h1 id="hero-title">Terranoetis</h1>
         <p class="tagline">A real-time geospatial intelligence platform for disaster research and operations: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equations, seven hazard-physics simulation kernels, continuous live-data monitoring, and an AI chat pipeline with dual-process reasoning. The documentation states what the code does — with file-level citations, and measured evidence wherever it was executable.</p>
         <div class="hero-actions">
@@ -135,6 +135,13 @@ curl -s http://localhost:3001/api/health   # measured boot: status + component c
     <div class="hero-actions" style="justify-content:center">
       <a class="btn btn-primary" href="documentation.html">Documentation hub</a>
       <a class="btn btn-ghost" href="${REPO}" rel="noopener">GitHub repository</a>
+    </div>
+    <div class="badge-row" aria-label="Maintainer links">
+      <a href="https://sreyassanker.vercel.app" rel="noopener"><img alt="Portfolio" src="https://img.shields.io/badge/Portfolio-000000?style=for-the-badge&logo=vercel&logoColor=white"></a>
+      <a href="https://github.com/sreyassanker" rel="noopener"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white"></a>
+      <a href="https://linkedin.com/in/sreyassanker" rel="noopener"><img alt="LinkedIn" src="https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white"></a>
+      <a href="https://buymeacoffee.com/sreyassanker" rel="noopener"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black"></a>
+      <a href="https://youtube.com/playlist?list=PLFp9mjre3Lco&si=yDAxddidcQZ4w_km" rel="noopener"><img alt="YouTube" src="https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white"></a>
     </div>
   </section>
 </main>
