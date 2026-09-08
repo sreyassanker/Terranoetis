@@ -57,14 +57,14 @@ export function renderLanding() {
       </div>
       <figure>
         <img src="Terranoetis_Thumbnail.webp" alt="Terranoetis globe interface showing live data layers and analysis panels over a 3D Earth" width="1280" height="720" loading="eager">
-        <figcaption>Terranoetis client (React 19 · CesiumJS 1.140). Image from this repository.</figcaption>
+        <figcaption>The Terranoetis globe — live data layers and analysis panels on a CesiumJS terrain.</figcaption>
       </figure>
     </div>
     <div class="stat-strip" role="list" aria-label="Verified platform facts">
-      <div role="listitem"><strong>150</strong><span>equation engines — ids 1–150 verified programmatically</span></div>
-      <div role="listitem"><strong>7</strong><span>simulation kernels — all executed in verification (2026-09-08)</span></div>
-      <div role="listitem"><strong>1,702</strong><span>tests passing — 1,653 unit + 49 integration, measured</span></div>
-      <div role="listitem"><strong>82</strong><span>registered external API integrations (counted)</span></div>
+      <div role="listitem"><strong>150</strong><span>literature-cited equation engines · 7 parts · 26 domains</span></div>
+      <div role="listitem"><strong>7</strong><span>hazard-physics simulation kernels with internal validation gates</span></div>
+      <div role="listitem"><strong>1,700+</strong><span>unit &amp; integration tests passing</span></div>
+      <div role="listitem"><strong>82</strong><span>registered external API integrations</span></div>
     </div>
   </section>
 
@@ -80,15 +80,15 @@ export function renderLanding() {
       <div class="feat"><span class="k">Cognition</span><h3>AI chat pipeline</h3><p>Eight-intent router, System 1 / System 2 thresholds (0.92 / 0.70), 4-agent debate with critic, tool loop over live data and kernels; nine-provider model router with local GGUF fallback.</p><a class="more" href="capabilities/ai-cognition.html">Cognition →</a></div>
     </div>
     <div class="showcase">
-      <figure><img src="assets/showcase/multi-hazard.gif" alt="Multi-hazard risk surfaces fused from live seismic, fire, storm and flood data rendered on the 3D globe" width="640" height="360" loading="lazy"><figcaption>Multi-hazard risk surfaces from live data — rendered by the client’s WebGL primitives.</figcaption></figure>
-      <figure><img src="assets/showcase/landslide.gif" alt="Landslide debris-flow simulation over real topography, depth field animated in time steps" width="640" height="360" loading="lazy"><figcaption>Voellmy–Salm debris flow over globe-sampled terrain — kernel output, not an animation preset.</figcaption></figure>
+      <figure><img src="assets/showcase/multi-hazard.gif" alt="Multi-hazard risk surfaces fused from live seismic, fire, storm and flood data rendered on the 3D globe" width="640" height="360" loading="lazy"><figcaption>Multi-hazard risk surfaces fused from live seismic, fire, storm and flood data.</figcaption></figure>
+      <figure><img src="assets/showcase/landslide.gif" alt="Landslide debris-flow simulation over real topography, depth field animated in time steps" width="640" height="360" loading="lazy"><figcaption>Landslide debris-flow simulation propagating over real topography.</figcaption></figure>
     </div>
   </section>
 
   <section class="band alt" id="hazards" aria-labelledby="hazards-h">
     <div class="band-head">
       <h2 id="hazards-h">Seven hazards, seven cited physics pages</h2>
-      <p>Every capability page carries the governing equations with their published sources, the UI → wire → kernel parameter contract, outputs with units, spatial-origin semantics, the kernel’s own validity limits verbatim, and reproduction commands. Figures below are measured executions from 2026-09-08.</p>
+      <p>Every capability page carries the governing equations with their published sources, the UI → wire → kernel parameter contract, outputs with units, spatial-origin semantics, the kernel’s own validity limits verbatim, and reproduction commands — the figures below come from executing each kernel.</p>
     </div>
     <div class="hz-grid">
       <div class="hz"><h3><a href="capabilities/earthquake.html">Earthquake</a></h3><p>BSSA14 NGA-West2 GMPE + USGS instrumental MMI. M 7.5 test → max PGA 251.0 cm/s², 0.008 s compute, 166 ms end-to-end job.</p></div>
@@ -108,9 +108,9 @@ export function renderLanding() {
     </div>
     <div class="feat-grid">
       <div class="feat"><h3>Kernel self-gates</h3><p>GMPE sanity, hurricane physics checks, closed-box conservation and lake-at-rest proofs abort emission on failure — each reproduced in review.</p></div>
-      <div class="feat"><h3>10-item limitation register</h3><p>From tsunami solver instability (D-1) to wire-constant artifacts (D-9): every finding is cited and linked from its capability page.</p></div>
-      <div class="feat"><h3>Discrepancy log</h3><p>Ten documentation errors found and corrected during this pass — including the “Kaggle GPU kernels” wording and DOI-count claims.</p></div>
-      <div class="feat"><h3>Reproducible numbers</h3><p>Each measured figure ships with the command that produced it, on one stated environment (Apple M1, Node 26, Python 3.14.5, 2026-09-08).</p></div>
+      <div class="feat"><h3>Published limitation register</h3><p>Every numerical or engineering finding from the review — from solver behaviour to wire-constant artifacts — is cited and linked from its capability page.</p></div>
+      <div class="feat"><h3>Discrepancy log</h3><p>Documentation claims are audited against the code; anything the code does not support is corrected and logged.</p></div>
+      <div class="feat"><h3>Reproducible numbers</h3><p>Every measured figure ships with the command that produced it, so any reviewer can rerun the check on their own machine.</p></div>
     </div>
     <p style="margin-top:1.2rem"><a class="btn btn-primary" href="methodology.html" style="background:var(--c-accent)">Read the methodology &amp; evidence runs</a></p>
   </section>
@@ -136,7 +136,8 @@ curl -s http://localhost:3001/api/health   # measured boot: status + component c
       <a class="btn btn-primary" href="documentation.html">Documentation hub</a>
       <a class="btn btn-ghost" href="${REPO}" rel="noopener">GitHub repository</a>
     </div>
-    <div class="badge-row" aria-label="Maintainer links">
+    <div class="badge-row" aria-label="Repository and maintainer links">
+      <a href="${REPO}/stargazers" rel="noopener"><img alt="GitHub stars" src="https://img.shields.io/github/stars/sreyassanker/Terranoetis?style=for-the-badge&logo=github&color=181717"></a>
       <a href="https://sreyassanker.vercel.app" rel="noopener"><img alt="Portfolio" src="https://img.shields.io/badge/Portfolio-000000?style=for-the-badge&logo=vercel&logoColor=white"></a>
       <a href="https://github.com/sreyassanker" rel="noopener"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white"></a>
       <a href="https://linkedin.com/in/sreyassanker" rel="noopener"><img alt="LinkedIn" src="https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white"></a>
@@ -147,7 +148,7 @@ curl -s http://localhost:3001/api/health   # measured boot: status + component c
 </main>
 <footer class="landing-footer">
   <div class="inner">
-    <span>Terranoetis v${DOCS_VERSION} · landing verified ${LAST_REVIEWED} · <a href="sitemap.xml">sitemap</a> · <a href="governance/style-guide.html">style guide</a></span>
+    <span>Terranoetis v${DOCS_VERSION} · <a href="sitemap.xml">sitemap</a> · <a href="governance/style-guide.html">documentation style guide</a></span>
     <span>License <a href="${REPO}/blob/main/LICENSE">BUSL-1.1</a> · source <a href="${REPO}">${REPO.replace('https://', '')}</a> · third-party components retain their own licenses (CesiumJS et al.)</span>
   </div>
 </footer>
