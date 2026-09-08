@@ -20,7 +20,7 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 
 - **150 analytical models grounded in primary literature** across 26 domains — every equation cites its source paper, book, or standard (82 with resolvable DOIs; pre-DOI classics explicitly flagged) ([details](docs/MODELS.md))
 - **Photorealistic CesiumJS 3D globe** with 41 rendering modules, satellite imagery, and sensor styles
-- **7 GPU physics simulations** — earthquake, tsunami, volcano, landslide, flood, hurricane, wildfire
+- **7 physics simulations** — 3 run locally on CPU (earthquake, wildfire, hurricane), 4 on free Kaggle GPU kernels (tsunami, volcano, landslide, flood)
 - **AI cognition** — System 1 / System 2 reasoning, multi-agent debate, causal + counterfactual analysis
 - **30+ live data feeds** — seismic, weather, aviation, maritime, satellite, traffic, space
 - **Realtime voice** — OpenAI Realtime → Gemini Live (server-side brokering)

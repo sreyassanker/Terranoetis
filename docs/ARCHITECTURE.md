@@ -224,7 +224,7 @@ flowchart LR
 | `useChatSelectors` | Zustand selectors for chat UI state |
 | `useWebSocket` | WebSocket connection manager |
 | `useCollaboration` | Real-time presence: join/heartbeat, typing, cursor position |
-| `useKaggleSimulation` | Kaggle GPU simulation job lifecycle |
+| `useKaggleSimulation` | Simulation job lifecycle (local CPU or Kaggle GPU) |
 | `useOfflineChat` | Offline banner + local fallback when AI provider is unreachable |
 | `useRealtimeVoice` | Primary voice: OpenAI Realtime → Gemini Live fallback via server bridge |
 

@@ -102,7 +102,7 @@ Defined in `src/main.tsx`:
 | `CinematicDirector.tsx` | Camera path animation for disaster fly-throughs |
 | `EarthquakeVisualizer.tsx` | MMI polygons, P/S/Rayleigh/Love wavefront rings |
 | `HurricaneVisualizer.tsx`, `WildfireVisualizer.tsx`, `LandslideVisualizer.tsx`, `VolcanicVisualizer.tsx`, `FloodWaterSurface.tsx` | Per-hazard scenario visualizers |
-| `ScenarioEditor.tsx` | Parameter forms for 7 disaster types |
+| `ScenarioEditor.tsx` | Parameter forms for 7 disaster types, with globe-pinned origin points (vent / epicentre / hurricane landfall) |
 | `ScenarioGallery.tsx` | Sortable/filterable grid, search |
 | `hazardRenderers.ts` | Renders 6 shape types on Cesium (polygon, cylinder, corridor, ellipse, polyline, ring) |
 | `SpatialSketching.tsx`, `TimelineControls.tsx`, `ScenarioThumbnail.tsx` | Supporting visualizers |
