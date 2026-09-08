@@ -168,7 +168,8 @@ tr:nth-child(even) td { background: color-mix(in srgb, var(--c-bg-subtle) 55%, v
 .table-scroll { overflow-x: auto; }
 
 /* ── Code ───────────────────────────────────────────────────────────── */
-code, kbd, samp { font-family: var(--font-mono); font-size: 0.83em; }
+code, kbd, samp { font-family: var(--font-mono); font-size: 0.83em; overflow-wrap: anywhere; }
+main a { overflow-wrap: anywhere; }
 code { background: var(--c-code-bg); color: var(--c-code-text); padding: 0.08em 0.35em; border-radius: 4px; border: 1px solid var(--c-border); }
 pre { background: var(--c-code-bg); border: 1px solid var(--c-border); border-radius: 6px;
   padding: 0.8rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.5; }
@@ -176,8 +177,8 @@ pre code { background: none; border: 0; padding: 0; font-size: inherit; }
 
 /* file:line citation chip */
 cite.src {
-  font-style: normal; font-family: var(--font-mono); font-size: 0.74rem;
-  color: var(--c-text-muted); white-space: nowrap;
+  font-style: normal; font-family: var(--font-mono); font-size: 0.8rem;
+  color: var(--c-text-muted); white-space: normal; overflow-wrap: anywhere;
 }
 cite.src::before { content: "⌗ "; }
 
@@ -229,6 +230,20 @@ dl.metrics dd { margin: 0; }
   font-size: 0.8rem; color: var(--c-text-muted);
 }
 .site-footer a { color: var(--c-link); }
+
+/* ── On-this-page nav ───────────────────────────────────────────────── */
+.toc h2 { font-size: 1.05rem; text-transform: none; letter-spacing: 0; color: var(--c-text); border: 0; padding: 0; margin: 1.4rem 0 0.4rem; }
+.toc ul { list-style: none; margin: 0 0 1.5rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.2rem 0.9rem; font-size: 0.88rem; }
+
+/* ── Narrow-screen refinements ──────────────────────────────────────── */
+@media (max-width: 640px) {
+  .tag { white-space: normal; }
+  dl.metrics { grid-template-columns: 1fr; gap: 0.15rem; }
+  dl.metrics dt { margin-top: 0.6rem; }
+  .page-meta span { overflow-wrap: anywhere; }
+  h1 { font-size: 1.5rem; }
+  table { font-size: 0.82rem; }
+}
 
 /* ── Print ──────────────────────────────────────────────────────────── */
 @media print {
