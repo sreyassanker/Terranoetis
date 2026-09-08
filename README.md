@@ -80,9 +80,11 @@ npm run dev             # Vite (3000) + Express API (3001); Redis optional
 | [Analytical Models](docs/MODELS.md) | The 150 equation engines, 7 parts, 26 domains |
 | [Deployment](docs/DEPLOYMENT.md) | Docker, environment variables, Kaggle token setup, CI/CD, security |
 
-The rendered documentation site (GitHub Pages, from `docs/`) adds per-capability pages with
-file-level citations, measured verification data and a quality gate:
-start at **[docs/index.html](docs/index.html)** → [Getting started](docs/getting-started.html) ·
+The rendered GitHub Pages site (from `docs/`) opens with a product landing page
+(**[docs/index.html](docs/index.html)**) and a navigation-first documentation hub
+(**[docs/documentation.html](docs/documentation.html)**) with per-capability pages carrying
+file-level citations, measured verification data and a CI quality gate. Highlights:
+[Getting started](docs/getting-started.html) ·
 [Hazard simulations](docs/capabilities/hazard-simulations.html) ·
 [Methodology & verification](docs/methodology.html).
 
@@ -124,7 +126,8 @@ terranoetis/
 ├── kaggle-kernels/               # 7 NumPy physics kernels pushed locally or to Kaggle (earthquake, tsunami, ...)
 ├── server/plugins/               # Plugin system: install from URL / GitHub / raw code / zip
 ├── docs/                         # Documentation site (GitHub Pages) + Markdown sources of truth
-│   ├── index.html                # Docs landing (generated from scripts/docs/)
+│   ├── index.html                # Product landing page (generated)
+│   ├── documentation.html        # Documentation hub (generated)
 │   ├── capabilities/             # Per-capability pages + prose (hazards, engine, cognition, …)
 │   ├── reference/ · methodology.html · deployment.html · governance/
 │   ├── ARCHITECTURE.md · API.md · FRONTEND.md · BACKEND.md · MODELS.md · DEPLOYMENT.md

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { renderPage, src } from './site.mjs';
 import { HAZARDS, COMMON_GRID_SECTION } from './hazards.mjs';
 import { PAGES } from './pages.mjs';
+import { renderLanding, LANDING_PATH } from './landing.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DOCS = path.join(ROOT, 'docs');
@@ -92,7 +93,15 @@ if (CHECK) {
   if (drift.length) { console.log(drift.join('\n')); console.log(`check: ${drift.length} page(s) out of date — run node scripts/docs/build.mjs`); process.exit(1); }
   console.log(`check: ${pages.length} pages match specs`);
 } else {
-  console.log(`build: ${pages.length} pages, ${changed} changed`);
+  // landing (docs/index.html)
+const landingOut = renderLanding();
+const landingFile = path.join(DOCS, LANDING_PATH);
+const landingPrev = fs.existsSync(landingFile) ? fs.readFileSync(landingFile, 'utf-8') : null;
+if (landingPrev !== landingOut) {
+  if (CHECK) { console.log('DRIFT docs/' + LANDING_PATH); process.exitCode = 1; }
+  else { fs.writeFileSync(landingFile, landingOut); console.log('wrote docs/' + LANDING_PATH); changed++; }
+}
+console.log(`build: ${pages.length + 1} pages, ${changed} changed`);
 }
 
 // sitemap + robots
@@ -100,6 +109,8 @@ const today = '2026-09-08';
 const sitemapBody =
 `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://terranoetis.com/</loc><lastmod>${today}</lastmod></url>
+  <url><loc>https://terranoetis.com/index.html</loc><lastmod>${today}</lastmod></url>
 ${pages.map((p) => `  <url><loc>https://terranoetis.com/${p.path}</loc><lastmod>${today}</lastmod></url>`).join('\n')}
 </urlset>
 `;

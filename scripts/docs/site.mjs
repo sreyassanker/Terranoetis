@@ -13,7 +13,8 @@ export const REPO = 'https://github.com/sreyassanker/Terranoetis';
 // Sidebar navigation tree. `href` values are repo-root-relative (from docs/).
 export const NAV = [
   { group: 'Start', items: [
-    { href: 'index.html', label: 'Documentation home' },
+    { href: 'index.html', label: 'Product overview' },
+    { href: 'documentation.html', label: 'Documentation home' },
     { href: 'getting-started.html', label: 'Getting started' },
     { href: 'architecture.html', label: 'Platform architecture' },
   ]},
@@ -54,7 +55,8 @@ export const NAV = [
 ];
 
 export const TOP_NAV = [
-  { href: 'index.html', label: 'Docs home' },
+  { href: 'index.html', label: 'Overview' },
+  { href: 'documentation.html', label: 'Docs home' },
   { href: 'capabilities/hazard-simulations.html', label: 'Capabilities' },
   { href: 'reference/api.html', label: 'Reference' },
   { href: 'methodology.html', label: 'Methodology' },
@@ -119,7 +121,8 @@ export function renderPage(page) {
   const d = page.depth;
   const r = (t) => rel(d, t);
   const crumbHtml = [
-    `<li><a href="${r('index.html')}">Docs</a></li>`,
+    `<li><a href="${r('index.html')}">Overview</a></li>
+    <li><a href="${r('documentation.html')}">Docs</a></li>`,
     ...page.breadcrumb.map((b, i, a) => i === a.length - 1
       ? `<li aria-current="page">${esc(b.label)}</li>`
       : `<li><a href="${r(b.href)}">${esc(b.label)}</a></li>`),

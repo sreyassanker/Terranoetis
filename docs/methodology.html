@@ -24,7 +24,8 @@
   <div class="site-banner-inner">
     <a class="brand" href="index.html">TERRANOETIS<small>Documentation</small></a>
     <nav class="top-nav" aria-label="Primary">
-      <a href="index.html">Docs home</a>
+      <a href="index.html">Overview</a>
+      <a href="documentation.html">Docs home</a>
       <a href="capabilities/hazard-simulations.html">Capabilities</a>
       <a href="reference/api.html">Reference</a>
       <a href="methodology.html" aria-current="page">Methodology</a>
@@ -36,7 +37,8 @@
 <div class="layout">
   <nav class="sidebar" aria-label="Documentation">
     <h2>Start</h2>
-<ul><li><a href="index.html">Documentation home</a></li>
+<ul><li><a href="index.html">Product overview</a></li>
+<li><a href="documentation.html">Documentation home</a></li>
 <li><a href="getting-started.html">Getting started</a></li>
 <li><a href="architecture.html">Platform architecture</a></li></ul>
 <h2>Hazard simulations</h2>
@@ -71,7 +73,8 @@
   <main id="main">
     <div class="content">
       <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
-        <li><a href="index.html">Docs</a></li>
+        <li><a href="index.html">Overview</a></li>
+    <li><a href="documentation.html">Docs</a></li>
 <li aria-current="page">Methodology &amp; verification</li>
       </ol></nav>
       <h1>Methodology &amp; verification</h1>
@@ -163,7 +166,7 @@
 <tr><td>C-5</td><td>“sandboxV2: Simulation engines (FARSITE, ADCIRC, WRF, HYSPLIT)” (README/BACKEND/ARCHITECTURE)</td><td>Files are simplified surrogates named <code>*Lite</code> (cellular ROS; storm-surge SWE; dispersion particle model; idealized WRF-style driver) plus an FNO surrogate — not the operational models.</td><td>BACKEND.md · ARCHITECTURE.md · README.md</td></tr>
 <tr><td>C-6</td><td>“1,600+ tests” / “1624+ tests” (README/CONTRIBUTING)</td><td>Measured today: 1,653 unit + 49 integration passing.</td><td>README.md · CONTRIBUTING.md</td></tr>
 <tr><td>C-7</td><td>“Playwright browser tests (7 specs, 12 tests)” (README)</td><td>7 spec files, 38 <code>test()</code> declarations counted (method stated); execution not performed here → labelled inspection-only.</td><td>README.md</td></tr>
-<tr><td>C-8</td><td>Landing copy: “GPU-accelerated mathematical models computed directly over real 3D terrain meshes” (platform-overview)</td><td>Simulation math runs on CPU (NumPy); fields are rendered on the WebGL globe client-side.</td><td>old landing replaced by redirect; accurate claim on <a href="index.html">docs home</a></td></tr>
+<tr><td>C-8</td><td>Landing copy: “GPU-accelerated mathematical models computed directly over real 3D terrain meshes” (platform-overview)</td><td>Simulation math runs on CPU (NumPy); fields are rendered on the WebGL globe client-side.</td><td>old marketing claim removed; the rebuilt landing and <a href="documentation.html">docs hub</a> state the accurate wording</td></tr>
 <tr><td>C-9</td><td>docs/index.html was only a redirect to the marketing page</td><td>The site is now navigation-first from index.html; platform-overview.html preserved as a redirect stub so inbound URLs keep resolving.</td><td>docs/index.html · docs/platform-overview.html</td></tr>
 <tr><td>C-10</td><td>App shell “~11,000 lines”, “11 panels”, “41 modules” (approximations)</td><td>Measured: 11,038 lines; 11 lazy panels; 41 rendering modules.</td><td>now stated as measured counts</td></tr>
 </tbody></table></div>
