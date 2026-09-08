@@ -4,7 +4,9 @@
 
 - **Client** — React 19 + CesiumJS single-page application (Vite 7)
 - **Server** — Node.js + Express 4 API, WebSocket realtime, JWT auth
-- **Persistence** — SQLite (primary store) + Redis (cache, session, pub/sub)
+- **Persistence** — SQLite (primary store) + optional Redis (cache, memory hot path). The event bus is an in-process publish/subscribe (`server/pubsub.ts`), not Redis.
+
+> Rendered, navigation-first version of these documents with per-capability verification data: [docs site](index.html).
 
 This document describes the system topology, request lifecycle, background services, and the runtime modules that power the platform.
 
@@ -56,7 +58,7 @@ flowchart LR
 
     subgraph STORAGE["PERSISTENCE"]
         SQLite["SQLite\nAuth · Scenarios\nMemory · Forks"]
-        Redis["Redis\nCache · Session\nPubSub · Queue"]
+        Redis["Redis\nCache · memory hot path\n(optional)"]
     end
 
     subgraph EXTERNAL["EXTERNAL APIs"]
@@ -224,7 +226,7 @@ flowchart LR
 | `useChatSelectors` | Zustand selectors for chat UI state |
 | `useWebSocket` | WebSocket connection manager |
 | `useCollaboration` | Real-time presence: join/heartbeat, typing, cursor position |
-| `useKaggleSimulation` | Simulation job lifecycle (local CPU or Kaggle GPU) |
+| `useKaggleSimulation` | Simulation job lifecycle (local CPU kernel or Kaggle kernel) |
 | `useOfflineChat` | Offline banner + local fallback when AI provider is unreachable |
 | `useRealtimeVoice` | Primary voice: OpenAI Realtime → Gemini Live fallback via server bridge |
 
@@ -236,12 +238,12 @@ flowchart LR
 
 | Module Directory | Purpose |
 |---|---|
-| `analytical-models/` | 150 equation engines grounded in primary literature (7 parts, 26 domains), tool configs, workflows |
+| `analytical-models/` | 150 equation engines grounded in primary literature (7 parts, 26 domains — counts verified), tool configs, workflows |
 | `cognition/` | Cognitive orchestrator, System 1 / System 2, MCTS, reasoning tree, tree-of-thoughts |
 | `sentinel/` | Continuous monitoring: stream processor, anomaly detector, correlation engine, alert intelligence |
 | `memory/` + `memoryV2/` | Working/episodic/semantic/procedural/predictive memory, sensory buffer, Redis adapter |
 | `scenarios/` | Scenario generation (single + batch), simulator engines, scenario DB |
-| `sandboxV2/` | Sandbox simulation engines: FARSITE, ADCIRC, WRF, HYSPLIT, FNO surrogate |
+| `sandboxV2/` | Simplified surrogate engines (`farsiteLite` cellular ROS, `adcircLite` storm-surge SWE, `wrfLite`, `hysplitLite` dispersion, `fnoSurrogate`) — surrogates named after, not reimplementations of, the operational models |
 | `world-model/` | Causal graph, ensemble predictor, physics NN, prediction validator |
 | `causal/` | Causal reasoning: KG, discovery engine, entropy mixer, Python microservice (DoWhy) |
 | `kgV2/` | Knowledge graph v2: entity/edge generation, graph completion, counterfactual, evolving graph |
@@ -265,7 +267,7 @@ Primary store for authentication, scenarios, memory traces, forks, and applicati
 
 ### Redis (ioredis)
 
-Used for caching, session state, WebSocket pub/sub, and queueing. The server **gracefully degrades** to SQLite when Redis is unreachable (see `server/infrastructure/redis.ts`).
+Optional acceleration layer: caching and the sensory/working memory hot path. The server **gracefully degrades** to SQLite when Redis is unreachable (see `server/infrastructure/redis.ts`). Realtime fan-out does not depend on it — `server/pubsub.ts` is an in-process `EventEmitter` bus and WebSocket/SSE delivery runs through it.
 
 ---
 

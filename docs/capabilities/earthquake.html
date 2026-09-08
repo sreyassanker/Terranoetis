@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Earthquake ground motion (BSSA14 GMPE ShakeMap) — Terranoetis Documentation</title>
+<meta name="description" content="Scenario ShakeMap: Boore–Stewart–Seyhan–Atkinson NGA-West2 ground-motion prediction equation with linear + nonlinear site response and USGS instrumental intensity, computed locally on CPU.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/earthquake.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Earthquake ground motion (BSSA14 GMPE ShakeMap) — Terranoetis Documentation">
+<meta property="og:description" content="Scenario ShakeMap: Boore–Stewart–Seyhan–Atkinson NGA-West2 ground-motion prediction equation with linear + nonlinear site response and USGS instrumental intensity, computed locally on CPU.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/earthquake.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html" aria-current="true">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">Earthquake ground motion (BSSA14 GMPE ShakeMap)</li>
+      </ol></nav>
+      <h1>Earthquake ground motion (BSSA14 GMPE ShakeMap)</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/earthquake.md">capabilities/earthquake.md — narrative description (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#physics">Governing equations and coefficients</a></li>
+<li><a href="#parameters">Parameter contract</a></li>
+<li><a href="#outputs">Outputs</a></li>
+<li><a href="#spatial-origin">Spatial-origin semantics</a></li>
+<li><a href="#validity">Documented validity limits (verbatim from the code)</a></li>
+<li><a href="#measured">Measured runs and timings</a></li>
+<li><a href="#reproduction">Reproduction</a></li>
+      </ul></nav>
+      <p>The scenario is a 2D seismic-hazard computation, not a wave-physics animation: the kernel evaluates the median ground-motion prediction equation (GMPE) of Boore, Stewart, Seyhan &amp; Atkinson (NGA-West2 base case, BSSA14 / PEER 2013/05) on a regular grid around a user-pinned epicentre, applies linear and nonlinear site response for the chosen Vs30, converts to Modified Mercalli Intensity with the USGS instrumental rules, and writes PGA / PGV / Sa(1 s) / MMI grids plus an animated PGA series timed by S-wave arrival.</p>
+<dl class="metrics"><dt>Execution mode</dt><dd>Local CPU (python3) — no Kaggle token required <cite class="src">server/kaggle/simRunner.ts:126-141</cite> (LOCAL_SIM_TYPES)</dd>
+<dt>Verification</dt><dd>MEASURED — executed directly and end-to-end through the job API</dd>
+<dt>Wire scenario type</dt><dd><code>earthquake_swarm</code> — contract at <cite class="src">src/services/kaggleSim.ts:28-240</cite>; job API at <a href="../reference/simulation-api.html">Simulation job API</a></dd></dl>
+<div class="callout callout-verified" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). <span class="tag tag-inspected">CODE INSPECTION ONLY</span> marks behaviour traced to source lines but not executed here (e.g. Kaggle push/poll transport). Inspected is never presented as tested.</p></div>
+<h2 id="physics">Governing equations and coefficients</h2>
+<p>Source attribution as stated in the kernel header (verbatim):</p>
+<blockquote class="verbatim">PGA, PGV and Sa(1.0 s): the Boore, Stewart, Seyhan &amp; Atkinson NGA-West2 GMPE (BSSA14; PEER 2013/05, published as Boore et al. 2014, BSSA 104(2), doi:10.1785/0120130065). … ln Y = FE(M,mech) + FP(R,M) + FS(VS30,M,R) with the full linear + nonlinear site response; unspecified fault mechanism; base-case (no regional anelastic / basin-depth terms). Validity: M 3-9.7, shallow crustal, VS30 150-1500 m/s.<footer><cite class="src">kaggle-kernels/earthquake-sim/main.py:14-21</cite></footer></blockquote>
+<figure class="equation"><span class="formula">R = R_hyp = sqrt(R_epi² + depth²)          [km]</span><figcaption>Point-source hypocentral distance (no fault-geometry Rjb/Rrup terms). <cite class="src">kaggle-kernels/earthquake-sim/main.py:12,272-273</cite></figcaption></figure>
+<figure class="equation"><span class="formula">ln Y = FE(M) + FP(R, M) + FS(VS30, M, R)   [ln of cm/s² or cm/s]</span><figcaption>BSSA14 additive form for PGA, PGV and Sa(1.0 s). <cite class="src">kaggle-kernels/earthquake-sim/main.py:72-81,102-124</cite></figcaption></figure>
+<figure class="equation"><span class="formula">FE = e0 + e4·(M−Mh) + e5·(M−Mh)²   (M ≤ Mh);  FE = e0 + e6·(M−Mh)   (M &gt; Mh)</span><figcaption>Magnitude scaling, base case (unspecified mechanism — fault-type terms e1–e3 are stored but unused). <cite class="src">kaggle-kernels/earthquake-sim/main.py:109-113,85-93</cite></figcaption></figure>
+<figure class="equation"><span class="formula">FP = [c1 + c2·(M−Mref)]·ln(R/Rref) + c3·(R−Rref)</span><figcaption>Attenuation; R floored at 0.1 km. <cite class="src">kaggle-kernels/earthquake-sim/main.py:108,115</cite></figcaption></figure>
+<figure class="equation"><span class="formula">lnFlin = c·ln(min(VS30, Vc)/Vref);  lnFnl = f1 + f2·ln((PGA_r+f3)/f3),  f2 = f4·[exp(f5·(min(VS30,760)−360)) − exp(f5·(760−360))]</span><figcaption>Linear + nonlinear site response; PGA_r is the Vs30 = 760 m/s reference-rock PGA. <cite class="src">kaggle-kernels/earthquake-sim/main.py:120-129,94-99</cite></figcaption></figure>
+<figure class="equation"><span class="formula">MMI = max(MMI_PGA, MMI_PGV)                [unitless, 1…10]</span><figcaption>USGS instrumental intensity: Worden et al. 2012 (doi:10.1785/0120110156) + global GMICE Caprio et al. 2015 (doi:10.1785/0120140286). <cite class="src">kaggle-kernels/earthquake-sim/main.py:23-25,144-153,282</cite></figcaption></figure>
+<h3 id="coefficients">Coefficients and named constants</h3>
+<div class="table-scroll"><table><caption>BSSA14 base-case coefficients, read from the PEER 2013/05 appendix tables (PDF archived under docs/Research papers/ as boore-2014-nga-west2-gmpe-peer-2013-05.pdf). Order e0,e1,e2,e3,e4,e5,e6,Mh,c1,c2,c3,Mref,Rref,h.</caption>
+<thead><tr><th scope="col">IM</th><th scope="col">e0</th><th scope="col">e4</th><th scope="col">e5</th><th scope="col">e6</th><th scope="col">Mh</th><th scope="col">c1</th><th scope="col">c2</th><th scope="col">c3</th><th scope="col">Mref</th><th scope="col">Rref</th><th scope="col">h</th></tr></thead>
+<tbody>
+<tr><td>PGA</td><td>0.4473</td><td>1.431</td><td>0.05053</td><td>−0.1662</td><td>5.5</td><td>−1.134</td><td>0.1917</td><td>−0.00809</td><td>4.5</td><td>1.0</td><td>4.5</td></tr>
+<tr><td>PGV</td><td>5.037</td><td>1.073</td><td>−0.1536</td><td>0.2252</td><td>6.2</td><td>−1.243</td><td>0.1489</td><td>−0.00344</td><td>4.5</td><td>1.0</td><td>5.3</td></tr>
+<tr><td>Sa(1 s)</td><td>0.3932</td><td>1.5004</td><td>−0.18983</td><td>0.17895</td><td>6.2</td><td>−1.193</td><td>0.10248</td><td>−0.00121</td><td>4.5</td><td>1.0</td><td>5.74</td></tr>
+</tbody></table></div>
+<div class="table-scroll"><table><caption>Site-response coefficients (c, Vc, Vref, f1, f3, f4, f5); reference rock VS30_REF = 760 m/s.</caption>
+<thead><tr><th scope="col">IM</th><th scope="col">c</th><th scope="col">Vc</th><th scope="col">Vref</th><th scope="col">f1</th><th scope="col">f3</th><th scope="col">f4</th><th scope="col">f5</th></tr></thead>
+<tbody>
+<tr><td>PGA</td><td>−0.5150</td><td>925.00</td><td>760.0</td><td>0.0</td><td>0.1</td><td>−0.1500</td><td>−0.00701</td></tr>
+<tr><td>PGV</td><td>−0.8050</td><td>950.00</td><td>760.0</td><td>0.0</td><td>0.1</td><td>−0.1000</td><td>−0.00844</td></tr>
+<tr><td>Sa(1 s)</td><td>−1.0361</td><td>967.51</td><td>760.0</td><td>0.0</td><td>0.1</td><td>−0.1052</td><td>−0.00844</td></tr>
+</tbody></table></div>
+<div class="table-scroll"><table><caption>MMI upper bounds used by the intensity mapping. PGA in g; PGV bounds in cm/s (medians also tabulated).</caption>
+<thead><tr><th scope="col">Quantity</th><th scope="col">Values</th></tr></thead>
+<tbody>
+<tr><td>PGA upper bounds, MMI 2…10 [g]</td><td><code>0.000464, 0.00135, 0.00297, 0.0276, 0.115, 0.215, 0.401, 0.747, 1.39</code></td></tr>
+<tr><td>PGV upper bounds, MMI 2…10 [cm/s]</td><td><code>0.0215, 0.135, 1.41, 4.65, 9.64, 20.0, 41.4, 85.8, 178.0</code></td></tr>
+<tr><td>PGV medians, MMI 1…10 [cm/s]</td><td><code>0.010, 0.054, 0.437, 2.56, 6.70, 13.9, 28.8, 59.6, 123.6, 267.0</code></td></tr>
+</tbody></table></div>
+<h2 id="parameters">Parameter contract</h2>
+<p>Earthquake parameters: UI control → wire field → unit → valid range → default → physical meaning. Shared request envelope (validated at the client boundary before dispatch).</p>
+<div class="table-scroll"><table><caption>Earthquake parameters: UI control → wire field → unit → valid range → default → physical meaning.</caption>
+<thead><tr><th scope="col">UI control</th><th scope="col">Wire field</th><th scope="col">Unit</th><th scope="col">Valid range (UI · wire · kernel)</th><th scope="col">Default</th><th scope="col">Physical meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Mag (mainshock) <span class="cite">slider</span></td><td><code>magnitude</code></td><td>M (moment/local)</td><td>UI 3.0–9.5 step 0.1, default 8.0; wire 3.0–9.7; kernel raises outside 3.0–9.7</td><td>UI 8.0 · kernel 6.5</td><td>Mainshock magnitude driving GMPE magnitude scaling</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:62-68</cite> <cite class="src">src/services/kaggleSim.ts:94</cite> <cite class="src">kaggle-kernels/earthquake-sim/main.py:238,244-245</cite></td></tr>
+<tr><td>Depth (mainshock) <span class="cite">slider</span></td><td><code>depth_km</code></td><td>km</td><td>UI 1–300 (auto-overwritten to clamp(5, 50, 5·M) by the form derivation); wire 0.5–700; kernel validates 0.5–700</td><td>UI 30 · kernel 12</td><td>Hypocentral depth; enters R_hyp</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:62-68</cite> <cite class="src">src/services/kaggleSim.ts:95,600</cite> <cite class="src">kaggle-kernels/earthquake-sim/main.py:239,246-247</cite></td></tr>
+<tr><td>Site Vs30 (NEHRP) <span class="cite">slider</span></td><td><code>vs30</code> (optional)</td><td>m/s</td><td>150–1500 step 10</td><td>760</td><td>Time-averaged shear velocity to 30 m; drives linear + nonlinear site amplification</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:62-68</cite> <cite class="src">src/services/kaggleSim.ts:97</cite> <cite class="src">kaggle-kernels/earthquake-sim/main.py:242,248-249</cite></td></tr>
+<tr><td>Min Magnitude / Min Depth <span class="cite">sliders</span></td><td>— (not sent)</td><td>M / km</td><td>1–8 / 0–100</td><td>2.5 / 5</td><td>Catalog context shown in the panel; the wire carries only the mainshock pair</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:62-68</cite> <cite class="src">src/services/kaggleSim.ts:455-464</cite></td></tr>
+<tr><td>Epicentre (globe click)</td><td><code>epi_frac_x</code>, <code>epi_frac_y</code> (optional)</td><td>fraction of box</td><td>0–1, clamped</td><td>0.5, 0.5</td><td>Column = x eastward, row = y southward; GMPE distance field radiates from this cell</td><td><cite class="src">src/services/kaggleSim.ts:98-106</cite> <cite class="src">kaggle-kernels/earthquake-sim/main.py:262-267</cite></td></tr>
+</tbody></table></div>
+<h2 id="outputs">Outputs</h2>
+<div class="table-scroll"><table><caption>Files written per run (also served by <code>GET /api/kaggle/simulate/:jobId/grid/:name</code> and <code>…/geotiff/:name</code>)</caption>
+<thead><tr><th scope="col">Field</th><th scope="col">Unit</th><th scope="col">Meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td><code>pga_cm_s2.npy</code></td><td>cm/s²</td><td>Peak ground acceleration grid (median prediction)</td><td><cite class="src">kaggle-kernels/earthquake-sim/main.py:409-420</cite></td></tr>
+<tr><td><code>pgv_cm_s.npy</code></td><td>cm/s</td><td>Peak ground velocity grid</td><td><cite class="src">kaggle-kernels/earthquake-sim/main.py:409-420</cite></td></tr>
+<tr><td><code>sa_1s_cm_s2.npy</code></td><td>cm/s²</td><td>5 %-damped spectral acceleration at T = 1.0 s</td><td><cite class="src">kaggle-kernels/earthquake-sim/main.py:409-420</cite></td></tr>
+<tr><td><code>mmi.npy</code></td><td>MMI 1–10 (float)</td><td>Instrumental Modified Mercalli intensity grid (max of PGA- and PGV-derived)</td><td><cite class="src">kaggle-kernels/earthquake-sim/main.py:282,409-420</cite></td></tr>
+<tr><td><code>snapshots_pga.npy</code> + <code>snapshot_times.npy</code></td><td>cm/s²; s</td><td>PGA reveal frames timed by S-arrival (t = R_hyp / Vs, Vs = 3.5 km/s, smoothstep onset)</td><td><cite class="src">kaggle-kernels/earthquake-sim/main.py:297-314,303</cite></td></tr>
+<tr><td><code>metadata.json</code></td><td>—</td><td>params (incl. cell_size_m, epi fracs), model/source strings, final_stats, validation results</td><td><cite class="src">kaggle-kernels/earthquake-sim/main.py:319-335,425-433</cite></td></tr>
+</tbody></table></div>
+<h2 id="spatial-origin">Spatial-origin semantics</h2>
+<p>Simulation domain: a square of side <code>extent_km</code> centred on the study-box centroid; <code>dx = extent_km·1000/grid_size</code> m (default 500 m without extent). Rows run north→south (row 0 = north edge), columns west→east; the epi-fraction point (x = east, y = south) receives the distance origin so the strongest shaking sits on the clicked trace. <code>lat</code>/<code>lon</code> enter metadata only — never the physics. <cite class="src">kaggle-kernels/earthquake-sim/main.py:251-270,319,330</cite></p>
+<h2 id="validity">Documented validity limits (verbatim from the code)</h2>
+<blockquote class="verbatim">'point-source hypocentral distance used for the GMPE Rjb term — no fault-geometry directivity or finite-rupture effects' · 'unspecified fault mechanism; base-case only (no regional anelastic attenuation or basin-depth z1 terms)' · 'Sa reported at T=1.0 s only' · 'Worden-2012/Caprio-2015 intensity relations calibrated on California/global datasets and saturate for great-earthquake near-fields'<footer><cite class="src">kaggle-kernels/earthquake-sim/main.py:344-353</cite></footer></blockquote>
+<p>Before emitting any field the kernel runs a GMPE sanity gate (attenuation monotonicity, M6.5 @ 10 km PGA in (100, 500) cm/s², soft-site amplification &gt; 1, PGV/PGA ratio 0.05–0.2 s, MMI band round-trip). On failure it refuses to emit: <em>"GMPE sanity gate failed — refusing to emit a ShakeMap from mis-wired attenuation relations."</em> <cite class="src">kaggle-kernels/earthquake-sim/main.py:194-232,400-404</cite></p>
+<h2 id="measured">Measured runs and timings</h2>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-08. These are observations of one environment, not performance guarantees.</caption>
+<thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
+<tbody>
+<tr><td>Kernel, M 7.5 · 12 km · Vs30 760 · 100 km box · 256²</td><td>max PGA 251.0 cm/s², max PGV 27.5 cm/s, max MMI 7.0, area(MMI ≥ 6) 4,439 km²; kernel compute 0.0083 s; total wall 0.12 s (incl. interpreter start)</td></tr>
+<tr><td>Boundary cases</td><td>M 3.0 / 0.5 km / Vs30 150 and M 9.7 / 700 km / Vs30 1500 both complete; M 2.9 rejected with "magnitude 2.9 outside the 3.0-9.7 GMPE validity range"; depth 750 km rejected with "depth_km 750.0 outside 0.5-700 km"</td></tr>
+<tr><td>End-to-end via POST /api/kaggle/simulate</td><td>job sim_44d5c7d7 (M 7.2, 128², 100 km box): status running→complete 166 ms after submission; result metadata cites "BSSA14 … doi:10.1785/0120130065"; grid + GeoTIFF endpoints returned HTTP 200 (296,648-byte npy; valid 128×128 TIFF)</td></tr>
+<tr><td>DOI resolvability</td><td>https://doi.org/10.1785/0120130065 responds 302 (resolvable) — observed 2026-09-08</td></tr>
+</tbody></table></div>
+<h2 id="reproduction">Reproduction</h2>
+<h3 id="repro-cmd">Commands</h3>
+<pre><code># 1) via the running server (same path the web UI uses):
+npm run dev:server    # Express on :3001
+
+curl -s -X POST http://localhost:3001/api/kaggle/simulate \
+  -H 'Content-Type: application/json' -d '{
+    &quot;type&quot;:&quot;earthquake_swarm&quot;,&quot;lat&quot;:36.1,&quot;lon&quot;:139.7,
+    &quot;grid_size&quot;:128,&quot;extent_km&quot;:100,&quot;magnitude&quot;:7.2,
+    &quot;depth_km&quot;:15,&quot;vs30&quot;:760,&quot;epi_frac_x&quot;:0.4,&quot;epi_frac_y&quot;:0.5 }'
+# → {&quot;jobId&quot;:&quot;sim_…&quot;,&quot;status&quot;:&quot;running&quot;,&quot;streamUrl&quot;:&quot;/api/kaggle/simulate/…/stream&quot;}
+
+curl -s http://localhost:3001/api/kaggle/simulate/&lt;jobId&gt;/results
+curl -s -o pga.npy http://localhost:3001/api/kaggle/simulate/&lt;jobId&gt;/grid/pga_cm_s2
+
+# 2) kernel directly (honours TERRANOETIS_OUT_DIR):
+cd kaggle-kernels/earthquake-sim &amp;&amp; mkdir -p /tmp/eq &amp;&amp; \
+  echo '{&quot;grid_size&quot;:128,&quot;magnitude&quot;:7.5,&quot;depth_km&quot;:12,&quot;vs30&quot;:760,&quot;extent_km&quot;:100}' &gt; /tmp/eq/params.json &amp;&amp; \
+  (cd /tmp/eq &amp;&amp; TERRANOETIS_OUT_DIR=/tmp/eq python3 &lt;repo&gt;/kaggle-kernels/earthquake-sim/main.py)</code></pre>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

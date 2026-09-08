@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flood inundation (local-inertial shallow water) — Terranoetis Documentation</title>
+<meta name="description" content="Rainfall-driven 2D local-inertial shallow-water inundation with Audusse hydrostatic reconstruction, semi-implicit Manning friction and WorldCover-derived roughness; runs on Kaggle (GPU accelerator requested).">
+<link rel="canonical" href="https://terranoetis.com/capabilities/flood.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Flood inundation (local-inertial shallow water) — Terranoetis Documentation">
+<meta property="og:description" content="Rainfall-driven 2D local-inertial shallow-water inundation with Audusse hydrostatic reconstruction, semi-implicit Manning friction and WorldCover-derived roughness; runs on Kaggle (GPU accelerator requested).">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/flood.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html" aria-current="true">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">Flood inundation (local-inertial shallow water)</li>
+      </ol></nav>
+      <h1>Flood inundation (local-inertial shallow water)</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/flood.md">capabilities/flood.md — narrative description (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#physics">Governing equations and coefficients</a></li>
+<li><a href="#parameters">Parameter contract</a></li>
+<li><a href="#outputs">Outputs</a></li>
+<li><a href="#spatial-origin">Spatial-origin semantics</a></li>
+<li><a href="#validity">Documented validity limits (verbatim from the code)</a></li>
+<li><a href="#measured">Measured runs and timings</a></li>
+<li><a href="#reproduction">Reproduction</a></li>
+      </ul></nav>
+      <p>Rainfall-runoff inundation over real (or, when no terrain is supplied, procedurally generated) topography. The solver is the local-inertial (diffusive-inertial) form of the 2D shallow-water equations with a uniform rainfall source — the approach family of LISFLOOD-FP, SFINCS and RIM2D — discretised with Rusanov (local Lax–Friedrichs) fluxes with Audusse hydrostatic reconstruction and a semi-implicit Bates-2010 Manning friction update.</p>
+<dl class="metrics"><dt>Execution mode</dt><dd>Kaggle kernel push→poll→download (numpy-only code; the kernel metadata requests the GPU accelerator) <cite class="src">server/kaggle/simRunner.ts:126-141</cite> (not in LOCAL_SIM_TYPES) <cite class="src">kaggle-kernels/flood-sim/kernel-metadata.json:enable_gpu=true</cite></dd>
+<dt>Verification</dt><dd>PHYSICS MEASURED locally (solver completed; mass balance closure 0.0000 %); job transport verified by code inspection only</dd>
+<dt>Wire scenario type</dt><dd><code>flood_inundation</code> — contract at <cite class="src">src/services/kaggleSim.ts:28-240</cite>; job API at <a href="../reference/simulation-api.html">Simulation job API</a></dd></dl>
+<div class="callout callout-inspect" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). <span class="tag tag-inspected">CODE INSPECTION ONLY</span> marks behaviour traced to source lines but not executed here (e.g. Kaggle push/poll transport). Inspected is never presented as tested.</p></div>
+<h2 id="physics">Governing equations and coefficients</h2>
+<p>Source attribution as stated in the kernel header (verbatim):</p>
+<blockquote class="verbatim">Solves the 2D local-inertial (diffusive-inertial) shallow water equations with a spatially uniform rainfall source term — the approach used by LISFLOOD-FP, SFINCS, and RIM2D. … Solver: Rusanov (local Lax-Friedrichs) for continuity with hydrostatic reconstruction (Audusse et al. 2004), semi-implicit Bates (2010) formulation for Manning friction.<footer><cite class="src">kaggle-kernels/flood-sim/main.py:5-20</cite></footer></blockquote>
+<figure class="equation"><span class="formula">∂h/∂t = rainfall_rate − infiltration + flux divergence</span><figcaption>Continuity with rain source (h = surface water depth). <cite class="src">kaggle-kernels/flood-sim/main.py:12,524-543</cite></figcaption></figure>
+<figure class="equation"><span class="formula">∂(hu)/∂t = −g·h·∇η − g·n²·u|u|/h^(4/3),   u_new = (u + dt·pressure) / (1 + dt·g·n²·|u|/h^(4/3))</span><figcaption>Local-inertial momentum with semi-implicit Manning friction (Bates 2010). <cite class="src">kaggle-kernels/flood-sim/main.py:584-599</cite></figcaption></figure>
+<figure class="equation"><span class="formula">infiltration = 10 mm/hr × (1 − 0.7·soil_saturation)</span><figcaption>Constant-loss rate labelled &quot;Green-Ampt&quot; in the source — a fixed base loss modulated by saturation, not the full Green–Ampt infiltration equation (no wetting-front redistribution). Labeled honestly here. <cite class="src">kaggle-kernels/flood-sim/main.py:57,470-471</cite></figcaption></figure>
+<figure class="equation"><span class="formula">n(cell) = WorldCover-class lookup; default 0.035</span><figcaption>Manning roughness from ESA WorldCover v200 class codes; roughness &quot;from Chow (1959) + common flood-model lookup tables (LISFLOOD-FP / HEC-RAS)&quot;. <cite class="src">kaggle-kernels/flood-sim/main.py:56,61-84</cite></figcaption></figure>
+<figure class="equation"><span class="formula">dt = min(0.5·dx/(√(g·h_max)+V_MAX), 1.0 s),  V_MAX = 5 m/s</span><figcaption>Adaptive CFL with physical velocity cap; positivity-preserving face limiter with tracked clip-loss volume. <cite class="src">kaggle-kernels/flood-sim/main.py:503-507,554-579,59</cite></figcaption></figure>
+<h3 id="coefficients">Coefficients and named constants</h3>
+<div class="table-scroll"><table><caption>WorldCover v200 → Manning n lookup (class: n [s/m^1/3]).</caption>
+<thead><tr><th scope="col">WorldCover class</th><th scope="col">10</th><th scope="col">20</th><th scope="col">30</th><th scope="col">40</th><th scope="col">50</th><th scope="col">60</th><th scope="col">70</th><th scope="col">80</th><th scope="col">90</th><th scope="col">95</th><th scope="col">100</th></tr></thead>
+<tbody>
+<tr><td>n</td><td>0.100</td><td>0.070</td><td>0.035</td><td>0.040</td><td>0.015</td><td>0.025</td><td>0.025</td><td>0.030</td><td>0.060</td><td>0.150</td><td>0.050</td></tr>
+</tbody></table></div>
+<h2 id="parameters">Parameter contract</h2>
+<p>Flood parameters. Shared request envelope (validated at the client boundary before dispatch).</p>
+<div class="table-scroll"><table><caption>Flood parameters.</caption>
+<thead><tr><th scope="col">UI control</th><th scope="col">Wire field</th><th scope="col">Unit</th><th scope="col">Valid range (UI · wire · kernel)</th><th scope="col">Default</th><th scope="col">Physical meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Total Rainfall <span class="cite">slider</span></td><td><code>rainfall_mm</code></td><td>mm (event total)</td><td>UI 50–2000; wire 10–3000; kernel applies unvalidated</td><td>UI 500 · kernel 400</td><td>Spatially uniform rain depth</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:102-108</cite> <cite class="src">src/services/kaggleSim.ts:34</cite> <cite class="src">kaggle-kernels/flood-sim/main.py:372</cite></td></tr>
+<tr><td>Soil Saturation <span class="cite">slider</span></td><td><code>soil_saturation</code></td><td>fraction</td><td>0–1</td><td>UI 0.8 · kernel 0.8</td><td>Scales infiltration loss and initial ponded depth (h_init = 0.02·S)</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:102-108</cite> <cite class="src">src/services/kaggleSim.ts:36</cite> <cite class="src">kaggle-kernels/flood-sim/main.py:374,485-486</cite></td></tr>
+<tr><td>Duration <span class="cite">slider</span></td><td><code>duration_hours</code></td><td>h</td><td>UI 1–168 (auto-derived from rainfall/catchment); wire ≤ 720</td><td>UI 72 · kernel 12</td><td>Rain event length</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:102-108</cite> <cite class="src">src/services/kaggleSim.ts:35,640</cite> <cite class="src">kaggle-kernels/flood-sim/main.py:373</cite></td></tr>
+<tr><td>Wind Speed <span class="cite">slider</span></td><td><code>wind_speed_ms</code> (optional) = km/h÷3.6</td><td>m/s</td><td>UI 0–100 km/h; wire 0–60</td><td>UI 40 km/h</td><td>Advisory field — not used in the solver momentum terms</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:102-108</cite> <cite class="src">src/services/kaggleSim.ts:38,434</cite></td></tr>
+<tr><td>Catchment Area <span class="cite">slider</span></td><td>— (not sent)</td><td>km²</td><td>UI 100–20,000</td><td>2000</td><td>UI-only hint for derived runoff/duration suggestions</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:102-108</cite> <cite class="src">src/services/kaggleSim.ts:631-641</cite></td></tr>
+<tr><td>dam_breach</td><td><code>dam_breach</code></td><td>—</td><td>literal <code>true</code> required by the schema</td><td>true</td><td>Contract constant only — the kernel contains no dam-breach hydrograph; inundation is rainfall-driven</td><td><cite class="src">src/services/kaggleSim.ts:37</cite></td></tr>
+<tr><td>terrain / landcover (server-sampled)</td><td><code>terrain(+_gs)</code>, <code>landcover(+_gs)</code></td><td>m; WorldCover codes</td><td>≤ 65,536 cells each</td><td>auto</td><td>Server auto-samples land cover for flood runs when absent</td><td><cite class="src">src/services/kaggleSim.ts:41-55</cite> <cite class="src">server/kaggle/simRunner.ts:520-563</cite></td></tr>
+</tbody></table></div>
+<h2 id="outputs">Outputs</h2>
+<div class="table-scroll"><table><caption>Files written per run (also served by <code>GET /api/kaggle/simulate/:jobId/grid/:name</code> and <code>…/geotiff/:name</code>)</caption>
+<thead><tr><th scope="col">Field</th><th scope="col">Unit</th><th scope="col">Meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td><code>water_depth_final.npy</code></td><td>m</td><td>Final flood depth</td><td><cite class="src">kaggle-kernels/flood-sim/main.py:789-807</cite></td></tr>
+<tr><td><code>velocity_x/y.npy</code></td><td>m/s</td><td>Depth-averaged velocity</td><td><cite class="src">kaggle-kernels/flood-sim/main.py:789-807</cite></td></tr>
+<tr><td><code>terrain.npy</code></td><td>m</td><td>Elevation used</td><td><cite class="src">kaggle-kernels/flood-sim/main.py:789-807</cite></td></tr>
+<tr><td><code>snapshots_depth.npy</code> + <code>snapshot_times.npy</code></td><td>m; hours</td><td>Animation series</td><td><cite class="src">kaggle-kernels/flood-sim/main.py:789-807</cite></td></tr>
+<tr><td><code>metadata.json</code></td><td>—</td><td>model "local_inertial_swe", solver "bates_2010_semi_implicit", mass_balance block</td><td><cite class="src">kaggle-kernels/flood-sim/main.py:702-722,809-819</cite></td></tr>
+</tbody></table></div>
+<h2 id="spatial-origin">Spatial-origin semantics</h2>
+<p>Cell-centred (NY, NX) square grid, uniform dx from extent; row 0 = north (bilinear-upsample docstring shared across kernels); east face = <code>roll(z_b, −1, axis=1)</code>, south face = <code>roll(z_b, −1, axis=0)</code>. lat/lon are decorative (metadata/printing). <cite class="src">kaggle-kernels/flood-sim/main.py:16,476-478,525-530,91-92,387,375-381</cite></p>
+<h2 id="validity">Documented validity limits (verbatim from the code)</h2>
+<blockquote class="verbatim">'covers the entire DEM domain (not just valleys downstream of a breach)' · solver attribution: 'Rusanov (local Lax-Friedrichs) for continuity with hydrostatic reconstruction (Audusse et al. 2004), semi-implicit Bates (2010) formulation for Manning friction.' · boundary: 'the boundary can remove water but can never create it. (np.minimum = drain only.)' · truncation warning: '[WARNING] Simulation truncated at t=…h — results are partial'<footer><cite class="src">kaggle-kernels/flood-sim/main.py:8-9,18-20,614-617,698-700</cite></footer></blockquote>
+<p>Two fatal conservation gates run before the simulation (each raises and aborts): a closed-box mass-conservation test (tol 1e-9) and a lake-at-rest well-balanced test (tol 1e-6, 10 % sloped bed): <em>"Water would spontaneously flow on sloped terrain."</em> <cite class="src">kaggle-kernels/flood-sim/main.py:121-366,771-783</cite></p>
+<h2 id="measured">Measured runs and timings</h2>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-08. These are observations of one environment, not performance guarantees.</caption>
+<thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
+<tbody>
+<tr><td>Local direct run (64², 300 mm rain, 4 h, sat 0.8, 20 km box)</td><td>Solver completed: max depth 4.01 m, flooded 78.2 % of grid; mass balance rainfall 120.0 M m³, infiltration 7.04 M, outflow 7.73 M, clip-loss 0.000 M, closure error 0.0000 %; wall 7.5 s. Both conservation gates ran first (stdout).</td></tr>
+<tr><td>Minimum-rain edge (10 mm, 1 h)</td><td>max depth 0.00 m, flooded 0 % — infiltration absorbed all rainfall; closure 0.0000 %</td></tr>
+<tr><td>Output limitation observed</td><td>The npy/metadata write step fails off-Kaggle with "Read-only file system: '/kaggle'" because the output dir is hard-coded (main.py:786) — this is why flood is NOT in LOCAL_SIM_TYPES; the web pipeline runs it on Kaggle where /kaggle/working exists</td></tr>
+<tr><td>Kaggle job transport (push/poll/download)</td><td>VERIFIED BY CODE INSPECTION ONLY — no push was performed against the remote account in this review</td></tr>
+</tbody></table></div>
+<h2 id="reproduction">Reproduction</h2>
+<h3 id="repro-cmd">Commands</h3>
+<pre><code># Physics (computation) locally — output writing intentionally fails off-Kaggle:
+cd /tmp &amp;&amp; mkdir fl &amp;&amp; cp &lt;repo&gt;/kaggle-kernels/flood-sim/main.py fl/ &amp;&amp; cd fl &amp;&amp; \
+  echo '{&quot;grid_size&quot;:64,&quot;rainfall_mm&quot;:300,&quot;duration_hours&quot;:4,&quot;soil_saturation&quot;:0.8,&quot;extent_km&quot;:20,&quot;wallclock_max_sec&quot;:120}' &gt; params.json &amp;&amp; \
+  python3 main.py | grep -E &quot;VERIFY|MASS BALANCE|DONE&quot;
+
+# Full pipeline requires ~/.kaggle/kaggle.json (see deployment page):
+curl -s -X POST http://localhost:3001/api/kaggle/simulate \
+  -H 'Content-Type: application/json' -d '{&quot;type&quot;:&quot;flood_inundation&quot;,&quot;lat&quot;:29.76,&quot;lon&quot;:-95.37,&quot;grid_size&quot;:256,&quot;extent_km&quot;:20,&quot;rainfall_mm&quot;:300,&quot;duration_hours&quot;:4,&quot;soil_saturation&quot;:0.8,&quot;dam_breach&quot;:true}'</code></pre>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wildfire spread (Rothermel 1972 + Anderson 13) — Terranoetis Documentation</title>
+<meta name="description" content="Rothermel surface-fire rate-of-spread over Anderson NFFL fuel models with Byram fireline intensity, Simard equilibrium moisture and stochastic directional spread, computed locally on CPU.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/wildfire.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Wildfire spread (Rothermel 1972 + Anderson 13) — Terranoetis Documentation">
+<meta property="og:description" content="Rothermel surface-fire rate-of-spread over Anderson NFFL fuel models with Byram fireline intensity, Simard equilibrium moisture and stochastic directional spread, computed locally on CPU.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/wildfire.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html" aria-current="true">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">Wildfire spread (Rothermel 1972 + Anderson 13)</li>
+      </ol></nav>
+      <h1>Wildfire spread (Rothermel 1972 + Anderson 13)</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/wildfire.md">capabilities/wildfire.md — narrative description (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#physics">Governing equations and coefficients</a></li>
+<li><a href="#parameters">Parameter contract</a></li>
+<li><a href="#outputs">Outputs</a></li>
+<li><a href="#spatial-origin">Spatial-origin semantics</a></li>
+<li><a href="#validity">Documented validity limits (verbatim from the code)</a></li>
+<li><a href="#measured">Measured runs and timings</a></li>
+<li><a href="#reproduction">Reproduction</a></li>
+      </ul></nav>
+      <p>The kernel is a surface-fire cellular spread model: Rothermel's (1972) rate-of-spread formulation over the Anderson (1982) thirteen NFFL fuel models, evaluated per cell from slope, aspect, midflame wind and moisture, then propagated with a wind/slope-elongated directional probability. Byram (1959) fireline intensity, Simard (1968) equilibrium moisture content and a simplified Albini (1979) spotting term accompany the front. It reports ROS in m/s and intensity in kW/m.</p>
+<dl class="metrics"><dt>Execution mode</dt><dd>Local CPU (python3) — no Kaggle token required <cite class="src">server/kaggle/simRunner.ts:126-141</cite></dd>
+<dt>Verification</dt><dd>MEASURED — executed directly (3 parameter sets incl. boundary cases)</dd>
+<dt>Wire scenario type</dt><dd><code>wildfire_spread</code> — contract at <cite class="src">src/services/kaggleSim.ts:28-240</cite>; job API at <a href="../reference/simulation-api.html">Simulation job API</a></dd></dl>
+<div class="callout callout-verified" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). <span class="tag tag-inspected">CODE INSPECTION ONLY</span> marks behaviour traced to source lines but not executed here (e.g. Kaggle push/poll transport). Inspected is never presented as tested.</p></div>
+<h2 id="physics">Governing equations and coefficients</h2>
+<p>Source attribution as stated in the kernel header (verbatim):</p>
+<blockquote class="verbatim">Rothermel (1972) surface fire rate-of-spread model over the Anderson (1982) 13 NFFL fuel models, with a directional (wind/slope-elongated) time-marching spread algorithm on a raster grid.
+Physics references:
+  - Rothermel, R. C. (1972) USDA Forest Service RP INT-115.
+  - Anderson, H. E. (1982) USDA Forest Service GTR INT-122 (NFFL fuel models).
+  - Byram, G. M. (1959) fireline intensity I = H * w * R.<footer><cite class="src">kaggle-kernels/fire-sim/main.py:1-10</cite></footer></blockquote>
+<figure class="equation"><span class="formula">R [ft/min] = K_ROS · I_R · ξ · (1 + φ_Ew + φ_Es) / (σ_b · ε · Q_ig)</span><figcaption>Rothermel core rate of spread; converted to m/s via ×0.3048/60. <cite class="src">kaggle-kernels/fire-sim/main.py:327-339</cite></figcaption></figure>
+<figure class="equation"><span class="formula">I_R = γ′ · (W_d·h_d·η_Md + W_l·h_l·η_Ml) · η_S</span><figcaption>Reaction intensity (air volume basis). <cite class="src">kaggle-kernels/fire-sim/main.py:322-324</cite></figcaption></figure>
+<figure class="equation"><span class="formula">γ_max = σ^1.5 / (495.0 + 0.0594·σ^1.5);  A = clip(1/(4.774σ^0.1 − 7.27), 0.5, 3.0);  γ′ = γ_max·(β/β_opt)^A·exp(A(1−β/β_opt));  β_opt = 3.348·σ^−0.8189</span><figcaption>Optimum packing ratio and surface-to-volume heat-release skew. <cite class="src">kaggle-kernels/fire-sim/main.py:284-290</cite></figcaption></figure>
+<figure class="equation"><span class="formula">φ_Ew = C·U^B·(β/β_opt)^−E;  B = 0.02526·σ^0.54;  C = 7.47·exp(−0.133·σ^0.55);  E = 0.715·exp(−3.59e−4·σ)</span><figcaption>Wind term; U = effective midflame wind (vector sum of wind and up-slope component), ft/min per Rothermel. <cite class="src">kaggle-kernels/fire-sim/main.py:293-310</cite></figcaption></figure>
+<figure class="equation"><span class="formula">φ_Es = 5.275 · β^−0.3 · tan²θ</span><figcaption>Slope term (θ clipped to 0–45°; tan clipped at 89.9°). <cite class="src">kaggle-kernels/fire-sim/main.py:297-299</cite></figcaption></figure>
+<figure class="equation"><span class="formula">η_M = 1 − 2.59r + 5.11r² − 3.52r³  (r = M/FM, clipped [0,1]);  η_S = 0.174·S_e^−0.19;  ε = exp(−138/σ);  Q_ig = max(250 + 1116·M_d, 1) BTU/lb</span><figcaption>Moisture damping, mineral damping, effective heating number, ignition heat; live moisture-of-extinction floor per Rothermel 1972 eq. 88. <cite class="src">kaggle-kernels/fire-sim/main.py:256-272,314-315,327</cite></figcaption></figure>
+<figure class="equation"><span class="formula">I [kW/m] = H_eff · w_load · R[ft/min] · 0.0577</span><figcaption>Byram (1959) fireline intensity. The code comment records a prior unit error: &quot;The previous code used 3.155e-3 kW/m, i.e. 18.3× too small — Byram (1959) is reproduced only with the full 0.0577 factor.&quot; <cite class="src">kaggle-kernels/fire-sim/main.py:349-355</cite></figcaption></figure>
+<figure class="equation"><span class="formula">P(ignition) = 1 − exp(−R_dir·Δt / dist)   per neighbour, 8-cell stencil</span><figcaption>Stochastic directional ignition; R_dir from the Anderson ellipse with eccentricity from LB = R_head/R_back ∈ [1,12]. <cite class="src">kaggle-kernels/fire-sim/main.py:342-347,589-593</cite></figcaption></figure>
+<figure class="equation"><span class="formula">spot prob = min(0.6, 0.05 + 0.03·U);  spot distance = cell·(5 + 3·U)·U(0.5,2)  (downwind)</span><figcaption>Simplified Albini (1979) spotting (&quot;both the leap distance and the ignition odds grow with midflame wind speed&quot;). <cite class="src">kaggle-kernels/fire-sim/main.py:599-617</cite></figcaption></figure>
+<h3 id="coefficients">Coefficients and named constants</h3>
+<div class="table-scroll"><table><caption>Rothermel constants and K_ROS self-calibration. At import the kernel computes the raw (K=1) fm2 no-wind/no-slope ROS and scales it so the published FARSITE reference 0.105 m/s (8 % dead-fuel moisture) is reproduced; every other coefficient stays tabulated.</caption>
+<thead><tr><th scope="col">Name</th><th scope="col">Value</th><th scope="col">Meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>K_ROS_TARGET_FM2</td><td>0.105 m/s</td><td>Published fm2 reference ROS used to calibrate the model-form constant</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:365-371</cite></td></tr>
+<tr><td>K_ROS (computed)</td><td>29.90 in observed run</td><td>Only empirical freedom in the model (per code comment)</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:374-387</cite></td></tr>
+<tr><td>_ST, _SE, _RHO_P</td><td>0.0555, 0.010, 32.0 lb/ft³</td><td>Stoichiometric excess, mineral damping, particle density</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:120</cite></td></tr>
+<tr><td>Live-fuel heats h1 = hl</td><td>8000 BTU/lb</td><td>Rothermel/Anderson default live heat content</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:122</cite></td></tr>
+<tr><td>Simard EMC clip</td><td>[0.01, 0.60]</td><td>Equilibrium dead-fuel moisture fraction bounds</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:182-195</cite></td></tr>
+<tr><td>Anderson 13 table</td><td>fm1…fm13 (w0, σ, depth, mx, h′)</td><td>Full published fuel-model coefficients</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:117-148</cite></td></tr>
+</tbody></table></div>
+<h2 id="parameters">Parameter contract</h2>
+<p>Wildfire parameters (UI keys → wire fields). Shared request envelope (validated at the client boundary before dispatch).</p>
+<div class="table-scroll"><table><caption>Wildfire parameters (UI keys → wire fields).</caption>
+<thead><tr><th scope="col">UI control</th><th scope="col">Wire field</th><th scope="col">Unit</th><th scope="col">Valid range (UI · wire · kernel)</th><th scope="col">Default</th><th scope="col">Physical meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Wind Speed <span class="cite">slider</span></td><td><code>wind_speed_ms</code> = km/h ÷ 3.6</td><td>m/s</td><td>UI 0–120 km/h; wire 0–60 m/s</td><td>UI 20 km/h · kernel 10 m/s</td><td>Midflame wind input; also "blows FROM" per meteorological convention</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:77-88</cite> <cite class="src">src/services/kaggleSim.ts:62,441</cite> <cite class="src">kaggle-kernels/fire-sim/main.py:396-397</cite></td></tr>
+<tr><td>Wind Direction <span class="cite">slider</span></td><td><code>wind_dir_deg</code></td><td>°, clockwise from N (FROM)</td><td>UI 0–360 step 5; wire 0–360</td><td>UI 270 · kernel 270</td><td>Spread vector uses dir+180°</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:77-88</cite> <cite class="src">src/services/kaggleSim.ts:63</cite> <cite class="src">kaggle-kernels/fire-sim/main.py:302,397</cite></td></tr>
+<tr><td>Relative Humidity <span class="cite">slider</span></td><td><code>humidity_pct</code></td><td>%</td><td>UI 1–100; wire 0–100</td><td>UI 15 · kernel 20</td><td>Drives Simard EMC unless dead_moisture override given</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:77-88</cite> <cite class="src">src/services/kaggleSim.ts:64</cite> <cite class="src">kaggle-kernels/fire-sim/main.py:398,479-481</cite></td></tr>
+<tr><td>Fuel Type <span class="cite">select</span></td><td><code>fuel_type</code></td><td>grass|shrub|forest|urban</td><td>enum; mapped to Anderson fm 2/5/8/1</td><td>forest</td><td>Unknown strings rejected at the boundary</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:81-85</cite> <cite class="src">src/services/kaggleSim.ts:66,446-452</cite> <cite class="src">kaggle-kernels/fire-sim/main.py:150-161</cite></td></tr>
+<tr><td>Duration <span class="cite">slider</span></td><td><code>duration_hours</code></td><td>h</td><td>UI 1–168; wire ≤ 720</td><td>UI 72 · kernel 2</td><td>Simulation length</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:77-88</cite> <cite class="src">src/services/kaggleSim.ts:65</cite> <cite class="src">kaggle-kernels/fire-sim/main.py:399</cite></td></tr>
+<tr><td>Terrain (study-box sample)</td><td><code>terrain</code> + <code>terrain_gs</code></td><td>m above ellipsoid</td><td>≤ 65,536 cells; gs 2–256; server compacts to base64</td><td>—</td><td>Real globe relief; kernel derives slope/aspect from it</td><td><cite class="src">src/services/kaggleSim.ts:69-80</cite> <cite class="src">server/kaggle/simRunner.ts:456-495</cite></td></tr>
+<tr><td>dead_moisture / live_moisture / temperature_c</td><td>same names (optional)</td><td>fraction; fraction; °C</td><td>0–0.6; 0–2; −40…60</td><td>kernel: Simard-derived / fuel table / 25</td><td>Scientific overrides — not exposed as UI sliders (wire-only)</td><td><cite class="src">src/services/kaggleSim.ts:81-85</cite> <cite class="src">kaggle-kernels/fire-sim/main.py:404-405,409,479-481</cite></td></tr>
+</tbody></table></div>
+<h2 id="outputs">Outputs</h2>
+<div class="table-scroll"><table><caption>Files written per run (also served by <code>GET /api/kaggle/simulate/:jobId/grid/:name</code> and <code>…/geotiff/:name</code>)</caption>
+<thead><tr><th scope="col">Field</th><th scope="col">Unit</th><th scope="col">Meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td><code>fire_state.npy</code></td><td>0 unburned · 1 burning · 2 burned</td><td>Final combustion state grid</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:546,737</cite></td></tr>
+<tr><td><code>fire_intensity.npy</code></td><td>0…1 continuous</td><td>Per-cell combustion intensity (0.15 residual on burned)</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:633-641,738</cite></td></tr>
+<tr><td><code>fuel_map.npy</code></td><td>load multiplier 0–1.2</td><td>Per-cell fuel-load field</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:220,739</cite></td></tr>
+<tr><td><code>terrain_slope.npy</code></td><td>degrees</td><td>Slope grid (stored under final key "terrain")</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:666,740</cite></td></tr>
+<tr><td><code>fireline_intensity_npy.npy</code></td><td>kW/m</td><td>Byram intensity</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:741</cite></td></tr>
+<tr><td><code>rate_of_spread_npy.npy</code></td><td>m/s</td><td>Directional ROS field</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:742</cite></td></tr>
+<tr><td><code>snapshots_state/intensity.npy</code> + <code>snapshot_times.npy</code></td><td>—; h</td><td>20-frame animation series</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:743-752</cite></td></tr>
+<tr><td><code>metadata.json</code></td><td>—</td><td>model "rothermel_anderson13", terrain_source, final burned stats</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:680-685,759-764</cite></td></tr>
+</tbody></table></div>
+<h2 id="spatial-origin">Spatial-origin semantics</h2>
+<p>Square domain, row-major grid, <strong>row 0 = north</strong> (the "compaction contract" shared with all terrain-bearing kernels); <code>state[ignition_y, ignition_x]</code> addresses row= y, col = x. Slope and aspect are derived from the supplied (or synthetic) elevation with <code>np.gradient(elev, cell_m)</code>; wind direction is meteorological ("blows FROM"). <cite class="src">kaggle-kernels/fire-sim/main.py:553-557,433-435,459-461,302</cite></p>
+<h2 id="validity">Documented validity limits (verbatim from the code)</h2>
+<blockquote class="verbatim">the kernel must never silently invent topography for a study area the user has already drawn on the globe · Previously fuel_type was silently dropped and every run used fm2. · slow-ROS fuels (e.g. fm8 forest-floor duff) … burned out before igniting anything — the fire stalled at the ignition cell. Residence = clamp(flame-flush, cell-backing-sweep, 240 min). · WUI structure fuels are outside the Anderson-13 system<footer><cite class="src">kaggle-kernels/fire-sim/main.py:425-426,151-152,527-532,158-160</cite></footer></blockquote>
+<p>A non-fatal validation prints the no-wind/no-slope ROS of the active fuel against the 0.105 m/s reference (± 0.01) — "PASS" or "CHECK" <cite class="src">kaggle-kernels/fire-sim/main.py:501-508</cite>. Wall-clock cap default 480 s bounds the march <cite class="src">kaggle-kernels/fire-sim/main.py:407,568-570</cite>.</p>
+<h2 id="measured">Measured runs and timings</h2>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-08. These are observations of one environment, not performance guarantees.</caption>
+<thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
+<tbody>
+<tr><td>Calibration fuel (fm2 grass, no wind)</td><td>ROS_nowind_noslope = 0.103 m/s vs reference 0.105 → PASS (observed stdout)</td></tr>
+<tr><td>Representative fm8 (forest) run: 128², 8 m/s, RH 20 %, 6 h, 40 km box, seed 42</td><td>K_ROS = 29.90; mean R = 0.370 m/s, max R = 0.503 m/s, mean I = 4,072 kW/m; burned 25 cells (0.15 % of grid); wall 1.06 s. [VALIDATE] prints "CHECK" for non-fm2 fuels because the reference applies to fm2 — expected behaviour, non-fatal.</td></tr>
+<tr><td>Boundary calm-humid (0 m/s wind, RH 100 %, grass)</td><td>Completes in 0.40 s; minimal advance (moisture damping η_M → 0 near saturation)</td></tr>
+<tr><td>Boundary hot-dry (15 m/s, RH 5 %, shrub, T = 40 °C, dead moisture 0.04)</td><td>Completes in 0.60 s; fire starts and advances</td></tr>
+</tbody></table></div>
+<h2 id="reproduction">Reproduction</h2>
+<h3 id="repro-cmd">Commands</h3>
+<pre><code>curl -s -X POST http://localhost:3001/api/kaggle/simulate \
+  -H 'Content-Type: application/json' -d '{
+    &quot;type&quot;:&quot;wildfire_spread&quot;,&quot;lat&quot;:34.5,&quot;lon&quot;:-117.5,&quot;grid_size&quot;:128,
+    &quot;extent_km&quot;:40,&quot;wind_speed_ms&quot;:8,&quot;wind_dir_deg&quot;:270,
+    &quot;humidity_pct&quot;:20,&quot;duration_hours&quot;:6,&quot;fuel_type&quot;:&quot;forest&quot;,&quot;seed&quot;:42 }'
+
+# direct kernel run:
+cd /tmp &amp;&amp; mkdir fire &amp;&amp; cp &lt;repo&gt;/kaggle-kernels/fire-sim/main.py fire/ &amp;&amp; cd fire &amp;&amp; \
+  echo '{&quot;grid_size&quot;:64,&quot;wind_speed_ms&quot;:0,&quot;fuel_type&quot;:&quot;grass&quot;,&quot;humidity_pct&quot;:15,&quot;duration_hours&quot;:1,&quot;extent_km&quot;:10,&quot;seed&quot;:1}' &gt; params.json &amp;&amp; \
+  TERRANOETIS_OUT_DIR=$PWD python3 main.py | grep VALIDATE</code></pre>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Platform services — Terranoetis Documentation</title>
+<meta name="description" content="Authentication and rate limiting, sandboxed code execution, job queue, plugin system, observability and the OpenAPI surface.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/platform-services.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Platform services — Terranoetis Documentation">
+<meta property="og:description" content="Authentication and rate limiting, sandboxed code execution, job queue, plugin system, observability and the OpenAPI surface.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/platform-services.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html" aria-current="true">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">Platform services</li>
+      </ol></nav>
+      <h1>Platform services</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span> + <span class="tag tag-measured">MEASURED — health/metrics endpoints observed on boot</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/platform-services.md">capabilities/platform-services.md — narrative (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#execution">Code execution & jobs</a></li>
+<li><a href="#observability">Observability</a></li>
+      </ul></nav>
+      <div class="table-scroll"><table><caption>Security controls (verified parameters)</caption>
+<thead><tr><th scope="col">Control</th><th scope="col">Verified detail</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Passwords</td><td>scrypt N=16384, r=8, p=1 (RFC 7914 family); no plaintext</td><td><cite class="src">server/utils/passwords.ts:8-10</cite></td></tr>
+<tr><td>JWT</td><td>HS tokens, TTL 1 h prod / 1 d dev; startup refuses JWT_SECRET &lt; 32 chars in prod; refresh only for unexpired tokens of existing users</td><td><cite class="src">server/middleware/auth.ts:8,257-281</cite> <cite class="src">server/index.ts:171-181</cite></td></tr>
+<tr><td>Lockout</td><td>10 failed attempts → 15 min lockout, HTTP 423</td><td><cite class="src">server/middleware/auth.ts:9-10,65-73,151</cite></td></tr>
+<tr><td>Bootstrap admin</td><td>requires ADMIN_BOOTSTRAP_PASSWORD ≥ 16 chars in prod</td><td><cite class="src">server/middleware/auth.ts:104-110</cite></td></tr>
+<tr><td>Rate limits</td><td>login 5/15 min; public data 300/min/IP; agent 30/min; local-ask 20/min; in-process map store</td><td><cite class="src">server/index.ts:306,307,9167-9168</cite> <cite class="src">server/middleware/rateLimiter.ts:8-80</cite></td></tr>
+<tr><td>Tenant isolation</td><td>closed table set (chats, monitor_rules, scheduled_tasks, profiles, feedback); no user input in SQL strings</td><td><cite class="src">server/middleware/tenantIsolation.ts:5-20</cite></td></tr>
+<tr><td>Validation</td><td>zod: message ≤ 10k; ≤ 4 images ≤ 8 MB; ≤ 12 history × 4 KB; sandbox code ≤ 20k, timeout 1–120 s</td><td><cite class="src">server/middleware/validate.ts:3-43</cite></td></tr>
+<tr><td>Errors</td><td>canonical {error:{code,message}}, stacks hidden in prod; 413 on body overflow</td><td><cite class="src">server/middleware/errorHandler.ts:23-40</cite></td></tr>
+<tr><td>SSRF guard</td><td>validateOutboundUrl + allowlist at outbound fetch sites</td><td><cite class="src">server/utils/ssrfGuard.ts:module</cite> <cite class="src">SECURITY.md</cite></td></tr>
+<tr><td>Audit</td><td>auditLog → audit_logs on sandbox exec, simulate, deletes</td><td><cite class="src">server/middleware/audit.ts:3-19</cite></td></tr>
+</tbody></table></div>
+<h2 id="execution">Code execution & jobs</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Subsystem</th><th scope="col">Verified detail</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Sandbox</td><td>Python/Node/Bash via sandboxManager + e2b cloud option; concurrency caps 3 local / 10 cloud</td><td><cite class="src">server/index.ts:8655-8658</cite></td></tr>
+<tr><td>Lite simulation engines</td><td>simplified in-process surrogates in server/sandboxV2 — farsiteLite (cellular ROS), adcircLite (storm-surge SWE), wrfLite, hysplitLite (particle dispersion), fnoSurrogate (Fourier neural operator) — named after, not reimplementations of, the operational models; earlier docs implied the originals (corrected)</td><td><cite class="src">server/sandboxV2:module files</cite></td></tr>
+<tr><td>Job queue</td><td>SQLite job_queue; 10 concurrent; maxAttempts 3; recurring: materialized-view refresh 60 s, plugin scan 30 s, synthetic data 1 h, KG stats 10 min</td><td><cite class="src">server/queue/simple-queue.ts:22-60,1013+</cite> <cite class="src">server/index.ts:1006-1039</cite></td></tr>
+<tr><td>Plugins</td><td>install from URL/GitHub/raw/zip; toggle/remove; loads isolated with failure logging</td><td><cite class="src">server/pluginManager.ts:module</cite> <cite class="src">server/index.ts:941-942</cite></td></tr>
+<tr><td>E2E/eval harness</td><td>AI-chat golden + e2e scripts; evals + prompt lab under server/ml and scripts/</td><td><cite class="src">package.json:16-29</cite></td></tr>
+</tbody></table></div>
+<h2 id="observability">Observability</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Signal</th><th scope="col">Implementation</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Logs</td><td>pino JSON + correlationId; heap log 60 s</td><td><cite class="src">server/observability/logger.ts:6,33,53-64</cite></td></tr>
+<tr><td>Metrics</td><td>prom-client: http totals/duration, SSE gauge, sandbox/cache/db/tool/omninet counters at /api/metrics</td><td><cite class="src">server/observability/metrics.ts:13-86</cite></td></tr>
+<tr><td>Tracing/errors</td><td>OpenTelemetry init + Sentry opt-in via SENTRY_DSN</td><td><cite class="src">server/index.ts:14450-14457</cite></td></tr>
+<tr><td>Health</td><td>/api/health (+ /ready, /live) with component checks — measured payload on Getting started</td><td><cite class="src">server/index.ts:375-381</cite></td></tr>
+<tr><td>OpenAPI</td><td>spec at /api/openapi.json + docs UI /api/docs (generated from routes/openapi.ts)</td><td><cite class="src">server/routes/openapi.ts:module</cite> <cite class="src">server/index.ts:494</cite></td></tr>
+</tbody></table></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,6 +1,8 @@
 # API Reference
 
-Terranoetis exposes **360+ REST endpoints** plus a real-time **WebSocket** channel. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
+Terranoetis exposes **360+ REST endpoints** (371 handler registrations counted across `server/` on 2026-09-08) plus real-time **WebSocket** (`/ws/agent`, `/ws/voice`) and **SSE** channels. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
+
+> Site views: [API reference](reference/api.html) · [Simulation job API & parameter contracts](reference/simulation-api.html) · machine-readable spec at `GET /api/openapi.json`. The tables below are the curated prose map; per-endpoint behaviour is cited in the reference pages.
 
 ---
 
@@ -149,7 +151,15 @@ The analytical pipeline applies a **7-stage workflow** (input validation → pre
 | GET | `/api/kaggle/simulate/:id` | Kaggle simulation job status / results |
 | GET | `/api/kaggle/simulate/:id/results` | Simulation result data |
 | GET | `/api/kaggle/jobs` | Kaggle job queue |
-| POST | `/api/kaggle/simulate` | Submit a simulation run |
+| POST | `/api/kaggle/simulate` | Submit a simulation run (zod-validated contract; see parameter-contract reference) |
+| GET | `/api/kaggle/simulate/:id/stream` | SSE job status/progress stream |
+| POST | `/api/kaggle/simulate/:id/cancel` | Cooperative cancel (local runs SIGKILL at `LOCAL_SIM_TIMEOUT_MS`) |
+| GET | `/api/kaggle/simulate/:id/grid/:name` | Result grid as raw `.npy` or JSON (≤ 5 M elements) |
+| GET | `/api/kaggle/simulate/:id/geotiff/:name` | Result grid as WGS84 GeoTIFF |
+| GET | `/api/kaggle/jobs` · `/api/kaggle/kernels` | Job list · kernel availability & GPU-accelerator flags |
+| POST | `/api/kaggle/calibrate` | Landslide μ×ξ fit to an observed runout (local python3) |
+| POST | `/api/kaggle/landslide/quantify` · `/api/kaggle/volcano/quantify` | Monte-Carlo UQ ensembles (local python3) |
+| POST | `/api/kaggle/volcano/calibrate` · `/api/kaggle/volcano/profile` | Lava rheology calibration · wind-profile sampling |
 
 ---
 
@@ -246,7 +256,7 @@ The WebSocket server (`server/websocket.ts`) streams live data and agent events 
 - Presence (collaboration cursors, typing)
 - Pub/sub messages (alerts, fork state)
 
-Connection: `ws://<host>:3001` on paths `/ws/agent` and `/ws/voice` (brokered through the same server as REST).
+Connection: `ws://<host>:3001` on paths `/ws/agent` and `/ws/voice` only (all other upgrade paths are destroyed); auth via `Sec-WebSocket-Protocol` bearer JWT (fallback `?token=`); 30 s heartbeat / 35 s timeout; channel allowlist includes `sentinel:raw`, `sentinel:alerts`, `correlation:alerts`, `fork:*`, per-user `ws:<id>` (`server/websocket.ts:79-145`). The event bus feeding it is the in-process pub/sub (`server/pubsub.ts`) — Redis is not required for realtime delivery.
 
 ---
 

@@ -38,7 +38,7 @@ npx tsc -p tsconfig.app.json --noEmit
 npm run lint          # eslint — 0 errors required
 
 # E2E browser tests
-npx playwright test   # 7 tests, headless Chromium
+npx playwright test   # 7 spec files, headless Chromium
 
 # Build
 npm run build         # tsc + vite build
@@ -70,6 +70,10 @@ npm run build         # tsc + vite build
 4. Add the endpoint to the OpenAPI spec in `server/routes/openapi.ts`.
 5. Add the layer to the catalog in `src/lib/layerConfig.ts`.
 6. Verify the route returns real data: `curl http://localhost:3001/api/your-endpoint`.
+
+## Documentation
+
+Docs prose lives in Markdown (`README.md`, `docs/*.md`, `docs/capabilities/*.md`); the Pages site under `docs/` is generated from `scripts/docs/` page specs — edit the spec, run `node scripts/docs/build.mjs`, and keep `node scripts/docs/quality-gate.mjs` green. Every factual claim needs a `file:line` citation; executed evidence is labelled MEASURED, code-read evidence is labelled inspection-only. The writing rules are at [docs/governance/style-guide.html](docs/governance/style-guide.html).
 
 ## Pull Request Process
 

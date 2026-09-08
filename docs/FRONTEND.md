@@ -1,6 +1,8 @@
 # Frontend
 
-The Terranoetis client is a **React 19 + TypeScript** single-page application built with **Vite 7**, styled with **Tailwind CSS 3**, and rendered on a **CesiumJS 1.140** WebGL globe. The UI shell (topbar, sidebar, modals) is implemented inline in `src/App.tsx` (~11,000 lines); feature surfaces are split across lazy-loaded panels.
+The Terranoetis client is a **React 19 + TypeScript** single-page application built with **Vite 7**, styled with **Tailwind CSS 3**, and rendered on a **CesiumJS 1.140** WebGL globe. “GPU” below refers to WebGL rendering primitives and shaders only — the simulation kernels the overlays visualize are NumPy/CPU code ([verified modes table](capabilities/hazard-simulations.html#modes)).
+
+> Verified site view: [3D globe visualization](capabilities/globe-visualization.html). The UI shell (topbar, sidebar, modals) is implemented inline in `src/App.tsx` (~11,000 lines); feature surfaces are split across lazy-loaded panels.
 
 ---
 
@@ -10,7 +12,7 @@ The Terranoetis client is a **React 19 + TypeScript** single-page application bu
 - [Routing](#routing)
 - [Component Architecture](#component-architecture)
 - [Rendering Engine](#rendering-engine)
-- [Kaggle GPU Overlays](#kaggle-gpu-overlays)
+- [Simulation overlays](#simulation-overlays)
 - [Hooks](#hooks)
 - [State & Data](#state--data)
 
@@ -182,7 +184,7 @@ Scenario types and colors:
 
 ---
 
-## Kaggle GPU Overlays
+## Simulation overlays
 
 ### Shared Core (`src/components/kaggle/`)
 
@@ -220,7 +222,7 @@ Scenario types and colors:
 | `useChatSelectors` | Zustand selectors for chat UI state |
 | `useWebSocket` | WebSocket connection manager |
 | `useCollaboration` | Real-time presence: join/heartbeat, typing, cursor position |
-| `useKaggleSimulation` | Kaggle GPU simulation job lifecycle |
+| `useKaggleSimulation` | Simulation job lifecycle (local CPU kernels or Kaggle kernels) |
 | `useOfflineChat` | Offline banner + local fallback |
 | `useRealtimeVoice` | Primary voice: OpenAI Realtime → Gemini Live fallback via server bridge |
 

@@ -1,6 +1,8 @@
 # Analytical Models
 
-Terranoetis ships **150 scientific equation engines** organized across **7 parts** and **26 domains**. Every model is grounded in primary literature and math-verified against its source — no machine learning, no black boxes. Each model carries a full citation; **82 resolve to a DOI**, and the remainder are books (ISBN), government/standards documents, or classic pre-DOI papers, each explicitly flagged in the source with its reference PDF archived under `docs/Research papers/`.
+Terranoetis ships **150 scientific equation engines** organized across **7 parts** and **26 domains**. Every model is grounded in primary literature and math-verified against its source — no machine learning, no black boxes. Each of the 150 catalog entries carries a full citation: **80 reference strings contain a DOI**, 12 cite books by ISBN, 4 are explicitly flagged `NO-DOI`, and the remainder are pre-DOI classics, government/standards documents, or conference papers (counts produced by programmatic scan of `src/data/analyticalModels.ts` on 2026-09-08; 66 source PDFs are archived under `docs/Research papers/`). Spot-checked DOI resolvability: `doi.org/10.1785/0120130065` → HTTP 302.
+
+> Verified site view (counts, workflow, measured sample computations): [Analytical equation engine](capabilities/analytical-engine.html).
 
 ---
 
@@ -114,7 +116,7 @@ Each tool declares a `vizType`; the client renders it via Recharts (charts) or C
 - **7-part structure** — logically grouped from Earth system core to advanced engineering
 - **7-stage workflow** — input validation → preprocessing → computation → post-processing → quality control → uncertainty estimation → interpretation
 - **Real-data context** — every model receives live context (weather, terrain, ocean, seismic) from 30+ data feeds
-- **Literature-indexed** — 82 models cite a resolvable DOI; the rest cite books (ISBN), standards, or pre-DOI classics, each flagged in-source with its reference PDF archived under `docs/Research papers/`
+- **Literature-indexed** — 80 models carry a DOI in their citation (12 ISBN, 4 explicit NO-DOI; remainder pre-DOI/standards), each with its reference PDF archived under `docs/Research papers/` (66 PDFs)
 
 ---
 

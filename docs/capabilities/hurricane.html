@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hurricane landfall (Holland 1980 wind + SWE surge + waves + rainfall + runoff) — Terranoetis Documentation</title>
+<meta name="description" content="Parametric Holland gradient-wind field coupled to a 2D nonlinear shallow-water surge model with JONSWAP/SMB waves, Lonfat-2007 rainfall and SCS-CN runoff; local CPU kernel.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/hurricane.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Hurricane landfall (Holland 1980 wind + SWE surge + waves + rainfall + runoff) — Terranoetis Documentation">
+<meta property="og:description" content="Parametric Holland gradient-wind field coupled to a 2D nonlinear shallow-water surge model with JONSWAP/SMB waves, Lonfat-2007 rainfall and SCS-CN runoff; local CPU kernel.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/hurricane.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html" aria-current="true">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">Hurricane landfall (Holland 1980 wind + SWE surge + waves + rainfall + runoff)</li>
+      </ol></nav>
+      <h1>Hurricane landfall (Holland 1980 wind + SWE surge + waves + rainfall + runoff)</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/hurricane.md">capabilities/hurricane.md — narrative description (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#physics">Governing equations and coefficients</a></li>
+<li><a href="#parameters">Parameter contract</a></li>
+<li><a href="#outputs">Outputs</a></li>
+<li><a href="#spatial-origin">Spatial-origin semantics</a></li>
+<li><a href="#validity">Documented validity limits (verbatim from the code)</a></li>
+<li><a href="#measured">Measured runs and timings</a></li>
+<li><a href="#reproduction">Reproduction</a></li>
+      </ul></nav>
+      <p>The landfall scenario combines a parametric vortex wind field (Holland 1980 with the Atkinson–Hollan B estimate and Coriolis term, advected along a track that passes the pinned landfall point at mid-duration) with a depth-averaged nonlinear shallow-water surge solver forced by wind stress and bottom pressure, empirical wave growth (JONSWAP/Stokes–Moum–Bretschneider capped at Pierson–Moskowitz with USACE breaking/setup rules), Lonfat-shaped parametric rainfall, and USDA TR-55 SCS-CN runoff.</p>
+<dl class="metrics"><dt>Execution mode</dt><dd>Local CPU (python3) — no Kaggle token required <cite class="src">server/kaggle/simRunner.ts:126-141</cite></dd>
+<dt>Verification</dt><dd>MEASURED — executed directly (3 parameter sets incl. Cat 5 and Cat 1 boundaries); internal physics gate PASS observed</dd>
+<dt>Wire scenario type</dt><dd><code>hurricane_landfall</code> — contract at <cite class="src">src/services/kaggleSim.ts:28-240</cite>; job API at <a href="../reference/simulation-api.html">Simulation job API</a></dd></dl>
+<div class="callout callout-verified" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). <span class="tag tag-inspected">CODE INSPECTION ONLY</span> marks behaviour traced to source lines but not executed here (e.g. Kaggle push/poll transport). Inspected is never presented as tested.</p></div>
+<h2 id="physics">Governing equations and coefficients</h2>
+<p>Source attribution as stated in the kernel header (verbatim):</p>
+<blockquote class="verbatim">Wind: Holland (1980, MWR 108:1212) gradient-wind balance with Coriolis:
+    V(r) = sqrt( V_c^2 + (f·r/2)^2 ) − f·r/2,
+    V_c^2 = (B·Δp/ρ)·x·e^(−x),  x = (R_max/r)^B
+B from the observed Vmax–Δp relation (Atkinson &amp; Hollan 2012, BAMS):
+    B = e·ρ·Vmax^2/Δp, clipped to [1.0, 2.5].<footer><cite class="src">kaggle-kernels/hurricane-sim/main.py:10-14</cite></footer></blockquote>
+<figure class="equation"><span class="formula">V(r) = sqrt(V_c² + (f·r/2)²) − f·r/2,   V_c² = (B·Δp/ρ)·x·e^(−x),   x = (R_max/r)^B</span><figcaption>Holland gradient wind; r floored at 0.1 km; f = 2Ω·sin(lat), Ω = 7.2921159e-5 rad/s. <cite class="src">kaggle-kernels/hurricane-sim/main.py:160-170,138-143,156</cite></figcaption></figure>
+<figure class="equation"><span class="formula">p(r) = p_c + Δp·exp(−(R_max/r)^B)</span><figcaption>Holland pressure field; the inverse-barometer ocean response is implicit in the momentum forcing and is not re-added to the output. <cite class="src">kaggle-kernels/hurricane-sim/main.py:20,154-157,27-29</cite></figcaption></figure>
+<figure class="equation"><span class="formula">τ = ρ_a·C_d·|U|·U ÷ (ρ_w·h_stress),  C_d = 1.5e-3</span><figcaption>Wind stress on the surge; drag saturation per Powell et al. 2003 (BAMS); base value Large &amp;amp; Pond 1981 (JPO 11:324). h_stress floored at 1 m. <cite class="src">kaggle-kernels/hurricane-sim/main.py:25-27,519-529,108-110</cite></figcaption></figure>
+<figure class="equation"><span class="formula">Manning n = 0.03 bottom friction, damping-limited to ±0.9|u|/dt; current cap 10 m/s</span><figcaption>Shelf/channel roughness constant. <cite class="src">kaggle-kernels/hurricane-sim/main.py:549-560,111</cite></figcaption></figure>
+<figure class="equation"><span class="formula">H_s = 1.6e−3 · U_A · √F,  U_A = 0.71·U10,  capped at H_s ≤ 0.0248·U_A²</span><figcaption>Fetch-limited JONSWAP/SMB growth with Pierson–Moskowitz fully-developed cap; USACE CEM EM 1110-2-1100 Part II-1. <cite class="src">kaggle-kernels/hurricane-sim/main.py:30-36,117-119,173-182</cite></figcaption></figure>
+<figure class="equation"><span class="formula">H_b = 0.78·d;  setup η_s ≈ 0.19·H_b</span><figcaption>Depth-limited breaking (γ = 0.78, USACE CEM Part II-1) and wave setup (USACE Eq. II-4-24 radiation-stress result). <cite class="src">kaggle-kernels/hurricane-sim/main.py:35-38,112-116,501-502</cite></figcaption></figure>
+<figure class="equation"><span class="formula">rate(r) = 1.2·Vmax · (r/r_peak) · ((500−r)/(500−r_peak))^1.5 mm/h,  r_peak = max(100 km, R_max),  0 beyond 500 km</span><figcaption>Lonfat et al. 2007 (JGR 112, doi:10.1029/2006JD007557 — as cited in code: MWR 135:3086) PHRaM/R-CLIPER-shaped footprint; validation reference Tuleya et al. 2007, WAF 22:56. <cite class="src">kaggle-kernels/hurricane-sim/main.py:39-48,124-126,185-199</cite></figcaption></figure>
+<figure class="equation"><span class="formula">Q = (P − 0.2S)² / (P + 0.8S),  S = (1000/CN − 10)·25.4 mm;  Q ≤ P</span><figcaption>USDA TR-55 SCS Curve Number runoff, applied incrementally; CN land: 77 (suburban) on land, 99 on water — of five coded CN values only these two are used by the terrain classifier. <cite class="src">kaggle-kernels/hurricane-sim/main.py:49-51,131-136,202-209,426-427</cite></figcaption></figure>
+<h3 id="coefficients">Coefficients and named constants</h3>
+<div class="table-scroll"><table><caption>Named constants (value — meaning — source).</caption>
+<thead><tr><th scope="col">Constant</th><th scope="col">Value</th><th scope="col">Meaning / provenance</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>RHO_AIR</td><td>1.15 kg/m³</td><td>Air density for stress/IB</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:105</cite></td></tr>
+<tr><td>RHO_WATER</td><td>1025.0 kg/m³</td><td>Seawater density</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:106</cite></td></tr>
+<tr><td>G</td><td>9.81 m/s²</td><td>Gravity</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:107</cite></td></tr>
+<tr><td>C_DRAG</td><td>0.0015</td><td>Saturated high-wind drag (Powell 2003; Large & Pond 1981)</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:108-110</cite></td></tr>
+<tr><td>N_MANING</td><td>0.03</td><td>Typical shelf/channel Manning n</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:111</cite></td></tr>
+<tr><td>GAMMA_BREAKER</td><td>0.78</td><td>USACE CEM "(H/d)max = 0.78 agrees best with observations"</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:112-113</cite></td></tr>
+<tr><td>K_SETUP</td><td>0.19</td><td>Wave setup coefficient (USACE Eq II-4-24)</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:114-116</cite></td></tr>
+<tr><td>JONSWAP_CH</td><td>1.6e-3</td><td>SMB/JONSWAP fetch-growth coefficient</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:117-118</cite></td></tr>
+<tr><td>PM_LIMIT</td><td>0.0248</td><td>Pierson–Moskowitz cap coefficient</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:119</cite></td></tr>
+<tr><td>cat_winds</td><td>{1:43, 2:50, 3:58, 4:70, 5:90} m/s</td><td>Saffir–Simpson threshold wind per category</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:351-352</cite></td></tr>
+<tr><td>Ω (OMEGA_EARTH)</td><td>7.2921159e-5 rad/s</td><td>Earth rotation for Coriolis</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:138-143</cite></td></tr>
+</tbody></table></div>
+<h2 id="parameters">Parameter contract</h2>
+<p>Hurricane parameters. Category drives derived pressure/radius via derivePhysicsFormOverrides. Shared request envelope (validated at the client boundary before dispatch).</p>
+<div class="table-scroll"><table><caption>Hurricane parameters. Category drives derived pressure/radius via derivePhysicsFormOverrides.</caption>
+<thead><tr><th scope="col">UI control</th><th scope="col">Wire field</th><th scope="col">Unit</th><th scope="col">Valid range (UI · wire · kernel)</th><th scope="col">Default</th><th scope="col">Physical meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Saffir–Simpson Category <span class="cite">slider</span></td><td><code>category</code></td><td>cat (int)</td><td>UI &amp; wire 1–5</td><td>3</td><td>Peak wind 43/50/58/70/90 m/s (kernel table)</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:69-76</cite> <cite class="src">src/services/kaggleSim.ts:140,604-612</cite> <cite class="src">kaggle-kernels/hurricane-sim/main.py:351-352</cite></td></tr>
+<tr><td>Forward Speed <span class="cite">slider</span></td><td><code>forward_speed_kmh</code></td><td>km/h</td><td>UI 5–60; wire 2–80</td><td>UI 15 · kernel 30</td><td>Track translation speed (asymmetric wind + accumulation)</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:69-76</cite> <cite class="src">src/services/kaggleSim.ts:141</cite> <cite class="src">kaggle-kernels/hurricane-sim/main.py:342</cite></td></tr>
+<tr><td>Central Pressure <span class="cite">slider</span></td><td><code>central_pressure_hpa</code></td><td>hPa</td><td>UI 880–1010 (overwritten to 1010−20·cat); wire 860–1020</td><td>UI 950 · kernel 960</td><td>Sets Δp, hence B and the whole radial profile</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:69-76</cite> <cite class="src">src/services/kaggleSim.ts:142,609</cite> <cite class="src">kaggle-kernels/hurricane-sim/main.py:343</cite></td></tr>
+<tr><td>Radius of Max Winds <span class="cite">slider</span></td><td><code>radius_max_wind_km</code></td><td>km</td><td>UI 10–200 (overwritten to max(20, 30+15·cat)); wire 5–300</td><td>UI 50 · kernel 50</td><td>Eyewall radius; needs ≤ ~R_max/2 cell size to be resolved</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:69-76</cite> <cite class="src">src/services/kaggleSim.ts:143,611</cite> <cite class="src">kaggle-kernels/hurricane-sim/main.py:344</cite></td></tr>
+<tr><td>Track Heading <span class="cite">slider + auto checkbox</span></td><td><code>heading_deg</code> (optional)</td><td>°, clockwise from N</td><td>UI 0–360 step 5; wire 0–360; omitted in auto mode</td><td>270</td><td>Auto mode: kernel auto-aims the storm from the water centroid toward the pinned point</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:71-76,770-781</cite> <cite class="src">src/services/kaggleSim.ts:146-151,493</cite> <cite class="src">kaggle-kernels/hurricane-sim/main.py:393-400</cite></td></tr>
+<tr><td>Hours to Landfall <span class="cite">slider</span></td><td><code>duration_hours</code> = 2 × landfallTime</td><td>h</td><td>UI 6–96 (wire ≤ 720)</td><td>UI 24</td><td>The eye crosses the pinned point at mid-duration, so the run spans equal approach + inland halves</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:69-76</cite> <cite class="src">src/services/kaggleSim.ts:144,477-494</cite> <cite class="src">kaggle-kernels/hurricane-sim/main.py:376-381</cite></td></tr>
+<tr><td>Landfall point (globe click)</td><td><code>track_frac_x/y</code> (optional)</td><td>fraction 0–1</td><td>clamped</td><td>0.5, 0.5</td><td>Column = east, row = south; default box centre</td><td><cite class="src">src/services/kaggleSim.ts:152-159</cite> <cite class="src">kaggle-kernels/hurricane-sim/main.py:382-383</cite></td></tr>
+<tr><td>Terrain (auto-sampled)</td><td><code>terrain</code> + <code>terrain_gs</code></td><td>m (negative = below sea)</td><td>≤ 65,536 cells</td><td>—</td><td>Real relief/bathymetry replaces the synthetic coastal profile</td><td><cite class="src">src/services/kaggleSim.ts:160-167</cite></td></tr>
+</tbody></table></div>
+<h2 id="outputs">Outputs</h2>
+<div class="table-scroll"><table><caption>Files written per run (also served by <code>GET /api/kaggle/simulate/:jobId/grid/:name</code> and <code>…/geotiff/:name</code>)</caption>
+<thead><tr><th scope="col">Field</th><th scope="col">Unit</th><th scope="col">Meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td><code>wind_speed.npy</code></td><td>m/s</td><td>Total 10 m wind (gradient + translation)</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:724-745</cite></td></tr>
+<tr><td><code>wind_direction.npy</code></td><td>rad</td><td>atan2 of east/north wind components</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:724-745</cite></td></tr>
+<tr><td><code>surge_height.npy</code></td><td>m</td><td>Composite water level: η + setup over ocean, inundation depth over land (NHC/USGS composite convention)</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:612-615</cite></td></tr>
+<tr><td><code>wave_setup.npy</code> / <code>wave_height.npy</code></td><td>m / m (Hs)</td><td>Setup and significant wave height</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:724-745</cite></td></tr>
+<tr><td><code>rainfall.npy</code> / <code>runoff.npy</code></td><td>mm (cumulative)</td><td>Rain accumulation and SCS-CN runoff</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:582-591,724-745</cite></td></tr>
+<tr><td><code>inundation.npy</code></td><td>m above ground</td><td>On-land flooding depth</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:724-745</cite></td></tr>
+<tr><td><code>terrain.npy</code></td><td>m</td><td>Effective terrain used</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:724-745</cite></td></tr>
+<tr><td><code>snapshots_wind/surge.npy</code> + <code>snapshot_times.npy</code></td><td>—; h</td><td>≈20-frame series</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:724-745</cite></td></tr>
+<tr><td><code>metadata.json</code></td><td>—</td><td>model "holland_1980_wind + nonlinear_2d_swe_surge", physics/sources strings, limits</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:654-674</cite></td></tr>
+</tbody></table></div>
+<h2 id="spatial-origin">Spatial-origin semantics</h2>
+<p>Square domain; row 0 = north, so northward storm motion decreases the row index (<code>cy = cy0 − v_north·t/dx</code>). The eye passes the pinned track point (x = east, y = south, fractions of the grid) at mid-duration; heading 0 = N clockwise; auto-aim computes the bearing from the water centroid. Without supplied terrain the synthetic profile is ocean west / land east with a ~1.5 m/km shelf. <cite class="src">kaggle-kernels/hurricane-sim/main.py:476-482,376-383,431-440,393-400,240-256</cite></p>
+<h2 id="validity">Documented validity limits (verbatim from the code)</h2>
+<blockquote class="verbatim">'point-vortex Holland field — no eyewall fine structure, constant Vmax (no intensification/decay)' · 'fetch = distance to nearest coast (upper-bound proxy)' · 'wave setup empirical (USACE Eq II-4-24, ≈0.19·H_b) — no wave propagation' · 'rainfall parametric surrogate of the Lonfat-2007 PHRaM radial structure (no shear/topography Fourier terms), not microphysical' · 'no tides, no river routing (backwater excluded)' · 'equirectangular grid — valid ≤ ~500 km domain'<footer><cite class="src">kaggle-kernels/hurricane-sim/main.py:663-674</cite></footer></blockquote>
+<p>The kernel refuses to emit fields if its physics gate fails — <em>"Hurricane physics gate failed — refusing to emit fields from mis-wired parametric relations."</em> Checks: V(R_max) ≈ V_max ± 15 %, B ∈ [1, 2.5], inverse-barometer 0.9–1.1 cm/hPa, CN75 @ 100 mm in (30, 50) mm, SCS zero below 0.2 S, wave growth vs PM cap, rain peak 40–130 mm/h with zero eye/500 km. <cite class="src">kaggle-kernels/hurricane-sim/main.py:285-335,717-720</cite></p>
+<h2 id="measured">Measured runs and timings</h2>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-08. These are observations of one environment, not performance guarantees.</caption>
+<thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
+<tbody>
+<tr><td>Physics gate (every run, observed stdout)</td><td>"B=2.29 V(Rmax)=69.0 m/s (target 70) | IB=0.99 cm/hPa | CN75@100mm=41.1 mm | waves 18.0→31.3 cap 5.00 m | rain peak=84mm/h eye=0 edge=0 → PASS"</td></tr>
+<tr><td>Representative Cat 4 (950 hPa, 40 km RMW, 6 h, 240 km box)</td><td>max wind 77.0 m/s (right-front asymmetry above the 70 m/s threshold), coastal water 1.15 m, inundation 0.39 m, rainfall 482 mm, runoff 402 mm; wall 1.47 s</td></tr>
+<tr><td>Boundary Cat 5 with 5 km RMW on 2.5 km cells</td><td>max wind 32.2 m/s — eyewall under-resolved by the grid ("coarse-grid dilution"); a real Cat 5 wind requires RMW ≳ 2× cell size. Documented behaviour, not an error</td></tr>
+<tr><td>Boundary Cat 1 with 1020 hPa central pressure</td><td>max wind 1.6 m/s — Holland Δp floor (5 hPa) dominates; demonstrates that pressure, not category label, drives the field</td></tr>
+</tbody></table></div>
+<h2 id="reproduction">Reproduction</h2>
+<h3 id="repro-cmd">Commands</h3>
+<pre><code>curl -s -X POST http://localhost:3001/api/kaggle/simulate \
+  -H 'Content-Type: application/json' -d '{
+    &quot;type&quot;:&quot;hurricane_landfall&quot;,&quot;lat&quot;:25.0,&quot;lon&quot;:-80.0,&quot;grid_size&quot;:96,
+    &quot;extent_km&quot;:240,&quot;category&quot;:4,&quot;forward_speed_kmh&quot;:30,
+    &quot;central_pressure_hpa&quot;:950,&quot;radius_max_wind_km&quot;:40,&quot;duration_hours&quot;:6 }'
+
+# direct kernel:
+cd /tmp &amp;&amp; mkdir h &amp;&amp; cp &lt;repo&gt;/kaggle-kernels/hurricane-sim/main.py h/ &amp;&amp; cd h &amp;&amp; \
+  echo '{&quot;grid_size&quot;:96,&quot;category&quot;:4,&quot;central_pressure_hpa&quot;:950,&quot;radius_max_wind_km&quot;:40,&quot;forward_speed_kmh&quot;:30,&quot;duration_hours&quot;:6,&quot;extent_km&quot;:240}' &gt; params.json &amp;&amp; \
+  TERRANOETIS_OUT_DIR=$PWD python3 main.py | grep VERIFY</code></pre>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

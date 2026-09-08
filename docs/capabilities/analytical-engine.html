@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analytical equation engine — Terranoetis Documentation</title>
+<meta name="description" content="150 literature-cited equation engines across 26 domains with a 7-stage QC workflow; honest-NaN contract; no ML.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/analytical-engine.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Analytical equation engine — Terranoetis Documentation">
+<meta property="og:description" content="150 literature-cited equation engines across 26 domains with a 7-stage QC workflow; honest-NaN contract; no ML.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/analytical-engine.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html" aria-current="true">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">Analytical equation engine</li>
+      </ol></nav>
+      <h1>Analytical equation engine</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">COUNTS + SAMPLE COMPUTATIONS EXECUTED</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/analytical-engine.md">capabilities/analytical-engine.md — narrative (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#verified-counts">Verified structural counts</a></li>
+<li><a href="#pipeline">Execution pipeline</a></li>
+<li><a href="#never-throws">Honest-NaN contract</a></li>
+<li><a href="#domains">Parts and domains (measured tool counts)</a></li>
+      </ul></nav>
+      <p>The engine is a catalog of 150 deterministic, non-ML scientific functions — <code>EQUATION_ENGINE[id](inputs) → {result, unit, steps[]}</code> — each grounded in a primary-literature reference. A context engine enriches inputs from live feeds before execution; a 7-stage workflow wraps validation, unit preprocessing, computation, post-processing, quality control, uncertainty estimation and interpretation.</p>
+<h2 id="verified-counts">Verified structural counts</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Claim</th><th scope="col">Measured</th><th scope="col">Method</th></tr></thead>
+<tbody>
+<tr><td>150 engines, ids 1–150</td><td>150 unique ids, no gaps</td><td>programmatic key enumeration of EQUATION_ENGINE via tsx import (2026-09-08) <cite class="src">server/analytical-models/engine.ts:1-20,170</cite></td></tr>
+<tr><td>7 parts / 26 domains</td><td>parts = 7, domains = 26, tools sum = 150, dup ids = none</td><td>import of <code>PARTS</code> catalog <cite class="src">src/data/analyticalModels.ts:801</cite> + <cite class="src">src/data/analyticalModels.ts:248-250</cite></td></tr>
+<tr><td>Full literature citation per model</td><td>150/150 <code>reference:</code> strings present</td><td>regex count over catalog</td></tr>
+<tr><td>“82 with resolvable DOIs” (old README)</td><td>80 model references contain a DOI string; 12 ISBN; 4 explicit NO-DOI; remainder pre-DOI/gov/standards</td><td>regex <code>10\.\d{4,}/…</code> per reference; corrected in docs — see <a href="../methodology.html#discrepancy-log">discrepancy log</a></td></tr>
+<tr><td>Archived source PDFs</td><td>66 PDFs in docs/Research papers/</td><td>ls *.pdf (2026-09-08)</td></tr>
+<tr><td>DOI resolvability (spot check)</td><td>doi.org/10.1785/0120130065 → HTTP 302 (resolves)</td><td>curl -I, 2026-09-08</td></tr>
+</tbody></table></div>
+<h2 id="pipeline">Execution pipeline</h2>
+<ol><li><code>contextEngine.computeWithContext(id, inputs, context)</code> — enriches from live feeds (weather, terrain, ocean, seismic, air quality, FIRMS) before the call <cite class="src">server/analytical-models/contextEngine.ts:module</cite></li>
+<li>Stage pipeline per <code>toolWorkflows.ts</code>: input validation → preprocessing → computation (engine.ts) → post-processing → QC → uncertainty (analytical/empirical/qualitative, RMSE/CI fields) → interpretation <cite class="src">server/analytical-models/toolWorkflows.ts:5-60</cite></li>
+<li>HTTP surface: catalog / search / detail public; <code>:id/execute</code> authenticated; <code>:id/execute-internal</code> loopback-only for the agent tool executor <cite class="src">server/index.ts:316-371,493</cite></li></ol>
+<h2 id="never-throws">Honest-NaN contract</h2>
+<blockquote class="verbatim">Robustness (§5.5.1): a tool must NEVER throw — if an unexpected missing/malformed input path slips past a per-tool guard, return honest NaN instead of crashing the request. Genuine data is never fabricated here.<footer><cite class="src">server/analytical-models/engine.ts:175-178</cite></footer></blockquote>
+<div class="table-scroll"><table><caption>Sample computations executed in-process on 2026-09-08 (no network)</caption>
+<thead><tr><th scope="col">Tool</th><th scope="col">Inputs</th><th scope="col">Measured result</th><th scope="col">Check</th></tr></thead>
+<tbody>
+<tr><td>19 — Gutenberg–Richter (Gutenberg &amp; Richter 1944)</td><td>a=7, b=1, M=6</td><td>10 events/yr, 0 ms</td><td>10^(7−6)=10 ✓</td></tr>
+<tr><td>23 — Hanks–Kanamori moment magnitude (1979)</td><td>M₀ = 1×10²⁰ N·m</td><td>7.300000000000001 M_w, 0 ms</td><td>(2/3)(27) − 10.7 = 7.3 ✓</td></tr>
+<tr><td>24 — Brune (1970) stress drop, wrong unit scale</td><td>M0=1e20, r=20</td><td>NaN “Pa” guard path</td><td>returns honest NaN, no fabrication ✓</td></tr>
+<tr><td>19 with empty inputs</td><td>{}</td><td>NaN with warning steps</td><td>documented behaviour ✓</td></tr>
+</tbody></table></div>
+<p>Per-tool math is covered by the 1,653-test unit suite (all passing, measured) — math-verification tests named per equation (e.g. <code>airyDispersion.test.ts</code>, <code>atkinsonLifetime.test.ts</code>) under <code>server/__tests__/unit/</code>.</p>
+<h2 id="domains">Parts and domains (measured tool counts)</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Part</th><th scope="col">Domains (tool counts)</th></tr></thead>
+<tbody>
+<tr><td>I — Earth System Core</td><td>Atmospheric Science (8) · Hydrology & Oceanography (10) · Geophysics & Seismology (7) · Remote Sensing & Cryosphere (10) · Spatial Analysis & Extreme Events (7) · Soil Science & Land Surface (8)</td></tr>
+<tr><td>II — Biosphere, Agriculture & Chemistry</td><td>Biosphere & Carbon Cycle (7) · Agriculture & Crop Science (6) · Atmospheric Chemistry & Aerosols (2)</td></tr>
+<tr><td>III — Ocean & Coastal Advanced</td><td>Ocean Dynamics & Circulation (8) · Coastal & Wave Mechanics (7)</td></tr>
+<tr><td>IV — Geomorphology, Limnology & Cryosphere</td><td>Geomorphology & Mass Wasting (7) · Limnology & Freshwater (3) · Cryosphere Advanced & Volcanology (5)</td></tr>
+<tr><td>V — Climate & Atmosphere Advanced</td><td>Climate Dynamics & Feedback (6) · Atmospheric Dynamics & Turbulence (6) · Cloud Physics & Precipitation (3)</td></tr>
+<tr><td>VI — Space Environment & Satellite</td><td>Geodesy & Reference Frames (5) · Thermosphere, Ionosphere & Magnetosphere (7) · Satellite Dynamics & Space Debris (5) · Solar-Terrestrial & GNSS (3)</td></tr>
+<tr><td>VII — Advanced Engineering & Risk</td><td>Groundwater & Subsurface (4) · Hazard, Risk & Disaster Engineering (6) · Data Assimilation & State Estimation (4) · Signal Processing & Communications (3) · Mathematical Frameworks (3)</td></tr>
+</tbody></table></div>
+<p>Topic lists per domain and individual citations: <a href="../MODELS.md">MODELS.md</a> (source of truth, corrected 2026-09-08). Reproduction: <code>npx tsx -e "import {computeEquation} from './server/analytical-models/engine.ts'; console.log(computeEquation(19,{a:7,b:1,M:6}))"</code></p>
+<div class="callout callout-inspect" role="note"><div class="callout-title">Inspection-only scope</div><p>Live-context enrichment (contextEngine → USGS/Open-Meteo etc.) and the HTTP execute path were not exercised for all 150 tools in this pass (network-dependent). In-process computation, structural counts and test-suite math verification are measured; treat live-context behaviour as code-inspected.</p></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

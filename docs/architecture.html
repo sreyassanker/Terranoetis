@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Platform architecture — Terranoetis Documentation</title>
+<meta name="description" content="Three-tier topology: React/Cesium client, Express/TypeScript API, SQLite + Redis persistence — with request lifecycle and background services.">
+<link rel="canonical" href="https://terranoetis.com/architecture.html">
+<link rel="stylesheet" href="assets/docs.css">
+<link rel="icon" href="terranoetis.png" type="image/png">
+<meta property="og:title" content="Platform architecture — Terranoetis Documentation">
+<meta property="og:description" content="Three-tier topology: React/Cesium client, Express/TypeScript API, SQLite + Redis persistence — with request lifecycle and background services.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/architecture.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="index.html">Docs home</a>
+      <a href="capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="reference/api.html">Reference</a>
+      <a href="methodology.html">Methodology</a>
+      <a href="deployment.html">Deployment</a>
+      <a href="governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="index.html">Documentation home</a></li>
+<li><a href="getting-started.html">Getting started</a></li>
+<li><a href="architecture.html" aria-current="true">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="capabilities/flood.html">Flood inundation</a></li>
+<li><a href="capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="methodology.html">Methodology &amp; verification</a></li>
+<li><a href="deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="governance/contributing.html">Contributing</a></li>
+<li><a href="governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="index.html">Docs</a></li>
+<li aria-current="page">Platform architecture</li>
+      </ol></nav>
+      <h1>Platform architecture</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span> (topology read from server/index.ts boot order)</span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="ARCHITECTURE.md">ARCHITECTURE.md — full prose (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#boot-order">Server assembly (measured boot, cited order)</a></li>
+<li><a href="#request-flow">Request flow (chat)</a></li>
+<li><a href="#modules">Module inventory</a></li>
+<li><a href="#storage">Persistence and realtime plumbing</a></li>
+      </ul></nav>
+      <p>Terranoetis is a three-tier application: a React 19 + CesiumJS single-page client (Vite 7), a Node.js + Express 4 API (TypeScript run via <code>tsx</code>), and SQLite (primary store) with Redis as an optional cache/memory hot path. The client talks REST + SSE + WebSocket to the API; the API orchestrates live-data fetchers, the 150-equation analytical engine, the hazard-simulation runners and the cognitive pipeline.</p>
+<h2 id="boot-order">Server assembly (measured boot, cited order)</h2>
+<div class="table-scroll"><table><caption>Middleware/service order in server/index.ts (line cites are the app.use/startup sequence; boot observed 2026-09-08 on port 3399)</caption>
+<thead><tr><th scope="col">Order</th><th scope="col">Component</th><th scope="col">Detail</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>helmet CSP + Permissions-Policy</td><td>explicit CSP incl. Cesium/WS allowances; HSTS 1 yr in prod</td><td><cite class="src">server/index.ts:233-272</cite></td></tr>
+<tr><td>2</td><td>cors</td><td>static allowlist origin = CLIENT_ORIGIN, credentials on</td><td><cite class="src">server/index.ts:273</cite></td></tr>
+<tr><td>3</td><td>body limits 5 mb, x-powered-by off</td><td></td><td><cite class="src">server/index.ts:274-276</cite></td></tr>
+<tr><td>4</td><td>pino request logger → prom-client metrics</td><td>before auth so all traffic is metered</td><td><cite class="src">server/index.ts:279-280</cite></td></tr>
+<tr><td>5</td><td>auth endpoints pre-guard</td><td>login rate-limited 5/15 min; refresh; dev-login non-prod only</td><td><cite class="src">server/index.ts:306-314</cite></td></tr>
+<tr><td>6</td><td>global /api guard</td><td>~150 public read-only data paths → 300/min per-IP; everything else requires JWT</td><td><cite class="src">server/index.ts:373-487</cite></td></tr>
+<tr><td>7</td><td>routers</td><td>foundation-models, fork, pulse, /api/kaggle, analytical-models, openapi</td><td><cite class="src">server/index.ts:489-494</cite></td></tr>
+<tr><td>8</td><td>ToolRegistry (~201 registered tools) + Omninet init + local GGUF spawn</td><td>llama-server :11436 when model file present</td><td><cite class="src">server/index.ts:513-817</cite></td></tr>
+<tr><td>9</td><td>listen() background engines</td><td>sentinel, monitors, forecast ledger, reflex, forks, entropy, discovery, dream, memory system, power saver</td><td><cite class="src">server/index.ts:14448-14488</cite></td></tr>
+<tr><td>10</td><td>graceful shutdown</td><td>stop engines → close HTTP → queue shutdown 10 s → close DB</td><td><cite class="src">server/index.ts:14519-14573</cite></td></tr>
+</tbody></table></div>
+<h2 id="request-flow">Request flow (chat)</h2>
+<ol><li><code>POST /api/agent/ask</code> (authGuard, 30/min, zod-validated ≤ 10k chars + ≤ 4 images) — <cite class="src">server/index.ts:9749,9167</cite> <cite class="src">server/middleware/validate.ts:3-41</cite></li>
+<li>Intent classification: deterministic keyword router; embedding path if conf &lt; 0.85; LLM deep-path only if conf &lt; 0.7 — <cite class="src">server/agent.ts:389-800</cite> <cite class="src">server/index.ts:9835-9851</cite></li>
+<li>Cognitive orchestration: System 1 fast path (similarity ≥ 0.92), S1 + 10 s S2 verification (0.70–0.92), full System 2 with 45 s hard cap (&lt; 0.70) — <cite class="src">server/cognition/cognitiveOrchestrator.ts:251-295,386-388</cite></li>
+<li>Tool execution: live-data fetchers, analytical tools, sandbox, simulation jobs; ≤ 3 tool rounds; SSE streamed with 15 s heartbeats and a hard 150 s run cap — <cite class="src">server/index.ts:9801-9811,10966-10983</cite></li>
+<li>Write-through to the chat knowledge graph and reasoning traces — <cite class="src">server/index.ts:11237</cite> <cite class="src">server/kgV2/chatKgBridge.ts:28</cite></li></ol>
+<h2 id="modules">Module inventory</h2>
+<p>LOC per directory and each module’s purpose are tabulated in the prose document (<a href="BACKEND.md">BACKEND.md</a>), verified against the tree on 2026-09-08. Highlights of interest to researchers: <code>analytical-models/</code> (23,866 LOC), <code>kaggle/</code> (3,105), <code>cognition/</code> (2,760), <code>sentinel/</code> (3,191), <code>memoryV2/</code> (2,091).</p>
+<h2 id="storage">Persistence and realtime plumbing</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Subsystem</th><th scope="col">Implementation</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Primary store</td><td>SQLite <code>server/realtime.db</code>, WAL + busy_timeout 5000, FKs on; 47 schema tables + runtime tables (provider_stats, system1_cache, job_queue…)</td><td><cite class="src">server/db/index.ts:6-18</cite> <cite class="src">server/db/schema.sql:47 tables (counted)</cite></td></tr>
+<tr><td>Cache/hot path</td><td>Redis via ioredis when reachable; graceful SQLite fallback</td><td><cite class="src">server/infrastructure/redis.ts:degradation</cite></td></tr>
+<tr><td>Event bus</td><td><strong>In-process EventEmitter pub/sub</strong> (<code>server/pubsub.ts</code>) — not Redis pub/sub; WebSocket fan-out runs through this bus</td><td><cite class="src">server/pubsub.ts:1-21</cite></td></tr>
+<tr><td>Realtime transports</td><td>WebSocket only on <code>/ws/agent</code> + <code>/ws/voice</code>; SSE for chat and job status</td><td><cite class="src">server/websocket.ts:74-80</cite> <cite class="src">server/kaggle/routes.ts:225</cite></td></tr>
+<tr><td>Job queue</td><td>SQLite-backed SimpleQueue, 10 concurrent, max 3 attempts, recurring timers (MVC refresh 60 s, plugin scan 30 s…)</td><td><cite class="src">server/queue/simple-queue.ts:22-60</cite> <cite class="src">server/index.ts:1006-1039</cite></td></tr>
+</tbody></table></div>
+<div class="callout callout-caution" role="note"><div class="callout-title">Corrected claim</div><p>Earlier revisions described Redis as handling “pub/sub” and the docs tree listed a <code>server/digitalTwin/</code> module; both were inaccurate (pub/sub is the in-process bus; digitalTwin does not exist). See the <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

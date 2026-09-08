@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting started — Terranoetis Documentation</title>
+<meta name="description" content="Install and run Terranoetis locally, verify the stack with measured outputs, and run your first hazard simulation through the API.">
+<link rel="canonical" href="https://terranoetis.com/getting-started.html">
+<link rel="stylesheet" href="assets/docs.css">
+<link rel="icon" href="terranoetis.png" type="image/png">
+<meta property="og:title" content="Getting started — Terranoetis Documentation">
+<meta property="og:description" content="Install and run Terranoetis locally, verify the stack with measured outputs, and run your first hazard simulation through the API.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/getting-started.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="index.html">Docs home</a>
+      <a href="capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="reference/api.html">Reference</a>
+      <a href="methodology.html">Methodology</a>
+      <a href="deployment.html">Deployment</a>
+      <a href="governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="index.html">Documentation home</a></li>
+<li><a href="getting-started.html" aria-current="true">Getting started</a></li>
+<li><a href="architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="capabilities/flood.html">Flood inundation</a></li>
+<li><a href="capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="methodology.html">Methodology &amp; verification</a></li>
+<li><a href="deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="governance/contributing.html">Contributing</a></li>
+<li><a href="governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="index.html">Docs</a></li>
+<li aria-current="page">Getting started</li>
+      </ol></nav>
+      <h1>Getting started</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">ALL STEPS EXECUTED 2026-09-08</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="getting-started.md">getting-started.md — narrative walkthrough (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#prerequisites">Prerequisites</a></li>
+<li><a href="#install">Install and start</a></li>
+<li><a href="#verify">Verify the stack (measured)</a></li>
+<li><a href="#first-sim">First simulation (no credentials needed)</a></li>
+<li><a href="#no-keys">What works without any API keys</a></li>
+<li><a href="#orientation">Orientation</a></li>
+      </ul></nav>
+      <h2 id="prerequisites">Prerequisites</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Dependency</th><th scope="col">Version</th><th scope="col">Why / evidence</th></tr></thead>
+<tbody>
+<tr><td>Node.js</td><td>≥ 20 (<code>.nvmrc</code> pins 20; this review ran Node 26.0.0)</td><td><code>package.json engines: {"node": ">=20"}</code>; npm ci/test/build executed successfully under Node 26</td></tr>
+<tr><td>Python 3 + NumPy</td><td>3.14.5 + numpy 2.4.2 observed; scipy optional (hurricane/landslide fall back when absent)</td><td>local kernels spawn <code>python3</code> <cite class="src">server/kaggle/simRunner.ts:170-175</cite></td></tr>
+<tr><td>Redis</td><td>optional</td><td>health check reports redis PONG when present; server falls back to SQLite (see <cite class="src">server/infrastructure/redis.ts:graceful degradation</cite>)</td></tr>
+<tr><td>Cesium Ion token</td><td>optional</td><td>only for Google Photorealistic 3D Tiles layer; everything else runs without it</td></tr>
+<tr><td>Kaggle token</td><td>optional</td><td>only for the 4 kernels pushed to Kaggle (flood, tsunami, volcano, landslide main runs); not needed for earthquake/wildfire/hurricane or analytical tools</td></tr>
+</tbody></table></div>
+<h2 id="install">Install and start</h2>
+<h3 id="install-cmds">Commands</h3>
+<pre><code>git clone https://github.com/sreyassanker/Terranoetis.git
+cd Terranoetis
+cp .env.example .env   # keys are optional; features degrade gracefully
+npm install
+npm run dev            # Vite :3000 + Express :3001 (proxy /api → :3001)</code></pre>
+<p><code>dev</code> runs <code>scripts/dev-prep.js</code> then starts both servers concurrently <cite class="src">package.json:16-29</cite>; the Vite proxy target and port come from <code>vite.config.ts:73-88</code>. To run only the API: <code>npm run dev:server</code>.</p>
+<h2 id="verify">Verify the stack (measured)</h2>
+<h3 id="verify-cmds">Commands and the actual observed response</h3>
+<pre><code>curl -s http://localhost:3001/api/health
+# measured 2026-09-08 (fresh boot, no API keys beyond .env):
+# {&quot;status&quot;:&quot;degraded&quot;,&quot;checks&quot;:{&quot;db&quot;:&quot;ok&quot;,&quot;gemini&quot;:&quot;degraded&quot;,&quot;memory&quot;:&quot;ok&quot;,
+#  &quot;reflex&quot;:&quot;ok&quot;,&quot;forks&quot;:&quot;ok&quot;,&quot;dream&quot;:&quot;ok&quot;,&quot;entropy&quot;:&quot;ok&quot;,&quot;discovery&quot;:&quot;ok&quot;,
+#  &quot;pubsub&quot;:&quot;ok&quot;,&quot;redis&quot;:&quot;ok/PONG&quot;},&quot;uptime_ms&quot;:24305,&quot;version&quot;:&quot;3.1&quot;}
+
+npm run test:unit          # measured: 141 files, 1,653 tests, 22.85 s, 0 failures
+npm run test:integration   # measured: 5 files, 49 tests, 5.66 s, 0 failures</code></pre>
+<p>“degraded” is the honest state with optional providers missing — e.g. <code>gemini</code> when no vision key is configured; the server still boots and serves. <span class="tag tag-measured">MEASURED — boot + health observed</span></p>
+<h2 id="first-sim">First simulation (no credentials needed)</h2>
+<h3 id="first-sim-cmds">Submit → poll → fetch grid</h3>
+<pre><code>curl -s -X POST http://localhost:3001/api/kaggle/simulate \
+  -H 'Content-Type: application/json' -d '{
+    &quot;type&quot;:&quot;earthquake_swarm&quot;,&quot;lat&quot;:36.1,&quot;lon&quot;:139.7,&quot;grid_size&quot;:128,
+    &quot;extent_km&quot;:100,&quot;magnitude&quot;:7.2,&quot;depth_km&quot;:15,&quot;vs30&quot;:760 }'
+# measured: {&quot;jobId&quot;:&quot;sim_44d5c7d7&quot;,&quot;status&quot;:&quot;running&quot;,
+#           &quot;streamUrl&quot;:&quot;/api/kaggle/simulate/sim_44d5c7d7/stream&quot;}
+
+curl -s http://localhost:3001/api/kaggle/simulate/sim_44d5c7d7   # status → complete 166 ms after submit (measured)
+curl -s http://localhost:3001/api/kaggle/simulate/sim_44d5c7d7/results
+curl -s -o pga.npy http://localhost:3001/api/kaggle/simulate/sim_44d5c7d7/grid/pga_cm_s2   # 200, 296,648 bytes (measured)</code></pre>
+<p>Wire payloads are validated client-side by a zod discriminated union before submission (bounds mirror the kernels’ own validity checks) <cite class="src">src/services/kaggleSim.ts:28-240</cite>. The UI path is identical: ScenarioEditor builds the same request <cite class="src">src/services/kaggleSim.ts:381-545</cite> and <code>useKaggleSimulation</code> streams job status over SSE <cite class="src">src/hooks/useKaggleSimulation.ts:136-159</cite>. Full contract: <a href="reference/simulation-api.html">Simulation job API</a>.</p>
+<h2 id="no-keys">What works without any API keys</h2>
+<div class="table-scroll"><table><caption>Feature availability without credentials (verified boot + code paths)</caption>
+<thead><tr><th scope="col">Feature</th><th scope="col">Without keys</th><th scope="col">Evidence</th></tr></thead>
+<tbody>
+<tr><td>Analytical engine (150 tools)</td><td>Runs; live-context enrichment falls back to honest NaN where data is unreachable</td><td><cite class="src">server/analytical-models/engine.ts:170-194</cite></td></tr>
+<tr><td>Earthquake / wildfire / hurricane sims</td><td>Run locally via python3</td><td><cite class="src">server/kaggle/simRunner.ts:126-175</cite></td></tr>
+<tr><td>Flood / tsunami / volcano / landslide sims</td><td>Disabled until a Kaggle token exists at ~/.kaggle/kaggle.json</td><td><cite class="src">server/kaggle/simRunner.ts:Kaggle pipeline requires token</cite> <cite class="src">docs/DEPLOYMENT.md:162-173</cite></td></tr>
+<tr><td>AI chat (agent/ask)</td><td>Needs at least one LLM provider key; local GGUF fallback auto-launches if model downloaded</td><td><cite class="src">server/index.ts:789-817</cite></td></tr>
+<tr><td>Live-data routes</td><td>Keyless feeds work (USGS, OpenSky public, EONET…); keyed ones 5xx/disable</td><td><cite class="src">server/apiMetadata.ts:82 entries</cite></td></tr>
+<tr><td>Sentinel / reflex / world model / memory</td><td>Run on keyless feeds or local state</td><td><cite class="src">server/index.ts:14448-14488</cite></td></tr>
+<tr><td>Globe (dev)</td><td>Works without Cesium Ion; photorealistic tiles off</td><td><cite class="src">vite + src/rendering/photorealisticGlobe.ts</cite></td></tr>
+</tbody></table></div>
+<h2 id="orientation">Orientation</h2>
+<ul><li>Understand the tiers: <a href="architecture.html">Platform architecture</a>.</li>
+<li>Science detail: <a href="capabilities/hazard-simulations.html">Hazard simulations</a> and the <a href="capabilities/analytical-engine.html">Analytical equation engine</a>.</li>
+<li>How we verified any of it: <a href="methodology.html">Methodology &amp; verification</a>.</li>
+<li>Running it for real: <a href="deployment.html">Deployment &amp; operations</a>.</li></ul>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

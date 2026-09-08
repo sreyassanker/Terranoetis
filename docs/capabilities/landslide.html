@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Landslide debris flow (Voellmy–Salm depth-averaged) — Terranoetis Documentation</title>
+<meta name="description" content="Mohr–Coulomb failure with earthquake/rainfall/volcanic triggers and a Voellmy-friction depth-averaged debris-flow solver; convergence-validated with a calibration endpoint against observed runout.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/landslide.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Landslide debris flow (Voellmy–Salm depth-averaged) — Terranoetis Documentation">
+<meta property="og:description" content="Mohr–Coulomb failure with earthquake/rainfall/volcanic triggers and a Voellmy-friction depth-averaged debris-flow solver; convergence-validated with a calibration endpoint against observed runout.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/landslide.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html" aria-current="true">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">Landslide debris flow (Voellmy–Salm depth-averaged)</li>
+      </ol></nav>
+      <h1>Landslide debris flow (Voellmy–Salm depth-averaged)</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/landslide.md">capabilities/landslide.md — narrative description (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#physics">Governing equations and coefficients</a></li>
+<li><a href="#parameters">Parameter contract</a></li>
+<li><a href="#outputs">Outputs</a></li>
+<li><a href="#spatial-origin">Spatial-origin semantics</a></li>
+<li><a href="#validity">Documented validity limits (verbatim from the code)</a></li>
+<li><a href="#measured">Measured runs and timings</a></li>
+<li><a href="#reproduction">Reproduction</a></li>
+      </ul></nav>
+      <p>Slope failure begins with a Mohr–Coulomb infinite-slope assessment over a susceptibility field (with Newmark-style seismic, effective-stress rainfall, and lahar triggers), converts susceptible steep cells into an initial debris mass, and routes it with the depth-averaged Voellmy–Salm equations using Rusanov mass fluxes and a semi-implicit momentum update. μ and ξ are free calibration parameters — the platform ships an endpoint to fit them against an observed runout.</p>
+<dl class="metrics"><dt>Execution mode</dt><dd>Kaggle kernel (numpy, CPU instance); local in-process for calibration & Monte-Carlo <cite class="src">server/kaggle/simRunner.ts:126-141</cite> <cite class="src">server/kaggle/localRunner.ts:1-15</cite></dd>
+<dt>Verification</dt><dd>MEASURED locally — convergence/conservation script PASS re-executed; job transport verified by code inspection only</dd>
+<dt>Wire scenario type</dt><dd><code>landslide</code> — contract at <cite class="src">src/services/kaggleSim.ts:28-240</cite>; job API at <a href="../reference/simulation-api.html">Simulation job API</a></dd></dl>
+<div class="callout callout-verified" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). <span class="tag tag-inspected">CODE INSPECTION ONLY</span> marks behaviour traced to source lines but not executed here (e.g. Kaggle push/poll transport). Inspected is never presented as tested.</p></div>
+<h2 id="physics">Governing equations and coefficients</h2>
+<p>Source attribution as stated in the kernel header (verbatim):</p>
+<blockquote class="verbatim">Voellmy-Salm friction law:
+  τ_b/ρ = μ_c·g·h·cos²θ  +  g·u·|u|/ξ
+  where μ_c = tan φ_res is the residual (dynamic) basal friction and
+  ξ (m/s²) is Voellmy's turbulent coefficient. Debris: φ_res ≈ 14°, ξ ≈ 300.<footer><cite class="src">kaggle-kernels/landslide-sim/main.py:11-14</cite></footer></blockquote>
+<figure class="equation"><span class="formula">∂h/∂t + ∇·(h·u) = 0;   ∂(hu)/∂t + ∇·(hu⊗u) = −g·h·∇(h+z) − τ_b/ρ</span><figcaption>Depth-averaged debris-flow SWE (mass via Lax-Friedrichs, momentum semi-implicit Euler). <cite class="src">kaggle-kernels/landslide-sim/main.py:7-10,518-537,579-629</cite></figcaption></figure>
+<figure class="equation"><span class="formula">τ_b/ρ = μ·g·h·cos²θ + g·u·|u|/ξ  (μ capped by driving stress — yield behaviour)</span><figcaption>Voellmy–Salm total basal stress; Coulomb term only reduces when driving stress exceeds it. <cite class="src">kaggle-kernels/landslide-sim/main.py:593-624</cite></figcaption></figure>
+<figure class="equation"><span class="formula">FS = (c + σ′·tanφ) / (γ·h·sinθ),  σ′ = γ_soil·h_soil·cosθ·0.5</span><figcaption>Infinite-slope Mohr–Coulomb factor of safety assuming 50 % saturation; γ_soil = 18,000 N/m³, h_soil = 2 m. <cite class="src">kaggle-kernels/landslide-sim/main.py:226-235,228-230</cite></figcaption></figure>
+<figure class="equation"><span class="formula">seismic: fs_seismic = fs − a/(g·sinθ)  (Newmark criterion a_max &amp;gt; g(FS−1)sinθ);  rainfall: fs·(1 − 0.7·rain_factor);  volcanic: exp(−r/0.25·gs)·(slope&amp;gt;15°)</span><figcaption>Trigger mechanisms on the susceptibility field. <cite class="src">kaggle-kernels/landslide-sim/main.py:241-271</cite></figcaption></figure>
+<figure class="equation"><span class="formula">ln PGA[g] = 3.586 + 0.707·M − 1.093·ln(r+10) − 0.0053·(r+10)  [site term 0.25·ln(760/760) ≡ 0]</span><figcaption>&quot;Simplified Campbell–Bozorgnia&quot; PGA field feeding the trigger; r in km floored at 1; epicentre fixed at (0.7gs, 0.3gs). No site amplification — the term is identically zero. <cite class="src">kaggle-kernels/landslide-sim/main.py:187-189,372</cite></figcaption></figure>
+<figure class="equation"><span class="formula">E = min(entrainment_rate·|u|·dt·(1 − h/(h+ent_ref)), bed)</span><figcaption>Hungr/McDougall-type velocity-proportional entrainment, self-limiting, default OFF (rate 0). <cite class="src">kaggle-kernels/landslide-sim/main.py:556-577,314-315</cite></figcaption></figure>
+<h3 id="coefficients">Coefficients and named constants</h3>
+<div class="table-scroll"><table><caption>Named constants and defaults.</caption>
+<thead><tr><th scope="col">Name</th><th scope="col">Value</th><th scope="col">Meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>G</td><td>9.81 m/s²</td><td>Gravity</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:54</cite></td></tr>
+<tr><td>RHO_DEBRIS</td><td>2000 kg/m³</td><td>Bulk debris density (sediment + water)</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:55</cite></td></tr>
+<tr><td>φ_res / μ_default</td><td>14° / tan φ ≈ 0.249</td><td>Residual friction angle (μ = 0.25 UI default)</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:68-69</cite></td></tr>
+<tr><td>ξ_default</td><td>300 m/s²</td><td>Turbulent coefficient (range 100–1000 in comment: "ξ=300 gives ~6–11 m/s on realistic slopes")</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:59-70</cite></td></tr>
+<tr><td>φ / c defaults</td><td>35° / 500 Pa</td><td>Mohr–Coulomb strength (overridable per run)</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:73-74</cite></td></tr>
+<tr><td>PGA / rain thresholds</td><td>0.15 g / 150 mm</td><td>Trigger defaults</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:77-78</cite></td></tr>
+<tr><td>V_MAX / CFL</td><td>30 m/s / 0.15</td><td>Velocity cap and inner substep criterion</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:326-327,503-509</cite></td></tr>
+<tr><td>Source construction</td><td>sus &gt; 0.4, slope &gt; 25°, radius 0.32·gs, h = sus·(slope/30)·6 ∈ [2,15] m, capped at 5 % of grid</td><td>Localized failure mass (rationale comments for each guard)</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:391-421</cite></td></tr>
+</tbody></table></div>
+<h2 id="parameters">Parameter contract</h2>
+<p>Landslide parameters. Shared request envelope (validated at the client boundary before dispatch).</p>
+<div class="table-scroll"><table><caption>Landslide parameters.</caption>
+<thead><tr><th scope="col">UI control</th><th scope="col">Wire field</th><th scope="col">Unit</th><th scope="col">Valid range (UI · wire · kernel)</th><th scope="col">Default</th><th scope="col">Physical meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Trigger Type <span class="cite">select</span></td><td><code>trigger_type</code></td><td>enum</td><td>earthquake | rainfall | volcanic</td><td>earthquake</td><td>Which failure mechanism maps rainfall/PGA fields to susceptibility</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:114-134</cite> <cite class="src">src/services/kaggleSim.ts:211</cite> <cite class="src">kaggle-kernels/landslide-sim/main.py:298</cite></td></tr>
+<tr><td>Earthquake Magnitude <span class="cite">slider</span></td><td><code>magnitude</code></td><td>M</td><td>UI 4–9.5; wire 3–9.7</td><td>UI 6.5 · kernel 6.5</td><td>Feeds the PGA field only under earthquake trigger</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:114-134</cite> <cite class="src">src/services/kaggleSim.ts:212</cite> <cite class="src">kaggle-kernels/landslide-sim/main.py:299</cite></td></tr>
+<tr><td>PGA Threshold <span class="cite">slider</span></td><td><code>pga_threshold</code></td><td>g</td><td>UI 0.05–0.5 (auto-lowered with M); wire 0.01–1</td><td>UI 0.15 · kernel 0.15</td><td>Cell activates when local PGA exceeds it</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:114-134</cite> <cite class="src">src/services/kaggleSim.ts:213,625</cite> <cite class="src">kaggle-kernels/landslide-sim/main.py:300</cite></td></tr>
+<tr><td>Total Rainfall <span class="cite">slider</span></td><td><code>rainfall_mm</code></td><td>mm</td><td>UI 50–2000; wire 0–3000</td><td>UI 200 · kernel 200</td><td>Rain-trigger susceptibility via effective-stress loss (≤ 70 %)</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:114-134</cite> <cite class="src">src/services/kaggleSim.ts:214</cite> <cite class="src">kaggle-kernels/landslide-sim/main.py:302,252-260</cite></td></tr>
+<tr><td>Friction Angle / Cohesion <span class="cite">sliders</span></td><td><code>friction_angle</code>, <code>cohesion</code></td><td>°; Pa</td><td>UI 20–50 / 0–2000; wire 10–60 / 0–5000</td><td>35° / 500 Pa</td><td>Mohr–Coulomb strength in the FS criterion</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:114-134</cite> <cite class="src">src/services/kaggleSim.ts:215-216</cite> <cite class="src">kaggle-kernels/landslide-sim/main.py:304-305</cite></td></tr>
+<tr><td>Voellmy μ <span class="cite">slider</span></td><td><code>mu</code></td><td>—</td><td>UI 0.05–0.5; wire 0.01–1</td><td>UI 0.25 · kernel tan 14° ≈ 0.249</td><td>Dry (dynamic) Coulomb friction — free calibration parameter</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:114-134</cite> <cite class="src">src/services/kaggleSim.ts:230</cite> <cite class="src">kaggle-kernels/landslide-sim/main.py:311</cite></td></tr>
+<tr><td>Voellmy ξ <span class="cite">slider</span></td><td><code>xi</code></td><td>m/s²</td><td>UI 50–1500; wire 10–5000</td><td>UI 300 · kernel 300</td><td>Turbulent friction coefficient — free calibration parameter</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:114-134</cite> <cite class="src">src/services/kaggleSim.ts:232</cite> <cite class="src">kaggle-kernels/landslide-sim/main.py:312</cite></td></tr>
+<tr><td>Bed Entrainment Rate / Erodible Depth <span class="cite">sliders</span></td><td><code>entrainment_rate</code>, <code>erodible_depth_m</code></td><td>1/s; m</td><td>UI 0–0.01 / 0–20; wire 0–0.1 / 0–50</td><td>UI 0 / 5 · kernel 0 / 0 (off)</td><td>Velocity-proportional growth of the flow by bed erosion (default disabled)</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:114-134</cite> <cite class="src">src/services/kaggleSim.ts:233-236</cite> <cite class="src">kaggle-kernels/landslide-sim/main.py:314-315,556-577</cite></td></tr>
+<tr><td>Duration <span class="cite">slider</span></td><td><code>duration_hours</code></td><td>h</td><td>UI 0.5–48; wire ≤ 720; kernel also caps simulated time at 300 s</td><td>UI 2 · kernel 2</td><td>Flow routing window</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:114-134</cite> <cite class="src">src/services/kaggleSim.ts:217</cite> <cite class="src">kaggle-kernels/landslide-sim/main.py:303,435-442</cite></td></tr>
+<tr><td>Terrain (optional)</td><td><code>terrain(+_gs)</code></td><td>m</td><td>≤ 65,536 cells</td><td>—</td><td>Real relief; otherwise a deterministic synthetic ridge (seed 42)</td><td><cite class="src">src/services/kaggleSim.ts:218-224</cite> <cite class="src">kaggle-kernels/landslide-sim/main.py:81-103</cite></td></tr>
+</tbody></table></div>
+<h2 id="outputs">Outputs</h2>
+<div class="table-scroll"><table><caption>Files written per run (also served by <code>GET /api/kaggle/simulate/:jobId/grid/:name</code> and <code>…/geotiff/:name</code>)</caption>
+<thead><tr><th scope="col">Field</th><th scope="col">Unit</th><th scope="col">Meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td><code>landslide_depth.npy</code></td><td>m</td><td>Final debris thickness</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:875-895</cite></td></tr>
+<tr><td><code>landslide_velocity.npy</code>, <code>velocity_x/y.npy</code></td><td>m/s</td><td>Speed and components</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:875-895</cite></td></tr>
+<tr><td><code>runout_distance.npy</code></td><td>km field</td><td>Distance from the depth-weighted source centroid</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:457-463</cite></td></tr>
+<tr><td><code>susceptibility.npy</code> / <code>trigger_map.npy</code> / <code>slope.npy</code></td><td>0–1 / g or mm / °</td><td>Failure susceptibility and trigger field (PGA in g for earthquake runs, else rainfall mm)</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:744,875-895</cite></td></tr>
+<tr><td><code>snapshots_depth/velocity/vx/vy.npy</code> + <code>snapshot_times.npy</code></td><td>—; s</td><td>Animation series</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:875-895</cite></td></tr>
+<tr><td><code>metadata.json</code></td><td>—</td><td>model "depth_averaged_debris_flow", friction_law "voellmy", solver "lax_friedrichs", total volume + outflow ledger</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:772-775,756-761</cite></td></tr>
+</tbody></table></div>
+<h2 id="spatial-origin">Spatial-origin semantics</h2>
+<p>Square domain; row 0 = north. Documented axis-naming quirk: internally <code>dz_dx</code> is the north–south (row-axis) gradient and <code>dz_dy</code> the east–west (column-axis) gradient; the code comment records that the old mapping was swapped and would have driven debris across slopes on real terrain. Runout is measured from the depth-weighted source centroid. <cite class="src">kaggle-kernels/landslide-sim/main.py:147-148,465-475,457-463</cite></p>
+<h2 id="validity">Documented validity limits (verbatim from the code)</h2>
+<blockquote class="verbatim">'The genuine conservation proof is the closed-box test (verify_closed_box) and the grid-convergence script, not this algebraic bookkeeping.' · axis-mapping note: 'The old mapping was swapped, which on *real* terrain would drive debris across the slope instead of down it' · susceptibility raw mask note: 'The raw mask (susceptibility &gt; 0.3) covers ~99% of the grid, so the &quot;pile&quot; is a grid-wide slab that blows up and renders as a hollow rim.' · &quot;Certified-grade&quot; debris-flow modelling requires the free parameters to be fit to a real slide, not guessed … Sample runout resources: Hungr et al. (2001) runout databases<footer><cite class="src">kaggle-kernels/landslide-sim/main.py:712-714,465-475,391-393</cite> <cite class="src">kaggle-kernels/landslide-sim/calibrate.py:4-14</cite></footer></blockquote>
+<p>The closed-box verifier exists in main.py but is NOT invoked by main() (unlike flood/tsunami/volcano); the authoritative gates are validate_convergence.py (conservation 1e-8, runout refinement ≤ 0.25, upsampling RMSE ≤ max(10 %, 30 m)) and the /api/kaggle/calibrate grid fit. <cite class="src">kaggle-kernels/landslide-sim/main.py:808-857</cite> <cite class="src">kaggle-kernels/landslide-sim/validate_convergence.py:19-21,35-98</cite></p>
+<h2 id="measured">Measured runs and timings</h2>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-08. These are observations of one environment, not performance guarantees.</caption>
+<thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
+<tbody>
+<tr><td>Grid-convergence script re-executed 2026-09-08</td><td>PASS — conservation |Δ| = 0 with and without entrainment; runout 3.74→2.87→2.95 km over gs 64→128→256 (fixed 5.12 km domain, dx 80→40→20 m); area refinement Δ1 = 1.386 → Δ2 = 0.050 (gate ≤ 0.25); terrain upsample RMSE 20.6 m = 1.5 % of 1,381 m relief; exit 0</td></tr>
+<tr><td>Representative quake-trigger run (128², M 6.5, μ 0.25, ξ 300, 5 min sim)</td><td>max depth 157 m (coarse-grid pooling), max velocity 26.2 m/s, runout 4.0 km, affected 5.1 km², volume 24.5 M m³; in-domain mass ledger drift 1.56 % (boundary exchange ledger reported separately); wall 2.7 s</td></tr>
+<tr><td>Rain + entrainment run (96², 300 mm, rate 0.005/s, bed 4 m)</td><td>max depth 216 m, velocity 21.6 m/s, runout 6.2 km, affected 25.5 km²; entrained +126 M m³ accounted; mass drift 0.0000 %; wall 2.0 s</td></tr>
+<tr><td>Calibration endpoint semantics</td><td>μ×ξ grid search {0.15…0.40}×{100…800} minimising |runout − observed| (calibrate.py:24-25,64) — exercised by the server localRunner (spawned python3, in-process)</td></tr>
+<tr><td>Kaggle job transport</td><td>VERIFIED BY CODE INSPECTION ONLY</td></tr>
+</tbody></table></div>
+<h2 id="reproduction">Reproduction</h2>
+<h3 id="repro-cmd">Commands</h3>
+<pre><code># Convergence/conservation gates (in-process, no Kaggle):
+cd &lt;repo&gt;/kaggle-kernels/landslide-sim &amp;&amp; python3 validate_convergence.py
+# → 'PASS — all gates OK'
+
+# Calibrate μ×ξ to an observed runout (documented-event value required):
+python3 calibrate.py --observed-runout-km 2.9 --grid-size 128
+
+# Server-side UQ:
+curl -s -X POST http://localhost:3001/api/kaggle/landslide/quantify \
+  -H 'Content-Type: application/json' -d '{ &quot;request&quot;: {…landslide params…}, &quot;samples&quot;: 16 }'</code></pre>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security — Terranoetis Documentation</title>
+<meta name="description" content="Vulnerability reporting and the threat-model summary; authoritative policy in SECURITY.md.">
+<link rel="canonical" href="https://terranoetis.com/governance/security.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Security — Terranoetis Documentation">
+<meta property="og:description" content="Vulnerability reporting and the threat-model summary; authoritative policy in SECURITY.md.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/governance/security.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html" aria-current="true">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../governance/style-guide.html">Governance</a></li>
+<li aria-current="page">Security</li>
+      </ol></nav>
+      <h1>Security</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../../SECURITY.md">SECURITY.md — full policy (source of truth, repo root)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#surface">Security-relevant implementation points (verified this pass)</a></li>
+      </ul></nav>
+      <p>Report vulnerabilities by email to the address in <a href="../../SECURITY.md">SECURITY.md</a> (48-hour response target). The current threat model — SSRF guard, auth surface, key handling, JWT strength enforcement, brute-force lockout, public-endpoint limiting, CORS allowlist, injection defences — is maintained there.</p>
+<h2 id="surface">Security-relevant implementation points (verified this pass)</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Control</th><th scope="col">Verified detail</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Secrets in repo</td><td>runtime <code>.env</code> is gitignored; Kaggle credentials read only from <code>~/.kaggle</code></td><td><cite class="src">docs/DEPLOYMENT.md:173</cite> <cite class="src">.gitignore:.env</cite></td></tr>
+<tr><td>JWT strength</td><td>prod boot refuses <code>JWT_SECRET</code> &lt; 32 chars</td><td><cite class="src">server/index.ts:171-181</cite></td></tr>
+<tr><td>Sandbox</td><td>execution caps + audit log per exec</td><td><cite class="src">server/index.ts:8655-8658,8718</cite></td></tr>
+<tr><td>Sim kernels</td><td>receive JSON params only; no shell interpolation of user values</td><td><cite class="src">server/kaggle/simRunner.ts:156-175</cite> <span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
+<tr><td>Auth surface</td><td>public allow-list explicit; everything else behind authGuard</td><td><cite class="src">server/index.ts:373-487</cite></td></tr>
+</tbody></table></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>
