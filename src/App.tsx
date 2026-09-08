@@ -15,6 +15,7 @@ import StudyAreaPanel from '@/components/ui/StudyAreaPanel';
 import { CameraControls } from '@/components/CameraControls';
 import type { StudyAreaItem } from '@/rendering/studyArea';
 import { throttledRender } from '@/lib/throttledRender';
+import { isGlobePickMode } from '@/lib/globePickMode';
 import { startRadioWave, type RadioWaveHandle } from '@/rendering/radioWave';
 import { useChatStore } from '@/store/chatStore';
 import { useUserPrefStore } from '@/store/userPrefStore';
@@ -1412,12 +1413,12 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showScenarioGallery, setShowScenarioGallery] = useState(false);
   const [showScenarioEditor, setShowScenarioEditor] = useState(false);
-  const [kaggleOverlay, setKaggleOverlay] = useState<{ jobId: string; lat: number; lon: number; scenarioType: string } | null>(null);
+  const [kaggleOverlay, setKaggleOverlay] = useState<{ jobId: string; lat: number; lon: number; scenarioType: string; bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null } | null>(null);
   // E2E bridge: Playwright live-render tests invoke this to trigger overlays
   // without driving the full ScenarioEditor UI. Production users never see it.
   useEffect(() => {
     if (import.meta.env.DEV) {
-      (window as unknown as Record<string, unknown>).setKaggleOverlay = (v: { jobId: string; lat: number; lon: number; scenarioType: string }) =>
+      (window as unknown as Record<string, unknown>).setKaggleOverlay = (v: { jobId: string; lat: number; lon: number; scenarioType: string; bbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null }) =>
         setKaggleOverlay(v);
       (window as unknown as Record<string, unknown>).kaggleOverlayState = kaggleOverlay;
       // God-eye test hook: set the active study-area bbox directly so the AI
@@ -2332,6 +2333,9 @@ export default function App() {
     handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
       // The viewer may have been destroyed while the interaction was queued.
       if (v.isDestroyed()) return;
+      // The scenario editor's point picker (vent / epicentre / landfall) owns
+      // the click while armed — don't zoom-to-entity or open the context menu.
+      if (isGlobePickMode()) return;
       // ── Navigation / Spatial Safety tools ──
       if (navModeRef.current === 'route' || navModeRef.current === 'safest') {
         let cart = v.scene.pickPosition(click.position);
@@ -10887,9 +10891,9 @@ case 'openPanel':
           studyAreas={studyAreas}
           activeStudyAreaId={activeStudyAreaId}
           viewer={viewerRef.current}
-          onKaggleComplete={(jobId, lat, lon, scenarioType) => {
+          onKaggleComplete={(jobId, lat, lon, scenarioType, bbox) => {
             setShowScenarioEditor(false);
-            setKaggleOverlay({ jobId, lat, lon, scenarioType });
+            setKaggleOverlay({ jobId, lat, lon, scenarioType, bbox: bbox ?? null });
           }}
           onKaggleStart={() => setKaggleOverlay(null)} // Clear old overlay when starting a new run
         />
@@ -10930,6 +10934,7 @@ case 'openPanel':
           jobId={kaggleOverlay.jobId}
           lat={kaggleOverlay.lat}
           lon={kaggleOverlay.lon}
+          studyBbox={kaggleOverlay.bbox}
           // extent auto-derived from grid shape & cell size
           opacity={0.7}
           onDismiss={() => setKaggleOverlay(null)}
@@ -10944,6 +10949,7 @@ case 'openPanel':
           jobId={kaggleOverlay.jobId}
           lat={kaggleOverlay.lat}
           lon={kaggleOverlay.lon}
+          studyBbox={kaggleOverlay.bbox}
           // extent auto-derived from grid shape & cell size
           opacity={0.7}
           onDismiss={() => setKaggleOverlay(null)}
@@ -10958,6 +10964,7 @@ case 'openPanel':
           jobId={kaggleOverlay.jobId}
           lat={kaggleOverlay.lat}
           lon={kaggleOverlay.lon}
+          studyBbox={kaggleOverlay.bbox}
           // extent auto-derived from grid shape & cell size
           opacity={0.7}
           onDismiss={() => setKaggleOverlay(null)}

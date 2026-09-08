@@ -20,6 +20,7 @@ import { computeStudyAreaBbox } from '@/rendering/studyArea';
 import { SCENARIO_TYPE_LABELS } from './types';
 import Panel from '@/components/ui/Panel';
 import { useKaggleSimulation } from '@/hooks/useKaggleSimulation';
+import { setGlobePickMode } from '@/lib/globePickMode';
 import { sampleStudyAreaTerrainAsync } from './studyAreaTerrain';
 import {
   buildSimulationRequest,
@@ -29,6 +30,7 @@ import {
   deriveExtentKm,
   derivePhysicsFormOverrides,
   type SimulationRequest,
+  type StudyAreaBbox,
 } from '@/services/kaggleSim';
 import type { VolcanicEnsembleResult } from '@/components/kaggle/VolcanoEnsembleOverlay';
 
@@ -62,12 +64,14 @@ const SCENARIO_PARAMS: Record<string, ParameterDef[]> = {
     { key: 'magnitudeMax', label: 'Mag (Mainshock)', min: 3, max: 9.5, step: 0.1, defaultValue: 8, unit: 'M' },
     { key: 'depthMin', label: 'Min Depth (catalog context)', min: 0, max: 100, step: 1, defaultValue: 5, unit: 'km' },
     { key: 'depthMax', label: 'Depth (Mainshock)', min: 1, max: 300, step: 1, defaultValue: 30, unit: 'km' },
+    { key: 'vs30', label: 'Site Vs30 (NEHRP)', min: 150, max: 1500, step: 10, defaultValue: 760, unit: 'm/s' },
   ],
   hurricane_landfall: [
     { key: 'category', label: 'Saffir-Simpson Category', min: 1, max: 5, step: 1, defaultValue: 3, unit: '' },
     { key: 'forwardSpeed', label: 'Forward Speed', min: 5, max: 60, step: 1, defaultValue: 15, unit: 'km/h' },
     { key: 'pressure', label: 'Central Pressure', min: 880, max: 1010, step: 5, defaultValue: 950, unit: 'hPa' },
     { key: 'radius', label: 'Radius of Max Winds', min: 10, max: 200, step: 5, defaultValue: 50, unit: 'km' },
+    { key: 'heading', label: 'Track Heading (from N)', min: 0, max: 360, step: 5, defaultValue: 270, unit: '°' },
     { key: 'landfallTime', label: 'Hours to Landfall', min: 6, max: 96, step: 1, defaultValue: 24, unit: 'h' },
   ],
   wildfire_spread: [
@@ -175,7 +179,7 @@ function phaseProgress(status: string | undefined): number {
 
 interface ScenarioEditorProps {
   onClose: () => void;
-  onKaggleComplete?: (jobId: string, lat: number, lon: number, scenarioType: string) => void;
+  onKaggleComplete?: (jobId: string, lat: number, lon: number, scenarioType: string, bbox?: StudyAreaBbox | null) => void;
   onKaggleStart?: () => void;
   /**
    * Fired when a volcanic UQ ensemble completes, so the caller can render the
@@ -213,6 +217,12 @@ export default function ScenarioEditor({
   const ventHandlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
   const ventMarkerRef = useRef<Cesium.Entity | null>(null);
 
+  // Hurricane track heading: auto (default) omits heading_deg from the request
+  // so the kernel aims the storm at the pinned landfall point from the water
+  // centroid — a genuine water-side approach for any coastline orientation.
+  // A manual heading always overrides the auto-aim.
+  const [autoHeading, setAutoHeading] = useState(true);
+
   // ── Real-vs-parameter mode toggle (volcano only) ──
   // Parameter mode: the user's sliders (wind speed/dir, ash diameter) are sent
   // to the kernel as-is — pure "what if" scenario exploration.
@@ -236,7 +246,7 @@ export default function ScenarioEditor({
   );
 
   const kaggle = useKaggleSimulation({
-    onComplete: (jobId, lat, lon, type) => onKaggleComplete?.(jobId, lat, lon, type),
+    onComplete: (jobId, lat, lon, type) => onKaggleComplete?.(jobId, lat, lon, type, activeBbox),
     onStart: () => onKaggleStart?.(),
   });
 
@@ -250,11 +260,6 @@ export default function ScenarioEditor({
     [scenarioType],
   );
 
-  const switchScenarioType = useCallback((type: string) => {
-    setScenarioType(type);
-    setParams(defaultsFor(type));
-  }, []);
-
   /** Remove only the vent marker entity — keeps the drawn bbox on the globe. */
   const clearVentMarker = useCallback(() => {
     if (!viewer) return;
@@ -263,6 +268,16 @@ export default function ScenarioEditor({
       ventMarkerRef.current = null;
     }
   }, [viewer]);
+
+  const switchScenarioType = useCallback((type: string) => {
+    setScenarioType(type);
+    setParams(defaultsFor(type));
+    setAutoHeading(true);
+    // Drop any pinned origin point — a volcano vent must not leak into an
+    // earthquake epicentre (or vice versa) when the user switches scenario.
+    setVentPoint(null);
+    clearVentMarker();
+  }, [clearVentMarker]);
 
   /** Let the user click an exact vent/ignition point inside the study area. */
   const pickVentPoint = useCallback(() => {
@@ -274,25 +289,31 @@ export default function ScenarioEditor({
     }
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     ventHandlerRef.current = handler;
+    // Suppress the App's global click handler (zoom-to-entity / context menu)
+    // while this one-shot pick is armed.
+    setGlobePickMode(true);
     handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
-      // Pick the EXACT terrain surface (not the ellipsoid) so the vent point
-      // lands precisely where the user clicks, not shifted by terrain elevation.
-      const ray = viewer.camera.getPickRay(click.position);
-      if (!ray) return;
-      const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
-      if (cartesian) {
-        const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
-        const pt = {
-          lat: Cesium.Math.toDegrees(cartographic.latitude),
-          lon: Cesium.Math.toDegrees(cartographic.longitude),
-        };
-        setVentPoint(pt);
-        drawVentMarker(viewer, pt, ventMarkerRef);
+      try {
+        // Pick the EXACT terrain surface (not the ellipsoid) so the vent point
+        // lands precisely where the user clicks, not shifted by terrain elevation.
+        const ray = viewer.camera.getPickRay(click.position);
+        const cartesian = ray ? viewer.scene.globe.pick(ray, viewer.scene) : undefined;
+        if (cartesian) {
+          const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+          const pt = {
+            lat: Cesium.Math.toDegrees(cartographic.latitude),
+            lon: Cesium.Math.toDegrees(cartographic.longitude),
+          };
+          setVentPoint(pt);
+          drawVentMarker(viewer, pt, ventMarkerRef, pinLabelFor(scenarioType));
+        }
+      } finally {
+        if (!handler.isDestroyed()) handler.destroy();
+        ventHandlerRef.current = null;
+        setGlobePickMode(false);
       }
-      if (!handler.isDestroyed()) handler.destroy();
-      ventHandlerRef.current = null;
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
-  }, [viewer, activeBbox, clearVentMarker]);
+  }, [viewer, activeBbox, scenarioType, clearVentMarker]);
 
   // Clean up the vent picker handler + marker on unmount or study-area change.
   useEffect(() => {
@@ -301,6 +322,7 @@ export default function ScenarioEditor({
         ventHandlerRef.current.destroy();
       }
       ventHandlerRef.current = null;
+      setGlobePickMode(false);
       clearVentMarker();
     };
   }, [clearVentMarker, activeBbox]);
@@ -314,20 +336,31 @@ export default function ScenarioEditor({
     setRunScenarioType(scenarioType);
     setPreparing(true);
     try {
+      // Hurricane auto-aim: omit the heading entirely so the kernel aims the
+      // storm at the pinned landfall point from the water side. The builder's
+      // `hasNum('heading')` guard then drops heading_deg from the request.
+      const effParams =
+        scenarioType === 'hurricane_landfall' && autoHeading
+          ? (() => {
+              const { heading: _omit, ...rest } = params;
+              return rest;
+            })()
+          : params;
       const base = buildSimulationRequest(
-        { scenarioType, params, gridSize: 256 },
+        { scenarioType, params: effParams, gridSize: 256 },
         activeBbox,
         scenarioType === 'volcanic_eruption' ? ventPoint : null,
       );
-      // Landslide + flood + volcano + wildfire: if the Cesium globe has real
-      // elevation for the drawn box, sample it at full resolution (256×256 —
-      // no bilinear loss, the kernel's simulation grid) and ship it so the
-      // kernel runs on real topography instead of the synthetic field. No
-      // real relief → keep synthetic.
+      // Landslide + flood + volcano + wildfire + hurricane: if the Cesium globe
+      // has real elevation for the drawn box, sample it at full resolution
+      // (256×256 — no bilinear loss, the kernel's simulation grid) and ship it
+      // so the kernel runs on real topography instead of the synthetic field.
+      // No real relief → keep synthetic.
       let request: SimulationRequest = base;
       if (
         (base.type === 'landslide' || base.type === 'flood_inundation' ||
-         base.type === 'volcanic_eruption' || base.type === 'wildfire_spread') &&
+         base.type === 'volcanic_eruption' || base.type === 'wildfire_spread' ||
+         base.type === 'hurricane_landfall') &&
         viewer
       ) {
         const real = await sampleStudyAreaTerrainAsync(viewer, activeBbox, 256);
@@ -358,6 +391,32 @@ export default function ScenarioEditor({
           } as SimulationRequest;
         }
       }
+      // Earthquake: honor the pinned epicentre the same way as the volcano vent
+      // — a fractional position in the SIMULATION GRID (column = east, row =
+      // south). The grid is a square of extent_km centred on the bbox centroid
+      // — NOT the bbox itself — so the fraction must be computed in grid space.
+      if (base.type === 'earthquake_swarm' && ventPoint && activeBbox) {
+        const vf = computeVentFractions(activeBbox, ventPoint);
+        if (vf) {
+          request = {
+            ...request,
+            epi_frac_x: vf.vent_frac_x,
+            epi_frac_y: vf.vent_frac_y,
+          } as SimulationRequest;
+        }
+      }
+      // Hurricane: the pinned point is the LANDFALL / TRACK-CENTER — the eye
+      // passes it at mid-duration. Same grid-space fraction as the epicentre.
+      if (base.type === 'hurricane_landfall' && ventPoint && activeBbox) {
+        const vf = computeVentFractions(activeBbox, ventPoint);
+        if (vf) {
+          request = {
+            ...request,
+            track_frac_x: vf.vent_frac_x,
+            track_frac_y: vf.vent_frac_y,
+          } as SimulationRequest;
+        }
+      }
       // Volcano, real-data mode: fetch ERA5 wind profile and embed it.
       if (base.type === 'volcanic_eruption' && useRealWindProfile) {
         const c = deriveCenter(activeBbox);
@@ -381,7 +440,7 @@ export default function ScenarioEditor({
     } finally {
       setPreparing(false);
     }
-  }, [activeBbox, scenarioType, params, viewer, kaggle, ventPoint, useRealWindProfile, profileDate]);
+  }, [activeBbox, scenarioType, params, autoHeading, viewer, kaggle, ventPoint, useRealWindProfile, profileDate]);
 
   // ── Voellmy calibration (fit μ/ξ to an observed runout) ──
   const [calibInput, setCalibInput] = useState('2.9');
@@ -609,11 +668,15 @@ export default function ScenarioEditor({
           )}
         </div>
 
-        {/* Manual Vent / Origin Point — volcano only */}
-        {activeBbox && scenarioType === 'volcanic_eruption' && (
+        {/* Manual origin point — volcano vent + earthquake epicentre + hurricane landfall */}
+        {activeBbox && (scenarioType === 'volcanic_eruption' || scenarioType === 'earthquake_swarm' || scenarioType === 'hurricane_landfall') && (
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
             <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 600 }}>
-              {ventPoint ? 'Vent / Origin Point' : 'Pinpoint the exact location'}
+              {scenarioType === 'earthquake_swarm'
+                ? (ventPoint ? 'Epicentre (pinned)' : 'Pinpoint the epicentre')
+                : scenarioType === 'hurricane_landfall'
+                  ? (ventPoint ? 'Landfall / Track Center (pinned)' : 'Pinpoint the landfall point')
+                  : (ventPoint ? 'Vent / Origin Point' : 'Pinpoint the exact location')}
             </div>
             {ventPoint ? (
               <div className="scenario-info" style={{ background: 'rgba(234,88,12,0.12)', borderRadius: 8, padding: 8 }}>
@@ -622,7 +685,11 @@ export default function ScenarioEditor({
               </div>
             ) : (
               <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6 }}>
-                Defaults to the study-area centroid. Click a precise point on the terrain for better accuracy.
+                {scenarioType === 'earthquake_swarm'
+                  ? 'Defaults to the study-area centre. Click the fault trace to place the epicentre there for an accurate ShakeMap.'
+                  : scenarioType === 'hurricane_landfall'
+                    ? 'Defaults to the study-area centre. Click where the eye should make landfall — it arrives there after the "Hours to Landfall" time, approaching from the water side (auto heading).'
+                    : 'Defaults to the study-area centroid. Click a precise point on the terrain for better accuracy.'}
               </div>
             )}
             <div style={{ display: 'flex', gap: 6 }}>
@@ -663,11 +730,15 @@ export default function ScenarioEditor({
           <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, fontWeight: 600 }}>Parameters — {SCENARIO_TYPE_LABELS[scenarioType]}</div>
           {currentParams.map((param) => {
             const inputId = `se-param-${param.key}`;
+            const isAutoHeading =
+              scenarioType === 'hurricane_landfall' && param.key === 'heading' && autoHeading;
             return (
             <div key={param.key} style={{ marginBottom: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>
                 <label htmlFor={param.type === 'select' ? undefined : inputId} style={{ cursor: 'default' }}>{param.label}</label>
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{String(params[param.key] ?? param.defaultValue)}{param.unit}</span>
+                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {isAutoHeading ? 'auto' : `${String(params[param.key] ?? param.defaultValue)}${param.unit}`}
+                </span>
               </div>
               {param.type === 'select' ? (
                 <select
@@ -683,18 +754,32 @@ export default function ScenarioEditor({
                   ))}
                 </select>
               ) : (
-                <input
-                  id={inputId}
-                  type="range"
-                  aria-label={param.label}
-                  min={param.min}
-                  max={param.max}
-                  step={param.step}
-                  value={Number(params[param.key] ?? param.defaultValue)}
-                  onChange={(e) => updateParam(param.key, Number(e.target.value))}
-                  disabled={formDisabled}
-                  style={{ width: '100%', height: 3, accentColor: '#60a5fa' }}
-                />
+                <>
+                  <input
+                    id={inputId}
+                    type="range"
+                    aria-label={param.label}
+                    min={param.min}
+                    max={param.max}
+                    step={param.step}
+                    value={Number(params[param.key] ?? param.defaultValue)}
+                    onChange={(e) => updateParam(param.key, Number(e.target.value))}
+                    disabled={formDisabled || isAutoHeading}
+                    style={{ width: '100%', height: 3, accentColor: '#60a5fa' }}
+                  />
+                  {scenarioType === 'hurricane_landfall' && param.key === 'heading' && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 9, color: 'var(--text-muted)', marginTop: 3, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={autoHeading}
+                        onChange={(e) => setAutoHeading(e.target.checked)}
+                        disabled={formDisabled}
+                        style={{ accentColor: '#60a5fa', margin: 0 }}
+                      />
+                      Auto-aim: storm approaches the landfall point from the water side
+                    </label>
+                  )}
+                </>
               )}
             </div>
           );
@@ -1041,10 +1126,20 @@ export default function ScenarioEditor({
 }
 
 /** Orange VENT marker pinned to the real terrain surface (0 m, CLAMP_TO_GROUND). */
+function pinLabelFor(scenarioType: string): string {
+  switch (scenarioType) {
+    case 'earthquake_swarm': return 'EPICENTRE';
+    case 'hurricane_landfall': return 'LANDFALL';
+    case 'volcanic_eruption': return 'VENT';
+    default: return 'ORIGIN';
+  }
+}
+
 function drawVentMarker(
   viewer: Viewer,
   pt: { lat: number; lon: number },
   markerRef: { current: Cesium.Entity | null },
+  label = 'VENT',
 ): void {
   if (markerRef.current) {
     viewer.entities.remove(markerRef.current);
@@ -1060,7 +1155,7 @@ function drawVentMarker(
       heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
     },
     label: {
-      text: 'VENT',
+      text: label,
       font: '10px monospace',
       fillColor: Cesium.Color.fromCssColorString('#f97316'),
       outlineColor: Cesium.Color.BLACK,

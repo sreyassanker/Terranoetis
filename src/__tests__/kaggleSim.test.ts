@@ -275,6 +275,56 @@ describe('buildSimulationRequest', () => {
     });
     expect(r.success).toBe(false);
   });
+
+  it('hurricane: "Hours to Landfall" is the eye-arrival time, not the run length', () => {
+    // The kernel centres the track at MID-duration, so a 24 h lead time must
+    // produce a 48 h run — otherwise landfall happens at t=12 h (the old bug).
+    const req = buildSimulationRequest(
+      {
+        scenarioType: 'hurricane_landfall',
+        gridSize: 256,
+        params: {
+          category: 3, forwardSpeed: 15, pressure: 950, radius: 50,
+          landfallTime: 24,
+        },
+      },
+      bbox,
+    );
+    if (req.type !== 'hurricane_landfall') throw new Error('wrong type');
+    expect(req.duration_hours).toBe(48);
+    expect(req.category).toBe(3);
+    expect(req.central_pressure_hpa).toBe(950);
+  });
+
+  it('hurricane: manual heading passes through; auto (omitted) drops heading_deg', () => {
+    const manual = buildSimulationRequest(
+      {
+        scenarioType: 'hurricane_landfall',
+        gridSize: 256,
+        params: {
+          category: 3, forwardSpeed: 15, pressure: 950, radius: 50,
+          landfallTime: 24, heading: 45,
+        },
+      },
+      bbox,
+    );
+    if (manual.type !== 'hurricane_landfall') throw new Error('wrong type');
+    expect(manual.heading_deg).toBe(45);
+
+    const auto = buildSimulationRequest(
+      {
+        scenarioType: 'hurricane_landfall',
+        gridSize: 256,
+        params: {
+          category: 3, forwardSpeed: 15, pressure: 950, radius: 50,
+          landfallTime: 24, // heading intentionally absent → kernel auto-aims
+        },
+      },
+      bbox,
+    );
+    if (auto.type !== 'hurricane_landfall') throw new Error('wrong type');
+    expect(auto.heading_deg).toBeUndefined();
+  });
 });
 
 describe('derivePhysicsFormOverrides', () => {

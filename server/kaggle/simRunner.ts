@@ -9,7 +9,7 @@
  * 5. Load results into frontend
  */
 
-import { execFile, type ExecFileException } from 'child_process';
+import { execFile, spawn, type ExecFileException, type ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -118,6 +118,112 @@ const KERNEL_REGISTRY: Record<SimulationType, { folder: string; slug: string }> 
 
 // In-memory job tracking (with automatic cleanup)
 const activeJobs = new Map<string, SimulationJob>();
+
+// ═════════════════════════════════════════════════════════════════
+// LOCAL EXECUTION (2D kernels — CPU-scale, no Kaggle round-trip)
+// ═════════════════════════════════════════════════════════════════
+
+// Scenario types that run locally via python3 instead of the
+// push→poll→download Kaggle pipeline. These kernels are 2D and finish in
+// seconds on a laptop CPU, so the GPU queue would be pure latency. The
+// local pipeline writes the same results layout
+// (kaggle-kernels/results/<jobId>/metadata.json + *.npy) and emits the
+// same job statuses, so the SSE stream, grid and GeoTIFF endpoints work
+// unchanged.
+const LOCAL_SIM_TYPES = new Set<SimulationType>([
+  'earthquake_swarm', 'wildfire_spread', 'hurricane_landfall',
+]);
+const LOCAL_TIMEOUT_MS = Number(process.env.LOCAL_SIM_TIMEOUT_MS) || 120_000;
+const localChildren = new Map<string, ChildProcess>();
+
+export function isLocalSimType(type: SimulationType): boolean {
+  return LOCAL_SIM_TYPES.has(type);
+}
+
+function runLocalSimulation(job: SimulationJob, kernelDir: string): Promise<void> {
+  return new Promise((resolve) => {
+    const resultDir = path.join(RESULTS_DIR, job.id);
+    let tmpDir: string | null = null;
+    const cleanupTmp = () => {
+      if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ } }
+    };
+
+    try {
+      fs.mkdirSync(resultDir, { recursive: true });
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'terranoetis-local-'));
+      fs.copyFileSync(path.join(kernelDir, 'main.py'), path.join(tmpDir, 'main.py'));
+      // The kernel's _load_params() reads params.json from cwd — locally we
+      // can ship params as a real file (Kaggle needs EMBEDDED_PARAMS because
+      // the CLI only uploads the code file). The kernel's own wall-clock cap
+      // is tuned for the Kaggle queue (480 s); locally it must finish inside
+      // the spawn timeout so it exits cleanly instead of being SIGKILLed.
+      const localParams = {
+        ...job.params,
+        wallclock_max_sec: Math.min(
+          Number(job.params.wallclock_max_sec) || (LOCAL_TIMEOUT_MS / 1000) - 15,
+          (LOCAL_TIMEOUT_MS / 1000) - 15,
+        ),
+      };
+      fs.writeFileSync(path.join(tmpDir, 'params.json'), JSON.stringify(localParams));
+
+      updateJobStatus(job, 'running', 'Running locally (2D kernel, CPU)…');
+      const child = spawn('python3', ['main.py'], {
+        cwd: tmpDir,
+        env: { ...process.env, TERRANOETIS_OUT_DIR: resultDir, PYTHONUNBUFFERED: '1' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      localChildren.set(job.id, child);
+      let out = '';
+      let err = '';
+      child.stdout?.on('data', (d) => { out += d.toString(); });
+      child.stderr?.on('data', (d) => { err += d.toString(); });
+
+      const timer = setTimeout(() => { child.kill('SIGKILL'); }, LOCAL_TIMEOUT_MS);
+
+      child.on('error', (e) => {
+        clearTimeout(timer);
+        localChildren.delete(job.id);
+        updateJobStatus(job, 'error', `Local run failed to start: ${e.message}`);
+        cleanupTmp();
+        resolve();
+      });
+
+      child.on('close', (code, signal) => {
+        clearTimeout(timer);
+        localChildren.delete(job.id);
+        if (job.cancelled) {
+          updateJobStatus(job, 'error', 'Simulation cancelled by user');
+          cleanupTmp();
+          resolve();
+          return;
+        }
+        const metaPath = path.join(resultDir, 'metadata.json');
+        if (code === 0 && fs.existsSync(metaPath)) {
+          job.resultPath = resultDir;
+          job.completedAt = new Date().toISOString();
+          updateJobStatus(job, 'complete', 'Done locally');
+          logger.info({ jobId: job.id, type: job.type }, 'Local simulation complete');
+        } else {
+          // Prefer the kernel's own error.log (Python traceback) over stderr.
+          let detail = '';
+          const errLog = path.join(resultDir, 'error.log');
+          try {
+            if (fs.existsSync(errLog)) detail = fs.readFileSync(errLog, 'utf-8').split('\n').slice(-12).join('\n');
+          } catch { /* best effort */ }
+          if (!detail) detail = (err || out).split('\n').slice(-12).join('\n');
+          updateJobStatus(job, 'error',
+            `Local kernel failed (exit ${code}${signal ? `, signal ${signal}` : ''}): ${detail}`);
+        }
+        cleanupTmp();
+        resolve();
+      });
+    } catch (e) {
+      updateJobStatus(job, 'error', e instanceof Error ? e.message : String(e));
+      cleanupTmp();
+      resolve();
+    }
+  });
+}
 
 // ═════════════════════════════════════════════════════════════════
 // UTILITIES
@@ -725,6 +831,16 @@ export async function startSimulation(params: SimulationParams): Promise<Simulat
 
   activeJobs.set(jobId, job);
 
+  // 2D local kernels: seconds on CPU — run in-process, skip the Kaggle queue
+  // and the power-saver engine pause entirely (that pause exists to keep the
+  // machine cool during minutes-long GPU polls, not 0.2 s runs).
+  if (LOCAL_SIM_TYPES.has(params.type)) {
+    runLocalSimulation(job, kernelDir).catch((err) => {
+      updateJobStatus(job, 'error', err instanceof Error ? err.message : String(err));
+    });
+    return job;
+  }
+
   // Suspend non-essential background engines so the local machine stays cool
   // while the GPU work runs on Kaggle.
   pauseBackgroundEngines();
@@ -767,6 +883,13 @@ export function cancelJob(jobId: string): boolean {
   if (!job) return false;
   if (job.status === 'complete' || job.status === 'error') return false;
   job.cancelled = true;
+  // Local runs: kill the python child immediately — its close handler emits
+  // the terminal 'cancelled' status.
+  const child = localChildren.get(jobId);
+  if (child) {
+    child.kill('SIGKILL');
+    return true;
+  }
   // Mark terminal right away — do NOT wait up to one full poll tick.
   // We stay truthful about the Kaggle-side cancellation (fire-and-forget)
   // by letting the poll loop's next iteration call cancelKernel().
