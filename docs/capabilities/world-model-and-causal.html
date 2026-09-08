@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>World model &amp; causal reasoning — Terranoetis Documentation</title>
+<meta name="description" content="Causal knowledge graph, weighted ensemble predictor, hand-coded physics NN, Brier-scored forecast ledger, temporal KG v2, forks and the dream engine.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/world-model-and-causal.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="World model &amp; causal reasoning — Terranoetis Documentation">
+<meta property="og:description" content="Causal knowledge graph, weighted ensemble predictor, hand-coded physics NN, Brier-scored forecast ledger, temporal KG v2, forks and the dream engine.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/world-model-and-causal.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html" aria-current="true">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">World model &amp; causal reasoning</li>
+      </ol></nav>
+      <h1>World model &amp; causal reasoning</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span> (start-up observed; no outcome claims)</span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/world-model-and-causal.md">capabilities/world-model-and-causal.md — narrative (source of truth)</a></p>
+      
+      <p>The world-model subsystem stores causal structure (SQLite nodes/edges + embeddings), fuses five weighted forecast sources, keeps a scored ledger of predictions versus outcomes, and feeds knowledge back through a temporal KG. The DoWhy Python microservice is an optional external discovery path.</p>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Component</th><th scope="col">Verified structure</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Causal graph</td><td>Bayesian posterior inference over causal_nodes/causal_edges; GET /api/causal-graph (+ DOT)</td><td><cite class="src">server/world-model/causalGraph.ts:79,391</cite> <cite class="src">server/db/schema.sql:284-298</cite> <cite class="src">server/index.ts:13929-13939</cite></td></tr>
+<tr><td>Ensemble predictor</td><td>5 sources (physics/statistical/pattern/causal/LLM), default weights 0.30/0.25/0.25/0.10/0.10 with per-domain variants for earthquake/tsunami/wildfire/severe-weather/flood</td><td><cite class="src">server/world-model/ensemblePredictor.ts:58,82-96</cite></td></tr>
+<tr><td>Physics NN (hand-coded)</td><td>Gutenberg–Richter a=4.5 b=1.0; aftershock/tsunami probability; saturation vapor pressure; precipitation; storm severity; Rothermel ROS; ignition probability</td><td><cite class="src">server/world-model/physicsNN.ts:11,28,43,60,67,77,93,109</cite></td></tr>
+<tr><td>Prediction validation</td><td>Brier scores + calibration report; /api/predict/validation-report</td><td><cite class="src">server/world-model/predictionValidator.ts:18,23,45</cite> <cite class="src">server/index.ts:13903</cite></td></tr>
+<tr><td>Forecast ledger</td><td>sweep every 6 h scoring prediction_log</td><td><cite class="src">server/world-model/forecastLedger.ts:32,134-137</cite> <cite class="src">server/index.ts:14471</cite></td></tr>
+<tr><td>Scenario what-ifs</td><td>energy-ratio 10^(1.5ΔM) magnitude-change template; /api/predict/scenario(s)</td><td><cite class="src">server/world-model/scenarioSimulator.ts:37,159</cite> <cite class="src">server/index.ts:13885-13916</cite></td></tr>
+<tr><td>Temporal KG v2</td><td>LLM entity/edge generation, completion, counterfactuals; edge decay constant 72 h; chat write-through/read-through bridge</td><td><cite class="src">server/kgV2/evolvingGraph.ts:28,145-149</cite> <cite class="src">server/kgV2/chatKgBridge.ts:4-22,28</cite></td></tr>
+<tr><td>Causal discovery</td><td>Flask + DoWhy microservice (/discover, /health) in causal/python-service; optional in compose</td><td><cite class="src">server/causal/python-service/causal_service.py:9,13</cite></td></tr>
+<tr><td>Dream / forks / entropy / discovery</td><td>synthetic scenario generation; parallel-reality forks; entropy mixer broadcasts rolling domain anomaly scores every 60 s (header: “not a neural net”); discovery cycle 24 h</td><td><cite class="src">server/dream:engine</cite> <cite class="src">server/causal/entropyMixer.ts:5-14,39</cite> <cite class="src">server/causal/discoveryEngine.ts:8</cite></td></tr>
+</tbody></table></div>
+<div class="callout callout-inspect" role="note"><div class="callout-title">Honest scope</div><p>These are cognitive/state subsystems: their data structures, timers and gates are code-verified, and boot logs confirm the engines start. No prediction-accuracy claim is made anywhere in this documentation — accuracy tooling (Brier, calibration) exists to <em>measure</em> such claims over time, not to assert them. <span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></p></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

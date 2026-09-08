@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulation job API &amp; parameter contracts — Terranoetis Documentation</title>
+<meta name="description" content="The zod request contract layer, wire-field bounds, geometry conventions, job endpoints and result formats for the seven hazard kernels.">
+<link rel="canonical" href="https://terranoetis.com/reference/simulation-api.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Simulation job API &amp; parameter contracts — Terranoetis Documentation">
+<meta property="og:description" content="The zod request contract layer, wire-field bounds, geometry conventions, job endpoints and result formats for the seven hazard kernels.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/reference/simulation-api.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html" aria-current="true">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../reference/api.html">Reference</a></li>
+<li aria-current="page">Simulation job API</li>
+      </ol></nav>
+      <h1>Simulation job API &amp; parameter contracts</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">MEASURED — HTTP transcript from a live server boot 2026-09-08</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/hazard-simulations.md">capabilities/hazard-simulations.md — narrative (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#contract">Request contract</a></li>
+<li><a href="#semantics">Wire semantics that matter to scientists</a></li>
+<li><a href="#endpoints">Job endpoints</a></li>
+<li><a href="#results">Result formats</a></li>
+<li><a href="#errors">Failure modes worth knowing</a></li>
+      </ul></nav>
+      <h2 id="contract">Request contract</h2>
+<p>Payloads are validated by a zod discriminated union on <code>type</code> whose bounds “mirror the physical ranges enforced by the simulator kernels… Validation MUST happen at this boundary, not inside the kernel, so bad input fails fast with a legible error. No synthetic fallbacks. If a value is required, the boundary throws.” <cite class="src">src/services/kaggleSim.ts:8-14</cite></p>
+<div class="table-scroll"><table><caption>Shared bounds (all branches)</caption>
+<thead><tr><th scope="col">Field</th><th scope="col">Rule</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>lat / lon</td><td>−90…90 / −180…180</td><td><cite class="src">src/services/kaggleSim.ts:20-21</cite></td></tr>
+<tr><td>grid_size</td><td>int 64…2048</td><td><cite class="src">src/services/kaggleSim.ts:22</cite></td></tr>
+<tr><td>extent_km</td><td>&gt;0…40,000 (bbox derivation floors at 1.0)</td><td><cite class="src">src/services/kaggleSim.ts:23,263-272</cite></td></tr>
+<tr><td>duration_hours</td><td>&gt;0…720</td><td><cite class="src">src/services/kaggleSim.ts:24</cite></td></tr>
+<tr><td>terrain / landcover / bathymetry arrays</td><td>≤ 65,536 cells; gs 2…256; row-major, row 0 = north</td><td><cite class="src">src/services/kaggleSim.ts:41-55,69-80,116-124,160-167,178-184,218-224</cite></td></tr>
+</tbody></table></div>
+<p>Per-scenario field tables (UI → wire → unit → range → default → meaning) are on the capability pages: <a href="../capabilities/earthquake.html">earthquake</a> · <a href="../capabilities/wildfire.html">wildfire</a> · <a href="../capabilities/hurricane.html">hurricane</a> · <a href="../capabilities/flood.html">flood</a> · <a href="../capabilities/tsunami.html">tsunami</a> · <a href="../capabilities/volcano.html">volcano</a> · <a href="../capabilities/landslide.html">landslide</a>. Branch source: <cite class="src">src/services/kaggleSim.ts:28-240</cite>.</p>
+<h2 id="semantics">Wire semantics that matter to scientists</h2>
+<ul><li>Unit conversions happen once, in the builder: wind km/h → m/s (÷3.6) <cite class="src">src/services/kaggleSim.ts:434,441,501</cite>; ash diameter µm → m (÷1e6) <cite class="src">src/services/kaggleSim.ts:509</cite>.</li>
+<li>“Hours to Landfall” is doubled because the kernel places landfall at mid-duration <cite class="src">src/services/kaggleSim.ts:485-490</cite>.</li>
+<li>Optional scientific knobs (vs30, heading, mu, xi, entrainment, ash_*) are omitted — never fabricated — when the user has not supplied a finite value <cite class="src">src/services/kaggleSim.ts:390-415,461-463,493,504-511,531-537</cite>.</li>
+<li>Origin points are grid fractions (x = east, y = south, 0…1): epicentre / track / vent; default box centre <cite class="src">src/services/kaggleSim.ts:98-106,152-159,194-200</cite>.</li>
+<li>The sim grid is a SQUARE of extent_km centred on the bbox centroid — not the bbox itself; vent fractions are computed against that square <cite class="src">src/services/kaggleSim.ts:274-309</cite>.</li>
+<li>landslide duration is additionally capped to 300 simulated seconds inside the kernel <cite class="src">kaggle-kernels/landslide-sim/main.py:435-442</cite>.</li></ul>
+<h2 id="endpoints">Job endpoints</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Method & path</th><th scope="col">Behaviour</th><th scope="col">Measured / source</th></tr></thead>
+<tbody>
+<tr><td>POST /api/kaggle/simulate</td><td>Validate + enqueue; 400 with explicit message on missing type/lat/lon or unknown type; returns <code>{jobId, status, type, streamUrl, createdAt}</code></td><td><cite class="src">server/kaggle/routes.ts:164-201</cite></td></tr>
+<tr><td>GET /api/kaggle/simulate/:id</td><td>Status document (params echoed)</td><td><cite class="src">server/kaggle/routes.ts:204-223</cite></td></tr>
+<tr><td>GET /api/kaggle/simulate/:id/stream</td><td>SSE progress: queued/running(+detail)/complete/error</td><td><cite class="src">server/kaggle/routes.ts:225-231</cite></td></tr>
+<tr><td>POST /api/kaggle/simulate/:id/cancel</td><td>cooperative cancel; local runs take a SIGKILL path on timeout</td><td><cite class="src">server/kaggle/routes.ts:233-243</cite></td></tr>
+<tr><td>GET /api/kaggle/simulate/:id/results</td><td>metadata.json + final_stats; 409 until complete</td><td><cite class="src">server/kaggle/routes.ts:245-261</cite> <span class="tag tag-measured">200 + full metadata observed</span></td></tr>
+<tr><td>GET /api/kaggle/simulate/:id/grid/:name</td><td>raw .npy or JSON (≤ 5M elements; 413 above); name sanitised to [A-Za-z0-9_-]</td><td><cite class="src">server/kaggle/routes.ts:263-307</cite> <span class="tag tag-measured">296,648-byte npy observed</span></td></tr>
+<tr><td>GET /api/kaggle/simulate/:id/geotiff/:name</td><td>WGS84 GeoTIFF (final frame of series)</td><td><cite class="src">server/kaggle/routes.ts:309-422</cite> <span class="tag tag-measured">valid 128×128 TIFF observed</span></td></tr>
+<tr><td>GET /api/kaggle/jobs · /kernels</td><td>job list; kernel availability + GPU flags</td><td><cite class="src">server/kaggle/routes.ts:424-477</cite> <span class="tag tag-measured">flood gpu=true, others false (observed)</span></td></tr>
+<tr><td>POST /api/kaggle/calibrate · /landslide/quantify · /volcano/calibrate · /volcano/quantify</td><td>local python3 in-process kernel runs (see hub page)</td><td><cite class="src">server/kaggle/routes.ts:479-810</cite></td></tr>
+</tbody></table></div>
+<h2 id="results">Result formats</h2>
+<p>Local and Kaggle runners converge on one layout: <code>kaggle-kernels/results/&lt;jobId&gt;/metadata.json</code> + <code>*.npy</code> grids, “so the SSE stream, grid and GeoTIFF endpoints work unchanged” <cite class="src">server/kaggle/simRunner.ts:126-141</cite>. Field dtypes/units are tabulated on each capability page; archived example artifacts (earthquake, wildfire, hurricane, flood families) sit in <code>kaggle-kernels/results/</code>.</p>
+<h2 id="errors">Failure modes worth knowing</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Condition</th><th scope="col">Observed behaviour</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Missing/invalid required UI value</td><td>builder throws (ZodError or explicit message) — never substitutes</td><td><cite class="src">src/services/kaggleSim.ts:390-415,544</cite></td></tr>
+<tr><td>Kernel out-of-range (e.g. M 2.9)</td><td>kernel raises with named validity range; job → error with the last log lines surfaced</td><td><cite class="src">kaggle-kernels/earthquake-sim/main.py:244-249</cite> <span class="tag tag-measured">observed</span></td></tr>
+<tr><td>Local timeout</td><td>SIGKILL after <code>LOCAL_SIM_TIMEOUT_MS</code> (default 120 s)</td><td><cite class="src">server/kaggle/simRunner.ts:134</cite></td></tr>
+<tr><td>No Kaggle token (Kaggle-routed types)</td><td>job errors early; local trio + analytical engine unaffected</td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
+<tr><td>Tsunami without real bathymetry</td><td>kernel aborts: “Real GEBCO bathymetry is required…”</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:227-230</cite></td></tr>
+<tr><td>Volcano without terrain</td><td>kernel aborts: “…no synthetic cone fallback is permitted…”</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:821-826</cite></td></tr>
+</tbody></table></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Volcanic eruption (lava SWE + buoyant plume + ash PDE) — Terranoetis Documentation</title>
+<meta name="description" content="Conservative Rusanov lava shallow-water flow with Arrhenius/Bingham rheology and cooling, Morton–Taylor plume column, and advection–diffusion–settling ash transport. Benchmarked 4/4 against Pinatubo 1991 and Kilauea 2018.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/volcano.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Volcanic eruption (lava SWE + buoyant plume + ash PDE) — Terranoetis Documentation">
+<meta property="og:description" content="Conservative Rusanov lava shallow-water flow with Arrhenius/Bingham rheology and cooling, Morton–Taylor plume column, and advection–diffusion–settling ash transport. Benchmarked 4/4 against Pinatubo 1991 and Kilauea 2018.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/volcano.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html" aria-current="true">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">Volcanic eruption (lava SWE + buoyant plume + ash PDE)</li>
+      </ol></nav>
+      <h1>Volcanic eruption (lava SWE + buoyant plume + ash PDE)</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/volcano.md">capabilities/volcano.md — narrative description (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#physics">Governing equations and coefficients</a></li>
+<li><a href="#parameters">Parameter contract</a></li>
+<li><a href="#outputs">Outputs</a></li>
+<li><a href="#spatial-origin">Spatial-origin semantics</a></li>
+<li><a href="#validity">Documented validity limits (verbatim from the code)</a></li>
+<li><a href="#measured">Measured runs and timings</a></li>
+<li><a href="#reproduction">Reproduction</a></li>
+      </ul></nav>
+      <p>The eruption scenario couples three physics modules: (1) lava flow as a 2D conservative shallow-water system with Rusanov fluxes, Arrhenius temperature-dependent viscosity, Bingham yield strength, Stefan–Boltzmann radiation, crust insulation and enthalpy-porosity solidification; (2) the eruption column as a 1D Morton–Taylor buoyant plume integrated to neutral buoyancy; and (3) ash as a vertically integrated advection–diffusion–settling PDE over a height-resolved wind field, with Schiller–Naumann particle drag. Terrain is REAL ONLY — the kernel refuses to run without sampled relief.</p>
+<dl class="metrics"><dt>Execution mode</dt><dd>Kaggle kernel (numpy-only, CPU accelerator instance); local in-process use for calibration & Monte-Carlo <cite class="src">server/kaggle/simRunner.ts:126-141</cite> <cite class="src">server/kaggle/localRunner.ts:1-15</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:607-680,1383</cite></dd>
+<dt>Verification</dt><dd>MEASURED locally — benchmark suite 4/4 PASS re-executed 2026-09-08; job transport verified by code inspection only</dd>
+<dt>Wire scenario type</dt><dd><code>volcanic_eruption</code> — contract at <cite class="src">src/services/kaggleSim.ts:28-240</cite>; job API at <a href="../reference/simulation-api.html">Simulation job API</a></dd></dl>
+<div class="callout callout-verified" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). <span class="tag tag-inspected">CODE INSPECTION ONLY</span> marks behaviour traced to source lines but not executed here (e.g. Kaggle push/poll transport). Inspected is never presented as tested.</p></div>
+<h2 id="physics">Governing equations and coefficients</h2>
+<p>Source attribution as stated in the kernel header (verbatim):</p>
+<blockquote class="verbatim">Lava flow — 2D conservative shallow-water equations solved with a Rusanov (local Lax-Friedrichs) flux … The Rusanov face flux telescopes to exact mass conservation (verified by verify_closed_box). … Eruption column — 1D Morton-Taylor buoyant plume with turbulent entrainment … Terrain — REAL ONLY. … if real relief is absent the run fails fast with a legible error rather than fabricating a cone.<footer><cite class="src">kaggle-kernels/volcano-sim/main.py:4-40</cite></footer></blockquote>
+<figure class="equation"><span class="formula">∂(hu)/∂t + ∇·(hu⊗u) = −g·h·∇η + g·h·sinθ − (η(T)·u)/(ρ·h) − τ_y/ρ</span><figcaption>Lava momentum: pressure + gravity − viscous (Arrhenius η(T)) − Bingham yield. <cite class="src">kaggle-kernels/volcano-sim/main.py:9-12</cite></figcaption></figure>
+<figure class="equation"><span class="formula">∂T/∂t + u·∇T = κ∇²T − h_c(T−T_amb)/(ρc_p h) − εσ(T⁴−T_amb⁴)/(ρc_p h) − (L_f/c_p)·dφ/dt</span><figcaption>Temperature advection–diffusion with convective + radiative cooling and latent heat of solidification. <cite class="src">kaggle-kernels/volcano-sim/main.py:15-18</cite></figcaption></figure>
+<figure class="equation"><span class="formula">d(ρwR²)/dz = 2αρ_a wR;  dw/dz = g(ρ_a−ρ)/ρ_a − (w/R)·dR/dz;  dT/dz = −g/c_p − (2α/R)(T−T_a)</span><figcaption>Morton, Taylor &amp;amp; Turner (1956) plume equations; α = 0.1; height where w → 0; exit velocity capped at 200 m/s with flux-conserving vent widening. <cite class="src">kaggle-kernels/volcano-sim/main.py:21-26,200-262</cite></figcaption></figure>
+<figure class="equation"><span class="formula">∂C/∂t + u_wx·∂C/∂x + u_wy·∂C/∂y = K·∇²C + Ṡ(x,y,t) − v_t·C/H_col</span><figcaption>Ash column-mass transport: upwind advection (conservative flux form), exact Gaussian-blur diffusion (σ = √(2KΔt)), Stokes/Schiller–Naumann settling, permanent deposition. <cite class="src">kaggle-kernels/volcano-sim/main.py:28-36</cite></figcaption></figure>
+<figure class="equation"><span class="formula">v = ((ρ_p−ρ_f)·g·d²)/(18μ) [Stokes];  Cd = (24/Re)(1+0.15·Re^0.687) [Schiller–Naumann, Re &amp;lt; 800], iterated</span><figcaption>Terminal velocity; the code notes Stokes is valid only Re &amp;lt; 0.5 and that 316 µm ash sits at Re ≈ 60, so the correction matters. <cite class="src">kaggle-kernels/volcano-sim/main.py:265-296</cite></figcaption></figure>
+<figure class="equation"><span class="formula">M0-style scaling: MER = mass_erupt(VEI)·mass_scale/(t·0.5);  vent radius by VEI {0:60 m … 8:600 m}</span><figcaption>VEI bins are order-of-magnitude: mass_erupt ≈ 1.2·10^(VEI+7) kg &quot;at bulk density ~1200 kg/m³ (loose tephra)&quot;; col_height/lava_vol/ash_mass per VEI. <cite class="src">kaggle-kernels/volcano-sim/main.py:139-152,117-121,775-777,976</cite></figcaption></figure>
+<h3 id="coefficients">Coefficients and named constants</h3>
+<div class="table-scroll"><table><caption>Named physical constants (value — meaning).</caption>
+<thead><tr><th scope="col">Constant</th><th scope="col">Value</th><th scope="col">Meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>RHO_LAVA</td><td>2600 kg/m³</td><td>Basaltic lava density</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:74</cite></td></tr>
+<tr><td>C_P_LAVA</td><td>1200 J/(kg·K)</td><td>Specific heat</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:75</cite></td></tr>
+<tr><td>K_THERMAL</td><td>1.5 W/(m·K)</td><td>Conductivity</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:76</cite></td></tr>
+<tr><td>ETA_REF @ T_REF</td><td>300 Pa·s @ 1450 K</td><td>Arrhenius reference viscosity</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:77-78</cite></td></tr>
+<tr><td>E_A</td><td>180 kJ/mol</td><td>Activation energy (range 100–400 noted in comment)</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:79</cite></td></tr>
+<tr><td>T_LIQ / T_SOLID / T_CRUST</td><td>1450 / 1320 / 1360 K</td><td>Liquidus, solidus, crust-onset (tholeiitic basalt)</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:80-83</cite></td></tr>
+<tr><td>L_FUSION</td><td>400 kJ/kg</td><td>Latent heat</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:84</cite></td></tr>
+<tr><td>H_COEFF</td><td>25 W/(m²·K)</td><td>Convective transfer</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:85</cite></td></tr>
+<tr><td>σ_SB / ε</td><td>5.67e-8 / 0.9</td><td>Stefan–Boltzmann / emissivity</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:89-90</cite></td></tr>
+<tr><td>CRUST_INSULATION</td><td>0.92 (92 % loss cut)</td><td>Keszthelyi &amp; Self 1998 crust effect</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:74-79 header comment lines 91-97</cite></td></tr>
+<tr><td>τ_y</td><td>1000 → 20,000 Pa</td><td>Bingham yield, eruption → near-solid</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:98-99</cite></td></tr>
+<tr><td>D_ASH_DEFAULT</td><td>316 µm</td><td>Median coarse-ash diameter → v_t ≈ 1.25 m/s (Stokes-regime note says ≈3 m/s at defaults)</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:127-128</cite></td></tr>
+<tr><td>RHO_AIR / μ_air</td><td>1.2 kg/m³ / 1.8e-5 Pa·s</td><td>Settling medium</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:124-125</cite></td></tr>
+<tr><td>lapse rate Γ</td><td>0.0065 K/m</td><td>Tropospheric profile for the plume</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:126</cite></td></tr>
+<tr><td>α (entrainment)</td><td>0.1</td><td>Morton–Taylor coefficient</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:223</cite></td></tr>
+</tbody></table></div>
+<h2 id="parameters">Parameter contract</h2>
+<p>Volcano parameters. Shared request envelope (validated at the client boundary before dispatch).</p>
+<div class="table-scroll"><table><caption>Volcano parameters.</caption>
+<thead><tr><th scope="col">UI control</th><th scope="col">Wire field</th><th scope="col">Unit</th><th scope="col">Valid range (UI · wire · kernel)</th><th scope="col">Default</th><th scope="col">Physical meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Volcanic Explosivity Index <span class="cite">slider</span></td><td><code>vei</code></td><td>VEI int</td><td>UI &amp; wire 0–8</td><td>UI 3 · kernel 3</td><td>Selects the order-of-magnitude mass/lava/ash bin</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:89-101</cite> <cite class="src">src/services/kaggleSim.ts:174</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:143-152</cite></td></tr>
+<tr><td>Wind Speed / Direction <span class="cite">sliders</span></td><td><code>wind_speed_ms</code>, <code>wind_dir_deg</code></td><td>m/s; ° FROM</td><td>UI 0–120 km/h, 0–360; wire 0–60, 0–360</td><td>UI 36 km/h / 260° · kernel 10 / 270</td><td>Ash transport (height-resolved bins)</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:89-101</cite> <cite class="src">src/services/kaggleSim.ts:175-176</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:340-341</cite></td></tr>
+<tr><td>Duration <span class="cite">slider</span></td><td><code>duration_hours</code></td><td>h</td><td>UI 1–168 (overwritten 8·VEI); wire ≤ 720</td><td>UI 48 · kernel 2</td><td>Eruption window (source active first half)</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:89-101</cite> <cite class="src">src/services/kaggleSim.ts:177,617</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:765,923</cite></td></tr>
+<tr><td>Lava Yield Scale <span class="cite">slider</span></td><td><code>yield_scale</code></td><td>multiplier</td><td>UI 0.05–3; wire 0.01–10</td><td>UI 0.3 · kernel 1.0</td><td>Multiplies Bingham τ_y — calibration knob</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:89-101</cite> <cite class="src">src/services/kaggleSim.ts:202</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:100-105,781-782</cite></td></tr>
+<tr><td>Lava Volume Scale <span class="cite">slider</span></td><td><code>mass_scale</code></td><td>multiplier</td><td>UI 0.5–5; wire 0.1–100</td><td>UI 2 · kernel 1.0</td><td>Perturbs erupted mass within the VEI bin (2–5× spread noted)</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:89-101</cite> <cite class="src">src/services/kaggleSim.ts:204</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:768-777</cite></td></tr>
+<tr><td>Ash Particle Diameter <span class="cite">slider</span></td><td><code>ash_particle_diameter_m</code> = µm/1e6</td><td>m</td><td>UI 50–2000 µm; wire 50e-6–2e-3</td><td>UI 316 µm</td><td>Drives terminal settling velocity</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:89-101</cite> <cite class="src">src/services/kaggleSim.ts:189,509</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:896</cite></td></tr>
+<tr><td>Ash Cloud Diffusivity <span class="cite">slider</span></td><td><code>ash_diffusivity_m2_s</code></td><td>m²/s</td><td>UI &amp; wire 10–5000</td><td>UI 500 · kernel 500</td><td>Sub-grid turbulent eddy diffusion</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:89-101</cite> <cite class="src">src/services/kaggleSim.ts:191</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:901</cite></td></tr>
+<tr><td>Wind-Shear Factor <span class="cite">slider</span></td><td><code>ash_wind_shear_factor</code></td><td>fraction</td><td>UI &amp; wire 0–1</td><td>UI 0.5 · kernel 0.5</td><td>Low-level wind fraction of free stream</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:89-101</cite> <cite class="src">src/services/kaggleSim.ts:193</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:902</cite></td></tr>
+<tr><td>Vent (globe click; snapped to crater floor)</td><td><code>vent_frac_x/y</code></td><td>fraction 0–1</td><td>clamped; floor-scan within 1.5 km</td><td>0.5, 0.5</td><td>Column + lava source location</td><td><cite class="src">src/services/kaggleSim.ts:194-200,320-362</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:785-788</cite></td></tr>
+<tr><td>Terrain (required)</td><td><code>terrain(+_gs)</code> / <code>terrain_b64</code></td><td>m above ellipsoid</td><td>must be present or the run raises</td><td>—</td><td>Real sampled relief; NO synthetic fallback</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:800-826</cite></td></tr>
+</tbody></table></div>
+<h2 id="outputs">Outputs</h2>
+<div class="table-scroll"><table><caption>Files written per run (also served by <code>GET /api/kaggle/simulate/:jobId/grid/:name</code> and <code>…/geotiff/:name</code>)</caption>
+<thead><tr><th scope="col">Field</th><th scope="col">Unit</th><th scope="col">Meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td><code>column_height.npy</code></td><td>m</td><td>Ash-column height field (VEI table height × radial decay)</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:1015-1019,1393</cite></td></tr>
+<tr><td><code>ash_deposit.npy</code></td><td>kg/m² (renderer shows mm via bulk ρ 1000 kg/m³)</td><td>Cumulative deposit</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:127-129,1394</cite></td></tr>
+<tr><td><code>ash_column.npy</code></td><td>kg/m²</td><td>Airborne column mass at t_end</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:1395</cite></td></tr>
+<tr><td><code>lava_thickness.npy</code> / <code>lava_temp.npy</code></td><td>m / K</td><td>Lava thickness and temperature</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:1396-1397</cite></td></tr>
+<tr><td><code>terrain.npy</code> + <code>snapshots_column/ash/lava.npy</code> + <code>snapshot_times.npy</code></td><td>m; —; h</td><td>Animation series (up to 60 frames)</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:1398-1411</cite></td></tr>
+<tr><td><code>metadata.json</code></td><td>—</td><td>model/solver/plume/ash strings, settling velocity, plume_height_m, eruption_mass_rate_kg_s</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:1318-1333</cite></td></tr>
+</tbody></table></div>
+<h2 id="spatial-origin">Spatial-origin semantics</h2>
+<p>Square domain; row-major terrain, row 0 = north, metres above ellipsoid (server contract); vent at fractions (x = east, y = south) of the grid; column index increases east, row index south, and transport direction is the met convention +180° (wind FROM → TOWARD). Height-resolved ash bins above the domain. <cite class="src">kaggle-kernels/volcano-sim/main.py:785-798,925-933</cite></p>
+<h2 id="validity">Documented validity limits (verbatim from the code)</h2>
+<blockquote class="verbatim">'Terrain — REAL ONLY. … There is NO synthetic cone fallback: if real relief is absent the run fails fast with a legible error rather than fabricating a cone.' · 'Real eruptions of the SAME VEI bin differ 2–5× in ejected volume (Newhall &amp; Self note the bins are order-of-magnitude).' · 'Stokes law (Cd = 24/Re) is valid only for Re &lt; 0.5; for coarse ash (d ~ 316 µm) Re ≈ 60, so the Schiller–Naumann correction is essential.'<footer><cite class="src">kaggle-kernels/volcano-sim/main.py:37-40,822-826</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:769-773</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:272-276</cite></footer></blockquote>
+<p>Before emitting, main() runs the flat closed-box conservation proof (gs = 64, 2000 steps, tol 1e-3); the suite also carries verify_steep_closed_box (well-balanced + mass on 30° slopes). <cite class="src">kaggle-kernels/volcano-sim/main.py:607-680,1383-1386</cite></p>
+<h2 id="measured">Measured runs and timings</h2>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-08. These are observations of one environment, not performance guarantees.</caption>
+<thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
+<tbody>
+<tr><td>Benchmark suite re-executed 2026-09-08 (run_benchmarks.py)</td><td>4/4 PASS — B1 flat closed-box mass; B2 steep-terrain well-balanced mass; B3 Pinatubo 1991 ash isopach vs observed thickness–distance axes; B4 Kilauea 2018: modelled runout 15.0 km vs observed ~13.5 km, mass budget True, downslope True</td></tr>
+<tr><td>Representative VEI 3 ×2 mass, 12 h, 20 km box on synthetic cone terrain (test input)</td><td>MER 5.56e+5 kg/s; Morton–Taylor plume integrates to 788 m while the VEI table column (10,000 m) drives ash-column height — both reported; ash budget Δ = 7.6e-15 relative, lava mass Δ = 0.0; wall 70.6 s at 156 m cells (crater pooling at this coarse resolution)</td></tr>
+<tr><td>Boundary VEI 5, 800 µm ash, K = 1000, shear 0.8, 96² / 40 km</td><td>MER 2.22e8 kg/s; M-T plume 27,920 m (table 40,000 m); v_t(800 µm) = 3.17 m/s; both budgets PASS (Δ ≤ 2e-14); wall 3.6 s</td></tr>
+<tr><td>Output limitation</td><td>main() writes to /kaggle/working unconditionally — local calibration/Monte-Carlo instead imports simulate_volcano() in-process via localRunner.ts; standalone local main.py runs reach the final budgets but fail at the write step (observed: Read-only file system '/kaggle')</td></tr>
+<tr><td>Kaggle job transport</td><td>VERIFIED BY CODE INSPECTION ONLY</td></tr>
+</tbody></table></div>
+<h2 id="reproduction">Reproduction</h2>
+<h3 id="repro-cmd">Commands</h3>
+<pre><code># The regression gate the docs cite (fast, in-process):
+cd &lt;repo&gt;/kaggle-kernels/volcano-sim/benchmarks &amp;&amp; python3 run_benchmarks.py
+# → 'RESULT: 4/4 benchmarks passed'
+
+# Server-side ensemble (no Kaggle token needed):
+curl -s -X POST http://localhost:3001/api/kaggle/volcano/quantify \
+  -H 'Content-Type: application/json' -d '{ &quot;request&quot;: {…volcanic_eruption params with terrain…}, &quot;samples&quot;: 16 }'</code></pre>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

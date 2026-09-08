@@ -1,0 +1,42 @@
+# ═══════════════════════════════════════════════════════════════════════
+# Documentation quality gate — links, anchors, page metadata, citations,
+# vocabulary, sitemap and build drift. Serves from docs/ via GitHub Pages.
+# ═══════════════════════════════════════════════════════════════════════
+name: Docs Quality Gate
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'docs/**'
+      - 'scripts/docs/**'
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'docs/**'
+      - 'scripts/docs/**'
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+
+permissions:
+  contents: read
+
+jobs:
+  docs-gate:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build drift check (generated pages must match scripts/docs specs)
+        run: node scripts/docs/build.mjs --check
+      - name: Quality gate (links, anchors, metadata, citations, vocabulary, sitemap)
+        run: node scripts/docs/quality-gate.mjs

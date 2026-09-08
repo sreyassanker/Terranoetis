@@ -1,6 +1,8 @@
 # Backend
 
-The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via `tsx`), exposing **360+ REST endpoints** and a WebSocket channel. It coordinates live data ingestion, the 150-equation analytical engine, AI cognition, realtime services, and persistent state.
+The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via `tsx`), exposing **360+ REST endpoints** (371 route registrations counted 2026-09-08) and a WebSocket channel.
+
+> Site view with per-module citations: [Platform services](capabilities/platform-services.html) · [Live data & monitoring](capabilities/live-data-and-monitoring.html) · [AI cognition](capabilities/ai-cognition.html). It coordinates live data ingestion, the 150-equation analytical engine, AI cognition, realtime services, and persistent state.
 
 ---
 
@@ -41,7 +43,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 | `mcp.ts` | Model Context Protocol integration |
 | `websocket.ts` | WebSocket server for live data + agent relay |
 | `voiceRealtime.ts` | Realtime voice bridge (OpenAI Realtime → Gemini Live) |
-| `pubsub.ts` | Publish/subscribe message bus |
+| `pubsub.ts` | Publish/subscribe message bus (in-process EventEmitter — not Redis) |
 | `monitor.ts` | Runtime monitor |
 | `selfImprover.ts` / `selfImproverV2.ts` | Feedback-driven self-improvement (response evaluation, drift detection, prompt evolution) |
 | `costOptimizer.ts` | LLM cost optimization |
@@ -64,7 +66,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 | `sentinel/` | Continuous monitoring: stream processor, anomaly detector, correlation engine, alert intelligence, ambient/proactive insights |
 | `memory/` + `memoryV2/` | Working / episodic / semantic / procedural / predictive memory, sensory buffer, Redis adapter |
 | `scenarios/` | Scenario generation (single + batch), simulators, scenario DB |
-| `sandboxV2/` | Simulation engines: FARSITE, ADCIRC, WRF, HYSPLIT, FNO surrogate |
+| `sandboxV2/` | Simplified surrogate engines (`farsiteLite`, `adcircLite`, `wrfLite`, `hysplitLite`, FNO) — not the operational models of the same names |
 | `world-model/` | Causal graph, ensemble predictor, physics NN, prediction validator, scenario simulator |
 | `causal/` | Causal reasoning: KG, discovery engine, entropy mixer, Python microservice (DoWhy) |
 | `kgV2/` | Knowledge graph v2: entity/edge generation, graph completion, counterfactual, evolving graph |
@@ -142,7 +144,7 @@ Primary store. Schema is defined in `server/db/schema.sql` (47 tables) and appli
 
 ### Redis (`ioredis`)
 
-Caching, session state, WebSocket pub/sub, and queueing. The server **gracefully degrades** to SQLite when Redis is unreachable — memory and caching tiers fall back automatically.
+Optional caching and the sensory/working memory hot path. The server **gracefully degrades** to SQLite when Redis is unreachable — memory and caching tiers fall back automatically. WebSocket/SSE delivery uses the in-process event bus, not Redis pub/sub.
 
 ---
 

@@ -156,12 +156,12 @@ The `.env` file configures 100+ variables covering 70+ integrated services (see 
 | Weather & Disaster | USGS, NASA EONET, GDACS, NOAA, OpenAQ, WAQI, Windy |
 | Economic & Financial | FRED, EIA, Alpha Vantage, ENTSO-E, UN Comtrade, IMF, GoldAPI |
 | Search & Scraping | Brave Search, Exa, Firecrawl, Guardian, NewsAPI |
-| Kaggle GPU Simulations | Kaggle API token at `~/.kaggle/kaggle.json` (see below), `KAGGLE_BIN`, `KAGGLE_POLL_INTERVAL_MS`, `KAGGLE_POST_PUSH_SETTLE_MS`, `KAGGLE_STALE_ERROR_GRACE_MS`. Optional — the 3 local CPU scenarios need none of it. |
+| Kaggle simulation kernels | Kaggle API token at `~/.kaggle/kaggle.json` (see below), `KAGGLE_BIN`, `KAGGLE_POLL_INTERVAL_MS`, `KAGGLE_POST_PUSH_SETTLE_MS`, `KAGGLE_STALE_ERROR_GRACE_MS`. Optional — the 3 local CPU scenarios need none of it. |
 | Other | Telegram, Resend, ACLED, Cloudflare Radar, AbuseIPDB, AlienVault OTX, Gmail SMTP |
 
-### Kaggle GPU Simulations (optional setup)
+### Kaggle simulation kernels (optional setup)
 
-Four physics simulations (tsunami, volcano, landslide, flood) run as Kaggle GPU kernels. The three 2D scenarios — earthquake, wildfire, and hurricane — finish in seconds on a laptop CPU and run **locally via `python3`** (see `server/kaggle/simRunner.ts`), so they work without any token. To enable the GPU kernels:
+Four physics simulations (tsunami, volcano, landslide, flood) are dispatched to **Kaggle kernels** as their execution venue. All kernels are NumPy CPU code (no GPU imports); only flood-sim requests Kaggle's GPU accelerator in its kernel metadata, so “GPU kernels” is a hosting term here, not a compute claim (verified 2026-09-08 — see [modes table](capabilities/hazard-simulations.html#modes)). The three 2D scenarios — earthquake, wildfire, and hurricane — finish in seconds on a laptop CPU and run **locally via `python3`** (see `server/kaggle/simRunner.ts`; measured end-to-end job completion of 166 ms for the earthquake kernel), so they work without any token. To enable the Kaggle-routed kernels:
 
 1. Create a token at **https://www.kaggle.com/settings/account** → *Create New Token* (requires an account with phone verification).
 2. Save the downloaded `kaggle.json` as **`~/.kaggle/kaggle.json`** and restrict permissions:
@@ -170,7 +170,7 @@ Four physics simulations (tsunami, volcano, landslide, flood) run as Kaggle GPU 
    ```
 3. Install the Kaggle CLI (`pip install kaggle`), or point `KAGGLE_BIN` at its path.
 
-The simulation runner reads credentials exclusively from `~/.kaggle` (`KAGGLE_CONFIG_DIR`, see `server/kaggle/simRunner.ts`) — **never from the repository**, so no secrets are ever committed. Without a token, the 4 GPU simulation features disable gracefully while the 3 local CPU scenarios (earthquake, wildfire, hurricane) and the analytical engine keep working.
+The simulation runner reads credentials exclusively from `~/.kaggle` (`KAGGLE_CONFIG_DIR`, see `server/kaggle/simRunner.ts`) — **never from the repository**, so no secrets are ever committed. Without a token, the 4 Kaggle-routed simulations disable gracefully while the 3 local CPU scenarios (earthquake, wildfire, hurricane) and the analytical engine keep working.
 
 ---
 
@@ -188,12 +188,14 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) runs the following on e
 | Build | `npm run build` (tsc -b + vite build) |
 | Docker Build | Docker build verification |
 | Security Audit | `npm audit` |
+| Docs Gate (docs.yml) | `node scripts/docs/build.mjs --check` (build drift) + `node scripts/docs/quality-gate.mjs` (links, anchors, page metadata, file:line citations, marketing-vocabulary ban) |
 | Browser Tests | Playwright — headless Chromium with software WebGL (SwiftShader) |
 | Summary | Aggregates job results into a single CI status comment |
 
 ### CI Notes
 
-- **Node version:** 20 (specified in workflow and `.nvmrc`)
+- **Node version:** 20 (specified in workflow and `.nvmrc`; the 2026-09-08 verification pass ran Node 26 with 1,653 unit + 49 integration tests passing)
+- **Docs quality gate:** `.github/workflows/docs.yml` runs on every push/PR touching `docs/**` or `scripts/docs/**`
 - **Browser tests** run headless in CI on `ubuntu-latest` using Chromium with software WebGL (`--use-gl=angle --enable-unsafe-swiftshader`), so no physical display/GPU is required. They are still the most environment-sensitive job and can be flaky.
 - **Redis** is optional in both development and CI (the server falls back to SQLite gracefully)
 - **Docker Compose** is recommended for production

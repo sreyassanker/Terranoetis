@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hazard simulations — overview &amp; architecture — Terranoetis Documentation</title>
+<meta name="description" content="How the seven disaster-physics kernels are structured: the zod request/contract layer, local-CPU vs Kaggle execution, job lifecycle, output formats, UQ endpoints.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/hazard-simulations.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Hazard simulations — overview &amp; architecture — Terranoetis Documentation">
+<meta property="og:description" content="How the seven disaster-physics kernels are structured: the zod request/contract layer, local-CPU vs Kaggle execution, job lifecycle, output formats, UQ endpoints.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/hazard-simulations.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html" aria-current="page">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html" aria-current="true">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">Hazard simulations</li>
+      </ol></nav>
+      <h1>Hazard simulations — overview &amp; architecture</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">ALL 7 KERNELS EXECUTED LOCALLY</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/hazard-simulations.md">capabilities/hazard-simulations.md — narrative (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#layers">Layers</a></li>
+<li><a href="#modes">Execution modes (verified)</a></li>
+<li><a href="#lifecycle">Job lifecycle</a></li>
+<li><a href="#data-bridges">Real-data bridges feeding kernels</a></li>
+<li><a href="#uq">Calibration & uncertainty endpoints</a></li>
+<li><a href="#pages">Capability pages</a></li>
+      </ul></nav>
+      <p>Seven disaster scenarios share one pipeline: the client builds a typed request through a zod discriminated-union contract whose bounds mirror the kernels’ own validity checks; the server either executes the kernel locally (<code>python3</code>) or pushes it to Kaggle; results land in a uniform <code>results/&lt;jobId&gt;/</code> directory of NumPy grids + metadata.json and stream back over SSE.</p>
+<h2 id="layers">Layers</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Layer</th><th scope="col">File</th><th scope="col">Responsibility</th></tr></thead>
+<tbody>
+<tr><td>Contract</td><td><code>SimulationRequestSchema</code> (7 branches)</td><td>fail-fast validation; missing values throw instead of being fabricated — the builder explicitly forbids the old <code>Number(x) || default</code> pattern <cite class="src">src/services/kaggleSim.ts:28-240,381-415</cite></td></tr>
+<tr><td>Geometry</td><td>bbox → centre/extent/fractions</td><td>square domain from the drawn box; vent/epicentre/landfall as 0–1 grid fractions; crater-floor snapping <cite class="src">src/services/kaggleSim.ts:246-362</cite></td></tr>
+<tr><td>Form physics</td><td><code>derivePhysicsFormOverrides</code></td><td>UI-side derived defaults computed from user inputs (e.g. Cat→pressure/radius; hidden tsunami displacement) <cite class="src">src/services/kaggleSim.ts:589-669</cite></td></tr>
+<tr><td>Transport</td><td>submit / SSE / poll / results / cancel</td><td><cite class="src">src/services/kaggleSim.ts:549-577</cite></td></tr>
+<tr><td>Runner</td><td>simRunner.ts</td><td>route local vs Kaggle, param compaction (terrain→uint16 base64), GEBCO/land-cover auto-sampling <cite class="src">server/kaggle/simRunner.ts:126-215,456-495,520-640</cite></td></tr>
+<tr><td>Scientific endpoints</td><td>routes.ts</td><td>calibrate (μ×ξ grid), Monte-Carlo quantify, GeoTIFF export <cite class="src">server/kaggle/routes.ts:263-810</cite></td></tr>
+</tbody></table></div>
+<h2 id="modes">Execution modes (verified)</h2>
+<div class="table-scroll"><table><caption>LOCAL_SIM_TYPES = earthquake_swarm, wildfire_spread, hurricane_landfall run under python3 locally; the rest push to Kaggle. Sources: <cite class="src">server/kaggle/simRunner.ts:126-141</cite> <cite class="src">server/kaggle/localRunner.ts:1-15</cite> kaggle-kernels/*/kernel-metadata.json; grep of cupy|cuda across all main.py: 0 hits. Correction carried: “Kaggle GPU kernels” describes where they run, not what they use — only flood-sim requests the accelerator and its code is NumPy-only.</caption>
+<thead><tr><th scope="col">Kernel</th><th scope="col">Mode</th><th scope="col">GPU code?</th><th scope="col">Metadata enable_gpu</th><th scope="col">Physics executed in this review</th><th scope="col">Transport executed?</th></tr></thead>
+<tbody>
+<tr><td>earthquake-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct + HTTP e2e</span></td><td>n/a</td></tr>
+<tr><td>fire-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct ×4</span></td><td>n/a</td></tr>
+<tr><td>hurricane-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct ×3</span></td><td>n/a</td></tr>
+<tr><td>flood-sim</td><td>Kaggle</td><td>no</td><td>true</td><td><span class="tag tag-measured">MEASURED — solver + gates via python3</span></td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
+<tr><td>tsunami-sim</td><td>Kaggle</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — in-process solver incl. real GEBCO</span></td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
+<tr><td>volcano-sim</td><td>Kaggle + local in-process (UQ/calibration)</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — benchmarks 4/4 PASS</span></td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
+<tr><td>landslide-sim</td><td>Kaggle + local in-process (UQ/calibration)</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — convergence PASS</span></td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
+</tbody></table></div>
+<h2 id="lifecycle">Job lifecycle</h2>
+<ol><li><code>POST /api/kaggle/simulate</code> → <code>{jobId, status, streamUrl}</code> (HTTP 400 on missing type/lat/lon or unknown type) — <cite class="src">server/kaggle/routes.ts:164-201</cite></li>
+<li>States: <code>queued → running → complete | error</code> (cancel → “cancelling”, local SIGKILL after <code>LOCAL_SIM_TIMEOUT_MS</code> default 120 s) — <cite class="src">server/kaggle/simRunner.ts:status transitions + 134</cite></li>
+<li>Progress: SSE <code>/stream</code> with detail strings — local: “Running locally (2D kernel, CPU)…”, “Done locally”; Kaggle: “Uploading to Kaggle GPU…”, “Kernel pushed. Kaggle GPU booting…” — <cite class="src">server/kaggle/simRunner.ts:169,204,927-929</cite> <cite class="src">server/kaggle/routes.ts:225</cite></li>
+<li>Results: <code>/results</code> (metadata + final stats), <code>/grid/:name</code> (npy bytes or JSON ≤ 5M elements), <code>/geotiff/:name</code> (WGS84 GeoTIFF), <code>/jobs</code>, <code>/kernels</code> — <cite class="src">server/kaggle/routes.ts:245-442</cite></li>
+<li>Measured e2e latency (local quake): submit → complete in 166 ms (server-side timestamps sim_44d5c7d7).</li></ol>
+<h2 id="data-bridges">Real-data bridges feeding kernels</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Bridge</th><th scope="col">Source</th><th scope="col">Feeds</th></tr></thead>
+<tbody>
+<tr><td>Terrain</td><td>Cesium globe sampling (256² on the run path; median-fill, retry ×3; null → kernel synthetic)</td><td><cite class="src">src/components/scenarios/studyAreaTerrain.ts:5-149</cite> <cite class="src">src/lib/terrainSampler.ts:3-31</cite></td></tr>
+<tr><td>Bathymetry</td><td>GEBCO 2020 via api.opentopodata.org (64² sample, uint16-quantized)</td><td><cite class="src">server/kaggle/bathymetry.ts:10-40</cite></td></tr>
+<tr><td>Land cover</td><td>ESA WorldCover v200 → per-cell Manning n</td><td><cite class="src">server/kaggle/landCover.ts:module</cite> <cite class="src">kaggle-kernels/flood-sim/main.py:61-84</cite></td></tr>
+<tr><td>Wind profiles</td><td>ERA5-derived (volcano ash bins)</td><td><cite class="src">server/kaggle/era5Profile.ts:module</cite> <cite class="src">kaggle-kernels/volcano-sim/main.py:300-330</cite></td></tr>
+</tbody></table></div>
+<h2 id="uq">Calibration & uncertainty endpoints</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Endpoint</th><th scope="col">What it does</th><th scope="col">Execution</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>POST /api/kaggle/calibrate</td><td>μ×ξ grid search fit to an observed landslide runout (grid {0.15…0.40}×{100…800})</td><td>local python3, in-process kernel import</td><td><cite class="src">server/kaggle/routes.ts:479</cite> <cite class="src">kaggle-kernels/landslide-sim/calibrate.py:24-25</cite></td></tr>
+<tr><td>POST /api/kaggle/landslide/quantify</td><td>N-sample Monte-Carlo depth maps (mean/min/max/exceedance) + summary percentiles</td><td>local python3</td><td><cite class="src">server/kaggle/routes.ts:541</cite> <cite class="src">server/kaggle/localRunner.ts:36-60</cite></td></tr>
+<tr><td>POST /api/kaggle/volcano/calibrate</td><td>yield_scale sweep vs observed lava runout</td><td>local python3</td><td><cite class="src">server/kaggle/routes.ts:611</cite></td></tr>
+<tr><td>POST /api/kaggle/volcano/quantify</td><td>16-member ensemble (ash/lava P5/P50/P95 + plume stats)</td><td>local python3</td><td><cite class="src">server/kaggle/routes.ts:690</cite> <cite class="src">server/kaggle/localRunner.ts:62-92</cite></td></tr>
+<tr><td>GET /api/kaggle/volcano/profile</td><td>real wind-profile sampling for a box</td><td>server</td><td><cite class="src">server/kaggle/routes.ts:47</cite></td></tr>
+</tbody></table></div>
+<div class="callout callout-caution" role="note"><div class="callout-title">Kernel honesty notes carried from source</div><p>Kernels refuse fabricated context: tsunami requires real GEBCO (synthetic fallback disabled) <cite class="src">kaggle-kernels/tsunami-sim/main.py:227-230</cite>; volcano requires real terrain <cite class="src">kaggle-kernels/volcano-sim/main.py:821-826</cite>; the wire builder throws rather than substituting missing numbers <cite class="src">src/services/kaggleSim.ts:390-415</cite>. The solver gates (GMPE sanity, hurricane physics, mass-conservation proofs) abort emission on failure — see each page.</p></div>
+<h2 id="pages">Capability pages</h2>
+<div class="card-grid"><div class="card"><a href="earthquake.html">Earthquake ground motion</a><p>BSSA14 GMPE · measured 0.008 s compute, 166 ms e2e job</p></div>
+<div class="card"><a href="tsunami.html">Tsunami propagation</a><p>HLL/minmod SWE · measured flat-bed stability + sloped-bed instability</p></div>
+<div class="card"><a href="volcano.html">Volcanic eruption</a><p>Lava + plume + ash · benchmarks 4/4 PASS measured</p></div>
+<div class="card"><a href="landslide.html">Landslide debris flow</a><p>Voellmy–Salm · convergence gates PASS measured</p></div>
+<div class="card"><a href="flood.html">Flood inundation</a><p>Local-inertial SWE · mass closure 0.0000 % measured</p></div>
+<div class="card"><a href="hurricane.html">Hurricane landfall</a><p>Holland + surge + waves + rain + runoff · gates PASS measured</p></div>
+<div class="card"><a href="wildfire.html">Wildfire spread</a><p>Rothermel + Anderson-13 · calibration PASS measured</p></div></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

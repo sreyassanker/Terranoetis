@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REST &amp; WebSocket API — Terranoetis Documentation</title>
+<meta name="description" content="API surface map: auth model, endpoint groups, realtime transports, error envelope and the live OpenAPI document.">
+<link rel="canonical" href="https://terranoetis.com/reference/api.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="REST &amp; WebSocket API — Terranoetis Documentation">
+<meta property="og:description" content="API surface map: auth model, endpoint groups, realtime transports, error envelope and the live OpenAPI document.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/reference/api.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html" aria-current="page">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html" aria-current="true">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../reference/api.html">Reference</a></li>
+<li aria-current="page">REST &amp; WebSocket API</li>
+      </ol></nav>
+      <h1>REST &amp; WebSocket API</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span> (endpoint map read from route registrations; complete list in API.md)</span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../API.md">API.md — the full endpoint table (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#groups">Endpoint groups</a></li>
+<li><a href="#realtime">Realtime transports</a></li>
+      </ul></nav>
+      <p>The API is Express 4 mounted at <code>/api</code> with JWT bearer auth (RBAC via <code>authGuard</code>/<code>requireRole</code>), in-process IP + per-user rate limiting, zod validation and a canonical <code>{error:{code,message}}</code> envelope. A public allow-list covers health/metrics/config/OpenAPI plus the read-only live-data routes (300 req/min/IP); everything else requires a token. <cite class="src">server/index.ts:373-487</cite></p>
+<dl class="metrics"><dt>Route registrations (measured)</dt><dd>371 handler registrations (<code>app.get/post/put/delete</code> + router verbs) under server/ — grep count 2026-09-08; API.md headline “360+” is consistent</dd>
+<dt>Auth</dt><dd>JWT TTL 1 h prod / 1 d dev · scrypt (N=16384, r=8, p=1) · login 5/15 min + 10-attempt lockout (HTTP 423)</dd>
+<dt>Errors</dt><dd>400 validation · 401 token · 403 role · 404 · 409 job-not-ready · 413 body-too-large · 423 locked · 429 limited · 500</dd>
+<dt>OpenAPI</dt><dd>GET /api/openapi.json (generated) + /api/docs UI</dd></dl>
+<h2 id="groups">Endpoint groups</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Group</th><th scope="col">Prefix / examples</th><th scope="col">Notes</th></tr></thead>
+<tbody>
+<tr><td>Authentication</td><td><code>POST /api/auth/login · dev-login · refresh</code></td><td>dev-login returns 404 in production</td></tr>
+<tr><td>Agent & cognition</td><td><code>POST /api/agent/ask (SSE) · cognize · pipeline · plan · approve · feedback · tiers · models · trace/:id</code></td><td>see <a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></td></tr>
+<tr><td>Analytical models</td><td><code>GET /api/analytical-models · /search · /:id</code> · <code>POST /api/analytical-models/:id/execute[-internal]</code></td><td>execute-internal is loopback-only (agent path) <cite class="src">server/index.ts:316-371</cite></td></tr>
+<tr><td>Simulation jobs</td><td><code>/api/kaggle/simulate · :id/stream · :id/results · :id/grid/:name · :id/geotiff/:name · /calibrate · /landslide/quantify · /volcano/*</code></td><td>full contract: <a href="simulation-api.html">Simulation job API</a></td></tr>
+<tr><td>Live data</td><td><code>/api/earthquakes · /weather/* · /flights · /ais · /satellites/* · /firms · /eonet · /gdacs · /space-weather/* …</code></td><td>keyless sources public; per-source metadata in server/apiMetadata.ts</td></tr>
+<tr><td>Scenarios & sandbox</td><td><code>/api/scenarios/* · /api/sandbox/* · /api/simulate/*</code></td><td>scenario generation + sandboxed code execution</td></tr>
+<tr><td>Intelligence & pulse</td><td><code>/api/pulse/* · /api/correlation/* · economic feeds</code></td><td>market/energy/geopolitical panels</td></tr>
+<tr><td>Memory & knowledge</td><td><code>/api/memory/* · /api/causal-graph · /api/kgV2/* · /api/predict/*</code></td><td>tiers, graph, forecast scoring</td></tr>
+<tr><td>Explainability</td><td><code>/api/explain/*</code></td><td>traces, evidence, bias audits, human-override queue</td></tr>
+<tr><td>Admin & ops</td><td><code>/api/admin/* · /api/metrics · /api/health · /api/ready · /api/live</code></td><td>plugins, GGUF model manager, audit logs</td></tr>
+</tbody></table></div>
+<h2 id="realtime">Realtime transports</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Transport</th><th scope="col">Endpoint</th><th scope="col">Auth</th><th scope="col">Content</th></tr></thead>
+<tbody>
+<tr><td>WebSocket</td><td><code>/ws/agent</code></td><td>JWT via Sec-WebSocket-Protocol (fallback <code>?token=</code>)</td><td>entity updates, agent relay, presence, alert/fork channels (allow-list) <cite class="src">server/websocket.ts:18-20,90-105</cite></td></tr>
+<tr><td>WebSocket</td><td><code>/ws/voice</code></td><td>same</td><td>brokered OpenAI Realtime ⇄ Gemini Live audio bridge (PCM16 24 kHz) <cite class="src">server/voiceRealtime.ts:24-27</cite></td></tr>
+<tr><td>SSE</td><td><code>/api/agent/ask</code></td><td>authGuard</td><td>chat tokens + tool events; 15 s heartbeats; hard 150 s cap</td></tr>
+<tr><td>SSE</td><td><code>/api/kaggle/simulate/:id/stream</code></td><td>public prefix</td><td>job status/progress <cite class="src">server/kaggle/routes.ts:225</cite></td></tr>
+<tr><td>SSE</td><td><code>/api/social/stream · /api/agent/events</code></td><td><code>?token=</code> (sseAuthGuard)</td><td>event relays; /agent/events deprecated in favour of WS <cite class="src">server/middleware/auth.ts:205-233</cite></td></tr>
+</tbody></table></div>
+<p>The complete per-endpoint table lives in <a href="../API.md">API.md</a>; a machine-readable schema is served at <code>/api/openapi.json</code>. This page intentionally does not duplicate it.</p>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

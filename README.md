@@ -18,9 +18,9 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 
 ## Highlights
 
-- **150 analytical models grounded in primary literature** across 26 domains — every equation cites its source paper, book, or standard (82 with resolvable DOIs; pre-DOI classics explicitly flagged) ([details](docs/MODELS.md))
+- **150 analytical models grounded in primary literature** across 26 domains — every equation cites its source paper, book, or standard (80 references carry a DOI, 12 an ISBN, 4 are flagged NO-DOI; 66 source PDFs archived under `docs/Research papers/`) ([catalog](docs/MODELS.md) · [verified engine page](docs/capabilities/analytical-engine.html))
 - **Photorealistic CesiumJS 3D globe** with 41 rendering modules, satellite imagery, and sensor styles
-- **7 physics simulations** — 3 run locally on CPU (earthquake, wildfire, hurricane), 4 on free Kaggle GPU kernels (tsunami, volcano, landslide, flood)
+- **7 physics simulations** — 3 run locally on CPU (earthquake, wildfire, hurricane); 4 execute on free Kaggle kernels (tsunami, volcano, landslide, flood). All kernels are NumPy/CPU code; only flood-sim requests Kaggle's GPU accelerator in its metadata ([verified modes table](docs/capabilities/hazard-simulations.html#modes))
 - **AI cognition** — System 1 / System 2 reasoning, multi-agent debate, causal + counterfactual analysis
 - **30+ live data feeds** — seismic, weather, aviation, maritime, satellite, traffic, space
 - **Realtime voice** — OpenAI Realtime → Gemini Live (server-side brokering)
@@ -75,10 +75,16 @@ npm run dev             # Vite (3000) + Express API (3001); Redis optional
 |---|---|
 | [Architecture](docs/ARCHITECTURE.md) | System topology, request flow, background services, module inventory |
 | [API Reference](docs/API.md) | 360+ REST endpoints + WebSocket channel |
-| [Frontend](docs/FRONTEND.md) | React components, rendering engine, Kaggle GPU overlays, hooks |
+| [Frontend](docs/FRONTEND.md) | React components, rendering engine, simulation overlays, hooks |
 | [Backend](docs/BACKEND.md) | Server modules, cognition, memory, security, observability |
 | [Analytical Models](docs/MODELS.md) | The 150 equation engines, 7 parts, 26 domains |
 | [Deployment](docs/DEPLOYMENT.md) | Docker, environment variables, Kaggle token setup, CI/CD, security |
+
+The rendered documentation site (GitHub Pages, from `docs/`) adds per-capability pages with
+file-level citations, measured verification data and a quality gate:
+start at **[docs/index.html](docs/index.html)** → [Getting started](docs/getting-started.html) ·
+[Hazard simulations](docs/capabilities/hazard-simulations.html) ·
+[Methodology & verification](docs/methodology.html).
 
 ---
 
@@ -100,13 +106,12 @@ terranoetis/
 ├── server/                       # Express 4 + TypeScript API
 │   ├── index.ts                  # App entry: routes, middleware, background services (~13.8k lines)
 │   ├── agent.ts                  # Intent router + cognition pipeline
-│   ├── analytical-models/        # 150 equations, 7 parts, 26 domains
+│   ├── analytical-models/        # 150-equation engine, 7 parts, 26 domains
 │   ├── cognition/                # System 1 / System 2, MCTS, tree-of-thoughts
 │   ├── sentinel/                 # Continuous monitoring, anomaly detection
 │   ├── memory/ + memoryV2/       # Working/episodic/semantic/procedural memory
 │   ├── ai-router/                # Omninet 9-provider LLM router (incl. local GGUF)
-│   ├── digitalTwin/              # Regional analysis pipeline
-│   ├── sandboxV2/                # Simulation engines (FARSITE, ADCIRC, WRF, HYSPLIT)
+│   ├── sandboxV2/                # Simplified surrogate engines (farsiteLite, adcircLite, wrfLite, hysplitLite, FNO)
 │   ├── causal/ + kgV2/           # Causal reasoning + knowledge graph
 │   ├── scenarios/                # Disaster scenario generation
 │   ├── data/                     # 30+ live data fetchers
@@ -114,24 +119,21 @@ terranoetis/
 │   ├── middleware/               # JWT auth, rate limiter, validation, audit
 │   ├── observability/            # Pino, OpenTelemetry, Sentry
 │   ├── selfImprover.ts           # Feedback-driven prompt evolution
-│   └── __tests__/                # 1,600+ unit + integration tests
+│   └── __tests__/                # 1,700+ tests (1,653 unit + 49 integration passing, measured 2026-09-08)
 │
-├── kaggle-kernels/               # 7 Python physics simulations (earthquake, tsunami, volcano, ...)
+├── kaggle-kernels/               # 7 NumPy physics kernels pushed locally or to Kaggle (earthquake, tsunami, ...)
 ├── server/plugins/               # Plugin system: install from URL / GitHub / raw code / zip
-├── docs/                         # Topic-specific documentation
-│   ├── ARCHITECTURE.md
-│   ├── API.md
-│   ├── FRONTEND.md
-│   ├── BACKEND.md
-│   ├── MODELS.md
-│   ├── DEPLOYMENT.md
-│   ├── index.html                # Docs site entry (redirects to platform-overview.html)
-│   ├── platform-overview.html    # Standalone project landing page
-│   └── Research papers/          # Source PDFs for the equation catalog
+├── docs/                         # Documentation site (GitHub Pages) + Markdown sources of truth
+│   ├── index.html                # Docs landing (generated from scripts/docs/)
+│   ├── capabilities/             # Per-capability pages + prose (hazards, engine, cognition, …)
+│   ├── reference/ · methodology.html · deployment.html · governance/
+│   ├── ARCHITECTURE.md · API.md · FRONTEND.md · BACKEND.md · MODELS.md · DEPLOYMENT.md
+│   ├── platform-overview.html    # Legacy URL — redirects to the docs index
+│   └── Research papers/          # 66 source PDFs for the equation catalog
 │
-├── e2e/                          # Playwright browser tests (7 specs, 12 tests)
+├── e2e/                          # Playwright browser tests (7 spec files, 38 test declarations)
 ├── gifs/                         # README gallery captures
-├── scripts/                      # Dev utilities + legacy test scripts
+├── scripts/                      # Dev utilities, live smoke scripts, docs build + quality gate
 ├── data/                         # Runtime databases + ML models
 ├── models/                       # Local GGUF model (downloadable from admin panel) → gitignored
 ├── public/                       # Static assets (Cesium, DuckDB-WASM, fonts, models)

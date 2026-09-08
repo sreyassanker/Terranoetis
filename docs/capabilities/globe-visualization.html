@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D globe visualization — Terranoetis Documentation</title>
+<meta name="description" content="React 19 + Cesium 1.140 client: App shell with 11 lazy panels, 41 rendering modules, simulation overlays, sensor styles and cinematic cameras.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/globe-visualization.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="3D globe visualization — Terranoetis Documentation">
+<meta property="og:description" content="React 19 + Cesium 1.140 client: App shell with 11 lazy panels, 41 rendering modules, simulation overlays, sensor styles and cinematic cameras.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/globe-visualization.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html" aria-current="true">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">3D globe visualization</li>
+      </ol></nav>
+      <h1>3D globe visualization</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">COUNTS MEASURED</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/globe-visualization.md">capabilities/globe-visualization.md — narrative (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#overlays">Simulation overlays</a></li>
+<li><a href="#panels">Interface surfaces (excerpt from FRONTEND.md)</a></li>
+      </ul></nav>
+      <p>The client renders live data and simulation outputs on a WebGL globe. “GPU” in this layer refers to rendering primitives (PostProcessStage shaders, custom Cesium Primitives) — not to GPU compute in the simulation kernels.</p>
+<div class="table-scroll"><table><caption>Verified counts (methods stated in captions)</caption>
+<thead><tr><th scope="col">Item</th><th scope="col">Value</th><th scope="col">Verification</th></tr></thead>
+<tbody>
+<tr><td>Rendering modules in src/rendering/</td><td>41 TS modules</td><td>file count excluding .DS_Store and shpjs.d.ts declaration (2026-09-08)</td></tr>
+<tr><td>Lazy panels in App.tsx</td><td>11 (const Lazy…Panel = lazy(...))</td><td>grep count <cite class="src">src/App.tsx:135-145</cite></td></tr>
+<tr><td>App shell size</td><td>11,038 lines</td><td>wc -l src/App.tsx</td></tr>
+<tr><td>Routes</td><td>/ · /v2/globe · /v2/canvas · /v2/scenarios · /v2/tours</td><td><cite class="src">src/main.tsx:22-26</cite></td></tr>
+<tr><td>Cesium version</td><td>1.140</td><td><code>package.json dependencies.cesium</code></td></tr>
+<tr><td>Photorealistic tiles</td><td>Google 3D Tiles, Cesium Ion asset 2275207 (needs token)</td><td><cite class="src">src/rendering/photorealisticGlobe.ts</cite></td></tr>
+<tr><td>Sensor looks</td><td>CRT · NVG · FLIR · Noir · Snow via PostProcessStage GLSL</td><td><cite class="src">src/rendering/sensorStyles.ts</cite></td></tr>
+</tbody></table></div>
+<h2 id="overlays">Simulation overlays</h2>
+<p>Each hazard kernel result lands on the globe through <code>src/components/kaggle/</code>: a generic scalar raster overlay (colormap + legend + animation timeline) plus per-hazard wrappers (PGA/PGV/MMI/Sa · water depth · wind+surge+rainfall · debris depth/velocity/runout · wave height+bathymetry · ash+lava · fire intensity/state). GPU primitives (<code>ScalarSurfacePrimitive</code>, <code>ArrowFieldPrimitive</code>, <code>ParticleAdvector</code>) handle field rendering; “honest 2D mode” flat-drapes fields when terrain is unavailable <cite class="src">src/components/kaggle/KaggleScalarOverlay.tsx:105-112</cite>.</p>
+<h2 id="panels">Interface surfaces (excerpt from FRONTEND.md)</h2>
+<ul><li>Chat (11 components: SSE streaming, tool approval cards, model tier selector, study-area prompts)</li>
+<li>Cockpit (memory graph, settings: cognitive bias, alerts, providers, privacy)</li>
+<li>Trackers (aviation, satellite TLE), DuckDB-WASM analytics workbench (7 live layers), Market Intel (8 tabs)</li>
+<li>Scenario studio (editor, gallery, cinematic director, per-hazard visualizers; origin points pinned by globe click)</li>
+<li>Collaboration presence (cursors/typing) over /ws/agent; realtime voice via /ws/voice</li></ul>
+<p>Component tables and line counts: <a href="../FRONTEND.md">FRONTEND.md</a> (source of truth, corrected 2026-09-08).</p>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

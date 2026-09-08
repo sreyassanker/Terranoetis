@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tsunami propagation (finite-volume SWE, HLL + minmod) — Terranoetis Documentation</title>
+<meta name="description" content="Okada-style dislocation source over real GEBCO 2020 bathymetry with a nonlinear shallow-water HLL/minmod finite-volume solver. Includes this review's measured flat-bed stability and sloped-bed instability results.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/tsunami.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Tsunami propagation (finite-volume SWE, HLL + minmod) — Terranoetis Documentation">
+<meta property="og:description" content="Okada-style dislocation source over real GEBCO 2020 bathymetry with a nonlinear shallow-water HLL/minmod finite-volume solver. Includes this review's measured flat-bed stability and sloped-bed instability results.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/tsunami.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html" aria-current="true">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">Tsunami propagation (finite-volume SWE, HLL + minmod)</li>
+      </ol></nav>
+      <h1>Tsunami propagation (finite-volume SWE, HLL + minmod)</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/tsunami.md">capabilities/tsunami.md — narrative description (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#physics">Governing equations and coefficients</a></li>
+<li><a href="#parameters">Parameter contract</a></li>
+<li><a href="#outputs">Outputs</a></li>
+<li><a href="#spatial-origin">Spatial-origin semantics</a></li>
+<li><a href="#validity">Documented validity limits (verbatim from the code)</a></li>
+<li><a href="#measured">Measured runs and timings</a></li>
+<li><a href="#known-limitation">Known numerical limitation (found in this review)</a></li>
+<li><a href="#reproduction">Reproduction</a></li>
+      </ul></nav>
+      <p>A tsunami scenario starts from a finite-fault seafloor displacement (simplified Okada-1985-in-spirit rectangular dip-slip patch with moment-magnitude scaling) and propagates the free surface with a nonlinear shallow-water finite-volume solver (MUSCL/minmod reconstruction, HLL fluxes, semi-implicit Manning friction) over real GEBCO 2020 bathymetry sampled server-side; a synthetic bathymetry fallback is explicitly disabled.</p>
+<dl class="metrics"><dt>Execution mode</dt><dd>Kaggle kernel (numpy-only, CPU accelerator instance) <cite class="src">server/kaggle/simRunner.ts:126-141</cite> (not in LOCAL_SIM_TYPES) <cite class="src">kaggle-kernels/tsunami-sim/main.py:228-229</cite></dd>
+<dt>Verification</dt><dd>SOLVER MEASURED locally in-process (conservation gate PASS; flat-bed propagation stable; REAL-GEBCO runs diverge — see Known limitation); job transport verified by code inspection only</dd>
+<dt>Wire scenario type</dt><dd><code>tsunami_wave</code> — contract at <cite class="src">src/services/kaggleSim.ts:28-240</cite>; job API at <a href="../reference/simulation-api.html">Simulation job API</a></dd></dl>
+<div class="callout callout-inspect" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). <span class="tag tag-inspected">CODE INSPECTION ONLY</span> marks behaviour traced to source lines but not executed here (e.g. Kaggle push/poll transport). Inspected is never presented as tested.</p></div>
+<h2 id="physics">Governing equations and coefficients</h2>
+<p>Source attribution as stated in the kernel header (verbatim):</p>
+<blockquote class="verbatim">Initial source: simplified Okada-style elastic dislocation uplift — vertical seafloor displacement from finite-fault slip transferred to the water surface (Okada 1985 in spirit; here a rectangular fault patch with dip-slip lobes, and moment-magnitude scaling).<footer><cite class="src">kaggle-kernels/tsunami-sim/main.py:10-13</cite></footer></blockquote>
+<figure class="equation"><span class="formula">∂η/∂t + ∇·(H·u) = 0;   ∂u/∂t + … = −g·∇η;   c = √(g·H)</span><figcaption>Header form (H = still-water depth + η). The implemented solver is the NONLINEAR conservative SWE (h·u² and g·h²/2 fluxes), not the linearised form. <cite class="src">kaggle-kernels/tsunami-sim/main.py:7-9</cite> <cite class="src">kaggle-kernels/tsunami-sim/swe_solver.py:64-75</cite></figcaption></figure>
+<figure class="equation"><span class="formula">M0 = 10^(1.5·M + 9.1) N·m;  amp = seafloor_displacement_m · √(M0/M0_ref) / 5.6,  M0_ref = 10^(1.5·8+9.1)</span><figcaption>Moment scaling of the surface displacement (normalised to the requested displacement at M 8). <cite class="src">kaggle-kernels/tsunami-sim/main.py:262-267</cite></figcaption></figure>
+<figure class="equation"><span class="formula">L_half = 20·10^(0.5(M−8)) km;  W_half = max(0.4·L_half, 8) km;  slip = clip(1−(along/L)²,0,1)·clip(1−(across/W)²,0,1)·tanh(across/(0.5·W))</span><figcaption>Rupture dimensions (&quot;Wells &amp;amp; Coppersmith style&quot;) and dip-slip uplift/subsidence lobes; strike default 135°; applied to ocean cells (bathy &amp;gt; 50 m) only. <cite class="src">kaggle-kernels/tsunami-sim/main.py:274-287,260,94</cite></figcaption></figure>
+<figure class="equation"><span class="formula">Face flux: MUSCL minmod reconstruction; HLL with sl = min(u−c), sr = max(u+c);  dt = 0.9·dx/(√2·c_max)</span><figcaption>Update scheme and main-loop timestep (the solver's own estimate_cfl_dt uses safety 0.45 — the kernel main path passes its own dt). <cite class="src">kaggle-kernels/tsunami-sim/swe_solver.py:34-36,77-113</cite></figcaption></figure>
+<figure class="equation"><span class="formula">friction = g·n²·|u|/H^(4/3), clipped ≤ 0.05 s⁻¹, applied as (1+dt·friction)⁻¹; n = 0.03</span><figcaption>Semi-implicit Manning damping. <cite class="src">kaggle-kernels/tsunami-sim/swe_solver.py:200-206</cite></figcaption></figure>
+<figure class="equation"><span class="formula">∂(hu)/∂t += −dt·g·H·∂b/∂x (central difference)</span><figcaption>Explicit bathymetry source term — NOT hydrostatically re-balanced per face; see Known limitation. <cite class="src">kaggle-kernels/tsunami-sim/swe_solver.py:188-193</cite></figcaption></figure>
+<h3 id="coefficients">Coefficients and named constants</h3>
+<div class="table-scroll"><table><caption>Constants and defaults.</caption>
+<thead><tr><th scope="col">Name</th><th scope="col">Value</th><th scope="col">Meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>g</td><td>9.81 m/s²</td><td>Gravity</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:232</cite></td></tr>
+<tr><td>manning_n</td><td>0.03</td><td>Basal roughness</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:307</cite> <cite class="src">kaggle-kernels/tsunami-sim/swe_solver.py:163</cite></td></tr>
+<tr><td>ocean threshold</td><td>bathy &gt; 50 m</td><td>Source applied only on ocean cells</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:94,254</cite></td></tr>
+<tr><td>default dx</td><td>5 km (when no extent_km)</td><td>Cell size</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:233-234</cite></td></tr>
+<tr><td>dt (default)</td><td>0.9·dx/(√2·√(g·H_max))</td><td>CFL-style timestep from deep-water celerity</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:236-238</cite></td></tr>
+<tr><td>strike default</td><td>135°</td><td>Rupture orientation</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:260</cite></td></tr>
+</tbody></table></div>
+<h2 id="parameters">Parameter contract</h2>
+<p>Tsunami parameters. Shared request envelope (validated at the client boundary before dispatch).</p>
+<div class="table-scroll"><table><caption>Tsunami parameters.</caption>
+<thead><tr><th scope="col">UI control</th><th scope="col">Wire field</th><th scope="col">Unit</th><th scope="col">Valid range (UI · wire · kernel)</th><th scope="col">Default</th><th scope="col">Physical meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Earthquake Magnitude <span class="cite">slider</span></td><td><code>magnitude</code></td><td>M</td><td>UI 5–9.5 step 0.1; wire 5–9.7</td><td>UI 8.5 · kernel 8.5</td><td>Sets M0, rupture L/W and amplitude</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:109-113</cite> <cite class="src">src/services/kaggleSim.ts:113</cite> <cite class="src">kaggle-kernels/tsunami-sim/main.py:191,262-276</cite></td></tr>
+<tr><td>Max Wave Height <span class="cite">slider</span></td><td><code>seafloor_displacement_m</code></td><td>m</td><td>UI 1–30 m (hidden derived value preferred: clamp(1, 40, 5·10^(M−6))); wire &gt;0, ≤ 40</td><td>derived at M 8.5 → 40 m; kernel 5</td><td>Near-field vertical displacement reference amplitude</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:109-113</cite> <cite class="src">src/services/kaggleSim.ts:114,473,660</cite> <cite class="src">kaggle-kernels/tsunami-sim/main.py:192</cite></td></tr>
+<tr><td>Hypocenter Depth <span class="cite">slider</span></td><td>— (not sent)</td><td>km</td><td>UI 5–100</td><td>20</td><td>Panel context + arrival-time hint only; long-wave physics is depth-independent</td><td><cite class="src">src/components/scenarios/ScenarioEditor.tsx:109-113</cite> <cite class="src">src/services/kaggleSim.ts:663-664</cite></td></tr>
+<tr><td>duration_minutes</td><td><code>duration_minutes</code></td><td>min</td><td>wire ≤ 720; builder fixes 30</td><td>kernel 30</td><td>Propagation window</td><td><cite class="src">src/services/kaggleSim.ts:115,474</cite> <cite class="src">kaggle-kernels/tsunami-sim/main.py:193</cite></td></tr>
+<tr><td>Bathymetry</td><td><code>bathymetry(+_gs)</code> → <code>bathy_b64/min/span</code></td><td>m positive-down</td><td>Required: run raises without real GEBCO</td><td>auto server-sampled</td><td>GEBCO 2020 via api.opentopodata.org/v1/gebco2020 (64² default)</td><td><cite class="src">src/services/kaggleSim.ts:116-124</cite> <cite class="src">server/kaggle/bathymetry.ts:10,28</cite> <cite class="src">kaggle-kernels/tsunami-sim/main.py:227-230</cite></td></tr>
+<tr><td>benchmark_stations (optional)</td><td>array ≤16</td><td>—</td><td>row/col + observed eta(t) series</td><td>—</td><td>Compare modeled η(t) with observed gauge series</td><td><cite class="src">src/services/kaggleSim.ts:125-133</cite></td></tr>
+</tbody></table></div>
+<h2 id="outputs">Outputs</h2>
+<div class="table-scroll"><table><caption>Files written per run (also served by <code>GET /api/kaggle/simulate/:jobId/grid/:name</code> and <code>…/geotiff/:name</code>)</caption>
+<thead><tr><th scope="col">Field</th><th scope="col">Unit</th><th scope="col">Meaning</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td><code>water_height.npy</code></td><td>m (η)</td><td>Final free-surface elevation grid</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:421-425</cite></td></tr>
+<tr><td><code>bathymetry.npy</code></td><td>m</td><td>Depth grid used (positive-down)</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:421-425</cite></td></tr>
+<tr><td><code>snapshots_height.npy</code> + <code>snapshot_times.npy</code></td><td>m; min</td><td>Propagation frames</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:421-425</cite></td></tr>
+<tr><td><code>metadata.json</code> + <code>validation.json</code> + <code>benchmark.json</code></td><td>—</td><td>model "okada_finite_fault_dislocation", solver "finite_volume_swe_hll_minmod", final stats, benchmark comparison</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:336-364,430-438</cite></td></tr>
+</tbody></table></div>
+<h2 id="spatial-origin">Spatial-origin semantics</h2>
+<p>Square domain decoded from the uint16-quantized GEBCO sample (<code>bathy_min + u16/65534·bathy_span</code>, sentinel 65535 = NaN→min) and bilinearly upsampled to the run grid; positive-down depth, negative = dry land; row 0 = north, matching the server-side sampler that mirrors the client's cell-centre geometry. The rupture is placed in the deep-ocean region of the box, not the centre. <cite class="src">kaggle-kernels/tsunami-sim/main.py:208-226,59,79-99</cite> <cite class="src">server/kaggle/bathymetry.ts:18-24</cite></p>
+<h2 id="validity">Documented validity limits (verbatim from the code)</h2>
+<blockquote class="verbatim">'Real GEBCO bathymetry is required for tsunami simulations; synthetic fallback is disabled.' · the linear-in-form header describes c = sqrt(g·H) propagation; implementation integrates the nonlinear conservative SWE · internal conservation proof states: 'Flat bathymetry (constant depth) — no source terms, pure wave propagation.'<footer><cite class="src">kaggle-kernels/tsunami-sim/main.py:228-229</cite> <cite class="src">kaggle-kernels/tsunami-sim/main.py:7-9</cite> <cite class="src">kaggle-kernels/tsunami-sim/swe_solver.py:235</cite></footer></blockquote>
+<p>main() runs the closed-box conservation proof (flat 2000 m bathy, 500 steps, tol 1e-9) before the simulation and refuses non-conservative runs: <em>"Tsunami solver failed closed-box conservation check (|Δ|=…). Refusing to run a non-conservative simulation."</em> <cite class="src">kaggle-kernels/tsunami-sim/main.py:406-417</cite></p>
+<h2 id="measured">Measured runs and timings</h2>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-08. These are observations of one environment, not performance guarantees.</caption>
+<thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
+<tbody>
+<tr><td>Conservation gate (re-executed)</td><td>[VERIFY] closed-box gs=64 steps=500: init=8194010.359005 final=8194010.359005 |Δ|=0.00e+00 → PASS</td></tr>
+<tr><td>Flat-bed propagation (4000 m constant bathy, 96²/300 km, dt = 3 s → CFL 0.27, 20 min)</td><td>Stable for the duration: 1.21 m uplift → max η 0.64 m radiated; energy 0.07 GJ; wall 0.6 s</td></tr>
+<tr><td>Flat bed, kernel default dt (96²/300 km, dt = 0.9·dx/(√2·c) = 10.04 s, printed “CFL 0.90 (OK)”, 20 min)</td><td>Diverges (max |η| ~ 10²³⁰ m): the kernel’s own dt formula exceeds the ~0.5 stability bound of second-order (MUSCL/HLL) updates; its estimate_cfl_dt uses safety 0.45 but main() passes its own dt</td></tr>
+<tr><td>Flat bed, small box (48² at dt = 3 s)</td><td>Stable for ~40 steps, then monotonic growth from periodic wrap-around coupling at the roll-based face divergence: 0.27 → 22 m by 20 min</td></tr>
+<tr><td>Sloped synthetic bed (dt = 3 s)</td><td>Diverges at low CFL — the explicit bathymetry source drives unbounded growth on any slope</td></tr>
+<tr><td>REAL GEBCO 2020 (16×16 sampled off Tohoku, 38.5°N 143.5°E, via the same api.opentopodata.org/v1/gebco2020 endpoint the server uses; M 8.5, 5 m, 20 min, 300 km box)</td><td>Diverges at both default dt (7.25 s, “CFL 0.90 (OK)”) and dt = 3 s (CFL 0.37): final max_wave ~10³⁰⁰ m, E = nan</td></tr>
+<tr><td>Kaggle job transport</td><td>VERIFIED BY CODE INSPECTION ONLY — no push performed in this review</td></tr>
+</tbody></table></div>
+<h2 id="known-limitation">Known numerical limitation (found in this review)</h2>
+<div class="callout callout-warning" role="note"><div class="callout-title">Tsunami solver — non-flat bathymetry instability</div><p>This review reproduced three distinct unbounded-growth mechanisms in the standalone kernel: (1) the default main-loop timestep uses a 0.9 CFL that second-order MUSCL/HLL updates cannot satisfy (flat bed still diverged at CFL 0.90; the solver's own <code>estimate_cfl_dt</code> applies safety 0.45 but main() overrides it); (2) the roll-based face divergence wraps opposite domain edges together, so waves grow after boundary interaction even on a flat bed in a small box; (3) on any non-flat bathymetry — including a real GEBCO 2020 sample — the explicit central-difference source term drives divergence at every tested timestep (max |η| → 10^300 m, energy NaN). The closed-box conservation proof deliberately uses a flat bed where the source vanishes, so it cannot detect (2) or (3). Until the scheme gains a well-balanced source treatment (e.g. the Audusse reconstruction the flood kernel uses) and a transmissive boundary, tsunami output must be treated as UNVALIDATED. Production runs go through Kaggle where this review could not execute them (labelled inspection-only).</p></div>
+<h2 id="reproduction">Reproduction</h2>
+<h3 id="repro-cmd">Commands</h3>
+<pre><code># Conservation gate + flat-bed propagation + diverging real-bed case:
+cd /tmp &amp;&amp; mkdir ts &amp;&amp; cp &lt;repo&gt;/kaggle-kernels/tsunami-sim/{main.py,swe_solver.py} ts/ &amp;&amp; cd ts
+python3 - &lt;&lt;'PY'
+import base64, json, numpy as np, subprocess, os
+v = np.full((16,16), 4000.0)          # flat bed  — stable
+# v = (np.mgrid[0:16,0:16][1]/15)*-4000+4000   # sloped bed — diverges
+span=v.max()-v.min(); u16=np.round((v-v.min())/max(span,1e-9)*65534).astype('&lt;u2')
+json.dump({'grid_size':96,'magnitude':8.5,'seafloor_displacement_m':5,'duration_minutes':20,
+  'extent_km':300,'dt_s':3.0,'bathy_gs':16,'bathy_b64':base64.b64encode(u16.tobytes()).decode(),
+  'bathy_min':float(v.min()),'bathy_span':float(span)}, open('params.json','w'))
+PY
+TERRANOETIS_OUT_DIR=$PWD python3 main.py | grep -E &quot;VERIFY|DONE&quot;   # writes fail off-Kaggle: hard-coded /kaggle/working (main.py:421)</code></pre>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Methodology &amp; verification — Terranoetis Documentation</title>
+<meta name="description" content="How every claim in this documentation was traced to code and, wherever possible, verified by executing the code; discrepancy log, known-limitation register and reproduction commands.">
+<link rel="canonical" href="https://terranoetis.com/methodology.html">
+<link rel="stylesheet" href="assets/docs.css">
+<link rel="icon" href="terranoetis.png" type="image/png">
+<meta property="og:title" content="Methodology &amp; verification — Terranoetis Documentation">
+<meta property="og:description" content="How every claim in this documentation was traced to code and, wherever possible, verified by executing the code; discrepancy log, known-limitation register and reproduction commands.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/methodology.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="index.html">Docs home</a>
+      <a href="capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="reference/api.html">Reference</a>
+      <a href="methodology.html" aria-current="page">Methodology</a>
+      <a href="deployment.html">Deployment</a>
+      <a href="governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="index.html">Documentation home</a></li>
+<li><a href="getting-started.html">Getting started</a></li>
+<li><a href="architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="capabilities/flood.html">Flood inundation</a></li>
+<li><a href="capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="methodology.html" aria-current="true">Methodology &amp; verification</a></li>
+<li><a href="deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="governance/contributing.html">Contributing</a></li>
+<li><a href="governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="index.html">Docs</a></li>
+<li aria-current="page">Methodology &amp; verification</li>
+      </ol></nav>
+      <h1>Methodology &amp; verification</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-measured">VERIFICATION PASS COMPLETED 2026-09-08</span></span>
+      </div>
+      
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#approach">Approach</a></li>
+<li><a href="#environment">Execution environment (stated precisely — no performance claims are generalised from it)</a></li>
+<li><a href="#evidence-runs">Evidence runs</a></li>
+<li><a href="#gates">Gates built into the kernels (what runs before results are trusted)</a></li>
+<li><a href="#known-limitations">Known-limitation register (found or confirmed by this review)</a></li>
+<li><a href="#discrepancy-log">Discrepancy log — documentation errors found & fixed</a></li>
+<li><a href="#unverified">Claims not verifiable in this environment (and their labels)</a></li>
+<li><a href="#gate">Documentation quality gate</a></li>
+<li><a href="#reproduction">Reproduction quick sheet</a></li>
+      </ul></nav>
+      <h2 id="approach">Approach</h2>
+<ol><li>Every physics claim is traced to <code>file:line</code> in this repository (engines, kernels, contract layer, UI); where the code itself states limits, they are quoted verbatim.</li>
+<li>Claims are then attacked empirically: test suites were run; kernels were executed for representative and boundary inputs; conservation/convergence/benchmark gates were re-executed; a real server boot produced an end-to-end simulation-job transcript.</li>
+<li>Anything not executable here (Kaggle push/poll, LLM outcomes, provider-gated feeds) is labelled <span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span>. Inspected is never presented as tested.</li>
+<li>Where documentation and code disagreed, the documentation was corrected; the code was not modified (this is a documentation pass). Code-level defects found are recorded in the <a href="#known-limitations">known-limitation register</a> for engineering follow-up.</li></ol>
+<h2 id="environment">Execution environment (stated precisely — no performance claims are generalised from it)</h2>
+<dl class="metrics"><dt>Machine</dt><dd>Apple M1 (arm64), macOS 26.5.2 — <code>uname -m</code> + <code>sysctl machdep.cpu.brand_string</code></dd>
+<dt>Node.js</dt><dd>v26.0.0 (<code>node --version</code>) — repository targets ≥ 20 (<code>.nvmrc</code> pins 20)</dd>
+<dt>Python</dt><dd>3.14.5 · NumPy 2.4.2 · SciPy present</dd>
+<dt>Date</dt><dd>2026-09-08 — the date behind every “measured” stamp on this site</dd></dl>
+<h2 id="evidence-runs">Evidence runs</h2>
+<div class="table-scroll"><table><caption>Test suites</caption>
+<thead><tr><th scope="col">Command</th><th scope="col">Result (measured)</th></tr></thead>
+<tbody>
+<tr><td><code>npm run test:unit</code></td><td>141 files · 1,653 tests passed · 0 failed · 22.85 s wall</td></tr>
+<tr><td><code>npm run test:integration</code></td><td>5 files · 49 tests passed · 0 failed · 5.66 s wall</td></tr>
+<tr><td><code>npx tsx</code> engine import</td><td>EQUATION_ENGINE: 150 keys, ids 1–150, no gaps</td></tr>
+<tr><td><code>npx tsx</code> catalog import</td><td>PARTS: 7 parts · 26 domains · 150 tools · 0 duplicate ids</td></tr>
+<tr><td><code>node scripts/docs/build.mjs && node scripts/docs/quality-gate.mjs</code></td><td>see <a href="#gate">quality gate</a> below</td></tr>
+</tbody></table></div>
+<div class="table-scroll"><table><caption>Kernel executions (per-run detail on each capability page)</caption>
+<thead><tr><th scope="col">Kernel</th><th scope="col">Runs executed</th><th scope="col">Headline evidence</th></tr></thead>
+<tbody>
+<tr><td>earthquake</td><td>representative + 2 boundary + 2 invalid + HTTP end-to-end</td><td>M7.5 → max PGA 251.0 cm/s², MMI 7.0; kernel compute 0.0083 s; job complete 166 ms after submit; M 2.9 and depth 750 km rejected with named validity ranges</td></tr>
+<tr><td>wildfire</td><td>fm2 calibration + fm8 representative + 2 boundary</td><td>ROS 0.103 m/s vs 0.105 reference → PASS; fm8 mean R 0.370 m/s, I 4,072 kW/m; wall ≤ 1.1 s</td></tr>
+<tr><td>hurricane</td><td>Cat 4 representative + Cat 5 + Cat 1 boundaries</td><td>physics gate PASS (V(Rmax)=69.0/70; IB 0.99 cm/hPa; CN75@100 mm 41.1 mm); Cat 4: 77.0 m/s wind, 1.15 m coastal water, 482 mm rain; wall ≤ 1.5 s</td></tr>
+<tr><td>flood</td><td>representative + minimum-rain</td><td>closed-box + lake-at-rest gates run; max depth 4.01 m; mass-balance closure 0.0000 %; off-Kaggle output failure observed (D-2)</td></tr>
+<tr><td>tsunami</td><td>conservation gate + flat-bed ×2 dt + small-box flat ×1 + sloped ×2 dt + REAL GEBCO (Tohoku, via the server’s own opentopodata endpoint) ×2 dt</td><td>gate |Δ| = 0 PASS; 96²/300 km flat bed stable for 20 min at CFL 0.27 (η 0.64 m, E 0.07 GJ); default-dt flat run diverged; all sloped/real-bed runs diverged (D-1)</td></tr>
+<tr><td>volcano</td><td>benchmark suite + VEI 3 + VEI 5 boundary</td><td>B1–B4 4/4 PASS (Kilauea 2018: 15.0 km modelled vs ~13.5 km observed); mass/ash budgets Δ ≤ 1e-14 relative; M–T plume 27.9 km @ VEI 5</td></tr>
+<tr><td>landslide</td><td>quake-trigger + rain/entrainment + convergence script + calibration grids</td><td>convergence PASS (Δ₂ = 0.050 ≤ 0.25); runout 3.74→2.87→2.95 km over 64/128/256; entrainment ledger 0.0000 % drift</td></tr>
+</tbody></table></div>
+<p>Raw per-run records (stdout, metadata.json, timings) were held outside the repository during this pass; every published number is re-derivable from the <a href="#reproduction">reproduction commands</a> and each page’s own command block.</p>
+<h2 id="gates">Gates built into the kernels (what runs before results are trusted)</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Kernel</th><th scope="col">Pre-emission gate</th><th scope="col">On failure</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>earthquake</td><td>GMPE sanity (decay, range, site, PGV/PGA ratio, MMI monotonicity, band round-trips)</td><td>refuses to emit (RuntimeError)</td><td><cite class="src">kaggle-kernels/earthquake-sim/main.py:194-232,400-404</cite></td></tr>
+<tr><td>hurricane</td><td>Holland/B/IB/SCS-CN/wave/rainfall physics checks</td><td>refuses to emit</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:285-335,717-720</cite></td></tr>
+<tr><td>flood</td><td>closed-box conservation (1e-9) + lake-at-rest well-balanced (1e-6)</td><td>raises before run</td><td><cite class="src">kaggle-kernels/flood-sim/main.py:121-366,771-783</cite></td></tr>
+<tr><td>tsunami</td><td>closed-box conservation (flat bed only)</td><td>raises before run — flat bed leaves the source term untested (D-1)</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:406-417</cite></td></tr>
+<tr><td>volcano</td><td>flat + steep closed-box conservation (steep checks well-balancedness)</td><td>raises before run</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:607-680,1383-1386</cite></td></tr>
+<tr><td>landslide</td><td>convergence + conservation via validate_convergence.py (not invoked by main())</td><td>script exit 1</td><td><cite class="src">kaggle-kernels/landslide-sim/validate_convergence.py:19-105</cite></td></tr>
+<tr><td>wildfire</td><td>ROS reference print (non-fatal)</td><td>prints CHECK</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:501-508</cite></td></tr>
+</tbody></table></div>
+<h2 id="known-limitations">Known-limitation register (found or confirmed by this review)</h2>
+<div class="table-scroll"><table><caption>D-numbered for cross-reference; engineering follow-up recommended. Capability pages already state each limitation where it applies.</caption>
+<thead><tr><th scope="col">#</th><th scope="col">Limitation</th><th scope="col">Evidence</th></tr></thead>
+<tbody>
+<tr><td>D-1</td><td><strong>Tsunami solver: three unbounded-growth mechanisms.</strong> (1) the main-loop default timestep (0.9·dx/√2c) exceeds the stability bound of second-order MUSCL/HLL — divergence even on a flat bed at printed “CFL 0.90 (OK)”; (2) the roll-based face divergence couples opposite domain edges, so waves grow after boundary interaction (48² box: 0.27 → 22 m in 20 min on a flat bed); (3) on any non-flat bathymetry — including a real GEBCO 2020 sample — the explicit central-difference source (<code>−dt·g·H·∂b/∂x</code>, not well-balanced) drives max|η| → 10^300 m, energy NaN, at every tested dt. The closed-box conservation gate runs on a flat bed where (3) vanishes, so it cannot detect these. Flood/volcano use Audusse-style hydrostatic reconstruction; tsunami does not.</td><td><cite class="src">kaggle-kernels/tsunami-sim/swe_solver.py:150-151,188-193,235</cite> <cite class="src">kaggle-kernels/tsunami-sim/main.py:236-241</cite> <span class="tag tag-measured">reproduced ×9 configs</span></td></tr>
+<tr><td>D-2</td><td>Standalone local <code>python3 main.py</code> for flood/tsunami/volcano/landslide completes physics but fails writing results (hard-coded <code>/kaggle/working</code>). Consistent with the runner design (Kaggle or in-process import), but it blocks ad-hoc local runs.</td><td><cite class="src">kaggle-kernels/flood-sim/main.py:786</cite> <cite class="src">kaggle-kernels/landslide-sim/main.py:873</cite> <span class="tag tag-measured">observed [Errno 30]</span></td></tr>
+<tr><td>D-3</td><td>Earthquake: the <code>spectral_acceleration</code> docstring promises a fallback “PGA model scaled by the 1 s/PGA ratio” for other periods; the code returns the unscaled PGA model. Docs describe actual behaviour only.</td><td><cite class="src">kaggle-kernels/earthquake-sim/main.py:174-178</cite></td></tr>
+<tr><td>D-4</td><td>Hurricane gate comment inconsistency: the docstring quotes “TR-55: CN75, P=100 mm → Q≈28.3 mm” while the enforced tolerance is (30, 50) mm and the measured value is 41.1 mm. Pages cite the tolerance, not the stale comment.</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:291,304-305</cite> <span class="tag tag-measured">gate line observed</span></td></tr>
+<tr><td>D-5</td><td>Coarse-grid eyewall dilution: when R_max ≲ 2× cell size the sampled wind maximum falls far below V_max (Cat 5, RMW 5 km on 2.5 km cells → 32.2 m/s). A sampling limit of point-vortex parametrics on discrete grids, not a code fault.</td><td><cite class="src">kaggle-kernels/hurricane-sim/main.py:484</cite> <span class="tag tag-measured">observed</span></td></tr>
+<tr><td>D-6</td><td>Wildfire front advance is stochastic-ignition-rate-limited: measured burned area trails the continuous ROS field (0.15 % of grid in 6 h, fm8). The code documents the slow-fuel stall failure mode and its residence-time fix.</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:521-543,589-593</cite> <span class="tag tag-measured">observed</span></td></tr>
+<tr><td>D-7</td><td>Landslide <code>main()</code> does not invoke its own closed-box verifier (defined but uncalled); the authoritative gates are validate_convergence.py and the calibration path. In-domain ledger drift 1.56 % observed without entrainment (boundary exchange booked separately).</td><td><cite class="src">kaggle-kernels/landslide-sim/main.py:712-714,808-857</cite> <span class="tag tag-measured">observed</span></td></tr>
+<tr><td>D-8</td><td>Flood “Green-Ampt constant loss rate” is a fixed 10 mm/hr modulated by saturation — not the Green–Ampt equation. Label kept as in source; described as implemented.</td><td><cite class="src">kaggle-kernels/flood-sim/main.py:57,470-471</cite></td></tr>
+<tr><td>D-9</td><td>Wire constants with no physics: flood <code>dam_breach</code> is a schema literal with no breach hydrograph in the kernel; flood <code>wind_speed_ms</code> and tsunami hypocentre depth are UI/context fields that never enter the solve.</td><td><cite class="src">src/services/kaggleSim.ts:37-38</cite> <cite class="src">kaggle-kernels/flood-sim/main.py:370-380</cite></td></tr>
+<tr><td>D-10</td><td>Determinism caveats: wildfire honours <code>seed</code> (optional — unseeded otherwise); wall-clock caps truncate runs machine-dependently (kernels ≤ 480 s; local server timeout 120 s); synthetic fallbacks are fixed-seed. All timing figures here are single observations on one machine.</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:407-415,568-570</cite> <cite class="src">server/kaggle/simRunner.ts:134</cite></td></tr>
+</tbody></table></div>
+<h2 id="discrepancy-log">Discrepancy log — documentation errors found & fixed</h2>
+<div class="table-scroll"><table><caption>The code was treated as authoritative in every case; sources of truth updated 2026-09-08.</caption>
+<thead><tr><th scope="col">#</th><th scope="col">Was (documentation claim)</th><th scope="col">Is (verified reality)</th><th scope="col">Fixed in</th></tr></thead>
+<tbody>
+<tr><td>C-1</td><td>“7 physics simulations — 3 run locally on CPU, 4 on free Kaggle <em>GPU</em> kernels” (README)</td><td>Kernels are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the Kaggle GPU accelerator; the other routed kernels have enable_gpu=false. “Kaggle kernels” is accurate; “GPU kernels” is not.</td><td>README.md · DEPLOYMENT.md · BACKEND.md · <a href="capabilities/hazard-simulations.html#modes">modes table</a></td></tr>
+<tr><td>C-2</td><td>“82 with resolvable DOIs” (README/MODELS.md)</td><td>80 of 150 model references contain a DOI string (12 ISBN, 4 explicit NO-DOI); counting method now stated.</td><td>README.md · MODELS.md</td></tr>
+<tr><td>C-3</td><td>Redis handles “PubSub · Queue” (ARCHITECTURE.md topology + BACKEND.md)</td><td>The event bus is an in-process EventEmitter (server/pubsub.ts); Redis serves cache + memory hot path.</td><td>ARCHITECTURE.md · BACKEND.md</td></tr>
+<tr><td>C-4</td><td>Repository tree lists <code>server/digitalTwin/</code> (README)</td><td>Directory does not exist (disk + git ls-files).</td><td>README.md</td></tr>
+<tr><td>C-5</td><td>“sandboxV2: Simulation engines (FARSITE, ADCIRC, WRF, HYSPLIT)” (README/BACKEND/ARCHITECTURE)</td><td>Files are simplified surrogates named <code>*Lite</code> (cellular ROS; storm-surge SWE; dispersion particle model; idealized WRF-style driver) plus an FNO surrogate — not the operational models.</td><td>BACKEND.md · ARCHITECTURE.md · README.md</td></tr>
+<tr><td>C-6</td><td>“1,600+ tests” / “1624+ tests” (README/CONTRIBUTING)</td><td>Measured today: 1,653 unit + 49 integration passing.</td><td>README.md · CONTRIBUTING.md</td></tr>
+<tr><td>C-7</td><td>“Playwright browser tests (7 specs, 12 tests)” (README)</td><td>7 spec files, 38 <code>test()</code> declarations counted (method stated); execution not performed here → labelled inspection-only.</td><td>README.md</td></tr>
+<tr><td>C-8</td><td>Landing copy: “GPU-accelerated mathematical models computed directly over real 3D terrain meshes” (platform-overview)</td><td>Simulation math runs on CPU (NumPy); fields are rendered on the WebGL globe client-side.</td><td>old landing replaced by redirect; accurate claim on <a href="index.html">docs home</a></td></tr>
+<tr><td>C-9</td><td>docs/index.html was only a redirect to the marketing page</td><td>The site is now navigation-first from index.html; platform-overview.html preserved as a redirect stub so inbound URLs keep resolving.</td><td>docs/index.html · docs/platform-overview.html</td></tr>
+<tr><td>C-10</td><td>App shell “~11,000 lines”, “11 panels”, “41 modules” (approximations)</td><td>Measured: 11,038 lines; 11 lazy panels; 41 rendering modules.</td><td>now stated as measured counts</td></tr>
+</tbody></table></div>
+<h2 id="unverified">Claims not verifiable in this environment (and their labels)</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Item</th><th scope="col">Why</th><th scope="col">Label used</th></tr></thead>
+<tbody>
+<tr><td>Kaggle push → poll → download transport</td><td>Would push to the maintainer’s Kaggle account; deliberately not performed</td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
+<tr><td>GPU-accelerated instance behaviour</td><td>No kernel uses GPU code; acceleration flags are metadata only</td><td>same label</td></tr>
+<tr><td>LLM provider call success/latency</td><td>External paid providers</td><td>same label; only boot + configuration verified</td></tr>
+<tr><td>Live-feed correctness per provider</td><td>External data churn; not asserted in prose</td><td>same label</td></tr>
+<tr><td>Playwright pass state</td><td>Chromium/WebGL environment; not run</td><td>same label (counts measured by other means)</td></tr>
+<tr><td>ClickHouse / TimescaleDB / Kafka scaling paths</td><td>Optional backends not deployed</td><td>documented as optional no-ops per code</td></tr>
+</tbody></table></div>
+<h2 id="gate">Documentation quality gate</h2>
+<p><code>node scripts/docs/quality-gate.mjs</code> fails CI on: broken internal links (HTML↔HTML, HTML→MD, MD→MD, MD anchors), missing anchor targets, missing per-page metadata (title, description, canonical, og, last-reviewed, version), unresolvable <code>file:line</code> citations (target must exist; the cited range must fit the file), banned marketing vocabulary, and build drift (<code>build.mjs --check</code>). Wired into <code>.github/workflows/docs.yml</code> on every docs-affecting push/PR.</p>
+<h2 id="reproduction">Reproduction quick sheet</h2>
+<h3 id="repro-all">Everything the site claims as measured, in one block</h3>
+<pre><code>npm run test:unit &amp;&amp; npm run test:integration
+
+npm run dev:server &amp;   # then:
+curl -s -X POST localhost:3001/api/kaggle/simulate -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;type&quot;:&quot;earthquake_swarm&quot;,&quot;lat&quot;:36.1,&quot;lon&quot;:139.7,&quot;grid_size&quot;:128,&quot;extent_km&quot;:100,&quot;magnitude&quot;:7.2,&quot;depth_km&quot;:15,&quot;vs30&quot;:760}'
+
+# tsunami: flat vs sloped bed (D-1) — run from kaggle-kernels/tsunami-sim:
+python3 &lt;&lt;PY
+import numpy as np, swe_solver as S
+y, x = np.mgrid[0:48, 0:48]
+flat = np.full((48,48), 4000.0); sloped = 4000 - 500*x/47
+h0 = np.exp(-(((x-24)**2+(y-24)**2)/(2*6.0**2)))*1.2
+for name, bed in [(&quot;flat&quot;, flat), (&quot;sloped&quot;, sloped)]:
+    h, hu, hv = h0.copy(), np.zeros_like(h0), np.zeros_like(h0)
+    for _ in range(200): h, hu, hv = S.step_shallow_water(h, hu, hv, bed, 3.0, 3125.0, 3125.0)
+    print(name, &quot;max|eta| = %.3e&quot; % np.abs(h).max())   # observed: flat 1.17e+01 m (wrap growth), sloped 5.81e+03 m
+PY
+
+cd kaggle-kernels/volcano-sim/benchmarks &amp;&amp; python3 run_benchmarks.py    # B1–B4
+cd kaggle-kernels/landslide-sim &amp;&amp; python3 validate_convergence.py       # gates
+node scripts/docs/build.mjs &amp;&amp; node scripts/docs/quality-gate.mjs</code></pre>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI chat &amp; cognition — Terranoetis Documentation</title>
+<meta name="description" content="Intent routing, System 1 / System 2 dual-process reasoning, multi-agent debate, tool loop and the 9-provider Omninet model router.">
+<link rel="canonical" href="https://terranoetis.com/capabilities/ai-cognition.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="AI chat &amp; cognition — Terranoetis Documentation">
+<meta property="og:description" content="Intent routing, System 1 / System 2 dual-process reasoning, multi-agent debate, tool loop and the 9-provider Omninet model router.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://terranoetis.com/capabilities/ai-cognition.html">
+<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Docs home</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../reference/api.html">Reference</a>
+      <a href="../methodology.html">Methodology</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html" aria-current="true">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Docs</a></li>
+<li><a href="../capabilities/hazard-simulations.html">Capabilities</a></li>
+<li aria-current="page">AI chat &amp; cognition</li>
+      </ol></nav>
+      <h1>AI chat &amp; cognition</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span> (boot + SSE plumbing observed; LLM outcomes provider-dependent)</span>
+      </div>
+      <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/ai-cognition.md">capabilities/ai-cognition.md — narrative (source of truth)</a></p>
+      <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
+        <li><a href="#intents">Intents & routing thresholds</a></li>
+<li><a href="#omninet">Omninet model router</a></li>
+<li><a href="#advanced">Advanced agent safety rails</a></li>
+      </ul></nav>
+      <p>The chat pipeline classifies a natural-language query into one of eight intents, routes it through a dual-process cognition layer (fast cached/templated answers vs deliberate multi-agent reasoning), executes tools (live data, analytical models, simulations, sandbox), and streams results over SSE. All LLM traffic passes through the Omninet provider router.</p>
+<h2 id="intents">Intents & routing thresholds</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Decision point</th><th scope="col">Rule (verified values)</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Intent classes</td><td>quick_scan · deep_analysis · fly_to · toggle_layer · weather_check · compute · panel_command · unknown</td><td><cite class="src">server/agent.ts:48-49</cite></td></tr>
+<tr><td>System 1 fast path</td><td>similarity ≥ 0.92 → real tool for matched intent (6 mapped intents)</td><td><cite class="src">server/cognition/cognitiveOrchestrator.ts:251,47-72</cite></td></tr>
+<tr><td>Verify band</td><td>0.70 ≤ similarity &lt; 0.92 → S1 answer + System 2 verification, 10 s timeout</td><td><cite class="src">server/cognition/cognitiveOrchestrator.ts:252,295</cite></td></tr>
+<tr><td>Full System 2</td><td>no match / anomaly / &lt; 0.70 → HTN decomposition → 4-agent debate (Data Analyst, Domain Expert, Systems Thinker, Risk Assessor) + Verifier critic, 45 s hard cap, critic ≥ 0.7 to exit</td><td><cite class="src">server/cognition/cognitiveOrchestrator.ts:286,386-388</cite> <cite class="src">server/cognition/system2.ts:78-85,446-467</cite></td></tr>
+<tr><td>LLM deep classification</td><td>only when keyword intent conf &lt; 0.7; LLM verdict accepted at conf ≥ 0.4</td><td><cite class="src">server/index.ts:9846-9851</cite> <cite class="src">server/agent.ts:795</cite></td></tr>
+<tr><td>Tool loop</td><td>MAX_TOOL_ROUNDS = 3 with anti-prompt-injection synthesis prompt</td><td><cite class="src">server/index.ts:10966-10983</cite></td></tr>
+<tr><td>Stream cap</td><td>hard 150 s run cap; 15 s heartbeats</td><td><cite class="src">server/index.ts:9801-9811</cite></td></tr>
+</tbody></table></div>
+<h2 id="omninet">Omninet model router</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Property</th><th scope="col">Verified value</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Providers</td><td>9: groq, gemini, bai, deepseek, claude, ollama, openrouter, huggingface, local-gguf (20 models, tiers 1–4)</td><td><cite class="src">server/ai-router/omninet.ts:70-84</cite></td></tr>
+<tr><td>Complexity → tier</td><td>simple→1, medium→2, complex/reasoning→3</td><td><cite class="src">server/ai-router/omninet.ts:103-121,300-307</cite></td></tr>
+<tr><td>Ranking</td><td>health → |tier−target| → tier → lastLatency; skips circuit-open / keyless / token-starved</td><td><cite class="src">server/ai-router/omninet.ts:331-358</cite></td></tr>
+<tr><td>Resilience</td><td>per-provider token buckets; circuit opens at 5 failures, half-open 30 s; retries backoff [1s,2s,4s] ≤ 2 extra; health ping every 2 min (429/402/403 count as alive)</td><td><cite class="src">server/ai-router/omninet.ts:281-296,563-568,337,585-589,225-250,270</cite></td></tr>
+<tr><td>Local fallback</td><td>LFM2.5-2.6B-Q4_K_M GGUF via llama-server :11436, spawned at boot when file present; admin-panel downloader with resume</td><td><cite class="src">server/index.ts:789-817</cite> <cite class="src">server/apiMetadata.ts:gguf endpoints</cite></td></tr>
+<tr><td>Embeddings</td><td>local Xenova all-MiniLM-L6-v2 first; API fallbacks (Gemini/OAI/Ollama), 768-dim default</td><td><cite class="src">server/ai-router/omninet.ts:675-713,648</cite></td></tr>
+<tr><td>Cost tiers</td><td>ModelRouter local/flash/pro + price table; /api/agent/tiers costPerQuery 0 / 0.0001 / 0.0008</td><td><cite class="src">server/costOptimizer.ts:18-22,47-54</cite> <cite class="src">server/index.ts:11686-11695</cite></td></tr>
+</tbody></table></div>
+<h2 id="advanced">Advanced agent safety rails</h2>
+<div class="table-scroll"><table><caption></caption>
+<thead><tr><th scope="col">Control</th><th scope="col">Detail</th><th scope="col">Source</th></tr></thead>
+<tbody>
+<tr><td>Risk classes</td><td>17 DESTRUCTIVE + 15 HIGH_RISK tool lists; arg regex promotes risk (delete|remove|reset|…|deploy|publish)</td><td><cite class="src">server/advancedAgent.ts:212-234</cite></td></tr>
+<tr><td>Approval gate</td><td>actions at threshold “high” require user approval before execution</td><td><cite class="src">server/advancedAgent.ts:240-244</cite></td></tr>
+<tr><td>Plan budget</td><td>LLM plan 1–5 steps (max 6), temp 0.3; sub-agents temp 0.4</td><td><cite class="src">server/advancedAgent.ts:252-274,370</cite></td></tr>
+<tr><td>MCTS</td><td>exploration constant 1.41, ≤100 iterations, depth 5, 30 s timeout (execution orchestrator over tools)</td><td><cite class="src">server/cognition/mctsEngine.ts:11-16,87-89</cite></td></tr>
+<tr><td>Human override</td><td>explainability subsystem: pending override queue, evidence chains, bias audits</td><td><cite class="src">server/index.ts:explainability routes :917-918 + module</cite></td></tr>
+</tbody></table></div>
+<div class="callout callout-inspect" role="note"><div class="callout-title">Verification status</div><p>Startup of the cognitive services (orchestrator, omninet init, self-improver V2, feedback) was observed in server boot logs <cite class="src">server/index.ts:787,834-845</cite>; thresholds and lists are traced to source as above. End-to-end LLM outcomes are provider/credential dependent and were <strong>not</strong> executed here — <span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></p></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>
