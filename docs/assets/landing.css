@@ -48,7 +48,7 @@
 .hz h3 { margin: 0 0 0.3rem; font-size: 0.95rem; } .hz h3 a { text-decoration: none; }
 .hz p { margin: 0 0 0.45rem; font-size: 0.8rem; color: var(--c-text-muted); }
 .showcase { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.4rem; }
-@media (max-width: 800px) { .showcase { grid-template-columns: 1fr; } }
+@media (max-width: 800px) { .showcase { grid-template-columns: 1fr; } } .showcase figure { min-width: 0; }
 .showcase figure { margin: 0; border: 1px solid var(--c-border); border-radius: 10px; overflow: hidden; background: var(--c-bg); }
 .showcase img { width: 100%; height: auto; display: block; }
 .showcase figcaption { font-size: 0.78rem; color: var(--c-text-muted); padding: 0.5rem 0.75rem; }
@@ -58,20 +58,53 @@
 .landing-footer { border-top: 1px solid var(--c-border); padding: 1.4rem 1.5rem 2.4rem; font-size: 0.8rem; color: var(--c-text-muted); }
 .landing-footer .inner { max-width: 72rem; margin: 0 auto; display: flex; gap: 1.5rem; flex-wrap: wrap; justify-content: space-between; }
 
-/* ── hero refinement (desktop) ──────────────────────────────────────── */
+/* ── hero (desktop-first, deep navy, no grey cast) ───────────────────── */
 .landing .hero {
-  padding: 5.5rem 1.5rem 4rem;
-  background: radial-gradient(1100px 480px at 72% -12%, rgba(47,129,211,0.30), transparent 62%),
-              radial-gradient(900px 420px at 8% 108%, rgba(47,129,211,0.14), transparent 60%),
-              var(--c-banner-bg);
+  padding: 6rem 2rem 4.5rem;
+  background: linear-gradient(168deg, #080f1d 0%, #0c1a30 48%, #091120 100%);
+  border-bottom: 1px solid rgba(90,140,200,0.28);
 }
-.landing .hero-inner { gap: 4rem; align-items: center; }
-.hero h1 { font-size: clamp(2.4rem, 5.2vw, 3.5rem); letter-spacing: -0.015em; }
-.hero p.tagline { font-size: 1.08rem; line-height: 1.78; margin-bottom: 1.8rem; }
-.hero figure img { box-shadow: 0 26px 64px rgba(0,0,0,0.5); border-radius: 12px; }
-.stat-strip { margin-top: 3.2rem; }
-.stat-strip div { padding: 1.05rem 1rem; }
-.stat-strip strong { font-size: 1.45rem; }
+.landing .hero-inner { max-width: 82rem; gap: 4.5rem; align-items: center; grid-template-columns: minmax(0, 1.02fr) minmax(0, 0.98fr); }
+.hero-badge { font-size: 0.78rem; letter-spacing: 0.1em; padding: 0.32rem 0.95rem; border-color: rgba(140,180,230,0.4); }
+.hero h1 { font-size: clamp(3rem, 6vw, 4.3rem); margin: 0 0 0.9rem; }
+.hero p.tagline { font-size: 1.17rem; line-height: 1.8; color: #cdd9e8; margin-bottom: 2rem; max-width: 41rem; }
+.hero-actions { gap: 0.95rem; }
+.btn { padding: 0.72rem 1.4rem; font-size: 0.98rem; border-radius: 9px; }
+.btn-primary { background: #2e7ed0; } .btn-primary:hover { background: #4b96e2; }
+.btn-ghost { border-color: rgba(160,195,235,0.5); }
+.hero figure { margin: 0; width: 100%; }
+.hero img { width: 100%; height: auto; border-radius: 14px; border: 1px solid rgba(150,190,240,0.25); box-shadow: 0 34px 90px rgba(0,0,0,0.62), 0 2px 0 rgba(255,255,255,0.05) inset; display: block; }
+.hero figcaption { font-size: 0.8rem; color: #97a8be; margin-top: 0.75rem; font-family: var(--font-mono); }
+.stat-strip { max-width: 82rem; margin: 3.6rem auto 0; grid-template-columns: repeat(4, 1fr); background: rgba(150,190,240,0.16); border-color: rgba(150,190,240,0.22); border-radius: 12px; }
+.stat-strip div { background: #0b1526; padding: 1.35rem 1.2rem; }
+.stat-strip strong { font-size: 1.85rem; color: #fff; }
+.stat-strip span { font-size: 0.84rem; color: #9fb0c3; margin-top: 0.3rem; }
+@media (max-width: 900px) {
+  .landing .hero { padding: 3rem 1.25rem 2.5rem; }
+  .landing .hero-inner { gap: 2.5rem; }
+  .stat-strip { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── overall page scale (larger, calmer) ─────────────────────────────── */
+.landing .band { max-width: 82rem; padding: 4.4rem 2rem; }
+.landing .band-head { max-width: 52rem; margin-bottom: 1.8rem; }
+.landing .band-head h2 { font-size: 1.85rem; }
+.landing .band-head p { font-size: 1.02rem; line-height: 1.75; }
+.landing .feat { padding: 1.3rem 1.4rem; }
+.landing .feat h3 { font-size: 1.1rem; }
+.landing .feat p { font-size: 0.92rem; line-height: 1.68; }
+.landing .feat .k { font-size: 0.75rem; }
+.landing .feat a.more { font-size: 0.9rem; }
+.landing .hz { padding: 1.1rem 1.2rem; }
+.landing .hz h3 { font-size: 1.04rem; }
+.landing .hz p { font-size: 0.88rem; line-height: 1.62; }
+.landing .showcase figcaption { font-size: 0.86rem; padding: 0.65rem 0.95rem; }
+.landing .cta-band { padding: 4.2rem 1.5rem; }
+.landing .cta-band h2 { font-size: 2.05rem; }
+.landing .cta-band p { font-size: 1.02rem; color: #a9b8ca; }
+.landing pre { font-size: 0.9rem; padding: 1.1rem 1.3rem; }
+.landing .band > p { font-size: 0.98rem; }
+.landing-footer { padding: 1.6rem 1.5rem 2.6rem; font-size: 0.84rem; }
 
 /* ── justified body text across the landing page ────────────────────── */
 .landing .tagline, .landing .band-head p, .landing .feat p, .landing .hz p,
