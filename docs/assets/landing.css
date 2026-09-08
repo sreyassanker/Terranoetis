@@ -57,3 +57,30 @@
 .landing .cta-band p { color: #9fb0c3; margin: 0 0 1.4rem; }
 .landing-footer { border-top: 1px solid var(--c-border); padding: 1.4rem 1.5rem 2.4rem; font-size: 0.8rem; color: var(--c-text-muted); }
 .landing-footer .inner { max-width: 72rem; margin: 0 auto; display: flex; gap: 1.5rem; flex-wrap: wrap; justify-content: space-between; }
+
+/* ── hero refinement (desktop) ──────────────────────────────────────── */
+.landing .hero {
+  padding: 5.5rem 1.5rem 4rem;
+  background: radial-gradient(1100px 480px at 72% -12%, rgba(47,129,211,0.30), transparent 62%),
+              radial-gradient(900px 420px at 8% 108%, rgba(47,129,211,0.14), transparent 60%),
+              var(--c-banner-bg);
+}
+.landing .hero-inner { gap: 4rem; align-items: center; }
+.hero h1 { font-size: clamp(2.4rem, 5.2vw, 3.5rem); letter-spacing: -0.015em; }
+.hero p.tagline { font-size: 1.08rem; line-height: 1.78; margin-bottom: 1.8rem; }
+.hero figure img { box-shadow: 0 26px 64px rgba(0,0,0,0.5); border-radius: 12px; }
+.stat-strip { margin-top: 3.2rem; }
+.stat-strip div { padding: 1.05rem 1rem; }
+.stat-strip strong { font-size: 1.45rem; }
+
+/* ── justified body text across the landing page ────────────────────── */
+.landing .tagline, .landing .band-head p, .landing .feat p, .landing .hz p,
+.landing .band > p, .landing .showcase figcaption {
+  text-align: justify; text-justify: inter-word; hyphens: auto;
+}
+.landing .cta-band p { text-align: center; }
+
+/* ── maintainer badge row ───────────────────────────────────────────── */
+.badge-row { display: flex; gap: 0.65rem; justify-content: center; flex-wrap: wrap; margin-top: 1.8rem; }
+.badge-row a:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.badge-row img { height: 28px; display: block; }
