@@ -82,6 +82,7 @@ agentdb.rvf.lock
 .claude-flow/
 .ruflo/
 .swarm/
+.ruvector/
 ruvector.db
 
 # Python bytecode
@@ -120,6 +121,7 @@ public/models/
  # Research papers (downloaded PDFs)
 docs/Research papers/
 docs/Research papers/*.pdf
+docs/*.pdf
 
 # Reports
 reports/

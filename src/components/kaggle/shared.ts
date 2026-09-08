@@ -279,6 +279,8 @@ export interface BuildCanvasOptions {
   clampMax?: boolean;
   alphaMin?: number;
   alphaMax?: number;
+  /** Fractional keep-window (0..1); cells outside are forced transparent. */
+  clip?: { x0: number; y0: number; x1: number; y1: number };
 }
 
 /** Rasterize a value grid into a colored canvas using a colormap. */
@@ -291,6 +293,15 @@ export function buildColoredCanvas(opts: BuildCanvasOptions): HTMLCanvasElement 
     alphaMin = 80,
     alphaMax = 220,
   } = opts;
+  // Optional fractional keep-window (0..1). The simulation grid is a SQUARE of
+  // extent = max(bbox width, height) centred on the study box, so a non-square
+  // box would spill outside it. Cells outside this window are forced
+  // transparent, confining the render to the drawn study area.
+  const clip = opts.clip;
+  const cx0 = clip ? clip.x0 * size : 0;
+  const cx1 = clip ? clip.x1 * size : size;
+  const cy0 = clip ? clip.y0 * size : 0;
+  const cy1 = clip ? clip.y1 * size : size;
 
   let maxValue = opts.maxValue ?? 0;
   if (!opts.maxValue) {
@@ -311,6 +322,15 @@ export function buildColoredCanvas(opts: BuildCanvasOptions): HTMLCanvasElement 
   for (let idx = 0; idx < size * size; idx++) {
     const v = isFinite(values[idx]) ? values[idx] : 0;
     const pi = idx * 4;
+    const row = (idx / size) | 0;
+    const col = idx % size;
+    if (clip && (col < cx0 || col >= cx1 || row < cy0 || row >= cy1)) {
+      image.data[pi] = 0;
+      image.data[pi + 1] = 0;
+      image.data[pi + 2] = 0;
+      image.data[pi + 3] = 0;
+      continue;
+    }
     if (v < nodata) {
       image.data[pi] = 0;
       image.data[pi + 1] = 0;

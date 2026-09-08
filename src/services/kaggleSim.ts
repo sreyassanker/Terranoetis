@@ -89,9 +89,21 @@ export const SimulationRequestSchema = z.discriminatedUnion('type', [
     lat, lon,
     grid_size: gridSize,
     extent_km: extentKm,
-    magnitude: z.number().min(1).max(10),
-    depth_km: z.number().positive().max(700),
-    duration_seconds: z.number().positive().max(600),
+    // Bounds mirror the 2D GMPE kernel's validity window (kaggle-kernels/
+    // earthquake-sim/main.py): M 3.0–9.7, hypocentral depth 0.5–700 km.
+    magnitude: z.number().min(3).max(9.7),
+    depth_km: z.number().min(0.5).max(700),
+    /** Site condition — NEHRP Vs30 (m/s). Default 760 (class C rock). */
+    vs30: z.number().min(150).max(1500).optional(),
+    /**
+     * Pinned epicentre as a fraction of the study box (column = x eastward,
+     * row = y southward, 0..1), exactly like the volcano vent. Defaults to the
+     * box centroid (0.5,0.5) when absent. The GMPE distance field radiates from
+     * this cell, so the strongest shaking sits on the fault trace the user
+     * clicked, not the box centre.
+     */
+    epi_frac_x: z.number().min(0).max(1).optional(),
+    epi_frac_y: z.number().min(0).max(1).optional(),
   }),
   z.object({
     type: z.literal('tsunami_wave'),
@@ -130,6 +142,29 @@ export const SimulationRequestSchema = z.discriminatedUnion('type', [
     central_pressure_hpa: z.number().min(860).max(1020),
     radius_max_wind_km: z.number().min(5).max(300),
     duration_hours: durationHrs,
+    /**
+     * Track heading in degrees clockwise from north (270 = moving west).
+     * Omit to let the kernel auto-aim the storm at the pinned landfall point
+     * from the water centroid — a genuine water-side approach for any
+     * coastline orientation.
+     */
+    heading_deg: z.number().min(0).max(360).optional(),
+    /**
+     * Pinned landfall / track-center point as a fraction of the study box
+     * (column = x eastward, row = y southward, 0..1) — the eye passes this
+     * cell at mid-duration, like the earthquake epicentre. Defaults to the
+     * box centre (0.5,0.5) when absent.
+     */
+    track_frac_x: z.number().min(0).max(1).optional(),
+    track_frac_y: z.number().min(0).max(1).optional(),
+    /**
+     * Real terrain/bathymetry sampled from the Cesium globe for the drawn
+     * study box (row-major, row 0 = north, meters; negative = below sea).
+     * The kernel runs the surge/inundation on this grid instead of the
+     * synthetic coastal profile.
+     */
+    terrain: z.array(z.number()).max(65_536).optional(),
+    terrain_gs: z.number().int().min(2).max(256).optional(),
   }),
   z.object({
     type: z.literal('volcanic_eruption'),
@@ -423,7 +458,9 @@ export function buildSimulationRequest(
         type: 'earthquake_swarm' as const,
         magnitude: num('magnitudeMax'),
         depth_km: num('depthMax'),
-        duration_seconds: 30, // Fixed — see kaggle-kernels/earthquake-sim
+        // Optional site-condition override (NEHRP Vs30); the kernel defaults
+        // to 760 m/s rock when absent — never fabricated here.
+        ...(hasNum('vs30') ? { vs30: num('vs30') } : {}),
       };
       break;
     case 'tsunami_wave':
@@ -445,7 +482,15 @@ export function buildSimulationRequest(
         forward_speed_kmh: num('forwardSpeed'),
         central_pressure_hpa: num('pressure'),
         radius_max_wind_km: num('radius'),
-        duration_hours: num('landfallTime'),
+        // "Hours to Landfall" is the time until the eye reaches the pinned
+        // landfall point. The kernel centres the track at MID-duration
+        // (hurricane-sim/main.py: cx(T/2) = track point), so the run must span
+        // 2× the requested lead time — equal approach and inland-departure
+        // halves. Mapping it 1:1 made landfall happen at half the stated hour.
+        duration_hours: num('landfallTime') * 2,
+        // Track heading (deg clockwise from N). Omitted in auto mode → the
+        // kernel aims the storm at the pinned point from the water centroid.
+        ...(hasNum('heading') ? { heading_deg: num('heading') } : {}),
       };
       break;
     case 'volcanic_eruption':

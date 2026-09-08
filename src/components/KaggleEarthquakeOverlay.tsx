@@ -1,8 +1,11 @@
 /**
- * KaggleEarthquakeOverlay — Professional 3D Shaking Field Visualization.
+ * KaggleEarthquakeOverlay — 2D scenario ShakeMap.
  *
- * Renders peak ground acceleration (PGA), velocity (PGV), and macroseismic 
- * intensity (MMI) datasets computed by the 3D elastic wave simulation.
+ * Renders peak ground acceleration (PGA), velocity (PGV) and macroseismic
+ * intensity (MMI) from the 2D GMPE kernel as a FLAT georeferenced raster
+ * draped on the globe's real terrain. No vertical extrusion: PGA is an
+ * intensity, not an elevation — a displaced surface would be decoration,
+ * not data.
  */
 
 import React from 'react';
@@ -31,19 +34,24 @@ const SCHEMES = [
 ];
 
 const EARTHQUAKE_CONFIG: ScalarOverlayConfig = {
-  title: 'Earthquake 3D Wavefield',
+  title: 'Earthquake ShakeMap',
   accent: 'rgba(250, 204, 21, 0.95)',
   typeKey: 'earthquake_swarm',
   fields: {
     // Primary scalar array exported by main.py
     finalName: 'pga_cm_s2',
+    // ShakeMovie arrival-time series: the peak PGA field revealed as the
+    // S-wave front expands from the epicentre (final frame == pga_cm_s2).
+    seriesName: 'snapshots_pga',
   },
+  // Honest 2D: flat raster drape — PGA/PGV/MMI are intensities, not heights.
+  flat: true,
   defaultColormap: PGA_COLORMAP,
   surfaceColormap: 'inferno',
   arrowColormap: 'plasma',
-  exaggeration: 650,
+  exaggeration: 0,
   alphaFloor: 0.005,
-  sideTint: true,
+  sideTint: false,
   schemes: SCHEMES,
   legendUnit: 'cm/s²',
   auxFetchNames: ['mmi', 'pgv_cm_s', 'sa_1s_cm_s2'],
@@ -62,6 +70,7 @@ const EARTHQUAKE_CONFIG: ScalarOverlayConfig = {
       ['Max PGV', maxPGV != null ? `${maxPGV.toFixed(1)} cm/s` : '—'],
       ['Max MMI', maxMMI != null ? `Intensity ${maxMMI.toFixed(0)}` : '—'],
       ['Domain Extent', `${domainKm.toFixed(1)} km`],
+      ['Model', 'BSSA14 GMPE · ShakeMovie'],
     ];
   },
 };

@@ -1,8 +1,11 @@
 /**
- * KaggleHurricaneOverlay — 3D wind/pressure CFD.
+ * KaggleHurricaneOverlay — 2D Holland wind + storm-surge field.
  *
- * wind_speed is displaced vertically like a weather radar volume; the
- * wind_direction/azimuth field could be added as arrows after normalization.
+ * The Holland (1980) wind speed (m/s) is draped as a FLAT georeferenced
+ * raster on the globe's real terrain and animated over the snapshot series
+ * (the storm translating across the study box). No vertical extrusion: wind
+ * speed is an intensity, not an elevation — a displaced surface would be
+ * decoration. Surge / inundation / rainfall are exposed as auxiliary stats.
  */
 
 import {
@@ -30,26 +33,45 @@ const SCHEMES = [
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const HURRICANE_CONFIG: ScalarOverlayConfig = {
-  title: 'Hurricane',
+  title: 'Hurricane Wind & Surge',
   accent: 'rgba(56,189,248,0.95)',
   typeKey: 'hurricane_landfall',
   fields: {
+    // Sustained 10 m wind speed (m/s) — same scale in final + series so the
+    // flat legend is honest. snapshots_wind.npy is the [F,R,C] animation.
     finalName: 'wind_speed',
+    seriesName: 'snapshots_wind',
   },
+  // Honest 2D: flat raster drape — wind speed is an intensity, not a height.
+  flat: true,
   defaultColormap: WIND_COLORMAP,
   surfaceColormap: 'viridis',
   arrowColormap: 'viridis',
-  exaggeration: 160,
+  exaggeration: 0,
   alphaFloor: 0.005,
-  sideTint: true,
+  sideTint: false,
   schemes: SCHEMES,
   legendUnit: 'm/s',
-  auxFetchNames: ['rainfall', 'surge_height'],
+  auxFetchNames: ['surge_height', 'rainfall', 'inundation'],
   formatTime: (t) => `${t.toFixed(2)} h`,
-  formatStats: ({ surface }) => [
-    ['Max wind', `${surface.maxValue.toFixed(1)} m/s`],
-    ['Domain', '→'],
-  ],
+  formatStats: ({ surface, aux, times }) => {
+    const fieldMax = (name: string) => {
+      const g = aux[name];
+      if (!g || g.shape.length < 2) return 0;
+      let m = 0;
+      for (const v of g.values) if (Number.isFinite(v) && v > m) m = v;
+      return m;
+    };
+    const totalH = times.length > 0 ? times[times.length - 1] : 0;
+    return [
+      ['Peak wind', `${surface.maxValue.toFixed(1)} m/s`],
+      ['Peak surge', `${fieldMax('surge_height').toFixed(2)} m`],
+      ['Peak rain', `${fieldMax('rainfall').toFixed(0)} mm`],
+      ['Max inundation', `${fieldMax('inundation').toFixed(2)} m`],
+      ['Duration', `${totalH.toFixed(1)} h`],
+      ['Model', 'Holland 1980 + SWE'],
+    ];
+  },
 };
 
 export default function KaggleHurricaneOverlay(

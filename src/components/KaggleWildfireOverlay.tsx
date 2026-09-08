@@ -1,8 +1,9 @@
 /**
- * KaggleWildfireOverlay — 3D fire front CFD.
+ * KaggleWildfireOverlay — 2D Rothermel fire-front spread.
  *
- * Overlaid fire_intensity becomes the elevated surface; hotspots burn
- * with dynamic lighting; particles trace smoke embers.
+ * The burning-fraction field (0..1) is draped as a FLAT georeferenced raster
+ * on the globe's real terrain and animated over the snapshot series. No
+ * vertical extrusion: fire intensity is not an elevation.
  */
 
 import {
@@ -20,7 +21,7 @@ const FIRE_COLORMAP: ColorStop[] = [
 ];
 
 const SCHEMES = [
-  { name: 'default', label: 'Fire intensity' },
+  { name: 'default', label: 'Burning fraction' },
   { name: 'viridis', label: 'Viridis' },
   { name: 'turbo', label: 'Turbo' },
   { name: 'spectral', label: 'Spectral' },
@@ -34,22 +35,39 @@ export const WILDFIRE_CONFIG: ScalarOverlayConfig = {
   accent: 'rgba(248,113,113,0.95)',
   typeKey: 'wildfire_spread',
   fields: {
+    // Continuous burning fraction (0..1) — same scale in final + series so
+    // the flat legend is honest. (fire_intensity.npy holds the final frame.)
     finalName: 'fire_intensity',
-    seriesName: 'snapshots_state',
+    seriesName: 'snapshots_intensity',
   },
+  flat: true,
   defaultColormap: FIRE_COLORMAP,
   surfaceColormap: 'inferno',
   arrowColormap: 'plasma',
-  exaggeration: 280,
+  exaggeration: 0,
   alphaFloor: 0.005,
-  sideTint: true,
+  sideTint: false,
   schemes: SCHEMES,
-  legendUnit: 'kW/m',
+  legendUnit: '',
+  auxFetchNames: ['fire_state'],
   formatTime: (t) => `${t.toFixed(1)} h`,
-  formatStats: ({ surface }) => [
-    ['Max intensity', `${surface.maxValue.toFixed(2)} kW/m`],
-    ['Domain', '→'],
-  ],
+  formatStats: ({ surface, aux, times }) => {
+    // Burned fraction from the final state frame (0 unburned, 1 burning, 2 burned)
+    let burnedPct = 0;
+    const state = aux['fire_state'];
+    if (state && state.shape.length === 2) {
+      let burned = 0;
+      for (const v of state.values) if (v >= 1.5) burned++;
+      burnedPct = (burned / (state.shape[0] * state.shape[1])) * 100;
+    }
+    const totalH = times.length > 0 ? times[times.length - 1] : 0;
+    return [
+      ['Peak burning', surface.maxValue.toFixed(2)],
+      ['Burned area', `${burnedPct.toFixed(1)}%`],
+      ['Duration', `${totalH.toFixed(1)} h`],
+      ['Model', 'Rothermel 2D'],
+    ];
+  },
 };
 
 export default function KaggleWildfireOverlay(

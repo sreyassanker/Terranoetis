@@ -21,6 +21,9 @@ import {
   addDomainBoundary,
   schemeToCfa,
   toFrameSeries,
+  buildColoredCanvas,
+  addCanvasLayer,
+  sliceFrame,
   type ColorStop,
   type GridData,
 } from './shared';
@@ -78,7 +81,7 @@ export interface ScalarOverlayConfig {
     gs: number;
     cellSizeM: number;
     series: GridData | null;
-    surface: ScalarSurfacePrimitive;
+    surface: SurfaceLike;
     arrows: ArrowFieldPrimitive | null;
     aux: Record<string, GridData>;
     rect: Cesium.Rectangle;
@@ -99,6 +102,22 @@ export interface ScalarOverlayConfig {
   schemes?: SchemeOption[];
   /** Animation frames per second (default 4). */
   fps?: number;
+  /**
+   * Honest 2D mode: drape the scalar field as a georeferenced raster on the
+   * globe's real terrain instead of displacing a GPU surface vertically.
+   * For fields whose values are NOT elevations (PGA, wind speed, fire
+   * intensity) vertical extrusion is decorative — flat is the truthful render.
+   */
+  flat?: boolean;
+}
+
+/** Minimal surface contract shared by the GPU primitive and the flat drape. */
+interface SurfaceLike {
+  readonly maxValue: number;
+  setFrame(frame: number): void;
+  setOpacity(opacity: number): void;
+  setColormap(name: string): void;
+  destroy(): void;
 }
 
 export interface ScalarOverlayProps {
@@ -110,10 +129,16 @@ export interface ScalarOverlayProps {
   opacity?: number;
   onDismiss?: () => void;
   config: ScalarOverlayConfig;
+  /**
+   * The drawn study box (degrees). The simulation grid is a SQUARE sized to
+   * the box's longer side, so a non-square box would render past its edges;
+   * when provided, the flat drape is clipped to this rectangle.
+   */
+  studyBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
 }
 
 interface GpuStack {
-  surface: ScalarSurfacePrimitive;
+  surface: SurfaceLike;
   arrows: ArrowFieldPrimitive | null;
   frames: number;
   times: number[];
@@ -127,8 +152,9 @@ export function KaggleScalarOverlay({
   lat,
   lon,
   gridSizeKm,
-  opacity = 0.85,
+  opacity = 1,
   onDismiss,
+  studyBbox,
   config,
 }: ScalarOverlayProps) {
   const [loading, setLoading] = useState(false);
@@ -138,6 +164,13 @@ export function KaggleScalarOverlay({
   const [scheme, setScheme] = useState('default');
   const [dismissHovered, setDismissHovered] = useState(false);
   const [layerOpacity, setLayerOpacity] = useState(opacity);
+  // Mirror of layerOpacity readable from the long-lived flat-paint closure
+  // (buildOverlay must not re-run when the opacity slider moves).
+  const flatOpacityRef = useRef(layerOpacity);
+  useEffect(() => { flatOpacityRef.current = layerOpacity; });
+  // Same pattern for the initial colour scheme at build time.
+  const schemeRef = useRef(scheme);
+  useEffect(() => { schemeRef.current = scheme; });
   const [stats, setStats] = useState<Array<[string, string]> | null>(null);
 
   const loadedJobRef = useRef<string | null>(null);
@@ -263,6 +296,100 @@ export function KaggleScalarOverlay({
       const km = gridSizeKm && gridSizeKm > 0 ? gridSizeKm : extentKm(gs, cellSizeM);
       const rect = computeGridRectangle(lat, lon, km);
 
+      if (config.flat) {
+        // ── Honest 2D: drape the field as a georeferenced raster on the
+        //    globe's real terrain. No vertical displacement — the scalar is
+        //    an intensity, not an elevation. Animated when a snapshot series
+        //    exists (e.g. wildfire front spread). ──
+        const finalValues = Array.from(finalGrid.values).slice(0, gs * gs);
+        const seriesValues = seriesGrid && seriesGrid.shape.length === 3
+          ? seriesGrid
+          : null;
+        let maxValue = 0;
+        if (seriesValues) {
+          for (const v of seriesValues.values) if (Number.isFinite(v) && v > maxValue) maxValue = v;
+        } else {
+          for (const v of finalValues) if (Number.isFinite(v) && v > maxValue) maxValue = v;
+        }
+        if (maxValue === 0) maxValue = 1;
+        // Clip the square grid to the drawn study box: the grid spans a square
+        // of extent = max(box w,h) centred on the box, so a non-square box
+        // would spill past its short edges. Compute the box's fractional window
+        // inside the square and force cells outside it transparent.
+        let clip: { x0: number; y0: number; x1: number; y1: number } | undefined;
+        let displayRect = rect;
+        if (studyBbox) {
+          const bb = Cesium.Rectangle.fromDegrees(
+            studyBbox.lonMin, studyBbox.latMin, studyBbox.lonMax, studyBbox.latMax,
+          );
+          const wSpan = rect.east - rect.west;
+          const nSpan = rect.north - rect.south;
+          if (wSpan > 0 && nSpan > 0) {
+            clip = {
+              x0: Math.max(0, (bb.west - rect.west) / wSpan),
+              x1: Math.min(1, (bb.east - rect.west) / wSpan),
+              y0: Math.max(0, (rect.north - bb.north) / nSpan),
+              y1: Math.min(1, (rect.north - bb.south) / nSpan),
+            };
+          }
+          displayRect = bb;
+        }
+        const boundary = addDomainBoundary(
+          viewer,
+          displayRect,
+          Cesium.Color.fromCssColorString(config.accent),
+        );
+        let layer: Cesium.ImageryLayer | null = null;
+        let currentScheme = schemeRef.current;
+        // The play loop emits FRACTIONAL frames (for the GPU shader's lerp).
+        // The flat drape has no shader blend, so it must use INTEGER frame
+        // indices — a fractional sliceFrame() returns a misaligned slice — and
+        // must repaint only when the integer frame actually changes. Repainting
+        // on every rAF tick (~60 Hz) tears down the SingleTileImageryProvider
+        // before its PNG decodes, so the field never appears while playing.
+        let currentFrame = 0;
+        let lastPaintedFrame = -1;
+        const paint = () => {
+          if (layer) { try { viewer.scene.imageryLayers.remove(layer, true); } catch { /* gone */ } }
+          const values = seriesValues
+            ? sliceFrame(seriesValues as unknown as GridData, currentFrame)
+            : finalValues;
+          const canvas = buildColoredCanvas({
+            size: gs,
+            values,
+            colormap: getColormap(currentScheme, config.defaultColormap),
+            nodata: 0.01, // dry/unburned cells stay transparent; intensities above it show
+            maxValue,
+            alphaMin: 90,
+            alphaMax: 220,
+            clip,
+          });
+          layer = addCanvasLayer(viewer, canvas, rect, flatOpacityRef.current, `${config.typeKey}-flat`);
+          lastPaintedFrame = currentFrame;
+          try { viewer.scene.requestRender(); } catch { /* teardown */ }
+        };
+        paint();
+        const surface: SurfaceLike = {
+          get maxValue() { return maxValue; },
+          setFrame: (f) => {
+            const fi = Math.max(0, Math.min(frames - 1, Math.round(f)));
+            if (fi === lastPaintedFrame) return; // skip fractional-tick churn
+            currentFrame = fi;
+            paint();
+          },
+          setOpacity: (o) => {
+            if (layer) layer.alpha = o;
+            try { viewer.scene.requestRender(); } catch { /* teardown */ }
+          },
+          setColormap: (name) => { currentScheme = name; paint(); },
+          destroy: () => {
+            if (layer) { try { viewer.scene.imageryLayers.remove(layer, true); } catch { /* gone */ } }
+            try { viewer.entities.remove(boundary); } catch { /* gone */ }
+          },
+        };
+        stackRef.current = { surface, arrows: null, frames, times, boundary };
+      } else {
+
       const geoFrame = buildGeoFrame(lat, lon, gs, cellSizeM);
 
       // Build (or rebuild) the GPU stack for a given terrain heightfield.
@@ -342,6 +469,8 @@ export function KaggleScalarOverlay({
         buildStack,
       );
       buildStack(terrain);
+      }
+
       const surface = stackRef.current!.surface;
       const arrows = stackRef.current!.arrows;
 
@@ -353,6 +482,10 @@ export function KaggleScalarOverlay({
       try { viewer.scene.requestRender(); } catch { /* viewer may be torn down */ }
 
       loadedJobRef.current = jobId;
+
+      // Animation always starts at frame 0 (the t=0 state) — pressing Play
+      // runs the event from its beginning. The scrubber lets the user jump to
+      // the final extent if they want the completed map.
 
       // Stats
       if (config.formatStats) {
@@ -386,7 +519,7 @@ export function KaggleScalarOverlay({
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [viewer, jobId, lat, lon, gridSizeKm, config, cleanup]);
+  }, [viewer, jobId, lat, lon, gridSizeKm, studyBbox, config, cleanup]);
 
   useEffect(() => {
     if (jobId) {
@@ -440,10 +573,16 @@ export function KaggleScalarOverlay({
   useEffect(() => {
     const s = stackRef.current;
     if (!s) return;
-    const gpu = schemeToCfa(scheme, config.surfaceColormap);
-    s.surface.setColormap(gpu);
-    s.arrows?.setColormap(gpu);
-  }, [scheme, config.surfaceColormap]);
+    // Flat mode paints from the JS ColorStop ramps and understands the raw
+    // scheme names ('default', 'viridis', …); the GPU path needs the GLSL name.
+    if (config.flat) {
+      s.surface.setColormap(scheme);
+    } else {
+      const gpu = schemeToCfa(scheme, config.surfaceColormap);
+      s.surface.setColormap(gpu);
+      s.arrows?.setColormap(gpu);
+    }
+  }, [scheme, config.surfaceColormap, config.flat]);
 
   if (!jobId) return null;
   const seriesFrames = stackRef.current?.frames ?? 0;

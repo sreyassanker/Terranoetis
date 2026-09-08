@@ -147,6 +147,30 @@ FM_NAMES = {1: 'short_grass', 2: 'timber_grass_understory', 3: 'tall_grass',
             10: 'timber_litter_understory', 11: 'light_logging_slash',
             12: 'medium_logging_slash', 13: 'heavy_logging_slash'}
 
+# UI fuel classes -> Anderson (1982) NFFL model numbers. The client wire
+# contract sends `fuel_type` (grass/shrub/forest/urban); the kernel solves on
+# fm1-13. Previously fuel_type was silently dropped and every run used fm2.
+# Mapping rationale (Anderson 1982, GTR INT-122):
+#   grass  -> 2  timber-grass-understory (the model the ROS calibration is
+#               anchored to; representative herbaceous load)
+#   shrub  -> 5  brush (light woody shrub)
+#   forest -> 8  closed-timber-litter (forest floor, canopy-shaded grass)
+#   urban  -> 1  short-grass (lowest load / slowest spread — the closest
+#               Anderson proxy for a wildland-urban-interface mosaic; WUI
+#               structure fuels are outside the Anderson-13 system)
+FUEL_TYPE_TO_ANDERSON = {'grass': 2, 'shrub': 5, 'forest': 8, 'urban': 1}
+
+
+def resolve_fuel_model(params):
+    """Explicit `fuel_model` (int 1-13) wins; else map `fuel_type`; else 2."""
+    fm = params.get('fuel_model')
+    if fm is not None:
+        return int(np.clip(int(fm), 1, 13))
+    ft = params.get('fuel_type')
+    if ft is not None:
+        return FUEL_TYPE_TO_ANDERSON.get(str(ft).lower(), 2)
+    return 2
+
 # US customary -> SI conversion factors
 LBFT2_TO_KGM2 = 4.882427636   # lb/ft^2  -> kg/m^2
 FT_TO_M = 0.3048              # ft      -> m
@@ -376,7 +400,7 @@ def simulate_fire(params):
     extent_km = float(params.get('extent_km', 0.0))
     ignition_x = int(params.get('ignition_x', gs // 2))
     ignition_y = int(params.get('ignition_y', gs // 2))
-    fuel_model = int(params.get('fuel_model', 2))
+    fuel_model = resolve_fuel_model(params)
     dead_m_override = params.get('dead_moisture', params.get('fuel_moisture_dead', None))
     live_m_override = params.get('live_moisture', params.get('fuel_moisture_live', None))
     spotting = bool(params.get('spotting', True))
@@ -409,6 +433,7 @@ def simulate_fire(params):
     # Real terrain arrives compacted as `terrain_b64` (uint16) + `terrain_min`
     # + `terrain_span` + `terrain_gs` (simRunner shinks the 256x256 grid so it
     # fits Kaggle's kernel size limit), or as a raw `terrain` array.
+    terrain_source = 'synthetic'
     elev_raw = params.get('terrain')
     if elev_raw is None:
         terrain_b64 = params.get('terrain_b64')
@@ -430,6 +455,7 @@ def simulate_fire(params):
     if elev_raw is not None:
         elev = np.asarray(elev_raw, dtype=np.float64)
         if elev.shape == (gs, gs):
+            terrain_source = 'cesium_globe'
             gy, gx = np.gradient(elev, cell_m)
             slope_deg = np.clip(np.degrees(np.arctan(np.hypot(gx, gy))), 0.0, 45.0)
             aspect_rad = np.arctan2(-gy, -gx)  # downslope aspect, math convention
@@ -492,6 +518,21 @@ def simulate_fire(params):
     fuel_remaining = fuel_mult.copy()          # consumed as cells burn out
     print(f"[ROS] mean R={np.mean(R):.3f} m/s | max R={np.max(R):.3f} m/s | "
           f"mean I={np.mean(fline_kWm):.1f} kW/m")
+
+    # --- Per-cell residence time --------------------------------------------
+    # A cell must stay a *propagating source* long enough for the flame front
+    # to sweep across it and reach its neighbours. The relevant crossing time
+    # is the BACKING-fire one (cell_size / R_back, R_back = R·sqrt(1-e²) is the
+    # slowest direction), because the thin wind-driven ellipse only fills in
+    # once the source has burned long enough to pass fire to its shoulders —
+    # not just its head. The particle flame-flush time (384/sigma) alone is far
+    # shorter than this on a coarse (78 m) grid, so slow-ROS fuels (e.g. fm8
+    # forest-floor duff, which physically smoulders for a long time) burned out
+    # before igniting anything — the fire stalled at the ignition cell.
+    # Residence = clamp(flame-flush, cell-backing-sweep, 240 min).
+    R_back = R * np.sqrt(np.clip(1.0 - ecc ** 2, 1e-4, 1.0))
+    t_sweep_min = (cell_m / np.maximum(R_back, 1e-4)) / 60.0
+    t_res_field = np.clip(np.maximum(t_res_min, t_sweep_min), t_res_min, 240.0)
 
     # --- Adaptive time step -------------------------------------------------
     # The single-cell ignition stencil can only propagate ~1 cell per step, so
@@ -584,7 +625,7 @@ def simulate_fire(params):
 
         burning_mask = state == 1
         burn_timer[burning_mask] += dt_sim / 60.0
-        burnout = burning_mask & (burn_timer >= t_res_min)
+        burnout = burning_mask & (burn_timer >= t_res_field)
         state[burnout] = 2
         burn_timer[burnout] = 0.0
         fuel_remaining[burnout] = 0.0        # fuel consumed — cannot reignite/propagate
@@ -594,7 +635,7 @@ def simulate_fire(params):
         # marked burned and retains a low residual smoulder value.
         new_intensity = np.zeros_like(intensity)
         bm = state == 1
-        new_intensity[bm] = np.clip(burn_timer[bm] / max(0.3 * t_res_min, 1e-6), 0.0, 1.0)
+        new_intensity[bm] = np.clip(burn_timer[bm] / np.maximum(0.3 * t_res_field[bm], 1e-6), 0.0, 1.0)
         bd = state == 2
         new_intensity[bd] = 0.15
         intensity = new_intensity
@@ -639,6 +680,7 @@ def simulate_fire(params):
         'metadata': {'elapsed_seconds': elapsed,
                      'num_snapshots': len(snapshots),
                      'model': 'rothermel_anderson13',
+                     'terrain_source': terrain_source,
                      'fuel_model_table': f"Anderson(1982) NFFL fm{fuel_model}: "
                                           f"{FM_NAMES.get(fuel_model, 'unknown')}"},
     }
@@ -690,7 +732,7 @@ def main():
 
     try:
         result = simulate_fire(params)
-        out = '/kaggle/working'
+        out = os.environ.get('TERRANOETIS_OUT_DIR', '/kaggle/working')
         os.makedirs(out, exist_ok=True)
         np.save(f'{out}/fire_state.npy', result['final']['state'])
         np.save(f'{out}/fire_intensity.npy', result['final']['intensity'])
@@ -701,11 +743,18 @@ def main():
         if result['snapshots']:
             snap_data = np.stack([s['state'] for s in result['snapshots']])
             np.save(f'{out}/snapshots_state.npy', snap_data)
+            # Continuous burning fraction (0..1) per frame — the honest
+            # animation field for flat rendering (state codes are classes,
+            # not a magnitude).
+            snap_i = np.stack([s['intensity'] for s in result['snapshots']])
+            np.save(f'{out}/snapshots_intensity.npy', snap_i)
             np.save(f'{out}/snapshot_times.npy',
                     np.array([s['time_hours'] for s in result['snapshots']]))
         else:
             np.save(f'{out}/snapshots_state.npy',
                     np.expand_dims(result['final']['state'], axis=0))
+            np.save(f'{out}/snapshots_intensity.npy',
+                    np.expand_dims(result['final']['intensity'], axis=0))
             np.save(f'{out}/snapshot_times.npy', np.array([0.0]))
         result['params']['lat'] = params.get('lat', 0)
         result['params']['lon'] = params.get('lon', 0)
@@ -713,14 +762,15 @@ def main():
                 'final_stats': {'burning_cells': result['final']['burning_cells'],
                                 'burned_cells': result['final']['burned_cells'],
                                 'total_burned_pct': result['final']['total_burned_pct']},
-                'snapshot_count': len(result['snapshots'])}
+                'snapshot_count': len(result['snapshots']),
+                'completed': True}
         with open(f'{out}/metadata.json', 'w') as f:
             json.dump(_json_safe(meta), f, indent=2)
         print(f"\n{'='*60}\nSIMULATION COMPLETE\n{'='*60}")
     except Exception as e:
         print(f"\n[ERROR] {e}")
         traceback.print_exc()
-        with open('/kaggle/working/error.log', 'w') as f:
+        with open(os.path.join(os.environ.get('TERRANOETIS_OUT_DIR', '/kaggle/working'), 'error.log'), 'w') as f:
             traceback.print_exc(file=f)
         raise
 
