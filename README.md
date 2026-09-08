@@ -125,7 +125,8 @@ terranoetis/
 │   ├── BACKEND.md
 │   ├── MODELS.md
 │   ├── DEPLOYMENT.md
-│   ├── index.html                # Standalone project landing page
+│   ├── index.html                # Docs site entry (redirects to platform-overview.html)
+│   ├── platform-overview.html    # Standalone project landing page
 │   └── Research papers/          # Source PDFs for the equation catalog
 │
 ├── e2e/                          # Playwright browser tests (7 specs, 12 tests)
