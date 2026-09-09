@@ -4,8 +4,13 @@
 
 A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3D globe with a comprehensive backend serving live environmental data, satellite imagery, **150 real scientific equation engines**, physics simulations, realtime voice, and AI-driven cognition. Unlike a passive globe viewer, Terranoetis **computes** — it runs literature-grounded equations over live data, reasons about what it sees, and paints real results back onto the Earth.
 
+<p align="center">
+  <a href="https://sreyassanker.github.io/Terranoetis/"><strong>Documentation site → https://sreyassanker.github.io/Terranoetis</strong></a>
+</p>
+
 <div align="center">
 
+[![Website](https://img.shields.io/badge/Docs_Site-2560EB?style=for-the-badge&logo=githubpages&logoColor=white)](https://sreyassanker.github.io/Terranoetis/)
 [![Website](https://img.shields.io/badge/Portfolio-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://sreyassanker.vercel.app)
 [![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sreyassanker)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/in/sreyassanker)
