@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>API Reference — Terranoetis Documentation</title>
-<meta name="description" content="Terranoetis exposes 360+ REST endpoints (398 handler registrations across app/router verbs under server/, counted 2026-09-09; GET/POST/PUT/DELETE/PATCH) pl…">
+<meta name="description" content="Terranoetis exposes 360+ REST endpoints (398 handler registrations across app/router verbs under server/; GET/POST/PUT/DELETE/PATCH) plus real-time WebSock…">
 <link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/narratives/API.html">
 <link rel="stylesheet" href="../assets/docs.css">
 <link rel="icon" href="../assets/img/terranoetis.png" type="image/png">
 <meta property="og:title" content="API Reference — Terranoetis Documentation">
-<meta property="og:description" content="Terranoetis exposes 360+ REST endpoints (398 handler registrations across app/router verbs under server/, counted 2026-09-09; GET/POST/PUT/DELETE/PATCH) pl…">
+<meta property="og:description" content="Terranoetis exposes 360+ REST endpoints (398 handler registrations across app/router verbs under server/; GET/POST/PUT/DELETE/PATCH) plus real-time WebSock…">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/API.html">
 <meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
@@ -86,14 +86,13 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-09</span>
         
       </div>
       
       
       <div class="prose">
 
-<p>Terranoetis exposes <strong>360+ REST endpoints</strong> (398 handler registrations across <code>app</code>/router verbs under <code>server/</code>, counted 2026-09-09; <code>GET</code>/<code>POST</code>/<code>PUT</code>/<code>DELETE</code>/<code>PATCH</code>) plus real-time <strong>WebSocket</strong> (<code>/ws/agent</code>, <code>/ws/voice</code>) and <strong>SSE</strong> channels. All API routes are served under <code>/api</code>. Authentication uses JWT bearer tokens with role-based access control (RBAC).</p>
+<p>Terranoetis exposes <strong>360+ REST endpoints</strong> (398 handler registrations across <code>app</code>/router verbs under <code>server/</code>; <code>GET</code>/<code>POST</code>/<code>PUT</code>/<code>DELETE</code>/<code>PATCH</code>) plus real-time <strong>WebSocket</strong> (<code>/ws/agent</code>, <code>/ws/voice</code>) and <strong>SSE</strong> channels. All API routes are served under <code>/api</code>. Authentication uses JWT bearer tokens with role-based access control (RBAC).</p>
 
 
 <blockquote>
@@ -1066,7 +1065,7 @@
 
 <p>Route handlers return <code>{ &quot;error&quot;: &quot;&lt;message&gt;&quot; }</code>; the central error middleware (body-parse 400/413/415, 404 not-found, unhandled 500s) returns <code>{ &quot;error&quot;: { &quot;code&quot;: &quot;&lt;CODE&gt;&quot;, &quot;message&quot;: &quot;&lt;message&gt;&quot; } }</code>. Authentication failures return <code>{ &quot;error&quot;: &quot;Missing or invalid Authorization header...&quot; }</code>.</p></div>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
+        <p>Terranoetis v3.0.0 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

@@ -86,7 +86,6 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-09</span>
         <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="../narratives/capabilities/landslide.html">Read the full narrative</a></p>
@@ -162,10 +161,10 @@
 <blockquote class="verbatim">'The genuine conservation proof is the closed-box test (verify_closed_box) and the grid-convergence script, not this algebraic bookkeeping.' · axis-mapping note: 'The old mapping was swapped, which on *real* terrain would drive debris across the slope instead of down it' · susceptibility raw mask note: 'The raw mask (susceptibility &gt; 0.3) covers ~99% of the grid, so the &quot;pile&quot; is a grid-wide slab that blows up and renders as a hollow rim.' · &quot;Certified-grade&quot; debris-flow modelling requires the free parameters to be fit to a real slide, not guessed … Sample runout resources: Hungr et al. (2001) runout databases<footer><cite class="src">kaggle-kernels/landslide-sim/main.py:712-714,465-475,391-393</cite> <cite class="src">kaggle-kernels/landslide-sim/calibrate.py:4-14</cite></footer></blockquote>
 <p>The closed-box verifier exists in main.py but is NOT invoked by main() (unlike flood/tsunami/volcano); the authoritative gates are validate_convergence.py (conservation 1e-8, runout refinement ≤ 0.25, upsampling RMSE ≤ max(10 %, 30 m)) and the /api/kaggle/calibrate grid fit. <cite class="src">kaggle-kernels/landslide-sim/main.py:808-857</cite> <cite class="src">kaggle-kernels/landslide-sim/validate_convergence.py:19-21,35-98</cite></p>
 <h2 id="measured">Measured runs and timings</h2>
-<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-09. These are observations of one environment, not performance guarantees.</caption>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2). These are observations of one environment, not performance guarantees.</caption>
 <thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
 <tbody>
-<tr><td>Grid-convergence script re-executed 2026-09-09</td><td>PASS — conservation |Δ| = 0 with and without entrainment; runout 3.74→2.87→2.95 km over gs 64→128→256 (fixed 5.12 km domain, dx 80→40→20 m); area refinement Δ1 = 1.386 → Δ2 = 0.050 (gate ≤ 0.25); terrain upsample RMSE 20.6 m = 1.5 % of 1,381 m relief; exit 0</td></tr>
+<tr><td>Grid-convergence script re-executed</td><td>PASS — conservation |Δ| = 0 with and without entrainment; runout 3.74→2.87→2.95 km over gs 64→128→256 (fixed 5.12 km domain, dx 80→40→20 m); area refinement Δ1 = 1.386 → Δ2 = 0.050 (gate ≤ 0.25); terrain upsample RMSE 20.6 m = 1.5 % of 1,381 m relief; exit 0</td></tr>
 <tr><td>Representative quake-trigger run (128², M 6.5, μ 0.25, ξ 300, 5 min sim)</td><td>max depth 157 m (coarse-grid pooling), max velocity 26.2 m/s, runout 4.0 km, affected 5.1 km², volume 24.5 M m³; in-domain mass ledger drift 1.56 % (boundary exchange ledger reported separately); wall 2.7 s</td></tr>
 <tr><td>Rain + entrainment run (96², 300 mm, rate 0.005/s, bed 4 m)</td><td>max depth 216 m, velocity 21.6 m/s, runout 6.2 km, affected 25.5 km²; entrained +126 M m³ accounted; mass drift 0.0000 %; wall 2.0 s</td></tr>
 <tr><td>Calibration endpoint semantics</td><td>μ×ξ grid search {0.15…0.40}×{100…800} minimising |runout − observed| (calibrate.py:24-25,64) — exercised by the server localRunner (spawned python3, in-process)</td></tr>
@@ -183,7 +182,7 @@ python3 calibrate.py --observed-runout-km 2.9 --grid-size 128
 curl -s -X POST http://localhost:3001/api/kaggle/landslide/quantify \
   -H 'Content-Type: application/json' -d '{ &quot;request&quot;: {…landslide params…}, &quot;samples&quot;: 16 }'</code></pre>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
+        <p>Terranoetis v3.0.0 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

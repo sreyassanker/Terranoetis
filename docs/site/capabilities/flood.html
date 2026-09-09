@@ -86,7 +86,6 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-09</span>
         <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="../narratives/capabilities/flood.html">Read the full narrative</a></p>
@@ -147,7 +146,7 @@
 <blockquote class="verbatim">'covers the entire DEM domain (not just valleys downstream of a breach)' · solver attribution: 'Rusanov (local Lax-Friedrichs) for continuity with hydrostatic reconstruction (Audusse et al. 2004), semi-implicit Bates (2010) formulation for Manning friction.' · boundary: 'the boundary can remove water but can never create it. (np.minimum = drain only.)' · truncation warning: '[WARNING] Simulation truncated at t=…h — results are partial'<footer><cite class="src">kaggle-kernels/flood-sim/main.py:8-9,18-20,614-617,698-700</cite></footer></blockquote>
 <p>Two fatal conservation gates run before the simulation (each raises and aborts): a closed-box mass-conservation test (tol 1e-9) and a lake-at-rest well-balanced test (tol 1e-6, 10 % sloped bed): <em>"Water would spontaneously flow on sloped terrain."</em> <cite class="src">kaggle-kernels/flood-sim/main.py:121-366,771-783</cite></p>
 <h2 id="measured">Measured runs and timings</h2>
-<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-09. These are observations of one environment, not performance guarantees.</caption>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2). These are observations of one environment, not performance guarantees.</caption>
 <thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
 <tbody>
 <tr><td>Local direct run (64², 300 mm rain, 4 h, sat 0.8, 20 km box)</td><td>Solver completed: max depth 4.01 m, flooded 78.2 % of grid; mass balance rainfall 120.0 M m³, infiltration 7.04 M, outflow 7.73 M, clip-loss 0.000 M, closure error 0.0000 %; wall 7.5 s. Both conservation gates ran first (stdout).</td></tr>
@@ -165,7 +164,7 @@ cd /tmp &amp;&amp; mkdir fl &amp;&amp; cp &lt;repo&gt;/kaggle-kernels/flood-sim/
 curl -s -X POST http://localhost:3001/api/kaggle/simulate \
   -H 'Content-Type: application/json' -d '{&quot;type&quot;:&quot;flood_inundation&quot;,&quot;lat&quot;:29.76,&quot;lon&quot;:-95.37,&quot;grid_size&quot;:256,&quot;extent_km&quot;:20,&quot;rainfall_mm&quot;:300,&quot;duration_hours&quot;:4,&quot;soil_saturation&quot;:0.8,&quot;dam_breach&quot;:true}'</code></pre>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
+        <p>Terranoetis v3.0.0 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

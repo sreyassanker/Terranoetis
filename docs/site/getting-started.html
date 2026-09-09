@@ -85,8 +85,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-09</span>
-        <span><span class="tag tag-measured">ALL STEPS EXECUTED 2026-09-09</span></span>
+        <span><span class="tag tag-measured">ALL STEPS EXECUTED</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="narratives/getting-started.html">Read the full narrative</a></p>
       <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
@@ -118,7 +117,7 @@ npm run dev            # Vite :3000 + Express :3001 (proxy /api → :3001)</code
 <h2 id="verify">Verify the stack</h2>
 <h3 id="verify-cmds">Commands and the actual observed response</h3>
 <pre><code>curl -s http://localhost:3001/api/health
-# measured 2026-09-09 (fresh boot, no API keys beyond .env):
+# measured (fresh boot, no API keys beyond .env):
 # {&quot;status&quot;:&quot;degraded&quot;,&quot;checks&quot;:{&quot;db&quot;:&quot;ok&quot;,&quot;gemini&quot;:&quot;degraded&quot;,&quot;memory&quot;:&quot;ok&quot;,
 #  &quot;reflex&quot;:&quot;ok&quot;,&quot;forks&quot;:&quot;ok&quot;,&quot;dream&quot;:&quot;ok&quot;,&quot;entropy&quot;:&quot;ok&quot;,&quot;discovery&quot;:&quot;ok&quot;,
 #  &quot;pubsub&quot;:&quot;ok&quot;,&quot;redis&quot;:&quot;ok/PONG&quot;},&quot;uptime_ms&quot;:24305,&quot;version&quot;:&quot;3.1&quot;}
@@ -157,7 +156,7 @@ curl -s -o pga.npy http://localhost:3001/api/kaggle/simulate/sim_44d5c7d7/grid/p
 <li>How we verified any of it: <a href="methodology.html">Methodology &amp; verification</a>.</li>
 <li>Running it for real: <a href="deployment.html">Deployment &amp; operations</a>.</li></ul>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
+        <p>Terranoetis v3.0.0 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

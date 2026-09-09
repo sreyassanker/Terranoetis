@@ -85,8 +85,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-09</span>
-        <span><span class="tag tag-measured">REVIEWED 2026-09-09</span></span>
+        
       </div>
       
       <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
@@ -99,10 +98,10 @@
 <div class="callout callout-verified" role="note"><div class="callout-title">Accuracy policy</div><p>Physics statements carry a <code>file:line</code> citation into the source. Executed evidence is tagged <span class="tag tag-measured">MEASURED</span>. See <a href="methodology.html">Methodology &amp; verification</a> and its <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p></div>
 <h2 id="verified-facts">Verified at a glance</h2>
 <dl class="metrics"><dt><strong>Analytical engines</strong></dt><dd>150 (ids 1–150, no gaps) across 7 parts and 26 domains — counted programmatically <cite class="src">src/data/analyticalModels.ts:801+</cite><cite class="src">server/analytical-models/engine.ts:1-174</cite></dd>
-<dt><strong>Equation-engine tests</strong></dt><dd>1,653 unit tests passed (141 files, 22.85 s wall) with <code>npm run test:unit</code> on 2026-09-09 <cite class="src">measured</cite></dd>
+<dt><strong>Equation-engine tests</strong></dt><dd>1,653 unit tests passed (141 files, 22.85 s wall) with <code>npm run test:unit</code> <cite class="src">measured</cite></dd>
 <dt><strong>Integration tests</strong></dt><dd>49 passed (5 files, 5.66 s) with <code>npm run test:integration</code> <cite class="src">measured</cite></dd>
 <dt><strong>Simulation kernels</strong></dt><dd>7 Python kernels; 3 execute locally on CPU (earthquake, wildfire, hurricane); 4 dispatch through Kaggle. All are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the GPU accelerator in its metadata. <cite class="src">server/kaggle/simRunner.ts:126-141</cite> <cite class="src">kaggle-kernels/*/kernel-metadata.json</cite></dd>
-<dt><strong>Hazard physics</strong></dt><dd>All 7 kernels executed locally in this review; representative + boundary inputs, conservation gates, convergence and benchmark suites re-run — see <a href="methodology.html#evidence-runs">Evidence runs</a> <cite class="src">measured 2026-09-09</cite></dd>
+<dt><strong>Hazard physics</strong></dt><dd>All 7 kernels executed locally in this review; representative + boundary inputs, conservation gates, convergence and benchmark suites re-run — see <a href="methodology.html#evidence-runs">Evidence runs</a> <cite class="src">measured</cite></dd>
 <dt><strong>Citations</strong></dt><dd>150 model reference strings; 80 contain a DOI, 12 an ISBN, 4 flagged NO-DOI; spot-checked DOI 10.1785/0120130065 resolves (HTTP 302) <cite class="src">src/data/analyticalModels.ts (counted)</cite></dd></dl>
 <h2 id="explore">Where to go next</h2>
 <div class="card-grid"><div class="card"><a href="getting-started.html">Getting started</a><p>Install, run, verify: the five-minute local setup with measured outputs.</p></div>
@@ -151,7 +150,7 @@
 <tr><td><code>.github/workflows/</code></td><td>ci.yml (10 jobs) + docs.yml (quality gate)</td></tr>
 </tbody></table></div>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
+        <p>Terranoetis v3.0.0 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

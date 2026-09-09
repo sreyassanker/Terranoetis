@@ -110,7 +110,7 @@ export const HAZARDS = {
       ['Kernel, M 7.5 · 12 km · Vs30 760 · 100 km box · 256²', 'max PGA 251.0 cm/s², max PGV 27.5 cm/s, max MMI 7.0, area(MMI ≥ 6) 4,439 km²; kernel compute 0.0083 s; total wall 0.12 s (incl. interpreter start)'],
       ['Boundary cases', 'M 3.0 / 0.5 km / Vs30 150 and M 9.7 / 700 km / Vs30 1500 both complete; M 2.9 rejected with "magnitude 2.9 outside the 3.0-9.7 GMPE validity range"; depth 750 km rejected with "depth_km 750.0 outside 0.5-700 km"'],
       ['End-to-end via POST /api/kaggle/simulate', 'job sim_44d5c7d7 (M 7.2, 128², 100 km box): status running→complete 166 ms after submission; result metadata cites "BSSA14 … doi:10.1785/0120130065"; grid + GeoTIFF endpoints returned HTTP 200 (296,648-byte npy; valid 128×128 TIFF)'],
-      ['DOI resolvability', 'https://doi.org/10.1785/0120130065 responds 302 (resolvable) — observed 2026-09-09'],
+      ['DOI resolvability', 'https://doi.org/10.1785/0120130065 responds 302 (resolvable)'],
     ],
     repro: `# 1) via the running server (same path the web UI uses):\nnpm run dev:server    # Express on :3001\n\ncurl -s -X POST http://localhost:3001/api/kaggle/simulate \\\n  -H 'Content-Type: application/json' -d '{\n    "type":"earthquake_swarm","lat":36.1,"lon":139.7,\n    "grid_size":128,"extent_km":100,"magnitude":7.2,\n    "depth_km":15,"vs30":760,"epi_frac_x":0.4,"epi_frac_y":0.5 }'\n# → {"jobId":"sim_…","status":"running","streamUrl":"/api/kaggle/simulate/…/stream"}\n\ncurl -s http://localhost:3001/api/kaggle/simulate/<jobId>/results\ncurl -s -o pga.npy http://localhost:3001/api/kaggle/simulate/<jobId>/grid/pga_cm_s2\n\n# 2) kernel directly (honours TERRANOETIS_OUT_DIR):\ncd kaggle-kernels/earthquake-sim && mkdir -p /tmp/eq && \\\n  echo '{"grid_size":128,"magnitude":7.5,"depth_km":12,"vs30":760,"extent_km":100}' > /tmp/eq/params.json && \\\n  (cd /tmp/eq && TERRANOETIS_OUT_DIR=/tmp/eq python3 <repo>/kaggle-kernels/earthquake-sim/main.py)`,
   },
@@ -395,7 +395,7 @@ export const HAZARDS = {
     wireType: 'volcanic_eruption',
     proseMd: 'volcano.md',
     mode: 'Kaggle kernel (numpy-only, CPU accelerator instance); local in-process use for calibration & Monte-Carlo',
-    status: 'MEASURED locally — benchmark suite 4/4 PASS re-executed 2026-09-09',
+    status: 'MEASURED locally — benchmark suite 4/4 PASS re-executed',
     runCite: `${src(SR, '126-141')} ${src('server/kaggle/localRunner.ts', '1-15')} ${src(V, '607-680,1383')}`,
     intro: `The eruption scenario couples three physics modules: (1) lava flow as a 2D conservative shallow-water system with Rusanov fluxes, Arrhenius temperature-dependent viscosity, Bingham yield strength, Stefan–Boltzmann radiation, crust insulation and enthalpy-porosity solidification; (2) the eruption column as a 1D Morton–Taylor buoyant plume integrated to neutral buoyancy; and (3) ash as a vertically integrated advection–diffusion–settling PDE over a height-resolved wind field, with Schiller–Naumann particle drag. Terrain is REAL ONLY — the kernel refuses to run without sampled relief.`,
     headerQuote: {
@@ -456,7 +456,7 @@ export const HAZARDS = {
     },
     gate: `Before emitting, main() runs the flat closed-box conservation proof (gs = 64, 2000 steps, tol 1e-3); the suite also carries verify_steep_closed_box (well-balanced + mass on 30° slopes). ${src(V, '607-680,1383-1386')}`,
     measured: [
-      ['Benchmark suite re-executed 2026-09-09 (run_benchmarks.py)', '4/4 PASS — B1 flat closed-box mass; B2 steep-terrain well-balanced mass; B3 Pinatubo 1991 ash isopach vs observed thickness–distance axes; B4 Kilauea 2018: modelled runout 15.0 km vs observed ~13.5 km, mass budget True, downslope True'],
+      ['Benchmark suite re-executed (run_benchmarks.py)', '4/4 PASS — B1 flat closed-box mass; B2 steep-terrain well-balanced mass; B3 Pinatubo 1991 ash isopach vs observed thickness–distance axes; B4 Kilauea 2018: modelled runout 15.0 km vs observed ~13.5 km, mass budget True, downslope True'],
       ['Representative VEI 3 ×2 mass, 12 h, 20 km box on synthetic cone terrain (test input)', 'MER 5.56e+5 kg/s; Morton–Taylor plume integrates to 788 m while the VEI table column (10,000 m) drives ash-column height — both reported; ash budget Δ = 7.6e-15 relative, lava mass Δ = 0.0; wall 70.6 s at 156 m cells (crater pooling at this coarse resolution)'],
       ['Boundary VEI 5, 800 µm ash, K = 1000, shear 0.8, 96² / 40 km', 'MER 2.22e8 kg/s; M-T plume 27,920 m (table 40,000 m); v_t(800 µm) = 3.17 m/s; both budgets PASS (Δ ≤ 2e-14); wall 3.6 s'],
       ['Output limitation', 'main() writes to /kaggle/working unconditionally — local calibration/Monte-Carlo instead imports simulate_volcano() in-process via localRunner.ts; standalone local main.py runs reach the final budgets but fail at the write step (observed: Read-only file system \'/kaggle\')'],
@@ -526,7 +526,7 @@ export const HAZARDS = {
     },
     gate: `The closed-box verifier exists in main.py but is NOT invoked by main() (unlike flood/tsunami/volcano); the authoritative gates are validate_convergence.py (conservation 1e-8, runout refinement ≤ 0.25, upsampling RMSE ≤ max(10 %, 30 m)) and the /api/kaggle/calibrate grid fit. ${src(L, '808-857')} ${src('kaggle-kernels/landslide-sim/validate_convergence.py', '19-21,35-98')}`,
     measured: [
-      ['Grid-convergence script re-executed 2026-09-09', 'PASS — conservation |Δ| = 0 with and without entrainment; runout 3.74→2.87→2.95 km over gs 64→128→256 (fixed 5.12 km domain, dx 80→40→20 m); area refinement Δ1 = 1.386 → Δ2 = 0.050 (gate ≤ 0.25); terrain upsample RMSE 20.6 m = 1.5 % of 1,381 m relief; exit 0'],
+      ['Grid-convergence script re-executed', 'PASS — conservation |Δ| = 0 with and without entrainment; runout 3.74→2.87→2.95 km over gs 64→128→256 (fixed 5.12 km domain, dx 80→40→20 m); area refinement Δ1 = 1.386 → Δ2 = 0.050 (gate ≤ 0.25); terrain upsample RMSE 20.6 m = 1.5 % of 1,381 m relief; exit 0'],
       ['Representative quake-trigger run (128², M 6.5, μ 0.25, ξ 300, 5 min sim)', 'max depth 157 m (coarse-grid pooling), max velocity 26.2 m/s, runout 4.0 km, affected 5.1 km², volume 24.5 M m³; in-domain mass ledger drift 1.56 % (boundary exchange ledger reported separately); wall 2.7 s'],
       ['Rain + entrainment run (96², 300 mm, rate 0.005/s, bed 4 m)', 'max depth 216 m, velocity 21.6 m/s, runout 6.2 km, affected 25.5 km²; entrained +126 M m³ accounted; mass drift 0.0000 %; wall 2.0 s'],
       ['Calibration endpoint semantics', 'μ×ξ grid search {0.15…0.40}×{100…800} minimising |runout − observed| (calibrate.py:24-25,64) — exercised by the server localRunner (spawned python3, in-process)'],

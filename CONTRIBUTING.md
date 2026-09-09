@@ -28,7 +28,7 @@ The client runs on `http://localhost:3000` and the server on `http://localhost:3
 
 ```bash
 # Unit + integration tests
-npm test              # vitest — 1,702 tests (1,653 unit + 49 integration; measured 2026-09-09)
+npm test              # vitest — 1,702 tests (1,653 unit + 49 integration)
 
 # TypeScript type checking
 npx tsc -p tsconfig.server.json --noEmit

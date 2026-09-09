@@ -128,7 +128,7 @@ terranoetis/
 │   ├── middleware/               # JWT auth, rate limiter, validation, audit
 │   ├── observability/            # Pino, in-house OpenTelemetry-style tracing, Sentry
 │   ├── selfImprover.ts           # Feedback-driven prompt evolution
-│   └── __tests__/                # 1,700+ tests (1,653 unit + 49 integration passing, measured 2026-09-09)
+│   └── __tests__/                # 1,700+ tests (1,653 unit + 49 integration passing)
 │
 ├── kaggle-kernels/               # 7 NumPy physics kernels pushed locally or to Kaggle (earthquake, tsunami, ...)
 ├── server/plugins/               # Plugin system: install from URL / GitHub / raw code / zip

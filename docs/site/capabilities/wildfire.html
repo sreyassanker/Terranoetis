@@ -86,7 +86,6 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-09</span>
         <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="../narratives/capabilities/wildfire.html">Read the full narrative</a></p>
@@ -163,7 +162,7 @@ Physics references:
 <blockquote class="verbatim">the kernel must never silently invent topography for a study area the user has already drawn on the globe · Previously fuel_type was silently dropped and every run used fm2. · slow-ROS fuels (e.g. fm8 forest-floor duff) … burned out before igniting anything — the fire stalled at the ignition cell. Residence = clamp(flame-flush, cell-backing-sweep, 240 min). · WUI structure fuels are outside the Anderson-13 system<footer><cite class="src">kaggle-kernels/fire-sim/main.py:425-426,151-152,527-532,158-160</cite></footer></blockquote>
 <p>A non-fatal validation prints the no-wind/no-slope ROS of the active fuel against the 0.105 m/s reference (± 0.01) — "PASS" or "CHECK" <cite class="src">kaggle-kernels/fire-sim/main.py:501-508</cite>. Wall-clock cap default 480 s bounds the march <cite class="src">kaggle-kernels/fire-sim/main.py:407,568-570</cite>.</p>
 <h2 id="measured">Measured runs and timings</h2>
-<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-09. These are observations of one environment, not performance guarantees.</caption>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2). These are observations of one environment, not performance guarantees.</caption>
 <thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
 <tbody>
 <tr><td>Calibration fuel (fm2 grass, no wind)</td><td>ROS_nowind_noslope = 0.103 m/s vs reference 0.105 → PASS (observed stdout)</td></tr>
@@ -184,7 +183,7 @@ cd /tmp &amp;&amp; mkdir fire &amp;&amp; cp &lt;repo&gt;/kaggle-kernels/fire-sim
   echo '{&quot;grid_size&quot;:64,&quot;wind_speed_ms&quot;:0,&quot;fuel_type&quot;:&quot;grass&quot;,&quot;humidity_pct&quot;:15,&quot;duration_hours&quot;:1,&quot;extent_km&quot;:10,&quot;seed&quot;:1}' &gt; params.json &amp;&amp; \
   TERRANOETIS_OUT_DIR=$PWD python3 main.py | grep VALIDATE</code></pre>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
+        <p>Terranoetis v3.0.0 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

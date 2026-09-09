@@ -86,7 +86,6 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-09</span>
         
       </div>
       
@@ -487,7 +486,7 @@ docker compose up -d    # Restart with rebuilt images
 <h3 id="kaggle-simulation-kernels-optional-setup">Kaggle simulation kernels (optional setup)</h3>
 
 
-<p>Four physics simulations (tsunami, volcano, landslide, flood) are dispatched to <strong>Kaggle kernels</strong> as their execution venue. All kernels are NumPy CPU code (no GPU imports); only flood-sim requests Kaggle's GPU accelerator in its kernel metadata, so “GPU kernels” is a hosting term here, not a compute claim (verified 2026-09-09 — see <a href="../capabilities/hazard-simulations.html#modes">modes table</a>). The three 2D scenarios — earthquake, wildfire, and hurricane — finish in seconds on a laptop CPU and run <strong>locally via <code>python3</code></strong> (see <code>server/kaggle/simRunner.ts</code>; measured end-to-end job completion of 166 ms for the earthquake kernel), so they work without any token. To enable the Kaggle-routed kernels:</p>
+<p>Four physics simulations (tsunami, volcano, landslide, flood) are dispatched to <strong>Kaggle kernels</strong> as their execution venue. All kernels are NumPy CPU code (no GPU imports); only flood-sim requests Kaggle's GPU accelerator in its kernel metadata, so “GPU kernels” is a hosting term here, not a compute claim (verified — see <a href="../capabilities/hazard-simulations.html#modes">modes table</a>). The three 2D scenarios — earthquake, wildfire, and hurricane — finish in seconds on a laptop CPU and run <strong>locally via <code>python3</code></strong> (see <code>server/kaggle/simRunner.ts</code>; measured end-to-end job completion of 166 ms for the earthquake kernel), so they work without any token. To enable the Kaggle-routed kernels:</p>
 
 
 <ol>
@@ -572,7 +571,7 @@ docker compose up -d    # Restart with rebuilt images
 
 
 <ul>
-<li><strong>Node version:</strong> 20 (specified in workflow and <code>.nvmrc</code>; the 2026-09-09 verification pass ran Node 26 with 1,653 unit + 49 integration tests passing)</li>
+<li><strong>Node version:</strong> 20 (specified in workflow and <code>.nvmrc</code>; the verification pass ran Node 26 with 1,653 unit + 49 integration tests passing)</li>
 <li><strong>Docs quality gate:</strong> <code>.github/workflows/docs.yml</code> runs on pushes/PRs to <code>main</code>/<code>develop</code> touching <code>docs/site/**</code>, <code>scripts/docs/**</code>, <code>README.md</code>, <code>CONTRIBUTING.md</code>, <code>SECURITY.md</code>, or the workflow itself; <code>deploy-docs.yml</code> publishes <code>docs/site/</code> to GitHub Pages (workflow deploy; also manually dispatchable)</li>
 <li><strong>Browser tests</strong> run headless in CI on <code>ubuntu-latest</code> using Chromium with software WebGL (<code>--use-gl=angle --enable-unsafe-swiftshader</code>), so no physical display/GPU is required. They are still the most environment-sensitive job and can be flaky.</li>
 <li><strong>Redis</strong> is optional in both development and CI (the server falls back to SQLite gracefully)</li>
@@ -640,7 +639,7 @@ docker compose up -d    # Restart with rebuilt images
 <li>Seal the Docker network if deploying in a multi-tenant environment</li>
 </ul></div>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
+        <p>Terranoetis v3.0.0 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
