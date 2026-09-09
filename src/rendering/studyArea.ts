@@ -16,6 +16,7 @@ export interface StudyAreaItem {
   color: string;
   width: number;
   outlinePrimitive?: Cesium.GroundPolylinePrimitive;
+  source?: 'draw' | 'chat' | 'import';
 }
 
 let areaIdCounter = 0;

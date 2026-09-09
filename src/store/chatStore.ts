@@ -354,7 +354,12 @@ interface ChatState {
   // Active study area bbox (drawn on globe) — sent with AI requests so the
   // analytical engine can compute grids over the user's real study area.
   studyAreaBbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
-  setStudyAreaBbox: (bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null) => void;
+  /** Where the active bbox came from: 'chat' = an AI-resolved boundary
+   *  (replaceable by the next named place), 'manual' = user draw/import
+   *  (always wins, A2.29). Sent with AI requests so the server re-registers
+   *  chat areas instead of treating them as the user's explicit selection. */
+  studyAreaSource: 'chat' | 'manual' | null;
+  setStudyAreaBbox: (bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null, source?: 'chat' | 'manual') => void;
   /** The AI query awaiting a drawn study area — auto-sent when drawing completes. */
   pendingStudyAreaQuery: string | null;
   setPendingStudyAreaQuery: (query: string | null) => void;
@@ -480,6 +485,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // A new chat is a fresh spatial context — a study area drawn in another
       // tab must not leak into (and silently scope) this one's queries.
       studyAreaBbox: null,
+      studyAreaSource: null,
       pendingStudyAreaQuery: null,
       streamingMdRef: { current: new StreamingMarkdownRenderer() },
       showChatHistory: false,
@@ -520,6 +526,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           chatCollapsed: nextTab.collapsed,
           aiTyping: get().tabTyping[nextId] ?? false,
           studyAreaBbox: null,
+          studyAreaSource: null,
           pendingStudyAreaQuery: null,
           streamingMdRef: { current: new StreamingMarkdownRenderer() },
         });
@@ -551,6 +558,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           sandboxWorkspaceId: freshTab.sandboxWorkspaceId,
           aiTyping: false,
           studyAreaBbox: null,
+          studyAreaSource: null,
           pendingStudyAreaQuery: null,
           streamingMdRef: { current: new StreamingMarkdownRenderer() },
         });
@@ -601,6 +609,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       chatCollapsed: targetTab.collapsed,
       aiTyping: get().tabTyping[id] ?? false,
       studyAreaBbox: null,
+      studyAreaSource: null,
       pendingStudyAreaQuery: null,
       streamingMdRef: { current: new StreamingMarkdownRenderer() },
     });
@@ -914,7 +923,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // Study area bbox
   studyAreaBbox: null,
-  setStudyAreaBbox: (bbox) => set({ studyAreaBbox: bbox }),
+  studyAreaSource: null,
+  setStudyAreaBbox: (bbox, source = 'manual') => set({ studyAreaBbox: bbox, studyAreaSource: bbox ? source : null }),
   pendingStudyAreaQuery: null,
   setPendingStudyAreaQuery: (query) => set({ pendingStudyAreaQuery: query }),
 

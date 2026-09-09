@@ -18,9 +18,13 @@ interface Props {
   show: boolean;
   onClose: () => void;
   zIndex?: number;
+  /** Active study area bbox (user-drawn OR chat-resolved) — the panel adopts
+   *  it automatically so an area resolved in the AI chat feeds the imagery
+   *  request without a manual redraw. */
+  studyAreaBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null;
 }
 
-export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose, zIndex = 110 }: Props) {
+export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose, zIndex = 110, studyAreaBbox }: Props) {
   const [satStartDate, setSatStartDate] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 7);
     return d.toISOString().slice(0, 10);
@@ -68,6 +72,16 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
 
   /* ── Bounding box state ── */
   const [bbox, setBbox] = useState({ latMin: 24, latMax: 49, lonMin: -125, lonMax: -66 });
+
+  // Adopt the active study area (incl. chat-resolved boundaries) whenever it
+  // changes while the panel is open; manual edits survive until the next area
+  // change. Render-time state adjustment (React's sync-from-props pattern) —
+  // setState inside an effect would only sync after an extra painted frame.
+  const [prevStudyArea, setPrevStudyArea] = useState<{ latMin: number; latMax: number; lonMin: number; lonMax: number } | null>(null);
+  if (show && studyAreaBbox && studyAreaBbox !== prevStudyArea) {
+    setPrevStudyArea(studyAreaBbox);
+    setBbox({ latMin: studyAreaBbox.latMin, latMax: studyAreaBbox.latMax, lonMin: studyAreaBbox.lonMin, lonMax: studyAreaBbox.lonMax });
+  }
 
   const handleSelectProduct = useCallback((value: string) => {
     setSatProduct(value);

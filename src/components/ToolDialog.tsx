@@ -65,6 +65,9 @@ type SelectionKind = 'none' | 'point' | 'two-points' | 'bbox' | 'polygon';
 interface StudyAreaSelection {
   kind: SelectionKind;
   pointCount: number;
+  /** A usable bounding box exists (either drawn directly or derived from the
+   *  active area's geometry) — area↔area conversion is only safe when true. */
+  hasBbox: boolean;
 }
 
 /** Derive what the user currently has drawn on the globe from the active
@@ -75,27 +78,37 @@ function deriveSelection(
   polygon: Array<Array<[number, number]>> | undefined,
   points: Array<{ lat: number; lon: number }> | undefined,
 ): StudyAreaSelection {
+  const hasBbox = !!bbox
+    && [bbox.latMin, bbox.latMax, bbox.lonMin, bbox.lonMax].every(Number.isFinite)
+    && bbox.latMax > bbox.latMin && bbox.lonMax > bbox.lonMin;
+  const sel = (kind: SelectionKind, pointCount = 0): StudyAreaSelection => ({ kind, pointCount, hasBbox });
   const type = studyAreaType;
   if (type === 'point') {
     const n = points?.length ?? 0;
-    if (n >= 2) return { kind: 'two-points', pointCount: n };
-    if (n === 1) return { kind: 'point', pointCount: 1 };
-    return { kind: 'none', pointCount: 0 };
+    if (n >= 2) return sel('two-points', n);
+    if (n === 1) return sel('point', 1);
+    return sel('none');
   }
-  if (type === 'rectangle') return { kind: 'bbox', pointCount: 0 };
-  if (type === 'polygon' || type === 'circle') return { kind: 'polygon', pointCount: 0 };
-  if (type === 'geojson' || type === 'shapefile') return { kind: 'polygon', pointCount: 0 };
+  if (type === 'rectangle') return sel('bbox');
+  if (type === 'polygon' || type === 'circle') return sel('polygon');
+  if (type === 'geojson' || type === 'shapefile') return sel('polygon');
   // Fallback (type unknown): prefer a wide bbox/area, then points.
-  const isWideBox = bbox && (bbox.latMax - bbox.latMin > 0.2 || bbox.lonMax - bbox.lonMin > 0.2);
-  if (isWideBox) return { kind: 'bbox', pointCount: 0 };
-  if (points && points.length >= 2) return { kind: 'two-points', pointCount: points.length };
-  if (points && points.length === 1) return { kind: 'point', pointCount: 1 };
-  if (polygon && polygon.length > 0) return { kind: 'polygon', pointCount: 0 };
-  if (bbox) return { kind: 'bbox', pointCount: 0 };
-  return { kind: 'none', pointCount: 0 };
+  const isWideBox = hasBbox && (bbox!.latMax - bbox!.latMin > 0.2 || bbox!.lonMax - bbox!.lonMin > 0.2);
+  if (isWideBox) return sel('bbox');
+  if (points && points.length >= 2) return sel('two-points', points.length);
+  if (points && points.length === 1) return sel('point', 1);
+  if (polygon && polygon.length > 0) return sel('polygon');
+  if (bbox) return sel('bbox');
+  return sel('none');
 }
 
-/** Does the user's current drawing satisfy a given tool required mode? */
+/** Does the user's current drawing satisfy a given tool required mode?
+ *  Points stay strict, but AREA shapes convert freely: a polygon study area
+ *  (e.g. a chat-resolved admin boundary like Thrissur district) satisfies a
+ *  bbox-only tool through its derived bounding box, and a drawn rectangle
+ *  satisfies a polygon-only tool through its four-corner ring. This is what
+ *  lets the chat hand a resolved boundary to every study-area consumer
+ *  instead of forcing the user to re-draw one. */
 function modeSatisfied(mode: StudyAreaMode, sel: StudyAreaSelection): boolean {
   switch (mode) {
     case 'point': return sel.kind === 'point';
@@ -103,8 +116,8 @@ function modeSatisfied(mode: StudyAreaMode, sel: StudyAreaSelection): boolean {
     case 'transect':
     case 'fault-line':
     case 'path': return sel.kind === 'two-points';
-    case 'bbox': return sel.kind === 'bbox';
-    case 'polygon': return sel.kind === 'polygon';
+    case 'bbox': return sel.hasBbox && (sel.kind === 'bbox' || sel.kind === 'polygon');
+    case 'polygon': return sel.kind === 'polygon' || (sel.kind === 'bbox' && sel.hasBbox);
     case 'region':
     case 'basin':
     case 'coastal': return sel.kind === 'bbox' || sel.kind === 'polygon';
@@ -178,12 +191,12 @@ function buildStudyAreaHint(allowed: StudyAreaMode[], sel: StudyAreaSelection): 
   if (hasBbox && !hasPoint && !hasPoly && !hasArea) {
     if (sel.kind === 'point' || sel.kind === 'two-points')
       return 'This tool needs a bounding box, not a point. Draw a rectangle on the globe.';
-    if (sel.kind === 'polygon')
+    if (sel.kind === 'polygon' && !sel.hasBbox)
       return 'This tool needs a bounding box. Draw a rectangle on the globe.';
     return 'Draw a bounding box on the globe.';
   }
   if (hasPoly && !hasBbox && !hasArea) {
-    if (sel.kind === 'bbox')
+    if (sel.kind === 'bbox' && !sel.hasBbox)
       return 'This tool needs a polygon. Draw a polygon on the globe.';
     return 'Draw a polygon on the globe.';
   }

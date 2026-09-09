@@ -1616,7 +1616,7 @@ export class CommandParser {
   }
 
   private static pushIfValid(commands: GlobeCommand[], cmd: GlobeCommand): void {
-    const validActions = ['flyTo', 'toggleLayer', 'addPin', 'addHeatmap', 'addPolygon', 'addGeoJSON', 'addChart', 'addPanel', 'openPanel', 'closePanel', 'togglePanel', 'addRoute', 'moveCamera', 'setLayerOpacity', 'focusEntity', 'screenshot', 'openAnalyticalModel'];
+    const validActions = ['flyTo', 'toggleLayer', 'addPin', 'addHeatmap', 'addPolygon', 'addGeoJSON', 'addChart', 'addPanel', 'openPanel', 'closePanel', 'togglePanel', 'addRoute', 'moveCamera', 'setLayerOpacity', 'focusEntity', 'screenshot', 'openAnalyticalModel', 'setStudyArea'];
     if (cmd && typeof cmd === 'object' && validActions.includes(cmd.action)) {
       commands.push(cmd);
     }
