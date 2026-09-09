@@ -15,7 +15,7 @@ import remarkGfm from 'remark-gfm';
 import remarkRehype from 'remark-rehype';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const DOCS = path.join(ROOT, 'docs');
+const DOCS = path.join(ROOT, 'docs', 'site');
 
 const processor = unified().use(remarkParse).use(remarkGfm).use(remarkRehype);
 
@@ -65,7 +65,7 @@ function rewriteLinks(node, srcDir, outDir) {
         let dest;
         if (target.endsWith('.md')) {
           let relFromRoot = path.relative(ROOT, target).replaceAll(path.sep, '/');
-          if (relFromRoot.startsWith('docs/markdown/')) relFromRoot = 'docs/' + relFromRoot.slice('docs/markdown/'.length);
+          if (relFromRoot.startsWith('docs/site/markdown/')) relFromRoot = 'docs/' + relFromRoot.slice('docs/site/markdown/'.length);
           dest = relFromRoot.startsWith('docs/')
             ? 'narratives/' + relFromRoot.slice(5).replace(/\.md$/, '.html')
             : 'narratives/' + path.basename(target).replace(/\.md$/, '.html');

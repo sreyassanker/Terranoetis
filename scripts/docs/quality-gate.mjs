@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const DOCS = path.join(ROOT, 'docs');
+const DOCS = path.join(ROOT, 'docs', 'site');
 const errors = [];
 const warnings = [];
 const err = (msg) => errors.push(msg);

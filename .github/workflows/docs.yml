@@ -1,6 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════
 # Documentation quality gate — links, anchors, page metadata, citations,
-# vocabulary, sitemap and build drift. Serves from docs/ via GitHub Pages.
+# vocabulary, sitemap and build drift. The site lives in docs/site/ and is
+# deployed by deploy-docs.yml (workflow deploy).
 # ═══════════════════════════════════════════════════════════════════════
 name: Docs Quality Gate
 
@@ -8,7 +9,7 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - 'docs/**'
+      - 'docs/site/**'
       - 'scripts/docs/**'
       - 'README.md'
       - 'CONTRIBUTING.md'
@@ -17,7 +18,7 @@ on:
   pull_request:
     branches: [main, develop]
     paths:
-      - 'docs/**'
+      - 'docs/site/**'
       - 'scripts/docs/**'
       - 'README.md'
       - 'CONTRIBUTING.md'

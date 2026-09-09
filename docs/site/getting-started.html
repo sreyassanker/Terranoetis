@@ -145,7 +145,7 @@ curl -s -o pga.npy http://localhost:3001/api/kaggle/simulate/sim_44d5c7d7/grid/p
 <tbody>
 <tr><td>Analytical engine (150 tools)</td><td>Runs; live-context enrichment falls back to honest NaN where data is unreachable</td><td><cite class="src">server/analytical-models/engine.ts:170-194</cite></td></tr>
 <tr><td>Earthquake / wildfire / hurricane sims</td><td>Run locally via python3</td><td><cite class="src">server/kaggle/simRunner.ts:126-175</cite></td></tr>
-<tr><td>Flood / tsunami / volcano / landslide sims</td><td>Disabled until a Kaggle token exists at ~/.kaggle/kaggle.json</td><td><cite class="src">server/kaggle/simRunner.ts:Kaggle pipeline requires token</cite> <cite class="src">docs/markdown/DEPLOYMENT.md:162-173</cite></td></tr>
+<tr><td>Flood / tsunami / volcano / landslide sims</td><td>Disabled until a Kaggle token exists at ~/.kaggle/kaggle.json</td><td><cite class="src">server/kaggle/simRunner.ts:Kaggle pipeline requires token</cite> <cite class="src">docs/site/markdown/DEPLOYMENT.md:162-173</cite></td></tr>
 <tr><td>AI chat (agent/ask)</td><td>Needs at least one LLM provider key; local GGUF fallback auto-launches if model downloaded</td><td><cite class="src">server/index.ts:789-817</cite></td></tr>
 <tr><td>Live-data routes</td><td>Keyless feeds work (USGS, OpenSky public, EONET…); keyed ones 5xx/disable</td><td><cite class="src">server/apiMetadata.ts:82 entries</cite></td></tr>
 <tr><td>Sentinel / reflex / world model / memory</td><td>Run on keyless feeds or local state</td><td><cite class="src">server/index.ts:14448-14488</cite></td></tr>

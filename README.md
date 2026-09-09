@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/img/Terranoetis_Thumbnail.webp" alt="Terranoetis" width="100%" />
+  <img src="docs/site/assets/img/Terranoetis_Thumbnail.webp" alt="Terranoetis" width="100%" />
 </p>
 
 A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3D globe with a comprehensive backend serving live environmental data, satellite imagery, **150 real scientific equation engines**, physics simulations, realtime voice, and AI-driven cognition. Unlike a passive globe viewer, Terranoetis **computes** — it runs literature-grounded equations over live data, reasons about what it sees, and paints real results back onto the Earth.
@@ -41,16 +41,16 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 
 <table>
   <tr>
-    <td width="50%"><a href="docs/gifs/Multi%20Hazard%20Risk%20Map.gif"><img src="docs/gifs/preview/multi-hazard.gif" alt="Multi-hazard risk map — fused seismic, fire, storm and flood risk rendered on the globe" /></a></td>
-    <td width="50%"><a href="docs/gifs/Landslide%20simulation.gif"><img src="docs/gifs/preview/landslide.gif" alt="Landslide physics simulation — GPU-run terrain failure over real topography" /></a></td>
+    <td width="50%"><a href="docs/site/gifs/Multi%20Hazard%20Risk%20Map.gif"><img src="docs/site/gifs/preview/multi-hazard.gif" alt="Multi-hazard risk map — fused seismic, fire, storm and flood risk rendered on the globe" /></a></td>
+    <td width="50%"><a href="docs/site/gifs/Landslide%20simulation.gif"><img src="docs/site/gifs/preview/landslide.gif" alt="Landslide physics simulation — GPU-run terrain failure over real topography" /></a></td>
   </tr>
   <tr>
     <td align="center"><b>Multi-Hazard Risk Map</b><br/>fused live risk surfaces on the 3D globe</td>
     <td align="center"><b>Landslide Simulation</b><br/>one of 7 physics engines, run over real terrain</td>
   </tr>
   <tr>
-    <td width="50%"><a href="docs/gifs/Aviation%20Tracker.gif"><img src="docs/gifs/preview/aviation.gif" alt="Live aviation tracker — ADS-B aircraft streamed onto the globe" /></a></td>
-    <td width="50%"><a href="docs/gifs/Satellite%20Tracker.gif"><img src="docs/gifs/preview/satellite.gif" alt="Live satellite tracker — TLE orbits propagated and rendered in real time" /></a></td>
+    <td width="50%"><a href="docs/site/gifs/Aviation%20Tracker.gif"><img src="docs/site/gifs/preview/aviation.gif" alt="Live aviation tracker — ADS-B aircraft streamed onto the globe" /></a></td>
+    <td width="50%"><a href="docs/site/gifs/Satellite%20Tracker.gif"><img src="docs/site/gifs/preview/satellite.gif" alt="Live satellite tracker — TLE orbits propagated and rendered in real time" /></a></td>
   </tr>
   <tr>
     <td align="center"><b>Aviation Tracker</b><br/>live ADS-B flights on the globe</td>
@@ -78,12 +78,12 @@ npm run dev             # Vite (3000) + Express API (3001); Redis optional
 
 | Document | Covers |
 |---|---|
-| [Architecture](docs/markdown/ARCHITECTURE.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/ARCHITECTURE.html)) | System topology, request flow, background services, module inventory |
-| [API Reference](docs/markdown/API.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/API.html)) | 360+ REST endpoints + WebSocket channel |
-| [Frontend](docs/markdown/FRONTEND.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/FRONTEND.html)) | React components, rendering engine, simulation overlays, hooks |
-| [Backend](docs/markdown/BACKEND.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/BACKEND.html)) | Server modules, cognition, memory, security, observability |
-| [Analytical Models](docs/markdown/MODELS.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/MODELS.html)) | The 150 equation engines, 7 parts, 26 domains |
-| [Deployment](docs/markdown/DEPLOYMENT.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/DEPLOYMENT.html)) | Docker, environment variables, Kaggle token setup, CI/CD, security |
+| [Architecture](docs/site/markdown/ARCHITECTURE.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/ARCHITECTURE.html)) | System topology, request flow, background services, module inventory |
+| [API Reference](docs/site/markdown/API.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/API.html)) | 360+ REST endpoints + WebSocket channel |
+| [Frontend](docs/site/markdown/FRONTEND.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/FRONTEND.html)) | React components, rendering engine, simulation overlays, hooks |
+| [Backend](docs/site/markdown/BACKEND.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/BACKEND.html)) | Server modules, cognition, memory, security, observability |
+| [Analytical Models](docs/site/markdown/MODELS.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/MODELS.html)) | The 150 equation engines, 7 parts, 26 domains |
+| [Deployment](docs/site/markdown/DEPLOYMENT.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/DEPLOYMENT.html)) | Docker, environment variables, Kaggle token setup, CI/CD, security |
 
 The full rendered site lives at **https://sreyassanker.github.io/Terranoetis/** —
 diagrams, tables and navigation included. The GitHub Pages site (from `docs/`) opens
@@ -132,17 +132,17 @@ terranoetis/
 │
 ├── kaggle-kernels/               # 7 NumPy physics kernels pushed locally or to Kaggle (earthquake, tsunami, ...)
 ├── server/plugins/               # Plugin system: install from URL / GitHub / raw code / zip
-├── docs/                         # Documentation site (GitHub Pages) + Markdown sources of truth
-│   ├── index.html                # Product landing page (generated)
-│   ├── gifs/                     # README gallery captures (also served on Pages)
-│   ├── documentation.html        # Documentation hub (generated)
-│   ├── capabilities/             # Per-capability pages + prose (hazards, engine, cognition, …)
-│   ├── reference/ · methodology.html · deployment.html · governance/
-│   ├── markdown/                 # ARCHITECTURE · API · BACKEND · FRONTEND · MODELS · DEPLOYMENT · getting-started
-│   ├── platform-overview.html    # Legacy URL — redirects to the docs index
+├── docs/
+│   ├── site/                     # The GitHub Pages website — everything below deploys to sreyassanker.github.io/Terranoetis
+│   │   ├── index.html            # Product landing page (generated)
+│   │   ├── documentation.html    # Documentation hub (generated)
+│   │   ├── capabilities/ · reference/ · governance/ · narratives/
+│   │   ├── assets/ (css · img · showcase) · gifs/ (README gallery captures)
+│   │   ├── markdown/             # ARCHITECTURE · API · BACKEND · FRONTEND · MODELS · DEPLOYMENT · getting-started
+│   │   └── platform-overview.html # Legacy URL — redirects to the docs index
+│   └── Research papers/          # Source PDFs backing the equation citations
 │
 ├── e2e/                          # Playwright browser tests (7 spec files, 38 test declarations)
-├── gifs/ → moved into docs/gifs  # README gallery captures (served on Pages)
 ├── scripts/                      # Dev utilities, live smoke scripts, docs build + quality gate
 ├── data/                         # Runtime databases + ML models
 ├── models/                       # Local GGUF model (downloadable from admin panel) → gitignored
