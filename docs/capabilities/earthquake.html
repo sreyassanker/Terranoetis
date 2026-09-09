@@ -15,7 +15,7 @@
 <meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="docs-last-reviewed" content="2026-09-09">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -86,7 +86,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><strong>Last reviewed</strong> 2026-09-09</span>
         <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="../narratives/capabilities/earthquake.html">Read the full narrative</a></p>
@@ -163,13 +163,13 @@
 <blockquote class="verbatim">'point-source hypocentral distance used for the GMPE Rjb term — no fault-geometry directivity or finite-rupture effects' · 'unspecified fault mechanism; base-case only (no regional anelastic attenuation or basin-depth z1 terms)' · 'Sa reported at T=1.0 s only' · 'Worden-2012/Caprio-2015 intensity relations calibrated on California/global datasets and saturate for great-earthquake near-fields'<footer><cite class="src">kaggle-kernels/earthquake-sim/main.py:344-353</cite></footer></blockquote>
 <p>Before emitting any field the kernel runs a GMPE sanity gate (attenuation monotonicity, M6.5 @ 10 km PGA in (100, 500) cm/s², soft-site amplification &gt; 1, PGV/PGA ratio 0.05–0.2 s, MMI band round-trip). On failure it refuses to emit: <em>"GMPE sanity gate failed — refusing to emit a ShakeMap from mis-wired attenuation relations."</em> <cite class="src">kaggle-kernels/earthquake-sim/main.py:194-232,400-404</cite></p>
 <h2 id="measured">Measured runs and timings</h2>
-<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-08. These are observations of one environment, not performance guarantees.</caption>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-09. These are observations of one environment, not performance guarantees.</caption>
 <thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
 <tbody>
 <tr><td>Kernel, M 7.5 · 12 km · Vs30 760 · 100 km box · 256²</td><td>max PGA 251.0 cm/s², max PGV 27.5 cm/s, max MMI 7.0, area(MMI ≥ 6) 4,439 km²; kernel compute 0.0083 s; total wall 0.12 s (incl. interpreter start)</td></tr>
 <tr><td>Boundary cases</td><td>M 3.0 / 0.5 km / Vs30 150 and M 9.7 / 700 km / Vs30 1500 both complete; M 2.9 rejected with "magnitude 2.9 outside the 3.0-9.7 GMPE validity range"; depth 750 km rejected with "depth_km 750.0 outside 0.5-700 km"</td></tr>
 <tr><td>End-to-end via POST /api/kaggle/simulate</td><td>job sim_44d5c7d7 (M 7.2, 128², 100 km box): status running→complete 166 ms after submission; result metadata cites "BSSA14 … doi:10.1785/0120130065"; grid + GeoTIFF endpoints returned HTTP 200 (296,648-byte npy; valid 128×128 TIFF)</td></tr>
-<tr><td>DOI resolvability</td><td>https://doi.org/10.1785/0120130065 responds 302 (resolvable) — observed 2026-09-08</td></tr>
+<tr><td>DOI resolvability</td><td>https://doi.org/10.1785/0120130065 responds 302 (resolvable) — observed 2026-09-09</td></tr>
 </tbody></table></div>
 <h2 id="reproduction">Reproduction</h2>
 <h3 id="repro-cmd">Commands</h3>
@@ -191,7 +191,7 @@ cd kaggle-kernels/earthquake-sim &amp;&amp; mkdir -p /tmp/eq &amp;&amp; \
   echo '{&quot;grid_size&quot;:128,&quot;magnitude&quot;:7.5,&quot;depth_km&quot;:12,&quot;vs30&quot;:760,&quot;extent_km&quot;:100}' &gt; /tmp/eq/params.json &amp;&amp; \
   (cd /tmp/eq &amp;&amp; TERRANOETIS_OUT_DIR=/tmp/eq python3 &lt;repo&gt;/kaggle-kernels/earthquake-sim/main.py)</code></pre>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

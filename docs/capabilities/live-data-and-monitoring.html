@@ -15,7 +15,7 @@
 <meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="docs-last-reviewed" content="2026-09-09">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -86,7 +86,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><strong>Last reviewed</strong> 2026-09-09</span>
         <span><span class="tag tag-measured">MEASURED — server boot started all services; USGS/EONET/FIRMS pollers observed live</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="../narratives/capabilities/live-data-and-monitoring.html">Read the full narrative</a></p>
@@ -100,7 +100,7 @@
 <div class="table-scroll"><table><caption></caption>
 <thead><tr><th scope="col">Metric</th><th scope="col">Value</th><th scope="col">Method/source</th></tr></thead>
 <tbody>
-<tr><td>Registered API metadata entries</td><td>82</td><td>regex count <code>category:</code> in server/apiMetadata.ts (2026-09-08)</td></tr>
+<tr><td>Registered API metadata entries</td><td>82</td><td>regex count <code>category:</code> in server/apiMetadata.ts (2026-09-09)</td></tr>
 <tr><td>Categories (top)</td><td>Aviation 16 · Weather & Disaster 13 · Economic & Financial 12 · Notifications 5 · AI & Analytics 5 · Satellite & Imagery 4 · Infrastructure 4 …</td><td>same</td></tr>
 <tr><td>External https hosts referenced in server data code</td><td>159 (upper bound incl. docs/CDN URLs)</td><td>regex over server/index.ts, server/data, server/utils</td></tr>
 <tr><td>Built-in Sentinel pollers</td><td>USGS earthquakes 60 s · NASA EONET 120 s · NASA FIRMS 180 s (only with key) · NWS alerts 120 s</td><td><cite class="src">server/sentinel/index.ts:11-41,43,72,110,165-169</cite></td></tr>
@@ -126,7 +126,7 @@ air_quality: 100,  // AQI threshold<footer><cite class="src">server/sentinel/eng
 <p>Seismic (USGS), storms (NHC/NWS), fires (FIRMS), events (EONET, GDACS), air quality (OpenAQ/WAQI), aviation (OpenSky + FlightAware/AirLabs keys), maritime (AIS), satellites (CelesTrak/UCS TLEs, Space-Debris, Launch Library 2), ocean (NDBC, Copernicus), traffic (TomTom), economic (FRED/EIA/ENTSO-E/IMF/Comtrade/CoinGecko/AlphaVantage), tiles (<code>/api/tiles/*</code> MVT server from SQLite: earthquakes/firms/volcanoes/alerts/gdacs, ZOOM_MAX 22) — endpoint map in <a href="../reference/api.html">Reference → API</a>; per-entry auth/rate metadata in <code>server/apiMetadata.ts</code>.</p>
 <div class="callout callout-inspect" role="note"><div class="callout-title">Status</div><p>Polling intervals, thresholds and gates are code-verified; the services were seen starting under a real boot (logs show sentinel engine, correlation routes, cache pre-warms). Individual remote-feed responses were not asserted here.</p></div>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

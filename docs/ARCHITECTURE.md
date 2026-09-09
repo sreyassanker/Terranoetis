@@ -173,62 +173,15 @@ flowchart LR
 
 ## Frontend (`src/`)
 
-### Rendering Engine (`src/rendering/`, 41 modules)
+The frontend internals are inventoried in [FRONTEND.md](FRONTEND.md): the 41 rendering modules (`src/rendering/`) with per-module purposes, the simulation overlay color map, and all 7 React hooks (`useChat`, `useWebSocket`, `useKaggleSimulation`, …). Routing:
 
-| File | Purpose |
-|---|---|
-| `ais.ts` | Maritime AIS vessel positions/tracks |
-| `aviation.ts` | Flight tracking (real-time aircraft + paths) |
-| `flights.ts` | Flight route arcs (departure/arrival) |
-| `earthquakes.ts` | Earthquake markers (magnitude-scaled, depth-colored) |
-| `satelliteDataSources.ts` | TLE orbit propagation & rendering |
-| `satelliteImagery.ts` | GIBS/XYZ/WMS imagery layer management |
-| `satnogs.ts` | SatNOGS ground station visualization |
-| `osmBuildings.ts` | OSM 3D building extrusion |
-| `surfaceRenderer.ts` | IDW interpolation surface rendering |
-| `gisFusion.ts` | GIS data fusion for risk surfaces |
-| `studyArea.ts` | GeoJSON upload/draw/export/fly-to |
-| `scenarioEngine.ts` | What-if scenario definition/rollout/diff |
-| `causalGraph.ts` | Noisy-OR causal Bayesian network |
-| `blackboard.ts` | Blackboard pattern for probability writing |
-| `physicsSurrogates.ts` | Liquefaction, dispersion, wildfire, flood surrogates |
-| `domainLayers.ts` | Domain-specific layer management |
-| `advancedWaterShader.ts` | Custom water shader |
-| `ghostEntity.ts` / `ghostProtocol.ts` | Ghost entity rendering + protocol |
-| `entropyHalo.ts` | Entropy halo visualization |
-| `forkRenderer.ts` | Parallel reality fork rendering |
-| `layerRenderer.ts` | Generic layer rendering abstraction |
-| `navigation.ts` | Navigation utilities |
-| `oracleChains.ts` | Oracle chain visualization |
-| `idwInterpolation.ts` | IDW interpolation algorithm |
-| `tectonic.ts` | Tectonic plate data |
-| `weather.ts` | Weather data |
-| `trajectoryPredictor.ts` | Trajectory prediction |
-| `toolResultParser.ts` | Tool result parsing |
-| `ucsSatelliteDb.ts` | UCS satellite database |
-| `formatStepResult.ts` | Step result formatting |
-| `sensorStyles.ts` | GLSL sensor looks (CRT · NVG · FLIR · Noir · Snow) via `PostProcessStage` |
-| `photorealisticGlobe.ts` | Google Photorealistic 3D Tiles (Cesium Ion asset 2275207) |
-| `cinematicCamera.ts` | Tick-based camera engine (orbit/pan/tilt/rotate, route dolly) |
-| `tomtomTraffic.ts` | Per-vehicle street-level traffic flow (TomTom) |
-| `cctvViewshed.ts` | Estimated coverage cones for public webcams |
-| `launchReplay.ts` | Rocket ascent reconstruction (Launch Library 2) |
-| `aircraftHangar.ts` | LOD swap: flight glyphs → 3D glTF models |
-| `osrmRoute.ts` | Street-following walking route (OSRM) |
-| `radioWave.ts` | Radio tuner globe wave animation |
-| `detectionOverlay.ts` | Screen-space bounding boxes over live entities |
-
-### Hooks (7 total)
-
-| Hook | Purpose |
-|---|---|
-| `useChat` | Chat pipeline: SSE streaming to `/api/agent/ask`, tool calls, analytical-result auto-render |
-| `useChatSelectors` | Zustand selectors for chat UI state |
-| `useWebSocket` | WebSocket connection manager |
-| `useCollaboration` | Real-time presence: join/heartbeat, typing, cursor position |
-| `useKaggleSimulation` | Simulation job lifecycle (local CPU kernel or Kaggle kernel) |
-| `useOfflineChat` | Offline banner + local fallback when AI provider is unreachable |
-| `useRealtimeVoice` | Primary voice: OpenAI Realtime → Gemini Live fallback via server bridge |
+| Route | View | Description |
+|---|---|---|
+| `/` | App | Main Cesium globe application (~11,000 lines, 11 lazy-loaded panels) |
+| `/v2/globe` | GlobePage | Dedicated Cesium globe viewport |
+| `/v2/canvas` | CanvasPage | Spatial canvas |
+| `/v2/scenarios` | ScenariosPage | Scenario gallery and editor |
+| `/v2/tours` | ToursPage | Cinematic tours |
 
 ---
 

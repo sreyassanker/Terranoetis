@@ -6,7 +6,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 export const DOCS_VERSION = '3.0.0';
-export const LAST_REVIEWED = '2026-09-08';
+export const LAST_REVIEWED = '2026-09-09';
 export const SITE_ORIGIN = 'https://sreyassanker.github.io/Terranoetis';
 export const REPO = 'https://github.com/sreyassanker/Terranoetis';
 

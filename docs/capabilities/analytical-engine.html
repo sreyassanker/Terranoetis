@@ -15,7 +15,7 @@
 <meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="docs-last-reviewed" content="2026-09-09">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -86,7 +86,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><strong>Last reviewed</strong> 2026-09-09</span>
         <span><span class="tag tag-measured">COUNTS + SAMPLE COMPUTATIONS EXECUTED</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="../narratives/capabilities/analytical-engine.html">Read the full narrative</a></p>
@@ -101,11 +101,11 @@
 <div class="table-scroll"><table><caption></caption>
 <thead><tr><th scope="col">Claim</th><th scope="col">Measured</th><th scope="col">Method</th></tr></thead>
 <tbody>
-<tr><td>150 engines, ids 1–150</td><td>150 unique ids, no gaps</td><td>programmatic key enumeration of EQUATION_ENGINE via tsx import (2026-09-08) <cite class="src">server/analytical-models/engine.ts:1-20,170</cite></td></tr>
+<tr><td>150 engines, ids 1–150</td><td>150 unique ids, no gaps</td><td>programmatic key enumeration of EQUATION_ENGINE via tsx import (2026-09-09) <cite class="src">server/analytical-models/engine.ts:1-20,170</cite></td></tr>
 <tr><td>7 parts / 26 domains</td><td>parts = 7, domains = 26, tools sum = 150, dup ids = none</td><td>import of <code>PARTS</code> catalog <cite class="src">src/data/analyticalModels.ts:801</cite> + <cite class="src">src/data/analyticalModels.ts:248-250</cite></td></tr>
 <tr><td>Full literature citation per model</td><td>150/150 <code>reference:</code> strings present</td><td>regex count over catalog</td></tr>
 <tr><td>“82 with resolvable DOIs” (old README)</td><td>80 model references contain a DOI string; 12 ISBN; 4 explicit NO-DOI; remainder pre-DOI/gov/standards</td><td>regex <code>10\.\d{4,}/…</code> per reference; corrected in docs — see <a href="../methodology.html#discrepancy-log">discrepancy log</a></td></tr>
-<tr><td>DOI resolvability (spot check)</td><td>doi.org/10.1785/0120130065 → HTTP 302 (resolves)</td><td>curl -I, 2026-09-08</td></tr>
+<tr><td>DOI resolvability (spot check)</td><td>doi.org/10.1785/0120130065 → HTTP 302 (resolves)</td><td>curl -I, 2026-09-09</td></tr>
 </tbody></table></div>
 <h2 id="pipeline">Execution pipeline</h2>
 <ol><li><code>contextEngine.computeWithContext(id, inputs, context)</code> — enriches from live feeds (weather, terrain, ocean, seismic, air quality, FIRMS) before the call <cite class="src">server/analytical-models/contextEngine.ts:module</cite></li>
@@ -113,7 +113,7 @@
 <li>HTTP surface: catalog / search / detail public; <code>:id/execute</code> authenticated; <code>:id/execute-internal</code> loopback-only for the agent tool executor <cite class="src">server/index.ts:316-371,493</cite></li></ol>
 <h2 id="never-throws">Honest-NaN contract</h2>
 <blockquote class="verbatim">Robustness (§5.5.1): a tool must NEVER throw — if an unexpected missing/malformed input path slips past a per-tool guard, return honest NaN instead of crashing the request. Genuine data is never fabricated here.<footer><cite class="src">server/analytical-models/engine.ts:175-178</cite></footer></blockquote>
-<div class="table-scroll"><table><caption>Sample computations executed in-process on 2026-09-08 (no network)</caption>
+<div class="table-scroll"><table><caption>Sample computations executed in-process on 2026-09-09 (no network)</caption>
 <thead><tr><th scope="col">Tool</th><th scope="col">Inputs</th><th scope="col">Measured result</th><th scope="col">Check</th></tr></thead>
 <tbody>
 <tr><td>19 — Gutenberg–Richter (Gutenberg &amp; Richter 1944)</td><td>a=7, b=1, M=6</td><td>10 events/yr, 0 ms</td><td>10^(7−6)=10 ✓</td></tr>
@@ -134,10 +134,10 @@
 <tr><td>VI — Space Environment & Satellite</td><td>Geodesy & Reference Frames (5) · Thermosphere, Ionosphere & Magnetosphere (7) · Satellite Dynamics & Space Debris (5) · Solar-Terrestrial & GNSS (3)</td></tr>
 <tr><td>VII — Advanced Engineering & Risk</td><td>Groundwater & Subsurface (4) · Hazard, Risk & Disaster Engineering (6) · Data Assimilation & State Estimation (4) · Signal Processing & Communications (3) · Mathematical Frameworks (3)</td></tr>
 </tbody></table></div>
-<p>Topic lists per domain and individual citations: <a href="../narratives/MODELS.html">MODELS.md</a> (corrected 2026-09-08). Reproduction: <code>npx tsx -e "import {computeEquation} from './server/analytical-models/engine.ts'; console.log(computeEquation(19,{a:7,b:1,M:6}))"</code></p>
+<p>Topic lists per domain and individual citations: <a href="../narratives/MODELS.html">MODELS.md</a> (corrected 2026-09-09). Reproduction: <code>npx tsx -e "import {computeEquation} from './server/analytical-models/engine.ts'; console.log(computeEquation(19,{a:7,b:1,M:6}))"</code></p>
 <div class="callout callout-inspect" role="note"><div class="callout-title">Verification scope</div><p>Live-context enrichment (contextEngine → USGS/Open-Meteo etc.) and the HTTP execute path were not exercised for all 150 tools in this pass (network-dependent). In-process computation, structural counts and test-suite math verification are measured.</p></div>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

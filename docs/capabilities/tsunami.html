@@ -15,7 +15,7 @@
 <meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="docs-last-reviewed" content="2026-09-09">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -86,7 +86,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><strong>Last reviewed</strong> 2026-09-09</span>
         <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="../narratives/capabilities/tsunami.html">Read the full narrative</a></p>
@@ -152,7 +152,7 @@
 <blockquote class="verbatim">'Real GEBCO bathymetry is required for tsunami simulations; synthetic fallback is disabled.' · the linear-in-form header describes c = sqrt(g·H) propagation; implementation integrates the nonlinear conservative SWE · internal conservation proof states: 'Flat bathymetry (constant depth) — no source terms, pure wave propagation.'<footer><cite class="src">kaggle-kernels/tsunami-sim/main.py:228-229</cite> <cite class="src">kaggle-kernels/tsunami-sim/main.py:7-9</cite> <cite class="src">kaggle-kernels/tsunami-sim/swe_solver.py:235</cite></footer></blockquote>
 <p>main() runs the closed-box conservation proof (flat 2000 m bathy, 500 steps, tol 1e-9) before the simulation and refuses non-conservative runs: <em>"Tsunami solver failed closed-box conservation check (|Δ|=…). Refusing to run a non-conservative simulation."</em> <cite class="src">kaggle-kernels/tsunami-sim/main.py:406-417</cite></p>
 <h2 id="measured">Measured runs and timings</h2>
-<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-08. These are observations of one environment, not performance guarantees.</caption>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-09. These are observations of one environment, not performance guarantees.</caption>
 <thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
 <tbody>
 <tr><td>Conservation gate (re-executed)</td><td>[VERIFY] closed-box gs=64 steps=500: init=8194010.359005 final=8194010.359005 |Δ|=0.00e+00 → PASS</td></tr>
@@ -179,7 +179,7 @@ json.dump({'grid_size':96,'magnitude':8.5,'seafloor_displacement_m':5,'duration_
 PY
 TERRANOETIS_OUT_DIR=$PWD python3 main.py | grep -E &quot;VERIFY|DONE&quot;   # writes fail off-Kaggle: hard-coded /kaggle/working (main.py:421)</code></pre>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
