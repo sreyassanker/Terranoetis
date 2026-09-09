@@ -41,16 +41,16 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 
 <table>
   <tr>
-    <td width="50%"><a href="docs/site/gifs/preview/multi-hazard.webp"><img src="docs/site/gifs/preview/multi-hazard.webp" alt="Multi-hazard risk map — fused seismic, fire, storm and flood risk rendered on the globe" /></a></td>
-    <td width="50%"><a href="docs/site/gifs/preview/landslide.webp"><img src="docs/site/gifs/preview/landslide.webp" alt="Landslide physics simulation — Kaggle-routed terrain failure over real topography" /></a></td>
+    <td width="50%"><a href="https://sreyassanker.github.io/Terranoetis/capabilities/live-data-and-monitoring.html" title="Live data &amp; monitoring"><img src="docs/site/assets/gallery/multi-hazard.webp" alt="Multi-hazard risk map — fused seismic, fire, storm and flood risk rendered on the globe (animated)" width="640" height="400" /></a></td>
+    <td width="50%"><a href="https://sreyassanker.github.io/Terranoetis/capabilities/landslide.html" title="Landslide capability page"><img src="docs/site/assets/gallery/landslide.webp" alt="Landslide physics simulation — Kaggle-routed terrain failure over real topography (animated)" width="560" height="350" /></a></td>
   </tr>
   <tr>
     <td align="center"><b>Multi-Hazard Risk Map</b><br/>fused live risk surfaces on the 3D globe</td>
     <td align="center"><b>Landslide Simulation</b><br/>one of 7 physics engines, run over real terrain</td>
   </tr>
   <tr>
-    <td width="50%"><a href="docs/site/gifs/preview/aviation.webp"><img src="docs/site/gifs/preview/aviation.webp" alt="Live aviation tracker — ADS-B aircraft streamed onto the globe" /></a></td>
-    <td width="50%"><a href="docs/site/gifs/preview/satellite.webp"><img src="docs/site/gifs/preview/satellite.webp" alt="Live satellite tracker — TLE orbits propagated and rendered in real time" /></a></td>
+    <td width="50%"><a href="https://sreyassanker.github.io/Terranoetis/capabilities/globe-visualization.html" title="3D globe visualization"><img src="docs/site/assets/gallery/aviation.webp" alt="Live aviation tracker — ADS-B aircraft streamed onto the globe (animated)" width="480" height="300" /></a></td>
+    <td width="50%"><a href="https://sreyassanker.github.io/Terranoetis/capabilities/globe-visualization.html" title="3D globe visualization"><img src="docs/site/assets/gallery/satellite.webp" alt="Live satellite tracker — TLE orbits propagated and rendered in real time (animated)" width="480" height="300" /></a></td>
   </tr>
   <tr>
     <td align="center"><b>Aviation Tracker</b><br/>live ADS-B flights on the globe</td>
@@ -137,7 +137,7 @@ terranoetis/
 │   │   ├── index.html            # Product landing page (generated)
 │   │   ├── documentation.html    # Documentation hub (generated)
 │   │   ├── capabilities/ · reference/ · governance/ · narratives/
-│   │   ├── assets/ (css · img · showcase) · gifs/ (README gallery captures)
+│   │   ├── assets/ (css · img · gallery — animated WebP captures used by the README and landing)
 │   │   ├── markdown/             # ARCHITECTURE · API · BACKEND · FRONTEND · MODELS · DEPLOYMENT · getting-started
 │   │   └── platform-overview.html # Legacy URL — redirects to the docs index
 │   └── Research papers/          # Source PDFs backing the equation citations
