@@ -1,6 +1,6 @@
 # Analytical equation engine — narrative
 
-Verified counts, measured tool outputs and the full workflow: [analytical-engine.html](analytical-engine.html); the catalog itself is [MODELS.md](../MODELS.md).
+Verified counts, measured tool outputs and the full workflow: [analytical-engine.html](analytical-engine.html); the catalog itself is [MODELS.md](../markdown/MODELS.md).
 
 ## What it is
 

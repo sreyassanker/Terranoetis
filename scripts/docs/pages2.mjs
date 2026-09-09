@@ -330,7 +330,7 @@ export const PAGES2 = [
       { kind: 'p', html: 'Report vulnerabilities by email to the address in <a href="../narratives/SECURITY.html">SECURITY.md</a> (48-hour response target). The current threat model — SSRF guard, auth surface, key handling, JWT strength enforcement, brute-force lockout, public-endpoint limiting, CORS allowlist, injection defences — is maintained there.' },
       { kind: 'h2', id: 'surface', title: 'Security-relevant implementation points' },
       { kind: 'table', cols: ['Control', 'Verified detail', 'Source'], rows: [
-        ['Secrets in repo', 'runtime <code>.env</code> is gitignored; Kaggle credentials read only from <code>~/.kaggle</code>', src('docs/DEPLOYMENT.md', '173') + ' ' + src('.gitignore', '.env')],
+        ['Secrets in repo', 'runtime <code>.env</code> is gitignored; Kaggle credentials read only from <code>~/.kaggle</code>', src('docs/markdown/DEPLOYMENT.md', '173') + ' ' + src('.gitignore', '.env')],
         ['JWT strength', 'prod boot refuses <code>JWT_SECRET</code> &lt; 32 chars', src('server/index.ts', '171-181')],
         ['Sandbox', 'execution caps + audit log per exec', src('server/index.ts', '8655-8658,8718')],
         ['Sim kernels', 'receive JSON params only; no shell interpolation of user values', src(SR, '156-175')],

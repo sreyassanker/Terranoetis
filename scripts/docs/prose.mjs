@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 // Narrative pages — renders the in-repo Markdown prose as styled HTML
 // pages inside the site chrome, so GitHub Pages never serves raw .md.
-// docs/x.md → docs/narratives/x.html · docs/capabilities/x.md →
+// docs/markdown/x.md → docs/narratives/x.html · docs/capabilities/x.md →
 // docs/narratives/capabilities/x.html · root CONTRIBUTING.md/SECURITY.md →
 // docs/narratives/<name>.html. Markdown files remain the repo source of
 // truth; this module is the presentation layer for the website.
@@ -64,7 +64,8 @@ function rewriteLinks(node, srcDir, outDir) {
       if (fs.existsSync(target)) {
         let dest;
         if (target.endsWith('.md')) {
-          const relFromRoot = path.relative(ROOT, target).replaceAll(path.sep, '/');
+          let relFromRoot = path.relative(ROOT, target).replaceAll(path.sep, '/');
+          if (relFromRoot.startsWith('docs/markdown/')) relFromRoot = 'docs/' + relFromRoot.slice('docs/markdown/'.length);
           dest = relFromRoot.startsWith('docs/')
             ? 'narratives/' + relFromRoot.slice(5).replace(/\.md$/, '.html')
             : 'narratives/' + path.basename(target).replace(/\.md$/, '.html');
@@ -160,7 +161,10 @@ function listMarkdownFiles() {
     }
     return out;
   };
-  const docsMd = walk(DOCS).map((f) => ({ abs: f, out: 'narratives/' + path.relative(DOCS, f).replace(/\.md$/, '.html') }));
+  const docsMd = walk(DOCS).map((f) => {
+    const relFromDocs = path.relative(DOCS, f).replace(/^markdown\//, '');
+    return { abs: f, out: 'narratives/' + relFromDocs.replace(/\.md$/, '.html') };
+  });
   const rootMd = ['CONTRIBUTING.md', 'SECURITY.md']
     .map((f) => ({ abs: path.join(ROOT, f), out: 'narratives/' + f.replace(/\.md$/, '.html') }));
   return [...docsMd, ...rootMd];

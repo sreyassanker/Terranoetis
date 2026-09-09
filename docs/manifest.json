@@ -10,6 +10,6 @@
   "orientation": "any",
   "categories": ["science", "geospatial", "weather", "utilities"],
   "icons": [
-    { "src": "terranoetis.png", "sizes": "96x96", "type": "image/png" }
+    { "src": "assets/img/terranoetis.png", "sizes": "96x96", "type": "image/png" }
   ]
 }

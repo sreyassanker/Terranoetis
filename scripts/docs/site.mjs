@@ -146,12 +146,12 @@ export function renderPage(page) {
 <meta name="description" content="${esc(page.desc)}">
 <link rel="canonical" href="${SITE_ORIGIN}/${page.path}">
 <link rel="stylesheet" href="${r('assets/docs.css')}">
-<link rel="icon" href="${r('terranoetis.png')}" type="image/png">
+<link rel="icon" href="${r('assets/img/terranoetis.png')}" type="image/png">
 <meta property="og:title" content="${esc(page.title)} — Terranoetis Documentation">
 <meta property="og:description" content="${esc(page.desc)}">
 <meta property="og:type" content="article">
 <meta property="og:url" content="${SITE_ORIGIN}/${page.path}">
-<meta property="og:image" content="${SITE_ORIGIN}/terranoetis.png">
+<meta property="og:image" content="${SITE_ORIGIN}/assets/img/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="${DOCS_VERSION}">
 <meta name="docs-last-reviewed" content="${LAST_REVIEWED}">
@@ -165,7 +165,7 @@ ${page.head || ''}
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="${r('index.html')}"><img src="${r('terranoetis.png')}" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="${r('index.html')}"><img src="${r('assets/img/terranoetis.png')}" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
       ${TOP_NAV.map((t) => `<a href="${t.external ? t.href : r(t.href)}"${page.path === t.href ? ' aria-current="page"' : ''}${t.external ? ' rel="noopener"' : ''}${t.cls ? ` class="${t.cls}"` : ''}>${esc(t.label)}</a>`).join('\n      ')}
     </nav>

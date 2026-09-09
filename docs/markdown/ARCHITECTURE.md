@@ -6,7 +6,7 @@
 - **Server** — Node.js + Express 4 API, WebSocket realtime, JWT auth
 - **Persistence** — SQLite (primary store) + optional Redis (cache, memory hot path). The event bus is an in-process publish/subscribe (`server/pubsub.ts`), not Redis.
 
-> Rendered, navigation-first version of these documents with per-capability verification data: [docs site](index.html).
+> Rendered, navigation-first version of these documents with per-capability verification data: [docs site](../index.html).
 
 This document describes the system topology, request lifecycle, background services, and the runtime modules that power the platform.
 

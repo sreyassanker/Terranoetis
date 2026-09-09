@@ -7,12 +7,12 @@
 <meta name="description" content="Install and run Terranoetis locally, verify the stack with measured outputs, and run your first hazard simulation through the API.">
 <link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/getting-started.html">
 <link rel="stylesheet" href="assets/docs.css">
-<link rel="icon" href="terranoetis.png" type="image/png">
+<link rel="icon" href="assets/img/terranoetis.png" type="image/png">
 <meta property="og:title" content="Getting started — Terranoetis Documentation">
 <meta property="og:description" content="Install and run Terranoetis locally, verify the stack with measured outputs, and run your first hazard simulation through the API.">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/getting-started.html">
-<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
 <meta name="docs-last-reviewed" content="2026-09-09">
@@ -26,7 +26,7 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="index.html"><img src="terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="index.html"><img src="assets/img/terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="index.html">Overview</a>
       <a href="documentation.html">Documentation</a>
@@ -145,7 +145,7 @@ curl -s -o pga.npy http://localhost:3001/api/kaggle/simulate/sim_44d5c7d7/grid/p
 <tbody>
 <tr><td>Analytical engine (150 tools)</td><td>Runs; live-context enrichment falls back to honest NaN where data is unreachable</td><td><cite class="src">server/analytical-models/engine.ts:170-194</cite></td></tr>
 <tr><td>Earthquake / wildfire / hurricane sims</td><td>Run locally via python3</td><td><cite class="src">server/kaggle/simRunner.ts:126-175</cite></td></tr>
-<tr><td>Flood / tsunami / volcano / landslide sims</td><td>Disabled until a Kaggle token exists at ~/.kaggle/kaggle.json</td><td><cite class="src">server/kaggle/simRunner.ts:Kaggle pipeline requires token</cite> <cite class="src">docs/DEPLOYMENT.md:162-173</cite></td></tr>
+<tr><td>Flood / tsunami / volcano / landslide sims</td><td>Disabled until a Kaggle token exists at ~/.kaggle/kaggle.json</td><td><cite class="src">server/kaggle/simRunner.ts:Kaggle pipeline requires token</cite> <cite class="src">docs/markdown/DEPLOYMENT.md:162-173</cite></td></tr>
 <tr><td>AI chat (agent/ask)</td><td>Needs at least one LLM provider key; local GGUF fallback auto-launches if model downloaded</td><td><cite class="src">server/index.ts:789-817</cite></td></tr>
 <tr><td>Live-data routes</td><td>Keyless feeds work (USGS, OpenSky public, EONET…); keyed ones 5xx/disable</td><td><cite class="src">server/apiMetadata.ts:82 entries</cite></td></tr>
 <tr><td>Sentinel / reflex / world model / memory</td><td>Run on keyless feeds or local state</td><td><cite class="src">server/index.ts:14448-14488</cite></td></tr>

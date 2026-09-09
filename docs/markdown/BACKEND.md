@@ -2,7 +2,7 @@
 
 The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via `tsx`), exposing **360+ REST endpoints** (371 route registrations counted 2026-09-09) and a WebSocket channel.
 
-> Site view with per-module citations: [Platform services](capabilities/platform-services.html) · [Live data & monitoring](capabilities/live-data-and-monitoring.html) · [AI cognition](capabilities/ai-cognition.html). It coordinates live data ingestion, the 150-equation analytical engine, AI cognition, realtime services, and persistent state.
+> Site view with per-module citations: [Platform services](../capabilities/platform-services.html) · [Live data & monitoring](../capabilities/live-data-and-monitoring.html) · [AI cognition](../capabilities/ai-cognition.html). It coordinates live data ingestion, the 150-equation analytical engine, AI cognition, realtime services, and persistent state.
 
 ---
 

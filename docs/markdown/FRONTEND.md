@@ -1,8 +1,8 @@
 # Frontend
 
-The Terranoetis client is a **React 19 + TypeScript** single-page application built with **Vite 7**, styled with **Tailwind CSS 3**, and rendered on a **CesiumJS 1.140** WebGL globe. “GPU” below refers to WebGL rendering primitives and shaders only — the simulation kernels the overlays visualize are NumPy/CPU code ([verified modes table](capabilities/hazard-simulations.html#modes)).
+The Terranoetis client is a **React 19 + TypeScript** single-page application built with **Vite 7**, styled with **Tailwind CSS 3**, and rendered on a **CesiumJS 1.140** WebGL globe. “GPU” below refers to WebGL rendering primitives and shaders only — the simulation kernels the overlays visualize are NumPy/CPU code ([verified modes table](../capabilities/hazard-simulations.html#modes)).
 
-> Verified site view: [3D globe visualization](capabilities/globe-visualization.html). The UI shell (topbar, sidebar, modals) is implemented inline in `src/App.tsx` (~11,000 lines); feature surfaces are split across lazy-loaded panels.
+> Verified site view: [3D globe visualization](../capabilities/globe-visualization.html). The UI shell (topbar, sidebar, modals) is implemented inline in `src/App.tsx` (~11,000 lines); feature surfaces are split across lazy-loaded panels.
 
 ---
 

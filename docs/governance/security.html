@@ -7,12 +7,12 @@
 <meta name="description" content="Vulnerability reporting and the threat-model summary; authoritative policy in SECURITY.md.">
 <link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/governance/security.html">
 <link rel="stylesheet" href="../assets/docs.css">
-<link rel="icon" href="../terranoetis.png" type="image/png">
+<link rel="icon" href="../assets/img/terranoetis.png" type="image/png">
 <meta property="og:title" content="Security — Terranoetis Documentation">
 <meta property="og:description" content="Vulnerability reporting and the threat-model summary; authoritative policy in SECURITY.md.">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/governance/security.html">
-<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
 <meta name="docs-last-reviewed" content="2026-09-09">
@@ -26,7 +26,7 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <a class="brand" href="../index.html"><img src="../assets/img/terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
       <a href="../documentation.html">Documentation</a>
@@ -98,7 +98,7 @@
 <div class="table-scroll"><table><caption></caption>
 <thead><tr><th scope="col">Control</th><th scope="col">Verified detail</th><th scope="col">Source</th></tr></thead>
 <tbody>
-<tr><td>Secrets in repo</td><td>runtime <code>.env</code> is gitignored; Kaggle credentials read only from <code>~/.kaggle</code></td><td><cite class="src">docs/DEPLOYMENT.md:173</cite> <cite class="src">.gitignore:.env</cite></td></tr>
+<tr><td>Secrets in repo</td><td>runtime <code>.env</code> is gitignored; Kaggle credentials read only from <code>~/.kaggle</code></td><td><cite class="src">docs/markdown/DEPLOYMENT.md:173</cite> <cite class="src">.gitignore:.env</cite></td></tr>
 <tr><td>JWT strength</td><td>prod boot refuses <code>JWT_SECRET</code> &lt; 32 chars</td><td><cite class="src">server/index.ts:171-181</cite></td></tr>
 <tr><td>Sandbox</td><td>execution caps + audit log per exec</td><td><cite class="src">server/index.ts:8655-8658,8718</cite></td></tr>
 <tr><td>Sim kernels</td><td>receive JSON params only; no shell interpolation of user values</td><td><cite class="src">server/kaggle/simRunner.ts:156-175</cite></td></tr>
