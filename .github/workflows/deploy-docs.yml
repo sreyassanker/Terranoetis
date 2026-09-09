@@ -1,0 +1,45 @@
+# ═══════════════════════════════════════════════════════════════════════
+# GitHub Pages deploy — publishes docs/site/ as the site root.
+# Keeps URLs identical to the previous docs/ branch deployment
+# (https://sreyassanker.github.io/Terranoetis/…).
+# One-time setup: Settings → Pages → Build and deployment →
+# Source: "GitHub Actions".
+# ═══════════════════════════════════════════════════════════════════════
+name: Deploy Docs Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/site/**'
+      - 'scripts/docs/**'
+      - '.github/workflows/deploy-docs.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

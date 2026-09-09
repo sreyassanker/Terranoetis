@@ -10,7 +10,7 @@ import { renderLanding, LANDING_PATH } from './landing.mjs';
 import { narrativePages } from './prose.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const DOCS = path.join(ROOT, 'docs');
+const DOCS = path.join(ROOT, 'docs', 'site');
 
 const SPATIAL = {
   earthquake: `Simulation domain: a square of side <code>extent_km</code> centred on the study-box centroid; <code>dx = extent_km·1000/grid_size</code> m (default 500 m without extent). Rows run north→south (row 0 = north edge), columns west→east; the epi-fraction point (x = east, y = south) receives the distance origin so the strongest shaking sits on the clicked trace. <code>lat</code>/<code>lon</code> enter metadata only — never the physics. ${src('kaggle-kernels/earthquake-sim/main.py', '251-270,319,330')}`,

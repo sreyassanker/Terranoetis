@@ -73,7 +73,7 @@ npm run build         # tsc + vite build
 
 ## Documentation
 
-Docs prose lives in Markdown (`README.md`, `docs/*.md`, `docs/capabilities/*.md`); the Pages site under `docs/` is generated from `scripts/docs/` page specs — edit the spec, run `node scripts/docs/build.mjs`, and keep `node scripts/docs/quality-gate.mjs` green. Every factual claim needs a `file:line` citation; executed evidence is labelled MEASURED, code-read evidence is labelled inspection-only. The writing rules are at [docs/governance/style-guide.html](docs/governance/style-guide.html).
+Docs prose lives in Markdown (`README.md`, `docs/site/markdown/*.md`, `docs/capabilities/*.md`); the Pages site under `docs/site/` is generated from `scripts/docs/` page specs — edit the spec, run `node scripts/docs/build.mjs`, and keep `node scripts/docs/quality-gate.mjs` green. Every factual claim needs a `file:line` citation; executed evidence is labelled MEASURED, code-read evidence is labelled inspection-only. The writing rules are at [docs/governance/style-guide.html](docs/site/governance/style-guide.html).
 
 ## Pull Request Process
 
