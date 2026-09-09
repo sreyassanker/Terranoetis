@@ -23,9 +23,9 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 
 ## Highlights
 
-- **150 analytical models grounded in primary literature** across 26 domains — every equation cites its source paper, book, or standard (80 references carry a DOI, 12 an ISBN, 4 are flagged NO-DOI) ([catalog](docs/MODELS.md) · [verified engine page](docs/capabilities/analytical-engine.html))
+- **150 analytical models grounded in primary literature** across 26 domains — every equation cites its source paper, book, or standard (80 references carry a DOI, 12 an ISBN, 4 are flagged NO-DOI) ([catalog](https://sreyassanker.github.io/Terranoetis/narratives/MODELS.html) · [verified engine page](https://sreyassanker.github.io/Terranoetis/capabilities/analytical-engine.html))
 - **Photorealistic CesiumJS 3D globe** with 41 rendering modules, satellite imagery, and sensor styles
-- **7 physics simulations** — 3 run locally on CPU (earthquake, wildfire, hurricane); 4 execute on free Kaggle kernels (tsunami, volcano, landslide, flood). All kernels are NumPy/CPU code; only flood-sim requests Kaggle's GPU accelerator in its metadata ([verified modes table](docs/capabilities/hazard-simulations.html#modes))
+- **7 physics simulations** — 3 run locally on CPU (earthquake, wildfire, hurricane); 4 execute on free Kaggle kernels (tsunami, volcano, landslide, flood). All kernels are NumPy/CPU code; only flood-sim requests Kaggle's GPU accelerator in its metadata ([verified modes table](https://sreyassanker.github.io/Terranoetis/capabilities/hazard-simulations.html#modes))
 - **AI cognition** — System 1 / System 2 reasoning, multi-agent debate, causal + counterfactual analysis
 - **30+ live data feeds** — seismic, weather, aviation, maritime, satellite, traffic, space
 - **Realtime voice** — OpenAI Realtime → Gemini Live (server-side brokering)
@@ -70,7 +70,7 @@ npm install
 npm run dev             # Vite (3000) + Express API (3001); Redis optional
 ```
 
-> Redis is optional — the server falls back to SQLite automatically if Redis is unavailable. See [Deployment](docs/DEPLOYMENT.md) for the full Docker + production setup.
+> Redis is optional — the server falls back to SQLite automatically if Redis is unavailable. See [Deployment guide](https://sreyassanker.github.io/Terranoetis/narratives/DEPLOYMENT.html) for the full Docker + production setup.
 
 ---
 
@@ -88,12 +88,12 @@ npm run dev             # Vite (3000) + Express API (3001); Redis optional
 The full rendered site lives at **https://sreyassanker.github.io/Terranoetis/** —
 diagrams, tables and navigation included. The GitHub Pages site (from `docs/`) opens
 with a product landing page
-(**[docs/index.html](docs/index.html)**) and a navigation-first documentation hub
-(**[docs/documentation.html](docs/documentation.html)**) with per-capability pages carrying
+(**[landing](https://sreyassanker.github.io/Terranoetis/)**) and a navigation-first documentation hub
+(**[documentation hub](https://sreyassanker.github.io/Terranoetis/documentation.html)**) with per-capability pages carrying
 file-level citations, measured verification data and a CI quality gate. Highlights:
-[Getting started](docs/getting-started.html) ·
-[Hazard simulations](docs/capabilities/hazard-simulations.html) ·
-[Methodology & verification](docs/methodology.html).
+[Getting started](https://sreyassanker.github.io/Terranoetis/getting-started.html) ·
+[Hazard simulations](https://sreyassanker.github.io/Terranoetis/capabilities/hazard-simulations.html) ·
+[Methodology & verification](https://sreyassanker.github.io/Terranoetis/methodology.html).
 
 ---
 
