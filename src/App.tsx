@@ -1836,6 +1836,15 @@ export default function App() {
     // QGIS-style raster output: render the computed spatial grid as a styled
     // surface over the study area (real per-cell values, not a flat plane).
     if (grid && b && b.latMin < b.latMax && b.lonMin < b.lonMax) {
+      // Every cell masked (all cloud / no scene coverage): the honest answer
+      // is an empty field — the warnings on the result card say why. Do NOT
+      // fall through to the scalar IDW plane below; that would paint one
+      // point value across the whole area.
+      if ((grid.finiteCellCount ?? 0) === 0) {
+        setToolSurfaceLegend(null);
+        setToolSurfaceProbe(null);
+        return;
+      }
       // Clear any leftover yellow point from a previous scalar-tool run — the
       // heatmap overlay is the result for spatial tools.
       if (toolResultEntityRef.current) {

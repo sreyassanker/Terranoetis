@@ -98,6 +98,14 @@ export interface GridResult {
   valueMedian: number;
   finiteCellCount: number;
   hasNaN: boolean;
+  /** Satellite-scene provenance for thermal grid tools — the honesty layer:
+   *  which acquisition the field actually came from, how much of the box the
+   *  single scene covers, and how many cells were masked as cloud/shadow/snow
+   *  (cloud-top radiance converted by the split-window equation would show up
+   *  as a physically impossible -35 °C "land surface temperature"). */
+  sceneAcquired?: string;
+  sceneCoverageFrac?: number;
+  sceneCloudMasked?: number;
 }
 
 export interface ContextResult extends ComputeResult {
@@ -3509,7 +3517,27 @@ export async function computeWithContext(
       const grid = await buildSpatialGrid(id, normInputs, { ...ctx, pop: popData, __satDate: dateStr }, latMin, latMax, lonMin, lonMax, sa.polygon);
       if (grid) {
         result.grid = grid;
-        if (grid.hasNaN) warnings.push('Some grid cells produced non-finite values (clamped in display).');
+        // result.warnings was already assembled from `warnings` above (line
+        // ~3487) — pushes to the local array alone would be silently dropped
+        // from the response, so mirror into result.warnings as well.
+        const pushW = (msg: string) => {
+          warnings.push(msg);
+          result.warnings = result.warnings ?? [];
+          if (!result.warnings.includes(msg)) result.warnings.push(msg);
+        };
+        if (grid.hasNaN) pushW('Some grid cells produced non-finite values (clamped in display).');
+        if (grid.sceneCloudMasked) {
+          pushW(`${grid.sceneCloudMasked}/${grid.nLat * grid.nLon} cells masked as cloud/cirrus/shadow/snow by Landsat QA — cloud-top radiance is not land surface temperature, so the field skips those cells.`);
+        }
+        if (grid.sceneCoverageFrac != null && grid.sceneCoverageFrac < 0.98) {
+          pushW(`One Landsat scene (~110 km swath) covers ${Math.round(grid.sceneCoverageFrac * 100)}% of this area — cells outside the swath are empty. Draw a smaller study area for a complete field.`);
+        }
+        if (grid.sceneAcquired && dateStr && !dateStr.includes('/') && grid.sceneAcquired !== dateStr) {
+          pushW(`Field computed from the ${grid.sceneAcquired} acquisition (nearest cloud-viable scene for ${dateStr}).`);
+        }
+        if (SAFE_THERMAL_TOOLS.has(id) && grid.finiteCellCount === 0) {
+          pushW('No cloud-free satellite pixels for this area and date — spatial field withheld rather than faked.');
+        }
       }
     }
   }
@@ -3751,8 +3779,12 @@ async function buildSpatialGrid(
       },
     )
     : null;
+  // Per-cell satellite sampling. A null satGrid means NO field is available —
+  // falling back to the single centre-point pixel here is what produced the
+  // "one flat value across the whole district" lie for large areas: every cell
+  // received the same radiance. Honest NaN instead.
   const satCellAt = (r: number, c: number): import('../data/satelliteThermal').LandsatThermalData | null =>
-    satGrid ? (satGrid.cells[r * nLon + c] ?? null) : ((ctx as Record<string, unknown>).satThermal as import('../data/satelliteThermal').LandsatThermalData | null ?? null);
+    satGrid ? (satGrid.cells[r * nLon + c] ?? null) : null;
 
   const values: number[] = new Array(nLat * nLon);
   let vmin = Infinity, vmax = -Infinity, hasNaN = false;
@@ -3762,6 +3794,13 @@ async function buildSpatialGrid(
       const lon = lons[c];
       try {
         if (!pointInPolygon(lon, lat)) { values[r * nLon + c] = NaN; hasNaN = true; continue; }
+        // Satellite-thermal tools: a cell without a cloud-free Landsat pixel
+        // has NO surface temperature measurement. Letting mapInputs fall back
+        // to ERA5 air temperature per cell would repaint the whole field as
+        // an air-temp proxy labelled "Land Surface Temperature" — the cell
+        // stays empty instead (the point/headline value keeps its own
+        // explicitly-warned proxy fallback).
+        if (SAFE_THERMAL_TOOLS.has(id) && !satCellAt(r, c)) { values[r * nLon + c] = NaN; hasNaN = true; continue; }
         const cellCtx = { ...ctx, lat, lon, elevation: { elevation: elevAt(lat, lon) }, weather: weatherAt(lat, lon), terrain: terrainAt(lat, lon) };
         if (id === 47) {
           const cellSoil = soilAt(lat, lon);
@@ -3812,6 +3851,9 @@ async function buildSpatialGrid(
     valueMedian,
     finiteCellCount: finite.length,
     hasNaN,
+    sceneAcquired: satGrid?.acquired,
+    sceneCoverageFrac: satGrid?.coverageFrac,
+    sceneCloudMasked: satGrid?.cloudMasked,
   };
 }
 

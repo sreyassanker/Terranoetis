@@ -384,6 +384,28 @@ function isFill(raw: number | null | undefined): boolean {
   return raw == null || raw === 0 || raw === -9999 || raw === -99999;
 }
 
+/**
+ * Landsat Collection 2 pixel_qa one-hot class bits: 0 fill, 1 clear, 2 water,
+ * 3 cloud shadow, 4 snow, 5 cloud. Shadow/snow/fill/cloud pixels all carry a
+ * radiance that is NOT the land surface — feeding them to the split-window
+ * equation yields cloud-top brightness temperature mislabelled as LST (the
+ * -35 °C-over-Bengaluru symptom). Unclassified (0) passes through: the
+ * per-cell BT sanity floor below still catches contaminated pixels.
+ */
+const PQA_BAD = (1 << 0) | (1 << 3) | (1 << 4) | (1 << 5); // fill | shadow | snow | cloud
+function isCloudOrBadQa(qaRaw: number | null | undefined): boolean {
+  if (qaRaw == null) return false;
+  const v = Math.round(qaRaw);
+  return v !== 0 && (v & PQA_BAD) !== 0;
+}
+
+/**
+ * Brightness-temperature floor for a plausible land surface anywhere on the
+ * planet (~−22 °C — Antarctic plateau in winter approaches it). Cloud tops in
+ * the tropics sit at 220–250 K, so anything under this is cloud, not ground.
+ */
+const BT_LAND_FLOOR_K = 251;
+
 export async function fetchLandsatThermal(
   lat: number, lon: number, date?: string,
 ): Promise<LandsatThermalData | null> {
@@ -492,10 +514,18 @@ export async function fetchLandsatThermal(
 
   const measuredB11 = await measuredB11Promise;
 
+  // QA_PIXEL was fetched and ignored for years — the point (headline) value
+  // carried cloud-top brightness temperature as "LST" (Bengaluru -35 °C).
+  const bt11Point = measuredB11?.bt11 ?? bt?.bt11;
+  if (isCloudOrBadQa(qaPixel) || (bt11Point != null && bt11Point < BT_LAND_FLOOR_K)) {
+    console.warn(`[L1-PT] centre pixel cloud-flagged (qa=${qaPixel ?? '-'}, BT11=${bt11Point?.toFixed(1) ?? '-'}K) at ${lat.toFixed(3)},${lon.toFixed(3)} — refusing cloud-top radiance as surface temperature`);
+    return null;
+  }
+
   return {
     surfaceTemperature,
     bt10: bt?.bt10,
-    bt11: measuredB11?.bt11 ?? bt?.bt11,
+    bt11: bt11Point,
     bt11Source: measuredB11 ? 'measured' : bt ? 'forward-model' : undefined,
     wScene: bt?.wScene,
     ndvi,
@@ -652,7 +682,7 @@ function sampleBandWindow(
  */
 export async function fetchLandsatThermalGrid(
   lats: number[], lons: number[], date?: string,
-): Promise<{ cells: Array<LandsatThermalData | null>; source: string; acquired?: string; cloudCover?: number } | null> {
+): Promise<{ cells: Array<LandsatThermalData | null>; source: string; acquired?: string; cloudCover?: number; coverageFrac: number; cloudMasked: number } | null> {
   const nLat = lats.length, nLon = lons.length;
   if (nLat < 2 || nLon < 2) return null;
   const latMin = lats[0], latMax = lats[nLat - 1];
@@ -678,15 +708,34 @@ export async function fetchLandsatThermalGrid(
   const features = search.features;
   if (!features || features.length === 0) { console.warn('[L1-GRID] STAC no features in window'); return null; }
 
-  // Require the footprint to cover ALL four grid corners.
-  const corners: Array<[number, number]> = [[latMax, lonMin], [latMax, lonMax], [latMin, lonMin], [latMin, lonMax]];
-  const covering = features.filter((f) => corners.every(([la, lo]) => pointInFootprint(f, la, lo)));
-  if (covering.length === 0) { console.warn(`[L1-GRID] none of ${features.length} scenes cover all corners`); return null; }
-  covering.sort((a, b) =>
-    ((a.properties as Record<string, unknown>)?.['eo:cloud_cover'] as number ?? 100) -
-    ((b.properties as Record<string, unknown>)?.['eo:cloud_cover'] as number ?? 100),
+  // A Landsat scene is a ~110 km path swath. Demanding that one scene contain
+  // ALL FOUR corners of an arbitrary study-area box discards scenes covering
+  // 95% of it — the large-area symptom where the grid silently collapses to
+  // the centre-point broadcast (one flat value everywhere). Score each
+  // candidate by the fraction of a 5×5 lattice of grid-cell centres inside
+  // its footprint; majority coverage qualifies. Preference: least cloud
+  // (10% buckets — decisive differences only), then nearest acquisition to the
+  // requested date (monsoon windows otherwise drift back to the clear season),
+  // then better coverage.
+  const refMs = refDate.getTime();
+  const lattice: Array<[number, number]> = [];
+  for (let i = 0; i < 5; i++) {
+    for (let j = 0; j < 5; j++) {
+      lattice.push([latMin + (latMax - latMin) * ((i + 0.5) / 5), lonMin + (lonMax - lonMin) * ((j + 0.5) / 5)]);
+    }
+  }
+  const cloudOf = (f: Record<string, unknown>) => ((f.properties as Record<string, unknown>)?.['eo:cloud_cover'] as number | undefined) ?? 100;
+  const dateOf = (f: Record<string, unknown>) => new Date(((f.properties as Record<string, unknown>)?.datetime as string) ?? 0).getTime() || 0;
+  const scored = features
+    .map(f => ({ f, cov: lattice.reduce((n, [la, lo]) => n + (pointInFootprint(f, la, lo) ? 1 : 0), 0) / lattice.length }))
+    .filter(s => s.cov >= 0.5);
+  if (scored.length === 0) { console.warn(`[L1-GRID] none of ${features.length} scenes covers ≥50% of the study box`); return null; }
+  scored.sort((a, b) =>
+    (Math.round(cloudOf(a.f) / 10) - Math.round(cloudOf(b.f) / 10)) ||
+    (Math.abs(dateOf(a.f) - refMs) - Math.abs(dateOf(b.f) - refMs)) ||
+    (b.cov - a.cov),
   );
-  const item = covering[0];
+  const item = scored[0].f;
   const assets = item.assets as Record<string, { href: string }>;
   const props = item.properties as Record<string, unknown>;
   const epsg = props['proj:epsg'] as number;
@@ -761,7 +810,19 @@ export async function fetchLandsatThermalGrid(
     return dnToBt11(dn, calibration);
   };
 
+  // QA band (fill/cloud-shadow/snow/cloud classes) — the per-pixel gate that
+  // stops cloud-top radiance from being converted into a "land surface"
+  // temperature. Landsat C2 L2 exposes it as 'qa' (older items 'qa_pixel').
+  const qaKey = assets['qa'] ? 'qa' : assets['qa_pixel'] ? 'qa_pixel' : undefined;
+  let qaBand: { win: BandWindow; geom: BandGeom } | null = null;
+  if (qaKey) {
+    const qs = await sign(assets[qaKey].href).catch(() => null);
+    if (qs) qaBand = await readCogBboxWindow(qs, epsg, latMin, latMax, lonMin, lonMax).catch(() => null);
+    if (!qaBand) console.warn('[L1-GRID] QA band window read failed — relying on BT-floor screening only');
+  }
+
   const cells: Array<LandsatThermalData | null> = new Array(nLat * nLon).fill(null);
+  let coverageIn = 0, cloudMasked = 0;
   for (let r = 0; r < nLat; r++) {
     for (let c = 0; c < nLon; c++) {
       const lat = lats[r], lon = lons[c];
@@ -772,6 +833,12 @@ export async function fetchLandsatThermalGrid(
         return v != null && !isFill(v) ? v : undefined;
       };
       const stRaw = raw('lwir11');
+      if (stRaw == null) continue;
+      coverageIn++;
+      if (qaBand) {
+        const qv = sampleBandWindow(qaBand, toUtm, lat, lon);
+        if (qv != null && isCloudOrBadQa(qv)) { cloudMasked++; continue; }
+      }
       const tradRaw = raw('trad');
       const atranRaw = raw('atran');
       const uradRaw = raw('urad');
@@ -792,6 +859,10 @@ export async function fetchLandsatThermalGrid(
         K, surfaceTemperature,
       );
       const measuredBt11 = sampleMeasuredB11(lat, lon);
+      const bt11v = measuredBt11 ?? bt?.bt11;
+      // Thin cirrus passes PQA "clear" but its band-11 BT is physically
+      // impossible as a land surface — mask it too (counts as cloud).
+      if (bt11v != null && bt11v < BT_LAND_FLOOR_K) { cloudMasked++; continue; }
       cells[r * nLon + c] = {
         surfaceTemperature,
         bt10: bt?.bt10,
@@ -806,5 +877,5 @@ export async function fetchLandsatThermalGrid(
       };
     }
   }
-  return { cells, source: `pc:${PC_COLLECTION}:${itemId}`, acquired: acquired?.slice(0, 10), cloudCover };
+  return { cells, source: `pc:${PC_COLLECTION}:${itemId}`, acquired: acquired?.slice(0, 10), cloudCover, coverageFrac: coverageIn / (nLat * nLon), cloudMasked };
 }
