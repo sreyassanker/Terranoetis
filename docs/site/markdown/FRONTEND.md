@@ -137,13 +137,13 @@ Scenario types and colors:
 | `earthquakes.ts` | Earthquake markers |
 | `satelliteDataSources.ts` | TLE orbit propagation & rendering |
 | `satelliteImagery.ts` | GIBS/XYZ/WMS imagery layers |
-| `satnogs.ts` | SatNOGS ground stations |
+| `satnogs.ts` | SatNOGS transmitter/frequency records |
 | `osmBuildings.ts` | OSM 3D building extrusion |
 | `ucsSatelliteDb.ts` | UCS satellite database |
 | `tectonic.ts` | Tectonic plate data |
 | `weather.ts` | Weather data |
 | `trajectoryPredictor.ts` | Trajectory prediction |
-| `tomtomTraffic.ts` | Per-vehicle street-level traffic flow |
+| `tomtomTraffic.ts` | Per-segment street-level traffic flow (TomTom Flow Segment API) |
 | `cctvViewshed.ts` | Webcam coverage cones |
 | `launchReplay.ts` | Rocket ascent reconstruction |
 | `aircraftHangar.ts` | Flight glyphs → 3D glTF models (LOD) |
@@ -190,9 +190,9 @@ Scenario types and colors:
 
 | File | Lines | Contents |
 |---|---|---|
-| `KaggleScalarOverlay.tsx` | 541 | Generic scalar field renderer (raster → Cesium surface, colormap legend, animation) |
+| `KaggleScalarOverlay.tsx` | 680 | Generic scalar field renderer (raster → Cesium surface, colormap legend, animation) |
 | `VolcanoEnsembleOverlay.tsx` | 310 | Volcano ensemble (lava + ash) overlay |
-| `shared.ts` | 485 | Shared colormaps, color stops, config types |
+| `shared.ts` | 505 | Shared colormaps, color stops, config types |
 | `KaggleLegend.tsx` | 113 | Legend component |
 | `KaggleAnimationControls.tsx` | 116 | Animation timeline controls |
 

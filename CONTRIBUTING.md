@@ -5,7 +5,7 @@
 ### Prerequisites
 
 - Node.js 20+
-- Redis 7+ (optional for dev — falls back to in-memory cache)
+- Redis 7+ (optional for dev — the server falls back to SQLite automatically)
 - A `.env` file with your API keys (copy from `.env.example`)
 
 ### Quick Start
@@ -28,7 +28,7 @@ The client runs on `http://localhost:3000` and the server on `http://localhost:3
 
 ```bash
 # Unit + integration tests
-npm test              # vitest — 1624+ tests
+npm test              # vitest — 1,702 tests (1,653 unit + 49 integration; measured 2026-09-09)
 
 # TypeScript type checking
 npx tsc -p tsconfig.server.json --noEmit
@@ -73,7 +73,7 @@ npm run build         # tsc + vite build
 
 ## Documentation
 
-Docs prose lives in Markdown (`README.md`, `docs/site/markdown/*.md`, `docs/capabilities/*.md`); the Pages site under `docs/site/` is generated from `scripts/docs/` page specs — edit the spec, run `node scripts/docs/build.mjs`, and keep `node scripts/docs/quality-gate.mjs` green. Every factual claim needs a `file:line` citation; executed evidence is labelled MEASURED, code-read evidence is labelled inspection-only. The writing rules are at [docs/governance/style-guide.html](docs/site/governance/style-guide.html).
+Docs prose lives in Markdown (`README.md`, `docs/site/markdown/*.md`, `docs/site/capabilities/*.md`); the Pages site under `docs/site/` is generated from `scripts/docs/` page specs — edit the spec, run `node scripts/docs/build.mjs`, and keep `node scripts/docs/quality-gate.mjs` green. Every factual claim needs a `file:line` citation; executed evidence is labelled MEASURED, code-read evidence is labelled inspection-only. The writing rules are at [docs/governance/style-guide.html](docs/site/governance/style-guide.html).
 
 ## Pull Request Process
 

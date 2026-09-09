@@ -105,9 +105,9 @@
 <tr><td>3</td><td>body limits 5 mb, x-powered-by off</td><td></td><td><cite class="src">server/index.ts:274-276</cite></td></tr>
 <tr><td>4</td><td>pino request logger → prom-client metrics</td><td>before auth so all traffic is metered</td><td><cite class="src">server/index.ts:279-280</cite></td></tr>
 <tr><td>5</td><td>auth endpoints pre-guard</td><td>login rate-limited 5/15 min; refresh; dev-login non-prod only</td><td><cite class="src">server/index.ts:306-314</cite></td></tr>
-<tr><td>6</td><td>global /api guard</td><td>~150 public read-only data paths → 300/min per-IP; everything else requires JWT</td><td><cite class="src">server/index.ts:373-487</cite></td></tr>
+<tr><td>6</td><td>global /api guard</td><td>public allow-list: health/metrics/config/OpenAPI + rate-limited read-only data routes (300/min/IP) + unthrottled public non-data routes (tiles, pulse, share-token reads); everything else requires JWT</td><td><cite class="src">server/index.ts:373-487</cite></td></tr>
 <tr><td>7</td><td>routers</td><td>foundation-models, fork, pulse, /api/kaggle, analytical-models, openapi</td><td><cite class="src">server/index.ts:489-494</cite></td></tr>
-<tr><td>8</td><td>ToolRegistry (~201 registered tools) + Omninet init + local GGUF spawn</td><td>llama-server :11436 when model file present</td><td><cite class="src">server/index.ts:513-817</cite></td></tr>
+<tr><td>8</td><td>DynamicToolRegistry (DB-persisted; 210 tools loaded at boot 2026-09-09) + Omninet init + local GGUF spawn</td><td>llama-server :11436 when model file present</td><td><cite class="src">server/index.ts:513-817</cite></td></tr>
 <tr><td>9</td><td>listen() background engines</td><td>sentinel, monitors, forecast ledger, reflex, forks, entropy, discovery, dream, memory system, power saver</td><td><cite class="src">server/index.ts:14448-14488</cite></td></tr>
 <tr><td>10</td><td>graceful shutdown</td><td>stop engines → close HTTP → queue shutdown 10 s → close DB</td><td><cite class="src">server/index.ts:14519-14573</cite></td></tr>
 </tbody></table></div>

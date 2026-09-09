@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>API Reference — Terranoetis Documentation</title>
-<meta name="description" content="Terranoetis exposes 360+ REST endpoints (371 handler registrations counted across server/ on 2026-09-09) plus real-time WebSocket (/ws/agent, /ws/voice) an…">
+<meta name="description" content="Terranoetis exposes 360+ REST endpoints (398 handler registrations across app/router verbs under server/, counted 2026-09-09; GET/POST/PUT/DELETE/PATCH) pl…">
 <link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/narratives/API.html">
 <link rel="stylesheet" href="../assets/docs.css">
 <link rel="icon" href="../assets/img/terranoetis.png" type="image/png">
 <meta property="og:title" content="API Reference — Terranoetis Documentation">
-<meta property="og:description" content="Terranoetis exposes 360+ REST endpoints (371 handler registrations counted across server/ on 2026-09-09) plus real-time WebSocket (/ws/agent, /ws/voice) an…">
+<meta property="og:description" content="Terranoetis exposes 360+ REST endpoints (398 handler registrations across app/router verbs under server/, counted 2026-09-09; GET/POST/PUT/DELETE/PATCH) pl…">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/API.html">
 <meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
@@ -93,7 +93,7 @@
       
       <div class="prose">
 
-<p>Terranoetis exposes <strong>360+ REST endpoints</strong> (371 handler registrations counted across <code>server/</code> on 2026-09-09) plus real-time <strong>WebSocket</strong> (<code>/ws/agent</code>, <code>/ws/voice</code>) and <strong>SSE</strong> channels. All API routes are served under <code>/api</code>. Authentication uses JWT bearer tokens with role-based access control (RBAC).</p>
+<p>Terranoetis exposes <strong>360+ REST endpoints</strong> (398 handler registrations across <code>app</code>/router verbs under <code>server/</code>, counted 2026-09-09; <code>GET</code>/<code>POST</code>/<code>PUT</code>/<code>DELETE</code>/<code>PATCH</code>) plus real-time <strong>WebSocket</strong> (<code>/ws/agent</code>, <code>/ws/voice</code>) and <strong>SSE</strong> channels. All API routes are served under <code>/api</code>. Authentication uses JWT bearer tokens with role-based access control (RBAC).</p>
 
 
 <blockquote>
@@ -135,7 +135,7 @@
 <li><strong>Content-Type:</strong> <code>application/json</code></li>
 <li><strong>Auth:</strong> <code>Authorization: Bearer &lt;JWT&gt;</code></li>
 <li><strong>Rate limiting:</strong> per-IP and per-user limits apply on public + authenticated routes</li>
-<li><strong>Public routes</strong> (no auth): <code>/auth/login</code>, <code>/auth/dev-login</code>, <code>/auth/refresh</code>, <code>/health</code>, <code>/ready</code>, <code>/live</code>, <code>/metrics</code>, <code>/config/apis</code>, <code>/openapi.json</code>, <code>/docs</code>. In addition, read-only live-data endpoints (e.g. <code>/earthquakes</code>, <code>/weather/*</code>, <code>/flights</code>, <code>/ais</code>, <code>/satellites/tle</code>, <code>/pulse/*</code>, <code>/kaggle/*</code>, <code>/analytical-models</code> search + detail) are public but server-side rate-limited, as are shared-session reads (<code>/shared/*</code>), map tiles (<code>/tiles/*</code>, <code>/tilejson</code>), foundation-model endpoints (<code>/fm/*</code>, <code>/road-traffic/*</code>, <code>/spacex/*</code>, <code>/bayfire/*</code>), multimodal endpoints (<code>/multimodal/*</code>), and simulations (<code>/simulate/*</code>). <code>/social/stream</code> authenticates via <code>?token=</code> (SSE).</li>
+<li><strong>Public routes</strong> (no auth): <code>/auth/login</code>, <code>/auth/dev-login</code>, <code>/auth/refresh</code>, <code>/health</code>, <code>/ready</code>, <code>/live</code>, <code>/metrics</code>, <code>/config/apis</code>, <code>/openapi.json</code>, <code>/docs</code>. In addition, read-only live-data endpoints (e.g. <code>/earthquakes</code>, <code>/weather/*</code>, <code>/flights</code>, <code>/ais</code>, <code>/satellites/tle</code>, <code>/kaggle/*</code>, <code>/analytical-models</code> search + detail, plus <code>/multimodal/*</code> and <code>/simulate/*</code>) are public with server-side rate limiting (<code>publicDataRateLimit</code>, 300/min/IP). Shared-session reads (<code>/shared/*</code>, share-token scoped), map tiles (<code>/tiles/*</code>, <code>/tilejson</code>), <code>/pulse/*</code> and most foundation-model endpoints (<code>/fm/*</code>, <code>/road-traffic/*</code>, <code>/spacex/*</code>, <code>/bayfire/*</code>) are public but unthrottled. <code>/social/stream</code> authenticates via <code>?token=</code> (SSE).</li>
 </ul>
 
 
@@ -389,7 +389,7 @@
 <tr>
 <td>GET</td>
 <td><code>/api/analytical-models</code></td>
-<td>Full catalog (all 150 models)</td>
+<td>Implemented equation IDs (<code>{implemented: [1..150]}</code>; names/citations via <code>/:id</code> and search)</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -560,7 +560,7 @@
 <tr>
 <td>POST</td>
 <td><code>/api/sandbox/execute</code></td>
-<td>Execute Python / Node / Bash in the sandbox</td>
+<td>Execute Python / Node / Bash / R in the sandbox</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -605,7 +605,7 @@
 <tr>
 <td>POST</td>
 <td><code>/api/kaggle/simulate</code></td>
-<td>Submit a simulation run (zod-validated contract; see parameter-contract reference)</td>
+<td>Submit a simulation run (contract zod-validated client-side; the server checks type/lat/lon presence and known types — see parameter-contract reference)</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -615,12 +615,12 @@
 <tr>
 <td>POST</td>
 <td><code>/api/kaggle/simulate/:id/cancel</code></td>
-<td>Cooperative cancel (local runs SIGKILL at <code>LOCAL_SIM_TIMEOUT_MS</code>)</td>
+<td>Cooperative cancel (local runs are SIGKILLed; wall-clock runs are separately capped by <code>LOCAL_SIM_TIMEOUT_MS</code>, default 120 s)</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/api/kaggle/simulate/:id/grid/:name</code></td>
-<td>Result grid as raw <code>.npy</code> or JSON (≤ 5 M elements)</td>
+<td>Result grid as raw <code>.npy</code> or JSON (JSON capped at 5 M elements; 413 above)</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -644,8 +644,13 @@
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/api/kaggle/volcano/calibrate</code> · <code>/api/kaggle/volcano/profile</code></td>
-<td>Lava rheology calibration · wind-profile sampling</td>
+<td><code>/api/kaggle/volcano/calibrate</code></td>
+<td>Lava rheology calibration (local python3)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/kaggle/volcano/profile</code></td>
+<td>ERA5 wind-profile sampling (<code>?lat=&amp;lon=&amp;date=</code>)</td>
 </tr>
 </tbody>
 </table></div>
@@ -927,7 +932,7 @@
 <tr>
 <td>DELETE</td>
 <td><code>/api/tools/:id</code></td>
-<td>Disable tool</td>
+<td>Remove a dynamic tool (core tools return 403)</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -1005,12 +1010,12 @@
 <ul>
 <li>Live entity updates (flights, vessels, satellites, earthquakes)</li>
 <li>Agent SSE-style streaming relayed over WS</li>
-<li>Presence (collaboration cursors, typing)</li>
+<li>Presence (typing indicators)</li>
 <li>Pub/sub messages (alerts, fork state)</li>
 </ul>
 
 
-<p>Connection: <code>ws://&lt;host&gt;:3001</code> on paths <code>/ws/agent</code> and <code>/ws/voice</code> only (all other upgrade paths are destroyed); auth via <code>Sec-WebSocket-Protocol</code> bearer JWT (fallback <code>?token=</code>); 30 s heartbeat / 35 s timeout; channel allowlist includes <code>sentinel:raw</code>, <code>sentinel:alerts</code>, <code>correlation:alerts</code>, <code>fork:*</code>, per-user <code>ws:&lt;id&gt;</code> (<code>server/websocket.ts:79-145</code>). The event bus feeding it is the in-process pub/sub (<code>server/pubsub.ts</code>) — Redis is not required for realtime delivery.</p>
+<p>Connection: <code>ws://&lt;host&gt;:3001</code> on paths <code>/ws/agent</code> and <code>/ws/voice</code> only (all other upgrade paths are destroyed); auth via <code>Sec-WebSocket-Protocol</code> bearer JWT (fallback <code>?token=</code>); 30 s heartbeat / 35 s timeout; channel allowlist includes <code>sentinel:raw</code>, <code>sentinel:alerts</code>, <code>correlation:alerts</code>, <code>fork:*</code>, per-user <code>ws:&lt;id&gt;</code> (<code>server/websocket.ts:18-20,63-69</code>; upgrade + heartbeat :79-145). The event bus feeding it is the in-process pub/sub (<code>server/pubsub.ts</code>) — Redis is not required for realtime delivery.</p>
 
 
 <hr></hr>
@@ -1059,7 +1064,7 @@
 </table></div>
 
 
-<p>Errors return <code>{ &quot;error&quot;: &quot;&lt;message&gt;&quot; }</code>. Authentication failures return <code>{ &quot;error&quot;: &quot;Missing or invalid Authorization header...&quot; }</code>.</p></div>
+<p>Route handlers return <code>{ &quot;error&quot;: &quot;&lt;message&gt;&quot; }</code>; the central error middleware (body-parse 400/413/415, 404 not-found, unhandled 500s) returns <code>{ &quot;error&quot;: { &quot;code&quot;: &quot;&lt;CODE&gt;&quot;, &quot;message&quot;: &quot;&lt;message&gt;&quot; } }</code>. Authentication failures return <code>{ &quot;error&quot;: &quot;Missing or invalid Authorization header...&quot; }</code>.</p></div>
       <footer class="site-footer">
         <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·

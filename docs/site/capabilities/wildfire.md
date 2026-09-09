@@ -12,4 +12,4 @@ Rothermel's model form carries a dimensionless proportionality constant that dif
 
 ## Why measured spread trails the ROS field
 
-The continuous ROS can be 0.37 m/s while the discrete front creeps: ignition is probabilistic, cells burn out after a residence time, and slow fuels stall without the documented residence/clumping fixes. Judge the product as a stochastic ignition process constrained by Rothermel physics; use terrain-realism (the kernel happily runs on globe-sampled slopes) and fuel choice as the levers, and read the boundary rows on the page for what happens in calm/saturated versus hot/dry regimes.
+The continuous ROS can be 0.37 m/s while the discrete front creeps: ignition is probabilistic, cells burn out after a residence time, and slow fuels stall on the ignition cell without the documented residence-time dynamics. Judge the product as a stochastic ignition process constrained by Rothermel physics; use terrain-realism (the kernel happily runs on globe-sampled slopes) and fuel choice as the levers, and read the boundary rows on the page for what happens in calm/saturated versus hot/dry regimes.

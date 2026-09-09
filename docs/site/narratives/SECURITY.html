@@ -123,11 +123,11 @@
 <tbody>
 <tr>
 <td>SSRF via user-controlled URL</td>
-<td><code>validateOutboundUrl()</code> + <code>isAllowedUpstream()</code> — DNS resolution, private-IP blocking, allowlist. Applied at 3 outbound fetch sites.</td>
+<td><code>validateOutboundUrl()</code> + <code>isAllowedUpstream()</code> — DNS resolution, private-IP blocking, allowlist. Applied at the 2 user-URL fetch sites (proxy endpoint, custom data-source ingest).</td>
 </tr>
 <tr>
 <td>Unauthenticated access to protected routes</td>
-<td>JWT verification via <code>authGuard</code> middleware. Public routes limited to health, metrics, config, OpenAPI spec, and read-only data endpoints.</td>
+<td>JWT verification via <code>authGuard</code> middleware. Public routes are an explicit allow-list: health/ready/live, metrics, config, OpenAPI/docs, the rate-limited read-only data routes, plus unauthenticated tile/pulse endpoints and share-token reads under /shared/.</td>
 </tr>
 <tr>
 <td>API key exposure</td>
@@ -143,11 +143,11 @@
 </tr>
 <tr>
 <td>Public data endpoint abuse</td>
-<td><code>perIpRateLimiter(300, 60s)</code> on all public read-only data endpoints.</td>
+<td><code>perIpRateLimiter(300, 60s)</code> on the rate-limited public data allow-list (tile, pulse and share routes are public by design and carry their own guards).</td>
 </tr>
 <tr>
 <td>CORS abuse</td>
-<td>Static allowlist (<code>origin: CLIENT_ORIGIN</code>), no origin reflection.</td>
+<td>Fixed single origin from <code>CLIENT_ORIGIN</code> (no reflection), credentials mode on.</td>
 </tr>
 <tr>
 <td>Injections</td>

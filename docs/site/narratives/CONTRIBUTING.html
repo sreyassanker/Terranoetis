@@ -101,7 +101,7 @@
 
 <ul>
 <li>Node.js 20+</li>
-<li>Redis 7+ (optional for dev — falls back to in-memory cache)</li>
+<li>Redis 7+ (optional for dev — the server falls back to SQLite automatically)</li>
 <li>A <code>.env</code> file with your API keys (copy from <code>.env.example</code>)</li>
 </ul>
 
@@ -128,7 +128,7 @@ npm run dev
 
 
 <pre><code class="language-bash"># Unit + integration tests
-npm test              # vitest — 1624+ tests
+npm test              # vitest — 1,702 tests (1,653 unit + 49 integration; measured 2026-09-09)
 
 # TypeScript type checking
 npx tsc -p tsconfig.server.json --noEmit
@@ -187,7 +187,7 @@ npm run build         # tsc + vite build
 <h2 id="documentation">Documentation</h2>
 
 
-<p>Docs prose lives in Markdown (<code>README.md</code>, <code>docs/site/markdown/*.md</code>, <code>docs/capabilities/*.md</code>); the Pages site under <code>docs/site/</code> is generated from <code>scripts/docs/</code> page specs — edit the spec, run <code>node scripts/docs/build.mjs</code>, and keep <code>node scripts/docs/quality-gate.mjs</code> green. Every factual claim needs a <code>file:line</code> citation; executed evidence is labelled MEASURED, code-read evidence is labelled inspection-only. The writing rules are at <a href="../governance/style-guide.html">docs/governance/style-guide.html</a>.</p>
+<p>Docs prose lives in Markdown (<code>README.md</code>, <code>docs/site/markdown/*.md</code>, <code>docs/site/capabilities/*.md</code>); the Pages site under <code>docs/site/</code> is generated from <code>scripts/docs/</code> page specs — edit the spec, run <code>node scripts/docs/build.mjs</code>, and keep <code>node scripts/docs/quality-gate.mjs</code> green. Every factual claim needs a <code>file:line</code> citation; executed evidence is labelled MEASURED, code-read evidence is labelled inspection-only. The writing rules are at <a href="../governance/style-guide.html">docs/governance/style-guide.html</a>.</p>
 
 
 <h2 id="pull-request-process">Pull Request Process</h2>

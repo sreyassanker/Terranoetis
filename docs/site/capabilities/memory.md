@@ -8,7 +8,7 @@ An intelligence assistant that forgets everything is a search engine. Terranoeti
 
 ## Storage without pretension
 
-Everything is local: SQLite tables per tier, with Redis used only as a hot key/value path for the fastest tiers and falling back to SQLite when absent. Retrieval is embedding-augmented (768-dim cosine), consolidation is a scheduled sweep that promotes episodic traces into semantic and procedural records, and every memory read that enters a prompt is attributed (per-user isolation, tenant-guarded deletes).
+Everything is local: SQLite tables per tier, with Redis used only as a hot key/value path for the fastest tiers and falling back to SQLite when absent. Retrieval is embedding-augmented (768-dim cosine), consolidation is a 6-hour sweep that promotes successful episodic traces into semantic records (procedural patterns are captured live from tool-chain outcomes, not by the sweep), and every memory read that enters a prompt is attributed (per-user isolation, tenant-guarded deletes).
 
 ## Honest boundary
 

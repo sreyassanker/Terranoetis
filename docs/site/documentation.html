@@ -144,9 +144,9 @@
 <tbody>
 <tr><td><code>src/</code></td><td>React 19 + CesiumJS client (App shell, components/, rendering/ 41 modules, hooks, lib, services, store)</td></tr>
 <tr><td><code>server/</code></td><td>Express API: index.ts (14,573 lines), agent/cognition, analytical-models, kaggle, sentinel, memory, world-model, middleware, db</td></tr>
-<tr><td><code>kaggle-kernels/</code></td><td>Seven Python simulation kernels + per-kernel metadata + archived result artifacts</td></tr>
+<tr><td><code>kaggle-kernels/</code></td><td>Seven Python simulation kernels + per-kernel metadata; runtime output goes to <code>results/&lt;jobId&gt;/</code> (gitignored)</td></tr>
 <tr><td><code>docs/</code></td><td>This site: generated HTML pages (source: scripts/docs/), Markdown prose of record, manifest and sitemap</td></tr>
-<tr><td><code>e2e/</code></td><td>Playwright specs (7 files, 38 test declarations)</td></tr>
+<tr><td><code>e2e/</code></td><td>Playwright specs (7 files; 15 test declarations, 14 registered by default — 1 gated behind <code>LULC_HEAVY=1</code>)</td></tr>
 <tr><td><code>scripts/</code></td><td>Dev utilities, live smoke scripts, docs build + quality gate</td></tr>
 <tr><td><code>.github/workflows/</code></td><td>ci.yml (10 jobs) + docs.yml (quality gate)</td></tr>
 </tbody></table></div>

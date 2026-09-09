@@ -110,7 +110,7 @@
 
 <ol>
 <li><strong>The API is the product boundary.</strong> The globe UI and any script you write hit the same <code>/api</code> endpoints. If you can <code>curl</code> it, you can automate it.</li>
-<li><strong>Simulations are kernels, not cloud services.</strong> Each hazard is a Python file in <code>kaggle-kernels/</code>. Three of them (earthquake, wildfire, hurricane) are executed locally by the server with <code>python3</code>; four (flood, tsunami, volcano, landslide) are dispatched to Kaggle as an execution venue — the code itself is NumPy and runs on CPU instances.</li>
+<li><strong>Simulations are kernels, not cloud services.</strong> Each hazard is a Python file in <code>kaggle-kernels/</code>. Three of them (earthquake, wildfire, hurricane) are executed locally by the server with <code>python3</code>; four (flood, tsunami, volcano, landslide) are dispatched to Kaggle as an execution venue — the code itself is pure NumPy, run on CPU instances except flood-sim, whose kernel metadata requests Kaggle's GPU accelerator.</li>
 <li><strong>Nothing is fabricated silently.</strong> Inputs that are required but missing raise at the client boundary; analytical tools that cannot obtain real data return NaN with an explanation. The docs mirror this: every claim on the site carries a <code>file:line</code> citation, and unexecuted claims are labelled.</li>
 </ol>
 

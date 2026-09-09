@@ -16,4 +16,4 @@ Evaluating a GMPE median on a 256×256 grid is arithmetic, not integration: the 
 
 ## Reading a ShakeMap honestly
 
-PGA values are medians of empirical distributions whose spread is large (roughly a factor of two in either direction at fixed M and R — the source paper's log-standard-deviation terms `h` are in the coefficient table). MMI bands are decision aids, not physics: the bands saturate for great-earthquake near-fields, which the kernel metadata states. Use the map to rank places, not to certify them.
+PGA values are medians of empirical distributions whose spread is large (roughly a factor of two in either direction at fixed M and R; the kernel predicts the median only — its metadata states "median (no epistemic uncertainty bands)"; the `h` in the coefficient table is the geometric attenuation term √(R_jb² + h²) of the point-source distance proxy, not a log-sigma). MMI bands are decision aids, not physics: the bands saturate for great-earthquake near-fields, which the kernel metadata states. Use the map to rank places, not to certify them.

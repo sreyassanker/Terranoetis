@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Backend — Terranoetis Documentation</title>
-<meta name="description" content="The Terranoetis backend is a Node.js + Express 4 API server (TypeScript via tsx), exposing 360+ REST endpoints (371 route registrations counted 2026-09-09)…">
+<meta name="description" content="The Terranoetis backend is a Node.js + Express 4 API server (TypeScript via tsx), exposing 360+ REST endpoints (398 handler registrations counted 2026-09-0…">
 <link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/narratives/BACKEND.html">
 <link rel="stylesheet" href="../assets/docs.css">
 <link rel="icon" href="../assets/img/terranoetis.png" type="image/png">
 <meta property="og:title" content="Backend — Terranoetis Documentation">
-<meta property="og:description" content="The Terranoetis backend is a Node.js + Express 4 API server (TypeScript via tsx), exposing 360+ REST endpoints (371 route registrations counted 2026-09-09)…">
+<meta property="og:description" content="The Terranoetis backend is a Node.js + Express 4 API server (TypeScript via tsx), exposing 360+ REST endpoints (398 handler registrations counted 2026-09-0…">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/BACKEND.html">
 <meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/assets/img/terranoetis.png">
@@ -93,7 +93,7 @@
       
       <div class="prose">
 
-<p>The Terranoetis backend is a <strong>Node.js + Express 4</strong> API server (TypeScript via <code>tsx</code>), exposing <strong>360+ REST endpoints</strong> (371 route registrations counted 2026-09-09) and a WebSocket channel.</p>
+<p>The Terranoetis backend is a <strong>Node.js + Express 4</strong> API server (TypeScript via <code>tsx</code>), exposing <strong>360+ REST endpoints</strong> (398 handler registrations counted 2026-09-09 across app/router verbs) and a WebSocket channel.</p>
 
 
 <blockquote>
@@ -153,7 +153,7 @@
 </tr>
 <tr>
 <td>Observability</td>
-<td>Pino, OpenTelemetry, Sentry</td>
+<td>Pino, in-house OpenTelemetry-style tracing, Sentry</td>
 </tr>
 <tr>
 <td>Sandbox</td>
@@ -381,7 +381,7 @@
 </tr>
 <tr>
 <td><code>observability/</code></td>
-<td>Pino logger, metrics, OpenTelemetry, Sentry</td>
+<td>Pino logger, metrics, in-house OpenTelemetry-style tracing, Sentry</td>
 </tr>
 <tr>
 <td><code>queue/</code></td>
@@ -393,7 +393,7 @@
 </tr>
 <tr>
 <td><code>routes/</code></td>
-<td>Foundation models, self-evolution, vault, pulse, cache service, OpenAPI</td>
+<td>Foundation models, self-evolution, pulse, cache service, OpenAPI</td>
 </tr>
 <tr>
 <td><code>infrastructure/</code></td>
@@ -597,7 +597,7 @@
 </tr>
 <tr>
 <td>Tracing</td>
-<td>OpenTelemetry</td>
+<td>OpenTelemetry-style spans (in-house <code>observability/openTelemetry.ts</code>; official SDK imports are stubbed)</td>
 </tr>
 <tr>
 <td>Error tracking</td>

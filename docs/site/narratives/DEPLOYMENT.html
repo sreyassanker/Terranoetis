@@ -141,7 +141,7 @@
 <tr>
 <td>Redis</td>
 <td>7.x</td>
-<td>Caching, session, pub/sub (optional — graceful fallback to SQLite)</td>
+<td>Cache + memory hot path (optional — graceful fallback to SQLite; the event bus is in-process regardless)</td>
 </tr>
 <tr>
 <td>Docker &amp; Compose</td>
@@ -221,7 +221,7 @@ curl http://localhost:3001/api/health
 <td><code>redis</code></td>
 <td><code>redis:7-alpine</code></td>
 <td>6379</td>
-<td>Cache, session, pub/sub</td>
+<td>Cache + memory hot path</td>
 </tr>
 <tr>
 <td><code>causal-service</code></td>
@@ -351,8 +351,8 @@ docker compose up -d    # Restart with rebuilt images
 </tr>
 <tr>
 <td>ADMIN_BOOTSTRAP_PASSWORD</td>
-<td>Auto-generated</td>
-<td>Required, ≥ 16 chars</td>
+<td>Auto-generated (dev)</td>
+<td>Required for admin provisioning, ≥ 16 chars; if missing, boot continues with the admin disabled</td>
 </tr>
 <tr>
 <td>Dev auto-login</td>
@@ -367,7 +367,7 @@ docker compose up -d    # Restart with rebuilt images
 <tr>
 <td>Startup validation</td>
 <td>Warning</td>
-<td>Hard error</td>
+<td>Hard error for <code>JWT_SECRET</code> only (weak ⇒ boot refuses); a missing admin bootstrap password disables the admin account, not the server</td>
 </tr>
 </tbody>
 </table></div>
@@ -509,7 +509,7 @@ docker compose up -d    # Restart with rebuilt images
 <h2 id="cicd-pipeline">CI/CD Pipeline</h2>
 
 
-<p>The GitHub Actions workflow (<code>.github/workflows/ci.yml</code>) runs the following on every push and pull request:</p>
+<p>The GitHub Actions workflow (<code>.github/workflows/ci.yml</code>) runs the following on pushes and pull requests targeting <code>main</code>/<code>develop</code>; the documentation gate ships as a separate workflow (<code>.github/workflows/docs.yml</code>):</p>
 
 
 <div class="table-scroll"><table>
@@ -534,7 +534,7 @@ docker compose up -d    # Restart with rebuilt images
 </tr>
 <tr>
 <td>Integration Tests</td>
-<td>Vitest in <code>server/__tests__/integration</code></td>
+<td>Vitest in <code>server/__tests__/integration</code> + <code>server/__tests__/e2e</code></td>
 </tr>
 <tr>
 <td>Coverage</td>
@@ -573,7 +573,7 @@ docker compose up -d    # Restart with rebuilt images
 
 <ul>
 <li><strong>Node version:</strong> 20 (specified in workflow and <code>.nvmrc</code>; the 2026-09-09 verification pass ran Node 26 with 1,653 unit + 49 integration tests passing)</li>
-<li><strong>Docs quality gate:</strong> <code>.github/workflows/docs.yml</code> runs on every push/PR touching <code>docs/**</code> or <code>scripts/docs/**</code></li>
+<li><strong>Docs quality gate:</strong> <code>.github/workflows/docs.yml</code> runs on pushes/PRs to <code>main</code>/<code>develop</code> touching <code>docs/site/**</code>, <code>scripts/docs/**</code>, <code>README.md</code>, <code>CONTRIBUTING.md</code>, <code>SECURITY.md</code>, or the workflow itself; <code>deploy-docs.yml</code> publishes <code>docs/site/</code> to GitHub Pages (workflow deploy; also manually dispatchable)</li>
 <li><strong>Browser tests</strong> run headless in CI on <code>ubuntu-latest</code> using Chromium with software WebGL (<code>--use-gl=angle --enable-unsafe-swiftshader</code>), so no physical display/GPU is required. They are still the most environment-sensitive job and can be flaky.</li>
 <li><strong>Redis</strong> is optional in both development and CI (the server falls back to SQLite gracefully)</li>
 <li><strong>Docker Compose</strong> is recommended for production</li>

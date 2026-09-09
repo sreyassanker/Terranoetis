@@ -38,9 +38,8 @@ Each tool declares a `vizType`; the client renders it via Recharts (charts) or C
 |---|---|
 | **scalar** | Single computed value with unit + interpretation |
 | **timeseries / bar / histogram / scatter / distribution / gauge / profile / spectrum** | Recharts visualizations |
-| **heatmap / contour / vector** | IDW-interpolated field surfaces over the study area (Cesium) |
-| **Grid** | Structured data grid for downstream GIS fusion |
-| **Report** | PDF export with charts and methodology |
+| **heatmap / contour / vector** | Field surfaces over the study area (Cesium) — direct per-cell equation sweeps, or IDW interpolation for point-sampled surfaces |
+| *(derived)* | Structured grids feed downstream GIS fusion; PDF "report" export (charts + methodology) is a client-side composition of any tool's result, not a declared `vizType` |
 
 ---
 
