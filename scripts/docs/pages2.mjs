@@ -13,7 +13,7 @@ export const PAGES2 = [
     title: 'REST & WebSocket API',
     desc: 'API surface map: auth model, endpoint groups, realtime transports, error envelope and the live OpenAPI document.',
     breadcrumb: [{ label: 'Reference', href: 'reference/api.html' }, { label: 'REST & WebSocket API' }],
-    proseMd: 'API.md', proseMdLabel: 'API.md — the full endpoint table (source of truth)',
+    proseMd: 'narratives/API.html',
     tags: [tagMeasured('endpoint map read from route registrations; complete list in API.md')],
     sections: [
       { kind: 'p', html: 'The API is Express 4 mounted at <code>/api</code> with JWT bearer auth (RBAC via <code>authGuard</code>/<code>requireRole</code>), in-process IP + per-user rate limiting, zod validation and a canonical <code>{error:{code,message}}</code> envelope. A public allow-list covers health/metrics/config/OpenAPI plus the read-only live-data routes (300 req/min/IP); everything else requires a token. ' + src('server/index.ts', '373-487') },
@@ -44,7 +44,7 @@ export const PAGES2 = [
         ['SSE', '<code>/api/kaggle/simulate/:id/stream</code>', 'public prefix', 'job status/progress ' + src(RT, '225')],
         ['SSE', '<code>/api/social/stream · /api/agent/events</code>', '<code>?token=</code> (sseAuthGuard)', 'event relays; /agent/events deprecated in favour of WS ' + src('server/middleware/auth.ts', '205-233')],
       ]},
-      { kind: 'p', html: 'The complete per-endpoint table lives in <a href="../API.md">API.md</a>; a machine-readable schema is served at <code>/api/openapi.json</code>. This page intentionally does not duplicate it.' },
+      { kind: 'p', html: 'The complete per-endpoint table lives in <a href="../narratives/API.html">API.md</a>; a machine-readable schema is served at <code>/api/openapi.json</code>. This page intentionally does not duplicate it.' },
     ],
   },
 
@@ -54,7 +54,7 @@ export const PAGES2 = [
     title: 'Simulation job API & parameter contracts',
     desc: 'The zod request contract layer, wire-field bounds, geometry conventions, job endpoints and result formats for the seven hazard kernels.',
     breadcrumb: [{ label: 'Reference', href: 'reference/api.html' }, { label: 'Simulation job API' }],
-    proseMd: 'capabilities/hazard-simulations.md', proseMdLabel: 'capabilities/hazard-simulations.md — narrative (source of truth)',
+    proseMd: 'narratives/capabilities/hazard-simulations.html',
     tags: [tagMeasured('HTTP transcript from a live server boot 2026-09-08')],
     sections: [
       { kind: 'h2', id: 'contract', title: 'Request contract' },
@@ -221,7 +221,7 @@ export const PAGES2 = [
     title: 'Deployment & operations',
     desc: 'Docker Compose stack, environment contract, optional Kaggle credentials, CI pipeline including the docs quality gate.',
     breadcrumb: [{ label: 'Deployment & operations' }],
-    proseMd: 'DEPLOYMENT.md', proseMdLabel: 'DEPLOYMENT.md — the operations manual (source of truth)',
+    proseMd: 'narratives/DEPLOYMENT.html',
     tags: [tagMeasured('compose/env read from repo; local dev boot measured')],
     sections: [
       { kind: 'h2', id: 'stack', title: 'Deployment stack' },
@@ -230,7 +230,7 @@ export const PAGES2 = [
         ['redis', 'redis:7-alpine', '6379', 'cache + memory hot path; optional — SQLite fallback'],
         ['causal-service', 'Python microservice (DoWhy + Flask)', '5001', 'causal discovery (/discover, /health)'],
       ]},
-      { kind: 'p', html: 'Volumes and mounts (<code>terranoetis-data</code>, <code>redis-data</code>, read-only <code>.env</code>) and full commands: <a href="DEPLOYMENT.md">DEPLOYMENT.md</a> · <code>docker-compose.yml</code> · <code>Dockerfile</code>.' },
+      { kind: 'p', html: 'Volumes and mounts (<code>terranoetis-data</code>, <code>redis-data</code>, read-only <code>.env</code>) and full commands: <a href="narratives/DEPLOYMENT.html">DEPLOYMENT.md</a> · <code>docker-compose.yml</code> · <code>Dockerfile</code>.' },
       { kind: 'h2', id: 'config', title: 'Configuration contract' },
       { kind: 'table', cols: ['Variable', 'Behaviour (code-verified)'], rows: [
         ['<code>JWT_SECRET</code> / <code>ADMIN_BOOTSTRAP_PASSWORD</code>', 'production hard-requirement ≥ 32 / ≥ 16 chars; boot refuses otherwise'],
@@ -277,7 +277,7 @@ export const PAGES2 = [
       { kind: 'h2', id: 'structure', title: 'Page structure' },
       { kind: 'list', items: [
         'Every capability page carries: equations with citations → parameter contract → outputs + units → spatial-origin semantics → verbatim validity limits → measured evidence table → reproduction → honesty callout.',
-        'Prose lives in Markdown (source of truth, linked from each page’s header); HTML pages carry structured verified data and navigation — they never duplicate prose paragraphs.',
+        'Prose lives in Markdown (linked from each page’s header); HTML pages carry structured verified data and navigation — they never duplicate prose paragraphs.',
         'Navigation, breadcrumbs, version + last-reviewed stamps are generated by scripts/docs/build.mjs — edit specs, rebuild, never hand-edit HTML.',
       ]},
       { kind: 'h2', id: 'a11y', title: 'Accessibility (WCAG 2.1 AA)' },
@@ -307,9 +307,9 @@ export const PAGES2 = [
     title: 'Contributing',
     desc: 'How documentation and code contributions follow the verification workflow.',
     breadcrumb: [{ label: 'Governance', href: 'governance/style-guide.html' }, { label: 'Contributing' }],
-    proseMd: '../CONTRIBUTING.md', proseMdLabel: 'CONTRIBUTING.md — full contributor guide (source of truth, repo root)',
+    proseMd: 'narratives/CONTRIBUTING.html',
     sections: [
-      { kind: 'p', html: 'Development setup, code style, the analytical-model and data-layer recipes, and the PR contract are defined in <a href="../../CONTRIBUTING.md">CONTRIBUTING.md</a> (source of truth).' },
+      { kind: 'p', html: 'Development setup, code style, the analytical-model and data-layer recipes, and the PR contract are defined in <a href="../narratives/CONTRIBUTING.html">CONTRIBUTING.md</a>.' },
       { kind: 'h2', id: 'docs-flow', title: 'Documentation contributions' },
       { kind: 'list', items: [
         'Pages are generated — change specs under <code>scripts/docs/</code>, then <code>node scripts/docs/build.mjs</code>.',
@@ -325,9 +325,9 @@ export const PAGES2 = [
     title: 'Security',
     desc: 'Vulnerability reporting and the threat-model summary; authoritative policy in SECURITY.md.',
     breadcrumb: [{ label: 'Governance', href: 'governance/style-guide.html' }, { label: 'Security' }],
-    proseMd: '../SECURITY.md', proseMdLabel: 'SECURITY.md — full policy (source of truth, repo root)',
+    proseMd: 'narratives/SECURITY.html',
     sections: [
-      { kind: 'p', html: 'Report vulnerabilities by email to the address in <a href="../../SECURITY.md">SECURITY.md</a> (48-hour response target). The current threat model — SSRF guard, auth surface, key handling, JWT strength enforcement, brute-force lockout, public-endpoint limiting, CORS allowlist, injection defences — is maintained there.' },
+      { kind: 'p', html: 'Report vulnerabilities by email to the address in <a href="../narratives/SECURITY.html">SECURITY.md</a> (48-hour response target). The current threat model — SSRF guard, auth surface, key handling, JWT strength enforcement, brute-force lockout, public-endpoint limiting, CORS allowlist, injection defences — is maintained there.' },
       { kind: 'h2', id: 'surface', title: 'Security-relevant implementation points (verified this pass)' },
       { kind: 'table', cols: ['Control', 'Verified detail', 'Source'], rows: [
         ['Secrets in repo', 'runtime <code>.env</code> is gitignored; Kaggle credentials read only from <code>~/.kaggle</code>', src('docs/DEPLOYMENT.md', '173') + ' ' + src('.gitignore', '.env')],

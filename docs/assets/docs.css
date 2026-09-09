@@ -312,3 +312,20 @@ dl.metrics dd { margin: 0; }
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .top-nav a.nav-demo, .gh-star-wrapper { animation: none; } }
+
+/* ── Narrative pages (Markdown-generated) ───────────────────────────── */
+.prose { line-height: 1.7; }
+.prose h2 { font-size: 1.35rem; margin: 2rem 0 0.75rem; }
+.prose h3, .prose h4 { margin: 1.5rem 0 0.5rem; }
+.prose p { margin: 0.75rem 0; }
+.prose ul, .prose ol { margin: 0.75rem 0; padding-left: 1.5rem; }
+.prose li { margin: 0.3rem 0; }
+.prose code { background: var(--c-code-bg); color: var(--c-code-text); padding: 0.1rem 0.35rem; border-radius: 4px; font-family: var(--font-mono); font-size: 0.875em; }
+.prose pre { background: var(--c-code-bg); border: 1px solid var(--c-border); border-radius: 8px; padding: 0.9rem 1.1rem; overflow-x: auto; margin: 1rem 0; }
+.prose pre code { background: none; padding: 0; font-size: 0.85rem; line-height: 1.55; }
+.prose blockquote { border-left: 3px solid var(--c-accent); margin: 1rem 0; padding: 0.25rem 1rem; color: var(--c-text-muted); }
+.prose table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.9rem; }
+.prose th, .prose td { border: 1px solid var(--c-border); padding: 0.45rem 0.7rem; text-align: left; }
+.prose thead th { background: var(--c-bg-subtle); }
+.prose a { color: var(--c-link); }
+.prose hr { border: 0; border-top: 1px solid var(--c-border); margin: 2rem 0; }

@@ -107,6 +107,7 @@ function renderSection(s) {
       return `<div class="callout ${tone}" role="note"><div class="callout-title">${esc(s.title)}</div>${s.html}</div>`;
     }
     case 'list': return `<${s.ordered ? 'ol' : 'ul'}>${s.items.map((i) => `<li>${i}</li>`).join('\n')}</${s.ordered ? 'ol' : 'ul'}>`;
+    case 'raw': return s.html;
     case 'cards': return `<div class="card-grid">${s.items.map((c) => `<div class="card">${c.tag || ''}<a href="${esc(c.href)}">${esc(c.title)}</a><p>${c.desc}</p></div>`).join('\n')}</div>`;
     default: throw new Error(`unknown section kind: ${s.kind}`);
   }
@@ -185,7 +186,7 @@ export function renderPage(page) {
         <span><strong>Last reviewed</strong> ${LAST_REVIEWED}</span>
         ${tags ? `<span>${tags}</span>` : ''}
       </div>
-      ${page.proseMd ? `<p><strong>Full description (prose, source of truth):</strong> <a href="${r(page.proseMd)}">${esc(page.proseMdLabel || page.proseMd)}</a></p>` : ''}
+      ${page.proseMd ? `<p><strong>Full description:</strong> <a href="${r(page.proseMd)}">Read the full narrative</a></p>` : ''}
       ${toc ? `<nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
         ${toc}
       </ul></nav>` : ''}
@@ -194,7 +195,7 @@ export function renderPage(page) {
         <p>Terranoetis v${DOCS_VERSION} · documentation last reviewed ${LAST_REVIEWED} ·
         source: <a href="${REPO}">${esc(REPO.replace('https://', ''))}</a> ·
         license: <a href="${REPO}/blob/main/LICENSE">BUSL-1.1</a> ·
-        prose source of truth: <a href="${REPO}/tree/main/docs">docs/</a> in-repo Markdown ·
+        full narratives: <a href="${REPO}/tree/main/docs">docs/</a> in-repo Markdown ·
         corrections: see <a href="${r('methodology.html')}#discrepancy-log">discrepancy log</a>.</p>
       </footer>
     </div>

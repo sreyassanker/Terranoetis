@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deployment &amp; Operations — Terranoetis Documentation</title>
+<meta name="description" content="Terranoetis runs in a Docker Compose stack with three services, or directly with Node.js for development. This document covers setup, configuration, produc…">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/narratives/DEPLOYMENT.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Deployment &amp; Operations — Terranoetis Documentation">
+<meta property="og:description" content="Terranoetis runs in a Docker Compose stack with three services, or directly with Node.js for development. This document covers setup, configuration, produc…">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/DEPLOYMENT.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Overview</a>
+      <a href="../documentation.html">Documentation</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../methodology.html">Verification</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+      <a href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener" class="nav-demo">Demo</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Product overview</a></li>
+<li><a href="../documentation.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Overview</a></li>
+    <li><a href="../documentation.html">Docs</a></li>
+<li><a href="../documentation.html">Documentation</a></li>
+<li aria-current="page">Deployment &amp; Operations</li>
+      </ol></nav>
+      <h1>Deployment &amp; Operations</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        
+      </div>
+      
+      
+      <div class="prose">
+
+<p>Terranoetis runs in a Docker Compose stack with three services, or directly with Node.js for development. This document covers setup, configuration, production deployment, and CI/CD.</p>
+
+
+<hr></hr>
+
+
+<h2 id="table-of-contents">Table of Contents</h2>
+
+
+<ul>
+<li><a href="#prerequisites">Prerequisites</a></li>
+<li><a href="#quick-start-development">Quick Start (Development)</a></li>
+<li><a href="#docker-deployment">Docker Deployment</a></li>
+<li><a href="#configuration">Configuration</a></li>
+<li><a href="#environment-variables">Environment Variables</a></li>
+<li><a href="#cicd-pipeline">CI/CD Pipeline</a></li>
+<li><a href="#security">Security</a></li>
+</ul>
+
+
+<hr></hr>
+
+
+<h2 id="prerequisites">Prerequisites</h2>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Dependency</th>
+<th>Version</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Node.js</td>
+<td>≥ 20</td>
+<td>Runtime (matches CI and Docker image)</td>
+</tr>
+<tr>
+<td>npm</td>
+<td>≥ 10</td>
+<td>Package management</td>
+</tr>
+<tr>
+<td>Redis</td>
+<td>7.x</td>
+<td>Caching, session, pub/sub (optional — graceful fallback to SQLite)</td>
+</tr>
+<tr>
+<td>Docker &amp; Compose</td>
+<td>Latest</td>
+<td>Containerized deployment</td>
+</tr>
+<tr>
+<td>Cesium Ion token</td>
+<td>—</td>
+<td>Photorealistic 3D Tiles (set <code>VITE_CESIUM_ION_ACCESS_TOKEN</code>)</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="quick-start-development">Quick Start (Development)</h2>
+
+
+<pre><code className="language-bash"># Clone and install
+git clone https://github.com/sreyassanker/Terranoetis.git
+cd Terranoetis
+cp .env.example .env    # Fill in API keys as needed
+npm install
+
+# Start development servers
+npm run dev
+
+# In a separate terminal:
+npm run dev:client      # Vite dev server (port 3000) only
+npm run dev:server      # Express API (port 3001) only
+</code></pre>
+
+
+<p>The <code>dev</code> command starts the Vite dev server and the Express API concurrently. Redis is started automatically if installed; otherwise the server falls back to SQLite.</p>
+
+
+<h3 id="verification">Verification</h3>
+
+
+<pre><code className="language-bash"># Frontend
+open http://localhost:3000
+
+# API health
+curl http://localhost:3001/api/health
+</code></pre>
+
+
+<hr></hr>
+
+
+<h2 id="docker-deployment">Docker Deployment</h2>
+
+
+<h3 id="services">Services</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Image</th>
+<th>Port</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>terranoetis</code></td>
+<td>Custom (Dockerfile)</td>
+<td>3001</td>
+<td>Express API + built frontend (single origin)</td>
+</tr>
+<tr>
+<td><code>redis</code></td>
+<td><code>redis:7-alpine</code></td>
+<td>6379</td>
+<td>Cache, session, pub/sub</td>
+</tr>
+<tr>
+<td><code>causal-service</code></td>
+<td>Custom (Python)</td>
+<td>5001</td>
+<td>Causal inference microservice (DoWhy)</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<blockquote>
+<p>In production (<code>NODE_ENV=production</code>), the Express app serves the built frontend from <code>dist/</code> on the same origin as the API — open <code>http://localhost:3001</code> for the full application. In development, Vite serves the client on :3000 and proxies <code>/api</code> to :3001.</p>
+</blockquote>
+
+
+<h3 id="production-start">Production Start</h3>
+
+
+<pre><code className="language-bash"># Copy environment (edit with your production values)
+cp .env.example .env
+
+# Build and start all services
+docker compose up -d
+
+# Verify
+curl http://localhost:3001/api/health   # API
+open http://localhost:3001              # Frontend (served by the same container)
+
+# View logs
+docker compose logs -f terranoetis
+</code></pre>
+
+
+<h3 id="build">Build</h3>
+
+
+<pre><code className="language-bash">docker compose build    # Rebuild images
+docker compose up -d    # Restart with rebuilt images
+</code></pre>
+
+
+<h3 id="data-persistence">Data Persistence</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Volume</th>
+<th>Mount</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>terranoetis-data</code></td>
+<td><code>/app/data</code></td>
+<td>SQLite databases, runtime state</td>
+</tr>
+<tr>
+<td><code>redis-data</code></td>
+<td><code>/data</code></td>
+<td>Redis persistence</td>
+</tr>
+<tr>
+<td><code>.env</code> mount</td>
+<td><code>/app/.env:ro</code></td>
+<td>Environment configuration (read-only)</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="configuration">Configuration</h2>
+
+
+<h3 id="ports">Ports</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PROXY_PORT</code></td>
+<td><code>3001</code></td>
+<td>Express API port (empty = fall through to <code>PORT</code>, else 3001)</td>
+</tr>
+<tr>
+<td><code>PORT</code></td>
+<td><code>3001</code></td>
+<td>Standard runtime port (used when <code>PROXY_PORT</code> is unset; set by Dockerfile/compose)</td>
+</tr>
+<tr>
+<td>Vite port</td>
+<td><code>3000</code></td>
+<td>Frontend dev server (hardcoded in <code>vite.config.ts</code>)</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="node_env-behavior">NODE_ENV Behavior</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Dev (<code>development</code>)</th>
+<th>Production (<code>production</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>JWT_SECRET</td>
+<td>Auto-generated weak secret</td>
+<td>Required, ≥ 32 chars</td>
+</tr>
+<tr>
+<td>ADMIN_BOOTSTRAP_PASSWORD</td>
+<td>Auto-generated</td>
+<td>Required, ≥ 16 chars</td>
+</tr>
+<tr>
+<td>Dev auto-login</td>
+<td>Enabled</td>
+<td>Disabled (returns 404)</td>
+</tr>
+<tr>
+<td>CSP / HSTS</td>
+<td>Relaxed</td>
+<td>Strict</td>
+</tr>
+<tr>
+<td>Startup validation</td>
+<td>Warning</td>
+<td>Hard error</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="environment-variables">Environment Variables</h2>
+
+
+<p>The <code>.env</code> file configures 100+ variables covering 70+ integrated services (see <code>.env.example</code>). Missing keys disable the corresponding feature — services degrade gracefully.</p>
+
+
+<h3 id="required-production">Required (production)</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>JWT_SECRET</code></td>
+<td>≥ 32 characters</td>
+</tr>
+<tr>
+<td><code>ADMIN_BOOTSTRAP_PASSWORD</code></td>
+<td>≥ 16 characters, used to provision the initial admin account</td>
+</tr>
+<tr>
+<td><code>VITE_CESIUM_ION_ACCESS_TOKEN</code></td>
+<td>For Google Photorealistic 3D Tiles</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="category-reference">Category Reference</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Variables</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Server</td>
+<td><code>PROXY_PORT</code>, <code>CLIENT_ORIGIN</code>, <code>NODE_ENV</code></td>
+</tr>
+<tr>
+<td>Local AI Model</td>
+<td><code>GGUF_DOWNLOAD_URL</code> (override HuggingFace download source), <code>LLAMA_SERVER_PATH</code> (path to <code>llama-server</code> binary)</td>
+</tr>
+<tr>
+<td>NASA Earthdata</td>
+<td><code>EARTHDATA_USERNAME</code>, <code>EARTHDATA_PASSWORD</code>, <code>EARTHDATA_EDL_TOKEN</code>, <code>USGS_ERS_*</code></td>
+</tr>
+<tr>
+<td>Satellite &amp; Imagery</td>
+<td><code>VITE_CESIUM_ION_ACCESS_TOKEN</code>, Sentinel Hub, Copernicus, NASA FIRMS, Planet Labs, Maxar</td>
+</tr>
+<tr>
+<td>Aviation</td>
+<td>FlightAware, AirLabs</td>
+</tr>
+<tr>
+<td>Maritime</td>
+<td>AISStream, MarineTraffic</td>
+</tr>
+<tr>
+<td>Traffic</td>
+<td>TOMTOM_API_KEY</td>
+</tr>
+<tr>
+<td>Realtime Voice</td>
+<td><code>OPENAI_API_KEY</code> (primary), <code>GOOGLE_GEMINI_API_KEY</code> (Live fallback)</td>
+</tr>
+<tr>
+<td>AI/LLM</td>
+<td>Google Gemini, Anthropic Claude, Groq, OpenRouter, DeepSeek, Bai, Ollama</td>
+</tr>
+<tr>
+<td>Error Tracking</td>
+<td><code>SENTRY_DSN</code> (optional, unset = no-op)</td>
+</tr>
+<tr>
+<td>Weather &amp; Disaster</td>
+<td>USGS, NASA EONET, GDACS, NOAA, OpenAQ, WAQI, Windy</td>
+</tr>
+<tr>
+<td>Economic &amp; Financial</td>
+<td>FRED, EIA, Alpha Vantage, ENTSO-E, UN Comtrade, IMF, GoldAPI</td>
+</tr>
+<tr>
+<td>Search &amp; Scraping</td>
+<td>Brave Search, Exa, Firecrawl, Guardian, NewsAPI</td>
+</tr>
+<tr>
+<td>Kaggle simulation kernels</td>
+<td>Kaggle API token at <code>~/.kaggle/kaggle.json</code> (see below), <code>KAGGLE_BIN</code>, <code>KAGGLE_POLL_INTERVAL_MS</code>, <code>KAGGLE_POST_PUSH_SETTLE_MS</code>, <code>KAGGLE_STALE_ERROR_GRACE_MS</code>. Optional — the 3 local CPU scenarios need none of it.</td>
+</tr>
+<tr>
+<td>Other</td>
+<td>Telegram, Resend, ACLED, Cloudflare Radar, AbuseIPDB, AlienVault OTX, Gmail SMTP</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="kaggle-simulation-kernels-optional-setup">Kaggle simulation kernels (optional setup)</h3>
+
+
+<p>Four physics simulations (tsunami, volcano, landslide, flood) are dispatched to <strong>Kaggle kernels</strong> as their execution venue. All kernels are NumPy CPU code (no GPU imports); only flood-sim requests Kaggle's GPU accelerator in its kernel metadata, so “GPU kernels” is a hosting term here, not a compute claim (verified 2026-09-08 — see <a href="../capabilities/hazard-simulations.html#modes">modes table</a>). The three 2D scenarios — earthquake, wildfire, and hurricane — finish in seconds on a laptop CPU and run <strong>locally via <code>python3</code></strong> (see <code>server/kaggle/simRunner.ts</code>; measured end-to-end job completion of 166 ms for the earthquake kernel), so they work without any token. To enable the Kaggle-routed kernels:</p>
+
+
+<ol>
+<li>Create a token at <strong><a href="https://www.kaggle.com/settings/account">https://www.kaggle.com/settings/account</a></strong> → <em>Create New Token</em> (requires an account with phone verification).</li>
+<li>Save the downloaded <code>kaggle.json</code> as <strong><code>~/.kaggle/kaggle.json</code></strong> and restrict permissions:
+<pre><code className="language-bash">mkdir -p ~/.kaggle &amp;&amp; mv ~/Downloads/kaggle.json ~/.kaggle/kaggle.json &amp;&amp; chmod 600 ~/.kaggle/kaggle.json
+</code></pre>
+</li>
+<li>Install the Kaggle CLI (<code>pip install kaggle</code>), or point <code>KAGGLE_BIN</code> at its path.</li>
+</ol>
+
+
+<p>The simulation runner reads credentials exclusively from <code>~/.kaggle</code> (<code>KAGGLE_CONFIG_DIR</code>, see <code>server/kaggle/simRunner.ts</code>) — <strong>never from the repository</strong>, so no secrets are ever committed. Without a token, the 4 Kaggle-routed simulations disable gracefully while the 3 local CPU scenarios (earthquake, wildfire, hurricane) and the analytical engine keep working.</p>
+
+
+<hr></hr>
+
+
+<h2 id="cicd-pipeline">CI/CD Pipeline</h2>
+
+
+<p>The GitHub Actions workflow (<code>.github/workflows/ci.yml</code>) runs the following on every push and pull request:</p>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Job</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TypeScript Check</td>
+<td><code>tsc --noEmit</code> for frontend + server</td>
+</tr>
+<tr>
+<td>Lint</td>
+<td><code>eslint .</code></td>
+</tr>
+<tr>
+<td>Unit Tests</td>
+<td>Vitest in <code>server/__tests__/unit</code> + <code>src/__tests__</code></td>
+</tr>
+<tr>
+<td>Integration Tests</td>
+<td>Vitest in <code>server/__tests__/integration</code></td>
+</tr>
+<tr>
+<td>Coverage</td>
+<td>Vitest with <code>--coverage</code></td>
+</tr>
+<tr>
+<td>Build</td>
+<td><code>npm run build</code> (tsc -b + vite build)</td>
+</tr>
+<tr>
+<td>Docker Build</td>
+<td>Docker build verification</td>
+</tr>
+<tr>
+<td>Security Audit</td>
+<td><code>npm audit</code></td>
+</tr>
+<tr>
+<td>Docs Gate (docs.yml)</td>
+<td><code>node scripts/docs/build.mjs --check</code> (build drift) + <code>node scripts/docs/quality-gate.mjs</code> (links, anchors, page metadata, file:line citations, marketing-vocabulary ban)</td>
+</tr>
+<tr>
+<td>Browser Tests</td>
+<td>Playwright — headless Chromium with software WebGL (SwiftShader)</td>
+</tr>
+<tr>
+<td>Summary</td>
+<td>Aggregates job results into a single CI status comment</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="ci-notes">CI Notes</h3>
+
+
+<ul>
+<li><strong>Node version:</strong> 20 (specified in workflow and <code>.nvmrc</code>; the 2026-09-08 verification pass ran Node 26 with 1,653 unit + 49 integration tests passing)</li>
+<li><strong>Docs quality gate:</strong> <code>.github/workflows/docs.yml</code> runs on every push/PR touching <code>docs/**</code> or <code>scripts/docs/**</code></li>
+<li><strong>Browser tests</strong> run headless in CI on <code>ubuntu-latest</code> using Chromium with software WebGL (<code>--use-gl=angle --enable-unsafe-swiftshader</code>), so no physical display/GPU is required. They are still the most environment-sensitive job and can be flaky.</li>
+<li><strong>Redis</strong> is optional in both development and CI (the server falls back to SQLite gracefully)</li>
+<li><strong>Docker Compose</strong> is recommended for production</li>
+</ul>
+
+
+<hr></hr>
+
+
+<h2 id="security">Security</h2>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Control</th>
+<th>Implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Authentication</td>
+<td>JWT bearer tokens</td>
+</tr>
+<tr>
+<td>Password hashing</td>
+<td>scrypt (RFC 7914, N=16384, r=8, p=1)</td>
+</tr>
+<tr>
+<td>Authorization</td>
+<td>Role-based access control (RBAC)</td>
+</tr>
+<tr>
+<td>Rate limiting</td>
+<td>Per-IP + per-user (middleware/rateLimiter.ts)</td>
+</tr>
+<tr>
+<td>Input validation</td>
+<td>Zod schemas</td>
+</tr>
+<tr>
+<td>SSRF protection</td>
+<td><code>utils/ssrfGuard.ts</code></td>
+</tr>
+<tr>
+<td>Security headers</td>
+<td>CSP, HSTS, X-Frame-Options</td>
+</tr>
+<tr>
+<td>Prod mode only</td>
+<td>Dev auto-login, auto-generated passwords disabled in NODE_ENV=production</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="best-practices">Best Practices</h3>
+
+
+<ul>
+<li>Always set a strong JWT_SECRET and ADMIN_BOOTSTRAP_PASSWORD in production</li>
+<li>Keep the .env file out of version control (gitignored)</li>
+<li>Periodically rotate API keys</li>
+<li>Seal the Docker network if deploying in a multi-tenant environment</li>
+</ul></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Landslide debris flow — narrative — Terranoetis Documentation</title>
+<meta name="description" content="Verified parameters, convergence numbers and measured runs: landslide.html.…">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/narratives/capabilities/landslide.html">
+<link rel="stylesheet" href="../../assets/docs.css">
+<link rel="icon" href="../../terranoetis.png" type="image/png">
+<meta property="og:title" content="Landslide debris flow — narrative — Terranoetis Documentation">
+<meta property="og:description" content="Verified parameters, convergence numbers and measured runs: landslide.html.…">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/capabilities/landslide.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../../index.html"><img src="../../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../../index.html">Overview</a>
+      <a href="../../documentation.html">Documentation</a>
+      <a href="../../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../../methodology.html">Verification</a>
+      <a href="../../deployment.html">Deployment</a>
+      <a href="../../governance/style-guide.html">Governance</a>
+      <a href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener" class="nav-demo">Demo</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../../index.html">Product overview</a></li>
+<li><a href="../../documentation.html">Documentation home</a></li>
+<li><a href="../../getting-started.html">Getting started</a></li>
+<li><a href="../../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../../governance/contributing.html">Contributing</a></li>
+<li><a href="../../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../../index.html">Overview</a></li>
+    <li><a href="../../documentation.html">Docs</a></li>
+<li><a href="../../documentation.html">Documentation</a></li>
+<li aria-current="page">Landslide debris flow — narrative</li>
+      </ol></nav>
+      <h1>Landslide debris flow — narrative</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        
+      </div>
+      
+      
+      <div class="prose">
+
+<p>Verified parameters, convergence numbers and measured runs: <a href="../../capabilities/landslide.html">landslide.html</a>.</p>
+
+
+<h2 id="what-the-scenario-represents">What the scenario represents</h2>
+
+
+<p>The model is the depth-averaged Voellmy–Salm debris-flow equations: a Mohr–Coulomb infinite-slope assessment turns a steepness/susceptibility field into a source mass, and the flow is routed under gravity with Coulomb plus turbulent (velocity-squared) basal resistance, optional velocity-proportional bed entrainment, and one-way outflow boundaries. The friction pair (μ, ξ) is not asserted from the literature run-to-run — it is treated as free calibration parameters, which is the certified-grade practice for quantitative debris-flow work.</p>
+
+
+<h2 id="calibration-and-uncertainty-are-first-class">Calibration and uncertainty are first-class</h2>
+
+
+<p>The platform exposes the same kernel to two scientific endpoints: a grid-search calibration against an observed runout distance (a documented event value — the code's own docstring insists on this), and Monte-Carlo quantification that returns per-cell depth statistics (P50/P95/exceedance) for an ensemble. This review re-ran the shipped convergence script: the area refinement metric passes its 0.25 gate across 64/128/256 grids and the closed-box conservation error is zero.</p>
+
+
+<h2 id="honest-limits">Honest limits</h2>
+
+
+<p>Source localization is heuristic (steepness and susceptibility thresholds with documented caps so the failure mass is physical rather than grid-wide); the main() path does not itself invoke the conservation verifier (the convergence script is the authority); and in-domain mass-ledger drift of ~1.6 % appeared in one measured run — the code states its genuine proof is the closed-box test, not the algebraic ledger. All of this is on the page with citations.</p></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>
