@@ -15,7 +15,7 @@
 <meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="docs-last-reviewed" content="2026-09-09">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -85,8 +85,8 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-08</span>
-        <span><span class="tag tag-measured">VERIFICATION PASS COMPLETED 2026-09-08</span></span>
+        <span><strong>Last reviewed</strong> 2026-09-09</span>
+        <span><span class="tag tag-measured">VERIFICATION PASS COMPLETED 2026-09-09</span></span>
       </div>
       
       <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
@@ -108,7 +108,7 @@
 <dl class="metrics"><dt>Machine</dt><dd>Apple M1 (arm64), macOS 26.5.2 — <code>uname -m</code> + <code>sysctl machdep.cpu.brand_string</code></dd>
 <dt>Node.js</dt><dd>v26.0.0 (<code>node --version</code>) — repository targets ≥ 20 (<code>.nvmrc</code> pins 20)</dd>
 <dt>Python</dt><dd>3.14.5 · NumPy 2.4.2 · SciPy present</dd>
-<dt>Date</dt><dd>2026-09-08 — the date behind every “measured” stamp on this site</dd></dl>
+<dt>Date</dt><dd>2026-09-09 — the date behind every “measured” stamp on this site</dd></dl>
 <h2 id="evidence-runs">Evidence runs</h2>
 <div class="table-scroll"><table><caption>Test suites</caption>
 <thead><tr><th scope="col">Command</th><th scope="col">Result</th></tr></thead>
@@ -159,7 +159,7 @@
 <tr><td>D-10</td><td>Determinism caveats: wildfire honours <code>seed</code> (optional — unseeded otherwise); wall-clock caps truncate runs machine-dependently (kernels ≤ 480 s; local server timeout 120 s); synthetic fallbacks are fixed-seed. All timing figures here are single observations on one machine.</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:407-415,568-570</cite> <cite class="src">server/kaggle/simRunner.ts:134</cite></td></tr>
 </tbody></table></div>
 <h2 id="discrepancy-log">Discrepancy log — documentation errors found & fixed</h2>
-<div class="table-scroll"><table><caption>The code was treated as authoritative in every case; sources of truth updated 2026-09-08.</caption>
+<div class="table-scroll"><table><caption>The code was treated as authoritative in every case; sources of truth updated 2026-09-09.</caption>
 <thead><tr><th scope="col">#</th><th scope="col">Claim</th><th scope="col">Verified correction</th><th scope="col">Fixed in</th></tr></thead>
 <tbody>
 <tr><td>C-1</td><td>“7 physics simulations — 3 run locally on CPU, 4 on free Kaggle <em>GPU</em> kernels” (README)</td><td>Kernels are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the Kaggle GPU accelerator; the other routed kernels have enable_gpu=false. “Kaggle kernels” is accurate; “GPU kernels” is not.</td><td>README.md · DEPLOYMENT.md · BACKEND.md · <a href="capabilities/hazard-simulations.html#modes">modes table</a></td></tr>
@@ -210,7 +210,7 @@ cd kaggle-kernels/volcano-sim/benchmarks &amp;&amp; python3 run_benchmarks.py   
 cd kaggle-kernels/landslide-sim &amp;&amp; python3 validate_convergence.py       # gates
 node scripts/docs/build.mjs &amp;&amp; node scripts/docs/quality-gate.mjs</code></pre>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

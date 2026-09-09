@@ -18,7 +18,7 @@ export const PAGES2 = [
     sections: [
       { kind: 'p', html: 'The API is Express 4 mounted at <code>/api</code> with JWT bearer auth (RBAC via <code>authGuard</code>/<code>requireRole</code>), in-process IP + per-user rate limiting, zod validation and a canonical <code>{error:{code,message}}</code> envelope. A public allow-list covers health/metrics/config/OpenAPI plus the read-only live-data routes (300 req/min/IP); everything else requires a token. ' + src('server/index.ts', '373-487') },
       { kind: 'metrics', items: [
-        ['Route registrations', '371 handler registrations (<code>app.get/post/put/delete</code> + router verbs) under server/ — grep count 2026-09-08; API.md headline “360+” is consistent'],
+        ['Route registrations', '371 handler registrations (<code>app.get/post/put/delete</code> + router verbs) under server/ — grep count 2026-09-09; API.md headline “360+” is consistent'],
         ['Auth', 'JWT TTL 1 h prod / 1 d dev · scrypt (N=16384, r=8, p=1) · login 5/15 min + 10-attempt lockout (HTTP 423)'],
         ['Errors', '400 validation · 401 token · 403 role · 404 · 409 job-not-ready · 413 body-too-large · 423 locked · 429 limited · 500'],
         ['OpenAPI', 'GET /api/openapi.json (generated) + /api/docs UI'],
@@ -55,7 +55,7 @@ export const PAGES2 = [
     desc: 'The zod request contract layer, wire-field bounds, geometry conventions, job endpoints and result formats for the seven hazard kernels.',
     breadcrumb: [{ label: 'Reference', href: 'reference/api.html' }, { label: 'Simulation job API' }],
     proseMd: 'narratives/capabilities/hazard-simulations.html',
-    tags: [tagMeasured('HTTP transcript from a live server boot 2026-09-08')],
+    tags: [tagMeasured('HTTP transcript from a live server boot 2026-09-09')],
     sections: [
       { kind: 'h2', id: 'contract', title: 'Request contract' },
       { kind: 'p', html: 'Payloads are validated by a zod discriminated union on <code>type</code> whose bounds “mirror the physical ranges enforced by the simulator kernels… Validation MUST happen at this boundary, not inside the kernel, so bad input fails fast with a legible error. No synthetic fallbacks. If a value is required, the boundary throws.” ' + src(INDEX, '8-14') },
@@ -108,7 +108,7 @@ export const PAGES2 = [
     title: 'Methodology & verification',
     desc: 'How every claim in this documentation was traced to code and, wherever possible, verified by executing the code; discrepancy log, known-limitation register and reproduction commands.',
     breadcrumb: [{ label: 'Methodology & verification' }],
-    tags: ['<span class="tag tag-measured">VERIFICATION PASS COMPLETED 2026-09-08</span>'],
+    tags: ['<span class="tag tag-measured">VERIFICATION PASS COMPLETED 2026-09-09</span>'],
     sections: [
       { kind: 'h2', id: 'approach', title: 'Approach' },
       { kind: 'list', ordered: true, items: [
@@ -121,7 +121,7 @@ export const PAGES2 = [
         ['Machine', 'Apple M1 (arm64), macOS 26.5.2 — <code>uname -m</code> + <code>sysctl machdep.cpu.brand_string</code>'],
         ['Node.js', 'v26.0.0 (<code>node --version</code>) — repository targets ≥ 20 (<code>.nvmrc</code> pins 20)'],
         ['Python', '3.14.5 · NumPy 2.4.2 · SciPy present'],
-        ['Date', '2026-09-08 — the date behind every “measured” stamp on this site'],
+        ['Date', '2026-09-09 — the date behind every “measured” stamp on this site'],
       ]},
       { kind: 'h2', id: 'evidence-runs', title: 'Evidence runs' },
       { kind: 'table', caption: 'Test suites', cols: ['Command', 'Result'], rows: [
@@ -165,7 +165,7 @@ export const PAGES2 = [
         ['D-10', 'Determinism caveats: wildfire honours <code>seed</code> (optional — unseeded otherwise); wall-clock caps truncate runs machine-dependently (kernels ≤ 480 s; local server timeout 120 s); synthetic fallbacks are fixed-seed. All timing figures here are single observations on one machine.', src('kaggle-kernels/fire-sim/main.py', '407-415,568-570') + ' ' + src(SR, '134')],
       ]},
       { kind: 'h2', id: 'discrepancy-log', title: 'Discrepancy log — documentation errors found & fixed' },
-      { kind: 'table', caption: 'The code was treated as authoritative in every case; sources of truth updated 2026-09-08.', cols: ['#', 'Claim', 'Verified correction', 'Fixed in'], rows: [
+      { kind: 'table', caption: 'The code was treated as authoritative in every case; sources of truth updated 2026-09-09.', cols: ['#', 'Claim', 'Verified correction', 'Fixed in'], rows: [
         ['C-1', '“7 physics simulations — 3 run locally on CPU, 4 on free Kaggle <em>GPU</em> kernels” (README)', 'Kernels are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the Kaggle GPU accelerator; the other routed kernels have enable_gpu=false. “Kaggle kernels” is accurate; “GPU kernels” is not.', 'README.md · DEPLOYMENT.md · BACKEND.md · <a href="capabilities/hazard-simulations.html#modes">modes table</a>'],
         ['C-2', '“82 with resolvable DOIs” (README/MODELS.md)', '80 of 150 model references contain a DOI string (12 ISBN, 4 explicit NO-DOI); counting method now stated.', 'README.md · MODELS.md'],
         ['C-3', 'Redis handles “PubSub · Queue” (ARCHITECTURE.md topology + BACKEND.md)', 'The event bus is an in-process EventEmitter (server/pubsub.ts); Redis serves cache + memory hot path.', 'ARCHITECTURE.md · BACKEND.md'],
@@ -257,7 +257,7 @@ export const PAGES2 = [
     sections: [
       { kind: 'h2', id: 'voice', title: 'Voice and register' },
       { kind: 'list', items: [
-        'Plain, precise, scientific prose. Present tense for behaviour (“the kernel raises…”), past tense + date for measurements (“1,653 tests passed on 2026-09-08”).',
+        'Plain, precise, scientific prose. Present tense for behaviour (“the kernel raises…”), past tense + date for measurements (“1,653 tests passed on 2026-09-09”).',
         'No marketing superlatives and no decorative adjectives. The gate rejects a banned-vocabulary list (<code>world-class · cutting-edge · best-in-class · revolutionary · seamless · powerful · robust · state-of-the-art · unparalleled · game-changing · industry-leading · unprecedented · ultimate …</code>); the adjectives appear only beside measured numbers.',
         'No hardware or performance claims without evidence. Timings are single-environment observations, stamped with date + environment, or omitted.',
         'Uncertainty is stated, not smoothed over. If it was not run, say so.',
@@ -271,7 +271,7 @@ export const PAGES2 = [
       ]},
       { kind: 'h2', id: 'honesty', title: 'Notes' },
       { kind: 'table', cols: ['Label', 'Meaning', 'Rule'], rows: [
-        [tagMeasured(), 'produced by executing the code in this repository on 2026-09-08', 'must be reproducible from the page’s own command block'],
+        [tagMeasured(), 'produced by executing the code in this repository on 2026-09-09', 'must be reproducible from the page’s own command block'],
         ['Known limitation (D-n)', 'defect or bound found by verification', 'register entry on the methodology page + note on the affected page'],
       ]},
       { kind: 'h2', id: 'structure', title: 'Page structure' },

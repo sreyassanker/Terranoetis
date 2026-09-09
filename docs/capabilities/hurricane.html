@@ -15,7 +15,7 @@
 <meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="docs-last-reviewed" content="2026-09-09">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -86,7 +86,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><strong>Last reviewed</strong> 2026-09-09</span>
         <span><span class="tag tag-measured">MEASURED LOCALLY</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="../narratives/capabilities/hurricane.html">Read the full narrative</a></p>
@@ -169,7 +169,7 @@ B from the observed Vmax–Δp relation (Atkinson &amp; Hollan 2012, BAMS):
 <blockquote class="verbatim">'point-vortex Holland field — no eyewall fine structure, constant Vmax (no intensification/decay)' · 'fetch = distance to nearest coast (upper-bound proxy)' · 'wave setup empirical (USACE Eq II-4-24, ≈0.19·H_b) — no wave propagation' · 'rainfall parametric surrogate of the Lonfat-2007 PHRaM radial structure (no shear/topography Fourier terms), not microphysical' · 'no tides, no river routing (backwater excluded)' · 'equirectangular grid — valid ≤ ~500 km domain'<footer><cite class="src">kaggle-kernels/hurricane-sim/main.py:663-674</cite></footer></blockquote>
 <p>The kernel refuses to emit fields if its physics gate fails — <em>"Hurricane physics gate failed — refusing to emit fields from mis-wired parametric relations."</em> Checks: V(R_max) ≈ V_max ± 15 %, B ∈ [1, 2.5], inverse-barometer 0.9–1.1 cm/hPa, CN75 @ 100 mm in (30, 50) mm, SCS zero below 0.2 S, wave growth vs PM cap, rain peak 40–130 mm/h with zero eye/500 km. <cite class="src">kaggle-kernels/hurricane-sim/main.py:285-335,717-720</cite></p>
 <h2 id="measured">Measured runs and timings</h2>
-<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-08. These are observations of one environment, not performance guarantees.</caption>
+<div class="table-scroll"><table><caption>Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-09. These are observations of one environment, not performance guarantees.</caption>
 <thead><tr><th scope="col">Run / check</th><th scope="col">Measured result</th></tr></thead>
 <tbody>
 <tr><td>Physics gate (every run, observed stdout)</td><td>"B=2.29 V(Rmax)=69.0 m/s (target 70) | IB=0.99 cm/hPa | CN75@100mm=41.1 mm | waves 18.0→31.3 cap 5.00 m | rain peak=84mm/h eye=0 edge=0 → PASS"</td></tr>
@@ -190,7 +190,7 @@ cd /tmp &amp;&amp; mkdir h &amp;&amp; cp &lt;repo&gt;/kaggle-kernels/hurricane-s
   echo '{&quot;grid_size&quot;:96,&quot;category&quot;:4,&quot;central_pressure_hpa&quot;:950,&quot;radius_max_wind_km&quot;:40,&quot;forward_speed_kmh&quot;:30,&quot;duration_hours&quot;:6,&quot;extent_km&quot;:240}' &gt; params.json &amp;&amp; \
   TERRANOETIS_OUT_DIR=$PWD python3 main.py | grep VERIFY</code></pre>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

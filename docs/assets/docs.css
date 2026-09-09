@@ -324,6 +324,27 @@ dl.metrics dd { margin: 0; }
 .prose pre { background: var(--c-code-bg); border: 1px solid var(--c-border); border-radius: 8px; padding: 0.9rem 1.1rem; overflow-x: auto; margin: 1rem 0; }
 .prose pre.mermaid { background: none; border: 0; border-radius: 0; padding: 0; overflow-x: auto; text-align: center; }
 .prose pre.mermaid svg { max-width: 100%; height: auto; }
+/* Diagram viewer: drag to pan, wheel/buttons to zoom, fullscreen expand */
+.diagram-viewer {
+  position: relative; overflow: hidden; margin: 1rem 0;
+  border: 1px solid var(--c-border); border-radius: 8px;
+  background: var(--c-bg-raised); cursor: grab; touch-action: none;
+}
+.diagram-viewer.grabbing { cursor: grabbing; }
+.diagram-viewer > svg { display: block; margin: 0 auto; padding: 0.75rem; max-width: 100%; height: auto; }
+.diagram-viewer:fullscreen { background: var(--c-bg); }
+.diagram-toolbar {
+  position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; z-index: 5;
+  opacity: 0.85; transition: opacity 0.15s ease;
+}
+.diagram-viewer:hover .diagram-toolbar, .diagram-viewer:focus-within .diagram-toolbar { opacity: 1; }
+.diagram-toolbar button {
+  font: inherit; font-size: 0.78rem; line-height: 1; padding: 0.3rem 0.55rem;
+  border: 1px solid var(--c-border); border-radius: 6px;
+  background: var(--c-bg-raised); color: var(--c-text); cursor: pointer;
+}
+.diagram-toolbar button:hover { background: var(--c-bg-subtle); border-color: var(--c-link); }
+.diagram-toolbar button:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
 .prose pre code { background: none; padding: 0; font-size: 0.85rem; line-height: 1.55; }
 .prose blockquote { border-left: 3px solid var(--c-accent); margin: 1rem 0; padding: 0.25rem 1rem; color: var(--c-text-muted); }
 .prose table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.9rem; }

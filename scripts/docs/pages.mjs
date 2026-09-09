@@ -16,17 +16,17 @@ export const CORE_PAGES = [
     title: 'Documentation',
     desc: 'Official documentation hub for Terranoetis — a geospatial intelligence platform with 150 literature-cited equation engines, seven hazard-physics simulation kernels, AI cognition and live-data monitoring. Every claim is cited to source and verified by measurement wherever the code was executable.',
     breadcrumb: [{ label: 'Documentation home' }],
-    tags: ['<span class="tag tag-measured">REVIEWED 2026-09-08</span>'],
+    tags: ['<span class="tag tag-measured">REVIEWED 2026-09-09</span>'],
     sections: [
       { kind: 'lede', html: `Terranoetis is a real-time geospatial intelligence platform: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equation engines, seven hazard-physics simulation kernels, and an AI chat pipeline with dual-process cognition. These documents state what the software <em>does</em> — verified against the source in this repository, and against the code actually executed wherever this environment allows.` },
       { kind: 'callout', tone: 'verified', title: 'Accuracy policy', html: `<p>Physics statements carry a <code>file:line</code> citation into the source. Executed evidence is tagged ${'<span class="tag tag-measured">MEASURED</span>'}. See <a href="methodology.html">Methodology &amp; verification</a> and its <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p>` },
       { kind: 'h2', id: 'verified-facts', title: 'Verified at a glance' },
       { kind: 'metrics', items: [
         verifiedFact('Analytical engines', '150 (ids 1–150, no gaps) across 7 parts and 26 domains — counted programmatically', src('src/data/analyticalModels.ts', '801+') + src('server/analytical-models/engine.ts', '1-174')),
-        verifiedFact('Equation-engine tests', '1,653 unit tests passed (141 files, 22.85 s wall) with <code>npm run test:unit</code> on 2026-09-08', srcRaw('measured')),
+        verifiedFact('Equation-engine tests', '1,653 unit tests passed (141 files, 22.85 s wall) with <code>npm run test:unit</code> on 2026-09-09', srcRaw('measured')),
         verifiedFact('Integration tests', '49 passed (5 files, 5.66 s) with <code>npm run test:integration</code>', srcRaw('measured')),
         verifiedFact('Simulation kernels', '7 Python kernels; 3 execute locally on CPU (earthquake, wildfire, hurricane); 4 dispatch through Kaggle. All are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the GPU accelerator in its metadata.', src(SR, '126-141') + ' ' + srcRaw('kaggle-kernels/*/kernel-metadata.json')),
-        verifiedFact('Hazard physics', 'All 7 kernels executed locally in this review; representative + boundary inputs, conservation gates, convergence and benchmark suites re-run — see <a href="methodology.html#evidence-runs">Evidence runs</a>', srcRaw('measured 2026-09-08')),
+        verifiedFact('Hazard physics', 'All 7 kernels executed locally in this review; representative + boundary inputs, conservation gates, convergence and benchmark suites re-run — see <a href="methodology.html#evidence-runs">Evidence runs</a>', srcRaw('measured 2026-09-09')),
         verifiedFact('Citations', '150 model reference strings; 80 contain a DOI, 12 an ISBN, 4 flagged NO-DOI; spot-checked DOI 10.1785/0120130065 resolves (HTTP 302)', srcRaw('src/data/analyticalModels.ts (counted)')),
       ]},
       { kind: 'h2', id: 'explore', title: 'Where to go next' },
@@ -83,7 +83,7 @@ export const CORE_PAGES = [
     desc: 'Install and run Terranoetis locally, verify the stack with measured outputs, and run your first hazard simulation through the API.',
     breadcrumb: [{ label: 'Getting started' }],
     proseMd: 'narratives/getting-started.html',
-    tags: ['<span class="tag tag-measured">ALL STEPS EXECUTED 2026-09-08</span>'],
+    tags: ['<span class="tag tag-measured">ALL STEPS EXECUTED 2026-09-09</span>'],
     sections: [
       { kind: 'h2', id: 'prerequisites', title: 'Prerequisites' },
       { kind: 'table', cols: ['Dependency', 'Version', 'Why / evidence'], rows: [
@@ -105,7 +105,7 @@ export const CORE_PAGES = [
       { kind: 'h2', id: 'verify', title: 'Verify the stack' },
       { kind: 'code', id: 'verify-cmds', title: 'Commands and the actual observed response', lines: [
         'curl -s http://localhost:3001/api/health',
-        '# measured 2026-09-08 (fresh boot, no API keys beyond .env):',
+        '# measured 2026-09-09 (fresh boot, no API keys beyond .env):',
         '# {"status":"degraded","checks":{"db":"ok","gemini":"degraded","memory":"ok",',
         '#  "reflex":"ok","forks":"ok","dream":"ok","entropy":"ok","discovery":"ok",',
         '#  "pubsub":"ok","redis":"ok/PONG"},"uptime_ms":24305,"version":"3.1"}',
@@ -159,7 +159,7 @@ export const CORE_PAGES = [
     sections: [
       { kind: 'p', html: `Terranoetis is a three-tier application: a React 19 + CesiumJS single-page client (Vite 7), a Node.js + Express 4 API (TypeScript run via <code>tsx</code>), and SQLite (primary store) with Redis as an optional cache/memory hot path. The client talks REST + SSE + WebSocket to the API; the API orchestrates live-data fetchers, the 150-equation analytical engine, the hazard-simulation runners and the cognitive pipeline.` },
       { kind: 'h2', id: 'boot-order', title: 'Server assembly' },
-      { kind: 'table', caption: 'Middleware/service order in server/index.ts (line cites are the app.use/startup sequence; boot observed 2026-09-08 on port 3399)', cols: ['Order', 'Component', 'Detail', 'Source'], rows: [
+      { kind: 'table', caption: 'Middleware/service order in server/index.ts (line cites are the app.use/startup sequence; boot observed 2026-09-09 on port 3399)', cols: ['Order', 'Component', 'Detail', 'Source'], rows: [
         ['1', 'helmet CSP + Permissions-Policy', 'explicit CSP incl. Cesium/WS allowances; HSTS 1 yr in prod', src('server/index.ts', '233-272')],
         ['2', 'cors', 'static allowlist origin = CLIENT_ORIGIN, credentials on', src('server/index.ts', '273')],
         ['3', 'body limits 5 mb, x-powered-by off', '', src('server/index.ts', '274-276')],
@@ -180,7 +180,7 @@ export const CORE_PAGES = [
         'Write-through to the chat knowledge graph and reasoning traces — ' + src('server/index.ts', '11237') + ' ' + src('server/kgV2/chatKgBridge.ts', '28'),
       ]},
       { kind: 'h2', id: 'modules', title: 'Module inventory' },
-      { kind: 'p', html: `LOC per directory and each module’s purpose are tabulated in the prose document (<a href="narratives/BACKEND.html">BACKEND.md</a>), verified against the tree on 2026-09-08. Highlights of interest to researchers: <code>analytical-models/</code> (23,866 LOC), <code>kaggle/</code> (3,105), <code>cognition/</code> (2,760), <code>sentinel/</code> (3,191), <code>memoryV2/</code> (2,091).` },
+      { kind: 'p', html: `LOC per directory and each module’s purpose are tabulated in the prose document (<a href="narratives/BACKEND.html">BACKEND.md</a>), verified against the tree on 2026-09-09. Highlights of interest to researchers: <code>analytical-models/</code> (23,866 LOC), <code>kaggle/</code> (3,105), <code>cognition/</code> (2,760), <code>sentinel/</code> (3,191), <code>memoryV2/</code> (2,091).` },
       { kind: 'h2', id: 'storage', title: 'Persistence and realtime plumbing' },
       { kind: 'table', cols: ['Subsystem', 'Implementation', 'Source'], rows: [
         ['Primary store', 'SQLite <code>server/realtime.db</code>, WAL + busy_timeout 5000, FKs on; 47 schema tables + runtime tables (provider_stats, system1_cache, job_queue…)', src('server/db/index.ts', '6-18') + ' ' + src('server/db/schema.sql', '47 tables (counted)')],
@@ -272,11 +272,11 @@ export const CORE_PAGES = [
       { kind: 'p', html: `The engine is a catalog of 150 deterministic, non-ML scientific functions — <code>EQUATION_ENGINE[id](inputs) → {result, unit, steps[]}</code> — each grounded in a primary-literature reference. A context engine enriches inputs from live feeds before execution; a 7-stage workflow wraps validation, unit preprocessing, computation, post-processing, quality control, uncertainty estimation and interpretation.` },
       { kind: 'h2', id: 'verified-counts', title: 'Verified structural counts' },
       { kind: 'table', cols: ['Claim', 'Measured', 'Method'], rows: [
-        ['150 engines, ids 1–150', '150 unique ids, no gaps', 'programmatic key enumeration of EQUATION_ENGINE via tsx import (2026-09-08) ' + src('server/analytical-models/engine.ts', '1-20,170')],
+        ['150 engines, ids 1–150', '150 unique ids, no gaps', 'programmatic key enumeration of EQUATION_ENGINE via tsx import (2026-09-09) ' + src('server/analytical-models/engine.ts', '1-20,170')],
         ['7 parts / 26 domains', 'parts = 7, domains = 26, tools sum = 150, dup ids = none', 'import of <code>PARTS</code> catalog ' + src('src/data/analyticalModels.ts', '801') + ' + ' + src('src/data/analyticalModels.ts', '248-250')],
         ['Full literature citation per model', '150/150 <code>reference:</code> strings present', 'regex count over catalog'],
         ['“82 with resolvable DOIs” (old README)', '80 model references contain a DOI string; 12 ISBN; 4 explicit NO-DOI; remainder pre-DOI/gov/standards', 'regex <code>10\\.\\d{4,}/…</code> per reference; corrected in docs — see <a href="../methodology.html#discrepancy-log">discrepancy log</a>'],
-        ['DOI resolvability (spot check)', 'doi.org/10.1785/0120130065 → HTTP 302 (resolves)', 'curl -I, 2026-09-08'],
+        ['DOI resolvability (spot check)', 'doi.org/10.1785/0120130065 → HTTP 302 (resolves)', 'curl -I, 2026-09-09'],
       ]},
       { kind: 'h2', id: 'pipeline', title: 'Execution pipeline' },
       { kind: 'list', ordered: true, items: [
@@ -286,7 +286,7 @@ export const CORE_PAGES = [
       ]},
       { kind: 'h2', id: 'never-throws', title: 'Honest-NaN contract' },
       { kind: 'verbatim', quote: `Robustness (§5.5.1): a tool must NEVER throw — if an unexpected missing/malformed input path slips past a per-tool guard, return honest NaN instead of crashing the request. Genuine data is never fabricated here.`, cite: src('server/analytical-models/engine.ts', '175-178') },
-      { kind: 'table', caption: 'Sample computations executed in-process on 2026-09-08 (no network)', cols: ['Tool', 'Inputs', 'Measured result', 'Check'], rows: [
+      { kind: 'table', caption: 'Sample computations executed in-process on 2026-09-09 (no network)', cols: ['Tool', 'Inputs', 'Measured result', 'Check'], rows: [
         ['19 — Gutenberg–Richter (Gutenberg &amp; Richter 1944)', 'a=7, b=1, M=6', '10 events/yr, 0 ms', '10^(7−6)=10 ✓'],
         ['23 — Hanks–Kanamori moment magnitude (1979)', 'M₀ = 1×10²⁰ N·m', '7.300000000000001 M_w, 0 ms', '(2/3)(27) − 10.7 = 7.3 ✓'],
         ['24 — Brune (1970) stress drop, wrong unit scale', 'M0=1e20, r=20', 'NaN “Pa” guard path', 'returns honest NaN, no fabrication ✓'],
@@ -303,7 +303,7 @@ export const CORE_PAGES = [
         ['VI — Space Environment & Satellite', 'Geodesy & Reference Frames (5) · Thermosphere, Ionosphere & Magnetosphere (7) · Satellite Dynamics & Space Debris (5) · Solar-Terrestrial & GNSS (3)'],
         ['VII — Advanced Engineering & Risk', 'Groundwater & Subsurface (4) · Hazard, Risk & Disaster Engineering (6) · Data Assimilation & State Estimation (4) · Signal Processing & Communications (3) · Mathematical Frameworks (3)'],
       ]},
-      { kind: 'p', html: `Topic lists per domain and individual citations: <a href="../narratives/MODELS.html">MODELS.md</a> (corrected 2026-09-08). Reproduction: <code>npx tsx -e "import {computeEquation} from './server/analytical-models/engine.ts'; console.log(computeEquation(19,{a:7,b:1,M:6}))"</code>` },
+      { kind: 'p', html: `Topic lists per domain and individual citations: <a href="../narratives/MODELS.html">MODELS.md</a> (corrected 2026-09-09). Reproduction: <code>npx tsx -e "import {computeEquation} from './server/analytical-models/engine.ts'; console.log(computeEquation(19,{a:7,b:1,M:6}))"</code>` },
       { kind: 'callout', tone: 'inspect', title: 'Verification scope', html: `<p>Live-context enrichment (contextEngine → USGS/Open-Meteo etc.) and the HTTP execute path were not exercised for all 150 tools in this pass (network-dependent). In-process computation, structural counts and test-suite math verification are measured.</p>` },
     ],
   },
@@ -362,7 +362,7 @@ export const CORE_PAGES = [
       { kind: 'p', html: `The platform ingests live open-data feeds and turns them into alerts. Sentinel polls sources against baselines for user watch-zones; anomaly detectors and a correlation engine fuse streams; reflex rules push actions to connected globe clients over WebSocket/SSE.` },
       { kind: 'h2', id: 'inventory', title: 'Integration inventory' },
       { kind: 'table', cols: ['Metric', 'Value', 'Method/source'], rows: [
-        ['Registered API metadata entries', '82', 'regex count <code>category:</code> in server/apiMetadata.ts (2026-09-08)'],
+        ['Registered API metadata entries', '82', 'regex count <code>category:</code> in server/apiMetadata.ts (2026-09-09)'],
         ['Categories (top)', 'Aviation 16 · Weather & Disaster 13 · Economic & Financial 12 · Notifications 5 · AI & Analytics 5 · Satellite & Imagery 4 · Infrastructure 4 …', 'same'],
         ['External https hosts referenced in server data code', '159 (upper bound incl. docs/CDN URLs)', 'regex over server/index.ts, server/data, server/utils'],
         ['Built-in Sentinel pollers', 'USGS earthquakes 60 s · NASA EONET 120 s · NASA FIRMS 180 s (only with key) · NWS alerts 120 s', src('server/sentinel/index.ts', '11-41,43,72,110,165-169')],
@@ -454,7 +454,7 @@ export const CORE_PAGES = [
     sections: [
       { kind: 'p', html: `The client renders live data and simulation outputs on a WebGL globe. “GPU” in this layer refers to rendering primitives (PostProcessStage shaders, custom Cesium Primitives) — not to GPU compute in the simulation kernels.` },
       { kind: 'table', caption: 'Verified counts', cols: ['Item', 'Value', 'Verification'], rows: [
-        ['Rendering modules in src/rendering/', '41 TS modules', 'file count excluding .DS_Store and shpjs.d.ts declaration (2026-09-08)'],
+        ['Rendering modules in src/rendering/', '41 TS modules', 'file count excluding .DS_Store and shpjs.d.ts declaration (2026-09-09)'],
         ['Lazy panels in App.tsx', '11 (const Lazy…Panel = lazy(...))', 'grep count ' + srcRaw('src/App.tsx:135-145')],
         ['App shell size', '11,038 lines', 'wc -l src/App.tsx'],
         ['Routes', '/ · /v2/globe · /v2/canvas · /v2/scenarios · /v2/tours', srcRaw('src/main.tsx:22-26')],
@@ -472,7 +472,7 @@ export const CORE_PAGES = [
         'Scenario studio (editor, gallery, cinematic director, per-hazard visualizers; origin points pinned by globe click)',
         'Collaboration presence (cursors/typing) over /ws/agent; realtime voice via /ws/voice',
       ]},
-      { kind: 'p', html: `Component tables and line counts: <a href="../narratives/FRONTEND.html">FRONTEND.md</a> (corrected 2026-09-08).` },
+      { kind: 'p', html: `Component tables and line counts: <a href="../narratives/FRONTEND.html">FRONTEND.md</a> (corrected 2026-09-09).` },
     ],
   },
 

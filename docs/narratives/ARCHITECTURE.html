@@ -15,14 +15,59 @@
 <meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
-<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="docs-last-reviewed" content="2026-09-09">
 <meta name="generator" content="scripts/docs/build.mjs">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+  mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
+  await mermaid.run({ querySelector: 'pre.mermaid' });
+  // GitHub-style diagram viewer: drag to pan, wheel/buttons to zoom, expand.
+  for (const el of document.querySelectorAll('pre.mermaid, svg.mermaid')) {
+    const svg = el.tagName === 'svg' ? el : el.querySelector('svg');
+    if (!svg) continue;
+    const node = el;
+    const wrap = document.createElement('div');
+    wrap.className = 'diagram-viewer';
+    node.parentNode.insertBefore(wrap, node);
+    wrap.appendChild(node);
+    const bar = document.createElement('div');
+    bar.className = 'diagram-toolbar';
+    bar.innerHTML =
+      '<button type="button" data-a="in" aria-label="Zoom in">+</button>' +
+      '<button type="button" data-a="out" aria-label="Zoom out">−</button>' +
+      '<button type="button" data-a="reset" aria-label="Reset view">Reset</button>' +
+      '<button type="button" data-a="full" aria-label="Expand">Expand</button>';
+    wrap.appendChild(bar);
+    let scale = 1, tx = 0, ty = 0;
+    const apply = () => { svg.style.transformOrigin = '0 0'; svg.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; };    const zoomAt = (mx, my, factor) => {
+      const next = Math.min(10, Math.max(0.2, scale * factor)), z = next / scale;
+      tx = mx - z * (mx - tx); ty = my - z * (my - ty); scale = next; apply();
+    };
+    wrap.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const r = wrap.getBoundingClientRect();
+      zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    }, { passive: false });
+    let drag = null;
+    wrap.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.diagram-toolbar')) return;
+      drag = { x: e.clientX - tx, y: e.clientY - ty };
+      wrap.setPointerCapture(e.pointerId); wrap.classList.add('grabbing');
+    });
+    wrap.addEventListener('pointermove', (e) => { if (drag) { tx = e.clientX - drag.x; ty = e.clientY - drag.y; apply(); } });
+    const drop = (e) => { drag = null; wrap.classList.remove('grabbing'); };
+    wrap.addEventListener('pointerup', drop); wrap.addEventListener('pointercancel', drop);
+    bar.addEventListener('click', (e) => {
+      const a = e.target.closest('button')?.dataset.a; if (!a) return;
+      if (a === 'in' || a === 'out') { const r = wrap.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, a === 'in' ? 1.25 : 1 / 1.25); }
+      if (a === 'reset') { scale = 1; tx = 0; ty = 0; apply(); }
+      if (a === 'full') { document.fullscreenElement ? document.exitFullscreen() : wrap.requestFullscreen?.(); }
+    });
+    apply();
+  }
 </script>
 </head>
 <body>
@@ -89,7 +134,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        <span><strong>Last reviewed</strong> 2026-09-09</span>
         
       </div>
       
@@ -381,219 +426,42 @@ flowchart LR
 <h2 id="frontend-src">Frontend (<code>src/</code>)</h2>
 
 
-<h3 id="rendering-engine-srcrendering-41-modules">Rendering Engine (<code>src/rendering/</code>, 41 modules)</h3>
+<p>The frontend internals are inventoried in <a href="FRONTEND.html">FRONTEND.md</a>: the 41 rendering modules (<code>src/rendering/</code>) with per-module purposes, the simulation overlay color map, and all 7 React hooks (<code>useChat</code>, <code>useWebSocket</code>, <code>useKaggleSimulation</code>, …). Routing:</p>
 
 
 <div class="table-scroll"><table>
 <thead>
 <tr>
-<th>File</th>
-<th>Purpose</th>
+<th>Route</th>
+<th>View</th>
+<th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>ais.ts</code></td>
-<td>Maritime AIS vessel positions/tracks</td>
+<td><code>/</code></td>
+<td>App</td>
+<td>Main Cesium globe application (~11,000 lines, 11 lazy-loaded panels)</td>
 </tr>
 <tr>
-<td><code>aviation.ts</code></td>
-<td>Flight tracking (real-time aircraft + paths)</td>
+<td><code>/v2/globe</code></td>
+<td>GlobePage</td>
+<td>Dedicated Cesium globe viewport</td>
 </tr>
 <tr>
-<td><code>flights.ts</code></td>
-<td>Flight route arcs (departure/arrival)</td>
+<td><code>/v2/canvas</code></td>
+<td>CanvasPage</td>
+<td>Spatial canvas</td>
 </tr>
 <tr>
-<td><code>earthquakes.ts</code></td>
-<td>Earthquake markers (magnitude-scaled, depth-colored)</td>
+<td><code>/v2/scenarios</code></td>
+<td>ScenariosPage</td>
+<td>Scenario gallery and editor</td>
 </tr>
 <tr>
-<td><code>satelliteDataSources.ts</code></td>
-<td>TLE orbit propagation &amp; rendering</td>
-</tr>
-<tr>
-<td><code>satelliteImagery.ts</code></td>
-<td>GIBS/XYZ/WMS imagery layer management</td>
-</tr>
-<tr>
-<td><code>satnogs.ts</code></td>
-<td>SatNOGS ground station visualization</td>
-</tr>
-<tr>
-<td><code>osmBuildings.ts</code></td>
-<td>OSM 3D building extrusion</td>
-</tr>
-<tr>
-<td><code>surfaceRenderer.ts</code></td>
-<td>IDW interpolation surface rendering</td>
-</tr>
-<tr>
-<td><code>gisFusion.ts</code></td>
-<td>GIS data fusion for risk surfaces</td>
-</tr>
-<tr>
-<td><code>studyArea.ts</code></td>
-<td>GeoJSON upload/draw/export/fly-to</td>
-</tr>
-<tr>
-<td><code>scenarioEngine.ts</code></td>
-<td>What-if scenario definition/rollout/diff</td>
-</tr>
-<tr>
-<td><code>causalGraph.ts</code></td>
-<td>Noisy-OR causal Bayesian network</td>
-</tr>
-<tr>
-<td><code>blackboard.ts</code></td>
-<td>Blackboard pattern for probability writing</td>
-</tr>
-<tr>
-<td><code>physicsSurrogates.ts</code></td>
-<td>Liquefaction, dispersion, wildfire, flood surrogates</td>
-</tr>
-<tr>
-<td><code>domainLayers.ts</code></td>
-<td>Domain-specific layer management</td>
-</tr>
-<tr>
-<td><code>advancedWaterShader.ts</code></td>
-<td>Custom water shader</td>
-</tr>
-<tr>
-<td><code>ghostEntity.ts</code> / <code>ghostProtocol.ts</code></td>
-<td>Ghost entity rendering + protocol</td>
-</tr>
-<tr>
-<td><code>entropyHalo.ts</code></td>
-<td>Entropy halo visualization</td>
-</tr>
-<tr>
-<td><code>forkRenderer.ts</code></td>
-<td>Parallel reality fork rendering</td>
-</tr>
-<tr>
-<td><code>layerRenderer.ts</code></td>
-<td>Generic layer rendering abstraction</td>
-</tr>
-<tr>
-<td><code>navigation.ts</code></td>
-<td>Navigation utilities</td>
-</tr>
-<tr>
-<td><code>oracleChains.ts</code></td>
-<td>Oracle chain visualization</td>
-</tr>
-<tr>
-<td><code>idwInterpolation.ts</code></td>
-<td>IDW interpolation algorithm</td>
-</tr>
-<tr>
-<td><code>tectonic.ts</code></td>
-<td>Tectonic plate data</td>
-</tr>
-<tr>
-<td><code>weather.ts</code></td>
-<td>Weather data</td>
-</tr>
-<tr>
-<td><code>trajectoryPredictor.ts</code></td>
-<td>Trajectory prediction</td>
-</tr>
-<tr>
-<td><code>toolResultParser.ts</code></td>
-<td>Tool result parsing</td>
-</tr>
-<tr>
-<td><code>ucsSatelliteDb.ts</code></td>
-<td>UCS satellite database</td>
-</tr>
-<tr>
-<td><code>formatStepResult.ts</code></td>
-<td>Step result formatting</td>
-</tr>
-<tr>
-<td><code>sensorStyles.ts</code></td>
-<td>GLSL sensor looks (CRT · NVG · FLIR · Noir · Snow) via <code>PostProcessStage</code></td>
-</tr>
-<tr>
-<td><code>photorealisticGlobe.ts</code></td>
-<td>Google Photorealistic 3D Tiles (Cesium Ion asset 2275207)</td>
-</tr>
-<tr>
-<td><code>cinematicCamera.ts</code></td>
-<td>Tick-based camera engine (orbit/pan/tilt/rotate, route dolly)</td>
-</tr>
-<tr>
-<td><code>tomtomTraffic.ts</code></td>
-<td>Per-vehicle street-level traffic flow (TomTom)</td>
-</tr>
-<tr>
-<td><code>cctvViewshed.ts</code></td>
-<td>Estimated coverage cones for public webcams</td>
-</tr>
-<tr>
-<td><code>launchReplay.ts</code></td>
-<td>Rocket ascent reconstruction (Launch Library 2)</td>
-</tr>
-<tr>
-<td><code>aircraftHangar.ts</code></td>
-<td>LOD swap: flight glyphs → 3D glTF models</td>
-</tr>
-<tr>
-<td><code>osrmRoute.ts</code></td>
-<td>Street-following walking route (OSRM)</td>
-</tr>
-<tr>
-<td><code>radioWave.ts</code></td>
-<td>Radio tuner globe wave animation</td>
-</tr>
-<tr>
-<td><code>detectionOverlay.ts</code></td>
-<td>Screen-space bounding boxes over live entities</td>
-</tr>
-</tbody>
-</table></div>
-
-
-<h3 id="hooks-7-total">Hooks (7 total)</h3>
-
-
-<div class="table-scroll"><table>
-<thead>
-<tr>
-<th>Hook</th>
-<th>Purpose</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>useChat</code></td>
-<td>Chat pipeline: SSE streaming to <code>/api/agent/ask</code>, tool calls, analytical-result auto-render</td>
-</tr>
-<tr>
-<td><code>useChatSelectors</code></td>
-<td>Zustand selectors for chat UI state</td>
-</tr>
-<tr>
-<td><code>useWebSocket</code></td>
-<td>WebSocket connection manager</td>
-</tr>
-<tr>
-<td><code>useCollaboration</code></td>
-<td>Real-time presence: join/heartbeat, typing, cursor position</td>
-</tr>
-<tr>
-<td><code>useKaggleSimulation</code></td>
-<td>Simulation job lifecycle (local CPU kernel or Kaggle kernel)</td>
-</tr>
-<tr>
-<td><code>useOfflineChat</code></td>
-<td>Offline banner + local fallback when AI provider is unreachable</td>
-</tr>
-<tr>
-<td><code>useRealtimeVoice</code></td>
-<td>Primary voice: OpenAI Realtime → Gemini Live fallback via server bridge</td>
+<td><code>/v2/tours</code></td>
+<td>ToursPage</td>
+<td>Cinematic tours</td>
 </tr>
 </tbody>
 </table></div>
@@ -756,7 +624,7 @@ flowchart LR
 
 <p>See <a href="DEPLOYMENT.html">Deployment &amp; Operations</a> for Docker Compose, CI/CD, environment variables, and security configuration.</p></div>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

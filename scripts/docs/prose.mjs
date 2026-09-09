@@ -103,7 +103,52 @@ function markMermaid(node) {
 
 const MERMAID_HEAD = `<script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+  mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
+  await mermaid.run({ querySelector: 'pre.mermaid' });
+  // GitHub-style diagram viewer: drag to pan, wheel/buttons to zoom, expand.
+  for (const el of document.querySelectorAll('pre.mermaid, svg.mermaid')) {
+    const svg = el.tagName === 'svg' ? el : el.querySelector('svg');
+    if (!svg) continue;
+    const node = el;
+    const wrap = document.createElement('div');
+    wrap.className = 'diagram-viewer';
+    node.parentNode.insertBefore(wrap, node);
+    wrap.appendChild(node);
+    const bar = document.createElement('div');
+    bar.className = 'diagram-toolbar';
+    bar.innerHTML =
+      '<button type="button" data-a="in" aria-label="Zoom in">+</button>' +
+      '<button type="button" data-a="out" aria-label="Zoom out">−</button>' +
+      '<button type="button" data-a="reset" aria-label="Reset view">Reset</button>' +
+      '<button type="button" data-a="full" aria-label="Expand">Expand</button>';
+    wrap.appendChild(bar);
+    let scale = 1, tx = 0, ty = 0;
+    const apply = () => { svg.style.transformOrigin = '0 0'; svg.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; };    const zoomAt = (mx, my, factor) => {
+      const next = Math.min(10, Math.max(0.2, scale * factor)), z = next / scale;
+      tx = mx - z * (mx - tx); ty = my - z * (my - ty); scale = next; apply();
+    };
+    wrap.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const r = wrap.getBoundingClientRect();
+      zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    }, { passive: false });
+    let drag = null;
+    wrap.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.diagram-toolbar')) return;
+      drag = { x: e.clientX - tx, y: e.clientY - ty };
+      wrap.setPointerCapture(e.pointerId); wrap.classList.add('grabbing');
+    });
+    wrap.addEventListener('pointermove', (e) => { if (drag) { tx = e.clientX - drag.x; ty = e.clientY - drag.y; apply(); } });
+    const drop = (e) => { drag = null; wrap.classList.remove('grabbing'); };
+    wrap.addEventListener('pointerup', drop); wrap.addEventListener('pointercancel', drop);
+    bar.addEventListener('click', (e) => {
+      const a = e.target.closest('button')?.dataset.a; if (!a) return;
+      if (a === 'in' || a === 'out') { const r = wrap.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, a === 'in' ? 1.25 : 1 / 1.25); }
+      if (a === 'reset') { scale = 1; tx = 0; ty = 0; apply(); }
+      if (a === 'full') { document.fullscreenElement ? document.exitFullscreen() : wrap.requestFullscreen?.(); }
+    });
+    apply();
+  }
 </script>`;
 
 function listMarkdownFiles() {

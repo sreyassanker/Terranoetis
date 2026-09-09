@@ -1,6 +1,6 @@
 # Analytical Models
 
-Terranoetis ships **150 scientific equation engines** organized across **7 parts** and **26 domains**. Every model is grounded in primary literature and math-verified against its source — no machine learning, no black boxes. Each of the 150 catalog entries carries a full citation: **80 reference strings contain a DOI**, 12 cite books by ISBN, 4 are explicitly flagged `NO-DOI`, and the remainder are pre-DOI classics, government/standards documents, or conference papers (counts produced by programmatic scan of `src/data/analyticalModels.ts` on 2026-09-08). Spot-checked DOI resolvability: `doi.org/10.1785/0120130065` → HTTP 302.
+Terranoetis ships **150 scientific equation engines** organized across **7 parts** and **26 domains**. Every model is grounded in primary literature and math-verified against its source — no machine learning, no black boxes. Each of the 150 catalog entries carries a full citation: **80 reference strings contain a DOI**, 12 cite books by ISBN, 4 are explicitly flagged `NO-DOI`, and the remainder are pre-DOI classics, government/standards documents, or conference papers (counts produced by programmatic scan of `src/data/analyticalModels.ts` on 2026-09-09). Spot-checked DOI resolvability: `doi.org/10.1785/0120130065` → HTTP 302.
 
 > Verified site view (counts, workflow, measured sample computations): [Analytical equation engine](capabilities/analytical-engine.html).
 
