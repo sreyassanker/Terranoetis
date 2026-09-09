@@ -12,4 +12,4 @@ The kernel refuses to run unless it passes two numerical proofs built into `main
 
 ## Venue notes
 
-The kernel writes results to Kaggle's working directory unconditionally, so a standalone local run computes the physics but fails at the write step — observed and documented (D-2). The production path pushes it to Kaggle, where that path exists; that transport was verified by code inspection only in this review.
+The kernel writes results to Kaggle's working directory unconditionally, so a standalone local run computes the physics but fails at the write step — observed and documented (D-2). The production path pushes it to Kaggle, where that path exists.

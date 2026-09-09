@@ -129,7 +129,7 @@
 <tr><td>MCTS</td><td>exploration constant 1.41, ≤100 iterations, depth 5, 30 s timeout (execution orchestrator over tools)</td><td><cite class="src">server/cognition/mctsEngine.ts:11-16,87-89</cite></td></tr>
 <tr><td>Human override</td><td>explainability subsystem: pending override queue, evidence chains, bias audits</td><td><cite class="src">server/index.ts:explainability routes :917-918 + module</cite></td></tr>
 </tbody></table></div>
-<div class="callout callout-inspect" role="note"><div class="callout-title">Verification status</div><p>Startup of the cognitive services (orchestrator, omninet init, self-improver V2, feedback) was observed in server boot logs <cite class="src">server/index.ts:787,834-845</cite>; thresholds and lists are traced to source as above. End-to-end LLM outcomes are provider/credential dependent and were <strong>not</strong> executed here — verified by code inspection.</p></div>
+<div class="callout callout-inspect" role="note"><div class="callout-title">Verification status</div><p>Startup of the cognitive services (orchestrator, omninet init, self-improver V2, feedback) was observed in server boot logs <cite class="src">server/index.ts:787,834-845</cite>; thresholds and lists are traced to source as above. End-to-end LLM outcomes are provider/credential dependent and were <strong>not</strong> executed here.</p></div>
       <footer class="site-footer">
         <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·

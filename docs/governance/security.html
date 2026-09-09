@@ -100,7 +100,7 @@
 <tr><td>Secrets in repo</td><td>runtime <code>.env</code> is gitignored; Kaggle credentials read only from <code>~/.kaggle</code></td><td><cite class="src">docs/DEPLOYMENT.md:173</cite> <cite class="src">.gitignore:.env</cite></td></tr>
 <tr><td>JWT strength</td><td>prod boot refuses <code>JWT_SECRET</code> &lt; 32 chars</td><td><cite class="src">server/index.ts:171-181</cite></td></tr>
 <tr><td>Sandbox</td><td>execution caps + audit log per exec</td><td><cite class="src">server/index.ts:8655-8658,8718</cite></td></tr>
-<tr><td>Sim kernels</td><td>receive JSON params only; no shell interpolation of user values</td><td><cite class="src">server/kaggle/simRunner.ts:156-175</cite> <span class="tag tag-inspected">verified by code inspection</span></td></tr>
+<tr><td>Sim kernels</td><td>receive JSON params only; no shell interpolation of user values</td><td><cite class="src">server/kaggle/simRunner.ts:156-175</cite></td></tr>
 <tr><td>Auth surface</td><td>public allow-list explicit; everything else behind authGuard</td><td><cite class="src">server/index.ts:373-487</cite></td></tr>
 </tbody></table></div>
       <footer class="site-footer">

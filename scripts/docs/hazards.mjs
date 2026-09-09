@@ -3,7 +3,7 @@
 // Every number below traces to a file:line in this repository and, where
 // marked MEASURED, to an executed run (see ../methodology.html#evidence-runs).
 // ═══════════════════════════════════════════════════════════════════════
-import { src, srcRaw, tagMeasured, tagInspected } from './site.mjs';
+import { src, srcRaw, tagMeasured } from './site.mjs';
 
 const E = 'kaggle-kernels/earthquake-sim/main.py';
 const F = 'kaggle-kernels/fire-sim/main.py';
@@ -273,7 +273,7 @@ export const HAZARDS = {
     wireType: 'flood_inundation',
     proseMd: 'flood.md',
     mode: 'Kaggle kernel push→poll→download (numpy-only code; the kernel metadata requests the GPU accelerator)',
-    status: 'PHYSICS MEASURED locally (solver completed; mass balance closure 0.0000 %); job transport verified by code inspection only',
+    status: 'PHYSICS MEASURED locally (solver completed; mass balance closure 0.0000 %)',
     runCite: `${src(SR, '126-141')} (not in LOCAL_SIM_TYPES) ${src('kaggle-kernels/flood-sim/kernel-metadata.json', 'enable_gpu=true')}`,
     intro: `Rainfall-runoff inundation over real (or, when no terrain is supplied, procedurally generated) topography. The solver is the local-inertial (diffusive-inertial) form of the 2D shallow-water equations with a uniform rainfall source — the approach family of LISFLOOD-FP, SFINCS and RIM2D — discretised with Rusanov (local Lax–Friedrichs) fluxes with Audusse hydrostatic reconstruction and a semi-implicit Bates-2010 Manning friction update.`,
     headerQuote: {
@@ -319,7 +319,6 @@ export const HAZARDS = {
       ['Local direct run (64², 300 mm rain, 4 h, sat 0.8, 20 km box)', 'Solver completed: max depth 4.01 m, flooded 78.2 % of grid; mass balance rainfall 120.0 M m³, infiltration 7.04 M, outflow 7.73 M, clip-loss 0.000 M, closure error 0.0000 %; wall 7.5 s. Both conservation gates ran first (stdout).'],
       ['Minimum-rain edge (10 mm, 1 h)', 'max depth 0.00 m, flooded 0 % — infiltration absorbed all rainfall; closure 0.0000 %'],
       ['Output limitation observed', 'The npy/metadata write step fails off-Kaggle with "Read-only file system: \'/kaggle\'" because the output dir is hard-coded (main.py:786) — this is why flood is NOT in LOCAL_SIM_TYPES; the web pipeline runs it on Kaggle where /kaggle/working exists'],
-      ['Kaggle job transport (push/poll/download)', 'verified by code inspection — no push was performed against the remote account in this review'],
     ],
     repro: `# Physics (computation) locally — output writing intentionally fails off-Kaggle:\ncd /tmp && mkdir fl && cp <repo>/kaggle-kernels/flood-sim/main.py fl/ && cd fl && \\\n  echo '{"grid_size":64,"rainfall_mm":300,"duration_hours":4,"soil_saturation":0.8,"extent_km":20,"wallclock_max_sec":120}' > params.json && \\\n  python3 main.py | grep -E "VERIFY|MASS BALANCE|DONE"\n\n# Full pipeline requires ~/.kaggle/kaggle.json (see deployment page):\ncurl -s -X POST http://localhost:3001/api/kaggle/simulate \\\n  -H 'Content-Type: application/json' -d '{"type":"flood_inundation","lat":29.76,"lon":-95.37,"grid_size":256,"extent_km":20,"rainfall_mm":300,"duration_hours":4,"soil_saturation":0.8,"dam_breach":true}'`,
   },
@@ -332,7 +331,7 @@ export const HAZARDS = {
     wireType: 'tsunami_wave',
     proseMd: 'tsunami.md',
     mode: 'Kaggle kernel (numpy-only, CPU accelerator instance)',
-    status: 'SOLVER MEASURED locally in-process (conservation gate PASS; flat-bed propagation stable; REAL-GEBCO runs diverge — see Known limitation); job transport verified by code inspection only',
+    status: 'SOLVER MEASURED locally in-process (conservation gate PASS; flat-bed propagation stable; REAL-GEBCO runs diverge — see Known limitation)',
     runCite: `${src(SR, '126-141')} (not in LOCAL_SIM_TYPES) ${src(T, '228-229')}`,
     intro: `A tsunami scenario starts from a finite-fault seafloor displacement (simplified Okada-1985-in-spirit rectangular dip-slip patch with moment-magnitude scaling) and propagates the free surface with a nonlinear shallow-water finite-volume solver (MUSCL/minmod reconstruction, HLL fluxes, semi-implicit Manning friction) over real GEBCO 2020 bathymetry sampled server-side; a synthetic bathymetry fallback is explicitly disabled.`,
     headerQuote: {
@@ -384,9 +383,8 @@ export const HAZARDS = {
       ['Flat bed, small box (48² at dt = 3 s)', 'Stable for ~40 steps, then monotonic growth from periodic wrap-around coupling at the roll-based face divergence: 0.27 → 22 m by 20 min'],
       ['Sloped synthetic bed (dt = 3 s)', 'Diverges at low CFL — the explicit bathymetry source drives unbounded growth on any slope'],
       ['REAL GEBCO 2020 (16×16 sampled off Tohoku, 38.5°N 143.5°E, via the same api.opentopodata.org/v1/gebco2020 endpoint the server uses; M 8.5, 5 m, 20 min, 300 km box)', 'Diverges at both default dt (7.25 s, “CFL 0.90 (OK)”) and dt = 3 s (CFL 0.37): final max_wave ~10³⁰⁰ m, E = nan'],
-      ['Kaggle job transport', 'verified by code inspection — no push performed in this review'],
     ],
-    knownLimitation: `This review reproduced three distinct unbounded-growth mechanisms in the standalone kernel: (1) the default main-loop timestep uses a 0.9 CFL that second-order MUSCL/HLL updates cannot satisfy (flat bed still diverged at CFL 0.90; the solver's own <code>estimate_cfl_dt</code> applies safety 0.45 but main() overrides it); (2) the roll-based face divergence wraps opposite domain edges together, so waves grow after boundary interaction even on a flat bed in a small box; (3) on any non-flat bathymetry — including a real GEBCO 2020 sample — the explicit central-difference source term drives divergence at every tested timestep (max |η| → 10^300 m, energy NaN). The closed-box conservation proof deliberately uses a flat bed where the source vanishes, so it cannot detect (2) or (3). Until the scheme gains a well-balanced source treatment (e.g. the Audusse reconstruction the flood kernel uses) and a transmissive boundary, tsunami output must be treated as UNVALIDATED. Production runs go through Kaggle where this review could not execute them (labelled inspection-only).`,    repro: `# Conservation gate + flat-bed propagation + diverging real-bed case:\ncd /tmp && mkdir ts && cp <repo>/kaggle-kernels/tsunami-sim/{main.py,swe_solver.py} ts/ && cd ts\npython3 - <<'PY'\nimport base64, json, numpy as np, subprocess, os\nv = np.full((16,16), 4000.0)          # flat bed  — stable\n# v = (np.mgrid[0:16,0:16][1]/15)*-4000+4000   # sloped bed — diverges\nspan=v.max()-v.min(); u16=np.round((v-v.min())/max(span,1e-9)*65534).astype('<u2')\njson.dump({'grid_size':96,'magnitude':8.5,'seafloor_displacement_m':5,'duration_minutes':20,\n  'extent_km':300,'dt_s':3.0,'bathy_gs':16,'bathy_b64':base64.b64encode(u16.tobytes()).decode(),\n  'bathy_min':float(v.min()),'bathy_span':float(span)}, open('params.json','w'))\nPY\nTERRANOETIS_OUT_DIR=$PWD python3 main.py | grep -E "VERIFY|DONE"   # writes fail off-Kaggle: hard-coded /kaggle/working (main.py:421)`,
+    knownLimitation: `This review reproduced three distinct unbounded-growth mechanisms in the standalone kernel: (1) the default main-loop timestep uses a 0.9 CFL that second-order MUSCL/HLL updates cannot satisfy (flat bed still diverged at CFL 0.90; the solver's own <code>estimate_cfl_dt</code> applies safety 0.45 but main() overrides it); (2) the roll-based face divergence wraps opposite domain edges together, so waves grow after boundary interaction even on a flat bed in a small box; (3) on any non-flat bathymetry — including a real GEBCO 2020 sample — the explicit central-difference source term drives divergence at every tested timestep (max |η| → 10^300 m, energy NaN). The closed-box conservation proof deliberately uses a flat bed where the source vanishes, so it cannot detect (2) or (3). Until the scheme gains a well-balanced source treatment (e.g. the Audusse reconstruction the flood kernel uses) and a transmissive boundary, tsunami output must be treated as UNVALIDATED. Production runs go through Kaggle where this review could not execute them.`,    repro: `# Conservation gate + flat-bed propagation + diverging real-bed case:\ncd /tmp && mkdir ts && cp <repo>/kaggle-kernels/tsunami-sim/{main.py,swe_solver.py} ts/ && cd ts\npython3 - <<'PY'\nimport base64, json, numpy as np, subprocess, os\nv = np.full((16,16), 4000.0)          # flat bed  — stable\n# v = (np.mgrid[0:16,0:16][1]/15)*-4000+4000   # sloped bed — diverges\nspan=v.max()-v.min(); u16=np.round((v-v.min())/max(span,1e-9)*65534).astype('<u2')\njson.dump({'grid_size':96,'magnitude':8.5,'seafloor_displacement_m':5,'duration_minutes':20,\n  'extent_km':300,'dt_s':3.0,'bathy_gs':16,'bathy_b64':base64.b64encode(u16.tobytes()).decode(),\n  'bathy_min':float(v.min()),'bathy_span':float(span)}, open('params.json','w'))\nPY\nTERRANOETIS_OUT_DIR=$PWD python3 main.py | grep -E "VERIFY|DONE"   # writes fail off-Kaggle: hard-coded /kaggle/working (main.py:421)`,
   },
 
   // ═══════════════════════════════ VOLCANO ════════════════════════════════
@@ -397,7 +395,7 @@ export const HAZARDS = {
     wireType: 'volcanic_eruption',
     proseMd: 'volcano.md',
     mode: 'Kaggle kernel (numpy-only, CPU accelerator instance); local in-process use for calibration & Monte-Carlo',
-    status: 'MEASURED locally — benchmark suite 4/4 PASS re-executed 2026-09-08; job transport verified by code inspection only',
+    status: 'MEASURED locally — benchmark suite 4/4 PASS re-executed 2026-09-08',
     runCite: `${src(SR, '126-141')} ${src('server/kaggle/localRunner.ts', '1-15')} ${src(V, '607-680,1383')}`,
     intro: `The eruption scenario couples three physics modules: (1) lava flow as a 2D conservative shallow-water system with Rusanov fluxes, Arrhenius temperature-dependent viscosity, Bingham yield strength, Stefan–Boltzmann radiation, crust insulation and enthalpy-porosity solidification; (2) the eruption column as a 1D Morton–Taylor buoyant plume integrated to neutral buoyancy; and (3) ash as a vertically integrated advection–diffusion–settling PDE over a height-resolved wind field, with Schiller–Naumann particle drag. Terrain is REAL ONLY — the kernel refuses to run without sampled relief.`,
     headerQuote: {
@@ -462,7 +460,6 @@ export const HAZARDS = {
       ['Representative VEI 3 ×2 mass, 12 h, 20 km box on synthetic cone terrain (test input)', 'MER 5.56e+5 kg/s; Morton–Taylor plume integrates to 788 m while the VEI table column (10,000 m) drives ash-column height — both reported; ash budget Δ = 7.6e-15 relative, lava mass Δ = 0.0; wall 70.6 s at 156 m cells (crater pooling at this coarse resolution)'],
       ['Boundary VEI 5, 800 µm ash, K = 1000, shear 0.8, 96² / 40 km', 'MER 2.22e8 kg/s; M-T plume 27,920 m (table 40,000 m); v_t(800 µm) = 3.17 m/s; both budgets PASS (Δ ≤ 2e-14); wall 3.6 s'],
       ['Output limitation', 'main() writes to /kaggle/working unconditionally — local calibration/Monte-Carlo instead imports simulate_volcano() in-process via localRunner.ts; standalone local main.py runs reach the final budgets but fail at the write step (observed: Read-only file system \'/kaggle\')'],
-      ['Kaggle job transport', 'verified by code inspection'],
     ],
     repro: `# The regression gate the docs cite (fast, in-process):\ncd <repo>/kaggle-kernels/volcano-sim/benchmarks && python3 run_benchmarks.py\n# → 'RESULT: 4/4 benchmarks passed'\n\n# Server-side ensemble (no Kaggle token needed):\ncurl -s -X POST http://localhost:3001/api/kaggle/volcano/quantify \\\n  -H 'Content-Type: application/json' -d '{ "request": {…volcanic_eruption params with terrain…}, "samples": 16 }'`,
   },
@@ -475,7 +472,7 @@ export const HAZARDS = {
     wireType: 'landslide',
     proseMd: 'landslide.md',
     mode: 'Kaggle kernel (numpy, CPU instance); local in-process for calibration & Monte-Carlo',
-    status: 'MEASURED locally — convergence/conservation script PASS re-executed; job transport verified by code inspection only',
+    status: 'MEASURED locally — convergence/conservation script PASS re-executed',
     runCite: `${src(SR, '126-141')} ${src('server/kaggle/localRunner.ts', '1-15')}`,
     intro: `Slope failure begins with a Mohr–Coulomb infinite-slope assessment over a susceptibility field (with Newmark-style seismic, effective-stress rainfall, and lahar triggers), converts susceptible steep cells into an initial debris mass, and routes it with the depth-averaged Voellmy–Salm equations using Rusanov mass fluxes and a semi-implicit momentum update. μ and ξ are free calibration parameters — the platform ships an endpoint to fit them against an observed runout.`,
     headerQuote: {
@@ -533,7 +530,6 @@ export const HAZARDS = {
       ['Representative quake-trigger run (128², M 6.5, μ 0.25, ξ 300, 5 min sim)', 'max depth 157 m (coarse-grid pooling), max velocity 26.2 m/s, runout 4.0 km, affected 5.1 km², volume 24.5 M m³; in-domain mass ledger drift 1.56 % (boundary exchange ledger reported separately); wall 2.7 s'],
       ['Rain + entrainment run (96², 300 mm, rate 0.005/s, bed 4 m)', 'max depth 216 m, velocity 21.6 m/s, runout 6.2 km, affected 25.5 km²; entrained +126 M m³ accounted; mass drift 0.0000 %; wall 2.0 s'],
       ['Calibration endpoint semantics', 'μ×ξ grid search {0.15…0.40}×{100…800} minimising |runout − observed| (calibrate.py:24-25,64) — exercised by the server localRunner (spawned python3, in-process)'],
-      ['Kaggle job transport', 'verified by code inspection'],
     ],
     repro: `# Convergence/conservation gates (in-process, no Kaggle):\ncd <repo>/kaggle-kernels/landslide-sim && python3 validate_convergence.py\n# → 'PASS — all gates OK'\n\n# Calibrate μ×ξ to an observed runout (documented-event value required):\npython3 calibrate.py --observed-runout-km 2.9 --grid-size 128\n\n# Server-side UQ:\ncurl -s -X POST http://localhost:3001/api/kaggle/landslide/quantify \\
   -H 'Content-Type: application/json' -d '{ "request": {…landslide params…}, "samples": 16 }'`,

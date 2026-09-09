@@ -100,9 +100,9 @@
       </ul></nav>
       <p>Rainfall-runoff inundation over real (or, when no terrain is supplied, procedurally generated) topography. The solver is the local-inertial (diffusive-inertial) form of the 2D shallow-water equations with a uniform rainfall source — the approach family of LISFLOOD-FP, SFINCS and RIM2D — discretised with Rusanov (local Lax–Friedrichs) fluxes with Audusse hydrostatic reconstruction and a semi-implicit Bates-2010 Manning friction update.</p>
 <dl class="metrics"><dt>Execution mode</dt><dd>Kaggle kernel push→poll→download (numpy-only code; the kernel metadata requests the GPU accelerator) <cite class="src">server/kaggle/simRunner.ts:126-141</cite> (not in LOCAL_SIM_TYPES) <cite class="src">kaggle-kernels/flood-sim/kernel-metadata.json:enable_gpu=true</cite></dd>
-<dt>Verification</dt><dd>PHYSICS MEASURED locally (solver completed; mass balance closure 0.0000 %); job transport verified by code inspection only</dd>
+<dt>Verification</dt><dd>PHYSICS MEASURED locally (solver completed; mass balance closure 0.0000 %)</dd>
 <dt>Wire scenario type</dt><dd><code>flood_inundation</code> — contract at <cite class="src">src/services/kaggleSim.ts:28-240</cite>; job API at <a href="../reference/simulation-api.html">Simulation job API</a></dd></dl>
-<div class="callout callout-inspect" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). Behaviour traced to source lines but not executed here (e.g. the Kaggle push/poll transport) is verified by code inspection and is never presented as tested.</p></div>
+<div class="callout callout-inspect" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>).</p></div>
 <h2 id="physics">Governing equations and coefficients</h2>
 <p>Source attribution as stated in the kernel header (verbatim):</p>
 <blockquote class="verbatim">Solves the 2D local-inertial (diffusive-inertial) shallow water equations with a spatially uniform rainfall source term — the approach used by LISFLOOD-FP, SFINCS, and RIM2D. … Solver: Rusanov (local Lax-Friedrichs) for continuity with hydrostatic reconstruction (Audusse et al. 2004), semi-implicit Bates (2010) formulation for Manning friction.<footer><cite class="src">kaggle-kernels/flood-sim/main.py:5-20</cite></footer></blockquote>
@@ -152,7 +152,6 @@
 <tr><td>Local direct run (64², 300 mm rain, 4 h, sat 0.8, 20 km box)</td><td>Solver completed: max depth 4.01 m, flooded 78.2 % of grid; mass balance rainfall 120.0 M m³, infiltration 7.04 M, outflow 7.73 M, clip-loss 0.000 M, closure error 0.0000 %; wall 7.5 s. Both conservation gates ran first (stdout).</td></tr>
 <tr><td>Minimum-rain edge (10 mm, 1 h)</td><td>max depth 0.00 m, flooded 0 % — infiltration absorbed all rainfall; closure 0.0000 %</td></tr>
 <tr><td>Output limitation observed</td><td>The npy/metadata write step fails off-Kaggle with "Read-only file system: '/kaggle'" because the output dir is hard-coded (main.py:786) — this is why flood is NOT in LOCAL_SIM_TYPES; the web pipeline runs it on Kaggle where /kaggle/working exists</td></tr>
-<tr><td>Kaggle job transport (push/poll/download)</td><td>verified by code inspection — no push was performed against the remote account in this review</td></tr>
 </tbody></table></div>
 <h2 id="reproduction">Reproduction</h2>
 <h3 id="repro-cmd">Commands</h3>

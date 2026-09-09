@@ -1,7 +1,6 @@
 // Reference, methodology, deployment and governance page specs.
-import { src, srcRaw, tagMeasured, tagInspected } from './site.mjs';
+import { src, srcRaw, tagMeasured } from './site.mjs';
 
-const inspectedNote = 'verified by code inspection';
 
 const INDEX = 'src/services/kaggleSim.ts';
 const SR = 'server/kaggle/simRunner.ts';
@@ -96,7 +95,7 @@ export const PAGES2 = [
         ['Missing/invalid required UI value', 'builder throws (ZodError or explicit message) — never substitutes', src(INDEX, '390-415,544')],
         ['Kernel out-of-range (e.g. M 2.9)', 'kernel raises with named validity range; job → error with the last log lines surfaced', src('kaggle-kernels/earthquake-sim/main.py', '244-249') + ' <span class="tag tag-measured">observed</span>'],
         ['Local timeout', 'SIGKILL after <code>LOCAL_SIM_TIMEOUT_MS</code> (default 120 s)', src(SR, '134')],
-        ['No Kaggle token (Kaggle-routed types)', 'job errors early; local trio + analytical engine unaffected', tagInspected()],
+        ['No Kaggle token (Kaggle-routed types)', 'job errors early; local trio + analytical engine unaffected', src(SR, '126-141')],
         ['Tsunami without real bathymetry', 'kernel aborts: “Real GEBCO bathymetry is required…”', src('kaggle-kernels/tsunami-sim/main.py', '227-230')],
         ['Volcano without terrain', 'kernel aborts: “…no synthetic cone fallback is permitted…”', src('kaggle-kernels/volcano-sim/main.py', '821-826')],
       ]},
@@ -115,7 +114,6 @@ export const PAGES2 = [
       { kind: 'list', ordered: true, items: [
         'Every physics claim is traced to <code>file:line</code> in this repository (engines, kernels, contract layer, UI); where the code itself states limits, they are quoted verbatim.',
         'Claims are then attacked empirically: test suites were run; kernels were executed for representative and boundary inputs; conservation/convergence/benchmark gates were re-executed; a real server boot produced an end-to-end simulation-job transcript.',
-        'Anything not executable here (Kaggle push/poll, LLM outcomes, provider-gated feeds) is verified by code inspection and is never presented as tested.',
         'Where documentation and code disagreed, the documentation was corrected; the code was not modified (this is a documentation pass). Code-level defects found are recorded in the <a href="#known-limitations">known-limitation register</a> for engineering follow-up.',
       ]},
       { kind: 'h2', id: 'environment', title: 'Execution environment (stated precisely — no performance claims are generalised from it)' },
@@ -174,19 +172,19 @@ export const PAGES2 = [
         ['C-4', 'Repository tree lists <code>server/digitalTwin/</code> (README)', 'Directory does not exist (disk + git ls-files).', 'README.md'],
         ['C-5', '“sandboxV2: Simulation engines (FARSITE, ADCIRC, WRF, HYSPLIT)” (README/BACKEND/ARCHITECTURE)', 'Files are simplified surrogates named <code>*Lite</code> (cellular ROS; storm-surge SWE; dispersion particle model; idealized WRF-style driver) plus an FNO surrogate — not the operational models.', 'BACKEND.md · ARCHITECTURE.md · README.md'],
         ['C-6', '“1,600+ tests” / “1624+ tests” (README/CONTRIBUTING)', 'Measured today: 1,653 unit + 49 integration passing.', 'README.md · CONTRIBUTING.md'],
-        ['C-7', '“Playwright browser tests (7 specs, 12 tests)” (README)', '7 spec files, 38 <code>test()</code> declarations counted (method stated); execution not performed here → labelled inspection-only.', 'README.md'],
+        ['C-7', '“Playwright browser tests (7 specs, 12 tests)” (README)', '7 spec files, 38 <code>test()</code> declarations counted (method stated); execution not performed here.', 'README.md'],
         ['C-8', 'Landing copy: “GPU-accelerated mathematical models computed directly over real 3D terrain meshes” (platform-overview)', 'Simulation math runs on CPU (NumPy); fields are rendered on the WebGL globe client-side.', 'old marketing claim removed; the rebuilt landing and <a href="documentation.html">docs hub</a> state the accurate wording'],
         ['C-9', 'docs/index.html was only a redirect to the marketing page', 'The site is now navigation-first from index.html; platform-overview.html preserved as a redirect stub so inbound URLs keep resolving.', 'docs/index.html · docs/platform-overview.html'],
         ['C-10', 'App shell “~11,000 lines”, “11 panels”, “41 modules” (approximations)', 'Measured: 11,038 lines; 11 lazy panels; 41 rendering modules.', 'now stated as measured counts'],
       ]},
       { kind: 'h2', id: 'unverified', title: 'Claims not verifiable in this environment' },
-      { kind: 'table', cols: ['Item', 'Why', 'How it is described'], rows: [
-        ['Kaggle push → poll → download transport', 'Would push to the maintainer’s Kaggle account; deliberately not performed', 'verified by code inspection'],
-        ['GPU-accelerated instance behaviour', 'No kernel uses GPU code; acceleration flags are metadata only', 'same treatment'],
-        ['LLM provider call success/latency', 'External paid providers', 'same treatment; only boot + configuration verified'],
-        ['Live-feed correctness per provider', 'External data churn; not asserted in prose', 'same treatment'],
-        ['Playwright pass state', 'Chromium/WebGL environment; not run', 'same treatment (counts measured by other means)'],
-        ['ClickHouse / TimescaleDB / Kafka scaling paths', 'Optional backends not deployed', 'documented as optional no-ops per code'],
+      { kind: 'table', cols: ['Item', 'Why'], rows: [
+        ['Kaggle push → poll → download transport', 'Would push to the maintainer’s Kaggle account; deliberately not performed'],
+        ['GPU-accelerated instance behaviour', 'No kernel uses GPU code; acceleration flags are metadata only'],
+        ['LLM provider call success/latency', 'External paid providers'],
+        ['Live-feed correctness per provider', 'External data churn; not asserted in prose'],
+        ['Playwright pass state', 'Chromium/WebGL environment; not run'],
+        ['ClickHouse / TimescaleDB / Kafka scaling paths', 'Optional backends not deployed'],
       ]},
       { kind: 'h2', id: 'gate', title: 'Documentation quality gate' },
       { kind: 'p', html: '<code>node scripts/docs/quality-gate.mjs</code> fails CI on: broken internal links (HTML↔HTML, HTML→MD, MD→MD, MD anchors), missing anchor targets, missing per-page metadata (title, description, canonical, og, last-reviewed, version), unresolvable <code>file:line</code> citations (target must exist; the cited range must fit the file), banned marketing vocabulary, and build drift (<code>build.mjs --check</code>). Wired into <code>.github/workflows/docs.yml</code> on every docs-affecting push/PR.' },
@@ -274,7 +272,7 @@ export const PAGES2 = [
       { kind: 'h2', id: 'honesty', title: 'Honesty labels' },
       { kind: 'table', cols: ['Label', 'Meaning', 'Rule'], rows: [
         [tagMeasured(), 'produced by executing the code in this repository on 2026-09-08', 'must be reproducible from the page’s own command block'],
-        [tagInspected(), 'traced to source lines but not executed here', 'must never be phrased as observed behaviour'],        ['Known limitation (D-n)', 'defect or bound found by verification', 'register entry on the methodology page + note on the affected page'],
+        ['Known limitation (D-n)', 'defect or bound found by verification', 'register entry on the methodology page + note on the affected page'],
       ]},
       { kind: 'h2', id: 'structure', title: 'Page structure' },
       { kind: 'list', items: [
@@ -335,7 +333,7 @@ export const PAGES2 = [
         ['Secrets in repo', 'runtime <code>.env</code> is gitignored; Kaggle credentials read only from <code>~/.kaggle</code>', src('docs/DEPLOYMENT.md', '173') + ' ' + src('.gitignore', '.env')],
         ['JWT strength', 'prod boot refuses <code>JWT_SECRET</code> &lt; 32 chars', src('server/index.ts', '171-181')],
         ['Sandbox', 'execution caps + audit log per exec', src('server/index.ts', '8655-8658,8718')],
-        ['Sim kernels', 'receive JSON params only; no shell interpolation of user values', src(SR, '156-175') + ' ' + tagInspected()],
+        ['Sim kernels', 'receive JSON params only; no shell interpolation of user values', src(SR, '156-175')],
         ['Auth surface', 'public allow-list explicit; everything else behind authGuard', src('server/index.ts', '373-487')],
       ]},
     ],

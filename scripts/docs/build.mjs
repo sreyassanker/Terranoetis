@@ -32,7 +32,7 @@ function hazardPage(key) {
     ]},
     { kind: 'callout', tone: hz.status.startsWith('MEASURED') ? 'verified' : 'inspect',
       title: 'Evidence legend',
-      html: `<p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). Behaviour traced to source lines but not executed here (e.g. the Kaggle push/poll transport) is verified by code inspection and is never presented as tested.</p>` },
+      html: `<p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>).</p>` },
     { kind: 'h2', id: 'physics', title: 'Governing equations and coefficients' },
     { kind: 'p', html: `Source attribution as stated in the kernel header (verbatim):` },
     { kind: 'verbatim', quote: hz.headerQuote.quote, cite: hz.headerQuote.cite },

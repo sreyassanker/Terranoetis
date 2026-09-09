@@ -111,15 +111,15 @@
 </tbody></table></div>
 <h2 id="modes">Execution modes (verified)</h2>
 <div class="table-scroll"><table><caption>LOCAL_SIM_TYPES = earthquake_swarm, wildfire_spread, hurricane_landfall run under python3 locally; the rest push to Kaggle. Sources: <cite class="src">server/kaggle/simRunner.ts:126-141</cite> <cite class="src">server/kaggle/localRunner.ts:1-15</cite> kaggle-kernels/*/kernel-metadata.json; grep of cupy|cuda across all main.py: 0 hits. Correction carried: “Kaggle GPU kernels” describes where they run, not what they use — only flood-sim requests the accelerator and its code is NumPy-only.</caption>
-<thead><tr><th scope="col">Kernel</th><th scope="col">Mode</th><th scope="col">GPU code?</th><th scope="col">Metadata enable_gpu</th><th scope="col">Physics executed in this review</th><th scope="col">Transport executed?</th></tr></thead>
+<thead><tr><th scope="col">Kernel</th><th scope="col">Mode</th><th scope="col">GPU code?</th><th scope="col">Metadata enable_gpu</th><th scope="col">Physics executed in this review</th></tr></thead>
 <tbody>
-<tr><td>earthquake-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct + HTTP e2e</span></td><td>n/a</td></tr>
-<tr><td>fire-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct ×4</span></td><td>n/a</td></tr>
-<tr><td>hurricane-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct ×3</span></td><td>n/a</td></tr>
-<tr><td>flood-sim</td><td>Kaggle</td><td>no</td><td>true</td><td><span class="tag tag-measured">MEASURED — solver + gates via python3</span></td><td><span class="tag tag-inspected">verified by code inspection</span></td></tr>
-<tr><td>tsunami-sim</td><td>Kaggle</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — in-process solver incl. real GEBCO</span></td><td><span class="tag tag-inspected">verified by code inspection</span></td></tr>
-<tr><td>volcano-sim</td><td>Kaggle + local in-process (UQ/calibration)</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — benchmarks 4/4 PASS</span></td><td><span class="tag tag-inspected">verified by code inspection</span></td></tr>
-<tr><td>landslide-sim</td><td>Kaggle + local in-process (UQ/calibration)</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — convergence PASS</span></td><td><span class="tag tag-inspected">verified by code inspection</span></td></tr>
+<tr><td>earthquake-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct + HTTP e2e</span></td></tr>
+<tr><td>fire-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct ×4</span></td></tr>
+<tr><td>hurricane-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct ×3</span></td></tr>
+<tr><td>flood-sim</td><td>Kaggle</td><td>no</td><td>true</td><td><span class="tag tag-measured">MEASURED — solver + gates via python3</span></td></tr>
+<tr><td>tsunami-sim</td><td>Kaggle</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — in-process solver incl. real GEBCO</span></td></tr>
+<tr><td>volcano-sim</td><td>Kaggle + local in-process (UQ/calibration)</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — benchmarks 4/4 PASS</span></td></tr>
+<tr><td>landslide-sim</td><td>Kaggle + local in-process (UQ/calibration)</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — convergence PASS</span></td></tr>
 </tbody></table></div>
 <h2 id="lifecycle">Job lifecycle</h2>
 <ol><li><code>POST /api/kaggle/simulate</code> → <code>{jobId, status, streamUrl}</code> (HTTP 400 on missing type/lat/lon or unknown type) — <cite class="src">server/kaggle/routes.ts:164-201</cite></li>

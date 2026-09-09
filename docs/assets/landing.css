@@ -22,6 +22,13 @@
 .btn-primary:hover { background: #4a95e2; color: #fff; }
 .btn-ghost { border-color: rgba(255,255,255,0.4); color: var(--c-banner-text); }
 .btn-ghost:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.btn-yt { border-color: rgba(255, 99, 99, 0.55); }
+.btn-yt:hover { background: rgba(255, 0, 0, 0.14); border-color: rgba(255, 99, 99, 0.8); color: #ffe2e2; }
+.btn-yt::before {
+  content: ""; display: inline-block; margin-right: 0.5rem; vertical-align: 1px;
+  width: 0; height: 0;
+  border-left: 8px solid #ff4b4b; border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+}
 .hero figure { margin: 0; }
 .hero img { width: 100%; height: auto; border-radius: 10px; border: 1px solid rgba(255,255,255,0.18); display: block; }
 .hero figcaption { font-size: 0.72rem; color: #9fb0c3; margin-top: 0.5rem; font-family: var(--font-mono); }

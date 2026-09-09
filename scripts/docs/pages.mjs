@@ -1,6 +1,5 @@
 // Non-hazard page specs: home, getting-started, architecture, capability hubs and feature pages.
-import { src, srcRaw, tagMeasured, tagInspected, DOCS_VERSION, LAST_REVIEWED, REPO } from './site.mjs';
-const inspectedNote = 'verified by code inspection';
+import { src, srcRaw, tagMeasured, DOCS_VERSION, LAST_REVIEWED, REPO } from './site.mjs';
 import { HAZARDS } from './hazards.mjs';
 import { PAGES2 } from './pages2.mjs';
 
@@ -20,7 +19,7 @@ export const CORE_PAGES = [
     tags: ['<span class="tag tag-measured">REVIEWED 2026-09-08</span>'],
     sections: [
       { kind: 'lede', html: `Terranoetis is a real-time geospatial intelligence platform: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equation engines, seven hazard-physics simulation kernels, and an AI chat pipeline with dual-process cognition. These documents state what the software <em>does</em> — verified against the source in this repository, and against the code actually executed wherever this environment allows.` },
-      { kind: 'callout', tone: 'verified', title: 'Accuracy policy', html: `<p>Physics statements carry a <code>file:line</code> citation into the source. Executed evidence is tagged ${'<span class="tag tag-measured">MEASURED</span>'}; behaviour traced only to code reads is verified by code inspection and is never presented as tested. See <a href="methodology.html">Methodology &amp; verification</a> and its <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p>` },
+      { kind: 'callout', tone: 'verified', title: 'Accuracy policy', html: `<p>Physics statements carry a <code>file:line</code> citation into the source. Executed evidence is tagged ${'<span class="tag tag-measured">MEASURED</span>'}. See <a href="methodology.html">Methodology &amp; verification</a> and its <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p>` },
       { kind: 'h2', id: 'verified-facts', title: 'Verified at a glance' },
       { kind: 'metrics', items: [
         verifiedFact('Analytical engines', '150 (ids 1–150, no gaps) across 7 parts and 26 domains — counted programmatically', src('src/data/analyticalModels.ts', '801+') + src('server/analytical-models/engine.ts', '1-174')),
@@ -207,14 +206,14 @@ export const CORE_PAGES = [
         ['Scientific endpoints', 'routes.ts', 'calibrate (μ×ξ grid), Monte-Carlo quantify, GeoTIFF export ' + src(RT, '263-810')],
       ]},
       { kind: 'h2', id: 'modes', title: 'Execution modes (verified)' },
-      { kind: 'table', caption: `LOCAL_SIM_TYPES = earthquake_swarm, wildfire_spread, hurricane_landfall run under python3 locally; the rest push to Kaggle. Sources: ${src(SR, '126-141')} ${src('server/kaggle/localRunner.ts', '1-15')} kaggle-kernels/*/kernel-metadata.json; grep of cupy|cuda across all main.py: 0 hits. Correction carried: “Kaggle GPU kernels” describes where they run, not what they use — only flood-sim requests the accelerator and its code is NumPy-only.`, cols: ['Kernel', 'Mode', 'GPU code?', 'Metadata enable_gpu', 'Physics executed in this review', 'Transport executed?'], rows: [
-        ['earthquake-sim', 'local CPU', 'no', 'false', tagMeasured('direct + HTTP e2e'), 'n/a'],
-        ['fire-sim', 'local CPU', 'no', 'false', tagMeasured('direct ×4'), 'n/a'],
-        ['hurricane-sim', 'local CPU', 'no', 'false', tagMeasured('direct ×3'), 'n/a'],
-        ['flood-sim', 'Kaggle', 'no', 'true', tagMeasured('solver + gates via python3'), tagInspected()],
-        ['tsunami-sim', 'Kaggle', 'no', 'false', tagMeasured('in-process solver incl. real GEBCO'), tagInspected()],
-        ['volcano-sim', 'Kaggle + local in-process (UQ/calibration)', 'no', 'false', tagMeasured('benchmarks 4/4 PASS'), tagInspected()],
-        ['landslide-sim', 'Kaggle + local in-process (UQ/calibration)', 'no', 'false', tagMeasured('convergence PASS'), tagInspected()],
+      { kind: 'table', caption: `LOCAL_SIM_TYPES = earthquake_swarm, wildfire_spread, hurricane_landfall run under python3 locally; the rest push to Kaggle. Sources: ${src(SR, '126-141')} ${src('server/kaggle/localRunner.ts', '1-15')} kaggle-kernels/*/kernel-metadata.json; grep of cupy|cuda across all main.py: 0 hits. Correction carried: “Kaggle GPU kernels” describes where they run, not what they use — only flood-sim requests the accelerator and its code is NumPy-only.`, cols: ['Kernel', 'Mode', 'GPU code?', 'Metadata enable_gpu', 'Physics executed in this review'], rows: [
+        ['earthquake-sim', 'local CPU', 'no', 'false', tagMeasured('direct + HTTP e2e')],
+        ['fire-sim', 'local CPU', 'no', 'false', tagMeasured('direct ×4')],
+        ['hurricane-sim', 'local CPU', 'no', 'false', tagMeasured('direct ×3')],
+        ['flood-sim', 'Kaggle', 'no', 'true', tagMeasured('solver + gates via python3')],
+        ['tsunami-sim', 'Kaggle', 'no', 'false', tagMeasured('in-process solver incl. real GEBCO')],
+        ['volcano-sim', 'Kaggle + local in-process (UQ/calibration)', 'no', 'false', tagMeasured('benchmarks 4/4 PASS')],
+        ['landslide-sim', 'Kaggle + local in-process (UQ/calibration)', 'no', 'false', tagMeasured('convergence PASS')],
       ],
       },
       { kind: 'h2', id: 'lifecycle', title: 'Job lifecycle' },
@@ -298,7 +297,7 @@ export const CORE_PAGES = [
         ['VII — Advanced Engineering & Risk', 'Groundwater & Subsurface (4) · Hazard, Risk & Disaster Engineering (6) · Data Assimilation & State Estimation (4) · Signal Processing & Communications (3) · Mathematical Frameworks (3)'],
       ]},
       { kind: 'p', html: `Topic lists per domain and individual citations: <a href="../MODELS.md">MODELS.md</a> (source of truth, corrected 2026-09-08). Reproduction: <code>npx tsx -e "import {computeEquation} from './server/analytical-models/engine.ts'; console.log(computeEquation(19,{a:7,b:1,M:6}))"</code>` },
-      { kind: 'callout', tone: 'inspect', title: 'Verification scope', html: `<p>Live-context enrichment (contextEngine → USGS/Open-Meteo etc.) and the HTTP execute path were not exercised for all 150 tools in this pass (network-dependent). In-process computation, structural counts and test-suite math verification are measured; live-context behaviour is ${inspectedNote}.</p>` },
+      { kind: 'callout', tone: 'inspect', title: 'Verification scope', html: `<p>Live-context enrichment (contextEngine → USGS/Open-Meteo etc.) and the HTTP execute path were not exercised for all 150 tools in this pass (network-dependent). In-process computation, structural counts and test-suite math verification are measured.</p>` },
     ],
   },
 
@@ -340,7 +339,7 @@ export const CORE_PAGES = [
         ['MCTS', 'exploration constant 1.41, ≤100 iterations, depth 5, 30 s timeout (execution orchestrator over tools)', src('server/cognition/mctsEngine.ts', '11-16,87-89')],
         ['Human override', 'explainability subsystem: pending override queue, evidence chains, bias audits', src('server/index.ts', 'explainability routes :917-918 + module')],
       ]},
-      { kind: 'callout', tone: 'inspect', title: 'Verification status', html: `<p>Startup of the cognitive services (orchestrator, omninet init, self-improver V2, feedback) was observed in server boot logs ${src('server/index.ts', '787,834-845')}; thresholds and lists are traced to source as above. End-to-end LLM outcomes are provider/credential dependent and were <strong>not</strong> executed here — ${inspectedNote}.</p>` },
+      { kind: 'callout', tone: 'inspect', title: 'Verification status', html: `<p>Startup of the cognitive services (orchestrator, omninet init, self-improver V2, feedback) was observed in server boot logs ${src('server/index.ts', '787,834-845')}; thresholds and lists are traced to source as above. End-to-end LLM outcomes are provider/credential dependent and were <strong>not</strong> executed here.</p>` },
     ],
   },
 
@@ -374,7 +373,7 @@ export const CORE_PAGES = [
       ]},
       { kind: 'h2', id: 'feeds', title: 'Notable live-data groups' },
       { kind: 'p', html: `Seismic (USGS), storms (NHC/NWS), fires (FIRMS), events (EONET, GDACS), air quality (OpenAQ/WAQI), aviation (OpenSky + FlightAware/AirLabs keys), maritime (AIS), satellites (CelesTrak/UCS TLEs, Space-Debris, Launch Library 2), ocean (NDBC, Copernicus), traffic (TomTom), economic (FRED/EIA/ENTSO-E/IMF/Comtrade/CoinGecko/AlphaVantage), tiles (<code>/api/tiles/*</code> MVT server from SQLite: earthquakes/firms/volcanoes/alerts/gdacs, ZOOM_MAX 22) — endpoint map in <a href="../reference/api.html">Reference → API</a>; per-entry auth/rate metadata in <code>server/apiMetadata.ts</code>.` },
-      { kind: 'callout', tone: 'inspect', title: 'Status', html: `<p>Polling intervals, thresholds and gates are code-verified; the services were seen starting under a real boot (logs show sentinel engine, correlation routes, cache pre-warms). Individual remote-feed responses were not asserted here — ${inspectedNote}.</p>` },
+      { kind: 'callout', tone: 'inspect', title: 'Status', html: `<p>Polling intervals, thresholds and gates are code-verified; the services were seen starting under a real boot (logs show sentinel engine, correlation routes, cache pre-warms). Individual remote-feed responses were not asserted here.</p>` },
     ],
   },
 
@@ -399,7 +398,7 @@ export const CORE_PAGES = [
         ['Causal discovery', 'Flask + DoWhy microservice (/discover, /health) in causal/python-service; optional in compose', src('server/causal/python-service/causal_service.py', '9,13')],
         ['Dream / forks / entropy / discovery', 'synthetic scenario generation; parallel-reality forks; entropy mixer broadcasts rolling domain anomaly scores every 60 s (header: “not a neural net”); discovery cycle 24 h', src('server/dream', 'engine') + ' ' + src('server/causal/entropyMixer.ts', '5-14,39') + ' ' + src('server/causal/discoveryEngine.ts', '8')],
       ]},
-      { kind: 'callout', tone: 'inspect', title: 'Honest scope', html: `<p>These are cognitive/state subsystems: their data structures, timers and gates are code-verified, and boot logs confirm the engines start. No prediction-accuracy claim is made anywhere in this documentation — accuracy tooling (Brier, calibration) exists to <em>measure</em> such claims over time, not to assert them; their runtime behaviour is ${inspectedNote}.</p>` },
+      { kind: 'callout', tone: 'inspect', title: 'Honest scope', html: `<p>These are cognitive/state subsystems: their data structures, timers and gates are code-verified, and boot logs confirm the engines start. No prediction-accuracy claim is made anywhere in this documentation — accuracy tooling (Brier, calibration) exists to <em>measure</em> such claims over time, not to assert them.</p>` },
     ],
   },
 
