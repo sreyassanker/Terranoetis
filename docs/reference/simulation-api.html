@@ -138,7 +138,7 @@
 <tr><td>Missing/invalid required UI value</td><td>builder throws (ZodError or explicit message) — never substitutes</td><td><cite class="src">src/services/kaggleSim.ts:390-415,544</cite></td></tr>
 <tr><td>Kernel out-of-range (e.g. M 2.9)</td><td>kernel raises with named validity range; job → error with the last log lines surfaced</td><td><cite class="src">kaggle-kernels/earthquake-sim/main.py:244-249</cite> <span class="tag tag-measured">observed</span></td></tr>
 <tr><td>Local timeout</td><td>SIGKILL after <code>LOCAL_SIM_TIMEOUT_MS</code> (default 120 s)</td><td><cite class="src">server/kaggle/simRunner.ts:134</cite></td></tr>
-<tr><td>No Kaggle token (Kaggle-routed types)</td><td>job errors early; local trio + analytical engine unaffected</td><td><span class="tag tag-inspected">verified by code inspection</span></td></tr>
+<tr><td>No Kaggle token (Kaggle-routed types)</td><td>job errors early; local trio + analytical engine unaffected</td><td><cite class="src">server/kaggle/simRunner.ts:126-141</cite></td></tr>
 <tr><td>Tsunami without real bathymetry</td><td>kernel aborts: “Real GEBCO bathymetry is required…”</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:227-230</cite></td></tr>
 <tr><td>Volcano without terrain</td><td>kernel aborts: “…no synthetic cone fallback is permitted…”</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:821-826</cite></td></tr>
 </tbody></table></div>

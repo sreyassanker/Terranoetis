@@ -84,9 +84,6 @@ export function srcRaw(pathLine) {
 export function tagMeasured(extra = 'verified by execution') {
   return `<span class="tag tag-measured">MEASURED — ${esc(extra)}</span>`;
 }
-export function tagInspected() {
-  return `<span class="tag tag-inspected">verified by code inspection</span>`;
-}
 
 function renderSection(s) {
   switch (s.kind) {

@@ -23,7 +23,7 @@
   --c-code-text: #1f2328;
 
   --c-ok-bg: #dafbe1;    --c-ok-text: #116329;    /* measured/verified */
-  --c-inspect-bg: #ddf4ff; --c-inspect-text: #0a5379; /* code inspection only */
+  --c-inspect-bg: #ddf4ff; --c-inspect-text: #0a5379; /* inspection callout accent */
   --c-caution-bg: #fff8c5; --c-caution-text: #7a5e00; /* known limitation */
   --c-error-bg: #ffebe9;   --c-error-text: #a40e26;   /* failed gate / rejected */
 
@@ -55,7 +55,7 @@
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; scroll-padding-top: 4.5rem; }
 body {
   margin: 0;
   font-family: var(--font-body);
@@ -74,16 +74,25 @@ body {
 
 /* ── Site banner ────────────────────────────────────────────────────── */
 .site-banner {
-  background: var(--c-banner-bg); color: var(--c-banner-text);
-  border-bottom: 1px solid var(--c-border);
+  position: sticky; top: 0; z-index: 50;
+  /* Modern glass banner: translucent navy gradient over blurred content */
+  background: linear-gradient(180deg, rgba(19, 30, 48, 0.92), rgba(13, 22, 36, 0.88));
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  backdrop-filter: blur(14px) saturate(1.5);
+  color: var(--c-banner-text);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.28);
+  box-shadow: 0 4px 24px rgba(2, 8, 23, 0.35);
 }
 .site-banner-inner {
   max-width: 88rem; margin: 0 auto; padding: 0.65rem 1.25rem;
-  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 1rem; flex-wrap: nowrap;
+  /* Constant banner height across every page (32px content + 2×0.65rem padding). */
+  min-height: 3.3rem;
 }
 /* Brand wordmark — single source of truth, identical on every page
    (matches the landing header: logo + Syncopate gradient TERRA/NOETIS). */
 .site-banner a.brand {
+  flex-shrink: 0;
   color: inherit; text-decoration: none;
   font-family: 'Syncopate', sans-serif !important;
   font-weight: 700 !important;
@@ -94,7 +103,7 @@ body {
   align-items: center;
   line-height: 1;
 }
-.brand-logo { border-radius: 4px; margin-right: 8px; vertical-align: middle; }
+.brand-logo { border-radius: 8px; margin-right: 8px; vertical-align: middle; box-shadow: 0 0 12px rgba(56, 189, 248, 0.45); }
 .site-banner a.brand .terra {
   background: linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%);
   -webkit-background-clip: text; background-clip: text;
@@ -106,13 +115,28 @@ body {
   -webkit-text-fill-color: transparent;
 }
 .site-banner .brand small { font-weight: 400; opacity: 0.85; margin-left: 0.5rem; }
-.top-nav { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-left: auto; }
+.top-nav { display: flex; gap: 0.25rem; flex-wrap: nowrap; margin-left: auto; }
 .top-nav a {
   color: var(--c-banner-text); text-decoration: none; font-size: 0.85rem;
-  padding: 0.3rem 0.6rem; border-radius: 4px;
+  padding: 0.3rem 0.7rem; border-radius: 999px; white-space: nowrap;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
-.top-nav a:hover, .top-nav a[aria-current="page"] { background: rgba(255,255,255,0.14); }
+/* Bright sky-blue hover (brand palette) — beats the global dark-blue a:hover
+   rule, which was invisible on the dark banner. */
+.top-nav a:hover { color: #7dd3fc; background: rgba(56, 189, 248, 0.18); }
+.top-nav a[aria-current="page"] { color: #7dd3fc; background: rgba(56, 189, 248, 0.22); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.4); }
 .top-nav a:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+/* Mid widths: tighten the nav so the 7-link docs bar stays on one line
+   (keeps banner height identical to the landing page). */
+@media (max-width: 1023px) {
+  .site-banner-inner { gap: 0.75rem; }
+  .top-nav a { font-size: 0.8rem; padding: 0.3rem 0.45rem; }
+}
+/* Mobile: allow the banner to wrap (height grows by design below 860px). */
+@media (max-width: 860px) {
+  .site-banner-inner { flex-wrap: wrap; }
+  .top-nav { margin-left: 0; }
+}
 
 /* ── Layout ─────────────────────────────────────────────────────────── */
 .layout { max-width: 88rem; margin: 0 auto; display: grid;
@@ -175,7 +199,6 @@ a:hover { color: var(--c-link-hover); }
   font-family: var(--font-mono);
 }
 .tag-measured { background: var(--c-ok-bg); color: var(--c-ok-text); }
-.tag-inspected { background: var(--c-inspect-bg); color: var(--c-inspect-text); }
 .tag-caution { background: var(--c-caution-bg); color: var(--c-caution-text); }
 .tag-error { background: var(--c-error-bg); color: var(--c-error-text); }
 

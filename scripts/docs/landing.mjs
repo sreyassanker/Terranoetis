@@ -457,6 +457,7 @@ export function renderLanding() {
         <a class="btn btn-primary" href="documentation.html">Open the documentation</a>
         <a class="btn btn-ghost" href="capabilities/hazard-simulations.html">Hazard simulations</a>
         <a class="btn btn-ghost" href="${REPO}" rel="noopener">Source on GitHub</a>
+        <a class="btn btn-ghost btn-yt" href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener">View demo on YouTube</a>
       </div>
     </div>
 
@@ -526,7 +527,7 @@ export function renderLanding() {
   <section class="band" id="verification" aria-labelledby="verif-h">
     <div class="band-head">
       <h2 id="verif-h">Verification is part of the product</h2>
-      <p>A documentation quality gate in CI checks links, anchors, page metadata, every <code>file:line</code> citation and a marketing-vocabulary ban. Claims that could not be executed in review are verified by code inspection and never presented as tested; defects found in the science are published, not buried.</p>
+      <p>A documentation quality gate in CI checks links, anchors, page metadata, every <code>file:line</code> citation and a marketing-vocabulary ban. Defects found in the science are published, not buried.</p>
     </div>
     <div class="feat-grid">
       <div class="feat"><h3>Kernel self-gates</h3><p>GMPE sanity, hurricane physics checks, closed-box conservation and lake-at-rest proofs abort emission on failure — each reproduced in review.</p></div>

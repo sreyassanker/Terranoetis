@@ -102,7 +102,6 @@
       <h2 id="approach">Approach</h2>
 <ol><li>Every physics claim is traced to <code>file:line</code> in this repository (engines, kernels, contract layer, UI); where the code itself states limits, they are quoted verbatim.</li>
 <li>Claims are then attacked empirically: test suites were run; kernels were executed for representative and boundary inputs; conservation/convergence/benchmark gates were re-executed; a real server boot produced an end-to-end simulation-job transcript.</li>
-<li>Anything not executable here (Kaggle push/poll, LLM outcomes, provider-gated feeds) is verified by code inspection and is never presented as tested.</li>
 <li>Where documentation and code disagreed, the documentation was corrected; the code was not modified (this is a documentation pass). Code-level defects found are recorded in the <a href="#known-limitations">known-limitation register</a> for engineering follow-up.</li></ol>
 <h2 id="environment">Execution environment (stated precisely — no performance claims are generalised from it)</h2>
 <dl class="metrics"><dt>Machine</dt><dd>Apple M1 (arm64), macOS 26.5.2 — <code>uname -m</code> + <code>sysctl machdep.cpu.brand_string</code></dd>
@@ -168,21 +167,21 @@
 <tr><td>C-4</td><td>Repository tree lists <code>server/digitalTwin/</code> (README)</td><td>Directory does not exist (disk + git ls-files).</td><td>README.md</td></tr>
 <tr><td>C-5</td><td>“sandboxV2: Simulation engines (FARSITE, ADCIRC, WRF, HYSPLIT)” (README/BACKEND/ARCHITECTURE)</td><td>Files are simplified surrogates named <code>*Lite</code> (cellular ROS; storm-surge SWE; dispersion particle model; idealized WRF-style driver) plus an FNO surrogate — not the operational models.</td><td>BACKEND.md · ARCHITECTURE.md · README.md</td></tr>
 <tr><td>C-6</td><td>“1,600+ tests” / “1624+ tests” (README/CONTRIBUTING)</td><td>Measured today: 1,653 unit + 49 integration passing.</td><td>README.md · CONTRIBUTING.md</td></tr>
-<tr><td>C-7</td><td>“Playwright browser tests (7 specs, 12 tests)” (README)</td><td>7 spec files, 38 <code>test()</code> declarations counted (method stated); execution not performed here → labelled inspection-only.</td><td>README.md</td></tr>
+<tr><td>C-7</td><td>“Playwright browser tests (7 specs, 12 tests)” (README)</td><td>7 spec files, 38 <code>test()</code> declarations counted (method stated); execution not performed here.</td><td>README.md</td></tr>
 <tr><td>C-8</td><td>Landing copy: “GPU-accelerated mathematical models computed directly over real 3D terrain meshes” (platform-overview)</td><td>Simulation math runs on CPU (NumPy); fields are rendered on the WebGL globe client-side.</td><td>old marketing claim removed; the rebuilt landing and <a href="documentation.html">docs hub</a> state the accurate wording</td></tr>
 <tr><td>C-9</td><td>docs/index.html was only a redirect to the marketing page</td><td>The site is now navigation-first from index.html; platform-overview.html preserved as a redirect stub so inbound URLs keep resolving.</td><td>docs/index.html · docs/platform-overview.html</td></tr>
 <tr><td>C-10</td><td>App shell “~11,000 lines”, “11 panels”, “41 modules” (approximations)</td><td>Measured: 11,038 lines; 11 lazy panels; 41 rendering modules.</td><td>now stated as measured counts</td></tr>
 </tbody></table></div>
 <h2 id="unverified">Claims not verifiable in this environment</h2>
 <div class="table-scroll"><table><caption></caption>
-<thead><tr><th scope="col">Item</th><th scope="col">Why</th><th scope="col">How it is described</th></tr></thead>
+<thead><tr><th scope="col">Item</th><th scope="col">Why</th></tr></thead>
 <tbody>
-<tr><td>Kaggle push → poll → download transport</td><td>Would push to the maintainer’s Kaggle account; deliberately not performed</td><td>verified by code inspection</td></tr>
-<tr><td>GPU-accelerated instance behaviour</td><td>No kernel uses GPU code; acceleration flags are metadata only</td><td>same treatment</td></tr>
-<tr><td>LLM provider call success/latency</td><td>External paid providers</td><td>same treatment; only boot + configuration verified</td></tr>
-<tr><td>Live-feed correctness per provider</td><td>External data churn; not asserted in prose</td><td>same treatment</td></tr>
-<tr><td>Playwright pass state</td><td>Chromium/WebGL environment; not run</td><td>same treatment (counts measured by other means)</td></tr>
-<tr><td>ClickHouse / TimescaleDB / Kafka scaling paths</td><td>Optional backends not deployed</td><td>documented as optional no-ops per code</td></tr>
+<tr><td>Kaggle push → poll → download transport</td><td>Would push to the maintainer’s Kaggle account; deliberately not performed</td></tr>
+<tr><td>GPU-accelerated instance behaviour</td><td>No kernel uses GPU code; acceleration flags are metadata only</td></tr>
+<tr><td>LLM provider call success/latency</td><td>External paid providers</td></tr>
+<tr><td>Live-feed correctness per provider</td><td>External data churn; not asserted in prose</td></tr>
+<tr><td>Playwright pass state</td><td>Chromium/WebGL environment; not run</td></tr>
+<tr><td>ClickHouse / TimescaleDB / Kafka scaling paths</td><td>Optional backends not deployed</td></tr>
 </tbody></table></div>
 <h2 id="gate">Documentation quality gate</h2>
 <p><code>node scripts/docs/quality-gate.mjs</code> fails CI on: broken internal links (HTML↔HTML, HTML→MD, MD→MD, MD anchors), missing anchor targets, missing per-page metadata (title, description, canonical, og, last-reviewed, version), unresolvable <code>file:line</code> citations (target must exist; the cited range must fit the file), banned marketing vocabulary, and build drift (<code>build.mjs --check</code>). Wired into <code>.github/workflows/docs.yml</code> on every docs-affecting push/PR.</p>
