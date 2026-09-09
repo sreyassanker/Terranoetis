@@ -20,6 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -96,7 +97,7 @@
 <li><a href="#spatial-origin">Spatial-origin semantics</a></li>
 <li><a href="#validity">Documented validity limits (verbatim from the code)</a></li>
 <li><a href="#measured">Measured runs and timings</a></li>
-<li><a href="#known-limitation">Known numerical limitation (found in this review)</a></li>
+<li><a href="#known-limitation">Known numerical limitation</a></li>
 <li><a href="#reproduction">Reproduction</a></li>
       </ul></nav>
       <p>A tsunami scenario starts from a finite-fault seafloor displacement (simplified Okada-1985-in-spirit rectangular dip-slip patch with moment-magnitude scaling) and propagates the free surface with a nonlinear shallow-water finite-volume solver (MUSCL/minmod reconstruction, HLL fluxes, semi-implicit Manning friction) over real GEBCO 2020 bathymetry sampled server-side; a synthetic bathymetry fallback is explicitly disabled.</p>
@@ -161,7 +162,7 @@
 <tr><td>Sloped synthetic bed (dt = 3 s)</td><td>Diverges at low CFL — the explicit bathymetry source drives unbounded growth on any slope</td></tr>
 <tr><td>REAL GEBCO 2020 (16×16 sampled off Tohoku, 38.5°N 143.5°E, via the same api.opentopodata.org/v1/gebco2020 endpoint the server uses; M 8.5, 5 m, 20 min, 300 km box)</td><td>Diverges at both default dt (7.25 s, “CFL 0.90 (OK)”) and dt = 3 s (CFL 0.37): final max_wave ~10³⁰⁰ m, E = nan</td></tr>
 </tbody></table></div>
-<h2 id="known-limitation">Known numerical limitation (found in this review)</h2>
+<h2 id="known-limitation">Known numerical limitation</h2>
 <div class="callout callout-warning" role="note"><div class="callout-title">Tsunami solver — non-flat bathymetry instability</div><p>This review reproduced three distinct unbounded-growth mechanisms in the standalone kernel: (1) the default main-loop timestep uses a 0.9 CFL that second-order MUSCL/HLL updates cannot satisfy (flat bed still diverged at CFL 0.90; the solver's own <code>estimate_cfl_dt</code> applies safety 0.45 but main() overrides it); (2) the roll-based face divergence wraps opposite domain edges together, so waves grow after boundary interaction even on a flat bed in a small box; (3) on any non-flat bathymetry — including a real GEBCO 2020 sample — the explicit central-difference source term drives divergence at every tested timestep (max |η| → 10^300 m, energy NaN). The closed-box conservation proof deliberately uses a flat bed where the source vanishes, so it cannot detect (2) or (3). Until the scheme gains a well-balanced source treatment (e.g. the Audusse reconstruction the flood kernel uses) and a transmissive boundary, tsunami output must be treated as UNVALIDATED. Production runs go through Kaggle where this review could not execute them.</p></div>
 <h2 id="reproduction">Reproduction</h2>
 <h3 id="repro-cmd">Commands</h3>

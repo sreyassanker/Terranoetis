@@ -20,6 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -105,7 +106,7 @@
 <p>Volumes and mounts (<code>terranoetis-data</code>, <code>redis-data</code>, read-only <code>.env</code>) and full commands: <a href="narratives/DEPLOYMENT.html">DEPLOYMENT.md</a> · <code>docker-compose.yml</code> · <code>Dockerfile</code>.</p>
 <h2 id="config">Configuration contract</h2>
 <div class="table-scroll"><table><caption></caption>
-<thead><tr><th scope="col">Variable</th><th scope="col">Behaviour (code-verified)</th></tr></thead>
+<thead><tr><th scope="col">Variable</th><th scope="col">Behaviour</th></tr></thead>
 <tbody>
 <tr><td><code>JWT_SECRET</code> / <code>ADMIN_BOOTSTRAP_PASSWORD</code></td><td>production hard-requirement ≥ 32 / ≥ 16 chars; boot refuses otherwise</td></tr>
 <tr><td><code>PROXY_PORT</code> / <code>PORT</code></td><td>3001 default chain; measured boot served on a chosen port with health “version: 3.1”</td></tr>

@@ -20,6 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -162,7 +163,7 @@
 <h2 id="quick-start-development">Quick Start (Development)</h2>
 
 
-<pre><code className="language-bash"># Clone and install
+<pre><code class="language-bash"># Clone and install
 git clone https://github.com/sreyassanker/Terranoetis.git
 cd Terranoetis
 cp .env.example .env    # Fill in API keys as needed
@@ -183,7 +184,7 @@ npm run dev:server      # Express API (port 3001) only
 <h3 id="verification">Verification</h3>
 
 
-<pre><code className="language-bash"># Frontend
+<pre><code class="language-bash"># Frontend
 open http://localhost:3000
 
 # API health
@@ -240,7 +241,7 @@ curl http://localhost:3001/api/health
 <h3 id="production-start">Production Start</h3>
 
 
-<pre><code className="language-bash"># Copy environment (edit with your production values)
+<pre><code class="language-bash"># Copy environment (edit with your production values)
 cp .env.example .env
 
 # Build and start all services
@@ -258,7 +259,7 @@ docker compose logs -f terranoetis
 <h3 id="build">Build</h3>
 
 
-<pre><code className="language-bash">docker compose build    # Rebuild images
+<pre><code class="language-bash">docker compose build    # Rebuild images
 docker compose up -d    # Restart with rebuilt images
 </code></pre>
 
@@ -492,7 +493,7 @@ docker compose up -d    # Restart with rebuilt images
 <ol>
 <li>Create a token at <strong><a href="https://www.kaggle.com/settings/account">https://www.kaggle.com/settings/account</a></strong> → <em>Create New Token</em> (requires an account with phone verification).</li>
 <li>Save the downloaded <code>kaggle.json</code> as <strong><code>~/.kaggle/kaggle.json</code></strong> and restrict permissions:
-<pre><code className="language-bash">mkdir -p ~/.kaggle &amp;&amp; mv ~/Downloads/kaggle.json ~/.kaggle/kaggle.json &amp;&amp; chmod 600 ~/.kaggle/kaggle.json
+<pre><code class="language-bash">mkdir -p ~/.kaggle &amp;&amp; mv ~/Downloads/kaggle.json ~/.kaggle/kaggle.json &amp;&amp; chmod 600 ~/.kaggle/kaggle.json
 </code></pre>
 </li>
 <li>Install the Kaggle CLI (<code>pip install kaggle</code>), or point <code>KAGGLE_BIN</code> at its path.</li>

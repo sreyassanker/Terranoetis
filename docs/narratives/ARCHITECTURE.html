@@ -20,6 +20,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+</script>
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -133,7 +137,7 @@
 <h2 id="system-topology">System Topology</h2>
 
 
-<pre><code className="language-mermaid">%%{init: {'theme': 'neutral', 'flowchart': {'htmlLabels': false}}}%%
+<pre class="mermaid">%%{init: {'theme': 'neutral', 'flowchart': {'htmlLabels': false}}}%%
 flowchart LR
     subgraph CLIENT[&quot;CLIENT (React 19 + CesiumJS)&quot;]
         direction LR
@@ -179,7 +183,7 @@ flowchart LR
     Engine --&gt; Live
     Agents --&gt; LLM
     Realtime --&gt; Voice
-</code></pre>
+</pre>
 
 
 <h3 id="component-inventory">Component Inventory</h3>
@@ -227,7 +231,7 @@ flowchart LR
 <p>The request lifecycle routes a natural-language user query through intent recognition, cognitive orchestration, and multi-stage tool execution.</p>
 
 
-<pre><code className="language-mermaid">%%{init: {'theme': 'neutral'}}%%
+<pre class="mermaid">%%{init: {'theme': 'neutral'}}%%
 flowchart LR
     Q[&quot;User Query&quot;] --&gt; IR[&quot;IntentRouter\n(agent.ts)&quot;]
     IR --&gt;|&quot;embedding + cosine similarity&quot;| CO[&quot;CognitiveOrchestrator&quot;]
@@ -251,7 +255,7 @@ flowchart LR
     RP --&gt;|&quot;Cesium globe&quot;| CG[&quot;3D Render&quot;]
     RP --&gt;|&quot;Panels&quot;| UP[&quot;UI Update&quot;]
     RP --&gt;|&quot;Memory&quot;| MS[&quot;Memory Store&quot;]
-</code></pre>
+</pre>
 
 
 <h3 id="routing">Routing</h3>
@@ -304,7 +308,7 @@ flowchart LR
 <p>The platform runs several continuous services that monitor live data, simulate scenarios, improve responses, and enforce safety.</p>
 
 
-<pre><code className="language-mermaid">%%{init: {'theme': 'neutral'}}%%
+<pre class="mermaid">%%{init: {'theme': 'neutral'}}%%
 flowchart LR
     subgraph Continuous[&quot;Continuous Background Processes&quot;]
         SE[&quot;Sentinel Engine\nPoll watch zones\nCompare vs baseline&quot;] --&gt; SP[&quot;Stream Processor\nFilter, Enrich, Route&quot;]
@@ -325,7 +329,7 @@ flowchart LR
         EC --&gt; AC[&quot;Execute Actions\nALERT / ZOOM / SCAN&quot;]
         AC --&gt; TR[&quot;Trauma Mode\n&gt;=3 simultaneous&quot;]
     end
-</code></pre>
+</pre>
 
 
 <h3 id="service-table">Service Table</h3>

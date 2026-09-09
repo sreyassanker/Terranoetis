@@ -18,7 +18,7 @@ export const PAGES2 = [
     sections: [
       { kind: 'p', html: 'The API is Express 4 mounted at <code>/api</code> with JWT bearer auth (RBAC via <code>authGuard</code>/<code>requireRole</code>), in-process IP + per-user rate limiting, zod validation and a canonical <code>{error:{code,message}}</code> envelope. A public allow-list covers health/metrics/config/OpenAPI plus the read-only live-data routes (300 req/min/IP); everything else requires a token. ' + src('server/index.ts', '373-487') },
       { kind: 'metrics', items: [
-        ['Route registrations (measured)', '371 handler registrations (<code>app.get/post/put/delete</code> + router verbs) under server/ — grep count 2026-09-08; API.md headline “360+” is consistent'],
+        ['Route registrations', '371 handler registrations (<code>app.get/post/put/delete</code> + router verbs) under server/ — grep count 2026-09-08; API.md headline “360+” is consistent'],
         ['Auth', 'JWT TTL 1 h prod / 1 d dev · scrypt (N=16384, r=8, p=1) · login 5/15 min + 10-attempt lockout (HTTP 423)'],
         ['Errors', '400 validation · 401 token · 403 role · 404 · 409 job-not-ready · 413 body-too-large · 423 locked · 429 limited · 500'],
         ['OpenAPI', 'GET /api/openapi.json (generated) + /api/docs UI'],
@@ -116,7 +116,7 @@ export const PAGES2 = [
         'Claims are then attacked empirically: test suites were run; kernels were executed for representative and boundary inputs; conservation/convergence/benchmark gates were re-executed; a real server boot produced an end-to-end simulation-job transcript.',
         'Where documentation and code disagreed, the documentation was corrected; the code was not modified (this is a documentation pass). Code-level defects found are recorded in the <a href="#known-limitations">known-limitation register</a> for engineering follow-up.',
       ]},
-      { kind: 'h2', id: 'environment', title: 'Execution environment (stated precisely — no performance claims are generalised from it)' },
+      { kind: 'h2', id: 'environment', title: 'Execution environment' },
       { kind: 'metrics', items: [
         ['Machine', 'Apple M1 (arm64), macOS 26.5.2 — <code>uname -m</code> + <code>sysctl machdep.cpu.brand_string</code>'],
         ['Node.js', 'v26.0.0 (<code>node --version</code>) — repository targets ≥ 20 (<code>.nvmrc</code> pins 20)'],
@@ -124,7 +124,7 @@ export const PAGES2 = [
         ['Date', '2026-09-08 — the date behind every “measured” stamp on this site'],
       ]},
       { kind: 'h2', id: 'evidence-runs', title: 'Evidence runs' },
-      { kind: 'table', caption: 'Test suites', cols: ['Command', 'Result (measured)'], rows: [
+      { kind: 'table', caption: 'Test suites', cols: ['Command', 'Result'], rows: [
         ['<code>npm run test:unit</code>', '141 files · 1,653 tests passed · 0 failed · 22.85 s wall'],
         ['<code>npm run test:integration</code>', '5 files · 49 tests passed · 0 failed · 5.66 s wall'],
         ['<code>npx tsx</code> engine import', 'EQUATION_ENGINE: 150 keys, ids 1–150, no gaps'],
@@ -151,7 +151,7 @@ export const PAGES2 = [
         ['landslide', 'convergence + conservation via validate_convergence.py (not invoked by main())', 'script exit 1', src('kaggle-kernels/landslide-sim/validate_convergence.py', '19-105')],
         ['wildfire', 'ROS reference print (non-fatal)', 'prints CHECK', src('kaggle-kernels/fire-sim/main.py', '501-508')],
       ]},
-      { kind: 'h2', id: 'known-limitations', title: 'Known-limitation register (found or confirmed by this review)' },
+      { kind: 'h2', id: 'known-limitations', title: 'Known-limitation register' },
       { kind: 'table', caption: 'D-numbered for cross-reference; engineering follow-up recommended. Capability pages already state each limitation where it applies.', cols: ['#', 'Limitation', 'Evidence'], rows: [
         ['D-1', '<strong>Tsunami solver: three unbounded-growth mechanisms.</strong> (1) the main-loop default timestep (0.9·dx/√2c) exceeds the stability bound of second-order MUSCL/HLL — divergence even on a flat bed at printed “CFL 0.90 (OK)”; (2) the roll-based face divergence couples opposite domain edges, so waves grow after boundary interaction (48² box: 0.27 → 22 m in 20 min on a flat bed); (3) on any non-flat bathymetry — including a real GEBCO 2020 sample — the explicit central-difference source (<code>−dt·g·H·∂b/∂x</code>, not well-balanced) drives max|η| → 10^300 m, energy NaN, at every tested dt. The closed-box conservation gate runs on a flat bed where (3) vanishes, so it cannot detect these. Flood/volcano use Audusse-style hydrostatic reconstruction; tsunami does not.', src('kaggle-kernels/tsunami-sim/swe_solver.py', '150-151,188-193,235') + ' ' + src('kaggle-kernels/tsunami-sim/main.py', '236-241') + ' <span class="tag tag-measured">reproduced ×9 configs</span>'],
         ['D-2', 'Standalone local <code>python3 main.py</code> for flood/tsunami/volcano/landslide completes physics but fails writing results (hard-coded <code>/kaggle/working</code>). Consistent with the runner design (Kaggle or in-process import), but it blocks ad-hoc local runs.', src('kaggle-kernels/flood-sim/main.py', '786') + ' ' + src('kaggle-kernels/landslide-sim/main.py', '873') + ' <span class="tag tag-measured">observed [Errno 30]</span>'],
@@ -165,7 +165,7 @@ export const PAGES2 = [
         ['D-10', 'Determinism caveats: wildfire honours <code>seed</code> (optional — unseeded otherwise); wall-clock caps truncate runs machine-dependently (kernels ≤ 480 s; local server timeout 120 s); synthetic fallbacks are fixed-seed. All timing figures here are single observations on one machine.', src('kaggle-kernels/fire-sim/main.py', '407-415,568-570') + ' ' + src(SR, '134')],
       ]},
       { kind: 'h2', id: 'discrepancy-log', title: 'Discrepancy log — documentation errors found & fixed' },
-      { kind: 'table', caption: 'The code was treated as authoritative in every case; sources of truth updated 2026-09-08.', cols: ['#', 'Was (documentation claim)', 'Is (verified reality)', 'Fixed in'], rows: [
+      { kind: 'table', caption: 'The code was treated as authoritative in every case; sources of truth updated 2026-09-08.', cols: ['#', 'Claim', 'Verified correction', 'Fixed in'], rows: [
         ['C-1', '“7 physics simulations — 3 run locally on CPU, 4 on free Kaggle <em>GPU</em> kernels” (README)', 'Kernels are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the Kaggle GPU accelerator; the other routed kernels have enable_gpu=false. “Kaggle kernels” is accurate; “GPU kernels” is not.', 'README.md · DEPLOYMENT.md · BACKEND.md · <a href="capabilities/hazard-simulations.html#modes">modes table</a>'],
         ['C-2', '“82 with resolvable DOIs” (README/MODELS.md)', '80 of 150 model references contain a DOI string (12 ISBN, 4 explicit NO-DOI); counting method now stated.', 'README.md · MODELS.md'],
         ['C-3', 'Redis handles “PubSub · Queue” (ARCHITECTURE.md topology + BACKEND.md)', 'The event bus is an in-process EventEmitter (server/pubsub.ts); Redis serves cache + memory hot path.', 'ARCHITECTURE.md · BACKEND.md'],
@@ -232,7 +232,7 @@ export const PAGES2 = [
       ]},
       { kind: 'p', html: 'Volumes and mounts (<code>terranoetis-data</code>, <code>redis-data</code>, read-only <code>.env</code>) and full commands: <a href="narratives/DEPLOYMENT.html">DEPLOYMENT.md</a> · <code>docker-compose.yml</code> · <code>Dockerfile</code>.' },
       { kind: 'h2', id: 'config', title: 'Configuration contract' },
-      { kind: 'table', cols: ['Variable', 'Behaviour (code-verified)'], rows: [
+      { kind: 'table', cols: ['Variable', 'Behaviour'], rows: [
         ['<code>JWT_SECRET</code> / <code>ADMIN_BOOTSTRAP_PASSWORD</code>', 'production hard-requirement ≥ 32 / ≥ 16 chars; boot refuses otherwise'],
         ['<code>PROXY_PORT</code> / <code>PORT</code>', '3001 default chain; measured boot served on a chosen port with health “version: 3.1”'],
         ['~100 provider keys (<code>.env.example</code>)', 'missing key ⇒ that feature disables; the 3 local sims + analytical engine unaffected'],
@@ -295,7 +295,7 @@ export const PAGES2 = [
       { kind: 'h2', id: 'workflow', title: 'Change workflow' },
       { kind: 'list', ordered: true, items: [
         'Edit page specs in scripts/docs/ and prose in the Markdown files.',
-        '<code>node scripts/docs/build.mjs</code> regenerates the HTML (diff the output in review).',
+        '<code>node scripts/docs/build.mjs</code> regenerates the HTML.',
         '<code>node scripts/docs/quality-gate.mjs</code> must pass (it is wired into CI).',
         'When re-verifying: bump <code>LAST_REVIEWED</code> in site.mjs and refresh measured tables; new discrepancies go to the methodology log.',
       ]},
@@ -328,7 +328,7 @@ export const PAGES2 = [
     proseMd: 'narratives/SECURITY.html',
     sections: [
       { kind: 'p', html: 'Report vulnerabilities by email to the address in <a href="../narratives/SECURITY.html">SECURITY.md</a> (48-hour response target). The current threat model — SSRF guard, auth surface, key handling, JWT strength enforcement, brute-force lockout, public-endpoint limiting, CORS allowlist, injection defences — is maintained there.' },
-      { kind: 'h2', id: 'surface', title: 'Security-relevant implementation points (verified this pass)' },
+      { kind: 'h2', id: 'surface', title: 'Security-relevant implementation points' },
       { kind: 'table', cols: ['Control', 'Verified detail', 'Source'], rows: [
         ['Secrets in repo', 'runtime <code>.env</code> is gitignored; Kaggle credentials read only from <code>~/.kaggle</code>', src('docs/DEPLOYMENT.md', '173') + ' ' + src('.gitignore', '.env')],
         ['JWT strength', 'prod boot refuses <code>JWT_SECRET</code> &lt; 32 chars', src('server/index.ts', '171-181')],

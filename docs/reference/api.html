@@ -20,6 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -94,7 +95,7 @@
 <li><a href="#realtime">Realtime transports</a></li>
       </ul></nav>
       <p>The API is Express 4 mounted at <code>/api</code> with JWT bearer auth (RBAC via <code>authGuard</code>/<code>requireRole</code>), in-process IP + per-user rate limiting, zod validation and a canonical <code>{error:{code,message}}</code> envelope. A public allow-list covers health/metrics/config/OpenAPI plus the read-only live-data routes (300 req/min/IP); everything else requires a token. <cite class="src">server/index.ts:373-487</cite></p>
-<dl class="metrics"><dt>Route registrations (measured)</dt><dd>371 handler registrations (<code>app.get/post/put/delete</code> + router verbs) under server/ — grep count 2026-09-08; API.md headline “360+” is consistent</dd>
+<dl class="metrics"><dt>Route registrations</dt><dd>371 handler registrations (<code>app.get/post/put/delete</code> + router verbs) under server/ — grep count 2026-09-08; API.md headline “360+” is consistent</dd>
 <dt>Auth</dt><dd>JWT TTL 1 h prod / 1 d dev · scrypt (N=16384, r=8, p=1) · login 5/15 min + 10-attempt lockout (HTTP 423)</dd>
 <dt>Errors</dt><dd>400 validation · 401 token · 403 role · 404 · 409 job-not-ready · 413 body-too-large · 423 locked · 429 limited · 500</dd>
 <dt>OpenAPI</dt><dd>GET /api/openapi.json (generated) + /api/docs UI</dd></dl>

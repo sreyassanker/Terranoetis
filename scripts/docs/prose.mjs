@@ -39,7 +39,10 @@ function serialize(node) {
     case 'element': {
       const attrs = Object.entries(node.properties || {})
         .filter(([, v]) => v !== null && v !== undefined && v !== false && !(Array.isArray(v) && v.length === 0))
-        .map(([k, v]) => ` ${k}="${esc(Array.isArray(v) ? v.join(' ') : v === true ? k : String(v))}"`)
+        .map(([k, v]) => {
+          const name = k === 'className' ? 'class' : k === 'htmlFor' ? 'for' : k;
+          return ` ${name}="${esc(Array.isArray(v) ? v.join(' ') : v === true ? k : String(v))}"`;
+        })
         .join('');
       const inner = (node.children || []).map(serialize).join('');
       const out = `<${node.tagName}${attrs}>${inner}</${node.tagName}>`;
@@ -82,6 +85,27 @@ function addHeadingIds(node) {
   for (const child of node.children || []) addHeadingIds(child);
 }
 
+// Convert ```mermaid fences into <pre class="mermaid"> blocks rendered by
+// mermaid.js at view time (exact graphs from the Markdown source).
+function markMermaid(node) {
+  if (node.type === 'element' && node.tagName === 'pre' && node.children?.[0]?.type === 'element'
+      && node.children[0].tagName === 'code'
+      && /language-mermaid/.test(node.children[0].properties?.className?.join(' ') || '')) {
+    node.tagName = 'pre';
+    node.properties = { className: ['mermaid'] };
+    node.children = [{ type: 'text', value: collectText(node.children[0]) }];
+    return true;
+  }
+  let found = false;
+  for (const child of node.children || []) found = markMermaid(child) || found;
+  return found;
+}
+
+const MERMAID_HEAD = `<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+</script>`;
+
 function listMarkdownFiles() {
   const walk = (dir, out = []) => {
     for (const f of fs.readdirSync(dir)) {
@@ -116,10 +140,12 @@ export function narrativePages() {
     const desc = firstP ? collectText(firstP).replace(/\s+/g, ' ').trim().slice(0, 155) + '…' : title;
     rewriteLinks(hast, srcDir, outDir);
     addHeadingIds(hast);
+    const hasMermaid = markMermaid(hast);
     const depth = out.split('/').length - 1;
     specs.push({
       path: out, depth, title, desc,
       breadcrumb: [{ label: 'Documentation', href: 'documentation.html' }, { label: title }],
+      head: hasMermaid ? MERMAID_HEAD : '',
       sections: [{ kind: 'raw', html: `<div class="prose">${serialize(hast)}</div>` }],
     });
   }

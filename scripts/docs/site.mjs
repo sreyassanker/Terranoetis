@@ -159,6 +159,7 @@ export function renderPage(page) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+${page.head || ''}
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>

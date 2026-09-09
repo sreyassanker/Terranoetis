@@ -73,14 +73,16 @@ npm run dev             # Vite (3000) + Express API (3001); Redis optional
 
 | Document | Covers |
 |---|---|
-| [Architecture](docs/ARCHITECTURE.md) | System topology, request flow, background services, module inventory |
-| [API Reference](docs/API.md) | 360+ REST endpoints + WebSocket channel |
-| [Frontend](docs/FRONTEND.md) | React components, rendering engine, simulation overlays, hooks |
-| [Backend](docs/BACKEND.md) | Server modules, cognition, memory, security, observability |
-| [Analytical Models](docs/MODELS.md) | The 150 equation engines, 7 parts, 26 domains |
-| [Deployment](docs/DEPLOYMENT.md) | Docker, environment variables, Kaggle token setup, CI/CD, security |
+| [Architecture](docs/ARCHITECTURE.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/ARCHITECTURE.html)) | System topology, request flow, background services, module inventory |
+| [API Reference](docs/API.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/API.html)) | 360+ REST endpoints + WebSocket channel |
+| [Frontend](docs/FRONTEND.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/FRONTEND.html)) | React components, rendering engine, simulation overlays, hooks |
+| [Backend](docs/BACKEND.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/BACKEND.html)) | Server modules, cognition, memory, security, observability |
+| [Analytical Models](docs/MODELS.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/MODELS.html)) | The 150 equation engines, 7 parts, 26 domains |
+| [Deployment](docs/DEPLOYMENT.md) ([web](https://sreyassanker.github.io/Terranoetis/narratives/DEPLOYMENT.html)) | Docker, environment variables, Kaggle token setup, CI/CD, security |
 
-The rendered GitHub Pages site (from `docs/`) opens with a product landing page
+The full rendered site lives at **https://sreyassanker.github.io/Terranoetis/** —
+diagrams, tables and navigation included. The GitHub Pages site (from `docs/`) opens
+with a product landing page
 (**[docs/index.html](docs/index.html)**) and a navigation-first documentation hub
 (**[docs/documentation.html](docs/documentation.html)**) with per-capability pages carrying
 file-level citations, measured verification data and a CI quality gate. Highlights:
