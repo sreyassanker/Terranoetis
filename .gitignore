@@ -48,9 +48,8 @@ inspect.mjs
 inspect2.mjs
 screenshot.mjs
 test_pdf2.mjs
-# Any .mjs file in the root folder
-    /*.mjs
-    # Any .cjs file in the root folder
+# Any .mjs or .cjs file in the root folder (local scratch scripts)
+/*.mjs
 /*.cjs
 
 # Vite dev-server PID file
@@ -134,6 +133,11 @@ coverage/
 .nyc_output/
 .eslintcache
 
+# Cesium static assets: regenerated from node_modules/cesium/Build/Cesium by
+# the cesium-assets plugin in vite.config.ts on every dev server + build.
+# Never hand-managed; fresh clones get it via npm install + npm run dev/build.
+public/cesium/
+
 # Build tool caches
 .vite/
 .cache/
@@ -145,7 +149,8 @@ coverage/
 *.zip
 *.orig
 *.rej
-server/plugins/
+server/plugins/*
+!server/plugins/example.ts
 
 # E2E: ignore ad-hoc debug specs only — real specs in e2e/ must stay tracked
 e2e/_debug*

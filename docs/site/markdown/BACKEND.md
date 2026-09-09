@@ -95,7 +95,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 | `infrastructure/` | Redis setup |
 | `utils/` | 29 utility modules: FIRMS, EONET, ISS, MGRS, NDBC, OpenAQ, ERA5, ACLED, CMEMS, shakeMap, SPC, VAAC, space debris, wavewatch, geo |
 | `ai-patterns/` | Pattern store, summarize tool |
-| `plugins/` | Plugin system + example plugin |
+| `plugins/` | Runtime plugin drop-in dir (auto-loads `*.ts` every 30 s; installed plugins are gitignored, the tracked `example.ts` ships in-repo; system: `pluginManager.ts`) |
 | `maritime/` | AIS tracker |
 | `simulation/` | Real-data bridge |
 
