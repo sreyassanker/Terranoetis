@@ -131,7 +131,7 @@ terranoetis/
 │   └── __tests__/                # 1,700+ tests (1,653 unit + 49 integration passing)
 │
 ├── kaggle-kernels/               # 7 NumPy physics kernels pushed locally or to Kaggle (earthquake, tsunami, ...)
-├── server/plugins/               # Plugin system: install from URL / GitHub / raw code / zip
+├── server/plugins/               # Plugin drop-in dir (auto-loads *.ts; installed plugins gitignored, example.ts tracked; system: pluginManager.ts)
 ├── docs/
 │   ├── site/                     # The GitHub Pages website — everything below deploys to sreyassanker.github.io/Terranoetis
 │   │   ├── index.html            # Product landing page (generated)
@@ -140,13 +140,13 @@ terranoetis/
 │   │   ├── assets/ (css · img · gallery — animated WebP captures used by the README and landing)
 │   │   ├── markdown/             # ARCHITECTURE · API · BACKEND · FRONTEND · MODELS · DEPLOYMENT · getting-started
 │   │   └── platform-overview.html # Legacy URL — redirects to the docs index
-│   └── Research papers/          # Source PDFs backing the equation citations
+│   └── Research papers/          # Source PDFs backing the equation citations → local-only (gitignored)
 │
 ├── e2e/                          # Playwright browser tests (7 spec files; 15 test declarations, 14 registered by default — 1 gated behind LULC_HEAVY=1)
 ├── scripts/                      # Dev utilities, live smoke scripts, docs build + quality gate
-├── data/                         # Runtime databases + ML models
+├── data/                         # Runtime databases + ML models → gitignored
 ├── models/                       # Local GGUF model (downloadable from admin panel) → gitignored
-├── public/                       # Static assets (Cesium, DuckDB-WASM, fonts, models)
+├── public/                       # Static assets (DuckDB-WASM, fonts, offline data; Cesium synced from node_modules at build; models gitignored)
 │
 ├── docker-compose.yml            # 3 services (terranoetis + redis + causal-service)
 ├── Dockerfile                    # Multi-stage build (node:20-alpine)
