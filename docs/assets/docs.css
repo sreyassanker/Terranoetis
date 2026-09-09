@@ -79,18 +79,20 @@ body {
 }
 .site-banner-inner {
   max-width: 88rem; margin: 0 auto; padding: 0.65rem 1.25rem;
-  display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
 }
+/* Brand wordmark — single source of truth, identical on every page
+   (matches the landing header: logo + Syncopate gradient TERRA/NOETIS). */
 .site-banner a.brand {
-  color: inherit; text-decoration: none; font-weight: 600; letter-spacing: 0.04em;
-  font-size: 1.05rem;
-  font-family: 'Syncopate', ui-sans-serif, system-ui, sans-serif !important;
+  color: inherit; text-decoration: none;
+  font-family: 'Syncopate', sans-serif !important;
   font-weight: 700 !important;
   font-size: 0.9rem !important;
   text-transform: uppercase;
   letter-spacing: 0.15em;
   display: inline-flex;
   align-items: center;
+  line-height: 1;
 }
 .brand-logo { border-radius: 4px; margin-right: 8px; vertical-align: middle; }
 .site-banner a.brand .terra {
