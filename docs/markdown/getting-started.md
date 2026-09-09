@@ -1,6 +1,6 @@
 # Getting started
 
-This is the narrative companion to [Getting started (site page)](getting-started.html), which carries the verified commands, measured outputs and feature-availability tables. Read this file for context; trust the page for numbers.
+This is the narrative companion to [Getting started (site page)](../getting-started.html), which carries the verified commands, measured outputs and feature-availability tables. Read this file for context; trust the page for numbers.
 
 ## What Terranoetis is
 
@@ -16,10 +16,10 @@ Three facts orient everything else:
 
 ## First hour
 
-1. Install and run: the commands and the measured health payload are on the [site page](getting-started.html#install).
+1. Install and run: the commands and the measured health payload are on the [site page](../getting-started.html#install).
 2. Run one simulation end-to-end: a `curl` earthquake job completes in well under a second with no keys configured — the page shows the transcript.
-3. Read one capability page top to bottom (start with [earthquake](capabilities/earthquake.html)) to see what a fully-cited page contains: equations, parameter contract, outputs, validity limits, measured runs, reproduction.
-4. When you need raw endpoints, use the [API reference](reference/api.html) and [`/api/openapi.json`](https://github.com/sreyassanker/Terranoetis/blob/main/server/routes/openapi.ts); when you need the simulation wire format, use the [simulation job API](reference/simulation-api.html).
+3. Read one capability page top to bottom (start with [earthquake](../capabilities/earthquake.html)) to see what a fully-cited page contains: equations, parameter contract, outputs, validity limits, measured runs, reproduction.
+4. When you need raw endpoints, use the [API reference](../reference/api.html) and [`/api/openapi.json`](https://github.com/sreyassanker/Terranoetis/blob/main/server/routes/openapi.ts); when you need the simulation wire format, use the [simulation job API](../reference/simulation-api.html).
 
 ## Where each document lives
 

@@ -161,7 +161,7 @@ The `.env` file configures 100+ variables covering 70+ integrated services (see 
 
 ### Kaggle simulation kernels (optional setup)
 
-Four physics simulations (tsunami, volcano, landslide, flood) are dispatched to **Kaggle kernels** as their execution venue. All kernels are NumPy CPU code (no GPU imports); only flood-sim requests Kaggle's GPU accelerator in its kernel metadata, so “GPU kernels” is a hosting term here, not a compute claim (verified 2026-09-09 — see [modes table](capabilities/hazard-simulations.html#modes)). The three 2D scenarios — earthquake, wildfire, and hurricane — finish in seconds on a laptop CPU and run **locally via `python3`** (see `server/kaggle/simRunner.ts`; measured end-to-end job completion of 166 ms for the earthquake kernel), so they work without any token. To enable the Kaggle-routed kernels:
+Four physics simulations (tsunami, volcano, landslide, flood) are dispatched to **Kaggle kernels** as their execution venue. All kernels are NumPy CPU code (no GPU imports); only flood-sim requests Kaggle's GPU accelerator in its kernel metadata, so “GPU kernels” is a hosting term here, not a compute claim (verified 2026-09-09 — see [modes table](../capabilities/hazard-simulations.html#modes)). The three 2D scenarios — earthquake, wildfire, and hurricane — finish in seconds on a laptop CPU and run **locally via `python3`** (see `server/kaggle/simRunner.ts`; measured end-to-end job completion of 166 ms for the earthquake kernel), so they work without any token. To enable the Kaggle-routed kernels:
 
 1. Create a token at **https://www.kaggle.com/settings/account** → *Create New Token* (requires an account with phone verification).
 2. Save the downloaded `kaggle.json` as **`~/.kaggle/kaggle.json`** and restrict permissions:

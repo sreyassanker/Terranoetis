@@ -132,7 +132,7 @@ export const CORE_PAGES = [
       { kind: 'table', caption: 'Feature availability without credentials (verified boot + code paths)', cols: ['Feature', 'Without keys', 'Evidence'], rows: [
         ['Analytical engine (150 tools)', 'Runs; live-context enrichment falls back to honest NaN where data is unreachable', src('server/analytical-models/engine.ts', '170-194')],
         ['Earthquake / wildfire / hurricane sims', 'Run locally via python3', src(SR, '126-175')],
-        ['Flood / tsunami / volcano / landslide sims', 'Disabled until a Kaggle token exists at ~/.kaggle/kaggle.json', src(SR, 'Kaggle pipeline requires token') + ' ' + src('docs/DEPLOYMENT.md', '162-173')],
+        ['Flood / tsunami / volcano / landslide sims', 'Disabled until a Kaggle token exists at ~/.kaggle/kaggle.json', src(SR, 'Kaggle pipeline requires token') + ' ' + src('docs/markdown/DEPLOYMENT.md', '162-173')],
         ['AI chat (agent/ask)', 'Needs at least one LLM provider key; local GGUF fallback auto-launches if model downloaded', src('server/index.ts', '789-817')],
         ['Live-data routes', 'Keyless feeds work (USGS, OpenSky public, EONET…); keyed ones 5xx/disable', src('server/apiMetadata.ts', '82 entries')],
         ['Sentinel / reflex / world model / memory', 'Run on keyless feeds or local state', src('server/index.ts', '14448-14488')],
