@@ -5,32 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hazard simulations — overview &amp; architecture — Terranoetis Documentation</title>
 <meta name="description" content="How the seven disaster-physics kernels are structured: the zod request/contract layer, local-CPU vs Kaggle execution, job lifecycle, output formats, UQ endpoints.">
-<link rel="canonical" href="https://terranoetis.com/capabilities/hazard-simulations.html">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/capabilities/hazard-simulations.html">
 <link rel="stylesheet" href="../assets/docs.css">
 <link rel="icon" href="../terranoetis.png" type="image/png">
 <meta property="og:title" content="Hazard simulations — overview &amp; architecture — Terranoetis Documentation">
 <meta property="og:description" content="How the seven disaster-physics kernels are structured: the zod request/contract layer, local-CPU vs Kaggle execution, job lifecycle, output formats, UQ endpoints.">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://terranoetis.com/capabilities/hazard-simulations.html">
-<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/capabilities/hazard-simulations.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
 <meta name="docs-last-reviewed" content="2026-09-08">
 <meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
-      <a href="../documentation.html">Docs home</a>
+      <a href="../documentation.html">Documentation</a>
       <a href="../capabilities/hazard-simulations.html" aria-current="page">Capabilities</a>
-      <a href="../reference/api.html">Reference</a>
-      <a href="../methodology.html">Methodology</a>
+      <a href="../methodology.html">Verification</a>
       <a href="../deployment.html">Deployment</a>
       <a href="../governance/style-guide.html">Governance</a>
+      <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
@@ -113,10 +116,10 @@
 <tr><td>earthquake-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct + HTTP e2e</span></td><td>n/a</td></tr>
 <tr><td>fire-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct ×4</span></td><td>n/a</td></tr>
 <tr><td>hurricane-sim</td><td>local CPU</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — direct ×3</span></td><td>n/a</td></tr>
-<tr><td>flood-sim</td><td>Kaggle</td><td>no</td><td>true</td><td><span class="tag tag-measured">MEASURED — solver + gates via python3</span></td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
-<tr><td>tsunami-sim</td><td>Kaggle</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — in-process solver incl. real GEBCO</span></td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
-<tr><td>volcano-sim</td><td>Kaggle + local in-process (UQ/calibration)</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — benchmarks 4/4 PASS</span></td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
-<tr><td>landslide-sim</td><td>Kaggle + local in-process (UQ/calibration)</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — convergence PASS</span></td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
+<tr><td>flood-sim</td><td>Kaggle</td><td>no</td><td>true</td><td><span class="tag tag-measured">MEASURED — solver + gates via python3</span></td><td><span class="tag tag-inspected">verified by code inspection</span></td></tr>
+<tr><td>tsunami-sim</td><td>Kaggle</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — in-process solver incl. real GEBCO</span></td><td><span class="tag tag-inspected">verified by code inspection</span></td></tr>
+<tr><td>volcano-sim</td><td>Kaggle + local in-process (UQ/calibration)</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — benchmarks 4/4 PASS</span></td><td><span class="tag tag-inspected">verified by code inspection</span></td></tr>
+<tr><td>landslide-sim</td><td>Kaggle + local in-process (UQ/calibration)</td><td>no</td><td>false</td><td><span class="tag tag-measured">MEASURED — convergence PASS</span></td><td><span class="tag tag-inspected">verified by code inspection</span></td></tr>
 </tbody></table></div>
 <h2 id="lifecycle">Job lifecycle</h2>
 <ol><li><code>POST /api/kaggle/simulate</code> → <code>{jobId, status, streamUrl}</code> (HTTP 400 on missing type/lat/lon or unknown type) — <cite class="src">server/kaggle/routes.ts:164-201</cite></li>

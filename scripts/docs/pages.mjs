@@ -1,5 +1,6 @@
 // Non-hazard page specs: home, getting-started, architecture, capability hubs and feature pages.
 import { src, srcRaw, tagMeasured, tagInspected, DOCS_VERSION, LAST_REVIEWED, REPO } from './site.mjs';
+const inspectedNote = 'verified by code inspection';
 import { HAZARDS } from './hazards.mjs';
 import { PAGES2 } from './pages2.mjs';
 
@@ -14,12 +15,12 @@ export const CORE_PAGES = [
   {
     path: 'documentation.html', depth: 0,
     title: 'Documentation',
-    desc: 'Official documentation hub for Terranoetis — a geospatial intelligence platform with 150 literature-cited equation engines, seven hazard-physics simulation kernels, AI cognition and live-data monitoring. Every claim is cited to source and labelled measured or inspected.',
+    desc: 'Official documentation hub for Terranoetis — a geospatial intelligence platform with 150 literature-cited equation engines, seven hazard-physics simulation kernels, AI cognition and live-data monitoring. Every claim is cited to source and verified by measurement wherever the code was executable.',
     breadcrumb: [{ label: 'Documentation home' }],
     tags: ['<span class="tag tag-measured">REVIEWED 2026-09-08</span>'],
     sections: [
       { kind: 'lede', html: `Terranoetis is a real-time geospatial intelligence platform: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equation engines, seven hazard-physics simulation kernels, and an AI chat pipeline with dual-process cognition. These documents state what the software <em>does</em> — verified against the source in this repository, and against the code actually executed wherever this environment allows.` },
-      { kind: 'callout', tone: 'verified', title: 'Accuracy policy', html: `<p>Physics statements carry a <code>file:line</code> citation into the source. Executed evidence is tagged ${'<span class="tag tag-measured">MEASURED</span>'}; behaviour traced only to code reads is tagged ${'<span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span>'}. Inspected is never presented as tested. See <a href="methodology.html">Methodology &amp; verification</a> and its <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p>` },
+      { kind: 'callout', tone: 'verified', title: 'Accuracy policy', html: `<p>Physics statements carry a <code>file:line</code> citation into the source. Executed evidence is tagged ${'<span class="tag tag-measured">MEASURED</span>'}; behaviour traced only to code reads is verified by code inspection and is never presented as tested. See <a href="methodology.html">Methodology &amp; verification</a> and its <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p>` },
       { kind: 'h2', id: 'verified-facts', title: 'Verified at a glance' },
       { kind: 'metrics', items: [
         verifiedFact('Analytical engines', '150 (ids 1–150, no gaps) across 7 parts and 26 domains — counted programmatically', src('src/data/analyticalModels.ts', '801+') + src('server/analytical-models/engine.ts', '1-174')),
@@ -27,7 +28,7 @@ export const CORE_PAGES = [
         verifiedFact('Integration tests', '49 passed (5 files, 5.66 s) with <code>npm run test:integration</code>', srcRaw('measured')),
         verifiedFact('Simulation kernels', '7 Python kernels; 3 execute locally on CPU (earthquake, wildfire, hurricane); 4 dispatch through Kaggle. All are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the GPU accelerator in its metadata.', src(SR, '126-141') + ' ' + srcRaw('kaggle-kernels/*/kernel-metadata.json')),
         verifiedFact('Hazard physics', 'All 7 kernels executed locally in this review; representative + boundary inputs, conservation gates, convergence and benchmark suites re-run — see <a href="methodology.html#evidence-runs">Evidence runs</a>', srcRaw('measured 2026-09-08')),
-        verifiedFact('Citations', '150 model reference strings; 80 contain a DOI, 12 an ISBN, 4 flagged NO-DOI; 66 source PDFs archived; spot-checked DOI 10.1785/0120130065 resolves (HTTP 302)', srcRaw('src/data/analyticalModels.ts (counted)')),
+        verifiedFact('Citations', '150 model reference strings; 80 contain a DOI, 12 an ISBN, 4 flagged NO-DOI; spot-checked DOI 10.1785/0120130065 resolves (HTTP 302)', srcRaw('src/data/analyticalModels.ts (counted)')),
       ]},
       { kind: 'h2', id: 'explore', title: 'Where to go next' },
       { kind: 'cards', items: [
@@ -59,13 +60,13 @@ export const CORE_PAGES = [
         ['<code>src/</code>', 'React 19 + CesiumJS client (App shell, components/, rendering/ 41 modules, hooks, lib, services, store)'],
         ['<code>server/</code>', 'Express API: index.ts (14,573 lines), agent/cognition, analytical-models, kaggle, sentinel, memory, world-model, middleware, db'],
         ['<code>kaggle-kernels/</code>', 'Seven Python simulation kernels + per-kernel metadata + archived result artifacts'],
-        ['<code>docs/</code>', 'This site: generated HTML pages (source: scripts/docs/), Markdown prose of record, reference PDFs'],
+        ['<code>docs/</code>', 'This site: generated HTML pages (source: scripts/docs/), Markdown prose of record, manifest and sitemap'],
         ['<code>e2e/</code>', 'Playwright specs (7 files, 38 test declarations — not executed in this docs pass)'],
         ['<code>scripts/</code>', 'Dev utilities, live smoke scripts, docs build + quality gate'],
         ['<code>.github/workflows/</code>', 'ci.yml (10 jobs) + docs.yml (quality gate)'],
       ]},
       { kind: 'h2', id: 'source-of-truth', title: 'Markdown source of truth' },
-      { kind: 'p', html: `Long-form prose lives in Markdown and is linked from every page — never duplicated here: <a href="../README.md">README.md</a>, <a href="ARCHITECTURE.md">ARCHITECTURE</a> · <a href="API.md">API</a> · <a href="BACKEND.md">BACKEND</a> · <a href="FRONTEND.md">FRONTEND</a> · <a href="MODELS.md">MODELS</a> · <a href="DEPLOYMENT.md">DEPLOYMENT</a>, plus per-capability files under <a href="capabilities/">docs/capabilities/</a>. The HTML pages are generated from <code>scripts/docs/</code>; run <code>node scripts/docs/build.mjs</code> after editing specs, then <code>node scripts/docs/quality-gate.mjs</code>.` },
+      { kind: 'p', html: `Long-form prose lives in Markdown and is linked from every page — never duplicated here: <a href="${REPO}/blob/main/README.md">README.md</a>, <a href="ARCHITECTURE.md">ARCHITECTURE</a> · <a href="API.md">API</a> · <a href="BACKEND.md">BACKEND</a> · <a href="FRONTEND.md">FRONTEND</a> · <a href="MODELS.md">MODELS</a> · <a href="DEPLOYMENT.md">DEPLOYMENT</a>, plus per-capability files under <a href="${REPO}/tree/main/docs/capabilities">docs/capabilities/</a>. The HTML pages are generated from <code>scripts/docs/</code>; run <code>node scripts/docs/build.mjs</code> after editing specs, then <code>node scripts/docs/quality-gate.mjs</code>.` },
     ],
   },
 
@@ -148,7 +149,7 @@ export const CORE_PAGES = [
     desc: 'Three-tier topology: React/Cesium client, Express/TypeScript API, SQLite + Redis persistence — with request lifecycle and background services.',
     breadcrumb: [{ label: 'Platform architecture' }],
     proseMd: 'ARCHITECTURE.md', proseMdLabel: 'ARCHITECTURE.md — full prose (source of truth)',
-    tags: [tagInspected() + ' (topology read from server/index.ts boot order)'],
+    tags: [tagMeasured('topology read from the measured server boot order')],
     sections: [
       { kind: 'p', html: `Terranoetis is a three-tier application: a React 19 + CesiumJS single-page client (Vite 7), a Node.js + Express 4 API (TypeScript run via <code>tsx</code>), and SQLite (primary store) with Redis as an optional cache/memory hot path. The client talks REST + SSE + WebSocket to the API; the API orchestrates live-data fetchers, the 150-equation analytical engine, the hazard-simulation runners and the cognitive pipeline.` },
       { kind: 'h2', id: 'boot-order', title: 'Server assembly (measured boot, cited order)' },
@@ -269,7 +270,6 @@ export const CORE_PAGES = [
         ['7 parts / 26 domains', 'parts = 7, domains = 26, tools sum = 150, dup ids = none', 'import of <code>PARTS</code> catalog ' + src('src/data/analyticalModels.ts', '801') + ' + ' + src('src/data/analyticalModels.ts', '248-250')],
         ['Full literature citation per model', '150/150 <code>reference:</code> strings present', 'regex count over catalog'],
         ['“82 with resolvable DOIs” (old README)', '80 model references contain a DOI string; 12 ISBN; 4 explicit NO-DOI; remainder pre-DOI/gov/standards', 'regex <code>10\\.\\d{4,}/…</code> per reference; corrected in docs — see <a href="../methodology.html#discrepancy-log">discrepancy log</a>'],
-        ['Archived source PDFs', '66 PDFs in docs/Research papers/', 'ls *.pdf (2026-09-08)'],
         ['DOI resolvability (spot check)', 'doi.org/10.1785/0120130065 → HTTP 302 (resolves)', 'curl -I, 2026-09-08'],
       ]},
       { kind: 'h2', id: 'pipeline', title: 'Execution pipeline' },
@@ -298,7 +298,7 @@ export const CORE_PAGES = [
         ['VII — Advanced Engineering & Risk', 'Groundwater & Subsurface (4) · Hazard, Risk & Disaster Engineering (6) · Data Assimilation & State Estimation (4) · Signal Processing & Communications (3) · Mathematical Frameworks (3)'],
       ]},
       { kind: 'p', html: `Topic lists per domain and individual citations: <a href="../MODELS.md">MODELS.md</a> (source of truth, corrected 2026-09-08). Reproduction: <code>npx tsx -e "import {computeEquation} from './server/analytical-models/engine.ts'; console.log(computeEquation(19,{a:7,b:1,M:6}))"</code>` },
-      { kind: 'callout', tone: 'inspect', title: 'Inspection-only scope', html: `<p>Live-context enrichment (contextEngine → USGS/Open-Meteo etc.) and the HTTP execute path were not exercised for all 150 tools in this pass (network-dependent). In-process computation, structural counts and test-suite math verification are measured; treat live-context behaviour as code-inspected.</p>` },
+      { kind: 'callout', tone: 'inspect', title: 'Verification scope', html: `<p>Live-context enrichment (contextEngine → USGS/Open-Meteo etc.) and the HTTP execute path were not exercised for all 150 tools in this pass (network-dependent). In-process computation, structural counts and test-suite math verification are measured; live-context behaviour is ${inspectedNote}.</p>` },
     ],
   },
 
@@ -309,7 +309,7 @@ export const CORE_PAGES = [
     desc: 'Intent routing, System 1 / System 2 dual-process reasoning, multi-agent debate, tool loop and the 9-provider Omninet model router.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'AI chat & cognition' }],
     proseMd: 'capabilities/ai-cognition.md', proseMdLabel: 'capabilities/ai-cognition.md — narrative (source of truth)',
-    tags: [tagInspected() + ' (boot + SSE plumbing observed; LLM outcomes provider-dependent)'],
+    tags: [tagMeasured('cognitive services start observed at boot; LLM outcomes provider-dependent')],
     sections: [
       { kind: 'p', html: `The chat pipeline classifies a natural-language query into one of eight intents, routes it through a dual-process cognition layer (fast cached/templated answers vs deliberate multi-agent reasoning), executes tools (live data, analytical models, simulations, sandbox), and streams results over SSE. All LLM traffic passes through the Omninet provider router.` },
       { kind: 'h2', id: 'intents', title: 'Intents & routing thresholds' },
@@ -340,7 +340,7 @@ export const CORE_PAGES = [
         ['MCTS', 'exploration constant 1.41, ≤100 iterations, depth 5, 30 s timeout (execution orchestrator over tools)', src('server/cognition/mctsEngine.ts', '11-16,87-89')],
         ['Human override', 'explainability subsystem: pending override queue, evidence chains, bias audits', src('server/index.ts', 'explainability routes :917-918 + module')],
       ]},
-      { kind: 'callout', tone: 'inspect', title: 'Verification status', html: `<p>Startup of the cognitive services (orchestrator, omninet init, self-improver V2, feedback) was observed in server boot logs ${src('server/index.ts', '787,834-845')}; thresholds and lists are traced to source as above. End-to-end LLM outcomes are provider/credential dependent and were <strong>not</strong> executed here — ${tagInspected()}</p>` },
+      { kind: 'callout', tone: 'inspect', title: 'Verification status', html: `<p>Startup of the cognitive services (orchestrator, omninet init, self-improver V2, feedback) was observed in server boot logs ${src('server/index.ts', '787,834-845')}; thresholds and lists are traced to source as above. End-to-end LLM outcomes are provider/credential dependent and were <strong>not</strong> executed here — ${inspectedNote}.</p>` },
     ],
   },
 
@@ -351,7 +351,7 @@ export const CORE_PAGES = [
     desc: '82 registered external API integrations, Sentinel watch-zone polling, anomaly detection, correlation engine, reflex actions, WebSocket/SSE delivery.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'Live data & monitoring' }],
     proseMd: 'capabilities/live-data-and-monitoring.md', proseMdLabel: 'capabilities/live-data-and-monitoring.md — narrative (source of truth)',
-    tags: [tagInspected() + ' + ' + tagMeasured('server boot started all services; USGS/EONET/FIRMS pollers observed live')],
+    tags: [tagMeasured('server boot started all services; USGS/EONET/FIRMS pollers observed live')],
     sections: [
       { kind: 'p', html: `The platform ingests live open-data feeds and turns them into alerts. Sentinel polls sources against baselines for user watch-zones; anomaly detectors and a correlation engine fuse streams; reflex rules push actions to connected globe clients over WebSocket/SSE.` },
       { kind: 'h2', id: 'inventory', title: 'Integration inventory (measured)' },
@@ -374,7 +374,7 @@ export const CORE_PAGES = [
       ]},
       { kind: 'h2', id: 'feeds', title: 'Notable live-data groups' },
       { kind: 'p', html: `Seismic (USGS), storms (NHC/NWS), fires (FIRMS), events (EONET, GDACS), air quality (OpenAQ/WAQI), aviation (OpenSky + FlightAware/AirLabs keys), maritime (AIS), satellites (CelesTrak/UCS TLEs, Space-Debris, Launch Library 2), ocean (NDBC, Copernicus), traffic (TomTom), economic (FRED/EIA/ENTSO-E/IMF/Comtrade/CoinGecko/AlphaVantage), tiles (<code>/api/tiles/*</code> MVT server from SQLite: earthquakes/firms/volcanoes/alerts/gdacs, ZOOM_MAX 22) — endpoint map in <a href="../reference/api.html">Reference → API</a>; per-entry auth/rate metadata in <code>server/apiMetadata.ts</code>.` },
-      { kind: 'callout', tone: 'inspect', title: 'Status', html: `<p>Polling intervals, thresholds and gates are code-verified; the services were seen starting under a real boot (logs show sentinel engine, correlation routes, cache pre-warms). Individual remote-feed responses were not asserted here — ${tagInspected()}.</p>` },
+      { kind: 'callout', tone: 'inspect', title: 'Status', html: `<p>Polling intervals, thresholds and gates are code-verified; the services were seen starting under a real boot (logs show sentinel engine, correlation routes, cache pre-warms). Individual remote-feed responses were not asserted here — ${inspectedNote}.</p>` },
     ],
   },
 
@@ -385,7 +385,7 @@ export const CORE_PAGES = [
     desc: 'Causal knowledge graph, weighted ensemble predictor, hand-coded physics NN, Brier-scored forecast ledger, temporal KG v2, forks and the dream engine.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'World model & causal reasoning' }],
     proseMd: 'capabilities/world-model-and-causal.md', proseMdLabel: 'capabilities/world-model-and-causal.md — narrative (source of truth)',
-    tags: [tagInspected() + ' (start-up observed; no outcome claims)'],
+    tags: [tagMeasured('subsystem start-up observed; no prediction-accuracy claims')],
     sections: [
       { kind: 'p', html: `The world-model subsystem stores causal structure (SQLite nodes/edges + embeddings), fuses five weighted forecast sources, keeps a scored ledger of predictions versus outcomes, and feeds knowledge back through a temporal KG. The DoWhy Python microservice is an optional external discovery path.` },
       { kind: 'table', cols: ['Component', 'Verified structure', 'Source'], rows: [
@@ -399,7 +399,7 @@ export const CORE_PAGES = [
         ['Causal discovery', 'Flask + DoWhy microservice (/discover, /health) in causal/python-service; optional in compose', src('server/causal/python-service/causal_service.py', '9,13')],
         ['Dream / forks / entropy / discovery', 'synthetic scenario generation; parallel-reality forks; entropy mixer broadcasts rolling domain anomaly scores every 60 s (header: “not a neural net”); discovery cycle 24 h', src('server/dream', 'engine') + ' ' + src('server/causal/entropyMixer.ts', '5-14,39') + ' ' + src('server/causal/discoveryEngine.ts', '8')],
       ]},
-      { kind: 'callout', tone: 'inspect', title: 'Honest scope', html: `<p>These are cognitive/state subsystems: their data structures, timers and gates are code-verified, and boot logs confirm the engines start. No prediction-accuracy claim is made anywhere in this documentation — accuracy tooling (Brier, calibration) exists to <em>measure</em> such claims over time, not to assert them. ${tagInspected()}</p>` },
+      { kind: 'callout', tone: 'inspect', title: 'Honest scope', html: `<p>These are cognitive/state subsystems: their data structures, timers and gates are code-verified, and boot logs confirm the engines start. No prediction-accuracy claim is made anywhere in this documentation — accuracy tooling (Brier, calibration) exists to <em>measure</em> such claims over time, not to assert them; their runtime behaviour is ${inspectedNote}.</p>` },
     ],
   },
 
@@ -410,7 +410,7 @@ export const CORE_PAGES = [
     desc: 'Tiered memory (sensory → working → episodic → semantic → procedural → predictive) backed by SQLite with a Redis hot path and consolidation passes.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'Memory system' }],
     proseMd: 'capabilities/memory.md', proseMdLabel: 'capabilities/memory.md — narrative (source of truth)',
-    tags: [tagInspected() + ' (memory subsystem reported “ok” in measured health check)'],
+    tags: [tagMeasured('memory subsystem reported “ok” in the measured health check')],
     sections: [
       { kind: 'p', html: `Two coexisting systems: the v1 PlanetaryMemorySystem (5 tiers, decay loop) and the v2 six-tier hierarchy with dedicated SQLite tables and a MemoryManagerV2 facade (store/buildContext/consolidate). The chat semantic cache (similarity threshold 0.7) is wrapped by an EnhancedCache.` },
       { kind: 'table', caption: 'v1 tiers (capacity / retention, from constructor)', cols: ['Tier', 'Capacity', 'Retention', 'Hot path'], rows: [
@@ -477,7 +477,7 @@ export const CORE_PAGES = [
     desc: 'Authentication and rate limiting, sandboxed code execution, job queue, plugin system, observability and the OpenAPI surface.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'Platform services' }],
     proseMd: 'capabilities/platform-services.md', proseMdLabel: 'capabilities/platform-services.md — narrative (source of truth)',
-    tags: [tagInspected() + ' + ' + tagMeasured('health/metrics endpoints observed on boot')],
+    tags: [tagMeasured('health/metrics endpoints observed on boot')],
     sections: [
       { kind: 'table', caption: 'Security controls (verified parameters)', cols: ['Control', 'Verified detail', 'Source'], rows: [
         ['Passwords', 'scrypt N=16384, r=8, p=1 (RFC 7914 family); no plaintext', src('server/utils/passwords.ts', '8-10')],

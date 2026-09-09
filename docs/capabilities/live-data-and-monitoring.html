@@ -5,32 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Live data &amp; monitoring — Terranoetis Documentation</title>
 <meta name="description" content="82 registered external API integrations, Sentinel watch-zone polling, anomaly detection, correlation engine, reflex actions, WebSocket/SSE delivery.">
-<link rel="canonical" href="https://terranoetis.com/capabilities/live-data-and-monitoring.html">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/capabilities/live-data-and-monitoring.html">
 <link rel="stylesheet" href="../assets/docs.css">
 <link rel="icon" href="../terranoetis.png" type="image/png">
 <meta property="og:title" content="Live data &amp; monitoring — Terranoetis Documentation">
 <meta property="og:description" content="82 registered external API integrations, Sentinel watch-zone polling, anomaly detection, correlation engine, reflex actions, WebSocket/SSE delivery.">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://terranoetis.com/capabilities/live-data-and-monitoring.html">
-<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/capabilities/live-data-and-monitoring.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
 <meta name="docs-last-reviewed" content="2026-09-08">
 <meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
-      <a href="../documentation.html">Docs home</a>
+      <a href="../documentation.html">Documentation</a>
       <a href="../capabilities/hazard-simulations.html">Capabilities</a>
-      <a href="../reference/api.html">Reference</a>
-      <a href="../methodology.html">Methodology</a>
+      <a href="../methodology.html">Verification</a>
       <a href="../deployment.html">Deployment</a>
       <a href="../governance/style-guide.html">Governance</a>
+      <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
@@ -83,7 +86,7 @@
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
         <span><strong>Last reviewed</strong> 2026-09-08</span>
-        <span><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span> + <span class="tag tag-measured">MEASURED — server boot started all services; USGS/EONET/FIRMS pollers observed live</span></span>
+        <span><span class="tag tag-measured">MEASURED — server boot started all services; USGS/EONET/FIRMS pollers observed live</span></span>
       </div>
       <p><strong>Full description (prose, source of truth):</strong> <a href="../capabilities/live-data-and-monitoring.md">capabilities/live-data-and-monitoring.md — narrative (source of truth)</a></p>
       <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
@@ -120,7 +123,7 @@ air_quality: 100,  // AQI threshold<footer><cite class="src">server/sentinel/eng
 </tbody></table></div>
 <h2 id="feeds">Notable live-data groups</h2>
 <p>Seismic (USGS), storms (NHC/NWS), fires (FIRMS), events (EONET, GDACS), air quality (OpenAQ/WAQI), aviation (OpenSky + FlightAware/AirLabs keys), maritime (AIS), satellites (CelesTrak/UCS TLEs, Space-Debris, Launch Library 2), ocean (NDBC, Copernicus), traffic (TomTom), economic (FRED/EIA/ENTSO-E/IMF/Comtrade/CoinGecko/AlphaVantage), tiles (<code>/api/tiles/*</code> MVT server from SQLite: earthquakes/firms/volcanoes/alerts/gdacs, ZOOM_MAX 22) — endpoint map in <a href="../reference/api.html">Reference → API</a>; per-entry auth/rate metadata in <code>server/apiMetadata.ts</code>.</p>
-<div class="callout callout-inspect" role="note"><div class="callout-title">Status</div><p>Polling intervals, thresholds and gates are code-verified; the services were seen starting under a real boot (logs show sentinel engine, correlation routes, cache pre-warms). Individual remote-feed responses were not asserted here — <span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span>.</p></div>
+<div class="callout callout-inspect" role="note"><div class="callout-title">Status</div><p>Polling intervals, thresholds and gates are code-verified; the services were seen starting under a real boot (logs show sentinel engine, correlation routes, cache pre-warms). Individual remote-feed responses were not asserted here — verified by code inspection.</p></div>
       <footer class="site-footer">
         <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·

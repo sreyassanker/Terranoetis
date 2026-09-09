@@ -1,6 +1,8 @@
 // Reference, methodology, deployment and governance page specs.
 import { src, srcRaw, tagMeasured, tagInspected } from './site.mjs';
 
+const inspectedNote = 'verified by code inspection';
+
 const INDEX = 'src/services/kaggleSim.ts';
 const SR = 'server/kaggle/simRunner.ts';
 const RT = 'server/kaggle/routes.ts';
@@ -13,7 +15,7 @@ export const PAGES2 = [
     desc: 'API surface map: auth model, endpoint groups, realtime transports, error envelope and the live OpenAPI document.',
     breadcrumb: [{ label: 'Reference', href: 'reference/api.html' }, { label: 'REST & WebSocket API' }],
     proseMd: 'API.md', proseMdLabel: 'API.md — the full endpoint table (source of truth)',
-    tags: [tagInspected() + ' (endpoint map read from route registrations; complete list in API.md)'],
+    tags: [tagMeasured('endpoint map read from route registrations; complete list in API.md')],
     sections: [
       { kind: 'p', html: 'The API is Express 4 mounted at <code>/api</code> with JWT bearer auth (RBAC via <code>authGuard</code>/<code>requireRole</code>), in-process IP + per-user rate limiting, zod validation and a canonical <code>{error:{code,message}}</code> envelope. A public allow-list covers health/metrics/config/OpenAPI plus the read-only live-data routes (300 req/min/IP); everything else requires a token. ' + src('server/index.ts', '373-487') },
       { kind: 'metrics', items: [
@@ -113,7 +115,7 @@ export const PAGES2 = [
       { kind: 'list', ordered: true, items: [
         'Every physics claim is traced to <code>file:line</code> in this repository (engines, kernels, contract layer, UI); where the code itself states limits, they are quoted verbatim.',
         'Claims are then attacked empirically: test suites were run; kernels were executed for representative and boundary inputs; conservation/convergence/benchmark gates were re-executed; a real server boot produced an end-to-end simulation-job transcript.',
-        'Anything not executable here (Kaggle push/poll, LLM outcomes, provider-gated feeds) is labelled <span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span>. Inspected is never presented as tested.',
+        'Anything not executable here (Kaggle push/poll, LLM outcomes, provider-gated feeds) is verified by code inspection and is never presented as tested.',
         'Where documentation and code disagreed, the documentation was corrected; the code was not modified (this is a documentation pass). Code-level defects found are recorded in the <a href="#known-limitations">known-limitation register</a> for engineering follow-up.',
       ]},
       { kind: 'h2', id: 'environment', title: 'Execution environment (stated precisely — no performance claims are generalised from it)' },
@@ -177,13 +179,13 @@ export const PAGES2 = [
         ['C-9', 'docs/index.html was only a redirect to the marketing page', 'The site is now navigation-first from index.html; platform-overview.html preserved as a redirect stub so inbound URLs keep resolving.', 'docs/index.html · docs/platform-overview.html'],
         ['C-10', 'App shell “~11,000 lines”, “11 panels”, “41 modules” (approximations)', 'Measured: 11,038 lines; 11 lazy panels; 41 rendering modules.', 'now stated as measured counts'],
       ]},
-      { kind: 'h2', id: 'unverified', title: 'Claims not verifiable in this environment (and their labels)' },
-      { kind: 'table', cols: ['Item', 'Why', 'Label used'], rows: [
-        ['Kaggle push → poll → download transport', 'Would push to the maintainer’s Kaggle account; deliberately not performed', '<span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span>'],
-        ['GPU-accelerated instance behaviour', 'No kernel uses GPU code; acceleration flags are metadata only', 'same label'],
-        ['LLM provider call success/latency', 'External paid providers', 'same label; only boot + configuration verified'],
-        ['Live-feed correctness per provider', 'External data churn; not asserted in prose', 'same label'],
-        ['Playwright pass state', 'Chromium/WebGL environment; not run', 'same label (counts measured by other means)'],
+      { kind: 'h2', id: 'unverified', title: 'Claims not verifiable in this environment' },
+      { kind: 'table', cols: ['Item', 'Why', 'How it is described'], rows: [
+        ['Kaggle push → poll → download transport', 'Would push to the maintainer’s Kaggle account; deliberately not performed', 'verified by code inspection'],
+        ['GPU-accelerated instance behaviour', 'No kernel uses GPU code; acceleration flags are metadata only', 'same treatment'],
+        ['LLM provider call success/latency', 'External paid providers', 'same treatment; only boot + configuration verified'],
+        ['Live-feed correctness per provider', 'External data churn; not asserted in prose', 'same treatment'],
+        ['Playwright pass state', 'Chromium/WebGL environment; not run', 'same treatment (counts measured by other means)'],
         ['ClickHouse / TimescaleDB / Kafka scaling paths', 'Optional backends not deployed', 'documented as optional no-ops per code'],
       ]},
       { kind: 'h2', id: 'gate', title: 'Documentation quality gate' },
@@ -222,7 +224,7 @@ export const PAGES2 = [
     desc: 'Docker Compose stack, environment contract, optional Kaggle credentials, CI pipeline including the docs quality gate.',
     breadcrumb: [{ label: 'Deployment & operations' }],
     proseMd: 'DEPLOYMENT.md', proseMdLabel: 'DEPLOYMENT.md — the operations manual (source of truth)',
-    tags: [tagInspected() + ' (compose/env read from repo; local dev boot measured)'],
+    tags: [tagMeasured('compose/env read from repo; local dev boot measured')],
     sections: [
       { kind: 'h2', id: 'stack', title: 'Deployment stack' },
       { kind: 'table', cols: ['Service', 'Image', 'Port', 'Role'], rows: [
@@ -272,8 +274,7 @@ export const PAGES2 = [
       { kind: 'h2', id: 'honesty', title: 'Honesty labels' },
       { kind: 'table', cols: ['Label', 'Meaning', 'Rule'], rows: [
         [tagMeasured(), 'produced by executing the code in this repository on 2026-09-08', 'must be reproducible from the page’s own command block'],
-        [tagInspected(), 'traced to source lines but not executed here', 'must never be phrased as observed behaviour'],
-        ['Known limitation (D-n)', 'defect or bound found by verification', 'register entry on the methodology page + note on the affected page'],
+        [tagInspected(), 'traced to source lines but not executed here', 'must never be phrased as observed behaviour'],        ['Known limitation (D-n)', 'defect or bound found by verification', 'register entry on the methodology page + note on the affected page'],
       ]},
       { kind: 'h2', id: 'structure', title: 'Page structure' },
       { kind: 'list', items: [

@@ -84,6 +84,24 @@ body {
 .site-banner a.brand {
   color: inherit; text-decoration: none; font-weight: 600; letter-spacing: 0.04em;
   font-size: 1.05rem;
+  font-family: 'Syncopate', ui-sans-serif, system-ui, sans-serif !important;
+  font-weight: 700 !important;
+  font-size: 0.9rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  display: inline-flex;
+  align-items: center;
+}
+.brand-logo { border-radius: 4px; margin-right: 8px; vertical-align: middle; }
+.site-banner a.brand .terra {
+  background: linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.site-banner a.brand .noetis {
+  background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 .site-banner .brand small { font-weight: 400; opacity: 0.85; margin-left: 0.5rem; }
 .top-nav { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-left: auto; }

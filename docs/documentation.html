@@ -4,33 +4,36 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Documentation — Terranoetis Documentation</title>
-<meta name="description" content="Official documentation hub for Terranoetis — a geospatial intelligence platform with 150 literature-cited equation engines, seven hazard-physics simulation kernels, AI cognition and live-data monitoring. Every claim is cited to source and labelled measured or inspected.">
-<link rel="canonical" href="https://terranoetis.com/documentation.html">
+<meta name="description" content="Official documentation hub for Terranoetis — a geospatial intelligence platform with 150 literature-cited equation engines, seven hazard-physics simulation kernels, AI cognition and live-data monitoring. Every claim is cited to source and verified by measurement wherever the code was executable.">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/documentation.html">
 <link rel="stylesheet" href="assets/docs.css">
 <link rel="icon" href="terranoetis.png" type="image/png">
 <meta property="og:title" content="Documentation — Terranoetis Documentation">
-<meta property="og:description" content="Official documentation hub for Terranoetis — a geospatial intelligence platform with 150 literature-cited equation engines, seven hazard-physics simulation kernels, AI cognition and live-data monitoring. Every claim is cited to source and labelled measured or inspected.">
+<meta property="og:description" content="Official documentation hub for Terranoetis — a geospatial intelligence platform with 150 literature-cited equation engines, seven hazard-physics simulation kernels, AI cognition and live-data monitoring. Every claim is cited to source and verified by measurement wherever the code was executable.">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://terranoetis.com/documentation.html">
-<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/documentation.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
 <meta name="docs-last-reviewed" content="2026-09-08">
 <meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="index.html">TERRANOETIS<small>Documentation</small></a>
+    <a class="brand" href="index.html"><img src="terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="index.html">Overview</a>
-      <a href="documentation.html" aria-current="page">Docs home</a>
+      <a href="documentation.html" aria-current="page">Documentation</a>
       <a href="capabilities/hazard-simulations.html">Capabilities</a>
-      <a href="reference/api.html">Reference</a>
-      <a href="methodology.html">Methodology</a>
+      <a href="methodology.html">Verification</a>
       <a href="deployment.html">Deployment</a>
       <a href="governance/style-guide.html">Governance</a>
+      <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
@@ -92,14 +95,14 @@
 <li><a href="#source-of-truth">Markdown source of truth</a></li>
       </ul></nav>
       <p class="lede">Terranoetis is a real-time geospatial intelligence platform: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equation engines, seven hazard-physics simulation kernels, and an AI chat pipeline with dual-process cognition. These documents state what the software <em>does</em> — verified against the source in this repository, and against the code actually executed wherever this environment allows.</p>
-<div class="callout callout-verified" role="note"><div class="callout-title">Accuracy policy</div><p>Physics statements carry a <code>file:line</code> citation into the source. Executed evidence is tagged <span class="tag tag-measured">MEASURED</span>; behaviour traced only to code reads is tagged <span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span>. Inspected is never presented as tested. See <a href="methodology.html">Methodology &amp; verification</a> and its <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p></div>
+<div class="callout callout-verified" role="note"><div class="callout-title">Accuracy policy</div><p>Physics statements carry a <code>file:line</code> citation into the source. Executed evidence is tagged <span class="tag tag-measured">MEASURED</span>; behaviour traced only to code reads is verified by code inspection and is never presented as tested. See <a href="methodology.html">Methodology &amp; verification</a> and its <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p></div>
 <h2 id="verified-facts">Verified at a glance</h2>
 <dl class="metrics"><dt><strong>Analytical engines</strong></dt><dd>150 (ids 1–150, no gaps) across 7 parts and 26 domains — counted programmatically <cite class="src">src/data/analyticalModels.ts:801+</cite><cite class="src">server/analytical-models/engine.ts:1-174</cite></dd>
 <dt><strong>Equation-engine tests</strong></dt><dd>1,653 unit tests passed (141 files, 22.85 s wall) with <code>npm run test:unit</code> on 2026-09-08 <cite class="src">measured</cite></dd>
 <dt><strong>Integration tests</strong></dt><dd>49 passed (5 files, 5.66 s) with <code>npm run test:integration</code> <cite class="src">measured</cite></dd>
 <dt><strong>Simulation kernels</strong></dt><dd>7 Python kernels; 3 execute locally on CPU (earthquake, wildfire, hurricane); 4 dispatch through Kaggle. All are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the GPU accelerator in its metadata. <cite class="src">server/kaggle/simRunner.ts:126-141</cite> <cite class="src">kaggle-kernels/*/kernel-metadata.json</cite></dd>
 <dt><strong>Hazard physics</strong></dt><dd>All 7 kernels executed locally in this review; representative + boundary inputs, conservation gates, convergence and benchmark suites re-run — see <a href="methodology.html#evidence-runs">Evidence runs</a> <cite class="src">measured 2026-09-08</cite></dd>
-<dt><strong>Citations</strong></dt><dd>150 model reference strings; 80 contain a DOI, 12 an ISBN, 4 flagged NO-DOI; 66 source PDFs archived; spot-checked DOI 10.1785/0120130065 resolves (HTTP 302) <cite class="src">src/data/analyticalModels.ts (counted)</cite></dd></dl>
+<dt><strong>Citations</strong></dt><dd>150 model reference strings; 80 contain a DOI, 12 an ISBN, 4 flagged NO-DOI; spot-checked DOI 10.1785/0120130065 resolves (HTTP 302) <cite class="src">src/data/analyticalModels.ts (counted)</cite></dd></dl>
 <h2 id="explore">Where to go next</h2>
 <div class="card-grid"><div class="card"><a href="getting-started.html">Getting started</a><p>Install, run, verify: the five-minute local setup with measured outputs.</p></div>
 <div class="card"><a href="architecture.html">Platform architecture</a><p>Three-tier topology, request lifecycle, background services.</p></div>
@@ -130,13 +133,13 @@
 <tr><td><code>src/</code></td><td>React 19 + CesiumJS client (App shell, components/, rendering/ 41 modules, hooks, lib, services, store)</td></tr>
 <tr><td><code>server/</code></td><td>Express API: index.ts (14,573 lines), agent/cognition, analytical-models, kaggle, sentinel, memory, world-model, middleware, db</td></tr>
 <tr><td><code>kaggle-kernels/</code></td><td>Seven Python simulation kernels + per-kernel metadata + archived result artifacts</td></tr>
-<tr><td><code>docs/</code></td><td>This site: generated HTML pages (source: scripts/docs/), Markdown prose of record, reference PDFs</td></tr>
+<tr><td><code>docs/</code></td><td>This site: generated HTML pages (source: scripts/docs/), Markdown prose of record, manifest and sitemap</td></tr>
 <tr><td><code>e2e/</code></td><td>Playwright specs (7 files, 38 test declarations — not executed in this docs pass)</td></tr>
 <tr><td><code>scripts/</code></td><td>Dev utilities, live smoke scripts, docs build + quality gate</td></tr>
 <tr><td><code>.github/workflows/</code></td><td>ci.yml (10 jobs) + docs.yml (quality gate)</td></tr>
 </tbody></table></div>
 <h2 id="source-of-truth">Markdown source of truth</h2>
-<p>Long-form prose lives in Markdown and is linked from every page — never duplicated here: <a href="../README.md">README.md</a>, <a href="ARCHITECTURE.md">ARCHITECTURE</a> · <a href="API.md">API</a> · <a href="BACKEND.md">BACKEND</a> · <a href="FRONTEND.md">FRONTEND</a> · <a href="MODELS.md">MODELS</a> · <a href="DEPLOYMENT.md">DEPLOYMENT</a>, plus per-capability files under <a href="capabilities/">docs/capabilities/</a>. The HTML pages are generated from <code>scripts/docs/</code>; run <code>node scripts/docs/build.mjs</code> after editing specs, then <code>node scripts/docs/quality-gate.mjs</code>.</p>
+<p>Long-form prose lives in Markdown and is linked from every page — never duplicated here: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/README.md">README.md</a>, <a href="ARCHITECTURE.md">ARCHITECTURE</a> · <a href="API.md">API</a> · <a href="BACKEND.md">BACKEND</a> · <a href="FRONTEND.md">FRONTEND</a> · <a href="MODELS.md">MODELS</a> · <a href="DEPLOYMENT.md">DEPLOYMENT</a>, plus per-capability files under <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs/capabilities">docs/capabilities/</a>. The HTML pages are generated from <code>scripts/docs/</code>; run <code>node scripts/docs/build.mjs</code> after editing specs, then <code>node scripts/docs/quality-gate.mjs</code>.</p>
       <footer class="site-footer">
         <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
