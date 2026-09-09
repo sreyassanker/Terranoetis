@@ -1,6 +1,6 @@
 // Product landing page (docs/index.html). Generated — content must remain
 // traceable: numbers here are the measured values published in the docs set.
-import { DOCS_VERSION, LAST_REVIEWED, SITE_ORIGIN, REPO } from './site.mjs';
+import { DOCS_VERSION, LAST_REVIEWED, SITE_ORIGIN, REPO, YOUTUBE_PLAYLIST } from './site.mjs';
 
 export const LANDING_PATH = 'index.html';
 
@@ -428,7 +428,7 @@ export function renderLanding() {
         <a href="capabilities/hazard-simulations.html">Capabilities</a>
         <a href="methodology.html">Verification</a>
         <a href="deployment.html">Deployment</a>
-        <a href="${REPO}" rel="noopener">GitHub</a>
+        <a href="${YOUTUBE_PLAYLIST}" rel="noopener" class="nav-demo">Demo</a>
       </nav>
       <!-- Top-right native GitHub Star Button -->
       <div class="gh-star-wrapper">

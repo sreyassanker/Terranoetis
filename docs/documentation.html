@@ -33,7 +33,7 @@
       <a href="methodology.html">Verification</a>
       <a href="deployment.html">Deployment</a>
       <a href="governance/style-guide.html">Governance</a>
-      <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
+      <a href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener" class="nav-demo">Demo</a>
     </nav>
   </div>
 </header>
@@ -92,7 +92,6 @@
         <li><a href="#verified-facts">Verified at a glance</a></li>
 <li><a href="#explore">Where to go next</a></li>
 <li><a href="#repo-map">Repository map</a></li>
-<li><a href="#source-of-truth">Markdown source of truth</a></li>
       </ul></nav>
       <p class="lede">Terranoetis is a real-time geospatial intelligence platform: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equation engines, seven hazard-physics simulation kernels, and an AI chat pipeline with dual-process cognition. These documents state what the software <em>does</em> — verified against the source in this repository, and against the code actually executed wherever this environment allows.</p>
 <div class="callout callout-verified" role="note"><div class="callout-title">Accuracy policy</div><p>Physics statements carry a <code>file:line</code> citation into the source. Executed evidence is tagged <span class="tag tag-measured">MEASURED</span>. See <a href="methodology.html">Methodology &amp; verification</a> and its <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p></div>
@@ -138,8 +137,6 @@
 <tr><td><code>scripts/</code></td><td>Dev utilities, live smoke scripts, docs build + quality gate</td></tr>
 <tr><td><code>.github/workflows/</code></td><td>ci.yml (10 jobs) + docs.yml (quality gate)</td></tr>
 </tbody></table></div>
-<h2 id="source-of-truth">Markdown source of truth</h2>
-<p>Long-form prose lives in Markdown and is linked from every page — never duplicated here: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/README.md">README.md</a>, <a href="ARCHITECTURE.md">ARCHITECTURE</a> · <a href="API.md">API</a> · <a href="BACKEND.md">BACKEND</a> · <a href="FRONTEND.md">FRONTEND</a> · <a href="MODELS.md">MODELS</a> · <a href="DEPLOYMENT.md">DEPLOYMENT</a>, plus per-capability files under <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs/capabilities">docs/capabilities/</a>. The HTML pages are generated from <code>scripts/docs/</code>; run <code>node scripts/docs/build.mjs</code> after editing specs, then <code>node scripts/docs/quality-gate.mjs</code>.</p>
       <footer class="site-footer">
         <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·

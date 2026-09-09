@@ -64,8 +64,6 @@ export const CORE_PAGES = [
         ['<code>scripts/</code>', 'Dev utilities, live smoke scripts, docs build + quality gate'],
         ['<code>.github/workflows/</code>', 'ci.yml (10 jobs) + docs.yml (quality gate)'],
       ]},
-      { kind: 'h2', id: 'source-of-truth', title: 'Markdown source of truth' },
-      { kind: 'p', html: `Long-form prose lives in Markdown and is linked from every page — never duplicated here: <a href="${REPO}/blob/main/README.md">README.md</a>, <a href="ARCHITECTURE.md">ARCHITECTURE</a> · <a href="API.md">API</a> · <a href="BACKEND.md">BACKEND</a> · <a href="FRONTEND.md">FRONTEND</a> · <a href="MODELS.md">MODELS</a> · <a href="DEPLOYMENT.md">DEPLOYMENT</a>, plus per-capability files under <a href="${REPO}/tree/main/docs/capabilities">docs/capabilities/</a>. The HTML pages are generated from <code>scripts/docs/</code>; run <code>node scripts/docs/build.mjs</code> after editing specs, then <code>node scripts/docs/quality-gate.mjs</code>.` },
     ],
   },
 
@@ -239,7 +237,7 @@ export const CORE_PAGES = [
         ['POST /api/kaggle/volcano/quantify', '16-member ensemble (ash/lava P5/P50/P95 + plume stats)', 'local python3', src(RT, '690') + ' ' + src('server/kaggle/localRunner.ts', '62-92')],
         ['GET /api/kaggle/volcano/profile', 'real wind-profile sampling for a box', 'server', src(RT, '47')],
       ]},
-      { kind: 'callout', tone: 'caution', title: 'Kernel honesty notes carried from source', html: `<p>Kernels refuse fabricated context: tsunami requires real GEBCO (synthetic fallback disabled) ${src('kaggle-kernels/tsunami-sim/main.py', '227-230')}; volcano requires real terrain ${src('kaggle-kernels/volcano-sim/main.py', '821-826')}; the wire builder throws rather than substituting missing numbers ${src(INDEX, '390-415')}. The solver gates (GMPE sanity, hurricane physics, mass-conservation proofs) abort emission on failure — see each page.</p>` },
+      { kind: 'callout', tone: 'caution', title: 'Kernel notes carried from source', html: `<p>Kernels refuse fabricated context: tsunami requires real GEBCO (synthetic fallback disabled) ${src('kaggle-kernels/tsunami-sim/main.py', '227-230')}; volcano requires real terrain ${src('kaggle-kernels/volcano-sim/main.py', '821-826')}; the wire builder throws rather than substituting missing numbers ${src(INDEX, '390-415')}. The solver gates (GMPE sanity, hurricane physics, mass-conservation proofs) abort emission on failure — see each page.</p>` },
       { kind: 'h2', id: 'pages', title: 'Capability pages' },
       { kind: 'cards', items: [
         { href: 'earthquake.html', title: 'Earthquake ground motion', desc: 'BSSA14 GMPE · measured 0.008 s compute, 166 ms e2e job' },
@@ -398,7 +396,7 @@ export const CORE_PAGES = [
         ['Causal discovery', 'Flask + DoWhy microservice (/discover, /health) in causal/python-service; optional in compose', src('server/causal/python-service/causal_service.py', '9,13')],
         ['Dream / forks / entropy / discovery', 'synthetic scenario generation; parallel-reality forks; entropy mixer broadcasts rolling domain anomaly scores every 60 s (header: “not a neural net”); discovery cycle 24 h', src('server/dream', 'engine') + ' ' + src('server/causal/entropyMixer.ts', '5-14,39') + ' ' + src('server/causal/discoveryEngine.ts', '8')],
       ]},
-      { kind: 'callout', tone: 'inspect', title: 'Honest scope', html: `<p>These are cognitive/state subsystems: their data structures, timers and gates are code-verified, and boot logs confirm the engines start. No prediction-accuracy claim is made anywhere in this documentation — accuracy tooling (Brier, calibration) exists to <em>measure</em> such claims over time, not to assert them.</p>` },
+      { kind: 'callout', tone: 'inspect', title: 'Scope note', html: `<p>These are cognitive/state subsystems: their data structures, timers and gates are code-verified, and boot logs confirm the engines start. No prediction-accuracy claim is made anywhere in this documentation — accuracy tooling (Brier, calibration) exists to <em>measure</em> such claims over time, not to assert them.</p>` },
     ],
   },
 
