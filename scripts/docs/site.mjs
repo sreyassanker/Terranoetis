@@ -54,6 +54,8 @@ export const NAV = [
   ]},
 ];
 
+export const YOUTUBE_PLAYLIST = 'https://www.youtube.com/playlist?list=PLFp9mjre3Lco';
+
 export const TOP_NAV = [
   { href: 'index.html', label: 'Overview' },
   { href: 'documentation.html', label: 'Documentation' },
@@ -61,7 +63,7 @@ export const TOP_NAV = [
   { href: 'methodology.html', label: 'Verification' },
   { href: 'deployment.html', label: 'Deployment' },
   { href: 'governance/style-guide.html', label: 'Governance' },
-  { href: REPO, label: 'GitHub', external: true },
+  { href: YOUTUBE_PLAYLIST, label: 'Demo', external: true, cls: 'nav-demo' },
 ];
 
 /** Repo-root-relative path from a page at `depth` levels below docs/ root. */
@@ -163,7 +165,7 @@ export function renderPage(page) {
   <div class="site-banner-inner">
     <a class="brand" href="${r('index.html')}"><img src="${r('terranoetis.png')}" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
-      ${TOP_NAV.map((t) => `<a href="${t.external ? t.href : r(t.href)}"${page.path === t.href ? ' aria-current="page"' : ''}${t.external ? ' rel="noopener"' : ''}>${esc(t.label)}</a>`).join('\n      ')}
+      ${TOP_NAV.map((t) => `<a href="${t.external ? t.href : r(t.href)}"${page.path === t.href ? ' aria-current="page"' : ''}${t.external ? ' rel="noopener"' : ''}${t.cls ? ` class="${t.cls}"` : ''}>${esc(t.label)}</a>`).join('\n      ')}
     </nav>
   </div>
 </header>

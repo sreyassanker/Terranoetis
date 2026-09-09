@@ -269,7 +269,7 @@ export const PAGES2 = [
         'Verbatim quotes from code comments/docstrings use the dashed quote block with a file:line footer; they are the authority for validity limits.',
         'Unit conventions: SI on parameter tables; non-SI retained only where a published formulation requires it (Rothermel imperial constants; FAO mm/inch), always stated inline. Wire units are named explicitly (µm vs m, km/h vs m/s).',
       ]},
-      { kind: 'h2', id: 'honesty', title: 'Honesty labels' },
+      { kind: 'h2', id: 'honesty', title: 'Notes' },
       { kind: 'table', cols: ['Label', 'Meaning', 'Rule'], rows: [
         [tagMeasured(), 'produced by executing the code in this repository on 2026-09-08', 'must be reproducible from the page’s own command block'],
         ['Known limitation (D-n)', 'defect or bound found by verification', 'register entry on the methodology page + note on the affected page'],

@@ -33,7 +33,7 @@
       <a href="../methodology.html">Verification</a>
       <a href="../deployment.html">Deployment</a>
       <a href="../governance/style-guide.html">Governance</a>
-      <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
+      <a href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener" class="nav-demo">Demo</a>
     </nav>
   </div>
 </header>
@@ -146,7 +146,7 @@
 <tr><td>POST /api/kaggle/volcano/quantify</td><td>16-member ensemble (ash/lava P5/P50/P95 + plume stats)</td><td>local python3</td><td><cite class="src">server/kaggle/routes.ts:690</cite> <cite class="src">server/kaggle/localRunner.ts:62-92</cite></td></tr>
 <tr><td>GET /api/kaggle/volcano/profile</td><td>real wind-profile sampling for a box</td><td>server</td><td><cite class="src">server/kaggle/routes.ts:47</cite></td></tr>
 </tbody></table></div>
-<div class="callout callout-caution" role="note"><div class="callout-title">Kernel honesty notes carried from source</div><p>Kernels refuse fabricated context: tsunami requires real GEBCO (synthetic fallback disabled) <cite class="src">kaggle-kernels/tsunami-sim/main.py:227-230</cite>; volcano requires real terrain <cite class="src">kaggle-kernels/volcano-sim/main.py:821-826</cite>; the wire builder throws rather than substituting missing numbers <cite class="src">src/services/kaggleSim.ts:390-415</cite>. The solver gates (GMPE sanity, hurricane physics, mass-conservation proofs) abort emission on failure — see each page.</p></div>
+<div class="callout callout-caution" role="note"><div class="callout-title">Kernel notes carried from source</div><p>Kernels refuse fabricated context: tsunami requires real GEBCO (synthetic fallback disabled) <cite class="src">kaggle-kernels/tsunami-sim/main.py:227-230</cite>; volcano requires real terrain <cite class="src">kaggle-kernels/volcano-sim/main.py:821-826</cite>; the wire builder throws rather than substituting missing numbers <cite class="src">src/services/kaggleSim.ts:390-415</cite>. The solver gates (GMPE sanity, hurricane physics, mass-conservation proofs) abort emission on failure — see each page.</p></div>
 <h2 id="pages">Capability pages</h2>
 <div class="card-grid"><div class="card"><a href="earthquake.html">Earthquake ground motion</a><p>BSSA14 GMPE · measured 0.008 s compute, 166 ms e2e job</p></div>
 <div class="card"><a href="tsunami.html">Tsunami propagation</a><p>HLL/minmod SWE · measured flat-bed stability + sloped-bed instability</p></div>
