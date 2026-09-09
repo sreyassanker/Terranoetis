@@ -184,7 +184,6 @@ ${page.head || ''}
       <div class="page-meta">
         <span><strong>Platform</strong> v${DOCS_VERSION}</span>
         <span><strong>Docs</strong> v${DOCS_VERSION}</span>
-        <span><strong>Last reviewed</strong> ${LAST_REVIEWED}</span>
         ${tags ? `<span>${tags}</span>` : ''}
       </div>
       ${page.proseMd ? `<p><strong>Full description:</strong> <a href="${r(page.proseMd)}">Read the full narrative</a></p>` : ''}
@@ -193,7 +192,7 @@ ${page.head || ''}
       </ul></nav>` : ''}
       ${page.sections.map(renderSection).join('\n')}
       <footer class="site-footer">
-        <p>Terranoetis v${DOCS_VERSION} · documentation last reviewed ${LAST_REVIEWED} ·
+        <p>Terranoetis v${DOCS_VERSION} ·
         source: <a href="${REPO}">${esc(REPO.replace('https://', ''))}</a> ·
         license: <a href="${REPO}/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="${REPO}/tree/main/docs">docs/</a> in-repo Markdown ·

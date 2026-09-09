@@ -85,8 +85,7 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-09</span>
-        <span><span class="tag tag-measured">VERIFICATION PASS COMPLETED 2026-09-09</span></span>
+        <span><span class="tag tag-measured">VERIFICATION PASS COMPLETED</span></span>
       </div>
       
       <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
@@ -107,8 +106,7 @@
 <h2 id="environment">Execution environment</h2>
 <dl class="metrics"><dt>Machine</dt><dd>Apple M1 (arm64), macOS 26.5.2 — <code>uname -m</code> + <code>sysctl machdep.cpu.brand_string</code></dd>
 <dt>Node.js</dt><dd>v26.0.0 (<code>node --version</code>) — repository targets ≥ 20 (<code>.nvmrc</code> pins 20)</dd>
-<dt>Python</dt><dd>3.14.5 · NumPy 2.4.2 · SciPy present</dd>
-<dt>Date</dt><dd>2026-09-09 — the date behind every “measured” stamp on this site</dd></dl>
+<dt>Python</dt><dd>3.14.5 · NumPy 2.4.2 · SciPy present</dd></dl>
 <h2 id="evidence-runs">Evidence runs</h2>
 <div class="table-scroll"><table><caption>Test suites</caption>
 <thead><tr><th scope="col">Command</th><th scope="col">Result</th></tr></thead>
@@ -159,7 +157,7 @@
 <tr><td>D-10</td><td>Determinism caveats: wildfire honours <code>seed</code> (optional — unseeded otherwise); wall-clock caps truncate runs machine-dependently (kernels ≤ 480 s; local server timeout 120 s); synthetic fallbacks are fixed-seed. All timing figures here are single observations on one machine.</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:407-415,568-570</cite> <cite class="src">server/kaggle/simRunner.ts:134</cite></td></tr>
 </tbody></table></div>
 <h2 id="discrepancy-log">Discrepancy log — documentation errors found & fixed</h2>
-<div class="table-scroll"><table><caption>The code was treated as authoritative in every case; sources of truth updated 2026-09-09.</caption>
+<div class="table-scroll"><table><caption>The code was treated as authoritative in every case; sources of truth updated in the second verification pass.</caption>
 <thead><tr><th scope="col">#</th><th scope="col">Claim</th><th scope="col">Verified correction</th><th scope="col">Fixed in</th></tr></thead>
 <tbody>
 <tr><td>C-1</td><td>“7 physics simulations — 3 run locally on CPU, 4 on free Kaggle <em>GPU</em> kernels” (README)</td><td>Kernels are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the Kaggle GPU accelerator; the other routed kernels have enable_gpu=false. “Kaggle kernels” is accurate; “GPU kernels” is not.</td><td>README.md · DEPLOYMENT.md · BACKEND.md · <a href="capabilities/hazard-simulations.html#modes">modes table</a></td></tr>
@@ -168,11 +166,11 @@
 <tr><td>C-4</td><td>Repository tree lists <code>server/digitalTwin/</code> (README)</td><td>Directory does not exist (disk + git ls-files).</td><td>README.md</td></tr>
 <tr><td>C-5</td><td>“sandboxV2: Simulation engines (FARSITE, ADCIRC, WRF, HYSPLIT)” (README/BACKEND/ARCHITECTURE)</td><td>Files are simplified surrogates named <code>*Lite</code> (cellular ROS; storm-surge SWE; dispersion particle model; idealized WRF-style driver) plus an FNO surrogate — not the operational models.</td><td>BACKEND.md · ARCHITECTURE.md · README.md</td></tr>
 <tr><td>C-6</td><td>“1,600+ tests” / “1624+ tests” (README/CONTRIBUTING)</td><td>Measured today: 1,653 unit + 49 integration passing.</td><td>README.md · CONTRIBUTING.md</td></tr>
-<tr><td>C-7</td><td>“Playwright browser tests (7 specs, 12 tests)” (README)</td><td>7 spec files; 15 <code>test()</code> declarations at line start, 14 registered by default per <code>npx playwright test --list</code> (“Total: 14 tests in 7 files”; the one extra land-cover test self-skips unless <code>LULC_HEAVY=1</code>). An earlier fix-note here stated “38 declarations” — that count came from a naive <code>grep "test("</code> that also matched regex <code>.test(</code> calls; corrected by direct enumeration 2026-09-09.</td><td>README.md · documentation hub</td></tr>
+<tr><td>C-7</td><td>“Playwright browser tests (7 specs, 12 tests)” (README)</td><td>7 spec files; 15 <code>test()</code> declarations at line start, 14 registered by default per <code>npx playwright test --list</code> (“Total: 14 tests in 7 files”; the one extra land-cover test self-skips unless <code>LULC_HEAVY=1</code>). An earlier fix-note here stated “38 declarations” — that count came from a naive <code>grep "test("</code> that also matched regex <code>.test(</code> calls; corrected by direct enumeration.</td><td>README.md · documentation hub</td></tr>
 <tr><td>C-8</td><td>Landing copy: “GPU-accelerated mathematical models computed directly over real 3D terrain meshes” (platform-overview)</td><td>Simulation math runs on CPU (NumPy); fields are rendered on the WebGL globe client-side.</td><td>old marketing claim removed; the rebuilt landing and <a href="documentation.html">docs hub</a> state the accurate wording</td></tr>
 <tr><td>C-9</td><td>docs/index.html was only a redirect to the marketing page</td><td>The site is now navigation-first from index.html; platform-overview.html preserved as a redirect stub so inbound URLs keep resolving.</td><td>docs/index.html · docs/platform-overview.html</td></tr>
 <tr><td>C-10</td><td>App shell “~11,000 lines”, “11 panels”, “41 modules” (approximations)</td><td>Measured: 11,038 lines; 11 lazy panels; 41 rendering modules.</td><td>now stated as measured counts</td></tr>
-<tr><td>C-11</td><td>Second verification pass 2026-09-09 (re-executed kernels, suites, boot; line-by-line claim audit)</td><td>Nine fixes: e2e suite counts “38 declarations” (naive grep artifact) → 15 declarations / 14 registered; handler count 371 (literal <code>app|router</code> only) → 398 across all router identifiers; “~100 provider keys” → 103 variables (62 key/token/secret); “archived example artifacts in <code>kaggle-kernels/results/</code>” → directory is empty and gitignored; error shape → two coexisting forms (string from handlers, <code>{error:{code,message}}</code> from central middleware); public-route wording → tiles/pulse/shared are public and unthrottled; phantom “vault” module removed from <code>routes/</code> inventory; “OpenTelemetry” relabelled as in-house OpenTelemetry-style tracing (official SDK imports are stubbed); Pages deployment paragraph → <code>docs/site/</code> via <code>deploy-docs.yml</code>; landing prerequisites badge “PYTHON 3.12+” → “PYTHON 3 + NumPy” (nothing enforces 3.12).</td><td>README.md · SECURITY.md · CONTRIBUTING.md · API.md · BACKEND.md · ARCHITECTURE.md · DEPLOYMENT.md · FRONTEND.md · MODELS.md · getting-started.md · capability pages · this site</td></tr>
+<tr><td>C-11</td><td>Second verification pass (re-executed kernels, suites, boot; line-by-line claim audit)</td><td>Nine fixes: e2e suite counts “38 declarations” (naive grep artifact) → 15 declarations / 14 registered; handler count 371 (literal <code>app|router</code> only) → 398 across all router identifiers; “~100 provider keys” → 103 variables (62 key/token/secret); “archived example artifacts in <code>kaggle-kernels/results/</code>” → directory is empty and gitignored; error shape → two coexisting forms (string from handlers, <code>{error:{code,message}}</code> from central middleware); public-route wording → tiles/pulse/shared are public and unthrottled; phantom “vault” module removed from <code>routes/</code> inventory; “OpenTelemetry” relabelled as in-house OpenTelemetry-style tracing (official SDK imports are stubbed); Pages deployment paragraph → <code>docs/site/</code> via <code>deploy-docs.yml</code>; landing prerequisites badge “PYTHON 3.12+” → “PYTHON 3 + NumPy” (nothing enforces 3.12).</td><td>README.md · SECURITY.md · CONTRIBUTING.md · API.md · BACKEND.md · ARCHITECTURE.md · DEPLOYMENT.md · FRONTEND.md · MODELS.md · getting-started.md · capability pages · this site</td></tr>
 </tbody></table></div>
 <h2 id="unverified">Claims not verifiable in this environment</h2>
 <div class="table-scroll"><table><caption></caption>
@@ -211,7 +209,7 @@ cd kaggle-kernels/volcano-sim/benchmarks &amp;&amp; python3 run_benchmarks.py   
 cd kaggle-kernels/landslide-sim &amp;&amp; python3 validate_convergence.py       # gates
 node scripts/docs/build.mjs &amp;&amp; node scripts/docs/quality-gate.mjs</code></pre>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
+        <p>Terranoetis v3.0.0 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

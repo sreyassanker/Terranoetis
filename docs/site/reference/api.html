@@ -86,7 +86,6 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-09</span>
         <span><span class="tag tag-measured">MEASURED — endpoint map read from route registrations; complete list in API.md</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="../narratives/API.html">Read the full narrative</a></p>
@@ -95,7 +94,7 @@
 <li><a href="#realtime">Realtime transports</a></li>
       </ul></nav>
       <p>The API is Express 4 mounted at <code>/api</code> with JWT bearer auth (RBAC via <code>authGuard</code>/<code>requireRole</code>), in-process IP + per-user rate limiting, zod validation and a canonical <code>{error:{code,message}}</code> envelope. A public allow-list covers health/metrics/config/OpenAPI plus read-only live-data routes rate-limited at 300 req/min/IP; tile, pulse and share-token routes are public by design and unthrottled; everything else requires a token. <cite class="src">server/index.ts:373-487</cite></p>
-<dl class="metrics"><dt>Route registrations</dt><dd>398 handler registrations (<code>(app|*Router).get/post/put/delete/patch(</code>) under server/ — grep count 2026-09-09; API.md headline “360+” is consistent</dd>
+<dl class="metrics"><dt>Route registrations</dt><dd>398 handler registrations (<code>(app|*Router).get/post/put/delete/patch(</code>) under server/ — grep count; API.md headline “360+” is consistent</dd>
 <dt>Auth</dt><dd>JWT TTL 1 h prod / 1 d dev · scrypt (N=16384, r=8, p=1) · login 5/15 min + 10-attempt lockout (HTTP 423)</dd>
 <dt>Errors</dt><dd>400 validation · 401 token · 403 role · 404 · 409 job-not-ready · 413 body-too-large · 423 locked · 429 limited · 500</dd>
 <dt>OpenAPI</dt><dd>GET /api/openapi.json (generated) + /api/docs UI</dd></dl>
@@ -126,7 +125,7 @@
 </tbody></table></div>
 <p>The complete per-endpoint table lives in <a href="../narratives/API.html">API.md</a>; a machine-readable schema is served at <code>/api/openapi.json</code>. This page intentionally does not duplicate it.</p>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
+        <p>Terranoetis v3.0.0 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

@@ -85,7 +85,6 @@
       <div class="page-meta">
         <span><strong>Platform</strong> v3.0.0</span>
         <span><strong>Docs</strong> v3.0.0</span>
-        <span><strong>Last reviewed</strong> 2026-09-09</span>
         <span><span class="tag tag-measured">MEASURED — topology read from the measured server boot order</span></span>
       </div>
       <p><strong>Full description:</strong> <a href="narratives/ARCHITECTURE.html">Read the full narrative</a></p>
@@ -97,7 +96,7 @@
       </ul></nav>
       <p>Terranoetis is a three-tier application: a React 19 + CesiumJS single-page client (Vite 7), a Node.js + Express 4 API (TypeScript run via <code>tsx</code>), and SQLite (primary store) with Redis as an optional cache/memory hot path. The client talks REST + SSE + WebSocket to the API; the API orchestrates live-data fetchers, the 150-equation analytical engine, the hazard-simulation runners and the cognitive pipeline.</p>
 <h2 id="boot-order">Server assembly</h2>
-<div class="table-scroll"><table><caption>Middleware/service order in server/index.ts (line cites are the app.use/startup sequence; boot observed 2026-09-09 on port 3399)</caption>
+<div class="table-scroll"><table><caption>Middleware/service order in server/index.ts (line cites are the app.use/startup sequence; boot observed on port 3399)</caption>
 <thead><tr><th scope="col">Order</th><th scope="col">Component</th><th scope="col">Detail</th><th scope="col">Source</th></tr></thead>
 <tbody>
 <tr><td>1</td><td>helmet CSP + Permissions-Policy</td><td>explicit CSP incl. Cesium/WS allowances; HSTS 1 yr in prod</td><td><cite class="src">server/index.ts:233-272</cite></td></tr>
@@ -107,7 +106,7 @@
 <tr><td>5</td><td>auth endpoints pre-guard</td><td>login rate-limited 5/15 min; refresh; dev-login non-prod only</td><td><cite class="src">server/index.ts:306-314</cite></td></tr>
 <tr><td>6</td><td>global /api guard</td><td>public allow-list: health/metrics/config/OpenAPI + rate-limited read-only data routes (300/min/IP) + unthrottled public non-data routes (tiles, pulse, share-token reads); everything else requires JWT</td><td><cite class="src">server/index.ts:373-487</cite></td></tr>
 <tr><td>7</td><td>routers</td><td>foundation-models, fork, pulse, /api/kaggle, analytical-models, openapi</td><td><cite class="src">server/index.ts:489-494</cite></td></tr>
-<tr><td>8</td><td>DynamicToolRegistry (DB-persisted; 210 tools loaded at boot 2026-09-09) + Omninet init + local GGUF spawn</td><td>llama-server :11436 when model file present</td><td><cite class="src">server/index.ts:513-817</cite></td></tr>
+<tr><td>8</td><td>DynamicToolRegistry (DB-persisted; 210 tools loaded at boot) + Omninet init + local GGUF spawn</td><td>llama-server :11436 when model file present</td><td><cite class="src">server/index.ts:513-817</cite></td></tr>
 <tr><td>9</td><td>listen() background engines</td><td>sentinel, monitors, forecast ledger, reflex, forks, entropy, discovery, dream, memory system, power saver</td><td><cite class="src">server/index.ts:14448-14488</cite></td></tr>
 <tr><td>10</td><td>graceful shutdown</td><td>stop engines → close HTTP → queue shutdown 10 s → close DB</td><td><cite class="src">server/index.ts:14519-14573</cite></td></tr>
 </tbody></table></div>
@@ -118,7 +117,7 @@
 <li>Tool execution: live-data fetchers, analytical tools, sandbox, simulation jobs; ≤ 3 tool rounds; SSE streamed with 15 s heartbeats and a hard 150 s run cap — <cite class="src">server/index.ts:9801-9811,10966-10983</cite></li>
 <li>Write-through to the chat knowledge graph and reasoning traces — <cite class="src">server/index.ts:11237</cite> <cite class="src">server/kgV2/chatKgBridge.ts:28</cite></li></ol>
 <h2 id="modules">Module inventory</h2>
-<p>LOC per directory and each module’s purpose are tabulated in the prose document (<a href="narratives/BACKEND.html">BACKEND.md</a>), verified against the tree on 2026-09-09. Highlights of interest to researchers: <code>analytical-models/</code> (23,866 LOC), <code>kaggle/</code> (3,105), <code>cognition/</code> (2,760), <code>sentinel/</code> (3,191), <code>memoryV2/</code> (2,091).</p>
+<p>LOC per directory and each module’s purpose are tabulated in the prose document (<a href="narratives/BACKEND.html">BACKEND.md</a>), verified against the tree. Highlights of interest to researchers: <code>analytical-models/</code> (23,866 LOC), <code>kaggle/</code> (3,105), <code>cognition/</code> (2,760), <code>sentinel/</code> (3,191), <code>memoryV2/</code> (2,091).</p>
 <h2 id="storage">Persistence and realtime plumbing</h2>
 <div class="table-scroll"><table><caption></caption>
 <thead><tr><th scope="col">Subsystem</th><th scope="col">Implementation</th><th scope="col">Source</th></tr></thead>
@@ -131,7 +130,7 @@
 </tbody></table></div>
 <div class="callout callout-caution" role="note"><div class="callout-title">Corrected claim</div><p>Earlier revisions described Redis as handling “pub/sub” and the docs tree listed a <code>server/digitalTwin/</code> module; both were inaccurate (pub/sub is the in-process bus; digitalTwin does not exist). See the <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p></div>
       <footer class="site-footer">
-        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-09 ·
+        <p>Terranoetis v3.0.0 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
         full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·

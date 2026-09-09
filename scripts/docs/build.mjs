@@ -53,7 +53,7 @@ function hazardPage(key) {
     { kind: 'verbatim', quote: hz.validity.quote, cite: hz.validity.cite },
     { kind: 'p', html: hz.gate },
     { kind: 'h2', id: 'measured', title: 'Measured runs and timings' },
-    { kind: 'table', caption: 'Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2), 2026-09-09. These are observations of one environment, not performance guarantees.', cols: ['Run / check', 'Measured result'], rows: hz.measured.map(([a, b]) => [a, b]) },
+    { kind: 'table', caption: 'Executed on an Apple-Silicon laptop (Python 3.14.5, NumPy 2.4.2). These are observations of one environment, not performance guarantees.', cols: ['Run / check', 'Measured result'], rows: hz.measured.map(([a, b]) => [a, b]) },
     ...(hz.knownLimitation ? [
       { kind: 'h2', id: 'known-limitation', title: 'Known numerical limitation' },
       { kind: 'callout', tone: 'warning', title: 'Tsunami solver — non-flat bathymetry instability', html: `<p>${hz.knownLimitation}</p>` },

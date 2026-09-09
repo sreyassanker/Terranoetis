@@ -161,7 +161,7 @@ The `.env` file configures 100+ variables covering 70+ integrated services (see 
 
 ### Kaggle simulation kernels (optional setup)
 
-Four physics simulations (tsunami, volcano, landslide, flood) are dispatched to **Kaggle kernels** as their execution venue. All kernels are NumPy CPU code (no GPU imports); only flood-sim requests Kaggle's GPU accelerator in its kernel metadata, so “GPU kernels” is a hosting term here, not a compute claim (verified 2026-09-09 — see [modes table](../capabilities/hazard-simulations.html#modes)). The three 2D scenarios — earthquake, wildfire, and hurricane — finish in seconds on a laptop CPU and run **locally via `python3`** (see `server/kaggle/simRunner.ts`; measured end-to-end job completion of 166 ms for the earthquake kernel), so they work without any token. To enable the Kaggle-routed kernels:
+Four physics simulations (tsunami, volcano, landslide, flood) are dispatched to **Kaggle kernels** as their execution venue. All kernels are NumPy CPU code (no GPU imports); only flood-sim requests Kaggle's GPU accelerator in its kernel metadata, so “GPU kernels” is a hosting term here, not a compute claim (verified — see [modes table](../capabilities/hazard-simulations.html#modes)). The three 2D scenarios — earthquake, wildfire, and hurricane — finish in seconds on a laptop CPU and run **locally via `python3`** (see `server/kaggle/simRunner.ts`; measured end-to-end job completion of 166 ms for the earthquake kernel), so they work without any token. To enable the Kaggle-routed kernels:
 
 1. Create a token at **https://www.kaggle.com/settings/account** → *Create New Token* (requires an account with phone verification).
 2. Save the downloaded `kaggle.json` as **`~/.kaggle/kaggle.json`** and restrict permissions:
@@ -194,7 +194,7 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) runs the following on p
 
 ### CI Notes
 
-- **Node version:** 20 (specified in workflow and `.nvmrc`; the 2026-09-09 verification pass ran Node 26 with 1,653 unit + 49 integration tests passing)
+- **Node version:** 20 (specified in workflow and `.nvmrc`; the verification pass ran Node 26 with 1,653 unit + 49 integration tests passing)
 - **Docs quality gate:** `.github/workflows/docs.yml` runs on pushes/PRs to `main`/`develop` touching `docs/site/**`, `scripts/docs/**`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, or the workflow itself; `deploy-docs.yml` publishes `docs/site/` to GitHub Pages (workflow deploy; also manually dispatchable)
 - **Browser tests** run headless in CI on `ubuntu-latest` using Chromium with software WebGL (`--use-gl=angle --enable-unsafe-swiftshader`), so no physical display/GPU is required. They are still the most environment-sensitive job and can be flaky.
 - **Redis** is optional in both development and CI (the server falls back to SQLite gracefully)

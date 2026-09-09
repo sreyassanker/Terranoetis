@@ -1,6 +1,6 @@
 # API Reference
 
-Terranoetis exposes **360+ REST endpoints** (398 handler registrations across `app`/router verbs under `server/`, counted 2026-09-09; `GET`/`POST`/`PUT`/`DELETE`/`PATCH`) plus real-time **WebSocket** (`/ws/agent`, `/ws/voice`) and **SSE** channels. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
+Terranoetis exposes **360+ REST endpoints** (398 handler registrations across `app`/router verbs under `server/`; `GET`/`POST`/`PUT`/`DELETE`/`PATCH`) plus real-time **WebSocket** (`/ws/agent`, `/ws/voice`) and **SSE** channels. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
 
 > Site views: [API reference](../reference/api.html) · [Simulation job API & parameter contracts](../reference/simulation-api.html) · machine-readable spec at `GET /api/openapi.json`. The tables below are the curated prose map; per-endpoint behaviour is cited in the reference pages.
 
