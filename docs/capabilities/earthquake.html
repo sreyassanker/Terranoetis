@@ -5,32 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Earthquake ground motion (BSSA14 GMPE ShakeMap) — Terranoetis Documentation</title>
 <meta name="description" content="Scenario ShakeMap: Boore–Stewart–Seyhan–Atkinson NGA-West2 ground-motion prediction equation with linear + nonlinear site response and USGS instrumental intensity, computed locally on CPU.">
-<link rel="canonical" href="https://terranoetis.com/capabilities/earthquake.html">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/capabilities/earthquake.html">
 <link rel="stylesheet" href="../assets/docs.css">
 <link rel="icon" href="../terranoetis.png" type="image/png">
 <meta property="og:title" content="Earthquake ground motion (BSSA14 GMPE ShakeMap) — Terranoetis Documentation">
 <meta property="og:description" content="Scenario ShakeMap: Boore–Stewart–Seyhan–Atkinson NGA-West2 ground-motion prediction equation with linear + nonlinear site response and USGS instrumental intensity, computed locally on CPU.">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://terranoetis.com/capabilities/earthquake.html">
-<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/capabilities/earthquake.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
 <meta name="docs-last-reviewed" content="2026-09-08">
 <meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
-      <a href="../documentation.html">Docs home</a>
+      <a href="../documentation.html">Documentation</a>
       <a href="../capabilities/hazard-simulations.html">Capabilities</a>
-      <a href="../reference/api.html">Reference</a>
-      <a href="../methodology.html">Methodology</a>
+      <a href="../methodology.html">Verification</a>
       <a href="../deployment.html">Deployment</a>
       <a href="../governance/style-guide.html">Governance</a>
+      <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
@@ -99,7 +102,7 @@
 <dl class="metrics"><dt>Execution mode</dt><dd>Local CPU (python3) — no Kaggle token required <cite class="src">server/kaggle/simRunner.ts:126-141</cite> (LOCAL_SIM_TYPES)</dd>
 <dt>Verification</dt><dd>MEASURED — executed directly and end-to-end through the job API</dd>
 <dt>Wire scenario type</dt><dd><code>earthquake_swarm</code> — contract at <cite class="src">src/services/kaggleSim.ts:28-240</cite>; job API at <a href="../reference/simulation-api.html">Simulation job API</a></dd></dl>
-<div class="callout callout-verified" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). <span class="tag tag-inspected">CODE INSPECTION ONLY</span> marks behaviour traced to source lines but not executed here (e.g. Kaggle push/poll transport). Inspected is never presented as tested.</p></div>
+<div class="callout callout-verified" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). Behaviour traced to source lines but not executed here (e.g. the Kaggle push/poll transport) is verified by code inspection and is never presented as tested.</p></div>
 <h2 id="physics">Governing equations and coefficients</h2>
 <p>Source attribution as stated in the kernel header (verbatim):</p>
 <blockquote class="verbatim">PGA, PGV and Sa(1.0 s): the Boore, Stewart, Seyhan &amp; Atkinson NGA-West2 GMPE (BSSA14; PEER 2013/05, published as Boore et al. 2014, BSSA 104(2), doi:10.1785/0120130065). … ln Y = FE(M,mech) + FP(R,M) + FS(VS30,M,R) with the full linear + nonlinear site response; unspecified fault mechanism; base-case (no regional anelastic / basin-depth terms). Validity: M 3-9.7, shallow crustal, VS30 150-1500 m/s.<footer><cite class="src">kaggle-kernels/earthquake-sim/main.py:14-21</cite></footer></blockquote>
@@ -110,7 +113,7 @@
 <figure class="equation"><span class="formula">lnFlin = c·ln(min(VS30, Vc)/Vref);  lnFnl = f1 + f2·ln((PGA_r+f3)/f3),  f2 = f4·[exp(f5·(min(VS30,760)−360)) − exp(f5·(760−360))]</span><figcaption>Linear + nonlinear site response; PGA_r is the Vs30 = 760 m/s reference-rock PGA. <cite class="src">kaggle-kernels/earthquake-sim/main.py:120-129,94-99</cite></figcaption></figure>
 <figure class="equation"><span class="formula">MMI = max(MMI_PGA, MMI_PGV)                [unitless, 1…10]</span><figcaption>USGS instrumental intensity: Worden et al. 2012 (doi:10.1785/0120110156) + global GMICE Caprio et al. 2015 (doi:10.1785/0120140286). <cite class="src">kaggle-kernels/earthquake-sim/main.py:23-25,144-153,282</cite></figcaption></figure>
 <h3 id="coefficients">Coefficients and named constants</h3>
-<div class="table-scroll"><table><caption>BSSA14 base-case coefficients, read from the PEER 2013/05 appendix tables (PDF archived under docs/Research papers/ as boore-2014-nga-west2-gmpe-peer-2013-05.pdf). Order e0,e1,e2,e3,e4,e5,e6,Mh,c1,c2,c3,Mref,Rref,h.</caption>
+<div class="table-scroll"><table><caption>BSSA14 base-case coefficients, read from the PEER 2013/05 appendix tables. Order e0,e1,e2,e3,e4,e5,e6,Mh,c1,c2,c3,Mref,Rref,h.</caption>
 <thead><tr><th scope="col">IM</th><th scope="col">e0</th><th scope="col">e4</th><th scope="col">e5</th><th scope="col">e6</th><th scope="col">Mh</th><th scope="col">c1</th><th scope="col">c2</th><th scope="col">c3</th><th scope="col">Mref</th><th scope="col">Rref</th><th scope="col">h</th></tr></thead>
 <tbody>
 <tr><td>PGA</td><td>0.4473</td><td>1.431</td><td>0.05053</td><td>−0.1662</td><td>5.5</td><td>−1.134</td><td>0.1917</td><td>−0.00809</td><td>4.5</td><td>1.0</td><td>4.5</td></tr>

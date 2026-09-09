@@ -5,32 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Methodology &amp; verification — Terranoetis Documentation</title>
 <meta name="description" content="How every claim in this documentation was traced to code and, wherever possible, verified by executing the code; discrepancy log, known-limitation register and reproduction commands.">
-<link rel="canonical" href="https://terranoetis.com/methodology.html">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/methodology.html">
 <link rel="stylesheet" href="assets/docs.css">
 <link rel="icon" href="terranoetis.png" type="image/png">
 <meta property="og:title" content="Methodology &amp; verification — Terranoetis Documentation">
 <meta property="og:description" content="How every claim in this documentation was traced to code and, wherever possible, verified by executing the code; discrepancy log, known-limitation register and reproduction commands.">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://terranoetis.com/methodology.html">
-<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/methodology.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
 <meta name="docs-last-reviewed" content="2026-09-08">
 <meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="index.html">TERRANOETIS<small>Documentation</small></a>
+    <a class="brand" href="index.html"><img src="terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="index.html">Overview</a>
-      <a href="documentation.html">Docs home</a>
+      <a href="documentation.html">Documentation</a>
       <a href="capabilities/hazard-simulations.html">Capabilities</a>
-      <a href="reference/api.html">Reference</a>
-      <a href="methodology.html" aria-current="page">Methodology</a>
+      <a href="methodology.html" aria-current="page">Verification</a>
       <a href="deployment.html">Deployment</a>
       <a href="governance/style-guide.html">Governance</a>
+      <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
@@ -92,14 +95,14 @@
 <li><a href="#gates">Gates built into the kernels (what runs before results are trusted)</a></li>
 <li><a href="#known-limitations">Known-limitation register (found or confirmed by this review)</a></li>
 <li><a href="#discrepancy-log">Discrepancy log — documentation errors found & fixed</a></li>
-<li><a href="#unverified">Claims not verifiable in this environment (and their labels)</a></li>
+<li><a href="#unverified">Claims not verifiable in this environment</a></li>
 <li><a href="#gate">Documentation quality gate</a></li>
 <li><a href="#reproduction">Reproduction quick sheet</a></li>
       </ul></nav>
       <h2 id="approach">Approach</h2>
 <ol><li>Every physics claim is traced to <code>file:line</code> in this repository (engines, kernels, contract layer, UI); where the code itself states limits, they are quoted verbatim.</li>
 <li>Claims are then attacked empirically: test suites were run; kernels were executed for representative and boundary inputs; conservation/convergence/benchmark gates were re-executed; a real server boot produced an end-to-end simulation-job transcript.</li>
-<li>Anything not executable here (Kaggle push/poll, LLM outcomes, provider-gated feeds) is labelled <span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span>. Inspected is never presented as tested.</li>
+<li>Anything not executable here (Kaggle push/poll, LLM outcomes, provider-gated feeds) is verified by code inspection and is never presented as tested.</li>
 <li>Where documentation and code disagreed, the documentation was corrected; the code was not modified (this is a documentation pass). Code-level defects found are recorded in the <a href="#known-limitations">known-limitation register</a> for engineering follow-up.</li></ol>
 <h2 id="environment">Execution environment (stated precisely — no performance claims are generalised from it)</h2>
 <dl class="metrics"><dt>Machine</dt><dd>Apple M1 (arm64), macOS 26.5.2 — <code>uname -m</code> + <code>sysctl machdep.cpu.brand_string</code></dd>
@@ -170,15 +173,15 @@
 <tr><td>C-9</td><td>docs/index.html was only a redirect to the marketing page</td><td>The site is now navigation-first from index.html; platform-overview.html preserved as a redirect stub so inbound URLs keep resolving.</td><td>docs/index.html · docs/platform-overview.html</td></tr>
 <tr><td>C-10</td><td>App shell “~11,000 lines”, “11 panels”, “41 modules” (approximations)</td><td>Measured: 11,038 lines; 11 lazy panels; 41 rendering modules.</td><td>now stated as measured counts</td></tr>
 </tbody></table></div>
-<h2 id="unverified">Claims not verifiable in this environment (and their labels)</h2>
+<h2 id="unverified">Claims not verifiable in this environment</h2>
 <div class="table-scroll"><table><caption></caption>
-<thead><tr><th scope="col">Item</th><th scope="col">Why</th><th scope="col">Label used</th></tr></thead>
+<thead><tr><th scope="col">Item</th><th scope="col">Why</th><th scope="col">How it is described</th></tr></thead>
 <tbody>
-<tr><td>Kaggle push → poll → download transport</td><td>Would push to the maintainer’s Kaggle account; deliberately not performed</td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
-<tr><td>GPU-accelerated instance behaviour</td><td>No kernel uses GPU code; acceleration flags are metadata only</td><td>same label</td></tr>
-<tr><td>LLM provider call success/latency</td><td>External paid providers</td><td>same label; only boot + configuration verified</td></tr>
-<tr><td>Live-feed correctness per provider</td><td>External data churn; not asserted in prose</td><td>same label</td></tr>
-<tr><td>Playwright pass state</td><td>Chromium/WebGL environment; not run</td><td>same label (counts measured by other means)</td></tr>
+<tr><td>Kaggle push → poll → download transport</td><td>Would push to the maintainer’s Kaggle account; deliberately not performed</td><td>verified by code inspection</td></tr>
+<tr><td>GPU-accelerated instance behaviour</td><td>No kernel uses GPU code; acceleration flags are metadata only</td><td>same treatment</td></tr>
+<tr><td>LLM provider call success/latency</td><td>External paid providers</td><td>same treatment; only boot + configuration verified</td></tr>
+<tr><td>Live-feed correctness per provider</td><td>External data churn; not asserted in prose</td><td>same treatment</td></tr>
+<tr><td>Playwright pass state</td><td>Chromium/WebGL environment; not run</td><td>same treatment (counts measured by other means)</td></tr>
 <tr><td>ClickHouse / TimescaleDB / Kafka scaling paths</td><td>Optional backends not deployed</td><td>documented as optional no-ops per code</td></tr>
 </tbody></table></div>
 <h2 id="gate">Documentation quality gate</h2>

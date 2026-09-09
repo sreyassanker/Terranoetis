@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Page not found — Terranoetis Documentation</title>
+  <meta name="description" content="The requested Terranoetis documentation page does not exist. Start from the documentation index.">
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="/Terranoetis/assets/docs.css">
+  <link rel="icon" href="/Terranoetis/terranoetis.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body { min-height: 100vh; display: flex; flex-direction: column; }
+    .nf-main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 3rem 1.5rem; }
+    .nf-card { text-align: center; max-width: 36rem; }
+    .nf-code {
+      font-family: 'Syncopate', ui-sans-serif, system-ui, sans-serif;
+      font-weight: 700; font-size: clamp(3rem, 10vw, 5.5rem);
+      line-height: 1.1; margin: 0 0 1rem;
+      background: linear-gradient(180deg, #0b1329 0%, #0284c7 100%);
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: 0.04em;
+    }
+    .nf-card h1 { font-size: 1.4rem; color: #0f172a; margin: 0 0 0.75rem; }
+    .nf-card p { color: #475569; line-height: 1.65; margin: 0 0 2rem; }
+    .nf-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .nf-links { margin-top: 2.5rem; font-size: 0.9rem; color: #64748b; }
+    .nf-links a { color: #0284c7; }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-banner">
+    <div class="site-banner-inner">
+      <a class="brand" href="/Terranoetis/index.html"><img src="/Terranoetis/terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="/Terranoetis/index.html">Overview</a>
+        <a href="/Terranoetis/documentation.html">Documentation</a>
+        <a href="/Terranoetis/capabilities/hazard-simulations.html">Capabilities</a>
+        <a href="/Terranoetis/methodology.html">Verification</a>
+        <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+  <main id="main" class="nf-main">
+    <div class="nf-card">
+      <p class="nf-code">404</p>
+      <h1>This page does not exist</h1>
+      <p>The address may be mistyped, or the page may have moved. Everything the documentation covers is reachable from the index below.</p>
+      <div class="nf-actions">
+        <a class="btn btn-primary" href="/Terranoetis/documentation.html">Open the documentation</a>
+        <a class="btn btn-ghost" href="/Terranoetis/index.html">Back to overview</a>
+      </div>
+      <p class="nf-links">Popular pages: <a href="/Terranoetis/getting-started.html">Getting started</a> · <a href="/Terranoetis/capabilities/hazard-simulations.html">Hazard simulations</a> · <a href="/Terranoetis/reference/api.html">API reference</a> · <a href="/Terranoetis/methodology.html">Methodology</a></p>
+    </div>
+  </main>
+  <footer class="site-footer" style="text-align:center">
+    <p>Terranoetis v3.0.0 · source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> · license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a></p>
+  </footer>
+  <script>
+    (function () {
+      // If served from a different base (custom domain), rewrite absolute links in place.
+      var base = window.location.pathname.split('/').slice(0, -1).join('/');
+      if (base && base !== '/Terranoetis') {
+        document.querySelectorAll('a[href^="/Terranoetis/"]').forEach(function (a) {
+          a.setAttribute('href', a.getAttribute('href').replace('/Terranoetis', base));
+        });
+        document.querySelectorAll('link[href^="/Terranoetis/"], img[src^="/Terranoetis/"]').forEach(function (el) {
+          var attr = el.tagName === 'LINK' ? 'href' : 'src';
+          el.setAttribute(attr, el.getAttribute(attr).replace('/Terranoetis', base));
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

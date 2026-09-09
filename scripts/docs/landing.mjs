@@ -16,6 +16,9 @@ export function renderLanding() {
 <link rel="stylesheet" href="assets/docs.css">
 <link rel="stylesheet" href="assets/landing.css">
 <link rel="icon" href="terranoetis.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
 <meta property="og:title" content="Terranoetis — Real-Time Geospatial Intelligence Platform">
 <meta property="og:description" content="150 literature-cited equation engines · 7 hazard-physics kernels · live-data monitoring · AI-assisted analysis on a 3D globe.">
 <meta property="og:type" content="website">
@@ -25,49 +28,466 @@ export function renderLanding() {
 <meta name="docs-version" content="${DOCS_VERSION}">
 <meta name="docs-last-reviewed" content="${LAST_REVIEWED}">
 <meta name="generator" content="scripts/docs/landing.mjs">
+<!-- GitHub Official Buttons SDK for dynamic stars & direct starring -->
+<script async defer src="https://buttons.github.io/buttons.js"></script>
+<style>
+  /* -------------------------------------------------------------
+     Navbar Modern Layout & Top-Right Star Widget
+     ------------------------------------------------------------- */
+  .site-banner-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+  }
+
+  .nav-right-cluster {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+  }
+
+  .gh-star-wrapper {
+    display: inline-flex;
+    align-items: center;
+    line-height: 0;
+  }
+
+  /* -------------------------------------------------------------
+     Hero & High-Contrast Typography Fixes
+     ------------------------------------------------------------- */
+  .hero-spotlight {
+    max-width: 76rem;
+    margin: 0 auto;
+    padding: 3.5rem 1.5rem 2rem;
+    text-align: center;
+  }
+
+  .pulse-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: #0ea5e9;
+    border-radius: 50%;
+    margin-right: 6px;
+    box-shadow: 0 0 0 rgba(14, 165, 233, 0.4);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.6); }
+    70% { box-shadow: 0 0 0 8px rgba(14, 165, 233, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0); }
+  }
+
+  .hero-spotlight .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    color: #0369a1;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0.35rem 0.9rem;
+    border-radius: 9999px;
+    margin-bottom: 1.5rem;
+  }
+
+  .hero-spotlight h1 {
+    font-family: 'Syncopate', sans-serif;
+    font-size: clamp(2rem, 4.5vw, 3.2rem);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.15;
+    margin: 0 0 1.25rem;
+    filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.35)) drop-shadow(0 0 20px rgba(56, 189, 248, 0.15));
+  }
+  .hero-spotlight h1 .terra {
+    background: linear-gradient(180deg, #0b1329 0%, #0284c7 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero-spotlight h1 .noetis {
+    background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-spotlight .tagline {
+    color: #475569 !important;
+    font-size: 1.125rem;
+    line-height: 1.7;
+    max-width: 52rem;
+    margin: 0 auto 2.25rem;
+  }
+
+  .hero-spotlight .hero-actions {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 3rem;
+  }
+
+  .hero-spotlight .btn-ghost {
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    transition: all 0.2s ease;
+  }
+
+  .hero-spotlight .btn-ghost:hover {
+    background: #f8fafc;
+    border-color: #94a3b8;
+    transform: translateY(-1px);
+  }
+
+  .hero-spotlight .btn-primary {
+    transition: all 0.2s ease;
+  }
+
+  .hero-spotlight .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(2, 132, 199, 0.25);
+  }
+
+  /* -------------------------------------------------------------
+     Large Cinematic Showcase Image
+     ------------------------------------------------------------- */
+  .hero-large-mockup {
+    max-width: 72rem;
+    margin: 0 auto 3rem;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 24px 48px -12px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.06);
+    border: 1px solid #cbd5e1;
+    background: #020617;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .hero-large-mockup:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 30px 60px -12px rgba(15, 23, 42, 0.24);
+  }
+
+  .hero-large-mockup img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .hero-large-mockup figcaption {
+    padding: 0.85rem 1rem;
+    font-size: 0.875rem;
+    color: #64748b;
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+    text-align: center;
+  }
+
+  /* -------------------------------------------------------------
+     Modern Animated Metric Grid
+     ------------------------------------------------------------- */
+  .modern-stat-grid {
+    max-width: 72rem;
+    margin: 0 auto 1.5rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1.25rem;
+  }
+
+  .stat-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1.75rem 1.5rem;
+    text-align: left;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #0284c7, #38bdf8);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+
+  .stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px -6px rgba(15, 23, 42, 0.08);
+    border-color: #cbd5e1;
+  }
+
+  .stat-card:hover::before {
+    opacity: 1;
+  }
+
+  .stat-num {
+    display: block;
+    font-size: 2.5rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.1;
+    margin-bottom: 0.35rem;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-txt {
+    font-size: 0.9rem;
+    color: #64748b;
+    line-height: 1.45;
+  }
+
+  .feat, .hz {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .feat:hover, .hz:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.06);
+  }
+
+  /* -------------------------------------------------------------
+     Interactive 3D Tilt Terminal Section
+     ------------------------------------------------------------- */
+  .deck-3d-stage {
+    max-width: 58rem;
+    margin: 2.5rem auto 1rem;
+    perspective: 1200px;
+    padding: 1rem;
+  }
+
+  .deck-terminal-card {
+    position: relative;
+    background: #090d16;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+      0 25px 50px -12px rgba(0, 0, 0, 0.45),
+      0 0 0 1px rgba(255, 255, 255, 0.05),
+      0 0 35px rgba(56, 189, 248, 0.12);
+    transform-style: preserve-3d;
+    transform: rotateX(6deg) translateY(0);
+    transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s ease;
+    overflow: hidden;
+  }
+
+  .deck-terminal-card:hover {
+    transform: rotateX(0deg) translateY(-4px);
+    box-shadow:
+      0 35px 65px -15px rgba(0, 0, 0, 0.6),
+      0 0 0 1px rgba(56, 189, 248, 0.3),
+      0 0 45px rgba(56, 189, 248, 0.2);
+  }
+
+  .terminal-glass-reflection {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 120px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0) 60%);
+    pointer-events: none;
+  }
+
+  .terminal-header-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: #0f172a;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .window-controls {
+    display: flex;
+    gap: 6px;
+  }
+
+  .ctrl {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .ctrl.close { background: #ef4444; }
+  .ctrl.minimize { background: #f59e0b; }
+  .ctrl.expand { background: #10b981; }
+
+  .terminal-title {
+    font-size: 0.8rem;
+    color: #94a3b8;
+    font-family: monospace;
+    letter-spacing: 0.03em;
+  }
+
+  .copy-deck-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.65rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .copy-deck-btn:hover {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: #38bdf8;
+    color: #fff;
+  }
+
+  .terminal-body-code {
+    padding: 1.5rem 1.25rem;
+    overflow-x: auto;
+  }
+
+  .terminal-body-code pre {
+    margin: 0 !important;
+    background: transparent !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+
+  .terminal-body-code code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.95rem;
+    line-height: 1.65;
+    color: #e2e8f0;
+    display: block;
+  }
+
+  .t-prompt { color: #38bdf8; font-weight: bold; user-select: none; margin-right: 4px; }
+  .t-cmd { color: #f8fafc; font-weight: 600; }
+  .t-comment { color: #64748b; font-style: italic; }
+
+  .t-cursor {
+    display: inline-block;
+    width: 8px;
+    height: 1.1em;
+    background: #38bdf8;
+    vertical-align: sub;
+    margin-left: 6px;
+    animation: blinkCursor 1s step-start infinite;
+  }
+
+  @keyframes blinkCursor {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  .terminal-status-strip {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    background: #06090e;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 0.75rem;
+    color: #64748b;
+    font-family: monospace;
+  }
+
+  .t-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #94a3b8;
+  }
+
+  .t-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 8px #10b981;
+  }
+</style>
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
+
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="index.html">TERRANOETIS</a>
-    <nav class="top-nav" aria-label="Primary">
-      <a href="documentation.html">Documentation</a>
-      <a href="capabilities/hazard-simulations.html">Capabilities</a>
-      <a href="methodology.html">Verification</a>
-      <a href="deployment.html">Deployment</a>
-      <a href="${REPO}" rel="noopener">GitHub</a>
-    </nav>
+    <a class="brand" href="index.html"><img src="terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <div class="nav-right-cluster">
+      <nav class="top-nav" aria-label="Primary">
+        <a href="documentation.html">Documentation</a>
+        <a href="capabilities/hazard-simulations.html">Capabilities</a>
+        <a href="methodology.html">Verification</a>
+        <a href="deployment.html">Deployment</a>
+        <a href="${REPO}" rel="noopener">GitHub</a>
+      </nav>
+      <!-- Top-right native GitHub Star Button -->
+      <div class="gh-star-wrapper">
+        <a class="github-button"
+           href="${REPO}"
+           data-icon="octicon-star"
+           data-size="large"
+           data-show-count="true"
+           aria-label="Star sreyassanker/Terranoetis on GitHub">Star</a>
+      </div>
+    </div>
   </div>
 </header>
+
 <main id="main">
   <nav class="breadcrumbs" aria-label="Breadcrumb" style="max-width:72rem;margin:1rem auto 0;padding:0 1.5rem;"><ol><li aria-current="page">Overview</li></ol></nav>
 
-  <section class="hero" aria-labelledby="hero-title">
-    <div class="hero-inner">
-      <div>
-        <span class="hero-badge">Open source · BUSL-1.1 · v${DOCS_VERSION}</span>
-        <h1 id="hero-title">Terranoetis</h1>
-        <p class="tagline">A real-time geospatial intelligence platform for disaster research and operations: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equations, seven hazard-physics simulation kernels, continuous live-data monitoring, and an AI chat pipeline with dual-process reasoning. The documentation states what the code does — with file-level citations, and measured evidence wherever it was executable.</p>
-        <div class="hero-actions">
-          <a class="btn btn-primary" href="documentation.html">Open the documentation</a>
-          <a class="btn btn-ghost" href="capabilities/hazard-simulations.html">Hazard simulations</a>
-          <a class="btn btn-ghost" href="${REPO}" rel="noopener">Source on GitHub</a>
-        </div>
+  <!-- Hero Spotlight -->
+  <section class="hero-spotlight" aria-labelledby="hero-title">
+    <div>
+      <span class="hero-badge"><span class="pulse-dot"></span> Source-available · BUSL-1.1 · v${DOCS_VERSION}</span>
+      <h1 id="hero-title"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></h1>
+      <p class="tagline">A real-time geospatial intelligence platform for disaster research and operations: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equations, seven hazard-physics simulation kernels, continuous live-data monitoring, and an AI chat pipeline with dual-process reasoning. The documentation states what the code does — with file-level citations, and measured evidence wherever it was executable.</p>
+
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="documentation.html">Open the documentation</a>
+        <a class="btn btn-ghost" href="capabilities/hazard-simulations.html">Hazard simulations</a>
+        <a class="btn btn-ghost" href="${REPO}" rel="noopener">Source on GitHub</a>
       </div>
-      <figure>
-        <img src="Terranoetis_Thumbnail.webp" alt="Terranoetis globe interface showing live data layers and analysis panels over a 3D Earth" width="1280" height="720" loading="eager">
-        <figcaption>The Terranoetis globe — live data layers and analysis panels on a CesiumJS terrain.</figcaption>
-      </figure>
     </div>
-    <div class="stat-strip" role="list" aria-label="Verified platform facts">
-      <div role="listitem"><strong>150</strong><span>literature-cited equation engines · 7 parts · 26 domains</span></div>
-      <div role="listitem"><strong>7</strong><span>hazard-physics simulation kernels with internal validation gates</span></div>
-      <div role="listitem"><strong>1,700+</strong><span>unit &amp; integration tests passing</span></div>
-      <div role="listitem"><strong>82</strong><span>registered external API integrations</span></div>
+
+    <!-- Wide Showcase Visual -->
+    <figure class="hero-large-mockup">
+      <img src="Terranoetis_Thumbnail.webp" alt="Terranoetis globe interface showing live data layers and analysis panels over a 3D Earth" width="1280" height="720" loading="eager">
+      <figcaption>The Terranoetis globe — live data layers and analysis panels on a CesiumJS terrain.</figcaption>
+    </figure>
+
+    <!-- Animated Metric Cards -->
+    <div class="modern-stat-grid" role="list" aria-label="Platform Specifications">
+      <div class="stat-card" role="listitem">
+        <span class="stat-num" data-target="150">0</span>
+        <span class="stat-txt">Literature-cited equation engines · 7 parts · 26 domains</span>
+      </div>
+      <div class="stat-card" role="listitem">
+        <span class="stat-num" data-target="7">0</span>
+        <span class="stat-txt">Hazard-physics simulation kernels with internal validation gates</span>
+      </div>
+      <div class="stat-card" role="listitem">
+        <span class="stat-num" data-target="1702">0</span>
+        <span class="stat-txt">Automated unit &amp; integration tests passing</span>
+      </div>
+      <div class="stat-card" role="listitem">
+        <span class="stat-num" data-target="82">0</span>
+        <span class="stat-txt">Registered external telemetry &amp; sensor integrations</span>
+      </div>
     </div>
   </section>
 
+  <!-- Platform Layers -->
   <section class="band" id="platform" aria-labelledby="platform-h">
     <div class="band-head">
       <h2 id="platform-h">One platform, four working layers</h2>
@@ -85,6 +505,7 @@ export function renderLanding() {
     </div>
   </section>
 
+  <!-- Hazards Suite -->
   <section class="band alt" id="hazards" aria-labelledby="hazards-h">
     <div class="band-head">
       <h2 id="hazards-h">Seven hazards, seven cited physics pages</h2>
@@ -101,10 +522,11 @@ export function renderLanding() {
     </div>
   </section>
 
+  <!-- Verification -->
   <section class="band" id="verification" aria-labelledby="verif-h">
     <div class="band-head">
       <h2 id="verif-h">Verification is part of the product</h2>
-      <p>A documentation quality gate in CI checks links, anchors, page metadata, every <code>file:line</code> citation and a marketing-vocabulary ban. Claims that could not be executed in review are labelled <span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span>; defects found in the science are published, not buried.</p>
+      <p>A documentation quality gate in CI checks links, anchors, page metadata, every <code>file:line</code> citation and a marketing-vocabulary ban. Claims that could not be executed in review are verified by code inspection and never presented as tested; defects found in the science are published, not buried.</p>
     </div>
     <div class="feat-grid">
       <div class="feat"><h3>Kernel self-gates</h3><p>GMPE sanity, hurricane physics checks, closed-box conservation and lake-at-rest proofs abort emission on failure — each reproduced in review.</p></div>
@@ -115,20 +537,59 @@ export function renderLanding() {
     <p style="margin-top:1.2rem"><a class="btn btn-primary" href="methodology.html" style="background:var(--c-accent)">Read the methodology &amp; evidence runs</a></p>
   </section>
 
+  <!-- Modern 3D Interactive Terminal Section -->
   <section class="band alt" id="start" aria-labelledby="start-h">
     <div class="band-head">
       <h2 id="start-h">Run it locally in minutes</h2>
       <p>Node ≥ 20 and Python 3 are enough: no API keys are required for the analytical engine, the three local simulation kernels, or the API itself.</p>
     </div>
-    <pre><code>git clone https://github.com/sreyassanker/Terranoetis.git
-cd Terranoetis
-cp .env.example .env   # optional keys — features degrade gracefully
-npm install
-npm run dev            # Vite :3000 + Express :3001
-curl -s http://localhost:3001/api/health   # measured boot: status + component checks</code></pre>
-    <p>Continue with <a href="getting-started.html">Getting started</a> for the measured first-run transcript, or the <a href="deployment.html">deployment guide</a> for Docker, environment variables and optional Kaggle credentials.</p>
+
+    <div class="deck-3d-stage">
+      <div class="deck-terminal-card" id="deckTerminal">
+        <div class="terminal-glass-reflection"></div>
+        <div class="terminal-header-bar">
+          <div class="window-controls">
+            <span class="ctrl close"></span>
+            <span class="ctrl minimize"></span>
+            <span class="ctrl expand"></span>
+          </div>
+          <span class="terminal-title">bash — terranoetis-deployment — 80×24</span>
+          <button class="copy-deck-btn" id="copyCodeBtn" title="Copy code to clipboard">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Copy</span>
+          </button>
+        </div>
+
+        <div class="terminal-body-code">
+          <pre><code><span class="t-comment"># 1. Clone repository &amp; configure environment</span>
+<span class="t-prompt">$</span> <span class="t-cmd">git clone</span> ${REPO}.git
+<span class="t-prompt">$</span> <span class="t-cmd">cd</span> Terranoetis
+<span class="t-prompt">$</span> <span class="t-cmd">cp</span> .env.example .env   <span class="t-comment"># optional keys — features degrade gracefully</span>
+
+<span class="t-comment"># 2. Install dependencies &amp; boot core servers</span>
+<span class="t-prompt">$</span> <span class="t-cmd">npm install</span>
+<span class="t-prompt">$</span> <span class="t-cmd">npm run dev</span>            <span class="t-comment"># Vite :3000 + Express :3001</span>
+
+<span class="t-comment"># 3. Verify real-time kernel &amp; API health</span>
+<span class="t-prompt">$</span> <span class="t-cmd">curl -s</span> http://localhost:3001/api/health<span class="t-cursor"></span></code></pre>
+        </div>
+
+        <div class="terminal-status-strip">
+          <span class="t-status"><span class="t-indicator"></span> Ready for deployment</span>
+          <span class="t-env">NODE ≥ 20.0 · PYTHON 3.12+</span>
+        </div>
+      </div>
+    </div>
+
+    <p style="text-align:center; margin-top:2rem;">
+      Continue with <a href="getting-started.html">Getting started</a> for the measured first-run transcript, or the <a href="deployment.html">deployment guide</a> for Docker, environment variables and optional Kaggle credentials.
+    </p>
   </section>
 
+  <!-- CTA Band (Shields.io star removed) -->
   <section class="cta-band" aria-labelledby="cta-h">
     <h2 id="cta-h">Start with the evidence</h2>
     <p>Capability pages, parameter contracts, API reference and verification records — all cited to source.</p>
@@ -136,8 +597,7 @@ curl -s http://localhost:3001/api/health   # measured boot: status + component c
       <a class="btn btn-primary" href="documentation.html">Documentation hub</a>
       <a class="btn btn-ghost" href="${REPO}" rel="noopener">GitHub repository</a>
     </div>
-    <div class="badge-row" aria-label="Repository and maintainer links">
-      <a href="${REPO}/stargazers" rel="noopener"><img alt="GitHub stars" src="https://img.shields.io/github/stars/sreyassanker/Terranoetis?style=for-the-badge&logo=github&color=181717"></a>
+    <div class="badge-row" aria-label="Maintainer links">
       <a href="https://sreyassanker.vercel.app" rel="noopener"><img alt="Portfolio" src="https://img.shields.io/badge/Portfolio-000000?style=for-the-badge&logo=vercel&logoColor=white"></a>
       <a href="https://github.com/sreyassanker" rel="noopener"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white"></a>
       <a href="https://linkedin.com/in/sreyassanker" rel="noopener"><img alt="LinkedIn" src="https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white"></a>
@@ -146,12 +606,97 @@ curl -s http://localhost:3001/api/health   # measured boot: status + component c
     </div>
   </section>
 </main>
+
 <footer class="landing-footer">
   <div class="inner">
     <span>Terranoetis v${DOCS_VERSION} · <a href="sitemap.xml">sitemap</a> · <a href="governance/style-guide.html">documentation style guide</a></span>
-    <span>License <a href="${REPO}/blob/main/LICENSE">BUSL-1.1</a> · source <a href="${REPO}">${REPO.replace('https://', '')}</a> · third-party components retain their own licenses (CesiumJS et al.)</span>
+    <span>License <a href="${REPO}/blob/main/LICENSE">BUSL-1.1</a> · source <a href="${REPO}">github.com/sreyassanker/Terranoetis</a> · third-party components retain their own licenses (CesiumJS et al.)</span>
   </div>
 </footer>
+
+<!-- Interactive Scripts: Number Count-up & 3D Tilt Terminal -->
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    // 1. Metric counter animation
+    const counters = document.querySelectorAll('.stat-num');
+    const speed = 40;
+
+    const animateCount = (el) => {
+      const target = +el.getAttribute('data-target');
+      const suffix = el.getAttribute('data-suffix') || '';
+      let count = 0;
+      const step = Math.max(1, Math.ceil(target / speed));
+
+      const update = () => {
+        count += step;
+        if (count < target) {
+          el.innerText = count.toLocaleString() + suffix;
+          requestAnimationFrame(update);
+        } else {
+          el.innerText = target.toLocaleString() + suffix;
+        }
+      };
+      update();
+    };
+
+    const counterObserver = new IntersectionObserver((entries, obs) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          animateCount(entry.target);
+          obs.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.2 });
+
+    counters.forEach(counter => counterObserver.observe(counter));
+
+    // 2. 3D Tilt Card Interaction
+    const card = document.getElementById('deckTerminal');
+    const copyBtn = document.getElementById('copyCodeBtn');
+
+    if (card) {
+      card.addEventListener('mousemove', (e) => {
+        const rect = card.getBoundingClientRect();
+        const x = e.clientX - rect.left - rect.width / 2;
+        const y = e.clientY - rect.top - rect.height / 2;
+        const rotateX = -(y / rect.height) * 12;
+        const rotateY = (x / rect.width) * 12;
+        card.style.transform = 'rotateX(' + rotateX + 'deg) rotateY(' + rotateY + 'deg) translateY(-2px)';
+      });
+
+      card.addEventListener('mouseleave', () => {
+        card.style.transform = 'rotateX(6deg) rotateY(0deg) translateY(0)';
+      });
+    }
+
+    // 3. One-Click Copy for Terminal Commands
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        const commands = [
+          'git clone ${REPO}.git',
+          'cd Terranoetis',
+          'cp .env.example .env',
+          'npm install',
+          'npm run dev',
+          'curl -s http://localhost:3001/api/health'
+        ].join('\\n');
+
+        navigator.clipboard.writeText(commands).then(() => {
+          const label = copyBtn.querySelector('span');
+          const orig = label.innerText;
+          label.innerText = 'Copied!';
+          copyBtn.style.borderColor = '#10b981';
+          copyBtn.style.color = '#10b981';
+          setTimeout(() => {
+            label.innerText = orig;
+            copyBtn.style.borderColor = '';
+            copyBtn.style.color = '';
+          }, 2000);
+        });
+      });
+    }
+  });
+</script>
 </body>
 </html>`;
 }

@@ -1651,9 +1651,8 @@ function mapInputs(
     }
     case 49: {
       // Logarithmic wind profile u(z) = (u_*/κ)·ln(z/z₀) (Stull 1988 Ch. 4,
-      // p. 376, DOI 10.1007/978-94-009-3027-8 — local extract in
-      // docs/Research papers/). Neutral-stratification form: constant-flux
-      // layer, ∂ū/∂z = u_*/(κz), K_m = κ·u_*·z.
+      // p. 376, DOI 10.1007/978-94-009-3027-8). Neutral-stratification form:
+      // constant-flux layer, ∂ū/∂z = u_*/(κz), K_m = κ·u_*·z.
       // Genuine inputs — zero static fallbacks:
       //  - u_*: user-supplied OR genuine ERA5 friction velocity (zust) at
       //    the study point via CDS. The former 0.3 m/s fabrication is

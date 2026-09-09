@@ -117,10 +117,8 @@ SESSION_SUMMARY.md
 models/
 public/models/
 
-# Research papers (downloaded PDFs)
- # Research papers (downloaded PDFs)
-docs/Research papers/
-docs/Research papers/*.pdf
+# Local-only assets (downloaded PDFs) — never committed
+docs/**/*.pdf
 docs/*.pdf
 
 # Reports

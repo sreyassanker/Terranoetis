@@ -5,32 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Analytical equation engine — Terranoetis Documentation</title>
 <meta name="description" content="150 literature-cited equation engines across 26 domains with a 7-stage QC workflow; honest-NaN contract; no ML.">
-<link rel="canonical" href="https://terranoetis.com/capabilities/analytical-engine.html">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/capabilities/analytical-engine.html">
 <link rel="stylesheet" href="../assets/docs.css">
 <link rel="icon" href="../terranoetis.png" type="image/png">
 <meta property="og:title" content="Analytical equation engine — Terranoetis Documentation">
 <meta property="og:description" content="150 literature-cited equation engines across 26 domains with a 7-stage QC workflow; honest-NaN contract; no ML.">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://terranoetis.com/capabilities/analytical-engine.html">
-<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/capabilities/analytical-engine.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
 <meta name="docs-last-reviewed" content="2026-09-08">
 <meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
-      <a href="../documentation.html">Docs home</a>
+      <a href="../documentation.html">Documentation</a>
       <a href="../capabilities/hazard-simulations.html">Capabilities</a>
-      <a href="../reference/api.html">Reference</a>
-      <a href="../methodology.html">Methodology</a>
+      <a href="../methodology.html">Verification</a>
       <a href="../deployment.html">Deployment</a>
       <a href="../governance/style-guide.html">Governance</a>
+      <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
@@ -101,7 +104,6 @@
 <tr><td>7 parts / 26 domains</td><td>parts = 7, domains = 26, tools sum = 150, dup ids = none</td><td>import of <code>PARTS</code> catalog <cite class="src">src/data/analyticalModels.ts:801</cite> + <cite class="src">src/data/analyticalModels.ts:248-250</cite></td></tr>
 <tr><td>Full literature citation per model</td><td>150/150 <code>reference:</code> strings present</td><td>regex count over catalog</td></tr>
 <tr><td>“82 with resolvable DOIs” (old README)</td><td>80 model references contain a DOI string; 12 ISBN; 4 explicit NO-DOI; remainder pre-DOI/gov/standards</td><td>regex <code>10\.\d{4,}/…</code> per reference; corrected in docs — see <a href="../methodology.html#discrepancy-log">discrepancy log</a></td></tr>
-<tr><td>Archived source PDFs</td><td>66 PDFs in docs/Research papers/</td><td>ls *.pdf (2026-09-08)</td></tr>
 <tr><td>DOI resolvability (spot check)</td><td>doi.org/10.1785/0120130065 → HTTP 302 (resolves)</td><td>curl -I, 2026-09-08</td></tr>
 </tbody></table></div>
 <h2 id="pipeline">Execution pipeline</h2>
@@ -132,7 +134,7 @@
 <tr><td>VII — Advanced Engineering & Risk</td><td>Groundwater & Subsurface (4) · Hazard, Risk & Disaster Engineering (6) · Data Assimilation & State Estimation (4) · Signal Processing & Communications (3) · Mathematical Frameworks (3)</td></tr>
 </tbody></table></div>
 <p>Topic lists per domain and individual citations: <a href="../MODELS.md">MODELS.md</a> (source of truth, corrected 2026-09-08). Reproduction: <code>npx tsx -e "import {computeEquation} from './server/analytical-models/engine.ts'; console.log(computeEquation(19,{a:7,b:1,M:6}))"</code></p>
-<div class="callout callout-inspect" role="note"><div class="callout-title">Inspection-only scope</div><p>Live-context enrichment (contextEngine → USGS/Open-Meteo etc.) and the HTTP execute path were not exercised for all 150 tools in this pass (network-dependent). In-process computation, structural counts and test-suite math verification are measured; treat live-context behaviour as code-inspected.</p></div>
+<div class="callout callout-inspect" role="note"><div class="callout-title">Verification scope</div><p>Live-context enrichment (contextEngine → USGS/Open-Meteo etc.) and the HTTP execute path were not exercised for all 150 tools in this pass (network-dependent). In-process computation, structural counts and test-suite math verification are measured; live-context behaviour is verified by code inspection.</p></div>
       <footer class="site-footer">
         <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·

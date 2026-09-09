@@ -2851,7 +2851,7 @@ export const PARTS: Part[] = [
           },
           {
             id: 48, toolName: 'Surface Layer Stability Analysis', name: 'Monin-Obukhov Similarity Theory', equation: 'φ_m(ζ) = κ·z/u_* × ∂ū/∂z, ζ = z/L',
-            reference: 'Monin, A.S. & Obukhov, A.M. (1954) Basic laws of turbulent mixing in the surface layer of the atmosphere. Trudy Geofizicheskogo Instituta AN SSSR, 24(151), 163–187 (similarity theory, no DOI). Coefficients implemented per Högström, U. (1988) Non-dimensional wind and temperature profiles in the atmospheric surface layer: A re-evaluation. Boundary-Layer Meteorology, 42, 55–78. DOI: 10.1007/bf00119875 (local: docs/Research papers/10.1007@bf00119875_tool48_monin-obukhov.pdf). Coefficient tabulation cross-checked against Foken, T. (2006) 50 Years of the Monin–Obukhov Similarity Theory. Boundary-Layer Meteorology, 119(3), 431–447. DOI: 10.1007/s10546-006-9048-6.',
+            reference: 'Monin, A.S. & Obukhov, A.M. (1954) Basic laws of turbulent mixing in the surface layer of the atmosphere. Trudy Geofizicheskogo Instituta AN SSSR, 24(151), 163–187 (similarity theory, no DOI). Coefficients implemented per Högström, U. (1988) Non-dimensional wind and temperature profiles in the atmospheric surface layer: A re-evaluation. Boundary-Layer Meteorology, 42, 55–78. DOI: 10.1007/bf00119875. Coefficient tabulation cross-checked against Foken, T. (2006) 50 Years of the Monin–Obukhov Similarity Theory. Boundary-Layer Meteorology, 119(3), 431–447. DOI: 10.1007/s10546-006-9048-6.',
             paperUrl: 'https://doi.org/10.1007/bf00119875',
             appliesTo: 'Surface layer flux-profile relationships',
             shortDescription: 'Describes the vertical profiles of wind, temperature, and humidity in the atmospheric surface layer using Monin-Obukhov similarity theory, accounting for atmospheric stability effects',
@@ -2898,7 +2898,7 @@ export const PARTS: Part[] = [
           },
           {
             id: 49, toolName: 'Logarithmic Wind Profile', name: 'Logarithmic Wind Profile', equation: 'u(z) = (u_*/κ) × ln(z/z₀), κ ≈ 0.4',
-            reference: 'Stull, R.B. (1988) An Introduction to Boundary Layer Meteorology. Kluwer Academic Publishers, ISBN: 978-90-277-2769-5, Chapter 4 ("The log wind profile", p. 376). DOI: 10.1007/978-94-009-3027-8 (local extract: docs/Research papers/10.1007@978-94-009-3027-8_tool49_stull-boundary-layer.pdf).',
+            reference: 'Stull, R.B. (1988) An Introduction to Boundary Layer Meteorology. Kluwer Academic Publishers, ISBN: 978-90-277-2769-5, Chapter 4 ("The log wind profile", p. 376). DOI: 10.1007/978-94-009-3027-8.',
             paperUrl: 'https://doi.org/10.1007/978-94-009-3027-8',
             appliesTo: 'Near-surface wind estimation, wind energy',
             shortDescription: 'Estimates the mean horizontal wind speed at height z above the surface using the logarithmic law for the neutrally stratified atmospheric surface layer',
@@ -2928,7 +2928,7 @@ export const PARTS: Part[] = [
           },
           {
             id: 50, toolName: 'Stomatal Conductance Model', name: 'Ball-Berry Stomatal Conductance Model', equation: 'g_s = g₀ + a₁ × A × h_s / c_s  (g in mol m⁻² s⁻¹; ×1000 → mmol m⁻² s⁻¹)',
-            reference: 'Ball, J.T., Woodrow, I.E. & Berry, J.A. (1987) A model predicting stomatal conductance and its contribution to the control of photosynthesis under different environmental conditions. In: Biggins, J. (ed.), Progress in Photosynthesis Research, Vol. 4, pp. 221–224. Martinus Nijhoff Publishers, Dordrecht. DOI: 10.1007/978-94-017-0519-6_48 (local: docs/Research papers/10.1007@978-94-017-0519-6_48_tool50_ball-berry-stomatal.pdf). Empirical form read from the paper\'s Fig. 1B fit g = 9.31·A·hₛ/cₛ (Glycine max, r² = 0.971); regression intercept not significantly different from the origin.',
+            reference: 'Ball, J.T., Woodrow, I.E. & Berry, J.A. (1987) A model predicting stomatal conductance and its contribution to the control of photosynthesis under different environmental conditions. In: Biggins, J. (ed.), Progress in Photosynthesis Research, Vol. 4, pp. 221–224. Martinus Nijhoff Publishers, Dordrecht. DOI: 10.1007/978-94-017-0519-6_48. Empirical form read from the paper\'s Fig. 1B fit g = 9.31·A·hₛ/cₛ (Glycine max, r² = 0.971); regression intercept not significantly different from the origin.',
             paperUrl: 'https://doi.org/10.1007/978-94-017-0519-6_48',
             appliesTo: 'Land surface modeling, transpiration',
             shortDescription: 'Models stomatal conductance (g_s) as a linear function of net photosynthesis rate (A), relative humidity at the leaf surface (h_s), and CO₂ concentration at the leaf surface (c_s), used in all major land surface models',

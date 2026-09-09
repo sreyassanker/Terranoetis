@@ -5,32 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Simulation job API &amp; parameter contracts — Terranoetis Documentation</title>
 <meta name="description" content="The zod request contract layer, wire-field bounds, geometry conventions, job endpoints and result formats for the seven hazard kernels.">
-<link rel="canonical" href="https://terranoetis.com/reference/simulation-api.html">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/reference/simulation-api.html">
 <link rel="stylesheet" href="../assets/docs.css">
 <link rel="icon" href="../terranoetis.png" type="image/png">
 <meta property="og:title" content="Simulation job API &amp; parameter contracts — Terranoetis Documentation">
 <meta property="og:description" content="The zod request contract layer, wire-field bounds, geometry conventions, job endpoints and result formats for the seven hazard kernels.">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://terranoetis.com/reference/simulation-api.html">
-<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/reference/simulation-api.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
 <meta name="docs-last-reviewed" content="2026-09-08">
 <meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
-      <a href="../documentation.html">Docs home</a>
+      <a href="../documentation.html">Documentation</a>
       <a href="../capabilities/hazard-simulations.html">Capabilities</a>
-      <a href="../reference/api.html">Reference</a>
-      <a href="../methodology.html">Methodology</a>
+      <a href="../methodology.html">Verification</a>
       <a href="../deployment.html">Deployment</a>
       <a href="../governance/style-guide.html">Governance</a>
+      <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
@@ -135,7 +138,7 @@
 <tr><td>Missing/invalid required UI value</td><td>builder throws (ZodError or explicit message) — never substitutes</td><td><cite class="src">src/services/kaggleSim.ts:390-415,544</cite></td></tr>
 <tr><td>Kernel out-of-range (e.g. M 2.9)</td><td>kernel raises with named validity range; job → error with the last log lines surfaced</td><td><cite class="src">kaggle-kernels/earthquake-sim/main.py:244-249</cite> <span class="tag tag-measured">observed</span></td></tr>
 <tr><td>Local timeout</td><td>SIGKILL after <code>LOCAL_SIM_TIMEOUT_MS</code> (default 120 s)</td><td><cite class="src">server/kaggle/simRunner.ts:134</cite></td></tr>
-<tr><td>No Kaggle token (Kaggle-routed types)</td><td>job errors early; local trio + analytical engine unaffected</td><td><span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span></td></tr>
+<tr><td>No Kaggle token (Kaggle-routed types)</td><td>job errors early; local trio + analytical engine unaffected</td><td><span class="tag tag-inspected">verified by code inspection</span></td></tr>
 <tr><td>Tsunami without real bathymetry</td><td>kernel aborts: “Real GEBCO bathymetry is required…”</td><td><cite class="src">kaggle-kernels/tsunami-sim/main.py:227-230</cite></td></tr>
 <tr><td>Volcano without terrain</td><td>kernel aborts: “…no synthetic cone fallback is permitted…”</td><td><cite class="src">kaggle-kernels/volcano-sim/main.py:821-826</cite></td></tr>
 </tbody></table></div>

@@ -7,7 +7,7 @@
 
 export const DOCS_VERSION = '3.0.0';
 export const LAST_REVIEWED = '2026-09-08';
-export const SITE_ORIGIN = 'https://terranoetis.com';
+export const SITE_ORIGIN = 'https://sreyassanker.github.io/Terranoetis';
 export const REPO = 'https://github.com/sreyassanker/Terranoetis';
 
 // Sidebar navigation tree. `href` values are repo-root-relative (from docs/).
@@ -56,12 +56,12 @@ export const NAV = [
 
 export const TOP_NAV = [
   { href: 'index.html', label: 'Overview' },
-  { href: 'documentation.html', label: 'Docs home' },
+  { href: 'documentation.html', label: 'Documentation' },
   { href: 'capabilities/hazard-simulations.html', label: 'Capabilities' },
-  { href: 'reference/api.html', label: 'Reference' },
-  { href: 'methodology.html', label: 'Methodology' },
+  { href: 'methodology.html', label: 'Verification' },
   { href: 'deployment.html', label: 'Deployment' },
   { href: 'governance/style-guide.html', label: 'Governance' },
+  { href: REPO, label: 'GitHub', external: true },
 ];
 
 /** Repo-root-relative path from a page at `depth` levels below docs/ root. */
@@ -85,7 +85,7 @@ export function tagMeasured(extra = 'verified by execution') {
   return `<span class="tag tag-measured">MEASURED — ${esc(extra)}</span>`;
 }
 export function tagInspected() {
-  return `<span class="tag tag-inspected">VERIFIED BY CODE INSPECTION ONLY</span>`;
+  return `<span class="tag tag-inspected">verified by code inspection</span>`;
 }
 
 function renderSection(s) {
@@ -156,14 +156,17 @@ export function renderPage(page) {
 <meta name="docs-version" content="${DOCS_VERSION}">
 <meta name="docs-last-reviewed" content="${LAST_REVIEWED}">
 <meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="${r('index.html')}">TERRANOETIS<small>Documentation</small></a>
+    <a class="brand" href="${r('index.html')}"><img src="${r('terranoetis.png')}" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
-      ${TOP_NAV.map((t) => `<a href="${r(t.href)}"${page.path === t.href ? ' aria-current="page"' : ''}>${esc(t.label)}</a>`).join('\n      ')}
+      ${TOP_NAV.map((t) => `<a href="${t.external ? t.href : r(t.href)}"${page.path === t.href ? ' aria-current="page"' : ''}${t.external ? ' rel="noopener"' : ''}>${esc(t.label)}</a>`).join('\n      ')}
     </nav>
   </div>
 </header>

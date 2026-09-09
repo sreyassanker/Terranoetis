@@ -5,32 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tsunami propagation (finite-volume SWE, HLL + minmod) — Terranoetis Documentation</title>
 <meta name="description" content="Okada-style dislocation source over real GEBCO 2020 bathymetry with a nonlinear shallow-water HLL/minmod finite-volume solver. Includes this review's measured flat-bed stability and sloped-bed instability results.">
-<link rel="canonical" href="https://terranoetis.com/capabilities/tsunami.html">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/capabilities/tsunami.html">
 <link rel="stylesheet" href="../assets/docs.css">
 <link rel="icon" href="../terranoetis.png" type="image/png">
 <meta property="og:title" content="Tsunami propagation (finite-volume SWE, HLL + minmod) — Terranoetis Documentation">
 <meta property="og:description" content="Okada-style dislocation source over real GEBCO 2020 bathymetry with a nonlinear shallow-water HLL/minmod finite-volume solver. Includes this review's measured flat-bed stability and sloped-bed instability results.">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://terranoetis.com/capabilities/tsunami.html">
-<meta property="og:image" content="https://terranoetis.com/terranoetis.png">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/capabilities/tsunami.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="docs-version" content="3.0.0">
 <meta name="docs-last-reviewed" content="2026-09-08">
 <meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-banner">
   <div class="site-banner-inner">
-    <a class="brand" href="../index.html">TERRANOETIS<small>Documentation</small></a>
+    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
     <nav class="top-nav" aria-label="Primary">
       <a href="../index.html">Overview</a>
-      <a href="../documentation.html">Docs home</a>
+      <a href="../documentation.html">Documentation</a>
       <a href="../capabilities/hazard-simulations.html">Capabilities</a>
-      <a href="../reference/api.html">Reference</a>
-      <a href="../methodology.html">Methodology</a>
+      <a href="../methodology.html">Verification</a>
       <a href="../deployment.html">Deployment</a>
       <a href="../governance/style-guide.html">Governance</a>
+      <a href="https://github.com/sreyassanker/Terranoetis" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
@@ -100,7 +103,7 @@
 <dl class="metrics"><dt>Execution mode</dt><dd>Kaggle kernel (numpy-only, CPU accelerator instance) <cite class="src">server/kaggle/simRunner.ts:126-141</cite> (not in LOCAL_SIM_TYPES) <cite class="src">kaggle-kernels/tsunami-sim/main.py:228-229</cite></dd>
 <dt>Verification</dt><dd>SOLVER MEASURED locally in-process (conservation gate PASS; flat-bed propagation stable; REAL-GEBCO runs diverge — see Known limitation); job transport verified by code inspection only</dd>
 <dt>Wire scenario type</dt><dd><code>tsunami_wave</code> — contract at <cite class="src">src/services/kaggleSim.ts:28-240</cite>; job API at <a href="../reference/simulation-api.html">Simulation job API</a></dd></dl>
-<div class="callout callout-inspect" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). <span class="tag tag-inspected">CODE INSPECTION ONLY</span> marks behaviour traced to source lines but not executed here (e.g. Kaggle push/poll transport). Inspected is never presented as tested.</p></div>
+<div class="callout callout-inspect" role="note"><div class="callout-title">Evidence legend</div><p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). Behaviour traced to source lines but not executed here (e.g. the Kaggle push/poll transport) is verified by code inspection and is never presented as tested.</p></div>
 <h2 id="physics">Governing equations and coefficients</h2>
 <p>Source attribution as stated in the kernel header (verbatim):</p>
 <blockquote class="verbatim">Initial source: simplified Okada-style elastic dislocation uplift — vertical seafloor displacement from finite-fault slip transferred to the water surface (Okada 1985 in spirit; here a rectangular fault patch with dip-slip lobes, and moment-magnitude scaling).<footer><cite class="src">kaggle-kernels/tsunami-sim/main.py:10-13</cite></footer></blockquote>
@@ -157,7 +160,7 @@
 <tr><td>Flat bed, small box (48² at dt = 3 s)</td><td>Stable for ~40 steps, then monotonic growth from periodic wrap-around coupling at the roll-based face divergence: 0.27 → 22 m by 20 min</td></tr>
 <tr><td>Sloped synthetic bed (dt = 3 s)</td><td>Diverges at low CFL — the explicit bathymetry source drives unbounded growth on any slope</td></tr>
 <tr><td>REAL GEBCO 2020 (16×16 sampled off Tohoku, 38.5°N 143.5°E, via the same api.opentopodata.org/v1/gebco2020 endpoint the server uses; M 8.5, 5 m, 20 min, 300 km box)</td><td>Diverges at both default dt (7.25 s, “CFL 0.90 (OK)”) and dt = 3 s (CFL 0.37): final max_wave ~10³⁰⁰ m, E = nan</td></tr>
-<tr><td>Kaggle job transport</td><td>VERIFIED BY CODE INSPECTION ONLY — no push performed in this review</td></tr>
+<tr><td>Kaggle job transport</td><td>verified by code inspection — no push performed in this review</td></tr>
 </tbody></table></div>
 <h2 id="known-limitation">Known numerical limitation (found in this review)</h2>
 <div class="callout callout-warning" role="note"><div class="callout-title">Tsunami solver — non-flat bathymetry instability</div><p>This review reproduced three distinct unbounded-growth mechanisms in the standalone kernel: (1) the default main-loop timestep uses a 0.9 CFL that second-order MUSCL/HLL updates cannot satisfy (flat bed still diverged at CFL 0.90; the solver's own <code>estimate_cfl_dt</code> applies safety 0.45 but main() overrides it); (2) the roll-based face divergence wraps opposite domain edges together, so waves grow after boundary interaction even on a flat bed in a small box; (3) on any non-flat bathymetry — including a real GEBCO 2020 sample — the explicit central-difference source term drives divergence at every tested timestep (max |η| → 10^300 m, energy NaN). The closed-box conservation proof deliberately uses a flat bed where the source vanishes, so it cannot detect (2) or (3). Until the scheme gains a well-balanced source treatment (e.g. the Audusse reconstruction the flood kernel uses) and a transmissive boundary, tsunami output must be treated as UNVALIDATED. Production runs go through Kaggle where this review could not execute them (labelled inspection-only).</p></div>

@@ -3,7 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { renderPage, src } from './site.mjs';
+import { renderPage, src, SITE_ORIGIN } from './site.mjs';
 import { HAZARDS, COMMON_GRID_SECTION } from './hazards.mjs';
 import { PAGES } from './pages.mjs';
 import { renderLanding, LANDING_PATH } from './landing.mjs';
@@ -32,7 +32,7 @@ function hazardPage(key) {
     ]},
     { kind: 'callout', tone: hz.status.startsWith('MEASURED') ? 'verified' : 'inspect',
       title: 'Evidence legend',
-      html: `<p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). <span class="tag tag-inspected">CODE INSPECTION ONLY</span> marks behaviour traced to source lines but not executed here (e.g. Kaggle push/poll transport). Inspected is never presented as tested.</p>` },
+      html: `<p><span class="tag tag-measured">MEASURED</span> marks values produced by executing the actual code on this machine (commands in <a href="#reproduction">Reproduction</a>; raw logs summarised in <a href="../methodology.html#evidence-runs">Methodology → Evidence runs</a>). Behaviour traced to source lines but not executed here (e.g. the Kaggle push/poll transport) is verified by code inspection and is never presented as tested.</p>` },
     { kind: 'h2', id: 'physics', title: 'Governing equations and coefficients' },
     { kind: 'p', html: `Source attribution as stated in the kernel header (verbatim):` },
     { kind: 'verbatim', quote: hz.headerQuote.quote, cite: hz.headerQuote.cite },
@@ -66,7 +66,7 @@ function hazardPage(key) {
     proseMd: `capabilities/${hz.proseMd}`, proseMdLabel: `capabilities/${hz.proseMd} — narrative description (source of truth)`,
     tags: hz.status.startsWith('MEASURED') || hz.status.startsWith('PHYSICS') || hz.status.startsWith('SOLVER')
       ? ['<span class="tag tag-measured">MEASURED LOCALLY</span>']
-      : ['<span class="tag tag-inspected">INSPECTION</span>'],
+      : [],
     sections,
   };
 }
@@ -109,14 +109,14 @@ const today = '2026-09-08';
 const sitemapBody =
 `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://terranoetis.com/</loc><lastmod>${today}</lastmod></url>
-  <url><loc>https://terranoetis.com/index.html</loc><lastmod>${today}</lastmod></url>
-${pages.map((p) => `  <url><loc>https://terranoetis.com/${p.path}</loc><lastmod>${today}</lastmod></url>`).join('\n')}
+  <url><loc>${SITE_ORIGIN}/</loc><lastmod>${today}</lastmod></url>
+  <url><loc>${SITE_ORIGIN}/index.html</loc><lastmod>${today}</lastmod></url>
+${pages.map((p) => `  <url><loc>${SITE_ORIGIN}/${p.path}</loc><lastmod>${today}</lastmod></url>`).join('\n')}
 </urlset>
 `;
 const robots = `User-agent: *
 Allow: /
-Sitemap: https://terranoetis.com/sitemap.xml
+Sitemap: ${SITE_ORIGIN}/sitemap.xml
 `;
 if (!CHECK) {
   fs.writeFileSync(path.join(DOCS, 'sitemap.xml'), sitemapBody);

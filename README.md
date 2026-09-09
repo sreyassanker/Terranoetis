@@ -18,7 +18,7 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 
 ## Highlights
 
-- **150 analytical models grounded in primary literature** across 26 domains — every equation cites its source paper, book, or standard (80 references carry a DOI, 12 an ISBN, 4 are flagged NO-DOI; 66 source PDFs archived under `docs/Research papers/`) ([catalog](docs/MODELS.md) · [verified engine page](docs/capabilities/analytical-engine.html))
+- **150 analytical models grounded in primary literature** across 26 domains — every equation cites its source paper, book, or standard (80 references carry a DOI, 12 an ISBN, 4 are flagged NO-DOI) ([catalog](docs/MODELS.md) · [verified engine page](docs/capabilities/analytical-engine.html))
 - **Photorealistic CesiumJS 3D globe** with 41 rendering modules, satellite imagery, and sensor styles
 - **7 physics simulations** — 3 run locally on CPU (earthquake, wildfire, hurricane); 4 execute on free Kaggle kernels (tsunami, volcano, landslide, flood). All kernels are NumPy/CPU code; only flood-sim requests Kaggle's GPU accelerator in its metadata ([verified modes table](docs/capabilities/hazard-simulations.html#modes))
 - **AI cognition** — System 1 / System 2 reasoning, multi-agent debate, causal + counterfactual analysis
@@ -132,7 +132,6 @@ terranoetis/
 │   ├── reference/ · methodology.html · deployment.html · governance/
 │   ├── ARCHITECTURE.md · API.md · FRONTEND.md · BACKEND.md · MODELS.md · DEPLOYMENT.md
 │   ├── platform-overview.html    # Legacy URL — redirects to the docs index
-│   └── Research papers/          # 66 source PDFs for the equation catalog
 │
 ├── e2e/                          # Playwright browser tests (7 spec files, 38 test declarations)
 ├── gifs/                         # README gallery captures

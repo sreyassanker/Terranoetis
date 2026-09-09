@@ -66,10 +66,16 @@ function checkLinks(file, text, isHtml) {
   for (const href of hrefs) {
     if (!href || href.startsWith('#')) continue;
     if (/^(https?:|mailto:|data:|blob:)/.test(href)) continue;
-    const [rawTarget, anchor] = href.split('#');
+    const [rawHref, anchor] = href.split('#');
+    if (!rawHref) continue;
+    if (/^[a-z]+:\/\//.test(rawHref)) { err(`${path.relative(ROOT, file)}: protocol-relative or unknown scheme "${href}"`); continue; }
+    // Site-absolute URLs (leading "/") are served from the site base — strip the
+    // first path segment (e.g. "Terranoetis" on project pages) and resolve in docs/.
+    const rawTarget = rawHref.startsWith('/')
+      ? rawHref.split('/').filter(Boolean).slice(1).join('/')
+      : rawHref;
     if (!rawTarget) continue;
-    if (/^[a-z]+:\/\//.test(rawTarget)) { err(`${path.relative(ROOT, file)}: protocol-relative or unknown scheme "${href}"`); continue; }
-    const target = path.resolve(dir, rawTarget);
+    const target = path.resolve(rawHref.startsWith('/') ? DOCS : dir, rawTarget);
     if (!fs.existsSync(target)) {
       err(`${path.relative(ROOT, file)}: broken link → ${href}`);
       continue;
@@ -150,7 +156,7 @@ const sitemap = fs.readFileSync(path.join(DOCS, 'sitemap.xml'), 'utf-8');
 for (const f of htmlFiles) {
   const rel = path.relative(DOCS, f).split(path.sep).join('/');
   const isGenerated = /name="generator"/.test(fs.readFileSync(f, 'utf-8'));
-  if (isGenerated && !sitemap.includes('/' + rel) && !(rel === 'index.html' && sitemap.includes('https://terranoetis.com/'))) {
+  if (isGenerated && !sitemap.includes('/' + rel) && !(rel === 'index.html' && sitemap.includes('https://sreyassanker.github.io/Terranoetis/'))) {
     err(`sitemap.xml missing ${rel}`);
   }
 }
