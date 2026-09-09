@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analytical Models — Terranoetis Documentation</title>
+<meta name="description" content="Terranoetis ships 150 scientific equation engines organized across 7 parts and 26 domains. Every model is grounded in primary literature and math-verified …">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/narratives/MODELS.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Analytical Models — Terranoetis Documentation">
+<meta property="og:description" content="Terranoetis ships 150 scientific equation engines organized across 7 parts and 26 domains. Every model is grounded in primary literature and math-verified …">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/MODELS.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Overview</a>
+      <a href="../documentation.html">Documentation</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../methodology.html">Verification</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+      <a href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener" class="nav-demo">Demo</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Product overview</a></li>
+<li><a href="../documentation.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Overview</a></li>
+    <li><a href="../documentation.html">Docs</a></li>
+<li><a href="../documentation.html">Documentation</a></li>
+<li aria-current="page">Analytical Models</li>
+      </ol></nav>
+      <h1>Analytical Models</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        
+      </div>
+      
+      
+      <div class="prose">
+
+<p>Terranoetis ships <strong>150 scientific equation engines</strong> organized across <strong>7 parts</strong> and <strong>26 domains</strong>. Every model is grounded in primary literature and math-verified against its source — no machine learning, no black boxes. Each of the 150 catalog entries carries a full citation: <strong>80 reference strings contain a DOI</strong>, 12 cite books by ISBN, 4 are explicitly flagged <code>NO-DOI</code>, and the remainder are pre-DOI classics, government/standards documents, or conference papers (counts produced by programmatic scan of <code>src/data/analyticalModels.ts</code> on 2026-09-08). Spot-checked DOI resolvability: <code>doi.org/10.1785/0120130065</code> → HTTP 302.</p>
+
+
+<blockquote>
+<p>Verified site view (counts, workflow, measured sample computations): <a href="../capabilities/analytical-engine.html">Analytical equation engine</a>.</p>
+</blockquote>
+
+
+<hr></hr>
+
+
+<h2 id="table-of-contents">Table of Contents</h2>
+
+
+<ul>
+<li><a href="#architecture">Architecture</a></li>
+<li><a href="#visualization-types">Visualization Types</a></li>
+<li><a href="#parts--domains">Parts &amp; Domains</a></li>
+<li><a href="#key-features">Key Features</a></li>
+<li><a href="#7-stage-quality-control">7-Stage Quality Control</a></li>
+</ul>
+
+
+<hr></hr>
+
+
+<h2 id="architecture">Architecture</h2>
+
+
+<p>Before execution, the <strong>context engine</strong> (<code>contextEngine.ts</code>) enriches inputs from live data feeds (weather, terrain, ocean, seismic, air quality, satellite thermal). Each tool then runs through the <strong>7-stage workflow</strong> defined in <code>toolWorkflows.ts</code>:</p>
+
+
+<ol>
+<li><strong>Input validation</strong> — range, type, and physical-plausibility checks</li>
+<li><strong>Preprocessing</strong> — unit conversion, derived-parameter computation</li>
+<li><strong>Computation</strong> — the source equation (<code>engine.ts</code>)</li>
+<li><strong>Post-processing</strong> — classification, unit normalisation</li>
+<li><strong>Quality control</strong> — result sanity checks, outlier detection</li>
+<li><strong>Uncertainty estimation</strong> — error propagation / empirical RMSE</li>
+<li><strong>Interpretation</strong> — contextual analysis + scientific recommendations</li>
+</ol>
+
+
+<hr></hr>
+
+
+<h2 id="visualization-types">Visualization Types</h2>
+
+
+<p>Each tool declares a <code>vizType</code>; the client renders it via Recharts (charts) or Cesium (field surfaces):</p>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>scalar</strong></td>
+<td>Single computed value with unit + interpretation</td>
+</tr>
+<tr>
+<td><strong>timeseries / bar / histogram / scatter / distribution / gauge / profile / spectrum</strong></td>
+<td>Recharts visualizations</td>
+</tr>
+<tr>
+<td><strong>heatmap / contour / vector</strong></td>
+<td>IDW-interpolated field surfaces over the study area (Cesium)</td>
+</tr>
+<tr>
+<td><strong>Grid</strong></td>
+<td>Structured data grid for downstream GIS fusion</td>
+</tr>
+<tr>
+<td><strong>Report</strong></td>
+<td>PDF export with charts and methodology</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="parts-domains">Parts &amp; Domains</h2>
+
+
+<h3 id="part-i-earth-system-core-tools-150-6-domains">Part I — Earth System Core (Tools 1–50) · 6 Domains</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Tools</th>
+<th>Topics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Atmospheric Science</td>
+<td>1–8</td>
+<td>Land surface temperature, brightness temperature, saturation vapor pressure, atmospheric pressure profile, geostrophic wind, pollutant transport, atmospheric stability, turbulent energy spectrum</td>
+</tr>
+<tr>
+<td>Hydrology &amp; Oceanography</td>
+<td>9–18</td>
+<td>Evapotranspiration, runoff (SCS-CN), open channel flow, peak discharge, flood wave routing, tide prediction, wind-driven current, ocean current, marine heat budget, infiltration</td>
+</tr>
+<tr>
+<td>Geophysics &amp; Seismology</td>
+<td>19–25</td>
+<td>Earthquake frequency (Gutenberg-Richter), aftershock decay (Omori), ground motion prediction (GMPE), shear strength, moment magnitude, stress drop, fault rupture scaling</td>
+</tr>
+<tr>
+<td>Remote Sensing &amp; Cryosphere</td>
+<td>26–35</td>
+<td>Vegetation health index, surface water detection, vegetation water content, enhanced vegetation index, snow cover, burn severity (NBR), fire radiative power, crop water stress, snowmelt runoff, sea ice analysis</td>
+</tr>
+<tr>
+<td>Spatial Analysis &amp; Extreme Events</td>
+<td>36–42</td>
+<td>Great circle distance, kriging, IDW interpolation, Gaussian plume dispersion, Gumbel extreme value analysis, Pareto peaks-over-threshold, semivariogram analysis</td>
+</tr>
+<tr>
+<td>Soil Science &amp; Land Surface</td>
+<td>43–50</td>
+<td>Soil water retention (van Genuchten), soil hydraulic model, universal soil loss equation (USLE), soil respiration (Q₁₀), soil thermal conductivity, surface layer stability (Monin-Obukhov), logarithmic wind profile, stomatal conductance</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="part-ii-biosphere-agriculture-chemistry-tools-5165-3-domains">Part II — Biosphere, Agriculture &amp; Chemistry (Tools 51–65) · 3 Domains</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Tools</th>
+<th>Topics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Biosphere &amp; Carbon Cycle</td>
+<td>51–57</td>
+<td>Gross primary production (LUE model), canopy light extinction (Beer-Lambert), net carbon flux, C3 photosynthesis (Farquhar), forest biomass estimation, ocean CO₂ uptake, ocean nutrient ratios</td>
+</tr>
+<tr>
+<td>Agriculture &amp; Crop Science</td>
+<td>58–63</td>
+<td>Growing degree days, Priestley-Taylor evapotranspiration, Hargreaves-Samani ET, FAO yield-water response, phytoplankton temperature growth, Bigleaf Penman-Monteith</td>
+</tr>
+<tr>
+<td>Atmospheric Chemistry &amp; Aerosols</td>
+<td>64–65</td>
+<td>Stratospheric ozone equilibrium, pollutant lifetime estimation</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="part-iii-ocean-coastal-advanced-tools-6680-2-domains">Part III — Ocean &amp; Coastal Advanced (Tools 66–80) · 2 Domains</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Tools</th>
+<th>Topics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ocean Dynamics &amp; Circulation</td>
+<td>66–73</td>
+<td>Wind-driven ocean transport, westward-intensified gyre flow (Stommel), western boundary current structure, thermohaline flow, seawater density (TEOS-10), ocean mixing diffusivity, mixed layer deepening, fully developed sea state</td>
+</tr>
+<tr>
+<td>Coastal &amp; Wave Mechanics</td>
+<td>74–80</td>
+<td>Coastal wave runup, shoreline retreat (Bruun Rule), breaking wave height (McCowan), longshore sediment transport (CERC), wave dispersion (Airy), Stokes drift, JONSWAP wave spectrum</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="part-iv-geomorphology-limnology-cryosphere-tools-8195-3-domains">Part IV — Geomorphology, Limnology &amp; Cryosphere (Tools 81–95) · 3 Domains</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Tools</th>
+<th>Topics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Geomorphology &amp; Mass Wasting</td>
+<td>81–87</td>
+<td>Erosion from stream power, river network scaling (Hack's law), fractal coastline dimension, slope stability (infinite slope), avalanche runout distance, stream power index, topographic wetness index</td>
+</tr>
+<tr>
+<td>Limnology &amp; Freshwater</td>
+<td>88–90</td>
+<td>Lake evaporation, lake thermal stability, unit hydrograph (linear reservoir)</td>
+</tr>
+<tr>
+<td>Cryosphere Advanced &amp; Volcanology</td>
+<td>91–95</td>
+<td>Glacier ablation (temperature-index), permafrost active layer depth (Stefan), firn densification, eruption volume from VEI, volcanic plume rise height</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="part-v-climate-atmosphere-advanced-tools-96110-3-domains">Part V — Climate &amp; Atmosphere Advanced (Tools 96–110) · 3 Domains</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Tools</th>
+<th>Topics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Climate Dynamics &amp; Feedback</td>
+<td>96–101</td>
+<td>Global energy balance model, equilibrium climate sensitivity, Planck feedback parameter, Rossby wave phase speed, baroclinic instability condition, baroclinic growth rate (Eady)</td>
+</tr>
+<tr>
+<td>Atmospheric Dynamics &amp; Turbulence</td>
+<td>102–107</td>
+<td>Quasi-geostrophic potential vorticity, turbulent velocity field decomposition (Reynolds), Ekman layer depth, convective velocity scale (Deardorff), frontogenesis rate, vorticity tendency</td>
+</tr>
+<tr>
+<td>Cloud Physics &amp; Precipitation</td>
+<td>108–110</td>
+<td>Equilibrium saturation over droplet (Köhler), drop size distribution, radar reflectivity → rain rate (Z-R)</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="part-vi-space-environment-satellite-tools-111130-4-domains">Part VI — Space Environment &amp; Satellite (Tools 111–130) · 4 Domains</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Tools</th>
+<th>Topics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Geodesy &amp; Reference Frames</td>
+<td>111–115</td>
+<td>Earth rotation matrix (IAU-2006), solid earth tide displacement, geopotential from spherical harmonics, 7-parameter Helmert transform, orthometric height from GPS</td>
+</tr>
+<tr>
+<td>Thermosphere, Ionosphere &amp; Magnetosphere</td>
+<td>116–122</td>
+<td>Thermospheric density profile (NRLMSISE-00), ionospheric electron density (IRI-2016), Joule heating rate, scintillation index S4, magnetopause standoff distance, pressure-corrected Dst, plasma Debye length</td>
+</tr>
+<tr>
+<td>Satellite Dynamics &amp; Space Debris</td>
+<td>123–127</td>
+<td>Satellite drag acceleration, orbital decay from drag, conjunction collision probability, Kessler debris cascade, relative orbit motion (Clohessy-Wiltshire)</td>
+</tr>
+<tr>
+<td>Solar-Terrestrial &amp; GNSS</td>
+<td>128–130</td>
+<td>Kp geomagnetic index, GNSS dilution of precision (DOP), tropospheric delay for GNSS</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="part-vii-advanced-engineering-risk-tools-131150-5-domains">Part VII — Advanced Engineering &amp; Risk (Tools 131–150) · 5 Domains</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Tools</th>
+<th>Topics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Groundwater &amp; Subsurface</td>
+<td>131–134</td>
+<td>Steady-state well discharge (Thiem), transient well drawdown (Theis), straight-line well test (Jacob), infiltration capacity over time (Horton)</td>
+</tr>
+<tr>
+<td>Hazard, Risk &amp; Disaster Engineering</td>
+<td>135–140</td>
+<td>Disaster risk index, expected annual flood damage, air quality index, probable maximum precipitation (PMP), Palmer drought severity index (PDSI), dam breach parameters</td>
+</tr>
+<tr>
+<td>Data Assimilation &amp; State Estimation</td>
+<td>141–144</td>
+<td>Ensemble Kalman filter (EnKF), optimal interpolation, 4D-Var assimilation cost, Shannon information entropy</td>
+</tr>
+<tr>
+<td>Signal Processing &amp; Communications</td>
+<td>145–147</td>
+<td>Free-space RF path loss (Friis), ionospheric delay (Klobuchar), frequency shift from relative velocity (Doppler)</td>
+</tr>
+<tr>
+<td>Mathematical Frameworks</td>
+<td>148–150</td>
+<td>Hohmann transfer Δv, Lagrange point positions, mutual information between variables</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="key-features">Key Features</h2>
+
+
+<ul>
+<li><strong>150 non-ML equations</strong> — every model is derived from a peer-reviewed paper, textbook, or authoritative standard</li>
+<li><strong>26 domains</strong> — atmospheric, oceanic, seismic, cryospheric, space, and beyond</li>
+<li><strong>7-part structure</strong> — logically grouped from Earth system core to advanced engineering</li>
+<li><strong>7-stage workflow</strong> — input validation → preprocessing → computation → post-processing → quality control → uncertainty estimation → interpretation</li>
+<li><strong>Real-data context</strong> — every model receives live context (weather, terrain, ocean, seismic) from 30+ data feeds</li>
+<li><strong>Literature-indexed</strong> — 80 models carry a DOI in their citation (12 ISBN, 4 explicit NO-DOI; remainder pre-DOI/standards)</li>
+</ul>
+
+
+<hr></hr>
+
+
+<h2 id="7-stage-workflow">7-Stage Workflow</h2>
+
+
+<p>Defined in <code>server/analytical-models/toolWorkflows.ts</code> (preceded by live-data context enrichment in <code>contextEngine.ts</code>):</p>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. Input validation</td>
+<td>Range, type, and physical-plausibility checks</td>
+</tr>
+<tr>
+<td>2. Preprocessing</td>
+<td>Unit conversion, derived-parameter computation</td>
+</tr>
+<tr>
+<td>3. Computation</td>
+<td>The source equation (<code>engine.ts</code>)</td>
+</tr>
+<tr>
+<td>4. Post-processing</td>
+<td>Classification, unit normalisation</td>
+</tr>
+<tr>
+<td>5. Quality control</td>
+<td>Result sanity checks, outlier detection</td>
+</tr>
+<tr>
+<td>6. Uncertainty estimation</td>
+<td>Error propagation / empirical RMSE</td>
+</tr>
+<tr>
+<td>7. Interpretation</td>
+<td>Contextual analysis + scientific recommendations</td>
+</tr>
+</tbody>
+</table></div></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -87,7 +87,7 @@
         <span><strong>Last reviewed</strong> 2026-09-08</span>
         <span><span class="tag tag-measured">MEASURED — compose/env read from repo; local dev boot measured</span></span>
       </div>
-      <p><strong>Full description (prose, source of truth):</strong> <a href="DEPLOYMENT.md">DEPLOYMENT.md — the operations manual (source of truth)</a></p>
+      <p><strong>Full description:</strong> <a href="narratives/DEPLOYMENT.html">Read the full narrative</a></p>
       <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
         <li><a href="#stack">Deployment stack</a></li>
 <li><a href="#config">Configuration contract</a></li>
@@ -102,7 +102,7 @@
 <tr><td>redis</td><td>redis:7-alpine</td><td>6379</td><td>cache + memory hot path; optional — SQLite fallback</td></tr>
 <tr><td>causal-service</td><td>Python microservice (DoWhy + Flask)</td><td>5001</td><td>causal discovery (/discover, /health)</td></tr>
 </tbody></table></div>
-<p>Volumes and mounts (<code>terranoetis-data</code>, <code>redis-data</code>, read-only <code>.env</code>) and full commands: <a href="DEPLOYMENT.md">DEPLOYMENT.md</a> · <code>docker-compose.yml</code> · <code>Dockerfile</code>.</p>
+<p>Volumes and mounts (<code>terranoetis-data</code>, <code>redis-data</code>, read-only <code>.env</code>) and full commands: <a href="narratives/DEPLOYMENT.html">DEPLOYMENT.md</a> · <code>docker-compose.yml</code> · <code>Dockerfile</code>.</p>
 <h2 id="config">Configuration contract</h2>
 <div class="table-scroll"><table><caption></caption>
 <thead><tr><th scope="col">Variable</th><th scope="col">Behaviour (code-verified)</th></tr></thead>
@@ -122,7 +122,7 @@
         <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
         source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
         license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
-        prose source of truth: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
         corrections: see <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p>
       </footer>
     </div>

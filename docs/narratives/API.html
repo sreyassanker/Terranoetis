@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Reference — Terranoetis Documentation</title>
+<meta name="description" content="Terranoetis exposes 360+ REST endpoints (371 handler registrations counted across server/ on 2026-09-08) plus real-time WebSocket (/ws/agent, /ws/voice) an…">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/narratives/API.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="API Reference — Terranoetis Documentation">
+<meta property="og:description" content="Terranoetis exposes 360+ REST endpoints (371 handler registrations counted across server/ on 2026-09-08) plus real-time WebSocket (/ws/agent, /ws/voice) an…">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/API.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Overview</a>
+      <a href="../documentation.html">Documentation</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../methodology.html">Verification</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+      <a href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener" class="nav-demo">Demo</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Product overview</a></li>
+<li><a href="../documentation.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Overview</a></li>
+    <li><a href="../documentation.html">Docs</a></li>
+<li><a href="../documentation.html">Documentation</a></li>
+<li aria-current="page">API Reference</li>
+      </ol></nav>
+      <h1>API Reference</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        
+      </div>
+      
+      
+      <div class="prose">
+
+<p>Terranoetis exposes <strong>360+ REST endpoints</strong> (371 handler registrations counted across <code>server/</code> on 2026-09-08) plus real-time <strong>WebSocket</strong> (<code>/ws/agent</code>, <code>/ws/voice</code>) and <strong>SSE</strong> channels. All API routes are served under <code>/api</code>. Authentication uses JWT bearer tokens with role-based access control (RBAC).</p>
+
+
+<blockquote>
+<p>Site views: <a href="../reference/api.html">API reference</a> · <a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a> · machine-readable spec at <code>GET /api/openapi.json</code>. The tables below are the curated prose map; per-endpoint behaviour is cited in the reference pages.</p>
+</blockquote>
+
+
+<hr></hr>
+
+
+<h2 id="table-of-contents">Table of Contents</h2>
+
+
+<ul>
+<li><a href="#conventions">Conventions</a></li>
+<li><a href="#authentication">Authentication</a></li>
+<li><a href="#agent--cognition">Agent &amp; Cognition</a></li>
+<li><a href="#analytical-models">Analytical Models</a></li>
+<li><a href="#live-data-feeds">Live Data Feeds</a></li>
+<li><a href="#intelligence--pulse">Intelligence &amp; Pulse</a></li>
+<li><a href="#simulations--scenarios">Simulations &amp; Scenarios</a></li>
+<li><a href="#explainability--governance">Explainability &amp; Governance</a></li>
+<li><a href="#memory--knowledge">Memory &amp; Knowledge</a></li>
+<li><a href="#admin--operations">Admin &amp; Operations</a></li>
+<li><a href="#local-gguf-model">Local GGUF Model</a></li>
+<li><a href="#websocket">WebSocket</a></li>
+<li><a href="#error-handling">Error Handling</a></li>
+</ul>
+
+
+<hr></hr>
+
+
+<h2 id="conventions">Conventions</h2>
+
+
+<ul>
+<li><strong>Base URL:</strong> <code>/api</code></li>
+<li><strong>Content-Type:</strong> <code>application/json</code></li>
+<li><strong>Auth:</strong> <code>Authorization: Bearer &lt;JWT&gt;</code></li>
+<li><strong>Rate limiting:</strong> per-IP and per-user limits apply on public + authenticated routes</li>
+<li><strong>Public routes</strong> (no auth): <code>/auth/login</code>, <code>/auth/dev-login</code>, <code>/auth/refresh</code>, <code>/health</code>, <code>/ready</code>, <code>/live</code>, <code>/metrics</code>, <code>/config/apis</code>, <code>/openapi.json</code>, <code>/docs</code>. In addition, read-only live-data endpoints (e.g. <code>/earthquakes</code>, <code>/weather/*</code>, <code>/flights</code>, <code>/ais</code>, <code>/satellites/tle</code>, <code>/pulse/*</code>, <code>/kaggle/*</code>, <code>/analytical-models</code> search + detail) are public but server-side rate-limited, as are shared-session reads (<code>/shared/*</code>), map tiles (<code>/tiles/*</code>, <code>/tilejson</code>), foundation-model endpoints (<code>/fm/*</code>, <code>/road-traffic/*</code>, <code>/spacex/*</code>, <code>/bayfire/*</code>), multimodal endpoints (<code>/multimodal/*</code>), and simulations (<code>/simulate/*</code>). <code>/social/stream</code> authenticates via <code>?token=</code> (SSE).</li>
+</ul>
+
+
+<hr></hr>
+
+
+<h2 id="authentication">Authentication</h2>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/api/auth/login</code></td>
+<td>Exchange credentials for a JWT</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/auth/dev-login</code></td>
+<td>Development-only auto-login (disabled in production)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/auth/refresh</code></td>
+<td>Refresh an unexpired JWT</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>authGuard</code></td>
+<td>Protects authenticated routes</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<p>Passwords are hashed with <strong>scrypt</strong> (RFC 7914, <code>scrypt$N=16384,r=8,p=1</code>) — no plaintext storage, no external crypto dependency.</p>
+
+
+<hr></hr>
+
+
+<h2 id="agent-cognition">Agent &amp; Cognition</h2>
+
+
+<p>The agent pipeline routes natural-language queries through intent recognition (System 1 / System 2) and executes tool chains against live data.</p>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/ask</code></td>
+<td>Main agent endpoint — SSE streaming chat with tool execution</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/local-ask</code></td>
+<td>Offline/local fallback agent</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/cognize</code></td>
+<td>Cognitive reasoning entry point</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/analyze-data</code></td>
+<td>Data analysis task</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/analyze-vision</code></td>
+<td>Vision/image analysis</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/pipeline</code></td>
+<td>Multi-stage pipeline execution</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/plan</code></td>
+<td>Hierarchical task network (HTN) planning</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/plan/execute</code></td>
+<td>Execute an HTN plan</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/search-all</code></td>
+<td>Unified natural-language search across all databases</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/suggestions</code></td>
+<td>Proactive insight suggestions</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/approve</code></td>
+<td>Approve pending agent actions</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/feedback</code></td>
+<td>Record feedback for self-improvement</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/analytics</code></td>
+<td>Agent performance analytics</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/context</code></td>
+<td>Conversation context</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/events</code></td>
+<td>Agent event stream (SSE; deprecated — superseded by WebSocket <code>/ws/agent</code>)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/tiers</code></td>
+<td>Model tier configuration</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/models</code></td>
+<td>List all available LLM models with availability status</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/geocode</code></td>
+<td>Geocoding</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/trace/:id</code></td>
+<td>Reasoning trace for an interaction</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/memory</code></td>
+<td>Conversation memory retrieval</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/agent/memory</code></td>
+<td>Clear conversation memory</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/profile</code></td>
+<td>Get user profile</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/profile</code></td>
+<td>Update user profile</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/agent/profile</code></td>
+<td>Delete user profile</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/monitor</code></td>
+<td>List monitor rules</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/monitor</code></td>
+<td>Create monitor rule</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/agent/monitor/:id</code></td>
+<td>Delete a monitor rule</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/schedule</code></td>
+<td>List scheduled tasks</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/schedule</code></td>
+<td>Create a scheduled task</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/agent/schedule/:id</code></td>
+<td>Delete a scheduled task</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/cache</code></td>
+<td>Inspect agent cache</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/agent/cache</code></td>
+<td>Purge agent cache</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/evidence/:id</code></td>
+<td>Evidence chain for a claim</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="analytical-models">Analytical Models</h2>
+
+
+<p>150 equation engines grounded in primary literature across 26 domains and 7 parts.</p>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/analytical-models</code></td>
+<td>Full catalog (all 150 models)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/analytical-models/search</code></td>
+<td>Full-text + domain search over all 150 models</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/analytical-models/:id</code></td>
+<td>Model detail (paper citation, formula, params)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/analytical-models/:id/execute</code></td>
+<td>Execute a model with inputs (authenticated)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/analytical-models/:id/execute-internal</code></td>
+<td>Execute a model from the server-side tool executor (loopback; remote callers need admin JWT)</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<p>The analytical pipeline applies a <strong>7-stage workflow</strong> (input validation → preprocessing → computation → post-processing → quality control → uncertainty estimation → interpretation), defined in <code>server/analytical-models/toolWorkflows.ts</code>.</p>
+
+
+<hr></hr>
+
+
+<h2 id="live-data-feeds">Live Data Feeds</h2>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Endpoints</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Seismic</td>
+<td><code>/api/earthquakes</code>, <code>/api/earthquakes/significant</code>, <code>/api/earthquakes/summary</code></td>
+</tr>
+<tr>
+<td>Weather</td>
+<td><code>/api/weather/open-meteo</code>, <code>/api/weather/alerts</code>, <code>/api/weather/nhc</code>, <code>/api/weather/marine</code>, <code>/api/weather/air-quality</code>, <code>/api/weather/gfs</code>, <code>/api/weather/ensemble</code>, <code>/api/weather/seasonal</code>, <code>/api/weather/historical</code>, <code>/api/weather/flood</code></td>
+</tr>
+<tr>
+<td>Aviation</td>
+<td><code>/api/flights</code>, <code>/api/flights/all</code>, <code>/api/flights/military</code>, <code>/api/adsb-fi</code>, <code>/api/adsb-lol</code>, <code>/api/airlabs</code></td>
+</tr>
+<tr>
+<td>Maritime</td>
+<td><code>/api/ais</code>, <code>/api/ais/nearby</code>, <code>/api/ais/status</code></td>
+</tr>
+<tr>
+<td>Fires &amp; hazards</td>
+<td><code>/api/firms</code>, <code>/api/eonet</code>, <code>/api/gdacs/alerts</code>, <code>/api/fema</code>, <code>/api/geospatial/overpass</code></td>
+</tr>
+<tr>
+<td>Space</td>
+<td><code>/api/satellites/tle</code>, <code>/api/ucs-satellites</code>, <code>/api/spacex/launches</code>, <code>/api/space-debris</code>, <code>/api/space-weather/donki</code>, <code>/api/space-weather/kp</code>, <code>/api/aurora</code>, <code>/api/iss</code></td>
+</tr>
+<tr>
+<td>Traffic</td>
+<td><code>/api/road-traffic/analyze</code></td>
+</tr>
+<tr>
+<td>Climate</td>
+<td><code>/api/climate/power</code>, <code>/api/electricity-grid</code></td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="intelligence-pulse">Intelligence &amp; Pulse</h2>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/pulse/market/quotes</code></td>
+<td>Live stock + crypto quotes</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/pulse/energy/prices</code></td>
+<td>Energy commodity prices</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/pulse/geopolitical/risks</code></td>
+<td>Geopolitical risk scores</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/pulse/correlation/cards</code></td>
+<td>Cross-asset correlation analysis</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/pulse/heatmap</code></td>
+<td>19-asset price heatmap</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/correlation/anomalies</code></td>
+<td>Anomaly detection feed</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/correlation/status</code></td>
+<td>Correlation engine status</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/gold</code>, <code>/api/fred</code>, <code>/api/eia</code>, <code>/api/entsoe</code>, <code>/api/imf</code>, <code>/api/comtrade</code>, <code>/api/alphavantage</code>, <code>/api/coingecko</code></td>
+<td>Economic &amp; financial data</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="simulations-scenarios">Simulations &amp; Scenarios</h2>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/api/scenarios/generate</code></td>
+<td>Generate a single disaster scenario</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/scenarios/batch</code></td>
+<td>Batch-generate scenarios</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/scenarios/:id</code></td>
+<td>Scenario detail</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/sandbox/execute</code></td>
+<td>Execute Python / Node / Bash in the sandbox</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/sandbox/workspace</code></td>
+<td>Create a sandbox workspace</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/sandbox/workspace/:id</code></td>
+<td>Delete a workspace</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/sandbox/workspace/:id/upload</code></td>
+<td>Upload a file to the workspace</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/sandbox/workspace/:id/files</code></td>
+<td>List workspace files</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/sandbox/workspace/:id/read</code></td>
+<td>Read a workspace file</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/kaggle/simulate/:id</code></td>
+<td>Kaggle simulation job status / results</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/kaggle/simulate/:id/results</code></td>
+<td>Simulation result data</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/kaggle/jobs</code></td>
+<td>Kaggle job queue</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/kaggle/simulate</code></td>
+<td>Submit a simulation run (zod-validated contract; see parameter-contract reference)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/kaggle/simulate/:id/stream</code></td>
+<td>SSE job status/progress stream</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/kaggle/simulate/:id/cancel</code></td>
+<td>Cooperative cancel (local runs SIGKILL at <code>LOCAL_SIM_TIMEOUT_MS</code>)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/kaggle/simulate/:id/grid/:name</code></td>
+<td>Result grid as raw <code>.npy</code> or JSON (≤ 5 M elements)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/kaggle/simulate/:id/geotiff/:name</code></td>
+<td>Result grid as WGS84 GeoTIFF</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/kaggle/jobs</code> · <code>/api/kaggle/kernels</code></td>
+<td>Job list · kernel availability &amp; GPU-accelerator flags</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/kaggle/calibrate</code></td>
+<td>Landslide μ×ξ fit to an observed runout (local python3)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/kaggle/landslide/quantify</code> · <code>/api/kaggle/volcano/quantify</code></td>
+<td>Monte-Carlo UQ ensembles (local python3)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/kaggle/volcano/calibrate</code> · <code>/api/kaggle/volcano/profile</code></td>
+<td>Lava rheology calibration · wind-profile sampling</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="explainability-governance">Explainability &amp; Governance</h2>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/explain/status</code></td>
+<td>Explainability subsystem status</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/explain/traces</code></td>
+<td>Reasoning traces</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/explain/trace/:interactionId</code></td>
+<td>Full trace for an interaction</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/explain/trace</code></td>
+<td>Create a trace</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/explain/evidence/:interactionId</code></td>
+<td>Evidence chain</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/explain/evidence/link</code></td>
+<td>Link evidence to claims</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/explain/evidence/:id/verify</code></td>
+<td>Verify evidence</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/explain/bias/geographic</code></td>
+<td>Geographic bias audit</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/explain/bias/temporal</code></td>
+<td>Temporal bias audit</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/explain/bias/report</code></td>
+<td>Latest bias audit report</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/explain/bias/reports</code></td>
+<td>List bias audit reports</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/explain/override/:id/approve</code></td>
+<td>Approve a pending override</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/explain/override/:id/reject</code></td>
+<td>Reject a pending override</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/explain/override/pending</code></td>
+<td>Pending overrides</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/explain/override/audit-log</code></td>
+<td>Override audit log</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/explain/uncertainty/compute</code></td>
+<td>Uncertainty quantification</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/explain/uncertainty/calibration</code></td>
+<td>Calibration metrics</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="memory-knowledge">Memory &amp; Knowledge</h2>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/api/memory/consolidate</code></td>
+<td>Trigger memory consolidation</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/memory/working</code></td>
+<td>Working memory</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/memory/episodes</code></td>
+<td>Episodic memory</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/memory/facts</code></td>
+<td>Fact memory</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/memory/procedural</code></td>
+<td>Procedural memory</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/memory/predictive</code></td>
+<td>Predictive memory</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/memory/sensory</code></td>
+<td>Sensory buffer</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/memory/stats</code></td>
+<td>Memory statistics</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/memory/status</code></td>
+<td>Memory subsystem status</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/causal-graph</code></td>
+<td>Causal knowledge graph</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/causal-graph/dot</code></td>
+<td>GraphViz DOT export</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/kgV2/generate-entities</code></td>
+<td>Generate entities from a trigger event</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/kgV2/generate-edges</code></td>
+<td>Generate causal relationships</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/kgV2/counterfactual</code></td>
+<td>Counterfactual graph</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/kgV2/complete</code></td>
+<td>Complete missing edges</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/kgV2/evolve</code></td>
+<td>Apply decay, evolution log</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="admin-operations">Admin &amp; Operations</h2>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/admin/metrics</code></td>
+<td>System metrics</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/admin/audit-logs</code></td>
+<td>Audit log</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/admin/plugins</code></td>
+<td>Installed plugins</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/admin/plugins/install</code></td>
+<td>Install plugin (URL / GitHub / raw code)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/admin/plugins/install-zip</code></td>
+<td>Install plugin from a ZIP archive</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/admin/plugins/:id/toggle</code></td>
+<td>Enable or disable a plugin</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/admin/plugins/:id</code></td>
+<td>Remove plugin</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/admin/models/gguf-status</code></td>
+<td>Local GGUF model status (installed, size, partial file, download progress, speed, ETA)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/admin/models/gguf-download</code></td>
+<td>Start or resume downloading the LFM 2.5 2.6B Q4_K_M GGUF model from HuggingFace</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/admin/models/gguf</code></td>
+<td>Remove the local GGUF model file (and any partial download)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/tools</code></td>
+<td>Registered tools</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/tools/:id</code></td>
+<td>Disable tool</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/config/apis</code></td>
+<td>Public API config (no secrets)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/openapi.json</code></td>
+<td>OpenAPI spec</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/docs</code></td>
+<td>API documentation UI</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/health</code></td>
+<td>Health + readiness checks</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="local-gguf-model">Local GGUF Model</h3>
+
+
+<p>The server ships with a built-in downloader for the <strong>LFM 2.5 2.6B Q4_K_M</strong> GGUF model (<code>~1.6 GB</code>). Once downloaded, the server auto-starts <code>llama-server</code> on port 11436, making the local model available as a fallback LLM provider.</p>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/admin/models/gguf-status</code></td>
+<td>Check install state, file size, partial/resume state, and live download progress (speed, ETA)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/admin/models/gguf-download</code></td>
+<td>Start or resume downloading. Returns <code>alreadyInstalled: true</code> if the model is already present. Writes to a <code>.partial</code> file so network interruptions don't corrupt the real path</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/admin/models/gguf</code></td>
+<td>Delete the model file and any partial download</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<p><strong>Resume behaviour</strong>: if the download is interrupted (network drop, server restart), the partial file is kept at <code>models/LFM2.5-2.6B-Q4_K_M.gguf.partial</code>. Re-triggering the download sends an HTTP <code>Range</code> header to HuggingFace and appends to the partial file — no re-download from scratch.</p>
+
+
+<p><strong>Progress tracking</strong>: the status endpoint returns <code>speedBytes</code> (bytes/s), <code>etaSeconds</code>, <code>percent</code>, <code>received</code>, <code>total</code>, <code>running</code>, <code>done</code>, and <code>resuming</code> flags for real-time UI updates.</p>
+
+
+<hr></hr>
+
+
+<h2 id="websocket">WebSocket</h2>
+
+
+<p>The WebSocket server (<code>server/websocket.ts</code>) streams live data and agent events to connected clients:</p>
+
+
+<ul>
+<li>Live entity updates (flights, vessels, satellites, earthquakes)</li>
+<li>Agent SSE-style streaming relayed over WS</li>
+<li>Presence (collaboration cursors, typing)</li>
+<li>Pub/sub messages (alerts, fork state)</li>
+</ul>
+
+
+<p>Connection: <code>ws://&lt;host&gt;:3001</code> on paths <code>/ws/agent</code> and <code>/ws/voice</code> only (all other upgrade paths are destroyed); auth via <code>Sec-WebSocket-Protocol</code> bearer JWT (fallback <code>?token=</code>); 30 s heartbeat / 35 s timeout; channel allowlist includes <code>sentinel:raw</code>, <code>sentinel:alerts</code>, <code>correlation:alerts</code>, <code>fork:*</code>, per-user <code>ws:&lt;id&gt;</code> (<code>server/websocket.ts:79-145</code>). The event bus feeding it is the in-process pub/sub (<code>server/pubsub.ts</code>) — Redis is not required for realtime delivery.</p>
+
+
+<hr></hr>
+
+
+<h2 id="error-handling">Error Handling</h2>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>200</code></td>
+<td>Success</td>
+</tr>
+<tr>
+<td><code>400</code></td>
+<td>Validation error</td>
+</tr>
+<tr>
+<td><code>401</code></td>
+<td>Missing/invalid token</td>
+</tr>
+<tr>
+<td><code>403</code></td>
+<td>Insufficient role</td>
+</tr>
+<tr>
+<td><code>404</code></td>
+<td>Not found</td>
+</tr>
+<tr>
+<td><code>429</code></td>
+<td>Rate limited</td>
+</tr>
+<tr>
+<td><code>500</code></td>
+<td>Internal error</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<p>Errors return <code>{ &quot;error&quot;: &quot;&lt;message&gt;&quot; }</code>. Authentication failures return <code>{ &quot;error&quot;: &quot;Missing or invalid Authorization header...&quot; }</code>.</p></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

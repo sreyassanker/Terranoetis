@@ -73,7 +73,7 @@ export const CORE_PAGES = [
     title: 'Getting started',
     desc: 'Install and run Terranoetis locally, verify the stack with measured outputs, and run your first hazard simulation through the API.',
     breadcrumb: [{ label: 'Getting started' }],
-    proseMd: 'getting-started.md', proseMdLabel: 'getting-started.md — narrative walkthrough (source of truth)',
+    proseMd: 'narratives/getting-started.html',
     tags: ['<span class="tag tag-measured">ALL STEPS EXECUTED 2026-09-08</span>'],
     sections: [
       { kind: 'h2', id: 'prerequisites', title: 'Prerequisites' },
@@ -145,7 +145,7 @@ export const CORE_PAGES = [
     title: 'Platform architecture',
     desc: 'Three-tier topology: React/Cesium client, Express/TypeScript API, SQLite + Redis persistence — with request lifecycle and background services.',
     breadcrumb: [{ label: 'Platform architecture' }],
-    proseMd: 'ARCHITECTURE.md', proseMdLabel: 'ARCHITECTURE.md — full prose (source of truth)',
+    proseMd: 'narratives/ARCHITECTURE.html',
     tags: [tagMeasured('topology read from the measured server boot order')],
     sections: [
       { kind: 'p', html: `Terranoetis is a three-tier application: a React 19 + CesiumJS single-page client (Vite 7), a Node.js + Express 4 API (TypeScript run via <code>tsx</code>), and SQLite (primary store) with Redis as an optional cache/memory hot path. The client talks REST + SSE + WebSocket to the API; the API orchestrates live-data fetchers, the 150-equation analytical engine, the hazard-simulation runners and the cognitive pipeline.` },
@@ -171,7 +171,7 @@ export const CORE_PAGES = [
         'Write-through to the chat knowledge graph and reasoning traces — ' + src('server/index.ts', '11237') + ' ' + src('server/kgV2/chatKgBridge.ts', '28'),
       ]},
       { kind: 'h2', id: 'modules', title: 'Module inventory' },
-      { kind: 'p', html: `LOC per directory and each module’s purpose are tabulated in the prose document (<a href="BACKEND.md">BACKEND.md</a>), verified against the tree on 2026-09-08. Highlights of interest to researchers: <code>analytical-models/</code> (23,866 LOC), <code>kaggle/</code> (3,105), <code>cognition/</code> (2,760), <code>sentinel/</code> (3,191), <code>memoryV2/</code> (2,091).` },
+      { kind: 'p', html: `LOC per directory and each module’s purpose are tabulated in the prose document (<a href="narratives/BACKEND.html">BACKEND.md</a>), verified against the tree on 2026-09-08. Highlights of interest to researchers: <code>analytical-models/</code> (23,866 LOC), <code>kaggle/</code> (3,105), <code>cognition/</code> (2,760), <code>sentinel/</code> (3,191), <code>memoryV2/</code> (2,091).` },
       { kind: 'h2', id: 'storage', title: 'Persistence and realtime plumbing' },
       { kind: 'table', cols: ['Subsystem', 'Implementation', 'Source'], rows: [
         ['Primary store', 'SQLite <code>server/realtime.db</code>, WAL + busy_timeout 5000, FKs on; 47 schema tables + runtime tables (provider_stats, system1_cache, job_queue…)', src('server/db/index.ts', '6-18') + ' ' + src('server/db/schema.sql', '47 tables (counted)')],
@@ -190,7 +190,7 @@ export const CORE_PAGES = [
     title: 'Hazard simulations — overview & architecture',
     desc: 'How the seven disaster-physics kernels are structured: the zod request/contract layer, local-CPU vs Kaggle execution, job lifecycle, output formats, UQ endpoints.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'Hazard simulations' }],
-    proseMd: 'capabilities/hazard-simulations.md', proseMdLabel: 'capabilities/hazard-simulations.md — narrative (source of truth)',
+    proseMd: 'narratives/capabilities/hazard-simulations.html',
     tags: ['<span class="tag tag-measured">ALL 7 KERNELS EXECUTED LOCALLY</span>'],
     sections: [
       { kind: 'p', html: `Seven disaster scenarios share one pipeline: the client builds a typed request through a zod discriminated-union contract whose bounds mirror the kernels’ own validity checks; the server either executes the kernel locally (<code>python3</code>) or pushes it to Kaggle; results land in a uniform <code>results/&lt;jobId&gt;/</code> directory of NumPy grids + metadata.json and stream back over SSE.` },
@@ -257,7 +257,7 @@ export const CORE_PAGES = [
     title: 'Analytical equation engine',
     desc: '150 literature-cited equation engines across 26 domains with a 7-stage QC workflow; honest-NaN contract; no ML.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'Analytical equation engine' }],
-    proseMd: 'capabilities/analytical-engine.md', proseMdLabel: 'capabilities/analytical-engine.md — narrative (source of truth)',
+    proseMd: 'narratives/capabilities/analytical-engine.html',
     tags: ['<span class="tag tag-measured">COUNTS + SAMPLE COMPUTATIONS EXECUTED</span>'],
     sections: [
       { kind: 'p', html: `The engine is a catalog of 150 deterministic, non-ML scientific functions — <code>EQUATION_ENGINE[id](inputs) → {result, unit, steps[]}</code> — each grounded in a primary-literature reference. A context engine enriches inputs from live feeds before execution; a 7-stage workflow wraps validation, unit preprocessing, computation, post-processing, quality control, uncertainty estimation and interpretation.` },
@@ -294,7 +294,7 @@ export const CORE_PAGES = [
         ['VI — Space Environment & Satellite', 'Geodesy & Reference Frames (5) · Thermosphere, Ionosphere & Magnetosphere (7) · Satellite Dynamics & Space Debris (5) · Solar-Terrestrial & GNSS (3)'],
         ['VII — Advanced Engineering & Risk', 'Groundwater & Subsurface (4) · Hazard, Risk & Disaster Engineering (6) · Data Assimilation & State Estimation (4) · Signal Processing & Communications (3) · Mathematical Frameworks (3)'],
       ]},
-      { kind: 'p', html: `Topic lists per domain and individual citations: <a href="../MODELS.md">MODELS.md</a> (source of truth, corrected 2026-09-08). Reproduction: <code>npx tsx -e "import {computeEquation} from './server/analytical-models/engine.ts'; console.log(computeEquation(19,{a:7,b:1,M:6}))"</code>` },
+      { kind: 'p', html: `Topic lists per domain and individual citations: <a href="../narratives/MODELS.html">MODELS.md</a> (corrected 2026-09-08). Reproduction: <code>npx tsx -e "import {computeEquation} from './server/analytical-models/engine.ts'; console.log(computeEquation(19,{a:7,b:1,M:6}))"</code>` },
       { kind: 'callout', tone: 'inspect', title: 'Verification scope', html: `<p>Live-context enrichment (contextEngine → USGS/Open-Meteo etc.) and the HTTP execute path were not exercised for all 150 tools in this pass (network-dependent). In-process computation, structural counts and test-suite math verification are measured.</p>` },
     ],
   },
@@ -305,7 +305,7 @@ export const CORE_PAGES = [
     title: 'AI chat & cognition',
     desc: 'Intent routing, System 1 / System 2 dual-process reasoning, multi-agent debate, tool loop and the 9-provider Omninet model router.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'AI chat & cognition' }],
-    proseMd: 'capabilities/ai-cognition.md', proseMdLabel: 'capabilities/ai-cognition.md — narrative (source of truth)',
+    proseMd: 'narratives/capabilities/ai-cognition.html',
     tags: [tagMeasured('cognitive services start observed at boot; LLM outcomes provider-dependent')],
     sections: [
       { kind: 'p', html: `The chat pipeline classifies a natural-language query into one of eight intents, routes it through a dual-process cognition layer (fast cached/templated answers vs deliberate multi-agent reasoning), executes tools (live data, analytical models, simulations, sandbox), and streams results over SSE. All LLM traffic passes through the Omninet provider router.` },
@@ -347,7 +347,7 @@ export const CORE_PAGES = [
     title: 'Live data & monitoring',
     desc: '82 registered external API integrations, Sentinel watch-zone polling, anomaly detection, correlation engine, reflex actions, WebSocket/SSE delivery.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'Live data & monitoring' }],
-    proseMd: 'capabilities/live-data-and-monitoring.md', proseMdLabel: 'capabilities/live-data-and-monitoring.md — narrative (source of truth)',
+    proseMd: 'narratives/capabilities/live-data-and-monitoring.html',
     tags: [tagMeasured('server boot started all services; USGS/EONET/FIRMS pollers observed live')],
     sections: [
       { kind: 'p', html: `The platform ingests live open-data feeds and turns them into alerts. Sentinel polls sources against baselines for user watch-zones; anomaly detectors and a correlation engine fuse streams; reflex rules push actions to connected globe clients over WebSocket/SSE.` },
@@ -381,7 +381,7 @@ export const CORE_PAGES = [
     title: 'World model & causal reasoning',
     desc: 'Causal knowledge graph, weighted ensemble predictor, hand-coded physics NN, Brier-scored forecast ledger, temporal KG v2, forks and the dream engine.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'World model & causal reasoning' }],
-    proseMd: 'capabilities/world-model-and-causal.md', proseMdLabel: 'capabilities/world-model-and-causal.md — narrative (source of truth)',
+    proseMd: 'narratives/capabilities/world-model-and-causal.html',
     tags: [tagMeasured('subsystem start-up observed; no prediction-accuracy claims')],
     sections: [
       { kind: 'p', html: `The world-model subsystem stores causal structure (SQLite nodes/edges + embeddings), fuses five weighted forecast sources, keeps a scored ledger of predictions versus outcomes, and feeds knowledge back through a temporal KG. The DoWhy Python microservice is an optional external discovery path.` },
@@ -406,7 +406,7 @@ export const CORE_PAGES = [
     title: 'Memory system',
     desc: 'Tiered memory (sensory → working → episodic → semantic → procedural → predictive) backed by SQLite with a Redis hot path and consolidation passes.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'Memory system' }],
-    proseMd: 'capabilities/memory.md', proseMdLabel: 'capabilities/memory.md — narrative (source of truth)',
+    proseMd: 'narratives/capabilities/memory.html',
     tags: [tagMeasured('memory subsystem reported “ok” in the measured health check')],
     sections: [
       { kind: 'p', html: `Two coexisting systems: the v1 PlanetaryMemorySystem (5 tiers, decay loop) and the v2 six-tier hierarchy with dedicated SQLite tables and a MemoryManagerV2 facade (store/buildContext/consolidate). The chat semantic cache (similarity threshold 0.7) is wrapped by an EnhancedCache.` },
@@ -440,7 +440,7 @@ export const CORE_PAGES = [
     title: '3D globe visualization',
     desc: 'React 19 + Cesium 1.140 client: App shell with 11 lazy panels, 41 rendering modules, simulation overlays, sensor styles and cinematic cameras.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: '3D globe visualization' }],
-    proseMd: 'capabilities/globe-visualization.md', proseMdLabel: 'capabilities/globe-visualization.md — narrative (source of truth)',
+    proseMd: 'narratives/capabilities/globe-visualization.html',
     tags: ['<span class="tag tag-measured">COUNTS MEASURED</span>'],
     sections: [
       { kind: 'p', html: `The client renders live data and simulation outputs on a WebGL globe. “GPU” in this layer refers to rendering primitives (PostProcessStage shaders, custom Cesium Primitives) — not to GPU compute in the simulation kernels.` },
@@ -463,7 +463,7 @@ export const CORE_PAGES = [
         'Scenario studio (editor, gallery, cinematic director, per-hazard visualizers; origin points pinned by globe click)',
         'Collaboration presence (cursors/typing) over /ws/agent; realtime voice via /ws/voice',
       ]},
-      { kind: 'p', html: `Component tables and line counts: <a href="../FRONTEND.md">FRONTEND.md</a> (source of truth, corrected 2026-09-08).` },
+      { kind: 'p', html: `Component tables and line counts: <a href="../narratives/FRONTEND.html">FRONTEND.md</a> (corrected 2026-09-08).` },
     ],
   },
 
@@ -473,7 +473,7 @@ export const CORE_PAGES = [
     title: 'Platform services',
     desc: 'Authentication and rate limiting, sandboxed code execution, job queue, plugin system, observability and the OpenAPI surface.',
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: 'Platform services' }],
-    proseMd: 'capabilities/platform-services.md', proseMdLabel: 'capabilities/platform-services.md — narrative (source of truth)',
+    proseMd: 'narratives/capabilities/platform-services.html',
     tags: [tagMeasured('health/metrics endpoints observed on boot')],
     sections: [
       { kind: 'table', caption: 'Security controls (verified parameters)', cols: ['Control', 'Verified detail', 'Source'], rows: [

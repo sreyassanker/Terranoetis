@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contributing to Terranoetis — Terranoetis Documentation</title>
+<meta name="description" content="The client runs on http://localhost:3000 and the server on http://localhost:3001.…">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/narratives/CONTRIBUTING.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Contributing to Terranoetis — Terranoetis Documentation">
+<meta property="og:description" content="The client runs on http://localhost:3000 and the server on http://localhost:3001.…">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/CONTRIBUTING.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Overview</a>
+      <a href="../documentation.html">Documentation</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../methodology.html">Verification</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+      <a href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener" class="nav-demo">Demo</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Product overview</a></li>
+<li><a href="../documentation.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Overview</a></li>
+    <li><a href="../documentation.html">Docs</a></li>
+<li><a href="../documentation.html">Documentation</a></li>
+<li aria-current="page">Contributing to Terranoetis</li>
+      </ol></nav>
+      <h1>Contributing to Terranoetis</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        
+      </div>
+      
+      
+      <div class="prose">
+
+<h2 id="development-setup">Development Setup</h2>
+
+
+<h3 id="prerequisites">Prerequisites</h3>
+
+
+<ul>
+<li>Node.js 20+</li>
+<li>Redis 7+ (optional for dev — falls back to in-memory cache)</li>
+<li>A <code>.env</code> file with your API keys (copy from <code>.env.example</code>)</li>
+</ul>
+
+
+<h3 id="quick-start">Quick Start</h3>
+
+
+<pre><code className="language-bash"># Install dependencies
+npm install
+
+# Copy and configure environment
+cp .env.example .env
+# Edit .env with your API keys (see .env.example for documentation)
+
+# Start all services (client + server + Redis)
+npm run dev
+</code></pre>
+
+
+<p>The client runs on <code>http://localhost:3000</code> and the server on <code>http://localhost:3001</code>.</p>
+
+
+<h3 id="running-tests">Running Tests</h3>
+
+
+<pre><code className="language-bash"># Unit + integration tests
+npm test              # vitest — 1624+ tests
+
+# TypeScript type checking
+npx tsc -p tsconfig.server.json --noEmit
+npx tsc -p tsconfig.app.json --noEmit
+
+# Lint
+npm run lint          # eslint — 0 errors required
+
+# E2E browser tests
+npx playwright test   # 7 spec files, headless Chromium
+
+# Build
+npm run build         # tsc + vite build
+</code></pre>
+
+
+<h2 id="code-style">Code Style</h2>
+
+
+<ul>
+<li><strong>TypeScript</strong> — strict mode enabled. No <code>any</code> unless explicitly justified.</li>
+<li><strong>Imports</strong> — prefer <code>import type</code> for type-only imports. Use path aliases (<code>@/</code> for <code>src/</code>, direct paths for <code>server/</code>).</li>
+<li><strong>No fabricated data</strong> — every API response must be computed from real data or honestly labeled. No mocks, stubs, or hardcoded values in production code.</li>
+<li><strong>Error handling</strong> — never throw from analytical equations. Return <code>NaN</code> with a clear warning. Use <code>AppError</code> subclasses for HTTP errors.</li>
+<li><strong>Naming</strong> — <code>camelCase</code> for variables and functions, <code>PascalCase</code> for types and components, <code>UPPER_SNAKE</code> for constants.</li>
+</ul>
+
+
+<h2 id="adding-a-new-analytical-model">Adding a New Analytical Model</h2>
+
+
+<ol>
+<li>Add the equation function to the appropriate <code>server/analytical-models/equationParts/PART{n}.ts</code> file (or create a new part if adding a new domain).</li>
+<li>The function receives typed inputs <code>Record&lt;string, number&gt;</code> and must return <code>{ result: number, unit: string, steps: string[] }</code>.</li>
+<li>Add the ID to the <code>EQUATION_ENGINE</code> object (it's composed from the parts automatically).</li>
+<li>Register the model's metadata in <code>src/data/analyticalModels.ts</code> (name, equation, description, reference, etc.).</li>
+<li>Add the search keyword mapping in <code>server/index.ts</code> (<code>tryAnalyticalModelRunInner</code>'s <code>MODEL_KEYWORDS</code> array).</li>
+<li>Wire the model's inputs in <code>server/analytical-models/contextEngine.ts</code> (<code>mapInputs</code> switch-case).</li>
+<li>Add a unit test in <code>server/__tests__/unit/</code> and an E2E test in <code>e2e/</code>.</li>
+</ol>
+
+
+<h2 id="adding-a-new-data-layer">Adding a New Data Layer</h2>
+
+
+<ol>
+<li>Add the fetch function in <code>server/data/dataFetchers.ts</code>.</li>
+<li>Add the route in <code>server/index.ts</code> and register it in the public/authenticated bypass list if needed.</li>
+<li>Add the API metadata in <code>server/apiMetadata.ts</code>.</li>
+<li>Add the endpoint to the OpenAPI spec in <code>server/routes/openapi.ts</code>.</li>
+<li>Add the layer to the catalog in <code>src/lib/layerConfig.ts</code>.</li>
+<li>Verify the route returns real data: <code>curl http://localhost:3001/api/your-endpoint</code>.</li>
+</ol>
+
+
+<h2 id="documentation">Documentation</h2>
+
+
+<p>Docs prose lives in Markdown (<code>README.md</code>, <code>docs/*.md</code>, <code>docs/capabilities/*.md</code>); the Pages site under <code>docs/</code> is generated from <code>scripts/docs/</code> page specs — edit the spec, run <code>node scripts/docs/build.mjs</code>, and keep <code>node scripts/docs/quality-gate.mjs</code> green. Every factual claim needs a <code>file:line</code> citation; executed evidence is labelled MEASURED, code-read evidence is labelled inspection-only. The writing rules are at <a href="../governance/style-guide.html">docs/governance/style-guide.html</a>.</p>
+
+
+<h2 id="pull-request-process">Pull Request Process</h2>
+
+
+<ol>
+<li>Run the full test suite before submitting: <code>npm test &amp;&amp; npx playwright test &amp;&amp; npm run build</code>.</li>
+<li>Ensure eslint is clean: <code>npm run lint</code>.</li>
+<li>No <code>.env</code> files in commits — they are gitignored.</li>
+<li>No third-party API keys in source code.</li>
+<li>Every new feature must have a corresponding E2E test.</li>
+<li>All analytical model outputs must be computed from real data — no fabricated results.</li>
+</ol>
+
+
+<h2 id="architecture">Architecture</h2>
+
+
+<p>See <code>README.md</code> for the full architecture diagram and request flow.</p>
+
+
+<h2 id="license-contributions">License &amp; Contributions</h2>
+
+
+<p>Terranoetis is licensed under the <strong>Business Source License 1.1 (BUSL-1.1)</strong> (see <code>LICENSE</code>). Each version converts to the MIT License four years after publication.</p>
+
+
+<p>By submitting a contribution (pull request, patch, or code), you agree that:</p>
+
+
+<ol>
+<li>Your contribution is licensed to the project under the same BUSL-1.1 terms.</li>
+<li>The maintainer may relicense and use your contribution for any purpose, <strong>including commercial licensing</strong> of the project (e.g. offering it under a paid commercial license). This is required so the project can stay sustainable.</li>
+<li>You confirm you have the right to grant these permissions and that your contribution is original or properly attributed.</li>
+</ol>
+
+
+<p>Third-party components you reference (models, data sources, libraries) must keep their own licenses — do not relicense someone else's work as ours.</p></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

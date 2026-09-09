@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Earthquake ground motion — narrative — Terranoetis Documentation</title>
+<meta name="description" content="Verified data, parameters and measured runs: earthquake.html.…">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/narratives/capabilities/earthquake.html">
+<link rel="stylesheet" href="../../assets/docs.css">
+<link rel="icon" href="../../terranoetis.png" type="image/png">
+<meta property="og:title" content="Earthquake ground motion — narrative — Terranoetis Documentation">
+<meta property="og:description" content="Verified data, parameters and measured runs: earthquake.html.…">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/capabilities/earthquake.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../../index.html"><img src="../../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../../index.html">Overview</a>
+      <a href="../../documentation.html">Documentation</a>
+      <a href="../../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../../methodology.html">Verification</a>
+      <a href="../../deployment.html">Deployment</a>
+      <a href="../../governance/style-guide.html">Governance</a>
+      <a href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener" class="nav-demo">Demo</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../../index.html">Product overview</a></li>
+<li><a href="../../documentation.html">Documentation home</a></li>
+<li><a href="../../getting-started.html">Getting started</a></li>
+<li><a href="../../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../../governance/contributing.html">Contributing</a></li>
+<li><a href="../../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../../index.html">Overview</a></li>
+    <li><a href="../../documentation.html">Docs</a></li>
+<li><a href="../../documentation.html">Documentation</a></li>
+<li aria-current="page">Earthquake ground motion — narrative</li>
+      </ol></nav>
+      <h1>Earthquake ground motion — narrative</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        
+      </div>
+      
+      
+      <div class="prose">
+
+<p>Verified data, parameters and measured runs: <a href="../../capabilities/earthquake.html">earthquake.html</a>.</p>
+
+
+<h2 id="what-the-scenario-represents">What the scenario represents</h2>
+
+
+<p>An earthquake scenario answers one planning question: if a mainshock of magnitude M occurred at this point at this depth, what would the ground shaking field look like around it? The kernel computes the accepted engineering answer directly — the NGA-West2 ground-motion prediction equation of Boore, Stewart, Seyhan &amp; Atkinson (2014) for peak acceleration, peak velocity and 1-second spectral acceleration, with the standard linear-plus-nonlinear site response for the chosen site class, converted to Modified Mercalli Intensity through the USGS instrumental relations. The animation you see on the globe is that field revealed along S-wave arrival times; the hazard itself is computed instantly.</p>
+
+
+<h2 id="what-it-is-not">What it is not</h2>
+
+
+<p>It is not a rupture simulation. There is no fault geometry, directivity or finite rupture; distance is hypocentral from a point source; the magnitude mechanism is unspecified (base case); and no ground-motion variability is drawn — these are the kernel's own documented limits, reproduced verbatim on the page. For scenario screening and education the simplifications are conventional; they are not appropriate for site-specific assessment, where Rupture-to-Scenario style methods and regional GMPE variants are required.</p>
+
+
+<h2 id="why-it-runs-locally">Why it runs locally</h2>
+
+
+<p>Evaluating a GMPE median on a 256×256 grid is arithmetic, not integration: the measured kernel time for a full ShakeMap was 0.008 seconds (single observation, M 7.5). There is no reason to queue it on a remote machine, so the server spawns it with <code>python3</code> and returns results in well under a second end-to-end.</p>
+
+
+<h2 id="reading-a-shakemap-honestly">Reading a ShakeMap honestly</h2>
+
+
+<p>PGA values are medians of empirical distributions whose spread is large (roughly a factor of two in either direction at fixed M and R — the source paper's log-standard-deviation terms <code>h</code> are in the coefficient table). MMI bands are decision aids, not physics: the bands saturate for great-earthquake near-fields, which the kernel metadata states. Use the map to rank places, not to certify them.</p></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>

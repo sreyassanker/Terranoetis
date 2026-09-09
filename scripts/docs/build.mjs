@@ -7,6 +7,7 @@ import { renderPage, src, SITE_ORIGIN } from './site.mjs';
 import { HAZARDS, COMMON_GRID_SECTION } from './hazards.mjs';
 import { PAGES } from './pages.mjs';
 import { renderLanding, LANDING_PATH } from './landing.mjs';
+import { narrativePages } from './prose.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DOCS = path.join(ROOT, 'docs');
@@ -63,7 +64,7 @@ function hazardPage(key) {
   return {
     path: hz.path, depth: 1, title: hz.title, desc: hz.desc,
     breadcrumb: [{ label: 'Capabilities', href: 'capabilities/hazard-simulations.html' }, { label: hz.title }],
-    proseMd: `capabilities/${hz.proseMd}`, proseMdLabel: `capabilities/${hz.proseMd} — narrative description (source of truth)`,
+    proseMd: `narratives/capabilities/${hz.proseMd.replace('.md', '.html')}`,
     tags: hz.status.startsWith('MEASURED') || hz.status.startsWith('PHYSICS') || hz.status.startsWith('SOLVER')
       ? ['<span class="tag tag-measured">MEASURED LOCALLY</span>']
       : [],
@@ -74,6 +75,7 @@ function hazardPage(key) {
 const pages = [
   ...Object.keys(HAZARDS).map(hazardPage),
   ...PAGES,
+  ...narrativePages(),
 ];
 
 const CHECK = process.argv.includes('--check');

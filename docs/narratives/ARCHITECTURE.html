@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture — Terranoetis Documentation</title>
+<meta name="description" content="Terranoetis is a real-time geospatial intelligence platform built as a three-tier application:…">
+<link rel="canonical" href="https://sreyassanker.github.io/Terranoetis/narratives/ARCHITECTURE.html">
+<link rel="stylesheet" href="../assets/docs.css">
+<link rel="icon" href="../terranoetis.png" type="image/png">
+<meta property="og:title" content="Architecture — Terranoetis Documentation">
+<meta property="og:description" content="Terranoetis is a real-time geospatial intelligence platform built as a three-tier application:…">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://sreyassanker.github.io/Terranoetis/narratives/ARCHITECTURE.html">
+<meta property="og:image" content="https://sreyassanker.github.io/Terranoetis/terranoetis.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="docs-version" content="3.0.0">
+<meta name="docs-last-reviewed" content="2026-09-08">
+<meta name="generator" content="scripts/docs/build.mjs">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-banner">
+  <div class="site-banner-inner">
+    <a class="brand" href="../index.html"><img src="../terranoetis.png" alt="" width="32" height="32" class="brand-logo"><span class="terra">TERRA</span><span class="noetis">NOETIS</span></a>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="../index.html">Overview</a>
+      <a href="../documentation.html">Documentation</a>
+      <a href="../capabilities/hazard-simulations.html">Capabilities</a>
+      <a href="../methodology.html">Verification</a>
+      <a href="../deployment.html">Deployment</a>
+      <a href="../governance/style-guide.html">Governance</a>
+      <a href="https://www.youtube.com/playlist?list=PLFp9mjre3Lco" rel="noopener" class="nav-demo">Demo</a>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar" aria-label="Documentation">
+    <h2>Start</h2>
+<ul><li><a href="../index.html">Product overview</a></li>
+<li><a href="../documentation.html">Documentation home</a></li>
+<li><a href="../getting-started.html">Getting started</a></li>
+<li><a href="../architecture.html">Platform architecture</a></li></ul>
+<h2>Hazard simulations</h2>
+<ul><li><a href="../capabilities/hazard-simulations.html">Overview &amp; architecture</a></li>
+<li><a href="../capabilities/earthquake.html">Earthquake ground motion</a></li>
+<li><a href="../capabilities/tsunami.html">Tsunami propagation</a></li>
+<li><a href="../capabilities/volcano.html">Volcanic eruption</a></li>
+<li><a href="../capabilities/landslide.html">Landslide debris flow</a></li>
+<li><a href="../capabilities/flood.html">Flood inundation</a></li>
+<li><a href="../capabilities/hurricane.html">Hurricane wind &amp; surge</a></li>
+<li><a href="../capabilities/wildfire.html">Wildfire spread</a></li></ul>
+<h2>Intelligence capabilities</h2>
+<ul><li><a href="../capabilities/analytical-engine.html">Analytical equation engine</a></li>
+<li><a href="../capabilities/ai-cognition.html">AI chat &amp; cognition</a></li>
+<li><a href="../capabilities/live-data-and-monitoring.html">Live data &amp; monitoring</a></li>
+<li><a href="../capabilities/world-model-and-causal.html">World model &amp; causal reasoning</a></li>
+<li><a href="../capabilities/memory.html">Memory system</a></li></ul>
+<h2>Interface &amp; platform</h2>
+<ul><li><a href="../capabilities/globe-visualization.html">3D globe visualization</a></li>
+<li><a href="../capabilities/platform-services.html">Platform services</a></li></ul>
+<h2>Reference</h2>
+<ul><li><a href="../reference/api.html">REST &amp; WebSocket API</a></li>
+<li><a href="../reference/simulation-api.html">Simulation job API &amp; parameter contracts</a></li></ul>
+<h2>Quality</h2>
+<ul><li><a href="../methodology.html">Methodology &amp; verification</a></li>
+<li><a href="../deployment.html">Deployment &amp; operations</a></li></ul>
+<h2>Governance</h2>
+<ul><li><a href="../governance/style-guide.html">Documentation style guide</a></li>
+<li><a href="../governance/contributing.html">Contributing</a></li>
+<li><a href="../governance/security.html">Security</a></li></ul>
+  </nav>
+  <main id="main">
+    <div class="content">
+      <nav class="breadcrumbs" aria-label="Breadcrumb"><ol>
+        <li><a href="../index.html">Overview</a></li>
+    <li><a href="../documentation.html">Docs</a></li>
+<li><a href="../documentation.html">Documentation</a></li>
+<li aria-current="page">Architecture</li>
+      </ol></nav>
+      <h1>Architecture</h1>
+      <div class="page-meta">
+        <span><strong>Platform</strong> v3.0.0</span>
+        <span><strong>Docs</strong> v3.0.0</span>
+        <span><strong>Last reviewed</strong> 2026-09-08</span>
+        
+      </div>
+      
+      
+      <div class="prose">
+
+<p><strong>Terranoetis</strong> is a real-time geospatial intelligence platform built as a three-tier application:</p>
+
+
+<ul>
+<li><strong>Client</strong> — React 19 + CesiumJS single-page application (Vite 7)</li>
+<li><strong>Server</strong> — Node.js + Express 4 API, WebSocket realtime, JWT auth</li>
+<li><strong>Persistence</strong> — SQLite (primary store) + optional Redis (cache, memory hot path). The event bus is an in-process publish/subscribe (<code>server/pubsub.ts</code>), not Redis.</li>
+</ul>
+
+
+<blockquote>
+<p>Rendered, navigation-first version of these documents with per-capability verification data: <a href="../index.html">docs site</a>.</p>
+</blockquote>
+
+
+<p>This document describes the system topology, request lifecycle, background services, and the runtime modules that power the platform.</p>
+
+
+<hr></hr>
+
+
+<h2 id="table-of-contents">Table of Contents</h2>
+
+
+<ul>
+<li><a href="#system-topology">System Topology</a></li>
+<li><a href="#request-flow">Request Flow</a></li>
+<li><a href="#background-processes">Background Processes</a></li>
+<li><a href="#frontend-src">Frontend (<code>src/</code>)</a></li>
+<li><a href="#backend-server">Backend (<code>server/</code>)</a></li>
+<li><a href="#storage-layer">Storage Layer</a></li>
+<li><a href="#external-integrations">External Integrations</a></li>
+</ul>
+
+
+<hr></hr>
+
+
+<h2 id="system-topology">System Topology</h2>
+
+
+<pre><code className="language-mermaid">%%{init: {'theme': 'neutral', 'flowchart': {'htmlLabels': false}}}%%
+flowchart LR
+    subgraph CLIENT[&quot;CLIENT (React 19 + CesiumJS)&quot;]
+        direction LR
+        UI[&quot;UI\nPanels&quot;]
+        Render[&quot;Rendering\nCesium + 41 modules&quot;]
+        WS[&quot;WebSocket\nClient&quot;]
+        API[&quot;REST\nClient&quot;]
+        UI --&gt; API
+        Render --&gt; API
+        UI --&gt; WS
+    end
+
+    subgraph SERVER[&quot;EXPRESS.JS SERVER&quot;]
+        Security[&quot;Security &amp;\nObservability&quot;]
+        Agents[&quot;Agent &amp;\nCognition\nSystem 1 + System 2\n9-LLM Router&quot;]
+        Engine[&quot;Analytical Engine\n150 equations\n7-stage QC\nKaggle kernels&quot;]
+        Data[&quot;Data Layer\n30+ live APIs\nFetchers + Cache&quot;]
+        Realtime[&quot;Realtime\nSentinel · Reflex\nVoice Bridge\nPubSub&quot;]
+        Services[&quot;World Model\nCausal KG · Memory\nDream · Forks\nScenarios&quot;]
+        Security --&gt; Agents
+        Security --&gt; Data
+        Agents --&gt; Engine
+        Data --&gt; Engine
+        Agents --&gt; Realtime
+        Agents --&gt; Services
+        Engine --&gt; Services
+    end
+
+    subgraph STORAGE[&quot;PERSISTENCE&quot;]
+        SQLite[&quot;SQLite\nAuth · Scenarios\nMemory · Forks&quot;]
+        Redis[&quot;Redis\nCache · memory hot path\n(optional)&quot;]
+    end
+
+    subgraph EXTERNAL[&quot;EXTERNAL APIs&quot;]
+        LLM[&quot;LLM Providers\nGemini · Claude\nGroq · DeepSeek&quot;]
+        Live[&quot;Live Data\nOpenSky · USGS\nTomTom · Landsat\nFIRMS · AIS · LL2&quot;]
+        Voice[&quot;Realtime Voice\nOpenAI → Gemini\n(brokered server-side)&quot;]
+    end
+
+    CLIENT --&gt;|HTTP| Security
+    CLIENT --&gt;|WebSocket| Realtime
+    Services --&gt; STORAGE
+    Engine --&gt; Live
+    Agents --&gt; LLM
+    Realtime --&gt; Voice
+</code></pre>
+
+
+<h3 id="component-inventory">Component Inventory</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Location</th>
+<th>Details</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Client</td>
+<td><code>src/</code></td>
+<td>React 19, TypeScript, Vite 7, Tailwind CSS 3, CesiumJS 1.140</td>
+</tr>
+<tr>
+<td>Server</td>
+<td><code>server/</code></td>
+<td>Express 4, tsx runtime, TypeScript source files across module directories</td>
+</tr>
+<tr>
+<td>Persistence</td>
+<td>SQLite + Redis</td>
+<td>better-sqlite3, ioredis</td>
+</tr>
+<tr>
+<td>Containerization</td>
+<td>Docker Compose</td>
+<td><code>terranoetis</code> (app), <code>redis</code> (cache), <code>causal-service</code> (Python)</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="request-flow">Request Flow</h2>
+
+
+<p>The request lifecycle routes a natural-language user query through intent recognition, cognitive orchestration, and multi-stage tool execution.</p>
+
+
+<pre><code className="language-mermaid">%%{init: {'theme': 'neutral'}}%%
+flowchart LR
+    Q[&quot;User Query&quot;] --&gt; IR[&quot;IntentRouter\n(agent.ts)&quot;]
+    IR --&gt;|&quot;embedding + cosine similarity&quot;| CO[&quot;CognitiveOrchestrator&quot;]
+    CO --&gt;|&quot;confidence &gt;= 0.92&quot;| S1[&quot;System 1\nFast real-data resolution&quot;]
+    CO --&gt;|&quot;0.70 &lt;= conf &lt; 0.92&quot;| S2V[&quot;System 2\nVerify (10s timeout)&quot;]
+    CO --&gt;|&quot;conf &lt; 0.70&quot;| S2D[&quot;System 2\nDeep reasoning&quot;]
+    S1 --&gt;|&quot;real tool&quot;| TE[&quot;Tool Execution\n(weather / earthquakes /\nflights / eonet / gdacs)&quot;]
+    S2D --&gt; HTN[&quot;HTN Decomposition&quot;]
+    HTN --&gt; MAD[&quot;Multi-Agent Debate\n4 agent personas&quot;]
+    MAD --&gt; CR[&quot;Causal Reasoning&quot;]
+    CR --&gt; CA[&quot;Counterfactual Analysis&quot;]
+    CA --&gt; HG[&quot;Hypothesis Generation&quot;]
+    HG --&gt; SC[&quot;Synthesis + Critic&quot;]
+    S2V --&gt; TE
+    SC --&gt; TE
+    TE --&gt;|&quot;API calls&quot;| DF[&quot;Data Fetchers\n30+ sources&quot;]
+    TE --&gt;|&quot;Equations&quot;| AE[&quot;Analytical Engine\n150 models&quot;]
+    TE --&gt;|&quot;Sandbox&quot;| SB[&quot;Python / Node / Bash&quot;]
+    TE --&gt;|&quot;Foundation&quot;| FME[&quot;Weather / Agriculture\nBayFire / SpaceX / MVT&quot;]
+    TE --&gt; RP[&quot;Response Processing&quot;]
+    RP --&gt;|&quot;Cesium globe&quot;| CG[&quot;3D Render&quot;]
+    RP --&gt;|&quot;Panels&quot;| UP[&quot;UI Update&quot;]
+    RP --&gt;|&quot;Memory&quot;| MS[&quot;Memory Store&quot;]
+</code></pre>
+
+
+<h3 id="routing">Routing</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Route</th>
+<th>View</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/</code></td>
+<td>App</td>
+<td>Main Cesium globe application (~11,000 lines, 11 lazy-loaded panels)</td>
+</tr>
+<tr>
+<td><code>/v2/globe</code></td>
+<td>GlobePage</td>
+<td>Dedicated Cesium globe viewport</td>
+</tr>
+<tr>
+<td><code>/v2/canvas</code></td>
+<td>CanvasPage</td>
+<td>Spatial canvas</td>
+</tr>
+<tr>
+<td><code>/v2/scenarios</code></td>
+<td>ScenariosPage</td>
+<td>Scenario gallery and editor</td>
+</tr>
+<tr>
+<td><code>/v2/tours</code></td>
+<td>ToursPage</td>
+<td>Cinematic tours</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="background-processes">Background Processes</h2>
+
+
+<p>The platform runs several continuous services that monitor live data, simulate scenarios, improve responses, and enforce safety.</p>
+
+
+<pre><code className="language-mermaid">%%{init: {'theme': 'neutral'}}%%
+flowchart LR
+    subgraph Continuous[&quot;Continuous Background Processes&quot;]
+        SE[&quot;Sentinel Engine\nPoll watch zones\nCompare vs baseline&quot;] --&gt; SP[&quot;Stream Processor\nFilter, Enrich, Route&quot;]
+        SP --&gt; AD[&quot;Anomaly Detector&quot;]
+        SP --&gt; CE[&quot;Correlation Engine\nCross-stream fusion&quot;]
+        AD --&gt; AL[&quot;Alerts via PubSub&quot;]
+        CE --&gt; AL
+
+        DE[&quot;Dream Engine\nSynthetic scenarios&quot;] --&gt; FK[&quot;Fork Simulation&quot;]
+        FK --&gt; EA[&quot;Evaluate Accuracy&quot;]
+        EA --&gt; KG[&quot;Update Causal KG&quot;]
+
+        SI[&quot;Self-Improver\nRecord feedback&quot;] --&gt; ER[&quot;Evaluate Responses&quot;]
+        ER --&gt; DD[&quot;Detect Drift&quot;]
+        DD --&gt; EP[&quot;Evolve Prompts&quot;]
+
+        REF[&quot;Reflex Engine\nMonitor channels&quot;] --&gt; EC[&quot;Evaluate Conditions&quot;]
+        EC --&gt; AC[&quot;Execute Actions\nALERT / ZOOM / SCAN&quot;]
+        AC --&gt; TR[&quot;Trauma Mode\n&gt;=3 simultaneous&quot;]
+    end
+</code></pre>
+
+
+<h3 id="service-table">Service Table</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sentinel Engine</td>
+<td>Polls configured watch zones and compares live conditions against baselines</td>
+</tr>
+<tr>
+<td>Stream Processor</td>
+<td>Filters, enriches, and routes incoming data streams</td>
+</tr>
+<tr>
+<td>Correlation Engine</td>
+<td>Cross-stream fusion for anomaly detection</td>
+</tr>
+<tr>
+<td>Dream Engine</td>
+<td>Generates synthetic scenarios and evaluates them against ground truth</td>
+</tr>
+<tr>
+<td>Self-Improver</td>
+<td>Records feedback, evaluates responses, detects drift, evolves prompts</td>
+</tr>
+<tr>
+<td>Reflex Engine</td>
+<td>Monitors channels and executes actions (ALERT / ZOOM / SCAN)</td>
+</tr>
+<tr>
+<td>Trauma Mode</td>
+<td>Aggregated response when ≥3 simultaneous alerts fire</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="frontend-src">Frontend (<code>src/</code>)</h2>
+
+
+<h3 id="rendering-engine-srcrendering-41-modules">Rendering Engine (<code>src/rendering/</code>, 41 modules)</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ais.ts</code></td>
+<td>Maritime AIS vessel positions/tracks</td>
+</tr>
+<tr>
+<td><code>aviation.ts</code></td>
+<td>Flight tracking (real-time aircraft + paths)</td>
+</tr>
+<tr>
+<td><code>flights.ts</code></td>
+<td>Flight route arcs (departure/arrival)</td>
+</tr>
+<tr>
+<td><code>earthquakes.ts</code></td>
+<td>Earthquake markers (magnitude-scaled, depth-colored)</td>
+</tr>
+<tr>
+<td><code>satelliteDataSources.ts</code></td>
+<td>TLE orbit propagation &amp; rendering</td>
+</tr>
+<tr>
+<td><code>satelliteImagery.ts</code></td>
+<td>GIBS/XYZ/WMS imagery layer management</td>
+</tr>
+<tr>
+<td><code>satnogs.ts</code></td>
+<td>SatNOGS ground station visualization</td>
+</tr>
+<tr>
+<td><code>osmBuildings.ts</code></td>
+<td>OSM 3D building extrusion</td>
+</tr>
+<tr>
+<td><code>surfaceRenderer.ts</code></td>
+<td>IDW interpolation surface rendering</td>
+</tr>
+<tr>
+<td><code>gisFusion.ts</code></td>
+<td>GIS data fusion for risk surfaces</td>
+</tr>
+<tr>
+<td><code>studyArea.ts</code></td>
+<td>GeoJSON upload/draw/export/fly-to</td>
+</tr>
+<tr>
+<td><code>scenarioEngine.ts</code></td>
+<td>What-if scenario definition/rollout/diff</td>
+</tr>
+<tr>
+<td><code>causalGraph.ts</code></td>
+<td>Noisy-OR causal Bayesian network</td>
+</tr>
+<tr>
+<td><code>blackboard.ts</code></td>
+<td>Blackboard pattern for probability writing</td>
+</tr>
+<tr>
+<td><code>physicsSurrogates.ts</code></td>
+<td>Liquefaction, dispersion, wildfire, flood surrogates</td>
+</tr>
+<tr>
+<td><code>domainLayers.ts</code></td>
+<td>Domain-specific layer management</td>
+</tr>
+<tr>
+<td><code>advancedWaterShader.ts</code></td>
+<td>Custom water shader</td>
+</tr>
+<tr>
+<td><code>ghostEntity.ts</code> / <code>ghostProtocol.ts</code></td>
+<td>Ghost entity rendering + protocol</td>
+</tr>
+<tr>
+<td><code>entropyHalo.ts</code></td>
+<td>Entropy halo visualization</td>
+</tr>
+<tr>
+<td><code>forkRenderer.ts</code></td>
+<td>Parallel reality fork rendering</td>
+</tr>
+<tr>
+<td><code>layerRenderer.ts</code></td>
+<td>Generic layer rendering abstraction</td>
+</tr>
+<tr>
+<td><code>navigation.ts</code></td>
+<td>Navigation utilities</td>
+</tr>
+<tr>
+<td><code>oracleChains.ts</code></td>
+<td>Oracle chain visualization</td>
+</tr>
+<tr>
+<td><code>idwInterpolation.ts</code></td>
+<td>IDW interpolation algorithm</td>
+</tr>
+<tr>
+<td><code>tectonic.ts</code></td>
+<td>Tectonic plate data</td>
+</tr>
+<tr>
+<td><code>weather.ts</code></td>
+<td>Weather data</td>
+</tr>
+<tr>
+<td><code>trajectoryPredictor.ts</code></td>
+<td>Trajectory prediction</td>
+</tr>
+<tr>
+<td><code>toolResultParser.ts</code></td>
+<td>Tool result parsing</td>
+</tr>
+<tr>
+<td><code>ucsSatelliteDb.ts</code></td>
+<td>UCS satellite database</td>
+</tr>
+<tr>
+<td><code>formatStepResult.ts</code></td>
+<td>Step result formatting</td>
+</tr>
+<tr>
+<td><code>sensorStyles.ts</code></td>
+<td>GLSL sensor looks (CRT · NVG · FLIR · Noir · Snow) via <code>PostProcessStage</code></td>
+</tr>
+<tr>
+<td><code>photorealisticGlobe.ts</code></td>
+<td>Google Photorealistic 3D Tiles (Cesium Ion asset 2275207)</td>
+</tr>
+<tr>
+<td><code>cinematicCamera.ts</code></td>
+<td>Tick-based camera engine (orbit/pan/tilt/rotate, route dolly)</td>
+</tr>
+<tr>
+<td><code>tomtomTraffic.ts</code></td>
+<td>Per-vehicle street-level traffic flow (TomTom)</td>
+</tr>
+<tr>
+<td><code>cctvViewshed.ts</code></td>
+<td>Estimated coverage cones for public webcams</td>
+</tr>
+<tr>
+<td><code>launchReplay.ts</code></td>
+<td>Rocket ascent reconstruction (Launch Library 2)</td>
+</tr>
+<tr>
+<td><code>aircraftHangar.ts</code></td>
+<td>LOD swap: flight glyphs → 3D glTF models</td>
+</tr>
+<tr>
+<td><code>osrmRoute.ts</code></td>
+<td>Street-following walking route (OSRM)</td>
+</tr>
+<tr>
+<td><code>radioWave.ts</code></td>
+<td>Radio tuner globe wave animation</td>
+</tr>
+<tr>
+<td><code>detectionOverlay.ts</code></td>
+<td>Screen-space bounding boxes over live entities</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h3 id="hooks-7-total">Hooks (7 total)</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>useChat</code></td>
+<td>Chat pipeline: SSE streaming to <code>/api/agent/ask</code>, tool calls, analytical-result auto-render</td>
+</tr>
+<tr>
+<td><code>useChatSelectors</code></td>
+<td>Zustand selectors for chat UI state</td>
+</tr>
+<tr>
+<td><code>useWebSocket</code></td>
+<td>WebSocket connection manager</td>
+</tr>
+<tr>
+<td><code>useCollaboration</code></td>
+<td>Real-time presence: join/heartbeat, typing, cursor position</td>
+</tr>
+<tr>
+<td><code>useKaggleSimulation</code></td>
+<td>Simulation job lifecycle (local CPU kernel or Kaggle kernel)</td>
+</tr>
+<tr>
+<td><code>useOfflineChat</code></td>
+<td>Offline banner + local fallback when AI provider is unreachable</td>
+</tr>
+<tr>
+<td><code>useRealtimeVoice</code></td>
+<td>Primary voice: OpenAI Realtime → Gemini Live fallback via server bridge</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="backend-server">Backend (<code>server/</code>)</h2>
+
+
+<h3 id="runtime-modules">Runtime Modules</h3>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Module Directory</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>analytical-models/</code></td>
+<td>150 equation engines grounded in primary literature (7 parts, 26 domains — counts verified), tool configs, workflows</td>
+</tr>
+<tr>
+<td><code>cognition/</code></td>
+<td>Cognitive orchestrator, System 1 / System 2, MCTS, reasoning tree, tree-of-thoughts</td>
+</tr>
+<tr>
+<td><code>sentinel/</code></td>
+<td>Continuous monitoring: stream processor, anomaly detector, correlation engine, alert intelligence</td>
+</tr>
+<tr>
+<td><code>memory/</code> + <code>memoryV2/</code></td>
+<td>Working/episodic/semantic/procedural/predictive memory, sensory buffer, Redis adapter</td>
+</tr>
+<tr>
+<td><code>scenarios/</code></td>
+<td>Scenario generation (single + batch), simulator engines, scenario DB</td>
+</tr>
+<tr>
+<td><code>sandboxV2/</code></td>
+<td>Simplified surrogate engines (<code>farsiteLite</code> cellular ROS, <code>adcircLite</code> storm-surge SWE, <code>wrfLite</code>, <code>hysplitLite</code> dispersion, <code>fnoSurrogate</code>) — surrogates named after, not reimplementations of, the operational models</td>
+</tr>
+<tr>
+<td><code>world-model/</code></td>
+<td>Causal graph, ensemble predictor, physics NN, prediction validator</td>
+</tr>
+<tr>
+<td><code>causal/</code></td>
+<td>Causal reasoning: KG, discovery engine, entropy mixer, Python microservice (DoWhy)</td>
+</tr>
+<tr>
+<td><code>kgV2/</code></td>
+<td>Knowledge graph v2: entity/edge generation, graph completion, counterfactual, evolving graph</td>
+</tr>
+<tr>
+<td><code>multimodal/</code></td>
+<td>Satellite analyzer, seismic processor, radar interpreter, sentiment analyzer, fusion</td>
+</tr>
+<tr>
+<td><code>ai-router/</code></td>
+<td>Omninet 9-provider LLM router (incl. local GGUF fallback)</td>
+</tr>
+<tr>
+<td><code>rag/</code></td>
+<td>Retrieval-augmented generation: embeddings, memory bridge</td>
+</tr>
+<tr>
+<td><code>h3-engine/</code></td>
+<td>H3 indexing, spatial query, ClickHouse, TimescaleDB, stream processor</td>
+</tr>
+<tr>
+<td><code>observability/</code></td>
+<td>Pino logger, metrics, OpenTelemetry, Sentry</td>
+</tr>
+<tr>
+<td><code>middleware/</code></td>
+<td>JWT auth, rate limiter, tenant isolation, audit, validation, error handler</td>
+</tr>
+<tr>
+<td><code>sandboxManager.ts</code> / <code>pluginManager.ts</code></td>
+<td>Sandbox execution + plugin extensibility</td>
+</tr>
+<tr>
+<td><code>selfImprover.ts</code> / <code>selfImproverV2.ts</code></td>
+<td>Feedback-driven self-improvement</td>
+</tr>
+<tr>
+<td><code>fork/</code></td>
+<td>Parallel reality fork manager</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="storage-layer">Storage Layer</h2>
+
+
+<h3 id="sqlite-better-sqlite3">SQLite (better-sqlite3)</h3>
+
+
+<p>Primary store for authentication, scenarios, memory traces, forks, and application state.</p>
+
+
+<h3 id="redis-ioredis">Redis (ioredis)</h3>
+
+
+<p>Optional acceleration layer: caching and the sensory/working memory hot path. The server <strong>gracefully degrades</strong> to SQLite when Redis is unreachable (see <code>server/infrastructure/redis.ts</code>). Realtime fan-out does not depend on it — <code>server/pubsub.ts</code> is an in-process <code>EventEmitter</code> bus and WebSocket/SSE delivery runs through it.</p>
+
+
+<hr></hr>
+
+
+<h2 id="external-integrations">External Integrations</h2>
+
+
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Providers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LLM</td>
+<td>Gemini, Claude, Groq, DeepSeek, OpenRouter, Bai, Ollama, HuggingFace, local LFM (GGUF)</td>
+</tr>
+<tr>
+<td>Live data</td>
+<td>OpenSky, USGS, TomTom, Landsat, FIRMS, AIS, Launch Library 2, CelesTrak, UCS</td>
+</tr>
+<tr>
+<td>Realtime voice</td>
+<td>OpenAI Realtime → Gemini Live (server-side brokering)</td>
+</tr>
+<tr>
+<td>Earth observation</td>
+<td>NASA Earthdata, Sentinel Hub, Copernicus, Planet Labs, Maxar</td>
+</tr>
+<tr>
+<td>Weather &amp; disaster</td>
+<td>NOAA, NASA EONET, GDACS, OpenAQ, WAQI, Windy</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<hr></hr>
+
+
+<h2 id="deployment">Deployment</h2>
+
+
+<p>See <a href="DEPLOYMENT.html">Deployment &amp; Operations</a> for Docker Compose, CI/CD, environment variables, and security configuration.</p></div>
+      <footer class="site-footer">
+        <p>Terranoetis v3.0.0 · documentation last reviewed 2026-09-08 ·
+        source: <a href="https://github.com/sreyassanker/Terranoetis">github.com/sreyassanker/Terranoetis</a> ·
+        license: <a href="https://github.com/sreyassanker/Terranoetis/blob/main/LICENSE">BUSL-1.1</a> ·
+        full narratives: <a href="https://github.com/sreyassanker/Terranoetis/tree/main/docs">docs/</a> in-repo Markdown ·
+        corrections: see <a href="../methodology.html#discrepancy-log">discrepancy log</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>
