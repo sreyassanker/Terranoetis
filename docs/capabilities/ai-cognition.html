@@ -20,6 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -97,7 +98,7 @@
       <p>The chat pipeline classifies a natural-language query into one of eight intents, routes it through a dual-process cognition layer (fast cached/templated answers vs deliberate multi-agent reasoning), executes tools (live data, analytical models, simulations, sandbox), and streams results over SSE. All LLM traffic passes through the Omninet provider router.</p>
 <h2 id="intents">Intents & routing thresholds</h2>
 <div class="table-scroll"><table><caption></caption>
-<thead><tr><th scope="col">Decision point</th><th scope="col">Rule (verified values)</th><th scope="col">Source</th></tr></thead>
+<thead><tr><th scope="col">Decision point</th><th scope="col">Rule</th><th scope="col">Source</th></tr></thead>
 <tbody>
 <tr><td>Intent classes</td><td>quick_scan · deep_analysis · fly_to · toggle_layer · weather_check · compute · panel_command · unknown</td><td><cite class="src">server/agent.ts:48-49</cite></td></tr>
 <tr><td>System 1 fast path</td><td>similarity ≥ 0.92 → real tool for matched intent (6 mapped intents)</td><td><cite class="src">server/cognition/cognitiveOrchestrator.ts:251,47-72</cite></td></tr>

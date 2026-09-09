@@ -54,13 +54,22 @@ export const CORE_PAGES = [
         { href: 'deployment.html', title: 'Deployment & operations', desc: 'Docker, environment, CI, optional Kaggle credentials.' },
         { href: 'governance/style-guide.html', title: 'Style guide', desc: 'The writing, citation and accessibility standards these pages follow.' },
       ]},
+      { kind: 'h2', id: 'coverage', title: 'Documentation coverage' },
+      { kind: 'table', caption: 'Every area of the platform has a long-form narrative page with diagrams, rendered from the Markdown sources of truth in the repository.', cols: ['Area', 'Covers', 'Read'], rows: [
+        ['Architecture', 'System topology, request flow, background services, module inventory', '<a href="narratives/ARCHITECTURE.html">Architecture narrative</a>'],
+        ['API Reference', '360+ REST endpoints + WebSocket channel', '<a href="narratives/API.html">API narrative</a>'],
+        ['Frontend', 'React components, rendering engine, simulation overlays, hooks', '<a href="narratives/FRONTEND.html">Frontend narrative</a>'],
+        ['Backend', 'Server modules, cognition, memory, security, observability', '<a href="narratives/BACKEND.html">Backend narrative</a>'],
+        ['Analytical Models', 'The 150 equation engines, 7 parts, 26 domains', '<a href="narratives/MODELS.html">Analytical-models narrative</a>'],
+        ['Deployment', 'Docker, environment variables, Kaggle token setup, CI/CD, security', '<a href="narratives/DEPLOYMENT.html">Deployment narrative</a>'],
+      ]},
       { kind: 'h2', id: 'repo-map', title: 'Repository map' },
-      { kind: 'table', caption: 'Top-level layout (directories verified present via git ls-files on 2026-09-08)', cols: ['Path', 'Contents'], rows: [
+      { kind: 'table', caption: 'Top-level layout', cols: ['Path', 'Contents'], rows: [
         ['<code>src/</code>', 'React 19 + CesiumJS client (App shell, components/, rendering/ 41 modules, hooks, lib, services, store)'],
         ['<code>server/</code>', 'Express API: index.ts (14,573 lines), agent/cognition, analytical-models, kaggle, sentinel, memory, world-model, middleware, db'],
         ['<code>kaggle-kernels/</code>', 'Seven Python simulation kernels + per-kernel metadata + archived result artifacts'],
         ['<code>docs/</code>', 'This site: generated HTML pages (source: scripts/docs/), Markdown prose of record, manifest and sitemap'],
-        ['<code>e2e/</code>', 'Playwright specs (7 files, 38 test declarations — not executed in this docs pass)'],
+        ['<code>e2e/</code>', 'Playwright specs (7 files, 38 test declarations)'],
         ['<code>scripts/</code>', 'Dev utilities, live smoke scripts, docs build + quality gate'],
         ['<code>.github/workflows/</code>', 'ci.yml (10 jobs) + docs.yml (quality gate)'],
       ]},
@@ -93,7 +102,7 @@ export const CORE_PAGES = [
         'npm run dev            # Vite :3000 + Express :3001 (proxy /api → :3001)',
       ]},
       { kind: 'p', html: `<code>dev</code> runs <code>scripts/dev-prep.js</code> then starts both servers concurrently ${src('package.json', '16-29')}; the Vite proxy target and port come from <code>vite.config.ts:73-88</code>. To run only the API: <code>npm run dev:server</code>.` },
-      { kind: 'h2', id: 'verify', title: 'Verify the stack (measured)' },
+      { kind: 'h2', id: 'verify', title: 'Verify the stack' },
       { kind: 'code', id: 'verify-cmds', title: 'Commands and the actual observed response', lines: [
         'curl -s http://localhost:3001/api/health',
         '# measured 2026-09-08 (fresh boot, no API keys beyond .env):',
@@ -149,7 +158,7 @@ export const CORE_PAGES = [
     tags: [tagMeasured('topology read from the measured server boot order')],
     sections: [
       { kind: 'p', html: `Terranoetis is a three-tier application: a React 19 + CesiumJS single-page client (Vite 7), a Node.js + Express 4 API (TypeScript run via <code>tsx</code>), and SQLite (primary store) with Redis as an optional cache/memory hot path. The client talks REST + SSE + WebSocket to the API; the API orchestrates live-data fetchers, the 150-equation analytical engine, the hazard-simulation runners and the cognitive pipeline.` },
-      { kind: 'h2', id: 'boot-order', title: 'Server assembly (measured boot, cited order)' },
+      { kind: 'h2', id: 'boot-order', title: 'Server assembly' },
       { kind: 'table', caption: 'Middleware/service order in server/index.ts (line cites are the app.use/startup sequence; boot observed 2026-09-08 on port 3399)', cols: ['Order', 'Component', 'Detail', 'Source'], rows: [
         ['1', 'helmet CSP + Permissions-Policy', 'explicit CSP incl. Cesium/WS allowances; HSTS 1 yr in prod', src('server/index.ts', '233-272')],
         ['2', 'cors', 'static allowlist origin = CLIENT_ORIGIN, credentials on', src('server/index.ts', '273')],
@@ -203,7 +212,7 @@ export const CORE_PAGES = [
         ['Runner', 'simRunner.ts', 'route local vs Kaggle, param compaction (terrain→uint16 base64), GEBCO/land-cover auto-sampling ' + src(SR, '126-215,456-495,520-640')],
         ['Scientific endpoints', 'routes.ts', 'calibrate (μ×ξ grid), Monte-Carlo quantify, GeoTIFF export ' + src(RT, '263-810')],
       ]},
-      { kind: 'h2', id: 'modes', title: 'Execution modes (verified)' },
+      { kind: 'h2', id: 'modes', title: 'Execution modes' },
       { kind: 'table', caption: `LOCAL_SIM_TYPES = earthquake_swarm, wildfire_spread, hurricane_landfall run under python3 locally; the rest push to Kaggle. Sources: ${src(SR, '126-141')} ${src('server/kaggle/localRunner.ts', '1-15')} kaggle-kernels/*/kernel-metadata.json; grep of cupy|cuda across all main.py: 0 hits. Correction carried: “Kaggle GPU kernels” describes where they run, not what they use — only flood-sim requests the accelerator and its code is NumPy-only.`, cols: ['Kernel', 'Mode', 'GPU code?', 'Metadata enable_gpu', 'Physics executed in this review'], rows: [
         ['earthquake-sim', 'local CPU', 'no', 'false', tagMeasured('direct + HTTP e2e')],
         ['fire-sim', 'local CPU', 'no', 'false', tagMeasured('direct ×4')],
@@ -284,7 +293,7 @@ export const CORE_PAGES = [
         ['19 with empty inputs', '{}', 'NaN with warning steps', 'documented behaviour ✓'],
       ]},
       { kind: 'p', html: `Per-tool math is covered by the 1,653-test unit suite (all passing, measured) — math-verification tests named per equation (e.g. <code>airyDispersion.test.ts</code>, <code>atkinsonLifetime.test.ts</code>) under <code>server/__tests__/unit/</code>.` },
-      { kind: 'h2', id: 'domains', title: 'Parts and domains (measured tool counts)' },
+      { kind: 'h2', id: 'domains', title: 'Parts and domains' },
       { kind: 'table', cols: ['Part', 'Domains (tool counts)'], rows: [
         ['I — Earth System Core', 'Atmospheric Science (8) · Hydrology & Oceanography (10) · Geophysics & Seismology (7) · Remote Sensing & Cryosphere (10) · Spatial Analysis & Extreme Events (7) · Soil Science & Land Surface (8)'],
         ['II — Biosphere, Agriculture & Chemistry', 'Biosphere & Carbon Cycle (7) · Agriculture & Crop Science (6) · Atmospheric Chemistry & Aerosols (2)'],
@@ -310,7 +319,7 @@ export const CORE_PAGES = [
     sections: [
       { kind: 'p', html: `The chat pipeline classifies a natural-language query into one of eight intents, routes it through a dual-process cognition layer (fast cached/templated answers vs deliberate multi-agent reasoning), executes tools (live data, analytical models, simulations, sandbox), and streams results over SSE. All LLM traffic passes through the Omninet provider router.` },
       { kind: 'h2', id: 'intents', title: 'Intents & routing thresholds' },
-      { kind: 'table', cols: ['Decision point', 'Rule (verified values)', 'Source'], rows: [
+      { kind: 'table', cols: ['Decision point', 'Rule', 'Source'], rows: [
         ['Intent classes', 'quick_scan · deep_analysis · fly_to · toggle_layer · weather_check · compute · panel_command · unknown', src('server/agent.ts', '48-49')],
         ['System 1 fast path', 'similarity ≥ 0.92 → real tool for matched intent (6 mapped intents)', src('server/cognition/cognitiveOrchestrator.ts', '251,47-72')],
         ['Verify band', '0.70 ≤ similarity &lt; 0.92 → S1 answer + System 2 verification, 10 s timeout', src('server/cognition/cognitiveOrchestrator.ts', '252,295')],
@@ -351,7 +360,7 @@ export const CORE_PAGES = [
     tags: [tagMeasured('server boot started all services; USGS/EONET/FIRMS pollers observed live')],
     sections: [
       { kind: 'p', html: `The platform ingests live open-data feeds and turns them into alerts. Sentinel polls sources against baselines for user watch-zones; anomaly detectors and a correlation engine fuse streams; reflex rules push actions to connected globe clients over WebSocket/SSE.` },
-      { kind: 'h2', id: 'inventory', title: 'Integration inventory (measured)' },
+      { kind: 'h2', id: 'inventory', title: 'Integration inventory' },
       { kind: 'table', cols: ['Metric', 'Value', 'Method/source'], rows: [
         ['Registered API metadata entries', '82', 'regex count <code>category:</code> in server/apiMetadata.ts (2026-09-08)'],
         ['Categories (top)', 'Aviation 16 · Weather & Disaster 13 · Economic & Financial 12 · Notifications 5 · AI & Analytics 5 · Satellite & Imagery 4 · Infrastructure 4 …', 'same'],
@@ -444,7 +453,7 @@ export const CORE_PAGES = [
     tags: ['<span class="tag tag-measured">COUNTS MEASURED</span>'],
     sections: [
       { kind: 'p', html: `The client renders live data and simulation outputs on a WebGL globe. “GPU” in this layer refers to rendering primitives (PostProcessStage shaders, custom Cesium Primitives) — not to GPU compute in the simulation kernels.` },
-      { kind: 'table', caption: 'Verified counts (methods stated in captions)', cols: ['Item', 'Value', 'Verification'], rows: [
+      { kind: 'table', caption: 'Verified counts', cols: ['Item', 'Value', 'Verification'], rows: [
         ['Rendering modules in src/rendering/', '41 TS modules', 'file count excluding .DS_Store and shpjs.d.ts declaration (2026-09-08)'],
         ['Lazy panels in App.tsx', '11 (const Lazy…Panel = lazy(...))', 'grep count ' + srcRaw('src/App.tsx:135-145')],
         ['App shell size', '11,038 lines', 'wc -l src/App.tsx'],
@@ -476,7 +485,7 @@ export const CORE_PAGES = [
     proseMd: 'narratives/capabilities/platform-services.html',
     tags: [tagMeasured('health/metrics endpoints observed on boot')],
     sections: [
-      { kind: 'table', caption: 'Security controls (verified parameters)', cols: ['Control', 'Verified detail', 'Source'], rows: [
+      { kind: 'table', caption: 'Security controls', cols: ['Control', 'Verified detail', 'Source'], rows: [
         ['Passwords', 'scrypt N=16384, r=8, p=1 (RFC 7914 family); no plaintext', src('server/utils/passwords.ts', '8-10')],
         ['JWT', 'HS tokens, TTL 1 h prod / 1 d dev; startup refuses JWT_SECRET &lt; 32 chars in prod; refresh only for unexpired tokens of existing users', src('server/middleware/auth.ts', '8,257-281') + ' ' + src('server/index.ts', '171-181')],
         ['Lockout', '10 failed attempts → 15 min lockout, HTTP 423', src('server/middleware/auth.ts', '9-10,65-73,151')],

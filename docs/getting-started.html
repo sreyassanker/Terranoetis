@@ -20,6 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -91,7 +92,7 @@
       <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
         <li><a href="#prerequisites">Prerequisites</a></li>
 <li><a href="#install">Install and start</a></li>
-<li><a href="#verify">Verify the stack (measured)</a></li>
+<li><a href="#verify">Verify the stack</a></li>
 <li><a href="#first-sim">First simulation (no credentials needed)</a></li>
 <li><a href="#no-keys">What works without any API keys</a></li>
 <li><a href="#orientation">Orientation</a></li>
@@ -114,7 +115,7 @@ cp .env.example .env   # keys are optional; features degrade gracefully
 npm install
 npm run dev            # Vite :3000 + Express :3001 (proxy /api → :3001)</code></pre>
 <p><code>dev</code> runs <code>scripts/dev-prep.js</code> then starts both servers concurrently <cite class="src">package.json:16-29</cite>; the Vite proxy target and port come from <code>vite.config.ts:73-88</code>. To run only the API: <code>npm run dev:server</code>.</p>
-<h2 id="verify">Verify the stack (measured)</h2>
+<h2 id="verify">Verify the stack</h2>
 <h3 id="verify-cmds">Commands and the actual observed response</h3>
 <pre><code>curl -s http://localhost:3001/api/health
 # measured 2026-09-08 (fresh boot, no API keys beyond .env):

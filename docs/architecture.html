@@ -20,6 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -89,13 +90,13 @@
       </div>
       <p><strong>Full description:</strong> <a href="narratives/ARCHITECTURE.html">Read the full narrative</a></p>
       <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
-        <li><a href="#boot-order">Server assembly (measured boot, cited order)</a></li>
+        <li><a href="#boot-order">Server assembly</a></li>
 <li><a href="#request-flow">Request flow (chat)</a></li>
 <li><a href="#modules">Module inventory</a></li>
 <li><a href="#storage">Persistence and realtime plumbing</a></li>
       </ul></nav>
       <p>Terranoetis is a three-tier application: a React 19 + CesiumJS single-page client (Vite 7), a Node.js + Express 4 API (TypeScript run via <code>tsx</code>), and SQLite (primary store) with Redis as an optional cache/memory hot path. The client talks REST + SSE + WebSocket to the API; the API orchestrates live-data fetchers, the 150-equation analytical engine, the hazard-simulation runners and the cognitive pipeline.</p>
-<h2 id="boot-order">Server assembly (measured boot, cited order)</h2>
+<h2 id="boot-order">Server assembly</h2>
 <div class="table-scroll"><table><caption>Middleware/service order in server/index.ts (line cites are the app.use/startup sequence; boot observed 2026-09-08 on port 3399)</caption>
 <thead><tr><th scope="col">Order</th><th scope="col">Component</th><th scope="col">Detail</th><th scope="col">Source</th></tr></thead>
 <tbody>

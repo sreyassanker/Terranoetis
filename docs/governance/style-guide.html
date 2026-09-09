@@ -20,6 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -129,7 +130,7 @@
 <li>docs/.nojekyll pins byte-exact delivery of Markdown sources linked from pages.</li></ul>
 <h2 id="workflow">Change workflow</h2>
 <ol><li>Edit page specs in scripts/docs/ and prose in the Markdown files.</li>
-<li><code>node scripts/docs/build.mjs</code> regenerates the HTML (diff the output in review).</li>
+<li><code>node scripts/docs/build.mjs</code> regenerates the HTML.</li>
 <li><code>node scripts/docs/quality-gate.mjs</code> must pass (it is wired into CI).</li>
 <li>When re-verifying: bump <code>LAST_REVIEWED</code> in site.mjs and refresh measured tables; new discrepancies go to the methodology log.</li></ol>
       <footer class="site-footer">

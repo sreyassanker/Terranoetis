@@ -20,6 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -93,7 +94,7 @@
         <li><a href="#verified-counts">Verified structural counts</a></li>
 <li><a href="#pipeline">Execution pipeline</a></li>
 <li><a href="#never-throws">Honest-NaN contract</a></li>
-<li><a href="#domains">Parts and domains (measured tool counts)</a></li>
+<li><a href="#domains">Parts and domains</a></li>
       </ul></nav>
       <p>The engine is a catalog of 150 deterministic, non-ML scientific functions — <code>EQUATION_ENGINE[id](inputs) → {result, unit, steps[]}</code> — each grounded in a primary-literature reference. A context engine enriches inputs from live feeds before execution; a 7-stage workflow wraps validation, unit preprocessing, computation, post-processing, quality control, uncertainty estimation and interpretation.</p>
 <h2 id="verified-counts">Verified structural counts</h2>
@@ -121,7 +122,7 @@
 <tr><td>19 with empty inputs</td><td>{}</td><td>NaN with warning steps</td><td>documented behaviour ✓</td></tr>
 </tbody></table></div>
 <p>Per-tool math is covered by the 1,653-test unit suite (all passing, measured) — math-verification tests named per equation (e.g. <code>airyDispersion.test.ts</code>, <code>atkinsonLifetime.test.ts</code>) under <code>server/__tests__/unit/</code>.</p>
-<h2 id="domains">Parts and domains (measured tool counts)</h2>
+<h2 id="domains">Parts and domains</h2>
 <div class="table-scroll"><table><caption></caption>
 <thead><tr><th scope="col">Part</th><th scope="col">Domains (tool counts)</th></tr></thead>
 <tbody>

@@ -20,6 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -90,10 +91,10 @@
       
       <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
         <li><a href="#approach">Approach</a></li>
-<li><a href="#environment">Execution environment (stated precisely — no performance claims are generalised from it)</a></li>
+<li><a href="#environment">Execution environment</a></li>
 <li><a href="#evidence-runs">Evidence runs</a></li>
 <li><a href="#gates">Gates built into the kernels (what runs before results are trusted)</a></li>
-<li><a href="#known-limitations">Known-limitation register (found or confirmed by this review)</a></li>
+<li><a href="#known-limitations">Known-limitation register</a></li>
 <li><a href="#discrepancy-log">Discrepancy log — documentation errors found & fixed</a></li>
 <li><a href="#unverified">Claims not verifiable in this environment</a></li>
 <li><a href="#gate">Documentation quality gate</a></li>
@@ -103,14 +104,14 @@
 <ol><li>Every physics claim is traced to <code>file:line</code> in this repository (engines, kernels, contract layer, UI); where the code itself states limits, they are quoted verbatim.</li>
 <li>Claims are then attacked empirically: test suites were run; kernels were executed for representative and boundary inputs; conservation/convergence/benchmark gates were re-executed; a real server boot produced an end-to-end simulation-job transcript.</li>
 <li>Where documentation and code disagreed, the documentation was corrected; the code was not modified (this is a documentation pass). Code-level defects found are recorded in the <a href="#known-limitations">known-limitation register</a> for engineering follow-up.</li></ol>
-<h2 id="environment">Execution environment (stated precisely — no performance claims are generalised from it)</h2>
+<h2 id="environment">Execution environment</h2>
 <dl class="metrics"><dt>Machine</dt><dd>Apple M1 (arm64), macOS 26.5.2 — <code>uname -m</code> + <code>sysctl machdep.cpu.brand_string</code></dd>
 <dt>Node.js</dt><dd>v26.0.0 (<code>node --version</code>) — repository targets ≥ 20 (<code>.nvmrc</code> pins 20)</dd>
 <dt>Python</dt><dd>3.14.5 · NumPy 2.4.2 · SciPy present</dd>
 <dt>Date</dt><dd>2026-09-08 — the date behind every “measured” stamp on this site</dd></dl>
 <h2 id="evidence-runs">Evidence runs</h2>
 <div class="table-scroll"><table><caption>Test suites</caption>
-<thead><tr><th scope="col">Command</th><th scope="col">Result (measured)</th></tr></thead>
+<thead><tr><th scope="col">Command</th><th scope="col">Result</th></tr></thead>
 <tbody>
 <tr><td><code>npm run test:unit</code></td><td>141 files · 1,653 tests passed · 0 failed · 22.85 s wall</td></tr>
 <tr><td><code>npm run test:integration</code></td><td>5 files · 49 tests passed · 0 failed · 5.66 s wall</td></tr>
@@ -142,7 +143,7 @@
 <tr><td>landslide</td><td>convergence + conservation via validate_convergence.py (not invoked by main())</td><td>script exit 1</td><td><cite class="src">kaggle-kernels/landslide-sim/validate_convergence.py:19-105</cite></td></tr>
 <tr><td>wildfire</td><td>ROS reference print (non-fatal)</td><td>prints CHECK</td><td><cite class="src">kaggle-kernels/fire-sim/main.py:501-508</cite></td></tr>
 </tbody></table></div>
-<h2 id="known-limitations">Known-limitation register (found or confirmed by this review)</h2>
+<h2 id="known-limitations">Known-limitation register</h2>
 <div class="table-scroll"><table><caption>D-numbered for cross-reference; engineering follow-up recommended. Capability pages already state each limitation where it applies.</caption>
 <thead><tr><th scope="col">#</th><th scope="col">Limitation</th><th scope="col">Evidence</th></tr></thead>
 <tbody>
@@ -159,7 +160,7 @@
 </tbody></table></div>
 <h2 id="discrepancy-log">Discrepancy log — documentation errors found & fixed</h2>
 <div class="table-scroll"><table><caption>The code was treated as authoritative in every case; sources of truth updated 2026-09-08.</caption>
-<thead><tr><th scope="col">#</th><th scope="col">Was (documentation claim)</th><th scope="col">Is (verified reality)</th><th scope="col">Fixed in</th></tr></thead>
+<thead><tr><th scope="col">#</th><th scope="col">Claim</th><th scope="col">Verified correction</th><th scope="col">Fixed in</th></tr></thead>
 <tbody>
 <tr><td>C-1</td><td>“7 physics simulations — 3 run locally on CPU, 4 on free Kaggle <em>GPU</em> kernels” (README)</td><td>Kernels are NumPy-only (0 cupy/CUDA imports); only flood-sim requests the Kaggle GPU accelerator; the other routed kernels have enable_gpu=false. “Kaggle kernels” is accurate; “GPU kernels” is not.</td><td>README.md · DEPLOYMENT.md · BACKEND.md · <a href="capabilities/hazard-simulations.html#modes">modes table</a></td></tr>
 <tr><td>C-2</td><td>“82 with resolvable DOIs” (README/MODELS.md)</td><td>80 of 150 model references contain a DOI string (12 ISBN, 4 explicit NO-DOI); counting method now stated.</td><td>README.md · MODELS.md</td></tr>

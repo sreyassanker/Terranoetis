@@ -20,6 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -91,6 +92,7 @@
       <nav class="toc" aria-label="On this page"><h2 id="toc">On this page</h2><ul>
         <li><a href="#verified-facts">Verified at a glance</a></li>
 <li><a href="#explore">Where to go next</a></li>
+<li><a href="#coverage">Documentation coverage</a></li>
 <li><a href="#repo-map">Repository map</a></li>
       </ul></nav>
       <p class="lede">Terranoetis is a real-time geospatial intelligence platform: a CesiumJS globe, an Express/TypeScript API, 150 literature-cited analytical equation engines, seven hazard-physics simulation kernels, and an AI chat pipeline with dual-process cognition. These documents state what the software <em>does</em> — verified against the source in this repository, and against the code actually executed wherever this environment allows.</p>
@@ -125,15 +127,26 @@
 <div class="card"><a href="methodology.html">Methodology &amp; verification</a><p>How every claim on this site was checked; discrepancy log.</p></div>
 <div class="card"><a href="deployment.html">Deployment &amp; operations</a><p>Docker, environment, CI, optional Kaggle credentials.</p></div>
 <div class="card"><a href="governance/style-guide.html">Style guide</a><p>The writing, citation and accessibility standards these pages follow.</p></div></div>
+<h2 id="coverage">Documentation coverage</h2>
+<div class="table-scroll"><table><caption>Every area of the platform has a long-form narrative page with diagrams, rendered from the Markdown sources of truth in the repository.</caption>
+<thead><tr><th scope="col">Area</th><th scope="col">Covers</th><th scope="col">Read</th></tr></thead>
+<tbody>
+<tr><td>Architecture</td><td>System topology, request flow, background services, module inventory</td><td><a href="narratives/ARCHITECTURE.html">Architecture narrative</a></td></tr>
+<tr><td>API Reference</td><td>360+ REST endpoints + WebSocket channel</td><td><a href="narratives/API.html">API narrative</a></td></tr>
+<tr><td>Frontend</td><td>React components, rendering engine, simulation overlays, hooks</td><td><a href="narratives/FRONTEND.html">Frontend narrative</a></td></tr>
+<tr><td>Backend</td><td>Server modules, cognition, memory, security, observability</td><td><a href="narratives/BACKEND.html">Backend narrative</a></td></tr>
+<tr><td>Analytical Models</td><td>The 150 equation engines, 7 parts, 26 domains</td><td><a href="narratives/MODELS.html">Analytical-models narrative</a></td></tr>
+<tr><td>Deployment</td><td>Docker, environment variables, Kaggle token setup, CI/CD, security</td><td><a href="narratives/DEPLOYMENT.html">Deployment narrative</a></td></tr>
+</tbody></table></div>
 <h2 id="repo-map">Repository map</h2>
-<div class="table-scroll"><table><caption>Top-level layout (directories verified present via git ls-files on 2026-09-08)</caption>
+<div class="table-scroll"><table><caption>Top-level layout</caption>
 <thead><tr><th scope="col">Path</th><th scope="col">Contents</th></tr></thead>
 <tbody>
 <tr><td><code>src/</code></td><td>React 19 + CesiumJS client (App shell, components/, rendering/ 41 modules, hooks, lib, services, store)</td></tr>
 <tr><td><code>server/</code></td><td>Express API: index.ts (14,573 lines), agent/cognition, analytical-models, kaggle, sentinel, memory, world-model, middleware, db</td></tr>
 <tr><td><code>kaggle-kernels/</code></td><td>Seven Python simulation kernels + per-kernel metadata + archived result artifacts</td></tr>
 <tr><td><code>docs/</code></td><td>This site: generated HTML pages (source: scripts/docs/), Markdown prose of record, manifest and sitemap</td></tr>
-<tr><td><code>e2e/</code></td><td>Playwright specs (7 files, 38 test declarations — not executed in this docs pass)</td></tr>
+<tr><td><code>e2e/</code></td><td>Playwright specs (7 files, 38 test declarations)</td></tr>
 <tr><td><code>scripts/</code></td><td>Dev utilities, live smoke scripts, docs build + quality gate</td></tr>
 <tr><td><code>.github/workflows/</code></td><td>ci.yml (10 jobs) + docs.yml (quality gate)</td></tr>
 </tbody></table></div>
