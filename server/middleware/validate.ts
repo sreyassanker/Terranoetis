@@ -38,6 +38,10 @@ export const askSchema = z.object({
   // GeoJSON ring order is [lon, lat] — validate each coord against the union
   // range ([-180,180] covers both lat and lon) rather than assuming an order.
   studyAreaPolygon: z.array(z.array(z.array(z.number().min(-180).max(180)))).max(200).nullable().optional(),
+  // Provenance of the ambient studyAreaBbox: 'chat' areas are provisional and
+  // get re-registered by the next named place; 'manual' is the user's explicit
+  // selection and always wins (A2.29).
+  studyAreaSource: z.enum(['chat', 'manual']).nullable().optional(),
 });
 
 export const sandboxExecuteSchema = z.object({

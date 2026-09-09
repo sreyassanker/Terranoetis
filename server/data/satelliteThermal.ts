@@ -715,7 +715,8 @@ export async function fetchLandsatThermalGrid(
     try {
       const r = await readCogBboxWindow(signed[k], epsg, latMin, latMax, lonMin, lonMax);
       return r;
-    } catch {
+    } catch (e) {
+      console.warn(`[L1-GRID] band ${k} read failed (${e instanceof Error ? e.message : String(e)})${retries > 0 ? ', retrying' : ''}`);
       if (retries > 0) return readBand(k, retries - 1);
       return null;
     }

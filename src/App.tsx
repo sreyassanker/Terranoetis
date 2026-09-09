@@ -7657,6 +7657,73 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
     }
   }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showMultiHazardPanel, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showTimeline, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowMultiHazardPanel, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowTimeline, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setMonitorCollapsed, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
 
+  // Register a chat-resolved boundary as the app-wide ACTIVE study area so
+  // every study-area consumer (Analytics Workbench, Land Cover Mapper, later
+  // chat turns) picks it up automatically instead of prompting to draw one.
+  // A user-drawn/imported active area is never overridden (A2.29 contract:
+  // the user's explicit selection wins).
+  const applyChatStudyArea = useCallback((
+    bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number },
+    polygonRings?: Array<Array<[number, number]>>,
+    label?: string,
+  ) => {
+    const v = viewerRef.current;
+    if (!v || !bbox) return;
+    if (studyAreasRef.current.some(a => a.active && a.source && a.source !== 'chat')) return;
+    const name = `${(label || 'Chat area').trim()} (chat)`;
+    for (const a of studyAreasRef.current.filter(x => x.source === 'chat')) removeStudyAreaFromGlobe(v, a);
+    studyAreasRef.current = studyAreasRef.current.filter(x => x.source !== 'chat');
+    const outer = polygonRings && polygonRings.length > 0
+      ? polygonRings.reduce((m, r) => (r.length > m.length ? r : m), [])
+      : null;
+    let area: StudyAreaItem;
+    if (outer && outer.length >= 4) {
+      const positions = outer.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat));
+      const ring = [...outer, outer[0]];
+      const geojson: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [ring] } as GeoJSON.Polygon,
+          properties: { name, type: 'polygon' },
+        }],
+      };
+      area = {
+        id: `study_area_${Date.now()}`, name, type: 'polygon',
+        visible: true, active: false,
+        entity: v.entities.add({
+          polygon: { hierarchy: positions, material: new Cesium.Color(0.2, 0.8, 0.3, 0.08) },
+          name,
+        }),
+        positions, geojson, color: '#22c55e', width: 3, source: 'chat',
+      };
+    } else {
+      const rect = Cesium.Rectangle.fromDegrees(bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax);
+      const positions = [
+        Cesium.Cartesian3.fromDegrees(bbox.lonMin, bbox.latMax),
+        Cesium.Cartesian3.fromDegrees(bbox.lonMax, bbox.latMax),
+        Cesium.Cartesian3.fromDegrees(bbox.lonMax, bbox.latMin),
+        Cesium.Cartesian3.fromDegrees(bbox.lonMin, bbox.latMin),
+      ];
+      area = {
+        id: `study_area_${Date.now()}`, name, type: 'rectangle',
+        visible: true, active: false,
+        entity: v.entities.add({
+          rectangle: { coordinates: rect, material: new Cesium.Color(0.2, 0.8, 0.3, 0.08) },
+          name,
+        }),
+        positions, color: '#22c55e', width: 3, source: 'chat',
+      };
+    }
+    studyAreasRef.current.forEach(a => { if (a.id !== area.id && a.active) setStudyAreaActive(v, a, false); });
+    setStudyAreaActive(v, area, true);
+    studyAreasRef.current = [...studyAreasRef.current, area];
+    setStudyAreas(studyAreasRef.current);
+    setActiveStudyAreaId(area.id);
+    useChatStore.getState().setStudyAreaBbox(bbox, 'chat');
+    throttledRender(v);
+  }, []);
+
   const executeAgentCommands = useCallback((commands: Array<Record<string, unknown>>) => {
     const v = viewerRef.current;
     if (!v) return;
@@ -7664,6 +7731,28 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
     // A flyTo creates a labelled focus marker; an addPin at the SAME spot would
     // duplicate the label. Track the flyTo target so we can skip that pin.
     let flyTarget: { lat: number; lon: number } | null = null;
+    // Global dedupe guard: a boundary matching the ACTIVE study area (or the
+    // area registered in this same batch) must not be drawn a second time —
+    // the study-area outline already renders that geometry. Covers any
+    // command source (deterministic area flow or LLM-emitted ## COMMANDS)
+    // that pairs addPolygon with setStudyArea.
+    const batchStudy = commands.find(c => c.action === 'setStudyArea')?.bbox as
+      | { latMin: number; latMax: number; lonMin: number; lonMax: number } | undefined;
+    const saBbox = batchStudy ?? useChatStore.getState().studyAreaBbox;
+    const sameAsStudyArea = (coords: Array<[number, number]>) => {
+      if (!saBbox || !Array.isArray(coords) || coords.length < 3) return false;
+      let la = Infinity, lb = -Infinity, oa = Infinity, ob = -Infinity;
+      for (const [lat, lon] of coords) {
+        if (!isFinite(lat) || !isFinite(lon)) continue;
+        if (lat < la) la = lat; if (lat > lb) lb = lat;
+        if (lon < oa) oa = lon; if (lon > ob) ob = lon;
+      }
+      if (!isFinite(la)) return false;
+      const tolLat = Math.max((saBbox.latMax - saBbox.latMin) * 0.15, 0.02);
+      const tolLon = Math.max((saBbox.lonMax - saBbox.lonMin) * 0.15, 0.02);
+      return Math.abs(la - saBbox.latMin) <= tolLat && Math.abs(lb - saBbox.latMax) <= tolLat
+        && Math.abs(oa - saBbox.lonMin) <= tolLon && Math.abs(ob - saBbox.lonMax) <= tolLon;
+    };
     for (const cmd of commands) {
       try {
         const action: { type: 'flyTo' | 'toggleLayer' | 'addEntity' | 'addPanel' | 'openPanel' | 'setLayerOpacity' | 'screenshot'; entities?: Cesium.Entity[]; layerId?: string; previousEnabled?: boolean; previousCamera?: { longitude: number; latitude: number; height: number }; panelData?: unknown; description: string; timestamp: number } = {
@@ -7689,6 +7778,15 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
                 rect: bbox ? { west: bbox.lonMin, south: bbox.latMin, east: bbox.lonMax, north: bbox.latMax } : undefined,
               });
               cleanupThinkingSteps(true);
+            }
+            break;
+          }
+          case 'setStudyArea': {
+            const bbox = cmd.bbox as { latMin: number; latMax: number; lonMin: number; lonMax: number } | undefined;
+            if (bbox && [bbox.latMin, bbox.latMax, bbox.lonMin, bbox.lonMax].every(n => isFinite(n))) {
+              applyChatStudyArea(bbox, cmd.polygon as Array<Array<[number, number]>> | undefined, (cmd.label as string) || 'Chat area');
+              action.type = 'addEntity';
+              action.description = `Study area → ${(cmd.label as string) || 'resolved boundary'}`;
             }
             break;
           }
@@ -7760,6 +7858,9 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
             const extrudedHeight = (cmd.extrudedHeight as number) || (cmd.height as number) || 0;
             const outlineOnly = (cmd.outlineOnly as boolean) || false;
             if (Array.isArray(coords) && coords.length >= 3) {
+              // Same geometry as the active study area → the outline is already
+              // on the globe; drawing it again doubles the boundary.
+              if (sameAsStudyArea(coords)) break;
               const positions = coords.map(c => Cesium.Cartesian3.fromDegrees(c[1], c[0]));
               const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
               const fill = rgba ? Cesium.Color.fromBytes(+rgba[1], +rgba[2], +rgba[3], Math.round((parseFloat(rgba[4]) || 0.35) * 255)) : Cesium.Color.WHITE.withAlpha(0.35);
@@ -8049,7 +8150,7 @@ case 'openPanel':
         else if (action.entities && action.entities.length > 0) history.push(action as any);
       } catch { /* skip malformed commands */ }
     }
-  }, [focusLocation, isLayerEnabled, cleanupThinkingSteps, applyPanelCommand, setLayerEnabled, setLayerOpacity, focusPanel]);
+  }, [focusLocation, isLayerEnabled, cleanupThinkingSteps, applyPanelCommand, setLayerEnabled, setLayerOpacity, focusPanel, applyChatStudyArea]);
 
   const sendToPipeline = useCallback(async (goal: string, wsId: string | null) => {
     const resp = await fetch('/api/agent/pipeline', {
@@ -8960,23 +9061,14 @@ case 'openPanel':
   // Expose the drawing function globally so the StudyAreaPrompt can trigger it.
   (window as unknown as Record<string, unknown>).__startStudyAreaDraw = () => startStudyDraw('RECTANGLE');
   // Draw the auto-detected OSM boundary on the globe so the user can see (and
-  // optionally adjust) it before the analysis runs.
+  // optionally adjust) it before the analysis runs. Registered as a real
+  // study area (chat-sourced) so the workbench / land-cover mapper / every
+  // later turn use it — not just a transient rectangle.
   (window as unknown as Record<string, unknown>).__drawStudyAreaBbox = (bbox: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null) => {
     const v = viewerRef.current;
     if (!v || !bbox) return;
-    clearStudyArea();
-    const rect = Cesium.Rectangle.fromDegrees(bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax);
-    studyAreaEntityRef.current = v.entities.add({
-      rectangle: {
-        coordinates: rect,
-        material: new Cesium.Color(0.2, 0.8, 0.3, 0.12),
-        outline: true,
-        outlineColor: Cesium.Color.LIME,
-        outlineWidth: 2,
-      },
-    });
-    v.camera.flyTo({ destination: rect });
-    throttledRender(v);
+    applyChatStudyArea(bbox, undefined, 'Detected area');
+    v.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax) });
     // Make sure the AI uses it even if the user just clicks "Use This Area".
     useChatStore.getState().setStudyAreaBbox(bbox);
   };
@@ -10682,7 +10774,7 @@ case 'openPanel':
       {showAviationTracker && <PanelSuspense><LazyAviationTrackerPanel zIndex={getPanelZIndex('aviation-tracker')} onClose={() => setShowAviationTracker(false)} onTravelView={travelToFlight} /></PanelSuspense>}
 
       {/* Satellite Imagery Panel */}
-      <PanelSuspense><LazySatelliteImageryPanel viewer={viewerRef.current} show={showSatelliteImagery} onClose={() => setShowSatelliteImagery(false)} zIndex={getPanelZIndex('satellite-imagery')} /></PanelSuspense>
+      <PanelSuspense><LazySatelliteImageryPanel viewer={viewerRef.current} show={showSatelliteImagery} onClose={() => setShowSatelliteImagery(false)} zIndex={getPanelZIndex('satellite-imagery')} studyAreaBbox={activeBbox} /></PanelSuspense>
 
       {/* First-run mission card */}
       {showFirstRun && (

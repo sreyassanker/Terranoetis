@@ -377,8 +377,8 @@ export function useChat(
           // bbox (e.g. the user clicked "Use Detected Area") must OVERRIDE it.
           // Previously the store value was spread last and clobbered opts.bbox,
           // so "Use Detected Area" silently re-applied a stale drawn area.
-          ...(studyAreaBbox ? { studyAreaBbox } : {}),
-          ...(opts?.bbox ? { studyAreaBbox: opts.bbox } : {}),
+          ...(studyAreaBbox ? { studyAreaBbox, studyAreaSource: store.getState().studyAreaSource ?? 'manual' } : {}),
+          ...(opts?.bbox ? { studyAreaBbox: opts.bbox, studyAreaSource: 'chat' } : {}),
           ...(opts?.polygon ? { studyAreaPolygon: opts.polygon } : {}),
           recentMessages: contextMessages,
           images: requestImages,

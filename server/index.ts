@@ -9366,15 +9366,16 @@ async function tryAnalyticalModelRun(
   refinedId?: number,
   studyAreaBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null,
   studyAreaPolygon?: Array<Array<[number, number]>> | null,
+  drawBoundary = true,
 ): Promise<AnalyticalRunResult | null> {
   // Memoize identical (modelId + bbox) runs — satellite grid fetches can take
   // ~30s cold; repeats should return instantly so chat stays responsive.
-  const cacheKey = `m${refinedId ?? 'auto'}|${studyAreaBbox ? `${studyAreaBbox.latMin},${studyAreaBbox.latMax},${studyAreaBbox.lonMin},${studyAreaBbox.lonMax}` : (location ? `loc:${location.lat},${location.lon}` : 'none')}|${message.toLowerCase().trim().slice(0, 60)}`;
+  const cacheKey = `m${refinedId ?? 'auto'}|${studyAreaBbox ? `${studyAreaBbox.latMin},${studyAreaBbox.latMax},${studyAreaBbox.lonMin},${studyAreaBbox.lonMax}` : (location ? `loc:${location.lat},${location.lon}` : 'none')}|${drawBoundary ? 1 : 0}|${message.toLowerCase().trim().slice(0, 60)}`;
   const cached = analyticalResultCache.get(cacheKey);
   if (cached && Date.now() - cached.at < ANALYTICAL_CACHE_TTL_MS) {
     return cached.hit;
   }
-  const hit = await tryAnalyticalModelRunInner(message, location, refinedId, studyAreaBbox, studyAreaPolygon);
+  const hit = await tryAnalyticalModelRunInner(message, location, refinedId, studyAreaBbox, studyAreaPolygon, drawBoundary);
   analyticalResultCache.set(cacheKey, { at: Date.now(), hit });
   return hit;
 }
@@ -9399,6 +9400,7 @@ async function tryAnalyticalModelRunInner(
   refinedId?: number,
   studyAreaBbox?: { latMin: number; latMax: number; lonMin: number; lonMax: number } | null,
   studyAreaPolygon?: Array<Array<[number, number]>> | null,
+  drawBoundary = true,
 ): Promise<AnalyticalRunResult | null> {
   const lower = message.toLowerCase().trim();
   // Map of known analytical model keywords → model IDs (verified against
@@ -9615,7 +9617,10 @@ async function tryAnalyticalModelRunInner(
     const commands: Array<Record<string, unknown>> = [];
     // Draw the real OSM boundary polygon on the globe (if one was resolved)
     // so the user sees the actual region shape, not just the heatmap dots.
-    if (studyAreaPolygon && studyAreaPolygon.length > 0) {
+    // Skipped when the area was already registered as the ACTIVE study area
+    // this turn (setStudyArea) — the study-area outline renders the same
+    // geometry, and drawing both doubles the boundary on the globe.
+    if (drawBoundary && studyAreaPolygon && studyAreaPolygon.length > 0) {
       for (const ring of studyAreaPolygon) {
         if (Array.isArray(ring) && ring.length >= 3) {
           // Outline only — no fill. The heatmap dots carry the data; the
@@ -9750,6 +9755,10 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
   const { message, images, recentMessages } = req.body;
   let studyAreaBbox = req.body.studyAreaBbox as { latMin: number; latMax: number; lonMin: number; lonMax: number } | undefined;
   const studyAreaPolygon = req.body.studyAreaPolygon as Array<Array<[number, number]>> | undefined;
+  // True once a chat-resolved boundary has been registered as the ACTIVE
+  // study area via a setStudyArea command (the client draws its outline) —
+  // downstream boundary drawing must then stay silent to avoid double shapes.
+  let studyAreaRegisteredForTurn = false;
   const imageContext = Array.isArray(images) && images.length > 0 ? images.map((img: any) => "[Image: " + img.fileName + " (" + img.mimeType + ")]").join(' ') : '';
   const fullMessage = imageContext ? imageContext + "\n" + message : message;
   const userId = (req as any).userId || 'default';
@@ -9927,8 +9936,14 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
               };
             }
             if (resolvedAreaBbox) {
-              const hadDrawnArea = studyAreaBbox != null;
-              studyAreaBbox = studyAreaBbox ?? resolvedAreaBbox;
+              // A chat-resolved area is itself provisional: the NEXT named
+              // place re-registers the study area ("go to thrissur" then "go
+              // to kochi"). Only a user-drawn/imported area is the explicit
+              // selection that wins over a named place (A2.29).
+              const chatSourcedArea = (req.body.studyAreaSource as string | undefined) === 'chat';
+              const hadDrawnArea = studyAreaBbox != null && !chatSourcedArea;
+              if (hadDrawnArea) studyAreaBbox = studyAreaBbox ?? resolvedAreaBbox;
+              else studyAreaBbox = resolvedAreaBbox;
               // Audit A2.29: drawn area + named place = two different regions in
               // one answer. The DATA follows the drawn area (it was the user's
               // explicit selection) — say so, and fly there instead of silently
@@ -9951,21 +9966,45 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
                 const areaCommands: Array<Record<string, unknown>> = [
                   { action: 'flyTo', lat: midLat, lon: midLon, label: resolvedAreaLabel, height, bbox: resolvedAreaBbox },
                 ];
-                if (resolvedAreaPolygon && resolvedAreaPolygon.length > 0) {
-                  let outer = resolvedAreaPolygon[0];
-                  for (const ring of resolvedAreaPolygon) if (ring.length > outer.length) outer = ring;
-                  const step = Math.max(1, Math.ceil(outer.length / 180));
-                  const coords = outer.filter((_, i) => i % step === 0).map(([lon, lat]) => [lat, lon]);
-                  if (coords.length >= 3) {
-                    areaCommands.push({ action: 'addPolygon', coordinates: coords, label: `${resolvedAreaLabel} boundary`, color: 'rgba(96,165,250,0.55)', outlineOnly: true });
+                // Draw the named-place boundary as a standalone shape ONLY when
+                // a user-drawn study area prevents setStudyArea below (A2.29).
+                // Otherwise setStudyArea registers the SAME geometry as the
+                // active study area, which renders its own outline — pushing a
+                // decorative addPolygon too would double the boundary on the globe.
+                if (hadDrawnArea) {
+                  if (resolvedAreaPolygon && resolvedAreaPolygon.length > 0) {
+                    let outer = resolvedAreaPolygon[0];
+                    for (const ring of resolvedAreaPolygon) if (ring.length > outer.length) outer = ring;
+                    const step = Math.max(1, Math.ceil(outer.length / 180));
+                    const coords = outer.filter((_, i) => i % step === 0).map(([lon, lat]) => [lat, lon]);
+                    if (coords.length >= 3) {
+                      areaCommands.push({ action: 'addPolygon', coordinates: coords, label: `${resolvedAreaLabel} boundary`, color: 'rgba(96,165,250,0.55)', outlineOnly: true });
+                    }
+                  } else {
+                    // No admin polygon (cities/points) — draw the bbox as a
+                    // rectangle so a boundary is ALWAYS visible for a named place.
+                    const { latMin, latMax, lonMin, lonMax } = resolvedAreaBbox;
+                    areaCommands.push({ action: 'addPolygon', coordinates: [[latMin, lonMin], [latMax, lonMin], [latMax, lonMax], [latMin, lonMax]], label: `${resolvedAreaLabel} area`, color: 'rgba(96,165,250,0.55)', outlineOnly: true });
                   }
-                } else {
-                  // No admin polygon (cities/points) — draw the bbox as a
-                  // rectangle so a boundary is ALWAYS visible for a named place.
-                  const { latMin, latMax, lonMin, lonMax } = resolvedAreaBbox;
-                  areaCommands.push({ action: 'addPolygon', coordinates: [[latMin, lonMin], [latMax, lonMin], [latMax, lonMax], [latMin, lonMax]], label: `${resolvedAreaLabel} area`, color: 'rgba(96,165,250,0.55)', outlineOnly: true });
                 }
-                sendEvent('step', { stepType: 'area_resolved', text: `Resolved ${resolvedAreaLabel} — flying to boundary`, status: 'completed' });
+                // Register the resolved boundary as the ACTIVE study area so
+                // every study-area consumer (Analytics Workbench, Land Cover
+                // Mapper, subsequent chat turns) picks it up automatically
+                // instead of prompting "Draw a bounding box".
+                if (!hadDrawnArea) {
+                  const saRings = (resolvedAreaPolygon || []).map(ring => {
+                    const step = Math.max(1, Math.ceil(ring.length / 240));
+                    return ring.filter((_, i) => i % step === 0);
+                  }).filter(r => r.length >= 4);
+                  areaCommands.push({
+                    action: 'setStudyArea',
+                    bbox: resolvedAreaBbox,
+                    label: resolvedAreaLabel,
+                    ...(saRings.length > 0 ? { polygon: saRings } : {}),
+                  });
+                  studyAreaRegisteredForTurn = true;
+                }
+                sendEvent('step', { stepType: 'area_resolved', text: hadDrawnArea ? `Resolved ${resolvedAreaLabel} — flying to boundary` : `Resolved ${resolvedAreaLabel} — boundary set as study area`, status: 'completed' });
                 sendEvent('commands', areaCommands);
               }
             }
@@ -10363,6 +10402,19 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
           // The polygon is fetched below via the detect — we need to pass it.
           // Store it in a mutable ref so the analytical runner can use it.
           (req as any).__studyAreaPolygon = autoPolygon;
+          // Register it as the app-wide active study area too (workbench,
+          // land-cover mapper, later turns) instead of a request-only variable.
+          const saRings = autoPolygon.map(ring => {
+            const step = Math.max(1, Math.ceil(ring.length / 240));
+            return ring.filter((_, i) => i % step === 0);
+          }).filter(r => r.length >= 4);
+          sendEvent('commands', [{
+            action: 'setStudyArea',
+            bbox: autoBoundary,
+            label: probeLocation.label || 'the area',
+            ...(saRings.length > 0 ? { polygon: saRings } : {}),
+          }]);
+          studyAreaRegisteredForTurn = true;
         } else {
           // No real polygon, only a bounding box or point — show the prompt.
           if (autoBoundary) {
@@ -10415,7 +10467,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
           const g = await IntentRouter.geocode(clause, geoKey);
           if (g?.lat && g?.lon) locs.push({ lat: g.lat, lon: g.lon, label: g.label });
         }
-        const analyticalHit = await tryAnalyticalModelRun(message, intent.location, intent.analyticalModelId, studyAreaBbox, studyAreaPolygon ?? (req as any).__studyAreaPolygon);
+        const analyticalHit = await tryAnalyticalModelRun(message, intent.location, intent.analyticalModelId, studyAreaBbox, studyAreaPolygon ?? (req as any).__studyAreaPolygon, !studyAreaRegisteredForTurn);
         // Only attempt multi-location when the query clearly names several
         // distinct places AND the base model run succeeds (so we reuse its
         // resolved model id deterministically rather than guessing again).
@@ -10424,7 +10476,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
             const perLoc: Array<{ label: string; text: string }> = [];
             const locCommands: Array<Record<string, unknown>> = [];
             for (const loc of locs) {
-              const hit = await tryAnalyticalModelRun(message, loc, analyticalHit.id, studyAreaBbox, studyAreaPolygon ?? (req as any).__studyAreaPolygon);
+              const hit = await tryAnalyticalModelRun(message, loc, analyticalHit.id, studyAreaBbox, studyAreaPolygon ?? (req as any).__studyAreaPolygon, !studyAreaRegisteredForTurn);
               if (hit) {
                 perLoc.push({ label: loc.label, text: hit.text });
                 locCommands.push(...hit.commands);
@@ -10446,7 +10498,7 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
           }
         }
       }
-      const analyticalHit = await tryAnalyticalModelRun(message, intent.location, intent.analyticalModelId, studyAreaBbox, studyAreaPolygon ?? (req as any).__studyAreaPolygon);
+      const analyticalHit = await tryAnalyticalModelRun(message, intent.location, intent.analyticalModelId, studyAreaBbox, studyAreaPolygon ?? (req as any).__studyAreaPolygon, !studyAreaRegisteredForTurn);
       if (analyticalHit) {
         // The message may also carry UI commands ("... and open the workbench").
         // Parse them so the model result AND the panel/layer actions both fire.
