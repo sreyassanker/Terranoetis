@@ -189,7 +189,6 @@ export const CORE_PAGES = [
         ['Realtime transports', 'WebSocket only on <code>/ws/agent</code> + <code>/ws/voice</code>; SSE for chat and job status', src('server/websocket.ts', '74-80') + ' ' + src(RT, '225')],
         ['Job queue', 'SQLite-backed SimpleQueue, 10 concurrent, max 3 attempts, recurring timers (MVC refresh 60 s, plugin scan 30 s…)', src('server/queue/simple-queue.ts', '22-60') + ' ' + src('server/index.ts', '1006-1039')],
       ]},
-      { kind: 'callout', tone: 'caution', title: 'Corrected claim', html: `<p>Earlier revisions described Redis as handling “pub/sub” and the docs tree listed a <code>server/digitalTwin/</code> module; both were inaccurate (pub/sub is the in-process bus; digitalTwin does not exist). See the <a href="methodology.html#discrepancy-log">discrepancy log</a>.</p>` },
     ],
   },
 
@@ -246,7 +245,6 @@ export const CORE_PAGES = [
         ['POST /api/kaggle/volcano/quantify', '16-member ensemble (ash/lava P5/P50/P95 + plume stats)', 'local python3', src(RT, '690') + ' ' + src('server/kaggle/localRunner.ts', '62-92')],
         ['GET /api/kaggle/volcano/profile', 'real wind-profile sampling for a box', 'server', src(RT, '47')],
       ]},
-      { kind: 'callout', tone: 'caution', title: 'Kernel notes carried from source', html: `<p>Kernels refuse fabricated context: tsunami requires real GEBCO (synthetic fallback disabled) ${src('kaggle-kernels/tsunami-sim/main.py', '227-230')}; volcano requires real terrain ${src('kaggle-kernels/volcano-sim/main.py', '821-826')}; the wire builder throws rather than substituting missing numbers ${src(INDEX, '390-415')}. The solver gates (GMPE sanity, hurricane physics, mass-conservation proofs) abort emission on failure — see each page.</p>` },
       { kind: 'h2', id: 'pages', title: 'Capability pages' },
       { kind: 'cards', items: [
         { href: 'earthquake.html', title: 'Earthquake ground motion', desc: 'BSSA14 GMPE · measured 0.008 s compute, 166 ms e2e job' },
