@@ -14,13 +14,13 @@ Please include:
 
 | Threat | Mitigation |
 |--------|------------|
-| SSRF via user-controlled URL | `validateOutboundUrl()` + `isAllowedUpstream()` — DNS resolution, private-IP blocking, allowlist. Applied at 3 outbound fetch sites. |
-| Unauthenticated access to protected routes | JWT verification via `authGuard` middleware. Public routes limited to health, metrics, config, OpenAPI spec, and read-only data endpoints. |
+| SSRF via user-controlled URL | `validateOutboundUrl()` + `isAllowedUpstream()` — DNS resolution, private-IP blocking, allowlist. Applied at the 2 user-URL fetch sites (proxy endpoint, custom data-source ingest). |
+| Unauthenticated access to protected routes | JWT verification via `authGuard` middleware. Public routes are an explicit allow-list: health/ready/live, metrics, config, OpenAPI/docs, the rate-limited read-only data routes, plus unauthenticated tile/pulse endpoints and share-token reads under <code>/shared/</code>. |
 | API key exposure | All keys in `.env` (gitignored). No keys exposed in `GET /api/config/apis`. Docker compose mounts `.env` as read-only volume. |
 | Weak/compromised JWT secret | `validateJwtSecretStrength()` at startup — refuses to start in production with a secret <32 chars. |
 | Brute-force login | `perIpRateLimiter(5, 15min)` on `/api/auth/login`. Account lockout after 10 failed attempts. |
-| Public data endpoint abuse | `perIpRateLimiter(300, 60s)` on all public read-only data endpoints. |
-| CORS abuse | Static allowlist (`origin: CLIENT_ORIGIN`), no origin reflection. |
+| Public data endpoint abuse | `perIpRateLimiter(300, 60s)` on the rate-limited public data allow-list (tile, pulse and share routes are public by design and carry their own guards). |
+| CORS abuse | Fixed single origin from `CLIENT_ORIGIN` (no reflection), credentials mode on. |
 | Injections | Helmet CSP headers, parameterized SQL queries (better-sqlite3), input validation on all POST endpoints. |
 | Supply chain | `package-lock.json` committed, `npm ci` in Docker build. |
 

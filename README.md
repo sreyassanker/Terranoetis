@@ -27,7 +27,7 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 - **Photorealistic CesiumJS 3D globe** with 41 rendering modules, satellite imagery, and sensor styles
 - **7 physics simulations** — 3 run locally on CPU (earthquake, wildfire, hurricane); 4 execute on free Kaggle kernels (tsunami, volcano, landslide, flood). All kernels are NumPy/CPU code; only flood-sim requests Kaggle's GPU accelerator in its metadata ([verified modes table](https://sreyassanker.github.io/Terranoetis/capabilities/hazard-simulations.html#modes))
 - **AI cognition** — System 1 / System 2 reasoning, multi-agent debate, causal + counterfactual analysis
-- **30+ live data feeds** — seismic, weather, aviation, maritime, satellite, traffic, space
+- **82 registered live-data integrations** — seismic, weather, aviation, maritime, satellite, traffic, space ([inventory](https://sreyassanker.github.io/Terranoetis/capabilities/live-data-and-monitoring.html#inventory))
 - **Realtime voice** — OpenAI Realtime → Gemini Live (server-side brokering)
 - **Explainable AI** — evidence chains, uncertainty quantification, human-override workflow
 - **Global model selector** — pick any LLM provider (or local GGUF) from the AI chat panel
@@ -42,7 +42,7 @@ A real-time geospatial intelligence platform. Combines a photorealistic Cesium 3
 <table>
   <tr>
     <td width="50%"><a href="docs/site/gifs/Multi%20Hazard%20Risk%20Map.gif"><img src="docs/site/gifs/preview/multi-hazard.gif" alt="Multi-hazard risk map — fused seismic, fire, storm and flood risk rendered on the globe" /></a></td>
-    <td width="50%"><a href="docs/site/gifs/Landslide%20simulation.gif"><img src="docs/site/gifs/preview/landslide.gif" alt="Landslide physics simulation — GPU-run terrain failure over real topography" /></a></td>
+    <td width="50%"><a href="docs/site/gifs/Landslide%20simulation.gif"><img src="docs/site/gifs/preview/landslide.gif" alt="Landslide physics simulation — Kaggle-routed terrain failure over real topography" /></a></td>
   </tr>
   <tr>
     <td align="center"><b>Multi-Hazard Risk Map</b><br/>fused live risk surfaces on the 3D globe</td>
@@ -113,7 +113,7 @@ terranoetis/
 │   └── __tests__/                # Frontend unit tests
 │
 ├── server/                       # Express 4 + TypeScript API
-│   ├── index.ts                  # App entry: routes, middleware, background services (~13.8k lines)
+│   ├── index.ts                  # App entry: routes, middleware, background services (14,573 lines)
 │   ├── agent.ts                  # Intent router + cognition pipeline
 │   ├── analytical-models/        # 150-equation engine, 7 parts, 26 domains
 │   ├── cognition/                # System 1 / System 2, MCTS, tree-of-thoughts
@@ -123,10 +123,10 @@ terranoetis/
 │   ├── sandboxV2/                # Simplified surrogate engines (farsiteLite, adcircLite, wrfLite, hysplitLite, FNO)
 │   ├── causal/ + kgV2/           # Causal reasoning + knowledge graph
 │   ├── scenarios/                # Disaster scenario generation
-│   ├── data/                     # 30+ live data fetchers
+│   ├── data/                     # Live-data fetchers (82 registered sources)
 │   ├── db/                       # SQLite schema (47 tables), migrations
 │   ├── middleware/               # JWT auth, rate limiter, validation, audit
-│   ├── observability/            # Pino, OpenTelemetry, Sentry
+│   ├── observability/            # Pino, in-house OpenTelemetry-style tracing, Sentry
 │   ├── selfImprover.ts           # Feedback-driven prompt evolution
 │   └── __tests__/                # 1,700+ tests (1,653 unit + 49 integration passing, measured 2026-09-09)
 │
@@ -142,7 +142,7 @@ terranoetis/
 │   │   └── platform-overview.html # Legacy URL — redirects to the docs index
 │   └── Research papers/          # Source PDFs backing the equation citations
 │
-├── e2e/                          # Playwright browser tests (7 spec files, 38 test declarations)
+├── e2e/                          # Playwright browser tests (7 spec files; 15 test declarations, 14 registered by default — 1 gated behind LULC_HEAVY=1)
 ├── scripts/                      # Dev utilities, live smoke scripts, docs build + quality gate
 ├── data/                         # Runtime databases + ML models
 ├── models/                       # Local GGUF model (downloadable from admin panel) → gitignored
@@ -151,9 +151,9 @@ terranoetis/
 ├── docker-compose.yml            # 3 services (terranoetis + redis + causal-service)
 ├── Dockerfile                    # Multi-stage build (node:20-alpine)
 ├── .github/workflows/ci.yml      # 10 CI jobs (typecheck, lint, tests, coverage, build, docker, audit, browser, summary)
-├── package.json                  # 97 dependencies, 14 scripts
+├── package.json                  # 96 dependencies, 14 scripts
 ├── tsconfig.json                 # Project references: app + node + server + scripts
-├── vite.config.ts                # Vite 7 config with Cesium plugin
+├── vite.config.ts                # Vite 7 config with a custom Cesium asset-copy plugin
 ├── playwright.config.ts          # Playwright: WebGL args, reuse server
 └── vitest.config.ts              # Vitest: include server + frontend tests
 ```

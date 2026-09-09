@@ -1,6 +1,6 @@
 # Backend
 
-The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via `tsx`), exposing **360+ REST endpoints** (371 route registrations counted 2026-09-09) and a WebSocket channel.
+The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via `tsx`), exposing **360+ REST endpoints** (398 handler registrations counted 2026-09-09 across app/router verbs) and a WebSocket channel.
 
 > Site view with per-module citations: [Platform services](../capabilities/platform-services.html) · [Live data & monitoring](../capabilities/live-data-and-monitoring.html) · [AI cognition](../capabilities/ai-cognition.html). It coordinates live data ingestion, the 150-equation analytical engine, AI cognition, realtime services, and persistent state.
 
@@ -26,7 +26,7 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 | Realtime | WebSocket (`ws`), SSE |
 | Auth | JWT + RBAC, scrypt password hashing |
 | LLM routing | Omninet 9-provider router (Groq, Gemini, Bai, DeepSeek, Claude, OpenRouter, Ollama, HuggingFace, local GGUF) |
-| Observability | Pino, OpenTelemetry, Sentry |
+| Observability | Pino, in-house OpenTelemetry-style tracing, Sentry |
 | Sandbox | Python / Node / Bash execution |
 
 ---
@@ -88,10 +88,10 @@ The Terranoetis backend is a **Node.js + Express 4** API server (TypeScript via 
 | `explainability/` | Bias auditor, evidence chain, human override, reasoning visualizer |
 | `fork/` | Parallel reality fork manager |
 | `middleware/` | JWT auth, rate limiter, tenant isolation, audit, validation, error handler |
-| `observability/` | Pino logger, metrics, OpenTelemetry, Sentry |
+| `observability/` | Pino logger, metrics, in-house OpenTelemetry-style tracing, Sentry |
 | `queue/` | Job queue |
 | `email/` | Nodemailer integration |
-| `routes/` | Foundation models, self-evolution, vault, pulse, cache service, OpenAPI |
+| `routes/` | Foundation models, self-evolution, pulse, cache service, OpenAPI |
 | `infrastructure/` | Redis setup |
 | `utils/` | 29 utility modules: FIRMS, EONET, ISS, MGRS, NDBC, OpenAQ, ERA5, ACLED, CMEMS, shakeMap, SPC, VAAC, space debris, wavewatch, geo |
 | `ai-patterns/` | Pattern store, summarize tool |
@@ -175,7 +175,7 @@ In `NODE_ENV=production`, the server **requires** a `JWT_SECRET` of ≥ 32 chara
 |---|---|
 | Logging | Pino (structured JSON, pretty in dev) |
 | Metrics | Prometheus-style metrics endpoint |
-| Tracing | OpenTelemetry |
+| Tracing | OpenTelemetry-style spans (in-house `observability/openTelemetry.ts`; official SDK imports are stubbed) |
 | Error tracking | Sentry (opt-in via `SENTRY_DSN`) |
 | Health | `/api/health`, `/api/ready`, `/api/live` |
 

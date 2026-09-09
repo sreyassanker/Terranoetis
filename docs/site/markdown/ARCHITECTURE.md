@@ -204,7 +204,7 @@ The frontend internals are inventoried in [FRONTEND.md](FRONTEND.md): the 41 ren
 | `ai-router/` | Omninet 9-provider LLM router (incl. local GGUF fallback) |
 | `rag/` | Retrieval-augmented generation: embeddings, memory bridge |
 | `h3-engine/` | H3 indexing, spatial query, ClickHouse, TimescaleDB, stream processor |
-| `observability/` | Pino logger, metrics, OpenTelemetry, Sentry |
+| `observability/` | Pino logger, metrics, in-house OpenTelemetry-style tracing, Sentry |
 | `middleware/` | JWT auth, rate limiter, tenant isolation, audit, validation, error handler |
 | `sandboxManager.ts` / `pluginManager.ts` | Sandbox execution + plugin extensibility |
 | `selfImprover.ts` / `selfImproverV2.ts` | Feedback-driven self-improvement |

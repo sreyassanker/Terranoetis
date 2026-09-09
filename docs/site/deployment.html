@@ -110,13 +110,13 @@
 <tbody>
 <tr><td><code>JWT_SECRET</code> / <code>ADMIN_BOOTSTRAP_PASSWORD</code></td><td>production hard-requirement ≥ 32 / ≥ 16 chars; boot refuses otherwise</td></tr>
 <tr><td><code>PROXY_PORT</code> / <code>PORT</code></td><td>3001 default chain; measured boot served on a chosen port with health “version: 3.1”</td></tr>
-<tr><td>~100 provider keys (<code>.env.example</code>)</td><td>missing key ⇒ that feature disables; the 3 local sims + analytical engine unaffected</td></tr>
+<tr><td>103 variables in <code>.env.example</code> (62 named *KEY/*TOKEN/*SECRET)</td><td>missing key ⇒ that feature disables; the 3 local sims + analytical engine unaffected</td></tr>
 <tr><td><code>~/.kaggle/kaggle.json</code> + <code>KAGGLE_BIN</code>, poll/settle/grace vars</td><td>transport for the 4 routed kernels; credentials read only from ~/.kaggle — never from the repo</td></tr>
-<tr><td><code>LOCAL_SIM_TIMEOUT_MS</code></td><td>local kernel spawn timeout, default 120,000 ms <cite class="src">server/kaggle/simRunner.ts:134</cite></td></tr>
+<tr><td><code>LOCAL_SIM_TIMEOUT_MS</code></td><td>local kernel spawn timeout, default 120,000 ms <cite class="src">server/kaggle/simRunner.ts:136</cite></td></tr>
 <tr><td><code>TIMESCALE_CONNECTION_STRING</code> / <code>CLICKHOUSE_HOST</code> / <code>KAFKA_BROKERS</code></td><td>optional H3 spatial backends; graceful no-op when unset</td></tr>
 </tbody></table></div>
 <h2 id="ci">CI pipeline</h2>
-<p><code>ci.yml</code> runs 10 jobs (typecheck, lint, unit, integration, build, Playwright, Docker build, coverage, audit, summary). <code>docs.yml</code> adds the documentation gate: build-drift check + quality-gate on every push/PR touching <code>docs/**</code> or <code>scripts/docs/**</code>. GitHub Pages serves <code>docs/</code> with <code>.nojekyll</code> so every file is delivered byte-exact.</p>
+<p><code>ci.yml</code> runs 10 jobs (typecheck, lint, unit, integration, build, Playwright, Docker build, coverage, audit, summary). <code>docs.yml</code> adds the documentation gate: build-drift check + quality-gate on pushes/PRs to <code>main</code>/<code>develop</code> touching <code>docs/site/**</code>, <code>scripts/docs/**</code>, or the root markdown files. <code>deploy-docs.yml</code> publishes <code>docs/site/</code> to GitHub Pages via <code>upload-pages-artifact</code> (workflow deploy; also manually dispatchable), with <code>.nojekyll</code> so every file is delivered byte-exact.</p>
 <h2 id="kaggle">Optional Kaggle setup (for the 4 routed kernels)</h2>
 <p>Create a token at kaggle.com/settings/account → save as <code>~/.kaggle/kaggle.json</code> (chmod 600) → install the CLI (<code>pip install kaggle</code>) or set <code>KAGGLE_BIN</code>. Without it, the routed kernels disable gracefully; earthquake/wildfire/hurricane simulations, all 150 analytical tools, monitoring and the API work with no token at all. Transport details and honesty labels: <a href="capabilities/hazard-simulations.html#modes">execution modes</a>.</p>
       <footer class="site-footer">

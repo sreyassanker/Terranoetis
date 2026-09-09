@@ -22,7 +22,7 @@ Terranoetis runs in a Docker Compose stack with three services, or directly with
 |---|---|---|
 | Node.js | ≥ 20 | Runtime (matches CI and Docker image) |
 | npm | ≥ 10 | Package management |
-| Redis | 7.x | Caching, session, pub/sub (optional — graceful fallback to SQLite) |
+| Redis | 7.x | Cache + memory hot path (optional — graceful fallback to SQLite; the event bus is in-process regardless) |
 | Docker & Compose | Latest | Containerized deployment |
 | Cesium Ion token | — | Photorealistic 3D Tiles (set `VITE_CESIUM_ION_ACCESS_TOKEN`) |
 
@@ -66,7 +66,7 @@ curl http://localhost:3001/api/health
 | Service | Image | Port | Purpose |
 |---|---|---|---|
 | `terranoetis` | Custom (Dockerfile) | 3001 | Express API + built frontend (single origin) |
-| `redis` | `redis:7-alpine` | 6379 | Cache, session, pub/sub |
+| `redis` | `redis:7-alpine` | 6379 | Cache + memory hot path |
 | `causal-service` | Custom (Python) | 5001 | Causal inference microservice (DoWhy) |
 
 > In production (`NODE_ENV=production`), the Express app serves the built frontend from `dist/` on the same origin as the API — open `http://localhost:3001` for the full application. In development, Vite serves the client on :3000 and proxies `/api` to :3001.
@@ -120,10 +120,10 @@ docker compose up -d    # Restart with rebuilt images
 | Mode | Dev (`development`) | Production (`production`) |
 |---|---|---|
 | JWT_SECRET | Auto-generated weak secret | Required, ≥ 32 chars |
-| ADMIN_BOOTSTRAP_PASSWORD | Auto-generated | Required, ≥ 16 chars |
+| ADMIN_BOOTSTRAP_PASSWORD | Auto-generated (dev) | Required for admin provisioning, ≥ 16 chars; if missing, boot continues with the admin disabled |
 | Dev auto-login | Enabled | Disabled (returns 404) |
 | CSP / HSTS | Relaxed | Strict |
-| Startup validation | Warning | Hard error |
+| Startup validation | Warning | Hard error for `JWT_SECRET` only (weak ⇒ boot refuses); a missing admin bootstrap password disables the admin account, not the server |
 
 ---
 
@@ -176,14 +176,14 @@ The simulation runner reads credentials exclusively from `~/.kaggle` (`KAGGLE_CO
 
 ## CI/CD Pipeline
 
-The GitHub Actions workflow (`.github/workflows/ci.yml`) runs the following on every push and pull request:
+The GitHub Actions workflow (`.github/workflows/ci.yml`) runs the following on pushes and pull requests targeting `main`/`develop`; the documentation gate ships as a separate workflow (`.github/workflows/docs.yml`):
 
 | Job | Description |
 |---|---|
 | TypeScript Check | `tsc --noEmit` for frontend + server |
 | Lint | `eslint .` |
 | Unit Tests | Vitest in `server/__tests__/unit` + `src/__tests__` |
-| Integration Tests | Vitest in `server/__tests__/integration` |
+| Integration Tests | Vitest in `server/__tests__/integration` + `server/__tests__/e2e` |
 | Coverage | Vitest with `--coverage` |
 | Build | `npm run build` (tsc -b + vite build) |
 | Docker Build | Docker build verification |
@@ -195,7 +195,7 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) runs the following on e
 ### CI Notes
 
 - **Node version:** 20 (specified in workflow and `.nvmrc`; the 2026-09-09 verification pass ran Node 26 with 1,653 unit + 49 integration tests passing)
-- **Docs quality gate:** `.github/workflows/docs.yml` runs on every push/PR touching `docs/**` or `scripts/docs/**`
+- **Docs quality gate:** `.github/workflows/docs.yml` runs on pushes/PRs to `main`/`develop` touching `docs/site/**`, `scripts/docs/**`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, or the workflow itself; `deploy-docs.yml` publishes `docs/site/` to GitHub Pages (workflow deploy; also manually dispatchable)
 - **Browser tests** run headless in CI on `ubuntu-latest` using Chromium with software WebGL (`--use-gl=angle --enable-unsafe-swiftshader`), so no physical display/GPU is required. They are still the most environment-sensitive job and can be flaky.
 - **Redis** is optional in both development and CI (the server falls back to SQLite gracefully)
 - **Docker Compose** is recommended for production

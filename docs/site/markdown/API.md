@@ -1,6 +1,6 @@
 # API Reference
 
-Terranoetis exposes **360+ REST endpoints** (371 handler registrations counted across `server/` on 2026-09-09) plus real-time **WebSocket** (`/ws/agent`, `/ws/voice`) and **SSE** channels. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
+Terranoetis exposes **360+ REST endpoints** (398 handler registrations across `app`/router verbs under `server/`, counted 2026-09-09; `GET`/`POST`/`PUT`/`DELETE`/`PATCH`) plus real-time **WebSocket** (`/ws/agent`, `/ws/voice`) and **SSE** channels. All API routes are served under `/api`. Authentication uses JWT bearer tokens with role-based access control (RBAC).
 
 > Site views: [API reference](../reference/api.html) · [Simulation job API & parameter contracts](../reference/simulation-api.html) · machine-readable spec at `GET /api/openapi.json`. The tables below are the curated prose map; per-endpoint behaviour is cited in the reference pages.
 
@@ -30,7 +30,7 @@ Terranoetis exposes **360+ REST endpoints** (371 handler registrations counted a
 - **Content-Type:** `application/json`
 - **Auth:** `Authorization: Bearer <JWT>`
 - **Rate limiting:** per-IP and per-user limits apply on public + authenticated routes
-- **Public routes** (no auth): `/auth/login`, `/auth/dev-login`, `/auth/refresh`, `/health`, `/ready`, `/live`, `/metrics`, `/config/apis`, `/openapi.json`, `/docs`. In addition, read-only live-data endpoints (e.g. `/earthquakes`, `/weather/*`, `/flights`, `/ais`, `/satellites/tle`, `/pulse/*`, `/kaggle/*`, `/analytical-models` search + detail) are public but server-side rate-limited, as are shared-session reads (`/shared/*`), map tiles (`/tiles/*`, `/tilejson`), foundation-model endpoints (`/fm/*`, `/road-traffic/*`, `/spacex/*`, `/bayfire/*`), multimodal endpoints (`/multimodal/*`), and simulations (`/simulate/*`). `/social/stream` authenticates via `?token=` (SSE).
+- **Public routes** (no auth): `/auth/login`, `/auth/dev-login`, `/auth/refresh`, `/health`, `/ready`, `/live`, `/metrics`, `/config/apis`, `/openapi.json`, `/docs`. In addition, read-only live-data endpoints (e.g. `/earthquakes`, `/weather/*`, `/flights`, `/ais`, `/satellites/tle`, `/kaggle/*`, `/analytical-models` search + detail, plus `/multimodal/*` and `/simulate/*`) are public with server-side rate limiting (`publicDataRateLimit`, 300/min/IP). Shared-session reads (`/shared/*`, share-token scoped), map tiles (`/tiles/*`, `/tilejson`), `/pulse/*` and most foundation-model endpoints (`/fm/*`, `/road-traffic/*`, `/spacex/*`, `/bayfire/*`) are public but unthrottled. `/social/stream` authenticates via `?token=` (SSE).
 
 ---
 
@@ -95,7 +95,7 @@ The agent pipeline routes natural-language queries through intent recognition (S
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/analytical-models` | Full catalog (all 150 models) |
+| GET | `/api/analytical-models` | Implemented equation IDs (`{implemented: [1..150]}`; names/citations via `/:id` and search) |
 | GET | `/api/analytical-models/search` | Full-text + domain search over all 150 models |
 | GET | `/api/analytical-models/:id` | Model detail (paper citation, formula, params) |
 | POST | `/api/analytical-models/:id/execute` | Execute a model with inputs (authenticated) |
@@ -142,7 +142,7 @@ The analytical pipeline applies a **7-stage workflow** (input validation → pre
 | POST | `/api/scenarios/generate` | Generate a single disaster scenario |
 | POST | `/api/scenarios/batch` | Batch-generate scenarios |
 | GET | `/api/scenarios/:id` | Scenario detail |
-| POST | `/api/sandbox/execute` | Execute Python / Node / Bash in the sandbox |
+| POST | `/api/sandbox/execute` | Execute Python / Node / Bash / R in the sandbox |
 | POST | `/api/sandbox/workspace` | Create a sandbox workspace |
 | DELETE | `/api/sandbox/workspace/:id` | Delete a workspace |
 | POST | `/api/sandbox/workspace/:id/upload` | Upload a file to the workspace |
@@ -151,15 +151,16 @@ The analytical pipeline applies a **7-stage workflow** (input validation → pre
 | GET | `/api/kaggle/simulate/:id` | Kaggle simulation job status / results |
 | GET | `/api/kaggle/simulate/:id/results` | Simulation result data |
 | GET | `/api/kaggle/jobs` | Kaggle job queue |
-| POST | `/api/kaggle/simulate` | Submit a simulation run (zod-validated contract; see parameter-contract reference) |
+| POST | `/api/kaggle/simulate` | Submit a simulation run (contract zod-validated client-side; the server checks type/lat/lon presence and known types — see parameter-contract reference) |
 | GET | `/api/kaggle/simulate/:id/stream` | SSE job status/progress stream |
-| POST | `/api/kaggle/simulate/:id/cancel` | Cooperative cancel (local runs SIGKILL at `LOCAL_SIM_TIMEOUT_MS`) |
-| GET | `/api/kaggle/simulate/:id/grid/:name` | Result grid as raw `.npy` or JSON (≤ 5 M elements) |
+| POST | `/api/kaggle/simulate/:id/cancel` | Cooperative cancel (local runs are SIGKILLed; wall-clock runs are separately capped by `LOCAL_SIM_TIMEOUT_MS`, default 120 s) |
+| GET | `/api/kaggle/simulate/:id/grid/:name` | Result grid as raw `.npy` or JSON (JSON capped at 5 M elements; 413 above) |
 | GET | `/api/kaggle/simulate/:id/geotiff/:name` | Result grid as WGS84 GeoTIFF |
 | GET | `/api/kaggle/jobs` · `/api/kaggle/kernels` | Job list · kernel availability & GPU-accelerator flags |
 | POST | `/api/kaggle/calibrate` | Landslide μ×ξ fit to an observed runout (local python3) |
 | POST | `/api/kaggle/landslide/quantify` · `/api/kaggle/volcano/quantify` | Monte-Carlo UQ ensembles (local python3) |
-| POST | `/api/kaggle/volcano/calibrate` · `/api/kaggle/volcano/profile` | Lava rheology calibration · wind-profile sampling |
+| POST | `/api/kaggle/volcano/calibrate` | Lava rheology calibration (local python3) |
+| GET | `/api/kaggle/volcano/profile` | ERA5 wind-profile sampling (`?lat=&lon=&date=`) |
 
 ---
 
@@ -225,7 +226,7 @@ The analytical pipeline applies a **7-stage workflow** (input validation → pre
 | POST | `/api/admin/models/gguf-download` | Start or resume downloading the LFM 2.5 2.6B Q4_K_M GGUF model from HuggingFace |
 | DELETE | `/api/admin/models/gguf` | Remove the local GGUF model file (and any partial download) |
 | GET | `/api/tools` | Registered tools |
-| DELETE | `/api/tools/:id` | Disable tool |
+| DELETE | `/api/tools/:id` | Remove a dynamic tool (core tools return 403) |
 | GET | `/api/config/apis` | Public API config (no secrets) |
 | GET | `/api/openapi.json` | OpenAPI spec |
 | GET | `/api/docs` | API documentation UI |
@@ -253,10 +254,10 @@ The WebSocket server (`server/websocket.ts`) streams live data and agent events 
 
 - Live entity updates (flights, vessels, satellites, earthquakes)
 - Agent SSE-style streaming relayed over WS
-- Presence (collaboration cursors, typing)
+- Presence (typing indicators)
 - Pub/sub messages (alerts, fork state)
 
-Connection: `ws://<host>:3001` on paths `/ws/agent` and `/ws/voice` only (all other upgrade paths are destroyed); auth via `Sec-WebSocket-Protocol` bearer JWT (fallback `?token=`); 30 s heartbeat / 35 s timeout; channel allowlist includes `sentinel:raw`, `sentinel:alerts`, `correlation:alerts`, `fork:*`, per-user `ws:<id>` (`server/websocket.ts:79-145`). The event bus feeding it is the in-process pub/sub (`server/pubsub.ts`) — Redis is not required for realtime delivery.
+Connection: `ws://<host>:3001` on paths `/ws/agent` and `/ws/voice` only (all other upgrade paths are destroyed); auth via `Sec-WebSocket-Protocol` bearer JWT (fallback `?token=`); 30 s heartbeat / 35 s timeout; channel allowlist includes `sentinel:raw`, `sentinel:alerts`, `correlation:alerts`, `fork:*`, per-user `ws:<id>` (`server/websocket.ts:18-20,63-69`; upgrade + heartbeat :79-145). The event bus feeding it is the in-process pub/sub (`server/pubsub.ts`) — Redis is not required for realtime delivery.
 
 ---
 
@@ -272,4 +273,4 @@ Connection: `ws://<host>:3001` on paths `/ws/agent` and `/ws/voice` only (all ot
 | `429` | Rate limited |
 | `500` | Internal error |
 
-Errors return `{ "error": "<message>" }`. Authentication failures return `{ "error": "Missing or invalid Authorization header..." }`.
+Route handlers return `{ "error": "<message>" }`; the central error middleware (body-parse 400/413/415, 404 not-found, unhandled 500s) returns `{ "error": { "code": "<CODE>", "message": "<message>" } }`. Authentication failures return `{ "error": "Missing or invalid Authorization header..." }`.

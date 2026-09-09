@@ -124,7 +124,7 @@
 <tbody>
 <tr><td>Logs</td><td>pino JSON + correlationId; heap log 60 s</td><td><cite class="src">server/observability/logger.ts:6,33,53-64</cite></td></tr>
 <tr><td>Metrics</td><td>prom-client: http totals/duration, SSE gauge, sandbox/cache/db/tool/omninet counters at /api/metrics</td><td><cite class="src">server/observability/metrics.ts:13-86</cite></td></tr>
-<tr><td>Tracing/errors</td><td>OpenTelemetry init + Sentry opt-in via SENTRY_DSN</td><td><cite class="src">server/index.ts:14450-14457</cite></td></tr>
+<tr><td>Tracing/errors</td><td>in-house OpenTelemetry-style tracing init + Sentry opt-in via SENTRY_DSN</td><td><cite class="src">server/index.ts:14450-14457</cite></td></tr>
 <tr><td>Health</td><td>/api/health (+ /ready, /live) with component checks — measured payload on Getting started</td><td><cite class="src">server/index.ts:375-381</cite></td></tr>
 <tr><td>OpenAPI</td><td>spec at /api/openapi.json + docs UI /api/docs (generated from routes/openapi.ts)</td><td><cite class="src">server/routes/openapi.ts:module</cite> <cite class="src">server/index.ts:494</cite></td></tr>
 </tbody></table></div>

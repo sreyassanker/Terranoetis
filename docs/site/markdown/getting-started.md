@@ -11,7 +11,7 @@ Terranoetis is a real-time geospatial intelligence platform. A React 19 + Cesium
 Three facts orient everything else:
 
 1. **The API is the product boundary.** The globe UI and any script you write hit the same `/api` endpoints. If you can `curl` it, you can automate it.
-2. **Simulations are kernels, not cloud services.** Each hazard is a Python file in `kaggle-kernels/`. Three of them (earthquake, wildfire, hurricane) are executed locally by the server with `python3`; four (flood, tsunami, volcano, landslide) are dispatched to Kaggle as an execution venue — the code itself is NumPy and runs on CPU instances.
+2. **Simulations are kernels, not cloud services.** Each hazard is a Python file in `kaggle-kernels/`. Three of them (earthquake, wildfire, hurricane) are executed locally by the server with `python3`; four (flood, tsunami, volcano, landslide) are dispatched to Kaggle as an execution venue — the code itself is pure NumPy, run on CPU instances except flood-sim, whose kernel metadata requests Kaggle's GPU accelerator.
 3. **Nothing is fabricated silently.** Inputs that are required but missing raise at the client boundary; analytical tools that cannot obtain real data return NaN with an explanation. The docs mirror this: every claim on the site carries a `file:line` citation, and unexecuted claims are labelled.
 
 ## First hour

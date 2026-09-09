@@ -580,7 +580,7 @@ export function renderLanding() {
 
         <div class="terminal-status-strip">
           <span class="t-status"><span class="t-indicator"></span> Ready for deployment</span>
-          <span class="t-env">NODE ≥ 20.0 · PYTHON 3.12+</span>
+          <span class="t-env">NODE ≥ 20.0 · PYTHON 3 + NUMPY</span>
         </div>
       </div>
     </div>
