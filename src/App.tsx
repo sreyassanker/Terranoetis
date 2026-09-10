@@ -80,7 +80,6 @@ import PerformanceMonitor from '@/components/PerformanceMonitor';
 import { IssTravelView } from '@/components/IssTravelView';
 import { FlightTravelView } from '@/components/FlightTravelView';
 import { classifyAircraft, getAircraftGltf, type AircraftClass } from '@/rendering/aircraftHangar';
-import { buildFlight4DPath, sampleFlight4DPath, flight4DConfidence, flight4DOffsetLabel, FLIGHT_4D_HORIZON_S, type Flight4DWaypoint } from '@/rendering/flight4D';
 import { CommandPalette } from '@/components/CommandPalette';
 import { AnalyticsWorkbench } from '@/components/AnalyticsWorkbench';
 import type { StudyAreaDrawType } from '@/components/ToolDialog';
@@ -1170,31 +1169,15 @@ export default function App() {
   const flightTravelFovRef = useRef(Cesium.Math.toRadians(65));
   const flightTravelPreRenderRef = useRef<(() => void) | null>(null);
   const flightTravelHudIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const flightTravelScreenIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const flightTravelRefreshIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const flightTravelDragRef = useRef<{ x: number; y: number; active: boolean }>({ x: 0, y: 0, active: false });
   const flightTravelDragCleanupRef = useRef<(() => void) | null>(null);
   const flightTravelMarkerRef = useRef<Cesium.Entity | null>(null);
   const flightTravelModelClassRef = useRef<AircraftClass>('airliner');
   const flightTravelModeRef = useRef<'external' | 'cockpit'>('external');
-  const flightTravel4DPathRef = useRef<Flight4DWaypoint[]>([]);
-  const flightTravel4DOffsetRef = useRef(0);              // seconds into the future (0 = live)
-  const flightTravel4DPlayingRef = useRef(false);
-  const flightTravel4DSpeedRef = useRef(60);              // playback speed multiplier
-  const flightTravel4DLastTickRef = useRef(0);
-  const flightTravel4DPathEntityRef = useRef<Cesium.Entity | null>(null);
-  const flightTravel4DRingsRef = useRef<Cesium.Entity[]>([]);
-  const flightTravel4DGhostEntityRef = useRef<Cesium.Entity | null>(null);
   const flightTravelSmoothPosRef = useRef<Cesium.Cartesian3 | null>(null);   // chase-cam low-pass filter
   const flightTravelSmoothHdgRef = useRef(0);
   const flightTravelLastFrameRef = useRef(0);
-  const flightTravelScreenRef = useRef({ x: 0, y: 0, visible: false, rangeKm: 0 });
-  const [flightTravelScreen, setFlightTravelScreen] = useState({ x: 0, y: 0, visible: false, rangeKm: 0 });
-  const [flightTravelMode, setFlightTravelMode] = useState<'external' | 'cockpit'>('external');
-  const [flightTravel4DActive, setFlightTravel4DActive] = useState(false);
-  const [flightTravel4DOffset, setFlightTravel4DOffset] = useState(0);
-  const [flightTravel4DPlaying, setFlightTravel4DPlaying] = useState(false);
-  const [flightTravel4DSpeed, setFlightTravel4DSpeed] = useState(60);
   const flightTravelSavedViewRef = useRef<{ pos: Cesium.Cartesian3; hdg: number; pitch: number; roll: number } | null>(null);
   const flightTravelNearbyEntitiesRef = useRef<Map<string, Cesium.Entity>>(new Map());
   const flightTravelHiddenEntityRef = useRef<Cesium.Entity | null>(null);
@@ -4962,63 +4945,31 @@ export default function App() {
     });
   }
 
-  /** Project the live sim state forward by the current 4D scrub offset and
-   *  return the (possibly future) position the camera/aircraft should use. */
-  function flightTravelProjectedState(): { lat: number; lon: number; alt: number; heading: number; velocity: number; verticalRate: number } | null {
-    const sim = flightTravelSimRef.current;
-    if (!sim) return null;
-    const offset = flightTravel4DOffsetRef.current;
-    if (offset <= 0 || flightTravel4DPathRef.current.length === 0) return null;
-    const wp = sampleFlight4DPath(flightTravel4DPathRef.current, offset);
-    if (!wp) return null;
-    return { lat: wp.lat, lon: wp.lon, alt: wp.alt, heading: sim.heading, velocity: sim.velocity, verticalRate: sim.verticalRate };
-  }
-
   function updateFlightTravelCamera(v: Cesium.Viewer) {
     const sim = flightTravelSimRef.current;
     if (!sim) return;
 
-    // ── 4D playback ticker ──
-    if (flightTravel4DPlayingRef.current && flightTravel4DOffsetRef.current < FLIGHT_4D_HORIZON_S) {
-      const now = Date.now();
-      const dt = (now - flightTravel4DLastTickRef.current) / 1000;
-      flightTravel4DLastTickRef.current = now;
-      if (dt > 0) {
-        const next = Math.min(FLIGHT_4D_HORIZON_S, flightTravel4DOffsetRef.current + dt * flightTravel4DSpeedRef.current);
-        flightTravel4DOffsetRef.current = next;
-        setFlightTravel4DOffset(next);
-        if (next >= FLIGHT_4D_HORIZON_S) { flightTravel4DPlayingRef.current = false; setFlightTravel4DPlaying(false); }
-      }
-    }
-
-    // ── live dead-reckoning (only advances while at "now") ──
-    if (flightTravel4DOffsetRef.current <= 0) {
-      const now = Date.now();
-      const dt = (now - sim.lastUpdate) / 1000;
-      if (dt > 0) {
-        if (sim.velocity > 0) {
-          const dist = sim.velocity * dt;
-          const rad = (sim.heading * Math.PI) / 180;
-          const dLat = (dist * Math.cos(rad)) / 111320;
-          const cosLat = Math.cos((sim.lat * Math.PI) / 180);
-          if (Math.abs(cosLat) >= 0.01) {
-            const dLon = (dist * Math.sin(rad)) / (111320 * cosLat);
-            sim.lat += dLat;
-            sim.lon += dLon;
-            if (sim.lon > 180) sim.lon -= 360; else if (sim.lon < -180) sim.lon += 360;
-          }
+    // ── live dead-reckoning ──
+    const now = Date.now();
+    const dt = (now - sim.lastUpdate) / 1000;
+    if (dt > 0) {
+      if (sim.velocity > 0) {
+        const dist = sim.velocity * dt;
+        const rad = (sim.heading * Math.PI) / 180;
+        const dLat = (dist * Math.cos(rad)) / 111320;
+        const cosLat = Math.cos((sim.lat * Math.PI) / 180);
+        if (Math.abs(cosLat) >= 0.01) {
+          const dLon = (dist * Math.sin(rad)) / (111320 * cosLat);
+          sim.lat += dLat;
+          sim.lon += dLon;
+          if (sim.lon > 180) sim.lon -= 360; else if (sim.lon < -180) sim.lon += 360;
         }
-        sim.alt = Math.max(0, sim.alt + sim.verticalRate * dt);
-        sim.lastUpdate = now;
       }
+      sim.alt = Math.max(0, sim.alt + sim.verticalRate * dt);
+      sim.lastUpdate = now;
     }
 
-    // ── projected state (4D scrub) or live state ──
-    const proj = flightTravelProjectedState();
-    const lat = proj ? proj.lat : sim.lat;
-    const lon = proj ? proj.lon : sim.lon;
-    const alt = proj ? proj.alt : sim.alt;
-    const pos = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+    const pos = Cesium.Cartesian3.fromDegrees(sim.lon, sim.lat, sim.alt);
 
     // ── exponential low-pass smoothing (frame-rate independent) ──
     const nowMs = Date.now();
@@ -5042,7 +4993,7 @@ export default function App() {
       if (marker.position instanceof Cesium.ConstantPositionProperty) marker.position.setValue(pos);
       const hpr = new Cesium.HeadingPitchRoll(
         Cesium.Math.toRadians(sim.heading),
-        proj ? 0 : Math.max(-12, Math.min(12, Cesium.Math.toDegrees(Math.atan2(sim.verticalRate, Math.max(1, sim.velocity))))),
+        Math.max(-12, Math.min(12, Cesium.Math.toDegrees(Math.atan2(sim.verticalRate, Math.max(1, sim.velocity))))),
         0,
       );
       if (marker.orientation) {
@@ -5052,35 +5003,12 @@ export default function App() {
       }
     }
 
-    // ── screen projection for the external target brackets ──
-    if (flightTravelModeRef.current === 'external') {
-      try {
-        const wc = Cesium.SceneTransforms.worldToWindowCoordinates(v.scene, pos);
-        if (wc) {
-          const camDist = Cesium.Cartesian3.distance(v.camera.positionWC, pos);
-          flightTravelScreenRef.current = {
-            x: wc.x, y: wc.y,
-            visible: camDist < 400000,
-            rangeKm: +(camDist / 1000).toFixed(1),
-          };
-        } else {
-          flightTravelScreenRef.current = { ...flightTravelScreenRef.current, visible: false };
-        }
-      } catch { flightTravelScreenRef.current = { ...flightTravelScreenRef.current, visible: false }; }
-    }
-
     // ── camera per mode (smoothed chase in external, rigid cockpit eye) ──
     if (flightTravelModeRef.current === 'cockpit') {
       flightCockpitCam(v, pos, sim.heading, flightTravelYawRef.current, flightTravelPitchRef.current);
     } else {
       flightChaseCam(v, camPos, smoothHeading, flightTravelYawRef.current, flightTravelPitchRef.current);
     }
-  }
-
-  /** Throttled push of the projected target-box state to the external HUD. */
-  function updateFlightTravelScreen() {
-    if (!flightTravelRef.current || flightTravelModeRef.current !== 'external') return;
-    setFlightTravelScreen({ ...flightTravelScreenRef.current });
   }
 
   function updateFlightTravelHud(_v: Cesium.Viewer) {
@@ -5157,14 +5085,6 @@ export default function App() {
 
     // ── EXTERNAL mode is the default boarding view ──
     flightTravelModeRef.current = 'external';
-    setFlightTravelMode('external');
-    flightTravel4DOffsetRef.current = 0;
-    flightTravel4DPlayingRef.current = false;
-    flightTravel4DPathRef.current = [];
-    setFlightTravel4DOffset(0);
-    setFlightTravel4DPlaying(false);
-    setFlightTravel4DActive(false);
-    setFlightTravel4DSpeed(60);
 
     const pos = Cesium.Cartesian3.fromDegrees(sim.lon, sim.lat, sim.alt);
     flightChaseCam(v, pos, sim.heading, 0, FLIGHT_TRAVEL_PITCH);
@@ -5197,10 +5117,8 @@ export default function App() {
     });
     flightTravelMarkerRef.current = marker;
 
-    setupFlight4DScene(v, sim);
     flightTravelPreRenderRef.current = v.scene.preRender.addEventListener(() => updateFlightTravelCamera(v));
     flightTravelHudIntRef.current = setInterval(() => updateFlightTravelHud(v), 200);
-    flightTravelScreenIntRef.current = setInterval(updateFlightTravelScreen, 70);
     flightTravelRefreshIntRef.current = setInterval(() => refreshFlightTravelPosition(), 30000);
     setupFlightTravelDrag(v);
     window.addEventListener('keydown', flightTravelKeyHandler);
@@ -5217,84 +5135,6 @@ export default function App() {
         }
       }
     }
-  }
-
-  // ── 4D scene: predicted path polyline + uncertainty rings + predicted ghost ──
-  function setupFlight4DScene(v: Cesium.Viewer, sim: { lat: number; lon: number; alt: number; velocity: number; heading: number; verticalRate: number }) {
-    // Projected path from the live state — regenerated whenever offsets reset
-    flightTravel4DPathRef.current = buildFlight4DPath({ ...sim });
-
-
-    const pathEntity = v.entities.add({
-      polyline: {
-        positions: new Cesium.CallbackProperty(() => {
-          return flightTravel4DPathRef.current.map(wp => wp.position);
-        }, false) as unknown as Cesium.PositionProperty,
-        width: 2,
-        material: new Cesium.PolylineDashMaterialProperty({
-          color: Cesium.Color.fromCssColorString('#fbbf24').withAlpha(0.55),
-          dashLength: 14,
-        }),
-        show: new Cesium.CallbackProperty(() => flightTravel4DOffsetRef.current > 0, false) as unknown as boolean,
-      },
-    });
-    flightTravel4DPathEntityRef.current = pathEntity;
-
-    // Uncertainty rings at 1h/2h/3h/4h — translucent ellipsoids on the path
-    const ringHours = [1, 2, 3, 4];
-    const rings: Cesium.Entity[] = [];
-    for (const h of ringHours) {
-      const tSec = h * 3600;
-      const ring = v.entities.add({
-        position: new Cesium.CallbackProperty(() => {
-          const wp = sampleFlight4DPath(flightTravel4DPathRef.current, tSec);
-          return wp ? wp.position : Cesium.Cartesian3.ZERO;
-        }, false) as unknown as Cesium.PositionProperty,
-        ellipse: {
-          semiMajorAxis: new Cesium.CallbackProperty(() => {
-            const wp = sampleFlight4DPath(flightTravel4DPathRef.current, tSec);
-            return wp ? wp.uncertaintyM : 200;
-          }, false) as unknown as number,
-          semiMinorAxis: new Cesium.CallbackProperty(() => {
-            const wp = sampleFlight4DPath(flightTravel4DPathRef.current, tSec);
-            return wp ? wp.uncertaintyM : 200;
-          }, false) as unknown as number,
-          material: Cesium.Color.fromCssColorString('#fbbf24').withAlpha(0.07),
-          outline: true,
-          outlineColor: Cesium.Color.fromCssColorString('#fbbf24').withAlpha(0.28),
-          outlineWidth: 1.5,
-          heightReference: Cesium.HeightReference.NONE,
-          height: new Cesium.CallbackProperty(() => {
-            const wp = sampleFlight4DPath(flightTravel4DPathRef.current, tSec);
-            return wp ? wp.alt : 0;
-          }, false) as unknown as number,
-        },
-      });
-      rings.push(ring);
-    }
-    flightTravel4DRingsRef.current = rings;
-
-    // Predicted ghost — the aircraft's future self, visible while scrubbing
-    const ghost = v.entities.add({
-      position: new Cesium.CallbackProperty(() => {
-        const wp = sampleFlight4DPath(flightTravel4DPathRef.current, flightTravel4DOffsetRef.current);
-        return wp ? wp.position : Cesium.Cartesian3.ZERO;
-      }, false) as unknown as Cesium.PositionProperty,
-      billboard: {
-        image: getPlaneIcon(sim.heading, '#fbbf24'),
-        width: 24, height: 24,
-      },
-      label: {
-        text: new Cesium.CallbackProperty(() => 'PRED ' + flight4DOffsetLabel(flightTravel4DOffsetRef.current), false) as unknown as string,
-        font: '10px "JetBrains Mono", monospace',
-        fillColor: Cesium.Color.fromCssColorString('#fbbf24'),
-        showBackground: true,
-        backgroundColor: Cesium.Color.fromCssColorString('rgba(8,20,30,0.75)'),
-        pixelOffset: new Cesium.Cartesian2(0, -18),
-      },
-      show: new Cesium.CallbackProperty(() => flightTravel4DOffsetRef.current > 0 && flightTravelModeRef.current === 'external', false) as unknown as boolean,
-    });
-    flightTravel4DGhostEntityRef.current = ghost;
   }
 
   function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -5408,21 +5248,10 @@ export default function App() {
     flightTravelNameRef.current = '';
     flightTravelIcaoRef.current = '';
     flightTravelCallsignRef.current = '';
-    flightTravel4DOffsetRef.current = 0;
-    flightTravel4DPlayingRef.current = false;
-    flightTravel4DPathRef.current = [];
-    setFlightTravelMode('external');
-    setFlightTravel4DActive(false);
-    setFlightTravel4DOffset(0);
-    setFlightTravel4DPlaying(false);
+    flightTravelModeRef.current = 'external';
     if (flightTravelMarkerRef.current) { try { v.entities.remove(flightTravelMarkerRef.current); } catch { /* ignore */ } flightTravelMarkerRef.current = null; }
-    if (flightTravel4DPathEntityRef.current) { try { v.entities.remove(flightTravel4DPathEntityRef.current); } catch { /* ignore */ } flightTravel4DPathEntityRef.current = null; }
-    for (const ring of flightTravel4DRingsRef.current) { try { v.entities.remove(ring); } catch { /* ignore */ } }
-    flightTravel4DRingsRef.current = [];
-    if (flightTravel4DGhostEntityRef.current) { try { v.entities.remove(flightTravel4DGhostEntityRef.current); } catch { /* ignore */ } flightTravel4DGhostEntityRef.current = null; }
     if (flightTravelPreRenderRef.current) { flightTravelPreRenderRef.current(); flightTravelPreRenderRef.current = null; }
     if (flightTravelHudIntRef.current) { clearInterval(flightTravelHudIntRef.current); flightTravelHudIntRef.current = null; }
-    if (flightTravelScreenIntRef.current) { clearInterval(flightTravelScreenIntRef.current); flightTravelScreenIntRef.current = null; }
     flightTravelSmoothPosRef.current = null;
     flightTravelLastFrameRef.current = 0;
     if (flightTravelRefreshIntRef.current) { clearInterval(flightTravelRefreshIntRef.current); flightTravelRefreshIntRef.current = null; }
@@ -5471,7 +5300,6 @@ export default function App() {
     if (!v) return;
     const next: 'external' | 'cockpit' = flightTravelModeRef.current === 'external' ? 'cockpit' : 'external';
     flightTravelModeRef.current = next;
-    setFlightTravelMode(next);
     if (next === 'cockpit') {
       // Flight-deck instrument view — clamp pitch to a sensible scan range
       flightTravelPitchRef.current = FLIGHT_TRAVEL_COCKPIT_PITCH;
@@ -5484,33 +5312,6 @@ export default function App() {
       showNotification('External 3D View', 'info');
     }
   }
-
-  // ── 4D time-projection controls (exposed to the HUD) ──
-  function flight4DScrub(tSec: number) {
-    flightTravel4DOffsetRef.current = Math.max(0, Math.min(FLIGHT_4D_HORIZON_S, tSec));
-    flightTravel4DLastTickRef.current = Date.now();
-    setFlightTravel4DOffset(flightTravel4DOffsetRef.current);
-  }
-  function flight4DSetPlaying(playing: boolean) {
-    flightTravel4DPlayingRef.current = playing;
-    flightTravel4DLastTickRef.current = Date.now();
-    setFlightTravel4DPlaying(playing);
-    if (playing && flightTravel4DOffsetRef.current >= FLIGHT_4D_HORIZON_S) flight4DScrub(0);
-    if (playing) setFlightTravel4DActive(true);
-  }
-  function flight4DSetSpeed(speed: number) {
-    flightTravel4DSpeedRef.current = speed;
-    setFlightTravel4DSpeed(speed);
-  }
-  function flight4DSetActive(active: boolean) {
-    if (!active) {
-      // snap back to live ("now") when 4D is dismissed
-      flight4DScrub(0);
-      flight4DSetPlaying(false);
-    }
-    setFlightTravel4DActive(active);
-  }
-
 
   const travelLookFlight = useCallback((action: 'left' | 'right' | 'up' | 'down' | 'back' | 'default' | 'zoomin' | 'zoomout' | 'chase' | 'cockpit' | 'topdown') => {
     const STEP = Cesium.Math.toRadians(8);
@@ -10820,20 +10621,6 @@ case 'openPanel':
           onLook={travelLookFlight}
           onCapture={() => takeSnapshot()}
           onExit={() => { const v = viewerRef.current; if (v) exitFlightTravel(v); }}
-          mode={flightTravelMode}
-          onToggleMode={toggleFlightTravelMode}
-          screen={flightTravelScreen}
-          time4D={{
-            active: flightTravel4DActive,
-            offsetSec: flightTravel4DOffset,
-            playing: flightTravel4DPlaying,
-            speed: flightTravel4DSpeed,
-            horizonSec: FLIGHT_4D_HORIZON_S,
-            onScrub: flight4DScrub,
-            onSetPlaying: flight4DSetPlaying,
-            onSetSpeed: flight4DSetSpeed,
-            onSetActive: flight4DSetActive,
-          }}
         />
       )}
 
