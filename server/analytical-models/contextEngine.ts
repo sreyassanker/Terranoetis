@@ -106,6 +106,9 @@ export interface GridResult {
   sceneAcquired?: string;
   sceneCoverageFrac?: number;
   sceneCloudMasked?: number;
+  /** Cells screened out after the fact as cloud-edge/cirrus contamination
+   *  (passed QA_PIXEL but physically impossible vs scene median + air temp). */
+  sceneOutlierMasked?: number;
 }
 
 export interface ContextResult extends ComputeResult {
@@ -2135,15 +2138,18 @@ function mapInputs(
       R: u('R', 2),
     };
     case 70: {
-      const obsSst = ctx.era5?.surfaceFluxes?.netShortwave != null
-        ? T
-        : undefined;
+      const liveSst = ctx.marine?.sst;
+      const obsSst = liveSst ?? (ctx.era5?.surfaceFluxes?.netShortwave != null ? T : undefined);
       const profile = getOceanProfile(lat, lon, 0, obsSst);
-      return {
+      const out: Record<string, unknown> = {
         S: u('S', Math.round(profile.salinity * 10) / 10),
         Theta: u('Theta', Math.round(profile.sst * 10) / 10),
         p: u('p', 0),
       };
+      if (liveSst == null) {
+        out.__proxyWarning = 'Marine SST unavailable for this query — salinity/temperature fall back to a latitude-band ocean climatology (zonal mean, no longitude resolution). Density reflects the band average, not measured water.';
+      }
+      return out;
     }
     case 71: {
       const obsSst = ctx.era5?.surfaceFluxes?.netShortwave != null
@@ -3126,9 +3132,10 @@ export async function computeWithContext(
           ? fetchHistoricalWeather(lat, lon, context.time.start, context.time.start)
           : fetchCurrentWeather(lat, lon),
       {} as WeatherData,
+      30000,
     ),
-    safe(fetchMarineData(lat, lon), {} as MarineData),
-    safe(fetchAirQuality(lat, lon), {} as AirQualityData),
+    safe(fetchMarineData(lat, lon, dateStr), {} as MarineData, 30000),
+    safe(fetchAirQuality(lat, lon, dateStr), {} as AirQualityData, 30000),
     safe(fetchEarthquakes(lat, lon, context?.time?.start ?? '', context?.time?.end ?? ''),
       { count: 0, maxMagnitude: 0, avgMagnitude: 0, avgDepth: 0, bValue: 1.0, aValue: 0, mcMagnitude: 2.5, omoriFit: null, events: [] } as EarthquakeData),
     safe(fetchElevation(lat, lon), { elevation: 0 } as ElevationData),
@@ -3213,7 +3220,7 @@ export async function computeWithContext(
     // Tools 56/62: genuine SST from NCEI ERDDAP OISST v2 — for Tool 56 the
     // paper's Schmidt-number and solubility inputs; for Tool 62 (Eppley
     // 1972) the marine temperature T of the paper's Eq. (1)/Eq. (a).
-    safe(id === 56 || id === 62 ? fetchSST(lat, lon).catch(() => null) : Promise.resolve(null), null, 30000),
+    safe(id === 56 || id === 62 ? fetchSST(lat, lon, dateStr).catch(() => null) : Promise.resolve(null), null, 30000),
     // Tool 56 (Wanninkhof 1992): nearest NOAA PMEL mooring pCO₂ sample
     // (measured pCO₂_sw / pCO₂_air for ΔpCO₂, plus co-located SST/SSS for
     // Sc and the Weiss solubility). Only for tool 56 — null when no mooring
@@ -3302,7 +3309,7 @@ export async function computeWithContext(
   // Null when no fires are detected or the FIRMS API is unreachable —
   // the engine then reports honest NaN (no fabricated fire temperature).
   const fire = id === 32
-    ? await safe(fetchFIRMSFires(lat, lon, 50), null, 25000)
+    ? await safe(fetchFIRMSFires(lat, lon, 50, dateStr), null, 25000)
     : null;
 
   // Genuine USGS annual-maxima flood series → Gumbel (Type I) fit for
@@ -3457,6 +3464,45 @@ export async function computeWithContext(
     log.push(`  Gumbel fit: ${annualMaxGumbel.years} water years (${annualMaxGumbel.startYear}-${annualMaxGumbel.endYear}) of daily discharge @ ${annualMaxGumbel.siteName} (${annualMaxGumbel.siteId})`);
   }
 
+  // ── Honesty block A: placeholder-context disclosure ──────────────
+  // When a context fetch times out or fails, mapInputs falls back to
+  // standard-atmosphere / zero constants (15 °C, 1013.25 hPa, 5 m/s,
+  // 50 % RH, …). Under load that produced "plausible but constant"
+  // results (the Es = 17.02 hPa symptom). Such results must never be
+  // presented silently as measurements.
+  {
+    const placeholders: string[] = [];
+    if (weather.temperature_2m === undefined && consumed.has('open-meteo-weather'))
+      placeholders.push('weather (15°C/1013.25 hPa/5 m/s/50% RH standards)');
+    if (marine.wave_height === undefined && consumed.has('open-meteo-marine'))
+      placeholders.push('marine (calm-sea defaults)');
+    if (airQuality.pm2_5 === undefined && consumed.has('open-meteo-aq'))
+      placeholders.push('air quality (zero-pollution defaults)');
+    if (soil.texture_class === 'unknown' && consumed.has('isric-soilgrids'))
+      placeholders.push('soil (generic texture defaults)');
+    if (placeholders.length) {
+      const msg = `Context fetch incomplete — the computation used placeholder values: ${placeholders.join('; ')}. The result is a standard-input estimate, not a measurement.`;
+      warnings.push(msg);
+      log.push(`  WARNING: ${msg}`);
+    }
+  }
+
+  // ── Honesty block B: date-blind source disclosure ────────────────
+  // Marine and air-quality fetchers are live snapshots (no historical
+  // archive is wired), while Landsat/ERA5/USGS honour the query date.
+  // For past-date computations that must be explicit.
+  {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    if (dateStr && !dateStr.includes('/') && dateStr !== todayIso) {
+      const blind: string[] = [];
+      if (sources.includes('open-meteo-marine') && marine.asOf === undefined) blind.push('Marine');
+      if (sources.includes('open-meteo-aq') && airQuality.asOf === undefined) blind.push('Air-quality');
+      if (blind.length) {
+        warnings.push(`${blind.join(' & ')} input${blind.length > 1 ? 's are' : ' is'} a current live snapshot, not a ${dateStr} observation — those sources have no historical archive wired in.`);
+      }
+    }
+  }
+
   // Run the complete 7-stage scientific workflow
   const validationRules = Object.entries(enrichedInputs).map(([k, v]) => ({
     param: k,
@@ -3528,6 +3574,9 @@ export async function computeWithContext(
         if (grid.hasNaN) pushW('Some grid cells produced non-finite values (clamped in display).');
         if (grid.sceneCloudMasked) {
           pushW(`${grid.sceneCloudMasked}/${grid.nLat * grid.nLon} cells masked as cloud/cirrus/shadow/snow by Landsat QA — cloud-top radiance is not land surface temperature, so the field skips those cells.`);
+        }
+        if (grid.sceneOutlierMasked) {
+          pushW(`${grid.sceneOutlierMasked} additional cell(s) screened out as cloud-edge/thin-cirrus contamination — more than 8 K below the scene's clear-sky core and 10 K below the local air temperature, which no sunlit land surface can be.`);
         }
         if (grid.sceneCoverageFrac != null && grid.sceneCoverageFrac < 0.98) {
           pushW(`One Landsat scene (~110 km swath) covers ${Math.round(grid.sceneCoverageFrac * 100)}% of this area — cells outside the swath are empty. Draw a smaller study area for a complete field.`);
@@ -3830,6 +3879,46 @@ async function buildSpatialGrid(
       }
     }
   }
+  // ── Cloud-edge / thin-cirrus contamination screen (thermal LST fields) ──
+  // Pixels that pass the QA_PIXEL "clear" class yet sit on a cloud edge or
+  // under sub-pixel cirrus can read tens of K too cold — the Bengaluru
+  // 7-14 °C-in-a-27 °C-air symptom. A cell is screened only when BOTH
+  // tests agree, each protecting a different legitimate case:
+  //   (a) air guard (the physics): > 10 K colder than the local ERA5 screen
+  //       air temp. At the ~10:30 solar overpass the sunlit surface sits at
+  //       or above the air it heats; water bodies and rain-cooled ground
+  //       rarely fall below ~8 K, so 10 K is a hard impossibility.
+  //   (b) scene test (the season guard): > 8 K colder than the scene's p75
+  //       AND the scene core itself being cold vs the requested date's air —
+  //       i.e. never mask a genuinely cold (e.g. winter/snow) scene whose
+  //       whole distribution sits together when the *request* is milder.
+  //       Upper quartile reference: cloud-edge error is strictly cold-side.
+  let sceneOutlierMasked = 0;
+  if (SAFE_THERMAL_TOOLS.has(id)) {
+    const obs: number[] = [];
+    for (let i = 0; i < values.length; i++) if (Number.isFinite(values[i])) obs.push(values[i]);
+    if (obs.length >= 5) {
+      const s = [...obs].sort((a, b) => a - b);
+      const p75 = s[Math.floor(0.75 * (s.length - 1))];
+      const sceneCut = p75 - 8;
+      for (let r = 0; r < nLat; r++) {
+        for (let c = 0; c < nLon; c++) {
+          const v = values[r * nLon + c];
+          if (!Number.isFinite(v) || v >= sceneCut) continue;
+          const airT = weatherAt(lats[r], lons[c]).temperature_2m;
+          if (airT != null && Number.isFinite(airT) && v < airT - 10) {
+            values[r * nLon + c] = NaN;
+            hasNaN = true;
+            sceneOutlierMasked++;
+          }
+        }
+      }
+      if (sceneOutlierMasked > 0) {
+        vmin = Infinity; vmax = -Infinity;
+        for (const v of values) if (Number.isFinite(v)) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+      }
+    }
+  }
   // Zonal statistics over finite cells (standard spatial-field summary for
   // raster/heatmap output — min/max/mean/std/median of the field).
   const finite = values.filter((v): v is number => Number.isFinite(v));
@@ -3854,6 +3943,7 @@ async function buildSpatialGrid(
     sceneAcquired: satGrid?.acquired,
     sceneCoverageFrac: satGrid?.coverageFrac,
     sceneCloudMasked: satGrid?.cloudMasked,
+    sceneOutlierMasked: sceneOutlierMasked > 0 ? sceneOutlierMasked : undefined,
   };
 }
 

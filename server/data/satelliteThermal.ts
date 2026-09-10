@@ -651,6 +651,7 @@ function sampleBandWindow(
   bw: { win: BandWindow; geom: BandGeom },
   toUtm: ReturnType<typeof proj4>,
   lat: number, lon: number,
+  nearest = false,
 ): number | undefined {
   const [ux, uy] = toUtm.forward([lon, lat]);
   const { win, geom } = bw;
@@ -658,6 +659,16 @@ function sampleBandWindow(
   const gy = ((geom.yMax - uy) / (geom.yMax - geom.yMin)) * geom.h - 0.5 - win.py0;
   const ww = win.px1 - win.px0, hh = win.py1 - win.py0;
   if (gx < -0.5 || gy < -0.5 || gx > ww - 0.5 || gy > hh - 0.5) return undefined;
+  // Nearest-neighbour: mandatory for integer class/mask bands (QA_PIXEL).
+  // Bilinear between two class DNs fabricates intermediate bitmasks whose
+  // rounded value sets shadow/snow/cloud bits that the real pixels do not
+  // have — which masked entire clear scenes out of the LST grid.
+  if (nearest) {
+    const nx = Math.max(0, Math.min(ww - 1, Math.round(gx)));
+    const ny = Math.max(0, Math.min(hh - 1, Math.round(gy)));
+    const v = win.data[ny * ww + nx];
+    return Number.isFinite(v) ? v : undefined;
+  }
   const x0 = Math.max(0, Math.min(ww - 1, Math.floor(gx)));
   const y0 = Math.max(0, Math.min(hh - 1, Math.floor(gy)));
   const x1 = Math.min(ww - 1, x0 + 1);
@@ -836,7 +847,7 @@ export async function fetchLandsatThermalGrid(
       if (stRaw == null) continue;
       coverageIn++;
       if (qaBand) {
-        const qv = sampleBandWindow(qaBand, toUtm, lat, lon);
+        const qv = sampleBandWindow(qaBand, toUtm, lat, lon, true);
         if (qv != null && isCloudOrBadQa(qv)) { cloudMasked++; continue; }
       }
       const tradRaw = raw('trad');

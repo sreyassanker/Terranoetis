@@ -178,15 +178,54 @@ export interface MarineData {
   wind_wave_height?: number;
   ocean_current_velocity?: number;
   ocean_current_direction?: number;
+  /** Sea surface temperature (°C) — co-fetched so SST tools stop falling
+   *  back to a longitude-blind climatology (zonal-mean bug class found by
+   *  the 900-run audit: identical TEOS-10 density at Tokyo & San Francisco). */
+  sst?: number;
+  /** ISO date the values correspond to; undefined = live current snapshot. */
+  asOf?: string;
 }
 
 export async function fetchMarineData(
-  lat: number, lon: number,
+  lat: number, lon: number, date?: string,
 ): Promise<MarineData> {
+  // Historical path: the marine API archives hourly wave analyses via
+  // past_days (≤ ~92 days). A past-date query must NOT silently receive
+  // today's ocean (the live-snapshot leakage found by the 900-run audit);
+  // out of window we return an empty object so the placeholder warning
+  // fires instead of a fabricated value.
+  const iso = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined;
+  if (iso) {
+    const daysAgo = Math.round((Date.now() - Date.parse(`${iso}T12:00:00Z`)) / 86400000);
+    if (daysAgo >= 1 && daysAgo <= 90) {
+      const data = await strictFetch(
+        `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}`
+        + `&hourly=wave_height,wave_direction,wave_period,swell_wave_height,swell_wave_direction,swell_wave_period,sea_surface_temperature`
+        + `&past_days=${daysAgo}&forecast_days=1&timezone=auto`,
+      );
+      const h = (data.hourly ?? {}) as Record<string, (number | null)[] | undefined>;
+      const idx = ((h.time as unknown as string[]) ?? []).findIndex(t => t === `${iso}T10:00`);
+      if (idx >= 0) {
+        const at = (k: string) => (h[k]?.[idx] ?? undefined) as number | undefined;
+        return {
+          wave_height: at('wave_height'),
+          wave_direction: at('wave_direction'),
+          wave_period: at('wave_period'),
+          swell_wave_height: at('swell_wave_height'),
+          swell_wave_direction: at('swell_wave_direction'),
+          swell_wave_period: at('swell_wave_period'),
+          sst: at('sea_surface_temperature'),
+          asOf: iso,
+        };
+      }
+      return {};
+    }
+    if (daysAgo >= 1) return {};
+  }
   const data = await strictFetch(
     `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}`
     + `&current=wave_height,wave_direction,wave_period,swell_wave_height,swell_wave_direction,`
-    + `swell_wave_period,wind_wave_height,ocean_current_velocity,ocean_current_direction`
+    + `swell_wave_period,wind_wave_height,ocean_current_velocity,ocean_current_direction,sea_surface_temperature`
     + `&timezone=auto`
   );
   const c = (data.current ?? {}) as Record<string, unknown>;
@@ -200,6 +239,7 @@ export async function fetchMarineData(
     wind_wave_height: c.wind_wave_height as number | undefined,
     ocean_current_velocity: c.ocean_current_velocity as number | undefined,
     ocean_current_direction: c.ocean_current_direction as number | undefined,
+    sst: c.sea_surface_temperature as number | undefined,
   };
 }
 
@@ -218,14 +258,45 @@ export interface AirQualityData {
   dust?: number;
   uv_index?: number;
   aerosol_optical_depth?: number;
+  /** ISO date the values correspond to; undefined = live current snapshot. */
+  asOf?: string;
 }
 
+const AQ_FIELDS = 'european_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,dust,uv_index,aerosol_optical_depth';
+
 export async function fetchAirQuality(
-  lat: number, lon: number,
+  lat: number, lon: number, date?: string,
 ): Promise<AirQualityData> {
+  // Historical path: the air-quality API serves CAMS hourly analyses for
+  // past dates. A past-date query must receive the past value — never
+  // today's snapshot (date-blindness found by the 900-run audit).
+  const iso = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined;
+  if (iso) {
+    const data = await strictFetch(
+      `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}`
+      + `&hourly=${AQ_FIELDS}&start_date=${iso}&end_date=${iso}&timezone=auto`,
+    );
+    const h = (data.hourly ?? {}) as Record<string, (number | null)[] | undefined>;
+    const idx = ((h.time as unknown as string[]) ?? []).findIndex(t => t === `${iso}T10:00`);
+    if (idx < 0) return {};
+    const at = (k: string) => (h[k]?.[idx] ?? undefined) as number | undefined;
+    return {
+      european_aqi: at('european_aqi'),
+      pm10: at('pm10'),
+      pm2_5: at('pm2_5'),
+      carbon_monoxide: at('carbon_monoxide'),
+      nitrogen_dioxide: at('nitrogen_dioxide'),
+      sulphur_dioxide: at('sulphur_dioxide'),
+      ozone: at('ozone'),
+      dust: at('dust'),
+      uv_index: at('uv_index'),
+      aerosol_optical_depth: at('aerosol_optical_depth'),
+      asOf: iso,
+    };
+  }
   const data = await strictFetch(
     `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}`
-    + `&current=european_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,dust,uv_index,aerosol_optical_depth`
+    + `&current=${AQ_FIELDS}`
     + `&timezone=auto`
   );
   const c = (data.current ?? {}) as Record<string, unknown>;
@@ -548,7 +619,7 @@ export interface FireData {
 }
 
 export async function fetchFIRMSFires(
-  lat: number, lon: number, radiusKm: number = 100,
+  lat: number, lon: number, radiusKm: number = 100, date?: string,
 ): Promise<FireData> {
   const mapKey = process.env.NASA_FIRMS_MAP_KEY;
   if (!mapKey) throw new Error('NASA_FIRMS_MAP_KEY not set');
@@ -564,7 +635,12 @@ export async function fetchFIRMSFires(
     Math.min(180, lon + halfDeg),
     Math.min(90, lat + halfDeg),
   ].map(v => v.toFixed(4)).join(',');
-  const days = 5; // rolling NRT archive keeps the last few days
+  const iso = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined;
+  // A past-date query gets the 5-day window ENDING at that date (the
+  // rolling NRT default ends today — date-blindness found by the audit).
+  const rangeSpec = iso
+    ? `/${iso}/${iso}`
+    : `/${5}`;
 
   // VIIRS 375m, then MODIS 1km, then VIIRS NOAA-20
   const sources = ['VIIRS_SNPP_NRT', 'MODIS_NRT', 'VIIRS_NOAA20_NRT'];
@@ -573,7 +649,7 @@ export async function fetchFIRMSFires(
   for (const source of sources) {
     try {
       const resp = await fetch(
-        `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${mapKey}/${source}/${bbox}/${days}`,
+        `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${mapKey}/${source}/${bbox}${rangeSpec}`,
         { signal: AbortSignal.timeout(FETCH_TIMEOUT) },
       );
       if (!resp.ok) continue;
@@ -749,19 +825,25 @@ export interface SSTData {
 }
 
 export async function fetchSST(
-  lat: number, lon: number,
+  lat: number, lon: number, date?: string,
 ): Promise<SSTData> {
   // NCEI ERDDAP OISST v2 (0.25° daily). Native axis variables are sst/anom
   // (NOT analysed_sst/anomaly) and the longitude axis is 0–360°E. The most
   // recent timesteps are preliminary (null) pending final processing, so
-  // probe a trailing window and take the newest valid value.
+  // probe a trailing window and take the newest valid value. With a query
+  // date, the window ends at that date — a past-date request must never
+  // receive today's SST.
+  const iso = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined;
   const lon360 = ((lon % 360) + 360) % 360;
-  const start = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10) + 'T12:00:00Z';
+  const start = iso
+    ? new Date(Date.parse(`${iso}T12:00:00Z`) - 10 * 86400000).toISOString().slice(0, 10) + 'T12:00:00Z'
+    : new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10) + 'T12:00:00Z';
+  const endSpec = iso ? `${iso}T12:00:00Z` : 'last';
   // Round lat/lon onto the 0.25° grid cell centers (…-89.875 … 89.875; …0.125 … 359.875)
   const gridLat = Math.max(-89.875, Math.min(89.875, Math.round((lat + 89.875) / 0.25) * 0.25 - 89.875));
   const gridLon = Math.round(((lon360 - 0.125) / 0.25)) * 0.25 + 0.125;
   const query = (v: string) =>
-    encodeURIComponent(`${v}`) + `%5B(${start}):last%5D%5B(0.0)%5D%5B(${gridLat})%5D%5B(${gridLon})%5D`;
+    encodeURIComponent(`${v}`) + `%5B(${start}):${endSpec === 'last' ? 'last' : `1:(${endSpec})`}%5D%5B(0.0)%5D%5B(${gridLat})%5D%5B(${gridLon})%5D`;
   const url =
     `https://www.ncei.noaa.gov/erddap/griddap/ncdc_oisst_v2_avhrr_by_time_zlev_lat_lon.json?`
     + `${query('sst')},${query('anom')}`;
