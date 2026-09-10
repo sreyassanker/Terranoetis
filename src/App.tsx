@@ -41,7 +41,7 @@ import { ForkRenderer } from '@/rendering/forkRenderer';
 import { EntropyHalo } from '@/rendering/entropyHalo';
 import { OracleChainRenderer, type CausalChainLink } from '@/rendering/oracleChains';
 import { interpolateIDW } from '@/rendering/idwInterpolation';
-import type { InterpGrid } from '@/rendering/idwInterpolation';
+import type { InterpGrid, InterpPoint } from '@/rendering/idwInterpolation';
 import { extractPointsFromResult } from '@/rendering/toolResultParser';
 import { showInterpSurface, clearInterpSurface, getViewDependentResolution, getCurrentGrid, probeGridValue, legendGradientCSS } from '@/rendering/surfaceRenderer';
 import { COLORMAPS } from '@/components/kaggle/shared';
@@ -79,6 +79,8 @@ import SpatialSketching from '@/components/scenarios/SpatialSketching';
 import PerformanceMonitor from '@/components/PerformanceMonitor';
 import { IssTravelView } from '@/components/IssTravelView';
 import { FlightTravelView } from '@/components/FlightTravelView';
+import { classifyAircraft, getAircraftGltf, type AircraftClass } from '@/rendering/aircraftHangar';
+import { buildFlight4DPath, sampleFlight4DPath, flight4DConfidence, flight4DOffsetLabel, FLIGHT_4D_HORIZON_S, type Flight4DWaypoint } from '@/rendering/flight4D';
 import { CommandPalette } from '@/components/CommandPalette';
 import { AnalyticsWorkbench } from '@/components/AnalyticsWorkbench';
 import type { StudyAreaDrawType } from '@/components/ToolDialog';
@@ -1086,11 +1088,13 @@ export default function App() {
   const [toolSurfaceLegend, setToolSurfaceLegend] = useState<{
     label: string; unit?: string;
     valueMin: number; valueMax: number; valueMean: number; valueStd: number; valueMedian: number; finiteCellCount: number;
+    interpolated?: boolean; sampleCount?: number;
   } | null>(null);
   /** Raster value probe: the heatmap cell under the cursor while hovering the
    *  tool-result surface on the 3D globe (QGIS identify-tool behaviour). */
   const [toolSurfaceProbe, setToolSurfaceProbe] = useState<{
     x: number; y: number; value: number; lat: number; lon: number;
+    measuredValue?: number; measuredDistM?: number;
   } | null>(null);
   /** Active color scheme for the tool-result heatmap surface + legend. */
   const [toolSurfaceScheme, setToolSurfaceScheme] = useState('default');
@@ -1109,6 +1113,10 @@ export default function App() {
   } | null>(null);
   /** The rendered grid for re-coloring on scheme change. */
   const toolSurfaceGridRef = useRef<InterpGrid | null>(null);
+  /** The measured pixels behind an IDW-interpolated surface — the probe shows
+   *  the nearest real value so interpolated readings never masquerade as
+   *  measurements. Empty when the surface is not interpolated. */
+  const toolSurfaceSamplesRef = useRef<InterpPoint[]>([]);
   /** Polyon mask used when the surface was rendered (re-applied on recolor). */
   const toolSurfacePolygonRef = useRef<Array<Array<[number, number]>> | undefined>(undefined);
   useEffect(() => { toolSurfaceLegendRef.current = toolSurfaceLegend; }, [toolSurfaceLegend]);
@@ -1162,10 +1170,31 @@ export default function App() {
   const flightTravelFovRef = useRef(Cesium.Math.toRadians(65));
   const flightTravelPreRenderRef = useRef<(() => void) | null>(null);
   const flightTravelHudIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const flightTravelScreenIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const flightTravelRefreshIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const flightTravelDragRef = useRef<{ x: number; y: number; active: boolean }>({ x: 0, y: 0, active: false });
   const flightTravelDragCleanupRef = useRef<(() => void) | null>(null);
   const flightTravelMarkerRef = useRef<Cesium.Entity | null>(null);
+  const flightTravelModelClassRef = useRef<AircraftClass>('airliner');
+  const flightTravelModeRef = useRef<'external' | 'cockpit'>('external');
+  const flightTravel4DPathRef = useRef<Flight4DWaypoint[]>([]);
+  const flightTravel4DOffsetRef = useRef(0);              // seconds into the future (0 = live)
+  const flightTravel4DPlayingRef = useRef(false);
+  const flightTravel4DSpeedRef = useRef(60);              // playback speed multiplier
+  const flightTravel4DLastTickRef = useRef(0);
+  const flightTravel4DPathEntityRef = useRef<Cesium.Entity | null>(null);
+  const flightTravel4DRingsRef = useRef<Cesium.Entity[]>([]);
+  const flightTravel4DGhostEntityRef = useRef<Cesium.Entity | null>(null);
+  const flightTravelSmoothPosRef = useRef<Cesium.Cartesian3 | null>(null);   // chase-cam low-pass filter
+  const flightTravelSmoothHdgRef = useRef(0);
+  const flightTravelLastFrameRef = useRef(0);
+  const flightTravelScreenRef = useRef({ x: 0, y: 0, visible: false, rangeKm: 0 });
+  const [flightTravelScreen, setFlightTravelScreen] = useState({ x: 0, y: 0, visible: false, rangeKm: 0 });
+  const [flightTravelMode, setFlightTravelMode] = useState<'external' | 'cockpit'>('external');
+  const [flightTravel4DActive, setFlightTravel4DActive] = useState(false);
+  const [flightTravel4DOffset, setFlightTravel4DOffset] = useState(0);
+  const [flightTravel4DPlaying, setFlightTravel4DPlaying] = useState(false);
+  const [flightTravel4DSpeed, setFlightTravel4DSpeed] = useState(60);
   const flightTravelSavedViewRef = useRef<{ pos: Cesium.Cartesian3; hdg: number; pitch: number; roll: number } | null>(null);
   const flightTravelNearbyEntitiesRef = useRef<Map<string, Cesium.Entity>>(new Map());
   const flightTravelHiddenEntityRef = useRef<Cesium.Entity | null>(null);
@@ -1851,23 +1880,54 @@ export default function App() {
         viewer.entities.remove(toolResultEntityRef.current);
         toolResultEntityRef.current = null;
       }
-      const n = grid.nLat * grid.nLon;
-      const data = new Float32Array(n);
-      for (let i = 0; i < n; i++) {
-        // Keep NaN as-is so cells outside a drawn polygon study area render
-        // transparent (the IDW overlay hugs the shape, not its bounding box).
-        const v = grid.values[i];
-        data[i] = typeof v === 'number' && Number.isFinite(v) ? v : NaN;
+      // Measured pixels become the IDW sample points — nothing added, nothing
+      // dropped: every valid cell the scene returns is a sample (40 → 40,
+      // 80 → 80). The IDW surface then fills the ENTIRE study area (classic
+      // ArcGIS/QGIS behaviour, same as the Tool Workbench), even from one or
+      // two samples. Honesty lives in the labels instead of holes: the legend
+      // states the sample count, and the probe always shows the nearest
+      // measured value + distance, so an estimate is never sold as data.
+      const dCellLat = (grid.latMax - grid.latMin) / grid.nLat;
+      const dCellLon = (grid.lonMax - grid.lonMin) / grid.nLon;
+      const samples: InterpPoint[] = [];
+      let realMin = Infinity;
+      let realMax = -Infinity;
+      for (let row = 0; row < grid.nLat; row++) {
+        for (let col = 0; col < grid.nLon; col++) {
+          const v = grid.values[row * grid.nLon + col];
+          if (typeof v === 'number' && Number.isFinite(v)) {
+            samples.push({
+              lat: grid.latMin + (row + 0.5) * dCellLat,
+              lon: grid.lonMin + (col + 0.5) * dCellLon,
+              value: v,
+            });
+            if (v < realMin) realMin = v;
+            if (v > realMax) realMax = v;
+          }
+        }
       }
-      const interpGrid: InterpGrid = {
-        data,
-        variance: new Float32Array(n),
-        width: grid.nLon,
-        height: grid.nLat,
-        latMin: grid.latMin, latMax: grid.latMax, lonMin: grid.lonMin, lonMax: grid.lonMax,
-        valueMin: grid.valueMin, valueMax: grid.valueMax,
-      };
+      if (samples.length === 0) {
+        // finiteCellCount said >0 but nothing is finite — same honest blank.
+        setToolSurfaceLegend(null);
+        setToolSurfaceProbe(null);
+        return;
+      }
+      const camAlt = viewer.camera.positionCartographic.height;
+      const { width, height } = getViewDependentResolution(camAlt, 200);
+      const interpGrid: InterpGrid = interpolateIDW(
+        samples,
+        { latMin: grid.latMin, latMax: grid.latMax, lonMin: grid.lonMin, lonMax: grid.lonMax },
+        width, height, 2, Math.min(12, samples.length),
+      );
+      // Map colours to the MEASURED pixel range, not the (slightly
+      // attenuated) interpolated one — the legend stays truthful.
+      if (Number.isFinite(realMin) && Number.isFinite(realMax) && realMax > realMin) {
+        interpGrid.valueMin = realMin;
+        interpGrid.valueMax = realMax;
+      }
+      const interpolated = true;
       toolSurfaceGridRef.current = interpGrid;
+      toolSurfaceSamplesRef.current = interpolated ? samples : [];
       toolSurfacePolygonRef.current = activeStudyAreaPolygon ?? undefined;
       const schemeColors = schemeToColorStops(toolSurfaceScheme);
       showInterpSurface(viewer, interpGrid, schemeColors, 0.6, false, activeStudyAreaPolygon ?? undefined);
@@ -1880,6 +1940,7 @@ export default function App() {
         valueStd: grid.valueStd ?? Number.NaN,
         valueMedian: grid.valueMedian ?? Number.NaN,
         finiteCellCount: grid.finiteCellCount ?? 0,
+        interpolated, sampleCount: samples.length,
       });
       setToolSurfaceProbe(null);
       return;
@@ -1914,6 +1975,7 @@ export default function App() {
     setToolSurfaceProbe(null);
     setToolSurfaceScheme('default');
     toolSurfaceGridRef.current = null;
+    toolSurfaceSamplesRef.current = [];
     toolSurfacePolygonRef.current = undefined;
     const viewer = viewerRef.current;
     if (!viewer) return;
@@ -2337,7 +2399,24 @@ export default function App() {
       const lat = Cesium.Math.toDegrees(carto.latitude);
       const hit = probeGridValue(lat, lon);
       if (!hit) { setToolSurfaceProbe(null); return; }
-      setToolSurfaceProbe({ x: move.endPosition.x, y: move.endPosition.y, value: hit.value, lat: hit.lat, lon: hit.lon });
+      // For IDW-interpolated surfaces also surface the nearest MEASURED pixel
+      // (value + distance) so the probe never presents an estimate as data.
+      let measuredValue: number | undefined;
+      let measuredDistM: number | undefined;
+      const samples = toolSurfaceSamplesRef.current;
+      if (toolSurfaceLegendRef.current?.interpolated && samples.length > 0) {
+        const cosLat = Math.cos(lat * Math.PI / 180);
+        let bestD = Infinity;
+        let bestV = NaN;
+        for (const s of samples) {
+          const dx = (s.lon - lon) * cosLat * 111320;
+          const dy = (s.lat - lat) * 111320;
+          const d = Math.hypot(dx, dy);
+          if (d < bestD) { bestD = d; bestV = s.value; }
+        }
+        if (Number.isFinite(bestV)) { measuredValue = bestV; measuredDistM = bestD; }
+      }
+      setToolSurfaceProbe({ x: move.endPosition.x, y: move.endPosition.y, value: hit.value, lat: hit.lat, lon: hit.lon, measuredValue, measuredDistM });
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
     handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
       // The viewer may have been destroyed while the interaction was queued.
@@ -4550,14 +4629,24 @@ export default function App() {
   const SAT_TRAVEL_FOV_MAX = Cesium.Math.toRadians(90);
 
   // Flight Travel View — chase-cam constants (distinct from satellite nadir view)
-  const FLIGHT_TRAVEL_CHASE_DIST = 1800;                          // metres behind the aircraft
-  const FLIGHT_TRAVEL_CHASE_HEIGHT = 480;                         // metres above the aircraft
-  const FLIGHT_TRAVEL_PITCH = Cesium.Math.toRadians(-14);        // default chase look-down (rad)
+  const FLIGHT_TRAVEL_CHASE_DIST = 260;                           // metres behind the aircraft — close drone chase
+  const FLIGHT_TRAVEL_CHASE_HEIGHT = 80;                          // metres above the aircraft
+  const FLIGHT_TRAVEL_PITCH = Cesium.Math.toRadians(-16);        // default chase look-down (rad)
   const FLIGHT_TRAVEL_PITCH_MIN = Cesium.Math.toRadians(-80);    // can look back/down
   const FLIGHT_TRAVEL_PITCH_MAX = Cesium.Math.toRadians(35);     // can look up
-  const FLIGHT_TRAVEL_FOV = Cesium.Math.toRadians(65);               // default field of view (rad)
+  const FLIGHT_TRAVEL_FOV = Cesium.Math.toRadians(58);               // cinematic field of view (rad)
   const FLIGHT_TRAVEL_FOV_MIN = Cesium.Math.toRadians(25);
   const FLIGHT_TRAVEL_FOV_MAX = Cesium.Math.toRadians(90);
+  // EXTERNAL 3D model — big game-style airframe that fills the drone view
+  const FLIGHT_TRAVEL_MODEL_SCALE = 20;                           // airliner (~200 m visual)
+  const FLIGHT_TRAVEL_MODEL_SILHOUETTE = Cesium.Color.fromCssColorString('#7dd3fc');
+  // COCKPIT mode — camera sits at the flight-deck windows looking forward
+  const FLIGHT_TRAVEL_COCKPIT_PITCH = Cesium.Math.toRadians(8);  // slight nose-up instrument view (rad)
+  const FLIGHT_TRAVEL_COCKPIT_FOV = Cesium.Math.toRadians(72);
+  const FLIGHT_TRAVEL_COCKPIT_FWD = 20;                          // metres forward of fuselage centre (flight deck)
+  const FLIGHT_TRAVEL_COCKPIT_UP = 14;                           // metres above fuselage centreline
+  const FLIGHT_TRAVEL_COCKPIT_PITCH_MIN = Cesium.Math.toRadians(-55);
+  const FLIGHT_TRAVEL_COCKPIT_PITCH_MAX = Cesium.Math.toRadians(45);
 
 
   // Per-frame: glue the camera to the live satellite position and orient it from yaw/pitch.
@@ -4850,29 +4939,148 @@ export default function App() {
     v.camera.setView({ destination: chasePos, orientation: { heading: lookHeading, pitch: pitchRad, roll: 0 } });
   }
 
+  // ── COCKPIT cam: seated at the flight deck, looking forward along the nose ──
+  function flightCockpitCam(v: Cesium.Viewer, pos: Cesium.Cartesian3, acHeadingDeg: number, yawRad: number, pitchRad: number) {
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(pos);
+    const eAxis = new Cesium.Cartesian3(enu[0], enu[4], enu[8]);
+    const nAxis = new Cesium.Cartesian3(enu[1], enu[5], enu[9]);
+    const uAxis = new Cesium.Cartesian3(enu[2], enu[6], enu[10]);
+    const hRad = Cesium.Math.toRadians(acHeadingDeg);
+    const fwd = new Cesium.Cartesian3();
+    Cesium.Cartesian3.multiplyByScalar(eAxis, Math.sin(hRad), fwd);
+    Cesium.Cartesian3.add(fwd, Cesium.Cartesian3.multiplyByScalar(nAxis, Math.cos(hRad), new Cesium.Cartesian3()), fwd);
+    // eye position = aircraft + forward*FWD + up*UP (flight-deck windows)
+    const eye = new Cesium.Cartesian3();
+    Cesium.Cartesian3.multiplyByScalar(fwd, FLIGHT_TRAVEL_COCKPIT_FWD, eye);
+    Cesium.Cartesian3.add(pos, eye, eye);
+    Cesium.Cartesian3.add(eye, Cesium.Cartesian3.multiplyByScalar(uAxis, FLIGHT_TRAVEL_COCKPIT_UP, new Cesium.Cartesian3()), eye);
+    const frustum = v.camera.frustum as Cesium.PerspectiveFrustum;
+    frustum.fov = FLIGHT_TRAVEL_COCKPIT_FOV;
+    v.camera.setView({
+      destination: eye,
+      orientation: { heading: hRad + yawRad, pitch: pitchRad, roll: 0 },
+    });
+  }
+
+  /** Project the live sim state forward by the current 4D scrub offset and
+   *  return the (possibly future) position the camera/aircraft should use. */
+  function flightTravelProjectedState(): { lat: number; lon: number; alt: number; heading: number; velocity: number; verticalRate: number } | null {
+    const sim = flightTravelSimRef.current;
+    if (!sim) return null;
+    const offset = flightTravel4DOffsetRef.current;
+    if (offset <= 0 || flightTravel4DPathRef.current.length === 0) return null;
+    const wp = sampleFlight4DPath(flightTravel4DPathRef.current, offset);
+    if (!wp) return null;
+    return { lat: wp.lat, lon: wp.lon, alt: wp.alt, heading: sim.heading, velocity: sim.velocity, verticalRate: sim.verticalRate };
+  }
+
   function updateFlightTravelCamera(v: Cesium.Viewer) {
     const sim = flightTravelSimRef.current;
     if (!sim) return;
-    const now = Date.now();
-    const dt = (now - sim.lastUpdate) / 1000;
-    if (dt > 0) {
-      if (sim.velocity > 0) {
-        const dist = sim.velocity * dt;
-        const rad = (sim.heading * Math.PI) / 180;
-        const dLat = (dist * Math.cos(rad)) / 111320;
-        const cosLat = Math.cos((sim.lat * Math.PI) / 180);
-        if (Math.abs(cosLat) >= 0.01) {
-          const dLon = (dist * Math.sin(rad)) / (111320 * cosLat);
-          sim.lat += dLat;
-          sim.lon += dLon;
-          if (sim.lon > 180) sim.lon -= 360; else if (sim.lon < -180) sim.lon += 360;
-        }
+
+    // ── 4D playback ticker ──
+    if (flightTravel4DPlayingRef.current && flightTravel4DOffsetRef.current < FLIGHT_4D_HORIZON_S) {
+      const now = Date.now();
+      const dt = (now - flightTravel4DLastTickRef.current) / 1000;
+      flightTravel4DLastTickRef.current = now;
+      if (dt > 0) {
+        const next = Math.min(FLIGHT_4D_HORIZON_S, flightTravel4DOffsetRef.current + dt * flightTravel4DSpeedRef.current);
+        flightTravel4DOffsetRef.current = next;
+        setFlightTravel4DOffset(next);
+        if (next >= FLIGHT_4D_HORIZON_S) { flightTravel4DPlayingRef.current = false; setFlightTravel4DPlaying(false); }
       }
-      sim.alt = Math.max(0, sim.alt + sim.verticalRate * dt);
-      sim.lastUpdate = now;
     }
-    const pos = Cesium.Cartesian3.fromDegrees(sim.lon, sim.lat, sim.alt);
-    flightChaseCam(v, pos, sim.heading, flightTravelYawRef.current, flightTravelPitchRef.current);
+
+    // ── live dead-reckoning (only advances while at "now") ──
+    if (flightTravel4DOffsetRef.current <= 0) {
+      const now = Date.now();
+      const dt = (now - sim.lastUpdate) / 1000;
+      if (dt > 0) {
+        if (sim.velocity > 0) {
+          const dist = sim.velocity * dt;
+          const rad = (sim.heading * Math.PI) / 180;
+          const dLat = (dist * Math.cos(rad)) / 111320;
+          const cosLat = Math.cos((sim.lat * Math.PI) / 180);
+          if (Math.abs(cosLat) >= 0.01) {
+            const dLon = (dist * Math.sin(rad)) / (111320 * cosLat);
+            sim.lat += dLat;
+            sim.lon += dLon;
+            if (sim.lon > 180) sim.lon -= 360; else if (sim.lon < -180) sim.lon += 360;
+          }
+        }
+        sim.alt = Math.max(0, sim.alt + sim.verticalRate * dt);
+        sim.lastUpdate = now;
+      }
+    }
+
+    // ── projected state (4D scrub) or live state ──
+    const proj = flightTravelProjectedState();
+    const lat = proj ? proj.lat : sim.lat;
+    const lon = proj ? proj.lon : sim.lon;
+    const alt = proj ? proj.alt : sim.alt;
+    const pos = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+
+    // ── exponential low-pass smoothing (frame-rate independent) ──
+    const nowMs = Date.now();
+    const frameDt = flightTravelLastFrameRef.current ? Math.min(0.1, (nowMs - flightTravelLastFrameRef.current) / 1000) : 0.016;
+    flightTravelLastFrameRef.current = nowMs;
+    const SMOOTH_POS = 1 - Math.exp(-frameDt * 3.2);   // position: fast settle, no rubber-band
+    const SMOOTH_HDG = 1 - Math.exp(-frameDt * 2.2);  // heading: gentle turn-following
+    if (!flightTravelSmoothPosRef.current) flightTravelSmoothPosRef.current = pos.clone();
+    else Cesium.Cartesian3.lerp(flightTravelSmoothPosRef.current, pos, SMOOTH_POS, flightTravelSmoothPosRef.current);
+    // shortest-arc heading smoothing
+    let dh = sim.heading - flightTravelSmoothHdgRef.current;
+    while (dh > 180) dh -= 360;
+    while (dh < -180) dh += 360;
+    flightTravelSmoothHdgRef.current = ((flightTravelSmoothHdgRef.current + dh * SMOOTH_HDG) % 360 + 360) % 360;
+    const smoothHeading = flightTravelSmoothHdgRef.current;
+    const camPos = flightTravelSmoothPosRef.current;
+
+    // ── 3D airframe marker (the actual aircraft) ──
+    const marker = flightTravelMarkerRef.current;
+    if (marker) {
+      if (marker.position instanceof Cesium.ConstantPositionProperty) marker.position.setValue(pos);
+      const hpr = new Cesium.HeadingPitchRoll(
+        Cesium.Math.toRadians(sim.heading),
+        proj ? 0 : Math.max(-12, Math.min(12, Cesium.Math.toDegrees(Math.atan2(sim.verticalRate, Math.max(1, sim.velocity))))),
+        0,
+      );
+      if (marker.orientation) {
+        (marker.orientation as unknown as Cesium.ConstantProperty).setValue(
+          Cesium.Transforms.headingPitchRollQuaternion(pos, hpr),
+        );
+      }
+    }
+
+    // ── screen projection for the external target brackets ──
+    if (flightTravelModeRef.current === 'external') {
+      try {
+        const wc = Cesium.SceneTransforms.worldToWindowCoordinates(v.scene, pos);
+        if (wc) {
+          const camDist = Cesium.Cartesian3.distance(v.camera.positionWC, pos);
+          flightTravelScreenRef.current = {
+            x: wc.x, y: wc.y,
+            visible: camDist < 400000,
+            rangeKm: +(camDist / 1000).toFixed(1),
+          };
+        } else {
+          flightTravelScreenRef.current = { ...flightTravelScreenRef.current, visible: false };
+        }
+      } catch { flightTravelScreenRef.current = { ...flightTravelScreenRef.current, visible: false }; }
+    }
+
+    // ── camera per mode (smoothed chase in external, rigid cockpit eye) ──
+    if (flightTravelModeRef.current === 'cockpit') {
+      flightCockpitCam(v, pos, sim.heading, flightTravelYawRef.current, flightTravelPitchRef.current);
+    } else {
+      flightChaseCam(v, camPos, smoothHeading, flightTravelYawRef.current, flightTravelPitchRef.current);
+    }
+  }
+
+  /** Throttled push of the projected target-box state to the external HUD. */
+  function updateFlightTravelScreen() {
+    if (!flightTravelRef.current || flightTravelModeRef.current !== 'external') return;
+    setFlightTravelScreen({ ...flightTravelScreenRef.current });
   }
 
   function updateFlightTravelHud(_v: Cesium.Viewer) {
@@ -4901,6 +5109,7 @@ export default function App() {
       case 'ArrowUp': flightTravelPitchRef.current = Math.min(FLIGHT_TRAVEL_PITCH_MAX, flightTravelPitchRef.current + STEP); e.preventDefault(); break;
       case 'ArrowDown': flightTravelPitchRef.current = Math.max(FLIGHT_TRAVEL_PITCH_MIN, flightTravelPitchRef.current - STEP); e.preventDefault(); break;
       case 'r': case 'R': flightTravelPitchRef.current = FLIGHT_TRAVEL_PITCH; flightTravelYawRef.current = 0; break;
+      case 'c': case 'C': toggleFlightTravelMode(); break;
       case '+': case '=': flightTravelFovRef.current = Math.max(FLIGHT_TRAVEL_FOV_MIN, flightTravelFovRef.current - FOV); break;
       case '-': case '_': flightTravelFovRef.current = Math.min(FLIGHT_TRAVEL_FOV_MAX, flightTravelFovRef.current + FOV); break;
       case 'Escape': { const v = viewerRef.current; if (v) exitFlightTravel(v); break; }
@@ -4946,18 +5155,56 @@ export default function App() {
     flightTravelPitchRef.current = FLIGHT_TRAVEL_PITCH;
     flightTravelFovRef.current = FLIGHT_TRAVEL_FOV;
 
+    // ── EXTERNAL mode is the default boarding view ──
+    flightTravelModeRef.current = 'external';
+    setFlightTravelMode('external');
+    flightTravel4DOffsetRef.current = 0;
+    flightTravel4DPlayingRef.current = false;
+    flightTravel4DPathRef.current = [];
+    setFlightTravel4DOffset(0);
+    setFlightTravel4DPlaying(false);
+    setFlightTravel4DActive(false);
+    setFlightTravel4DSpeed(60);
+
     const pos = Cesium.Cartesian3.fromDegrees(sim.lon, sim.lat, sim.alt);
     flightChaseCam(v, pos, sim.heading, 0, FLIGHT_TRAVEL_PITCH);
 
     const ctrl = v.scene.screenSpaceCameraController;
     ctrl.enableRotate = false; ctrl.enableZoom = false; ctrl.enableTilt = false; ctrl.enableTranslate = false;
 
+    // ── real 3D airframe (hangar glTF, class-picked from the callsign) ──
+    const cls = classifyAircraft(name, flightTravelCallsignRef.current, { callsign: flightTravelCallsignRef.current });
+    flightTravelModelClassRef.current = cls;
+    const hpr = new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(sim.heading), 0, 0);
+    const marker = v.entities.add({
+      position: pos,
+      orientation: Cesium.Transforms.headingPitchRollQuaternion(pos, hpr),
+      model: {
+        uri: getAircraftGltf(cls),
+        scale: cls === 'airliner' ? FLIGHT_TRAVEL_MODEL_SCALE : cls === 'regional' ? FLIGHT_TRAVEL_MODEL_SCALE * 0.8 : FLIGHT_TRAVEL_MODEL_SCALE * 0.6,
+        silhouetteColor: FLIGHT_TRAVEL_MODEL_SILHOUETTE,
+        silhouetteSize: 1.2,
+      },
+      // billboard fallback — subtle at close range (the 3D model owns the view),
+      // becomes the visible aircraft marker when the camera is far away
+      billboard: {
+        image: getPlaneIcon(sim.heading, '#7dd3fc'),
+        width: 28, height: 28,
+        scaleByDistance: new Cesium.NearFarScalar(1200, 0.02, 20000, 0.15),
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+      },
+      properties: new Cesium.ConstantProperty({ layer: 'flight_travel_marker', icao24: icao24 || '' }),
+    });
+    flightTravelMarkerRef.current = marker;
+
+    setupFlight4DScene(v, sim);
     flightTravelPreRenderRef.current = v.scene.preRender.addEventListener(() => updateFlightTravelCamera(v));
     flightTravelHudIntRef.current = setInterval(() => updateFlightTravelHud(v), 200);
+    flightTravelScreenIntRef.current = setInterval(updateFlightTravelScreen, 70);
     flightTravelRefreshIntRef.current = setInterval(() => refreshFlightTravelPosition(), 30000);
     setupFlightTravelDrag(v);
     window.addEventListener('keydown', flightTravelKeyHandler);
-    showNotification('Boarded ' + name + ' — Flight Travel View (chase cam)', 'success');
+    showNotification('Boarded ' + name + ' — External 3D View (press C for Cockpit)', 'success');
 
     const qIcao = (icao24 || '').toLowerCase();
     if (qIcao) {
@@ -4970,6 +5217,84 @@ export default function App() {
         }
       }
     }
+  }
+
+  // ── 4D scene: predicted path polyline + uncertainty rings + predicted ghost ──
+  function setupFlight4DScene(v: Cesium.Viewer, sim: { lat: number; lon: number; alt: number; velocity: number; heading: number; verticalRate: number }) {
+    // Projected path from the live state — regenerated whenever offsets reset
+    flightTravel4DPathRef.current = buildFlight4DPath({ ...sim });
+
+
+    const pathEntity = v.entities.add({
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => {
+          return flightTravel4DPathRef.current.map(wp => wp.position);
+        }, false) as unknown as Cesium.PositionProperty,
+        width: 2,
+        material: new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString('#fbbf24').withAlpha(0.55),
+          dashLength: 14,
+        }),
+        show: new Cesium.CallbackProperty(() => flightTravel4DOffsetRef.current > 0, false) as unknown as boolean,
+      },
+    });
+    flightTravel4DPathEntityRef.current = pathEntity;
+
+    // Uncertainty rings at 1h/2h/3h/4h — translucent ellipsoids on the path
+    const ringHours = [1, 2, 3, 4];
+    const rings: Cesium.Entity[] = [];
+    for (const h of ringHours) {
+      const tSec = h * 3600;
+      const ring = v.entities.add({
+        position: new Cesium.CallbackProperty(() => {
+          const wp = sampleFlight4DPath(flightTravel4DPathRef.current, tSec);
+          return wp ? wp.position : Cesium.Cartesian3.ZERO;
+        }, false) as unknown as Cesium.PositionProperty,
+        ellipse: {
+          semiMajorAxis: new Cesium.CallbackProperty(() => {
+            const wp = sampleFlight4DPath(flightTravel4DPathRef.current, tSec);
+            return wp ? wp.uncertaintyM : 200;
+          }, false) as unknown as number,
+          semiMinorAxis: new Cesium.CallbackProperty(() => {
+            const wp = sampleFlight4DPath(flightTravel4DPathRef.current, tSec);
+            return wp ? wp.uncertaintyM : 200;
+          }, false) as unknown as number,
+          material: Cesium.Color.fromCssColorString('#fbbf24').withAlpha(0.07),
+          outline: true,
+          outlineColor: Cesium.Color.fromCssColorString('#fbbf24').withAlpha(0.28),
+          outlineWidth: 1.5,
+          heightReference: Cesium.HeightReference.NONE,
+          height: new Cesium.CallbackProperty(() => {
+            const wp = sampleFlight4DPath(flightTravel4DPathRef.current, tSec);
+            return wp ? wp.alt : 0;
+          }, false) as unknown as number,
+        },
+      });
+      rings.push(ring);
+    }
+    flightTravel4DRingsRef.current = rings;
+
+    // Predicted ghost — the aircraft's future self, visible while scrubbing
+    const ghost = v.entities.add({
+      position: new Cesium.CallbackProperty(() => {
+        const wp = sampleFlight4DPath(flightTravel4DPathRef.current, flightTravel4DOffsetRef.current);
+        return wp ? wp.position : Cesium.Cartesian3.ZERO;
+      }, false) as unknown as Cesium.PositionProperty,
+      billboard: {
+        image: getPlaneIcon(sim.heading, '#fbbf24'),
+        width: 24, height: 24,
+      },
+      label: {
+        text: new Cesium.CallbackProperty(() => 'PRED ' + flight4DOffsetLabel(flightTravel4DOffsetRef.current), false) as unknown as string,
+        font: '10px "JetBrains Mono", monospace',
+        fillColor: Cesium.Color.fromCssColorString('#fbbf24'),
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString('rgba(8,20,30,0.75)'),
+        pixelOffset: new Cesium.Cartesian2(0, -18),
+      },
+      show: new Cesium.CallbackProperty(() => flightTravel4DOffsetRef.current > 0 && flightTravelModeRef.current === 'external', false) as unknown as boolean,
+    });
+    flightTravel4DGhostEntityRef.current = ghost;
   }
 
   function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -5083,8 +5408,23 @@ export default function App() {
     flightTravelNameRef.current = '';
     flightTravelIcaoRef.current = '';
     flightTravelCallsignRef.current = '';
+    flightTravel4DOffsetRef.current = 0;
+    flightTravel4DPlayingRef.current = false;
+    flightTravel4DPathRef.current = [];
+    setFlightTravelMode('external');
+    setFlightTravel4DActive(false);
+    setFlightTravel4DOffset(0);
+    setFlightTravel4DPlaying(false);
+    if (flightTravelMarkerRef.current) { try { v.entities.remove(flightTravelMarkerRef.current); } catch { /* ignore */ } flightTravelMarkerRef.current = null; }
+    if (flightTravel4DPathEntityRef.current) { try { v.entities.remove(flightTravel4DPathEntityRef.current); } catch { /* ignore */ } flightTravel4DPathEntityRef.current = null; }
+    for (const ring of flightTravel4DRingsRef.current) { try { v.entities.remove(ring); } catch { /* ignore */ } }
+    flightTravel4DRingsRef.current = [];
+    if (flightTravel4DGhostEntityRef.current) { try { v.entities.remove(flightTravel4DGhostEntityRef.current); } catch { /* ignore */ } flightTravel4DGhostEntityRef.current = null; }
     if (flightTravelPreRenderRef.current) { flightTravelPreRenderRef.current(); flightTravelPreRenderRef.current = null; }
     if (flightTravelHudIntRef.current) { clearInterval(flightTravelHudIntRef.current); flightTravelHudIntRef.current = null; }
+    if (flightTravelScreenIntRef.current) { clearInterval(flightTravelScreenIntRef.current); flightTravelScreenIntRef.current = null; }
+    flightTravelSmoothPosRef.current = null;
+    flightTravelLastFrameRef.current = 0;
     if (flightTravelRefreshIntRef.current) { clearInterval(flightTravelRefreshIntRef.current); flightTravelRefreshIntRef.current = null; }
     if (flightTravelDragCleanupRef.current) { flightTravelDragCleanupRef.current(); flightTravelDragCleanupRef.current = null; }
     window.removeEventListener('keydown', flightTravelKeyHandler);
@@ -5124,20 +5464,70 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── EXTERNAL ↔ COCKPIT mode switching ──
+  function toggleFlightTravelMode() {
+    if (!flightTravelRef.current) return;
+    const v = viewerRef.current;
+    if (!v) return;
+    const next: 'external' | 'cockpit' = flightTravelModeRef.current === 'external' ? 'cockpit' : 'external';
+    flightTravelModeRef.current = next;
+    setFlightTravelMode(next);
+    if (next === 'cockpit') {
+      // Flight-deck instrument view — clamp pitch to a sensible scan range
+      flightTravelPitchRef.current = FLIGHT_TRAVEL_COCKPIT_PITCH;
+      flightTravelYawRef.current = 0;
+      showNotification('Cockpit View — press C or click the HUD to exit', 'info');
+    } else {
+      flightTravelPitchRef.current = FLIGHT_TRAVEL_PITCH;
+      flightTravelYawRef.current = 0;
+      (v.camera.frustum as Cesium.PerspectiveFrustum).fov = flightTravelFovRef.current;
+      showNotification('External 3D View', 'info');
+    }
+  }
+
+  // ── 4D time-projection controls (exposed to the HUD) ──
+  function flight4DScrub(tSec: number) {
+    flightTravel4DOffsetRef.current = Math.max(0, Math.min(FLIGHT_4D_HORIZON_S, tSec));
+    flightTravel4DLastTickRef.current = Date.now();
+    setFlightTravel4DOffset(flightTravel4DOffsetRef.current);
+  }
+  function flight4DSetPlaying(playing: boolean) {
+    flightTravel4DPlayingRef.current = playing;
+    flightTravel4DLastTickRef.current = Date.now();
+    setFlightTravel4DPlaying(playing);
+    if (playing && flightTravel4DOffsetRef.current >= FLIGHT_4D_HORIZON_S) flight4DScrub(0);
+    if (playing) setFlightTravel4DActive(true);
+  }
+  function flight4DSetSpeed(speed: number) {
+    flightTravel4DSpeedRef.current = speed;
+    setFlightTravel4DSpeed(speed);
+  }
+  function flight4DSetActive(active: boolean) {
+    if (!active) {
+      // snap back to live ("now") when 4D is dismissed
+      flight4DScrub(0);
+      flight4DSetPlaying(false);
+    }
+    setFlightTravel4DActive(active);
+  }
+
 
   const travelLookFlight = useCallback((action: 'left' | 'right' | 'up' | 'down' | 'back' | 'default' | 'zoomin' | 'zoomout' | 'chase' | 'cockpit' | 'topdown') => {
     const STEP = Cesium.Math.toRadians(8);
     const FOV = Cesium.Math.toRadians(6);
+    const cockpit = flightTravelModeRef.current === 'cockpit';
+    const pitchMin = cockpit ? FLIGHT_TRAVEL_COCKPIT_PITCH_MIN : FLIGHT_TRAVEL_PITCH_MIN;
+    const pitchMax = cockpit ? FLIGHT_TRAVEL_COCKPIT_PITCH_MAX : FLIGHT_TRAVEL_PITCH_MAX;
     switch (action) {
       case 'left': flightTravelYawRef.current -= STEP; break;
       case 'right': flightTravelYawRef.current += STEP; break;
-      case 'up': flightTravelPitchRef.current = Math.min(FLIGHT_TRAVEL_PITCH_MAX, flightTravelPitchRef.current + STEP); break;
-      case 'down': flightTravelPitchRef.current = Math.max(FLIGHT_TRAVEL_PITCH_MIN, flightTravelPitchRef.current - STEP); break;
+      case 'up': flightTravelPitchRef.current = Math.min(pitchMax, flightTravelPitchRef.current + STEP); break;
+      case 'down': flightTravelPitchRef.current = Math.max(pitchMin, flightTravelPitchRef.current - STEP); break;
       case 'back': flightTravelYawRef.current += Math.PI; break;
-      case 'default': flightTravelPitchRef.current = FLIGHT_TRAVEL_PITCH; flightTravelYawRef.current = 0; break;
-      case 'chase': flightTravelPitchRef.current = FLIGHT_TRAVEL_PITCH; flightTravelYawRef.current = 0; break;
-      case 'cockpit': flightTravelPitchRef.current = Cesium.Math.toRadians(10); flightTravelYawRef.current = 0; break;
-      case 'topdown': flightTravelPitchRef.current = FLIGHT_TRAVEL_PITCH_MIN; flightTravelYawRef.current = 0; break;
+      case 'default': flightTravelPitchRef.current = cockpit ? FLIGHT_TRAVEL_COCKPIT_PITCH : FLIGHT_TRAVEL_PITCH; flightTravelYawRef.current = 0; break;
+      case 'chase': toggleFlightTravelMode(); break;
+      case 'cockpit': toggleFlightTravelMode(); break;
+      case 'topdown': flightTravelPitchRef.current = pitchMin; flightTravelYawRef.current = 0; break;
       case 'zoomin': flightTravelFovRef.current = Math.max(FLIGHT_TRAVEL_FOV_MIN, flightTravelFovRef.current - FOV); break;
       case 'zoomout': flightTravelFovRef.current = Math.min(FLIGHT_TRAVEL_FOV_MAX, flightTravelFovRef.current + FOV); break;
     }
@@ -10430,6 +10820,20 @@ case 'openPanel':
           onLook={travelLookFlight}
           onCapture={() => takeSnapshot()}
           onExit={() => { const v = viewerRef.current; if (v) exitFlightTravel(v); }}
+          mode={flightTravelMode}
+          onToggleMode={toggleFlightTravelMode}
+          screen={flightTravelScreen}
+          time4D={{
+            active: flightTravel4DActive,
+            offsetSec: flightTravel4DOffset,
+            playing: flightTravel4DPlaying,
+            speed: flightTravel4DSpeed,
+            horizonSec: FLIGHT_4D_HORIZON_S,
+            onScrub: flight4DScrub,
+            onSetPlaying: flight4DSetPlaying,
+            onSetSpeed: flight4DSetSpeed,
+            onSetActive: flight4DSetActive,
+          }}
         />
       )}
 
@@ -10479,6 +10883,11 @@ case 'openPanel':
           <div style={{ fontWeight: 700, fontSize: 11, color: '#c4b5fd', marginBottom: 4 }}>
             {toolSurfaceLegend.label}
           </div>
+          {toolSurfaceLegend.interpolated && (
+            <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 4 }}>
+              IDW surface · interpolated from {toolSurfaceLegend.sampleCount ?? toolSurfaceLegend.finiteCellCount} measured pixel{ (toolSurfaceLegend.sampleCount ?? toolSurfaceLegend.finiteCellCount) === 1 ? '' : 's' }
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
             <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-end', fontSize: 9, opacity: 0.8, minWidth: 34 }}>
               <span>{formatValue(toolSurfaceLegend.valueMax)}</span>
@@ -10556,6 +10965,11 @@ case 'openPanel':
           <div style={{ color: '#a78bfa', fontWeight: 600, marginBottom: 2 }}>
             {formatValue(toolSurfaceProbe.value)}{toolSurfaceLegend?.unit ? ` ${toolSurfaceLegend.unit}` : ''}
           </div>
+          {toolSurfaceProbe.measuredValue !== undefined && (
+            <div style={{ color: '#6ee7b7', fontSize: 9, marginBottom: 2 }}>
+              nearest measured: {formatValue(toolSurfaceProbe.measuredValue)}{toolSurfaceLegend?.unit ? ` ${toolSurfaceLegend.unit}` : ''} · {toolSurfaceProbe.measuredDistM! < 1000 ? `${toolSurfaceProbe.measuredDistM!.toFixed(0)} m` : `${(toolSurfaceProbe.measuredDistM! / 1000).toFixed(2)} km`}
+            </div>
+          )}
           <div style={{ color: '#64748b', fontSize: 9 }}>
             {toolSurfaceProbe.lat.toFixed(4)}°, {toolSurfaceProbe.lon.toFixed(4)}°
           </div>

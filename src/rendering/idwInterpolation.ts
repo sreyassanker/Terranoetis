@@ -124,6 +124,7 @@ export function interpolateIDW(
   gridHeight: number,
   power: number = 2,
   neighbors: number = 12,
+  maxNearestDistM: number = Infinity,
 ): InterpGrid {
   const centerLat = (bbox.latMin + bbox.latMax) / 2;
   const centerLon = (bbox.lonMin + bbox.lonMax) / 2;
@@ -176,6 +177,14 @@ export function interpolateIDW(
         if (n.dist < closestDist) closestDist = n.dist;
       }
       const val = weightSum > 0 ? valueSum / weightSum : 0;
+      // Honesty gate: a cell is only interpolated where a measured sample is
+      // within reach. Beyond that (cloud / no-data gaps) the cell stays NaN and
+      // renders transparent — IDW never extrapolates into data voids.
+      if (Math.sqrt(closestDist) > maxNearestDistM) {
+        data[row * gridWidth + col] = NaN;
+        variance[row * gridWidth + col] = 0;
+        continue;
+      }
       data[row * gridWidth + col] = val;
       const nCount = nbrs.length;
       let varEst = 0;
@@ -195,7 +204,30 @@ export function interpolateIDW(
     }
   }
 
+  if (!Number.isFinite(valueMin)) valueMin = 0;
+  if (!Number.isFinite(valueMax)) valueMax = 0;
   return { data, variance, width: gridWidth, height: gridHeight, latMin: bbox.latMin, latMax: bbox.latMax, lonMin: bbox.lonMin, lonMax: bbox.lonMax, valueMin, valueMax };
+}
+
+/** Median nearest-neighbour spacing (meters) among the sample points — the
+ *  characteristic measurement spacing. Used to size the IDW influence reach:
+ *  the surface may extend only ~half a sample-spacing beyond the last real
+ *  measurement, never across a data void. */
+export function medianNearestNeighborDistanceM(points: InterpPoint[]): number {
+  if (points.length < 2) return Infinity;
+  const cLat = points.reduce((s, p) => s + p.lat, 0) / points.length;
+  const cLon = points.reduce((s, p) => s + p.lon, 0) / points.length;
+  const projected = points.map(p => ({ ...projectToLocal(p.lat, p.lon, cLat, cLon), value: p.value }));
+  const tree = buildKDTree(projected);
+  const dists: number[] = [];
+  for (const p of projected) {
+    const nn = nearestK(tree, p.x, p.y, 2);
+    if (nn.length < 2) continue;
+    dists.push(Math.sqrt(Math.max(nn[0].dist, nn[1].dist)));
+  }
+  if (dists.length === 0) return Infinity;
+  dists.sort((a, b) => a - b);
+  return dists[Math.floor(dists.length / 2)];
 }
 
 /** Ray-casting point-in-ring test (lon/lat in degrees). Rings use [lon, lat]
