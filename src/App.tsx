@@ -79,6 +79,23 @@ import SpatialSketching from '@/components/scenarios/SpatialSketching';
 import PerformanceMonitor from '@/components/PerformanceMonitor';
 import { IssTravelView } from '@/components/IssTravelView';
 import { FlightTravelView } from '@/components/FlightTravelView';
+import { HelicopterHud } from '@/components/HelicopterHud';
+import { HelicopterPanel, type HeliSpawn } from '@/components/HelicopterPanel';
+import { getApacheGltf, APACHE_MODEL_SCALE, APACHE_GEAR_BOTTOM, MAIN_ROTOR_PIVOT, TAIL_ROTOR_PIVOT } from '@/rendering/apacheModel';
+import { HelicopterSim, PROFILES, type HeliState, type HelicopterInput, type RotorcraftProfile } from '@/rendering/helicopterSim';
+import { ChaseRig, CHASE_CLOSE_CONFIG, CHASE_WIDE_CONFIG } from '@/rendering/heliCameraRig';
+
+export type HeliCamMode = 'chase-close' | 'chase-wide' | 'cockpit' | 'topdown' | 'external';
+import { HeliControls, type ControlSnapshot, type ControlEvent } from '@/rendering/heliControls';
+import { PilotHead } from '@/rendering/heliHeadModel';
+import { projectDeck, COCKPIT, type DeckPanel } from '@/rendering/cockpitAnchors';
+import { CockpitScreenMgr, buildInstrData } from '@/rendering/heliCockpitScreens';
+import { HeliAudioEngine } from '@/rendering/heliAudio';
+
+/** The projected glass deck is the production cockpit.  The experimental
+ * in-scene canvases can float when an imported model's node transforms differ
+ * from its authored cockpit geometry, so they remain intentionally disabled. */
+const HELI_DOM_DECK = true;
 import { classifyAircraft, getAircraftGltf, type AircraftClass } from '@/rendering/aircraftHangar';
 import { CommandPalette } from '@/components/CommandPalette';
 import { AnalyticsWorkbench } from '@/components/AnalyticsWorkbench';
@@ -1181,6 +1198,61 @@ export default function App() {
   const flightTravelSavedViewRef = useRef<{ pos: Cesium.Cartesian3; hdg: number; pitch: number; roll: number } | null>(null);
   const flightTravelNearbyEntitiesRef = useRef<Map<string, Cesium.Entity>>(new Map());
   const flightTravelHiddenEntityRef = useRef<Cesium.Entity | null>(null);
+
+  /* ── Apache helicopter flight simulator (in-globe) ── */
+  const [showHelicopterPanel, setShowHelicopterPanel] = useState(false);
+  const [heliFlying, setHeliFlying] = useState(false);
+  const [heliHud, setHeliHud] = useState<HeliState | null>(null);
+  const heliActiveRef = useRef(false);
+  const heliSimRef = useRef<HelicopterSim | null>(null);
+  const heliModelRef = useRef<Cesium.Model | null>(null);
+  const heliMainRotorRef = useRef<Cesium.ModelNode | null>(null);
+  const heliTailRotorRef = useRef<Cesium.ModelNode | null>(null);
+  const heliRotorAngleRef = useRef(0);
+  const heliTailAngleRef = useRef(0);
+  const heliPreRenderRef = useRef<(() => void) | null>(null);
+  const heliStopRafRef = useRef(false);
+  const heliHudIntRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const heliFrameRef = useRef(0);
+  const heliKeysRef = useRef({ w: false, s: false, pitch: 0, roll: 0, pedal: 0, thr: 0 });
+  const heliStickRef = useRef({ pitch: 0, roll: 0, pedal: 0 });   // mouse cyclic/pedals (spring)
+  const heliTrimRef = useRef({ pitch: 0, roll: 0 });              // TRIM holds cyclic position
+  const heliHandlersRef = useRef<{ down: (e: KeyboardEvent) => void; up: (e: KeyboardEvent) => void; blur: () => void } | null>(null);
+  const heliHoverAssistRef = useRef(false);
+  const heliTurbRef = useRef(false);
+  const heliInputRef = useRef<HelicopterInput>({ collective: 0.55, pitch: 0, roll: 0, pedal: 0, throttle: 0, engine: true });
+  const heliModeRef = useRef<HeliCamMode>('chase-close');
+  const heliSavedSidebarRef = useRef<boolean | null>(null);
+  const heliYawRef = useRef(0);
+  const heliPitchRef = useRef(0);
+  const heliFovRef = useRef(Cesium.Math.toRadians(60));
+  const heliOrbitRef = useRef({ az: Math.PI, el: 0.28, dist: 72, distTarget: 72 });
+  const heliRigRef = useRef<ChaseRig | null>(null);
+  const [heliOrbitMode, setHeliOrbitMode] = useState(false);
+  const heliCtlRef = useRef<HeliControls | null>(null);
+  const heliHeadRef = useRef(new PilotHead());
+  const heliDeckRef = useRef<Record<string, DeckPanel>>({});
+  const heliScreensRef = useRef<CockpitScreenMgr | null>(null);
+  const [heliDeckMode, setHeliDeckMode] = useState<'dom' | 'scene'>('scene');
+  const heliAudioRef = useRef<HeliAudioEngine | null>(null);
+  const heliFpsRef = useRef(60);
+  const [heliFps, setHeliFps] = useState(60);
+  const [heliFade, setHeliFade] = useState(0);
+  const heliTimeRef = useRef(0);
+  const [heliCtl, setHeliCtl] = useState<ControlSnapshot | null>(null);
+  const heliStarterRef = useRef(false);
+  const heliTopdownHeightRef = useRef(55);
+  const heliOrbitVelRef = useRef({ az: 0, el: 0 });
+  const heliLastGroundAltRef = useRef<number>(0);
+  const heliZoomVelRef = useRef(0);
+  const heliPanRef = useRef({ x: 0, y: 0, z: 0 });
+  const heliDragButtonRef = useRef(0);
+  const heliLastMoveRef = useRef(0);
+  const heliDragRef = useRef<{ x: number; y: number; active: boolean }>({ x: 0, y: 0, active: false });
+  const heliDragCleanupRef = useRef<(() => void) | null>(null);
+  const heliSavedViewRef = useRef<{ pos: Cesium.Cartesian3; hdg: number; pitch: number; roll: number } | null>(null);
+  const heliSpawnRef = useRef<{ lat: number; lon: number; altM: number; headingDeg: number; label: string; coldStart?: boolean; airframe?: 'AH64E' | 'HELIDRIVE_X' } | null>(null);
+  const heliProfileRef = useRef<RotorcraftProfile>(PROFILES.AH64E);
   const trackedSatRef = useRef<Cesium.Entity | null>(null);
   const trackedSatTrailEntityRef = useRef<Cesium.Entity | null>(null);
   const trackedSatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -2137,6 +2209,7 @@ export default function App() {
         },
       };
       (window as any).__renderCausalChain = renderCausalChain;
+      (window as any).__APACHE_URI = () => getApacheGltf();
     }
     entityTrackerRef.current = createEntityTracker(v);
     flightDrRef.current = new FlightDeadReckoning(v);
@@ -4639,6 +4712,9 @@ export default function App() {
   function updateTravelCamera(v: Cesium.Viewer) {
     const posProp = satTravelPosRef.current;
     if (!posProp) return;
+    // travel view owns the camera — kill entity tracking / fly-ins mid-ride
+    if (v.trackedEntity) v.trackedEntity = undefined;
+    v.camera.cancelFlight();
     const pos = posProp.getValue(Cesium.JulianDate.now());
     if (!pos) return;
 
@@ -4745,6 +4821,7 @@ export default function App() {
   }
 
   function enterSatelliteTravel(v: Cesium.Viewer, posProp: Cesium.PositionProperty, name: string) {
+    releaseCameraDrivers(v);
     if (flightTravelRef.current) exitFlightTravel(v);
     satTravelRef.current = true;
     setSatTravel(true);
@@ -4948,6 +5025,9 @@ export default function App() {
   function updateFlightTravelCamera(v: Cesium.Viewer) {
     const sim = flightTravelSimRef.current;
     if (!sim) return;
+    // travel view owns the camera — kill entity tracking / fly-ins mid-ride
+    if (v.trackedEntity) v.trackedEntity = undefined;
+    v.camera.cancelFlight();
 
     // ── live dead-reckoning ──
     const now = Date.now();
@@ -5069,6 +5149,7 @@ export default function App() {
   }
 
   function enterFlightTravel(v: Cesium.Viewer, sim: { lat: number; lon: number; alt: number; velocity: number; heading: number; verticalRate: number }, name: string, icao24?: string) {
+    releaseCameraDrivers(v);
     flightTravelRef.current = true;
     setFlightTravel(true);
     flightTravelSimRef.current = { ...sim, lastUpdate: Date.now() };
@@ -5280,6 +5361,913 @@ export default function App() {
     }
     flightTravelNearbyEntitiesRef.current.clear();
     showNotification('Exited Flight Travel View', 'info');
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════
+     APACHE HELICOPTER FLIGHT SIMULATOR — live 3D globe flight
+     ════════════════════════════════════════════════════════════════════════ */
+  /* rear-pilot eye station — metres in the HPR frame (right, nose, up),
+     derived from the authored Apache interior geometry (cockpitAnchors.ts) */
+  const HELI_COCKPIT_FWD = COCKPIT.EYE[1];
+  const HELI_COCKPIT_UP = COCKPIT.EYE[2];
+  const HELI_GEAR_H = APACHE_GEAR_BOTTOM * APACHE_MODEL_SCALE; // model origin above the wheels
+  const HELI_FOV = Cesium.Math.toRadians(60);
+  const HELI_FOV_MIN = Cesium.Math.toRadians(28);
+  const HELI_FOV_MAX = Cesium.Math.toRadians(100);
+
+  function heliGroundHeight(v: Cesium.Viewer, lat: number, lon: number): number {
+    try {
+      const h = v.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(lon, lat));
+      if (typeof h === 'number' && Number.isFinite(h) && h >= -500 && h <= 8848) {
+        heliLastGroundAltRef.current = Math.max(0, h);
+        return heliLastGroundAltRef.current;
+      }
+      return heliLastGroundAltRef.current;
+    } catch { return heliLastGroundAltRef.current; }
+  }
+
+  function getCurrentViewPosition(): { lat: number; lon: number } | null {
+    const v = viewerRef.current;
+    if (!v) return null;
+    try {
+      const center = new Cesium.Cartesian2(v.scene.canvas.clientWidth / 2, v.scene.canvas.clientHeight / 2);
+      // pickEllipsoid survives a camera below the surface (boot cinematic);
+      // globe.pick from inside would return a nonsensical far-side point.
+      const hit = v.camera.pickEllipsoid(center, v.scene.globe.ellipsoid);
+      if (hit) {
+        const c = Cesium.Cartographic.fromCartesian(hit);
+        return { lat: Cesium.Math.toDegrees(c.latitude), lon: Cesium.Math.toDegrees(c.longitude) };
+      }
+    } catch { /* fall through to camera geo */ }
+    const cc = v.camera.positionCartographic;
+    return { lat: Cesium.Math.toDegrees(cc.latitude), lon: Cesium.Math.toDegrees(cc.longitude) };
+  }
+
+  function heliResetSim() {
+        const sp = heliSpawnRef.current;
+        if (!sp || !viewerRef.current) return;
+        heliLastGroundAltRef.current = 0;
+        const cold = !!sp.coldStart;
+        const g = heliGroundHeight(viewerRef.current, sp.lat, sp.lon);
+        const resetAlt = cold ? g + HELI_GEAR_H : Math.max(g + HELI_GEAR_H, sp.altM);
+        heliSimRef.current?.resetTo({ lat: sp.lat, lon: sp.lon, altM: resetAlt, headingDeg: sp.headingDeg, groundAltM: g, collective: cold ? 0 : hoverCollectiveAtSim(resetAlt), engine: !cold });
+        heliProfileRef.current = PROFILES[sp.airframe ?? 'AH64E'];
+    heliCtlRef.current = new HeliControls(cold);
+    const coll0 = cold ? 0 : hoverCollectiveAtSim(resetAlt);   // hold station on spawn, not a surprise sink
+    if (!cold) heliCtlRef.current.collective = coll0;
+        heliInputRef.current = { collective: coll0, pitch: 0, roll: 0, pedal: 0, throttle: 0, engine: !cold };
+        heliStarterRef.current = false;
+        heliResetCamera();
+        showNotification(cold ? 'Sim reset — COLD on the pad' : 'Sim reset to spawn point', 'info');
+  }
+
+  function hoverCollectiveAtSim(altM: number): number {
+    // profile-aware hover detent for the controls machine (thin air or winged compound)
+    return heliProfileRef.current ? Math.min(1, (1 / heliProfileRef.current.thrustPerWeight) /
+      Math.pow(1 - 2.25577e-5 * Math.max(0, Math.min(11000, altM)), 4.2568)) : 0.77;
+  }
+
+  function heliSetMode(m: HeliCamMode) {
+    const canonical = m === 'external' ? 'chase-close' : m;
+    if (heliModeRef.current === canonical) return;
+    heliModeRef.current = canonical;
+    const sim = heliSimRef.current;
+    const hDeg = sim ? sim.state.headingDeg : 0;
+    const hRad = Cesium.Math.toRadians(hDeg);
+    heliPanRef.current = { x: 0, y: 0, z: 0 };
+    if (canonical === 'chase-close') {
+      heliRigRef.current?.setProfile('close', hRad);
+      heliOrbitRef.current.az = Math.PI;
+      setHeliOrbitMode(false);
+      showNotification('Camera: CLOSE CHASE (Gaming)', 'info');
+    } else if (canonical === 'chase-wide') {
+      heliRigRef.current?.setProfile('wide', hRad);
+      heliOrbitRef.current.az = Math.PI;
+      setHeliOrbitMode(false);
+      showNotification('Camera: WIDE CHASE (Tactical)', 'info');
+    } else if (canonical === 'cockpit') {
+      heliHeadRef.current.reset();
+      showNotification('Camera: COCKPIT (Flight Deck)', 'info');
+    } else if (canonical === 'topdown') {
+      showNotification('Camera: TACTICAL (Top-Down)', 'info');
+    }
+    setHeliFade((f) => f + 1);
+  }
+
+  function heliResetCamera() {
+    heliHeadRef.current.reset();
+    const isClose = heliModeRef.current === 'chase-close';
+    const initD = isClose ? 21 : 48;
+    const initEl = isClose ? 0.16 : 0.26;
+    const sim = heliSimRef.current;
+    const hDeg = sim ? sim.state.headingDeg : 0;
+    const hRad = Cesium.Math.toRadians(hDeg);
+    const azInit = hRad + Math.PI;
+    heliRigRef.current?.reset(initD, initEl, azInit);
+    heliOrbitRef.current = { az: Math.PI, el: initEl, dist: initD, distTarget: initD };
+    heliRigRef.current = new ChaseRig({ az: azInit, el: initEl, dist: initD }, isClose ? CHASE_CLOSE_CONFIG() : CHASE_WIDE_CONFIG());
+    setHeliOrbitMode(false);
+    heliOrbitVelRef.current = { az: 0, el: 0 };
+    heliZoomVelRef.current = 0;
+    heliPanRef.current = { x: 0, y: 0, z: 0 };
+    heliHeadRef.current = new PilotHead();
+    heliDeckRef.current = {};
+    heliTimeRef.current = 0;
+    heliYawRef.current = 0;
+    heliPitchRef.current = 0;
+    heliStickRef.current = { pitch: 0, roll: 0, pedal: 0 };
+    heliTrimRef.current = { pitch: 0, roll: 0 };
+  }
+
+  const heliToggleEngine = () => {
+    if (!heliActiveRef.current) return;
+    const c = heliCtlRef.current;
+    if (!c) return;
+    c.setEcl(c.ecl === 0 ? 2 : 0);
+    for (const e of c.drainEvents()) heliCtlNotify(e);
+  };
+  const heliToggleHover = () => {
+    if (!heliActiveRef.current) return;
+    heliHoverAssistRef.current = !heliHoverAssistRef.current;
+    showNotification(heliHoverAssistRef.current ? 'Hover assist ON' : 'Hover assist OFF', 'info');
+  };
+  const heliToggleTurb = () => {
+    if (!heliActiveRef.current) return;
+    heliTurbRef.current = !heliTurbRef.current;
+    showNotification(heliTurbRef.current ? 'Turbulence ON' : 'Turbulence OFF', 'info');
+  };
+  const heliToggleTrim = () => {
+    if (!heliActiveRef.current) return;
+    const t = heliTrimRef.current;
+    if (Math.abs(t.pitch) < 1e-4 && Math.abs(t.roll) < 1e-4) {
+      const inp = heliInputRef.current;
+      t.pitch = inp.pitch; t.roll = inp.roll;
+      showNotification('Cyclic trim set', 'info');
+    } else {
+      t.pitch = 0; t.roll = 0;
+      showNotification('Cyclic trim cleared', 'info');
+    }
+  };
+  const heliApplySwitch = (sw: 'engine' | 'hover' | 'turb' | 'trim' | 'friction' | 'battery' | 'master' | 'ecl') => {
+    const c = heliCtlRef.current;
+    if (sw === 'engine') heliToggleEngine();
+    else if (sw === 'hover') heliToggleHover();
+    else if (sw === 'turb') heliToggleTurb();
+    else if (sw === 'trim') heliToggleTrim();
+    else if (c && sw === 'friction') { c.toggleFriction(); for (const e of c.drainEvents()) heliCtlNotify(e); }
+    else if (c && sw === 'battery') { c.battery = !c.battery; showNotification(c.battery ? 'Battery ON' : 'Battery OFF — masters dead without generator', c.battery ? 'info' : 'warning'); }
+    else if (c && sw === 'master') { c.avionicsMaster = !c.avionicsMaster; showNotification(c.avionicsMaster ? 'Avionics master ON' : 'Avionics master OFF — standby instruments only', 'info'); }
+    else if (c && sw === 'ecl') { c.cycleEcl(); for (const e of c.drainEvents()) heliCtlNotify(e); }
+  };
+  const heliCtlNotify = (e: ControlEvent) => {
+    const map: Record<ControlEvent, [string, 'info' | 'success' | 'warning' | 'error']> = {
+      'start': ['STARTER ENGAGED — cranking…', 'info'],
+      'start-denied-battery': ['START INHIBIT — battery OFF', 'error'],
+      'start-denied-ecl': ['START INHIBIT — ECL at CUTOFF (G to cycle)', 'error'],
+      'start-denied-fuel': ['START INHIBIT — no fuel', 'error'],
+      'start-denied-speed': ['START INHIBIT — rotor already turning', 'warning'],
+      'lightoff': ['LIGHT-OFF — starter cuts out', 'success'],
+      'run': ['ENGINE RUNNING — idle', 'success'],
+      'flameout-ecl': ['ECL CUTOFF — engine flamed out', 'warning'],
+      'flameout-fuel': ['FUEL STARVED — engine flamed out, autorotate!', 'error'],
+      'friction-on': ['COLLECTIVE FRICTION LOCK SET', 'info'],
+      'friction-off': ['Collective friction lock released', 'info'],
+    };
+    const m = map[e]; if (m) showNotification(m[0], m[1]);
+  };
+  const heliApplyControl = (p: Partial<HelicopterInput>) => {
+    const c = heliCtlRef.current;
+    if (c && p.collective !== undefined) c.setCollective(p.collective);
+    if (c && p.throttle !== undefined) c.setThrottle(p.throttle);
+    Object.assign(heliInputRef.current, p);
+  };
+  const heliApplyStick = (p: { pitch?: number; roll?: number; pedal?: number }) => { Object.assign(heliStickRef.current, p); };
+
+  function heliKeyHandler(e: KeyboardEvent) {
+    if (!heliActiveRef.current) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    const k = heliKeysRef.current;
+    switch (e.code) {
+      case 'KeyW': case 'PageUp': k.w = true; e.preventDefault(); break;
+      case 'KeyS': case 'PageDown': k.s = true; e.preventDefault(); break;
+      case 'KeyA': k.thr = -1; e.preventDefault(); break;
+      case 'KeyD': k.thr = 1; e.preventDefault(); break;
+      case 'ArrowUp':
+        k.pitch = 1;
+        if (heliInputRef.current.collective < 0.65) {
+          heliInputRef.current.collective = 0.75;
+          if (heliCtlRef.current && !heliCtlRef.current.collectiveLocked) heliCtlRef.current.collective = 0.75;
+        }
+        if (heliInputRef.current.throttle < 0.85) {
+          heliInputRef.current.throttle = 1.0;
+          if (heliCtlRef.current) heliCtlRef.current.throttle = 1.0;
+        }
+        e.preventDefault(); break;
+      case 'ArrowDown': k.pitch = -0.75; e.preventDefault(); break;
+      case 'ArrowLeft': k.roll = -0.75; k.pedal = -0.75; e.preventDefault(); break;
+      case 'ArrowRight': k.roll = 0.75; k.pedal = 0.75; e.preventDefault(); break;
+      case 'KeyQ': case 'Comma': k.pedal = -1; break;
+      case 'KeyE': case 'Period': k.pedal = 1; break;
+      case 'Space':
+        if (!e.repeat) heliToggleHover();
+        e.preventDefault(); break;
+      case 'KeyC':
+        heliSetMode(heliModeRef.current === 'cockpit' ? 'chase-close' : 'cockpit');
+        break;
+      case 'KeyT':
+        heliSetMode(heliModeRef.current === 'topdown' ? 'chase-close' : 'topdown');
+        break;
+      case 'KeyV': {
+        const next = (heliModeRef.current === 'chase-close' || heliModeRef.current === 'external')
+          ? 'chase-wide'
+          : heliModeRef.current === 'chase-wide'
+          ? 'cockpit'
+          : heliModeRef.current === 'cockpit'
+          ? 'topdown'
+          : 'chase-close';
+        heliSetMode(next);
+        break;
+      }
+      case 'Digit1': heliSetMode('cockpit'); break;
+      case 'Digit2': heliSetMode('chase-close'); break;
+      case 'Digit3': heliSetMode('chase-wide'); break;
+      case 'KeyU': {
+        const muted = heliAudioRef.current?.toggleMute();
+        showNotification(muted === undefined ? 'Audio unavailable' : muted ? 'Audio MUTED' : 'Audio ON', 'info');
+        break;
+      }
+      case 'KeyX':
+        heliToggleTurb();
+        break;
+      case 'KeyZ':
+        if (!e.repeat) heliToggleTrim();
+        break;
+      case 'KeyR': {
+        heliResetSim();
+        break;
+      }
+      case 'ShiftLeft': case 'ShiftRight':
+        if (!e.repeat) heliToggleEngine();
+        break;
+      case 'KeyF':
+        if (!e.repeat) heliApplySwitch('friction');
+        break;
+      case 'KeyG':
+        if (!e.repeat) heliApplySwitch('ecl');
+        break;
+      case 'KeyB':
+        if (!e.repeat) heliApplySwitch('battery');
+        break;
+      case 'KeyM':
+        if (!e.repeat) heliApplySwitch('master');
+        break;
+      case 'KeyH':
+        heliStarterRef.current = true;
+        e.preventDefault();
+        break;
+      case 'Equal': case 'NumpadAdd':
+        if (heliModeRef.current === 'external' && heliRigRef.current) heliRigRef.current.nudgeFov(-Cesium.Math.toRadians(5));
+        else heliFovRef.current = Math.max(HELI_FOV_MIN, heliFovRef.current - Cesium.Math.toRadians(5));
+        break;
+      case 'Minus': case 'NumpadSubtract':
+        if (heliModeRef.current === 'external' && heliRigRef.current) heliRigRef.current.nudgeFov(Cesium.Math.toRadians(5));
+        else heliFovRef.current = Math.min(HELI_FOV_MAX, heliFovRef.current + Cesium.Math.toRadians(5));
+        break;
+      case 'KeyO':
+        if (heliRigRef.current) {
+          const m = heliRigRef.current.mode === 'orbit' ? 'chase' : 'orbit';
+          heliRigRef.current.mode = m;
+          setHeliOrbitMode(m === 'orbit');
+          showNotification(m === 'orbit' ? 'Camera: free ORBIT (classic)' : 'Camera: dynamic CHASE', 'info');
+        }
+        break;
+      case 'BracketLeft':
+        if (heliRigRef.current) heliRigRef.current.rigidity = Math.max(0.2, heliRigRef.current.rigidity - 0.2);
+        break;
+      case 'BracketRight':
+        if (heliRigRef.current) heliRigRef.current.rigidity = Math.min(2, heliRigRef.current.rigidity + 0.2);
+        break;
+      case 'Escape': { const v = viewerRef.current; if (v) exitHeliSim(v); break; }
+    }
+  }
+
+  function heliKeyUpHandler(e: KeyboardEvent) {
+    if (!heliActiveRef.current) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    const k = heliKeysRef.current;
+    switch (e.code) {
+      case 'KeyW': case 'Space': case 'PageUp': k.w = false; break;
+      case 'KeyS': case 'PageDown': k.s = false; break;
+      case 'KeyA': case 'KeyD': if (k.thr !== 0) k.thr = 0; break;
+      case 'ArrowUp': case 'ArrowDown': if (k.pitch !== 0) k.pitch = 0; break;
+      case 'ArrowLeft': case 'ArrowRight':
+        if (k.roll !== 0) k.roll = 0;
+        if (k.pedal !== 0) k.pedal = 0;
+        break;
+      case 'KeyQ': case 'KeyE': case 'Comma': case 'Period': if (k.pedal !== 0) k.pedal = 0; break;
+      case 'KeyH': heliStarterRef.current = false; break;
+    }
+  }
+
+  function setupHeliDrag(v: Cesium.Viewer) {
+    const canvas = v.scene.canvas;
+    const SENS = Cesium.Math.toRadians(0.25);
+    const onDown = (ev: PointerEvent) => {
+      heliDragRef.current = { x: ev.clientX, y: ev.clientY, active: true };
+      heliDragButtonRef.current = ev.button;
+      if (heliModeRef.current !== 'cockpit' && heliModeRef.current !== 'topdown') heliRigRef.current?.setDragging(true);
+      if (ev.button === 1) ev.preventDefault(); // middle: no autoscroll
+    };
+    const onUp = () => {
+      heliDragRef.current.active = false;
+      heliDragButtonRef.current = 0;
+      heliRigRef.current?.setDragging(false);
+    };
+    const onMove = (ev: PointerEvent) => {
+      const d = heliDragRef.current;
+      if (!d.active) return;
+      const dx = ev.clientX - d.x, dy = ev.clientY - d.y;
+      d.x = ev.clientX; d.y = ev.clientY;
+      const evtDt = Math.max(0.008, (ev.timeStamp - (heliLastMoveRef.current || ev.timeStamp - 16)) / 1000);
+      heliLastMoveRef.current = ev.timeStamp;
+      if (heliModeRef.current !== 'cockpit' && heliModeRef.current !== 'topdown') {
+        // Chase-cam rig: gestures perturb the framing (decay back over τ);
+        // orbit mode keeps classic Cesium gesture parity with release inertia.
+        const rig = heliRigRef.current;
+        const o = heliOrbitRef.current;
+        const btn = heliDragButtonRef.current;
+        if (btn === 2 && rig) {
+          const panS = (o.dist / Math.max(1, canvas.clientHeight)) * 1.2;
+          const pan = heliPanRef.current;
+          pan.x -= dx * panS;
+          pan.z += dy * panS;
+        } else if (btn === 1 && rig) {
+          rig.nudgeZoom(dy * 0.004);
+        } else if (rig) {
+          rig.nudgeAzEl(dx * SENS, -dy * SENS, (dx * SENS) / evtDt, (-dy * SENS) / evtDt);
+        }
+      } else {
+        heliHeadRef.current.look(-dx * SENS, dy * SENS, heliTimeRef.current);
+        heliYawRef.current = heliHeadRef.current.yaw;
+        heliPitchRef.current = heliHeadRef.current.pitch;
+      }
+    };
+    const onWheel = (ev: WheelEvent) => {
+      if (!heliActiveRef.current) return;
+      ev.preventDefault();
+      const mode = heliModeRef.current;
+      if (mode === 'cockpit') {
+        // two-finger scroll = look around inside the neck cone
+        heliHeadRef.current.look(ev.deltaX * 0.003, -ev.deltaY * 0.003, heliTimeRef.current);
+        heliYawRef.current = heliHeadRef.current.yaw;
+        heliPitchRef.current = heliHeadRef.current.pitch;
+        return;
+      }
+      if (mode === 'topdown') {
+        heliTopdownHeightRef.current = Cesium.Math.clamp(heliTopdownHeightRef.current * Math.exp(ev.deltaY * 0.0012), 12, 5000);
+        return;
+      }
+      // external: dominant wheel axis decides — vertical = zoom,
+      // horizontal = two-finger twist/orbit around the Apache.
+      const rig = heliRigRef.current;
+      if (rig) {
+        if (Math.abs(ev.deltaY) >= Math.abs(ev.deltaX)) {
+          rig.nudgeZoom(ev.deltaY * 0.0012, ev.deltaY * 0.0012);
+        } else {
+          const d = ev.deltaX * 0.004;
+          rig.nudgeAzEl(d, 0);
+          rig.flingAz(d * 8);                          // keeps spinning after fling
+        }
+        return;
+      }
+      const o = heliOrbitRef.current;
+      if (Math.abs(ev.deltaY) >= Math.abs(ev.deltaX)) {
+        o.distTarget = Cesium.Math.clamp(o.distTarget * Math.exp(ev.deltaY * 0.0012), 0.05, 8000);
+        heliZoomVelRef.current += ev.deltaY * 0.0012;
+      } else {
+        const d = ev.deltaX * 0.004;
+        o.az += d;
+        heliOrbitVelRef.current.az = d * 12;
+      }
+    };
+    // Safari/macOS trackpad two-finger TWIST (GestureEvent) = orbit, pinch =
+    // zoom — same gestures that spin the globe in normal Cesium navigation.
+    const hasGesture = typeof (window as unknown as { GestureEvent?: unknown }).GestureEvent !== 'undefined';
+    let gRot = 0, gScale = 1;
+    const onGStart = (ev: Event) => {
+      const g = ev as unknown as { rotation: number; scale: number };
+      gRot = g.rotation || 0; gScale = g.scale || 1;
+    };
+    const onGChange = (ev: Event) => {
+      if (!heliActiveRef.current) return;
+      ev.preventDefault();
+      const g = ev as unknown as { rotation: number; scale: number };
+      if (heliModeRef.current !== 'cockpit' && heliModeRef.current !== 'topdown') {
+        const rig = heliRigRef.current;
+        if (g.rotation !== gRot) {
+          const d = Cesium.Math.toRadians(g.rotation - gRot);
+          if (rig) { rig.nudgeAzEl(d, 0); rig.flingAz(d * 8); }
+          gRot = g.rotation;
+        }
+        if (g.scale && g.scale !== gScale) {
+          const sc = g.scale / gScale;
+          if (rig) rig.nudgeZoom(-Math.log(sc || 1e-6));
+          gScale = g.scale;
+        }
+      } else {
+        if (g.rotation !== gRot) {
+          heliHeadRef.current.look(Cesium.Math.toRadians(g.rotation - gRot), 0, heliTimeRef.current);
+          heliYawRef.current = heliHeadRef.current.yaw;
+          gRot = g.rotation;
+        }
+      }
+    };
+    const onGEnd = () => { gRot = 0; gScale = 1; };
+    const onCtx = (ev: Event) => ev.preventDefault();
+    canvas.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    canvas.addEventListener('contextmenu', onCtx);
+    if (hasGesture) {
+      canvas.addEventListener('gesturestart', onGStart as EventListener);
+      canvas.addEventListener('gesturechange', onGChange as EventListener, { passive: false });
+      canvas.addEventListener('gestureend', onGEnd);
+    }
+    heliDragCleanupRef.current = () => {
+      canvas.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointermove', onMove);
+      canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('contextmenu', onCtx);
+      if (hasGesture) {
+        canvas.removeEventListener('gesturestart', onGStart as EventListener);
+        canvas.removeEventListener('gesturechange', onGChange as EventListener);
+        canvas.removeEventListener('gestureend', onGEnd);
+      }
+    };
+  }
+
+  /** Take the camera hostage from every other driver before a chase rig takes over.
+   *  Auto-rotate's rAF loop, an in-flight camera.flyTo (current-location/search/
+   *  disaster fly-ins) and a trackedEntity each rewrite the camera per frame —
+   *  they race the sim's setView and make the external view look "decoupled". */
+  function releaseCameraDrivers(v: Cesium.Viewer) {
+    unlockInteractionRef.current?.();
+    v.camera.cancelFlight();
+    if (v.trackedEntity) v.trackedEntity = undefined;
+  }
+
+  function enterHeliSim(v: Cesium.Viewer, spawn: HeliSpawn) {
+    if (heliActiveRef.current) exitHeliSim(v);
+    if (satTravelRef.current) exitSatelliteTravel(v);
+    if (flightTravelRef.current) exitFlightTravel(v);
+    releaseCameraDrivers(v);
+    const ground = heliGroundHeight(v, spawn.lat, spawn.lon);
+    const cold = !!spawn.coldStart;
+    heliProfileRef.current = PROFILES[spawn.airframe ?? 'AH64E'];
+    // The launch panel is explicitly labelled MSL, so never add terrain to
+    // the selected altitude.  A floor keeps a selected altitude below local
+    // terrain from spawning the aircraft underground.
+    const startAlt = cold ? ground + HELI_GEAR_H : Math.max(ground + HELI_GEAR_H, spawn.altM);
+    heliSpawnRef.current = { ...spawn };
+    const coll0 = cold ? 0 : hoverCollectiveAtSim(startAlt);   // hold station on spawn, not a surprise sink
+    heliSimRef.current = new HelicopterSim(
+      { lat: spawn.lat, lon: spawn.lon, altM: startAlt, headingDeg: spawn.headingDeg, groundAltM: ground, collective: coll0, engine: !cold },
+      { gearOffsetM: HELI_GEAR_H, profile: heliProfileRef.current },
+    );
+    heliCtlRef.current = new HeliControls(cold);
+    if (!cold) heliCtlRef.current.collective = coll0;
+    setHeliCtl(heliCtlRef.current.snapshot);
+    if (!HELI_DOM_DECK) {
+      try {
+        heliScreensRef.current = new CockpitScreenMgr(v.scene);
+        setHeliDeckMode(heliScreensRef.current.live ? 'scene' : 'dom');
+      } catch { heliScreensRef.current = null; setHeliDeckMode('dom'); }
+    } else {
+      heliScreensRef.current = null;
+      setHeliDeckMode('dom');
+    }
+    heliStarterRef.current = false;
+    heliActiveRef.current = true;
+    if (!sidebarCollapsed) {
+      heliSavedSidebarRef.current = false;
+      setSidebarCollapsed(true);
+    }
+    setHeliFlying(true);
+    if (!heliAudioRef.current) heliAudioRef.current = new HeliAudioEngine();
+    heliAudioRef.current.start();
+    setHeliHud(heliSimRef.current.state);
+    heliRotorAngleRef.current = 0;
+    heliTailAngleRef.current = 0;
+    heliModeRef.current = 'chase-close';
+    heliYawRef.current = 0;
+    heliPitchRef.current = 0;
+    heliOrbitRef.current = { az: Math.PI, el: 0.16, dist: 21, distTarget: 21 };
+    const initHdgRad = Cesium.Math.toRadians(spawn.headingDeg);
+    heliRigRef.current = new ChaseRig({ az: initHdgRad + Math.PI, el: 0.16, dist: 21 }, CHASE_CLOSE_CONFIG());
+    setHeliOrbitMode(false);
+    heliOrbitVelRef.current = { az: 0, el: 0 };
+    heliZoomVelRef.current = 0;
+    heliPanRef.current = { x: 0, y: 0, z: 0 };
+    heliTopdownHeightRef.current = 55;
+    heliFovRef.current = HELI_FOV;
+    heliKeysRef.current = { w: false, s: false, pitch: 0, roll: 0, pedal: 0, thr: 0 };
+    heliInputRef.current = { collective: coll0, pitch: 0, roll: 0, pedal: 0, throttle: 0, engine: !cold };
+    heliHoverAssistRef.current = false;
+    heliFrameRef.current = 0;
+    heliSavedViewRef.current = {
+      pos: Cesium.Cartesian3.clone(v.camera.position),
+      hdg: v.camera.heading, pitch: v.camera.pitch, roll: v.camera.roll,
+    };
+    // Drive the sim from our own rAF loop: the viewer runs in
+    // requestRenderMode, and requestRender() called inside a preRender
+    // callback can be swallowed by the frame in progress — an external
+    // clock guarantees physics + camera frames keep flowing.
+    heliStopRafRef.current = false;
+    const loop = () => {
+      if (!heliActiveRef.current || v.isDestroyed()) return;
+      updateHeliSim(v);
+      if (!heliStopRafRef.current) requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+    const ctrl = v.scene.screenSpaceCameraController;
+    ctrl.enableRotate = false; ctrl.enableZoom = false; ctrl.enableTilt = false; ctrl.enableTranslate = false;
+
+    Cesium.Model.fromGltfAsync({
+      url: getApacheGltf(),
+      id: 'apache-heli',
+      scale: APACHE_MODEL_SCALE,
+      shadows: Cesium.ShadowMode.DISABLED,
+    }).then((model) => {
+      if (!heliActiveRef.current || v.isDestroyed()) { try { model.destroy(); } catch { /* ignore */ } return; }
+      v.scene.primitives.add(model);
+      heliModelRef.current = model;
+      const grabNodes = () => {
+        if (!heliActiveRef.current || model.isDestroyed()) return;
+        try {
+          heliMainRotorRef.current = model.getNode('mainRotor') ?? null;
+          heliTailRotorRef.current = model.getNode('tailRotor') ?? null;
+        } catch { /* rotor spin degrades gracefully */ }
+      };
+      if (model.ready) grabNodes();
+      else model.readyEvent.addEventListener(grabNodes);
+      v.scene.requestRender();
+    }).catch((err) => {
+      console.warn('Apache model failed to load:', err);
+      showNotification('Helicopter model failed to load', 'error');
+    });
+
+    heliHudIntRef.current = setInterval(() => {
+      const sim = heliSimRef.current;
+      if (sim && heliActiveRef.current) {
+        setHeliHud(sim.state);
+        setHeliFps(Math.round(heliFpsRef.current));
+        const c = heliCtlRef.current;
+        if (c) setHeliCtl(c.snapshot);
+      }
+    }, 100);
+    const onBlur = () => { heliKeysRef.current = { w: false, s: false, pitch: 0, roll: 0, pedal: 0, thr: 0 }; heliStarterRef.current = false; };
+    // capture this render's handlers so exitHeliSim removes the exact instances
+    heliHandlersRef.current = { down: heliKeyHandler, up: heliKeyUpHandler, blur: onBlur };
+    window.addEventListener('keydown', heliKeyHandler);
+    window.addEventListener('keyup', heliKeyUpHandler);
+    window.addEventListener('blur', onBlur);
+    setupHeliDrag(v);
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).__HELI = {
+        simRef: heliSimRef, modelRef: heliModelRef, activeRef: heliActiveRef,
+        mainRotorRef: heliMainRotorRef, tailRotorRef: heliTailRotorRef,
+        keysRef: heliKeysRef, inputRef: heliInputRef, orbitRef: heliOrbitRef,
+        rigRef: heliRigRef, ctlRef: heliCtlRef, deckRef: heliDeckRef, headRef: heliHeadRef, instrRef: heliScreensRef, audioRef: heliAudioRef,
+        modeRef: heliModeRef,
+      };
+    }
+    showNotification(`Apache airborne over ${spawn.label} — W/S collective · arrows cyclic · Q/E pedals`, 'success');
+  }
+
+  function updateHeliSim(v: Cesium.Viewer) {
+    const sim = heliSimRef.current;
+    if (!sim || !heliActiveRef.current) return;
+    // the sim owns the camera — kill any fly-in or entity tracking started mid-flight
+    if (v.trackedEntity) v.trackedEntity = undefined;
+    v.camera.cancelFlight();
+    const nowMs = performance.now();
+    const dt = heliFrameRef.current ? Math.min(0.05, (nowMs - heliFrameRef.current) / 1000) : 0.016;
+    heliFrameRef.current = nowMs;
+
+    const before = sim.state;
+    sim.setGroundAlt(heliGroundHeight(v, before.lat, before.lon));
+
+    const k = heliKeysRef.current;
+    const inp = heliInputRef.current;
+    const st = heliStickRef.current, tr = heliTrimRef.current;
+    const ctl = heliCtlRef.current;
+    if (ctl) {
+      ctl.update(dt, {
+        collUp: k.w, collDown: k.s, collRateUp: 0.45, collRateDown: 0.6,
+        throttleDelta: k.thr, starterHeld: heliStarterRef.current,
+        onGround: before.onGround, nfPct: before.rotorRpm, ngPct: before.ngPct,
+        fuelKg: before.fuelKg, altM: before.altM,
+        hoverColl: hoverCollectiveAtSim(before.altM),
+      }, inp);
+      for (const e of ctl.drainEvents()) heliCtlNotify(e);
+    } else {
+      if (k.w) inp.collective = Math.min(1, inp.collective + dt * 0.45);
+      if (k.s) inp.collective = Math.max(0, inp.collective - dt * 0.6);
+      if (k.thr) inp.throttle = Math.min(1, Math.max(0, inp.throttle + k.thr * dt * 0.5));
+    }
+    if (heliHoverAssistRef.current) {
+      const err = -before.vsFpm / 600;            // want vs→0
+      inp.collective = Math.min(1, Math.max(0, inp.collective + Math.min(0.4, err) * dt * 1.6));
+      if (ctl && !ctl.collectiveLocked) ctl.collective = inp.collective;
+      inp.pitch = 0; inp.roll = 0;
+    } else {
+      inp.pitch = Math.max(-1, Math.min(1, k.pitch + tr.pitch + st.pitch));
+      inp.roll = Math.max(-1, Math.min(1, k.roll + tr.roll + st.roll));
+    }
+    inp.pedal = Math.max(-1, Math.min(1, k.pedal + st.pedal));
+    if (heliTurbRef.current && Math.random() < dt * 1.5) {
+      sim.addGust((Math.random() - 0.5) * 3.2, (Math.random() - 0.5) * 3.2, (Math.random() - 0.5) * 1.8);
+    }
+    const s = sim.update(dt, inp);
+    if (s.hardLanding) showNotification(`HARD LANDING — ${Math.round(before.vsFpm)} fpm sink · flare earlier!`, 'warning');
+    heliFpsRef.current = heliFpsRef.current * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
+    heliAudioRef.current?.update({
+      nfPct: s.rotorRpm, ngPct: s.ngPct, torquePct: s.torquePct, throttle: inp.throttle,
+      engineOn: s.engine, vrs: s.vrs, cockpit: heliModeRef.current === 'cockpit',
+    });
+
+    // ── place the Apache on the globe ──
+    const pos = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.altM);
+    const hpr = new Cesium.HeadingPitchRoll(
+      Cesium.Math.toRadians(s.headingDeg),
+      Cesium.Math.toRadians(s.pitchDeg),
+      Cesium.Math.toRadians(s.rollDeg),
+    );
+    const modelMatrix = Cesium.Transforms.headingPitchRollToFixedFrame(pos, hpr);
+    if (heliModelRef.current && !heliModelRef.current.isDestroyed()) {
+      heliModelRef.current.modelMatrix = modelMatrix;
+      heliModelRef.current.show = heliModeRef.current !== 'cockpit';
+    }
+
+    // ── spin the rotor joints ──
+    heliRotorAngleRef.current += 12.0 * (s.rotorRpm / 100) * dt;
+    heliTailAngleRef.current += 36.0 * (s.rotorRpm / 100) * dt;
+    const main = heliMainRotorRef.current;
+    if (main) {
+      main.matrix = Cesium.Matrix4.fromRotationTranslation(
+        Cesium.Matrix3.fromRotationY(heliRotorAngleRef.current),
+        new Cesium.Cartesian3(MAIN_ROTOR_PIVOT[0], MAIN_ROTOR_PIVOT[1], MAIN_ROTOR_PIVOT[2]),
+      );
+    }
+    const tail = heliTailRotorRef.current;
+    if (tail) {
+      tail.matrix = Cesium.Matrix4.fromRotationTranslation(
+        Cesium.Matrix3.fromRotationZ(heliTailAngleRef.current),
+        new Cesium.Cartesian3(TAIL_ROTOR_PIVOT[0], TAIL_ROTOR_PIVOT[1], TAIL_ROTOR_PIVOT[2]),
+      );
+    }
+
+    // ── camera: cockpit = rigid flight-deck eye, top-down = vertical,
+    //    external = FREE orbit (Cesium-style drag-rotate + wheel-zoom)
+    //    around the airframe, all offsets riding the heli's attitude frame ──
+    const frustum = v.camera.frustum as Cesium.PerspectiveFrustum;
+    frustum.near = heliModeRef.current === 'cockpit' ? 0.05 : 0.02;  // cockpit: clear the canopy frames
+    const hRad = Cesium.Math.toRadians(s.headingDeg);
+    let camPos: Cesium.Cartesian3;
+    let camHeading: number;
+    let camPitch: number;
+    let camRoll = 0;
+    let camFov = heliModeRef.current === 'cockpit' ? Cesium.Math.toRadians(78) : heliFovRef.current;
+    if (heliModeRef.current === 'cockpit') {
+      // pilot's-eye view: head rides the airframe with vibration, look angles
+      // live inside the neck cone, and the deck DOM instruments are pinned to
+      // console geometry by projection (see cockpitAnchors.projectDeck).
+      heliTimeRef.current += dt;
+      const head = heliHeadRef.current;
+      head.update(dt, heliTimeRef.current, { nfPct: s.rotorRpm, engineOn: s.engine, time: heliTimeRef.current });
+      const eye = COCKPIT.EYE;
+      camPos = Cesium.Matrix4.multiplyByPointAsVector(modelMatrix,
+        new Cesium.Cartesian3(eye[0] + head.jitter[0], eye[1] + head.jitter[1], eye[2] + head.jitter[2]),
+        new Cesium.Cartesian3());
+      Cesium.Cartesian3.add(pos, camPos, camPos);
+      camHeading = hRad + head.yaw;
+      // Head couples airframe pitch attitude + forward flight scan
+      camPitch = Cesium.Math.toRadians(s.pitchDeg) + head.pitch;
+      camRoll = Cesium.Math.toRadians(s.rollDeg * head.rollFollow);
+      try { heliDeckRef.current = projectDeck(v.scene, modelMatrix, [eye[0] + head.jitter[0], eye[1] + head.jitter[1], eye[2] + head.jitter[2]]); }
+      catch { heliDeckRef.current = {}; }
+      const scr = heliScreensRef.current;
+      if (scr && scr.live) {
+        if (!scr.visible) scr.setVisible(true);
+        scr.update(dt, modelMatrix, buildInstrData(s, !(heliCtlRef.current?.avionicsMaster ?? true)));
+      }
+    } else if (heliModeRef.current === 'topdown') {
+      const scr0 = heliScreensRef.current;
+      if (scr0?.visible) scr0.setVisible(false);
+      camPos = Cesium.Matrix4.multiplyByPointAsVector(modelMatrix, new Cesium.Cartesian3(0, 0, heliTopdownHeightRef.current), new Cesium.Cartesian3());
+      Cesium.Cartesian3.add(pos, camPos, camPos);
+      camHeading = hRad + heliYawRef.current;
+      camPitch = -Cesium.Math.PI_OVER_TWO + 0.001;
+    } else {
+      // chase-cam rig: close gaming chase or wide tactical chase view
+      const isClose = heliModeRef.current === 'chase-close' || heliModeRef.current === 'external';
+      const scrE = heliScreensRef.current;
+      if (scrE?.visible) scrE.setVisible(false);
+      const rig = heliRigRef.current;
+      const o = heliOrbitRef.current;
+      const out = rig ? rig.step(dt, {
+        headingRad: hRad,
+        tasMps: s.tasKts / 1.94384,
+        aglM: s.aglM,
+        yawRateDps: s.yawRateDps,
+        sideslipDeg: s.sideslipDeg,
+        pitchDeg: s.pitchDeg,
+        rollDeg: s.rollDeg,
+      }) : null;
+      if (out) {
+        o.az = out.az; o.el = out.el; o.dist = out.dist; o.distTarget = out.distTarget;
+        camFov = out.fov;
+        camRoll = Cesium.Math.toRadians(out.rollDeg);
+      }
+      const relAz = Cesium.Math.negativePiToPi(o.az - hRad - Math.PI);
+      const el = o.el, dist = o.dist;
+      const pan = heliPanRef.current;
+      const panWorld = Cesium.Matrix4.multiplyByPointAsVector(
+        modelMatrix, new Cesium.Cartesian3(pan.x, pan.y, pan.z), new Cesium.Cartesian3(),
+      );
+      // Center on fuselage centroid (0.7, 0, 0.4) for all chase modes
+      const lookOffsetLocal = new Cesium.Cartesian3(0.7, 0, 0.4);
+      const lookOffsetWorld = Cesium.Matrix4.multiplyByPointAsVector(
+        modelMatrix, lookOffsetLocal, new Cesium.Cartesian3(),
+      );
+      const lookTarget = Cesium.Cartesian3.add(
+        Cesium.Cartesian3.add(pos, panWorld, new Cesium.Cartesian3()),
+        lookOffsetWorld,
+        new Cesium.Cartesian3(),
+      );
+
+      // Spherical placement around lookTarget:
+      // relAz = 0 is directly behind the tail boom (-X) looking forward (+X)
+      const ce = Math.cos(el);
+      const local = new Cesium.Cartesian3(
+        -dist * ce * Math.cos(relAz),
+        dist * ce * Math.sin(relAz),
+        dist * Math.sin(el),
+      );
+      camPos = Cesium.Matrix4.multiplyByPointAsVector(modelMatrix, local, new Cesium.Cartesian3());
+      Cesium.Cartesian3.add(lookTarget, camPos, camPos);
+
+      // Terrain clearance: ensure camera never dips below terrain
+      try {
+        const camGeo = v.scene.globe.ellipsoid.cartesianToCartographic(camPos, new Cesium.Cartographic());
+        const deck = heliGroundHeight(v, Cesium.Math.toDegrees(camGeo.latitude), Cesium.Math.toDegrees(camGeo.longitude));
+        if (camGeo.height < deck + 3.0) {
+          const pen = deck + 3.0 - camGeo.height;
+          // 1. Lift vertically along surface normal
+          const lift = new Cesium.Cartesian3();
+          v.scene.globe.ellipsoid.geodeticSurfaceNormal(camPos, lift);
+          Cesium.Cartesian3.multiplyByScalar(lift, pen * 0.7, lift);
+          Cesium.Cartesian3.add(camPos, lift, camPos);
+          // 2. Pull camera closer toward lookTarget so ridges behind don't obscure
+          const toTarget = Cesium.Cartesian3.subtract(lookTarget, camPos, new Cesium.Cartesian3());
+          const dTarget = Cesium.Cartesian3.magnitude(toTarget);
+          if (dTarget > 12) {
+            Cesium.Cartesian3.normalize(toTarget, toTarget);
+            Cesium.Cartesian3.multiplyByScalar(toTarget, Math.min(pen * 1.2, dTarget - 10), toTarget);
+            Cesium.Cartesian3.add(camPos, toTarget, camPos);
+          }
+        }
+      } catch { /* terrain probe unavailable — keep the rig framing */ }
+
+      const toHeli = Cesium.Cartesian3.subtract(lookTarget, camPos, new Cesium.Cartesian3());
+      const enu = Cesium.Transforms.eastNorthUpToFixedFrame(camPos, Cesium.Ellipsoid.WGS84, new Cesium.Matrix4());
+      const enuInv = Cesium.Matrix4.inverseTransformation(enu, new Cesium.Matrix4());
+      const dir = Cesium.Matrix4.multiplyByPointAsVector(enuInv, toHeli, new Cesium.Cartesian3());
+      const horiz = Math.hypot(dir.x, dir.y);
+      camHeading = horiz > 1e-3 ? Math.atan2(dir.x, dir.y) : Cesium.Math.negativePiToPi(o.az);
+      camPitch = Math.atan2(dir.z, Math.max(horiz, 1e-6));
+    }
+    frustum.fov = camFov;
+    v.camera.setView({
+      destination: camPos,
+      orientation: { heading: camHeading, pitch: camPitch, roll: camRoll },
+    });
+    v.scene.requestRender();
+  }
+
+  function exitHeliSim(v: Cesium.Viewer) {
+    if (!heliActiveRef.current) return;
+    heliActiveRef.current = false;
+    heliStopRafRef.current = true;
+    setHeliFlying(false);
+    setHeliHud(null);
+    heliSimRef.current = null;
+    if (heliAudioRef.current) { heliAudioRef.current.stop(); heliAudioRef.current = null; }
+    if (heliScreensRef.current) { heliScreensRef.current.destroy(); heliScreensRef.current = null; }
+    heliCtlRef.current = null;
+    setHeliCtl(null);
+    if (heliPreRenderRef.current) { heliPreRenderRef.current(); heliPreRenderRef.current = null; }
+    if (heliHudIntRef.current) { clearInterval(heliHudIntRef.current); heliHudIntRef.current = null; }
+    if (heliHandlersRef.current) {
+      window.removeEventListener('keydown', heliHandlersRef.current.down);
+      window.removeEventListener('keyup', heliHandlersRef.current.up);
+      window.removeEventListener('blur', heliHandlersRef.current.blur);
+      heliHandlersRef.current = null;
+    }
+    if (heliDragCleanupRef.current) { heliDragCleanupRef.current(); heliDragCleanupRef.current = null; }
+    if (heliModelRef.current) {
+      try { v.scene.primitives.remove(heliModelRef.current); } catch { /* ignore */ }
+      heliModelRef.current = null;
+    }
+    heliMainRotorRef.current = null;
+    heliTailRotorRef.current = null;
+    heliHoverAssistRef.current = false;
+    heliTurbRef.current = false;
+    const ctrl = v.scene.screenSpaceCameraController;
+    ctrl.enableRotate = true; ctrl.enableZoom = true; ctrl.enableTilt = true; ctrl.enableTranslate = true;
+    const exitFrustum = v.camera.frustum as Cesium.PerspectiveFrustum;
+    exitFrustum.fov = Cesium.Math.toRadians(60);
+    exitFrustum.near = 1.0;
+    const saved = heliSavedViewRef.current;
+    heliSavedViewRef.current = null;
+    if (saved) {
+      v.camera.flyTo({
+        destination: saved.pos,
+        orientation: { heading: saved.hdg, pitch: saved.pitch, roll: saved.roll },
+        duration: 1.5, easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+      });
+    }
+    if (heliSavedSidebarRef.current === false) {
+      setSidebarCollapsed(false);
+      heliSavedSidebarRef.current = null;
+    }
+    showNotification('Exited Helicopter Flight Simulator', 'info');
+  }
+
+  const HELI_PULSE_MS = 320;
+  function heliLook(action: string) {
+    if (!heliActiveRef.current) return;
+    const k = heliKeysRef.current;
+    const pulse = (apply: () => void, clear: () => void) => {
+      apply();
+      setTimeout(clear, HELI_PULSE_MS);
+    };
+    switch (action) {
+      case 'up':
+        pulse(() => {
+          k.pitch = 1;
+          if (heliInputRef.current.collective < 0.65) {
+            heliInputRef.current.collective = 0.75;
+            if (heliCtlRef.current && !heliCtlRef.current.collectiveLocked) heliCtlRef.current.collective = 0.75;
+          }
+          if (heliInputRef.current.throttle < 0.85) {
+            heliInputRef.current.throttle = 1.0;
+            if (heliCtlRef.current) heliCtlRef.current.throttle = 1.0;
+          }
+        }, () => { k.pitch = 0; });
+        break;
+      case 'down': pulse(() => { k.pitch = -0.75; }, () => { k.pitch = 0; }); break;
+      case 'left': pulse(() => { k.roll = -0.75; k.pedal = -0.75; }, () => { k.roll = 0; k.pedal = 0; }); break;
+      case 'right': pulse(() => { k.roll = 0.75; k.pedal = 0.75; }, () => { k.roll = 0; k.pedal = 0; }); break;
+      case 'collup': pulse(() => { k.w = true; }, () => { k.w = false; }); break;
+      case 'colldown': pulse(() => { k.s = true; }, () => { k.s = false; }); break;
+      case 'thrup': pulse(() => { k.thr = 1; }, () => { k.thr = 0; }); break;
+      case 'thrdown': pulse(() => { k.thr = -1; }, () => { k.thr = 0; }); break;
+      case 'chase-close':
+        heliSetMode('chase-close');
+        break;
+      case 'chase-wide':
+        heliSetMode('chase-wide');
+        break;
+      case 'chase': case 'external':
+        heliSetMode('chase-close');
+        break;
+      case 'orbit':
+        if (heliRigRef.current) {
+          const isOrb = heliRigRef.current.mode === 'orbit';
+          heliRigRef.current.mode = isOrb ? 'chase' : 'orbit';
+          setHeliOrbitMode(!isOrb);
+          showNotification(!isOrb ? 'Camera: free ORBIT (rotate/pan)' : 'Camera: dynamic CHASE', 'info');
+        }
+        break;
+      case 'cockpit': heliSetMode('cockpit'); break;
+      case 'topdown': heliSetMode('topdown'); break;
+      case 'zoomin':
+        if (heliModeRef.current === 'external') { if (heliRigRef.current) heliRigRef.current.nudgeZoom(-0.22); else heliOrbitRef.current.distTarget = Math.max(0.05, heliOrbitRef.current.distTarget * 0.8); }
+        else if (heliModeRef.current === 'topdown') heliTopdownHeightRef.current = Math.max(15, heliTopdownHeightRef.current * 0.8);
+        else heliFovRef.current = Math.max(HELI_FOV_MIN, heliFovRef.current - Cesium.Math.toRadians(6));
+        break;
+      case 'zoomout':
+        if (heliModeRef.current === 'external') { if (heliRigRef.current) heliRigRef.current.nudgeZoom(0.22); else heliOrbitRef.current.distTarget = Math.min(8000, heliOrbitRef.current.distTarget * 1.25); }
+        else if (heliModeRef.current === 'topdown') heliTopdownHeightRef.current = Math.min(5000, heliTopdownHeightRef.current * 1.25);
+        else heliFovRef.current = Math.min(HELI_FOV_MAX, heliFovRef.current + Cesium.Math.toRadians(6));
+        break;
+      case 'reset': heliResetSim(); break;
+    }
   }
 
   const travelToFlight = useCallback((f: { id: string; name: string; lat: number; lon: number; altitude: number; velocity: number; heading: number; verticalRate: number }) => {
@@ -8985,6 +9973,12 @@ case 'openPanel':
     } else {
       setIsAutoRotating(true);
       const rotateFrame = () => {
+        // the flying-camera rigs (heli sim / travel views) own the camera while
+        // active — never fight them; auto-rotate resumes after they exit
+        if (heliActiveRef.current || satTravelRef.current || flightTravelRef.current) {
+          rotateTimerRef.current = requestAnimationFrame(rotateFrame) as unknown as ReturnType<typeof setInterval>;
+          return;
+        }
         if (document.hidden) {
           rotateTimerRef.current = requestAnimationFrame(rotateFrame) as unknown as ReturnType<typeof setInterval>;
           return;
@@ -10001,6 +10995,19 @@ case 'openPanel':
           />
 
           <TopbarMenu
+            id="fly" title="Flight Simulator" icon={<Rocket size={16} />}
+            menuId={openMenu} setMenuId={setOpenMenu}
+            active={heliFlying}
+            items={[
+              { label: 'Apache Helicopter Sim', icon: <Rocket size={15} />, active: heliFlying || showHelicopterPanel, onClick: () => setShowHelicopterPanel(p => !p) },
+              ...(heliFlying ? [{
+                label: 'Exit Flight', icon: <X size={15} />,
+                onClick: () => { const v = viewerRef.current; if (v) exitHeliSim(v); },
+              }] : []),
+            ]}
+          />
+
+          <TopbarMenu
             id="view" title="View & Capture" icon={<Eye size={16} />}
             menuId={openMenu} setMenuId={setOpenMenu}
             active={isLayerEnabled('india_cctv') || showTimeline || isAutoRotating}
@@ -10624,6 +11631,43 @@ case 'openPanel':
         />
       )}
 
+      {showHelicopterPanel && (
+        <HelicopterPanel
+          onClose={() => setShowHelicopterPanel(false)}
+          onLaunch={(sp) => {
+            const v = viewerRef.current;
+            if (!v) return;
+            const spawn = sp.label === 'Current view' ? { ...sp, ...(getCurrentViewPosition() ?? { lat: 28.61, lon: 77.21 }) } : sp;
+            setShowHelicopterPanel(false);
+            enterHeliSim(v, spawn);
+          }}
+        />
+      )}
+
+      {heliFlying && heliHud && (
+        <HelicopterHud
+          hud={heliHud}
+          orbitMode={heliOrbitMode}
+          ctl={heliCtl}
+          deck={heliDeckRef}
+          deckMode={heliDeckMode}
+          airframe={heliProfileRef.current.label}
+          fps={heliFps}
+          fadeKey={heliFade}
+          onStarter={(on: boolean) => { heliStarterRef.current = on; }}
+          input={heliInputRef.current}
+          mode={heliModeRef.current}
+          hoverAssist={heliHoverAssistRef.current}
+          turbulence={heliTurbRef.current}
+          onLook={(a) => heliLook(a)}
+          onCapture={() => takeSnapshot()}
+          onExit={() => { const v = viewerRef.current; if (v) exitHeliSim(v); }}
+          onSwitch={heliApplySwitch}
+          onControl={heliApplyControl}
+          onStick={heliApplyStick}
+        />
+      )}
+
 
       {/* Weather Cards */}
       {weatherCards.map(wc => (
@@ -10987,7 +12031,7 @@ case 'openPanel':
       <PanelSuspense><LazySatelliteImageryPanel viewer={viewerRef.current} show={showSatelliteImagery} onClose={() => setShowSatelliteImagery(false)} zIndex={getPanelZIndex('satellite-imagery')} studyAreaBbox={activeBbox} /></PanelSuspense>
 
       {/* First-run mission card */}
-      {showFirstRun && (
+      {showFirstRun && !heliFlying && (
         <FirstRunCard
           onDismiss={() => setShowFirstRun(false)}
           onStage={(mission) => { stageFirstRunMission(mission); setShowFirstRun(false); }}
