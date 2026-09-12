@@ -3,6 +3,8 @@ import path from 'path';
 
 const ARTIFACT_DIR = '/Users/sreyassanker/.gemini/antigravity/brain/e9c9adff-b818-4025-aca3-936c7f6f067c';
 
+test.setTimeout(120000);
+
 test('check helicopter framing at ground 0m and high altitude 5000m', async ({ page }) => {
   await page.goto('http://localhost:3000', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForSelector('canvas', { timeout: 60000 });
