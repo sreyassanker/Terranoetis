@@ -6099,8 +6099,10 @@ export default function App() {
       const panWorld = Cesium.Matrix4.multiplyByPointAsVector(
         modelMatrix, new Cesium.Cartesian3(pan.x, pan.y, pan.z), new Cesium.Cartesian3(),
       );
-      // Center on fuselage centroid (0.7, 0, 0.4) for all chase modes
-      const lookOffsetLocal = new Cesium.Cartesian3(0.7, 0, 0.4);
+      // Center on fuselage centroid for all chase modes.
+      // Offset Z (-0.45m) centers the entire airframe (including landing gear and rotors)
+      // cleanly in the open sky area above the bottom dock, so the control box never obscures the aircraft.
+      const lookOffsetLocal = new Cesium.Cartesian3(0.7, 0, -0.45);
       const lookOffsetWorld = Cesium.Matrix4.multiplyByPointAsVector(
         modelMatrix, lookOffsetLocal, new Cesium.Cartesian3(),
       );
@@ -6125,8 +6127,8 @@ export default function App() {
       try {
         const camGeo = v.scene.globe.ellipsoid.cartesianToCartographic(camPos, new Cesium.Cartographic());
         const deck = heliGroundHeight(v, Cesium.Math.toDegrees(camGeo.latitude), Cesium.Math.toDegrees(camGeo.longitude));
-        if (camGeo.height < deck + 3.0) {
-          const pen = deck + 3.0 - camGeo.height;
+        if (camGeo.height < deck + 1.8) {
+          const pen = deck + 1.8 - camGeo.height;
           // 1. Lift vertically along surface normal
           const lift = new Cesium.Cartesian3();
           v.scene.globe.ellipsoid.geodeticSurfaceNormal(camPos, lift);
@@ -6135,9 +6137,9 @@ export default function App() {
           // 2. Pull camera closer toward lookTarget so ridges behind don't obscure
           const toTarget = Cesium.Cartesian3.subtract(lookTarget, camPos, new Cesium.Cartesian3());
           const dTarget = Cesium.Cartesian3.magnitude(toTarget);
-          if (dTarget > 12) {
+          if (dTarget > 15) {
             Cesium.Cartesian3.normalize(toTarget, toTarget);
-            Cesium.Cartesian3.multiplyByScalar(toTarget, Math.min(pen * 1.2, dTarget - 10), toTarget);
+            Cesium.Cartesian3.multiplyByScalar(toTarget, Math.min(pen * 0.8, dTarget - 14), toTarget);
             Cesium.Cartesian3.add(camPos, toTarget, camPos);
           }
         }

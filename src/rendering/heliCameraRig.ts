@@ -46,11 +46,11 @@ export interface ChaseRigConfig {
 
 export const CHASE_CLOSE_CONFIG = (over: Partial<ChaseRigConfig> = {}): ChaseRigConfig => ({
   // Close gaming chase cam: positioned right behind the tail boom looking directly
-  // along the airframe axis with the helicopter centered on screen (like GTA/DCS gaming chase).
-  d0: 21, kv: 0.18, ka: 0.015, dMin: 14, dMax: 36,
+  // along the airframe axis with the helicopter centered on screen at all altitudes (0m to 5000m+).
+  d0: 21, kv: 0.18, ka: 0, dMin: 18, dMax: 26,
   fovClose: 1.12, fovFar: 1.25, fovSpeedK: 0.08, fovMin: 0.85, fovMax: 1.65, // radians
-  elBase: 0.16, bankK: 0.08, pitchLeadK: 0.15,
-  aglKnee: 200, elLow: 0.08, kaLow: 0.5,
+  elBase: 0.18, bankK: 0.08, pitchLeadK: 0.15,
+  aglKnee: 200, elLow: 0.18, kaLow: 1.0,
   omega: 5.0, zeta: 0.95,
   fovOmega: 2.0, rollOmega: 2.8,
   tauReturn: 5,

@@ -976,7 +976,7 @@ const css = `
 .hxdock-inner { pointer-events: none; display: flex; flex-direction: column; gap: 7px; align-items: center;
   background: rgba(8,20,30,.75); border: 1px solid rgba(125,211,252,.25); border-radius: 10px;
   padding: 8px 12px; backdrop-filter: blur(6px); box-shadow: 0 8px 24px rgba(0,0,0,.5); max-width: 94vw; }
-.hxdock-telem { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; font-size: 10px; pointer-events: none; }
+.hxdock-telem { display: flex; flex-wrap: nowrap; gap: 7px; justify-content: center; align-items: center; font-size: 9.5px; pointer-events: none; max-width: 100%; overflow-x: auto; }
 .hxdock-hint { pointer-events: none; }
 .hxdock-inner .hxf-controls, .hxdock-inner .hxf-systems { pointer-events: auto; }
 .hxdock-chip { display: inline-flex; gap: 4px; align-items: baseline; letter-spacing: .04em; }
