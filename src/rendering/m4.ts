@@ -58,25 +58,28 @@ export function mtxTR(tx: number, ty: number, tz: number, rx = 0, ry = 0, rz = 0
   return matMult(mtxTranslation(tx, ty, tz), mtxEuler(rx, ry, rz));
 }
 
-/** Quaternion from unit vectors (like three.js setFromUnitVectors) → M4. */
+/** Quaternion from unit vectors (matching Three.js setFromUnitVectors) → column-major M4. */
 export function mtxFromUnitVectors(from: [number, number, number], to: [number, number, number]): M4 {
   const [fx, fy, fz] = from;
   const [tx, ty, tz] = to;
-  let [qx, qy, qz, qw] = [0, 0, 0, 1];
-  const r = new Float64Array(3);
-  r[0] = fx + tx; r[1] = fy + ty; r[2] = fz + tz;
   const dot = fx * tx + fy * ty + fz * tz;
-  const len = Math.hypot(r[0], r[1], r[2]);
-  if (len < 1e-9) {
-    // from and to are opposite — pick an orthogonal axis
-    qx = (Math.abs(fy) < 0.999) ? fy : 1; qy = -fx; qz = (Math.abs(fy) < 0.999) ? 0 : fx;
-    qw = 0;
+  let qx = 0, qy = 0, qz = 0, qw = 1;
+  if (dot < -0.999999) {
+    // 180-degree rotation: pick an axis orthogonal to `from`
+    if (Math.abs(fx) > Math.abs(fz)) {
+      qx = -fy; qy = fx; qz = 0; qw = 0;
+    } else {
+      qx = 0; qy = -fz; qz = fy; qw = 0;
+    }
   } else {
-    r[0] /= len; r[1] /= len; r[2] /= len;
-    qx = r[0]; qy = r[1]; qz = r[2]; qw = 1 + dot;
-    const invLen = 1 / Math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
-    qx *= invLen; qy *= invLen; qz *= invLen; qw *= invLen;
+    // Cross product: from x to
+    qx = fy * tz - fz * ty;
+    qy = fz * tx - fx * tz;
+    qz = fx * ty - fy * tx;
+    qw = 1 + dot;
   }
+  const invLen = 1 / Math.hypot(qx, qy, qz, qw);
+  qx *= invLen; qy *= invLen; qz *= invLen; qw *= invLen;
   // quaternion → column-major rotation matrix
   return [
     1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy + qw * qz), 2 * (qx * qz - qw * qy), 0,

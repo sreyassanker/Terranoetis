@@ -61,11 +61,11 @@ describe('HeliControls', () => {
     expect(o.engine).toBe(false);
   });
 
-  it('fuel starvation trips FLAMEOUT-FUEL and gates the engine', () => {
+  it('operates continuously without fuel starvation flameout', () => {
     const c = new HeliControls(); const o = cmd();
-    c.update(1 / 60, raw({ fuelKg: 0.2 }), o);
-    expect(c.drainEvents()).toContain('flameout-fuel');
-    expect(o.engine).toBe(false);
+    c.update(1 / 60, raw({ fuelKg: 0 }), o);
+    expect(c.drainEvents()).not.toContain('flameout-fuel');
+    expect(o.engine).toBe(true);
   });
 
   it('friction lock freezes the collective against keys and widget input', () => {

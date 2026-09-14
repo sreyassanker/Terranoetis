@@ -9,7 +9,8 @@ import type { DeckPanel } from '@/rendering/cockpitAnchors';
 
 export type HeliLookAction = 'up' | 'down' | 'left' | 'right' | 'reset' | 'cockpit' | 'external'
   | 'topdown' | 'zoomin' | 'zoomout' | 'chase' | 'orbit' | 'collup' | 'colldown' | 'thrup' | 'thrdown'
-  | 'chase-close' | 'chase-wide';
+  | 'chase-close' | 'chase-wide'
+  | 'inspect-rotor' | 'inspect-nose' | 'inspect-tail' | 'inspect-gear' | 'inspect-weapons' | 'inspect-cpg';
 
 export type HeliSwitch = 'engine' | 'hover' | 'turb' | 'trim' | 'friction' | 'battery' | 'master' | 'ecl';
 
@@ -480,30 +481,38 @@ export function HelicopterHud({
           <Crosshair size={11} /> STICK {showControls ? 'ON' : 'OFF'}
         </button>
       </div>
-      <div className="hxf-sys-title">CAMERAS</div>
+      <div className="hxf-sys-title">CAMERAS &amp; INSPECTION</div>
       <div className="hxf-swatch-row">
         <button data-testid="hxf-sw-chase" className={`hxf-sw ${mode === 'chase-close' || (mode === 'external' && !orbitMode) ? 'on' : ''}`} onClick={() => onLook('chase-close')}><Video size={11} /> CLOSE</button>
         <button data-testid="hxf-sw-wide" className={`hxf-sw ${mode === 'chase-wide' ? 'on' : ''}`} onClick={() => onLook('chase-wide')}><Scan size={11} /> WIDE</button>
         <button data-testid="hxf-sw-orbit" className={`hxf-sw ${orbitMode ? 'on' : ''}`} onClick={() => onLook('orbit')}><RotateCcw size={11} /> ORB</button>
         <button data-testid="hxf-sw-cpit" className={`hxf-sw ${mode === 'cockpit' ? 'on' : ''}`} onClick={() => onLook('cockpit')}><Rocket size={11} /> CPIT</button>
         <button className={`hxf-sw ${mode === 'topdown' ? 'on' : ''}`} onClick={() => onLook('topdown')}><MapPin size={11} /> TOP</button>
-        {ctl && (
-          <>
-            <div className="hxf-sys-title" style={{ marginTop: 6 }}>TACTICAL · ECL {['CUTOFF', 'IDLE', 'FLIGHT'][ctl.ecl]}</div>
-            <div className="hxf-swatch-row" data-testid="hxf-tactical">
-              <button data-testid="hxf-ecl" className={`hxf-sw ${ctl.ecl > 0 ? 'on' : ''}`} onClick={() => onSwitch('ecl')}>ECL·{['CUT', 'IDL', 'FLT'][ctl.ecl]}</button>
-              <button data-testid="hxf-starter" className={`hxf-sw ${ctl.starterEngaged ? 'on' : ''}`}
-                onPointerDown={(e) => { try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* synthetic pointer */ } onStarter?.(true); }}
-                onPointerUp={() => onStarter?.(false)}
-                onPointerCancel={() => onStarter?.(false)}
-              >START</button>
-              <button data-testid="hxf-fric" className={`hxf-sw ${ctl.collectiveLocked ? 'on' : ''}`} onClick={() => onSwitch('friction')}>FRIC</button>
-              <button data-testid="hxf-batt" className={`hxf-sw ${ctl.battery ? 'on' : ''}`} onClick={() => onSwitch('battery')}>BATT</button>
-              <button data-testid="hxf-avn" className={`hxf-sw ${ctl.avionicsMaster ? 'on' : ''}`} onClick={() => onSwitch('master')}>AVN</button>
-              <span className={`hxf-sw ${ctl.generatorOnline ? 'on' : ''}`} style={{ cursor: 'default' }}>GEN</span>
-            </div>
-          </>
-        )}
+        <button data-testid="hxf-insp-rotor" className="hxf-sw" title="Inspect Main Rotor Head &amp; APG-78 Radar" onClick={() => onLook('inspect-rotor')}>ROTOR</button>
+        <button data-testid="hxf-insp-nose" className="hxf-sw" title="Inspect TADS/PNVS Sensor Turret &amp; Chain Gun" onClick={() => onLook('inspect-nose')}>NOSE</button>
+        <button data-testid="hxf-insp-cpg" className="hxf-sw" title="Inspect CPG Copilot/Gunner Station" onClick={() => onLook('inspect-cpg')}>CPG</button>
+        <button data-testid="hxf-insp-tail" className="hxf-sw" title="Inspect Tail Boom, Stabilator &amp; Tail Rotor" onClick={() => onLook('inspect-tail')}>TAIL</button>
+        <button data-testid="hxf-insp-gear" className="hxf-sw" title="Inspect Trailing Arm Landing Gear" onClick={() => onLook('inspect-gear')}>GEAR</button>
+        <button data-testid="hxf-insp-weapons" className="hxf-sw" title="Inspect Wings, Hellfire Missiles &amp; Rocket Pods" onClick={() => onLook('inspect-weapons')}>WEAPONS</button>
+      </div>
+      {ctl && (
+        <>
+          <div className="hxf-sys-title" style={{ marginTop: 6 }}>TACTICAL · ECL {['CUTOFF', 'IDLE', 'FLIGHT'][ctl.ecl]}</div>
+          <div className="hxf-swatch-row" data-testid="hxf-tactical">
+            <button data-testid="hxf-ecl" className={`hxf-sw ${ctl.ecl > 0 ? 'on' : ''}`} onClick={() => onSwitch('ecl')}>ECL·{['CUT', 'IDL', 'FLT'][ctl.ecl]}</button>
+            <button data-testid="hxf-starter" className={`hxf-sw ${ctl.starterEngaged ? 'on' : ''}`}
+              onPointerDown={(e) => { try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* synthetic pointer */ } onStarter?.(true); }}
+              onPointerUp={() => onStarter?.(false)}
+              onPointerCancel={() => onStarter?.(false)}
+            >START</button>
+            <button data-testid="hxf-fric" className={`hxf-sw ${ctl.collectiveLocked ? 'on' : ''}`} onClick={() => onSwitch('friction')}>FRIC</button>
+            <button data-testid="hxf-batt" className={`hxf-sw ${ctl.battery ? 'on' : ''}`} onClick={() => onSwitch('battery')}>BATT</button>
+            <button data-testid="hxf-avn" className={`hxf-sw ${ctl.avionicsMaster ? 'on' : ''}`} onClick={() => onSwitch('master')}>AVN</button>
+            <span className={`hxf-sw ${ctl.generatorOnline ? 'on' : ''}`} style={{ cursor: 'default' }}>GEN</span>
+          </div>
+        </>
+      )}
+      <div className="hxf-swatch-row" style={{ marginTop: 4 }}>
         <button className="hxf-sw" onClick={() => onLook('zoomin')}>+</button>
         <button className="hxf-sw" onClick={() => onLook('zoomout')}>−</button>
         <button className="hxf-sw" onClick={() => onLook('reset')}><RotateCcw size={11} /> RST</button>

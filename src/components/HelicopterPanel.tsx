@@ -32,7 +32,7 @@ export function HelicopterPanel({ onLaunch, onClose }: HelicopterPanelProps) {
   const [city, setCity] = useState(HELI_SPAWN_CITIES[0].label);
   const [altM, setAltM] = useState(500);
   const [coldStart, setColdStart] = useState(false);
-  const [airframe, setAirframe] = useState<'AH64E' | 'HELIDRIVE_X'>('AH64E');
+  const [airframe] = useState<'AH64E'>('AH64E');
 
   const selected = HELI_SPAWN_CITIES.find(c => c.label === city)!;
 
@@ -110,21 +110,40 @@ export function HelicopterPanel({ onLaunch, onClose }: HelicopterPanelProps) {
             </>
           )}
 
-          {/* airframe */}
-          <div style={{ display: 'flex', gap: 6 }}>
-            {([['AH64E', 'AH-64E APACHE', 'the honest attack helicopter — Vne 150 kt'],
-               ['HELIDRIVE_X', 'HELIDRIVE-X COMPOUND', 'experimental: coaxial + pusher + wing · Vne 250 kt']] as const).map(([id, name, hint]) => (
-              <button
-                key={id} data-testid={`heli-air-${id}`} title={hint}
-                onClick={() => setAirframe(id)}
-                style={{
-                  flex: 1, padding: '7px 8px', borderRadius: 6, fontSize: 10, cursor: 'pointer',
-                  background: airframe === id ? 'rgba(94,200,255,0.14)' : 'transparent',
-                  border: `1px solid ${airframe === id ? 'rgba(94,200,255,0.55)' : 'rgba(255,255,255,0.15)'}`,
-                  color: airframe === id ? '#5ec8ff' : '#94a3b8',
-                }}
-              >{name}</button>
-            ))}
+          {/* airframe badge (single unified AH-64E airframe) */}
+          <div
+            data-testid="heli-air-AH64E"
+            style={{
+              padding: '8px 12px',
+              borderRadius: 6,
+              background: 'rgba(34, 197, 94, 0.08)',
+              border: '1px solid rgba(34, 197, 94, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#86efac', letterSpacing: '0.04em' }}>
+                AH-64E APACHE GUARDIAN
+              </div>
+              <div style={{ fontSize: 9.5, color: '#94a3b8', marginTop: 2 }}>
+                Heavy Attack · Twin Turboshaft · 4-Blade Main Rotor
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 600,
+                color: '#4ade80',
+                background: 'rgba(34, 197, 94, 0.2)',
+                padding: '2px 7px',
+                borderRadius: 4,
+                letterSpacing: '0.05em',
+              }}
+            >
+              ACTIVE
+            </span>
           </div>
 
           {/* cold & dark */}

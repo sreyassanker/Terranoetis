@@ -201,15 +201,23 @@ build(opts: BuildOptions = {}): CompiledGltf {
       if (root.matrix) node.matrix = root.matrix;
       gltfNodes.push(node);
       sceneChildren.push(nodeIdx);
-      if (root.name) nodeMap.set(root.name, nodeIdx);
-      for (const b of buckets.values()) emitBucketNode(b, node.children);
+      const sortBuckets = (list: Bucket[]) => {
+        return [...list].sort((a, b) => {
+          const matA = this.materials[a.material] as { alphaMode?: string };
+          const matB = this.materials[b.material] as { alphaMode?: string };
+          const aBlend = matA?.alphaMode === 'BLEND' ? 1 : 0;
+          const bBlend = matB?.alphaMode === 'BLEND' ? 1 : 0;
+          return aBlend - bBlend;
+        });
+      };
+      for (const b of sortBuckets([...buckets.values()])) emitBucketNode(b, node.children);
       for (const cut of cuts) {
         const cutIdx = gltfNodes.length;
         const cutNode: Record<string, unknown> & { children: number[] } = { name: cut.name, matrix: cut.matrix, children: [] };
         gltfNodes.push(cutNode);
         node.children.push(cutIdx);
         nodeMap.set(cut.name, cutIdx);
-        for (const b of cut.buckets.values()) emitBucketNode(b, cutNode.children);
+        for (const b of sortBuckets([...cut.buckets.values()])) emitBucketNode(b, cutNode.children);
       }
     }
 
@@ -327,14 +335,14 @@ export function buildBoxMesh(sx: number, sy: number, sz: number): GltfMesh {
   return { pos, idx };
 }
 
-export function buildCylinderMesh(radius: number, halfH: number, segments: number): GltfMesh {
+export function buildCylinderMesh(radius: number, halfH: number, segments: number, radiusBottom = radius): GltfMesh {
   const pos: number[] = [];
   const idx: number[] = [];
   for (let i = 0; i <= segments; i++) {
     const a = (i / segments) * Math.PI * 2;
-    const x = Math.cos(a) * radius, z = Math.sin(a) * radius;
-    pos.push(x, halfH, z);
-    pos.push(x, -halfH, z);
+    const cosA = Math.cos(a), sinA = Math.sin(a);
+    pos.push(cosA * radius, halfH, sinA * radius);
+    pos.push(cosA * radiusBottom, -halfH, sinA * radiusBottom);
   }
   for (let i = 0; i < segments; i++) {
     const b = i * 2;
@@ -368,6 +376,40 @@ export function buildSphereMesh(radius: number, stacks = 10, slices = 12): GltfM
   for (let i = 0; i < stacks; i++) for (let j = 0; j < slices; j++) {
     const a = i * cols + j, b = a + 1, c = (i + 1) * cols + j, d = c + 1;
     idx.push(a, c, b, b, c, d);
+  }
+  return { pos, idx, normals };
+}
+
+export function buildHemisphereCapMesh(radius: number, height: number, stacks = 8, slices = 16): GltfMesh {
+  const pos: number[] = [];
+  const normals: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i <= stacks; i++) {
+    const phi = (i / stacks) * (Math.PI / 2);
+    for (let j = 0; j <= slices; j++) {
+      const theta = (j / slices) * Math.PI * 2;
+      const x = Math.sin(phi) * Math.cos(theta);
+      const y = Math.cos(phi);
+      const z = Math.sin(phi) * Math.sin(theta);
+      const nx = x, ny = y * (radius / Math.max(0.01, height)), nz = z;
+      const nlen = Math.hypot(nx, ny, nz) || 1;
+      pos.push(x * radius, y * height, z * radius);
+      normals.push(nx / nlen, ny / nlen, nz / nlen);
+    }
+  }
+  const cols = slices + 1;
+  for (let i = 0; i < stacks; i++) {
+    for (let j = 0; j < slices; j++) {
+      const a = i * cols + j, b = a + 1, c = (i + 1) * cols + j, d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+  }
+  const centerIdx = pos.length / 3;
+  pos.push(0, 0, 0);
+  normals.push(0, -1, 0);
+  const bottomRingStart = stacks * cols;
+  for (let j = 0; j < slices; j++) {
+    idx.push(centerIdx, bottomRingStart + j, bottomRingStart + j + 1);
   }
   return { pos, idx, normals };
 }
@@ -411,4 +453,72 @@ export function buildTorusMesh(radius: number, tube: number, radial = 10, tubula
 /** Triangle soup helper: build a mesh from explicit vertex/index arrays. */
 export function rawMesh(pos: number[], idx: number[]): GltfMesh {
   return { pos, idx };
+}
+
+/** Builds a continuous seamless tubular sweep along a 3D polyline without individual segment caps. */
+export function buildContinuousTubeMesh(pts: [number, number, number][], radius: number, radialSeg = 10): GltfMesh {
+  if (pts.length < 2) return { pos: [], idx: [] };
+  const pos: number[] = [];
+  const idx: number[] = [];
+  const normals: number[] = [];
+  const n = pts.length;
+
+  let prevNormal: [number, number, number] = [0, 1, 0];
+
+  for (let i = 0; i < n; i++) {
+    let tx = 0, ty = 0, tz = 0;
+    if (i === 0) {
+      tx = pts[1][0] - pts[0][0]; ty = pts[1][1] - pts[0][1]; tz = pts[1][2] - pts[0][2];
+    } else if (i === n - 1) {
+      tx = pts[n - 1][0] - pts[n - 2][0]; ty = pts[n - 1][1] - pts[n - 2][1]; tz = pts[n - 1][2] - pts[n - 2][2];
+    } else {
+      tx = pts[i + 1][0] - pts[i - 1][0]; ty = pts[i + 1][1] - pts[i - 1][1]; tz = pts[i + 1][2] - pts[i - 1][2];
+    }
+    const tlen = Math.hypot(tx, ty, tz) || 1;
+    tx /= tlen; ty /= tlen; tz /= tlen;
+
+    const dot = prevNormal[0] * tx + prevNormal[1] * ty + prevNormal[2] * tz;
+    let nx = prevNormal[0] - dot * tx;
+    let ny = prevNormal[1] - dot * ty;
+    let nz = prevNormal[2] - dot * tz;
+    let nlen = Math.hypot(nx, ny, nz);
+    if (nlen < 1e-4) {
+      const altX = Math.abs(tx) > 0.9 ? 0 : 1;
+      const altY = Math.abs(tx) > 0.9 ? 1 : 0;
+      const altZ = 0;
+      const dotAlt = altX * tx + altY * ty + altZ * tz;
+      nx = altX - dotAlt * tx;
+      ny = altY - dotAlt * ty;
+      nz = altZ - dotAlt * tz;
+      nlen = Math.hypot(nx, ny, nz) || 1;
+    }
+    nx /= nlen; ny /= nlen; nz /= nlen;
+    prevNormal = [nx, ny, nz];
+
+    const bx = ty * nz - tz * ny;
+    const by = tz * nx - tx * nz;
+    const bz = tx * ny - ty * nx;
+
+    for (let s = 0; s <= radialSeg; s++) {
+      const angle = (s / radialSeg) * Math.PI * 2;
+      const cosA = Math.cos(angle), sinA = Math.sin(angle);
+      const vx = nx * cosA + bx * sinA;
+      const vy = ny * cosA + by * sinA;
+      const vz = nz * cosA + bz * sinA;
+      pos.push(pts[i][0] + vx * radius, pts[i][1] + vy * radius, pts[i][2] + vz * radius);
+      normals.push(vx, vy, vz);
+    }
+  }
+
+  const cols = radialSeg + 1;
+  for (let i = 0; i < n - 1; i++) {
+    for (let s = 0; s < radialSeg; s++) {
+      const a = i * cols + s;
+      const b = a + 1;
+      const c = (i + 1) * cols + s;
+      const d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+  }
+  return { pos, idx, normals };
 }

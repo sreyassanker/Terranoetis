@@ -78,10 +78,10 @@ describe('HelicopterSim', () => {
     expect(st.rotorRpm).toBeGreaterThan(5); // but not zero — autorotating
   });
 
-  it('burns fuel and the HUD default state is well-formed', () => {
+  it('operates without fuel depletion and HUD default state is well-formed', () => {
     const sim = new HelicopterSim();
     const st = run(sim, 10, input({ collective: 1 }));
-    expect(st.fuelKg).toBeLessThan(HELI_DEFAULT().fuelKg);
+    expect(st.fuelKg).toBe(st.fuelMaxKg); // infinite fuel, no depletion
     const d = HELI_DEFAULT();
     expect(d.rotorRpm).toBe(100);
     expect(d.fuelKg).toBe(d.fuelMaxKg);
@@ -271,5 +271,94 @@ describe('HelicopterSim — HELIDRIVE-X compound profile (benchmarks doc)', () =
       input({ collective: HOVER_COLLECTIVE, pitch: 1, throttle: 1 }));
     expect(a.iasKts).toBeCloseTo(b.iasKts, 4);
     expect(a.vneKts).toBe(150);
+  });
+
+  describe('Direct Intuitive Flight Controls', () => {
+    it('FRONT moves forward only', () => {
+      const sim = new HelicopterSim({ lat: 28.61, lon: 77.21, altM: 500, groundAltM: 0, headingDeg: 90 });
+      const st = run(sim, 3, input({ collective: HOVER_COLLECTIVE, pitch: 1, roll: 0, throttle: 0 }));
+      expect(sim.velocity.e).toBeGreaterThan(5); // heading 90 = east
+      expect(Math.abs(sim.velocity.n)).toBeLessThan(1); // no lateral deviation
+      expect(st.pitchDeg).toBeLessThan(0); // slight nose down
+    });
+
+    it('BACK moves backward only', () => {
+      const sim = new HelicopterSim({ lat: 28.61, lon: 77.21, altM: 500, groundAltM: 0, headingDeg: 90 });
+      const st = run(sim, 3, input({ collective: HOVER_COLLECTIVE, pitch: -1, roll: 0, throttle: 0 }));
+      expect(sim.velocity.e).toBeLessThan(-5); // moves west (backward from east)
+      expect(Math.abs(sim.velocity.n)).toBeLessThan(1);
+      expect(st.pitchDeg).toBeGreaterThan(0); // slight nose up
+    });
+
+    it('LEFT moves left only with heading preserved in hover', () => {
+      const sim = new HelicopterSim({ lat: 28.61, lon: 77.21, altM: 500, groundAltM: 0, headingDeg: 90 });
+      const st = run(sim, 3, input({ collective: HOVER_COLLECTIVE, roll: -1, pitch: 0, throttle: 0 }));
+      expect(sim.velocity.n).toBeGreaterThan(4); // heading 90 (east): left is north (+N)
+      expect(Math.abs(st.headingDeg - 90)).toBeLessThan(2); // no yaw spin!
+    });
+
+    it('RIGHT moves right only with heading preserved in hover', () => {
+      const sim = new HelicopterSim({ lat: 28.61, lon: 77.21, altM: 500, groundAltM: 0, headingDeg: 90 });
+      const st = run(sim, 3, input({ collective: HOVER_COLLECTIVE, roll: 1, pitch: 0, throttle: 0 }));
+      expect(sim.velocity.n).toBeLessThan(-4); // heading 90 (east): right is south (-N)
+      expect(Math.abs(st.headingDeg - 90)).toBeLessThan(2); // no yaw spin!
+    });
+
+    it('ACCEL bar at 0 stays at 0 speed; increasing it increases speed to max', () => {
+      const sim = new HelicopterSim({ lat: 28.61, lon: 77.21, altM: 500, groundAltM: 0, headingDeg: 90 });
+      const stop = run(sim, 4, input({ collective: HOVER_COLLECTIVE, throttle: 0, pitch: 0 }));
+      expect(stop.iasKts).toBeLessThan(1);
+
+      const fast = run(sim, 8, input({ collective: HOVER_COLLECTIVE, throttle: 1, pitch: 0 }));
+      expect(fast.iasKts).toBeGreaterThan(40);
+    });
+
+    it('PULL UP bar lifts off from the ground, and PULL DOWN to 0 reaches the ground at 0m', () => {
+      // 1. On ground, increasing pull-up bar lifts off
+      const sim = new HelicopterSim({ lat: 28.61, lon: 77.21, altM: 100, groundAltM: 100, onGround: true });
+      expect(sim.state.aglM).toBe(0);
+      const lifted = run(sim, 4, input({ collective: 0.35 }));
+      expect(lifted.aglM).toBeGreaterThan(0.5); // lifted off from ground!
+      expect(lifted.onGround).toBe(false);
+
+      // 2. In air, pulling bar down to 0 lands and reaches ground at 0m
+      const landed = run(sim, 10, input({ collective: 0 }));
+      expect(landed.aglM).toBe(0);
+      expect(landed.onGround).toBe(true);
+    });
+
+    it('FRONT + LEFT curves left smoothly with banked turn and heading rotation', () => {
+      const sim = new HelicopterSim({ lat: 28.61, lon: 77.21, altM: 500, groundAltM: 0, headingDeg: 90 });
+      // Start flying forward + rolling left
+      const st = run(sim, 3, input({ collective: HOVER_COLLECTIVE, pitch: 1, roll: -1 }));
+      // Heading should have turned counter-clockwise (left) from 90° towards North (0°)
+      const hdgDiff = ((90 - st.headingDeg + 540) % 360) - 180;
+      expect(hdgDiff).toBeGreaterThan(30); // turned at least 30° left in 3 seconds
+      expect(st.rollDeg).toBeLessThan(-10); // banked into the turn
+      expect(st.iasKts).toBeGreaterThan(15); // moving forward along the curve
+    });
+
+    it('FRONT + RIGHT curves right smoothly with banked turn and heading rotation', () => {
+      const sim = new HelicopterSim({ lat: 28.61, lon: 77.21, altM: 500, groundAltM: 0, headingDeg: 90 });
+      // Start flying forward + rolling right
+      const st = run(sim, 3, input({ collective: HOVER_COLLECTIVE, pitch: 1, roll: 1 }));
+      // Heading should have turned clockwise (right) from 90° towards South (180°)
+      const hdgDiff = ((st.headingDeg - 90 + 540) % 360) - 180;
+      expect(hdgDiff).toBeGreaterThan(30); // turned at least 30° right in 3 seconds
+      expect(st.rollDeg).toBeGreaterThan(10); // banked right into the turn
+      expect(st.iasKts).toBeGreaterThan(15); // moving forward along the curve
+    });
+
+    it('Releasing LEFT after curving leaves forward flight on the new heading', () => {
+      const sim = new HelicopterSim({ lat: 28.61, lon: 77.21, altM: 500, groundAltM: 0, headingDeg: 90 });
+      // Curve left for 2 seconds
+      run(sim, 2, input({ collective: HOVER_COLLECTIVE, pitch: 1, roll: -1 }));
+      const turnedHdg = sim.state.headingDeg;
+      // Release roll, continue FRONT only for 2 seconds
+      const finalSt = run(sim, 2, input({ collective: HOVER_COLLECTIVE, pitch: 1, roll: 0 }));
+      // Wings level out and heading stays steady on the new curved heading
+      expect(Math.abs(finalSt.rollDeg)).toBeLessThan(3);
+      expect(Math.abs(finalSt.headingDeg - turnedHdg)).toBeLessThan(5);
+    });
   });
 });
