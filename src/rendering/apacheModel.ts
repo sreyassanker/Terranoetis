@@ -46,22 +46,22 @@ function hexToLinear(hex: number): [number, number, number] {
 }
 
 const MATERIALS = {
-  airframe:   { base: hexToLinear(0x3d4550), metallic: 0.16, roughness: 0.72, doubleSided: true } as GltfMaterialSpec,
-  composite:  { base: hexToLinear(0x14181f), metallic: 0.25, roughness: 0.62, doubleSided: true } as GltfMaterialSpec,
-  frame:      { base: hexToLinear(0x0e1116), metallic: 0.55, roughness: 0.42, doubleSided: true } as GltfMaterialSpec,
+  airframe:   { base: hexToLinear(0x303733), metallic: 0.08, roughness: 0.76, doubleSided: true } as GltfMaterialSpec,
+  composite:  { base: hexToLinear(0x1a201e), metallic: 0.12, roughness: 0.70, doubleSided: true } as GltfMaterialSpec,
+  frame:      { base: hexToLinear(0x101316), metallic: 0.08, roughness: 0.86, doubleSided: true } as GltfMaterialSpec,
   interior:   { base: hexToLinear(0x0c0e12), metallic: 0.08, roughness: 0.85, doubleSided: true } as GltfMaterialSpec,
-  seatFrame:  { base: hexToLinear(0x1a1e26), metallic: 0.35, roughness: 0.55, doubleSided: true } as GltfMaterialSpec,
+  seatFrame:  { base: hexToLinear(0x1a1e24), metallic: 0.35, roughness: 0.55, doubleSided: true } as GltfMaterialSpec,
   seatCushion:{ base: hexToLinear(0x22262d), metallic: 0.05, roughness: 0.85, doubleSided: true } as GltfMaterialSpec,
   seatRed:    { base: hexToLinear(0x5c1319), metallic: 0.20, roughness: 0.62, doubleSided: true } as GltfMaterialSpec,
-  titanium:   { base: hexToLinear(0x242a32), metallic: 0.88, roughness: 0.38, doubleSided: true } as GltfMaterialSpec,
-  steel:      { base: hexToLinear(0x9aa6b6), metallic: 0.98, roughness: 0.14, doubleSided: true } as GltfMaterialSpec,
-  graphite:   { base: hexToLinear(0x1c2028), metallic: 0.65, roughness: 0.45, doubleSided: true } as GltfMaterialSpec,
+  titanium:   { base: hexToLinear(0x262c35), metallic: 0.85, roughness: 0.36, doubleSided: true } as GltfMaterialSpec,
+  steel:      { base: hexToLinear(0x94a1b0), metallic: 0.96, roughness: 0.16, doubleSided: true } as GltfMaterialSpec,
+  graphite:   { base: hexToLinear(0x181b20), metallic: 0.35, roughness: 0.60, doubleSided: true } as GltfMaterialSpec,
   tire:       { base: hexToLinear(0x101216), metallic: 0.05, roughness: 0.92, doubleSided: true } as GltfMaterialSpec,
-  panel:      { base: hexToLinear(0x090b0f), metallic: 0.45, roughness: 0.55, doubleSided: true } as GltfMaterialSpec,
+  panel:      { base: hexToLinear(0x0c0f13), metallic: 0.25, roughness: 0.68, doubleSided: true } as GltfMaterialSpec,
   green:      { base: [0.003, 0.024, 0.007], emissive: [0.133, 1, 0.267], emissiveIntensity: 2.2, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
   red:        { base: [0.024, 0.003, 0.003], emissive: [1, 0.133, 0.133], emissiveIntensity: 2.2, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
   warn:       { base: hexToLinear(0xc92a1a), metallic: 0.15, roughness: 0.55, emissive: [0.13, 0, 0], emissiveIntensity: 0.3, doubleSided: true } as GltfMaterialSpec,
-  canopyGlass: { base: hexToLinear(0xa8c8e0), metallic: 0.08, roughness: 0.03, opacity: 0.26, doubleSided: true } as GltfMaterialSpec,
+  canopyGlass: { base: hexToLinear(0x8eb6c0), metallic: 0.10, roughness: 0.04, opacity: 0.28, doubleSided: true } as GltfMaterialSpec,
   hudGlass:    { base: [0.005, 0.05, 0.02], emissive: [0, 1, 0.4], emissiveIntensity: 0.4, opacity: 0.40, roughness: 0.05, doubleSided: true } as GltfMaterialSpec,
   screenGreen: { base: [0.001, 0.015, 0.005], emissive: [0, 1, 0.4], emissiveIntensity: 1.8, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
   screenAmber: { base: [0.015, 0.006, 0], emissive: [1, 0.667, 0.133], emissiveIntensity: 1.5, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
@@ -499,10 +499,9 @@ function canopyFrames(): GltfNodeSpec[] {
     const mesh = g.addMesh(buildContinuousTubeMesh(pts, thick, 12), MATERIALS.frame);
     kids.push({ mesh, matrix: mtxTranslation(0, 0, 0) });
   };
-  ring(-0.15, 0.030);
-  ring(1.75, 0.032);
-  ring(3.45, 0.028);
-  ring(4.32, 0.024);
+  ring(-0.15, 0.030); // Aft bulkhead behind pilot
+  ring(1.75, 0.032);  // Blast shield bulkhead between pilot and CPG
+  ring(4.32, 0.024);  // Windshield forward nose seal frame
   for (const side of [1, -1]) {
     const pts: [number, number, number][] = [];
     for (let i = 0; i <= 56; i++) {
@@ -515,8 +514,9 @@ function canopyFrames(): GltfNodeSpec[] {
   }
   {
     const ridge: [number, number, number][] = [];
-    for (let i = 0; i <= 56; i++) {
-      const x = X_MIN + (X_MAX - X_MIN) * (i / 56);
+    // Overhead roof spine between pilot aft bulkhead (-0.15) and mid bulkhead (1.75)
+    for (let i = 0; i <= 24; i++) {
+      const x = X_MIN + (1.75 - X_MIN) * (i / 24);
       const s = sampleCanopy(x);
       ridge.push([x, s.ridgeY, 0]);
     }
@@ -623,7 +623,7 @@ function fuselage(): GltfNodeSpec[] {
     kids.push(boxNode(0.32, 0.22, 0.012, 'panel', -0.90, 0.30, 0.66 * s));
     kids.push(boxNode(0.30, 0.20, 0.012, 'panel', -1.80, 0.10, 0.60 * s));
     kids.push(boxNode(0.24, 0.18, 0.012, 'panel', -2.25, 0.30, 0.55 * s));
-    kids.push(boxNode(0.18, 0.045, 0.06, 'green', 0.60, -0.88, 0.55 * s));
+    kids.push(boxNode(0.18, 0.045, 0.06, s > 0 ? 'green' : 'red', 0.60, -0.88, 0.55 * s));
     kids.push(boxNode(0.04, 0.42, 0.02, 'warn', -0.15, -0.55, 0.672 * s));
   }
   kids.push(boxNode(0.55, 0.24, 0.012, 'panel', 3.10, -0.60, 0.42, 0, -0.10, 0));
@@ -738,7 +738,7 @@ function enginesAndWeapons(): GltfNodeSpec[] {
         kids.push({ children: miss, matrix: mtxTranslation(-0.95, py, pz * s) });
       }
     }
-    kids.push(boxNode(0.05, 0.05, 0.06, 'green', -0.95, -0.30, 2.68 * s));
+    kids.push(boxNode(0.05, 0.05, 0.06, s > 0 ? 'green' : 'red', -0.95, -0.30, 2.65 * s));
   }
   return kids;
 }
