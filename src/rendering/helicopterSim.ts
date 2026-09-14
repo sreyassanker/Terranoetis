@@ -303,9 +303,6 @@ export class HelicopterSim {
     // FRONT: input.pitch = 1.0 -> forward acceleration only
     // BACK:  input.pitch = -1.0 -> backward acceleration only
     const stickFwd = input.pitch * 9.0 * rpmNow;
-    // LEFT:  input.roll = -1.0 -> lateral left acceleration only (no yaw)
-    // RIGHT: input.roll = 1.0 -> lateral right acceleration only (no yaw)
-    const stickLat = input.roll * 8.5 * rpmNow;
 
     // Acceleration bar (input.throttle 0..1):
     // Directly commands forward cruise speed from 0 (min / hover-stop) to max (130+ kt)
@@ -320,13 +317,29 @@ export class HelicopterSim {
           : (Math.abs(input.pitch) < 0.05 ? clamp(-currentFwdSpeed * 1.5, -8.0, 0) * rpmNow : 0))
       : 0;
 
+    // Forward flight authority: 0 in stationary hover, 1.0 during forward flight or forward command
+    const fwdAuthority = clamp(
+      Math.max(
+        input.pitch > 0.05 ? 1.0 : 0.0,
+        Math.abs(currentFwdSpeed) / 4.0,
+        input.throttle > 0.05 ? 1.0 : 0.0
+      ),
+      0,
+      1.0
+    );
+
+    // Directional lateral controls:
+    // In hover (fwdAuthority = 0): pure lateral strafe at constant heading
+    // In forward flight (fwdAuthority = 1.0): lateral rocket sliding is suppressed; roll drives coordinated curving turn
+    const stickLat = input.roll * 8.5 * rpmNow * (1 - fwdAuthority);
+
     const gravFwd = -GRAVITY * Math.sin((s.pitchDeg * Math.PI) / 180);
     const gravLat = GRAVITY * Math.sin((s.rollDeg * Math.PI) / 180);
 
     const trBalance = Math.max(0, coll * rpmNow);
     s.trThrustPct = this.profile.trt ? trBalance * 100 : 0;
     const aFwd = stickFwd + gravFwd * 0.4 + thrFwd;
-    const aLat = stickLat + gravLat * 0.4;                      // + = right of nose
+    const aLat = stickLat + (1 - fwdAuthority) * gravLat * 0.4;                      // + = right of nose
 
     /* aerodynamic drag acts against the AIRMASS velocity */
     if (ve > 0.001) {
@@ -342,11 +355,12 @@ export class HelicopterSim {
     this.vN += aLat * Math.cos(hdg + Math.PI / 2) * dt;
     this.vE += aLat * Math.sin(hdg + Math.PI / 2) * dt;
 
-    // Lateral stabilization: smoothly damp lateral slide when no roll command is pressed
-    if (Math.abs(input.roll) < 0.05) {
-      const currentLatSpeed = -this.vN * Math.sin(hdg) + this.vE * Math.cos(hdg);
+    // Lateral stabilization: damp lateral slide (sideslip) so the turn stays cleanly coordinated
+    const currentLatSpeed = -this.vN * Math.sin(hdg) + this.vE * Math.cos(hdg);
+    if (Math.abs(input.roll) < 0.05 || fwdAuthority > 0.2) {
+      const dampGain = Math.abs(input.roll) < 0.05 ? 2.5 : 2.0 * fwdAuthority;
       if (Math.abs(currentLatSpeed) > 0.02) {
-        const latDecel = clamp(-currentLatSpeed * 2.2, -6.0, 6.0);
+        const latDecel = clamp(-currentLatSpeed * dampGain, -6.0, 6.0);
         this.vN += latDecel * Math.cos(hdg + Math.PI / 2) * dt;
         this.vE += latDecel * Math.sin(hdg + Math.PI / 2) * dt;
       }
@@ -382,19 +396,29 @@ export class HelicopterSim {
     }
 
     /* Heading: pedals command tail-rotor yaw.
-       In cruise (ve > 10 kt), banked turns coordinate heading; in hover, roll is pure strafe. */
+       In forward flight (fwdAuthority > 0 or ve > 2 kt), banked turns coordinate heading; in hover, roll is pure strafe. */
     const yawPedal = input.pedal * YAW_RATE;
     const beta = Math.abs(ve) > 0.5 ? Math.atan2(vaLat, Math.abs(vaFwd) + ve * 0.5) : 0;
-    const yawWeathervane = (input.pedal !== 0 || Math.abs(input.roll) < 0.05)
+    const yawWeathervane = input.pedal !== 0
       ? WEATHERVANE * beta * Math.min(1, ve / 15)
+      : (Math.abs(input.roll) < 0.05 && currentFwdSpeed > 15 ? WEATHERVANE * beta * 0.15 * Math.min(1, ve / 20) : 0);
+
+    // Coordinated banked turn:
+    // When moving forward or FRONT is commanded, roll banks the aircraft and curves the flight path
+    const bankRad = (s.rollDeg * Math.PI) / 180;
+    const turnAuthority = Math.min(1.0, Math.max(0.4, Math.abs(currentFwdSpeed) / 6.0));
+    const yawBank = (Math.abs(input.roll) > 0.05 && (fwdAuthority > 0.05 || Math.abs(currentFwdSpeed) > 1.5))
+      ? (Math.sin(bankRad) * 1.2 + input.roll * 0.45) * rpmNow * fwdAuthority * turnAuthority
       : 0;
-    const yawBank = (input.pedal !== 0 || currentFwdSpeed > 4)
-      ? Math.sin((s.rollDeg * Math.PI) / 180) * Math.min(1, spd / 20) * 0.55
-      : 0;
-    const yawRateRad = yawPedal + yawWeathervane;
-    s.headingDeg = (((s.headingDeg + ((yawRateRad + yawBank) * 180) / Math.PI * dt) % 360) + 360) % 360;
-    if (Math.abs(yawBank) > 1e-9) {
-      const c = Math.cos(yawBank * dt), sn = Math.sin(yawBank * dt);
+
+    const yawRateRad = yawPedal + yawWeathervane + yawBank;
+    s.headingDeg = (((s.headingDeg + ((yawRateRad) * 180) / Math.PI * dt) % 360) + 360) % 360;
+
+    // Velocity vector arc rotation:
+    // In forward flight, rotate horizontal velocity with the turn so the helicopter carves a clean arc
+    if ((Math.abs(yawBank) > 1e-6 || Math.abs(yawPedal) > 1e-6) && (Math.abs(currentFwdSpeed) > 0.8 || input.pitch !== 0)) {
+      const rot = (yawBank + (Math.abs(currentFwdSpeed) > 1.5 ? yawPedal * 0.7 : 0)) * dt;
+      const c = Math.cos(rot), sn = Math.sin(rot);
       const vN0 = this.vN;
       this.vN = vN0 * c - this.vE * sn;
       this.vE = vN0 * sn + this.vE * c;
@@ -403,9 +427,9 @@ export class HelicopterSim {
     /* attitude dynamics: clean visual feedback for commands */
     const targetPitch = -input.pitch * 9.0;
     const targetRoll = input.roll * 18.0;
-    const P_RATE = 3.5, R_RATE = 3.8;
+    const P_RATE = 3.5, R_RATE = Math.abs(input.roll) < 0.05 ? 6.0 : 3.8;
     s.pitchDeg += clamp((targetPitch - s.pitchDeg) * P_RATE * dt, -10 * dt, 10 * dt);
-    s.rollDeg += clamp((targetRoll - s.rollDeg) * R_RATE * dt, -14 * dt, 14 * dt);
+    s.rollDeg += clamp((targetRoll - s.rollDeg) * R_RATE * dt, -20 * dt, 20 * dt);
     s.pitchDeg = clamp(s.pitchDeg, -18, 18);
     s.rollDeg = clamp(s.rollDeg, -25, 25);
 
