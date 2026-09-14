@@ -138,7 +138,6 @@ export class HeliControls {
     collective: number; pitch: number; roll: number; pedal: number; throttle: number; engine: boolean;
   }): void {
     dt = Math.max(0.0001, Math.min(dt, 0.05));
-    const fuelOk = raw.fuelKg > 0.5;
 
     /* ── collective: rates, friction lock, detent magnets with break-away ── */
     this.hoverDetent = raw.hoverColl ?? hoverCollectiveAt(raw.altM);
@@ -177,12 +176,11 @@ export class HeliControls {
       const okBattery = this.battery;
       const okEcl = this.ecl >= 1;
       const okSpeed = raw.nfPct <= LIGHTOFF_NF + 8;
-      if (okBattery && okEcl && fuelOk && okSpeed) {
+      if (okBattery && okEcl && okSpeed) {
         this.starterEngaged = true; this.engineState = 'STARTING'; this.emit('start');
       } else if (!this.starterWasHeld) {                     // denial reported once per press
         if (!okBattery) this.emit('start-denied-battery');
         else if (!okEcl) this.emit('start-denied-ecl');
-        else if (!fuelOk) this.emit('start-denied-fuel');
         else this.emit('start-denied-speed');
       }
     }
@@ -198,18 +196,15 @@ export class HeliControls {
     } else if (this.engineState === 'RUNNING') {
       if (this.ecl === 0 || !this.battery) { this.engineState = 'OFF'; this.lightOff = false; }
     }
-    if (this.engineState !== 'OFF' && !fuelOk) {
-      this.engineState = 'OFF'; this.lightOff = false; this.emit('flameout-fuel');
-    }
     this.generatorOnline = (this.engineState === 'RUNNING' ||
       (this.engineState === 'STARTING' && this.lightOff)) && raw.ngPct > 55;
 
     /* ── write the command channels ── */
     out.collective = this.collective;
     out.throttle = this.engineState === 'OFF' ? 0 : thrDelivered;
-    // engine boolean = fuel+ignition gate: ECL open, battery feeds the igniters,
+    // engine boolean = ignition gate: ECL open, battery feeds the igniters,
     // starter motoring or engine running. The sim's Ng/Nf dynamics do the rest.
     out.engine = this.ecl >= 1 && this.battery &&
-      (this.engineState === 'RUNNING' || this.engineState === 'STARTING' || this.starterEngaged) && fuelOk;
+      (this.engineState === 'RUNNING' || this.engineState === 'STARTING' || this.starterEngaged);
   }
 }

@@ -224,7 +224,7 @@ export class HelicopterSim {
     const sqrtSigma = Math.sqrt(sigma);
 
     /* ── powerplant: ECL/engine → Ng demand; rotor (Nf) follows torque balance ── */
-    const engineRun = input.engine && s.fuelKg > 0;
+    const engineRun = input.engine;
     const ngDemand = engineRun
       ? Math.min(100, NG_HOVER + input.throttle * 16 + 1.6 * Math.max(0, 100 - this.rotorRpm))
       : 0;
@@ -256,11 +256,6 @@ export class HelicopterSim {
     // which made the caution illuminate throughout an otherwise normal flight.
     const trqDemand = engineRun ? 0.12 + coll * 0.74 * rpmNow + input.throttle * 0.18 : 0;
     this.torque += (Math.max(0, trqDemand) - this.torque) * (dt * 2.2);
-
-    /* fuel burn */
-    if (engineRun) {
-      s.fuelKg = Math.max(0, s.fuelKg - dt * (FUEL_BURN_IDLE + this.torque * FUEL_BURN_PER_TORQUE + input.throttle * 0.015));
-    }
 
     /* available thrust = weight-adjusted, density-scaled (T ∝ ρ); gravity opposes */
     const thrust = coll * this.profile.thrustPerWeight * GRAVITY * (0.25 + 0.75 * rpmNow) * sigma;
