@@ -5997,7 +5997,7 @@ export default function App() {
       (window as unknown as Record<string, unknown>).__HELI = {
         simRef: heliSimRef, modelRef: heliModelRef, activeRef: heliActiveRef,
         mainRotorRef: heliMainRotorRef, tailRotorRef: heliTailRotorRef,
-        keysRef: heliKeysRef, inputRef: heliInputRef, orbitRef: heliOrbitRef,
+        keysRef: heliKeysRef, inputRef: heliInputRef, orbitRef: heliOrbitRef, panRef: heliPanRef,
         rigRef: heliRigRef, ctlRef: heliCtlRef, deckRef: heliDeckRef, headRef: heliHeadRef, instrRef: heliScreensRef, audioRef: heliAudioRef,
         modeRef: heliModeRef,
       };
@@ -6155,21 +6155,26 @@ export default function App() {
       const el = o.el, dist = o.dist;
       const ce = Math.cos(el);
 
-      // Spherical offset in helicopter body frame:
+      const pan = heliPanRef.current;
+      const tx = pan.x;
+      const ty = 0.7 + pan.y;
+      const tz = 1.2 + pan.z;
+
+      // Target fuselage center + pan offset (elevated above bottom dock)
+      const targetLocal = new Cesium.Cartesian3(tx, ty, tz);
+      const targetWorld = Cesium.Matrix4.multiplyByPointAsVector(modelMatrix, targetLocal, new Cesium.Cartesian3());
+      Cesium.Cartesian3.add(pos, targetWorld, targetWorld);
+
+      // Spherical offset around targetWorld in helicopter body frame:
       // Forward = +Y, Tail = -Y, Starboard = +X, Port = -X, Up = +Z
       // relAz = 0: directly behind the tail boom (-Y)
       const local = new Cesium.Cartesian3(
-        dist * ce * Math.sin(relAz),
-        -dist * ce * Math.cos(relAz),
-        dist * Math.sin(el) + 1.2,
+        tx + dist * ce * Math.sin(relAz),
+        ty - dist * ce * Math.cos(relAz),
+        tz + dist * Math.sin(el),
       );
       camPos = Cesium.Matrix4.multiplyByPointAsVector(modelMatrix, local, new Cesium.Cartesian3());
       Cesium.Cartesian3.add(pos, camPos, camPos);
-
-      // Target fuselage center (elevated above bottom dock)
-      const targetLocal = new Cesium.Cartesian3(0, 0.7, 1.2);
-      const targetWorld = Cesium.Matrix4.multiplyByPointAsVector(modelMatrix, targetLocal, new Cesium.Cartesian3());
-      Cesium.Cartesian3.add(pos, targetWorld, targetWorld);
 
       // Camera orientation to look directly at targetWorld with vertical bias for HUD dock clearance
       const toTarget = Cesium.Cartesian3.subtract(targetWorld, camPos, new Cesium.Cartesian3());
@@ -6287,6 +6292,84 @@ export default function App() {
           heliRigRef.current.mode = isOrb ? 'chase' : 'orbit';
           setHeliOrbitMode(!isOrb);
           showNotification(!isOrb ? 'Camera: free ORBIT (rotate/pan)' : 'Camera: dynamic CHASE', 'info');
+        }
+        break;
+      case 'inspect-rotor':
+        if (heliModeRef.current === 'cockpit' || heliModeRef.current === 'topdown') heliModeRef.current = 'chase-close';
+        if (heliScreensRef.current?.visible) heliScreensRef.current.setVisible(false);
+        if (heliRigRef.current) {
+          heliRigRef.current.mode = 'orbit';
+          setHeliOrbitMode(true);
+          heliPanRef.current = { x: 0, y: -1.25, z: 1.40 };
+          const sim = heliSimRef.current;
+          const hRad = Cesium.Math.toRadians(sim ? sim.state.headingDeg : 0);
+          heliRigRef.current.reset(7.0, 0.32, hRad + 2.40 + Math.PI);
+          showNotification('Inspect: ROTOR HEAD & APG-78 RADOME', 'info');
+        }
+        break;
+      case 'inspect-nose':
+        if (heliModeRef.current === 'cockpit' || heliModeRef.current === 'topdown') heliModeRef.current = 'chase-close';
+        if (heliScreensRef.current?.visible) heliScreensRef.current.setVisible(false);
+        if (heliRigRef.current) {
+          heliRigRef.current.mode = 'orbit';
+          setHeliOrbitMode(true);
+          heliPanRef.current = { x: 0, y: 3.10, z: -1.60 };
+          const sim = heliSimRef.current;
+          const hRad = Cesium.Math.toRadians(sim ? sim.state.headingDeg : 0);
+          heliRigRef.current.reset(5.6, 0.05, hRad + 2.85 + Math.PI);
+          showNotification('Inspect: NOSE SENSORS (TADS/PNVS) & M230 CHAIN GUN', 'info');
+        }
+        break;
+      case 'inspect-tail':
+        if (heliModeRef.current === 'cockpit' || heliModeRef.current === 'topdown') heliModeRef.current = 'chase-close';
+        if (heliScreensRef.current?.visible) heliScreensRef.current.setVisible(false);
+        if (heliRigRef.current) {
+          heliRigRef.current.mode = 'orbit';
+          setHeliOrbitMode(true);
+          heliPanRef.current = { x: 0.24, y: -7.10, z: 0.16 };
+          const sim = heliSimRef.current;
+          const hRad = Cesium.Math.toRadians(sim ? sim.state.headingDeg : 0);
+          heliRigRef.current.reset(6.2, 0.20, hRad + 0.55 + Math.PI);
+          showNotification('Inspect: TAIL BOOM & TAIL ROTOR ASSEMBLY', 'info');
+        }
+        break;
+      case 'inspect-gear':
+        if (heliModeRef.current === 'cockpit' || heliModeRef.current === 'topdown') heliModeRef.current = 'chase-close';
+        if (heliScreensRef.current?.visible) heliScreensRef.current.setVisible(false);
+        if (heliRigRef.current) {
+          heliRigRef.current.mode = 'orbit';
+          setHeliOrbitMode(true);
+          heliPanRef.current = { x: 1.35, y: -0.65, z: -3.14 };
+          const sim = heliSimRef.current;
+          const hRad = Cesium.Math.toRadians(sim ? sim.state.headingDeg : 0);
+          heliRigRef.current.reset(4.8, 0.08, hRad + 1.35 + Math.PI);
+          showNotification('Inspect: LANDING GEAR & TRAILING ARM SUSPENSION', 'info');
+        }
+        break;
+      case 'inspect-weapons':
+        if (heliModeRef.current === 'cockpit' || heliModeRef.current === 'topdown') heliModeRef.current = 'chase-close';
+        if (heliScreensRef.current?.visible) heliScreensRef.current.setVisible(false);
+        if (heliRigRef.current) {
+          heliRigRef.current.mode = 'orbit';
+          setHeliOrbitMode(true);
+          heliPanRef.current = { x: 1.65, y: -1.65, z: -1.90 };
+          const sim = heliSimRef.current;
+          const hRad = Cesium.Math.toRadians(sim ? sim.state.headingDeg : 0);
+          heliRigRef.current.reset(5.2, 0.12, hRad + 1.95 + Math.PI);
+          showNotification('Inspect: WINGS, HELLFIRE MISSILES & HYDRA PODS', 'info');
+        }
+        break;
+      case 'inspect-cpg':
+        if (heliModeRef.current === 'cockpit' || heliModeRef.current === 'topdown') heliModeRef.current = 'chase-close';
+        if (heliScreensRef.current?.visible) heliScreensRef.current.setVisible(false);
+        if (heliRigRef.current) {
+          heliRigRef.current.mode = 'orbit';
+          setHeliOrbitMode(true);
+          heliPanRef.current = { x: 0, y: 1.30, z: -0.58 };
+          const sim = heliSimRef.current;
+          const hRad = Cesium.Math.toRadians(sim ? sim.state.headingDeg : 0);
+          heliRigRef.current.reset(4.8, 0.28, hRad + 2.50 + Math.PI);
+          showNotification('Inspect: CPG / COPILOT GUNNER STATION', 'info');
         }
         break;
       case 'cockpit': heliSetMode('cockpit'); break;

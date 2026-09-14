@@ -15,8 +15,10 @@ import {
   buildBoxMesh,
   buildCylinderMesh,
   buildSphereMesh,
+  buildHemisphereCapMesh,
   buildConeMesh,
   buildTorusMesh,
+  buildContinuousTubeMesh,
   type GltfMaterialSpec,
   type GltfNodeSpec,
 } from './gltfBuilder';
@@ -27,26 +29,42 @@ import {
 
 /* ═══════════════ MATERIALS (mirrored from helicopter.html) ═══════════════ */
 
+function srgbToLinear(c: number): number {
+  const v = c / 255;
+  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+}
+
+function hexToLinear(hex: number): [number, number, number] {
+  const r = (hex >> 16) & 0xff;
+  const g = (hex >> 8) & 0xff;
+  const b = hex & 0xff;
+  return [
+    parseFloat(srgbToLinear(r).toFixed(4)),
+    parseFloat(srgbToLinear(g).toFixed(4)),
+    parseFloat(srgbToLinear(b).toFixed(4)),
+  ];
+}
+
 const MATERIALS = {
-  airframe:   { base: [0.24, 0.27, 0.31], metallic: 0.16, roughness: 0.72, doubleSided: true } as GltfMaterialSpec,
-  composite:  { base: [0.078, 0.094, 0.122], metallic: 0.25, roughness: 0.62, doubleSided: true } as GltfMaterialSpec,
-  frame:      { base: [0.055, 0.067, 0.086], metallic: 0.55, roughness: 0.42, doubleSided: true } as GltfMaterialSpec,
-  interior:   { base: [0.047, 0.055, 0.071], metallic: 0.08, roughness: 0.85, doubleSided: true } as GltfMaterialSpec,
-  seatFrame:  { base: [0.10, 0.118, 0.149], metallic: 0.35, roughness: 0.55, doubleSided: true } as GltfMaterialSpec,
-  seatCushion:{ base: [0.133, 0.149, 0.177], metallic: 0.05, roughness: 0.85, doubleSided: true } as GltfMaterialSpec,
-  seatRed:    { base: [0.36, 0.075, 0.098], metallic: 0.20, roughness: 0.62, doubleSided: true } as GltfMaterialSpec,
-  titanium:   { base: [0.141, 0.165, 0.196], metallic: 0.88, roughness: 0.38, doubleSided: true } as GltfMaterialSpec,
-  steel:      { base: [0.605, 0.651, 0.714], metallic: 0.98, roughness: 0.14, doubleSided: true } as GltfMaterialSpec,
-  graphite:   { base: [0.11, 0.125, 0.157], metallic: 0.65, roughness: 0.45, doubleSided: true } as GltfMaterialSpec,
-  tire:       { base: [0.063, 0.071, 0.086], metallic: 0.05, roughness: 0.92, doubleSided: true } as GltfMaterialSpec,
-  panel:      { base: [0.035, 0.043, 0.059], metallic: 0.45, roughness: 0.55, doubleSided: true } as GltfMaterialSpec,
-  green:      { base: [0.039, 0.165, 0.078], emissive: [0.133, 1, 0.267], emissiveIntensity: 2.2, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
-  red:        { base: [0.165, 0.039, 0.039], emissive: [1, 0.133, 0.133], emissiveIntensity: 2.2, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
-  warn:       { base: [0.788, 0.165, 0.102], metallic: 0.15, roughness: 0.55, emissive: [0.13, 0, 0], emissiveIntensity: 0.3, doubleSided: true } as GltfMaterialSpec,
-  canopyGlass: { base: [0.66, 0.78, 0.88], metallic: 0.05, roughness: 0.02, opacity: 0.24, doubleSided: true } as GltfMaterialSpec,
-  hudGlass:    { base: [0.024, 0.18, 0.11], emissive: [0, 1, 0.4], emissiveIntensity: 0.15, opacity: 0.3, doubleSided: true } as GltfMaterialSpec,
-  screenGreen: { base: [0.008, 0.125, 0.063], emissive: [0, 1, 0.4], emissiveIntensity: 1.6, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
-  screenAmber: { base: [0.125, 0.07, 0], emissive: [1, 0.667, 0.133], emissiveIntensity: 1.3, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
+  airframe:   { base: hexToLinear(0x3d4550), metallic: 0.16, roughness: 0.72, doubleSided: true } as GltfMaterialSpec,
+  composite:  { base: hexToLinear(0x14181f), metallic: 0.25, roughness: 0.62, doubleSided: true } as GltfMaterialSpec,
+  frame:      { base: hexToLinear(0x0e1116), metallic: 0.55, roughness: 0.42, doubleSided: true } as GltfMaterialSpec,
+  interior:   { base: hexToLinear(0x0c0e12), metallic: 0.08, roughness: 0.85, doubleSided: true } as GltfMaterialSpec,
+  seatFrame:  { base: hexToLinear(0x1a1e26), metallic: 0.35, roughness: 0.55, doubleSided: true } as GltfMaterialSpec,
+  seatCushion:{ base: hexToLinear(0x22262d), metallic: 0.05, roughness: 0.85, doubleSided: true } as GltfMaterialSpec,
+  seatRed:    { base: hexToLinear(0x5c1319), metallic: 0.20, roughness: 0.62, doubleSided: true } as GltfMaterialSpec,
+  titanium:   { base: hexToLinear(0x242a32), metallic: 0.88, roughness: 0.38, doubleSided: true } as GltfMaterialSpec,
+  steel:      { base: hexToLinear(0x9aa6b6), metallic: 0.98, roughness: 0.14, doubleSided: true } as GltfMaterialSpec,
+  graphite:   { base: hexToLinear(0x1c2028), metallic: 0.65, roughness: 0.45, doubleSided: true } as GltfMaterialSpec,
+  tire:       { base: hexToLinear(0x101216), metallic: 0.05, roughness: 0.92, doubleSided: true } as GltfMaterialSpec,
+  panel:      { base: hexToLinear(0x090b0f), metallic: 0.45, roughness: 0.55, doubleSided: true } as GltfMaterialSpec,
+  green:      { base: [0.003, 0.024, 0.007], emissive: [0.133, 1, 0.267], emissiveIntensity: 2.2, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
+  red:        { base: [0.024, 0.003, 0.003], emissive: [1, 0.133, 0.133], emissiveIntensity: 2.2, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
+  warn:       { base: hexToLinear(0xc92a1a), metallic: 0.15, roughness: 0.55, emissive: [0.13, 0, 0], emissiveIntensity: 0.3, doubleSided: true } as GltfMaterialSpec,
+  canopyGlass: { base: hexToLinear(0xa8c8e0), metallic: 0.08, roughness: 0.03, opacity: 0.26, doubleSided: true } as GltfMaterialSpec,
+  hudGlass:    { base: [0.005, 0.05, 0.02], emissive: [0, 1, 0.4], emissiveIntensity: 0.4, opacity: 0.40, roughness: 0.05, doubleSided: true } as GltfMaterialSpec,
+  screenGreen: { base: [0.001, 0.015, 0.005], emissive: [0, 1, 0.4], emissiveIntensity: 1.8, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
+  screenAmber: { base: [0.015, 0.006, 0], emissive: [1, 0.667, 0.133], emissiveIntensity: 1.5, roughness: 0.3, doubleSided: true } as GltfMaterialSpec,
 } as const;
 type Mat = keyof typeof MATERIALS;
 
@@ -66,8 +84,8 @@ function boxNode(w: number, h: number, d: number, mat: Mat, x: number, y: number
 }
 
 function cylNode(r: number, len: number, mat: Mat, x: number, y: number, z: number,
-  axis: 'y' | 'x' | 'z' = 'y'): GltfNodeSpec {
-  const mesh = g.addMesh(buildCylinderMesh(r, len / 2, 16), MATERIALS[mat]);
+  axis: 'y' | 'x' | 'z' = 'y', rBottom = r): GltfNodeSpec {
+  const mesh = g.addMesh(buildCylinderMesh(r, len / 2, 16, rBottom), MATERIALS[mat]);
   let m: M4;
   if (axis === 'x') m = matMult(mtxTranslation(x, y, z), mtxRotZ(Math.PI / 2));
   else if (axis === 'z') m = matMult(mtxTranslation(x, y, z), mtxRotX(Math.PI / 2));
@@ -77,6 +95,11 @@ function cylNode(r: number, len: number, mat: Mat, x: number, y: number, z: numb
 
 function sphereNode(r: number, mat: Mat, x: number, y: number, z: number): GltfNodeSpec {
   const mesh = g.addMesh(buildSphereMesh(r, 10, 12), MATERIALS[mat]);
+  return { mesh, matrix: mtxTranslation(x, y, z) };
+}
+
+function hubCapNode(radius: number, height: number, mat: Mat, x: number, y: number, z: number): GltfNodeSpec {
+  const mesh = g.addMesh(buildHemisphereCapMesh(radius, height, 8, 20), MATERIALS[mat]);
   return { mesh, matrix: mtxTranslation(x, y, z) };
 }
 
@@ -109,9 +132,10 @@ function tubeMesh(a: [number, number, number], b: [number, number, number], r: n
   return { mesh, matrix };
 }
 
-/** Polygon extrusion (prism) with optional z-offset. Returns a node. */
+/** Polygon extrusion (prism) with optional z-offset and taper function. Returns a node. */
 function prismNode(pts: [number, number][], depth: number, mat: Mat,
-  x = 0, y = 0, z = 0, rz = 0, ry = 0, rx = 0): GltfNodeSpec {
+  x = 0, y = 0, z = 0, rz = 0, ry = 0, rx = 0,
+  taper?: (px: number, py: number) => number): GltfNodeSpec {
   const halfZ = depth / 2;
   const n = pts.length;
   let cx = 0, cy = 0;
@@ -119,15 +143,22 @@ function prismNode(pts: [number, number][], depth: number, mat: Mat,
   cx /= n; cy /= n;
   const pos: number[] = [];
   const idx: number[] = [];
-  for (const [px, py] of pts) { pos.push(px, py, -halfZ); }
-  for (const [px, py] of pts) { pos.push(px, py, +halfZ); }
+  for (const [px, py] of pts) {
+    const s = taper ? taper(px, py) : 1;
+    pos.push(px, py, -halfZ * s);
+  }
+  for (const [px, py] of pts) {
+    const s = taper ? taper(px, py) : 1;
+    pos.push(px, py, +halfZ * s);
+  }
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
     idx.push(i, j, i + n, j, j + n, i + n);
   }
-  const bot = 2 * n; pos.push(cx, cy, -halfZ);
+  const cs = taper ? taper(cx, cy) : 1;
+  const bot = 2 * n; pos.push(cx, cy, -halfZ * cs);
   for (let i = 0; i < n; i++) { const j = (i + 1) % n; idx.push(bot, i, j); }
-  const top = 2 * n + 1; pos.push(cx, cy, +halfZ);
+  const top = 2 * n + 1; pos.push(cx, cy, +halfZ * cs);
   for (let i = 0; i < n; i++) { const j = (i + 1) % n; idx.push(top, j, i); }
   const mesh = g.addMesh({ pos, idx }, MATERIALS[mat]);
   return { mesh, matrix: mtxTR(x, y, z, rx, ry, rz) };
@@ -149,8 +180,8 @@ export const APACHE_GEAR_BOTTOM = 2.16;
 /** Main rotor head + 4 blades. Spins about local +Y via `mainRotor` node. */
 function mainRotorHead(): GltfNodeSpec {
   const kids: GltfNodeSpec[] = [];
-  kids.push(cylNode(0.42, 0.36, 'titanium', 0, 0, 0));
-  kids.push(sphereNode(0.42, 'titanium', 0, 0.18, 0));
+  kids.push(cylNode(0.42, 0.36, 'titanium', 0, 0, 0, 'y', 0.54));
+  kids.push(hubCapNode(0.42, 0.23, 'titanium', 0, 0.18, 0));
   kids.push(torusNode(0.54, 0.038, 'graphite', 0, -0.18, 0, Math.PI / 2, 0, 0));
   kids.push(cylNode(0.18, 0.04, 'graphite', 0, 0.40, 0));
 
@@ -314,6 +345,7 @@ function landingGear(s: number): GltfNodeSpec[] {
   const SA1: [number, number, number] = [U[0] - 0.20, U[1] - 0.35, U[2] - 0.08 * s];
   const SA2 = [...lerp3(U, W, 0.30)] as [number, number, number];
   SA2[2] += 0.02 * s;
+  kids.push(boxNode(0.14, 0.32, 0.12, 'titanium', SA1[0], SA1[1] + 0.16, SA1[2]));
   kids.push(tubeNode(SA1, SA2, 0.024, 'graphite', 8));
   kids.push(sphereNode(0.032, 'steel', SA1[0], SA1[1], SA1[2]));
   kids.push(sphereNode(0.032, 'steel', SA2[0], SA2[1], SA2[2]));
@@ -337,6 +369,7 @@ function tailWheel(): GltfNodeSpec[] {
   const kids: GltfNodeSpec[] = [];
   kids.push(boxNode(0.26, 0.20, 0.26, 'titanium', TW_TOP[0], TW_TOP[1] + 0.04, 0));
   kids.push(cylNode(0.045, 0.24, 'steel', TW_TOP[0], TW_TOP[1], 0, 'z'));
+  kids.push(boxNode(0.12, 0.32, 0.12, 'titanium', TW_FWD[0], -0.38, 0));
   kids.push(boxNode(0.18, 0.16, 0.18, 'titanium', TW_FWD[0], TW_FWD[1] + 0.06, 0));
   kids.push(cylNode(0.038, 0.20, 'steel', TW_FWD[0], TW_FWD[1], 0, 'z'));
 
@@ -458,12 +491,13 @@ function canopyFrames(): GltfNodeSpec[] {
   const ring = (x: number, thick = 0.028) => {
     const s = sampleCanopy(x);
     const pts: [number, number, number][] = [];
-    for (let j = 0; j <= 22; j++) {
-      const u = j / 22;
+    for (let j = 0; j <= 28; j++) {
+      const u = j / 28;
       const theta = (u - 0.5) * Math.PI;
       pts.push([x, s.sillY + (s.ridgeY - s.sillY) * Math.cos(theta), Math.sin(theta) * s.sillZ]);
     }
-    for (let j = 0; j < pts.length - 1; j++) kids.push(tubeNode(pts[j], pts[j + 1], thick, 'frame', 7));
+    const mesh = g.addMesh(buildContinuousTubeMesh(pts, thick, 12), MATERIALS.frame);
+    kids.push({ mesh, matrix: mtxTranslation(0, 0, 0) });
   };
   ring(-0.15, 0.030);
   ring(1.75, 0.032);
@@ -476,7 +510,8 @@ function canopyFrames(): GltfNodeSpec[] {
       const s = sampleCanopy(x);
       pts.push([x, s.sillY, side * s.sillZ]);
     }
-    for (let i = 0; i < pts.length - 1; i++) kids.push(tubeNode(pts[i], pts[i + 1], 0.026, 'frame', 7));
+    const mesh = g.addMesh(buildContinuousTubeMesh(pts, 0.026, 12), MATERIALS.frame);
+    kids.push({ mesh, matrix: mtxTranslation(0, 0, 0) });
   }
   {
     const ridge: [number, number, number][] = [];
@@ -485,7 +520,8 @@ function canopyFrames(): GltfNodeSpec[] {
       const s = sampleCanopy(x);
       ridge.push([x, s.ridgeY, 0]);
     }
-    for (let i = 0; i < ridge.length - 1; i++) kids.push(tubeNode(ridge[i], ridge[i + 1], 0.022, 'frame', 7));
+    const mesh = g.addMesh(buildContinuousTubeMesh(ridge, 0.022, 12), MATERIALS.frame);
+    kids.push({ mesh, matrix: mtxTranslation(0, 0, 0) });
   }
   kids.push(boxNode(0.10, 0.06, 0.16, 'titanium', 3.60, 0.28, 0));
   kids.push(boxNode(0.10, 0.06, 0.16, 'titanium', 1.85, 0.80, 0));
@@ -539,6 +575,16 @@ function cockpitInterior(): GltfNodeSpec[] {
       k2.push(boxNode(0.18, 0.035, 0.14, 'composite', panelX - 0.30, seatY - 0.06, 0.16 * s));
       k2.push(tubeNode([panelX - 0.30, seatY - 0.06, 0.16 * s], [panelX - 0.42, seatY + 0.06, 0.16 * s], 0.012, 'titanium', 7));
     }
+
+    // Collimated HUD unit (housing, projector lens, mount tubes, and HUD glass combiner)
+    const hudX = seatX + 0.55, hudY = seatY + 0.50;
+    k2.push(boxNode(0.26, 0.14, 0.34, 'composite', hudX, hudY - 0.16, 0));
+    k2.push(cylNode(0.09, 0.14, 'titanium', hudX + 0.10, hudY - 0.06, 0, 'x', 0.10));
+    for (const s of [1, -1]) {
+      k2.push(tubeNode([hudX - 0.05, hudY - 0.10, 0.20 * s], [hudX + 0.05, hudY + 0.22, 0.20 * s], 0.014, 'titanium', 8));
+    }
+    k2.push(boxNode(0.012, 0.28, 0.38, 'hudGlass', hudX + 0.08, hudY + 0.14, 0, 0.55));
+
     void isPilot;
     return { children: k2, matrix: mtxTranslation(xCenter, 0, 0) };
   };
@@ -559,8 +605,16 @@ function fuselage(): GltfNodeSpec[] {
   const tubShape: [number, number][] = [
     [1.55, -0.94], [3.55, -0.90], [4.32, -0.48], [4.35, -0.14], [3.35, 0.20], [1.55, 0.22],
   ];
-  kids.push(prismNode(tubShape, 1.32, 'airframe'));
+  const tubTaper = (px: number) => {
+    if (px > 1.55) {
+      const t = Math.min(1.0, (px - 1.55) / 2.80);
+      return 1 - 0.52 * t;
+    }
+    return 1;
+  };
+  kids.push(prismNode(tubShape, 1.32, 'airframe', 0, 0, 0, 0, 0, 0, tubTaper));
   kids.push(boxNode(1.75, 0.44, 0.98, 'composite', 3.00, -0.86, 0, -0.06));
+  kids.push(tubeNode([2.40, -0.96, 0], [2.72, -1.16, 0], 0.066, 'titanium', 12));
 
   for (const s of [1, -1]) {
     kids.push(boxNode(3.80, 0.014, 0.010, 'panel', -0.42, 0.55, 0.665 * s));
@@ -597,21 +651,38 @@ function rotorMast(): GltfNodeSpec[] {
   ];
   kids.push(prismNode(dhShape, 0.96, 'airframe', RC, 1.14, 0));
   kids.push(boxNode(2.10, 0.08, 0.42, 'composite', RC - 0.05, 1.81, 0));
-  kids.push(boxNode(0.55, 0.05, 0.42, 'graphite', RC - 0.55, 1.66, 0.32));
-  kids.push(boxNode(0.55, 0.05, 0.42, 'graphite', RC - 0.55, 1.66, -0.32));
-  kids.push(boxNode(0.30, 0.05, 0.70, 'graphite', RC - 1.30, 1.46, 0));
-  kids.push(cylNode(0.46, 0.32, 'titanium', RC, 1.46, 0));
+  kids.push(boxNode(0.48, 0.03, 0.22, 'graphite', RC - 0.55, 1.74, 0.28));
+  kids.push(boxNode(0.48, 0.03, 0.22, 'graphite', RC - 0.55, 1.74, -0.28));
+  kids.push(boxNode(0.24, 0.03, 0.42, 'graphite', RC - 1.25, 1.48, 0));
+  kids.push(cylNode(0.36, 0.32, 'titanium', RC, 1.46, 0, 'y', 0.56));
   kids.push(torusNode(0.52, 0.030, 'graphite', RC, 1.32, 0, Math.PI / 2, 0, 0));
   kids.push(cylNode(0.16, 0.78, 'titanium', RC, 2.00, 0));
   kids.push(torusNode(0.44, 0.055, 'titanium', RC, 1.76, 0, Math.PI / 2, 0, 0));
   kids.push(torusNode(0.44, 0.055, 'steel', RC, 1.83, 0, Math.PI / 2, 0, 0));
-  // hydraulic actuators from doghouse to swash
+  // pitch links from doghouse to swash
   for (let i = 0; i < 2; i++) {
     const a = i * Math.PI;
     kids.push(tubeNode(
       [RC + Math.cos(a) * 0.30, 1.62, Math.sin(a) * 0.30],
       [RC + Math.cos(a) * 0.42, 1.84, Math.sin(a) * 0.42], 0.020, 'steel', 8,
     ));
+  }
+  // 3 angled swashplate hydraulic cylinders from helicopter.html
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + Math.PI / 6;
+    const bot: [number, number, number] = [RC + Math.cos(a) * 0.78, 1.34, Math.sin(a) * 0.78];
+    const top: [number, number, number] = [RC + Math.cos(a) * 0.60, 1.74, Math.sin(a) * 0.60];
+    kids.push(tubeNode(bot, top, 0.038, 'titanium', 10));
+
+    const dx = top[0] - bot[0], dy = top[1] - bot[1], dz = top[2] - bot[2];
+    const L = Math.hypot(dx, dy, dz);
+    if (L > 1e-6) {
+      const ux = dx / L, uy = dy / L, uz = dz / L;
+      const cx = bot[0] + dx * 0.55, cy = bot[1] + dy * 0.55, cz = bot[2] + dz * 0.55;
+      const c1: [number, number, number] = [cx - ux * 0.18, cy - uy * 0.18, cz - uz * 0.18];
+      const c2: [number, number, number] = [cx + ux * 0.18, cy + uy * 0.18, cz + uz * 0.18];
+      kids.push(tubeNode(c1, c2, 0.058, 'graphite', 12));
+    }
   }
   return kids;
 }
@@ -625,19 +696,20 @@ function enginesAndWeapons(): GltfNodeSpec[] {
     eng.push(boxNode(2.15, 0.012, 0.02, 'panel', 0, 0.20, 0.235));
     eng.push(boxNode(2.15, 0.012, 0.02, 'panel', 0, -0.05, 0.235));
     for (const xr of [-0.70, -0.10, 0.55]) eng.push(boxNode(0.014, 0.55, 0.02, 'panel', xr, 0, 0.235));
-    eng.push(cylNode(0.27, 0.35, 'composite', 1.12, 0, 0, 'x'));
+    eng.push(cylNode(0.26, 0.35, 'composite', 1.12, 0, 0, 'x', 0.28));
     eng.push(torusNode(0.28, 0.018, 'steel', 1.29, 0, 0, 0, Math.PI / 2, 0));
     eng.push(coneNode(0.14, 0.30, 'graphite', 1.05, 0, 0, -Math.PI / 2));
-    eng.push(cylNode(0.27, 0.70, 'titanium', -1.25, 0, 0, 'x'));
+    eng.push(cylNode(0.25, 0.70, 'titanium', -1.25, 0, 0, 'x', 0.30));
     eng.push(cylNode(0.32, 0.40, 'graphite', -1.38, 0, 0, 'x'));
     kids.push({ children: eng, matrix: mtxTranslation(-1.45, 0.76, 0.72 * s) });
 
     kids.push(boxNode(1.1, 0.16, 2.2, 'airframe', -0.95, -0.28, 1.55 * s));
     kids.push(boxNode(1.05, 0.012, 0.02, 'panel', -0.95, -0.19, 1.55 * s));
-    kids.push(boxNode(0.44, 0.42, 0.26, 'composite', -0.95, -0.58, 1.55 * s));
-    kids.push(boxNode(0.42, 0.012, 0.02, 'panel', -0.95, -0.42, 1.55 * s));
+    // Inboard pylon mounting the rocket pod to the wing
+    kids.push(boxNode(0.55, 0.28, 0.16, 'composite', -0.95, -0.50, 1.15 * s));
+    kids.push(boxNode(0.52, 0.012, 0.02, 'panel', -0.95, -0.42, 1.15 * s));
     kids.push(cylNode(0.32, 1.7, 'airframe', -0.95, -0.88, 1.15 * s, 'x'));
-    kids.push(cylNode(0.26, 0.20, 'airframe', 0.05, -0.88, 1.15 * s, 'x'));
+    kids.push(cylNode(0.20, 0.20, 'airframe', 0.05, -0.88, 1.15 * s, 'x', 0.32));
     for (let r = 0; r < 2; r++) {
       const ringRad = 0.11 + r * 0.11;
       const n = r === 0 ? 7 : 12;
@@ -647,18 +719,21 @@ function enginesAndWeapons(): GltfNodeSpec[] {
         kids.push({ mesh: idx, matrix: matMult(mtxTranslation(-0.08, -0.88 + Math.cos(a) * ringRad, 1.15 * s + Math.sin(a) * ringRad), mtxRotZ(Math.PI / 2)) });
       }
     }
+    // Outboard pylon mounting the Hellfire launcher rail to the wing
+    kids.push(boxNode(0.55, 0.38, 0.16, 'composite', -0.95, -0.55, 2.15 * s));
+    kids.push(boxNode(0.52, 0.012, 0.02, 'panel', -0.95, -0.45, 2.15 * s));
     kids.push(boxNode(1.3, 0.08, 0.55, 'composite', -0.95, -0.74, 2.15 * s));
     kids.push(boxNode(1.25, 0.012, 0.02, 'panel', -0.95, -0.69, 2.15 * s));
     for (const py of [-0.85, -0.98]) {
       for (const pz of [2.05, 2.25]) {
         const miss: GltfNodeSpec[] = [];
         miss.push(cylNode(0.065, 1.35, 'composite', 0, 0, 0, 'x'));
-        miss.push(sphereNode(0.065, 'canopyGlass', 1.23, 0, 0));
+        miss.push(sphereNode(0.065, 'canopyGlass', 0.68, 0, 0));
         miss.push(cylNode(0.067, 0.06, 'warn', 0.10, 0, 0, 'x'));
         for (let f = 0; f < 4; f++) {
           const fa = f * Math.PI / 2 + Math.PI / 4;
           const finMesh = g.addMesh(buildBoxMesh(0.22, 0.14, 0.010), MATERIALS.graphite);
-          miss.push({ mesh: finMesh, matrix: matMult(mtxTranslation(-1.57, 0, 0), mtxRotX(fa)) });
+          miss.push({ mesh: finMesh, matrix: matMult(mtxTranslation(-0.55, Math.cos(fa) * 0.08, Math.sin(fa) * 0.08), mtxRotX(fa)) });
         }
         kids.push({ children: miss, matrix: mtxTranslation(-0.95, py, pz * s) });
       }
@@ -670,28 +745,29 @@ function enginesAndWeapons(): GltfNodeSpec[] {
 
 function tailBoomFin(): GltfNodeSpec[] {
   const kids: GltfNodeSpec[] = [];
-  kids.push(cylNode(0.33, 4.6, 'airframe', -4.9, 0.06, 0, 'x'));
+  // Tapered tail boom: thick at fuselage (x=-2.6, R=0.44), slender at tail (x=-7.2, R=0.24)
+  kids.push(cylNode(0.24, 4.6, 'airframe', -4.9, 0.06, 0, 'x', 0.44));
   kids.push(cylNode(0.14, 4.3, 'airframe', -4.85, 0.44, 0, 'x'));
   for (const xr of [-3.10, -4.00, -4.90, -5.80, -6.40]) {
     kids.push(torusNode(0.145, 0.010, 'graphite', xr, 0.44, 0, 0, Math.PI / 2, 0));
   }
+  // Flush access hatches conforming to the local radius of the tapered boom
   for (const s of [1, -1]) {
-    kids.push(boxNode(4.2, 0.010, 0.014, 'panel', -4.85, 0.24, 0.34 * s));
-    kids.push(boxNode(4.2, 0.010, 0.014, 'panel', -4.85, -0.10, 0.36 * s));
-    kids.push(boxNode(0.42, 0.20, 0.010, 'panel', -3.60, 0.10, 0.34 * s));
-    kids.push(boxNode(0.42, 0.20, 0.010, 'panel', -5.10, 0.10, 0.30 * s));
-    kids.push(boxNode(0.28, 0.16, 0.010, 'panel', -4.20, 0.30, 0.32 * s));
+    kids.push(boxNode(0.42, 0.20, 0.010, 'panel', -3.60, 0.10, 0.39 * s));
+    kids.push(boxNode(0.42, 0.20, 0.010, 'panel', -5.10, 0.10, 0.33 * s));
+    kids.push(boxNode(0.28, 0.16, 0.010, 'panel', -4.20, 0.28, 0.36 * s));
+    kids.push(boxNode(0.02, 0.14, 0.05, 'graphite', -3.20, 0.20, 0.40 * s));
+    kids.push(boxNode(0.02, 0.14, 0.05, 'graphite', -5.60, 0.18, 0.31 * s));
   }
   kids.push(boxNode(0.02, 0.30, 0.06, 'graphite', -4.20, -0.20, 0));
   kids.push(boxNode(0.03, 0.04, 0.07, 'titanium', -4.20, -0.34, 0));
-  for (const s of [1, -1]) {
-    kids.push(boxNode(0.02, 0.14, 0.05, 'graphite', -3.20, 0.20, 0.38 * s));
-    kids.push(boxNode(0.02, 0.14, 0.05, 'graphite', -5.60, 0.18, 0.34 * s));
-  }
-  kids.push(cylNode(0.425, 0.10, 'warn', -6.55, 0.06, 0, 'x'));
-  kids.push(boxNode(0.14, 0.04, 0.04, 'green', -3.85, 0.06, 0.34));
-  kids.push(boxNode(0.14, 0.04, 0.04, 'red', -3.85, 0.06, -0.34));
 
+  // Snug warning stripe at x = -6.55 (local boom radius ~0.268)
+  kids.push(cylNode(0.272, 0.10, 'warn', -6.55, 0.06, 0, 'x'));
+  kids.push(boxNode(0.14, 0.04, 0.04, 'green', -3.85, 0.06, 0.385));
+  kids.push(boxNode(0.14, 0.04, 0.04, 'red', -3.85, 0.06, -0.385));
+
+  // Horizontal stabilator
   kids.push(boxNode(0.9, 0.08, 2.9, 'airframe', -6.55, -0.12, 0));
   kids.push(boxNode(0.86, 0.010, 2.85, 'panel', -6.55, -0.075, 0));
   kids.push(boxNode(0.86, 0.008, 0.012, 'panel', -6.55, -0.075, 0.90));
@@ -699,32 +775,43 @@ function tailBoomFin(): GltfNodeSpec[] {
   kids.push(boxNode(0.35, 0.20, 0.30, 'titanium', -6.40, -0.22, 0));
   kids.push(tubeNode([-6.20, -0.20, 0], [-5.85, -0.15, 0], 0.030, 'steel', 8));
 
+  // Vertical fin: centered at Z = 0
   const finShape: [number, number][] = [
     [-5.62, 0.30], [-6.12, 2.05], [-7.02, 2.05], [-7.02, 0.16], [-6.28, -0.04],
   ];
-  // rotate the fin so +X dir is up... the original used a vertical fin (in XY plane, depth Z)
-  kids.push(prismNode(finShape, 0.16, 'airframe', 0, -0.1, -0.08));
-  kids.push(tubeNode([-5.66, 0.22, 0.02], [-6.15, 1.98, 0.02], 0.032, 'graphite', 8));
-  kids.push(boxNode(0.70, 0.010, 0.012, 'panel', -6.55, 0.80, 0.10));
-  kids.push(boxNode(0.90, 0.010, 0.012, 'panel', -6.55, 1.40, 0.10));
-  kids.push(boxNode(0.10, 0.06, 0.18, 'titanium', -6.57, 2.08, 0.02));
-  kids.push(boxNode(0.14, 0.04, 0.06, 'graphite', -7.10, -0.40, 0));
-  kids.push(boxNode(0.05, 0.05, 0.06, 'red', -5.85, 0.35, 0.06));
+  kids.push(prismNode(finShape, 0.16, 'airframe', 0, -0.1, 0));
+  kids.push(tubeNode([-5.66, 0.22, 0], [-6.15, 1.98, 0], 0.032, 'graphite', 8));
+  for (const s of [1, -1]) {
+    kids.push(boxNode(0.70, 0.010, 0.012, 'panel', -6.55, 0.80, 0.082 * s));
+    kids.push(boxNode(0.90, 0.010, 0.012, 'panel', -6.55, 1.40, 0.082 * s));
+  }
+  kids.push(boxNode(0.10, 0.06, 0.18, 'titanium', -6.57, 2.08, 0));
+
+  // Tail rotor gearbox: firmly connects vertical fin (z=0) to tail rotor hub (z=0.24)
+  kids.push(boxNode(0.28, 0.44, 0.32, 'titanium', -6.40, 1.36, 0.10));
+
+  // Tail skid strut (steel tube) + bumper
+  kids.push(tubeNode([-6.65, -0.15, 0], [-7.10, -0.42, 0], 0.030, 'steel', 8));
+  kids.push(boxNode(0.14, 0.04, 0.06, 'graphite', -7.10, -0.42, 0));
+  kids.push(boxNode(0.05, 0.05, 0.06, 'red', -5.85, 0.35, 0.082));
 
   return kids;
 }
 
 function longbowRadome(): GltfNodeSpec {
   const kids: GltfNodeSpec[] = [];
-  kids.push(cylNode(0.105, 0.66, 'titanium', 0, 0, 0));
-  kids.push(cylNode(0.16, 0.08, 'graphite', 0, -0.29, 0));
-  kids.push(cylNode(0.58, 0.42, 'composite', 0, 0.42, 0));
-  kids.push(torusNode(0.58, 0.030, 'graphite', 0, 0.21, 0, Math.PI / 2, 0, 0));
-  kids.push(coneNode(0.58, 0.22, 'composite', 0, 0.32, 0, 0));
+  // Mast & collar below radome drum (origin is radome drum center y = 3.02)
+  kids.push(cylNode(0.095, 0.66, 'titanium', 0, -0.42, 0, 'y', 0.115));
+  kids.push(cylNode(0.16, 0.08, 'graphite', 0, -0.71, 0));
+  // APG-78 Longbow Radar drum
+  kids.push(cylNode(0.58, 0.42, 'composite', 0, 0, 0));
+  kids.push(torusNode(0.58, 0.030, 'graphite', 0, -0.21, 0, Math.PI / 2, 0, 0));
+  // Radome upper tapered top (vertical cylinder tapering from 0.58 at bottom to 0.32 at top)
+  kids.push(cylNode(0.32, 0.22, 'composite', 0, 0.32, 0, 'y', 0.58));
   kids.push(cylNode(0.32, 0.05, 'composite', 0, 0.46, 0));
   kids.push(torusNode(0.585, 0.014, 'graphite', 0, 0.12, 0, Math.PI / 2, 0, 0));
   kids.push(sphereNode(0.06, 'steel', 0, 0.50, 0));
-  return { name: 'longbow', children: kids, matrix: mtxTranslation(-0.55, 2.60, 0) };
+  return { name: 'longbow', children: kids, matrix: mtxTranslation(-0.55, 3.02, 0) };
 }
 
 /* ═══════════════ ROOT ═══════════════ */
@@ -771,6 +858,11 @@ const root: GltfNodeSpec[] = [{ name: 'modelFrame', matrix: AXIS_FIX, children: 
   }
   cache = compiled.dataUri;
   return cache;
+}
+
+/** Reset cached binary glTF data URI (useful for test suites and dynamic updates). */
+export function resetApacheGltfCache(): void {
+  cache = null;
 }
 
 /** Real-size scale for the Apache in the globe. The model spans ~13 units
