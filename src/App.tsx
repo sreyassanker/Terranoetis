@@ -5688,10 +5688,13 @@ export default function App() {
       case 'KeyW': case 'Space': case 'PageUp': k.w = false; break;
       case 'KeyS': case 'PageDown': k.s = false; break;
       case 'KeyA': case 'KeyD': if (k.thr !== 0) k.thr = 0; break;
-      case 'ArrowUp': case 'ArrowDown': if (k.pitch !== 0) k.pitch = 0; break;
-      case 'ArrowLeft': case 'ArrowRight':
-        if (k.roll !== 0) k.roll = 0;
-        if (k.pedal !== 0) k.pedal = 0;
+      case 'ArrowUp': if (k.pitch > 0) k.pitch = 0; break;
+      case 'ArrowDown': if (k.pitch < 0) k.pitch = 0; break;
+      case 'ArrowLeft':
+        if (k.roll < 0) k.roll = 0;
+        break;
+      case 'ArrowRight':
+        if (k.roll > 0) k.roll = 0;
         break;
       case 'KeyQ': case 'KeyE': case 'Comma': case 'Period': if (k.pedal !== 0) k.pedal = 0; break;
       case 'KeyH': heliStarterRef.current = false; break;

@@ -179,28 +179,25 @@ export function DualLeverFlightPod({
   const pressDir = (dir: 'front' | 'back' | 'left' | 'right') => {
     if (dir === 'front') {
       activeStickRef.current.pitch = 1.0;
-      activeStickRef.current.roll = 0;
-      activeStickRef.current.pedal = 0;
     } else if (dir === 'back') {
       activeStickRef.current.pitch = -1.0;
-      activeStickRef.current.roll = 0;
-      activeStickRef.current.pedal = 0;
     } else if (dir === 'left') {
-      activeStickRef.current.pitch = 0;
       activeStickRef.current.roll = -1.0;
-      activeStickRef.current.pedal = 0;
     } else if (dir === 'right') {
-      activeStickRef.current.pitch = 0;
       activeStickRef.current.roll = 1.0;
-      activeStickRef.current.pedal = 0;
     }
+    activeStickRef.current.pedal = 0;
     onStick({ ...activeStickRef.current });
   };
 
   const releaseDir = (dir: 'front' | 'back' | 'left' | 'right') => {
-    if (dir === 'front' || dir === 'back') {
+    if (dir === 'front' && activeStickRef.current.pitch > 0) {
       activeStickRef.current.pitch = 0;
-    } else if (dir === 'left' || dir === 'right') {
+    } else if (dir === 'back' && activeStickRef.current.pitch < 0) {
+      activeStickRef.current.pitch = 0;
+    } else if (dir === 'left' && activeStickRef.current.roll < 0) {
+      activeStickRef.current.roll = 0;
+    } else if (dir === 'right' && activeStickRef.current.roll > 0) {
       activeStickRef.current.roll = 0;
     }
     activeStickRef.current.pedal = 0;
@@ -293,7 +290,7 @@ export function DualLeverFlightPod({
             className="hxf-dpad-btn front"
             data-testid="hxf-dpad-front"
             title="Move FRONT (Forward flight)"
-            onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); pressDir('front'); }}
+            onPointerDown={(e) => { pressDir('front'); try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch {} }}
             onPointerUp={() => releaseDir('front')}
             onPointerCancel={() => releaseDir('front')}
           >
@@ -306,7 +303,7 @@ export function DualLeverFlightPod({
             className="hxf-dpad-btn left"
             data-testid="hxf-dpad-left"
             title="Move LEFT (Turn & bank left)"
-            onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); pressDir('left'); }}
+            onPointerDown={(e) => { pressDir('left'); try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch {} }}
             onPointerUp={() => releaseDir('left')}
             onPointerCancel={() => releaseDir('left')}
           >
@@ -326,7 +323,7 @@ export function DualLeverFlightPod({
             className="hxf-dpad-btn right"
             data-testid="hxf-dpad-right"
             title="Move RIGHT (Turn & bank right)"
-            onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); pressDir('right'); }}
+            onPointerDown={(e) => { pressDir('right'); try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch {} }}
             onPointerUp={() => releaseDir('right')}
             onPointerCancel={() => releaseDir('right')}
           >
@@ -339,7 +336,7 @@ export function DualLeverFlightPod({
             className="hxf-dpad-btn back"
             data-testid="hxf-dpad-back"
             title="Move BACK (Flare / Pitch aft)"
-            onPointerDown={(e) => { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); pressDir('back'); }}
+            onPointerDown={(e) => { pressDir('back'); try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch {} }}
             onPointerUp={() => releaseDir('back')}
             onPointerCancel={() => releaseDir('back')}
           >
