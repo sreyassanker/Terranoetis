@@ -423,14 +423,12 @@ export function HelicopterHud({
   const windKt = Math.round(Math.hypot(hud.windE, hud.windN) * 1.94384);
   const rates = `${hud.pitchRateDps >= 0 ? '+' : ''}${hud.pitchRateDps.toFixed(0)}/${hud.rollRateDps >= 0 ? '+' : ''}${hud.rollRateDps.toFixed(0)}/${hud.yawRateDps >= 0 ? '+' : ''}${hud.yawRateDps.toFixed(0)}°/s`;
   const thr = Math.round(input.throttle * 100);
-  const fuelPct = Math.round((hud.fuelKg / Math.max(1, hud.fuelMaxKg)) * 100);
 
   const annun: { tag: string; on: boolean; color: string }[] = [
     { tag: 'RLM', on: rpm < 90 && hud.engine, color: C.red },          // rotor low
     { tag: hud.engine ? 'ENG' : 'ENG OUT', on: !hud.engine, color: C.red },
     { tag: `TORQ${torque > 95 ? '!' : ''}`, on: torque > 95, color: C.red },
     { tag: 'VNE', on: hud.iasKts > VNE_KTS - 5, color: C.red },
-    { tag: 'FUEL', on: fuelPct < 15, color: fuelPct < 6 ? C.red : C.amber },
     { tag: 'SINK RATE', on: vs < -1500 && hud.aglM * 3.28084 < 120 && hud.aglM > 0.5, color: C.red },
     { tag: 'VRS', on: hud.vrs, color: C.red },
     { tag: 'ETL', on: hud.etlPct > 85 && !hud.onGround, color: C.green },
@@ -531,7 +529,6 @@ export function HelicopterHud({
       <div className="hxf-eng-row"><span>SHP</span><b>{shp.toLocaleString()}</b><i className="hxf-bar"><u style={{ width: `${Math.min(100, shp / 38)}%`, background: C.cyan }} /></i></div>
       <div className="hxf-eng-row"><span>COL</span><b>{coll}%</b><i className="hxf-bar"><u style={{ width: `${coll}%`, background: C.green }} /></i></div>
       <div className="hxf-eng-row"><span>THR</span><b>{thr}%</b><i className="hxf-bar"><u style={{ width: `${thr}%`, background: C.amber }} /></i></div>
-      <div className="hxf-eng-row"><span>FUEL</span><b style={{ color: fuelPct < 15 ? C.red : C.white }}>{fuelPct}%</b><i className="hxf-bar"><u style={{ width: `${fuelPct}%`, background: fuelPct < 15 ? C.red : C.cyan }} /></i></div>
     </div>
   );
 
@@ -605,10 +602,10 @@ export function HelicopterHud({
       <div className="hxf-ihadss" data-testid="hxf-ihadss">
         <div className="hxf-reticle-cross" />
         <div className="hxf-reticle-ring" />
-        <div className="hxf-hud-fpm" style={{ transform: `translate(${(hud.sideslipDeg || 0) * 3}px, ${(pitch - vs / 120) * 2.5}px)` }}>
+        <div className="hxf-hud-fpm" style={{ transform: `translate(calc(-50% + ${(hud.sideslipDeg || 0) * 3}px), calc(-50% + ${(pitch - vs / 120) * 2.5}px))` }}>
           <span className="hxf-fpm-o" /><span className="hxf-fpm-l" /><span className="hxf-fpm-r" /><span className="hxf-fpm-u" />
         </div>
-        <div className="hxf-hud-horizon" style={{ transform: `translateY(${pitch * 3.5}px) rotate(${roll}deg)` }}>
+        <div className="hxf-hud-horizon" style={{ transform: `translate(-50%, -50%) translateY(${pitch * 3.5}px) rotate(${roll}deg)` }}>
           <div className="hxf-hz-l" /><div className="hxf-hz-gap" /><div className="hxf-hz-r" />
         </div>
       </div>
@@ -918,8 +915,8 @@ const css = `
 .hxf-fpm-r { position: absolute; left: 50%; top: 50%; width: 8px; height: 1.5px; background: #00ff66; transform: translate(5px, -50%); }
 .hxf-fpm-u { position: absolute; left: 50%; bottom: 50%; width: 1.5px; height: 6px; background: #00ff66; transform: translate(-50%, -5px); }
 .hxf-hud-horizon { position: absolute; left: 50%; top: 50%; width: 180px; height: 2px; transform-origin: center; transition: transform 0.05s ease-out; display: flex; justify-content: space-between; align-items: center; }
-.hxf-hz-l, .hxf-hz-r { width: 65px; height: 1.5px; background: #00ff66; box-shadow: 0 0 6px rgba(0,255,102,0.6); }
-.hxf-hz-gap { width: 40px; }
+.hxf-hz-l, .hxf-hz-r { width: 66px; height: 1.5px; background: #00ff66; box-shadow: 0 0 6px rgba(0,255,102,0.6); }
+.hxf-hz-gap { width: 48px; }
 .hxf-diu-in { width: 208px; height: 228px; box-sizing: border-box; transform-origin: 50% 50%;
   background: rgba(3,10,16,0.94); border: 2px solid rgba(90,110,130,0.55); border-radius: 7px;
   box-shadow: inset 0 0 22px rgba(0,0,0,0.85), 0 2px 8px rgba(0,0,0,0.6);
