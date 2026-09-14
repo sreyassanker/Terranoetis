@@ -4,7 +4,6 @@
  * A small WebAudio graph whose tone IS the telemetry:
  *   - blade-pass "whump": 4P sawtooth (17.9 Hz × Nf) through a lowpass,
  *     amplitude from torque — the deep chop that speeds up with Nf.
- *   - gas-generator hiss: band-passed noise, gain ∝ Ng.
  *   - transmission tone: 1P fundamental hum (4.5 Hz × Nf → sub octave mixed
  *     up two octaves so laptop speakers still render it).
  *   - VRS/low-Nf warble: slight detune when Nf < 90.
@@ -25,8 +24,6 @@ export class HeliAudioEngine {
   private whumpFilter: BiquadFilterNode | null = null;
   private humOsc: OscillatorNode | null = null;
   private humGain: GainNode | null = null;
-  private hissSrc: AudioBufferSourceNode | null = null;
-  private hissGain: GainNode | null = null;
   private started = false;
   muted = false;
 
@@ -54,22 +51,9 @@ export class HeliAudioEngine {
       humOsc.connect(humGain).connect(master);
       humOsc.start();
 
-      // 1 s of white noise, looped → bandpassed hiss
-      const buf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-      const hissSrc = ctx.createBufferSource();
-      hissSrc.buffer = buf; hissSrc.loop = true;
-      const band = ctx.createBiquadFilter();
-      band.type = 'bandpass'; band.frequency.value = 5200; band.Q.value = 0.8;
-      const hissGain = ctx.createGain(); hissGain.gain.value = 0.0001;
-      hissSrc.connect(band).connect(hissGain).connect(master);
-      hissSrc.start();
-
       this.ctx = ctx; this.master = master;
       this.whumpOsc = whumpOsc; this.whumpGain = whumpGain; this.whumpFilter = whumpFilter;
       this.humOsc = humOsc; this.humGain = humGain;
-      this.hissSrc = hissSrc; this.hissGain = hissGain;
       this.started = true;
       void ctx.resume().catch(() => { /* autoplay policy */ });
       return true;
@@ -91,14 +75,13 @@ export class HeliAudioEngine {
     if (this.whumpFilter) this.whumpFilter.frequency.setTargetAtTime(90 + 120 * nf, t, 0.15);
     if (this.humOsc) this.humOsc.frequency.setTargetAtTime(4.5 * Math.max(0.3, nf) * 16 * (env.vrs ? 0.94 : 1) + (env.vrs ? Math.sin(t * 9) * 6 : 0), t, 0.12);
     if (this.humGain) set(this.humGain.gain, nf > 0.05 ? 0.05 * nf * nf + (env.vrs ? 0.06 : 0) : 0);
-    if (this.hissGain) set(this.hissGain.gain, env.engineOn ? 0.004 + (env.ngPct / 100) * 0.028 * (0.5 + env.throttle) : 0);
   }
 
   toggleMute(): boolean { this.muted = !this.muted; return this.muted; }
 
   stop() {
     try {
-      this.whumpOsc?.stop(); this.humOsc?.stop(); this.hissSrc?.stop();
+      this.whumpOsc?.stop(); this.humOsc?.stop();
       this.ctx?.close();
     } catch { /* already down */ }
     this.ctx = null; this.master = null; this.started = false;
