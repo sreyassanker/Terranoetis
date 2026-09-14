@@ -174,6 +174,7 @@ export class HelicopterSim {
     this.profile = opts?.profile ?? PROFILES.AH64E;
     this.st = { ...HELI_DEFAULT(), ...init };
     this.gearH = Math.max(0, opts?.gearOffsetM ?? 0);
+    this.st.aglM = this.st.onGround ? 0 : Math.max(0, this.st.altM - this.st.groundAltM - this.gearH);
     this.rotorRpm = this.st.engine ? this.st.rotorRpm : 0;
     this.ng = this.st.engine ? this.st.ngPct : 0;
     this.collectiveSmooth = this.st.collective;
@@ -264,9 +265,13 @@ export class HelicopterSim {
     /* available thrust = weight-adjusted, density-scaled (T ∝ ρ); gravity opposes */
     const thrust = coll * this.profile.thrustPerWeight * GRAVITY * (0.25 + 0.75 * rpmNow) * sigma;
 
-    /* ground effect: extra efficiency close to the ground (wheel-height datum) */
+    /* ground effect & takeoff assist: extra efficiency close to the ground */
     const agl = Math.max(0, s.altM - s.groundAltM - this.gearH);
-    const groundEffect = 1 + Math.max(0, 0.18 * (1 - Math.min(1, agl / 60)));
+    const groundEffect = 1 + Math.max(0, 0.25 * (1 - Math.min(1, agl / 40)));
+    // Ground lift assist: when on or near the ground, increasing the pull-up bar lifts the aircraft up
+    const groundTakeoff = (s.onGround || agl < 8) && coll > 0.22 && engineRun
+      ? Math.max(0, 1 - agl / 8) * GRAVITY * (0.85 + coll * 0.55) * (0.5 + 0.5 * rpmNow)
+      : 0;
 
     /* air-mass velocity for all aerodynamic forces */
     const vaN = this.vN - this.wN;
@@ -280,35 +285,48 @@ export class HelicopterSim {
     /* translational lift (ETL): rotor efficiency climbs between ~10 and 24 kt EAS */
     const eas = ve * sqrtSigma;
     const tlFactor = 1 + TL_GAIN * (1 - Math.exp(-eas / TL_SPEED_MS));
-    const effectiveThrust = thrust * groundEffect * tlFactor;
+    const effectiveThrust = (thrust * groundEffect * tlFactor) + groundTakeoff;
     s.etlPct = ((tlFactor - 1) / TL_GAIN) * 100;
 
     /* ── vertical accel (thrust cos-pitch cos-roll − g) ── */
+    // coll <= 0.03: zero lift command, descend until reaching ground at 0m
+    const vertThrust = coll <= 0.03 ? 0 : effectiveThrust;
     const cosP = Math.cos((s.pitchDeg * Math.PI) / 180);
     const cosR = Math.cos((s.rollDeg * Math.PI) / 180);
     this.wingFrac = this.profile.wingOffload * Math.max(0, Math.min(1, (eas - 20) / 25));
-    const aUp = effectiveThrust * cosP * cosR - GRAVITY * (1 - this.wingFrac) - this.profile.vsDrag * this.vU * Math.abs(this.vU);
+    const aUp = coll <= 0.03
+      ? -GRAVITY * 0.45 - this.profile.vsDrag * this.vU * Math.abs(this.vU)
+      : vertThrust * cosP * cosR - GRAVITY * (1 - this.wingFrac) - this.profile.vsDrag * this.vU * Math.abs(this.vU);
 
-    /* ── forward/lateral accel from cyclic tilt (stick + thrust-vector tilt) ── */
-    // pitchDeg: + = nose UP. Stick forward (+pitch input) commands nose-down.
+    /* ── forward/lateral accel from cyclic tilt & acceleration bar ── */
+    // Directional buttons:
+    // FRONT: input.pitch = 1.0 -> forward acceleration only
+    // BACK:  input.pitch = -1.0 -> backward acceleration only
+    const stickFwd = input.pitch * 9.0 * rpmNow;
+    // LEFT:  input.roll = -1.0 -> lateral left acceleration only (no yaw)
+    // RIGHT: input.roll = 1.0 -> lateral right acceleration only (no yaw)
+    const stickLat = input.roll * 8.5 * rpmNow;
+
+    // Acceleration bar (input.throttle 0..1):
+    // Directly commands forward cruise speed from 0 (min / hover-stop) to max (130+ kt)
+    const targetFwdSpeed = (engineRun ? input.throttle : 0) * this.profile.vneMs * (this.profile.pusherAccel > 0 ? 1.0 : 0.92);
+    const currentFwdSpeed = this.vN * Math.cos(hdgRad0) + this.vE * Math.sin(hdgRad0);
+    const speedDiff = targetFwdSpeed - currentFwdSpeed;
+    const pusherK = this.profile.pusherAccel > 0 ? this.profile.pusherAccel : THROTTLE_ACCEL;
+    const pusherExtra = this.profile.pusherAccel > 0 ? input.throttle * pusherK * rpmNow : 0;
+    const thrFwd = engineRun
+      ? (input.throttle > 0
+          ? clamp(speedDiff * 1.6, -8.0, 8.0) * rpmNow + pusherExtra
+          : (Math.abs(input.pitch) < 0.05 ? clamp(-currentFwdSpeed * 1.5, -8.0, 0) * rpmNow : 0))
+      : 0;
+
     const gravFwd = -GRAVITY * Math.sin((s.pitchDeg * Math.PI) / 180);
     const gravLat = GRAVITY * Math.sin((s.rollDeg * Math.PI) / 180);
 
-    const stickFwd = input.pitch * PITCH_ACCEL * rpmNow;
-    const stickLat = input.roll * ROLL_ACCEL * rpmNow;
-    // throttle: net acceleration from power surplus behind the rotor governor
-    // pusher-prop compounds accelerate hard without bleeding rotor authority
-    const pusherK = this.profile.pusherAccel > 0 ? this.profile.pusherAccel : THROTTLE_ACCEL;
-    const pusherTaper = this.profile.pusherAccel > 0 ? Math.max(0.4, 1 - ve / 150) : 1;
-    const thrFwd = (engineRun ? input.throttle : 0) * pusherK * rpmNow * pusherTaper;
-    // The tail-rotor trim system balances main-rotor torque at the launch
-    // detent.  Pedals command a turn; they do not require a constant opposite
-    // input merely to prevent an unattended simulation from drifting left.
-    const trBalance = Math.max(0, coll * rpmNow);               // 0..1 TR thrust demand
+    const trBalance = Math.max(0, coll * rpmNow);
     s.trThrustPct = this.profile.trt ? trBalance * 100 : 0;
-    const trtLat = 0;
-    const aFwd = stickFwd + gravFwd + thrFwd;
-    const aLat = stickLat + gravLat + trtLat;                   // + = right of nose
+    const aFwd = stickFwd + gravFwd * 0.4 + thrFwd;
+    const aLat = stickLat + gravLat * 0.4;                      // + = right of nose
 
     /* aerodynamic drag acts against the AIRMASS velocity */
     if (ve > 0.001) {
@@ -324,6 +342,16 @@ export class HelicopterSim {
     this.vN += aLat * Math.cos(hdg + Math.PI / 2) * dt;
     this.vE += aLat * Math.sin(hdg + Math.PI / 2) * dt;
 
+    // Lateral stabilization: smoothly damp lateral slide when no roll command is pressed
+    if (Math.abs(input.roll) < 0.05) {
+      const currentLatSpeed = -this.vN * Math.sin(hdg) + this.vE * Math.cos(hdg);
+      if (Math.abs(currentLatSpeed) > 0.02) {
+        const latDecel = clamp(-currentLatSpeed * 2.2, -6.0, 6.0);
+        this.vN += latDecel * Math.cos(hdg + Math.PI / 2) * dt;
+        this.vE += latDecel * Math.sin(hdg + Math.PI / 2) * dt;
+      }
+    }
+
     // never exceed Vne (ground-track authority limit, as before)
     const spd = Math.hypot(this.vN, this.vE);
     if (spd > this.profile.vneMs) {
@@ -334,34 +362,35 @@ export class HelicopterSim {
     /* vertical integration with cap */
     this.vU = Math.max(-this.profile.maxVsMs, Math.min(this.profile.maxVsMs, this.vU + aUp * dt));
     s.altM += this.vU * dt;
-    // ground contact: the skids (not the model origin) rest on the terrain —
-    // unconditional clamp so rising terrain can never swallow the airframe
+    // ground contact: skids rest on the terrain at 0m AGL
     const floor = s.groundAltM + this.gearH;
     if (s.altM <= floor) {
-      const sink = this.vU;                       // m/s at the moment of contact
+      const sink = this.vU;
       s.altM = floor;
       if (this.vU < 0) this.vU = 0;
-      // skid friction on the ground bleeds horizontal speed fast
-      const fric = Math.min(1, 2.5 * dt);
+      const fric = Math.min(1, 3.0 * dt);
       this.vN *= (1 - fric);
       this.vE *= (1 - fric);
       s.onGround = true;
-      s.hardLanding = sink < -8;                  // >~1,600 fpm — report it
-    } else if (s.onGround && coll < 0.08 && s.altM - floor < 25) {
-      // terrain re-streaming under a parked heli: keep it glued to the pad
+      s.hardLanding = sink < -8 && coll > 0.15;
+    } else if (s.onGround && coll <= 0.05 && s.altM - floor < 25) {
+      // bar down at 0: reaches the ground and stays firmly parked at 0m AGL
       s.altM = floor; this.vU = 0; s.aglM = 0; s.hardLanding = false;
     } else {
       s.onGround = false;
       s.hardLanding = false;
     }
 
-    /* Heading: pedals command tail-rotor yaw while the trim system cancels
-       steady main-rotor torque.  The fin still weathervanes at speed and a
-       banked turn coordinates the flight path. */
+    /* Heading: pedals command tail-rotor yaw.
+       In cruise (ve > 10 kt), banked turns coordinate heading; in hover, roll is pure strafe. */
     const yawPedal = input.pedal * YAW_RATE;
-    const beta = Math.abs(ve) > 0.5 ? Math.atan2(vaLat, Math.abs(vaFwd) + ve * 0.5) : 0; // + airflow from right
-    const yawWeathervane = WEATHERVANE * beta * Math.min(1, ve / 15);  // nose yaws toward the relative wind
-    const yawBank = Math.sin((s.rollDeg * Math.PI) / 180) * Math.min(1, spd / 30) * 0.45;
+    const beta = Math.abs(ve) > 0.5 ? Math.atan2(vaLat, Math.abs(vaFwd) + ve * 0.5) : 0;
+    const yawWeathervane = (input.pedal !== 0 || Math.abs(input.roll) < 0.05)
+      ? WEATHERVANE * beta * Math.min(1, ve / 15)
+      : 0;
+    const yawBank = (input.pedal !== 0 || currentFwdSpeed > 4)
+      ? Math.sin((s.rollDeg * Math.PI) / 180) * Math.min(1, spd / 20) * 0.55
+      : 0;
     const yawRateRad = yawPedal + yawWeathervane;
     s.headingDeg = (((s.headingDeg + ((yawRateRad + yawBank) * 180) / Math.PI * dt) % 360) + 360) % 360;
     if (Math.abs(yawBank) > 1e-9) {
@@ -371,10 +400,10 @@ export class HelicopterSim {
       this.vE = vN0 * sn + this.vE * c;
     }
 
-    /* attitude dynamics: cyclic commands a target attitude, body follows w/ rate limit */
-    const targetPitch = -input.pitch * 16;
-    const targetRoll = input.roll * 20;
-    const P_RATE = 3.2, R_RATE = 3.6;
+    /* attitude dynamics: clean visual feedback for commands */
+    const targetPitch = -input.pitch * 9.0;
+    const targetRoll = input.roll * 18.0;
+    const P_RATE = 3.5, R_RATE = 3.8;
     s.pitchDeg += clamp((targetPitch - s.pitchDeg) * P_RATE * dt, -10 * dt, 10 * dt);
     s.rollDeg += clamp((targetRoll - s.rollDeg) * R_RATE * dt, -14 * dt, 14 * dt);
     s.pitchDeg = clamp(s.pitchDeg, -18, 18);
@@ -405,7 +434,7 @@ export class HelicopterSim {
     s.vsFpm = this.vU * 196.8504;
     s.collective = coll;
     s.throttle = engineRun ? input.throttle : 0;
-    s.aglM = agl;
+    s.aglM = s.onGround ? 0 : agl;
     s.engine = engineRun;
 
     /* rotor coefficients: T = m·a_thrust (1g datum), CT = T/(ρ·πR²·(ΩR)²) */
