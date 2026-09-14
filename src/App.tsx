@@ -5429,13 +5429,15 @@ export default function App() {
         const sp = heliSpawnRef.current;
         if (!sp || !viewerRef.current) return;
         const cold = !!sp.coldStart;
+        const isGround = cold || sp.altM === 0;
         const g = heliGroundHeight(viewerRef.current, sp.lat, sp.lon);
-        const resetAlt = cold ? g + HELI_GEAR_H : Math.max(g + HELI_GEAR_H, sp.altM);
-        heliSimRef.current?.resetTo({ lat: sp.lat, lon: sp.lon, altM: resetAlt, headingDeg: sp.headingDeg, groundAltM: g, collective: cold ? 0 : hoverCollectiveAtSim(resetAlt), engine: !cold });
+        const resetAlt = isGround ? g + HELI_GEAR_H : Math.max(g + HELI_GEAR_H, sp.altM);
+        const coll0 = isGround ? 0 : hoverCollectiveAtSim(resetAlt);
+        heliSimRef.current?.resetTo({ lat: sp.lat, lon: sp.lon, altM: resetAlt, headingDeg: sp.headingDeg, groundAltM: g, collective: coll0, engine: !cold });
         heliProfileRef.current = PROFILES[sp.airframe ?? 'AH64E'];
     heliCtlRef.current = new HeliControls(cold);
-    const coll0 = cold ? 0 : hoverCollectiveAtSim(resetAlt);   // hold station on spawn, not a surprise sink
-    if (!cold) heliCtlRef.current.collective = coll0;
+    if (!isGround) heliCtlRef.current.collective = coll0;
+    else heliCtlRef.current.collective = 0;
         heliInputRef.current = { collective: coll0, pitch: 0, roll: 0, pedal: 0, throttle: 0, engine: !cold };
         heliStarterRef.current = false;
         heliResetCamera();
@@ -5576,18 +5578,22 @@ export default function App() {
       case 'KeyD': k.thr = 1; e.preventDefault(); break;
       case 'ArrowUp':
         k.pitch = 1;
-        if (heliInputRef.current.collective < 0.65) {
-          heliInputRef.current.collective = 0.75;
-          if (heliCtlRef.current && !heliCtlRef.current.collectiveLocked) heliCtlRef.current.collective = 0.75;
-        }
-        if (heliInputRef.current.throttle < 0.85) {
-          heliInputRef.current.throttle = 1.0;
-          if (heliCtlRef.current) heliCtlRef.current.throttle = 1.0;
-        }
-        e.preventDefault(); break;
-      case 'ArrowDown': k.pitch = -0.75; e.preventDefault(); break;
-      case 'ArrowLeft': k.roll = -0.75; k.pedal = -0.75; e.preventDefault(); break;
-      case 'ArrowRight': k.roll = 0.75; k.pedal = 0.75; e.preventDefault(); break;
+        e.preventDefault();
+        break;
+      case 'ArrowDown':
+        k.pitch = -1;
+        e.preventDefault();
+        break;
+      case 'ArrowLeft':
+        k.roll = -1;
+        k.pedal = 0;
+        e.preventDefault();
+        break;
+      case 'ArrowRight':
+        k.roll = 1;
+        k.pedal = 0;
+        e.preventDefault();
+        break;
       case 'KeyQ': case 'Comma': k.pedal = -1; break;
       case 'KeyE': case 'Period': k.pedal = 1; break;
       case 'Space':

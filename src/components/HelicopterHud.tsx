@@ -178,16 +178,21 @@ export function DualLeverFlightPod({
 
   const pressDir = (dir: 'front' | 'back' | 'left' | 'right') => {
     if (dir === 'front') {
-      if (collective < 0.65) onControl({ collective: 0.75, throttle: 1.0 });
-      activeStickRef.current.pitch = 1;
+      activeStickRef.current.pitch = 1.0;
+      activeStickRef.current.roll = 0;
+      activeStickRef.current.pedal = 0;
     } else if (dir === 'back') {
-      activeStickRef.current.pitch = -0.75;
+      activeStickRef.current.pitch = -1.0;
+      activeStickRef.current.roll = 0;
+      activeStickRef.current.pedal = 0;
     } else if (dir === 'left') {
-      activeStickRef.current.roll = -0.75;
-      activeStickRef.current.pedal = -0.75;
+      activeStickRef.current.pitch = 0;
+      activeStickRef.current.roll = -1.0;
+      activeStickRef.current.pedal = 0;
     } else if (dir === 'right') {
-      activeStickRef.current.roll = 0.75;
-      activeStickRef.current.pedal = 0.75;
+      activeStickRef.current.pitch = 0;
+      activeStickRef.current.roll = 1.0;
+      activeStickRef.current.pedal = 0;
     }
     onStick({ ...activeStickRef.current });
   };
@@ -197,8 +202,8 @@ export function DualLeverFlightPod({
       activeStickRef.current.pitch = 0;
     } else if (dir === 'left' || dir === 'right') {
       activeStickRef.current.roll = 0;
-      activeStickRef.current.pedal = 0;
     }
+    activeStickRef.current.pedal = 0;
     onStick({ ...activeStickRef.current });
   };
 
@@ -1036,7 +1041,7 @@ const css = `
   font-size: 7.5px; font-weight: 700; padding: 2px 4px; letter-spacing: 0.04em;
   background: rgba(125, 211, 252, 0.10); border: 1px solid rgba(125, 211, 252, 0.35);
   color: var(--c, #7dd3fc); border-radius: 3px; cursor: pointer; user-select: none;
-  touch-action: none; transition: all 0.1s ease; line-height: 1.1;
+  touch-action: none; transition: all 0.1s ease; line-height: 1.1; white-space: nowrap;
 }
 .hxf-dpad-btn:hover {
   background: rgba(125, 211, 252, 0.25); border-color: rgba(125, 211, 252, 0.6); color: #fff;
@@ -1045,9 +1050,9 @@ const css = `
   background: rgba(74, 222, 128, 0.35); border-color: #4ade80; color: #4ade80;
   box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
 }
-.hxf-dpad-btn.front { width: 70px; text-align: center; }
-.hxf-dpad-btn.back { width: 70px; text-align: center; }
-.hxf-dpad-btn.left, .hxf-dpad-btn.right { width: 40px; text-align: center; }
+.hxf-dpad-btn.front { width: 76px; text-align: center; }
+.hxf-dpad-btn.back { width: 76px; text-align: center; }
+.hxf-dpad-btn.left, .hxf-dpad-btn.right { width: 44px; text-align: center; }
 .hxf-dpad-btn.hover { width: 34px; text-align: center; font-size: 7px; }
 
 /* Cockpit Flight Controls Mount */
