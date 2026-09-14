@@ -143,14 +143,36 @@ export function HelicopterPanel({ onLaunch, onClose }: HelicopterPanelProps) {
 
           {/* altitude */}
           <div style={{ opacity: coldStart ? 0.45 : 1 }}>
-            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4 }}>SPAWN ALTITUDE (MSL)</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <span style={{ fontSize: 10, color: '#64748b' }}>SPAWN ALTITUDE (MSL)</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {[0, 100, 500, 1500].map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setAltM(v)}
+                    style={{
+                      padding: '2px 5px', fontSize: 9, borderRadius: 3, cursor: 'pointer',
+                      background: altM === v ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,0.06)',
+                      border: `1px solid ${altM === v ? '#4ade80' : 'rgba(255,255,255,0.12)'}`,
+                      color: altM === v ? '#86efac' : '#94a3b8',
+                    }}
+                  >
+                    {v === 0 ? '0m Ground' : `${v}m`}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input
-                type="range" min={100} max={3000} step={50} value={altM}
+                data-testid="heli-alt-slider"
+                type="range" min={0} max={3000} step={25} value={altM}
                 onChange={e => setAltM(Number(e.target.value))}
                 style={{ flex: 1, accentColor: '#22c55e' }}
               />
-              <span style={{ fontSize: 11, color: '#4ade80', minWidth: 52, textAlign: 'right' }}>{altM} m</span>
+              <span style={{ fontSize: 11, color: '#4ade80', minWidth: 68, textAlign: 'right', fontWeight: 700 }}>
+                {altM === 0 ? '0m (Ground)' : `${altM} m`}
+              </span>
             </div>
           </div>
 

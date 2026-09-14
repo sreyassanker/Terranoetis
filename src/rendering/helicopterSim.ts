@@ -347,12 +347,12 @@ export class HelicopterSim {
       this.vE *= (1 - fric);
       s.onGround = true;
       s.hardLanding = sink < -8;                  // >~1,600 fpm — report it
-    } else if (!(s.onGround && !engineRun && this.rotorRpm < 10 && coll < 0.05)) {
-      s.onGround = false;
-      s.hardLanding = false;
-    } else {
+    } else if (s.onGround && coll < 0.08 && s.altM - floor < 25) {
       // terrain re-streaming under a parked heli: keep it glued to the pad
       s.altM = floor; this.vU = 0; s.aglM = 0; s.hardLanding = false;
+    } else {
+      s.onGround = false;
+      s.hardLanding = false;
     }
 
     /* Heading: pedals command tail-rotor yaw while the trim system cancels

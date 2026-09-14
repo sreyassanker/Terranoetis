@@ -234,7 +234,7 @@ export class ChaseRig {
       const elBaseAg = lerp(c.elBase, c.elLow, squat);
       const eqEl = clamp(
         elBaseAg + c.bankK * (f.rollDeg * Math.PI / 180) + c.pitchLeadK * (f.pitchDeg * Math.PI / 180) + this.mEl,
-        -1.2, 1.45,
+        0.05, 1.45,
       );
       const eqDist = clamp(c.d0 + c.kv * f.tasMps + c.ka * f.aglM * lerp(1, c.kaLow, squat), c.dMin, c.dMax);
       // manual zoom may perturb but never break out of the framing envelope
