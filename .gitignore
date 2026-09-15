@@ -160,3 +160,6 @@ e2e/tmp*
 # Editor/manual backup cruft
 *.bak
 *.bak[0-9]
+
+# Original Three.js heli showcase (reference only, not part of the app)
+src/Flying models/
