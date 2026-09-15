@@ -28,10 +28,12 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: 'npm run dev:client',
-    url: 'http://localhost:3000',
-    reuseExistingServer: true,
-    timeout: 60000,
-  },
+  ...(process.env.NO_SERVER ? {} : {
+    webServer: {
+      command: 'npm run dev:client',
+      url: 'http://127.0.0.1:3000',
+      reuseExistingServer: true,
+      timeout: 60000,
+    },
+  }),
 });

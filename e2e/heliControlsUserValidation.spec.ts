@@ -65,11 +65,13 @@ test('validate clear cockpit view and interactive dual bars + directional arrows
   await btnAccelUp.click();
   await page.waitForTimeout(200);
 
-  // Test Move FRONT button (forward flight)
+  // Test Move FRONT button (forward flight) — thrust-vector accel builds speed over
+  // seconds, and headless frames run sim-time slower than wall-time: poll the sim.
   await dpadFront.dispatchEvent('pointerdown', { pointerId: 1 });
-  await page.waitForTimeout(3000);
+  await page.waitForFunction(() => ((window as any).__HELI?.simRef?.current?.state?.iasKts ?? 0) > 14,
+    null, { timeout: 150000 });
   await dpadFront.dispatchEvent('pointerup', { pointerId: 1 });
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(400);
 
   const extFlyingShot = path.join(ARTIFACT_DIR, 'heli_02_external_flying_front.png');
   await page.screenshot({ path: extFlyingShot, fullPage: true });
@@ -96,11 +98,12 @@ test('validate clear cockpit view and interactive dual bars + directional arrows
   await expect(cpitControls.getByTestId('hxf-lever-THR')).toBeVisible();
   await expect(cpitControls.getByTestId('hxf-dpad')).toBeVisible();
 
-  // Test Keyboard ArrowUp in Cockpit
+  // Test Keyboard ArrowUp in Cockpit (poll sim speed, not the wall clock)
   await page.keyboard.down('ArrowUp');
-  await page.waitForTimeout(3500);
+  await page.waitForFunction(() => ((window as any).__HELI?.simRef?.current?.state?.iasKts ?? 0) > 20,
+    null, { timeout: 150000 });
   await page.keyboard.up('ArrowUp');
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(400);
 
   const cpitFlyingShot = path.join(ARTIFACT_DIR, 'heli_04_cockpit_flying_forward.png');
   await page.screenshot({ path: cpitFlyingShot, fullPage: true });
