@@ -5453,12 +5453,20 @@ export default function App() {
         const g = heliGroundHeight(viewerRef.current, sp.lat, sp.lon);
         const resetAlt = isGround ? g + HELI_GEAR_H : g + HELI_GEAR_H + sp.altM;   // AGL semantics
         const coll0 = isGround ? 0 : hoverCollectiveAtSim(resetAlt);
-        heliSimRef.current?.resetTo({ lat: sp.lat, lon: sp.lon, altM: resetAlt, headingDeg: sp.headingDeg, groundAltM: g, collective: coll0, engine: !cold });
+        const cruiseSpeedMs = !isGround && resetAlt > 2500 ? 38 : 0;
+        const hdgRad = Cesium.Math.toRadians(sp.headingDeg);
+        const initVel = cruiseSpeedMs > 0 ? { n: cruiseSpeedMs * Math.cos(hdgRad), e: cruiseSpeedMs * Math.sin(hdgRad) } : undefined;
+        const cruiseThr = cruiseSpeedMs > 0 ? 0.52 : 0;
+        heliSimRef.current?.resetTo({ lat: sp.lat, lon: sp.lon, altM: resetAlt, headingDeg: sp.headingDeg, groundAltM: g, collective: coll0, engine: !cold }, initVel);
         heliProfileRef.current = PROFILES[sp.airframe ?? 'AH64E'];
-    heliCtlRef.current = new HeliControls(cold);
-    if (!isGround) heliCtlRef.current.collective = coll0;
-    else heliCtlRef.current.collective = 0;
-        heliInputRef.current = { collective: coll0, pitch: 0, roll: 0, pedal: 0, throttle: 0, engine: !cold };
+        heliCtlRef.current = new HeliControls(cold);
+        if (!isGround) {
+          heliCtlRef.current.collective = coll0;
+          if (cruiseThr > 0) heliCtlRef.current.throttle = cruiseThr;
+        } else {
+          heliCtlRef.current.collective = 0;
+        }
+        heliInputRef.current = { collective: coll0, pitch: 0, roll: 0, pedal: 0, throttle: cruiseThr, engine: !cold };
         heliStarterRef.current = false;
         heliResetCamera();
         showNotification(cold ? 'Sim reset — COLD on the pad' : 'Sim reset to spawn point', 'info');
@@ -5469,6 +5477,7 @@ export default function App() {
     const tpw = heliProfileRef.current?.thrustPerWeight ?? 1.3;
     const sig = sigma && Number.isFinite(sigma) && sigma > 0.2 ? sigma
       : Math.pow(1 - 2.25577e-5 * Math.max(0, Math.min(11000, altM)), 4.2568);
+    if (altM > 2500) return 0.85;
     return Math.min(1, (1 / tpw) * Math.pow(massKg / 5200, 0.38) / sig);
   }
 
@@ -5656,9 +5665,6 @@ export default function App() {
         heliResetSim();
         break;
       }
-      case 'ShiftLeft': case 'ShiftRight':
-        if (!e.repeat) heliToggleEngine();
-        break;
       case 'KeyF':
         if (!e.repeat) heliApplySwitch('friction');
         break;
@@ -5891,9 +5897,13 @@ export default function App() {
     const startAlt = isGroundSpawn ? ground + HELI_GEAR_H : ground + HELI_GEAR_H + spawn.altM;   // AGL semantics
     heliSpawnRef.current = { ...spawn };
     const coll0 = isGroundSpawn ? 0 : hoverCollectiveAtSim(startAlt);   // hold station on spawn, not a surprise sink
+    const cruiseSpeedMs = !isGroundSpawn && startAlt > 2500 ? 38 : 0;
+    const initHdgRad = Cesium.Math.toRadians(spawn.headingDeg);
+    const initVel = cruiseSpeedMs > 0 ? { n: cruiseSpeedMs * Math.cos(initHdgRad), e: cruiseSpeedMs * Math.sin(initHdgRad) } : undefined;
+    const cruiseThr = cruiseSpeedMs > 0 ? 0.52 : 0;
     heliSimRef.current = new HelicopterSim(
       { lat: spawn.lat, lon: spawn.lon, altM: startAlt, headingDeg: spawn.headingDeg, groundAltM: ground, collective: coll0, engine: !cold },
-      { gearOffsetM: HELI_GEAR_H, profile: heliProfileRef.current },
+      { gearOffsetM: HELI_GEAR_H, profile: heliProfileRef.current, initVel },
     );
     if (initialGround === undefined || initialGround === 0) {
       sampleHeliGroundAlt(v, spawn.lat, spawn.lon).then((sampledG) => {
@@ -5916,7 +5926,10 @@ export default function App() {
       });
     }
     heliCtlRef.current = new HeliControls(cold);
-    if (!cold) heliCtlRef.current.collective = coll0;
+    if (!cold) {
+      heliCtlRef.current.collective = coll0;
+      if (cruiseThr > 0) heliCtlRef.current.throttle = cruiseThr;
+    }
     setHeliCtl(heliCtlRef.current.snapshot);
     if (!HELI_DOM_DECK) {
       try {
@@ -5943,7 +5956,6 @@ export default function App() {
     heliYawRef.current = 0;
     heliPitchRef.current = 0;
     heliOrbitRef.current = { az: Math.PI, el: 0.16, dist: 21, distTarget: 21 };
-    const initHdgRad = Cesium.Math.toRadians(spawn.headingDeg);
     heliRigRef.current = new ChaseRig({ az: initHdgRad + Math.PI, el: 0.16, dist: 21 }, CHASE_CLOSE_CONFIG());
     setHeliOrbitMode(false);
     heliOrbitVelRef.current = { az: 0, el: 0 };
@@ -5952,7 +5964,7 @@ export default function App() {
     heliTopdownHeightRef.current = 55;
     heliFovRef.current = HELI_FOV;
     heliKeysRef.current = { w: false, s: false, pitch: 0, roll: 0, pedal: 0, thr: 0 };
-    heliInputRef.current = { collective: coll0, pitch: 0, roll: 0, pedal: 0, throttle: 0, engine: !cold };
+    heliInputRef.current = { collective: coll0, pitch: 0, roll: 0, pedal: 0, throttle: cruiseThr, engine: !cold };
     heliHoverAssistRef.current = false;
     heliFrameRef.current = 0;
     heliSavedViewRef.current = {
