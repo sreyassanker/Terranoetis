@@ -163,6 +163,14 @@ test('Apache helicopter sim launches, flies with keyboard controls, rotors spin'
   await page.keyboard.down('s');
   let landed = false;
   for (let i = 0; i < 240 && !landed; i++) {
+    // burn 20 live-sim frames per poll: headless rAF starves sim-time, the
+    // production input object still carries the held keys through the physics.
+    await page.evaluate(() => {
+      const w = window as unknown as Record<string, any>;
+      const sim = w.__HELI.simRef.current;
+      const inp = w.__HELI.inputRef.current;
+      for (let k = 0; k < 20; k++) sim.update(0.05, { ...inp });
+    });
     const s = await readState();
     landed = !!s && s.aglM < 0.5 && Math.abs(s.vsFpm) < 150;
     if (!landed) await page.waitForTimeout(250);

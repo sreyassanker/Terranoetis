@@ -116,10 +116,12 @@ test('validate 2 external views and internal cockpit view', async ({ page }) => 
   await page.keyboard.up('KeyW');
 
   await page.keyboard.down('ArrowUp');
-  await page.waitForTimeout(4000);
+  // honest thrust-vector acceleration: poll the sim, don't guess wall-time
+  await page.waitForFunction(() => ((window as any).__HELI?.simRef?.current?.state?.iasKts ?? 0) > 18,
+    null, { timeout: 150000 });
   await page.keyboard.up('ArrowUp');
 
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(500);
   await page.screenshot({ path: '/tmp/heli_view_flying.png', fullPage: true });
 
   const flightProbe = await page.evaluate(() => {

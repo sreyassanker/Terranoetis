@@ -177,32 +177,45 @@ export function DualLeverFlightPod({
     onControl({ throttle: v });
   };
 
-  const pressDir = (dir: 'front' | 'back' | 'left' | 'right') => {
+  type HeliDirection =
+    | 'front' | 'back' | 'left' | 'right'
+    | 'front-left' | 'front-right' | 'back-left' | 'back-right';
+
+  const pressDir = (dir: HeliDirection) => {
     if (dir === 'front') {
       activeStickRef.current.pitch = 1.0;
+      activeStickRef.current.roll = 0;
     } else if (dir === 'back') {
       activeStickRef.current.pitch = -1.0;
+      activeStickRef.current.roll = 0;
     } else if (dir === 'left') {
+      activeStickRef.current.pitch = 0;
       activeStickRef.current.roll = -1.0;
     } else if (dir === 'right') {
+      activeStickRef.current.pitch = 0;
+      activeStickRef.current.roll = 1.0;
+    } else if (dir === 'front-left') {
+      activeStickRef.current.pitch = 1.0;
+      activeStickRef.current.roll = -1.0;
+    } else if (dir === 'front-right') {
+      activeStickRef.current.pitch = 1.0;
+      activeStickRef.current.roll = 1.0;
+    } else if (dir === 'back-left') {
+      activeStickRef.current.pitch = -1.0;
+      activeStickRef.current.roll = -1.0;
+    } else if (dir === 'back-right') {
+      activeStickRef.current.pitch = -1.0;
       activeStickRef.current.roll = 1.0;
     }
     activeStickRef.current.pedal = 0;
     onStick({ ...activeStickRef.current });
   };
 
-  const releaseDir = (dir: 'front' | 'back' | 'left' | 'right') => {
-    if (dir === 'front' && activeStickRef.current.pitch > 0) {
-      activeStickRef.current.pitch = 0;
-    } else if (dir === 'back' && activeStickRef.current.pitch < 0) {
-      activeStickRef.current.pitch = 0;
-    } else if (dir === 'left' && activeStickRef.current.roll < 0) {
-      activeStickRef.current.roll = 0;
-    } else if (dir === 'right' && activeStickRef.current.roll > 0) {
-      activeStickRef.current.roll = 0;
-    }
+  const releaseDir = (_dir: HeliDirection) => {
+    activeStickRef.current.pitch = 0;
+    activeStickRef.current.roll = 0;
     activeStickRef.current.pedal = 0;
-    onStick({ ...activeStickRef.current });
+    onStick({ pitch: 0, roll: 0, pedal: 0 });
   };
 
   return (
@@ -283,9 +296,20 @@ export function DualLeverFlightPod({
         <div className="hxf-lever-val" style={{ color: '#fbbf24' }}>{Math.round(throttle * 100)}%</div>
       </div>
 
-      {/* ── 4-WAY DIRECTIONAL ARROW D-PAD ── */}
+      {/* ── 8-WAY DIRECTIONAL ARROW D-PAD ── */}
       <div className="hxf-dpad" data-testid="hxf-dpad">
         <div className="hxf-dpad-row top">
+          <button
+            type="button"
+            className="hxf-dpad-btn diag fl"
+            data-testid="hxf-dpad-fl"
+            title="Move FRONT-LEFT (Turn & curve left)"
+            onPointerDown={(e) => { pressDir('front-left'); try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch {} }}
+            onPointerUp={() => releaseDir('front-left')}
+            onPointerCancel={() => releaseDir('front-left')}
+          >
+            ◤ F-L
+          </button>
           <button
             type="button"
             className="hxf-dpad-btn front"
@@ -296,6 +320,17 @@ export function DualLeverFlightPod({
             onPointerCancel={() => releaseDir('front')}
           >
             ▲ FRONT
+          </button>
+          <button
+            type="button"
+            className="hxf-dpad-btn diag fr"
+            data-testid="hxf-dpad-fr"
+            title="Move FRONT-RIGHT (Turn & curve right)"
+            onPointerDown={(e) => { pressDir('front-right'); try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch {} }}
+            onPointerUp={() => releaseDir('front-right')}
+            onPointerCancel={() => releaseDir('front-right')}
+          >
+            ◥ F-R
           </button>
         </div>
         <div className="hxf-dpad-row mid">
@@ -334,6 +369,17 @@ export function DualLeverFlightPod({
         <div className="hxf-dpad-row bot">
           <button
             type="button"
+            className="hxf-dpad-btn diag bl"
+            data-testid="hxf-dpad-bl"
+            title="Move BACK-LEFT (Reverse & strafe left)"
+            onPointerDown={(e) => { pressDir('back-left'); try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch {} }}
+            onPointerUp={() => releaseDir('back-left')}
+            onPointerCancel={() => releaseDir('back-left')}
+          >
+            ◣ B-L
+          </button>
+          <button
+            type="button"
             className="hxf-dpad-btn back"
             data-testid="hxf-dpad-back"
             title="Move BACK (Flare / Pitch aft)"
@@ -342,6 +388,17 @@ export function DualLeverFlightPod({
             onPointerCancel={() => releaseDir('back')}
           >
             ▼ BACK
+          </button>
+          <button
+            type="button"
+            className="hxf-dpad-btn diag br"
+            data-testid="hxf-dpad-br"
+            title="Move BACK-RIGHT (Reverse & strafe right)"
+            onPointerDown={(e) => { pressDir('back-right'); try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch {} }}
+            onPointerUp={() => releaseDir('back-right')}
+            onPointerCancel={() => releaseDir('back-right')}
+          >
+            ◢ B-R
           </button>
         </div>
       </div>
@@ -419,6 +476,8 @@ export function HelicopterHud({
   const tas = Math.round(hud.tasKts);
   const gs = Math.round(hud.gsKts);
   const ng = Math.round(hud.ngPct);
+  const ng1 = Math.round(hud.ngLPct);
+  const ng2 = Math.round(hud.ngRPct);
   const ct = (hud.torqueCoeff * 1000).toFixed(1);
   const shp = Math.round(hud.powerShp);
   const windKt = Math.round(Math.hypot(hud.windE, hud.windN) * 1.94384);
@@ -428,12 +487,15 @@ export function HelicopterHud({
   const annun: { tag: string; on: boolean; color: string }[] = [
     { tag: 'RLM', on: rpm < 90 && hud.engine, color: C.red },          // rotor low
     { tag: hud.engine ? 'ENG' : 'ENG OUT', on: !hud.engine, color: C.red },
+    { tag: hud.oei ? 'ENG2 OUT' : '', on: !!hud.oei, color: C.red },
     { tag: `TORQ${torque > 95 ? '!' : ''}`, on: torque > 95, color: C.red },
     { tag: 'VNE', on: hud.iasKts > VNE_KTS - 5, color: C.red },
     { tag: 'SINK RATE', on: vs < -1500 && hud.aglM * 3.28084 < 120 && hud.aglM > 0.5, color: C.red },
     { tag: 'VRS', on: hud.vrs, color: C.red },
+    { tag: 'RBS', on: hud.rbs, color: C.red },
+    { tag: hud.oei ? 'OEI' : '', on: !!hud.oei, color: C.amber },
     { tag: 'ETL', on: hud.etlPct > 85 && !hud.onGround, color: C.green },
-    { tag: 'TRT', on: hud.ttDriftMps < -0.8 && !hud.onGround && hud.engine && hud.gsKts < 25, color: C.amber },
+    { tag: 'TRT', on: Math.abs(hud.ttDriftMps) > 0.8 && !hud.onGround && hud.engine && hud.gsKts < 25, color: C.amber },
     { tag: hoverAssist ? 'HVR·ASSIST' : 'HVR', on: !!hoverAssist, color: C.green },
     { tag: turbulence ? 'TURB' : '', on: !!turbulence, color: C.amber },
     ...(ctl ? [
@@ -530,10 +592,13 @@ export function HelicopterHud({
   const engineGauges = (
     <div className="hxf-engine">
       {avnOff && <div className="hxf-dark" data-testid="hxf-avn-dark">AVIONICS OFF — STANDBY ONLY</div>}
-      <div className="hxf-sys-title">ENGINE · T700-701D</div>
+      <div className="hxf-sys-title">TWIN T700-701D · FADEC · LIMIT {hud.torqueLimitPct}%</div>
       <div className="hxf-eng-row"><span>TRQ</span><b style={{ color: torque > 95 ? C.red : C.white }}>{torque}%</b><i className="hxf-bar"><u style={{ width: `${Math.min(100, torque)}%`, background: torque > 95 ? C.red : C.cyan }} /></i></div>
       <div className="hxf-eng-row"><span>Nf</span><b style={{ color: rpm < 90 ? C.red : C.white }}>{rpm}%</b><i className="hxf-bar"><u style={{ width: `${Math.min(100, rpm)}%`, background: rpm < 90 ? C.red : C.green }} /></i></div>
-      <div className="hxf-eng-row"><span>Ng</span><b style={{ color: ng < 60 ? C.red : C.white }}>{ng}%</b><i className="hxf-bar"><u style={{ width: `${Math.min(100, ng)}%`, background: ng < 60 ? C.red : C.green }} /></i></div>
+      <div className="hxf-eng-row"><span>Ng1</span><b data-testid="hxf-ng1" style={{ color: !hud.eng1Live || ng1 < 15 ? C.red : C.white }}>{ng1}%</b><i className="hxf-bar"><u style={{ width: `${Math.min(100, ng1)}%`, background: !hud.eng1Live ? C.red : ng1 < 60 ? C.red : C.green }} /></i></div>
+      <div className="hxf-eng-row"><span>Ng2</span><b data-testid="hxf-ng2" style={{ color: !hud.eng2Live || ng2 < 15 ? C.red : C.white }}>{ng2}%</b><i className="hxf-bar"><u style={{ width: `${Math.min(100, ng2)}%`, background: !hud.eng2Live ? C.red : ng2 < 60 ? C.red : C.green }} /></i></div>
+      <div className="hxf-eng-row"><span>ITT1</span><b data-testid="hxf-itt1" style={{ color: hud.ittLC > 845 ? C.red : C.white }}>{Math.round(hud.ittLC)}°</b><i className="hxf-bar"><u style={{ width: `${Math.min(100, hud.ittLC / 9.4)}%`, background: hud.ittLC > 845 ? C.red : C.amber }} /></i></div>
+      <div className="hxf-eng-row"><span>ITT2</span><b data-testid="hxf-itt2" style={{ color: hud.ittRC > 845 ? C.red : C.white }}>{Math.round(hud.ittRC)}°</b><i className="hxf-bar"><u style={{ width: `${Math.min(100, hud.ittRC / 9.4)}%`, background: hud.ittRC > 845 ? C.red : C.amber }} /></i></div>
       <div className="hxf-eng-row"><span>CT</span><b>{ct}×</b><i className="hxf-bar"><u style={{ width: `${Math.min(100, hud.torqueCoeff * 12000)}%`, background: C.amber }} /></i></div>
       <div className="hxf-eng-row"><span>SHP</span><b>{shp.toLocaleString()}</b><i className="hxf-bar"><u style={{ width: `${Math.min(100, shp / 38)}%`, background: C.cyan }} /></i></div>
       <div className="hxf-eng-row"><span>COL</span><b>{coll}%</b><i className="hxf-bar"><u style={{ width: `${coll}%`, background: C.green }} /></i></div>
@@ -563,6 +628,7 @@ export function HelicopterHud({
             <span className="hxdock-chip"><i>RA</i><b>{Math.round(ra).toLocaleString()}</b></span>
             <span className="hxdock-chip"><i>V/S</i><b style={{ color: vs < -1500 ? C.red : C.dim }}>{vs > 0 ? `+${Math.round(vs)}` : Math.round(vs)}</b></span>
             <span className="hxdock-chip"><i>Nf</i><b style={{ color: rpm < 90 ? C.red : C.green }}>{rpm}%</b></span>
+            <span className="hxdock-chip" data-testid="hxf-wind"><i>WIND</i><b>{Math.round(Math.hypot(hud.windE, hud.windN) * 1.94384)}kt/{Math.round(hud.windFromDeg)}°</b></span>
             {annun.filter((a) => a.on).map((a) => (
               <span key={a.tag} className="hxdock-chip hxdock-warn" style={{ color: a.color }}>{a.tag}</span>
             ))}
@@ -1033,7 +1099,7 @@ const css = `
   font-size: 8px; font-weight: 700;
 }
 
-/* D-Pad 4-Way Directional Grid */
+/* D-Pad 8-Way Directional Grid */
 .hxf-dpad {
   display: flex; flex-direction: column; align-items: center; gap: 2px; margin-left: 1px;
 }
@@ -1041,7 +1107,7 @@ const css = `
   display: flex; gap: 2px; justify-content: center; align-items: center;
 }
 .hxf-dpad-btn {
-  font-size: 7.5px; font-weight: 700; padding: 2px 4px; letter-spacing: 0.04em;
+  font-size: 7.5px; font-weight: 700; padding: 2px 3px; letter-spacing: 0.02em;
   background: rgba(125, 211, 252, 0.10); border: 1px solid rgba(125, 211, 252, 0.35);
   color: var(--c, #7dd3fc); border-radius: 3px; cursor: pointer; user-select: none;
   touch-action: none; transition: all 0.1s ease; line-height: 1.1; white-space: nowrap;
@@ -1053,9 +1119,9 @@ const css = `
   background: rgba(74, 222, 128, 0.35); border-color: #4ade80; color: #4ade80;
   box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
 }
-.hxf-dpad-btn.front { width: 76px; text-align: center; }
-.hxf-dpad-btn.back { width: 76px; text-align: center; }
+.hxf-dpad-btn.front, .hxf-dpad-btn.back { width: 50px; text-align: center; }
 .hxf-dpad-btn.left, .hxf-dpad-btn.right { width: 44px; text-align: center; }
+.hxf-dpad-btn.diag { width: 34px; text-align: center; font-size: 7px; color: #38bdf8; }
 .hxf-dpad-btn.hover { width: 34px; text-align: center; font-size: 7px; }
 
 /* Cockpit Flight Controls Mount */

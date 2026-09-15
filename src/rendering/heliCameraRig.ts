@@ -47,7 +47,7 @@ export interface ChaseRigConfig {
 export const CHASE_CLOSE_CONFIG = (over: Partial<ChaseRigConfig> = {}): ChaseRigConfig => ({
   // Close gaming chase cam: positioned right behind the tail boom looking directly
   // along the airframe axis with the helicopter centered on screen at all altitudes (0m to 5000m+).
-  d0: 21, kv: 0.18, ka: 0, dMin: 18, dMax: 26,
+  d0: 21, kv: 0.18, ka: 0, dMin: 18, dMax: 30,
   fovClose: 1.12, fovFar: 1.25, fovSpeedK: 0.08, fovMin: 0.85, fovMax: 1.65, // radians
   elBase: 0.18, bankK: 0.08, pitchLeadK: 0.15,
   aglKnee: 200, elLow: 0.18, kaLow: 1.0,
@@ -209,12 +209,13 @@ export class ChaseRig {
     this.t += dt;
     const rigW = 0.55 + 0.75 * clamp(this.rigidity, 0, 2);   // softness from user knob
 
-    // heading advance feed-forward: camera mostly follows the nose, leaving a
-    // controllable fraction of genuine world-frame lag during fast rotation.
+    // heading advance feed-forward: camera follows the nose smoothly; in close
+    // chase mode, full feedforward keeps the airframe centered without opposite-side swing.
     let dH = f.headingRad - this.pH;
     while (dH > Math.PI) dH -= 2 * Math.PI;
     while (dH < -Math.PI) dH += 2 * Math.PI;
-    if (Math.abs(dH) < 0.6) this.wAz.x += dH * 0.82;
+    const isClose = this.cfg.d0 <= 25;
+    if (Math.abs(dH) < 0.6) this.wAz.x += dH * (isClose ? 1.0 : 0.82);
     this.pH = f.headingRad;
 
     let targetDist = Math.exp(this.ld.x);

@@ -5371,14 +5371,25 @@ export default function App() {
      derived from the authored Apache interior geometry (cockpitAnchors.ts) */
   const HELI_COCKPIT_FWD = COCKPIT.EYE[1];
   const HELI_COCKPIT_UP = COCKPIT.EYE[2];
-  const HELI_GEAR_H = APACHE_GEAR_BOTTOM * APACHE_MODEL_SCALE; // model origin above the wheels
+  const HELI_GEAR_H = APACHE_GEAR_BOTTOM * APACHE_MODEL_SCALE + 0.12; // 0.12m cushion keeps wheels resting cleanly on terrain mesh triangles
   const HELI_FOV = Cesium.Math.toRadians(60);
   const HELI_FOV_MIN = Cesium.Math.toRadians(28);
   const HELI_FOV_MAX = Cesium.Math.toRadians(100);
 
   function heliGroundHeight(v: Cesium.Viewer, lat: number, lon: number): number {
     try {
-      const h = v.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(lon, lat));
+      const carto = Cesium.Cartographic.fromDegrees(lon, lat);
+      if (typeof v.scene.sampleHeight === 'function') {
+        try {
+          const exclude = heliModelRef.current ? [heliModelRef.current] : undefined;
+          const sh = v.scene.sampleHeight(carto, exclude);
+          if (typeof sh === 'number' && Number.isFinite(sh) && sh >= -500 && sh <= 8848) {
+            heliLastGroundAltRef.current = Math.max(0, sh);
+            return heliLastGroundAltRef.current;
+          }
+        } catch { /* scene.sampleHeight requires loaded depth tiles */ }
+      }
+      const h = v.scene.globe.getHeight(carto);
       if (typeof h === 'number' && Number.isFinite(h) && h >= -500 && h <= 8848) {
         heliLastGroundAltRef.current = Math.max(0, h);
         return heliLastGroundAltRef.current;
@@ -5390,6 +5401,15 @@ export default function App() {
   async function sampleHeliGroundAlt(v: Cesium.Viewer, lat: number, lon: number): Promise<number> {
     try {
       const carto = Cesium.Cartographic.fromDegrees(lon, lat);
+      if (typeof v.scene.sampleHeight === 'function') {
+        try {
+          const sh = v.scene.sampleHeight(carto);
+          if (typeof sh === 'number' && Number.isFinite(sh) && sh >= -500 && sh <= 8848) {
+            heliLastGroundAltRef.current = Math.max(0, sh);
+            return heliLastGroundAltRef.current;
+          }
+        } catch {}
+      }
       const h = v.scene.globe.getHeight(carto);
       if (typeof h === 'number' && Number.isFinite(h) && h >= -500 && h <= 8848) {
         heliLastGroundAltRef.current = Math.max(0, h);
@@ -5431,7 +5451,7 @@ export default function App() {
         const cold = !!sp.coldStart;
         const isGround = cold || sp.altM === 0;
         const g = heliGroundHeight(viewerRef.current, sp.lat, sp.lon);
-        const resetAlt = isGround ? g + HELI_GEAR_H : Math.max(g + HELI_GEAR_H, sp.altM);
+        const resetAlt = isGround ? g + HELI_GEAR_H : g + HELI_GEAR_H + sp.altM;   // AGL semantics
         const coll0 = isGround ? 0 : hoverCollectiveAtSim(resetAlt);
         heliSimRef.current?.resetTo({ lat: sp.lat, lon: sp.lon, altM: resetAlt, headingDeg: sp.headingDeg, groundAltM: g, collective: coll0, engine: !cold });
         heliProfileRef.current = PROFILES[sp.airframe ?? 'AH64E'];
@@ -5444,10 +5464,12 @@ export default function App() {
         showNotification(cold ? 'Sim reset — COLD on the pad' : 'Sim reset to spawn point', 'info');
   }
 
-  function hoverCollectiveAtSim(altM: number): number {
-    // profile-aware hover detent for the controls machine (thin air or winged compound)
-    return heliProfileRef.current ? Math.min(1, (1 / heliProfileRef.current.thrustPerWeight) /
-      Math.pow(1 - 2.25577e-5 * Math.max(0, Math.min(11000, altM)), 4.2568)) : 0.77;
+  function hoverCollectiveAtSim(altM: number, sigma?: number, massKg = 5200): number {
+    // profile-aware hover detent for the controls machine (thin air, gross weight)
+    const tpw = heliProfileRef.current?.thrustPerWeight ?? 1.3;
+    const sig = sigma && Number.isFinite(sigma) && sigma > 0.2 ? sigma
+      : Math.pow(1 - 2.25577e-5 * Math.max(0, Math.min(11000, altM)), 4.2568);
+    return Math.min(1, (1 / tpw) * Math.pow(massKg / 5200, 0.38) / sig);
   }
 
   function heliSetMode(m: HeliCamMode) {
@@ -5866,7 +5888,7 @@ export default function App() {
     // The launch panel is explicitly labelled MSL, so never add terrain to
     // the selected altitude.  A floor keeps a selected altitude below local
     const isGroundSpawn = cold || spawn.altM === 0;
-    const startAlt = isGroundSpawn ? ground + HELI_GEAR_H : Math.max(ground + HELI_GEAR_H, spawn.altM);
+    const startAlt = isGroundSpawn ? ground + HELI_GEAR_H : ground + HELI_GEAR_H + spawn.altM;   // AGL semantics
     heliSpawnRef.current = { ...spawn };
     const coll0 = isGroundSpawn ? 0 : hoverCollectiveAtSim(startAlt);   // hold station on spawn, not a surprise sink
     heliSimRef.current = new HelicopterSim(
@@ -6002,6 +6024,21 @@ export default function App() {
         modeRef: heliModeRef,
       };
     }
+    // Live weather at the spawn point: real wind + real temperature.
+    void fetch(`https://api.open-meteo.com/v1/forecast?latitude=${spawn.lat}&longitude=${spawn.lon}`
+      + `&current=wind_speed_10m,wind_direction_10m,temperature_2m`)
+      .then(r => r.json())
+      .then((d: { current?: { wind_speed_10m?: number; wind_direction_10m?: number; temperature_2m?: number } }) => {
+        const c = d?.current;
+        const sim = heliSimRef.current;
+        if (!c || !sim) return;
+        const spd = (c.wind_speed_10m ?? 0) / 3.6;                      // km/h → m/s at 10 m
+        const th = ((c.wind_direction_10m ?? 0) * Math.PI) / 180;       // FROM, met convention
+        sim.setWind(-spd * Math.sin(th), -spd * Math.cos(th));          // air-mass velocity
+        sim.setSurfaceOAT(c.temperature_2m ?? 15);
+        showNotification(`WIND ${Math.round(spd * 1.94384)} kt from ${Math.round(c.wind_direction_10m ?? 0)}° · OAT ${Math.round(c.temperature_2m ?? 15)}°C`, 'info');
+      })
+      .catch(() => { /* calm and ISA remain the fallback */ });
     showNotification(`Apache airborne over ${spawn.label} — W/S collective · arrows cyclic · Q/E pedals`, 'success');
   }
 
@@ -6028,7 +6065,7 @@ export default function App() {
         throttleDelta: k.thr, starterHeld: heliStarterRef.current,
         onGround: before.onGround, nfPct: before.rotorRpm, ngPct: before.ngPct,
         fuelKg: before.fuelKg, altM: before.altM,
-        hoverColl: hoverCollectiveAtSim(before.altM),
+        hoverColl: hoverCollectiveAtSim(before.altM, before.densityRatio, before.massKg),
       }, inp);
       for (const e of ctl.drainEvents()) heliCtlNotify(e);
     } else {
@@ -6046,9 +6083,7 @@ export default function App() {
       inp.roll = Math.max(-1, Math.min(1, k.roll + tr.roll + st.roll));
     }
     inp.pedal = Math.max(-1, Math.min(1, k.pedal + st.pedal));
-    if (heliTurbRef.current && Math.random() < dt * 1.5) {
-      sim.addGust((Math.random() - 0.5) * 3.2, (Math.random() - 0.5) * 3.2, (Math.random() - 0.5) * 1.8);
-    }
+    sim.setTurbulence(heliTurbRef.current ? 0.6 : 0);
     const s = sim.update(dt, inp);
     if (s.hardLanding) showNotification(`HARD LANDING — ${Math.round(before.vsFpm)} fpm sink · flare earlier!`, 'warning');
     heliFpsRef.current = heliFpsRef.current * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
@@ -6057,14 +6092,28 @@ export default function App() {
       engineOn: s.engine, vrs: s.vrs, cockpit: heliModeRef.current === 'cockpit',
     });
 
-    // ── place the Apache on the globe ──
+    // ── place the Apache on the globe with authentic aircraft attitude frame ──
+    // Model body: +Y = Nose, +X = Right Wing, +Z = Up (Mast)
+    // Heading: rotation about Z (-hRad clockwise from North)
+    // Pitch: rotation about lateral axis +X (+pRad, nose up > 0, nose down < 0)
+    // Roll: rotation about longitudinal axis +Y (+rRad, right bank > 0, left bank < 0)
     const pos = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.altM);
-    const hpr = new Cesium.HeadingPitchRoll(
-      Cesium.Math.toRadians(s.headingDeg),
-      Cesium.Math.toRadians(s.pitchDeg),
-      Cesium.Math.toRadians(s.rollDeg),
+    const hRad = Cesium.Math.toRadians(s.headingDeg);
+    const pRad = Cesium.Math.toRadians(s.pitchDeg);
+    const rRad = Cesium.Math.toRadians(s.rollDeg);
+    const qHdg = Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_Z, -hRad, new Cesium.Quaternion());
+    const qPitch = Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_X, pRad, new Cesium.Quaternion());
+    const qRoll = Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_Y, rRad, new Cesium.Quaternion());
+    let qAtt = Cesium.Quaternion.multiply(qHdg, qPitch, new Cesium.Quaternion());
+    qAtt = Cesium.Quaternion.multiply(qAtt, qRoll, qAtt);
+    const rotM = Cesium.Matrix4.fromTranslationQuaternionRotationScale(
+      Cesium.Cartesian3.ZERO,
+      qAtt,
+      new Cesium.Cartesian3(1, 1, 1),
+      new Cesium.Matrix4()
     );
-    const modelMatrix = Cesium.Transforms.headingPitchRollToFixedFrame(pos, hpr);
+    const enuFixed = Cesium.Transforms.eastNorthUpToFixedFrame(pos, Cesium.Ellipsoid.WGS84, new Cesium.Matrix4());
+    const modelMatrix = Cesium.Matrix4.multiply(enuFixed, rotM, new Cesium.Matrix4());
     if (heliModelRef.current && !heliModelRef.current.isDestroyed()) {
       heliModelRef.current.modelMatrix = modelMatrix;
       heliModelRef.current.show = heliModeRef.current !== 'cockpit';
@@ -6093,8 +6142,7 @@ export default function App() {
     //    around the airframe, all offsets riding the heli's attitude frame ──
     const frustum = v.camera.frustum as Cesium.PerspectiveFrustum;
     frustum.near = heliModeRef.current === 'cockpit' ? 0.05 : 0.5;  // cockpit: clear canopy frames; external: stable depth precision
-    v.scene.globe.depthTestAgainstTerrain = false;
-    const hRad = Cesium.Math.toRadians(s.headingDeg);
+    v.scene.globe.depthTestAgainstTerrain = true;
     let camPos: Cesium.Cartesian3;
     let camHeading: number;
     let camPitch: number;
@@ -6128,6 +6176,14 @@ export default function App() {
       if (scr0?.visible) scr0.setVisible(false);
       const enuPos = Cesium.Transforms.eastNorthUpToFixedFrame(pos, Cesium.Ellipsoid.WGS84, new Cesium.Matrix4());
       camPos = Cesium.Matrix4.multiplyByPoint(enuPos, new Cesium.Cartesian3(0, 0, heliTopdownHeightRef.current), new Cesium.Cartesian3());
+      try {
+        const topCarto = Cesium.Cartographic.fromCartesian(camPos, Cesium.Ellipsoid.WGS84, new Cesium.Cartographic());
+        const topGround = heliGroundHeight(v, Cesium.Math.toDegrees(topCarto.latitude), Cesium.Math.toDegrees(topCarto.longitude));
+        if (topCarto.height < topGround + 15) {
+          topCarto.height = topGround + 15;
+          camPos = Cesium.Cartographic.toCartesian(topCarto, Cesium.Ellipsoid.WGS84, camPos);
+        }
+      } catch { /* probe fallback */ }
       camHeading = hRad + heliYawRef.current;
       camPitch = -Cesium.Math.PI_OVER_TWO + 0.001;
     } else {
@@ -6165,16 +6221,51 @@ export default function App() {
       const targetWorld = Cesium.Matrix4.multiplyByPointAsVector(modelMatrix, targetLocal, new Cesium.Cartesian3());
       Cesium.Cartesian3.add(pos, targetWorld, targetWorld);
 
-      // Spherical offset around targetWorld in helicopter body frame:
-      // Forward = +Y, Tail = -Y, Starboard = +X, Port = -X, Up = +Z
-      // relAz = 0: directly behind the tail boom (-Y)
-      const local = new Cesium.Cartesian3(
-        tx + dist * ce * Math.sin(relAz),
-        ty - dist * ce * Math.cos(relAz),
-        tz + dist * Math.sin(el),
+      // Spherical offset around targetWorld in world ENU heading frame:
+      // Decoupled from airframe roll/pitch so the camera stays dead-center behind the flight path
+      // without disorienting viewport swing or horizon tilt during banked turns.
+      const enuAtTarget = Cesium.Transforms.eastNorthUpToFixedFrame(targetWorld, Cesium.Ellipsoid.WGS84, new Cesium.Matrix4());
+      const camAzWorld = hRad + o.az;
+      const offsetENU = new Cesium.Cartesian3(
+        dist * ce * Math.sin(camAzWorld),
+        dist * ce * Math.cos(camAzWorld),
+        dist * Math.sin(el)
       );
-      camPos = Cesium.Matrix4.multiplyByPointAsVector(modelMatrix, local, new Cesium.Cartesian3());
-      Cesium.Cartesian3.add(pos, camPos, camPos);
+      camPos = Cesium.Matrix4.multiplyByPoint(enuAtTarget, offsetENU, new Cesium.Cartesian3());
+
+      // Terrain clearance: guarantee chase & orbit camera NEVER dips beneath terrain or 3D tiles
+      try {
+        const camCarto = Cesium.Cartographic.fromCartesian(camPos, Cesium.Ellipsoid.WGS84, new Cesium.Cartographic());
+        const camLat = Cesium.Math.toDegrees(camCarto.latitude);
+        const camLon = Cesium.Math.toDegrees(camCarto.longitude);
+        const groundAtCam = heliGroundHeight(v, camLat, camLon);
+        const minCamClearance = 2.5; // metres clearance above terrain
+        if (camCarto.height < groundAtCam + minCamClearance) {
+          const penetration = (groundAtCam + minCamClearance) - camCarto.height;
+          // 1. Lift camera vertically along ellipsoid normal
+          camCarto.height = groundAtCam + minCamClearance;
+          camPos = Cesium.Cartographic.toCartesian(camCarto, Cesium.Ellipsoid.WGS84, camPos);
+
+          // 2. On steep mountain slopes behind the tail, pull camera closer toward targetWorld
+          // to maintain smooth framing without excessive overhead pitch
+          const toTargetVec = Cesium.Cartesian3.subtract(targetWorld, camPos, new Cesium.Cartesian3());
+          const curDist = Cesium.Cartesian3.magnitude(toTargetVec);
+          if (curDist > 8 && penetration > 0.5) {
+            Cesium.Cartesian3.normalize(toTargetVec, toTargetVec);
+            const pullIn = Math.min(penetration * 0.75, curDist - 7);
+            Cesium.Cartesian3.multiplyByScalar(toTargetVec, pullIn, toTargetVec);
+            Cesium.Cartesian3.add(camPos, toTargetVec, camPos);
+
+            // Re-verify ground height at adjusted camera location
+            const adjCarto = Cesium.Cartographic.fromCartesian(camPos, Cesium.Ellipsoid.WGS84, new Cesium.Cartographic());
+            const adjGround = heliGroundHeight(v, Cesium.Math.toDegrees(adjCarto.latitude), Cesium.Math.toDegrees(adjCarto.longitude));
+            if (adjCarto.height < adjGround + minCamClearance) {
+              adjCarto.height = adjGround + minCamClearance;
+              camPos = Cesium.Cartographic.toCartesian(adjCarto, Cesium.Ellipsoid.WGS84, camPos);
+            }
+          }
+        }
+      } catch { /* probe fallback */ }
 
       // Camera orientation to look directly at targetWorld with vertical bias for HUD dock clearance
       const toTarget = Cesium.Cartesian3.subtract(targetWorld, camPos, new Cesium.Cartesian3());
@@ -6182,10 +6273,12 @@ export default function App() {
       const enuInv = Cesium.Matrix4.inverseTransformation(enu, new Cesium.Matrix4());
       const dir = Cesium.Matrix4.multiplyByPointAsVector(enuInv, toTarget, new Cesium.Cartesian3());
       const horiz = Math.hypot(dir.x, dir.y);
-      camHeading = horiz > 1e-3 ? Math.atan2(dir.x, dir.y) : hRad + relAz;
+      camHeading = horiz > 1e-3 ? Math.atan2(dir.x, dir.y) : (camAzWorld + Math.PI);
       // Tilt pitch slightly downward (-0.08 rad ≈ -4.6°) so the helicopter sits higher on screen,
       // centered in the unobstructed upper 70% of the viewport above the bottom HUD dock (.hxdock)
       camPitch = Math.atan2(dir.z, Math.max(horiz, 1e-6)) - 0.08;
+      // In close chase, rock-solid level horizon lets pilot see the airframe bank realistically
+      camRoll = isClose ? 0 : Cesium.Math.toRadians(out?.rollDeg ? out.rollDeg * 0.15 : 0);
     }
     frustum.fov = camFov;
     v.camera.setView({
@@ -6232,6 +6325,7 @@ export default function App() {
     const exitFrustum = v.camera.frustum as Cesium.PerspectiveFrustum;
     exitFrustum.fov = Cesium.Math.toRadians(60);
     exitFrustum.near = 1.0;
+    v.scene.globe.depthTestAgainstTerrain = true;
     const saved = heliSavedViewRef.current;
     heliSavedViewRef.current = null;
     if (saved) {
