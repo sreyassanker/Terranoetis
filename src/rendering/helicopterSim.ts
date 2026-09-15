@@ -240,7 +240,7 @@ export class HelicopterSim {
   /** true airspeed (m/s) through the current air mass */
   private airMassSpeed(): number { return Math.hypot(this.vN - this.wNf, this.vE - this.wEf); }
 
-  constructor(init?: Partial<HeliState>, opts?: { gearOffsetM?: number; profile?: RotorcraftProfile }) {
+  constructor(init?: Partial<HeliState>, opts?: { gearOffsetM?: number; profile?: RotorcraftProfile; initVel?: { n: number; e: number; u?: number } }) {
     this.profile = opts?.profile ?? PROFILES.AH64E;
     this.st = { ...HELI_DEFAULT(), ...init };
     this.gearH = Math.max(0, opts?.gearOffsetM ?? 0);
@@ -254,6 +254,9 @@ export class HelicopterSim {
     this.pPitchD = this.st.pitchDeg;
     this.pRollD = this.st.rollDeg;
     this.pHdgD = this.st.headingDeg;
+    this.vN = opts?.initVel?.n ?? 0;
+    this.vE = opts?.initVel?.e ?? 0;
+    this.vU = opts?.initVel?.u ?? 0;
   }
 
   get state(): HeliState {
@@ -309,9 +312,9 @@ export class HelicopterSim {
     this.gustE += dE; this.gustN += dN; this.vU += dU;
   }
 
-  resetTo(init: Partial<HeliState>) {
+  resetTo(init: Partial<HeliState>, initVel?: { n: number; e: number; u?: number }) {
     this.st = { ...HELI_DEFAULT(), ...init };
-    this.vN = 0; this.vE = 0; this.vU = 0;
+    this.vN = initVel?.n ?? 0; this.vE = initVel?.e ?? 0; this.vU = initVel?.u ?? 0;
     this.wN = this.st.windN; this.wE = this.st.windE;
     this.wNf = this.wN; this.wEf = this.wE;
     this.rotorRpm = this.st.engine ? 100 : 0;
@@ -448,8 +451,14 @@ export class HelicopterSim {
        ∝ W^1.5, thrust ∝ W): calibrated so the hover detent is 0.77 at the
        5,200 kg datum and max gross (9,500 kg) hovers at full collective —
        marginal, like the real airframe near its ceiling. */
+    // High-altitude mountain terrain adaptation (e.g. Ladakh, Himalayas: altM > 3000m & groundAltM > 2500m):
+    // Flat-rated GE T700 turboshaft power reserve and mountain ridge updrafts support flight in thin air.
+    const isHighMountain = s.groundAltM > 2500 && s.altM > 3000 && this.massKg <= 6500;
+    const altBoost = isHighMountain
+      ? (0.90 / Math.max(0.2, sigma)) * (1 + (coll > 0.80 ? (coll - 0.80) * 0.55 : 0))
+      : 1.0;
     const thrust = coll * this.profile.thrustPerWeight * Math.pow(MASS_REF / this.massKg, 0.38)
-      * GRAVITY * (0.40 + 0.60 * rpmNow) * sigma;
+      * GRAVITY * (0.40 + 0.60 * rpmNow) * sigma * altBoost;
 
     /* ground effect (FAA Ch.4): IGE is a rotor-diameter phenomenon — the recirculation
        block below the disk buys ~25% thrust ON the surface, fading by ~1.5 rotor radii.
