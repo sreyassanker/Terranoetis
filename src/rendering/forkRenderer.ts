@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { applyEntityShow } from './primitiveLayers';
 
 interface GhostData {
   ghostEntity: Cesium.Entity;
@@ -667,7 +668,9 @@ export class ForkRenderer {
       for (const ent of ents) {
         if (!ent) continue;
         processed.add(String(ent.id ?? ''));
-        ent.show = shouldShow(layerId, ent);
+        // Primitive-backed layers render from a collection, so the crop has to
+        // go through the registry — writing `show` on the carrier does nothing.
+        applyEntityShow(layerId, ent, shouldShow(layerId, ent));
       }
     }
 

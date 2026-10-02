@@ -23,22 +23,75 @@ function withTZ(date: Date | number | string): Date {
   return typeof date === 'number' || typeof date === 'string' ? new Date(date) : date;
 }
 
+/**
+ * `Date.prototype.toLocaleString` is specified as constructing an
+ * `Intl.DateTimeFormat` and immediately calling `format` on it, so the
+ * formatter is rebuilt — with full ICU timezone resolution — on every call.
+ * These helpers are invoked from render paths that run several times a
+ * second, which dominated the CPU profile. Reusing one formatter per distinct
+ * option set is byte-identical output at a fraction of the cost.
+ *
+ * The active timezone is part of the key, so setTimezone() takes effect
+ * immediately.
+ */
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function formatter(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = `${locale}|${JSON.stringify(options)}`;
+  let f = formatterCache.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, options);
+    formatterCache.set(key, f);
+  }
+  return f;
+}
+
+const COMPONENT_KEYS = [
+  'year', 'month', 'day', 'hour', 'minute', 'second', 'weekday', 'era',
+  'quarter', 'dayPeriod', 'timeZoneName', 'fractionalSecondDigits',
+] as const;
+
+function hasFormatSpec(options: Intl.DateTimeFormatOptions | undefined): boolean {
+  if (!options) return false;
+  const opts = options as Record<string, unknown>;
+  return opts.dateStyle !== undefined || opts.timeStyle !== undefined
+    || COMPONENT_KEYS.some((k) => opts[k] !== undefined);
+}
+
 export function formatISTTime(date: Date | number | string): string {
-  return withTZ(date).toLocaleTimeString('en-IN', { timeZone: currentTimezone, hour: '2-digit', minute: '2-digit' });
+  return formatter('en-IN', { timeZone: currentTimezone, hour: '2-digit', minute: '2-digit' })
+    .format(withTZ(date));
 }
 
 export function formatISTDate(date: Date | number | string): string {
-  return withTZ(date).toLocaleDateString('en-IN', { timeZone: currentTimezone, dateStyle: 'medium' });
+  return formatter('en-IN', { timeZone: currentTimezone, dateStyle: 'medium' })
+    .format(withTZ(date));
+}
+
+/** Cached equivalent of `toLocaleDateString('en-IN', { timeZone })` — renders
+ *  as `22/9/2026` rather than `formatISTDate`'s `22 Sept 2026`. */
+export function formatISTCalendarDate(date: Date | number | string): string {
+  return formatter('en-IN', { timeZone: currentTimezone }).format(withTZ(date));
 }
 
 export function formatIST(date: Date | number | string, options?: { dateStyle?: 'full' | 'long' | 'medium' | 'short'; timeStyle?: 'full' | 'long' | 'medium' | 'short' }): string {
-  return withTZ(date).toLocaleString('en-IN', { timeZone: currentTimezone, ...options });
+  const d = withTZ(date);
+  // V8 is not equivalent in the no-format-spec case: `d.toLocaleString(loc,
+  // {timeZone})` yields date AND time, while a DateTimeFormat built from the
+  // same options yields date only. Real call sites always pass a style, so
+  // route just that degenerate case through the original expression rather
+  // than change what users see.
+  if (!hasFormatSpec(options)) return d.toLocaleString('en-IN', { timeZone: currentTimezone, ...options });
+  return formatter('en-IN', { timeZone: currentTimezone, ...options }).format(d);
 }
 
 /** Short display label for the active timezone, e.g. "IST" or "China Standard Time". */
 export function timezoneLabel(tz: string = currentTimezone): string {
   try {
-    const short = new Intl.DateTimeFormat('en', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value;
+    // Formatting against the clock each call keeps the label correct across a
+    // DST transition; only the construction was being paid repeatedly.
+    const short = formatter('en', { timeZone: tz, timeZoneName: 'short' })
+      .formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value;
     if (short) return short;
   } catch { /* fall through */ }
   return tz.split('/').pop()?.replace(/_/g, ' ') || tz;

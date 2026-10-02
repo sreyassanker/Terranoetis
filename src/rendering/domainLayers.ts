@@ -1,5 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import * as Cesium from 'cesium';
+import {
+  registerPrimitiveLayer,
+  unregisterPrimitiveLayer,
+  type PrimitiveLayerHandle,
+} from './primitiveLayers';
 
 // --- REAL AIRSPACES (GeoJSON) ---
 export async function loadAirspaces(viewer: Cesium.Viewer): Promise<Cesium.Entity[]> {
@@ -58,7 +63,9 @@ async function loadAisVessels(viewer: Cesium.Viewer, apiKey: string): Promise<Ce
         BoundingBoxes: [[[-90, -180], [90, 180]]],
         FilterMessageTypes: ["PositionReport"]
       };
-      socket.send(JSON.stringify(subMsg));
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(subMsg));
+      }
     };
 
     socket.onmessage = (event) => {
@@ -438,9 +445,27 @@ export function addLightningEntities(viewer: Cesium.Viewer, strikes: any[]): Ces
 }
 
 // 4. Render Polar Auroral Oval
+//
+// These are ~1,500 points that never move and never change colour. As individual
+// `entities` each one costs roughly ten `Property.getValue` calls per visualizer
+// update (see PointVisualizer.update), so they are drawn from a single
+// PointPrimitiveCollection instead.
+//
+// Detached `Cesium.Entity` carriers are still returned and each primitive's `id`
+// is its carrier, exactly as PointVisualizer does it — so `scene.pick()` keeps
+// yielding an Entity and the info panel, chat chip and tracker paths are
+// unchanged. Visibility is the one thing that no longer propagates from a
+// detached entity, hence the primitive-layer registry below.
+const auroraLayers = new WeakMap<Cesium.Viewer, PrimitiveLayerHandle>();
+
 export function addAuroraEntities(viewer: Cesium.Viewer, auroraData: any): Cesium.Entity[] {
-  const ents: Cesium.Entity[] = [];
+  auroraLayers.get(viewer)?.destroy();
+
   const coordinates = auroraData.coordinates || [];
+  const collection = new Cesium.PointPrimitiveCollection();
+  const primitives = new Map<Cesium.Entity, Cesium.PointPrimitive>();
+  const ents: Cesium.Entity[] = [];
+  let layerShown = true;
 
   coordinates.forEach((pt: any) => {
     const prob = pt.prob || 0;
@@ -448,34 +473,69 @@ export function addAuroraEntities(viewer: Cesium.Viewer, auroraData: any): Cesiu
 
     // Render a high-altitude floating glowing point representation of the aurora
     // Auroral glow sits between 90km and 160km altitude
-    const height = 95000 + (prob * 600); 
+    const height = 95000 + (prob * 600);
     const pos = Cesium.Cartesian3.fromDegrees(pt.lon, pt.lat, height);
 
     // Map probability to aurora colors: Green (common) to Red (high probability/altitude)
-    const color = prob > 55 
+    const color = prob > 55
       ? Cesium.Color.fromCssColorString('#f87171').withAlpha(prob / 130) // Red Aurora
       : Cesium.Color.fromCssColorString('#4ade80').withAlpha(prob / 150); // Green Aurora
 
-    const point = viewer.entities.add({
-      position: pos,
+    const entity = new Cesium.Entity({
+      position: new Cesium.ConstantPositionProperty(pos),
       name: `Aurora Forecast (Prob: ${prob}%)`,
-      point: {
-        pixelSize: 5 + (prob * 0.08),
-        color: color,
-        outlineColor: Cesium.Color.fromCssColorString('#22c55e').withAlpha(0.05),
-        outlineWidth: 1,
-      },
-      properties: {
+      properties: new Cesium.PropertyBag({
         layer: 'aurora_oval',
         probability: prob,
         lat: pt.lat,
         lon: pt.lon,
-      }
+      }),
     });
 
-    ents.push(point);
+    primitives.set(entity, collection.add({
+      position: pos,
+      pixelSize: 5 + (prob * 0.08),
+      color: color,
+      outlineColor: Cesium.Color.fromCssColorString('#22c55e').withAlpha(0.05),
+      outlineWidth: 1,
+      id: entity,
+    }));
+    ents.push(entity);
   });
 
+  viewer.scene.primitives.add(collection);
+  const requestRender = () => {
+    if (!viewer.isDestroyed()) viewer.scene.requestRender();
+  };
+  // Adding to `scene.primitives` does not itself wake a requestRenderMode scene.
+  requestRender();
+
+  const handle: PrimitiveLayerHandle = {
+    setShown(shown: boolean) {
+      layerShown = shown;
+      collection.show = shown;
+      requestRender();
+    },
+    setEntityShown(entity: Cesium.Entity, shown: boolean) {
+      const prim = primitives.get(entity);
+      if (!prim) return;
+      prim.show = layerShown && shown;
+      requestRender();
+    },
+    get size() {
+      return primitives.size;
+    },
+    destroy() {
+      if (auroraLayers.get(viewer) === handle) auroraLayers.delete(viewer);
+      unregisterPrimitiveLayer('aurora_oval');
+      if (!viewer.isDestroyed()) viewer.scene.primitives.remove(collection);
+      primitives.clear();
+      requestRender();
+    },
+  };
+
+  auroraLayers.set(viewer, handle);
+  registerPrimitiveLayer('aurora_oval', handle);
   return ents;
 }
 

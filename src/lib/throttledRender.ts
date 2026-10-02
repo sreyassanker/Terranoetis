@@ -38,7 +38,13 @@ export function throttledRender(viewer?: Cesium.Viewer | null): void {
   if (pending) return; // already scheduled
   pending = true;
   requestAnimationFrame(doRender);
-  // Fallback: if rAF is frozen (backgrounded tab), render after timeout
-  fallbackTimer = setTimeout(doRender, FALLBACK_TIMEOUT_MS);
+  // The timeout is a safety net for a frame that never lands. Arming it while
+  // the page is hidden defeats the browser's background throttling and keeps
+  // rasterising a globe nobody can see, so the tab burns a core indefinitely.
+  // The queued rAF above fires on the first frame after the tab is visible
+  // again, so waiting costs nothing.
+  if (document.visibilityState !== 'hidden') {
+    fallbackTimer = setTimeout(doRender, FALLBACK_TIMEOUT_MS);
+  }
 }
 

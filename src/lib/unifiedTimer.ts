@@ -23,7 +23,17 @@ export function createUnifiedTimer() {
   let rafId = 0;
   let running = false;
 
+  function hasWork() {
+    return tasks.some(t => t.enabled);
+  }
+
+  /** Park the loop when nothing is enabled instead of spinning at 60 Hz. */
+  function ensureLoop() {
+    if (running && hasWork() && !rafId) rafId = requestAnimationFrame(tick);
+  }
+
   function tick(now: number) {
+    rafId = 0;
     for (const task of tasks) {
       if (!task.enabled) continue;
       if (now - task.lastRun >= task.intervalMs) {
@@ -35,9 +45,7 @@ export function createUnifiedTimer() {
         }
       }
     }
-    if (running) {
-      rafId = requestAnimationFrame(tick);
-    }
+    ensureLoop();
   }
 
   return {
@@ -52,6 +60,7 @@ export function createUnifiedTimer() {
       } else {
         tasks.push(task);
       }
+      ensureLoop();
     },
 
     /**
@@ -60,6 +69,7 @@ export function createUnifiedTimer() {
     setEnabled(id: string, enabled: boolean) {
       const task = tasks.find(t => t.id === id);
       if (task) task.enabled = enabled;
+      ensureLoop();
     },
 
     /**
