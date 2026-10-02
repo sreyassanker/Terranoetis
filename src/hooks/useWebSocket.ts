@@ -15,7 +15,15 @@ export interface WsMessage {
   payload?: unknown;
 }
 
-const WS_BASE = import.meta.env.VITE_WS_URL || `ws://${location.hostname}:3001`;
+const isDesktopApp =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'tauri.localhost' ||
+    window.location.protocol === 'file:' ||
+    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
+
+const WS_BASE =
+  import.meta.env.VITE_WS_URL ||
+  (isDesktopApp ? 'ws://127.0.0.1:3001' : `ws://${location.hostname}:3001`);
 const WS_PATH = '/ws/agent';
 const MAX_RECONNECT_DELAY = 30000;
 const INITIAL_RECONNECT_DELAY = 1000;

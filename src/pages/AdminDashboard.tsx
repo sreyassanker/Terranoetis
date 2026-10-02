@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { getToken } from '../context/AuthContext';
+import { useAuth, getToken, isDesktopApp } from '../context/AuthContext';
 import { Lock, Shield, X, BarChart3, ClipboardList, Plug, Heart, Sparkles, Brain, CheckCircle, XCircle, Home, MapPin, Clock, Search, Cpu } from 'lucide-react';
 import { useUserPrefStore } from '../store/userPrefStore';
 import { formatISTTime, getAllTimezones } from '../lib/formatTime';
@@ -360,7 +359,7 @@ const formatEta = (seconds: number): string => {
     return () => { clearInterval(interval); clearInterval(evoInterval); clearInterval(clock); };
   }, [fetchMetrics, fetchHealth, fetchAdminData, fetchEvolution]);
 
-  if (!isAdmin) {
+  if (!isAdmin && !isDesktopApp) {
     return (
       <div className="admin-overlay">
         <div className="admin-panel" style={{ textAlign: 'center', padding: 40 }}>
