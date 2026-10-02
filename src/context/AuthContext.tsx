@@ -21,11 +21,23 @@ const ROLE_KEY = 'auth_role';
 let fetchPatchInstalled = false;
 let originalFetch: typeof window.fetch | null = null;
 
+export const isDesktopApp =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'tauri.localhost' ||
+    window.location.protocol === 'file:' ||
+    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
+
 function shouldAttachAuth(input: RequestInfo | URL): boolean {
   const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
   try {
     const url = new URL(rawUrl, window.location.origin);
-    return url.origin === window.location.origin && url.pathname.startsWith('/api/');
+    return (
+      url.pathname.startsWith('/api/') &&
+      (url.origin === window.location.origin ||
+        url.hostname === '127.0.0.1' ||
+        url.hostname === 'localhost' ||
+        url.hostname.includes('tauri'))
+    );
   } catch {
     return rawUrl.startsWith('/api/');
   }
@@ -66,10 +78,19 @@ function loadAuth(): AuthState {
   const token = localStorage.getItem(TOKEN_KEY);
   const user = localStorage.getItem(USER_KEY);
   const storedRole = localStorage.getItem(ROLE_KEY);
-  const role = storedRole || (token ? parseJwtRole(token) : null);
+  const role = storedRole || (token ? parseJwtRole(token) : (isDesktopApp ? 'admin' : null));
   if (token && user) {
-    const isAdmin = role === 'admin';
+    const isAdmin = role === 'admin' || isDesktopApp;
     return { user, token, role, isLoggedIn: true, isAdmin };
+  }
+  if (isDesktopApp) {
+    return {
+      user: user || 'desktop-operator',
+      token: token || null,
+      role: 'admin',
+      isLoggedIn: true,
+      isAdmin: true,
+    };
   }
   return { user: null, token: null, role: null, isLoggedIn: false, isAdmin: false };
 }
@@ -82,7 +103,7 @@ function persistAuth(token: string, userId: string, role: string): void {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuth] = useState<AuthState>(loadAuth);
-  const [authReady, setAuthReady] = useState(() => !import.meta.env.DEV);
+  const [authReady, setAuthReady] = useState(() => !import.meta.env.DEV && !isDesktopApp);
 
   useEffect(() => {
     const handler = () => setAuth(loadAuth());
@@ -94,9 +115,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // DEV mode: always try dev-login for a fresh token, fall back to stored token
+  // DEV mode or Desktop App: always try dev-login for a fresh token, fall back to stored token
   useEffect(() => {
-    if (!import.meta.env.DEV) {
+    if (!import.meta.env.DEV && !isDesktopApp) {
       setAuthReady(true);
       return;
     }
@@ -111,13 +132,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!resp.ok) throw new Error(`dev-login ${resp.status}`);
         const data = await resp.json();
         if (!data?.token) throw new Error('no token in dev-login response');
-        persistAuth(data.token, data.userId, data.role ?? 'user');
+        persistAuth(data.token, data.userId, data.role ?? 'admin');
         setAuth({
           user: data.userId,
           token: data.token,
-          role: data.role ?? 'user',
+          role: data.role ?? 'admin',
           isLoggedIn: true,
-          isAdmin: data.role === 'admin',
+          isAdmin: true,
         });
         window.dispatchEvent(new CustomEvent('auth:updated'));
       } catch {

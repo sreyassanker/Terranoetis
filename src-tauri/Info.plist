@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Terranoetis requires location access to center the 3D globe on your current location.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Terranoetis requires microphone access for voice-assisted geospatial AI cognition.</string>
+</dict>
+</plist>

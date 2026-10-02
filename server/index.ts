@@ -18,6 +18,23 @@ const papaparse = createRequire(import.meta.url)('papaparse');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Desktop lifecycle: auto-terminate if parent desktop app exits or dies
+if (process.env.PARENT_PID) {
+  const parentPid = parseInt(process.env.PARENT_PID, 10);
+  if (!Number.isNaN(parentPid) && parentPid > 0) {
+    const parentWatcher = setInterval(() => {
+      try {
+        process.kill(parentPid, 0);
+      } catch {
+        clearInterval(parentWatcher);
+        console.log('[server] Desktop app exited. Shutting down backend automatically...');
+        process.exit(0);
+      }
+    }, 1000);
+    parentWatcher.unref();
+  }
+}
+
 import { getDb, closeDb } from './db/index';
 import { isAutonomousAiAllowed } from './aiGate';
 import {

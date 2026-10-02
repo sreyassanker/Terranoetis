@@ -6,7 +6,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
 import { formatIST, formatISTTime, formatISTCalendarDate, getTimezone, timezoneLabel } from '@/lib/formatTime';
 import AdminDashboard from '@/pages/AdminDashboard';
-import { useAuth, authHeaders } from '@/context/AuthContext';
+import { useAuth, authHeaders, isDesktopApp } from '@/context/AuthContext';
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { apiGet } from '@/lib/api';
@@ -9039,7 +9039,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
       case 'time-slider': case 'time_slider':
         return apply(setShowTimeSlider, showTimeSlider);
       case 'admin': case 'admin-dashboard':
-        if (isAdmin) return apply(setShowAdmin, showAdmin);
+        if (isAdmin || isDesktopApp) return apply(setShowAdmin, showAdmin);
         return undefined;
       case 'iss': case 'iss-live': case 'iss-tracker':
         toggleISS();
@@ -11357,7 +11357,7 @@ case 'openPanel':
             <button className="btn-all" style={{background:showMeasureTool ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowMeasureTool(p => !p)}><Ruler size={12} style={{display:'inline',marginRight:3}} /> Measure</button>
             <button className="btn-all" style={{background: navMode==='route' ? 'rgba(34,211,238,0.25)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => { const on = navMode!=='route'; setNavMode(on?'route':'none'); if(!on){clearNavEntities(); setRoutePoints([]); setRouteResult(null);} setShowMeasureTool(false); }}><Navigation2 size={12} style={{display:'inline',marginRight:3}} /> Route</button>
             <button className="btn-all" style={{background: navMode==='safest' ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => { const on = navMode!=='safest'; setNavMode(on?'safest':'none'); if(!on){clearNavEntities(); setSafestHazard(null); setSafestResult(null);} setShowMeasureTool(false); }}><Shield size={12} style={{display:'inline',marginRight:3}} /> Safest</button>
-            {isAdmin && <button className="btn-all" style={{background:'rgba(59,130,246,0.2)', fontSize:10}} onClick={() => setShowAdmin(true)}><Shield size={12} style={{display:'inline',marginRight:3}} /> Admin</button>}
+            {(isAdmin || isDesktopApp) && <button className="btn-all" style={{background:'rgba(59,130,246,0.2)', fontSize:10}} onClick={() => setShowAdmin(true)}><Shield size={12} style={{display:'inline',marginRight:3}} /> Admin</button>}
           </div>
           <button className="btn-all" onClick={enableDefaultLayers}>Reset to Defaults</button>
         </div>

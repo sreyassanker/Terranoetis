@@ -1,4 +1,12 @@
-const API_BASE = import.meta.env.VITE_API_PROXY || '/api';
+const isDesktopApp =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'tauri.localhost' ||
+    window.location.protocol === 'file:' ||
+    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
+
+const API_BASE =
+  import.meta.env.VITE_API_PROXY ||
+  (isDesktopApp ? 'http://127.0.0.1:3001/api' : '/api');
 
 /** Direct upstream URLs used when the local proxy is down or misconfigured */
 const DIRECT_SOURCES: Record<string, string> = {
