@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isDesktopApp } from '@/context/AuthContext';
 
 export type WsConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
 
@@ -14,12 +15,6 @@ export interface WsMessage {
   status?: string;
   payload?: unknown;
 }
-
-const isDesktopApp =
-  typeof window !== 'undefined' &&
-  (window.location.hostname === 'tauri.localhost' ||
-    window.location.protocol === 'file:' ||
-    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
 
 const WS_BASE =
   import.meta.env.VITE_WS_URL ||

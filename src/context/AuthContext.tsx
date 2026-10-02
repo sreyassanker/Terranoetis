@@ -24,8 +24,11 @@ let originalFetch: typeof window.fetch | null = null;
 export const isDesktopApp =
   typeof window !== 'undefined' &&
   (window.location.hostname === 'tauri.localhost' ||
+    (window.location.hostname === 'localhost' && window.location.port === '') ||
+    window.location.protocol === 'tauri:' ||
     window.location.protocol === 'file:' ||
-    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
+    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) ||
+    Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__));
 
 function shouldAttachAuth(input: RequestInfo | URL): boolean {
   const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
@@ -47,16 +50,43 @@ function installAuthFetchPatch(): void {
   if (fetchPatchInstalled || typeof window === 'undefined') return;
   originalFetch = window.fetch.bind(window);
   window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    let reqInput = input;
     const token = localStorage.getItem(TOKEN_KEY);
-    if (!token || !shouldAttachAuth(input)) {
-      return originalFetch!(input, init);
+
+    // In desktop app, route any /api requests to local backend server
+    if (isDesktopApp) {
+      const API_SERVER =
+        (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') || 'http://127.0.0.1:3001';
+      let rawUrl = '';
+      if (typeof reqInput === 'string') rawUrl = reqInput;
+      else if (reqInput instanceof URL) rawUrl = reqInput.href;
+      else if (reqInput instanceof Request) rawUrl = reqInput.url;
+
+      if (
+        rawUrl.startsWith('/api') ||
+        rawUrl.startsWith('http://tauri.localhost/api') ||
+        rawUrl.startsWith('https://tauri.localhost/api') ||
+        rawUrl.startsWith('tauri://localhost/api')
+      ) {
+        const cleanPath = rawUrl.replace(/^(https?:\/\/tauri\.localhost|tauri:\/\/localhost)/, '');
+        const targetUrl = `${API_SERVER}${cleanPath}`;
+        if (reqInput instanceof Request) {
+          reqInput = new Request(targetUrl, reqInput);
+        } else {
+          reqInput = targetUrl;
+        }
+      }
     }
 
-    const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
+    if (!token || !shouldAttachAuth(reqInput)) {
+      return originalFetch!(reqInput, init);
+    }
+
+    const headers = new Headers(init?.headers || (reqInput instanceof Request ? reqInput.headers : undefined));
     if (!headers.has('Authorization')) {
       headers.set('Authorization', `Bearer ${token}`);
     }
-    return originalFetch!(input, { ...init, headers });
+    return originalFetch!(reqInput, { ...init, headers });
   };
   fetchPatchInstalled = true;
 }
@@ -123,39 +153,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false;
     let retries = 0;
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY = 1500;
+    const MAX_RETRIES = 35;
+    const RETRY_DELAY = 1000;
     const stored = loadAuth();
-    (async function tryLogin() {
-      try {
-        const resp = await fetch('/api/auth/dev-login', { method: 'POST' });
-        if (!resp.ok) throw new Error(`dev-login ${resp.status}`);
-        const data = await resp.json();
-        if (!data?.token) throw new Error('no token in dev-login response');
-        persistAuth(data.token, data.userId, data.role ?? 'admin');
-        setAuth({
-          user: data.userId,
-          token: data.token,
-          role: data.role ?? 'admin',
-          isLoggedIn: true,
-          isAdmin: true,
-        });
-        window.dispatchEvent(new CustomEvent('auth:updated'));
-      } catch {
-        if (cancelled) return;
-        retries++;
-        if (retries < MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, RETRY_DELAY));
-          if (!cancelled) return tryLogin();
+
+    (async function loginLoop() {
+      while (!cancelled && retries < MAX_RETRIES) {
+        try {
+          const resp = await fetch('/api/auth/dev-login', { method: 'POST' });
+          if (!resp.ok) throw new Error(`dev-login ${resp.status}`);
+          const data = await resp.json();
+          if (!data?.token) throw new Error('no token in dev-login response');
+          persistAuth(data.token, data.userId, data.role ?? 'admin');
+          setAuth({
+            user: data.userId,
+            token: data.token,
+            role: data.role ?? 'admin',
+            isLoggedIn: true,
+            isAdmin: true,
+          });
+          window.dispatchEvent(new CustomEvent('auth:updated'));
+          if (!cancelled) setAuthReady(true);
+          return;
+        } catch {
+          retries++;
+          if (retries < MAX_RETRIES && !cancelled) {
+            await new Promise((r) => setTimeout(r, RETRY_DELAY));
+          }
         }
-        if (!cancelled && stored.isLoggedIn) {
+      }
+      if (!cancelled) {
+        if (stored.isLoggedIn) {
           setAuth(stored);
         }
-      } finally {
-        if (!cancelled) setAuthReady(true);
+        setAuthReady(true);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

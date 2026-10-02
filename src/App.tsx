@@ -2704,6 +2704,18 @@ export default function App() {
     }
   }, []);
 
+  // When auth/backend is ready (e.g. desktop dev-login resolves), refresh live data
+  useEffect(() => {
+    const handleAuthUpdated = () => {
+      const v = viewerRef.current;
+      if (v && !v.isDestroyed()) {
+        void refreshLiveData(v);
+      }
+    };
+    window.addEventListener('auth:updated', handleAuthUpdated);
+    return () => window.removeEventListener('auth:updated', handleAuthUpdated);
+  }, []);
+
 
   useEffect(() => {
     const v = viewerRef.current;

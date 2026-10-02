@@ -10,28 +10,7 @@ import ToursPage from './pages/v2/ToursPage';
 import { AuthProvider } from './context/AuthContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
-// In desktop environments (Tauri webview / custom schemes), route relative `/api` calls
-// to the backend server.
-const isDesktopApp =
-  typeof window !== 'undefined' &&
-  (window.location.hostname === 'tauri.localhost' ||
-    window.location.protocol === 'file:' ||
-    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
 
-if (isDesktopApp) {
-  const originalFetch = window.fetch;
-  const API_SERVER =
-    (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') || 'http://127.0.0.1:3001';
-  window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
-    if (typeof input === 'string' && input.startsWith('/api')) {
-      return originalFetch(`${API_SERVER}${input}`, init);
-    }
-    if (input instanceof URL && input.pathname.startsWith('/api')) {
-      return originalFetch(`${API_SERVER}${input.pathname}${input.search}`, init);
-    }
-    return originalFetch(input, init);
-  };
-}
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
