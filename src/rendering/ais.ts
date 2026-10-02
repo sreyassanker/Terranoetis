@@ -109,7 +109,11 @@ export class AisVesselTracker {
     this.socket.onopen = () => {
       this.connected = true;
       this.reconnectAttempt = 0;
-      this.socket!.send(JSON.stringify({
+      // `stop()`/`clear()` can null the socket while this callback is queued,
+      // so re-read it instead of asserting non-null on the closed-over socket.
+      const socket = this.socket;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({
         APIKey: this.apiKey,
         BoundingBoxes: [[[-90, -180], [90, 180]]],
         FilterMessageTypes: ['PositionReport'],

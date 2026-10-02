@@ -4,7 +4,7 @@ import { Cctv, Camera, Monitor, Eye, Brain, Search as SearchIcon, Activity, Cros
 import DOMPurify from 'dompurify';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
-import { formatIST, formatISTTime, getTimezone, timezoneLabel } from '@/lib/formatTime';
+import { formatIST, formatISTTime, formatISTCalendarDate, getTimezone, timezoneLabel } from '@/lib/formatTime';
 import AdminDashboard from '@/pages/AdminDashboard';
 import { useAuth, authHeaders } from '@/context/AuthContext';
 import * as Cesium from 'cesium';
@@ -58,6 +58,7 @@ import {
   addAnimalMigrationEntities,
   getDebrisOrbitPositions
 } from '@/rendering/domainLayers';
+import { getPrimitiveLayer } from '@/rendering/primitiveLayers';
 import { fetchAndStoreSatnogsData, getSatnogsForNorad, addSatnogsEntities } from '@/rendering/satnogs';
 import { fetchAndStoreUcsData, getUcsForNorad, addUcsEntities } from '@/rendering/ucsSatelliteDb';
 import { HumanOverrideBanner } from '@/components/explainability/index';
@@ -3836,6 +3837,9 @@ export default function App() {
   }, []);
 
   function setLayerEntitiesVisible(layerId: string, visible: boolean) {
+    // Primitive-backed layers draw from a collection, so a `show` flag written to
+    // their detached entity carriers drives nothing on its own.
+    getPrimitiveLayer(layerId)?.setShown(visible);
     const ents = entityStoreRef.current[layerId];
     if (!ents) return;
     ents.forEach(ent => {
@@ -3864,6 +3868,7 @@ export default function App() {
   function removeLayerEntities(layerId: string) {
     const v = viewerRef.current;
     const ents = entityStoreRef.current[layerId];
+    getPrimitiveLayer(layerId)?.destroy();
     if (!ents) return;
     if (v) {
       ents.forEach(ent => {
@@ -3895,6 +3900,7 @@ export default function App() {
       if (!next || next !== ents) continue;
       removed += next.length;
       if (v) {
+        getPrimitiveLayer(id)?.destroy();
         next.forEach(ent => {
           ghostProtocolRef.current?.removeGhost(ent.id);
           clearEntityProperties(ent);
@@ -11570,8 +11576,8 @@ case 'openPanel':
         <button className="tl-btn" onClick={stopTimeline}><Square size={14} /></button>
         <div className="tl-slider-wrap">
           <div className="tl-labels">
-            <span>{new Date(timelineRef.current.start).toLocaleDateString('en-IN', { timeZone: getTimezone() })}</span>
-            <span>{new Date(timelineRef.current.current).toLocaleString('en-IN', { timeZone: getTimezone(), dateStyle: 'medium', timeStyle: 'short' })} {timezoneLabel()}</span>
+            <span>{formatISTCalendarDate(timelineRef.current.start)}</span>
+            <span>{formatIST(timelineRef.current.current, { dateStyle: 'medium', timeStyle: 'short' })} {timezoneLabel()}</span>
             <span>Now</span>
           </div>
           <input type="range" className="tl-slider" min="0" max="100" value={timelineValue}

@@ -193,13 +193,13 @@ export class SensorStyles {
   private stage: Cesium.PostProcessStage | null = null;
   private activeId: SensorStyleId = 'normal';
   private lastTime = 0;
-  private readonly removePostRender: () => void;
+  private readonly postRenderHandler: () => void;
   private destroyed = false;
 
   constructor(viewer: Cesium.Viewer) {
     this.viewer = viewer;
-    this.removePostRender = this.onPostRender.bind(this);
-    this.viewer.scene.postRender.addEventListener(this.removePostRender);
+    this.postRenderHandler = this.onPostRender.bind(this);
+    this.viewer.scene.postRender.addEventListener(this.postRenderHandler);
   }
 
   get active(): SensorStyleId {
@@ -256,6 +256,6 @@ export class SensorStyles {
       this.viewer.scene.postProcessStages.remove(this.stage);
       this.stage = null;
     }
-    this.removePostRender();
+    this.viewer.scene.postRender.removeEventListener(this.postRenderHandler);
   }
 }
