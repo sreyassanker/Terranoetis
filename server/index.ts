@@ -287,7 +287,30 @@ app.use((_req, res, next) => {
   res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(), microphone=(), payment=(), usb=(), magnetometer=(self), gyroscope=(self), accelerometer=(self)');
   next();
 });
-app.use(cors({ origin: CLIENT_ORIGIN, credentials: true, maxAge: 600 }));
+const ALLOWED_ORIGIN_PATTERNS = [
+  /^http:\/\/localhost(:\d+)?$/,
+  /^http:\/\/127\.0\.0\.1(:\d+)?$/,
+  /^https?:\/\/tauri\.localhost(:\d+)?$/,
+  /^tauri:\/\/localhost$/,
+];
+
+function isOriginAllowed(origin?: string): boolean {
+  if (!origin) return true;
+  if (origin === CLIENT_ORIGIN) return true;
+  return ALLOWED_ORIGIN_PATTERNS.some((pat) => pat.test(origin));
+}
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (isOriginAllowed(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
+  credentials: true,
+  maxAge: 600,
+}));
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ limit: '5mb', extended: false }));
 app.disable('x-powered-by');
