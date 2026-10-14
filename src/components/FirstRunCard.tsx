@@ -5,6 +5,7 @@ import { markFirstRunDone, type FirstRunMission } from '@/lib/firstRun';
 interface FirstRunCardProps {
   onDismiss: () => void;
   onStage: (mission: FirstRunMission) => void;
+  sidebarCollapsed?: boolean;
 }
 
 interface MissionOption {
@@ -32,7 +33,7 @@ const MISSIONS: MissionOption[] = [
   },
 ];
 
-export const FirstRunCard: React.FC<FirstRunCardProps> = ({ onDismiss, onStage }) => {
+export const FirstRunCard: React.FC<FirstRunCardProps> = ({ onDismiss, onStage, sidebarCollapsed = false }) => {
   const [visible, setVisible] = useState(true);
   const [staging, setStaging] = useState<FirstRunMission | null>(null);
 
@@ -53,14 +54,21 @@ export const FirstRunCard: React.FC<FirstRunCardProps> = ({ onDismiss, onStage }
 
   return (
     <div style={{
-      position: 'fixed', left: 16, bottom: 76, zIndex: 9990, width: 380,
+      position: 'fixed',
+      left: sidebarCollapsed ? 16 : 296,
+      bottom: 44,
+      zIndex: 120,
+      width: 380,
       maxWidth: 'calc(100vw - 32px)',
-      background: 'rgba(10,12,28,0.92)', backdropFilter: 'blur(18px)',
+      background: 'rgba(10,12,28,0.92)',
+      backdropFilter: 'blur(18px)',
       WebkitBackdropFilter: 'blur(18px)',
-      border: '1px solid rgba(139,92,246,0.3)', borderRadius: 12,
+      border: '1px solid rgba(139,92,246,0.3)',
+      borderRadius: 12,
       boxShadow: '0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(139,92,246,0.08)',
       overflow: 'hidden',
       animation: 'slideInUp 0.35s ease',
+      transition: 'left 0.25s ease, opacity 0.2s ease',
     }}>
       <style>{`@keyframes slideInUp { from { opacity: 0; transform: translateY(16px);} to { opacity: 1; transform: translateY(0);} }`}</style>
       <div style={{

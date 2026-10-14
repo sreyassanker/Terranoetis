@@ -37,6 +37,9 @@ server/db/realtime.db
 server/db/realtime.db-wal
 server/db/realtime.db-shm
 server/data/terranoetis.db
+realtime.db
+realtime.db*
+dist-server/
 *.db-wal
 *.db-shm
 

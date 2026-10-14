@@ -426,7 +426,7 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
   if (
     req.path === '/auth/login' || req.path === '/auth/dev-login' || req.path === '/auth/refresh' ||
     req.path === '/health' || req.path === '/ready' || req.path === '/live' || req.path === '/metrics' ||
-    req.path === '/config/apis' ||
+    req.path === '/config/apis' || req.path.startsWith('/config/vault') || req.path === '/config/cesium-token' ||
     req.path === '/openapi.json' || req.path === '/docs'
   ) {
     return next();
@@ -1786,11 +1786,11 @@ app.delete('/api/config/vault/:key', (req: express.Request, res: express.Respons
 
 app.post('/api/config/vault/validate', async (req: express.Request, res: express.Response) => {
   try {
-    const { keyName, keyValue } = req.body || {};
+    const { keyName, keyValue, contextKeys } = req.body || {};
     if (!keyName || typeof keyName !== 'string') {
       return res.status(400).json({ error: 'keyName is required' });
     }
-    const result = await keyManager.validateKey(keyName, keyValue);
+    const result = await keyManager.validateKey(keyName, keyValue, contextKeys);
     res.json(result);
   } catch (err) {
     res.status(500).json({ valid: false, message: `Validation error: ${err instanceof Error ? err.message : String(err)}` });

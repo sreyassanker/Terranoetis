@@ -104,32 +104,94 @@ export function AviationTrackerPanel({ onClose, onTravelView, zIndex = 1000 }: {
             {loading ? 'Loading live flights...' : `${allFlights.length.toLocaleString()} live aircraft`}
           </div>
 
+          {/* Quick-Pick Featured Presets */}
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 9, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+              Quick Filters
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {[
+                { label: '✈️ United', q: 'UAL' },
+                { label: '🛫 Emirates', q: 'UAE' },
+                { label: '🛬 Lufthansa', q: 'DLH' },
+                { label: '✈️ Delta', q: 'DAL' },
+                { label: '🌍 British Airways', q: 'BAW' },
+                { label: '🛫 Air India', q: 'AIC' },
+              ].map(preset => (
+                <button
+                  key={preset.q}
+                  onClick={() => {
+                    setQuery(preset.q);
+                    setSelected(null);
+                  }}
+                  style={{
+                    padding: '3px 7px',
+                    borderRadius: 4,
+                    background: query.toLowerCase() === preset.q.toLowerCase() ? 'rgba(96,165,250,0.25)' : 'rgba(255,255,255,0.05)',
+                    border: query.toLowerCase() === preset.q.toLowerCase() ? '1px solid #60a5fa' : '1px solid rgba(255,255,255,0.1)',
+                    color: query.toLowerCase() === preset.q.toLowerCase() ? '#60a5fa' : '#cbd5e1',
+                    fontSize: 10,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {suggestions.length > 0 && !selected && (
-            <div style={{ marginTop: 6, maxHeight: 250, overflowY: 'auto', borderRadius: 4, background: 'rgba(0,0,0,0.4)' }}>
+            <div style={{ marginTop: 8, maxHeight: 250, overflowY: 'auto', borderRadius: 6, background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(96,165,250,0.2)' }}>
               {suggestions.map(f => (
                 <div
                   key={f.icao24}
                   onClick={() => handleSelect(f)}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
-                    cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.03)',
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '7px 9px',
+                    cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.04)',
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(96,165,250,0.1)')}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(96,165,250,0.12)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                   <Plane size={12} style={{ color: f.onGround ? '#64748b' : SOURCE_COLOR, flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ color: '#e2e8f0', fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.callsign}</span>
+                      <span style={{ color: '#f8fafc', fontSize: 10, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.callsign}</span>
                       <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: SOURCE_BG, color: SOURCE_COLOR, flexShrink: 0 }}>{f.icao24}</span>
                     </div>
-                    <div style={{ color: '#64748b', fontSize: 9 }}>
+                    <div style={{ color: '#94a3b8', fontSize: 9 }}>
                       {f.country ?? 'Unknown'}{f.alt != null ? ` · ${Math.round(mToFt(f.alt)).toLocaleString()} ft` : ''}
                     </div>
                   </div>
                   <Globe size={10} style={{ color: '#64748b', flexShrink: 0 }} />
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Empty state guidance when no search active */}
+          {!selected && suggestions.length === 0 && !query.trim() && (
+            <div style={{
+              marginTop: 10,
+              padding: '12px 10px',
+              borderRadius: 6,
+              background: 'rgba(96, 165, 250, 0.04)',
+              border: '1px dashed rgba(96, 165, 250, 0.25)',
+              textAlign: 'center',
+            }}>
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(96, 165, 250, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 8px', color: '#60a5fa' }}>
+                <Plane size={16} />
+              </div>
+              <div style={{ color: '#e2e8f0', fontSize: 11, fontWeight: 600, marginBottom: 4 }}>
+                Live ADS-B Transponder Radar
+              </div>
+              <div style={{ color: '#94a3b8', fontSize: 10, lineHeight: 1.4, marginBottom: 8 }}>
+                Select an airline filter above or search by callsign, ICAO24 hex code, or country to inspect live altitude, heading, airspeed, and cockpit travel view.
+              </div>
+              <div style={{ fontSize: 9, color: '#60a5fa', fontFamily: 'monospace' }}>
+                {allFlights.length > 0 ? `● ${allFlights.length.toLocaleString()} aircraft tracked in memory` : 'Listening to ADS-B network...'}
+              </div>
             </div>
           )}
         </div>

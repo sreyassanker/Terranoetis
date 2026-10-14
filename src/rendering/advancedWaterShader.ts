@@ -11,6 +11,7 @@
  */
 
 import * as Cesium from 'cesium';
+import { sanitizeGlsl } from '../components/kaggle/gpu/cesiumRuntime';
 
 /**
  * Advanced ocean wave shader with Gerstner waves
@@ -264,7 +265,7 @@ export function createFloodMaterial(
         waterLevel,
         flowSpeed,
       },
-      source: FLOOD_SHADER,
+      source: sanitizeGlsl(FLOOD_SHADER),
     },
   });
 }

@@ -21,6 +21,8 @@ interface EncryptedPayload {
 }
 
 export const KEY_ALIASES: Record<string, string[]> = {
+  CESIUM_ION_ACCESS_TOKEN: ['VITE_CESIUM_ION_ACCESS_TOKEN'],
+  VITE_CESIUM_ION_ACCESS_TOKEN: ['CESIUM_ION_ACCESS_TOKEN'],
   GOOGLE_GEMINI_API_KEY: ['GEMINI_API_KEY'],
   GEMINI_API_KEY: ['GOOGLE_GEMINI_API_KEY'],
   NASA_FIRMS_MAP_KEY: ['NASA_FIRMS_API_KEY'],
@@ -189,8 +191,35 @@ class KeyManager {
       }
     }
 
+    const initKaggleUser = this.userKeys.get('KAGGLE_USERNAME') || process.env.KAGGLE_USERNAME;
+    const initKaggleKey = this.userKeys.get('KAGGLE_KEY') || process.env.KAGGLE_KEY;
+    if (initKaggleUser && initKaggleKey) {
+      this.syncKaggleConfig(initKaggleUser, initKaggleKey);
+    }
+
     this.initialized = true;
     logger.info({ activeUserKeys: this.userKeys.size }, '[KeyManager] KeyManager ready');
+  }
+
+  private syncKaggleConfig(username: string, key: string): void {
+    try {
+      const kaggleDir = path.join(this.vaultDir, '.kaggle');
+      fs.mkdirSync(kaggleDir, { recursive: true, mode: 0o700 });
+      const configPath = path.join(kaggleDir, 'kaggle.json');
+      fs.writeFileSync(configPath, JSON.stringify({ username, key }, null, 2), { mode: 0o600 });
+      process.env.KAGGLE_CONFIG_DIR = kaggleDir;
+
+      // Also best-effort sync to ~/.kaggle if accessible
+      const homeKaggleDir = path.join(os.homedir(), '.kaggle');
+      try {
+        fs.mkdirSync(homeKaggleDir, { recursive: true, mode: 0o700 });
+        fs.writeFileSync(path.join(homeKaggleDir, 'kaggle.json'), JSON.stringify({ username, key }, null, 2), { mode: 0o600 });
+      } catch { /* best effort */ }
+
+      logger.info({ username }, '[KeyManager] Kaggle credentials synchronized to AppData and environment');
+    } catch (err) {
+      logger.warn({ err }, '[KeyManager] Failed to sync Kaggle configuration file');
+    }
   }
 
   private applyKeyToEnv(key: string, value: string): void {
@@ -358,6 +387,13 @@ class KeyManager {
 
     this.persistToDisk(toPersist);
 
+    // If Kaggle credentials were saved or modified, sync runtime kaggle.json
+    const kaggleUser = this.userKeys.get('KAGGLE_USERNAME') || process.env.KAGGLE_USERNAME;
+    const kaggleKey = this.userKeys.get('KAGGLE_KEY') || process.env.KAGGLE_KEY;
+    if (kaggleUser && kaggleKey) {
+      this.syncKaggleConfig(kaggleUser, kaggleKey);
+    }
+
     if (changed.length > 0) {
       for (const listener of this.changeListeners) {
         try {
@@ -402,10 +438,40 @@ class KeyManager {
   /**
    * Live validation for a provider key.
    */
-  async validateKey(keyName: string, keyValue?: string): Promise<{ valid: boolean; message: string }> {
+  async validateKey(keyName: string, keyValue?: string, contextKeys?: Record<string, string>): Promise<{ valid: boolean; message: string }> {
     const val = (keyValue || this.get(keyName) || '').trim();
     if (!val) {
       return { valid: false, message: 'Key cannot be empty' };
+    }
+
+    // Kaggle GPU Compute Validation
+    if (keyName === 'KAGGLE_KEY' || keyName === 'KAGGLE_USERNAME') {
+      let username = contextKeys?.KAGGLE_USERNAME || this.get('KAGGLE_USERNAME') || process.env.KAGGLE_USERNAME || '';
+      let key = contextKeys?.KAGGLE_KEY || this.get('KAGGLE_KEY') || process.env.KAGGLE_KEY || '';
+
+      // Check if value itself is a pasted JSON object (from kaggle.json)
+      if (val.startsWith('{') && val.includes('username') && val.includes('key')) {
+        try {
+          const parsed = JSON.parse(val) as { username?: string; key?: string };
+          if (parsed.username) username = parsed.username;
+          if (parsed.key) key = parsed.key;
+        } catch { /* continue */ }
+      } else if (keyName === 'KAGGLE_USERNAME') {
+        username = val;
+      } else if (keyName === 'KAGGLE_KEY') {
+        key = val;
+      }
+
+      if (!username || !key) {
+        return {
+          valid: false,
+          message: 'Both Kaggle Username and API Key are required to connect to Kaggle GPU. Please provide both.',
+        };
+      }
+
+      const { kaggleClient } = await import('./kaggle/kaggleClient');
+      const res = await kaggleClient.validateCredentials(username, key);
+      return { valid: res.valid, message: res.message };
     }
 
     // Google Gemini
@@ -441,16 +507,238 @@ class KeyManager {
     }
 
     // Cesium Ion Access Token
-    if (keyName === 'CESIUM_ION_ACCESS_TOKEN') {
+    if (keyName === 'CESIUM_ION_ACCESS_TOKEN' || keyName === 'VITE_CESIUM_ION_ACCESS_TOKEN') {
       try {
         const resp = await fetch('https://api.cesium.com/v1/me', {
           headers: { Authorization: `Bearer ${val}` },
           signal: AbortSignal.timeout(8000),
         });
         if (resp.ok) {
-          return { valid: true, message: 'Cesium Ion Access Token verified successfully' };
+          const data = await resp.json().catch(() => ({})) as { id?: number };
+          return { valid: true, message: `Cesium Ion Access Token verified successfully (Account ID: ${data.id || 'Active'})` };
         }
         return { valid: false, message: `Invalid Cesium Ion token (HTTP ${resp.status})` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // OpenAI
+    if (keyName === 'OPENAI_API_KEY') {
+      try {
+        const resp = await fetch('https://api.openai.com/v1/models', {
+          headers: { Authorization: `Bearer ${val}` },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (resp.ok) {
+          const data = await resp.json().catch(() => ({})) as { data?: unknown[] };
+          return { valid: true, message: `OpenAI API key verified successfully (${data.data?.length || 0} models available)` };
+        }
+        return { valid: false, message: `Invalid OpenAI API key (HTTP ${resp.status})` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // Sentinel Hub (OAuth token check)
+    if (keyName === 'SENTINEL_HUB_CLIENT_ID' || keyName === 'SENTINEL_HUB_CLIENT_SECRET') {
+      const clientId = contextKeys?.SENTINEL_HUB_CLIENT_ID || this.get('SENTINEL_HUB_CLIENT_ID') || process.env.SENTINEL_HUB_CLIENT_ID || (keyName === 'SENTINEL_HUB_CLIENT_ID' ? val : '');
+      const clientSecret = contextKeys?.SENTINEL_HUB_CLIENT_SECRET || this.get('SENTINEL_HUB_CLIENT_SECRET') || process.env.SENTINEL_HUB_CLIENT_SECRET || (keyName === 'SENTINEL_HUB_CLIENT_SECRET' ? val : '');
+
+      if (!clientId || !clientSecret) {
+        return { valid: false, message: 'Both Sentinel Hub Client ID and Client Secret are required' };
+      }
+      try {
+        const resp = await fetch('https://services.sentinel-hub.com/oauth/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (resp.ok) {
+          return { valid: true, message: 'Sentinel Hub OAuth credentials verified successfully' };
+        }
+        const data = await resp.json().catch(() => ({})) as { error_description?: string; error?: string };
+        return { valid: false, message: data.error_description || data.error || `Sentinel Hub rejected credentials (HTTP ${resp.status})` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // AirLabs Aviation
+    if (keyName === 'AIRLABS_API_KEY') {
+      try {
+        const resp = await fetch(`https://airlabs.co/api/v9/ping?api_key=${encodeURIComponent(val)}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        const data = await resp.json().catch(() => ({})) as { response?: string; error?: { message?: string } };
+        if (data.response === 'pong') {
+          return { valid: true, message: 'AirLabs API key verified successfully (Flight tracking active)' };
+        }
+        return { valid: false, message: data.error?.message || `AirLabs rejected key (HTTP ${resp.status})` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // FRED Economic Data
+    if (keyName === 'FRED_API_KEY') {
+      try {
+        const resp = await fetch(`https://api.stlouisfed.org/fred/series?series_id=GNPCA&api_key=${encodeURIComponent(val)}&file_type=json`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        if (resp.ok) {
+          return { valid: true, message: 'Federal Reserve (FRED) API key verified successfully' };
+        }
+        const err = await resp.json().catch(() => ({})) as { error_message?: string };
+        return { valid: false, message: err.error_message || `FRED API error (HTTP ${resp.status})` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // AlphaVantage
+    if (keyName === 'ALPHAVANTAGE_API_KEY' || keyName === 'ALPHA_VANTAGE_API_KEY') {
+      try {
+        const resp = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&apikey=${encodeURIComponent(val)}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        const data = await resp.json().catch(() => ({})) as Record<string, unknown>;
+        if (data['Global Quote']) {
+          return { valid: true, message: 'AlphaVantage API key verified successfully' };
+        }
+        const note = (data['Note'] || data['Information'] || data['Error Message']) as string | undefined;
+        return { valid: false, message: note || 'Invalid AlphaVantage key or rate limit exceeded' };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // NewsAPI
+    if (keyName === 'NEWSAPI_API_KEY' || keyName === 'NEWS_API_KEY') {
+      try {
+        const resp = await fetch(`https://newsapi.org/v2/top-headlines?country=us&pageSize=1&apiKey=${encodeURIComponent(val)}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        const data = await resp.json().catch(() => ({})) as { status?: string; message?: string };
+        if (data.status === 'ok') {
+          return { valid: true, message: 'NewsAPI key verified successfully' };
+        }
+        return { valid: false, message: data.message || `NewsAPI returned HTTP ${resp.status}` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // AlienVault OTX
+    if (keyName === 'OTX_API_KEY') {
+      try {
+        const resp = await fetch('https://otx.alienvault.com/api/v1/user/me', {
+          headers: { 'X-OTX-API-KEY': val },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (resp.ok) {
+          const data = await resp.json().catch(() => ({})) as { username?: string };
+          return { valid: true, message: `AlienVault OTX key verified successfully (User: ${data.username || 'Active'})` };
+        }
+        return { valid: false, message: `Invalid AlienVault OTX key (HTTP ${resp.status})` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // AbuseIPDB
+    if (keyName === 'ABUSEIPDB_API_KEY') {
+      try {
+        const resp = await fetch('https://api.abuseipdb.com/api/v2/check?ipAddress=8.8.8.8', {
+          headers: { Key: val, Accept: 'application/json' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (resp.ok) {
+          return { valid: true, message: 'AbuseIPDB API key verified successfully' };
+        }
+        return { valid: false, message: `Invalid AbuseIPDB key (HTTP ${resp.status})` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // Windy Point Forecast
+    if (keyName === 'WINDY_API_KEY') {
+      try {
+        const resp = await fetch('https://api.windy.com/api/point-forecast/v2', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat: 40, lon: -74, model: 'gfs', parameters: ['temp'], levels: ['surface'], key: val }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (resp.ok) {
+          return { valid: true, message: 'Windy Forecast API key verified successfully' };
+        }
+        return { valid: false, message: `Invalid Windy key (HTTP ${resp.status})` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // TomTom Traffic
+    if (keyName === 'TOMTOM_API_KEY') {
+      try {
+        const resp = await fetch(`https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?point=52.41072,4.84239&key=${encodeURIComponent(val)}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        if (resp.ok) {
+          return { valid: true, message: 'TomTom Traffic API key verified successfully' };
+        }
+        return { valid: false, message: `Invalid TomTom key (HTTP ${resp.status})` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // EIA Energy Data
+    if (keyName === 'EIA_API_KEY') {
+      try {
+        const resp = await fetch(`https://api.eia.gov/v2/electricity?api_key=${encodeURIComponent(val)}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        if (resp.ok) {
+          return { valid: true, message: 'U.S. EIA API key verified successfully' };
+        }
+        return { valid: false, message: `Invalid EIA key (HTTP ${resp.status})` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // GoldAPI
+    if (keyName === 'GOLDAPI_API_KEY') {
+      try {
+        const resp = await fetch('https://www.goldapi.io/api/XAU/USD', {
+          headers: { 'x-access-token': val },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (resp.ok) {
+          const data = await resp.json().catch(() => ({})) as { price?: number };
+          return { valid: true, message: `GoldAPI key verified successfully (Gold Spot: $${data.price || 'Active'})` };
+        }
+        return { valid: false, message: `Invalid GoldAPI token (HTTP ${resp.status})` };
+      } catch (e) {
+        return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
+    // E2B Sandboxes
+    if (keyName === 'E2B_API_KEY') {
+      try {
+        const resp = await fetch('https://api.e2b.dev/sandboxes', {
+          headers: { 'X-API-KEY': val },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (resp.ok) {
+          return { valid: true, message: 'E2B Sandbox API key verified successfully' };
+        }
+        return { valid: false, message: `Invalid E2B key (HTTP ${resp.status})` };
       } catch (e) {
         return { valid: false, message: `Connection failed: ${e instanceof Error ? e.message : String(e)}` };
       }

@@ -14,56 +14,170 @@ pub struct BackendStatus {
     pub message: String,
 }
 
-pub struct BackendManager {
-    child: Arc<Mutex<Option<Child>>>,
-    project_dir: PathBuf,
+#[derive(Clone, Debug)]
+pub enum BackendEntry {
+    /// Compiled production ESM bundle (dist-server/server.mjs)
+    Compiled { entry_file: PathBuf, work_dir: PathBuf },
+    /// Development raw TypeScript entry (server/index.ts via tsx)
+    DevSource { entry_file: PathBuf, tsx_cli: PathBuf, work_dir: PathBuf },
 }
 
-pub fn find_project_dir() -> PathBuf {
-    // 1. Env override
-    if let Ok(p) = std::env::var("TERRANOETIS_PROJECT_DIR") {
-        let pb = PathBuf::from(p);
-        if pb.join("package.json").exists() {
-            return pb;
+pub struct BackendManager {
+    child: Arc<Mutex<Option<Child>>>,
+    entry: Option<BackendEntry>,
+    log_file_path: PathBuf,
+}
+
+pub fn resolve_backend_entry() -> Option<BackendEntry> {
+    // 1. Check inside application bundle resources (packaged production distribution)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            // macOS App Bundle: Terranoetis.app/Contents/MacOS/Terranoetis -> Contents/Resources/dist-server/server.mjs
+            if let Some(contents) = exe_dir.parent() {
+                let candidates = [
+                    contents.join("Resources/_up_/dist-server/server.mjs"),
+                    contents.join("Resources/dist-server/server.mjs"),
+                ];
+                for res_path in &candidates {
+                    if res_path.exists() {
+                        let work_dir = res_path.parent().unwrap_or(exe_dir).to_path_buf();
+                        return Some(BackendEntry::Compiled {
+                            entry_file: res_path.clone(),
+                            work_dir,
+                        });
+                    }
+                }
+            }
+
+            // Windows / Linux standalone installer: resources/dist-server/server.mjs
+            let win_lin_candidates = [
+                exe_dir.join("resources/_up_/dist-server/server.mjs"),
+                exe_dir.join("resources/dist-server/server.mjs"),
+            ];
+            for win_lin_res in &win_lin_candidates {
+                if win_lin_res.exists() {
+                    let work_dir = win_lin_res.parent().unwrap_or(exe_dir).to_path_buf();
+                    return Some(BackendEntry::Compiled {
+                        entry_file: win_lin_res.clone(),
+                        work_dir,
+                    });
+                }
+            }
+
+            let next_to_exe = exe_dir.join("dist-server/server.mjs");
+            if next_to_exe.exists() {
+                let work_dir = exe_dir.to_path_buf();
+                return Some(BackendEntry::Compiled {
+                    entry_file: next_to_exe,
+                    work_dir,
+                });
+            }
         }
     }
 
-    // 2. Walk up from current exe
+    // 2. Check TERRANOETIS_PROJECT_DIR environment override
+    if let Ok(env_dir) = std::env::var("TERRANOETIS_PROJECT_DIR") {
+        let p = PathBuf::from(env_dir);
+        let compiled = p.join("dist-server/server.mjs");
+        if compiled.exists() {
+            return Some(BackendEntry::Compiled {
+                entry_file: compiled,
+                work_dir: p,
+            });
+        }
+        let ts_entry = p.join("server/index.ts");
+        let tsx = p.join("node_modules/tsx/dist/cli.mjs");
+        if ts_entry.exists() && tsx.exists() {
+            return Some(BackendEntry::DevSource {
+                entry_file: ts_entry,
+                tsx_cli: tsx,
+                work_dir: p,
+            });
+        }
+    }
+
+    // 3. Walk up from current executable to find project root or dist-server
     if let Ok(exe) = std::env::current_exe() {
         let mut cur = exe.parent();
         while let Some(parent) = cur {
-            if parent.join("package.json").exists() && parent.join("server/index.ts").exists() {
-                return parent.to_path_buf();
+            let compiled = parent.join("dist-server/server.mjs");
+            if compiled.exists() {
+                return Some(BackendEntry::Compiled {
+                    entry_file: compiled,
+                    work_dir: parent.to_path_buf(),
+                });
+            }
+            let ts_entry = parent.join("server/index.ts");
+            let tsx = parent.join("node_modules/tsx/dist/cli.mjs");
+            if ts_entry.exists() && tsx.exists() {
+                return Some(BackendEntry::DevSource {
+                    entry_file: ts_entry,
+                    tsx_cli: tsx,
+                    work_dir: parent.to_path_buf(),
+                });
             }
             cur = parent.parent();
         }
     }
 
-    // 3. Current dir
+    // 4. Walk up from current working directory
     if let Ok(cd) = std::env::current_dir() {
         let mut cur = Some(cd.as_path());
         while let Some(parent) = cur {
-            if parent.join("package.json").exists() && parent.join("server/index.ts").exists() {
-                return parent.to_path_buf();
+            let compiled = parent.join("dist-server/server.mjs");
+            if compiled.exists() {
+                return Some(BackendEntry::Compiled {
+                    entry_file: compiled,
+                    work_dir: parent.to_path_buf(),
+                });
+            }
+            let ts_entry = parent.join("server/index.ts");
+            let tsx = parent.join("node_modules/tsx/dist/cli.mjs");
+            if ts_entry.exists() && tsx.exists() {
+                return Some(BackendEntry::DevSource {
+                    entry_file: ts_entry,
+                    tsx_cli: tsx,
+                    work_dir: parent.to_path_buf(),
+                });
             }
             cur = parent.parent();
         }
     }
 
-    // 4. Default fallback on local installation
-    let default_path = PathBuf::from("/Users/sreyassanker/Downloads/Terranoetis");
-    if default_path.exists() {
-        return default_path;
-    }
-
-    PathBuf::from(".")
+    None
 }
 
-fn find_node() -> PathBuf {
+pub fn resolve_node_binary() -> PathBuf {
+    // 1. Embedded node alongside executable or in bundle
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            #[cfg(target_os = "windows")]
+            let node_name = "node.exe";
+            #[cfg(not(target_os = "windows"))]
+            let node_name = "node";
+
+            let local_node = exe_dir.join(node_name);
+            if local_node.exists() {
+                return local_node;
+            }
+
+            if let Some(contents) = exe_dir.parent() {
+                let res = contents.join("Resources").join(node_name);
+                if res.exists() {
+                    return res;
+                }
+            }
+        }
+    }
+
+    // 2. Standard system locations across macOS, Linux, and Windows
     let candidates = [
         "/opt/homebrew/bin/node",
         "/usr/local/bin/node",
         "/usr/bin/node",
+        "/snap/bin/node",
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Program Files (x86)\\nodejs\\node.exe",
     ];
     for c in &candidates {
         let p = PathBuf::from(c);
@@ -71,8 +185,9 @@ fn find_node() -> PathBuf {
             return p;
         }
     }
-    // Check ~/.nvm/versions/node/*/bin/node
-    if let Ok(home) = std::env::var("HOME") {
+
+    // 3. User runtime managers (NVM, FNM, ASDF, Volta)
+    if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
         let nvm_pattern = format!("{}/.nvm/versions/node", home);
         if let Ok(entries) = std::fs::read_dir(&nvm_pattern) {
             for entry in entries.flatten() {
@@ -82,8 +197,52 @@ fn find_node() -> PathBuf {
                 }
             }
         }
+        let fnm_bin = PathBuf::from(&home).join(".local/share/fnm/current/bin/node");
+        if fnm_bin.exists() {
+            return fnm_bin;
+        }
+        let asdf_bin = PathBuf::from(&home).join(".asdf/shims/node");
+        if asdf_bin.exists() {
+            return asdf_bin;
+        }
+        let volta_bin = PathBuf::from(&home).join(".volta/bin/node");
+        if volta_bin.exists() {
+            return volta_bin;
+        }
     }
+
     PathBuf::from("node")
+}
+
+pub fn resolve_log_path() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    if let Ok(home) = std::env::var("HOME") {
+        let log_dir = PathBuf::from(home).join("Library/Logs/Terranoetis");
+        let _ = std::fs::create_dir_all(&log_dir);
+        if log_dir.exists() {
+            return log_dir.join("backend.log");
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let log_dir = PathBuf::from(local_app_data).join("Terranoetis\\Logs");
+        let _ = std::fs::create_dir_all(&log_dir);
+        if log_dir.exists() {
+            return log_dir.join("backend.log");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    if let Ok(home) = std::env::var("HOME") {
+        let log_dir = PathBuf::from(home).join(".local/state/terranoetis");
+        let _ = std::fs::create_dir_all(&log_dir);
+        if log_dir.exists() {
+            return log_dir.join("backend.log");
+        }
+    }
+
+    std::env::temp_dir().join("terranoetis-backend.log")
 }
 
 pub fn is_port_open(port: u16) -> bool {
@@ -97,10 +256,12 @@ pub fn is_port_open(port: u16) -> bool {
 
 impl BackendManager {
     pub fn new() -> Self {
-        let project_dir = find_project_dir();
+        let entry = resolve_backend_entry();
+        let log_file_path = resolve_log_path();
         Self {
             child: Arc::new(Mutex::new(None)),
-            project_dir,
+            entry,
+            log_file_path,
         }
     }
 
@@ -119,23 +280,33 @@ impl BackendManager {
             };
         }
 
-        let node = find_node();
-        let tsx_cli = self.project_dir.join("node_modules/tsx/dist/cli.mjs");
-        let server_entry = self.project_dir.join("server/index.ts");
-
-        log::info!(
-            "[BackendManager] Starting backend: {:?} {:?} {:?}",
-            node,
-            tsx_cli,
-            server_entry
-        );
-
+        let node = resolve_node_binary();
         let mut cmd = Command::new(&node);
-        cmd.arg(&tsx_cli)
-            .arg(&server_entry)
-            .current_dir(&self.project_dir);
 
-        // Augment PATH with node directory and standard paths
+        match &self.entry {
+            Some(BackendEntry::Compiled { entry_file, work_dir }) => {
+                log::info!("[BackendManager] Starting compiled production backend: {:?} with {:?}", entry_file, node);
+                cmd.arg(entry_file).current_dir(work_dir);
+                cmd.env("NODE_ENV", "production");
+            }
+            Some(BackendEntry::DevSource { entry_file, tsx_cli, work_dir }) => {
+                log::info!("[BackendManager] Starting dev TypeScript backend: {:?} with tsx {:?}", entry_file, tsx_cli);
+                cmd.arg(tsx_cli).arg(entry_file).current_dir(work_dir);
+                cmd.env("NODE_ENV", "development");
+            }
+            None => {
+                log::error!("[BackendManager] No valid backend entry found (dist-server/server.mjs or server/index.ts)");
+                return BackendStatus {
+                    running: false,
+                    port: 3001,
+                    managed_by_app: false,
+                    pid: None,
+                    message: "No backend bundle found. Run 'npm run build:server' before launching.".to_string(),
+                };
+            }
+        }
+
+        // Augment PATH with node directory and standard system paths
         let mut new_path = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin".to_string();
         if let Some(parent) = node.parent().and_then(|p| p.to_str()) {
             new_path = format!("{}:{}", parent, new_path);
@@ -145,13 +316,14 @@ impl BackendManager {
         }
         cmd.env("PATH", new_path);
         cmd.env("PORT", "3001");
+        cmd.env("PROXY_PORT", "3001");
         cmd.env("PARENT_PID", std::process::id().to_string());
 
-        // Pipe backend stdout/stderr to backend.log in project root
+        // Pipe backend stdout/stderr to application log file
         if let Ok(log_file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(self.project_dir.join("backend.log"))
+            .open(&self.log_file_path)
         {
             if let Ok(err_file) = log_file.try_clone() {
                 cmd.stdout(std::process::Stdio::from(log_file));
@@ -258,14 +430,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_find_project_dir() {
-        let p = find_project_dir();
-        assert!(p.join("package.json").exists(), "Project dir must contain package.json: {:?}", p);
+    fn test_resolve_backend_entry() {
+        let entry = resolve_backend_entry();
+        assert!(entry.is_some(), "Backend entry must be resolved (compiled or dev source)");
     }
 
     #[test]
-    fn test_find_node() {
-        let n = find_node();
+    fn test_resolve_node() {
+        let n = resolve_node_binary();
         assert!(n.exists() || n == PathBuf::from("node"), "Node binary must exist: {:?}", n);
     }
 }

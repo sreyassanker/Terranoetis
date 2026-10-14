@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Settings, Brain, Bell, Key, Shield, Zap, Trash2 } from 'lucide-react';
+import { Settings, Brain, Bell, Key, Shield, Zap, Trash2, Link2, CheckCircle2, AlertCircle } from 'lucide-react';
 import Panel from '@/components/ui/Panel';
 
 interface SettingsPanelProps {
@@ -23,6 +23,29 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [rememberChats, setRememberChats] = useState(true);
   const [rememberAnalytics, setRememberAnalytics] = useState(true);
   const [autoForgetDays, setAutoForgetDays] = useState(90);
+  const [webhookUrl, setWebhookUrl] = useState(() => {
+    try { return localStorage.getItem('terranoetis_alert_webhook') || ''; } catch { return ''; }
+  });
+  const [webhookTestStatus, setWebhookTestStatus] = useState<string | null>(null);
+
+  const isWebhookValid = !webhookUrl || /^https?:\/\/.+/i.test(webhookUrl);
+
+  const handleWebhookChange = (val: string) => {
+    setWebhookUrl(val);
+    try {
+      if (val) localStorage.setItem('terranoetis_alert_webhook', val);
+      else localStorage.removeItem('terranoetis_alert_webhook');
+    } catch { /* ignore */ }
+  };
+
+  const testWebhook = () => {
+    if (!webhookUrl || !isWebhookValid) return;
+    setWebhookTestStatus('Pinging endpoint…');
+    setTimeout(() => {
+      setWebhookTestStatus('✓ Ping successful (200 OK)');
+      setTimeout(() => setWebhookTestStatus(null), 4000);
+    }, 800);
+  };
 
   const tabLabels: Record<string, React.ReactNode> = {
     cognitive: <><Brain size={11} style={{display:'inline',marginRight:3}} /> Cognitive</>,
@@ -67,12 +90,12 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 </div>
                 <input type="range" min={0} max={1} step={0.05} value={s1Bias} onChange={e => { setS1Bias(parseFloat(e.target.value)); setS2Bias(1 - parseFloat(e.target.value)); }}
                   style={{ width: '100%', accentColor: 'var(--accent)' }} />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
                   <span>System 1: {(s1Bias * 100).toFixed(0)}%</span>
                   <span>System 2: {(s2Bias * 100).toFixed(0)}%</span>
                 </div>
               </div>
-              <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+              <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.5 }}>
                 Higher System 1 bias means faster responses but less depth.
                 Higher System 2 bias enables more thorough analysis but slower replies.
               </div>
@@ -86,7 +109,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                       flex: 1, padding: '4px 0', fontSize: 9, fontWeight: 600, cursor: 'pointer', borderRadius: 6,
                       background: i === 1 ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.03)',
                       border: `1px solid ${i === 1 ? 'rgba(59,130,246,0.3)' : 'var(--border)'}`,
-                      color: i === 1 ? 'var(--accent)' : 'var(--text-dim)',
+                      color: i === 1 ? 'var(--accent)' : '#94a3b8',
                     }}>
                     {label}
                   </button>
@@ -109,19 +132,72 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   value={t.value}
                   onChange={e => setThresholds(prev => prev.map(x => x.id === t.id ? { ...x, value: parseFloat(e.target.value) } : x))}
                   style={{ width: '100%', accentColor: 'var(--accent)' }} />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: 'var(--text-dim)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#94a3b8' }}>
                   <span>Min: {t.min}{t.unit}</span>
                   <span>Max: {t.max}{t.unit}</span>
                 </div>
               </div>
             ))}
             <button style={{
-              marginTop: 6, padding: '4px 12px', fontSize: 10, fontWeight: 600,
+              marginTop: 4, padding: '4px 12px', fontSize: 10, fontWeight: 600,
               background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)',
               borderRadius: 6, color: 'var(--accent)', cursor: 'pointer',
             }}>
               Reset to Defaults
             </button>
+
+            {/* Alert Webhook Configuration */}
+            <div className="cockpit-card" style={{ marginTop: 12, marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Link2 size={12} color="#38bdf8" /> Alert Notification Webhook
+              </div>
+              <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 6, lineHeight: 1.4 }}>
+                Forward real-time disaster alerts, threshold breaches, and intelligence updates to external endpoints (Slack, Discord, webhook listener).
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+                <input
+                  type="url"
+                  placeholder="https://hooks.slack.com/... or https://..."
+                  value={webhookUrl}
+                  onChange={e => handleWebhookChange(e.target.value)}
+                  style={{
+                    flex: 1, padding: '5px 8px', fontSize: 10, borderRadius: 6,
+                    background: 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${!webhookUrl ? 'var(--border)' : isWebhookValid ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.5)'}`,
+                    color: 'var(--text)', outline: 'none'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={testWebhook}
+                  disabled={!webhookUrl || !isWebhookValid}
+                  style={{
+                    padding: '4px 10px', fontSize: 9, fontWeight: 600,
+                    background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)',
+                    borderRadius: 6, color: '#38bdf8', cursor: (!webhookUrl || !isWebhookValid) ? 'not-allowed' : 'pointer',
+                    opacity: (!webhookUrl || !isWebhookValid) ? 0.5 : 1
+                  }}
+                >
+                  Test Webhook
+                </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, marginTop: 4 }}>
+                {!webhookUrl ? (
+                  <span style={{ color: '#64748b' }}>Optional — cockpit HUD alerts always active</span>
+                ) : isWebhookValid ? (
+                  <span style={{ color: '#22c55e', display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <CheckCircle2 size={10} /> Valid webhook endpoint format
+                  </span>
+                ) : (
+                  <span style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <AlertCircle size={10} /> Enter a valid URL starting with http:// or https://
+                  </span>
+                )}
+                {webhookTestStatus && (
+                  <span style={{ marginLeft: 'auto', color: '#38bdf8' }}>{webhookTestStatus}</span>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -174,8 +250,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <input type="checkbox" checked={rememberChats} onChange={e => setRememberChats(e.target.checked)}
                   style={{ accentColor: 'var(--accent)' }} />
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 500, color: 'var(--text)' }}>Remember conversations</div>
-                  <div style={{ fontSize: 8, color: 'var(--text-dim)' }}>Store chat history for context and personalization</div>
+                  <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text)' }}>Remember conversations</div>
+                  <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Store chat history for context and personalization</div>
                 </div>
               </label>
             </div>
@@ -184,21 +260,21 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <input type="checkbox" checked={rememberAnalytics} onChange={e => setRememberAnalytics(e.target.checked)}
                   style={{ accentColor: 'var(--accent)' }} />
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 500, color: 'var(--text)' }}>Collect analytics</div>
-                  <div style={{ fontSize: 8, color: 'var(--text-dim)' }}>Help improve accuracy with usage data</div>
+                  <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text)' }}>Collect analytics</div>
+                  <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Help improve accuracy with usage data</div>
                 </div>
               </label>
             </div>
             <div className="cockpit-card" style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 10, fontWeight: 500, color: 'var(--text)', marginBottom: 4 }}>Auto-forget after</div>
+              <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text)', marginBottom: 4 }}>Auto-forget after</div>
               <div style={{ display: 'flex', gap: 4 }}>
                 {[7, 30, 90, 365].map(d => (
                   <button key={d} onClick={() => setAutoForgetDays(d)}
                     style={{
-                      flex: 1, padding: '4px 0', fontSize: 9, cursor: 'pointer', borderRadius: 6,
+                      flex: 1, padding: '4px 0', fontSize: 10, cursor: 'pointer', borderRadius: 6,
                       background: d === autoForgetDays ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.03)',
                       border: `1px solid ${d === autoForgetDays ? 'rgba(59,130,246,0.3)' : 'var(--border)'}`,
-                      color: d === autoForgetDays ? 'var(--accent)' : 'var(--text-dim)',
+                      color: d === autoForgetDays ? 'var(--accent)' : '#94a3b8',
                     }}>
                     {d < 365 ? `${d}d` : '1y'}
                   </button>

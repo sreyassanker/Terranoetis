@@ -830,7 +830,7 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
 
   return (
     <Panel
-      title="TOOL WORKBENCH"
+      title="MULTI-HAZARD ASSESSMENT WORKBENCH"
       icon={<Wrench size={16} />}
       accentColor="#8b5cf6"
       iconColor="#a78bfa"

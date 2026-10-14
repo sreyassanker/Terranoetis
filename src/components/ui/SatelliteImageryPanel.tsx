@@ -59,6 +59,7 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
     }
     return { byCategory };
   }, []);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [satOpacity, setSatOpacity] = useState(70);
   const [satCloudCover, setSatCloudCover] = useState(100);
   const [satLoading, setSatLoading] = useState(false);
@@ -184,7 +185,7 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
   }, [show, viewer]);
 
   return (
-    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 340, maxHeight: 'calc(100vh - 92px)', display: show ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ position: 'absolute', top: 60, right: 10, zIndex, width: 370, maxHeight: 'calc(100vh - 92px)', display: show ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
       <Panel title="SATELLITE IMAGERY" icon={<Satellite size={14} />} accentColor="#3b82f6" iconColor="#60a5fa" titleColor="#93c5fd" onClose={onClose}>
         <div style={{ padding: '8px 10px', overflowY: 'auto', flex: 1 }}>
           {/* Bounding Box Inputs */}
@@ -214,11 +215,52 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
             </div>
           </div>
 
-          {/* Availability info */}
-          <div className="sat-availability">
-            {Object.entries(availabilityInfo.byCategory).map(([cat, count]) => (
-              <span key={cat} className="sat-avail-chip">{cat} {count}</span>
-            ))}
+          {/* Availability summary badge & scrollable category chips */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '6px 9px', borderRadius: 6, background: 'rgba(56, 189, 248, 0.08)',
+              border: '1px solid rgba(56, 189, 248, 0.2)', marginBottom: 6, fontSize: 10, color: '#38bdf8'
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 600 }}>
+                <Satellite size={12} /> 200+ Satellite Datasets
+              </span>
+              <span style={{ fontSize: 9, color: '#94a3b8' }}>15 Domains</span>
+            </div>
+            <div style={{ display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'thin' }}>
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('all')}
+                style={{
+                  padding: '3px 8px', borderRadius: 4, border: '1px solid',
+                  borderColor: selectedCategory === 'all' ? '#38bdf8' : 'rgba(255,255,255,0.1)',
+                  background: selectedCategory === 'all' ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.02)',
+                  color: selectedCategory === 'all' ? '#38bdf8' : '#94a3b8',
+                  fontSize: 9, cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: selectedCategory === 'all' ? 600 : 400
+                }}
+              >
+                All
+              </button>
+              {Object.entries(availabilityInfo.byCategory).map(([cat, count]) => {
+                const isCatActive = selectedCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat)}
+                    style={{
+                      padding: '3px 8px', borderRadius: 4, border: '1px solid',
+                      borderColor: isCatActive ? '#38bdf8' : 'rgba(255,255,255,0.1)',
+                      background: isCatActive ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.02)',
+                      color: isCatActive ? '#38bdf8' : '#94a3b8',
+                      fontSize: 9, cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: isCatActive ? 600 : 400
+                    }}
+                  >
+                    {cat} ({count})
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Product Selector */}
@@ -228,10 +270,12 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
             <select className="sat-product-select" value={satProduct} onChange={e => handleSelectProduct(e.target.value)}>
               <option value="" disabled>Select a product...</option>
               {Object.entries(groupProducts(GIBS_PRODUCTS)).map(([group, products]) => {
+                const catLabel = GROUP_LABELS[group] || group;
+                if (selectedCategory !== 'all' && selectedCategory !== catLabel && selectedCategory !== group) return null;
                 const filtered = productSearch ? products.filter(p => p.label.toLowerCase().includes(productSearch) || p.description.toLowerCase().includes(productSearch)) : products;
                 if (filtered.length === 0) return null;
                 return (
-                  <optgroup key={`gibs-${group}`} label={`${GROUP_LABELS[group] || group} (${filtered.length})`}>
+                  <optgroup key={`gibs-${group}`} label={`${catLabel} (${filtered.length})`}>
                     {filtered.map(p => (
                       <option key={p.id} value={p.id}>{p.label}{p.resolution ? `  [${p.resolution}]` : ''}</option>
                     ))}
@@ -239,11 +283,13 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
                 );
               })}
               {Object.entries(externalByGroup).map(([group, sources]) => {
+                const catLabel = GROUP_LABELS[group] || group;
+                if (selectedCategory !== 'all' && selectedCategory !== catLabel && selectedCategory !== group) return null;
                 const filtered = productSearch ? sources.filter(s => s.label.toLowerCase().includes(productSearch) || s.description.toLowerCase().includes(productSearch)) : sources;
                 if (filtered.length === 0) return null;
                 const needsKey = (s: typeof EXTERNAL_DATA_SOURCES[0]) => s.url.includes('{key}') && !sentinelHubKey;
                 return (
-                  <optgroup key={`ext-${group}`} label={`${GROUP_LABELS[group] || group} (${filtered.length})`}>
+                  <optgroup key={`ext-${group}`} label={`${catLabel} (${filtered.length})`}>
                     {filtered.map(src => (
                       <option key={src.id} value={src.id}>
                         {src.label}  [{src.resolution || '?'}]{needsKey(src) ? '  [key required]' : ''}
@@ -354,17 +400,31 @@ export default React.memo(function SatelliteImageryPanel({ viewer, show, onClose
 
           {/* Quick select chips */}
           <div className="sat-quick-row">
-            <div className="sat-quick-label">Quick Select</div>
+            <div className="sat-quick-label" style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', marginBottom: 6 }}>
+              QUICK SELECT PRESETS
+            </div>
             <div className="sat-quick-chips">
-              {[{ id: 'terra_true_color' }, { id: 'terra_false_721' }, { id: 'viirs_fires' }, { id: 'terra_ndvi' }, { id: 'tropomi_no2' }, { id: 'esa_worldcover_2021' }, { id: 'eox_s2_cloudless' }, { id: 'esri_imagery' }].map(chip => {
+              {[
+                { id: 'terra_true_color', label: 'Terra True Color', icon: '🌍' },
+                { id: 'terra_ndvi', label: 'Terra NDVI Veg', icon: '🌱' },
+                { id: 'viirs_fires', label: 'VIIRS Active Fires', icon: '🔥' },
+                { id: 'terra_false_721', label: 'Terra False Color', icon: '🌈' },
+                { id: 'eox_s2_cloudless', label: 'Sentinel-2 Cloudless', icon: '🛰️' },
+                { id: 'esa_worldcover_2021', label: 'ESA WorldCover 10m', icon: '🌲' },
+                { id: 'tropomi_no2', label: 'TROPOMI NO₂', icon: '💨' },
+                { id: 'esri_imagery', label: 'Esri Satellite', icon: '🗺️' },
+              ].map(chip => {
                 const isActive = satProduct === chip.id;
-                const chipLabel = GIBS_PRODUCTS.find(p => p.id === chip.id)?.label
-                  || EXTERNAL_DATA_SOURCES.find(s => s.id === chip.id)?.label
-                  || chip.id;
                 return (
-                  <button key={chip.id} className={`sat-chip ${isActive ? 'active' : ''}`}
-                    onClick={() => handleSelectProduct(chip.id)}>
-                    {chipLabel}
+                  <button
+                    key={chip.id}
+                    type="button"
+                    className={`sat-chip ${isActive ? 'active' : ''}`}
+                    onClick={() => handleSelectProduct(chip.id)}
+                    title={chip.label}
+                  >
+                    <span style={{ fontSize: 12 }}>{chip.icon}</span>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chip.label}</span>
                   </button>
                 );
               })}

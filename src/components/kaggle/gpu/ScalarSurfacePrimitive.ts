@@ -25,6 +25,7 @@ import { colormapGLSL, type CfaColormapName } from './cfdColormaps';
 import {
   runtimeCesium,
   sceneContext,
+  sanitizeGlsl,
   type LooseMaterialAppearance,
   type LooseTexture,
 } from './cesiumRuntime';
@@ -38,8 +39,8 @@ const ATLAS_UV_GLSL = /* glsl */ `
     return (vec2(col, row) + clamp(st, 0.0, 1.0)) / tiles;
   }
 
-  /** Interpolated atlas sample — lerps between floor(frame) and ceil(frame)
-   *  for smooth animation instead of discrete frame jumps. */
+  // Interpolated atlas sample — lerps between floor(frame) and ceil(frame)
+  // for smooth animation instead of discrete frame jumps.
   float kaggleAtlasLerp(sampler2D tex, float frame, vec2 tiles, vec2 st) {
     float totalFrames = tiles.x * tiles.y;
     float f0 = floor(frame);
@@ -252,7 +253,7 @@ export class ScalarSurfacePrimitive {
         gl_Position = czm_modelViewProjectionRelativeToEye * p;
       }
     `;
-    this.vertexShaderSource = vertexShaderSource;
+    this.vertexShaderSource = sanitizeGlsl(vertexShaderSource);
 
     // Real GPU texture for the atlas. Used by BOTH the vertex shader (via
     // appearance uniforms, which Cesium does NOT rename) and the material
@@ -352,7 +353,7 @@ export class ScalarSurfacePrimitive {
           u_alphaFloor: this.alphaFloor,
           u_opacity: this.opacity,
         },
-        source: this.makeFragmentSource(cmap),
+        source: sanitizeGlsl(this.makeFragmentSource(cmap)),
       },
       translucent: !this.forceOpaque,
     });

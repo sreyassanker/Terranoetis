@@ -36,7 +36,7 @@ interface PluginRow {
 }
 
 export default function AdminDashboard({ onClose }: { onClose: () => void }) {
-  const { isAdmin, logout } = useAuth();
+  const { isAdmin, token: authToken, logout } = useAuth();
   const [tab, setTab] = useState<Tab>('home');
   const [metrics, setMetrics] = useState<MetricsData | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
@@ -97,7 +97,7 @@ export default function AdminDashboard({ onClose }: { onClose: () => void }) {
     );
   };
 
-  const token = getToken();
+  const token = authToken || getToken();
 
   // Local GGUF model download state
   const [ggufStatus, setGgufStatus] = useState<{ installed: boolean; size: number; partialSize: number; download: { running: boolean; received: number; total: number; done: boolean; error?: string; percent: number; resuming?: boolean; speedBytes: number; etaSeconds: number } } | null>(null);
@@ -582,11 +582,11 @@ const formatEta = (seconds: number): string => {
               <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>Dashboard Sections</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
                 {([
-                  { key: 'metrics' as Tab, icon: <BarChart3 size={18} />, title: 'Metrics', desc: `${metrics ? Object.keys(metrics).length : '…'} Prometheus metrics` },
-                  { key: 'audit' as Tab, icon: <ClipboardList size={18} />, title: 'Audit Logs', desc: `${auditLogs.length} recorded events` },
-                  { key: 'plugins' as Tab, icon: <Plug size={18} />, title: 'Plugins', desc: `${plugins.length} plugins · install / remove` },
-                  { key: 'health' as Tab, icon: <Heart size={18} />, title: 'Health', desc: health ? `${health.status} · ${Object.keys(health.checks).length} checks` : '…' },
-                  { key: 'evolution' as Tab, icon: <Sparkles size={18} />, title: 'Evolution', desc: `${archProposals.length + intentProposals.length + ecoProposals.length} proposals` },
+                  { key: 'metrics' as Tab, icon: <BarChart3 size={18} />, title: 'Metrics', desc: metrics ? `${Object.keys(metrics).length} Prometheus metrics active` : 'Collecting Prometheus telemetry…' },
+                  { key: 'audit' as Tab, icon: <ClipboardList size={18} />, title: 'Audit Logs', desc: `${auditLogs.length} recorded audit events` },
+                  { key: 'plugins' as Tab, icon: <Plug size={18} />, title: 'Plugins', desc: `${plugins.length} active plugins · install / remove` },
+                  { key: 'health' as Tab, icon: <Heart size={18} />, title: 'Health', desc: health ? `${health.status.toUpperCase()} · ${Object.keys(health.checks).length} subsystem checks` : 'System health check in progress…' },
+                  { key: 'evolution' as Tab, icon: <Sparkles size={18} />, title: 'Evolution', desc: `${archProposals.length + intentProposals.length + ecoProposals.length} active proposals` },
                 ]).map(c => (
                   <button key={c.key} onClick={() => setTab(c.key)}
                     style={{

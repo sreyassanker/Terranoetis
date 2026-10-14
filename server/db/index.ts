@@ -1,17 +1,66 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { logger } from '../observability/logger';
+import { EMBEDDED_SCHEMA } from './embeddedSchema';
 
-const SERVER_DIR = path.resolve(import.meta.dirname, '..');
-const DB_PATH = path.join(SERVER_DIR, 'realtime.db');
+export function getDatabasePath(): string {
+  if (process.env.TERRANOETIS_DB_PATH) {
+    return process.env.TERRANOETIS_DB_PATH;
+  }
+
+  // 1. In dev mode or when running inside source repo, use local realtime.db
+  const localDb = path.resolve(import.meta.dirname, '..', 'realtime.db');
+  const projectPackage = path.resolve(import.meta.dirname, '..', '..', 'package.json');
+  if (fs.existsSync(projectPackage) && (fs.existsSync(localDb) || process.env.NODE_ENV !== 'production')) {
+    return localDb;
+  }
+
+  // 2. In packaged production app, store in OS Application Data directory
+  const platform = process.platform;
+  let baseDir: string;
+  if (platform === 'darwin') {
+    baseDir = path.join(os.homedir(), 'Library', 'Application Support', 'Terranoetis');
+  } else if (platform === 'win32') {
+    baseDir = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming', 'Terranoetis');
+  } else {
+    baseDir = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share', 'terranoetis');
+  }
+
+  try {
+    fs.mkdirSync(baseDir, { recursive: true, mode: 0o700 });
+  } catch { /* ignore directory creation errors */ }
+
+  return path.join(baseDir, 'realtime.db');
+}
+
+export function getSchemaSql(): string {
+  const candidates = [
+    path.resolve(import.meta.dirname, 'schema.sql'),
+    path.resolve(import.meta.dirname, 'db/schema.sql'),
+    path.resolve(import.meta.dirname, '../server/db/schema.sql'),
+    path.resolve(import.meta.dirname, 'server/db/schema.sql'),
+    path.resolve(process.cwd(), 'server/db/schema.sql'),
+    path.resolve(process.cwd(), 'dist-server/schema.sql'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      try {
+        return fs.readFileSync(c, 'utf-8');
+      } catch { /* continue */ }
+    }
+  }
+  return EMBEDDED_SCHEMA;
+}
 
 let db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (db) return db;
 
-  db = new Database(DB_PATH);
+  const dbPath = getDatabasePath();
+  db = new Database(dbPath);
 
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
@@ -30,8 +79,7 @@ export function closeDb(): void {
 }
 
 function runMigrations(database: Database.Database): void {
-  const schemaPath = path.resolve(import.meta.dirname, 'schema.sql');
-  const schema = fs.readFileSync(schemaPath, 'utf-8');
+  const schema = getSchemaSql();
 
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
 

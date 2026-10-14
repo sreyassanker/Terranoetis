@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { sanitizeGlsl } from '../components/kaggle/gpu/cesiumRuntime';
 
 export class EntropyHalo {
   private viewer: Cesium.Viewer;
@@ -77,7 +78,7 @@ export class EntropyHalo {
 
     this.stage = new Cesium.PostProcessStage({
       name: 'entropy_halo',
-      fragmentShader,
+      fragmentShader: sanitizeGlsl(fragmentShader),
       uniforms: {
         entropy: 0.0,
         time: 0.0,

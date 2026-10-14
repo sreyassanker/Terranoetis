@@ -69,10 +69,33 @@ function models404Plugin(): Plugin {
   }
 }
 
+/**
+ * Guards against Cesium's ShaderSource bug:
+ * `match.match(/\n/gm).length` throws TypeError when a comment starts with `/**` without newlines.
+ * This plugin guarantees any module bundled containing this pattern is patched safely.
+ */
+function cesiumShaderPatchPlugin(): Plugin {
+  const REGEX = /(\b\w+\.match\(\/\\n\/[a-z]*\))\.length/g;
+  return {
+    name: 'cesium-shader-patch',
+    enforce: 'pre',
+    transform(code, id) {
+      if ((id.includes('cesium') || id.includes('ShaderSource')) && REGEX.test(code)) {
+        REGEX.lastIndex = 0;
+        return {
+          code: code.replace(REGEX, (_m, g1) => `(${g1} || []).length`),
+          map: null,
+        };
+      }
+      return null;
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
-  plugins: [react(), cesiumAssetsPlugin(), models404Plugin()],
+  plugins: [cesiumShaderPatchPlugin(), react(), cesiumAssetsPlugin(), models404Plugin()],
   assetsInclude: ['**/*.wasm', '**/*.worker.js'],
   server: {
     host: '127.0.0.1',
@@ -82,6 +105,10 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,
+      },
+      '/ws': {
+        target: 'http://127.0.0.1:3001',
+        ws: true,
       },
     },
   },

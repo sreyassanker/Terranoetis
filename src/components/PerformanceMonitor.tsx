@@ -5,6 +5,7 @@ interface PerformanceMonitorProps {
   viewer: Cesium.Viewer | null;
   visible: boolean;
   onToggle: () => void;
+  sidebarCollapsed?: boolean;
 }
 
 interface Stats {
@@ -20,7 +21,7 @@ interface Stats {
  * Performance Monitor — real-time FPS, entity count, memory, and render timing.
  * Toggle with Ctrl+Shift+P or the button in the toolbar.
  */
-export default function PerformanceMonitor({ viewer, visible, onToggle }: PerformanceMonitorProps) {
+export default function PerformanceMonitor({ viewer, visible, onToggle, sidebarCollapsed = false }: PerformanceMonitorProps) {
   const [stats, setStats] = useState<Stats>({ fps: 0, frameTime: 0, entityCount: 0, primitiveCount: 0, memoryMB: 0, jsHeapUsed: '—' });
   const frameTimesRef = useRef<number[]>([]);
   const lastFrameRef = useRef(0);
@@ -103,11 +104,12 @@ export default function PerformanceMonitor({ viewer, visible, onToggle }: Perfor
   return (
     <div style={{
       position: 'fixed',
-      bottom: 12,
-      left: 12,
+      top: 56,
+      left: sidebarCollapsed ? 16 : 296,
       zIndex: 9999,
-      background: 'rgba(0,0,0,0.75)',
-      backdropFilter: 'blur(12px)',
+      background: 'rgba(5,8,20,0.85)',
+      backdropFilter: 'blur(16px)',
+      WebkitBackdropFilter: 'blur(16px)',
       borderRadius: 8,
       padding: '8px 12px',
       fontSize: 11,
@@ -116,8 +118,9 @@ export default function PerformanceMonitor({ viewer, visible, onToggle }: Perfor
       lineHeight: 1.6,
       minWidth: 180,
       pointerEvents: 'auto',
-      border: '1px solid rgba(255,255,255,0.08)',
-      boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+      border: '1px solid rgba(56, 189, 248, 0.25)',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+      transition: 'left 0.25s ease',
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <span style={{ fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(255,255,255,0.5)' }}>Performance</span>

@@ -8,6 +8,7 @@
  */
 
 import * as Cesium from 'cesium';
+import { sanitizeGlsl } from '../components/kaggle/gpu/cesiumRuntime';
 
 export type SensorStyleId = 'normal' | 'crt' | 'nvg' | 'flir' | 'noir' | 'snow';
 
@@ -231,9 +232,7 @@ export class SensorStyles {
       const uniforms: Record<string, unknown> = {};
       if (def.frag.includes('time')) uniforms.time = 0;
       this.stage = new Cesium.PostProcessStage({
-        fragmentShader: `
-          ${def.frag}
-        `,
+        fragmentShader: sanitizeGlsl(def.frag),
         uniforms,
       });
       this.viewer.scene.postProcessStages.add(this.stage);

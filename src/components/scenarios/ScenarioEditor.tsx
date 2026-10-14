@@ -994,7 +994,9 @@ export default function ScenarioEditor({
             <Cpu size={11} /> Generate Scenario
           </div>
           <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.4 }}>
-            Run a full-physics simulation on Kaggle's free GPU. Results stream back in real-time.
+            {scenarioType === 'earthquake' || scenarioType === 'wildfire' || scenarioType === 'hurricane'
+              ? 'High-speed 2D physical simulation runs locally on CPU (no credentials required).'
+              : 'Full 3D CFD physics simulation on Kaggle GPU. Results stream back in real-time (API Vault configured).'}
           </div>
           <button
             className="glass-button"
@@ -1068,7 +1070,12 @@ export default function ScenarioEditor({
           {/* Error */}
           {kaggle.error && (
             <div style={{ fontSize: 10, color: '#ef4444', background: 'rgba(239,68,68,0.1)', borderRadius: 6, padding: '6px 8px', border: '1px solid rgba(239,68,68,0.2)', marginTop: 6 }}>
-              {kaggle.error}
+              <div>{kaggle.error}</div>
+              {kaggle.error.toLowerCase().includes('kaggle') && (
+                <div style={{ marginTop: 4, fontSize: 9, color: '#38bdf8' }}>
+                  Tip: Open the API Vault (Key icon in top navigation) to paste your Kaggle username & API key.
+                </div>
+              )}
             </div>
           )}
 
