@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
 import ScenarioGallery from '@/components/scenarios/ScenarioGallery';
 import type { ScenarioSummary } from '@/components/scenarios/types';
 import { authHeaders } from '@/context/AuthContext';
@@ -37,6 +38,7 @@ function useScenarioSummaries() {
 
 const ScenariosPage: React.FC = () => {
   const { scenarios, loading, error } = useScenarioSummaries();
+  const navigate = useNavigate();
   // Selected-scenario wiring lives in App.tsx (the full SPA view). This v2 page is
   // a standalone gallery; onSelect surfaces to the console for embedders.
   return (
@@ -48,15 +50,15 @@ const ScenariosPage: React.FC = () => {
         </div>
         <div style={styles.nav}>
           {(['globe', 'canvas', 'scenarios', 'tours'] as const).map(p => (
-            <a
+            <Link
               key={p}
-              href={`/v2/${p}`}
+              to={`/v2/${p}`}
               style={{ ...styles.navLink, ...(p === 'scenarios' ? styles.navLinkActive : {}) }}
             >
               {p.charAt(0).toUpperCase() + p.slice(1)}
-            </a>
+            </Link>
           ))}
-          <a href="/" style={{ ...styles.navLink, ...styles.navBack }}>Back to v1</a>
+          <Link to="/" style={{ ...styles.navLink, ...styles.navBack }}>Back to v1</Link>
         </div>
       </div>
       <div style={styles.body}>
@@ -65,7 +67,7 @@ const ScenariosPage: React.FC = () => {
           loading={loading}
           error={error}
           onSelect={(id) => console.log('selected scenario', id)}
-          onCreateNew={() => { window.location.href = '/'; }}
+          onCreateNew={() => { navigate('/'); }}
           onClose={() => window.history.back()}
         />
       </div>

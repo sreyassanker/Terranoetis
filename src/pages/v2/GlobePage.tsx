@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router';
 
 const GlowCanvas: React.FC = () => {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
@@ -52,11 +53,11 @@ const GlobePage: React.FC = () => {
           <span className="v2-logo-text">Geospatial Intelligence v2</span>
         </div>
         <div className="v2-nav">
-          <a href="/v2/globe" className="nav-link active">Globe</a>
-          <a href="/v2/canvas" className="nav-link">Canvas</a>
-          <a href="/v2/scenarios" className="nav-link">Scenarios</a>
-          <a href="/v2/tours" className="nav-link">Tours</a>
-          <a href="/" className="nav-link nav-back">Back to v1</a>
+          <Link to="/v2/globe" className="nav-link active">Globe</Link>
+          <Link to="/v2/canvas" className="nav-link">Canvas</Link>
+          <Link to="/v2/scenarios" className="nav-link">Scenarios</Link>
+          <Link to="/v2/tours" className="nav-link">Tours</Link>
+          <Link to="/" className="nav-link nav-back">Back to v1</Link>
         </div>
       </div>
       <div className="v2-globe-container">

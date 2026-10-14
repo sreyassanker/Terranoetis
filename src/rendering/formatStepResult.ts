@@ -34,7 +34,7 @@ function eonetLatestTs(events: Array<Record<string, unknown>> | undefined): numb
         const d = String(g.date ?? '');
         if (d) {
           const t = new Date(d).getTime();
-          if (t > latest) latest = t;
+          if (Number.isFinite(t) && t > latest) latest = t;
         }
       }
     }
@@ -159,7 +159,8 @@ export function formatStepResult(
           const t = String(h.acq_time ?? '').padStart(4, '0');
           if (d) {
             const iso = new Date(d + 'T' + t.substring(0, 2) + ':' + t.substring(2, 4));
-            if (iso.getTime() > latestTs) latestTs = iso.getTime();
+            const tMs = iso.getTime();
+            if (Number.isFinite(tMs) && tMs > latestTs) latestTs = tMs;
           }
         }
         timestamp = fmtTime(latestTs || undefined);
@@ -211,7 +212,9 @@ export function formatStepResult(
       const msg = result?.message as string | undefined;
       const layer = result?.gibsLayer as string | undefined;
       const sType = result?.type as string | undefined;
-      timestamp = fmtTime(Number(new Date(String(result?.date ?? ''))));
+      const dateStr = String(result?.date ?? '').trim();
+      const dateMs = dateStr ? new Date(dateStr).getTime() : NaN;
+      timestamp = fmtTime(Number.isFinite(dateMs) ? dateMs : undefined);
       summary = msg ?? `Satellite analysis: ${sType ?? 'ndvi'}`;
       if (sType) metrics.push({ label: 'Type', value: sType });
       if (layer) metrics.push({ label: 'Layer', value: String(layer).replace('MODIS_Terra_', '') });
@@ -240,8 +243,9 @@ export function formatStepResult(
             const sev = String(p.severity ?? '');
             const order = ['Unknown', 'Minor', 'Moderate', 'Severe', 'Extreme'];
             if (order.indexOf(sev) > order.indexOf(maxSev)) maxSev = sev;
-            const t = Number(new Date(String(p.effective ?? p.issued ?? '')));
-            if (t > latestTs) latestTs = t;
+            const tStr = String(p.effective ?? p.issued ?? '').trim();
+            const t = tStr ? new Date(tStr).getTime() : NaN;
+            if (Number.isFinite(t) && t > latestTs) latestTs = t;
           }
         }
         timestamp = fmtTime(latestTs || undefined);

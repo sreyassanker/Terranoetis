@@ -6,5 +6,12 @@
   <string>Terranoetis requires location access to center the 3D globe on your current location.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>Terranoetis requires microphone access for voice-assisted geospatial AI cognition.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+  </dict>
 </dict>
 </plist>

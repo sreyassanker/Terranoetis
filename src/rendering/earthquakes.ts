@@ -21,7 +21,8 @@ export function addEarthquakeEntity(
   const color = depthColor(depth);
   const height = Math.max(5000, mag * 15000);
   const radius = 2000 + mag * 800;
-  const eventTime = Cesium.JulianDate.fromDate(new Date(Number(p.time ?? Date.now())));
+  const rawTime = Number(p.time);
+  const eventTime = Cesium.JulianDate.fromDate(new Date(Number.isFinite(rawTime) && rawTime > 0 ? rawTime : Date.now()));
 
   // Pre-compute static positions for the vertical line (these never change)
   const carto = Cesium.Cartographic.fromDegrees(c[0], c[1]);

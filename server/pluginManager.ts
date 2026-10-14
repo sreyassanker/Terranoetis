@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import vm from 'vm';
+import { transformSync } from 'esbuild';
 import { logger } from './observability/logger';
 import { pluginLoadsTotal } from './observability/metrics';
 
@@ -409,7 +410,14 @@ module.exports.init = function(api) {
   private runInSandbox(content: string, api: PluginAPI): ((api: PluginAPI) => void) | undefined {
     const sandboxModule = { exports: {} as Record<string, unknown> };
 
-    const cleanContent = content
+    let transpileSource = content;
+    try {
+      transpileSource = transformSync(content, { loader: 'ts', target: 'es2022' }).code;
+    } catch (e) {
+      logger.warn({ error: (e as Error).message }, 'TypeScript transpile failed, using raw content');
+    }
+
+    const cleanContent = transpileSource
       .replace(/^export\s+default\s+/gm, 'module.exports = ')
       .replace(/^export\s+function\s+(\w+)/gm, 'module.exports.$1 = function')
       .replace(/^export\s+(const|let|var)\s+(\w+)/gm, 'module.exports.$2 = $1 ');

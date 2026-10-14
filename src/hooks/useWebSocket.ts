@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isDesktopApp } from '@/context/AuthContext';
+import { isDesktopApp, DESKTOP_WS_SERVER } from '@/lib/desktop';
 
 export type WsConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
 
@@ -18,7 +18,7 @@ export interface WsMessage {
 
 const WS_BASE =
   import.meta.env.VITE_WS_URL ||
-  (isDesktopApp ? 'ws://127.0.0.1:3001' : `ws://${location.hostname}:3001`);
+  (isDesktopApp ? DESKTOP_WS_SERVER : `ws://${typeof location !== 'undefined' ? location.hostname : '127.0.0.1'}:3001`);
 const WS_PATH = '/ws/agent';
 const MAX_RECONNECT_DELAY = 30000;
 const INITIAL_RECONNECT_DELAY = 1000;

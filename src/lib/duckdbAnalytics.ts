@@ -42,9 +42,22 @@ export async function getDuckDB(): Promise<AsyncDuckDB> {
   if (dbPromise) return dbPromise;
   dbPromise = (async () => {
     const bundle = await duckdb.selectBundle(BUNDLES);
-    const worker_url = URL.createObjectURL(
-      new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' }),
-    );
+    if (!bundle.mainWorker) {
+      throw new Error('No DuckDB main worker found in selected bundle');
+    }
+    const workerScript = bundle.mainWorker;
+    let worker_url: string;
+    try {
+      const resp = await fetch(workerScript);
+      if (!resp.ok) throw new Error(`Worker script fetch failed (${resp.status})`);
+      const scriptText = await resp.text();
+      const blob = new Blob([scriptText], { type: 'application/javascript' });
+      worker_url = URL.createObjectURL(blob);
+    } catch {
+      worker_url = URL.createObjectURL(
+        new Blob([`importScripts("${workerScript}");`], { type: 'text/javascript' }),
+      );
+    }
     worker = new Worker(worker_url);
     const logger = new duckdb.ConsoleLogger();
     const db = new duckdb.AsyncDuckDB(logger, worker);

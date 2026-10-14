@@ -141,9 +141,20 @@ export function DuckdbAnalyticsPanel({ open, onClose, restoreKey = 0, zIndex = 1
   const doQuery = useCallback(async () => {
     if (!sql.trim()) return;
     setLoading(true);
-    const r = await runQuery(sql);
-    setResult(r);
-    setLoading(false);
+    try {
+      const r = await runQuery(sql);
+      setResult(r);
+    } catch (e) {
+      setResult({
+        columns: [],
+        rows: [],
+        rowCount: 0,
+        timeMs: 0,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setLoading(false);
+    }
   }, [sql]);
 
   if (!open) return null;

@@ -351,11 +351,27 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
   useEffect(() => {
     const tz = getTimezone();
     function tzParts(date: Date) {
-      const part = (d: Date, type: 'numeric' | '2-digit') => d.toLocaleString('en-CA', { timeZone: tz, year: 'numeric', month: type, day: type, hour: type, minute: type, hour12: false });
-      const s = part(date, '2-digit');
-      // en-CA gives YYYY-MM-DD HH:MM
-      const [d, t] = s.split(' ');
-      return { date: d, time: t.slice(0, 5) };
+      try {
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+          timeZone: tz,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+        const parts = formatter.formatToParts(date);
+        const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+        const d = `${get('year')}-${get('month')}-${get('day')}`;
+        let h = get('hour');
+        if (h === '24') h = '00';
+        const t = `${h}:${get('minute')}`;
+        return { date: d, time: t };
+      } catch {
+        const iso = !isNaN(date.getTime()) ? date.toISOString() : new Date().toISOString();
+        return { date: iso.slice(0, 10), time: iso.slice(11, 16) };
+      }
     }
     const now = new Date();
     const end = tzParts(now);
@@ -531,7 +547,8 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
     const toolRawResults: Record<string, Record<string, unknown>> = {};
     const duplicateTools = new Set<string>();
 
-    for (let i = 0; i < currentChain.length; i++) {
+    try {
+      for (let i = 0; i < currentChain.length; i++) {
       if (!mountedRef.current) return;
       const step = currentChain[i];
 
@@ -543,14 +560,22 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
       // but APIs interpret dates in UTC. toISOString() gives us the correct UTC date.
       // e.g. IST "July 3 00:00" → UTC "July 2 18:30" → API sees "2026-07-02"
       if (rangeStartDate) {
-        const userDate = new Date(`${rangeStartDate}T${rangeStartTime || '00:00'}`);
-        params.startDate = userDate.toISOString().slice(0, 10);
-        params.startTime = userDate.toISOString().slice(11, 16);
+        const cleanDate = rangeStartDate.replace(/,/g, '').trim();
+        const cleanTime = (rangeStartTime || '00:00').replace(/,/g, '').trim();
+        const userDate = new Date(`${cleanDate}T${cleanTime}`);
+        if (!isNaN(userDate.getTime())) {
+          params.startDate = userDate.toISOString().slice(0, 10);
+          params.startTime = userDate.toISOString().slice(11, 16);
+        }
       }
       if (rangeEndDate) {
-        const userDate = new Date(`${rangeEndDate}T${rangeEndTime || '23:59'}`);
-        params.endDate = userDate.toISOString().slice(0, 10);
-        params.endTime = userDate.toISOString().slice(11, 16);
+        const cleanDate = rangeEndDate.replace(/,/g, '').trim();
+        const cleanTime = (rangeEndTime || '23:59').replace(/,/g, '').trim();
+        const userDate = new Date(`${cleanDate}T${cleanTime}`);
+        if (!isNaN(userDate.getTime())) {
+          params.endDate = userDate.toISOString().slice(0, 10);
+          params.endTime = userDate.toISOString().slice(11, 16);
+        }
       }
 
       // Inject cumulative evidence from upstream tools
@@ -716,9 +741,12 @@ export default function MultiHazardPanel({ onClose, bbox, studyAreaName, onSurfa
     } catch (e) {
       console.error('[Chain] GIS fusion error:', e);
     }
-
+  } catch (err) {
+    console.error('[Chain] execution error:', err);
+  } finally {
     if (mountedRef.current) setExecuting(false);
   }
+}
 
   function exportChain() {
     const blob = new Blob([JSON.stringify(chain, null, 2)], { type: 'application/json' });

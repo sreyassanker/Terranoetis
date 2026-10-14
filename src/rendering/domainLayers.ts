@@ -393,7 +393,9 @@ export function addLightningEntities(viewer: Cesium.Viewer, strikes: any[]): Ces
     ents.push(bolt);
 
     // 2. Draw ground ripple effect that expands and fades (1.6s animation)
-    const strikeTime = Cesium.JulianDate.fromDate(new Date(strike.time));
+    const rawStrikeDate = new Date(strike.time);
+    const validStrikeDate = !isNaN(rawStrikeDate.getTime()) ? rawStrikeDate : new Date();
+    const strikeTime = Cesium.JulianDate.fromDate(validStrikeDate);
     const baseRippleColor = Cesium.Color.fromCssColorString('#fef08a');
     const transparentRipple = baseRippleColor.withAlpha(0);
     const rippleDuration = 1.6;

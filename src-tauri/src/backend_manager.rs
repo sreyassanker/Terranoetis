@@ -252,3 +252,20 @@ impl BackendManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_project_dir() {
+        let p = find_project_dir();
+        assert!(p.join("package.json").exists(), "Project dir must contain package.json: {:?}", p);
+    }
+
+    #[test]
+    fn test_find_node() {
+        let n = find_node();
+        assert!(n.exists() || n == PathBuf::from("node"), "Node binary must exist: {:?}", n);
+    }
+}
