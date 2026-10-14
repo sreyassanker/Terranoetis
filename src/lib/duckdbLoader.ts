@@ -14,7 +14,9 @@ type LayerDef = {
 };
 
 const AUTH = (): Record<string, string> => {
-  const t = (window as unknown as Record<string, unknown>).__AUTH_TOKEN__;
+  const t =
+    (typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null) ||
+    ((typeof window !== 'undefined' ? (window as unknown as Record<string, unknown>).__AUTH_TOKEN__ : null) as string | null);
   return t ? { Authorization: `Bearer ${t}` } : {};
 };
 

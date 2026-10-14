@@ -135,7 +135,7 @@ function renderPoints(
     const position = satrec
       ? new Cesium.CallbackProperty((time: Cesium.JulianDate | undefined, _result: number[]) => {
           try {
-            const date = Cesium.JulianDate.toDate(time!);
+            const date = time ? Cesium.JulianDate.toDate(time) : new Date();
             const pv = satellite.propagate(satrec, date);
             const pos = pv?.position;
             if (pos && typeof pos.x === 'number' && isFinite(pos.x)) {

@@ -33,31 +33,34 @@ export const RadioTunerPanel: React.FC<RadioTunerPanelProps> = ({ open, onClose,
 
   const loadStations = useCallback(async () => {
     setLoading(true); setErr(null);
-    // Prefer already-loaded layer entities (fast path), else fetch fresh.
-    let list = getStations?.() ?? [];
-    if (!list.length) {
-      try {
-        const resp = await fetch('/api/data/radio_stations', { cache: 'no-store', headers: authHeaders() });
-        if (resp.ok) {
-          const data = await resp.json();
-          const items = Array.isArray(data) ? data : (data.items ?? []);
-          list = items.map((s: Record<string, unknown>) => ({
-            lat: Number(s.lat ?? s.geo_lat ?? 0),
-            lon: Number(s.lon ?? s.geo_long ?? 0),
-            name: String(s.name ?? 'Unknown Station').replace(/^\s+/, ''),
-            url: String(s.url ?? s.urlResolved ?? ''),
-            tags: String(s.tags ?? ''),
-            codec: String(s.codec ?? ''),
-            bitrate: Number(s.bitrate ?? 0),
-            stationuuid: String(s.stationuuid ?? ''),
-            favicon: String(s.favicon ?? ''),
-          })).filter((s: { lat: number; lon: number }) => Number.isFinite(s.lat) && Number.isFinite(s.lon));
-        }
-      } catch { /* fall through */ }
+    try {
+      // Prefer already-loaded layer entities (fast path), else fetch fresh.
+      let list = getStations?.() ?? [];
+      if (!list.length) {
+        try {
+          const resp = await fetch('/api/data/radio_stations', { cache: 'no-store', headers: authHeaders() });
+          if (resp.ok) {
+            const data = await resp.json();
+            const items = Array.isArray(data) ? data : (data.items ?? []);
+            list = items.map((s: Record<string, unknown>) => ({
+              lat: Number(s.lat ?? s.geo_lat ?? 0),
+              lon: Number(s.lon ?? s.geo_long ?? 0),
+              name: String(s.name ?? 'Unknown Station').replace(/^\s+/, ''),
+              url: String(s.url ?? s.urlResolved ?? ''),
+              tags: String(s.tags ?? ''),
+              codec: String(s.codec ?? ''),
+              bitrate: Number(s.bitrate ?? 0),
+              stationuuid: String(s.stationuuid ?? ''),
+              favicon: String(s.favicon ?? ''),
+            })).filter((s: { lat: number; lon: number }) => Number.isFinite(s.lat) && Number.isFinite(s.lon));
+          }
+        } catch { /* fall through */ }
+      }
+      if (!list.length) setErr('No radio stations reachable.');
+      setStations(list);
+    } finally {
+      setLoading(false);
     }
-    if (!list.length) setErr('No radio stations reachable.');
-    setStations(list);
-    setLoading(false);
   }, [getStations]);
 
   // Defer the load out of the synchronous effect body so the setState calls

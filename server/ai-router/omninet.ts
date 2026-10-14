@@ -1,5 +1,6 @@
 import { getDb } from '../db/index';
 import { logger } from '../observability/logger';
+import { keyManager } from '../keyManager';
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -250,6 +251,55 @@ export class Omninet {
     }, 120000);
   }
 
+  /**
+   * Reload provider statuses when API keys are dynamically configured or updated.
+   * Promotes providers with new valid keys from 'down' or initializes them, and
+   * triggers an immediate health ping cycle.
+   */
+  reloadProviders(): void {
+    let reloadedCount = 0;
+    for (const state of this.providers) {
+      if (state.config.apiKeyEnvVar) {
+        const key = this.resolveApiKey(state.config);
+        if (key && (state.status === 'down' || state.circuitState === 'open')) {
+          state.status = 'degraded';
+          state.circuitState = 'closed';
+          state.circuitFailures = 0;
+          state.failureCount = 0;
+          reloadedCount++;
+        }
+      }
+    }
+    logger.info({ reloadedCount }, 'Omninet reloaded providers after API key update');
+    this.triggerImmediateHealthChecks().catch((err) => {
+      logger.warn({ err }, 'Omninet immediate health check error');
+    });
+  }
+
+  async triggerImmediateHealthChecks(): Promise<void> {
+    const pings = this.providers
+      .filter(state => !state.config.local)
+      .filter(state => {
+        const apiKey = this.resolveApiKey(state.config);
+        return !!apiKey;
+      })
+      .map(async (state) => {
+        try {
+          await this.healthPing(state);
+          state.consecutiveSuccesses++;
+          state.failureCount = 0;
+          if (state.consecutiveSuccesses >= 1) state.status = 'healthy';
+        } catch (e) {
+          logger.warn({ err: e, provider: state.config.name }, 'Omninet health ping failed during reload');
+          state.failureCount++;
+          if (state.failureCount >= 3) state.status = 'down';
+        }
+        state.lastChecked = Date.now();
+        this.persistState(state);
+      });
+    await Promise.allSettled(pings);
+  }
+
   private async healthPing(state: ProviderState): Promise<void> {
     const start = Date.now();
     const config = state.config;
@@ -318,9 +368,11 @@ export class Omninet {
 
   // ── Routing Logic ─────────────────────────────────────────────
 
-  /** Resolve the API key for a provider: server environment (.env) only. */
+  /** Resolve the API key for a provider: user-configured key (encrypted store) > process.env fallback. */
   private resolveApiKey(config: ProviderConfig): string | undefined {
     if (config.apiKeyEnvVar) {
+      const userKey = keyManager.get(config.apiKeyEnvVar);
+      if (userKey) return userKey;
       const envKey = process.env[config.apiKeyEnvVar];
       if (envKey) return envKey;
     }

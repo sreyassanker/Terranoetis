@@ -18,80 +18,10 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'auth_user';
 const ROLE_KEY = 'auth_role';
-let fetchPatchInstalled = false;
-let originalFetch: typeof window.fetch | null = null;
+import { isDesktopApp, installDesktopFetchPatch } from '@/lib/desktop';
+export { isDesktopApp };
 
-export const isDesktopApp =
-  typeof window !== 'undefined' &&
-  (window.location.hostname === 'tauri.localhost' ||
-    (window.location.hostname === 'localhost' && window.location.port === '') ||
-    window.location.protocol === 'tauri:' ||
-    window.location.protocol === 'file:' ||
-    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) ||
-    Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__));
-
-function shouldAttachAuth(input: RequestInfo | URL): boolean {
-  const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
-  try {
-    const url = new URL(rawUrl, window.location.origin);
-    return (
-      url.pathname.startsWith('/api/') &&
-      (url.origin === window.location.origin ||
-        url.hostname === '127.0.0.1' ||
-        url.hostname === 'localhost' ||
-        url.hostname.includes('tauri'))
-    );
-  } catch {
-    return rawUrl.startsWith('/api/');
-  }
-}
-
-function installAuthFetchPatch(): void {
-  if (fetchPatchInstalled || typeof window === 'undefined') return;
-  originalFetch = window.fetch.bind(window);
-  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    let reqInput = input;
-    const token = localStorage.getItem(TOKEN_KEY);
-
-    // In desktop app, route any /api requests to local backend server
-    if (isDesktopApp) {
-      const API_SERVER =
-        (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') || 'http://127.0.0.1:3001';
-      let rawUrl = '';
-      if (typeof reqInput === 'string') rawUrl = reqInput;
-      else if (reqInput instanceof URL) rawUrl = reqInput.href;
-      else if (reqInput instanceof Request) rawUrl = reqInput.url;
-
-      if (
-        rawUrl.startsWith('/api') ||
-        rawUrl.startsWith('http://tauri.localhost/api') ||
-        rawUrl.startsWith('https://tauri.localhost/api') ||
-        rawUrl.startsWith('tauri://localhost/api')
-      ) {
-        const cleanPath = rawUrl.replace(/^(https?:\/\/tauri\.localhost|tauri:\/\/localhost)/, '');
-        const targetUrl = `${API_SERVER}${cleanPath}`;
-        if (reqInput instanceof Request) {
-          reqInput = new Request(targetUrl, reqInput);
-        } else {
-          reqInput = targetUrl;
-        }
-      }
-    }
-
-    if (!token || !shouldAttachAuth(reqInput)) {
-      return originalFetch!(reqInput, init);
-    }
-
-    const headers = new Headers(init?.headers || (reqInput instanceof Request ? reqInput.headers : undefined));
-    if (!headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${token}`);
-    }
-    return originalFetch!(reqInput, { ...init, headers });
-  };
-  fetchPatchInstalled = true;
-}
-
-installAuthFetchPatch();
+installDesktopFetchPatch();
 
 function parseJwtRole(token: string): string | null {
   try {

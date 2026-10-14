@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { isDesktopApp, DESKTOP_WS_SERVER } from '@/lib/desktop';
 
 /**
  * Realtime Voice — PRIMARY voice path using OpenAI Realtime API via the
@@ -59,8 +60,12 @@ export function useRealtimeVoice(opts: RealtimeVoiceOptions = {}) {
 
     return new Promise<boolean>((resolve) => {
       try {
-        const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const ws = new WebSocket(`${proto}://${window.location.host}/ws/voice?token=${encodeURIComponent(token)}`);
+        const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const host = typeof location !== 'undefined' ? location.hostname : '127.0.0.1';
+        const wsBase =
+          (import.meta.env.VITE_WS_URL as string | undefined)?.replace(/\/+$/, '') ||
+          (isDesktopApp ? DESKTOP_WS_SERVER : `${proto}://${host}:3001`);
+        const ws = new WebSocket(`${wsBase}/ws/voice?token=${encodeURIComponent(token)}`);
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -106,8 +111,17 @@ export function useRealtimeVoice(opts: RealtimeVoiceOptions = {}) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 24000, echoCancellation: true, noiseSuppression: true } });
       mediaStreamRef.current = stream;
       const ctx = new AudioContext({ sampleRate: 24000 });
+      try {
+        await ctx.audioWorklet.addModule('/voice-pcm-processor.js');
+      } catch {
+        const resp = await fetch('/voice-pcm-processor.js');
+        const code = await resp.text();
+        const blob = new Blob([code], { type: 'application/javascript' });
+        const blobUrl = URL.createObjectURL(blob);
+        await ctx.audioWorklet.addModule(blobUrl);
+        URL.revokeObjectURL(blobUrl);
+      }
       audioCtxRef.current = ctx;
-      await ctx.audioWorklet.addModule('/voice-pcm-processor.js');
       const source = ctx.createMediaStreamSource(stream);
       sourceNodeRef.current = source;
       const worklet = new AudioWorkletNode(ctx, 'voice-pcm-processor');

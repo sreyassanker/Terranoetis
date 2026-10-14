@@ -365,9 +365,14 @@ export function TraceExpander({ traceId }: { traceId: string }) {
   const handleExpand = async () => {
     if (!expanded && !trace) {
       setLoading(true);
-      const t = await fetchTrace(traceId);
-      setTrace(t);
-      setLoading(false);
+      try {
+        const t = await fetchTrace(traceId);
+        setTrace(t);
+      } catch {
+        setTrace(null);
+      } finally {
+        setLoading(false);
+      }
     }
     setExpanded(!expanded);
   };

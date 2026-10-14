@@ -1,5 +1,7 @@
+import '@/lib/desktop';
+import { isDesktopApp } from '@/lib/desktop';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route } from 'react-router';
+import { BrowserRouter, HashRouter, Routes, Route } from 'react-router';
 import { Toaster, toast } from 'sonner';
 import './index.css';
 import App from './App';
@@ -10,9 +12,9 @@ import ToursPage from './pages/v2/ToursPage';
 import { AuthProvider } from './context/AuthContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
+const RouterComponent = isDesktopApp ? HashRouter : BrowserRouter;
 
-
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+if (import.meta.env.PROD && !isDesktopApp && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   });
@@ -48,7 +50,7 @@ window.addEventListener('unhandledrejection', (event) => {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <ErrorBoundary label="Application">
     <AuthProvider>
-      <BrowserRouter>
+      <RouterComponent>
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/v2/globe" element={<GlobePage />} />
@@ -56,7 +58,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/v2/scenarios" element={<ScenariosPage />} />
           <Route path="/v2/tours" element={<ToursPage />} />
         </Routes>
-      </BrowserRouter>
+      </RouterComponent>
     </AuthProvider>
     {/* useChat.ts:517 already fires toasts; nothing mounted a renderer for them. */}
     <Toaster position="bottom-right" theme="dark" richColors closeButton />

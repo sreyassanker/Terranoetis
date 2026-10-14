@@ -44,6 +44,7 @@ import {
 } from './ai-patterns/patternStore';
 import { summarizeToolResult } from './ai-patterns/summarizeTool';
 import { API_METADATA, getCategories } from './apiMetadata';
+import { keyManager } from './keyManager';
 import { COUNTRY_CENTROIDS } from './data/countryCentroids';
 import { WHO_GEO } from './data/whoGeo';
 import {
@@ -182,6 +183,18 @@ import { bayFireDetector } from './foundation-models/bayFireDetector';
 import { weatherForecaster } from './foundation-models/weatherForecaster';
 import { agricultureMonitor } from './foundation-models/agricultureMonitor';
 dotenv.config();
+// Initialize dynamic encrypted key storage (AppData at rest + env injection)
+keyManager.init();
+keyManager.onChange((changedKeys) => {
+  try {
+    omninet.reloadProviders();
+    if (changedKeys.includes('AIS_STREAM_API_KEY')) {
+      initAisTracker();
+    }
+  } catch (err) {
+    logger.warn({ err }, '[server] Error executing keyManager change hooks');
+  }
+});
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -272,14 +285,14 @@ app.use(helmet({
       'object-src': ["'none'"],
       'base-uri': ["'self'"],
       'form-action': ["'self'"],
-      'frame-ancestors': ["'none'"],
+      'frame-ancestors': ["'self'", 'http://localhost:*', 'http://127.0.0.1:*', 'tauri:', 'tauri://*'],
       'upgrade-insecure-requests': IS_PROD ? [] : null,
     },
   },
   crossOriginEmbedderPolicy: false,
   crossOriginOpenerPolicy: { policy: 'same-origin' },
   crossOriginResourcePolicy: { policy: 'cross-origin' },
-  referrerPolicy: { policy: 'no-referrer' },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   hsts: IS_PROD ? { maxAge: 31536000, includeSubDomains: true } : false,
   permittedCrossDomainPolicies: { permittedPolicies: 'none' },
 }));
@@ -347,9 +360,7 @@ const loginRateLimit = perIpRateLimiter(5, 15 * 60 * 1000);
 const publicDataRateLimit = perIpRateLimiter(300, 60000);
 app.post('/api/auth/login', loginRateLimit, login);
 
-if (!IS_PROD) {
-  app.post('/api/auth/dev-login', devAutoLogin);
-}
+app.post('/api/auth/dev-login', devAutoLogin);
 
 app.post('/api/auth/refresh', refreshToken);
 
@@ -521,6 +532,10 @@ app.use('/api', (req: express.Request, res: express.Response, next: express.Next
   // SSE streams: EventSource cannot send Authorization headers, so the token
   // arrives via ?token= — the route-level sseAuthGuard handles verification.
   if (req.path === '/social/stream') {
+    return next();
+  }
+  // Public iframe bridge for embedded media players
+  if (req.path.startsWith('/youtube/embed') || req.path.startsWith('/embed/youtube')) {
     return next();
   }
   authGuard(req, res, next);
@@ -1731,6 +1746,62 @@ app.get('/api/config/apis', (_req: express.Request, res: express.Response) => {
   });
 });
 
+app.get('/api/config/vault', (_req: express.Request, res: express.Response) => {
+  try {
+    const statuses = keyManager.getAllStatuses();
+    res.json({ keys: statuses });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to retrieve API key statuses', detail: String(err) });
+  }
+});
+
+app.post('/api/config/vault', (req: express.Request, res: express.Response) => {
+  try {
+    const { keys, deleteKeys } = req.body || {};
+    if (!keys || typeof keys !== 'object') {
+      return res.status(400).json({ error: 'Invalid request body: "keys" object expected' });
+    }
+    const result = keyManager.saveKeys(keys, Array.isArray(deleteKeys) ? deleteKeys : []);
+    res.json({
+      success: true,
+      message: 'API keys saved securely',
+      savedCount: result.saved,
+      deletedCount: result.deleted,
+      keys: keyManager.getAllStatuses(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save API keys', detail: String(err) });
+  }
+});
+
+app.delete('/api/config/vault/:key', (req: express.Request, res: express.Response) => {
+  try {
+    const key = req.params.key;
+    const deleted = keyManager.deleteKey(key);
+    res.json({ success: true, deleted, keys: keyManager.getAllStatuses() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete key', detail: String(err) });
+  }
+});
+
+app.post('/api/config/vault/validate', async (req: express.Request, res: express.Response) => {
+  try {
+    const { keyName, keyValue } = req.body || {};
+    if (!keyName || typeof keyName !== 'string') {
+      return res.status(400).json({ error: 'keyName is required' });
+    }
+    const result = await keyManager.validateKey(keyName, keyValue);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ valid: false, message: `Validation error: ${err instanceof Error ? err.message : String(err)}` });
+  }
+});
+
+app.get('/api/config/cesium-token', (_req: express.Request, res: express.Response) => {
+  const token = keyManager.get('CESIUM_ION_ACCESS_TOKEN') || process.env.CESIUM_ION_ACCESS_TOKEN || '';
+  res.json({ token });
+});
+
 app.get('/api/earthquakes', async (req: express.Request, res: express.Response) => {
   try {
     const { minLat, maxLat, minLon, maxLon, minMag, starttime, endtime, hours } = req.query as Record<string, string | undefined>;
@@ -2223,6 +2294,57 @@ async function fetchWorldwideCameras(): Promise<WorldwideCctvCamera[]> {
 }
 
 
+
+// Bridge embed for YouTube videos across desktop (Tauri WKWebView) and web contexts.
+// In desktop webviews (tauri://localhost), YouTube blocks direct embeds with Error 153
+// (embedder.identity.missing.referrer). This lightweight HTML bridge serves from a valid
+// HTTP origin (127.0.0.1/localhost) and passes strict-origin-when-cross-origin headers.
+app.get('/api/embed/youtube', (req: express.Request, res: express.Response) => {
+  const videoId = String(req.query.v || req.query.id || '').trim();
+  const autoplay = req.query.autoplay === '0' ? 0 : 1;
+  if (!videoId || !/^[a-zA-Z0-9_-]{5,25}$/.test(videoId)) {
+    return res.status(400).send('Invalid or missing YouTube Video ID');
+  }
+
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self' 'unsafe-inline' https://www.youtube-nocookie.com https://www.youtube.com https://*.ytimg.com https://*.googlevideo.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com; img-src * data: blob:; frame-ancestors *;"
+  );
+
+  const host = req.get('host') || '127.0.0.1:3001';
+  const origin = `${req.protocol}://${host}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>YouTube Video</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+    iframe { width: 100%; height: 100%; border: 0; display: block; position: absolute; top: 0; left: 0; }
+  </style>
+</head>
+<body>
+  <iframe
+    id="yt-frame"
+    src="https://www.youtube.com/embed/${encodeURIComponent(videoId)}?autoplay=${autoplay}&playsinline=1"
+    title="YouTube video player"
+    referrerpolicy="strict-origin-when-cross-origin"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+    allowfullscreen>
+  </iframe>
+</body>
+</html>`;
+
+  res.send(html);
+});
 
 // Server-side proxy for opencctv.org feeds. The upstream returns
 // `Cross-Origin-Resource-Policy: same-origin`, so browsers refuse to embed
@@ -4626,6 +4748,65 @@ app.get('/api/social/stream', sseAuthGuard, (req: express.Request, res: express.
   req.on('close', () => {
     clearInterval(heartbeat);
   });
+});
+
+// ── YouTube Embedded Player Shim (Loopback proxy for WKWebView / Tauri) ──
+app.get('/api/youtube/embed/:id', (req: express.Request, res: express.Response) => {
+  const videoId = String(req.params.id || '').trim();
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+    res.status(400).send('Invalid video id');
+    return;
+  }
+  const host = req.headers.host || '127.0.0.1:3001';
+  const origin = `http://${host}`;
+
+  res.removeHeader('X-Frame-Options');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self' http: https: data: blob: 'unsafe-inline' 'unsafe-eval'; " +
+    "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; " +
+    "img-src 'self' data: https:; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "frame-ancestors *;"
+  );
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>YouTube Player</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+    }
+    iframe {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+  </style>
+</head>
+<body>
+  <iframe
+    src="https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1"
+    referrerpolicy="strict-origin-when-cross-origin"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+    allowfullscreen>
+  </iframe>
+</body>
+</html>`);
 });
 
 // --- UPGRADED PLANETARY LAYERS PROXIES ---

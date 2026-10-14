@@ -19,8 +19,10 @@ export function getTimezone(): string {
   return currentTimezone;
 }
 
-function withTZ(date: Date | number | string): Date {
-  return typeof date === 'number' || typeof date === 'string' ? new Date(date) : date;
+function withTZ(date: Date | number | string | undefined | null): Date {
+  if (date === undefined || date === null) return new Date();
+  const d = typeof date === 'number' || typeof date === 'string' ? new Date(date) : date;
+  return d instanceof Date && !isNaN(d.getTime()) ? d : new Date();
 }
 
 /**
@@ -58,23 +60,23 @@ function hasFormatSpec(options: Intl.DateTimeFormatOptions | undefined): boolean
     || COMPONENT_KEYS.some((k) => opts[k] !== undefined);
 }
 
-export function formatISTTime(date: Date | number | string): string {
+export function formatISTTime(date?: Date | number | string | null): string {
   return formatter('en-IN', { timeZone: currentTimezone, hour: '2-digit', minute: '2-digit' })
     .format(withTZ(date));
 }
 
-export function formatISTDate(date: Date | number | string): string {
+export function formatISTDate(date?: Date | number | string | null): string {
   return formatter('en-IN', { timeZone: currentTimezone, dateStyle: 'medium' })
     .format(withTZ(date));
 }
 
 /** Cached equivalent of `toLocaleDateString('en-IN', { timeZone })` — renders
  *  as `22/9/2026` rather than `formatISTDate`'s `22 Sept 2026`. */
-export function formatISTCalendarDate(date: Date | number | string): string {
+export function formatISTCalendarDate(date?: Date | number | string | null): string {
   return formatter('en-IN', { timeZone: currentTimezone }).format(withTZ(date));
 }
 
-export function formatIST(date: Date | number | string, options?: { dateStyle?: 'full' | 'long' | 'medium' | 'short'; timeStyle?: 'full' | 'long' | 'medium' | 'short' }): string {
+export function formatIST(date?: Date | number | string | null, options?: { dateStyle?: 'full' | 'long' | 'medium' | 'short'; timeStyle?: 'full' | 'long' | 'medium' | 'short' }): string {
   const d = withTZ(date);
   // V8 is not equivalent in the no-format-spec case: `d.toLocaleString(loc,
   // {timeZone})` yields date AND time, while a DateTimeFormat built from the

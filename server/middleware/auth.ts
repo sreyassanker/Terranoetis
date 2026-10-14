@@ -232,9 +232,11 @@ export function sseAuthGuard(req: Request, res: Response, next: NextFunction): v
   res.status(401).json({ error: 'Authentication required. Provide token via ?token= query param or Authorization Bearer header.' });
 }
 
-/** Dev-only: issue JWT for admin without password (never mount in production). */
+/** Issue JWT for admin without password in dev mode, or for loopback desktop operator. Remote prod calls are rejected (404). */
 export function devAutoLogin(req: Request, res: Response): void {
-  if (IS_PROD) {
+  const remoteIp = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  const isLoopback = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === 'localhost';
+  if (IS_PROD && !isLoopback) {
     res.status(404).json({ error: 'Not found' });
     return;
   }

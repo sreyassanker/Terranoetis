@@ -6,7 +6,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import LoginModal from '@/components/LoginModal';
 import { formatIST, formatISTTime, formatISTCalendarDate, getTimezone, timezoneLabel } from '@/lib/formatTime';
 import AdminDashboard from '@/pages/AdminDashboard';
-import { useAuth, authHeaders, isDesktopApp } from '@/context/AuthContext';
+import { useAuth, authHeaders } from '@/context/AuthContext';
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { apiGet } from '@/lib/api';
@@ -142,6 +142,7 @@ import { flushQueue } from '@/lib/offlineChat';
 import { exportConversationAsPDF } from '@/lib/pdfReport';
 import { formatSci } from '@/lib/formatSci';
 import { PlanCardView, SubAgentActivityView, ArtifactView, ToolApprovalView, ModelTierSelector, TraceExpander, VoiceModeIndicator } from '@/components/chat/AdvancedChatViews';
+import { isDesktopApp, DESKTOP_API_SERVER, openInBrowser, getYoutubeEmbedUrl } from '@/lib/desktop';
 
 /* ═════════════════════════════════════════════════════════════════
    LAZY PANELS
@@ -250,12 +251,21 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 let cachedYoutubeCanvas: HTMLCanvasElement | null = null;
 
 function extractYoutubeId(url?: string): string | undefined {
-  if (!url) return;
+  if (!url) return undefined;
   try {
     const u = new URL(url);
-    if (u.hostname.includes('youtube.com')) return u.searchParams.get('v') || undefined;
+    if (u.hostname.includes('youtube.com')) {
+      const v = u.searchParams.get('v');
+      if (v) return v;
+      const embedMatch = u.pathname.match(/\/(?:embed|v)\/([a-zA-Z0-9_-]+)/);
+      if (embedMatch) return embedMatch[1];
+    }
     if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('/')[0] || undefined;
-  } catch { /* */ }
+  } catch {
+    const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=))([a-zA-Z0-9_-]{6,15})/);
+    if (match) return match[1];
+  }
+  return undefined;
 }
 
 const CATEGORIES = LAYER_GROUPS.map(g => ({
@@ -593,29 +603,14 @@ function loadApiVault(): ApiVaultState {
     if (cached) {
       const parsed = JSON.parse(cached) as Partial<ApiVaultState>;
       if (parsed && typeof parsed === 'object') {
-        return { ...DEFAULT_API_VAULT, ...parsed, keys: parsed.keys || {} };
+        return {
+          ...DEFAULT_API_VAULT,
+          preferredAiProvider: parsed.preferredAiProvider || 'gemini',
+          vaultDismissed: Boolean(parsed.vaultDismissed),
+          keys: {}, // Raw secrets resolve from backend encrypted store, never browser storage
+        };
       }
     }
-    // One-time migration: check old sessionStorage for vault data
-    try {
-      const oldSession = window.sessionStorage.getItem(SESSION_VAULT_KEY);
-      if (oldSession) {
-        const old = JSON.parse(oldSession) as Record<string, unknown>;
-        if (old && typeof old === 'object') {
-          // Migrate old format (individual fields) to new flat keys format
-          const migratedKeys: Record<string, string> = {};
-          if ((old as Record<string, string>).gemini) migratedKeys.GOOGLE_GEMINI_API_KEY = (old as Record<string, string>).gemini;
-          if ((old as Record<string, string>).anthropic) migratedKeys.ANTHROPIC_API_KEY = (old as Record<string, string>).anthropic;
-          if ((old as Record<string, string>).cesiumIonAccessToken) migratedKeys.CESIUM_ION_ACCESS_TOKEN = (old as Record<string, string>).cesiumIonAccessToken;
-          if (Object.keys(migratedKeys).length > 0) {
-            const migrated = { keys: migratedKeys, preferredAiProvider: 'gemini' as AiProvider, vaultDismissed: Boolean((old as Record<string, unknown>).vaultDismissed) };
-            window.localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify(migrated));
-            window.sessionStorage.removeItem(SESSION_VAULT_KEY);
-            return migrated;
-          }
-        }
-      }
-    } catch { /* ignore */ }
   } catch { /* ignore */ }
   return DEFAULT_API_VAULT;
 }
@@ -624,6 +619,16 @@ function purgeLegacyVaultStorage(): void {
   try {
     localStorage.removeItem(LEGACY_VAULT_KEYS);
     localStorage.removeItem(LEGACY_VAULT_STATE);
+    const raw = localStorage.getItem(SESSION_VAULT_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<ApiVaultState>;
+      if (parsed && parsed.keys && Object.keys(parsed.keys).length > 0) {
+        localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify({
+          preferredAiProvider: parsed.preferredAiProvider || 'gemini',
+          vaultDismissed: Boolean(parsed.vaultDismissed),
+        }));
+      }
+    }
   } catch {
     /* ignore */
   }
@@ -645,7 +650,7 @@ function resolveAiProvider(vault: ApiVaultState): AiProvider {
 
 function resolveCesiumIonToken(vault: ApiVaultState): string | undefined {
   const t = (vault.keys.CESIUM_ION_ACCESS_TOKEN || '').trim();
-  if (t) return t;
+  if (t && !t.includes('••••')) return t;
   return CESIUM_ION_ENV_TOKEN || undefined;
 }
 
@@ -832,27 +837,114 @@ const CctvVideoPlayer = ({ src }: { src: string }) => {
   );
 };
 
-const ISS_LIVE_EMBED = 'https://www.youtube.com/embed/awQzjn72bI0?autoplay=1&rel=0';
+const ISS_LIVE_EMBED = 'https://www.youtube.com/watch?v=awQzjn72bI0';
 
 const YoutubePlayer = ({ videoId, src }: { videoId?: string; src?: string }) => {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [error, setError] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const cleanVideoId = useMemo(() => {
+    return videoId || extractYoutubeId(src) || '';
+  }, [videoId, src]);
 
-  if (error) {
-    return <div className="cctv-preview-empty">Failed to load YouTube video</div>;
+  const watchUrl = cleanVideoId ? `https://www.youtube.com/watch?v=${cleanVideoId}` : undefined;
+  const thumbUrl = cleanVideoId ? `https://img.youtube.com/vi/${cleanVideoId}/hqdefault.jpg` : undefined;
+
+  const handleOpenExternal = useCallback(() => {
+    if (watchUrl) openInBrowser(watchUrl);
+  }, [watchUrl]);
+
+  if (!cleanVideoId) {
+    return <div className="cctv-preview-empty">Video unavailable</div>;
   }
 
-  const embedSrc = src ?? `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`;
+  // If playback inside the webview fails, render a fallback card with thumbnail & external browser launch
+  if (hasError) {
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={handleOpenExternal}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenExternal(); } }}
+        title="Playback unavailable. Click to watch on YouTube"
+        style={{
+          position: 'relative',
+          width: '100%',
+          paddingBottom: '56.25%',
+          borderRadius: 6,
+          overflow: 'hidden',
+          cursor: 'pointer',
+          backgroundColor: '#0a0a0f',
+          backgroundImage: thumbUrl ? `url("${thumbUrl}")` : undefined,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          boxShadow: '0 4px 14px rgba(0,0,0,0.4)',
+        }}
+      >
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.1) 40%, rgba(0,0,0,0.65) 100%)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <div
+            style={{
+              width: 54,
+              height: 38,
+              backgroundColor: '#ef4444',
+              borderRadius: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 14px rgba(0,0,0,0.6)',
+              transition: 'transform 0.15s ease',
+            }}
+          >
+            <div style={{
+              width: 0,
+              height: 0,
+              borderTop: '8px solid transparent',
+              borderBottom: '8px solid transparent',
+              borderLeft: '14px solid #ffffff',
+              marginLeft: 3,
+            }} />
+          </div>
+
+          <div style={{
+            marginTop: 10,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '3px 9px',
+            borderRadius: 4,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            color: '#fff',
+            fontSize: 10.5,
+            fontWeight: 500,
+            letterSpacing: '0.3px',
+          }}>
+            <span>Watch on YouTube</span>
+            <span style={{ fontSize: 9, opacity: 0.8 }}>↗</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Desktop app routes through the native Rust loopback embed server to ensure a valid HTTP Referer
+  const embedSrc = getYoutubeEmbedUrl(cleanVideoId);
 
   return (
     <div style={{ position: 'relative', width: '100%', paddingBottom: '56.25%', background: '#000', borderRadius: 6, overflow: 'hidden' }}>
       <iframe
-        ref={iframeRef}
         src={embedSrc}
         title="YouTube video player"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        referrerPolicy="strict-origin-when-cross-origin"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
         allowFullScreen
-        onError={() => setError(true)}
+        onError={() => setHasError(true)}
         style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
       />
     </div>
@@ -1807,8 +1899,9 @@ export default function App() {
   /* Auto-scroll chat to bottom on new messages */
   useEffect(() => { chatMessagesRef.current?.scrollTo({ top: chatMessagesRef.current.scrollHeight, behavior: 'smooth' }); }, [aiMessages.length, aiMessages[aiMessages.length - 1]?.content, aiTyping]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [customCesiumToken, setCustomCesiumToken] = useState<string | undefined>(undefined);
   const aiApiType = useMemo(() => resolveAiProvider(apiVault), [apiVault]);
-  const cesiumIonToken = useMemo(() => resolveCesiumIonToken(apiVault), [apiVault]);
+  const cesiumIonToken = useMemo(() => customCesiumToken || resolveCesiumIonToken(apiVault), [customCesiumToken, apiVault]);
 
   const activeBbox = useMemo(() => {
     if (!activeStudyAreaId) return null;
@@ -2094,20 +2187,90 @@ export default function App() {
 
   useEffect(() => {
     if (!isLoggedIn) return;
-    // Server-side /api/vault was removed (enterprise: keys resolve from server
-    // .env only — no per-user vault endpoint exists anymore). Purge stale
-    // browser storage; the fetch below intentionally never runs.
     purgeLegacyVaultStorage();
+
+    // Dynamically retrieve configured Cesium token from server vault
+    fetch('/api/config/cesium-token')
+      .then(r => r.json())
+      .then((data: { token?: string }) => {
+        if (data?.token) {
+          const t = data.token.trim();
+          if (t) {
+            setCustomCesiumToken(t);
+            Cesium.Ion.defaultAccessToken = t;
+            if (viewerRef.current) {
+              applyTerrainProvider(viewerRef.current, t);
+            }
+          }
+        }
+      })
+      .catch(() => {});
+
+    // Sync vault statuses
+    fetch('/api/config/vault')
+      .then(r => r.json())
+      .then((data: { keys?: Record<string, { configured: boolean; masked: string }> }) => {
+        if (data?.keys) {
+          const loaded: Record<string, string> = {};
+          for (const [k, v] of Object.entries(data.keys)) {
+            if (v.configured && v.masked) {
+              loaded[k] = v.masked;
+            }
+          }
+          setApiVault(prev => ({
+            ...prev,
+            keys: { ...prev.keys, ...loaded },
+          }));
+        }
+      })
+      .catch(() => {});
   }, [isLoggedIn, auth.token]);
 
   const handleApiVaultSave = async (keys: Record<string, string>) => {
     flatKeysRef.current = keys;
-    setApiVault(prev => ({ ...prev, keys }));
-    // Keys are stored locally for UI convenience only; the SERVER ignores them
-    // entirely (enterprise: /api/vault removed — AI/data keys resolve from the
-    // server .env). No network call, so no 404.
-    try { localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify({ keys, preferredAiProvider: 'gemini', vaultDismissed: false })); } catch { /* ignore */ }
+    setApiVault(prev => ({ ...prev, keys: { ...prev.keys, ...keys } }));
+
+    // Never store raw secrets in browser localStorage; only keep UI state
+    try {
+      localStorage.setItem(
+        SESSION_VAULT_KEY,
+        JSON.stringify({
+          preferredAiProvider: apiVault.preferredAiProvider,
+          vaultDismissed: true,
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
     purgeLegacyVaultStorage();
+
+    // Dynamically update Cesium token if changed
+    const ionToken = (keys.CESIUM_ION_ACCESS_TOKEN || '').trim();
+    if (ionToken && !ionToken.includes('••••')) {
+      setCustomCesiumToken(ionToken);
+      Cesium.Ion.defaultAccessToken = ionToken;
+      if (viewerRef.current) {
+        applyTerrainProvider(viewerRef.current, ionToken).then(enabled => {
+          if (enabled) {
+            showNotification('Cesium World Terrain activated with new access token', 'success');
+          }
+        });
+      }
+    }
+
+    // Persist securely to backend encrypted store
+    try {
+      const resp = await fetch('/api/config/vault', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keys }),
+      });
+      if (resp.ok) {
+        showNotification('API configuration saved securely to device', 'success');
+      }
+    } catch (err) {
+      console.error('[App] Failed to save keys to backend:', err);
+    }
   };
 
   /* ── Clock (selected timezone) ── */
@@ -2965,25 +3128,26 @@ export default function App() {
         if (!Array.isArray(items)) return;
         for (const item of items) {
           if (!item.id || intelFeedRef.current.find(i => i.id === item.id)) continue;
-          if (item.youtubeVideoId || extractYoutubeId(item.url)) {
+          const ytId = item.youtubeVideoId || extractYoutubeId(item.url);
+          if (ytId) {
             if (!item.lat && !item.lon) {
               const geo = geoFromText(item.title || '');
               if (geo.lat || geo.lon) { item.lat = geo.lat; item.lon = geo.lon; }
             }
             if (item.lat && item.lon) addYoutubeEntity(item);
-            continue;
           }
           pushIntelFeed({
             id: item.id,
             title: item.title ?? '',
             source: item.source ?? '',
-            type: item.type ?? 'news',
+            type: ytId ? 'youtube' : (item.type ?? 'news'),
             lat: item.lat || 0,
             lon: item.lon || 0,
             timestamp: item.timestamp ?? Date.now(),
             url: item.url,
             platform: item.platform,
-          });
+            youtubeVideoId: ytId,
+          } as any);
         }
       } catch { /* ignore malformed SSE data */ }
     });
@@ -3016,25 +3180,26 @@ export default function App() {
           .then((items: any[]) => {
             for (const item of items) {
               if (!item.id || intelFeedRef.current.find(i => i.id === item.id)) continue;
-              if (item.youtubeVideoId || extractYoutubeId(item.url)) {
+              const ytId = item.youtubeVideoId || extractYoutubeId(item.url);
+              if (ytId) {
                 if (!item.lat && !item.lon) {
                   const geo = geoFromText(item.title || '');
                   if (geo.lat || geo.lon) { item.lat = geo.lat; item.lon = geo.lon; }
                 }
                 if (item.lat && item.lon) addYoutubeEntity(item);
-                continue;
               }
               pushIntelFeed({
                 id: item.id,
                 title: item.title ?? '',
                 source: item.source ?? '',
-                type: item.type ?? 'news',
+                type: ytId ? 'youtube' : (item.type ?? 'news'),
                 lat: item.lat || 0,
                 lon: item.lon || 0,
                 timestamp: item.timestamp ?? Date.now(),
                 url: item.url,
                 platform: item.platform,
-              });
+                youtubeVideoId: ytId,
+              } as any);
             }
           })
           .catch(() => {});
@@ -3085,7 +3250,7 @@ export default function App() {
   function pushIntelFeed(item: Omit<IntelFeedItem, 'timeLabel'>) {
     const entry: IntelFeedItem = {
       ...item,
-      timeLabel: new Date(item.timestamp).toLocaleTimeString('en-IN', { timeZone: getTimezone(), hour: '2-digit', minute: '2-digit', hour12: true }),
+      timeLabel: formatISTTime(item.timestamp),
     };
     const next = [entry, ...intelFeedRef.current.filter(i => i.id !== item.id)];
     next.sort((a, b) => b.timestamp - a.timestamp); // Keep newest at the top
@@ -7220,6 +7385,7 @@ export default function App() {
       // Layers loaded at init with no re-fetch fallback in loadLayerData
       'earthquakes', 'tectonic', 'airports', 'space_weather',
       'wildfires', 'severe_storms', 'volcanoes', 'floods', 'dust', 'seaLakeIce',
+      'live_media',
     ]);
     if (!skipRemove.has(layerId)) {
       const ents = entityStoreRef.current[layerId];
@@ -7648,14 +7814,37 @@ export default function App() {
       return;
     }
     console.warn('[LiveMedia] loadLiveMedia: no existing entities, scanning intelFeed...', intelFeedRef.current.length);
-    const items = intelFeedRef.current
+    let items = intelFeedRef.current
       .map(i => {
+        const vid = (i as any).youtubeVideoId || extractYoutubeId(i.url);
         const geo = (!i.lat || !i.lon) ? geoFromText(i.title || i.url || '') : { lat: 0, lon: 0 };
-        return { ...i, lat: i.lat || geo.lat, lon: i.lon || geo.lon, youtubeVideoId: extractYoutubeId(i.url) };
+        return { ...i, lat: i.lat || geo.lat, lon: i.lon || geo.lon, youtubeVideoId: vid };
       })
       .filter(i => i.youtubeVideoId && i.lat && i.lon);
+
+    if (!items.length) {
+      try {
+        const raw = await apiGet<any[]>('/social');
+        if (Array.isArray(raw)) {
+          items = raw
+            .map(i => {
+              const vid = i.youtubeVideoId || extractYoutubeId(i.url);
+              const geo = (!i.lat || !i.lon) ? geoFromText(i.title || i.url || '') : { lat: 0, lon: 0 };
+              return { ...i, lat: i.lat || geo.lat, lon: i.lon || geo.lon, youtubeVideoId: vid };
+            })
+            .filter(i => i.youtubeVideoId && i.lat && i.lon);
+        }
+      } catch (e) {
+        console.warn('[LiveMedia] fetch /api/social fallback failed', e);
+      }
+    }
+
+    if (!isLayerEnabled('live_media')) return;
+    if (!items.length) {
+      showNotification('No YouTube crisis videos available right now', 'warning');
+      return;
+    }
     console.warn(`[LiveMedia] loadLiveMedia: found ${items.length} YouTube items with geo`);
-    if (!items.length) return;
     const ents = items.map(item => {
       return viewer.entities.add({
         id: item.id,
@@ -10714,7 +10903,7 @@ case 'openPanel':
       rows.push({ key: 'Location', val: String(p.place ?? '') });
       rows.push({ key: 'Magnitude', val: `M${Number(p.magnitude ?? 0).toFixed(1)}` });
       rows.push({ key: 'Depth', val: `${String(p.depth ?? 'N/A')} km` });
-      rows.push({ key: 'Time', val: `${new Date(Number(p.time ?? 0)).toLocaleString('en-IN', { timeZone: getTimezone(), dateStyle: 'medium', timeStyle: 'medium' })} ${getTimezone().split('/').pop()?.replace('_', ' ') || ''}` });
+      rows.push({ key: 'Time', val: `${formatIST(Number(p.time ?? 0), { dateStyle: 'medium', timeStyle: 'medium' })} ${timezoneLabel()}` });
     } else if (layer === 'wildfires') {
       rows.push({ key: 'Status', val: String(p.status ?? 'Active') });
       rows.push({ key: 'Date', val: String(p.date ?? '') });
@@ -10743,7 +10932,7 @@ case 'openPanel':
       const updatedAt = Number(p.updatedAt ?? Date.now());
       rows.push({ key: 'Location', val: location });
       rows.push({ key: 'Category', val: String(p.category ?? 'Public webcam') });
-      rows.push({ key: 'Updated', val: `${new Date(updatedAt).toLocaleString('en-IN', { timeZone: getTimezone(), dateStyle: 'medium', timeStyle: 'short' })} ${timezoneLabel()}` });
+      rows.push({ key: 'Updated', val: `${formatIST(updatedAt, { dateStyle: 'medium', timeStyle: 'short' })} ${timezoneLabel()}` });
     } else if (px.temperature != null) {
       rows.push({ key: 'Temp', val: `${Number(px.temperature).toFixed(1)}°C` });
       rows.push({ key: 'Humidity', val: `${Number(px.humidity ?? 0).toFixed(0)}%` });
@@ -10880,7 +11069,18 @@ case 'openPanel':
               <div className="sparkline-title">YouTube Video</div>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
                 <div style={{fontSize:10,color:'var(--text-dim)',lineHeight:1.4}}>{String(p.title ?? '')}</div>
-                <a className="cctv-link" href={`https://www.youtube.com/watch?v=${String(p.youtubeVideoId)}`} target="_blank" rel="noreferrer">Open on YouTube</a>
+                <a
+                  className="cctv-link"
+                  href={`https://www.youtube.com/watch?v=${String(p.youtubeVideoId)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    openInBrowser(`https://www.youtube.com/watch?v=${String(p.youtubeVideoId)}`);
+                  }}
+                >
+                  Open on YouTube
+                </a>
               </div>
             </div>
           )}
@@ -11147,6 +11347,7 @@ case 'openPanel':
               <button
                 className="btn-primary"
                 onClick={() => {
+                  handleApiVaultSave(apiVault.keys);
                   setApiVault(prev => ({ ...prev, vaultDismissed: true }));
                   setShowTokenSetup(false);
                 }}
@@ -11157,6 +11358,9 @@ case 'openPanel':
                 className="btn-secondary"
                 onClick={() => {
                   setApiVault(prev => ({ ...prev, vaultDismissed: true }));
+                  try {
+                    localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify({ preferredAiProvider: apiVault.preferredAiProvider, vaultDismissed: true }));
+                  } catch { /* ignore */ }
                   setShowTokenSetup(false);
                 }}
               >
@@ -11166,14 +11370,6 @@ case 'openPanel':
           </div>
         </div>
       )}
-
-      {/* API Vault Dialog */}
-      <ApiVault
-        isOpen={showApiVault}
-        onClose={() => setShowApiVault(false)}
-        onSave={handleApiVaultSave}
-        initialKeys={apiVault.keys}
-      />
 
       {/* Top Bar */}
       <div className="topbar glass-panel">
@@ -11205,6 +11401,7 @@ case 'openPanel':
             <span>Live</span>
           </div>
 
+          <button className="btn-icon" onClick={() => window.location.reload()} title="Reload App (⌘R / F5)"><RotateCcw size={16} /></button>
           <button className={`btn-icon ${showIntelFeed ? 'active' : ''}`} onClick={() => { setShowIntelFeed(p => !p); focusPanel('intel-feed'); }} title="Intel Feed"><Activity size={16} /></button>
           <button className={`btn-icon ${showStudyArea ? 'active' : ''}`} onClick={() => { setShowStudyArea(p => !p); focusPanel('study-area'); }} title="Study Area"><Crosshair size={16} /></button>
           <button className={`btn-icon ${showAI ? 'active' : ''}`} onClick={() => { setShowAI(p => !p); focusPanel('ai'); }} title="AI Assistant"><Bot size={16} /></button>
@@ -11267,6 +11464,7 @@ case 'openPanel':
             menuId={openMenu} setMenuId={setOpenMenu}
             active={showSettings || showPerfMonitor}
             items={[
+              { label: 'Reload App (⌘R)', icon: <RotateCcw size={15} />, onClick: () => window.location.reload() },
               { label: 'API Configuration', icon: <Key size={15} />, onClick: () => setShowApiVault(true) },
               { label: 'Settings', icon: <Cog size={15} />, active: showSettings, onClick: () => { setShowSettings(p => !p); focusPanel('settings'); } },
               { label: 'Performance Monitor', icon: <Activity size={15} />, active: showPerfMonitor, onClick: () => setShowPerfMonitor(p => !p) },
@@ -12623,6 +12821,14 @@ case 'openPanel':
 
       {/* Sensor-style accessibility widget — floating, draggable, lockable */}
       {!loading && <SensorStyleWidget activeStyle={sensorStyle} onSelect={id => setSensorStyle(prev => sensorStylesRef.current?.toggle(id) ?? id)} />}
+
+      {/* API Configuration & Credentials Vault Modal */}
+      <ApiVault
+        isOpen={showApiVault}
+        onClose={() => setShowApiVault(false)}
+        onSave={handleApiVaultSave}
+        initialKeys={apiVault.keys}
+      />
     </div>
   );
 }

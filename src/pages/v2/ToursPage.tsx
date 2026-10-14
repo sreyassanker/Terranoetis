@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router';
 import CinematicTours from '@/components/v2/cinematicTours';
 
 const ToursPage: React.FC = () => {
@@ -10,11 +11,11 @@ const ToursPage: React.FC = () => {
           <span className="v2-logo-text">Cinematic Tours v2</span>
         </div>
         <div className="v2-nav">
-          <a href="/v2/globe" className="nav-link">Globe</a>
-          <a href="/v2/canvas" className="nav-link">Canvas</a>
-          <a href="/v2/scenarios" className="nav-link">Scenarios</a>
-          <a href="/v2/tours" className="nav-link active">Tours</a>
-          <a href="/" className="nav-link nav-back">Back to v1</a>
+          <Link to="/v2/globe" className="nav-link">Globe</Link>
+          <Link to="/v2/canvas" className="nav-link">Canvas</Link>
+          <Link to="/v2/scenarios" className="nav-link">Scenarios</Link>
+          <Link to="/v2/tours" className="nav-link active">Tours</Link>
+          <Link to="/" className="nav-link nav-back">Back to v1</Link>
         </div>
       </div>
       <div className="v2-tours-body">
