@@ -18,6 +18,7 @@ import { logger } from '../observability/logger';
 import { pauseBackgroundEngines, resumeBackgroundEngines } from './powerSaver';
 import { sampleLandCoverGrid, compactLandCover } from './landCover';
 import { sampleBathymetryGrid, compactBathymetry } from './bathymetry';
+import { kaggleClient } from './kaggleClient';
 
 const KAGGLE_KERNELS_DIR = path.resolve(process.cwd(), 'kaggle-kernels');
 const RESULTS_DIR = path.resolve(process.cwd(), 'kaggle-kernels', 'results');
@@ -679,7 +680,7 @@ function estimateWallclockSeconds(params: SimulationParams): number {
  * params directly into the code: replace the `EMBEDDED_PARAMS = None` marker
  * line in main.py, stage a temp kernel folder, and push from there.
  */
-async function pushKernelWithParams(kernelDir: string, params: SimulationParams): Promise<void> {
+async function pushKernelWithParams(kernelDir: string, params: SimulationParams, ownerSlug: string): Promise<void> {
   const metadataPath = path.join(kernelDir, 'kernel-metadata.json');
   const mainPyPath = path.join(kernelDir, 'main.py');
   if (!fs.existsSync(mainPyPath) || !fs.existsSync(metadataPath)) {
@@ -726,38 +727,41 @@ async function pushKernelWithParams(kernelDir: string, params: SimulationParams)
     `EMBEDDED_PARAMS = json.loads(${JSON.stringify(JSON.stringify(embedded))})`,
   );
 
+  const rawMeta = JSON.parse(fs.readFileSync(metadataPath, 'utf-8')) as Record<string, unknown>;
+  const stagingMeta: Record<string, unknown> = {
+    ...rawMeta,
+    id: ownerSlug,
+  };
+
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaggle-push-'));
   try {
     fs.writeFileSync(path.join(tmpDir, 'main.py'), injected);
-    fs.copyFileSync(metadataPath, path.join(tmpDir, 'kernel-metadata.json'));
-    await pushKernel(tmpDir);
+    fs.writeFileSync(path.join(tmpDir, 'kernel-metadata.json'), JSON.stringify(stagingMeta, null, 2));
+    await kaggleClient.pushKernel(
+      {
+        ownerSlug,
+        newTitle: String(stagingMeta.title || 'Terranoetis Simulation'),
+        code: injected,
+        isGpu: true,
+      },
+      tmpDir,
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
 async function getKernelStatus(ownerSlug: string): Promise<string> {
-  const output = await kaggleCommand(['kernels', 'status', ownerSlug]);
-  // Kaggle CLI v2.x outputs: "owner/kernel has status \"KernelWorkerStatus.COMPLETE\""
-  // Older versions output just: "complete"
-  const match = output.match(/KernelWorkerStatus\.(\w+)/i);
-  if (match) {
-    return match[1].toLowerCase();
-  }
-  return output.toLowerCase().trim();
+  const res = await kaggleClient.getKernelStatus(ownerSlug);
+  return res.status;
 }
 
 async function downloadOutput(ownerSlug: string, outputDir: string): Promise<void> {
-  fs.mkdirSync(outputDir, { recursive: true });
-  await kaggleCommand(['kernels', 'output', ownerSlug, '-p', outputDir, '--force']);
+  await kaggleClient.downloadKernelOutput(ownerSlug, outputDir);
 }
 
 async function cancelKernel(ownerSlug: string): Promise<void> {
-  try {
-    await kaggleCommand(['kernels', 'cancel', ownerSlug]);
-  } catch {
-    logger.warn({ ownerSlug }, 'Failed to cancel Kaggle kernel (may already be done)');
-  }
+  await kaggleClient.cancelKernel(ownerSlug);
 }
 
 /**
@@ -819,7 +823,9 @@ export async function startSimulation(params: SimulationParams): Promise<Simulat
     throw new Error(`Kernel directory not found: ${kernelDir}`);
   }
 
-  const ownerSlug = `sreyassanker/${kernelSlug}`;
+  const creds = kaggleClient.getCredentials();
+  const username = creds?.username || 'sreyassanker';
+  const ownerSlug = `${username}/${kernelSlug}`;
   const job: SimulationJob = {
     id: jobId,
     type: params.type,
@@ -839,6 +845,13 @@ export async function startSimulation(params: SimulationParams): Promise<Simulat
       updateJobStatus(job, 'error', err instanceof Error ? err.message : String(err));
     });
     return job;
+  }
+
+  // Ensure Kaggle credentials exist for GPU runs
+  if (!kaggleClient.hasCredentials()) {
+    const errorMsg = 'Kaggle GPU credentials are required for 3D physics simulations. Please open API Vault (Key icon) and configure your Kaggle Username & API Key.';
+    updateJobStatus(job, 'error', errorMsg);
+    throw new Error(errorMsg);
   }
 
   // Suspend non-essential background engines so the local machine stays cool
@@ -925,7 +938,7 @@ async function runPipeline(
   try {
     // ── Step 1: Push kernel with params embedded in the code file ──
     updateJobStatus(job, 'pushing', 'Uploading to Kaggle GPU...');
-    await pushKernelWithParams(kernelDir, job.params);
+    await pushKernelWithParams(kernelDir, job.params, ownerSlug);
     updateJobStatus(job, 'running', 'Kernel pushed. Kaggle GPU booting...');
     logger.info({ jobId: job.id, ownerSlug }, 'Kernel pushed to Kaggle');
 

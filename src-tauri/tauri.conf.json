@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:3000",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npm run build:all"
   },
   "app": {
     "windows": [
@@ -31,6 +31,9 @@
   "bundle": {
     "active": true,
     "targets": ["app"],
+    "resources": [
+      "../dist-server/*"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,7 +42,18 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "entitlements": "Entitlements.plist"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37", "curl", "ca-certificates"]
+      }
     }
   }
 }

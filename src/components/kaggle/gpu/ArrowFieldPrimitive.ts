@@ -30,6 +30,7 @@ import { colormapGLSL, type CfaColormapName } from './cfdColormaps';
 import {
   runtimeCesium,
   sceneContext,
+  sanitizeGlsl,
   type LooseMaterialAppearance,
   type LooseTexture,
 } from './cesiumRuntime';
@@ -43,7 +44,18 @@ const ATLAS_UV_GLSL = /* glsl */ `
     return (vec2(col, row) + clamp(st, 0.0, 1.0)) / tiles;
   }
 
-  /** Interpolated atlas sample for velocity — lerps between frames for smooth arrow animation. */
+  // Interpolated atlas sample for scalar depth — lerps between frames.
+  float kaggleAtlasLerp(sampler2D tex, float frame, vec2 tiles, vec2 st) {
+    float totalFrames = tiles.x * tiles.y;
+    float f0 = floor(frame);
+    float f1 = min(f0 + 1.0, totalFrames - 1.0);
+    float t = frame - f0;
+    vec2 uv0 = kaggleAtlasUV(f0, tiles, st);
+    vec2 uv1 = kaggleAtlasUV(f1, tiles, st);
+    return mix(texture(tex, uv0).r, texture(tex, uv1).r, t);
+  }
+
+  // Interpolated atlas sample for velocity — lerps between frames for smooth arrow animation.
   vec3 kaggleAtlasLerp3(sampler2D tex, float frame, vec2 tiles, vec2 st) {
     float totalFrames = tiles.x * tiles.y;
     float f0 = floor(frame);
@@ -450,7 +462,8 @@ export class ArrowFieldPrimitive {
         // add the same (depth/maxDepth)*exaggeration offset the surface
         // primitive applies, so arrows hover 'lift' meters over the debris.
         // u_vs_exaggeration == 0 when no depth series was supplied -> no-op.
-        p.xyz += upDir * (texture(u_vs_depth, uv).r * u_vs_exaggeration);
+        float depthSample = kaggleAtlasLerp(u_vs_depth, u_vs_frame, u_vs_tiles, st);
+        p.xyz += upDir * (depthSample * u_vs_exaggeration);
 
         vec3 worldNormal = basis * normalize(normal);
 
@@ -462,7 +475,7 @@ export class ArrowFieldPrimitive {
         gl_Position = czm_modelViewProjectionRelativeToEye * p;
       }
     `;
-    this.vertexShaderSource = vertexShaderSource;
+    this.vertexShaderSource = sanitizeGlsl(vertexShaderSource);
 
     // The atlas is sampled only in the vertex shader (arrows are deformed per
     // cell there), so it is exposed via appearance uniforms, which — unlike
@@ -568,7 +581,7 @@ export class ArrowFieldPrimitive {
         uniforms: {
           u_opacity: this.opacity,
         },
-        source: this.makeFragmentSource(cmap),
+        source: sanitizeGlsl(this.makeFragmentSource(cmap)),
       },
       translucent: true,
     });

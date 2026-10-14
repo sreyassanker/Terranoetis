@@ -197,7 +197,7 @@ export function ChatPanel({
   if (!showAI) return null;
 
   return (
-    <div className="ai-panel-light" style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('ai', 110), width: chatPanelWidth }}>
+    <div className="ai-panel-dark" style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('ai', 110), width: chatPanelWidth }}>
       {!chatCollapsed && (
         <>
           <div
@@ -217,11 +217,11 @@ export function ChatPanel({
         </>
       )}
       <Panel
-        title="EARTH INTELLIGENCE AI"
+        title="EARTH INTELLIGENCE COPILOT"
         icon={<Bot size={15} />}
-        accentColor="#d97757"
-        iconColor="#b4532e"
-        titleColor="#8a5540"
+        accentColor="#38bdf8"
+        iconColor="#38bdf8"
+        titleColor="#e0f2fe"
         onClose={() => setShowAI(false)}
         headerExtra={
           <div className="chat-header-actions">
@@ -262,12 +262,12 @@ export function ChatPanel({
         style={{
           height: chatCollapsed ? 46 : (chatPanelHeight ?? 'calc(100vh - 160px)'),
           maxHeight: chatCollapsed ? 46 : (chatPanelHeight ?? 'calc(100vh - 160px)'),
-          background: '#faf9f5',
-          backdropFilter: 'none',
-          WebkitBackdropFilter: 'none',
-          border: '1px solid rgba(0,0,0,0.12)',
-          boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
-          color: '#1f1e1d',
+          background: 'rgba(11, 17, 32, 0.95)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
+          border: '1px solid rgba(56, 189, 248, 0.25)',
+          boxShadow: '0 16px 48px rgba(0, 0, 0, 0.7), 0 0 24px rgba(56, 189, 248, 0.08)',
+          color: '#f8fafc',
         }}
       >
         {!chatCollapsed && (

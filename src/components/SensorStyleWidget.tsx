@@ -116,11 +116,20 @@ export default function SensorStyleWidget({ activeStyle, onSelect }: Props) {
                 title={`${s.label} — ${s.hint}`}
                 onClick={() => onSelect(s.id)}
                 style={{
-                  color: `hsl(${hue}, ${sat}%, ${isActive ? 55 : 35}%)`,
-                  background: `hsl(${hue}, ${sat}%, ${isActive ? 15 : 5}%)`,
-                  border: isActive ? `1px solid hsl(${hue}, ${sat}%, 45%)` : '1px solid transparent',
+                  color: isActive ? `hsl(${hue}, ${sat}%, 88%)` : '#cbd5e1',
+                  background: isActive ? `hsl(${hue}, ${sat}%, 18%)` : 'rgba(255, 255, 255, 0.04)',
+                  border: isActive ? `1px solid hsl(${hue}, ${sat}%, 55%)` : '1px solid rgba(148, 163, 184, 0.15)',
+                  boxShadow: isActive ? `0 0 10px hsla(${hue}, ${sat}%, 50%, 0.4)` : 'none',
                 }}
               >
+                <span style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: isActive ? `hsl(${hue}, ${sat}%, 65%)` : '#64748b',
+                  boxShadow: isActive ? `0 0 6px hsl(${hue}, ${sat}%, 65%)` : 'none',
+                  flexShrink: 0,
+                }} />
                 <span className="sensor-widget-item-label">{s.label}</span>
               </button>
             );

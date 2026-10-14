@@ -103,18 +103,55 @@ export function SatelliteTrackerPanel({ onClose, onTrackSatellite, onTravelView,
             {loading ? <Loader2 size={14} style={{ color: '#00D4FF', alignSelf: 'center', animation: 'spin 1s linear infinite' }} /> : <Search size={14} style={{ color: '#64748b', alignSelf: 'center' }} />}
           </div>
 
+          {/* Quick-Pick Featured Presets */}
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 9, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+              Featured Missions
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {[
+                { label: '🛰️ ISS', q: 'ISS' },
+                { label: '🔭 Hubble', q: 'HST' },
+                { label: '🌐 Starlink', q: 'STARLINK' },
+                { label: '🌦️ NOAA', q: 'NOAA' },
+                { label: '🛰️ Tiangong', q: 'TIANGONG' },
+                { label: '🌍 Landsat', q: 'LANDSAT' },
+              ].map(preset => (
+                <button
+                  key={preset.q}
+                  onClick={() => {
+                    setQuery(preset.q);
+                    setSelected(null);
+                  }}
+                  style={{
+                    padding: '3px 7px',
+                    borderRadius: 4,
+                    background: query.toLowerCase() === preset.q.toLowerCase() ? 'rgba(0,212,255,0.25)' : 'rgba(255,255,255,0.05)',
+                    border: query.toLowerCase() === preset.q.toLowerCase() ? '1px solid #00D4FF' : '1px solid rgba(255,255,255,0.1)',
+                    color: query.toLowerCase() === preset.q.toLowerCase() ? '#00D4FF' : '#cbd5e1',
+                    fontSize: 10,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {suggestions.length > 0 && !selected && (
-            <div style={{ marginTop: 6, maxHeight: 250, overflowY: 'auto', borderRadius: 4, background: 'rgba(0,0,0,0.4)' }}>
+            <div style={{ marginTop: 8, maxHeight: 250, overflowY: 'auto', borderRadius: 6, background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(0,212,255,0.15)' }}>
               {suggestions.map(s => (
                 <div
                   key={s.id}
                   onClick={() => handleSelect(s)}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
-                    cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.03)',
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '7px 9px',
+                    cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.04)',
                     opacity: s.tle1 && s.tle2 ? 1 : 0.6,
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,212,255,0.1)')}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,212,255,0.12)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                   {s.tle1 && s.tle2
@@ -123,10 +160,10 @@ export function SatelliteTrackerPanel({ onClose, onTrackSatellite, onTravelView,
                   }
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ color: '#e2e8f0', fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</span>
+                      <span style={{ color: '#f8fafc', fontSize: 10, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</span>
                       <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: SOURCE_BG[s.source] ?? 'rgba(100,116,139,0.2)', color: SOURCE_COLORS[s.source] ?? '#94a3b8', flexShrink: 0 }}>{s.source}</span>
                     </div>
-                    <div style={{ color: '#64748b', fontSize: 9 }}>
+                    <div style={{ color: '#94a3b8', fontSize: 9 }}>
                       {s.tle1 && s.tle2 ? `NORAD ${s.id}` : s.source === 'UCS' ? (s.country ?? s.orbitClass ?? 'Satellite') : `v${s.version ?? '?'}`}
                       {s.altitude != null ? ` · ${s.altitude.toLocaleString()}m` : ''}
                     </div>
@@ -134,6 +171,31 @@ export function SatelliteTrackerPanel({ onClose, onTrackSatellite, onTravelView,
                   <Globe size={10} style={{ color: '#64748b', flexShrink: 0 }} />
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Empty state guidance when no search active */}
+          {!selected && suggestions.length === 0 && !query.trim() && (
+            <div style={{
+              marginTop: 10,
+              padding: '12px 10px',
+              borderRadius: 6,
+              background: 'rgba(0, 212, 255, 0.04)',
+              border: '1px dashed rgba(0, 212, 255, 0.25)',
+              textAlign: 'center',
+            }}>
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(0, 212, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 8px', color: '#00D4FF' }}>
+                <Satellite size={16} />
+              </div>
+              <div style={{ color: '#e2e8f0', fontSize: 11, fontWeight: 600, marginBottom: 4 }}>
+                Real-Time SGP4 Propagation
+              </div>
+              <div style={{ color: '#94a3b8', fontSize: 10, lineHeight: 1.4, marginBottom: 8 }}>
+                Select a featured mission above or enter any satellite name or NORAD ID to track orbits, compute altitude, and render ground tracks.
+              </div>
+              <div style={{ fontSize: 9, color: '#38bdf8', fontFamily: 'monospace' }}>
+                {allSats.length > 0 ? `● ${allSats.length.toLocaleString()} orbital objects loaded` : 'Loading orbital catalog...'}
+              </div>
             </div>
           )}
         </div>

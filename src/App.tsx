@@ -188,11 +188,6 @@ interface SeismicWaveData {
   surfEnt: Cesium.Entity | null; interval: ReturnType<typeof setInterval> | null;
 }
 
-interface TimelineState {
-  current: number; start: number; end: number;
-  active: boolean; speed: number; interval: ReturnType<typeof setInterval> | null;
-}
-
 interface IntelFeedItem {
   id: string; title: string; source: string; type: string;
   lat: number; lon: number; timestamp: number; timeLabel: string;
@@ -1181,10 +1176,6 @@ export default function App() {
   /* ── Refs ── */
   const viewerRef = useRef<Cesium.Viewer | null>(null);
   const cesiumElRef = useRef<HTMLDivElement>(null);
-  const timelineRef = useRef<TimelineState>({
-    current: Date.now(), start: Date.now() - 72*3600000, end: Date.now(),
-    active: false, speed: 1, interval: null,
-  });
   const seismicAnimationsRef = useRef<SeismicWaveData[]>([]);
   const weatherCardsRef = useRef<WeatherCardData[]>([]);
   const heatmapDataRef = useRef<HeatmapPoint[]>([]);
@@ -1241,8 +1232,6 @@ export default function App() {
   const searchValueRef = useRef('');
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
   const [searchBoxRect, setSearchBoxRect] = useState<DOMRect | null>(null);
-  const timelineThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const timelineLastUpdateRef = useRef<number>(0);
   const pinCountRef = useRef(0);
   const entityStoreRef = useRef<Record<string, Cesium.Entity[]>>({});
   const layerDataCacheRef = useRef<Record<string, unknown[]>>({});
@@ -1409,7 +1398,7 @@ export default function App() {
   const [showHeatmapLegend, setShowHeatmapLegend] = useState(false);
   const [showSmokeLegend, setShowSmokeLegend] = useState(false);
   const [apiVault, setApiVault] = useState<ApiVaultState>(initialApiVault);
-  const [showTokenSetup, setShowTokenSetup] = useState(() => !hasAnyApiVaultValue(initialApiVault) && !initialApiVault.vaultDismissed && !CESIUM_ION_ENV_TOKEN);
+  const [showTokenSetup, setShowTokenSetup] = useState(() => !hasAnyApiVaultValue(initialApiVault) && !initialApiVault.vaultDismissed);
   const [showApiVault, setShowApiVault] = useState(false);
   const [showStudyArea, setShowStudyArea] = useState(false);
   const [studyWest, setStudyWest] = useState('68.0');
@@ -1668,6 +1657,7 @@ export default function App() {
   const [showTimeSlider, setShowTimeSlider] = useState(false);
   const [timeSliderValue, setTimeSliderValue] = useState(Date.now());
   const [timeSliderPlaying, setTimeSliderPlaying] = useState(false);
+  const [timeSliderSpeed, setTimeSliderSpeed] = useState<number>(60); // 10x, 60x, 600x
 
   // Time slider: apply entity filtering when value changes
   useEffect(() => {
@@ -1683,7 +1673,7 @@ export default function App() {
     if (!timeSliderPlaying || !showTimeSlider) return;
     const interval = setInterval(() => {
       setTimeSliderValue(prev => {
-        const next = prev + 60000; // advance 1 minute per tick
+        const next = prev + (100 * timeSliderSpeed); // 100ms * speed multiplier
         if (next >= Date.now()) {
           setTimeSliderPlaying(false);
           return Date.now();
@@ -1692,8 +1682,9 @@ export default function App() {
       });
     }, 100); // 10 ticks per second for smooth playback
     return () => clearInterval(interval);
-  }, [timeSliderPlaying, showTimeSlider]);
+  }, [timeSliderPlaying, showTimeSlider, timeSliderSpeed]);
   const [showMeasureTool, setShowMeasureTool] = useState(false);
+  const [measureUnit, setMeasureUnit] = useState<'km' | 'mi' | 'nm'>('km');
   const [measurePoints, setMeasurePoints] = useState<Array<{ lat: number; lon: number }>>([]);
   const [measureDistance, setMeasureDistance] = useState<number | null>(null);
   const [measureArea, setMeasureArea] = useState<number | null>(null);
@@ -1853,8 +1844,6 @@ export default function App() {
   const [searchValue, setSearchValue] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState<Array<{name:string;lat:number;lon:number}>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [showTimeline, setShowTimeline] = useState(false);
-  const [timelineValue, setTimelineValue] = useState(100);
   const [isAutoRotating, setIsAutoRotating] = useState(false);
   const [showISSInfo, setShowISSInfo] = useState(false);
   const [issInfo, setIssInfo] = useState<{lat:number;lon:number} | null>(null);
@@ -2207,7 +2196,7 @@ export default function App() {
       .catch(() => {});
 
     // Sync vault statuses
-    fetch('/api/config/vault')
+    fetch('/api/config/vault', { headers: { ...authHeaders() } })
       .then(r => r.json())
       .then((data: { keys?: Record<string, { configured: boolean; masked: string }> }) => {
         if (data?.keys) {
@@ -2262,7 +2251,7 @@ export default function App() {
     try {
       const resp = await fetch('/api/config/vault', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ keys }),
       });
       if (resp.ok) {
@@ -4548,63 +4537,12 @@ export default function App() {
   }
 
   /* ═════════════════════════════════════════════════════════════════
-     TIMELINE
+     TIMELINE & TEMPORAL PLAYBACK (UNIFIED)
      ═════════════════════════════════════════════════════════════════ */
 
   const toggleTimeline = useCallback(() => {
-    setShowTimeline(p => !p);
+    setShowTimeSlider(p => !p);
   }, []);
-
-  const startTimeline = useCallback(() => {
-    if (timelineRef.current.active) return;
-    timelineRef.current.active = true;
-    timelineRef.current.interval = setInterval(() => {
-      timelineRef.current.current += 60000 * timelineRef.current.speed;
-      if (timelineRef.current.current >= timelineRef.current.end) {
-        timelineRef.current.current = timelineRef.current.start;
-      }
-      setTimelineValue(Math.round(((timelineRef.current.current - timelineRef.current.start) /
-        (timelineRef.current.end - timelineRef.current.start)) * 100));
-      throttledTimelineFilter();
-    }, 50);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const pauseTimeline = useCallback(() => {
-    timelineRef.current.active = false;
-    if (timelineRef.current.interval) clearInterval(timelineRef.current.interval);
-  }, []);
-
-  const resetTimeline = useCallback(() => {
-    pauseTimeline();
-    timelineRef.current.current = timelineRef.current.start;
-    setTimelineValue(0);
-    clearTimelineFilter();
-  }, [pauseTimeline]);
-
-  const stopTimeline = useCallback(() => {
-    pauseTimeline();
-    setShowTimeline(false);
-  }, [pauseTimeline]);
-
-  const _changeTimelineSpeed = useCallback((speed: number) => {
-    timelineRef.current.speed = speed;
-    if (timelineRef.current.active) { pauseTimeline(); startTimeline(); }
-  }, [pauseTimeline, startTimeline]);
-
-  const handleTimelineSlider = useCallback((val: number) => {
-    const t = timelineRef.current;
-    t.current = t.start + (t.end - t.start) * (val / 100);
-    setTimelineValue(val);
-    throttledTimelineFilter();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function throttledTimelineFilter() {
-    const now = Date.now();
-    if (now - timelineLastUpdateRef.current < 200) return;
-    timelineLastUpdateRef.current = now;
-    if (timelineThrottleRef.current) clearTimeout(timelineThrottleRef.current);
-    timelineThrottleRef.current = setTimeout(() => filterEntitiesByTime(timelineRef.current.current), 50);
-  }
 
   function filterEntitiesByTime(timeMs: number) {
     const v = viewerRef.current;
@@ -9046,7 +8984,9 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
   // Phase 3: Get location context
   const getLocationContextData = useCallback(async (lat: number, lon: number) => {
     try {
-      const resp = await fetch(`/api/agent/context?lat=${lat}&lon=${lon}`);
+      const resp = await fetch(`/api/agent/context?lat=${lat}&lon=${lon}`, {
+        headers: { ...authHeaders() }
+      });
       if (resp.ok) {
         const ctx = await resp.json();
         setAiMessages(prev => [...prev, { id: nextAiMsgIdRef.current++, role: 'assistant', content: `**Location Context: ${ctx.location.label}**\n\n**Seismic**: ${ctx.earthquakeRisk}\n**Weather**: ${ctx.weather}\n${ctx.nearbyEvents?.length > 0 ? `**Nearby Events**:\n${ctx.nearbyEvents.slice(0, 3).map((e: { title: string; category: string }) => `- ${e.title} (${e.category})`).join('\n')}` : ''}\n\n*Data from live APIs*`, type: 'context' }]);
@@ -9233,12 +9173,10 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
         return apply(setShowSpatialSketching, showSpatialSketching, 'spatial-sketch');
       case 'performance': case 'perf': case 'perf-monitor':
         return apply(setShowPerfMonitor, showPerfMonitor);
-      case 'timeline': case 'timeline-bar':
-        return apply(setShowTimeline, showTimeline);
+      case 'timeline': case 'timeline-bar': case 'time-slider': case 'time_slider': case 'time':
+        return apply(setShowTimeSlider, showTimeSlider);
       case 'measure': case 'measure-tool':
         return apply(setShowMeasureTool, showMeasureTool);
-      case 'time-slider': case 'time_slider':
-        return apply(setShowTimeSlider, showTimeSlider);
       case 'admin': case 'admin-dashboard':
         if (isAdmin || isDesktopApp) return apply(setShowAdmin, showAdmin);
         return undefined;
@@ -9274,7 +9212,7 @@ showNotification(`Enabled ${layersRef.current.filter(l=>l.on).length} layers`, '
       default:
         return undefined;
     }
-  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showMultiHazardPanel, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showTimeline, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowMultiHazardPanel, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowTimeline, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setMonitorCollapsed, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
+  }, [showAnalyticsWorkbench, showAnalytics, showSatelliteTracker, showSatelliteImagery, showAviationTracker, showLandCoverMapper, showMarketIntelPanel, showIntelFeed, showMultiHazardPanel, showMemoryExplorer, showSettings, showStudyArea, showApiVault, showCommandPalette, showScenarioGallery, showScenarioEditor, showCinematicDirector, showSpatialSketching, showPerfMonitor, showMeasureTool, showTimeSlider, showAdmin, showHeatmapLegend, showSmokeLegend, showPopulationImpact, setShowAnalyticsWorkbench, setShowAnalytics, setShowSatelliteTracker, setShowSatelliteImagery, setShowAviationTracker, setShowLandCoverMapper, setShowMarketIntelPanel, setShowIntelFeed, setShowMultiHazardPanel, setShowMemoryExplorer, setShowSettings, setShowStudyArea, setShowApiVault, setShowCommandPalette, setShowScenarioGallery, setShowScenarioEditor, setShowCinematicDirector, setShowSpatialSketching, setShowPerfMonitor, setShowMeasureTool, setShowTimeSlider, setShowAdmin, setShowAI, focusPanel, toggleISS, isAdmin, setForkMode, setMonitorCollapsed, setNavMode, setShowHeatmapLegend, setShowSmokeLegend, setShowPopulationImpact]);
 
   // Register a chat-resolved boundary as the app-wide ACTIVE study area so
   // every study-area consumer (Analytics Workbench, Land Cover Mapper, later
@@ -10018,7 +9956,9 @@ case 'openPanel':
 
     // Deep path: server-side LLM geocoding for any location name
     try {
-      const resp = await fetch(`/api/agent/geocode?q=${encodeURIComponent(text)}`);
+      const resp = await fetch(`/api/agent/geocode?q=${encodeURIComponent(text)}`, {
+        headers: { ...authHeaders() }
+      });
       if (resp.ok) {
         const data = await resp.json();
         if (data && data.lat !== undefined) return { lat: data.lat, lon: data.lon };
@@ -10813,7 +10753,6 @@ case 'openPanel':
     if (issTimerRef.current) clearInterval(issTimerRef.current);
     if (issRenderTickRef.current) { issRenderTickRef.current(); issRenderTickRef.current = null; }
     if (rotateTimerRef.current) cancelAnimationFrame(rotateTimerRef.current as unknown as number);
-    if (timelineRef.current.interval) clearInterval(timelineRef.current.interval);
     if (autoRefreshIntervalRef.current) clearInterval(autoRefreshIntervalRef.current);
     if (autoRefreshSlowRef.current) clearInterval(autoRefreshSlowRef.current);
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
@@ -11240,139 +11179,10 @@ case 'openPanel':
         </div>
       )}
 
-      {/* Token Setup */}
-      {showTokenSetup && (
-        <div className="token-setup">
-          <div className="token-card api-vault-card">
-            <div className="token-title">API Vault</div>
-            <div className="token-sub">
-              Paste the keys you want to use. Everything is stored locally in this browser, so it stays after refresh.
-            </div>
 
-            <div className="api-vault-grid">
-              <section className="api-section">
-                <div className="api-section-title">AI providers</div>
-                <label className="api-field">
-                  <span>Gemini API Key</span>
-                  <input
-                    type="password"
-                    className="token-input"
-                    placeholder="Paste your Gemini API key"
-                    value={apiVault.keys.GOOGLE_GEMINI_API_KEY || ''}
-                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, GOOGLE_GEMINI_API_KEY: e.target.value } }))}
-                  />
-                </label>
-                <label className="api-field">
-                  <span>Anthropic API Key</span>
-                  <input
-                    type="password"
-                    className="token-input"
-                    placeholder="Paste your Anthropic API key"
-                    value={apiVault.keys.ANTHROPIC_API_KEY || ''}
-                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, ANTHROPIC_API_KEY: e.target.value } }))}
-                  />
-                </label>
-                <label className="api-field">
-                  <span>Cesium Ion Access Token</span>
-                  <input
-                    type="password"
-                    className="token-input"
-                    placeholder="Paste your Cesium ion access token"
-                    value={apiVault.keys.CESIUM_ION_ACCESS_TOKEN || ''}
-                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, CESIUM_ION_ACCESS_TOKEN: e.target.value } }))}
-                  />
-                </label>
-                <div className="token-note" style={{marginTop: 6}}>
-                  A valid Cesium ion token enables World Terrain and a much more convincing 3D globe.
-                </div>
-                <label className="api-field">
-                  <span>Preferred AI Provider</span>
-                  <select
-                    className="token-input api-select"
-                    value={apiVault.preferredAiProvider}
-                    onChange={e => setApiVault(prev => ({
-                      ...prev,
-                      preferredAiProvider: e.target.value as AiProvider,
-                    }))}
-                  >
-                    <option value="gemini">Gemini</option>
-                    <option value="anthropic">Anthropic</option>
-                    <option value="local">Local fallback</option>
-                  </select>
-                </label>
-              </section>
-
-              <section className="api-section">
-                <div className="api-section-title">Future integrations</div>
-                <label className="api-field">
-                  <span>Sentinel Hub Client ID</span>
-                  <input
-                    type="text"
-                    className="token-input"
-                    placeholder="Optional"
-                    value={apiVault.keys.SENTINEL_HUB_CLIENT_ID || ''}
-                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, SENTINEL_HUB_CLIENT_ID: e.target.value } }))}
-                  />
-                </label>
-                <label className="api-field">
-                  <span>Sentinel Hub Client Secret</span>
-                  <input
-                    type="password"
-                    className="token-input"
-                    placeholder="Optional"
-                    value={apiVault.keys.SENTINEL_HUB_CLIENT_SECRET || ''}
-                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, SENTINEL_HUB_CLIENT_SECRET: e.target.value } }))}
-                  />
-                </label>
-                <label className="api-field">
-                  <span>MarineTraffic API Key</span>
-                  <input
-                    type="password"
-                    className="token-input"
-                    placeholder="Optional"
-                    value={apiVault.keys.MARINE_TRAFFIC_API_KEY || ''}
-                    onChange={e => setApiVault(prev => ({ ...prev, keys: { ...prev.keys, MARINE_TRAFFIC_API_KEY: e.target.value } }))}
-                  />
-                </label>
-                <div className="token-note" style={{marginTop: 6}}>
-                  These are stored for the matching layers when those integrations are enabled.
-                </div>
-              </section>
-            </div>
-
-            <div className="token-note">
-              Keys are stored locally on this device. If a service is unavailable, the app falls back to simulated data so the scene stays alive.
-            </div>
-            <div className="api-actions">
-              <button
-                className="btn-primary"
-                onClick={() => {
-                  handleApiVaultSave(apiVault.keys);
-                  setApiVault(prev => ({ ...prev, vaultDismissed: true }));
-                  setShowTokenSetup(false);
-                }}
-              >
-                Save & Continue
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={() => {
-                  setApiVault(prev => ({ ...prev, vaultDismissed: true }));
-                  try {
-                    localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify({ preferredAiProvider: apiVault.preferredAiProvider, vaultDismissed: true }));
-                  } catch { /* ignore */ }
-                  setShowTokenSetup(false);
-                }}
-              >
-                Continue Without Keys
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Top Bar */}
-      <div className="topbar glass-panel">
+      <div className={`topbar glass-panel ${heliFlying ? 'hidden' : ''}`}>
         <div className="brand">
           <div className="brand-dot" />
           <span>Terranoetis</span>
@@ -11449,11 +11259,11 @@ case 'openPanel':
           <TopbarMenu
             id="view" title="View & Capture" icon={<Eye size={16} />}
             menuId={openMenu} setMenuId={setOpenMenu}
-            active={isLayerEnabled('india_cctv') || showTimeline || isAutoRotating}
+            active={isLayerEnabled('india_cctv') || showTimeSlider || isAutoRotating}
             items={[
               { label: 'Worldwide Public Cameras', icon: <Cctv size={15} />, active: isLayerEnabled('india_cctv'), onClick: () => toggleLayer('india_cctv') },
               { label: 'ISS Tracker', icon: <Satellite size={15} />, onClick: () => toggleISS() },
-              { label: 'Timeline', icon: <Timer size={15} />, active: showTimeline, onClick: () => toggleTimeline() },
+              { label: 'Timeline', icon: <Timer size={15} />, active: showTimeSlider, onClick: () => toggleTimeline() },
               { label: 'Auto Rotate', icon: <RefreshCw size={15} />, active: isAutoRotating, onClick: () => toggleAutoRotate() },
               { label: 'Snapshot', icon: <Camera size={15} />, onClick: () => takeSnapshot() },
             ]}
@@ -11563,7 +11373,7 @@ case 'openPanel':
             <button className="btn-all" onClick={() => toggleAllLayers(false)}>Disable All</button>
           </div>
           <div className="btn-row" style={{marginBottom:8, gap:4, flexWrap:'wrap'}}>
-            <button className="btn-all" style={{background:showTimeSlider ? 'rgba(96,165,250,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowTimeSlider(p => !p)}><Clock size={12} style={{display:'inline',marginRight:3}} /> Time</button>
+            <button className="btn-all" style={{background:showTimeSlider ? 'rgba(96,165,250,0.25)' : 'rgba(255,255,255,0.05)', borderColor: showTimeSlider ? 'rgba(96,165,250,0.5)' : undefined, fontSize:10}} onClick={() => setShowTimeSlider(p => !p)}><Clock size={12} style={{display:'inline',marginRight:3}} /> Timeline</button>
             <button className="btn-all" style={{background:showMeasureTool ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => setShowMeasureTool(p => !p)}><Ruler size={12} style={{display:'inline',marginRight:3}} /> Measure</button>
             <button className="btn-all" style={{background: navMode==='route' ? 'rgba(34,211,238,0.25)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => { const on = navMode!=='route'; setNavMode(on?'route':'none'); if(!on){clearNavEntities(); setRoutePoints([]); setRouteResult(null);} setShowMeasureTool(false); }}><Navigation2 size={12} style={{display:'inline',marginRight:3}} /> Route</button>
             <button className="btn-all" style={{background: navMode==='safest' ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,0.05)', fontSize:10}} onClick={() => { const on = navMode!=='safest'; setNavMode(on?'safest':'none'); if(!on){clearNavEntities(); setSafestHazard(null); setSafestResult(null);} setShowMeasureTool(false); }}><Shield size={12} style={{display:'inline',marginRight:3}} /> Safest</button>
@@ -11778,26 +11588,8 @@ case 'openPanel':
         </div>
       )}
 
-      {/* Timeline */}
-      <div className={`timeline-bar glass-panel ${showTimeline ? '' : 'collapsed'} ${sidebarCollapsed ? 'full-width' : ''}`}>
-        <button className="tl-btn" onClick={startTimeline}><Play size={14} /></button>
-        <button className="tl-btn" onClick={pauseTimeline}><Pause size={14} /></button>
-        <button className="tl-btn" onClick={resetTimeline}><SkipBack size={14} /></button>
-        <button className="tl-btn" onClick={stopTimeline}><Square size={14} /></button>
-        <div className="tl-slider-wrap">
-          <div className="tl-labels">
-            <span>{formatISTCalendarDate(timelineRef.current.start)}</span>
-            <span>{formatIST(timelineRef.current.current, { dateStyle: 'medium', timeStyle: 'short' })} {timezoneLabel()}</span>
-            <span>Now</span>
-          </div>
-          <input type="range" className="tl-slider" min="0" max="100" value={timelineValue}
-            onChange={e => handleTimelineSlider(parseInt(e.target.value))} />
-        </div>
-        <span className="tl-speed">{timelineRef.current.speed}x</span>
-      </div>
-
       {/* Stats Bar */}
-      <div className={`statsbar glass-panel ${sidebarCollapsed ? 'full-width' : ''}`}>
+      <div className={`statsbar glass-panel ${sidebarCollapsed ? 'full-width' : ''} ${heliFlying ? 'hidden' : ''}`}>
         <div className="stat-item"><div className="stat-dot" style={{background:'#f59e0b'}}/><span className="stat-label">Layers</span><span className="stat-val">{activeLayerCount}/{LAYER_DEFS.length}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#22c55e'}}/><span className="stat-label">Events</span><span className="stat-val">{activeEvents}</span></div>
         <div className="stat-item"><div className="stat-dot" style={{background:'#8b5cf6'}}/><span className="stat-label">Intel</span><span className="stat-val">{intelFeedRef.current.length}</span></div>
@@ -12332,35 +12124,137 @@ case 'openPanel':
         </div>
       )}
 
-      {/* Measure Tool Display */}
-      {showMeasureTool && measurePoints.length > 0 && (
+      {/* Measure Tool Display HUD */}
+      {showMeasureTool && (
         <div className="glass-panel" style={{
-          position: 'fixed', top: 60, left: '50%', transform: 'translateX(-50%)',
-          padding: '10px 20px', borderRadius: 10, zIndex: 110,
-          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)',
+          padding: '8px 16px', borderRadius: 12, zIndex: 110,
+          display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+          background: 'rgba(11, 17, 32, 0.90)',
+          border: '1px solid rgba(245, 158, 11, 0.35)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 20px rgba(245, 158, 11, 0.15)',
+          backdropFilter: 'blur(12px)',
         }}>
-          <span style={{ color: '#f59e0b', fontWeight: 600 }}><Ruler size={12} style={{display:'inline',marginRight:4}} /> Measurement</span>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 24, height: 24, borderRadius: 6, background: 'rgba(245, 158, 11, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Ruler size={14} style={{ color: '#f59e0b' }} />
+            </div>
+            <span style={{ color: '#f8fafc', fontWeight: 600, fontSize: 13, letterSpacing: '0.02em' }}>
+              Geospatial Ruler
+            </span>
+          </div>
+
+          {/* Status / Measurements */}
+          {measurePoints.length === 0 && (
+            <span style={{ color: '#94a3b8', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', animation: 'pulse 2s infinite' }} />
+              Click any location on globe to start measuring
+            </span>
+          )}
+
+          {measurePoints.length === 1 && (
+            <span style={{ color: '#fbbf24', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
+              Point 1 placed · Click second point for distance
+            </span>
+          )}
+
           {measureDistance !== null && (
-            <span style={{ color: '#e2e8f0', fontFamily: 'monospace', fontSize: 13 }}>
-              {measureDistance >= 1000
-                ? `${(measureDistance / 1000).toFixed(2)} km`
-                : `${measureDistance.toFixed(0)} m`}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.25)', padding: '3px 10px', borderRadius: 6 }}>
+              <span style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600 }}>DIST:</span>
+              <span style={{ color: '#ffffff', fontFamily: 'monospace', fontWeight: 700, fontSize: 13 }}>
+                {measureUnit === 'km'
+                  ? (measureDistance >= 1000 ? `${(measureDistance / 1000).toFixed(2)} km` : `${measureDistance.toFixed(0)} m`)
+                  : measureUnit === 'mi'
+                  ? `${((measureDistance / 1000) * 0.621371).toFixed(2)} mi`
+                  : `${((measureDistance / 1000) * 0.539957).toFixed(2)} nm`}
+              </span>
+            </div>
           )}
+
           {measureArea !== null && measurePoints.length >= 3 && (
-            <span style={{ color: '#22d3ee', fontFamily: 'monospace', fontSize: 13 }}>
-              Area: {measureArea >= 1
-                ? `${measureArea.toFixed(2)} km²`
-                : `${(measureArea * 1e6).toFixed(2)} m²`}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(34, 211, 238, 0.12)', border: '1px solid rgba(34, 211, 238, 0.25)', padding: '3px 10px', borderRadius: 6 }}>
+              <span style={{ fontSize: 11, color: '#22d3ee', fontWeight: 600 }}>AREA:</span>
+              <span style={{ color: '#ffffff', fontFamily: 'monospace', fontWeight: 700, fontSize: 13 }}>
+                {measureUnit === 'km'
+                  ? (measureArea >= 1 ? `${measureArea.toFixed(2)} km²` : `${(measureArea * 1e6).toFixed(0)} m²`)
+                  : measureUnit === 'mi'
+                  ? `${(measureArea * 0.386102).toFixed(2)} sq mi`
+                  : `${(measureArea * 0.291553).toFixed(2)} sq nm`}
+              </span>
+            </div>
           )}
-          {measureDistance === null && measurePoints.length === 1 && (
-            <span style={{ color: '#94a3b8' }}>Click a second point on the globe</span>
-          )}
-          <button onClick={() => { setMeasurePoints([]); setMeasureDistance(null); setMeasureArea(null); }}
-            style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: 6, cursor: 'pointer', fontSize: 11, padding: '4px 10px' }}>
-            Clear
-          </button>
+
+          {/* Unit switcher */}
+          <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.06)', borderRadius: 6, padding: 2, border: '1px solid rgba(255,255,255,0.1)' }}>
+            {(['km', 'mi', 'nm'] as const).map(u => (
+              <button
+                key={u}
+                onClick={() => setMeasureUnit(u)}
+                style={{
+                  background: measureUnit === u ? 'rgba(245, 158, 11, 0.35)' : 'transparent',
+                  color: measureUnit === u ? '#fef3c7' : '#94a3b8',
+                  border: 'none',
+                  borderRadius: 4,
+                  padding: '3px 8px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {u.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {measurePoints.length > 0 && (
+              <button
+                onClick={() => { setMeasurePoints([]); setMeasureDistance(null); setMeasureArea(null); }}
+                style={{
+                  background: 'rgba(239,68,68,0.15)',
+                  border: '1px solid rgba(239,68,68,0.3)',
+                  color: '#fca5a5',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  padding: '4px 10px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                Clear
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setShowMeasureTool(false);
+                setMeasurePoints([]);
+                setMeasureDistance(null);
+                setMeasureArea(null);
+              }}
+              style={{
+                background: 'rgba(255,255,255,0.08)',
+                border: '1px solid rgba(255,255,255,0.14)',
+                color: '#cbd5e1',
+                borderRadius: 6,
+                cursor: 'pointer',
+                fontSize: 11,
+                padding: '4px 8px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+              title="Close Measure Tool"
+            >
+              <X size={13} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -12404,25 +12298,182 @@ case 'openPanel':
         </div>
       )}
 
-      {/* Time Slider */}
+      {/* Unified Timeline & Mission Playback Scrubber */}
       {showTimeSlider && (
         <div className="glass-panel" style={{
           position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)',
-          padding: '12px 24px', borderRadius: 12, zIndex: 1000, minWidth: 400,
+          padding: '10px 18px', borderRadius: 14, zIndex: 1000, minWidth: 540,
+          background: 'rgba(11, 17, 32, 0.94)',
+          border: '1px solid rgba(96, 165, 250, 0.35)',
+          boxShadow: '0 12px 40px rgba(0,0,0,0.6), 0 0 25px rgba(96, 165, 250, 0.15)',
+          backdropFilter: 'blur(12px)',
           display: 'flex', alignItems: 'center', gap: 12,
         }}>
-          <button onClick={() => setTimeSliderPlaying(p => !p)}
-            style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {timeSliderPlaying ? <Pause size={18} /> : <Play size={18} />}
+          {/* Play/Pause */}
+          <button
+            onClick={() => setTimeSliderPlaying(p => !p)}
+            style={{
+              width: 32, height: 32, borderRadius: 8,
+              background: timeSliderPlaying ? 'rgba(96, 165, 250, 0.25)' : 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(96, 165, 250, 0.4)',
+              color: '#60a5fa',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+              transition: 'all 0.15s ease',
+            }}
+            title={timeSliderPlaying ? "Pause Playback" : `Play Replay (${timeSliderSpeed}x)`}
+          >
+            {timeSliderPlaying ? <Pause size={16} /> : <Play size={16} />}
           </button>
-          <input type="range" min={Date.now() - 86400000} max={Date.now()} value={timeSliderValue}
-            onChange={e => setTimeSliderValue(Number(e.target.value))}
-            style={{ flex: 1, height: 4, accentColor: '#60a5fa' }} />
-          <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 80, textAlign: 'right' }}>
-            {formatISTTime(timeSliderValue)}
-          </span>
-          <button onClick={() => setShowTimeSlider(false)}
-            style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 14 }}>[X]</button>
+
+          {/* Speed selector */}
+          <div style={{ display: 'flex', gap: 2, flexShrink: 0, background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: 2, border: '1px solid rgba(255,255,255,0.08)' }}>
+            {[10, 60, 600].map(s => (
+              <button
+                key={s}
+                onClick={() => setTimeSliderSpeed(s)}
+                style={{
+                  background: timeSliderSpeed === s ? 'rgba(96, 165, 250, 0.25)' : 'transparent',
+                  border: 'none',
+                  color: timeSliderSpeed === s ? '#60a5fa' : '#94a3b8',
+                  borderRadius: 4, padding: '2px 5px', fontSize: 9, fontWeight: 700, cursor: 'pointer',
+                }}
+                title={`Playback speed ${s}x`}
+              >
+                {s}x
+              </button>
+            ))}
+          </div>
+
+          {/* Quick jump presets */}
+          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+            <button
+              onClick={() => setTimeSliderValue(Date.now() - 86400000)}
+              style={{
+                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                color: '#94a3b8', borderRadius: 4, padding: '3px 6px', fontSize: 10, cursor: 'pointer',
+                fontWeight: 600,
+              }}
+              title="Jump to 24 hours ago"
+            >
+              -24h
+            </button>
+            <button
+              onClick={() => setTimeSliderValue(Date.now() - 43200000)}
+              style={{
+                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                color: '#94a3b8', borderRadius: 4, padding: '3px 6px', fontSize: 10, cursor: 'pointer',
+                fontWeight: 600,
+              }}
+              title="Jump to 12 hours ago"
+            >
+              -12h
+            </button>
+            <button
+              onClick={() => setTimeSliderValue(Date.now() - 3600000)}
+              style={{
+                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                color: '#94a3b8', borderRadius: 4, padding: '3px 6px', fontSize: 10, cursor: 'pointer',
+                fontWeight: 600,
+              }}
+              title="Jump to 1 hour ago"
+            >
+              -1h
+            </button>
+            <button
+              onClick={() => { setTimeSliderValue(Date.now()); setTimeSliderPlaying(false); }}
+              style={{
+                background: Date.now() - timeSliderValue < 120000 ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255,255,255,0.06)',
+                border: Date.now() - timeSliderValue < 120000 ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(255,255,255,0.1)',
+                color: Date.now() - timeSliderValue < 120000 ? '#4ade80' : '#94a3b8',
+                borderRadius: 4, padding: '3px 6px', fontSize: 10, cursor: 'pointer',
+                fontWeight: 700,
+              }}
+              title="Reset to Live Real-Time"
+            >
+              Live
+            </button>
+          </div>
+
+          {/* Scrubber slider */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>-24h</span>
+              {/* Live / Replay badge */}
+              {Date.now() - timeSliderValue < 120000 ? (
+                <span
+                  onClick={() => { setTimeSliderValue(Date.now()); setTimeSliderPlaying(false); }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    fontSize: 10, fontWeight: 700, color: '#22c55e',
+                    background: 'rgba(34, 197, 94, 0.12)', border: '1px solid rgba(34, 197, 94, 0.3)',
+                    padding: '1px 6px', borderRadius: 4, letterSpacing: '0.04em', cursor: 'pointer'
+                  }}
+                  title="Click to snap to Live"
+                >
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22c55e', animation: 'pulse 1.5s infinite' }} />
+                  LIVE
+                </span>
+              ) : (
+                <span
+                  onClick={() => { setTimeSliderValue(Date.now()); setTimeSliderPlaying(false); }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    fontSize: 10, fontWeight: 600, color: '#38bdf8',
+                    background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)',
+                    padding: '1px 6px', borderRadius: 4, cursor: 'pointer'
+                  }}
+                  title="Click to reset to Live"
+                >
+                  ⏱ REPLAY (-{Math.round((Date.now() - timeSliderValue) / 3600000)}h)
+                </span>
+              )}
+              <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>Now</span>
+            </div>
+            <input
+              type="range"
+              min={Date.now() - 86400000}
+              max={Date.now()}
+              value={timeSliderValue}
+              onChange={e => setTimeSliderValue(Number(e.target.value))}
+              className="time-slider-scrubber"
+              style={{
+                width: '100%',
+                height: 6,
+                accentColor: '#38bdf8',
+                cursor: 'pointer',
+              }}
+            />
+          </div>
+
+          {/* Time display */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 95, flexShrink: 0 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#f8fafc', fontFamily: 'monospace' }}>
+              {formatISTTime(timeSliderValue)}
+            </span>
+            <span style={{ fontSize: 9, color: '#94a3b8', letterSpacing: '0.02em', fontWeight: 500 }}>
+              IST TELEMETRY
+            </span>
+          </div>
+
+          {/* Close button */}
+          <button
+            onClick={() => setShowTimeSlider(false)}
+            style={{
+              width: 26, height: 26, borderRadius: 6,
+              background: 'rgba(255, 255, 255, 0.06)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              color: '#94a3b8',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+              transition: 'all 0.15s ease',
+            }}
+            title="Close Timeline Scrubber"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 
@@ -12475,6 +12526,7 @@ case 'openPanel':
       {/* First-run mission card */}
       {showFirstRun && !heliFlying && (
         <FirstRunCard
+          sidebarCollapsed={sidebarCollapsed}
           onDismiss={() => setShowFirstRun(false)}
           onStage={(mission) => { stageFirstRunMission(mission); setShowFirstRun(false); }}
         />
@@ -12529,9 +12581,10 @@ case 'openPanel':
         onToggleLayer={toggleLayer}
         onFlyTo={focusLocation}
         onOpenMarketIntelPanel={() => { setShowMarketIntelPanel(true); setShowCommandPalette(false); focusPanel('market-intel'); }}
+        onDispatchCommand={(cmd) => { applyPanelCommand(cmd, true); setShowCommandPalette(false); }}
       />
 
-      <PerformanceMonitor viewer={viewerRef.current} visible={showPerfMonitor} onToggle={() => setShowPerfMonitor(p => !p)} />
+      <PerformanceMonitor viewer={viewerRef.current} visible={showPerfMonitor && !heliFlying} onToggle={() => setShowPerfMonitor(p => !p)} sidebarCollapsed={sidebarCollapsed} />
       {/* Monitor Panel */}
       {!loading && !monitorCollapsed && (
         <div style={{ position: 'absolute', top: 60, right: 10, zIndex: getPanelZIndex('monitor', 110), width: 320 }}>
@@ -12822,11 +12875,30 @@ case 'openPanel':
       {/* Sensor-style accessibility widget — floating, draggable, lockable */}
       {!loading && <SensorStyleWidget activeStyle={sensorStyle} onSelect={id => setSensorStyle(prev => sensorStylesRef.current?.toggle(id) ?? id)} />}
 
-      {/* API Configuration & Credentials Vault Modal */}
+      {/* API Configuration & Credentials Vault Modal (Unified Settings & First-Run Onboarding) */}
       <ApiVault
-        isOpen={showApiVault}
-        onClose={() => setShowApiVault(false)}
-        onSave={handleApiVaultSave}
+        isOpen={showApiVault || showTokenSetup}
+        isOnboarding={showTokenSetup}
+        onClose={() => {
+          if (showTokenSetup) {
+            setApiVault(prev => ({ ...prev, vaultDismissed: true }));
+            try {
+              localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify({ preferredAiProvider: apiVault.preferredAiProvider, vaultDismissed: true }));
+            } catch { /* ignore */ }
+            setShowTokenSetup(false);
+          }
+          setShowApiVault(false);
+        }}
+        onSave={(keys) => {
+          handleApiVaultSave(keys);
+          if (showTokenSetup) {
+            setApiVault(prev => ({ ...prev, vaultDismissed: true }));
+            try {
+              localStorage.setItem(SESSION_VAULT_KEY, JSON.stringify({ preferredAiProvider: apiVault.preferredAiProvider, vaultDismissed: true }));
+            } catch { /* ignore */ }
+            setShowTokenSetup(false);
+          }
+        }}
         initialKeys={apiVault.keys}
       />
     </div>

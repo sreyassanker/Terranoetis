@@ -45,3 +45,17 @@ export function runtimeCesium(): RuntimeCesium {
 export function sceneContext(viewer: Cesium.Viewer): unknown {
   return (viewer.scene as unknown as { context?: unknown }).context;
 }
+
+/**
+ * Sanitize GLSL source strings before passing them to Cesium.
+ * Cesium's ShaderSource has an upstream bug in removeComments() where
+ * `match.match(/\n/gm).length` throws:
+ * "TypeError: null is not an object (evaluating 't.match(/\n/gm).length')"
+ * whenever a comment block starts with `/**` without newline characters.
+ * Converting `/**` to `/*` neutralizes Cesium's buggy regex while preserving
+ * exact lines and comment contents.
+ */
+export function sanitizeGlsl(glsl: string): string {
+  if (!glsl) return glsl;
+  return glsl.replace(/\/\*\*([\s\S]*?)\*\//g, (_match, body) => '/*' + body + '*/');
+}

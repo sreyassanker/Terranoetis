@@ -596,16 +596,39 @@ export default function CinematicDirector({ viewer, onClose, layerVersion, focus
             )}
           </div>
 
-          {/* Scrub slider */}
-          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 10, color: 'var(--text-dim)', minWidth: 40 }}>{(progress * 100).toFixed(0)}%</span>
-            <input type="range" min="0" max="100" value={progress * 100}
-              onMouseDown={handleScrubStart}
-              onTouchStart={handleScrubStart}
-              onChange={e => handleScrubChange(Number(e.target.value))}
-              onMouseUp={handleScrubEnd}
-              onTouchEnd={handleScrubEnd}
-              style={{ flex: 1, height: 3, accentColor: '#60a5fa' }} />
+          {/* Scrub slider with Granular Timecode & Easing */}
+          <div style={{ marginTop: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, fontFamily: 'monospace', color: '#94a3b8', marginBottom: 4 }}>
+              <span style={{ color: '#38bdf8', fontWeight: 700 }}>
+                {(() => {
+                  const sec = progress * (selectedPath?.duration || 0);
+                  const m = Math.floor(sec / 60);
+                  const s = Math.floor(sec % 60);
+                  const ms = Math.floor((sec % 1) * 10);
+                  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms}`;
+                })()}
+              </span>
+              <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', letterSpacing: '0.04em' }}>
+                CUBIC EASING · {(progress * 100).toFixed(0)}%
+              </span>
+              <span style={{ color: '#64748b' }}>
+                {(() => {
+                  const sec = selectedPath?.duration || 0;
+                  const m = Math.floor(sec / 60);
+                  const s = Math.floor(sec % 60);
+                  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.0`;
+                })()}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="range" min="0" max="100" value={progress * 100}
+                onMouseDown={handleScrubStart}
+                onTouchStart={handleScrubStart}
+                onChange={e => handleScrubChange(Number(e.target.value))}
+                onMouseUp={handleScrubEnd}
+                onTouchEnd={handleScrubEnd}
+                style={{ flex: 1, height: 4, accentColor: '#38bdf8', cursor: 'pointer' }} />
+            </div>
           </div>
         </div>
 

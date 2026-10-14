@@ -1,4 +1,4 @@
-name: Release Desktop App
+name: Release Desktop App (Multi-Platform)
 
 on:
   push:
@@ -14,46 +14,91 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # macOS Apple Silicon (M1/M2/M3/M4)
           - platform: 'macos-latest'
+            target: 'aarch64-apple-darwin'
             args: '--target aarch64-apple-darwin'
+          # macOS Intel (x86_64)
+          - platform: 'macos-13'
+            target: 'x86_64-apple-darwin'
+            args: '--target x86_64-apple-darwin'
+          # Linux (Ubuntu, Debian, Fedora, Arch via AppImage & DEB)
           - platform: 'ubuntu-22.04'
+            target: 'x86_64-unknown-linux-gnu'
             args: ''
+          # Windows (x64 NSIS exe & WiX MSI)
           - platform: 'windows-latest'
+            target: 'x86_64-pc-windows-msvc'
             args: ''
 
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
 
-      - name: Install Rust
+      - name: Install Rust Stable Toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
-      - name: Install dependencies (Ubuntu only)
+      - name: Install Linux Dependencies (Ubuntu)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            squashfs-tools
 
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Build frontend
-        run: npm run build
+      - name: Build Full Production Stack (Frontend + Server Bundle)
+        run: npm run build:all
 
-      - name: Build Tauri Desktop App
+      - name: Build, Sign & Package Tauri Desktop App
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Apple Developer Code Signing & Notarization
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Windows Authenticode & Tauri updater signing
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Terranoetis Desktop v__VERSION__'
-          releaseBody: 'Terranoetis Desktop Application — 4D Real-time Geospatial Intelligence Workstation'
-          releaseDraft: true
+          releaseBody: |
+            ## Terranoetis Geospatial Intelligence Desktop — v__VERSION__
+            
+            ### Cross-Platform Distributions
+            - **macOS (Apple Silicon)**: `Terranoetis_3.0.0_aarch64.dmg`
+            - **macOS (Intel)**: `Terranoetis_3.0.0_x64.dmg`
+            - **Windows**: `Terranoetis_3.0.0_x64-setup.exe` & `Terranoetis_3.0.0_x64_en-US.msi`
+            - **Linux**: `terranoetis_3.0.0_amd64.AppImage` & `terranoetis_3.0.0_amd64.deb`
+            
+            ### Features
+            - Embedded production intelligence backend running on port 3001
+            - AES-256-GCM encrypted OS Credential Vault
+            - 150 analytical equation models and live Cesium 4D globe
+            - Zero external Node.js runtime requirement
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

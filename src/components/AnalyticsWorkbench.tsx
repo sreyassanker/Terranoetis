@@ -168,6 +168,18 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
 
   const hasBbox = !!bbox;
 
+  const domainCategories = useMemo(() => {
+    const map = new Map<string, { count: number; color: string }>();
+    for (const part of PARTS) {
+      for (const dom of part.domains) {
+        const cur = map.get(dom.name) || { count: 0, color: dom.color };
+        cur.count += dom.tools.length;
+        map.set(dom.name, cur);
+      }
+    }
+    return Array.from(map.entries()).map(([name, info]) => ({ name, ...info }));
+  }, []);
+
   return (
     <div style={{ position: 'fixed', top: 60, right: 10, bottom: 56, zIndex, width: 440, maxWidth: 'calc(100vw - 32px)', display: open ? 'block' : 'none' }}>
       <Panel title="ANALYTICS WORKBENCH" icon={<FlaskConical size={16} />} accentColor="#8b5cf6" iconColor="#a78bfa" titleColor="#c4b5fd" onClose={onClose} style={{ height: '100%', animation: 'slideInRight 0.25s ease' }}>
@@ -180,19 +192,53 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
           </div>
         </div>
 
+        {/* Domain Category Filter Tabs */}
+        <div style={{ padding: '6px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'thin' }}>
+          <button
+            type="button"
+            onClick={() => setDomainFilter('all')}
+            style={{
+              padding: '3px 8px', borderRadius: 5, fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap',
+              border: domainFilter === 'all' ? '1px solid #a78bfa' : '1px solid rgba(255,255,255,0.1)',
+              background: domainFilter === 'all' ? 'rgba(139,92,246,0.25)' : 'rgba(255,255,255,0.03)',
+              color: domainFilter === 'all' ? '#c4b5fd' : '#94a3b8',
+              fontWeight: domainFilter === 'all' ? 600 : 400
+            }}
+          >
+            All ({TOTAL_EQUATIONS})
+          </button>
+          {domainCategories.map(cat => {
+            const isActive = domainFilter === cat.name;
+            return (
+              <button
+                key={cat.name}
+                type="button"
+                onClick={() => setDomainFilter(isActive ? 'all' : cat.name)}
+                style={{
+                  padding: '3px 8px', borderRadius: 5, fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap',
+                  border: isActive ? `1px solid ${cat.color}` : '1px solid rgba(255,255,255,0.1)',
+                  background: isActive ? `${cat.color}25` : 'rgba(255,255,255,0.03)',
+                  color: isActive ? '#f8fafc' : '#cbd5e1',
+                  fontWeight: isActive ? 600 : 400,
+                  display: 'flex', alignItems: 'center', gap: 4
+                }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: cat.color }} />
+                <span>{cat.name}</span>
+                <span style={{ fontSize: 9, opacity: 0.7 }}>({cat.count})</span>
+              </button>
+            );
+          })}
+        </div>
+
         {/* Toolbar: domain filter + view toggle + stats */}
         <div style={{ padding: '6px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
           <div style={{ fontSize: 10, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Wifi size={10} />
-            {hasSearch ? `${totalResults} of ${TOTAL_EQUATIONS}` : `${TOTAL_EQUATIONS} tools`}
+            {hasSearch || domainFilter !== 'all' ? `${totalResults} of ${TOTAL_EQUATIONS}` : `${TOTAL_EQUATIONS} tools`}
             {!hasBbox && <span style={{ color: '#f59e0b' }} title="No study area active — using default location">· no study area</span>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <select value={domainFilter} onChange={(e) => setDomainFilter(e.target.value)}
-              style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(139,92,246,0.2)', color: '#94a3b8', outline: 'none' }}>
-              <option value="all">All domains</option>
-              {ALL_DOMAIN_NAMES.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
               <button onClick={() => setViewMode('tree')} style={{ padding: '2px 6px', fontSize: 9, cursor: 'pointer', border: 'none', background: viewMode === 'tree' ? 'rgba(139,92,246,0.2)' : 'transparent', color: viewMode === 'tree' ? '#a78bfa' : '#64748b' }} title="Tree view">
                 <Layers size={11} />
@@ -243,8 +289,10 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
                         {tool.equation && (
                           <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: domain.color, opacity: 0.7, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tool.equation}</div>
                         )}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3 }}>
-                          <span style={{ fontSize: 8, color: '#475569' }}>{domain.name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                          <span style={{ fontSize: 8, color: domain.color, background: `${domain.color}15`, border: `1px solid ${domain.color}30`, padding: '1px 5px', borderRadius: 3 }}>
+                            {domain.name}
+                          </span>
                           {dataSources.length > 0 && (
                             <span style={{ fontSize: 7, color: '#86efac', display: 'flex', alignItems: 'center', gap: 2 }}>
                               <Database size={7} /> {dataSources.length} live source{dataSources.length > 1 ? 's' : ''}
@@ -260,7 +308,7 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
               /* Tree view — Parts → Domains → Tools */
               filteredParts.map((part) => {
                 const partToolCount = part.domains.reduce((s, d) => s + d.tools.length, 0);
-                const isPartExpanded = expandedParts.has(part.id) || hasSearch;
+                const isPartExpanded = expandedParts.has(part.id) || hasSearch || domainFilter !== 'all';
                 return (
                   <div key={part.id} style={{ marginBottom: 6 }}>
                     <div onClick={() => togglePart(part.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', background: isPartExpanded ? `${part.color}10` : 'rgba(255,255,255,0.03)', border: `1px solid ${isPartExpanded ? `${part.color}30` : 'rgba(255,255,255,0.06)'}`, transition: 'all 0.15s', marginBottom: isPartExpanded ? 6 : 2 }}>
@@ -277,7 +325,7 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
                     {isPartExpanded && (
                       <div style={{ paddingLeft: 8 }}>
                         {part.domains.map((domain) => {
-                          const isDomainExpanded = expandedDomains.has(domain.id) || hasSearch;
+                          const isDomainExpanded = expandedDomains.has(domain.id) || hasSearch || domainFilter !== 'all';
                           return (
                             <div key={domain.id} style={{ marginBottom: 4 }}>
                               <div onClick={() => toggleDomain(domain.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 6, cursor: 'pointer' }}>
@@ -307,14 +355,19 @@ export const AnalyticsWorkbench: React.FC<AnalyticsWorkbenchProps> = ({ open, on
                                             <span style={{ fontSize: 9, color: '#475569', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>#{tool.id}</span>
                                           </div>
                                           {tool.equation && (
-                                            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: domain.color, opacity: 0.6, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tool.equation}</div>
+                                            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: domain.color, opacity: 0.8, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tool.equation}</div>
                                           )}
-                                          {dataSources.length > 0 && (
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 2 }}>
-                                              <Database size={7} color="#22c55e" />
-                                              <span style={{ fontSize: 7, color: '#22c55e', opacity: 0.7 }}>{dataSources.length} live source{dataSources.length > 1 ? 's' : ''}</span>
-                                            </div>
-                                          )}
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                                            <span style={{ fontSize: 8, color: domain.color, background: `${domain.color}15`, border: `1px solid ${domain.color}30`, padding: '1px 5px', borderRadius: 3 }}>
+                                              {domain.name}
+                                            </span>
+                                            {dataSources.length > 0 && (
+                                              <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                                                <Database size={7} color="#22c55e" />
+                                                <span style={{ fontSize: 7, color: '#22c55e', opacity: 0.85 }}>{dataSources.length} live source{dataSources.length > 1 ? 's' : ''}</span>
+                                              </div>
+                                            )}
+                                          </div>
                                         </div>
                                       </div>
                                     );

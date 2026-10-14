@@ -83,6 +83,11 @@ async function ensureRedis() {
 try {
   if (ONLY === 'all' || ONLY === 'ports') await freePort(3000);
   if (ONLY === 'all' || ONLY === 'redis') await ensureRedis();
+  if (ONLY === 'all') {
+    try {
+      execSync('node scripts/patch-cesium.js', { stdio: 'inherit' });
+    } catch { /* best-effort */ }
+  }
 } catch (e) {
   log(`dev-prep skipped: ${e.message}`);
 }

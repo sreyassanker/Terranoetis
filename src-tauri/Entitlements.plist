@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Allows JIT compilation for high-performance WebAssembly and JavaScript engines -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- Allows outgoing network connections for live geospatial telemetry, APIs, and satellite feeds -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <!-- Allows localhost loopback binding for the background intelligence server (port 3001) -->
+  <key>com.apple.security.network.server</key>
+  <true/>
+  <!-- Location and microphone access descriptions matching Info.plist -->
+  <key>com.apple.security.personal-information.location</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+</dict>
+</plist>

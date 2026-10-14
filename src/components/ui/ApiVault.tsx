@@ -35,6 +35,7 @@ import {
   Unlock,
   AlertTriangle,
 } from 'lucide-react';
+import { authHeaders } from '@/context/AuthContext';
 
 export interface ApiConfig {
   id: string;
@@ -68,9 +69,10 @@ interface ApiVaultProps {
   onClose: () => void;
   onSave?: (savedKeys: Record<string, string>) => void;
   initialKeys?: Record<string, string>;
+  isOnboarding?: boolean;
 }
 
-export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
+export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiVaultProps) {
   const [apis, setApis] = useState<ApiConfig[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [keyStatuses, setKeyStatuses] = useState<Record<string, KeyStatusInfo>>({});
@@ -84,6 +86,7 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
   const [filterMode, setFilterMode] = useState<'all' | 'configured' | 'missing' | 'verified' | 'issues'>('all');
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [savingProvider, setSavingProvider] = useState<string | null>(null);
   const [savingAll, setSavingAll] = useState(false);
   const [bulkTesting, setBulkTesting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
@@ -95,8 +98,8 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
     setLoading(true);
     try {
       const [apiRes, vaultRes] = await Promise.all([
-        fetch('/api/config/apis', { signal }).then(r => r.json()),
-        fetch('/api/config/vault', { signal }).then(r => r.json()).catch(() => ({ keys: {} })),
+        fetch('/api/config/apis', { signal, headers: { ...authHeaders() } }).then(r => r.json()),
+        fetch('/api/config/vault', { signal, headers: { ...authHeaders() } }).then(r => r.json()).catch(() => ({ keys: {} })),
       ]);
 
       if (signal?.aborted) return;
@@ -206,42 +209,67 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
 
   // Single Key Validation
   const handleValidateKey = async (field: string) => {
+    const isKaggle = field === 'KAGGLE_USERNAME' || field === 'KAGGLE_KEY';
     const currentTyped = inputValues[field]?.trim();
-    setValidations(prev => ({
-      ...prev,
-      [field]: { validating: true, message: 'Contacting provider API...' },
-    }));
+    const contextKeys: Record<string, string> = {};
+    if (isKaggle) {
+      const u = inputValues['KAGGLE_USERNAME']?.trim();
+      const k = inputValues['KAGGLE_KEY']?.trim();
+      if (u && !u.includes('••••')) contextKeys.KAGGLE_USERNAME = u;
+      if (k && !k.includes('••••')) contextKeys.KAGGLE_KEY = k;
+    }
+
+    setValidations(prev => {
+      const next = { ...prev, [field]: { validating: true, message: 'Contacting provider API...' } };
+      if (isKaggle) {
+        next.KAGGLE_USERNAME = { validating: true, message: 'Contacting Kaggle API...' };
+        next.KAGGLE_KEY = { validating: true, message: 'Contacting Kaggle API...' };
+      }
+      return next;
+    });
 
     try {
       const resp = await fetch('/api/config/vault/validate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           keyName: field,
-          keyValue: currentTyped || undefined,
+          keyValue: (currentTyped && !currentTyped.includes('••••')) ? currentTyped : undefined,
+          contextKeys: Object.keys(contextKeys).length > 0 ? contextKeys : undefined,
         }),
       });
 
       const data = await resp.json() as { valid?: boolean; message?: string };
-      setValidations(prev => ({
-        ...prev,
-        [field]: {
-          validating: false,
-          valid: Boolean(data.valid),
-          message: data.message || (data.valid ? 'Verified successfully' : 'Validation failed'),
-          testedAt: Date.now(),
-        },
-      }));
+      const valResult = {
+        validating: false,
+        valid: Boolean(data.valid),
+        message: data.message || (data.valid ? 'Verified successfully' : 'Validation failed'),
+        testedAt: Date.now(),
+      };
+
+      setValidations(prev => {
+        const next = { ...prev, [field]: valResult };
+        if (isKaggle) {
+          next.KAGGLE_USERNAME = valResult;
+          next.KAGGLE_KEY = valResult;
+        }
+        return next;
+      });
     } catch (err) {
-      setValidations(prev => ({
-        ...prev,
-        [field]: {
-          validating: false,
-          valid: false,
-          message: `Network error: ${err instanceof Error ? err.message : String(err)}`,
-          testedAt: Date.now(),
-        },
-      }));
+      const errResult = {
+        validating: false,
+        valid: false,
+        message: `Network error: ${err instanceof Error ? err.message : String(err)}`,
+        testedAt: Date.now(),
+      };
+      setValidations(prev => {
+        const next = { ...prev, [field]: errResult };
+        if (isKaggle) {
+          next.KAGGLE_USERNAME = errResult;
+          next.KAGGLE_KEY = errResult;
+        }
+        return next;
+      });
     }
   };
 
@@ -320,7 +348,7 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
     try {
       const resp = await fetch('/api/config/vault', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ keys: { [field]: val } }),
       });
 
@@ -360,6 +388,7 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
     try {
       const resp = await fetch(`/api/config/vault/${encodeURIComponent(field)}`, {
         method: 'DELETE',
+        headers: { ...authHeaders() },
       });
 
       if (!resp.ok) {
@@ -392,6 +421,119 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
     }
   };
 
+  // Validate Entire Provider / Service Integration (one unified test for the card)
+  const handleValidateApi = async (api: ApiConfig) => {
+    const fields = getKeyFields(api);
+    if (fields.length === 0) return;
+
+    const primaryField = fields[0];
+    const currentTyped = inputValues[primaryField]?.trim();
+    const contextKeys: Record<string, string> = {};
+    for (const f of fields) {
+      const val = inputValues[f]?.trim();
+      if (val && !val.includes('••••')) {
+        contextKeys[f] = val;
+      }
+    }
+
+    setValidations(prev => {
+      const next = { ...prev };
+      for (const f of fields) {
+        next[f] = { validating: true, message: `Connecting to ${api.name}...` };
+      }
+      return next;
+    });
+
+    try {
+      const resp = await fetch('/api/config/vault/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          keyName: primaryField,
+          keyValue: (currentTyped && !currentTyped.includes('••••')) ? currentTyped : undefined,
+          contextKeys: Object.keys(contextKeys).length > 0 ? contextKeys : undefined,
+        }),
+      });
+
+      const data = await resp.json() as { valid?: boolean; message?: string };
+      const valResult: ValidationResult = {
+        validating: false,
+        valid: Boolean(data.valid),
+        message: data.message || (data.valid ? `${api.name} verified successfully` : 'Validation failed'),
+        testedAt: Date.now(),
+      };
+
+      setValidations(prev => {
+        const next = { ...prev };
+        for (const f of fields) {
+          next[f] = valResult;
+        }
+        return next;
+      });
+    } catch (err) {
+      const errResult: ValidationResult = {
+        validating: false,
+        valid: false,
+        message: `Network error: ${err instanceof Error ? err.message : String(err)}`,
+        testedAt: Date.now(),
+      };
+      setValidations(prev => {
+        const next = { ...prev };
+        for (const f of fields) {
+          next[f] = errResult;
+        }
+        return next;
+      });
+    }
+  };
+
+  // Save All Modified Credentials for a Provider Card
+  const handleSaveProvider = async (api: ApiConfig) => {
+    const fields = getKeyFields(api);
+    const toSave: Record<string, string> = {};
+    for (const f of fields) {
+      const val = inputValues[f]?.trim();
+      if (val && !val.includes('••••')) {
+        toSave[f] = val;
+      }
+    }
+    if (Object.keys(toSave).length === 0) return;
+
+    setSavingProvider(api.id);
+    try {
+      const resp = await fetch('/api/config/vault', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ keys: toSave }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `Server error ${resp.status}`);
+      }
+      const data = await resp.json() as { keys?: Record<string, KeyStatusInfo> };
+      if (data.keys) {
+        setKeyStatuses(data.keys);
+      }
+      setInputValues(prev => {
+        const n = { ...prev };
+        for (const f of Object.keys(toSave)) delete n[f];
+        return n;
+      });
+      setFeedback({ type: 'success', message: `Saved ${api.name} credentials securely to encrypted device storage.` });
+      if (onSave) onSave(toSave);
+
+      // Automatically test connection after saving
+      handleValidateApi(api);
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        message: `Failed to save ${api.name}: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setSavingProvider(null);
+    }
+  };
+
   // Save All Modified Keys
   const handleSaveAll = async () => {
     setSavingAll(true);
@@ -414,7 +556,7 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
     try {
       const resp = await fetch('/api/config/vault', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ keys: payloadKeys }),
       });
 
@@ -526,7 +668,7 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
             <div>
               <div className="flex items-center gap-2.5">
                 <h1 className="text-sm sm:text-base font-bold text-white tracking-wide">
-                  API Configuration & Credentials Vault
+                  {isOnboarding ? 'Terranoetis API Vault — Initial Onboarding' : 'API Configuration & Credentials Vault'}
                 </h1>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/25 font-mono font-medium">
                   {configuredCount}/{totalFields} Active
@@ -534,7 +676,11 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
               </div>
               <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
                 <ShieldCheck size={13} className="text-emerald-400 inline shrink-0" />
-                <span>Encrypted at rest with AES-256-GCM in OS application storage • Zero plaintext exposure</span>
+                <span>
+                  {isOnboarding
+                    ? 'Configure your basemaps and AI keys, or launch directly with public offline defaults'
+                    : 'Encrypted at rest with AES-256-GCM in OS application storage • Zero plaintext exposure'}
+                </span>
               </p>
             </div>
           </div>
@@ -776,6 +922,15 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
               filteredApis.map(api => {
                 const fields = getKeyFields(api);
                 const isConfigured = isApiConfigured(api);
+                const cardValidation = fields.map(f => validations[f]).find(v => v !== undefined);
+                const isValidatingCard = fields.some(f => validations[f]?.validating);
+                const isCardConfigured = fields.some(f => isFieldConfigured(f));
+                const dirtyFields = fields.filter(f => {
+                  const val = inputValues[f];
+                  return val !== undefined && val.trim() !== '' && !val.includes('••••');
+                });
+                const hasDirtyFields = dirtyFields.length > 0;
+                const isSavingCard = savingProvider === api.id;
 
                 return (
                   <div
@@ -909,7 +1064,27 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
                                   }
                                   value={currentVal}
                                   onChange={e => {
-                                    setInputValues(prev => ({ ...prev, [field]: e.target.value }));
+                                    const val = e.target.value;
+                                    // Smart detection for pasted kaggle.json token
+                                    if ((field === 'KAGGLE_USERNAME' || field === 'KAGGLE_KEY') && val.trim().startsWith('{') && val.includes('username') && val.includes('key')) {
+                                      try {
+                                        const parsed = JSON.parse(val.trim()) as { username?: string; key?: string };
+                                        if (parsed.username && parsed.key) {
+                                          setInputValues(prev => ({
+                                            ...prev,
+                                            KAGGLE_USERNAME: parsed.username!,
+                                            KAGGLE_KEY: parsed.key!,
+                                          }));
+                                          setFeedback({
+                                            type: 'success',
+                                            message: 'Parsed Kaggle Username & API Key from pasted kaggle.json! Click Save to store securely in your device vault.',
+                                          });
+                                          return;
+                                        }
+                                      } catch { /* proceed with normal text */ }
+                                    }
+
+                                    setInputValues(prev => ({ ...prev, [field]: val }));
                                     if (validations[field]) {
                                       setValidations(prev => {
                                         const n = { ...prev };
@@ -972,28 +1147,6 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
                                 </button>
                               )}
 
-                              {/* Test Connection Button */}
-                              <button
-                                type="button"
-                                disabled={validation?.validating || (!currentVal.trim() && !hasConfigured)}
-                                onClick={() => handleValidateKey(field)}
-                                className={`px-3 py-2 rounded-lg text-xs font-medium border transition flex items-center gap-1.5 shrink-0 ${
-                                  validation?.valid === true
-                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-                                    : validation?.valid === false
-                                    ? 'bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20'
-                                    : 'bg-slate-800 hover:bg-slate-700/90 text-slate-300 border-slate-700/80 disabled:opacity-40'
-                                }`}
-                                title="Verify connectivity with upstream provider"
-                              >
-                                {validation?.validating ? (
-                                  <Loader2 size={13} className="animate-spin text-blue-400" />
-                                ) : (
-                                  <RefreshCw size={13} className={validation?.valid ? 'text-emerald-400' : 'text-slate-400'} />
-                                )}
-                                <span>{validation?.validating ? 'Testing...' : 'Test Connection'}</span>
-                              </button>
-
                               {/* Delete User Key Button */}
                               {isSavedUserKey && (
                                 <button
@@ -1006,27 +1159,73 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
                                 </button>
                               )}
                             </div>
-
-                            {/* Validation Result Inline Banner */}
-                            {validation && (
-                              <div
-                                className={`text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-2 mt-1.5 font-sans ${
-                                  validation.valid
-                                    ? 'text-emerald-300 bg-emerald-500/10 border border-emerald-500/25'
-                                    : 'text-rose-300 bg-rose-500/10 border border-rose-500/25'
-                                }`}
-                              >
-                                {validation.valid ? (
-                                  <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
-                                ) : (
-                                  <AlertCircle size={13} className="text-rose-400 shrink-0" />
-                                )}
-                                <span className="truncate">{validation.message}</span>
-                              </div>
-                            )}
                           </div>
                         );
                       })}
+                    </div>
+
+                    {/* Unified Service Card Action Bar (Professional Standard) */}
+                    <div className="mt-3.5 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+                      {/* Left: Validation Status or Config Summary */}
+                      <div className="flex-1 min-w-[240px]">
+                        {cardValidation ? (
+                          <div
+                            className={`text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-sans ${
+                              cardValidation.valid
+                                ? 'text-emerald-300 bg-emerald-500/10 border border-emerald-500/25'
+                                : 'text-rose-300 bg-rose-500/10 border border-rose-500/25'
+                            }`}
+                          >
+                            {cardValidation.valid ? (
+                              <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                            ) : (
+                              <AlertCircle size={13} className="text-rose-400 shrink-0" />
+                            )}
+                            <span className="truncate">{cardValidation.message}</span>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-slate-500 font-mono">
+                            {isCardConfigured ? '● Credentials ready for verification' : '○ Not yet configured'}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Right: Unified Test Connection Button & Save Provider Keys */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {hasDirtyFields && (
+                          <button
+                            type="button"
+                            disabled={isSavingCard}
+                            onClick={() => handleSaveProvider(api)}
+                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-sm shadow-blue-500/20"
+                            title={`Save modified credentials for ${api.name}`}
+                          >
+                            {isSavingCard ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                            <span>Save Changes ({dirtyFields.length})</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          disabled={isValidatingCard || !isCardConfigured}
+                          onClick={() => handleValidateApi(api)}
+                          className={`px-3.5 py-1.5 rounded-lg text-xs font-medium border transition flex items-center gap-1.5 shrink-0 ${
+                            cardValidation?.valid === true
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                              : cardValidation?.valid === false
+                              ? 'bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20'
+                              : 'bg-slate-800 hover:bg-slate-700/90 text-slate-200 border-slate-700/80 disabled:opacity-40'
+                          }`}
+                          title={`Verify connection to ${api.name}`}
+                        >
+                          {isValidatingCard ? (
+                            <Loader2 size={13} className="animate-spin text-blue-400" />
+                          ) : (
+                            <RefreshCw size={13} className={cardValidation?.valid ? 'text-emerald-400' : 'text-slate-400'} />
+                          )}
+                          <span>{isValidatingCard ? 'Testing...' : 'Test Connection'}</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1063,17 +1262,23 @@ export function ApiVault({ isOpen, onClose, onSave }: ApiVaultProps) {
               onClick={onClose}
               className="px-4 py-2 text-xs text-slate-400 hover:text-white rounded-lg hover:bg-slate-800/80 transition font-medium"
             >
-              Close
+              {isOnboarding ? 'Skip & Launch Cockpit' : 'Close'}
             </button>
 
             <button
               type="button"
-              disabled={savingAll || unsavedCount === 0}
+              disabled={savingAll}
               onClick={handleSaveAll}
               className="px-5 py-2 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-40 text-white font-bold rounded-lg transition flex items-center gap-2 shadow-lg shadow-blue-500/25"
             >
               {savingAll ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              <span>{savingAll ? 'Encrypting & Saving...' : `Save All Changes (${unsavedCount})`}</span>
+              <span>
+                {savingAll
+                  ? 'Encrypting & Saving...'
+                  : isOnboarding
+                  ? (unsavedCount > 0 ? `Save & Launch (${unsavedCount})` : 'Launch Cockpit')
+                  : `Save All Changes (${unsavedCount})`}
+              </span>
             </button>
           </div>
         </div>
