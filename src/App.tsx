@@ -1719,6 +1719,7 @@ export default function App() {
   }>>([]);
   const chatListRef = useRef<ChatListItem[]>([]);
   chatListRef.current = chatList;
+  const [agentActionCount, setAgentActionCount] = useState(0);
   const chatSearch = chatState.chatSearch;
   const setChatSearch = chatState.setChatSearch;
   // Phase 8: Session sharing. New shares store session contents locally and
@@ -2291,7 +2292,7 @@ export default function App() {
     if (!cesiumElRef.current || viewerRef.current) return;
     window.Cesium = Cesium;
     // @ts-expect-error CESIUM_BASE_URL is a global config
-    window.CESIUM_BASE_URL = '/cesium/';
+    window.CESIUM_BASE_URL = window.CESIUM_BASE_URL || (isDesktopApp ? './cesium/' : '/cesium/');
     if (cesiumIonToken) {
       Cesium.Ion.defaultAccessToken = cesiumIonToken;
     }
@@ -2866,6 +2867,12 @@ export default function App() {
     };
     window.addEventListener('auth:updated', handleAuthUpdated);
     return () => window.removeEventListener('auth:updated', handleAuthUpdated);
+  }, []);
+
+  useEffect(() => {
+    const handleOpenVault = () => setShowApiVault(true);
+    window.addEventListener('terranoetis:open-api-vault', handleOpenVault);
+    return () => window.removeEventListener('terranoetis:open-api-vault', handleOpenVault);
   }, []);
 
 
@@ -9707,6 +9714,7 @@ case 'openPanel':
         else if (action.entities && action.entities.length > 0) history.push(action as any);
       } catch { /* skip malformed commands */ }
     }
+    setAgentActionCount(history.length);
   }, [focusLocation, isLayerEnabled, cleanupThinkingSteps, applyPanelCommand, setLayerEnabled, setLayerOpacity, focusPanel, applyChatStudyArea]);
 
   const sendToPipeline = useCallback(async (goal: string, wsId: string | null) => {
@@ -9792,9 +9800,14 @@ case 'openPanel':
   function newChat() {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
+    cleanupThinkingSteps(true);
     // Fresh conversation → fresh globe: drop AI-added artifacts (boundaries,
     // pins, heatmaps, charts, routes). User-toggled data layers are untouched.
     clearAllAgentActions();
+    // If current tab is already empty, no need to create duplicate blank tabs
+    if (chatState.aiMessages.length === 0 && !chatState.aiInput.trim()) {
+      return;
+    }
     // Use the tab system: open a new tab (snapshots current, creates fresh)
     chatState.openChatTab();
   }
@@ -9845,15 +9858,30 @@ case 'openPanel':
   }
 
   async function deleteCurrentChat() {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    cleanupThinkingSteps(true);
     clearAllAgentActions();
+
     const id = chatState.currentChatId;
-    if (!id) {
-      // No saved session yet — just clear the composer.
+    const activeTabId = chatState.activeTabId;
+    const tabCount = chatState.chatTabs.length;
+
+    if (id) {
+      await deleteChatSession(id);
+    }
+
+    if (tabCount > 1 && activeTabId) {
+      chatState.closeChatTab(activeTabId);
+    } else {
       setAiMessages([]);
       chatState.setCurrentChatId(null);
-      return;
+      chatState.setAiInput('');
+      chatState.clearAgentSteps();
+      chatState.clearPipelineProgress();
+      chatState.clearChatImages();
     }
-    await deleteChatSession(id);
+    showNotification('Conversation deleted', 'info');
   }
 
   async function clearAllChats() {
@@ -9978,6 +10006,7 @@ case 'openPanel':
     const history = agentActionHistoryRef.current;
     if (history.length === 0) return;
     const last = history.pop()!;
+    setAgentActionCount(history.length);
     const v = viewerRef.current;
     if (!v) return;
     switch (last.type) {
@@ -9999,19 +10028,22 @@ case 'openPanel':
         }
         break;
     }
+    showNotification('Undid last globe action', 'info');
   }
 
   function clearAllAgentActions() {
     const v = viewerRef.current;
-    if (!v) return;
-    const toRemove = v.entities.values.filter((e: any) => {
-      const props = e.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
-      return props?.agent === true;
-    });
-    for (const e of toRemove) {
-      try { v.entities.remove(e); } catch { /* ignore */ }
+    if (v) {
+      const toRemove = v.entities.values.filter((e: any) => {
+        const props = e.properties?.getValue(Cesium.JulianDate.now()) as Record<string, unknown> | undefined;
+        return props?.agent === true;
+      });
+      for (const e of toRemove) {
+        try { v.entities.remove(e); } catch { /* ignore */ }
+      }
     }
     agentActionHistoryRef.current = [];
+    setAgentActionCount(0);
   }
 
   // ── Advanced chat helpers ──────────────────────────────────────────────
@@ -11516,6 +11548,7 @@ case 'openPanel':
         buildSessionShareLink={buildSessionShareLink}
         showNotification={showNotification}
         newChat={newChat}
+        agentActionCount={agentActionCount}
         undoLastAgentAction={undoLastAgentAction}
         clearAllAgentActions={clearAllAgentActions}
         deleteCurrentChat={deleteCurrentChat}

@@ -83,7 +83,7 @@ export function ChatTabs({
     tabRefs.current.get(activeTabId)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [activeTabId]);
 
-  if (chatTabs.length === 0) return null;
+  if (chatTabs.length <= 1) return null;
 
   return (
     <div

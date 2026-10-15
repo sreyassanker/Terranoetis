@@ -170,13 +170,22 @@ export function ChatMessageRow({
     toggleLayer?: (id: string) => void,
   ) => {
     if (!commands || commands.length === 0) return null;
+    const seen = new Set<string>();
     const cmdChips: Array<{ label: string; action: string; lat?: number; lon?: number; layerId?: string }> = [];
     for (const cmd of commands) {
       if (cmd.action === 'flyTo' && cmd.lat != null && cmd.lon != null) {
-        cmdChips.push({ label: cmd.label || 'Fly', action: 'flyTo', lat: cmd.lat, lon: cmd.lon });
+        const key = `flyTo_${cmd.lat}_${cmd.lon}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          cmdChips.push({ label: cmd.label || 'Fly', action: 'flyTo', lat: cmd.lat, lon: cmd.lon });
+        }
       }
       if (cmd.action === 'toggleLayer' && cmd.layerId) {
-        cmdChips.push({ label: cmd.layerId, action: 'toggleLayer', layerId: cmd.layerId });
+        const key = `layer_${cmd.layerId}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          cmdChips.push({ label: cmd.layerId, action: 'toggleLayer', layerId: cmd.layerId });
+        }
       }
     }
     if (cmdChips.length === 0) return null;
@@ -185,7 +194,7 @@ export function ChatMessageRow({
         {cmdChips.map((chip, i) => (
           <button key={i} className="ai-chip command-chip"
             onClick={() => {
-              if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation?.(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#60a5fa', height: 20000 });
+              if (chip.action === 'flyTo' && chip.lat && chip.lon) focusLocation?.(chip.lat, chip.lon, { label: chip.label || 'Location', color: '#d97757', height: 20000 });
               if (chip.action === 'toggleLayer' && chip.layerId) toggleLayer?.(chip.layerId);
             }}>{chip.label}</button>
         ))}

@@ -69,7 +69,8 @@ export interface OmninetOptions {
 // ── Provider Registry ───────────────────────────────────────────
 
 const PROVIDER_CONFIGS: ProviderConfig[] = [
-  { name: 'groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', models: ['groq/compound', 'qwen/qwen3.8-27b'], rateLimit: 20, tier: 2, apiKeyEnvVar: 'GROQ_API_KEY', supportsStreaming: true },
+  { name: 'openai', type: 'openai-compatible', baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o', 'gpt-4o-mini'], rateLimit: 60, tier: 3, apiKeyEnvVar: 'OPENAI_API_KEY', supportsStreaming: true, supportsVision: true },
+  { name: 'groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', models: ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'], rateLimit: 30, tier: 2, apiKeyEnvVar: 'GROQ_API_KEY', supportsStreaming: true },
   { name: 'gemini', type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', models: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'], rateLimit: 60, tier: 3, apiKeyEnvVar: 'GOOGLE_GEMINI_API_KEY', supportsStreaming: true, supportsVision: true },
   { name: 'bai', type: 'openai-compatible', baseUrl: 'https://api.b.ai/v1', models: ['deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'hy3', 'mimo-v2.5', 'qwen3.8-flash'], rateLimit: 60, tier: 1, apiKeyEnvVar: 'BAI_API_KEY', supportsStreaming: true, supportsVision: true },
   { name: 'deepseek', type: 'openai-compatible', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'], rateLimit: 50, tier: 3, apiKeyEnvVar: 'DEEPSEEK_API_KEY', supportsStreaming: true },
@@ -161,6 +162,9 @@ export class Omninet {
     this.initialized = true;
     this.ensureTable();
     this.startHealthChecks();
+    void this.triggerImmediateHealthChecks().catch((err) => {
+      logger.warn({ err }, 'Omninet initial health check error');
+    });
     logger.info({ providerCount: this.providers.length }, 'Omninet initialized');
   }
 
@@ -277,26 +281,47 @@ export class Omninet {
   }
 
   async triggerImmediateHealthChecks(): Promise<void> {
-    const pings = this.providers
-      .filter(state => !state.config.local)
-      .filter(state => {
-        const apiKey = this.resolveApiKey(state.config);
-        return !!apiKey;
-      })
-      .map(async (state) => {
+    const pings = this.providers.map(async (state) => {
+      if (state.config.local) {
         try {
-          await this.healthPing(state);
-          state.consecutiveSuccesses++;
-          state.failureCount = 0;
-          if (state.consecutiveSuccesses >= 1) state.status = 'healthy';
-        } catch (e) {
-          logger.warn({ err: e, provider: state.config.name }, 'Omninet health ping failed during reload');
-          state.failureCount++;
-          if (state.failureCount >= 3) state.status = 'down';
+          if (state.config.name === 'ollama') {
+            const res = await fetch(`${state.config.baseUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
+            state.status = res.ok ? 'healthy' : 'down';
+          } else if (state.config.name === 'local-gguf') {
+            const res = await fetch('http://localhost:11436/health', { signal: AbortSignal.timeout(2000) });
+            state.status = res.ok ? 'healthy' : 'down';
+          } else {
+            state.status = 'healthy';
+          }
+        } catch {
+          state.status = 'down';
         }
         state.lastChecked = Date.now();
         this.persistState(state);
-      });
+        return;
+      }
+
+      const apiKey = this.resolveApiKey(state.config);
+      if (!apiKey) {
+        state.status = 'down';
+        this.persistState(state);
+        return;
+      }
+
+      try {
+        await this.healthPing(state);
+        state.consecutiveSuccesses++;
+        state.failureCount = 0;
+        state.status = 'healthy';
+      } catch (e) {
+        logger.warn({ err: (e as Error).message, provider: state.config.name }, 'Omninet provider check failed');
+        state.failureCount++;
+        state.consecutiveSuccesses = 0;
+        state.status = 'down';
+      }
+      state.lastChecked = Date.now();
+      this.persistState(state);
+    });
     await Promise.allSettled(pings);
   }
 
@@ -312,16 +337,14 @@ export class Omninet {
       await this.executeProviderCall(config, model, 'hi', { maxTokens: 24, temperature: 0.1, signal: AbortSignal.timeout(20000) });
       state.lastLatency = Date.now() - start;
     } catch (e) {
-      // A reachable upstream is ALIVE even when the ping produced no text:
-      // "returned no content" (reasoning models burning tokens), 429 quota and
-      // 402 billing all mean the API responded. Only genuine transport/infra
-      // failures should mark the provider unhealthy.
       const msg = (e as Error).message || '';
-      if (/HTTP 429|HTTP 402|HTTP 403|returned no content|HTTP 5\d\d/.test(msg)) {
+      // Only "returned no content" (pure reasoning token burn) is considered alive:
+      if (/returned no content/.test(msg)) {
         state.lastLatency = Date.now() - start;
         state.lastChecked = Date.now();
         return;
       }
+      // Genuine operational failures (401, 402, 403, 404, 429 quota, network errors) mark the provider unhealthy
       throw e;
     }
   }
@@ -461,8 +484,8 @@ export class Omninet {
       signal,
       body: JSON.stringify({
         model,
-        messages: [{ role: 'user', content: capPromptKeepingQuery(prompt, config.local ? 6000 : config.name === 'groq' ? 12000 : 32000) }],
-        max_tokens: options?.maxTokens ?? 1024,
+        messages: [{ role: 'user', content: capPromptKeepingQuery(prompt, config.local ? 3500 : config.name === 'groq' ? 12000 : 32000) }],
+        max_tokens: config.local ? Math.min(options?.maxTokens ?? 600, 600) : (options?.maxTokens ?? 1024),
         temperature: options?.temperature ?? 0.3,
         ...(model.includes('gpt-oss') ? { reasoning_effort: 'low' } : {}),
       }),
@@ -783,6 +806,21 @@ export class Omninet {
     const targetTier = options?.clientTier ? this.clientTierToProviderTier(options.clientTier) : this.complexityToTier(complexity);
     const candidates = this.rankProviders(targetTier);
 
+    const preferred = options?.model;
+    if (preferred && preferred !== 'auto') {
+      const slashIdx = preferred.indexOf('/');
+      const prefProvider = slashIdx > 0 ? preferred.slice(0, slashIdx) : undefined;
+      const prefModel = slashIdx > 0 ? preferred.slice(slashIdx + 1) : preferred;
+
+      candidates.sort((a, b) => {
+        const aMatches = (prefProvider && a.config.name === prefProvider) || a.config.models.includes(prefModel);
+        const bMatches = (prefProvider && b.config.name === prefProvider) || b.config.models.includes(prefModel);
+        if (aMatches && !bMatches) return -1;
+        if (!aMatches && bMatches) return 1;
+        return 0;
+      });
+    }
+
     if (candidates.length === 0) {
       yield 'All AI providers unavailable. Check API keys and provider status.';
       return;
@@ -793,13 +831,11 @@ export class Omninet {
 
     for (const state of candidates) {
       const config = state.config;
-      // Try every model on the provider before moving on — the head model often
-      // has a much smaller daily quota than the provider as a whole (e.g.
-      // groq/compound RPD cap vs openai/gpt-oss-20b). modelOverride pins a
-      // specific model when the caller explicitly requested one.
-      const preferred = options?.model;
-      const modelList = preferred && config.models.includes(preferred)
-        ? [preferred]
+      // Try every model on the provider before moving on.
+      // modelOverride pins a specific model when the caller explicitly requested one.
+      const prefModel = preferred && preferred.includes('/') ? preferred.slice(preferred.indexOf('/') + 1) : preferred;
+      const modelList = prefModel && config.models.includes(prefModel)
+        ? [prefModel]
         : config.models;
       for (const model of modelList) {
         const apiKey = this.resolveApiKey(config);

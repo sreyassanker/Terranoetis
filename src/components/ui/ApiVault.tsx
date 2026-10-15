@@ -370,6 +370,7 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
 
       setFeedback({ type: 'success', message: `Saved ${field} securely to encrypted device storage.` });
       if (onSave) onSave({ [field]: val });
+      window.dispatchEvent(new CustomEvent('terranoetis:vault-updated'));
 
       // Run live verification automatically on newly saved key
       handleValidateKey(field);
@@ -413,6 +414,7 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
       });
 
       setFeedback({ type: 'info', message: `Removed ${field} from user vault. Reverted to default.` });
+      window.dispatchEvent(new CustomEvent('terranoetis:vault-updated'));
     } catch (err) {
       setFeedback({
         type: 'error',
@@ -521,6 +523,7 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
       });
       setFeedback({ type: 'success', message: `Saved ${api.name} credentials securely to encrypted device storage.` });
       if (onSave) onSave(toSave);
+      window.dispatchEvent(new CustomEvent('terranoetis:vault-updated'));
 
       // Automatically test connection after saving
       handleValidateApi(api);
@@ -577,6 +580,7 @@ export function ApiVault({ isOpen, onClose, onSave, isOnboarding = false }: ApiV
       });
 
       if (onSave) onSave(payloadKeys);
+      window.dispatchEvent(new CustomEvent('terranoetis:vault-updated'));
     } catch (err) {
       setFeedback({
         type: 'error',

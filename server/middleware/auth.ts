@@ -11,15 +11,16 @@ const LOCKOUT_MS = 15 * 60 * 1000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 function getSecret(): string {
-  const secret = process.env.JWT_SECRET;
-  if (IS_PROD && (!secret || secret.length < 32)) {
+  let secret = process.env.JWT_SECRET;
+  const isDesktop = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
+  if (!secret || secret.length < 32) {
+    if (isDesktop || !IS_PROD) {
+      secret = generateSecret(48);
+      process.env.JWT_SECRET = secret;
+      logger.info({ length: secret.length }, 'Generated ephemeral JWT secret for desktop/dev session');
+      return secret;
+    }
     throw new Error('JWT_SECRET must be at least 32 chars in production');
-  }
-  if (!secret) {
-    if (IS_PROD) throw new Error('JWT_SECRET required in production');
-    const generated = generateSecret(48);
-    logger.warn({ length: generated.length }, 'JWT_SECRET not set — generated ephemeral dev secret (DO NOT use in production)');
-    return generated;
   }
   return secret;
 }
@@ -100,8 +101,9 @@ export function ensureDefaultAdmin(): void {
     if (existing) return;
 
     const adminId = 'admin';
+    const isDesktop = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
     let password: string;
-    if (IS_PROD) {
+    if (IS_PROD && !isDesktop) {
       const envPwd = process.env.ADMIN_BOOTSTRAP_PASSWORD;
       if (!envPwd || envPwd.length < 16) {
         logger.error('Admin user does not exist and ADMIN_BOOTSTRAP_PASSWORD is not set (or < 16 chars). Set it in .env or create an admin manually via the CLI. Skipping admin bootstrap.');
@@ -109,8 +111,8 @@ export function ensureDefaultAdmin(): void {
       }
       password = envPwd;
     } else {
-      password = generateSecret(18);
-      logger.warn({ adminId, devPassword: password }, 'Provisioned default admin user (DEV ONLY). Set ADMIN_BOOTSTRAP_PASSWORD in production.');
+      password = process.env.ADMIN_BOOTSTRAP_PASSWORD || generateSecret(18);
+      logger.info({ adminId }, 'Provisioned default admin user for desktop/dev session');
     }
 
     const hash = hashPassword(password);
@@ -234,13 +236,18 @@ export function sseAuthGuard(req: Request, res: Response, next: NextFunction): v
 
 /** Issue JWT for admin without password in dev mode, or for loopback desktop operator. Remote prod calls are rejected (404). */
 export function devAutoLogin(req: Request, res: Response): void {
+  const isDesktop = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
   const remoteIp = (req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
   const isLoopback = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === 'localhost';
-  if (IS_PROD && !isLoopback) {
+  if (IS_PROD && !isDesktop && !isLoopback) {
     res.status(404).json({ error: 'Not found' });
     return;
   }
-  const user = getUserByName('admin');
+  let user = getUserByName('admin');
+  if (!user && (isDesktop || !IS_PROD)) {
+    ensureDefaultAdmin();
+    user = getUserByName('admin');
+  }
   if (!user) {
     res.status(503).json({ error: 'Admin user not provisioned. Restart server and check logs for devPassword.' });
     return;

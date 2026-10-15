@@ -10,6 +10,7 @@ interface PanelProps {
   onClose?: () => void;
   children: ReactNode;
   headerExtra?: ReactNode;
+  headerActions?: ReactNode;
   style?: CSSProperties;
   headerHeight?: string;
   hideHeader?: boolean;
@@ -26,6 +27,7 @@ export default function Panel({
   onClose,
   children,
   headerExtra,
+  headerActions,
   style,
   headerHeight,
   hideHeader,
@@ -50,25 +52,29 @@ export default function Panel({
           background: headerBackground ?? `linear-gradient(135deg, rgba(${hexToRgb(accentColor)},0.18), rgba(${hexToRgb(accentColor)},0.06))`,
           borderBottom: `1px solid rgba(${hexToRgb(accentColor)},0.15)`,
           minHeight: headerHeight ?? 'auto',
+          gap: 8,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
             {icon && <span style={{ color: iconColor, flexShrink: 0, display: 'flex' }}>{icon}</span>}
-            <span style={{ color: titleColor, fontWeight: 600, fontSize: 11, letterSpacing: 1, whiteSpace: 'nowrap' }}>
+            <span style={{ color: titleColor, fontWeight: 600, fontSize: 11, letterSpacing: 1, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
               {title}
             </span>
             {headerExtra}
           </div>
-          {onClose && (
-            <button
-              type="button"
-              className="panel-close"
-              onClick={onClose}
-              aria-label={`Close ${title ?? 'panel'}`}
-              title="Close"
-            >
-              <X size={14} />
-            </button>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            {headerActions}
+            {onClose && (
+              <button
+                type="button"
+                className="panel-close"
+                onClick={onClose}
+                aria-label={`Close ${title ?? 'panel'}`}
+                title="Close"
+              >
+                <X size={14} strokeWidth={1.5} />
+              </button>
+            )}
+          </div>
         </div>
       )}
       {children}

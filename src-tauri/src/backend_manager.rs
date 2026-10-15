@@ -318,6 +318,63 @@ impl BackendManager {
         cmd.env("PORT", "3001");
         cmd.env("PROXY_PORT", "3001");
         cmd.env("PARENT_PID", std::process::id().to_string());
+        cmd.env("TERRANOETIS_DESKTOP", "1");
+        cmd.env("DESKTOP_APP", "1");
+
+        // Supply a session secret if JWT_SECRET is not provided
+        if std::env::var("JWT_SECRET").is_err() {
+            let now_nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let secret = format!("desktop_{:x}_{:x}_{:x}", now_nanos, std::process::id(), std::process::id() ^ 0x5a5a5a5a);
+            let padded_secret = format!("{:0<48}", secret);
+            cmd.env("JWT_SECRET", padded_secret);
+        }
+
+        // Augment NODE_PATH with candidate node_modules directories so bundled server.mjs can resolve packages
+        let mut node_paths: Vec<PathBuf> = Vec::new();
+        if let Some(entry) = &self.entry {
+            let work_dir = match entry {
+                BackendEntry::Compiled { work_dir, .. } => work_dir,
+                BackendEntry::DevSource { work_dir, .. } => work_dir,
+            };
+            node_paths.push(work_dir.join("node_modules"));
+            let mut cur = work_dir.parent();
+            while let Some(parent) = cur {
+                let candidate = parent.join("node_modules");
+                if candidate.exists() {
+                    node_paths.push(candidate);
+                }
+                cur = parent.parent();
+            }
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            let mut cur = exe.parent();
+            while let Some(parent) = cur {
+                let candidate = parent.join("node_modules");
+                if candidate.exists() {
+                    node_paths.push(candidate);
+                }
+                cur = parent.parent();
+            }
+        }
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let mut node_path_str = node_paths
+            .into_iter()
+            .filter_map(|p| p.to_str().map(|s| s.to_string()))
+            .collect::<Vec<String>>()
+            .join(sep);
+        if let Ok(existing_np) = std::env::var("NODE_PATH") {
+            if !node_path_str.is_empty() {
+                node_path_str = format!("{}{}{}", node_path_str, sep, existing_np);
+            } else {
+                node_path_str = existing_np;
+            }
+        }
+        if !node_path_str.is_empty() {
+            cmd.env("NODE_PATH", node_path_str);
+        }
 
         // Pipe backend stdout/stderr to application log file
         if let Ok(log_file) = std::fs::OpenOptions::new()
