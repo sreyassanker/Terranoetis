@@ -146,7 +146,7 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { logger, requestLoggerMiddleware, startMemoryLogging, stopMemoryLogging } from './observability/logger';
 import { metricsMiddleware, getMetrics, getMetricsContentType, activeSseConnections, sandboxExecutionsTotal, dbQueryDuration, cacheHitRate, omninetCallsTotal, toolExecutionsTotal, toolGenerationsTotal } from './observability/metrics';
 import { AppError, GeminiError, SandboxError, ValidationError, DatabaseError, CircuitOpenError, AuthenticationError, NotFoundError, RateLimitError } from './observability/errors';
-import { validateJwtSecretStrength } from './utils/validation';
+import { validateJwtSecretStrength, generateSecret } from './utils/validation';
 import { validateOutboundUrl, isAllowedUpstream } from './utils/ssrfGuard';
 import { filterEonetPayload, readEonetCategoryFilter, type EonetPayload } from './utils/eonet';
 import { isValidIssPosition, parseIssTle, propagateIssPosition, type IssPosition, type IssTle } from './utils/iss';
@@ -197,16 +197,29 @@ keyManager.onChange((changedKeys) => {
 });
 
 const IS_PROD = process.env.NODE_ENV === 'production';
+const IS_DESKTOP = process.env.TERRANOETIS_DESKTOP === '1' || process.env.DESKTOP_APP === '1';
 
-// Startup env check — refuse to start in production with weak/missing JWT_SECRET
-const secretIssues = validateJwtSecretStrength(process.env.JWT_SECRET);
-if (secretIssues.length > 0) {
-  if (IS_PROD) {
+// Startup env check — ensure a strong JWT_SECRET exists
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  if (IS_DESKTOP || !IS_PROD) {
+    process.env.JWT_SECRET = generateSecret(48);
+    logger.info('Auto-generated cryptographically secure session JWT_SECRET for desktop/dev runtime');
+  } else {
+    const secretIssues = validateJwtSecretStrength(process.env.JWT_SECRET);
     logger.fatal({ issues: secretIssues }, 'Refusing to start in production with weak JWT_SECRET. Set a strong (>=32 chars) secret in .env');
     process.exit(1);
   }
-  for (const issue of secretIssues) {
-    logger.warn({ issue }, 'JWT_SECRET is weak — a strong random secret will be auto-generated for this dev session');
+} else {
+  const secretIssues = validateJwtSecretStrength(process.env.JWT_SECRET);
+  if (secretIssues.length > 0) {
+    if (IS_PROD && !IS_DESKTOP) {
+      logger.fatal({ issues: secretIssues }, 'Refusing to start in production with weak JWT_SECRET. Set a strong (>=32 chars) secret in .env');
+      process.exit(1);
+    }
+    for (const issue of secretIssues) {
+      logger.warn({ issue }, 'JWT_SECRET is weak — auto-generating strong replacement secret for session');
+    }
+    process.env.JWT_SECRET = generateSecret(48);
   }
 }
 
@@ -1762,6 +1775,7 @@ app.post('/api/config/vault', (req: express.Request, res: express.Response) => {
       return res.status(400).json({ error: 'Invalid request body: "keys" object expected' });
     }
     const result = keyManager.saveKeys(keys, Array.isArray(deleteKeys) ? deleteKeys : []);
+    omninet.reloadProviders();
     res.json({
       success: true,
       message: 'API keys saved securely',
@@ -1778,6 +1792,7 @@ app.delete('/api/config/vault/:key', (req: express.Request, res: express.Respons
   try {
     const key = req.params.key;
     const deleted = keyManager.deleteKey(key);
+    omninet.reloadProviders();
     res.json({ success: true, deleted, keys: keyManager.getAllStatuses() });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete key', detail: String(err) });
@@ -10050,8 +10065,9 @@ app.post('/api/agent/ask', authGuard, askRateLimit, validate(askSchema), async (
   if (clientModel) {
     try {
       const providers = omninet.getProviderDetails();
-      const modelAvailable = providers.some(p =>
-        p.models.includes(clientModel) && p.status !== 'down' && (p.local || Boolean(p.apiKeyEnvVar && process.env[p.apiKeyEnvVar]))
+      const bareModel = clientModel.includes('/') ? clientModel.slice(clientModel.indexOf('/') + 1) : clientModel;
+      const modelAvailable = clientModel === 'auto' || providers.some(p =>
+        (p.models.includes(bareModel) || p.models.includes(clientModel)) && p.status !== 'down' && (p.local || Boolean(p.apiKeyEnvVar && (keyManager.get(p.apiKeyEnvVar) || process.env[p.apiKeyEnvVar])))
       );
       if (!modelAvailable) {
         sendEvent('step', { stepType: 'model_unavailable', text: `Selected model "${clientModel}" is not available — falling back to auto`, status: 'completed' });
@@ -11978,29 +11994,51 @@ app.get('/api/agent/models', authGuard, (_req: express.Request, res: express.Res
       id: string; provider: string; model: string; label: string;
       available: boolean; status: string; local: boolean; tier: number;
     }> = [];
+
+    const formatModelLabel = (provider: string, model: string): string => {
+      if (provider === 'openai') {
+        if (model === 'gpt-4o') return 'OpenAI — GPT-4o (Vision & Reasoning)';
+        if (model === 'gpt-4o-mini') return 'OpenAI — GPT-4o Mini (Fast)';
+      }
+      if (provider === 'groq') {
+        if (model.includes('qwen')) return 'Groq — Qwen 3.8 27B (Ultra-Fast 5ms)';
+        if (model.includes('gpt-oss-120b')) return 'Groq — GPT-OSS 120B (Deep Reasoning)';
+        if (model.includes('gpt-oss-20b')) return 'Groq — GPT-OSS 20B (Balanced)';
+      }
+      if (provider === 'local-gguf') {
+        return 'Local Offline — LFM 2.6B (On-Device)';
+      }
+      return `${provider} — ${model}`;
+    };
+
     for (const p of providers) {
-      const hasKey = p.local || Boolean(p.apiKeyEnvVar && process.env[p.apiKeyEnvVar]);
-      const reachable = p.status !== 'down';
-      const available = hasKey && reachable && p.supportsStreaming !== false;
+      const keyVal = p.apiKeyEnvVar ? (keyManager.get(p.apiKeyEnvVar) || process.env[p.apiKeyEnvVar]) : undefined;
+      const hasKey = p.local || Boolean(keyVal);
+      const isWorking = hasKey && p.status !== 'down' && p.status !== 'degraded' && p.supportsStreaming !== false;
+      const isLocalAvailable = p.local && p.status !== 'down';
+      
+      // Strict filter: only models that actually work are shown to the user!
+      if (!isWorking && !isLocalAvailable) continue;
+
       for (const m of p.models) {
         models.push({
           id: `${p.name}/${m}`,
           provider: p.name,
           model: m,
-          label: `${p.name} — ${m}`,
-          available,
+          label: formatModelLabel(p.name, m),
+          available: true,
           status: p.status,
           local: Boolean(p.local),
           tier: p.tier,
         });
       }
     }
-    // Auto (default) entry — no explicit selection, current behaviour.
-    models.unshift({ id: 'auto', provider: 'auto', model: '', label: 'Auto (recommended)', available: true, status: 'healthy', local: false, tier: 0 });
+    // Auto (default) entry — smart routing across working models.
+    models.unshift({ id: 'auto', provider: 'auto', model: 'auto', label: 'Auto (Smart Routing)', available: true, status: 'healthy', local: false, tier: 0 });
     res.json({ models });
   } catch (e) {
     logger.warn({ err: e }, 'Failed to list models');
-    res.json({ models: [{ id: 'auto', provider: 'auto', model: '', label: 'Auto (recommended)', available: true, status: 'healthy', local: false, tier: 0 }] });
+    res.json({ models: [{ id: 'auto', provider: 'auto', model: 'auto', label: 'Auto (Smart Routing)', available: true, status: 'healthy', local: false, tier: 0 }] });
   }
 });
 

@@ -63,7 +63,7 @@ function persistAuth(token: string, userId: string, role: string): void {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuth] = useState<AuthState>(loadAuth);
-  const [authReady, setAuthReady] = useState(() => !import.meta.env.DEV && !isDesktopApp);
+  const [authReady, setAuthReady] = useState(true);
 
   useEffect(() => {
     const handler = () => setAuth(loadAuth());
@@ -170,7 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{ ...auth, login, logout }}>
-      {authReady ? children : null}
+      {children}
     </AuthContext.Provider>
   );
 }
