@@ -12847,6 +12847,8 @@ case 'openPanel':
           layerVersion={cinematicLayerVersion}
           focusEntity={cinematicFocusEntity}
           zIndex={getPanelZIndex('cinematic-director')}
+          activeSensorStyle={sensorStyle}
+          onSelectSensorStyle={setSensorStyle}
         />
       )}
 

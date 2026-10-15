@@ -6,6 +6,9 @@ import {
   catmullRomPoint,
   evaluateSplinePath,
   formatTimecode,
+  calculateHeadingPitchToTarget,
+  generateOrbitPath,
+  generateContextualNarration,
   type Waypoint,
 } from '@/rendering/cinematicSpline';
 
@@ -78,5 +81,39 @@ describe('Cinematic Spline & Angular Interpolation', () => {
     expect(formatTimecode(0)).toBe('00:00.0');
     expect(formatTimecode(65.4)).toBe('01:05.4');
     expect(formatTimecode(125.99)).toBe('02:05.9');
+  });
+
+  it('calculates exact heading and pitch to target from camera', () => {
+    // Camera directly south of target at equator
+    const camPos = Cesium.Cartesian3.fromDegrees(0, 0, 1000);
+    // Target is directly north at lat 1.0 deg
+    const targetPos = Cesium.Cartesian3.fromDegrees(0, 1.0, 0);
+
+    const { heading, pitch } = calculateHeadingPitchToTarget(camPos, targetPos);
+    // Heading should point directly North (~0 or 360)
+    expect(Math.min(heading, Math.abs(360 - heading))).toBeLessThan(1.0);
+    // Pitch should be slightly negative (looking down toward earth surface)
+    expect(pitch).toBeLessThan(0);
+  });
+
+  it('generates a 360-degree orbit path with targetLock and smooth banking', () => {
+    const orbit = generateOrbitPath({ lat: 27.988, lon: 86.925, height: 8848, name: 'Mt. Everest' }, 5000, 2000, 30);
+    expect(orbit.waypoints.length).toBe(9); // 8 segments + closure
+    expect(orbit.targetLock).toBeDefined();
+    expect(orbit.targetLock?.name).toBe('Mt. Everest');
+    expect(orbit.waypoints[0].roll).toBe(10);
+    expect(orbit.duration).toBe(30);
+  });
+
+  it('generates an intelligent contextual military/documentary narration line', () => {
+    const lineHigh = generateContextualNarration({ lat: 35.6, lon: 139.7, height: 75000, heading: 0, pitch: -45 }, 0, 5);
+    expect(lineHigh).toContain('Orbital');
+
+    const lineAlpine = generateContextualNarration({ lat: 28.0, lon: 86.9, height: 9000, heading: 45, pitch: -20 }, 2, 5);
+    expect(lineAlpine).toContain('Alpine');
+    expect(lineAlpine).toContain('meters');
+
+    const lineHazard = generateContextualNarration({ lat: -33.8, lon: 151.2, height: 1200, heading: 90, pitch: -15 }, 1, 5, 'Wildfire Sector 4');
+    expect(lineHazard).toContain('Wildfire Sector 4');
   });
 });

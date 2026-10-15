@@ -4,16 +4,24 @@ import {
   Globe, MapPin, Play, Pause, Square, RotateCw, Video, Volume2, VolumeX,
   Plus, Trash2, Camera, Download, Upload, Eye, Compass, Mountain,
   Layers, Sliders, Maximize2, Minimize2, ChevronUp, ChevronDown, Sparkles,
-  Radio, Check, RefreshCw, X, ArrowLeft
+  Radio, Check, RefreshCw, X, ArrowLeft, Crosshair, Orbit, PlaneTakeoff,
+  Wand2, Target, SunMedium
 } from 'lucide-react';
 import * as Cesium from 'cesium';
 import Panel from '@/components/ui/Panel';
+import { SENSOR_STYLES, type SensorStyleId } from '@/rendering/sensorStyles';
 import {
   evaluateSplinePath,
   formatTimecode,
+  generateOrbitPath,
+  generateReconDivePath,
+  generateHorizonRevealPath,
+  generateSpiralClimbPath,
+  generateContextualNarration,
   type Waypoint,
   type CameraPath,
-  type EvaluatedCameraFrame
+  type EvaluatedCameraFrame,
+  type TargetPoint,
 } from '@/rendering/cinematicSpline';
 import { SHOWCASE_PRESETS } from '@/data/cinematicPresets';
 
@@ -23,6 +31,8 @@ interface CinematicDirectorProps {
   layerVersion?: number;
   focusEntity?: { lat: number; lon: number; layer: string; name?: string } | null;
   zIndex?: number;
+  activeSensorStyle?: SensorStyleId;
+  onSelectSensorStyle?: (id: SensorStyleId) => void;
 }
 
 const CUSTOM_TOURS_KEY = 'terranoetis_custom_cinematic_tours';
@@ -107,12 +117,68 @@ function buildDisasterPaths(entityGroups: Map<string, { lat: number; lon: number
   return paths;
 }
 
+/* ── Tactical Radio Sound Synthesizer (Web Audio API) ── */
+function playRadioCommsChirp(type: 'squelch' | 'roger' = 'squelch') {
+  try {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+
+    if (type === 'squelch') {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(2200, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1100, ctx.currentTime + 0.05);
+
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.08);
+
+      const bufferSize = Math.floor(ctx.sampleRate * 0.035);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.04;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.04, ctx.currentTime);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+      noise.connect(noiseGain);
+      noiseGain.connect(ctx.destination);
+      noise.start();
+    } else {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(1450, ctx.currentTime);
+      osc.frequency.setValueAtTime(850, ctx.currentTime + 0.04);
+
+      gain.gain.setValueAtTime(0.06, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.09);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.1);
+    }
+  } catch {
+    /* AudioContext unavailable or blocked */
+  }
+}
+
 export default function CinematicDirector({
   viewer,
   onClose,
   layerVersion,
   focusEntity,
   zIndex = 110,
+  activeSensorStyle = 'normal',
+  onSelectSensorStyle,
 }: CinematicDirectorProps) {
   // Navigation tabs: 'showcase' | 'studio' | 'settings'
   const [activeTab, setActiveTab] = useState<'showcase' | 'studio' | 'settings'>('showcase');
@@ -137,9 +203,11 @@ export default function CinematicDirector({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [isLooping, setIsLooping] = useState(false);
   const [cinemaMode, setCinemaMode] = useState(false);
+  const [showTacticalHud, setShowTacticalHud] = useState(false);
 
   // Voice narration & speech synthesis
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [radioSfxEnabled, setRadioSfxEnabled] = useState(true);
   const [currentNarration, setCurrentNarration] = useState('');
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
 
@@ -188,6 +256,13 @@ export default function CinematicDirector({
     return allPaths.find(p => (p.id ?? p.name) === selectedTourId) || allPaths[0];
   }, [allPaths, selectedTourId, activeTab, editingTour]);
 
+  // Activate tour's sensor style if defined
+  useEffect(() => {
+    if (activePath?.sensorStyle && onSelectSensorStyle) {
+      onSelectSensorStyle(activePath.sensorStyle);
+    }
+  }, [activePath, onSelectSensorStyle]);
+
   // Refresh live disaster paths on layer changes
   const refreshLivePaths = useCallback(() => {
     if (!viewer) return;
@@ -210,18 +285,22 @@ export default function CinematicDirector({
     } catch { /* ignore */ }
   }, []);
 
-  /* ── Speech Synthesis ── */
+  /* ── Speech Synthesis & Tactical Radio Audio ── */
   const speakNarration = useCallback((text: string) => {
     if (!voiceEnabled || !('speechSynthesis' in window) || !text) return;
     try {
       window.speechSynthesis.cancel();
+      if (radioSfxEnabled) playRadioCommsChirp('squelch');
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1.0;
-      utterance.pitch = 1.0;
+      utterance.pitch = 1.02;
+      utterance.onend = () => {
+        if (radioSfxEnabled) playRadioCommsChirp('roger');
+      };
       speechRef.current = utterance;
       window.speechSynthesis.speak(utterance);
     } catch { /* ignore */ }
-  }, [voiceEnabled]);
+  }, [voiceEnabled, radioSfxEnabled]);
 
   const stopSpeech = useCallback(() => {
     if ('speechSynthesis' in window) {
@@ -389,15 +468,16 @@ export default function CinematicDirector({
     const pitch = Math.round(Cesium.Math.toDegrees(cam.pitch));
     const roll = Math.round(Cesium.Math.toDegrees(cam.roll));
 
-    return {
+    const wp: Waypoint = {
       lat: Number(lat.toFixed(4)),
       lon: Number(lon.toFixed(4)),
       height,
       heading,
       pitch,
       roll,
-      narration: `Waypoint at ${lat.toFixed(2)}°, ${lon.toFixed(2)}° (altitude ${height.toLocaleString()}m)`,
     };
+    wp.narration = generateContextualNarration(wp, 0, 1);
+    return wp;
   }, [viewer]);
 
   /* ── Keyframe Studio Handlers ── */
@@ -410,6 +490,7 @@ export default function CinematicDirector({
       category: 'custom',
       duration: 25,
       isCustom: true,
+      sensorStyle: activeSensorStyle || 'normal',
       waypoints: currentWp ? [currentWp] : [
         { lat: 35.68, lon: 139.75, height: 3000, heading: 45, pitch: -30, narration: 'Mission approach viewpoint' }
       ],
@@ -423,16 +504,89 @@ export default function CinematicDirector({
     if (!editingTour) return;
     const wp = captureCurrentCamera();
     if (!wp) return;
-    const updatedWps = [...editingTour.waypoints, wp];
-    const updatedTour = {
+    const newIdx = editingTour.waypoints.length;
+    const enrichedWp: Waypoint = {
+      ...wp,
+      narration: generateContextualNarration(wp, newIdx, newIdx + 1),
+    };
+    const updatedWps = [...editingTour.waypoints, enrichedWp];
+    const updatedTour: CameraPath = {
       ...editingTour,
       waypoints: updatedWps,
       duration: Math.max(10, updatedWps.length * 6),
-      narration: updatedWps.map((w, i) => w.narration || `Waypoint #${i + 1}`),
+      narration: updatedWps.map(w => w.narration || ''),
     };
     setEditingTour(updatedTour);
     setStudioFeedback(`Captured viewpoint #${updatedWps.length}`);
     setTimeout(() => setStudioFeedback(null), 2500);
+  };
+
+  /* ── AI Tactical Narration Generator ── */
+  const handleAutoNarrateTour = () => {
+    if (!editingTour) return;
+    const total = editingTour.waypoints.length;
+    const updatedWps = editingTour.waypoints.map((wp, idx) => {
+      let hazardNote: string | undefined;
+      for (const dp of disasterPaths) {
+        const first = dp.waypoints[0];
+        if (first && Math.hypot(first.lat - wp.lat, first.lon - wp.lon) < 2.5) {
+          hazardNote = `${dp.name} sector`;
+          break;
+        }
+      }
+      const line = generateContextualNarration(wp, idx, total, hazardNote);
+      return { ...wp, narration: line };
+    });
+
+    const updatedTour: CameraPath = {
+      ...editingTour,
+      waypoints: updatedWps,
+      narration: updatedWps.map(w => w.narration || ''),
+    };
+    setEditingTour(updatedTour);
+    setStudioFeedback('AI Tactical Narration generated!');
+    setTimeout(() => setStudioFeedback(null), 2500);
+  };
+
+  /* ── Procedural Director Maneuvers ── */
+  const handleGenerateManeuver = (type: 'orbit' | 'dive' | 'reveal' | 'spiral') => {
+    const currentWp = captureCurrentCamera();
+    const center: TargetPoint = focusEntity ? {
+      lat: focusEntity.lat,
+      lon: focusEntity.lon,
+      height: 100,
+      name: focusEntity.name || focusEntity.layer,
+    } : currentWp ? {
+      lat: currentWp.lat,
+      lon: currentWp.lon,
+      height: Math.max(0, currentWp.height - 2500),
+      name: 'Terrain Focus',
+    } : {
+      lat: 27.988,
+      lon: 86.925,
+      height: 8848,
+      name: 'Khumbu Valley',
+    };
+
+    let tour: CameraPath;
+    if (type === 'orbit') {
+      tour = generateOrbitPath(center, 4000, 2200, 26);
+    } else if (type === 'dive') {
+      tour = generateReconDivePath(center, 26);
+    } else if (type === 'reveal') {
+      tour = generateHorizonRevealPath(center, 20);
+    } else {
+      tour = generateSpiralClimbPath(center, 2500, 7500, 28);
+    }
+
+    if (activeSensorStyle) {
+      tour.sensorStyle = activeSensorStyle;
+    }
+
+    setEditingTour(tour);
+    setActiveTab('studio');
+    setStudioFeedback(`Generated ${tour.name}!`);
+    setTimeout(() => setStudioFeedback(null), 3000);
   };
 
   const handleDeleteWaypoint = (idx: number) => {
@@ -656,6 +810,73 @@ export default function CinematicDirector({
                 >
                   <Square size={14} />
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TACTICAL AVIATION & RECON HUD OVERLAY ── */}
+      {showTacticalHud && (
+        <div style={{
+          position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: zIndex + 40,
+          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+          padding: '24px 32px', fontFamily: 'monospace', color: '#38bdf8',
+          textShadow: '0 0 4px rgba(56,189,248,0.8)', fontSize: 11, letterSpacing: '0.08em', userSelect: 'none'
+        }}>
+          {/* Top Compass Tape */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div style={{ background: 'rgba(0,0,0,0.65)', padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(56,189,248,0.35)', backdropFilter: 'blur(6px)' }}>
+              SYS: RECON FLIGHT · SENSOR: {(activeSensorStyle || 'NORMAL').toUpperCase()}
+            </div>
+            <div style={{
+              background: 'rgba(0,0,0,0.75)', padding: '6px 18px', borderRadius: 6,
+              border: '1px solid rgba(56,189,248,0.4)', fontWeight: 700, fontSize: 12, display: 'flex', gap: 14, backdropFilter: 'blur(6px)'
+            }}>
+              <span>HDG {Math.round(liveTelemetry?.heading ?? 0).toString().padStart(3, '0')}°</span>
+              <span style={{ color: '#64748b' }}>|</span>
+              <span>PITCH {(liveTelemetry?.pitch ?? 0) > 0 ? `+${Math.round(liveTelemetry?.pitch ?? 0)}` : Math.round(liveTelemetry?.pitch ?? 0)}°</span>
+              <span style={{ color: '#64748b' }}>|</span>
+              <span>BANK {Math.round(liveTelemetry?.roll ?? 0)}°</span>
+            </div>
+            <div style={{ background: 'rgba(0,0,0,0.65)', padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(56,189,248,0.35)', backdropFilter: 'blur(6px)' }}>
+              CAM SPLINE · {isPlaying ? 'TRACKING' : 'IDLE'} · 60 FPS
+            </div>
+          </div>
+
+          {/* Center Flight Path Reticle & Pitch Ladder */}
+          <div style={{
+            position: 'absolute', top: '50%', left: '50%',
+            transform: `translate(-50%, -50%) rotate(${-(liveTelemetry?.roll ?? 0)}deg)`,
+            width: 160, height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <div style={{ position: 'absolute', width: 24, height: 24, border: '1px solid rgba(56,189,248,0.7)', borderRadius: '50%' }} />
+            <div style={{ position: 'absolute', width: 4, height: 4, background: '#38bdf8', borderRadius: '50%' }} />
+            <div style={{ position: 'absolute', left: -45, width: 40, height: 1, background: '#38bdf8' }} />
+            <div style={{ position: 'absolute', right: -45, width: 40, height: 1, background: '#38bdf8' }} />
+            {/* Pitch ticks */}
+            <div style={{ position: 'absolute', top: 32, width: 60, height: 1, background: 'rgba(56,189,248,0.4)', display: 'flex', justifyContent: 'space-between', fontSize: 8 }}>
+              <span>-10</span><span>-10</span>
+            </div>
+            <div style={{ position: 'absolute', bottom: 32, width: 60, height: 1, background: 'rgba(56,189,248,0.4)', display: 'flex', justifyContent: 'space-between', fontSize: 8 }}>
+              <span>+10</span><span>+10</span>
+            </div>
+          </div>
+
+          {/* Bottom Telemetry Gauges */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+            <div style={{ background: 'rgba(0,0,0,0.65)', padding: '6px 12px', borderRadius: 6, border: '1px solid rgba(56,189,248,0.35)', backdropFilter: 'blur(6px)' }}>
+              <div>POS: {liveTelemetry?.lat.toFixed(4)}°, {liveTelemetry?.lon.toFixed(4)}°</div>
+              <div style={{ color: '#94a3b8', fontSize: 9, marginTop: 2 }}>
+                TARGET: {activePath?.targetLock?.name || activePath?.name || 'TACTICAL VISTA'}
+              </div>
+            </div>
+            <div style={{ background: 'rgba(0,0,0,0.65)', padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(56,189,248,0.35)', textAlign: 'right', backdropFilter: 'blur(6px)' }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>
+                ALT {Math.round(liveTelemetry?.height ?? 0).toLocaleString()} M
+              </div>
+              <div style={{ color: '#94a3b8', fontSize: 9, marginTop: 2 }}>
+                SPEED ~{Math.round(380 * playbackSpeed)} KTS
               </div>
             </div>
           </div>
@@ -898,42 +1119,101 @@ export default function CinematicDirector({
                       />
                     </div>
 
-                    {/* "Capture Current Camera" & "Play Live Draft" Actions */}
-                    <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                    {/* "Capture Current Camera" Action */}
+                    <div style={{ marginTop: 4 }}>
                       <button
                         onClick={handleAddWaypoint}
                         style={{
-                          flex: 1,
+                          width: '100%',
                           background: 'rgba(236, 72, 153, 0.2)', border: '1px solid rgba(236, 72, 153, 0.4)',
-                          color: '#f472b6', borderRadius: 8, padding: '8px 10px', fontSize: 11, fontWeight: 700,
+                          color: '#f472b6', borderRadius: 8, padding: '9px 12px', fontSize: 11, fontWeight: 700,
                           cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                           transition: 'all 0.15s ease'
                         }}
+                        title="Capture the current camera position, pitch, heading & altitude as a new keyframe"
                       >
                         <Camera size={14} /> Capture Viewpoint
                       </button>
+                    </div>
 
-                      <button
-                        onClick={() => {
-                          if (isPlaying) {
-                            stopPlayback();
-                          } else {
-                            playPath(progress >= 1 ? 0 : progress);
-                          }
-                        }}
-                        style={{
-                          flex: 1,
-                          background: isPlaying ? 'rgba(56, 189, 248, 0.35)' : 'rgba(56, 189, 248, 0.15)',
-                          border: '1px solid rgba(56, 189, 248, 0.4)',
-                          color: '#38bdf8', borderRadius: 8, padding: '8px 10px', fontSize: 11, fontWeight: 700,
-                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                          transition: 'all 0.15s ease'
-                        }}
-                        title="Preview and play this flight path right now without saving"
-                      >
-                        {isPlaying ? <Pause size={14} /> : <Play size={14} />}
-                        {isPlaying ? 'Pause' : 'Play Live Draft'}
-                      </button>
+                    {/* Procedural Maneuvers Generator */}
+                    <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span style={{ fontSize: 9, color: '#f472b6', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <Orbit size={11} /> Procedural Hollywood & Recon Maneuvers
+                        </span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                        <button
+                          onClick={() => handleGenerateManeuver('orbit')}
+                          className="glass-button"
+                          style={{ fontSize: 10, padding: '5px 8px', display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}
+                          title="Generate 360-degree circular orbit with target lock and coordinated roll"
+                        >
+                          <Orbit size={12} color="#38bdf8" /> 360° Orbit
+                        </button>
+                        <button
+                          onClick={() => handleGenerateManeuver('dive')}
+                          className="glass-button"
+                          style={{ fontSize: 10, padding: '5px 8px', display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}
+                          title="Generate high-velocity supersonic dive from orbit to deck"
+                        >
+                          <PlaneTakeoff size={12} color="#f97316" /> Recon Dive
+                        </button>
+                        <button
+                          onClick={() => handleGenerateManeuver('reveal')}
+                          className="glass-button"
+                          style={{ fontSize: 10, padding: '5px 8px', display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}
+                          title="Generate vertical crane pull-up revealing horizon"
+                        >
+                          <SunMedium size={12} color="#eab308" /> Horizon Reveal
+                        </button>
+                        <button
+                          onClick={() => handleGenerateManeuver('spiral')}
+                          className="glass-button"
+                          style={{ fontSize: 10, padding: '5px 8px', display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}
+                          title="Generate ascending spiral corkscrew climb around target"
+                        >
+                          <Compass size={12} color="#a855f7" /> Spiral Climb
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Camera Optics / Sensor Mode */}
+                    <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span style={{ fontSize: 9, color: '#38bdf8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <Eye size={11} /> Optical Spectrum & Sensor Post-Process
+                        </span>
+                        <span style={{ fontSize: 9, color: '#94a3b8' }}>
+                          MODE: <strong style={{ color: '#f8fafc' }}>{activeSensorStyle?.toUpperCase() || 'NORMAL'}</strong>
+                        </span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
+                        {SENSOR_STYLES.map(s => {
+                          const isCur = (activeSensorStyle || 'normal') === s.id;
+                          return (
+                            <button
+                              key={s.id}
+                              onClick={() => {
+                                if (onSelectSensorStyle) onSelectSensorStyle(s.id);
+                                if (editingTour) setEditingTour({ ...editingTour, sensorStyle: s.id });
+                              }}
+                              className="glass-button"
+                              style={{
+                                fontSize: 9, padding: '4px 6px', fontWeight: isCur ? 700 : 500,
+                                background: isCur ? 'rgba(56, 189, 248, 0.25)' : undefined,
+                                borderColor: isCur ? '#38bdf8' : undefined,
+                                color: isCur ? '#38bdf8' : '#94a3b8',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3
+                              }}
+                              title={s.hint}
+                            >
+                              {s.label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     {studioFeedback && (
@@ -942,10 +1222,20 @@ export default function CinematicDirector({
                       </div>
                     )}
 
-                    {/* Waypoints List */}
-                    <div style={{ marginTop: 6 }}>
-                      <div style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, marginBottom: 6 }}>
-                        Waypoints Sequence ({editingTour.waypoints.length})
+                    {/* Waypoints List with AI Briefing button */}
+                    <div style={{ marginTop: 4 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600 }}>
+                          Waypoints Sequence ({editingTour.waypoints.length})
+                        </span>
+                        <button
+                          onClick={handleAutoNarrateTour}
+                          className="glass-button"
+                          style={{ fontSize: 9, padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 3, color: '#f472b6' }}
+                          title="Generate authentic military/documentary voice narration for all waypoints"
+                        >
+                          <Sparkles size={11} /> AI Tactical Briefing
+                        </button>
                       </div>
 
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
@@ -1136,6 +1426,48 @@ export default function CinematicDirector({
                   </button>
                 </div>
 
+                {/* Radio Comms SFX toggle */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#f8fafc' }}>Radio Comms Squelch (SFX)</div>
+                    <div style={{ fontSize: 9, color: '#94a3b8' }}>Tactical military cockpit beep and squelch sound effects</div>
+                  </div>
+                  <button
+                    onClick={() => setRadioSfxEnabled(p => !p)}
+                    style={{
+                      background: radioSfxEnabled ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255,255,255,0.05)',
+                      border: radioSfxEnabled ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+                      color: radioSfxEnabled ? '#38bdf8' : '#94a3b8',
+                      padding: '4px 10px', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 4
+                    }}
+                  >
+                    <Radio size={13} />
+                    {radioSfxEnabled ? 'Active' : 'Muted'}
+                  </button>
+                </div>
+
+                {/* Tactical HUD toggle */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#f8fafc' }}>Aviation & Recon HUD</div>
+                    <div style={{ fontSize: 9, color: '#94a3b8' }}>Flight path reticle, compass tape, altitude & pitch ladder</div>
+                  </div>
+                  <button
+                    onClick={() => setShowTacticalHud(p => !p)}
+                    style={{
+                      background: showTacticalHud ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255,255,255,0.05)',
+                      border: showTacticalHud ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+                      color: showTacticalHud ? '#38bdf8' : '#94a3b8',
+                      padding: '4px 10px', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 4
+                    }}
+                  >
+                    <Crosshair size={13} />
+                    {showTacticalHud ? 'Visible' : 'Hidden'}
+                  </button>
+                </div>
+
                 {/* Loop toggle */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
@@ -1253,12 +1585,40 @@ export default function CinematicDirector({
                   <RotateCw size={13} />
                 </button>
 
+                {/* Tactical HUD Toggle */}
+                <button
+                  onClick={() => setShowTacticalHud(p => !p)}
+                  className="glass-button"
+                  style={{
+                    padding: '8px 10px',
+                    background: showTacticalHud ? 'rgba(56, 189, 248, 0.25)' : undefined,
+                    color: showTacticalHud ? '#38bdf8' : '#94a3b8'
+                  }}
+                  title="Toggle Tactical Aviation & Recon HUD"
+                >
+                  <Crosshair size={13} />
+                </button>
+
+                {/* Tactical Radio Comms SFX Toggle */}
+                <button
+                  onClick={() => setRadioSfxEnabled(p => !p)}
+                  className="glass-button"
+                  style={{
+                    padding: '8px 10px',
+                    background: radioSfxEnabled ? 'rgba(56, 189, 248, 0.25)' : undefined,
+                    color: radioSfxEnabled ? '#38bdf8' : '#94a3b8'
+                  }}
+                  title="Toggle Tactical Radio Audio Squelch / Comms SFX"
+                >
+                  <Radio size={13} />
+                </button>
+
                 {/* Cinema Mode Toggle */}
                 <button
                   onClick={() => setCinemaMode(p => !p)}
                   className="glass-button"
                   style={{
-                    padding: '8px 12px',
+                    padding: '8px 10px',
                     background: cinemaMode ? 'rgba(56, 189, 248, 0.25)' : undefined,
                     color: cinemaMode ? '#38bdf8' : undefined
                   }}
